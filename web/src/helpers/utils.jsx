@@ -645,7 +645,17 @@ export const calculateModelPrice = ({
     }
   }
 
-  // 2. 根据计费类型计算价格
+  // 2. 动态计费（tiered_expr）
+  if (record.billing_mode === 'tiered_expr' && record.billing_expr) {
+    return {
+      isDynamicPricing: true,
+      billingExpr: record.billing_expr,
+      usedGroup,
+      usedGroupRatio,
+    };
+  }
+
+  // 3. 根据计费类型计算价格
   if (record.quota_type === 0) {
     // 按量计费
     const isTokensDisplay = quotaDisplayType === 'TOKENS';
@@ -766,6 +776,18 @@ export const getModelPriceItems = (
   t,
   quotaDisplayType = 'USD',
 ) => {
+  if (priceData.isDynamicPricing) {
+    return [
+      {
+        key: 'dynamic',
+        label: t('动态计费'),
+        value: '',
+        suffix: '',
+        isDynamic: true,
+      },
+    ];
+  }
+
   if (priceData.isPerToken) {
     if (quotaDisplayType === 'TOKENS' || priceData.isTokensDisplay) {
       return [
@@ -872,6 +894,83 @@ export const getModelPriceItems = (
       suffix: ` / ${t('次')}`,
     },
   ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
+};
+
+// 格式化动态计费摘要（用于卡片视图，与 formatPriceInfo 风格统一）
+export const formatDynamicPriceSummary = (billingExpr, t) => {
+  if (!billingExpr) return <span style={{ color: 'var(--semi-color-text-1)' }}>{t('动态计费')}</span>;
+
+  const tierMatches = billingExpr.match(/tier\(/g) || [];
+  const tierCount = tierMatches.length;
+
+  const firstTierMatch = billingExpr.match(
+    /tier\("[^"]*",\s*p\s*\*\s*([\d.eE+-]+)\s*\+\s*c\s*\*\s*([\d.eE+-]+)(?:\s*\+\s*cr\s*\*\s*([\d.eE+-]+))?(?:\s*\+\s*cc\s*\*\s*([\d.eE+-]+))?/,
+  );
+
+  const hasTimeCondition = /\b(?:hour|weekday|month|day)\(/.test(billingExpr);
+  const hasRequestCondition = /\b(?:param|header)\(/.test(billingExpr);
+
+  const tags = [];
+  if (tierCount > 1) tags.push(`${tierCount}${t('档')}`);
+  if (hasTimeCondition) tags.push(t('含时间条件'));
+  if (hasRequestCondition) tags.push(t('含请求条件'));
+
+  const unitSuffix = ' / 1M Tokens';
+  const lineStyle = { color: 'var(--semi-color-text-1)' };
+
+  return (
+    <>
+      {firstTierMatch && (
+        <>
+          <span style={lineStyle}>
+            {t('输入价格')} ${(Number(firstTierMatch[1]) * 2).toFixed(4)}{unitSuffix}
+          </span>
+          <span style={lineStyle}>
+            {t('输出价格')} ${(Number(firstTierMatch[2]) * 2).toFixed(4)}{unitSuffix}
+          </span>
+          {firstTierMatch[3] && (
+            <span style={lineStyle}>
+              {t('缓存读取价格')} ${(Number(firstTierMatch[3]) * 2).toFixed(4)}{unitSuffix}
+            </span>
+          )}
+          {firstTierMatch[4] && (
+            <span style={lineStyle}>
+              {t('缓存创建价格')} ${(Number(firstTierMatch[4]) * 2).toFixed(4)}{unitSuffix}
+            </span>
+          )}
+        </>
+      )}
+      <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        <span
+          style={{
+            display: 'inline-block',
+            padding: '1px 6px',
+            borderRadius: 4,
+            fontSize: 11,
+            background: 'var(--semi-color-warning-light-default)',
+            color: 'var(--semi-color-warning)',
+          }}
+        >
+          {t('动态计费')}
+        </span>
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            style={{
+              display: 'inline-block',
+              padding: '1px 6px',
+              borderRadius: 4,
+              fontSize: 11,
+              background: 'var(--semi-color-fill-1)',
+              color: 'var(--semi-color-text-2)',
+            }}
+          >
+            {tag}
+          </span>
+        ))}
+      </span>
+    </>
+  );
 };
 
 // 格式化价格信息（用于卡片视图）

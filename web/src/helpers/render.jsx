@@ -102,7 +102,7 @@ import {
   SiX,
 } from 'react-icons/si';
 
-// getLucideIcon returns the sidebar Lucide icon for a navigation key.
+// 获取侧边栏Lucide图标组件
 export function getLucideIcon(key, selected = false) {
   const size = 16;
   const strokeWidth = 2;
@@ -152,7 +152,7 @@ export function getLucideIcon(key, selected = false) {
   }
 }
 
-// getModelCategories returns localized model category filters with memoized reuse per locale.
+// 获取模型分类
 export const getModelCategories = (() => {
   let categoriesCache = null;
   let lastLocale = null;
@@ -700,7 +700,6 @@ export const modelColorMap = {
   'claude-3-haiku-20240307': 'rgb(255,175,146)', // 浅橙色
 };
 
-// modelToColor returns a stable display color for a model name.
 export function modelToColor(modelName) {
   // 1. 如果模型在预定义的 modelColorMap 中，使用预定义颜色
   if (modelColorMap[modelName]) {
@@ -723,7 +722,6 @@ export function modelToColor(modelName) {
   return colorPalette[index];
 }
 
-// stringToColor hashes an arbitrary string into a preset color name.
 export function stringToColor(str) {
   let sum = 0;
   for (let i = 0; i < str.length; i++) {
@@ -767,7 +765,6 @@ export function renderModelTag(modelName, options = {}) {
   );
 }
 
-// renderText truncates plain text to a character limit with ellipsis.
 export function renderText(text, limit) {
   if (text.length > limit) {
     return text.slice(0, limit - 3) + '...';
@@ -824,7 +821,6 @@ export function renderGroup(group) {
   );
 }
 
-// renderRatio renders a colored billing-ratio tag.
 export function renderRatio(ratio) {
   let color = 'green';
   if (ratio > 5) {
@@ -868,7 +864,6 @@ const measureTextWidth = (
   return width;
 };
 
-// truncateText shortens long text for small screens using measured width.
 export function truncateText(text, maxWidth = 200) {
   const isMobileScreen = window.matchMedia(
     `(max-width: ${MOBILE_BREAKPOINT - 1}px)`,
@@ -920,7 +915,6 @@ export function truncateText(text, maxWidth = 200) {
   }
 }
 
-// renderGroupOption renders a custom option row for group selectors.
 export const renderGroupOption = (item) => {
   const {
     disabled,
@@ -984,7 +978,6 @@ export const renderGroupOption = (item) => {
   );
 };
 
-// renderNumber formats large numbers with compact suffixes.
 export function renderNumber(num) {
   if (num >= 1000000000) {
     return (num / 1000000000).toFixed(1) + 'B';
@@ -997,7 +990,6 @@ export function renderNumber(num) {
   }
 }
 
-// renderQuotaNumberWithDigit formats quota values with the active currency prefix.
 export function renderQuotaNumberWithDigit(num, digits = 2) {
   if (typeof num !== 'number' || isNaN(num)) {
     return 0;
@@ -1023,7 +1015,6 @@ export function renderQuotaNumberWithDigit(num, digits = 2) {
   }
 }
 
-// renderNumberWithPoint abbreviates very long decimal strings for display.
 export function renderNumberWithPoint(num) {
   if (num === undefined) return '';
   num = num.toFixed(2);
@@ -1053,14 +1044,12 @@ export function renderNumberWithPoint(num) {
   return num;
 }
 
-// getQuotaPerUnit returns the persisted quota-per-unit multiplier.
 export function getQuotaPerUnit() {
   let quotaPerUnit = localStorage.getItem('quota_per_unit');
   quotaPerUnit = parseFloat(quotaPerUnit);
   return quotaPerUnit;
 }
 
-// renderUnitWithQuota converts quota units into token units.
 export function renderUnitWithQuota(quota) {
   let quotaPerUnit = localStorage.getItem('quota_per_unit');
   quotaPerUnit = parseFloat(quotaPerUnit);
@@ -1068,14 +1057,12 @@ export function renderUnitWithQuota(quota) {
   return quotaPerUnit * quota;
 }
 
-// getQuotaWithUnit converts token units back into quota units.
 export function getQuotaWithUnit(quota, digits = 6) {
   let quotaPerUnit = localStorage.getItem('quota_per_unit');
   quotaPerUnit = parseFloat(quotaPerUnit);
   return (quota / quotaPerUnit).toFixed(digits);
 }
 
-// renderQuotaWithAmount formats a monetary amount with the active currency symbol.
 export function renderQuotaWithAmount(amount) {
   const quotaDisplayType = localStorage.getItem('quota_display_type') || 'USD';
   if (quotaDisplayType === 'TOKENS') {
@@ -1147,24 +1134,14 @@ export function convertUSDToCurrency(usdAmount, digits = 2) {
   return symbol + convertedAmount.toFixed(digits);
 }
 
-// renderQuota formats quota into the active display mode and currency.
 export function renderQuota(quota, digits = 2) {
   let quotaPerUnit = localStorage.getItem('quota_per_unit');
   const quotaDisplayType = localStorage.getItem('quota_display_type') || 'USD';
   quotaPerUnit = parseFloat(quotaPerUnit);
-  if (!Number.isFinite(quotaPerUnit) || quotaPerUnit <= 0) {
-    quotaPerUnit = 1;
-  }
-  const numericQuota = Number(quota || 0);
-  if (!Number.isFinite(numericQuota)) {
-    return quotaDisplayType === 'TOKENS'
-      ? renderNumber(0)
-      : convertUSDToCurrency(0, digits);
-  }
   if (quotaDisplayType === 'TOKENS') {
-    return renderNumber(numericQuota);
+    return renderNumber(quota);
   }
-  const resultUSD = numericQuota / quotaPerUnit;
+  const resultUSD = quota / quotaPerUnit;
   let symbol = '$';
   let value = resultUSD;
   if (quotaDisplayType === 'CNY') {
@@ -1193,7 +1170,7 @@ export function renderQuota(quota, digits = 2) {
     symbol = symbolCustom;
   }
   const fixedResult = value.toFixed(digits);
-  if (parseFloat(fixedResult) === 0 && numericQuota > 0 && value > 0) {
+  if (parseFloat(fixedResult) === 0 && quota > 0 && value > 0) {
     const minValue = Math.pow(10, -digits);
     return symbol + minValue.toFixed(digits);
   }
@@ -1643,50 +1620,38 @@ function renderPriceSimpleCore({
   return result;
 }
 
-export function renderTaskBillingProcess(other, content) {
-  if (other?.task_id != null) {
-    return renderBillingArticle(
-      [content].filter(Boolean),
-      { showReferenceNote: false },
-    );
-  }
-  return renderBillingArticle([
-    buildBillingText('任务预扣费（将在任务完成后按实际token重算）'),
-  ]);
-}
-
-// renderModelPrice renders the detailed billing breakdown for a text/image model call.
-export function renderModelPrice(
-  inputTokens,
-  completionTokens,
-  modelRatio,
-  modelPrice = -1,
-  completionRatio,
-  groupRatio,
-  user_group_ratio,
-  cacheTokens = 0,
-  cacheRatio = 1.0,
-  image = false,
-  imageRatio = 1.0,
-  imageOutputTokens = 0,
-  webSearch = false,
-  webSearchCallCount = 0,
-  webSearchPrice = 0,
-  fileSearch = false,
-  fileSearchCallCount = 0,
-  fileSearchPrice = 0,
-  audioInputSeperatePrice = false,
-  audioInputTokens = 0,
-  audioInputPrice = 0,
-  imageGenerationCall = false,
-  imageGenerationCallPrice = 0,
-  displayMode = 'price',
-) {
+export function renderModelPrice(opts) {
+  const {
+    prompt_tokens: inputTokens = 0,
+    completion_tokens: completionTokens = 0,
+    model_ratio: modelRatio = 0,
+    model_price: modelPrice = -1,
+    completion_ratio: completionRatio,
+    group_ratio: _groupRatio,
+    user_group_ratio,
+    cache_tokens: cacheTokens = 0,
+    cache_ratio: cacheRatio = 1.0,
+    image = false,
+    image_ratio: imageRatio = 1.0,
+    image_output: imageOutputTokens = 0,
+    web_search: webSearch = false,
+    web_search_call_count: webSearchCallCount = 0,
+    web_search_price: webSearchPrice = 0,
+    file_search: fileSearch = false,
+    file_search_call_count: fileSearchCallCount = 0,
+    file_search_price: fileSearchPrice = 0,
+    audio_input_seperate_price: audioInputSeperatePrice = false,
+    audio_input_token_count: audioInputTokens = 0,
+    audio_input_price: audioInputPrice = 0,
+    image_generation_call: imageGenerationCall = false,
+    image_generation_call_price: imageGenerationCallPrice = 0,
+    displayMode = 'price',
+  } = opts;
   const { ratio: effectiveGroupRatio, label: ratioLabel } = getEffectiveRatio(
-    groupRatio,
+    _groupRatio,
     user_group_ratio,
   );
-  groupRatio = effectiveGroupRatio;
+  let groupRatio = effectiveGroupRatio;
 
   const { symbol, rate } = getCurrencyConfig();
 
@@ -2114,22 +2079,22 @@ export function renderModelPrice(
   ]);
 }
 
-// renderLogContent renders the summary billing description shown in log tables.
-export function renderLogContent(
-  modelRatio,
-  completionRatio,
-  modelPrice = -1,
-  groupRatio,
-  user_group_ratio,
-  cacheRatio = 1.0,
-  image = false,
-  imageRatio = 1.0,
-  webSearch = false,
-  webSearchCallCount = 0,
-  fileSearch = false,
-  fileSearchCallCount = 0,
-  displayMode = 'price',
-) {
+export function renderLogContent(opts) {
+  const {
+    model_ratio: modelRatio,
+    completion_ratio: completionRatio,
+    model_price: modelPrice = -1,
+    group_ratio: groupRatio,
+    user_group_ratio,
+    cache_ratio: cacheRatio = 1.0,
+    image = false,
+    image_ratio: imageRatio = 1.0,
+    web_search: webSearch = false,
+    web_search_call_count: webSearchCallCount = 0,
+    file_search: fileSearch = false,
+    file_search_call_count: fileSearchCallCount = 0,
+    displayMode = 'price',
+  } = opts;
   const {
     ratio,
     label: ratioLabel,
@@ -2245,27 +2210,193 @@ export function renderLogContent(
   }
 }
 
-// renderModelPriceSimple renders the simplified pricing summary for model cards.
-export function renderModelPriceSimple(
-  modelRatio,
-  modelPrice = -1,
-  groupRatio,
-  user_group_ratio,
-  cacheTokens = 0,
-  cacheRatio = 1.0,
-  cacheCreationTokens = 0,
-  cacheCreationRatio = 1.0,
-  cacheCreationTokens5m = 0,
-  cacheCreationRatio5m = 1.0,
-  cacheCreationTokens1h = 0,
-  cacheCreationRatio1h = 1.0,
-  image = false,
-  imageRatio = 1.0,
-  isSystemPromptOverride = false,
-  provider = 'openai',
-  displayMode = 'price',
-  outputMode = 'text',
-) {
+function parseTiersFromExpr(exprStr) {
+  if (!exprStr) return [];
+  try {
+    const cacheVars = ['cr', 'cc', 'cc1h'];
+    const optCache = cacheVars.map((v) => `(?:\\s*\\+\\s*${v}\\s*\\*\\s*([\\d.eE+-]+))?`).join('');
+    const bodyPat = `p\\s*\\*\\s*([\\d.eE+-]+)\\s*\\+\\s*c\\s*\\*\\s*([\\d.eE+-]+)${optCache}`;
+    const tierRe = new RegExp(`tier\\("([^"]*)",\\s*${bodyPat}\\)`, 'g');
+    const tiers = [];
+    let m;
+    while ((m = tierRe.exec(exprStr)) !== null) {
+      tiers.push({
+        label: m[1],
+        inputPrice: Number(m[2]) * 2,
+        outputPrice: Number(m[3]) * 2,
+        cacheReadPrice: m[4] ? Number(m[4]) * 2 : 0,
+        cacheCreatePrice: m[5] ? Number(m[5]) * 2 : 0,
+        cacheCreate1hPrice: m[6] ? Number(m[6]) * 2 : 0,
+      });
+    }
+    return tiers;
+  } catch {
+    return [];
+  }
+}
+
+export function renderTieredModelPrice(opts) {
+  const {
+    prompt_tokens: inputTokens = 0,
+    completion_tokens: completionTokens = 0,
+    expr_b64: exprB64,
+    matched_tier: matchedTier,
+    group_ratio: groupRatio,
+    cache_tokens: cacheTokens = 0,
+    cache_creation_tokens: cacheCreationTokens = 0,
+    cache_creation_tokens_5m: cacheCreationTokens5m = 0,
+    cache_creation_tokens_1h: cacheCreationTokens1h = 0,
+  } = opts;
+  let exprStr = '';
+  try { exprStr = atob(exprB64); } catch { /* ignore */ }
+  const tiers = parseTiersFromExpr(exprStr);
+  if (tiers.length === 0) {
+    return i18next.t('阶梯计费（表达式解析失败）');
+  }
+
+  const tier = tiers.find((t) => t.label === matchedTier) || tiers[0];
+  const { symbol, rate } = getCurrencyConfig();
+  const gr = groupRatio || 1;
+
+  const inputCost = (inputTokens / 1000000) * tier.inputPrice;
+  const outputCost = (completionTokens / 1000000) * tier.outputPrice;
+  const cacheReadCost = (cacheTokens / 1000000) * tier.cacheReadPrice;
+  const hasSplitCacheCreation = cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
+  let cacheCreateCost = 0;
+  if (hasSplitCacheCreation) {
+    cacheCreateCost = (cacheCreationTokens5m / 1000000) * tier.cacheCreatePrice
+      + (cacheCreationTokens1h / 1000000) * tier.cacheCreate1hPrice;
+  } else if (cacheCreationTokens > 0) {
+    cacheCreateCost = (cacheCreationTokens / 1000000) * tier.cacheCreatePrice;
+  }
+  const totalBeforeGroup = inputCost + outputCost + cacheReadCost + cacheCreateCost;
+  const total = totalBeforeGroup * gr;
+
+  const lines = [
+    buildBillingText('命中档位：{{tier}}', { tier: matchedTier || tier.label }),
+    buildBillingPriceText('输入价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.inputPrice, rate }),
+    buildBillingPriceText('输出价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.outputPrice, rate }),
+    cacheTokens > 0 && tier.cacheReadPrice > 0
+      ? buildBillingPriceText('缓存读取价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.cacheReadPrice, rate })
+      : null,
+    hasSplitCacheCreation && cacheCreationTokens5m > 0 && tier.cacheCreatePrice > 0
+      ? buildBillingPriceText('5m缓存创建价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.cacheCreatePrice, rate })
+      : null,
+    hasSplitCacheCreation && cacheCreationTokens1h > 0 && tier.cacheCreate1hPrice > 0
+      ? buildBillingPriceText('1h缓存创建价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.cacheCreate1hPrice, rate })
+      : null,
+    !hasSplitCacheCreation && cacheCreationTokens > 0 && tier.cacheCreatePrice > 0
+      ? buildBillingPriceText('缓存创建价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.cacheCreatePrice, rate })
+      : null,
+    buildBillingText(
+      '(输入 {{input}} tokens / 1M tokens * {{symbol}}{{inputPrice}} + 输出 {{output}} tokens / 1M tokens * {{symbol}}{{outputPrice}}) * 分组倍率 {{ratio}} = {{symbol}}{{total}}',
+      {
+        input: inputTokens, output: completionTokens, symbol,
+        inputPrice: formatBillingDisplayPrice(tier.inputPrice, rate),
+        outputPrice: formatBillingDisplayPrice(tier.outputPrice, rate),
+        ratio: gr, total: formatBillingDisplayPrice(total, rate),
+      },
+    ),
+  ];
+
+  return renderBillingArticle(lines);
+}
+
+export function renderTieredModelPriceSimple(opts) {
+  const {
+    expr_b64: exprB64,
+    matched_tier: matchedTier,
+    group_ratio: groupRatio,
+    user_group_ratio,
+    cache_tokens: cacheTokens = 0,
+    cache_creation_tokens_5m: cacheCreationTokens5m = 0,
+    cache_creation_tokens_1h: cacheCreationTokens1h = 0,
+    cache_creation_tokens: cacheCreationTokens = 0,
+    displayMode = 'price',
+    outputMode = 'segments',
+  } = opts;
+  let exprStr = '';
+  try { exprStr = atob(exprB64); } catch { /* ignore */ }
+  const tiers = parseTiersFromExpr(exprStr);
+  const tier = tiers.find((t) => t.label === matchedTier) || tiers[0];
+
+  if (outputMode === 'segments') {
+    const segments = [
+      {
+        tone: 'primary',
+        text: getGroupRatioText(groupRatio, user_group_ratio),
+      },
+    ];
+
+    if (tier && isPriceDisplayMode(displayMode)) {
+      segments.push({
+        tone: 'secondary',
+        text: i18next.t('输入 {{price}} / 1M tokens', {
+          price: formatCompactDisplayPrice(tier.inputPrice),
+        }),
+      });
+      if (cacheTokens > 0 && tier.cacheReadPrice > 0) {
+        segments.push({
+          tone: 'secondary',
+          text: i18next.t('缓存读 {{price}} / 1M tokens', {
+            price: formatCompactDisplayPrice(tier.cacheReadPrice),
+          }),
+        });
+      }
+      const hasSplitCacheCreation = cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
+      if (hasSplitCacheCreation && cacheCreationTokens5m > 0 && tier.cacheCreatePrice > 0) {
+        segments.push({
+          tone: 'secondary',
+          text: i18next.t('5m缓存创建 {{price}} / 1M tokens', {
+            price: formatCompactDisplayPrice(tier.cacheCreatePrice),
+          }),
+        });
+      }
+      if (hasSplitCacheCreation && cacheCreationTokens1h > 0 && tier.cacheCreate1hPrice > 0) {
+        segments.push({
+          tone: 'secondary',
+          text: i18next.t('1h缓存创建 {{price}} / 1M tokens', {
+            price: formatCompactDisplayPrice(tier.cacheCreate1hPrice),
+          }),
+        });
+      }
+      if (!hasSplitCacheCreation && cacheCreationTokens > 0 && tier.cacheCreatePrice > 0) {
+        segments.push({
+          tone: 'secondary',
+          text: i18next.t('缓存创建 {{price}} / 1M tokens', {
+            price: formatCompactDisplayPrice(tier.cacheCreatePrice),
+          }),
+        });
+      }
+    }
+
+    return segments;
+  }
+
+  return [];
+}
+
+export function renderModelPriceSimple(opts) {
+  const {
+    model_ratio: modelRatio,
+    model_price: modelPrice = -1,
+    group_ratio: groupRatio,
+    user_group_ratio,
+    cache_tokens: cacheTokens = 0,
+    cache_ratio: cacheRatio = 1.0,
+    cache_creation_tokens: cacheCreationTokens = 0,
+    cache_creation_ratio: cacheCreationRatio = 1.0,
+    cache_creation_tokens_5m: cacheCreationTokens5m = 0,
+    cache_creation_ratio_5m: cacheCreationRatio5m = 1.0,
+    cache_creation_tokens_1h: cacheCreationTokens1h = 0,
+    cache_creation_ratio_1h: cacheCreationRatio1h = 1.0,
+    image = false,
+    image_ratio: imageRatio = 1.0,
+    is_system_prompt_overwritten: isSystemPromptOverride = false,
+    provider = 'openai',
+    displayMode = 'price',
+    outputMode = 'text',
+  } = opts;
   return renderPriceSimpleCore({
     modelRatio,
     modelPrice,
@@ -2287,28 +2418,28 @@ export function renderModelPriceSimple(
   });
 }
 
-// renderAudioModelPrice renders the detailed billing breakdown for audio model calls.
-export function renderAudioModelPrice(
-  inputTokens,
-  completionTokens,
-  modelRatio,
-  modelPrice = -1,
-  completionRatio,
-  audioInputTokens,
-  audioCompletionTokens,
-  audioRatio,
-  audioCompletionRatio,
-  groupRatio,
-  user_group_ratio,
-  cacheTokens = 0,
-  cacheRatio = 1.0,
-  displayMode = 'price',
-) {
+export function renderAudioModelPrice(opts) {
+  const {
+    prompt_tokens: inputTokens = 0,
+    completion_tokens: completionTokens = 0,
+    model_ratio: modelRatio = 0,
+    model_price: modelPrice = -1,
+    completion_ratio: completionRatio,
+    audio_input: audioInputTokens = 0,
+    audio_output: audioCompletionTokens = 0,
+    audio_ratio: audioRatio,
+    audio_completion_ratio: audioCompletionRatio,
+    group_ratio: _groupRatio,
+    user_group_ratio,
+    cache_tokens: cacheTokens = 0,
+    cache_ratio: cacheRatio = 1.0,
+    displayMode = 'price',
+  } = opts;
   const { ratio: effectiveGroupRatio, label: ratioLabel } = getEffectiveRatio(
-    groupRatio,
+    _groupRatio,
     user_group_ratio,
   );
-  groupRatio = effectiveGroupRatio;
+  let groupRatio = effectiveGroupRatio;
 
   // 获取货币配置
   const { symbol, rate } = getCurrencyConfig();
@@ -2566,7 +2697,6 @@ export function renderAudioModelPrice(
   ]);
 }
 
-// renderQuotaWithPrompt renders the equivalent monetary prompt for token mode.
 export function renderQuotaWithPrompt(quota, digits) {
   const quotaDisplayType = localStorage.getItem('quota_display_type') || 'USD';
   if (quotaDisplayType !== 'TOKENS') {
@@ -2575,30 +2705,30 @@ export function renderQuotaWithPrompt(quota, digits) {
   return '';
 }
 
-// renderClaudeModelPrice renders the detailed billing breakdown for Claude requests.
-export function renderClaudeModelPrice(
-  inputTokens,
-  completionTokens,
-  modelRatio,
-  modelPrice = -1,
-  completionRatio,
-  groupRatio,
-  user_group_ratio,
-  cacheTokens = 0,
-  cacheRatio = 1.0,
-  cacheCreationTokens = 0,
-  cacheCreationRatio = 1.0,
-  cacheCreationTokens5m = 0,
-  cacheCreationRatio5m = 1.0,
-  cacheCreationTokens1h = 0,
-  cacheCreationRatio1h = 1.0,
-  displayMode = 'price',
-) {
+export function renderClaudeModelPrice(opts) {
+  const {
+    prompt_tokens: inputTokens = 0,
+    completion_tokens: completionTokens = 0,
+    model_ratio: modelRatio = 0,
+    model_price: modelPrice = -1,
+    completion_ratio: completionRatio,
+    group_ratio: _groupRatio,
+    user_group_ratio,
+    cache_tokens: cacheTokens = 0,
+    cache_ratio: cacheRatio = 1.0,
+    cache_creation_tokens: cacheCreationTokens = 0,
+    cache_creation_ratio: cacheCreationRatio = 1.0,
+    cache_creation_tokens_5m: cacheCreationTokens5m = 0,
+    cache_creation_ratio_5m: cacheCreationRatio5m = 1.0,
+    cache_creation_tokens_1h: cacheCreationTokens1h = 0,
+    cache_creation_ratio_1h: cacheCreationRatio1h = 1.0,
+    displayMode = 'price',
+  } = opts;
   const { ratio: effectiveGroupRatio, label: ratioLabel } = getEffectiveRatio(
-    groupRatio,
+    _groupRatio,
     user_group_ratio,
   );
-  groupRatio = effectiveGroupRatio;
+  let groupRatio = effectiveGroupRatio;
 
   // 获取货币配置
   const { symbol, rate } = getCurrencyConfig();
@@ -2985,26 +3115,26 @@ export function renderClaudeModelPrice(
   ]);
 }
 
-// renderClaudeLogContent renders the summary billing description for Claude logs.
-export function renderClaudeLogContent(
-  modelRatio,
-  completionRatio,
-  modelPrice = -1,
-  groupRatio,
-  user_group_ratio,
-  cacheRatio = 1.0,
-  cacheCreationRatio = 1.0,
-  cacheCreationTokens5m = 0,
-  cacheCreationRatio5m = 1.0,
-  cacheCreationTokens1h = 0,
-  cacheCreationRatio1h = 1.0,
-  displayMode = 'price',
-) {
+export function renderClaudeLogContent(opts) {
+  const {
+    model_ratio: modelRatio,
+    completion_ratio: completionRatio,
+    model_price: modelPrice = -1,
+    group_ratio: _groupRatio,
+    user_group_ratio,
+    cache_ratio: cacheRatio = 1.0,
+    cache_creation_ratio: cacheCreationRatio = 1.0,
+    cache_creation_tokens_5m: cacheCreationTokens5m = 0,
+    cache_creation_ratio_5m: cacheCreationRatio5m = 1.0,
+    cache_creation_tokens_1h: cacheCreationTokens1h = 0,
+    cache_creation_ratio_1h: cacheCreationRatio1h = 1.0,
+    displayMode = 'price',
+  } = opts;
   const { ratio: effectiveGroupRatio, label: ratioLabel } = getEffectiveRatio(
-    groupRatio,
+    _groupRatio,
     user_group_ratio,
   );
-  groupRatio = effectiveGroupRatio;
+  let groupRatio = effectiveGroupRatio;
 
   // 获取货币配置
   const { symbol, rate } = getCurrencyConfig();
@@ -3136,7 +3266,6 @@ export function renderClaudeLogContent(
  * rehype 插件：将段落等文本节点拆分为逐词 <span>，并添加淡入动画 class。
  * 仅在流式渲染阶段使用，避免已渲染文字重复动画。
  */
-// rehypeSplitWordsIntoSpans wraps streamed words in span nodes for fade-in animation.
 export function rehypeSplitWordsIntoSpans(options = {}) {
   const { previousContentLength = 0 } = options;
 

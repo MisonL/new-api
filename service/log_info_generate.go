@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/base64"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -266,41 +267,17 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.Price
 	return other
 }
 
-func GenerateTieredOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, result *billingexpr.TieredResult) map[string]interface{} {
-	other := make(map[string]interface{})
-	other["billing_mode"] = "tiered_expr"
-
+// InjectTieredBillingInfo overlays tiered billing fields onto an existing
+// module-specific other map. Call this after GenerateTextOtherInfo /
+// GenerateClaudeOtherInfo / etc. when the request used tiered_expr billing.
+func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommon.RelayInfo, result *billingexpr.TieredResult) {
 	snap := relayInfo.TieredBillingSnapshot
-	if snap != nil {
-		other["group_ratio"] = snap.GroupRatio
-		other["expr_hash"] = snap.ExprHash
-		other["estimated_prompt_tokens"] = snap.EstimatedPromptTokens
-		other["estimated_completion_tokens"] = snap.EstimatedCompletionTokens
-		other["estimated_quota_before_group"] = snap.EstimatedQuotaBeforeGroup
-		other["estimated_quota_after_group"] = snap.EstimatedQuotaAfterGroup
-		other["estimated_tier"] = snap.EstimatedTier
+	if snap == nil {
+		return
 	}
-
+	other["billing_mode"] = "tiered_expr"
+	other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(snap.ExprString))
 	if result != nil {
-		other["actual_quota_before_group"] = result.ActualQuotaBeforeGroup
-		other["actual_quota_after_group"] = result.ActualQuotaAfterGroup
 		other["matched_tier"] = result.MatchedTier
-		other["crossed_tier"] = result.CrossedTier
 	}
-
-	other["frt"] = float64(relayInfo.FirstResponseTime.UnixMilli() - relayInfo.StartTime.UnixMilli())
-	if relayInfo.IsModelMapped {
-		other["is_model_mapped"] = true
-		other["upstream_model_name"] = relayInfo.UpstreamModelName
-	}
-
-	adminInfo := make(map[string]interface{})
-	adminInfo["use_channel"] = ctx.GetStringSlice("use_channel")
-	AppendChannelAffinityAdminInfo(ctx, adminInfo)
-	other["admin_info"] = adminInfo
-
-	appendRequestPath(ctx, relayInfo, other)
-	appendRequestConversionChain(relayInfo, other)
-	appendBillingInfo(relayInfo, other)
-	return other
 }

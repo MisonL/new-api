@@ -62,6 +62,12 @@ func runProgram(prog *vm.Program, params TokenParams, request RequestInput) (flo
 		"cache_read_tokens":      params.CR,
 		"cache_create_tokens":    params.CC,
 		"cache_create_1h_tokens": params.CC1h,
+		"img":                    params.Img,
+		"ai":                     params.AI,
+		"ao":                     params.AO,
+		"image_tokens":           params.Img,
+		"audio_input_tokens":     params.AI,
+		"audio_output_tokens":    params.AO,
 		"tier": func(name string, value float64) float64 {
 			trace.MatchedTier = name
 			trace.Cost = value

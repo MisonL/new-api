@@ -33,6 +33,7 @@ import {
   getLogOther,
   renderModelTag,
   renderModelPriceSimple,
+  renderTieredModelPriceSimple,
 } from '../../../helpers';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import { CircleAlert, Route, Sparkles } from 'lucide-react';
@@ -430,43 +431,6 @@ function renderCompactDetailSummary(summarySegments) {
   );
 }
 
-function buildTieredBillingSegments(other, t) {
-  const segments = [
-    { text: `${t('阶梯计费')}`, tone: 'primary' },
-  ];
-
-  if (other.matched_tier) {
-    segments.push({
-      text: `${t('命中档位')}: ${other.matched_tier}`,
-      tone: 'secondary',
-    });
-  }
-
-  const groupRatio = other.group_ratio;
-  if (groupRatio !== undefined && groupRatio !== null) {
-    segments.push({
-      text: `${t('分组')} ${formatRatio(groupRatio)}x`,
-      tone: 'secondary',
-    });
-  }
-
-  if (other.crossed_tier) {
-    segments.push({
-      text: `${t('跨阶梯')}: ${t('是')}`,
-      tone: 'secondary',
-    });
-  }
-
-  if (other.actual_quota_after_group !== undefined) {
-    segments.push({
-      text: `${t('实际额度')}: ${other.actual_quota_after_group}`,
-      tone: 'secondary',
-    });
-  }
-
-  return { segments };
-}
-
 function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
   const other = getLogOther(record.other);
 
@@ -504,52 +468,16 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     };
   }
 
+  const summaryOpts = { ...other, displayMode: billingDisplayMode, outputMode: 'segments' };
+
   if (other?.billing_mode === 'tiered_expr') {
-    return buildTieredBillingSegments(other, t);
+    return { segments: renderTieredModelPriceSimple(summaryOpts) };
   }
 
   return {
     segments: other?.claude
-      ? renderModelPriceSimple(
-          other.model_ratio,
-          other.model_price,
-          other.group_ratio,
-          other?.user_group_ratio,
-          other.cache_tokens || 0,
-          other.cache_ratio || 1.0,
-          other.cache_creation_tokens || 0,
-          other.cache_creation_ratio || 1.0,
-          other.cache_creation_tokens_5m || 0,
-          other.cache_creation_ratio_5m || other.cache_creation_ratio || 1.0,
-          other.cache_creation_tokens_1h || 0,
-          other.cache_creation_ratio_1h || other.cache_creation_ratio || 1.0,
-          false,
-          1.0,
-          other?.is_system_prompt_overwritten,
-          'claude',
-          billingDisplayMode,
-          'segments',
-        )
-      : renderModelPriceSimple(
-          other.model_ratio,
-          other.model_price,
-          other.group_ratio,
-          other?.user_group_ratio,
-          other.cache_tokens || 0,
-          other.cache_ratio || 1.0,
-          0,
-          1.0,
-          0,
-          1.0,
-          0,
-          1.0,
-          false,
-          1.0,
-          other?.is_system_prompt_overwritten,
-          'openai',
-          billingDisplayMode,
-          'segments',
-        ),
+      ? renderModelPriceSimple({ ...summaryOpts, provider: 'claude' })
+      : renderModelPriceSimple({ ...summaryOpts, provider: 'openai' }),
   };
 }
 

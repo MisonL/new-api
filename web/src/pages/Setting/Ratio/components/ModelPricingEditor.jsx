@@ -327,7 +327,7 @@ export default function ModelPricingEditor({
             gap: 16,
             gridTemplateColumns: isMobile
               ? 'minmax(0, 1fr)'
-              : 'minmax(360px, 1.1fr) minmax(420px, 1fr)',
+              : 'minmax(300px, 0.8fr) minmax(480px, 1.2fr)',
           }}
         >
           <Card

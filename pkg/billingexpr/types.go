@@ -14,11 +14,14 @@ type RequestInput struct {
 // Fields beyond P and C are optional — when absent they default to 0,
 // which means cache-unaware expressions keep working unchanged.
 type TokenParams struct {
-	P    float64 // prompt tokens
-	C    float64 // completion tokens
+	P    float64 // prompt tokens (text)
+	C    float64 // completion tokens (text)
 	CR   float64 // cache read (hit) tokens
 	CC   float64 // cache creation tokens (5-min TTL for Claude, generic for others)
 	CC1h float64 // cache creation tokens — 1-hour TTL (Claude only)
+	Img  float64 // image input tokens
+	AI   float64 // audio input tokens
+	AO   float64 // audio output tokens
 }
 
 // TraceResult holds side-channel info captured by the tier() function

@@ -931,3 +931,55 @@ func TestTimeFunctions_MonthDayPattern(t *testing.T) {
 		t.Errorf("cost = %f, want 1000 or 500", cost)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Image and audio token tests
+// ---------------------------------------------------------------------------
+
+func TestImageTokenVariable(t *testing.T) {
+	exprStr := `tier("base", p * 2 + c * 10 + img * 5)`
+	cost, _, err := billingexpr.RunExpr(exprStr, billingexpr.TokenParams{P: 1000, C: 500, Img: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 1000*2 + 500*10 + 200*5 = 2000 + 5000 + 1000 = 8000
+	if math.Abs(cost-8000) > 1e-6 {
+		t.Errorf("cost = %f, want 8000", cost)
+	}
+}
+
+func TestAudioTokenVariables(t *testing.T) {
+	exprStr := `tier("base", p * 2 + c * 10 + ai * 50 + ao * 100)`
+	cost, _, err := billingexpr.RunExpr(exprStr, billingexpr.TokenParams{P: 1000, C: 500, AI: 100, AO: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 1000*2 + 500*10 + 100*50 + 50*100 = 2000 + 5000 + 5000 + 5000 = 17000
+	if math.Abs(cost-17000) > 1e-6 {
+		t.Errorf("cost = %f, want 17000", cost)
+	}
+}
+
+func TestImageAudioAliases(t *testing.T) {
+	exprStr := `tier("base", prompt_tokens * 1 + image_tokens * 3 + audio_input_tokens * 5 + audio_output_tokens * 10)`
+	cost, _, err := billingexpr.RunExpr(exprStr, billingexpr.TokenParams{P: 100, Img: 50, AI: 20, AO: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 100*1 + 50*3 + 20*5 + 10*10 = 100 + 150 + 100 + 100 = 450
+	if math.Abs(cost-450) > 1e-6 {
+		t.Errorf("cost = %f, want 450", cost)
+	}
+}
+
+func TestImageAudioZero(t *testing.T) {
+	exprStr := `tier("base", p * 2 + img * 5 + ai * 50 + ao * 100)`
+	cost, _, err := billingexpr.RunExpr(exprStr, billingexpr.TokenParams{P: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// img, ai, ao default to 0
+	if math.Abs(cost-2000) > 1e-6 {
+		t.Errorf("cost = %f, want 2000", cost)
+	}
+}
