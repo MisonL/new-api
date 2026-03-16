@@ -1,8 +1,10 @@
 package service
 
 import (
+	"math"
 	"testing"
 
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
@@ -403,5 +405,185 @@ func TestTryTieredSettle_ErrorFallbackToEstimatedQuotaAfterGroup(t *testing.T) {
 	}
 	if result != nil {
 		t.Fatal("result should be nil on error fallback")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BuildTieredTokenParams: token normalization and ratio parity tests
+// ---------------------------------------------------------------------------
+
+func tieredQuota(exprStr string, usage *dto.Usage, isClaudeSemantic bool, groupRatio float64) float64 {
+	usedVars := billingexpr.UsedVars(exprStr)
+	params := BuildTieredTokenParams(usage, isClaudeSemantic, usedVars)
+	cost, _, _ := billingexpr.RunExpr(exprStr, params)
+	return cost / 1_000_000 * testQuotaPerUnit * groupRatio
+}
+
+func ratioQuota(usage *dto.Usage, isClaudeSemantic bool, modelRatio, completionRatio, cacheRatio, imageRatio, groupRatio float64) float64 {
+	baseTokens := float64(usage.PromptTokens)
+	cacheTokens := float64(usage.PromptTokensDetails.CachedTokens)
+	ccTokens := float64(usage.PromptTokensDetails.CachedCreationTokens)
+	imgTokens := float64(usage.PromptTokensDetails.ImageTokens)
+
+	if !isClaudeSemantic {
+		baseTokens -= cacheTokens
+		baseTokens -= ccTokens
+		baseTokens -= imgTokens
+	}
+
+	promptQuota := baseTokens + cacheTokens*cacheRatio + imgTokens*imageRatio
+	completionQuota := float64(usage.CompletionTokens) * completionRatio
+	return (promptQuota + completionQuota) * modelRatio * groupRatio
+}
+
+func TestBuildTieredTokenParams_GPT_WithCache(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     1000,
+		CompletionTokens: 500,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 200,
+			TextTokens:   800,
+		},
+	}
+	expr := `tier("base", p * 2.5 + c * 15 + cr * 0.25)`
+	got := tieredQuota(expr, usage, false, 1.0)
+	// P=800, C=500, CR=200 → (800*2.5 + 500*15 + 200*0.25) * 0.5 = 4775
+	want := 4775.0
+	if math.Abs(got-want) > 0.01 {
+		t.Fatalf("quota = %f, want %f", got, want)
+	}
+}
+
+func TestBuildTieredTokenParams_GPT_NoCacheVar(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     1000,
+		CompletionTokens: 500,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 200,
+			TextTokens:   800,
+		},
+	}
+	expr := `tier("base", p * 2.5 + c * 15)`
+	got := tieredQuota(expr, usage, false, 1.0)
+	// No cr → P=1000 (cache stays in P), C=500 → (1000*2.5 + 500*15) * 0.5 = 5000
+	want := 5000.0
+	if math.Abs(got-want) > 0.01 {
+		t.Fatalf("quota = %f, want %f", got, want)
+	}
+}
+
+func TestBuildTieredTokenParams_GPT_WithImage(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     1000,
+		CompletionTokens: 500,
+		PromptTokensDetails: dto.InputTokenDetails{
+			ImageTokens: 200,
+			TextTokens:  800,
+		},
+	}
+	expr := `tier("base", p * 2 + c * 8 + img * 2.5)`
+	got := tieredQuota(expr, usage, false, 1.0)
+	// P=800, C=500, Img=200 → (800*2 + 500*8 + 200*2.5) * 0.5 = 3050
+	want := 3050.0
+	if math.Abs(got-want) > 0.01 {
+		t.Fatalf("quota = %f, want %f", got, want)
+	}
+}
+
+func TestBuildTieredTokenParams_Claude_WithCache(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     800,
+		CompletionTokens: 500,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 200,
+			TextTokens:   800,
+		},
+	}
+	expr := `tier("base", p * 3 + c * 15 + cr * 0.3)`
+	got := tieredQuota(expr, usage, true, 1.0)
+	// Claude: P=800 (no subtraction), C=500, CR=200 → (800*3 + 500*15 + 200*0.3) * 0.5 = 4980
+	want := 4980.0
+	if math.Abs(got-want) > 0.01 {
+		t.Fatalf("quota = %f, want %f", got, want)
+	}
+}
+
+func TestBuildTieredTokenParams_GPT_AudioOutput(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     1000,
+		CompletionTokens: 600,
+		CompletionTokenDetails: dto.OutputTokenDetails{
+			AudioTokens: 100,
+			TextTokens:  500,
+		},
+	}
+	expr := `tier("base", p * 2 + c * 10 + ao * 50)`
+	got := tieredQuota(expr, usage, false, 1.0)
+	// C=600-100=500, AO=100 → (1000*2 + 500*10 + 100*50) * 0.5 = 6000
+	want := 6000.0
+	if math.Abs(got-want) > 0.01 {
+		t.Fatalf("quota = %f, want %f", got, want)
+	}
+}
+
+func TestBuildTieredTokenParams_GPT_AudioOutputNoVar(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     1000,
+		CompletionTokens: 600,
+		CompletionTokenDetails: dto.OutputTokenDetails{
+			AudioTokens: 100,
+			TextTokens:  500,
+		},
+	}
+	expr := `tier("base", p * 2 + c * 10)`
+	got := tieredQuota(expr, usage, false, 1.0)
+	// No ao → C=600 (audio stays in C) → (1000*2 + 600*10) * 0.5 = 4000
+	want := 4000.0
+	if math.Abs(got-want) > 0.01 {
+		t.Fatalf("quota = %f, want %f", got, want)
+	}
+}
+
+func TestBuildTieredTokenParams_ParityWithRatio(t *testing.T) {
+	// GPT-5.4 prices: input=$2.5, output=$15, cacheRead=$0.25
+	// Ratio equivalents: modelRatio=1.25, completionRatio=6, cacheRatio=0.1
+	usage := &dto.Usage{
+		PromptTokens:     10000,
+		CompletionTokens: 2000,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 3000,
+			TextTokens:   7000,
+		},
+	}
+	expr := `tier("base", p * 2.5 + c * 15 + cr * 0.25)`
+
+	for _, gr := range []float64{1.0, 1.5, 2.0, 0.5} {
+		tq := tieredQuota(expr, usage, false, gr)
+		rq := ratioQuota(usage, false, 1.25, 6, 0.1, 0, gr)
+
+		if math.Abs(tq-rq) > 0.01 {
+			t.Fatalf("groupRatio=%v: tiered=%f ratio=%f (mismatch)", gr, tq, rq)
+		}
+	}
+}
+
+func TestBuildTieredTokenParams_ParityWithRatio_Image(t *testing.T) {
+	// gpt-image-1-mini prices: input=$2, output=$8, image=$2.5
+	// Ratio equivalents: modelRatio=1, completionRatio=4, imageRatio=1.25
+	usage := &dto.Usage{
+		PromptTokens:     5000,
+		CompletionTokens: 4000,
+		PromptTokensDetails: dto.InputTokenDetails{
+			ImageTokens: 1000,
+			TextTokens:  4000,
+		},
+	}
+	expr := `tier("base", p * 2 + c * 8 + img * 2.5)`
+
+	tq := tieredQuota(expr, usage, false, 1.0)
+	rq := ratioQuota(usage, false, 1.0, 4, 0, 1.25, 1.0)
+
+	if math.Abs(tq-rq) > 0.01 {
+		t.Fatalf("tiered=%f ratio=%f (mismatch)", tq, rq)
 	}
 }

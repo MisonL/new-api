@@ -256,14 +256,12 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, usage, relayInfo.GetFinalRequestRelayFormat())
 	}
 
+	var tieredUsedVars map[string]bool
+	if snap := relayInfo.TieredBillingSnapshot; snap != nil {
+		tieredUsedVars = billingexpr.UsedVars(snap.ExprString)
+	}
 	var tieredResult *billingexpr.TieredResult
-	tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, billingexpr.TokenParams{
-		P:    float64(usage.PromptTokens),
-		C:    float64(usage.CompletionTokens),
-		CR:   float64(usage.PromptTokensDetails.CachedTokens),
-		CC:   float64(usage.PromptTokensDetails.CachedCreationTokens - usage.ClaudeCacheCreation1hTokens),
-		CC1h: float64(usage.ClaudeCacheCreation1hTokens),
-	})
+	tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, BuildTieredTokenParams(usage, true, tieredUsedVars))
 	if tieredOk {
 		tieredResult = tieredRes
 	}
@@ -394,14 +392,12 @@ func CalcOpenRouterCacheCreateTokens(usage dto.Usage, priceData types.PriceData)
 
 func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent string) {
 
+	var tieredUsedVars map[string]bool
+	if snap := relayInfo.TieredBillingSnapshot; snap != nil {
+		tieredUsedVars = billingexpr.UsedVars(snap.ExprString)
+	}
 	var tieredResult *billingexpr.TieredResult
-	tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, billingexpr.TokenParams{
-		P:  float64(usage.PromptTokens),
-		C:  float64(usage.CompletionTokens),
-		CR: float64(usage.PromptTokensDetails.CachedTokens),
-		AI: float64(usage.PromptTokensDetails.AudioTokens),
-		AO: float64(usage.CompletionTokenDetails.AudioTokens),
-	})
+	tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, BuildTieredTokenParams(usage, false, tieredUsedVars))
 	if tieredOk {
 		tieredResult = tieredRes
 	}
@@ -659,4 +655,3 @@ func checkAndSendSubscriptionQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 		}
 	})
 }
-

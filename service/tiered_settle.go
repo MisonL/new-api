@@ -1,12 +1,69 @@
 package service
 
 import (
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
 // TieredResultWrapper wraps billingexpr.TieredResult for use at the service layer.
 type TieredResultWrapper = billingexpr.TieredResult
+
+// BuildTieredTokenParams constructs billingexpr.TokenParams from a dto.Usage,
+// normalizing P and C so they mean "tokens not separately priced by the
+// expression". Sub-categories (cache, image, audio) are only subtracted
+// when the expression references them via their own variable.
+//
+// GPT-format APIs report prompt_tokens / completion_tokens as totals that
+// include all sub-categories (cache, image, audio). Claude-format APIs
+// report them as text-only. This function normalizes to text-only when
+// sub-categories are separately priced.
+func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVars map[string]bool) billingexpr.TokenParams {
+	p := float64(usage.PromptTokens)
+	c := float64(usage.CompletionTokens)
+	cr := float64(usage.PromptTokensDetails.CachedTokens)
+	ccTotal := float64(usage.PromptTokensDetails.CachedCreationTokens)
+	cc1h := float64(usage.ClaudeCacheCreation1hTokens)
+	img := float64(usage.PromptTokensDetails.ImageTokens)
+	ai := float64(usage.PromptTokensDetails.AudioTokens)
+	ao := float64(usage.CompletionTokenDetails.AudioTokens)
+
+	if !isClaudeUsageSemantic {
+		if usedVars["cr"] || usedVars["cache_read_tokens"] {
+			p -= cr
+		}
+		if usedVars["cc"] || usedVars["cc1h"] || usedVars["cache_create_tokens"] || usedVars["cache_create_1h_tokens"] {
+			p -= ccTotal
+		}
+		if usedVars["img"] || usedVars["image_tokens"] {
+			p -= img
+		}
+		if usedVars["ai"] || usedVars["audio_input_tokens"] {
+			p -= ai
+		}
+		if usedVars["ao"] || usedVars["audio_output_tokens"] {
+			c -= ao
+		}
+	}
+
+	if p < 0 {
+		p = 0
+	}
+	if c < 0 {
+		c = 0
+	}
+
+	return billingexpr.TokenParams{
+		P:    p,
+		C:    c,
+		CR:   cr,
+		CC:   ccTotal - cc1h,
+		CC1h: cc1h,
+		Img:  img,
+		AI:   ai,
+		AO:   ao,
+	}
+}
 
 // TryTieredSettle checks if the request uses tiered_expr billing and, if so,
 // computes the actual quota using the frozen BillingSnapshot. Returns:

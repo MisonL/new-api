@@ -6,14 +6,20 @@ import (
 	"sync"
 
 	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/ast"
 	"github.com/expr-lang/expr/vm"
 )
 
 const maxCacheSize = 256
 
+type cachedEntry struct {
+	prog     *vm.Program
+	usedVars map[string]bool
+}
+
 var (
 	cacheMu sync.RWMutex
-	cache   = make(map[string]*vm.Program, 64)
+	cache   = make(map[string]*cachedEntry, 64)
 )
 
 // compileEnvPrototype is the type-checking prototype used at compile time.
@@ -67,9 +73,9 @@ func CompileFromCacheByHash(exprStr, hash string) (*vm.Program, error) {
 
 func compileFromCacheByHash(exprStr, hash string) (*vm.Program, error) {
 	cacheMu.RLock()
-	if prog, ok := cache[hash]; ok {
+	if entry, ok := cache[hash]; ok {
 		cacheMu.RUnlock()
-		return prog, nil
+		return entry.prog, nil
 	}
 	cacheMu.RUnlock()
 
@@ -78,20 +84,61 @@ func compileFromCacheByHash(exprStr, hash string) (*vm.Program, error) {
 		return nil, fmt.Errorf("expr compile error: %w", err)
 	}
 
+	vars := extractUsedVars(prog)
+
 	cacheMu.Lock()
 	if len(cache) >= maxCacheSize {
-		cache = make(map[string]*vm.Program, 64)
+		cache = make(map[string]*cachedEntry, 64)
 	}
-	cache[hash] = prog
+	cache[hash] = &cachedEntry{prog: prog, usedVars: vars}
 	cacheMu.Unlock()
 
 	return prog, nil
+}
+
+func extractUsedVars(prog *vm.Program) map[string]bool {
+	vars := make(map[string]bool)
+	node := prog.Node()
+	ast.Find(node, func(n ast.Node) bool {
+		if id, ok := n.(*ast.IdentifierNode); ok {
+			vars[id.Value] = true
+		}
+		return false
+	})
+	return vars
+}
+
+// UsedVars returns the set of identifier names referenced by an expression.
+// The result is cached alongside the compiled program. Returns nil for empty input.
+func UsedVars(exprStr string) map[string]bool {
+	if exprStr == "" {
+		return nil
+	}
+	hash := ExprHashString(exprStr)
+	cacheMu.RLock()
+	if entry, ok := cache[hash]; ok {
+		cacheMu.RUnlock()
+		return entry.usedVars
+	}
+	cacheMu.RUnlock()
+
+	// Compile (and cache) to populate usedVars
+	if _, err := compileFromCacheByHash(exprStr, hash); err != nil {
+		return nil
+	}
+	cacheMu.RLock()
+	entry, ok := cache[hash]
+	cacheMu.RUnlock()
+	if ok {
+		return entry.usedVars
+	}
+	return nil
 }
 
 // InvalidateCache clears the compiled-expression cache.
 // Called when billing rules are updated.
 func InvalidateCache() {
 	cacheMu.Lock()
-	cache = make(map[string]*vm.Program, 64)
+	cache = make(map[string]*cachedEntry, 64)
 	cacheMu.Unlock()
 }

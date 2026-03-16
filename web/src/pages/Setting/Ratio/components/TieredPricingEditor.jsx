@@ -764,7 +764,7 @@ const PRESET_GROUPS = [
     presets: [
       { key: 'flat', label: 'Flat', expr: 'tier("base", p * 2 + c * 4)' },
       { key: 'claude-opus', label: 'Claude Opus 4.6', expr: 'tier("base", p * 5 + c * 25 + cr * 0.5 + cc * 6.25 + cc1h * 10)' },
-      { key: 'gpt-5.4', label: 'GPT-5.4', expr: 'tier("base", p * 2.5 + c * 10 + cr * 0.25)' },
+      { key: 'gpt-5.4', label: 'GPT-5.4', expr: 'tier("base", p * 2.5 + c * 15 + cr * 0.25)' },
     ],
   },
   {
@@ -778,6 +778,7 @@ const PRESET_GROUPS = [
   {
     group: '多模态',
     presets: [
+      { key: 'gpt-image-1-mini', label: 'GPT-Image-1-Mini', expr: 'tier("base", p * 2 + c * 8 + img * 2.5)' },
       { key: 'qwen3-omni-flash', label: 'Qwen3-Omni-Flash', expr: 'tier("base", p * 0.43 + c * 3.06 + img * 0.78 + ai * 3.81 + ao * 15.11)' },
     ],
   },
@@ -791,7 +792,7 @@ const PRESET_GROUPS = [
       },
       {
         key: 'gpt-5.4-fast', label: 'GPT-5.4 Fast',
-        expr: 'tier("base", p * 2.5 + c * 10 + cr * 0.25)',
+        expr: 'tier("base", p * 2.5 + c * 15 + cr * 0.25)',
         requestRules: [{ conditions: [{ source: SOURCE_PARAM, path: 'service_tier', mode: MATCH_EQ, value: 'fast' }], multiplier: '2' }],
       },
     ],

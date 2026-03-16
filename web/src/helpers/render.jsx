@@ -2210,24 +2210,47 @@ export function renderLogContent(opts) {
   }
 }
 
-function parseTiersFromExpr(exprStr) {
+const TIER_VAR_KEYS = ['p', 'c', 'cr', 'cc', 'cc1h', 'img', 'ai', 'ao'];
+const TIER_VAR_TO_FIELD = {
+  p: 'inputPrice', c: 'outputPrice',
+  cr: 'cacheReadPrice', cc: 'cacheCreatePrice', cc1h: 'cacheCreate1hPrice',
+  img: 'imagePrice', ai: 'audioInputPrice', ao: 'audioOutputPrice',
+};
+
+function parseTierBody(bodyStr) {
+  const coeffs = {};
+  const re = new RegExp(`\\b(${TIER_VAR_KEYS.join('|')})\\s*\\*\\s*([\\d.eE+-]+)`, 'g');
+  let m;
+  while ((m = re.exec(bodyStr)) !== null) {
+    if (!(m[1] in coeffs)) coeffs[m[1]] = Number(m[2]);
+  }
+  const tier = {};
+  for (const [varName, field] of Object.entries(TIER_VAR_TO_FIELD)) {
+    tier[field] = coeffs[varName] || 0;
+  }
+  return tier;
+}
+
+export function parseTiersFromExpr(exprStr) {
   if (!exprStr) return [];
   try {
-    const cacheVars = ['cr', 'cc', 'cc1h'];
-    const optCache = cacheVars.map((v) => `(?:\\s*\\+\\s*${v}\\s*\\*\\s*([\\d.eE+-]+))?`).join('');
-    const bodyPat = `p\\s*\\*\\s*([\\d.eE+-]+)\\s*\\+\\s*c\\s*\\*\\s*([\\d.eE+-]+)${optCache}`;
-    const tierRe = new RegExp(`tier\\("([^"]*)",\\s*${bodyPat}\\)`, 'g');
+    const condGroup = `((?:(?:p|c)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)(?:\\s*&&\\s*(?:p|c)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`;
+    const tierRe = new RegExp(`(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`, 'g');
     const tiers = [];
     let m;
     while ((m = tierRe.exec(exprStr)) !== null) {
-      tiers.push({
-        label: m[1],
-        inputPrice: Number(m[2]),
-        outputPrice: Number(m[3]),
-        cacheReadPrice: m[4] ? Number(m[4]) : 0,
-        cacheCreatePrice: m[5] ? Number(m[5]) : 0,
-        cacheCreate1hPrice: m[6] ? Number(m[6]) : 0,
-      });
+      const condStr = m[1] || '';
+      const conditions = [];
+      if (condStr) {
+        for (const cp of condStr.split(/\s*&&\s*/)) {
+          const cm = cp.trim().match(/^(p|c)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/);
+          if (cm) conditions.push({ var: cm[1], op: cm[2], value: Number(cm[3]) });
+        }
+      }
+      const tier = parseTierBody(m[3]);
+      tier.label = m[2];
+      tier.conditions = conditions;
+      tiers.push(tier);
     }
     return tiers;
   } catch {
@@ -2258,45 +2281,24 @@ export function renderTieredModelPrice(opts) {
   const { symbol, rate } = getCurrencyConfig();
   const gr = groupRatio || 1;
 
-  const inputCost = (inputTokens / 1000000) * tier.inputPrice;
-  const outputCost = (completionTokens / 1000000) * tier.outputPrice;
-  const cacheReadCost = (cacheTokens / 1000000) * tier.cacheReadPrice;
-  const hasSplitCacheCreation = cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
-  let cacheCreateCost = 0;
-  if (hasSplitCacheCreation) {
-    cacheCreateCost = (cacheCreationTokens5m / 1000000) * tier.cacheCreatePrice
-      + (cacheCreationTokens1h / 1000000) * tier.cacheCreate1hPrice;
-  } else if (cacheCreationTokens > 0) {
-    cacheCreateCost = (cacheCreationTokens / 1000000) * tier.cacheCreatePrice;
-  }
-  const totalBeforeGroup = inputCost + outputCost + cacheReadCost + cacheCreateCost;
-  const total = totalBeforeGroup * gr;
+  const priceLines = [
+    ['inputPrice', '输入价格'],
+    ['outputPrice', '补全价格'],
+    ['cacheReadPrice', '缓存读取价格'],
+    ['cacheCreatePrice', '缓存创建价格'],
+    ['cacheCreate1hPrice', '1h缓存创建价格'],
+    ['imagePrice', '图片输入价格'],
+    ['audioInputPrice', '音频输入价格'],
+    ['audioOutputPrice', '音频输出价格'],
+  ];
 
   const lines = [
     buildBillingText('命中档位：{{tier}}', { tier: matchedTier || tier.label }),
-    buildBillingPriceText('输入价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.inputPrice, rate }),
-    buildBillingPriceText('输出价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.outputPrice, rate }),
-    cacheTokens > 0 && tier.cacheReadPrice > 0
-      ? buildBillingPriceText('缓存读取价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.cacheReadPrice, rate })
-      : null,
-    hasSplitCacheCreation && cacheCreationTokens5m > 0 && tier.cacheCreatePrice > 0
-      ? buildBillingPriceText('5m缓存创建价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.cacheCreatePrice, rate })
-      : null,
-    hasSplitCacheCreation && cacheCreationTokens1h > 0 && tier.cacheCreate1hPrice > 0
-      ? buildBillingPriceText('1h缓存创建价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.cacheCreate1hPrice, rate })
-      : null,
-    !hasSplitCacheCreation && cacheCreationTokens > 0 && tier.cacheCreatePrice > 0
-      ? buildBillingPriceText('缓存创建价格：{{symbol}}{{price}} / 1M tokens', { symbol, usdAmount: tier.cacheCreatePrice, rate })
-      : null,
-    buildBillingText(
-      '(输入 {{input}} tokens / 1M tokens * {{symbol}}{{inputPrice}} + 输出 {{output}} tokens / 1M tokens * {{symbol}}{{outputPrice}}) * 分组倍率 {{ratio}} = {{symbol}}{{total}}',
-      {
-        input: inputTokens, output: completionTokens, symbol,
-        inputPrice: formatBillingDisplayPrice(tier.inputPrice, rate),
-        outputPrice: formatBillingDisplayPrice(tier.outputPrice, rate),
-        ratio: gr, total: formatBillingDisplayPrice(total, rate),
-      },
-    ),
+    ...priceLines
+      .filter(([field]) => tier[field] > 0)
+      .map(([field, label]) =>
+        buildBillingPriceText(`${label}：{{symbol}}{{price}} / 1M tokens`, { symbol, usdAmount: tier[field], rate }),
+      ),
   ];
 
   return renderBillingArticle(lines);
@@ -2329,44 +2331,26 @@ export function renderTieredModelPriceSimple(opts) {
     ];
 
     if (tier && isPriceDisplayMode(displayMode)) {
-      segments.push({
-        tone: 'secondary',
-        text: i18next.t('输入 {{price}} / 1M tokens', {
-          price: formatCompactDisplayPrice(tier.inputPrice),
-        }),
-      });
-      if (cacheTokens > 0 && tier.cacheReadPrice > 0) {
-        segments.push({
-          tone: 'secondary',
-          text: i18next.t('缓存读 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(tier.cacheReadPrice),
-          }),
-        });
-      }
-      const hasSplitCacheCreation = cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
-      if (hasSplitCacheCreation && cacheCreationTokens5m > 0 && tier.cacheCreatePrice > 0) {
-        segments.push({
-          tone: 'secondary',
-          text: i18next.t('5m缓存创建 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(tier.cacheCreatePrice),
-          }),
-        });
-      }
-      if (hasSplitCacheCreation && cacheCreationTokens1h > 0 && tier.cacheCreate1hPrice > 0) {
-        segments.push({
-          tone: 'secondary',
-          text: i18next.t('1h缓存创建 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(tier.cacheCreate1hPrice),
-          }),
-        });
-      }
-      if (!hasSplitCacheCreation && cacheCreationTokens > 0 && tier.cacheCreatePrice > 0) {
-        segments.push({
-          tone: 'secondary',
-          text: i18next.t('缓存创建 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(tier.cacheCreatePrice),
-          }),
-        });
+      const priceSegments = [
+        ['inputPrice', '输入'],
+        ['outputPrice', '补全'],
+        ['cacheReadPrice', '缓存读'],
+        ['cacheCreatePrice', '缓存创建'],
+        ['cacheCreate1hPrice', '1h缓存创建'],
+        ['imagePrice', '图片输入'],
+        ['audioInputPrice', '音频输入'],
+        ['audioOutputPrice', '音频输出'],
+      ];
+      for (const [field, label] of priceSegments) {
+        if (tier[field] > 0) {
+          segments.push({
+            tone: 'secondary',
+            text: i18next.t('{{label}} {{price}} / 1M tokens', {
+              label: i18next.t(label),
+              price: formatCompactDisplayPrice(tier[field]),
+            }),
+          });
+        }
       }
     }
 

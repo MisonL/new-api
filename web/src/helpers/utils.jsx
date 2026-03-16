@@ -904,9 +904,24 @@ export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
   const tierMatches = billingExpr.match(/tier\(/g) || [];
   const tierCount = tierMatches.length;
 
-  const firstTierMatch = billingExpr.match(
-    /tier\("[^"]*",\s*p\s*\*\s*([\d.eE+-]+)\s*\+\s*c\s*\*\s*([\d.eE+-]+)(?:\s*\+\s*cr\s*\*\s*([\d.eE+-]+))?(?:\s*\+\s*cc\s*\*\s*([\d.eE+-]+))?/,
-  );
+  const varCoeffs = {};
+  const varRe = /\b(p|c|cr|cc|cc1h|img|ai|ao)\s*\*\s*([\d.eE+-]+)/g;
+  let vm;
+  while ((vm = varRe.exec(billingExpr)) !== null) {
+    if (!(vm[1] in varCoeffs)) varCoeffs[vm[1]] = Number(vm[2]);
+  }
+  const hasCoeffs = 'p' in varCoeffs || 'c' in varCoeffs;
+
+  const varLabels = [
+    ['p', '输入价格'],
+    ['c', '补全价格'],
+    ['cr', '缓存读取价格'],
+    ['cc', '缓存创建价格'],
+    ['cc1h', '1h缓存创建价格'],
+    ['img', '图片输入价格'],
+    ['ai', '音频输入价格'],
+    ['ao', '音频输出价格'],
+  ];
 
   const hasTimeCondition = /\b(?:hour|weekday|month|day)\(/.test(billingExpr);
   const hasRequestCondition = /\b(?:param|header)\(/.test(billingExpr);
@@ -921,26 +936,18 @@ export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
 
   return (
     <>
-      {firstTierMatch && (
+      {hasCoeffs && (
         <>
-          <span style={lineStyle}>
-            {t('输入价格')} ${(Number(firstTierMatch[1]) * gr).toFixed(4)}{unitSuffix}
-          </span>
-          <span style={lineStyle}>
-            {t('输出价格')} ${(Number(firstTierMatch[2]) * gr).toFixed(4)}{unitSuffix}
-          </span>
-          {firstTierMatch[3] && (
-            <span style={lineStyle}>
-              {t('缓存读取价格')} ${(Number(firstTierMatch[3]) * gr).toFixed(4)}{unitSuffix}
-            </span>
-          )}
-          {firstTierMatch[4] && (
-            <span style={lineStyle}>
-              {t('缓存创建价格')} ${(Number(firstTierMatch[4]) * gr).toFixed(4)}{unitSuffix}
-            </span>
+          {varLabels.map(([key, label]) =>
+            key in varCoeffs ? (
+              <span key={key} style={lineStyle}>
+                {t(label)} ${(varCoeffs[key] * gr).toFixed(4)}{unitSuffix}
+              </span>
+            ) : null,
           )}
         </>
       )}
+      {(tierCount > 1 || hasTimeCondition || hasRequestCondition) && (
       <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         <span
           style={{
@@ -970,6 +977,7 @@ export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
           </span>
         ))}
       </span>
+      )}
     </>
   );
 };
