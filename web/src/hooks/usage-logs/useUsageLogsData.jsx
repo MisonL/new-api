@@ -591,6 +591,66 @@ export const useLogsData = () => {
             value: other.reasoning_effort,
           });
         }
+        if (other?.billing_mode === 'tiered_expr') {
+          expandDataLocal.push({
+            key: t('计费方式'),
+            value: t('阶梯计费'),
+          });
+          if (other?.group_ratio !== undefined) {
+            const gr = other.group_ratio;
+            expandDataLocal.push({
+              key: t('分组倍率'),
+              value: typeof gr === 'number' ? gr.toFixed(4) : String(gr ?? '-'),
+            });
+          }
+          if (other?.rule_version !== undefined) {
+            expandDataLocal.push({
+              key: t('规则版本'),
+              value: String(other.rule_version),
+            });
+          }
+          if (other?.estimated_env) {
+            expandDataLocal.push({
+              key: t('预估环境'),
+              value: `prompt=${other.estimated_env.prompt_tokens ?? 0}, completion=${other.estimated_env.completion_tokens ?? 0}`,
+            });
+          }
+          if (other?.actual_env) {
+            expandDataLocal.push({
+              key: t('实际环境'),
+              value: `prompt=${other.actual_env.prompt_tokens ?? 0}, completion=${other.actual_env.completion_tokens ?? 0}`,
+            });
+          }
+          if (other?.estimated_quota_after_group !== undefined) {
+            expandDataLocal.push({
+              key: t('预估额度'),
+              value: String(other.estimated_quota_after_group),
+            });
+          }
+          if (other?.actual_quota_after_group !== undefined) {
+            expandDataLocal.push({
+              key: t('实际额度'),
+              value: String(other.actual_quota_after_group),
+            });
+          }
+          expandDataLocal.push({
+            key: t('跨阶梯'),
+            value: other?.crossed_tier ? t('是') : t('否'),
+          });
+          if (Array.isArray(other?.breakdown) && other.breakdown.length > 0) {
+            const breakdownText = other.breakdown.map((item, idx) =>
+              `[${idx}] ${item.token_type} | tokens=${item.tokens_in_tier} | cost=${item.unit_cost} | flat=${item.flat_fee} | sub=${item.subtotal}`
+            ).join('\n');
+            expandDataLocal.push({
+              key: t('计费明细'),
+              value: (
+                <div style={{ whiteSpace: 'pre-line', fontFamily: 'monospace', fontSize: 12 }}>
+                  {breakdownText}
+                </div>
+              ),
+            });
+          }
+        }
       }
       if (logs[i].type === 6) {
         if (other?.task_id) {

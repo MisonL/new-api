@@ -430,6 +430,43 @@ function renderCompactDetailSummary(summarySegments) {
   );
 }
 
+function buildTieredBillingSegments(other, t) {
+  const segments = [
+    { text: `${t('阶梯计费')}`, tone: 'primary' },
+  ];
+
+  if (other.matched_tier) {
+    segments.push({
+      text: `${t('命中档位')}: ${other.matched_tier}`,
+      tone: 'secondary',
+    });
+  }
+
+  const groupRatio = other.group_ratio;
+  if (groupRatio !== undefined && groupRatio !== null) {
+    segments.push({
+      text: `${t('分组')} ${formatRatio(groupRatio)}x`,
+      tone: 'secondary',
+    });
+  }
+
+  if (other.crossed_tier) {
+    segments.push({
+      text: `${t('跨阶梯')}: ${t('是')}`,
+      tone: 'secondary',
+    });
+  }
+
+  if (other.actual_quota_after_group !== undefined) {
+    segments.push({
+      text: `${t('实际额度')}: ${other.actual_quota_after_group}`,
+      tone: 'secondary',
+    });
+  }
+
+  return { segments };
+}
+
 function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
   const other = getLogOther(record.other);
 
@@ -465,6 +502,10 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
         text ? { text: `${t('详情')}：${text}`, tone: 'secondary' } : null,
       ].filter(Boolean),
     };
+  }
+
+  if (other?.billing_mode === 'tiered_expr') {
+    return buildTieredBillingSegments(other, t);
   }
 
   return {
