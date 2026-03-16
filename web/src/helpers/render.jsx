@@ -2222,11 +2222,11 @@ function parseTiersFromExpr(exprStr) {
     while ((m = tierRe.exec(exprStr)) !== null) {
       tiers.push({
         label: m[1],
-        inputPrice: Number(m[2]) * 2,
-        outputPrice: Number(m[3]) * 2,
-        cacheReadPrice: m[4] ? Number(m[4]) * 2 : 0,
-        cacheCreatePrice: m[5] ? Number(m[5]) * 2 : 0,
-        cacheCreate1hPrice: m[6] ? Number(m[6]) * 2 : 0,
+        inputPrice: Number(m[2]),
+        outputPrice: Number(m[3]),
+        cacheReadPrice: m[4] ? Number(m[4]) : 0,
+        cacheCreatePrice: m[5] ? Number(m[5]) : 0,
+        cacheCreate1hPrice: m[6] ? Number(m[6]) : 0,
       });
     }
     return tiers;

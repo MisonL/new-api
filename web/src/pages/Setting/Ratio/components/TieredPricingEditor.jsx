@@ -60,10 +60,10 @@ const { Text } = Typography;
 const PRICE_SUFFIX = '$/1M tokens';
 
 function unitCostToPrice(uc) {
-  return (Number(uc) || 0) * 2;
+  return Number(uc) || 0;
 }
 function priceToUnitCost(price) {
-  return (Number(price) || 0) / 2;
+  return Number(price) || 0;
 }
 
 const OPS = ['<', '<=', '>', '>='];
@@ -762,23 +762,23 @@ const PRESET_GROUPS = [
   {
     group: '固定价格',
     presets: [
-      { key: 'flat', label: 'Flat', expr: 'tier("base", p * 1 + c * 2)' },
-      { key: 'claude-opus', label: 'Claude Opus 4.6', expr: 'tier("base", p * 2.5 + c * 12.5 + cr * 0.25 + cc * 3.125 + cc1h * 5)' },
-      { key: 'gpt-5.4', label: 'GPT-5.4', expr: 'tier("base", p * 1.25 + c * 5 + cr * 0.125)' },
+      { key: 'flat', label: 'Flat', expr: 'tier("base", p * 2 + c * 4)' },
+      { key: 'claude-opus', label: 'Claude Opus 4.6', expr: 'tier("base", p * 5 + c * 25 + cr * 0.5 + cc * 6.25 + cc1h * 10)' },
+      { key: 'gpt-5.4', label: 'GPT-5.4', expr: 'tier("base", p * 2.5 + c * 10 + cr * 0.25)' },
     ],
   },
   {
     group: '阶梯计费',
     presets: [
-      { key: 'claude-sonnet', label: 'Claude Sonnet 4.5', expr: 'p <= 200000 ? tier("standard", p * 1.5 + c * 7.5 + cr * 0.15 + cc * 1.875 + cc1h * 3) : tier("long_context", p * 3 + c * 11.25 + cr * 0.3 + cc * 3.75 + cc1h * 6)' },
-      { key: 'qwen3-max', label: 'Qwen3-Max', expr: 'p <= 32000 ? tier("short", p * 0.6 + c * 3 + cr * 0.12 + cc * 0.75) : p <= 128000 ? tier("mid", p * 1.2 + c * 6 + cr * 0.24 + cc * 1.5) : tier("long", p * 1.5 + c * 7.5 + cr * 0.3 + cc * 1.875)' },
-      { key: 'glm-4.5-air', label: 'GLM-4.5-Air', expr: 'p < 32000 && c < 200 ? tier("short_output", p * 0.4 + c * 1 + cr * 0.08) : p < 32000 && c >= 200 ? tier("long_output", p * 0.4 + c * 3 + cr * 0.08) : tier("mid_context", p * 0.6 + c * 4 + cr * 0.12)' },
+      { key: 'claude-sonnet', label: 'Claude Sonnet 4.5', expr: 'p <= 200000 ? tier("standard", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6) : tier("long_context", p * 6 + c * 22.5 + cr * 0.6 + cc * 7.5 + cc1h * 12)' },
+      { key: 'qwen3-max', label: 'Qwen3-Max', expr: 'p <= 32000 ? tier("short", p * 1.2 + c * 6 + cr * 0.24 + cc * 1.5) : p <= 128000 ? tier("mid", p * 2.4 + c * 12 + cr * 0.48 + cc * 3) : tier("long", p * 3 + c * 15 + cr * 0.6 + cc * 3.75)' },
+      { key: 'glm-4.5-air', label: 'GLM-4.5-Air', expr: 'p < 32000 && c < 200 ? tier("short_output", p * 0.8 + c * 2 + cr * 0.16) : p < 32000 && c >= 200 ? tier("long_output", p * 0.8 + c * 6 + cr * 0.16) : tier("mid_context", p * 1.2 + c * 8 + cr * 0.24)' },
     ],
   },
   {
     group: '多模态',
     presets: [
-      { key: 'qwen3-omni-flash', label: 'Qwen3-Omni-Flash', expr: 'tier("base", p * 0.215 + c * 1.53 + img * 0.39 + ai * 1.905 + ao * 7.555)' },
+      { key: 'qwen3-omni-flash', label: 'Qwen3-Omni-Flash', expr: 'tier("base", p * 0.43 + c * 3.06 + img * 0.78 + ai * 3.81 + ao * 15.11)' },
     ],
   },
   {
@@ -786,12 +786,12 @@ const PRESET_GROUPS = [
     presets: [
       {
         key: 'claude-opus-fast', label: 'Claude Opus 4.6 Fast',
-        expr: 'tier("base", p * 2.5 + c * 12.5 + cr * 0.25 + cc * 3.125 + cc1h * 5)',
+        expr: 'tier("base", p * 5 + c * 25 + cr * 0.5 + cc * 6.25 + cc1h * 10)',
         requestRules: [{ conditions: [{ source: SOURCE_HEADER, path: 'anthropic-beta', mode: MATCH_CONTAINS, value: 'fast-mode-2026-02-01' }], multiplier: '6' }],
       },
       {
         key: 'gpt-5.4-fast', label: 'GPT-5.4 Fast',
-        expr: 'tier("base", p * 1.25 + c * 5 + cr * 0.125)',
+        expr: 'tier("base", p * 2.5 + c * 10 + cr * 0.25)',
         requestRules: [{ conditions: [{ source: SOURCE_PARAM, path: 'service_tier', mode: MATCH_EQ, value: 'fast' }], multiplier: '2' }],
       },
     ],
@@ -801,12 +801,12 @@ const PRESET_GROUPS = [
     presets: [
       {
         key: 'night-discount', label: '夜间半价',
-        expr: 'tier("base", p * 1.5 + c * 7.5)',
+        expr: 'tier("base", p * 3 + c * 15)',
         requestRules: [{ conditions: [{ source: SOURCE_TIME, timeFunc: 'hour', timezone: 'Asia/Shanghai', mode: MATCH_RANGE, rangeStart: '21', rangeEnd: '6' }], multiplier: '0.5' }],
       },
       {
         key: 'weekend-discount', label: '周末8折',
-        expr: 'tier("base", p * 1.5 + c * 7.5)',
+        expr: 'tier("base", p * 3 + c * 15)',
         requestRules: [
           { conditions: [{ source: SOURCE_TIME, timeFunc: 'weekday', timezone: 'Asia/Shanghai', mode: MATCH_EQ, value: '0' }], multiplier: '0.8' },
           { conditions: [{ source: SOURCE_TIME, timeFunc: 'weekday', timezone: 'Asia/Shanghai', mode: MATCH_EQ, value: '6' }], multiplier: '0.8' },
@@ -814,7 +814,7 @@ const PRESET_GROUPS = [
       },
       {
         key: 'new-year-promo', label: '新年促销',
-        expr: 'tier("base", p * 1.5 + c * 7.5)',
+        expr: 'tier("base", p * 3 + c * 15)',
         requestRules: [{ conditions: [
           { source: SOURCE_TIME, timeFunc: 'month', timezone: 'Asia/Shanghai', mode: MATCH_EQ, value: '1' },
           { source: SOURCE_TIME, timeFunc: 'day', timezone: 'Asia/Shanghai', mode: MATCH_EQ, value: '1' },

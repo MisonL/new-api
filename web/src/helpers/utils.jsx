@@ -897,9 +897,10 @@ export const getModelPriceItems = (
 };
 
 // 格式化动态计费摘要（用于卡片视图，与 formatPriceInfo 风格统一）
-export const formatDynamicPriceSummary = (billingExpr, t) => {
+export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
   if (!billingExpr) return <span style={{ color: 'var(--semi-color-text-1)' }}>{t('动态计费')}</span>;
 
+  const gr = groupRatio || 1;
   const tierMatches = billingExpr.match(/tier\(/g) || [];
   const tierCount = tierMatches.length;
 
@@ -923,19 +924,19 @@ export const formatDynamicPriceSummary = (billingExpr, t) => {
       {firstTierMatch && (
         <>
           <span style={lineStyle}>
-            {t('输入价格')} ${(Number(firstTierMatch[1]) * 2).toFixed(4)}{unitSuffix}
+            {t('输入价格')} ${(Number(firstTierMatch[1]) * gr).toFixed(4)}{unitSuffix}
           </span>
           <span style={lineStyle}>
-            {t('输出价格')} ${(Number(firstTierMatch[2]) * 2).toFixed(4)}{unitSuffix}
+            {t('输出价格')} ${(Number(firstTierMatch[2]) * gr).toFixed(4)}{unitSuffix}
           </span>
           {firstTierMatch[3] && (
             <span style={lineStyle}>
-              {t('缓存读取价格')} ${(Number(firstTierMatch[3]) * 2).toFixed(4)}{unitSuffix}
+              {t('缓存读取价格')} ${(Number(firstTierMatch[3]) * gr).toFixed(4)}{unitSuffix}
             </span>
           )}
           {firstTierMatch[4] && (
             <span style={lineStyle}>
-              {t('缓存创建价格')} ${(Number(firstTierMatch[4]) * 2).toFixed(4)}{unitSuffix}
+              {t('缓存创建价格')} ${(Number(firstTierMatch[4]) * gr).toFixed(4)}{unitSuffix}
             </span>
           )}
         </>

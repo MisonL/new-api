@@ -45,6 +45,7 @@ type BillingSnapshot struct {
 	EstimatedQuotaBeforeGroup float64 `json:"estimated_quota_before_group"`
 	EstimatedQuotaAfterGroup  int     `json:"estimated_quota_after_group"`
 	EstimatedTier             string  `json:"estimated_tier"`
+	QuotaPerUnit              float64 `json:"quota_per_unit"`
 }
 
 // TieredResult holds everything needed after running tiered settlement.

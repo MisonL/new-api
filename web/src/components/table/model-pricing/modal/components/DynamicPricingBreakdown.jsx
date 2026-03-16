@@ -37,7 +37,7 @@ const { Text } = Typography;
 const PRICE_SUFFIX = '$/1M tokens';
 
 function unitCostToPrice(uc) {
-  return (Number(uc) || 0) * 2;
+  return Number(uc) || 0;
 }
 
 function formatPrice(uc) {
