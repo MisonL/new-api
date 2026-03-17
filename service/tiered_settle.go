@@ -26,22 +26,26 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	cc1h := float64(usage.ClaudeCacheCreation1hTokens)
 	img := float64(usage.PromptTokensDetails.ImageTokens)
 	ai := float64(usage.PromptTokensDetails.AudioTokens)
+	imgO := float64(usage.CompletionTokenDetails.ImageTokens)
 	ao := float64(usage.CompletionTokenDetails.AudioTokens)
 
 	if !isClaudeUsageSemantic {
-		if usedVars["cr"] || usedVars["cache_read_tokens"] {
+		if usedVars["cr"] {
 			p -= cr
 		}
-		if usedVars["cc"] || usedVars["cc1h"] || usedVars["cache_create_tokens"] || usedVars["cache_create_1h_tokens"] {
+		if usedVars["cc"] || usedVars["cc1h"] {
 			p -= ccTotal
 		}
-		if usedVars["img"] || usedVars["image_tokens"] {
+		if usedVars["img"] {
 			p -= img
 		}
-		if usedVars["ai"] || usedVars["audio_input_tokens"] {
+		if usedVars["ai"] {
 			p -= ai
 		}
-		if usedVars["ao"] || usedVars["audio_output_tokens"] {
+		if usedVars["img_o"] {
+			c -= imgO
+		}
+		if usedVars["ao"] {
 			c -= ao
 		}
 	}
@@ -60,6 +64,7 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 		CC:   ccTotal - cc1h,
 		CC1h: cc1h,
 		Img:  img,
+		ImgO: imgO,
 		AI:   ai,
 		AO:   ao,
 	}

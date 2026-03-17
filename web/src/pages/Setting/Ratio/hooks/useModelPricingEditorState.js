@@ -646,8 +646,8 @@ export function useModelPricingEditorState({
       ImageRatio: parseOptionJSON(options.ImageRatio),
       AudioRatio: parseOptionJSON(options.AudioRatio),
       AudioCompletionRatio: parseOptionJSON(options.AudioCompletionRatio),
-      ModelBillingMode: parseOptionJSON(options.ModelBillingMode),
-      ModelBillingExpr: parseOptionJSON(options.ModelBillingExpr),
+      ModelBillingMode: parseOptionJSON(options['billing_setting.billing_mode']),
+      ModelBillingExpr: parseOptionJSON(options['billing_setting.billing_expr']),
     };
 
     const names = new Set([
@@ -1035,19 +1035,19 @@ export function useModelPricingEditorState({
       };
 
       const tieredOutput = {
-        ModelBillingMode: {},
-        ModelBillingExpr: {},
+        'billing_setting.billing_mode': {},
+        'billing_setting.billing_expr': {},
       };
 
       for (const model of models) {
         if (model.billingMode === 'tiered_expr') {
-          tieredOutput.ModelBillingMode[model.name] = 'tiered_expr';
+          tieredOutput['billing_setting.billing_mode'][model.name] = 'tiered_expr';
           const finalBillingExpr = combineBillingExpr(
             model.billingExpr,
             model.requestRuleExpr,
           );
           if (finalBillingExpr) {
-            tieredOutput.ModelBillingExpr[model.name] = finalBillingExpr;
+            tieredOutput['billing_setting.billing_expr'][model.name] = finalBillingExpr;
           }
         }
         if (model.billingMode === 'tiered_expr') {

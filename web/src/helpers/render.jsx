@@ -21,6 +21,11 @@ import i18next from 'i18next';
 import { Modal, Tag, Typography, Avatar } from '@douyinfe/semi-ui';
 import { copy, showSuccess } from './utils';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
+import {
+  BILLING_VARS,
+  BILLING_VAR_KEY_TO_FIELD,
+  BILLING_VAR_REGEX,
+} from '../constants';
 import { visit } from 'unist-util-visit';
 import * as LobeIcons from '@lobehub/icons';
 import {
@@ -2210,22 +2215,22 @@ export function renderLogContent(opts) {
   }
 }
 
-const TIER_VAR_KEYS = ['p', 'c', 'cr', 'cc', 'cc1h', 'img', 'ai', 'ao'];
-const TIER_VAR_TO_FIELD = {
-  p: 'inputPrice', c: 'outputPrice',
-  cr: 'cacheReadPrice', cc: 'cacheCreatePrice', cc1h: 'cacheCreate1hPrice',
-  img: 'imagePrice', ai: 'audioInputPrice', ao: 'audioOutputPrice',
-};
+export function stripExprVersion(exprStr) {
+  if (!exprStr) return { version: 1, body: '' };
+  const m = exprStr.match(/^v(\d+):([\s\S]*)$/);
+  if (m) return { version: Number(m[1]), body: m[2] };
+  return { version: 1, body: exprStr };
+}
 
 function parseTierBody(bodyStr) {
   const coeffs = {};
-  const re = new RegExp(`\\b(${TIER_VAR_KEYS.join('|')})\\s*\\*\\s*([\\d.eE+-]+)`, 'g');
+  const re = new RegExp(BILLING_VAR_REGEX.source, 'g');
   let m;
   while ((m = re.exec(bodyStr)) !== null) {
     if (!(m[1] in coeffs)) coeffs[m[1]] = Number(m[2]);
   }
   const tier = {};
-  for (const [varName, field] of Object.entries(TIER_VAR_TO_FIELD)) {
+  for (const [varName, field] of Object.entries(BILLING_VAR_KEY_TO_FIELD)) {
     tier[field] = coeffs[varName] || 0;
   }
   return tier;
@@ -2234,11 +2239,12 @@ function parseTierBody(bodyStr) {
 export function parseTiersFromExpr(exprStr) {
   if (!exprStr) return [];
   try {
+    const { body } = stripExprVersion(exprStr);
     const condGroup = `((?:(?:p|c)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)(?:\\s*&&\\s*(?:p|c)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`;
     const tierRe = new RegExp(`(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`, 'g');
     const tiers = [];
     let m;
-    while ((m = tierRe.exec(exprStr)) !== null) {
+    while ((m = tierRe.exec(body)) !== null) {
       const condStr = m[1] || '';
       const conditions = [];
       if (condStr) {
@@ -2281,16 +2287,7 @@ export function renderTieredModelPrice(opts) {
   const { symbol, rate } = getCurrencyConfig();
   const gr = groupRatio || 1;
 
-  const priceLines = [
-    ['inputPrice', '输入价格'],
-    ['outputPrice', '补全价格'],
-    ['cacheReadPrice', '缓存读取价格'],
-    ['cacheCreatePrice', '缓存创建价格'],
-    ['cacheCreate1hPrice', '1h缓存创建价格'],
-    ['imagePrice', '图片输入价格'],
-    ['audioInputPrice', '音频输入价格'],
-    ['audioOutputPrice', '音频输出价格'],
-  ];
+  const priceLines = BILLING_VARS.map((v) => [v.field, v.label]);
 
   const lines = [
     buildBillingText('命中档位：{{tier}}', { tier: matchedTier || tier.label }),
@@ -2331,16 +2328,7 @@ export function renderTieredModelPriceSimple(opts) {
     ];
 
     if (tier && isPriceDisplayMode(displayMode)) {
-      const priceSegments = [
-        ['inputPrice', '输入'],
-        ['outputPrice', '补全'],
-        ['cacheReadPrice', '缓存读'],
-        ['cacheCreatePrice', '缓存创建'],
-        ['cacheCreate1hPrice', '1h缓存创建'],
-        ['imagePrice', '图片输入'],
-        ['audioInputPrice', '音频输入'],
-        ['audioOutputPrice', '音频输出'],
-      ];
+      const priceSegments = BILLING_VARS.map((v) => [v.field, v.shortLabel]);
       for (const [field, label] of priceSegments) {
         if (tier[field] > 0) {
           segments.push({

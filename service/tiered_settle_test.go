@@ -2,11 +2,14 @@ package service
 
 import (
 	"math"
+	"math/rand"
+	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/shopspring/decimal"
 )
 
 // Claude Sonnet-style tiered expression: standard vs long-context
@@ -420,20 +423,33 @@ func tieredQuota(exprStr string, usage *dto.Usage, isClaudeSemantic bool, groupR
 }
 
 func ratioQuota(usage *dto.Usage, isClaudeSemantic bool, modelRatio, completionRatio, cacheRatio, imageRatio, groupRatio float64) float64 {
-	baseTokens := float64(usage.PromptTokens)
-	cacheTokens := float64(usage.PromptTokensDetails.CachedTokens)
-	ccTokens := float64(usage.PromptTokensDetails.CachedCreationTokens)
-	imgTokens := float64(usage.PromptTokensDetails.ImageTokens)
+	dPromptTokens := decimal.NewFromInt(int64(usage.PromptTokens))
+	dCacheTokens := decimal.NewFromInt(int64(usage.PromptTokensDetails.CachedTokens))
+	dCcTokens := decimal.NewFromInt(int64(usage.PromptTokensDetails.CachedCreationTokens))
+	dImgTokens := decimal.NewFromInt(int64(usage.PromptTokensDetails.ImageTokens))
+	dCompletionTokens := decimal.NewFromInt(int64(usage.CompletionTokens))
+	dModelRatio := decimal.NewFromFloat(modelRatio)
+	dCompletionRatio := decimal.NewFromFloat(completionRatio)
+	dCacheRatio := decimal.NewFromFloat(cacheRatio)
+	dImageRatio := decimal.NewFromFloat(imageRatio)
+	dGroupRatio := decimal.NewFromFloat(groupRatio)
 
+	baseTokens := dPromptTokens
 	if !isClaudeSemantic {
-		baseTokens -= cacheTokens
-		baseTokens -= ccTokens
-		baseTokens -= imgTokens
+		baseTokens = baseTokens.Sub(dCacheTokens)
+		baseTokens = baseTokens.Sub(dCcTokens)
+		baseTokens = baseTokens.Sub(dImgTokens)
 	}
 
-	promptQuota := baseTokens + cacheTokens*cacheRatio + imgTokens*imageRatio
-	completionQuota := float64(usage.CompletionTokens) * completionRatio
-	return (promptQuota + completionQuota) * modelRatio * groupRatio
+	cachedTokensWithRatio := dCacheTokens.Mul(dCacheRatio)
+	imageTokensWithRatio := dImgTokens.Mul(dImageRatio)
+	promptQuota := baseTokens.Add(cachedTokensWithRatio).Add(imageTokensWithRatio)
+	completionQuota := dCompletionTokens.Mul(dCompletionRatio)
+	ratio := dModelRatio.Mul(dGroupRatio)
+
+	result := promptQuota.Add(completionQuota).Mul(ratio)
+	f, _ := result.Float64()
+	return f
 }
 
 func TestBuildTieredTokenParams_GPT_WithCache(t *testing.T) {
@@ -586,4 +602,138 @@ func TestBuildTieredTokenParams_ParityWithRatio_Image(t *testing.T) {
 	if math.Abs(tq-rq) > 0.01 {
 		t.Fatalf("tiered=%f ratio=%f (mismatch)", tq, rq)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Stress test: 1000 concurrent goroutines, complex tiered expr vs ratio,
+// random token counts, verify correctness and measure performance
+// ---------------------------------------------------------------------------
+
+const complexTieredExpr = `p <= 200000 ? tier("standard", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6 + img * 3 + img_o * 30 + ai * 10 + ao * 40) : tier("long_context", p * 6 + c * 22.5 + cr * 0.6 + cc * 7.5 + cc1h * 12 + img * 6 + img_o * 60 + ai * 20 + ao * 80)`
+
+func randomUsage(rng *rand.Rand) *dto.Usage {
+	cacheRead := int(rng.Float64() * 50000)
+	cacheCreate := int(rng.Float64() * 10000)
+	imgIn := int(rng.Float64() * 5000)
+	audioIn := int(rng.Float64() * 3000)
+	prompt := int(rng.Float64()*300000) + cacheRead + cacheCreate + imgIn + audioIn
+
+	imgOut := int(rng.Float64() * 2000)
+	audioOut := int(rng.Float64() * 1000)
+	completion := int(rng.Float64()*50000) + imgOut + audioOut
+
+	return &dto.Usage{
+		PromptTokens:     prompt,
+		CompletionTokens: completion,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         cacheRead,
+			CachedCreationTokens: cacheCreate,
+			ImageTokens:          imgIn,
+			AudioTokens:          audioIn,
+			TextTokens:           prompt - cacheRead - cacheCreate - imgIn - audioIn,
+		},
+		CompletionTokenDetails: dto.OutputTokenDetails{
+			ImageTokens: imgOut,
+			AudioTokens: audioOut,
+			TextTokens:  completion - imgOut - audioOut,
+		},
+	}
+}
+
+func TestStress_TieredBilling_1000Concurrent(t *testing.T) {
+	usedVars := billingexpr.UsedVars(complexTieredExpr)
+
+	var wg sync.WaitGroup
+	errCh := make(chan string, 1000)
+
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go func(seed int64) {
+			defer wg.Done()
+			rng := rand.New(rand.NewSource(seed))
+
+			for j := 0; j < 100; j++ {
+				usage := randomUsage(rng)
+				groupRatio := 0.5 + rng.Float64()*2.0
+
+				params := BuildTieredTokenParams(usage, false, usedVars)
+				cost, trace, err := billingexpr.RunExpr(complexTieredExpr, params)
+				if err != nil {
+					errCh <- err.Error()
+					return
+				}
+				if cost < 0 {
+					errCh <- "negative cost"
+					return
+				}
+
+				quota := billingexpr.QuotaRound(cost / 1_000_000 * testQuotaPerUnit * groupRatio)
+				if quota < 0 {
+					errCh <- "negative quota"
+					return
+				}
+
+				_ = trace.MatchedTier
+			}
+		}(int64(i))
+	}
+
+	wg.Wait()
+	close(errCh)
+	for e := range errCh {
+		t.Fatal(e)
+	}
+}
+
+func BenchmarkTieredBilling_ComplexExpr(b *testing.B) {
+	rng := rand.New(rand.NewSource(42))
+	usedVars := billingexpr.UsedVars(complexTieredExpr)
+	usages := make([]*dto.Usage, 1000)
+	for i := range usages {
+		usages[i] = randomUsage(rng)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		usage := usages[i%len(usages)]
+		params := BuildTieredTokenParams(usage, false, usedVars)
+		billingexpr.RunExpr(complexTieredExpr, params)
+	}
+}
+
+func BenchmarkRatioBilling_Equivalent(b *testing.B) {
+	rng := rand.New(rand.NewSource(42))
+	usages := make([]*dto.Usage, 1000)
+	for i := range usages {
+		usages[i] = randomUsage(rng)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		usage := usages[i%len(usages)]
+		ratioQuota(usage, false, 1.5, 5.0, 0.1, 1.0, 1.5)
+	}
+}
+
+func BenchmarkTieredBilling_Parallel(b *testing.B) {
+	usedVars := billingexpr.UsedVars(complexTieredExpr)
+
+	b.RunParallel(func(pb *testing.PB) {
+		rng := rand.New(rand.NewSource(rand.Int63()))
+		for pb.Next() {
+			usage := randomUsage(rng)
+			params := BuildTieredTokenParams(usage, false, usedVars)
+			billingexpr.RunExpr(complexTieredExpr, params)
+		}
+	})
+}
+
+func BenchmarkRatioBilling_Parallel(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		rng := rand.New(rand.NewSource(rand.Int63()))
+		for pb.Next() {
+			usage := randomUsage(rng)
+			ratioQuota(usage, false, 1.5, 5.0, 0.1, 1.0, 1.5)
+		}
+	})
 }

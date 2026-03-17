@@ -52,22 +52,15 @@ func runProgram(prog *vm.Program, params TokenParams, request RequestInput) (flo
 	headers := normalizeHeaders(request.Headers)
 
 	env := map[string]interface{}{
-		"p":                      params.P,
-		"c":                      params.C,
-		"cr":                     params.CR,
-		"cc":                     params.CC,
-		"cc1h":                   params.CC1h,
-		"prompt_tokens":          params.P,
-		"completion_tokens":      params.C,
-		"cache_read_tokens":      params.CR,
-		"cache_create_tokens":    params.CC,
-		"cache_create_1h_tokens": params.CC1h,
-		"img":                    params.Img,
-		"ai":                     params.AI,
-		"ao":                     params.AO,
-		"image_tokens":           params.Img,
-		"audio_input_tokens":     params.AI,
-		"audio_output_tokens":    params.AO,
+		"p":    params.P,
+		"c":    params.C,
+		"cr":   params.CR,
+		"cc":   params.CC,
+		"cc1h": params.CC1h,
+		"img":  params.Img,
+		"img_o": params.ImgO,
+		"ai":   params.AI,
+		"ao":   params.AO,
 		"tier": func(name string, value float64) float64 {
 			trace.MatchedTier = name
 			trace.Cost = value

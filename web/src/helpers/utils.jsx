@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { Toast, Pagination } from '@douyinfe/semi-ui';
-import { toastConstants } from '../constants';
+import { toastConstants, BILLING_VARS, BILLING_VAR_REGEX } from '../constants';
 import React from 'react';
 import { toast } from 'react-toastify';
 import {
@@ -901,30 +901,22 @@ export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
   if (!billingExpr) return <span style={{ color: 'var(--semi-color-text-1)' }}>{t('动态计费')}</span>;
 
   const gr = groupRatio || 1;
-  const tierMatches = billingExpr.match(/tier\(/g) || [];
+  const exprBody = billingExpr.replace(/^v\d+:/, '');
+  const tierMatches = exprBody.match(/tier\(/g) || [];
   const tierCount = tierMatches.length;
 
   const varCoeffs = {};
-  const varRe = /\b(p|c|cr|cc|cc1h|img|ai|ao)\s*\*\s*([\d.eE+-]+)/g;
+  const varRe = new RegExp(BILLING_VAR_REGEX.source, 'g');
   let vm;
-  while ((vm = varRe.exec(billingExpr)) !== null) {
+  while ((vm = varRe.exec(exprBody)) !== null) {
     if (!(vm[1] in varCoeffs)) varCoeffs[vm[1]] = Number(vm[2]);
   }
   const hasCoeffs = 'p' in varCoeffs || 'c' in varCoeffs;
 
-  const varLabels = [
-    ['p', '输入价格'],
-    ['c', '补全价格'],
-    ['cr', '缓存读取价格'],
-    ['cc', '缓存创建价格'],
-    ['cc1h', '1h缓存创建价格'],
-    ['img', '图片输入价格'],
-    ['ai', '音频输入价格'],
-    ['ao', '音频输出价格'],
-  ];
+  const varLabels = BILLING_VARS.map((v) => [v.key, v.label]);
 
-  const hasTimeCondition = /\b(?:hour|weekday|month|day)\(/.test(billingExpr);
-  const hasRequestCondition = /\b(?:param|header)\(/.test(billingExpr);
+  const hasTimeCondition = /\b(?:hour|weekday|month|day)\(/.test(exprBody);
+  const hasRequestCondition = /\b(?:param|header)\(/.test(exprBody);
 
   const tags = [];
   if (tierCount > 1) tags.push(`${tierCount}${t('档')}`);

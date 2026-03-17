@@ -145,7 +145,7 @@ func TestMathHelpers(t *testing.T) {
 
 func TestRequestProbeHelpers(t *testing.T) {
 	cost, _, err := billingexpr.RunExprWithRequest(
-		`prompt_tokens * 0.5 + completion_tokens * 1.0 * (param("service_tier") == "fast" ? 2 : 1)`,
+		`p * 0.5 + c * 1.0 * (param("service_tier") == "fast" ? 2 : 1)`,
 		billingexpr.TokenParams{P: 1000, C: 500},
 		billingexpr.RequestInput{
 			Body: []byte(`{"service_tier":"fast"}`),
@@ -976,8 +976,8 @@ func TestAudioTokenVariables(t *testing.T) {
 	}
 }
 
-func TestImageAudioAliases(t *testing.T) {
-	exprStr := `tier("base", prompt_tokens * 1 + image_tokens * 3 + audio_input_tokens * 5 + audio_output_tokens * 10)`
+func TestImageAudioVariables(t *testing.T) {
+	exprStr := `tier("base", p * 1 + img * 3 + ai * 5 + ao * 10)`
 	cost, _, err := billingexpr.RunExpr(exprStr, billingexpr.TokenParams{P: 100, Img: 50, AI: 20, AO: 10})
 	if err != nil {
 		t.Fatal(err)
@@ -997,5 +997,27 @@ func TestImageAudioZero(t *testing.T) {
 	// img, ai, ao default to 0
 	if math.Abs(cost-2000) > 1e-6 {
 		t.Errorf("cost = %f, want 2000", cost)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Benchmarks: compile vs cached execution
+// ---------------------------------------------------------------------------
+
+const benchComplexExpr = `p <= 200000 ? tier("standard", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6 + img * 3 + img_o * 30 + ai * 10 + ao * 40) : tier("long_context", p * 6 + c * 22.5 + cr * 0.6 + cc * 7.5 + cc1h * 12 + img * 6 + img_o * 60 + ai * 20 + ao * 80)`
+
+func BenchmarkExprCompile(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		billingexpr.InvalidateCache()
+		billingexpr.CompileFromCache(benchComplexExpr)
+	}
+}
+
+func BenchmarkExprRunCached(b *testing.B) {
+	billingexpr.CompileFromCache(benchComplexExpr)
+	params := billingexpr.TokenParams{P: 150000, C: 10000, CR: 30000, CC: 5000, Img: 2000, AI: 1000, AO: 500}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		billingexpr.RunExpr(benchComplexExpr, params)
 	}
 }

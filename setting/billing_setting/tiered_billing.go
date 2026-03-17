@@ -2,20 +2,9 @@ package billing_setting
 
 import (
 	"fmt"
-	"sync"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
-)
-
-var (
-	mu sync.RWMutex
-
-	// model -> "ratio" | "tiered_expr"
-	billingModeMap = make(map[string]string)
-
-	// model -> expr string (authored by frontend, stored directly)
-	billingExprMap = make(map[string]string)
+	"github.com/QuantumNous/new-api/setting/config"
 )
 
 const (
@@ -23,84 +12,44 @@ const (
 	BillingModeTieredExpr = "tiered_expr"
 )
 
+// BillingSetting is managed by config.GlobalConfig.Register.
+// DB keys: billing_setting.billing_mode, billing_setting.billing_expr
+type BillingSetting struct {
+	BillingMode map[string]string `json:"billing_mode"`
+	BillingExpr map[string]string `json:"billing_expr"`
+}
+
+var billingSetting = BillingSetting{
+	BillingMode: make(map[string]string),
+	BillingExpr: make(map[string]string),
+}
+
+func init() {
+	config.GlobalConfig.Register("billing_setting", &billingSetting)
+}
+
 // ---------------------------------------------------------------------------
 // Read accessors (hot path, must be fast)
 // ---------------------------------------------------------------------------
 
 func GetBillingMode(model string) string {
-	mu.RLock()
-	defer mu.RUnlock()
-	if mode, ok := billingModeMap[model]; ok {
+	if mode, ok := billingSetting.BillingMode[model]; ok {
 		return mode
 	}
 	return BillingModeRatio
 }
 
 func GetBillingExpr(model string) (string, bool) {
-	mu.RLock()
-	defer mu.RUnlock()
-	expr, ok := billingExprMap[model]
+	expr, ok := billingSetting.BillingExpr[model]
 	return expr, ok
 }
 
-func UpdateBillingModeByJSONString(jsonStr string) error {
-	var m map[string]string
-	if err := common.Unmarshal([]byte(jsonStr), &m); err != nil {
-		return fmt.Errorf("parse ModelBillingMode: %w", err)
-	}
-	for k, v := range m {
-		if v != BillingModeRatio && v != BillingModeTieredExpr {
-			return fmt.Errorf("invalid billing mode %q for model %q", v, k)
-		}
-	}
-	mu.Lock()
-	billingModeMap = m
-	mu.Unlock()
-	return nil
-}
-
-func UpdateBillingExprByJSONString(jsonStr string) error {
-	var m map[string]string
-	if err := common.Unmarshal([]byte(jsonStr), &m); err != nil {
-		return fmt.Errorf("parse ModelBillingExpr: %w", err)
-	}
-	for model, exprStr := range m {
-		if _, err := billingexpr.CompileFromCache(exprStr); err != nil {
-			return fmt.Errorf("model %q: %w", model, err)
-		}
-		if err := smokeTestExpr(exprStr); err != nil {
-			return fmt.Errorf("model %q smoke test: %w", model, err)
-		}
-	}
-	mu.Lock()
-	billingExprMap = m
-	mu.Unlock()
-	billingexpr.InvalidateCache()
-	return nil
-}
-
 // ---------------------------------------------------------------------------
-// JSON serializers (for OptionMap / API response)
+// Smoke test (called externally for validation before save)
 // ---------------------------------------------------------------------------
 
-func BillingMode2JSONString() string {
-	mu.RLock()
-	defer mu.RUnlock()
-	b, err := common.Marshal(billingModeMap)
-	if err != nil {
-		return "{}"
-	}
-	return string(b)
-}
-
-func BillingExpr2JSONString() string {
-	mu.RLock()
-	defer mu.RUnlock()
-	b, err := common.Marshal(billingExprMap)
-	if err != nil {
-		return "{}"
-	}
-	return string(b)
+func SmokeTestExpr(exprStr string) error {
+	return smokeTestExpr(exprStr)
 }
 
 func smokeTestExpr(exprStr string) error {

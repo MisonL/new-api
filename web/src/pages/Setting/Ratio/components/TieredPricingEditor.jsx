@@ -33,6 +33,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { IconDelete, IconPlus } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../../helpers/render';
+import { BILLING_EXTRA_VARS, BILLING_CACHE_VAR_MAP } from '../../../../constants';
 import {
   createEmptyCondition,
   createEmptyTimeCondition,
@@ -96,15 +97,7 @@ function buildConditionStr(conditions) {
     .join(' && ');
 }
 
-// CACHE_VAR_MAP maps tier data fields to Expr variable names (cache + image + audio)
-const CACHE_VAR_MAP = [
-  { field: 'cache_read_unit_cost', exprVar: 'cr' },
-  { field: 'cache_create_unit_cost', exprVar: 'cc' },
-  { field: 'cache_create_1h_unit_cost', exprVar: 'cc1h' },
-  { field: 'image_unit_cost', exprVar: 'img' },
-  { field: 'audio_input_unit_cost', exprVar: 'ai' },
-  { field: 'audio_output_unit_cost', exprVar: 'ao' },
-];
+const CACHE_VAR_MAP = BILLING_CACHE_VAR_MAP;
 
 function getTierCacheMode(tier) {
   if (tier?.cache_mode === CACHE_MODE_TIMED) {
@@ -197,6 +190,8 @@ function generateExprFromVisualConfig(config) {
 function tryParseVisualConfig(exprStr) {
   if (!exprStr) return null;
   try {
+    const versionMatch = exprStr.match(/^v\d+:([\s\S]*)$/);
+    if (versionMatch) exprStr = versionMatch[1];
     const cacheVarNames = CACHE_VAR_MAP.map((cv) => cv.exprVar);
     const optCacheStr = cacheVarNames
       .map((v) => `(?:\\s*\\+\\s*${v}\\s*\\*\\s*([\\d.eE+-]+))?`)
@@ -385,7 +380,8 @@ const CACHE_FIELDS_GENERIC = [
 ];
 
 function ExtendedPriceBlock({ tier, index, onUpdate, t }) {
-  const hasAny = [...CACHE_FIELDS_TIMED, 'image_unit_cost', 'audio_input_unit_cost', 'audio_output_unit_cost'].some(
+  const mediaFields = BILLING_EXTRA_VARS.filter((v) => v.group === 'media');
+  const hasAny = [...CACHE_FIELDS_TIMED, ...mediaFields.map((v) => v.tierField)].some(
     (f) => Number(tier[typeof f === 'string' ? f : f.field]) > 0,
   );
   const [expanded, setExpanded] = useState(hasAny);
@@ -464,15 +460,11 @@ function ExtendedPriceBlock({ tier, index, onUpdate, t }) {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: '1fr 1fr 1fr',
+              gridTemplateColumns: '1fr 1fr',
               gap: 8,
             }}
           >
-            {[
-              { field: 'image_unit_cost', labelKey: '图片输入价格' },
-              { field: 'audio_input_unit_cost', labelKey: '音频输入价格' },
-              { field: 'audio_output_unit_cost', labelKey: '音频补全价格' },
-            ].map((cf) => (
+            {mediaFields.map((v) => ({ field: v.tierField, labelKey: v.label })).map((cf) => (
               <div key={cf.field}>
                 <Text
                   size='small'
@@ -779,6 +771,8 @@ const PRESET_GROUPS = [
     group: '多模态',
     presets: [
       { key: 'gpt-image-1-mini', label: 'GPT-Image-1-Mini', expr: 'tier("base", p * 2 + c * 8 + img * 2.5)' },
+      { key: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', expr: 'tier("base", p * 0.3 + c * 2.5 + cr * 0.03 + ai * 1.0)' },
+      { key: 'gemini-3-pro-image', label: 'Gemini 3 Pro Image', expr: 'tier("base", p * 2 + c * 12 + img_o * 120)' },
       { key: 'qwen3-omni-flash', label: 'Qwen3-Omni-Flash', expr: 'tier("base", p * 0.43 + c * 3.06 + img * 0.78 + ai * 3.81 + ao * 15.11)' },
     ],
   },
@@ -913,45 +907,22 @@ function RawExprEditor({ exprString, onChange, t }) {
 // Cache token inputs for estimator — auto-shown when expression uses cache vars
 // ---------------------------------------------------------------------------
 
-const EXTRA_ESTIMATOR_FIELDS = [
-  { var: 'cr', stateKey: 'cacheReadTokens', labelKey: '缓存读取 Token (cr)' },
-  { var: 'cc', stateKey: 'cacheCreateTokens', labelKey: '缓存创建 Token (cc)' },
-  { var: 'cc1h', stateKey: 'cacheCreate1hTokens', labelKey: '缓存创建-1小时 (cc1h)' },
-  { var: 'img', stateKey: 'imageTokens', labelKey: '图片输入 Token (img)' },
-  { var: 'ai', stateKey: 'audioInputTokens', labelKey: '音频输入 Token (ai)' },
-  { var: 'ao', stateKey: 'audioOutputTokens', labelKey: '音频补全 Token (ao)' },
-];
+const EXTRA_ESTIMATOR_FIELDS = BILLING_EXTRA_VARS.map((v) => ({
+  var: v.key,
+  stateKey: v.field.replace('Price', 'Tokens'),
+  labelKey: `${v.shortLabel} Token (${v.key})`,
+}));
 
 function CacheTokenEstimatorInputs({
   effectiveExpr,
-  cacheReadTokens, setCacheReadTokens,
-  cacheCreateTokens, setCacheCreateTokens,
-  cacheCreate1hTokens, setCacheCreate1hTokens,
-  imageTokens, setImageTokens,
-  audioInputTokens, setAudioInputTokens,
-  audioOutputTokens, setAudioOutputTokens,
+  extraTokenValues,
+  extraTokenSetters,
   t,
 }) {
-  const setters = {
-    cacheReadTokens: setCacheReadTokens,
-    cacheCreateTokens: setCacheCreateTokens,
-    cacheCreate1hTokens: setCacheCreate1hTokens,
-    imageTokens: setImageTokens,
-    audioInputTokens: setAudioInputTokens,
-    audioOutputTokens: setAudioOutputTokens,
-  };
-  const values = {
-    cacheReadTokens,
-    cacheCreateTokens,
-    cacheCreate1hTokens,
-    imageTokens,
-    audioInputTokens,
-    audioOutputTokens,
-  };
-
   const usesExtra = useMemo(() => {
     if (!effectiveExpr) return false;
-    return /\b(cr|cc1h|cc|img|ai|ao)\b/.test(effectiveExpr);
+    const varNames = EXTRA_ESTIMATOR_FIELDS.map((f) => f.var.replace('_', '_')).join('|');
+    return new RegExp(`\\b(${varNames})\\b`).test(effectiveExpr);
   }, [effectiveExpr]);
 
   if (!usesExtra) return null;
@@ -971,9 +942,9 @@ function CacheTokenEstimatorInputs({
             {t(cf.labelKey)}
           </Text>
           <InputNumber
-            value={values[cf.stateKey]}
+            value={extraTokenValues[cf.stateKey]}
             min={0}
-            onChange={(val) => setters[cf.stateKey](val ?? 0)}
+            onChange={(val) => extraTokenSetters[cf.stateKey](val ?? 0)}
             style={{ width: '100%' }}
           />
         </div>
@@ -986,37 +957,17 @@ function CacheTokenEstimatorInputs({
 // Cost estimator (works with any Expr string)
 // ---------------------------------------------------------------------------
 
-function evalExprLocally(exprStr, p, c, cr, cc, cc1h, img, ai, ao) {
+function evalExprLocally(exprStr, p, c, extraTokenValues) {
   try {
     let matchedTier = '';
     const tierFn = (name, value) => {
       matchedTier = name;
       return value;
     };
-    const env = {
-      p,
-      c,
-      cr: cr || 0,
-      cc: cc || 0,
-      cc1h: cc1h || 0,
-      img: img || 0,
-      ai: ai || 0,
-      ao: ao || 0,
-      prompt_tokens: p,
-      completion_tokens: c,
-      cache_read_tokens: cr || 0,
-      cache_create_tokens: cc || 0,
-      cache_create_1h_tokens: cc1h || 0,
-      image_tokens: img || 0,
-      audio_input_tokens: ai || 0,
-      audio_output_tokens: ao || 0,
-      tier: tierFn,
-      max: Math.max,
-      min: Math.min,
-      abs: Math.abs,
-      ceil: Math.ceil,
-      floor: Math.floor,
-    };
+    const env = { p, c, tier: tierFn, max: Math.max, min: Math.min, abs: Math.abs, ceil: Math.ceil, floor: Math.floor };
+    for (const field of EXTRA_ESTIMATOR_FIELDS) {
+      env[field.var] = extraTokenValues[field.stateKey] || 0;
+    }
     const fn = new Function(
       ...Object.keys(env),
       `"use strict"; return (${exprStr});`,
@@ -1281,6 +1232,7 @@ export default function TieredPricingEditor({ model, onExprChange, requestRuleEx
   const [cacheCreateTokens, setCacheCreateTokens] = useState(0);
   const [cacheCreate1hTokens, setCacheCreate1hTokens] = useState(0);
   const [imageTokens, setImageTokens] = useState(0);
+  const [imageOutputTokens, setImageOutputTokens] = useState(0);
   const [audioInputTokens, setAudioInputTokens] = useState(0);
   const [audioOutputTokens, setAudioOutputTokens] = useState(0);
 
@@ -1389,15 +1341,27 @@ export default function TieredPricingEditor({ model, onExprChange, requestRuleEx
     [onRequestRuleExprChange],
   );
 
-  const evalResult = useMemo(
-    () => evalExprLocally(
-      effectiveExpr, promptTokens, completionTokens,
-      cacheReadTokens, cacheCreateTokens, cacheCreate1hTokens,
-      imageTokens, audioInputTokens, audioOutputTokens,
-    ),
+  const extraTokenValues = {
+    cacheReadTokens, cacheCreateTokens, cacheCreate1hTokens,
+    imageTokens, imageOutputTokens, audioInputTokens, audioOutputTokens,
+  };
+  const extraTokenSetters = {
+    cacheReadTokens: setCacheReadTokens, cacheCreateTokens: setCacheCreateTokens,
+    cacheCreate1hTokens: setCacheCreate1hTokens, imageTokens: setImageTokens,
+    imageOutputTokens: setImageOutputTokens, audioInputTokens: setAudioInputTokens,
+    audioOutputTokens: setAudioOutputTokens,
+  };
+
+  const evalResult = useMemo(() => {
+      const result = evalExprLocally(effectiveExpr, promptTokens, completionTokens, extraTokenValues);
+      if (!result.error) {
+        result.cost = result.cost / 1000000 * (parseFloat(localStorage.getItem('quota_per_unit')) || 500000);
+      }
+      return result;
+    },
     [effectiveExpr, promptTokens, completionTokens,
       cacheReadTokens, cacheCreateTokens, cacheCreate1hTokens,
-      imageTokens, audioInputTokens, audioOutputTokens],
+      imageTokens, imageOutputTokens, audioInputTokens, audioOutputTokens],
   );
 
   return (
@@ -1530,18 +1494,8 @@ export default function TieredPricingEditor({ model, onExprChange, requestRuleEx
         {/* Cache token inputs — shown when expression uses cache variables */}
         <CacheTokenEstimatorInputs
           effectiveExpr={effectiveExpr}
-          cacheReadTokens={cacheReadTokens}
-          setCacheReadTokens={setCacheReadTokens}
-          cacheCreateTokens={cacheCreateTokens}
-          setCacheCreateTokens={setCacheCreateTokens}
-          cacheCreate1hTokens={cacheCreate1hTokens}
-          setCacheCreate1hTokens={setCacheCreate1hTokens}
-          imageTokens={imageTokens}
-          setImageTokens={setImageTokens}
-          audioInputTokens={audioInputTokens}
-          setAudioInputTokens={setAudioInputTokens}
-          audioOutputTokens={audioOutputTokens}
-          setAudioOutputTokens={setAudioOutputTokens}
+          extraTokenValues={extraTokenValues}
+          extraTokenSetters={extraTokenSetters}
           t={t}
         />
         <div

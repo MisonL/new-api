@@ -21,6 +21,7 @@ import React from 'react';
 import { Card, Avatar, Tag, Table, Typography } from '@douyinfe/semi-ui';
 import { IconPriceTag } from '@douyinfe/semi-icons';
 import { parseTiersFromExpr } from '../../../../../helpers';
+import { BILLING_VARS } from '../../../../../constants';
 import {
   splitBillingExprAndRequestRules,
   tryParseRequestRuleExpr,
@@ -113,16 +114,7 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
     );
   }
 
-  const priceFields = [
-    ['inputPrice', '输入价格'],
-    ['outputPrice', '补全价格'],
-    ['cacheReadPrice', '缓存读取'],
-    ['cacheCreatePrice', '缓存创建'],
-    ['cacheCreate1hPrice', '缓存创建-1h'],
-    ['imagePrice', '图片输入'],
-    ['audioInputPrice', '音频输入'],
-    ['audioOutputPrice', '音频输出'],
-  ];
+  const priceFields = BILLING_VARS.map((v) => [v.field, v.shortLabel]);
 
   const tierColumns = [
     {

@@ -3,6 +3,7 @@ package billingexpr
 import (
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 
 	"github.com/expr-lang/expr"
@@ -12,9 +13,23 @@ import (
 
 const maxCacheSize = 256
 
+// DefaultExprVersion is used when an expression string has no version prefix.
+const DefaultExprVersion = 1
+
+// ParseExprVersion extracts the version tag and body from an expression string.
+// Format: "v1:tier(...)" → version=1, body="tier(...)".
+// No prefix defaults to DefaultExprVersion.
+func ParseExprVersion(exprStr string) (version int, body string) {
+	if strings.HasPrefix(exprStr, "v1:") {
+		return 1, exprStr[3:]
+	}
+	return DefaultExprVersion, exprStr
+}
+
 type cachedEntry struct {
 	prog     *vm.Program
 	usedVars map[string]bool
+	version  int
 }
 
 var (
@@ -22,27 +37,17 @@ var (
 	cache   = make(map[string]*cachedEntry, 64)
 )
 
-// compileEnvPrototype is the type-checking prototype used at compile time.
-// It declares the shape of the environment that RunExpr will provide.
-// The tier() function is a no-op placeholder here; the real one with
-// side-channel tracing is injected at runtime.
-var compileEnvPrototype = map[string]interface{}{
-	"p":                      float64(0),
-	"c":                      float64(0),
-	"cr":                     float64(0),
-	"cc":                     float64(0),
-	"cc1h":                   float64(0),
-	"prompt_tokens":          float64(0),
-	"completion_tokens":      float64(0),
-	"cache_read_tokens":      float64(0),
-	"cache_create_tokens":    float64(0),
-	"cache_create_1h_tokens": float64(0),
-	"img":                    float64(0),
-	"ai":                     float64(0),
-	"ao":                     float64(0),
-	"image_tokens":           float64(0),
-	"audio_input_tokens":     float64(0),
-	"audio_output_tokens":    float64(0),
+// compileEnvPrototypeV1 is the v1 type-checking prototype used at compile time.
+var compileEnvPrototypeV1 = map[string]interface{}{
+	"p":    float64(0),
+	"c":    float64(0),
+	"cr":   float64(0),
+	"cc":   float64(0),
+	"cc1h": float64(0),
+	"img":  float64(0),
+	"img_o": float64(0),
+	"ai":   float64(0),
+	"ao":   float64(0),
 	"tier":                   func(string, float64) float64 { return 0 },
 	"header":                 func(string) string { return "" },
 	"param":                  func(string) interface{} { return nil },
@@ -57,6 +62,13 @@ var compileEnvPrototype = map[string]interface{}{
 	"abs":                    math.Abs,
 	"ceil":                   math.Ceil,
 	"floor":                  math.Floor,
+}
+
+func getCompileEnv(version int) map[string]interface{} {
+	switch version {
+	default:
+		return compileEnvPrototypeV1
+	}
 }
 
 // CompileFromCache compiles an expression string, using a cached program when
@@ -79,7 +91,8 @@ func compileFromCacheByHash(exprStr, hash string) (*vm.Program, error) {
 	}
 	cacheMu.RUnlock()
 
-	prog, err := expr.Compile(exprStr, expr.Env(compileEnvPrototype), expr.AsFloat64())
+	version, body := ParseExprVersion(exprStr)
+	prog, err := expr.Compile(body, expr.Env(getCompileEnv(version)), expr.AsFloat64())
 	if err != nil {
 		return nil, fmt.Errorf("expr compile error: %w", err)
 	}
@@ -90,10 +103,27 @@ func compileFromCacheByHash(exprStr, hash string) (*vm.Program, error) {
 	if len(cache) >= maxCacheSize {
 		cache = make(map[string]*cachedEntry, 64)
 	}
-	cache[hash] = &cachedEntry{prog: prog, usedVars: vars}
+	cache[hash] = &cachedEntry{prog: prog, usedVars: vars, version: version}
 	cacheMu.Unlock()
 
 	return prog, nil
+}
+
+// ExprVersion returns the version of a cached expression. Returns DefaultExprVersion
+// if the expression hasn't been compiled yet or is empty.
+func ExprVersion(exprStr string) int {
+	if exprStr == "" {
+		return DefaultExprVersion
+	}
+	hash := ExprHashString(exprStr)
+	cacheMu.RLock()
+	if entry, ok := cache[hash]; ok {
+		cacheMu.RUnlock()
+		return entry.version
+	}
+	cacheMu.RUnlock()
+	v, _ := ParseExprVersion(exprStr)
+	return v
 }
 
 func extractUsedVars(prog *vm.Program) map[string]bool {
