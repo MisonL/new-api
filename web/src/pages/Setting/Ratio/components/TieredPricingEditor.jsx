@@ -765,6 +765,7 @@ const PRESET_GROUPS = [
       { key: 'claude-sonnet', label: 'Claude Sonnet 4.5', expr: 'p <= 200000 ? tier("standard", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6) : tier("long_context", p * 6 + c * 22.5 + cr * 0.6 + cc * 7.5 + cc1h * 12)' },
       { key: 'qwen3-max', label: 'Qwen3 Max', expr: 'p <= 32000 ? tier("short", p * 1.2 + c * 6 + cr * 0.24 + cc * 1.5) : p <= 128000 ? tier("mid", p * 2.4 + c * 12 + cr * 0.48 + cc * 3) : tier("long", p * 3 + c * 15 + cr * 0.6 + cc * 3.75)' },
       { key: 'glm-4.5-air', label: 'GLM-4.5 Air', expr: 'p < 32000 && c < 200 ? tier("short_output", p * 0.8 + c * 2 + cr * 0.16) : p < 32000 && c >= 200 ? tier("long_output", p * 0.8 + c * 6 + cr * 0.16) : tier("mid_context", p * 1.2 + c * 8 + cr * 0.24)' },
+      { key: 'doubao-seed-1.8', label: 'Doubao Seed 1.8', expr: 'p <= 32000 && c <= 200 ? tier("discount", p * 0.8 + c * 2 + cr * 0.16 + cc * 0.17) : p <= 32000 ? tier("short", p * 0.8 + c * 8 + cr * 0.16 + cc * 0.17) : p <= 128000 ? tier("mid", p * 1.2 + c * 16 + cr * 0.16 + cc * 0.17) : tier("long", p * 2.4 + c * 24 + cr * 0.16 + cc * 0.17)' },
     ],
   },
   {
