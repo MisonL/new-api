@@ -208,9 +208,18 @@ export default function GeneralSettings(props) {
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.Slot label={t('站点额度展示类型及汇率')}>
+                <div className='semi-form-field'>
+                  <label
+                    htmlFor='quota-display-rate'
+                    className='semi-form-field-label semi-form-field-label-left'
+                  >
+                    <div className='semi-form-field-label-text'>
+                      {t('站点额度展示类型及汇率')}
+                    </div>
+                  </label>
                   <InputGroup style={{ width: '100%' }}>
                     <Input
+                      id='quota-display-rate'
                       prefix={'1 USD = '}
                       style={{ width: '50%' }}
                       value={combinedRate}
@@ -235,7 +244,7 @@ export default function GeneralSettings(props) {
                       </Select.Option>
                     </Select>
                   </InputGroup>
-                </Form.Slot>
+                </div>
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Input

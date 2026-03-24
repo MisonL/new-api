@@ -2216,21 +2216,33 @@ const EditChannelModal = (props) => {
                       </Banner>
                     )}
 
-                    <Form.Select
-                      field='type'
-                      label={t('类型')}
-                      placeholder={t('请选择渠道类型')}
-                      rules={[{ required: true, message: t('请选择渠道类型') }]}
-                      optionList={channelOptionList}
-                      style={{ width: '100%' }}
-                      filter={selectFilter}
-                      autoClearSearchValue={false}
-                      searchPosition='dropdown'
-                      onSearch={(value) => setChannelSearchValue(value)}
-                      renderOptionItem={renderChannelOption}
-                      onChange={(value) => handleInputChange('type', value)}
-                      disabled={isIonetLocked}
-                    />
+                    <div className='semi-form-field'>
+                      <div
+                        id='type-label'
+                        className='semi-form-field-label semi-form-field-label-left semi-form-field-label-required'
+                      >
+                        <div className='semi-form-field-label-text'>
+                          {t('类型')}
+                        </div>
+                      </div>
+                      <Form.Select
+                        field='type'
+                        noLabel
+                        aria-labelledby='type-label'
+                        aria-label={t('类型')}
+                        placeholder={t('请选择渠道类型')}
+                        rules={[{ required: true, message: t('请选择渠道类型') }]}
+                        optionList={channelOptionList}
+                        style={{ width: '100%' }}
+                        filter={selectFilter}
+                        autoClearSearchValue={false}
+                        searchPosition='dropdown'
+                        onSearch={(value) => setChannelSearchValue(value)}
+                        renderOptionItem={renderChannelOption}
+                        onChange={(value) => handleInputChange('type', value)}
+                        disabled={isIonetLocked}
+                      />
+                    </div>
 
                     {inputs.type === 57 && (
                       <Banner
@@ -3099,159 +3111,171 @@ const EditChannelModal = (props) => {
                       </div>
                     </div>
 
-                    <Form.Select
-                      field='models'
-                      label={t('模型')}
-                      placeholder={t('请选择该渠道所支持的模型')}
-                      rules={[{ required: true, message: t('请选择模型') }]}
-                      multiple
-                      filter={selectFilter}
-                      allowCreate
-                      autoClearSearchValue={false}
-                      searchPosition='dropdown'
-                      optionList={modelOptions}
-                      onSearch={(value) => setModelSearchValue(value)}
-                      innerBottomSlot={
-                        modelSearchHintText ? (
-                          <Text className='px-3 py-2 block text-xs !text-semi-color-text-2'>
-                            {modelSearchHintText}
-                          </Text>
-                        ) : null
-                      }
-                      style={{ width: '100%' }}
-                      onChange={(value) => handleInputChange('models', value)}
-                      renderSelectedItem={(optionNode) => {
-                        const modelName = String(optionNode?.value ?? '');
-                        return {
-                          isRenderInTag: true,
-                          content: (
-                            <span
-                              className='cursor-pointer select-none'
-                              role='button'
-                              tabIndex={0}
-                              title={t('点击复制模型名称')}
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                const ok = await copy(modelName);
-                                if (ok) {
-                                  showSuccess(
-                                    t('已复制：{{name}}', { name: modelName }),
-                                  );
-                                } else {
+                    <div className='semi-form-field'>
+                      <div
+                        id='models-label'
+                        className='semi-form-field-label semi-form-field-label-left semi-form-field-label-required'
+                      >
+                        <div className='semi-form-field-label-text'>
+                          {t('模型')}
+                        </div>
+                      </div>
+                      <Form.Select
+                        field='models'
+                        noLabel
+                        aria-labelledby='models-label'
+                        aria-label={t('模型')}
+                        placeholder={t('请选择该渠道所支持的模型')}
+                        rules={[{ required: true, message: t('请选择模型') }]}
+                        multiple
+                        filter={selectFilter}
+                        allowCreate
+                        autoClearSearchValue={false}
+                        searchPosition='dropdown'
+                        optionList={modelOptions}
+                        onSearch={(value) => setModelSearchValue(value)}
+                        innerBottomSlot={
+                          modelSearchHintText ? (
+                            <Text className='px-3 py-2 block text-xs !text-semi-color-text-2'>
+                              {modelSearchHintText}
+                            </Text>
+                          ) : null
+                        }
+                        style={{ width: '100%' }}
+                        onChange={(value) => handleInputChange('models', value)}
+                        renderSelectedItem={(optionNode) => {
+                          const modelName = String(optionNode?.value ?? '');
+                          return {
+                            isRenderInTag: true,
+                            content: (
+                              <span
+                                className='cursor-pointer select-none'
+                                role='button'
+                                tabIndex={0}
+                                title={t('点击复制模型名称')}
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  const ok = await copy(modelName);
+                                  if (ok) {
+                                    showSuccess(
+                                      t('已复制：{{name}}', { name: modelName }),
+                                    );
+                                  } else {
+                                    showError(t('复制失败'));
+                                  }
+                                }}
+                              >
+                                {optionNode.label || modelName}
+                              </span>
+                            ),
+                          };
+                        }}
+                        extraText={
+                          <Space wrap>
+                            <Button
+                              size='small'
+                              type='primary'
+                              onClick={() =>
+                                handleInputChange('models', basicModels)
+                              }
+                            >
+                              {t('填入相关模型')}
+                            </Button>
+                            <Button
+                              size='small'
+                              type='secondary'
+                              onClick={() =>
+                                handleInputChange('models', fullModels)
+                              }
+                            >
+                              {t('填入所有模型')}
+                            </Button>
+                            {MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type) && (
+                              <Button
+                                size='small'
+                                type='tertiary'
+                                onClick={() => fetchUpstreamModelList('models')}
+                              >
+                                {t('获取模型列表')}
+                              </Button>
+                            )}
+                            {inputs.type === 4 && isEdit && (
+                              <Button
+                                size='small'
+                                type='primary'
+                                theme='light'
+                                onClick={() => setOllamaModalVisible(true)}
+                              >
+                                {t('Ollama 模型管理')}
+                              </Button>
+                            )}
+                            <Button
+                              size='small'
+                              type='warning'
+                              onClick={() => handleInputChange('models', [])}
+                            >
+                              {t('清除所有模型')}
+                            </Button>
+                            <Button
+                              size='small'
+                              type='tertiary'
+                              onClick={() => {
+                                if (inputs.models.length === 0) {
+                                  showInfo(t('没有模型可以复制'));
+                                  return;
+                                }
+                                try {
+                                  copy(inputs.models.join(','));
+                                  showSuccess(t('模型列表已复制到剪贴板'));
+                                } catch (error) {
                                   showError(t('复制失败'));
                                 }
                               }}
                             >
-                              {optionNode.label || modelName}
-                            </span>
-                          ),
-                        };
-                      }}
-                      extraText={
-                        <Space wrap>
-                          <Button
-                            size='small'
-                            type='primary'
-                            onClick={() =>
-                              handleInputChange('models', basicModels)
-                            }
-                          >
-                            {t('填入相关模型')}
-                          </Button>
-                          <Button
-                            size='small'
-                            type='secondary'
-                            onClick={() =>
-                              handleInputChange('models', fullModels)
-                            }
-                          >
-                            {t('填入所有模型')}
-                          </Button>
-                          {MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type) && (
-                            <Button
-                              size='small'
-                              type='tertiary'
-                              onClick={() => fetchUpstreamModelList('models')}
-                            >
-                              {t('获取模型列表')}
+                              {t('复制所有模型')}
                             </Button>
-                          )}
-                          {inputs.type === 4 && isEdit && (
-                            <Button
-                              size='small'
-                              type='primary'
-                              theme='light'
-                              onClick={() => setOllamaModalVisible(true)}
-                            >
-                              {t('Ollama 模型管理')}
-                            </Button>
-                          )}
-                          <Button
-                            size='small'
-                            type='warning'
-                            onClick={() => handleInputChange('models', [])}
-                          >
-                            {t('清除所有模型')}
-                          </Button>
-                          <Button
-                            size='small'
-                            type='tertiary'
-                            onClick={() => {
-                              if (inputs.models.length === 0) {
-                                showInfo(t('没有模型可以复制'));
-                                return;
-                              }
-                              try {
-                                copy(inputs.models.join(','));
-                                showSuccess(t('模型列表已复制到剪贴板'));
-                              } catch (error) {
-                                showError(t('复制失败'));
-                              }
-                            }}
-                          >
-                            {t('复制所有模型')}
-                          </Button>
-                          {modelGroups &&
-                            modelGroups.length > 0 &&
-                            modelGroups.map((group) => (
-                              <Button
-                                key={group.id}
-                                size='small'
-                                type='primary'
-                                onClick={() => {
-                                  let items = [];
-                                  try {
-                                    if (Array.isArray(group.items)) {
-                                      items = group.items;
-                                    } else if (
-                                      typeof group.items === 'string'
-                                    ) {
-                                      const parsed = JSON.parse(
-                                        group.items || '[]',
-                                      );
-                                      if (Array.isArray(parsed)) items = parsed;
-                                    }
-                                  } catch {}
-                                  const current =
-                                    formApiRef.current?.getValue('models') ||
-                                    inputs.models ||
-                                    [];
-                                  const merged = Array.from(
-                                    new Set(
-                                      [...current, ...items]
-                                        .map((m) => (m || '').trim())
-                                        .filter(Boolean),
-                                    ),
-                                  );
-                                  handleInputChange('models', merged);
-                                }}
-                              >
-                                {group.name}
-                              </Button>
-                            ))}
-                        </Space>
-                      }
-                    />
+                            {modelGroups &&
+                              modelGroups.length > 0 &&
+                              modelGroups.map((group) => (
+                                <Button
+                                  key={group.id}
+                                  size='small'
+                                  type='primary'
+                                  onClick={() => {
+                                    let items = [];
+                                    try {
+                                      if (Array.isArray(group.items)) {
+                                        items = group.items;
+                                      } else if (
+                                        typeof group.items === 'string'
+                                      ) {
+                                        const parsed = JSON.parse(
+                                          group.items || '[]',
+                                        );
+                                        if (Array.isArray(parsed)) items = parsed;
+                                      }
+                                    } catch {}
+                                    const current =
+                                      formApiRef.current?.getValue('models') ||
+                                      inputs.models ||
+                                      [];
+                                    const merged = Array.from(
+                                      new Set(
+                                        [...current, ...items]
+                                          .map((m) => (m || '').trim())
+                                          .filter(Boolean),
+                                      ),
+                                    );
+                                    handleInputChange('models', merged);
+                                  }}
+                                >
+                                  {group.name}
+                                </Button>
+                              ))}
+                          </Space>
+                        }
+                      />
+                    </div>
 
                     <Form.Input
                       field='custom_model'
@@ -3388,19 +3412,31 @@ const EditChannelModal = (props) => {
                       </div>
                     </div>
 
-                    <Form.Select
-                      field='groups'
-                      label={t('分组')}
-                      placeholder={t('请选择可以使用该渠道的分组')}
-                      multiple
-                      allowAdditions
-                      additionLabel={t(
-                        '请在系统设置页面编辑分组倍率以添加新的分组：',
-                      )}
-                      optionList={groupOptions}
-                      style={{ width: '100%' }}
-                      onChange={(value) => handleInputChange('groups', value)}
-                    />
+                    <div className='semi-form-field'>
+                      <div
+                        id='groups-label'
+                        className='semi-form-field-label semi-form-field-label-left'
+                      >
+                        <div className='semi-form-field-label-text'>
+                          {t('分组')}
+                        </div>
+                      </div>
+                      <Form.Select
+                        field='groups'
+                        noLabel
+                        aria-labelledby='groups-label'
+                        aria-label={t('分组')}
+                        placeholder={t('请选择可以使用该渠道的分组')}
+                        multiple
+                        allowAdditions
+                        additionLabel={t(
+                          '请在系统设置页面编辑分组倍率以添加新的分组：',
+                        )}
+                        optionList={groupOptions}
+                        style={{ width: '100%' }}
+                        onChange={(value) => handleInputChange('groups', value)}
+                      />
+                    </div>
 
                     <Form.Input
                       field='tag'
