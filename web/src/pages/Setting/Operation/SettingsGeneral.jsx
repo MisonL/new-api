@@ -218,6 +218,7 @@ export default function GeneralSettings(props) {
                       disabled={
                         inputs['general_setting.quota_display_type'] === 'USD'
                       }
+                      name='pages-setting-operation-settingsgeneral-input-1'
                     />
                     <Select
                       style={{ width: '50%' }}

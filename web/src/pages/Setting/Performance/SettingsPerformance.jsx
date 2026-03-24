@@ -441,6 +441,7 @@ export default function SettingsPerformance(props) {
                   <RadioGroup
                     value={logCleanupMode}
                     onChange={(e) => setLogCleanupMode(e.target.value)}
+                    name='pages-setting-performance-settingsperformance-radiogroup-1'
                   >
                     <Radio value='by_count'>{t('保留最近N个文件')}</Radio>
                     <Radio value='by_days'>{t('保留最近N天')}</Radio>
@@ -460,6 +461,7 @@ export default function SettingsPerformance(props) {
                     max={logCleanupMode === 'by_count' ? 1000 : 3650}
                     onChange={(value) => setLogCleanupValue(value)}
                     style={{ width: '100%' }}
+                    name='pages-setting-performance-settingsperformance-inputnumber-1'
                   />
                 </div>
               </Col>

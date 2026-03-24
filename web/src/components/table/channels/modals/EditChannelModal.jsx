@@ -1966,6 +1966,7 @@ const EditChannelModal = (props) => {
               }
             }
           }}
+          name='components-table-channels-modals-editchannelmodal-checkbox-1'
         >
           {t('批量创建')}
         </Checkbox>
@@ -1990,6 +1991,7 @@ const EditChannelModal = (props) => {
                 return nextValue;
               });
             }}
+            name='components-table-channels-modals-editchannelmodal-checkbox-2'
           >
             {t('密钥聚合模式')}
           </Checkbox>

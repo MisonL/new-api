@@ -159,6 +159,7 @@ const renderTokenKey = (
             />
           </div>
         }
+        name='components-table-tokens-tokenscolumndefs-input-1'
       />
     </div>
   );
