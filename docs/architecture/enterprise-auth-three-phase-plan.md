@@ -180,7 +180,10 @@
 - `public_key`
 - `jwt_source`
 - `jwt_header`
-- `external_id_field`
+- `client_id`
+- `authorization_endpoint`
+- `scopes`
+- `external_id_field`（实现层统一落到 `user_id_field`）
 - `username_field`
 - `display_name_field`
 - `email_field`
@@ -190,6 +193,12 @@
 - `auto_merge_by_email`
 - `group_mapping`
 - `role_mapping`
+- `sync_group_on_login`
+- `sync_role_on_login`
+- `group_mapping_mode`
+- `role_mapping_mode`
+- `access_policy`
+- `access_denied_message`
 
 ### 5.1.4 登录入口设计
 
@@ -204,6 +213,13 @@
 
 如果前端从 fragment 获取 token，则由前端显式提交给后端；后端不要依赖 fragment。
 
+补充约束：
+
+- `jwt_source = query / fragment` 时，可以支持浏览器登录入口
+- `jwt_source = body` 时，仅作为后端接口直连模式，不作为浏览器登录入口
+- 浏览器模式下，前端负责从 query / fragment 取回 token，再显式提交到 `POST /api/auth/external/:slug/jwt/login`
+- 因此第一阶段虽然主入口是后端直登接口，但允许在配置完整时复用统一登录页和回调页完成浏览器链路
+
 ### 5.1.5 权限映射规则
 
 - `external_id` 为主绑定键
@@ -211,8 +227,25 @@
 - `role_mapping` 最大只能投影到 `admin`
 - `root` 只能由本地人工授予
 - `group_mapping` 只能命中现有 group
+- 默认使用 `explicit_only` 映射模式，不允许 claim 直通命中本地角色或分组
+- 若显式开启 `mapping_first`，仅允许在“未命中 mapping”时再尝试：
+  - `group` 直通命中现有本地 group
+  - `role` 直通命中 `common / admin`
+- `guest` 不作为第一阶段可同步目标
 
-### 5.1.6 测试与验证
+### 5.1.6 有限属性联动同步补充
+
+第一阶段补充支持受控的 `group / role` 登录时同步，但边界必须写清楚：
+
+- 同步只发生在“外部登录链路”
+- 已绑定用户登录时，可按配置同步 `group / role`
+- 邮箱自动合并命中的用户登录时，可按配置同步 `group / role`
+- 已登录用户执行“绑定外部身份”时，只建立绑定，不同步本地属性
+- claim 缺失、映射未命中、目标非法、目标 group 不存在时，只忽略该字段，不清空本地已有值
+- 角色从 `common -> admin` 时，需要补齐管理员默认侧边栏块，但不能覆盖用户已有个性化配置
+- 角色降回普通用户时，不重写用户个性化设置，依赖现有权限计算与会话刷新链路即时收口
+
+### 5.1.7 测试与验证
 
 必须覆盖：
 
@@ -225,6 +258,11 @@
 - 邮箱冲突
 - 普通 claim 冒充管理员
 - 非法 group 注入
+- 默认 `explicit_only` 下的 claim 直通被拒绝
+- `mapping_first` 打开后的受控直通
+- 已绑定用户登录同步 `group / role`
+- 邮箱自动合并后的登录同步
+- 绑定动作不改本地 `group / role`
 
 ## 5.2 第二阶段：可信 Header SSO
 
@@ -368,6 +406,12 @@ CAS 成功验票后，只负责把属性抽取为标准化身份对象。
 - role 映射结果
 - failure_reason
 
+补充说明：
+
+- 若当前请求不是“登录成功”，至少也要有系统级审计日志，不能静默失败
+- 若已经定位到本地用户，则应补一条用户系统日志，便于后续按用户回溯
+- 绑定成功 / 绑定失败也应纳入同一审计口径，避免认证面与绑定面割裂
+
 ### 6.2 权限安全红线
 
 - 外部身份不能直升 `root`
@@ -375,6 +419,7 @@ CAS 成功验票后，只负责把属性抽取为标准化身份对象。
 - 邮箱合并必须默认关闭
 - Header 模式必须要求可信来源
 - 所有配置错误默认 fail-closed
+- 已登录会话不能长期信任旧 `role / status / group`，需要在鉴权中间件按数据库真实状态刷新
 
 ### 6.3 UI 与配置面建议
 
