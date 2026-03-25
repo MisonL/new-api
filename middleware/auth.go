@@ -19,6 +19,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const authVersionHeaderValue = "newapi-auth-v1"
+
 func validUserInfo(username string, role int) bool {
 	// check username is empty
 	if strings.TrimSpace(username) == "" {
@@ -190,7 +192,7 @@ func authHelper(c *gin.Context, minRole int) {
 		return
 	}
 	// 防止不同newapi版本冲突，导致数据不通用
-	c.Header("Auth-Version", "864b7076dbcd0a3c01b5520316720ebf")
+	c.Header("Auth-Version", authVersionHeaderValue)
 	c.Set("username", currentUsername)
 	c.Set("role", currentRole)
 	c.Set("id", currentID)
