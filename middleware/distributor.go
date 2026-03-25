@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -82,6 +83,11 @@ func Distribute() func(c *gin.Context) {
 				}
 				bootstrapState, bootstrapErr := service.EnsureResponsesBootstrapRecoveryStateFromRequest(c)
 				if bootstrapErr != nil {
+					if errors.Is(bootstrapErr, context.Canceled) || errors.Is(bootstrapErr, context.DeadlineExceeded) {
+						c.Error(bootstrapErr)
+						c.Abort()
+						return
+					}
 					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": bootstrapErr.Error()}))
 					return
 				}
