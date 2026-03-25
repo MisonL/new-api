@@ -142,6 +142,16 @@ func Distribute() func(c *gin.Context) {
 				if channel == nil {
 					channel, selectGroup, err = getChannelWithBootstrapGrace(c, modelRequest.Model, usingGroup, bootstrapState)
 					if err != nil {
+						if ctxErr := c.Request.Context().Err(); ctxErr != nil ||
+							errors.Is(err, context.Canceled) ||
+							errors.Is(err, context.DeadlineExceeded) {
+							if ctxErr != nil {
+								err = ctxErr
+							}
+							c.Error(err)
+							c.Abort()
+							return
+						}
 						showGroup := usingGroup
 						if usingGroup == "auto" {
 							showGroup = fmt.Sprintf("auto(%s)", selectGroup)
