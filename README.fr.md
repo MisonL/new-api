@@ -202,6 +202,8 @@ docker run --name new-api -d --restart always \
 - 🤖 Connexion par autorisation LinuxDO
 - 📱 Connexion par autorisation Telegram
 - 🔑 Authentification unifiée OIDC
+- Enterprise SSO (JWT Direct) : validation JWT directe, echange de ticket, UserInfo et flux CAS validate
+- Enterprise SSO (Trusted Header) : integration par en-tetes d'identite de reverse proxy pour oauth2-proxy, Authentik, Pomerium et Authelia
 - 🔍 Requête de quota d'utilisation de clé (avec [neko-api-key-tool](https://github.com/Calcium-Ion/neko-api-key-tool))
 
 ### 🚀 Fonctionnalités avancées
