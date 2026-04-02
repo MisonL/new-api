@@ -14,6 +14,7 @@ const (
 	CustomOAuthProviderKindOAuthCode     = "oauth_code"
 	CustomOAuthProviderKindJWTDirect     = "jwt_direct"
 	CustomOAuthProviderKindTrustedHeader = "trusted_header"
+	CustomOAuthProviderKindCAS           = "cas"
 )
 
 const (
@@ -106,6 +107,11 @@ type CustomOAuthProvider struct {
 	EmailHeader                string `json:"email_header" gorm:"type:varchar(128)"`                                 // Optional email header
 	GroupHeader                string `json:"group_header" gorm:"type:varchar(128)"`                                 // Optional group header
 	RoleHeader                 string `json:"role_header" gorm:"type:varchar(128)"`                                  // Optional role header
+	CASServerURL               string `json:"cas_server_url" gorm:"type:varchar(512)"`                               // CAS server base URL
+	ServiceURL                 string `json:"service_url" gorm:"type:varchar(512)"`                                  // Optional browser callback URL override
+	ValidateURL                string `json:"validate_url" gorm:"type:varchar(512)"`                                 // Optional CAS validation URL override
+	Renew                      bool   `json:"renew" gorm:"default:false"`                                            // Force primary credentials for login
+	Gateway                    bool   `json:"gateway" gorm:"default:false"`                                          // Request passive login when supported
 	AuthorizationServiceField  string `json:"authorization_service_field" gorm:"type:varchar(64);default:'service'"` // browser login callback param for ticket exchange
 	TicketExchangeURL          string `json:"ticket_exchange_url" gorm:"type:varchar(512)"`                          // ticket processing endpoint URL
 	TicketExchangeMethod       string `json:"ticket_exchange_method" gorm:"type:varchar(16);default:'GET'"`          // GET / POST
@@ -165,6 +171,10 @@ func (p *CustomOAuthProvider) IsTrustedHeader() bool {
 	return p.GetKind() == CustomOAuthProviderKindTrustedHeader
 }
 
+func (p *CustomOAuthProvider) IsCAS() bool {
+	return p.GetKind() == CustomOAuthProviderKindCAS
+}
+
 func (p *CustomOAuthProvider) IsOAuthCode() bool {
 	return p.GetKind() == CustomOAuthProviderKindOAuthCode
 }
@@ -205,6 +215,9 @@ func (p *CustomOAuthProvider) SupportsBrowserLogin() bool {
 	}
 	if p.IsTrustedHeader() {
 		return strings.TrimSpace(p.ExternalIDHeader) != "" && len(p.GetTrustedProxyCIDRs()) > 0
+	}
+	if p.IsCAS() {
+		return isValidAbsoluteHTTPURL(p.CASServerURL)
 	}
 	return false
 }
@@ -315,7 +328,8 @@ func validateCustomOAuthProvider(provider *CustomOAuthProvider) error {
 	}
 	if provider.Kind != CustomOAuthProviderKindOAuthCode &&
 		provider.Kind != CustomOAuthProviderKindJWTDirect &&
-		provider.Kind != CustomOAuthProviderKindTrustedHeader {
+		provider.Kind != CustomOAuthProviderKindTrustedHeader &&
+		provider.Kind != CustomOAuthProviderKindCAS {
 		return errors.New("provider kind is invalid")
 	}
 	normalizeCustomOAuthProviderForKind(provider)
@@ -362,13 +376,17 @@ func validateCustomOAuthProvider(provider *CustomOAuthProvider) error {
 				return errors.New("user_info_endpoint is required and must be a valid http/https url for jwt_direct providers using userinfo mode")
 			}
 		}
-	} else {
+	} else if provider.IsTrustedHeader() {
 		if err := validateTrustedHeaderProvider(provider); err != nil {
+			return err
+		}
+	} else {
+		if err := validateCASProvider(provider); err != nil {
 			return err
 		}
 	}
 
-	if provider.IsOAuthCode() || provider.IsJWTDirect() {
+	if provider.IsOAuthCode() || provider.IsJWTDirect() || provider.IsCAS() {
 		if provider.UserIdField == "" {
 			provider.UserIdField = "sub"
 		}
@@ -383,6 +401,11 @@ func validateCustomOAuthProvider(provider *CustomOAuthProvider) error {
 		}
 		if provider.Scopes == "" {
 			provider.Scopes = "openid profile email"
+		}
+	}
+	if provider.IsCAS() {
+		if provider.UserIdField == "sub" {
+			provider.UserIdField = "authenticationSuccess.user"
 		}
 	}
 	if provider.IsJWTDirect() {

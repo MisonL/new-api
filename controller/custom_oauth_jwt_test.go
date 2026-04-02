@@ -132,6 +132,8 @@ func newCustomOAuthJWTRouter(t *testing.T) *gin.Engine {
 	store := cookie.NewStore([]byte("test-session-secret"))
 	router.Use(sessions.Sessions("session", store))
 	router.GET("/api/oauth/state", GenerateOAuthCode)
+	router.GET("/api/auth/external/:provider/cas/start", HandleCustomOAuthCASStart)
+	router.GET("/api/auth/external/:provider/cas/callback", HandleCustomOAuthCASCallback)
 	router.POST("/api/auth/external/:provider/jwt/login", HandleCustomOAuthJWTLogin)
 	router.POST("/api/auth/external/:provider/header/login", HandleCustomOAuthHeaderLogin)
 	router.GET("/test/login-as/:id", func(c *gin.Context) {
@@ -1285,8 +1287,22 @@ func TestHandleCustomOAuthJWTLoginWithTicketExchangeRequiresValidServerAddress(t
 
 	previousServerAddress := system_setting.ServerAddress
 	system_setting.ServerAddress = ""
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	previousConfiguredAddress, hadConfiguredAddress := common.OptionMap["ServerAddress"]
+	common.OptionMap["ServerAddress"] = ""
+	common.OptionMapRWMutex.Unlock()
 	t.Cleanup(func() {
 		system_setting.ServerAddress = previousServerAddress
+		common.OptionMapRWMutex.Lock()
+		if hadConfiguredAddress {
+			common.OptionMap["ServerAddress"] = previousConfiguredAddress
+		} else {
+			delete(common.OptionMap, "ServerAddress")
+		}
+		common.OptionMapRWMutex.Unlock()
 	})
 
 	client := newTestHTTPClient(t)
@@ -1294,34 +1310,162 @@ func TestHandleCustomOAuthJWTLoginWithTicketExchangeRequiresValidServerAddress(t
 	response := postJWTTicketLoginForTest(t, client, server.URL, state, "ST-123")
 
 	if response.Success {
-		t.Fatalf("expected ticket login to fail when server address is empty")
+		t.Fatalf("expected ticket login to fail because exchange response is invalid")
 	}
-	if exchangeCallCount != 0 {
-		t.Fatalf("expected ticket exchange not to be called without valid server address, got %d", exchangeCallCount)
+	if exchangeCallCount != 1 {
+		t.Fatalf("expected ticket exchange to be called once using request-derived callback url, got %d", exchangeCallCount)
 	}
 	if response.Message == "" {
 		t.Fatalf("expected ticket login failure to include message")
 	}
 }
 
-func TestBuildCustomOAuthJWTCallbackURLRequiresValidServerAddress(t *testing.T) {
+func TestBuildCustomOAuthBrowserCallbackURLRequiresValidServerAddress(t *testing.T) {
 	previousServerAddress := system_setting.ServerAddress
 	t.Cleanup(func() {
 		system_setting.ServerAddress = previousServerAddress
 	})
 
 	system_setting.ServerAddress = "://bad"
-	_, err := buildCustomOAuthJWTCallbackURL("acme-sso", "state-1")
+	_, err := buildCustomOAuthBrowserCallbackURL(nil, "acme-sso", "state-1")
 	if err == nil {
 		t.Fatalf("expected invalid server address to fail callback url build")
 	}
 
 	system_setting.ServerAddress = "https://example.com/base/"
-	callbackURL, err := buildCustomOAuthJWTCallbackURL("acme-sso", "state-2")
+	callbackURL, err := buildCustomOAuthBrowserCallbackURL(nil, "acme-sso", "state-2")
 	if err != nil {
 		t.Fatalf("expected valid server address to build callback url, got %v", err)
 	}
 	expected := "https://example.com/base/oauth/acme-sso?state=state-2"
+	if callbackURL != expected {
+		t.Fatalf("expected callback url %q, got %q", expected, callbackURL)
+	}
+}
+
+func TestBuildCustomOAuthBrowserCallbackURLFallsBackToRequestOriginWhenServerAddressUnset(t *testing.T) {
+	previousServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = ""
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	previousConfiguredAddress, hadConfiguredAddress := common.OptionMap["ServerAddress"]
+	common.OptionMap["ServerAddress"] = ""
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		system_setting.ServerAddress = previousServerAddress
+		common.OptionMapRWMutex.Lock()
+		if hadConfiguredAddress {
+			common.OptionMap["ServerAddress"] = previousConfiguredAddress
+		} else {
+			delete(common.OptionMap, "ServerAddress")
+		}
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://internal/api/auth/external/acme-sso/cas/start", nil)
+	req.Host = "internal:8080"
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "login.example.com")
+	req.Header.Set("X-Forwarded-Prefix", "/gateway")
+
+	callbackURL, err := buildCustomOAuthBrowserCallbackURL(req, "acme-sso", "state-3")
+	if err != nil {
+		t.Fatalf("expected request-derived callback url, got %v", err)
+	}
+	expected := "https://login.example.com/gateway/oauth/acme-sso?state=state-3"
+	if callbackURL != expected {
+		t.Fatalf("expected callback url %q, got %q", expected, callbackURL)
+	}
+}
+
+func TestBuildCustomOAuthBrowserCallbackURLIgnoresForwardedHeadersWhenDisabled(t *testing.T) {
+	previousServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = ""
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	previousConfiguredAddress, hadConfiguredAddress := common.OptionMap["ServerAddress"]
+	previousForwardedSetting, hadForwardedSetting := common.OptionMap[customOAuthTrustForwardedHeadersOption]
+	common.OptionMap["ServerAddress"] = ""
+	common.OptionMap[customOAuthTrustForwardedHeadersOption] = "false"
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		system_setting.ServerAddress = previousServerAddress
+		common.OptionMapRWMutex.Lock()
+		if hadConfiguredAddress {
+			common.OptionMap["ServerAddress"] = previousConfiguredAddress
+		} else {
+			delete(common.OptionMap, "ServerAddress")
+		}
+		if hadForwardedSetting {
+			common.OptionMap[customOAuthTrustForwardedHeadersOption] = previousForwardedSetting
+		} else {
+			delete(common.OptionMap, customOAuthTrustForwardedHeadersOption)
+		}
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://internal/api/auth/external/acme-sso/cas/start", nil)
+	req.Host = "internal:8080"
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "login.example.com")
+	req.Header.Set("X-Forwarded-Prefix", "/gateway")
+
+	callbackURL, err := buildCustomOAuthBrowserCallbackURL(req, "acme-sso", "state-4")
+	if err != nil {
+		t.Fatalf("expected request-derived callback url without forwarded headers, got %v", err)
+	}
+	expected := "http://internal:8080/oauth/acme-sso?state=state-4"
+	if callbackURL != expected {
+		t.Fatalf("expected callback url %q, got %q", expected, callbackURL)
+	}
+}
+
+func TestBuildCustomOAuthBrowserCallbackURLIgnoresForwardedHeadersFromUntrustedPeer(t *testing.T) {
+	previousServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = ""
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	previousConfiguredAddress, hadConfiguredAddress := common.OptionMap["ServerAddress"]
+	previousForwardedSetting, hadForwardedSetting := common.OptionMap[customOAuthTrustForwardedHeadersOption]
+	common.OptionMap["ServerAddress"] = ""
+	delete(common.OptionMap, customOAuthTrustForwardedHeadersOption)
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		system_setting.ServerAddress = previousServerAddress
+		common.OptionMapRWMutex.Lock()
+		if hadConfiguredAddress {
+			common.OptionMap["ServerAddress"] = previousConfiguredAddress
+		} else {
+			delete(common.OptionMap, "ServerAddress")
+		}
+		if hadForwardedSetting {
+			common.OptionMap[customOAuthTrustForwardedHeadersOption] = previousForwardedSetting
+		} else {
+			delete(common.OptionMap, customOAuthTrustForwardedHeadersOption)
+		}
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://internal/api/auth/external/acme-sso/cas/start", nil)
+	req.Host = "internal:8080"
+	req.RemoteAddr = "203.0.113.10:45678"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "login.example.com")
+	req.Header.Set("X-Forwarded-Prefix", "/gateway")
+
+	callbackURL, err := buildCustomOAuthBrowserCallbackURL(req, "acme-sso", "state-5")
+	if err != nil {
+		t.Fatalf("expected request-derived callback url without forwarded headers, got %v", err)
+	}
+	expected := "http://internal:8080/oauth/acme-sso?state=state-5"
 	if callbackURL != expected {
 		t.Fatalf("expected callback url %q, got %q", expected, callbackURL)
 	}

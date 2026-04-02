@@ -70,6 +70,9 @@ function supportsCustomProviderBrowserLogin(provider) {
     return Boolean(provider.browser_login_supported);
   }
   const providerKind = getCustomProviderKind(provider);
+  if (providerKind === 'cas') {
+    return Boolean(provider?.cas_server_url);
+  }
   if (providerKind === 'trusted_header') {
     return true;
   }
@@ -87,6 +90,31 @@ function supportsCustomProviderBrowserLogin(provider) {
     );
   }
   return Boolean(provider?.authorization_endpoint && provider?.client_id);
+}
+
+function buildAPIURL(path) {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const configuredBaseURL =
+    typeof API.defaults?.baseURL === 'string'
+      ? API.defaults.baseURL.trim()
+      : '';
+
+  if (!configuredBaseURL) {
+    return new URL(normalizedPath, window.location.origin);
+  }
+
+  const baseURL = new URL(configuredBaseURL, window.location.origin);
+  const basePath = baseURL.pathname.replace(/\/+$/, '');
+  baseURL.pathname = `${basePath}${normalizedPath}`;
+  baseURL.search = '';
+  baseURL.hash = '';
+  return baseURL;
+}
+
+function buildCustomCASStartUrl(provider, state) {
+  const startUrl = buildAPIURL(`/api/auth/external/${provider.slug}/cas/start`);
+  startUrl.searchParams.set('state', state);
+  return startUrl;
 }
 
 function ensureAbsoluteOAuthURL(url) {
@@ -441,7 +469,10 @@ export async function onCustomOAuthClicked(provider, options = {}) {
             user,
           };
         } catch (error) {
-          console.error('Failed to refresh trusted header bind session user:', error);
+          console.error(
+            'Failed to refresh trusted header bind session user:',
+            error,
+          );
           throw new Error(
             error?.response?.data?.message ||
               error?.message ||
@@ -458,11 +489,13 @@ export async function onCustomOAuthClicked(provider, options = {}) {
     const state = await prepareOAuthState(options);
     if (!state) return;
     const authUrl =
-      providerKind === 'jwt_direct'
-        ? buildCustomJWTAuthorizationUrl(provider, state)
-        : ensureAbsoluteOAuthURL(provider.authorization_endpoint);
+      providerKind === 'cas'
+        ? buildCustomCASStartUrl(provider, state)
+        : providerKind === 'jwt_direct'
+          ? buildCustomJWTAuthorizationUrl(provider, state)
+          : ensureAbsoluteOAuthURL(provider.authorization_endpoint);
 
-    if (providerKind !== 'jwt_direct') {
+    if (providerKind !== 'jwt_direct' && providerKind !== 'cas') {
       authUrl.searchParams.set('client_id', provider.client_id);
       authUrl.searchParams.set(
         'redirect_uri',

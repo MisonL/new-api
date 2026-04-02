@@ -57,9 +57,7 @@ const OAuth2Callback = (props) => {
       const customProviders = Array.isArray(status.custom_oauth_providers)
         ? status.custom_oauth_providers
         : [];
-      return customProviders.find(
-        (provider) => provider.slug === props.type,
-      );
+      return customProviders.find((provider) => provider.slug === props.type);
     } catch (error) {
       return null;
     }
@@ -150,6 +148,38 @@ const OAuth2Callback = (props) => {
     }
   };
 
+  const submitCASLogin = async (ticket, state, retry = 0) => {
+    try {
+      const { data: resData } = await API.get(
+        `/api/auth/external/${props.type}/cas/callback`,
+        {
+          params: {
+            ticket,
+            state,
+          },
+          skipErrorHandler: true,
+        },
+      );
+
+      const { success, message, data } = resData;
+      if (!success) {
+        showError(message || t('授权失败'));
+        navigate('/console/personal');
+        return;
+      }
+
+      handleCallbackSuccess(data);
+    } catch (error) {
+      if (retry < MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, (retry + 1) * 2000));
+        return submitCASLogin(ticket, state, retry + 1);
+      }
+
+      showError(error.message || t('授权失败'));
+      navigate('/console/personal');
+    }
+  };
+
   useEffect(() => {
     // 防止 React 18 Strict Mode 下重复执行
     if (hasExecuted.current) {
@@ -167,6 +197,21 @@ const OAuth2Callback = (props) => {
     if (errorDescription) {
       showError(errorDescription);
       navigate('/console/personal');
+      return;
+    }
+
+    if (providerKind === 'cas') {
+      const state = pickFirstParamValue(searchParams, hashParams, ['state']);
+      const ticket = pickFirstParamValue(searchParams, hashParams, [
+        'ticket',
+        'st',
+      ]);
+      if (!ticket) {
+        showError(t('未获取到登录票据'));
+        navigate('/console/personal');
+        return;
+      }
+      submitCASLogin(ticket, state);
       return;
     }
 

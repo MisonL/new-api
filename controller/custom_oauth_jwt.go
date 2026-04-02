@@ -1,15 +1,12 @@
 package controller
 
 import (
-	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
-	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -135,7 +132,7 @@ func completeCustomOAuthJWTLogin(
 
 	callbackURL := ""
 	if providerConfig.RequiresTicketAcquire() {
-		validatedCallbackURL, callbackErr := buildCustomOAuthJWTCallbackURL(providerConfig.Slug, state)
+		validatedCallbackURL, callbackErr := buildCustomOAuthBrowserCallbackURL(c.Request, providerConfig.Slug, state)
 		if callbackErr != nil {
 			if audit != nil {
 				audit.FailureReason = "invalid_callback_url"
@@ -165,33 +162,6 @@ func completeCustomOAuthJWTLogin(
 		identity.Role,
 		audit,
 	)
-}
-
-func buildCustomOAuthJWTCallbackURL(providerSlug string, state string) (string, error) {
-	baseURL := strings.TrimSpace(system_setting.ServerAddress)
-	if baseURL == "" {
-		return "", fmt.Errorf("server address is empty")
-	}
-	callbackURL, err := url.Parse(baseURL)
-	if err != nil {
-		return "", fmt.Errorf("invalid server address: %w", err)
-	}
-	if callbackURL == nil || strings.TrimSpace(callbackURL.Host) == "" {
-		return "", fmt.Errorf("server address host is empty")
-	}
-	if callbackURL.Scheme != "http" && callbackURL.Scheme != "https" {
-		return "", fmt.Errorf("server address scheme must be http or https")
-	}
-
-	callbackURL.RawQuery = ""
-	callbackURL.Fragment = ""
-	callbackURL.Path = strings.TrimRight(callbackURL.Path, "/") + "/oauth/" + providerSlug
-	if strings.TrimSpace(state) != "" {
-		query := callbackURL.Query()
-		query.Set("state", state)
-		callbackURL.RawQuery = query.Encode()
-	}
-	return callbackURL.String(), nil
 }
 
 func handleCustomOAuthJWTLoginError(c *gin.Context, err error) {

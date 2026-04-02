@@ -8,12 +8,17 @@ func normalizeCustomOAuthProviderForKind(provider *CustomOAuthProvider) {
 	switch provider.GetKind() {
 	case CustomOAuthProviderKindOAuthCode:
 		clearTrustedHeaderProviderFields(provider)
+		clearCASProviderFields(provider)
 		clearJWTDirectOnlyProviderFields(provider)
 	case CustomOAuthProviderKindJWTDirect:
 		clearTrustedHeaderProviderFields(provider)
+		clearCASProviderFields(provider)
 		clearOAuthCodeOnlyProviderFields(provider)
 	case CustomOAuthProviderKindTrustedHeader:
 		clearTrustedHeaderUnrelatedProviderFields(provider)
+	case CustomOAuthProviderKindCAS:
+		clearTrustedHeaderProviderFields(provider)
+		clearCASUnrelatedProviderFields(provider)
 	}
 }
 
@@ -49,6 +54,14 @@ func clearJWTDirectOnlyProviderFields(provider *CustomOAuthProvider) {
 	provider.TicketExchangeServiceField = ""
 	provider.TicketExchangeExtraParams = ""
 	provider.TicketExchangeHeaders = ""
+}
+
+func clearCASProviderFields(provider *CustomOAuthProvider) {
+	provider.CASServerURL = ""
+	provider.ServiceURL = ""
+	provider.ValidateURL = ""
+	provider.Renew = false
+	provider.Gateway = false
 }
 
 func clearOAuthCodeOnlyProviderFields(provider *CustomOAuthProvider) {
@@ -90,5 +103,33 @@ func clearTrustedHeaderUnrelatedProviderFields(provider *CustomOAuthProvider) {
 	provider.RoleField = ""
 	provider.AccessPolicy = ""
 	provider.AccessDeniedMessage = ""
+	provider.AuthStyle = 0
+}
+
+func clearCASUnrelatedProviderFields(provider *CustomOAuthProvider) {
+	provider.WellKnown = ""
+	provider.ClientId = ""
+	provider.ClientSecret = ""
+	provider.AuthorizationEndpoint = ""
+	provider.TokenEndpoint = ""
+	provider.UserInfoEndpoint = ""
+	provider.Scopes = ""
+	provider.Issuer = ""
+	provider.Audience = ""
+	provider.JwksURL = ""
+	provider.PublicKey = ""
+	provider.JWTSource = ""
+	provider.JWTHeader = ""
+	provider.JWTIdentityMode = ""
+	provider.JWTAcquireMode = ""
+	provider.AuthorizationServiceField = ""
+	provider.TicketExchangeURL = ""
+	provider.TicketExchangeMethod = ""
+	provider.TicketExchangePayloadMode = ""
+	provider.TicketExchangeTicketField = ""
+	provider.TicketExchangeTokenField = ""
+	provider.TicketExchangeServiceField = ""
+	provider.TicketExchangeExtraParams = ""
+	provider.TicketExchangeHeaders = ""
 	provider.AuthStyle = 0
 }

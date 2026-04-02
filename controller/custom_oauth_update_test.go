@@ -639,3 +639,113 @@ func TestGetCustomOAuthStatusPayloadDoesNotInjectJWTDefaultsForTrustedHeader(t *
 		t.Fatal("expected trusted_header status payload to mark browser login as supported")
 	}
 }
+
+func TestUpdateCustomOAuthProviderSwitchesJWTDirectToCASAndClearsJWTFields(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+
+	provider := &model.CustomOAuthProvider{
+		Name:                  "Acme SSO",
+		Slug:                  "acme-sso",
+		Kind:                  model.CustomOAuthProviderKindJWTDirect,
+		Enabled:               true,
+		AuthorizationEndpoint: "https://issuer.example.com/oauth2/authorize",
+		Issuer:                "https://issuer.example.com",
+		JwksURL:               "https://issuer.example.com/.well-known/jwks.json",
+		JWTSource:             model.CustomJWTSourceQuery,
+		JWTIdentityMode:       model.CustomJWTIdentityModeClaims,
+		JWTAcquireMode:        model.CustomJWTAcquireModeDirectToken,
+		UserIdField:           "sub",
+	}
+	if err := model.CreateCustomOAuthProvider(provider); err != nil {
+		t.Fatalf("failed to create provider: %v", err)
+	}
+
+	payload, err := common.Marshal(map[string]any{
+		"kind":           model.CustomOAuthProviderKindCAS,
+		"cas_server_url": "https://cas.example.com/cas",
+		"validate_url":   "https://cas.example.com/cas/serviceValidate",
+		"user_id_field":  "authenticationSuccess.user",
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal update payload: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(provider.Id)}}
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/custom-oauth-provider/"+strconv.Itoa(provider.Id), bytes.NewReader(payload))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	UpdateCustomOAuthProvider(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 response, got %d with body %s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "\"success\":false") {
+		t.Fatalf("expected cas update to succeed, got body %s", recorder.Body.String())
+	}
+
+	updatedProvider, err := model.GetCustomOAuthProviderById(provider.Id)
+	if err != nil {
+		t.Fatalf("failed to reload provider: %v", err)
+	}
+	if updatedProvider.Kind != model.CustomOAuthProviderKindCAS {
+		t.Fatalf("expected cas provider kind, got %s", updatedProvider.Kind)
+	}
+	if updatedProvider.CASServerURL != "https://cas.example.com/cas" {
+		t.Fatalf("unexpected cas_server_url: %q", updatedProvider.CASServerURL)
+	}
+	if updatedProvider.AuthorizationEndpoint != "" || updatedProvider.Issuer != "" || updatedProvider.JwksURL != "" {
+		t.Fatalf("expected jwt fields to be cleared after cas switch, got authorization_endpoint=%q issuer=%q jwks_url=%q", updatedProvider.AuthorizationEndpoint, updatedProvider.Issuer, updatedProvider.JwksURL)
+	}
+}
+
+func TestCustomOAuthProviderResponseDoesNotInjectJWTDefaultsForCAS(t *testing.T) {
+	response := toCustomOAuthProviderResponse(&model.CustomOAuthProvider{
+		Name:         "CAS SSO",
+		Slug:         "cas-sso",
+		Kind:         model.CustomOAuthProviderKindCAS,
+		CASServerURL: "https://cas.example.com/cas",
+	})
+
+	if response.JWTSource != "" || response.JWTIdentityMode != "" || response.JWTAcquireMode != "" {
+		t.Fatalf("expected cas response to keep jwt fields empty, got jwt_source=%q jwt_identity_mode=%q jwt_acquire_mode=%q", response.JWTSource, response.JWTIdentityMode, response.JWTAcquireMode)
+	}
+	if response.AuthorizationServiceField != "" || response.TicketExchangeMethod != "" || response.TicketExchangePayloadMode != "" {
+		t.Fatalf("expected cas response to keep ticket fields empty, got authorization_service_field=%q ticket_exchange_method=%q ticket_exchange_payload_mode=%q", response.AuthorizationServiceField, response.TicketExchangeMethod, response.TicketExchangePayloadMode)
+	}
+	if response.CASServerURL != "https://cas.example.com/cas" {
+		t.Fatalf("expected cas response to expose cas_server_url, got %q", response.CASServerURL)
+	}
+}
+
+func TestGetCustomOAuthStatusPayloadMarksCASBrowserLoginSupport(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	invalidateCustomOAuthStatusCache()
+	t.Cleanup(invalidateCustomOAuthStatusCache)
+
+	provider := &model.CustomOAuthProvider{
+		Name:         "CAS SSO",
+		Slug:         "cas-sso",
+		Kind:         model.CustomOAuthProviderKindCAS,
+		Enabled:      true,
+		CASServerURL: "https://cas.example.com/cas",
+	}
+	if err := model.CreateCustomOAuthProvider(provider); err != nil {
+		t.Fatalf("failed to create provider: %v", err)
+	}
+
+	payload := getCustomOAuthStatusPayload()
+	if len(payload) != 1 {
+		t.Fatalf("expected 1 provider in status payload, got %d", len(payload))
+	}
+	if payload[0].Kind != model.CustomOAuthProviderKindCAS {
+		t.Fatalf("expected cas kind, got %s", payload[0].Kind)
+	}
+	if !payload[0].BrowserLoginSupported {
+		t.Fatal("expected cas status payload to mark browser login as supported")
+	}
+	if payload[0].AuthorizationEndpoint != "" || payload[0].ClientId != "" {
+		t.Fatalf("expected cas status payload to keep oauth code fields empty, got authorization_endpoint=%q client_id=%q", payload[0].AuthorizationEndpoint, payload[0].ClientId)
+	}
+}
