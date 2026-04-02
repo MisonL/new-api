@@ -202,8 +202,10 @@ docker run --name new-api -d --restart always \
 - 🤖 LinuxDO 授權登錄
 - 📱 Telegram 授權登錄
 - 🔑 OIDC 統一認證
-- 企業 SSO（JWT Direct）：支援直接驗證 JWT、票據換 JWT、UserInfo 與 CAS Validate 接入
-- 企業 SSO（Trusted Header）：支援反向代理傳遞身份標頭接入（oauth2-proxy、Authentik、Pomerium、Authelia）
+- 企業 SSO（JWT Direct）：支援直接驗證 JWT、票據換 JWT、票據校驗，以及基於 UserInfo 的身份解析
+- 企業 SSO（CAS）：支援原生 CAS 瀏覽器登入、service/serviceValidate 回呼、欄位映射、存取策略與使用者群組/角色同步
+- 企業 SSO（Trusted Header）：支援反向代理傳遞身份標頭接入（oauth2-proxy、Authentik、Pomerium、Authelia），並強制校驗可信代理 CIDR
+- 瀏覽器登入回呼位址回退僅會在私網或 loopback 代理下讀取 `X-Forwarded-*`，也可透過 `CustomOAuthTrustForwardedHeaders` 顯式關閉
 - 🔍 Key 查詢使用額度（配合 [neko-api-key-tool](https://github.com/Calcium-Ion/neko-api-key-tool)）
 
 ### 🚀 高級功能

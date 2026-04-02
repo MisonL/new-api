@@ -202,8 +202,10 @@ docker run --name new-api -d --restart always \
 - 🤖 LinuxDO認証ログイン
 - 📱 Telegram認証ログイン
 - 🔑 OIDC統一認証
-- Enterprise SSO（JWT Direct）: 直接JWT検証、チケット交換、UserInfo、CAS Validate フロー
-- Enterprise SSO（Trusted Header）: oauth2-proxy、Authentik、Pomerium、Authelia 向けのリバースプロキシ認証ヘッダー連携
+- Enterprise SSO（JWT Direct）: JWT の直接検証、チケットから JWT への交換、チケット検証、UserInfo ベースの ID 解決
+- Enterprise SSO（CAS）: ネイティブ CAS ブラウザーログイン、service/serviceValidate コールバック、フィールドマッピング、アクセス制御、グループ/ロール同期
+- Enterprise SSO（Trusted Header）: oauth2-proxy、Authentik、Pomerium、Authelia 向けのリバースプロキシ認証ヘッダー連携と trusted proxy CIDR 検証
+- ブラウザーコールバック URL のフォールバックは private または loopback プロキシからの `X-Forwarded-*` のみを信頼し、`CustomOAuthTrustForwardedHeaders` で無効化可能
 - 🔍 Key使用量クォータ照会（[neko-api-key-tool](https://github.com/Calcium-Ion/neko-api-key-tool)と併用）
 
 
