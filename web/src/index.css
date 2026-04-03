@@ -197,11 +197,36 @@ code {
 /* 分组标签样式 */
 .sidebar-group-label {
   padding: 4px 15px 8px;
-  color: var(--semi-color-text-2);
+  color: var(--semi-color-text-1);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  opacity: 0.8;
+  opacity: 1;
+}
+
+@media (max-width: 768px) {
+  .custom-oauth-provider-modal-body .semi-col {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+
+  .custom-oauth-provider-modal-body .custom-oauth-provider-icon-preview-col {
+    align-items: stretch;
+  }
+
+  .custom-oauth-provider-modal-body .custom-oauth-provider-icon-preview {
+    margin-bottom: 12px;
+  }
+
+  .custom-oauth-provider-modal .custom-oauth-provider-modal-footer {
+    justify-content: stretch;
+  }
+
+  .custom-oauth-provider-modal .custom-oauth-provider-modal-footer .semi-space {
+    width: 100%;
+    justify-content: space-between;
+    margin-right: 0;
+  }
 }
 
 /* 底部折叠按钮 */
@@ -367,7 +392,9 @@ code {
   line-height: 1;
   background-color: var(--semi-color-fill-0);
   color: var(--semi-color-text-2);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .sbg-badge-active {
@@ -1005,4 +1032,6 @@ html.dark .with-pastel-balls::before {
   }
 }
 
-.ec-dbcd0a3c01b55203 { forced-color-adjust: auto; }
+.ec-dbcd0a3c01b55203 {
+  forced-color-adjust: auto;
+}

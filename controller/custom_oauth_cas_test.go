@@ -43,6 +43,17 @@ func createCASProviderForTest(t *testing.T, validateURL string) *model.CustomOAu
 	return provider
 }
 
+func createCASProviderWithServiceURLForTest(t *testing.T, validateURL string, serviceURL string) *model.CustomOAuthProvider {
+	t.Helper()
+
+	provider := createCASProviderForTest(t, validateURL)
+	provider.ServiceURL = serviceURL
+	if err := model.UpdateCustomOAuthProvider(provider); err != nil {
+		t.Fatalf("failed to update cas provider service url: %v", err)
+	}
+	return provider
+}
+
 func TestHandleCustomOAuthCASStartRedirectsToCASLogin(t *testing.T) {
 	setupCustomOAuthJWTControllerTestDB(t)
 	createCASProviderForTest(t, "https://cas.example.com/cas/serviceValidate")
@@ -237,6 +248,90 @@ func TestHandleCustomOAuthCASCallbackCreatesUser(t *testing.T) {
 	}
 }
 
+func TestHandleCustomOAuthCASCallbackUsesConfiguredServiceURLWithState(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	handlerErrors := newAsyncHandlerErrorSink(2)
+	defer handlerErrors.failIfAny(t)
+
+	expectedServicePrefix := "https://sso.example.com/callback"
+	validationServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("ticket"); got != "ST-CAS-456" {
+			handlerErrors.reportf("expected ticket query param ST-CAS-456, got %q", got)
+			http.Error(w, "unexpected ticket query param", http.StatusBadRequest)
+			return
+		}
+		serviceValue := r.URL.Query().Get("service")
+		if !strings.HasPrefix(serviceValue, expectedServicePrefix) {
+			handlerErrors.reportf("expected configured service url prefix %q, got %q", expectedServicePrefix, serviceValue)
+			http.Error(w, "unexpected service callback url", http.StatusBadRequest)
+			return
+		}
+		if !strings.Contains(serviceValue, "state=") {
+			handlerErrors.reportf("expected configured service url to include state, got %q", serviceValue)
+			http.Error(w, "missing state in service callback url", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+  <cas:authenticationSuccess>
+    <cas:user>cas-user-2</cas:user>
+    <cas:attributes>
+      <cas:loginid>cas-user-2</cas:loginid>
+      <cas:userName>CAS User Two</cas:userName>
+      <cas:mailbox>cas-user-2@example.com</cas:mailbox>
+      <cas:group>engineering</cas:group>
+    </cas:attributes>
+  </cas:authenticationSuccess>
+</cas:serviceResponse>`))
+	}))
+	defer validationServer.Close()
+
+	provider := createCASProviderWithServiceURLForTest(
+		t,
+		validationServer.URL,
+		expectedServicePrefix,
+	)
+
+	router := newCustomOAuthJWTRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	previousServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = server.URL
+	t.Cleanup(func() {
+		system_setting.ServerAddress = previousServerAddress
+	})
+
+	client := newTestHTTPClient(t)
+	state := fetchOAuthStateForTest(t, client, server.URL)
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		server.URL+"/api/auth/external/acme-sso/cas/callback?ticket=ST-CAS-456&state="+state,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("failed to build cas callback request: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to execute cas callback request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var response oauthJWTAPIResponse
+	if err := common.DecodeJson(resp.Body, &response); err != nil {
+		t.Fatalf("failed to decode cas callback response: %v", err)
+	}
+	if !response.Success {
+		t.Fatalf("expected cas callback success with configured service url, got message: %s", response.Message)
+	}
+	if !model.IsProviderUserIdTaken(provider.Id, "cas-user-2") {
+		t.Fatal("expected cas binding to be created for configured service url")
+	}
+}
+
 func TestHandleCustomOAuthCASCallbackRejectsInvalidState(t *testing.T) {
 	setupCustomOAuthJWTControllerTestDB(t)
 	createCASProviderForTest(t, "https://cas.example.com/cas/serviceValidate")
@@ -274,5 +369,45 @@ func TestHandleCustomOAuthCASCallbackRejectsInvalidState(t *testing.T) {
 	}
 	if response.Success {
 		t.Fatal("expected invalid-state cas callback to fail")
+	}
+}
+
+func TestHandleCustomOAuthCASCallbackRejectsMissingTicket(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	createCASProviderForTest(t, "https://cas.example.com/cas/serviceValidate")
+
+	router := newCustomOAuthJWTRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	previousServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = server.URL
+	t.Cleanup(func() {
+		system_setting.ServerAddress = previousServerAddress
+	})
+
+	client := newTestHTTPClient(t)
+	state := fetchOAuthStateForTest(t, client, server.URL)
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		server.URL+"/api/auth/external/acme-sso/cas/callback?state="+state,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("failed to build missing-ticket cas callback request: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to execute missing-ticket cas callback request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var response oauthJWTAPIResponse
+	if err := common.DecodeJson(resp.Body, &response); err != nil {
+		t.Fatalf("failed to decode missing-ticket cas callback response: %v", err)
+	}
+	if response.Success {
+		t.Fatal("expected missing-ticket cas callback to fail")
 	}
 }

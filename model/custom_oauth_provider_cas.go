@@ -72,6 +72,10 @@ func (p *CustomOAuthProvider) GetCASValidateURL() string {
 
 func (p *CustomOAuthProvider) GetCASServiceURL(baseCallbackURL string) string {
 	if explicit := strings.TrimSpace(p.ServiceURL); explicit != "" {
+		mergedURL, err := mergeCASServiceState(explicit, baseCallbackURL)
+		if err == nil {
+			return mergedURL
+		}
 		return explicit
 	}
 	return strings.TrimSpace(baseCallbackURL)
@@ -93,4 +97,23 @@ func (p *CustomOAuthProvider) GetCASRequiredServiceURL(baseCallbackURL string) (
 		return "", fmt.Errorf("cas service url is invalid")
 	}
 	return serviceURL, nil
+}
+
+func mergeCASServiceState(explicitServiceURL string, baseCallbackURL string) (string, error) {
+	explicitParsed, err := url.Parse(strings.TrimSpace(explicitServiceURL))
+	if err != nil || explicitParsed == nil {
+		return "", fmt.Errorf("invalid explicit service url")
+	}
+	baseParsed, err := url.Parse(strings.TrimSpace(baseCallbackURL))
+	if err != nil || baseParsed == nil {
+		return explicitParsed.String(), nil
+	}
+	state := strings.TrimSpace(baseParsed.Query().Get("state"))
+	if state == "" {
+		return explicitParsed.String(), nil
+	}
+	query := explicitParsed.Query()
+	query.Set("state", state)
+	explicitParsed.RawQuery = query.Encode()
+	return explicitParsed.String(), nil
 }

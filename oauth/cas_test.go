@@ -149,3 +149,70 @@ func TestCASProviderResolveIdentitySanitizesErrorResponseBody(t *testing.T) {
 		t.Fatalf("expected truncation marker in raw error, got %q", oauthErr.RawError)
 	}
 }
+
+func TestCASProviderResolveIdentityRejectsAuthenticationFailure(t *testing.T) {
+	validationServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+  <cas:authenticationFailure code="INVALID_TICKET">
+    service mismatch
+  </cas:authenticationFailure>
+</cas:serviceResponse>`))
+	}))
+	defer validationServer.Close()
+
+	provider := NewCASProvider(&model.CustomOAuthProvider{
+		Name:         "CAS SSO",
+		Slug:         "cas-sso",
+		CASServerURL: "https://cas.example.com/cas",
+		ValidateURL:  validationServer.URL,
+	})
+
+	_, err := provider.ResolveIdentityFromTicket(
+		context.Background(),
+		"ST-FAIL-1",
+		"https://newapi.example.com/oauth/cas-sso?state=abc",
+	)
+	if err == nil {
+		t.Fatal("expected cas authentication failure to be rejected")
+	}
+	if !strings.Contains(err.Error(), "INVALID_TICKET") || !strings.Contains(err.Error(), "service mismatch") {
+		t.Fatalf("expected failure reason to include cas authentication failure details, got %v", err)
+	}
+}
+
+func TestCASProviderResolveIdentityRejectsMissingExternalUserID(t *testing.T) {
+	validationServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+  <cas:authenticationSuccess>
+    <cas:attributes>
+      <cas:loginid>cas-user</cas:loginid>
+    </cas:attributes>
+  </cas:authenticationSuccess>
+</cas:serviceResponse>`))
+	}))
+	defer validationServer.Close()
+
+	provider := NewCASProvider(&model.CustomOAuthProvider{
+		Name:         "CAS SSO",
+		Slug:         "cas-sso",
+		CASServerURL: "https://cas.example.com/cas",
+		ValidateURL:  validationServer.URL,
+		UserIdField:  "authenticationSuccess.user",
+	})
+
+	_, err := provider.ResolveIdentityFromTicket(
+		context.Background(),
+		"ST-MISSING-USER",
+		"https://newapi.example.com/oauth/cas-sso?state=abc",
+	)
+	if err == nil {
+		t.Fatal("expected cas response without external user id to fail")
+	}
+	if !strings.Contains(err.Error(), "external user id") {
+		t.Fatalf("expected missing external user id error, got %v", err)
+	}
+}

@@ -60,3 +60,16 @@ func TestCASProviderBuildsDerivedURLs(t *testing.T) {
 		t.Fatalf("unexpected cas service url: %q", got)
 	}
 }
+
+func TestCASProviderServiceURLPreservesConfiguredURLAndInjectsState(t *testing.T) {
+	provider := &CustomOAuthProvider{
+		CASServerURL: "https://cas.example.com/cas",
+		ServiceURL:   "https://sso.example.com/custom/callback?from=cas",
+	}
+
+	got := provider.GetCASServiceURL("https://newapi.example.com/oauth/cas-sso?state=abc123")
+	expected := "https://sso.example.com/custom/callback?from=cas&state=abc123"
+	if got != expected {
+		t.Fatalf("expected configured service url with merged state %q, got %q", expected, got)
+	}
+}
