@@ -121,6 +121,10 @@ func (r *GeminiChatRequest) IsStream(c *gin.Context) bool {
 	if c.Query("alt") == "sse" {
 		return true
 	}
+	// Native Gemini API also signals streaming via the action suffix.
+	if strings.Contains(c.Request.URL.Path, "streamGenerateContent") {
+		return true
+	}
 	return false
 }
 
