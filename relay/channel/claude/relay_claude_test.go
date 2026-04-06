@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/stretchr/testify/require"
 )
 
@@ -362,4 +363,41 @@ func TestRequestOpenAI2ClaudeMessage_ConvertsTextFileContentToText(t *testing.T)
 	require.Equal(t, "text", content[0].Type)
 	require.NotNil(t, content[0].Text)
 	require.Equal(t, "alpha\nbeta", *content[0].Text)
+}
+
+func TestRequestOpenAI2ClaudeMessage_ThinkingAdapterOmitsTopP(t *testing.T) {
+	claudeSettings := model_setting.GetClaudeSettings()
+	origEnabled := claudeSettings.ThinkingAdapterEnabled
+	origBudgetRatio := claudeSettings.ThinkingAdapterBudgetTokensPercentage
+	globalSettings := model_setting.GetGlobalSettings()
+	origBlacklist := append([]string(nil), globalSettings.ThinkingModelBlacklist...)
+	t.Cleanup(func() {
+		claudeSettings.ThinkingAdapterEnabled = origEnabled
+		claudeSettings.ThinkingAdapterBudgetTokensPercentage = origBudgetRatio
+		globalSettings.ThinkingModelBlacklist = origBlacklist
+	})
+
+	claudeSettings.ThinkingAdapterEnabled = true
+	claudeSettings.ThinkingAdapterBudgetTokensPercentage = 0.8
+	globalSettings.ThinkingModelBlacklist = nil
+
+	request := dto.GeneralOpenAIRequest{
+		Model: "claude-3-5-sonnet-thinking",
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.NotNil(t, claudeRequest)
+	require.Nil(t, claudeRequest.TopP)
+	require.NotNil(t, claudeRequest.Temperature)
+	require.Equal(t, 1.0, *claudeRequest.Temperature)
+	require.NotNil(t, claudeRequest.Thinking)
+	require.Equal(t, "enabled", claudeRequest.Thinking.Type)
+	require.Equal(t, "claude-3-5-sonnet", claudeRequest.Model)
 }
