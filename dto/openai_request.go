@@ -366,9 +366,12 @@ func (m *MediaContent) GetFile() *MessageFile {
 		}
 		if itemMap, ok := m.File.(map[string]any); ok {
 			out := &MessageFile{
-				FileName: common.Interface2String(itemMap["file_name"]),
+				FileName: common.Interface2String(itemMap["filename"]),
 				FileData: common.Interface2String(itemMap["file_data"]),
 				FileId:   common.Interface2String(itemMap["file_id"]),
+			}
+			if out.FileName == "" {
+				out.FileName = common.Interface2String(itemMap["file_name"])
 			}
 			return out
 		}
@@ -870,7 +873,12 @@ func (r *OpenAIResponsesRequest) GetTokenCountMeta() *types.TokenCountMeta {
 					})
 				}
 			} else if input.Type == "input_file" {
-				if input.FileUrl != "" {
+				if input.File != nil && input.File.FileData != "" {
+					fileMeta = append(fileMeta, &types.FileMeta{
+						FileType: types.FileTypeFile,
+						Source:   createFileSource(input.File.FileData),
+					})
+				} else if input.FileUrl != "" {
 					fileMeta = append(fileMeta, &types.FileMeta{
 						FileType: types.FileTypeFile,
 						Source:   createFileSource(input.FileUrl),
@@ -948,6 +956,7 @@ type MediaInput struct {
 	FileUrl  string `json:"file_url,omitempty"`
 	ImageUrl string `json:"image_url,omitempty"`
 	Detail   string `json:"detail,omitempty"` // 仅 input_image 有效
+	File     *MessageFile `json:"file,omitempty"`
 }
 
 // ParseInput parses the Responses API `input` field into a normalized slice of MediaInput.
@@ -1021,18 +1030,20 @@ func (r *OpenAIResponsesRequest) ParseInput() []MediaInput {
 							}
 						}
 						mediaInputs = append(mediaInputs, MediaInput{Type: "input_image", ImageUrl: imageUrl})
-					case "input_file":
-						// file_url may be string or object with url field
-						var fileUrl string
-						switch v := item["file_url"].(type) {
-						case string:
-							fileUrl = v
-						case map[string]any:
-							if url, ok := v["url"].(string); ok {
-								fileUrl = url
-							}
-						}
-						mediaInputs = append(mediaInputs, MediaInput{Type: "input_file", FileUrl: fileUrl})
+			case "input_file":
+				mediaInput := MediaInput{Type: "input_file"}
+				switch v := item["file_url"].(type) {
+				case string:
+					mediaInput.FileUrl = v
+				case map[string]any:
+					if url, ok := v["url"].(string); ok {
+						mediaInput.FileUrl = url
+					}
+				}
+				if fileData, ok := item["file"].(map[string]any); ok {
+					mediaInput.File = (&MediaContent{File: fileData}).GetFile()
+				}
+				mediaInputs = append(mediaInputs, mediaInput)
 					}
 				}
 			}
