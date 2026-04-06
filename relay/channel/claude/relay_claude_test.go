@@ -418,3 +418,26 @@ func TestRequestOpenAI2ClaudeMessage_ThinkingAdapterOmitsTopP(t *testing.T) {
 	require.Equal(t, "enabled", claudeRequest.Thinking.Type)
 	require.Equal(t, "claude-3-5-sonnet", claudeRequest.Model)
 }
+
+func TestRequestOpenAI2ClaudeMessage_OpusEffortOmitsTopP(t *testing.T) {
+	request := dto.GeneralOpenAIRequest{
+		Model: "claude-opus-4-6-high",
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.NotNil(t, claudeRequest)
+	require.Nil(t, claudeRequest.TopP)
+	require.NotNil(t, claudeRequest.Temperature)
+	require.Equal(t, 1.0, *claudeRequest.Temperature)
+	require.NotNil(t, claudeRequest.Thinking)
+	require.Equal(t, "adaptive", claudeRequest.Thinking.Type)
+	require.Equal(t, "claude-opus-4-6", claudeRequest.Model)
+	require.JSONEq(t, `{"effort":"high"}`, string(claudeRequest.OutputConfig))
+}
