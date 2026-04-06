@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/stretchr/testify/require"
@@ -440,4 +441,55 @@ func TestRequestOpenAI2ClaudeMessage_OpusEffortOmitsTopP(t *testing.T) {
 	require.Equal(t, "adaptive", claudeRequest.Thinking.Type)
 	require.Equal(t, "claude-opus-4-6", claudeRequest.Model)
 	require.JSONEq(t, `{"effort":"high"}`, string(claudeRequest.OutputConfig))
+}
+
+func TestRequestOpenAI2ClaudeMessage_ReasoningEffortOmitsTopP(t *testing.T) {
+	request := dto.GeneralOpenAIRequest{
+		Model:           "claude-3-5-sonnet",
+		ReasoningEffort: "low",
+		TopP:            common.GetPointer(0.2),
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.NotNil(t, claudeRequest)
+	require.Nil(t, claudeRequest.TopP)
+	require.NotNil(t, claudeRequest.Thinking)
+	require.Equal(t, "enabled", claudeRequest.Thinking.Type)
+	require.NotNil(t, claudeRequest.Thinking.BudgetTokens)
+	require.Equal(t, 1280, *claudeRequest.Thinking.BudgetTokens)
+}
+
+func TestRequestOpenAI2ClaudeMessage_ReasoningMaxTokensOmitsTopP(t *testing.T) {
+	reasoningRaw, err := common.Marshal(map[string]any{
+		"max_tokens": 3000,
+	})
+	require.NoError(t, err)
+
+	request := dto.GeneralOpenAIRequest{
+		Model:     "claude-3-5-sonnet",
+		TopP:      common.GetPointer(0.2),
+		Reasoning: reasoningRaw,
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.NotNil(t, claudeRequest)
+	require.Nil(t, claudeRequest.TopP)
+	require.NotNil(t, claudeRequest.Thinking)
+	require.Equal(t, "enabled", claudeRequest.Thinking.Type)
+	require.NotNil(t, claudeRequest.Thinking.BudgetTokens)
+	require.Equal(t, 3000, *claudeRequest.Thinking.BudgetTokens)
 }

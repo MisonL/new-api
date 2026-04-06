@@ -259,6 +259,9 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 				BudgetTokens: common.GetPointer[int](4096),
 			}
 		}
+		if claudeRequest.Thinking != nil {
+			claudeRequest.TopP = nil
+		}
 	}
 
 	// 指定了 reasoning 参数,覆盖 budgetTokens
@@ -274,6 +277,7 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 				Type:         "enabled",
 				BudgetTokens: &budgetTokens,
 			}
+			claudeRequest.TopP = nil
 		}
 	}
 
