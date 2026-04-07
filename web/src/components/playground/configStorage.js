@@ -21,6 +21,7 @@ import {
   STORAGE_KEYS,
   DEFAULT_CONFIG,
 } from '../../constants/playground.constants';
+import { sanitizePlaygroundInputs } from '../../helpers/playgroundMaxTokens';
 
 const MESSAGES_STORAGE_KEY = 'playground_messages';
 
@@ -65,16 +66,12 @@ export const loadConfig = () => {
     const savedConfig = localStorage.getItem(STORAGE_KEYS.CONFIG);
     if (savedConfig) {
       const parsedConfig = JSON.parse(savedConfig);
-      const parsedMaxTokens = parseInt(parsedConfig?.inputs?.max_tokens, 10);
 
       const mergedConfig = {
-        inputs: {
+        inputs: sanitizePlaygroundInputs({
           ...DEFAULT_CONFIG.inputs,
           ...parsedConfig.inputs,
-          max_tokens: Number.isNaN(parsedMaxTokens)
-            ? parsedConfig?.inputs?.max_tokens
-            : parsedMaxTokens,
-        },
+        }),
         parameterEnabled: {
           ...DEFAULT_CONFIG.parameterEnabled,
           ...parsedConfig.parameterEnabled,

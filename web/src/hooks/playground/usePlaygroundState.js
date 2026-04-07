@@ -33,6 +33,7 @@ import {
   saveMessages,
 } from '../../components/playground/configStorage';
 import { processIncompleteThinkTags } from '../../helpers';
+import { sanitizePlaygroundInputs } from '../../helpers/playgroundMaxTokens';
 
 export const usePlaygroundState = () => {
   const { t } = useTranslation();
@@ -167,13 +168,9 @@ export const usePlaygroundState = () => {
   // 配置导入/重置
   const handleConfigImport = useCallback((importedConfig) => {
     if (importedConfig.inputs) {
-      const parsedMaxTokens = parseInt(importedConfig.inputs.max_tokens, 10);
       setInputs((prev) => ({
         ...prev,
-        ...importedConfig.inputs,
-        max_tokens: Number.isNaN(parsedMaxTokens)
-          ? importedConfig.inputs.max_tokens
-          : parsedMaxTokens,
+        ...sanitizePlaygroundInputs(importedConfig.inputs),
       }));
     }
     if (importedConfig.parameterEnabled) {
