@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -13,6 +14,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -465,6 +468,66 @@ func TestRecalculateTaskQuotaByTokens_AppliesOtherRatios(t *testing.T) {
 	assert.Equal(t, model.LogTypeConsume, log.Type)
 	assert.Equal(t, actualQuota-preConsumed, log.Quota)
 	assert.True(t, strings.Contains(log.Content, "otherMultiplier=1.5000"))
+}
+
+func TestLogTaskConsumption_FixedPriceTaskUsesPerCallContent(t *testing.T) {
+	truncate(t)
+	gin.SetMode(gin.TestMode)
+
+	const userID, tokenID, channelID = 16, 16, 16
+	seedUser(t, userID, 10000)
+	seedToken(t, tokenID, userID, "sk-task-log", 5000)
+	seedChannel(t, channelID)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/video/generations", nil)
+	ctx.Set("token_name", "test_token")
+
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		OriginModelName: "fixed-price-task-model",
+		UsingGroup:      "default",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: channelID,
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{
+			Action: "generate",
+		},
+		PriceData: types.PriceData{
+			UsePrice:   true,
+			ModelPrice: 0.4,
+			Quota:      2000,
+			GroupRatioInfo: types.GroupRatioInfo{
+				GroupRatio: 1,
+			},
+		},
+	}
+
+	LogTaskConsumption(ctx, info)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Contains(t, log.Content, "按次计费")
+
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, true, other["is_task"])
+	assert.Equal(t, "/v1/video/generations", other["request_path"])
+}
+
+func TestTaskBillingOther_IncludesModelRatio(t *testing.T) {
+	task := makeTask(1, 1, 1000, 1, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.ModelRatio = 2.5
+	task.PrivateData.BillingContext.OtherRatios = map[string]float64{
+		"seconds": 4,
+	}
+
+	other := taskBillingOther(task)
+
+	assert.Equal(t, 2.5, other["model_ratio"])
+	assert.Equal(t, 4.0, other["seconds"])
 }
 
 // ===========================================================================
