@@ -132,6 +132,49 @@ func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *r
 	return nil
 }
 
+// EstimateBilling 检测 metadata 是否包含视频输入，并返回对应折扣倍率。
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	if !hasVideoInMetadata(req.Metadata) {
+		return nil
+	}
+	ratio, ok := GetVideoInputRatio(info.OriginModelName)
+	if !ok {
+		return nil
+	}
+	return map[string]float64{"video_input": ratio}
+}
+
+func hasVideoInMetadata(metadata map[string]interface{}) bool {
+	if metadata == nil {
+		return false
+	}
+	contentRaw, ok := metadata["content"]
+	if !ok {
+		return false
+	}
+	contentItems, ok := contentRaw.([]interface{})
+	if !ok {
+		return false
+	}
+	for _, item := range contentItems {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if itemMap["type"] == "video_url" {
+			return true
+		}
+		if _, ok := itemMap["video_url"]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildRequestBody converts request into Doubao specific format.
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
 	req, err := relaycommon.GetTaskRequest(c)
