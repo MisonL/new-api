@@ -182,10 +182,10 @@ export const usePlaygroundState = () => {
     if (typeof importedConfig.showDebugPanel === 'boolean') {
       setShowDebugPanel(importedConfig.showDebugPanel);
     }
-    if (importedConfig.customRequestMode) {
+    if (typeof importedConfig.customRequestMode === 'boolean') {
       setCustomRequestMode(importedConfig.customRequestMode);
     }
-    if (importedConfig.customRequestBody) {
+    if (typeof importedConfig.customRequestBody === 'string') {
       setCustomRequestBody(importedConfig.customRequestBody);
     }
     // 如果导入的配置包含消息，也恢复消息

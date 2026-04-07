@@ -77,11 +77,17 @@ export const loadConfig = () => {
           ...parsedConfig.parameterEnabled,
         },
         showDebugPanel:
-          parsedConfig.showDebugPanel || DEFAULT_CONFIG.showDebugPanel,
+          typeof parsedConfig.showDebugPanel === 'boolean'
+            ? parsedConfig.showDebugPanel
+            : DEFAULT_CONFIG.showDebugPanel,
         customRequestMode:
-          parsedConfig.customRequestMode || DEFAULT_CONFIG.customRequestMode,
+          typeof parsedConfig.customRequestMode === 'boolean'
+            ? parsedConfig.customRequestMode
+            : DEFAULT_CONFIG.customRequestMode,
         customRequestBody:
-          parsedConfig.customRequestBody || DEFAULT_CONFIG.customRequestBody,
+          typeof parsedConfig.customRequestBody === 'string'
+            ? parsedConfig.customRequestBody
+            : DEFAULT_CONFIG.customRequestBody,
       };
 
       return mergedConfig;
