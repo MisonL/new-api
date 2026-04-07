@@ -277,9 +277,19 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		finalGroupRatio = groupRatio
 	}
 
-	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio
-	actualQuota := int(float64(totalTokens) * modelRatio * finalGroupRatio)
+	otherMultiplier := 1.0
+	if bc := task.PrivateData.BillingContext; bc != nil {
+		for _, ratio := range bc.OtherRatios {
+			if ratio != 1.0 && ratio > 0 {
+				otherMultiplier *= ratio
+			}
+		}
+	}
 
-	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f", totalTokens, modelRatio, finalGroupRatio)
+	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio * otherMultiplier
+	actualQuota := int(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
+
+	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f",
+		totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
 	RecalculateTaskQuota(ctx, task, actualQuota, reason)
 }

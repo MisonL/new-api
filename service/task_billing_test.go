@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -425,6 +427,44 @@ func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestRecalculateTaskQuotaByTokens_AppliesOtherRatios(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 15, 15, 15
+	const initQuota, preConsumed = 10000, 200
+	const tokenRemain = 5000
+	const totalTokens = 100
+
+	ratio_setting.InitRatioSettings()
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"test-task-ratio":2}`))
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-token-recalc-ratio", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.Properties.OriginModelName = "test-task-ratio"
+	task.PrivateData.BillingContext.OriginModelName = "test-task-ratio"
+	task.PrivateData.BillingContext.OtherRatios = map[string]float64{
+		"seconds":     3,
+		"video_input": 0.5,
+	}
+
+	RecalculateTaskQuotaByTokens(ctx, task, totalTokens)
+
+	const actualQuota = 300
+	assert.Equal(t, initQuota-(actualQuota-preConsumed), getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain-(actualQuota-preConsumed), getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, actualQuota, task.Quota)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Equal(t, actualQuota-preConsumed, log.Quota)
+	assert.True(t, strings.Contains(log.Content, "otherMultiplier=1.5000"))
 }
 
 // ===========================================================================
