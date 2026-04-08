@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7f4ea" />
+      <stop offset="100%" stop-color="#e8eef5" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#23303f" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .title { font: 700 44px 'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif; fill: #17212b; }
+      .subtitle { font: 500 20px 'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif; fill: #415366; }
+      .section { font: 700 24px 'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif; fill: #17212b; }
+      .cardTitle { font: 700 24px 'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif; fill: #17212b; }
+      .cardText { font: 500 18px 'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif; fill: #324354; }
+      .small { font: 500 16px 'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif; fill: #5b6a79; }
+      .tag { font: 700 16px 'SFMono-Regular','Consolas','Menlo',monospace; }
+      .mono { font: 600 16px 'SFMono-Regular','Consolas','Menlo',monospace; fill: #253242; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1080" fill="url(#bg)"/>
+  <rect x="48" y="40" width="1504" height="1000" rx="32" fill="#ffffff" filter="url(#shadow)"/>
+
+  <text x="96" y="120" class="title">new-api 当前 Open PR 摘要图</text>
+  <text x="96" y="158" class="subtitle">用于 PR #3467 跟帖说明，聚焦仍在 open 的分支功能范围与认证能力评审顺序</text>
+  <text x="96" y="192" class="small">更新时间：2026-04-08 · 说明对象：@RedWindA</text>
+
+  <text x="96" y="252" class="section">A. 独立问题修复</text>
+
+  <rect x="96" y="280" width="676" height="150" rx="22" fill="#f8fbff" stroke="#d7e7f8"/>
+  <rect x="118" y="302" width="108" height="36" rx="18" fill="#dcedff"/>
+  <text x="141" y="326" class="tag" fill="#1155aa">#3402</text>
+  <text x="248" y="330" class="cardTitle">stale channel cache 误判 503 修复</text>
+  <text x="118" y="370" class="cardText">避免 distributor 因旧缓存与真实能力状态不同步而返回错误的 503。</text>
+  <text x="118" y="404" class="small">性质：可独立评审 / 可独立合并</text>
+
+  <rect x="96" y="452" width="676" height="150" rx="22" fill="#fbfaf6" stroke="#eadfb8"/>
+  <rect x="118" y="474" width="108" height="36" rx="18" fill="#f8edc8"/>
+  <text x="141" y="498" class="tag" fill="#8b5e00">#4057</text>
+  <text x="248" y="502" class="cardTitle">negative usage log latency 防护</text>
+  <text x="118" y="542" class="cardText">收紧日志与费用链路中的负延迟异常，避免统计与展示被错误值带偏。</text>
+  <text x="118" y="576" class="small">性质：可独立评审 / 可独立合并</text>
+
+  <text x="828" y="252" class="section">B. 认证接入能力扩展</text>
+  <text x="828" y="286" class="small">推荐评审 / 合并顺序：#3447 → #3467 / #4064</text>
+
+  <rect x="828" y="310" width="676" height="170" rx="24" fill="#f7fbf8" stroke="#cfe7d6"/>
+  <rect x="850" y="332" width="108" height="36" rx="18" fill="#d9f4df"/>
+  <text x="873" y="356" class="tag" fill="#17663b">#3447</text>
+  <text x="980" y="360" class="cardTitle">JWT Direct SSO 基础线</text>
+  <text x="850" y="400" class="cardText">补齐 JWT Direct 登录模式、票据处理模式、身份解析与前后端设置面。</text>
+  <text x="850" y="434" class="small">定位：这组三条认证 PR 的基础地基</text>
+
+  <path d="M 1166 490 L 1166 544" stroke="#9fb7c9" stroke-width="4" stroke-linecap="round"/>
+  <path d="M 1166 544 L 1154 528 M 1166 544 L 1178 528" stroke="#9fb7c9" stroke-width="4" stroke-linecap="round"/>
+
+  <rect x="828" y="566" width="316" height="190" rx="24" fill="#fff7f4" stroke="#f1d3c6"/>
+  <rect x="850" y="588" width="108" height="36" rx="18" fill="#ffe1d6"/>
+  <text x="873" y="612" class="tag" fill="#b6451b">#3467</text>
+  <text x="850" y="654" class="cardTitle">Trusted Header Enterprise SSO</text>
+  <text x="850" y="694" class="cardText">在 JWT 基础能力之上，扩展可信代理</text>
+  <text x="850" y="724" class="cardText">注入 Header 的企业 SSO 接入链路。</text>
+
+  <rect x="1188" y="566" width="316" height="190" rx="24" fill="#f6f8ff" stroke="#d5dcff"/>
+  <rect x="1210" y="588" width="108" height="36" rx="18" fill="#dfe5ff"/>
+  <text x="1233" y="612" class="tag" fill="#334bb5">#4064</text>
+  <text x="1210" y="654" class="cardTitle">CAS ticket callback / standalone</text>
+  <text x="1210" y="694" class="cardText">补齐 CAS 协议登录、回调页处理、</text>
+  <text x="1210" y="724" class="cardText">ticket 校验与 standalone 流程。</text>
+
+  <rect x="96" y="668" width="676" height="230" rx="24" fill="#17212b"/>
+  <text x="126" y="714" class="section" fill="#ffffff">C. 当前补充说明</text>
+  <text x="126" y="756" class="cardText" fill="#e8eef5">1. 这张图用于帮助快速理解 open PR 的功能边界，不改变代码事实本身。</text>
+  <text x="126" y="792" class="cardText" fill="#e8eef5">2. `#3467` 与 `#4064` 都共享 custom OAuth surface，但二者不是彼此功能依赖。</text>
+  <text x="126" y="828" class="cardText" fill="#e8eef5">3. 最近已额外补推前端联调修复：有效服务器地址展示、默认占位地址提示、配置弹窗防溢出。</text>
+  <text x="126" y="864" class="mono" fill="#d7e7f8">#3467 head: b11b8791    #4064 head: 09dfb5a0</text>
+
+  <rect x="828" y="790" width="676" height="108" rx="20" fill="#fff8df" stroke="#ead9a2"/>
+  <text x="854" y="836" class="cardTitle">结论</text>
+  <text x="854" y="874" class="cardText">如果要优先看认证接入能力，请先看 #3447，再分别看 #3467 与 #4064。</text>
+
+  <text x="96" y="970" class="small">注：该图为补充说明版整理图，用于替代前面评论里缺失的附图。</text>
+</svg>
