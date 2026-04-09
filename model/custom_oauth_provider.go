@@ -12,6 +12,7 @@ import (
 
 const (
 	CustomOAuthProviderKindOAuthCode     = "oauth_code"
+	CustomOAuthProviderKindCAS           = "cas"
 	CustomOAuthProviderKindJWTDirect     = "jwt_direct"
 	CustomOAuthProviderKindTrustedHeader = "trusted_header"
 )
@@ -83,7 +84,7 @@ type CustomOAuthProvider struct {
 	Name                       string `json:"name" gorm:"type:varchar(64);not null"`                                 // Display name, e.g., "GitHub Enterprise"
 	Slug                       string `json:"slug" gorm:"type:varchar(64);uniqueIndex;not null"`                     // URL identifier, e.g., "github-enterprise"
 	Icon                       string `json:"icon" gorm:"type:varchar(128);default:''"`                              // Icon name from @lobehub/icons
-	Kind                       string `json:"kind" gorm:"type:varchar(32);default:'oauth_code'"`                     // oauth_code / jwt_direct
+	Kind                       string `json:"kind" gorm:"type:varchar(32);default:'oauth_code'"`                     // oauth_code / cas / jwt_direct / trusted_header
 	Enabled                    bool   `json:"enabled" gorm:"default:false"`                                          // Whether this provider is enabled
 	ClientId                   string `json:"client_id" gorm:"type:varchar(256)"`                                    // OAuth client ID
 	ClientSecret               string `json:"-" gorm:"type:varchar(512)"`                                            // OAuth client secret (not returned to frontend)
@@ -106,6 +107,11 @@ type CustomOAuthProvider struct {
 	EmailHeader                string `json:"email_header" gorm:"type:varchar(128)"`                                 // Optional email header
 	GroupHeader                string `json:"group_header" gorm:"type:varchar(128)"`                                 // Optional group header
 	RoleHeader                 string `json:"role_header" gorm:"type:varchar(128)"`                                  // Optional role header
+	CASServerURL               string `json:"cas_server_url" gorm:"type:varchar(512)"`                               // CAS server base URL
+	ServiceURL                 string `json:"service_url" gorm:"type:varchar(512)"`                                  // Optional browser callback URL override
+	ValidateURL                string `json:"validate_url" gorm:"type:varchar(512)"`                                 // Optional CAS validation URL override
+	Renew                      bool   `json:"renew" gorm:"default:false"`                                            // Force primary credentials for login
+	Gateway                    bool   `json:"gateway" gorm:"default:false"`                                          // Request passive login when supported
 	AuthorizationServiceField  string `json:"authorization_service_field" gorm:"type:varchar(64);default:'service'"` // browser login callback param for ticket exchange
 	TicketExchangeURL          string `json:"ticket_exchange_url" gorm:"type:varchar(512)"`                          // ticket processing endpoint URL
 	TicketExchangeMethod       string `json:"ticket_exchange_method" gorm:"type:varchar(16);default:'GET'"`          // GET / POST
@@ -165,6 +171,10 @@ func (p *CustomOAuthProvider) IsTrustedHeader() bool {
 	return p.GetKind() == CustomOAuthProviderKindTrustedHeader
 }
 
+func (p *CustomOAuthProvider) IsCAS() bool {
+	return p.GetKind() == CustomOAuthProviderKindCAS
+}
+
 func (p *CustomOAuthProvider) IsOAuthCode() bool {
 	return p.GetKind() == CustomOAuthProviderKindOAuthCode
 }
@@ -191,6 +201,9 @@ func (p *CustomOAuthProvider) SupportsBrowserLogin() bool {
 	}
 	if p.IsOAuthCode() {
 		return isValidAbsoluteHTTPURL(p.AuthorizationEndpoint) && strings.TrimSpace(p.ClientId) != ""
+	}
+	if p.IsCAS() {
+		return isValidAbsoluteHTTPURL(p.CASServerURL)
 	}
 	if p.IsJWTDirect() {
 		if p.GetJWTIdentityMode() == CustomJWTIdentityModeUserInfo && !p.RequiresTicketAcquire() {
@@ -314,6 +327,7 @@ func validateCustomOAuthProvider(provider *CustomOAuthProvider) error {
 		provider.Kind = CustomOAuthProviderKindOAuthCode
 	}
 	if provider.Kind != CustomOAuthProviderKindOAuthCode &&
+		provider.Kind != CustomOAuthProviderKindCAS &&
 		provider.Kind != CustomOAuthProviderKindJWTDirect &&
 		provider.Kind != CustomOAuthProviderKindTrustedHeader {
 		return errors.New("provider kind is invalid")
@@ -332,6 +346,10 @@ func validateCustomOAuthProvider(provider *CustomOAuthProvider) error {
 		}
 		if provider.UserInfoEndpoint == "" {
 			return errors.New("user info endpoint is required")
+		}
+	} else if provider.IsCAS() {
+		if err := validateCASProvider(provider); err != nil {
+			return err
 		}
 	} else if provider.IsJWTDirect() {
 		acquireMode := normalizeCustomJWTAcquireMode(provider.JWTAcquireMode)
@@ -368,7 +386,7 @@ func validateCustomOAuthProvider(provider *CustomOAuthProvider) error {
 		}
 	}
 
-	if provider.IsOAuthCode() || provider.IsJWTDirect() {
+	if provider.IsOAuthCode() || provider.IsJWTDirect() || provider.IsCAS() {
 		if provider.UserIdField == "" {
 			provider.UserIdField = "sub"
 		}

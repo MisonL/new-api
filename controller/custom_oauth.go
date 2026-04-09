@@ -44,6 +44,11 @@ type CustomOAuthProviderResponse struct {
 	EmailHeader                string `json:"email_header"`
 	GroupHeader                string `json:"group_header"`
 	RoleHeader                 string `json:"role_header"`
+	CASServerURL               string `json:"cas_server_url"`
+	ServiceURL                 string `json:"service_url"`
+	ValidateURL                string `json:"validate_url"`
+	Renew                      bool   `json:"renew"`
+	Gateway                    bool   `json:"gateway"`
 	AuthorizationServiceField  string `json:"authorization_service_field"`
 	TicketExchangeURL          string `json:"ticket_exchange_url"`
 	TicketExchangeMethod       string `json:"ticket_exchange_method"`
@@ -141,6 +146,11 @@ func toCustomOAuthProviderResponse(p *model.CustomOAuthProvider) *CustomOAuthPro
 		EmailHeader:                sanitized.EmailHeader,
 		GroupHeader:                sanitized.GroupHeader,
 		RoleHeader:                 sanitized.RoleHeader,
+		CASServerURL:               sanitized.CASServerURL,
+		ServiceURL:                 sanitized.ServiceURL,
+		ValidateURL:                sanitized.ValidateURL,
+		Renew:                      sanitized.Renew,
+		Gateway:                    sanitized.Gateway,
 		AuthorizationServiceField:  authorizationServiceField,
 		TicketExchangeURL:          sanitized.TicketExchangeURL,
 		TicketExchangeMethod:       ticketExchangeMethod,
@@ -242,6 +252,11 @@ type CreateCustomOAuthProviderRequest struct {
 	EmailHeader                string `json:"email_header"`
 	GroupHeader                string `json:"group_header"`
 	RoleHeader                 string `json:"role_header"`
+	CASServerURL               string `json:"cas_server_url"`
+	ServiceURL                 string `json:"service_url"`
+	ValidateURL                string `json:"validate_url"`
+	Renew                      bool   `json:"renew"`
+	Gateway                    bool   `json:"gateway"`
 	AuthorizationServiceField  string `json:"authorization_service_field"`
 	TicketExchangeURL          string `json:"ticket_exchange_url"`
 	TicketExchangeMethod       string `json:"ticket_exchange_method"`
@@ -400,6 +415,11 @@ func CreateCustomOAuthProvider(c *gin.Context) {
 		EmailHeader:                req.EmailHeader,
 		GroupHeader:                req.GroupHeader,
 		RoleHeader:                 req.RoleHeader,
+		CASServerURL:               req.CASServerURL,
+		ServiceURL:                 req.ServiceURL,
+		ValidateURL:                req.ValidateURL,
+		Renew:                      req.Renew,
+		Gateway:                    req.Gateway,
 		AuthorizationServiceField:  req.AuthorizationServiceField,
 		TicketExchangeURL:          req.TicketExchangeURL,
 		TicketExchangeMethod:       req.TicketExchangeMethod,
@@ -476,6 +496,11 @@ type UpdateCustomOAuthProviderRequest struct {
 	EmailHeader                *string `json:"email_header"`
 	GroupHeader                *string `json:"group_header"`
 	RoleHeader                 *string `json:"role_header"`
+	CASServerURL               *string `json:"cas_server_url"`
+	ServiceURL                 *string `json:"service_url"`
+	ValidateURL                *string `json:"validate_url"`
+	Renew                      *bool   `json:"renew"`
+	Gateway                    *bool   `json:"gateway"`
 	AuthorizationServiceField  *string `json:"authorization_service_field"`
 	TicketExchangeURL          *string `json:"ticket_exchange_url"`
 	TicketExchangeMethod       *string `json:"ticket_exchange_method"`
@@ -623,6 +648,21 @@ func UpdateCustomOAuthProvider(c *gin.Context) {
 	}
 	if req.RoleHeader != nil {
 		provider.RoleHeader = *req.RoleHeader
+	}
+	if req.CASServerURL != nil {
+		provider.CASServerURL = *req.CASServerURL
+	}
+	if req.ServiceURL != nil {
+		provider.ServiceURL = *req.ServiceURL
+	}
+	if req.ValidateURL != nil {
+		provider.ValidateURL = *req.ValidateURL
+	}
+	if req.Renew != nil {
+		provider.Renew = *req.Renew
+	}
+	if req.Gateway != nil {
+		provider.Gateway = *req.Gateway
 	}
 	if req.AuthorizationServiceField != nil {
 		provider.AuthorizationServiceField = *req.AuthorizationServiceField

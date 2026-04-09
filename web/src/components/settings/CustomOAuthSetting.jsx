@@ -174,6 +174,7 @@ const REQUIRED_FIELD_LABELS = {
   issuer: '发行者',
   trusted_proxy_cidrs: '可信代理 CIDR JSON',
   external_id_header: '外部身份 Header',
+  cas_server_url: 'CAS 服务端 URL',
 };
 
 const ACCESS_POLICY_TEMPLATES = {
@@ -229,6 +230,10 @@ const CustomOAuthSetting = ({ serverAddress }) => {
     {
       value: 'oauth_code',
       label: t('OAuth 2.0 / OIDC 授权码模式'),
+    },
+    {
+      value: 'cas',
+      label: t('CAS 协议登录'),
     },
     {
       value: 'jwt_direct',
@@ -290,6 +295,7 @@ const CustomOAuthSetting = ({ serverAddress }) => {
     email_field: t('邮箱字段'),
   };
   const currentProviderKind = formValues.kind || 'oauth_code';
+  const isCAS = currentProviderKind === 'cas';
   const isJWTDirect = currentProviderKind === 'jwt_direct';
   const isTrustedHeader = currentProviderKind === 'trusted_header';
   const isOAuthCode = currentProviderKind === 'oauth_code';
@@ -297,7 +303,8 @@ const CustomOAuthSetting = ({ serverAddress }) => {
     isOAuthCode &&
     !!editingProvider &&
     (editingProvider.kind || 'oauth_code') !== 'oauth_code';
-  const usesMappedRoleGroup = isOAuthCode || isJWTDirect || isTrustedHeader;
+  const usesMappedRoleGroup =
+    isOAuthCode || isCAS || isJWTDirect || isTrustedHeader;
   const currentJWTIdentityMode = formValues.jwt_identity_mode || 'claims';
   const currentJWTAcquireMode = formValues.jwt_acquire_mode || 'direct_token';
   const isJWTTicketExchange =
@@ -409,6 +416,11 @@ const CustomOAuthSetting = ({ serverAddress }) => {
       email_header: '',
       group_header: '',
       role_header: '',
+      cas_server_url: '',
+      service_url: '',
+      validate_url: '',
+      renew: false,
+      gateway: false,
       user_id_field: 'sub',
       username_field: 'preferred_username',
       display_name_field: 'name',
@@ -464,6 +476,11 @@ const CustomOAuthSetting = ({ serverAddress }) => {
       email_header: provider.email_header || '',
       group_header: provider.group_header || '',
       role_header: provider.role_header || '',
+      cas_server_url: provider.cas_server_url || '',
+      service_url: provider.service_url || '',
+      validate_url: provider.validate_url || '',
+      renew: !!provider.renew,
+      gateway: !!provider.gateway,
       sync_username_on_login: !!provider.sync_username_on_login,
       sync_display_name_on_login: !!provider.sync_display_name_on_login,
       sync_email_on_login: !!provider.sync_email_on_login,
@@ -515,6 +532,22 @@ const CustomOAuthSetting = ({ serverAddress }) => {
 
       if (requiresNewOAuthClientSecret) {
         requiredFields.push('client_secret');
+      }
+    } else if (providerKind === 'cas') {
+      requiredFields.push('cas_server_url');
+      const casEndpoints = ['cas_server_url', 'service_url', 'validate_url'];
+      for (const field of casEndpoints) {
+        const value = currentValues[field];
+        if (
+          value &&
+          !value.startsWith('http://') &&
+          !value.startsWith('https://')
+        ) {
+          showError(
+            t('CAS 相关 URL 必须是完整地址（以 http:// 或 https:// 开头）'),
+          );
+          return;
+        }
       }
     } else if (providerKind === 'jwt_direct') {
       const acquireMode = currentValues.jwt_acquire_mode || 'direct_token';
@@ -643,6 +676,22 @@ const CustomOAuthSetting = ({ serverAddress }) => {
         delete payload.ticket_exchange_service_field;
         delete payload.ticket_exchange_extra_params;
         delete payload.ticket_exchange_headers;
+      }
+      if (providerKind !== 'cas') {
+        delete payload.cas_server_url;
+        delete payload.service_url;
+        delete payload.validate_url;
+        delete payload.renew;
+        delete payload.gateway;
+      } else {
+        delete payload.client_id;
+        delete payload.client_secret;
+        delete payload.authorization_endpoint;
+        delete payload.token_endpoint;
+        delete payload.user_info_endpoint;
+        delete payload.scopes;
+        delete payload.well_known;
+        delete payload.auth_style;
       }
       if (providerKind !== 'trusted_header') {
         delete payload.trusted_proxy_cidrs;
@@ -882,6 +931,8 @@ const CustomOAuthSetting = ({ serverAddress }) => {
           color={
             kind === 'jwt_direct'
               ? 'blue'
+              : kind === 'cas'
+                ? 'green'
               : kind === 'trusted_header'
                 ? 'orange'
                 : 'cyan'
@@ -889,6 +940,8 @@ const CustomOAuthSetting = ({ serverAddress }) => {
         >
           {kind === 'jwt_direct'
             ? t('JWT 直连')
+            : kind === 'cas'
+              ? t('CAS 协议')
             : kind === 'trusted_header'
               ? t('可信 Header')
               : t('OAuth 授权码')}
@@ -969,7 +1022,7 @@ const CustomOAuthSetting = ({ serverAddress }) => {
           description={
             <>
               {t(
-                '配置自定义外部身份提供商，支持 OAuth Code Flow、JWT Direct 和可信 Header SSO 三种接入模式',
+                '配置自定义外部身份提供商，支持 OAuth Code Flow、CAS、JWT Direct 和可信 Header SSO 四种接入模式',
               )}
               <br />
               {t('浏览器回调 URL')}: {effectiveServerAddress || t('网站地址')}
@@ -978,11 +1031,15 @@ const CustomOAuthSetting = ({ serverAddress }) => {
               <br />
               {t('说明')}:{' '}
               {t(
+                'CAS 模式通过 start/callback 两段式流程完成浏览器跳转与 service ticket 校验，登录成功后继续复用现有绑定、注册与权限映射逻辑',
+              )}
+              <br />
+              {t(
                 'JWT Direct 支持 direct_token、ticket_exchange、ticket_validate 三种获取模式，并支持 claims 或 userinfo 两类身份解析方式',
               )}
               <br />
               {t(
-                '浏览器回调 URL 仅用于 OAuth Code Flow 和 JWT Direct；可信 Header SSO 通过代理注入的 Header 完成登录，不使用 /oauth/{slug} 浏览器回调',
+                '浏览器回调 URL 用于 OAuth Code Flow、CAS 和 JWT Direct；CAS 会先走 /api/auth/external/{slug}/cas/start，再在回调阶段完成验票与登录；可信 Header SSO 不使用 /oauth/{slug} 浏览器回调',
               )}
             </>
           }
@@ -1081,10 +1138,14 @@ const CustomOAuthSetting = ({ serverAddress }) => {
                     ? t(
                         'JWT Direct 使用前端回调页接收 token，再由后端调用用户信息接口验证 token 并提取身份',
                       )
-                    : isJWTDirect
+                : isJWTDirect
                       ? t(
                           'JWT Direct 使用前端回调页接收 JWT，再由后端完成验签、建号、绑定与登录',
                         )
+                      : isCAS
+                        ? t(
+                            'CAS 模式先由后端发起浏览器跳转，再在回调阶段校验 service ticket，随后复用现有外部身份归一化、绑定和登录逻辑',
+                          )
                       : isTrustedHeader
                         ? t(
                             '可信 Header SSO 仅信任来自指定代理网段的请求，并从代理注入的 Header 中提取身份、映射权限并建立本地会话',
@@ -1305,6 +1366,8 @@ const CustomOAuthSetting = ({ serverAddress }) => {
                       ? isJWTTicketExchange
                         ? t('可选：仅部分 JWT 登录方式需要客户端 ID')
                         : t('可选：JWT 前端跳转使用的客户端 ID')
+                      : isCAS
+                        ? t('CAS 模式不需要客户端 ID')
                       : isTrustedHeader
                         ? t('可信 Header 模式不需要客户端 ID')
                         : t('OAuth 客户端 ID')
@@ -1314,6 +1377,7 @@ const CustomOAuthSetting = ({ serverAddress }) => {
                       ? []
                       : [{ required: true, message: t('请输入客户端 ID') }]
                   }
+                  disabled={isCAS || isTrustedHeader}
                 />
               </Col>
               {isOAuthCode && (
@@ -1386,12 +1450,14 @@ const CustomOAuthSetting = ({ serverAddress }) => {
             <Text strong style={{ display: 'block', margin: '16px 0 8px' }}>
               {isJWTDirect
                 ? t('JWT 入口与验签')
+                : isCAS
+                  ? t('CAS 服务端与回调')
                 : isTrustedHeader
                   ? t('可信代理与身份头')
                   : t('OAuth 端点')}
             </Text>
 
-            {!isTrustedHeader && (
+            {!isTrustedHeader && !isCAS && (
               <Row gutter={16}>
                 <Col span={24}>
                   <Form.Input
@@ -1431,6 +1497,65 @@ const CustomOAuthSetting = ({ serverAddress }) => {
               </Row>
             )}
 
+            {isCAS && (
+              <>
+                <Row gutter={16}>
+                  <Col span={24}>
+                    <Form.Input
+                      field='cas_server_url'
+                      label={t('CAS 服务端 URL')}
+                      placeholder='https://cas.example.com/cas'
+                      extraText={t(
+                        '填写 CAS 服务根地址；登录入口默认拼接为 /login，验票地址默认拼接为 /serviceValidate',
+                      )}
+                      rules={[
+                        {
+                          required: true,
+                          message: t('请输入 CAS 服务端 URL'),
+                        },
+                      ]}
+                    />
+                  </Col>
+                </Row>
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Input
+                      field='service_url'
+                      label={t('Service URL（可选）')}
+                      placeholder='https://newapi.example.com/oauth/acme-cas'
+                      extraText={t(
+                        '留空时自动使用站点地址拼接 /oauth/{slug}?state=... 作为 service',
+                      )}
+                    />
+                  </Col>
+                  <Col span={12}>
+                    <Form.Input
+                      field='validate_url'
+                      label={t('Validate URL（可选）')}
+                      placeholder='https://cas.example.com/cas/p3/serviceValidate'
+                      extraText={t(
+                        '留空时默认使用 CAS 服务端 URL 拼接 /serviceValidate',
+                      )}
+                    />
+                  </Col>
+                </Row>
+                <Row gutter={16}>
+                  <Col span={6}>
+                    <Form.Switch
+                      field='renew'
+                      label={t('强制重新认证（renew）')}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Form.Switch
+                      field='gateway'
+                      label={t('被动探测登录（gateway）')}
+                    />
+                  </Col>
+                </Row>
+              </>
+            )}
+
             {isOAuthCode && (
               <Row gutter={16}>
                 <Col span={12}>
@@ -1467,7 +1592,7 @@ const CustomOAuthSetting = ({ serverAddress }) => {
               </Row>
             )}
 
-            {!isTrustedHeader && (
+            {!isTrustedHeader && !isCAS && (
               <Row gutter={16}>
                 <Col span={12}>
                   <Form.Input
@@ -1925,6 +2050,10 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtest
                 : isJWTTicketValidateMode
                   ? t(
                       '配置如何从票据校验响应中提取用户数据，支持 gjson 路径语法，例如 authenticationSuccess.attributes.mailbox',
+                    )
+                : isCAS
+                  ? t(
+                      '配置如何从 CAS ticket 校验响应中提取用户数据，支持 gjson 路径语法，例如 authenticationSuccess.attributes.mailbox',
                     )
                 : isJWTDirect
                   ? t(
