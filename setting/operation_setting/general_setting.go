@@ -13,6 +13,7 @@ const (
 // GeneralSetting contains globally mutable operation settings exposed in the admin console.
 type GeneralSetting struct {
 	DocsLink                                          string `json:"docs_link"`
+	LogFilterAutocompleteEnabled                      bool   `json:"log_filter_autocomplete_enabled"`
 	PingIntervalEnabled                               bool   `json:"ping_interval_enabled"`
 	PingIntervalSeconds                               int    `json:"ping_interval_seconds"`
 	ResponsesStreamBootstrapRecoveryEnabled           bool   `json:"responses_stream_bootstrap_recovery_enabled"`
@@ -46,6 +47,7 @@ func DefaultResponsesBootstrapRetryableStatusCodes() []int {
 // 默认配置
 var generalSetting = GeneralSetting{
 	DocsLink:                                          "https://docs.newapi.pro",
+	LogFilterAutocompleteEnabled:                      true,
 	PingIntervalEnabled:                               false,
 	PingIntervalSeconds:                               60,
 	ResponsesStreamBootstrapRecoveryEnabled:           false,

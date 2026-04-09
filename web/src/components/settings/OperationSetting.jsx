@@ -41,6 +41,7 @@ const OperationSetting = () => {
     /* 通用设置 */
     TopUpLink: '',
     'general_setting.docs_link': '',
+    'general_setting.log_filter_autocomplete_enabled': true,
     'general_setting.responses_stream_bootstrap_recovery_enabled': false,
     'general_setting.responses_stream_bootstrap_grace_period_seconds': 180,
     'general_setting.responses_stream_bootstrap_probe_interval_milliseconds': 1000,
@@ -80,7 +81,9 @@ const OperationSetting = () => {
     AutomaticRetryStatusCodes:
       '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
     'monitor_setting.auto_test_channel_enabled': false,
-    'monitor_setting.auto_test_channel_minutes': 10 /* 签到设置 */,
+    'monitor_setting.auto_test_channel_minutes': 10,
+
+    /* 签到设置 */
     'checkin_setting.enabled': false,
     'checkin_setting.min_quota': 1000,
     'checkin_setting.max_quota': 10000,

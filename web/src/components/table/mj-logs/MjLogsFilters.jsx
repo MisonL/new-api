@@ -23,6 +23,21 @@ import { IconSearch } from '@douyinfe/semi-icons';
 import useRepeatingDomPatch from '../../../hooks/common/useRepeatingDomPatch';
 
 import { DATE_RANGE_PRESETS } from '../../../constants/console.constants';
+import { StatusContext } from '../../../context/Status';
+import FilterAutoComplete from '../../common/ui/FilterAutoComplete';
+
+const parseDateRangeToUnixMilliseconds = (dateRange) => {
+  if (!Array.isArray(dateRange) || dateRange.length !== 2) {
+    return {
+      start_timestamp: 0,
+      end_timestamp: 0,
+    };
+  }
+  return {
+    start_timestamp: Date.parse(dateRange[0]) || 0,
+    end_timestamp: Date.parse(dateRange[1]) || 0,
+  };
+};
 
 const MjLogsFilters = ({
   formInitValues,
@@ -34,7 +49,27 @@ const MjLogsFilters = ({
   isAdminUser,
   t,
 }) => {
+  const [statusState] = React.useContext(StatusContext);
+  const autocompleteEnabled = statusState?.status
+    ? statusState.status.log_filter_autocomplete_enabled ?? true
+    : false;
+  const suggestionEndpoint = isAdminUser
+    ? '/api/mj/suggestions'
+    : '/api/mj/self/suggestions';
   const containerRef = useRef(null);
+
+  const buildSuggestionParams = () => {
+    const values = formApi ? formApi.getValues() : formInitValues;
+    const { start_timestamp, end_timestamp } = parseDateRangeToUnixMilliseconds(
+      values.dateRange,
+    );
+    return {
+      start_timestamp,
+      end_timestamp,
+      mj_id: values.mj_id || '',
+      channel_id: values.channel_id || '',
+    };
+  };
 
   useRepeatingDomPatch(() => {
     const patchInputs = () => {
@@ -89,36 +124,27 @@ const MjLogsFilters = ({
           </div>
 
           {/* 任务 ID */}
-          <span id='mj_id-label' className='sr-only'>
-            {t('任务 ID')}
-          </span>
-          <Form.Input
+          <FilterAutoComplete
             field='mj_id'
-            name='mj_id'
-            prefix={<IconSearch />}
+            endpoint={suggestionEndpoint}
             placeholder={t('任务 ID')}
-            showClear
-            pure
-            size='small'
+            prefix={<IconSearch />}
+            buildParams={buildSuggestionParams}
+            enableSuggestions={autocompleteEnabled}
+            minLength={1}
           />
 
           {/* 渠道 ID - 仅管理员可见 */}
           {isAdminUser && (
-            <>
-              <span id='channel_id-label' className='sr-only'>
-                {t('渠道 ID')}
-              </span>
-              <Form.Input
-                field='channel_id'
-                name='channel_id'
-                aria-labelledby='channel_id-label'
-                prefix={<IconSearch />}
-                placeholder={t('渠道 ID')}
-                showClear
-                pure
-                size='small'
-              />
-            </>
+            <FilterAutoComplete
+              field='channel_id'
+              endpoint={suggestionEndpoint}
+              placeholder={t('渠道 ID')}
+              prefix={<IconSearch />}
+              buildParams={buildSuggestionParams}
+              enableSuggestions={autocompleteEnabled}
+              minLength={1}
+            />
           )}
         </div>
 

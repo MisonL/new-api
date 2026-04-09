@@ -288,8 +288,10 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)
 		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)
+		logRoute.GET("/suggestions", middleware.AdminAuth(), middleware.SuggestionRateLimit(), controller.GetAllLogSuggestions)
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
+		logRoute.GET("/self/suggestions", middleware.UserAuth(), middleware.SuggestionRateLimit(), controller.GetUserLogSuggestions)
 
 		dataRoute := apiRouter.Group("/data")
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)
@@ -319,12 +321,16 @@ func SetApiRouter(router *gin.Engine) {
 
 		mjRoute := apiRouter.Group("/mj")
 		mjRoute.GET("/self", middleware.UserAuth(), controller.GetUserMidjourney)
+		mjRoute.GET("/self/suggestions", middleware.UserAuth(), middleware.SuggestionRateLimit(), controller.GetUserMidjourneySuggestions)
 		mjRoute.GET("/", middleware.AdminAuth(), controller.GetAllMidjourney)
+		mjRoute.GET("/suggestions", middleware.AdminAuth(), middleware.SuggestionRateLimit(), controller.GetAllMidjourneySuggestions)
 
 		taskRoute := apiRouter.Group("/task")
 		{
 			taskRoute.GET("/self", middleware.UserAuth(), controller.GetUserTask)
+			taskRoute.GET("/self/suggestions", middleware.UserAuth(), middleware.SuggestionRateLimit(), controller.GetUserTaskSuggestions)
 			taskRoute.GET("/", middleware.AdminAuth(), controller.GetAllTask)
+			taskRoute.GET("/suggestions", middleware.AdminAuth(), middleware.SuggestionRateLimit(), controller.GetAllTaskSuggestions)
 		}
 
 		vendorRoute := apiRouter.Group("/vendors")
