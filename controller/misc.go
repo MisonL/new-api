@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -36,28 +35,10 @@ type customOAuthStatusInfo struct {
 	BrowserLoginSupported     bool   `json:"browser_login_supported"`
 }
 
-var (
-	customOAuthStatusCacheMu   sync.RWMutex
-	customOAuthStatusCacheData []customOAuthStatusInfo
-	customOAuthStatusCacheInit bool
-)
-
 func invalidateCustomOAuthStatusCache() {
-	customOAuthStatusCacheMu.Lock()
-	defer customOAuthStatusCacheMu.Unlock()
-	customOAuthStatusCacheData = nil
-	customOAuthStatusCacheInit = false
 }
 
 func getCustomOAuthStatusPayload() []customOAuthStatusInfo {
-	customOAuthStatusCacheMu.RLock()
-	if customOAuthStatusCacheInit {
-		cached := append([]customOAuthStatusInfo(nil), customOAuthStatusCacheData...)
-		customOAuthStatusCacheMu.RUnlock()
-		return cached
-	}
-	customOAuthStatusCacheMu.RUnlock()
-
 	customProviders, err := model.GetEnabledCustomOAuthProviders()
 	if err != nil {
 		common.SysError("failed to load enabled custom auth providers: " + err.Error())
@@ -66,35 +47,41 @@ func getCustomOAuthStatusPayload() []customOAuthStatusInfo {
 
 	providersInfo := make([]customOAuthStatusInfo, 0, len(customProviders))
 	for _, config := range customProviders {
-		jwtSource := config.JWTSource
-		if strings.TrimSpace(jwtSource) == "" {
+		sanitized := *config
+		model.NormalizeCustomOAuthProviderForRead(&sanitized)
+
+		jwtSource := sanitized.JWTSource
+		if sanitized.IsJWTDirect() && strings.TrimSpace(jwtSource) == "" {
 			jwtSource = model.CustomJWTSourceQuery
 		}
-		authorizationServiceField := config.AuthorizationServiceField
-		if strings.TrimSpace(authorizationServiceField) == "" {
+		jwtIdentityMode := sanitized.JWTIdentityMode
+		if sanitized.IsJWTDirect() && strings.TrimSpace(jwtIdentityMode) == "" {
+			jwtIdentityMode = model.CustomJWTIdentityModeClaims
+		}
+		jwtAcquireMode := sanitized.JWTAcquireMode
+		if sanitized.IsJWTDirect() && strings.TrimSpace(jwtAcquireMode) == "" {
+			jwtAcquireMode = model.CustomJWTAcquireModeDirectToken
+		}
+		authorizationServiceField := sanitized.AuthorizationServiceField
+		if sanitized.IsJWTDirect() && strings.TrimSpace(authorizationServiceField) == "" {
 			authorizationServiceField = "service"
 		}
 		providersInfo = append(providersInfo, customOAuthStatusInfo{
-			Id:                        config.Id,
-			Name:                      config.Name,
-			Slug:                      config.Slug,
-			Icon:                      config.Icon,
-			Kind:                      config.GetKind(),
-			ClientId:                  config.ClientId,
-			AuthorizationEndpoint:     config.AuthorizationEndpoint,
-			Scopes:                    config.Scopes,
+			Id:                        sanitized.Id,
+			Name:                      sanitized.Name,
+			Slug:                      sanitized.Slug,
+			Icon:                      sanitized.Icon,
+			Kind:                      sanitized.GetKind(),
+			ClientId:                  sanitized.ClientId,
+			AuthorizationEndpoint:     sanitized.AuthorizationEndpoint,
+			Scopes:                    sanitized.Scopes,
 			JWTSource:                 jwtSource,
-			JWTIdentityMode:           config.GetJWTIdentityMode(),
-			JWTAcquireMode:            config.GetJWTAcquireMode(),
+			JWTIdentityMode:           jwtIdentityMode,
+			JWTAcquireMode:            jwtAcquireMode,
 			AuthorizationServiceField: authorizationServiceField,
-			BrowserLoginSupported:     config.SupportsBrowserLogin(),
+			BrowserLoginSupported:     sanitized.SupportsBrowserLogin(),
 		})
 	}
-
-	customOAuthStatusCacheMu.Lock()
-	customOAuthStatusCacheData = append([]customOAuthStatusInfo(nil), providersInfo...)
-	customOAuthStatusCacheInit = true
-	customOAuthStatusCacheMu.Unlock()
 	return providersInfo
 }
 
@@ -150,9 +137,7 @@ func GetStatus(c *gin.Context) {
 		"turnstile_site_key":          common.TurnstileSiteKey,
 		"top_up_link":                 common.TopUpLink,
 		"docs_link":                   operation_setting.GetGeneralSetting().DocsLink,
-		"log_filter_autocomplete_enabled": operation_setting.GetGeneralSetting().
-			LogFilterAutocompleteEnabled,
-		"quota_per_unit": common.QuotaPerUnit,
+		"quota_per_unit":              common.QuotaPerUnit,
 		// 兼容旧前端：保留 display_in_currency，同时提供新的 quota_display_type
 		"display_in_currency":           operation_setting.IsCurrencyDisplay(),
 		"quota_display_type":            operation_setting.GetQuotaDisplayType(),

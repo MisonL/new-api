@@ -134,10 +134,9 @@ const LoginForm = () => {
   const customOAuthProviders = Array.isArray(status.custom_oauth_providers)
     ? status.custom_oauth_providers
     : [];
-  const hasCustomOAuthProviders =
-    customOAuthProviders.some(
-      (provider) => provider.browser_login_supported !== false,
-    );
+  const hasCustomOAuthProviders = customOAuthProviders.some(
+    (provider) => provider.browser_login_supported !== false,
+  );
   const hasOAuthLoginOptions = Boolean(
     status.github_oauth ||
       status.discord_oauth ||
@@ -393,19 +392,37 @@ const LoginForm = () => {
   };
 
   // 包装的自定义OAuth登录点击处理
-  const handleCustomOAuthClick = (provider) => {
+  const handleCustomOAuthClick = async (provider) => {
     if ((hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms) {
       showInfo(t('请先阅读并同意用户协议和隐私政策'));
       return;
     }
     setCustomOAuthLoading((prev) => ({ ...prev, [provider.slug]: true }));
     try {
-      onCustomOAuthClicked(provider, { shouldLogout: true });
+      const result = await onCustomOAuthClicked(provider, {
+        shouldLogout: true,
+      });
+      if (provider.kind === 'trusted_header' && result?.user) {
+        userDispatch({ type: 'login', payload: result.user });
+        localStorage.setItem('user', JSON.stringify(result.user));
+        setUserData(result.user);
+        updateAPI();
+        navigate('/');
+        showSuccess(
+          result.action === 'bind'
+            ? t('检测到现有会话，已完成绑定并同步登录态')
+            : t('登录成功！'),
+        );
+        return;
+      }
+      if (provider.kind === 'trusted_header' && result?.action === 'bind') {
+        showSuccess(t('检测到现有会话，已完成绑定'));
+        return;
+      }
+    } catch (error) {
+      showError(error?.message || t('操作失败'));
     } finally {
-      // 由于重定向，这里不会执行到，但为了完整性添加
-      setTimeout(() => {
-        setCustomOAuthLoading((prev) => ({ ...prev, [provider.slug]: false }));
-      }, 3000);
+      setCustomOAuthLoading((prev) => ({ ...prev, [provider.slug]: false }));
     }
   };
 
@@ -610,7 +627,9 @@ const LoginForm = () => {
 
                 {customOAuthProviders.length > 0 &&
                   customOAuthProviders
-                    .filter((provider) => provider.browser_login_supported !== false)
+                    .filter(
+                      (provider) => provider.browser_login_supported !== false,
+                    )
                     .map((provider) => (
                       <Button
                         key={provider.slug}
@@ -670,7 +689,6 @@ const LoginForm = () => {
                   <Checkbox
                     checked={agreedToTerms}
                     onChange={(e) => setAgreedToTerms(e.target.checked)}
-                    name='components-auth-loginform-checkbox-1'
                   >
                     <Text size='small' className='text-gray-600'>
                       {t('我已阅读并同意')}
@@ -758,7 +776,6 @@ const LoginForm = () => {
                   label={t('用户名或邮箱')}
                   placeholder={t('请输入您的用户名或邮箱地址')}
                   name='username'
-                  autoComplete='username'
                   onChange={(value) => handleChange('username', value)}
                   prefix={<IconMail />}
                 />
@@ -769,7 +786,6 @@ const LoginForm = () => {
                   placeholder={t('请输入您的密码')}
                   name='password'
                   mode='password'
-                  autoComplete='current-password'
                   onChange={(value) => handleChange('password', value)}
                   prefix={<IconLock />}
                 />
@@ -779,7 +795,6 @@ const LoginForm = () => {
                     <Checkbox
                       checked={agreedToTerms}
                       onChange={(e) => setAgreedToTerms(e.target.checked)}
-                      name='components-auth-loginform-checkbox-2'
                     >
                       <Text size='small' className='text-gray-600'>
                         {t('我已阅读并同意')}
@@ -969,8 +984,7 @@ const LoginForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
-        {showEmailLogin ||
-        !hasOAuthLoginOptions
+        {showEmailLogin || !hasOAuthLoginOptions
           ? renderEmailLoginForm()
           : renderOAuthOptions()}
         {renderWeChatLoginModal()}

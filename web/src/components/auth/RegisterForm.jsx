@@ -132,10 +132,9 @@ const RegisterForm = () => {
   const customOAuthProviders = Array.isArray(status.custom_oauth_providers)
     ? status.custom_oauth_providers
     : [];
-  const hasCustomOAuthProviders =
-    customOAuthProviders.some(
-      (provider) => provider.browser_login_supported !== false,
-    );
+  const hasCustomOAuthProviders = customOAuthProviders.some(
+    (provider) => provider.browser_login_supported !== false,
+  );
   const hasOAuthRegisterOptions = Boolean(
     status.github_oauth ||
       status.discord_oauth ||
@@ -338,14 +337,33 @@ const RegisterForm = () => {
     }
   };
 
-  const handleCustomOAuthClick = (provider) => {
+  const handleCustomOAuthClick = async (provider) => {
     setCustomOAuthLoading((prev) => ({ ...prev, [provider.slug]: true }));
     try {
-      onCustomOAuthClicked(provider, { shouldLogout: true });
+      const result = await onCustomOAuthClicked(provider, {
+        shouldLogout: true,
+      });
+      if (provider.kind === 'trusted_header' && result?.user) {
+        userDispatch({ type: 'login', payload: result.user });
+        localStorage.setItem('user', JSON.stringify(result.user));
+        setUserData(result.user);
+        updateAPI();
+        navigate('/');
+        showSuccess(
+          result.action === 'bind'
+            ? t('检测到现有会话，已完成绑定并同步登录态')
+            : t('登录成功！'),
+        );
+        return;
+      }
+      if (provider.kind === 'trusted_header' && result?.action === 'bind') {
+        showSuccess(t('检测到现有会话，已完成绑定'));
+        return;
+      }
+    } catch (error) {
+      showError(error?.message || t('操作失败'));
     } finally {
-      setTimeout(() => {
-        setCustomOAuthLoading((prev) => ({ ...prev, [provider.slug]: false }));
-      }, 3000);
+      setCustomOAuthLoading((prev) => ({ ...prev, [provider.slug]: false }));
     }
   };
 
@@ -501,7 +519,9 @@ const RegisterForm = () => {
 
                 {customOAuthProviders.length > 0 &&
                   customOAuthProviders
-                    .filter((provider) => provider.browser_login_supported !== false)
+                    .filter(
+                      (provider) => provider.browser_login_supported !== false,
+                    )
                     .map((provider) => (
                       <Button
                         key={provider.slug}
@@ -585,7 +605,6 @@ const RegisterForm = () => {
                   label={t('用户名')}
                   placeholder={t('请输入用户名')}
                   name='username'
-                  autoComplete='username'
                   onChange={(value) => handleChange('username', value)}
                   prefix={<IconUser />}
                 />
@@ -596,7 +615,6 @@ const RegisterForm = () => {
                   placeholder={t('输入密码，最短 8 位，最长 20 位')}
                   name='password'
                   mode='password'
-                  autoComplete='new-password'
                   onChange={(value) => handleChange('password', value)}
                   prefix={<IconLock />}
                 />
@@ -607,7 +625,6 @@ const RegisterForm = () => {
                   placeholder={t('确认密码')}
                   name='password2'
                   mode='password'
-                  autoComplete='new-password'
                   onChange={(value) => handleChange('password2', value)}
                   prefix={<IconLock />}
                 />
@@ -620,7 +637,6 @@ const RegisterForm = () => {
                       placeholder={t('输入邮箱地址')}
                       name='email'
                       type='email'
-                      autoComplete='email'
                       onChange={(value) => handleChange('email', value)}
                       prefix={<IconMail />}
                       suffix={
@@ -640,7 +656,6 @@ const RegisterForm = () => {
                       label={t('验证码')}
                       placeholder={t('输入验证码')}
                       name='verification_code'
-                      autoComplete='one-time-code'
                       onChange={(value) =>
                         handleChange('verification_code', value)
                       }
@@ -654,7 +669,6 @@ const RegisterForm = () => {
                     <Checkbox
                       checked={agreedToTerms}
                       onChange={(e) => setAgreedToTerms(e.target.checked)}
-                      name='components-auth-registerform-checkbox-1'
                     >
                       <Text size='small' className='text-gray-600'>
                         {t('我已阅读并同意')}
@@ -794,8 +808,7 @@ const RegisterForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
-        {showEmailRegister ||
-        !hasOAuthRegisterOptions
+        {showEmailRegister || !hasOAuthRegisterOptions
           ? renderEmailRegisterForm()
           : renderOAuthOptions()}
         {renderWeChatLoginModal()}

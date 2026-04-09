@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -19,6 +20,7 @@ type UserBase struct {
 	Group    string `json:"group"`
 	Email    string `json:"email"`
 	Quota    int    `json:"quota"`
+	Role     int    `json:"role"`
 	Status   int    `json:"status"`
 	Username string `json:"username"`
 	Setting  string `json:"setting"`
@@ -103,6 +105,7 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 		Id:       user.Id,
 		Group:    user.Group,
 		Quota:    user.Quota,
+		Role:     user.Role,
 		Status:   user.Status,
 		Username: user.Username,
 		Setting:  user.Setting,
@@ -116,11 +119,24 @@ func cacheGetUserBase(userId int) (*UserBase, error) {
 	if !common.RedisEnabled {
 		return nil, fmt.Errorf("redis is not enabled")
 	}
-	var userCache UserBase
-	// Try getting from Redis first
-	err := common.RedisHGetObj(getUserCacheKey(userId), &userCache)
+	cacheFields, err := common.RDB.HGetAll(context.Background(), getUserCacheKey(userId)).Result()
 	if err != nil {
 		return nil, err
+	}
+	if len(cacheFields) == 0 {
+		return nil, fmt.Errorf("user cache is empty")
+	}
+	if _, ok := cacheFields["Role"]; !ok {
+		return nil, fmt.Errorf("user cache is missing role")
+	}
+	var userCache UserBase
+	// Try getting from Redis first
+	err = common.RedisHGetObj(getUserCacheKey(userId), &userCache)
+	if err != nil {
+		return nil, err
+	}
+	if userCache.Id <= 0 || userCache.Username == "" || !common.IsValidateRole(userCache.Role) {
+		return nil, fmt.Errorf("user cache is incomplete")
 	}
 	return &userCache, nil
 }

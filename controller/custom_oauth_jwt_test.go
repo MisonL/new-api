@@ -44,6 +44,35 @@ type oauthJWTBindResponse struct {
 	Action string `json:"action"`
 }
 
+type asyncHandlerErrorSink struct {
+	ch chan string
+}
+
+func newAsyncHandlerErrorSink(buffer int) *asyncHandlerErrorSink {
+	return &asyncHandlerErrorSink{ch: make(chan string, buffer)}
+}
+
+func (s *asyncHandlerErrorSink) reportf(format string, args ...any) {
+	s.ch <- fmt.Sprintf(format, args...)
+}
+
+func (s *asyncHandlerErrorSink) failIfAny(t *testing.T) {
+	t.Helper()
+
+	var messages []string
+	for {
+		select {
+		case message := <-s.ch:
+			messages = append(messages, message)
+		default:
+			if len(messages) > 0 {
+				t.Fatalf("%s", strings.Join(messages, "\n"))
+			}
+			return
+		}
+	}
+}
+
 func setupCustomOAuthJWTControllerTestDB(t *testing.T) {
 	t.Helper()
 
@@ -104,6 +133,7 @@ func newCustomOAuthJWTRouter(t *testing.T) *gin.Engine {
 	router.Use(sessions.Sessions("session", store))
 	router.GET("/api/oauth/state", GenerateOAuthCode)
 	router.POST("/api/auth/external/:provider/jwt/login", HandleCustomOAuthJWTLogin)
+	router.POST("/api/auth/external/:provider/header/login", HandleCustomOAuthHeaderLogin)
 	router.GET("/test/login-as/:id", func(c *gin.Context) {
 		var user model.User
 		if err := model.DB.First(&user, c.Param("id")).Error; err != nil {
@@ -128,6 +158,9 @@ func newCustomOAuthJWTRouter(t *testing.T) *gin.Engine {
 type jwtDirectProviderTestOptions struct {
 	AutoRegister               bool
 	AutoMergeByEmail           bool
+	SyncUsernameOnLogin        bool
+	SyncDisplayNameOnLogin     bool
+	SyncEmailOnLogin           bool
 	SyncGroupOnLogin           bool
 	SyncRoleOnLogin            bool
 	JWTIdentityMode            string
@@ -170,6 +203,9 @@ func createJWTDirectProviderForTest(t *testing.T, privateKey *rsa.PrivateKey, op
 		RoleMapping:                `{"platform-admin":"admin"}`,
 		AutoRegister:               options.AutoRegister,
 		AutoMergeByEmail:           options.AutoMergeByEmail,
+		SyncUsernameOnLogin:        options.SyncUsernameOnLogin,
+		SyncDisplayNameOnLogin:     options.SyncDisplayNameOnLogin,
+		SyncEmailOnLogin:           options.SyncEmailOnLogin,
 		SyncGroupOnLogin:           options.SyncGroupOnLogin,
 		SyncRoleOnLogin:            options.SyncRoleOnLogin,
 		JWTAcquireMode:             options.JWTAcquireMode,
@@ -398,6 +434,69 @@ func TestHandleCustomOAuthJWTLoginBindsExistingSessionUser(t *testing.T) {
 	}
 }
 
+func TestHandleCustomOAuthJWTLoginTreatsRepeatBindForSameUserAsSuccess(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate private key: %v", err)
+	}
+	provider := createJWTDirectProviderForTest(t, privateKey, jwtDirectProviderTestOptions{
+		AutoRegister: true,
+	})
+	user := createUserForBindTest(t, "bind-repeat-user")
+	if err := model.CreateUserOAuthBinding(&model.UserOAuthBinding{
+		UserId:         user.Id,
+		ProviderId:     provider.Id,
+		ProviderUserId: "ext-repeat-1",
+	}); err != nil {
+		t.Fatalf("failed to seed oauth binding: %v", err)
+	}
+
+	router := newCustomOAuthJWTRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	client := newTestHTTPClient(t)
+	loginReq, err := http.NewRequest(http.MethodGet, server.URL+"/test/login-as/"+strconv.Itoa(user.Id), nil)
+	if err != nil {
+		t.Fatalf("failed to build login-as request: %v", err)
+	}
+	loginResp, err := client.Do(loginReq)
+	if err != nil {
+		t.Fatalf("failed to establish session: %v", err)
+	}
+	_ = loginResp.Body.Close()
+
+	state := fetchOAuthStateForTest(t, client, server.URL)
+	token := signJWTForControllerTest(t, privateKey, jwt.MapClaims{
+		"iss": "https://issuer.example.com",
+		"aud": "new-api",
+		"sub": "ext-repeat-1",
+		"exp": time.Now().Add(time.Hour).Unix(),
+	})
+
+	response := postJWTLoginForTest(t, client, server.URL, state, token)
+	if !response.Success {
+		t.Fatalf("expected repeat bind response success, got message: %s", response.Message)
+	}
+
+	var bindData oauthJWTBindResponse
+	if err := common.Unmarshal(response.Data, &bindData); err != nil {
+		t.Fatalf("failed to decode bind response: %v", err)
+	}
+	if bindData.Action != "bind" {
+		t.Fatalf("expected bind action, got %s", bindData.Action)
+	}
+
+	binding, err := model.GetUserOAuthBinding(user.Id, provider.Id)
+	if err != nil {
+		t.Fatalf("failed to reload oauth binding: %v", err)
+	}
+	if binding.ProviderUserId != "ext-repeat-1" {
+		t.Fatalf("expected binding to keep provider user id ext-repeat-1, got %s", binding.ProviderUserId)
+	}
+}
+
 func TestHandleCustomOAuthJWTLoginDoesNotSyncAttributesDuringBind(t *testing.T) {
 	setupCustomOAuthJWTControllerTestDB(t)
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -571,6 +670,69 @@ func TestHandleCustomOAuthJWTLoginSyncsExistingBoundUserOnLogin(t *testing.T) {
 	}
 	if !strings.Contains(reloadedUser.GetSetting().SidebarModules, "\"admin\"") {
 		t.Fatalf("expected admin sidebar section to be added after role promotion, got %s", reloadedUser.GetSetting().SidebarModules)
+	}
+}
+
+func TestHandleCustomOAuthJWTLoginSyncsLimitedProfileAttributesOnLogin(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate private key: %v", err)
+	}
+	provider := createJWTDirectProviderForTest(t, privateKey, jwtDirectProviderTestOptions{
+		AutoRegister:           true,
+		SyncUsernameOnLogin:    true,
+		SyncDisplayNameOnLogin: true,
+		SyncEmailOnLogin:       true,
+	})
+	user := createUserWithEmailForTest(t, "legacy-user", "legacy@example.com")
+	user.DisplayName = "Legacy User"
+	if err := user.Update(false); err != nil {
+		t.Fatalf("failed to seed legacy profile: %v", err)
+	}
+	if err := model.CreateUserOAuthBinding(&model.UserOAuthBinding{
+		UserId:         user.Id,
+		ProviderId:     provider.Id,
+		ProviderUserId: "ext-sync-profile",
+	}); err != nil {
+		t.Fatalf("failed to seed oauth binding: %v", err)
+	}
+
+	router := newCustomOAuthJWTRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	client := newTestHTTPClient(t)
+	state := fetchOAuthStateForTest(t, client, server.URL)
+	token := signJWTForControllerTest(t, privateKey, jwt.MapClaims{
+		"iss":                "https://issuer.example.com",
+		"aud":                "new-api",
+		"sub":                "ext-sync-profile",
+		"preferred_username": "updated-user",
+		"name":               "Updated User",
+		"email":              "updated@example.com",
+		"exp":                time.Now().Add(time.Hour).Unix(),
+	})
+
+	response := postJWTLoginForTest(t, client, server.URL, state, token)
+	if !response.Success {
+		t.Fatalf("expected profile sync login to succeed, got message: %s", response.Message)
+	}
+
+	var loginData oauthJWTLoginResponse
+	if err := common.Unmarshal(response.Data, &loginData); err != nil {
+		t.Fatalf("failed to decode login response: %v", err)
+	}
+	if loginData.Username != "updated-user" {
+		t.Fatalf("expected synced username in response, got %s", loginData.Username)
+	}
+
+	reloadedUser, err := model.GetUserById(user.Id, false)
+	if err != nil {
+		t.Fatalf("failed to reload synced user: %v", err)
+	}
+	if reloadedUser.Username != "updated-user" || reloadedUser.DisplayName != "Updated User" || reloadedUser.Email != "updated@example.com" {
+		t.Fatalf("expected synced profile fields, got username=%s display_name=%s email=%s", reloadedUser.Username, reloadedUser.DisplayName, reloadedUser.Email)
 	}
 }
 
@@ -806,6 +968,8 @@ func TestHandleCustomOAuthJWTLoginDoesNotBindDisabledMergedUser(t *testing.T) {
 
 func TestHandleCustomOAuthJWTLoginWithTicketExchangeAndUserInfoModeCreatesUser(t *testing.T) {
 	setupCustomOAuthJWTControllerTestDB(t)
+	handlerErrors := newAsyncHandlerErrorSink(4)
+	defer handlerErrors.failIfAny(t)
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate private key: %v", err)
@@ -818,7 +982,9 @@ func TestHandleCustomOAuthJWTLoginWithTicketExchangeAndUserInfoModeCreatesUser(t
 			},
 		})
 		if err != nil {
-			t.Fatalf("failed to marshal exchange response: %v", err)
+			handlerErrors.reportf("failed to marshal exchange response: %v", err)
+			http.Error(w, "marshal exchange response failed", http.StatusInternalServerError)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(payload)
@@ -827,7 +993,9 @@ func TestHandleCustomOAuthJWTLoginWithTicketExchangeAndUserInfoModeCreatesUser(t
 
 	userInfoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("x-access-token"); got != "opaque-access-token" {
-			t.Fatalf("expected exchanged token in x-access-token header, got %q", got)
+			handlerErrors.reportf("expected exchanged token in x-access-token header, got %q", got)
+			http.Error(w, "missing exchanged token header", http.StatusBadRequest)
+			return
 		}
 		payload, err := common.Marshal(map[string]any{
 			"info": map[string]any{
@@ -838,7 +1006,9 @@ func TestHandleCustomOAuthJWTLoginWithTicketExchangeAndUserInfoModeCreatesUser(t
 			},
 		})
 		if err != nil {
-			t.Fatalf("failed to marshal userinfo payload: %v", err)
+			handlerErrors.reportf("failed to marshal userinfo payload: %v", err)
+			http.Error(w, "marshal userinfo payload failed", http.StatusInternalServerError)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(payload)
@@ -911,6 +1081,8 @@ func TestHandleCustomOAuthJWTLoginWithTicketExchangeAndUserInfoModeCreatesUser(t
 
 func TestHandleCustomOAuthJWTLoginWithTicketExchangeCreatesUser(t *testing.T) {
 	setupCustomOAuthJWTControllerTestDB(t)
+	handlerErrors := newAsyncHandlerErrorSink(4)
+	defer handlerErrors.failIfAny(t)
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate private key: %v", err)
@@ -932,10 +1104,14 @@ func TestHandleCustomOAuthJWTLoginWithTicketExchangeCreatesUser(t *testing.T) {
 
 	exchangeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
-			t.Fatalf("failed to parse exchange request: %v", err)
+			handlerErrors.reportf("failed to parse exchange request: %v", err)
+			http.Error(w, "parse exchange request failed", http.StatusBadRequest)
+			return
 		}
 		if got := r.Form.Get("st"); got != "ST-123" {
-			t.Fatalf("expected ticket field st=ST-123, got %q", got)
+			handlerErrors.reportf("expected ticket field st=ST-123, got %q", got)
+			http.Error(w, "unexpected ticket field", http.StatusBadRequest)
+			return
 		}
 		callbackURLSeen = r.Form.Get("service")
 		stateSeen = r.Header.Get("X-State")
@@ -945,7 +1121,9 @@ func TestHandleCustomOAuthJWTLoginWithTicketExchangeCreatesUser(t *testing.T) {
 			},
 		})
 		if err != nil {
-			t.Fatalf("failed to marshal exchange response: %v", err)
+			handlerErrors.reportf("failed to marshal exchange response: %v", err)
+			http.Error(w, "marshal exchange response failed", http.StatusInternalServerError)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(payload)
@@ -1045,6 +1223,8 @@ func TestOAuthAuditFailureReason(t *testing.T) {
 
 func TestHandleCustomOAuthJWTLoginWithTicketValidateCreatesUser(t *testing.T) {
 	setupCustomOAuthJWTControllerTestDB(t)
+	handlerErrors := newAsyncHandlerErrorSink(2)
+	defer handlerErrors.failIfAny(t)
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate private key: %v", err)
@@ -1052,10 +1232,14 @@ func TestHandleCustomOAuthJWTLoginWithTicketValidateCreatesUser(t *testing.T) {
 
 	validationServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("ticket"); got != "ST-CAS-123" {
-			t.Fatalf("expected ticket query param ST-CAS-123, got %q", got)
+			handlerErrors.reportf("expected ticket query param ST-CAS-123, got %q", got)
+			http.Error(w, "unexpected ticket query param", http.StatusBadRequest)
+			return
 		}
 		if got := r.URL.Query().Get("service"); !strings.Contains(got, "/oauth/acme-sso?state=") {
-			t.Fatalf("expected service callback url to contain oauth callback, got %q", got)
+			handlerErrors.reportf("expected service callback url to contain oauth callback, got %q", got)
+			http.Error(w, "unexpected service callback url", http.StatusBadRequest)
+			return
 		}
 		w.Header().Set("Content-Type", "application/xml")
 		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
