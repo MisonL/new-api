@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -210,6 +211,11 @@ func UpdateOption(key string, value string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	value, err = normalizeOptionValueForInMemoryConfig(key, value)
+	if err != nil {
+		return err
+	}
+
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
@@ -510,6 +516,15 @@ func updateOptionMap(key string, value string) (err error) {
 		// No additional in-memory variable to update.
 	}
 	return err
+}
+
+func normalizeOptionValueForInMemoryConfig(key string, value string) (string, error) {
+	switch key {
+	case "global.chat_completions_to_responses_policy":
+		return model_setting.NormalizeChatCompletionsToResponsesPolicyJSON(value)
+	default:
+		return value, nil
+	}
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理

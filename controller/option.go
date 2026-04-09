@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -296,6 +297,16 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "global.chat_completions_to_responses_policy":
+		normalizedPolicyJSON, normalizeErr := model_setting.NormalizeChatCompletionsToResponsesPolicyJSON(option.Value.(string))
+		if normalizeErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": normalizeErr.Error(),
+			})
+			return
+		}
+		option.Value = normalizedPolicyJSON
 	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {
