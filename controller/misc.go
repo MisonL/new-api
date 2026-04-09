@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -19,6 +19,84 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+type customOAuthStatusInfo struct {
+	Id                        int    `json:"id"`
+	Name                      string `json:"name"`
+	Slug                      string `json:"slug"`
+	Icon                      string `json:"icon"`
+	Kind                      string `json:"kind"`
+	ClientId                  string `json:"client_id"`
+	AuthorizationEndpoint     string `json:"authorization_endpoint"`
+	Scopes                    string `json:"scopes"`
+	JWTSource                 string `json:"jwt_source"`
+	JWTIdentityMode           string `json:"jwt_identity_mode"`
+	JWTAcquireMode            string `json:"jwt_acquire_mode"`
+	AuthorizationServiceField string `json:"authorization_service_field"`
+	BrowserLoginSupported     bool   `json:"browser_login_supported"`
+}
+
+var (
+	customOAuthStatusCacheMu   sync.RWMutex
+	customOAuthStatusCacheData []customOAuthStatusInfo
+	customOAuthStatusCacheInit bool
+)
+
+func invalidateCustomOAuthStatusCache() {
+	customOAuthStatusCacheMu.Lock()
+	defer customOAuthStatusCacheMu.Unlock()
+	customOAuthStatusCacheData = nil
+	customOAuthStatusCacheInit = false
+}
+
+func getCustomOAuthStatusPayload() []customOAuthStatusInfo {
+	customOAuthStatusCacheMu.RLock()
+	if customOAuthStatusCacheInit {
+		cached := append([]customOAuthStatusInfo(nil), customOAuthStatusCacheData...)
+		customOAuthStatusCacheMu.RUnlock()
+		return cached
+	}
+	customOAuthStatusCacheMu.RUnlock()
+
+	customProviders, err := model.GetEnabledCustomOAuthProviders()
+	if err != nil {
+		common.SysError("failed to load enabled custom auth providers: " + err.Error())
+		return nil
+	}
+
+	providersInfo := make([]customOAuthStatusInfo, 0, len(customProviders))
+	for _, config := range customProviders {
+		jwtSource := config.JWTSource
+		if strings.TrimSpace(jwtSource) == "" {
+			jwtSource = model.CustomJWTSourceQuery
+		}
+		authorizationServiceField := config.AuthorizationServiceField
+		if strings.TrimSpace(authorizationServiceField) == "" {
+			authorizationServiceField = "service"
+		}
+		providersInfo = append(providersInfo, customOAuthStatusInfo{
+			Id:                        config.Id,
+			Name:                      config.Name,
+			Slug:                      config.Slug,
+			Icon:                      config.Icon,
+			Kind:                      config.GetKind(),
+			ClientId:                  config.ClientId,
+			AuthorizationEndpoint:     config.AuthorizationEndpoint,
+			Scopes:                    config.Scopes,
+			JWTSource:                 jwtSource,
+			JWTIdentityMode:           config.GetJWTIdentityMode(),
+			JWTAcquireMode:            config.GetJWTAcquireMode(),
+			AuthorizationServiceField: authorizationServiceField,
+			BrowserLoginSupported:     config.SupportsBrowserLogin(),
+		})
+	}
+
+	customOAuthStatusCacheMu.Lock()
+	customOAuthStatusCacheData = append([]customOAuthStatusInfo(nil), providersInfo...)
+	customOAuthStatusCacheInit = true
+	customOAuthStatusCacheMu.Unlock()
+	return providersInfo
+}
 
 func TestStatus(c *gin.Context) {
 	err := model.PingDB()
@@ -42,6 +120,7 @@ func TestStatus(c *gin.Context) {
 func GetStatus(c *gin.Context) {
 
 	cs := console_setting.GetConsoleSetting()
+	customProviders := getCustomOAuthStatusPayload()
 	common.OptionMapRWMutex.RLock()
 	defer common.OptionMapRWMutex.RUnlock()
 
@@ -132,32 +211,9 @@ func GetStatus(c *gin.Context) {
 		data["faq"] = console_setting.GetFAQ()
 	}
 
-	// Add enabled custom OAuth providers
-	customProviders := oauth.GetEnabledCustomProviders()
+	// Add enabled custom auth providers
 	if len(customProviders) > 0 {
-		type CustomOAuthInfo struct {
-			Id                    int    `json:"id"`
-			Name                  string `json:"name"`
-			Slug                  string `json:"slug"`
-			Icon                  string `json:"icon"`
-			ClientId              string `json:"client_id"`
-			AuthorizationEndpoint string `json:"authorization_endpoint"`
-			Scopes                string `json:"scopes"`
-		}
-		providersInfo := make([]CustomOAuthInfo, 0, len(customProviders))
-		for _, p := range customProviders {
-			config := p.GetConfig()
-			providersInfo = append(providersInfo, CustomOAuthInfo{
-				Id:                    config.Id,
-				Name:                  config.Name,
-				Slug:                  config.Slug,
-				Icon:                  config.Icon,
-				ClientId:              config.ClientId,
-				AuthorizationEndpoint: config.AuthorizationEndpoint,
-				Scopes:                config.Scopes,
-			})
-		}
-		data["custom_oauth_providers"] = providersInfo
+		data["custom_oauth_providers"] = customProviders
 	}
 
 	c.JSON(http.StatusOK, gin.H{
