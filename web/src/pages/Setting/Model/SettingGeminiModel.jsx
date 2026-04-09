@@ -31,7 +31,7 @@ import { useTranslation } from 'react-i18next';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
 
 const GEMINI_SETTING_EXAMPLE = {
-  default: 'OFF'
+  default: 'OFF',
 };
 
 const GEMINI_VERSION_EXAMPLE = {
@@ -128,7 +128,7 @@ export default function SettingGeminiModel(props) {
                   extraText={t(
                     'default为默认设置，可单独设置每个分类的安全等级',
                   )}
-                  autosize={{ minRows: 6, maxRows: 12 }}
+                  rows={6}
                   trigger='blur'
                   stopValidateWithError
                   rules={[
@@ -154,7 +154,7 @@ export default function SettingGeminiModel(props) {
                   }
                   field={'gemini.version_settings'}
                   extraText={t('default为默认设置，可单独设置每个模型的版本')}
-                  autosize={{ minRows: 6, maxRows: 12 }}
+                  rows={6}
                   trigger='blur'
                   stopValidateWithError
                   rules={[

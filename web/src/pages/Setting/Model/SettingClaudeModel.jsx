@@ -147,7 +147,7 @@ export default function SettingClaudeModel(props) {
                       </div>
                     </div>
                   }
-                  autosize={{ minRows: 6, maxRows: 12 }}
+                  rows={6}
                   trigger='blur'
                   stopValidateWithError
                   rules={[
@@ -180,7 +180,7 @@ export default function SettingClaudeModel(props) {
                     '\n' +
                     JSON.stringify(CLAUDE_DEFAULT_MAX_TOKENS, null, 2)
                   }
-                  autosize={{ minRows: 6, maxRows: 12 }}
+                  rows={6}
                   trigger='blur'
                   stopValidateWithError
                   rules={[

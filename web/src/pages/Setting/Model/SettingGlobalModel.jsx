@@ -18,16 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useState, useRef } from 'react';
-import {
-  Button,
-  Col,
-  Form,
-  Row,
-  Spin,
-  Banner,
-  Tag,
-  Divider,
-} from '@douyinfe/semi-ui';
+import { Banner, Button, Col, Form, Row, Spin, Tag } from '@douyinfe/semi-ui';
 import {
   compareObjects,
   API,
@@ -37,31 +28,10 @@ import {
   verifyJSON,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+import ProtocolConversionPolicyEditor from '../../../components/settings/ProtocolConversionPolicyEditor';
 
 const thinkingExample = JSON.stringify(
   ['moonshotai/kimi-k2-thinking', 'kimi-k2-thinking'],
-  null,
-  2,
-);
-
-const chatCompletionsToResponsesPolicyExample = JSON.stringify(
-  {
-    enabled: true,
-    all_channels: false,
-    channel_ids: [1, 2],
-    channel_types: [1],
-    model_patterns: ['^gpt-4o.*$', '^gpt-5.*$'],
-  },
-  null,
-  2,
-);
-
-const chatCompletionsToResponsesPolicyAllChannelsExample = JSON.stringify(
-  {
-    enabled: true,
-    all_channels: true,
-    model_patterns: ['^gpt-4o.*$', '^gpt-5.*$'],
-  },
   null,
   2,
 );
@@ -106,9 +76,32 @@ export default function SettingGlobalModel(props) {
     return value;
   };
 
+  const validateJSONBeforeSave = (key, value) => {
+    if (
+      key !== 'global.thinking_model_blacklist' &&
+      key !== 'global.chat_completions_to_responses_policy'
+    ) {
+      return true;
+    }
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (!text) {
+      return true;
+    }
+    if (!verifyJSON(text)) {
+      showError(t('不是合法的 JSON 字符串'));
+      return false;
+    }
+    return true;
+  };
+
   function onSubmit() {
     const updateArray = compareObjects(inputs, inputsRow);
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
+    for (const item of updateArray) {
+      if (!validateJSONBeforeSave(item.key, inputs[item.key])) {
+        return;
+      }
+    }
     const requestQueue = updateArray.map((item) => {
       const normalizedValue = normalizeValueBeforeSave(
         item.key,
@@ -246,7 +239,7 @@ export default function SettingGlobalModel(props) {
                     flexWrap: 'wrap',
                   }}
                 >
-                  {t('ChatCompletions→Responses 兼容配置')}
+                  {t('协议转换兼容配置')}
                   <Tag color='orange' size='small'>
                     测试版
                   </Tag>
@@ -255,102 +248,10 @@ export default function SettingGlobalModel(props) {
             >
               <Row style={{ marginTop: 10 }}>
                 <Col span={24}>
-                  <Banner
-                    type='warning'
-                    description={t(
-                      '提示：该功能为测试版，未来配置结构与功能行为可能发生变更，请勿在生产环境使用。',
-                    )}
+                  <ProtocolConversionPolicyEditor
+                    value={inputs[chatCompletionsToResponsesPolicyKey]}
+                    onChange={setChatCompletionsToResponsesPolicyValue}
                   />
-                </Col>
-              </Row>
-
-              <Row style={{ marginTop: 10 }}>
-                <Col span={24}>
-                  <Form.TextArea
-                    label={t('参数配置')}
-                    field={chatCompletionsToResponsesPolicyKey}
-                    placeholder={
-                      t('例如（指定渠道）：') +
-                      '\n' +
-                      chatCompletionsToResponsesPolicyExample +
-                      '\n\n' +
-                      t('例如（全渠道）：') +
-                      '\n' +
-                      chatCompletionsToResponsesPolicyAllChannelsExample
-                    }
-                    rows={8}
-                    rules={[
-                      {
-                        validator: (rule, value) => {
-                          if (!value || value.trim() === '') return true;
-                          return verifyJSON(value);
-                        },
-                        message: t('不是合法的 JSON 字符串'),
-                      },
-                    ]}
-                    onChange={(value) =>
-                      setInputs((prev) => ({
-                        ...prev,
-                        [chatCompletionsToResponsesPolicyKey]: value,
-                      }))
-                    }
-                  />
-                </Col>
-              </Row>
-
-              <Row style={{ marginTop: 10, marginBottom: 16 }}>
-                <Col span={24}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 8,
-                      flexWrap: 'wrap',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Button
-                      type='secondary'
-                      size='small'
-                      onClick={() =>
-                        setChatCompletionsToResponsesPolicyValue(
-                          chatCompletionsToResponsesPolicyExample,
-                        )
-                      }
-                    >
-                      {t('填充模板（指定渠道）')}
-                    </Button>
-                    <Button
-                      type='secondary'
-                      size='small'
-                      onClick={() =>
-                        setChatCompletionsToResponsesPolicyValue(
-                          chatCompletionsToResponsesPolicyAllChannelsExample,
-                        )
-                      }
-                    >
-                      {t('填充模板（全渠道）')}
-                    </Button>
-                    <Button
-                      type='secondary'
-                      size='small'
-                      onClick={() => {
-                        const raw = inputs[chatCompletionsToResponsesPolicyKey];
-                        if (!raw || String(raw).trim() === '') return;
-                        try {
-                          const formatted = JSON.stringify(
-                            JSON.parse(raw),
-                            null,
-                            2,
-                          );
-                          setChatCompletionsToResponsesPolicyValue(formatted);
-                        } catch (error) {
-                          showError(t('不是合法的 JSON 字符串'));
-                        }
-                      }}
-                    >
-                      {t('格式化 JSON')}
-                    </Button>
-                  </div>
                 </Col>
               </Row>
             </Form.Section>
