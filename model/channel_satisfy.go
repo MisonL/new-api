@@ -5,6 +5,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
+// IsChannelEnabledForGroupModel reports whether a channel is enabled for a group/model pair.
 func IsChannelEnabledForGroupModel(group string, modelName string, channelID int) bool {
 	if group == "" || modelName == "" || channelID <= 0 {
 		return false
@@ -14,22 +15,27 @@ func IsChannelEnabledForGroupModel(group string, modelName string, channelID int
 	}
 
 	channelSyncLock.RLock()
-	defer channelSyncLock.RUnlock()
-
 	if group2model2channels == nil {
-		return false
+		channelSyncLock.RUnlock()
+		return isChannelEnabledForGroupModelDB(group, modelName, channelID)
 	}
 
 	if isChannelIDInList(group2model2channels[group][modelName], channelID) {
+		channelSyncLock.RUnlock()
 		return true
 	}
 	normalized := ratio_setting.FormatMatchingModelName(modelName)
 	if normalized != "" && normalized != modelName {
-		return isChannelIDInList(group2model2channels[group][normalized], channelID)
+		if isChannelIDInList(group2model2channels[group][normalized], channelID) {
+			channelSyncLock.RUnlock()
+			return true
+		}
 	}
-	return false
+	channelSyncLock.RUnlock()
+	return isChannelEnabledForGroupModelDB(group, modelName, channelID)
 }
 
+// IsChannelEnabledForAnyGroupModel reports whether a channel is enabled for any group/model pair.
 func IsChannelEnabledForAnyGroupModel(groups []string, modelName string, channelID int) bool {
 	if len(groups) == 0 {
 		return false
@@ -44,8 +50,10 @@ func IsChannelEnabledForAnyGroupModel(groups []string, modelName string, channel
 
 func isChannelEnabledForGroupModelDB(group string, modelName string, channelID int) bool {
 	var count int64
+	groupColumn := "abilities." + commonGroupCol
 	err := DB.Model(&Ability{}).
-		Where(commonGroupCol+" = ? and model = ? and channel_id = ? and enabled = ?", group, modelName, channelID, true).
+		Joins("JOIN channels ON channels.id = abilities.channel_id").
+		Where(groupColumn+" = ? and abilities.model = ? and abilities.channel_id = ? and abilities.enabled = ? and channels.status = ?", group, modelName, channelID, true, common.ChannelStatusEnabled).
 		Count(&count).Error
 	if err == nil && count > 0 {
 		return true
@@ -56,7 +64,8 @@ func isChannelEnabledForGroupModelDB(group string, modelName string, channelID i
 	}
 	count = 0
 	err = DB.Model(&Ability{}).
-		Where(commonGroupCol+" = ? and model = ? and channel_id = ? and enabled = ?", group, normalized, channelID, true).
+		Joins("JOIN channels ON channels.id = abilities.channel_id").
+		Where(groupColumn+" = ? and abilities.model = ? and abilities.channel_id = ? and abilities.enabled = ? and channels.status = ?", group, normalized, channelID, true, common.ChannelStatusEnabled).
 		Count(&count).Error
 	return err == nil && count > 0
 }
