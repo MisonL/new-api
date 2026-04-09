@@ -249,6 +249,7 @@ const ParameterControl = ({
           />
         </div>
         <InputNumber
+          id='playground-max-tokens'
           placeholder='MaxTokens'
           name='max_tokens'
           value={inputs.max_tokens}
@@ -285,6 +286,7 @@ const ParameterControl = ({
           />
         </div>
         <Input
+          id='playground-seed'
           placeholder={t('随机种子 (留空为随机)')}
           name='seed'
           autoComplete='new-password'

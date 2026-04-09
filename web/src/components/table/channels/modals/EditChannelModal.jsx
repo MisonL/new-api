@@ -2026,6 +2026,7 @@ const EditChannelModal = (props) => {
               }
             }
           }}
+          name='components-table-channels-modals-editchannelmodal-checkbox-1'
         >
           {t('批量创建')}
         </Checkbox>
@@ -2050,6 +2051,7 @@ const EditChannelModal = (props) => {
                 return nextValue;
               });
             }}
+            name='components-table-channels-modals-editchannelmodal-checkbox-2'
           >
             {t('密钥聚合模式')}
           </Checkbox>
@@ -2605,21 +2607,33 @@ const EditChannelModal = (props) => {
                       </Banner>
                     )}
 
-                    <Form.Select
-                      field='type'
-                      label={t('类型')}
-                      placeholder={t('请选择渠道类型')}
-                      rules={[{ required: true, message: t('请选择渠道类型') }]}
-                      optionList={channelOptionList}
-                      style={{ width: '100%' }}
-                      filter={selectFilter}
-                      autoClearSearchValue={false}
-                      searchPosition='dropdown'
-                      onSearch={(value) => setChannelSearchValue(value)}
-                      renderOptionItem={renderChannelOption}
-                      onChange={(value) => handleInputChange('type', value)}
-                      disabled={isIonetLocked}
-                    />
+                    <div className='semi-form-field'>
+                      <div
+                        id='type-label'
+                        className='semi-form-field-label semi-form-field-label-left semi-form-field-label-required'
+                      >
+                        <div className='semi-form-field-label-text'>
+                          {t('类型')}
+                        </div>
+                      </div>
+                      <Form.Select
+                        field='type'
+                        noLabel
+                        aria-labelledby='type-label'
+                        aria-label={t('类型')}
+                        placeholder={t('请选择渠道类型')}
+                        rules={[{ required: true, message: t('请选择渠道类型') }]}
+                        optionList={channelOptionList}
+                        style={{ width: '100%' }}
+                        filter={selectFilter}
+                        autoClearSearchValue={false}
+                        searchPosition='dropdown'
+                        onSearch={(value) => setChannelSearchValue(value)}
+                        renderOptionItem={renderChannelOption}
+                        onChange={(value) => handleInputChange('type', value)}
+                        disabled={isIonetLocked}
+                      />
+                    </div>
 
                     {inputs.type === 57 && (
                       <Banner
@@ -3463,9 +3477,20 @@ const EditChannelModal = (props) => {
                   )}
 
                   {/* Model Selection - Part of Core Config */}
-                  <Form.Select
+                  <div className='semi-form-field'>
+                    <div
+                      id='models-label'
+                      className='semi-form-field-label semi-form-field-label-left semi-form-field-label-required'
+                    >
+                      <div className='semi-form-field-label-text'>
+                        {t('模型')}
+                      </div>
+                    </div>
+                    <Form.Select
                       field='models'
-                      label={t('模型')}
+                      noLabel
+                      aria-labelledby='models-label'
+                      aria-label={t('模型')}
                       placeholder={t('请选择该渠道所支持的模型')}
                       rules={[{ required: true, message: t('请选择模型') }]}
                       multiple
@@ -3572,6 +3597,7 @@ const EditChannelModal = (props) => {
                         </Space>
                       }
                     />
+                  </div>
 
                   {/* Custom Model Name - Core Config */}
                   <Form.Input
@@ -3592,20 +3618,32 @@ const EditChannelModal = (props) => {
                   />
 
                   {/* Groups - Core Config */}
-                  <Form.Select
-                    field='groups'
-                    label={t('分组')}
-                    placeholder={t('请选择可以使用该渠道的分组')}
-                    multiple
-                    allowAdditions
-                    additionLabel={t(
-                      '请在系统设置页面编辑分组倍率以添加新的分组：',
-                    )}
-                    optionList={groupOptions}
-                    style={{ width: '100%' }}
-                    position='top'
-                    onChange={(value) => handleInputChange('groups', value)}
-                  />
+                  <div className='semi-form-field'>
+                    <div
+                      id='groups-label'
+                      className='semi-form-field-label semi-form-field-label-left'
+                    >
+                      <div className='semi-form-field-label-text'>
+                        {t('分组')}
+                      </div>
+                    </div>
+                    <Form.Select
+                      field='groups'
+                      noLabel
+                      aria-labelledby='groups-label'
+                      aria-label={t('分组')}
+                      placeholder={t('请选择可以使用该渠道的分组')}
+                      multiple
+                      allowAdditions
+                      additionLabel={t(
+                        '请在系统设置页面编辑分组倍率以添加新的分组：',
+                      )}
+                      optionList={groupOptions}
+                      style={{ width: '100%' }}
+                      position='top'
+                      onChange={(value) => handleInputChange('groups', value)}
+                    />
+                  </div>
 
                   {/* Model Mapping - Core Config */}
                   <JSONEditor

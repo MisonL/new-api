@@ -25,6 +25,7 @@ import FooterBar from './Footer';
 import { ToastContainer } from 'react-toastify';
 import ErrorBoundary from '../common/ErrorBoundary';
 import React, { useContext, useEffect, useState } from 'react';
+import useFormFieldA11yPatch from '../../hooks/common/useFormFieldA11yPatch';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useTranslation } from 'react-i18next';
@@ -143,6 +144,8 @@ const PageLayout = () => {
       }
     }
   }, [i18n, userState?.user?.setting]);
+
+  useFormFieldA11yPatch(location.pathname);
 
   return (
     <Layout
