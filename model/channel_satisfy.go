@@ -1,6 +1,8 @@
 package model
 
 import (
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
@@ -48,6 +50,64 @@ func IsChannelEnabledForAnyGroupModel(groups []string, modelName string, channel
 	return false
 }
 
+func HasResponsesBootstrapRecoveryEnabledChannel(groups []string, modelName string) bool {
+	if len(groups) == 0 || modelName == "" {
+		return false
+	}
+	normalized := ratio_setting.FormatMatchingModelName(modelName)
+	if !common.MemoryCacheEnabled {
+		return hasResponsesBootstrapRecoveryEnabledChannelDB(groups, modelName, normalized)
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	for _, channel := range channelsIDM {
+		if channel == nil || channel.Status != common.ChannelStatusEnabled {
+			continue
+		}
+		if !channel.GetOtherSettings().ResponsesStreamBootstrapRecoveryEnabled {
+			continue
+		}
+		if !channelMatchesAnyGroup(channel, groups) {
+			continue
+		}
+		if channelSupportsModel(channel, modelName, normalized) {
+			return true
+		}
+	}
+	return false
+}
+
+func HasResponsesBootstrapRecoveryCandidateChannel(groups []string, modelName string) bool {
+	if len(groups) == 0 || modelName == "" {
+		return false
+	}
+	normalized := ratio_setting.FormatMatchingModelName(modelName)
+	if !common.MemoryCacheEnabled {
+		return hasResponsesBootstrapRecoveryCandidateChannelDB(groups, modelName, normalized)
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	for _, channel := range channelsIDM {
+		if channel == nil {
+			continue
+		}
+		if !channel.GetOtherSettings().ResponsesStreamBootstrapRecoveryEnabled {
+			continue
+		}
+		if !channelMatchesAnyGroup(channel, groups) {
+			continue
+		}
+		if channelSupportsModel(channel, modelName, normalized) {
+			return true
+		}
+	}
+	return false
+}
+
 func isChannelEnabledForGroupModelDB(group string, modelName string, channelID int) bool {
 	var count int64
 	groupColumn := "abilities." + commonGroupCol
@@ -68,6 +128,74 @@ func isChannelEnabledForGroupModelDB(group string, modelName string, channelID i
 		Where(groupColumn+" = ? and abilities.model = ? and abilities.channel_id = ? and abilities.enabled = ? and channels.status = ?", group, normalized, channelID, true, common.ChannelStatusEnabled).
 		Count(&count).Error
 	return err == nil && count > 0
+}
+
+func hasResponsesBootstrapRecoveryEnabledChannelDB(groups []string, modelName string, normalized string) bool {
+	var channels []*Channel
+	if err := DB.Where("status = ?", common.ChannelStatusEnabled).Find(&channels).Error; err != nil {
+		return false
+	}
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		if !channel.GetOtherSettings().ResponsesStreamBootstrapRecoveryEnabled {
+			continue
+		}
+		if !channelMatchesAnyGroup(channel, groups) {
+			continue
+		}
+		if channelSupportsModel(channel, modelName, normalized) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasResponsesBootstrapRecoveryCandidateChannelDB(groups []string, modelName string, normalized string) bool {
+	var channels []*Channel
+	if err := DB.Find(&channels).Error; err != nil {
+		return false
+	}
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		if !channel.GetOtherSettings().ResponsesStreamBootstrapRecoveryEnabled {
+			continue
+		}
+		if !channelMatchesAnyGroup(channel, groups) {
+			continue
+		}
+		if channelSupportsModel(channel, modelName, normalized) {
+			return true
+		}
+	}
+	return false
+}
+
+func channelMatchesAnyGroup(channel *Channel, groups []string) bool {
+	for _, group := range channel.GetGroups() {
+		for _, candidate := range groups {
+			if strings.TrimSpace(group) == strings.TrimSpace(candidate) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func channelSupportsModel(channel *Channel, modelName string, normalized string) bool {
+	for _, model := range channel.GetModels() {
+		trimmed := strings.TrimSpace(model)
+		if trimmed == modelName {
+			return true
+		}
+		if normalized != "" && normalized != modelName && trimmed == normalized {
+			return true
+		}
+	}
+	return false
 }
 
 func isChannelIDInList(list []int, channelID int) bool {
