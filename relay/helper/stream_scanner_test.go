@@ -26,12 +26,6 @@ func init() {
 func setupStreamTest(t *testing.T, body io.Reader) (*gin.Context, *http.Response, *relaycommon.RelayInfo) {
 	t.Helper()
 
-	oldTimeout := constant.StreamingTimeout
-	constant.StreamingTimeout = 30
-	t.Cleanup(func() {
-		constant.StreamingTimeout = oldTimeout
-	})
-
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -249,10 +243,6 @@ func TestStreamScannerHandler_ScannerDecoupledFromSlowHandler(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
-	oldTimeout := constant.StreamingTimeout
-	constant.StreamingTimeout = 30
-	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
-
 	resp := &http.Response{Body: pr}
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
 
@@ -316,8 +306,6 @@ func TestStreamScannerHandler_SlowUpstreamFastHandler(t *testing.T) {
 // ---------- Ping tests ----------
 
 func TestStreamScannerHandler_PingSentDuringSlowUpstream(t *testing.T) {
-	t.Parallel()
-
 	setting := operation_setting.GetGeneralSetting()
 	oldEnabled := setting.PingIntervalEnabled
 	oldSeconds := setting.PingIntervalSeconds
@@ -341,12 +329,6 @@ func TestStreamScannerHandler_PingSentDuringSlowUpstream(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-
-	oldTimeout := constant.StreamingTimeout
-	constant.StreamingTimeout = 30
-	t.Cleanup(func() {
-		constant.StreamingTimeout = oldTimeout
-	})
 
 	resp := &http.Response{Body: pr}
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
@@ -376,8 +358,6 @@ func TestStreamScannerHandler_PingSentDuringSlowUpstream(t *testing.T) {
 }
 
 func TestStreamScannerHandler_PingDisabledByRelayInfo(t *testing.T) {
-	t.Parallel()
-
 	setting := operation_setting.GetGeneralSetting()
 	oldEnabled := setting.PingIntervalEnabled
 	oldSeconds := setting.PingIntervalSeconds
@@ -401,12 +381,6 @@ func TestStreamScannerHandler_PingDisabledByRelayInfo(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-
-	oldTimeout := constant.StreamingTimeout
-	constant.StreamingTimeout = 30
-	t.Cleanup(func() {
-		constant.StreamingTimeout = oldTimeout
-	})
 
 	resp := &http.Response{Body: pr}
 	info := &relaycommon.RelayInfo{
@@ -630,8 +604,6 @@ func TestStreamScannerHandler_StreamStatus_PreInitialized(t *testing.T) {
 }
 
 func TestStreamScannerHandler_PingInterleavesWithSlowUpstream(t *testing.T) {
-	t.Parallel()
-
 	setting := operation_setting.GetGeneralSetting()
 	oldEnabled := setting.PingIntervalEnabled
 	oldSeconds := setting.PingIntervalSeconds
@@ -655,12 +627,6 @@ func TestStreamScannerHandler_PingInterleavesWithSlowUpstream(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-
-	oldTimeout := constant.StreamingTimeout
-	constant.StreamingTimeout = 30
-	t.Cleanup(func() {
-		constant.StreamingTimeout = oldTimeout
-	})
 
 	resp := &http.Response{Body: pr}
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
@@ -687,4 +653,33 @@ func TestStreamScannerHandler_PingInterleavesWithSlowUpstream(t *testing.T) {
 	t.Logf("received %d pings interleaved with 10 chunks over 5s", pingCount)
 	assert.GreaterOrEqual(t, pingCount, 3,
 		"expected at least 3 pings during 5s stream with 1s ping interval; got %d", pingCount)
+}
+
+func TestStreamScannerHandler_StreamingTimeoutFallbackWhenNonPositive(t *testing.T) {
+	// Not parallel: modifies global constant.StreamingTimeout
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 0
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	resp := &http.Response{
+		Body: io.NopCloser(strings.NewReader(buildSSEBody(1))),
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+
+	var count atomic.Int64
+	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+		count.Add(1)
+	})
+
+	assert.Equal(t, int64(1), count.Load())
+	require.NotNil(t, info.StreamStatus)
+	assert.True(t, info.StreamStatus.IsNormalEnd())
 }
