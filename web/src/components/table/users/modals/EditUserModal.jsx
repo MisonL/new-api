@@ -70,8 +70,9 @@ const EditUserModal = (props) => {
   const [groupOptions, setGroupOptions] = useState([]);
   const [bindingModalVisible, setBindingModalVisible] = useState(false);
   const formApiRef = useRef(null);
+  const requestIdRef = useRef(0);
 
-  const isEdit = Boolean(userId);
+  const isEdit = userId !== null && userId !== undefined;
 
   const getInitValues = () => ({
     username: '',
@@ -89,36 +90,100 @@ const EditUserModal = (props) => {
     remark: '',
   });
 
-  const fetchGroups = async () => {
+  const handleCancel = () => props.handleClose();
+
+  const resetFormValues = () => {
+    formApiRef.current?.setValues(getInitValues());
+  };
+
+  const isRequestCurrent = (requestId) => requestIdRef.current === requestId;
+
+  const fetchGroups = async (requestId) => {
     try {
-      let res = await API.get(`/api/group/`);
+      const res = await API.get(`/api/group/`);
+      if (!isRequestCurrent(requestId)) {
+        return false;
+      }
       setGroupOptions(res.data.data.map((g) => ({ label: g, value: g })));
+      return true;
     } catch (e) {
-      showError(e.message);
+      if (isRequestCurrent(requestId)) {
+        showError(e.message);
+      }
+      return false;
     }
   };
 
-  const handleCancel = () => props.handleClose();
-
-  const loadUser = async () => {
-    setLoading(true);
-    const url = userId ? `/api/user/${userId}` : `/api/user/self`;
-    const res = await API.get(url);
-    const { success, message, data } = res.data;
-    if (success) {
-      data.password = '';
-      formApiRef.current?.setValues({ ...getInitValues(), ...data });
-    } else {
-      showError(message);
+  const loadUser = async (currentUserId, requestId) => {
+    if (!isRequestCurrent(requestId)) {
+      return null;
     }
-    setLoading(false);
+    const url = currentUserId ? `/api/user/${currentUserId}` : `/api/user/self`;
+    const res = await API.get(url);
+    if (!isRequestCurrent(requestId)) {
+      return null;
+    }
+    return res.data;
   };
 
   useEffect(() => {
-    loadUser();
-    if (userId) fetchGroups();
-    setBindingModalVisible(false);
-  }, [props.editingUser.id]);
+    if (!props.visible) {
+      return;
+    }
+
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const currentUserId = props.editingUser.id;
+
+    const initialize = async () => {
+      setBindingModalVisible(false);
+      setLoading(true);
+      resetFormValues();
+      try {
+        if (currentUserId) {
+          const groupsLoaded = await fetchGroups(requestId);
+          if (!groupsLoaded || !isRequestCurrent(requestId)) {
+            return;
+          }
+        } else {
+          setGroupOptions([]);
+        }
+
+        if (!isRequestCurrent(requestId)) {
+          return;
+        }
+        const response = await loadUser(currentUserId, requestId);
+        if (!response || !isRequestCurrent(requestId)) {
+          return;
+        }
+        const { success, message, data } = response;
+        if (success) {
+          data.password = '';
+          formApiRef.current?.setValues({ ...getInitValues(), ...data });
+        } else {
+          resetFormValues();
+          showError(message);
+        }
+      } catch (error) {
+        if (isRequestCurrent(requestId)) {
+          resetFormValues();
+          showError(error.message);
+        }
+      } finally {
+        if (isRequestCurrent(requestId)) {
+          setLoading(false);
+        }
+      }
+    };
+
+    initialize();
+
+    return () => {
+      if (requestIdRef.current === requestId) {
+        requestIdRef.current += 1;
+      }
+    };
+  }, [props.visible, props.editingUser.id]);
 
   const openBindingModal = () => {
     setBindingModalVisible(true);
@@ -142,7 +207,7 @@ const EditUserModal = (props) => {
     const { success, message } = res.data;
     if (success) {
       showSuccess(t('用户信息更新成功！'));
-      props.refresh();
+      await props.refresh();
       props.handleClose();
     } else {
       showError(message);
