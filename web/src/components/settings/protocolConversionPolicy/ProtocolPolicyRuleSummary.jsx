@@ -23,6 +23,7 @@ import {
   getEndpointLabel,
   getRuleModelSummary,
   getRuleScopeSummary,
+  isRuleScopeValid,
 } from './utils';
 
 const { Text } = Typography;
@@ -37,6 +38,8 @@ export default function ProtocolPolicyRuleSummary({
   toggleRuleExpanded,
   updateRule,
 }) {
+  const scopeInvalid = !isRuleScopeValid(rule);
+
   return (
     <div
       style={{
@@ -69,6 +72,7 @@ export default function ProtocolPolicyRuleSummary({
             {`${getEndpointLabel(rule.source_endpoint)} -> ${getEndpointLabel(rule.target_endpoint)}`}
           </Tag>
           {directionInvalid ? <Tag color='red'>{t('方向无效')}</Tag> : null}
+          {scopeInvalid ? <Tag color='red'>{t('范围未命中')}</Tag> : null}
         </div>
         <div
           style={{

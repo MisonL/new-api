@@ -30,7 +30,12 @@ import {
   Typography,
 } from '@douyinfe/semi-ui';
 import { ENDPOINT_OPTIONS, panelStyle } from './constants';
-import { parseIntegerList, parseTextList, stringifyIntegerList } from './utils';
+import {
+  isRuleScopeValid,
+  parseIntegerList,
+  parseTextList,
+  stringifyIntegerList,
+} from './utils';
 
 const { Text } = Typography;
 
@@ -179,6 +184,15 @@ function ScopePanel({ channelTypeOptions, index, rule, t, updateRule }) {
           }
         />
       </div>
+      {!isRuleScopeValid(rule) ? (
+        <Banner
+          type='warning'
+          style={{ marginTop: 12 }}
+          description={t(
+            '当前未指定任何渠道范围，这条规则不会命中。请勾选“作用于全部渠道”或至少指定一个渠道 ID / 渠道类型。',
+          )}
+        />
+      ) : null}
     </div>
   );
 }

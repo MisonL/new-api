@@ -38,6 +38,7 @@ import {
   buildTemplateRule,
   deserializeRules,
   getRuleKey,
+  isRuleScopeValid,
   isRuleDirectionValid,
   serializeRules,
   validateRulesForVisualMode,
@@ -64,7 +65,7 @@ function appendRulesByTemplates(rules, templates) {
   for (const template of (templates || []).filter(Boolean)) {
     const nextRule = buildTemplateRule(template, nextRules);
     nextRules.push(nextRule);
-    nextRuleKeys.push(getRuleKey(nextRules.length - 1));
+    nextRuleKeys.push(getRuleKey(nextRule, nextRules.length - 1));
   }
   return { nextRules, nextRuleKeys };
 }
@@ -91,7 +92,9 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
       return;
     }
     setExpandedRuleKeys((prev) => {
-      const validKeys = new Set(rules.map((_, index) => getRuleKey(index)));
+      const validKeys = new Set(
+        rules.map((rule, index) => getRuleKey(rule, index)),
+      );
       return prev.filter((key) => validKeys.has(key));
     });
   }, [rules]);
@@ -104,7 +107,7 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
   const editModeOptions = useMemo(() => buildEditModeOptions(t), [t]);
   const newRuleTemplateOptions = useMemo(() => buildTemplateOptions(t), [t]);
   const ruleKeys = useMemo(
-    () => rules.map((_, index) => getRuleKey(index)),
+    () => rules.map((rule, index) => getRuleKey(rule, index)),
     [rules],
   );
   const enabledRuleCount = useMemo(
@@ -113,6 +116,10 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
   );
   const invalidDirectionRuleCount = useMemo(
     () => rules.filter((rule) => !isRuleDirectionValid(rule)).length,
+    [rules],
+  );
+  const invalidScopeRuleCount = useMemo(
+    () => rules.filter((rule) => !isRuleScopeValid(rule)).length,
     [rules],
   );
   const isAllRulesExpanded = useMemo(
@@ -166,6 +173,14 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
       ),
     );
 
+  const removeRule = (targetIndex) => {
+    const targetRuleKey = getRuleKey(rules[targetIndex], targetIndex);
+    applyRules(
+      rules.filter((_, currentIndex) => currentIndex !== targetIndex),
+    );
+    setExpandedRuleKeys((prev) => prev.filter((key) => key !== targetRuleKey));
+  };
+
   const headerProps = {
     addRuleByTemplateType,
     editMode,
@@ -177,6 +192,7 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
         ? switchToVisualMode()
         : (setEditMode(EDIT_MODE_JSON), onChange(serializeRules(rules))),
     invalidDirectionRuleCount,
+    invalidScopeRuleCount,
     isAllRulesExpanded,
     newRuleTemplateOptions,
     newRuleTemplateType,
@@ -192,7 +208,7 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
       <Banner
         type='info'
         description={t(
-          '协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时，该规则不会命中。',
+          '协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空或渠道范围为空时，该规则不会命中。',
         )}
       />
       <ProtocolPolicyHeader {...headerProps} />
@@ -202,6 +218,15 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
           style={{ marginBottom: 12 }}
           description={t(
             '存在源协议与目标协议相同的规则，这类规则不会产生实际转换效果，请检查后再保存。',
+          )}
+        />
+      ) : null}
+      {editMode === EDIT_MODE_VISUAL && invalidScopeRuleCount > 0 ? (
+        <Banner
+          type='warning'
+          style={{ marginBottom: 12 }}
+          description={t(
+            '存在未指定渠道范围的规则：既未勾选“作用于全部渠道”，也没有填写渠道 ID 或渠道类型，这类规则不会命中。',
           )}
         />
       ) : null}
@@ -225,19 +250,13 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
           ) : null}
           {rules.map((rule, index) => (
             <ProtocolPolicyRuleCard
-              key={getRuleKey(index)}
+              key={getRuleKey(rule, index)}
               channelTypeOptions={channelTypeOptions}
               index={index}
-              isExpanded={expandedRuleKeys.includes(getRuleKey(index))}
-              removeRule={(targetIndex) =>
-                applyRules(
-                  rules.filter(
-                    (_, currentIndex) => currentIndex !== targetIndex,
-                  ),
-                )
-              }
+              isExpanded={expandedRuleKeys.includes(getRuleKey(rule, index))}
+              removeRule={removeRule}
               rule={rule}
-              ruleKey={getRuleKey(index)}
+              ruleKey={getRuleKey(rule, index)}
               t={t}
               toggleRuleExpanded={(ruleKey) =>
                 setExpandedRuleKeys((prev) =>

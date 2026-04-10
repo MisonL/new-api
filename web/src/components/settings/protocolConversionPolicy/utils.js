@@ -25,6 +25,23 @@ import {
 } from './constants';
 import { verifyJSON } from '../../../helpers';
 
+const RULE_CLIENT_KEY_FIELD = '__client_key';
+
+let ruleClientKeyCounter = 0;
+
+const nextRuleClientKey = () => `protocol-rule-${ruleClientKeyCounter++}`;
+
+const ensureRuleClientKey = (rule) => {
+  const currentKey =
+    rule &&
+    typeof rule === 'object' &&
+    typeof rule[RULE_CLIENT_KEY_FIELD] === 'string' &&
+    rule[RULE_CLIENT_KEY_FIELD].trim() !== ''
+      ? rule[RULE_CLIENT_KEY_FIELD].trim()
+      : '';
+  return currentKey || nextRuleClientKey();
+};
+
 export const normalizeEndpoint = (value) => {
   const endpoint = String(value || '')
     .trim()
@@ -69,6 +86,11 @@ export const parseIntegerList = (text) =>
 export const stringifyIntegerList = (values) =>
   Array.isArray(values) ? values.join(', ') : '';
 
+export const isRuleScopeValid = (rule) =>
+  rule?.all_channels === true ||
+  (Array.isArray(rule?.channel_ids) && rule.channel_ids.length > 0) ||
+  (Array.isArray(rule?.channel_types) && rule.channel_types.length > 0);
+
 export const sanitizeRule = (rule, fallbackName) => {
   const channelTypes = Array.isArray(rule?.channel_types)
     ? rule.channel_types
@@ -77,6 +99,7 @@ export const sanitizeRule = (rule, fallbackName) => {
     : [];
 
   return {
+    [RULE_CLIENT_KEY_FIELD]: ensureRuleClientKey(rule),
     name: String(rule?.name || fallbackName || '').trim() || 'rule',
     enabled: rule?.enabled !== false,
     source_endpoint: normalizeEndpoint(rule?.source_endpoint),
@@ -200,7 +223,8 @@ export const buildTemplateRule = (template, currentRules) => {
   );
 };
 
-export const getRuleKey = (index) => `rule-${index}`;
+export const getRuleKey = (rule, index) =>
+  ensureRuleClientKey(rule) || `rule-${index}`;
 
 export const getEndpointLabel = (value) =>
   ENDPOINT_OPTIONS.find((item) => item.value === value)?.label || value;
@@ -216,7 +240,7 @@ export const getRuleScopeSummary = (rule, t) => {
   if (Array.isArray(rule.channel_ids) && rule.channel_ids.length > 0) {
     parts.push(t('{{count}} 个渠道 ID', { count: rule.channel_ids.length }));
   }
-  return parts.length === 0 ? t('未指定渠道范围') : parts.join(' / ');
+  return parts.length === 0 ? t('未指定渠道范围，不会命中') : parts.join(' / ');
 };
 
 export const getRuleModelSummary = (rule, t) => {

@@ -23,7 +23,13 @@ import { EDIT_MODE_JSON, EDIT_MODE_VISUAL, panelStyle } from './constants';
 
 const { Text } = Typography;
 
-function RuleStats({ enabledRuleCount, invalidDirectionRuleCount, rules, t }) {
+function RuleStats({
+  enabledRuleCount,
+  invalidDirectionRuleCount,
+  invalidScopeRuleCount,
+  rules,
+  t,
+}) {
   return (
     <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       <Tag color='light-blue'>
@@ -35,6 +41,11 @@ function RuleStats({ enabledRuleCount, invalidDirectionRuleCount, rules, t }) {
       {invalidDirectionRuleCount > 0 ? (
         <Tag color='red'>
           {t('方向异常 {{count}} 条', { count: invalidDirectionRuleCount })}
+        </Tag>
+      ) : null}
+      {invalidScopeRuleCount > 0 ? (
+        <Tag color='red'>
+          {t('范围未命中 {{count}} 条', { count: invalidScopeRuleCount })}
         </Tag>
       ) : null}
     </div>
@@ -121,8 +132,14 @@ function ModeTip({ editMode, t }) {
 }
 
 export default function ProtocolPolicyHeader(props) {
-  const { editMode, enabledRuleCount, invalidDirectionRuleCount, rules, t } =
-    props;
+  const {
+    editMode,
+    enabledRuleCount,
+    invalidDirectionRuleCount,
+    invalidScopeRuleCount,
+    rules,
+    t,
+  } = props;
 
   return (
     <div style={{ ...panelStyle, marginTop: 12, marginBottom: 12 }}>
@@ -147,6 +164,7 @@ export default function ProtocolPolicyHeader(props) {
           <RuleStats
             enabledRuleCount={enabledRuleCount}
             invalidDirectionRuleCount={invalidDirectionRuleCount}
+            invalidScopeRuleCount={invalidScopeRuleCount}
             rules={rules}
             t={t}
           />
