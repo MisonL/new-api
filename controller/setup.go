@@ -152,6 +152,15 @@ func PostSetup(c *gin.Context) {
 		return
 	}
 
+	err = persistDerivedServerAddress(c.Request)
+	if err != nil {
+		c.JSON(200, gin.H{
+			"success": false,
+			"message": "保存服务器地址失败: " + err.Error(),
+		})
+		return
+	}
+
 	// Update setup status
 	constant.Setup = true
 
