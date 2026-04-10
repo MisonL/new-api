@@ -82,9 +82,14 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
   useEffect(() => {
     const parsedRules = deserializeRules(value);
     if (parsedRules) {
+      const nextSerialized = serializeRules(parsedRules);
+      const currentSerialized = serializeRules(rules);
+      if (nextSerialized === currentSerialized) {
+        return;
+      }
       setRules(parsedRules);
     }
-  }, [value]);
+  }, [value, rules]);
 
   useEffect(() => {
     if (rules.length === 0) {
