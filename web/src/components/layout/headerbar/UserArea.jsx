@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Avatar, Button, Dropdown, Typography } from '@douyinfe/semi-ui';
+import { Button, Dropdown, Typography } from '@douyinfe/semi-ui';
 import { ChevronDown } from 'lucide-react';
 import {
   IconExit,
@@ -52,6 +52,12 @@ const UserArea = ({
   }
 
   if (userState.user) {
+    const username = userState.user.username;
+    const userInitial = username[0].toUpperCase();
+    const userBadgeStyle = {
+      backgroundColor: stringToColor(username),
+    };
+
     return (
       <div className='relative' ref={dropdownRef}>
         <Dropdown
@@ -119,18 +125,19 @@ const UserArea = ({
           <Button
             theme='borderless'
             type='tertiary'
+            aria-label={username}
             className='flex items-center gap-1.5 !p-1 !rounded-full hover:!bg-semi-color-fill-1 dark:hover:!bg-gray-700 !bg-semi-color-fill-0 dark:!bg-semi-color-fill-1 dark:hover:!bg-semi-color-fill-2'
           >
-            <Avatar
-              size='extra-small'
-              color={stringToColor(userState.user.username)}
-              className='mr-1'
+            <span
+              aria-hidden='true'
+              style={userBadgeStyle}
+              className='mr-1 inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold text-white'
             >
-              {userState.user.username[0].toUpperCase()}
-            </Avatar>
+              {userInitial}
+            </span>
             <span className='hidden md:inline'>
               <Typography.Text className='!text-xs !font-medium !text-semi-color-text-1 dark:!text-gray-300 mr-1'>
-                {userState.user.username}
+                {username}
               </Typography.Text>
             </span>
             <ChevronDown

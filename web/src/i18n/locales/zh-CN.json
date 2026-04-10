@@ -72,7 +72,7 @@
     "Claude会在原有请求头基础上追加这些值，不会覆盖已有同名请求头；重复值会自动忽略。": "Claude会在原有请求头基础上追加这些值，不会覆盖已有同名请求头；重复值会自动忽略。",
     "Client ID": "Client ID",
     "Client Secret": "Client Secret",
-    "common.changeLanguage": "common.changeLanguage",
+    "common.changeLanguage": "切换语言",
     "Creem API 密钥，敏感信息不显示": "Creem API 密钥，敏感信息不显示",
     "Creem Setting Tips": "Creem 只支持预设的固定金额产品，这产品以及价格需要提前在Creem网站内创建配置，所以不支持自定义动态金额充值。在Creem端配置产品的名字以及价格，获取Product Id 后填到下面的产品，在new-api为该产品设置充值额度，以及展示价格。",
     "Creem 介绍": "Creem 是一个简单的支付处理平台，支持固定金额产品销售，以及订阅销售。",

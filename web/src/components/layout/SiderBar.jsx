@@ -18,13 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getLucideIcon } from '../../helpers/render';
 import { ChevronLeft } from 'lucide-react';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useSidebar } from '../../hooks/common/useSidebar';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
+import useRepeatingDomPatch from '../../hooks/common/useRepeatingDomPatch';
 import { isAdmin, isRoot, showError } from '../../helpers';
 import SkeletonWrapper from './components/SkeletonWrapper';
 
@@ -66,6 +67,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   const [chatItems, setChatItems] = useState([]);
   const [openedKeys, setOpenedKeys] = useState([]);
   const location = useLocation();
+  const navigate = useNavigate();
   const [routerMapState, setRouterMapState] = useState(routerMap);
 
   const workspaceItems = useMemo(() => {
@@ -303,8 +305,50 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     }
   }, [collapsed]);
 
+  useRepeatingDomPatch(() => {
+    const sidebar = document.querySelector('.sidebar-container');
+    if (!sidebar) {
+      return;
+    }
+
+    const subWrappers = sidebar.querySelectorAll('.semi-navigation-sub-wrap');
+    subWrappers.forEach((node) => {
+      node.setAttribute('role', 'none');
+      node.removeAttribute('tabindex');
+      node.removeAttribute('aria-disabled');
+      node.removeAttribute('aria-expanded');
+    });
+  }, [collapsed, chatItems.length]);
+
   // 选中高亮颜色（统一）
   const SELECTED_COLOR = 'var(--semi-color-primary)';
+  const sharedNavProps = {
+    className: 'sidebar-nav',
+    defaultIsCollapsed: collapsed,
+    isCollapsed: collapsed,
+    onCollapseChange: toggleCollapsed,
+    selectedKeys,
+    itemStyle: 'sidebar-nav-item',
+    hoverStyle: 'sidebar-nav-item:hover',
+    selectedStyle: 'sidebar-nav-item-selected',
+    onSelect: (key) => {
+      if (openedKeys.includes(key.itemKey)) {
+        setOpenedKeys(openedKeys.filter((k) => k !== key.itemKey));
+      }
+
+      setSelectedKeys([key.itemKey]);
+
+      const to = routerMapState[key.itemKey] || routerMap[key.itemKey];
+      if (to && location.pathname !== to) {
+        navigate(to);
+        onNavigate();
+      }
+    },
+    openKeys: openedKeys,
+    onOpenChange: (data) => {
+      setOpenedKeys(data.openKeys);
+    },
+  };
 
   // 渲染自定义菜单项
   const renderNavItem = (item) => {
@@ -400,65 +444,29 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         collapsed={collapsed}
         showAdmin={isAdmin()}
       >
-        <Nav
-          className='sidebar-nav'
-          defaultIsCollapsed={collapsed}
-          isCollapsed={collapsed}
-          onCollapseChange={toggleCollapsed}
-          selectedKeys={selectedKeys}
-          itemStyle='sidebar-nav-item'
-          hoverStyle='sidebar-nav-item:hover'
-          selectedStyle='sidebar-nav-item-selected'
-          renderWrapper={({ itemElement, props }) => {
-            const to =
-              routerMapState[props.itemKey] || routerMap[props.itemKey];
-
-            // 如果没有路由，直接返回元素
-            if (!to) return itemElement;
-
-            return (
-              <Link
-                style={{ textDecoration: 'none' }}
-                to={to}
-                onClick={onNavigate}
-              >
-                {itemElement}
-              </Link>
-            );
-          }}
-          onSelect={(key) => {
-            // 如果点击的是已经展开的子菜单的父项，则收起子菜单
-            if (openedKeys.includes(key.itemKey)) {
-              setOpenedKeys(openedKeys.filter((k) => k !== key.itemKey));
-            }
-
-            setSelectedKeys([key.itemKey]);
-          }}
-          openKeys={openedKeys}
-          onOpenChange={(data) => {
-            setOpenedKeys(data.openKeys);
-          }}
-        >
+        <>
           {/* 聊天区域 */}
           {hasSectionVisibleModules('chat') && (
-            <div className='sidebar-section'>
+            <>
               {!collapsed && (
                 <div className='sidebar-group-label'>{t('聊天')}</div>
               )}
-              {chatMenuItems.map((item) => renderSubItem(item))}
-            </div>
+              <Nav {...sharedNavProps}>
+                {chatMenuItems.map((item) => renderSubItem(item))}
+              </Nav>
+            </>
           )}
 
           {/* 控制台区域 */}
           {hasSectionVisibleModules('console') && (
             <>
               <Divider className='sidebar-divider' />
-              <div>
-                {!collapsed && (
-                  <div className='sidebar-group-label'>{t('控制台')}</div>
-                )}
+              {!collapsed && (
+                <div className='sidebar-group-label'>{t('控制台')}</div>
+              )}
+              <Nav {...sharedNavProps}>
                 {workspaceItems.map((item) => renderNavItem(item))}
-              </div>
+              </Nav>
             </>
           )}
 
@@ -466,12 +474,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           {hasSectionVisibleModules('personal') && (
             <>
               <Divider className='sidebar-divider' />
-              <div>
-                {!collapsed && (
-                  <div className='sidebar-group-label'>{t('个人中心')}</div>
-                )}
+              {!collapsed && (
+                <div className='sidebar-group-label'>{t('个人中心')}</div>
+              )}
+              <Nav {...sharedNavProps}>
                 {financeItems.map((item) => renderNavItem(item))}
-              </div>
+              </Nav>
             </>
           )}
 
@@ -479,15 +487,15 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           {isAdmin() && hasSectionVisibleModules('admin') && (
             <>
               <Divider className='sidebar-divider' />
-              <div>
-                {!collapsed && (
-                  <div className='sidebar-group-label'>{t('管理员')}</div>
-                )}
+              {!collapsed && (
+                <div className='sidebar-group-label'>{t('管理员')}</div>
+              )}
+              <Nav {...sharedNavProps}>
                 {adminItems.map((item) => renderNavItem(item))}
-              </div>
+              </Nav>
             </>
           )}
-        </Nav>
+        </>
       </SkeletonWrapper>
 
       {/* 底部折叠按钮 */}

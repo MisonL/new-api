@@ -197,11 +197,12 @@ code {
 /* 分组标签样式 */
 .sidebar-group-label {
   padding: 4px 15px 8px;
-  color: var(--semi-color-text-2);
+  color: var(--semi-color-text-0);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  opacity: 0.8;
+  opacity: 1;
+  font-weight: 700;
 }
 
 /* 底部折叠按钮 */
@@ -1016,6 +1017,17 @@ html.dark .with-pastel-balls::before {
 .semi-button,
 .semi-datepicker-range-input {
   border-radius: 10px !important;
+}
+
+.usage-date-range-field .semi-datepicker-range-input {
+  min-height: 32px;
+  align-items: stretch;
+}
+
+.usage-date-range-field .semi-datepicker-range-input-wrapper,
+.usage-date-range-field .semi-datepicker-range-input .semi-input-wrapper,
+.usage-date-range-field .semi-datepicker-range-input .semi-input {
+  min-height: 32px;
 }
 
 @keyframes slideInLeft {

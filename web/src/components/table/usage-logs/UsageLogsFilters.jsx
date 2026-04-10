@@ -93,6 +93,14 @@ const LogsFilters = ({
         endInput.name = 'log-date-range-end';
         endInput.id = endInput.id || 'log-date-range-end';
       }
+
+      const logTypeSelect = container.querySelector('#logType');
+      if (logTypeSelect) {
+        const activeDescendant = logTypeSelect.getAttribute('aria-activedescendant');
+        if (activeDescendant && !document.getElementById(activeDescendant)) {
+          logTypeSelect.removeAttribute('aria-activedescendant');
+        }
+      }
     };
 
     patchInputs();

@@ -22,6 +22,7 @@ import { Form, Spin } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API, showError } from '../../../helpers';
 import { useDebouncedCallback } from 'use-debounce';
+import useRepeatingDomPatch from '../../../hooks/common/useRepeatingDomPatch';
 
 const DEFAULT_LIMIT = 10;
 const DEFAULT_DEBOUNCE_MS = 250;
@@ -42,6 +43,7 @@ const FilterAutoComplete = ({
   const [options, setOptions] = useState([]);
   const [loading, setLoading] = useState(false);
   const autoCompleteRef = useRef(null);
+  const popupContainerRef = useRef(null);
   const requestIdRef = useRef(0);
   const cacheRef = useRef(new Map());
   const lastRateLimitNoticeAtRef = useRef(0);
@@ -130,6 +132,34 @@ const FilterAutoComplete = ({
     }
   }, [enableSuggestions, fetchSuggestions]);
 
+  useRepeatingDomPatch(() => {
+    const wrapper = popupContainerRef.current?.querySelector(`[id="${field}"]`);
+    if (!wrapper) {
+      return;
+    }
+
+    const popupId =
+      wrapper.getAttribute('data-popupid') || wrapper.getAttribute('aria-controls');
+    const popup = popupId ? document.getElementById(popupId) : null;
+
+    if (enableSuggestions && !disabled) {
+      wrapper.setAttribute('role', 'combobox');
+      wrapper.setAttribute('aria-haspopup', 'listbox');
+      wrapper.setAttribute('aria-autocomplete', 'list');
+      wrapper.setAttribute('aria-expanded', popup ? 'true' : 'false');
+      if (popupId) {
+        wrapper.setAttribute('aria-controls', popupId);
+      }
+      return;
+    }
+
+    wrapper.removeAttribute('role');
+    wrapper.removeAttribute('aria-haspopup');
+    wrapper.removeAttribute('aria-expanded');
+    wrapper.removeAttribute('aria-controls');
+    wrapper.removeAttribute('aria-autocomplete');
+  }, [disabled, enableSuggestions, field, options.length]);
+
   const handleTabSelect = () => {
     if (!enableSuggestions || disabled || options.length === 0) {
       return;
@@ -153,37 +183,40 @@ const FilterAutoComplete = ({
   };
 
   return (
-    <Form.AutoComplete
-      ref={autoCompleteRef}
-      field={field}
-      data={enableSuggestions ? options : []}
-      prefix={prefix}
-      placeholder={placeholder}
-      showClear
-      pure
-      size='small'
-      autoComplete='off'
-      disabled={disabled}
-      suffix={loading ? <Spin size='small' /> : null}
-      onChange={(value) => {
-        if (enableSuggestions) {
-          fetchSuggestions(value);
-        }
-      }}
-      onClear={() => {
-        resetOptions();
-      }}
-      onFocus={(e) => {
-        if (enableSuggestions && e?.target?.value) {
-          fetchSuggestions(e.target.value);
-        }
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Tab') {
-          handleTabSelect();
-        }
-      }}
-    />
+    <div className='relative w-full' ref={popupContainerRef}>
+      <Form.AutoComplete
+        ref={autoCompleteRef}
+        field={field}
+        data={enableSuggestions ? options : []}
+        prefix={prefix}
+        placeholder={placeholder}
+        showClear
+        pure
+        size='small'
+        autoComplete='off'
+        disabled={disabled}
+        getPopupContainer={() => popupContainerRef.current || document.body}
+        suffix={loading ? <Spin size='small' /> : null}
+        onChange={(value) => {
+          if (enableSuggestions) {
+            fetchSuggestions(value);
+          }
+        }}
+        onClear={() => {
+          resetOptions();
+        }}
+        onFocus={(e) => {
+          if (enableSuggestions && e?.target?.value) {
+            fetchSuggestions(e.target.value);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Tab') {
+            handleTabSelect();
+          }
+        }}
+      />
+    </div>
   );
 };
 
