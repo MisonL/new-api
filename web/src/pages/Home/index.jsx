@@ -25,7 +25,13 @@ import {
   ScrollList,
   ScrollItem,
 } from '@douyinfe/semi-ui';
-import { API, showError, copy, showSuccess } from '../../helpers';
+import {
+  API,
+  showError,
+  copy,
+  showSuccess,
+  getEffectiveServerAddress,
+} from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { API_ENDPOINTS } from '../../constants/common.constant';
 import { StatusContext } from '../../context/Status';
@@ -75,8 +81,9 @@ const Home = () => {
   const isMobile = useIsMobile();
   const isDemoSiteMode = statusState?.status?.demo_site_enabled || false;
   const docsLink = statusState?.status?.docs_link || '';
-  const serverAddress =
-    statusState?.status?.server_address || `${window.location.origin}`;
+  const serverAddress = getEffectiveServerAddress(
+    statusState?.status?.server_address,
+  );
   const endpointItems = API_ENDPOINTS.map((e) => ({ value: e }));
   const [endpointIndex, setEndpointIndex] = useState(0);
   const isChinese = i18n.language.startsWith('zh');
@@ -197,6 +204,7 @@ const Home = () => {
                               list={endpointItems}
                               selectedIndex={endpointIndex}
                               onSelect={({ index }) => setEndpointIndex(index)}
+                              aria-label={t('API端点')}
                             />
                           </ScrollList>
                           <Button
@@ -207,6 +215,7 @@ const Home = () => {
                           />
                         </div>
                       }
+                      name='pages-home-index-input-1'
                     />
                   </div>
                 </div>
@@ -241,8 +250,10 @@ const Home = () => {
                   ) : (
                     docsLink && (
                       <Button
+                        theme='solid'
+                        type='primary'
                         size={isMobile ? 'default' : 'large'}
-                        className='flex items-center !rounded-3xl px-6 py-2'
+                        className='flex items-center !rounded-3xl px-6 py-2 !bg-slate-900 hover:!bg-slate-800 !border-slate-900 !text-white shadow-sm'
                         icon={<IconFile />}
                         onClick={() => window.open(docsLink, '_blank')}
                       >
@@ -257,7 +268,7 @@ const Home = () => {
                   <div className='flex items-center mb-6 md:mb-8 justify-center'>
                     <Text
                       type='tertiary'
-                      className='text-lg md:text-xl lg:text-2xl font-light'
+                      className='text-lg md:text-xl lg:text-2xl font-medium !text-slate-700 dark:!text-slate-200'
                     >
                       {t('支持众多的大模型供应商')}
                     </Text>

@@ -52,6 +52,7 @@ import {
   renderMonitorList,
 } from '../../helpers/dashboard';
 
+// Dashboard composes the dashboard panels, filters, and chart interactions.
 const Dashboard = () => {
   // ========== Context ==========
   const [userState, userDispatch] = useContext(UserContext);
@@ -86,12 +87,22 @@ const Dashboard = () => {
   );
 
   // ========== 数据处理 ==========
+  const loadUserData = async () => {
+    if (dashboardData.isAdminUser) {
+      const userData = await dashboardData.loadUserQuotaData();
+      if (userData && userData.length > 0) {
+        dashboardCharts.updateUserChartData(userData);
+      }
+    }
+  };
+
   const initChart = async () => {
     await dashboardData.loadQuotaData().then((data) => {
       if (data && data.length > 0) {
         dashboardCharts.updateChartData(data);
       }
     });
+    await loadUserData();
     await dashboardData.loadUptimeData();
   };
 
@@ -100,10 +111,44 @@ const Dashboard = () => {
     if (data && data.length > 0) {
       dashboardCharts.updateChartData(data);
     }
+    await loadUserData();
+  };
+
+  const handleRangePresetChange = async (preset) => {
+    if (preset === 'custom') {
+      dashboardData.activateCustomRange();
+      return;
+    }
+    const rangeState = dashboardData.applyChartRangePreset(preset);
+    if (!rangeState) {
+      return;
+    }
+    const data = await dashboardData.loadQuotaData(
+      rangeState.nextInputs,
+      rangeState.nextDefaultTime,
+    );
+    if (data && data.length > 0) {
+      dashboardCharts.updateChartData(data);
+    }
+  };
+
+  const handleCustomRangeConfirm = async () => {
+    const rangeState = dashboardData.applyCustomRange();
+    if (!rangeState) {
+      return;
+    }
+    const data = await dashboardData.loadQuotaData(
+      rangeState.nextInputs,
+      rangeState.nextDefaultTime,
+    );
+    if (data && data.length > 0) {
+      dashboardCharts.updateChartData(data);
+    }
   };
 
   const handleSearchConfirm = async () => {
     await dashboardData.handleSearchConfirm(dashboardCharts.updateChartData);
+    await loadUserData();
   };
 
   // ========== 数据准备 ==========
@@ -182,10 +227,20 @@ const Dashboard = () => {
             spec_model_line={dashboardCharts.spec_model_line}
             spec_pie={dashboardCharts.spec_pie}
             spec_rank_bar={dashboardCharts.spec_rank_bar}
+            spec_user_rank={dashboardCharts.spec_user_rank}
+            spec_user_trend={dashboardCharts.spec_user_trend}
+            isAdminUser={dashboardData.isAdminUser}
             CARD_PROPS={CARD_PROPS}
             CHART_CONFIG={CHART_CONFIG}
             FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
             hasApiInfoPanel={dashboardData.hasApiInfoPanel}
+            customRangeDraft={dashboardData.customRangeDraft}
+            timeOptions={dashboardData.timeOptions}
+            activeRangePreset={dashboardData.activeRangePreset}
+            quickRangeOptions={dashboardData.quickRangeOptions}
+            handleRangePresetChange={handleRangePresetChange}
+            handleCustomRangeChange={dashboardData.handleCustomRangeChange}
+            handleCustomRangeConfirm={handleCustomRangeConfirm}
             t={dashboardData.t}
           />
 

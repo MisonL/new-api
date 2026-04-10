@@ -33,7 +33,7 @@ const ColumnSelectorModal = ({
   COLUMN_KEYS,
   isAdminUser,
   copyText,
-  showUserInfoFunc,
+  openEditUserPanel,
   t,
 }) => {
   const handleBillingDisplayModeChange = (eventOrValue) => {
@@ -49,7 +49,7 @@ const ColumnSelectorModal = ({
     t,
     COLUMN_KEYS,
     copyText,
-    showUserInfoFunc,
+    openEditUserPanel,
     isAdminUser,
     billingDisplayMode,
   });
@@ -73,11 +73,14 @@ const ColumnSelectorModal = ({
     >
       <div style={{ marginBottom: 20 }}>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ marginBottom: 8, fontWeight: 600 }}>{t('计费显示模式')}</div>
+          <div style={{ marginBottom: 8, fontWeight: 600 }}>
+            {t('计费显示模式')}
+          </div>
           <RadioGroup
             type='button'
             value={billingDisplayMode}
             onChange={handleBillingDisplayModeChange}
+            name='components-table-usage-logs-modals-columnselectormodal-radiogroup-1'
           >
             <Radio value='price'>
               {isTokensDisplay ? t('价格模式') : t('价格模式（默认）')}
@@ -94,6 +97,7 @@ const ColumnSelectorModal = ({
             !Object.values(visibleColumns).every((v) => v === true)
           }
           onChange={(e) => handleSelectAll(e.target.checked)}
+          name='components-table-usage-logs-modals-columnselectormodal-checkbox-1'
         >
           {t('全选')}
         </Checkbox>
@@ -120,6 +124,7 @@ const ColumnSelectorModal = ({
                 onChange={(e) =>
                   handleColumnVisibilityChange(column.key, e.target.checked)
                 }
+                name='components-table-usage-logs-modals-columnselectormodal-checkbox-2'
               >
                 {column.title}
               </Checkbox>

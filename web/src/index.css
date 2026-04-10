@@ -197,11 +197,12 @@ code {
 /* 分组标签样式 */
 .sidebar-group-label {
   padding: 4px 15px 8px;
-  color: var(--semi-color-text-2);
+  color: var(--semi-color-text-0);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  opacity: 0.8;
+  opacity: 1;
+  font-weight: 700;
 }
 
 /* 底部折叠按钮 */
@@ -367,7 +368,9 @@ code {
   line-height: 1;
   background-color: var(--semi-color-fill-0);
   color: var(--semi-color-text-2);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .sbg-badge-active {
@@ -853,6 +856,40 @@ html.dark .with-pastel-balls::before {
   overflow-y: auto;
 }
 
+.card-table-desktop-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--semi-grey-2), 0.3) transparent;
+}
+
+.card-table-desktop-scroll:hover {
+  scrollbar-color: rgba(var(--semi-grey-2), 0.5) transparent;
+}
+
+.card-table-desktop-scroll-inner {
+  min-width: 100%;
+}
+
+.card-table-desktop-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.card-table-desktop-scroll::-webkit-scrollbar-thumb {
+  background: rgba(var(--semi-grey-2), 0.3);
+  border-radius: 999px;
+}
+
+.card-table-desktop-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--semi-grey-2), 0.5);
+}
+
+.card-table-desktop-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .table-scroll-card .semi-card-body::-webkit-scrollbar {
   width: 6px;
 }
@@ -980,6 +1017,17 @@ html.dark .with-pastel-balls::before {
 .semi-button,
 .semi-datepicker-range-input {
   border-radius: 10px !important;
+}
+
+.usage-date-range-field .semi-datepicker-range-input {
+  min-height: 32px;
+  align-items: stretch;
+}
+
+.usage-date-range-field .semi-datepicker-range-input-wrapper,
+.usage-date-range-field .semi-datepicker-range-input .semi-input-wrapper,
+.usage-date-range-field .semi-datepicker-range-input .semi-input {
+  min-height: 32px;
 }
 
 @keyframes slideInLeft {

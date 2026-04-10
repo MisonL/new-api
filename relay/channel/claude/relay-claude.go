@@ -33,37 +33,6 @@ const (
 	WebSearchMaxUsesHigh   = 10
 )
 
-func resolveFileMimeTypeByName(fileName string) string {
-	name := strings.TrimSpace(fileName)
-	if name == "" {
-		return ""
-	}
-	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
-	if ext == "" {
-		return ""
-	}
-	mimeType := service.GetMimeTypeByExtension(ext)
-	if mimeType == "application/octet-stream" {
-		return ""
-	}
-	return mimeType
-}
-
-func decodeBase64Payload(base64Data string) ([]byte, error) {
-	data := strings.TrimSpace(base64Data)
-	if idx := strings.Index(data, ","); idx >= 0 {
-		data = data[idx+1:]
-	}
-	if data == "" {
-		return nil, fmt.Errorf("empty base64 data")
-	}
-	decoded, err := base64.StdEncoding.DecodeString(data)
-	if err != nil {
-		return nil, err
-	}
-	return decoded, nil
-}
-
 func stopReasonClaude2OpenAI(reason string) string {
 	return reasonmap.ClaudeStopReasonToOpenAIFinishReason(reason)
 }
@@ -75,6 +44,68 @@ func maybeMarkClaudeRefusal(c *gin.Context, stopReason string) {
 	if strings.EqualFold(stopReason, "refusal") {
 		common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "claude_stop_reason=refusal")
 	}
+}
+
+func buildClaudeMediaMessageFromFile(
+	c *gin.Context,
+	mediaMessage dto.MediaContent,
+) (*dto.ClaudeMediaMessage, bool, error) {
+	file := mediaMessage.GetFile()
+	if file == nil || file.FileData == "" {
+		return nil, false, nil
+	}
+
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.FileName)), ".")
+	mimeType := ""
+	if ext != "" {
+		mimeType = service.GetMimeTypeByExtension(ext)
+	}
+	if mimeType == "" {
+		return nil, false, nil
+	}
+	if mimeType == "application/octet-stream" {
+		return nil, true, nil
+	}
+
+	if strings.HasPrefix(mimeType, "text/") {
+		decoded, err := base64.StdEncoding.DecodeString(file.FileData)
+		if err != nil {
+			return nil, true, fmt.Errorf("decode text file failed: %w", err)
+		}
+		text := string(decoded)
+		return &dto.ClaudeMediaMessage{
+			Type: "text",
+			Text: common.GetPointer[string](text),
+		}, true, nil
+	}
+
+	source := types.NewFileSourceFromData(file.FileData, mimeType)
+	base64Data, normalizedMimeType, err := service.GetBase64Data(
+		c,
+		source,
+		"formatting file for Claude",
+	)
+	if err != nil {
+		return nil, true, fmt.Errorf("get file data failed: %w", err)
+	}
+
+	claudeMediaMessage := &dto.ClaudeMediaMessage{
+		Source: &dto.ClaudeMessageSource{
+			Type:      "base64",
+			MediaType: normalizedMimeType,
+			Data:      base64Data,
+		},
+	}
+	if strings.HasPrefix(normalizedMimeType, "application/pdf") {
+		claudeMediaMessage.Type = "document"
+		return claudeMediaMessage, true, nil
+	}
+	if strings.HasPrefix(normalizedMimeType, "image/") {
+		claudeMediaMessage.Type = "image"
+		return claudeMediaMessage, true, nil
+	}
+
+	return nil, true, nil
 }
 
 func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
@@ -383,56 +414,17 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 							Text: common.GetPointer[string](mediaMessage.Text),
 						})
 					case dto.ContentTypeFile:
-						file := mediaMessage.GetFile()
-						if file == nil || strings.TrimSpace(file.FileData) == "" {
-							continue
-						}
-
-						mimeTypeByFileName := resolveFileMimeTypeByName(file.FileName)
-						if mimeTypeByFileName == "" {
-							continue
-						}
-
-						source := types.NewFileSourceFromData(file.FileData, mimeTypeByFileName)
-						base64Data, mimeType, err := service.GetBase64Data(c, source, "formatting file for Claude")
+						claudeMediaMessage, handled, err := buildClaudeMediaMessageFromFile(c, mediaMessage)
 						if err != nil {
-							return nil, fmt.Errorf("get file data failed: %s", err.Error())
+							return nil, err
 						}
-						if mimeType == "" {
-							continue
-						}
-
-						switch {
-						case strings.HasPrefix(mimeType, "text/"):
-							textBytes, err := decodeBase64Payload(base64Data)
-							if err != nil {
-								return nil, fmt.Errorf("decode text file failed: %s", err.Error())
+						if handled {
+							if claudeMediaMessage != nil {
+								claudeMediaMessages = append(claudeMediaMessages, *claudeMediaMessage)
 							}
-							claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
-								Type: "text",
-								Text: common.GetPointer(string(textBytes)),
-							})
-						case strings.HasPrefix(mimeType, "application/pdf"):
-							claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
-								Type: "document",
-								Source: &dto.ClaudeMessageSource{
-									Type:      "base64",
-									MediaType: mimeType,
-									Data:      base64Data,
-								},
-							})
-						case strings.HasPrefix(mimeType, "image/"):
-							claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
-								Type: "image",
-								Source: &dto.ClaudeMessageSource{
-									Type:      "base64",
-									MediaType: mimeType,
-									Data:      base64Data,
-								},
-							})
-						default:
 							continue
 						}
+						fallthrough
 					default:
 						source := mediaMessage.ToFileSource()
 						if source == nil {
@@ -893,7 +885,16 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 		if common.DebugEnabled {
 			common.SysLog("claude response usage is not complete, maybe upstream error")
 		}
-		claudeInfo.Usage = service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, claudeInfo.Usage.PromptTokens)
+		// 只补缺失字段，不整份覆盖——保留 message_start 已拿到的 cache 字段
+		fallback := service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		if claudeInfo.Usage.CompletionTokens == 0 ||
+			(!claudeInfo.Done && fallback.CompletionTokens > claudeInfo.Usage.CompletionTokens) {
+			claudeInfo.Usage.CompletionTokens = fallback.CompletionTokens
+		}
+		if claudeInfo.Usage.PromptTokens == 0 {
+			claudeInfo.Usage.PromptTokens = fallback.PromptTokens
+		}
+		claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
 	}
 	if claudeInfo.Usage != nil {
 		claudeInfo.Usage.UsageSemantic = "anthropic"

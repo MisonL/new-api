@@ -10,10 +10,17 @@ const (
 	QuotaDisplayTypeCustom = "CUSTOM"
 )
 
+// GeneralSetting contains globally mutable operation settings exposed in the admin console.
 type GeneralSetting struct {
-	DocsLink            string `json:"docs_link"`
-	PingIntervalEnabled bool   `json:"ping_interval_enabled"`
-	PingIntervalSeconds int    `json:"ping_interval_seconds"`
+	DocsLink                                          string `json:"docs_link"`
+	LogFilterAutocompleteEnabled                      bool   `json:"log_filter_autocomplete_enabled"`
+	PingIntervalEnabled                               bool   `json:"ping_interval_enabled"`
+	PingIntervalSeconds                               int    `json:"ping_interval_seconds"`
+	ResponsesStreamBootstrapRecoveryEnabled           bool   `json:"responses_stream_bootstrap_recovery_enabled"`
+	ResponsesStreamBootstrapGracePeriodSeconds        int    `json:"responses_stream_bootstrap_grace_period_seconds"`
+	ResponsesStreamBootstrapProbeIntervalMilliseconds int    `json:"responses_stream_bootstrap_probe_interval_milliseconds"`
+	ResponsesStreamBootstrapPingIntervalSeconds       int    `json:"responses_stream_bootstrap_ping_interval_seconds"`
+	ResponsesStreamBootstrapRetryableStatusCodes      []int  `json:"responses_stream_bootstrap_retryable_status_codes"`
 	// 当前站点额度展示类型：USD / CNY / TOKENS
 	QuotaDisplayType string `json:"quota_display_type"`
 	// 自定义货币符号，用于 CUSTOM 展示类型
@@ -22,11 +29,35 @@ type GeneralSetting struct {
 	CustomCurrencyExchangeRate float64 `json:"custom_currency_exchange_rate"`
 }
 
+// DefaultResponsesBootstrapRetryableStatusCodes returns a copy of the default
+// retryable status-code allowlist for responses bootstrap recovery.
+func DefaultResponsesBootstrapRetryableStatusCodes() []int {
+	return []int{
+		401,
+		403,
+		408,
+		429,
+		500,
+		502,
+		503,
+		504,
+	}
+}
+
 // 默认配置
 var generalSetting = GeneralSetting{
-	DocsLink:                   "https://docs.newapi.pro",
-	PingIntervalEnabled:        false,
-	PingIntervalSeconds:        60,
+	DocsLink:                                          "https://docs.newapi.pro",
+	LogFilterAutocompleteEnabled:                      true,
+	PingIntervalEnabled:                               false,
+	PingIntervalSeconds:                               60,
+	ResponsesStreamBootstrapRecoveryEnabled:           false,
+	ResponsesStreamBootstrapGracePeriodSeconds:        180,
+	ResponsesStreamBootstrapProbeIntervalMilliseconds: 1000,
+	ResponsesStreamBootstrapPingIntervalSeconds:       10,
+	// ResponsesStreamBootstrapRetryableStatusCodes keeps 401/403 because in
+	// multi-channel delivery these failures can be channel-specific, allowing
+	// fallback to another channel or a refreshed credential before the first payload.
+	ResponsesStreamBootstrapRetryableStatusCodes: DefaultResponsesBootstrapRetryableStatusCodes(),
 	QuotaDisplayType:           QuotaDisplayTypeUSD,
 	CustomCurrencySymbol:       "¤",
 	CustomCurrencyExchangeRate: 1.0,
@@ -37,8 +68,26 @@ func init() {
 	config.GlobalConfig.Register("general_setting", &generalSetting)
 }
 
+// GetGeneralSetting returns the mutable singleton general settings object.
 func GetGeneralSetting() *GeneralSetting {
 	return &generalSetting
+}
+
+// GetGeneralSettingSnapshot returns a copy of the current general settings under config-manager locking.
+func GetGeneralSettingSnapshot() GeneralSetting {
+	var snapshot GeneralSetting
+	config.GlobalConfig.Read("general_setting", func(cfg interface{}) {
+		if setting, ok := cfg.(*GeneralSetting); ok && setting != nil {
+			snapshot = *setting
+			if setting.ResponsesStreamBootstrapRetryableStatusCodes != nil {
+				snapshot.ResponsesStreamBootstrapRetryableStatusCodes = append(
+					[]int(nil),
+					setting.ResponsesStreamBootstrapRetryableStatusCodes...,
+				)
+			}
+		}
+	})
+	return snapshot
 }
 
 // IsCurrencyDisplay 是否以货币形式展示（美元或人民币）

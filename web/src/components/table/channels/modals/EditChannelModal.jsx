@@ -27,7 +27,11 @@ import {
   verifyJSON,
 } from '../../../../helpers';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
-import { CHANNEL_OPTIONS, MODEL_FETCHABLE_CHANNEL_TYPES } from '../../../../constants';
+import {
+  CHANNEL_OPTIONS,
+  MODEL_FETCHABLE_CHANNEL_TYPES,
+  RESPONSES_BOOTSTRAP_RECOVERY_CHANNEL_TYPES,
+} from '../../../../constants';
 import {
   SideSheet,
   Space,
@@ -127,6 +131,9 @@ const PARAM_OVERRIDE_OPERATIONS_TEMPLATE = {
   ],
 };
 
+const supportsResponsesBootstrapRecovery = (channelType) =>
+  RESPONSES_BOOTSTRAP_RECOVERY_CHANNEL_TYPES.has(channelType);
+
 const DEPRECATED_DOUBAO_CODING_PLAN_BASE_URL = 'doubao-coding-plan';
 
 // 支持并且已适配通过接口获取模型列表的渠道类型
@@ -209,6 +216,7 @@ const EditChannelModal = (props) => {
     allow_include_obfuscation: false,
     allow_inference_geo: false,
     claude_beta_query: false,
+    responses_stream_bootstrap_recovery_enabled: false,
     upstream_model_update_check_enabled: false,
     upstream_model_update_auto_sync_enabled: false,
     upstream_model_update_last_check_time: 0,
@@ -280,7 +288,8 @@ const EditChannelModal = (props) => {
     [inputs.upstream_model_update_last_detected_models],
   );
   const upstreamDetectedModelsPreview = useMemo(
-    () => upstreamDetectedModels.slice(0, UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT),
+    () =>
+      upstreamDetectedModels.slice(0, UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT),
     [upstreamDetectedModels],
   );
   const upstreamDetectedModelsOmittedCount =
@@ -313,9 +322,7 @@ const EditChannelModal = (props) => {
       return {
         tagLabel: t('不更改'),
         tagColor: 'grey',
-        preview: t(
-          '此项可选，用于覆盖请求参数。不支持覆盖 stream 参数',
-        ),
+        preview: t('此项可选，用于覆盖请求参数。不支持覆盖 stream 参数'),
       };
     }
     if (!verifyJSON(raw)) {
@@ -891,6 +898,8 @@ const EditChannelModal = (props) => {
           data.allow_inference_geo =
             parsedSettings.allow_inference_geo || false;
           data.claude_beta_query = parsedSettings.claude_beta_query || false;
+          data.responses_stream_bootstrap_recovery_enabled =
+            parsedSettings.responses_stream_bootstrap_recovery_enabled === true;
           data.upstream_model_update_check_enabled =
             parsedSettings.upstream_model_update_check_enabled === true;
           data.upstream_model_update_auto_sync_enabled =
@@ -920,6 +929,7 @@ const EditChannelModal = (props) => {
           data.allow_include_obfuscation = false;
           data.allow_inference_geo = false;
           data.claude_beta_query = false;
+          data.responses_stream_bootstrap_recovery_enabled = false;
           data.upstream_model_update_check_enabled = false;
           data.upstream_model_update_auto_sync_enabled = false;
           data.upstream_model_update_last_check_time = 0;
@@ -937,6 +947,7 @@ const EditChannelModal = (props) => {
         data.allow_include_obfuscation = false;
         data.allow_inference_geo = false;
         data.claude_beta_query = false;
+        data.responses_stream_bootstrap_recovery_enabled = false;
         data.upstream_model_update_check_enabled = false;
         data.upstream_model_update_auto_sync_enabled = false;
         data.upstream_model_update_last_check_time = 0;
@@ -1779,6 +1790,12 @@ const EditChannelModal = (props) => {
         settings.claude_beta_query = localInputs.claude_beta_query === true;
       }
     }
+    if (supportsResponsesBootstrapRecovery(localInputs.type)) {
+      settings.responses_stream_bootstrap_recovery_enabled =
+        localInputs.responses_stream_bootstrap_recovery_enabled === true;
+    } else {
+      settings.responses_stream_bootstrap_recovery_enabled = false;
+    }
 
     settings.upstream_model_update_check_enabled =
       localInputs.upstream_model_update_check_enabled === true;
@@ -1824,6 +1841,7 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_include_obfuscation;
     delete localInputs.allow_inference_geo;
     delete localInputs.claude_beta_query;
+    delete localInputs.responses_stream_bootstrap_recovery_enabled;
     delete localInputs.upstream_model_update_check_enabled;
     delete localInputs.upstream_model_update_auto_sync_enabled;
     delete localInputs.upstream_model_update_last_check_time;
@@ -2008,6 +2026,7 @@ const EditChannelModal = (props) => {
               }
             }
           }}
+          name='components-table-channels-modals-editchannelmodal-checkbox-1'
         >
           {t('批量创建')}
         </Checkbox>
@@ -2032,6 +2051,7 @@ const EditChannelModal = (props) => {
                 return nextValue;
               });
             }}
+            name='components-table-channels-modals-editchannelmodal-checkbox-2'
           >
             {t('密钥聚合模式')}
           </Checkbox>
@@ -2587,21 +2607,33 @@ const EditChannelModal = (props) => {
                       </Banner>
                     )}
 
-                    <Form.Select
-                      field='type'
-                      label={t('类型')}
-                      placeholder={t('请选择渠道类型')}
-                      rules={[{ required: true, message: t('请选择渠道类型') }]}
-                      optionList={channelOptionList}
-                      style={{ width: '100%' }}
-                      filter={selectFilter}
-                      autoClearSearchValue={false}
-                      searchPosition='dropdown'
-                      onSearch={(value) => setChannelSearchValue(value)}
-                      renderOptionItem={renderChannelOption}
-                      onChange={(value) => handleInputChange('type', value)}
-                      disabled={isIonetLocked}
-                    />
+                    <div className='semi-form-field'>
+                      <div
+                        id='type-label'
+                        className='semi-form-field-label semi-form-field-label-left semi-form-field-label-required'
+                      >
+                        <div className='semi-form-field-label-text'>
+                          {t('类型')}
+                        </div>
+                      </div>
+                      <Form.Select
+                        field='type'
+                        noLabel
+                        aria-labelledby='type-label'
+                        aria-label={t('类型')}
+                        placeholder={t('请选择渠道类型')}
+                        rules={[{ required: true, message: t('请选择渠道类型') }]}
+                        optionList={channelOptionList}
+                        style={{ width: '100%' }}
+                        filter={selectFilter}
+                        autoClearSearchValue={false}
+                        searchPosition='dropdown'
+                        onSearch={(value) => setChannelSearchValue(value)}
+                        renderOptionItem={renderChannelOption}
+                        onChange={(value) => handleInputChange('type', value)}
+                        disabled={isIonetLocked}
+                      />
+                    </div>
 
                     {inputs.type === 57 && (
                       <Banner
@@ -3294,6 +3326,26 @@ const EditChannelModal = (props) => {
                         </>
                       )}
 
+                      {supportsResponsesBootstrapRecovery(inputs.type) && (
+                        <div>
+                          <Form.Switch
+                            field='responses_stream_bootstrap_recovery_enabled'
+                            label={t('允许该渠道参与 Responses 启动恢复')}
+                            checkedText={t('开')}
+                            uncheckedText={t('关')}
+                            onChange={(value) =>
+                              handleChannelOtherSettingsChange(
+                                'responses_stream_bootstrap_recovery_enabled',
+                                value,
+                              )
+                            }
+                            extraText={t(
+                              '仅在已全局开启后生效。开启后，该渠道可参与 /v1/responses 首包前的恢复等待窗口。',
+                            )}
+                          />
+                        </div>
+                      )}
+
                       {inputs.type === 8 && (
                         <>
                           <Banner
@@ -3425,9 +3477,20 @@ const EditChannelModal = (props) => {
                   )}
 
                   {/* Model Selection - Part of Core Config */}
-                  <Form.Select
+                  <div className='semi-form-field'>
+                    <div
+                      id='models-label'
+                      className='semi-form-field-label semi-form-field-label-left semi-form-field-label-required'
+                    >
+                      <div className='semi-form-field-label-text'>
+                        {t('模型')}
+                      </div>
+                    </div>
+                    <Form.Select
                       field='models'
-                      label={t('模型')}
+                      noLabel
+                      aria-labelledby='models-label'
+                      aria-label={t('模型')}
                       placeholder={t('请选择该渠道所支持的模型')}
                       rules={[{ required: true, message: t('请选择模型') }]}
                       multiple
@@ -3534,6 +3597,7 @@ const EditChannelModal = (props) => {
                         </Space>
                       }
                     />
+                  </div>
 
                   {/* Custom Model Name - Core Config */}
                   <Form.Input
@@ -3554,20 +3618,32 @@ const EditChannelModal = (props) => {
                   />
 
                   {/* Groups - Core Config */}
-                  <Form.Select
-                    field='groups'
-                    label={t('分组')}
-                    placeholder={t('请选择可以使用该渠道的分组')}
-                    multiple
-                    allowAdditions
-                    additionLabel={t(
-                      '请在系统设置页面编辑分组倍率以添加新的分组：',
-                    )}
-                    optionList={groupOptions}
-                    style={{ width: '100%' }}
-                    position='top'
-                    onChange={(value) => handleInputChange('groups', value)}
-                  />
+                  <div className='semi-form-field'>
+                    <div
+                      id='groups-label'
+                      className='semi-form-field-label semi-form-field-label-left'
+                    >
+                      <div className='semi-form-field-label-text'>
+                        {t('分组')}
+                      </div>
+                    </div>
+                    <Form.Select
+                      field='groups'
+                      noLabel
+                      aria-labelledby='groups-label'
+                      aria-label={t('分组')}
+                      placeholder={t('请选择可以使用该渠道的分组')}
+                      multiple
+                      allowAdditions
+                      additionLabel={t(
+                        '请在系统设置页面编辑分组倍率以添加新的分组：',
+                      )}
+                      optionList={groupOptions}
+                      style={{ width: '100%' }}
+                      position='top'
+                      onChange={(value) => handleInputChange('groups', value)}
+                    />
+                  </div>
 
                   {/* Model Mapping - Core Config */}
                   <JSONEditor

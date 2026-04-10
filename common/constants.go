@@ -80,6 +80,7 @@ var InsecureTLSConfig = &tls.Config{InsecureSkipVerify: true}
 var SMTPServer = ""
 var SMTPPort = 587
 var SMTPSSLEnabled = false
+var SMTPForceAuthLogin = false
 var SMTPAccount = ""
 var SMTPFrom = ""
 var SMTPToken = ""
@@ -180,6 +181,11 @@ var (
 	SearchRateLimitEnable         = true
 	SearchRateLimitNum            = 10
 	SearchRateLimitDuration int64 = 60
+
+	// Per-user suggestion rate limit for autocomplete endpoints
+	SuggestionRateLimitEnable         = true
+	SuggestionRateLimitNum            = 60
+	SuggestionRateLimitDuration int64 = 60
 )
 
 var RateLimitKeyExpirationDuration = 20 * time.Minute

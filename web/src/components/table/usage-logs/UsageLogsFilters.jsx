@@ -17,11 +17,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useRef } from 'react';
 import { Button, Form } from '@douyinfe/semi-ui';
 import { IconSearch } from '@douyinfe/semi-icons';
+import useRepeatingDomPatch from '../../../hooks/common/useRepeatingDomPatch';
 
 import { DATE_RANGE_PRESETS } from '../../../constants/console.constants';
+import { StatusContext } from '../../../context/Status';
+import FilterAutoComplete from '../../common/ui/FilterAutoComplete';
+
+const parseDateRangeToUnixSeconds = (dateRange) => {
+  if (!Array.isArray(dateRange) || dateRange.length !== 2) {
+    return {
+      start_timestamp: 0,
+      end_timestamp: 0,
+    };
+  }
+  return {
+    start_timestamp: Math.floor(Date.parse(dateRange[0]) / 1000) || 0,
+    end_timestamp: Math.floor(Date.parse(dateRange[1]) / 1000) || 0,
+  };
+};
 
 const LogsFilters = ({
   formInitValues,
@@ -34,8 +50,65 @@ const LogsFilters = ({
   isAdminUser,
   t,
 }) => {
+  const [statusState] = React.useContext(StatusContext);
+  const autocompleteEnabled = statusState?.status
+    ? statusState.status.log_filter_autocomplete_enabled ?? true
+    : false;
+  const suggestionEndpoint = isAdminUser
+    ? '/api/log/suggestions'
+    : '/api/log/self/suggestions';
+  const containerRef = useRef(null);
+
+  const buildSuggestionParams = () => {
+    const values = formApi ? formApi.getValues() : formInitValues;
+    const { start_timestamp, end_timestamp } = parseDateRangeToUnixSeconds(
+      values.dateRange,
+    );
+    return {
+      type: values.logType ? parseInt(values.logType, 10) : 0,
+      start_timestamp,
+      end_timestamp,
+      token_name: values.token_name || '',
+      model_name: values.model_name || '',
+      group: values.group || '',
+      request_id: values.request_id || '',
+      channel: values.channel || '',
+      username: values.username || '',
+    };
+  };
+
+  useRepeatingDomPatch(() => {
+    const patchInputs = () => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      const [startInput, endInput] = container.querySelectorAll(
+        '.usage-date-range-field input:not([aria-hidden="true"])',
+      );
+      if (startInput) {
+        startInput.name = 'log-date-range-start';
+        startInput.id = startInput.id || 'log-date-range-start';
+      }
+      if (endInput) {
+        endInput.name = 'log-date-range-end';
+        endInput.id = endInput.id || 'log-date-range-end';
+      }
+
+      const logTypeSelect = container.querySelector('#logType');
+      if (logTypeSelect) {
+        const activeDescendant = logTypeSelect.getAttribute('aria-activedescendant');
+        if (activeDescendant && !document.getElementById(activeDescendant)) {
+          logTypeSelect.removeAttribute('aria-activedescendant');
+        }
+      }
+    };
+
+    patchInputs();
+  }, []);
+
   return (
     <Form
+      wrapperCol={{}}
       initValues={formInitValues}
       getFormApi={(api) => setFormApi(api)}
       onSubmit={refresh}
@@ -44,14 +117,15 @@ const LogsFilters = ({
       layout='vertical'
       trigger='change'
       stopValidateWithError={false}
+      wrapperClassName='usage-logs-filters-form'
     >
-      <div className='flex flex-col gap-2'>
+      <div className='flex flex-col gap-2' ref={containerRef}>
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2'>
           {/* 时间选择器 */}
           <div className='col-span-1 lg:col-span-2'>
             <Form.DatePicker
               field='dateRange'
-              className='w-full'
+              className='w-full usage-date-range-field'
               type='dateTimeRange'
               placeholder={[t('开始时间'), t('结束时间')]}
               showClear
@@ -66,59 +140,62 @@ const LogsFilters = ({
           </div>
 
           {/* 其他搜索字段 */}
-          <Form.Input
+          <FilterAutoComplete
             field='token_name'
-            prefix={<IconSearch />}
+            endpoint={suggestionEndpoint}
             placeholder={t('令牌名称')}
-            showClear
-            pure
-            size='small'
+            prefix={<IconSearch />}
+            buildParams={buildSuggestionParams}
+            enableSuggestions={autocompleteEnabled}
           />
 
-          <Form.Input
+          <FilterAutoComplete
             field='model_name'
-            prefix={<IconSearch />}
+            endpoint={suggestionEndpoint}
             placeholder={t('模型名称')}
-            showClear
-            pure
-            size='small'
+            prefix={<IconSearch />}
+            buildParams={buildSuggestionParams}
+            enableSuggestions={autocompleteEnabled}
           />
 
-          <Form.Input
+          <FilterAutoComplete
             field='group'
-            prefix={<IconSearch />}
+            endpoint={suggestionEndpoint}
             placeholder={t('分组')}
-            showClear
-            pure
-            size='small'
+            prefix={<IconSearch />}
+            buildParams={buildSuggestionParams}
+            enableSuggestions={autocompleteEnabled}
           />
 
-          <Form.Input
+          <FilterAutoComplete
             field='request_id'
+            endpoint={suggestionEndpoint}
+            placeholder={t('请求 ID')}
             prefix={<IconSearch />}
-            placeholder={t('Request ID')}
-            showClear
-            pure
-            size='small'
+            buildParams={buildSuggestionParams}
+            enableSuggestions={autocompleteEnabled}
+            minLength={1}
           />
 
           {isAdminUser && (
             <>
-              <Form.Input
+              <FilterAutoComplete
                 field='channel'
-                prefix={<IconSearch />}
+                endpoint={suggestionEndpoint}
                 placeholder={t('渠道 ID')}
-                showClear
-                pure
-                size='small'
-              />
-              <Form.Input
-                field='username'
                 prefix={<IconSearch />}
+                buildParams={buildSuggestionParams}
+                enableSuggestions={autocompleteEnabled}
+                minLength={1}
+              />
+              <FilterAutoComplete
+                field='username'
+                endpoint={suggestionEndpoint}
                 placeholder={t('用户名称')}
-                showClear
-                pure
-                size='small'
+                prefix={<IconSearch />}
+                buildParams={buildSuggestionParams}
+                enableSuggestions={autocompleteEnabled}
+                minLength={1}
               />
             </>
           )}

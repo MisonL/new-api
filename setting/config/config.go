@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"reflect"
 	"strconv"
 	"strings"
@@ -36,6 +35,44 @@ func (cm *ConfigManager) Get(name string) interface{} {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 	return cm.configs[name]
+}
+
+func cloneConfigValue(config interface{}) (interface{}, error) {
+	if config == nil {
+		return nil, nil
+	}
+
+	valueType := reflect.TypeOf(config)
+	if valueType.Kind() != reflect.Ptr || valueType.Elem().Kind() != reflect.Struct {
+		return config, nil
+	}
+
+	raw, err := common.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+
+	target := reflect.New(valueType.Elem()).Interface()
+	if err := common.UnmarshalWithNumber(raw, target); err != nil {
+		return nil, err
+	}
+
+	return target, nil
+}
+
+// Read executes fn with a snapshot of the named config after releasing the manager read lock.
+func (cm *ConfigManager) Read(name string, fn func(config interface{})) {
+	if fn == nil {
+		return
+	}
+	cm.mutex.RLock()
+	config, err := cloneConfigValue(cm.configs[name])
+	cm.mutex.RUnlock()
+	if err != nil {
+		common.SysError("failed to clone config " + name + ": " + err.Error())
+		return
+	}
+	fn(config)
 }
 
 // LoadFromDB 从数据库加载配置
@@ -134,7 +171,7 @@ func configToMap(config interface{}) (map[string]string, error) {
 		case reflect.Ptr:
 			// 处理指针类型：如果非 nil，序列化指向的值
 			if !field.IsNil() {
-				bytes, err := json.Marshal(field.Interface())
+				bytes, err := common.Marshal(field.Interface())
 				if err != nil {
 					return nil, err
 				}
@@ -145,7 +182,7 @@ func configToMap(config interface{}) (map[string]string, error) {
 			}
 		case reflect.Map, reflect.Slice, reflect.Struct:
 			// 复杂类型使用JSON序列化
-			bytes, err := json.Marshal(field.Interface())
+			bytes, err := common.Marshal(field.Interface())
 			if err != nil {
 				return nil, err
 			}
@@ -247,14 +284,14 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 					field.Set(reflect.New(field.Type().Elem()))
 				}
 				// 反序列化到指针指向的值
-				err := json.Unmarshal([]byte(strValue), field.Interface())
+				err := common.UnmarshalJsonStr(strValue, field.Interface())
 				if err != nil {
 					continue
 				}
 			}
 		case reflect.Map, reflect.Slice, reflect.Struct:
 			// 复杂类型使用JSON反序列化
-			err := json.Unmarshal([]byte(strValue), field.Addr().Interface())
+			err := common.UnmarshalJsonStr(strValue, field.Addr().Interface())
 			if err != nil {
 				continue
 			}

@@ -57,6 +57,7 @@ func (user *User) ToBaseUser() *UserBase {
 		Id:       user.Id,
 		Group:    user.Group,
 		Quota:    user.Quota,
+		Role:     user.Role,
 		Status:   user.Status,
 		Username: user.Username,
 		Setting:  user.Setting,
@@ -300,6 +301,16 @@ func GetUserById(id int, selectAll bool) (*User, error) {
 	} else {
 		err = DB.Omit("password").First(&user, "id = ?", id).Error
 	}
+	return &user, err
+}
+
+func GetUserIdentityById(id int) (*User, error) {
+	if id == 0 {
+		return nil, errors.New("id 为空！")
+	}
+	user := User{}
+	err := DB.Select("id", "username", "role", "status", "group").
+		First(&user, "id = ?", id).Error
 	return &user, err
 }
 

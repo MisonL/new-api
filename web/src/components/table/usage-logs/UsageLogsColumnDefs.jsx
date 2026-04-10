@@ -204,7 +204,10 @@ function renderIsStream(bool, t, streamStatus) {
 }
 
 function renderUseTime(type, t) {
-  const time = parseInt(type);
+  const time = parseInt(type, 10);
+  if (Number.isNaN(time) || time < 0) {
+    return null;
+  }
   if (time < 101) {
     return (
       <Tag color='green' shape='circle'>
@@ -230,16 +233,20 @@ function renderUseTime(type, t) {
 }
 
 function renderFirstUseTime(type, t) {
-  let time = parseFloat(type) / 1000.0;
-  time = time.toFixed(1);
-  if (time < 3) {
+  const rawTime = parseFloat(type);
+  if (!Number.isFinite(rawTime) || rawTime < 0) {
+    return null;
+  }
+  const seconds = rawTime / 1000.0;
+  const time = seconds.toFixed(1);
+  if (seconds < 3) {
     return (
       <Tag color='green' shape='circle'>
         {' '}
         {time} s{' '}
       </Tag>
     );
-  } else if (time < 10) {
+  } else if (seconds < 10) {
     return (
       <Tag color='orange' shape='circle'>
         {' '}
@@ -509,7 +516,7 @@ export const getLogsColumns = ({
   t,
   COLUMN_KEYS,
   copyText,
-  showUserInfoFunc,
+  openEditUserPanel,
   openChannelAffinityUsageCacheModal,
   isAdminUser,
   billingDisplayMode = 'price',
@@ -618,24 +625,37 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.USERNAME,
       title: t('用户'),
       dataIndex: 'username',
-      render: (text, record, index) => {
-        return isAdminUser ? (
-          <div>
+      render: (text, record) => {
+        if (!isAdminUser) {
+          return <></>;
+        }
+        const displayText = String(text || record.user_id || '?');
+        const canOpen = Boolean(record.user_id);
+        const handleOpen = (event) => {
+          if (!canOpen) {
+            return;
+          }
+          event.stopPropagation();
+          openEditUserPanel(record.user_id);
+        };
+        return (
+          <Space spacing={4}>
             <Avatar
               size='extra-small'
-              color={stringToColor(text)}
-              style={{ marginRight: 4 }}
-              onClick={(event) => {
-                event.stopPropagation();
-                showUserInfoFunc(record.user_id);
-              }}
+              color={stringToColor(displayText)}
+              style={{ cursor: canOpen ? 'pointer' : 'default' }}
+              onClick={canOpen ? handleOpen : undefined}
             >
-              {typeof text === 'string' && text.slice(0, 1)}
+              {displayText.slice(0, 1)}
             </Avatar>
-            {text}
-          </div>
-        ) : (
-          <></>
+            <Typography.Text
+              link={canOpen}
+              style={{ cursor: canOpen ? 'pointer' : 'default' }}
+              onClick={canOpen ? handleOpen : undefined}
+            >
+              {displayText}
+            </Typography.Text>
+          </Space>
         );
       },
     },

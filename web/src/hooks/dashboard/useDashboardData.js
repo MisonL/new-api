@@ -21,16 +21,72 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { API, isAdmin, showError, timestamp2string } from '../../helpers';
-import { getDefaultTime, getInitialTimestamp } from '../../helpers/dashboard';
-import { TIME_OPTIONS } from '../../constants/dashboard.constants';
+import {
+  getInitialChartRange,
+  getDashboardQuickRangeConfig,
+  parseDashboardTimestamp,
+  setStoredChartRange,
+} from '../../helpers/dashboard';
+import {
+  DASHBOARD_QUICK_RANGE_CONFIGS,
+  STORAGE_KEYS,
+  TIME_OPTIONS,
+} from '../../constants/dashboard.constants';
 import { useIsMobile } from '../common/useIsMobile';
 import { useMinimumLoadingTime } from '../common/useMinimumLoadingTime';
 
+const END_TIME_BUFFER_SECONDS = 3600;
+
+// useDashboardData manages dashboard filters, chart data, and auxiliary panels.
 export const useDashboardData = (userState, userDispatch, statusState) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const initialized = useRef(false);
+  const quotaRequestSeq = useRef(0);
+
+  // Keep a small buffer so the latest records are not clipped near "now".
+  const getCurrentEndTimestamp = useCallback(
+    () =>
+      timestamp2string(new Date().getTime() / 1000 + END_TIME_BUFFER_SECONDS),
+    [],
+  );
+
+  const detectQuickRangePreset = useCallback(
+    (startTimestamp, endTimestamp, granularity) => {
+      const diffSeconds =
+        (parseDashboardTimestamp(endTimestamp) -
+          parseDashboardTimestamp(startTimestamp)) /
+        1000;
+      const toleranceSeconds = 3600;
+      for (const preset of Object.keys(DASHBOARD_QUICK_RANGE_CONFIGS)) {
+        const config = getDashboardQuickRangeConfig(preset);
+        if (!config || config.defaultTime !== granularity) {
+          continue;
+        }
+        if (Math.abs(diffSeconds - config.seconds) <= toleranceSeconds) {
+          return preset;
+        }
+      }
+      return 'custom';
+    },
+    [],
+  );
+
+  const isValidCustomRange = useCallback((startTimestamp, endTimestamp) => {
+    const startTime = parseDashboardTimestamp(startTimestamp);
+    const endTime = parseDashboardTimestamp(endTimestamp);
+    return (
+      Number.isFinite(startTime) &&
+      Number.isFinite(endTime) &&
+      startTime < endTime
+    );
+  }, []);
+
+  const initialChartRange = useMemo(() => {
+    const endTimestamp = getCurrentEndTimestamp();
+    return getInitialChartRange(endTimestamp);
+  }, [getCurrentEndTimestamp]);
 
   // ========== 基础状态 ==========
   const [loading, setLoading] = useState(false);
@@ -43,14 +99,29 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     username: '',
     token_name: '',
     model_name: '',
-    start_timestamp: getInitialTimestamp(),
-    end_timestamp: timestamp2string(new Date().getTime() / 1000 + 3600),
+    start_timestamp: initialChartRange.start_timestamp,
+    end_timestamp: initialChartRange.end_timestamp,
     channel: '',
     data_export_default_time: '',
   });
 
-  const [dataExportDefaultTime, setDataExportDefaultTime] =
-    useState(getDefaultTime());
+  const [dataExportDefaultTime, setDataExportDefaultTime] = useState(
+    initialChartRange.default_time,
+  );
+  const [activeRangePreset, setActiveRangePreset] = useState(
+    () =>
+      initialChartRange.preset ||
+      detectQuickRangePreset(
+        initialChartRange.start_timestamp,
+        initialChartRange.end_timestamp,
+        initialChartRange.default_time,
+      ),
+  );
+  const [customRangeDraft, setCustomRangeDraft] = useState(() => ({
+    start_timestamp: initialChartRange.start_timestamp,
+    end_timestamp: initialChartRange.end_timestamp,
+    default_time: initialChartRange.default_time,
+  }));
 
   // ========== 数据状态 ==========
   const [quotaData, setQuotaData] = useState([]);
@@ -82,7 +153,6 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [activeUptimeTab, setActiveUptimeTab] = useState('');
 
   // ========== 常量 ==========
-  const now = new Date();
   const isAdminUser = isAdmin();
 
   // ========== Panel enable flags ==========
@@ -105,10 +175,22 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     [t],
   );
 
+  const quickRangeOptions = useMemo(
+    () => [
+      { label: t('最近24小时'), value: '24h' },
+      { label: t('最近7天'), value: '7d' },
+      { label: t('最近30天'), value: '30d' },
+      { label: t('最近90天'), value: '90d' },
+    ],
+    [t],
+  );
+
   const performanceMetrics = useMemo(() => {
     const { start_timestamp, end_timestamp } = inputs;
     const timeDiff =
-      (Date.parse(end_timestamp) - Date.parse(start_timestamp)) / 60000;
+      (parseDashboardTimestamp(end_timestamp) -
+        parseDashboardTimestamp(start_timestamp)) /
+      60000;
     const avgRPM = isNaN(times / timeDiff)
       ? '0'
       : (times / timeDiff).toFixed(3);
@@ -141,11 +223,134 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const handleInputChange = useCallback((value, name) => {
     if (name === 'data_export_default_time') {
       setDataExportDefaultTime(value);
-      localStorage.setItem('data_export_default_time', value);
+      localStorage.setItem(STORAGE_KEYS.DATA_EXPORT_DEFAULT_TIME, value);
+      setActiveRangePreset('custom');
       return;
+    }
+    if (name === 'start_timestamp' || name === 'end_timestamp') {
+      setActiveRangePreset('custom');
     }
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   }, []);
+
+  const persistChartRange = useCallback(
+    (
+      nextInputs,
+      nextDefaultTime,
+      preset = detectQuickRangePreset(
+        nextInputs.start_timestamp,
+        nextInputs.end_timestamp,
+        nextDefaultTime,
+      ),
+    ) => {
+      const { start_timestamp, end_timestamp } = nextInputs;
+      if (!isValidCustomRange(start_timestamp, end_timestamp)) {
+        return;
+      }
+
+      setStoredChartRange({
+        start_timestamp,
+        end_timestamp,
+        default_time: nextDefaultTime,
+        preset,
+      });
+    },
+    [detectQuickRangePreset, isValidCustomRange],
+  );
+
+  const applyChartRangePreset = useCallback(
+    (preset) => {
+      const config = getDashboardQuickRangeConfig(preset);
+      if (!config) {
+        return null;
+      }
+      const endTimestamp = getCurrentEndTimestamp();
+      const endTimestampUnix = parseDashboardTimestamp(endTimestamp) / 1000;
+      const nextInputs = {
+        ...inputs,
+        start_timestamp: timestamp2string(endTimestampUnix - config.seconds),
+        end_timestamp: endTimestamp,
+      };
+      setInputs(nextInputs);
+      setDataExportDefaultTime(config.defaultTime);
+      setActiveRangePreset(preset);
+      localStorage.setItem(
+        STORAGE_KEYS.DATA_EXPORT_DEFAULT_TIME,
+        config.defaultTime,
+      );
+      const nextRange = {
+        start_timestamp: nextInputs.start_timestamp,
+        end_timestamp: nextInputs.end_timestamp,
+        default_time: config.defaultTime,
+      };
+      setCustomRangeDraft(nextRange);
+      persistChartRange(nextInputs, config.defaultTime, preset);
+      return {
+        nextInputs,
+        nextDefaultTime: config.defaultTime,
+      };
+    },
+    [getCurrentEndTimestamp, inputs, persistChartRange],
+  );
+
+  const activateCustomRange = useCallback(() => {
+    setCustomRangeDraft({
+      start_timestamp: inputs.start_timestamp,
+      end_timestamp: inputs.end_timestamp,
+      default_time: dataExportDefaultTime,
+    });
+    setActiveRangePreset('custom');
+  }, [dataExportDefaultTime, inputs.end_timestamp, inputs.start_timestamp]);
+
+  const handleCustomRangeChange = useCallback(
+    (
+      rangeValue = [
+        customRangeDraft.start_timestamp,
+        customRangeDraft.end_timestamp,
+      ],
+      nextDefaultTime = customRangeDraft.default_time,
+    ) => {
+      const normalizedRange = Array.isArray(rangeValue) ? rangeValue : [];
+      const [startTimestamp = '', endTimestamp = ''] = normalizedRange;
+
+      setActiveRangePreset('custom');
+      setCustomRangeDraft({
+        start_timestamp: startTimestamp,
+        end_timestamp: endTimestamp,
+        default_time: nextDefaultTime,
+      });
+    },
+    [
+      customRangeDraft.default_time,
+      customRangeDraft.end_timestamp,
+      customRangeDraft.start_timestamp,
+    ],
+  );
+
+  const applyCustomRange = useCallback(() => {
+    const { start_timestamp, end_timestamp, default_time } = customRangeDraft;
+    if (!start_timestamp || !end_timestamp) {
+      return null;
+    }
+    if (!isValidCustomRange(start_timestamp, end_timestamp)) {
+      showError(t('请求参数无效'));
+      return null;
+    }
+    const nextInputs = {
+      ...inputs,
+      start_timestamp,
+      end_timestamp,
+    };
+    setInputs(nextInputs);
+    setDataExportDefaultTime(default_time);
+    setActiveRangePreset('custom');
+    localStorage.setItem(STORAGE_KEYS.DATA_EXPORT_DEFAULT_TIME, default_time);
+    persistChartRange(nextInputs, default_time, 'custom');
+    return {
+      nextInputs,
+      nextDefaultTime: default_time,
+    };
+  }, [customRangeDraft, inputs, isValidCustomRange, persistChartRange, t]);
 
   const showSearchModal = useCallback(() => {
     setSearchModalVisible(true);
@@ -156,42 +361,74 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   }, []);
 
   // ========== API 调用函数 ==========
-  const loadQuotaData = useCallback(async () => {
-    setLoading(true);
-    try {
-      let url = '';
-      const { start_timestamp, end_timestamp, username } = inputs;
-      let localStartTimestamp = Date.parse(start_timestamp) / 1000;
-      let localEndTimestamp = Date.parse(end_timestamp) / 1000;
-
-      if (isAdminUser) {
-        url = `/api/data/?username=${username}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${dataExportDefaultTime}`;
-      } else {
-        url = `/api/data/self/?start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${dataExportDefaultTime}`;
-      }
-
-      const res = await API.get(url);
-      const { success, message, data } = res.data;
-      if (success) {
-        setQuotaData(data);
-        if (data.length === 0) {
-          data.push({
-            count: 0,
-            model_name: '无数据',
-            quota: 0,
-            created_at: now.getTime() / 1000,
-          });
+  const loadQuotaData = useCallback(
+    async (
+      overrideInputs = inputs,
+      overrideDefaultTime = dataExportDefaultTime,
+    ) => {
+      const requestSeq = ++quotaRequestSeq.current;
+      setLoading(true);
+      try {
+        let url = '';
+        const { start_timestamp, end_timestamp, username } = overrideInputs;
+        let localStartTimestamp =
+          parseDashboardTimestamp(start_timestamp) / 1000;
+        let localEndTimestamp = parseDashboardTimestamp(end_timestamp) / 1000;
+        if (
+          !Number.isFinite(localStartTimestamp) ||
+          !Number.isFinite(localEndTimestamp)
+        ) {
+          showError(t('请求参数无效'));
+          return [];
         }
-        data.sort((a, b) => a.created_at - b.created_at);
-        return data;
-      } else {
-        showError(message);
-        return [];
+        const emptyStateTimestamp = Number.isFinite(localStartTimestamp)
+          ? localStartTimestamp
+          : 0;
+
+        if (isAdminUser) {
+          url = `/api/data/?username=${username}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${overrideDefaultTime}`;
+        } else {
+          url = `/api/data/self/?start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${overrideDefaultTime}`;
+        }
+
+        try {
+          const res = await API.get(url);
+          if (requestSeq !== quotaRequestSeq.current) {
+            return null;
+          }
+          const { success, message, data } = res.data;
+          if (success) {
+            const nextData = Array.isArray(data) ? [...data] : [];
+            if (nextData.length === 0) {
+              nextData.push({
+                count: 0,
+                model_name: t('暂无数据'),
+                quota: 0,
+                created_at: emptyStateTimestamp,
+              });
+            }
+            nextData.sort((a, b) => a.created_at - b.created_at);
+            setQuotaData(nextData);
+            return nextData;
+          } else {
+            showError(message);
+            return [];
+          }
+        } catch (error) {
+          if (requestSeq !== quotaRequestSeq.current) {
+            return null;
+          }
+          showError(error?.message || t('请求发生错误'));
+          return [];
+        }
+      } finally {
+        if (requestSeq === quotaRequestSeq.current) {
+          setLoading(false);
+        }
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [inputs, dataExportDefaultTime, isAdminUser, now]);
+    },
+    [dataExportDefaultTime, inputs, isAdminUser, t],
+  );
 
   const loadUptimeData = useCallback(async () => {
     setUptimeLoading(true);
@@ -213,6 +450,27 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, [activeUptimeTab]);
 
+  const loadUserQuotaData = useCallback(async () => {
+    if (!isAdminUser) return [];
+    try {
+      const { start_timestamp, end_timestamp } = inputs;
+      const localStartTimestamp = Date.parse(start_timestamp) / 1000;
+      const localEndTimestamp = Date.parse(end_timestamp) / 1000;
+      const url = `/api/data/users?start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}`;
+      const res = await API.get(url);
+      const { success, message, data } = res.data;
+      if (success) {
+        return data || [];
+      } else {
+        showError(message);
+        return [];
+      }
+    } catch (err) {
+      console.error(err);
+      return [];
+    }
+  }, [inputs, isAdminUser]);
+
   const getUserData = useCallback(async () => {
     let res = await API.get(`/api/user/self`);
     const { success, message, data } = res.data;
@@ -223,21 +481,54 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, [userDispatch]);
 
-  const refresh = useCallback(async () => {
-    const data = await loadQuotaData();
-    await loadUptimeData();
-    return data;
-  }, [loadQuotaData, loadUptimeData]);
+  const refresh = useCallback(
+    async (
+      overrideInputs = inputs,
+      overrideDefaultTime = dataExportDefaultTime,
+    ) => {
+      const data = await loadQuotaData(overrideInputs, overrideDefaultTime);
+      await loadUptimeData();
+      return data;
+    },
+    [dataExportDefaultTime, inputs, loadQuotaData, loadUptimeData],
+  );
 
   const handleSearchConfirm = useCallback(
     async (updateChartDataCallback) => {
-      const data = await refresh();
+      const { start_timestamp, end_timestamp } = inputs;
+      if (!isValidCustomRange(start_timestamp, end_timestamp)) {
+        showError(t('请求参数无效'));
+        return;
+      }
+
+      const nextPreset = detectQuickRangePreset(
+        start_timestamp,
+        end_timestamp,
+        dataExportDefaultTime,
+      );
+      setActiveRangePreset(nextPreset);
+      setCustomRangeDraft({
+        start_timestamp,
+        end_timestamp,
+        default_time: dataExportDefaultTime,
+      });
+      persistChartRange(inputs, dataExportDefaultTime, nextPreset);
+
+      const data = await loadQuotaData(inputs, dataExportDefaultTime);
       if (data && data.length > 0 && updateChartDataCallback) {
         updateChartDataCallback(data);
       }
       setSearchModalVisible(false);
     },
-    [refresh],
+    [
+      dataExportDefaultTime,
+      detectQuickRangePreset,
+      inputs,
+      isValidCustomRange,
+      loadQuotaData,
+      persistChartRange,
+      t,
+    ],
   );
 
   // ========== Effects ==========
@@ -264,6 +555,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     // 输入状态
     inputs,
     dataExportDefaultTime,
+    activeRangePreset,
+    quickRangeOptions,
+    customRangeDraft,
 
     // 数据状态
     quotaData,
@@ -308,9 +602,14 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
     // 函数
     handleInputChange,
+    applyChartRangePreset,
+    activateCustomRange,
+    handleCustomRangeChange,
+    applyCustomRange,
     showSearchModal,
     handleCloseModal,
     loadQuotaData,
+    loadUserQuotaData,
     loadUptimeData,
     getUserData,
     refresh,

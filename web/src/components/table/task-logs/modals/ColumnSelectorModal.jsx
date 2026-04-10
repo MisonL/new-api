@@ -32,6 +32,7 @@ const ColumnSelectorModal = ({
   isAdminUser,
   copyText,
   openContentModal,
+  openEditUserPanel,
   t,
 }) => {
   // Get all columns for display in selector
@@ -41,6 +42,7 @@ const ColumnSelectorModal = ({
     copyText,
     openContentModal,
     isAdminUser,
+    openEditUserPanel,
   });
 
   return (
@@ -68,6 +70,7 @@ const ColumnSelectorModal = ({
             !Object.values(visibleColumns).every((v) => v === true)
           }
           onChange={(e) => handleSelectAll(e.target.checked)}
+          name='components-table-task-logs-modals-columnselectormodal-checkbox-1'
         >
           {t('全选')}
         </Checkbox>
@@ -89,6 +92,7 @@ const ColumnSelectorModal = ({
                 onChange={(e) =>
                   handleColumnVisibilityChange(column.key, e.target.checked)
                 }
+                name='components-table-task-logs-modals-columnselectormodal-checkbox-2'
               >
                 {column.title}
               </Checkbox>

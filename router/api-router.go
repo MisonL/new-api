@@ -44,6 +44,10 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/oauth/telegram/bind", middleware.CriticalRateLimit(), controller.TelegramBind)
 		// Standard OAuth providers (GitHub, Discord, OIDC, LinuxDO) - unified route
 		apiRouter.GET("/oauth/:provider", middleware.CriticalRateLimit(), controller.HandleOAuth)
+		apiRouter.POST("/auth/external/:provider/jwt/login", middleware.CriticalRateLimit(), controller.HandleCustomOAuthJWTLogin)
+		apiRouter.POST("/auth/external/:provider/header/login", middleware.CriticalRateLimit(), controller.HandleCustomOAuthHeaderLogin)
+		apiRouter.GET("/auth/external/:provider/cas/start", middleware.CriticalRateLimit(), controller.HandleCustomOAuthCASStart)
+		apiRouter.GET("/auth/external/:provider/cas/callback", middleware.CriticalRateLimit(), controller.HandleCustomOAuthCASCallback)
 		apiRouter.GET("/ratio_config", middleware.CriticalRateLimit(), controller.GetRatioConfig)
 
 		apiRouter.POST("/stripe/webhook", controller.StripeWebhook)
@@ -288,12 +292,17 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)
 		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)
+		logRoute.GET("/suggestions", middleware.AdminAuth(), middleware.SuggestionRateLimit(), controller.GetAllLogSuggestions)
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
+		logRoute.GET("/self/suggestions", middleware.UserAuth(), middleware.SuggestionRateLimit(), controller.GetUserLogSuggestions)
 
 		dataRoute := apiRouter.Group("/data")
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)
+		dataRoute.GET("/channels", middleware.AdminAuth(), controller.GetAllChannelQuotaDates)
+		dataRoute.GET("/users", middleware.AdminAuth(), controller.GetQuotaDatesByUser)
 		dataRoute.GET("/self", middleware.UserAuth(), controller.GetUserQuotaDates)
+		dataRoute.GET("/self/channels", middleware.UserAuth(), controller.GetUserChannelQuotaDates)
 
 		logRoute.Use(middleware.CORS(), middleware.CriticalRateLimit())
 		{
@@ -316,12 +325,16 @@ func SetApiRouter(router *gin.Engine) {
 
 		mjRoute := apiRouter.Group("/mj")
 		mjRoute.GET("/self", middleware.UserAuth(), controller.GetUserMidjourney)
+		mjRoute.GET("/self/suggestions", middleware.UserAuth(), middleware.SuggestionRateLimit(), controller.GetUserMidjourneySuggestions)
 		mjRoute.GET("/", middleware.AdminAuth(), controller.GetAllMidjourney)
+		mjRoute.GET("/suggestions", middleware.AdminAuth(), middleware.SuggestionRateLimit(), controller.GetAllMidjourneySuggestions)
 
 		taskRoute := apiRouter.Group("/task")
 		{
 			taskRoute.GET("/self", middleware.UserAuth(), controller.GetUserTask)
+			taskRoute.GET("/self/suggestions", middleware.UserAuth(), middleware.SuggestionRateLimit(), controller.GetUserTaskSuggestions)
 			taskRoute.GET("/", middleware.AdminAuth(), controller.GetAllTask)
+			taskRoute.GET("/suggestions", middleware.AdminAuth(), middleware.SuggestionRateLimit(), controller.GetAllTaskSuggestions)
 		}
 
 		vendorRoute := apiRouter.Group("/vendors")

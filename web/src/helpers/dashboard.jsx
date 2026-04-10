@@ -33,36 +33,182 @@ import {
 import {
   STORAGE_KEYS,
   DEFAULT_TIME_INTERVALS,
+  DASHBOARD_QUICK_RANGE_CONFIGS,
   DEFAULTS,
   ILLUSTRATION_SIZE,
 } from '../constants/dashboard.constants';
 
 // ========== 时间相关工具函数 ==========
-export const getDefaultTime = () => {
-  return localStorage.getItem(STORAGE_KEYS.DATA_EXPORT_DEFAULT_TIME) || 'hour';
+// normalizeDefaultTime normalizes a persisted dashboard granularity value.
+export const normalizeDefaultTime = (timeType) => {
+  return DEFAULT_TIME_INTERVALS[timeType] ? timeType : 'hour';
 };
 
+// getDefaultTime returns the normalized dashboard granularity from local storage.
+export const getDefaultTime = () => {
+  return normalizeDefaultTime(
+    localStorage.getItem(STORAGE_KEYS.DATA_EXPORT_DEFAULT_TIME),
+  );
+};
+
+const VALID_RANGE_PRESETS = new Set([
+  ...Object.keys(DASHBOARD_QUICK_RANGE_CONFIGS),
+  'custom',
+]);
+
+// getDashboardQuickRangeConfig returns the predefined dashboard quick-range config.
+export const getDashboardQuickRangeConfig = (preset) => {
+  return DASHBOARD_QUICK_RANGE_CONFIGS[preset] || null;
+};
+
+// parseDashboardTimestamp parses a dashboard datetime string into a local timestamp.
+export const parseDashboardTimestamp = (timestamp) => {
+  if (typeof timestamp !== 'string') {
+    return NaN;
+  }
+
+  const match = timestamp.match(
+    /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/,
+  );
+  if (!match) {
+    return NaN;
+  }
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] =
+    match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const parsedDate = new Date(year, month - 1, day, hour, minute, second);
+
+  if (
+    parsedDate.getFullYear() !== year ||
+    parsedDate.getMonth() !== month - 1 ||
+    parsedDate.getDate() !== day ||
+    parsedDate.getHours() !== hour ||
+    parsedDate.getMinutes() !== minute ||
+    parsedDate.getSeconds() !== second
+  ) {
+    return NaN;
+  }
+
+  return parsedDate.getTime();
+};
+
+const isValidStoredChartRange = (range) => {
+  if (!range || typeof range !== 'object') {
+    return false;
+  }
+
+  const { start_timestamp, end_timestamp, default_time, preset } = range;
+  const startTime = parseDashboardTimestamp(start_timestamp);
+  const endTime = parseDashboardTimestamp(end_timestamp);
+
+  return (
+    Number.isFinite(startTime) &&
+    Number.isFinite(endTime) &&
+    startTime < endTime &&
+    default_time === normalizeDefaultTime(default_time) &&
+    (preset == null ||
+      (typeof preset === 'string' && VALID_RANGE_PRESETS.has(preset)))
+  );
+};
+
+// getStoredChartRange reads and sanitizes the persisted dashboard chart range.
+export const getStoredChartRange = () => {
+  const storedRange = localStorage.getItem(STORAGE_KEYS.DASHBOARD_CHART_RANGE);
+  if (!storedRange) {
+    return null;
+  }
+
+  try {
+    const parsedRange = JSON.parse(storedRange);
+    if (isValidStoredChartRange(parsedRange)) {
+      return parsedRange;
+    }
+  } catch (error) {
+    // Ignore invalid persisted values and reset them below.
+  }
+
+  localStorage.removeItem(STORAGE_KEYS.DASHBOARD_CHART_RANGE);
+  return null;
+};
+
+// setStoredChartRange validates and persists the current dashboard chart range.
+export const setStoredChartRange = (range) => {
+  if (!isValidStoredChartRange(range)) {
+    localStorage.removeItem(STORAGE_KEYS.DASHBOARD_CHART_RANGE);
+    return;
+  }
+
+  localStorage.setItem(
+    STORAGE_KEYS.DASHBOARD_CHART_RANGE,
+    JSON.stringify(range),
+  );
+};
+
+// getTimeInterval returns the dashboard aggregation interval in minutes or seconds.
 export const getTimeInterval = (timeType, isSeconds = false) => {
   const intervals =
     DEFAULT_TIME_INTERVALS[timeType] || DEFAULT_TIME_INTERVALS.hour;
   return isSeconds ? intervals.seconds : intervals.minutes;
 };
 
-export const getInitialTimestamp = () => {
-  const defaultTime = getDefaultTime();
-  const now = new Date().getTime() / 1000;
+// getInitialTimestamp computes the default chart start time for a given end time.
+export const getInitialTimestamp = (endTimestamp) => {
+  const defaultTime = normalizeDefaultTime(getDefaultTime());
+  const parsedEndTimestamp = parseDashboardTimestamp(endTimestamp) / 1000;
+  const baseTimestamp = Number.isFinite(parsedEndTimestamp)
+    ? parsedEndTimestamp
+    : new Date().getTime() / 1000;
 
   switch (defaultTime) {
     case 'hour':
-      return timestamp2string(now - 86400);
+      return timestamp2string(baseTimestamp - 86400);
     case 'week':
-      return timestamp2string(now - 86400 * 30);
+      return timestamp2string(baseTimestamp - 86400 * 30);
     default:
-      return timestamp2string(now - 86400 * 7);
+      return timestamp2string(baseTimestamp - 86400 * 7);
   }
 };
 
+// getInitialChartRange restores a saved range or rebuilds a fresh default window.
+export const getInitialChartRange = (endTimestamp) => {
+  const storedRange = getStoredChartRange();
+  if (storedRange) {
+    if (storedRange.preset && storedRange.preset !== 'custom') {
+      const presetConfig = getDashboardQuickRangeConfig(storedRange.preset);
+      const parsedEndTimestamp = parseDashboardTimestamp(endTimestamp) / 1000;
+
+      if (presetConfig && Number.isFinite(parsedEndTimestamp)) {
+        return {
+          start_timestamp: timestamp2string(
+            parsedEndTimestamp - presetConfig.seconds,
+          ),
+          end_timestamp: endTimestamp,
+          default_time: presetConfig.defaultTime,
+          preset: storedRange.preset,
+        };
+      }
+    }
+
+    return storedRange;
+  }
+
+  const defaultTime = normalizeDefaultTime(getDefaultTime());
+  return {
+    start_timestamp: getInitialTimestamp(endTimestamp),
+    end_timestamp: endTimestamp,
+    default_time: defaultTime,
+    preset: null,
+  };
+};
+
 // ========== 数据处理工具函数 ==========
+// updateMapValue accumulates a numeric value into a map bucket.
 export const updateMapValue = (map, key, value) => {
   if (!map.has(key)) {
     map.set(key, 0);
@@ -70,6 +216,7 @@ export const updateMapValue = (map, key, value) => {
   map.set(key, map.get(key) + value);
 };
 
+// initializeMaps ensures each provided map has an initialized value for the key.
 export const initializeMaps = (key, ...maps) => {
   maps.forEach((map) => {
     if (!map.has(key)) {
@@ -79,6 +226,7 @@ export const initializeMaps = (key, ...maps) => {
 };
 
 // ========== 图表相关工具函数 ==========
+// updateChartSpec applies new values, subtitle, and colors to a chart spec.
 export const updateChartSpec = (
   setterFunc,
   newData,
@@ -99,6 +247,7 @@ export const updateChartSpec = (
   }));
 };
 
+// getTrendSpec builds the compact trend-chart spec used by dashboard cards.
 export const getTrendSpec = (data, color) => ({
   type: 'line',
   data: [{ id: 'trend', values: data.map((val, idx) => ({ x: idx, y: val })) }],
@@ -136,6 +285,7 @@ export const getTrendSpec = (data, color) => ({
 });
 
 // ========== UI 工具函数 ==========
+// createSectionTitle renders a shared dashboard section title with an icon.
 export const createSectionTitle = (Icon, text) => (
   <div className='flex items-center gap-2'>
     <Icon size={16} />
@@ -143,17 +293,20 @@ export const createSectionTitle = (Icon, text) => (
   </div>
 );
 
+// createFormField renders a shared dashboard form field with common props.
 export const createFormField = (Component, props, FORM_FIELD_PROPS) => (
   <Component {...FORM_FIELD_PROPS} {...props} />
 );
 
 // ========== 操作处理函数 ==========
+// handleCopyUrl copies a URL and reports a translated success message.
 export const handleCopyUrl = async (url, t) => {
   if (await copy(url)) {
     showSuccess(t('复制成功'));
   }
 };
 
+// handleSpeedTest opens an external speed-test page for the provided API URL.
 export const handleSpeedTest = (apiUrl) => {
   const encodedUrl = encodeURIComponent(apiUrl);
   const speedTestUrl = `https://www.tcptest.cn/http/${encodedUrl}`;
@@ -161,13 +314,16 @@ export const handleSpeedTest = (apiUrl) => {
 };
 
 // ========== 状态映射函数 ==========
+// getUptimeStatusColor returns the configured color for an uptime status code.
 export const getUptimeStatusColor = (status, uptimeStatusMap) =>
   uptimeStatusMap[status]?.color || '#8b9aa7';
 
+// getUptimeStatusText returns the translated display text for an uptime status code.
 export const getUptimeStatusText = (status, uptimeStatusMap, t) =>
   uptimeStatusMap[status]?.text || t('未知');
 
 // ========== 监控列表渲染函数 ==========
+// renderMonitorList renders the grouped uptime monitor list for the dashboard.
 export const renderMonitorList = (
   monitors,
   getUptimeStatusColor,
@@ -243,6 +399,7 @@ export const renderMonitorList = (
 };
 
 // ========== 数据处理函数 ==========
+// processRawData aggregates raw quota rows into dashboard summary structures.
 export const processRawData = (
   data,
   dataExportDefaultTime,
@@ -293,6 +450,7 @@ export const processRawData = (
   return result;
 };
 
+// calculateTrendData converts aggregated series into dashboard trend datasets.
 export const calculateTrendData = (
   timePoints,
   timeQuotaMap,
@@ -328,6 +486,7 @@ export const calculateTrendData = (
   };
 };
 
+// aggregateDataByTimeAndModel groups raw rows by time bucket and model name.
 export const aggregateDataByTimeAndModel = (data, dataExportDefaultTime) => {
   const aggregatedData = new Map();
 
@@ -360,6 +519,7 @@ export const aggregateDataByTimeAndModel = (data, dataExportDefaultTime) => {
   return aggregatedData;
 };
 
+// generateChartTimePoints ensures enough ordered time buckets exist for chart rendering.
 export const generateChartTimePoints = (
   aggregatedData,
   data,
@@ -386,4 +546,59 @@ export const generateChartTimePoints = (
   }
 
   return chartTimePoints;
+};
+
+// ========== 用户维度数据处理 ==========
+export const processUserData = (data, dataExportDefaultTime, limit = 10) => {
+  const userQuotaTotal = new Map();
+  data.forEach((item) => {
+    const prev = userQuotaTotal.get(item.username) || 0;
+    userQuotaTotal.set(item.username, prev + item.quota);
+  });
+
+  const sorted = Array.from(userQuotaTotal.entries()).sort(
+    (a, b) => b[1] - a[1],
+  );
+  const topUsers = sorted.slice(0, limit).map(([u]) => u);
+  const topUserSet = new Set(topUsers);
+
+  const rankingData = sorted.slice(0, limit).map(([username, quota]) => ({
+    User: username,
+    Quota: quota,
+  }));
+
+  const showYear = isDataCrossYear(data.map((item) => item.created_at));
+
+  const timeUserMap = new Map();
+  const allTimePoints = new Set();
+
+  data.forEach((item) => {
+    const timeKey = timestamp2string1(
+      item.created_at,
+      dataExportDefaultTime,
+      showYear,
+    );
+    allTimePoints.add(timeKey);
+    const user = topUserSet.has(item.username) ? item.username : null;
+    if (!user) return;
+    const key = `${timeKey}-${user}`;
+    const prev = timeUserMap.get(key) || { quota: 0 };
+    timeUserMap.set(key, { quota: prev.quota + item.quota });
+  });
+
+  const sortedTimePoints = Array.from(allTimePoints).sort();
+  const trendData = [];
+  sortedTimePoints.forEach((time) => {
+    topUsers.forEach((user) => {
+      const key = `${time}-${user}`;
+      const val = timeUserMap.get(key);
+      trendData.push({
+        Time: time,
+        User: user,
+        Quota: val?.quota || 0,
+      });
+    });
+  });
+
+  return { rankingData, trendData, topUsers };
 };

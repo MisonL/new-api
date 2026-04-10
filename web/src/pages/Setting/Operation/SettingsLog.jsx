@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import {
   Button,
   Col,
@@ -37,15 +37,20 @@ import {
   showSuccess,
   showWarning,
 } from '../../../helpers';
+import { StatusContext } from '../../../context/Status';
+import useRepeatingDomPatch from '../../../hooks/common/useRepeatingDomPatch';
 
 const { Text } = Typography;
 
 export default function SettingsLog(props) {
   const { t } = useTranslation();
+  const [statusState, statusDispatch] = useContext(StatusContext);
   const [loading, setLoading] = useState(false);
   const [loadingCleanHistoryLog, setLoadingCleanHistoryLog] = useState(false);
+  const containerRef = useRef(null);
   const [inputs, setInputs] = useState({
     LogConsumeEnabled: false,
+    'general_setting.log_filter_autocomplete_enabled': true,
     historyTimestamp: dayjs().subtract(1, 'month').toDate(),
   });
   const refForm = useRef();
@@ -79,6 +84,14 @@ export default function SettingsLog(props) {
             return showError(t('部分保存失败，请重试'));
         }
         showSuccess(t('保存成功'));
+        statusDispatch({
+          type: 'set',
+          payload: {
+            ...(statusState?.status || {}),
+            log_filter_autocomplete_enabled:
+              inputs['general_setting.log_filter_autocomplete_enabled'],
+          },
+        });
         props.refresh();
       })
       .catch(() => {
@@ -191,15 +204,49 @@ export default function SettingsLog(props) {
     setInputsRow(structuredClone(currentInputs));
     refForm.current.setValues(currentInputs);
   }, [props.options]);
+
+  useRepeatingDomPatch(() => {
+    const patchInputs = () => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      const wrapper = container.querySelector('#historyTimestamp');
+      if (
+        wrapper &&
+        wrapper.tagName.toLowerCase() !== 'input' &&
+        wrapper.tagName.toLowerCase() !== 'textarea'
+      ) {
+        wrapper.id = 'historyTimestamp-wrapper';
+      }
+
+      const input = container.querySelector(
+        '.history-timestamp-field input:not([aria-hidden="true"])',
+      );
+      if (input) {
+        input.id = 'historyTimestamp';
+        input.name = 'historyTimestamp';
+      }
+
+      container
+        .querySelectorAll('textarea[aria-hidden="true"]:not([name])')
+        .forEach((element, index) => {
+          element.name = `operation-hidden-textarea-${index + 1}`;
+        });
+    };
+
+    patchInputs();
+  }, [inputs.historyTimestamp, props.options]);
+
   return (
     <>
       <Spin spinning={loading}>
-        <Form
-          values={inputs}
-          getFormApi={(formAPI) => (refForm.current = formAPI)}
-          style={{ marginBottom: 15 }}
-        >
-          <Form.Section text={t('日志设置')}>
+        <div ref={containerRef}>
+          <Form
+            values={inputs}
+            getFormApi={(formAPI) => (refForm.current = formAPI)}
+            style={{ marginBottom: 15 }}
+          >
+            <Form.Section text={t('日志设置')}>
             <Row gutter={16}>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Switch
@@ -217,10 +264,30 @@ export default function SettingsLog(props) {
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'general_setting.log_filter_autocomplete_enabled'}
+                  label={t('启用日志筛选联想')}
+                  extraText={t(
+                    '控制使用日志、任务日志、绘图日志筛选输入框的联想提示',
+                  )}
+                  size='default'
+                  checkedText='｜'
+                  uncheckedText='〇'
+                  onChange={(value) => {
+                    setInputs({
+                      ...inputs,
+                      'general_setting.log_filter_autocomplete_enabled': value,
+                    });
+                  }}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Spin spinning={loadingCleanHistoryLog}>
                   <Form.DatePicker
                     label={t('清除历史日志')}
                     field={'historyTimestamp'}
+                    id='historyTimestamp'
+                    className='history-timestamp-field'
                     type='dateTime'
                     inputReadOnly={true}
                     onChange={(value) => {
@@ -253,8 +320,9 @@ export default function SettingsLog(props) {
                 {t('保存日志设置')}
               </Button>
             </Row>
-          </Form.Section>
-        </Form>
+            </Form.Section>
+          </Form>
+        </div>
       </Spin>
     </>
   );

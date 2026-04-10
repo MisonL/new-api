@@ -6,6 +6,8 @@ import (
 	"io"
 )
 
+type RawMessage = json.RawMessage
+
 func Unmarshal(data []byte, v any) error {
 	return json.Unmarshal(data, v)
 }
@@ -18,8 +20,18 @@ func DecodeJson(reader io.Reader, v any) error {
 	return json.NewDecoder(reader).Decode(v)
 }
 
+func DecodeJsonUseNumber(reader io.Reader, v any) error {
+	decoder := json.NewDecoder(reader)
+	decoder.UseNumber()
+	return decoder.Decode(v)
+}
+
 func Marshal(v any) ([]byte, error) {
 	return json.Marshal(v)
+}
+
+func UnmarshalWithNumber(data []byte, v any) error {
+	return DecodeJsonUseNumber(bytes.NewReader(data), v)
 }
 
 func GetJsonType(data json.RawMessage) string {

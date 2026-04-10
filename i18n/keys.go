@@ -103,6 +103,11 @@ const (
 	MsgUserLinuxDOIdEmpty            = "user.linux_do_id_empty"
 )
 
+// OAuth related messages
+const (
+	MsgOAuthAutoRegisterDisabled = "oauth.auto_register_disabled"
+)
+
 // Quota related messages
 const (
 	MsgQuotaNegative        = "quota.negative"
@@ -265,20 +270,24 @@ const (
 
 // OAuth related messages
 const (
-	MsgOAuthInvalidCode     = "oauth.invalid_code"
-	MsgOAuthGetUserErr      = "oauth.get_user_error"
-	MsgOAuthAccountUsed     = "oauth.account_used"
-	MsgOAuthUnknownProvider = "oauth.unknown_provider"
-	MsgOAuthStateInvalid    = "oauth.state_invalid"
-	MsgOAuthNotEnabled      = "oauth.not_enabled"
-	MsgOAuthUserDeleted     = "oauth.user_deleted"
-	MsgOAuthUserBanned      = "oauth.user_banned"
-	MsgOAuthBindSuccess     = "oauth.bind_success"
-	MsgOAuthAlreadyBound    = "oauth.already_bound"
-	MsgOAuthConnectFailed   = "oauth.connect_failed"
-	MsgOAuthTokenFailed     = "oauth.token_failed"
-	MsgOAuthUserInfoEmpty   = "oauth.user_info_empty"
-	MsgOAuthTrustLevelLow   = "oauth.trust_level_low"
+	MsgOAuthInvalidCode          = "oauth.invalid_code"
+	MsgOAuthGetUserErr           = "oauth.get_user_error"
+	MsgOAuthAccountUsed          = "oauth.account_used"
+	MsgOAuthUnknownProvider      = "oauth.unknown_provider"
+	MsgOAuthStateInvalid         = "oauth.state_invalid"
+	MsgOAuthNotEnabled           = "oauth.not_enabled"
+	MsgOAuthUserDeleted          = "oauth.user_deleted"
+	MsgOAuthUserBanned           = "oauth.user_banned"
+	MsgOAuthBindSuccess          = "oauth.bind_success"
+	MsgOAuthAlreadyBound         = "oauth.already_bound"
+	MsgOAuthConnectFailed        = "oauth.connect_failed"
+	MsgOAuthTokenFailed          = "oauth.token_failed"
+	MsgOAuthUserInfoEmpty        = "oauth.user_info_empty"
+	MsgOAuthTrustLevelLow        = "oauth.trust_level_low"
+	MsgOAuthTicketMissing        = "oauth.ticket_missing"
+	MsgOAuthJWTMissing           = "oauth.jwt_missing"
+	MsgOAuthTrustedHeaderMissing = "oauth.trusted_header_missing"
+	MsgOAuthTrustedProxyDenied   = "oauth.trusted_proxy_denied"
 )
 
 // Model layer error messages (for translation in controller)

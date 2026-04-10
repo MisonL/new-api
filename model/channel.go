@@ -74,8 +74,25 @@ func (c ChannelInfo) Value() (driver.Value, error) {
 
 // Scan implements sql.Scanner interface
 func (c *ChannelInfo) Scan(value interface{}) error {
-	bytesValue, _ := value.([]byte)
-	return common.Unmarshal(bytesValue, c)
+	switch typedValue := value.(type) {
+	case nil:
+		*c = ChannelInfo{}
+		return nil
+	case []byte:
+		if len(typedValue) == 0 {
+			*c = ChannelInfo{}
+			return nil
+		}
+		return common.Unmarshal(typedValue, c)
+	case string:
+		if typedValue == "" {
+			*c = ChannelInfo{}
+			return nil
+		}
+		return common.Unmarshal([]byte(typedValue), c)
+	default:
+		return fmt.Errorf("unsupported channel info type: %T", value)
+	}
 }
 
 func (channel *Channel) GetKeys() []string {
@@ -608,42 +625,13 @@ func handlerMultiKeyUpdate(channel *Channel, usingKey string, status int, reason
 	}
 }
 
+// UpdateChannelStatus updates channel state and its ability visibility atomically.
 func UpdateChannelStatus(channelId int, usingKey string, status int, reason string) bool {
 	if common.MemoryCacheEnabled {
 		channelStatusLock.Lock()
 		defer channelStatusLock.Unlock()
-
-		channelCache, _ := CacheGetChannel(channelId)
-		if channelCache == nil {
-			return false
-		}
-		if channelCache.ChannelInfo.IsMultiKey {
-			// Use per-channel lock to prevent concurrent map read/write with GetNextEnabledKey
-			pollingLock := GetChannelPollingLock(channelId)
-			pollingLock.Lock()
-			// 如果是多Key模式，更新缓存中的状态
-			handlerMultiKeyUpdate(channelCache, usingKey, status, reason)
-			pollingLock.Unlock()
-			//CacheUpdateChannel(channelCache)
-			//return true
-		} else {
-			// 如果缓存渠道存在，且状态已是目标状态，直接返回
-			if channelCache.Status == status {
-				return false
-			}
-			CacheUpdateChannelStatus(channelId, status)
-		}
 	}
-
 	shouldUpdateAbilities := false
-	defer func() {
-		if shouldUpdateAbilities {
-			err := UpdateAbilityStatus(channelId, status == common.ChannelStatusEnabled)
-			if err != nil {
-				common.SysLog(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
-			}
-		}
-	}()
 	channel, err := GetChannelById(channelId, true)
 	if err != nil {
 		return false
@@ -670,11 +658,32 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			channel.Status = status
 			shouldUpdateAbilities = true
 		}
-		err = channel.SaveWithoutKey()
-		if err != nil {
-			common.SysLog(fmt.Sprintf("failed to update channel status: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
-			return false
+	}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Omit("key").Save(channel).Error; err != nil {
+			return err
 		}
+		if shouldUpdateAbilities {
+			err := tx.Model(&Ability{}).
+				Where("channel_id = ?", channelId).
+				Select("enabled").
+				Update("enabled", status == common.ChannelStatusEnabled).Error
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if shouldUpdateAbilities {
+			common.SysLog(fmt.Sprintf("failed to update channel or ability status atomically: channel_id=%d, status=%d, error=%v", channelId, status, err))
+		} else {
+			common.SysLog(fmt.Sprintf("failed to update channel status: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
+		}
+		return false
+	}
+	if common.MemoryCacheEnabled {
+		InitChannelCache()
 	}
 	return true
 }

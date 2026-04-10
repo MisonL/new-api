@@ -28,6 +28,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { selectFilter } from '../../../../helpers';
+import { getServerAddress } from '../../../../helpers/token';
 
 const APP_CONFIGS = {
   claude: {
@@ -51,17 +52,6 @@ const APP_CONFIGS = {
     modelFields: [{ key: 'model', label: '主模型' }],
   },
 };
-
-function getServerAddress() {
-  try {
-    const raw = localStorage.getItem('status');
-    if (raw) {
-      const status = JSON.parse(raw);
-      if (status.server_address) return status.server_address;
-    }
-  } catch (_) {}
-  return window.location.origin;
-}
 
 function buildCCSwitchURL(app, name, models, apiKey) {
   const serverAddress = getServerAddress();
@@ -149,6 +139,7 @@ export default function CCSwitchModal({
             value={app}
             onChange={(e) => handleAppChange(e.target.value)}
             style={{ width: '100%' }}
+            name='components-table-tokens-modals-ccswitchmodal-radiogroup-1'
           >
             {Object.entries(APP_CONFIGS).map(([key, cfg]) => (
               <Radio key={key} value={key}>
@@ -164,6 +155,7 @@ export default function CCSwitchModal({
             value={name}
             onChange={setName}
             placeholder={currentConfig.defaultName}
+            name='components-table-tokens-modals-ccswitchmodal-input-1'
           />
         </div>
 

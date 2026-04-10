@@ -70,8 +70,9 @@ const EditUserModal = (props) => {
   const [groupOptions, setGroupOptions] = useState([]);
   const [bindingModalVisible, setBindingModalVisible] = useState(false);
   const formApiRef = useRef(null);
+  const requestIdRef = useRef(0);
 
-  const isEdit = Boolean(userId);
+  const isEdit = userId !== null && userId !== undefined;
 
   const getInitValues = () => ({
     username: '',
@@ -89,36 +90,100 @@ const EditUserModal = (props) => {
     remark: '',
   });
 
-  const fetchGroups = async () => {
+  const handleCancel = () => props.handleClose();
+
+  const resetFormValues = () => {
+    formApiRef.current?.setValues(getInitValues());
+  };
+
+  const isRequestCurrent = (requestId) => requestIdRef.current === requestId;
+
+  const fetchGroups = async (requestId) => {
     try {
-      let res = await API.get(`/api/group/`);
+      const res = await API.get(`/api/group/`);
+      if (!isRequestCurrent(requestId)) {
+        return false;
+      }
       setGroupOptions(res.data.data.map((g) => ({ label: g, value: g })));
+      return true;
     } catch (e) {
-      showError(e.message);
+      if (isRequestCurrent(requestId)) {
+        showError(e.message);
+      }
+      return false;
     }
   };
 
-  const handleCancel = () => props.handleClose();
-
-  const loadUser = async () => {
-    setLoading(true);
-    const url = userId ? `/api/user/${userId}` : `/api/user/self`;
-    const res = await API.get(url);
-    const { success, message, data } = res.data;
-    if (success) {
-      data.password = '';
-      formApiRef.current?.setValues({ ...getInitValues(), ...data });
-    } else {
-      showError(message);
+  const loadUser = async (currentUserId, requestId) => {
+    if (!isRequestCurrent(requestId)) {
+      return null;
     }
-    setLoading(false);
+    const url = currentUserId ? `/api/user/${currentUserId}` : `/api/user/self`;
+    const res = await API.get(url);
+    if (!isRequestCurrent(requestId)) {
+      return null;
+    }
+    return res.data;
   };
 
   useEffect(() => {
-    loadUser();
-    if (userId) fetchGroups();
-    setBindingModalVisible(false);
-  }, [props.editingUser.id]);
+    if (!props.visible) {
+      return;
+    }
+
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const currentUserId = props.editingUser.id;
+
+    const initialize = async () => {
+      setBindingModalVisible(false);
+      setLoading(true);
+      resetFormValues();
+      try {
+        if (currentUserId) {
+          const groupsLoaded = await fetchGroups(requestId);
+          if (!groupsLoaded || !isRequestCurrent(requestId)) {
+            return;
+          }
+        } else {
+          setGroupOptions([]);
+        }
+
+        if (!isRequestCurrent(requestId)) {
+          return;
+        }
+        const response = await loadUser(currentUserId, requestId);
+        if (!response || !isRequestCurrent(requestId)) {
+          return;
+        }
+        const { success, message, data } = response;
+        if (success) {
+          data.password = '';
+          formApiRef.current?.setValues({ ...getInitValues(), ...data });
+        } else {
+          resetFormValues();
+          showError(message);
+        }
+      } catch (error) {
+        if (isRequestCurrent(requestId)) {
+          resetFormValues();
+          showError(error.message);
+        }
+      } finally {
+        if (isRequestCurrent(requestId)) {
+          setLoading(false);
+        }
+      }
+    };
+
+    initialize();
+
+    return () => {
+      if (requestIdRef.current === requestId) {
+        requestIdRef.current += 1;
+      }
+    };
+  }, [props.visible, props.editingUser.id]);
 
   const openBindingModal = () => {
     setBindingModalVisible(true);
@@ -142,7 +207,7 @@ const EditUserModal = (props) => {
     const { success, message } = res.data;
     if (success) {
       showSuccess(t('用户信息更新成功！'));
-      props.refresh();
+      await props.refresh();
       props.handleClose();
     } else {
       showError(message);
@@ -232,8 +297,10 @@ const EditUserModal = (props) => {
                     <Col span={24}>
                       <Form.Input
                         field='username'
+                        name='username'
                         label={t('用户名')}
                         placeholder={t('请输入新的用户名')}
+                        autocomplete='username'
                         rules={[{ required: true, message: t('请输入用户名') }]}
                         showClear
                       />
@@ -242,8 +309,10 @@ const EditUserModal = (props) => {
                     <Col span={24}>
                       <Form.Input
                         field='password'
+                        name='password'
                         label={t('密码')}
                         placeholder={t('请输入新的密码，最短 8 位')}
+                        autocomplete='new-password'
                         mode='password'
                         showClear
                       />
@@ -252,8 +321,10 @@ const EditUserModal = (props) => {
                     <Col span={24}>
                       <Form.Input
                         field='display_name'
+                        name='display_name'
                         label={t('显示名称')}
                         placeholder={t('请输入新的显示名称')}
+                        autocomplete='name'
                         showClear
                       />
                     </Col>
@@ -261,8 +332,10 @@ const EditUserModal = (props) => {
                     <Col span={24}>
                       <Form.Input
                         field='remark'
+                        name='remark'
                         label={t('备注')}
                         placeholder={t('请输入备注（仅管理员可见）')}
+                        autocomplete='off'
                         showClear
                       />
                     </Col>
@@ -292,9 +365,13 @@ const EditUserModal = (props) => {
 
                     <Row gutter={12}>
                       <Col span={24}>
+                        <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                          {t('分组')}
+                        </Text>
                         <Form.Select
                           field='group'
-                          label={t('分组')}
+                          noLabel
+                          aria-label={t('分组')}
                           placeholder={t('请选择分组')}
                           optionList={groupOptions}
                           allowAdditions
@@ -306,8 +383,10 @@ const EditUserModal = (props) => {
                       <Col span={10}>
                         <Form.InputNumber
                           field='quota'
+                          name='quota'
                           label={t('剩余额度')}
                           placeholder={t('请输入新的剩余额度')}
+                          autocomplete='off'
                           step={500000}
                           extraText={renderQuotaWithPrompt(values.quota || 0)}
                           rules={[{ required: true, message: t('请输入额度') }]}
@@ -316,12 +395,16 @@ const EditUserModal = (props) => {
                       </Col>
 
                       <Col span={14}>
-                        <Form.Slot label={t('添加额度')}>
+                        <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                          {t('添加额度')}
+                        </Text>
+                        <div>
                           <Button
                             icon={<IconPlus />}
+                            aria-label={t('添加额度')}
                             onClick={() => setIsModalOpen(true)}
                           />
-                        </Form.Slot>
+                        </div>
                       </Col>
                     </Row>
                   </Card>
@@ -427,6 +510,7 @@ const EditUserModal = (props) => {
               }}
               style={{ width: '100%' }}
               showClear
+              name='components-table-users-modals-editusermodal-inputnumber-1'
             />
           </div>
         )}
@@ -452,6 +536,7 @@ const EditUserModal = (props) => {
             style={{ width: '100%' }}
             showClear
             step={500000}
+            name='components-table-users-modals-editusermodal-inputnumber-2'
           />
         </div>
       </Modal>
