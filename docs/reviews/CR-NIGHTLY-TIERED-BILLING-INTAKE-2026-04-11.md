@@ -87,9 +87,12 @@ bun run build
 - 为 nightly 吸纳引入的前端源码文件补齐标准许可证头注释。
 - 构建通过。
 - 已消除 `render.jsx` 中的 `const` 重新赋值告警。
+- 对 `App.jsx` 做页面级懒加载收口，避免控制台页面继续同步打进主入口。
+- 对 `vite.config.js` 增加 `icons`、`markdown`、`charts` vendor 分包规则。
+- 构建后主应用 chunk 从约 `7.48 MB` 降到约 `1.39 MB`，入口负担显著下降。
 - 仍存在既有非阻塞告警：
   - `lottie-web` 使用 `eval`
-  - 部分 chunk 体积超过 500 kB
+  - `icons` / `charts` / `semi-ui` / `markdown` 等 vendor chunk 仍超过 500 kB，但已从主入口分离
 
 ## 结论
 
