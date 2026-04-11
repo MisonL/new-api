@@ -183,6 +183,12 @@ export const useLogsData = () => {
   const [channelAffinityUsageCacheTarget, setChannelAffinityUsageCacheTarget] =
     useState(null);
 
+  // Edit user modal state
+  const [showEditUser, setShowEditUser] = useState(false);
+  const [editingUser, setEditingUser] = useState({
+    id: undefined,
+  });
+
   // Initialize default column visibility
   const initDefaultColumns = () => {
     const defaults = getDefaultColumnVisibility();
@@ -344,6 +350,25 @@ export const useLogsData = () => {
       key_fp: a.key_fp || '',
     });
     setShowChannelAffinityUsageCacheModal(true);
+  };
+
+  const openEditUserPanel = (userId) => {
+    if (!isAdminUser) {
+      return;
+    }
+    if (!userId) {
+      showError(t('用户信息缺失'));
+      return;
+    }
+    setEditingUser({ id: userId });
+    setShowEditUser(true);
+  };
+
+  const closeEditUserPanel = () => {
+    setShowEditUser(false);
+    setEditingUser({
+      id: undefined,
+    });
   };
 
   // Format logs data
@@ -738,6 +763,12 @@ export const useLogsData = () => {
     setShowChannelAffinityUsageCacheModal,
     channelAffinityUsageCacheTarget,
     openChannelAffinityUsageCacheModal,
+
+    // Edit user modal
+    showEditUser,
+    editingUser,
+    openEditUserPanel,
+    closeEditUserPanel,
 
     // Functions
     loadLogs,
