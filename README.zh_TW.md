@@ -224,7 +224,7 @@ docker run --name new-api -d --restart always \
 - 🔄 **OpenAI Compatible ⇄ Claude Messages**
 - 🔄 **OpenAI Compatible → Google Gemini**
 - 🔄 **Google Gemini → OpenAI Compatible** - 僅支援文本，暫不支援函數調用
-- 🚧 **OpenAI Compatible ⇄ OpenAI Responses** - 開發中
+- 🔄 **OpenAI Compatible ⇄ OpenAI Responses** - 已支援，可在控制台系統設定中配置策略規則
 - 🔄 **思考轉內容功能**
 
 **Reasoning Effort 支援：**
