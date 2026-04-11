@@ -6,7 +6,7 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 
 ## Tech Stack
 
-- **Backend**: Go 1.22+, Gin web framework, GORM v2 ORM
+- **Backend**: Go 1.25+, Gin web framework, GORM v2 ORM
 - **Frontend**: React 18, Vite, Semi Design UI (@douyinfe/semi-ui)
 - **Databases**: SQLite, MySQL, PostgreSQL (all three must be supported)
 - **Cache**: Redis (go-redis) + in-memory cache
@@ -125,7 +125,7 @@ This includes but is not limited to:
 
 When working on tiered/dynamic billing (expression-based pricing), you MUST read `pkg/billingexpr/expr.md` first. It documents the design philosophy, expression language (variables, functions, examples), full system architecture (editor → storage → pre-consume → settlement → log display), token normalization rules (`p`/`c` auto-exclusion), quota conversion, and expression versioning. All code changes to the billing expression system must follow the patterns described in that document.
 
-### Rule 6: Upstream Relay Request DTOs — Preserve Explicit Zero Values
+### Rule 8: Upstream Relay Request DTOs — Preserve Explicit Zero Values
 
 For request structs that are parsed from client JSON and then re-marshaled to upstream providers (especially relay/convert paths):
 
@@ -134,3 +134,43 @@ For request structs that are parsed from client JSON and then re-marshaled to up
   - field absent in client JSON => `nil` => omitted on marshal;
   - field explicitly set to zero/false => non-`nil` pointer => must still be sent upstream.
 - Avoid using non-pointer scalars with `omitempty` for optional request parameters, because zero values (`0`, `0.0`, `false`) will be silently dropped during marshal.
+
+### Rule 9: Real-Channel Validation Must Use an Isolated Environment
+
+When validating relay behavior with real upstream channel configurations:
+
+- NEVER point a development instance directly at the production database or production data directory.
+- Production channel configuration may only be used as a **read-only source** for export/import.
+- Use an isolated database, isolated runtime directory, isolated logs, and a separate port for the validation instance.
+- If production channel records are copied into the validation environment, restore them into the isolated database only.
+- Any migration, setup, cache rebuild, token creation, or test invocation must happen in the isolated environment, not the production instance.
+
+### Rule 10: Dashboard Session APIs Require `New-Api-User`
+
+For dashboard/API routes protected by `middleware.UserAuth()`:
+
+- A valid session cookie alone is not sufficient.
+- Requests must also include header `New-Api-User: <current_user_id>`.
+- The header value must match the authenticated session user ID, otherwise the request will be rejected with `401`.
+
+This is especially important for automated integration tests that log in via `/api/user/login` and then call dashboard endpoints such as `/api/user/self` or `/api/token/*`.
+
+### Rule 11: Do Not Infer Streaming Only From `Content-Type`
+
+Some upstreams return a normal JSON body for non-stream requests but incorrectly label the response as `text/event-stream`.
+
+- For non-stream client requests, do not switch into SSE handling solely because the upstream `Content-Type` starts with `text/event-stream`.
+- Prefer request intent first, then inspect the upstream response body prefix when compatibility handling is required.
+- If the body starts with JSON (`{` or `[` after trimming whitespace), treat it as a normal non-stream response.
+- If the body starts with SSE frames such as `data:`, `event:`, or `:`, treat it as a real stream.
+
+This rule exists because relying only on the header can cause non-stream chat completion requests to lose the final JSON body and incorrectly record `is_stream=true`.
+
+### Rule 12: Stable Secrets Are Mandatory For Local/Isolated Runs
+
+Before starting any local or isolated `new-api` instance, set stable values for:
+
+- `SESSION_SECRET`
+- `CRYPTO_SECRET`
+
+Do not rely on implicit defaults or placeholder values such as `random_string`. Missing or unstable secrets will change session/encryption behavior and can invalidate integration test results.

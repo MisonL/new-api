@@ -1,9 +1,13 @@
 package helper
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -55,6 +59,47 @@ func SetEventStreamHeaders(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("Transfer-Encoding", "chunked")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
+}
+
+type peekReadCloser struct {
+	*bufio.Reader
+	io.Closer
+}
+
+// ShouldTreatAsEventStream inspects mislabelled upstream responses.
+// Some upstreams return a JSON body but mark the response as text/event-stream.
+// When the client did not request streaming, prefer the body prefix over the
+// header so non-stream requests still take the JSON response path.
+func ShouldTreatAsEventStream(resp *http.Response, requestedStream bool) bool {
+	if requestedStream || resp == nil {
+		return requestedStream
+	}
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type"))), "text/event-stream") {
+		return false
+	}
+	if resp.Body == nil {
+		return true
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	resp.Body = &peekReadCloser{Reader: reader, Closer: resp.Body}
+
+	peek, err := reader.Peek(512)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
+		return true
+	}
+
+	trimmed := bytes.TrimLeft(peek, " \t\r\n")
+	if len(trimmed) == 0 {
+		return true
+	}
+	if trimmed[0] == '{' || trimmed[0] == '[' {
+		return false
+	}
+	if bytes.HasPrefix(trimmed, []byte("data:")) || bytes.HasPrefix(trimmed, []byte("event:")) || trimmed[0] == ':' {
+		return true
+	}
+	return true
 }
 
 // ClaudeData writes a Claude SSE event with a JSON payload.
