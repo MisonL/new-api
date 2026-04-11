@@ -144,6 +144,31 @@ func GetToolPrice(toolName string) float64 {
 	return GetToolPriceForModel(toolName, "")
 }
 
+func getWebSearchToolName(modelName string) string {
+	if strings.HasSuffix(modelName, "search-preview") {
+		return "web_search_preview"
+	}
+	return "web_search"
+}
+
+// GetWebSearchPricePerThousand keeps the legacy billing API stable while
+// delegating price resolution to the tool-price index.
+// searchContextSize is currently accepted for signature compatibility.
+func GetWebSearchPricePerThousand(modelName string, searchContextSize string) float64 {
+	_ = searchContextSize
+	return GetToolPriceForModel(getWebSearchToolName(modelName), modelName)
+}
+
+// GetClaudeWebSearchPricePerThousand preserves the legacy Claude billing API.
+func GetClaudeWebSearchPricePerThousand() float64 {
+	return GetToolPrice("web_search")
+}
+
+// GetFileSearchPricePerThousand preserves the legacy Responses file-search API.
+func GetFileSearchPricePerThousand() float64 {
+	return GetToolPrice("file_search")
+}
+
 // ---------------------------------------------------------------------------
 // GPT Image 1 per-call pricing (special: depends on quality + size)
 // ---------------------------------------------------------------------------

@@ -1657,6 +1657,7 @@ export function renderModelPrice(opts) {
     user_group_ratio,
   );
   let groupRatio = effectiveGroupRatio;
+  const normalizedCompletionRatio = completionRatio ?? 0;
 
   const { symbol, rate } = getCurrencyConfig();
 
@@ -1683,11 +1684,8 @@ export function renderModelPrice(opts) {
       ]);
     }
 
-    if (completionRatio === undefined) {
-      completionRatio = 0;
-    }
     const inputRatioPrice = modelRatio * 2.0;
-    const completionRatioPrice = modelRatio * 2.0 * completionRatio;
+    const completionRatioPrice = modelRatio * 2.0 * normalizedCompletionRatio;
     const cacheRatioPrice = modelRatio * 2.0 * cacheRatio;
     const imageRatioPrice = modelRatio * 2.0 * imageRatio;
     let effectiveInputTokens =
@@ -1896,12 +1894,8 @@ export function renderModelPrice(opts) {
     );
   }
 
-  if (completionRatio === undefined) {
-    completionRatio = 0;
-  }
-
   const modelRatioValue = formatRatioValue(modelRatio);
-  const completionRatioValue = formatRatioValue(completionRatio);
+  const completionRatioValue = formatRatioValue(normalizedCompletionRatio);
   const cacheRatioValue = formatRatioValue(cacheRatio);
   const imageRatioValue = formatRatioValue(imageRatio);
   const inputRatioPrice = modelRatio * 2.0;
@@ -2241,7 +2235,10 @@ export function parseTiersFromExpr(exprStr) {
   try {
     const { body } = stripExprVersion(exprStr);
     const condGroup = `((?:(?:p|c)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)(?:\\s*&&\\s*(?:p|c)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`;
-    const tierRe = new RegExp(`(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`, 'g');
+    const tierRe = new RegExp(
+      `(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`,
+      'g',
+    );
     const tiers = [];
     let m;
     while ((m = tierRe.exec(body)) !== null) {
@@ -2250,7 +2247,8 @@ export function parseTiersFromExpr(exprStr) {
       if (condStr) {
         for (const cp of condStr.split(/\s*&&\s*/)) {
           const cm = cp.trim().match(/^(p|c)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/);
-          if (cm) conditions.push({ var: cm[1], op: cm[2], value: Number(cm[3]) });
+          if (cm)
+            conditions.push({ var: cm[1], op: cm[2], value: Number(cm[3]) });
         }
       }
       const tier = parseTierBody(m[3]);
@@ -2277,7 +2275,11 @@ export function renderTieredModelPrice(opts) {
     cache_creation_tokens_1h: cacheCreationTokens1h = 0,
   } = opts;
   let exprStr = '';
-  try { exprStr = atob(exprB64); } catch { /* ignore */ }
+  try {
+    exprStr = atob(exprB64);
+  } catch {
+    /* ignore */
+  }
   const tiers = parseTiersFromExpr(exprStr);
   if (tiers.length === 0) {
     return i18next.t('阶梯计费（表达式解析失败）');
@@ -2294,7 +2296,11 @@ export function renderTieredModelPrice(opts) {
     ...priceLines
       .filter(([field]) => tier[field] > 0)
       .map(([field, label]) =>
-        buildBillingPriceText(`${label}：{{symbol}}{{price}} / 1M tokens`, { symbol, usdAmount: tier[field], rate }),
+        buildBillingPriceText(`${label}：{{symbol}}{{price}} / 1M tokens`, {
+          symbol,
+          usdAmount: tier[field],
+          rate,
+        }),
       ),
   ];
 
@@ -2315,7 +2321,11 @@ export function renderTieredModelPriceSimple(opts) {
     outputMode = 'segments',
   } = opts;
   let exprStr = '';
-  try { exprStr = atob(exprB64); } catch { /* ignore */ }
+  try {
+    exprStr = atob(exprB64);
+  } catch {
+    /* ignore */
+  }
   const tiers = parseTiersFromExpr(exprStr);
   const tier = tiers.find((t) => t.label === matchedTier) || tiers[0];
 
@@ -2412,6 +2422,9 @@ export function renderAudioModelPrice(opts) {
     user_group_ratio,
   );
   let groupRatio = effectiveGroupRatio;
+  const normalizedCompletionRatio = completionRatio ?? 0;
+  const normalizedAudioRatio = Number.parseFloat(audioRatio ?? 0) || 0;
+  const normalizedAudioCompletionRatio = audioCompletionRatio ?? 0;
 
   // 获取货币配置
   const { symbol, rate } = getCurrencyConfig();
@@ -2438,23 +2451,22 @@ export function renderAudioModelPrice(opts) {
       ]);
     }
 
-    if (completionRatio === undefined) {
-      completionRatio = 0;
-    }
-    audioRatio = parseFloat(audioRatio).toFixed(6);
     const inputRatioPrice = modelRatio * 2.0;
-    const completionRatioPrice = modelRatio * 2.0 * completionRatio;
+    const completionRatioPrice = modelRatio * 2.0 * normalizedCompletionRatio;
     const textPrice =
       ((inputTokens - cacheTokens + cacheTokens * cacheRatio) / 1000000) *
         inputRatioPrice *
         groupRatio +
       (completionTokens / 1000000) * completionRatioPrice * groupRatio;
     const audioPrice =
-      (audioInputTokens / 1000000) * inputRatioPrice * audioRatio * groupRatio +
+      (audioInputTokens / 1000000) *
+        inputRatioPrice *
+        normalizedAudioRatio *
+        groupRatio +
       (audioCompletionTokens / 1000000) *
         inputRatioPrice *
-        audioRatio *
-        audioCompletionRatio *
+        normalizedAudioRatio *
+        normalizedAudioCompletionRatio *
         groupRatio;
     const totalPrice = textPrice + audioPrice;
 
@@ -2481,12 +2493,15 @@ export function renderAudioModelPrice(opts) {
         : null,
       buildBillingPriceText('音频输入价格：{{symbol}}{{price}} / 1M tokens', {
         symbol,
-        usdAmount: inputRatioPrice * audioRatio,
+        usdAmount: inputRatioPrice * normalizedAudioRatio,
         rate,
       }),
       buildBillingPriceText('音频补全价格：{{symbol}}{{price}} / 1M tokens', {
         symbol,
-        usdAmount: inputRatioPrice * audioRatio * audioCompletionRatio,
+        usdAmount:
+          inputRatioPrice *
+          normalizedAudioRatio *
+          normalizedAudioCompletionRatio,
         rate,
       }),
       buildBillingText(
@@ -2499,11 +2514,13 @@ export function renderAudioModelPrice(opts) {
           textInputPrice: formatBillingDisplayPrice(inputRatioPrice, rate),
           textCompPrice: formatBillingDisplayPrice(completionRatioPrice, rate),
           audioInputPrice: formatBillingDisplayPrice(
-            audioRatio * inputRatioPrice,
+            normalizedAudioRatio * inputRatioPrice,
             rate,
           ),
           audioCompPrice: formatBillingDisplayPrice(
-            audioRatio * audioCompletionRatio * inputRatioPrice,
+            normalizedAudioRatio *
+              normalizedAudioCompletionRatio *
+              inputRatioPrice,
             rate,
           ),
           ratioType: ratioLabel,
@@ -2529,15 +2546,13 @@ export function renderAudioModelPrice(opts) {
     );
   }
 
-  if (completionRatio === undefined) {
-    completionRatio = 0;
-  }
-
   const modelRatioValue = formatRatioValue(modelRatio);
-  const completionRatioValue = formatRatioValue(completionRatio);
+  const completionRatioValue = formatRatioValue(normalizedCompletionRatio);
   const cacheRatioValue = formatRatioValue(cacheRatio);
-  const audioRatioValue = formatRatioValue(audioRatio);
-  const audioCompletionRatioValue = formatRatioValue(audioCompletionRatio);
+  const audioRatioValue = formatRatioValue(normalizedAudioRatio);
+  const audioCompletionRatioValue = formatRatioValue(
+    normalizedAudioCompletionRatio,
+  );
 
   const inputRatioPrice = modelRatio * 2.0;
   const completionRatioPrice = modelRatio * 2.0 * completionRatioValue;
@@ -2701,6 +2716,7 @@ export function renderClaudeModelPrice(opts) {
     user_group_ratio,
   );
   let groupRatio = effectiveGroupRatio;
+  const normalizedCompletionRatio = completionRatio ?? 0;
 
   // 获取货币配置
   const { symbol, rate } = getCurrencyConfig();
@@ -2727,12 +2743,8 @@ export function renderClaudeModelPrice(opts) {
       ]);
     }
 
-    if (completionRatio === undefined) {
-      completionRatio = 0;
-    }
-
     const inputRatioPrice = modelRatio * 2.0;
-    const completionRatioPrice = modelRatio * 2.0 * completionRatio;
+    const completionRatioPrice = modelRatio * 2.0 * normalizedCompletionRatio;
     const cacheRatioPrice = modelRatio * 2.0 * cacheRatio;
     const cacheCreationRatioPrice = modelRatio * 2.0 * cacheCreationRatio;
     const cacheCreationRatioPrice5m = modelRatio * 2.0 * cacheCreationRatio5m;
@@ -2914,12 +2926,8 @@ export function renderClaudeModelPrice(opts) {
     );
   }
 
-  if (completionRatio === undefined) {
-    completionRatio = 0;
-  }
-
   const modelRatioValue = formatRatioValue(modelRatio);
-  const completionRatioValue = formatRatioValue(completionRatio);
+  const completionRatioValue = formatRatioValue(normalizedCompletionRatio);
   const cacheRatioValue = formatRatioValue(cacheRatio);
   const cacheCreationRatioValue = formatRatioValue(cacheCreationRatio);
   const cacheCreationRatio5mValue = formatRatioValue(cacheCreationRatio5m);
