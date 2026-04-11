@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   Button,
@@ -61,11 +80,7 @@ export function serializeGroupTable(rows) {
   };
 }
 
-export default function GroupTable({
-  groupRatio,
-  userUsableGroups,
-  onChange,
-}) {
+export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
   const { t } = useTranslation();
 
   const [rows, setRows] = useState(() =>
@@ -223,9 +238,7 @@ export default function GroupTable({
         rowKey='_id'
         hidePagination
         size='small'
-        empty={
-          <Text type='tertiary'>{t('暂无分组，点击下方按钮添加')}</Text>
-        }
+        empty={<Text type='tertiary'>{t('暂无分组，点击下方按钮添加')}</Text>}
       />
       <div className='mt-3 flex justify-center'>
         <Button icon={<IconPlus />} theme='outline' onClick={addRow}>
@@ -234,7 +247,8 @@ export default function GroupTable({
       </div>
       {duplicateNames.size > 0 && (
         <Text type='warning' size='small' className='mt-2 block'>
-          {t('存在重复的分组名称：')}{Array.from(duplicateNames).join(', ')}
+          {t('存在重复的分组名称：')}
+          {Array.from(duplicateNames).join(', ')}
         </Text>
       )}
     </div>

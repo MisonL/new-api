@@ -36,11 +36,10 @@ import {
   renderAudioModelPrice,
   renderClaudeModelPrice,
   renderModelPrice,
-  renderTaskBillingProcess,
+  renderTieredModelPrice,
 } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
-import ParamOverrideEntry from '../../components/table/usage-logs/components/ParamOverrideEntry';
 
 export const useLogsData = () => {
   const { t } = useTranslation();
@@ -163,9 +162,7 @@ export const useLogsData = () => {
   };
 
   // Column visibility state
-  const [visibleColumns, setVisibleColumns] = useState(
-    getInitialVisibleColumns,
-  );
+  const [visibleColumns, setVisibleColumns] = useState(getInitialVisibleColumns);
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [billingDisplayMode, setBillingDisplayMode] = useState(
     getInitialBillingDisplayMode,
@@ -174,11 +171,9 @@ export const useLogsData = () => {
   // Compact mode
   const [compactMode, setCompactMode] = useTableCompactMode('logs');
 
-  // Edit user modal state
-  const [showEditUser, setShowEditUser] = useState(false);
-  const [editingUser, setEditingUser] = useState({
-    id: undefined,
-  });
+  // User info modal state
+  const [showUserInfo, setShowUserInfoModal] = useState(false);
+  const [userInfoData, setUserInfoData] = useState(null);
 
   // Channel affinity usage cache stats modal state (admin only)
   const [
@@ -187,8 +182,6 @@ export const useLogsData = () => {
   ] = useState(false);
   const [channelAffinityUsageCacheTarget, setChannelAffinityUsageCacheTarget] =
     useState(null);
-  const [showParamOverrideModal, setShowParamOverrideModal] = useState(false);
-  const [paramOverrideTarget, setParamOverrideTarget] = useState(null);
 
   // Initialize default column visibility
   const initDefaultColumns = () => {
@@ -327,23 +320,19 @@ export const useLogsData = () => {
     setLoadingStat(false);
   };
 
-  const openEditUserPanel = (userId) => {
+  // User info function
+  const showUserInfoFunc = async (userId) => {
     if (!isAdminUser) {
       return;
     }
-    if (userId === null || userId === undefined) {
-      showError(t('用户信息缺失'));
-      return;
+    const res = await API.get(`/api/user/${userId}`);
+    const { success, message, data } = res.data;
+    if (success) {
+      setUserInfoData(data);
+      setShowUserInfoModal(true);
+    } else {
+      showError(message);
     }
-    setEditingUser({ id: userId });
-    setShowEditUser(true);
-  };
-
-  const closeEditUserPanel = () => {
-    setShowEditUser(false);
-    setEditingUser({
-      id: undefined,
-    });
   };
 
   const openChannelAffinityUsageCacheModal = (affinity) => {
@@ -355,20 +344,6 @@ export const useLogsData = () => {
       key_fp: a.key_fp || '',
     });
     setShowChannelAffinityUsageCacheModal(true);
-  };
-
-  const openParamOverrideModal = (log, other) => {
-    const lines = Array.isArray(other?.po) ? other.po.filter(Boolean) : [];
-    if (lines.length === 0) {
-      return;
-    }
-    setParamOverrideTarget({
-      lines,
-      modelName: log?.model_name || '',
-      requestId: log?.request_id || '',
-      requestPath: other?.request_path || '',
-    });
-    setShowParamOverrideModal(true);
   };
 
   // Format logs data
@@ -390,10 +365,7 @@ export const useLogsData = () => {
       let other = getLogOther(logs[i].other);
       let expandDataLocal = [];
 
-      if (
-        isAdminUser &&
-        (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)
-      ) {
+      if (isAdminUser && (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)) {
         expandDataLocal.push({
           key: t('渠道信息'),
           value: `${logs[i].channel} - ${logs[i].channel_name || '[未知]'}`,
@@ -436,43 +408,14 @@ export const useLogsData = () => {
         });
       }
       if (logs[i].type === 2) {
-        expandDataLocal.push({
-          key: t('日志详情'),
-          value: other?.claude
-            ? renderClaudeLogContent(
-                other?.model_ratio,
-                other.completion_ratio,
-                other.model_price,
-                other.group_ratio,
-                other?.user_group_ratio,
-                other.cache_ratio || 1.0,
-                other.cache_creation_ratio || 1.0,
-                other.cache_creation_tokens_5m || 0,
-                other.cache_creation_ratio_5m ||
-                  other.cache_creation_ratio ||
-                  1.0,
-                other.cache_creation_tokens_1h || 0,
-                other.cache_creation_ratio_1h ||
-                  other.cache_creation_ratio ||
-                  1.0,
-                billingDisplayMode,
-              )
-            : renderLogContent(
-                other?.model_ratio,
-                other.completion_ratio,
-                other.model_price,
-                other.group_ratio,
-                other?.user_group_ratio,
-                other.cache_ratio || 1.0,
-                false,
-                1.0,
-                other.web_search || false,
-                other.web_search_call_count || 0,
-                other.file_search || false,
-                other.file_search_call_count || 0,
-                billingDisplayMode,
-              ),
-        });
+        if (other?.billing_mode !== 'tiered_expr') {
+          expandDataLocal.push({
+            key: t('日志详情'),
+            value: other?.claude
+              ? renderClaudeLogContent({ ...other, displayMode: billingDisplayMode })
+              : renderLogContent({ ...other, displayMode: billingDisplayMode }),
+          });
+        }
         if (logs[i]?.content) {
           expandDataLocal.push({
             key: t('其他详情'),
@@ -508,77 +451,19 @@ export const useLogsData = () => {
           Boolean(other?.violation_fee_marker);
 
         let content = '';
-        if (!isViolationFeeLog) {
-          const isTaskLog = other?.is_task === true || other?.task_id != null;
-          if (isTaskLog && other?.model_price === -1) {
-            content = renderTaskBillingProcess(other, logs[i].content);
-          } else if (other?.ws || other?.audio) {
-            content = renderAudioModelPrice(
-              other?.text_input,
-              other?.text_output,
-              other?.model_ratio,
-              other?.model_price,
-              other?.completion_ratio,
-              other?.audio_input,
-              other?.audio_output,
-              other?.audio_ratio,
-              other?.audio_completion_ratio,
-              other?.group_ratio,
-              other?.user_group_ratio,
-              other?.cache_tokens || 0,
-              other?.cache_ratio || 1.0,
-              billingDisplayMode,
-            );
+        if (!isViolationFeeLog && other?.billing_mode !== 'tiered_expr') {
+          const logOpts = {
+            ...other,
+            prompt_tokens: logs[i].prompt_tokens,
+            completion_tokens: logs[i].completion_tokens,
+            displayMode: billingDisplayMode,
+          };
+          if (other?.ws || other?.audio) {
+            content = renderAudioModelPrice(logOpts);
           } else if (other?.claude) {
-            content = renderClaudeModelPrice(
-              logs[i].prompt_tokens,
-              logs[i].completion_tokens,
-              other.model_ratio,
-              other.model_price,
-              other.completion_ratio,
-              other.group_ratio,
-              other?.user_group_ratio,
-              other.cache_tokens || 0,
-              other.cache_ratio || 1.0,
-              other.cache_creation_tokens || 0,
-              other.cache_creation_ratio || 1.0,
-              other.cache_creation_tokens_5m || 0,
-              other.cache_creation_ratio_5m ||
-                other.cache_creation_ratio ||
-                1.0,
-              other.cache_creation_tokens_1h || 0,
-              other.cache_creation_ratio_1h ||
-                other.cache_creation_ratio ||
-                1.0,
-              billingDisplayMode,
-            );
+            content = renderClaudeModelPrice(logOpts);
           } else {
-            content = renderModelPrice(
-              logs[i].prompt_tokens,
-              logs[i].completion_tokens,
-              other?.model_ratio,
-              other?.model_price,
-              other?.completion_ratio,
-              other?.group_ratio,
-              other?.user_group_ratio,
-              other?.cache_tokens || 0,
-              other?.cache_ratio || 1.0,
-              other?.image || false,
-              other?.image_ratio || 0,
-              other?.image_output || 0,
-              other?.web_search || false,
-              other?.web_search_call_count || 0,
-              other?.web_search_price || 0,
-              other?.file_search || false,
-              other?.file_search_call_count || 0,
-              other?.file_search_price || 0,
-              other?.audio_input_seperate_price || false,
-              other?.audio_input_token_count || 0,
-              other?.audio_input_price || 0,
-              other?.image_generation_call || false,
-              other?.image_generation_call_price || 0,
-              billingDisplayMode,
-            );
+            content = renderModelPrice(logOpts);
           }
           expandDataLocal.push({
             key: t('计费过程'),
@@ -589,6 +474,16 @@ export const useLogsData = () => {
           expandDataLocal.push({
             key: t('Reasoning Effort'),
             value: other.reasoning_effort,
+          });
+        }
+        if (other?.billing_mode === 'tiered_expr' && other?.expr_b64) {
+          expandDataLocal.push({
+            key: t('计费过程'),
+            value: renderTieredModelPrice({
+              ...other,
+              prompt_tokens: logs[i].prompt_tokens,
+              completion_tokens: logs[i].completion_tokens,
+            }),
           });
         }
       }
@@ -603,14 +498,7 @@ export const useLogsData = () => {
           expandDataLocal.push({
             key: t('失败原因'),
             value: (
-              <div
-                style={{
-                  maxWidth: 600,
-                  whiteSpace: 'normal',
-                  wordBreak: 'break-word',
-                  lineHeight: 1.6,
-                }}
-              >
+              <div style={{ maxWidth: 600, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.6 }}>
                 {other.reason}
               </div>
             ),
@@ -621,47 +509,6 @@ export const useLogsData = () => {
         expandDataLocal.push({
           key: t('请求路径'),
           value: other.request_path,
-        });
-      }
-      if (isAdminUser && other?.stream_status) {
-        const ss = other.stream_status;
-        const isOk = ss.status === 'ok';
-        const statusLabel = isOk ? '✓ ' + t('正常') : '✗ ' + t('异常');
-        let streamValue = statusLabel + ' (' + (ss.end_reason || 'unknown') + ')';
-        if (ss.error_count > 0) {
-          streamValue += ` [${t('软错误')}: ${ss.error_count}]`;
-        }
-        if (ss.end_error) {
-          streamValue += ` - ${ss.end_error}`;
-        }
-        expandDataLocal.push({
-          key: t('流状态'),
-          value: streamValue,
-        });
-        if (Array.isArray(ss.errors) && ss.errors.length > 0) {
-          expandDataLocal.push({
-            key: t('流错误详情'),
-            value: (
-              <div style={{ maxWidth: 600, whiteSpace: 'pre-line', wordBreak: 'break-word', lineHeight: 1.6 }}>
-                {ss.errors.join('\n')}
-              </div>
-            ),
-          });
-        }
-      }
-      if (Array.isArray(other?.po) && other.po.length > 0) {
-        expandDataLocal.push({
-          key: t('参数覆盖'),
-          value: (
-            <ParamOverrideEntry
-              count={other.po.length}
-              t={t}
-              onOpen={(event) => {
-                event.stopPropagation();
-                openParamOverrideModal(logs[i], other);
-              }}
-            />
-          ),
         });
       }
       if (other?.billing_source === 'subscription') {
@@ -803,15 +650,10 @@ export const useLogsData = () => {
   };
 
   // Refresh function
-  const refresh = async (
-    page = 1,
-    { refreshStats = true } = {},
-  ) => {
-    setActivePage(page);
-    if (refreshStats) {
-      await handleEyeClick();
-    }
-    await loadLogs(page, pageSize);
+  const refresh = async () => {
+    setActivePage(1);
+    handleEyeClick();
+    await loadLogs(1, pageSize);
   };
 
   // Copy text function
@@ -885,20 +727,17 @@ export const useLogsData = () => {
     compactMode,
     setCompactMode,
 
-    // Edit user modal
-    showEditUser,
-    editingUser,
-    openEditUserPanel,
-    closeEditUserPanel,
+    // User info modal
+    showUserInfo,
+    setShowUserInfoModal,
+    userInfoData,
+    showUserInfoFunc,
 
     // Channel affinity usage cache stats modal
     showChannelAffinityUsageCacheModal,
     setShowChannelAffinityUsageCacheModal,
     channelAffinityUsageCacheTarget,
     openChannelAffinityUsageCacheModal,
-    showParamOverrideModal,
-    setShowParamOverrideModal,
-    paramOverrideTarget,
 
     // Functions
     loadLogs,
@@ -910,7 +749,6 @@ export const useLogsData = () => {
     setLogsFormat,
     hasExpandableRows,
     setLogType,
-    openParamOverrideModal,
 
     // Translation
     t,

@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import { useEffect } from 'react';
 
 const useFormFieldA11yPatch = (routeKey) => {
@@ -38,8 +57,9 @@ const useFormFieldA11yPatch = (routeKey) => {
 
     const getFieldLabelText = (element) => {
       const formField = element.closest('.semi-form-field');
-      const explicitLabel =
-        formField?.querySelector('.semi-form-field-label-text')?.textContent?.trim();
+      const explicitLabel = formField
+        ?.querySelector('.semi-form-field-label-text')
+        ?.textContent?.trim();
       if (explicitLabel) {
         return explicitLabel;
       }
@@ -73,12 +93,14 @@ const useFormFieldA11yPatch = (routeKey) => {
             element.setAttribute('name', `audit-hidden-textarea-${index + 1}`);
           });
 
-        document.querySelectorAll('[data-a11y-disable-autocomplete]').forEach((element) => {
-          if (!isVisibleField(element)) {
-            return;
-          }
-          element.setAttribute('autocomplete', 'off');
-        });
+        document
+          .querySelectorAll('[data-a11y-disable-autocomplete]')
+          .forEach((element) => {
+            if (!isVisibleField(element)) {
+              return;
+            }
+            element.setAttribute('autocomplete', 'off');
+          });
 
         document
           .querySelectorAll(
@@ -160,7 +182,11 @@ const useFormFieldA11yPatch = (routeKey) => {
             return;
           }
 
-          if (['input', 'textarea', 'select'].includes(target.tagName.toLowerCase())) {
+          if (
+            ['input', 'textarea', 'select'].includes(
+              target.tagName.toLowerCase(),
+            )
+          ) {
             return;
           }
 
@@ -194,7 +220,9 @@ const useFormFieldA11yPatch = (routeKey) => {
 
             if (
               control &&
-              ['input', 'textarea', 'select'].includes(control.tagName.toLowerCase())
+              ['input', 'textarea', 'select'].includes(
+                control.tagName.toLowerCase(),
+              )
             ) {
               const controlId = ensureFieldId(
                 control,
@@ -221,7 +249,9 @@ const useFormFieldA11yPatch = (routeKey) => {
               .filter(Boolean);
             const field = control.closest('.semi-form-field');
             const labelText =
-              field?.querySelector('.semi-form-field-label-text')?.textContent?.trim() ||
+              field
+                ?.querySelector('.semi-form-field-label-text')
+                ?.textContent?.trim() ||
               control.getAttribute('placeholder') ||
               control.getAttribute('name') ||
               control.id ||
