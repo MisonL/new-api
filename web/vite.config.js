@@ -79,8 +79,10 @@ export default defineConfig(({ command }) => {
             'react-core': ['react', 'react-dom', 'react-router-dom'],
             'semi-ui': ['@douyinfe/semi-icons', '@douyinfe/semi-ui'],
             tools: ['axios', 'history', 'marked'],
-            icons: ['@lobehub/icons', 'lucide-react', 'react-icons'],
-            markdown: [
+            'lobehub-icons': ['@lobehub/icons'],
+            'lucide-icons': ['lucide-react'],
+            'react-icons': ['react-icons'],
+            'markdown-core': [
               'react-markdown',
               'remark-breaks',
               'remark-gfm',
@@ -88,14 +90,16 @@ export default defineConfig(({ command }) => {
               'rehype-highlight',
               'rehype-katex',
               'katex',
-              'mermaid',
               'clsx',
               'use-debounce',
             ],
-            charts: [
+            mermaid: ['mermaid'],
+            visactor: [
               '@visactor/react-vchart',
               '@visactor/vchart',
               '@visactor/vchart-semi-theme',
+            ],
+            cytoscape: [
               'cytoscape',
             ],
             'react-components': [

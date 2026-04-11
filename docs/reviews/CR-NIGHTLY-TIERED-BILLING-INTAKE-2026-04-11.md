@@ -88,11 +88,11 @@ bun run build
 - 构建通过。
 - 已消除 `render.jsx` 中的 `const` 重新赋值告警。
 - 对 `App.jsx` 做页面级懒加载收口，避免控制台页面继续同步打进主入口。
-- 对 `vite.config.js` 增加 `icons`、`markdown`、`charts` vendor 分包规则。
+- 对 `vite.config.js` 增加并细化 vendor 分包规则，拆出 `lobehub-icons`、`lucide-icons`、`react-icons`、`markdown-core`、`mermaid`、`visactor`、`cytoscape`。
 - 构建后主应用 chunk 从约 `7.48 MB` 降到约 `1.39 MB`，入口负担显著下降。
 - 仍存在既有非阻塞告警：
   - `lottie-web` 使用 `eval`
-  - `icons` / `charts` / `semi-ui` / `markdown` 等 vendor chunk 仍超过 500 kB，但已从主入口分离
+  - `semi-ui`、`lobehub-icons`、`visactor` 等库级 vendor chunk 仍超过 500 kB，但已从主入口分离
 
 ## 结论
 
