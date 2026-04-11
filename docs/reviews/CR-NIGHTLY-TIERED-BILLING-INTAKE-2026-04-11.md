@@ -76,11 +76,15 @@ go test ./...
 ```bash
 cd web
 bun install
+bun run eslint
 bun run build
 ```
 
 结果：
 
+- ESLint 通过。
+- 补充 `.eslintignore`，避免将 `dist/` 产物纳入源码门禁。
+- 为 nightly 吸纳引入的前端源码文件补齐标准许可证头注释。
 - 构建通过。
 - 已消除 `render.jsx` 中的 `const` 重新赋值告警。
 - 仍存在既有非阻塞告警：
