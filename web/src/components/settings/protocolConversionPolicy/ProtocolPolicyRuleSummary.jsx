@@ -100,7 +100,8 @@ export default function ProtocolPolicyRuleSummary({
       >
         <Button
           size='small'
-          type={isExpanded ? 'tertiary' : 'secondary'}
+          type={isExpanded ? 'tertiary' : 'primary'}
+          theme={isExpanded ? 'light' : 'solid'}
           onClick={() => toggleRuleExpanded(ruleKey)}
         >
           {isExpanded ? t('收起编辑') : t('编辑规则')}

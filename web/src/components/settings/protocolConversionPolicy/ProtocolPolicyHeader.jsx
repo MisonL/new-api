@@ -18,10 +18,18 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Button, Select, Tag, Typography } from '@douyinfe/semi-ui';
+import { Button, Radio, RadioGroup, Tag, Typography } from '@douyinfe/semi-ui';
 import { EDIT_MODE_JSON, EDIT_MODE_VISUAL, panelStyle } from './constants';
 
 const { Text } = Typography;
+
+const selectionFieldStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  flex: '1 1 220px',
+  minWidth: 180,
+};
 
 function RuleStats({
   enabledRuleCount,
@@ -61,13 +69,23 @@ function ModeControls({
 }) {
   return (
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      <div style={{ flex: '1 1 220px', minWidth: 180 }}>
-        <Select
-          optionList={editModeOptions}
+      <div style={selectionFieldStyle}>
+        <Text strong size='small'>
+          {t('编辑模式')}
+        </Text>
+        <RadioGroup
+          aria-label={t('编辑模式')}
+          direction='horizontal'
+          name='protocol-policy-edit-mode'
           value={editMode}
-          onChange={handleEditModeChange}
-          insetLabel={t('编辑模式')}
-        />
+          onChange={(event) => handleEditModeChange(event.target.value)}
+        >
+          {editModeOptions.map((option) => (
+            <Radio key={option.value} value={option.value}>
+              {option.label}
+            </Radio>
+          ))}
+        </RadioGroup>
       </div>
       {editMode === EDIT_MODE_JSON ? (
         <Button type='secondary' onClick={formatJsonValue}>
@@ -93,17 +111,27 @@ function VisualControls({
   }
   return (
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      <div style={{ flex: '1 1 220px', minWidth: 180 }}>
-        <Select
-          optionList={newRuleTemplateOptions}
+      <div style={selectionFieldStyle}>
+        <Text strong size='small'>
+          {t('新增模板')}
+        </Text>
+        <RadioGroup
+          aria-label={t('新增模板')}
+          direction='horizontal'
+          name='protocol-policy-rule-template'
           value={newRuleTemplateType}
-          onChange={(nextValue) =>
-            setNewRuleTemplateType(nextValue || newRuleTemplateType)
+          onChange={(event) =>
+            setNewRuleTemplateType(event.target.value || newRuleTemplateType)
           }
-          insetLabel={t('新增模板')}
-        />
+        >
+          {newRuleTemplateOptions.map((option) => (
+            <Radio key={option.value} value={option.value}>
+              {option.label}
+            </Radio>
+          ))}
+        </RadioGroup>
       </div>
-      <Button type='secondary' onClick={addRuleByTemplateType}>
+      <Button type='primary' theme='solid' onClick={addRuleByTemplateType}>
         {t('新增规则')}
       </Button>
       {rules.length > 1 ? (
