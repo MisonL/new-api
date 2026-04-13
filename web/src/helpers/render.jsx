@@ -1247,6 +1247,9 @@ function joinBillingSummary(parts) {
 
 function getGroupRatioText(groupRatio, user_group_ratio) {
   const { ratio, label } = getEffectiveRatio(groupRatio, user_group_ratio);
+  if (!Number.isFinite(Number(ratio))) {
+    return null;
+  }
   return i18next.t('{{ratioType}} {{ratio}}x', {
     ratioType: label,
     ratio,
@@ -1325,6 +1328,7 @@ function renderPriceSimpleCore({
     user_group_ratio,
   );
   const finalGroupRatio = effectiveGroupRatio;
+  const hasModelRatio = Number.isFinite(Number(modelRatio));
 
   const { symbol, rate } = getCurrencyConfig();
   const hasSplitCacheCreation =
@@ -1356,7 +1360,7 @@ function renderPriceSimpleCore({
             })
           : i18next.t('按次'),
       });
-    } else if (isPriceDisplayMode(displayMode, modelPrice)) {
+    } else if (isPriceDisplayMode(displayMode, modelPrice) && hasModelRatio) {
       segments.push({
         tone: 'secondary',
         text: i18next.t('输入 {{price}} / 1M tokens', {
@@ -1412,7 +1416,7 @@ function renderPriceSimpleCore({
           }),
         });
       }
-    } else {
+    } else if (hasModelRatio) {
       segments.push({
         tone: 'secondary',
         text: i18next.t('模型: {{ratio}}', {
@@ -1516,13 +1520,15 @@ function renderPriceSimpleCore({
       return joinBillingSummary(parts);
     }
 
-    parts.push(
-      i18next.t('输入 {{price}} / 1M tokens', {
-        price: formatCompactDisplayPrice(modelRatio * 2.0),
-      }),
-    );
+    if (hasModelRatio) {
+      parts.push(
+        i18next.t('输入 {{price}} / 1M tokens', {
+          price: formatCompactDisplayPrice(modelRatio * 2.0),
+        }),
+      );
+    }
 
-    if (shouldShowCache) {
+    if (hasModelRatio && shouldShowCache) {
       parts.push(
         i18next.t('缓存读 {{price}} / 1M tokens', {
           price: formatCompactDisplayPrice(modelRatio * 2.0 * cacheRatio),
@@ -1530,7 +1536,7 @@ function renderPriceSimpleCore({
       );
     }
 
-    if (hasSplitCacheCreation && shouldShowCacheCreation5m) {
+    if (hasModelRatio && hasSplitCacheCreation && shouldShowCacheCreation5m) {
       parts.push(
         i18next.t('5m缓存创建 {{price}} / 1M tokens', {
           price: formatCompactDisplayPrice(
@@ -1539,7 +1545,7 @@ function renderPriceSimpleCore({
         }),
       );
     }
-    if (hasSplitCacheCreation && shouldShowCacheCreation1h) {
+    if (hasModelRatio && hasSplitCacheCreation && shouldShowCacheCreation1h) {
       parts.push(
         i18next.t('1h缓存创建 {{price}} / 1M tokens', {
           price: formatCompactDisplayPrice(
@@ -1548,7 +1554,7 @@ function renderPriceSimpleCore({
         }),
       );
     }
-    if (!hasSplitCacheCreation && shouldShowLegacyCacheCreation) {
+    if (hasModelRatio && !hasSplitCacheCreation && shouldShowLegacyCacheCreation) {
       parts.push(
         i18next.t('缓存创建 {{price}} / 1M tokens', {
           price: formatCompactDisplayPrice(
@@ -1558,7 +1564,7 @@ function renderPriceSimpleCore({
       );
     }
 
-    if (image) {
+    if (hasModelRatio && image) {
       parts.push(
         i18next.t('图片输入 {{price}} / 1M tokens', {
           price: formatCompactDisplayPrice(modelRatio * 2.0 * imageRatio),
@@ -1577,7 +1583,13 @@ function renderPriceSimpleCore({
 
   const parts = [];
   // base: model ratio
-  parts.push(i18next.t('模型: {{ratio}}'));
+  if (hasModelRatio) {
+    parts.push(
+      i18next.t('模型: {{ratio}}', {
+        ratio: modelRatio,
+      }),
+    );
+  }
 
   // cache part (label differs when with image)
   if (shouldShowCache) {

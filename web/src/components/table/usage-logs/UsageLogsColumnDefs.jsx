@@ -144,14 +144,21 @@ function renderType(type, t) {
 
 function buildStreamStatusTooltip(ss, t) {
   if (!ss) return null;
-  const lines = [
-    t('流状态') + '：' + t('异常'),
-    (ss.end_reason || 'unknown'),
-  ];
+  const isCanceled =
+    ss.status === 'canceled' || ss.end_reason === 'client_gone';
+  const statusLabel = isCanceled ? t('已取消') : t('异常');
+  const reasonLabel = isCanceled ? t('客户端已断开') : ss.end_reason || 'unknown';
+  const lines = [t('流状态') + '：' + statusLabel, reasonLabel];
   if (ss.error_count > 0) {
     lines.push(`${t('软错误')}: ${ss.error_count}`);
   }
-  if (ss.end_error) {
+  const normalizedEndError = String(ss.end_error || '').trim().toLowerCase();
+  const shouldShowEndError =
+    ss.end_error &&
+    (!isCanceled ||
+      (normalizedEndError !== 'context canceled' &&
+        normalizedEndError !== 'context cancelled'));
+  if (shouldShowEndError) {
     lines.push(ss.end_error);
   }
   return (
@@ -164,7 +171,16 @@ function buildStreamStatusTooltip(ss, t) {
 }
 
 function renderIsStream(bool, t, streamStatus) {
-  const isError = streamStatus && streamStatus.status !== 'ok';
+  const indicatorKind = !streamStatus
+    ? 'ok'
+    : streamStatus.status === 'canceled' ||
+        streamStatus.end_reason === 'client_gone'
+      ? 'canceled'
+      : streamStatus.status !== 'ok'
+        ? 'error'
+        : 'ok';
+  const shouldShowIndicator = indicatorKind !== 'ok';
+  const indicatorColor = indicatorKind === 'error' ? '#ef4444' : '#f59e0b';
 
   if (bool) {
     return (
@@ -172,7 +188,7 @@ function renderIsStream(bool, t, streamStatus) {
         <Tag color='blue' shape='circle'>
           {t('流')}
         </Tag>
-        {isError && (
+        {shouldShowIndicator && (
           <Tooltip content={buildStreamStatusTooltip(streamStatus, t)}>
             <span
               style={{
@@ -180,7 +196,7 @@ function renderIsStream(bool, t, streamStatus) {
                 right: -4,
                 top: -4,
                 lineHeight: 1,
-                color: '#ef4444',
+                color: indicatorColor,
                 cursor: 'pointer',
                 userSelect: 'none',
               }}

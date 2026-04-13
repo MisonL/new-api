@@ -3438,6 +3438,8 @@
     "含请求条件": "Request rules",
     "输入": "Input",
     "输出": "Output",
+    "已取消": "Canceled",
+    "客户端已断开": "Client disconnected",
     "档": "tiers"
   }
 }

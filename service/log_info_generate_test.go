@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -43,4 +44,39 @@ func TestGenerateTextOtherInfoIncludesValidFirstResponseLatency(t *testing.T) {
 
 	other := GenerateTextOtherInfo(ctx, relayInfo, 1, 1, 1, 0, 0, -1, -1)
 	require.Equal(t, 1500.0, other["frt"])
+}
+
+func TestAppendStreamStatusCategorizesClientGoneAsCanceled(t *testing.T) {
+	ss := relaycommon.NewStreamStatus()
+	ss.SetEndReason(relaycommon.StreamEndReasonClientGone, context.Canceled)
+
+	other := make(map[string]interface{})
+	appendStreamStatus(&relaycommon.RelayInfo{
+		IsStream:     true,
+		StreamStatus: ss,
+	}, other)
+
+	streamInfo, ok := other["stream_status"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "canceled", streamInfo["status"])
+	require.Equal(t, "client_gone", streamInfo["end_reason"])
+	require.Equal(t, context.Canceled.Error(), streamInfo["end_error"])
+}
+
+func TestAppendStreamStatusKeepsSoftErroredClientGoneAsError(t *testing.T) {
+	ss := relaycommon.NewStreamStatus()
+	ss.RecordError("upstream warning")
+	ss.SetEndReason(relaycommon.StreamEndReasonClientGone, context.Canceled)
+
+	other := make(map[string]interface{})
+	appendStreamStatus(&relaycommon.RelayInfo{
+		IsStream:     true,
+		StreamStatus: ss,
+	}, other)
+
+	streamInfo, ok := other["stream_status"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "error", streamInfo["status"])
+	require.Equal(t, "client_gone", streamInfo["end_reason"])
+	require.Equal(t, 1, streamInfo["error_count"])
 }

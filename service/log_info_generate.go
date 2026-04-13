@@ -96,10 +96,7 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 		return
 	}
 	ss := relayInfo.StreamStatus
-	status := "ok"
-	if !ss.IsNormalEnd() || ss.HasErrors() {
-		status = "error"
-	}
+	status := classifyStreamStatus(ss)
 	streamInfo := map[string]interface{}{
 		"status":     status,
 		"end_reason": string(ss.EndReason),
@@ -116,6 +113,19 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 		streamInfo["errors"] = messages
 	}
 	other["stream_status"] = streamInfo
+}
+
+func classifyStreamStatus(ss *relaycommon.StreamStatus) string {
+	if ss == nil {
+		return "ok"
+	}
+	if ss.EndReason == relaycommon.StreamEndReasonClientGone && !ss.HasErrors() {
+		return "canceled"
+	}
+	if !ss.IsNormalEnd() || ss.HasErrors() {
+		return "error"
+	}
+	return "ok"
 }
 
 func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
