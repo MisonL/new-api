@@ -453,7 +453,8 @@ const TwoFASetting = ({ t }) => {
       </Card>
 
       {/* 2FA设置模态框 */}
-      <Modal
+      {setupModalVisible ? (
+        <Modal
         title={
           <div className='flex items-center'>
             <IconShield className='mr-2 text-slate-600' />
@@ -542,10 +543,12 @@ const TwoFASetting = ({ t }) => {
             </div>
           </div>
         )}
-      </Modal>
+        </Modal>
+      ) : null}
 
       {/* 禁用2FA模态框 */}
-      <Modal
+      {disableModalVisible ? (
+        <Modal
         title={
           <div className='flex items-center'>
             <IconAlertTriangle className='mr-2 text-red-500' />
@@ -638,10 +641,12 @@ const TwoFASetting = ({ t }) => {
             </div>
           </div>
         </div>
-      </Modal>
+        </Modal>
+      ) : null}
 
       {/* 重新生成备用码模态框 */}
-      <Modal
+      {backupModalVisible ? (
+        <Modal
         title={
           <div className='flex items-center'>
             <IconRefresh className='mr-2 text-slate-600' />
@@ -719,7 +724,8 @@ const TwoFASetting = ({ t }) => {
             </>
           )}
         </div>
-      </Modal>
+        </Modal>
+      ) : null}
     </>
   );
 };

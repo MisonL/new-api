@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   Button,
-  Collapsible,
   Input,
   Select,
   Tag,
@@ -144,8 +143,14 @@ function UsableGroupSection({ groupName, items, opOptions, onUpdate, onRemove, o
           </Popconfirm>
         </div>
       </div>
-      <Collapsible isOpen={open} keepDOM>
-        <div style={{ padding: '8px 12px' }}>
+      <div
+        style={{
+          maxHeight: open ? '1000px' : 0,
+          overflow: 'hidden',
+          transition: 'max-height 0.2s ease',
+        }}
+      >
+        <div style={{ padding: open ? '8px 12px' : '0 12px' }}>
           {items.map((rule) => (
             <div
               key={rule._id}
@@ -153,6 +158,7 @@ function UsableGroupSection({ groupName, items, opOptions, onUpdate, onRemove, o
               style={{ marginBottom: 6 }}
             >
               <Select
+                id={`group-special-op-${rule._id}`}
                 size='small'
                 value={rule.op}
                 optionList={opOptions}
@@ -164,6 +170,8 @@ function UsableGroupSection({ groupName, items, opOptions, onUpdate, onRemove, o
                 }}
               />
               <Input
+                id={`group-special-target-${rule._id}`}
+                name={`group-special-target-${rule._id}`}
                 size='small'
                 value={rule.targetGroup}
                 placeholder={t('分组名称')}
@@ -172,6 +180,8 @@ function UsableGroupSection({ groupName, items, opOptions, onUpdate, onRemove, o
               />
               {rule.op !== OP_REMOVE ? (
                 <Input
+                  id={`group-special-description-${rule._id}`}
+                  name={`group-special-description-${rule._id}`}
                   size='small'
                   value={rule.description}
                   placeholder={t('分组描述')}
@@ -198,7 +208,7 @@ function UsableGroupSection({ groupName, items, opOptions, onUpdate, onRemove, o
             </div>
           ))}
         </div>
-      </Collapsible>
+      </div>
     </div>
   );
 }

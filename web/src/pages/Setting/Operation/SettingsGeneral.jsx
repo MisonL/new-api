@@ -280,6 +280,30 @@ export default function GeneralSettings(props) {
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <span
+                  id='general_setting.quota_display_type-option-0'
+                  className='sr-only'
+                >
+                  USD ($)
+                </span>
+                <span
+                  id='general_setting.quota_display_type-option-1'
+                  className='sr-only'
+                >
+                  CNY (¥)
+                </span>
+                <span
+                  id='general_setting.quota_display_type-option-2'
+                  className='sr-only'
+                >
+                  Tokens
+                </span>
+                <span
+                  id='general_setting.quota_display_type-option-3'
+                  className='sr-only'
+                >
+                  {t('自定义货币')}
+                </span>
                 <Form.Select
                   field='general_setting.quota_display_type'
                   label={t('额度展示类型')}

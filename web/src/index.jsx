@@ -41,6 +41,88 @@ if (typeof window !== 'undefined') {
     'color: #10b981; font-weight: bold; font-size: 24px;',
     'color: inherit; font-size: 14px;',
   );
+
+  const startGlobalFieldIdentityPatch = () => {
+    if (window.__newApiFieldIdentityPatchStarted) {
+      return;
+    }
+
+    window.__newApiFieldIdentityPatchStarted = true;
+    window.__newApiFieldIdentityPatchVersion = '2026-04-12-1';
+
+    let generatedCounter = 0;
+    const toStableToken = (value, fallback) => {
+      const token = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+      return token || fallback;
+    };
+
+    const patchFields = () => {
+      if (!document.body) {
+        return;
+      }
+
+      document
+        .querySelectorAll('input:not([type="hidden"]), textarea, select')
+        .forEach((element) => {
+          if (!element.id) {
+            generatedCounter += 1;
+            const source =
+              element.getAttribute('data-insp-path') ||
+              element.getAttribute('aria-label') ||
+              element.getAttribute('placeholder') ||
+              element.getAttribute('type') ||
+              element.tagName.toLowerCase();
+            element.id = `global-field-${toStableToken(source, 'field')}-${generatedCounter}`;
+          }
+
+          if (!element.getAttribute('name')) {
+            element.setAttribute('name', element.id);
+          }
+        });
+    };
+
+    const schedulePatch = () => {
+      window.requestAnimationFrame(() => {
+        patchFields();
+      });
+    };
+
+    patchFields();
+    window.setTimeout(schedulePatch, 0);
+    window.setTimeout(schedulePatch, 300);
+    window.setTimeout(schedulePatch, 1000);
+    window.setTimeout(schedulePatch, 2000);
+    window.setTimeout(schedulePatch, 4000);
+    window.setInterval(schedulePatch, 800);
+
+    const observer = new MutationObserver(() => {
+      schedulePatch();
+    });
+
+    const startObserve = () => {
+      if (!document.body) {
+        return;
+      }
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'value', 'checked', 'placeholder'],
+      });
+    };
+
+    if (document.body) {
+      startObserve();
+    } else {
+      window.addEventListener('DOMContentLoaded', startObserve, { once: true });
+    }
+  };
+
+  startGlobalFieldIdentityPatch();
 }
 
 function SemiLocaleWrapper({ children }) {
@@ -54,9 +136,11 @@ function SemiLocaleWrapper({ children }) {
 
 // initialization
 
+const RootWrapper = import.meta.env.DEV ? React.Fragment : React.StrictMode;
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
-  <React.StrictMode>
+  <RootWrapper>
     <StatusProvider>
       <UserProvider>
         <BrowserRouter
@@ -73,5 +157,5 @@ root.render(
         </BrowserRouter>
       </UserProvider>
     </StatusProvider>
-  </React.StrictMode>,
+  </RootWrapper>,
 );

@@ -53,7 +53,7 @@ const CardPro = ({
   searchArea,
   paginationArea, // 新增分页区域
   // 卡片属性
-  shadows = '',
+  shadows,
   bordered = true,
   // 自定义样式
   style,
@@ -157,13 +157,15 @@ const CardPro = ({
   };
 
   const footerContent = renderFooter();
+  const normalizedShadows =
+    shadows === 'hover' || shadows === 'always' ? shadows : undefined;
 
   return (
     <Card
       className={`table-scroll-card !rounded-2xl ${className}`}
       title={headerContent}
       footer={footerContent}
-      shadows={shadows}
+      shadows={normalizedShadows}
       bordered={bordered}
       style={style}
       {...props}
@@ -179,7 +181,7 @@ CardPro.propTypes = {
   // 样式相关
   className: PropTypes.string,
   style: PropTypes.object,
-  shadows: PropTypes.oneOfType([PropTypes.string, PropTypes.bool]),
+  shadows: PropTypes.oneOf(['hover', 'always']),
   bordered: PropTypes.bool,
   // 内容区域
   statsArea: PropTypes.node,

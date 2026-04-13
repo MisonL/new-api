@@ -249,12 +249,16 @@ export default function ModelPricingEditor({
   const rowSelection = {
     selectedRowKeys: selectedModelNames,
     onChange: (selectedRowKeys) => setSelectedModelNames(selectedRowKeys),
+    getCheckboxProps: (record) => ({
+      name: `model-pricing-select-${record.name}`,
+    }),
   };
 
   return (
     <>
-      <Space vertical align='start' style={{ width: '100%' }}>
-        <Space wrap className='mt-2'>
+      <div style={{ width: '100%' }}>
+        <Space vertical align='start' style={{ width: '100%' }}>
+          <Space wrap className='mt-2'>
           {allowAddModel ? (
             <Button
               icon={<IconPlus />}
@@ -301,35 +305,35 @@ export default function ModelPricingEditor({
           ) : null}
         </Space>
 
-        {listDescription ? (
-          <div className='text-sm text-gray-500'>{listDescription}</div>
-        ) : null}
-        {selectedModelNames.length > 0 ? (
+          {listDescription ? (
+            <div className='text-sm text-gray-500'>{listDescription}</div>
+          ) : null}
+          {selectedModelNames.length > 0 ? (
+            <div
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: 8,
+                background: 'var(--semi-color-primary-light-default)',
+                border: '1px solid var(--semi-color-primary)',
+                color: 'var(--semi-color-primary)',
+                fontWeight: 600,
+              }}
+            >
+              {t('已勾选 {{count}} 个模型', { count: selectedModelNames.length })}
+            </div>
+          ) : null}
+
           <div
             style={{
               width: '100%',
-              padding: '10px 12px',
-              borderRadius: 8,
-              background: 'var(--semi-color-primary-light-default)',
-              border: '1px solid var(--semi-color-primary)',
-              color: 'var(--semi-color-primary)',
-              fontWeight: 600,
+              display: 'grid',
+              gap: 16,
+              gridTemplateColumns: isMobile
+                ? 'minmax(0, 1fr)'
+                : 'minmax(300px, 0.8fr) minmax(480px, 1.2fr)',
             }}
           >
-            {t('已勾选 {{count}} 个模型', { count: selectedModelNames.length })}
-          </div>
-        ) : null}
-
-        <div
-          style={{
-            width: '100%',
-            display: 'grid',
-            gap: 16,
-            gridTemplateColumns: isMobile
-              ? 'minmax(0, 1fr)'
-              : 'minmax(300px, 0.8fr) minmax(480px, 1.2fr)',
-          }}
-        >
           <Card
             bodyStyle={{ padding: 0 }}
             style={isMobile ? { order: 2 } : undefined}
@@ -507,11 +511,11 @@ export default function ModelPricingEditor({
                               selectedModel,
                               'completionPrice',
                             )}
+                            name='model-pricing-switch-completion-price'
                             disabled={selectedModel.completionRatioLocked}
                             onChange={(checked) =>
                               handleOptionalFieldToggle('completionPrice', checked)
                             }
-                            id='pages-setting-ratio-components-modelpricingeditor-switch-1'
                           />
                         }
                         hidden={
@@ -546,10 +550,10 @@ export default function ModelPricingEditor({
                           <Switch
                             size='small'
                             checked={isOptionalFieldEnabled(selectedModel, 'cachePrice')}
+                            name='model-pricing-switch-cache-price'
                             onChange={(checked) =>
                               handleOptionalFieldToggle('cachePrice', checked)
                             }
-                            id='pages-setting-ratio-components-modelpricingeditor-switch-2'
                           />
                         }
                         hidden={!isOptionalFieldEnabled(selectedModel, 'cachePrice')}
@@ -574,10 +578,10 @@ export default function ModelPricingEditor({
                               selectedModel,
                               'createCachePrice',
                             )}
+                            name='model-pricing-switch-create-cache-price'
                             onChange={(checked) =>
                               handleOptionalFieldToggle('createCachePrice', checked)
                             }
-                            id='pages-setting-ratio-components-modelpricingeditor-switch-3'
                           />
                         }
                         hidden={
@@ -617,10 +621,10 @@ export default function ModelPricingEditor({
                           <Switch
                             size='small'
                             checked={isOptionalFieldEnabled(selectedModel, 'imagePrice')}
+                            name='model-pricing-switch-image-price'
                             onChange={(checked) =>
                               handleOptionalFieldToggle('imagePrice', checked)
                             }
-                            id='pages-setting-ratio-components-modelpricingeditor-switch-4'
                           />
                         }
                         hidden={!isOptionalFieldEnabled(selectedModel, 'imagePrice')}
@@ -645,10 +649,10 @@ export default function ModelPricingEditor({
                               selectedModel,
                               'audioInputPrice',
                             )}
+                            name='model-pricing-switch-audio-input-price'
                             onChange={(checked) =>
                               handleOptionalFieldToggle('audioInputPrice', checked)
                             }
-                            id='pages-setting-ratio-components-modelpricingeditor-switch-5'
                           />
                         }
                         hidden={!isOptionalFieldEnabled(selectedModel, 'audioInputPrice')}
@@ -676,6 +680,7 @@ export default function ModelPricingEditor({
                               selectedModel,
                               'audioOutputPrice',
                             )}
+                            name='model-pricing-switch-audio-output-price'
                             disabled={!isOptionalFieldEnabled(
                               selectedModel,
                               'audioInputPrice',
@@ -683,7 +688,6 @@ export default function ModelPricingEditor({
                             onChange={(checked) =>
                               handleOptionalFieldToggle('audioOutputPrice', checked)
                             }
-                            id='pages-setting-ratio-components-modelpricingeditor-switch-6'
                           />
                         }
                         hidden={
@@ -736,10 +740,11 @@ export default function ModelPricingEditor({
               </div>
             )}
           </Card>
-        </div>
-      </Space>
+          </div>
+        </Space>
+      </div>
 
-      {allowAddModel ? (
+      {allowAddModel && addVisible ? (
         <Modal
           title={t('添加模型')}
           visible={addVisible}
@@ -758,35 +763,37 @@ export default function ModelPricingEditor({
         </Modal>
       ) : null}
 
-      <Modal
-        title={t('批量应用当前模型价格')}
-        visible={batchVisible}
-        onCancel={() => setBatchVisible(false)}
-        onOk={() => {
-          if (applySelectedModelPricing()) {
-            setBatchVisible(false);
-          }
-        }}
-      >
-        <div className='text-sm text-gray-600'>
-          {selectedModel
-            ? t(
-                '将把当前编辑中的模型 {{name}} 的价格配置，批量应用到已勾选的 {{count}} 个模型。',
-                {
-                  name: selectedModel.name,
-                  count: selectedModelNames.length,
-                },
-              )
-            : t('请先选择一个作为模板的模型')}
-        </div>
-        {selectedModel ? (
-          <div className='text-xs text-gray-500 mt-3'>
-            {t(
-              '适合同系列模型一起定价，例如把 gpt-5.1 的价格批量同步到 gpt-5.1-high、gpt-5.1-low 等模型。',
-            )}
+      {batchVisible ? (
+        <Modal
+          title={t('批量应用当前模型价格')}
+          visible={batchVisible}
+          onCancel={() => setBatchVisible(false)}
+          onOk={() => {
+            if (applySelectedModelPricing()) {
+              setBatchVisible(false);
+            }
+          }}
+        >
+          <div className='text-sm text-gray-600'>
+            {selectedModel
+              ? t(
+                  '将把当前编辑中的模型 {{name}} 的价格配置，批量应用到已勾选的 {{count}} 个模型。',
+                  {
+                    name: selectedModel.name,
+                    count: selectedModelNames.length,
+                  },
+                )
+              : t('请先选择一个作为模板的模型')}
           </div>
-        ) : null}
-      </Modal>
+          {selectedModel ? (
+            <div className='text-xs text-gray-500 mt-3'>
+              {t(
+                '适合同系列模型一起定价，例如把 gpt-5.1 的价格批量同步到 gpt-5.1-high、gpt-5.1-low 等模型。',
+              )}
+            </div>
+          ) : null}
+        </Modal>
+      ) : null}
     </>
   );
 }

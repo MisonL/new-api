@@ -860,35 +860,39 @@ export default function UpstreamRatioSync(props) {
         {renderDifferenceTable()}
       </Form.Section>
 
-      <ChannelSelectorModal
-        ref={channelSelectorRef}
-        t={t}
-        visible={modalVisible}
-        onCancel={handleModalClose}
-        onOk={confirmChannelSelection}
-        allChannels={allChannels}
-        selectedChannelIds={selectedChannelIds}
-        setSelectedChannelIds={setSelectedChannelIds}
-        channelEndpoints={channelEndpoints}
-        updateChannelEndpoint={updateChannelEndpoint}
-      />
+      {modalVisible ? (
+        <ChannelSelectorModal
+          ref={channelSelectorRef}
+          t={t}
+          visible={modalVisible}
+          onCancel={handleModalClose}
+          onOk={confirmChannelSelection}
+          allChannels={allChannels}
+          selectedChannelIds={selectedChannelIds}
+          setSelectedChannelIds={setSelectedChannelIds}
+          channelEndpoints={channelEndpoints}
+          updateChannelEndpoint={updateChannelEndpoint}
+        />
+      ) : null}
 
-      <ConflictConfirmModal
-        t={t}
-        visible={confirmVisible}
-        items={conflictItems}
-        onOk={async () => {
-          setConfirmVisible(false);
-          const curRatios = {
-            ModelRatio: JSON.parse(props.options.ModelRatio || '{}'),
-            CompletionRatio: JSON.parse(props.options.CompletionRatio || '{}'),
-            CacheRatio: JSON.parse(props.options.CacheRatio || '{}'),
-            ModelPrice: JSON.parse(props.options.ModelPrice || '{}'),
-          };
-          await performSync(curRatios);
-        }}
-        onCancel={() => setConfirmVisible(false)}
-      />
+      {confirmVisible ? (
+        <ConflictConfirmModal
+          t={t}
+          visible={confirmVisible}
+          items={conflictItems}
+          onOk={async () => {
+            setConfirmVisible(false);
+            const curRatios = {
+              ModelRatio: JSON.parse(props.options.ModelRatio || '{}'),
+              CompletionRatio: JSON.parse(props.options.CompletionRatio || '{}'),
+              CacheRatio: JSON.parse(props.options.CacheRatio || '{}'),
+              ModelPrice: JSON.parse(props.options.ModelPrice || '{}'),
+            };
+            await performSync(curRatios);
+          }}
+          onCancel={() => setConfirmVisible(false)}
+        />
+      ) : null}
     </>
   );
 }

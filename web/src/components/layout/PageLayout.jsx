@@ -145,7 +145,7 @@ const PageLayout = () => {
     }
   }, [i18n, userState?.user?.setting]);
 
-  useFormFieldA11yPatch(location.pathname);
+  useFormFieldA11yPatch(`${location.pathname}${location.search}`);
 
   return (
     <Layout

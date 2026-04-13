@@ -27,7 +27,6 @@ import {
   Avatar,
   Tabs,
   TabPane,
-  Popover,
   Modal,
 } from '@douyinfe/semi-ui';
 import {
@@ -77,23 +76,13 @@ const AccountManagement = ({
       return <span className='text-gray-500'>{t('未绑定')}</span>;
     }
 
-    const popContent = (
-      <div className='text-xs p-2'>
-        <Typography.Paragraph copyable={{ content: accountId }}>
-          {accountId}
-        </Typography.Paragraph>
-        {label ? (
-          <div className='mt-1 text-[11px] text-gray-500'>{label}</div>
-        ) : null}
-      </div>
-    );
-
     return (
-      <Popover content={popContent} position='top' trigger='hover'>
-        <span className='block max-w-full truncate text-gray-600 hover:text-blue-600 cursor-pointer'>
-          {accountId}
-        </span>
-      </Popover>
+      <span
+        title={label ? `${label}: ${accountId}` : accountId}
+        className='block max-w-full truncate text-gray-600 hover:text-blue-600 cursor-pointer'
+      >
+        {accountId}
+      </span>
     );
   };
   const isBound = (accountId) => Boolean(accountId);
@@ -478,24 +467,26 @@ const AccountManagement = ({
                   </div>
                 </div>
               </Card>
-              <Modal
-                title={t('绑定 Telegram')}
-                visible={showTelegramBindModal}
-                onCancel={() => setShowTelegramBindModal(false)}
-                footer={null}
-              >
-                <div className='my-3 text-sm text-gray-600'>
-                  {t('点击下方按钮通过 Telegram 完成绑定')}
-                </div>
-                <div className='flex justify-center'>
-                  <div className='scale-90'>
-                    <TelegramLoginButton
-                      dataAuthUrl='/api/oauth/telegram/bind'
-                      botName={status.telegram_bot_name}
-                    />
+              {showTelegramBindModal ? (
+                <Modal
+                  title={t('绑定 Telegram')}
+                  visible={showTelegramBindModal}
+                  onCancel={() => setShowTelegramBindModal(false)}
+                  footer={null}
+                >
+                  <div className='my-3 text-sm text-gray-600'>
+                    {t('点击下方按钮通过 Telegram 完成绑定')}
                   </div>
-                </div>
-              </Modal>
+                  <div className='flex justify-center'>
+                    <div className='scale-90'>
+                      <TelegramLoginButton
+                        dataAuthUrl='/api/oauth/telegram/bind'
+                        botName={status.telegram_bot_name}
+                      />
+                    </div>
+                  </div>
+                </Modal>
+              ) : null}
 
               {/* LinuxDO绑定 */}
               <Card className='!rounded-xl'>

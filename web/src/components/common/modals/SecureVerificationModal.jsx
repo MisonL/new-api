@@ -156,7 +156,7 @@ const SecureVerificationModal = ({
           activeKey={method}
           onChange={onMethodSwitch}
           type='line'
-          size='default'
+          size='medium'
           style={{ margin: 0 }}
         >
           {has2FA && (

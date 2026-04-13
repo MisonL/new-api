@@ -506,56 +506,64 @@ const PersonalSetting = () => {
       </div>
 
       {/* 模态框组件 */}
-      <EmailBindModal
-        t={t}
-        showEmailBindModal={showEmailBindModal}
-        setShowEmailBindModal={setShowEmailBindModal}
-        inputs={inputs}
-        handleInputChange={handleInputChange}
-        sendVerificationCode={sendVerificationCode}
-        bindEmail={bindEmail}
-        disableButton={disableButton}
-        loading={loading}
-        countdown={countdown}
-        turnstileEnabled={turnstileEnabled}
-        turnstileSiteKey={turnstileSiteKey}
-        setTurnstileToken={setTurnstileToken}
-      />
+      {showEmailBindModal ? (
+        <EmailBindModal
+          t={t}
+          showEmailBindModal={showEmailBindModal}
+          setShowEmailBindModal={setShowEmailBindModal}
+          inputs={inputs}
+          handleInputChange={handleInputChange}
+          sendVerificationCode={sendVerificationCode}
+          bindEmail={bindEmail}
+          disableButton={disableButton}
+          loading={loading}
+          countdown={countdown}
+          turnstileEnabled={turnstileEnabled}
+          turnstileSiteKey={turnstileSiteKey}
+          setTurnstileToken={setTurnstileToken}
+        />
+      ) : null}
 
-      <WeChatBindModal
-        t={t}
-        showWeChatBindModal={showWeChatBindModal}
-        setShowWeChatBindModal={setShowWeChatBindModal}
-        inputs={inputs}
-        handleInputChange={handleInputChange}
-        bindWeChat={bindWeChat}
-        status={status}
-      />
+      {showWeChatBindModal ? (
+        <WeChatBindModal
+          t={t}
+          showWeChatBindModal={showWeChatBindModal}
+          setShowWeChatBindModal={setShowWeChatBindModal}
+          inputs={inputs}
+          handleInputChange={handleInputChange}
+          bindWeChat={bindWeChat}
+          status={status}
+        />
+      ) : null}
 
-      <AccountDeleteModal
-        t={t}
-        showAccountDeleteModal={showAccountDeleteModal}
-        setShowAccountDeleteModal={setShowAccountDeleteModal}
-        inputs={inputs}
-        handleInputChange={handleInputChange}
-        deleteAccount={deleteAccount}
-        userState={userState}
-        turnstileEnabled={turnstileEnabled}
-        turnstileSiteKey={turnstileSiteKey}
-        setTurnstileToken={setTurnstileToken}
-      />
+      {showAccountDeleteModal ? (
+        <AccountDeleteModal
+          t={t}
+          showAccountDeleteModal={showAccountDeleteModal}
+          setShowAccountDeleteModal={setShowAccountDeleteModal}
+          inputs={inputs}
+          handleInputChange={handleInputChange}
+          deleteAccount={deleteAccount}
+          userState={userState}
+          turnstileEnabled={turnstileEnabled}
+          turnstileSiteKey={turnstileSiteKey}
+          setTurnstileToken={setTurnstileToken}
+        />
+      ) : null}
 
-      <ChangePasswordModal
-        t={t}
-        showChangePasswordModal={showChangePasswordModal}
-        setShowChangePasswordModal={setShowChangePasswordModal}
-        inputs={inputs}
-        handleInputChange={handleInputChange}
-        changePassword={changePassword}
-        turnstileEnabled={turnstileEnabled}
-        turnstileSiteKey={turnstileSiteKey}
-        setTurnstileToken={setTurnstileToken}
-      />
+      {showChangePasswordModal ? (
+        <ChangePasswordModal
+          t={t}
+          showChangePasswordModal={showChangePasswordModal}
+          setShowChangePasswordModal={setShowChangePasswordModal}
+          inputs={inputs}
+          handleInputChange={handleInputChange}
+          changePassword={changePassword}
+          turnstileEnabled={turnstileEnabled}
+          turnstileSiteKey={turnstileSiteKey}
+          setTurnstileToken={setTurnstileToken}
+        />
+      ) : null}
     </div>
   );
 };

@@ -25,8 +25,6 @@ import {
   Typography,
   Avatar,
   Spin,
-  Tooltip,
-  Collapsible,
   Modal,
 } from '@douyinfe/semi-ui';
 import {
@@ -188,19 +186,17 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
 
     if (isCheckedIn) {
       return (
-        <Tooltip
-          content={`${t('获得')} ${renderQuota(quotaAwarded)}`}
-          position='top'
+        <div
+          title={`${t('获得')} ${renderQuota(quotaAwarded)}`}
+          className='absolute inset-0 flex flex-col items-center justify-center cursor-pointer'
         >
-          <div className='absolute inset-0 flex flex-col items-center justify-center cursor-pointer'>
-            <div className='w-6 h-6 rounded-full bg-green-500 flex items-center justify-center mb-0.5 shadow-sm'>
-              <Check size={14} className='text-white' strokeWidth={3} />
-            </div>
-            <div className='text-[10px] font-medium text-green-600 dark:text-green-400 leading-none'>
-              {renderQuota(quotaAwarded)}
-            </div>
+          <div className='w-6 h-6 rounded-full bg-green-500 flex items-center justify-center mb-0.5 shadow-sm'>
+            <Check size={14} className='text-white' strokeWidth={3} />
           </div>
-        </Tooltip>
+          <div className='text-[10px] font-medium text-green-600 dark:text-green-400 leading-none'>
+            {renderQuota(quotaAwarded)}
+          </div>
+        </div>
       );
     }
     return null;
@@ -214,29 +210,31 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
 
   return (
     <Card className='!rounded-2xl'>
-      <Modal
-        title='Security Check'
-        visible={turnstileModalVisible}
-        footer={null}
-        centered
-        onCancel={() => {
-          setTurnstileModalVisible(false);
-          setTurnstileWidgetKey((v) => v + 1);
-        }}
-      >
-        <div className='flex justify-center py-2'>
-          <Turnstile
-            key={turnstileWidgetKey}
-            sitekey={turnstileSiteKey}
-            onVerify={(token) => {
-              doCheckin(token);
-            }}
-            onExpire={() => {
-              setTurnstileWidgetKey((v) => v + 1);
-            }}
-          />
-        </div>
-      </Modal>
+      {turnstileModalVisible ? (
+        <Modal
+          title='Security Check'
+          visible={turnstileModalVisible}
+          footer={null}
+          centered
+          onCancel={() => {
+            setTurnstileModalVisible(false);
+            setTurnstileWidgetKey((v) => v + 1);
+          }}
+        >
+          <div className='flex justify-center py-2'>
+            <Turnstile
+              key={turnstileWidgetKey}
+              sitekey={turnstileSiteKey}
+              onVerify={(token) => {
+                doCheckin(token);
+              }}
+              onExpire={() => {
+                setTurnstileWidgetKey((v) => v + 1);
+              }}
+            />
+          </div>
+        </Modal>
+      ) : null}
 
       {/* 卡片头部 */}
       <div className='flex items-center justify-between'>
@@ -287,7 +285,13 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
       </div>
 
       {/* 可折叠内容 */}
-      <Collapsible isOpen={isCollapsed === false} keepDOM>
+      <div
+        style={{
+          maxHeight: isCollapsed === false ? '1200px' : 0,
+          overflow: 'hidden',
+          transition: 'max-height 0.2s ease',
+        }}
+      >
         {/* 签到统计 */}
         <div className='grid grid-cols-3 gap-3 mb-4 mt-4'>
           <div className='text-center p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
@@ -376,7 +380,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
             </ul>
           </Typography.Text>
         </div>
-      </Collapsible>
+      </div>
     </Card>
   );
 };

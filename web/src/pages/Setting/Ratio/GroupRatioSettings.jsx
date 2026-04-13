@@ -21,7 +21,6 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import {
   Button,
   Col,
-  Collapsible,
   Form,
   Radio,
   RadioGroup,
@@ -433,7 +432,13 @@ export default function GroupRatioSettings(props) {
         >
           {title}
         </Button>
-        <Collapsible isOpen={open} keepDOM>
+        <div
+          style={{
+            maxHeight: open ? 'none' : 0,
+            overflow: 'hidden',
+            transition: 'max-height 0.2s ease',
+          }}
+        >
           <div
             style={{
               background: 'var(--semi-color-fill-0)',
@@ -444,7 +449,7 @@ export default function GroupRatioSettings(props) {
           >
             {children}
           </div>
-        </Collapsible>
+        </div>
       </div>
     );
   };
@@ -468,8 +473,13 @@ export default function GroupRatioSettings(props) {
     </pre>
   );
 
-  const renderGuide = () => (
-    <SideSheet
+  const renderGuide = () => {
+    if (!showGuide) {
+      return null;
+    }
+
+    return (
+      <SideSheet
       title={t('分组设置使用说明')}
       visible={showGuide}
       onCancel={() => setShowGuide(false)}
@@ -721,8 +731,9 @@ export default function GroupRatioSettings(props) {
           </div>
         </Tabs.TabPane>
       </Tabs>
-    </SideSheet>
-  );
+      </SideSheet>
+    );
+  };
 
   return (
     <Spin spinning={loading}>

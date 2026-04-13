@@ -20,7 +20,6 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   Button,
-  Collapsible,
   Input,
   InputNumber,
   Select,
@@ -145,8 +144,14 @@ function GroupSection({
           </Popconfirm>
         </div>
       </div>
-      <Collapsible isOpen={open} keepDOM>
-        <div style={{ padding: '8px 12px' }}>
+      <div
+        style={{
+          maxHeight: open ? '1000px' : 0,
+          overflow: 'hidden',
+          transition: 'max-height 0.2s ease',
+        }}
+      >
+        <div style={{ padding: open ? '8px 12px' : '0 12px' }}>
           {items.map((rule) => (
             <div
               key={rule._id}
@@ -154,6 +159,7 @@ function GroupSection({
               style={{ marginBottom: 6 }}
             >
               <Select
+                id={`group-ratio-target-group-${rule._id}`}
                 size='small'
                 filter
                 value={rule.usingGroup || undefined}
@@ -165,6 +171,8 @@ function GroupSection({
                 position='bottomLeft'
               />
               <InputNumber
+                id={`group-ratio-value-${rule._id}`}
+                name={`group-ratio-value-${rule._id}`}
                 size='small'
                 min={0}
                 step={0.1}
@@ -187,7 +195,7 @@ function GroupSection({
             </div>
           ))}
         </div>
-      </Collapsible>
+      </div>
     </div>
   );
 }

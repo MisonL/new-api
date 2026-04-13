@@ -25,10 +25,8 @@ import {
   Button,
   Row,
   Col,
-  Collapsible,
   Checkbox,
   Skeleton,
-  Tooltip,
 } from '@douyinfe/semi-ui';
 import { IconChevronDown, IconChevronUp } from '@douyinfe/semi-icons';
 
@@ -80,10 +78,10 @@ const SelectableButtonGroup = ({
       </span>
     );
 
-    return isOverflowing ? (
-      <Tooltip content={text}>{textElement}</Tooltip>
-    ) : (
-      textElement
+    return (
+      <span title={isOverflowing ? text : undefined} className='min-w-0 flex-1'>
+        {textElement}
+      </span>
     );
   };
 
@@ -258,13 +256,16 @@ const SelectableButtonGroup = ({
       )}
       {needCollapse && !showSkeleton ? (
         <div style={{ position: 'relative' }}>
-          <Collapsible
-            isOpen={isOpen}
-            collapseHeight={collapseHeight}
-            style={{ ...maskStyle }}
+          <div
+            style={{
+              ...maskStyle,
+              maxHeight: isOpen ? 'none' : `${collapseHeight}px`,
+              overflow: 'hidden',
+              transition: 'max-height 0.2s ease',
+            }}
           >
             {contentElement}
-          </Collapsible>
+          </div>
           {isOpen ? null : (
             <div onClick={toggle} style={{ ...linkStyle }}>
               <IconChevronDown size='small' />

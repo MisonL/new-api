@@ -156,6 +156,8 @@ export default function ToolPriceSettings({ options }) {
       dataIndex: 'key',
       render: (text, record) => (
         <Input
+          id={`tool-price-key-${record.id}`}
+          name={`tool-price-key-${record.id}`}
           value={text}
           placeholder='web_search_preview:gpt-4o*'
           onChange={(val) => updateRow(record.id, 'key', val)}
@@ -169,6 +171,8 @@ export default function ToolPriceSettings({ options }) {
       width: 160,
       render: (val, record) => (
         <InputNumber
+          id={`tool-price-value-${record.id}`}
+          name={`tool-price-value-${record.id}`}
           value={val}
           min={0}
           step={0.5}
@@ -241,6 +245,8 @@ export default function ToolPriceSettings({ options }) {
       ) : (
         <>
           <TextArea
+            id='tool-price-json'
+            name='tool-price-json'
             value={jsonText}
             onChange={syncToVisual}
             autosize={{ minRows: 8, maxRows: 20 }}

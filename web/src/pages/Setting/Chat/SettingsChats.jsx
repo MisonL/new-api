@@ -473,12 +473,7 @@ export default function SettingsChats(props) {
                   pageSize: 10,
                   showSizeChanger: false,
                   showQuickJumper: true,
-                  showTotal: (total, range) =>
-                    t('共 {{total}} 项，当前显示 {{start}}-{{end}} 项', {
-                      total,
-                      start: range[0],
-                      end: range[1],
-                    }),
+                  showTotal: true,
                 }}
               />
             </div>
@@ -527,38 +522,40 @@ export default function SettingsChats(props) {
         )}
       </Space>
 
-      <Modal
-        title={isEdit ? t('编辑聊天配置') : t('添加聊天配置')}
-        visible={modalVisible}
-        onOk={handleModalOk}
-        onCancel={handleModalCancel}
-        width={600}
-      >
-        <Form getFormApi={(api) => (modalFormRef.current = api)}>
-          <Form.Input
-            field='name'
-            label={t('聊天应用名称')}
-            placeholder={t('请输入聊天应用名称')}
-            rules={[
-              { required: true, message: t('请输入聊天应用名称') },
-              { min: 1, message: t('名称不能为空') },
-            ]}
-          />
-          <Form.Input
-            field='url'
-            label={t('URL链接')}
-            placeholder={t('请输入完整的URL链接')}
-            rules={[{ required: true, message: t('请输入URL链接') }]}
-          />
-          <Banner
-            type='info'
-            description={t(
-              '提示：链接中的{key}将被替换为API密钥，{address}将被替换为服务器地址',
-            )}
-            style={{ marginTop: 16 }}
-          />
-        </Form>
-      </Modal>
+      {modalVisible ? (
+        <Modal
+          title={isEdit ? t('编辑聊天配置') : t('添加聊天配置')}
+          visible={modalVisible}
+          onOk={handleModalOk}
+          onCancel={handleModalCancel}
+          width={600}
+        >
+          <Form getFormApi={(api) => (modalFormRef.current = api)}>
+            <Form.Input
+              field='name'
+              label={t('聊天应用名称')}
+              placeholder={t('请输入聊天应用名称')}
+              rules={[
+                { required: true, message: t('请输入聊天应用名称') },
+                { min: 1, message: t('名称不能为空') },
+              ]}
+            />
+            <Form.Input
+              field='url'
+              label={t('URL链接')}
+              placeholder={t('请输入完整的URL链接')}
+              rules={[{ required: true, message: t('请输入URL链接') }]}
+            />
+            <Banner
+              type='info'
+              description={t(
+                '提示：链接中的{key}将被替换为API密钥，{address}将被替换为服务器地址',
+              )}
+              style={{ marginTop: 16 }}
+            />
+          </Form>
+        </Modal>
+      ) : null}
     </Spin>
   );
 }

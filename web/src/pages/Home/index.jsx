@@ -157,11 +157,13 @@ const Home = () => {
 
   return (
     <div className='w-full overflow-x-hidden'>
-      <NoticeModal
-        visible={noticeVisible}
-        onClose={() => setNoticeVisible(false)}
-        isMobile={isMobile}
-      />
+      {noticeVisible ? (
+        <NoticeModal
+          visible={noticeVisible}
+          onClose={() => setNoticeVisible(false)}
+          isMobile={isMobile}
+        />
+      ) : null}
       {homePageContentLoaded && homePageContent === '' ? (
         <div className='w-full overflow-x-hidden'>
           {/* Banner 部分 */}

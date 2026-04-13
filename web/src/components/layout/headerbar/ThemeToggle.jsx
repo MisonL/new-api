@@ -18,9 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useMemo } from 'react';
-import { Button, Dropdown } from '@douyinfe/semi-ui';
+import { Button } from '@douyinfe/semi-ui';
 import { Sun, Moon, Monitor } from 'lucide-react';
 import { useActualTheme } from '../../../context/Theme';
+import HeaderPopupMenu from './HeaderPopupMenu';
 
 const ThemeToggle = ({ theme, onThemeToggle, t }) => {
   const actualTheme = useActualTheme();
@@ -63,48 +64,52 @@ const ThemeToggle = ({ theme, onThemeToggle, t }) => {
   }, [theme, themeOptions]);
 
   return (
-    <Dropdown
-      position='bottomRight'
-      render={
-        <Dropdown.Menu>
-          {themeOptions.map((option) => (
-            <Dropdown.Item
-              key={option.key}
-              icon={option.icon}
-              onClick={() => onThemeToggle(option.key)}
-              className={getItemClassName(theme === option.key)}
-            >
-              <div className='flex flex-col'>
-                <span>{option.label}</span>
-                <span className='text-xs text-semi-color-text-2'>
-                  {option.description}
-                </span>
-              </div>
-            </Dropdown.Item>
-          ))}
-
-          {theme === 'auto' && (
-            <>
-              <Dropdown.Divider />
-              <div className='px-3 py-2 text-xs text-semi-color-text-2'>
-                {t('当前跟随系统')}：
-                {actualTheme === 'dark' ? t('深色') : t('浅色')}
-              </div>
-            </>
-          )}
-        </Dropdown.Menu>
-      }
-    >
-      <span className='inline-flex'>
+    <HeaderPopupMenu
+      menuLabel={t('切换主题')}
+      renderTrigger={({ open, toggle }) => (
         <Button
           icon={currentButtonIcon}
           aria-label={t('切换主题')}
+          aria-haspopup='menu'
+          aria-expanded={open}
           theme='borderless'
           type='tertiary'
+          onClick={toggle}
           className='!p-1.5 !text-current focus:!bg-semi-color-fill-1 !rounded-full !bg-semi-color-fill-0 hover:!bg-semi-color-fill-1'
         />
-      </span>
-    </Dropdown>
+      )}
+      renderContent={({ closeMenu }) => (
+        <>
+          {themeOptions.map((option) => (
+            <button
+              key={option.key}
+              type='button'
+              role='menuitemradio'
+              aria-checked={theme === option.key}
+              onClick={() => {
+                onThemeToggle(option.key);
+                closeMenu();
+              }}
+              className={`flex w-full items-start gap-2 rounded-md px-3 py-2 text-left text-sm !text-semi-color-text-0 dark:!text-gray-200 ${getItemClassName(theme === option.key)}`}
+            >
+              <span className='mt-0.5'>{option.icon}</span>
+              <span className='flex flex-col'>
+                <span>{option.label}</span>
+                <span className='text-xs text-semi-color-text-2 dark:text-gray-400'>
+                  {option.description}
+                </span>
+              </span>
+            </button>
+          ))}
+          {theme === 'auto' && (
+            <div className='mt-1 border-t border-semi-color-border px-3 py-2 text-xs text-semi-color-text-2 dark:border-gray-600 dark:text-gray-400'>
+              {t('当前跟随系统')}：
+              {actualTheme === 'dark' ? t('深色') : t('浅色')}
+            </div>
+          )}
+        </>
+      )}
+    />
   );
 };
 

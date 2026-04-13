@@ -15,7 +15,7 @@
 
 /* ==================== 全局基础样式 ==================== */
 :root {
-  --sidebar-width: 180px;
+  --sidebar-width: 156px;
   --sidebar-width-collapsed: 60px;
   --sidebar-current-width: var(--sidebar-width);
 }

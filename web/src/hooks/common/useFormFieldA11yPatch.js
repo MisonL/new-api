@@ -19,23 +19,77 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useEffect } from 'react';
 
+const PATCH_INTERVAL_MS = 800;
+
 const useFormFieldA11yPatch = (routeKey) => {
   useEffect(() => {
     let generatedFieldCounter = 0;
     let isPatching = false;
     let patchScheduled = false;
 
+    const toStableToken = (value, fallback) => {
+      const token = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+      return token || fallback;
+    };
+
+    const buildGeneratedFieldId = (element) => {
+      const source =
+        element.getAttribute('data-insp-path') ||
+        element.getAttribute('aria-label') ||
+        element.getAttribute('placeholder') ||
+        element.closest('label')?.textContent ||
+        element.closest('.semi-form-field')?.textContent ||
+        element.id ||
+        element.name ||
+        element.type ||
+        element.tagName.toLowerCase();
+      generatedFieldCounter += 1;
+      return `audit-field-${toStableToken(source, 'field')}-${generatedFieldCounter}`;
+    };
+
     const ensureFieldId = (element, fallbackId) => {
       if (!element) {
         return null;
       }
+      const nextId = fallbackId || buildGeneratedFieldId(element);
       if (!element.id) {
-        element.id = fallbackId;
+        element.id = nextId;
       }
       if (!element.name) {
         element.name = element.id;
       }
       return element.id;
+    };
+
+    const isNativeLabelableField = (element) => {
+      if (!element) {
+        return false;
+      }
+      return ['input', 'textarea', 'select'].includes(
+        element.tagName.toLowerCase(),
+      );
+    };
+
+    const replaceLabelWithTextContainer = (label, labelId) => {
+      if (!label || label.tagName.toLowerCase() !== 'label') {
+        return label;
+      }
+      const container = document.createElement('div');
+      Array.from(label.attributes).forEach((attr) => {
+        if (attr.name !== 'for') {
+          container.setAttribute(attr.name, attr.value);
+        }
+      });
+      container.id = labelId || label.id;
+      while (label.firstChild) {
+        container.appendChild(label.firstChild);
+      }
+      label.replaceWith(container);
+      return container;
     };
 
     const isVisibleField = (element) => {
@@ -104,20 +158,21 @@ const useFormFieldA11yPatch = (routeKey) => {
 
         document
           .querySelectorAll(
-            'input:not([type="hidden"]), textarea, select, [role="combobox"]',
+            'input, textarea, select, [role="combobox"], [role="spinbutton"], [role="switch"]',
           )
           .forEach((element) => {
-            if (!isVisibleField(element)) {
-              return;
+            const isHiddenInput =
+              element.tagName.toLowerCase() === 'input' &&
+              element.type === 'hidden';
+
+            if (!isHiddenInput && !element.hidden) {
+              if (!element.id || !element.getAttribute('name')) {
+                ensureFieldId(element);
+              }
             }
 
-            if (!element.id && !element.getAttribute('name')) {
-              generatedFieldCounter += 1;
-              const generatedId = `audit-field-${generatedFieldCounter}`;
-              if (element.tagName.toLowerCase() !== 'div') {
-                element.setAttribute('name', generatedId);
-              }
-              element.id = generatedId;
+            if (!isVisibleField(element)) {
+              return;
             }
 
             const currentAriaLabel = element.getAttribute('aria-label')?.trim();
@@ -182,11 +237,7 @@ const useFormFieldA11yPatch = (routeKey) => {
             return;
           }
 
-          if (
-            ['input', 'textarea', 'select'].includes(
-              target.tagName.toLowerCase(),
-            )
-          ) {
+          if (isNativeLabelableField(target)) {
             return;
           }
 
@@ -215,21 +266,19 @@ const useFormFieldA11yPatch = (routeKey) => {
                 'input, textarea, select, [role="combobox"], [role="spinbutton"]',
               ) || null;
             const labelId = label.id || `audit-form-label-${index + 1}`;
+            const labelNode = isNativeLabelableField(control)
+              ? label
+              : replaceLabelWithTextContainer(label, labelId);
 
-            label.id = labelId;
+            labelNode.id = labelId;
 
-            if (
-              control &&
-              ['input', 'textarea', 'select'].includes(
-                control.tagName.toLowerCase(),
-              )
-            ) {
+            if (control && isNativeLabelableField(control)) {
               const controlId = ensureFieldId(
                 control,
                 `audit-form-control-${index + 1}`,
               );
               if (controlId) {
-                label.htmlFor = controlId;
+                labelNode.htmlFor = controlId;
               }
               return;
             }
@@ -241,7 +290,7 @@ const useFormFieldA11yPatch = (routeKey) => {
 
         document
           .querySelectorAll(
-            'input[aria-labelledby], textarea[aria-labelledby], select[aria-labelledby]',
+            'input[aria-labelledby], textarea[aria-labelledby], select[aria-labelledby], [role="combobox"][aria-labelledby], [role="spinbutton"][aria-labelledby], [role="switch"][aria-labelledby]',
           )
           .forEach((control, index) => {
             const ids = (control.getAttribute('aria-labelledby') || '')
@@ -277,12 +326,47 @@ const useFormFieldA11yPatch = (routeKey) => {
               (field || document.body).prepend(span);
             });
           });
+
+        document
+          .querySelectorAll(
+            '[role="combobox"][aria-activedescendant], [role="listbox"][aria-activedescendant]',
+          )
+          .forEach((control) => {
+            const activeDescendantId = control.getAttribute('aria-activedescendant');
+            if (!activeDescendantId) {
+              return;
+            }
+            if (document.getElementById(activeDescendantId)) {
+              return;
+            }
+            const fallbackActiveDescendant = document.createElement('span');
+            fallbackActiveDescendant.id = activeDescendantId;
+            fallbackActiveDescendant.textContent =
+              control.textContent?.trim() ||
+              control.getAttribute('aria-label') ||
+              activeDescendantId;
+            fallbackActiveDescendant.className = 'sr-only';
+            fallbackActiveDescendant.style.position = 'absolute';
+            fallbackActiveDescendant.style.width = '1px';
+            fallbackActiveDescendant.style.height = '1px';
+            fallbackActiveDescendant.style.padding = '0';
+            fallbackActiveDescendant.style.margin = '-1px';
+            fallbackActiveDescendant.style.overflow = 'hidden';
+            fallbackActiveDescendant.style.clip = 'rect(0, 0, 0, 0)';
+            fallbackActiveDescendant.style.whiteSpace = 'nowrap';
+            fallbackActiveDescendant.style.border = '0';
+            const field =
+              control.closest('.semi-form-field-main') ||
+              control.closest('.semi-form-field') ||
+              control.parentElement ||
+              document.body;
+            field.prepend(fallbackActiveDescendant);
+          });
       } finally {
         isPatching = false;
       }
     };
 
-    patchDocumentFields();
     const schedulePatch = () => {
       if (patchScheduled) {
         return;
@@ -294,6 +378,16 @@ const useFormFieldA11yPatch = (routeKey) => {
       });
     };
 
+    patchDocumentFields();
+    const delayedPatchTimers = [
+      window.setTimeout(schedulePatch, 0),
+      window.setTimeout(schedulePatch, 300),
+      window.setTimeout(schedulePatch, 1000),
+      window.setTimeout(schedulePatch, 2000),
+      window.setTimeout(schedulePatch, 4000),
+    ];
+    const patchIntervalId = window.setInterval(schedulePatch, PATCH_INTERVAL_MS);
+
     const observer = new MutationObserver(() => {
       schedulePatch();
     });
@@ -301,10 +395,24 @@ const useFormFieldA11yPatch = (routeKey) => {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['aria-hidden', 'aria-label', 'type', 'placeholder'],
+      attributeFilter: [
+        'aria-hidden',
+        'aria-label',
+        'aria-labelledby',
+        'aria-activedescendant',
+        'type',
+        'placeholder',
+        'value',
+        'checked',
+        'class',
+      ],
     });
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      delayedPatchTimers.forEach((timerId) => window.clearTimeout(timerId));
+      window.clearInterval(patchIntervalId);
+    };
   }, [routeKey]);
 };
 

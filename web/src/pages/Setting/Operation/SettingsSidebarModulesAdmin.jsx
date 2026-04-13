@@ -330,7 +330,7 @@ export default function SettingsSidebarModulesAdmin(props) {
                 checked={sidebarModulesAdmin[section.key]?.enabled}
                 onChange={handleSectionChange(section.key)}
                 size='default'
-                id={`pages-setting-operation-settingssidebarmodulesadmin-switch-1-${section}`}
+                id={`pages-setting-operation-settingssidebarmodulesadmin-switch-1-${section.key}`}
               />
             </div>
 
@@ -339,8 +339,8 @@ export default function SettingsSidebarModulesAdmin(props) {
               {section.modules.map((module) => (
                 <Col key={module.key} xs={24} sm={12} md={8} lg={6} xl={6}>
                   <Card
+                    className='transition-all duration-200 hover:-translate-y-px hover:shadow-sm'
                     bodyStyle={{ padding: '16px' }}
-                    hoverable
                     style={{
                       opacity: sidebarModulesAdmin[section.key]?.enabled
                         ? 1
@@ -388,7 +388,7 @@ export default function SettingsSidebarModulesAdmin(props) {
                           onChange={handleModuleChange(section.key, module.key)}
                           size='default'
                           disabled={!sidebarModulesAdmin[section.key]?.enabled}
-                          id={`pages-setting-operation-settingssidebarmodulesadmin-switch-2-${module}`}
+                          id={`pages-setting-operation-settingssidebarmodulesadmin-switch-2-${section.key}-${module.key}`}
                         />
                       </div>
                     </div>

@@ -108,6 +108,7 @@ const LogsFilters = ({
 
   return (
     <Form
+      className='usage-logs-filters-form'
       wrapperCol={{}}
       initValues={formInitValues}
       getFormApi={(api) => setFormApi(api)}
@@ -117,7 +118,6 @@ const LogsFilters = ({
       layout='vertical'
       trigger='change'
       stopValidateWithError={false}
-      wrapperClassName='usage-logs-filters-form'
     >
       <div className='flex flex-col gap-2' ref={containerRef}>
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2'>

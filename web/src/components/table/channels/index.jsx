@@ -43,36 +43,44 @@ const ChannelsPage = () => {
   return (
     <>
       {/* Modals */}
-      <ColumnSelectorModal {...channelsData} />
-      <EditTagModal
-        visible={channelsData.showEditTag}
-        tag={channelsData.editingTag}
-        handleClose={() => channelsData.setShowEditTag(false)}
-        refresh={channelsData.refresh}
-      />
-      <EditChannelModal
-        refresh={channelsData.refresh}
-        visible={channelsData.showEdit}
-        handleClose={channelsData.closeEdit}
-        editingChannel={channelsData.editingChannel}
-      />
-      <BatchTagModal {...channelsData} />
-      <ModelTestModal {...channelsData} />
-      <MultiKeyManageModal
-        visible={channelsData.showMultiKeyManageModal}
-        onCancel={() => channelsData.setShowMultiKeyManageModal(false)}
-        channel={channelsData.currentMultiKeyChannel}
-        onRefresh={channelsData.refresh}
-      />
-      <ChannelUpstreamUpdateModal
-        visible={channelsData.showUpstreamUpdateModal}
-        addModels={channelsData.upstreamUpdateAddModels}
-        removeModels={channelsData.upstreamUpdateRemoveModels}
-        preferredTab={channelsData.upstreamUpdatePreferredTab}
-        confirmLoading={channelsData.upstreamApplyLoading}
-        onConfirm={channelsData.applyUpstreamUpdates}
-        onCancel={channelsData.closeUpstreamUpdateModal}
-      />
+      {channelsData.showColumnSelector ? <ColumnSelectorModal {...channelsData} /> : null}
+      {channelsData.showEditTag ? (
+        <EditTagModal
+          visible={channelsData.showEditTag}
+          tag={channelsData.editingTag}
+          handleClose={() => channelsData.setShowEditTag(false)}
+          refresh={channelsData.refresh}
+        />
+      ) : null}
+      {channelsData.showEdit ? (
+        <EditChannelModal
+          refresh={channelsData.refresh}
+          visible={channelsData.showEdit}
+          handleClose={channelsData.closeEdit}
+          editingChannel={channelsData.editingChannel}
+        />
+      ) : null}
+      {channelsData.showBatchSetTag ? <BatchTagModal {...channelsData} /> : null}
+      {channelsData.showModelTestModal ? <ModelTestModal {...channelsData} /> : null}
+      {channelsData.showMultiKeyManageModal ? (
+        <MultiKeyManageModal
+          visible={channelsData.showMultiKeyManageModal}
+          onCancel={() => channelsData.setShowMultiKeyManageModal(false)}
+          channel={channelsData.currentMultiKeyChannel}
+          onRefresh={channelsData.refresh}
+        />
+      ) : null}
+      {channelsData.showUpstreamUpdateModal ? (
+        <ChannelUpstreamUpdateModal
+          visible={channelsData.showUpstreamUpdateModal}
+          addModels={channelsData.upstreamUpdateAddModels}
+          removeModels={channelsData.upstreamUpdateRemoveModels}
+          preferredTab={channelsData.upstreamUpdatePreferredTab}
+          confirmLoading={channelsData.upstreamApplyLoading}
+          onConfirm={channelsData.applyUpstreamUpdates}
+          onCancel={channelsData.closeUpstreamUpdateModal}
+        />
+      ) : null}
 
       {/* Main Content */}
       {channelsData.globalPassThroughEnabled ? (

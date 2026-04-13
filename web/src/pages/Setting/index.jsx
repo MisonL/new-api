@@ -55,7 +55,10 @@ const Setting = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const [tabActiveKey, setTabActiveKey] = useState('1');
+  const [tabActiveKey, setTabActiveKey] = useState(() => {
+    const currentTab = new URLSearchParams(location.search).get('tab');
+    return currentTab || 'operation';
+  });
   const panes = useMemo(() => {
     const nextPanes = [];
 

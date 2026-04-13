@@ -64,9 +64,9 @@ const CardTable = ({
     const horizontalScrollWidth = finalTableProps?.scroll?.x;
     const hasHorizontalScroll = Boolean(horizontalScrollWidth);
     const {
-      className: desktopScrollClassName,
-      style: desktopScrollStyle,
-      id: desktopScrollId,
+      className: desktopTableClassName,
+      style: desktopTableStyle,
+      id: desktopTableId,
       ...tableOnlyProps
     } = finalTableProps;
     const desktopScrollInnerStyle = hasHorizontalScroll
@@ -84,6 +84,9 @@ const CardTable = ({
         dataSource={dataSource}
         loading={loading}
         rowKey={rowKey}
+        id={desktopTableId}
+        className={desktopTableClassName}
+        style={desktopTableStyle}
         {...(hasHorizontalScroll ? tableOnlyProps : finalTableProps)}
       />
     );
@@ -92,14 +95,8 @@ const CardTable = ({
       return tableNode;
     }
 
-    return (
-      <div
-        id={desktopScrollId}
-        className={['card-table-desktop-scroll', desktopScrollClassName]
-          .filter(Boolean)
-          .join(' ')}
-        style={desktopScrollStyle}
-      >
+      return (
+      <div className='card-table-desktop-scroll'>
         <div
           className='card-table-desktop-scroll-inner'
           style={desktopScrollInnerStyle}

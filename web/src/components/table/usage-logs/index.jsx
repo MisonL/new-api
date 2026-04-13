@@ -39,15 +39,19 @@ const LogsPage = () => {
   return (
     <>
       {/* Modals */}
-      <ColumnSelectorModal {...logsData} />
-      <EditUserModal
-        refresh={refreshCurrentPage}
-        visible={logsData.showEditUser}
-        handleClose={logsData.closeEditUserPanel}
-        editingUser={logsData.editingUser}
-      />
-      <ChannelAffinityUsageCacheModal {...logsData} />
-      <ParamOverrideModal {...logsData} />
+      {logsData.showColumnSelector ? <ColumnSelectorModal {...logsData} /> : null}
+      {logsData.showEditUser ? (
+        <EditUserModal
+          refresh={refreshCurrentPage}
+          visible={logsData.showEditUser}
+          handleClose={logsData.closeEditUserPanel}
+          editingUser={logsData.editingUser}
+        />
+      ) : null}
+      {logsData.showChannelAffinityUsageCacheModal ? (
+        <ChannelAffinityUsageCacheModal {...logsData} />
+      ) : null}
+      {logsData.showParamOverrideModal ? <ParamOverrideModal {...logsData} /> : null}
 
       {/* Main Content */}
       <CardPro
