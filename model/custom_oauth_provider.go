@@ -403,6 +403,9 @@ func validateCustomOAuthProvider(provider *CustomOAuthProvider) error {
 			provider.Scopes = "openid profile email"
 		}
 	}
+	if provider.IsCAS() && provider.UserIdField == "sub" {
+		provider.UserIdField = "authenticationSuccess.user"
+	}
 	if provider.IsJWTDirect() {
 		if provider.JWTSource == "" {
 			provider.JWTSource = CustomJWTSourceQuery

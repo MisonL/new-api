@@ -134,6 +134,8 @@ func newCustomOAuthJWTRouter(t *testing.T) *gin.Engine {
 	router.GET("/api/oauth/state", GenerateOAuthCode)
 	router.POST("/api/auth/external/:provider/jwt/login", HandleCustomOAuthJWTLogin)
 	router.POST("/api/auth/external/:provider/header/login", HandleCustomOAuthHeaderLogin)
+	router.GET("/api/auth/external/:provider/cas/start", HandleCustomOAuthCASStart)
+	router.GET("/api/auth/external/:provider/cas/callback", HandleCustomOAuthCASCallback)
 	router.GET("/test/login-as/:id", func(c *gin.Context) {
 		var user model.User
 		if err := model.DB.First(&user, c.Param("id")).Error; err != nil {

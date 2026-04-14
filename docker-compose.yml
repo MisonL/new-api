@@ -12,11 +12,9 @@
 #
 # ⚠️  IMPORTANT: Change all default passwords before deploying to production!
 
-version: '3.4' # For compatibility with older Docker versions
-
 services:
   new-api:
-    image: calciumion/new-api:latest
+    image: ${NEW_API_IMAGE:-new-api-local:prod-20260412-080601}
     container_name: new-api
     restart: always
     command: --log-dir /app/logs
@@ -26,12 +24,14 @@ services:
       - ./data:/data
       - ./logs:/app/logs
     environment:
-      - SQL_DSN=postgresql://root:123456@postgres:5432/new-api # ⚠️ IMPORTANT: Change the password in production!
+      - SESSION_SECRET=${SESSION_SECRET}
+      - CRYPTO_SECRET=${CRYPTO_SECRET}
+      - SQL_DSN=${SQL_DSN:-postgresql://root:123456@postgres:5432/new-api}
 #      - SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # Point to the mysql service, uncomment if using MySQL
-      - REDIS_CONN_STRING=redis://redis
-      - TZ=Asia/Shanghai
-      - ERROR_LOG_ENABLED=true # 是否启用错误日志记录 (Whether to enable error log recording)
-      - BATCH_UPDATE_ENABLED=true  # 是否启用批量更新 (Whether to enable batch update)
+      - REDIS_CONN_STRING=${REDIS_CONN_STRING:-redis://redis}
+      - TZ=${TZ:-Asia/Shanghai}
+      - ERROR_LOG_ENABLED=${ERROR_LOG_ENABLED:-true} # 是否启用错误日志记录 (Whether to enable error log recording)
+      - BATCH_UPDATE_ENABLED=${BATCH_UPDATE_ENABLED:-true}  # 是否启用批量更新 (Whether to enable batch update)
 #      - STREAMING_TIMEOUT=300  # 流模式无响应超时时间，单位秒，默认120秒，如果出现空补全可以尝试改为更大值 （Streaming timeout in seconds, default is 120s. Increase if experiencing empty completions）
 #      - SESSION_SECRET=random_string  # 多机部署时设置，必须修改这个随机字符串！！ （multi-node deployment, set this to a random string!!!!!!!）
 #      - SYNC_FREQUENCY=60  # Uncomment if regular database syncing is needed
