@@ -160,6 +160,7 @@ export default function ToolPriceSettings({ options }) {
           name={`tool-price-key-${record.id}`}
           value={text}
           placeholder='web_search_preview:gpt-4o*'
+          aria-label={t('工具标识')}
           onChange={(val) => updateRow(record.id, 'key', val)}
           style={{ width: '100%' }}
         />
@@ -176,6 +177,7 @@ export default function ToolPriceSettings({ options }) {
           value={val}
           min={0}
           step={0.5}
+          aria-label={t('价格')}
           onChange={(v) => updateRow(record.id, 'price', v ?? 0)}
           style={{ width: '100%' }}
         />

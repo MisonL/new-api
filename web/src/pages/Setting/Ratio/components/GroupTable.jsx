@@ -153,6 +153,7 @@ export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
           <Input
             id={`ratio-group-name-${record._id}`}
             name={`ratio-group-name-${record._id}`}
+            aria-label={t('分组名称')}
             size='small'
             value={record.name}
             status={duplicateNames.has(record.name) ? 'warning' : undefined}
@@ -169,6 +170,7 @@ export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
           <InputNumber
             id={`ratio-group-multiplier-${record._id}`}
             name={`ratio-group-multiplier-${record._id}`}
+            aria-label={t('倍率')}
             size='small'
             min={0}
             step={0.1}
@@ -188,6 +190,7 @@ export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
           <Checkbox
             id={`ratio-group-selectable-${record._id}`}
             name={`ratio-group-selectable-${record._id}`}
+            aria-label={t('用户可选')}
             checked={record.selectable}
             onChange={(e) =>
               updateRow(record._id, 'selectable', e.target.checked)
@@ -204,6 +207,7 @@ export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
             <Input
               id={`ratio-group-description-${record._id}`}
               name={`ratio-group-description-${record._id}`}
+              aria-label={t('分组描述')}
               size='small'
               value={record.description}
               placeholder={t('分组描述')}

@@ -170,9 +170,10 @@ const Setting = () => {
         <Layout.Content>
           <SelectableButtonGroup
             activeValue={tabActiveKey}
-            collapsible
-            collapseHeight={112}
+            collapsible={false}
+            compact
             items={paneItems}
+            layout='scroll'
             onChange={onChangeTab}
             t={t}
             variant='teal'

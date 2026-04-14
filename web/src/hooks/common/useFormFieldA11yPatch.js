@@ -20,9 +20,21 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect } from 'react';
 
 const PATCH_INTERVAL_MS = 800;
+const AUTOCOMPLETE_DISABLED_INPUT_TYPES = new Set([
+  'hidden',
+  'checkbox',
+  'radio',
+  'range',
+  'file',
+  'submit',
+  'reset',
+  'button',
+  'image',
+]);
 
 const useFormFieldA11yPatch = (routeKey) => {
   useEffect(() => {
+    const isConsoleRoute = String(routeKey || '').startsWith('/console');
     let generatedFieldCounter = 0;
     let isPatching = false;
     let patchScheduled = false;
@@ -109,6 +121,26 @@ const useFormFieldA11yPatch = (routeKey) => {
       return style.display !== 'none' && style.visibility !== 'hidden';
     };
 
+    const shouldDisableAutocomplete = (element) => {
+      if (!isConsoleRoute || !element) {
+        return false;
+      }
+      if (element.hasAttribute('autocomplete')) {
+        return false;
+      }
+
+      const tagName = element.tagName.toLowerCase();
+      if (tagName === 'textarea') {
+        return true;
+      }
+      if (tagName !== 'input') {
+        return false;
+      }
+
+      const inputType = String(element.type || 'text').toLowerCase();
+      return !AUTOCOMPLETE_DISABLED_INPUT_TYPES.has(inputType);
+    };
+
     const getFieldLabelText = (element) => {
       const formField = element.closest('.semi-form-field');
       const explicitLabel = formField
@@ -171,10 +203,6 @@ const useFormFieldA11yPatch = (routeKey) => {
               }
             }
 
-            if (!isVisibleField(element)) {
-              return;
-            }
-
             const currentAriaLabel = element.getAttribute('aria-label')?.trim();
             const hasGenericAriaLabel =
               currentAriaLabel === 'input value' ||
@@ -187,6 +215,14 @@ const useFormFieldA11yPatch = (routeKey) => {
 
             if (!hasAssociatedLabel || hasGenericAriaLabel) {
               element.setAttribute('aria-label', getFieldLabelText(element));
+            }
+
+            if (!isVisibleField(element)) {
+              return;
+            }
+
+            if (shouldDisableAutocomplete(element)) {
+              element.setAttribute('autocomplete', 'off');
             }
           });
 

@@ -159,6 +159,7 @@ function UsableGroupSection({ groupName, items, opOptions, onUpdate, onRemove, o
             >
               <Select
                 id={`group-special-op-${rule._id}`}
+                aria-label={t('规则操作')}
                 size='small'
                 value={rule.op}
                 optionList={opOptions}
@@ -172,6 +173,7 @@ function UsableGroupSection({ groupName, items, opOptions, onUpdate, onRemove, o
               <Input
                 id={`group-special-target-${rule._id}`}
                 name={`group-special-target-${rule._id}`}
+                aria-label={t('分组名称')}
                 size='small'
                 value={rule.targetGroup}
                 placeholder={t('分组名称')}
@@ -182,6 +184,7 @@ function UsableGroupSection({ groupName, items, opOptions, onUpdate, onRemove, o
                 <Input
                   id={`group-special-description-${rule._id}`}
                   name={`group-special-description-${rule._id}`}
+                  aria-label={t('分组描述')}
                   size='small'
                   value={rule.description}
                   placeholder={t('分组描述')}
@@ -311,6 +314,7 @@ export default function GroupSpecialUsableRules({
             size='small'
             filter
             allowCreate
+            aria-label={t('选择用户分组')}
             placeholder={t('选择用户分组')}
             optionList={groupOptions}
             value={newGroupName || undefined}
@@ -345,6 +349,7 @@ export default function GroupSpecialUsableRules({
           size='small'
           filter
           allowCreate
+          aria-label={t('选择用户分组')}
           placeholder={t('选择用户分组')}
           optionList={groupOptions}
           value={newGroupName || undefined}

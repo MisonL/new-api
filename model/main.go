@@ -270,7 +270,6 @@ func migrateDB() error {
 		&Task{},
 		&Model{},
 		&Vendor{},
-		&PrefillGroup{},
 		&Setup{},
 		&TwoFA{},
 		&TwoFABackupCode{},
@@ -282,6 +281,9 @@ func migrateDB() error {
 		&UserOAuthBinding{},
 	)
 	if err != nil {
+		return err
+	}
+	if err := migratePrefillGroupTable(); err != nil {
 		return err
 	}
 	if common.UsingSQLite {
@@ -318,7 +320,6 @@ func migrateDBFast() error {
 		{&Task{}, "Task"},
 		{&Model{}, "Model"},
 		{&Vendor{}, "Vendor"},
-		{&PrefillGroup{}, "PrefillGroup"},
 		{&Setup{}, "Setup"},
 		{&TwoFA{}, "TwoFA"},
 		{&TwoFABackupCode{}, "TwoFABackupCode"},
@@ -351,6 +352,9 @@ func migrateDBFast() error {
 		if err != nil {
 			return err
 		}
+	}
+	if err := migratePrefillGroupTable(); err != nil {
+		return err
 	}
 	if common.UsingSQLite {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {

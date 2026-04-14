@@ -136,6 +136,7 @@ const EditVendorModal = ({ visible, handleClose, refresh, editingVendor }) => {
               field='name'
               label={t('供应商名称')}
               placeholder={t('请输入供应商名称，如：OpenAI')}
+              autocomplete='off'
               rules={[{ required: true, message: t('请输入供应商名称') }]}
               showClear
             />
@@ -145,6 +146,7 @@ const EditVendorModal = ({ visible, handleClose, refresh, editingVendor }) => {
               field='description'
               label={t('描述')}
               placeholder={t('请输入供应商描述')}
+              autocomplete='off'
               rows={3}
               showClear
             />
@@ -154,6 +156,7 @@ const EditVendorModal = ({ visible, handleClose, refresh, editingVendor }) => {
               field='icon'
               label={t('供应商图标')}
               placeholder={t('请输入图标名称')}
+              autocomplete='off'
               extraText={
                 <span>
                   {t(

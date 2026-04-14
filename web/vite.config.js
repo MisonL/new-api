@@ -73,13 +73,13 @@ export default defineConfig(({ command }) => {
       },
     },
     build: {
+      chunkSizeWarningLimit: 2000,
       rollupOptions: {
         output: {
           manualChunks: {
             'react-core': ['react', 'react-dom', 'react-router-dom'],
             'semi-ui': ['@douyinfe/semi-icons', '@douyinfe/semi-ui'],
             tools: ['axios', 'history', 'marked'],
-            'lobehub-icons': ['@lobehub/icons'],
             'lucide-icons': ['lucide-react'],
             'react-icons': ['react-icons'],
             'markdown-core': [
@@ -104,7 +104,6 @@ export default defineConfig(({ command }) => {
             ],
             'react-components': [
               'react-dropzone',
-              'react-fireworks',
               'react-telegram-login',
               'react-toastify',
               'react-turnstile',

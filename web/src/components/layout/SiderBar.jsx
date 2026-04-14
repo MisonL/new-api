@@ -444,29 +444,27 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         collapsed={collapsed}
         showAdmin={isAdmin()}
       >
-        <>
+        <Nav {...sharedNavProps}>
           {/* 聊天区域 */}
           {hasSectionVisibleModules('chat') && (
-            <>
+            <div className='sidebar-section'>
               {!collapsed && (
                 <div className='sidebar-group-label'>{t('聊天')}</div>
               )}
-              <Nav {...sharedNavProps}>
-                {chatMenuItems.map((item) => renderSubItem(item))}
-              </Nav>
-            </>
+              {chatMenuItems.map((item) => renderSubItem(item))}
+            </div>
           )}
 
           {/* 控制台区域 */}
           {hasSectionVisibleModules('console') && (
             <>
               <Divider className='sidebar-divider' />
-              {!collapsed && (
-                <div className='sidebar-group-label'>{t('控制台')}</div>
-              )}
-              <Nav {...sharedNavProps}>
+              <div className='sidebar-section'>
+                {!collapsed && (
+                  <div className='sidebar-group-label'>{t('控制台')}</div>
+                )}
                 {workspaceItems.map((item) => renderNavItem(item))}
-              </Nav>
+              </div>
             </>
           )}
 
@@ -474,12 +472,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           {hasSectionVisibleModules('personal') && (
             <>
               <Divider className='sidebar-divider' />
-              {!collapsed && (
-                <div className='sidebar-group-label'>{t('个人中心')}</div>
-              )}
-              <Nav {...sharedNavProps}>
+              <div className='sidebar-section'>
+                {!collapsed && (
+                  <div className='sidebar-group-label'>{t('个人中心')}</div>
+                )}
                 {financeItems.map((item) => renderNavItem(item))}
-              </Nav>
+              </div>
             </>
           )}
 
@@ -487,15 +485,15 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           {isAdmin() && hasSectionVisibleModules('admin') && (
             <>
               <Divider className='sidebar-divider' />
-              {!collapsed && (
-                <div className='sidebar-group-label'>{t('管理员')}</div>
-              )}
-              <Nav {...sharedNavProps}>
+              <div className='sidebar-section'>
+                {!collapsed && (
+                  <div className='sidebar-group-label'>{t('管理员')}</div>
+                )}
                 {adminItems.map((item) => renderNavItem(item))}
-              </Nav>
+              </div>
             </>
           )}
-        </>
+        </Nav>
       </SkeletonWrapper>
 
       {/* 底部折叠按钮 */}
@@ -503,7 +501,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         <SkeletonWrapper
           loading={showSkeleton}
           type='button'
-          width={collapsed ? 36 : 156}
+          width={collapsed ? 36 : 128}
           height={24}
           className='w-full'
         >

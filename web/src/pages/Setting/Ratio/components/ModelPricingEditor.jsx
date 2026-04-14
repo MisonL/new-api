@@ -77,6 +77,7 @@ const PriceInput = ({
         onChange={onChange}
         suffix={suffix}
         disabled={disabled}
+        aria-label={label}
         name='pages-setting-ratio-components-modelpricingeditor-input-1'
       />
     ) : null}
@@ -292,12 +293,14 @@ export default function ModelPricingEditor({
             onChange={(value) => setSearchText(value)}
             style={{ width: isMobile ? '100%' : 220 }}
             showClear
+            aria-label={t('搜索模型名称')}
             name='pages-setting-ratio-components-modelpricingeditor-input-2'
           />
           {showConflictFilter ? (
             <Checkbox
               checked={conflictOnly}
               onChange={(event) => setConflictOnly(event.target.checked)}
+              aria-label={t('仅显示矛盾倍率')}
               name='pages-setting-ratio-components-modelpricingeditor-checkbox-1'
             >
               {t('仅显示矛盾倍率')}
@@ -511,6 +514,7 @@ export default function ModelPricingEditor({
                               selectedModel,
                               'completionPrice',
                             )}
+                            aria-label={t('启用补全价格')}
                             name='model-pricing-switch-completion-price'
                             disabled={selectedModel.completionRatioLocked}
                             onChange={(checked) =>
@@ -550,6 +554,7 @@ export default function ModelPricingEditor({
                           <Switch
                             size='small'
                             checked={isOptionalFieldEnabled(selectedModel, 'cachePrice')}
+                            aria-label={t('启用缓存读取价格')}
                             name='model-pricing-switch-cache-price'
                             onChange={(checked) =>
                               handleOptionalFieldToggle('cachePrice', checked)
@@ -578,6 +583,7 @@ export default function ModelPricingEditor({
                               selectedModel,
                               'createCachePrice',
                             )}
+                            aria-label={t('启用缓存创建价格')}
                             name='model-pricing-switch-create-cache-price'
                             onChange={(checked) =>
                               handleOptionalFieldToggle('createCachePrice', checked)
@@ -621,6 +627,7 @@ export default function ModelPricingEditor({
                           <Switch
                             size='small'
                             checked={isOptionalFieldEnabled(selectedModel, 'imagePrice')}
+                            aria-label={t('启用图片输入价格')}
                             name='model-pricing-switch-image-price'
                             onChange={(checked) =>
                               handleOptionalFieldToggle('imagePrice', checked)
@@ -649,6 +656,7 @@ export default function ModelPricingEditor({
                               selectedModel,
                               'audioInputPrice',
                             )}
+                            aria-label={t('启用音频输入价格')}
                             name='model-pricing-switch-audio-input-price'
                             onChange={(checked) =>
                               handleOptionalFieldToggle('audioInputPrice', checked)
@@ -680,6 +688,7 @@ export default function ModelPricingEditor({
                               selectedModel,
                               'audioOutputPrice',
                             )}
+                            aria-label={t('启用音频补全价格')}
                             name='model-pricing-switch-audio-output-price'
                             disabled={!isOptionalFieldEnabled(
                               selectedModel,
@@ -758,6 +767,7 @@ export default function ModelPricingEditor({
             value={newModelName}
             placeholder={t('输入模型名称，例如 gpt-4.1')}
             onChange={(value) => setNewModelName(value)}
+            aria-label={t('模型名称')}
             name='pages-setting-ratio-components-modelpricingeditor-input-3'
           />
         </Modal>

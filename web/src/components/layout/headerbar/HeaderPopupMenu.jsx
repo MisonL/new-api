@@ -17,7 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useActualTheme } from '../../../context/Theme';
 
 const HeaderPopupMenu = ({
   menuLabel,
@@ -27,6 +28,22 @@ const HeaderPopupMenu = ({
 }) => {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
+  const actualTheme = useActualTheme();
+
+  const popupStyle = useMemo(
+    () => ({
+      backgroundColor:
+        actualTheme === 'dark' ? 'rgba(39, 39, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)',
+      borderColor:
+        actualTheme === 'dark' ? 'rgba(82, 82, 91, 0.92)' : 'rgba(203, 213, 225, 0.96)',
+      boxShadow:
+        actualTheme === 'dark'
+          ? '0 20px 25px -5px rgba(0, 0, 0, 0.45), 0 8px 10px -6px rgba(0, 0, 0, 0.35)'
+          : '0 20px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.08)',
+      isolation: 'isolate',
+    }),
+    [actualTheme],
+  );
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -58,11 +75,16 @@ const HeaderPopupMenu = ({
       })}
       {open && (
         <div
-          role='menu'
-          aria-label={menuLabel}
-          className={`absolute right-0 top-full z-[120] mt-2 min-w-[144px] overflow-hidden rounded-lg border border-semi-color-border bg-semi-color-bg-overlay p-1 shadow-lg dark:border-gray-600 dark:bg-gray-700 ${menuClassName}`.trim()}
+          className='absolute right-0 top-full z-[260] mt-2'
         >
-          {renderContent({ closeMenu: () => setOpen(false) })}
+          <div
+            role='menu'
+            aria-label={menuLabel}
+            style={popupStyle}
+            className={`min-w-[144px] overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xl ring-1 ring-black/5 dark:border-zinc-700 dark:bg-zinc-800 dark:ring-white/10 ${menuClassName}`.trim()}
+          >
+            {renderContent({ closeMenu: () => setOpen(false) })}
+          </div>
         </div>
       )}
     </div>

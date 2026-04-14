@@ -57,6 +57,8 @@ const SelectableButtonGroup = ({
   withCheckbox = false,
   loading = false,
   variant,
+  compact = false,
+  layout = 'grid',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [skeletonCount] = useState(12);
@@ -87,6 +89,12 @@ const SelectableButtonGroup = ({
 
   // 基于容器宽度计算响应式列数和标签显示策略
   const getResponsiveConfig = () => {
+    if (compact) {
+      if (containerWidth <= 360) return { columns: 2, showTags: false };
+      if (containerWidth <= 720) return { columns: 3, showTags: false };
+      if (containerWidth <= 1080) return { columns: 4, showTags: false };
+      return { columns: 5, showTags: false };
+    }
     if (containerWidth <= 280) return { columns: 1, showTags: true }; // 极窄：1列+标签
     if (containerWidth <= 380) return { columns: 2, showTags: true }; // 窄屏：2列+标签
     if (containerWidth <= 460) return { columns: 3, showTags: false }; // 中等：3列不加标签
@@ -95,7 +103,8 @@ const SelectableButtonGroup = ({
 
   const { columns: perRow, showTags: shouldShowTags } = getResponsiveConfig();
   const maxVisibleRows = Math.max(1, Math.floor(collapseHeight / 32)); // Approx row height 32
-  const needCollapse = collapsible && items.length > perRow * maxVisibleRows;
+  const needCollapse =
+    layout === 'grid' && collapsible && items.length > perRow * maxVisibleRows;
   const showSkeleton = useMinimumLoadingTime(loading);
 
   // 统一使用紧凑的网格间距
@@ -172,8 +181,84 @@ const SelectableButtonGroup = ({
     );
   };
 
+  const renderButton = (item, isActive) => {
+    const buttonClassNames = [
+      'sbg-button',
+      compact ? 'sbg-button-compact' : '',
+      layout === 'scroll' ? 'sbg-button-scroll' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    if (withCheckbox) {
+      return (
+        <Button
+          onClick={() => {
+            /* disabled */
+          }}
+          theme={isActive ? 'light' : 'outline'}
+          type={isActive ? 'primary' : 'tertiary'}
+          className={buttonClassNames}
+          icon={
+            <Checkbox
+              checked={isActive}
+              onChange={() => onChange(item.value)}
+              style={{ pointerEvents: 'auto' }}
+              name='components-common-ui-selectablebuttongroup-checkbox-1'
+            />
+          }
+          style={{ width: '100%', cursor: 'default' }}
+        >
+          <div className='sbg-content'>
+            {item.icon && <span className='sbg-icon'>{item.icon}</span>}
+            <ConditionalTooltipText text={item.label} />
+            {item.tagCount !== undefined && shouldShowTags && (
+              <span className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}>
+                {item.tagCount}
+              </span>
+            )}
+          </div>
+        </Button>
+      );
+    }
+
+    return (
+      <Button
+        onClick={() => onChange(item.value)}
+        theme={isActive ? 'light' : 'outline'}
+        type={isActive ? 'primary' : 'tertiary'}
+        className={buttonClassNames}
+        style={{ width: layout === 'scroll' ? 'auto' : '100%' }}
+      >
+        <div className='sbg-content'>
+          {item.icon && <span className='sbg-icon'>{item.icon}</span>}
+          <ConditionalTooltipText text={item.label} />
+          {item.tagCount !== undefined && shouldShowTags && item.tagCount !== '' && (
+            <span className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}>
+              {item.tagCount}
+            </span>
+          )}
+        </div>
+      </Button>
+    );
+  };
+
   const contentElement = showSkeleton ? (
     renderSkeletonButtons()
+  ) : layout === 'scroll' ? (
+    <div className='sbg-scroll'>
+      {items.map((item) => {
+        const isActive = Array.isArray(activeValue)
+          ? activeValue.includes(item.value)
+          : activeValue === item.value;
+
+        return (
+          <div key={item.value} className='sbg-scroll-item'>
+            {renderButton(item, isActive)}
+          </div>
+        );
+      })}
+    </div>
   ) : (
     <Row gutter={gutterSize} style={{ lineHeight: '32px', ...style }}>
       {items.map((item) => {
@@ -181,59 +266,9 @@ const SelectableButtonGroup = ({
           ? activeValue.includes(item.value)
           : activeValue === item.value;
 
-        if (withCheckbox) {
-          return (
-            <Col span={getColSpan()} key={item.value}>
-              <Button
-                onClick={() => {
-                  /* disabled */
-                }}
-                theme={isActive ? 'light' : 'outline'}
-                type={isActive ? 'primary' : 'tertiary'}
-                className='sbg-button'
-                icon={
-                  <Checkbox
-                    checked={isActive}
-                    onChange={() => onChange(item.value)}
-                    style={{ pointerEvents: 'auto' }}
-                    name='components-common-ui-selectablebuttongroup-checkbox-1'
-                  />
-                }
-                style={{ width: '100%', cursor: 'default' }}
-              >
-                <div className='sbg-content'>
-                  {item.icon && <span className='sbg-icon'>{item.icon}</span>}
-                  <ConditionalTooltipText text={item.label} />
-                  {item.tagCount !== undefined && shouldShowTags && (
-                    <span className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}>
-                      {item.tagCount}
-                    </span>
-                  )}
-                </div>
-              </Button>
-            </Col>
-          );
-        }
-
         return (
           <Col span={getColSpan()} key={item.value}>
-            <Button
-              onClick={() => onChange(item.value)}
-              theme={isActive ? 'light' : 'outline'}
-              type={isActive ? 'primary' : 'tertiary'}
-              className='sbg-button'
-              style={{ width: '100%' }}
-            >
-              <div className='sbg-content'>
-                {item.icon && <span className='sbg-icon'>{item.icon}</span>}
-                <ConditionalTooltipText text={item.label} />
-                {item.tagCount !== undefined && shouldShowTags && item.tagCount !== '' && (
-                  <span className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}>
-                    {item.tagCount}
-                  </span>
-                )}
-              </div>
-            </Button>
+            {renderButton(item, isActive)}
           </Col>
         );
       })}
@@ -242,7 +277,7 @@ const SelectableButtonGroup = ({
 
   return (
     <div
-      className={`mb-8 ${containerWidth <= 400 ? 'sbg-compact' : ''}${variant ? ` sbg-variant-${variant}` : ''}`}
+      className={`${compact ? 'mb-4' : 'mb-8'} ${containerWidth <= 400 ? 'sbg-compact' : ''}${variant ? ` sbg-variant-${variant}` : ''}`}
       ref={containerRef}
     >
       {title && (

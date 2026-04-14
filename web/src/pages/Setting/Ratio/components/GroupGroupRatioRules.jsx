@@ -160,6 +160,7 @@ function GroupSection({
             >
               <Select
                 id={`group-ratio-target-group-${rule._id}`}
+                aria-label={t('选择使用分组')}
                 size='small'
                 filter
                 value={rule.usingGroup || undefined}
@@ -173,6 +174,7 @@ function GroupSection({
               <InputNumber
                 id={`group-ratio-value-${rule._id}`}
                 name={`group-ratio-value-${rule._id}`}
+                aria-label={t('倍率')}
                 size='small'
                 min={0}
                 step={0.1}
@@ -281,6 +283,7 @@ export default function GroupGroupRatioRules({
             size='small'
             filter
             allowCreate
+            aria-label={t('选择用户分组')}
             placeholder={t('选择用户分组')}
             optionList={groupOptions}
             value={newGroupName || undefined}
@@ -315,6 +318,7 @@ export default function GroupGroupRatioRules({
           size='small'
           filter
           allowCreate
+          aria-label={t('选择用户分组')}
           placeholder={t('选择用户分组')}
           optionList={groupOptions}
           value={newGroupName || undefined}
