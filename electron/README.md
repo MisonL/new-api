@@ -1,73 +1,67 @@
-# New API Electron Desktop App
+# Electron 桌面端说明
 
-This directory contains the Electron wrapper for New API, providing a native desktop application with system tray support for Windows, macOS, and Linux.
+本目录是 `new-api` 的 Electron 封装，用于提供带托盘能力的桌面版应用，支持 Windows、macOS、Linux。
 
-## Prerequisites
+## 前置要求
 
-### 1. Go Binary (Required)
-The Electron app requires the compiled Go binary to function. You have two options:
+### 1. Go 二进制文件
 
-**Option A: Use existing binary (without Go installed)**
+Electron 启动时依赖上级目录中的 `new-api` 可执行文件。
+
+如果已经有现成二进制，可直接复制：
+
 ```bash
-# If you have a pre-built binary (e.g., new-api-macos)
 cp ../new-api-macos ../new-api
 ```
 
-**Option B: Build from source (requires Go)**
-TODO
+如果没有，需要先在项目根目录完成后端构建。
 
-### 3. Electron Dependencies
+### 2. 安装依赖
+
 ```bash
 cd electron
 npm install
 ```
 
-## Development
+## 开发运行
 
-Run the app in development mode:
 ```bash
 npm start
 ```
 
-This will:
-- Start the Go backend on port 3000
-- Open an Electron window with DevTools enabled
-- Create a system tray icon (menu bar on macOS)
-- Store database in `../data/new-api.db`
+启动后会：
 
-## Building for Production
+- 在 `3000` 端口启动 Go 后端
+- 打开 Electron 窗口
+- 创建系统托盘图标
+- 将开发环境数据库写入 `../data/new-api.db`
 
-### Quick Build
+## 构建
+
 ```bash
-# Ensure Go binary exists in parent directory
-ls ../new-api  # Should exist
-
-# Build for current platform
+ls ../new-api
 npm run build
-
-# Platform-specific builds
-npm run build:mac    # Creates .dmg and .zip
-npm run build:win    # Creates .exe installer
-npm run build:linux  # Creates .AppImage and .deb
+npm run build:mac
+npm run build:win
+npm run build:linux
 ```
 
-### Build Output
-- Built applications are in `electron/dist/`
-- macOS: `.dmg` (installer) and `.zip` (portable)
-- Windows: `.exe` (installer) and portable exe
-- Linux: `.AppImage` and `.deb`
+构建产物输出到 `electron/dist/`：
 
-## Configuration
+- macOS：`.dmg`、`.zip`
+- Windows：`.exe`
+- Linux：`.AppImage`、`.deb`
 
-### Port
-Default port is 3000. To change, edit `main.js`:
-```javascript
-const PORT = 3000; // Change to desired port
-```
+## 配置
 
-### Database Location
-- **Development**: `../data/new-api.db` (project directory)
-- **Production**:
-  - macOS: `~/Library/Application Support/New API/data/`
-  - Windows: `%APPDATA%/New API/data/`
-  - Linux: `~/.config/New API/data/`
+### 端口
+
+默认端口是 `3000`。如需修改，可编辑 `main.js` 中的 `PORT` 常量。
+
+### 数据库位置
+
+- 开发环境：`../data/new-api.db`
+- 生产环境：
+  - macOS：`~/Library/Application Support/New API/data/`
+  - Windows：`%APPDATA%/New API/data/`
+  - Linux：`~/.config/New API/data/`

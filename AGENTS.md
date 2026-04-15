@@ -1,203 +1,157 @@
-# AGENTS.md — Project Conventions for new-api
+# AGENTS.md — new-api 仓库约束
 
-## Overview
+## 项目概览
 
-This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI providers (OpenAI, Claude, Gemini, Azure, AWS Bedrock, etc.) behind a unified API, with user management, billing, rate limiting, and an admin dashboard.
+本项目是基于 Go 的统一 AI 网关，聚合 OpenAI、Claude、Gemini、Azure、AWS Bedrock 等上游接口，对外提供统一 API、用户管理、计费、限流和管理后台。
 
-## Tech Stack
+## 技术栈
 
-- **Backend**: Go 1.25+, Gin web framework, GORM v2 ORM
-- **Frontend**: React 18, Vite, Semi Design UI (@douyinfe/semi-ui)
-- **Databases**: SQLite, MySQL, PostgreSQL (all three must be supported)
-- **Cache**: Redis (go-redis) + in-memory cache
-- **Auth**: JWT, WebAuthn/Passkeys, OAuth (GitHub, Discord, OIDC, etc.)
-- **Frontend package manager**: Bun (preferred over npm/yarn/pnpm)
+- 后端：Go 1.25+、Gin、GORM v2
+- 前端：React 18、Vite、Semi Design
+- 数据库：SQLite、MySQL、PostgreSQL，三者都必须兼容
+- 缓存：Redis + 内存缓存
+- 鉴权：JWT、Passkey、OAuth、OIDC
+- 前端包管理：默认使用 `bun`
 
-## Architecture
+## 目录结构
 
-Layered architecture: Router -> Controller -> Service -> Model
+项目按 `router -> controller -> service -> model` 分层。
 
-```
-router/        — HTTP routing (API, relay, dashboard, web)
-controller/    — Request handlers
-service/       — Business logic
-model/         — Data models and DB access (GORM)
-relay/         — AI API relay/proxy with provider adapters
-  relay/channel/ — Provider-specific adapters (openai/, claude/, gemini/, aws/, etc.)
-middleware/    — Auth, rate limiting, CORS, logging, distribution
-setting/       — Configuration management (ratio, model, operation, system, performance)
-common/        — Shared utilities (JSON, crypto, Redis, env, rate-limit, etc.)
-dto/           — Data transfer objects (request/response structs)
-constant/      — Constants (API types, channel types, context keys)
-types/         — Type definitions (relay formats, file sources, errors)
-i18n/          — Backend internationalization (go-i18n, en/zh)
-oauth/         — OAuth provider implementations
-pkg/           — Internal packages (cachex, ionet)
-web/           — React frontend
-  web/src/i18n/  — Frontend internationalization (i18next, zh/en/fr/ru/ja/vi)
-```
+- `router/`：路由
+- `controller/`：请求处理
+- `service/`：业务逻辑
+- `model/`：数据模型与数据库访问
+- `relay/`：上游协议适配与中继
+- `middleware/`：鉴权、限流、日志、分发
+- `setting/`：系统、模型、计费、性能等配置
+- `common/`：共享工具
+- `dto/`、`types/`、`constant/`：结构体、类型和常量
+- `oauth/`：OAuth 相关实现
+- `pkg/`：内部通用包
+- `web/`：前端项目
 
-## Internationalization (i18n)
+## 国际化
 
-### Backend (`i18n/`)
-- Library: `nicksnyder/go-i18n/v2`
-- Languages: en, zh
+- 后端使用 `i18n/`，当前保留 `zh`、`en`
+- 前端使用 `web/src/i18n/`，当前存在多语言运行时资源
+- “文档中文化”与“运行时 i18n”是两件事；移除非中文文档时，不等于移除界面多语言能力
 
-### Frontend (`web/src/i18n/`)
-- Library: `i18next` + `react-i18next` + `i18next-browser-languagedetector`
-- Languages: zh (fallback), en, fr, ru, ja, vi
-- Translation files: `web/src/i18n/locales/{lang}.json` — flat JSON, keys are Chinese source strings
-- Usage: `useTranslation()` hook, call `t('中文key')` in components
-- Semi UI locale synced via `SemiLocaleWrapper`
-- CLI tools: `bun run i18n:extract`, `bun run i18n:sync`, `bun run i18n:lint`
+## 规则
 
-## Rules
+### 1. JSON 统一使用 `common/json.go`
 
-### Rule 1: JSON Package — Use `common/json.go`
+业务代码中禁止直接调用 `encoding/json` 的编解码函数，统一使用：
 
-All JSON marshal/unmarshal operations MUST use the wrapper functions in `common/json.go`:
+- `common.Marshal`
+- `common.Unmarshal`
+- `common.UnmarshalJsonStr`
+- `common.DecodeJson`
+- `common.GetJsonType`
 
-- `common.Marshal(v any) ([]byte, error)`
-- `common.Unmarshal(data []byte, v any) error`
-- `common.UnmarshalJsonStr(data string, v any) error`
-- `common.DecodeJson(reader io.Reader, v any) error`
-- `common.GetJsonType(data json.RawMessage) string`
+`json.RawMessage` 等类型仍可作为类型引用，但实际编解码必须走 `common.*`。
 
-Do NOT directly import or call `encoding/json` in business code. These wrappers exist for consistency and future extensibility (e.g., swapping to a faster JSON library).
+### 2. 数据库必须同时兼容 SQLite、MySQL、PostgreSQL
 
-Note: `json.RawMessage`, `json.Number`, and other type definitions from `encoding/json` may still be referenced as types, but actual marshal/unmarshal calls must go through `common.*`.
+- 优先使用 GORM，而不是手写方言 SQL
+- 不直接写 `AUTO_INCREMENT`、`SERIAL`
+- 必须兼容保留字列名、布尔值差异、迁移差异
+- SQLite 不支持的 `ALTER COLUMN`，必须用兼容方案
+- 若无法避免原生 SQL，必须同时给出三库兼容处理
 
-### Rule 2: Database Compatibility — SQLite, MySQL >= 5.7.8, PostgreSQL >= 9.6
+### 3. 前端默认使用 Bun
 
-All database code MUST be fully compatible with all three databases simultaneously.
+- 安装依赖：`bun install`
+- 开发：`bun run dev`
+- 构建：`bun run build`
+- i18n 工具：`bun run i18n:*`
 
-**Use GORM abstractions:**
-- Prefer GORM methods (`Create`, `Find`, `Where`, `Updates`, etc.) over raw SQL.
-- Let GORM handle primary key generation — do not use `AUTO_INCREMENT` or `SERIAL` directly.
+### 4. 新渠道接入时检查 `StreamOptions`
 
-**When raw SQL is unavoidable:**
-- Column quoting differs: PostgreSQL uses `"column"`, MySQL/SQLite uses `` `column` ``.
-- Use `commonGroupCol`, `commonKeyCol` variables from `model/main.go` for reserved-word columns like `group` and `key`.
-- Boolean values differ: PostgreSQL uses `true`/`false`, MySQL/SQLite uses `1`/`0`. Use `commonTrueVal`/`commonFalseVal`.
-- Use `common.UsingPostgreSQL`, `common.UsingSQLite`, `common.UsingMySQL` flags to branch DB-specific logic.
+新增渠道时，先确认上游是否支持 `StreamOptions`；若支持，需要同步加入 `streamSupportedChannels`。
 
-**Forbidden without cross-DB fallback:**
-- MySQL-only functions (e.g., `GROUP_CONCAT` without PostgreSQL `STRING_AGG` equivalent)
-- PostgreSQL-only operators (e.g., `@>`, `?`, `JSONB` operators)
-- `ALTER COLUMN` in SQLite (unsupported — use column-add workaround)
-- Database-specific column types without fallback — use `TEXT` instead of `JSONB` for JSON storage
+### 5. 保留 AGPL 与上游来源
 
-**Migrations:**
-- Ensure all migrations work on all three databases.
-- For SQLite, use `ALTER TABLE ... ADD COLUMN` instead of `ALTER COLUMN` (see `model/main.go` for patterns).
+本仓库独立演进，但必须保留：
 
-### Rule 3: Frontend — Prefer Bun
+- 许可证文本
+- 必要的版权与修改声明
+- 对 `QuantumNous/new-api` 的来源说明
 
-Use `bun` as the preferred package manager and script runner for the frontend (`web/` directory):
-- `bun install` for dependency installation
-- `bun run dev` for development server
-- `bun run build` for production build
-- `bun run i18n:*` for i18n tooling
+允许独立调整：
 
-### Rule 4: New Channel StreamOptions Support
+- README、仓库描述、Issue 模板、文档入口、发布说明、帮助链接
+- 本仓库自己的项目定位、发布渠道和对外链接
 
-When implementing a new channel:
-- Confirm whether the provider supports `StreamOptions`.
-- If supported, add the channel to `streamSupportedChannels`.
+默认原则：
 
-### Rule 5: Preserve AGPL Notices And Upstream Attribution
+- 保留法律与来源信息
+- 允许独立产品化表达
+- 不得抹去上游来源或伪造独占归属
 
-This repository follows AGPL obligations while evolving independently.
+### 6. 阶梯计费相关改动前先读 `pkg/billingexpr/expr.md`
 
-The following information MUST be preserved unless there is a separately reviewed legal decision:
+只要涉及表达式计费、阶梯计费、工具定价、预扣费或结算链路，必须先阅读 `pkg/billingexpr/expr.md`。
 
-- License texts and copyright notices
-- Required AGPL attribution and modification notices
-- Clear upstream attribution to `QuantumNous/new-api` where legal or historical provenance needs to be retained
+### 7. 中继请求 DTO 必须保留显式零值
 
-The following changes ARE allowed when they do not remove required legal notices or create false attribution:
+客户端 JSON 解析后再转发给上游的可选标量字段，必须使用带 `omitempty` 的指针类型，如：
 
-- Rewriting README, repository description, issue templates, release notes, docs links, support links, update-check links, and other project-facing documentation
-- Adjusting user-facing branding or project positioning for this independent fork
-- Pointing clone links, release links, documentation links, and security/reporting links to this repository's own endpoints
+- `*int`
+- `*uint`
+- `*float64`
+- `*bool`
 
-The following changes still require extra caution and should be minimized unless clearly necessary:
+语义要求：
 
-- Go module paths, package names, and import paths
-- Docker image names and CI publishing identifiers
-- Any wording that could obscure upstream origin or copyright ownership
+- 未传：`nil`，序列化时省略
+- 显式传 `0` / `false`：必须保留并继续向上游发送
 
-Default rule:
-- Keep legal notices and upstream provenance
-- Allow independent project presentation and repository links
-- Do not claim the upstream work as exclusively authored by this fork
+### 8. 真实渠道验证必须使用隔离环境
 
-### Rule 7: Billing Expression System — Read `pkg/billingexpr/expr.md`
+- 禁止开发实例直连生产数据库或生产数据目录
+- 生产渠道配置只能只读导出，再导入到隔离环境
+- 必须使用独立数据库、独立运行目录、独立日志、独立端口
+- 迁移、缓存重建、Token 创建、联调测试都必须在隔离环境进行
 
-When working on tiered/dynamic billing (expression-based pricing), you MUST read `pkg/billingexpr/expr.md` first. It documents the design philosophy, expression language (variables, functions, examples), full system architecture (editor → storage → pre-consume → settlement → log display), token normalization rules (`p`/`c` auto-exclusion), quota conversion, and expression versioning. All code changes to the billing expression system must follow the patterns described in that document.
+### 9. Dashboard 会话接口需要 `New-Api-User`
 
-### Rule 8: Upstream Relay Request DTOs — Preserve Explicit Zero Values
+对于受 `middleware.UserAuth()` 保护的后台接口：
 
-For request structs that are parsed from client JSON and then re-marshaled to upstream providers (especially relay/convert paths):
+- 仅有会话 Cookie 不够
+- 必须额外带上 `New-Api-User: <当前用户 ID>`
+- 该值必须与当前登录用户一致，否则会返回 `401`
 
-- Optional scalar fields MUST use pointer types with `omitempty` (e.g. `*int`, `*uint`, `*float64`, `*bool`), not non-pointer scalars.
-- Semantics MUST be:
-  - field absent in client JSON => `nil` => omitted on marshal;
-  - field explicitly set to zero/false => non-`nil` pointer => must still be sent upstream.
-- Avoid using non-pointer scalars with `omitempty` for optional request parameters, because zero values (`0`, `0.0`, `false`) will be silently dropped during marshal.
+### 10. 不能只靠 `Content-Type` 判断是否为流式
 
-### Rule 9: Real-Channel Validation Must Use an Isolated Environment
+部分上游会把普通 JSON 错误地标记成 `text/event-stream`。
 
-When validating relay behavior with real upstream channel configurations:
+处理规则：
 
-- NEVER point a development instance directly at the production database or production data directory.
-- Production channel configuration may only be used as a **read-only source** for export/import.
-- Use an isolated database, isolated runtime directory, isolated logs, and a separate port for the validation instance.
-- If production channel records are copied into the validation environment, restore them into the isolated database only.
-- Any migration, setup, cache rebuild, token creation, or test invocation must happen in the isolated environment, not the production instance.
+- 非流式请求，不能只因响应头是 `text/event-stream` 就强行按 SSE 处理
+- 先看请求意图，再看响应体前缀
+- 去掉前导空白后，如果以 `{` 或 `[` 开头，按普通 JSON 处理
+- 若以 `data:`、`event:`、`:` 开头，才按 SSE 处理
 
-### Rule 10: Dashboard Session APIs Require `New-Api-User`
+### 11. 本地与隔离运行必须使用稳定密钥
 
-For dashboard/API routes protected by `middleware.UserAuth()`:
-
-- A valid session cookie alone is not sufficient.
-- Requests must also include header `New-Api-User: <current_user_id>`.
-- The header value must match the authenticated session user ID, otherwise the request will be rejected with `401`.
-
-This is especially important for automated integration tests that log in via `/api/user/login` and then call dashboard endpoints such as `/api/user/self` or `/api/token/*`.
-
-### Rule 11: Do Not Infer Streaming Only From `Content-Type`
-
-Some upstreams return a normal JSON body for non-stream requests but incorrectly label the response as `text/event-stream`.
-
-- For non-stream client requests, do not switch into SSE handling solely because the upstream `Content-Type` starts with `text/event-stream`.
-- Prefer request intent first, then inspect the upstream response body prefix when compatibility handling is required.
-- If the body starts with JSON (`{` or `[` after trimming whitespace), treat it as a normal non-stream response.
-- If the body starts with SSE frames such as `data:`, `event:`, or `:`, treat it as a real stream.
-
-This rule exists because relying only on the header can cause non-stream chat completion requests to lose the final JSON body and incorrectly record `is_stream=true`.
-
-### Rule 12: Stable Secrets Are Mandatory For Local/Isolated Runs
-
-Before starting any local or isolated `new-api` instance, set stable values for:
+启动本地或隔离实例前，必须显式设置：
 
 - `SESSION_SECRET`
 - `CRYPTO_SECRET`
 
-Do not rely on implicit defaults or placeholder values such as `random_string`. Missing or unstable secrets will change session/encryption behavior and can invalidate integration test results.
+禁止依赖隐式默认值或占位字符串，否则会影响会话与加密行为，导致联调结论失真。
 
-### Rule 13: This Repository Evolves Independently From Upstream
+### 12. 本仓库独立于上游演进
 
-This repository is an independently steered `new-api` fork.
+- 仓库路线、优先级、发布时间由本仓库自行决定
+- 上游变更是可选输入，不是默认必须同步
+- 吸纳上游前，先评估对本仓库增强能力的影响
+- 优先选择性吸纳，而不是整仓盲目同步
 
-- The repository owner decides roadmap, feature priority, and release cadence.
-- `QuantumNous/new-api` upstream changes are optional inputs, not mandatory sync targets.
-- Do not assume “sync with upstream” is the default best action.
-- Before absorbing upstream changes, explicitly assess impact on local extensions, especially:
-  - enterprise SSO
-  - protocol conversion policy
-  - tiered billing and tool pricing
-  - payload content logging
-  - dashboard and Web UI enhancements
-- Prefer selective intake with conflict review and isolated verification over blind full synchronization.
-- Do not claim upstream intake is complete until local custom features remain available after validation.
+重点关注的本地增强能力包括：
+
+- 企业 SSO
+- 协议转换策略
+- 阶梯计费与工具定价
+- 请求内容日志
+- Dashboard 与 Web UI 增强
