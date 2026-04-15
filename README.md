@@ -54,6 +54,17 @@ cd web && bun run lint
 cd web && bun run build
 ```
 
+## CI/CD
+
+- 版本单一来源：根目录 `VERSION`
+- `release.yml`、`electron-build.yml`、Docker 构建都会读取 `VERSION`
+- tag 发布时，workflow 会校验 tag 名与 `VERSION` 完全一致
+- Docker 镜像默认发布到 `ghcr.io/misonl/new-api`
+- 如需同时发布到 Docker Hub，需要配置仓库 secrets：
+  - `DOCKERHUB_USERNAME`
+  - `DOCKERHUB_TOKEN`
+- 项目发布渠道仅保留 GitHub Release、GitHub Actions 与 GitHub Container Registry
+
 ## 与上游的关系
 
 - 上游项目：`QuantumNous/new-api`

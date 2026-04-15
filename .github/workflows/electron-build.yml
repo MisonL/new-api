@@ -1,4 +1,6 @@
 name: Build Electron App
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 on:
   push:
@@ -47,16 +49,17 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=4096"
         run: |
           VERSION=$(cat VERSION)
+          if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+            if [[ "$TAG_NAME" != "$VERSION" ]]; then
+              echo "Tag '$TAG_NAME' does not match VERSION '$VERSION'"
+              exit 1
+            fi
+          fi
           cd web
           bun install
-          DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$VERSION bun run build
+          DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION="$VERSION" bun run build
           cd ..
-
-      # - name: Build Go binary (macos/Linux)
-      #   if: runner.os != 'Windows'
-      #   run: |
-      #     go mod download
-      #     go build -ldflags "-s -w -X 'new-api/common.Version=$(git describe --tags)' -extldflags '-static'" -o new-api
 
       - name: Build Go binary (Windows)
         if: runner.os == 'Windows'
@@ -85,7 +88,7 @@ jobs:
               VERSION="$VERSION$REST"
             fi
           fi
-          npm version $VERSION --no-git-tag-version --allow-same-version
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Install Electron dependencies
         run: |
