@@ -46,9 +46,10 @@ jobs:
           CI: ""
           NODE_OPTIONS: "--max-old-space-size=4096"
         run: |
+          VERSION=$(cat VERSION)
           cd web
           bun install
-          DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(git describe --tags) bun run build
+          DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$VERSION bun run build
           cd ..
 
       # - name: Build Go binary (macos/Linux)
@@ -60,13 +61,14 @@ jobs:
       - name: Build Go binary (Windows)
         if: runner.os == 'Windows'
         run: |
+          VERSION=$(cat VERSION)
           go mod download
-          go build -ldflags "-s -w -X 'new-api/common.Version=$(git describe --tags)'" -o new-api.exe
+          go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION'" -o new-api.exe
 
       - name: Update Electron version
         run: |
           cd electron
-          VERSION=$(git describe --tags)
+          VERSION=$(cat ../VERSION)
           VERSION=${VERSION#v}  # Remove 'v' prefix if present
           # Convert to valid semver: take first 3 components and convert rest to prerelease format
           # e.g., 0.9.3-patch.1 -> 0.9.3-patch.1

@@ -29,13 +29,22 @@ func printHelp() {
 	fmt.Println("Usage: newapi [--port <port>] [--log-dir <log directory>] [--version] [--help]")
 }
 
+func resolveVersion() string {
+	if envVersion := strings.TrimSpace(os.Getenv("VERSION")); envVersion != "" {
+		return envVersion
+	}
+	versionFile, err := os.ReadFile("VERSION")
+	if err == nil {
+		if fileVersion := strings.TrimSpace(string(versionFile)); fileVersion != "" {
+			return fileVersion
+		}
+	}
+	return Version
+}
+
 func InitEnv() {
 	flag.Parse()
-
-	envVersion := os.Getenv("VERSION")
-	if envVersion != "" {
-		Version = envVersion
-	}
+	Version = resolveVersion()
 
 	if *PrintVersion {
 		fmt.Println(Version)
