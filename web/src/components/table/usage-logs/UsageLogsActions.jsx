@@ -18,18 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import {
-  Button,
-  Divider,
-  Space,
-  Skeleton,
-  Typography,
-} from '@douyinfe/semi-ui';
+import { Button, Skeleton, Space, Tag } from '@douyinfe/semi-ui';
 import { renderQuota } from '../../../helpers';
 import CompactModeToggle from '../../common/ui/CompactModeToggle';
 import { useMinimumLoadingTime } from '../../../hooks/common/useMinimumLoadingTime';
-
-const { Text } = Typography;
 
 const LogsActions = ({
   stat,
@@ -52,54 +44,32 @@ const LogsActions = ({
   );
 
   return (
-    <div className='usage-logs-actions flex flex-col md:flex-row justify-between items-start md:items-center gap-3 w-full'>
+    <div className='usage-logs-actions flex flex-col md:flex-row justify-between items-start md:items-center gap-2 w-full'>
       <Skeleton loading={needSkeleton} active placeholder={placeholder}>
-        <Space
-          className='usage-logs-stats-list'
-          wrap
-          split={<Divider layout='vertical' margin='8px' />}
-        >
-          <div className='usage-logs-stat-item'>
-            <Text size='small' type='tertiary'>
-              {t('消耗额度')}
-            </Text>
-            <Text strong className='usage-logs-stat-value'>
-              {renderQuota(stat.quota)}
-            </Text>
-          </div>
-          <div className='usage-logs-stat-item'>
-            <Text size='small' type='tertiary'>
-              RPM
-            </Text>
-            <Text strong className='usage-logs-stat-value'>
-              {stat.rpm}
-            </Text>
-          </div>
-          <div className='usage-logs-stat-item'>
-            <Text size='small' type='tertiary'>
-              TPM
-            </Text>
-            <Text strong className='usage-logs-stat-value'>
-              {stat.tpm}
-            </Text>
-          </div>
+        <Space className='usage-logs-stats-list' wrap>
+          <Tag color='blue' className='usage-logs-stat-tag'>
+            {t('消耗额度')}: {renderQuota(stat.quota)}
+          </Tag>
+          <Tag color='pink' className='usage-logs-stat-tag'>
+            RPM: {stat.rpm}
+          </Tag>
+          <Tag
+            color='white'
+            className='usage-logs-stat-tag usage-logs-stat-tag-neutral'
+          >
+            TPM: {stat.tpm}
+          </Tag>
         </Space>
       </Skeleton>
 
       <div className='usage-logs-actions-toolbar flex items-center gap-2'>
-        <Button
-          type='danger'
-          theme='light'
-          onClick={batchDeleteLogs}
-          className='usage-logs-action-button'
-        >
+        <Button type='danger' theme='light' onClick={batchDeleteLogs}>
           {t('批量删除日志')}
         </Button>
         <CompactModeToggle
           compactMode={compactMode}
           setCompactMode={setCompactMode}
           t={t}
-          className='usage-logs-action-button'
         />
       </div>
     </div>

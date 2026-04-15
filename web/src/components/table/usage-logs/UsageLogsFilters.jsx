@@ -240,7 +240,6 @@ const LogsFilters = ({
               htmlType='submit'
               loading={loading}
               size='small'
-              className='usage-logs-filter-button'
             >
               {t('查询')}
             </Button>
@@ -256,7 +255,6 @@ const LogsFilters = ({
                 }
               }}
               size='small'
-              className='usage-logs-filter-button'
             >
               {t('重置')}
             </Button>
@@ -264,7 +262,6 @@ const LogsFilters = ({
               type='tertiary'
               onClick={() => setShowColumnSelector(true)}
               size='small'
-              className='usage-logs-filter-button'
             >
               {t('列设置')}
             </Button>

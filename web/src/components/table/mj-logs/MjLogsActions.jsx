@@ -40,8 +40,8 @@ const MjLogsActions = ({
       : t('查看绘图任务进度、结果地址与失败原因');
 
   const placeholder = (
-    <div className='aux-logs-summary-card'>
-      <div className='aux-logs-summary-icon aux-logs-summary-icon-purple'>
+    <div className='logs-inline-summary'>
+      <div className='logs-inline-summary-icon logs-inline-summary-icon-purple'>
         <IconEyeOpened />
       </div>
       <div className='flex-1 min-w-0'>
@@ -54,22 +54,25 @@ const MjLogsActions = ({
   return (
     <div className='aux-logs-actions flex flex-col md:flex-row justify-between items-start md:items-center gap-3 w-full'>
       <Skeleton loading={showSkeleton} active placeholder={placeholder}>
-        <div className='aux-logs-summary-card'>
-          <div className='aux-logs-summary-icon aux-logs-summary-icon-purple'>
+        <div className='logs-inline-summary'>
+          <div className='logs-inline-summary-icon logs-inline-summary-icon-purple'>
             <IconEyeOpened />
           </div>
-          <div className='aux-logs-summary-content'>
-            <Text strong>{t('Midjourney 任务记录')}</Text>
+          <div className='logs-inline-summary-content'>
+            <div className='logs-inline-summary-header'>
+              <Text strong>{t('Midjourney 任务记录')}</Text>
+              <Tag
+                color={isAdminUser && showBanner ? 'red' : 'violet'}
+                size='small'
+                className='logs-inline-summary-tag'
+              >
+                {isAdminUser && showBanner ? t('需回调') : t('绘图')}
+              </Tag>
+            </div>
             <Text size='small' type='tertiary'>
               {description}
             </Text>
           </div>
-          <Tag
-            color={isAdminUser && showBanner ? 'red' : 'violet'}
-            className='aux-logs-summary-tag !rounded-xl'
-          >
-            {isAdminUser && showBanner ? t('需回调') : t('绘图')}
-          </Tag>
         </div>
       </Skeleton>
 
@@ -78,7 +81,6 @@ const MjLogsActions = ({
           compactMode={compactMode}
           setCompactMode={setCompactMode}
           t={t}
-          className='usage-logs-action-button'
         />
       </div>
     </div>

@@ -27,19 +27,25 @@ const { Text } = Typography;
 const TaskLogsActions = ({ compactMode, setCompactMode, t }) => {
   return (
     <div className='aux-logs-actions flex flex-col md:flex-row justify-between items-start md:items-center gap-3 w-full'>
-      <div className='aux-logs-summary-card'>
-        <div className='aux-logs-summary-icon aux-logs-summary-icon-orange'>
+      <div className='logs-inline-summary'>
+        <div className='logs-inline-summary-icon logs-inline-summary-icon-orange'>
           <IconEyeOpened />
         </div>
-        <div className='aux-logs-summary-content'>
-          <Text strong>{t('任务记录')}</Text>
+        <div className='logs-inline-summary-content'>
+          <div className='logs-inline-summary-header'>
+            <Text strong>{t('任务记录')}</Text>
+            <Tag
+              color='orange'
+              size='small'
+              className='logs-inline-summary-tag'
+            >
+              {t('任务')}
+            </Tag>
+          </div>
           <Text size='small' type='tertiary'>
             {t('查看异步任务状态、回调结果与失败信息')}
           </Text>
         </div>
-        <Tag color='orange' className='aux-logs-summary-tag !rounded-xl'>
-          {t('任务')}
-        </Tag>
       </div>
 
       <div className='usage-logs-actions-toolbar flex items-center gap-2'>
@@ -47,7 +53,6 @@ const TaskLogsActions = ({ compactMode, setCompactMode, t }) => {
           compactMode={compactMode}
           setCompactMode={setCompactMode}
           t={t}
-          className='usage-logs-action-button'
         />
       </div>
     </div>
