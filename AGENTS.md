@@ -174,3 +174,19 @@ Before starting any local or isolated `new-api` instance, set stable values for:
 - `CRYPTO_SECRET`
 
 Do not rely on implicit defaults or placeholder values such as `random_string`. Missing or unstable secrets will change session/encryption behavior and can invalidate integration test results.
+
+### Rule 13: This Repository Evolves Independently From Upstream
+
+This repository is an independently steered `new-api` fork.
+
+- The repository owner decides roadmap, feature priority, and release cadence.
+- `QuantumNous/new-api` upstream changes are optional inputs, not mandatory sync targets.
+- Do not assume “sync with upstream” is the default best action.
+- Before absorbing upstream changes, explicitly assess impact on local extensions, especially:
+  - enterprise SSO
+  - protocol conversion policy
+  - tiered billing and tool pricing
+  - payload content logging
+  - dashboard and Web UI enhancements
+- Prefer selective intake with conflict review and isolated verification over blind full synchronization.
+- Do not claim upstream intake is complete until local custom features remain available after validation.

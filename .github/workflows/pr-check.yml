@@ -16,15 +16,14 @@ jobs:
       - uses: peakoss/anti-slop@v0.2.1
         with:
           max-failures: 4
-          require-description: true
+          require-description: false
 
           # require-linked-issue: false
-          require-pr-template: true
-          strict-pr-template-sections: "提交前检查项 / Checklist"
+          require-pr-template: false
 
           detect-spam-usernames: true
           min-account-age: 30
 
           failure-add-pr-labels: "pr-check-failed"
-          failure-pr-message: "感谢您的提交。该 PR 当前未满足我们的基础提交流程要求，例如缺少必要的描述、模板内容或验证信息。项目接受 AI 协助开发，但提交人必须核对内容、对结果负责，并在出现问题时持续跟进修复。请补全相关信息后重新提交。/ Thank you for your submission. This PR does not currently meet our baseline submission requirements, such as providing the required description, template content, or verification details. AI-assisted development is allowed, but the submitter must verify the content, take responsibility for the result, and follow up on any issues. Please update the PR and resubmit."
+          failure-pr-message: "该 PR 未通过基础门禁检查。项目接受 AI 协助开发，但提交人必须核对结果并对后续修复负责。/ This PR did not pass the baseline checks. AI-assisted development is allowed, but the submitter must verify the result and remain responsible for follow-up fixes."
           close-pr: true
