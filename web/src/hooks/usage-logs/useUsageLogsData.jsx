@@ -19,7 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Modal } from '@douyinfe/semi-ui';
+import { Button, Modal, Typography } from '@douyinfe/semi-ui';
+import { IconEyeOpened } from '@douyinfe/semi-icons';
 import {
   API,
   getTodayStartTimestamp,
@@ -40,6 +41,7 @@ import {
 } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
+const { Text } = Typography;
 
 export const useLogsData = () => {
   const { t } = useTranslation();
@@ -162,7 +164,9 @@ export const useLogsData = () => {
   };
 
   // Column visibility state
-  const [visibleColumns, setVisibleColumns] = useState(getInitialVisibleColumns);
+  const [visibleColumns, setVisibleColumns] = useState(
+    getInitialVisibleColumns,
+  );
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [billingDisplayMode, setBillingDisplayMode] = useState(
     getInitialBillingDisplayMode,
@@ -188,6 +192,10 @@ export const useLogsData = () => {
   const [editingUser, setEditingUser] = useState({
     id: undefined,
   });
+
+  // Payload content modal state
+  const [showPayloadContentModal, setShowPayloadContentModal] = useState(false);
+  const [payloadContentTarget, setPayloadContentTarget] = useState(null);
 
   // Initialize default column visibility
   const initDefaultColumns = () => {
@@ -261,6 +269,60 @@ export const useLogsData = () => {
       request_id: formValues.request_id || '',
       logType: formValues.logType ? parseInt(formValues.logType) : 0,
     };
+  };
+
+  const buildLogFilterPayload = (overrideLogType = null) => {
+    const values = getFormValues();
+    const currentLogType =
+      overrideLogType !== null
+        ? overrideLogType
+        : values.logType !== undefined
+          ? values.logType
+          : logType;
+
+    return {
+      type: currentLogType,
+      username: values.username,
+      token_name: values.token_name,
+      model_name: values.model_name,
+      start_timestamp: Date.parse(values.start_timestamp) / 1000,
+      end_timestamp: Date.parse(values.end_timestamp) / 1000,
+      channel: values.channel ? parseInt(values.channel, 10) : 0,
+      group: values.group,
+      request_id: values.request_id,
+    };
+  };
+
+  const buildPayloadMetaText = (prefix, other) => {
+    const contentType = other?.[`${prefix}_content_type`];
+    const byteSize = other?.[`${prefix}_content_bytes`];
+    const flags = [];
+    if (contentType) {
+      flags.push(contentType);
+    }
+    if (byteSize) {
+      flags.push(`${byteSize} bytes`);
+    }
+    if (other?.[`${prefix}_content_truncated`]) {
+      flags.push(t('已截断'));
+    }
+    if (other?.[`${prefix}_content_omitted`]) {
+      flags.push(t('已省略二进制内容'));
+    }
+    return flags.join(' | ');
+  };
+
+  const hasPayloadAuditField = (other, prefix) => {
+    if (!other) {
+      return false;
+    }
+    return [
+      `${prefix}_content`,
+      `${prefix}_content_type`,
+      `${prefix}_content_bytes`,
+      `${prefix}_content_truncated`,
+      `${prefix}_content_omitted`,
+    ].some((key) => Object.prototype.hasOwnProperty.call(other, key));
   };
 
   // Statistics functions
@@ -352,6 +414,32 @@ export const useLogsData = () => {
     setShowChannelAffinityUsageCacheModal(true);
   };
 
+  const openPayloadContentModal = ({
+    title,
+    content,
+    contentType,
+    metaText,
+    requestId,
+    requestPath,
+    modelName,
+  }) => {
+    setPayloadContentTarget({
+      title,
+      content,
+      contentType,
+      metaText,
+      requestId,
+      requestPath,
+      modelName,
+    });
+    setShowPayloadContentModal(true);
+  };
+
+  const closePayloadContentModal = () => {
+    setShowPayloadContentModal(false);
+    setPayloadContentTarget(null);
+  };
+
   const openEditUserPanel = (userId) => {
     if (!isAdminUser) {
       return;
@@ -390,7 +478,10 @@ export const useLogsData = () => {
       let other = getLogOther(logs[i].other);
       let expandDataLocal = [];
 
-      if (isAdminUser && (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)) {
+      if (
+        isAdminUser &&
+        (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)
+      ) {
         expandDataLocal.push({
           key: t('渠道信息'),
           value: `${logs[i].channel} - ${logs[i].channel_name || '[未知]'}`,
@@ -437,7 +528,10 @@ export const useLogsData = () => {
           expandDataLocal.push({
             key: t('日志详情'),
             value: other?.claude
-              ? renderClaudeLogContent({ ...other, displayMode: billingDisplayMode })
+              ? renderClaudeLogContent({
+                  ...other,
+                  displayMode: billingDisplayMode,
+                })
               : renderLogContent({ ...other, displayMode: billingDisplayMode }),
           });
         }
@@ -453,6 +547,97 @@ export const useLogsData = () => {
             value: other.reject_reason,
           });
         }
+      }
+      const hasRequestPayload = hasPayloadAuditField(other, 'request');
+      const hasResponsePayload = hasPayloadAuditField(other, 'response');
+      if (hasRequestPayload || hasResponsePayload) {
+        const payloadEntries = [];
+        if (hasRequestPayload) {
+          const requestMetaText = buildPayloadMetaText('request', other);
+          payloadEntries.push(
+            <div key='request' className='usage-log-payload-entry'>
+              <div className='usage-log-payload-entry-header'>
+                <Text strong>{t('请求内容')}</Text>
+                <Button
+                  theme='light'
+                  type='primary'
+                  size='small'
+                  icon={<IconEyeOpened />}
+                  className='usage-log-payload-entry-button'
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openPayloadContentModal({
+                      title: t('请求内容'),
+                      content: other.request_content,
+                      contentType: other.request_content_type,
+                      metaText: requestMetaText,
+                      requestId: logs[i].request_id,
+                      requestPath: other.request_path,
+                      modelName: logs[i].model_name,
+                    });
+                  }}
+                >
+                  {t('查看内容')}
+                </Button>
+              </div>
+              {requestMetaText ? (
+                <Text
+                  type='tertiary'
+                  size='small'
+                  className='usage-log-payload-entry-meta'
+                >
+                  {requestMetaText}
+                </Text>
+              ) : null}
+            </div>,
+          );
+        }
+        if (hasResponsePayload) {
+          const responseMetaText = buildPayloadMetaText('response', other);
+          payloadEntries.push(
+            <div key='response' className='usage-log-payload-entry'>
+              <div className='usage-log-payload-entry-header'>
+                <Text strong>{t('返回内容')}</Text>
+                <Button
+                  theme='light'
+                  type='primary'
+                  size='small'
+                  icon={<IconEyeOpened />}
+                  className='usage-log-payload-entry-button'
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openPayloadContentModal({
+                      title: t('返回内容'),
+                      content: other.response_content,
+                      contentType: other.response_content_type,
+                      metaText: responseMetaText,
+                      requestId: logs[i].request_id,
+                      requestPath: other.request_path,
+                      modelName: logs[i].model_name,
+                    });
+                  }}
+                >
+                  {t('查看内容')}
+                </Button>
+              </div>
+              {responseMetaText ? (
+                <Text
+                  type='tertiary'
+                  size='small'
+                  className='usage-log-payload-entry-meta'
+                >
+                  {responseMetaText}
+                </Text>
+              ) : null}
+            </div>,
+          );
+        }
+        expandDataLocal.push({
+          key: t('内容日志'),
+          value: (
+            <div className='usage-log-payload-group'>{payloadEntries}</div>
+          ),
+        });
       }
       if (logs[i].type === 2) {
         let modelMapped =
@@ -523,9 +708,7 @@ export const useLogsData = () => {
           expandDataLocal.push({
             key: t('失败原因'),
             value: (
-              <div style={{ maxWidth: 600, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.6 }}>
-                {other.reason}
-              </div>
+              <div className='usage-log-expand-text-block'>{other.reason}</div>
             ),
           });
         }
@@ -569,7 +752,7 @@ export const useLogsData = () => {
         expandDataLocal.push({
           key: t('订阅结算'),
           value: (
-            <div style={{ whiteSpace: 'pre-line' }}>{settlementLines}</div>
+            <div className='usage-log-expand-preline'>{settlementLines}</div>
           ),
         });
         if (remain !== undefined && total !== undefined) {
@@ -603,6 +786,23 @@ export const useLogsData = () => {
           value: localCountMode,
         });
       }
+      expandDataLocal.push({
+        key: t('操作'),
+        value: (
+          <Button
+            theme='borderless'
+            type='danger'
+            size='small'
+            className='usage-log-delete-button'
+            onClick={(event) => {
+              event.stopPropagation();
+              confirmDeleteLog(logs[i]);
+            }}
+          >
+            {t('删除')}
+          </Button>
+        ),
+      });
       expandDatesLocal[logs[i].key] = expandDataLocal;
     }
 
@@ -679,6 +879,79 @@ export const useLogsData = () => {
     setActivePage(1);
     handleEyeClick();
     await loadLogs(1, pageSize);
+  };
+
+  const deleteLog = async (record) => {
+    if (!record?.id) {
+      showError(t('无效的日志记录'));
+      return;
+    }
+    try {
+      const endpoint = isAdminUser
+        ? `/api/log/${record.id}`
+        : `/api/log/self/${record.id}`;
+      const res = await API.delete(endpoint);
+      const { success, message } = res.data;
+      if (!success) {
+        showError(message);
+        return;
+      }
+      showSuccess(t('日志已删除'));
+      await loadLogs(activePage, pageSize);
+      if (showStat) {
+        await handleEyeClick();
+      }
+    } catch (error) {
+      showError(error?.message || t('删除日志失败'));
+    }
+  };
+
+  const confirmDeleteLog = (record) => {
+    Modal.confirm({
+      title: t('确认删除日志'),
+      content: t('删除后无法恢复，确定继续吗？'),
+      okText: t('删除'),
+      cancelText: t('取消'),
+      okType: 'danger',
+      onOk: async () => {
+        await deleteLog(record);
+      },
+    });
+  };
+
+  const batchDeleteLogs = () => {
+    const payload = buildLogFilterPayload();
+    const endpoint = isAdminUser
+      ? '/api/log/batch_delete'
+      : '/api/log/self/batch_delete';
+    Modal.confirm({
+      title: t('确认批量删除日志'),
+      content: t(
+        '将按当前筛选条件批量删除日志，至少包含当前时间范围。此操作不可恢复。',
+      ),
+      okText: t('批量删除'),
+      cancelText: t('取消'),
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          const res = await API.post(endpoint, payload);
+          const { success, message, data } = res.data;
+          if (!success) {
+            showError(message);
+            return;
+          }
+          showSuccess(
+            t('已删除 {{count}} 条日志', { count: data?.deleted || 0 }),
+          );
+          await loadLogs(1, pageSize);
+          if (showStat) {
+            await handleEyeClick();
+          }
+        } catch (error) {
+          showError(error?.message || t('批量删除日志失败'));
+        }
+      },
+    });
   };
 
   // Copy text function
@@ -769,12 +1042,18 @@ export const useLogsData = () => {
     editingUser,
     openEditUserPanel,
     closeEditUserPanel,
+    showPayloadContentModal,
+    setShowPayloadContentModal,
+    payloadContentTarget,
+    openPayloadContentModal,
+    closePayloadContentModal,
 
     // Functions
     loadLogs,
     handlePageChange,
     handlePageSizeChange,
     refresh,
+    batchDeleteLogs,
     copyText,
     handleEyeClick,
     setLogsFormat,

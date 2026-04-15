@@ -87,9 +87,7 @@ function launchConfettiBurst() {
   for (let index = 0; index < pieceCount; index += 1) {
     const piece = document.createElement('span');
     const driftX = Math.round((Math.random() - 0.5) * viewportWidth * 0.7);
-    const driftY = Math.round(
-      viewportHeight * (0.35 + Math.random() * 0.35),
-    );
+    const driftY = Math.round(viewportHeight * (0.35 + Math.random() * 0.35));
     const rotation = `${540 + Math.round(Math.random() * 360)}deg`;
 
     piece.className = 'new-api-confetti-piece';

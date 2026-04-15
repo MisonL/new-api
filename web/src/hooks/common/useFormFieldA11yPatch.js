@@ -368,7 +368,9 @@ const useFormFieldA11yPatch = (routeKey) => {
             '[role="combobox"][aria-activedescendant], [role="listbox"][aria-activedescendant]',
           )
           .forEach((control) => {
-            const activeDescendantId = control.getAttribute('aria-activedescendant');
+            const activeDescendantId = control.getAttribute(
+              'aria-activedescendant',
+            );
             if (!activeDescendantId) {
               return;
             }
@@ -422,7 +424,10 @@ const useFormFieldA11yPatch = (routeKey) => {
       window.setTimeout(schedulePatch, 2000),
       window.setTimeout(schedulePatch, 4000),
     ];
-    const patchIntervalId = window.setInterval(schedulePatch, PATCH_INTERVAL_MS);
+    const patchIntervalId = window.setInterval(
+      schedulePatch,
+      PATCH_INTERVAL_MS,
+    );
 
     const observer = new MutationObserver(() => {
       schedulePatch();

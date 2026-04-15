@@ -7,7 +7,7 @@ permissions:
 
 on:
   pull_request_target:
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize]
 
 jobs:
   pr-quality:
@@ -19,15 +19,12 @@ jobs:
           require-description: true
 
           # require-linked-issue: false
-          blocked-terms:  |
-            🤖 Generated with Claude Code
-
           require-pr-template: true
-          strict-pr-template-sections: "✅ 提交前检查项 / Checklist"
+          strict-pr-template-sections: "提交前检查项 / Checklist"
 
           detect-spam-usernames: true
           min-account-age: 30
 
           failure-add-pr-labels: "pr-check-failed"
-          failure-pr-message: "感谢您的提交。由于该 PR 未遵循我们的贡献模板，且被识别为缺乏人工参与的纯 AI 生成内容 (AI Slop)，我们将先予以关闭。我们更欢迎经过人工审核、验证并带有个人思考的贡献。如果您认为这其中存在误解，请回复告知。/ Thank you for your submission. This PR has been closed because it does not follow our contribution template and has been identified as purely AI-generated content (AI Slop) without meaningful human involvement. We prioritize contributions that are human-verified and reflect individual effort. If you believe this is a mistake, please let us know by replying to this comment."
+          failure-pr-message: "感谢您的提交。该 PR 当前未满足我们的基础提交流程要求，例如缺少必要的描述、模板内容或验证信息。项目接受 AI 协助开发，但提交人必须核对内容、对结果负责，并在出现问题时持续跟进修复。请补全相关信息后重新提交。/ Thank you for your submission. This PR does not currently meet our baseline submission requirements, such as providing the required description, template content, or verification details. AI-assisted development is allowed, but the submitter must verify the content, take responsibility for the result, and follow up on any issues. Please update the PR and resubmit."
           close-pr: true

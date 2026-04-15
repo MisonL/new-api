@@ -24,6 +24,9 @@ import path from 'path';
 import { codeInspectorPlugin } from 'code-inspector-plugin';
 const { vitePluginSemi } = pkg;
 
+// Silence the known Browserslist stale-data notice when upstream has no newer dataset.
+process.env.BROWSERSLIST_IGNORE_OLD_DATA = '1';
+
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => {
   const plugins = [
@@ -75,6 +78,21 @@ export default defineConfig(({ command }) => {
     build: {
       chunkSizeWarningLimit: 2000,
       rollupOptions: {
+        onwarn(warning, defaultHandler) {
+          const warningId =
+            typeof warning.id === 'string'
+              ? warning.id.replaceAll('\\', '/')
+              : '';
+          const isKnownLottieEvalWarning =
+            warning.code === 'EVAL' &&
+            warningId.includes(
+              '/node_modules/lottie-web/build/player/lottie.js',
+            );
+          if (isKnownLottieEvalWarning) {
+            return;
+          }
+          defaultHandler(warning);
+        },
         output: {
           manualChunks: {
             'react-core': ['react', 'react-dom', 'react-router-dom'],
@@ -99,9 +117,7 @@ export default defineConfig(({ command }) => {
               '@visactor/vchart',
               '@visactor/vchart-semi-theme',
             ],
-            cytoscape: [
-              'cytoscape',
-            ],
+            cytoscape: ['cytoscape'],
             'react-components': [
               'react-dropzone',
               'react-telegram-login',

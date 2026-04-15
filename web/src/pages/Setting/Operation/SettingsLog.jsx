@@ -247,79 +247,84 @@ export default function SettingsLog(props) {
             style={{ marginBottom: 15 }}
           >
             <Form.Section text={t('日志设置')}>
-            <Row gutter={16}>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.Switch
-                  field={'LogConsumeEnabled'}
-                  label={t('启用额度消费日志记录')}
-                  size='default'
-                  checkedText='｜'
-                  uncheckedText='〇'
-                  onChange={(value) => {
-                    setInputs({
-                      ...inputs,
-                      LogConsumeEnabled: value,
-                    });
-                  }}
-                />
-              </Col>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.Switch
-                  field={'general_setting.log_filter_autocomplete_enabled'}
-                  label={t('启用日志筛选联想')}
-                  extraText={t(
-                    '控制使用日志、任务日志、绘图日志筛选输入框的联想提示',
-                  )}
-                  size='default'
-                  checkedText='｜'
-                  uncheckedText='〇'
-                  onChange={(value) => {
-                    setInputs({
-                      ...inputs,
-                      'general_setting.log_filter_autocomplete_enabled': value,
-                    });
-                  }}
-                />
-              </Col>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Spin spinning={loadingCleanHistoryLog}>
-                  <Form.DatePicker
-                    label={t('清除历史日志')}
-                    field={'historyTimestamp'}
-                    id='historyTimestamp'
-                    className='history-timestamp-field'
-                    type='dateTime'
-                    inputReadOnly={true}
+              <Row gutter={16}>
+                <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                  <Form.Switch
+                    field={'LogConsumeEnabled'}
+                    label={t('启用额度消费日志记录')}
+                    size='default'
+                    checkedText='｜'
+                    uncheckedText='〇'
                     onChange={(value) => {
                       setInputs({
                         ...inputs,
-                        historyTimestamp: value,
+                        LogConsumeEnabled: value,
                       });
                     }}
                   />
-                  <Text
-                    type='tertiary'
-                    size='small'
-                    style={{ display: 'block', marginTop: 4, marginBottom: 8 }}
-                  >
-                    {t('将清除选定时间之前的所有日志')}
-                  </Text>
-                  <Button
+                </Col>
+                <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                  <Form.Switch
+                    field={'general_setting.log_filter_autocomplete_enabled'}
+                    label={t('启用日志筛选联想')}
+                    extraText={t(
+                      '控制使用日志、任务日志、绘图日志筛选输入框的联想提示',
+                    )}
                     size='default'
-                    type='danger'
-                    onClick={onCleanHistoryLog}
-                  >
-                    {t('清除历史日志')}
-                  </Button>
-                </Spin>
-              </Col>
-            </Row>
+                    checkedText='｜'
+                    uncheckedText='〇'
+                    onChange={(value) => {
+                      setInputs({
+                        ...inputs,
+                        'general_setting.log_filter_autocomplete_enabled':
+                          value,
+                      });
+                    }}
+                  />
+                </Col>
+                <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                  <Spin spinning={loadingCleanHistoryLog}>
+                    <Form.DatePicker
+                      label={t('清除历史日志')}
+                      field={'historyTimestamp'}
+                      id='historyTimestamp'
+                      className='history-timestamp-field'
+                      type='dateTime'
+                      inputReadOnly={true}
+                      onChange={(value) => {
+                        setInputs({
+                          ...inputs,
+                          historyTimestamp: value,
+                        });
+                      }}
+                    />
+                    <Text
+                      type='tertiary'
+                      size='small'
+                      style={{
+                        display: 'block',
+                        marginTop: 4,
+                        marginBottom: 8,
+                      }}
+                    >
+                      {t('将清除选定时间之前的所有日志')}
+                    </Text>
+                    <Button
+                      size='default'
+                      type='danger'
+                      onClick={onCleanHistoryLog}
+                    >
+                      {t('清除历史日志')}
+                    </Button>
+                  </Spin>
+                </Col>
+              </Row>
 
-            <Row>
-              <Button size='default' onClick={onSubmit}>
-                {t('保存日志设置')}
-              </Button>
-            </Row>
+              <Row>
+                <Button size='default' onClick={onSubmit}>
+                  {t('保存日志设置')}
+                </Button>
+              </Row>
             </Form.Section>
           </Form>
         </div>

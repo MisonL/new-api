@@ -63,6 +63,7 @@ const CardTable = ({
       : tableProps;
     const horizontalScrollWidth = finalTableProps?.scroll?.x;
     const hasHorizontalScroll = Boolean(horizontalScrollWidth);
+    const hasFixedColumns = columns.some((column) => Boolean(column?.fixed));
     const {
       className: desktopTableClassName,
       style: desktopTableStyle,
@@ -91,11 +92,11 @@ const CardTable = ({
       />
     );
 
-    if (!hasHorizontalScroll) {
+    if (!hasHorizontalScroll || hasFixedColumns) {
       return tableNode;
     }
 
-      return (
+    return (
       <div className='card-table-desktop-scroll'>
         <div
           className='card-table-desktop-scroll-inner'

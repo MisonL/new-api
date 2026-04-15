@@ -131,12 +131,14 @@ const SystemSetting = () => {
   const [allowedPortsInputValue, setAllowedPortsInputValue] = useState('');
 
   const normalizeTagEntries = (rawValue) => {
-    return [...new Set(
-      String(rawValue || '')
-        .split(/[\n,]/)
-        .map((item) => item.trim())
-        .filter(Boolean),
-    )];
+    return [
+      ...new Set(
+        String(rawValue || '')
+          .split(/[\n,]/)
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    ];
   };
 
   const updateListField = (fieldKey, nextValues, setter) => {
@@ -945,8 +947,18 @@ const SystemSetting = () => {
                         }}
                         style={{ marginBottom: 8 }}
                       >
-                        <Radio value='whitelist' name='components-settings-systemsetting-radio-1'>{t('白名单')}</Radio>
-                        <Radio value='blacklist' name='components-settings-systemsetting-radio-2'>{t('黑名单')}</Radio>
+                        <Radio
+                          value='whitelist'
+                          name='components-settings-systemsetting-radio-1'
+                        >
+                          {t('白名单')}
+                        </Radio>
+                        <Radio
+                          value='blacklist'
+                          name='components-settings-systemsetting-radio-2'
+                        >
+                          {t('黑名单')}
+                        </Radio>
                       </Form.RadioGroup>
                       {renderTagGroup(domainList, (value) =>
                         removeListFieldEntry(
@@ -959,7 +971,11 @@ const SystemSetting = () => {
                       <Form.Input
                         field='fetch_setting.domain_list_draft'
                         noLabel
-                        aria-label={t(domainFilterMode ? '域名白名单输入' : '域名黑名单输入')}
+                        aria-label={t(
+                          domainFilterMode
+                            ? '域名白名单输入'
+                            : '域名黑名单输入',
+                        )}
                         placeholder={t('输入域名后回车，如：example.com')}
                         value={domainInputValue}
                         onChange={setDomainInputValue}
@@ -1022,8 +1038,18 @@ const SystemSetting = () => {
                         }}
                         style={{ marginBottom: 8 }}
                       >
-                        <Radio value='whitelist' name='components-settings-systemsetting-radio-3'>{t('白名单')}</Radio>
-                        <Radio value='blacklist' name='components-settings-systemsetting-radio-4'>{t('黑名单')}</Radio>
+                        <Radio
+                          value='whitelist'
+                          name='components-settings-systemsetting-radio-3'
+                        >
+                          {t('白名单')}
+                        </Radio>
+                        <Radio
+                          value='blacklist'
+                          name='components-settings-systemsetting-radio-4'
+                        >
+                          {t('黑名单')}
+                        </Radio>
                       </Form.RadioGroup>
                       {renderTagGroup(ipList, (value) =>
                         removeListFieldEntry(
@@ -1036,7 +1062,9 @@ const SystemSetting = () => {
                       <Form.Input
                         field='fetch_setting.ip_list_draft'
                         noLabel
-                        aria-label={t(ipFilterMode ? 'IP白名单输入' : 'IP黑名单输入')}
+                        aria-label={t(
+                          ipFilterMode ? 'IP白名单输入' : 'IP黑名单输入',
+                        )}
                         placeholder={t('输入IP地址后回车，如：8.8.8.8')}
                         value={ipInputValue}
                         onChange={setIpInputValue}
@@ -1305,12 +1333,17 @@ const SystemSetting = () => {
                     style={{ marginTop: 16 }}
                   >
                     <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                      <Text
+                        strong
+                        style={{ display: 'block', marginBottom: 8 }}
+                      >
                         {t('安全验证级别')}
                       </Text>
                       <Select
                         aria-label={t('安全验证级别')}
-                        value={inputs['passkey.user_verification'] || 'preferred'}
+                        value={
+                          inputs['passkey.user_verification'] || 'preferred'
+                        }
                         placeholder={t('是否要求指纹/面容等生物识别')}
                         optionList={[
                           {
@@ -1336,7 +1369,10 @@ const SystemSetting = () => {
                       </Text>
                     </Col>
                     <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                      <Text
+                        strong
+                        style={{ display: 'block', marginBottom: 8 }}
+                      >
                         {t('设备类型偏好')}
                       </Text>
                       <Select

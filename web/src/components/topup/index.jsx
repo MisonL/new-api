@@ -317,32 +317,34 @@ const TopUp = () => {
 
   const waffoTopUp = async (payMethodIndex) => {
     try {
-        if (topUpCount < waffoMinTopUp) {
-            showError(t('充值数量不能小于') + waffoMinTopUp);
-            return;
-        }
-        setPaymentLoading(true);
-        const requestBody = {
-            amount: parseInt(topUpCount),
-        };
-        if (payMethodIndex != null) {
-            requestBody.pay_method_index = payMethodIndex;
-        }
-        const res = await API.post('/api/user/waffo/pay', requestBody);
-        if (res !== undefined) {
-            const { message, data } = res.data;
-            if (message === 'success' && data?.payment_url) {
-                window.open(data.payment_url, '_blank');
-            } else {
-                showError(data || t('支付请求失败'));
-            }
+      if (topUpCount < waffoMinTopUp) {
+        showError(t('充值数量不能小于') + waffoMinTopUp);
+        return;
+      }
+      setPaymentLoading(true);
+      const requestBody = {
+        amount: parseInt(topUpCount),
+      };
+      if (payMethodIndex != null) {
+        requestBody.pay_method_index = payMethodIndex;
+      }
+      const res = await API.post('/api/user/waffo/pay', requestBody);
+      if (res !== undefined) {
+        const { message, data } = res.data;
+        if (message === 'success' && data?.payment_url) {
+          window.open(data.payment_url, '_blank');
         } else {
-            showError(res);
+          const errorMsg =
+            typeof data === 'string' ? data : message || t('支付请求失败');
+          showError(errorMsg);
         }
-    } catch (e) {
+      } else {
         showError(t('支付请求失败'));
+      }
+    } catch (e) {
+      showError(t('支付请求失败'));
     } finally {
-        setPaymentLoading(false);
+      setPaymentLoading(false);
     }
   };
 

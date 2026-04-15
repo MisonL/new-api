@@ -22,6 +22,7 @@ import { Button, Tooltip, Toast } from '@douyinfe/semi-ui';
 import { Copy, ChevronDown, ChevronUp } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { copy } from '../../helpers';
+import { useActualTheme } from '../../context/Theme';
 
 const PERFORMANCE_CONFIG = {
   MAX_DISPLAY_LENGTH: 50000, // 最大显示字符数
@@ -29,65 +30,46 @@ const PERFORMANCE_CONFIG = {
   VERY_LARGE_MULTIPLIER: 2, // 超大内容倍数
 };
 
-const codeThemeStyles = {
-  container: {
-    backgroundColor: '#1e1e1e',
-    color: '#d4d4d4',
-    fontFamily: 'Consolas, "Courier New", Monaco, "SF Mono", monospace',
-    fontSize: '13px',
-    lineHeight: '1.4',
-    borderRadius: '8px',
-    border: '1px solid #3c3c3c',
-    position: 'relative',
-    overflow: 'hidden',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+const codeThemePalettes = {
+  light: {
+    background: '#f8fafc',
+    foreground: '#1f2937',
+    border: '#d7e0ea',
+    shadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
+    buttonBg: 'rgba(255, 255, 255, 0.92)',
+    buttonBorder: 'rgba(148, 163, 184, 0.35)',
+    buttonText: '#334155',
+    buttonHoverBg: 'rgba(255, 255, 255, 0.98)',
+    buttonHoverBorder: 'rgba(100, 116, 139, 0.45)',
+    mutedText: '#64748b',
+    warningBg: 'rgba(245, 158, 11, 0.12)',
+    warningBorder: 'rgba(245, 158, 11, 0.28)',
+    warningText: '#b45309',
+    spinnerTrack: '#cbd5e1',
+    spinnerHead: '#64748b',
+    jsonKey: '#0f766e',
+    jsonString: '#b45309',
+    jsonKeyword: '#1d4ed8',
   },
-  content: {
-    height: '100%',
-    overflowY: 'auto',
-    overflowX: 'auto',
-    padding: '16px',
-    margin: 0,
-    whiteSpace: 'pre',
-    wordBreak: 'normal',
-    background: '#1e1e1e',
-  },
-  actionButton: {
-    position: 'absolute',
-    zIndex: 10,
-    backgroundColor: 'rgba(45, 45, 45, 0.9)',
-    border: '1px solid rgba(255, 255, 255, 0.1)',
-    color: '#d4d4d4',
-    borderRadius: '6px',
-    transition: 'all 0.2s ease',
-  },
-  actionButtonHover: {
-    backgroundColor: 'rgba(60, 60, 60, 0.95)',
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    transform: 'scale(1.05)',
-  },
-  noContent: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-    color: '#666',
-    fontSize: '14px',
-    fontStyle: 'italic',
-    backgroundColor: 'var(--semi-color-fill-0)',
-    borderRadius: '8px',
-  },
-  performanceWarning: {
-    padding: '8px 12px',
-    backgroundColor: 'rgba(255, 193, 7, 0.1)',
-    border: '1px solid rgba(255, 193, 7, 0.3)',
-    borderRadius: '6px',
-    color: '#ffc107',
-    fontSize: '12px',
-    marginBottom: '8px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
+  dark: {
+    background: '#111827',
+    foreground: '#e5eefb',
+    border: '#334155',
+    shadow: '0 10px 28px rgba(0, 0, 0, 0.35)',
+    buttonBg: 'rgba(15, 23, 42, 0.92)',
+    buttonBorder: 'rgba(148, 163, 184, 0.18)',
+    buttonText: '#dbe7f5',
+    buttonHoverBg: 'rgba(30, 41, 59, 0.98)',
+    buttonHoverBorder: 'rgba(148, 163, 184, 0.28)',
+    mutedText: '#94a3b8',
+    warningBg: 'rgba(245, 158, 11, 0.18)',
+    warningBorder: 'rgba(245, 158, 11, 0.32)',
+    warningText: '#fbbf24',
+    spinnerTrack: '#475569',
+    spinnerHead: '#cbd5e1',
+    jsonKey: '#7dd3fc',
+    jsonString: '#fdba74',
+    jsonKeyword: '#93c5fd',
   },
 };
 
@@ -100,7 +82,7 @@ const escapeHtml = (str) => {
     .replace(/'/g, '&#039;');
 };
 
-const highlightJson = (str) => {
+const highlightJson = (str, palette) => {
   const tokenRegex =
     /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g;
 
@@ -113,11 +95,11 @@ const highlightJson = (str) => {
     result += escapeHtml(str.slice(lastIndex, match.index));
 
     const token = match[0];
-    let color = '#b5cea8';
+    let color = palette.jsonString;
     if (/^"/.test(token)) {
-      color = /:$/.test(token) ? '#9cdcfe' : '#ce9178';
+      color = /:$/.test(token) ? palette.jsonKey : palette.jsonString;
     } else if (/true|false|null/.test(token)) {
-      color = '#569cd6';
+      color = palette.jsonKeyword;
     }
     // Escape token content before wrapping in span
     result += `<span style="color: ${color}">${escapeHtml(token)}</span>`;
@@ -178,10 +160,13 @@ const formatContent = (content) => {
 
 const CodeViewer = ({ content, title, language = 'json' }) => {
   const { t } = useTranslation();
+  const actualTheme = useActualTheme();
   const [copied, setCopied] = useState(false);
   const [isHoveringCopy, setIsHoveringCopy] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const palette =
+    actualTheme === 'dark' ? codeThemePalettes.dark : codeThemePalettes.light;
 
   const formattedContent = useMemo(() => formatContent(content), [content]);
 
@@ -211,11 +196,17 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
     }
 
     if (isJsonLike(displayContent, language)) {
-      return highlightJson(displayContent);
+      return highlightJson(displayContent, palette);
     }
 
     return escapeHtml(displayContent);
-  }, [displayContent, language, contentMetrics.isVeryLarge, isExpanded]);
+  }, [
+    displayContent,
+    language,
+    contentMetrics.isVeryLarge,
+    isExpanded,
+    palette,
+  ]);
 
   const renderedContent = useMemo(() => {
     return linkifyHtml(highlightedContent);
@@ -263,7 +254,20 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
       }[title] || t('暂无数据');
 
     return (
-      <div style={codeThemeStyles.noContent}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100%',
+          color: palette.mutedText,
+          fontSize: '14px',
+          fontStyle: 'italic',
+          backgroundColor: 'var(--semi-color-fill-0)',
+          borderRadius: '8px',
+          border: `1px solid ${palette.border}`,
+        }}
+      >
         <span>{placeholderText}</span>
       </div>
     );
@@ -273,11 +277,38 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
   const contentPadding = contentMetrics.isLarge ? '52px' : '16px';
 
   return (
-    <div style={codeThemeStyles.container} className='h-full'>
+    <div
+      style={{
+        backgroundColor: palette.background,
+        color: palette.foreground,
+        fontFamily: 'Consolas, "Courier New", Monaco, "SF Mono", monospace',
+        fontSize: '13px',
+        lineHeight: '1.4',
+        borderRadius: '8px',
+        border: `1px solid ${palette.border}`,
+        position: 'relative',
+        overflow: 'hidden',
+        boxShadow: palette.shadow,
+      }}
+      className='h-full'
+    >
       {/* 性能警告 */}
       {contentMetrics.isLarge && (
-        <div style={codeThemeStyles.performanceWarning}>
-          <span>⚡</span>
+        <div
+          style={{
+            padding: '8px 12px',
+            backgroundColor: palette.warningBg,
+            border: `1px solid ${palette.warningBorder}`,
+            borderRadius: '6px',
+            color: palette.warningText,
+            fontSize: '12px',
+            marginBottom: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <span>INFO</span>
           <span>
             {contentMetrics.isVeryLarge
               ? t('内容较大，已启用性能优化模式')
@@ -289,8 +320,18 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
       {/* 复制按钮 */}
       <div
         style={{
-          ...codeThemeStyles.actionButton,
-          ...(isHoveringCopy ? codeThemeStyles.actionButtonHover : {}),
+          position: 'absolute',
+          zIndex: 10,
+          backgroundColor: isHoveringCopy
+            ? palette.buttonHoverBg
+            : palette.buttonBg,
+          border: `1px solid ${
+            isHoveringCopy ? palette.buttonHoverBorder : palette.buttonBorder
+          }`,
+          color: palette.buttonText,
+          borderRadius: '6px',
+          transition: 'all 0.2s ease',
+          transform: isHoveringCopy ? 'scale(1.05)' : 'scale(1)',
           top: warningTop,
           right: '12px',
         }}
@@ -306,7 +347,7 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
             style={{
               backgroundColor: 'transparent',
               border: 'none',
-              color: copied ? '#4ade80' : '#d4d4d4',
+              color: copied ? '#22c55e' : palette.buttonText,
               padding: '6px',
             }}
           />
@@ -316,8 +357,16 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
       {/* 代码内容 */}
       <div
         style={{
-          ...codeThemeStyles.content,
+          height: '100%',
+          overflowY: 'auto',
+          overflowX: 'auto',
+          margin: 0,
+          background: palette.background,
+          color: palette.foreground,
           paddingTop: contentPadding,
+          paddingRight: '16px',
+          paddingBottom: '16px',
+          paddingLeft: '16px',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}
@@ -330,15 +379,15 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
               alignItems: 'center',
               justifyContent: 'center',
               height: '200px',
-              color: '#888',
+              color: palette.mutedText,
             }}
           >
             <div
               style={{
                 width: '20px',
                 height: '20px',
-                border: '2px solid #444',
-                borderTop: '2px solid #888',
+                border: `2px solid ${palette.spinnerTrack}`,
+                borderTop: `2px solid ${palette.spinnerHead}`,
                 borderRadius: '50%',
                 animation: 'spin 1s linear infinite',
                 marginRight: '8px',
@@ -355,7 +404,13 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
       {contentMetrics.isLarge && !isProcessing && (
         <div
           style={{
-            ...codeThemeStyles.actionButton,
+            position: 'absolute',
+            zIndex: 10,
+            backgroundColor: palette.buttonBg,
+            border: `1px solid ${palette.buttonBorder}`,
+            color: palette.buttonText,
+            borderRadius: '6px',
+            transition: 'all 0.2s ease',
             bottom: '12px',
             left: '50%',
             transform: 'translateX(-50%)',
@@ -372,7 +427,7 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
               style={{
                 backgroundColor: 'transparent',
                 border: 'none',
-                color: '#d4d4d4',
+                color: palette.buttonText,
                 padding: '6px 12px',
               }}
             >

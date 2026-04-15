@@ -36,6 +36,50 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { copy } from '../../helpers';
+import { useActualTheme } from '../../context/Theme';
+
+const sseThemePalettes = {
+  light: {
+    containerBg: '#f8fafc',
+    toolbarBorder: '#d7e0ea',
+    panelBg: 'rgba(255, 255, 255, 0.96)',
+    panelBorder: 'rgba(148, 163, 184, 0.18)',
+    panelShadow: '0 12px 28px rgba(15, 23, 42, 0.08)',
+    emptyText: '#64748b',
+    eventText: '#475569',
+    eventMeta: '#94a3b8',
+    successBg: 'rgba(34, 197, 94, 0.10)',
+    successText: '#15803d',
+    errorBg: 'rgba(239, 68, 68, 0.10)',
+    errorText: '#dc2626',
+    codeBg: '#f8fafc',
+    codeBorder: '#d7e0ea',
+    codeText: '#1f2937',
+    actionBg: 'rgba(255, 255, 255, 0.92)',
+    actionText: '#334155',
+    actionBorder: 'rgba(148, 163, 184, 0.35)',
+  },
+  dark: {
+    containerBg: 'rgba(15, 23, 42, 0.74)',
+    toolbarBorder: 'rgba(71, 85, 105, 0.7)',
+    panelBg: 'rgba(15, 23, 42, 0.92)',
+    panelBorder: 'rgba(71, 85, 105, 0.42)',
+    panelShadow: '0 14px 30px rgba(2, 6, 23, 0.38)',
+    emptyText: '#94a3b8',
+    eventText: '#dbe7f5',
+    eventMeta: '#94a3b8',
+    successBg: 'rgba(34, 197, 94, 0.18)',
+    successText: '#86efac',
+    errorBg: 'rgba(239, 68, 68, 0.16)',
+    errorText: '#fca5a5',
+    codeBg: '#111827',
+    codeBorder: '#334155',
+    codeText: '#e5eefb',
+    actionBg: 'rgba(15, 23, 42, 0.92)',
+    actionText: '#dbe7f5',
+    actionBorder: 'rgba(148, 163, 184, 0.2)',
+  },
+};
 
 /**
  * SSEViewer component for displaying Server-Sent Events in an interactive format
@@ -45,8 +89,11 @@ import { copy } from '../../helpers';
  */
 const SSEViewer = ({ sseData }) => {
   const { t } = useTranslation();
+  const actualTheme = useActualTheme();
   const [expandedKeys, setExpandedKeys] = useState([]);
   const [copied, setCopied] = useState(false);
+  const palette =
+    actualTheme === 'dark' ? sseThemePalettes.dark : sseThemePalettes.light;
 
   const parsedSSEData = useMemo(() => {
     if (!sseData || !Array.isArray(sseData)) {
@@ -110,9 +157,8 @@ const SSEViewer = ({ sseData }) => {
       setCopied(true);
       Toast.success(t('已复制全部数据'));
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
+    } catch {
       Toast.error(t('复制失败'));
-      console.error('Copy failed:', err);
     }
   }, [parsedSSEData, t]);
 
@@ -124,7 +170,7 @@ const SSEViewer = ({ sseData }) => {
           : item.raw;
         await copy(textToCopy);
         Toast.success(t('已复制'));
-      } catch (err) {
+      } catch {
         Toast.error(t('复制失败'));
       }
     },
@@ -134,9 +180,15 @@ const SSEViewer = ({ sseData }) => {
   const renderSSEItem = (item) => {
     if (item.isDone) {
       return (
-        <div className='flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg'>
-          <CheckCircle size={16} className='text-green-600' />
-          <Typography.Text className='text-green-600 font-medium'>
+        <div
+          className='flex items-center gap-2 rounded-xl p-3'
+          style={{ background: palette.successBg }}
+        >
+          <CheckCircle size={16} style={{ color: palette.successText }} />
+          <Typography.Text
+            className='font-medium'
+            style={{ color: palette.successText }}
+          >
             {t('流式响应完成')} [DONE]
           </Typography.Text>
         </div>
@@ -146,13 +198,23 @@ const SSEViewer = ({ sseData }) => {
     if (item.error) {
       return (
         <div className='space-y-2'>
-          <div className='flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg'>
-            <XCircle size={16} className='text-red-600' />
-            <Typography.Text className='text-red-600'>
+          <div
+            className='flex items-center gap-2 rounded-xl p-3'
+            style={{ background: palette.errorBg }}
+          >
+            <XCircle size={16} style={{ color: palette.errorText }} />
+            <Typography.Text style={{ color: palette.errorText }}>
               {t('解析错误')}: {item.error}
             </Typography.Text>
           </div>
-          <div className='p-3 bg-gray-100 dark:bg-gray-800 rounded-lg font-mono text-xs overflow-auto'>
+          <div
+            className='overflow-auto rounded-xl border p-3 font-mono text-xs'
+            style={{
+              background: palette.codeBg,
+              borderColor: palette.codeBorder,
+              color: palette.codeText,
+            }}
+          >
             <pre>{item.raw}</pre>
           </div>
         </div>
@@ -163,7 +225,14 @@ const SSEViewer = ({ sseData }) => {
       <div className='space-y-2'>
         {/* JSON 格式化显示 */}
         <div className='relative'>
-          <pre className='p-4 bg-gray-900 text-gray-100 rounded-lg overflow-auto text-xs font-mono leading-relaxed'>
+          <pre
+            className='overflow-auto rounded-xl border p-4 text-xs font-mono leading-relaxed'
+            style={{
+              background: palette.codeBg,
+              borderColor: palette.codeBorder,
+              color: palette.codeText,
+            }}
+          >
             {JSON.stringify(item.parsed, null, 2)}
           </pre>
           <Button
@@ -171,7 +240,13 @@ const SSEViewer = ({ sseData }) => {
             size='small'
             theme='borderless'
             onClick={() => handleCopySingle(item)}
-            className='absolute top-2 right-2 !bg-gray-800/80 !text-gray-300 hover:!bg-gray-700'
+            className='absolute top-2 right-2'
+            style={{
+              background: palette.actionBg,
+              color: palette.actionText,
+              border: `1px solid ${palette.actionBorder}`,
+              borderRadius: 10,
+            }}
           />
         </div>
 
@@ -207,16 +282,25 @@ const SSEViewer = ({ sseData }) => {
 
   if (!parsedSSEData || parsedSSEData.length === 0) {
     return (
-      <div className='flex items-center justify-center h-full min-h-[200px] text-gray-500'>
+      <div
+        className='flex h-full min-h-[200px] items-center justify-center'
+        style={{ color: palette.emptyText }}
+      >
         <span>{t('暂无SSE响应数据')}</span>
       </div>
     );
   }
 
   return (
-    <div className='h-full flex flex-col bg-gray-50 dark:bg-gray-900/50 rounded-lg'>
+    <div
+      className='flex h-full flex-col rounded-2xl'
+      style={{ background: palette.containerBg }}
+    >
       {/* 头部工具栏 */}
-      <div className='flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0'>
+      <div
+        className='flex flex-shrink-0 items-center justify-between p-4'
+        style={{ borderBottom: `1px solid ${palette.toolbarBorder}` }}
+      >
         <div className='flex items-center gap-3'>
           <Zap size={16} className='text-blue-500' />
           <Typography.Text strong>{t('SSE数据流')}</Typography.Text>
@@ -270,7 +354,12 @@ const SSEViewer = ({ sseData }) => {
           activeKey={expandedKeys}
           onChange={setExpandedKeys}
           accordion={false}
-          className='bg-white dark:bg-gray-800 rounded-lg'
+          className='rounded-2xl'
+          style={{
+            background: palette.panelBg,
+            border: `1px solid ${palette.panelBorder}`,
+            boxShadow: palette.panelShadow,
+          }}
         >
           {parsedSSEData.map((item) => (
             <Collapse.Panel
@@ -279,18 +368,28 @@ const SSEViewer = ({ sseData }) => {
                 <div className='flex items-center gap-2'>
                   <Badge count={`#${item.index + 1}`} type='tertiary' />
                   {item.isDone ? (
-                    <span className='text-green-600 font-medium'>[DONE]</span>
+                    <span
+                      className='font-medium'
+                      style={{ color: palette.successText }}
+                    >
+                      [DONE]
+                    </span>
                   ) : item.error ? (
-                    <span className='text-red-600'>{t('解析错误')}</span>
+                    <span style={{ color: palette.errorText }}>
+                      {t('解析错误')}
+                    </span>
                   ) : (
                     <>
-                      <span className='text-gray-600'>
+                      <span style={{ color: palette.eventText }}>
                         {item.parsed?.id ||
                           item.parsed?.object ||
                           t('SSE 事件')}
                       </span>
                       {item.parsed?.choices?.[0]?.delta && (
-                        <span className='text-xs text-gray-400'>
+                        <span
+                          className='text-xs'
+                          style={{ color: palette.eventMeta }}
+                        >
                           •{' '}
                           {Object.keys(item.parsed.choices[0].delta)
                             .filter((k) => item.parsed.choices[0].delta[k])

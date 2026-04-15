@@ -33,8 +33,31 @@ import {
   stringToColor,
 } from '../../../../helpers';
 import { Coins, BarChart2, Users } from 'lucide-react';
+import { useActualTheme } from '../../../../context/Theme';
+
+const adjustHexChannel = (hex, delta) => {
+  const value = parseInt(hex, 16);
+  const nextValue = Math.max(0, Math.min(255, value + delta));
+  return nextValue.toString(16).padStart(2, '0');
+};
+
+const adjustHexColor = (color, delta) => {
+  if (
+    typeof color !== 'string' ||
+    !color.startsWith('#') ||
+    color.length !== 7
+  ) {
+    return color;
+  }
+  return `#${adjustHexChannel(color.slice(1, 3), delta)}${adjustHexChannel(
+    color.slice(3, 5),
+    delta,
+  )}${adjustHexChannel(color.slice(5, 7), delta)}`;
+};
 
 const UserInfoHeader = ({ t, userState }) => {
+  const actualTheme = useActualTheme();
+
   const getUsername = () => {
     if (userState.user) {
       return userState.user.username;
@@ -49,6 +72,21 @@ const UserInfoHeader = ({ t, userState }) => {
       return username.slice(0, 2).toUpperCase();
     }
     return 'NA';
+  };
+
+  const username = getUsername();
+  const avatarBaseColor = stringToColor(username);
+  const avatarStyle = {
+    backgroundColor:
+      actualTheme === 'dark'
+        ? adjustHexColor(avatarBaseColor, 12)
+        : adjustHexColor(avatarBaseColor, -8),
+    color: '#ffffff',
+    WebkitTextFillColor: '#ffffff',
+    boxShadow:
+      actualTheme === 'dark'
+        ? 'inset 0 0 0 1px rgba(255,255,255,0.08)'
+        : 'inset 0 0 0 1px rgba(15,23,42,0.06)',
   };
 
   return (
@@ -69,7 +107,7 @@ const UserInfoHeader = ({ t, userState }) => {
           <div className='relative z-10 h-full flex flex-col justify-end p-6'>
             <div className='flex items-center'>
               <div className='flex items-stretch gap-3 sm:gap-4 flex-1 min-w-0'>
-                <Avatar size='large' color={stringToColor(getUsername())}>
+                <Avatar size='large' style={avatarStyle}>
                   {getAvatarText()}
                 </Avatar>
                 <div className='flex-1 min-w-0 flex flex-col justify-between'>
@@ -77,7 +115,7 @@ const UserInfoHeader = ({ t, userState }) => {
                     className='text-3xl font-bold truncate'
                     style={{ color: 'white' }}
                   >
-                    {getUsername()}
+                    {username}
                   </div>
                   <div className='flex flex-wrap items-center gap-2'>
                     {isRoot() ? (

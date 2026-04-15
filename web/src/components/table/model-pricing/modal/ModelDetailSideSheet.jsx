@@ -90,12 +90,13 @@ const ModelDetailSideSheet = ({
               endpointMap={endpointMap}
               t={t}
             />
-            {modelData.billing_mode === 'tiered_expr' && modelData.billing_expr && (
-              <DynamicPricingBreakdown
-                billingExpr={modelData.billing_expr}
-                t={t}
-              />
-            )}
+            {modelData.billing_mode === 'tiered_expr' &&
+              modelData.billing_expr && (
+                <DynamicPricingBreakdown
+                  billingExpr={modelData.billing_expr}
+                  t={t}
+                />
+              )}
             <ModelPricingTable
               modelData={modelData}
               groupRatio={groupRatio}

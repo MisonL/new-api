@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func GetAllLogs(c *gin.Context) {
@@ -168,4 +170,144 @@ func DeleteHistoryLogs(c *gin.Context) {
 		"data":    count,
 	})
 	return
+}
+
+type BatchDeleteLogsRequest struct {
+	LogType        int    `json:"type"`
+	StartTimestamp int64  `json:"start_timestamp"`
+	EndTimestamp   int64  `json:"end_timestamp"`
+	Username       string `json:"username,omitempty"`
+	TokenName      string `json:"token_name,omitempty"`
+	ModelName      string `json:"model_name,omitempty"`
+	Channel        int    `json:"channel,omitempty"`
+	Group          string `json:"group,omitempty"`
+	RequestID      string `json:"request_id,omitempty"`
+}
+
+type ClearLogPayloadRequest struct {
+	ClearRequestContent  bool `json:"clear_request_content"`
+	ClearResponseContent bool `json:"clear_response_content"`
+}
+
+func DeleteLog(c *gin.Context) {
+	logID, _ := strconv.Atoi(c.Param("id"))
+	if logID <= 0 {
+		common.ApiErrorMsg(c, "invalid log id")
+		return
+	}
+	rowsAffected, err := model.DeleteLogByID(logID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if rowsAffected == 0 {
+		common.ApiErrorMsg(c, "log not found")
+		return
+	}
+	common.ApiSuccess(c, gin.H{"deleted": 1})
+}
+
+func DeleteUserLog(c *gin.Context) {
+	logID, _ := strconv.Atoi(c.Param("id"))
+	if logID <= 0 {
+		common.ApiErrorMsg(c, "invalid log id")
+		return
+	}
+	if err := model.DeleteUserLogByID(c.GetInt("id"), logID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ApiErrorMsg(c, "log not found")
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"deleted": 1})
+}
+
+func BatchDeleteLogs(c *gin.Context) {
+	var req BatchDeleteLogsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "invalid request")
+		return
+	}
+	if !hasScopedLogFilter(req) {
+		common.ApiErrorMsg(c, "at least one filter is required")
+		return
+	}
+	count, err := model.DeleteLogsByFilter(c.Request.Context(), model.LogFilter{
+		LogType:        req.LogType,
+		StartTimestamp: req.StartTimestamp,
+		EndTimestamp:   req.EndTimestamp,
+		ModelName:      req.ModelName,
+		Username:       req.Username,
+		TokenName:      req.TokenName,
+		Channel:        req.Channel,
+		Group:          req.Group,
+		RequestId:      req.RequestID,
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"deleted": count})
+}
+
+func BatchDeleteUserLogs(c *gin.Context) {
+	var req BatchDeleteLogsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "invalid request")
+		return
+	}
+	if !hasScopedLogFilter(req) {
+		common.ApiErrorMsg(c, "at least one filter is required")
+		return
+	}
+	count, err := model.DeleteLogsByFilter(c.Request.Context(), model.LogFilter{
+		UserId:         c.GetInt("id"),
+		LogType:        req.LogType,
+		StartTimestamp: req.StartTimestamp,
+		EndTimestamp:   req.EndTimestamp,
+		ModelName:      req.ModelName,
+		TokenName:      req.TokenName,
+		Channel:        req.Channel,
+		Group:          req.Group,
+		RequestId:      req.RequestID,
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"deleted": count})
+}
+
+func ClearUserLogPayloads(c *gin.Context) {
+	var req ClearLogPayloadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "invalid request")
+		return
+	}
+	if !req.ClearRequestContent && !req.ClearResponseContent {
+		common.ApiErrorMsg(c, "nothing to clear")
+		return
+	}
+	count, err := model.ClearPayloadAuditFieldsByFilter(c.Request.Context(), model.LogFilter{
+		UserId: c.GetInt("id"),
+	}, req.ClearRequestContent, req.ClearResponseContent, 200)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"updated": count})
+}
+
+func hasScopedLogFilter(req BatchDeleteLogsRequest) bool {
+	return req.StartTimestamp != 0 ||
+		req.EndTimestamp != 0 ||
+		req.Username != "" ||
+		req.TokenName != "" ||
+		req.ModelName != "" ||
+		req.Channel != 0 ||
+		req.Group != "" ||
+		req.RequestID != "" ||
+		req.LogType != 0
 }

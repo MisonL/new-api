@@ -178,7 +178,12 @@ const SingleModelSelectModal = ({
                 >
                   <div className='grid grid-cols-2 gap-x-4'>
                     {categoryData.models.map((model) => (
-                      <Radio key={model} value={model} className='my-1' name='components-table-channels-modals-singlemodelselectmodal-radio-1'>
+                      <Radio
+                        key={model}
+                        value={model}
+                        className='my-1'
+                        name='components-table-channels-modals-singlemodelselectmodal-radio-1'
+                      >
                         {model}
                       </Radio>
                     ))}

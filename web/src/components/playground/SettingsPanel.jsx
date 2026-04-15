@@ -97,7 +97,6 @@ const SettingsPanel = ({
             currentConfig={currentConfig}
             onConfigImport={onConfigImport}
             onConfigReset={onConfigReset}
-            styleState={{ ...styleState, isMobile: false }}
             messages={messages}
           />
         </div>
@@ -235,7 +234,6 @@ const SettingsPanel = ({
             currentConfig={currentConfig}
             onConfigImport={onConfigImport}
             onConfigReset={onConfigReset}
-            styleState={styleState}
             messages={messages}
           />
         </div>

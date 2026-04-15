@@ -905,8 +905,18 @@ const CreateDeploymentModal = ({ visible, onCancel, onSuccess, t }) => {
                     setImageMode(value?.target?.value ?? value)
                   }
                 >
-                  <Radio value='builtin' name='components-table-model-deployments-modals-createdeploymentmodal-radio-1'>{t('内置 Ollama 镜像')}</Radio>
-                  <Radio value='custom' name='components-table-model-deployments-modals-createdeploymentmodal-radio-2'>{t('自定义镜像')}</Radio>
+                  <Radio
+                    value='builtin'
+                    name='components-table-model-deployments-modals-createdeploymentmodal-radio-1'
+                  >
+                    {t('内置 Ollama 镜像')}
+                  </Radio>
+                  <Radio
+                    value='custom'
+                    name='components-table-model-deployments-modals-createdeploymentmodal-radio-2'
+                  >
+                    {t('自定义镜像')}
+                  </Radio>
                 </RadioGroup>
               </div>
             </div>
@@ -1408,8 +1418,18 @@ const CreateDeploymentModal = ({ visible, onCancel, onSuccess, t }) => {
                   value={priceCurrency}
                   onChange={handleCurrencyChange}
                 >
-                  <Radio value='usdc' name='components-table-model-deployments-modals-createdeploymentmodal-radio-3'>USDC</Radio>
-                  <Radio value='iocoin' name='components-table-model-deployments-modals-createdeploymentmodal-radio-4'>IOCOIN</Radio>
+                  <Radio
+                    value='usdc'
+                    name='components-table-model-deployments-modals-createdeploymentmodal-radio-3'
+                  >
+                    USDC
+                  </Radio>
+                  <Radio
+                    value='iocoin'
+                    name='components-table-model-deployments-modals-createdeploymentmodal-radio-4'
+                  >
+                    IOCOIN
+                  </Radio>
                 </RadioGroup>
                 <Tag size='small' color='blue'>
                   {currencyLabel}

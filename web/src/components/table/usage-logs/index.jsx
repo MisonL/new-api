@@ -25,6 +25,7 @@ import LogsFilters from './UsageLogsFilters';
 import ColumnSelectorModal from './modals/ColumnSelectorModal';
 import ChannelAffinityUsageCacheModal from './modals/ChannelAffinityUsageCacheModal';
 import ParamOverrideModal from './modals/ParamOverrideModal';
+import PayloadContentModal from './modals/PayloadContentModal';
 import EditUserModal from '../users/modals/EditUserModal';
 import { useLogsData } from '../../../hooks/usage-logs/useUsageLogsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
@@ -39,7 +40,9 @@ const LogsPage = () => {
   return (
     <>
       {/* Modals */}
-      {logsData.showColumnSelector ? <ColumnSelectorModal {...logsData} /> : null}
+      {logsData.showColumnSelector ? (
+        <ColumnSelectorModal {...logsData} />
+      ) : null}
       {logsData.showEditUser ? (
         <EditUserModal
           refresh={refreshCurrentPage}
@@ -51,11 +54,17 @@ const LogsPage = () => {
       {logsData.showChannelAffinityUsageCacheModal ? (
         <ChannelAffinityUsageCacheModal {...logsData} />
       ) : null}
-      {logsData.showParamOverrideModal ? <ParamOverrideModal {...logsData} /> : null}
+      {logsData.showParamOverrideModal ? (
+        <ParamOverrideModal {...logsData} />
+      ) : null}
+      {logsData.showPayloadContentModal ? (
+        <PayloadContentModal {...logsData} />
+      ) : null}
 
       {/* Main Content */}
       <CardPro
         type='type2'
+        className='usage-logs-card'
         statsArea={<LogsActions {...logsData} />}
         searchArea={<LogsFilters {...logsData} />}
         paginationArea={createCardProPagination({

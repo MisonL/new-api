@@ -119,7 +119,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			logger.LogError(c, "timeout waiting for goroutines to exit")
 		}
 		info.ReceivedResponseCount = int(receivedResponseCount.Load())
-		if info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors() {
+		if (info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors()) || info.StreamStatus.IsCanceled() {
 			logger.LogInfo(c, fmt.Sprintf("stream ended: %s", info.StreamStatus.Summary()))
 		} else {
 			logger.LogError(c, fmt.Sprintf("stream ended: %s, received=%d", info.StreamStatus.Summary(), info.ReceivedResponseCount))
@@ -288,8 +288,13 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 		if err := scanner.Err(); err != nil {
 			if err != io.EOF {
-				logger.LogError(c, "scanner error: "+err.Error())
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
+				if info.StreamStatus.IsCanceled() || relaycommon.IsBenignDisconnectErrorMessage(err.Error()) {
+					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, err)
+					logger.LogInfo(c, "scanner closed after client disconnect: "+err.Error())
+				} else {
+					logger.LogError(c, "scanner error: "+err.Error())
+					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
+				}
 			}
 		}
 		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)

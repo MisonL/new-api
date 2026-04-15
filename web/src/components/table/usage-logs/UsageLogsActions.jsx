@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Tag, Space, Skeleton } from '@douyinfe/semi-ui';
+import { Button, Skeleton, Space, Tag } from '@douyinfe/semi-ui';
 import { renderQuota } from '../../../helpers';
 import CompactModeToggle from '../../common/ui/CompactModeToggle';
 import { useMinimumLoadingTime } from '../../../hooks/common/useMinimumLoadingTime';
@@ -29,6 +29,7 @@ const LogsActions = ({
   showStat,
   compactMode,
   setCompactMode,
+  batchDeleteLogs,
   t,
 }) => {
   const showSkeleton = useMinimumLoadingTime(loadingStat);
@@ -43,51 +44,34 @@ const LogsActions = ({
   );
 
   return (
-    <div className='flex flex-col md:flex-row justify-between items-start md:items-center gap-2 w-full'>
+    <div className='usage-logs-actions flex flex-col md:flex-row justify-between items-start md:items-center gap-2 w-full'>
       <Skeleton loading={needSkeleton} active placeholder={placeholder}>
-        <Space>
-          <Tag
-            color='blue'
-            style={{
-              fontWeight: 500,
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-              padding: 13,
-            }}
-            className='!rounded-lg'
-          >
+        <Space className='usage-logs-stats-list' wrap>
+          <Tag color='blue' className='usage-logs-stat-tag'>
             {t('消耗额度')}: {renderQuota(stat.quota)}
           </Tag>
-          <Tag
-            color='pink'
-            style={{
-              fontWeight: 500,
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-              padding: 13,
-            }}
-            className='!rounded-lg'
-          >
+          <Tag color='pink' className='usage-logs-stat-tag'>
             RPM: {stat.rpm}
           </Tag>
           <Tag
             color='white'
-            style={{
-              border: 'none',
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-              fontWeight: 500,
-              padding: 13,
-            }}
-            className='!rounded-lg'
+            className='usage-logs-stat-tag usage-logs-stat-tag-neutral'
           >
             TPM: {stat.tpm}
           </Tag>
         </Space>
       </Skeleton>
 
-      <CompactModeToggle
-        compactMode={compactMode}
-        setCompactMode={setCompactMode}
-        t={t}
-      />
+      <div className='usage-logs-actions-toolbar flex items-center gap-2'>
+        <Button type='danger' theme='light' onClick={batchDeleteLogs}>
+          {t('批量删除日志')}
+        </Button>
+        <CompactModeToggle
+          compactMode={compactMode}
+          setCompactMode={setCompactMode}
+          t={t}
+        />
+      </div>
     </div>
   );
 };

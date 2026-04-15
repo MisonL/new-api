@@ -139,7 +139,8 @@ const FilterAutoComplete = ({
     }
 
     const popupId =
-      wrapper.getAttribute('data-popupid') || wrapper.getAttribute('aria-controls');
+      wrapper.getAttribute('data-popupid') ||
+      wrapper.getAttribute('aria-controls');
     const popup = popupId ? document.getElementById(popupId) : null;
 
     if (enableSuggestions && !disabled) {

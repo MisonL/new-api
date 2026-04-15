@@ -89,6 +89,8 @@ const PersonalSetting = () => {
     upstreamModelUpdateNotifyEnabled: false,
     acceptUnsetModelRatioModel: false,
     recordIpLog: false,
+    recordRequestContentLog: false,
+    recordResponseContentLog: false,
   });
 
   useEffect(() => {
@@ -164,6 +166,8 @@ const PersonalSetting = () => {
         acceptUnsetModelRatioModel:
           settings.accept_unset_model_ratio_model || false,
         recordIpLog: settings.record_ip_log || false,
+        recordRequestContentLog: settings.record_request_content_log || false,
+        recordResponseContentLog: settings.record_response_content_log || false,
       });
     }
   }, [userState?.user?.setting]);
@@ -413,7 +417,7 @@ const PersonalSetting = () => {
     }));
   };
 
-  const saveNotificationSettings = async () => {
+  const persistNotificationSettings = async (clearPayloads = null) => {
     try {
       const res = await API.put('/api/user/setting', {
         notify_type: notificationSettings.warningType,
@@ -435,10 +439,30 @@ const PersonalSetting = () => {
         accept_unset_model_ratio_model:
           notificationSettings.acceptUnsetModelRatioModel,
         record_ip_log: notificationSettings.recordIpLog,
+        record_request_content_log:
+          notificationSettings.recordRequestContentLog,
+        record_response_content_log:
+          notificationSettings.recordResponseContentLog,
       });
 
       if (res.data.success) {
-        showSuccess(t('设置保存成功'));
+        if (
+          clearPayloads &&
+          (clearPayloads.clear_request_content ||
+            clearPayloads.clear_response_content)
+        ) {
+          const clearRes = await API.post(
+            '/api/log/self/clear_payloads',
+            clearPayloads,
+          );
+          if (!clearRes.data.success) {
+            showError(t('设置已保存，但历史会话内容清理失败'));
+          } else {
+            showSuccess(t('设置已保存，历史会话内容已清理'));
+          }
+        } else {
+          showSuccess(t('设置保存成功'));
+        }
         await getUserData();
       } else {
         showError(res.data.message);
@@ -446,6 +470,48 @@ const PersonalSetting = () => {
     } catch (error) {
       showError(t('设置保存失败'));
     }
+  };
+
+  const saveNotificationSettings = async () => {
+    let currentSettings = {};
+    try {
+      currentSettings = JSON.parse(userState?.user?.setting || '{}');
+    } catch (error) {
+      currentSettings = {};
+    }
+
+    const clearPayloads = {
+      clear_request_content:
+        currentSettings.record_request_content_log === true &&
+        notificationSettings.recordRequestContentLog !== true,
+      clear_response_content:
+        currentSettings.record_response_content_log === true &&
+        notificationSettings.recordResponseContentLog !== true,
+    };
+
+    if (
+      clearPayloads.clear_request_content ||
+      clearPayloads.clear_response_content
+    ) {
+      Modal.confirm({
+        title: t('关闭内容日志记录'),
+        content: t(
+          '检测到您正在关闭请求或响应内容记录。确认将同步清理您历史日志中已保存的对应会话内容；取消则仅关闭功能并保留历史内容。',
+        ),
+        okText: t('关闭并清理'),
+        cancelText: t('仅关闭'),
+        okType: 'danger',
+        onOk: async () => {
+          await persistNotificationSettings(clearPayloads);
+        },
+        onCancel: async () => {
+          await persistNotificationSettings();
+        },
+      });
+      return;
+    }
+
+    await persistNotificationSettings();
   };
 
   return (

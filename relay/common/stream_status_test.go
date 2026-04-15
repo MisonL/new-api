@@ -157,6 +157,48 @@ func TestStreamStatus_IsNormalEnd_NilSafe(t *testing.T) {
 	assert.True(t, s.IsNormalEnd())
 }
 
+func TestIsBenignDisconnectErrorMessage(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, IsBenignDisconnectErrorMessage("context canceled"))
+	assert.True(t, IsBenignDisconnectErrorMessage("request context done: context canceled"))
+	assert.True(t, IsBenignDisconnectErrorMessage("write tcp: broken pipe"))
+	assert.False(t, IsBenignDisconnectErrorMessage("upstream warning"))
+}
+
+func TestStreamStatus_IsCanceled_WithBenignDisconnectErrors(t *testing.T) {
+	t.Parallel()
+
+	s := NewStreamStatus()
+	s.RecordError("request context done: context canceled")
+	s.SetEndReason(StreamEndReasonClientGone, fmt.Errorf("context canceled"))
+
+	assert.True(t, s.IsCanceled())
+}
+
+func TestStreamStatus_IsCanceled_WithNonBenignErrors(t *testing.T) {
+	t.Parallel()
+
+	s := NewStreamStatus()
+	s.RecordError("upstream warning")
+	s.SetEndReason(StreamEndReasonClientGone, fmt.Errorf("context canceled"))
+
+	assert.False(t, s.IsCanceled())
+}
+
+func TestStreamStatus_IsCanceled_WithTruncatedErrorHistory(t *testing.T) {
+	t.Parallel()
+
+	s := NewStreamStatus()
+	s.RecordError("upstream warning")
+	for i := 0; i < maxStreamErrorEntries+5; i++ {
+		s.RecordError("context canceled")
+	}
+	s.SetEndReason(StreamEndReasonClientGone, fmt.Errorf("context canceled"))
+
+	assert.False(t, s.IsCanceled())
+}
+
 func TestStreamStatus_Summary(t *testing.T) {
 	t.Parallel()
 

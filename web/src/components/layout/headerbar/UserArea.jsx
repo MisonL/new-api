@@ -28,8 +28,29 @@ import {
   IconKey,
 } from '@douyinfe/semi-icons';
 import { stringToColor } from '../../../helpers';
+import { useActualTheme } from '../../../context/Theme';
 import SkeletonWrapper from '../components/SkeletonWrapper';
 import HeaderPopupMenu from './HeaderPopupMenu';
+
+const adjustHexChannel = (hex, delta) => {
+  const value = parseInt(hex, 16);
+  const nextValue = Math.max(0, Math.min(255, value + delta));
+  return nextValue.toString(16).padStart(2, '0');
+};
+
+const adjustHexColor = (color, delta) => {
+  if (
+    typeof color !== 'string' ||
+    !color.startsWith('#') ||
+    color.length !== 7
+  ) {
+    return color;
+  }
+  return `#${adjustHexChannel(color.slice(1, 3), delta)}${adjustHexChannel(
+    color.slice(3, 5),
+    delta,
+  )}${adjustHexChannel(color.slice(5, 7), delta)}`;
+};
 
 const UserArea = ({
   userState,
@@ -40,6 +61,8 @@ const UserArea = ({
   navigate,
   t,
 }) => {
+  const actualTheme = useActualTheme();
+
   if (isLoading) {
     return (
       <SkeletonWrapper
@@ -54,33 +77,57 @@ const UserArea = ({
   if (userState.user) {
     const username = userState.user.username;
     const userInitial = username[0].toUpperCase();
+    const userBadgeColor = stringToColor(username);
     const userBadgeStyle = {
-      backgroundColor: stringToColor(username),
+      backgroundColor:
+        actualTheme === 'dark'
+          ? adjustHexColor(userBadgeColor, 12)
+          : adjustHexColor(userBadgeColor, -8),
+      color: '#ffffff',
+      WebkitTextFillColor: '#ffffff',
+      boxShadow:
+        actualTheme === 'dark'
+          ? 'inset 0 0 0 1px rgba(255,255,255,0.08)'
+          : 'inset 0 0 0 1px rgba(15,23,42,0.06)',
     };
 
     const menuItems = [
       {
         key: 'personal',
         label: t('个人设置'),
-        icon: <IconUserSetting size='small' className='text-gray-500 dark:text-gray-400' />,
+        icon: (
+          <IconUserSetting
+            size='small'
+            className='text-gray-500 dark:text-gray-400'
+          />
+        ),
         onClick: () => navigate('/console/personal'),
       },
       {
         key: 'token',
         label: t('令牌管理'),
-        icon: <IconKey size='small' className='text-gray-500 dark:text-gray-400' />,
+        icon: (
+          <IconKey size='small' className='text-gray-500 dark:text-gray-400' />
+        ),
         onClick: () => navigate('/console/token'),
       },
       {
         key: 'wallet',
         label: t('钱包管理'),
-        icon: <IconCreditCard size='small' className='text-gray-500 dark:text-gray-400' />,
+        icon: (
+          <IconCreditCard
+            size='small'
+            className='text-gray-500 dark:text-gray-400'
+          />
+        ),
         onClick: () => navigate('/console/topup'),
       },
       {
         key: 'logout',
         label: t('退出'),
-        icon: <IconExit size='small' className='text-gray-500 dark:text-gray-400' />,
+        icon: (
+          <IconExit size='small' className='text-gray-500 dark:text-gray-400' />
+        ),
         onClick: logout,
         danger: true,
       },
@@ -102,7 +149,7 @@ const UserArea = ({
             <span
               aria-hidden='true'
               style={userBadgeStyle}
-              className='mr-1 inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold text-white'
+              className='mr-1 inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold'
             >
               {userInitial}
             </span>

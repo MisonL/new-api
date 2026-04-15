@@ -95,6 +95,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, content))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
+	other = common.AppendPayloadAuditFields(c, other)
 	otherStr := common.MapToJsonStr(other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -156,6 +157,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, params=%s", userId, common.GetJsonString(params)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
+	params.Other = common.AppendPayloadAuditFields(c, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -243,37 +245,71 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string) (logs []*Log, total int64, err error) {
-	var tx *gorm.DB
-	if logType == LogTypeUnknown {
-		tx = LOG_DB
-	} else {
-		tx = LOG_DB.Where("logs.type = ?", logType)
-	}
+type LogFilter struct {
+	LogType        int
+	StartTimestamp int64
+	EndTimestamp   int64
+	ModelName      string
+	Username       string
+	TokenName      string
+	Channel        int
+	Group          string
+	RequestId      string
+	UserId         int
+}
 
-	if modelName != "" {
-		tx = tx.Where("logs.model_name like ?", modelName)
+func applyLogFilters(tx *gorm.DB, filter LogFilter) (*gorm.DB, error) {
+	if filter.UserId > 0 {
+		tx = tx.Where("logs.user_id = ?", filter.UserId)
 	}
-	if username != "" {
-		tx = tx.Where("logs.username = ?", username)
+	if filter.LogType != LogTypeUnknown {
+		tx = tx.Where("logs.type = ?", filter.LogType)
 	}
-	if tokenName != "" {
-		tx = tx.Where("logs.token_name = ?", tokenName)
+	if filter.ModelName != "" {
+		modelNamePattern, err := sanitizeLikePattern(filter.ModelName)
+		if err != nil {
+			return nil, err
+		}
+		tx = tx.Where("logs.model_name LIKE ? ESCAPE '!'", modelNamePattern)
 	}
-	if requestId != "" {
-		tx = tx.Where("logs.request_id = ?", requestId)
+	if filter.Username != "" {
+		tx = tx.Where("logs.username = ?", filter.Username)
 	}
-	if startTimestamp != 0 {
-		tx = tx.Where("logs.created_at >= ?", startTimestamp)
+	if filter.TokenName != "" {
+		tx = tx.Where("logs.token_name = ?", filter.TokenName)
 	}
-	if endTimestamp != 0 {
-		tx = tx.Where("logs.created_at <= ?", endTimestamp)
+	if filter.RequestId != "" {
+		tx = tx.Where("logs.request_id = ?", filter.RequestId)
 	}
-	if channel != 0 {
-		tx = tx.Where("logs.channel_id = ?", channel)
+	if filter.StartTimestamp != 0 {
+		tx = tx.Where("logs.created_at >= ?", filter.StartTimestamp)
 	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+	if filter.EndTimestamp != 0 {
+		tx = tx.Where("logs.created_at <= ?", filter.EndTimestamp)
+	}
+	if filter.Channel != 0 {
+		tx = tx.Where("logs.channel_id = ?", filter.Channel)
+	}
+	if filter.Group != "" {
+		tx = tx.Where("logs."+logGroupCol+" = ?", filter.Group)
+	}
+	return tx, nil
+}
+
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string) (logs []*Log, total int64, err error) {
+	tx, err := applyLogFilters(LOG_DB, LogFilter{
+		LogType:        logType,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		ModelName:      modelName,
+		Username:       username,
+		TokenName:      tokenName,
+		Channel:        channel,
+		Group:          group,
+		RequestId:      requestId,
+	})
+	if err != nil {
+		return nil, 0, err
 	}
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {
@@ -330,34 +366,18 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 const logSearchCountLimit = 10000
 
 func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string) (logs []*Log, total int64, err error) {
-	var tx *gorm.DB
-	if logType == LogTypeUnknown {
-		tx = LOG_DB.Where("logs.user_id = ?", userId)
-	} else {
-		tx = LOG_DB.Where("logs.user_id = ? and logs.type = ?", userId, logType)
-	}
-
-	if modelName != "" {
-		modelNamePattern, err := sanitizeLikePattern(modelName)
-		if err != nil {
-			return nil, 0, err
-		}
-		tx = tx.Where("logs.model_name LIKE ? ESCAPE '!'", modelNamePattern)
-	}
-	if tokenName != "" {
-		tx = tx.Where("logs.token_name = ?", tokenName)
-	}
-	if requestId != "" {
-		tx = tx.Where("logs.request_id = ?", requestId)
-	}
-	if startTimestamp != 0 {
-		tx = tx.Where("logs.created_at >= ?", startTimestamp)
-	}
-	if endTimestamp != 0 {
-		tx = tx.Where("logs.created_at <= ?", endTimestamp)
-	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+	tx, err := applyLogFilters(LOG_DB, LogFilter{
+		UserId:         userId,
+		LogType:        logType,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		ModelName:      modelName,
+		TokenName:      tokenName,
+		Group:          group,
+		RequestId:      requestId,
+	})
+	if err != nil {
+		return nil, 0, err
 	}
 	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
 	if err != nil {
@@ -478,4 +498,105 @@ func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64,
 	}
 
 	return total, nil
+}
+
+func DeleteLogByID(logID int) (int64, error) {
+	result := LOG_DB.Delete(&Log{}, logID)
+	return result.RowsAffected, result.Error
+}
+
+func DeleteUserLogByID(userID int, logID int) error {
+	result := LOG_DB.Where("id = ? AND user_id = ?", logID, userID).Delete(&Log{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func DeleteLogsByFilter(ctx context.Context, filter LogFilter) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	tx, err := applyLogFilters(LOG_DB, filter)
+	if err != nil {
+		return 0, err
+	}
+	result := tx.Delete(&Log{})
+	return result.RowsAffected, result.Error
+}
+
+func ClearPayloadAuditFieldsByFilter(ctx context.Context, filter LogFilter, clearRequest bool, clearResponse bool, batchSize int) (int64, error) {
+	if !clearRequest && !clearResponse {
+		return 0, nil
+	}
+	if batchSize <= 0 {
+		batchSize = 200
+	}
+
+	var total int64
+	lastID := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+
+		tx, err := applyLogFilters(LOG_DB.Model(&Log{}), filter)
+		if err != nil {
+			return total, err
+		}
+
+		var logs []Log
+		err = tx.Where("id > ?", lastID).Order("id asc").Limit(batchSize).Find(&logs).Error
+		if err != nil {
+			return total, err
+		}
+		if len(logs) == 0 {
+			break
+		}
+
+		for _, log := range logs {
+			lastID = log.Id
+			otherMap, err := common.StrToMap(log.Other)
+			if err != nil || otherMap == nil {
+				continue
+			}
+			changed := false
+			if clearRequest {
+				changed = deletePayloadKeys(otherMap, "request") || changed
+			}
+			if clearResponse {
+				changed = deletePayloadKeys(otherMap, "response") || changed
+			}
+			if !changed {
+				continue
+			}
+			if err := LOG_DB.Model(&Log{}).Where("id = ?", log.Id).Update("other", common.MapToJsonStr(otherMap)).Error; err != nil {
+				return total, err
+			}
+			total++
+		}
+	}
+
+	return total, nil
+}
+
+func deletePayloadKeys(otherMap map[string]interface{}, prefix string) bool {
+	keys := []string{
+		prefix + "_content",
+		prefix + "_content_type",
+		prefix + "_content_bytes",
+		prefix + "_content_truncated",
+		prefix + "_content_omitted",
+	}
+	changed := false
+	for _, key := range keys {
+		if _, ok := otherMap[key]; ok {
+			delete(otherMap, key)
+			changed = true
+		}
+	}
+	return changed
 }

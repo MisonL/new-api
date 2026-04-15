@@ -29,13 +29,14 @@ type StreamErrorEntry struct {
 }
 
 type StreamStatus struct {
-	EndReason  StreamEndReason
-	EndError   error
-	endOnce    sync.Once
+	EndReason StreamEndReason
+	EndError  error
+	endOnce   sync.Once
 
-	mu         sync.Mutex
-	Errors     []StreamErrorEntry
-	ErrorCount int
+	mu                 sync.Mutex
+	Errors             []StreamErrorEntry
+	ErrorCount         int
+	NonBenignErrorSeen bool
 }
 
 func NewStreamStatus() *StreamStatus {
@@ -59,6 +60,9 @@ func (s *StreamStatus) RecordError(msg string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ErrorCount++
+	if !IsBenignDisconnectErrorMessage(msg) {
+		s.NonBenignErrorSeen = true
+	}
 	if len(s.Errors) < maxStreamErrorEntries {
 		s.Errors = append(s.Errors, StreamErrorEntry{
 			Message:   msg,
@@ -92,6 +96,43 @@ func (s *StreamStatus) IsNormalEnd() bool {
 	return s.EndReason == StreamEndReasonDone ||
 		s.EndReason == StreamEndReasonEOF ||
 		s.EndReason == StreamEndReasonHandlerStop
+}
+
+func IsBenignDisconnectErrorMessage(msg string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(msg))
+	if normalized == "" {
+		return false
+	}
+	return strings.Contains(normalized, "context canceled") ||
+		strings.Contains(normalized, "context cancelled") ||
+		strings.Contains(normalized, "request context done") ||
+		strings.Contains(normalized, "broken pipe") ||
+		strings.Contains(normalized, "connection reset by peer") ||
+		strings.Contains(normalized, "client disconnected")
+}
+
+func (s *StreamStatus) HasOnlyBenignDisconnectErrors() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrorCount == 0 || s.NonBenignErrorSeen || len(s.Errors) != s.ErrorCount {
+		return false
+	}
+	for _, e := range s.Errors {
+		if !IsBenignDisconnectErrorMessage(e.Message) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *StreamStatus) IsCanceled() bool {
+	if s == nil || s.EndReason != StreamEndReasonClientGone {
+		return false
+	}
+	return !s.HasErrors() || s.HasOnlyBenignDisconnectErrors()
 }
 
 func (s *StreamStatus) Summary() string {

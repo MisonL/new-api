@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Typography } from '@douyinfe/semi-ui';
+import { Tag, Typography } from '@douyinfe/semi-ui';
 import { IconEyeOpened } from '@douyinfe/semi-icons';
 import CompactModeToggle from '../../common/ui/CompactModeToggle';
 
@@ -26,16 +26,35 @@ const { Text } = Typography;
 
 const TaskLogsActions = ({ compactMode, setCompactMode, t }) => {
   return (
-    <div className='flex flex-col md:flex-row justify-between items-start md:items-center gap-2 w-full'>
-      <div className='flex items-center text-orange-500 mb-2 md:mb-0'>
-        <IconEyeOpened className='mr-2' />
-        <Text>{t('任务记录')}</Text>
+    <div className='aux-logs-actions flex flex-col md:flex-row justify-between items-start md:items-center gap-3 w-full'>
+      <div className='logs-inline-summary'>
+        <div className='logs-inline-summary-icon logs-inline-summary-icon-orange'>
+          <IconEyeOpened />
+        </div>
+        <div className='logs-inline-summary-content'>
+          <div className='logs-inline-summary-header'>
+            <Text strong>{t('任务记录')}</Text>
+            <Tag
+              color='orange'
+              size='small'
+              className='logs-inline-summary-tag'
+            >
+              {t('任务')}
+            </Tag>
+          </div>
+          <Text size='small' type='tertiary'>
+            {t('查看异步任务状态、回调结果与失败信息')}
+          </Text>
+        </div>
       </div>
-      <CompactModeToggle
-        compactMode={compactMode}
-        setCompactMode={setCompactMode}
-        t={t}
-      />
+
+      <div className='usage-logs-actions-toolbar flex items-center gap-2'>
+        <CompactModeToggle
+          compactMode={compactMode}
+          setCompactMode={setCompactMode}
+          t={t}
+        />
+      </div>
     </div>
   );
 };

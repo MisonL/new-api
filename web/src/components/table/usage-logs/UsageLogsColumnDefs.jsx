@@ -145,14 +145,18 @@ function renderType(type, t) {
 function buildStreamStatusTooltip(ss, t) {
   if (!ss) return null;
   const isCanceled =
-    ss.status === 'canceled' || ss.end_reason === 'client_gone';
+    ss.status === 'canceled' || (!ss.status && ss.end_reason === 'client_gone');
   const statusLabel = isCanceled ? t('已取消') : t('异常');
-  const reasonLabel = isCanceled ? t('客户端已断开') : ss.end_reason || 'unknown';
+  const reasonLabel = isCanceled
+    ? t('客户端已断开')
+    : ss.end_reason || 'unknown';
   const lines = [t('流状态') + '：' + statusLabel, reasonLabel];
   if (ss.error_count > 0) {
     lines.push(`${t('软错误')}: ${ss.error_count}`);
   }
-  const normalizedEndError = String(ss.end_error || '').trim().toLowerCase();
+  const normalizedEndError = String(ss.end_error || '')
+    .trim()
+    .toLowerCase();
   const shouldShowEndError =
     ss.end_error &&
     (!isCanceled ||
@@ -174,8 +178,8 @@ function renderIsStream(bool, t, streamStatus) {
   const indicatorKind = !streamStatus
     ? 'ok'
     : streamStatus.status === 'canceled' ||
-        streamStatus.end_reason === 'client_gone'
-      ? 'canceled'
+        (!streamStatus.status && streamStatus.end_reason === 'client_gone')
+      ? 'ok'
       : streamStatus.status !== 'ok'
         ? 'error'
         : 'ok';
@@ -201,11 +205,7 @@ function renderIsStream(bool, t, streamStatus) {
                 userSelect: 'none',
               }}
             >
-              <CircleAlert
-                size={14}
-                strokeWidth={2.5}
-                color='currentColor'
-              />
+              <CircleAlert size={14} strokeWidth={2.5} color='currentColor' />
             </span>
           </Tooltip>
         )}
@@ -484,7 +484,11 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     };
   }
 
-  const summaryOpts = { ...other, displayMode: billingDisplayMode, outputMode: 'segments' };
+  const summaryOpts = {
+    ...other,
+    displayMode: billingDisplayMode,
+    outputMode: 'segments',
+  };
 
   if (other?.billing_mode === 'tiered_expr') {
     return { segments: renderTieredModelPriceSimple(summaryOpts) };

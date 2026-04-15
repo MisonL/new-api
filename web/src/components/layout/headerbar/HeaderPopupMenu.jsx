@@ -33,9 +33,13 @@ const HeaderPopupMenu = ({
   const popupStyle = useMemo(
     () => ({
       backgroundColor:
-        actualTheme === 'dark' ? 'rgba(39, 39, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)',
+        actualTheme === 'dark'
+          ? 'rgba(39, 39, 42, 0.98)'
+          : 'rgba(255, 255, 255, 0.98)',
       borderColor:
-        actualTheme === 'dark' ? 'rgba(82, 82, 91, 0.92)' : 'rgba(203, 213, 225, 0.96)',
+        actualTheme === 'dark'
+          ? 'rgba(82, 82, 91, 0.92)'
+          : 'rgba(203, 213, 225, 0.96)',
       boxShadow:
         actualTheme === 'dark'
           ? '0 20px 25px -5px rgba(0, 0, 0, 0.45), 0 8px 10px -6px rgba(0, 0, 0, 0.35)'
@@ -74,9 +78,7 @@ const HeaderPopupMenu = ({
         closeMenu: () => setOpen(false),
       })}
       {open && (
-        <div
-          className='absolute right-0 top-full z-[260] mt-2'
-        >
+        <div className='absolute right-0 top-full z-[260] mt-2'>
           <div
             role='menu'
             aria-label={menuLabel}
