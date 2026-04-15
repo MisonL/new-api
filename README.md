@@ -12,7 +12,6 @@
 - 请求/响应内容日志：用户授权开启、弹窗查看、JSON 导出、单条删除、批量删除
 - `Responses` 流式首包前恢复等待与相关稳定性增强
 - 渠道上游模型更新检测、自动同步与忽略列表
-- Claude 透传控制：`service_tier`、`inference_geo`、`speed`、`safety_identifier`、`include_obfuscation`
 - 用户绑定信息管理面板与用户属性入口增强
 - Dashboard 增强：时间范围切换、通道趋势排行
 - 使用日志与后台表格增强：筛选联想、横向滚动、详情显示稳定性改进
