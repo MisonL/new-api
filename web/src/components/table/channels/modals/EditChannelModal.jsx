@@ -215,6 +215,7 @@ const EditChannelModal = (props) => {
     allow_safety_identifier: false,
     allow_include_obfuscation: false,
     allow_inference_geo: false,
+    allow_speed: false,
     claude_beta_query: false,
     responses_stream_bootstrap_recovery_enabled: false,
     upstream_model_update_check_enabled: false,
@@ -897,6 +898,7 @@ const EditChannelModal = (props) => {
             parsedSettings.allow_include_obfuscation || false;
           data.allow_inference_geo =
             parsedSettings.allow_inference_geo || false;
+          data.allow_speed = parsedSettings.allow_speed || false;
           data.claude_beta_query = parsedSettings.claude_beta_query || false;
           data.responses_stream_bootstrap_recovery_enabled =
             parsedSettings.responses_stream_bootstrap_recovery_enabled === true;
@@ -928,6 +930,7 @@ const EditChannelModal = (props) => {
           data.allow_safety_identifier = false;
           data.allow_include_obfuscation = false;
           data.allow_inference_geo = false;
+          data.allow_speed = false;
           data.claude_beta_query = false;
           data.responses_stream_bootstrap_recovery_enabled = false;
           data.upstream_model_update_check_enabled = false;
@@ -946,6 +949,7 @@ const EditChannelModal = (props) => {
         data.allow_safety_identifier = false;
         data.allow_include_obfuscation = false;
         data.allow_inference_geo = false;
+        data.allow_speed = false;
         data.claude_beta_query = false;
         data.responses_stream_bootstrap_recovery_enabled = false;
         data.upstream_model_update_check_enabled = false;
@@ -1791,6 +1795,7 @@ const EditChannelModal = (props) => {
       }
       if (localInputs.type === 14) {
         settings.allow_inference_geo = localInputs.allow_inference_geo === true;
+        settings.allow_speed = localInputs.allow_speed === true;
         settings.claude_beta_query = localInputs.claude_beta_query === true;
       }
     }
@@ -1844,6 +1849,7 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_safety_identifier;
     delete localInputs.allow_include_obfuscation;
     delete localInputs.allow_inference_geo;
+    delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
     delete localInputs.responses_stream_bootstrap_recovery_enabled;
     delete localInputs.upstream_model_update_check_enabled;
@@ -2634,6 +2640,18 @@ const EditChannelModal = (props) => {
                         }
                         extraText={t(
                           'inference_geo 字段用于控制 Claude 数据驻留推理区域。默认关闭以避免未经授权透传地域信息',
+                        )}
+                      />
+                      <Form.Switch
+                        field='allow_speed'
+                        label={t('允许 speed 透传')}
+                        checkedText={t('开')}
+                        uncheckedText={t('关')}
+                        onChange={(value) =>
+                          handleChannelOtherSettingsChange('allow_speed', value)
+                        }
+                        extraText={t(
+                          'speed 字段用于控制 Claude 推理速度模式。默认关闭以避免意外切换到 fast 模式',
                         )}
                       />
                     </>

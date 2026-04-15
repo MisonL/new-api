@@ -70,4 +70,5 @@ const (
 	// Payload audit context keys store user-authorized request/response previews for logs.
 	ContextKeyLogRequestPayload  ContextKey = "log_request_payload"
 	ContextKeyLogResponsePayload ContextKey = "log_response_payload"
+	ContextKeyIsStream           ContextKey = "is_stream"
 )
