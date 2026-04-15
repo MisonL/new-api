@@ -94,6 +94,43 @@ func (s *StreamStatus) IsNormalEnd() bool {
 		s.EndReason == StreamEndReasonHandlerStop
 }
 
+func IsBenignDisconnectErrorMessage(msg string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(msg))
+	if normalized == "" {
+		return false
+	}
+	return strings.Contains(normalized, "context canceled") ||
+		strings.Contains(normalized, "context cancelled") ||
+		strings.Contains(normalized, "request context done") ||
+		strings.Contains(normalized, "broken pipe") ||
+		strings.Contains(normalized, "connection reset by peer") ||
+		strings.Contains(normalized, "client disconnected")
+}
+
+func (s *StreamStatus) HasOnlyBenignDisconnectErrors() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrorCount == 0 {
+		return false
+	}
+	for _, e := range s.Errors {
+		if !IsBenignDisconnectErrorMessage(e.Message) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *StreamStatus) IsCanceled() bool {
+	if s == nil || s.EndReason != StreamEndReasonClientGone {
+		return false
+	}
+	return !s.HasErrors() || s.HasOnlyBenignDisconnectErrors()
+}
+
 func (s *StreamStatus) Summary() string {
 	if s == nil {
 		return "StreamStatus<nil>"

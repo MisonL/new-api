@@ -119,7 +119,7 @@ func classifyStreamStatus(ss *relaycommon.StreamStatus) string {
 	if ss == nil {
 		return "ok"
 	}
-	if ss.EndReason == relaycommon.StreamEndReasonClientGone && !ss.HasErrors() {
+	if ss.IsCanceled() {
 		return "canceled"
 	}
 	if !ss.IsNormalEnd() || ss.HasErrors() {

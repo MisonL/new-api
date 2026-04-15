@@ -80,3 +80,21 @@ func TestAppendStreamStatusKeepsSoftErroredClientGoneAsError(t *testing.T) {
 	require.Equal(t, "client_gone", streamInfo["end_reason"])
 	require.Equal(t, 1, streamInfo["error_count"])
 }
+
+func TestAppendStreamStatusKeepsBenignClientGoneAsCanceled(t *testing.T) {
+	ss := relaycommon.NewStreamStatus()
+	ss.RecordError("request context done: context canceled")
+	ss.SetEndReason(relaycommon.StreamEndReasonClientGone, context.Canceled)
+
+	other := make(map[string]interface{})
+	appendStreamStatus(&relaycommon.RelayInfo{
+		IsStream:     true,
+		StreamStatus: ss,
+	}, other)
+
+	streamInfo, ok := other["stream_status"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "canceled", streamInfo["status"])
+	require.Equal(t, "client_gone", streamInfo["end_reason"])
+	require.Equal(t, 1, streamInfo["error_count"])
+}

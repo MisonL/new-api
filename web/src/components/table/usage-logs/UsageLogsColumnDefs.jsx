@@ -175,7 +175,7 @@ function renderIsStream(bool, t, streamStatus) {
     ? 'ok'
     : streamStatus.status === 'canceled' ||
         streamStatus.end_reason === 'client_gone'
-      ? 'canceled'
+      ? 'ok'
       : streamStatus.status !== 'ok'
         ? 'error'
         : 'ok';
