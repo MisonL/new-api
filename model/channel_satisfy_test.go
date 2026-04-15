@@ -95,3 +95,15 @@ func TestHasResponsesBootstrapRecoveryCandidateChannelRejectsNonOptInChannel(t *
 		t.Fatal("non-opt-in channel should not satisfy bootstrap recovery candidate lookup")
 	}
 }
+
+func TestIsResponsesBootstrapRecoveryEnabledInOtherSettings(t *testing.T) {
+	if !IsResponsesBootstrapRecoveryEnabledInOtherSettings(`{"responses_stream_bootstrap_recovery_enabled":true}`) {
+		t.Fatal("raw settings should enable bootstrap recovery when opt-in is true")
+	}
+	if IsResponsesBootstrapRecoveryEnabledInOtherSettings(`{"responses_stream_bootstrap_recovery_enabled":false}`) {
+		t.Fatal("raw settings should not enable bootstrap recovery when opt-in is false")
+	}
+	if IsResponsesBootstrapRecoveryEnabledInOtherSettings(`{invalid`) {
+		t.Fatal("invalid raw settings should not enable bootstrap recovery")
+	}
+}

@@ -66,7 +66,7 @@ func HasResponsesBootstrapRecoveryEnabledChannel(groups []string, modelName stri
 		if channel == nil || channel.Status != common.ChannelStatusEnabled {
 			continue
 		}
-		if !channel.GetOtherSettings().ResponsesStreamBootstrapRecoveryEnabled {
+		if !IsChannelResponsesBootstrapRecoveryEnabled(channel) {
 			continue
 		}
 		if !channelMatchesAnyGroup(channel, groups) {
@@ -95,7 +95,7 @@ func HasResponsesBootstrapRecoveryCandidateChannel(groups []string, modelName st
 		if channel == nil {
 			continue
 		}
-		if !channel.GetOtherSettings().ResponsesStreamBootstrapRecoveryEnabled {
+		if !IsChannelResponsesBootstrapRecoveryEnabled(channel) {
 			continue
 		}
 		if !channelMatchesAnyGroup(channel, groups) {
@@ -139,7 +139,7 @@ func hasResponsesBootstrapRecoveryEnabledChannelDB(groups []string, modelName st
 		if channel == nil {
 			continue
 		}
-		if !channel.GetOtherSettings().ResponsesStreamBootstrapRecoveryEnabled {
+		if !IsChannelResponsesBootstrapRecoveryEnabled(channel) {
 			continue
 		}
 		if !channelMatchesAnyGroup(channel, groups) {
@@ -161,7 +161,7 @@ func hasResponsesBootstrapRecoveryCandidateChannelDB(groups []string, modelName 
 		if channel == nil {
 			continue
 		}
-		if !channel.GetOtherSettings().ResponsesStreamBootstrapRecoveryEnabled {
+		if !IsChannelResponsesBootstrapRecoveryEnabled(channel) {
 			continue
 		}
 		if !channelMatchesAnyGroup(channel, groups) {

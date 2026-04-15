@@ -205,8 +205,9 @@ func IsResponsesBootstrapRecoveryEnabledForSelectedChannel(c *gin.Context) bool 
 	if c == nil {
 		return false
 	}
-	channelOtherSettings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)
-	return ok && channelOtherSettings.ResponsesStreamBootstrapRecoveryEnabled
+	return model.IsResponsesBootstrapRecoveryEnabledInOtherSettings(
+		common.GetContextKeyString(c, constant.ContextKeyChannelOtherSettingRaw),
+	)
 }
 
 // NextResponsesBootstrapWait returns the next wait duration and whether a keepalive ping should be sent.
