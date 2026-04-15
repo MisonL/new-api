@@ -17,11 +17,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getLucideIcon } from '../../helpers/render';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, RotateCcw } from 'lucide-react';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useSidebar } from '../../hooks/common/useSidebar';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
@@ -33,7 +39,7 @@ import {
   clampSidebarWidth,
 } from '../../hooks/common/useSidebarWidth';
 
-import { Nav, Divider, Button } from '@douyinfe/semi-ui';
+import { Nav, Divider, Button, Tooltip } from '@douyinfe/semi-ui';
 
 const routerMap = {
   home: '/',
@@ -80,6 +86,11 @@ const SiderBar = ({
   const navigate = useNavigate();
   const [routerMapState, setRouterMapState] = useState(routerMap);
   const resizeCleanupRef = useRef(null);
+  const sidebarIsCustomized =
+    Math.abs(sidebarWidth - DEFAULT_SIDEBAR_WIDTH) > 1;
+  const showResetWidthButton = !collapsed && !isMobile && sidebarIsCustomized;
+  const useCompactCollapseTrigger =
+    showResetWidthButton && sidebarWidth <= DEFAULT_SIDEBAR_WIDTH + 16;
 
   const workspaceItems = useMemo(() => {
     const items = [
@@ -577,10 +588,26 @@ const SiderBar = ({
 
       {/* 底部折叠按钮 */}
       <div className='sidebar-collapse-button'>
+        {showResetWidthButton ? (
+          <Tooltip content={t('恢复默认宽度')} position='top'>
+            <Button
+              theme='borderless'
+              type='tertiary'
+              size='small'
+              icon={<RotateCcw size={14} strokeWidth={2.2} />}
+              className='sidebar-default-width-button'
+              onClick={() => {
+                stopSidebarResize();
+                resetSidebarWidth();
+              }}
+              aria-label={t('恢复默认宽度')}
+            />
+          </Tooltip>
+        ) : null}
         <SkeletonWrapper
           loading={showSkeleton}
           type='button'
-          width={collapsed ? 36 : 128}
+          width={collapsed || useCompactCollapseTrigger ? 36 : 128}
           height={24}
           className='w-full'
         >
@@ -600,13 +627,15 @@ const SiderBar = ({
               />
             }
             onClick={toggleCollapsed}
+            aria-label={useCompactCollapseTrigger ? t('收起侧边栏') : undefined}
+            title={useCompactCollapseTrigger ? t('收起侧边栏') : undefined}
             style={
-              collapsed
+              collapsed || useCompactCollapseTrigger
                 ? { width: 36, height: 24, padding: 0 }
                 : { padding: '4px 12px', width: '100%' }
             }
           >
-            {!collapsed ? t('收起侧边栏') : null}
+            {!collapsed && !useCompactCollapseTrigger ? t('收起侧边栏') : null}
           </Button>
         </SkeletonWrapper>
       </div>

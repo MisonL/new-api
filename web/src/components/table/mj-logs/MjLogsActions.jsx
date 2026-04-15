@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Skeleton, Typography } from '@douyinfe/semi-ui';
+import { Skeleton, Tag, Typography } from '@douyinfe/semi-ui';
 import { useMinimumLoadingTime } from '../../../hooks/common/useMinimumLoadingTime';
 import { IconEyeOpened } from '@douyinfe/semi-icons';
 import CompactModeToggle from '../../common/ui/CompactModeToggle';
@@ -34,34 +34,53 @@ const MjLogsActions = ({
   t,
 }) => {
   const showSkeleton = useMinimumLoadingTime(loading);
+  const description =
+    isAdminUser && showBanner
+      ? t('当前未开启 Midjourney 回调，部分任务可能无法自动回填结果。')
+      : t('查看绘图任务进度、结果地址与失败原因');
 
   const placeholder = (
-    <div className='flex items-center mb-2 md:mb-0'>
-      <IconEyeOpened className='mr-2' />
-      <Skeleton.Title style={{ width: 300, height: 21, borderRadius: 6 }} />
+    <div className='aux-logs-summary-card'>
+      <div className='aux-logs-summary-icon aux-logs-summary-icon-purple'>
+        <IconEyeOpened />
+      </div>
+      <div className='flex-1 min-w-0'>
+        <Skeleton.Title style={{ width: 220, height: 18, borderRadius: 8 }} />
+        <Skeleton.Paragraph rows={1} style={{ width: 300, marginTop: 10 }} />
+      </div>
     </div>
   );
 
   return (
-    <div className='flex flex-col md:flex-row justify-between items-start md:items-center gap-2 w-full'>
+    <div className='aux-logs-actions flex flex-col md:flex-row justify-between items-start md:items-center gap-3 w-full'>
       <Skeleton loading={showSkeleton} active placeholder={placeholder}>
-        <div className='flex items-center mb-2 md:mb-0'>
-          <IconEyeOpened className='mr-2' />
-          <Text>
-            {isAdminUser && showBanner
-              ? t(
-                  '当前未开启Midjourney回调，部分项目可能无法获得绘图结果，可在运营设置中开启。',
-                )
-              : t('Midjourney 任务记录')}
-          </Text>
+        <div className='aux-logs-summary-card'>
+          <div className='aux-logs-summary-icon aux-logs-summary-icon-purple'>
+            <IconEyeOpened />
+          </div>
+          <div className='aux-logs-summary-content'>
+            <Text strong>{t('Midjourney 任务记录')}</Text>
+            <Text size='small' type='tertiary'>
+              {description}
+            </Text>
+          </div>
+          <Tag
+            color={isAdminUser && showBanner ? 'red' : 'violet'}
+            className='aux-logs-summary-tag !rounded-xl'
+          >
+            {isAdminUser && showBanner ? t('需回调') : t('绘图')}
+          </Tag>
         </div>
       </Skeleton>
 
-      <CompactModeToggle
-        compactMode={compactMode}
-        setCompactMode={setCompactMode}
-        t={t}
-      />
+      <div className='usage-logs-actions-toolbar flex items-center gap-2'>
+        <CompactModeToggle
+          compactMode={compactMode}
+          setCompactMode={setCompactMode}
+          t={t}
+          className='usage-logs-action-button'
+        />
+      </div>
     </div>
   );
 };

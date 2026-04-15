@@ -18,8 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useRef } from 'react';
-import { Button, Typography, Toast, Modal, Dropdown } from '@douyinfe/semi-ui';
-import { Download, Upload, RotateCcw, Settings2 } from 'lucide-react';
+import { Button, Typography, Toast, Modal, Tag } from '@douyinfe/semi-ui';
+import { Download, Upload, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   exportConfig,
@@ -33,7 +33,6 @@ const ConfigManager = ({
   currentConfig,
   onConfigImport,
   onConfigReset,
-  styleState,
   messages,
 }) => {
   const { t } = useTranslation();
@@ -155,103 +154,45 @@ const ConfigManager = ({
     return t('暂无保存的配置');
   };
 
-  const dropdownItems = [
-    {
-      node: 'item',
-      name: 'export',
-      onClick: handleExport,
-      children: (
-        <div className='flex items-center gap-2'>
-          <Download size={14} />
-          {t('导出配置')}
-        </div>
-      ),
-    },
-    {
-      node: 'item',
-      name: 'import',
-      onClick: handleImportClick,
-      children: (
-        <div className='flex items-center gap-2'>
-          <Upload size={14} />
-          {t('导入配置')}
-        </div>
-      ),
-    },
-    {
-      node: 'divider',
-    },
-    {
-      node: 'item',
-      name: 'reset',
-      onClick: handleReset,
-      children: (
-        <div className='flex items-center gap-2 text-red-600'>
-          <RotateCcw size={14} />
-          {t('重置配置')}
-        </div>
-      ),
-    },
-  ];
-
-  if (styleState.isMobile) {
-    // 移动端显示简化的下拉菜单
-    return (
-      <>
-        <Dropdown
-          trigger='click'
-          position='bottomLeft'
-          showTick
-          menu={dropdownItems}
-        >
-          <Button
-            icon={<Settings2 size={14} />}
-            theme='borderless'
-            type='tertiary'
-            size='small'
-            className='!rounded-lg !text-gray-600 hover:!text-blue-600 hover:!bg-blue-50'
-          />
-        </Dropdown>
-
-        <input
-          ref={fileInputRef}
-          type='file'
-          name='playground-config-import-mobile'
-          accept='.json'
-          onChange={handleFileChange}
-          style={{ display: 'none' }}
-        />
-      </>
-    );
-  }
-
-  // 桌面端显示紧凑的按钮组
   return (
-    <div className='space-y-3'>
-      {/* 配置状态信息和重置按钮 */}
-      <div className='flex items-center justify-between'>
-        <Typography.Text className='text-xs text-gray-500'>
-          {getConfigStatus()}
-        </Typography.Text>
-        <Button
-          icon={<RotateCcw size={12} />}
-          size='small'
-          theme='borderless'
-          type='danger'
-          onClick={handleReset}
-          className='!rounded-full !text-xs !px-2'
-        />
+    <div className='playground-config-manager space-y-3'>
+      <div className='playground-config-status-row'>
+        <div className='playground-config-status-copy'>
+          <div className='playground-config-status-head'>
+            <Typography.Text strong className='text-sm'>
+              {t('配置草稿')}
+            </Typography.Text>
+            <Tag size='small' color='blue' className='!rounded-full'>
+              {t('本地')}
+            </Tag>
+          </div>
+          <Typography.Text
+            className='playground-config-status-text'
+            ellipsis={{ showTooltip: true }}
+          >
+            {getConfigStatus()}
+          </Typography.Text>
+        </div>
       </div>
 
-      {/* 导出和导入按钮 */}
-      <div className='flex gap-2'>
+      <div className='playground-config-actions-grid'>
+        <Button
+          icon={<RotateCcw size={13} />}
+          size='small'
+          theme='light'
+          type='danger'
+          onClick={handleReset}
+          className='playground-config-action-button'
+        >
+          {t('恢复默认')}
+        </Button>
         <Button
           icon={<Download size={12} />}
           size='small'
           theme='solid'
           type='primary'
           onClick={handleExport}
-          className='!rounded-lg flex-1 !text-xs !h-7'
+          className='playground-config-action-button'
         >
           {t('导出')}
         </Button>
@@ -262,7 +203,7 @@ const ConfigManager = ({
           theme='outline'
           type='primary'
           onClick={handleImportClick}
-          className='!rounded-lg flex-1 !text-xs !h-7'
+          className='playground-config-action-button'
         >
           {t('导入')}
         </Button>

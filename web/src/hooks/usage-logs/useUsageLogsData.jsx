@@ -164,7 +164,9 @@ export const useLogsData = () => {
   };
 
   // Column visibility state
-  const [visibleColumns, setVisibleColumns] = useState(getInitialVisibleColumns);
+  const [visibleColumns, setVisibleColumns] = useState(
+    getInitialVisibleColumns,
+  );
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [billingDisplayMode, setBillingDisplayMode] = useState(
     getInitialBillingDisplayMode,
@@ -463,7 +465,10 @@ export const useLogsData = () => {
       let other = getLogOther(logs[i].other);
       let expandDataLocal = [];
 
-      if (isAdminUser && (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)) {
+      if (
+        isAdminUser &&
+        (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)
+      ) {
         expandDataLocal.push({
           key: t('渠道信息'),
           value: `${logs[i].channel} - ${logs[i].channel_name || '[未知]'}`,
@@ -510,7 +515,10 @@ export const useLogsData = () => {
           expandDataLocal.push({
             key: t('日志详情'),
             value: other?.claude
-              ? renderClaudeLogContent({ ...other, displayMode: billingDisplayMode })
+              ? renderClaudeLogContent({
+                  ...other,
+                  displayMode: billingDisplayMode,
+                })
               : renderLogContent({ ...other, displayMode: billingDisplayMode }),
           });
         }
@@ -532,10 +540,7 @@ export const useLogsData = () => {
         if (other?.request_content) {
           const requestMetaText = buildPayloadMetaText('request', other);
           payloadEntries.push(
-            <div
-              key='request'
-              className='usage-log-payload-entry'
-            >
+            <div key='request' className='usage-log-payload-entry'>
               <div className='usage-log-payload-entry-header'>
                 <Text strong>{t('请求内容')}</Text>
                 <Button
@@ -575,10 +580,7 @@ export const useLogsData = () => {
         if (other?.response_content) {
           const responseMetaText = buildPayloadMetaText('response', other);
           payloadEntries.push(
-            <div
-              key='response'
-              className='usage-log-payload-entry'
-            >
+            <div key='response' className='usage-log-payload-entry'>
               <div className='usage-log-payload-entry-header'>
                 <Text strong>{t('返回内容')}</Text>
                 <Button
@@ -617,7 +619,9 @@ export const useLogsData = () => {
         }
         expandDataLocal.push({
           key: t('内容日志'),
-          value: <div className='usage-log-payload-group'>{payloadEntries}</div>,
+          value: (
+            <div className='usage-log-payload-group'>{payloadEntries}</div>
+          ),
         });
       }
       if (logs[i].type === 2) {
@@ -689,9 +693,7 @@ export const useLogsData = () => {
           expandDataLocal.push({
             key: t('失败原因'),
             value: (
-              <div className='usage-log-expand-text-block'>
-                {other.reason}
-              </div>
+              <div className='usage-log-expand-text-block'>{other.reason}</div>
             ),
           });
         }
@@ -734,7 +736,9 @@ export const useLogsData = () => {
           .join('\n');
         expandDataLocal.push({
           key: t('订阅结算'),
-          value: <div className='usage-log-expand-preline'>{settlementLines}</div>,
+          value: (
+            <div className='usage-log-expand-preline'>{settlementLines}</div>
+          ),
         });
         if (remain !== undefined && total !== undefined) {
           expandDataLocal.push({

@@ -212,9 +212,10 @@ code {
   display: flex;
   justify-content: center;
   align-items: center;
+  gap: 8px;
   padding: 10px 12px 12px;
   margin-top: auto;
-  cursor: pointer;
+  cursor: default;
   background-color: var(--semi-color-bg-0);
   position: sticky;
   bottom: 0;
@@ -249,6 +250,28 @@ code {
   border-radius: 10px;
 }
 
+.sidebar-collapse-button .semi-button {
+  cursor: pointer;
+}
+
+.sidebar-default-width-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 !important;
+  border-radius: 999px;
+  color: var(--semi-color-text-2);
+  background: color-mix(in srgb, var(--semi-color-fill-0) 92%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--semi-color-border) 82%, transparent);
+}
+
+.sidebar-default-width-button:hover {
+  background: color-mix(in srgb, var(--semi-color-fill-1) 90%, transparent);
+  color: var(--semi-color-text-0);
+}
+
 .sidebar-resize-handle {
   position: absolute;
   top: 0;
@@ -275,9 +298,11 @@ code {
     var(--semi-color-border) 90%
   );
   opacity: 0.55;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--semi-color-bg-0) 86%, transparent);
-  transition: opacity 0.18s ease, background-color 0.18s ease,
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--semi-color-bg-0) 86%, transparent);
+  transition:
+    opacity 0.18s ease,
+    background-color 0.18s ease,
     box-shadow 0.18s ease;
 }
 
@@ -294,12 +319,16 @@ code {
     color-mix(in srgb, var(--semi-color-text-3) 10%, var(--semi-color-border));
   background:
     radial-gradient(
-      circle,
-      color-mix(in srgb, var(--semi-color-text-2) 78%, var(--semi-color-border))
-        0 1px,
-      transparent 1.5px
-    )
-    center / 3px 9px repeat-y,
+        circle,
+        color-mix(
+            in srgb,
+            var(--semi-color-text-2) 78%,
+            var(--semi-color-border)
+          )
+          0 1px,
+        transparent 1.5px
+      )
+      center / 3px 9px repeat-y,
     color-mix(in srgb, var(--semi-color-bg-1) 92%, transparent);
   box-shadow:
     0 6px 14px color-mix(in srgb, var(--semi-color-bg-3) 10%, transparent),
@@ -320,8 +349,8 @@ code {
     var(--semi-color-text-2) 18%,
     var(--semi-color-border) 82%
   );
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--semi-color-bg-0) 82%, transparent);
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--semi-color-bg-0) 82%, transparent);
 }
 
 .sidebar-resize-handle:hover::after {
@@ -333,12 +362,16 @@ code {
   );
   background:
     radial-gradient(
-      circle,
-      color-mix(in srgb, var(--semi-color-text-1) 72%, var(--semi-color-border))
-        0 1px,
-      transparent 1.5px
-    )
-    center / 3px 9px repeat-y,
+        circle,
+        color-mix(
+            in srgb,
+            var(--semi-color-text-1) 72%,
+            var(--semi-color-border)
+          )
+          0 1px,
+        transparent 1.5px
+      )
+      center / 3px 9px repeat-y,
     color-mix(in srgb, var(--semi-color-bg-1) 96%, transparent);
   box-shadow:
     0 8px 18px color-mix(in srgb, var(--semi-color-bg-3) 12%, transparent),
@@ -378,30 +411,21 @@ body.sidebar-resizing * {
 }
 
 .usage-logs-stats-list {
-  gap: 10px !important;
+  gap: 0 !important;
 }
 
-.usage-logs-stat-tag {
-  min-height: 40px;
-  padding: 0 14px !important;
-  font-weight: 600;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+.usage-logs-stat-item {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 92px;
+  padding: 2px 0;
 }
 
-.usage-logs-stat-tag-primary {
-  background: color-mix(in srgb, var(--semi-color-primary-light-default) 78%, transparent);
-  color: var(--semi-color-primary);
-}
-
-.usage-logs-stat-tag-danger {
-  background: color-mix(in srgb, var(--semi-color-danger-light-default) 82%, transparent);
-  color: var(--semi-color-danger);
-}
-
-.usage-logs-stat-tag-neutral {
-  background: color-mix(in srgb, var(--semi-color-fill-1) 86%, transparent);
+.usage-logs-stat-value {
+  font-size: 20px;
+  line-height: 1.2;
   color: var(--semi-color-text-0);
-  border: 1px solid color-mix(in srgb, var(--semi-color-border) 82%, transparent);
 }
 
 .usage-logs-actions-toolbar {
@@ -413,6 +437,57 @@ body.sidebar-resizing * {
   min-height: 36px;
   border-radius: 12px;
   font-weight: 600;
+}
+
+.aux-logs-actions {
+  align-items: center;
+}
+
+.aux-logs-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--semi-color-fill-0) 88%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--semi-color-border) 84%, transparent);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+.aux-logs-summary-icon {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+
+.aux-logs-summary-icon-orange {
+  color: #c2410c;
+  background: rgba(249, 115, 22, 0.12);
+}
+
+.aux-logs-summary-icon-purple {
+  color: #7c3aed;
+  background: rgba(124, 58, 237, 0.12);
+}
+
+.aux-logs-summary-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.aux-logs-summary-tag {
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
 .usage-logs-filters-form .semi-form-field {
@@ -457,14 +532,16 @@ body.sidebar-resizing * {
 }
 
 .usage-log-expanded-panel {
-  border: 1px solid color-mix(in srgb, var(--semi-color-border) 88%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--semi-color-border) 88%, transparent);
   border-radius: 16px;
   background: color-mix(in srgb, var(--semi-color-fill-0) 62%, transparent);
   padding: 6px 14px;
 }
 
 .usage-log-expanded-descriptions .semi-descriptions-row:not(:last-child) {
-  border-bottom: 1px solid color-mix(in srgb, var(--semi-color-border) 70%, transparent);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--semi-color-border) 70%, transparent);
 }
 
 .usage-log-expanded-descriptions .semi-descriptions-item-th {
@@ -493,7 +570,8 @@ body.sidebar-resizing * {
   padding: 12px 14px;
   border-radius: 14px;
   background: color-mix(in srgb, var(--semi-color-bg-1) 74%, transparent);
-  border: 1px solid color-mix(in srgb, var(--semi-color-border) 74%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--semi-color-border) 74%, transparent);
 }
 
 .usage-log-payload-entry-header {
@@ -553,6 +631,55 @@ body.sidebar-resizing * {
   min-height: 360px;
 }
 
+.playground-config-manager {
+  border-radius: 16px;
+  border: 1px solid
+    color-mix(in srgb, var(--semi-color-border) 82%, transparent);
+  background: color-mix(in srgb, var(--semi-color-fill-0) 88%, transparent);
+  padding: 12px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+.playground-config-status-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.playground-config-status-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.playground-config-status-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.playground-config-status-text {
+  color: var(--semi-color-text-2);
+  line-height: 1.45;
+}
+
+.playground-config-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.playground-config-action-button {
+  min-height: 34px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 @media (max-width: 1024px) {
   .usage-log-expanded-descriptions .semi-descriptions-item-th,
   .usage-log-expanded-descriptions .semi-descriptions-item-td {
@@ -569,6 +696,16 @@ body.sidebar-resizing * {
   .usage-log-expanded-descriptions .semi-descriptions-item-td {
     padding-top: 0;
     padding-bottom: 12px;
+  }
+
+  .playground-config-actions-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .playground-config-actions-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1305,7 +1442,8 @@ html.dark .with-pastel-balls::before {
     max-width: 80px;
   }
 
-  .semi-input-prefix-text, .semi-input-suffix-text {
+  .semi-input-prefix-text,
+  .semi-input-suffix-text {
     margin: 0;
   }
 
@@ -1454,4 +1592,6 @@ html.dark .with-pastel-balls::before {
   }
 }
 
-.ec-dbcd0a3c01b55203 { forced-color-adjust: auto; }
+.ec-dbcd0a3c01b55203 {
+  forced-color-adjust: auto;
+}

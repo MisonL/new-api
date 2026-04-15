@@ -25,6 +25,9 @@ export const MIN_SIDEBAR_WIDTH = 160;
 export const MAX_SIDEBAR_WIDTH = 320;
 
 export const clampSidebarWidth = (value) => {
+  if (value === null || value === undefined || value === '') {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
     return DEFAULT_SIDEBAR_WIDTH;
@@ -54,8 +57,9 @@ export const useSidebarWidth = () => {
   }, []);
 
   const resetWidth = useCallback(() => {
-    setWidth(DEFAULT_SIDEBAR_WIDTH);
-  }, [setWidth]);
+    setWidthState(DEFAULT_SIDEBAR_WIDTH);
+    localStorage.removeItem(KEY);
+  }, []);
 
   return [width, setWidth, resetWidth];
 };
