@@ -329,7 +329,7 @@
     "使用认证器应用（如 Google Authenticator、Microsoft Authenticator）扫描下方二维码：": "使用认证器应用（如 Google Authenticator、Microsoft Authenticator）扫描下方二维码：",
     "使用认证器应用扫描二维码": "使用认证器应用扫描二维码",
     "例如 €, £, Rp, ₩, ₹...": "例如 €, £, Rp, ₩, ₹...",
-    "例如 https://docs.newapi.pro": "例如 https://docs.newapi.pro",
+    "例如 https://github.com/MisonL/new-api/blob/main/README.md": "例如 https://github.com/MisonL/new-api/blob/main/README.md",
     "例如：": "例如：",
     "例如: /bin/bash -c \"python app.py\"": "例如: /bin/bash -c \"python app.py\"",
     "例如: nginx:latest": "例如: nginx:latest",

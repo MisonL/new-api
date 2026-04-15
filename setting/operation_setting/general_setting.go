@@ -46,7 +46,7 @@ func DefaultResponsesBootstrapRetryableStatusCodes() []int {
 
 // 默认配置
 var generalSetting = GeneralSetting{
-	DocsLink:                                          "https://docs.newapi.pro",
+	DocsLink:                                          "https://github.com/MisonL/new-api/blob/main/README.md",
 	LogFilterAutocompleteEnabled:                      true,
 	PingIntervalEnabled:                               false,
 	PingIntervalSeconds:                               60,

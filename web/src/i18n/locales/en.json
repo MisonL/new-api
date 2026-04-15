@@ -459,7 +459,7 @@
     "例如": "e.g.",
     "例如 /var/cache/new-api": "e.g. /var/cache/new-api",
     "例如 €, £, Rp, ₩, ₹...": "For example, €, £, Rp, ₩, ₹...",
-    "例如 https://docs.newapi.pro": "E.g., https://docs.newapi.pro",
+    "例如 https://github.com/MisonL/new-api/blob/main/README.md": "E.g., https://github.com/MisonL/new-api/blob/main/README.md",
     "例如：": "For example:",
     "例如: /bin/bash -c \"python app.py\"": "e.g.: /bin/bash -c \"python app.py\"",
     "例如: nginx:latest": "e.g.: nginx:latest",

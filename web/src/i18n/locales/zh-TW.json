@@ -407,7 +407,7 @@
     "使用说明": "使用說明",
     "例如": "例如",
     "例如 /var/cache/new-api": "例如 /var/cache/new-api",
-    "例如 https://docs.newapi.pro": "例如 https://docs.newapi.pro",
+    "例如 https://github.com/MisonL/new-api/blob/main/README.md": "例如 https://github.com/MisonL/new-api/blob/main/README.md",
     "例如 €, £, Rp, ₩, ₹...": "例如 €, £, Rp, ₩, ₹...",
     "例如: /bin/bash -c \"python app.py\"": "例如: /bin/bash -c \"python app.py\"",
     "例如: nginx:latest": "例如: nginx:latest",

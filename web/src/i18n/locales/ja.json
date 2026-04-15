@@ -461,7 +461,7 @@
     "使用认证器应用（如 Google Authenticator、Microsoft Authenticator）扫描下方二维码：": "Google Authenticator、Microsoft Authenticatorなどの認証アプリで、以下のQRコードをスキャンしてください：",
     "使用说明": "ガイド",
     "例如 /var/cache/new-api": "例：/var/cache/new-api",
-    "例如 https://docs.newapi.pro": "例：https://docs.newapi.pro",
+    "例如 https://github.com/MisonL/new-api/blob/main/README.md": "例：https://github.com/MisonL/new-api/blob/main/README.md",
     "例如 €, £, Rp, ₩, ₹...": "例：€, £, Rp, ₩, ₹...",
     "例如: /bin/bash -c \"python app.py\"": "e.g.: /bin/bash -c \"python app.py\"",
     "例如: nginx:latest": "e.g.: nginx:latest",
