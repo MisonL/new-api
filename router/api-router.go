@@ -294,8 +294,13 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)
 		logRoute.GET("/suggestions", middleware.AdminAuth(), middleware.SuggestionRateLimit(), controller.GetAllLogSuggestions)
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
+		logRoute.DELETE("/self/:id", middleware.UserAuth(), controller.DeleteUserLog)
+		logRoute.POST("/self/batch_delete", middleware.UserAuth(), controller.BatchDeleteUserLogs)
+		logRoute.POST("/self/clear_payloads", middleware.UserAuth(), controller.ClearUserLogPayloads)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 		logRoute.GET("/self/suggestions", middleware.UserAuth(), middleware.SuggestionRateLimit(), controller.GetUserLogSuggestions)
+		logRoute.DELETE("/:id", middleware.AdminAuth(), controller.DeleteLog)
+		logRoute.POST("/batch_delete", middleware.AdminAuth(), controller.BatchDeleteLogs)
 
 		dataRoute := apiRouter.Group("/data")
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)

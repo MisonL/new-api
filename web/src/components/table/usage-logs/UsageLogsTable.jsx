@@ -85,7 +85,14 @@ const LogsTable = (logsData) => {
   }, [compactMode, visibleColumnsList]);
 
   const expandRowRender = (record, index) => {
-    return <Descriptions data={expandData[record.key]} />;
+    return (
+      <div className='usage-log-expanded-panel'>
+        <Descriptions
+          className='usage-log-expanded-descriptions'
+          data={expandData[record.key]}
+        />
+      </div>
+    );
   };
 
   return (
@@ -101,7 +108,7 @@ const LogsTable = (logsData) => {
       rowKey='key'
       loading={loading}
       scroll={compactMode ? undefined : { x: 'max-content' }}
-      className='rounded-xl overflow-hidden'
+      className='usage-logs-table rounded-xl overflow-hidden'
       size='small'
       empty={
         <Empty

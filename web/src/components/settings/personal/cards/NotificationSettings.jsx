@@ -865,6 +865,30 @@ const NotificationSettings = ({
                     '开启后，仅"消费"和"错误"日志将记录您的客户端IP地址',
                   )}
                 />
+                <Form.Switch
+                  field='recordRequestContentLog'
+                  label={t('记录请求内容')}
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
+                  onChange={(value) =>
+                    handleFormChange('recordRequestContentLog', value)
+                  }
+                  extraText={t(
+                    '开启后，仅在您授权的前提下记录请求体预览，二进制与超长内容会被省略或截断',
+                  )}
+                />
+                <Form.Switch
+                  field='recordResponseContentLog'
+                  label={t('记录返回内容')}
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
+                  onChange={(value) =>
+                    handleFormChange('recordResponseContentLog', value)
+                  }
+                  extraText={t(
+                    '开启后，仅在您授权的前提下记录响应体预览，二进制与超长内容会被省略或截断；Realtime/WebSocket 响应暂不记录',
+                  )}
+                />
               </div>
             </TabPane>
 

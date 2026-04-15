@@ -69,6 +69,12 @@ func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewA
 func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	requestId := c.GetString(common.RequestIdKey)
+	userSetting, _ := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
+	common.InitPayloadAudit(
+		c,
+		userSetting.RecordRequestContentLog,
+		userSetting.RecordResponseContentLog && relayFormat != types.RelayFormatOpenAIRealtime,
+	)
 	//group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 	//originalModel := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 
@@ -561,6 +567,12 @@ func RelayTaskFetch(c *gin.Context) {
 
 // RelayTask handles task submission and follow-up relay requests.
 func RelayTask(c *gin.Context) {
+	userSetting, _ := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
+	common.InitPayloadAudit(
+		c,
+		userSetting.RecordRequestContentLog,
+		userSetting.RecordResponseContentLog,
+	)
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, &dto.TaskError{
