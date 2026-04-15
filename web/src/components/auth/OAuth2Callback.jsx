@@ -57,9 +57,7 @@ const OAuth2Callback = (props) => {
       const customProviders = Array.isArray(status.custom_oauth_providers)
         ? status.custom_oauth_providers
         : [];
-      return customProviders.find(
-        (provider) => provider.slug === props.type,
-      );
+      return customProviders.find((provider) => provider.slug === props.type);
     } catch (error) {
       return null;
     }

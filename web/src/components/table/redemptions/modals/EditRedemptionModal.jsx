@@ -294,7 +294,10 @@ const EditRedemptionModal = (props) => {
                       />
                     </Col>
                     <Col span={24} className='redemption-expired-time-field'>
-                      <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                      <Text
+                        strong
+                        style={{ display: 'block', marginBottom: 8 }}
+                      >
                         {t('过期时间')}
                       </Text>
                       <Form.DatePicker

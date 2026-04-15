@@ -43,7 +43,9 @@ const ChannelsPage = () => {
   return (
     <>
       {/* Modals */}
-      {channelsData.showColumnSelector ? <ColumnSelectorModal {...channelsData} /> : null}
+      {channelsData.showColumnSelector ? (
+        <ColumnSelectorModal {...channelsData} />
+      ) : null}
       {channelsData.showEditTag ? (
         <EditTagModal
           visible={channelsData.showEditTag}
@@ -60,8 +62,12 @@ const ChannelsPage = () => {
           editingChannel={channelsData.editingChannel}
         />
       ) : null}
-      {channelsData.showBatchSetTag ? <BatchTagModal {...channelsData} /> : null}
-      {channelsData.showModelTestModal ? <ModelTestModal {...channelsData} /> : null}
+      {channelsData.showBatchSetTag ? (
+        <BatchTagModal {...channelsData} />
+      ) : null}
+      {channelsData.showModelTestModal ? (
+        <ModelTestModal {...channelsData} />
+      ) : null}
       {channelsData.showMultiKeyManageModal ? (
         <MultiKeyManageModal
           visible={channelsData.showMultiKeyManageModal}

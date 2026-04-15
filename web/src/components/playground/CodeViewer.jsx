@@ -165,9 +165,8 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
   const [isHoveringCopy, setIsHoveringCopy] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const palette = actualTheme === 'dark'
-    ? codeThemePalettes.dark
-    : codeThemePalettes.light;
+  const palette =
+    actualTheme === 'dark' ? codeThemePalettes.dark : codeThemePalettes.light;
 
   const formattedContent = useMemo(() => formatContent(content), [content]);
 
@@ -201,7 +200,13 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
     }
 
     return escapeHtml(displayContent);
-  }, [displayContent, language, contentMetrics.isVeryLarge, isExpanded, palette]);
+  }, [
+    displayContent,
+    language,
+    contentMetrics.isVeryLarge,
+    isExpanded,
+    palette,
+  ]);
 
   const renderedContent = useMemo(() => {
     return linkifyHtml(highlightedContent);

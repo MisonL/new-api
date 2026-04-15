@@ -39,7 +39,11 @@ const adjustHexChannel = (hex, delta) => {
 };
 
 const adjustHexColor = (color, delta) => {
-  if (typeof color !== 'string' || !color.startsWith('#') || color.length !== 7) {
+  if (
+    typeof color !== 'string' ||
+    !color.startsWith('#') ||
+    color.length !== 7
+  ) {
     return color;
   }
   return `#${adjustHexChannel(color.slice(1, 3), delta)}${adjustHexChannel(
@@ -91,25 +95,39 @@ const UserArea = ({
       {
         key: 'personal',
         label: t('个人设置'),
-        icon: <IconUserSetting size='small' className='text-gray-500 dark:text-gray-400' />,
+        icon: (
+          <IconUserSetting
+            size='small'
+            className='text-gray-500 dark:text-gray-400'
+          />
+        ),
         onClick: () => navigate('/console/personal'),
       },
       {
         key: 'token',
         label: t('令牌管理'),
-        icon: <IconKey size='small' className='text-gray-500 dark:text-gray-400' />,
+        icon: (
+          <IconKey size='small' className='text-gray-500 dark:text-gray-400' />
+        ),
         onClick: () => navigate('/console/token'),
       },
       {
         key: 'wallet',
         label: t('钱包管理'),
-        icon: <IconCreditCard size='small' className='text-gray-500 dark:text-gray-400' />,
+        icon: (
+          <IconCreditCard
+            size='small'
+            className='text-gray-500 dark:text-gray-400'
+          />
+        ),
         onClick: () => navigate('/console/topup'),
       },
       {
         key: 'logout',
         label: t('退出'),
-        icon: <IconExit size='small' className='text-gray-500 dark:text-gray-400' />,
+        icon: (
+          <IconExit size='small' className='text-gray-500 dark:text-gray-400' />
+        ),
         onClick: logout,
         danger: true,
       },

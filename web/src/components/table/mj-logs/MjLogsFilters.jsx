@@ -51,7 +51,7 @@ const MjLogsFilters = ({
 }) => {
   const [statusState] = React.useContext(StatusContext);
   const autocompleteEnabled = statusState?.status
-    ? statusState.status.log_filter_autocomplete_enabled ?? true
+    ? (statusState.status.log_filter_autocomplete_enabled ?? true)
     : false;
   const suggestionEndpoint = isAdminUser
     ? '/api/mj/suggestions'

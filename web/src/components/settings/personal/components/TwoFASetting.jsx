@@ -455,229 +455,162 @@ const TwoFASetting = ({ t }) => {
       {/* 2FA设置模态框 */}
       {setupModalVisible ? (
         <Modal
-        title={
-          <div className='flex items-center'>
-            <IconShield className='mr-2 text-slate-600' />
-            {t('设置两步验证')}
-          </div>
-        }
-        visible={setupModalVisible}
-        onCancel={() => {
-          setSetupModalVisible(false);
-          setSetupData(null);
-          setCurrentStep(0);
-          setVerificationCode('');
-        }}
-        footer={renderSetupModalFooter()}
-        width={650}
-        style={{ maxWidth: '90vw' }}
-      >
-        {setupData && (
-          <div className='space-y-6'>
-            {/* 步骤进度 */}
-            <Steps type='basic' size='small' current={currentStep}>
-              <Steps.Step
-                title={t('扫描二维码')}
-                description={t('使用认证器应用扫描二维码')}
-              />
-              <Steps.Step
-                title={t('保存备用码')}
-                description={t('保存备用码以备不时之需')}
-              />
-              <Steps.Step
-                title={t('验证设置')}
-                description={t('输入验证码完成设置')}
-              />
-            </Steps>
+          title={
+            <div className='flex items-center'>
+              <IconShield className='mr-2 text-slate-600' />
+              {t('设置两步验证')}
+            </div>
+          }
+          visible={setupModalVisible}
+          onCancel={() => {
+            setSetupModalVisible(false);
+            setSetupData(null);
+            setCurrentStep(0);
+            setVerificationCode('');
+          }}
+          footer={renderSetupModalFooter()}
+          width={650}
+          style={{ maxWidth: '90vw' }}
+        >
+          {setupData && (
+            <div className='space-y-6'>
+              {/* 步骤进度 */}
+              <Steps type='basic' size='small' current={currentStep}>
+                <Steps.Step
+                  title={t('扫描二维码')}
+                  description={t('使用认证器应用扫描二维码')}
+                />
+                <Steps.Step
+                  title={t('保存备用码')}
+                  description={t('保存备用码以备不时之需')}
+                />
+                <Steps.Step
+                  title={t('验证设置')}
+                  description={t('输入验证码完成设置')}
+                />
+              </Steps>
 
-            {/* 步骤内容 */}
-            <div className='rounded-xl'>
-              {currentStep === 0 && (
-                <div>
-                  <Paragraph className='text-gray-600 dark:text-gray-300 mb-4'>
-                    {t(
-                      '使用认证器应用（如 Google Authenticator、Microsoft Authenticator）扫描下方二维码：',
-                    )}
-                  </Paragraph>
-                  <div className='flex justify-center mb-4'>
-                    <div className='bg-white p-4 rounded-lg shadow-sm'>
-                      <QRCodeSVG value={setupData.qr_code_data} size={180} />
+              {/* 步骤内容 */}
+              <div className='rounded-xl'>
+                {currentStep === 0 && (
+                  <div>
+                    <Paragraph className='text-gray-600 dark:text-gray-300 mb-4'>
+                      {t(
+                        '使用认证器应用（如 Google Authenticator、Microsoft Authenticator）扫描下方二维码：',
+                      )}
+                    </Paragraph>
+                    <div className='flex justify-center mb-4'>
+                      <div className='bg-white p-4 rounded-lg shadow-sm'>
+                        <QRCodeSVG value={setupData.qr_code_data} size={180} />
+                      </div>
+                    </div>
+                    <div className='bg-blue-50 dark:bg-blue-900 rounded-lg p-3'>
+                      <Text className='text-blue-800 dark:text-blue-200 text-sm'>
+                        {t('或手动输入密钥：')}
+                        <Text code copyable className='ml-2'>
+                          {setupData.secret}
+                        </Text>
+                      </Text>
                     </div>
                   </div>
-                  <div className='bg-blue-50 dark:bg-blue-900 rounded-lg p-3'>
-                    <Text className='text-blue-800 dark:text-blue-200 text-sm'>
-                      {t('或手动输入密钥：')}
-                      <Text code copyable className='ml-2'>
-                        {setupData.secret}
-                      </Text>
-                    </Text>
+                )}
+
+                {currentStep === 1 && (
+                  <div className='space-y-4'>
+                    {/* 备用码展示 */}
+                    <BackupCodesDisplay
+                      codes={setupData.backup_codes}
+                      title={t('备用恢复代码')}
+                      onCopy={() => {
+                        const codesText = setupData.backup_codes.join('\n');
+                        copyTextToClipboard(
+                          codesText,
+                          t('备用码已复制到剪贴板'),
+                        );
+                      }}
+                    />
                   </div>
-                </div>
-              )}
+                )}
 
-              {currentStep === 1 && (
-                <div className='space-y-4'>
-                  {/* 备用码展示 */}
-                  <BackupCodesDisplay
-                    codes={setupData.backup_codes}
-                    title={t('备用恢复代码')}
-                    onCopy={() => {
-                      const codesText = setupData.backup_codes.join('\n');
-                      copyTextToClipboard(codesText, t('备用码已复制到剪贴板'));
-                    }}
+                {currentStep === 2 && (
+                  <Input
+                    placeholder={t('输入认证器应用显示的6位数字验证码')}
+                    value={verificationCode}
+                    onChange={setVerificationCode}
+                    size='large'
+                    maxLength={6}
+                    className='!rounded-lg'
+                    name='components-settings-personal-components-twofasetting-input-1'
                   />
-                </div>
-              )}
-
-              {currentStep === 2 && (
-                <Input
-                  placeholder={t('输入认证器应用显示的6位数字验证码')}
-                  value={verificationCode}
-                  onChange={setVerificationCode}
-                  size='large'
-                  maxLength={6}
-                  className='!rounded-lg'
-                  name='components-settings-personal-components-twofasetting-input-1'
-                />
-              )}
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
         </Modal>
       ) : null}
 
       {/* 禁用2FA模态框 */}
       {disableModalVisible ? (
         <Modal
-        title={
-          <div className='flex items-center'>
-            <IconAlertTriangle className='mr-2 text-red-500' />
-            {t('禁用两步验证')}
-          </div>
-        }
-        visible={disableModalVisible}
-        onCancel={() => {
-          setDisableModalVisible(false);
-          setVerificationCode('');
-          setConfirmDisable(false);
-        }}
-        footer={renderDisableModalFooter()}
-        width={550}
-        style={{ maxWidth: '90vw' }}
-      >
-        <div className='space-y-6'>
-          {/* 警告提示 */}
-          <div className='rounded-xl'>
-            <Banner
-              type='warning'
-              description={t(
-                '警告：禁用两步验证将永久删除您的验证设置和所有备用码，此操作不可撤销！',
-              )}
-              className='!rounded-lg'
-            />
-          </div>
-
-          {/* 内容区域 */}
-          <div className='space-y-4'>
-            <div>
-              <Text
-                strong
-                className='block mb-2 text-slate-700 dark:text-slate-200'
-              >
-                {t('禁用后的影响：')}
-              </Text>
-              <ul className='space-y-2 text-sm text-slate-600 dark:text-slate-300'>
-                <li className='flex items-start gap-2'>
-                  <Badge dot type='warning' />
-                  {t('降低您账户的安全性')}
-                </li>
-                <li className='flex items-start gap-2'>
-                  <Badge dot type='warning' />
-                  {t('需要重新完整设置才能再次启用')}
-                </li>
-                <li className='flex items-start gap-2'>
-                  <Badge dot type='danger' />
-                  {t('永久删除您的两步验证设置')}
-                </li>
-                <li className='flex items-start gap-2'>
-                  <Badge dot type='danger' />
-                  {t('永久删除所有备用码（包括未使用的）')}
-                </li>
-              </ul>
+          title={
+            <div className='flex items-center'>
+              <IconAlertTriangle className='mr-2 text-red-500' />
+              {t('禁用两步验证')}
+            </div>
+          }
+          visible={disableModalVisible}
+          onCancel={() => {
+            setDisableModalVisible(false);
+            setVerificationCode('');
+            setConfirmDisable(false);
+          }}
+          footer={renderDisableModalFooter()}
+          width={550}
+          style={{ maxWidth: '90vw' }}
+        >
+          <div className='space-y-6'>
+            {/* 警告提示 */}
+            <div className='rounded-xl'>
+              <Banner
+                type='warning'
+                description={t(
+                  '警告：禁用两步验证将永久删除您的验证设置和所有备用码，此操作不可撤销！',
+                )}
+                className='!rounded-lg'
+              />
             </div>
 
-            <Divider margin={16} />
-
+            {/* 内容区域 */}
             <div className='space-y-4'>
               <div>
                 <Text
                   strong
                   className='block mb-2 text-slate-700 dark:text-slate-200'
                 >
-                  {t('验证身份')}
+                  {t('禁用后的影响：')}
                 </Text>
-                <Input
-                  placeholder={t('请输入认证器验证码或备用码')}
-                  value={verificationCode}
-                  onChange={setVerificationCode}
-                  size='large'
-                  className='!rounded-lg'
-                  name='components-settings-personal-components-twofasetting-input-2'
-                />
+                <ul className='space-y-2 text-sm text-slate-600 dark:text-slate-300'>
+                  <li className='flex items-start gap-2'>
+                    <Badge dot type='warning' />
+                    {t('降低您账户的安全性')}
+                  </li>
+                  <li className='flex items-start gap-2'>
+                    <Badge dot type='warning' />
+                    {t('需要重新完整设置才能再次启用')}
+                  </li>
+                  <li className='flex items-start gap-2'>
+                    <Badge dot type='danger' />
+                    {t('永久删除您的两步验证设置')}
+                  </li>
+                  <li className='flex items-start gap-2'>
+                    <Badge dot type='danger' />
+                    {t('永久删除所有备用码（包括未使用的）')}
+                  </li>
+                </ul>
               </div>
 
-              <div>
-                <Checkbox
-                  checked={confirmDisable}
-                  onChange={(e) => setConfirmDisable(e.target.checked)}
-                  className='text-sm'
-                  name='components-settings-personal-components-twofasetting-checkbox-1'
-                >
-                  {t(
-                    '我已了解禁用两步验证将永久删除所有相关设置和备用码，此操作不可撤销',
-                  )}
-                </Checkbox>
-              </div>
-            </div>
-          </div>
-        </div>
-        </Modal>
-      ) : null}
+              <Divider margin={16} />
 
-      {/* 重新生成备用码模态框 */}
-      {backupModalVisible ? (
-        <Modal
-        title={
-          <div className='flex items-center'>
-            <IconRefresh className='mr-2 text-slate-600' />
-            {t('重新生成备用码')}
-          </div>
-        }
-        visible={backupModalVisible}
-        onCancel={() => {
-          setBackupModalVisible(false);
-          setVerificationCode('');
-          setBackupCodes([]);
-        }}
-        footer={renderRegenerateModalFooter()}
-        width={500}
-        style={{ maxWidth: '90vw' }}
-      >
-        <div className='space-y-6'>
-          {backupCodes.length === 0 ? (
-            <>
-              {/* 警告提示 */}
-              <div className='rounded-xl'>
-                <Banner
-                  type='warning'
-                  description={t(
-                    '重新生成备用码将使现有的备用码失效，请确保您已保存了当前的备用码。',
-                  )}
-                  className='!rounded-lg'
-                />
-              </div>
-
-              {/* 验证区域 */}
               <div className='space-y-4'>
                 <div>
                   <Text
@@ -687,43 +620,113 @@ const TwoFASetting = ({ t }) => {
                     {t('验证身份')}
                   </Text>
                   <Input
-                    placeholder={t('请输入认证器验证码')}
+                    placeholder={t('请输入认证器验证码或备用码')}
                     value={verificationCode}
                     onChange={setVerificationCode}
                     size='large'
                     className='!rounded-lg'
-                    name='components-settings-personal-components-twofasetting-input-3'
+                    name='components-settings-personal-components-twofasetting-input-2'
                   />
                 </div>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* 成功提示 */}
-              <Space vertical style={{ width: '100%' }}>
-                <div className='flex items-center justify-center gap-2'>
-                  <Badge dot type='success' />
-                  <Text
-                    strong
-                    className='text-lg text-slate-700 dark:text-slate-200'
-                  >
-                    {t('新的备用码已生成')}
-                  </Text>
-                </div>
-                <Text className='text-slate-500 dark:text-slate-400 text-sm'>
-                  {t('旧的备用码已失效，请保存新的备用码')}
-                </Text>
 
-                {/* 备用码展示 */}
-                <BackupCodesDisplay
-                  codes={backupCodes}
-                  title={t('新的备用恢复代码')}
-                  onCopy={copyBackupCodes}
-                />
-              </Space>
-            </>
-          )}
-        </div>
+                <div>
+                  <Checkbox
+                    checked={confirmDisable}
+                    onChange={(e) => setConfirmDisable(e.target.checked)}
+                    className='text-sm'
+                    name='components-settings-personal-components-twofasetting-checkbox-1'
+                  >
+                    {t(
+                      '我已了解禁用两步验证将永久删除所有相关设置和备用码，此操作不可撤销',
+                    )}
+                  </Checkbox>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {/* 重新生成备用码模态框 */}
+      {backupModalVisible ? (
+        <Modal
+          title={
+            <div className='flex items-center'>
+              <IconRefresh className='mr-2 text-slate-600' />
+              {t('重新生成备用码')}
+            </div>
+          }
+          visible={backupModalVisible}
+          onCancel={() => {
+            setBackupModalVisible(false);
+            setVerificationCode('');
+            setBackupCodes([]);
+          }}
+          footer={renderRegenerateModalFooter()}
+          width={500}
+          style={{ maxWidth: '90vw' }}
+        >
+          <div className='space-y-6'>
+            {backupCodes.length === 0 ? (
+              <>
+                {/* 警告提示 */}
+                <div className='rounded-xl'>
+                  <Banner
+                    type='warning'
+                    description={t(
+                      '重新生成备用码将使现有的备用码失效，请确保您已保存了当前的备用码。',
+                    )}
+                    className='!rounded-lg'
+                  />
+                </div>
+
+                {/* 验证区域 */}
+                <div className='space-y-4'>
+                  <div>
+                    <Text
+                      strong
+                      className='block mb-2 text-slate-700 dark:text-slate-200'
+                    >
+                      {t('验证身份')}
+                    </Text>
+                    <Input
+                      placeholder={t('请输入认证器验证码')}
+                      value={verificationCode}
+                      onChange={setVerificationCode}
+                      size='large'
+                      className='!rounded-lg'
+                      name='components-settings-personal-components-twofasetting-input-3'
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* 成功提示 */}
+                <Space vertical style={{ width: '100%' }}>
+                  <div className='flex items-center justify-center gap-2'>
+                    <Badge dot type='success' />
+                    <Text
+                      strong
+                      className='text-lg text-slate-700 dark:text-slate-200'
+                    >
+                      {t('新的备用码已生成')}
+                    </Text>
+                  </div>
+                  <Text className='text-slate-500 dark:text-slate-400 text-sm'>
+                    {t('旧的备用码已失效，请保存新的备用码')}
+                  </Text>
+
+                  {/* 备用码展示 */}
+                  <BackupCodesDisplay
+                    codes={backupCodes}
+                    title={t('新的备用恢复代码')}
+                    onCopy={copyBackupCodes}
+                  />
+                </Space>
+              </>
+            )}
+          </div>
         </Modal>
       ) : null}
     </>

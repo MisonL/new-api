@@ -465,8 +465,18 @@ const ViewLogsModal = ({ visible, onCancel, deployment, t }) => {
                   value={streamFilter}
                   onChange={handleStreamChange}
                 >
-                  <Radio value='stdout' name='components-table-model-deployments-modals-viewlogsmodal-radio-1'>STDOUT</Radio>
-                  <Radio value='stderr' name='components-table-model-deployments-modals-viewlogsmodal-radio-2'>STDERR</Radio>
+                  <Radio
+                    value='stdout'
+                    name='components-table-model-deployments-modals-viewlogsmodal-radio-1'
+                  >
+                    STDOUT
+                  </Radio>
+                  <Radio
+                    value='stderr'
+                    name='components-table-model-deployments-modals-viewlogsmodal-radio-2'
+                  >
+                    STDERR
+                  </Radio>
                 </Radio.Group>
               </Space>
 

@@ -439,8 +439,10 @@ const PersonalSetting = () => {
         accept_unset_model_ratio_model:
           notificationSettings.acceptUnsetModelRatioModel,
         record_ip_log: notificationSettings.recordIpLog,
-        record_request_content_log: notificationSettings.recordRequestContentLog,
-        record_response_content_log: notificationSettings.recordResponseContentLog,
+        record_request_content_log:
+          notificationSettings.recordRequestContentLog,
+        record_response_content_log:
+          notificationSettings.recordResponseContentLog,
       });
 
       if (res.data.success) {

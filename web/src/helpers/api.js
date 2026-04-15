@@ -72,12 +72,17 @@ const DEFAULT_LOCAL_SERVER_ADDRESSES = new Set([
   'https://127.0.0.1:3000',
 ]);
 
-function normalizeServerAddress(address, fallbackOrigin = window.location.origin) {
+function normalizeServerAddress(
+  address,
+  fallbackOrigin = window.location.origin,
+) {
   if (typeof address !== 'string' || address.trim() === '') {
     return '';
   }
   try {
-    return new URL(address.trim(), fallbackOrigin).toString().replace(/\/$/, '');
+    return new URL(address.trim(), fallbackOrigin)
+      .toString()
+      .replace(/\/$/, '');
   } catch {
     return '';
   }
@@ -530,7 +535,10 @@ export async function onCustomOAuthClicked(provider, options = {}) {
             user,
           };
         } catch (error) {
-          console.error('Failed to refresh trusted header bind session user:', error);
+          console.error(
+            'Failed to refresh trusted header bind session user:',
+            error,
+          );
           throw new Error(
             error?.response?.data?.message ||
               error?.message ||
@@ -550,8 +558,8 @@ export async function onCustomOAuthClicked(provider, options = {}) {
       providerKind === 'cas'
         ? buildCustomCASStartUrl(provider, state)
         : providerKind === 'jwt_direct'
-        ? buildCustomJWTAuthorizationUrl(provider, state)
-        : ensureAbsoluteOAuthURL(provider.authorization_endpoint);
+          ? buildCustomJWTAuthorizationUrl(provider, state)
+          : ensureAbsoluteOAuthURL(provider.authorization_endpoint);
 
     if (providerKind !== 'jwt_direct' && providerKind !== 'cas') {
       authUrl.searchParams.set('client_id', provider.client_id);

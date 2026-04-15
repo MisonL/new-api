@@ -450,7 +450,10 @@ export function getChannelIcon(channelType) {
 }
 
 function renderLobeHubFallback(iconName) {
-  const firstLetter = String(iconName || '?').charAt(0).toUpperCase() || '?';
+  const firstLetter =
+    String(iconName || '?')
+      .charAt(0)
+      .toUpperCase() || '?';
   return <Avatar size='extra-extra-small'>{firstLetter}</Avatar>;
 }
 
@@ -1588,7 +1591,11 @@ function renderPriceSimpleCore({
         }),
       );
     }
-    if (hasModelRatio && !hasSplitCacheCreation && shouldShowLegacyCacheCreation) {
+    if (
+      hasModelRatio &&
+      !hasSplitCacheCreation &&
+      shouldShowLegacyCacheCreation
+    ) {
       parts.push(
         i18next.t('缓存创建 {{price}} / 1M tokens', {
           price: formatCompactDisplayPrice(

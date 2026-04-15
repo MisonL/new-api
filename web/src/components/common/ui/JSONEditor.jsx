@@ -637,9 +637,7 @@ const JSONEditor = ({
   return (
     <div className='semi-form-field'>
       <div className='semi-form-field-label semi-form-field-label-left'>
-        <div className='semi-form-field-label-text'>
-          {label}
-        </div>
+        <div className='semi-form-field-label-text'>{label}</div>
       </div>
       <Card
         header={

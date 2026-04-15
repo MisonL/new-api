@@ -365,7 +365,10 @@ const EditUserModal = (props) => {
 
                     <Row gutter={12}>
                       <Col span={24}>
-                        <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                        <Text
+                          strong
+                          style={{ display: 'block', marginBottom: 8 }}
+                        >
                           {t('分组')}
                         </Text>
                         <Form.Select
@@ -395,7 +398,10 @@ const EditUserModal = (props) => {
                       </Col>
 
                       <Col span={14}>
-                        <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                        <Text
+                          strong
+                          style={{ display: 'block', marginBottom: 8 }}
+                        >
                           {t('添加额度')}
                         </Text>
                         <div>

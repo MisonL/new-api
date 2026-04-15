@@ -40,7 +40,9 @@ const LogsPage = () => {
   return (
     <>
       {/* Modals */}
-      {logsData.showColumnSelector ? <ColumnSelectorModal {...logsData} /> : null}
+      {logsData.showColumnSelector ? (
+        <ColumnSelectorModal {...logsData} />
+      ) : null}
       {logsData.showEditUser ? (
         <EditUserModal
           refresh={refreshCurrentPage}
@@ -52,7 +54,9 @@ const LogsPage = () => {
       {logsData.showChannelAffinityUsageCacheModal ? (
         <ChannelAffinityUsageCacheModal {...logsData} />
       ) : null}
-      {logsData.showParamOverrideModal ? <ParamOverrideModal {...logsData} /> : null}
+      {logsData.showParamOverrideModal ? (
+        <ParamOverrideModal {...logsData} />
+      ) : null}
       {logsData.showPayloadContentModal ? (
         <PayloadContentModal {...logsData} />
       ) : null}

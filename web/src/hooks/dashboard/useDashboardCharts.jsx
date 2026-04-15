@@ -38,8 +38,16 @@ import {
 } from '../../helpers/dashboard';
 
 const USER_COLORS = [
-  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
-  '#ec4899', '#06b6d4', '#f97316', '#6366f1', '#14b8a6',
+  '#3b82f6',
+  '#ef4444',
+  '#10b981',
+  '#f59e0b',
+  '#8b5cf6',
+  '#ec4899',
+  '#06b6d4',
+  '#f97316',
+  '#6366f1',
+  '#14b8a6',
 ];
 
 export const useDashboardCharts = (
@@ -285,21 +293,26 @@ export const useDashboardCharts = (
       position: 'outside',
       formatMethod: (value, datum) => renderQuota(datum['rawQuota'] || 0, 2),
     },
-    axes: [{
-      orient: 'left',
-      type: 'band',
-      label: { visible: true },
-    }, {
-      orient: 'bottom',
-      type: 'linear',
-      visible: false,
-    }],
+    axes: [
+      {
+        orient: 'left',
+        type: 'band',
+        label: { visible: true },
+      },
+      {
+        orient: 'bottom',
+        type: 'linear',
+        visible: false,
+      },
+    ],
     tooltip: {
       mark: {
-        content: [{
-          key: (datum) => datum['User'],
-          value: (datum) => renderQuota(datum['rawQuota'] || 0, 4),
-        }],
+        content: [
+          {
+            key: (datum) => datum['User'],
+            value: (datum) => renderQuota(datum['rawQuota'] || 0, 4),
+          },
+        ],
       },
     },
     color: { type: 'ordinal', range: USER_COLORS },
@@ -319,21 +332,25 @@ export const useDashboardCharts = (
       text: t('用户消耗趋势'),
       subtext: '',
     },
-    axes: [{
-      orient: 'left',
-      label: {
-        formatMethod: (value) => renderQuota(value, 2),
+    axes: [
+      {
+        orient: 'left',
+        label: {
+          formatMethod: (value) => renderQuota(value, 2),
+        },
       },
-    }],
+    ],
     area: { style: { fillOpacity: 0.15 } },
     line: { style: { lineWidth: 2 } },
     point: { visible: false },
     tooltip: {
       mark: {
-        content: [{
-          key: (datum) => datum['User'],
-          value: (datum) => renderQuota(datum['rawQuota'] || 0, 4),
-        }],
+        content: [
+          {
+            key: (datum) => datum['User'],
+            value: (datum) => renderQuota(datum['rawQuota'] || 0, 4),
+          },
+        ],
       },
     },
     color: { type: 'ordinal', range: USER_COLORS },
@@ -515,11 +532,13 @@ export const useDashboardCharts = (
         10,
       );
 
-      const userRankValues = rankingData.map((item) => ({
-        User: item.User,
-        rawQuota: item.Quota,
-        Quota: getQuotaWithUnit(item.Quota, 4),
-      })).sort((a, b) => b.rawQuota - a.rawQuota);
+      const userRankValues = rankingData
+        .map((item) => ({
+          User: item.User,
+          rawQuota: item.Quota,
+          Quota: getQuotaWithUnit(item.Quota, 4),
+        }))
+        .sort((a, b) => b.rawQuota - a.rawQuota);
 
       const totalUserQuota = rankingData.reduce((s, i) => s + i.Quota, 0);
 

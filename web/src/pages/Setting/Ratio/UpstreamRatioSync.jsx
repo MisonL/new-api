@@ -884,7 +884,9 @@ export default function UpstreamRatioSync(props) {
             setConfirmVisible(false);
             const curRatios = {
               ModelRatio: JSON.parse(props.options.ModelRatio || '{}'),
-              CompletionRatio: JSON.parse(props.options.CompletionRatio || '{}'),
+              CompletionRatio: JSON.parse(
+                props.options.CompletionRatio || '{}',
+              ),
               CacheRatio: JSON.parse(props.options.CacheRatio || '{}'),
               ModelPrice: JSON.parse(props.options.ModelPrice || '{}'),
             };

@@ -180,9 +180,7 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
 
   const removeRule = (targetIndex) => {
     const targetRuleKey = getRuleKey(rules[targetIndex], targetIndex);
-    applyRules(
-      rules.filter((_, currentIndex) => currentIndex !== targetIndex),
-    );
+    applyRules(rules.filter((_, currentIndex) => currentIndex !== targetIndex));
     setExpandedRuleKeys((prev) => prev.filter((key) => key !== targetRuleKey));
   };
 

@@ -52,7 +52,7 @@ const LogsFilters = ({
 }) => {
   const [statusState] = React.useContext(StatusContext);
   const autocompleteEnabled = statusState?.status
-    ? statusState.status.log_filter_autocomplete_enabled ?? true
+    ? (statusState.status.log_filter_autocomplete_enabled ?? true)
     : false;
   const suggestionEndpoint = isAdminUser
     ? '/api/log/suggestions'
@@ -96,7 +96,9 @@ const LogsFilters = ({
 
       const logTypeSelect = container.querySelector('#logType');
       if (logTypeSelect) {
-        const activeDescendant = logTypeSelect.getAttribute('aria-activedescendant');
+        const activeDescendant = logTypeSelect.getAttribute(
+          'aria-activedescendant',
+        );
         if (activeDescendant && !document.getElementById(activeDescendant)) {
           logTypeSelect.removeAttribute('aria-activedescendant');
         }
@@ -119,7 +121,10 @@ const LogsFilters = ({
       trigger='change'
       stopValidateWithError={false}
     >
-      <div className='usage-logs-filters-stack flex flex-col gap-3' ref={containerRef}>
+      <div
+        className='usage-logs-filters-stack flex flex-col gap-3'
+        ref={containerRef}
+      >
         <div className='usage-logs-filters-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2'>
           {/* 时间选择器 */}
           <div className='col-span-1 lg:col-span-2'>
