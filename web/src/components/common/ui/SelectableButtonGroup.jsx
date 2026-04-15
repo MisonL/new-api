@@ -34,7 +34,7 @@ import { IconChevronDown, IconChevronUp } from '@douyinfe/semi-icons';
  * 通用可选择按钮组组件
  *
  * @param {string} title 标题
- * @param {Array<{value:any,label:string,icon?:React.ReactNode,tagCount?:number}>} items 按钮项
+ * @param {Array<{value:any,label:string,icon?:React.ReactNode,tagCount?:number|string}>} items 按钮项
  * @param {*|Array} activeValue 当前激活的值，可以是单个值或数组（多选）
  * @param {(value:any)=>void} onChange 选择改变回调
  * @param {function} t i18n
@@ -212,13 +212,15 @@ const SelectableButtonGroup = ({
           <div className='sbg-content'>
             {item.icon && <span className='sbg-icon'>{item.icon}</span>}
             <ConditionalTooltipText text={item.label} />
-            {item.tagCount !== undefined && shouldShowTags && (
-              <span
-                className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}
-              >
-                {item.tagCount}
-              </span>
-            )}
+            {item.tagCount !== undefined &&
+              shouldShowTags &&
+              item.tagCount !== '' && (
+                <span
+                  className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}
+                >
+                  {item.tagCount}
+                </span>
+              )}
           </div>
         </Button>
       );

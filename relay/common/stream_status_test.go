@@ -186,6 +186,19 @@ func TestStreamStatus_IsCanceled_WithNonBenignErrors(t *testing.T) {
 	assert.False(t, s.IsCanceled())
 }
 
+func TestStreamStatus_IsCanceled_WithTruncatedErrorHistory(t *testing.T) {
+	t.Parallel()
+
+	s := NewStreamStatus()
+	s.RecordError("upstream warning")
+	for i := 0; i < maxStreamErrorEntries+5; i++ {
+		s.RecordError("context canceled")
+	}
+	s.SetEndReason(StreamEndReasonClientGone, fmt.Errorf("context canceled"))
+
+	assert.False(t, s.IsCanceled())
+}
+
 func TestStreamStatus_Summary(t *testing.T) {
 	t.Parallel()
 

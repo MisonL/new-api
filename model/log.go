@@ -500,8 +500,9 @@ func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64,
 	return total, nil
 }
 
-func DeleteLogByID(logID int) error {
-	return LOG_DB.Delete(&Log{}, logID).Error
+func DeleteLogByID(logID int) (int64, error) {
+	result := LOG_DB.Delete(&Log{}, logID)
+	return result.RowsAffected, result.Error
 }
 
 func DeleteUserLogByID(userID int, logID int) error {

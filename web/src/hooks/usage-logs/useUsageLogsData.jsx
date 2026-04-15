@@ -312,6 +312,19 @@ export const useLogsData = () => {
     return flags.join(' | ');
   };
 
+  const hasPayloadAuditField = (other, prefix) => {
+    if (!other) {
+      return false;
+    }
+    return [
+      `${prefix}_content`,
+      `${prefix}_content_type`,
+      `${prefix}_content_bytes`,
+      `${prefix}_content_truncated`,
+      `${prefix}_content_omitted`,
+    ].some((key) => Object.prototype.hasOwnProperty.call(other, key));
+  };
+
   // Statistics functions
   const getLogSelfStat = async () => {
     const {
@@ -535,9 +548,11 @@ export const useLogsData = () => {
           });
         }
       }
-      if (other?.request_content || other?.response_content) {
+      const hasRequestPayload = hasPayloadAuditField(other, 'request');
+      const hasResponsePayload = hasPayloadAuditField(other, 'response');
+      if (hasRequestPayload || hasResponsePayload) {
         const payloadEntries = [];
-        if (other?.request_content) {
+        if (hasRequestPayload) {
           const requestMetaText = buildPayloadMetaText('request', other);
           payloadEntries.push(
             <div key='request' className='usage-log-payload-entry'>
@@ -577,7 +592,7 @@ export const useLogsData = () => {
             </div>,
           );
         }
-        if (other?.response_content) {
+        if (hasResponsePayload) {
           const responseMetaText = buildPayloadMetaText('response', other);
           payloadEntries.push(
             <div key='response' className='usage-log-payload-entry'>
@@ -871,19 +886,23 @@ export const useLogsData = () => {
       showError(t('无效的日志记录'));
       return;
     }
-    const endpoint = isAdminUser
-      ? `/api/log/${record.id}`
-      : `/api/log/self/${record.id}`;
-    const res = await API.delete(endpoint);
-    const { success, message } = res.data;
-    if (!success) {
-      showError(message);
-      return;
-    }
-    showSuccess(t('日志已删除'));
-    await loadLogs(activePage, pageSize);
-    if (showStat) {
-      await handleEyeClick();
+    try {
+      const endpoint = isAdminUser
+        ? `/api/log/${record.id}`
+        : `/api/log/self/${record.id}`;
+      const res = await API.delete(endpoint);
+      const { success, message } = res.data;
+      if (!success) {
+        showError(message);
+        return;
+      }
+      showSuccess(t('日志已删除'));
+      await loadLogs(activePage, pageSize);
+      if (showStat) {
+        await handleEyeClick();
+      }
+    } catch (error) {
+      showError(error?.message || t('删除日志失败'));
     }
   };
 
@@ -914,18 +933,22 @@ export const useLogsData = () => {
       cancelText: t('取消'),
       okType: 'danger',
       onOk: async () => {
-        const res = await API.post(endpoint, payload);
-        const { success, message, data } = res.data;
-        if (!success) {
-          showError(message);
-          return;
-        }
-        showSuccess(
-          t('已删除 {{count}} 条日志', { count: data?.deleted || 0 }),
-        );
-        await loadLogs(1, pageSize);
-        if (showStat) {
-          await handleEyeClick();
+        try {
+          const res = await API.post(endpoint, payload);
+          const { success, message, data } = res.data;
+          if (!success) {
+            showError(message);
+            return;
+          }
+          showSuccess(
+            t('已删除 {{count}} 条日志', { count: data?.deleted || 0 }),
+          );
+          await loadLogs(1, pageSize);
+          if (showStat) {
+            await handleEyeClick();
+          }
+        } catch (error) {
+          showError(error?.message || t('批量删除日志失败'));
         }
       },
     });

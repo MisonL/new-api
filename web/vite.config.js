@@ -79,11 +79,14 @@ export default defineConfig(({ command }) => {
       chunkSizeWarningLimit: 2000,
       rollupOptions: {
         onwarn(warning, defaultHandler) {
+          const warningId =
+            typeof warning.id === 'string'
+              ? warning.id.replaceAll('\\', '/')
+              : '';
           const isKnownLottieEvalWarning =
             warning.code === 'EVAL' &&
-            typeof warning.id === 'string' &&
-            warning.id.includes(
-              'node_modules/lottie-web/build/player/lottie.js',
+            warningId.includes(
+              '/node_modules/lottie-web/build/player/lottie.js',
             );
           if (isKnownLottieEvalWarning) {
             return;

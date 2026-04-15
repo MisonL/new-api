@@ -456,10 +456,10 @@ const PersonalSetting = () => {
             clearPayloads,
           );
           if (!clearRes.data.success) {
-            showError(clearRes.data.message);
-            return;
+            showError(t('设置已保存，但历史会话内容清理失败'));
+          } else {
+            showSuccess(t('设置已保存，历史会话内容已清理'));
           }
-          showSuccess(t('设置已保存，历史会话内容已清理'));
         } else {
           showSuccess(t('设置保存成功'));
         }

@@ -145,7 +145,7 @@ function renderType(type, t) {
 function buildStreamStatusTooltip(ss, t) {
   if (!ss) return null;
   const isCanceled =
-    ss.status === 'canceled' || ss.end_reason === 'client_gone';
+    ss.status === 'canceled' || (!ss.status && ss.end_reason === 'client_gone');
   const statusLabel = isCanceled ? t('已取消') : t('异常');
   const reasonLabel = isCanceled
     ? t('客户端已断开')
@@ -178,7 +178,7 @@ function renderIsStream(bool, t, streamStatus) {
   const indicatorKind = !streamStatus
     ? 'ok'
     : streamStatus.status === 'canceled' ||
-        streamStatus.end_reason === 'client_gone'
+        (!streamStatus.status && streamStatus.end_reason === 'client_gone')
       ? 'ok'
       : streamStatus.status !== 'ok'
         ? 'error'

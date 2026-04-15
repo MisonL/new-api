@@ -195,8 +195,13 @@ func DeleteLog(c *gin.Context) {
 		common.ApiErrorMsg(c, "invalid log id")
 		return
 	}
-	if err := model.DeleteLogByID(logID); err != nil {
+	rowsAffected, err := model.DeleteLogByID(logID)
+	if err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	if rowsAffected == 0 {
+		common.ApiErrorMsg(c, "log not found")
 		return
 	}
 	common.ApiSuccess(c, gin.H{"deleted": 1})

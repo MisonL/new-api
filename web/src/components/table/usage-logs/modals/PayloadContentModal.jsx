@@ -70,6 +70,11 @@ const PayloadContentModal = ({
   closePayloadContentModal,
   payloadContentTarget,
 }) => {
+  const hasContent =
+    payloadContentTarget &&
+    payloadContentTarget.content !== undefined &&
+    payloadContentTarget.content !== null;
+
   const metadata = useMemo(() => {
     const target = payloadContentTarget || {};
     const rows = [];
@@ -109,7 +114,7 @@ const PayloadContentModal = ({
     : 'text';
 
   const handleExportJson = useCallback(() => {
-    if (!payloadContentTarget?.content) {
+    if (!hasContent) {
       showError(t('暂无内容'));
       return;
     }
@@ -132,7 +137,7 @@ const PayloadContentModal = ({
       console.error('导出内容日志失败:', error);
       showError(t('导出日志失败'));
     }
-  }, [payloadContentTarget, t]);
+  }, [hasContent, payloadContentTarget, t]);
 
   return (
     <Modal
@@ -163,13 +168,13 @@ const PayloadContentModal = ({
             type='primary'
             icon={<IconDownload />}
             onClick={handleExportJson}
-            disabled={!payloadContentTarget?.content}
+            disabled={!hasContent}
             className='usage-log-payload-export'
           >
             {t('导出')} JSON
           </Button>
         </div>
-        {payloadContentTarget?.content ? (
+        {hasContent ? (
           <div className='usage-log-payload-modal-code'>
             <CodeViewer
               content={payloadContentTarget.content}

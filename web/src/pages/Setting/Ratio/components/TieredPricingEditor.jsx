@@ -49,6 +49,7 @@ import {
   combineBillingExpr,
   splitBillingExprAndRequestRules,
   MATCH_EQ,
+  MATCH_GTE,
   MATCH_EXISTS,
   MATCH_CONTAINS,
   MATCH_RANGE,

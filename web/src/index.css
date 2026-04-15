@@ -406,8 +406,10 @@ body.sidebar-resizing * {
   padding-bottom: 10px;
 }
 
-.usage-logs-actions {
-  align-items: center;
+@media (min-width: 768px) {
+  .usage-logs-actions {
+    align-items: center;
+  }
 }
 
 .usage-logs-stats-list {
@@ -570,7 +572,8 @@ body.sidebar-resizing * {
 .usage-log-expand-text-block {
   max-width: 680px;
   white-space: normal;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  word-break: normal;
   line-height: 1.65;
 }
 

@@ -29,13 +29,14 @@ type StreamErrorEntry struct {
 }
 
 type StreamStatus struct {
-	EndReason  StreamEndReason
-	EndError   error
-	endOnce    sync.Once
+	EndReason StreamEndReason
+	EndError  error
+	endOnce   sync.Once
 
-	mu         sync.Mutex
-	Errors     []StreamErrorEntry
-	ErrorCount int
+	mu                 sync.Mutex
+	Errors             []StreamErrorEntry
+	ErrorCount         int
+	NonBenignErrorSeen bool
 }
 
 func NewStreamStatus() *StreamStatus {
@@ -59,6 +60,9 @@ func (s *StreamStatus) RecordError(msg string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ErrorCount++
+	if !IsBenignDisconnectErrorMessage(msg) {
+		s.NonBenignErrorSeen = true
+	}
 	if len(s.Errors) < maxStreamErrorEntries {
 		s.Errors = append(s.Errors, StreamErrorEntry{
 			Message:   msg,
@@ -113,7 +117,7 @@ func (s *StreamStatus) HasOnlyBenignDisconnectErrors() bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.ErrorCount == 0 {
+	if s.ErrorCount == 0 || s.NonBenignErrorSeen || len(s.Errors) != s.ErrorCount {
 		return false
 	}
 	for _, e := range s.Errors {

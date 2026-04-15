@@ -334,10 +334,12 @@ const TopUp = () => {
         if (message === 'success' && data?.payment_url) {
           window.open(data.payment_url, '_blank');
         } else {
-          showError(data || t('支付请求失败'));
+          const errorMsg =
+            typeof data === 'string' ? data : message || t('支付请求失败');
+          showError(errorMsg);
         }
       } else {
-        showError(res);
+        showError(t('支付请求失败'));
       }
     } catch (e) {
       showError(t('支付请求失败'));

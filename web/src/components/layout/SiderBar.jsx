@@ -36,6 +36,8 @@ import { isAdmin, isRoot, showError } from '../../helpers';
 import SkeletonWrapper from './components/SkeletonWrapper';
 import {
   DEFAULT_SIDEBAR_WIDTH,
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
   clampSidebarWidth,
 } from '../../hooks/common/useSidebarWidth';
 
@@ -61,6 +63,8 @@ const routerMap = {
   playground: '/console/playground',
   personal: '/console/personal',
 };
+
+const SIDEBAR_KEYBOARD_STEP = 16;
 
 const SiderBar = ({
   onNavigate = () => {},
@@ -380,6 +384,37 @@ const SiderBar = ({
     [collapsed, isMobile, setSidebarWidth, sidebarWidth],
   );
 
+  const handleResizeKeyDown = useCallback(
+    (event) => {
+      if (collapsed || isMobile) {
+        return;
+      }
+
+      let nextWidth = null;
+      switch (event.key) {
+        case 'ArrowLeft':
+          nextWidth = clampSidebarWidth(sidebarWidth - SIDEBAR_KEYBOARD_STEP);
+          break;
+        case 'ArrowRight':
+          nextWidth = clampSidebarWidth(sidebarWidth + SIDEBAR_KEYBOARD_STEP);
+          break;
+        case 'Home':
+          nextWidth = MIN_SIDEBAR_WIDTH;
+          break;
+        case 'End':
+          nextWidth = MAX_SIDEBAR_WIDTH;
+          break;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      stopSidebarResize();
+      setSidebarWidth(nextWidth);
+    },
+    [collapsed, isMobile, setSidebarWidth, sidebarWidth, stopSidebarResize],
+  );
+
   useRepeatingDomPatch(() => {
     const sidebar = document.querySelector('.sidebar-container');
     if (!sidebar) {
@@ -577,8 +612,13 @@ const SiderBar = ({
           role='separator'
           aria-orientation='vertical'
           aria-label={t('拖拽调整侧边栏宽度')}
+          aria-valuemin={MIN_SIDEBAR_WIDTH}
+          aria-valuemax={MAX_SIDEBAR_WIDTH}
+          aria-valuenow={sidebarWidth}
+          tabIndex={0}
           title={t('拖拽调整侧边栏宽度')}
           onMouseDown={handleResizeStart}
+          onKeyDown={handleResizeKeyDown}
           onDoubleClick={() => {
             stopSidebarResize();
             resetSidebarWidth();

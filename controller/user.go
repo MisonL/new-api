@@ -1054,8 +1054,8 @@ type UpdateUserSettingRequest struct {
 	UpstreamModelUpdateNotifyEnabled *bool   `json:"upstream_model_update_notify_enabled,omitempty"`
 	AcceptUnsetModelRatioModel       bool    `json:"accept_unset_model_ratio_model"`
 	RecordIpLog                      bool    `json:"record_ip_log"`
-	RecordRequestContentLog          bool    `json:"record_request_content_log"`
-	RecordResponseContentLog         bool    `json:"record_response_content_log"`
+	RecordRequestContentLog          *bool   `json:"record_request_content_log,omitempty"`
+	RecordResponseContentLog         *bool   `json:"record_response_content_log,omitempty"`
 }
 
 func UpdateUserSetting(c *gin.Context) {
@@ -1157,8 +1157,12 @@ func UpdateUserSetting(c *gin.Context) {
 	settings.UpstreamModelUpdateNotifyEnabled = upstreamModelUpdateNotifyEnabled
 	settings.AcceptUnsetRatioModel = req.AcceptUnsetModelRatioModel
 	settings.RecordIpLog = req.RecordIpLog
-	settings.RecordRequestContentLog = req.RecordRequestContentLog
-	settings.RecordResponseContentLog = req.RecordResponseContentLog
+	if req.RecordRequestContentLog != nil {
+		settings.RecordRequestContentLog = *req.RecordRequestContentLog
+	}
+	if req.RecordResponseContentLog != nil {
+		settings.RecordResponseContentLog = *req.RecordResponseContentLog
+	}
 	settings.WebhookUrl = ""
 	settings.BarkUrl = ""
 	settings.NotificationEmail = ""
@@ -1169,9 +1173,7 @@ func UpdateUserSetting(c *gin.Context) {
 	// 如果是webhook类型,添加webhook相关设置
 	if req.QuotaWarningType == dto.NotifyTypeWebhook {
 		settings.WebhookUrl = req.WebhookUrl
-		if req.WebhookSecret != "" {
-			settings.WebhookSecret = req.WebhookSecret
-		}
+		settings.WebhookSecret = req.WebhookSecret
 	} else {
 		settings.WebhookSecret = ""
 	}
