@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getLucideIcon } from '../../helpers/render';
@@ -28,6 +28,10 @@ import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime'
 import useRepeatingDomPatch from '../../hooks/common/useRepeatingDomPatch';
 import { isAdmin, isRoot, showError } from '../../helpers';
 import SkeletonWrapper from './components/SkeletonWrapper';
+import {
+  DEFAULT_SIDEBAR_WIDTH,
+  clampSidebarWidth,
+} from '../../hooks/common/useSidebarWidth';
 
 import { Nav, Divider, Button } from '@douyinfe/semi-ui';
 
@@ -52,7 +56,13 @@ const routerMap = {
   personal: '/console/personal',
 };
 
-const SiderBar = ({ onNavigate = () => {} }) => {
+const SiderBar = ({
+  onNavigate = () => {},
+  sidebarWidth = DEFAULT_SIDEBAR_WIDTH,
+  setSidebarWidth = () => {},
+  resetSidebarWidth = () => {},
+  isMobile = false,
+}) => {
   const { t } = useTranslation();
   const [collapsed, toggleCollapsed] = useSidebarCollapsed();
   const {
@@ -69,6 +79,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [routerMapState, setRouterMapState] = useState(routerMap);
+  const resizeCleanupRef = useRef(null);
 
   const workspaceItems = useMemo(() => {
     const items = [
@@ -305,6 +316,59 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     }
   }, [collapsed]);
 
+  useEffect(() => {
+    return () => {
+      if (resizeCleanupRef.current) {
+        resizeCleanupRef.current();
+      }
+    };
+  }, []);
+
+  const stopSidebarResize = useCallback(() => {
+    if (resizeCleanupRef.current) {
+      resizeCleanupRef.current();
+      resizeCleanupRef.current = null;
+    }
+  }, []);
+
+  const handleResizeStart = useCallback(
+    (event) => {
+      if (collapsed || isMobile) {
+        return;
+      }
+
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = sidebarWidth;
+
+      document.body.classList.add('sidebar-resizing');
+
+      const handlePointerMove = (moveEvent) => {
+        const nextWidth = clampSidebarWidth(
+          startWidth + moveEvent.clientX - startX,
+        );
+        setSidebarWidth(nextWidth);
+      };
+
+      const handlePointerUp = () => {
+        document.body.classList.remove('sidebar-resizing');
+        window.removeEventListener('mousemove', handlePointerMove);
+        window.removeEventListener('mouseup', handlePointerUp);
+        resizeCleanupRef.current = null;
+      };
+
+      resizeCleanupRef.current = () => {
+        document.body.classList.remove('sidebar-resizing');
+        window.removeEventListener('mousemove', handlePointerMove);
+        window.removeEventListener('mouseup', handlePointerUp);
+      };
+
+      window.addEventListener('mousemove', handlePointerMove);
+      window.addEventListener('mouseup', handlePointerUp);
+    },
+    [collapsed, isMobile, setSidebarWidth, sidebarWidth],
+  );
+
   useRepeatingDomPatch(() => {
     const sidebar = document.querySelector('.sidebar-container');
     if (!sidebar) {
@@ -496,6 +560,21 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         </Nav>
       </SkeletonWrapper>
 
+      {!collapsed && !isMobile ? (
+        <div
+          className='sidebar-resize-handle'
+          role='separator'
+          aria-orientation='vertical'
+          aria-label={t('拖拽调整侧边栏宽度')}
+          title={t('拖拽调整侧边栏宽度')}
+          onMouseDown={handleResizeStart}
+          onDoubleClick={() => {
+            stopSidebarResize();
+            resetSidebarWidth();
+          }}
+        />
+      ) : null}
+
       {/* 底部折叠按钮 */}
       <div className='sidebar-collapse-button'>
         <SkeletonWrapper
@@ -509,6 +588,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
             theme='outline'
             type='tertiary'
             size='small'
+            className='sidebar-collapse-trigger'
             icon={
               <ChevronLeft
                 size={16}

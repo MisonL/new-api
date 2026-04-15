@@ -28,6 +28,7 @@ import React, { useContext, useEffect, useState } from 'react';
 import useFormFieldA11yPatch from '../../hooks/common/useFormFieldA11yPatch';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
+import { useSidebarWidth } from '../../hooks/common/useSidebarWidth';
 import { useTranslation } from 'react-i18next';
 import {
   API,
@@ -47,6 +48,7 @@ const PageLayout = () => {
   const [, statusDispatch] = useContext(StatusContext);
   const isMobile = useIsMobile();
   const [collapsed, , setCollapsed] = useSidebarCollapsed();
+  const [sidebarWidth, setSidebarWidth, resetSidebarWidth] = useSidebarWidth();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { i18n } = useTranslation();
   const location = useLocation();
@@ -193,6 +195,10 @@ const PageLayout = () => {
             }}
           >
             <SiderBar
+              sidebarWidth={sidebarWidth}
+              setSidebarWidth={setSidebarWidth}
+              resetSidebarWidth={resetSidebarWidth}
+              isMobile={isMobile}
               onNavigate={() => {
                 if (isMobile) setDrawerOpen(false);
               }}
