@@ -1,0 +1,30 @@
+name: new-api-frontend-readonly
+
+services:
+  readonly-proxy:
+    image: nginx:1.29-alpine
+    restart: always
+    ports:
+      - "${READONLY_PROXY_PORT:-3300}:80"
+    environment:
+      - READONLY_UPSTREAM=${READONLY_UPSTREAM:-http://host.docker.internal:3000}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        envsubst '$$READONLY_UPSTREAM' \
+          < /etc/nginx/templates/default.conf.template \
+          > /etc/nginx/conf.d/default.conf && \
+        nginx -g 'daemon off;'
+    volumes:
+      - type: bind
+        source: ${READONLY_PROXY_TEMPLATE_PATH:?set READONLY_PROXY_TEMPLATE_PATH}
+        target: /etc/nginx/templates/default.conf.template
+        read_only: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost/healthz | grep -q '^ok$'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

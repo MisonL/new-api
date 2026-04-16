@@ -41,6 +41,10 @@ import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useLocation } from 'react-router-dom';
 import { normalizeLanguage } from '../../i18n/language';
+import {
+  IS_READONLY_FRONTEND,
+  READONLY_FRONTEND_MESSAGE,
+} from '../../constants/runtime.constants';
 const { Sider, Content, Header } = Layout;
 
 const PageLayout = () => {
@@ -226,6 +230,24 @@ const PageLayout = () => {
               position: 'relative',
             }}
           >
+            {IS_READONLY_FRONTEND && (
+              <div
+                style={{
+                  margin: shouldInnerPadding ? '0 0 16px 0' : '0',
+                  padding: '12px 16px',
+                  borderBottom: shouldInnerPadding
+                    ? '1px solid var(--semi-color-border)'
+                    : '1px solid var(--semi-color-warning-light-default)',
+                  background:
+                    'var(--semi-color-warning-light-default, #fff7e8)',
+                  color: 'var(--semi-color-warning, #ad6800)',
+                  fontSize: '14px',
+                  lineHeight: 1.5,
+                }}
+              >
+                {READONLY_FRONTEND_MESSAGE}
+              </div>
+            )}
             <ErrorBoundary>
               <App />
             </ErrorBoundary>

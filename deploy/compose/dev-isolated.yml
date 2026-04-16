@@ -1,0 +1,62 @@
+name: new-api-dev-isolated
+
+services:
+  new-api:
+    image: ${DEV_NEW_API_IMAGE:-new-api-local:dev}
+    restart: always
+    command: --log-dir /app/logs
+    ports:
+      - "${DEV_NEW_API_PORT:-3001}:3000"
+    volumes:
+      - type: bind
+        source: ${DEV_NEW_API_DATA_DIR:?set DEV_NEW_API_DATA_DIR}
+        target: /data
+      - type: bind
+        source: ${DEV_NEW_API_LOG_DIR:?set DEV_NEW_API_LOG_DIR}
+        target: /app/logs
+    environment:
+      - SESSION_SECRET=${DEV_SESSION_SECRET:?set DEV_SESSION_SECRET}
+      - CRYPTO_SECRET=${DEV_CRYPTO_SECRET:?set DEV_CRYPTO_SECRET}
+      - SQL_DSN=${DEV_SQL_DSN:-postgresql://root:123456@postgres:5432/new-api-dev}
+      - REDIS_CONN_STRING=${DEV_REDIS_CONN_STRING:-redis://redis:6379/0}
+      - TZ=${DEV_TZ:-Asia/Shanghai}
+      - ERROR_LOG_ENABLED=${DEV_ERROR_LOG_ENABLED:-true}
+      - BATCH_UPDATE_ENABLED=${DEV_BATCH_UPDATE_ENABLED:-true}
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - dev-isolated-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:latest
+    restart: always
+    ports:
+      - "${DEV_REDIS_PORT:-6380}:6379"
+    networks:
+      - dev-isolated-network
+
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: ${DEV_POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD:-123456}
+      POSTGRES_DB: ${DEV_POSTGRES_DB:-new-api-dev}
+    ports:
+      - "${DEV_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - type: bind
+        source: ${DEV_POSTGRES_DATA_DIR:?set DEV_POSTGRES_DATA_DIR}
+        target: /var/lib/postgresql/data
+    networks:
+      - dev-isolated-network
+
+networks:
+  dev-isolated-network:
+    driver: bridge

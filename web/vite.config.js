@@ -29,6 +29,8 @@ process.env.BROWSERSLIST_IGNORE_OLD_DATA = '1';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => {
+  const devProxyTarget =
+    process.env.VITE_DEV_PROXY_TARGET || 'http://localhost:3000';
   const plugins = [
     {
       name: 'treat-js-files-as-jsx',
@@ -137,15 +139,15 @@ export default defineConfig(({ command }) => {
       host: '0.0.0.0',
       proxy: {
         '/api': {
-          target: 'http://localhost:3000',
+          target: devProxyTarget,
           changeOrigin: true,
         },
         '/mj': {
-          target: 'http://localhost:3000',
+          target: devProxyTarget,
           changeOrigin: true,
         },
         '/pg': {
-          target: 'http://localhost:3000',
+          target: devProxyTarget,
           changeOrigin: true,
         },
       },

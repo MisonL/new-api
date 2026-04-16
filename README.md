@@ -4,14 +4,15 @@
 
 本仓库继续保留 `new-api` 的基础定位，但未来路线、功能取舍、发布节奏和上游吸纳策略由本仓库单独决定，不再以“百分百跟随上游”为目标。
 
-## 相对原版 new-api 的新增/改动
+## 本仓库独有的新增/改动
+
+以下条目仅列出当前相对 `upstream/main` 仍由本仓库独立维护、且可在本仓库提交历史中追溯到的功能与改动，不包含单纯同步上游后已在上游存在的能力。
 
 - 企业 SSO 三条链路：`JWT Direct`、`Trusted Header`、`CAS`
 - `OpenAI Chat` 与 `OpenAI Responses` 协议转换策略可视化配置
 - 阶梯计费表达式与工具定价能力
 - 请求/响应内容日志：用户授权开启、弹窗查看、JSON 导出、单条删除、批量删除
 - `Responses` 流式首包前恢复等待与相关稳定性增强
-- 渠道上游模型更新检测、自动同步与忽略列表
 - 用户绑定信息管理面板与用户属性入口增强
 - Dashboard 增强：时间范围切换、通道趋势排行
 - 使用日志与后台表格增强：筛选联想、横向滚动、详情显示稳定性改进
@@ -58,6 +59,55 @@ NEW_API_LOG_DIR=./logs
 - Linux：可使用相对路径，或使用绝对路径如 `/srv/new-api/data`
 - Windows：建议使用 Docker Compose 可识别的绝对路径
 - WSL：建议使用 Linux 路径，如 `/home/<user>/new-api/data` 或 `/mnt/d/...`
+
+## 开发环境矩阵
+
+项目现在明确拆成两类开发环境，不再混用单个 `port3001` 样例文件：
+
+1. 完全隔离开发环境
+   - 编排文件：[deploy/compose/dev-isolated.yml](/Volumes/Work/code/new-api/deploy/compose/dev-isolated.yml)
+   - 环境模板：[deploy/env/dev-isolated.env.example](/Volumes/Work/code/new-api/deploy/env/dev-isolated.env.example)
+   - 目标：独立 `new-api`、独立 PostgreSQL、独立 Redis、独立数据目录、独立日志目录、独立端口
+   - 适用：日常主开发、联调、迁移验证、功能测试
+
+2. 只读前端联调环境
+   - 代理编排：[deploy/compose/frontend-readonly-proxy.yml](/Volumes/Work/code/new-api/deploy/compose/frontend-readonly-proxy.yml)
+   - 代理模板：[deploy/nginx/frontend-readonly.conf.template](/Volumes/Work/code/new-api/deploy/nginx/frontend-readonly.conf.template)
+   - 环境模板：[deploy/env/frontend-readonly.env.example](/Volumes/Work/code/new-api/deploy/env/frontend-readonly.env.example)
+   - 目标：复用正式后端，仅替换本地前端，禁止登录、登出、绑定和所有写入请求
+   - 适用：样式调试、只读观察、正式数据界面联调
+
+### 完全隔离开发环境启动
+
+```bash
+cp deploy/env/dev-isolated.env.example deploy/env/dev-isolated.env
+docker compose -f deploy/compose/dev-isolated.yml --env-file deploy/env/dev-isolated.env up -d
+```
+
+### 只读前端联调环境启动
+
+先启动只读代理：
+
+```bash
+cp deploy/env/frontend-readonly.env.example deploy/env/frontend-readonly.env
+docker compose -f deploy/compose/frontend-readonly-proxy.yml --env-file deploy/env/frontend-readonly.env up -d
+```
+
+再启动本地前端开发服务器：
+
+```bash
+cd web
+VITE_DEV_PROXY_TARGET=http://127.0.0.1:3300 \
+VITE_REACT_APP_READONLY_MODE=true \
+bun run dev --host 0.0.0.0 --port 5173
+```
+
+只读联调环境的控制原则：
+
+- 前端 UI 会显示只读提示
+- 前端请求层会阻断写方法和高风险登录绑定入口
+- 只读代理会再次阻断非安全方法和关键副作用路径
+- 如需登录，请先在正式 Web UI 完成登录，再打开只读前端；不要在只读前端里走登录流程
 
 ## 开发命令
 

@@ -26,6 +26,10 @@ import {
 import axios from 'axios';
 import i18n from '../i18n/i18n';
 import { MESSAGE_ROLES } from '../constants/playground.constants';
+import {
+  IS_READONLY_FRONTEND,
+  READONLY_FRONTEND_MESSAGE,
+} from '../constants/runtime.constants';
 
 export let API = axios.create({
   baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
@@ -36,6 +40,52 @@ export let API = axios.create({
     'Cache-Control': 'no-store',
   },
 });
+
+const READONLY_SAFE_METHODS = new Set(['get', 'head', 'options']);
+const READONLY_BLOCKED_PATHS = [
+  /^\/api\/oauth\//,
+  /^\/api\/auth\/external\//,
+  /^\/api\/user\/logout$/,
+  /^\/api\/setup$/,
+  /^\/api\/verification$/,
+  /^\/api\/reset_password$/,
+];
+
+function normalizeRequestPath(url) {
+  if (typeof url !== 'string' || url.trim() === '') {
+    return '';
+  }
+
+  try {
+    return new URL(url, window.location.origin).pathname;
+  } catch {
+    return url;
+  }
+}
+
+function applyReadonlyRequestGuard(instance) {
+  instance.interceptors.request.use((config) => {
+    if (!IS_READONLY_FRONTEND) {
+      return config;
+    }
+
+    const method = String(config.method || 'get').toLowerCase();
+    const path = normalizeRequestPath(config.url);
+
+    if (!READONLY_SAFE_METHODS.has(method)) {
+      return Promise.reject(new Error(READONLY_FRONTEND_MESSAGE));
+    }
+
+    const isBlockedReadonlyPath = READONLY_BLOCKED_PATHS.some((pattern) =>
+      pattern.test(path),
+    );
+    if (isBlockedReadonlyPath) {
+      return Promise.reject(new Error(READONLY_FRONTEND_MESSAGE));
+    }
+
+    return config;
+  });
+}
 
 function redirectToOAuthUrl(url, options = {}) {
   const { openInNewTab = false } = options;
@@ -255,6 +305,7 @@ function patchAPIInstance(instance) {
 }
 
 patchAPIInstance(API);
+applyReadonlyRequestGuard(API);
 
 export function updateAPI() {
   API = axios.create({
@@ -268,6 +319,7 @@ export function updateAPI() {
   });
 
   patchAPIInstance(API);
+  applyReadonlyRequestGuard(API);
 }
 
 API.interceptors.response.use(
