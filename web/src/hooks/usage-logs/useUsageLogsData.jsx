@@ -790,7 +790,7 @@ export const useLogsData = () => {
         key: t('操作'),
         value: (
           <Button
-            theme='borderless'
+            theme='light'
             type='danger'
             size='small'
             className='usage-log-delete-button'

@@ -508,15 +508,15 @@ body.sidebar-resizing * {
 
 .usage-logs-table .semi-table-expanded-row > .semi-table-row-cell {
   background: transparent;
-  padding: 12px 18px 18px;
+  padding: 8px 18px 16px;
 }
 
 .usage-log-expanded-panel {
-  border: 1px solid
-    color-mix(in srgb, var(--semi-color-border) 88%, transparent);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--semi-color-fill-0) 62%, transparent);
-  padding: 6px 14px;
+  border-top: 1px dashed
+    color-mix(in srgb, var(--semi-color-border) 72%, transparent);
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 0 0;
 }
 
 .usage-log-expanded-descriptions .semi-descriptions-row:not(:last-child) {
@@ -526,14 +526,14 @@ body.sidebar-resizing * {
 
 .usage-log-expanded-descriptions .semi-descriptions-item-th {
   width: 124px;
-  padding: 14px 12px 14px 8px;
+  padding: 12px 16px 12px 0;
   color: var(--semi-color-text-2);
   font-weight: 600;
   vertical-align: top;
 }
 
 .usage-log-expanded-descriptions .semi-descriptions-item-td {
-  padding: 14px 0;
+  padding: 12px 0;
 }
 
 .usage-log-payload-group {
@@ -584,6 +584,22 @@ body.sidebar-resizing * {
 
 .usage-log-delete-button {
   border-radius: 10px;
+  border: 1px solid
+    color-mix(in srgb, var(--semi-color-danger-light-default) 42%, var(--semi-color-danger));
+  background: color-mix(
+    in srgb,
+    var(--semi-color-danger-light-default) 76%,
+    transparent
+  );
+}
+
+.usage-log-delete-button:hover,
+.usage-log-delete-button:focus {
+  border-color: color-mix(
+    in srgb,
+    var(--semi-color-danger-light-hover) 46%,
+    var(--semi-color-danger)
+  );
 }
 
 .usage-log-payload-modal {
