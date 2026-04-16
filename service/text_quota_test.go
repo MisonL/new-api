@@ -1,12 +1,17 @@
 package service
 
 import (
+	"encoding/base64"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 
@@ -230,6 +235,123 @@ func TestCalculateTextQuotaSummaryClampsNegativeUseTime(t *testing.T) {
 
 	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
 	require.EqualValues(t, 0, summary.UseTimeSeconds)
+}
+
+func TestPostTextConsumeQuota_UsesTieredSettlementAndKeepsToolAddon(t *testing.T) {
+	truncate(t)
+	seedUser(t, 1, 1_000_000)
+	seedToken(t, 1, 1, "test-token", 1_000_000)
+	seedChannel(t, 1)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Request = req
+	ctx.Set("token_name", "test-token")
+	ctx.Set("username", "test_user")
+	ctx.Set("chat_completion_web_search_context_size", "medium")
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:                1,
+		TokenId:               1,
+		TokenKey:              "test-token",
+		UsingGroup:            "default",
+		UserGroup:             "default",
+		OriginModelName:       "gpt-4.1-search-preview",
+		StartTime:             time.Now(),
+		FinalPreConsumedQuota: 3500,
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:              "tiered_expr",
+			ExprString:               `tier("base", p * 2 + c * 10)`,
+			ExprHash:                 billingexpr.ExprHashString(`tier("base", p * 2 + c * 10)`),
+			GroupRatio:               1,
+			EstimatedQuotaAfterGroup: 3500,
+			QuotaPerUnit:             common.QuotaPerUnit,
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 1,
+		},
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     1000,
+		CompletionTokens: 500,
+		TotalTokens:      1500,
+	}
+
+	PostTextConsumeQuota(ctx, relayInfo, usage, nil)
+
+	var consumeLog model.Log
+	require.NoError(t, model.LOG_DB.Order("id desc").First(&consumeLog).Error)
+	require.Equal(t, 16000, consumeLog.Quota)
+
+	other, err := common.StrToMap(consumeLog.Other)
+	require.NoError(t, err)
+	require.Equal(t, "tiered_expr", other["billing_mode"])
+	require.Equal(t, base64.StdEncoding.EncodeToString([]byte(`tier("base", p * 2 + c * 10)`)), other["expr_b64"])
+	require.EqualValues(t, 1, other["web_search_call_count"])
+	require.EqualValues(t, 25, other["web_search_price"])
+}
+
+func TestPostTextConsumeQuota_ZeroTotalTokensDoesNotChargeTieredOrToolAddon(t *testing.T) {
+	truncate(t)
+	seedUser(t, 1, 1_000_000)
+	seedToken(t, 1, 1, "test-token", 1_000_000)
+	seedChannel(t, 1)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Request = req
+	ctx.Set("token_name", "test-token")
+	ctx.Set("username", "test_user")
+	ctx.Set("chat_completion_web_search_context_size", "medium")
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:                1,
+		TokenId:               1,
+		TokenKey:              "test-token",
+		UsingGroup:            "default",
+		UserGroup:             "default",
+		OriginModelName:       "gpt-4.1-search-preview",
+		StartTime:             time.Now(),
+		FinalPreConsumedQuota: 3500,
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:              "tiered_expr",
+			ExprString:               `tier("base", p * 2 + c * 10)`,
+			ExprHash:                 billingexpr.ExprHashString(`tier("base", p * 2 + c * 10)`),
+			GroupRatio:               1,
+			EstimatedQuotaAfterGroup: 3500,
+			QuotaPerUnit:             common.QuotaPerUnit,
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 1,
+		},
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     0,
+		CompletionTokens: 0,
+		TotalTokens:      0,
+	}
+
+	PostTextConsumeQuota(ctx, relayInfo, usage, nil)
+
+	var consumeLog model.Log
+	require.NoError(t, model.LOG_DB.Order("id desc").First(&consumeLog).Error)
+	require.Equal(t, 0, consumeLog.Quota)
 }
 
 func TestCalculateTextQuotaSummarySeparatesOpenRouterCacheReadFromPromptBilling(t *testing.T) {

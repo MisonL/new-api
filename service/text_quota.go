@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -45,12 +46,16 @@ type textQuotaSummary struct {
 	UsageSemantic            string
 	WebSearchPrice           float64
 	WebSearchCallCount       int
+	WebSearchQuota           int
 	ClaudeWebSearchPrice     float64
 	ClaudeWebSearchCallCount int
+	ClaudeWebSearchQuota     int
 	FileSearchPrice          float64
 	FileSearchCallCount      int
+	FileSearchQuota          int
 	AudioInputPrice          float64
 	ImageGenerationCallPrice float64
+	ImageGenerationCallQuota int
 }
 
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
@@ -156,6 +161,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			dWebSearchQuota = decimal.NewFromFloat(summary.WebSearchPrice).
 				Mul(decimal.NewFromInt(int64(webSearchTool.CallCount))).
 				Div(decimal.NewFromInt(1000)).Mul(dGroupRatio).Mul(dQuotaPerUnit)
+			summary.WebSearchQuota = int(dWebSearchQuota.Round(0).IntPart())
 		}
 	} else if strings.HasSuffix(summary.ModelName, "search-preview") {
 		searchContextSize := ctx.GetString("chat_completion_web_search_context_size")
@@ -166,6 +172,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		summary.WebSearchPrice = operation_setting.GetWebSearchPricePerThousand(summary.ModelName, searchContextSize)
 		dWebSearchQuota = decimal.NewFromFloat(summary.WebSearchPrice).
 			Div(decimal.NewFromInt(1000)).Mul(dGroupRatio).Mul(dQuotaPerUnit)
+		summary.WebSearchQuota = int(dWebSearchQuota.Round(0).IntPart())
 	}
 
 	var dClaudeWebSearchQuota decimal.Decimal
@@ -175,6 +182,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		dClaudeWebSearchQuota = decimal.NewFromFloat(summary.ClaudeWebSearchPrice).
 			Div(decimal.NewFromInt(1000)).Mul(dGroupRatio).Mul(dQuotaPerUnit).
 			Mul(decimal.NewFromInt(int64(summary.ClaudeWebSearchCallCount)))
+		summary.ClaudeWebSearchQuota = int(dClaudeWebSearchQuota.Round(0).IntPart())
 	}
 
 	var dFileSearchQuota decimal.Decimal
@@ -185,6 +193,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			dFileSearchQuota = decimal.NewFromFloat(summary.FileSearchPrice).
 				Mul(decimal.NewFromInt(int64(fileSearchTool.CallCount))).
 				Div(decimal.NewFromInt(1000)).Mul(dGroupRatio).Mul(dQuotaPerUnit)
+			summary.FileSearchQuota = int(dFileSearchQuota.Round(0).IntPart())
 		}
 	}
 
@@ -192,6 +201,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	if ctx.GetBool("image_generation_call") {
 		summary.ImageGenerationCallPrice = operation_setting.GetGPTImage1PriceOnceCall(ctx.GetString("image_generation_call_quality"), ctx.GetString("image_generation_call_size"))
 		dImageGenerationCallQuota = decimal.NewFromFloat(summary.ImageGenerationCallPrice).Mul(dGroupRatio).Mul(dQuotaPerUnit)
+		summary.ImageGenerationCallQuota = int(dImageGenerationCallQuota.Round(0).IntPart())
 	}
 
 	var audioInputQuota decimal.Decimal
@@ -281,6 +291,48 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	return summary
 }
 
+func buildTieredUsageFromTextSummary(summary textQuotaSummary, usage *dto.Usage) *dto.Usage {
+	if usage != nil {
+		return usage
+	}
+	return &dto.Usage{
+		PromptTokens:     summary.PromptTokens,
+		CompletionTokens: summary.CompletionTokens,
+		TotalTokens:      summary.TotalTokens,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         summary.CacheTokens,
+			CachedCreationTokens: summary.CacheCreationTokens,
+			ImageTokens:          summary.ImageTokens,
+			AudioTokens:          summary.AudioTokens,
+		},
+		ClaudeCacheCreation5mTokens: summary.CacheCreationTokens5m,
+		ClaudeCacheCreation1hTokens: summary.CacheCreationTokens1h,
+	}
+}
+
+func textToolAddonQuota(summary textQuotaSummary) int {
+	return summary.WebSearchQuota + summary.ClaudeWebSearchQuota + summary.FileSearchQuota + summary.ImageGenerationCallQuota
+}
+
+func settleTextQuota(summary textQuotaSummary, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) (int, bool, *billingexpr.TieredResult) {
+	quota := summary.Quota
+
+	var tieredUsedVars map[string]bool
+	if snap := relayInfo.TieredBillingSnapshot; snap != nil {
+		tieredUsedVars = billingexpr.UsedVars(snap.ExprString)
+	}
+
+	tieredOk, tieredQuota, tieredRes := TryTieredSettle(
+		relayInfo,
+		BuildTieredTokenParams(buildTieredUsageFromTextSummary(summary, usage), summary.IsClaudeUsageSemantic, tieredUsedVars),
+	)
+	if !tieredOk {
+		return quota, false, nil
+	}
+
+	return tieredQuota + textToolAddonQuota(summary), true, tieredRes
+}
+
 func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) string {
 	if usage != nil && usage.UsageSemantic != "" {
 		return usage.UsageSemantic
@@ -302,6 +354,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	adminRejectReason := common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason)
 	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	quota, tieredOk, tieredResult := settleTextQuota(summary, relayInfo, usage)
 
 	if summary.WebSearchCallCount > 0 {
 		extraContent = append(extraContent, fmt.Sprintf("Web Search 调用 %d 次，调用花费 %s", summary.WebSearchCallCount, decimal.NewFromFloat(summary.WebSearchPrice).Mul(decimal.NewFromInt(int64(summary.WebSearchCallCount))).Div(decimal.NewFromInt(1000)).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
@@ -320,14 +373,15 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 
 	if summary.TotalTokens == 0 {
+		quota = 0
 		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
 	} else {
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
-		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
+		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
+		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
+	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
 	}
 
@@ -357,6 +411,9 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 	if adminRejectReason != "" {
 		other["reject_reason"] = adminRejectReason
+	}
+	if tieredOk {
+		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	if summary.ImageTokens != 0 {
 		other["image"] = true
@@ -419,7 +476,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		CompletionTokens: summary.CompletionTokens,
 		ModelName:        logModel,
 		TokenName:        summary.TokenName,
-		Quota:            summary.Quota,
+		Quota:            quota,
 		Content:          logContent,
 		TokenId:          relayInfo.TokenId,
 		UseTimeSeconds:   int(summary.UseTimeSeconds),

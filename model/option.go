@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -196,19 +197,31 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
+	normalizedValue, err := normalizeOptionValueForInMemoryConfig(key, value)
+	if err != nil {
+		return err
+	}
+	if err := validateOptionValue(key, normalizedValue); err != nil {
+		return err
+	}
+
 	// Save to database first
 	option := Option{
 		Key: key,
 	}
 	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
-	option.Value = value
+	if err := DB.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
+	option.Value = normalizedValue
 	// Save is a combination function.
 	// If save value does not contain primary key, it will execute Create,
 	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
+	if err := DB.Save(&option).Error; err != nil {
+		return err
+	}
 	// Update OptionMap
-	return updateOptionMap(key, value)
+	return updateOptionMap(key, normalizedValue)
 }
 
 func updateOptionMap(key string, value string) (err error) {
@@ -527,6 +540,19 @@ func normalizeOptionValueForInMemoryConfig(key string, value string) (string, er
 		return model_setting.NormalizeChatCompletionsToResponsesPolicyJSON(value)
 	default:
 		return value, nil
+	}
+}
+
+func validateOptionValue(key string, value string) error {
+	switch key {
+	case "billing_setting.billing_mode":
+		return billing_setting.ValidateBillingModeJSON(value)
+	case "billing_setting.billing_expr":
+		return billing_setting.ValidateBillingExprJSON(value)
+	case "tool_price_setting.prices":
+		return operation_setting.ValidateToolPriceJSON(value)
+	default:
+		return nil
 	}
 }
 

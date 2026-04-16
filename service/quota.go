@@ -232,7 +232,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	}
 	other := GenerateWssOtherInfo(ctx, relayInfo, usage, modelRatio, groupRatio,
 		completionRatio.InexactFloat64(), audioRatio.InexactFloat64(), audioCompletionRatio.InexactFloat64(), modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
-	if tieredResult != nil {
+	if tieredOk {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
@@ -349,7 +349,7 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		cacheCreationTokens5m, cacheCreationRatio5m,
 		cacheCreationTokens1h, cacheCreationRatio1h,
 		modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
-	if tieredResult != nil {
+	if tieredOk {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
@@ -471,7 +471,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 	other := GenerateAudioOtherInfo(ctx, relayInfo, usage, modelRatio, groupRatio,
 		completionRatio.InexactFloat64(), audioRatio.InexactFloat64(), audioCompletionRatio.InexactFloat64(), modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
-	if tieredResult != nil {
+	if tieredOk {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{

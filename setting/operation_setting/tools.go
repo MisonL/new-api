@@ -1,10 +1,13 @@
 package operation_setting
 
 import (
+	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync/atomic"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
 )
 
@@ -71,6 +74,26 @@ type toolPriceIndex struct {
 }
 
 var currentIndex atomic.Pointer[toolPriceIndex]
+
+func ValidateToolPriceJSON(raw string) error {
+	priceMap := make(map[string]float64)
+	if err := common.UnmarshalJsonStr(raw, &priceMap); err != nil {
+		return fmt.Errorf("工具定价配置格式无效: %w", err)
+	}
+	for key, price := range priceMap {
+		trimmedKey := strings.TrimSpace(key)
+		if trimmedKey == "" {
+			return fmt.Errorf("工具定价配置包含空 key")
+		}
+		if math.IsNaN(price) || math.IsInf(price, 0) {
+			return fmt.Errorf("工具 %s 的价格不是有限数字", trimmedKey)
+		}
+		if price < 0 {
+			return fmt.Errorf("工具 %s 的价格不能为负数", trimmedKey)
+		}
+	}
+	return nil
+}
 
 // RebuildToolPriceIndex rebuilds the lookup index from the current config.
 // Called on init and after config updates. Not on the billing hot path.

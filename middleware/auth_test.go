@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
@@ -33,6 +34,10 @@ type authMiddlewareInfoResponse struct {
 
 func setupAuthMiddlewareTestDB(t *testing.T) {
 	t.Helper()
+
+	if err := i18n.Init(); err != nil {
+		t.Fatalf("failed to initialize i18n: %v", err)
+	}
 
 	oldDB := model.DB
 	oldLogDB := model.LOG_DB
@@ -214,7 +219,8 @@ func TestUserAuthRejectsDisabledSessionImmediately(t *testing.T) {
 	if response.Success {
 		t.Fatalf("expected disabled session request to fail")
 	}
-	if response.Message != "用户已被封禁" {
+	expected := i18n.Translate(i18n.DefaultLang, i18n.MsgAuthUserBanned)
+	if response.Message != expected {
 		t.Fatalf("unexpected error message: %s", response.Message)
 	}
 }
@@ -239,7 +245,8 @@ func TestAdminAuthRejectsDowngradedSessionImmediately(t *testing.T) {
 	if response.Success {
 		t.Fatalf("expected downgraded admin request to fail")
 	}
-	if response.Message != "无权进行此操作，权限不足" {
+	expected := i18n.Translate(i18n.DefaultLang, i18n.MsgAuthInsufficientPrivilege)
+	if response.Message != expected {
 		t.Fatalf("unexpected error message: %s", response.Message)
 	}
 }

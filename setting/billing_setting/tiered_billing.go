@@ -2,7 +2,9 @@ package billing_setting
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/setting/config"
 )
@@ -42,6 +44,37 @@ func GetBillingMode(model string) string {
 func GetBillingExpr(model string) (string, bool) {
 	expr, ok := billingSetting.BillingExpr[model]
 	return expr, ok
+}
+
+func ValidateBillingModeJSON(raw string) error {
+	modeMap := make(map[string]string)
+	if err := common.UnmarshalJsonStr(raw, &modeMap); err != nil {
+		return fmt.Errorf("billing mode 配置格式无效: %w", err)
+	}
+	for modelName, mode := range modeMap {
+		switch mode {
+		case BillingModeRatio, BillingModeTieredExpr:
+		default:
+			return fmt.Errorf("模型 %s 的 billing_mode 无效: %s", modelName, mode)
+		}
+	}
+	return nil
+}
+
+func ValidateBillingExprJSON(raw string) error {
+	exprMap := make(map[string]string)
+	if err := common.UnmarshalJsonStr(raw, &exprMap); err != nil {
+		return fmt.Errorf("billing expr 配置格式无效: %w", err)
+	}
+	for modelName, exprStr := range exprMap {
+		if strings.TrimSpace(exprStr) == "" {
+			return fmt.Errorf("模型 %s 的 billing_expr 不能为空", modelName)
+		}
+		if err := smokeTestExpr(exprStr); err != nil {
+			return fmt.Errorf("模型 %s 的 billing_expr 无效: %w", modelName, err)
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
