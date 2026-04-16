@@ -22,6 +22,7 @@ tiktoken_cache
 web/bun.lock
 plans
 .claude
+backups/
 
 electron/node_modules
 electron/dist

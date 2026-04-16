@@ -155,3 +155,38 @@
 - 阶梯计费与工具定价
 - 请求内容日志
 - Dashboard 与 Web UI 增强
+
+### 13. 正式 Docker 服务必须保持同一 Compose 分组
+
+正式环境中的 `new-api`、数据库、Redis 等关联容器，必须保持在同一个 Docker Compose project 分组下，避免在 Docker Desktop 或其他管理界面中拆成独立条目。
+
+要求如下：
+
+- `new-api` 正式容器必须带有与同组基础设施一致的 Compose 标签
+- 至少要保持：
+  - `com.docker.compose.project`
+  - `com.docker.compose.service`
+  - `com.docker.compose.project.working_dir`
+  - `com.docker.compose.project.config_files`
+- 如果因宿主机路径兼容问题临时改用 `docker run` 替代 `docker compose up`，也必须补齐上述标签，确保容器仍归属同一项目组
+- 升级后必须检查 Docker Desktop 中的分组展示是否正确，不能出现 `new-api` 单独游离在 `postgres`、`redis` 之外
+
+### 14. Docker 宿主机路径必须使用显式变量
+
+为兼容 macOS `/Volumes`、Windows、Linux、WSL，Compose 中涉及宿主机目录的绑定挂载，不要依赖相对路径的隐式解析结果。
+
+统一要求：
+
+- 数据目录使用 `${NEW_API_DATA_DIR:-./data}`
+- 日志目录使用 `${NEW_API_LOG_DIR:-./logs}`
+- Compose 中优先使用 `type: bind` 长写法
+
+原因：
+
+- 某些环境下，Compose 在解析 `./data` 这类相对路径时可能错误改写大小写或前缀
+- 在 macOS 上，这会把 `/Volumes/...` 错误变成 `/volumes/...`，从而触发 Docker Desktop 文件共享报错
+
+部署规则：
+
+- macOS 正式环境必须显式设置 `NEW_API_DATA_DIR`、`NEW_API_LOG_DIR` 为真实绝对路径
+- Windows / Linux / WSL 也建议显式设置，避免依赖当前工作目录

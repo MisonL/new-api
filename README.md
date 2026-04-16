@@ -45,6 +45,20 @@ http://localhost:3000
 
 如果你需要持久化数据或保留现有配置，请在启动前先检查并挂载数据目录、数据库连接和环境变量，不要直接覆盖生产实例。
 
+如需显式指定宿主机绑定目录，可设置：
+
+```bash
+NEW_API_DATA_DIR=./data
+NEW_API_LOG_DIR=./logs
+```
+
+跨平台建议：
+
+- macOS：使用绝对路径，例如 `/Volumes/Work/code/new-api/data`
+- Linux：可使用相对路径，或使用绝对路径如 `/srv/new-api/data`
+- Windows：建议使用 Docker Compose 可识别的绝对路径
+- WSL：建议使用 Linux 路径，如 `/home/<user>/new-api/data` 或 `/mnt/d/...`
+
 ## 开发命令
 
 ```bash

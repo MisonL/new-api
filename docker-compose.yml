@@ -21,8 +21,12 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./data:/data
-      - ./logs:/app/logs
+      - type: bind
+        source: ${NEW_API_DATA_DIR:-./data}
+        target: /data
+      - type: bind
+        source: ${NEW_API_LOG_DIR:-./logs}
+        target: /app/logs
     environment:
       - SESSION_SECRET=${SESSION_SECRET}
       - CRYPTO_SECRET=${CRYPTO_SECRET}
