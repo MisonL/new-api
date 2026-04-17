@@ -234,3 +234,20 @@
 
 - macOS 正式环境必须显式设置 `NEW_API_DATA_DIR`、`NEW_API_LOG_DIR` 为真实绝对路径
 - Windows / Linux / WSL 也建议显式设置，避免依赖当前工作目录
+
+### 18. 桌面端 sidecar 必须与仓库环境隔离
+
+Tauri 桌面端启动 `new-api` sidecar 时，必须显式隔离仓库根目录和宿主环境配置。
+
+要求如下：
+
+- sidecar 必须设置 `NEW_API_SKIP_DOTENV=true`，禁止读取仓库根 `.env`
+- sidecar 必须设置独立工作目录为桌面应用数据目录，而不是仓库根目录
+- 桌面本地数据必须默认走独立 SQLite：
+  - `SQL_DSN=local`
+  - `SQLITE_PATH=<应用数据目录>/data/new-api.db`
+  - `LOG_SQL_DSN=`
+  - `REDIS_CONN_STRING=`
+- 桌面端必须注入稳定的 `SESSION_SECRET` 和 `CRYPTO_SECRET`
+- 桌面端不得继承正式 Docker、开发环境或仓库 `.env` 中的数据库、Redis、端口等配置
+- 本地直接运行 `target/release/new-api-tauri-desktop` 前，必须确保 sidecar 已同步到同一 `target/release` 目录，避免“桌面壳是新版本、sidecar 仍是旧版本”的假象

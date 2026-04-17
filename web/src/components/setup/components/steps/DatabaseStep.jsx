@@ -19,43 +19,43 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Banner } from '@douyinfe/semi-ui';
+import { getDesktopRuntime } from '../../../../helpers';
 
 /**
  * 数据库检查步骤组件
  * 显示当前数据库类型和相关警告信息
  */
 const DatabaseStep = ({ setupStatus, renderNavigationButtons, t }) => {
-  // 检测是否在 Electron 环境中运行
-  const isElectron =
-    typeof window !== 'undefined' && window.electron?.isElectron;
+  const desktopRuntime = getDesktopRuntime();
+  const isDesktopApp = desktopRuntime.isDesktopApp;
 
   return (
     <>
       {/* 数据库警告 */}
       {setupStatus.database_type === 'sqlite' && (
         <Banner
-          type={isElectron ? 'info' : 'warning'}
+          type={isDesktopApp ? 'info' : 'warning'}
           closeIcon={null}
-          title={isElectron ? t('本地数据存储') : t('数据库警告')}
+          title={isDesktopApp ? t('本地数据存储') : t('数据库警告')}
           description={
-            isElectron ? (
+            isDesktopApp ? (
               <div>
                 <p>
                   {t(
                     '您的数据将安全地存储在本地计算机上。所有配置、用户信息和使用记录都会自动保存，关闭应用后不会丢失。',
                   )}
                 </p>
-                {window.electron?.dataDir && (
+                {desktopRuntime.dataDir && (
                   <p className='mt-2 text-sm opacity-80'>
                     <strong>{t('数据存储位置：')}</strong>
                     <br />
                     <code className='bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded'>
-                      {window.electron.dataDir}
+                      {desktopRuntime.dataDir}
                     </code>
                   </p>
                 )}
                 <p className='mt-2 text-sm opacity-70'>
-                  💡 {t('提示：如需备份数据，只需复制上述目录即可')}
+                  {t('提示：如需备份数据，只需复制上述目录即可')}
                 </p>
               </div>
             ) : (

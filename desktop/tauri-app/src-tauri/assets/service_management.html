@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>New API Service Management</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f5f7f8;
+        --panel: rgba(255, 255, 255, 0.94);
+        --panel-border: rgba(28, 31, 35, 0.08);
+        --text: #18222d;
+        --muted: #5b6b7f;
+        --accent: #0f766e;
+        --accent-soft: rgba(15, 118, 110, 0.1);
+        --danger: #b42318;
+        --danger-soft: rgba(180, 35, 24, 0.1);
+        --warning: #b54708;
+        --warning-soft: rgba(181, 71, 8, 0.1);
+        --shadow: 0 18px 45px rgba(18, 38, 63, 0.08);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f1418;
+          --panel: rgba(20, 28, 34, 0.94);
+          --panel-border: rgba(255, 255, 255, 0.08);
+          --text: #eef4f8;
+          --muted: #9ba9b8;
+          --accent-soft: rgba(45, 212, 191, 0.14);
+          --danger-soft: rgba(248, 113, 113, 0.14);
+          --warning-soft: rgba(251, 191, 36, 0.16);
+          --shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 34%),
+          radial-gradient(circle at right center, rgba(14, 165, 233, 0.06), transparent 28%),
+          var(--bg);
+        color: var(--text);
+        font:
+          14px/1.5 "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      .page {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 28px;
+      }
+
+      .hero {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        align-items: flex-start;
+        margin-bottom: 18px;
+      }
+
+      .hero h1 {
+        margin: 0 0 6px;
+        font-size: 28px;
+        line-height: 1.2;
+      }
+
+      .hero p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 18px;
+        box-shadow: var(--shadow);
+        padding: 18px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 16px;
+      }
+
+      .stack {
+        display: grid;
+        gap: 16px;
+      }
+
+      .section-title {
+        margin: 0 0 14px;
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      .meta {
+        display: grid;
+        gap: 12px;
+      }
+
+      .meta-item {
+        border: 1px solid var(--panel-border);
+        border-radius: 14px;
+        padding: 12px 14px;
+        background: rgba(127, 127, 127, 0.03);
+      }
+
+      .meta-item label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 12px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .meta-item strong,
+      .meta-item code {
+        font-size: 14px;
+        word-break: break-all;
+      }
+
+      .banner {
+        margin-bottom: 16px;
+        border-radius: 14px;
+        padding: 14px 16px;
+        border: 1px solid transparent;
+      }
+
+      .banner h3 {
+        margin: 0 0 6px;
+        font-size: 15px;
+      }
+
+      .banner p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .banner.warning {
+        background: var(--warning-soft);
+        border-color: rgba(181, 71, 8, 0.2);
+      }
+
+      .banner.error {
+        background: var(--danger-soft);
+        border-color: rgba(180, 35, 24, 0.22);
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        align-items: end;
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+      }
+
+      .field label {
+        font-weight: 600;
+      }
+
+      .field small {
+        color: var(--muted);
+      }
+
+      input[type="number"] {
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid var(--panel-border);
+        background: rgba(127, 127, 127, 0.02);
+        padding: 12px 14px;
+        color: inherit;
+        font: inherit;
+      }
+
+      button {
+        border: none;
+        border-radius: 12px;
+        padding: 11px 16px;
+        font: inherit;
+        cursor: pointer;
+        transition:
+          transform 0.16s ease,
+          opacity 0.16s ease,
+          background 0.16s ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .btn-secondary {
+        background: var(--accent-soft);
+        color: var(--text);
+      }
+
+      .btn-ghost {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--panel-border);
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 12px;
+        border-radius: 999px;
+        font-weight: 600;
+        background: rgba(127, 127, 127, 0.09);
+      }
+
+      .status-pill.running {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .status-pill.error {
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+
+      .status-pill.starting {
+        background: var(--warning-soft);
+        color: var(--warning);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 12px 10px;
+        border-bottom: 1px solid var(--panel-border);
+        vertical-align: top;
+      }
+
+      th {
+        font-size: 12px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      td code {
+        word-break: break-all;
+      }
+
+      .empty {
+        padding: 20px 0 4px;
+        color: var(--muted);
+      }
+
+      .footer-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 18px;
+      }
+
+      .hint {
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 860px) {
+        .page {
+          padding: 18px;
+        }
+
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          flex-direction: column;
+        }
+
+        .form-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="hero">
+        <div>
+          <h1>服务管理</h1>
+          <p>处理本地端口冲突，查看占用进程，修改桌面端监听端口并重试启动。</p>
+        </div>
+        <div class="actions">
+          <button class="btn-ghost" id="refreshButton">刷新状态</button>
+          <button class="btn-secondary" id="openDataDirButton">打开数据目录</button>
+          <button class="btn-secondary" id="openLogDirButton">打开日志目录</button>
+        </div>
+      </div>
+
+      <div id="diagnosisBanner"></div>
+
+      <div class="grid">
+        <div class="stack">
+          <section class="panel">
+            <h2 class="section-title">运行状态</h2>
+            <div class="meta">
+              <div class="meta-item">
+                <label>桌面状态</label>
+                <div id="startupStatus" class="status-pill">未知</div>
+              </div>
+              <div class="meta-item">
+                <label>应用数据目录</label>
+                <code id="appDataDir">-</code>
+              </div>
+              <div class="meta-item">
+                <label>运行时配置文件</label>
+                <code id="configPath">-</code>
+              </div>
+              <div class="meta-item">
+                <label>当前生效端口</label>
+                <strong id="effectivePort">-</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2 class="section-title">端口配置</h2>
+            <div class="form-row">
+              <div class="field">
+                <label for="portInput">桌面本地监听端口</label>
+                <input id="portInput" type="number" min="1" max="65535" step="1" />
+                <small>
+                  修改后不会静默生效。请保存配置，再点击“重试启动”。
+                </small>
+              </div>
+              <button class="btn-primary" id="saveButton">保存端口</button>
+            </div>
+            <div class="footer-actions">
+              <button class="btn-primary" id="retryButton">重试启动</button>
+            </div>
+            <div class="hint" id="saveHint"></div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <h2 class="section-title">端口占用进程</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>PID</th>
+                <th>进程</th>
+                <th>监听地址</th>
+                <th>命令</th>
+              </tr>
+            </thead>
+            <tbody id="processTableBody"></tbody>
+          </table>
+          <div class="empty" id="processEmpty">当前端口未检测到监听进程。</div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const banner = document.getElementById('diagnosisBanner');
+      const startupStatus = document.getElementById('startupStatus');
+      const appDataDir = document.getElementById('appDataDir');
+      const configPath = document.getElementById('configPath');
+      const effectivePort = document.getElementById('effectivePort');
+      const portInput = document.getElementById('portInput');
+      const processTableBody = document.getElementById('processTableBody');
+      const processEmpty = document.getElementById('processEmpty');
+      const saveHint = document.getElementById('saveHint');
+      const refreshButton = document.getElementById('refreshButton');
+      const saveButton = document.getElementById('saveButton');
+      const retryButton = document.getElementById('retryButton');
+      const openDataDirButton = document.getElementById('openDataDirButton');
+      const openLogDirButton = document.getElementById('openLogDirButton');
+
+      let currentState = null;
+      let pollTimer = null;
+
+      async function request(path, options = {}) {
+        const response = await fetch(path, {
+          headers: {
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+          },
+          ...options,
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `request failed: ${response.status}`);
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          return response.json();
+        }
+
+        return response.text();
+      }
+
+      function renderBanner(state) {
+        const diagnosis = state.startupDiagnosis;
+        if (!diagnosis) {
+          banner.innerHTML = '';
+          return;
+        }
+
+        const klass = state.startupStatus === 'error' ? 'error' : 'warning';
+        banner.innerHTML = `
+          <div class="banner ${klass}">
+            <h3>${escapeHtml(diagnosis.title)}</h3>
+            <p>${escapeHtml(diagnosis.summary)}</p>
+            <p style="margin-top: 8px;">${escapeHtml(diagnosis.detail)}</p>
+          </div>
+        `;
+      }
+
+      function renderStatus(state) {
+        startupStatus.className = `status-pill ${state.startupStatus}`;
+        startupStatus.textContent = {
+          running: '运行中',
+          starting: '启动中',
+          error: '启动失败',
+          stopped: '未启动',
+        }[state.startupStatus] || state.startupStatus;
+
+        appDataDir.textContent = state.appDataDir || '-';
+        configPath.textContent = state.configPath || '-';
+        effectivePort.textContent = String(state.port || '-');
+
+        if (document.activeElement !== portInput) {
+          portInput.value = String(state.port || '');
+        }
+
+        retryButton.disabled = state.startupStatus === 'starting';
+      }
+
+      function renderProcesses(state) {
+        processTableBody.innerHTML = '';
+        const processes = Array.isArray(state.portProcesses) ? state.portProcesses : [];
+        processEmpty.style.display = processes.length > 0 ? 'none' : 'block';
+
+        for (const process of processes) {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${escapeHtml(String(process.pid || '-'))}</td>
+            <td>${escapeHtml(process.name || '-')}</td>
+            <td><code>${escapeHtml(process.endpoint || '-')}</code></td>
+            <td><code>${escapeHtml(process.command || '-')}</code></td>
+          `;
+          processTableBody.appendChild(row);
+        }
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      async function refreshState() {
+        try {
+          const state = await request('/api/state');
+          currentState = state;
+          renderBanner(state);
+          renderStatus(state);
+          renderProcesses(state);
+          if (state.startupStatus === 'running' && window.__TAURI_INTERNALS__) {
+            window.close();
+          }
+        } catch (error) {
+          banner.innerHTML = `
+            <div class="banner error">
+              <h3>服务管理页面无法刷新</h3>
+              <p>${escapeHtml(error.message || String(error))}</p>
+            </div>
+          `;
+        }
+      }
+
+      async function savePort() {
+        saveHint.textContent = '';
+        const port = Number(portInput.value);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+          saveHint.textContent = '请输入 1 到 65535 之间的有效端口。';
+          return;
+        }
+
+        try {
+          saveButton.disabled = true;
+          await request('/api/config', {
+            method: 'POST',
+            body: JSON.stringify({ port }),
+          });
+          saveHint.textContent = '端口配置已保存。请点击“重试启动”。';
+          await refreshState();
+        } catch (error) {
+          saveHint.textContent = error.message || String(error);
+        } finally {
+          saveButton.disabled = false;
+        }
+      }
+
+      async function retryStartup() {
+        saveHint.textContent = '';
+        try {
+          retryButton.disabled = true;
+          const result = await request('/api/retry', {
+            method: 'POST',
+            body: JSON.stringify({}),
+          });
+          saveHint.textContent = result.message || '已发起重试。';
+          await refreshState();
+        } catch (error) {
+          saveHint.textContent = error.message || String(error);
+        } finally {
+          retryButton.disabled = false;
+        }
+      }
+
+      async function postSimple(path) {
+        try {
+          await request(path, { method: 'POST', body: JSON.stringify({}) });
+        } catch (error) {
+          saveHint.textContent = error.message || String(error);
+        }
+      }
+
+      refreshButton.addEventListener('click', refreshState);
+      saveButton.addEventListener('click', savePort);
+      retryButton.addEventListener('click', retryStartup);
+      openDataDirButton.addEventListener('click', () => postSimple('/api/open-data-dir'));
+      openLogDirButton.addEventListener('click', () => postSimple('/api/open-log-dir'));
+
+      refreshState();
+      pollTimer = setInterval(refreshState, 2000);
+      window.addEventListener('beforeunload', () => {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+        }
+      });
+    </script>
+  </body>
+</html>

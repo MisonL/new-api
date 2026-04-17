@@ -1,0 +1,24 @@
+use std::time::Duration;
+
+pub const APP_NAME: &str = "New API";
+pub const WINDOW_LABEL: &str = "main";
+pub const WINDOW_TITLE: &str = APP_NAME;
+pub const SERVICE_MANAGEMENT_WINDOW_LABEL: &str = "service-management";
+pub const SERVICE_MANAGEMENT_WINDOW_TITLE: &str = "New API Service Management";
+pub const SERVICE_MANAGEMENT_PROTOCOL: &str = "newapi-service";
+pub const SERVICE_MANAGEMENT_URL: &str = "newapi-service://localhost/index.html";
+pub const TRAY_ID: &str = "main-tray";
+pub const TRAY_MENU_SHOW_ID: &str = "show-main-window";
+pub const TRAY_MENU_SERVICE_MANAGEMENT_ID: &str = "service-management";
+pub const TRAY_MENU_OPEN_DATA_DIR_ID: &str = "open-data-dir";
+pub const TRAY_MENU_OPEN_LOG_DIR_ID: &str = "open-log-dir";
+pub const TRAY_MENU_QUIT_ID: &str = "quit-app";
+pub const DEFAULT_LOCAL_SERVER_HOST: &str = "127.0.0.1";
+pub const DEFAULT_LOCAL_SERVER_PORT: u16 = 3000;
+pub const LOCAL_SERVER_STATUS_PATH: &str = "/api/status";
+pub const SQLITE_FILE_NAME: &str = "new-api.db";
+pub const DESKTOP_SECRET_FILE_NAME: &str = "desktop-secrets.json";
+pub const DESKTOP_RUNTIME_CONFIG_FILE_NAME: &str = "desktop-runtime.json";
+pub const STARTUP_RETRIES: u32 = 30;
+pub const STARTUP_DELAY: Duration = Duration::from_secs(1);
+pub const MAX_ERROR_LOG_LINES: usize = 200;

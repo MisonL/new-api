@@ -242,10 +242,13 @@ func InjectGoogleAnalytics() {
 func InitResources() error {
 	// Initialize resources here if needed
 	// This is a placeholder function for future resource initialization
-	err := godotenv.Load(".env")
-	if err != nil {
-		if common.DebugEnabled {
-			common.SysLog("No .env file found, using default environment variables. If needed, please create a .env file and set the relevant variables.")
+	var err error
+	if os.Getenv("NEW_API_SKIP_DOTENV") != "true" {
+		err = godotenv.Load(".env")
+		if err != nil {
+			if common.DebugEnabled {
+				common.SysLog("No .env file found, using default environment variables. If needed, please create a .env file and set the relevant variables.")
+			}
 		}
 	}
 

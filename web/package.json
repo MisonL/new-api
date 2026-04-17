@@ -43,6 +43,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:desktop-runtime": "node --test tests/desktopRuntime.test.mjs",
+    "test:setup-validation": "node --test tests/setupValidation.test.mjs",
+    "test:node": "node --test tests/*.test.mjs",
     "lint": "prettier . --check",
     "lint:fix": "prettier . --write",
     "eslint": "bunx eslint \"**/*.{js,jsx}\" --cache",
