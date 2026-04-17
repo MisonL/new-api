@@ -72,6 +72,7 @@ sudo apt install -y \
 - 桌面运行时启动 sidecar 前会预检当前配置端口是否已被占用；如已占用会直接报错，不会静默连接到已有服务或自动切换随机端口
 - sidecar 启动后会等待 `/api/status` readiness 成功，再创建主窗口，避免端口已打开但服务尚未就绪时过早加载页面
 - 如果启动时检测到本地端口已被占用，桌面端会打开原生“Service Management”窗口，列出占用进程，允许修改本地端口后重试启动；不会静默切换到其他端口
+- 如果 `desktop-runtime.json` 或 `NEW_API_DESKTOP_PORT` 无效，桌面端也会进入原生“Service Management”窗口，并显式展示配置错误；不会静默回退到默认端口
 - 当前已实现：
   - sidecar 启动
   - `/api/status` readiness 等待

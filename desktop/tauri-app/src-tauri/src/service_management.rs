@@ -26,7 +26,8 @@ struct ServiceManagementState {
     startup_status: String,
     app_data_dir: String,
     config_path: String,
-    port: u16,
+    port: Option<u16>,
+    config_error: Option<String>,
     startup_diagnosis: Option<ErrorDiagnosis>,
     port_processes: Vec<PortProcessInfo>,
 }
@@ -107,10 +108,10 @@ fn build_service_management_state<R: Runtime>(app: &AppHandle<R>) -> ServiceMana
         .app_data_dir()
         .map(|path| path.join(DESKTOP_RUNTIME_CONFIG_FILE_NAME))
         .unwrap_or_else(|_| PathBuf::from(DESKTOP_RUNTIME_CONFIG_FILE_NAME));
-    let runtime_config =
-        load_or_create_desktop_runtime_config(&config_path).unwrap_or(DesktopRuntimeConfig {
-            port: crate::constants::DEFAULT_LOCAL_SERVER_PORT,
-        });
+    let (runtime_config, config_error) = match load_or_create_desktop_runtime_config(&config_path) {
+        Ok(config) => (Some(config), None),
+        Err(err) => (None, Some(err)),
+    };
     let startup_error = snapshot_startup_error(app);
     let startup_diagnosis = startup_error
         .as_ref()
@@ -129,9 +130,12 @@ fn build_service_management_state<R: Runtime>(app: &AppHandle<R>) -> ServiceMana
         startup_status,
         app_data_dir,
         config_path: config_path.to_string_lossy().to_string(),
-        port: runtime_config.port,
+        port: runtime_config.as_ref().map(|config| config.port),
+        config_error,
         startup_diagnosis,
-        port_processes: list_listening_processes_on_port(runtime_config.port),
+        port_processes: runtime_config
+            .map(|config| list_listening_processes_on_port(config.port))
+            .unwrap_or_default(),
     }
 }
 

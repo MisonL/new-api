@@ -89,6 +89,22 @@ fn load_or_create_desktop_runtime_config_reads_existing_custom_port() {
 }
 
 #[test]
+fn load_or_create_desktop_runtime_config_rejects_invalid_file() {
+    let test_dir = unique_test_dir("desktop-runtime-invalid");
+    let config_file = test_dir.join("desktop-runtime.json");
+    fs::create_dir_all(&test_dir).expect("test directory must be created");
+    fs::write(&config_file, r#"{"version":1,"port":0}"#)
+        .expect("desktop runtime config must be written");
+
+    let error = load_or_create_desktop_runtime_config(&config_file)
+        .expect_err("invalid desktop runtime config must fail");
+
+    assert!(error.contains("desktop runtime config is invalid"));
+
+    cleanup_test_dir(&test_dir);
+}
+
+#[test]
 fn save_desktop_runtime_config_persists_updated_port() {
     let test_dir = unique_test_dir("desktop-runtime-save");
     let config_file = test_dir.join("desktop-runtime.json");
@@ -116,6 +132,22 @@ fn load_or_create_desktop_runtime_config_uses_env_port_when_config_missing() {
 
     assert_eq!(config.port, 13000);
     assert!(config_file.exists());
+
+    std::env::remove_var("NEW_API_DESKTOP_PORT");
+    cleanup_test_dir(&test_dir);
+}
+
+#[test]
+fn load_or_create_desktop_runtime_config_rejects_invalid_env_port() {
+    let _guard = desktop_port_env_lock();
+    let test_dir = unique_test_dir("desktop-runtime-invalid-env");
+    let config_file = test_dir.join("desktop-runtime.json");
+    std::env::set_var("NEW_API_DESKTOP_PORT", "0");
+
+    let error = load_or_create_desktop_runtime_config(&config_file)
+        .expect_err("invalid env port must fail");
+
+    assert!(error.contains("invalid NEW_API_DESKTOP_PORT"));
 
     std::env::remove_var("NEW_API_DESKTOP_PORT");
     cleanup_test_dir(&test_dir);
@@ -188,6 +220,17 @@ fn analyze_startup_error_identifies_unexpected_http_service_on_port_3000() {
 }
 
 #[test]
+fn analyze_startup_error_identifies_invalid_runtime_config() {
+    let diagnosis = analyze_startup_error(
+        "failed to bootstrap desktop runtime: failed to parse desktop runtime config: expected value at line 1 column 1",
+        &[],
+    );
+
+    assert_eq!(diagnosis.title, "Desktop runtime config is invalid");
+    assert!(diagnosis.summary.contains("runtime configuration"));
+}
+
+#[test]
 fn analyze_startup_error_identifies_preflight_port_conflict() {
     let detail = "port 127.0.0.1:3000 is already in use before starting desktop sidecar";
     let diagnosis = analyze_startup_error(detail, &[]);
@@ -227,9 +270,16 @@ fn service_management_recoverable_error_only_matches_port_recovery_cases() {
         "timed out waiting for ready local server at 127.0.0.1:3000/api/status; last probe observation: probe error: connection refused",
         &[],
     );
+    let invalid_runtime_config = analyze_startup_error(
+        "failed to bootstrap desktop runtime: desktop runtime config is invalid: /tmp/desktop-runtime.json",
+        &[],
+    );
 
     assert!(is_service_management_recoverable_error(&occupied_port));
     assert!(is_service_management_recoverable_error(&unexpected_service));
+    assert!(is_service_management_recoverable_error(
+        &invalid_runtime_config
+    ));
     assert!(!is_service_management_recoverable_error(&generic_failure));
 }
 

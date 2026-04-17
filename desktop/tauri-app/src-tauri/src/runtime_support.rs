@@ -140,6 +140,19 @@ pub fn analyze_startup_error(detail: &str, log_lines: &[String]) -> ErrorDiagnos
         };
     }
 
+    if joined_logs.contains("failed to parse desktop runtime config")
+        || joined_logs.contains("desktop runtime config is invalid")
+        || joined_logs.contains("invalid NEW_API_DESKTOP_PORT")
+    {
+        return ErrorDiagnosis {
+            title: "Desktop runtime config is invalid".to_string(),
+            summary: "The desktop local runtime configuration could not be loaded."
+                .to_string(),
+            detail: "Open Service Management, choose a valid local port, save the configuration and retry startup."
+                .to_string(),
+        };
+    }
+
     if joined_logs.contains("database is locked") || joined_logs.contains("unable to open database")
     {
         return ErrorDiagnosis {
@@ -209,7 +222,9 @@ pub fn analyze_startup_error(detail: &str, log_lines: &[String]) -> ErrorDiagnos
 }
 
 pub fn is_service_management_recoverable_error(diagnosis: &ErrorDiagnosis) -> bool {
-    diagnosis.title.starts_with("Port ") || diagnosis.title.starts_with("Unexpected service")
+    diagnosis.title.starts_with("Port ")
+        || diagnosis.title.starts_with("Unexpected service")
+        || diagnosis.title == "Desktop runtime config is invalid"
 }
 
 pub fn resolve_single_instance_focus_target(

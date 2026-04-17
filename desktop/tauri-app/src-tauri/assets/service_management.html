@@ -437,20 +437,34 @@
       }
 
       function renderBanner(state) {
+        const sections = [];
+        if (state.configError) {
+          sections.push(`
+            <div class="banner warning">
+              <h3>运行时配置无效</h3>
+              <p>当前桌面运行时配置无法加载，必须先保存有效端口后才能继续启动。</p>
+              <p style="margin-top: 8px;"><code>${escapeHtml(state.configError)}</code></p>
+            </div>
+          `);
+        }
+
         const diagnosis = state.startupDiagnosis;
-        if (!diagnosis) {
+        if (diagnosis) {
+          const klass = state.startupStatus === 'error' ? 'error' : 'warning';
+          sections.push(`
+            <div class="banner ${klass}">
+              <h3>${escapeHtml(diagnosis.title)}</h3>
+              <p>${escapeHtml(diagnosis.summary)}</p>
+              <p style="margin-top: 8px;">${escapeHtml(diagnosis.detail)}</p>
+            </div>
+          `);
+        }
+
+        if (sections.length === 0) {
           banner.innerHTML = '';
           return;
         }
-
-        const klass = state.startupStatus === 'error' ? 'error' : 'warning';
-        banner.innerHTML = `
-          <div class="banner ${klass}">
-            <h3>${escapeHtml(diagnosis.title)}</h3>
-            <p>${escapeHtml(diagnosis.summary)}</p>
-            <p style="margin-top: 8px;">${escapeHtml(diagnosis.detail)}</p>
-          </div>
-        `;
+        banner.innerHTML = sections.join('');
       }
 
       function renderStatus(state) {
@@ -464,19 +478,28 @@
 
         appDataDir.textContent = state.appDataDir || '-';
         configPath.textContent = state.configPath || '-';
-        effectivePort.textContent = String(state.port || '-');
+        effectivePort.textContent = state.port ? String(state.port) : '-';
 
         if (document.activeElement !== portInput) {
-          portInput.value = String(state.port || '');
+          portInput.value = state.port ? String(state.port) : '';
         }
 
-        retryButton.disabled = state.startupStatus === 'starting';
+        retryButton.disabled = state.startupStatus === 'starting' || Boolean(state.configError);
+
+        if (state.configError) {
+          saveHint.textContent = '当前配置无效。请先输入有效端口并保存，再执行重试启动。';
+        } else if (!saveHint.textContent.includes('已保存')) {
+          saveHint.textContent = '';
+        }
       }
 
       function renderProcesses(state) {
         processTableBody.innerHTML = '';
         const processes = Array.isArray(state.portProcesses) ? state.portProcesses : [];
         processEmpty.style.display = processes.length > 0 ? 'none' : 'block';
+        processEmpty.textContent = state.configError
+          ? '当前配置无有效端口，暂时无法检查监听进程。'
+          : '当前端口未检测到监听进程。';
 
         for (const process of processes) {
           const row = document.createElement('tr');
