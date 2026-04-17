@@ -20,6 +20,10 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Banner, Form } from '@douyinfe/semi-ui';
 import { IconUser, IconLock } from '@douyinfe/semi-icons';
+import {
+  ADMIN_PASSWORD_MIN_LENGTH,
+  validateAdminSetupValues,
+} from '../../setupValidation';
 
 /**
  * 管理员账号设置步骤组件
@@ -33,6 +37,24 @@ const AdminStep = ({
   renderNavigationButtons,
   t,
 }) => {
+  const validateUsername = (value) => {
+    const validationError = validateAdminSetupValues({
+      username: value,
+      password: formData.password,
+      confirmPassword: formData.confirmPassword,
+    });
+
+    if (
+      validationError &&
+      (validationError.key === '请输入管理员用户名' ||
+        validationError.key === '用户名长度不能超过{{max}}个字符')
+    ) {
+      return Promise.reject(t(validationError.key, validationError.params));
+    }
+
+    return Promise.resolve();
+  };
+
   return (
     <>
       {setupStatus.root_init ? (
@@ -56,7 +78,10 @@ const AdminStep = ({
             showClear
             noLabel={false}
             validateStatus='default'
-            rules={[{ required: true, message: t('请输入管理员用户名') }]}
+            rules={[
+              { required: true, message: t('请输入管理员用户名') },
+              { validator: (_, value) => validateUsername(value) },
+            ]}
             initValue={formData.username || ''}
             onChange={(value) => {
               setFormData({ ...formData, username: value });
@@ -74,7 +99,10 @@ const AdminStep = ({
             validateStatus='default'
             rules={[
               { required: true, message: t('请输入管理员密码') },
-              { min: 8, message: t('密码长度至少为8个字符') },
+              {
+                min: ADMIN_PASSWORD_MIN_LENGTH,
+                message: t('密码长度至少为8个字符'),
+              },
             ]}
             initValue={formData.password || ''}
             onChange={(value) => {
