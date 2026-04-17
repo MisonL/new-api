@@ -2,7 +2,7 @@ use std::{
     fs,
     io::{ErrorKind, Read, Write},
     net::{SocketAddr, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -232,7 +232,7 @@ fn resolve_app_data_dir<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<PathBuf
     app.path().app_data_dir()
 }
 
-fn resolve_data_dir(app_data_dir: &PathBuf) -> PathBuf {
+fn resolve_data_dir(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("data")
 }
 
@@ -343,7 +343,7 @@ fn persist_error_log<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     Some(log_path)
 }
 
-fn build_error_log_content<R: Runtime>(app: &AppHandle<R>, log_path: &PathBuf) -> String {
+fn build_error_log_content<R: Runtime>(app: &AppHandle<R>, log_path: &Path) -> String {
     let package_info = app.package_info();
     let log_lines = snapshot_error_logs(app);
     let timestamp = SystemTime::now()
@@ -365,7 +365,7 @@ fn build_error_log_content<R: Runtime>(app: &AppHandle<R>, log_path: &PathBuf) -
     )
 }
 
-fn open_log_file<R: Runtime>(app: &AppHandle<R>, log_path: &PathBuf) {
+fn open_log_file<R: Runtime>(app: &AppHandle<R>, log_path: &Path) {
     #[allow(deprecated)]
     if let Err(err) = app
         .shell()

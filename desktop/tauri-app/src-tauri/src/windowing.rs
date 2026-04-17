@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf, sync::mpsc};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::mpsc,
+};
 
 use tauri::{
     menu::{Menu, MenuItemBuilder},
@@ -231,7 +235,7 @@ fn open_directory<R: Runtime>(app: &AppHandle<R>, path: PathBuf) -> tauri::Resul
         .map_err(|err| std::io::Error::other(err.to_string()).into())
 }
 
-fn build_runtime_script(data_dir: &PathBuf) -> String {
+fn build_runtime_script(data_dir: &Path) -> String {
     let payload = serde_json::json!({
       "isDesktopApp": true,
       "platform": "tauri",
