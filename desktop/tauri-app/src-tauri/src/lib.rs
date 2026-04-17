@@ -15,13 +15,20 @@ pub fn run() {
             service_management::handle_request(ctx, request)
         })
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if app.get_webview_window(constants::WINDOW_LABEL).is_some() {
-                let _ = windowing::show_main_window(app);
-            } else if app
-                .get_webview_window(constants::SERVICE_MANAGEMENT_WINDOW_LABEL)
-                .is_some()
-            {
-                let _ = windowing::open_service_management_window(app);
+            let target = runtime_support::resolve_single_instance_focus_target(
+                app.get_webview_window(constants::WINDOW_LABEL).is_some(),
+                app.get_webview_window(constants::SERVICE_MANAGEMENT_WINDOW_LABEL)
+                    .is_some(),
+            );
+
+            match target {
+                runtime_support::SingleInstanceFocusTarget::MainWindow => {
+                    let _ = windowing::show_main_window(app);
+                }
+                runtime_support::SingleInstanceFocusTarget::ServiceManagementWindow => {
+                    let _ = windowing::open_service_management_window(app);
+                }
+                runtime_support::SingleInstanceFocusTarget::None => {}
             }
         }))
         .plugin(tauri_plugin_shell::init())

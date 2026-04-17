@@ -8,8 +8,8 @@ use std::{
 use new_api_tauri_desktop_lib::runtime_support::{
     analyze_startup_error, is_ready_status_response, is_service_management_recoverable_error,
     load_or_create_desktop_runtime_config, load_or_create_desktop_secrets,
-    probe_readiness_response, save_desktop_runtime_config, DesktopRuntimeConfig,
-    ReadinessProbeResult,
+    probe_readiness_response, resolve_single_instance_focus_target, save_desktop_runtime_config,
+    DesktopRuntimeConfig, ReadinessProbeResult, SingleInstanceFocusTarget,
 };
 
 fn desktop_port_env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -231,6 +231,34 @@ fn service_management_recoverable_error_only_matches_port_recovery_cases() {
     assert!(is_service_management_recoverable_error(&occupied_port));
     assert!(is_service_management_recoverable_error(&unexpected_service));
     assert!(!is_service_management_recoverable_error(&generic_failure));
+}
+
+#[test]
+fn resolve_single_instance_focus_target_prefers_main_window() {
+    assert_eq!(
+        resolve_single_instance_focus_target(true, true),
+        SingleInstanceFocusTarget::MainWindow,
+    );
+    assert_eq!(
+        resolve_single_instance_focus_target(true, false),
+        SingleInstanceFocusTarget::MainWindow,
+    );
+}
+
+#[test]
+fn resolve_single_instance_focus_target_uses_service_management_when_main_missing() {
+    assert_eq!(
+        resolve_single_instance_focus_target(false, true),
+        SingleInstanceFocusTarget::ServiceManagementWindow,
+    );
+}
+
+#[test]
+fn resolve_single_instance_focus_target_noops_without_existing_windows() {
+    assert_eq!(
+        resolve_single_instance_focus_target(false, false),
+        SingleInstanceFocusTarget::None,
+    );
 }
 
 fn unique_test_dir(prefix: &str) -> PathBuf {

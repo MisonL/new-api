@@ -37,6 +37,13 @@ pub enum ReadinessProbeResult {
     NotReady { observation: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SingleInstanceFocusTarget {
+    MainWindow,
+    ServiceManagementWindow,
+    None,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct PersistedDesktopSecrets {
     version: u32,
@@ -203,6 +210,19 @@ pub fn analyze_startup_error(detail: &str, log_lines: &[String]) -> ErrorDiagnos
 
 pub fn is_service_management_recoverable_error(diagnosis: &ErrorDiagnosis) -> bool {
     diagnosis.title.starts_with("Port ") || diagnosis.title.starts_with("Unexpected service")
+}
+
+pub fn resolve_single_instance_focus_target(
+    has_main_window: bool,
+    has_service_management_window: bool,
+) -> SingleInstanceFocusTarget {
+    if has_main_window {
+        SingleInstanceFocusTarget::MainWindow
+    } else if has_service_management_window {
+        SingleInstanceFocusTarget::ServiceManagementWindow
+    } else {
+        SingleInstanceFocusTarget::None
+    }
 }
 
 pub fn probe_readiness_response(response: &str) -> ReadinessProbeResult {
