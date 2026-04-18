@@ -80,6 +80,11 @@ jobs:
           cd desktop/tauri-app
           bun run check:version
 
+      - name: Prepare desktop sidecar
+        run: |
+          cd desktop/tauri-app
+          bun run prepare:sidecar
+
       - name: Install Linux desktop dependencies
         if: matrix.platform == 'linux'
         run: |
