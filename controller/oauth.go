@@ -58,7 +58,12 @@ func HandleOAuth(c *gin.Context) {
 
 	// 1. Validate state (CSRF protection)
 	state := c.Query("state")
-	if state == "" || session.Get("oauth_state") == nil || state != session.Get("oauth_state").(string) {
+	desktopRequest, hasDesktopRequest, err := getDesktopOAuthRequestByState(state)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if state == "" || (!hasDesktopRequest && (session.Get("oauth_state") == nil || state != session.Get("oauth_state").(string))) {
 		c.JSON(http.StatusForbidden, gin.H{
 			"success": false,
 			"message": i18n.T(c, i18n.MsgOAuthStateInvalid),
@@ -68,7 +73,12 @@ func HandleOAuth(c *gin.Context) {
 
 	// 2. Check if user is already logged in (bind flow)
 	username := session.Get("username")
-	if username != nil {
+	if hasDesktopRequest {
+		if desktopRequest.Mode == desktopOAuthModeBind {
+			handleDesktopOAuthBind(c, provider, desktopRequest)
+			return
+		}
+	} else if username != nil {
 		handleOAuthBind(c, provider)
 		return
 	}
@@ -83,6 +93,16 @@ func HandleOAuth(c *gin.Context) {
 	errorCode := c.Query("error")
 	if errorCode != "" {
 		errorDescription := c.Query("error_description")
+		if hasDesktopRequest {
+			message := errorDescription
+			if message == "" {
+				message = errorCode
+			}
+			if err := failDesktopOAuthRequest(state, message); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": errorDescription,
@@ -94,6 +114,12 @@ func HandleOAuth(c *gin.Context) {
 	code := c.Query("code")
 	token, err := provider.ExchangeToken(c.Request.Context(), code, c)
 	if err != nil {
+		if hasDesktopRequest {
+			if storeErr := failDesktopOAuthRequest(state, err.Error()); storeErr != nil {
+				common.ApiError(c, storeErr)
+				return
+			}
+		}
 		handleOAuthError(c, err)
 		return
 	}
@@ -101,6 +127,12 @@ func HandleOAuth(c *gin.Context) {
 	// 6. Get user info
 	oauthUser, err := provider.GetUserInfo(c.Request.Context(), token)
 	if err != nil {
+		if hasDesktopRequest {
+			if storeErr := failDesktopOAuthRequest(state, err.Error()); storeErr != nil {
+				common.ApiError(c, storeErr)
+				return
+			}
+		}
 		handleOAuthError(c, err)
 		return
 	}
@@ -110,6 +142,7 @@ func HandleOAuth(c *gin.Context) {
 		AllowAutoRegister:     true,
 		AllowAutoMergeByEmail: false,
 		InitialRole:           common.RoleCommonUser,
+		AffiliateCode:         desktopRequestAffiliateCode(desktopRequest, hasDesktopRequest),
 	}
 	if genericProvider, ok := provider.(*oauth.GenericOAuthProvider); ok {
 		if config := genericProvider.GetConfig(); config != nil {
@@ -118,17 +151,42 @@ func HandleOAuth(c *gin.Context) {
 	}
 	resolvedUser, err := findOrCreateOAuthUserWithOptions(c, provider, oauthUser, session, options)
 	if err != nil {
+		if hasDesktopRequest {
+			if storeErr := failDesktopOAuthRequest(state, err.Error()); storeErr != nil {
+				common.ApiError(c, storeErr)
+				return
+			}
+		}
 		handleOAuthUserError(c, err)
 		return
 	}
 
 	// 8. Check user status
 	if resolvedUser.User.Status != common.UserStatusEnabled {
+		if hasDesktopRequest {
+			if storeErr := failDesktopOAuthRequest(state, i18n.T(c, i18n.MsgOAuthUserBanned)); storeErr != nil {
+				common.ApiError(c, storeErr)
+				return
+			}
+		}
 		common.ApiErrorI18n(c, i18n.MsgOAuthUserBanned)
 		return
 	}
 	if resolvedUser.BindAfterStatusCheck {
 		if err := bindOAuthIdentityToUser(resolvedUser.User, provider, oauthUser.ProviderUserID); err != nil {
+			if hasDesktopRequest {
+				if storeErr := failDesktopOAuthRequest(state, err.Error()); storeErr != nil {
+					common.ApiError(c, storeErr)
+					return
+				}
+			}
+			common.ApiError(c, err)
+			return
+		}
+	}
+
+	if hasDesktopRequest {
+		if err := completeDesktopOAuthRequest(state, resolvedUser.User.Id); err != nil {
 			common.ApiError(c, err)
 			return
 		}
@@ -136,6 +194,13 @@ func HandleOAuth(c *gin.Context) {
 
 	// 9. Setup login
 	setupLogin(resolvedUser.User, c)
+}
+
+func desktopRequestAffiliateCode(request *desktopOAuthRequest, hasRequest bool) string {
+	if !hasRequest || request == nil {
+		return ""
+	}
+	return request.AffCode
 }
 
 // handleOAuthBind handles binding OAuth account to existing user
@@ -174,6 +239,84 @@ func handleOAuthBindWithUser(c *gin.Context, provider oauth.Provider, oauthUser 
 		return
 	}
 
+	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, gin.H{
+		"action": "bind",
+	})
+}
+
+func handleDesktopOAuthBind(c *gin.Context, provider oauth.Provider, request *desktopOAuthRequest) {
+	if !provider.IsEnabled() {
+		if err := failDesktopOAuthRequest(request.State, i18n.T(c, i18n.MsgOAuthNotEnabled, providerParams(provider.GetName()))); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		common.ApiErrorI18n(c, i18n.MsgOAuthNotEnabled, providerParams(provider.GetName()))
+		return
+	}
+
+	code := c.Query("code")
+	token, err := provider.ExchangeToken(c.Request.Context(), code, c)
+	if err != nil {
+		if storeErr := failDesktopOAuthRequest(request.State, err.Error()); storeErr != nil {
+			common.ApiError(c, storeErr)
+			return
+		}
+		handleOAuthError(c, err)
+		return
+	}
+
+	oauthUser, err := provider.GetUserInfo(c.Request.Context(), token)
+	if err != nil {
+		if storeErr := failDesktopOAuthRequest(request.State, err.Error()); storeErr != nil {
+			common.ApiError(c, storeErr)
+			return
+		}
+		handleOAuthError(c, err)
+		return
+	}
+
+	user := model.User{Id: request.BindUserID}
+	if err := user.FillUserById(); err != nil {
+		if storeErr := failDesktopOAuthRequest(request.State, err.Error()); storeErr != nil {
+			common.ApiError(c, storeErr)
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	if user.Status != common.UserStatusEnabled {
+		if err := failDesktopOAuthRequest(request.State, i18n.T(c, i18n.MsgOAuthUserBanned)); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		common.ApiErrorI18n(c, i18n.MsgOAuthUserBanned)
+		return
+	}
+	if err := ensureProviderBindingAvailableForUser(&user, provider, oauthUser); err != nil {
+		if storeErr := failDesktopOAuthRequest(request.State, err.Error()); storeErr != nil {
+			common.ApiError(c, storeErr)
+			return
+		}
+		if boundErr, ok := err.(*OAuthAlreadyBoundError); ok {
+			common.ApiErrorI18n(c, i18n.MsgOAuthAlreadyBound, providerParams(boundErr.Provider))
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	if err := bindOAuthIdentityToUser(&user, provider, oauthUser.ProviderUserID); err != nil {
+		if storeErr := failDesktopOAuthRequest(request.State, err.Error()); storeErr != nil {
+			common.ApiError(c, storeErr)
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+
+	if err := completeDesktopOAuthRequest(request.State, user.Id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, gin.H{
 		"action": "bind",
 	})
@@ -231,6 +374,7 @@ type oauthFindOrCreateOptions struct {
 	AllowAutoMergeByEmail bool
 	InitialRole           int
 	InitialGroup          string
+	AffiliateCode         string
 }
 
 type oauthUserResolutionResult struct {
@@ -332,9 +476,10 @@ func findOrCreateOAuthUserWithOptions(c *gin.Context, provider oauth.Provider, o
 	user.Status = common.UserStatusEnabled
 
 	// Handle affiliate code
-	affCode := session.Get("aff")
 	inviterId := 0
-	if affCode != nil {
+	if strings.TrimSpace(options.AffiliateCode) != "" {
+		inviterId, _ = model.GetUserIdByAffCode(strings.TrimSpace(options.AffiliateCode))
+	} else if affCode := session.Get("aff"); affCode != nil {
 		inviterId, _ = model.GetUserIdByAffCode(affCode.(string))
 	}
 

@@ -19,9 +19,12 @@ var defNext = func(c *gin.Context) {
 }
 
 func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
+	redisRateLimiterWithKey(c, maxRequestNum, duration, "rateLimit:"+mark+c.ClientIP())
+}
+
+func redisRateLimiterWithKey(c *gin.Context, maxRequestNum int, duration int64, key string) {
 	ctx := context.Background()
 	rdb := common.RDB
-	key := "rateLimit:" + mark + c.ClientIP()
 	listLength, err := rdb.LLen(ctx, key).Result()
 	if err != nil {
 		fmt.Println(err.Error())
@@ -112,8 +115,56 @@ func DownloadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.DownloadRateLimitNum, common.DownloadRateLimitDuration, "DW")
 }
 
+func DesktopOAuthPollRateLimit() func(c *gin.Context) {
+	if !common.DesktopOAuthPollRateLimitEnable {
+		return defNext
+	}
+	return requestKeyRateLimitFactory(
+		common.DesktopOAuthPollRateLimitNum,
+		common.DesktopOAuthPollRateLimitDuration,
+		"DOP",
+		func(c *gin.Context) string {
+			return c.Query("handoff_token")
+		},
+	)
+}
+
 func UploadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.UploadRateLimitNum, common.UploadRateLimitDuration, "UP")
+}
+
+func requestKeyRateLimitFactory(maxRequestNum int, duration int64, mark string, keyFunc func(c *gin.Context) string) func(c *gin.Context) {
+	if common.RedisEnabled {
+		return func(c *gin.Context) {
+			redisRequestKeyRateLimiter(c, maxRequestNum, duration, mark, keyFunc)
+		}
+	}
+	inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
+	return func(c *gin.Context) {
+		memoryRequestKeyRateLimiter(c, maxRequestNum, duration, mark, keyFunc)
+	}
+}
+
+func memoryRequestKeyRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string, keyFunc func(c *gin.Context) string) {
+	key := buildRateLimitKey(mark, c, keyFunc)
+	if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
+		c.Status(http.StatusTooManyRequests)
+		c.Abort()
+		return
+	}
+}
+
+func redisRequestKeyRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string, keyFunc func(c *gin.Context) string) {
+	redisRateLimiterWithKey(c, maxRequestNum, duration, "rateLimit:"+buildRateLimitKey(mark, c, keyFunc))
+}
+
+func buildRateLimitKey(mark string, c *gin.Context, keyFunc func(c *gin.Context) string) string {
+	if keyFunc != nil {
+		if key := keyFunc(c); key != "" {
+			return mark + ":" + key
+		}
+	}
+	return mark + ":" + c.ClientIP()
 }
 
 // userRateLimitFactory creates a rate limiter keyed by authenticated user ID
