@@ -4,6 +4,25 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/tauri-build.yml"
+      - "desktop/tauri-app/**"
+      - "web/**"
+      - "go.mod"
+      - "go.sum"
+      - "VERSION"
+  push:
+    branches:
+      - main
+      - feat/desktop-tauri2-migration
+    paths:
+      - ".github/workflows/tauri-build.yml"
+      - "desktop/tauri-app/**"
+      - "web/**"
+      - "go.mod"
+      - "go.sum"
+      - "VERSION"
   workflow_dispatch:
 
 permissions:
@@ -19,7 +38,7 @@ jobs:
         include:
           - os: windows-2022
             platform: windows
-          - os: macos-13
+          - os: macos-15
             platform: macos
           - os: ubuntu-22.04
             platform: linux
