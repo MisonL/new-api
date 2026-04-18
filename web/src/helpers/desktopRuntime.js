@@ -24,14 +24,19 @@ function getWindowObject() {
   return window;
 }
 
+function getDefaultRuntime() {
+  return {
+    isDesktopApp: false,
+    platform: 'web',
+    dataDir: '',
+    openExternalUrl: null,
+  };
+}
+
 export function getDesktopRuntime() {
   const currentWindow = getWindowObject();
   if (!currentWindow) {
-    return {
-      isDesktopApp: false,
-      platform: 'web',
-      dataDir: '',
-    };
+    return getDefaultRuntime();
   }
 
   const injectedRuntime = currentWindow.__NEW_API_DESKTOP_RUNTIME__;
@@ -40,6 +45,10 @@ export function getDesktopRuntime() {
       isDesktopApp: true,
       platform: injectedRuntime.platform || 'desktop',
       dataDir: injectedRuntime.dataDir || '',
+      openExternalUrl:
+        typeof injectedRuntime.openExternalUrl === 'function'
+          ? injectedRuntime.openExternalUrl
+          : null,
     };
   }
 
@@ -49,16 +58,28 @@ export function getDesktopRuntime() {
       isDesktopApp: true,
       platform: 'electron',
       dataDir: electronRuntime.dataDir || '',
+      openExternalUrl: null,
     };
   }
 
-  return {
-    isDesktopApp: false,
-    platform: 'web',
-    dataDir: '',
-  };
+  return getDefaultRuntime();
 }
 
 export function isDesktopApp() {
   return getDesktopRuntime().isDesktopApp;
+}
+
+export async function openDesktopExternalUrl(url) {
+  const runtime = getDesktopRuntime();
+  if (typeof runtime.openExternalUrl === 'function') {
+    await runtime.openExternalUrl(url);
+    return;
+  }
+
+  const currentWindow = getWindowObject();
+  if (!currentWindow || typeof currentWindow.open !== 'function') {
+    throw new Error('当前环境不支持打开外部链接');
+  }
+
+  currentWindow.open(String(url), '_blank', 'noopener,noreferrer');
 }

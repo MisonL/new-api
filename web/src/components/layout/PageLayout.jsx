@@ -77,6 +77,8 @@ const PageLayout = () => {
     location.pathname !== '/console/playground';
 
   const isConsoleRoute = location.pathname.startsWith('/console');
+  const isHomeRoute = location.pathname === '/';
+  const useHomeViewportLock = !isMobile && isHomeRoute;
   const showSider = isConsoleRoute && (!isMobile || drawerOpen);
 
   useEffect(() => {
@@ -180,9 +182,12 @@ const PageLayout = () => {
       </Header>
       <Layout
         style={{
-          overflow: isMobile ? 'visible' : 'auto',
+          overflow: useHomeViewportLock ? 'hidden' : isMobile ? 'visible' : 'auto',
           display: 'flex',
           flexDirection: 'column',
+          minHeight: isMobile ? 'auto' : '100vh',
+          paddingTop: isMobile ? '0' : '64px',
+          boxSizing: 'border-box',
         }}
       >
         {showSider && (
@@ -223,7 +228,8 @@ const PageLayout = () => {
         >
           <Content
             style={{
-              flex: '1 0 auto',
+              flex: '1 1 auto',
+              minHeight: 0,
               overflowY: isMobile ? 'visible' : 'hidden',
               WebkitOverflowScrolling: 'touch',
               padding: shouldInnerPadding ? (isMobile ? '5px' : '24px') : '0',

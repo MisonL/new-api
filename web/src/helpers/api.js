@@ -30,6 +30,7 @@ import {
   IS_READONLY_FRONTEND,
   READONLY_FRONTEND_MESSAGE,
 } from '../constants/runtime.constants';
+import { isDesktopApp, openDesktopExternalUrl } from './desktopRuntime';
 
 export let API = axios.create({
   baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
@@ -42,6 +43,8 @@ export let API = axios.create({
 });
 
 const READONLY_SAFE_METHODS = new Set(['get', 'head', 'options']);
+const DESKTOP_OAUTH_POLL_INTERVAL_MS = 1000;
+const DESKTOP_OAUTH_TIMEOUT_MS = 2 * 60 * 1000;
 const READONLY_BLOCKED_PATHS = [
   /^\/api\/oauth\//,
   /^\/api\/auth\/external\//,
@@ -88,8 +91,19 @@ function applyReadonlyRequestGuard(instance) {
 }
 
 function redirectToOAuthUrl(url, options = {}) {
-  const { openInNewTab = false } = options;
+  const {
+    openInNewTab = false,
+    desktopHandoffToken = '',
+    bindProviderId = null,
+  } = options;
   const targetUrl = typeof url === 'string' ? url : url.toString();
+
+  if (desktopHandoffToken) {
+    return openDesktopOAuthUrlAndWait(targetUrl, {
+      handoffToken: desktopHandoffToken,
+      bindProviderId,
+    });
+  }
 
   if (openInNewTab) {
     window.open(targetUrl, '_blank');
@@ -101,6 +115,65 @@ function redirectToOAuthUrl(url, options = {}) {
 
 function getCustomProviderKind(provider) {
   return provider?.kind || 'oauth_code';
+}
+
+function buildDesktopOAuthStartURL(providerSlug, mode, affCode = '') {
+  const startUrl = buildAPIURL('/api/oauth/desktop/start');
+  startUrl.searchParams.set('provider', providerSlug);
+  startUrl.searchParams.set('mode', mode);
+  if (affCode) {
+    startUrl.searchParams.set('aff', affCode);
+  }
+  return startUrl;
+}
+
+function buildDesktopOAuthPollURL(handoffToken) {
+  const pollUrl = buildAPIURL('/api/oauth/desktop/poll');
+  pollUrl.searchParams.set('handoff_token', handoffToken);
+  return pollUrl;
+}
+
+async function pollDesktopOAuthCompletion(handoffToken, bindProviderId = null) {
+  const deadline = Date.now() + DESKTOP_OAUTH_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    const res = await API.get(buildDesktopOAuthPollURL(handoffToken).toString(), {
+      skipErrorHandler: true,
+      disableDuplicate: true,
+    });
+    const { success, message, data } = res.data || {};
+    if (!success) {
+      throw new Error(message || i18n.t('授权失败'));
+    }
+    if (data?.status === 'pending') {
+      await new Promise((resolve) =>
+        setTimeout(resolve, DESKTOP_OAUTH_POLL_INTERVAL_MS),
+      );
+      continue;
+    }
+    if (data?.action === 'bind') {
+      return {
+        action: 'bind',
+        providerId: bindProviderId,
+      };
+    }
+    if (data) {
+      return {
+        action: 'login',
+        user: data,
+      };
+    }
+    throw new Error(i18n.t('桌面端 OAuth 回调未返回登录结果'));
+  }
+
+  throw new Error(i18n.t('等待系统浏览器完成登录超时'));
+}
+
+async function openDesktopOAuthUrlAndWait(url, options = {}) {
+  const { handoffToken, bindProviderId = null } = options;
+  await openDesktopExternalUrl(url);
+  showSuccess(i18n.t('已在系统默认浏览器打开登录页面'));
+  return pollDesktopOAuthCompletion(handoffToken, bindProviderId);
 }
 
 async function getCurrentUserFromSession() {
@@ -504,14 +577,69 @@ async function prepareOAuthState(options = {}) {
   return await getOAuthState();
 }
 
-export async function onDiscordOAuthClicked(client_id, options = {}) {
+async function prepareDesktopOAuthStart(providerSlug, options = {}) {
+  const { shouldLogout = false, bindProviderId = null } = options;
+  const mode = shouldLogout ? 'login' : 'bind';
+
+  if (shouldLogout) {
+    try {
+      await API.get('/api/user/logout', { skipErrorHandler: true });
+    } catch (err) {}
+    localStorage.removeItem('user');
+    updateAPI();
+  }
+
+  const affCode = shouldLogout ? localStorage.getItem('aff') || '' : '';
+  const res = await API.get(
+    buildDesktopOAuthStartURL(providerSlug, mode, affCode).toString(),
+    {
+      skipErrorHandler: true,
+      disableDuplicate: true,
+    },
+  );
+  const { success, message, data } = res.data || {};
+  if (!success) {
+    throw new Error(message || i18n.t('无法创建桌面端 OAuth 登录请求'));
+  }
+  if (!data?.state || !data?.handoff_token) {
+    throw new Error(i18n.t('桌面端 OAuth 登录请求返回了不完整的数据'));
+  }
+
+  return {
+    state: data.state,
+    desktopHandoffToken: data.handoff_token,
+    bindProviderId,
+  };
+}
+
+async function prepareOAuthFlow(providerSlug, options = {}) {
+  if (isDesktopApp()) {
+    return prepareDesktopOAuthStart(providerSlug, options);
+  }
+
   const state = await prepareOAuthState(options);
-  if (!state) return;
+  if (!state) {
+    return null;
+  }
+
+  return {
+    state,
+    desktopHandoffToken: '',
+    bindProviderId: options.bindProviderId ?? null,
+  };
+}
+
+export async function onDiscordOAuthClicked(client_id, options = {}) {
+  const oauthFlow = await prepareOAuthFlow('discord', options);
+  if (!oauthFlow?.state) return;
   const redirect_uri = `${window.location.origin}/oauth/discord`;
   const response_type = 'code';
   const scope = 'identify+openid';
-  redirectToOAuthUrl(
-    `https://discord.com/oauth2/authorize?client_id=${client_id}&redirect_uri=${redirect_uri}&response_type=${response_type}&scope=${scope}&state=${state}`,
+  return redirectToOAuthUrl(
+    `https://discord.com/oauth2/authorize?client_id=${client_id}&redirect_uri=${redirect_uri}&response_type=${response_type}&scope=${scope}&state=${oauthFlow.state}`,
+    {
+      desktopHandoffToken: oauthFlow.desktopHandoffToken,
+    },
   );
 }
 
@@ -521,22 +649,28 @@ export async function onOIDCClicked(
   openInNewTab = false,
   options = {},
 ) {
-  const state = await prepareOAuthState(options);
-  if (!state) return;
+  const oauthFlow = await prepareOAuthFlow('oidc', options);
+  if (!oauthFlow?.state) return;
   const url = new URL(auth_url);
   url.searchParams.set('client_id', client_id);
   url.searchParams.set('redirect_uri', `${window.location.origin}/oauth/oidc`);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', 'openid profile email');
-  url.searchParams.set('state', state);
-  redirectToOAuthUrl(url, { openInNewTab });
+  url.searchParams.set('state', oauthFlow.state);
+  return redirectToOAuthUrl(url, {
+    openInNewTab,
+    desktopHandoffToken: oauthFlow.desktopHandoffToken,
+  });
 }
 
 export async function onGitHubOAuthClicked(github_client_id, options = {}) {
-  const state = await prepareOAuthState(options);
-  if (!state) return;
-  redirectToOAuthUrl(
-    `https://github.com/login/oauth/authorize?client_id=${github_client_id}&state=${state}&scope=user:email`,
+  const oauthFlow = await prepareOAuthFlow('github', options);
+  if (!oauthFlow?.state) return;
+  return redirectToOAuthUrl(
+    `https://github.com/login/oauth/authorize?client_id=${github_client_id}&state=${oauthFlow.state}&scope=user:email`,
+    {
+      desktopHandoffToken: oauthFlow.desktopHandoffToken,
+    },
   );
 }
 
@@ -544,10 +678,13 @@ export async function onLinuxDOOAuthClicked(
   linuxdo_client_id,
   options = { shouldLogout: false },
 ) {
-  const state = await prepareOAuthState(options);
-  if (!state) return;
-  redirectToOAuthUrl(
-    `https://connect.linux.do/oauth2/authorize?response_type=code&client_id=${linuxdo_client_id}&state=${state}`,
+  const oauthFlow = await prepareOAuthFlow('linuxdo', options);
+  if (!oauthFlow?.state) return;
+  return redirectToOAuthUrl(
+    `https://connect.linux.do/oauth2/authorize?response_type=code&client_id=${linuxdo_client_id}&state=${oauthFlow.state}`,
+    {
+      desktopHandoffToken: oauthFlow.desktopHandoffToken,
+    },
   );
 }
 
@@ -604,13 +741,16 @@ export async function onCustomOAuthClicked(provider, options = {}) {
       };
     }
 
-    const state = await prepareOAuthState(options);
-    if (!state) return;
+    const oauthFlow = await prepareOAuthFlow(provider.slug, {
+      ...options,
+      bindProviderId: provider.id ?? null,
+    });
+    if (!oauthFlow?.state) return;
     const authUrl =
       providerKind === 'cas'
-        ? buildCustomCASStartUrl(provider, state)
+        ? buildCustomCASStartUrl(provider, oauthFlow.state)
         : providerKind === 'jwt_direct'
-          ? buildCustomJWTAuthorizationUrl(provider, state)
+          ? buildCustomJWTAuthorizationUrl(provider, oauthFlow.state)
           : ensureAbsoluteOAuthURL(provider.authorization_endpoint);
 
     if (providerKind !== 'jwt_direct' && providerKind !== 'cas') {
@@ -624,11 +764,13 @@ export async function onCustomOAuthClicked(provider, options = {}) {
         'scope',
         provider.scopes || 'openid profile email',
       );
-      authUrl.searchParams.set('state', state);
+      authUrl.searchParams.set('state', oauthFlow.state);
     }
 
-    redirectToOAuthUrl(authUrl);
-    return undefined;
+    return redirectToOAuthUrl(authUrl, {
+      desktopHandoffToken: oauthFlow.desktopHandoffToken,
+      bindProviderId: oauthFlow.bindProviderId,
+    });
   } catch (error) {
     console.error('Failed to initiate custom OAuth:', error);
     throw new Error(

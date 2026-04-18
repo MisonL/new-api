@@ -142,7 +142,7 @@ const AccountManagement = ({
     setCustomOAuthLoading((prev) => ({ ...prev, [provider.id]: true }));
     try {
       const result = await onCustomOAuthClicked(provider);
-      if (provider.kind === 'trusted_header' && result?.action === 'bind') {
+      if (result?.action === 'bind') {
         showSuccess(t('绑定成功'));
         await loadCustomOAuthBindings();
       }
