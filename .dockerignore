@@ -8,3 +8,13 @@ docs
 .eslintcache
 .gocache
 /web/node_modules
+.dev-docker
+data
+logs
+tmp
+target
+desktop/tauri-app/src-tauri/target
+desktop/tauri-app/target
+web/dist
+coverage
+dist

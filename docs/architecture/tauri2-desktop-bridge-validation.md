@@ -5,7 +5,7 @@
 
 ## 0. 最新验证状态
 
-日期：2026-04-17
+日期：2026-04-18
 平台：macOS x86_64
 版本：v1.0.0
 
@@ -23,11 +23,19 @@
 - 端口冲突进入原生服务管理窗口
 - 无效桌面运行时配置进入原生服务管理窗口，可显式修复端口配置
 - 无新增 crash log
+- 隔离环境 OAuth 浏览器回调闭环（`start -> callback -> poll`）
+- 隔离环境 SSE 实流闭环（`/v1/chat/completions`，`stream=true`，含 `[DONE]`）
 
-仍需真实外部条件复验：
+本轮隔离实测证据：
 
-- OAuth 浏览器回调
-- 真实渠道 SSE / 流式请求
+- 隔离运行目录：`/tmp/newapi-mac-verify`
+- mock 上游：`http://127.0.0.1:15566`
+- 隔离 new-api：`http://127.0.0.1:13100`
+- OAuth callback 头与响应：`/tmp/newapi-mac-verify/oauth-callback-headers.txt`、`/tmp/newapi-mac-verify/oauth-callback-body.html`
+- SSE 输出：`/tmp/newapi-mac-verify/sse-response.txt`
+
+仍需人工 GUI 复验：
+
 - 托盘目录入口和显隐切换的 OS 级交互截图
 
 ## 1. 文档目标
