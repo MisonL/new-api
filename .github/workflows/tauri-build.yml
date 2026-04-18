@@ -102,7 +102,7 @@ jobs:
           bun run test:rust
 
       - name: Build Tauri desktop bundle
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@v0.6.2
         with:
           projectPath: desktop/tauri-app
           tauriScript: bun run
