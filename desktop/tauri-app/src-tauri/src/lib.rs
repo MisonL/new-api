@@ -1,8 +1,11 @@
+mod commands;
 mod constants;
+mod native_i18n;
 mod runtime;
 pub mod runtime_support;
 mod service_management;
 mod state;
+pub mod window_bounds;
 mod windowing;
 
 use state::{mark_quitting, DesktopState};
@@ -33,6 +36,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![commands::open_external_url])
         .on_window_event(windowing::handle_window_event)
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -44,6 +48,7 @@ pub fn run() {
             }
 
             app.manage(DesktopState::default());
+            windowing::create_native_app_menu(app.handle())?;
             windowing::create_tray(app.handle())?;
             runtime::spawn_bootstrap_desktop_runtime(app.handle().clone());
 

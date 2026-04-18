@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::{Mutex, OnceLock},
+    sync::{Mutex, MutexGuard, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -12,11 +12,37 @@ use new_api_tauri_desktop_lib::runtime_support::{
     DesktopRuntimeConfig, ReadinessProbeResult, SingleInstanceFocusTarget,
 };
 
-fn desktop_port_env_lock() -> std::sync::MutexGuard<'static, ()> {
+fn desktop_port_env_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
         .lock()
         .expect("desktop port env lock poisoned")
+}
+
+struct DesktopPortEnvGuard {
+    _lock: MutexGuard<'static, ()>,
+    previous_value: Option<String>,
+}
+
+impl DesktopPortEnvGuard {
+    fn clear() -> Self {
+        let lock = desktop_port_env_lock();
+        let previous_value = std::env::var("NEW_API_DESKTOP_PORT").ok();
+        std::env::remove_var("NEW_API_DESKTOP_PORT");
+        Self {
+            _lock: lock,
+            previous_value,
+        }
+    }
+}
+
+impl Drop for DesktopPortEnvGuard {
+    fn drop(&mut self) {
+        match &self.previous_value {
+            Some(value) => std::env::set_var("NEW_API_DESKTOP_PORT", value),
+            None => std::env::remove_var("NEW_API_DESKTOP_PORT"),
+        }
+    }
 }
 
 #[test]
@@ -56,6 +82,7 @@ fn load_or_create_desktop_secrets_rejects_invalid_file() {
 
 #[test]
 fn load_or_create_desktop_runtime_config_persists_default_port() {
+    let _guard = DesktopPortEnvGuard::clear();
     let test_dir = unique_test_dir("desktop-runtime-default");
     let config_file = test_dir.join("desktop-runtime.json");
 
@@ -74,6 +101,7 @@ fn load_or_create_desktop_runtime_config_persists_default_port() {
 
 #[test]
 fn load_or_create_desktop_runtime_config_reads_existing_custom_port() {
+    let _guard = DesktopPortEnvGuard::clear();
     let test_dir = unique_test_dir("desktop-runtime-custom");
     let config_file = test_dir.join("desktop-runtime.json");
     fs::create_dir_all(&test_dir).expect("test directory must be created");
@@ -90,6 +118,7 @@ fn load_or_create_desktop_runtime_config_reads_existing_custom_port() {
 
 #[test]
 fn load_or_create_desktop_runtime_config_rejects_invalid_file() {
+    let _guard = DesktopPortEnvGuard::clear();
     let test_dir = unique_test_dir("desktop-runtime-invalid");
     let config_file = test_dir.join("desktop-runtime.json");
     fs::create_dir_all(&test_dir).expect("test directory must be created");
@@ -106,6 +135,7 @@ fn load_or_create_desktop_runtime_config_rejects_invalid_file() {
 
 #[test]
 fn save_desktop_runtime_config_persists_updated_port() {
+    let _guard = DesktopPortEnvGuard::clear();
     let test_dir = unique_test_dir("desktop-runtime-save");
     let config_file = test_dir.join("desktop-runtime.json");
     fs::create_dir_all(&test_dir).expect("test directory must be created");
@@ -122,7 +152,7 @@ fn save_desktop_runtime_config_persists_updated_port() {
 
 #[test]
 fn load_or_create_desktop_runtime_config_uses_env_port_when_config_missing() {
-    let _guard = desktop_port_env_lock();
+    let _guard = DesktopPortEnvGuard::clear();
     let test_dir = unique_test_dir("desktop-runtime-env-fallback");
     let config_file = test_dir.join("desktop-runtime.json");
     std::env::set_var("NEW_API_DESKTOP_PORT", "13000");
@@ -132,14 +162,12 @@ fn load_or_create_desktop_runtime_config_uses_env_port_when_config_missing() {
 
     assert_eq!(config.port, 13000);
     assert!(config_file.exists());
-
-    std::env::remove_var("NEW_API_DESKTOP_PORT");
     cleanup_test_dir(&test_dir);
 }
 
 #[test]
 fn load_or_create_desktop_runtime_config_rejects_invalid_env_port() {
-    let _guard = desktop_port_env_lock();
+    let _guard = DesktopPortEnvGuard::clear();
     let test_dir = unique_test_dir("desktop-runtime-invalid-env");
     let config_file = test_dir.join("desktop-runtime.json");
     std::env::set_var("NEW_API_DESKTOP_PORT", "0");
@@ -148,14 +176,12 @@ fn load_or_create_desktop_runtime_config_rejects_invalid_env_port() {
         .expect_err("invalid env port must fail");
 
     assert!(error.contains("invalid NEW_API_DESKTOP_PORT"));
-
-    std::env::remove_var("NEW_API_DESKTOP_PORT");
     cleanup_test_dir(&test_dir);
 }
 
 #[test]
 fn load_or_create_desktop_runtime_config_prefers_existing_file_over_env() {
-    let _guard = desktop_port_env_lock();
+    let _guard = DesktopPortEnvGuard::clear();
     let test_dir = unique_test_dir("desktop-runtime-config-priority");
     let config_file = test_dir.join("desktop-runtime.json");
     fs::create_dir_all(&test_dir).expect("test directory must be created");
@@ -167,8 +193,6 @@ fn load_or_create_desktop_runtime_config_prefers_existing_file_over_env() {
         .expect("desktop runtime config must prefer persisted config");
 
     assert_eq!(config.port, 13000);
-
-    std::env::remove_var("NEW_API_DESKTOP_PORT");
     cleanup_test_dir(&test_dir);
 }
 
