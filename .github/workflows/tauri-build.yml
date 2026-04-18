@@ -80,6 +80,11 @@ jobs:
           cd desktop/tauri-app
           bun run check:version
 
+      - name: Prepare desktop web assets
+        run: |
+          cd desktop/tauri-app
+          bun run prepare:web
+
       - name: Prepare desktop sidecar
         run: |
           cd desktop/tauri-app
