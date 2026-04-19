@@ -37,6 +37,7 @@ import {
 } from '../../../helpers';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import { CircleAlert, Route, Sparkles } from 'lucide-react';
+import { shouldShowLogIp } from '../../../hooks/usage-logs/logAuditInfo';
 
 const colors = [
   'amber',
@@ -885,11 +886,11 @@ export const getLogsColumns = ({
       ),
       dataIndex: 'ip',
       render: (text, record, index) => {
-        const showIp =
-          (record.type === 2 ||
-            record.type === 5 ||
-            (isAdminUser && record.type === 1)) &&
-          text;
+        const showIp = shouldShowLogIp({
+          isAdminUser,
+          recordType: record.type,
+          ip: text,
+        });
         return showIp ? (
           <Tooltip content={text}>
             <span>

@@ -41,6 +41,10 @@ import {
 } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
+import {
+  getManageOperatorEntryDescriptor,
+  getTopupAuditEntryDescriptors,
+} from './logAuditInfo';
 const { Text } = Typography;
 
 export const useLogsData = () => {
@@ -787,81 +791,33 @@ export const useLogsData = () => {
         });
       }
       if (isAdminUser && logs[i].type === 1) {
-        const adminInfo = other?.admin_info;
-        if (adminInfo) {
-          if (adminInfo.payment_method) {
-            expandDataLocal.push({
-              key: t('订单支付方式'),
-              value: adminInfo.payment_method,
-            });
-          }
-          if (adminInfo.callback_payment_method) {
-            expandDataLocal.push({
-              key: t('回调支付方式'),
-              value: adminInfo.callback_payment_method,
-            });
-          }
-          if (adminInfo.caller_ip) {
-            expandDataLocal.push({
-              key: t('回调调用者IP'),
-              value: adminInfo.caller_ip,
-            });
-          }
-          if (adminInfo.server_ip) {
-            expandDataLocal.push({
-              key: t('服务器IP'),
-              value: adminInfo.server_ip,
-            });
-          }
-          if (adminInfo.node_name) {
-            expandDataLocal.push({
-              key: t('节点名称'),
-              value: adminInfo.node_name,
-            });
-          }
-          if (adminInfo.version) {
-            expandDataLocal.push({
-              key: t('系统版本'),
-              value: adminInfo.version,
-            });
-          }
-        } else {
+        const topupAuditEntries = getTopupAuditEntryDescriptors({
+          isAdminUser,
+          logType: logs[i].type,
+          adminInfo: other?.admin_info,
+          t,
+        });
+        topupAuditEntries.forEach((entry) => {
           expandDataLocal.push({
-            key: t('审计信息'),
-            value: (
+            key: entry.key,
+            value: entry.warning ? (
               <span style={{ color: 'var(--semi-color-warning)' }}>
-                {t(
-                  '该记录由旧版本实例写入，缺少审计信息，建议将实例升级至最新版本以便记录服务器IP、回调IP、支付方式与系统版本等审计字段。',
-                )}
+                {entry.value}
               </span>
+            ) : (
+              entry.value
             ),
           });
-        }
+        });
       }
-      if (isAdminUser && logs[i].type === 3 && other?.admin_info) {
-        const adminInfo = other.admin_info;
-        const hasUsername =
-          adminInfo.admin_username !== undefined &&
-          adminInfo.admin_username !== null &&
-          adminInfo.admin_username !== '';
-        const hasId =
-          adminInfo.admin_id !== undefined &&
-          adminInfo.admin_id !== null &&
-          adminInfo.admin_id !== '';
-        if (hasUsername || hasId) {
-          let operatorValue = '';
-          if (hasUsername && hasId) {
-            operatorValue = `${adminInfo.admin_username} (ID: ${adminInfo.admin_id})`;
-          } else if (hasUsername) {
-            operatorValue = String(adminInfo.admin_username);
-          } else {
-            operatorValue = `ID: ${adminInfo.admin_id}`;
-          }
-          expandDataLocal.push({
-            key: t('操作管理员'),
-            value: operatorValue,
-          });
-        }
+      const manageOperatorEntry = getManageOperatorEntryDescriptor({
+        isAdminUser,
+        logType: logs[i].type,
+        adminInfo: other?.admin_info,
+        t,
+      });
+      if (manageOperatorEntry) {
+        expandDataLocal.push(manageOperatorEntry);
       }
       expandDataLocal.push({
         key: t('操作'),
