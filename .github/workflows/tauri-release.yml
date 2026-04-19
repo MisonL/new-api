@@ -59,8 +59,10 @@ jobs:
             exit 1
           fi
 
+          VERSION_NO_V="${VERSION#v}"
           echo "TAG_NAME=${TAG_NAME}" >> "$GITHUB_ENV"
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "VERSION_NO_V=${VERSION_NO_V}" >> "$GITHUB_ENV"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -131,23 +133,83 @@ jobs:
     steps:
       - name: Resolve tag
         run: |
-          echo "TAG_NAME=${{ github.event.inputs.tag }}" >> "$GITHUB_ENV"
+          TAG_NAME="${{ github.event.inputs.tag }}"
+          VERSION_NO_V="${TAG_NAME#v}"
+          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_NO_V=$VERSION_NO_V" >> "$GITHUB_ENV"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+
+      - name: Normalize desktop artifact names
+        run: |
+          set -euo pipefail
+
+          pick_one() {
+            local pattern="$1"
+            local label="$2"
+            mapfile -t files < <(find tauri-bundle-* -type f -name "$pattern" | sort)
+            if [[ ${#files[@]} -eq 0 ]]; then
+              echo "Missing desktop artifact for pattern: $pattern"
+              exit 1
+            fi
+            if [[ ${#files[@]} -gt 1 ]]; then
+              echo "Found multiple files for $label ($pattern):"
+              printf '  %s\n' "${files[@]}"
+              exit 1
+            fi
+            echo "${files[0]}"
+          }
+
+          detect_arch() {
+            local file_name
+            file_name="$(basename "$1")"
+            case "$file_name" in
+              *aarch64*|*arm64*) echo "arm64" ;;
+              *x86_64*|*x64*|*amd64*) echo "amd64" ;;
+              *)
+                echo "Cannot detect arch from artifact name: $file_name"
+                exit 1
+                ;;
+            esac
+          }
+
+          VERSION="$VERSION_NO_V"
+          mkdir -p release-assets
+
+          DMG_FILE="$(pick_one '*.dmg' 'macOS dmg')"
+          APP_TAR_FILE="$(pick_one '*.app.tar.gz' 'macOS app tar')"
+          APPIMAGE_FILE="$(pick_one '*.AppImage' 'Linux AppImage')"
+          DEB_FILE="$(pick_one '*.deb' 'Linux deb')"
+          RPM_FILE="$(pick_one '*.rpm' 'Linux rpm')"
+          SETUP_EXE_FILE="$(pick_one '*-setup.exe' 'Windows setup exe')"
+          MSI_FILE="$(pick_one '*.msi' 'Windows msi')"
+
+          MACOS_ARCH="$(detect_arch "$DMG_FILE")"
+          LINUX_ARCH="$(detect_arch "$APPIMAGE_FILE")"
+          WINDOWS_ARCH="$(detect_arch "$SETUP_EXE_FILE")"
+
+          cp "$DMG_FILE" "release-assets/new-api-desktop_${VERSION}_macos_${MACOS_ARCH}.dmg"
+          cp "$APP_TAR_FILE" "release-assets/new-api-desktop_${VERSION}_macos_${MACOS_ARCH}.app.tar.gz"
+          cp "$APPIMAGE_FILE" "release-assets/new-api-desktop_${VERSION}_linux_${LINUX_ARCH}.AppImage"
+          cp "$DEB_FILE" "release-assets/new-api-desktop_${VERSION}_linux_${LINUX_ARCH}.deb"
+          cp "$RPM_FILE" "release-assets/new-api-desktop_${VERSION}_linux_${LINUX_ARCH}.rpm"
+          cp "$SETUP_EXE_FILE" "release-assets/new-api-desktop_${VERSION}_windows_${WINDOWS_ARCH}-setup.exe"
+          cp "$MSI_FILE" "release-assets/new-api-desktop_${VERSION}_windows_${WINDOWS_ARCH}.msi"
+
+          (
+            cd release-assets
+            sha256sum * > "new-api-desktop_${VERSION}_checksums.txt"
+          )
+
+          ls -lh release-assets
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            tauri-bundle-*/**/*.dmg
-            tauri-bundle-*/**/*.app.tar.gz
-            tauri-bundle-*/**/*.AppImage
-            tauri-bundle-*/**/*.deb
-            tauri-bundle-*/**/*.rpm
-            tauri-bundle-*/**/*.msi
-            tauri-bundle-*/**/*-setup.exe
+            release-assets/*
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

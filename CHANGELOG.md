@@ -11,6 +11,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 统一 Release 构建产物命名规范：
+  - 后端二进制命名改为 `new-api_<version-no-v>_<os>_<arch>[.exe]`
+  - 桌面安装包命名改为 `new-api-desktop_<version-no-v>_<os>_<arch>.<ext>`
+  - 桌面端发布新增统一命名后的校验和文件 `new-api-desktop_<version-no-v>_checksums.txt`
+- README 补充 Release 下载安装说明、后端二进制运行说明、Docker 新装/升级/回滚说明
+
 ## [1.1.0] - 2026-04-19
 
 ### Added

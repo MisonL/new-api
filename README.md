@@ -53,6 +53,117 @@ http://localhost:3000
 
 如果你需要持久化数据或保留现有配置，请在启动前先检查并挂载数据目录、数据库连接和环境变量，不要直接覆盖生产实例。
 
+## Release 下载与安装
+
+Release 页面：
+
+- https://github.com/MisonL/new-api/releases
+
+当前构建产物命名规则：
+
+- 后端服务：`new-api_<version-no-v>_<os>_<arch>[.exe]`
+- 桌面客户端：`new-api-desktop_<version-no-v>_<os>_<arch>.<ext>`
+- 校验文件：`new-api_<version-no-v>_checksums_<os>.txt`、`new-api-desktop_<version-no-v>_checksums.txt`
+
+### 后端服务（二进制）安装与启动
+
+最低要求：
+
+- 必须设置稳定密钥：`SESSION_SECRET`、`CRYPTO_SECRET`
+- 默认端口：`3000`
+- 未设置 `SQL_DSN` 时默认使用 SQLite（`one-api.db`）
+
+Linux / macOS 示例：
+
+```bash
+chmod +x ./new-api_1.1.0_linux_amd64
+export SESSION_SECRET='replace-with-stable-secret'
+export CRYPTO_SECRET='replace-with-stable-secret'
+./new-api_1.1.0_linux_amd64 --port 3000 --log-dir ./logs
+```
+
+Windows PowerShell 示例：
+
+```powershell
+$env:SESSION_SECRET="replace-with-stable-secret"
+$env:CRYPTO_SECRET="replace-with-stable-secret"
+.\new-api_1.1.0_windows_amd64.exe --port 3000 --log-dir .\logs
+```
+
+可选参数：
+
+- `--port <端口>`
+- `--log-dir <日志目录>`
+- `--version`
+- `--help`
+
+### 桌面客户端安装包选择
+
+- macOS：`*.dmg` 或 `*.app.tar.gz`
+- Linux：`*.AppImage` / `*.deb` / `*.rpm`（三选一）
+- Windows：`*-setup.exe` 或 `*.msi`
+
+桌面客户端是 Tauri 2 包装形态，内置 sidecar 启动后端服务能力，适合单机使用。
+
+## Docker 正式部署（保配置）
+
+### 新装
+
+1. 准备配置文件：
+
+```bash
+cp .env.example .env
+```
+
+2. 在 `.env` 中至少设置：
+
+- `NEW_API_IMAGE`（例如 `ghcr.io/misonl/new-api:v1.1.0`）
+- `SESSION_SECRET`
+- `CRYPTO_SECRET`
+- 如需外部数据库/缓存：`SQL_DSN`、`REDIS_CONN_STRING`
+- 建议显式设置：`NEW_API_DATA_DIR`、`NEW_API_LOG_DIR`
+
+3. 启动服务：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+4. 验证：
+
+```bash
+docker compose ps
+curl -fsS http://127.0.0.1:3000/api/status
+```
+
+### 升级（不丢配置）
+
+1. 备份当前配置与数据（至少包括 `.env`、数据目录、数据库卷）。
+2. 仅更新 `.env` 里的 `NEW_API_IMAGE` 到新版本标签。
+3. 执行：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+4. 验证健康状态与关键功能后再清理旧镜像：
+
+```bash
+docker image prune -f
+```
+
+### 回滚
+
+1. 将 `.env` 的 `NEW_API_IMAGE` 改回旧版本标签。
+2. 执行：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
 如需显式指定宿主机绑定目录，可设置：
 
 ```bash
@@ -131,6 +242,9 @@ cd web && bun run build
 - `release.yml`、`tauri-release.yml`、Docker 构建都会读取 `VERSION`
 - 发布流程仅支持手动触发 `workflow_dispatch`，不再由 `push tag` 自动触发
 - 正式发布仅允许稳定 semver tag（`vMAJOR.MINOR.PATCH`），并校验输入 tag 与 `VERSION` 完全一致
+- Release 构建产物命名统一为：
+  - 后端：`new-api_<version-no-v>_<os>_<arch>[.exe]`
+  - 桌面端：`new-api-desktop_<version-no-v>_<os>_<arch>.<ext>`
 - 桌面客户端产物仅由 Tauri 2 工作流发布，Electron 产物流程已移除
 - Docker 镜像默认发布到 `ghcr.io/misonl/new-api`
 - alpha Docker 镜像流程固定使用 `alpha` 分支头提交作为构建来源
