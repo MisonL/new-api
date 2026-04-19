@@ -137,6 +137,8 @@ const PasswordResetForm = () => {
                     label={t('邮箱')}
                     placeholder={t('请输入您的邮箱地址')}
                     name='email'
+                    autoComplete='email'
+                    autocomplete='email'
                     value={email}
                     onChange={handleChange}
                     prefix={<IconMail />}
