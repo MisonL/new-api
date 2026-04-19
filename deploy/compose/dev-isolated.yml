@@ -18,10 +18,11 @@ services:
       - SESSION_SECRET=${DEV_SESSION_SECRET:?set DEV_SESSION_SECRET}
       - CRYPTO_SECRET=${DEV_CRYPTO_SECRET:?set DEV_CRYPTO_SECRET}
       - SQL_DSN=${DEV_SQL_DSN:-postgresql://root:123456@postgres:5432/new-api-dev}
-      - REDIS_CONN_STRING=${DEV_REDIS_CONN_STRING:-redis://redis:6379/0}
+      - REDIS_CONN_STRING=${DEV_REDIS_CONN_STRING:-redis://:${DEV_REDIS_PASSWORD:-123456}@redis:6379/0}
       - TZ=${DEV_TZ:-Asia/Shanghai}
       - ERROR_LOG_ENABLED=${DEV_ERROR_LOG_ENABLED:-true}
       - BATCH_UPDATE_ENABLED=${DEV_BATCH_UPDATE_ENABLED:-true}
+      - NODE_NAME=${DEV_NODE_NAME:-dev-isolated-node-1}
     depends_on:
       - redis
       - postgres
@@ -36,6 +37,7 @@ services:
   redis:
     image: redis:latest
     restart: always
+    command: ["redis-server", "--requirepass", "${DEV_REDIS_PASSWORD:-123456}"]
     ports:
       - "${DEV_REDIS_PORT:-6380}:6379"
     networks:
