@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  ADMIN_PASSWORD_MIN_LENGTH,
   ADMIN_USERNAME_MAX_LENGTH,
   normalizeSetupFormValues,
   validateAdminSetupValues,
@@ -55,7 +56,8 @@ test('validateAdminSetupValues rejects short password and mismatched passwords',
       confirmPassword: 'short',
     }),
     {
-      key: '密码长度至少为8个字符',
+      key: '密码长度至少为{{min}}个字符',
+      params: { min: ADMIN_PASSWORD_MIN_LENGTH },
     },
   );
 

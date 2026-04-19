@@ -29,7 +29,10 @@ pub fn center_position_in_area(window_width: u32, window_height: u32, area: Rect
     let available_height = i64::from(area.height.saturating_sub(window_height));
     let centered_x = i64::from(area.x) + available_width / 2;
     let centered_y = i64::from(area.y) + available_height / 2;
-    (centered_x as i32, centered_y as i32)
+    (
+        centered_x.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+        centered_y.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+    )
 }
 
 fn intersects(window: Rect, area: Rect) -> bool {

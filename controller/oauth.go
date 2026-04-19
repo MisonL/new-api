@@ -479,8 +479,10 @@ func findOrCreateOAuthUserWithOptions(c *gin.Context, provider oauth.Provider, o
 	inviterId := 0
 	if strings.TrimSpace(options.AffiliateCode) != "" {
 		inviterId, _ = model.GetUserIdByAffCode(strings.TrimSpace(options.AffiliateCode))
-	} else if affCode := session.Get("aff"); affCode != nil {
-		inviterId, _ = model.GetUserIdByAffCode(affCode.(string))
+	} else if affCode, ok := session.Get("aff").(string); ok {
+		if normalizedAffCode := strings.TrimSpace(affCode); normalizedAffCode != "" {
+			inviterId, _ = model.GetUserIdByAffCode(normalizedAffCode)
+		}
 	}
 
 	// Use transaction to ensure user creation and OAuth binding are atomic

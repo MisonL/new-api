@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -11,6 +12,11 @@ import (
 )
 
 var timeFormat = "2006-01-02T15:04:05.000Z"
+
+const (
+	desktopOAuthHandoffTokenMinLength = 1
+	desktopOAuthHandoffTokenMaxLength = 128
+)
 
 var inMemoryRateLimiter common.InMemoryRateLimiter
 
@@ -119,14 +125,45 @@ func DesktopOAuthPollRateLimit() func(c *gin.Context) {
 	if !common.DesktopOAuthPollRateLimitEnable {
 		return defNext
 	}
-	return requestKeyRateLimitFactory(
+	limiter := requestKeyRateLimitFactory(
 		common.DesktopOAuthPollRateLimitNum,
 		common.DesktopOAuthPollRateLimitDuration,
 		"DOP",
 		func(c *gin.Context) string {
-			return c.Query("handoff_token")
+			return sanitizeDesktopOAuthHandoffToken(c.Query("handoff_token"))
 		},
 	)
+	return func(c *gin.Context) {
+		c.Set("desktop_oauth_poll_rate_limited", true)
+		limiter(c)
+	}
+}
+
+func sanitizeDesktopOAuthHandoffToken(token string) string {
+	normalized := strings.TrimSpace(token)
+	if normalized == "" {
+		return ""
+	}
+	if len(normalized) < desktopOAuthHandoffTokenMinLength ||
+		len(normalized) > desktopOAuthHandoffTokenMaxLength {
+		return ""
+	}
+	for _, char := range normalized {
+		if char >= 'a' && char <= 'z' {
+			continue
+		}
+		if char >= 'A' && char <= 'Z' {
+			continue
+		}
+		if char >= '0' && char <= '9' {
+			continue
+		}
+		if char == '-' || char == '_' {
+			continue
+		}
+		return ""
+	}
+	return normalized
 }
 
 func UploadRateLimit() func(c *gin.Context) {

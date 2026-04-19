@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { readVersion, webDir } from './lib/project.mjs';
+import { cpSync, existsSync, rmSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { readVersion, tauriAppDir, webDir } from './lib/project.mjs';
 
 function run(command, args, cwd, env = {}) {
   execFileSync(command, args, {
@@ -19,7 +21,14 @@ function buildWeb() {
     DISABLE_ESLINT_PLUGIN: 'true',
     VITE_REACT_APP_VERSION: version,
   });
-  console.log(`prepared web dist for desktop: ${version}`);
+  const webDistDir = resolve(webDir, 'dist');
+  const tauriDistDir = resolve(tauriAppDir, 'dist');
+  if (!existsSync(webDistDir)) {
+    throw new Error(`web dist not found: ${webDistDir}`);
+  }
+  rmSync(tauriDistDir, { recursive: true, force: true });
+  cpSync(webDistDir, tauriDistDir, { recursive: true });
+  console.log(`prepared web dist for desktop: ${version} -> ${tauriDistDir}`);
 }
 
 buildWeb();

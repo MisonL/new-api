@@ -26,6 +26,13 @@ type setupAPIResponse struct {
 func setupSetupControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
+	previousUsingSQLite := common.UsingSQLite
+	previousUsingMySQL := common.UsingMySQL
+	previousUsingPostgreSQL := common.UsingPostgreSQL
+	previousRedisEnabled := common.RedisEnabled
+	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+
 	gin.SetMode(gin.TestMode)
 	common.UsingSQLite = true
 	common.UsingMySQL = false
@@ -61,6 +68,12 @@ func setupSetupControllerTestDB(t *testing.T) *gorm.DB {
 		operation_setting.SelfUseModeEnabled = previousSelfUseMode
 		operation_setting.DemoSiteEnabled = previousDemoSiteMode
 		system_setting.ServerAddress = previousServerAddress
+		common.UsingSQLite = previousUsingSQLite
+		common.UsingMySQL = previousUsingMySQL
+		common.UsingPostgreSQL = previousUsingPostgreSQL
+		common.RedisEnabled = previousRedisEnabled
+		model.DB = previousDB
+		model.LOG_DB = previousLogDB
 
 		sqlDB, err := db.DB()
 		if err == nil {

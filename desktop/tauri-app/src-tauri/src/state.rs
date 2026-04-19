@@ -16,6 +16,7 @@ pub struct DesktopState {
     pub sidecar: Mutex<Option<CommandChild>>,
     pub error_logs: Mutex<VecDeque<String>>,
     pub is_quitting: AtomicBool,
+    pub is_stopping_sidecar: AtomicBool,
     pub fatal_error_reported: AtomicBool,
     pub startup_in_progress: AtomicBool,
     pub startup_error: Mutex<Option<String>>,
@@ -33,10 +34,30 @@ pub fn is_quitting<R: Runtime>(app: &AppHandle<R>) -> bool {
         .load(Ordering::SeqCst)
 }
 
+pub fn mark_stopping_sidecar<R: Runtime>(app: &AppHandle<R>) {
+    app.state::<DesktopState>()
+        .is_stopping_sidecar
+        .store(true, Ordering::SeqCst);
+}
+
+pub fn clear_stopping_sidecar<R: Runtime>(app: &AppHandle<R>) {
+    app.state::<DesktopState>()
+        .is_stopping_sidecar
+        .store(false, Ordering::SeqCst);
+}
+
+pub fn is_stopping_sidecar<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.state::<DesktopState>()
+        .is_stopping_sidecar
+        .load(Ordering::SeqCst)
+}
+
 pub fn clear_sidecar<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<DesktopState>();
     let mut guard = state.sidecar.lock().expect("sidecar state lock poisoned");
-    guard.take();
+    if let Some(child) = guard.take() {
+        let _ = child.kill();
+    }
 }
 
 pub fn has_running_sidecar<R: Runtime>(app: &AppHandle<R>) -> bool {

@@ -81,6 +81,24 @@ fn load_or_create_desktop_secrets_rejects_invalid_file() {
 }
 
 #[test]
+fn load_or_create_desktop_secrets_rejects_single_secret_file() {
+    let test_dir = unique_test_dir("desktop-secrets-single");
+    let secret_file = test_dir.join("desktop-secrets.json");
+    fs::create_dir_all(&test_dir).expect("test directory must be created");
+    fs::write(
+        &secret_file,
+        r#"{"version":1,"session_secret":"abcdef","crypto_secret":""}"#,
+    )
+    .expect("single secret file must be written");
+
+    let error =
+        load_or_create_desktop_secrets(&secret_file).expect_err("single secret file must fail");
+    assert!(error.contains("desktop secret file is invalid"));
+
+    cleanup_test_dir(&test_dir);
+}
+
+#[test]
 fn load_or_create_desktop_runtime_config_persists_default_port() {
     let _guard = DesktopPortEnvGuard::clear();
     let test_dir = unique_test_dir("desktop-runtime-default");

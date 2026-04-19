@@ -4,13 +4,13 @@
   "version": "1.0.0",
   "identifier": "io.github.misonl.newapi.desktop",
   "build": {
-    "frontendDist": "http://127.0.0.1:3000",
+    "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:3000"
   },
   "app": {
     "windows": [],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' http: https: tauri: asset: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' http: https: ws: wss:; img-src 'self' http: https: asset: data: blob:; font-src 'self' data: asset:; frame-src 'self' http: https:;"
     }
   },
   "bundle": {

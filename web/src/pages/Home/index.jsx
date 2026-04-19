@@ -247,14 +247,33 @@ const Home = () => {
     if (endpointItems.length <= 1 || endpointIndex < endpointItems.length) {
       return undefined;
     }
+    let cancelled = false;
+    let rafId1 = 0;
+    let rafId2 = 0;
     const resetTimer = setTimeout(() => {
+      if (cancelled) {
+        return;
+      }
       setEndpointTransitionEnabled(false);
       setEndpointIndex(0);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setEndpointTransitionEnabled(true));
+      rafId1 = requestAnimationFrame(() => {
+        rafId2 = requestAnimationFrame(() => {
+          if (!cancelled) {
+            setEndpointTransitionEnabled(true);
+          }
+        });
       });
     }, ENDPOINT_ANIMATION_DURATION_MS);
-    return () => clearTimeout(resetTimer);
+    return () => {
+      cancelled = true;
+      clearTimeout(resetTimer);
+      if (rafId1) {
+        cancelAnimationFrame(rafId1);
+      }
+      if (rafId2) {
+        cancelAnimationFrame(rafId2);
+      }
+    };
   }, [endpointIndex, endpointItems.length]);
 
   useEffect(() => {
@@ -411,7 +430,7 @@ const Home = () => {
                           theme='solid'
                           type='primary'
                           size={isMobile ? 'default' : 'large'}
-                          className='flex items-center !rounded-3xl px-6 py-2 !bg-slate-900 hover:!bg-slate-800 !border-slate-900 !text-white shadow-sm'
+                          className='flex items-center !rounded-3xl px-6 py-2'
                           icon={<IconFile />}
                           onClick={() => window.open(docsLink, '_blank')}
                         >

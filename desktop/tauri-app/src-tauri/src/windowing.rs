@@ -29,6 +29,9 @@ pub fn create_main_window<R: Runtime>(
     data_dir: PathBuf,
     local_server_url: String,
 ) -> Result<(), String> {
+    let parsed_local_server_url = local_server_url
+        .parse::<tauri::Url>()
+        .map_err(|err| format!("invalid local server url: {err}"))?;
     let runtime_script = build_runtime_script(&data_dir);
     let app_handle = app.clone();
     let (tx, rx) = mpsc::channel();
@@ -40,7 +43,7 @@ pub fn create_main_window<R: Runtime>(
             let mut builder = WebviewWindowBuilder::new(
                 &app_handle,
                 WINDOW_LABEL,
-                WebviewUrl::External(local_server_url.parse().expect("invalid local server url")),
+                WebviewUrl::External(parsed_local_server_url.clone()),
             )
             .title(WINDOW_TITLE)
             .inner_size(1080.0, 720.0)
@@ -360,7 +363,13 @@ fn show_window<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) -> tau
 
 fn hide_window<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) -> tauri::Result<()> {
     window.hide()?;
-    set_dock_visibility(app, false);
+    let has_visible_windows = app
+        .webview_windows()
+        .values()
+        .any(|candidate| candidate.is_visible().unwrap_or(false));
+    if !has_visible_windows {
+        set_dock_visibility(app, false);
+    }
     Ok(())
 }
 

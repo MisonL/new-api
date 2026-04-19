@@ -154,28 +154,45 @@ fn update_runtime_config<R: Runtime>(app: &AppHandle<R>, port: u16) -> Result<St
 }
 
 fn html_response(body: &'static str) -> Response<Cow<'static, [u8]>> {
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .body(Cow::Borrowed(body.as_bytes()))
-        .expect("failed to build html response")
+    build_response(
+        StatusCode::OK,
+        "text/html; charset=utf-8",
+        Cow::Borrowed(body.as_bytes()),
+    )
 }
 
 fn json_response<T: Serialize>(payload: T) -> Response<Cow<'static, [u8]>> {
-    let body = serde_json::to_vec(&payload).expect("failed to serialize json payload");
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
-        .body(Cow::Owned(body))
-        .expect("failed to build json response")
+    match serde_json::to_vec(&payload) {
+        Ok(body) => build_response(
+            StatusCode::OK,
+            "application/json; charset=utf-8",
+            Cow::Owned(body),
+        ),
+        Err(err) => text_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to serialize json payload: {err}"),
+        ),
+    }
 }
 
 fn text_response(status: StatusCode, body: impl Into<String>) -> Response<Cow<'static, [u8]>> {
+    build_response(
+        status,
+        "text/plain; charset=utf-8",
+        Cow::Owned(body.into().into_bytes()),
+    )
+}
+
+fn build_response(
+    status: StatusCode,
+    content_type: &'static str,
+    body: Cow<'static, [u8]>,
+) -> Response<Cow<'static, [u8]>> {
     Response::builder()
         .status(status)
-        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
-        .body(Cow::Owned(body.into().into_bytes()))
-        .expect("failed to build text response")
+        .header(header::CONTENT_TYPE, content_type)
+        .body(body)
+        .unwrap_or_else(|_| Response::new(Cow::Borrowed(b"internal server error")))
 }
 
 fn list_listening_processes_on_port(port: u16) -> Vec<PortProcessInfo> {

@@ -28,8 +28,9 @@ use crate::{
         probe_readiness_response, DesktopRuntimeConfig, ReadinessProbeResult,
     },
     state::{
-        clear_sidecar, clear_starting, clear_startup_error, has_running_sidecar, is_quitting,
-        is_starting, mark_quitting, push_error_log, set_startup_error, snapshot_error_logs,
+        clear_sidecar, clear_starting, clear_startup_error, clear_stopping_sidecar,
+        has_running_sidecar, is_quitting, is_starting, is_stopping_sidecar, mark_quitting,
+        mark_stopping_sidecar, push_error_log, set_startup_error, snapshot_error_logs,
         snapshot_startup_error, try_mark_starting, DesktopState,
     },
     windowing::{
@@ -70,6 +71,7 @@ pub fn request_startup_retry<R: Runtime>(app: &AppHandle<R>) -> Result<String, S
 }
 
 pub fn bootstrap_desktop_runtime<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    clear_stopping_sidecar(&app);
     let app_data_dir = resolve_app_data_dir(&app).map_err(|err| err.to_string())?;
     let data_dir = resolve_data_dir(&app_data_dir);
     fs::create_dir_all(&data_dir).map_err(|err| err.to_string())?;
@@ -136,7 +138,9 @@ pub fn bootstrap_desktop_runtime<R: Runtime>(app: AppHandle<R>) -> Result<(), St
                     eprintln!("{termination_message}");
                     push_error_log(&sidecar_monitor_handle, termination_message.clone());
 
-                    if !is_quitting(&sidecar_monitor_handle) {
+                    if !is_quitting(&sidecar_monitor_handle)
+                        && !is_stopping_sidecar(&sidecar_monitor_handle)
+                    {
                         report_fatal_error(
                             &sidecar_monitor_handle,
                             format!(
@@ -144,6 +148,7 @@ pub fn bootstrap_desktop_runtime<R: Runtime>(app: AppHandle<R>) -> Result<(), St
                             ),
                         );
                     }
+                    clear_stopping_sidecar(&sidecar_monitor_handle);
                 }
                 _ => {}
             }
@@ -214,6 +219,7 @@ pub fn report_fatal_error<R: Runtime>(app: &AppHandle<R>, detail: String) {
 }
 
 pub fn stop_sidecar<R: Runtime>(app_handle: &AppHandle<R>) {
+    mark_stopping_sidecar(app_handle);
     let sidecar_state = app_handle.state::<DesktopState>();
     let mut guard = sidecar_state
         .sidecar
@@ -223,7 +229,10 @@ pub fn stop_sidecar<R: Runtime>(app_handle: &AppHandle<R>) {
     if let Some(child) = guard.take() {
         if let Err(err) = child.kill() {
             eprintln!("failed to stop sidecar: {err}");
+            clear_stopping_sidecar(app_handle);
         }
+    } else {
+        clear_stopping_sidecar(app_handle);
     }
     clear_starting(app_handle);
 }
@@ -309,7 +318,7 @@ fn probe_local_server_ready(address: &SocketAddr) -> Result<ReadinessProbeResult
         .map_err(|err| err.to_string())?;
 
     let request = format!(
-        "GET {LOCAL_SERVER_STATUS_PATH} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+        "GET {LOCAL_SERVER_STATUS_PATH} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
     );
     stream
         .write_all(request.as_bytes())

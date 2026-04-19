@@ -275,6 +275,11 @@
 - sidecar 启动失败和异常退出的可见化提示
 - sidecar 错误日志落盘与打开
 - 数据目录注入前端运行时
+- sidecar 启动必须设置 `NEW_API_SKIP_DOTENV=true`，禁止读取仓库根 `.env`
+- sidecar 必须使用应用数据目录作为独立工作目录，不得使用仓库根目录
+- sidecar 默认使用独立 SQLite（`SQL_DSN=local`、`SQLITE_PATH=<app-data>/data/new-api.db`）
+- sidecar 必须禁用继承 Docker / 开发环境 / 仓库 `.env` 中的数据库、Redis、端口配置
+- sidecar 二进制必须与桌面主程序位于同一输出目录，避免壳与 sidecar 版本错配
 - 持久化稳定密钥注入 sidecar
 - 可恢复端口冲突进入原生服务管理窗口
 - 桌面工程版本号与根 `VERSION` 单一对齐

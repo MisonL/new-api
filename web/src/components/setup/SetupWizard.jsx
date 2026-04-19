@@ -133,7 +133,8 @@ const SetupWizard = () => {
         if (setupStatus.root_init) {
           return true; // 如果已经初始化，可以继续
         }
-        const validationError = validateAdminSetupValues(formData);
+        const normalizedData = normalizeSetupFormValues(formData);
+        const validationError = validateAdminSetupValues(normalizedData);
         if (validationError) {
           showError(t(validationError.key, validationError.params));
           return false;

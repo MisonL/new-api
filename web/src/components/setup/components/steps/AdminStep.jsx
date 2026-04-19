@@ -101,7 +101,9 @@ const AdminStep = ({
               { required: true, message: t('请输入管理员密码') },
               {
                 min: ADMIN_PASSWORD_MIN_LENGTH,
-                message: t('密码长度至少为8个字符'),
+                message: t('密码长度至少为{{min}}个字符', {
+                  min: ADMIN_PASSWORD_MIN_LENGTH,
+                }),
               },
             ]}
             initValue={formData.password || ''}

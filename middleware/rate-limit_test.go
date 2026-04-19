@@ -3,13 +3,19 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
 )
 
+var desktopOAuthRateLimitTestMu sync.Mutex
+
 func TestDesktopOAuthPollRateLimitUsesHandoffTokenKey(t *testing.T) {
+	desktopOAuthRateLimitTestMu.Lock()
+	defer desktopOAuthRateLimitTestMu.Unlock()
+
 	gin.SetMode(gin.TestMode)
 	originalRedisEnabled := common.RedisEnabled
 	originalEnable := common.DesktopOAuthPollRateLimitEnable
@@ -51,6 +57,9 @@ func TestDesktopOAuthPollRateLimitUsesHandoffTokenKey(t *testing.T) {
 }
 
 func TestDesktopOAuthPollRateLimitRejectsExcessRequests(t *testing.T) {
+	desktopOAuthRateLimitTestMu.Lock()
+	defer desktopOAuthRateLimitTestMu.Unlock()
+
 	gin.SetMode(gin.TestMode)
 	originalRedisEnabled := common.RedisEnabled
 	originalEnable := common.DesktopOAuthPollRateLimitEnable

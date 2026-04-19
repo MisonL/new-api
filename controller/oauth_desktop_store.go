@@ -35,9 +35,10 @@ type redisDesktopOAuthStore struct {
 }
 
 var (
-	desktopOAuthStoreOverride desktopOAuthRequestStore
-	desktopOAuthMemoryStore   = newMemoryDesktopOAuthStore()
-	desktopOAuthConsumeScript = redis.NewScript(`
+	errDesktopOAuthStoreUnavailable = errors.New("desktop oauth store unavailable")
+	desktopOAuthStoreOverride       desktopOAuthRequestStore
+	desktopOAuthMemoryStore         = newMemoryDesktopOAuthStore()
+	desktopOAuthConsumeScript       = redis.NewScript(`
 local payload = redis.call("GET", KEYS[1])
 if not payload then
 	return nil
@@ -47,7 +48,27 @@ redis.call("DEL", KEYS[1])
 if decoded["State"] then
 	redis.call("DEL", ARGV[1] .. decoded["State"])
 end
-return payload
+	return payload
+`)
+	desktopOAuthUpdateScript = redis.NewScript(`
+local handoffToken = redis.call("GET", KEYS[1])
+if not handoffToken then
+	return nil
+end
+local handoffKey = ARGV[1] .. handoffToken
+local payload = redis.call("GET", handoffKey)
+if not payload then
+	redis.call("DEL", KEYS[1])
+	return nil
+end
+local request = cjson.decode(payload)
+request["ResultUserID"] = tonumber(ARGV[2]) or 0
+request["CompletedAt"] = ARGV[3]
+request["ErrorMessage"] = ARGV[4]
+local nextPayload = cjson.encode(request)
+redis.call("SET", handoffKey, nextPayload, "EX", tonumber(ARGV[5]))
+redis.call("EXPIRE", KEYS[1], tonumber(ARGV[5]))
+return nextPayload
 `)
 )
 
@@ -76,8 +97,9 @@ func (s *memoryDesktopOAuthStore) Create(request *desktopOAuthRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanupExpiredLocked(time.Now())
-	s.byState[request.State] = cloneDesktopOAuthRequest(request)
-	s.byHandoff[request.HandoffToken] = cloneDesktopOAuthRequest(request)
+	clone := cloneDesktopOAuthRequest(request)
+	s.byState[request.State] = clone
+	s.byHandoff[request.HandoffToken] = clone
 	return nil
 }
 
@@ -167,7 +189,7 @@ func (s *redisDesktopOAuthStore) Create(request *desktopOAuthRequest) error {
 	pipe.Set(ctx, s.handoffKey(request.HandoffToken), payload, desktopOAuthTTL)
 	pipe.Set(ctx, s.stateKey(request.State), request.HandoffToken, desktopOAuthTTL)
 	_, err = pipe.Exec(ctx)
-	return err
+	return wrapDesktopOAuthStoreError(err)
 }
 
 func (s *redisDesktopOAuthStore) GetByState(state string) (*desktopOAuthRequest, bool, error) {
@@ -177,14 +199,14 @@ func (s *redisDesktopOAuthStore) GetByState(state string) (*desktopOAuthRequest,
 		if errors.Is(err, redis.Nil) {
 			return nil, false, nil
 		}
-		return nil, false, err
+		return nil, false, wrapDesktopOAuthStoreError(err)
 	}
 	request, found, err := s.GetByHandoff(handoffToken)
 	if err != nil || found {
 		return request, found, err
 	}
 	if delErr := s.client.Del(ctx, s.stateKey(state)).Err(); delErr != nil && !errors.Is(delErr, redis.Nil) {
-		return nil, false, delErr
+		return nil, false, wrapDesktopOAuthStoreError(delErr)
 	}
 	return nil, false, nil
 }
@@ -196,7 +218,7 @@ func (s *redisDesktopOAuthStore) GetByHandoff(handoffToken string) (*desktopOAut
 		if errors.Is(err, redis.Nil) {
 			return nil, false, nil
 		}
-		return nil, false, err
+		return nil, false, wrapDesktopOAuthStoreError(err)
 	}
 	request := &desktopOAuthRequest{}
 	if err := common.Unmarshal(payload, request); err != nil {
@@ -206,19 +228,11 @@ func (s *redisDesktopOAuthStore) GetByHandoff(handoffToken string) (*desktopOAut
 }
 
 func (s *redisDesktopOAuthStore) Complete(state string, resultUserID int) error {
-	return s.updateByState(state, func(request *desktopOAuthRequest) {
-		request.ResultUserID = resultUserID
-		request.CompletedAt = time.Now()
-		request.ErrorMessage = ""
-	})
+	return s.updateByStateAtomic(state, resultUserID, "")
 }
 
 func (s *redisDesktopOAuthStore) Fail(state string, message string) error {
-	return s.updateByState(state, func(request *desktopOAuthRequest) {
-		request.ErrorMessage = message
-		request.CompletedAt = time.Now()
-		request.ResultUserID = 0
-	})
+	return s.updateByStateAtomic(state, 0, message)
 }
 
 func (s *redisDesktopOAuthStore) Consume(handoffToken string) (*desktopOAuthRequest, bool, error) {
@@ -233,7 +247,7 @@ func (s *redisDesktopOAuthStore) Consume(handoffToken string) (*desktopOAuthRequ
 		if errors.Is(err, redis.Nil) {
 			return nil, false, nil
 		}
-		return nil, false, err
+		return nil, false, wrapDesktopOAuthStoreError(err)
 	}
 	payload, err := redisScriptPayload(result)
 	if err != nil {
@@ -246,26 +260,44 @@ func (s *redisDesktopOAuthStore) Consume(handoffToken string) (*desktopOAuthRequ
 	return request, true, nil
 }
 
-func (s *redisDesktopOAuthStore) updateByState(state string, mutate func(request *desktopOAuthRequest)) error {
-	request, found, err := s.GetByState(state)
-	if err != nil || !found {
-		return err
-	}
-	mutate(request)
-	payload, err := common.Marshal(request)
-	if err != nil {
-		return err
-	}
+func (s *redisDesktopOAuthStore) updateByStateAtomic(state string, resultUserID int, errorMessage string) error {
+	// Atomic state update in Redis:
+	// a single Lua script reads state->handoff mapping and writes the updated payload.
 	ctx := context.Background()
-	pipe := s.client.TxPipeline()
-	pipe.Set(ctx, s.handoffKey(request.HandoffToken), payload, desktopOAuthTTL)
-	pipe.Expire(ctx, s.stateKey(state), desktopOAuthTTL)
-	_, err = pipe.Exec(ctx)
-	return err
+	ttlSeconds := int(desktopOAuthTTL / time.Second)
+	_, err := desktopOAuthUpdateScript.Run(
+		ctx,
+		s.client,
+		[]string{s.stateKey(state)},
+		s.handoffKeyPrefix(),
+		resultUserID,
+		time.Now().Format(time.RFC3339Nano),
+		errorMessage,
+		ttlSeconds,
+	).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil
+	}
+	return wrapDesktopOAuthStoreError(err)
+}
+
+func wrapDesktopOAuthStoreError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %v", errDesktopOAuthStoreUnavailable, err)
+}
+
+func isDesktopOAuthStoreUnavailableError(err error) bool {
+	return errors.Is(err, errDesktopOAuthStoreUnavailable)
 }
 
 func (s *redisDesktopOAuthStore) handoffKey(handoffToken string) string {
 	return fmt.Sprintf("%s:handoff:%s", desktopOAuthRedisPrefix, handoffToken)
+}
+
+func (s *redisDesktopOAuthStore) handoffKeyPrefix() string {
+	return fmt.Sprintf("%s:handoff:", desktopOAuthRedisPrefix)
 }
 
 func (s *redisDesktopOAuthStore) stateKey(state string) string {

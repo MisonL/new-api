@@ -25,7 +25,7 @@
 - `completed`：callback 成功后写入 result user id 与 completed at。
 - `failed`：callback 失败后写入 error message 与 completed at。
 - `consumed`：poll 读取 completed 或 failed 后删除 handoff 主记录和 state 索引。
-- `expired`：TTL 到期后自动不可见。
+- `expired`：TTL 到期后自动不可见。memory store 采用访问前惰性清理策略（`Create`、`GetByState`、`GetByHandoff`、`Complete`、`Fail`、`Consume` 入口统一触发 `cleanupExpiredLocked`）。
 
 ## 存储接口
 
@@ -54,6 +54,10 @@
 - 索引：`new-api:desktop_oauth:v1:state:<state>`，值为 handoff token。
 - TTL：两类 key 均使用 `desktopOAuthTTL`。
 - `Consume`：使用 Lua 在 Redis 内原子读取主记录、删除主记录、删除 state 索引，并返回主记录 JSON。
+- Lua 原子消费边缘处理口径：
+  - 主记录不存在：返回不存在，不执行额外删除。
+  - 主记录存在但 state 索引缺失：仍删除主记录并返回数据。
+  - state 索引存在但主记录缺失：清理残留 state 索引并返回不存在。
 
 ## 复杂性转移账本
 
@@ -68,7 +72,6 @@
 ## 验证矩阵
 
 - 内存 store：创建、按 state 查询、按 handoff 查询、成功完成、失败完成、消费删除、过期清理。
-- Redis store：key 编码、JSON 编解码、成功完成、失败完成、原子消费；无 Redis 环境时不宣称真实 Redis 已通过。
+- Redis store：key 编码、JSON 编解码、成功完成、失败完成、原子消费，以及 Lua 原子消费边缘情况（主缺失、索引缺失、索引残留）；无 Redis 环境时不宣称真实 Redis 已通过。
 - OAuth 主链：provider 错误写入 failed；login 忽略系统浏览器 session；bind 使用 start 阶段记录的 bind user。
 - 回归：普通 Web OAuth state 校验和 bind 分支不变。
-

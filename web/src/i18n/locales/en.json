@@ -1115,7 +1115,7 @@
     "密码重置": "Password Reset",
     "密码重置完成": "Password reset completed",
     "密码重置确认": "Password Reset Confirmation",
-  "密码长度至少为8个字符": "Password must be at least 8 characters long",
+  "密码长度至少为{{min}}个字符": "Password must be at least {{min}} characters long",
   "用户名长度不能超过{{max}}个字符": "Username cannot exceed {{max}} characters",
     "密钥": "Key",
     "密钥 JSON 必须包含 access_token": "",

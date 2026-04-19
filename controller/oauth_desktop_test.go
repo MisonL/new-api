@@ -28,6 +28,32 @@ type desktopOAuthTestProvider struct {
 	user *oauth.OAuthUser
 }
 
+type unavailableDesktopOAuthStore struct{}
+
+func (s *unavailableDesktopOAuthStore) Create(request *desktopOAuthRequest) error {
+	return errDesktopOAuthStoreUnavailable
+}
+
+func (s *unavailableDesktopOAuthStore) GetByState(state string) (*desktopOAuthRequest, bool, error) {
+	return nil, false, errDesktopOAuthStoreUnavailable
+}
+
+func (s *unavailableDesktopOAuthStore) GetByHandoff(handoffToken string) (*desktopOAuthRequest, bool, error) {
+	return nil, false, errDesktopOAuthStoreUnavailable
+}
+
+func (s *unavailableDesktopOAuthStore) Complete(state string, resultUserID int) error {
+	return errDesktopOAuthStoreUnavailable
+}
+
+func (s *unavailableDesktopOAuthStore) Fail(state string, message string) error {
+	return errDesktopOAuthStoreUnavailable
+}
+
+func (s *unavailableDesktopOAuthStore) Consume(handoffToken string) (*desktopOAuthRequest, bool, error) {
+	return nil, false, errDesktopOAuthStoreUnavailable
+}
+
 func (p *desktopOAuthTestProvider) GetName() string {
 	return p.name
 }
@@ -405,5 +431,32 @@ func TestDesktopOAuthRedisFlowSurvivesCrossRouterLifecycle(t *testing.T) {
 		t.Fatalf("failed to verify cross-router request cleanup: %v", err)
 	} else if found {
 		t.Fatalf("expected cross-router desktop oauth request to be consumed after polling")
+	}
+}
+
+func TestPollDesktopOAuthReturnsServiceUnavailableWhenStoreUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resetDesktopOAuthStoreForTest(&unavailableDesktopOAuthStore{})
+	t.Cleanup(func() {
+		resetDesktopOAuthStoreForTest(nil)
+	})
+
+	router := gin.New()
+	router.GET("/api/oauth/desktop/poll", PollDesktopOAuth)
+
+	token := strings.ReplaceAll(t.Name(), "/", "-")
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/oauth/desktop/poll?handoff_token="+token,
+		nil,
+	)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected poll to return 503 when store is unavailable, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "状态存储暂不可用") {
+		t.Fatalf("expected service unavailable message, got %s", recorder.Body.String())
 	}
 }

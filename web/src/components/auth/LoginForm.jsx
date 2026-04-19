@@ -358,7 +358,9 @@ const LoginForm = () => {
       const result = await onGitHubOAuthClicked(status.github_client_id, {
         shouldLogout: true,
       });
-      handleBrowserOAuthResult(result);
+      if (!handleBrowserOAuthResult(result)) {
+        showError(t('登录失败，请重试'));
+      }
     } catch (error) {
       showError(error?.message || t('登录失败，请重试'));
     } finally {
@@ -383,7 +385,9 @@ const LoginForm = () => {
       const result = await onDiscordOAuthClicked(status.discord_client_id, {
         shouldLogout: true,
       });
-      handleBrowserOAuthResult(result);
+      if (!handleBrowserOAuthResult(result)) {
+        showError(t('登录失败，请重试'));
+      }
     } catch (error) {
       showError(error?.message || t('登录失败，请重试'));
     } finally {
@@ -405,7 +409,9 @@ const LoginForm = () => {
         false,
         { shouldLogout: true },
       );
-      handleBrowserOAuthResult(result);
+      if (!handleBrowserOAuthResult(result)) {
+        showError(t('登录失败，请重试'));
+      }
     } catch (error) {
       showError(error?.message || t('登录失败，请重试'));
     } finally {
@@ -424,7 +430,9 @@ const LoginForm = () => {
       const result = await onLinuxDOOAuthClicked(status.linuxdo_client_id, {
         shouldLogout: true,
       });
-      handleBrowserOAuthResult(result);
+      if (!handleBrowserOAuthResult(result)) {
+        showError(t('登录失败，请重试'));
+      }
     } catch (error) {
       showError(error?.message || t('登录失败，请重试'));
     } finally {
@@ -450,6 +458,7 @@ const LoginForm = () => {
         showSuccess(t('检测到现有会话，已完成绑定'));
         return;
       }
+      showError(t('登录失败，请重试'));
     } catch (error) {
       showError(error?.message || t('操作失败'));
     } finally {

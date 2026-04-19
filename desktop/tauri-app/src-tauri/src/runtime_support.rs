@@ -114,7 +114,12 @@ pub fn is_ready_status_response(response: &str) -> bool {
         return false;
     }
 
-    body.contains("\"success\":true") && body.contains("\"version\":")
+    let payload: serde_json::Value = match serde_json::from_str(body) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    payload.get("success").and_then(serde_json::Value::as_bool) == Some(true)
+        && payload.get("version").is_some()
 }
 
 pub fn analyze_startup_error(detail: &str, log_lines: &[String]) -> ErrorDiagnosis {
@@ -124,6 +129,7 @@ pub fn analyze_startup_error(detail: &str, log_lines: &[String]) -> ErrorDiagnos
         format!("{detail}\n{}", log_lines.join("\n"))
     };
     let configured_port = extract_port_from_text(&joined_logs).unwrap_or(DEFAULT_LOCAL_SERVER_PORT);
+    let joined_logs_lower = joined_logs.to_lowercase();
 
     if joined_logs.contains("bind: address already in use")
         || joined_logs.contains("failed to start HTTP server")
@@ -153,7 +159,8 @@ pub fn analyze_startup_error(detail: &str, log_lines: &[String]) -> ErrorDiagnos
         };
     }
 
-    if joined_logs.contains("database is locked") || joined_logs.contains("unable to open database")
+    if joined_logs_lower.contains("database is locked")
+        || joined_logs_lower.contains("unable to open database")
     {
         return ErrorDiagnosis {
             title: "Database file is locked".to_string(),
@@ -163,7 +170,9 @@ pub fn analyze_startup_error(detail: &str, log_lines: &[String]) -> ErrorDiagnos
         };
     }
 
-    if joined_logs.contains("permission denied") || joined_logs.contains("access denied") {
+    if joined_logs_lower.contains("permission denied")
+        || joined_logs_lower.contains("access denied")
+    {
         return ErrorDiagnosis {
             title: "Permission denied".to_string(),
             summary: "New API does not have permission to access a required file or directory."
@@ -264,11 +273,7 @@ fn load_existing_desktop_secrets(secret_file: &Path) -> Result<DesktopSecrets, S
             session_secret,
             crypto_secret,
         }),
-        (Some(secret), None) | (None, Some(secret)) => Ok(DesktopSecrets {
-            session_secret: secret.clone(),
-            crypto_secret: secret,
-        }),
-        (None, None) => Err(format!(
+        _ => Err(format!(
             "desktop secret file is invalid: {}",
             secret_file.display()
         )),

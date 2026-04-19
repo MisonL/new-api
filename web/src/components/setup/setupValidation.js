@@ -47,7 +47,10 @@ export function validateAdminSetupValues(values) {
     !normalized.password ||
     normalized.password.length < ADMIN_PASSWORD_MIN_LENGTH
   ) {
-    return { key: '密码长度至少为8个字符' };
+    return {
+      key: '密码长度至少为{{min}}个字符',
+      params: { min: ADMIN_PASSWORD_MIN_LENGTH },
+    };
   }
   if (normalized.password !== normalized.confirmPassword) {
     return { key: '两次输入的密码不一致' };
