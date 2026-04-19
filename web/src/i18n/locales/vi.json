@@ -4069,5 +4069,14 @@
   "填写 JSON 数组，例如 [401,403,429,500,502,503,504]。": "Provide a JSON array, for example [401,403,429,500,502,503,504].",
   "Responses 流启动恢复仅作用于 /v1/responses 的流式请求首包前阶段。它会在短时渠道故障时通过 SSE ping 保持连接，并在恢复后继续返回真实内容；首包发出后不会跨渠道续传。": "Phục hồi khởi động luồng Responses chỉ áp dụng cho giai đoạn trước payload đầu tiên của các yêu cầu stream /v1/responses. Nó giữ kết nối bằng SSE ping khi kênh gặp sự cố ngắn hạn và tiếp tục trả về nội dung thực sau khi phục hồi; sau khi payload đầu tiên đã được gửi sẽ không tiếp tục truyền qua kênh khác. Chỉ những kênh được bật rõ ràng trong cài đặt kênh mới tham gia cửa sổ bảo vệ.",
   "允许该渠道参与 Responses 启动恢复": "Cho phép kênh này tham gia phục hồi khởi động Responses",
-  "仅在已全局开启后生效。开启后，该渠道可参与 /v1/responses 首包前的恢复等待窗口。": "Chỉ có hiệu lực khi công tắc toàn cục đã bật. Sau khi bật, kênh này có thể tham gia cửa sổ chờ phục hồi trước payload đầu tiên của /v1/responses."
+  "仅在已全局开启后生效。开启后，该渠道可参与 /v1/responses 首包前的恢复等待窗口。": "Chỉ có hiệu lực khi công tắc toàn cục đã bật. Sau khi bật, kênh này có thể tham gia cửa sổ chờ phục hồi trước payload đầu tiên của /v1/responses.",
+  "操作管理员": "Operator Admin",
+  "订单支付方式": "Order Payment Method",
+  "回调支付方式": "Callback Payment Method",
+  "回调调用者IP": "Callback Caller IP",
+  "服务器IP": "Server IP",
+  "节点名称": "Node Name",
+  "系统版本": "System Version",
+  "审计信息": "Audit Info",
+  "该记录由旧版本实例写入，缺少审计信息，建议将实例升级至最新版本以便记录服务器IP、回调IP、支付方式与系统版本等审计字段。": "This record was written by an older instance and lacks audit details. Upgrade the instance to the latest version to record server IP, callback IP, payment method, and system version."
 }
