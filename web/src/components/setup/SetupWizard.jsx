@@ -27,6 +27,10 @@ import DatabaseStep from './components/steps/DatabaseStep';
 import AdminStep from './components/steps/AdminStep';
 import UsageModeStep from './components/steps/UsageModeStep';
 import CompleteStep from './components/steps/CompleteStep';
+import {
+  normalizeSetupFormValues,
+  validateAdminSetupValues,
+} from './setupValidation';
 
 const SetupWizard = () => {
   const { t } = useTranslation();
@@ -129,21 +133,10 @@ const SetupWizard = () => {
         if (setupStatus.root_init) {
           return true; // 如果已经初始化，可以继续
         }
-        // 检查必填字段
-        if (
-          !formData.username ||
-          !formData.password ||
-          !formData.confirmPassword
-        ) {
-          showError(t('请填写完整的管理员账号信息'));
-          return false;
-        }
-        if (formData.password !== formData.confirmPassword) {
-          showError(t('两次输入的密码不一致'));
-          return false;
-        }
-        if (formData.password.length < 8) {
-          showError(t('密码长度至少为8个字符'));
+        const normalizedData = normalizeSetupFormValues(formData);
+        const validationError = validateAdminSetupValues(normalizedData);
+        if (validationError) {
+          showError(t(validationError.key, validationError.params));
           return false;
         }
         return true;
@@ -170,22 +163,13 @@ const SetupWizard = () => {
       return;
     }
 
-    const values = formRef.current.getValues();
+    const values = normalizeSetupFormValues(formRef.current.getValues());
 
     // For root_init=false, validate admin username and password
     if (!setupStatus.root_init) {
-      if (!values.username || !values.username.trim()) {
-        showError(t('请输入管理员用户名'));
-        return;
-      }
-
-      if (!values.password || values.password.length < 8) {
-        showError(t('密码长度至少为8个字符'));
-        return;
-      }
-
-      if (values.password !== values.confirmPassword) {
-        showError(t('两次输入的密码不一致'));
+      const validationError = validateAdminSetupValues(values);
+      if (validationError) {
+        showError(t(validationError.key, validationError.params));
         return;
       }
     }

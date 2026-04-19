@@ -1,7 +1,10 @@
 package controller
 
 import (
+	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -76,11 +79,18 @@ func PostSetup(c *gin.Context) {
 
 	// If root doesn't exist, validate and create admin account
 	if !rootExists {
-		// Validate username length: max 12 characters to align with model.User validation
-		if len(req.Username) > 12 {
+		req.Username = strings.TrimSpace(req.Username)
+		if req.Username == "" {
 			c.JSON(200, gin.H{
 				"success": false,
-				"message": "用户名长度不能超过12个字符",
+				"message": "请输入管理员用户名",
+			})
+			return
+		}
+		if utf8.RuneCountInString(req.Username) > model.UserNameMaxLength {
+			c.JSON(200, gin.H{
+				"success": false,
+				"message": fmt.Sprintf("用户名长度不能超过%d个字符", model.UserNameMaxLength),
 			})
 			return
 		}

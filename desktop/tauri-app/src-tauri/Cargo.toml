@@ -1,0 +1,30 @@
+[package]
+name = "new-api-tauri-desktop"
+version = "1.0.0"
+description = "New API desktop shell powered by Tauri 2"
+authors = ["MisonL"]
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/MisonL/new-api"
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "new_api_tauri_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.6", features = [] }
+
+[dependencies]
+getrandom = "0.3.3"
+sys-locale = "0.3.2"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.10.3", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.4.2"
+tauri-plugin-log = "2"
+tauri-plugin-shell = "2.3.5"
+tauri-plugin-single-instance = "2.4.1"

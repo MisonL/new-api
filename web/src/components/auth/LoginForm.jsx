@@ -36,6 +36,7 @@ import {
   onOIDCClicked,
   onLinuxDOOAuthClicked,
   onCustomOAuthClicked,
+  isDesktopApp,
   prepareCredentialRequestOptions,
   buildAssertionResult,
   isPasskeySupported,
@@ -215,6 +216,24 @@ const LoginForm = () => {
     }
   };
 
+  const handleBrowserOAuthResult = (result) => {
+    if (!result?.user) {
+      return false;
+    }
+
+    userDispatch({ type: 'login', payload: result.user });
+    localStorage.setItem('user', JSON.stringify(result.user));
+    setUserData(result.user);
+    updateAPI();
+    navigate('/console/token');
+    showSuccess(
+      result.action === 'bind'
+        ? t('检测到现有会话，已完成绑定并同步登录态')
+        : t('登录成功！'),
+    );
+    return true;
+  };
+
   function handleChange(name, value) {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   }
@@ -314,7 +333,7 @@ const LoginForm = () => {
   };
 
   // 包装的GitHub登录点击处理
-  const handleGitHubClick = () => {
+  const handleGitHubClick = async () => {
     if ((hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms) {
       showInfo(t('请先阅读并同意用户协议和隐私政策'));
       return;
@@ -325,69 +344,99 @@ const LoginForm = () => {
     setGithubLoading(true);
     setGithubButtonDisabled(true);
     setGithubButtonState('redirecting');
-    if (githubTimeoutRef.current) {
-      clearTimeout(githubTimeoutRef.current);
+    if (!isDesktopApp()) {
+      if (githubTimeoutRef.current) {
+        clearTimeout(githubTimeoutRef.current);
+      }
+      githubTimeoutRef.current = setTimeout(() => {
+        setGithubLoading(false);
+        setGithubButtonState('timeout');
+        setGithubButtonDisabled(true);
+      }, 20000);
     }
-    githubTimeoutRef.current = setTimeout(() => {
-      setGithubLoading(false);
-      setGithubButtonState('timeout');
-      setGithubButtonDisabled(true);
-    }, 20000);
     try {
-      onGitHubOAuthClicked(status.github_client_id, { shouldLogout: true });
+      const result = await onGitHubOAuthClicked(status.github_client_id, {
+        shouldLogout: true,
+      });
+      if (!handleBrowserOAuthResult(result)) {
+        showError(t('登录失败，请重试'));
+      }
+    } catch (error) {
+      showError(error?.message || t('登录失败，请重试'));
     } finally {
-      // 由于重定向，这里不会执行到，但为了完整性添加
-      setTimeout(() => setGithubLoading(false), 3000);
+      if (githubTimeoutRef.current) {
+        clearTimeout(githubTimeoutRef.current);
+        githubTimeoutRef.current = null;
+      }
+      setGithubLoading(false);
+      setGithubButtonDisabled(false);
+      setGithubButtonState('idle');
     }
   };
 
   // 包装的Discord登录点击处理
-  const handleDiscordClick = () => {
+  const handleDiscordClick = async () => {
     if ((hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms) {
       showInfo(t('请先阅读并同意用户协议和隐私政策'));
       return;
     }
     setDiscordLoading(true);
     try {
-      onDiscordOAuthClicked(status.discord_client_id, { shouldLogout: true });
+      const result = await onDiscordOAuthClicked(status.discord_client_id, {
+        shouldLogout: true,
+      });
+      if (!handleBrowserOAuthResult(result)) {
+        showError(t('登录失败，请重试'));
+      }
+    } catch (error) {
+      showError(error?.message || t('登录失败，请重试'));
     } finally {
-      // 由于重定向，这里不会执行到，但为了完整性添加
-      setTimeout(() => setDiscordLoading(false), 3000);
+      setDiscordLoading(false);
     }
   };
 
   // 包装的OIDC登录点击处理
-  const handleOIDCClick = () => {
+  const handleOIDCClick = async () => {
     if ((hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms) {
       showInfo(t('请先阅读并同意用户协议和隐私政策'));
       return;
     }
     setOidcLoading(true);
     try {
-      onOIDCClicked(
+      const result = await onOIDCClicked(
         status.oidc_authorization_endpoint,
         status.oidc_client_id,
         false,
         { shouldLogout: true },
       );
+      if (!handleBrowserOAuthResult(result)) {
+        showError(t('登录失败，请重试'));
+      }
+    } catch (error) {
+      showError(error?.message || t('登录失败，请重试'));
     } finally {
-      // 由于重定向，这里不会执行到，但为了完整性添加
-      setTimeout(() => setOidcLoading(false), 3000);
+      setOidcLoading(false);
     }
   };
 
   // 包装的LinuxDO登录点击处理
-  const handleLinuxDOClick = () => {
+  const handleLinuxDOClick = async () => {
     if ((hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms) {
       showInfo(t('请先阅读并同意用户协议和隐私政策'));
       return;
     }
     setLinuxdoLoading(true);
     try {
-      onLinuxDOOAuthClicked(status.linuxdo_client_id, { shouldLogout: true });
+      const result = await onLinuxDOOAuthClicked(status.linuxdo_client_id, {
+        shouldLogout: true,
+      });
+      if (!handleBrowserOAuthResult(result)) {
+        showError(t('登录失败，请重试'));
+      }
+    } catch (error) {
+      showError(error?.message || t('登录失败，请重试'));
     } finally {
-      // 由于重定向，这里不会执行到，但为了完整性添加
-      setTimeout(() => setLinuxdoLoading(false), 3000);
+      setLinuxdoLoading(false);
     }
   };
 
@@ -402,23 +451,14 @@ const LoginForm = () => {
       const result = await onCustomOAuthClicked(provider, {
         shouldLogout: true,
       });
-      if (provider.kind === 'trusted_header' && result?.user) {
-        userDispatch({ type: 'login', payload: result.user });
-        localStorage.setItem('user', JSON.stringify(result.user));
-        setUserData(result.user);
-        updateAPI();
-        navigate('/');
-        showSuccess(
-          result.action === 'bind'
-            ? t('检测到现有会话，已完成绑定并同步登录态')
-            : t('登录成功！'),
-        );
+      if (handleBrowserOAuthResult(result)) {
         return;
       }
-      if (provider.kind === 'trusted_header' && result?.action === 'bind') {
+      if (result?.action === 'bind') {
         showSuccess(t('检测到现有会话，已完成绑定'));
         return;
       }
+      showError(t('登录失败，请重试'));
     } catch (error) {
       showError(error?.message || t('操作失败'));
     } finally {
