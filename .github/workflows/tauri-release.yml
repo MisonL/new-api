@@ -70,7 +70,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -115,7 +115,6 @@ jobs:
         with:
           projectPath: desktop/tauri-app
           tauriScript: bun run
-          args: --config ./src-tauri/tauri.conf.json
 
       - name: Upload Tauri bundle artifacts
         uses: actions/upload-artifact@v4
@@ -142,7 +141,13 @@ jobs:
         with:
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            tauri-bundle-*/**/*
+            tauri-bundle-*/**/*.dmg
+            tauri-bundle-*/**/*.app.tar.gz
+            tauri-bundle-*/**/*.AppImage
+            tauri-bundle-*/**/*.deb
+            tauri-bundle-*/**/*.rpm
+            tauri-bundle-*/**/*.msi
+            tauri-bundle-*/**/*-setup.exe
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
