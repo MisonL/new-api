@@ -1,0 +1,148 @@
+name: Release Tauri Desktop
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  NODE_OPTIONS: '--max_old_space_size=6144'
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Stable tag name to release (e.g. v1.0.1)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build Tauri bundle (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows
+          - os: macos-15
+            platform: macos
+          - os: ubuntu-22.04
+            platform: linux
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag and validate VERSION
+        run: |
+          TAG_NAME="${{ github.event.inputs.tag }}"
+          git fetch --tags --force
+          if ! git rev-parse "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
+            echo "Tag '${TAG_NAME}' does not exist"
+            exit 1
+          fi
+          git checkout "refs/tags/${TAG_NAME}"
+
+          VERSION="$(cat VERSION)"
+          if [[ "${TAG_NAME}" != "${VERSION}" ]]; then
+            echo "Tag '${TAG_NAME}' does not match VERSION '${VERSION}'"
+            exit 1
+          fi
+          if [[ ! "${TAG_NAME}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag '${TAG_NAME}' is not a stable semver tag (expected: vMAJOR.MINOR.PATCH)"
+            exit 1
+          fi
+
+          echo "TAG_NAME=${TAG_NAME}" >> "$GITHUB_ENV"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.12
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.1'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux desktop dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            unzip \
+            wget
+
+      - name: Prepare desktop web and sidecar
+        run: |
+          cd desktop/tauri-app
+          bun install --frozen-lockfile
+          bun run prepare:version
+          bun run check:version
+          bun run prepare:web
+          bun run prepare:sidecar
+
+      - name: Run desktop Rust integration test
+        run: |
+          cd desktop/tauri-app
+          bun run test:rust
+
+      - name: Build Tauri desktop bundle
+        uses: tauri-apps/tauri-action@v0.6.2
+        with:
+          projectPath: desktop/tauri-app
+          tauriScript: bun run
+          args: --config ./src-tauri/tauri.conf.json
+
+      - name: Upload Tauri bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-bundle-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            desktop/tauri-app/src-tauri/target/release/bundle/**/*
+
+  release:
+    name: Upload Tauri artifacts to GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        run: |
+          echo "TAG_NAME=${{ github.event.inputs.tag }}" >> "$GITHUB_ENV"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          files: |
+            tauri-bundle-*/**/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

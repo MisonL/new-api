@@ -1,6 +1,6 @@
 [package]
 name = "new-api-tauri-desktop"
-version = "1.0.0"
+version = "1.1.0"
 description = "New API desktop shell powered by Tauri 2"
 authors = ["MisonL"]
 license = "AGPL-3.0-or-later"

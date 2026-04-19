@@ -1,12 +1,9 @@
 name: Publish Docker image (alpha, GHCR + optional Docker Hub)
 
 on:
-  push:
-    branches:
-      - alpha
   workflow_dispatch:
     inputs:
-      name:
+      reason:
         description: "reason"
         required: false
 
@@ -14,8 +11,34 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
+  resolve_alpha_source:
+    name: Resolve alpha source
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Check out alpha branch
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          ref: alpha
+
+      - name: Resolve alpha version
+        id: resolve
+        run: |
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          VERSION="alpha-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved alpha source: $SOURCE_SHA"
+          echo "Resolved alpha version: $VERSION"
+
   build_single_arch:
     name: Build & push (${{ matrix.arch }}) [native]
+    needs: [resolve_alpha_source]
     strategy:
       fail-fast: false
       matrix:
@@ -36,15 +59,17 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
+          ref: ${{ needs.resolve_alpha_source.outputs.source_sha }}
 
       - name: Determine alpha version
         id: version
         run: |
-          VERSION="alpha-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+          VERSION="${{ needs.resolve_alpha_source.outputs.version }}"
+          SOURCE_SHA="${{ needs.resolve_alpha_source.outputs.source_sha }}"
           echo "$VERSION" > VERSION
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "Publishing version: $VERSION for ${{ matrix.arch }}"
+          echo "Publishing version: $VERSION from $SOURCE_SHA for ${{ matrix.arch }}"
 
       - name: Prepare registry targets
         id: registry
@@ -134,17 +159,12 @@ jobs:
 
   create_manifests:
     name: Create multi-arch manifests (GHCR + optional Docker Hub)
-    needs: [build_single_arch]
+    needs: [resolve_alpha_source, build_single_arch]
     runs-on: ubuntu-latest
     permissions:
       packages: write
       contents: read
     steps:
-      - name: Check out (shallow)
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 1
-
       - name: Prepare registry targets
         id: registry
         run: |
@@ -156,12 +176,14 @@ jobs:
             echo "dockerhub_enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Determine alpha version
+      - name: Resolve alpha version
         id: version
         run: |
-          VERSION="alpha-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+          VERSION="${{ needs.resolve_alpha_source.outputs.version }}"
+          SOURCE_SHA="${{ needs.resolve_alpha_source.outputs.source_sha }}"
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -211,6 +233,7 @@ jobs:
         run: |
           {
             echo "### Multi-arch Manifest Digests"
+            echo "source: ${SOURCE_SHA}"
             echo '```'
             docker buildx imagetools inspect "${{ steps.registry.outputs.ghcr_repository }}:alpha"
             if [ "${{ steps.registry.outputs.dockerhub_enabled }}" = "true" ]; then

@@ -11,6 +11,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-19
+
 ### Added
 
 - 增加完全隔离开发环境编排与模板：
@@ -30,6 +32,9 @@
 - Vite 开发代理支持通过 `VITE_DEV_PROXY_TARGET` 显式指定目标地址，便于只读联调环境接入
 - `.env.example`、`README.md`、`.gitignore` 已同步更新到新的开发环境与本地文件管理规则
 - GitHub-only 发布与文档策略已继续收敛，项目说明保持中文单入口
+- 桌面端发布链路从 Electron 切换为 Tauri 2，移除 Electron 代码目录和对应产物流程
+- Release CI/CD 触发机制统一调整为手动 `workflow_dispatch`，不再通过推送 tag 或分支自动发布
+- 正式发布流程新增稳定版本门禁（仅允许 `vMAJOR.MINOR.PATCH`）并固定 alpha 镜像来源为 `alpha` 分支头提交
 
 ### Fixed
 
@@ -68,5 +73,6 @@
 - 解耦 `Responses` 首包恢复逻辑与共享渠道 DTO，降低通道适配耦合风险
 - 收敛若干已在本仓库持续维护的稳定性修复，包括分发缓存反同步、负延迟保护等
 
-[Unreleased]: https://github.com/MisonL/new-api/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/MisonL/new-api/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/MisonL/new-api/tree/v1.1.0
 [1.0.0]: https://github.com/MisonL/new-api/tree/v1.0.0

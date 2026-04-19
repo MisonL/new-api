@@ -52,16 +52,6 @@ export function getDesktopRuntime() {
     };
   }
 
-  const electronRuntime = currentWindow.electron;
-  if (electronRuntime?.isElectron) {
-    return {
-      isDesktopApp: true,
-      platform: 'electron',
-      dataDir: electronRuntime.dataDir || '',
-      openExternalUrl: null,
-    };
-  }
-
   return getDefaultRuntime();
 }
 

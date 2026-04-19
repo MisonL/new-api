@@ -7,13 +7,13 @@ env:
 on:
   workflow_dispatch:
     inputs:
-      name:
+      tag:
+        description: 'Stable tag name to release (e.g. v1.0.1)'
+        required: true
+        type: string
+      reason:
         description: 'reason'
         required: false
-  push:
-    tags:
-      - '*'
-      - '!*-alpha*'
 
 jobs:
   linux:
@@ -24,17 +24,26 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          ref: refs/tags/${{ github.event.inputs.tag }}
       - name: Determine Version
         run: |
+          TAG_NAME="${{ github.event.inputs.tag }}"
+          if ! git rev-parse "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag '$TAG_NAME' does not exist"
+            exit 1
+          fi
+
           VERSION=$(cat VERSION)
-          if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
-            TAG_NAME="${GITHUB_REF#refs/tags/}"
-            if [[ "$TAG_NAME" != "$VERSION" ]]; then
-              echo "Tag '$TAG_NAME' does not match VERSION '$VERSION'"
-              exit 1
-            fi
+          if [[ "$TAG_NAME" != "$VERSION" ]]; then
+            echo "Tag '$TAG_NAME' does not match VERSION '$VERSION'"
+            exit 1
+          fi
+          if [[ ! "$TAG_NAME" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag '$TAG_NAME' is not a stable semver tag (expected: vMAJOR.MINOR.PATCH)"
+            exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_ENV"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: latest
@@ -64,8 +73,8 @@ jobs:
 
       - name: Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
+          tag_name: ${{ env.TAG_NAME }}
           files: |
             new-api-*
             checksums-linux.txt
@@ -80,17 +89,26 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          ref: refs/tags/${{ github.event.inputs.tag }}
       - name: Determine Version
         run: |
+          TAG_NAME="${{ github.event.inputs.tag }}"
+          if ! git rev-parse "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag '$TAG_NAME' does not exist"
+            exit 1
+          fi
+
           VERSION=$(cat VERSION)
-          if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
-            TAG_NAME="${GITHUB_REF#refs/tags/}"
-            if [[ "$TAG_NAME" != "$VERSION" ]]; then
-              echo "Tag '$TAG_NAME' does not match VERSION '$VERSION'"
-              exit 1
-            fi
+          if [[ "$TAG_NAME" != "$VERSION" ]]; then
+            echo "Tag '$TAG_NAME' does not match VERSION '$VERSION'"
+            exit 1
+          fi
+          if [[ ! "$TAG_NAME" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag '$TAG_NAME' is not a stable semver tag (expected: vMAJOR.MINOR.PATCH)"
+            exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_ENV"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: latest
@@ -116,8 +134,8 @@ jobs:
 
       - name: Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
+          tag_name: ${{ env.TAG_NAME }}
           files: |
             new-api-macos-*
             checksums-macos.txt
@@ -135,17 +153,26 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          ref: refs/tags/${{ github.event.inputs.tag }}
       - name: Determine Version
         run: |
+          TAG_NAME="${{ github.event.inputs.tag }}"
+          if ! git rev-parse "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag '$TAG_NAME' does not exist"
+            exit 1
+          fi
+
           VERSION=$(cat VERSION)
-          if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
-            TAG_NAME="${GITHUB_REF#refs/tags/}"
-            if [[ "$TAG_NAME" != "$VERSION" ]]; then
-              echo "Tag '$TAG_NAME' does not match VERSION '$VERSION'"
-              exit 1
-            fi
+          if [[ "$TAG_NAME" != "$VERSION" ]]; then
+            echo "Tag '$TAG_NAME' does not match VERSION '$VERSION'"
+            exit 1
+          fi
+          if [[ ! "$TAG_NAME" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag '$TAG_NAME' is not a stable semver tag (expected: vMAJOR.MINOR.PATCH)"
+            exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_ENV"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: latest
@@ -170,8 +197,8 @@ jobs:
 
       - name: Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
+          tag_name: ${{ env.TAG_NAME }}
           files: |
             new-api-*.exe
             checksums-windows.txt

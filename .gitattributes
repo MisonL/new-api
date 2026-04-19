@@ -34,7 +34,6 @@
 # ============================================
 # GitHub Linguist - Language Detection
 # ============================================
-electron/** linguist-vendored
 web/** linguist-vendored
 
 # Un-vendor core frontend source to keep JavaScript visible in language stats

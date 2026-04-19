@@ -36,10 +36,6 @@ test('优先读取注入的桌面运行时', () => {
       dataDir: '/tmp/new-api',
       openExternalUrl,
     },
-    electron: {
-      isElectron: true,
-      dataDir: '/tmp/electron',
-    },
   };
 
   assert.deepEqual(getDesktopRuntime(), {
@@ -49,22 +45,6 @@ test('优先读取注入的桌面运行时', () => {
     openExternalUrl,
   });
   assert.equal(isDesktopApp(), true);
-});
-
-test('无注入运行时时回退到 Electron 桥接', () => {
-  globalThis.window = {
-    electron: {
-      isElectron: true,
-      dataDir: '/tmp/electron',
-    },
-  };
-
-  assert.deepEqual(getDesktopRuntime(), {
-    isDesktopApp: true,
-    platform: 'electron',
-    dataDir: '/tmp/electron',
-    openExternalUrl: null,
-  });
 });
 
 test('普通 Web 环境保持非桌面语义', () => {

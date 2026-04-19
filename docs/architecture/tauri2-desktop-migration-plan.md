@@ -1,5 +1,7 @@
 # Tauri 2 桌面端替换 Electron 迁移规划
 
+状态：已完成迁移，`electron/` 目录与 `electron-build.yml` 已移除，桌面产物发布改为 `.github/workflows/tauri-release.yml`。本文件仅保留为迁移审计记录。
+
 日期：2026-04-16
 分支：`feat/desktop-tauri2-migration`
 当前基线：`main`

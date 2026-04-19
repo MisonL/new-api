@@ -8,6 +8,7 @@
 
 - 标准变更记录文件：[CHANGELOG.md](/Volumes/Work/code/new-api/CHANGELOG.md)
 - 维护方式：`Unreleased` 持续记录当前 `main` 上尚未发布的改动；正式发布时归档到对应版本
+- 当前稳定版本：`v1.1.0`
 - 当前独立版本起点：`v1.0.0`
 
 ## 本仓库独有的新增/改动
@@ -127,9 +128,12 @@ cd web && bun run build
 ## CI/CD
 
 - 版本单一来源：根目录 `VERSION`
-- `release.yml`、`electron-build.yml`、Docker 构建都会读取 `VERSION`
-- tag 发布时，workflow 会校验 tag 名与 `VERSION` 完全一致
+- `release.yml`、`tauri-release.yml`、Docker 构建都会读取 `VERSION`
+- 发布流程仅支持手动触发 `workflow_dispatch`，不再由 `push tag` 自动触发
+- 正式发布仅允许稳定 semver tag（`vMAJOR.MINOR.PATCH`），并校验输入 tag 与 `VERSION` 完全一致
+- 桌面客户端产物仅由 Tauri 2 工作流发布，Electron 产物流程已移除
 - Docker 镜像默认发布到 `ghcr.io/misonl/new-api`
+- alpha Docker 镜像流程固定使用 `alpha` 分支头提交作为构建来源
 - 如需同时发布到 Docker Hub，需要配置仓库 secrets：
   - `DOCKERHUB_USERNAME`
   - `DOCKERHUB_TOKEN`
