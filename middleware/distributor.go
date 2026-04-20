@@ -396,7 +396,10 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, channel.GetOtherSettings())
 	common.SetContextKey(c, constant.ContextKeyChannelOtherSettingRaw, channel.OtherSettings)
 	paramOverride := channel.GetParamOverride()
-	headerOverride := channel.GetHeaderOverride()
+	headerOverride, err := service.BuildChannelRuntimeHeaderOverride(channel)
+	if err != nil {
+		return types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
+	}
 	if mergedParam, applied := service.ApplyChannelAffinityOverrideTemplate(c, paramOverride); applied {
 		paramOverride = mergedParam
 	}
