@@ -48,13 +48,34 @@ import {
   IconSetting,
 } from '@douyinfe/semi-icons';
 import { getChannelModels } from '../../../../helpers';
+import {
+  applyUserAgentPresetToHeaderOverride,
+  buildUserAgentStrategyPayload,
+  normalizeHeaderTemplateContent,
+  normalizeUserAgentStrategy,
+  normalizeUserAgentValues,
+} from '../../../../helpers/headerOverrideUserAgent';
 import { useTranslation } from 'react-i18next';
+import HeaderOverrideUserAgentPresets from './HeaderOverrideUserAgentPresets';
+import UserHeaderTemplateManager from './UserHeaderTemplateManager';
 
 const { Text, Title } = Typography;
 
 const MODEL_MAPPING_EXAMPLE = {
   'gpt-3.5-turbo': 'gpt-3.5-turbo-0125',
 };
+
+const HEADER_POLICY_MODE_OPTIONS = [
+  { label: '跟随系统默认', value: 'system_default' },
+  { label: '渠道优先', value: 'prefer_channel' },
+  { label: '标签优先', value: 'prefer_tag' },
+  { label: '合并', value: 'merge' },
+];
+
+const USER_AGENT_STRATEGY_MODE_OPTIONS = [
+  { label: '轮询', value: 'round_robin' },
+  { label: '随机', value: 'random' },
+];
 
 const EditTagModal = (props) => {
   const { t } = useTranslation();
@@ -72,9 +93,16 @@ const EditTagModal = (props) => {
     groups: [],
     models: [],
     param_override: null,
-    header_override: null,
+    header_override: '',
+    header_policy_mode: 'system_default',
+    override_header_user_agent: false,
+    user_agent_strategy_configured: false,
+    user_agent_strategy_enabled: false,
+    user_agent_strategy_mode: 'round_robin',
+    user_agent_strategy_user_agents: [],
   };
   const [inputs, setInputs] = useState(originInputs);
+  const [tagPolicyExists, setTagPolicyExists] = useState(false);
   const modelSearchMatchedCount = useMemo(() => {
     const keyword = modelSearchValue.trim();
     if (!keyword) {
@@ -165,6 +193,48 @@ const EditTagModal = (props) => {
     }
   };
 
+  const applyHeaderOverrideUserAgentPreset = (preset) => {
+    const result = applyUserAgentPresetToHeaderOverride(
+      inputs.header_override,
+      preset.ua,
+    );
+
+    if (!result.ok) {
+      showInfo(t(result.message));
+      return;
+    }
+
+    handleInputChange('header_override', result.value);
+  };
+
+  const handleUserAgentStrategyListChange = (value) => {
+    const normalized = normalizeUserAgentValues(value);
+    handleInputChange('user_agent_strategy_user_agents', normalized);
+    if (normalized.length > 0 || inputs.user_agent_strategy_enabled) {
+      handleInputChange('user_agent_strategy_configured', true);
+    }
+  };
+
+  const appendUserAgentStrategyPreset = (preset) => {
+    const normalized = normalizeUserAgentValues([
+      ...(inputs.user_agent_strategy_user_agents || []),
+      preset.ua,
+    ]);
+    handleInputChange('user_agent_strategy_user_agents', normalized);
+    handleInputChange('user_agent_strategy_enabled', true);
+    handleInputChange('user_agent_strategy_configured', true);
+  };
+
+  const clearTagHeaderPolicyDraft = () => {
+    handleInputChange('header_override', '');
+    handleInputChange('header_policy_mode', 'system_default');
+    handleInputChange('override_header_user_agent', false);
+    handleInputChange('user_agent_strategy_configured', false);
+    handleInputChange('user_agent_strategy_enabled', false);
+    handleInputChange('user_agent_strategy_mode', 'round_robin');
+    handleInputChange('user_agent_strategy_user_agents', []);
+  };
+
   const fetchModels = async () => {
     try {
       let res = await API.get(`/api/channel/models`);
@@ -195,23 +265,58 @@ const EditTagModal = (props) => {
     }
   };
 
+  const fetchTagHeaderPolicy = async () => {
+    if (!tag) {
+      return;
+    }
+    const res = await API.get(
+      `/api/channel/tag-policy?tag=${encodeURIComponent(tag)}`,
+    );
+    const policy = res?.data?.data || {};
+    const rawUserAgentStrategy =
+      policy.ua_strategy &&
+      typeof policy.ua_strategy === 'object' &&
+      !Array.isArray(policy.ua_strategy)
+        ? policy.ua_strategy
+        : null;
+    const normalizedUserAgentStrategy = normalizeUserAgentStrategy(
+      rawUserAgentStrategy,
+    );
+    setTagPolicyExists(policy.exists === true);
+    setInputs((prev) => ({
+      ...prev,
+      header_override: policy.header_override || '',
+      header_policy_mode: policy.header_policy_mode || 'system_default',
+      override_header_user_agent: policy.override_header_user_agent === true,
+      user_agent_strategy_configured: rawUserAgentStrategy !== null,
+      user_agent_strategy_enabled: rawUserAgentStrategy?.enabled === true,
+      user_agent_strategy_mode:
+        normalizedUserAgentStrategy?.mode ||
+        String(rawUserAgentStrategy?.mode || '').trim() ||
+        'round_robin',
+      user_agent_strategy_user_agents: normalizeUserAgentValues(
+        rawUserAgentStrategy?.user_agents || rawUserAgentStrategy?.userAgents || [],
+      ),
+    }));
+  };
+
   const handleSave = async (values) => {
     setLoading(true);
     const formVals = values || formApiRef.current?.getValues() || {};
-    let data = { tag };
+    const bulkData = { tag };
     if (formVals.model_mapping) {
       if (!verifyJSON(formVals.model_mapping)) {
         showInfo('模型映射必须是合法的 JSON 格式！');
         setLoading(false);
         return;
       }
-      data.model_mapping = formVals.model_mapping;
+      bulkData.model_mapping = formVals.model_mapping;
     }
     if (formVals.groups && formVals.groups.length > 0) {
-      data.groups = formVals.groups.join(',');
+      bulkData.groups = formVals.groups.join(',');
     }
     if (formVals.models && formVals.models.length > 0) {
-      data.models = formVals.models.join(',');
+      bulkData.models = formVals.models.join(',');
     }
     if (
       formVals.param_override !== undefined &&
@@ -228,52 +333,108 @@ const EditTagModal = (props) => {
         setLoading(false);
         return;
       }
-      data.param_override = trimmedParamOverride;
+      bulkData.param_override = trimmedParamOverride;
+    }
+    const requestedTag = String(formVals.new_tag ?? '').trim();
+    const nextTag = requestedTag === '' ? '' : requestedTag || tag;
+    if (requestedTag !== tag) {
+      bulkData.new_tag = requestedTag;
+    }
+
+    const normalizedHeaderOverride = normalizeHeaderTemplateContent(
+      formVals.header_override,
+      {
+        allowEmpty: true,
+      },
+    );
+    if (!normalizedHeaderOverride.ok) {
+      showInfo(t(normalizedHeaderOverride.message));
+      setLoading(false);
+      return;
+    }
+
+    const userAgentStrategyPayload = buildUserAgentStrategyPayload({
+      configured: formVals.user_agent_strategy_configured,
+      enabled: formVals.user_agent_strategy_enabled,
+      mode: formVals.user_agent_strategy_mode,
+      userAgents: formVals.user_agent_strategy_user_agents,
+    });
+    if (!userAgentStrategyPayload.ok) {
+      showInfo(t(userAgentStrategyPayload.message));
+      setLoading(false);
+      return;
+    }
+
+    const headerPolicyMode = formVals.header_policy_mode || 'system_default';
+    const overrideHeaderUserAgent =
+      formVals.override_header_user_agent === true;
+    const shouldPersistPolicy =
+      normalizedHeaderOverride.value !== '' ||
+      headerPolicyMode !== 'system_default' ||
+      overrideHeaderUserAgent ||
+      userAgentStrategyPayload.value !== null;
+    if (nextTag === '' && shouldPersistPolicy) {
+      showInfo(t('清空标签前请先清空标签级请求头策略'));
+      setLoading(false);
+      return;
     }
     if (
-      formVals.header_override !== undefined &&
-      formVals.header_override !== null
-    ) {
-      if (typeof formVals.header_override !== 'string') {
-        showInfo('请求头覆盖必须是合法的 JSON 格式！');
-        setLoading(false);
-        return;
-      }
-      const trimmedHeaderOverride = formVals.header_override.trim();
-      if (trimmedHeaderOverride !== '' && !verifyJSON(trimmedHeaderOverride)) {
-        showInfo('请求头覆盖必须是合法的 JSON 格式！');
-        setLoading(false);
-        return;
-      }
-      data.header_override = trimmedHeaderOverride;
-    }
-    data.new_tag = formVals.new_tag;
-    if (
-      data.model_mapping === undefined &&
-      data.groups === undefined &&
-      data.models === undefined &&
-      data.new_tag === undefined &&
-      data.param_override === undefined &&
-      data.header_override === undefined
+      bulkData.model_mapping === undefined &&
+      bulkData.groups === undefined &&
+      bulkData.models === undefined &&
+      bulkData.new_tag === undefined &&
+      bulkData.param_override === undefined &&
+      !shouldPersistPolicy &&
+      !tagPolicyExists
     ) {
       showWarning('没有任何修改！');
       setLoading(false);
       return;
     }
-    await submit(data);
-    setLoading(false);
-  };
 
-  const submit = async (data) => {
     try {
-      const res = await API.put('/api/channel/tag', data);
-      if (res?.data?.success) {
-        showSuccess('标签更新成功！');
-        refresh();
-        handleClose();
+      if (
+        bulkData.model_mapping !== undefined ||
+        bulkData.groups !== undefined ||
+        bulkData.models !== undefined ||
+        bulkData.new_tag !== undefined ||
+        bulkData.param_override !== undefined
+      ) {
+        const bulkRes = await API.put('/api/channel/tag', bulkData);
+        if (!bulkRes?.data?.success) {
+          throw new Error(bulkRes?.data?.message || '标签更新失败');
+        }
       }
+
+      if (shouldPersistPolicy) {
+        const policyRes = await API.put('/api/channel/tag-policy', {
+          tag: nextTag,
+          header_override: normalizedHeaderOverride.value,
+          header_policy_mode: headerPolicyMode,
+          override_header_user_agent: overrideHeaderUserAgent,
+          ua_strategy: userAgentStrategyPayload.value,
+        });
+        if (!policyRes?.data?.success) {
+          throw new Error(policyRes?.data?.message || '标签请求头策略保存失败');
+        }
+      }
+
+      if (tagPolicyExists && (!shouldPersistPolicy || nextTag !== tag)) {
+        const deleteRes = await API.delete(
+          `/api/channel/tag-policy?tag=${encodeURIComponent(tag)}`,
+        );
+        if (!deleteRes?.data?.success) {
+          throw new Error(deleteRes?.data?.message || '标签请求头策略删除失败');
+        }
+      }
+
+      showSuccess('标签更新成功！');
+      refresh();
+      handleClose();
     } catch (error) {
-      showError(error);
+      showError(error.message || error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -291,11 +452,14 @@ const EditTagModal = (props) => {
   }, [originModelOptions, inputs.models]);
 
   useEffect(() => {
-    const fetchTagModels = async () => {
+    const fetchTagData = async () => {
       if (!tag) return;
       setLoading(true);
       try {
-        const res = await API.get(`/api/channel/tag/models?tag=${tag}`);
+        const [res] = await Promise.all([
+          API.get(`/api/channel/tag/models?tag=${encodeURIComponent(tag)}`),
+          fetchTagHeaderPolicy(),
+        ]);
         if (res?.data?.success) {
           const models = res.data.data ? res.data.data.split(',') : [];
           handleInputChange('models', models);
@@ -311,7 +475,7 @@ const EditTagModal = (props) => {
 
     fetchModels().then();
     fetchGroups().then();
-    fetchTagModels().then();
+    fetchTagData().then();
     setModelSearchValue('');
     if (formApiRef.current) {
       formApiRef.current.setValues({
@@ -326,6 +490,7 @@ const EditTagModal = (props) => {
       tag: tag,
       new_tag: tag,
     });
+    setTagPolicyExists(false);
   }, [visible, tag]);
 
   useEffect(() => {
@@ -571,9 +736,11 @@ const EditTagModal = (props) => {
                     <IconSetting size={16} />
                   </Avatar>
                   <div>
-                    <Text className='text-lg font-medium'>{t('高级设置')}</Text>
+                    <Text className='text-lg font-medium'>
+                      {t('标签级请求头策略')}
+                    </Text>
                     <div className='text-xs text-gray-600'>
-                      {t('渠道的高级配置选项')}
+                      {t('这里配置的是标签运行时请求头策略，不再是批量写入渠道字段')}
                     </div>
                   </div>
                 </div>
@@ -691,12 +858,22 @@ const EditTagModal = (props) => {
                           <Text
                             className='!text-semi-color-primary cursor-pointer'
                             onClick={() =>
-                              handleInputChange('header_override', null)
+                              handleInputChange('header_override', '')
                             }
                           >
                             {t('不更改')}
                           </Text>
+                          <Text
+                            className='!text-semi-color-primary cursor-pointer'
+                            onClick={() => handleInputChange('header_override', '')}
+                          >
+                            {t('清空')}
+                          </Text>
                         </div>
+                        <HeaderOverrideUserAgentPresets
+                          t={t}
+                          onSelect={applyHeaderOverrideUserAgentPreset}
+                        />
                         <div>
                           <Text type='tertiary' size='small'>
                             {t('支持变量：')}
@@ -709,6 +886,110 @@ const EditTagModal = (props) => {
                         </div>
                       </div>
                     }
+                  />
+                  <div
+                    className='mt-3 rounded-xl p-3'
+                    style={{
+                      backgroundColor: 'var(--semi-color-fill-0)',
+                      border: '1px solid var(--semi-color-fill-2)',
+                    }}
+                  >
+                    <div className='flex items-start justify-between gap-3 mb-3'>
+                      <div>
+                        <Text strong>{t('User-Agent 策略')}</Text>
+                        <div className='mt-1'>
+                          <Text type='tertiary' size='small'>
+                            {t(
+                              '标签策略会在运行时参与与渠道策略的优先级决策，并影响最终发往上游的 User-Agent',
+                            )}
+                          </Text>
+                        </div>
+                      </div>
+                      <Text
+                        className='!text-semi-color-primary cursor-pointer'
+                        onClick={clearTagHeaderPolicyDraft}
+                      >
+                        {t('清空标签策略')}
+                      </Text>
+                    </div>
+                    <div className='grid gap-3 md:grid-cols-2'>
+                      <Form.Switch
+                        field='user_agent_strategy_enabled'
+                        label={t('启用 UA 策略')}
+                        checkedText={t('开启')}
+                        uncheckedText={t('关闭')}
+                        initValue={false}
+                        onChange={(checked) => {
+                          handleInputChange('user_agent_strategy_enabled', checked);
+                          if (
+                            checked ||
+                            (inputs.user_agent_strategy_user_agents || []).length > 0
+                          ) {
+                            handleInputChange('user_agent_strategy_configured', true);
+                          }
+                        }}
+                      />
+                      <Form.Switch
+                        field='override_header_user_agent'
+                        label={t('覆盖静态 User-Agent')}
+                        checkedText={t('覆盖')}
+                        uncheckedText={t('保留静态值')}
+                        initValue={false}
+                        onChange={(checked) =>
+                          handleInputChange('override_header_user_agent', checked)
+                        }
+                      />
+                      <Form.Select
+                        field='header_policy_mode'
+                        label={t('请求头优先级')}
+                        optionList={HEADER_POLICY_MODE_OPTIONS.map((item) => ({
+                          ...item,
+                          label: t(item.label),
+                        }))}
+                        initValue='system_default'
+                        onChange={(value) =>
+                          handleInputChange('header_policy_mode', value)
+                        }
+                      />
+                      <Form.Select
+                        field='user_agent_strategy_mode'
+                        label={t('UA 策略模式')}
+                        optionList={USER_AGENT_STRATEGY_MODE_OPTIONS.map((item) => ({
+                          ...item,
+                          label: t(item.label),
+                        }))}
+                        initValue='round_robin'
+                        disabled={!inputs.user_agent_strategy_enabled}
+                        onChange={(value) => {
+                          handleInputChange('user_agent_strategy_mode', value);
+                          handleInputChange('user_agent_strategy_configured', true);
+                        }}
+                      />
+                    </div>
+                    <div className='mt-3'>
+                      <Form.TagInput
+                        field='user_agent_strategy_user_agents'
+                        label={t('User-Agent 列表')}
+                        placeholder={t('输入 UA，按回车或逗号可追加多个')}
+                        addOnBlur
+                        showClear
+                        disabled={!inputs.user_agent_strategy_enabled}
+                        onChange={handleUserAgentStrategyListChange}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div className='mt-3'>
+                      <HeaderOverrideUserAgentPresets
+                        t={t}
+                        onSelect={appendUserAgentStrategyPreset}
+                      />
+                    </div>
+                  </div>
+                  <UserHeaderTemplateManager
+                    t={t}
+                    value={inputs.header_override}
+                    visible={visible}
+                    onApply={(content) => handleInputChange('header_override', content)}
                   />
                 </div>
               </Card>

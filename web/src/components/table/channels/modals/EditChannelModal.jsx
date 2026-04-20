@@ -71,9 +71,18 @@ import HeaderProfileEditorModal from './HeaderProfileEditorModal';
 import JSONEditor from '../../../common/ui/JSONEditor';
 import SecureVerificationModal from '../../../common/modals/SecureVerificationModal';
 import StatusCodeRiskGuardModal from './StatusCodeRiskGuardModal';
+import HeaderOverrideUserAgentPresets from './HeaderOverrideUserAgentPresets';
+import UserHeaderTemplateManager from './UserHeaderTemplateManager';
 import ChannelKeyDisplay from '../../../common/ui/ChannelKeyDisplay';
 import { useSecureVerification } from '../../../../hooks/common/useSecureVerification';
 import { parseChannelConnectionString } from '../../../../helpers/token';
+import {
+  applyUserAgentPresetToHeaderOverride,
+  buildUserAgentStrategyPayload,
+  normalizeHeaderTemplateContent,
+  normalizeUserAgentStrategy,
+  normalizeUserAgentValues,
+} from '../../../../helpers/headerOverrideUserAgent';
 import { createApiCalls } from '../../../../services/secureVerification';
 import {
   collectInvalidStatusCodeEntries,
@@ -141,6 +150,18 @@ const PARAM_OVERRIDE_OPERATIONS_TEMPLATE = {
     },
   ],
 };
+
+const HEADER_POLICY_MODE_OPTIONS = [
+  { label: '跟随系统默认', value: 'system_default' },
+  { label: '渠道优先', value: 'prefer_channel' },
+  { label: '标签优先', value: 'prefer_tag' },
+  { label: '合并', value: 'merge' },
+];
+
+const USER_AGENT_STRATEGY_MODE_OPTIONS = [
+  { label: '轮询', value: 'round_robin' },
+  { label: '随机', value: 'random' },
+];
 
 const supportsResponsesBootstrapRecovery = (channelType) =>
   RESPONSES_BOOTSTRAP_RECOVERY_CHANNEL_TYPES.has(channelType);
@@ -214,6 +235,12 @@ const EditChannelModal = (props) => {
     system_prompt: '',
     system_prompt_override: false,
     settings: '',
+    header_policy_mode: 'system_default',
+    override_header_user_agent: false,
+    user_agent_strategy_configured: false,
+    user_agent_strategy_enabled: false,
+    user_agent_strategy_mode: 'round_robin',
+    user_agent_strategy_user_agents: [],
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
     // 仅 AWS: 密钥格式和区域（存入 settings.aws_key_type 和 settings.aws_region）
@@ -957,6 +984,45 @@ const EditChannelModal = (props) => {
     }
   };
 
+  const applyHeaderOverrideUserAgentPreset = (preset) => {
+    const result = applyUserAgentPresetToHeaderOverride(
+      inputs.header_override,
+      preset.ua,
+    );
+
+    if (!result.ok) {
+      showInfo(t(result.message));
+      return;
+    }
+
+    handleInputChange('header_override', result.value);
+  };
+
+  const handleUserAgentStrategyListChange = (value) => {
+    const normalized = normalizeUserAgentValues(value);
+    handleInputChange('user_agent_strategy_user_agents', normalized);
+    if (normalized.length > 0 || inputs.user_agent_strategy_enabled) {
+      handleInputChange('user_agent_strategy_configured', true);
+    }
+  };
+
+  const appendUserAgentStrategyPreset = (preset) => {
+    const normalized = normalizeUserAgentValues([
+      ...(inputs.user_agent_strategy_user_agents || []),
+      preset.ua,
+    ]);
+    handleInputChange('user_agent_strategy_user_agents', normalized);
+    handleInputChange('user_agent_strategy_enabled', true);
+    handleInputChange('user_agent_strategy_configured', true);
+  };
+
+  const clearUserAgentStrategyDraft = () => {
+    handleInputChange('user_agent_strategy_configured', false);
+    handleInputChange('user_agent_strategy_enabled', false);
+    handleInputChange('user_agent_strategy_mode', 'round_robin');
+    handleInputChange('user_agent_strategy_user_agents', []);
+  };
+
   const formatUnixTime = (timestamp) => {
     const value = Number(timestamp || 0);
     if (!value) {
@@ -1135,8 +1201,33 @@ const EditChannelModal = (props) => {
       if (data.settings) {
         try {
           const parsedSettings = JSON.parse(data.settings);
+          const rawUserAgentStrategy =
+            parsedSettings.ua_strategy &&
+            typeof parsedSettings.ua_strategy === 'object' &&
+            !Array.isArray(parsedSettings.ua_strategy)
+              ? parsedSettings.ua_strategy
+              : null;
+          const normalizedUserAgentStrategy = normalizeUserAgentStrategy(
+            rawUserAgentStrategy,
+          );
           data.azure_responses_version =
             parsedSettings.azure_responses_version || '';
+          data.header_policy_mode =
+            parsedSettings.header_policy_mode || 'system_default';
+          data.override_header_user_agent =
+            parsedSettings.override_header_user_agent === true;
+          data.user_agent_strategy_configured = rawUserAgentStrategy !== null;
+          data.user_agent_strategy_enabled =
+            rawUserAgentStrategy?.enabled === true;
+          data.user_agent_strategy_mode =
+            normalizedUserAgentStrategy?.mode ||
+            String(rawUserAgentStrategy?.mode || '').trim() ||
+            'round_robin';
+          data.user_agent_strategy_user_agents = normalizeUserAgentValues(
+            rawUserAgentStrategy?.user_agents ||
+              rawUserAgentStrategy?.userAgents ||
+              [],
+          );
           // 读取 Vertex 密钥格式
           data.vertex_key_type = parsedSettings.vertex_key_type || 'json';
           // 读取 AWS 密钥格式和区域
@@ -1176,6 +1267,12 @@ const EditChannelModal = (props) => {
         } catch (error) {
           console.error('解析其他设置失败:', error);
           data.azure_responses_version = '';
+          data.header_policy_mode = 'system_default';
+          data.override_header_user_agent = false;
+          data.user_agent_strategy_configured = false;
+          data.user_agent_strategy_enabled = false;
+          data.user_agent_strategy_mode = 'round_robin';
+          data.user_agent_strategy_user_agents = [];
           data.region = '';
           data.vertex_key_type = 'json';
           data.aws_key_type = 'ak_sk';
@@ -1196,6 +1293,12 @@ const EditChannelModal = (props) => {
         }
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
+        data.header_policy_mode = 'system_default';
+        data.override_header_user_agent = false;
+        data.user_agent_strategy_configured = false;
+        data.user_agent_strategy_enabled = false;
+        data.user_agent_strategy_mode = 'round_robin';
+        data.user_agent_strategy_user_agents = [];
         data.vertex_key_type = 'json';
         data.aws_key_type = 'ak_sk';
         data.is_enterprise_account = false;
@@ -2028,6 +2131,28 @@ const EditChannelModal = (props) => {
         localInputs.base_url.length - 1,
       );
     }
+    const normalizedHeaderOverride = normalizeHeaderTemplateContent(
+      localInputs.header_override,
+      {
+        allowEmpty: true,
+      },
+    );
+    if (!normalizedHeaderOverride.ok) {
+      showInfo(t(normalizedHeaderOverride.message));
+      return;
+    }
+    localInputs.header_override = normalizedHeaderOverride.value;
+
+    const userAgentStrategyPayload = buildUserAgentStrategyPayload({
+      configured: localInputs.user_agent_strategy_configured,
+      enabled: localInputs.user_agent_strategy_enabled,
+      mode: localInputs.user_agent_strategy_mode,
+      userAgents: localInputs.user_agent_strategy_user_agents,
+    });
+    if (!userAgentStrategyPayload.ok) {
+      showInfo(t(userAgentStrategyPayload.message));
+      return;
+    }
     if (localInputs.type === 18 && localInputs.other === '') {
       localInputs.other = 'v2.1';
     }
@@ -2117,6 +2242,15 @@ const EditChannelModal = (props) => {
     if (typeof settings.upstream_model_update_last_check_time !== 'number') {
       settings.upstream_model_update_last_check_time = 0;
     }
+    settings.header_policy_mode =
+      localInputs.header_policy_mode || 'system_default';
+    settings.override_header_user_agent =
+      localInputs.override_header_user_agent === true;
+    if (userAgentStrategyPayload.value) {
+      settings.ua_strategy = userAgentStrategyPayload.value;
+    } else if ('ua_strategy' in settings) {
+      delete settings.ua_strategy;
+    }
 
     localInputs.settings = JSON.stringify(settings);
 
@@ -2140,6 +2274,12 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_inference_geo;
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
+    delete localInputs.header_policy_mode;
+    delete localInputs.override_header_user_agent;
+    delete localInputs.user_agent_strategy_configured;
+    delete localInputs.user_agent_strategy_enabled;
+    delete localInputs.user_agent_strategy_mode;
+    delete localInputs.user_agent_strategy_user_agents;
     delete localInputs.responses_stream_bootstrap_recovery_enabled;
     delete localInputs.upstream_model_update_check_enabled;
     delete localInputs.upstream_model_update_auto_sync_enabled;
@@ -2681,7 +2821,6 @@ const EditChannelModal = (props) => {
                       </pre>
                     </div>
                   </div>
-
                   <HeaderProfileStrategySection
                     loading={headerProfilesLoading}
                     strategy={headerProfileStrategy}
@@ -2698,6 +2837,190 @@ const EditChannelModal = (props) => {
                     onEditProfile={openHeaderProfileEditor}
                     onDeleteProfile={handleDeleteHeaderProfile}
                     onImportLegacy={handleImportLegacyHeaderOverride}
+                  />
+                  <Form.TextArea
+                    field='header_override'
+                    label={t('请求头覆盖')}
+                    placeholder={
+                      t('此项可选，用于覆盖请求头参数') +
+                      '\n' +
+                      t('格式示例：') +
+                      '\n{\n  "User-Agent": "Mozilla/5.0 ...",\n  "Authorization": "Bearer {api_key}"\n}'
+                    }
+                    autosize
+                    onChange={(value) =>
+                      handleInputChange('header_override', value)
+                    }
+                    extraText={
+                      <div className='flex flex-col gap-1'>
+                        <div className='flex gap-2 flex-wrap items-center'>
+                          <Text
+                            className='!text-semi-color-primary cursor-pointer'
+                            onClick={() =>
+                              handleInputChange(
+                                'header_override',
+                                JSON.stringify(
+                                  {
+                                    '*': true,
+                                    're:^X-Trace-.*$': true,
+                                    'X-Foo': '{client_header:X-Foo}',
+                                    Authorization: 'Bearer {api_key}',
+                                    'User-Agent':
+                                      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0',
+                                  },
+                                  null,
+                                  2,
+                                ),
+                              )
+                            }
+                          >
+                            {t('填入模板')}
+                          </Text>
+                          <Text
+                            className='!text-semi-color-primary cursor-pointer'
+                            onClick={() =>
+                              handleInputChange(
+                                'header_override',
+                                JSON.stringify({ '*': true }, null, 2),
+                              )
+                            }
+                          >
+                            {t('填入透传模版')}
+                          </Text>
+                          <Text
+                            className='!text-semi-color-primary cursor-pointer'
+                            onClick={() => formatJsonField('header_override')}
+                          >
+                            {t('格式化')}
+                          </Text>
+                          <Text
+                            className='!text-semi-color-primary cursor-pointer'
+                            onClick={() => handleInputChange('header_override', '')}
+                          >
+                            {t('清空')}
+                          </Text>
+                        </div>
+                        <HeaderOverrideUserAgentPresets
+                          t={t}
+                          onSelect={applyHeaderOverrideUserAgentPreset}
+                        />
+                        <div>
+                          <Text type='tertiary' size='small'>
+                            {t('支持变量：')}
+                          </Text>
+                          <div className='text-xs text-tertiary ml-2'>
+                            <div>
+                              {t('渠道密钥')}: {'{api_key}'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    }
+                    showClear
+                  />
+                  <div
+                    className='mt-3 rounded-xl p-3'
+                    style={{
+                      backgroundColor: 'var(--semi-color-fill-0)',
+                      border: '1px solid var(--semi-color-fill-2)',
+                    }}
+                  >
+                    <div className='flex items-start justify-between gap-3 mb-3'>
+                      <div>
+                        <Text strong>{t('User-Agent 策略')}</Text>
+                        <div className='mt-1'>
+                          <Text type='tertiary' size='small'>
+                            {t(
+                              '可为渠道维护多选 UA 池，并在真实转发时按轮询或随机策略选出最终 User-Agent',
+                            )}
+                          </Text>
+                        </div>
+                      </div>
+                      <Text
+                        className='!text-semi-color-primary cursor-pointer'
+                        onClick={clearUserAgentStrategyDraft}
+                      >
+                        {t('清空 UA 策略')}
+                      </Text>
+                    </div>
+                    <div className='grid gap-3 md:grid-cols-2'>
+                      <Form.Switch
+                        field='user_agent_strategy_enabled'
+                        label={t('启用 UA 策略')}
+                        checkedText={t('开启')}
+                        uncheckedText={t('关闭')}
+                        initValue={false}
+                        onChange={(checked) => {
+                          handleInputChange('user_agent_strategy_enabled', checked);
+                          if (
+                            checked ||
+                            (inputs.user_agent_strategy_user_agents || []).length > 0
+                          ) {
+                            handleInputChange('user_agent_strategy_configured', true);
+                          }
+                        }}
+                      />
+                      <Form.Switch
+                        field='override_header_user_agent'
+                        label={t('覆盖静态 User-Agent')}
+                        checkedText={t('覆盖')}
+                        uncheckedText={t('保留静态值')}
+                        initValue={false}
+                        onChange={(checked) =>
+                          handleInputChange('override_header_user_agent', checked)
+                        }
+                      />
+                      <Form.Select
+                        field='header_policy_mode'
+                        label={t('请求头优先级')}
+                        optionList={HEADER_POLICY_MODE_OPTIONS.map((item) => ({
+                          ...item,
+                          label: t(item.label),
+                        }))}
+                        initValue='system_default'
+                        onChange={(value) =>
+                          handleInputChange('header_policy_mode', value)
+                        }
+                      />
+                      <Form.Select
+                        field='user_agent_strategy_mode'
+                        label={t('UA 策略模式')}
+                        optionList={USER_AGENT_STRATEGY_MODE_OPTIONS.map((item) => ({
+                          ...item,
+                          label: t(item.label),
+                        }))}
+                        initValue='round_robin'
+                        disabled={!inputs.user_agent_strategy_enabled}
+                        onChange={(value) => {
+                          handleInputChange('user_agent_strategy_mode', value);
+                          handleInputChange('user_agent_strategy_configured', true);
+                        }}
+                      />
+                    </div>
+                    <div className='mt-3'>
+                      <Form.TagInput
+                        field='user_agent_strategy_user_agents'
+                        label={t('User-Agent 列表')}
+                        placeholder={t('输入 UA，按回车或逗号可追加多个')}
+                        addOnBlur
+                        showClear
+                        disabled={!inputs.user_agent_strategy_enabled}
+                        onChange={handleUserAgentStrategyListChange}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div className='mt-3'>
+                      <HeaderOverrideUserAgentPresets
+                        t={t}
+                        onSelect={appendUserAgentStrategyPreset}
+                      />
+                    </div>
+                  </div>
+                  <UserHeaderTemplateManager
+                    t={t}
+                    value={inputs.header_override}
+                    visible={props.visible}
+                    onApply={(content) => handleInputChange('header_override', content)}
                   />
                   <JSONEditor
                     key={`status_code_mapping-${isEdit ? channelId : 'new'}`}
