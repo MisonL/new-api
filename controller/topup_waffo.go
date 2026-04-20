@@ -342,11 +342,7 @@ func handleWaffoPayment(c *gin.Context, wh *core.WebhookHandler, result *core.Pa
 		log.Printf("Waffo 订单状态非成功: %s, 订单: %s", result.OrderStatus, result.MerchantOrderID)
 		// 终态失败订单标记为 failed，避免永远停在 pending
 		if result.MerchantOrderID != "" {
-			if topUp := model.GetTopUpByTradeNo(result.MerchantOrderID); topUp != nil &&
-				topUp.Status == common.TopUpStatusPending {
-				topUp.Status = common.TopUpStatusFailed
-				_ = topUp.Update()
-			}
+			_ = model.MarkPendingTopUpFailedByTradeNoForPaymentMethod(result.MerchantOrderID, model.PaymentProviderWaffo)
 		}
 		sendWaffoWebhookResponse(c, wh, true, "")
 		return

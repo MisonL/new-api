@@ -38,10 +38,6 @@ func generateCreemSignature(payload string, secret string) string {
 func verifyCreemSignature(payload string, signature string, secret string) bool {
 	if secret == "" {
 		log.Printf("Creem webhook secret not set")
-		if setting.CreemTestMode {
-			log.Printf("Skip Creem webhook sign verify in test mode")
-			return true
-		}
 		return false
 	}
 
@@ -68,6 +64,10 @@ type CreemAdaptor struct {
 func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 	if req.PaymentMethod != PaymentMethodCreem {
 		c.JSON(200, gin.H{"message": "error", "data": "不支持的支付渠道"})
+		return
+	}
+	if setting.CreemWebhookSecret == "" {
+		c.JSON(200, gin.H{"message": "error", "data": "Creem Webhook 未配置"})
 		return
 	}
 
@@ -303,10 +303,10 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 	// Try complete subscription order first
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
-	if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(event)); err == nil {
+	if err := model.CompleteSubscriptionOrderWithPaymentMethod(referenceId, common.GetJsonString(event), model.PaymentProviderCreem); err == nil {
 		c.Status(http.StatusOK)
 		return
-	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
+	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) && !errors.Is(err, model.ErrSubscriptionOrderPaymentMethodMismatch) {
 		log.Printf("Creem订阅订单处理失败: %s, 订单号: %s", err.Error(), referenceId)
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
