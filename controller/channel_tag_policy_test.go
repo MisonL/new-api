@@ -123,7 +123,7 @@ func TestUpsertAndGetTagHeaderPolicy(t *testing.T) {
 		},
 	}
 
-	ctx, recorder := newHeaderPolicyContext(t, http.MethodPut, "/api/channel/tag/policy", body, 0)
+	ctx, recorder := newHeaderPolicyContext(t, http.MethodPut, "/api/channel/tag-policy", body, 0)
 	UpsertTagHeaderPolicy(ctx)
 
 	response := decodeHeaderPolicyResponse(t, recorder)
@@ -159,7 +159,7 @@ func TestUpsertAndGetTagHeaderPolicy(t *testing.T) {
 		t.Fatalf("unexpected stored user agents: %+v", storedStrategy.UserAgents)
 	}
 
-	getCtx, getRecorder := newHeaderPolicyContext(t, http.MethodGet, "/api/channel/tag/policy?tag=tag-a", nil, 0)
+	getCtx, getRecorder := newHeaderPolicyContext(t, http.MethodGet, "/api/channel/tag-policy?tag=tag-a", nil, 0)
 	GetTagHeaderPolicy(getCtx)
 
 	getResponse := decodeHeaderPolicyResponse(t, getRecorder)
@@ -180,7 +180,7 @@ func TestUpsertAndGetTagHeaderPolicy(t *testing.T) {
 func TestUpsertTagHeaderPolicyRejectsInvalidHeaderOverride(t *testing.T) {
 	setupHeaderPolicyControllerTestDB(t, &model.TagRequestHeaderPolicy{})
 
-	ctx, recorder := newHeaderPolicyContext(t, http.MethodPut, "/api/channel/tag/policy", map[string]any{
+	ctx, recorder := newHeaderPolicyContext(t, http.MethodPut, "/api/channel/tag-policy", map[string]any{
 		"tag":             "tag-a",
 		"header_override": `{"Bad Header":"x"}`,
 	}, 0)
@@ -207,7 +207,7 @@ func TestDeleteTagHeaderPolicyRemovesRecord(t *testing.T) {
 		t.Fatalf("failed to seed policy: %v", err)
 	}
 
-	ctx, recorder := newHeaderPolicyContext(t, http.MethodDelete, "/api/channel/tag/policy?tag=tag-a", nil, 0)
+	ctx, recorder := newHeaderPolicyContext(t, http.MethodDelete, "/api/channel/tag-policy?tag=tag-a", nil, 0)
 	DeleteTagHeaderPolicy(ctx)
 
 	response := decodeHeaderPolicyResponse(t, recorder)

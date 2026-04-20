@@ -838,7 +838,7 @@ func EditTagChannels(c *gin.Context) {
 	if channelTag.HeaderOverride != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "标签请求头策略已迁移到专用接口，请使用 /api/channel/tag/policy",
+			"message": "标签请求头策略已迁移到专用接口，请使用 /api/channel/tag-policy",
 		})
 		return
 	}
