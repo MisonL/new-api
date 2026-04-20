@@ -1,9 +1,11 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
 language: "zh-CN"
+tone_instructions: "使用中文，直接、严格、基于证据，优先指出真实风险、回归风险和测试缺口，不写空话。"
 early_access: false
 
 reviews:
-  profile: "chill"
+  profile: "assertive"
   request_changes_workflow: false
   high_level_summary: true
   high_level_summary_in_walkthrough: true
@@ -12,56 +14,15 @@ reviews:
   commit_status: true
   fail_commit_status: false
   collapse_walkthrough: false
-  changed_files_summary: true
-  sequence_diagrams: false
-  estimate_code_review_effort: false
-  assess_linked_issues: true
-  related_issues: true
-  related_prs: true
-  suggested_labels: false
-  suggested_reviewers: false
-  in_progress_fortune: false
-  poem: false
-  enable_prompt_for_ai_agents: false
-  path_filters:
-    - "!web/dist/**"
-    - "!node_modules/**"
-    - "!**/*.min.js"
-    - "!**/*.min.css"
-  path_instructions:
-    - path: "model/**/*.go"
-      instructions: >
-        重点检查数据库兼容性，相关实现必须同时兼容 SQLite、MySQL 和 PostgreSQL。
-        优先使用 GORM 抽象；如果出现原始 SQL，请确认列名引用、布尔值和方言差异均已正确处理。
-    - path: "**/*.go"
-      instructions: >
-        JSON 编解码应统一使用 common/json.go 提供的包装函数，不要在业务代码里直接调用 encoding/json 的 marshal/unmarshal。
-        同时关注错误处理是否显式，避免静默降级。
-    - path: "relay/**/*.go"
-      instructions: >
-        重点检查中转协议兼容性。对于从客户端 JSON 解析后再转发到上游的可选标量字段，
-        要确认是否使用指针类型以保留显式零值；不要因为 omitempty 或错误的默认值处理而改变请求语义。
-    - path: "web/src/**/*.{js,jsx,ts,tsx}"
-      instructions: >
-        重点检查亮色/暗色主题适配、Semi UI 组件行为、一致的移动端与桌面端布局，以及横向滚动、
-        折叠/展开、弹窗入口和可访问性是否出现回归。生成代码或构建产物不要作为主要问题来源。
   auto_review:
     enabled: true
-    auto_incremental_review: true
-    auto_pause_after_reviewed_commits: 0
     drafts: false
-    ignore_title_keywords:
-      - "wip"
-      - "do not review"
     base_branches:
-      - ".*"
-  finishing_touches:
-    docstrings:
-      enabled: false
-    unit_tests:
-      enabled: false
-    simplify:
-      enabled: false
+      - "^main$"
+    ignore_usernames:
+      - "github-actions[bot]"
+      - "dependabot[bot]"
+      - "renovate[bot]"
 
 chat:
   auto_reply: true
