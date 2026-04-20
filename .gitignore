@@ -23,6 +23,7 @@ web/bun.lock
 plans
 .claude
 backups/
+.worktrees/
 
 data/
 .gomodcache/
