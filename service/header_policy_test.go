@@ -43,6 +43,32 @@ func TestValidateHeaderTemplateRejectsTrimmedKeyConflict(t *testing.T) {
 	require.ErrorContains(t, err, "规整后重复")
 }
 
+func TestValidateHeaderTemplateRejectsCaseInsensitiveKeyConflict(t *testing.T) {
+	_, err := ValidateHeaderTemplate(`{"User-Agent":"a","user-agent":"b"}`)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "规整后重复")
+}
+
+func TestValidateHeaderTemplateRejectsInvalidHeaderName(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{name: "space", raw: `{"Bad Header":"x"}`},
+		{name: "control", raw: `{"\u0001bad":"x"}`},
+		{name: "separator", raw: `{"Bad:Header":"x"}`},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ValidateHeaderTemplate(tc.raw)
+			require.Error(t, err)
+			require.ErrorContains(t, err, "请求头名称不合法")
+		})
+	}
+}
+
 func TestValidateHeaderTemplateRejectsUnsupportedValueTypes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -67,13 +93,15 @@ func TestValidateHeaderTemplateNormalizesValidJSONObject(t *testing.T) {
 	normalized, err := ValidateHeaderTemplate(`{
 		"Authorization": "Bearer token",
 		"X-Enabled": true,
-		"X-Retry": 2.50
+		"X-Retry": 2.50,
+		"user-agent": "client/1.0"
 	}`)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{
 		"Authorization": "Bearer token",
 		"X-Enabled":     "true",
 		"X-Retry":       "2.50",
+		"User-Agent":    "client/1.0",
 	}, normalized)
 }
 

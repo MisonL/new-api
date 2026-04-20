@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/textproto"
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
@@ -64,7 +65,12 @@ func parseHeaderTemplateEntries(raw string) ([]headerTemplateEntry, error) {
 		if name == "" {
 			return nil, fmt.Errorf("请求头名称不能为空")
 		}
-		if _, ok := seen[name]; ok {
+		if !isValidHeaderFieldName(name) {
+			return nil, fmt.Errorf("请求头名称不合法: %s", name)
+		}
+
+		lookupKey := strings.ToLower(name)
+		if _, ok := seen[lookupKey]; ok {
 			return nil, fmt.Errorf("请求头名称规整后重复: %s", name)
 		}
 
@@ -73,9 +79,9 @@ func parseHeaderTemplateEntries(raw string) ([]headerTemplateEntry, error) {
 			return nil, err
 		}
 
-		seen[name] = struct{}{}
+		seen[lookupKey] = struct{}{}
 		entries = append(entries, headerTemplateEntry{
-			name:  name,
+			name:  textproto.CanonicalMIMEHeaderKey(name),
 			value: value,
 		})
 	}
@@ -96,6 +102,20 @@ func parseHeaderTemplateEntries(raw string) ([]headerTemplateEntry, error) {
 	_ = rest
 
 	return entries, nil
+}
+
+func isValidHeaderFieldName(name string) bool {
+	for i := 0; i < len(name); i++ {
+		switch ch := name[i]; {
+		case ch >= 'a' && ch <= 'z':
+		case ch >= 'A' && ch <= 'Z':
+		case ch >= '0' && ch <= '9':
+		case strings.ContainsRune("!#$%&'*+-.^_`|~", rune(ch)):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func decodeHeaderTemplateValue(decoder *json.Decoder, name string) (string, error) {
