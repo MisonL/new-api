@@ -5,6 +5,7 @@
 - 仓库：`new-api`
 - 审计日期：`2026-04-11`
 - 基线分支：`main`
+- 说明：本文件中的“上游 PR / 上游分支”仅用于描述历史事实，不代表当前仓库治理规则。当前项目默认只在本仓库内部发起 PR。
 - 复核目标引用：
   - `origin/feat/auth-cas-sso`
   - `origin/feat/auth-cas-sso-phase3`
