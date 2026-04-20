@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/textproto"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -12,13 +13,18 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	runtimeRoundRobinMaxAttempts  = 12
+	runtimeRoundRobinRetryBackoff = 2 * time.Millisecond
+)
+
 type runtimeHeaderPolicy struct {
-	Tag                    string
-	HeaderOverride         map[string]any
-	HeaderPolicyMode       string
+	Tag                     string
+	HeaderOverride          map[string]any
+	HeaderPolicyMode        string
 	OverrideHeaderUserAgent bool
-	UserAgentStrategy      *dto.UserAgentStrategy
-	UserAgentState         UserAgentStrategyState
+	UserAgentStrategy       *dto.UserAgentStrategy
+	UserAgentState          UserAgentStrategyState
 }
 
 func BuildChannelRuntimeHeaderOverride(channel *model.Channel) (map[string]any, error) {
@@ -205,14 +211,11 @@ func getRequestHeaderPolicyDefaultMode() (string, error) {
 	common.OptionMapRWMutex.RLock()
 	defer common.OptionMapRWMutex.RUnlock()
 
-	mode, err := parseRuntimeHeaderPolicyMode(common.OptionMap["RequestHeaderPolicyDefaultMode"], false)
-	if err != nil {
-		if strings.TrimSpace(common.OptionMap["RequestHeaderPolicyDefaultMode"]) == "" {
-			return string(dto.HeaderPolicyModePreferChannel), nil
-		}
-		return "", err
+	raw, exists := common.OptionMap["RequestHeaderPolicyDefaultMode"]
+	if !exists {
+		return string(dto.HeaderPolicyModePreferChannel), nil
 	}
-	return mode, nil
+	return parseRuntimeHeaderPolicyMode(raw, false)
 }
 
 func resolveRuntimeHeaderOverrideByMode(mode string, channelHeaders map[string]any, tagHeaders map[string]any) map[string]any {
@@ -304,17 +307,20 @@ func mergeRuntimeUserAgentPolicy(
 	channelState UserAgentStrategyState,
 	tagPolicy *runtimeHeaderPolicy,
 ) (*dto.UserAgentStrategy, string, string, bool) {
+	if tagPolicy.UserAgentState == UserAgentStrategyStateDisabled || channelState == UserAgentStrategyStateDisabled {
+		return nil, "", "", false
+	}
+
 	tagEnabled := tagPolicy.UserAgentState == UserAgentStrategyStateNormalized
 	channelEnabled := channelState == UserAgentStrategyStateNormalized
 	if !tagEnabled && !channelEnabled {
 		return nil, "", "", false
 	}
-
 	if !tagEnabled {
 		return channelStrategy, "channel", fmt.Sprintf("channel:%d", channelID), channelOverride
 	}
 	if !channelEnabled {
-		return tagPolicy.UserAgentStrategy, "tag", "tag:"+tagPolicy.Tag, tagPolicy.OverrideHeaderUserAgent
+		return tagPolicy.UserAgentStrategy, "tag", "tag:" + tagPolicy.Tag, tagPolicy.OverrideHeaderUserAgent
 	}
 
 	merged := &dto.UserAgentStrategy{
@@ -346,7 +352,7 @@ func nextRoundRobinRuntimeUserAgent(scopeType string, scopeKey string, userAgent
 	}
 
 	now := common.GetTimestamp()
-	for attempt := 0; attempt < 5; attempt++ {
+	for attempt := 0; attempt < runtimeRoundRobinMaxAttempts; attempt++ {
 		state := model.RequestHeaderStrategyState{}
 		err := model.DB.Where("scope_type = ? AND scope_key = ?", scopeType, scopeKey).First(&state).Error
 		switch {
@@ -360,6 +366,7 @@ func nextRoundRobinRuntimeUserAgent(scopeType string, scopeKey string, userAgent
 			}
 			if err := model.DB.Create(&state).Error; err != nil {
 				if isRuntimeDuplicateConstraintError(err) {
+					sleepRuntimeRoundRobinRetry(attempt)
 					continue
 				}
 				return "", err
@@ -382,10 +389,15 @@ func nextRoundRobinRuntimeUserAgent(scopeType string, scopeKey string, userAgent
 			if result.RowsAffected == 1 {
 				return userAgents[index], nil
 			}
+			sleepRuntimeRoundRobinRetry(attempt)
 		}
 	}
 
 	return "", errors.New("UA轮询状态更新失败")
+}
+
+func sleepRuntimeRoundRobinRetry(attempt int) {
+	time.Sleep(time.Duration(attempt+1) * runtimeRoundRobinRetryBackoff)
 }
 
 func normalizeRuntimeHeaderOverrideMap(source map[string]any) map[string]any {

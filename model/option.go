@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -552,6 +553,13 @@ func validateOptionValue(key string, value string) error {
 		return billing_setting.ValidateBillingExprJSON(value)
 	case "tool_price_setting.prices":
 		return operation_setting.ValidateToolPriceJSON(value)
+	case "RequestHeaderPolicyDefaultMode":
+		switch strings.TrimSpace(value) {
+		case "prefer_channel", "prefer_tag", "merge":
+			return nil
+		default:
+			return errors.New("RequestHeaderPolicyDefaultMode 值不合法")
+		}
 	default:
 		return nil
 	}

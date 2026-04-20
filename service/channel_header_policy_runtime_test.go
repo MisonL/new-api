@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -116,8 +118,8 @@ func TestBuildChannelRuntimeHeaderOverrideMergesHeadersAndAdvancesRoundRobin(t *
 		Tag:            common.GetPointer("tag-a"),
 	}
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
-		HeaderPolicyMode:         dto.HeaderPolicyModeMerge,
-		OverrideHeaderUserAgent:  true,
+		HeaderPolicyMode:        dto.HeaderPolicyModeMerge,
+		OverrideHeaderUserAgent: true,
 		UserAgentStrategy: &dto.UserAgentStrategy{
 			Enabled:    true,
 			Mode:       "round_robin",
@@ -201,10 +203,117 @@ func TestBuildChannelRuntimeHeaderOverrideDisabledPreferredStrategySuppressesFal
 	require.Equal(t, "channel-static", headers["User-Agent"])
 }
 
+func TestBuildChannelRuntimeHeaderOverrideMergeDisabledStrategySuppressesOtherSide(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+
+	channel := &model.Channel{
+		Id:             12,
+		HeaderOverride: common.GetPointer(`{"User-Agent":"channel-static"}`),
+		Tag:            common.GetPointer("tag-a"),
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		HeaderPolicyMode:        dto.HeaderPolicyModeMerge,
+		UserAgentStrategy:       &dto.UserAgentStrategy{Enabled: false},
+		OverrideHeaderUserAgent: true,
+	})
+
+	record := &model.TagRequestHeaderPolicy{
+		Tag:                     "tag-a",
+		HeaderPolicyMode:        "merge",
+		OverrideHeaderUserAgent: true,
+		UserAgentStrategyJSON:   `{"enabled":true,"mode":"random","user_agents":["tag-ua"]}`,
+	}
+	require.NoError(t, model.DB.Create(record).Error)
+
+	headers, err := BuildChannelRuntimeHeaderOverride(channel)
+	require.NoError(t, err)
+	require.Equal(t, "channel-static", headers["User-Agent"])
+}
+
+func TestNextRoundRobinRuntimeUserAgentRetriesOptimisticConflicts(t *testing.T) {
+	db := setupChannelHeaderRuntimeTestDB(t, &model.RequestHeaderStrategyState{})
+	require.NoError(t, model.DB.Create(&model.RequestHeaderStrategyState{
+		ScopeType:        "channel",
+		ScopeKey:         "channel:22",
+		RoundRobinCursor: 1,
+		Version:          1,
+		UpdatedAt:        common.GetTimestamp(),
+	}).Error)
+
+	var forcedConflicts int32
+	callbackName := "test_force_request_header_strategy_state_conflict"
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement == nil || tx.Statement.Table != "request_header_strategy_states" {
+			return
+		}
+		if atomic.AddInt32(&forcedConflicts, 1) > 6 {
+			return
+		}
+		tx.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Exec(
+			"UPDATE request_header_strategy_states SET version = version + 1 WHERE scope_type = ? AND scope_key = ?",
+			"channel",
+			"channel:22",
+		)
+	}))
+	t.Cleanup(func() {
+		db.Callback().Update().Remove(callbackName)
+	})
+
+	selected, err := nextRoundRobinRuntimeUserAgent("channel", "channel:22", []string{"ua-1", "ua-2"})
+	require.NoError(t, err)
+	require.Equal(t, "ua-2", selected)
+
+	state := model.RequestHeaderStrategyState{}
+	require.NoError(t, model.DB.Where("scope_type = ? AND scope_key = ?", "channel", "channel:22").First(&state).Error)
+	require.Equal(t, int32(7), atomic.LoadInt32(&forcedConflicts))
+	require.Equal(t, int64(8), state.Version)
+	require.Equal(t, int64(2), state.RoundRobinCursor)
+}
+
+func TestNextRoundRobinRuntimeUserAgentHandlesDuplicateCreateRace(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.RequestHeaderStrategyState{})
+
+	start := make(chan struct{})
+	results := make(chan string, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			selected, err := nextRoundRobinRuntimeUserAgent("tag", "tag:dup", []string{"ua-1", "ua-2"})
+			errs <- err
+			results <- selected
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(errs)
+	close(results)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	counts := map[string]int{}
+	for result := range results {
+		counts[result]++
+	}
+	require.Equal(t, 1, counts["ua-1"])
+	require.Equal(t, 1, counts["ua-2"])
+
+	state := model.RequestHeaderStrategyState{}
+	require.NoError(t, model.DB.Where("scope_type = ? AND scope_key = ?", "tag", "tag:dup").First(&state).Error)
+	require.Equal(t, int64(2), state.RoundRobinCursor)
+	require.Equal(t, int64(2), state.Version)
+}
+
 func TestBuildChannelRuntimeHeaderOverrideRejectsInvalidChannelMode(t *testing.T) {
 	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
 
-	channel := &model.Channel{Id: 12}
+	channel := &model.Channel{Id: 13}
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
 		HeaderPolicyMode: dto.HeaderPolicyMode("broken"),
 	})
@@ -218,7 +327,7 @@ func TestBuildChannelRuntimeHeaderOverrideRejectsInvalidSystemDefaultMode(t *tes
 	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
 	common.OptionMap["RequestHeaderPolicyDefaultMode"] = "broken"
 
-	channel := &model.Channel{Id: 13}
+	channel := &model.Channel{Id: 14}
 
 	_, err := BuildChannelRuntimeHeaderOverride(channel)
 	require.Error(t, err)
