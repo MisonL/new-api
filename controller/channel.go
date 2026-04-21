@@ -432,16 +432,71 @@ func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 	return false
 }
 
+func validateHeaderProfileStrategy(strategy *dto.HeaderProfileStrategy) error {
+	if strategy == nil || !strategy.Enabled {
+		return nil
+	}
+
+	normalizedProfileIDs := make([]string, 0, len(strategy.SelectedProfileIDs))
+	for _, profileID := range strategy.SelectedProfileIDs {
+		profileID = strings.TrimSpace(profileID)
+		if profileID == "" {
+			continue
+		}
+		normalizedProfileIDs = append(normalizedProfileIDs, profileID)
+	}
+	strategy.SelectedProfileIDs = normalizedProfileIDs
+
+	switch strategy.Mode {
+	case dto.HeaderProfileModeFixed:
+		if len(strategy.SelectedProfileIDs) != 1 {
+			return fmt.Errorf("header_profile_strategy mode=fixed 时必须且只能选择 1 个 selected_profile_ids")
+		}
+	case dto.HeaderProfileModeRoundRobin, dto.HeaderProfileModeRandom:
+		if len(strategy.SelectedProfileIDs) < 1 {
+			return fmt.Errorf("header_profile_strategy mode=%s 时至少需要 1 个 selected_profile_ids", strategy.Mode)
+		}
+	default:
+		return fmt.Errorf("header_profile_strategy mode 非法: %s", strategy.Mode)
+	}
+
+	return nil
+}
+
+func validateChannelOtherSettings(channel *model.Channel) error {
+	if channel == nil || channel.OtherSettings == "" {
+		return nil
+	}
+
+	settings := dto.ChannelOtherSettings{}
+	if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+		return fmt.Errorf("渠道其他设置[settings] 格式错误：%s", err.Error())
+	}
+
+	if err := validateHeaderProfileStrategy(settings.HeaderProfileStrategy); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // validateChannel 通用的渠道校验函数
 func validateChannel(channel *model.Channel, isAdd bool) error {
+	if channel == nil {
+		return fmt.Errorf("channel cannot be empty")
+	}
+
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
 	}
+	if err := validateChannelOtherSettings(channel); err != nil {
+		return err
+	}
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {
-		if channel == nil || channel.Key == "" {
+		if channel.Key == "" {
 			return fmt.Errorf("channel cannot be empty")
 		}
 
