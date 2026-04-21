@@ -1,6 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Input, Modal, Select, Typography } from '@douyinfe/semi-ui';
+import {
+  Button,
+  Input,
+  Modal,
+  Select,
+  TextArea,
+  Typography,
+} from '@douyinfe/semi-ui';
 
 import { HEADER_PROFILE_GROUPS } from './headerProfile.constants.js';
 import {
@@ -153,7 +160,7 @@ const HeaderProfileEditorModal = ({
 
         <div className='flex flex-col gap-1'>
           <Text strong>{t('Header JSON')}</Text>
-          <Input.TextArea
+          <TextArea
             rows={12}
             value={draft.headersText}
             onChange={(value) =>
