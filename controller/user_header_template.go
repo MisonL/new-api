@@ -1,15 +1,20 @@
 package controller
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+const userHeaderTemplateListQueryTimeout = 300 * time.Millisecond
 
 type userHeaderTemplateRequest struct {
 	Name    string `json:"name"`
@@ -18,8 +23,11 @@ type userHeaderTemplateRequest struct {
 
 func ListUserHeaderTemplates(c *gin.Context) {
 	userID := c.GetInt("id")
-	templates := make([]model.UserHeaderTemplate, 0)
-	if err := model.DB.Where("user_id = ?", userID).Order("updated_at desc").Order("id desc").Find(&templates).Error; err != nil {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), userHeaderTemplateListQueryTimeout)
+	defer cancel()
+
+	templates, err := model.ListUserHeaderTemplatesByUserID(ctx, userID)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -52,6 +60,7 @@ func CreateUserHeaderTemplate(c *gin.Context) {
 		return
 	}
 
+	model.RecordLog(record.UserId, model.LogTypeManage, fmt.Sprintf("创建请求头模板：%s", record.Name))
 	common.ApiSuccess(c, buildUserHeaderTemplateResponse(record))
 }
 
@@ -91,6 +100,7 @@ func UpdateUserHeaderTemplate(c *gin.Context) {
 		return
 	}
 
+	model.RecordLog(userID, model.LogTypeManage, fmt.Sprintf("更新请求头模板：%s", record.Name))
 	common.ApiSuccess(c, buildUserHeaderTemplateResponse(&record))
 }
 
@@ -111,6 +121,7 @@ func DeleteUserHeaderTemplate(c *gin.Context) {
 		return
 	}
 
+	model.RecordLog(userID, model.LogTypeManage, fmt.Sprintf("删除请求头模板：ID=%d", templateID))
 	common.ApiSuccess(c, gin.H{})
 }
 

@@ -17,20 +17,32 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { normalizeLanguage } from '../../i18n/language';
 
 const KEY = 'sidebar_width';
 export const DEFAULT_SIDEBAR_WIDTH = 180;
+export const ENGLISH_SIDEBAR_WIDTH = 224;
 export const MIN_SIDEBAR_WIDTH = 160;
 export const MAX_SIDEBAR_WIDTH = 320;
 
-export const clampSidebarWidth = (value) => {
+export const getDefaultSidebarWidth = (language) => {
+  return normalizeLanguage(language) === 'en'
+    ? ENGLISH_SIDEBAR_WIDTH
+    : DEFAULT_SIDEBAR_WIDTH;
+};
+
+export const clampSidebarWidth = (
+  value,
+  defaultWidth = DEFAULT_SIDEBAR_WIDTH,
+) => {
   if (value === null || value === undefined || value === '') {
-    return DEFAULT_SIDEBAR_WIDTH;
+    return defaultWidth;
   }
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
-    return DEFAULT_SIDEBAR_WIDTH;
+    return defaultWidth;
   }
   return Math.min(
     MAX_SIDEBAR_WIDTH,
@@ -39,27 +51,40 @@ export const clampSidebarWidth = (value) => {
 };
 
 export const useSidebarWidth = () => {
+  const { i18n } = useTranslation();
+  const defaultWidth = getDefaultSidebarWidth(
+    i18n.resolvedLanguage || i18n.language,
+  );
   const [width, setWidthState] = useState(() => {
     if (typeof window === 'undefined') {
-      return DEFAULT_SIDEBAR_WIDTH;
+      return defaultWidth;
     }
-    return clampSidebarWidth(localStorage.getItem(KEY));
+    return clampSidebarWidth(localStorage.getItem(KEY), defaultWidth);
   });
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (localStorage.getItem(KEY) === null) {
+      setWidthState(defaultWidth);
+    }
+  }, [defaultWidth]);
+
+  useLayoutEffect(() => {
     document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
   }, [width]);
 
   const setWidth = useCallback((value) => {
-    const nextWidth = clampSidebarWidth(value);
+    const nextWidth = clampSidebarWidth(value, defaultWidth);
     setWidthState(nextWidth);
     localStorage.setItem(KEY, String(nextWidth));
-  }, []);
+  }, [defaultWidth]);
 
   const resetWidth = useCallback(() => {
-    setWidthState(DEFAULT_SIDEBAR_WIDTH);
+    setWidthState(defaultWidth);
     localStorage.removeItem(KEY);
-  }, []);
+  }, [defaultWidth]);
 
-  return [width, setWidth, resetWidth];
+  return [width, setWidth, resetWidth, defaultWidth];
 };

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 type headerPolicyAPIResponse struct {
@@ -40,7 +43,13 @@ func setupHeaderPolicyControllerTestDB(t *testing.T, tables ...interface{}) *gor
 	common.RedisEnabled = false
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{
+			LogLevel:                  gormlogger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  false,
+		}),
+	})
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
@@ -48,8 +57,13 @@ func setupHeaderPolicyControllerTestDB(t *testing.T, tables ...interface{}) *gor
 	model.DB = db
 	model.LOG_DB = db
 
-	if len(tables) > 0 {
-		if err := db.AutoMigrate(tables...); err != nil {
+	autoMigrateTables := append([]interface{}{}, tables...)
+	if requiresUserTableForLog(autoMigrateTables) {
+		autoMigrateTables = append(autoMigrateTables, &model.User{})
+	}
+
+	if len(autoMigrateTables) > 0 {
+		if err := db.AutoMigrate(autoMigrateTables...); err != nil {
 			t.Fatalf("failed to migrate test tables: %v", err)
 		}
 	}
@@ -69,6 +83,20 @@ func setupHeaderPolicyControllerTestDB(t *testing.T, tables ...interface{}) *gor
 	})
 
 	return db
+}
+
+func requiresUserTableForLog(tables []interface{}) bool {
+	hasLog := false
+	hasUser := false
+	for _, table := range tables {
+		switch table.(type) {
+		case *model.Log:
+			hasLog = true
+		case *model.User:
+			hasUser = true
+		}
+	}
+	return hasLog && !hasUser
 }
 
 func newHeaderPolicyContext(t *testing.T, method string, target string, body any, userID int) (*gin.Context, *httptest.ResponseRecorder) {
@@ -109,13 +137,13 @@ func decodeHeaderPolicyResponse(t *testing.T, recorder *httptest.ResponseRecorde
 }
 
 func TestUpsertAndGetTagHeaderPolicy(t *testing.T) {
-	setupHeaderPolicyControllerTestDB(t, &model.TagRequestHeaderPolicy{})
+	setupHeaderPolicyControllerTestDB(t, &model.TagRequestHeaderPolicy{}, &model.Log{})
 
 	body := map[string]any{
-		"tag":                         "tag-a",
-		"header_override":             `{"user-agent":"agent-a","X-Debug":true}`,
-		"header_policy_mode":          "prefer_tag",
-		"override_header_user_agent":  true,
+		"tag":                        "tag-a",
+		"header_override":            `{"user-agent":"agent-a","X-Debug":true}`,
+		"header_policy_mode":         "prefer_tag",
+		"override_header_user_agent": true,
 		"ua_strategy": dto.UserAgentStrategy{
 			Enabled:    false,
 			Mode:       " random ",
@@ -123,7 +151,7 @@ func TestUpsertAndGetTagHeaderPolicy(t *testing.T) {
 		},
 	}
 
-	ctx, recorder := newHeaderPolicyContext(t, http.MethodPut, "/api/channel/tag-policy", body, 0)
+	ctx, recorder := newHeaderPolicyContext(t, http.MethodPut, "/api/channel/tag-policy", body, 1)
 	UpsertTagHeaderPolicy(ctx)
 
 	response := decodeHeaderPolicyResponse(t, recorder)
@@ -157,6 +185,13 @@ func TestUpsertAndGetTagHeaderPolicy(t *testing.T) {
 	}
 	if strings.Join(storedStrategy.UserAgents, ",") != "ua-1,ua-2" {
 		t.Fatalf("unexpected stored user agents: %+v", storedStrategy.UserAgents)
+	}
+	var logRecord model.Log
+	if err := model.DB.Where("user_id = ? AND type = ?", 1, model.LogTypeManage).Order("id desc").First(&logRecord).Error; err != nil {
+		t.Fatalf("expected operation log to be recorded: %v", err)
+	}
+	if !strings.Contains(logRecord.Content, "更新标签请求头策略") {
+		t.Fatalf("unexpected operation log content: %s", logRecord.Content)
 	}
 
 	getCtx, getRecorder := newHeaderPolicyContext(t, http.MethodGet, "/api/channel/tag-policy?tag=tag-a", nil, 0)
@@ -196,7 +231,7 @@ func TestUpsertTagHeaderPolicyRejectsInvalidHeaderOverride(t *testing.T) {
 }
 
 func TestDeleteTagHeaderPolicyRemovesRecord(t *testing.T) {
-	setupHeaderPolicyControllerTestDB(t, &model.TagRequestHeaderPolicy{})
+	setupHeaderPolicyControllerTestDB(t, &model.TagRequestHeaderPolicy{}, &model.Log{})
 
 	record := &model.TagRequestHeaderPolicy{
 		Tag:                     "tag-a",
@@ -207,7 +242,7 @@ func TestDeleteTagHeaderPolicyRemovesRecord(t *testing.T) {
 		t.Fatalf("failed to seed policy: %v", err)
 	}
 
-	ctx, recorder := newHeaderPolicyContext(t, http.MethodDelete, "/api/channel/tag-policy?tag=tag-a", nil, 0)
+	ctx, recorder := newHeaderPolicyContext(t, http.MethodDelete, "/api/channel/tag-policy?tag=tag-a", nil, 1)
 	DeleteTagHeaderPolicy(ctx)
 
 	response := decodeHeaderPolicyResponse(t, recorder)
@@ -221,6 +256,13 @@ func TestDeleteTagHeaderPolicyRemovesRecord(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected policy to be deleted, count=%d", count)
+	}
+	var logRecord model.Log
+	if err := model.DB.Where("user_id = ? AND type = ?", 1, model.LogTypeManage).Order("id desc").First(&logRecord).Error; err != nil {
+		t.Fatalf("expected delete operation log: %v", err)
+	}
+	if !strings.Contains(logRecord.Content, "删除标签请求头策略") {
+		t.Fatalf("unexpected delete log content: %s", logRecord.Content)
 	}
 }
 

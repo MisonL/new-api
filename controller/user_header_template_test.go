@@ -11,7 +11,7 @@ import (
 )
 
 func TestCreateAndListUserHeaderTemplates(t *testing.T) {
-	setupHeaderPolicyControllerTestDB(t, &model.UserHeaderTemplate{})
+	setupHeaderPolicyControllerTestDB(t, &model.UserHeaderTemplate{}, &model.Log{})
 
 	ctx, recorder := newHeaderPolicyContext(t, http.MethodPost, "/api/user/header-templates", map[string]any{
 		"name":    "My Template",
@@ -30,6 +30,13 @@ func TestCreateAndListUserHeaderTemplates(t *testing.T) {
 	}
 	if !strings.Contains(stored.Content, `"User-Agent":"agent-a"`) {
 		t.Fatalf("expected canonicalized header content, got %s", stored.Content)
+	}
+	var logRecord model.Log
+	if err := model.DB.Where("user_id = ? AND type = ?", 1, model.LogTypeManage).First(&logRecord).Error; err != nil {
+		t.Fatalf("expected operation log to be recorded: %v", err)
+	}
+	if !strings.Contains(logRecord.Content, "创建请求头模板") {
+		t.Fatalf("unexpected operation log content: %s", logRecord.Content)
 	}
 
 	listCtx, listRecorder := newHeaderPolicyContext(t, http.MethodGet, "/api/user/header-templates", nil, 1)
@@ -108,5 +115,31 @@ func TestDeleteUserHeaderTemplateIsScopedToCurrentUser(t *testing.T) {
 	}
 	if !strings.Contains(response.Message, "模板不存在") {
 		t.Fatalf("unexpected error message: %s", response.Message)
+	}
+}
+
+func TestDeleteUserHeaderTemplateRecordsOperationLog(t *testing.T) {
+	setupHeaderPolicyControllerTestDB(t, &model.UserHeaderTemplate{}, &model.Log{})
+
+	record := &model.UserHeaderTemplate{UserId: 1, Name: "B", Content: `{"X-Test":"2"}`, CreatedAt: 1, UpdatedAt: 1}
+	if err := model.DB.Create(record).Error; err != nil {
+		t.Fatalf("failed to seed template: %v", err)
+	}
+
+	ctx, recorder := newHeaderPolicyContext(t, http.MethodDelete, "/api/user/header-templates/"+strconv.Itoa(record.Id), nil, 1)
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(record.Id)}}
+	DeleteUserHeaderTemplate(ctx)
+
+	response := decodeHeaderPolicyResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected delete to succeed, got %s", response.Message)
+	}
+
+	var logRecord model.Log
+	if err := model.DB.Where("user_id = ? AND type = ?", 1, model.LogTypeManage).Order("id desc").First(&logRecord).Error; err != nil {
+		t.Fatalf("expected delete operation log: %v", err)
+	}
+	if !strings.Contains(logRecord.Content, "删除请求头模板") {
+		t.Fatalf("unexpected delete log content: %s", logRecord.Content)
 	}
 }

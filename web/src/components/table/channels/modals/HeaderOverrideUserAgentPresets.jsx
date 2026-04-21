@@ -23,25 +23,66 @@ import { HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS } from '../../../../helpers/he
 
 const { Text } = Typography;
 
-export default function HeaderOverrideUserAgentPresets({ t, onSelect }) {
+export default function HeaderOverrideUserAgentPresets({
+  t,
+  onSelect,
+  showTitle = true,
+  compact = false,
+  activeValues = [],
+  disabled = false,
+}) {
+  const activeSet = new Set(activeValues || []);
   return (
-    <div className='flex flex-col gap-2'>
-      <Text type='tertiary' size='small'>
-        {t('UA 预置模板')}
-      </Text>
+    <div className={`flex flex-col ${compact ? 'gap-2' : 'gap-3'}`}>
+      {showTitle && (
+        <Text type='tertiary' size='small'>
+          {t('UA 预置模板')}
+        </Text>
+      )}
       {HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS.map((group) => (
-        <div key={group.key} className='flex flex-col gap-1'>
+        <div
+          key={group.key}
+          className={`rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] ${
+            compact ? 'px-3 py-2' : 'px-3 py-2.5'
+          }`}
+          style={{
+            boxShadow: 'none',
+          }}
+        >
           <Text type='tertiary' size='small'>
             {t(group.label)}
           </Text>
-          <Space wrap spacing={6}>
+          <Space
+            wrap
+            spacing={compact ? 4 : 6}
+            className={compact ? 'mt-1.5' : 'mt-2'}
+          >
             {group.items.map((item) => (
               <Tag
                 key={item.id}
                 color='grey'
                 size='small'
-                className='cursor-pointer select-none'
-                onClick={() => onSelect(item)}
+                shape='circle'
+                className={`select-none transition-colors duration-200 ${
+                  disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                }`}
+                style={{
+                  backgroundColor: activeSet.has(item.ua)
+                    ? 'var(--semi-color-primary-light-default)'
+                    : 'var(--semi-color-bg-1)',
+                  border: activeSet.has(item.ua)
+                    ? '1px solid var(--semi-color-primary)'
+                    : '1px solid var(--semi-color-border)',
+                  color: activeSet.has(item.ua)
+                    ? 'var(--semi-color-primary)'
+                    : undefined,
+                }}
+                onClick={() => {
+                  if (disabled) {
+                    return;
+                  }
+                  onSelect(item);
+                }}
               >
                 {item.label}
               </Tag>

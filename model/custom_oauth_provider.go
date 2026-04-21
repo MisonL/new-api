@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -240,8 +241,16 @@ func GetAllCustomOAuthProviders() ([]*CustomOAuthProvider, error) {
 
 // GetEnabledCustomOAuthProviders returns all enabled custom OAuth providers
 func GetEnabledCustomOAuthProviders() ([]*CustomOAuthProvider, error) {
+	return GetEnabledCustomOAuthProvidersContext(context.Background())
+}
+
+func GetEnabledCustomOAuthProvidersContext(ctx context.Context) ([]*CustomOAuthProvider, error) {
 	var providers []*CustomOAuthProvider
-	err := DB.Where("enabled = ?", true).Order("id asc").Find(&providers).Error
+	query := DB
+	if ctx != nil {
+		query = query.WithContext(ctx)
+	}
+	err := query.Where("enabled = ?", true).Order("id asc").Find(&providers).Error
 	return providers, err
 }
 

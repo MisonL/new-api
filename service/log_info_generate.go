@@ -80,6 +80,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendFinalRequestFormat(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
+	AppendRequestHeaderPolicyInfo(ctx, other)
 	appendStreamStatus(relayInfo, other)
 	return other
 }
@@ -113,6 +114,38 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 		streamInfo["errors"] = messages
 	}
 	other["stream_status"] = streamInfo
+}
+
+func AppendRequestHeaderPolicyInfo(ctx *gin.Context, other map[string]interface{}) {
+	if ctx == nil || other == nil {
+		return
+	}
+
+	audit, ok := common.GetContextKeyType[RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	if !ok {
+		return
+	}
+
+	info := map[string]interface{}{
+		"mode": audit.HeaderPolicyMode,
+	}
+	if len(audit.AppliedHeaderKeys) > 0 {
+		info["applied_header_keys"] = audit.AppliedHeaderKeys
+	}
+	if audit.UserAgentStrategyMode != "" {
+		info["ua_strategy_mode"] = audit.UserAgentStrategyMode
+	}
+	if audit.UserAgentStrategyScope != "" {
+		info["ua_strategy_scope"] = audit.UserAgentStrategyScope
+	}
+	if audit.SelectedUserAgent != "" {
+		info["selected_user_agent"] = audit.SelectedUserAgent
+	}
+	if audit.OverrideStaticUserAgent {
+		info["override_static_user_agent"] = true
+	}
+	info["user_agent_applied"] = audit.UserAgentApplied
+	other["request_header_policy"] = info
 }
 
 func classifyStreamStatus(ss *relaycommon.StreamStatus) string {

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"database/sql/driver"
 	"encoding/json"
 
@@ -76,12 +77,12 @@ func (j *JSONValue) UnmarshalJSON(data []byte) error {
 type PrefillGroup struct {
 	Id          int            `json:"id"`
 	Name        string         `json:"name" gorm:"size:64;not null;uniqueIndex:uk_prefill_name,where:deleted_at IS NULL"`
-	Type        string         `json:"type" gorm:"size:32;index;not null"`
+	Type        string         `json:"type" gorm:"size:32;index:idx_prefill_groups_type_deleted_updated,priority:1;not null"`
 	Items       JSONValue      `json:"items" gorm:"type:json"`
 	Description string         `json:"description,omitempty" gorm:"type:varchar(255)"`
 	CreatedTime int64          `json:"created_time" gorm:"bigint"`
-	UpdatedTime int64          `json:"updated_time" gorm:"bigint"`
-	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
+	UpdatedTime int64          `json:"updated_time" gorm:"bigint;index:idx_prefill_groups_type_deleted_updated,priority:3,sort:desc"`
+	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index;index:idx_prefill_groups_type_deleted_updated,priority:2"`
 }
 
 // Insert 新建组
@@ -115,8 +116,16 @@ func DeletePrefillGroupByID(id int) error {
 
 // GetAllPrefillGroups 获取全部组，可按类型过滤（为空则返回全部）
 func GetAllPrefillGroups(groupType string) ([]*PrefillGroup, error) {
+	return GetAllPrefillGroupsContext(context.Background(), groupType)
+}
+
+func GetAllPrefillGroupsContext(ctx context.Context, groupType string) ([]*PrefillGroup, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	var groups []*PrefillGroup
-	query := DB.Model(&PrefillGroup{})
+	query := DB.WithContext(ctx).Model(&PrefillGroup{})
 	if groupType != "" {
 		query = query.Where("type = ?", groupType)
 	}

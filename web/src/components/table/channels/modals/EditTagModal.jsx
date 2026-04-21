@@ -38,6 +38,7 @@ import {
   Tag,
   Avatar,
   Form,
+  Dropdown,
 } from '@douyinfe/semi-ui';
 import {
   IconSave,
@@ -46,10 +47,12 @@ import {
   IconUser,
   IconCode,
   IconSetting,
+  IconChevronDown,
 } from '@douyinfe/semi-icons';
 import { getChannelModels } from '../../../../helpers';
 import {
   applyUserAgentPresetToHeaderOverride,
+  buildHeaderOverrideUserAgentPresetMenu,
   buildUserAgentStrategyPayload,
   normalizeHeaderTemplateContent,
   normalizeUserAgentStrategy,
@@ -225,6 +228,9 @@ const EditTagModal = (props) => {
     handleInputChange('user_agent_strategy_configured', true);
   };
 
+  const headerOverrideUserAgentPresetMenu =
+    buildHeaderOverrideUserAgentPresetMenu(t, applyHeaderOverrideUserAgentPreset);
+
   const clearTagHeaderPolicyDraft = () => {
     handleInputChange('header_override', '');
     handleInputChange('header_policy_mode', 'system_default');
@@ -306,7 +312,7 @@ const EditTagModal = (props) => {
     const bulkData = { tag };
     if (formVals.model_mapping) {
       if (!verifyJSON(formVals.model_mapping)) {
-        showInfo('模型映射必须是合法的 JSON 格式！');
+        showInfo(t('模型映射必须是合法的 JSON 格式！'));
         setLoading(false);
         return;
       }
@@ -323,13 +329,13 @@ const EditTagModal = (props) => {
       formVals.param_override !== null
     ) {
       if (typeof formVals.param_override !== 'string') {
-        showInfo('参数覆盖必须是合法的 JSON 格式！');
+        showInfo(t('参数覆盖必须是合法的 JSON 格式！'));
         setLoading(false);
         return;
       }
       const trimmedParamOverride = formVals.param_override.trim();
       if (trimmedParamOverride !== '' && !verifyJSON(trimmedParamOverride)) {
-        showInfo('参数覆盖必须是合法的 JSON 格式！');
+        showInfo(t('参数覆盖必须是合法的 JSON 格式！'));
         setLoading(false);
         return;
       }
@@ -387,7 +393,7 @@ const EditTagModal = (props) => {
       !shouldPersistPolicy &&
       !tagPolicyExists
     ) {
-      showWarning('没有任何修改！');
+      showWarning(t('没有任何修改！'));
       setLoading(false);
       return;
     }
@@ -402,7 +408,7 @@ const EditTagModal = (props) => {
       ) {
         const bulkRes = await API.put('/api/channel/tag', bulkData);
         if (!bulkRes?.data?.success) {
-          throw new Error(bulkRes?.data?.message || '标签更新失败');
+          throw new Error(bulkRes?.data?.message || t('标签更新失败'));
         }
       }
 
@@ -415,7 +421,9 @@ const EditTagModal = (props) => {
           ua_strategy: userAgentStrategyPayload.value,
         });
         if (!policyRes?.data?.success) {
-          throw new Error(policyRes?.data?.message || '标签请求头策略保存失败');
+          throw new Error(
+            policyRes?.data?.message || t('标签请求头策略保存失败'),
+          );
         }
       }
 
@@ -424,11 +432,13 @@ const EditTagModal = (props) => {
           `/api/channel/tag-policy?tag=${encodeURIComponent(tag)}`,
         );
         if (!deleteRes?.data?.success) {
-          throw new Error(deleteRes?.data?.message || '标签请求头策略删除失败');
+          throw new Error(
+            deleteRes?.data?.message || t('标签请求头策略删除失败'),
+          );
         }
       }
 
-      showSuccess('标签更新成功！');
+      showSuccess(t('标签更新成功！'));
       refresh();
       handleClose();
     } catch (error) {
@@ -863,6 +873,16 @@ const EditTagModal = (props) => {
                           >
                             {t('不更改')}
                           </Text>
+                          <Dropdown
+                            trigger='click'
+                            position='bottomLeft'
+                            menu={headerOverrideUserAgentPresetMenu}
+                          >
+                            <Text className='!text-semi-color-primary cursor-pointer inline-flex items-center gap-1'>
+                              <span>{t('UA 预置模板')}</span>
+                              <IconChevronDown size={12} />
+                            </Text>
+                          </Dropdown>
                           <Text
                             className='!text-semi-color-primary cursor-pointer'
                             onClick={() => handleInputChange('header_override', '')}
@@ -870,10 +890,6 @@ const EditTagModal = (props) => {
                             {t('清空')}
                           </Text>
                         </div>
-                        <HeaderOverrideUserAgentPresets
-                          t={t}
-                          onSelect={applyHeaderOverrideUserAgentPreset}
-                        />
                         <div>
                           <Text type='tertiary' size='small'>
                             {t('支持变量：')}
@@ -916,8 +932,8 @@ const EditTagModal = (props) => {
                       <Form.Switch
                         field='user_agent_strategy_enabled'
                         label={t('启用 UA 策略')}
-                        checkedText={t('开启')}
-                        uncheckedText={t('关闭')}
+                        checkedText={t('开')}
+                        uncheckedText={t('关')}
                         initValue={false}
                         onChange={(checked) => {
                           handleInputChange('user_agent_strategy_enabled', checked);

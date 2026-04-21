@@ -396,7 +396,7 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, channel.GetOtherSettings())
 	common.SetContextKey(c, constant.ContextKeyChannelOtherSettingRaw, channel.OtherSettings)
 	paramOverride := channel.GetParamOverride()
-	headerOverride, err := service.BuildChannelRuntimeHeaderOverride(channel)
+	headerOverride, headerPolicyAudit, err := service.BuildChannelRuntimeHeaderOverrideWithAudit(channel)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
 	}
@@ -405,6 +405,9 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelParamOverride, paramOverride)
 	common.SetContextKey(c, constant.ContextKeyChannelHeaderOverride, headerOverride)
+	if headerPolicyAudit != nil {
+		common.SetContextKey(c, constant.ContextKeyChannelHeaderPolicyAudit, *headerPolicyAudit)
+	}
 	if nil != channel.OpenAIOrganization && *channel.OpenAIOrganization != "" {
 		common.SetContextKey(c, constant.ContextKeyChannelOrganization, *channel.OpenAIOrganization)
 	}

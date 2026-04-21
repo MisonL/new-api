@@ -44,6 +44,18 @@ import { normalizeHeaderTemplateContent } from '../../../../helpers/headerOverri
 
 const { Text } = Typography;
 
+const SECTION_SURFACE_STYLE = {
+  backgroundColor: 'var(--semi-color-bg-0)',
+  border: '1px solid var(--semi-color-border)',
+  boxShadow: 'none',
+};
+
+const ITEM_SURFACE_STYLE = {
+  backgroundColor: 'var(--semi-color-fill-0)',
+  border: '1px solid var(--semi-color-border)',
+  boxShadow: 'none',
+};
+
 function formatTemplateTime(timestamp, t) {
   const value = Number(timestamp || 0);
   if (!value) {
@@ -62,6 +74,7 @@ export default function UserHeaderTemplateManager({
   const [saving, setSaving] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [templates, setTemplates] = useState([]);
+  const rawTemplateDraft = typeof value === 'string' ? value.trim() : '';
 
   const sortedTemplates = useMemo(
     () =>
@@ -70,6 +83,15 @@ export default function UserHeaderTemplateManager({
       ),
     [templates],
   );
+  const normalizedTemplateDraft = useMemo(
+    () => normalizeHeaderTemplateContent(value, { allowEmpty: false }),
+    [value],
+  );
+  const canSaveTemplate =
+    templateName.trim().length > 0 && normalizedTemplateDraft.ok;
+  const showTemplateValidation =
+    !normalizedTemplateDraft.ok &&
+    (templateName.trim().length > 0 || rawTemplateDraft.length > 0);
 
   const loadTemplates = async () => {
     setLoading(true);
@@ -90,9 +112,7 @@ export default function UserHeaderTemplateManager({
   }, [visible]);
 
   const getNormalizedContent = () => {
-    const normalized = normalizeHeaderTemplateContent(value, {
-      allowEmpty: false,
-    });
+    const normalized = normalizedTemplateDraft;
     if (!normalized.ok) {
       showInfo(t(normalized.message));
       return null;
@@ -176,21 +196,21 @@ export default function UserHeaderTemplateManager({
 
   return (
     <div
-      className='mt-3 rounded-xl p-3'
-      style={{
-        backgroundColor: 'var(--semi-color-fill-0)',
-        border: '1px solid var(--semi-color-fill-2)',
-      }}
+      className='mt-4 rounded-lg p-4'
+      style={SECTION_SURFACE_STYLE}
     >
       <div className='flex items-center justify-between gap-3 mb-3'>
-        <div className='flex flex-col'>
-          <Text strong>{t('请求头模板')}</Text>
+        <div className='min-w-0 flex flex-col'>
+          <Text strong size='small'>
+            {t('请求头模板')}
+          </Text>
           <Text type='tertiary' size='small'>
             {t('仅保存当前用户自己的合法 JSON 请求头模板')}
           </Text>
         </div>
         <Button
           type='tertiary'
+          theme='light'
           size='small'
           icon={<IconRefresh />}
           onClick={loadTemplates}
@@ -200,7 +220,7 @@ export default function UserHeaderTemplateManager({
         </Button>
       </div>
 
-      <Space wrap align='end' className='w-full mb-3'>
+      <div className='mb-4 flex flex-wrap items-end gap-2'>
         <Input
           value={templateName}
           placeholder={t('输入模板名称')}
@@ -211,13 +231,22 @@ export default function UserHeaderTemplateManager({
         <Button
           type='primary'
           theme='light'
+          size='small'
           icon={<IconSave />}
           onClick={handleCreateTemplate}
           loading={saving}
+          disabled={!canSaveTemplate}
         >
           {t('保存为模板')}
         </Button>
-      </Space>
+      </div>
+      {showTemplateValidation && (
+        <div className='mb-3'>
+          <Text type='tertiary' size='small'>
+            {t(normalizedTemplateDraft.message)}
+          </Text>
+        </div>
+      )}
 
       {loading ? (
         <div className='py-4 flex justify-center'>
@@ -234,24 +263,24 @@ export default function UserHeaderTemplateManager({
           {sortedTemplates.map((template) => (
             <div
               key={template.id}
-              className='rounded-lg px-3 py-2'
-              style={{
-                backgroundColor: 'var(--semi-color-bg-1)',
-                border: '1px solid var(--semi-color-border)',
-              }}
+              className='rounded-lg px-3 py-3'
+              style={ITEM_SURFACE_STYLE}
             >
-              <div className='flex items-center justify-between gap-3'>
-                <div className='min-w-0'>
-                  <div className='flex items-center gap-2 flex-wrap'>
-                    <Tag color='grey'>{template.name}</Tag>
+              <div className='flex flex-wrap items-start justify-between gap-3'>
+                <div className='min-w-0 flex-1'>
+                  <Tag color='grey' size='small'>
+                    {template.name}
+                  </Tag>
+                  <div className='mt-2'>
                     <Text type='tertiary' size='small'>
                       {t('更新于')} {formatTemplateTime(template.updated_at, t)}
                     </Text>
                   </div>
                 </div>
-                <Space spacing={6}>
+                <Space spacing={6} wrap>
                   <Button
                     type='tertiary'
+                    theme='light'
                     size='small'
                     icon={<IconUpload />}
                     onClick={() => onApply(template.content)}
@@ -260,10 +289,12 @@ export default function UserHeaderTemplateManager({
                   </Button>
                   <Button
                     type='tertiary'
+                    theme='light'
                     size='small'
                     icon={<IconSave />}
                     onClick={() => handleOverwriteTemplate(template)}
                     loading={saving}
+                    disabled={!normalizedTemplateDraft.ok}
                   >
                     {t('覆盖')}
                   </Button>

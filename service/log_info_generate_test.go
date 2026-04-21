@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
 	"github.com/gin-gonic/gin"
@@ -97,4 +99,31 @@ func TestAppendStreamStatusKeepsBenignClientGoneAsCanceled(t *testing.T) {
 	require.Equal(t, "canceled", streamInfo["status"])
 	require.Equal(t, "client_gone", streamInfo["end_reason"])
 	require.Equal(t, 1, streamInfo["error_count"])
+}
+
+func TestGenerateTextOtherInfoIncludesRequestHeaderPolicyAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode:        "merge",
+		AppliedHeaderKeys:       []string{"User-Agent", "X-Test"},
+		UserAgentApplied:        true,
+		SelectedUserAgent:       "codex-cli/1.0.0",
+		UserAgentStrategyMode:   "round_robin",
+		UserAgentStrategyScope:  "tag:new.xem8k5.top",
+		OverrideStaticUserAgent: true,
+	})
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}, 1, 1, 1, 0, 0, -1, -1)
+	info, ok := other["request_header_policy"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "merge", info["mode"])
+	require.Equal(t, "round_robin", info["ua_strategy_mode"])
+	require.Equal(t, "tag:new.xem8k5.top", info["ua_strategy_scope"])
+	require.Equal(t, "codex-cli/1.0.0", info["selected_user_agent"])
+	require.Equal(t, true, info["override_static_user_agent"])
+	require.Equal(t, true, info["user_agent_applied"])
+	require.Equal(t, []string{"User-Agent", "X-Test"}, info["applied_header_keys"])
 }

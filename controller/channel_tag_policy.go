@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/textproto"
 	"strings"
 
@@ -14,11 +15,11 @@ import (
 )
 
 type tagHeaderPolicyRequest struct {
-	Tag                    string                 `json:"tag"`
-	HeaderOverride         *string                `json:"header_override"`
-	HeaderPolicyMode       string                 `json:"header_policy_mode"`
-	OverrideHeaderUserAgent bool                  `json:"override_header_user_agent"`
-	UserAgentStrategy      *dto.UserAgentStrategy `json:"ua_strategy"`
+	Tag                     string                 `json:"tag"`
+	HeaderOverride          *string                `json:"header_override"`
+	HeaderPolicyMode        string                 `json:"header_policy_mode"`
+	OverrideHeaderUserAgent bool                   `json:"override_header_user_agent"`
+	UserAgentStrategy       *dto.UserAgentStrategy `json:"ua_strategy"`
 }
 
 func GetTagHeaderPolicy(c *gin.Context) {
@@ -122,6 +123,9 @@ func UpsertTagHeaderPolicy(c *gin.Context) {
 		}
 	}
 
+	if userID := c.GetInt("id"); userID > 0 {
+		model.RecordLog(userID, model.LogTypeManage, fmt.Sprintf("更新标签请求头策略：tag=%s", tag))
+	}
 	common.ApiSuccess(c, buildTagHeaderPolicyResponse(tag, &record, strategy))
 }
 
@@ -137,6 +141,9 @@ func DeleteTagHeaderPolicy(c *gin.Context) {
 		return
 	}
 
+	if userID := c.GetInt("id"); userID > 0 {
+		model.RecordLog(userID, model.LogTypeManage, fmt.Sprintf("删除标签请求头策略：tag=%s", tag))
+	}
 	common.ApiSuccess(c, gin.H{})
 }
 
@@ -232,23 +239,23 @@ func decodeStoredUserAgentStrategy(raw string) (*dto.UserAgentStrategy, error) {
 func buildTagHeaderPolicyResponse(tag string, record *model.TagRequestHeaderPolicy, strategy *dto.UserAgentStrategy) gin.H {
 	if record == nil {
 		return gin.H{
-			"exists":                      false,
-			"tag":                         tag,
-			"header_override":             "",
-			"header_policy_mode":          string(dto.HeaderPolicyModeSystemDefault),
-			"override_header_user_agent":  false,
-			"ua_strategy":                 nil,
+			"exists":                     false,
+			"tag":                        tag,
+			"header_override":            "",
+			"header_policy_mode":         string(dto.HeaderPolicyModeSystemDefault),
+			"override_header_user_agent": false,
+			"ua_strategy":                nil,
 		}
 	}
 
 	return gin.H{
-		"exists":                      true,
-		"tag":                         tag,
-		"header_override":             record.HeaderOverride,
-		"header_policy_mode":          record.HeaderPolicyMode,
-		"override_header_user_agent":  record.OverrideHeaderUserAgent,
-		"ua_strategy":                 strategy,
-		"created_at":                  record.CreatedAt,
-		"updated_at":                  record.UpdatedAt,
+		"exists":                     true,
+		"tag":                        tag,
+		"header_override":            record.HeaderOverride,
+		"header_policy_mode":         record.HeaderPolicyMode,
+		"override_header_user_agent": record.OverrideHeaderUserAgent,
+		"ua_strategy":                strategy,
+		"created_at":                 record.CreatedAt,
+		"updated_at":                 record.UpdatedAt,
 	}
 }

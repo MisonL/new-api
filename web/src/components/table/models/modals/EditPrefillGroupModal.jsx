@@ -90,7 +90,7 @@ const EditPrefillGroupModal = ({
 
       if (editingGroup.id) {
         submitData.id = editingGroup.id;
-        const res = await API.put('/api/prefill_group', submitData);
+        const res = await API.put('/api/prefill_group/', submitData);
         if (res.data.success) {
           showSuccess(t('更新成功'));
           onSuccess();
@@ -98,7 +98,7 @@ const EditPrefillGroupModal = ({
           showError(res.data.message || t('更新失败'));
         }
       } else {
-        const res = await API.post('/api/prefill_group', submitData);
+        const res = await API.post('/api/prefill_group/', submitData);
         if (res.data.success) {
           showSuccess(t('创建成功'));
           onSuccess();

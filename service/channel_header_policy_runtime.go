@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/textproto"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,28 +28,47 @@ type runtimeHeaderPolicy struct {
 	UserAgentState          UserAgentStrategyState
 }
 
+type RuntimeHeaderPolicyAudit struct {
+	HeaderPolicyMode        string   `json:"header_policy_mode"`
+	AppliedHeaderKeys       []string `json:"applied_header_keys,omitempty"`
+	UserAgentApplied        bool     `json:"user_agent_applied"`
+	SelectedUserAgent       string   `json:"selected_user_agent,omitempty"`
+	UserAgentStrategyMode   string   `json:"ua_strategy_mode,omitempty"`
+	UserAgentStrategyScope  string   `json:"ua_strategy_scope,omitempty"`
+	OverrideStaticUserAgent bool     `json:"override_static_user_agent,omitempty"`
+}
+
 func BuildChannelRuntimeHeaderOverride(channel *model.Channel) (map[string]any, error) {
+	headerOverride, _, err := BuildChannelRuntimeHeaderOverrideWithAudit(channel)
+	return headerOverride, err
+}
+
+func BuildChannelRuntimeHeaderOverrideWithAudit(channel *model.Channel) (map[string]any, *RuntimeHeaderPolicyAudit, error) {
 	if channel == nil {
-		return map[string]any{}, nil
+		return map[string]any{}, &RuntimeHeaderPolicyAudit{}, nil
 	}
 
 	channelHeaders := normalizeRuntimeHeaderOverrideMap(channel.GetHeaderOverride())
 	channelSettings := channel.GetOtherSettings()
 	channelStrategy, channelState, err := resolveRuntimeUserAgentStrategy(channelSettings.UserAgentStrategy)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	tagPolicy, err := loadRuntimeTagHeaderPolicy(channel.GetTag())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	mode, err := resolveEffectiveHeaderPolicyMode(string(channelSettings.HeaderPolicyMode), tagPolicy.HeaderPolicyMode)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	finalHeaders := resolveRuntimeHeaderOverrideByMode(mode, channelHeaders, tagPolicy.HeaderOverride)
+	audit := &RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode:  mode,
+		AppliedHeaderKeys: collectRuntimeHeaderKeys(finalHeaders),
+	}
 
 	finalStrategy, scopeType, scopeKey, shouldOverride := resolveRuntimeUserAgentPolicy(
 		mode,
@@ -59,26 +79,34 @@ func BuildChannelRuntimeHeaderOverride(channel *model.Channel) (map[string]any, 
 		tagPolicy,
 	)
 	if finalStrategy == nil || !finalStrategy.Enabled {
-		return finalHeaders, nil
+		return finalHeaders, audit, nil
 	}
+	audit.UserAgentStrategyMode = finalStrategy.Mode
+	audit.UserAgentStrategyScope = scopeKey
+	audit.OverrideStaticUserAgent = shouldOverride
 
 	selectedUA, err := selectRuntimeUserAgent(finalStrategy, scopeType, scopeKey)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if selectedUA == "" {
-		return finalHeaders, nil
+		return finalHeaders, audit, nil
 	}
+	audit.SelectedUserAgent = selectedUA
 
 	if hasRuntimeHeaderKey(finalHeaders, "User-Agent") {
 		if shouldOverride {
 			setRuntimeHeaderValue(finalHeaders, "User-Agent", selectedUA)
+			audit.UserAgentApplied = true
 		}
-		return finalHeaders, nil
+		audit.AppliedHeaderKeys = collectRuntimeHeaderKeys(finalHeaders)
+		return finalHeaders, audit, nil
 	}
 
 	setRuntimeHeaderValue(finalHeaders, "User-Agent", selectedUA)
-	return finalHeaders, nil
+	audit.UserAgentApplied = true
+	audit.AppliedHeaderKeys = collectRuntimeHeaderKeys(finalHeaders)
+	return finalHeaders, audit, nil
 }
 
 func loadRuntimeTagHeaderPolicy(tag string) (*runtimeHeaderPolicy, error) {
@@ -328,7 +356,7 @@ func mergeRuntimeUserAgentPolicy(
 		Mode:       tagPolicy.UserAgentStrategy.Mode,
 		UserAgents: MergeUserAgents(tagPolicy.UserAgentStrategy.UserAgents, channelStrategy.UserAgents),
 	}
-	return merged, "tag", "tag:" + tagPolicy.Tag, tagPolicy.OverrideHeaderUserAgent || channelOverride
+	return merged, "channel", fmt.Sprintf("channel:%d:merged_tag:%s", channelID, tagPolicy.Tag), tagPolicy.OverrideHeaderUserAgent || channelOverride
 }
 
 func selectRuntimeUserAgent(strategy *dto.UserAgentStrategy, scopeType string, scopeKey string) (string, error) {
@@ -512,4 +540,16 @@ func isRuntimeHeaderPassthroughRuleKey(key string) bool {
 	}
 	lower := strings.ToLower(key)
 	return strings.HasPrefix(lower, "re:") || strings.HasPrefix(lower, "regex:")
+}
+
+func collectRuntimeHeaderKeys(source map[string]any) []string {
+	keys := make([]string, 0, len(source))
+	for key := range normalizeRuntimeHeaderOverrideMap(source) {
+		if isRuntimeHeaderPassthroughRuleKey(key) {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

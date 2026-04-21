@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"testing"
@@ -15,10 +17,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 func TestMain(m *testing.M) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{
+			LogLevel:                  gormlogger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  false,
+		}),
+	})
 	if err != nil {
 		panic("failed to open test db: " + err.Error())
 	}

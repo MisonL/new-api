@@ -70,7 +70,7 @@ const PrefillGroupManagement = ({ visible, onClose }) => {
   const loadGroups = async () => {
     setLoading(true);
     try {
-      const res = await API.get('/api/prefill_group');
+      const res = await API.get('/api/prefill_group/');
       if (res.data.success) {
         setGroups(res.data.data || []);
       } else {

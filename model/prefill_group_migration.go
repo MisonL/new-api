@@ -87,6 +87,9 @@ func migratePrefillGroupTableWithExecutor(
 	if err := executor.Exec(`CREATE INDEX IF NOT EXISTS "idx_prefill_groups_deleted_at" ON "prefill_groups" ("deleted_at")`); err != nil {
 		return fmt.Errorf("failed to ensure prefill_groups deleted_at index: %w", err)
 	}
+	if err := executor.Exec(`CREATE INDEX IF NOT EXISTS "idx_prefill_groups_type_deleted_updated" ON "prefill_groups" ("type","deleted_at","updated_time" DESC)`); err != nil {
+		return fmt.Errorf("failed to ensure prefill_groups type/deleted_at/updated_time index: %w", err)
+	}
 	if err := executor.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS "uk_prefill_name" ON "prefill_groups" ("name") WHERE deleted_at IS NULL`); err != nil {
 		return fmt.Errorf("failed to ensure prefill_groups partial unique index: %w", err)
 	}

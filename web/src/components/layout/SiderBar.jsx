@@ -69,6 +69,7 @@ const SIDEBAR_KEYBOARD_STEP = 16;
 const SiderBar = ({
   onNavigate = () => {},
   sidebarWidth = DEFAULT_SIDEBAR_WIDTH,
+  defaultSidebarWidth = DEFAULT_SIDEBAR_WIDTH,
   setSidebarWidth = () => {},
   resetSidebarWidth = () => {},
   isMobile = false,
@@ -91,10 +92,10 @@ const SiderBar = ({
   const [routerMapState, setRouterMapState] = useState(routerMap);
   const resizeCleanupRef = useRef(null);
   const sidebarIsCustomized =
-    Math.abs(sidebarWidth - DEFAULT_SIDEBAR_WIDTH) > 1;
+    Math.abs(sidebarWidth - defaultSidebarWidth) > 1;
   const showResetWidthButton = !collapsed && !isMobile && sidebarIsCustomized;
   const useCompactCollapseTrigger =
-    showResetWidthButton && sidebarWidth <= DEFAULT_SIDEBAR_WIDTH + 16;
+    showResetWidthButton && sidebarWidth <= defaultSidebarWidth + 16;
 
   const workspaceItems = useMemo(() => {
     const items = [

@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -35,14 +38,57 @@ type customOAuthStatusInfo struct {
 	BrowserLoginSupported     bool   `json:"browser_login_supported"`
 }
 
+const (
+	customOAuthStatusCacheTTL     = 5 * time.Minute
+	customOAuthStatusQueryTimeout = 300 * time.Millisecond
+)
+
+var customOAuthStatusCache = struct {
+	sync.RWMutex
+	expiresAt time.Time
+	payload   []customOAuthStatusInfo
+}{
+	payload: make([]customOAuthStatusInfo, 0),
+}
+
 func invalidateCustomOAuthStatusCache() {
+	customOAuthStatusCache.Lock()
+	customOAuthStatusCache.expiresAt = time.Time{}
+	customOAuthStatusCache.payload = make([]customOAuthStatusInfo, 0)
+	customOAuthStatusCache.Unlock()
 }
 
 func getCustomOAuthStatusPayload() []customOAuthStatusInfo {
-	customProviders, err := model.GetEnabledCustomOAuthProviders()
+	now := time.Now()
+	customOAuthStatusCache.RLock()
+	if now.Before(customOAuthStatusCache.expiresAt) {
+		cached := append([]customOAuthStatusInfo(nil), customOAuthStatusCache.payload...)
+		customOAuthStatusCache.RUnlock()
+		return cached
+	}
+	stale := append([]customOAuthStatusInfo(nil), customOAuthStatusCache.payload...)
+	customOAuthStatusCache.RUnlock()
+
+	customOAuthStatusCache.Lock()
+	defer customOAuthStatusCache.Unlock()
+
+	now = time.Now()
+	if now.Before(customOAuthStatusCache.expiresAt) {
+		return append([]customOAuthStatusInfo(nil), customOAuthStatusCache.payload...)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), customOAuthStatusQueryTimeout)
+	defer cancel()
+
+	customProviders, err := model.GetEnabledCustomOAuthProvidersContext(ctx)
 	if err != nil {
-		common.SysError("failed to load enabled custom auth providers: " + err.Error())
-		return nil
+		common.SysError("failed to load enabled custom auth providers for status payload: " + err.Error())
+		if len(stale) > 0 {
+			customOAuthStatusCache.payload = append([]customOAuthStatusInfo(nil), stale...)
+			customOAuthStatusCache.expiresAt = now.Add(customOAuthStatusCacheTTL)
+			return append([]customOAuthStatusInfo(nil), stale...)
+		}
+		return make([]customOAuthStatusInfo, 0)
 	}
 
 	providersInfo := make([]customOAuthStatusInfo, 0, len(customProviders))
@@ -82,6 +128,8 @@ func getCustomOAuthStatusPayload() []customOAuthStatusInfo {
 			BrowserLoginSupported:     sanitized.SupportsBrowserLogin(),
 		})
 	}
+	customOAuthStatusCache.payload = append([]customOAuthStatusInfo(nil), providersInfo...)
+	customOAuthStatusCache.expiresAt = now.Add(customOAuthStatusCacheTTL)
 	return providersInfo
 }
 

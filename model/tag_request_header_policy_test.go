@@ -2,19 +2,28 @@ package model
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 func openTestDB(t *testing.T, models ...interface{}) *gorm.DB {
 	t.Helper()
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{
+			LogLevel:                  gormlogger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  false,
+		}),
+	})
 	require.NoError(t, err)
 
 	if len(models) > 0 {

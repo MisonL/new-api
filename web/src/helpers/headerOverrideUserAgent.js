@@ -114,6 +114,27 @@ export const HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS = [
   },
 ];
 
+export function buildHeaderOverrideUserAgentPresetMenu(t, onSelect) {
+  const menu = [];
+  HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS.forEach((group, groupIndex) => {
+    if (groupIndex > 0) {
+      menu.push({
+        node: 'divider',
+        key: `divider-${group.key}`,
+      });
+    }
+    group.items.forEach((item) => {
+      menu.push({
+        node: 'item',
+        key: `${group.key}-${item.id}`,
+        name: `${t(group.label)} / ${item.label}`,
+        onClick: () => onSelect(item),
+      });
+    });
+  });
+  return menu;
+}
+
 const USER_AGENT_STRATEGY_MODES = new Set(['round_robin', 'random']);
 
 export function normalizeUserAgentValues(values) {

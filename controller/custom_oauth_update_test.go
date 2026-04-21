@@ -639,3 +639,92 @@ func TestGetCustomOAuthStatusPayloadDoesNotInjectJWTDefaultsForTrustedHeader(t *
 		t.Fatal("expected trusted_header status payload to mark browser login as supported")
 	}
 }
+
+func TestGetCustomOAuthStatusPayloadReturnsCachedDataWhenDBBecomesUnavailable(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	invalidateCustomOAuthStatusCache()
+	t.Cleanup(invalidateCustomOAuthStatusCache)
+
+	provider := &model.CustomOAuthProvider{
+		Name:                  "Cached Provider",
+		Slug:                  "cached-provider",
+		Enabled:               true,
+		ClientId:              "client-id",
+		AuthorizationEndpoint: "https://example.com/oauth/authorize",
+		TokenEndpoint:         "https://example.com/oauth/token",
+		UserInfoEndpoint:      "https://example.com/oauth/userinfo",
+	}
+	if err := model.CreateCustomOAuthProvider(provider); err != nil {
+		t.Fatalf("failed to create provider: %v", err)
+	}
+
+	first := getCustomOAuthStatusPayload()
+	if len(first) != 1 {
+		t.Fatalf("expected 1 provider in first payload, got %d", len(first))
+	}
+
+	sqlDB, err := model.DB.DB()
+	if err != nil {
+		t.Fatalf("failed to access sql db: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("failed to close sql db: %v", err)
+	}
+
+	second := getCustomOAuthStatusPayload()
+	if len(second) != 1 {
+		t.Fatalf("expected cached payload after db close, got %d items", len(second))
+	}
+	if second[0].Slug != "cached-provider" {
+		t.Fatalf("expected cached provider slug, got %q", second[0].Slug)
+	}
+}
+
+func TestInvalidateCustomOAuthStatusCacheForcesReload(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	invalidateCustomOAuthStatusCache()
+	t.Cleanup(invalidateCustomOAuthStatusCache)
+
+	firstProvider := &model.CustomOAuthProvider{
+		Name:                  "First Provider",
+		Slug:                  "first-provider",
+		Enabled:               true,
+		ClientId:              "client-id-1",
+		AuthorizationEndpoint: "https://example.com/oauth/authorize",
+		TokenEndpoint:         "https://example.com/oauth/token",
+		UserInfoEndpoint:      "https://example.com/oauth/userinfo",
+	}
+	if err := model.CreateCustomOAuthProvider(firstProvider); err != nil {
+		t.Fatalf("failed to create first provider: %v", err)
+	}
+
+	firstPayload := getCustomOAuthStatusPayload()
+	if len(firstPayload) != 1 {
+		t.Fatalf("expected 1 provider in initial payload, got %d", len(firstPayload))
+	}
+
+	secondProvider := &model.CustomOAuthProvider{
+		Name:                  "Second Provider",
+		Slug:                  "second-provider",
+		Enabled:               true,
+		ClientId:              "client-id-2",
+		AuthorizationEndpoint: "https://example.com/oauth/authorize",
+		TokenEndpoint:         "https://example.com/oauth/token",
+		UserInfoEndpoint:      "https://example.com/oauth/userinfo",
+	}
+	if err := model.CreateCustomOAuthProvider(secondProvider); err != nil {
+		t.Fatalf("failed to create second provider: %v", err)
+	}
+
+	cachedPayload := getCustomOAuthStatusPayload()
+	if len(cachedPayload) != 1 {
+		t.Fatalf("expected cache hit before invalidation, got %d providers", len(cachedPayload))
+	}
+
+	invalidateCustomOAuthStatusCache()
+
+	reloadedPayload := getCustomOAuthStatusPayload()
+	if len(reloadedPayload) != 2 {
+		t.Fatalf("expected 2 providers after invalidation, got %d", len(reloadedPayload))
+	}
+}

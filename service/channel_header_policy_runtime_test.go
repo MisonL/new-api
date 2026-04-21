@@ -2,6 +2,8 @@ package service
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +15,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 func setupChannelHeaderRuntimeTestDB(t *testing.T, tables ...interface{}) *gorm.DB {
@@ -35,7 +38,13 @@ func setupChannelHeaderRuntimeTestDB(t *testing.T, tables ...interface{}) *gorm.
 	}
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{
+			LogLevel:                  gormlogger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  false,
+		}),
+	})
 	require.NoError(t, err)
 
 	model.DB = db
@@ -147,9 +156,75 @@ func TestBuildChannelRuntimeHeaderOverrideMergesHeadersAndAdvancesRoundRobin(t *
 	require.Equal(t, "tag-ua-2", second["User-Agent"])
 
 	state := model.RequestHeaderStrategyState{}
-	require.NoError(t, model.DB.Where("scope_type = ? AND scope_key = ?", "tag", "tag:tag-a").First(&state).Error)
+	require.NoError(t, model.DB.Where("scope_type = ? AND scope_key = ?", "channel", "channel:9:merged_tag:tag-a").First(&state).Error)
 	require.Equal(t, int64(2), state.RoundRobinCursor)
 	require.Equal(t, int64(2), state.Version)
+}
+
+func TestBuildChannelRuntimeHeaderOverrideMergeRoundRobinKeepsChannelStateIsolated(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+
+	tagRecord := &model.TagRequestHeaderPolicy{
+		Tag:                     "tag-shared",
+		HeaderPolicyMode:        "merge",
+		OverrideHeaderUserAgent: true,
+		UserAgentStrategyJSON:   `{"enabled":true,"mode":"round_robin","user_agents":["tag-ua-1","tag-ua-2"]}`,
+	}
+	require.NoError(t, model.DB.Create(tagRecord).Error)
+
+	channelA := &model.Channel{
+		Id: 101,
+		Tag: common.GetPointer("tag-shared"),
+	}
+	channelA.SetOtherSettings(dto.ChannelOtherSettings{
+		HeaderPolicyMode:        dto.HeaderPolicyModeMerge,
+		OverrideHeaderUserAgent: true,
+		UserAgentStrategy: &dto.UserAgentStrategy{
+			Enabled:    true,
+			Mode:       "round_robin",
+			UserAgents: []string{"channel-a-ua"},
+		},
+	})
+
+	channelB := &model.Channel{
+		Id: 202,
+		Tag: common.GetPointer("tag-shared"),
+	}
+	channelB.SetOtherSettings(dto.ChannelOtherSettings{
+		HeaderPolicyMode:        dto.HeaderPolicyModeMerge,
+		OverrideHeaderUserAgent: true,
+		UserAgentStrategy: &dto.UserAgentStrategy{
+			Enabled:    true,
+			Mode:       "round_robin",
+			UserAgents: []string{"channel-b-ua"},
+		},
+	})
+
+	firstA, err := BuildChannelRuntimeHeaderOverride(channelA)
+	require.NoError(t, err)
+	require.Equal(t, "tag-ua-1", firstA["User-Agent"])
+
+	firstB, err := BuildChannelRuntimeHeaderOverride(channelB)
+	require.NoError(t, err)
+	require.Equal(t, "tag-ua-1", firstB["User-Agent"])
+
+	secondA, err := BuildChannelRuntimeHeaderOverride(channelA)
+	require.NoError(t, err)
+	require.Equal(t, "tag-ua-2", secondA["User-Agent"])
+
+	secondB, err := BuildChannelRuntimeHeaderOverride(channelB)
+	require.NoError(t, err)
+	require.Equal(t, "tag-ua-2", secondB["User-Agent"])
+
+	stateA := model.RequestHeaderStrategyState{}
+	require.NoError(t, model.DB.Where("scope_type = ? AND scope_key = ?", "channel", "channel:101:merged_tag:tag-shared").First(&stateA).Error)
+	require.Equal(t, int64(2), stateA.RoundRobinCursor)
+	require.Equal(t, int64(2), stateA.Version)
+
+	stateB := model.RequestHeaderStrategyState{}
+	require.NoError(t, model.DB.Where("scope_type = ? AND scope_key = ?", "channel", "channel:202:merged_tag:tag-shared").First(&stateB).Error)
+	require.Equal(t, int64(2), stateB.RoundRobinCursor)
+	require.Equal(t, int64(2), stateB.Version)
 }
 
 func TestBuildChannelRuntimeHeaderOverrideFallsBackWhenPreferredStrategyUnconfigured(t *testing.T) {
