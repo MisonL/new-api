@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"context"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -9,10 +11,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const prefillGroupListQueryTimeout = 300 * time.Millisecond
+
 // GetPrefillGroups 获取预填组列表，可通过 ?type=xxx 过滤
 func GetPrefillGroups(c *gin.Context) {
 	groupType := c.Query("type")
-	groups, err := model.GetAllPrefillGroups(groupType)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), prefillGroupListQueryTimeout)
+	defer cancel()
+
+	groups, err := model.GetAllPrefillGroupsContext(ctx, groupType)
 	if err != nil {
 		common.ApiError(c, err)
 		return

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -150,6 +151,7 @@ func InitOptionMap() {
 	common.OptionMap["DataExportInterval"] = strconv.Itoa(common.DataExportInterval)
 	common.OptionMap["DataExportDefaultTime"] = common.DataExportDefaultTime
 	common.OptionMap["DefaultCollapseSidebar"] = strconv.FormatBool(common.DefaultCollapseSidebar)
+	common.OptionMap["RequestHeaderPolicyDefaultMode"] = "prefer_channel"
 	common.OptionMap["MjNotifyEnabled"] = strconv.FormatBool(setting.MjNotifyEnabled)
 	common.OptionMap["MjAccountFilterEnabled"] = strconv.FormatBool(setting.MjAccountFilterEnabled)
 	common.OptionMap["MjModeClearEnabled"] = strconv.FormatBool(setting.MjModeClearEnabled)
@@ -551,6 +553,13 @@ func validateOptionValue(key string, value string) error {
 		return billing_setting.ValidateBillingExprJSON(value)
 	case "tool_price_setting.prices":
 		return operation_setting.ValidateToolPriceJSON(value)
+	case "RequestHeaderPolicyDefaultMode":
+		switch strings.TrimSpace(value) {
+		case "prefer_channel", "prefer_tag", "merge":
+			return nil
+		default:
+			return errors.New("RequestHeaderPolicyDefaultMode 值不合法")
+		}
 	default:
 		return nil
 	}

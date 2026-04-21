@@ -836,17 +836,13 @@ func EditTagChannels(c *gin.Context) {
 		channelTag.ParamOverride = common.GetPointer[string](trimmed)
 	}
 	if channelTag.HeaderOverride != nil {
-		trimmed := strings.TrimSpace(*channelTag.HeaderOverride)
-		if trimmed != "" && !json.Valid([]byte(trimmed)) {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "请求头覆盖必须是合法的 JSON 格式",
-			})
-			return
-		}
-		channelTag.HeaderOverride = common.GetPointer[string](trimmed)
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "标签请求头策略已迁移到专用接口，请使用 /api/channel/tag-policy",
+		})
+		return
 	}
-	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ParamOverride, channelTag.HeaderOverride)
+	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ParamOverride, nil)
 	if err != nil {
 		common.ApiError(c, err)
 		return

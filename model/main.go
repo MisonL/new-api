@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 var commonGroupCol string
@@ -115,6 +117,22 @@ func CheckSetup() {
 	}
 }
 
+func newGormLogger(writer io.Writer) gormlogger.Interface {
+	return gormlogger.New(log.New(writer, "\r\n", log.LstdFlags), gormlogger.Config{
+		SlowThreshold:             200 * time.Millisecond,
+		LogLevel:                  gormlogger.Warn,
+		IgnoreRecordNotFoundError: true,
+		Colorful:                  false,
+	})
+}
+
+func newGormConfig() *gorm.Config {
+	return &gorm.Config{
+		PrepareStmt: true,
+		Logger:      newGormLogger(os.Stdout),
+	}
+}
+
 func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 	defer func() {
 		initCol()
@@ -132,9 +150,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 			return gorm.Open(postgres.New(postgres.Config{
 				DSN:                  dsn,
 				PreferSimpleProtocol: true, // disables implicit prepared statement usage
-			}), &gorm.Config{
-				PrepareStmt: true, // precompile SQL
-			})
+			}), newGormConfig())
 		}
 		if strings.HasPrefix(dsn, "local") {
 			common.SysLog("SQL_DSN not set, using SQLite as database")
@@ -143,9 +159,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 			} else {
 				common.LogSqlType = common.DatabaseTypeSQLite
 			}
-			return gorm.Open(sqlite.Open(common.SQLitePath), &gorm.Config{
-				PrepareStmt: true, // precompile SQL
-			})
+			return gorm.Open(sqlite.Open(common.SQLitePath), newGormConfig())
 		}
 		// Use MySQL
 		common.SysLog("using MySQL as database")
@@ -162,16 +176,12 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 		} else {
 			common.LogSqlType = common.DatabaseTypeMySQL
 		}
-		return gorm.Open(mysql.Open(dsn), &gorm.Config{
-			PrepareStmt: true, // precompile SQL
-		})
+		return gorm.Open(mysql.Open(dsn), newGormConfig())
 	}
 	// Use SQLite
 	common.SysLog("SQL_DSN not set, using SQLite as database")
 	common.UsingSQLite = true
-	return gorm.Open(sqlite.Open(common.SQLitePath), &gorm.Config{
-		PrepareStmt: true, // precompile SQL
-	})
+	return gorm.Open(sqlite.Open(common.SQLitePath), newGormConfig())
 }
 
 func InitDB() (err error) {
@@ -261,6 +271,9 @@ func migrateDB() error {
 		&User{},
 		&PasskeyCredential{},
 		&Option{},
+		&TagRequestHeaderPolicy{},
+		&RequestHeaderStrategyState{},
+		&UserHeaderTemplate{},
 		&Redemption{},
 		&Ability{},
 		&Log{},
@@ -311,6 +324,9 @@ func migrateDBFast() error {
 		{&User{}, "User"},
 		{&PasskeyCredential{}, "PasskeyCredential"},
 		{&Option{}, "Option"},
+		{&TagRequestHeaderPolicy{}, "TagRequestHeaderPolicy"},
+		{&RequestHeaderStrategyState{}, "RequestHeaderStrategyState"},
+		{&UserHeaderTemplate{}, "UserHeaderTemplate"},
 		{&Redemption{}, "Redemption"},
 		{&Ability{}, "Ability"},
 		{&Log{}, "Log"},

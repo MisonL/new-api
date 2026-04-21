@@ -24,8 +24,10 @@ services:
       - BATCH_UPDATE_ENABLED=${DEV_BATCH_UPDATE_ENABLED:-true}
       - NODE_NAME=${DEV_NODE_NAME:-dev-isolated-node-1}
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     networks:
       - dev-isolated-network
     healthcheck:
@@ -42,6 +44,11 @@ services:
       - "${DEV_REDIS_PORT:-6380}:6379"
     networks:
       - dev-isolated-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   postgres:
     image: postgres:15
@@ -58,6 +65,11 @@ services:
         target: /var/lib/postgresql/data
     networks:
       - dev-isolated-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DEV_POSTGRES_USER:-root} -d ${DEV_POSTGRES_DB:-new-api-dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 networks:
   dev-isolated-network:

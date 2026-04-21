@@ -32,6 +32,7 @@ const (
 	ContextKeyChannelOtherSettingRaw   ContextKey = "channel_other_setting_raw"
 	ContextKeyChannelParamOverride     ContextKey = "param_override"
 	ContextKeyChannelHeaderOverride    ContextKey = "header_override"
+	ContextKeyChannelHeaderPolicyAudit ContextKey = "channel_header_policy_audit"
 	ContextKeyChannelOrganization      ContextKey = "channel_organization"
 	ContextKeyChannelAutoBan           ContextKey = "auto_ban"
 	ContextKeyChannelModelMapping      ContextKey = "model_mapping"

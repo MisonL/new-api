@@ -91,8 +91,8 @@ const EditModelModal = (props) => {
   const fetchPrefillGroups = async () => {
     try {
       const [tagRes, endpointRes] = await Promise.all([
-        API.get('/api/prefill_group?type=tag'),
-        API.get('/api/prefill_group?type=endpoint'),
+        API.get('/api/prefill_group/?type=tag'),
+        API.get('/api/prefill_group/?type=endpoint'),
       ]);
       if (tagRes?.data?.success) {
         setTagGroups(tagRes.data.data || []);

@@ -411,6 +411,55 @@ function getUsageLogGroupSummary(groupRatio, userGroupRatio, t) {
   return `${useUserGroupRatio ? t('专属倍率') : t('分组')} ${formatRatio(ratio)}x`;
 }
 
+function formatRequestHeaderPolicyMode(mode, t) {
+  switch (mode) {
+    case 'prefer_channel':
+      return t('渠道优先');
+    case 'prefer_tag':
+      return t('标签优先');
+    case 'merge':
+      return t('合并');
+    default:
+      return String(mode || '').trim();
+  }
+}
+
+function buildRequestHeaderPolicySegments(other, t) {
+  const policy = other?.request_header_policy;
+  if (!policy || typeof policy !== 'object') {
+    return [];
+  }
+
+  const segments = [];
+  const modeLabel = formatRequestHeaderPolicyMode(policy.mode, t);
+  if (modeLabel) {
+    segments.push({
+      text: `${t('请求头策略')}：${modeLabel}`,
+      tone: 'secondary',
+    });
+  }
+
+  if (policy.selected_user_agent) {
+    segments.push({
+      text: `${t('已选 UA')}：${policy.selected_user_agent}`,
+      tone: 'secondary',
+    });
+    return segments;
+  }
+
+  if (
+    Array.isArray(policy.applied_header_keys) &&
+    policy.applied_header_keys.length > 0
+  ) {
+    segments.push({
+      text: `${t('应用请求头')}：${policy.applied_header_keys.join(', ')}`,
+      tone: 'secondary',
+    });
+  }
+
+  return segments;
+}
+
 function renderCompactDetailSummary(summarySegments) {
   const segments = Array.isArray(summarySegments)
     ? summarySegments.filter((segment) => segment?.text)
@@ -422,7 +471,8 @@ function renderCompactDetailSummary(summarySegments) {
   return (
     <div
       style={{
-        maxWidth: 180,
+        width: '100%',
+        maxWidth: 240,
         lineHeight: 1.35,
       }}
     >
@@ -436,9 +486,9 @@ function renderCompactDetailSummary(summarySegments) {
             maxWidth: '100%',
             fontSize: 12,
             marginTop: index === 0 ? 0 : 2,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
+            whiteSpace: 'normal',
+            overflowWrap: 'anywhere',
+            wordBreak: 'break-word',
           }}
         >
           {segment.text}
@@ -492,13 +542,21 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
   };
 
   if (other?.billing_mode === 'tiered_expr') {
-    return { segments: renderTieredModelPriceSimple(summaryOpts) };
+    return {
+      segments: [
+        ...renderTieredModelPriceSimple(summaryOpts),
+        ...buildRequestHeaderPolicySegments(other, t),
+      ],
+    };
   }
 
   return {
-    segments: other?.claude
-      ? renderModelPriceSimple({ ...summaryOpts, provider: 'claude' })
-      : renderModelPriceSimple({ ...summaryOpts, provider: 'openai' }),
+    segments: [
+      ...(other?.claude
+        ? renderModelPriceSimple({ ...summaryOpts, provider: 'claude' })
+        : renderModelPriceSimple({ ...summaryOpts, provider: 'openai' })),
+      ...buildRequestHeaderPolicySegments(other, t),
+    ],
   };
 }
 
@@ -944,7 +1002,7 @@ export const getLogsColumns = ({
       title: t('详情'),
       dataIndex: 'content',
       fixed: 'right',
-      width: 200,
+      width: 240,
       render: (text, record, index) => {
         const detailSummary = getUsageLogDetailSummary(
           record,
@@ -963,7 +1021,7 @@ export const getLogsColumns = ({
                   opts: { style: { width: 240 } },
                 },
               }}
-              style={{ maxWidth: 200, marginBottom: 0 }}
+              style={{ maxWidth: 240, marginBottom: 0 }}
             >
               {text}
             </Typography.Paragraph>

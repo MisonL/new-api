@@ -31,3 +31,21 @@ func TestUpdateOptionRejectsInvalidToolPriceBeforePersist(t *testing.T) {
 	require.NoError(t, DB.Model(&Option{}).Where("key = ?", "tool_price_setting.prices").Count(&count).Error)
 	require.Zero(t, count)
 }
+
+func TestUpdateOptionRejectsInvalidRequestHeaderPolicyDefaultModeBeforePersist(t *testing.T) {
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM options")
+	})
+
+	err := UpdateOption("RequestHeaderPolicyDefaultMode", "")
+	require.Error(t, err)
+
+	var count int64
+	require.NoError(t, DB.Model(&Option{}).Where("key = ?", "RequestHeaderPolicyDefaultMode").Count(&count).Error)
+	require.Zero(t, count)
+
+	err = UpdateOption("RequestHeaderPolicyDefaultMode", "broken")
+	require.Error(t, err)
+	require.NoError(t, DB.Model(&Option{}).Where("key = ?", "RequestHeaderPolicyDefaultMode").Count(&count).Error)
+	require.Zero(t, count)
+}

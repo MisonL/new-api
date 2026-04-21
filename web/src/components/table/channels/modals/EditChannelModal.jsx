@@ -53,6 +53,7 @@ import {
   Tooltip,
   Collapse,
   Dropdown,
+  Switch as SemiSwitch,
 } from '@douyinfe/semi-ui';
 import {
   getChannelModels,
@@ -71,9 +72,19 @@ import HeaderProfileEditorModal from './HeaderProfileEditorModal';
 import JSONEditor from '../../../common/ui/JSONEditor';
 import SecureVerificationModal from '../../../common/modals/SecureVerificationModal';
 import StatusCodeRiskGuardModal from './StatusCodeRiskGuardModal';
+import HeaderOverrideUserAgentPresets from './HeaderOverrideUserAgentPresets';
+import UserHeaderTemplateManager from './UserHeaderTemplateManager';
 import ChannelKeyDisplay from '../../../common/ui/ChannelKeyDisplay';
 import { useSecureVerification } from '../../../../hooks/common/useSecureVerification';
 import { parseChannelConnectionString } from '../../../../helpers/token';
+import {
+  applyUserAgentPresetToHeaderOverride,
+  buildHeaderOverrideUserAgentPresetMenu,
+  buildUserAgentStrategyPayload,
+  normalizeHeaderTemplateContent,
+  normalizeUserAgentStrategy,
+  normalizeUserAgentValues,
+} from '../../../../helpers/headerOverrideUserAgent';
 import { createApiCalls } from '../../../../services/secureVerification';
 import {
   collectInvalidStatusCodeEntries,
@@ -140,6 +151,31 @@ const PARAM_OVERRIDE_OPERATIONS_TEMPLATE = {
       logic: 'AND',
     },
   ],
+};
+
+const HEADER_POLICY_MODE_OPTIONS = [
+  { label: '跟随系统默认', value: 'system_default' },
+  { label: '渠道优先', value: 'prefer_channel' },
+  { label: '标签优先', value: 'prefer_tag' },
+  { label: '合并', value: 'merge' },
+];
+
+const USER_AGENT_STRATEGY_MODE_OPTIONS = [
+  { label: '轮询', value: 'round_robin' },
+  { label: '随机', value: 'random' },
+];
+
+const DESKTOP_CHANNEL_SHEET_WIDTH = 720;
+const DESKTOP_ADVANCED_SETTINGS_PANEL_WIDTH = 600;
+const MIN_VIEWPORT_FOR_DETACHED_ADVANCED_PANEL =
+  DESKTOP_CHANNEL_SHEET_WIDTH +
+  DESKTOP_ADVANCED_SETTINGS_PANEL_WIDTH +
+  64;
+
+const SOFT_SECTION_STYLE = {
+  backgroundColor: 'var(--semi-color-bg-0)',
+  border: '1px solid var(--semi-color-border)',
+  boxShadow: 'none',
 };
 
 const supportsResponsesBootstrapRecovery = (channelType) =>
@@ -214,6 +250,12 @@ const EditChannelModal = (props) => {
     system_prompt: '',
     system_prompt_override: false,
     settings: '',
+    header_policy_mode: 'system_default',
+    override_header_user_agent: false,
+    user_agent_strategy_configured: false,
+    user_agent_strategy_enabled: false,
+    user_agent_strategy_mode: 'round_robin',
+    user_agent_strategy_user_agents: [],
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
     // 仅 AWS: 密钥格式和区域（存入 settings.aws_key_type 和 settings.aws_region）
@@ -437,6 +479,12 @@ const EditChannelModal = (props) => {
     setAdvancedSettingsOpen(open);
     localStorage.setItem(ADVANCED_SETTINGS_EXPANDED_KEY, String(open));
   };
+  const [viewportWidth, setViewportWidth] = useState(() => {
+    if (typeof window === 'undefined') {
+      return MIN_VIEWPORT_FOR_DETACHED_ADVANCED_PANEL;
+    }
+    return window.innerWidth;
+  });
   const formContainerRef = useRef(null);
   const doubaoApiClickCountRef = useRef(0);
   const initialBaseUrlRef = useRef('');
@@ -532,6 +580,18 @@ const EditChannelModal = (props) => {
     setVerifyCode('');
     setVerifyLoading(false);
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+    const syncViewportWidth = () => {
+      setViewportWidth(window.innerWidth);
+    };
+    syncViewportWidth();
+    window.addEventListener('resize', syncViewportWidth);
+    return () => window.removeEventListener('resize', syncViewportWidth);
+  }, []);
 
   const handleApiConfigSecretClick = () => {
     if (inputs.type !== 45) return;
@@ -957,6 +1017,66 @@ const EditChannelModal = (props) => {
     }
   };
 
+  const applyHeaderOverrideUserAgentPreset = (preset) => {
+    const result = applyUserAgentPresetToHeaderOverride(
+      inputs.header_override,
+      preset.ua,
+    );
+
+    if (!result.ok) {
+      showInfo(t(result.message));
+      return;
+    }
+
+    handleInputChange('header_override', result.value);
+  };
+
+  const handleUserAgentStrategyListChange = (value) => {
+    const normalized = normalizeUserAgentValues(value);
+    handleInputChange('user_agent_strategy_user_agents', normalized);
+    if (normalized.length > 0 && !inputs.user_agent_strategy_enabled) {
+      handleInputChange('user_agent_strategy_enabled', true);
+    }
+    if (normalized.length === 0) {
+      handleInputChange('override_header_user_agent', false);
+    }
+    if (normalized.length > 0 || inputs.user_agent_strategy_enabled) {
+      handleInputChange('user_agent_strategy_configured', true);
+    }
+  };
+
+  const appendUserAgentStrategyPreset = (preset) => {
+    const currentValues = normalizeUserAgentValues(
+      inputs.user_agent_strategy_user_agents || [],
+    );
+    const exists = currentValues.includes(preset.ua);
+    const normalized = exists
+      ? currentValues.filter((value) => value !== preset.ua)
+      : normalizeUserAgentValues([...currentValues, preset.ua]);
+    handleInputChange('user_agent_strategy_user_agents', normalized);
+    if (!exists) {
+      handleInputChange('user_agent_strategy_enabled', true);
+    }
+    if (normalized.length === 0) {
+      handleInputChange('override_header_user_agent', false);
+    }
+    handleInputChange(
+      'user_agent_strategy_configured',
+      normalized.length > 0 || inputs.user_agent_strategy_enabled,
+    );
+  };
+
+  const headerOverrideUserAgentPresetMenu =
+    buildHeaderOverrideUserAgentPresetMenu(t, applyHeaderOverrideUserAgentPreset);
+
+  const clearUserAgentStrategyDraft = () => {
+    handleInputChange('user_agent_strategy_configured', false);
+    handleInputChange('user_agent_strategy_enabled', false);
+    handleInputChange('override_header_user_agent', false);
+    handleInputChange('user_agent_strategy_mode', 'round_robin');
+    handleInputChange('user_agent_strategy_user_agents', []);
+  };
+
   const formatUnixTime = (timestamp) => {
     const value = Number(timestamp || 0);
     if (!value) {
@@ -1135,8 +1255,33 @@ const EditChannelModal = (props) => {
       if (data.settings) {
         try {
           const parsedSettings = JSON.parse(data.settings);
+          const rawUserAgentStrategy =
+            parsedSettings.ua_strategy &&
+            typeof parsedSettings.ua_strategy === 'object' &&
+            !Array.isArray(parsedSettings.ua_strategy)
+              ? parsedSettings.ua_strategy
+              : null;
+          const normalizedUserAgentStrategy = normalizeUserAgentStrategy(
+            rawUserAgentStrategy,
+          );
           data.azure_responses_version =
             parsedSettings.azure_responses_version || '';
+          data.header_policy_mode =
+            parsedSettings.header_policy_mode || 'system_default';
+          data.override_header_user_agent =
+            parsedSettings.override_header_user_agent === true;
+          data.user_agent_strategy_configured = rawUserAgentStrategy !== null;
+          data.user_agent_strategy_enabled =
+            rawUserAgentStrategy?.enabled === true;
+          data.user_agent_strategy_mode =
+            normalizedUserAgentStrategy?.mode ||
+            String(rawUserAgentStrategy?.mode || '').trim() ||
+            'round_robin';
+          data.user_agent_strategy_user_agents = normalizeUserAgentValues(
+            rawUserAgentStrategy?.user_agents ||
+              rawUserAgentStrategy?.userAgents ||
+              [],
+          );
           // 读取 Vertex 密钥格式
           data.vertex_key_type = parsedSettings.vertex_key_type || 'json';
           // 读取 AWS 密钥格式和区域
@@ -1176,6 +1321,12 @@ const EditChannelModal = (props) => {
         } catch (error) {
           console.error('解析其他设置失败:', error);
           data.azure_responses_version = '';
+          data.header_policy_mode = 'system_default';
+          data.override_header_user_agent = false;
+          data.user_agent_strategy_configured = false;
+          data.user_agent_strategy_enabled = false;
+          data.user_agent_strategy_mode = 'round_robin';
+          data.user_agent_strategy_user_agents = [];
           data.region = '';
           data.vertex_key_type = 'json';
           data.aws_key_type = 'ak_sk';
@@ -1196,6 +1347,12 @@ const EditChannelModal = (props) => {
         }
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
+        data.header_policy_mode = 'system_default';
+        data.override_header_user_agent = false;
+        data.user_agent_strategy_configured = false;
+        data.user_agent_strategy_enabled = false;
+        data.user_agent_strategy_mode = 'round_robin';
+        data.user_agent_strategy_user_agents = [];
         data.vertex_key_type = 'json';
         data.aws_key_type = 'ak_sk';
         data.is_enterprise_account = false;
@@ -1447,7 +1604,7 @@ const EditChannelModal = (props) => {
 
   const fetchModelGroups = async () => {
     try {
-      const res = await API.get('/api/prefill_group?type=model');
+      const res = await API.get('/api/prefill_group/?type=model');
       if (res?.data?.success) {
         setModelGroups(res.data.data || []);
       }
@@ -2028,6 +2185,28 @@ const EditChannelModal = (props) => {
         localInputs.base_url.length - 1,
       );
     }
+  const normalizedHeaderOverride = normalizeHeaderTemplateContent(
+      localInputs.header_override,
+      {
+        allowEmpty: true,
+      },
+    );
+    if (!normalizedHeaderOverride.ok) {
+      showInfo(t(normalizedHeaderOverride.message));
+      return;
+    }
+    localInputs.header_override = normalizedHeaderOverride.value;
+
+    const userAgentStrategyPayload = buildUserAgentStrategyPayload({
+      configured: localInputs.user_agent_strategy_configured,
+      enabled: localInputs.user_agent_strategy_enabled,
+      mode: localInputs.user_agent_strategy_mode,
+      userAgents: localInputs.user_agent_strategy_user_agents,
+    });
+    if (!userAgentStrategyPayload.ok) {
+      showInfo(t(userAgentStrategyPayload.message));
+      return;
+    }
     if (localInputs.type === 18 && localInputs.other === '') {
       localInputs.other = 'v2.1';
     }
@@ -2117,6 +2296,15 @@ const EditChannelModal = (props) => {
     if (typeof settings.upstream_model_update_last_check_time !== 'number') {
       settings.upstream_model_update_last_check_time = 0;
     }
+    settings.header_policy_mode =
+      localInputs.header_policy_mode || 'system_default';
+    settings.override_header_user_agent =
+      localInputs.override_header_user_agent === true;
+    if (userAgentStrategyPayload.value) {
+      settings.ua_strategy = userAgentStrategyPayload.value;
+    } else if ('ua_strategy' in settings) {
+      delete settings.ua_strategy;
+    }
 
     localInputs.settings = JSON.stringify(settings);
 
@@ -2140,6 +2328,12 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_inference_geo;
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
+    delete localInputs.header_policy_mode;
+    delete localInputs.override_header_user_agent;
+    delete localInputs.user_agent_strategy_configured;
+    delete localInputs.user_agent_strategy_enabled;
+    delete localInputs.user_agent_strategy_mode;
+    delete localInputs.user_agent_strategy_user_agents;
     delete localInputs.responses_stream_bootstrap_recovery_enabled;
     delete localInputs.upstream_model_update_check_enabled;
     delete localInputs.upstream_model_update_auto_sync_enabled;
@@ -2184,6 +2378,20 @@ const EditChannelModal = (props) => {
       showError(message);
     }
   };
+
+  const selectedUserAgentCount = (inputs.user_agent_strategy_user_agents || [])
+    .length;
+  const userAgentStrategyHint = inputs.user_agent_strategy_enabled
+    ? selectedUserAgentCount > 0
+      ? t('已选 {{count}} 个 UA，将按当前策略参与请求转发', {
+          count: selectedUserAgentCount,
+        })
+      : t('策略已启用，但还需要至少选择 1 个 UA 才会生效')
+    : selectedUserAgentCount > 0
+      ? t('当前未启用，已保留 {{count}} 个 UA；重新开启后立即生效', {
+          count: selectedUserAgentCount,
+        })
+      : t('当前未启用；手动输入或点击预置后会自动启用策略');
 
   // 密钥去重函数
   const deduplicateKeys = () => {
@@ -2472,9 +2680,9 @@ const EditChannelModal = (props) => {
             )}
           </div>
         }
-        bodyStyle={{ padding: '0' }}
+        bodyStyle={{ padding: isMobile ? '12px 12px 16px' : '16px 20px 20px' }}
         visible={props.visible}
-        width={isMobile ? '100%' : 600}
+        width={isMobile ? '100%' : DESKTOP_CHANNEL_SHEET_WIDTH}
         footer={
           <div className='flex justify-end items-center gap-2'>
             <Button
@@ -2504,6 +2712,23 @@ const EditChannelModal = (props) => {
           onSubmit={submit}
         >
           {() => {
+            const useInlineAdvancedSettings =
+              isMobile ||
+              viewportWidth < MIN_VIEWPORT_FOR_DETACHED_ADVANCED_PANEL;
+            const advancedSettingsToggleLabel = advancedSettingsOpen
+              ? t('收起')
+              : useInlineAdvancedSettings
+                ? t('展开')
+                : isEdit
+                  ? t('向左展开')
+                  : t('向右展开');
+            const advancedSettingsIconTransform = advancedSettingsOpen
+              ? 'rotate(180deg)'
+              : useInlineAdvancedSettings
+                ? 'rotate(0deg)'
+                : isEdit
+                  ? 'rotate(90deg)'
+                  : 'rotate(-90deg)';
             const advancedSettingsContent = (
               <div className='space-y-4'>
                 {/* Upstream Model Management Section */}
@@ -2656,13 +2881,10 @@ const EditChannelModal = (props) => {
                     <Text type='tertiary' size='small'>
                       {t('此项可选，用于覆盖请求参数。不支持覆盖 stream 参数')}
                     </Text>
-                    <div
-                      className='mt-2 rounded-xl p-3'
-                      style={{
-                        backgroundColor: 'var(--semi-color-fill-0)',
-                        border: '1px solid var(--semi-color-fill-2)',
-                      }}
-                    >
+                  <div
+                    className='mt-2 rounded-lg p-3.5'
+                    style={SOFT_SECTION_STYLE}
+                  >
                       <div className='flex items-center justify-between mb-2'>
                         <Tag color={paramOverrideMeta.tagColor}>
                           {paramOverrideMeta.tagLabel}
@@ -2681,7 +2903,6 @@ const EditChannelModal = (props) => {
                       </pre>
                     </div>
                   </div>
-
                   <HeaderProfileStrategySection
                     loading={headerProfilesLoading}
                     strategy={headerProfileStrategy}
@@ -2698,6 +2919,333 @@ const EditChannelModal = (props) => {
                     onEditProfile={openHeaderProfileEditor}
                     onDeleteProfile={handleDeleteHeaderProfile}
                     onImportLegacy={handleImportLegacyHeaderOverride}
+                  />
+                  <Form.TextArea
+                    field='header_override'
+                    label={t('请求头覆盖')}
+                    placeholder={
+                      t('此项可选，用于覆盖请求头参数') +
+                      '\n' +
+                      t('格式示例：') +
+                      '\n{\n  "User-Agent": "Mozilla/5.0 ...",\n  "Authorization": "Bearer {api_key}"\n}'
+                    }
+                    autosize
+                    onChange={(value) =>
+                      handleInputChange('header_override', value)
+                    }
+                    extraText={
+                      <div className='flex flex-col gap-1'>
+                        <div className='flex gap-2 flex-wrap items-center'>
+                          <Text
+                            className='!text-semi-color-primary cursor-pointer'
+                            onClick={() =>
+                              handleInputChange(
+                                'header_override',
+                                JSON.stringify(
+                                  {
+                                    '*': true,
+                                    're:^X-Trace-.*$': true,
+                                    'X-Foo': '{client_header:X-Foo}',
+                                    Authorization: 'Bearer {api_key}',
+                                    'User-Agent':
+                                      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0',
+                                  },
+                                  null,
+                                  2,
+                                ),
+                              )
+                            }
+                          >
+                            {t('填入模板')}
+                          </Text>
+                          <Text
+                            className='!text-semi-color-primary cursor-pointer'
+                            onClick={() =>
+                              handleInputChange(
+                                'header_override',
+                                JSON.stringify({ '*': true }, null, 2),
+                              )
+                            }
+                          >
+                            {t('填入透传模版')}
+                          </Text>
+                          <Text
+                            className='!text-semi-color-primary cursor-pointer'
+                            onClick={() => formatJsonField('header_override')}
+                          >
+                            {t('格式化')}
+                          </Text>
+                          <Dropdown
+                            trigger='click'
+                            position='bottomLeft'
+                            menu={headerOverrideUserAgentPresetMenu}
+                          >
+                            <Text className='!text-semi-color-primary cursor-pointer inline-flex items-center gap-1'>
+                              <span>{t('UA 预置模板')}</span>
+                              <IconChevronDown size={12} />
+                            </Text>
+                          </Dropdown>
+                          <Text
+                            className='!text-semi-color-primary cursor-pointer'
+                            onClick={() => handleInputChange('header_override', '')}
+                          >
+                            {t('清空')}
+                          </Text>
+                        </div>
+                        <div>
+                          <Text type='tertiary' size='small'>
+                            {t('支持变量：')}
+                          </Text>
+                          <div className='text-xs text-tertiary ml-2'>
+                            <div>
+                              {t('渠道密钥')}: {'{api_key}'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    }
+                    showClear
+                  />
+                  <div
+                    className='mt-4 rounded-lg p-4'
+                    style={SOFT_SECTION_STYLE}
+                  >
+                    <div className='flex flex-wrap items-start justify-between gap-2 mb-3'>
+                      <div className='min-w-0 flex-1'>
+                        <Text strong>{t('User-Agent 策略')}</Text>
+                        <div className='mt-1'>
+                          <Text type='tertiary' size='small'>
+                            {t(
+                              '可为渠道维护多选 UA 池，并在真实转发时按轮询或随机策略选出最终 User-Agent',
+                            )}
+                          </Text>
+                        </div>
+                      </div>
+                      <Button
+                        type='tertiary'
+                        theme='borderless'
+                        size='small'
+                        className='!px-0 shrink-0'
+                        onClick={clearUserAgentStrategyDraft}
+                      >
+                        {t('清空 UA 策略')}
+                      </Button>
+                    </div>
+                    <div className='mb-3 flex flex-wrap items-center gap-2 transition-colors duration-200'>
+                      <Tag
+                        size='small'
+                        color={
+                          inputs.user_agent_strategy_enabled ? 'blue' : 'grey'
+                        }
+                      >
+                        {inputs.user_agent_strategy_enabled ? t('开') : t('关')}
+                      </Tag>
+                      <Text
+                        size='small'
+                        type={
+                          inputs.user_agent_strategy_enabled
+                            ? 'secondary'
+                            : 'tertiary'
+                        }
+                      >
+                        {userAgentStrategyHint}
+                      </Text>
+                    </div>
+                    <div className='grid gap-3'>
+                      <div
+                        className='rounded-lg px-3 py-3 transition-colors duration-200'
+                        style={{
+                          border: inputs.user_agent_strategy_enabled
+                            ? '1px solid var(--semi-color-primary-light-active)'
+                            : '1px solid var(--semi-color-border)',
+                          backgroundColor: inputs.user_agent_strategy_enabled
+                            ? 'var(--semi-color-fill-0)'
+                            : 'var(--semi-color-bg-0)',
+                        }}
+                      >
+                        <div className='flex items-start justify-between gap-3'>
+                          <div className='min-w-0 max-w-[420px] pr-2'>
+                            <Text strong size='small'>
+                              {t('启用 UA 策略')}
+                            </Text>
+                            <div className='mt-1'>
+                              <Text type='tertiary' size='small'>
+                                {t(
+                                  '启用后，从 UA 池按轮询或随机策略选出最终 User-Agent',
+                                )}
+                              </Text>
+                            </div>
+                          </div>
+                          <div className='shrink-0 flex items-center gap-2 pt-0.5'>
+                            <Text type='tertiary' size='small'>
+                              {inputs.user_agent_strategy_enabled ? t('开') : t('关')}
+                            </Text>
+                            <SemiSwitch
+                              checked={inputs.user_agent_strategy_enabled}
+                              onChange={(checked) => {
+                                handleInputChange(
+                                  'user_agent_strategy_enabled',
+                                  checked,
+                                );
+                                if (!checked) {
+                                  handleInputChange(
+                                    'override_header_user_agent',
+                                    false,
+                                  );
+                                }
+                                if (
+                                  checked ||
+                                  (inputs.user_agent_strategy_user_agents || [])
+                                    .length > 0
+                                ) {
+                                  handleInputChange(
+                                    'user_agent_strategy_configured',
+                                    true,
+                                  );
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className='rounded-lg px-3 py-3 transition-colors duration-200'
+                        style={{
+                          border: inputs.override_header_user_agent
+                            ? '1px solid var(--semi-color-primary-light-active)'
+                            : '1px solid var(--semi-color-border)',
+                          backgroundColor: inputs.override_header_user_agent
+                            ? 'var(--semi-color-fill-0)'
+                            : 'var(--semi-color-bg-0)',
+                          opacity:
+                            inputs.user_agent_strategy_enabled &&
+                            selectedUserAgentCount > 0
+                              ? 1
+                              : 0.72,
+                        }}
+                      >
+                        <div className='flex items-start justify-between gap-3'>
+                          <div className='min-w-0 max-w-[420px] pr-2'>
+                            <Text strong size='small'>
+                              {t('覆盖静态 User-Agent')}
+                            </Text>
+                            <div className='mt-1'>
+                              <Text type='tertiary' size='small'>
+                                {t(
+                                  '启用后，用 UA 池结果覆盖静态请求头里的 User-Agent',
+                                )}
+                              </Text>
+                            </div>
+                          </div>
+                          <div className='shrink-0 flex items-center gap-2 pt-0.5'>
+                            <Text type='tertiary' size='small'>
+                              {inputs.override_header_user_agent
+                                ? t('开')
+                                : t('关')}
+                            </Text>
+                            <SemiSwitch
+                              checked={inputs.override_header_user_agent}
+                              disabled={
+                                !inputs.user_agent_strategy_enabled ||
+                                selectedUserAgentCount === 0
+                              }
+                              onChange={(checked) =>
+                                handleInputChange(
+                                  'override_header_user_agent',
+                                  checked,
+                                )
+                              }
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className='grid gap-3'
+                        style={{
+                          gridTemplateColumns:
+                            'repeat(auto-fit, minmax(220px, 1fr))',
+                        }}
+                      >
+                        <Form.Select
+                          field='header_policy_mode'
+                          label={t('请求头优先级')}
+                          optionList={HEADER_POLICY_MODE_OPTIONS.map((item) => ({
+                            ...item,
+                            label: t(item.label),
+                          }))}
+                          initValue='system_default'
+                          onChange={(value) =>
+                            handleInputChange('header_policy_mode', value)
+                          }
+                        />
+                        <Form.Select
+                          field='user_agent_strategy_mode'
+                          label={t('UA 策略模式')}
+                          optionList={USER_AGENT_STRATEGY_MODE_OPTIONS.map((item) => ({
+                            ...item,
+                            label: t(item.label),
+                          }))}
+                          initValue='round_robin'
+                          disabled={!inputs.user_agent_strategy_enabled}
+                          onChange={(value) => {
+                            handleInputChange('user_agent_strategy_mode', value);
+                            handleInputChange(
+                              'user_agent_strategy_configured',
+                              true,
+                            );
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div
+                      className='mt-3 transition-opacity duration-200'
+                      style={{
+                        opacity:
+                          inputs.user_agent_strategy_enabled ||
+                          selectedUserAgentCount > 0
+                            ? 1
+                            : 0.84,
+                      }}
+                    >
+                      <Form.TagInput
+                        field='user_agent_strategy_user_agents'
+                        label={t('User-Agent 列表')}
+                        placeholder={t('输入 UA，按回车或逗号可追加多个')}
+                        addOnBlur
+                        showClear
+                        onChange={handleUserAgentStrategyListChange}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div
+                      className='mt-3 transition-opacity duration-200'
+                      style={{
+                        opacity:
+                          inputs.user_agent_strategy_enabled ||
+                          selectedUserAgentCount > 0
+                            ? 1
+                            : 0.82,
+                      }}
+                    >
+                      <div className='mb-2'>
+                        <Text type='tertiary' size='small'>
+                          {t('常用 UA 预置')}
+                        </Text>
+                      </div>
+                      <HeaderOverrideUserAgentPresets
+                        t={t}
+                        onSelect={appendUserAgentStrategyPreset}
+                        showTitle={false}
+                        compact
+                        activeValues={inputs.user_agent_strategy_user_agents || []}
+                      />
+                    </div>
+                  </div>
+                  <UserHeaderTemplateManager
+                    t={t}
+                    value={inputs.header_override}
+                    visible={props.visible}
+                    onApply={(content) => handleInputChange('header_override', content)}
                   />
                   <JSONEditor
                     key={`status_code_mapping-${isEdit ? channelId : 'new'}`}
@@ -3701,7 +4249,7 @@ const EditChannelModal = (props) => {
                         <Form.Input
                           field='other'
                           label={t('知识库 ID')}
-                          placeholder={'请输入知识库 ID，例如：123456'}
+                          placeholder={t('请输入知识库 ID，例如：123456')}
                           onChange={(value) =>
                             handleInputChange('other', value)
                           }
@@ -3713,9 +4261,9 @@ const EditChannelModal = (props) => {
                         <Form.Input
                           field='other'
                           label='Account ID'
-                          placeholder={
-                            '请输入Account ID，例如：d6b5da8hk1awo8nap34ube6gh'
-                          }
+                          placeholder={t(
+                            '请输入Account ID，例如：d6b5da8hk1awo8nap34ube6gh',
+                          )}
                           onChange={(value) =>
                             handleInputChange('other', value)
                           }
@@ -3727,7 +4275,7 @@ const EditChannelModal = (props) => {
                         <Form.Input
                           field='other'
                           label={t('智能体ID')}
-                          placeholder={'请输入智能体ID，例如：7342866812345'}
+                          placeholder={t('请输入智能体ID，例如：7342866812345')}
                           onChange={(value) =>
                             handleInputChange('other', value)
                           }
@@ -4288,7 +4836,7 @@ const EditChannelModal = (props) => {
                     </Card>
 
                     {/* Advanced Settings Toggle / Collapse */}
-                    {isMobile ? (
+                    {useInlineAdvancedSettings ? (
                       <Collapse
                         activeKey={advancedSettingsOpen ? ['advanced'] : []}
                         onChange={(keys) =>
@@ -4335,20 +4883,12 @@ const EditChannelModal = (props) => {
                             size='small'
                             style={{ color: 'var(--semi-color-primary)' }}
                           >
-                            {advancedSettingsOpen
-                              ? t('收起')
-                              : isEdit
-                                ? t('向左展开')
-                                : t('向右展开')}
+                            {advancedSettingsToggleLabel}
                           </Text>
                           <IconChevronDown
                             size={14}
                             style={{
-                              transform: advancedSettingsOpen
-                                ? 'rotate(180deg)'
-                                : isEdit
-                                  ? 'rotate(90deg)'
-                                  : 'rotate(-90deg)',
+                              transform: advancedSettingsIconTransform,
                               transition: 'transform 0.2s',
                             }}
                           />
@@ -4359,12 +4899,13 @@ const EditChannelModal = (props) => {
                 </Spin>
 
                 {/* Desktop: Advanced Settings Side Panel - rendered inside Form tree */}
-                {!isMobile && advancedSettingsOpen && (
+                {!useInlineAdvancedSettings && advancedSettingsOpen && (
                   <div
                     className='fixed top-0 h-full overflow-y-auto z-[999] semi-sidesheet-inner'
                     style={{
-                      width: 600,
-                      [isEdit ? 'right' : 'left']: 600,
+                      width: DESKTOP_ADVANCED_SETTINGS_PANEL_WIDTH,
+                      [isEdit ? 'right' : 'left']:
+                        DESKTOP_CHANNEL_SHEET_WIDTH,
                       backgroundColor: 'var(--semi-color-bg-0)',
                       borderLeft: isEdit
                         ? 'none'
@@ -4372,7 +4913,7 @@ const EditChannelModal = (props) => {
                       borderRight: isEdit
                         ? '1px solid var(--semi-color-border)'
                         : 'none',
-                      animation: `slideIn${isEdit ? 'Left' : 'Right'} 0.3s ease-out`,
+                      animation: `slideIn${isEdit ? 'Right' : 'Left'} 0.3s ease-out`,
                     }}
                   >
                     <div className='semi-sidesheet-header'>
@@ -4396,9 +4937,10 @@ const EditChannelModal = (props) => {
                       />
                     </div>
                     <div className='semi-sidesheet-body' style={{ padding: 0 }}>
-                      <div className='p-2 space-y-3'>
+                      <div className='p-3 space-y-3'>
                         <Card className='!rounded-2xl shadow-sm border-0'>
-                          <div className='flex items-center mb-4'>
+                          <div className='mb-4 rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] px-4 py-3'>
+                            <div className='flex items-center'>
                             <Avatar
                               size='small'
                               color='orange'
@@ -4414,6 +4956,7 @@ const EditChannelModal = (props) => {
                                 {t('渠道的高级配置选项')}
                               </div>
                             </div>
+                          </div>
                           </div>
                           {advancedSettingsContent}
                         </Card>

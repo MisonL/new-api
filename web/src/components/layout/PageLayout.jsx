@@ -22,9 +22,10 @@ import { Layout } from '@douyinfe/semi-ui';
 import SiderBar from './SiderBar';
 import App from '../../App';
 import FooterBar from './Footer';
+import Loading from '../common/ui/Loading';
 import { ToastContainer } from 'react-toastify';
 import ErrorBoundary from '../common/ErrorBoundary';
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import useFormFieldA11yPatch from '../../hooks/common/useFormFieldA11yPatch';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
@@ -52,7 +53,8 @@ const PageLayout = () => {
   const [, statusDispatch] = useContext(StatusContext);
   const isMobile = useIsMobile();
   const [collapsed, , setCollapsed] = useSidebarCollapsed();
-  const [sidebarWidth, setSidebarWidth, resetSidebarWidth] = useSidebarWidth();
+  const [sidebarWidth, setSidebarWidth, resetSidebarWidth, defaultSidebarWidth] =
+    useSidebarWidth();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { i18n } = useTranslation();
   const location = useLocation();
@@ -80,6 +82,27 @@ const PageLayout = () => {
   const isHomeRoute = location.pathname === '/';
   const useHomeViewportLock = !isMobile && isHomeRoute;
   const showSider = isConsoleRoute && (!isMobile || drawerOpen);
+  const preferredLang = useMemo(() => {
+    if (userState?.user?.setting) {
+      try {
+        const settings = JSON.parse(userState.user.setting);
+        const normalizedLanguage = normalizeLanguage(settings.language);
+        if (normalizedLanguage) {
+          return normalizedLanguage;
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+
+    const savedLang = localStorage.getItem('i18nextLng');
+    return normalizeLanguage(savedLang);
+  }, [userState?.user?.setting]);
+  const currentLanguage = normalizeLanguage(i18n.resolvedLanguage || i18n.language);
+  const shouldDelayConsoleRender =
+    isConsoleRoute &&
+    Boolean(preferredLang) &&
+    preferredLang !== currentLanguage;
 
   useEffect(() => {
     if (isMobile && drawerOpen && collapsed) {
@@ -127,31 +150,15 @@ const PageLayout = () => {
   }, []);
 
   useEffect(() => {
-    let preferredLang;
-
-    if (userState?.user?.setting) {
-      try {
-        const settings = JSON.parse(userState.user.setting);
-        preferredLang = normalizeLanguage(settings.language);
-      } catch (e) {
-        // Ignore parse errors
-      }
-    }
-
     if (!preferredLang) {
-      const savedLang = localStorage.getItem('i18nextLng');
-      if (savedLang) {
-        preferredLang = normalizeLanguage(savedLang);
-      }
+      return;
     }
 
-    if (preferredLang) {
-      localStorage.setItem('i18nextLng', preferredLang);
-      if (preferredLang !== i18n.language) {
-        i18n.changeLanguage(preferredLang);
-      }
+    localStorage.setItem('i18nextLng', preferredLang);
+    if (preferredLang !== currentLanguage) {
+      i18n.changeLanguage(preferredLang).catch(console.error);
     }
-  }, [i18n, userState?.user?.setting]);
+  }, [currentLanguage, i18n, preferredLang]);
 
   useFormFieldA11yPatch(`${location.pathname}${location.search}`);
 
@@ -205,6 +212,7 @@ const PageLayout = () => {
           >
             <SiderBar
               sidebarWidth={sidebarWidth}
+              defaultSidebarWidth={defaultSidebarWidth}
               setSidebarWidth={setSidebarWidth}
               resetSidebarWidth={resetSidebarWidth}
               isMobile={isMobile}
@@ -255,7 +263,7 @@ const PageLayout = () => {
               </div>
             )}
             <ErrorBoundary>
-              <App />
+              {shouldDelayConsoleRender ? <Loading /> : <App />}
             </ErrorBoundary>
           </Content>
           {!shouldHideFooter && (

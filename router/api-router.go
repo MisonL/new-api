@@ -103,6 +103,10 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/header_profiles", controller.CreateUserHeaderProfile)
 				selfRoute.PUT("/header_profiles/:id", controller.UpdateUserHeaderProfile)
 				selfRoute.DELETE("/header_profiles/:id", controller.DeleteUserHeaderProfile)
+				selfRoute.GET("/header-templates", controller.ListUserHeaderTemplates)
+				selfRoute.POST("/header-templates", controller.CreateUserHeaderTemplate)
+				selfRoute.PUT("/header-templates/:id", controller.UpdateUserHeaderTemplate)
+				selfRoute.DELETE("/header-templates/:id", controller.DeleteUserHeaderTemplate)
 
 				// 2FA routes
 				selfRoute.GET("/2fa/status", controller.Get2FAStatus)
@@ -232,6 +236,9 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.POST("/tag/disabled", controller.DisableTagChannels)
 			channelRoute.POST("/tag/enabled", controller.EnableTagChannels)
 			channelRoute.PUT("/tag", controller.EditTagChannels)
+			channelRoute.GET("/tag-policy", controller.GetTagHeaderPolicy)
+			channelRoute.PUT("/tag-policy", controller.UpsertTagHeaderPolicy)
+			channelRoute.DELETE("/tag-policy", controller.DeleteTagHeaderPolicy)
 			channelRoute.DELETE("/:id", controller.DeleteChannel)
 			channelRoute.POST("/batch", controller.DeleteChannelBatch)
 			channelRoute.POST("/fix", controller.FixChannelsAbilities)
