@@ -41,6 +41,10 @@ import {
 } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
+import {
+  getManageOperatorEntryDescriptor,
+  getTopupAuditEntryDescriptors,
+} from './logAuditInfo';
 const { Text } = Typography;
 
 export const useLogsData = () => {
@@ -768,13 +772,13 @@ export const useLogsData = () => {
           ),
         });
       }
-      if (isAdminUser && logs[i].type !== 6) {
+      if (isAdminUser && logs[i].type !== 6 && logs[i].type !== 1) {
         expandDataLocal.push({
           key: t('请求转换'),
           value: requestConversionDisplayValue(other?.request_conversion),
         });
       }
-      if (isAdminUser && logs[i].type !== 6) {
+      if (isAdminUser && logs[i].type !== 6 && logs[i].type !== 1) {
         let localCountMode = '';
         if (other?.admin_info?.local_count_tokens) {
           localCountMode = t('本地计费');
@@ -785,6 +789,35 @@ export const useLogsData = () => {
           key: t('计费模式'),
           value: localCountMode,
         });
+      }
+      if (isAdminUser && logs[i].type === 1) {
+        const topupAuditEntries = getTopupAuditEntryDescriptors({
+          isAdminUser,
+          logType: logs[i].type,
+          adminInfo: other?.admin_info,
+          t,
+        });
+        topupAuditEntries.forEach((entry) => {
+          expandDataLocal.push({
+            key: entry.key,
+            value: entry.warning ? (
+              <span style={{ color: 'var(--semi-color-warning)' }}>
+                {entry.value}
+              </span>
+            ) : (
+              entry.value
+            ),
+          });
+        });
+      }
+      const manageOperatorEntry = getManageOperatorEntryDescriptor({
+        isAdminUser,
+        logType: logs[i].type,
+        adminInfo: other?.admin_info,
+        t,
+      });
+      if (manageOperatorEntry) {
+        expandDataLocal.push(manageOperatorEntry);
       }
       expandDataLocal.push({
         key: t('操作'),

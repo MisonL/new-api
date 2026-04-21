@@ -75,7 +75,7 @@ func TestRechargeRejectsNonStripeTopUpOrders(t *testing.T) {
 	}
 	require.NoError(t, topUp.Insert())
 
-	err := Recharge(topUp.TradeNo, "cus_test")
+	err := Recharge(topUp.TradeNo, "cus_test", "127.0.0.1")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "充值失败")
 
