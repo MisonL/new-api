@@ -235,6 +235,17 @@ bun run dev --host 0.0.0.0 --port 5173
 - 只读代理会再次阻断非安全方法和关键副作用路径
 - 如需登录，请先在正式 Web UI 完成登录，再打开只读前端；不要在只读前端里走登录流程
 
+## 渠道请求头与 Header Profile
+
+- `Header Profile` 是用户级资产，保存于当前用户设置中；渠道只保存 `settings.header_profile_strategy` 对这些 Profile 的引用
+- `User-Agent` 只是完整请求头模板中的一个字段，不再单独维护独立的 UA 策略系统
+- 渠道策略支持三种模式：
+  - `fixed`：必须且只能选择 1 个 Profile
+  - `round_robin`：可选择多个 Profile，并按顺序轮询使用
+  - `random`：可选择多个 Profile，并在候选池中随机选用
+- 旧 `header_override` 不做静默写库迁移；如需迁移，必须在渠道编辑页中显式使用“导入为 Profile”
+- 预置浏览器、AI Coding CLI、API SDK / Debug 模板为只读资产；自定义模板可在资源库中新增、编辑和删除
+
 ## 开发命令
 
 ```bash

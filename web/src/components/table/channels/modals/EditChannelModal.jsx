@@ -66,6 +66,8 @@ import SingleModelSelectModal from './SingleModelSelectModal';
 import OllamaModelModal from './OllamaModelModal';
 import CodexOAuthModal from './CodexOAuthModal';
 import ParamOverrideEditorModal from './ParamOverrideEditorModal';
+import HeaderProfileStrategySection from './HeaderProfileStrategySection';
+import HeaderProfileEditorModal from './HeaderProfileEditorModal';
 import JSONEditor from '../../../common/ui/JSONEditor';
 import SecureVerificationModal from '../../../common/modals/SecureVerificationModal';
 import StatusCodeRiskGuardModal from './StatusCodeRiskGuardModal';
@@ -77,6 +79,15 @@ import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from './statusCodeRiskGuard';
+import {
+  buildHeaderProfileStrategySettings,
+  buildProfileItems,
+  buildSelectedProfileItems,
+  createLegacyHeaderProfileDraft,
+  getHeaderProfileStrategyFromSettings,
+  reorderSelectedProfileIds,
+  toggleSelectedProfile,
+} from './headerProfile.helpers.js';
 import {
   IconSave,
   IconClose,
@@ -375,6 +386,15 @@ const EditChannelModal = (props) => {
     useState(false);
   const [paramOverrideEditorVisible, setParamOverrideEditorVisible] =
     useState(false);
+  const [headerProfilesLoading, setHeaderProfilesLoading] = useState(false);
+  const [headerProfiles, setHeaderProfiles] = useState([]);
+  const [headerProfileEditorVisible, setHeaderProfileEditorVisible] =
+    useState(false);
+  const [headerProfileEditorProfile, setHeaderProfileEditorProfile] =
+    useState(null);
+  const [headerProfileEditorSaving, setHeaderProfileEditorSaving] =
+    useState(false);
+  const [headerProfileDeletingId, setHeaderProfileDeletingId] = useState('');
 
   // 密钥显示状态
   const [keyDisplayState, setKeyDisplayState] = useState({
@@ -423,6 +443,34 @@ const EditChannelModal = (props) => {
   const initialModelsRef = useRef([]);
   const initialModelMappingRef = useRef('');
   const initialStatusCodeMappingRef = useRef('');
+  const headerProfileStrategy = useMemo(
+    () =>
+      getHeaderProfileStrategyFromSettings(inputs.settings) || {
+        enabled: false,
+        mode: 'fixed',
+        selectedProfileIds: [],
+      },
+    [inputs.settings],
+  );
+  const allHeaderProfiles = useMemo(
+    () => buildProfileItems(headerProfiles),
+    [headerProfiles],
+  );
+  const selectedHeaderProfileItems = useMemo(
+    () =>
+      buildSelectedProfileItems(
+        headerProfileStrategy.selectedProfileIds,
+        headerProfiles,
+      ),
+    [headerProfileStrategy.selectedProfileIds, headerProfiles],
+  );
+  const hasLegacyHeaderOverride =
+    typeof inputs.header_override === 'string' &&
+    inputs.header_override.trim() !== '';
+  const shouldShowHeaderProfileLegacyBanner =
+    hasLegacyHeaderOverride &&
+    (!headerProfileStrategy.enabled ||
+      headerProfileStrategy.selectedProfileIds.length === 0);
   const doubaoCodingPlanDeprecationMessage =
     'Doubao Coding Plan 不再允许新增。根据火山方舟文档，Coding 套餐额度仅适用于 AI Coding 产品内调用，不适用于单独 API 调用；在非 AI Coding 产品中使用对应的 Base URL 和 API Key 可能被视为违规，并可能导致订阅停用或账号封禁。';
   const canKeepDeprecatedDoubaoCodingPlan =
@@ -553,6 +601,213 @@ const EditChannelModal = (props) => {
     settings[key] = value;
     const settingsJson = JSON.stringify(settings);
     handleInputChange('settings', settingsJson);
+  };
+
+  const applyHeaderProfileStrategy = (strategy) => {
+    handleInputChange(
+      'settings',
+      buildHeaderProfileStrategySettings(inputs.settings, strategy),
+    );
+  };
+
+  const fetchHeaderProfiles = async () => {
+    setHeaderProfilesLoading(true);
+    try {
+      const res = await API.get('/api/user/header_profiles', {
+        skipErrorHandler: true,
+      });
+      const { success, data, message } = res.data;
+      if (!success) {
+        showError(message || t('加载 Header Profile 失败'));
+        return;
+      }
+      setHeaderProfiles(Array.isArray(data) ? data : []);
+    } catch (error) {
+      showError(t('加载 Header Profile 失败'));
+    } finally {
+      setHeaderProfilesLoading(false);
+    }
+  };
+
+  const handleHeaderProfileEnabledChange = (enabled) => {
+    if (!enabled) {
+      applyHeaderProfileStrategy(null);
+      return;
+    }
+    applyHeaderProfileStrategy({
+      enabled: true,
+      mode: headerProfileStrategy.mode,
+      selectedProfileIds: headerProfileStrategy.selectedProfileIds,
+    });
+  };
+
+  const handleHeaderProfileModeChange = (mode) => {
+    const nextMode = mode || 'fixed';
+    const nextSelectedProfileIds =
+      nextMode === 'fixed'
+        ? headerProfileStrategy.selectedProfileIds.slice(0, 1)
+        : headerProfileStrategy.selectedProfileIds;
+    applyHeaderProfileStrategy({
+      enabled: true,
+      mode: nextMode,
+      selectedProfileIds: nextSelectedProfileIds,
+    });
+  };
+
+  const handleToggleHeaderProfile = (profileId) => {
+    const nextSelectedProfileIds = toggleSelectedProfile({
+      strategy: headerProfileStrategy.mode,
+      selectedProfileIds: headerProfileStrategy.selectedProfileIds,
+      profileId,
+    });
+    applyHeaderProfileStrategy({
+      enabled: true,
+      mode: headerProfileStrategy.mode,
+      selectedProfileIds: nextSelectedProfileIds,
+    });
+  };
+
+  const handleRemoveSelectedHeaderProfile = (profileId) => {
+    const nextSelectedProfileIds =
+      headerProfileStrategy.selectedProfileIds.filter((id) => id !== profileId);
+    applyHeaderProfileStrategy({
+      enabled: true,
+      mode: headerProfileStrategy.mode,
+      selectedProfileIds: nextSelectedProfileIds,
+    });
+  };
+
+  const handleReorderSelectedHeaderProfiles = (
+    sourceId,
+    targetId,
+    position,
+  ) => {
+    if (headerProfileStrategy.mode !== 'round_robin') {
+      return;
+    }
+    applyHeaderProfileStrategy({
+      enabled: true,
+      mode: headerProfileStrategy.mode,
+      selectedProfileIds: reorderSelectedProfileIds(
+        headerProfileStrategy.selectedProfileIds,
+        sourceId,
+        targetId,
+        position,
+      ),
+    });
+  };
+
+  const openHeaderProfileEditor = (profile = null) => {
+    setHeaderProfileEditorProfile(profile);
+    setHeaderProfileEditorVisible(true);
+  };
+
+  const closeHeaderProfileEditor = () => {
+    setHeaderProfileEditorVisible(false);
+    setHeaderProfileEditorProfile(null);
+  };
+
+  const handleImportLegacyHeaderOverride = () => {
+    const legacyDraft = createLegacyHeaderProfileDraft(inputs.header_override);
+    if (!legacyDraft) {
+      showError(t('旧请求头覆盖不是合法的 JSON 对象，无法导入'));
+      return;
+    }
+    openHeaderProfileEditor(legacyDraft);
+  };
+
+  const handleSaveHeaderProfile = async (profileDraft) => {
+    setHeaderProfileEditorSaving(true);
+    try {
+      const isLegacyImport =
+        headerProfileEditorProfile?.source === 'legacy_header_override';
+      const requestBody = {
+        name: profileDraft.name,
+        category: profileDraft.category,
+        headers: profileDraft.headers,
+        description: profileDraft.description || '',
+      };
+      const request = profileDraft.id
+        ? API.put(`/api/user/header_profiles/${profileDraft.id}`, requestBody, {
+            skipErrorHandler: true,
+          })
+        : API.post('/api/user/header_profiles', requestBody, {
+          skipErrorHandler: true,
+        });
+      const res = await request;
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('保存 Header Profile 失败'));
+        return;
+      }
+      const savedProfileId = String(
+        data?.id || data?.key || profileDraft.id || '',
+      ).trim();
+      if (isLegacyImport && savedProfileId) {
+        applyHeaderProfileStrategy({
+          enabled: true,
+          mode: 'fixed',
+          selectedProfileIds: [savedProfileId],
+        });
+        showSuccess(t('Header Profile 已导入并应用到当前渠道'));
+      } else {
+        showSuccess(
+          profileDraft.id
+            ? t('Header Profile 已更新')
+            : t('Header Profile 已创建'),
+        );
+      }
+      closeHeaderProfileEditor();
+      await fetchHeaderProfiles();
+    } catch (error) {
+      showError(t('保存 Header Profile 失败'));
+    } finally {
+      setHeaderProfileEditorSaving(false);
+    }
+  };
+
+  const handleDeleteHeaderProfile = (profile) => {
+    Modal.confirm({
+      title: t('删除 Header Profile'),
+      content: t('确认删除 Header Profile「{{name}}」吗？', {
+        name: profile.name,
+      }),
+      onOk: async () => {
+        setHeaderProfileDeletingId(profile.id);
+        try {
+          const res = await API.delete(
+            `/api/user/header_profiles/${profile.id}`,
+            {
+              skipErrorHandler: true,
+            },
+          );
+          const { success, message } = res.data;
+          if (!success) {
+            showError(message || t('删除 Header Profile 失败'));
+            return;
+          }
+          showSuccess(t('Header Profile 已删除'));
+          if (
+            headerProfileStrategy.selectedProfileIds.includes(profile.id)
+          ) {
+            const nextSelectedProfileIds =
+              headerProfileStrategy.selectedProfileIds.filter(
+                (id) => id !== profile.id,
+              );
+            applyHeaderProfileStrategy({
+              enabled: headerProfileStrategy.enabled,
+              mode: headerProfileStrategy.mode,
+              selectedProfileIds: nextSelectedProfileIds,
+            });
+          }
+          await fetchHeaderProfiles();
+        } catch (error) {
+          showError(t('删除 Header Profile 失败'));
+        } finally {
+          setHeaderProfileDeletingId('');
+        }
+      },
+    });
   };
 
   const applyClipboardConfig = (config) => {
@@ -1013,6 +1268,13 @@ const EditChannelModal = (props) => {
       const managedByIonet = !!parsedIonet;
       setIsIonetChannel(managedByIonet);
       setIonetMetadata(parsedIonet);
+      const currentHeaderProfileStrategy = getHeaderProfileStrategyFromSettings(
+        data.settings,
+      );
+      const hasHeaderProfileStrategy =
+        !!currentHeaderProfileStrategy &&
+        (currentHeaderProfileStrategy.enabled ||
+          currentHeaderProfileStrategy.selectedProfileIds.length > 0);
 
       // Smart expand: auto-open advanced settings if any advanced field has a value
       const hasAdvancedValues =
@@ -1020,6 +1282,7 @@ const EditChannelModal = (props) => {
         (data.param_override && data.param_override.trim()) ||
         (data.status_code_mapping && data.status_code_mapping.trim()) ||
         (data.header_override && data.header_override.trim()) ||
+        hasHeaderProfileStrategy ||
         (data.tag && data.tag.trim()) ||
         (data.remark && data.remark.trim()) ||
         (data.priority && data.priority !== 0) ||
@@ -1322,6 +1585,7 @@ const EditChannelModal = (props) => {
   useEffect(() => {
     setModelSearchValue('');
     if (props.visible) {
+      fetchHeaderProfiles().then();
       if (isEdit) {
         loadChannel();
       } else {
@@ -1398,6 +1662,10 @@ const EditChannelModal = (props) => {
     }
     // 重置本地输入，避免下次打开残留上一次的 JSON 字段值
     setInputs(getInitValues());
+    setHeaderProfiles([]);
+    setHeaderProfilesLoading(false);
+    setHeaderProfileDeletingId('');
+    closeHeaderProfileEditor();
     // 重置密钥显示状态
     resetKeyDisplayState();
     // 重置剪贴板检测状态
@@ -1729,6 +1997,27 @@ const EditChannelModal = (props) => {
     if (riskyStatusCodeRedirects.length > 0) {
       const confirmed = await confirmStatusCodeRisk(riskyStatusCodeRedirects);
       if (!confirmed) {
+        return;
+      }
+    }
+
+    const currentHeaderProfileStrategy = getHeaderProfileStrategyFromSettings(
+      localInputs.settings,
+    );
+    if (currentHeaderProfileStrategy?.enabled) {
+      if (
+        currentHeaderProfileStrategy.mode === 'fixed' &&
+        currentHeaderProfileStrategy.selectedProfileIds.length !== 1
+      ) {
+        showError(t('固定模式必须且只能选择 1 个 Header Profile'));
+        return;
+      }
+      if (
+        (currentHeaderProfileStrategy.mode === 'round_robin' ||
+          currentHeaderProfileStrategy.mode === 'random') &&
+        currentHeaderProfileStrategy.selectedProfileIds.length < 1
+      ) {
+        showError(t('已启用 Header Profile，但还没有选择任何 Profile'));
         return;
       }
     }
@@ -2393,75 +2682,22 @@ const EditChannelModal = (props) => {
                     </div>
                   </div>
 
-                  <Form.TextArea
-                    field='header_override'
-                    label={t('请求头覆盖')}
-                    placeholder={
-                      t('此项可选，用于覆盖请求头参数') +
-                      '\n' +
-                      t('格式示例：') +
-                      '\n{\n  "User-Agent": "Mozilla/5.0 ...",\n  "Authorization": "Bearer {api_key}"\n}'
-                    }
-                    autosize
-                    onChange={(value) =>
-                      handleInputChange('header_override', value)
-                    }
-                    extraText={
-                      <div className='flex flex-col gap-1'>
-                        <div className='flex gap-2 flex-wrap items-center'>
-                          <Text
-                            className='!text-semi-color-primary cursor-pointer'
-                            onClick={() =>
-                              handleInputChange(
-                                'header_override',
-                                JSON.stringify(
-                                  {
-                                    '*': true,
-                                    're:^X-Trace-.*$': true,
-                                    'X-Foo': '{client_header:X-Foo}',
-                                    Authorization: 'Bearer {api_key}',
-                                    'User-Agent':
-                                      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0',
-                                  },
-                                  null,
-                                  2,
-                                ),
-                              )
-                            }
-                          >
-                            {t('填入模板')}
-                          </Text>
-                          <Text
-                            className='!text-semi-color-primary cursor-pointer'
-                            onClick={() =>
-                              handleInputChange(
-                                'header_override',
-                                JSON.stringify({ '*': true }, null, 2),
-                              )
-                            }
-                          >
-                            {t('填入透传模版')}
-                          </Text>
-                          <Text
-                            className='!text-semi-color-primary cursor-pointer'
-                            onClick={() => formatJsonField('header_override')}
-                          >
-                            {t('格式化')}
-                          </Text>
-                        </div>
-                        <div>
-                          <Text type='tertiary' size='small'>
-                            {t('支持变量：')}
-                          </Text>
-                          <div className='text-xs text-tertiary ml-2'>
-                            <div>
-                              {t('渠道密钥')}: {'{api_key}'}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    }
-                    showClear
+                  <HeaderProfileStrategySection
+                    loading={headerProfilesLoading}
+                    strategy={headerProfileStrategy}
+                    selectedItems={selectedHeaderProfileItems}
+                    profiles={allHeaderProfiles}
+                    deletingProfileId={headerProfileDeletingId}
+                    showLegacyBanner={shouldShowHeaderProfileLegacyBanner}
+                    onEnabledChange={handleHeaderProfileEnabledChange}
+                    onModeChange={handleHeaderProfileModeChange}
+                    onToggleSelect={handleToggleHeaderProfile}
+                    onRemoveSelected={handleRemoveSelectedHeaderProfile}
+                    onReorderSelected={handleReorderSelectedHeaderProfiles}
+                    onCreateProfile={() => openHeaderProfileEditor(null)}
+                    onEditProfile={openHeaderProfileEditor}
+                    onDeleteProfile={handleDeleteHeaderProfile}
+                    onImportLegacy={handleImportLegacyHeaderOverride}
                   />
                   <JSONEditor
                     key={`status_code_mapping-${isEdit ? channelId : 'new'}`}
@@ -4264,6 +4500,15 @@ const EditChannelModal = (props) => {
           handleInputChange('param_override', nextValue);
           setParamOverrideEditorVisible(false);
         }}
+      />
+
+      <HeaderProfileEditorModal
+        visible={headerProfileEditorVisible}
+        saving={headerProfileEditorSaving}
+        profile={headerProfileEditorProfile}
+        profiles={allHeaderProfiles}
+        onCancel={closeHeaderProfileEditor}
+        onSave={handleSaveHeaderProfile}
       />
 
       <ModelSelectModal

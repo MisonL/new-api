@@ -1,0 +1,255 @@
+package controller
+
+import (
+	"bytes"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+)
+
+type channelAPIResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+func setupChannelControllerTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	previousUsingSQLite := common.UsingSQLite
+	previousUsingMySQL := common.UsingMySQL
+	previousUsingPostgreSQL := common.UsingPostgreSQL
+	previousRedisEnabled := common.RedisEnabled
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+
+	gin.SetMode(gin.TestMode)
+	common.UsingSQLite = true
+	common.UsingMySQL = false
+	common.UsingPostgreSQL = false
+	common.RedisEnabled = false
+	common.MemoryCacheEnabled = false
+
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+
+	model.DB = db
+	model.LOG_DB = db
+
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+
+	t.Cleanup(func() {
+		common.UsingSQLite = previousUsingSQLite
+		common.UsingMySQL = previousUsingMySQL
+		common.UsingPostgreSQL = previousUsingPostgreSQL
+		common.RedisEnabled = previousRedisEnabled
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		model.DB = previousDB
+		model.LOG_DB = previousLogDB
+
+		sqlDB, err := db.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	return db
+}
+
+func newChannelControllerContext(t *testing.T, method string, target string, body any) (*gin.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+
+	payload, err := common.Marshal(body)
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(method, target, bytes.NewReader(payload))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	return ctx, recorder
+}
+
+func decodeChannelAPIResponse(t *testing.T, recorder *httptest.ResponseRecorder) channelAPIResponse {
+	t.Helper()
+
+	var response channelAPIResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	return response
+}
+
+func marshalChannelOtherSettingsForTest(t *testing.T, settings dto.ChannelOtherSettings) string {
+	t.Helper()
+
+	raw, err := common.Marshal(settings)
+	require.NoError(t, err)
+	return string(raw)
+}
+
+func seedChannelForHeaderProfileTest(t *testing.T) *model.Channel {
+	t.Helper()
+
+	channel := &model.Channel{
+		Type:   constant.ChannelTypeOpenAI,
+		Key:    "sk-test-channel",
+		Status: common.ChannelStatusEnabled,
+		Name:   "header-profile-test-channel",
+		Group:  "default",
+		Models: "gpt-4o-mini",
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+	return channel
+}
+
+func TestUpdateChannelPersistsHeaderProfileStrategy(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":     channel.Id,
+		"type":   channel.Type,
+		"key":    channel.Key,
+		"status": channel.Status,
+		"name":   channel.Name,
+		"group":  channel.Group,
+		"models": channel.Models,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled: true,
+				Mode:    dto.HeaderProfileModeRoundRobin,
+				SelectedProfileIDs: []string{
+					"profile-a",
+					"profile-b",
+				},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+
+	loaded, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+
+	strategy := loaded.GetOtherSettings().HeaderProfileStrategy
+	require.NotNil(t, strategy)
+	require.True(t, strategy.Enabled)
+	require.Equal(t, dto.HeaderProfileModeRoundRobin, strategy.Mode)
+	require.Equal(t, []string{"profile-a", "profile-b"}, strategy.SelectedProfileIDs)
+}
+
+func TestUpdateChannelRejectsFixedModeWithMultipleProfiles(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":     channel.Id,
+		"type":   channel.Type,
+		"key":    channel.Key,
+		"status": channel.Status,
+		"name":   channel.Name,
+		"group":  channel.Group,
+		"models": channel.Models,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled: true,
+				Mode:    dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{
+					"profile-a",
+					"profile-b",
+				},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "fixed")
+
+	loaded, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	require.Nil(t, loaded.GetOtherSettings().HeaderProfileStrategy)
+}
+
+func TestAddChannelRejectsRandomModeWithoutProfiles(t *testing.T) {
+	setupChannelControllerTestDB(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel", map[string]any{
+		"mode": "single",
+		"channel": map[string]any{
+			"type":   constant.ChannelTypeOpenAI,
+			"key":    "sk-add-test-channel",
+			"status": common.ChannelStatusEnabled,
+			"name":   "add-header-profile-test-channel",
+			"group":  "default",
+			"models": "gpt-4o-mini",
+			"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeRandom,
+					SelectedProfileIDs: []string{},
+				},
+			}),
+		},
+	})
+
+	AddChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "random")
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Channel{}).Count(&count).Error)
+	require.EqualValues(t, 0, count)
+}
+
+func TestAddChannelRejectsHeaderProfileStrategyWithBlankProfileIDs(t *testing.T) {
+	setupChannelControllerTestDB(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel", map[string]any{
+		"mode": "single",
+		"channel": map[string]any{
+			"type":   constant.ChannelTypeOpenAI,
+			"key":    "sk-add-blank-profile-id",
+			"status": common.ChannelStatusEnabled,
+			"name":   "add-header-profile-blank-id-test-channel",
+			"group":  "default",
+			"models": "gpt-4o-mini",
+			"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled: true,
+					Mode:    dto.HeaderProfileModeRandom,
+					SelectedProfileIDs: []string{
+						"   ",
+					},
+				},
+			}),
+		},
+	})
+
+	AddChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "random")
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Channel{}).Count(&count).Error)
+	require.EqualValues(t, 0, count)
+}
