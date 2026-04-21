@@ -18,6 +18,8 @@ const browserProfiles = {
     key: 'chrome-macos',
     name: 'Chrome macOS',
     group: 'browser',
+    scope: 'builtin',
+    readonly: true,
     headers: {
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
@@ -36,6 +38,8 @@ const aiCodingCliProfiles = {
     key: 'codex-cli',
     name: 'Codex CLI',
     group: 'ai_coding_cli',
+    scope: 'builtin',
+    readonly: true,
     headers: {
       'User-Agent': 'OpenAI Codex CLI/0.1',
       'X-Client-Name': 'codex-cli',
@@ -46,6 +50,8 @@ const aiCodingCliProfiles = {
     key: 'claude-code',
     name: 'Claude Code',
     group: 'ai_coding_cli',
+    scope: 'builtin',
+    readonly: true,
     headers: {
       'User-Agent': 'Claude-Code/1.0',
       'X-Client-Name': 'claude-code',
@@ -56,6 +62,8 @@ const aiCodingCliProfiles = {
     key: 'gemini-cli',
     name: 'Gemini CLI',
     group: 'ai_coding_cli',
+    scope: 'builtin',
+    readonly: true,
     headers: {
       'User-Agent': 'GeminiCLI/1.0',
       'X-Client-Name': 'gemini-cli',
@@ -66,6 +74,8 @@ const aiCodingCliProfiles = {
     key: 'qwen-code',
     name: 'Qwen Code',
     group: 'ai_coding_cli',
+    scope: 'builtin',
+    readonly: true,
     headers: {
       'User-Agent': 'Qwen-Code/1.0',
       'X-Client-Name': 'qwen-code',
@@ -76,6 +86,8 @@ const aiCodingCliProfiles = {
     key: 'opencode',
     name: 'OpenCode',
     group: 'ai_coding_cli',
+    scope: 'builtin',
+    readonly: true,
     headers: {
       'User-Agent': 'OpenCode/1.0',
       'X-Client-Name': 'opencode',
@@ -86,6 +98,8 @@ const aiCodingCliProfiles = {
     key: 'droid',
     name: 'Droid',
     group: 'ai_coding_cli',
+    scope: 'builtin',
+    readonly: true,
     headers: {
       'User-Agent': 'Droid/1.0',
       'X-Client-Name': 'droid',
@@ -96,6 +110,8 @@ const aiCodingCliProfiles = {
     key: 'amp',
     name: 'Amp',
     group: 'ai_coding_cli',
+    scope: 'builtin',
+    readonly: true,
     headers: {
       'User-Agent': 'AmpCLI/1.0',
       'X-Client-Name': 'amp',
@@ -109,6 +125,8 @@ const apiSdkProfiles = {
     key: 'postman-runtime',
     name: 'Postman Runtime',
     group: 'api_sdk',
+    scope: 'builtin',
+    readonly: true,
     headers: {
       Accept: '*/*',
       'Cache-Control': 'no-cache',
@@ -123,4 +141,3 @@ export const HEADER_PROFILE_PRESETS = {
   ...aiCodingCliProfiles,
   ...apiSdkProfiles,
 };
-
