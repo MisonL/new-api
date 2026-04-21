@@ -98,6 +98,27 @@ func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
 	return make([]constant.EndpointType, 0)
 }
 
+func resolvePricing(model string) Pricing {
+	pricing := Pricing{}
+
+	modelPrice, usePrice := ratio_setting.GetModelPrice(model, false)
+	if usePrice {
+		pricing.ModelPrice = modelPrice
+		pricing.QuotaType = 1
+		return pricing
+	}
+
+	modelRatio, ok, _ := ratio_setting.GetConfiguredModelRatio(model)
+	if !ok {
+		return pricing
+	}
+
+	pricing.ModelRatio = modelRatio
+	pricing.CompletionRatio = ratio_setting.GetCompletionRatio(model)
+	pricing.QuotaType = 0
+	return pricing
+}
+
 func updatePricing() {
 	//modelRatios := common.GetModelRatios()
 	enableAbilities, err := GetAllEnableAbilityWithChannels()
@@ -295,16 +316,11 @@ func updatePricing() {
 			pricing.Tags = meta.Tags
 			pricing.VendorID = meta.VendorID
 		}
-		modelPrice, findPrice := ratio_setting.GetModelPrice(model, false)
-		if findPrice {
-			pricing.ModelPrice = modelPrice
-			pricing.QuotaType = 1
-		} else {
-			modelRatio, _, _ := ratio_setting.GetModelRatio(model)
-			pricing.ModelRatio = modelRatio
-			pricing.CompletionRatio = ratio_setting.GetCompletionRatio(model)
-			pricing.QuotaType = 0
-		}
+		resolvedPricing := resolvePricing(model)
+		pricing.ModelPrice = resolvedPricing.ModelPrice
+		pricing.ModelRatio = resolvedPricing.ModelRatio
+		pricing.CompletionRatio = resolvedPricing.CompletionRatio
+		pricing.QuotaType = resolvedPricing.QuotaType
 		if cacheRatio, ok := ratio_setting.GetCacheRatio(model); ok {
 			pricing.CacheRatio = &cacheRatio
 		}

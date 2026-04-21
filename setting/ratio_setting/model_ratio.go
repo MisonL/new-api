@@ -257,6 +257,20 @@ var defaultModelRatio = map[string]float64{
 	"grok-vision-beta":      2.5,
 	"grok-3-fast-beta":      2.5,
 	"grok-3-mini-fast-beta": 0.3,
+	// Fireworks AI
+	"deepseek-v3p1":             0.28,  // $0.56 / 1M tokens
+	"deepseek-v3p2":             0.28,  // $0.56 / 1M tokens
+	"glm-4p7":                   0.3,   // $0.60 / 1M tokens
+	"glm-5":                     0.5,   // $1.00 / 1M tokens
+	"gpt-oss-20b":               0.035, // $0.07 / 1M tokens
+	"gpt-oss-120b":              0.075, // $0.15 / 1M tokens
+	"kimi-k2-thinking":          0.3,   // $0.60 / 1M tokens
+	"kimi-k2p5":                 0.3,   // $0.60 / 1M tokens
+	"llama-v3p3-70b-instruct":   0.45,  // $0.90 / 1M tokens
+	"minimax-m2p5":              0.15,  // $0.30 / 1M tokens
+	"qwen3-8b":                  0.1,   // $0.20 / 1M tokens
+	"qwen3-vl-30b-a3b-instruct": 0.075, // $0.15 / 1M tokens
+	"qwen3-vl-30b-a3b-thinking": 0.075, // $0.15 / 1M tokens
 	// submodel
 	"NousResearch/Hermes-4-405B-FP8":          0.8,
 	"Qwen/Qwen3-235B-A22B-Thinking-2507":      0.6,
@@ -327,10 +341,23 @@ var modelRatioMap = types.NewRWMap[string, float64]()
 var completionRatioMap = types.NewRWMap[string, float64]()
 
 var defaultCompletionRatio = map[string]float64{
-	"gpt-4-gizmo-*":  2,
-	"gpt-4o-gizmo-*": 3,
-	"gpt-4-all":      2,
-	"gpt-image-1":    8,
+	"deepseek-v3p1":             3,
+	"deepseek-v3p2":             3,
+	"glm-4p7":                   11.0 / 3.0,
+	"glm-5":                     3.2,
+	"gpt-4-gizmo-*":             2,
+	"gpt-4o-gizmo-*":            3,
+	"gpt-4-all":                 2,
+	"gpt-image-1":               8,
+	"gpt-oss-20b":               30.0 / 7.0,
+	"gpt-oss-120b":              4,
+	"kimi-k2-thinking":          25.0 / 6.0,
+	"kimi-k2p5":                 5,
+	"llama-v3p3-70b-instruct":   1,
+	"minimax-m2p5":              4,
+	"qwen3-8b":                  1,
+	"qwen3-vl-30b-a3b-instruct": 4,
+	"qwen3-vl-30b-a3b-thinking": 4,
 }
 
 // InitRatioSettings initializes all model related settings maps
@@ -408,6 +435,23 @@ func GetModelRatio(name string) (float64, bool, string) {
 		return 37.5, operation_setting.SelfUseModeEnabled, name
 	}
 	return ratio, true, name
+}
+
+func GetConfiguredModelRatio(name string) (float64, bool, string) {
+	name = FormatMatchingModelName(name)
+
+	ratio, ok := modelRatioMap.Get(name)
+	if ok {
+		return ratio, true, name
+	}
+
+	if strings.HasSuffix(name, CompactModelSuffix) {
+		if wildcardRatio, ok := modelRatioMap.Get(CompactWildcardModelKey); ok {
+			return wildcardRatio, true, name
+		}
+	}
+
+	return 0, false, name
 }
 
 func DefaultModelRatio2JSONString() string {
