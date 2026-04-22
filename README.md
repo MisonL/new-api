@@ -236,17 +236,6 @@ bun run dev --host 0.0.0.0 --port 5173
 - 只读代理会再次阻断非安全方法和关键副作用路径
 - 如需登录，请先在正式 Web UI 完成登录，再打开只读前端；不要在只读前端里走登录流程
 
-## 渠道请求头与 Header Profile
-
-- `Header Profile` 是用户级资产，保存于当前用户设置中；渠道只保存 `settings.header_profile_strategy` 对这些 Profile 的引用
-- `User-Agent` 只是完整请求头模板中的一个字段，不再单独维护独立的 UA 策略系统
-- 渠道策略支持三种模式：
-  - `fixed`：必须且只能选择 1 个 Profile
-  - `round_robin`：可选择多个 Profile，并按顺序轮询使用
-  - `random`：可选择多个 Profile，并在候选池中随机选用
-- 旧 `header_override` 不做静默写库迁移；如需迁移，必须在渠道编辑页中显式使用“导入为 Profile”
-- 预置浏览器、AI Coding CLI、API SDK / Debug 模板为只读资产；自定义模板可在资源库中新增、编辑和删除
-
 ## 开发命令
 
 ```bash
@@ -258,13 +247,37 @@ cd web && bun run build
 
 ## 请求头策略能力
 
-- 渠道编辑支持维护结构化 `User-Agent` 策略：
-  - 多选 UA 池
-  - `轮询` / `随机` 两种运行时选择模式
-  - 是否覆盖静态 `header_override.User-Agent`
-  - 与标签策略的优先级模式：`跟随系统默认` / `渠道优先` / `标签优先` / `合并`
-- 标签编辑中的“请求头覆盖”已切换为标签级运行时策略，不再通过旧的 bulk edit 语义把同一份请求头 JSON 批量写回所有渠道
-- 请求头模板按当前登录用户私有保存，可在渠道编辑和标签编辑中复用、覆盖和删除
+当前仓库里与请求头相关的能力分为三层，文档口径以代码现状为准：
+
+1. 静态请求头覆盖
+   - 渠道字段 `header_override` 保存静态请求头 JSON。
+   - 标签编辑中的“请求头覆盖”现在写入独立的标签级运行时策略，不再批量回写所有渠道。
+   - 合法值要求：
+     - 必须是 JSON 对象。
+     - value 只支持字符串、数字、布尔值。
+     - key 支持标准请求头名，以及透传规则 `*`、`re:<pattern>`、`regex:<pattern>`。
+     - 非法 JSON、非法 key、非法正则会在保存阶段直接拒绝。
+
+2. UA 运行时策略
+   - 渠道 `settings` 中支持：
+     - `header_policy_mode`：`system_default` / `prefer_channel` / `prefer_tag` / `merge`
+     - `override_header_user_agent`
+     - `ua_strategy`
+   - `ua_strategy` 支持多选 UA 池，以及 `round_robin` / `random` 两种运行时选择模式。
+   - 真实转发链路当前实际生效的 UA 选择逻辑，仍以 `header_override`、标签级请求头策略、`header_policy_mode` 和 `ua_strategy` 为准。
+
+3. Header Profile 资源库
+   - 用户设置中保存 `header_profiles` 资产，渠道 `settings.header_profile_strategy` 保存所选 Profile 引用。
+   - 预置浏览器、AI Coding CLI、API SDK / Debug Profile 为只读资产，用户可新增、编辑、删除自己的 Profile。
+   - 渠道侧支持 `fixed` / `round_robin` / `random` 三种 Profile 选择模式，保存时会做服务端校验。
+   - 当前这套能力已具备资源管理、渠道选择和持久化校验；如需评估是否进入真实转发链路，应以代码事实和后续发布说明为准，不能把其与现有 `header_override` / `ua_strategy` 运行时链路混为一谈。
+
+补充说明：
+
+- 请求头模板是“当前用户私有”的合法 JSON 模板，只服务于静态 `header_override` 编辑区，可保存、应用、覆盖、删除。
+- `Header Profile` 与“请求头模板”不是同一回事：
+  - 模板：面向当前编辑器的 JSON 复用。
+  - Profile：面向用户级完整请求头资产管理与渠道选择。
 
 ## CI/CD
 
@@ -282,6 +295,22 @@ cd web && bun run build
   - `DOCKERHUB_USERNAME`
   - `DOCKERHUB_TOKEN`
 - 项目发布渠道仅保留 GitHub Release、GitHub Actions 与 GitHub Container Registry
+
+### 手动发布 Stable Release
+
+当前正式发布不再依赖推送 tag 自动触发，而是手动执行 GitHub Actions：
+
+1. 确认 `main` 已合入目标改动。
+2. 更新根目录 `VERSION` 与 [CHANGELOG.md](/Volumes/Work/code/new-api/CHANGELOG.md)。
+3. 推送 `main`。
+4. 在 GitHub Actions 手动触发：
+   - `release.yml`
+   - `tauri-release.yml`
+5. 两个工作流都使用同一个稳定版本 tag，例如 `v1.1.1`。
+6. 触发后核对 GitHub Release：
+   - 后端二进制命名为 `new-api_<version-no-v>_<os>_<arch>[.exe]`
+   - 桌面端命名为 `new-api-desktop_<version-no-v>_<os>_<arch>.<ext>`
+   - 校验文件命名正确且无旧 Electron 产物残留
 
 ## 与上游的关系
 
