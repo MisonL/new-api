@@ -9,6 +9,7 @@ docs
 .gocache
 /web/node_modules
 .dev-docker
+backups
 data
 logs
 tmp
@@ -18,3 +19,4 @@ desktop/tauri-app/target
 web/dist
 coverage
 dist
+desktop
