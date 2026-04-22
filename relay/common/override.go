@@ -394,6 +394,12 @@ func sanitizeHeaderOverrideMap(source map[string]interface{}) map[string]interfa
 		if normalizedKey == "" {
 			continue
 		}
+		if value == nil {
+			if isHeaderPassthroughRuleKeyForOverride(normalizedKey) {
+				target[normalizedKey] = ""
+			}
+			continue
+		}
 		normalizedValue := strings.TrimSpace(fmt.Sprintf("%v", value))
 		if normalizedValue == "" {
 			if isHeaderPassthroughRuleKeyForOverride(normalizedKey) {

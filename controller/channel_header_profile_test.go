@@ -219,6 +219,36 @@ func TestAddChannelRejectsRandomModeWithoutProfiles(t *testing.T) {
 	require.EqualValues(t, 0, count)
 }
 
+func TestBuildFetchModelsHeadersNormalizesNonStringHeaderOverrideValues(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI,
+		HeaderOverride: common.GetPointer(`{
+			"*": true,
+			"X-Debug": true,
+			"X-Count": 123,
+			"Authorization": "Bearer {api_key}"
+		}`),
+	}
+
+	headers, err := buildFetchModelsHeaders(channel, "sk-test")
+	require.NoError(t, err)
+	require.Equal(t, "true", headers.Get("X-Debug"))
+	require.Equal(t, "123", headers.Get("X-Count"))
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+}
+
+func TestBuildFetchModelsHeadersSkipsNilHeaderOverrideValues(t *testing.T) {
+	channel := &model.Channel{
+		Type:           constant.ChannelTypeOpenAI,
+		HeaderOverride: common.GetPointer(`{"X-Debug":null,"Authorization":"Bearer {api_key}"}`),
+	}
+
+	headers, err := buildFetchModelsHeaders(channel, "sk-test")
+	require.NoError(t, err)
+	require.Empty(t, headers.Get("X-Debug"))
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+}
+
 func TestAddChannelRejectsHeaderProfileStrategyWithBlankProfileIDs(t *testing.T) {
 	setupChannelControllerTestDB(t)
 

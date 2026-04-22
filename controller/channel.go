@@ -187,9 +187,12 @@ func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, e
 		if relaychannel.IsHeaderPassthroughRuleKey(k) {
 			continue
 		}
-		str, ok := v.(string)
-		if !ok {
-			return nil, fmt.Errorf("invalid header override for key %s", k)
+		if v == nil {
+			continue
+		}
+		str := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if str == "" {
+			continue
 		}
 		if strings.Contains(str, "{api_key}") {
 			str = strings.ReplaceAll(str, "{api_key}", key)

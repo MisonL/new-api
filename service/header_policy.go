@@ -65,11 +65,11 @@ func parseHeaderTemplateEntries(raw string) ([]headerTemplateEntry, error) {
 		if name == "" {
 			return nil, fmt.Errorf("请求头名称不能为空")
 		}
-		if !isValidHeaderFieldName(name) {
-			return nil, fmt.Errorf("请求头名称不合法: %s", name)
-		}
 
-		lookupKey := strings.ToLower(name)
+		normalizedName, lookupKey, err := normalizeHeaderTemplateEntryName(name)
+		if err != nil {
+			return nil, err
+		}
 		if _, ok := seen[lookupKey]; ok {
 			return nil, fmt.Errorf("请求头名称规整后重复: %s", name)
 		}
@@ -81,7 +81,7 @@ func parseHeaderTemplateEntries(raw string) ([]headerTemplateEntry, error) {
 
 		seen[lookupKey] = struct{}{}
 		entries = append(entries, headerTemplateEntry{
-			name:  textproto.CanonicalMIMEHeaderKey(name),
+			name:  normalizedName,
 			value: value,
 		})
 	}
@@ -102,6 +102,40 @@ func parseHeaderTemplateEntries(raw string) ([]headerTemplateEntry, error) {
 	_ = rest
 
 	return entries, nil
+}
+
+func normalizeHeaderTemplateEntryName(name string) (string, string, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "", "", fmt.Errorf("请求头名称不能为空")
+	}
+	if trimmed == "*" {
+		return "*", "*", nil
+	}
+
+	lower := strings.ToLower(trimmed)
+	switch {
+	case strings.HasPrefix(lower, "re:"):
+		pattern := strings.TrimSpace(trimmed[3:])
+		if pattern == "" {
+			return "", "", fmt.Errorf("请求头名称不合法: %s", name)
+		}
+		normalized := "re:" + pattern
+		return normalized, normalized, nil
+	case strings.HasPrefix(lower, "regex:"):
+		pattern := strings.TrimSpace(trimmed[6:])
+		if pattern == "" {
+			return "", "", fmt.Errorf("请求头名称不合法: %s", name)
+		}
+		normalized := "re:" + pattern
+		return normalized, normalized, nil
+	}
+
+	if !isValidHeaderFieldName(trimmed) {
+		return "", "", fmt.Errorf("请求头名称不合法: %s", name)
+	}
+	normalized := textproto.CanonicalMIMEHeaderKey(trimmed)
+	return normalized, strings.ToLower(normalized), nil
 }
 
 func isValidHeaderFieldName(name string) bool {

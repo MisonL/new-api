@@ -1997,6 +1997,25 @@ func TestGetEffectiveHeaderOverrideUsesRuntimeOverrideAsFinalResult(t *testing.T
 	}
 }
 
+func TestGetEffectiveHeaderOverrideSkipsNilValues(t *testing.T) {
+	info := &RelayInfo{
+		ChannelMeta: &ChannelMeta{
+			HeadersOverride: map[string]interface{}{
+				"X-Debug": nil,
+				"*":       nil,
+			},
+		},
+	}
+
+	effective := GetEffectiveHeaderOverride(info)
+	if _, exists := effective["x-debug"]; exists {
+		t.Fatalf("expected nil static header value to be ignored")
+	}
+	if effective["*"] != "" {
+		t.Fatalf("expected passthrough wildcard to keep empty marker, got: %v", effective["*"])
+	}
+}
+
 func TestRemoveDisabledFieldsSkipWhenChannelPassThroughEnabled(t *testing.T) {
 	input := `{
 		"service_tier":"flex",

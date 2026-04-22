@@ -230,6 +230,35 @@ func TestUpsertTagHeaderPolicyRejectsInvalidHeaderOverride(t *testing.T) {
 	}
 }
 
+func TestUpsertTagHeaderPolicyAllowsPassthroughRules(t *testing.T) {
+	setupHeaderPolicyControllerTestDB(t, &model.TagRequestHeaderPolicy{})
+
+	ctx, recorder := newHeaderPolicyContext(t, http.MethodPut, "/api/channel/tag-policy", map[string]any{
+		"tag":             "tag-pass",
+		"header_override": `{"*":true,"regex:^x-debug-.*$":true,"X-Trace":123}`,
+	}, 0)
+	UpsertTagHeaderPolicy(ctx)
+
+	response := decodeHeaderPolicyResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected success, got %s", response.Message)
+	}
+
+	var stored model.TagRequestHeaderPolicy
+	if err := model.DB.First(&stored, "tag = ?", "tag-pass").Error; err != nil {
+		t.Fatalf("failed to load stored policy: %v", err)
+	}
+	if !strings.Contains(stored.HeaderOverride, `"*":"true"`) {
+		t.Fatalf("expected wildcard passthrough rule, got %s", stored.HeaderOverride)
+	}
+	if !strings.Contains(stored.HeaderOverride, `"re:^x-debug-.*$":"true"`) {
+		t.Fatalf("expected normalized regex passthrough rule, got %s", stored.HeaderOverride)
+	}
+	if !strings.Contains(stored.HeaderOverride, `"X-Trace":"123"`) {
+		t.Fatalf("expected numeric header value to be normalized, got %s", stored.HeaderOverride)
+	}
+}
+
 func TestDeleteTagHeaderPolicyRemovesRecord(t *testing.T) {
 	setupHeaderPolicyControllerTestDB(t, &model.TagRequestHeaderPolicy{}, &model.Log{})
 

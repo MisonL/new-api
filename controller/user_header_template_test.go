@@ -69,6 +69,35 @@ func TestCreateUserHeaderTemplateRejectsBlankContent(t *testing.T) {
 	}
 }
 
+func TestCreateUserHeaderTemplateAllowsPassthroughRules(t *testing.T) {
+	setupHeaderPolicyControllerTestDB(t, &model.UserHeaderTemplate{})
+
+	ctx, recorder := newHeaderPolicyContext(t, http.MethodPost, "/api/user/header-templates", map[string]any{
+		"name":    "Passthrough",
+		"content": `{"*":true,"re:^X-Trace-.*$":true,"X-Debug":true}`,
+	}, 1)
+	CreateUserHeaderTemplate(ctx)
+
+	response := decodeHeaderPolicyResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected success, got %s", response.Message)
+	}
+
+	var stored model.UserHeaderTemplate
+	if err := model.DB.First(&stored, "user_id = ? AND name = ?", 1, "Passthrough").Error; err != nil {
+		t.Fatalf("failed to load stored template: %v", err)
+	}
+	if !strings.Contains(stored.Content, `"*":"true"`) {
+		t.Fatalf("expected wildcard passthrough rule, got %s", stored.Content)
+	}
+	if !strings.Contains(stored.Content, `"re:^X-Trace-.*$":"true"`) {
+		t.Fatalf("expected regex passthrough rule, got %s", stored.Content)
+	}
+	if !strings.Contains(stored.Content, `"X-Debug":"true"`) {
+		t.Fatalf("expected normal header value to be normalized, got %s", stored.Content)
+	}
+}
+
 func TestUpdateUserHeaderTemplateRejectsDuplicateName(t *testing.T) {
 	setupHeaderPolicyControllerTestDB(t, &model.UserHeaderTemplate{})
 

@@ -3,7 +3,6 @@ package controller
 import (
 	"errors"
 	"fmt"
-	"net/textproto"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -165,11 +164,7 @@ func normalizeHeaderTemplateForStorage(raw *string) (string, error) {
 		return "", nil
 	}
 
-	normalized := make(map[string]string, len(headers))
-	for key, value := range headers {
-		normalized[textproto.CanonicalMIMEHeaderKey(key)] = value
-	}
-	content, err := common.Marshal(normalized)
+	content, err := common.Marshal(headers)
 	if err != nil {
 		return "", err
 	}
