@@ -73,7 +73,7 @@ const HeaderProfileLibrary = ({
       >
         <Card
           shadows='hover'
-          bodyStyle={{ padding: 12 }}
+          bodyStyle={{ padding: 10 }}
           className='cursor-pointer'
           style={{
             border: selected
@@ -82,17 +82,19 @@ const HeaderProfileLibrary = ({
             backgroundColor: selected
               ? 'var(--semi-color-primary-light-default)'
               : 'var(--semi-color-bg-1)',
+            borderRadius: 8,
           }}
           onClick={() => onToggleSelect(profile.id)}
         >
-          <div className='flex items-start justify-between gap-3'>
+          <div className='flex items-start justify-between gap-2'>
             <div className='min-w-0'>
-              <div className='flex items-center gap-2 flex-wrap'>
-                <Text strong>{profile.name}</Text>
-                {selected && <Tag color='blue'>{t('已选中')}</Tag>}
-                {profile.readonly && <Tag>{t('只读')}</Tag>}
+              <div className='flex items-center gap-1.5 flex-wrap'>
+                <Text strong size='small'>
+                  {profile.name}
+                </Text>
+                {selected && <Tag size='small' color='blue'>{t('已选中')}</Tag>}
               </div>
-              <div className='mt-1 flex items-center gap-2 flex-wrap'>
+              <div className='mt-1 flex items-center gap-1.5 flex-wrap'>
                 <Tag size='small'>{getCategoryLabel(t, profile.category)}</Tag>
                 {strategyMode === 'fixed' && selected && (
                   <Text type='tertiary' size='small'>
@@ -132,34 +134,34 @@ const HeaderProfileLibrary = ({
   };
 
   return (
-    <div className='flex flex-col gap-4'>
+    <div className='flex flex-col gap-3'>
       <div className='flex items-center justify-between gap-2'>
         <div>
-          <Text strong>{t('Header Profile 资源库')}</Text>
+          <Text strong size='small'>{t('Header Profile 资源库')}</Text>
           <div>
             <Text type='tertiary' size='small'>
               {t('点击卡片即可加入或移出当前策略')}
             </Text>
           </div>
         </div>
-        <Button icon={<IconPlus />} onClick={onCreate}>
+        <Button size='small' icon={<IconPlus />} onClick={onCreate}>
           {t('新建 Profile')}
         </Button>
       </div>
 
       <div className='flex flex-col gap-3'>
         <div>
-          <div className='mb-2'>
-            <Text strong>{t('预置 Profile')}</Text>
+          <div className='mb-1.5'>
+            <Text strong size='small'>{t('预置 Profile')}</Text>
           </div>
-          <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
+          <div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
             {groups.builtin.map(renderCard)}
           </div>
         </div>
 
         <div>
-          <div className='mb-2 flex items-center justify-between gap-2'>
-            <Text strong>{t('我的 Profile')}</Text>
+          <div className='mb-1.5 flex items-center justify-between gap-2'>
+            <Text strong size='small'>{t('我的 Profile')}</Text>
             {loading && (
               <Text type='tertiary' size='small'>
                 {t('加载中...')}
@@ -168,7 +170,7 @@ const HeaderProfileLibrary = ({
           </div>
           {groups.user.length === 0 ? (
             <div
-              className='rounded-xl p-3'
+              className='rounded-lg p-3'
               style={{
                 backgroundColor: 'var(--semi-color-fill-0)',
                 border: '1px solid var(--semi-color-fill-2)',
@@ -177,7 +179,7 @@ const HeaderProfileLibrary = ({
               <Text type='tertiary'>{t('还没有自定义 Header Profile')}</Text>
             </div>
           ) : (
-            <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
+            <div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
               {groups.user.map(renderCard)}
             </div>
           )}

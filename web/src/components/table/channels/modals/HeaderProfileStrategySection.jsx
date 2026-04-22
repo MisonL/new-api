@@ -119,23 +119,24 @@ const HeaderProfileStrategySection = ({
   );
 
   return (
-    <div className='flex flex-col gap-4'>
-      <div className='flex items-start justify-between gap-4 flex-wrap'>
+    <div className='flex flex-col gap-3'>
+      <div className='flex items-start justify-between gap-3 flex-wrap'>
         <div>
-          <Text strong>{t('Header Profile')}</Text>
+          <Text strong size='small'>{t('Header Profile')}</Text>
           <div>
             <Text type='tertiary' size='small'>
               {t('通过 settings.header_profile_strategy 控制完整请求头模板，而不是只写 User-Agent')}
             </Text>
           </div>
         </div>
-        <div className='flex items-center gap-3 flex-wrap'>
-          <div className='flex items-center gap-2'>
-            <Text>{t('启用')}</Text>
+        <div className='flex items-center gap-2 flex-wrap'>
+          <div className='flex items-center gap-1.5'>
+            <Text size='small'>{t('启用')}</Text>
             <Switch checked={strategy.enabled} onChange={onEnabledChange} />
           </div>
           <Select
-            style={{ minWidth: 180 }}
+            size='small'
+            style={{ minWidth: 132 }}
             value={strategy.mode}
             disabled={!strategy.enabled}
             optionList={modeOptions}
@@ -165,14 +166,14 @@ const HeaderProfileStrategySection = ({
       )}
 
       <div
-        className='rounded-xl p-3'
+        className='rounded-lg p-2.5'
         style={{
           backgroundColor: 'var(--semi-color-fill-0)',
           border: '1px solid var(--semi-color-fill-2)',
         }}
       >
-        <div className='mb-2 flex items-center justify-between gap-2'>
-          <Text strong>{t('已选 Profile')}</Text>
+        <div className='mb-1.5 flex items-center justify-between gap-2'>
+          <Text strong size='small'>{t('已选 Profile')}</Text>
           <Text type='tertiary' size='small'>
             {selectedCount === 0
               ? t('未选择')
@@ -186,10 +187,12 @@ const HeaderProfileStrategySection = ({
         )}
         {selectedCount === 0 ? (
           <div className='mt-2'>
-            <Text type='tertiary'>{t('请从下方资源库中选择一个或多个 Profile')}</Text>
+            <Text type='tertiary' size='small'>
+              {t('请从下方资源库中选择一个或多个 Profile')}
+            </Text>
           </div>
         ) : (
-          <div className='mt-2 flex flex-col gap-2'>
+          <div className='mt-2 flex flex-col gap-1.5'>
             {selectedItems.map((profile, index) => {
               const showOrder = strategy.mode === 'round_robin';
               const isDragging = draggedProfileId === profile.id;
@@ -206,7 +209,7 @@ const HeaderProfileStrategySection = ({
                   }
                 >
                   <div
-                    className='flex items-center justify-between gap-3 rounded-xl p-3'
+                    className='flex items-center justify-between gap-2 rounded-lg px-2.5 py-2'
                     style={{
                       backgroundColor: 'var(--semi-color-bg-1)',
                       border: isDragTarget
@@ -224,11 +227,11 @@ const HeaderProfileStrategySection = ({
                     onDrop={(event) => handleDrop(event, profile.id)}
                     onDragEnd={resetDragState}
                   >
-                    <div className='flex items-center gap-3 min-w-0'>
+                    <div className='flex items-center gap-2 min-w-0'>
                       {showOrder && <IconMenu style={{ color: 'var(--semi-color-text-2)' }} />}
                       <div className='min-w-0'>
-                        <div className='flex items-center gap-2 flex-wrap'>
-                          <Text strong>{profile.name}</Text>
+                        <div className='flex items-center gap-1.5 flex-wrap'>
+                          <Text strong size='small'>{profile.name}</Text>
                           <Tag size='small'>{getCategoryLabel(t, profile.category)}</Tag>
                           {profile.missing && (
                             <Tag color='red' size='small'>
