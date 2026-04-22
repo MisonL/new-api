@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Space, Tag, Typography } from '@douyinfe/semi-ui';
+import { Button, Space, Tooltip, Typography } from '@douyinfe/semi-ui';
 import { HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS } from '../../../../helpers/headerOverrideUserAgent';
 
 const { Text } = Typography;
@@ -42,50 +42,52 @@ export default function HeaderOverrideUserAgentPresets({
       {HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS.map((group) => (
         <div
           key={group.key}
-          className={`rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] ${
+          className={`rounded-lg border ${
             compact ? 'px-3 py-2' : 'px-3 py-2.5'
           }`}
           style={{
+            borderColor: 'var(--semi-color-border)',
+            backgroundColor: 'var(--semi-color-fill-0)',
             boxShadow: 'none',
           }}
         >
-          <Text type='tertiary' size='small'>
+          <Text strong size='small'>
             {t(group.label)}
           </Text>
+          <div className='mt-0.5'>
+            <Text type='tertiary' size='small'>
+              {t('点击快速加入到当前 UA 列表')}
+            </Text>
+          </div>
           <Space
             wrap
             spacing={compact ? 4 : 6}
             className={compact ? 'mt-1.5' : 'mt-2'}
           >
             {group.items.map((item) => (
-              <Tag
-                key={item.id}
-                color='grey'
-                size='small'
-                shape='circle'
-                className={`select-none transition-colors duration-200 ${
-                  disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                }`}
-                style={{
-                  backgroundColor: activeSet.has(item.ua)
-                    ? 'var(--semi-color-primary-light-default)'
-                    : 'var(--semi-color-bg-1)',
-                  border: activeSet.has(item.ua)
-                    ? '1px solid var(--semi-color-primary)'
-                    : '1px solid var(--semi-color-border)',
-                  color: activeSet.has(item.ua)
-                    ? 'var(--semi-color-primary)'
-                    : undefined,
-                }}
-                onClick={() => {
-                  if (disabled) {
-                    return;
-                  }
-                  onSelect(item);
-                }}
-              >
-                {item.label}
-              </Tag>
+              <Tooltip key={item.id} content={item.ua} position='top'>
+                <Button
+                  type={activeSet.has(item.ua) ? 'primary' : 'tertiary'}
+                  theme={activeSet.has(item.ua) ? 'light' : 'outline'}
+                  size='small'
+                  className={`transition-all duration-200 ${
+                    disabled ? 'cursor-not-allowed opacity-60' : ''
+                  }`}
+                  style={{
+                    borderRadius: 9999,
+                    fontWeight: activeSet.has(item.ua) ? 600 : 400,
+                  }}
+                  disabled={disabled}
+                  onClick={() => {
+                    if (disabled) {
+                      return;
+                    }
+                    onSelect(item);
+                  }}
+                >
+                  {item.label}
+                </Button>
+              </Tooltip>
             ))}
           </Space>
         </div>

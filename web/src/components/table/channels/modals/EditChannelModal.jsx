@@ -2936,8 +2936,10 @@ const EditChannelModal = (props) => {
                     extraText={
                       <div className='flex flex-col gap-1'>
                         <div className='flex gap-2 flex-wrap items-center'>
-                          <Text
-                            className='!text-semi-color-primary cursor-pointer'
+                          <Button
+                            type='tertiary'
+                            theme='light'
+                            size='small'
                             onClick={() =>
                               handleInputChange(
                                 'header_override',
@@ -2957,9 +2959,11 @@ const EditChannelModal = (props) => {
                             }
                           >
                             {t('填入模板')}
-                          </Text>
-                          <Text
-                            className='!text-semi-color-primary cursor-pointer'
+                          </Button>
+                          <Button
+                            type='tertiary'
+                            theme='light'
+                            size='small'
                             onClick={() =>
                               handleInputChange(
                                 'header_override',
@@ -2968,29 +2972,38 @@ const EditChannelModal = (props) => {
                             }
                           >
                             {t('填入透传模版')}
-                          </Text>
-                          <Text
-                            className='!text-semi-color-primary cursor-pointer'
+                          </Button>
+                          <Button
+                            type='tertiary'
+                            theme='light'
+                            size='small'
                             onClick={() => formatJsonField('header_override')}
                           >
                             {t('格式化')}
-                          </Text>
+                          </Button>
                           <Dropdown
                             trigger='click'
                             position='bottomLeft'
                             menu={headerOverrideUserAgentPresetMenu}
                           >
-                            <Text className='!text-semi-color-primary cursor-pointer inline-flex items-center gap-1'>
+                            <Button
+                              type='tertiary'
+                              theme='light'
+                              size='small'
+                              icon={<IconChevronDown size={12} />}
+                              iconPosition='right'
+                            >
                               <span>{t('UA 预置模板')}</span>
-                              <IconChevronDown size={12} />
-                            </Text>
+                            </Button>
                           </Dropdown>
-                          <Text
-                            className='!text-semi-color-primary cursor-pointer'
+                          <Button
+                            type='tertiary'
+                            theme='light'
+                            size='small'
                             onClick={() => handleInputChange('header_override', '')}
                           >
                             {t('清空')}
-                          </Text>
+                          </Button>
                         </div>
                         <div>
                           <Text type='tertiary' size='small'>

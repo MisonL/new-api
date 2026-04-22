@@ -25,6 +25,7 @@ import {
   showSuccess,
 } from '../../../../helpers';
 import {
+  Banner,
   Button,
   Empty,
   Input,
@@ -33,6 +34,7 @@ import {
   Spin,
   Tag,
   Typography,
+  Tooltip,
 } from '@douyinfe/semi-ui';
 import {
   IconDelete,
@@ -62,6 +64,26 @@ function formatTemplateTime(timestamp, t) {
     return t('暂无');
   }
   return new Date(value * 1000).toLocaleString();
+}
+
+function buildTemplatePreview(content) {
+  const raw = String(content || '').trim();
+  if (!raw) {
+    return '';
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    const entries = Object.entries(parsed || {}).slice(0, 2);
+    const preview = entries
+      .map(([key, value]) => `${key}: ${String(value)}`)
+      .join(' | ');
+    if (Object.keys(parsed || {}).length > 2) {
+      return `${preview} ...`;
+    }
+    return preview;
+  } catch {
+    return raw.replace(/\s+/g, ' ').slice(0, 96);
+  }
 }
 
 export default function UserHeaderTemplateManager({
@@ -241,11 +263,12 @@ export default function UserHeaderTemplateManager({
         </Button>
       </div>
       {showTemplateValidation && (
-        <div className='mb-3'>
-          <Text type='tertiary' size='small'>
-            {t(normalizedTemplateDraft.message)}
-          </Text>
-        </div>
+        <Banner
+          className='mb-3'
+          type='warning'
+          closeIcon={null}
+          description={t(normalizedTemplateDraft.message)}
+        />
       )}
 
       {loading ? (
@@ -271,6 +294,20 @@ export default function UserHeaderTemplateManager({
                   <Tag color='grey' size='small'>
                     {template.name}
                   </Tag>
+                  <div className='mt-2'>
+                    <Tooltip content={template.content} position='topLeft'>
+                      <div
+                        className='rounded px-2 py-1 font-mono text-xs'
+                        style={{
+                          backgroundColor: 'var(--semi-color-bg-0)',
+                          border: '1px solid var(--semi-color-border)',
+                          color: 'var(--semi-color-text-1)',
+                        }}
+                      >
+                        {buildTemplatePreview(template.content)}
+                      </div>
+                    </Tooltip>
+                  </div>
                   <div className='mt-2'>
                     <Text type='tertiary' size='small'>
                       {t('更新于')} {formatTemplateTime(template.updated_at, t)}
