@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/textproto"
+	"regexp"
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
@@ -117,15 +118,15 @@ func normalizeHeaderTemplateEntryName(name string) (string, string, error) {
 	switch {
 	case strings.HasPrefix(lower, "re:"):
 		pattern := strings.TrimSpace(trimmed[3:])
-		if pattern == "" {
-			return "", "", fmt.Errorf("请求头名称不合法: %s", name)
+		if err := validateHeaderPassthroughRegexPattern(pattern, name); err != nil {
+			return "", "", err
 		}
 		normalized := "re:" + pattern
 		return normalized, normalized, nil
 	case strings.HasPrefix(lower, "regex:"):
 		pattern := strings.TrimSpace(trimmed[6:])
-		if pattern == "" {
-			return "", "", fmt.Errorf("请求头名称不合法: %s", name)
+		if err := validateHeaderPassthroughRegexPattern(pattern, name); err != nil {
+			return "", "", err
 		}
 		normalized := "re:" + pattern
 		return normalized, normalized, nil
@@ -136,6 +137,17 @@ func normalizeHeaderTemplateEntryName(name string) (string, string, error) {
 	}
 	normalized := textproto.CanonicalMIMEHeaderKey(trimmed)
 	return normalized, strings.ToLower(normalized), nil
+}
+
+func validateHeaderPassthroughRegexPattern(pattern string, name string) error {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return fmt.Errorf("请求头名称不合法: %s", name)
+	}
+	if _, err := regexp.Compile(pattern); err != nil {
+		return fmt.Errorf("请求头名称不合法: %s", name)
+	}
+	return nil
 }
 
 func isValidHeaderFieldName(name string) bool {

@@ -480,7 +480,37 @@ func validateChannelOtherSettings(channel *model.Channel) error {
 		return err
 	}
 
+	mode, err := normalizeOptionalHeaderPolicyModeForChannelSettings(settings.HeaderPolicyMode)
+	if err != nil {
+		return err
+	}
+	settings.HeaderPolicyMode = mode
+
+	strategy, err := normalizeUserAgentStrategyForStorage(settings.UserAgentStrategy)
+	if err != nil {
+		return err
+	}
+	settings.UserAgentStrategy = strategy
+
+	raw, err := common.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("渠道其他设置[settings] 格式错误：%s", err.Error())
+	}
+	channel.OtherSettings = string(raw)
+
 	return nil
+}
+
+func normalizeOptionalHeaderPolicyModeForChannelSettings(raw dto.HeaderPolicyMode) (dto.HeaderPolicyMode, error) {
+	mode := strings.TrimSpace(string(raw))
+	if mode == "" {
+		return "", nil
+	}
+	normalized, err := normalizeHeaderPolicyMode(mode)
+	if err != nil {
+		return "", err
+	}
+	return dto.HeaderPolicyMode(normalized), nil
 }
 
 // validateChannel 通用的渠道校验函数

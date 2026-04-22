@@ -69,6 +69,25 @@ func TestValidateHeaderTemplateRejectsInvalidHeaderName(t *testing.T) {
 	}
 }
 
+func TestValidateHeaderTemplateRejectsInvalidPassthroughRegex(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{name: "re", raw: `{"re:[":"true"}`},
+		{name: "regex", raw: `{"regex:(":"true"}`},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ValidateHeaderTemplate(tc.raw)
+			require.Error(t, err)
+			require.ErrorContains(t, err, "请求头名称不合法")
+		})
+	}
+}
+
 func TestValidateHeaderTemplateRejectsUnsupportedValueTypes(t *testing.T) {
 	cases := []struct {
 		name string

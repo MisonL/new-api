@@ -219,6 +219,106 @@ func TestAddChannelRejectsRandomModeWithoutProfiles(t *testing.T) {
 	require.EqualValues(t, 0, count)
 }
 
+func TestAddChannelRejectsInvalidHeaderPolicyMode(t *testing.T) {
+	setupChannelControllerTestDB(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel", map[string]any{
+		"mode": "single",
+		"channel": map[string]any{
+			"type":   constant.ChannelTypeOpenAI,
+			"key":    "sk-add-invalid-header-policy-mode",
+			"status": common.ChannelStatusEnabled,
+			"name":   "add-invalid-header-policy-mode",
+			"group":  "default",
+			"models": "gpt-4o-mini",
+			"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+				HeaderPolicyMode: dto.HeaderPolicyMode("broken"),
+			}),
+		},
+	})
+
+	AddChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "请求头优先级模式不合法")
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Channel{}).Count(&count).Error)
+	require.EqualValues(t, 0, count)
+}
+
+func TestUpdateChannelRejectsInvalidUserAgentStrategy(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":     channel.Id,
+		"type":   channel.Type,
+		"key":    channel.Key,
+		"status": channel.Status,
+		"name":   channel.Name,
+		"group":  channel.Group,
+		"models": channel.Models,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			UserAgentStrategy: &dto.UserAgentStrategy{
+				Enabled: true,
+				Mode:    "broken",
+				UserAgents: []string{
+					"ua-1",
+				},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "UA 策略模式不合法")
+
+	loaded, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	require.Nil(t, loaded.GetOtherSettings().UserAgentStrategy)
+}
+
+func TestUpdateChannelNormalizesHeaderPolicySettings(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":     channel.Id,
+		"type":   channel.Type,
+		"key":    channel.Key,
+		"status": channel.Status,
+		"name":   channel.Name,
+		"group":  channel.Group,
+		"models": channel.Models,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderPolicyMode: dto.HeaderPolicyMode(" prefer_tag "),
+			UserAgentStrategy: &dto.UserAgentStrategy{
+				Enabled:    false,
+				Mode:       " random ",
+				UserAgents: []string{" ua-1 ", "ua-1", "ua-2"},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+
+	loaded, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	settings := loaded.GetOtherSettings()
+	require.Equal(t, dto.HeaderPolicyModePreferTag, settings.HeaderPolicyMode)
+	require.NotNil(t, settings.UserAgentStrategy)
+	require.False(t, settings.UserAgentStrategy.Enabled)
+	require.Equal(t, "random", settings.UserAgentStrategy.Mode)
+	require.Equal(t, []string{"ua-1", "ua-2"}, settings.UserAgentStrategy.UserAgents)
+}
+
 func TestBuildFetchModelsHeadersNormalizesNonStringHeaderOverrideValues(t *testing.T) {
 	channel := &model.Channel{
 		Type: constant.ChannelTypeOpenAI,

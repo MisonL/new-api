@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -51,4 +52,10 @@ func TestTagRequestHeaderPolicyDefaultValuesPersist(t *testing.T) {
 	require.Equal(t, "system_default", got.HeaderPolicyMode)
 	require.False(t, got.OverrideHeaderUserAgent)
 	require.Empty(t, got.UserAgentStrategyJSON)
+}
+
+func TestTagRequestHeaderPolicyTagDoesNotHardcodeLegacyLength(t *testing.T) {
+	field, ok := reflect.TypeOf(TagRequestHeaderPolicy{}).FieldByName("Tag")
+	require.True(t, ok)
+	require.NotContains(t, string(field.Tag), "varchar(128)")
 }
