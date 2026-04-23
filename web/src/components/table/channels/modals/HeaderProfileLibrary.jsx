@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
-  Card,
+  Empty,
   Space,
   Tag,
   Tooltip,
@@ -71,10 +71,8 @@ const HeaderProfileLibrary = ({
           </pre>
         }
       >
-        <Card
-          shadows='hover'
-          bodyStyle={{ padding: 10 }}
-          className='cursor-pointer'
+        <div
+          className='cursor-pointer rounded-lg px-3 py-2.5 transition-colors duration-150'
           style={{
             border: selected
               ? '1px solid var(--semi-color-primary)'
@@ -82,7 +80,6 @@ const HeaderProfileLibrary = ({
             backgroundColor: selected
               ? 'var(--semi-color-primary-light-default)'
               : 'var(--semi-color-bg-1)',
-            borderRadius: 8,
           }}
           onClick={() => onToggleSelect(profile.id)}
         >
@@ -128,7 +125,7 @@ const HeaderProfileLibrary = ({
               </Space>
             )}
           </div>
-        </Card>
+        </div>
       </Tooltip>
     );
   };
@@ -140,7 +137,7 @@ const HeaderProfileLibrary = ({
           <Text strong size='small'>{t('Header Profile 资源库')}</Text>
           <div>
             <Text type='tertiary' size='small'>
-              {t('点击卡片即可加入或移出当前策略')}
+              {t('点击条目即可加入或移出当前策略')}
             </Text>
           </div>
         </div>
@@ -154,9 +151,17 @@ const HeaderProfileLibrary = ({
           <div className='mb-1.5'>
             <Text strong size='small'>{t('预置 Profile')}</Text>
           </div>
-          <div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
-            {groups.builtin.map(renderCard)}
-          </div>
+          {groups.builtin.length === 0 ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              title={t('暂无预置 Profile')}
+              description={t('当前没有可用的预置项')}
+            />
+          ) : (
+            <div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
+              {groups.builtin.map(renderCard)}
+            </div>
+          )}
         </div>
 
         <div>

@@ -475,6 +475,8 @@ const EditChannelModal = (props) => {
 
   // 高级设置折叠状态
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
+  const [requestHeaderAdvancedVisible, setRequestHeaderAdvancedVisible] =
+    useState(false);
   const toggleAdvancedSettings = (open) => {
     setAdvancedSettingsOpen(open);
     localStorage.setItem(ADVANCED_SETTINGS_EXPANDED_KEY, String(open));
@@ -488,6 +490,12 @@ const EditChannelModal = (props) => {
   const formContainerRef = useRef(null);
   const doubaoApiClickCountRef = useRef(0);
   const initialBaseUrlRef = useRef('');
+
+  useEffect(() => {
+    if (!props.visible) {
+      setRequestHeaderAdvancedVisible(false);
+    }
+  }, [props.visible]);
   const initialModelsRef = useRef([]);
   const initialModelMappingRef = useRef('');
   const initialStatusCodeMappingRef = useRef('');
@@ -2381,6 +2389,29 @@ const EditChannelModal = (props) => {
 
   const selectedUserAgentCount = (inputs.user_agent_strategy_user_agents || [])
     .length;
+  const hasHeaderOverrideDraft =
+    typeof inputs.header_override === 'string' &&
+    inputs.header_override.trim().length > 0;
+  const hasUserAgentStrategyDraft =
+    inputs.user_agent_strategy_configured ||
+    inputs.user_agent_strategy_enabled ||
+    inputs.override_header_user_agent ||
+    inputs.header_policy_mode !== 'system_default' ||
+    selectedUserAgentCount > 0;
+  const requestHeaderAdvancedCount =
+    (hasHeaderOverrideDraft ? 1 : 0) + (hasUserAgentStrategyDraft ? 1 : 0);
+  const requestHeaderAdvancedSummary =
+    requestHeaderAdvancedCount === 0
+      ? t('未配置')
+      : requestHeaderAdvancedCount === 1
+        ? hasHeaderOverrideDraft
+          ? t('仅请求头覆盖')
+          : t('仅 UA 池策略')
+        : t('已配置 2 项');
+  const requestHeaderAdvancedTags = [
+    hasHeaderOverrideDraft ? t('请求头覆盖') : null,
+    hasUserAgentStrategyDraft ? t('UA 池策略') : null,
+  ].filter(Boolean);
   const userAgentStrategyHint = inputs.user_agent_strategy_enabled
     ? selectedUserAgentCount > 0
       ? t('已选 {{count}} 个 UA，将按当前策略参与请求转发', {
@@ -2920,346 +2951,470 @@ const EditChannelModal = (props) => {
                     onDeleteProfile={handleDeleteHeaderProfile}
                     onImportLegacy={handleImportLegacyHeaderOverride}
                   />
-                  <Form.TextArea
-                    field='header_override'
-                    label={t('请求头覆盖')}
-                    placeholder={
-                      t('此项可选，用于覆盖请求头参数') +
-                      '\n' +
-                      t('格式示例：') +
-                      '\n{\n  "User-Agent": "Mozilla/5.0 ...",\n  "Authorization": "Bearer {api_key}"\n}'
-                    }
-                    autosize
-                    onChange={(value) =>
-                      handleInputChange('header_override', value)
-                    }
-                    extraText={
-                      <div className='flex flex-col gap-1'>
-                        <div className='flex gap-2 flex-wrap items-center'>
-                          <Button
-                            type='tertiary'
-                            theme='light'
-                            size='small'
-                            onClick={() =>
-                              handleInputChange(
-                                'header_override',
-                                JSON.stringify(
-                                  {
-                                    '*': true,
-                                    're:^X-Trace-.*$': true,
-                                    'X-Foo': '{client_header:X-Foo}',
-                                    Authorization: 'Bearer {api_key}',
-                                    'User-Agent':
-                                      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0',
-                                  },
-                                  null,
-                                  2,
-                                ),
-                              )
-                            }
-                          >
-                            {t('填入模板')}
-                          </Button>
-                          <Button
-                            type='tertiary'
-                            theme='light'
-                            size='small'
-                            onClick={() =>
-                              handleInputChange(
-                                'header_override',
-                                JSON.stringify({ '*': true }, null, 2),
-                              )
-                            }
-                          >
-                            {t('填入透传模版')}
-                          </Button>
-                          <Button
-                            type='tertiary'
-                            theme='light'
-                            size='small'
-                            onClick={() => formatJsonField('header_override')}
-                          >
-                            {t('格式化')}
-                          </Button>
-                          <Dropdown
-                            trigger='click'
-                            position='bottomLeft'
-                            menu={headerOverrideUserAgentPresetMenu}
-                          >
-                            <Button
-                              type='tertiary'
-                              theme='light'
-                              size='small'
-                              icon={<IconChevronDown size={12} />}
-                              iconPosition='right'
-                            >
-                              <span>{t('UA 预置模板')}</span>
-                            </Button>
-                          </Dropdown>
-                          <Button
-                            type='tertiary'
-                            theme='light'
-                            size='small'
-                            onClick={() => handleInputChange('header_override', '')}
-                          >
-                            {t('清空')}
-                          </Button>
-                        </div>
-                        <div>
-                          <Text type='tertiary' size='small'>
-                            {t('支持变量：')}
-                          </Text>
-                          <div className='text-xs text-tertiary ml-2'>
-                            <div>
-                              {t('渠道密钥')}: {'{api_key}'}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    }
-                    showClear
-                  />
-                  <div
-                    className='mt-4 rounded-lg p-4'
-                    style={SOFT_SECTION_STYLE}
-                  >
-                    <div className='flex flex-wrap items-start justify-between gap-2 mb-3'>
+                  <div className='rounded-lg p-3' style={SOFT_SECTION_STYLE}>
+                    <div className='flex items-start justify-between gap-3 flex-wrap'>
                       <div className='min-w-0 flex-1'>
-                        <Text strong>{t('User-Agent 策略')}</Text>
+                        <div className='flex items-center gap-2 flex-wrap'>
+                          <IconSetting size={15} />
+                          <Text strong size='small'>
+                            {t('高级请求头设置')}
+                          </Text>
+                          <Tag size='small' color='grey'>
+                            {requestHeaderAdvancedSummary}
+                          </Tag>
+                          {requestHeaderAdvancedTags.map((label) => (
+                            <Tag key={label} size='small' color='blue'>
+                              {label}
+                            </Tag>
+                          ))}
+                        </div>
                         <div className='mt-1'>
                           <Text type='tertiary' size='small'>
-                            {t(
-                              '可为渠道维护多选 UA 池，并在真实转发时按轮询或随机策略选出最终 User-Agent',
-                            )}
+                            {t('旧 header_override、UA 池策略和个人模板已收进二级窗口，避免主表单一次展开过多字段')}
                           </Text>
                         </div>
                       </div>
                       <Button
-                        type='tertiary'
-                        theme='borderless'
                         size='small'
-                        className='!px-0 shrink-0'
-                        onClick={clearUserAgentStrategyDraft}
+                        type='tertiary'
+                        onClick={() => setRequestHeaderAdvancedVisible(true)}
                       >
-                        {t('清空 UA 策略')}
+                        {requestHeaderAdvancedCount === 0
+                          ? t('配置')
+                          : t('查看与编辑')}
                       </Button>
                     </div>
-                    <div className='mb-3 flex flex-wrap items-center gap-2 transition-colors duration-200'>
-                      <Tag
-                        size='small'
-                        color={
-                          inputs.user_agent_strategy_enabled ? 'blue' : 'grey'
-                        }
-                      >
-                        {inputs.user_agent_strategy_enabled ? t('开') : t('关')}
-                      </Tag>
-                      <Text
-                        size='small'
-                        type={
-                          inputs.user_agent_strategy_enabled
-                            ? 'secondary'
-                            : 'tertiary'
-                        }
-                      >
-                        {userAgentStrategyHint}
-                      </Text>
-                    </div>
-                    <div className='grid gap-3'>
-                      <div
-                        className='rounded-lg px-3 py-3 transition-colors duration-200'
-                        style={{
-                          border: inputs.user_agent_strategy_enabled
-                            ? '1px solid var(--semi-color-primary-light-active)'
-                            : '1px solid var(--semi-color-border)',
-                          backgroundColor: inputs.user_agent_strategy_enabled
-                            ? 'var(--semi-color-fill-0)'
-                            : 'var(--semi-color-bg-0)',
-                        }}
-                      >
-                        <div className='flex items-start justify-between gap-3'>
-                          <div className='min-w-0 max-w-[420px] pr-2'>
-                            <Text strong size='small'>
-                              {t('启用 UA 策略')}
-                            </Text>
-                            <div className='mt-1'>
-                              <Text type='tertiary' size='small'>
-                                {t(
-                                  '启用后，从 UA 池按轮询或随机策略选出最终 User-Agent',
-                                )}
-                              </Text>
-                            </div>
-                          </div>
-                          <div className='shrink-0 flex items-center gap-2 pt-0.5'>
-                            <Text type='tertiary' size='small'>
-                              {inputs.user_agent_strategy_enabled ? t('开') : t('关')}
-                            </Text>
-                            <SemiSwitch
-                              checked={inputs.user_agent_strategy_enabled}
-                              onChange={(checked) => {
-                                handleInputChange(
-                                  'user_agent_strategy_enabled',
-                                  checked,
-                                );
-                                if (!checked) {
-                                  handleInputChange(
-                                    'override_header_user_agent',
-                                    false,
-                                  );
-                                }
-                                if (
-                                  checked ||
-                                  (inputs.user_agent_strategy_user_agents || [])
-                                    .length > 0
-                                ) {
-                                  handleInputChange(
-                                    'user_agent_strategy_configured',
-                                    true,
-                                  );
-                                }
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      <div
-                        className='rounded-lg px-3 py-3 transition-colors duration-200'
-                        style={{
-                          border: inputs.override_header_user_agent
-                            ? '1px solid var(--semi-color-primary-light-active)'
-                            : '1px solid var(--semi-color-border)',
-                          backgroundColor: inputs.override_header_user_agent
-                            ? 'var(--semi-color-fill-0)'
-                            : 'var(--semi-color-bg-0)',
-                          opacity:
-                            inputs.user_agent_strategy_enabled &&
-                            selectedUserAgentCount > 0
-                              ? 1
-                              : 0.72,
-                        }}
-                      >
-                        <div className='flex items-start justify-between gap-3'>
-                          <div className='min-w-0 max-w-[420px] pr-2'>
-                            <Text strong size='small'>
-                              {t('覆盖静态 User-Agent')}
-                            </Text>
-                            <div className='mt-1'>
-                              <Text type='tertiary' size='small'>
-                                {t(
-                                  '启用后，用 UA 池结果覆盖静态请求头里的 User-Agent',
-                                )}
-                              </Text>
-                            </div>
-                          </div>
-                          <div className='shrink-0 flex items-center gap-2 pt-0.5'>
-                            <Text type='tertiary' size='small'>
-                              {inputs.override_header_user_agent
-                                ? t('开')
-                                : t('关')}
-                            </Text>
-                            <SemiSwitch
-                              checked={inputs.override_header_user_agent}
-                              disabled={
-                                !inputs.user_agent_strategy_enabled ||
-                                selectedUserAgentCount === 0
-                              }
-                              onChange={(checked) =>
-                                handleInputChange(
-                                  'override_header_user_agent',
-                                  checked,
-                                )
-                              }
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      <div
-                        className='grid gap-3'
-                        style={{
-                          gridTemplateColumns:
-                            'repeat(auto-fit, minmax(220px, 1fr))',
-                        }}
-                      >
-                        <Form.Select
-                          field='header_policy_mode'
-                          label={t('请求头优先级')}
-                          optionList={HEADER_POLICY_MODE_OPTIONS.map((item) => ({
-                            ...item,
-                            label: t(item.label),
-                          }))}
-                          initValue='system_default'
-                          onChange={(value) =>
-                            handleInputChange('header_policy_mode', value)
-                          }
-                        />
-                        <Form.Select
-                          field='user_agent_strategy_mode'
-                          label={t('UA 策略模式')}
-                          optionList={USER_AGENT_STRATEGY_MODE_OPTIONS.map((item) => ({
-                            ...item,
-                            label: t(item.label),
-                          }))}
-                          initValue='round_robin'
-                          disabled={!inputs.user_agent_strategy_enabled}
-                          onChange={(value) => {
-                            handleInputChange('user_agent_strategy_mode', value);
-                            handleInputChange(
-                              'user_agent_strategy_configured',
-                              true,
-                            );
-                          }}
-                        />
-                      </div>
-                    </div>
-                    <div
-                      className='mt-3 transition-opacity duration-200'
-                      style={{
-                        opacity:
-                          inputs.user_agent_strategy_enabled ||
-                          selectedUserAgentCount > 0
-                            ? 1
-                            : 0.84,
-                      }}
-                    >
-                      <Form.TagInput
-                        field='user_agent_strategy_user_agents'
-                        label={t('User-Agent 列表')}
-                        placeholder={t('输入 UA，按回车或逗号可追加多个')}
-                        addOnBlur
-                        showClear
-                        onChange={handleUserAgentStrategyListChange}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                    <div
-                      className='mt-3 transition-opacity duration-200'
-                      style={{
-                        opacity:
-                          inputs.user_agent_strategy_enabled ||
-                          selectedUserAgentCount > 0
-                            ? 1
-                            : 0.82,
-                      }}
-                    >
-                      <div className='mb-2'>
+                  </div>
+                  <Modal
+                    title={t('高级请求头设置')}
+                    visible={requestHeaderAdvancedVisible}
+                    width={920}
+                    onCancel={() => setRequestHeaderAdvancedVisible(false)}
+                    footer={
+                      <Button onClick={() => setRequestHeaderAdvancedVisible(false)}>
+                        {t('完成')}
+                      </Button>
+                    }
+                  >
+                    <div className='flex flex-col gap-4'>
+                      <div>
                         <Text type='tertiary' size='small'>
-                          {t('常用 UA 预置')}
+                          {t('这里只有兼容旧覆盖、按策略轮换 User-Agent 和复用个人模板三类高级能力；常规渠道优先使用上面的 Header Profile')}
                         </Text>
                       </div>
-                      <HeaderOverrideUserAgentPresets
-                        t={t}
-                        onSelect={appendUserAgentStrategyPreset}
-                        showTitle={false}
-                        compact
-                        activeValues={inputs.user_agent_strategy_user_agents || []}
-                      />
+                      <Collapse
+                        defaultActiveKey={
+                          requestHeaderAdvancedCount > 0
+                            ? ['header-override-panel', 'user-agent-panel']
+                            : ['header-override-panel']
+                        }
+                      >
+                        <Collapse.Panel
+                          itemKey='header-override-panel'
+                          header={
+                            <div className='flex items-center gap-2 flex-wrap'>
+                              <Text className='font-medium' size='small'>
+                                {t('请求头覆盖')}
+                              </Text>
+                              <Tag size='small' color={hasHeaderOverrideDraft ? 'blue' : 'grey'}>
+                                {hasHeaderOverrideDraft ? t('已配置') : t('未配置')}
+                              </Tag>
+                            </div>
+                          }
+                        >
+                          <Form.TextArea
+                            field='header_override'
+                            label={t('请求头覆盖')}
+                            placeholder={
+                              t('此项可选，用于覆盖请求头参数') +
+                              '\n' +
+                              t('格式示例：') +
+                              '\n{\n  "User-Agent": "Mozilla/5.0 ...",\n  "Authorization": "Bearer {api_key}"\n}'
+                            }
+                            autosize
+                            onChange={(value) =>
+                              handleInputChange('header_override', value)
+                            }
+                            extraText={
+                              <div className='flex flex-col gap-1.5'>
+                                <div className='flex gap-2 flex-wrap items-center'>
+                                  <Button
+                                    type='tertiary'
+                                    theme='light'
+                                    size='small'
+                                    onClick={() =>
+                                      handleInputChange(
+                                        'header_override',
+                                        JSON.stringify(
+                                          {
+                                            '*': true,
+                                            're:^X-Trace-.*$': true,
+                                            'X-Foo': '{client_header:X-Foo}',
+                                            Authorization: 'Bearer {api_key}',
+                                            'User-Agent':
+                                              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0',
+                                          },
+                                          null,
+                                          2,
+                                        ),
+                                      )
+                                    }
+                                  >
+                                    {t('填入模板')}
+                                  </Button>
+                                  <Button
+                                    type='tertiary'
+                                    theme='light'
+                                    size='small'
+                                    onClick={() =>
+                                      handleInputChange(
+                                        'header_override',
+                                        JSON.stringify({ '*': true }, null, 2),
+                                      )
+                                    }
+                                  >
+                                    {t('填入透传模版')}
+                                  </Button>
+                                  <Button
+                                    type='tertiary'
+                                    theme='light'
+                                    size='small'
+                                    onClick={() => formatJsonField('header_override')}
+                                  >
+                                    {t('格式化')}
+                                  </Button>
+                                  <Dropdown
+                                    trigger='click'
+                                    position='bottomLeft'
+                                    menu={headerOverrideUserAgentPresetMenu}
+                                  >
+                                    <Button
+                                      type='tertiary'
+                                      theme='light'
+                                      size='small'
+                                      icon={<IconChevronDown size={12} />}
+                                      iconPosition='right'
+                                    >
+                                      <span>{t('UA 预置模板')}</span>
+                                    </Button>
+                                  </Dropdown>
+                                  <Button
+                                    type='tertiary'
+                                    theme='light'
+                                    size='small'
+                                    onClick={() =>
+                                      handleInputChange('header_override', '')
+                                    }
+                                  >
+                                    {t('清空')}
+                                  </Button>
+                                </div>
+                                <Text type='tertiary' size='small'>
+                                  {t('支持变量：渠道密钥 {{value}}', {
+                                    value: '{api_key}',
+                                  })}
+                                </Text>
+                              </div>
+                            }
+                            showClear
+                          />
+                        </Collapse.Panel>
+                        <Collapse.Panel
+                          itemKey='user-agent-panel'
+                          header={
+                            <div className='flex items-center gap-2 flex-wrap'>
+                              <Text className='font-medium' size='small'>
+                                {t('UA 池策略')}
+                              </Text>
+                              <Tag
+                                size='small'
+                                color={
+                                  hasUserAgentStrategyDraft ? 'blue' : 'grey'
+                                }
+                              >
+                                {hasUserAgentStrategyDraft ? t('已配置') : t('未配置')}
+                              </Tag>
+                              {selectedUserAgentCount > 0 && (
+                                <Tag size='small'>
+                                  {t('{{count}} 个 UA', {
+                                    count: selectedUserAgentCount,
+                                  })}
+                                </Tag>
+                              )}
+                            </div>
+                          }
+                        >
+                          <div className='rounded-lg p-3' style={SOFT_SECTION_STYLE}>
+                            <div className='flex flex-wrap items-start justify-between gap-2 mb-3'>
+                              <div className='min-w-0 flex-1'>
+                                <Text strong size='small'>{t('UA 池策略')}</Text>
+                                <div className='mt-1'>
+                                  <Text type='tertiary' size='small'>
+                                    {t(
+                                      '仅在需要让多个 User-Agent 按轮询或随机方式参与真实请求转发时使用',
+                                    )}
+                                  </Text>
+                                </div>
+                              </div>
+                              <Button
+                                type='tertiary'
+                                theme='borderless'
+                                size='small'
+                                className='!px-0 shrink-0'
+                                onClick={clearUserAgentStrategyDraft}
+                              >
+                                {t('清空 UA 策略')}
+                              </Button>
+                            </div>
+                            <div className='mb-3 flex flex-wrap items-center gap-2 transition-colors duration-200'>
+                              <Tag
+                                size='small'
+                                color={
+                                  inputs.user_agent_strategy_enabled
+                                    ? 'blue'
+                                    : 'grey'
+                                }
+                              >
+                                {inputs.user_agent_strategy_enabled
+                                  ? t('开')
+                                  : t('关')}
+                              </Tag>
+                              <Text
+                                size='small'
+                                type={
+                                  inputs.user_agent_strategy_enabled
+                                    ? 'secondary'
+                                    : 'tertiary'
+                                }
+                              >
+                                {userAgentStrategyHint}
+                              </Text>
+                            </div>
+                            <div className='grid gap-3'>
+                              <div
+                                className='rounded-lg px-3 py-2.5 transition-colors duration-200'
+                                style={{
+                                  border: inputs.user_agent_strategy_enabled
+                                    ? '1px solid var(--semi-color-primary-light-active)'
+                                    : '1px solid var(--semi-color-border)',
+                                  backgroundColor: inputs.user_agent_strategy_enabled
+                                    ? 'var(--semi-color-fill-0)'
+                                    : 'var(--semi-color-bg-0)',
+                                }}
+                              >
+                                <div className='flex items-start justify-between gap-3'>
+                                  <div className='min-w-0 max-w-[420px] pr-2'>
+                                    <Text strong size='small'>
+                                      {t('启用 UA 策略')}
+                                    </Text>
+                                    <div className='mt-1'>
+                                      <Text type='tertiary' size='small'>
+                                        {t(
+                                          '启用后，从 UA 池按轮询或随机策略选出最终 User-Agent',
+                                        )}
+                                      </Text>
+                                    </div>
+                                  </div>
+                                  <div className='shrink-0 flex items-center gap-2 pt-0.5'>
+                                    <Text type='tertiary' size='small'>
+                                      {inputs.user_agent_strategy_enabled
+                                        ? t('开')
+                                        : t('关')}
+                                    </Text>
+                                    <SemiSwitch
+                                      checked={inputs.user_agent_strategy_enabled}
+                                      onChange={(checked) => {
+                                        handleInputChange(
+                                          'user_agent_strategy_enabled',
+                                          checked,
+                                        );
+                                        if (!checked) {
+                                          handleInputChange(
+                                            'override_header_user_agent',
+                                            false,
+                                          );
+                                        }
+                                        if (
+                                          checked ||
+                                          (
+                                            inputs.user_agent_strategy_user_agents ||
+                                            []
+                                          ).length > 0
+                                        ) {
+                                          handleInputChange(
+                                            'user_agent_strategy_configured',
+                                            true,
+                                          );
+                                        }
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                              <div
+                                className='rounded-lg px-3 py-2.5 transition-colors duration-200'
+                                style={{
+                                  border: inputs.override_header_user_agent
+                                    ? '1px solid var(--semi-color-primary-light-active)'
+                                    : '1px solid var(--semi-color-border)',
+                                  backgroundColor: inputs.override_header_user_agent
+                                    ? 'var(--semi-color-fill-0)'
+                                    : 'var(--semi-color-bg-0)',
+                                  opacity:
+                                    inputs.user_agent_strategy_enabled &&
+                                    selectedUserAgentCount > 0
+                                      ? 1
+                                      : 0.72,
+                                }}
+                              >
+                                <div className='flex items-start justify-between gap-3'>
+                                  <div className='min-w-0 max-w-[420px] pr-2'>
+                                    <Text strong size='small'>
+                                      {t('覆盖静态 User-Agent')}
+                                    </Text>
+                                    <div className='mt-1'>
+                                      <Text type='tertiary' size='small'>
+                                        {t(
+                                          '启用后，用 UA 池结果覆盖静态请求头里的 User-Agent',
+                                        )}
+                                      </Text>
+                                    </div>
+                                  </div>
+                                  <div className='shrink-0 flex items-center gap-2 pt-0.5'>
+                                    <Text type='tertiary' size='small'>
+                                      {inputs.override_header_user_agent
+                                        ? t('开')
+                                        : t('关')}
+                                    </Text>
+                                    <SemiSwitch
+                                      checked={inputs.override_header_user_agent}
+                                      disabled={
+                                        !inputs.user_agent_strategy_enabled ||
+                                        selectedUserAgentCount === 0
+                                      }
+                                      onChange={(checked) =>
+                                        handleInputChange(
+                                          'override_header_user_agent',
+                                          checked,
+                                        )
+                                      }
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                              <div
+                                className='grid gap-3'
+                                style={{
+                                  gridTemplateColumns:
+                                    'repeat(auto-fit, minmax(220px, 1fr))',
+                                }}
+                              >
+                                <Form.Select
+                                  field='header_policy_mode'
+                                  label={t('请求头优先级')}
+                                  optionList={HEADER_POLICY_MODE_OPTIONS.map((item) => ({
+                                    ...item,
+                                    label: t(item.label),
+                                  }))}
+                                  initValue='system_default'
+                                  onChange={(value) =>
+                                    handleInputChange('header_policy_mode', value)
+                                  }
+                                />
+                                <Form.Select
+                                  field='user_agent_strategy_mode'
+                                  label={t('UA 策略模式')}
+                                  optionList={USER_AGENT_STRATEGY_MODE_OPTIONS.map((item) => ({
+                                    ...item,
+                                    label: t(item.label),
+                                  }))}
+                                  initValue='round_robin'
+                                  disabled={!inputs.user_agent_strategy_enabled}
+                                  onChange={(value) => {
+                                    handleInputChange(
+                                      'user_agent_strategy_mode',
+                                      value,
+                                    );
+                                    handleInputChange(
+                                      'user_agent_strategy_configured',
+                                      true,
+                                    );
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            <div
+                              className='mt-3 transition-opacity duration-200'
+                              style={{
+                                opacity:
+                                  inputs.user_agent_strategy_enabled ||
+                                  selectedUserAgentCount > 0
+                                    ? 1
+                                    : 0.84,
+                              }}
+                            >
+                              <Form.TagInput
+                                field='user_agent_strategy_user_agents'
+                                label={t('User-Agent 列表')}
+                                placeholder={t('输入 UA，按回车或逗号可追加多个')}
+                                addOnBlur
+                                showClear
+                                onChange={handleUserAgentStrategyListChange}
+                                style={{ width: '100%' }}
+                              />
+                            </div>
+                            <div
+                              className='mt-3 transition-opacity duration-200'
+                              style={{
+                                opacity:
+                                  inputs.user_agent_strategy_enabled ||
+                                  selectedUserAgentCount > 0
+                                    ? 1
+                                    : 0.82,
+                              }}
+                            >
+                              <div className='mb-2'>
+                                <Text type='tertiary' size='small'>
+                                  {t('常用 UA 预置')}
+                                </Text>
+                              </div>
+                              <HeaderOverrideUserAgentPresets
+                                t={t}
+                                onSelect={appendUserAgentStrategyPreset}
+                                showTitle={false}
+                                compact
+                                activeValues={
+                                  inputs.user_agent_strategy_user_agents || []
+                                }
+                              />
+                            </div>
+                          </div>
+                        </Collapse.Panel>
+                        <Collapse.Panel
+                          itemKey='template-panel'
+                          header={
+                            <div className='flex items-center gap-2 flex-wrap'>
+                              <Text className='font-medium' size='small'>
+                                {t('个人模板')}
+                              </Text>
+                              <Tag size='small' color='grey'>
+                                {t('复用')}
+                              </Tag>
+                            </div>
+                          }
+                        >
+                          <UserHeaderTemplateManager
+                            t={t}
+                            value={inputs.header_override}
+                            visible={requestHeaderAdvancedVisible}
+                            onApply={(content) =>
+                              handleInputChange('header_override', content)
+                            }
+                          />
+                        </Collapse.Panel>
+                      </Collapse>
                     </div>
-                  </div>
-                  <UserHeaderTemplateManager
-                    t={t}
-                    value={inputs.header_override}
-                    visible={props.visible}
-                    onApply={(content) => handleInputChange('header_override', content)}
-                  />
+                  </Modal>
                   <JSONEditor
                     key={`status_code_mapping-${isEdit ? channelId : 'new'}`}
                     field='status_code_mapping'

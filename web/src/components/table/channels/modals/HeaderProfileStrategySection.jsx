@@ -1,8 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Banner,
   Button,
+  Modal,
   Select,
   Switch,
   Tag,
@@ -46,6 +46,7 @@ const HeaderProfileStrategySection = ({
   onImportLegacy,
 }) => {
   const { t } = useTranslation();
+  const [libraryVisible, setLibraryVisible] = useState(false);
   const [draggedProfileId, setDraggedProfileId] = useState('');
   const [dragOverProfileId, setDragOverProfileId] = useState('');
   const [dragOverPosition, setDragOverPosition] = useState('before');
@@ -70,6 +71,16 @@ const HeaderProfileStrategySection = ({
     strategy.enabled && selectedCount === 0
       ? t('已启用 Header Profile，但还没有选择任何 Profile')
       : '';
+  const selectedSummaryText =
+    selectedCount === 0
+      ? t('未选择任何 Profile')
+      : strategy.mode === 'round_robin'
+        ? t('已选择 {{count}} 个，按顺序轮询', { count: selectedCount })
+        : strategy.mode === 'random'
+          ? t('已选择 {{count}} 个，随机取用', { count: selectedCount })
+          : t('固定使用 {{name}}', {
+              name: selectedItems[0]?.name || t('当前选择'),
+            });
 
   const resetDragState = useCallback(() => {
     setDraggedProfileId('');
@@ -125,7 +136,7 @@ const HeaderProfileStrategySection = ({
           <Text strong size='small'>{t('Header Profile')}</Text>
           <div>
             <Text type='tertiary' size='small'>
-              {t('通过 settings.header_profile_strategy 控制完整请求头模板，而不是只写 User-Agent')}
+              {t('优先管理完整请求头模板；常规渠道只需要在这里完成选择即可')}
             </Text>
           </div>
         </div>
@@ -150,19 +161,27 @@ const HeaderProfileStrategySection = ({
       </Text>
 
       {showLegacyBanner && (
-        <Banner
-          type='warning'
-          closeIcon={null}
-          title={t('检测到旧请求头覆盖')}
-          description={
-            <div className='flex items-center gap-2 flex-wrap'>
-              <Text>{t('当前渠道仍保留旧的 header_override，但尚未选择 Header Profile 策略。')}</Text>
-              <Button size='small' type='warning' onClick={onImportLegacy}>
-                {t('导入为 Profile')}
-              </Button>
+        <div
+          className='rounded-lg px-3 py-2'
+          style={{
+            backgroundColor: 'var(--semi-color-warning-light-default)',
+            border: '1px solid var(--semi-color-warning-light-active)',
+          }}
+        >
+          <div className='flex items-center justify-between gap-2 flex-wrap'>
+            <div className='flex items-center gap-2 flex-wrap min-w-0'>
+              <Tag color='orange' size='small'>
+                {t('旧覆盖待导入')}
+              </Tag>
+              <Text type='tertiary' size='small'>
+                {t('当前仍保留旧的 header_override，建议导入为 Header Profile 后统一管理')}
+              </Text>
             </div>
-          }
-        />
+            <Button size='small' type='warning' theme='solid' onClick={onImportLegacy}>
+              {t('导入')}
+            </Button>
+          </div>
+        </div>
       )}
 
       <div
@@ -172,23 +191,40 @@ const HeaderProfileStrategySection = ({
           border: '1px solid var(--semi-color-fill-2)',
         }}
       >
-        <div className='mb-1.5 flex items-center justify-between gap-2'>
-          <Text strong size='small'>{t('已选 Profile')}</Text>
-          <Text type='tertiary' size='small'>
-            {selectedCount === 0
-              ? t('未选择')
-              : t('已选择 {{count}} 个', { count: selectedCount })}
-          </Text>
+        <div className='flex items-start justify-between gap-3 flex-wrap'>
+          <div className='min-w-0 flex-1'>
+            <div className='flex items-center gap-2 flex-wrap'>
+              <Text strong size='small'>{t('已选 Profile')}</Text>
+              <Tag size='small' color={strategy.enabled ? 'blue' : 'grey'}>
+                {strategy.enabled ? t('已启用') : t('未启用')}
+              </Tag>
+              <Tag size='small'>
+                {modeOptions.find((item) => item.value === strategy.mode)?.label}
+              </Tag>
+            </div>
+            <div className='mt-1'>
+              <Text type='tertiary' size='small'>
+                {selectedSummaryText}
+              </Text>
+            </div>
+          </div>
+          <Button
+            size='small'
+            type='tertiary'
+            onClick={() => setLibraryVisible(true)}
+          >
+            {selectedCount === 0 ? t('选择 Profile') : t('管理 Profile')}
+          </Button>
         </div>
         {selectionError && (
-          <Text type='danger' size='small'>
+          <Text type='danger' size='small' className='mt-2 block'>
             {selectionError}
           </Text>
         )}
         {selectedCount === 0 ? (
           <div className='mt-2'>
             <Text type='tertiary' size='small'>
-              {t('请从下方资源库中选择一个或多个 Profile')}
+              {t('主表单不再直接展开资源库；点击右侧按钮进入二级窗口选择')}
             </Text>
           </div>
         ) : (
@@ -264,17 +300,29 @@ const HeaderProfileStrategySection = ({
         )}
       </div>
 
-      <HeaderProfileLibrary
-        profiles={profiles}
-        selectedProfileIds={strategy.selectedProfileIds}
-        strategyMode={strategy.mode}
-        loading={loading}
-        deletingProfileId={deletingProfileId}
-        onToggleSelect={onToggleSelect}
-        onCreate={onCreateProfile}
-        onEdit={onEditProfile}
-        onDelete={onDeleteProfile}
-      />
+      <Modal
+        title={t('管理 Header Profile')}
+        visible={libraryVisible}
+        width={920}
+        onCancel={() => setLibraryVisible(false)}
+        footer={
+          <Button onClick={() => setLibraryVisible(false)}>
+            {t('完成')}
+          </Button>
+        }
+      >
+        <HeaderProfileLibrary
+          profiles={profiles}
+          selectedProfileIds={strategy.selectedProfileIds}
+          strategyMode={strategy.mode}
+          loading={loading}
+          deletingProfileId={deletingProfileId}
+          onToggleSelect={onToggleSelect}
+          onCreate={onCreateProfile}
+          onEdit={onEditProfile}
+          onDelete={onDeleteProfile}
+        />
+      </Modal>
     </div>
   );
 };

@@ -218,7 +218,7 @@ export default function UserHeaderTemplateManager({
 
   return (
     <div
-      className='mt-4 rounded-lg p-4'
+      className='mt-3 rounded-lg p-3'
       style={SECTION_SURFACE_STYLE}
     >
       <div className='flex items-center justify-between gap-3 mb-3'>
