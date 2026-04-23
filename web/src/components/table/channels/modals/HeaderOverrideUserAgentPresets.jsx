@@ -30,6 +30,7 @@ export default function HeaderOverrideUserAgentPresets({
   compact = false,
   activeValues = [],
   disabled = false,
+  showGroupHint = true,
 }) {
   const activeSet = new Set(activeValues || []);
   return (
@@ -54,15 +55,23 @@ export default function HeaderOverrideUserAgentPresets({
           <Text strong size='small'>
             {t(group.label)}
           </Text>
-          <div className='mt-0.5'>
-            <Text type='tertiary' size='small'>
-              {t('点击快速加入到当前 UA 列表')}
-            </Text>
-          </div>
+          {showGroupHint && (
+            <div className='mt-0.5'>
+              <Text type='tertiary' size='small'>
+                {t('点击快速加入到当前 UA 列表')}
+              </Text>
+            </div>
+          )}
           <Space
             wrap
             spacing={compact ? 4 : 6}
-            className={compact ? 'mt-1.5' : 'mt-2'}
+            className={
+              compact
+                ? showGroupHint
+                  ? 'mt-1.5'
+                  : 'mt-1'
+                : 'mt-2'
+            }
           >
             {group.items.map((item) => (
               <Tooltip key={item.id} content={item.ua} position='top'>

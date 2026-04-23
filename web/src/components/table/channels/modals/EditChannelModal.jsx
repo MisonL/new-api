@@ -2988,8 +2988,12 @@ const EditChannelModal = (props) => {
                   <Modal
                     title={t('高级请求头设置')}
                     visible={requestHeaderAdvancedVisible}
-                    width={920}
+                    width={860}
                     onCancel={() => setRequestHeaderAdvancedVisible(false)}
+                    bodyStyle={{
+                      maxHeight: '72vh',
+                      overflowY: 'auto',
+                    }}
                     footer={
                       <Button onClick={() => setRequestHeaderAdvancedVisible(false)}>
                         {t('完成')}
@@ -3024,7 +3028,7 @@ const EditChannelModal = (props) => {
                         >
                           <Form.TextArea
                             field='header_override'
-                            label={t('请求头覆盖')}
+                            label=' '
                             placeholder={
                               t('此项可选，用于覆盖请求头参数') +
                               '\n' +
@@ -3146,16 +3150,11 @@ const EditChannelModal = (props) => {
                         >
                           <div className='rounded-lg p-3' style={SOFT_SECTION_STYLE}>
                             <div className='flex flex-wrap items-start justify-between gap-2 mb-3'>
-                              <div className='min-w-0 flex-1'>
-                                <Text strong size='small'>{t('UA 池策略')}</Text>
-                                <div className='mt-1'>
-                                  <Text type='tertiary' size='small'>
-                                    {t(
-                                      '仅在需要让多个 User-Agent 按轮询或随机方式参与真实请求转发时使用',
-                                    )}
-                                  </Text>
-                                </div>
-                              </div>
+                              <Text type='tertiary' size='small'>
+                                {t(
+                                  '仅在需要让多个 User-Agent 按轮询或随机方式参与真实请求转发时使用',
+                                )}
+                              </Text>
                               <Button
                                 type='tertiary'
                                 theme='borderless'
@@ -3192,14 +3191,10 @@ const EditChannelModal = (props) => {
                             </div>
                             <div className='grid gap-3'>
                               <div
-                                className='rounded-lg px-3 py-2.5 transition-colors duration-200'
+                                className='rounded-lg px-3 py-2 transition-colors duration-200'
                                 style={{
-                                  border: inputs.user_agent_strategy_enabled
-                                    ? '1px solid var(--semi-color-primary-light-active)'
-                                    : '1px solid var(--semi-color-border)',
-                                  backgroundColor: inputs.user_agent_strategy_enabled
-                                    ? 'var(--semi-color-fill-0)'
-                                    : 'var(--semi-color-bg-0)',
+                                  border: '1px solid var(--semi-color-border)',
+                                  backgroundColor: 'var(--semi-color-bg-0)',
                                 }}
                               >
                                 <div className='flex items-start justify-between gap-3'>
@@ -3252,14 +3247,10 @@ const EditChannelModal = (props) => {
                                 </div>
                               </div>
                               <div
-                                className='rounded-lg px-3 py-2.5 transition-colors duration-200'
+                                className='rounded-lg px-3 py-2 transition-colors duration-200'
                                 style={{
-                                  border: inputs.override_header_user_agent
-                                    ? '1px solid var(--semi-color-primary-light-active)'
-                                    : '1px solid var(--semi-color-border)',
-                                  backgroundColor: inputs.override_header_user_agent
-                                    ? 'var(--semi-color-fill-0)'
-                                    : 'var(--semi-color-bg-0)',
+                                  border: '1px solid var(--semi-color-border)',
+                                  backgroundColor: 'var(--semi-color-bg-0)',
                                   opacity:
                                     inputs.user_agent_strategy_enabled &&
                                     selectedUserAgentCount > 0
@@ -3383,6 +3374,7 @@ const EditChannelModal = (props) => {
                                 onSelect={appendUserAgentStrategyPreset}
                                 showTitle={false}
                                 compact
+                                showGroupHint={false}
                                 activeValues={
                                   inputs.user_agent_strategy_user_agents || []
                                 }
