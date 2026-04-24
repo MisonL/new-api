@@ -12,9 +12,11 @@ import (
 	"time"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	rootconstant "github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/relay/constant"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -26,9 +28,9 @@ import (
 )
 
 func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Header) {
-	if info.RelayMode == constant.RelayModeAudioTranscription || info.RelayMode == constant.RelayModeAudioTranslation {
+	if info.RelayMode == relayconstant.RelayModeAudioTranscription || info.RelayMode == relayconstant.RelayModeAudioTranslation {
 		// multipart/form-data
-	} else if info.RelayMode == constant.RelayModeRealtime {
+	} else if info.RelayMode == relayconstant.RelayModeRealtime {
 		// websocket
 	} else {
 		req.Set("Content-Type", c.Request.Header.Get("Content-Type"))
@@ -177,6 +179,24 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 	}
 
 	headerOverrideSource := common.GetEffectiveHeaderOverride(info)
+	profileHeaders, profileID, err := resolveHeaderProfileStrategyHeaders(info)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
+	}
+	for key, value := range profileHeaders {
+		trimmedKey := strings.TrimSpace(strings.ToLower(key))
+		if trimmedKey == "" || shouldSkipPassthroughHeader(trimmedKey) {
+			continue
+		}
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		headerOverride[trimmedKey] = value
+	}
+	if profileID != "" {
+		logger.LogInfo(c, fmt.Sprintf("header profile applied: %s", profileID))
+		mergeHeaderProfileAudit(c, info, profileID, collectHeaderOverrideKeys(headerOverride))
+	}
 
 	passAll := false
 	var passthroughRegex []*regexp.Regexp
@@ -268,6 +288,58 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 		headerOverride[key] = value
 	}
 	return headerOverride, nil
+}
+
+func mergeHeaderProfileAudit(c *gin.Context, info *common.RelayInfo, profileID string, headerKeys []string) {
+	if c == nil || info == nil || info.ChannelMeta == nil || info.ChannelMeta.ChannelOtherSettings.HeaderProfileStrategy == nil {
+		return
+	}
+	audit, _ := common2.GetContextKeyType[service.RuntimeHeaderPolicyAudit](c, rootconstant.ContextKeyChannelHeaderPolicyAudit)
+	audit.HeaderProfileID = profileID
+	audit.HeaderProfileMode = string(info.ChannelMeta.ChannelOtherSettings.HeaderProfileStrategy.Mode)
+	audit.HeaderProfileApplied = true
+	audit.AppliedHeaderKeys = mergeHeaderKeys(audit.AppliedHeaderKeys, headerKeys)
+	common2.SetContextKey(c, rootconstant.ContextKeyChannelHeaderPolicyAudit, audit)
+}
+
+func collectHeaderOverrideKeys(headers map[string]string) []string {
+	if len(headers) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func mergeHeaderKeys(existing []string, added []string) []string {
+	if len(existing) == 0 && len(added) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	merged := make([]string, 0, len(existing)+len(added))
+	for _, key := range append(existing, added...) {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if _, exists := seen[lower]; exists {
+			continue
+		}
+		seen[lower] = struct{}{}
+		merged = append(merged, trimmed)
+	}
+	return merged
+}
+
+func resolveHeaderProfileStrategyHeaders(info *common.RelayInfo) (map[string]string, string, error) {
+	if info == nil || info.ChannelMeta == nil {
+		return nil, "", nil
+	}
+	strategy := info.ChannelMeta.ChannelOtherSettings.HeaderProfileStrategy
+	return dto.ResolveHeaderProfileStrategyHeaders(strategy, info.RetryIndex)
 }
 
 func ResolveHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]string, error) {

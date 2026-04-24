@@ -31,6 +31,9 @@ type runtimeHeaderPolicy struct {
 type RuntimeHeaderPolicyAudit struct {
 	HeaderPolicyMode        string   `json:"header_policy_mode"`
 	AppliedHeaderKeys       []string `json:"applied_header_keys,omitempty"`
+	HeaderProfileID         string   `json:"header_profile_id,omitempty"`
+	HeaderProfileMode       string   `json:"header_profile_mode,omitempty"`
+	HeaderProfileApplied    bool     `json:"header_profile_applied"`
 	UserAgentApplied        bool     `json:"user_agent_applied"`
 	SelectedUserAgent       string   `json:"selected_user_agent,omitempty"`
 	UserAgentStrategyMode   string   `json:"ua_strategy_mode,omitempty"`

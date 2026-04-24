@@ -441,11 +441,16 @@ func validateHeaderProfileStrategy(strategy *dto.HeaderProfileStrategy) error {
 	}
 
 	normalizedProfileIDs := make([]string, 0, len(strategy.SelectedProfileIDs))
+	seenProfileIDs := map[string]struct{}{}
 	for _, profileID := range strategy.SelectedProfileIDs {
 		profileID = strings.TrimSpace(profileID)
 		if profileID == "" {
 			continue
 		}
+		if _, exists := seenProfileIDs[profileID]; exists {
+			continue
+		}
+		seenProfileIDs[profileID] = struct{}{}
 		normalizedProfileIDs = append(normalizedProfileIDs, profileID)
 	}
 	strategy.SelectedProfileIDs = normalizedProfileIDs
@@ -463,6 +468,58 @@ func validateHeaderProfileStrategy(strategy *dto.HeaderProfileStrategy) error {
 		return fmt.Errorf("header_profile_strategy mode 非法: %s", strategy.Mode)
 	}
 
+	if err := validateHeaderProfileStrategySnapshots(strategy); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateHeaderProfileStrategySnapshots(strategy *dto.HeaderProfileStrategy) error {
+	selectedIDs := make(map[string]struct{}, len(strategy.SelectedProfileIDs))
+	for _, profileID := range strategy.SelectedProfileIDs {
+		selectedIDs[profileID] = struct{}{}
+	}
+
+	profileMap := make(map[string]dto.HeaderProfile, len(strategy.Profiles))
+	for _, profile := range strategy.Profiles {
+		profile.ID = strings.TrimSpace(profile.ID)
+		if profile.ID == "" {
+			continue
+		}
+		if _, selected := selectedIDs[profile.ID]; !selected {
+			continue
+		}
+		if len(profile.Headers) == 0 {
+			return fmt.Errorf("header_profile_strategy profile %s headers 不能为空", profile.ID)
+		}
+		for key, value := range profile.Headers {
+			if strings.TrimSpace(key) == "" {
+				return fmt.Errorf("header_profile_strategy profile %s 存在空请求头名称", profile.ID)
+			}
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("header_profile_strategy profile %s 存在空请求头值", profile.ID)
+			}
+		}
+		profileMap[profile.ID] = profile
+	}
+
+	strategy.Profiles = make([]dto.HeaderProfile, 0, len(strategy.SelectedProfileIDs))
+	for _, profileID := range strategy.SelectedProfileIDs {
+		if profile, exists := profileMap[profileID]; exists {
+			strategy.Profiles = append(strategy.Profiles, profile)
+		}
+	}
+
+	for _, profileID := range strategy.SelectedProfileIDs {
+		if _, exists := profileMap[profileID]; exists {
+			continue
+		}
+		if _, exists := dto.ResolveHeaderProfile(profileID, nil); exists {
+			continue
+		}
+		return fmt.Errorf("header_profile_strategy 选择的 Profile 不存在或缺少快照: %s", profileID)
+	}
 	return nil
 }
 

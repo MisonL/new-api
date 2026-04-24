@@ -132,6 +132,10 @@ func TestUpdateChannelPersistsHeaderProfileStrategy(t *testing.T) {
 					"profile-a",
 					"profile-b",
 				},
+				Profiles: []dto.HeaderProfile{
+					{ID: "profile-a", Headers: map[string]string{"User-Agent": "A/1.0"}},
+					{ID: "profile-b", Headers: map[string]string{"User-Agent": "B/1.0"}},
+				},
 			},
 		}),
 	})
@@ -149,6 +153,67 @@ func TestUpdateChannelPersistsHeaderProfileStrategy(t *testing.T) {
 	require.True(t, strategy.Enabled)
 	require.Equal(t, dto.HeaderProfileModeRoundRobin, strategy.Mode)
 	require.Equal(t, []string{"profile-a", "profile-b"}, strategy.SelectedProfileIDs)
+	require.Len(t, strategy.Profiles, 2)
+	require.Equal(t, "A/1.0", strategy.Profiles[0].Headers["User-Agent"])
+}
+
+func TestUpdateChannelAllowsBuiltinHeaderProfileWithoutSnapshot(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":     channel.Id,
+		"type":   channel.Type,
+		"key":    channel.Key,
+		"status": channel.Status,
+		"name":   channel.Name,
+		"group":  channel.Group,
+		"models": channel.Models,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"codex-cli"},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+
+	loaded, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	require.Equal(t, []string{"codex-cli"}, loaded.GetOtherSettings().HeaderProfileStrategy.SelectedProfileIDs)
+}
+
+func TestUpdateChannelRejectsMissingCustomHeaderProfileSnapshot(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":     channel.Id,
+		"type":   channel.Type,
+		"key":    channel.Key,
+		"status": channel.Status,
+		"name":   channel.Name,
+		"group":  channel.Group,
+		"models": channel.Models,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"profile-a"},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "缺少快照")
 }
 
 func TestUpdateChannelRejectsFixedModeWithMultipleProfiles(t *testing.T) {

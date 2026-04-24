@@ -132,6 +132,15 @@ func AppendRequestHeaderPolicyInfo(ctx *gin.Context, other map[string]interface{
 	if len(audit.AppliedHeaderKeys) > 0 {
 		info["applied_header_keys"] = audit.AppliedHeaderKeys
 	}
+	if audit.HeaderProfileID != "" {
+		info["header_profile_id"] = audit.HeaderProfileID
+	}
+	if audit.HeaderProfileMode != "" {
+		info["header_profile_mode"] = audit.HeaderProfileMode
+	}
+	if audit.HeaderProfileApplied {
+		info["header_profile_applied"] = true
+	}
 	if audit.UserAgentStrategyMode != "" {
 		info["ua_strategy_mode"] = audit.UserAgentStrategyMode
 	}

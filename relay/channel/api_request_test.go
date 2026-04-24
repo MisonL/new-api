@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -109,6 +110,123 @@ func TestProcessHeaderOverride_RuntimeOverrideIsFinalHeaderMap(t *testing.T) {
 	require.Equal(t, "runtime-only", headers["x-runtime"])
 	_, exists := headers["x-legacy"]
 	require.False(t, exists)
+}
+
+func TestProcessHeaderOverride_AppliesBuiltinHeaderProfile(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeFixed,
+					SelectedProfileIDs: []string{"codex-cli"},
+				},
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "OpenAI Codex CLI/0.1", headers["user-agent"])
+	require.Equal(t, "codex-cli", headers["x-client-name"])
+	require.Equal(t, "terminal", headers["x-client-platform"])
+}
+
+func TestProcessHeaderOverride_AppliesUserHeaderProfileAndLegacyOverrideWins(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			HeadersOverride: map[string]any{"X-Custom": "from-legacy"},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeFixed,
+					SelectedProfileIDs: []string{"hp_custom"},
+					Profiles: []dto.HeaderProfile{
+						{
+							ID:      "hp_custom",
+							Name:    "Custom",
+							Scope:   dto.HeaderProfileScopeUser,
+							Headers: map[string]string{"User-Agent": "CustomUA/1.0", "X-Custom": "from-profile"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "CustomUA/1.0", headers["user-agent"])
+	require.Equal(t, "from-legacy", headers["x-custom"])
+}
+
+func TestProcessHeaderOverride_HeaderProfileRoundRobinUsesRetryIndex(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		RetryIndex: 1,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeRoundRobin,
+					SelectedProfileIDs: []string{"hp_a", "hp_b"},
+					Profiles: []dto.HeaderProfile{
+						{ID: "hp_a", Headers: map[string]string{"User-Agent": "A/1.0"}},
+						{ID: "hp_b", Headers: map[string]string{"User-Agent": "B/1.0"}},
+					},
+				},
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "B/1.0", headers["user-agent"])
+}
+
+func TestProcessHeaderOverride_HeaderProfileMissingFails(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeFixed,
+					SelectedProfileIDs: []string{"missing"},
+				},
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.Error(t, err)
+	require.Nil(t, headers)
 }
 
 func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {

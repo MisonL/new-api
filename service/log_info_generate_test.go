@@ -109,6 +109,9 @@ func TestGenerateTextOtherInfoIncludesRequestHeaderPolicyAudit(t *testing.T) {
 	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, RuntimeHeaderPolicyAudit{
 		HeaderPolicyMode:        "merge",
 		AppliedHeaderKeys:       []string{"User-Agent", "X-Test"},
+		HeaderProfileID:         "codex-cli",
+		HeaderProfileMode:       "fixed",
+		HeaderProfileApplied:    true,
 		UserAgentApplied:        true,
 		SelectedUserAgent:       "codex-cli/1.0.0",
 		UserAgentStrategyMode:   "round_robin",
@@ -120,6 +123,9 @@ func TestGenerateTextOtherInfoIncludesRequestHeaderPolicyAudit(t *testing.T) {
 	info, ok := other["request_header_policy"].(map[string]interface{})
 	require.True(t, ok)
 	require.Equal(t, "merge", info["mode"])
+	require.Equal(t, "codex-cli", info["header_profile_id"])
+	require.Equal(t, "fixed", info["header_profile_mode"])
+	require.Equal(t, true, info["header_profile_applied"])
 	require.Equal(t, "round_robin", info["ua_strategy_mode"])
 	require.Equal(t, "tag:new.xem8k5.top", info["ua_strategy_scope"])
 	require.Equal(t, "codex-cli/1.0.0", info["selected_user_agent"])

@@ -35,7 +35,7 @@ type ChannelAffinitySetting struct {
 	Rules             []ChannelAffinityRule `json:"rules"`
 }
 
-var codexCliPassThroughHeaders = []string{
+var CodexCliPassThroughHeaders = []string{
 	"Originator",
 	"Session_id",
 	"User-Agent",
@@ -43,7 +43,7 @@ var codexCliPassThroughHeaders = []string{
 	"X-Codex-Turn-Metadata",
 }
 
-var claudeCliPassThroughHeaders = []string{
+var ClaudeCliPassThroughHeaders = []string{
 	"X-Stainless-Arch",
 	"X-Stainless-Lang",
 	"X-Stainless-Os",
@@ -88,7 +88,7 @@ var channelAffinitySetting = ChannelAffinitySetting{
 			},
 			ValueRegex:            "",
 			TTLSeconds:            0,
-			ParamOverrideTemplate: buildPassHeaderTemplate(codexCliPassThroughHeaders),
+			ParamOverrideTemplate: buildPassHeaderTemplate(CodexCliPassThroughHeaders),
 			SkipRetryOnFailure:    true,
 			IncludeUsingGroup:     true,
 			IncludeRuleName:       true,
@@ -103,7 +103,7 @@ var channelAffinitySetting = ChannelAffinitySetting{
 			},
 			ValueRegex:            "",
 			TTLSeconds:            0,
-			ParamOverrideTemplate: buildPassHeaderTemplate(claudeCliPassThroughHeaders),
+			ParamOverrideTemplate: buildPassHeaderTemplate(ClaudeCliPassThroughHeaders),
 			SkipRetryOnFailure:    true,
 			IncludeUsingGroup:     true,
 			IncludeRuleName:       true,
