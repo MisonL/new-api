@@ -58,6 +58,19 @@ func TestGetConfiguredModelRatioMissingModel(t *testing.T) {
 	require.Equal(t, "missing-model-for-pricing-test", matchName)
 }
 
+func TestGetCompletionRatioInfoGPT55UsesOfficialOutputMultiplier(t *testing.T) {
+	info := GetCompletionRatioInfo("gpt-5.5")
+
+	require.InDelta(t, 6.0, info.Ratio, 1e-9)
+	require.True(t, info.Locked)
+}
+
+func TestGetCompletionRatioGPT55DatedVariant(t *testing.T) {
+	got := GetCompletionRatio("gpt-5.5-2026-04-24")
+
+	require.InDelta(t, 6.0, got, 1e-9)
+}
+
 func floatPtr(v float64) *float64 {
 	return &v
 }
