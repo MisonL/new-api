@@ -102,6 +102,41 @@ func TestUpdateChannelStatusRefreshesMemoryCacheAfterEnable(t *testing.T) {
 	require.True(t, isChannelIDInList(group2model2channels["default"]["gpt-5.4"], channel.Id))
 }
 
+func TestGetRandomSatisfiedChannelExcludingSkipsUsedChannelsAtSamePriority(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+	})
+
+	priority := int64(10)
+	weight := uint(1)
+	channels := []*Channel{
+		{Id: 201, Name: "used-a", Status: common.ChannelStatusEnabled, Group: "default", Models: "gpt-5.5", Priority: &priority, Weight: &weight},
+		{Id: 202, Name: "used-b", Status: common.ChannelStatusEnabled, Group: "default", Models: "gpt-5.5", Priority: &priority, Weight: &weight},
+		{Id: 203, Name: "fresh", Status: common.ChannelStatusEnabled, Group: "default", Models: "gpt-5.5", Priority: &priority, Weight: &weight},
+	}
+	for _, channel := range channels {
+		require.NoError(t, DB.Create(channel).Error)
+		require.NoError(t, DB.Create(&Ability{
+			Group:     "default",
+			Model:     "gpt-5.5",
+			ChannelId: channel.Id,
+			Enabled:   true,
+			Priority:  channel.Priority,
+			Weight:    *channel.Weight,
+		}).Error)
+	}
+	InitChannelCache()
+
+	got, err := GetRandomSatisfiedChannelExcluding("default", "gpt-5.5", 0, map[int]struct{}{201: {}, 202: {}})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, 203, got.Id)
+}
+
 func TestIsChannelEnabledForGroupModelFallsBackToDatabaseOnCacheMiss(t *testing.T) {
 	prepareChannelCacheTest(t)
 

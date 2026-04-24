@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -153,10 +154,29 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(param.TokenGroup, param.ModelName, param.GetRetry())
+		channel, err = model.GetRandomSatisfiedChannelExcluding(param.TokenGroup, param.ModelName, param.GetRetry(), getUsedChannelSet(param.Ctx))
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}
 	}
 	return channel, selectGroup, nil
+}
+
+func getUsedChannelSet(ctx *gin.Context) map[int]struct{} {
+	if ctx == nil {
+		return nil
+	}
+	usedChannels := ctx.GetStringSlice("use_channel")
+	if len(usedChannels) == 0 {
+		return nil
+	}
+	excluded := make(map[int]struct{}, len(usedChannels))
+	for _, raw := range usedChannels {
+		channelId, err := strconv.Atoi(raw)
+		if err != nil || channelId <= 0 {
+			continue
+		}
+		excluded[channelId] = struct{}{}
+	}
+	return excluded
 }

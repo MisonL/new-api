@@ -147,7 +147,7 @@ func requestChannelCacheRefreshAsync() {
 	}()
 }
 
-func getRandomSatisfiedChannelFromCache(group string, model string, retry int) (*Channel, error, bool) {
+func getRandomSatisfiedChannelFromCache(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
 	// First, try to find channels with the exact model name.
 	channels := group2model2channels[group][model]
 
@@ -162,6 +162,9 @@ func getRandomSatisfiedChannelFromCache(group string, model string, retry int) (
 	}
 
 	if len(channels) == 1 {
+		if _, skip := excluded[channels[0]]; skip {
+			return nil, nil, true
+		}
 		if channel, ok := channelsIDM[channels[0]]; ok {
 			return channel, nil, true
 		}
@@ -191,6 +194,9 @@ func getRandomSatisfiedChannelFromCache(group string, model string, retry int) (
 	var sumWeight = 0
 	var targetChannels []*Channel
 	for _, channelId := range channels {
+		if _, skip := excluded[channelId]; skip {
+			continue
+		}
 		if channel, ok := channelsIDM[channelId]; ok {
 			if channel.GetPriority() == targetPriority {
 				sumWeight += channel.GetWeight()
@@ -237,13 +243,18 @@ func getRandomSatisfiedChannelFromCache(group string, model string, retry int) (
 
 // GetRandomSatisfiedChannel returns a channel for the requested group/model pair.
 func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel, error) {
+	return GetRandomSatisfiedChannelExcluding(group, model, retry, nil)
+}
+
+// GetRandomSatisfiedChannelExcluding returns a channel while excluding channels already tried by the current request.
+func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
 		return GetChannel(group, model, retry)
 	}
 
 	channelSyncLock.RLock()
-	channel, cacheErr, cacheHit := getRandomSatisfiedChannelFromCache(group, model, retry)
+	channel, cacheErr, cacheHit := getRandomSatisfiedChannelFromCache(group, model, retry, excluded)
 	channelSyncLock.RUnlock()
 	if channel != nil || (cacheHit && cacheErr == nil) {
 		return channel, cacheErr
