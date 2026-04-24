@@ -46,6 +46,13 @@ func ModelMappedHelper(c *gin.Context, info *relaycommon.RelayInfo, request dto.
 
 		for _, candidate := range mappingCandidates {
 			currentModel := candidate
+			if isResponsesCompact && candidate == originModelName {
+				if mappedModel, exists := modelMap[currentModel]; exists && mappedModel != "" {
+					info.IsModelMapped = true
+					info.UpstreamModelName = mappedModel
+					break
+				}
+			}
 			visitedModels := map[string]bool{
 				currentModel: true,
 			}

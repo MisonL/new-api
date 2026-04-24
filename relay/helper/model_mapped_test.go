@@ -68,6 +68,34 @@ func TestModelMappedHelperResponsesCompactPreservesOriginWhenMappedToNamespacedU
 	}
 }
 
+func TestModelMappedHelperResponsesCompactFullMappingDoesNotChainThroughBaseMapping(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	c.Set("model_mapping", `{"gpt-5.5":"openai/gpt-5.5","gpt-5.5-openai-compact":"gpt-5.5"}`)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.5-openai-compact",
+		},
+	}
+	req := &dto.OpenAIResponsesRequest{Model: "gpt-5.5-openai-compact"}
+
+	if err := ModelMappedHelper(c, info, req); err != nil {
+		t.Fatalf("ModelMappedHelper returned error: %v", err)
+	}
+
+	if info.UpstreamModelName != "gpt-5.5" {
+		t.Fatalf("expected explicit compact mapping to stop at gpt-5.5, got %q", info.UpstreamModelName)
+	}
+	if req.Model != "gpt-5.5" {
+		t.Fatalf("expected request model gpt-5.5, got %q", req.Model)
+	}
+	if info.OriginModelName != "gpt-5.5-openai-compact" {
+		t.Fatalf("expected compact origin model to stay routable, got %q", info.OriginModelName)
+	}
+}
+
 func TestModelMappedHelperResponsesCompactDefaultsToBaseModel(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 
