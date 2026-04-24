@@ -95,6 +95,7 @@
 - 非法 `ua_strategy.mode`、空 UA 池、启用策略但无合法 UA，都会在保存阶段直接拒绝。
 - `header_profile_strategy.mode=fixed` 时必须且只能选择 1 个 Profile。
 - `header_profile_strategy.mode=round_robin/random` 时至少要选择 1 个 Profile。
+- `header_profile_strategy` 中的 AI Coding CLI 预置 Profile 只写入固定请求头；如果上游校验官方客户端动态头，必须同时在 `param_override.operations` 中使用 `pass_headers` 透传模板。
 
 ## 请求头模板与透传规则
 
@@ -124,6 +125,26 @@
 
 - 非法正则现在会在保存时直接失败，不再延迟到请求真正转发时才报错。
 - 规范化后重复的 key 也会被拒绝，例如大小写不同但归一化后相同的请求头名。
+
+### `pass_headers` 与 CLI 客户端
+
+`pass_headers` 不生成固定请求头，只从当前客户端请求里读取同名请求头并写入上游请求。它用于保留 Codex CLI、Claude Code 等真实客户端携带的动态元数据。
+
+Codex CLI 透传模板当前包含：
+
+```json
+[
+  "Originator",
+  "Session_id",
+  "User-Agent",
+  "X-Codex-Beta-Features",
+  "X-Codex-Turn-Metadata"
+]
+```
+
+Claude CLI 透传模板当前包含 `X-Stainless-*`、`User-Agent`、`X-App`、`Anthropic-Beta`、`Anthropic-Version` 等请求头。
+
+如果客户端原始请求里没有这些头，`pass_headers` 不会伪造值；这类缺失应通过真实客户端调用链路修复，而不是用固定 UA 模板替代。
 
 ## 模型更新检查相关字段
 

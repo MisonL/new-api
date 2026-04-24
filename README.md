@@ -270,7 +270,9 @@ cd web && bun run build
    - 用户设置中保存 `header_profiles` 资产，渠道 `settings.header_profile_strategy` 保存所选 Profile 引用。
    - 预置浏览器、AI Coding CLI、API SDK / Debug Profile 为只读资产，用户可新增、编辑、删除自己的 Profile。
    - 渠道侧支持 `fixed` / `round_robin` / `random` 三种 Profile 选择模式，保存时会做服务端校验。
-   - 当前这套能力已具备资源管理、渠道选择和持久化校验；如需评估是否进入真实转发链路，应以代码事实和后续发布说明为准，不能把其与现有 `header_override` / `ua_strategy` 运行时链路混为一谈。
+   - 渠道保存时会写入已选 Profile 的运行时快照，保证该渠道后续由任意用户请求时都能按同一组完整请求头生效。
+   - 真实转发链路会在旧 `header_override` 之前应用所选 Profile；如两者设置同名请求头，旧 `header_override` 仍作为显式覆盖值优先生效。
+   - AI Coding CLI 预置 Profile 只代表固定请求头快照；如果上游要求官方客户端身份或会话连续性，还必须在参数覆盖里启用对应的 `pass_headers` 透传模板，让真实客户端动态请求头进入上游。
 
 补充说明：
 
@@ -278,6 +280,7 @@ cd web && bun run build
 - `Header Profile` 与“请求头模板”不是同一回事：
   - 模板：面向当前编辑器的 JSON 复用。
   - Profile：面向用户级完整请求头资产管理与渠道选择。
+- `Codex CLI`、`Claude Code` 等 Profile 不能伪造官方客户端动态头；遇到 `only allows official clients`、会话追踪或 SDK 元数据校验类错误时，应同时配置高级请求头设置中的 CLI 真实请求头透传模板。
 
 ## CI/CD
 
