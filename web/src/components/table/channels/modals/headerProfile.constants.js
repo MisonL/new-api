@@ -33,91 +33,80 @@ const browserProfiles = {
   },
 };
 
+const buildAiCodingCliProfile = (
+  key,
+  name,
+  userAgent,
+  clientName,
+  description,
+  passthroughRequired = false,
+) => ({
+  key,
+  name,
+  group: 'ai_coding_cli',
+  scope: 'builtin',
+  readonly: true,
+  passthroughRequired,
+  description,
+  headers: {
+    'User-Agent': userAgent,
+    'X-Client-Name': clientName,
+    'X-Client-Platform': 'terminal',
+  },
+});
+
 const aiCodingCliProfiles = {
-  'codex-cli': {
-    key: 'codex-cli',
-    name: 'Codex CLI',
-    group: 'ai_coding_cli',
-    scope: 'builtin',
-    readonly: true,
-    headers: {
-      'User-Agent': 'OpenAI Codex CLI/0.1',
-      'X-Client-Name': 'codex-cli',
-      'X-Client-Platform': 'terminal',
-    },
-  },
-  'claude-code': {
-    key: 'claude-code',
-    name: 'Claude Code',
-    group: 'ai_coding_cli',
-    scope: 'builtin',
-    readonly: true,
-    headers: {
-      'User-Agent': 'Claude-Code/1.0',
-      'X-Client-Name': 'claude-code',
-      'X-Client-Platform': 'terminal',
-    },
-  },
-  'gemini-cli': {
-    key: 'gemini-cli',
-    name: 'Gemini CLI',
-    group: 'ai_coding_cli',
-    scope: 'builtin',
-    readonly: true,
-    headers: {
-      'User-Agent': 'GeminiCLI/1.0',
-      'X-Client-Name': 'gemini-cli',
-      'X-Client-Platform': 'terminal',
-    },
-  },
-  'qwen-code': {
-    key: 'qwen-code',
-    name: 'Qwen Code',
-    group: 'ai_coding_cli',
-    scope: 'builtin',
-    readonly: true,
-    headers: {
-      'User-Agent': 'Qwen-Code/1.0',
-      'X-Client-Name': 'qwen-code',
-      'X-Client-Platform': 'terminal',
-    },
-  },
-  opencode: {
-    key: 'opencode',
-    name: 'OpenCode',
-    group: 'ai_coding_cli',
-    scope: 'builtin',
-    readonly: true,
-    headers: {
-      'User-Agent': 'OpenCode/1.0',
-      'X-Client-Name': 'opencode',
-      'X-Client-Platform': 'terminal',
-    },
-  },
-  droid: {
-    key: 'droid',
-    name: 'Droid',
-    group: 'ai_coding_cli',
-    scope: 'builtin',
-    readonly: true,
-    headers: {
-      'User-Agent': 'Droid/1.0',
-      'X-Client-Name': 'droid',
-      'X-Client-Platform': 'terminal',
-    },
-  },
-  amp: {
-    key: 'amp',
-    name: 'Amp',
-    group: 'ai_coding_cli',
-    scope: 'builtin',
-    readonly: true,
-    headers: {
-      'User-Agent': 'AmpCLI/1.0',
-      'X-Client-Name': 'amp',
-      'X-Client-Platform': 'terminal',
-    },
-  },
+  'codex-cli': buildAiCodingCliProfile(
+    'codex-cli',
+    'Codex CLI',
+    'OpenAI Codex CLI/0.1',
+    'codex-cli',
+    '固定请求头只用于普通渠道标识；Codex 官方客户端限制场景还必须在高级请求头设置中启用 Codex CLI 请求头透传模板。',
+    true,
+  ),
+  'claude-code': buildAiCodingCliProfile(
+    'claude-code',
+    'Claude Code',
+    'Claude-Code/1.0',
+    'claude-code',
+    '固定请求头只用于普通渠道标识；Claude 官方客户端链路如需保留会话与 SDK 元数据，还必须启用 Claude CLI 请求头透传模板。',
+    true,
+  ),
+  'gemini-cli': buildAiCodingCliProfile(
+    'gemini-cli',
+    'Gemini CLI',
+    'GeminiCLI/1.0',
+    'gemini-cli',
+    '固定请求头用于普通渠道标识；若上游要求真实客户端会话头，应在高级请求头设置中额外配置 pass_headers。',
+  ),
+  'qwen-code': buildAiCodingCliProfile(
+    'qwen-code',
+    'Qwen Code',
+    'Qwen-Code/1.0',
+    'qwen-code',
+    '固定请求头用于普通渠道标识；不能替代真实 CLI 请求中携带的动态会话头。',
+  ),
+  opencode: buildAiCodingCliProfile(
+    'opencode',
+    'OpenCode',
+    'OpenCode/1.0',
+    'opencode',
+    '固定请求头用于普通渠道标识；不能替代真实客户端动态请求头。',
+  ),
+  droid: buildAiCodingCliProfile(
+    'droid',
+    'Droid',
+    'Droid/1.0',
+    'droid',
+    '固定请求头用于普通渠道标识；不能替代真实客户端动态请求头。',
+  ),
+  amp: buildAiCodingCliProfile(
+    'amp',
+    'Amp',
+    'AmpCLI/1.0',
+    'amp',
+    '固定请求头用于普通渠道标识；不能替代真实客户端动态请求头。',
+  ),
 };
 
 const apiSdkProfiles = {

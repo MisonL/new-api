@@ -53,7 +53,7 @@ function normalizeSelectedProfileIds(selectedProfileIds = []) {
 function normalizeProfile(profile = {}) {
   const id = String(profile.id || profile.key || '').trim();
   const headers = isPlainHeaderObject(profile.headers) ? profile.headers : {};
-  return {
+  const normalized = {
     id,
     key: id,
     name: String(profile.name || id).trim(),
@@ -64,6 +64,13 @@ function normalizeProfile(profile = {}) {
     headers,
     previewText: buildHeaderProfilePreviewText(headers),
   };
+  if (
+    profile.passthroughRequired === true ||
+    profile.passthrough_required === true
+  ) {
+    normalized.passthroughRequired = true;
+  }
+  return normalized;
 }
 
 function createMissingProfileItem(profileId) {
@@ -134,8 +141,12 @@ export function toggleSelectedProfile({
   return nextKeys;
 }
 
-export function buildSelectedProfileItems(selectedProfileIds = [], profiles = []) {
-  const profileMap = buildProfileMap(profiles);
+export function buildSelectedProfileItems(
+  selectedProfileIds = [],
+  profiles = [],
+  snapshotProfiles = [],
+) {
+  const profileMap = buildProfileMap([...snapshotProfiles, ...profiles]);
   return normalizeSelectedProfileIds(selectedProfileIds).map((profileId) => {
     if (profileMap.has(profileId)) {
       return profileMap.get(profileId);
@@ -187,6 +198,9 @@ export function getHeaderProfileStrategyFromSettings(settingsText) {
     selectedProfileIds: normalizeSelectedProfileIds(
       rawStrategy.selected_profile_ids || rawStrategy.selectedProfileIds,
     ),
+    profiles: Array.isArray(rawStrategy.profiles)
+      ? rawStrategy.profiles.map(normalizeProfile).filter((profile) => profile.id)
+      : [],
   };
 }
 
@@ -205,6 +219,26 @@ export function buildHeaderProfileStrategySettings(settingsText, strategy) {
     selected_profile_ids: normalizeSelectedProfileIds(
       strategy.selectedProfileIds || strategy.selected_profile_ids,
     ),
+    profiles: Array.isArray(strategy.profiles)
+      ? strategy.profiles
+          .map(normalizeProfile)
+          .filter((profile) => profile.id)
+          .map((profile) => {
+            const snapshot = {
+              id: profile.id,
+              name: profile.name,
+              category: profile.category,
+              scope: profile.scope,
+              readonly: profile.readonly,
+              description: profile.description,
+              headers: profile.headers,
+            };
+            if (profile.passthroughRequired === true) {
+              snapshot.passthrough_required = true;
+            }
+            return snapshot;
+          })
+      : [],
   };
   return JSON.stringify(nextSettings);
 }

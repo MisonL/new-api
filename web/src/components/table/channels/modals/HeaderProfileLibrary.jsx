@@ -89,10 +89,18 @@ const HeaderProfileLibrary = ({
                 <Text strong size='small'>
                   {profile.name}
                 </Text>
+                {profile.passthroughRequired && (
+                  <Tag size='small' color='orange'>{t('需透传')}</Tag>
+                )}
                 {selected && <Tag size='small' color='blue'>{t('已选中')}</Tag>}
               </div>
               <div className='mt-1 flex items-center gap-1.5 flex-wrap'>
                 <Tag size='small'>{getCategoryLabel(t, profile.category)}</Tag>
+                {profile.description && (
+                  <Text type='tertiary' size='small'>
+                    {t(profile.description)}
+                  </Text>
+                )}
                 {strategyMode === 'fixed' && selected && (
                   <Text type='tertiary' size='small'>
                     {t('固定模式会直接替换为当前选择')}

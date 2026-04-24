@@ -161,7 +161,7 @@ const MODE_DESCRIPTIONS = {
   to_upper: '把字符串转成大写',
   return_error: '立即返回自定义错误',
   prune_objects: '按条件清理对象中的子项',
-  pass_headers: '把指定请求头透传到上游请求',
+  pass_headers: '把客户端原始请求里的指定请求头透传到上游；适合 Codex / Claude CLI 等要求真实客户端动态头的渠道',
   sync_fields: '在一个字段有值、另一个缺失时自动补齐',
   set_header:
     '设置运行期请求头：可直接覆盖整条值，也可对逗号分隔的 token 做删除、替换、追加或白名单保留',
@@ -217,7 +217,7 @@ const getModeToPlaceholder = (mode) => {
 
 const getModeValueLabel = (mode) => {
   if (mode === 'set_header') return '请求头值（支持字符串或 JSON 映射）';
-  if (mode === 'pass_headers') return '透传请求头（支持逗号分隔或 JSON 数组）';
+  if (mode === 'pass_headers') return '透传请求头（来自客户端原始请求，支持逗号分隔或 JSON 数组）';
   if (
     mode === 'trim_prefix' ||
     mode === 'trim_suffix' ||
@@ -257,7 +257,7 @@ const getModeValuePlaceholder = (mode) => {
       '}',
     ].join('\n');
   }
-  if (mode === 'pass_headers') return 'Authorization, X-Request-Id';
+  if (mode === 'pass_headers') return 'Originator, Session_id, User-Agent';
   if (
     mode === 'trim_prefix' ||
     mode === 'trim_suffix' ||
@@ -411,7 +411,7 @@ const TEMPLATE_PRESET_CONFIG = {
   },
   pass_headers_auth: {
     group: 'scenario',
-    label: '请求头透传（X-Request-Id）',
+    label: '请求头透传（通用 Trace）',
     kind: 'operations',
     payload: HEADER_PASSTHROUGH_TEMPLATE,
   },
@@ -423,13 +423,13 @@ const TEMPLATE_PRESET_CONFIG = {
   },
   claude_cli_headers_passthrough: {
     group: 'scenario',
-    label: 'Claude CLI 请求头透传',
+    label: 'Claude CLI 真实请求头透传',
     kind: 'operations',
     payload: CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   codex_cli_headers_passthrough: {
     group: 'scenario',
-    label: 'Codex CLI 请求头透传',
+    label: 'Codex CLI 真实请求头透传',
     kind: 'operations',
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
@@ -2955,6 +2955,17 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                         </Space>
                                       ) : null}
                                     </div>
+                                    {mode === 'pass_headers' ? (
+                                      <Text
+                                        type='tertiary'
+                                        size='small'
+                                        className='mt-1 mb-2 block'
+                                      >
+                                        {t(
+                                          '这里不会生成固定请求头，只会把客户端请求中实际存在的同名请求头转发给上游；目标已有值时可开启保留原值。',
+                                        )}
+                                      </Text>
+                                    ) : null}
                                     {mode === 'set_header' ? (
                                       <Text
                                         type='tertiary'

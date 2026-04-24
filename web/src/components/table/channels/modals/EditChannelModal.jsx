@@ -100,6 +100,10 @@ import {
   toggleSelectedProfile,
 } from './headerProfile.helpers.js';
 import {
+  CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
+  CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
+} from '../../../../constants/channel-affinity-template.constants';
+import {
   IconSave,
   IconClose,
   IconServer,
@@ -517,8 +521,13 @@ const EditChannelModal = (props) => {
       buildSelectedProfileItems(
         headerProfileStrategy.selectedProfileIds,
         headerProfiles,
+        headerProfileStrategy.profiles,
       ),
-    [headerProfileStrategy.selectedProfileIds, headerProfiles],
+    [
+      headerProfileStrategy.selectedProfileIds,
+      headerProfileStrategy.profiles,
+      headerProfiles,
+    ],
   );
   const hasLegacyHeaderOverride =
     typeof inputs.header_override === 'string' &&
@@ -527,6 +536,73 @@ const EditChannelModal = (props) => {
     hasLegacyHeaderOverride &&
     (!headerProfileStrategy.enabled ||
       headerProfileStrategy.selectedProfileIds.length === 0);
+  const requestHeaderPassthroughStatus = useMemo(() => {
+    const raw =
+      typeof inputs.param_override === 'string'
+        ? inputs.param_override.trim()
+        : '';
+    if (!raw || !verifyJSON(raw)) {
+      return { codex: false, claude: false };
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      const operations = Array.isArray(parsed?.operations)
+        ? parsed.operations
+        : [];
+      const normalizedHeaders = new Set();
+      operations.forEach((operation) => {
+        if (operation?.mode !== 'pass_headers') {
+          return;
+        }
+        const rawValue = operation.value;
+        const values = Array.isArray(rawValue)
+          ? rawValue
+          : typeof rawValue === 'string'
+            ? rawValue.split(',')
+            : Array.isArray(rawValue?.headers)
+              ? rawValue.headers
+              : rawValue?.header !== undefined
+                ? [rawValue.header]
+                : [];
+        values.forEach((header) => {
+          const normalized = String(header || '').trim().toLowerCase();
+          if (normalized) {
+            normalizedHeaders.add(normalized);
+          }
+        });
+      });
+      const includesAll = (headers) =>
+        headers.every((header) => normalizedHeaders.has(header.toLowerCase()));
+      return {
+        codex: includesAll(CODEX_CLI_HEADER_PASSTHROUGH_HEADERS),
+        claude: includesAll(CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS),
+      };
+    } catch (error) {
+      return { codex: false, claude: false };
+    }
+  }, [inputs.param_override]);
+
+  const headerProfilePassthroughWarning = useMemo(() => {
+    if (!headerProfileStrategy.enabled) {
+      return '';
+    }
+    const selectedIds = new Set(headerProfileStrategy.selectedProfileIds || []);
+    const warnings = [];
+    if (selectedIds.has('codex-cli') && !requestHeaderPassthroughStatus.codex) {
+      warnings.push(t('Codex CLI'));
+    }
+    if (selectedIds.has('claude-code') && !requestHeaderPassthroughStatus.claude) {
+      warnings.push(t('Claude Code'));
+    }
+    if (warnings.length === 0) {
+      return '';
+    }
+    return t(
+      '{{names}} Profile 只会写入固定请求头。若上游要求官方客户端身份，还需要在高级请求头设置中追加对应的 CLI 请求头透传模板，保留真实客户端动态头。',
+      { names: warnings.join(' / ') },
+    );
+  }, [headerProfileStrategy, requestHeaderPassthroughStatus, t]);
+
   const doubaoCodingPlanDeprecationMessage =
     'Doubao Coding Plan 不再允许新增。根据火山方舟文档，Coding 套餐额度仅适用于 AI Coding 产品内调用，不适用于单独 API 调用；在非 AI Coding 产品中使用对应的 Base URL 和 API Key 可能被视为违规，并可能导致订阅停用或账号封禁。';
   const canKeepDeprecatedDoubaoCodingPlan =
@@ -672,9 +748,29 @@ const EditChannelModal = (props) => {
   };
 
   const applyHeaderProfileStrategy = (strategy) => {
+    const selectedProfileIds = strategy?.selectedProfileIds || [];
+    const selectedProfiles = buildSelectedProfileItems(
+      selectedProfileIds,
+      headerProfiles,
+      headerProfileStrategy.profiles,
+    )
+      .filter((profile) => !profile.missing)
+      .map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        category: profile.category,
+        scope: profile.scope,
+        readonly: profile.readonly,
+        headers: profile.headers,
+        description: profile.description || '',
+        passthrough_required: profile.passthroughRequired === true,
+      }));
     handleInputChange(
       'settings',
-      buildHeaderProfileStrategySettings(inputs.settings, strategy),
+      buildHeaderProfileStrategySettings(
+        inputs.settings,
+        strategy ? { ...strategy, profiles: selectedProfiles } : null,
+      ),
     );
   };
 
@@ -2941,6 +3037,7 @@ const EditChannelModal = (props) => {
                     profiles={allHeaderProfiles}
                     deletingProfileId={headerProfileDeletingId}
                     showLegacyBanner={shouldShowHeaderProfileLegacyBanner}
+                    passthroughWarning={headerProfilePassthroughWarning}
                     onEnabledChange={handleHeaderProfileEnabledChange}
                     onModeChange={handleHeaderProfileModeChange}
                     onToggleSelect={handleToggleHeaderProfile}

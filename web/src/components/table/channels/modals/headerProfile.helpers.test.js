@@ -15,6 +15,23 @@ import {
 } from './headerProfile.helpers.js';
 import { HEADER_PROFILE_PRESETS } from './headerProfile.constants.js';
 
+test('builtin AI CLI profiles distinguish fixed headers from required passthrough', () => {
+  assert.equal(HEADER_PROFILE_PRESETS['codex-cli'].passthroughRequired, true);
+  assert.equal(HEADER_PROFILE_PRESETS['claude-code'].passthroughRequired, true);
+  assert.match(
+    HEADER_PROFILE_PRESETS['codex-cli'].description,
+    /请求头透传模板/,
+  );
+  assert.match(
+    HEADER_PROFILE_PRESETS['claude-code'].description,
+    /请求头透传模板/,
+  );
+  assert.equal(
+    HEADER_PROFILE_PRESETS['gemini-cli'].passthroughRequired,
+    false,
+  );
+});
+
 test('normalizeHeaderProfileStrategy falls back to fixed', () => {
   assert.equal(normalizeHeaderProfileStrategy(undefined), 'fixed');
   assert.equal(normalizeHeaderProfileStrategy('unknown'), 'fixed');
@@ -56,6 +73,8 @@ test('buildSelectedProfileItems keeps structured headers while main fields stay 
   assert.match(items[0].previewText, /OpenAI Codex CLI/i);
   assert.deepEqual(items[0].headers, HEADER_PROFILE_PRESETS['codex-cli'].headers);
   assert.equal(items[0].name, 'Codex CLI');
+  assert.equal(items[0].passthroughRequired, true);
+  assert.match(items[0].description, /请求头透传模板/);
 });
 
 test('buildProfileItems merges builtin and user profiles into a normalized list', () => {
@@ -117,6 +136,13 @@ test('getHeaderProfileStrategyFromSettings reads strategy from settings json', (
           enabled: true,
           mode: 'random',
           selected_profile_ids: [' a ', 'b', 'a', ''],
+          profiles: [
+            {
+              id: 'a',
+              name: 'Profile A',
+              headers: { 'User-Agent': 'A/1.0' },
+            },
+          ],
         },
       }),
     ),
@@ -124,6 +150,19 @@ test('getHeaderProfileStrategyFromSettings reads strategy from settings json', (
       enabled: true,
       mode: 'random',
       selectedProfileIds: ['a', 'b'],
+      profiles: [
+        {
+          id: 'a',
+          key: 'a',
+          name: 'Profile A',
+          category: 'custom',
+          scope: 'user',
+          readonly: false,
+          description: '',
+          headers: { 'User-Agent': 'A/1.0' },
+          previewText: 'User-Agent: A/1.0',
+        },
+      ],
     },
   );
 });
@@ -137,6 +176,14 @@ test('buildHeaderProfileStrategySettings writes and removes header_profile_strat
       enabled: true,
       mode: 'round_robin',
       selectedProfileIds: ['profile-a', ' profile-b ', 'profile-a'],
+      profiles: [
+        {
+          id: 'profile-a',
+          name: 'Profile A',
+          category: 'custom',
+          headers: { 'User-Agent': 'A/1.0' },
+        },
+      ],
     },
   );
 
@@ -146,6 +193,17 @@ test('buildHeaderProfileStrategySettings writes and removes header_profile_strat
       enabled: true,
       mode: 'round_robin',
       selected_profile_ids: ['profile-a', 'profile-b'],
+      profiles: [
+        {
+          id: 'profile-a',
+          name: 'Profile A',
+          category: 'custom',
+          scope: 'user',
+          readonly: false,
+          description: '',
+          headers: { 'User-Agent': 'A/1.0' },
+        },
+      ],
     },
   });
 
@@ -153,6 +211,33 @@ test('buildHeaderProfileStrategySettings writes and removes header_profile_strat
   assert.deepEqual(JSON.parse(removed), {
     azure_responses_version: 'preview',
   });
+});
+
+test('buildHeaderProfileStrategySettings stores passthrough metadata with api field names', () => {
+  const written = buildHeaderProfileStrategySettings('{}', {
+    enabled: true,
+    mode: 'fixed',
+    selectedProfileIds: ['codex-cli'],
+    profiles: [HEADER_PROFILE_PRESETS['codex-cli']],
+  });
+
+  const parsed = JSON.parse(written);
+  assert.deepEqual(parsed.header_profile_strategy.profiles, [
+    {
+      id: 'codex-cli',
+      name: 'Codex CLI',
+      category: 'ai_coding_cli',
+      scope: 'builtin',
+      readonly: true,
+      description: HEADER_PROFILE_PRESETS['codex-cli'].description,
+      headers: HEADER_PROFILE_PRESETS['codex-cli'].headers,
+      passthrough_required: true,
+    },
+  ]);
+  assert.equal(
+    Object.hasOwn(parsed.header_profile_strategy.profiles[0], 'passthroughRequired'),
+    false,
+  );
 });
 
 test('reorderSelectedProfileIds follows before and after drop positions', () => {

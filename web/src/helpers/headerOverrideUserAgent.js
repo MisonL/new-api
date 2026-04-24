@@ -61,23 +61,23 @@ export const HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS = [
   },
   {
     key: 'ai-coding-cli',
-    label: 'AI Coding CLI',
+    label: 'AI Coding CLI（固定 UA）',
     items: [
-      { id: 'codex-cli', label: 'Codex CLI', ua: 'codex-cli/1.0.0' },
+      { id: 'codex-cli', label: 'Codex CLI 固定 UA', ua: 'codex-cli/1.0.0' },
       {
         id: 'claude-code',
-        label: 'Claude Code',
+        label: 'Claude Code 固定 UA',
         ua: 'claude-code/1.0.0',
       },
       {
         id: 'gemini-cli',
-        label: 'Gemini CLI',
+        label: 'Gemini CLI 固定 UA',
         ua: 'gemini-cli/1.0.0',
       },
-      { id: 'qwen-code', label: 'Qwen Code', ua: 'qwen-code/1.0.0' },
-      { id: 'opencode', label: 'OpenCode', ua: 'opencode/1.0.0' },
-      { id: 'droid', label: 'Droid', ua: 'droid/1.0.0' },
-      { id: 'amp', label: 'AMP', ua: 'amp/1.0.0' },
+      { id: 'qwen-code', label: 'Qwen Code 固定 UA', ua: 'qwen-code/1.0.0' },
+      { id: 'opencode', label: 'OpenCode 固定 UA', ua: 'opencode/1.0.0' },
+      { id: 'droid', label: 'Droid 固定 UA', ua: 'droid/1.0.0' },
+      { id: 'amp', label: 'AMP 固定 UA', ua: 'amp/1.0.0' },
     ],
   },
   {

@@ -35,6 +35,7 @@ const HeaderProfileStrategySection = ({
   profiles = [],
   deletingProfileId = '',
   showLegacyBanner = false,
+  passthroughWarning = '',
   onEnabledChange,
   onModeChange,
   onToggleSelect,
@@ -159,6 +160,25 @@ const HeaderProfileStrategySection = ({
       <Text type='tertiary' size='small'>
         {selectionHint}
       </Text>
+
+      {passthroughWarning && (
+        <div
+          className='rounded-lg px-3 py-2'
+          style={{
+            backgroundColor: 'var(--semi-color-warning-light-default)',
+            border: '1px solid var(--semi-color-warning-light-active)',
+          }}
+        >
+          <div className='flex items-center gap-2 flex-wrap min-w-0'>
+            <Tag color='orange' size='small'>
+              {t('需透传')}
+            </Tag>
+            <Text type='tertiary' size='small'>
+              {passthroughWarning}
+            </Text>
+          </div>
+        </div>
+      )}
 
       {showLegacyBanner && (
         <div
