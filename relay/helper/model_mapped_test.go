@@ -11,16 +11,16 @@ import (
 
 func TestModelMappedHelperResponsesCompactUsesFullCompactMappingKey(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
-	c.Set("model_mapping", `{"gpt-5.5-openai-compact":"gpt-5.5"}`)
+	c.Set("model_mapping", `{"model-alpha-openai-compact":"model-alpha"}`)
 
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
-		OriginModelName: "gpt-5.5-openai-compact",
+		OriginModelName: "model-alpha-openai-compact",
 		ChannelMeta: &relaycommon.ChannelMeta{
-			UpstreamModelName: "gpt-5.5-openai-compact",
+			UpstreamModelName: "model-alpha-openai-compact",
 		},
 	}
-	req := &dto.OpenAIResponsesRequest{Model: "gpt-5.5-openai-compact"}
+	req := &dto.OpenAIResponsesRequest{Model: "model-alpha-openai-compact"}
 
 	if err := ModelMappedHelper(c, info, req); err != nil {
 		t.Fatalf("ModelMappedHelper returned error: %v", err)
@@ -29,69 +29,69 @@ func TestModelMappedHelperResponsesCompactUsesFullCompactMappingKey(t *testing.T
 	if !info.IsModelMapped {
 		t.Fatal("expected compact mapping to be marked as mapped")
 	}
-	if info.UpstreamModelName != "gpt-5.5" {
-		t.Fatalf("expected upstream model gpt-5.5, got %q", info.UpstreamModelName)
+	if info.UpstreamModelName != "model-alpha" {
+		t.Fatalf("expected upstream model model-alpha, got %q", info.UpstreamModelName)
 	}
-	if req.Model != "gpt-5.5" {
-		t.Fatalf("expected request model gpt-5.5, got %q", req.Model)
+	if req.Model != "model-alpha" {
+		t.Fatalf("expected request model model-alpha, got %q", req.Model)
 	}
-	if info.OriginModelName != "gpt-5.5-openai-compact" {
+	if info.OriginModelName != "model-alpha-openai-compact" {
 		t.Fatalf("expected compact origin model to be preserved, got %q", info.OriginModelName)
 	}
 }
 
 func TestModelMappedHelperResponsesCompactPreservesOriginWhenMappedToNamespacedUpstream(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
-	c.Set("model_mapping", `{"gpt-5.5-openai-compact":"openai/gpt-5.5"}`)
+	c.Set("model_mapping", `{"model-alpha-openai-compact":"provider/model-alpha"}`)
 
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
-		OriginModelName: "gpt-5.5-openai-compact",
+		OriginModelName: "model-alpha-openai-compact",
 		ChannelMeta: &relaycommon.ChannelMeta{
-			UpstreamModelName: "gpt-5.5-openai-compact",
+			UpstreamModelName: "model-alpha-openai-compact",
 		},
 	}
-	req := &dto.OpenAIResponsesRequest{Model: "gpt-5.5-openai-compact"}
+	req := &dto.OpenAIResponsesRequest{Model: "model-alpha-openai-compact"}
 
 	if err := ModelMappedHelper(c, info, req); err != nil {
 		t.Fatalf("ModelMappedHelper returned error: %v", err)
 	}
 
-	if info.UpstreamModelName != "openai/gpt-5.5" {
-		t.Fatalf("expected upstream model openai/gpt-5.5, got %q", info.UpstreamModelName)
+	if info.UpstreamModelName != "provider/model-alpha" {
+		t.Fatalf("expected upstream model provider/model-alpha, got %q", info.UpstreamModelName)
 	}
-	if req.Model != "openai/gpt-5.5" {
-		t.Fatalf("expected request model openai/gpt-5.5, got %q", req.Model)
+	if req.Model != "provider/model-alpha" {
+		t.Fatalf("expected request model provider/model-alpha, got %q", req.Model)
 	}
-	if info.OriginModelName != "gpt-5.5-openai-compact" {
+	if info.OriginModelName != "model-alpha-openai-compact" {
 		t.Fatalf("expected compact origin model to stay routable, got %q", info.OriginModelName)
 	}
 }
 
 func TestModelMappedHelperResponsesCompactFullMappingDoesNotChainThroughBaseMapping(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
-	c.Set("model_mapping", `{"gpt-5.5":"openai/gpt-5.5","gpt-5.5-openai-compact":"gpt-5.5"}`)
+	c.Set("model_mapping", `{"model-alpha":"provider/model-alpha","model-alpha-openai-compact":"model-alpha"}`)
 
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
-		OriginModelName: "gpt-5.5-openai-compact",
+		OriginModelName: "model-alpha-openai-compact",
 		ChannelMeta: &relaycommon.ChannelMeta{
-			UpstreamModelName: "gpt-5.5-openai-compact",
+			UpstreamModelName: "model-alpha-openai-compact",
 		},
 	}
-	req := &dto.OpenAIResponsesRequest{Model: "gpt-5.5-openai-compact"}
+	req := &dto.OpenAIResponsesRequest{Model: "model-alpha-openai-compact"}
 
 	if err := ModelMappedHelper(c, info, req); err != nil {
 		t.Fatalf("ModelMappedHelper returned error: %v", err)
 	}
 
-	if info.UpstreamModelName != "gpt-5.5" {
-		t.Fatalf("expected explicit compact mapping to stop at gpt-5.5, got %q", info.UpstreamModelName)
+	if info.UpstreamModelName != "model-alpha" {
+		t.Fatalf("expected explicit compact mapping to stop at model-alpha, got %q", info.UpstreamModelName)
 	}
-	if req.Model != "gpt-5.5" {
-		t.Fatalf("expected request model gpt-5.5, got %q", req.Model)
+	if req.Model != "model-alpha" {
+		t.Fatalf("expected request model model-alpha, got %q", req.Model)
 	}
-	if info.OriginModelName != "gpt-5.5-openai-compact" {
+	if info.OriginModelName != "model-alpha-openai-compact" {
 		t.Fatalf("expected compact origin model to stay routable, got %q", info.OriginModelName)
 	}
 }
@@ -101,12 +101,12 @@ func TestModelMappedHelperResponsesCompactDefaultsToBaseModel(t *testing.T) {
 
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
-		OriginModelName: "gpt-5.5-openai-compact",
+		OriginModelName: "model-alpha-openai-compact",
 		ChannelMeta: &relaycommon.ChannelMeta{
-			UpstreamModelName: "gpt-5.5-openai-compact",
+			UpstreamModelName: "model-alpha-openai-compact",
 		},
 	}
-	req := &dto.OpenAIResponsesRequest{Model: "gpt-5.5-openai-compact"}
+	req := &dto.OpenAIResponsesRequest{Model: "model-alpha-openai-compact"}
 
 	if err := ModelMappedHelper(c, info, req); err != nil {
 		t.Fatalf("ModelMappedHelper returned error: %v", err)
@@ -115,10 +115,10 @@ func TestModelMappedHelperResponsesCompactDefaultsToBaseModel(t *testing.T) {
 	if info.IsModelMapped {
 		t.Fatal("expected default compact suffix stripping not to be marked as custom mapping")
 	}
-	if info.UpstreamModelName != "gpt-5.5" {
-		t.Fatalf("expected upstream model gpt-5.5, got %q", info.UpstreamModelName)
+	if info.UpstreamModelName != "model-alpha" {
+		t.Fatalf("expected upstream model model-alpha, got %q", info.UpstreamModelName)
 	}
-	if req.Model != "gpt-5.5" {
-		t.Fatalf("expected request model gpt-5.5, got %q", req.Model)
+	if req.Model != "model-alpha" {
+		t.Fatalf("expected request model model-alpha, got %q", req.Model)
 	}
 }
