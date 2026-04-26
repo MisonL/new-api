@@ -126,10 +126,13 @@ test('build user agent strategy payload returns null for untouched empty state',
 });
 
 test('normalize header template content rejects non-object json', () => {
-  assert.deepEqual(normalizeHeaderTemplateContent('[]', { allowEmpty: false }), {
-    ok: false,
-    message: '请求头覆盖必须是 JSON 对象！',
-  });
+  assert.deepEqual(
+    normalizeHeaderTemplateContent('[]', { allowEmpty: false }),
+    {
+      ok: false,
+      message: '请求头覆盖必须是 JSON 对象！',
+    },
+  );
 });
 
 test('normalize header template content formats object json', () => {

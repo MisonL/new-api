@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -49,10 +68,12 @@ const HeaderProfileEditorModal = ({
 }) => {
   const { t } = useTranslation();
   const [draft, setDraft] = useState(() => buildDraft(profile));
+  const [touched, setTouched] = useState({});
 
   useEffect(() => {
     if (visible) {
       setDraft(buildDraft(profile));
+      setTouched({});
     }
   }, [profile, visible]);
 
@@ -83,16 +104,16 @@ const HeaderProfileEditorModal = ({
     },
   ];
   const title = profile?.id
-    ? t('编辑 Header Profile')
+    ? t('编辑请求头模板')
     : profile?.source === 'legacy_header_override'
       ? t('导入旧请求头覆盖')
-      : t('新建 Header Profile');
+      : t('新建请求头模板');
 
   return (
     <Modal
       title={title}
       visible={visible}
-      width={760}
+      width='min(760px, calc(100vw - 24px))'
       onCancel={onCancel}
       footer={
         <div className='flex justify-end gap-2'>
@@ -125,7 +146,9 @@ const HeaderProfileEditorModal = ({
               border: '1px solid var(--semi-color-warning)',
             }}
           >
-            <Text>{t('这是从旧请求头覆盖导入的草稿，保存后会写入我的 Profile。')}</Text>
+            <Text>
+              {t('这是从旧请求头覆盖导入的草稿，保存后会写入我的请求头模板。')}
+            </Text>
           </div>
         )}
 
@@ -134,12 +157,13 @@ const HeaderProfileEditorModal = ({
             <Text strong>{t('名称')}</Text>
             <Input
               value={draft.name}
-              onChange={(value) =>
-                setDraft((prev) => ({ ...prev, name: value }))
-              }
-              placeholder={t('请输入 Profile 名称')}
+              onChange={(value) => {
+                setTouched((prev) => ({ ...prev, name: true }));
+                setDraft((prev) => ({ ...prev, name: value }));
+              }}
+              placeholder={t('请输入模板名称')}
             />
-            {validation.errors.name && (
+            {touched.name && validation.errors.name && (
               <Text type='danger' size='small'>
                 {t(validation.errors.name)}
               </Text>
@@ -159,19 +183,20 @@ const HeaderProfileEditorModal = ({
         </div>
 
         <div className='flex flex-col gap-1'>
-          <Text strong>{t('Header JSON')}</Text>
+          <Text strong>{t('请求头 JSON')}</Text>
           <TextArea
             rows={12}
             value={draft.headersText}
-            onChange={(value) =>
+            onChange={(value) => {
+              setTouched((prev) => ({ ...prev, headersText: true }));
               setDraft((prev) => ({
                 ...prev,
                 headersText: value,
-              }))
-            }
-            placeholder={t('请输入合法的 JSON 对象，value 必须都是字符串')}
+              }));
+            }}
+            placeholder={t('请输入合法的 JSON 对象，所有值必须是字符串')}
           />
-          {validation.errors.headersText && (
+          {touched.headersText && validation.errors.headersText && (
             <Text type='danger' size='small'>
               {t(validation.errors.headersText)}
             </Text>

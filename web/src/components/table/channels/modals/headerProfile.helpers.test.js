@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -26,10 +45,7 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
     HEADER_PROFILE_PRESETS['claude-code'].description,
     /请求头透传模板/,
   );
-  assert.equal(
-    HEADER_PROFILE_PRESETS['gemini-cli'].passthroughRequired,
-    false,
-  );
+  assert.equal(HEADER_PROFILE_PRESETS['gemini-cli'].passthroughRequired, false);
 });
 
 test('normalizeHeaderProfileStrategy falls back to fixed', () => {
@@ -71,7 +87,10 @@ test('buildSelectedProfileItems keeps structured headers while main fields stay 
   assert.equal(items[0].name, HEADER_PROFILE_PRESETS['codex-cli'].name);
   assert.equal(items[0].category, HEADER_PROFILE_PRESETS['codex-cli'].group);
   assert.match(items[0].previewText, /OpenAI Codex CLI/i);
-  assert.deepEqual(items[0].headers, HEADER_PROFILE_PRESETS['codex-cli'].headers);
+  assert.deepEqual(
+    items[0].headers,
+    HEADER_PROFILE_PRESETS['codex-cli'].headers,
+  );
   assert.equal(items[0].name, 'Codex CLI');
   assert.equal(items[0].passthroughRequired, true);
   assert.match(items[0].description, /请求头透传模板/);
@@ -235,7 +254,10 @@ test('buildHeaderProfileStrategySettings stores passthrough metadata with api fi
     },
   ]);
   assert.equal(
-    Object.hasOwn(parsed.header_profile_strategy.profiles[0], 'passthroughRequired'),
+    Object.hasOwn(
+      parsed.header_profile_strategy.profiles[0],
+      'passthroughRequired',
+    ),
     false,
   );
 });
@@ -328,7 +350,7 @@ test('validateHeaderProfileDraft rejects empty name, invalid json and empty obje
       errors: {
         headersText: 'Headers JSON 必须是非空对象',
       },
-      parsedHeaders: {},
+      parsedHeaders: null,
     },
   );
 });
@@ -337,18 +359,15 @@ test('validateHeaderProfileDraft rejects non-string header values', () => {
   assert.deepEqual(
     validateHeaderProfileDraft({
       name: 'Invalid Headers',
-      headersText: '{"User-Agent":{"nested":true},"X-Test":["a"],"X-Null":null}',
+      headersText:
+        '{"User-Agent":{"nested":true},"X-Test":["a"],"X-Null":null}',
     }),
     {
       isValid: false,
       errors: {
         headersText: 'Headers JSON 的值必须全部是字符串',
       },
-      parsedHeaders: {
-        'User-Agent': { nested: true },
-        'X-Test': ['a'],
-        'X-Null': null,
-      },
+      parsedHeaders: null,
     },
   );
 });

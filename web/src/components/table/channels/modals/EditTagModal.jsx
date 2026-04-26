@@ -229,7 +229,10 @@ const EditTagModal = (props) => {
   };
 
   const headerOverrideUserAgentPresetMenu =
-    buildHeaderOverrideUserAgentPresetMenu(t, applyHeaderOverrideUserAgentPreset);
+    buildHeaderOverrideUserAgentPresetMenu(
+      t,
+      applyHeaderOverrideUserAgentPreset,
+    );
 
   const clearTagHeaderPolicyDraft = () => {
     handleInputChange('header_override', '');
@@ -285,9 +288,8 @@ const EditTagModal = (props) => {
       !Array.isArray(policy.ua_strategy)
         ? policy.ua_strategy
         : null;
-    const normalizedUserAgentStrategy = normalizeUserAgentStrategy(
-      rawUserAgentStrategy,
-    );
+    const normalizedUserAgentStrategy =
+      normalizeUserAgentStrategy(rawUserAgentStrategy);
     setTagPolicyExists(policy.exists === true);
     setInputs((prev) => ({
       ...prev,
@@ -301,7 +303,9 @@ const EditTagModal = (props) => {
         String(rawUserAgentStrategy?.mode || '').trim() ||
         'round_robin',
       user_agent_strategy_user_agents: normalizeUserAgentValues(
-        rawUserAgentStrategy?.user_agents || rawUserAgentStrategy?.userAgents || [],
+        rawUserAgentStrategy?.user_agents ||
+          rawUserAgentStrategy?.userAgents ||
+          [],
       ),
     }));
   };
@@ -747,10 +751,12 @@ const EditTagModal = (props) => {
                   </Avatar>
                   <div>
                     <Text className='text-lg font-medium'>
-                      {t('标签级请求头策略')}
+                      {t('标签级专家请求头策略')}
                     </Text>
                     <div className='text-xs text-gray-600'>
-                      {t('这里配置的是标签运行时请求头策略，不再是批量写入渠道字段')}
+                      {t(
+                        '标签策略只处理运行时请求头优先级，不会批量改写渠道字段',
+                      )}
                     </div>
                   </div>
                 </div>
@@ -760,7 +766,9 @@ const EditTagModal = (props) => {
                     field='param_override'
                     label={t('参数覆盖')}
                     placeholder={
-                      t('此项可选，用于覆盖请求参数。不支持覆盖 stream 参数') +
+                      t(
+                        '用于修改请求体参数；常规渠道无需配置，不支持覆盖 stream 参数',
+                      ) +
                       '\n' +
                       t('旧格式（直接覆盖）：') +
                       '\n{\n  "temperature": 0,\n  "max_tokens": 1000\n}' +
@@ -831,9 +839,11 @@ const EditTagModal = (props) => {
 
                   <Form.TextArea
                     field='header_override'
-                    label={t('请求头覆盖')}
+                    label={t('旧版 JSON 请求头覆盖')}
                     placeholder={
-                      t('此项可选，用于覆盖请求头参数') +
+                      t(
+                        '此项仅用于兼容旧版 header_override；新配置建议保存为请求头模板',
+                      ) +
                       '\n' +
                       t('格式示例：') +
                       '\n{\n  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0",\n  "Authorization": "Bearer {api_key}"\n}'
@@ -863,7 +873,7 @@ const EditTagModal = (props) => {
                               )
                             }
                           >
-                            {t('填入模板')}
+                            {t('填入旧版模板')}
                           </Text>
                           <Text
                             className='!text-semi-color-primary cursor-pointer'
@@ -885,7 +895,9 @@ const EditTagModal = (props) => {
                           </Dropdown>
                           <Text
                             className='!text-semi-color-primary cursor-pointer'
-                            onClick={() => handleInputChange('header_override', '')}
+                            onClick={() =>
+                              handleInputChange('header_override', '')
+                            }
                           >
                             {t('清空')}
                           </Text>
@@ -912,7 +924,7 @@ const EditTagModal = (props) => {
                   >
                     <div className='flex items-start justify-between gap-3 mb-3'>
                       <div>
-                        <Text strong>{t('User-Agent 策略')}</Text>
+                        <Text strong>{t('UA 池覆盖')}</Text>
                         <div className='mt-1'>
                           <Text type='tertiary' size='small'>
                             {t(
@@ -931,33 +943,43 @@ const EditTagModal = (props) => {
                     <div className='grid gap-3 md:grid-cols-2'>
                       <Form.Switch
                         field='user_agent_strategy_enabled'
-                        label={t('启用 UA 策略')}
+                        label={t('启用 UA 池')}
                         checkedText={t('开')}
                         uncheckedText={t('关')}
                         initValue={false}
                         onChange={(checked) => {
-                          handleInputChange('user_agent_strategy_enabled', checked);
+                          handleInputChange(
+                            'user_agent_strategy_enabled',
+                            checked,
+                          );
                           if (
                             checked ||
-                            (inputs.user_agent_strategy_user_agents || []).length > 0
+                            (inputs.user_agent_strategy_user_agents || [])
+                              .length > 0
                           ) {
-                            handleInputChange('user_agent_strategy_configured', true);
+                            handleInputChange(
+                              'user_agent_strategy_configured',
+                              true,
+                            );
                           }
                         }}
                       />
                       <Form.Switch
                         field='override_header_user_agent'
-                        label={t('覆盖静态 User-Agent')}
+                        label={t('覆盖模板 User-Agent')}
                         checkedText={t('覆盖')}
                         uncheckedText={t('保留静态值')}
                         initValue={false}
                         onChange={(checked) =>
-                          handleInputChange('override_header_user_agent', checked)
+                          handleInputChange(
+                            'override_header_user_agent',
+                            checked,
+                          )
                         }
                       />
                       <Form.Select
                         field='header_policy_mode'
-                        label={t('请求头优先级')}
+                        label={t('标签/渠道优先级')}
                         optionList={HEADER_POLICY_MODE_OPTIONS.map((item) => ({
                           ...item,
                           label: t(item.label),
@@ -970,22 +992,27 @@ const EditTagModal = (props) => {
                       <Form.Select
                         field='user_agent_strategy_mode'
                         label={t('UA 策略模式')}
-                        optionList={USER_AGENT_STRATEGY_MODE_OPTIONS.map((item) => ({
-                          ...item,
-                          label: t(item.label),
-                        }))}
+                        optionList={USER_AGENT_STRATEGY_MODE_OPTIONS.map(
+                          (item) => ({
+                            ...item,
+                            label: t(item.label),
+                          }),
+                        )}
                         initValue='round_robin'
                         disabled={!inputs.user_agent_strategy_enabled}
                         onChange={(value) => {
                           handleInputChange('user_agent_strategy_mode', value);
-                          handleInputChange('user_agent_strategy_configured', true);
+                          handleInputChange(
+                            'user_agent_strategy_configured',
+                            true,
+                          );
                         }}
                       />
                     </div>
                     <div className='mt-3'>
                       <Form.TagInput
                         field='user_agent_strategy_user_agents'
-                        label={t('User-Agent 列表')}
+                        label={t('UA 池列表')}
                         placeholder={t('输入 UA，按回车或逗号可追加多个')}
                         addOnBlur
                         showClear
@@ -1005,7 +1032,9 @@ const EditTagModal = (props) => {
                     t={t}
                     value={inputs.header_override}
                     visible={visible}
-                    onApply={(content) => handleInputChange('header_override', content)}
+                    onApply={(content) =>
+                      handleInputChange('header_override', content)
+                    }
                   />
                 </div>
               </Card>

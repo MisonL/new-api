@@ -40,6 +40,7 @@ import {
   CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
 } from '../../../../constants/channel-affinity-template.constants';
+import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 
 const { Text } = Typography;
 
@@ -161,7 +162,8 @@ const MODE_DESCRIPTIONS = {
   to_upper: '把字符串转成大写',
   return_error: '立即返回自定义错误',
   prune_objects: '按条件清理对象中的子项',
-  pass_headers: '把客户端原始请求里的指定请求头透传到上游；适合 Codex / Claude CLI 等要求真实客户端动态头的渠道',
+  pass_headers:
+    '把客户端原始请求里的指定请求头透传到上游；适合 Codex / Claude CLI 等要求真实客户端动态头的渠道',
   sync_fields: '在一个字段有值、另一个缺失时自动补齐',
   set_header:
     '设置运行期请求头：可直接覆盖整条值，也可对逗号分隔的 token 做删除、替换、追加或白名单保留',
@@ -217,7 +219,8 @@ const getModeToPlaceholder = (mode) => {
 
 const getModeValueLabel = (mode) => {
   if (mode === 'set_header') return '请求头值（支持字符串或 JSON 映射）';
-  if (mode === 'pass_headers') return '透传请求头（来自客户端原始请求，支持逗号分隔或 JSON 数组）';
+  if (mode === 'pass_headers')
+    return '透传请求头（来自客户端原始请求，支持逗号分隔或 JSON 数组）';
   if (
     mode === 'trim_prefix' ||
     mode === 'trim_suffix' ||
@@ -859,12 +862,12 @@ const getOperationSummary = (operation = {}, index = 0) => {
   if (mode === 'sync_fields') {
     const from = String(operation.from || '').trim();
     const to = String(operation.to || '').trim();
-    return `${index + 1}. ${modeLabel} · ${from || to || '-'}`;
+    return `${index + 1}. ${modeLabel} - ${from || to || '-'}`;
   }
   const path = String(operation.path || '').trim();
   const from = String(operation.from || '').trim();
   const to = String(operation.to || '').trim();
-  return `${index + 1}. ${modeLabel} · ${path || from || to || '-'}`;
+  return `${index + 1}. ${modeLabel} - ${path || from || to || '-'}`;
 };
 
 const getOperationModeTagColor = (mode = 'set') => {
@@ -1084,6 +1087,7 @@ const validateOperations = (operations, t) => {
 
 const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
 
   const [editMode, setEditMode] = useState('visual');
   const [visualMode, setVisualMode] = useState('operations');
@@ -1105,6 +1109,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
   const [fieldGuideVisible, setFieldGuideVisible] = useState(false);
   const [fieldGuideTarget, setFieldGuideTarget] = useState('path');
   const [fieldGuideKeyword, setFieldGuideKeyword] = useState('');
+  const [operationEditorActive, setOperationEditorActive] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -1132,6 +1137,10 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     setFieldGuideVisible(false);
     setFieldGuideTarget('path');
     setFieldGuideKeyword('');
+    setOperationEditorActive(
+      nextState.visualMode !== 'operations' ||
+        nextState.operations.some((item) => !isOperationBlank(item)),
+    );
   }, [visible, value]);
 
   useEffect(() => {
@@ -1348,6 +1357,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       setLegacyValue('');
       setJsonError('');
       setEditMode('visual');
+      setOperationEditorActive(false);
       return;
     }
     if (!verifyJSON(trimmed)) {
@@ -1373,6 +1383,9 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       setEditMode('visual');
       setTemplateGroupKey('basic');
       setTemplatePresetKey('operations_default');
+      setOperationEditorActive(
+        nextOperations.some((item) => !isOperationBlank(item)),
+      );
       return;
     }
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -1385,6 +1398,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       setEditMode('visual');
       setTemplateGroupKey('basic');
       setTemplatePresetKey('legacy_default');
+      setOperationEditorActive(true);
       return;
     }
     showError(t('参数覆盖必须是合法的 JSON 对象'));
@@ -1401,6 +1415,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     setJsonText(text);
     setJsonError('');
     setEditMode('visual');
+    setOperationEditorActive(true);
   };
 
   const fillOperationsTemplate = (operationsPayload) => {
@@ -1416,6 +1431,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     );
     setJsonError('');
     setEditMode('visual');
+    setOperationEditorActive(true);
   };
 
   const appendLegacyTemplate = (legacyPayload) => {
@@ -1450,6 +1466,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     setJsonText(text);
     setJsonError('');
     setEditMode('visual');
+    setOperationEditorActive(true);
   };
 
   const appendOperationsTemplate = (operationsPayload) => {
@@ -1467,6 +1484,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     setJsonError('');
     setEditMode('visual');
     setJsonText('');
+    setOperationEditorActive(true);
   };
 
   const clearValue = () => {
@@ -1480,6 +1498,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     setJsonError('');
     setTemplateGroupKey('basic');
     setTemplatePresetKey('operations_default');
+    setOperationEditorActive(false);
   };
 
   const getSelectedTemplatePreset = () =>
@@ -1670,6 +1689,18 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     const created = createDefaultOperation();
     setOperations((prev) => [...prev, created]);
     setSelectedOperationId(created.id);
+    setOperationEditorActive(true);
+  };
+
+  const startOperationEditor = () => {
+    setOperationEditorActive(true);
+    if (operations.length === 0) {
+      const created = createDefaultOperation();
+      setOperations([created]);
+      setSelectedOperationId(created.id);
+      return;
+    }
+    setSelectedOperationId(operations[0].id);
   };
 
   const resetOperationDragState = useCallback(() => {
@@ -1907,6 +1938,11 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       return error?.message || t('参数配置有误');
     }
   }, [buildVisualJson, editMode, t]);
+  const shouldShowOperationEmptyState =
+    editMode === 'visual' &&
+    visualMode === 'operations' &&
+    !operationEditorActive &&
+    operationCount === 0;
 
   const handleSave = () => {
     try {
@@ -1933,46 +1969,96 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
   return (
     <>
       <Modal
-        title={t('参数覆盖')}
+        title={t('高级参数覆盖')}
         visible={visible}
-        width={1120}
-        bodyStyle={{ maxHeight: '76vh', overflowY: 'auto', paddingTop: 10 }}
+        width={
+          isMobile ? 'calc(100vw - 16px)' : 'min(980px, calc(100vw - 24px))'
+        }
+        style={isMobile ? { margin: '8px auto' } : undefined}
+        bodyStyle={{
+          maxHeight: isMobile ? 'calc(100vh - 188px)' : '76vh',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          padding: isMobile ? '10px 12px 12px' : undefined,
+          paddingTop: isMobile ? 10 : 10,
+        }}
         onCancel={onCancel}
         onOk={handleSave}
         okText={t('保存')}
         cancelText={t('取消')}
       >
-        <Space vertical align='start' spacing={14} style={{ width: '100%' }}>
-          <Card
-            className='!rounded-xl !border-0 w-full'
-            bodyStyle={{
-              padding: 12,
+        <div className='flex flex-col gap-3 min-w-0'>
+          <div
+            className='rounded-lg px-3 py-2 min-w-0'
+            style={{
               background: 'var(--semi-color-fill-0)',
+              border: '1px solid var(--semi-color-fill-2)',
             }}
           >
-            <div className='flex items-start justify-between gap-3'>
-              <Space wrap spacing={8}>
-                <Tag color='grey'>{t('编辑方式')}</Tag>
+            <div className='flex items-start justify-between gap-3 flex-wrap'>
+              <div className='min-w-0' style={{ maxWidth: 640 }}>
+                <Text strong size='small'>
+                  {t('仅在特殊场景配置，普通请求头不要写在这里')}
+                </Text>
+                <Text type='tertiary' size='small' className='block mt-1'>
+                  {t(
+                    '这里会影响请求体或运行期请求头。只改 User-Agent、X-Client-Name 等固定请求头时，请返回请求头模板。',
+                  )}
+                </Text>
+              </div>
+              <Space wrap spacing={6}>
+                <Tag color={operationCount > 0 ? 'cyan' : 'grey'}>
+                  {operationCount > 0
+                    ? t('规则 {{count}} 条', { count: operationCount })
+                    : t('未配置')}
+                </Tag>
                 <Button
+                  size='small'
                   type={editMode === 'visual' ? 'primary' : 'tertiary'}
                   onClick={switchToVisualMode}
                 >
                   {t('可视化')}
                 </Button>
                 <Button
+                  size='small'
                   type={editMode === 'json' ? 'primary' : 'tertiary'}
                   onClick={switchToJsonMode}
                 >
                   {t('JSON 文本')}
                 </Button>
-                <Tag color='grey'>{t('模板')}</Tag>
+                <Button size='small' type='tertiary' onClick={resetEditorState}>
+                  {t('重置')}
+                </Button>
+              </Space>
+            </div>
+            <Space wrap spacing={6} className='mt-2'>
+              <Tag size='small'>{t('改写请求体字段')}</Tag>
+              <Tag size='small'>{t('透传 CLI 动态头')}</Tag>
+              <Tag size='small'>{t('兼容上游参数差异')}</Tag>
+            </Space>
+          </div>
+          <Collapse keepDOM defaultActiveKey={[]} style={{ width: '100%' }}>
+            <Collapse.Panel
+              itemKey='templates'
+              header={
+                <Space wrap spacing={8}>
+                  <Text className='font-medium' size='small'>
+                    {t('从模板开始（可选）')}
+                  </Text>
+                  <Tag size='small' color='grey'>
+                    {t('高级入口')}
+                  </Tag>
+                </Space>
+              }
+            >
+              <Space wrap spacing={8} style={{ width: '100%' }}>
                 <Select
                   value={templateGroupKey}
                   optionList={TEMPLATE_GROUP_OPTIONS}
                   onChange={(nextValue) =>
                     setTemplateGroupKey(nextValue || 'basic')
                   }
-                  style={{ width: 120 }}
+                  style={{ width: 130 }}
                 />
                 <Select
                   value={templatePresetKey}
@@ -1980,26 +2066,32 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                   onChange={(nextValue) =>
                     setTemplatePresetKey(nextValue || 'operations_default')
                   }
-                  style={{ width: 260 }}
+                  style={{ minWidth: 220, flex: '1 1 260px' }}
                 />
-                <Button onClick={fillTemplateFromLibrary}>
+                <Button size='small' onClick={fillTemplateFromLibrary}>
                   {t('填充模板')}
                 </Button>
-                <Button type='tertiary' onClick={appendTemplateFromLibrary}>
+                <Button
+                  size='small'
+                  type='tertiary'
+                  onClick={appendTemplateFromLibrary}
+                >
                   {t('追加模板')}
                 </Button>
-                <Button type='tertiary' onClick={resetEditorState}>
-                  {t('重置')}
-                </Button>
               </Space>
-            </div>
-          </Card>
+              <Text type='tertiary' size='small' className='block mt-2'>
+                {t(
+                  '模板会写入参数覆盖规则；保存前仍可继续编辑或切换到 JSON 文本。',
+                )}
+              </Text>
+            </Collapse.Panel>
+          </Collapse>
 
           {editMode === 'visual' ? (
-            <div style={{ width: '100%' }}>
+            <div className='min-w-0' style={{ width: '100%' }}>
               {visualMode === 'legacy' ? (
                 <Card
-                  className='!rounded-2xl !border-0'
+                  className='!rounded-lg !border-0'
                   bodyStyle={{
                     padding: 14,
                     background: 'var(--semi-color-fill-0)',
@@ -2018,34 +2110,89 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                     {t('这里直接编辑 JSON 对象。适合简单覆盖参数的场景。')}
                   </Text>
                 </Card>
+              ) : shouldShowOperationEmptyState ? (
+                <Card
+                  className='!rounded-lg !border-0'
+                  bodyStyle={{
+                    padding: 18,
+                    background: 'var(--semi-color-fill-0)',
+                  }}
+                >
+                  <div className='flex items-start justify-between gap-3 flex-wrap'>
+                    <div className='min-w-0' style={{ maxWidth: 620 }}>
+                      <Text strong>{t('当前未配置高级参数覆盖')}</Text>
+                      <Text type='tertiary' size='small' className='block mt-1'>
+                        {t(
+                          '如果只是给渠道设置请求头或 User-Agent，请返回使用请求头模板；只有需要改写请求体字段或透传客户端动态请求头时再新增规则。',
+                        )}
+                      </Text>
+                    </div>
+                    <Space wrap spacing={8}>
+                      <Button
+                        size='small'
+                        type='primary'
+                        icon={<IconPlus />}
+                        onClick={startOperationEditor}
+                      >
+                        {t('新增规则')}
+                      </Button>
+                      <Button
+                        size='small'
+                        type='tertiary'
+                        onClick={fillTemplateFromLibrary}
+                      >
+                        {t('从模板填充')}
+                      </Button>
+                      <Button
+                        size='small'
+                        type='tertiary'
+                        onClick={switchToJsonMode}
+                      >
+                        {t('粘贴 JSON')}
+                      </Button>
+                    </Space>
+                  </div>
+                </Card>
               ) : (
                 <div>
-                  <div className='flex items-center justify-between mb-3'>
-                    <Space>
-                      <Text>{t('新格式（规则 + 条件）')}</Text>
+                  <div className='flex items-center justify-between gap-2 mb-2 flex-wrap'>
+                    <Space wrap spacing={8}>
+                      <Text strong size='small'>
+                        {t('规则设置')}
+                      </Text>
                       <Tag color='cyan'>{`${t('规则')}: ${operationCount}`}</Tag>
                     </Space>
-                    <Button icon={<IconPlus />} onClick={addOperation}>
+                    <Button
+                      size='small'
+                      icon={<IconPlus />}
+                      onClick={addOperation}
+                    >
                       {t('新增规则')}
                     </Button>
                   </div>
 
                   <Row gutter={12}>
-                    <Col xs={24} md={8}>
+                    <Col xs={24} md={8} style={{ order: isMobile ? 2 : 0 }}>
                       <Card
-                        className='!rounded-2xl !border-0 h-full'
+                        className='!rounded-lg !border-0 h-full'
                         bodyStyle={{
-                          padding: 12,
+                          padding: 10,
                           background: 'var(--semi-color-fill-0)',
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: 10,
-                          minHeight: 520,
+                          gap: 8,
+                          minHeight: isMobile ? 0 : 420,
+                          minWidth: 0,
                         }}
                       >
                         <div className='flex items-center justify-between'>
-                          <Text strong>{t('规则导航')}</Text>
-                          <Tag color='grey'>{`${operationCount}/${operations.length}`}</Tag>
+                          <Text strong size='small'>
+                            {t('规则导航')}
+                          </Text>
+                          <Tag
+                            size='small'
+                            color='grey'
+                          >{`${operationCount}/${operations.length}`}</Tag>
                         </div>
 
                         {topOperationModes.length > 0 ? (
@@ -2056,7 +2203,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                 size='small'
                                 color={getOperationModeTagColor(mode)}
                               >
-                                {`${OPERATION_MODE_LABEL_MAP[mode] || mode} · ${count}`}
+                                {`${OPERATION_MODE_LABEL_MAP[mode] || mode} - ${count}`}
                               </Tag>
                             ))}
                           </Space>
@@ -2076,7 +2223,12 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
 
                         <div
                           className='overflow-auto'
-                          style={{ flex: 1, minHeight: 320, paddingRight: 2 }}
+                          style={{
+                            flex: 1,
+                            minHeight: isMobile ? 0 : 260,
+                            maxHeight: isMobile ? 220 : undefined,
+                            paddingRight: 2,
+                          }}
                         >
                           {filteredOperations.length === 0 ? (
                             <Text type='tertiary' size='small'>
@@ -2137,7 +2289,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                         setSelectedOperationId(operation.id);
                                       }
                                     }}
-                                    className='w-full rounded-xl px-3 py-3 cursor-pointer transition-colors'
+                                    className='w-full rounded-md px-2.5 py-2 cursor-pointer transition-colors'
                                     style={{
                                       background: isActive
                                         ? 'var(--semi-color-primary-light-default)'
@@ -2205,7 +2357,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                         {(operation.conditions || []).length}
                                       </Tag>
                                     </div>
-                                    <Space spacing={6} style={{ marginTop: 8 }}>
+                                    <Space spacing={6} style={{ marginTop: 6 }}>
                                       <Tag
                                         size='small'
                                         color={getOperationModeTagColor(
@@ -2230,7 +2382,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                         </div>
                       </Card>
                     </Col>
-                    <Col xs={24} md={16}>
+                    <Col xs={24} md={16} style={{ order: isMobile ? 1 : 0 }}>
                       {selectedOperation ? (
                         (() => {
                           const mode = selectedOperation.mode || 'set';
@@ -2246,23 +2398,28 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                               : null;
                           return (
                             <Card
-                              className='!rounded-2xl !border-0'
+                              className='!rounded-lg !border-0'
                               bodyStyle={{
                                 padding: 14,
                                 background: 'var(--semi-color-fill-0)',
+                                minWidth: 0,
                               }}
                             >
-                              <div className='flex items-center justify-between mb-3'>
-                                <Space>
+                              <div className='flex items-center justify-between gap-2 mb-3 flex-wrap'>
+                                <Space wrap spacing={8} className='min-w-0'>
                                   <Tag color='blue'>{`#${selectedOperationIndex + 1}`}</Tag>
-                                  <Text strong>
+                                  <Text
+                                    strong
+                                    ellipsis={{ showTooltip: true }}
+                                    style={{ maxWidth: 520 }}
+                                  >
                                     {getOperationSummary(
                                       selectedOperation,
                                       selectedOperationIndex,
                                     )}
                                   </Text>
                                 </Space>
-                                <Space>
+                                <Space spacing={6}>
                                   <Button
                                     size='small'
                                     type='tertiary'
@@ -3186,7 +3343,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                               ) : null}
 
                               <div
-                                className='mt-3 rounded-xl p-3'
+                                className='mt-3 rounded-lg p-3'
                                 style={{
                                   background: 'rgba(127, 127, 127, 0.08)',
                                 }}
@@ -3427,7 +3584,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                         })()
                       ) : (
                         <Card
-                          className='!rounded-2xl !border-0'
+                          className='!rounded-lg !border-0'
                           bodyStyle={{
                             padding: 14,
                             background: 'var(--semi-color-fill-0)',
@@ -3441,7 +3598,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
 
                       {visualValidationError ? (
                         <Card
-                          className='!rounded-2xl !border-0 mt-3'
+                          className='!rounded-lg !border-0 mt-3'
                           bodyStyle={{
                             padding: 12,
                             background: 'var(--semi-color-fill-0)',
@@ -3459,7 +3616,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
               )}
             </div>
           ) : (
-            <div style={{ width: '100%' }}>
+            <div className='min-w-0' style={{ width: '100%' }}>
               <Space style={{ marginBottom: 8 }} wrap>
                 <Button onClick={formatJson}>{t('格式化')}</Button>
                 <Tag color='grey'>{t('高级文本编辑')}</Tag>
@@ -3480,13 +3637,13 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
               ) : null}
             </div>
           )}
-        </Space>
+        </div>
       </Modal>
 
       <Modal
         title={t('anthropic-beta JSON 示例')}
         visible={headerValueExampleVisible}
-        width={760}
+        width='min(760px, calc(100vw - 24px))'
         footer={null}
         onCancel={() => setHeaderValueExampleVisible(false)}
         bodyStyle={{ padding: 16, paddingBottom: 24 }}
@@ -3508,7 +3665,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       <Modal
         title={null}
         visible={fieldGuideVisible}
-        width={860}
+        width='min(860px, calc(100vw - 24px))'
         footer={null}
         onCancel={() => setFieldGuideVisible(false)}
         bodyStyle={{

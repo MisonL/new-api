@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import { HEADER_PROFILE_PRESETS } from './headerProfile.constants.js';
 
 const STRATEGIES = new Set(['fixed', 'round_robin', 'random']);
@@ -199,14 +218,18 @@ export function getHeaderProfileStrategyFromSettings(settingsText) {
       rawStrategy.selected_profile_ids || rawStrategy.selectedProfileIds,
     ),
     profiles: Array.isArray(rawStrategy.profiles)
-      ? rawStrategy.profiles.map(normalizeProfile).filter((profile) => profile.id)
+      ? rawStrategy.profiles
+          .map(normalizeProfile)
+          .filter((profile) => profile.id)
       : [],
   };
 }
 
 export function buildHeaderProfileStrategySettings(settingsText, strategy) {
   const parsedSettings = safeParseJson(settingsText);
-  const nextSettings = isPlainHeaderObject(parsedSettings) ? parsedSettings : {};
+  const nextSettings = isPlainHeaderObject(parsedSettings)
+    ? parsedSettings
+    : {};
 
   if (!strategy || typeof strategy !== 'object') {
     delete nextSettings.header_profile_strategy;
@@ -244,13 +267,18 @@ export function buildHeaderProfileStrategySettings(settingsText, strategy) {
 }
 
 export function createLegacyHeaderProfileDraft(headerOverrideText) {
-  const rawText = typeof headerOverrideText === 'string' ? headerOverrideText.trim() : '';
+  const rawText =
+    typeof headerOverrideText === 'string' ? headerOverrideText.trim() : '';
   if (!rawText || !verifyJsonText(rawText)) {
     return null;
   }
 
   const parsedHeaders = JSON.parse(rawText);
-  if (!parsedHeaders || typeof parsedHeaders !== 'object' || Array.isArray(parsedHeaders)) {
+  if (
+    !parsedHeaders ||
+    typeof parsedHeaders !== 'object' ||
+    Array.isArray(parsedHeaders)
+  ) {
     return null;
   }
 
@@ -268,8 +296,12 @@ export function validateHeaderProfileDraft(draft = {}, options = {}) {
   const name = typeof draft.name === 'string' ? draft.name.trim() : '';
   const headersText =
     typeof draft.headersText === 'string' ? draft.headersText.trim() : '';
-  const currentProfileId = String(options.currentProfileId || draft.id || '').trim();
-  const existingProfiles = Array.isArray(options.profiles) ? options.profiles : [];
+  const currentProfileId = String(
+    options.currentProfileId || draft.id || '',
+  ).trim();
+  const existingProfiles = Array.isArray(options.profiles)
+    ? options.profiles
+    : [];
 
   if (!name) {
     errors.name = '名称不能为空';
@@ -301,7 +333,10 @@ export function validateHeaderProfileDraft(draft = {}, options = {}) {
   }
 
   const parsedHeaders = parseHeadersText(headersText);
-  if (!isPlainHeaderObject(parsedHeaders) || Object.keys(parsedHeaders).length === 0) {
+  if (
+    !isPlainHeaderObject(parsedHeaders) ||
+    Object.keys(parsedHeaders).length === 0
+  ) {
     errors.headersText = 'Headers JSON 必须是非空对象';
   } else if (!hasOnlyStringHeaderValues(parsedHeaders)) {
     errors.headersText = 'Headers JSON 的值必须全部是字符串';
@@ -310,6 +345,6 @@ export function validateHeaderProfileDraft(draft = {}, options = {}) {
   return {
     isValid: Object.keys(errors).length === 0,
     errors,
-    parsedHeaders,
+    parsedHeaders: errors.headersText ? null : parsedHeaders,
   };
 }

@@ -53,7 +53,6 @@ import {
   Tooltip,
   Collapse,
   Dropdown,
-  Switch as SemiSwitch,
 } from '@douyinfe/semi-ui';
 import {
   getChannelModels,
@@ -72,19 +71,10 @@ import HeaderProfileEditorModal from './HeaderProfileEditorModal';
 import JSONEditor from '../../../common/ui/JSONEditor';
 import SecureVerificationModal from '../../../common/modals/SecureVerificationModal';
 import StatusCodeRiskGuardModal from './StatusCodeRiskGuardModal';
-import HeaderOverrideUserAgentPresets from './HeaderOverrideUserAgentPresets';
-import UserHeaderTemplateManager from './UserHeaderTemplateManager';
 import ChannelKeyDisplay from '../../../common/ui/ChannelKeyDisplay';
 import { useSecureVerification } from '../../../../hooks/common/useSecureVerification';
 import { parseChannelConnectionString } from '../../../../helpers/token';
-import {
-  applyUserAgentPresetToHeaderOverride,
-  buildHeaderOverrideUserAgentPresetMenu,
-  buildUserAgentStrategyPayload,
-  normalizeHeaderTemplateContent,
-  normalizeUserAgentStrategy,
-  normalizeUserAgentValues,
-} from '../../../../helpers/headerOverrideUserAgent';
+import { normalizeHeaderTemplateContent } from '../../../../helpers/headerOverrideUserAgent';
 import { createApiCalls } from '../../../../services/secureVerification';
 import {
   collectInvalidStatusCodeEntries,
@@ -135,51 +125,22 @@ const REGION_EXAMPLE = {
 const UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT = 8;
 const ADVANCED_SETTINGS_EXPANDED_KEY = 'channel-advanced-settings-expanded';
 
-const PARAM_OVERRIDE_LEGACY_TEMPLATE = {
-  temperature: 0,
-};
-
-const PARAM_OVERRIDE_OPERATIONS_TEMPLATE = {
-  operations: [
-    {
-      path: 'temperature',
-      mode: 'set',
-      value: 0.7,
-      conditions: [
-        {
-          path: 'model',
-          mode: 'prefix',
-          value: 'openai/',
-        },
-      ],
-      logic: 'AND',
-    },
-  ],
-};
-
-const HEADER_POLICY_MODE_OPTIONS = [
-  { label: '跟随系统默认', value: 'system_default' },
-  { label: '渠道优先', value: 'prefer_channel' },
-  { label: '标签优先', value: 'prefer_tag' },
-  { label: '合并', value: 'merge' },
-];
-
-const USER_AGENT_STRATEGY_MODE_OPTIONS = [
-  { label: '轮询', value: 'round_robin' },
-  { label: '随机', value: 'random' },
-];
-
 const DESKTOP_CHANNEL_SHEET_WIDTH = 720;
 const DESKTOP_ADVANCED_SETTINGS_PANEL_WIDTH = 600;
 const MIN_VIEWPORT_FOR_DETACHED_ADVANCED_PANEL =
-  DESKTOP_CHANNEL_SHEET_WIDTH +
-  DESKTOP_ADVANCED_SETTINGS_PANEL_WIDTH +
-  64;
+  DESKTOP_CHANNEL_SHEET_WIDTH + DESKTOP_ADVANCED_SETTINGS_PANEL_WIDTH + 64;
 
 const SOFT_SECTION_STYLE = {
   backgroundColor: 'var(--semi-color-bg-0)',
   border: '1px solid var(--semi-color-border)',
   boxShadow: 'none',
+};
+
+const normalizeCollapseKeys = (activeKey) => {
+  if (Array.isArray(activeKey)) {
+    return activeKey.filter(Boolean);
+  }
+  return activeKey ? [activeKey] : [];
 };
 
 const supportsResponsesBootstrapRecovery = (channelType) =>
@@ -239,7 +200,7 @@ const EditChannelModal = (props) => {
     param_override: '',
     status_code_mapping: '',
     models: [],
-    auto_ban: 1,
+    auto_ban: true,
     test_model: '',
     groups: ['default'],
     priority: 0,
@@ -254,12 +215,6 @@ const EditChannelModal = (props) => {
     system_prompt: '',
     system_prompt_override: false,
     settings: '',
-    header_policy_mode: 'system_default',
-    override_header_user_agent: false,
-    user_agent_strategy_configured: false,
-    user_agent_strategy_enabled: false,
-    user_agent_strategy_mode: 'round_robin',
-    user_agent_strategy_user_agents: [],
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
     // 仅 AWS: 密钥格式和区域（存入 settings.aws_key_type 和 settings.aws_region）
@@ -378,15 +333,21 @@ const EditChannelModal = (props) => {
         : '';
     if (!raw) {
       return {
-        tagLabel: t('不更改'),
+        isEmpty: true,
+        isValid: true,
+        tagLabel: t('未配置'),
         tagColor: 'grey',
-        preview: t('此项可选，用于覆盖请求参数。不支持覆盖 stream 参数'),
+        summary: t('不会修改请求体参数'),
+        preview: '',
       };
     }
     if (!verifyJSON(raw)) {
       return {
+        isEmpty: false,
+        isValid: false,
         tagLabel: t('JSON格式错误'),
         tagColor: 'red',
+        summary: t('当前参数覆盖不是合法 JSON，需要修正后才能保存'),
         preview: raw,
       };
     }
@@ -400,37 +361,92 @@ const EditChannelModal = (props) => {
         Array.isArray(parsed.operations)
       ) {
         return {
+          isEmpty: false,
+          isValid: true,
           tagLabel: `${t('新格式模板')} (${parsed.operations.length})`,
           tagColor: 'cyan',
+          summary: t('按规则改写请求体或运行期请求头'),
           preview: pretty,
         };
       }
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         return {
+          isEmpty: false,
+          isValid: true,
           tagLabel: `${t('旧格式模板')} (${Object.keys(parsed).length})`,
           tagColor: 'blue',
+          summary: t('按旧格式直接覆盖请求体字段'),
           preview: pretty,
         };
       }
       return {
+        isEmpty: false,
+        isValid: true,
         tagLabel: t('自定义 JSON'),
         tagColor: 'orange',
+        summary: t('使用自定义 JSON 参数覆盖'),
         preview: pretty,
+      };
+    } catch (error) {
+      return {
+        isEmpty: false,
+        isValid: false,
+        tagLabel: t('JSON格式错误'),
+        tagColor: 'red',
+        summary: t('当前参数覆盖不是合法 JSON，需要修正后才能保存'),
+        preview: raw,
+      };
+    }
+  }, [inputs.param_override, t]);
+  const statusCodeMappingMeta = useMemo(() => {
+    const raw =
+      typeof inputs.status_code_mapping === 'string'
+        ? inputs.status_code_mapping.trim()
+        : '';
+    if (!raw) {
+      return {
+        tagLabel: t('未配置'),
+        tagColor: 'grey',
+        summary: t('未配置状态码复写，渠道会按上游原始状态码参与本地判断'),
+      };
+    }
+    if (!verifyJSON(raw)) {
+      return {
+        tagLabel: t('JSON格式错误'),
+        tagColor: 'red',
+        summary: t('当前状态码复写不是合法 JSON，需要修正后才能保存'),
+      };
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      const count =
+        parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? Object.keys(parsed).length
+          : 0;
+      return {
+        tagLabel: t('已配置 {{count}} 项', { count }),
+        tagColor: count > 0 ? 'blue' : 'grey',
+        summary:
+          count > 0
+            ? t('仅影响本地错误判断和重试选择，不修改返回给客户端的状态码')
+            : t('未配置状态码复写，渠道会按上游原始状态码参与本地判断'),
       };
     } catch (error) {
       return {
         tagLabel: t('JSON格式错误'),
         tagColor: 'red',
-        preview: raw,
+        summary: t('当前状态码复写不是合法 JSON，需要修正后才能保存'),
       };
     }
-  }, [inputs.param_override, t]);
+  }, [inputs.status_code_mapping, t]);
   const [isIonetChannel, setIsIonetChannel] = useState(false);
   const [ionetMetadata, setIonetMetadata] = useState(null);
   const [codexOAuthModalVisible, setCodexOAuthModalVisible] = useState(false);
   const [codexCredentialRefreshing, setCodexCredentialRefreshing] =
     useState(false);
   const [paramOverrideEditorVisible, setParamOverrideEditorVisible] =
+    useState(false);
+  const [statusCodeMappingEditorVisible, setStatusCodeMappingEditorVisible] =
     useState(false);
   const [headerProfilesLoading, setHeaderProfilesLoading] = useState(false);
   const [headerProfiles, setHeaderProfiles] = useState([]);
@@ -481,6 +497,27 @@ const EditChannelModal = (props) => {
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   const [requestHeaderAdvancedVisible, setRequestHeaderAdvancedVisible] =
     useState(false);
+  const [requestPolicyModalVisible, setRequestPolicyModalVisible] =
+    useState(false);
+  const [requestPolicyAdvancedKeys, setRequestPolicyAdvancedKeys] = useState(
+    [],
+  );
+  const [requestHeaderAdvancedPanelKeys, setRequestHeaderAdvancedPanelKeys] =
+    useState([]);
+  const openRequestPolicyModal = () => {
+    setRequestPolicyAdvancedKeys(
+      paramOverrideMeta.isValid ? [] : ['param-override-panel'],
+    );
+    setRequestPolicyModalVisible(true);
+  };
+  const openRequestHeaderAdvancedModal = () => {
+    const activeKeys = [];
+    if (hasHeaderOverrideDraft) {
+      activeKeys.push('header-override-panel');
+    }
+    setRequestHeaderAdvancedPanelKeys(activeKeys);
+    setRequestHeaderAdvancedVisible(true);
+  };
   const toggleAdvancedSettings = (open) => {
     setAdvancedSettingsOpen(open);
     localStorage.setItem(ADVANCED_SETTINGS_EXPANDED_KEY, String(open));
@@ -498,6 +535,9 @@ const EditChannelModal = (props) => {
   useEffect(() => {
     if (!props.visible) {
       setRequestHeaderAdvancedVisible(false);
+      setRequestPolicyModalVisible(false);
+      setRequestPolicyAdvancedKeys([]);
+      setRequestHeaderAdvancedPanelKeys([]);
     }
   }, [props.visible]);
   const initialModelsRef = useRef([]);
@@ -529,6 +569,43 @@ const EditChannelModal = (props) => {
       headerProfiles,
     ],
   );
+  const headerProfilePolicyMeta = useMemo(() => {
+    if (!headerProfileStrategy.enabled) {
+      return {
+        tagLabel: t('请求头未启用'),
+        tagColor: 'grey',
+        summary: t('未启用请求头模板'),
+      };
+    }
+    const selectedCount = selectedHeaderProfileItems.length;
+    if (selectedCount === 0) {
+      return {
+        tagLabel: t('请求头待选择'),
+        tagColor: 'orange',
+        summary: t('已启用请求头模板，但还没有选择任何模板'),
+      };
+    }
+    const modeLabel =
+      headerProfileStrategy.mode === 'round_robin'
+        ? t('轮询')
+        : headerProfileStrategy.mode === 'random'
+          ? t('随机')
+          : t('固定');
+    return {
+      tagLabel: t('请求头已配置'),
+      tagColor: 'blue',
+      summary:
+        selectedCount === 1
+          ? t('{{mode}}使用 {{name}}', {
+              mode: modeLabel,
+              name: selectedHeaderProfileItems[0]?.name || t('当前模板'),
+            })
+          : t('{{mode}}使用 {{count}} 个模板', {
+              mode: modeLabel,
+              count: selectedCount,
+            }),
+    };
+  }, [headerProfileStrategy, selectedHeaderProfileItems, t]);
   const hasLegacyHeaderOverride =
     typeof inputs.header_override === 'string' &&
     inputs.header_override.trim() !== '';
@@ -565,7 +642,9 @@ const EditChannelModal = (props) => {
                 ? [rawValue.header]
                 : [];
         values.forEach((header) => {
-          const normalized = String(header || '').trim().toLowerCase();
+          const normalized = String(header || '')
+            .trim()
+            .toLowerCase();
           if (normalized) {
             normalizedHeaders.add(normalized);
           }
@@ -591,14 +670,17 @@ const EditChannelModal = (props) => {
     if (selectedIds.has('codex-cli') && !requestHeaderPassthroughStatus.codex) {
       warnings.push(t('Codex CLI'));
     }
-    if (selectedIds.has('claude-code') && !requestHeaderPassthroughStatus.claude) {
+    if (
+      selectedIds.has('claude-code') &&
+      !requestHeaderPassthroughStatus.claude
+    ) {
       warnings.push(t('Claude Code'));
     }
     if (warnings.length === 0) {
       return '';
     }
     return t(
-      '{{names}} Profile 只会写入固定请求头。若上游要求官方客户端身份，还需要在高级请求头设置中追加对应的 CLI 请求头透传模板，保留真实客户端动态头。',
+      '{{names}} 模板只会写入固定请求头。若上游要求官方客户端身份，还需要在高级参数覆盖中追加对应的 CLI 请求头透传模板，保留真实客户端动态头。',
       { names: warnings.join(' / ') },
     );
   }, [headerProfileStrategy, requestHeaderPassthroughStatus, t]);
@@ -782,12 +864,12 @@ const EditChannelModal = (props) => {
       });
       const { success, data, message } = res.data;
       if (!success) {
-        showError(message || t('加载 Header Profile 失败'));
+        showError(message || t('加载请求头模板失败'));
         return;
       }
       setHeaderProfiles(Array.isArray(data) ? data : []);
     } catch (error) {
-      showError(t('加载 Header Profile 失败'));
+      showError(t('加载请求头模板失败'));
     } finally {
       setHeaderProfilesLoading(false);
     }
@@ -896,12 +978,12 @@ const EditChannelModal = (props) => {
             skipErrorHandler: true,
           })
         : API.post('/api/user/header_profiles', requestBody, {
-          skipErrorHandler: true,
-        });
+            skipErrorHandler: true,
+          });
       const res = await request;
       const { success, message, data } = res.data;
       if (!success) {
-        showError(message || t('保存 Header Profile 失败'));
+        showError(message || t('保存请求头模板失败'));
         return;
       }
       const savedProfileId = String(
@@ -913,18 +995,16 @@ const EditChannelModal = (props) => {
           mode: 'fixed',
           selectedProfileIds: [savedProfileId],
         });
-        showSuccess(t('Header Profile 已导入并应用到当前渠道'));
+        showSuccess(t('请求头模板已导入并应用到当前渠道'));
       } else {
         showSuccess(
-          profileDraft.id
-            ? t('Header Profile 已更新')
-            : t('Header Profile 已创建'),
+          profileDraft.id ? t('请求头模板已更新') : t('请求头模板已创建'),
         );
       }
       closeHeaderProfileEditor();
       await fetchHeaderProfiles();
     } catch (error) {
-      showError(t('保存 Header Profile 失败'));
+      showError(t('保存请求头模板失败'));
     } finally {
       setHeaderProfileEditorSaving(false);
     }
@@ -932,8 +1012,8 @@ const EditChannelModal = (props) => {
 
   const handleDeleteHeaderProfile = (profile) => {
     Modal.confirm({
-      title: t('删除 Header Profile'),
-      content: t('确认删除 Header Profile「{{name}}」吗？', {
+      title: t('删除请求头模板'),
+      content: t('确认删除请求头模板「{{name}}」吗？', {
         name: profile.name,
       }),
       onOk: async () => {
@@ -947,13 +1027,11 @@ const EditChannelModal = (props) => {
           );
           const { success, message } = res.data;
           if (!success) {
-            showError(message || t('删除 Header Profile 失败'));
+            showError(message || t('删除请求头模板失败'));
             return;
           }
-          showSuccess(t('Header Profile 已删除'));
-          if (
-            headerProfileStrategy.selectedProfileIds.includes(profile.id)
-          ) {
+          showSuccess(t('请求头模板已删除'));
+          if (headerProfileStrategy.selectedProfileIds.includes(profile.id)) {
             const nextSelectedProfileIds =
               headerProfileStrategy.selectedProfileIds.filter(
                 (id) => id !== profile.id,
@@ -966,7 +1044,7 @@ const EditChannelModal = (props) => {
           }
           await fetchHeaderProfiles();
         } catch (error) {
-          showError(t('删除 Header Profile 失败'));
+          showError(t('删除请求头模板失败'));
         } finally {
           setHeaderProfileDeletingId('');
         }
@@ -1121,66 +1199,6 @@ const EditChannelModal = (props) => {
     }
   };
 
-  const applyHeaderOverrideUserAgentPreset = (preset) => {
-    const result = applyUserAgentPresetToHeaderOverride(
-      inputs.header_override,
-      preset.ua,
-    );
-
-    if (!result.ok) {
-      showInfo(t(result.message));
-      return;
-    }
-
-    handleInputChange('header_override', result.value);
-  };
-
-  const handleUserAgentStrategyListChange = (value) => {
-    const normalized = normalizeUserAgentValues(value);
-    handleInputChange('user_agent_strategy_user_agents', normalized);
-    if (normalized.length > 0 && !inputs.user_agent_strategy_enabled) {
-      handleInputChange('user_agent_strategy_enabled', true);
-    }
-    if (normalized.length === 0) {
-      handleInputChange('override_header_user_agent', false);
-    }
-    if (normalized.length > 0 || inputs.user_agent_strategy_enabled) {
-      handleInputChange('user_agent_strategy_configured', true);
-    }
-  };
-
-  const appendUserAgentStrategyPreset = (preset) => {
-    const currentValues = normalizeUserAgentValues(
-      inputs.user_agent_strategy_user_agents || [],
-    );
-    const exists = currentValues.includes(preset.ua);
-    const normalized = exists
-      ? currentValues.filter((value) => value !== preset.ua)
-      : normalizeUserAgentValues([...currentValues, preset.ua]);
-    handleInputChange('user_agent_strategy_user_agents', normalized);
-    if (!exists) {
-      handleInputChange('user_agent_strategy_enabled', true);
-    }
-    if (normalized.length === 0) {
-      handleInputChange('override_header_user_agent', false);
-    }
-    handleInputChange(
-      'user_agent_strategy_configured',
-      normalized.length > 0 || inputs.user_agent_strategy_enabled,
-    );
-  };
-
-  const headerOverrideUserAgentPresetMenu =
-    buildHeaderOverrideUserAgentPresetMenu(t, applyHeaderOverrideUserAgentPreset);
-
-  const clearUserAgentStrategyDraft = () => {
-    handleInputChange('user_agent_strategy_configured', false);
-    handleInputChange('user_agent_strategy_enabled', false);
-    handleInputChange('override_header_user_agent', false);
-    handleInputChange('user_agent_strategy_mode', 'round_robin');
-    handleInputChange('user_agent_strategy_user_agents', []);
-  };
-
   const formatUnixTime = (timestamp) => {
     const value = Number(timestamp || 0);
     if (!value) {
@@ -1213,73 +1231,6 @@ const EditChannelModal = (props) => {
       showSuccess(t('参数覆盖 JSON 已复制'));
     } else {
       showError(t('复制失败'));
-    }
-  };
-
-  const parseParamOverrideInput = () => {
-    const raw =
-      typeof inputs.param_override === 'string'
-        ? inputs.param_override.trim()
-        : '';
-    if (!raw) return null;
-    if (!verifyJSON(raw)) {
-      throw new Error(t('当前参数覆盖不是合法的 JSON'));
-    }
-    return JSON.parse(raw);
-  };
-
-  const applyParamOverrideTemplate = (
-    templateType = 'operations',
-    applyMode = 'fill',
-  ) => {
-    try {
-      const parsedCurrent = parseParamOverrideInput();
-      if (templateType === 'legacy') {
-        if (applyMode === 'fill') {
-          handleInputChange(
-            'param_override',
-            JSON.stringify(PARAM_OVERRIDE_LEGACY_TEMPLATE, null, 2),
-          );
-          return;
-        }
-        const currentLegacy =
-          parsedCurrent &&
-          typeof parsedCurrent === 'object' &&
-          !Array.isArray(parsedCurrent) &&
-          !Array.isArray(parsedCurrent.operations)
-            ? parsedCurrent
-            : {};
-        const merged = {
-          ...PARAM_OVERRIDE_LEGACY_TEMPLATE,
-          ...currentLegacy,
-        };
-        handleInputChange('param_override', JSON.stringify(merged, null, 2));
-        return;
-      }
-
-      if (applyMode === 'fill') {
-        handleInputChange(
-          'param_override',
-          JSON.stringify(PARAM_OVERRIDE_OPERATIONS_TEMPLATE, null, 2),
-        );
-        return;
-      }
-      const currentOperations =
-        parsedCurrent &&
-        typeof parsedCurrent === 'object' &&
-        !Array.isArray(parsedCurrent) &&
-        Array.isArray(parsedCurrent.operations)
-          ? parsedCurrent.operations
-          : [];
-      const merged = {
-        operations: [
-          ...currentOperations,
-          ...PARAM_OVERRIDE_OPERATIONS_TEMPLATE.operations,
-        ],
-      };
-      handleInputChange('param_override', JSON.stringify(merged, null, 2));
-    } catch (error) {
-      showError(error.message || t('模板应用失败'));
     }
   };
 
@@ -1359,33 +1310,8 @@ const EditChannelModal = (props) => {
       if (data.settings) {
         try {
           const parsedSettings = JSON.parse(data.settings);
-          const rawUserAgentStrategy =
-            parsedSettings.ua_strategy &&
-            typeof parsedSettings.ua_strategy === 'object' &&
-            !Array.isArray(parsedSettings.ua_strategy)
-              ? parsedSettings.ua_strategy
-              : null;
-          const normalizedUserAgentStrategy = normalizeUserAgentStrategy(
-            rawUserAgentStrategy,
-          );
           data.azure_responses_version =
             parsedSettings.azure_responses_version || '';
-          data.header_policy_mode =
-            parsedSettings.header_policy_mode || 'system_default';
-          data.override_header_user_agent =
-            parsedSettings.override_header_user_agent === true;
-          data.user_agent_strategy_configured = rawUserAgentStrategy !== null;
-          data.user_agent_strategy_enabled =
-            rawUserAgentStrategy?.enabled === true;
-          data.user_agent_strategy_mode =
-            normalizedUserAgentStrategy?.mode ||
-            String(rawUserAgentStrategy?.mode || '').trim() ||
-            'round_robin';
-          data.user_agent_strategy_user_agents = normalizeUserAgentValues(
-            rawUserAgentStrategy?.user_agents ||
-              rawUserAgentStrategy?.userAgents ||
-              [],
-          );
           // 读取 Vertex 密钥格式
           data.vertex_key_type = parsedSettings.vertex_key_type || 'json';
           // 读取 AWS 密钥格式和区域
@@ -1425,12 +1351,6 @@ const EditChannelModal = (props) => {
         } catch (error) {
           console.error('解析其他设置失败:', error);
           data.azure_responses_version = '';
-          data.header_policy_mode = 'system_default';
-          data.override_header_user_agent = false;
-          data.user_agent_strategy_configured = false;
-          data.user_agent_strategy_enabled = false;
-          data.user_agent_strategy_mode = 'round_robin';
-          data.user_agent_strategy_user_agents = [];
           data.region = '';
           data.vertex_key_type = 'json';
           data.aws_key_type = 'ak_sk';
@@ -1451,12 +1371,6 @@ const EditChannelModal = (props) => {
         }
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
-        data.header_policy_mode = 'system_default';
-        data.override_header_user_agent = false;
-        data.user_agent_strategy_configured = false;
-        data.user_agent_strategy_enabled = false;
-        data.user_agent_strategy_mode = 'round_robin';
-        data.user_agent_strategy_user_agents = [];
         data.vertex_key_type = 'json';
         data.aws_key_type = 'ak_sk';
         data.is_enterprise_account = false;
@@ -1483,16 +1397,15 @@ const EditChannelModal = (props) => {
         data.base_url = 'https://ark.cn-beijing.volces.com';
       }
 
+      const autoBanEnabled = data.auto_ban !== 0;
+      data.auto_ban = autoBanEnabled;
+
       initialBaseUrlRef.current = data.base_url || '';
       setInputs(data);
       if (formApiRef.current) {
         formApiRef.current.setValues(data);
       }
-      if (data.auto_ban === 0) {
-        setAutoBan(false);
-      } else {
-        setAutoBan(true);
-      }
+      setAutoBan(autoBanEnabled);
       // 同步企业账户状态
       setIsEnterpriseAccount(data.is_enterprise_account || false);
       setBasicModels(getChannelModels(data.type));
@@ -2270,7 +2183,7 @@ const EditChannelModal = (props) => {
         currentHeaderProfileStrategy.mode === 'fixed' &&
         currentHeaderProfileStrategy.selectedProfileIds.length !== 1
       ) {
-        showError(t('固定模式必须且只能选择 1 个 Header Profile'));
+        showError(t('固定模式必须且只能选择 1 个请求头模板'));
         return;
       }
       if (
@@ -2278,7 +2191,7 @@ const EditChannelModal = (props) => {
           currentHeaderProfileStrategy.mode === 'random') &&
         currentHeaderProfileStrategy.selectedProfileIds.length < 1
       ) {
-        showError(t('已启用 Header Profile，但还没有选择任何 Profile'));
+        showError(t('已启用请求头模板，但还没有选择任何模板'));
         return;
       }
     }
@@ -2289,7 +2202,7 @@ const EditChannelModal = (props) => {
         localInputs.base_url.length - 1,
       );
     }
-  const normalizedHeaderOverride = normalizeHeaderTemplateContent(
+    const normalizedHeaderOverride = normalizeHeaderTemplateContent(
       localInputs.header_override,
       {
         allowEmpty: true,
@@ -2301,16 +2214,6 @@ const EditChannelModal = (props) => {
     }
     localInputs.header_override = normalizedHeaderOverride.value;
 
-    const userAgentStrategyPayload = buildUserAgentStrategyPayload({
-      configured: localInputs.user_agent_strategy_configured,
-      enabled: localInputs.user_agent_strategy_enabled,
-      mode: localInputs.user_agent_strategy_mode,
-      userAgents: localInputs.user_agent_strategy_user_agents,
-    });
-    if (!userAgentStrategyPayload.ok) {
-      showInfo(t(userAgentStrategyPayload.message));
-      return;
-    }
     if (localInputs.type === 18 && localInputs.other === '') {
       localInputs.other = 'v2.1';
     }
@@ -2400,16 +2303,6 @@ const EditChannelModal = (props) => {
     if (typeof settings.upstream_model_update_last_check_time !== 'number') {
       settings.upstream_model_update_last_check_time = 0;
     }
-    settings.header_policy_mode =
-      localInputs.header_policy_mode || 'system_default';
-    settings.override_header_user_agent =
-      localInputs.override_header_user_agent === true;
-    if (userAgentStrategyPayload.value) {
-      settings.ua_strategy = userAgentStrategyPayload.value;
-    } else if ('ua_strategy' in settings) {
-      delete settings.ua_strategy;
-    }
-
     localInputs.settings = JSON.stringify(settings);
 
     // 清理不需要发送到后端的字段
@@ -2432,12 +2325,6 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_inference_geo;
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
-    delete localInputs.header_policy_mode;
-    delete localInputs.override_header_user_agent;
-    delete localInputs.user_agent_strategy_configured;
-    delete localInputs.user_agent_strategy_enabled;
-    delete localInputs.user_agent_strategy_mode;
-    delete localInputs.user_agent_strategy_user_agents;
     delete localInputs.responses_stream_bootstrap_recovery_enabled;
     delete localInputs.upstream_model_update_check_enabled;
     delete localInputs.upstream_model_update_auto_sync_enabled;
@@ -2483,42 +2370,15 @@ const EditChannelModal = (props) => {
     }
   };
 
-  const selectedUserAgentCount = (inputs.user_agent_strategy_user_agents || [])
-    .length;
   const hasHeaderOverrideDraft =
     typeof inputs.header_override === 'string' &&
     inputs.header_override.trim().length > 0;
-  const hasUserAgentStrategyDraft =
-    inputs.user_agent_strategy_configured ||
-    inputs.user_agent_strategy_enabled ||
-    inputs.override_header_user_agent ||
-    inputs.header_policy_mode !== 'system_default' ||
-    selectedUserAgentCount > 0;
-  const requestHeaderAdvancedCount =
-    (hasHeaderOverrideDraft ? 1 : 0) + (hasUserAgentStrategyDraft ? 1 : 0);
+  const requestHeaderAdvancedCount = hasHeaderOverrideDraft ? 1 : 0;
   const requestHeaderAdvancedSummary =
-    requestHeaderAdvancedCount === 0
-      ? t('未配置')
-      : requestHeaderAdvancedCount === 1
-        ? hasHeaderOverrideDraft
-          ? t('仅请求头覆盖')
-          : t('仅 UA 池策略')
-        : t('已配置 2 项');
+    requestHeaderAdvancedCount === 0 ? t('未配置') : t('旧版覆盖待处理');
   const requestHeaderAdvancedTags = [
     hasHeaderOverrideDraft ? t('请求头覆盖') : null,
-    hasUserAgentStrategyDraft ? t('UA 池策略') : null,
   ].filter(Boolean);
-  const userAgentStrategyHint = inputs.user_agent_strategy_enabled
-    ? selectedUserAgentCount > 0
-      ? t('已选 {{count}} 个 UA，将按当前策略参与请求转发', {
-          count: selectedUserAgentCount,
-        })
-      : t('策略已启用，但还需要至少选择 1 个 UA 才会生效')
-    : selectedUserAgentCount > 0
-      ? t('当前未启用，已保留 {{count}} 个 UA；重新开启后立即生效', {
-          count: selectedUserAgentCount,
-        })
-      : t('当前未启用；手动输入或点击预置后会自动启用策略');
 
   // 密钥去重函数
   const deduplicateKeys = () => {
@@ -2959,140 +2819,419 @@ const EditChannelModal = (props) => {
                     {t('请求配置')}
                   </Text>
 
-                  <div className='mb-4'>
-                    <div className='flex items-center justify-between gap-2 mb-1'>
-                      <Text className='text-sm font-medium'>
-                        {t('参数覆盖')}
-                      </Text>
-                      <Space>
-                        <Button
-                          size='small'
-                          type='primary'
-                          icon={<IconCode size={14} />}
-                          onClick={() => setParamOverrideEditorVisible(true)}
-                        >
-                          {t('可视化编辑')}
-                        </Button>
-                        <Dropdown
-                          trigger='click'
-                          position='bottomRight'
-                          menu={[
-                            {
-                              node: 'item',
-                              name: t('填充新模板'),
-                              onClick: () =>
-                                applyParamOverrideTemplate(
-                                  'operations',
-                                  'fill',
-                                ),
-                            },
-                            {
-                              node: 'item',
-                              name: t('填充旧模板'),
-                              onClick: () =>
-                                applyParamOverrideTemplate('legacy', 'fill'),
-                            },
-                            {
-                              node: 'item',
-                              name: t('清空'),
-                              onClick: clearParamOverride,
-                            },
-                          ]}
-                        >
-                          <Button size='small' type='tertiary'>
-                            {t('更多')} <IconChevronDown size={12} />
-                          </Button>
-                        </Dropdown>
-                      </Space>
-                    </div>
-                    <Text type='tertiary' size='small'>
-                      {t('此项可选，用于覆盖请求参数。不支持覆盖 stream 参数')}
-                    </Text>
                   <div
-                    className='mt-2 rounded-lg p-3.5'
-                    style={SOFT_SECTION_STYLE}
+                    className='rounded-lg px-3 py-2'
+                    style={{
+                      backgroundColor: 'var(--semi-color-bg-0)',
+                      border: '1px solid var(--semi-color-border)',
+                    }}
                   >
-                      <div className='flex items-center justify-between mb-2'>
-                        <Tag color={paramOverrideMeta.tagColor}>
-                          {paramOverrideMeta.tagLabel}
-                        </Tag>
-                        <Button
-                          size='small'
-                          icon={<IconCopy />}
-                          type='tertiary'
-                          onClick={copyParamOverrideJson}
-                        >
-                          {t('复制')}
-                        </Button>
-                      </div>
-                      <pre className='mb-0 text-xs leading-5 whitespace-pre-wrap break-all max-h-56 overflow-auto'>
-                        {paramOverrideMeta.preview}
-                      </pre>
-                    </div>
-                  </div>
-                  <HeaderProfileStrategySection
-                    loading={headerProfilesLoading}
-                    strategy={headerProfileStrategy}
-                    selectedItems={selectedHeaderProfileItems}
-                    profiles={allHeaderProfiles}
-                    deletingProfileId={headerProfileDeletingId}
-                    showLegacyBanner={shouldShowHeaderProfileLegacyBanner}
-                    passthroughWarning={headerProfilePassthroughWarning}
-                    onEnabledChange={handleHeaderProfileEnabledChange}
-                    onModeChange={handleHeaderProfileModeChange}
-                    onToggleSelect={handleToggleHeaderProfile}
-                    onRemoveSelected={handleRemoveSelectedHeaderProfile}
-                    onReorderSelected={handleReorderSelectedHeaderProfiles}
-                    onCreateProfile={() => openHeaderProfileEditor(null)}
-                    onEditProfile={openHeaderProfileEditor}
-                    onDeleteProfile={handleDeleteHeaderProfile}
-                    onImportLegacy={handleImportLegacyHeaderOverride}
-                  />
-                  <div className='rounded-lg p-3' style={SOFT_SECTION_STYLE}>
                     <div className='flex items-start justify-between gap-3 flex-wrap'>
                       <div className='min-w-0 flex-1'>
                         <div className='flex items-center gap-2 flex-wrap'>
-                          <IconSetting size={15} />
+                          <IconGlobe size={15} />
                           <Text strong size='small'>
-                            {t('高级请求头设置')}
+                            {t('上游请求策略')}
                           </Text>
-                          <Tag size='small' color='grey'>
-                            {requestHeaderAdvancedSummary}
+                          <Tag
+                            size='small'
+                            color={headerProfilePolicyMeta.tagColor}
+                          >
+                            {headerProfilePolicyMeta.tagLabel}
                           </Tag>
-                          {requestHeaderAdvancedTags.map((label) => (
-                            <Tag key={label} size='small' color='blue'>
-                              {label}
+                          {!paramOverrideMeta.isEmpty ? (
+                            <Tag
+                              size='small'
+                              color={paramOverrideMeta.tagColor}
+                            >
+                              {paramOverrideMeta.tagLabel}
                             </Tag>
-                          ))}
+                          ) : null}
+                          {requestHeaderAdvancedCount > 0 ? (
+                            <Tag size='small' color='blue'>
+                              {requestHeaderAdvancedSummary}
+                            </Tag>
+                          ) : null}
                         </div>
                         <div className='mt-1'>
                           <Text type='tertiary' size='small'>
-                            {t('旧 header_override、UA 池策略和个人模板已收进二级窗口，避免主表单一次展开过多字段')}
+                            {headerProfilePolicyMeta.summary}
                           </Text>
                         </div>
                       </div>
                       <Button
                         size='small'
                         type='tertiary'
-                        onClick={() => setRequestHeaderAdvancedVisible(true)}
+                        theme='light'
+                        onClick={openRequestPolicyModal}
                       >
-                        {requestHeaderAdvancedCount === 0
-                          ? t('配置')
-                          : t('查看与编辑')}
+                        {t('配置策略')}
                       </Button>
                     </div>
                   </div>
                   <Modal
-                    title={t('高级请求头设置')}
-                    visible={requestHeaderAdvancedVisible}
-                    width={860}
-                    onCancel={() => setRequestHeaderAdvancedVisible(false)}
+                    title={t('上游请求策略')}
+                    visible={requestPolicyModalVisible}
+                    width={
+                      isMobile
+                        ? 'calc(100vw - 16px)'
+                        : 'min(960px, calc(100vw - 24px))'
+                    }
+                    style={isMobile ? { margin: '8px auto' } : undefined}
+                    onCancel={() => setRequestPolicyModalVisible(false)}
                     bodyStyle={{
-                      maxHeight: '72vh',
+                      maxHeight: isMobile ? 'calc(100vh - 152px)' : '72vh',
                       overflowY: 'auto',
+                      overflowX: 'hidden',
+                      padding: isMobile ? '8px 0 4px' : undefined,
+                      paddingTop: isMobile ? 8 : 12,
                     }}
                     footer={
-                      <Button onClick={() => setRequestHeaderAdvancedVisible(false)}>
+                      <Button
+                        onClick={() => setRequestPolicyModalVisible(false)}
+                      >
+                        {t('完成')}
+                      </Button>
+                    }
+                  >
+                    <div className='flex flex-col gap-3 min-w-0'>
+                      <div className='min-w-0'>
+                        <Text strong size='small'>
+                          {t('按使用场景选择配置，不需要全部填写')}
+                        </Text>
+                        <Text
+                          type='tertiary'
+                          size='small'
+                          className='block mt-1'
+                        >
+                          {hasHeaderOverrideDraft
+                            ? t(
+                                '普通渠道只配置请求头模板；只有需要改写请求体或透传真实客户端动态头时，才进入高级参数覆盖；旧版兼容仅用于迁移历史 header_override。',
+                              )
+                            : t(
+                                '普通渠道只配置请求头模板；只有需要改写请求体或透传真实客户端动态头时，才进入高级参数覆盖。',
+                              )}
+                        </Text>
+                      </div>
+                      <div
+                        className='rounded-lg p-3 min-w-0'
+                        style={{
+                          backgroundColor: 'var(--semi-color-fill-0)',
+                          border: '1px solid var(--semi-color-fill-2)',
+                        }}
+                      >
+                        <div
+                          className={
+                            hasHeaderOverrideDraft
+                              ? 'grid grid-cols-1 md:grid-cols-3 gap-2'
+                              : 'grid grid-cols-1 md:grid-cols-2 gap-2'
+                          }
+                        >
+                          <div
+                            className='rounded-md px-2.5 py-2'
+                            style={{
+                              backgroundColor: 'var(--semi-color-bg-0)',
+                            }}
+                          >
+                            <div className='flex items-center gap-2 flex-wrap'>
+                              <Tag size='small' color='blue'>
+                                {t('推荐')}
+                              </Tag>
+                              <Text strong size='small'>
+                                {t('请求头模板')}
+                              </Text>
+                            </div>
+                            <Text
+                              type='tertiary'
+                              size='small'
+                              className='block mt-1'
+                            >
+                              {t('设置 User-Agent、客户端名称等固定请求头。')}
+                            </Text>
+                          </div>
+                          <div
+                            className='rounded-md px-2.5 py-2'
+                            style={{
+                              backgroundColor: 'var(--semi-color-bg-0)',
+                            }}
+                          >
+                            <div className='flex items-center gap-2 flex-wrap'>
+                              <Tag size='small' color='cyan'>
+                                {t('特殊场景')}
+                              </Tag>
+                              <Text strong size='small'>
+                                {t('高级参数覆盖')}
+                              </Text>
+                            </div>
+                            <Text
+                              type='tertiary'
+                              size='small'
+                              className='block mt-1'
+                            >
+                              {t(
+                                '改写请求体，或为 Codex / Claude 透传真实动态头。',
+                              )}
+                            </Text>
+                          </div>
+                          {hasHeaderOverrideDraft ? (
+                            <div
+                              className='rounded-md px-2.5 py-2'
+                              style={{
+                                backgroundColor: 'var(--semi-color-bg-0)',
+                              }}
+                            >
+                              <div className='flex items-center gap-2 flex-wrap'>
+                                <Tag size='small' color='grey'>
+                                  {t('兼容')}
+                                </Tag>
+                                <Text strong size='small'>
+                                  {t('旧版请求头覆盖')}
+                                </Text>
+                              </div>
+                              <Text
+                                type='tertiary'
+                                size='small'
+                                className='block mt-1'
+                              >
+                                {t('只用于查看、清空或导入历史 JSON 配置。')}
+                              </Text>
+                            </div>
+                          ) : null}
+                        </div>
+                        <Space wrap spacing={6} className='mt-2'>
+                          <Tag size='small'>
+                            {t('浏览器/API SDK：只选请求头模板')}
+                          </Tag>
+                          <Tag size='small'>
+                            {t('Codex/Claude：模板 + CLI 透传')}
+                          </Tag>
+                          <Tag size='small'>
+                            {t('参数不兼容：再加高级规则')}
+                          </Tag>
+                          {hasHeaderOverrideDraft ? (
+                            <Tag size='small'>
+                              {t('历史 header_override：导入为模板')}
+                            </Tag>
+                          ) : null}
+                        </Space>
+                      </div>
+                      <div
+                        className='rounded-lg p-3 w-full min-w-0'
+                        style={SOFT_SECTION_STYLE}
+                      >
+                        <HeaderProfileStrategySection
+                          loading={headerProfilesLoading}
+                          strategy={headerProfileStrategy}
+                          selectedItems={selectedHeaderProfileItems}
+                          profiles={allHeaderProfiles}
+                          deletingProfileId={headerProfileDeletingId}
+                          showLegacyBanner={shouldShowHeaderProfileLegacyBanner}
+                          passthroughWarning={headerProfilePassthroughWarning}
+                          onEnabledChange={handleHeaderProfileEnabledChange}
+                          onModeChange={handleHeaderProfileModeChange}
+                          onToggleSelect={handleToggleHeaderProfile}
+                          onRemoveSelected={handleRemoveSelectedHeaderProfile}
+                          onReorderSelected={
+                            handleReorderSelectedHeaderProfiles
+                          }
+                          onCreateProfile={() => openHeaderProfileEditor(null)}
+                          onEditProfile={openHeaderProfileEditor}
+                          onDeleteProfile={handleDeleteHeaderProfile}
+                          onImportLegacy={handleImportLegacyHeaderOverride}
+                        />
+                      </div>
+
+                      <Collapse
+                        keepDOM
+                        activeKey={requestPolicyAdvancedKeys}
+                        onChange={(activeKey) =>
+                          setRequestPolicyAdvancedKeys(
+                            normalizeCollapseKeys(activeKey),
+                          )
+                        }
+                        style={{ width: '100%' }}
+                      >
+                        <Collapse.Panel
+                          itemKey='param-override-panel'
+                          header={
+                            <div className='flex items-center justify-between gap-2 flex-wrap w-full min-w-0'>
+                              <div className='flex items-center gap-2 min-w-0'>
+                                <IconCode size={15} />
+                                <Text strong size='small'>
+                                  {t('高级参数覆盖（特殊场景）')}
+                                </Text>
+                              </div>
+                              <Tag
+                                size='small'
+                                color={paramOverrideMeta.tagColor}
+                              >
+                                {paramOverrideMeta.tagLabel}
+                              </Tag>
+                            </div>
+                          }
+                        >
+                          <div className='px-1 py-1 min-w-0'>
+                            <div
+                              className={
+                                isMobile
+                                  ? 'flex flex-col gap-2 min-w-0'
+                                  : 'flex items-start justify-between gap-3 flex-wrap'
+                              }
+                            >
+                              <div className='min-w-0 flex-1'>
+                                <Text type='tertiary' size='small'>
+                                  {paramOverrideMeta.summary}
+                                </Text>
+                                <Text
+                                  type='tertiary'
+                                  size='small'
+                                  className='block mt-1'
+                                >
+                                  {t(
+                                    '常规渠道无需配置；仅在需要改写请求体或透传 CLI 动态请求头时使用。',
+                                  )}
+                                </Text>
+                              </div>
+                              <Space
+                                wrap
+                                spacing={6}
+                                style={
+                                  isMobile
+                                    ? {
+                                        width: '100%',
+                                        justifyContent: 'flex-start',
+                                      }
+                                    : undefined
+                                }
+                              >
+                                {!paramOverrideMeta.isEmpty ? (
+                                  <Tooltip
+                                    position='topRight'
+                                    content={
+                                      <pre className='m-0 max-w-[520px] max-h-[260px] overflow-auto whitespace-pre-wrap break-all text-xs leading-5'>
+                                        {paramOverrideMeta.preview}
+                                      </pre>
+                                    }
+                                  >
+                                    <Button size='small' type='tertiary'>
+                                      {t('预览')}
+                                    </Button>
+                                  </Tooltip>
+                                ) : null}
+                                {!paramOverrideMeta.isEmpty ? (
+                                  <Button
+                                    size='small'
+                                    type='tertiary'
+                                    icon={<IconCopy />}
+                                    onClick={copyParamOverrideJson}
+                                  >
+                                    {t('复制')}
+                                  </Button>
+                                ) : null}
+                                <Button
+                                  size='small'
+                                  type='tertiary'
+                                  icon={<IconCode size={14} />}
+                                  onClick={() =>
+                                    setParamOverrideEditorVisible(true)
+                                  }
+                                >
+                                  {paramOverrideMeta.isEmpty
+                                    ? t('配置')
+                                    : t('编辑')}
+                                </Button>
+                                {!paramOverrideMeta.isEmpty ? (
+                                  <Button
+                                    size='small'
+                                    type='tertiary'
+                                    onClick={clearParamOverride}
+                                  >
+                                    {t('清空')}
+                                  </Button>
+                                ) : null}
+                              </Space>
+                            </div>
+                          </div>
+                        </Collapse.Panel>
+
+                        {hasHeaderOverrideDraft ? (
+                          <Collapse.Panel
+                            itemKey='expert-header-panel'
+                            header={
+                              <div className='flex items-center justify-between gap-2 flex-wrap w-full min-w-0'>
+                                <div className='flex items-center gap-2 min-w-0'>
+                                  <IconSetting size={15} />
+                                  <Text strong size='small'>
+                                    {t('旧版兼容请求头')}
+                                  </Text>
+                                </div>
+                                <div className='flex items-center gap-1.5 flex-wrap'>
+                                  <Tag size='small' color='grey'>
+                                    {requestHeaderAdvancedSummary}
+                                  </Tag>
+                                  {requestHeaderAdvancedTags.map((label) => (
+                                    <Tag key={label} size='small' color='blue'>
+                                      {label}
+                                    </Tag>
+                                  ))}
+                                </div>
+                              </div>
+                            }
+                          >
+                            <div className='px-1 py-1 min-w-0'>
+                              <div
+                                className={
+                                  isMobile
+                                    ? 'flex flex-col gap-2 min-w-0'
+                                    : 'flex items-start justify-between gap-3 flex-wrap'
+                                }
+                              >
+                                <div className='min-w-0 flex-1'>
+                                  <Text type='tertiary' size='small'>
+                                    {t(
+                                      '仅在需要查看、清空或导入旧版 header_override 时配置',
+                                    )}
+                                  </Text>
+                                </div>
+                                <Button
+                                  size='small'
+                                  type='tertiary'
+                                  style={
+                                    isMobile
+                                      ? { width: 'fit-content' }
+                                      : undefined
+                                  }
+                                  onClick={openRequestHeaderAdvancedModal}
+                                >
+                                  {t('查看与编辑')}
+                                </Button>
+                              </div>
+                            </div>
+                          </Collapse.Panel>
+                        ) : null}
+                      </Collapse>
+                    </div>
+                  </Modal>
+                  <Modal
+                    title={t('专家请求头策略')}
+                    visible={requestHeaderAdvancedVisible}
+                    width={
+                      isMobile
+                        ? 'calc(100vw - 16px)'
+                        : 'min(860px, calc(100vw - 24px))'
+                    }
+                    style={isMobile ? { margin: '8px auto' } : undefined}
+                    onCancel={() => setRequestHeaderAdvancedVisible(false)}
+                    bodyStyle={{
+                      maxHeight: isMobile ? 'calc(100vh - 152px)' : '72vh',
+                      overflowY: 'auto',
+                      overflowX: 'hidden',
+                      padding: isMobile ? '8px 0 4px' : undefined,
+                    }}
+                    footer={
+                      <Button
+                        onClick={() => setRequestHeaderAdvancedVisible(false)}
+                      >
                         {t('完成')}
                       </Button>
                     }
@@ -3100,14 +3239,17 @@ const EditChannelModal = (props) => {
                     <div className='flex flex-col gap-4'>
                       <div>
                         <Text type='tertiary' size='small'>
-                          {t('这里只有兼容旧覆盖、按策略轮换 User-Agent 和复用个人模板三类高级能力；常规渠道优先使用上面的 Header Profile')}
+                          {t(
+                            '常规渠道优先使用上方请求头模板；以下仅用于旧版 header_override 的兼容查看、清空和显式导入',
+                          )}
                         </Text>
                       </div>
                       <Collapse
-                        defaultActiveKey={
-                          requestHeaderAdvancedCount > 0
-                            ? ['header-override-panel', 'user-agent-panel']
-                            : ['header-override-panel']
+                        activeKey={requestHeaderAdvancedPanelKeys}
+                        onChange={(activeKey) =>
+                          setRequestHeaderAdvancedPanelKeys(
+                            normalizeCollapseKeys(activeKey),
+                          )
                         }
                       >
                         <Collapse.Panel
@@ -3115,10 +3257,17 @@ const EditChannelModal = (props) => {
                           header={
                             <div className='flex items-center gap-2 flex-wrap'>
                               <Text className='font-medium' size='small'>
-                                {t('请求头覆盖')}
+                                {t('旧版 JSON 请求头覆盖')}
                               </Text>
-                              <Tag size='small' color={hasHeaderOverrideDraft ? 'blue' : 'grey'}>
-                                {hasHeaderOverrideDraft ? t('已配置') : t('未配置')}
+                              <Tag
+                                size='small'
+                                color={
+                                  hasHeaderOverrideDraft ? 'orange' : 'grey'
+                                }
+                              >
+                                {hasHeaderOverrideDraft
+                                  ? t('建议迁移')
+                                  : t('未配置')}
                               </Tag>
                             </div>
                           }
@@ -3127,7 +3276,9 @@ const EditChannelModal = (props) => {
                             field='header_override'
                             label=' '
                             placeholder={
-                              t('此项可选，用于覆盖请求头参数') +
+                              t(
+                                '此项仅用于兼容旧版 header_override；新配置建议保存为请求头模板',
+                              ) +
                               '\n' +
                               t('格式示例：') +
                               '\n{\n  "User-Agent": "Mozilla/5.0 ...",\n  "Authorization": "Bearer {api_key}"\n}'
@@ -3161,7 +3312,7 @@ const EditChannelModal = (props) => {
                                       )
                                     }
                                   >
-                                    {t('填入模板')}
+                                    {t('填入旧版模板')}
                                   </Button>
                                   <Button
                                     type='tertiary'
@@ -3174,31 +3325,18 @@ const EditChannelModal = (props) => {
                                       )
                                     }
                                   >
-                                    {t('填入透传模版')}
+                                    {t('填入全量透传模板')}
                                   </Button>
                                   <Button
                                     type='tertiary'
                                     theme='light'
                                     size='small'
-                                    onClick={() => formatJsonField('header_override')}
+                                    onClick={() =>
+                                      formatJsonField('header_override')
+                                    }
                                   >
                                     {t('格式化')}
                                   </Button>
-                                  <Dropdown
-                                    trigger='click'
-                                    position='bottomLeft'
-                                    menu={headerOverrideUserAgentPresetMenu}
-                                  >
-                                    <Button
-                                      type='tertiary'
-                                      theme='light'
-                                      size='small'
-                                      icon={<IconChevronDown size={12} />}
-                                      iconPosition='right'
-                                    >
-                                      <span>{t('UA 预置模板')}</span>
-                                    </Button>
-                                  </Dropdown>
                                   <Button
                                     type='tertiary'
                                     theme='light'
@@ -3209,324 +3347,119 @@ const EditChannelModal = (props) => {
                                   >
                                     {t('清空')}
                                   </Button>
+                                  {hasHeaderOverrideDraft && (
+                                    <Button
+                                      type='warning'
+                                      theme='light'
+                                      size='small'
+                                      onClick={handleImportLegacyHeaderOverride}
+                                    >
+                                      {t('导入为请求头模板')}
+                                    </Button>
+                                  )}
                                 </div>
                                 <Text type='tertiary' size='small'>
-                                  {t('支持变量：渠道密钥 {{value}}', {
-                                    value: '{api_key}',
-                                  })}
+                                  {t(
+                                    '支持变量：渠道密钥 {{value}}；建议保存为请求头模板后在主区域选择',
+                                    {
+                                      value: '{api_key}',
+                                    },
+                                  )}
                                 </Text>
                               </div>
                             }
                             showClear
                           />
                         </Collapse.Panel>
-                        <Collapse.Panel
-                          itemKey='user-agent-panel'
-                          header={
-                            <div className='flex items-center gap-2 flex-wrap'>
-                              <Text className='font-medium' size='small'>
-                                {t('UA 池策略')}
-                              </Text>
-                              <Tag
-                                size='small'
-                                color={
-                                  hasUserAgentStrategyDraft ? 'blue' : 'grey'
-                                }
-                              >
-                                {hasUserAgentStrategyDraft ? t('已配置') : t('未配置')}
-                              </Tag>
-                              {selectedUserAgentCount > 0 && (
-                                <Tag size='small'>
-                                  {t('{{count}} 个 UA', {
-                                    count: selectedUserAgentCount,
-                                  })}
-                                </Tag>
-                              )}
-                            </div>
-                          }
-                        >
-                          <div className='rounded-lg p-3' style={SOFT_SECTION_STYLE}>
-                            <div className='flex flex-wrap items-start justify-between gap-2 mb-3'>
-                              <Text type='tertiary' size='small'>
-                                {t(
-                                  '仅在需要让多个 User-Agent 按轮询或随机方式参与真实请求转发时使用',
-                                )}
-                              </Text>
-                              <Button
-                                type='tertiary'
-                                theme='borderless'
-                                size='small'
-                                className='!px-0 shrink-0'
-                                onClick={clearUserAgentStrategyDraft}
-                              >
-                                {t('清空 UA 策略')}
-                              </Button>
-                            </div>
-                            <div className='mb-3 flex flex-wrap items-center gap-2 transition-colors duration-200'>
-                              <Tag
-                                size='small'
-                                color={
-                                  inputs.user_agent_strategy_enabled
-                                    ? 'blue'
-                                    : 'grey'
-                                }
-                              >
-                                {inputs.user_agent_strategy_enabled
-                                  ? t('开')
-                                  : t('关')}
-                              </Tag>
-                              <Text
-                                size='small'
-                                type={
-                                  inputs.user_agent_strategy_enabled
-                                    ? 'secondary'
-                                    : 'tertiary'
-                                }
-                              >
-                                {userAgentStrategyHint}
-                              </Text>
-                            </div>
-                            <div className='grid gap-3'>
-                              <div
-                                className='rounded-lg px-3 py-2 transition-colors duration-200'
-                                style={{
-                                  border: '1px solid var(--semi-color-border)',
-                                  backgroundColor: 'var(--semi-color-bg-0)',
-                                }}
-                              >
-                                <div className='flex items-start justify-between gap-3'>
-                                  <div className='min-w-0 max-w-[420px] pr-2'>
-                                    <Text strong size='small'>
-                                      {t('启用 UA 策略')}
-                                    </Text>
-                                    <div className='mt-1'>
-                                      <Text type='tertiary' size='small'>
-                                        {t(
-                                          '启用后，从 UA 池按轮询或随机策略选出最终 User-Agent',
-                                        )}
-                                      </Text>
-                                    </div>
-                                  </div>
-                                  <div className='shrink-0 flex items-center gap-2 pt-0.5'>
-                                    <Text type='tertiary' size='small'>
-                                      {inputs.user_agent_strategy_enabled
-                                        ? t('开')
-                                        : t('关')}
-                                    </Text>
-                                    <SemiSwitch
-                                      checked={inputs.user_agent_strategy_enabled}
-                                      onChange={(checked) => {
-                                        handleInputChange(
-                                          'user_agent_strategy_enabled',
-                                          checked,
-                                        );
-                                        if (!checked) {
-                                          handleInputChange(
-                                            'override_header_user_agent',
-                                            false,
-                                          );
-                                        }
-                                        if (
-                                          checked ||
-                                          (
-                                            inputs.user_agent_strategy_user_agents ||
-                                            []
-                                          ).length > 0
-                                        ) {
-                                          handleInputChange(
-                                            'user_agent_strategy_configured',
-                                            true,
-                                          );
-                                        }
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                              <div
-                                className='rounded-lg px-3 py-2 transition-colors duration-200'
-                                style={{
-                                  border: '1px solid var(--semi-color-border)',
-                                  backgroundColor: 'var(--semi-color-bg-0)',
-                                  opacity:
-                                    inputs.user_agent_strategy_enabled &&
-                                    selectedUserAgentCount > 0
-                                      ? 1
-                                      : 0.72,
-                                }}
-                              >
-                                <div className='flex items-start justify-between gap-3'>
-                                  <div className='min-w-0 max-w-[420px] pr-2'>
-                                    <Text strong size='small'>
-                                      {t('覆盖静态 User-Agent')}
-                                    </Text>
-                                    <div className='mt-1'>
-                                      <Text type='tertiary' size='small'>
-                                        {t(
-                                          '启用后，用 UA 池结果覆盖静态请求头里的 User-Agent',
-                                        )}
-                                      </Text>
-                                    </div>
-                                  </div>
-                                  <div className='shrink-0 flex items-center gap-2 pt-0.5'>
-                                    <Text type='tertiary' size='small'>
-                                      {inputs.override_header_user_agent
-                                        ? t('开')
-                                        : t('关')}
-                                    </Text>
-                                    <SemiSwitch
-                                      checked={inputs.override_header_user_agent}
-                                      disabled={
-                                        !inputs.user_agent_strategy_enabled ||
-                                        selectedUserAgentCount === 0
-                                      }
-                                      onChange={(checked) =>
-                                        handleInputChange(
-                                          'override_header_user_agent',
-                                          checked,
-                                        )
-                                      }
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                              <div
-                                className='grid gap-3'
-                                style={{
-                                  gridTemplateColumns:
-                                    'repeat(auto-fit, minmax(220px, 1fr))',
-                                }}
-                              >
-                                <Form.Select
-                                  field='header_policy_mode'
-                                  label={t('请求头优先级')}
-                                  optionList={HEADER_POLICY_MODE_OPTIONS.map((item) => ({
-                                    ...item,
-                                    label: t(item.label),
-                                  }))}
-                                  initValue='system_default'
-                                  onChange={(value) =>
-                                    handleInputChange('header_policy_mode', value)
-                                  }
-                                />
-                                <Form.Select
-                                  field='user_agent_strategy_mode'
-                                  label={t('UA 策略模式')}
-                                  optionList={USER_AGENT_STRATEGY_MODE_OPTIONS.map((item) => ({
-                                    ...item,
-                                    label: t(item.label),
-                                  }))}
-                                  initValue='round_robin'
-                                  disabled={!inputs.user_agent_strategy_enabled}
-                                  onChange={(value) => {
-                                    handleInputChange(
-                                      'user_agent_strategy_mode',
-                                      value,
-                                    );
-                                    handleInputChange(
-                                      'user_agent_strategy_configured',
-                                      true,
-                                    );
-                                  }}
-                                />
-                              </div>
-                            </div>
-                            <div
-                              className='mt-3 transition-opacity duration-200'
-                              style={{
-                                opacity:
-                                  inputs.user_agent_strategy_enabled ||
-                                  selectedUserAgentCount > 0
-                                    ? 1
-                                    : 0.84,
-                              }}
-                            >
-                              <Form.TagInput
-                                field='user_agent_strategy_user_agents'
-                                label={t('User-Agent 列表')}
-                                placeholder={t('输入 UA，按回车或逗号可追加多个')}
-                                addOnBlur
-                                showClear
-                                onChange={handleUserAgentStrategyListChange}
-                                style={{ width: '100%' }}
-                              />
-                            </div>
-                            <div
-                              className='mt-3 transition-opacity duration-200'
-                              style={{
-                                opacity:
-                                  inputs.user_agent_strategy_enabled ||
-                                  selectedUserAgentCount > 0
-                                    ? 1
-                                    : 0.82,
-                              }}
-                            >
-                              <div className='mb-2'>
-                                <Text type='tertiary' size='small'>
-                                  {t('常用 UA 预置')}
-                                </Text>
-                              </div>
-                              <HeaderOverrideUserAgentPresets
-                                t={t}
-                                onSelect={appendUserAgentStrategyPreset}
-                                showTitle={false}
-                                compact
-                                showGroupHint={false}
-                                activeValues={
-                                  inputs.user_agent_strategy_user_agents || []
-                                }
-                              />
-                            </div>
-                          </div>
-                        </Collapse.Panel>
-                        <Collapse.Panel
-                          itemKey='template-panel'
-                          header={
-                            <div className='flex items-center gap-2 flex-wrap'>
-                              <Text className='font-medium' size='small'>
-                                {t('个人模板')}
-                              </Text>
-                              <Tag size='small' color='grey'>
-                                {t('复用')}
-                              </Tag>
-                            </div>
-                          }
-                        >
-                          <UserHeaderTemplateManager
-                            t={t}
-                            value={inputs.header_override}
-                            visible={requestHeaderAdvancedVisible}
-                            onApply={(content) =>
-                              handleInputChange('header_override', content)
-                            }
-                          />
-                        </Collapse.Panel>
                       </Collapse>
                     </div>
                   </Modal>
-                  <JSONEditor
-                    key={`status_code_mapping-${isEdit ? channelId : 'new'}`}
-                    field='status_code_mapping'
-                    label={t('状态码复写')}
-                    placeholder={
-                      t(
-                        '此项可选，用于复写返回的状态码，仅影响本地判断，不修改返回到上游的状态码，比如将claude渠道的400错误复写为500（用于重试），请勿滥用该功能，例如：',
-                      ) +
-                      '\n' +
-                      JSON.stringify(STATUS_CODE_MAPPING_EXAMPLE, null, 2)
+                </div>
+
+                {/* Error Handling Section */}
+                <div className='py-3 border-b border-gray-100'>
+                  <Text className='text-sm font-medium text-gray-500 mb-3 block'>
+                    {t('错误处理')}
+                  </Text>
+
+                  <div
+                    className='rounded-lg px-3 py-2'
+                    style={{
+                      backgroundColor: 'var(--semi-color-bg-0)',
+                      border: '1px solid var(--semi-color-border)',
+                    }}
+                  >
+                    <div className='flex items-start justify-between gap-3 flex-wrap'>
+                      <div className='min-w-0 flex-1'>
+                        <div className='flex items-center gap-2 flex-wrap'>
+                          <IconSetting size={15} />
+                          <Text strong size='small'>
+                            {t('错误处理策略')}
+                          </Text>
+                          <Tag
+                            size='small'
+                            color={statusCodeMappingMeta.tagColor}
+                          >
+                            {statusCodeMappingMeta.tagLabel}
+                          </Tag>
+                        </div>
+                        <div className='mt-1'>
+                          <Text type='tertiary' size='small'>
+                            {statusCodeMappingMeta.summary}
+                          </Text>
+                        </div>
+                      </div>
+                      <Button
+                        size='small'
+                        type='tertiary'
+                        theme='light'
+                        onClick={() => setStatusCodeMappingEditorVisible(true)}
+                      >
+                        {t('配置')}
+                      </Button>
+                    </div>
+                  </div>
+                  <Modal
+                    title={t('错误处理策略')}
+                    visible={statusCodeMappingEditorVisible}
+                    width='min(760px, calc(100vw - 24px))'
+                    onCancel={() => setStatusCodeMappingEditorVisible(false)}
+                    bodyStyle={{
+                      maxHeight: '72vh',
+                      overflowY: 'auto',
+                    }}
+                    footer={
+                      <Button
+                        onClick={() => setStatusCodeMappingEditorVisible(false)}
+                      >
+                        {t('完成')}
+                      </Button>
                     }
-                    value={inputs.status_code_mapping || ''}
-                    onChange={(value) =>
-                      handleInputChange('status_code_mapping', value)
-                    }
-                    template={STATUS_CODE_MAPPING_EXAMPLE}
-                    templateLabel={t('填入模板')}
-                    editorType='keyValue'
-                    formApi={formApiRef.current}
-                    extraText={t(
-                      '键为原状态码，值为要复写的状态码，仅影响本地判断',
-                    )}
-                  />
+                  >
+                    <JSONEditor
+                      key={`status_code_mapping-${isEdit ? channelId : 'new'}`}
+                      field='status_code_mapping'
+                      label={t('状态码复写')}
+                      placeholder={
+                        t(
+                          '此项可选，用于复写返回的状态码，仅影响本地判断，不修改返回到上游的状态码，比如将claude渠道的400错误复写为500（用于重试），请勿滥用该功能，例如：',
+                        ) +
+                        '\n' +
+                        JSON.stringify(STATUS_CODE_MAPPING_EXAMPLE, null, 2)
+                      }
+                      value={inputs.status_code_mapping || ''}
+                      onChange={(value) =>
+                        handleInputChange('status_code_mapping', value)
+                      }
+                      template={STATUS_CODE_MAPPING_EXAMPLE}
+                      templateLabel={t('填入模板')}
+                      editorType='keyValue'
+                      formApi={formApiRef.current}
+                      extraText={t(
+                        '键为原状态码，值为要复写的状态码，仅影响本地判断',
+                      )}
+                    />
+                  </Modal>
                 </div>
 
                 {/* Channel Behavior Section */}
@@ -5161,8 +5094,7 @@ const EditChannelModal = (props) => {
                     className='fixed top-0 h-full overflow-y-auto z-[999] semi-sidesheet-inner'
                     style={{
                       width: DESKTOP_ADVANCED_SETTINGS_PANEL_WIDTH,
-                      [isEdit ? 'right' : 'left']:
-                        DESKTOP_CHANNEL_SHEET_WIDTH,
+                      [isEdit ? 'right' : 'left']: DESKTOP_CHANNEL_SHEET_WIDTH,
                       backgroundColor: 'var(--semi-color-bg-0)',
                       borderLeft: isEdit
                         ? 'none'
@@ -5198,22 +5130,22 @@ const EditChannelModal = (props) => {
                         <Card className='!rounded-2xl shadow-sm border-0'>
                           <div className='mb-4 rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] px-4 py-3'>
                             <div className='flex items-center'>
-                            <Avatar
-                              size='small'
-                              color='orange'
-                              className='mr-2 shadow-md'
-                            >
-                              <IconSetting size={16} />
-                            </Avatar>
-                            <div>
-                              <Text className='text-lg font-medium'>
-                                {t('高级设置')}
-                              </Text>
-                              <div className='text-xs text-gray-600'>
-                                {t('渠道的高级配置选项')}
+                              <Avatar
+                                size='small'
+                                color='orange'
+                                className='mr-2 shadow-md'
+                              >
+                                <IconSetting size={16} />
+                              </Avatar>
+                              <div>
+                                <Text className='text-lg font-medium'>
+                                  {t('高级设置')}
+                                </Text>
+                                <div className='text-xs text-gray-600'>
+                                  {t('渠道的高级配置选项')}
+                                </div>
                               </div>
                             </div>
-                          </div>
                           </div>
                           {advancedSettingsContent}
                         </Card>

@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 export const HEADER_PROFILE_GROUPS = [
   {
     key: 'browser',
@@ -61,7 +80,7 @@ const aiCodingCliProfiles = {
     'Codex CLI',
     'OpenAI Codex CLI/0.1',
     'codex-cli',
-    '固定请求头只用于普通渠道标识；Codex 官方客户端限制场景还必须在高级请求头设置中启用 Codex CLI 请求头透传模板。',
+    '固定请求头只用于普通渠道标识；Codex 官方客户端限制场景还必须在高级参数覆盖中启用 Codex CLI 请求头透传模板。',
     true,
   ),
   'claude-code': buildAiCodingCliProfile(
@@ -69,7 +88,7 @@ const aiCodingCliProfiles = {
     'Claude Code',
     'Claude-Code/1.0',
     'claude-code',
-    '固定请求头只用于普通渠道标识；Claude 官方客户端链路如需保留会话与 SDK 元数据，还必须启用 Claude CLI 请求头透传模板。',
+    '固定请求头只用于普通渠道标识；Claude 官方客户端链路如需保留会话与 SDK 元数据，还必须在高级参数覆盖中启用 Claude CLI 请求头透传模板。',
     true,
   ),
   'gemini-cli': buildAiCodingCliProfile(
@@ -77,7 +96,7 @@ const aiCodingCliProfiles = {
     'Gemini CLI',
     'GeminiCLI/1.0',
     'gemini-cli',
-    '固定请求头用于普通渠道标识；若上游要求真实客户端会话头，应在高级请求头设置中额外配置 pass_headers。',
+    '固定请求头用于普通渠道标识；若上游要求真实客户端会话头，应在高级参数覆盖中额外配置 pass_headers。',
   ),
   'qwen-code': buildAiCodingCliProfile(
     'qwen-code',

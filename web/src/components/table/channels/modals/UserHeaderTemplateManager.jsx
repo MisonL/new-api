@@ -18,12 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  API,
-  showError,
-  showInfo,
-  showSuccess,
-} from '../../../../helpers';
+import { API, showError, showInfo, showSuccess } from '../../../../helpers';
 import {
   Banner,
   Button,
@@ -101,7 +96,8 @@ export default function UserHeaderTemplateManager({
   const sortedTemplates = useMemo(
     () =>
       [...templates].sort(
-        (left, right) => Number(right.updated_at || 0) - Number(left.updated_at || 0),
+        (left, right) =>
+          Number(right.updated_at || 0) - Number(left.updated_at || 0),
       ),
     [templates],
   );
@@ -166,7 +162,10 @@ export default function UserHeaderTemplateManager({
         return;
       }
       setTemplateName('');
-      setTemplates((prev) => [record, ...prev.filter((item) => item.id !== record.id)]);
+      setTemplates((prev) => [
+        record,
+        ...prev.filter((item) => item.id !== record.id),
+      ]);
       showSuccess(t('模板保存成功'));
     } catch (error) {
       showError(error.message || t('模板保存失败'));
@@ -217,17 +216,14 @@ export default function UserHeaderTemplateManager({
   };
 
   return (
-    <div
-      className='mt-3 rounded-lg p-3'
-      style={SECTION_SURFACE_STYLE}
-    >
+    <div className='mt-3 rounded-lg p-3' style={SECTION_SURFACE_STYLE}>
       <div className='flex items-center justify-between gap-3 mb-3'>
         <div className='min-w-0 flex flex-col'>
           <Text strong size='small'>
-            {t('请求头模板')}
+            {t('旧版请求头模板')}
           </Text>
           <Text type='tertiary' size='small'>
-            {t('仅保存当前用户自己的合法 JSON 请求头模板')}
+            {t('用于复用旧版 header_override JSON；新配置建议保存为请求头模板')}
           </Text>
         </div>
         <Button
@@ -259,7 +255,7 @@ export default function UserHeaderTemplateManager({
           loading={saving}
           disabled={!canSaveTemplate}
         >
-          {t('保存为模板')}
+          {t('保存为旧版模板')}
         </Button>
       </div>
       {showTemplateValidation && (
@@ -279,7 +275,7 @@ export default function UserHeaderTemplateManager({
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           title={t('暂无模板')}
-          description={t('保存一次当前请求头后，这里会显示可复用模板')}
+          description={t('保存一次旧版 JSON 覆盖后，这里会显示可复用模板')}
         />
       ) : (
         <div className='flex flex-col gap-2'>

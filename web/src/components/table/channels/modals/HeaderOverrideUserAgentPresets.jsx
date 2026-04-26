@@ -65,13 +65,7 @@ export default function HeaderOverrideUserAgentPresets({
           <Space
             wrap
             spacing={compact ? 4 : 6}
-            className={
-              compact
-                ? showGroupHint
-                  ? 'mt-1.5'
-                  : 'mt-1'
-                : 'mt-2'
-            }
+            className={compact ? (showGroupHint ? 'mt-1.5' : 'mt-1') : 'mt-2'}
           >
             {group.items.map((item) => (
               <Tooltip key={item.id} content={item.ua} position='top'>

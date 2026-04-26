@@ -266,7 +266,7 @@
   },
   {
     "file": "src/components/common/ui/CardTable.jsx",
-    "line": 246,
+    "line": 245,
     "text": "No Data"
   },
   {
@@ -326,7 +326,7 @@
   },
   {
     "file": "src/components/layout/Footer.jsx",
-    "line": 244,
+    "line": 251,
     "text": "New API"
   },
   {
@@ -716,48 +716,58 @@
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 427,
+    "line": 689,
     "text": "Doubao Coding Plan"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 2150,
+    "line": 2634,
     "text": "M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 2853,
+    "line": 3827,
     "text": "type-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 3103,
+    "line": 4077,
     "text": "tight"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 3479,
+    "line": 4453,
     "text": "Account ID"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 3554,
+    "line": 4528,
     "text": "AZURE_OPENAI_ENDPOINT"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 3752,
+    "line": 4726,
     "text": "models-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 3954,
+    "line": 4928,
     "text": "groups-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4230,
+    "line": 5198,
     "text": "M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+  },
+  {
+    "file": "src/components/table/channels/modals/EditTagModal.jsx",
+    "line": 72,
+    "text": "system_default"
+  },
+  {
+    "file": "src/components/table/channels/modals/EditTagModal.jsx",
+    "line": 79,
+    "text": "round_robin"
   },
   {
     "file": "src/components/table/channels/modals/MultiKeyManageModal.jsx",
@@ -796,47 +806,47 @@
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 2473,
+    "line": 2630,
     "text": "forced_bad_request"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 2489,
+    "line": 2646,
     "text": "invalid_request_error"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 2649,
+    "line": 2806,
     "text": "redacted_thinking"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 2816,
+    "line": 2973,
     "text": "type"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 2860,
+    "line": 3017,
     "text": "redacted_thinking"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 3040,
+    "line": 3208,
     "text": "session_id"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 3080,
+    "line": 3248,
     "text": "prompt_cache_key"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 3302,
+    "line": 3470,
     "text": "model"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 3344,
+    "line": 3512,
     "text": "gpt"
   },
   {
@@ -1211,7 +1221,7 @@
   },
   {
     "file": "src/pages/Home/index.jsx",
-    "line": 481,
+    "line": 476,
     "text": "30+"
   },
   {
