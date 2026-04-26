@@ -160,7 +160,7 @@ func repairRow(row logRow) (repairedRow, bool, error) {
 
 	cacheRatio, hasCacheRatio := ratio_setting.GetCacheRatio(row.ModelName)
 	if !hasCacheRatio {
-		cacheRatio = 0
+		cacheRatio = 1
 	}
 
 	newQuota := pricingrepair.CalculateQuota(pricingrepair.LogSnapshot{

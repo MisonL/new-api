@@ -32,7 +32,7 @@ func TestCalculateQuotaSupportsCacheTokens(t *testing.T) {
 		CacheRatio:      0.5,
 	})
 
-	require.Equal(t, int64(504), quota)
+	require.Equal(t, int64(370), quota)
 }
 
 func TestCalculateQuotaForZeroUsageReturnsZero(t *testing.T) {

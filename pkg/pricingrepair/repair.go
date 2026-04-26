@@ -21,7 +21,10 @@ func CalculateQuota(snapshot LogSnapshot, pricing ModelPricing) int64 {
 	}
 
 	baseUsage := float64(snapshot.PromptTokens)
-	baseUsage += float64(snapshot.CacheTokens) * pricing.CacheRatio
+	if snapshot.CacheTokens > 0 {
+		baseUsage -= float64(snapshot.CacheTokens)
+		baseUsage += float64(snapshot.CacheTokens) * pricing.CacheRatio
+	}
 	baseUsage += float64(snapshot.CompletionTokens) * pricing.CompletionRatio
 	if baseUsage <= 0 {
 		return 0
