@@ -585,7 +585,11 @@ body.sidebar-resizing * {
 .usage-log-delete-button {
   border-radius: 10px;
   border: 1px solid
-    color-mix(in srgb, var(--semi-color-danger-light-default) 42%, var(--semi-color-danger));
+    color-mix(
+      in srgb,
+      var(--semi-color-danger-light-default) 42%,
+      var(--semi-color-danger)
+    );
   background: color-mix(
     in srgb,
     var(--semi-color-danger-light-default) 76%,

@@ -216,7 +216,14 @@ const FooterBar = () => {
         </div>
       </footer>
     ),
-    [logo, systemName, t, currentYear, isDemoSiteMode, customFooterPaddingClass],
+    [
+      logo,
+      systemName,
+      t,
+      currentYear,
+      isDemoSiteMode,
+      customFooterPaddingClass,
+    ],
   );
 
   useEffect(() => {

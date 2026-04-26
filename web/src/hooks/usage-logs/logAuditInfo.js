@@ -102,5 +102,7 @@ export function shouldShowLogIp({ isAdminUser, recordType, ip }) {
   if (!ip) {
     return false;
   }
-  return recordType === 2 || recordType === 5 || (isAdminUser && recordType === 1);
+  return (
+    recordType === 2 || recordType === 5 || (isAdminUser && recordType === 1)
+  );
 }

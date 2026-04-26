@@ -19,7 +19,7 @@
 - `OpenAI Chat` 与 `OpenAI Responses` 协议转换策略可视化配置
 - 阶梯计费表达式与工具定价能力
 - 请求/响应内容日志：用户授权开启、弹窗查看、JSON 导出、单条删除、批量删除
-- 渠道/标签级请求头策略：多选 `User-Agent`、`轮询/随机` 策略、优先级合成、用户私有请求头模板
+- 渠道请求头模板策略：完整 `Header Profile`、轮询/随机选择、AI CLI 动态请求头透传提示；标签级请求头策略保留历史兼容能力
 - `Responses` 流式首包前恢复等待与相关稳定性增强
 - 用户绑定信息管理面板与用户属性入口增强
 - Dashboard 增强：时间范围切换、通道趋势排行
@@ -258,15 +258,7 @@ cd web && bun run build
      - key 支持标准请求头名，以及透传规则 `*`、`re:<pattern>`、`regex:<pattern>`。
      - 非法 JSON、非法 key、非法正则会在保存阶段直接拒绝。
 
-2. UA 运行时策略
-   - 渠道 `settings` 中支持：
-     - `header_policy_mode`：`system_default` / `prefer_channel` / `prefer_tag` / `merge`
-     - `override_header_user_agent`
-     - `ua_strategy`
-   - `ua_strategy` 支持多选 UA 池，以及 `round_robin` / `random` 两种运行时选择模式。
-   - 真实转发链路当前实际生效的 UA 选择逻辑，仍以 `header_override`、标签级请求头策略、`header_policy_mode` 和 `ua_strategy` 为准。
-
-3. Header Profile 资源库
+2. Header Profile 资源库
    - 用户设置中保存 `header_profiles` 资产，渠道 `settings.header_profile_strategy` 保存所选 Profile 引用。
    - 预置浏览器、AI Coding CLI、API SDK / Debug Profile 为只读资产，用户可新增、编辑、删除自己的 Profile。
    - 渠道侧支持 `fixed` / `round_robin` / `random` 三种 Profile 选择模式，保存时会做服务端校验。
@@ -274,13 +266,18 @@ cd web && bun run build
    - 真实转发链路会在旧 `header_override` 之前应用所选 Profile；如两者设置同名请求头，旧 `header_override` 仍作为显式覆盖值优先生效。
    - AI Coding CLI 预置 Profile 只代表固定请求头快照；如果上游要求官方客户端身份或会话连续性，还必须在参数覆盖里启用对应的 `pass_headers` 透传模板，让真实客户端动态请求头进入上游。
 
+3. 历史 UA 运行时策略
+   - 后端仍兼容渠道 `settings.header_policy_mode`、`settings.override_header_user_agent` 和 `settings.ua_strategy`。
+   - 新渠道 UI 不再提供独立 UA 池入口；如需多组 User-Agent 轮询或随机，使用多个完整 Header Profile。
+   - 保存阶段仍会校验历史字段，避免非法历史配置延迟到运行期失败。
+
 补充说明：
 
-- 请求头模板是“当前用户私有”的合法 JSON 模板，只服务于静态 `header_override` 编辑区，可保存、应用、覆盖、删除。
+- 旧版 `header_override` 只用于兼容查看、清空和显式导入，不再作为新配置的主路径。
 - `Header Profile` 与“请求头模板”不是同一回事：
-  - 模板：面向当前编辑器的 JSON 复用。
+  - 旧版模板：面向 `header_override` 编辑区的 JSON 兼容入口。
   - Profile：面向用户级完整请求头资产管理与渠道选择。
-- `Codex CLI`、`Claude Code` 等 Profile 不能伪造官方客户端动态头；遇到 `only allows official clients`、会话追踪或 SDK 元数据校验类错误时，应同时配置高级请求头设置中的 CLI 真实请求头透传模板。
+- `Codex CLI`、`Claude Code` 等 Profile 不能伪造官方客户端动态头；遇到 `only allows official clients`、会话追踪或 SDK 元数据校验类错误时，应同时配置高级参数覆盖中的 CLI 真实请求头透传模板。
 
 ## CI/CD
 

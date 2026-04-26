@@ -53,8 +53,12 @@ const PageLayout = () => {
   const [, statusDispatch] = useContext(StatusContext);
   const isMobile = useIsMobile();
   const [collapsed, , setCollapsed] = useSidebarCollapsed();
-  const [sidebarWidth, setSidebarWidth, resetSidebarWidth, defaultSidebarWidth] =
-    useSidebarWidth();
+  const [
+    sidebarWidth,
+    setSidebarWidth,
+    resetSidebarWidth,
+    defaultSidebarWidth,
+  ] = useSidebarWidth();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { i18n } = useTranslation();
   const location = useLocation();
@@ -98,7 +102,9 @@ const PageLayout = () => {
     const savedLang = localStorage.getItem('i18nextLng');
     return normalizeLanguage(savedLang);
   }, [userState?.user?.setting]);
-  const currentLanguage = normalizeLanguage(i18n.resolvedLanguage || i18n.language);
+  const currentLanguage = normalizeLanguage(
+    i18n.resolvedLanguage || i18n.language,
+  );
   const shouldDelayConsoleRender =
     isConsoleRoute &&
     Boolean(preferredLang) &&
@@ -189,7 +195,11 @@ const PageLayout = () => {
       </Header>
       <Layout
         style={{
-          overflow: useHomeViewportLock ? 'hidden' : isMobile ? 'visible' : 'auto',
+          overflow: useHomeViewportLock
+            ? 'hidden'
+            : isMobile
+              ? 'visible'
+              : 'auto',
           display: 'flex',
           flexDirection: 'column',
           minHeight: isMobile ? 'auto' : '100vh',

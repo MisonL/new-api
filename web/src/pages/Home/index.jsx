@@ -18,11 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useContext, useEffect, useState } from 'react';
-import {
-  Button,
-  Typography,
-  Input,
-} from '@douyinfe/semi-ui';
+import { Button, Typography, Input } from '@douyinfe/semi-ui';
 import {
   API,
   showError,
@@ -311,9 +307,7 @@ const Home = () => {
             {/* 背景模糊晕染球 */}
             <div className='blur-ball blur-ball-indigo' />
             <div className='blur-ball blur-ball-teal' />
-            <div
-              className={`flex h-full px-4 ${heroPaddingClass}`}
-            >
+            <div className={`flex h-full px-4 ${heroPaddingClass}`}>
               {/* 居中内容区 */}
               <div className='flex flex-col items-center h-full w-full text-center max-w-4xl mx-auto'>
                 <div
@@ -361,27 +355,26 @@ const Home = () => {
                                   : 'none',
                               }}
                             >
-                              {endpointTrackItems.map(
-                                (item, idx) => (
-                                  <div
-                                    key={`home-endpoint-${item.value}-${idx}`}
-                                    role='option'
-                                    aria-selected={
-                                      endpointItems.length > 0 &&
-                                      idx % endpointItems.length === endpointActiveIndex
-                                    }
-                                    style={{
-                                      height: `${ENDPOINT_ITEM_HEIGHT}px`,
-                                      lineHeight: `${ENDPOINT_ITEM_HEIGHT}px`,
-                                      color: 'var(--semi-color-primary)',
-                                      fontWeight: 600,
-                                      whiteSpace: 'nowrap',
-                                    }}
-                                  >
-                                    {item.value}
-                                  </div>
-                                ),
-                              )}
+                              {endpointTrackItems.map((item, idx) => (
+                                <div
+                                  key={`home-endpoint-${item.value}-${idx}`}
+                                  role='option'
+                                  aria-selected={
+                                    endpointItems.length > 0 &&
+                                    idx % endpointItems.length ===
+                                      endpointActiveIndex
+                                  }
+                                  style={{
+                                    height: `${ENDPOINT_ITEM_HEIGHT}px`,
+                                    lineHeight: `${ENDPOINT_ITEM_HEIGHT}px`,
+                                    color: 'var(--semi-color-primary)',
+                                    fontWeight: 600,
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {item.value}
+                                </div>
+                              ))}
                             </div>
                           </div>
                           <Button
@@ -442,7 +435,9 @@ const Home = () => {
                 </div>
 
                 {/* 框架兼容性图标 */}
-                <div className={`${providerSectionSpacingClass} mt-auto w-full`}>
+                <div
+                  className={`${providerSectionSpacingClass} mt-auto w-full`}
+                >
                   <div
                     className={`flex items-center justify-center ${isTightHeight ? 'mb-3 md:mb-4' : 'mb-6 md:mb-8'}`}
                   >

@@ -91,8 +91,7 @@ const SiderBar = ({
   const navigate = useNavigate();
   const [routerMapState, setRouterMapState] = useState(routerMap);
   const resizeCleanupRef = useRef(null);
-  const sidebarIsCustomized =
-    Math.abs(sidebarWidth - defaultSidebarWidth) > 1;
+  const sidebarIsCustomized = Math.abs(sidebarWidth - defaultSidebarWidth) > 1;
   const showResetWidthButton = !collapsed && !isMobile && sidebarIsCustomized;
   const useCompactCollapseTrigger =
     showResetWidthButton && sidebarWidth <= defaultSidebarWidth + 16;

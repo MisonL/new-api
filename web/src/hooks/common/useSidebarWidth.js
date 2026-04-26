@@ -75,11 +75,14 @@ export const useSidebarWidth = () => {
     document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
   }, [width]);
 
-  const setWidth = useCallback((value) => {
-    const nextWidth = clampSidebarWidth(value, defaultWidth);
-    setWidthState(nextWidth);
-    localStorage.setItem(KEY, String(nextWidth));
-  }, [defaultWidth]);
+  const setWidth = useCallback(
+    (value) => {
+      const nextWidth = clampSidebarWidth(value, defaultWidth);
+      setWidthState(nextWidth);
+      localStorage.setItem(KEY, String(nextWidth));
+    },
+    [defaultWidth],
+  );
 
   const resetWidth = useCallback(() => {
     setWidthState(defaultWidth);

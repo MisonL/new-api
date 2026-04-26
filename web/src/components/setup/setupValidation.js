@@ -37,7 +37,9 @@ export function validateAdminSetupValues(values) {
   if (!normalized.username) {
     return { key: '请输入管理员用户名' };
   }
-  if (getUnicodeCharacterCount(normalized.username) > ADMIN_USERNAME_MAX_LENGTH) {
+  if (
+    getUnicodeCharacterCount(normalized.username) > ADMIN_USERNAME_MAX_LENGTH
+  ) {
     return {
       key: '用户名长度不能超过{{max}}个字符',
       params: { max: ADMIN_USERNAME_MAX_LENGTH },

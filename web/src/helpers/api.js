@@ -138,10 +138,13 @@ async function pollDesktopOAuthCompletion(handoffToken, bindProviderId = null) {
   const deadline = Date.now() + DESKTOP_OAUTH_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
-    const res = await API.get(buildDesktopOAuthPollURL(handoffToken).toString(), {
-      skipErrorHandler: true,
-      disableDuplicate: true,
-    });
+    const res = await API.get(
+      buildDesktopOAuthPollURL(handoffToken).toString(),
+      {
+        skipErrorHandler: true,
+        disableDuplicate: true,
+      },
+    );
     const { success, message, data } = res.data || {};
     if (!success) {
       throw new Error(message || i18n.t('授权失败'));

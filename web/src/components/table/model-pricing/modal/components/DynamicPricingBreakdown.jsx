@@ -146,7 +146,11 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
         title: `${t(label)} (${symbol}/1M tokens)`,
         dataIndex: field,
         render: (v) =>
-          v > 0 ? <Text strong>{`${symbol}${(v * rate).toFixed(4)}`}</Text> : '-',
+          v > 0 ? (
+            <Text strong>{`${symbol}${(v * rate).toFixed(4)}`}</Text>
+          ) : (
+            '-'
+          ),
       })),
   ];
 

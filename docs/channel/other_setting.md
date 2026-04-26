@@ -11,6 +11,14 @@
 
 不建议把无结构的临时配置长期堆进这里；新增字段前应先确认三库兼容、前后端序列化行为和运行时读取链路。
 
+## 组模型路由辅助匹配
+
+`GROUP_MODEL_ROUTE_HELPER_ENABLED` 是全局环境变量，不属于渠道 `settings` 字段，但会影响渠道能力匹配。
+
+默认值为 `true`。启用后，渠道选路会先尝试请求里的原始模型名，再尝试 `FormatMatchingModelName()` 生成的归一化模型名。例如请求 `gpt-4o-gizmo-special` 时，可以继续命中配置为 `gpt-4o-gizmo-*` 的渠道能力。
+
+如果显式设置为 `false`，渠道选路只按精确模型名匹配。该模式适合需要严格隔离模型名称、避免通配归一化扩大匹配范围的部署。
+
 ## 常用基础字段
 
 ```json
@@ -35,42 +43,37 @@
 | `system_prompt` | `string` | 渠道级系统提示词 |
 | `system_prompt_override` | `bool` | 是否强制覆盖请求中的系统提示词 |
 
-## 请求头与 UA 策略字段
+## 请求头策略字段
 
-这部分是当前仓库里最容易混淆的区域，必须区分三类概念：
+这部分是当前仓库里最容易混淆的区域，当前推荐口径是：
 
 1. `header_override`
    - 独立渠道字段，不在 `settings` 里。
-   - 保存静态请求头 JSON。
+   - 仅作为旧版静态请求头 JSON 兼容字段。
+   - 新配置建议显式导入或保存为 `Header Profile` 后再选择。
 
-2. `ua_strategy`
-   - 位于 `settings` 中。
-   - 控制真实转发链路里的 `User-Agent` 选择方式。
-
-3. `header_profile_strategy`
+2. `header_profile_strategy`
    - 位于 `settings` 中。
    - 控制渠道选择哪些 `Header Profile` 资产以及选择模式。
-   - 它不是 `header_override` 模板本身。
+   - `User-Agent` 只是 `Header Profile.headers` 中的普通字段。
+   - 常规渠道应优先使用该字段管理完整请求头。
+
+3. `ua_strategy`
+   - 位于 `settings` 中。
+   - 历史兼容字段，保留后端读取和校验。
+   - 新的渠道表单不再提供独立 UA 池入口。
+   - 如需多组 User-Agent 轮询或随机，使用多个只包含或包含不同 `User-Agent` 的 `Header Profile`。
 
 示例：
 
 ```json
 {
-  "header_policy_mode": "merge",
-  "override_header_user_agent": true,
-  "ua_strategy": {
-    "enabled": true,
-    "mode": "round_robin",
-    "user_agents": [
-      "codex-cli/1.0.0",
-      "claude-code/1.0.0"
-    ]
-  },
   "header_profile_strategy": {
     "enabled": true,
-    "mode": "fixed",
+    "mode": "round_robin",
     "selected_profile_ids": [
-      "builtin_browser_chrome_macos"
+      "builtin_browser_chrome_macos",
+      "builtin_browser_edge_windows"
     ]
   }
 }
@@ -80,22 +83,22 @@
 
 | 字段 | 类型 | 允许值 | 说明 |
 | --- | --- | --- | --- |
-| `header_policy_mode` | `string` | `system_default` / `prefer_channel` / `prefer_tag` / `merge` | 渠道级与标签级请求头策略的优先级模式 |
-| `override_header_user_agent` | `bool` | `true` / `false` | 是否用 `ua_strategy` 结果覆盖静态 `header_override.User-Agent` |
-| `ua_strategy.enabled` | `bool` | `true` / `false` | 是否启用 UA 运行时策略 |
-| `ua_strategy.mode` | `string` | `round_robin` / `random` | UA 池的选择模式 |
-| `ua_strategy.user_agents` | `string[]` | 非空字符串数组 | UA 候选池 |
 | `header_profile_strategy.enabled` | `bool` | `true` / `false` | 是否启用 Header Profile 选择 |
 | `header_profile_strategy.mode` | `string` | `fixed` / `round_robin` / `random` | Profile 选择模式 |
 | `header_profile_strategy.selected_profile_ids` | `string[]` | 非空字符串数组 | 选中的 Profile ID 列表 |
+| `header_policy_mode` | `string` | `system_default` / `prefer_channel` / `prefer_tag` / `merge` | 历史兼容：渠道级与标签级旧请求头策略的优先级模式 |
+| `override_header_user_agent` | `bool` | `true` / `false` | 历史兼容：是否用 `ua_strategy` 结果覆盖静态 `header_override.User-Agent` |
+| `ua_strategy.enabled` | `bool` | `true` / `false` | 历史兼容：是否启用 UA 运行时策略 |
+| `ua_strategy.mode` | `string` | `round_robin` / `random` | 历史兼容：UA 池选择模式 |
+| `ua_strategy.user_agents` | `string[]` | 非空字符串数组 | 历史兼容：UA 候选池 |
 
 保存时的关键校验：
 
-- 非法 `header_policy_mode` 会在保存阶段直接拒绝。
-- 非法 `ua_strategy.mode`、空 UA 池、启用策略但无合法 UA，都会在保存阶段直接拒绝。
 - `header_profile_strategy.mode=fixed` 时必须且只能选择 1 个 Profile。
 - `header_profile_strategy.mode=round_robin/random` 时至少要选择 1 个 Profile。
 - `header_profile_strategy` 中的 AI Coding CLI 预置 Profile 只写入固定请求头；如果上游校验官方客户端动态头，必须同时在 `param_override.operations` 中使用 `pass_headers` 透传模板。
+- 非法 `header_policy_mode` 会在保存阶段直接拒绝。
+- 非法 `ua_strategy.mode`、空 UA 池、启用策略但无合法 UA，都会在保存阶段直接拒绝。
 
 ## 请求头模板与透传规则
 
@@ -181,8 +184,8 @@ Claude CLI 透传模板当前包含 `X-Stainless-*`、`User-Agent`、`X-App`、`
 
 - 先优先使用已有表单入口，不要手工拼接未知 JSON。
 - 涉及请求头能力时，先区分你要改的是：
-  - 静态 `header_override`
-  - 标签级请求头策略
-  - `ua_strategy`
   - `header_profile_strategy`
+  - 旧版静态 `header_override`
+  - 标签级请求头策略
+  - 历史兼容 `ua_strategy`
 - 任何需要进入真实转发链路的配置，都必须在隔离环境做真实请求验证，不能只看表单保存成功。
