@@ -426,10 +426,20 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if code < 100 || code > 599 {
 		return true
 	}
+	if shouldRetryTimeoutForResponsesCompact(c, code) {
+		return true
+	}
 	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
 		return false
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
+func shouldRetryTimeoutForResponsesCompact(c *gin.Context, statusCode int) bool {
+	if statusCode != http.StatusGatewayTimeout && statusCode != 524 {
+		return false
+	}
+	return c.GetInt("relay_mode") == relayconstant.RelayModeResponsesCompact
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
