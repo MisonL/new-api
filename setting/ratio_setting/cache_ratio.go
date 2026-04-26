@@ -152,19 +152,19 @@ func UpdateCreateCacheRatioByJSONString(jsonStr string) error {
 
 // GetCacheRatio returns the cache ratio for a model
 func GetCacheRatio(name string) (float64, bool) {
-	ratio, ok := cacheRatioMap.Get(name)
-	if !ok {
-		return 1, false // Default to 1 if not found
+	name = FormatMatchingModelName(name)
+	if ratio, ok, _ := getCompactAwareMapValue(cacheRatioMap, name); ok {
+		return ratio, true
 	}
-	return ratio, true
+	return 1, false // Default to 1 if not found
 }
 
 func GetCreateCacheRatio(name string) (float64, bool) {
-	ratio, ok := createCacheRatioMap.Get(name)
-	if !ok {
-		return 1.25, false // Default to 1.25 if not found
+	name = FormatMatchingModelName(name)
+	if ratio, ok, _ := getCompactAwareMapValue(createCacheRatioMap, name); ok {
+		return ratio, true
 	}
-	return ratio, true
+	return 1.25, false // Default to 1.25 if not found
 }
 
 func GetCacheRatioCopy() map[string]float64 {

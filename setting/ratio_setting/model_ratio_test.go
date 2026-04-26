@@ -71,6 +71,83 @@ func TestGetCompletionRatioGPT55DatedVariant(t *testing.T) {
 	require.InDelta(t, 6.0, got, 1e-9)
 }
 
+func TestCompactModelPricingInheritsBaseModelSettings(t *testing.T) {
+	resetPricingMapsForTest(t)
+
+	modelRatioMap.Set("compact-base", 2.5)
+	completionRatioMap.Set("compact-base", 4)
+	cacheRatioMap.Set("compact-base", 0.25)
+	createCacheRatioMap.Set("compact-base", 1.5)
+	modelPriceMap.Set("compact-base", 0.02)
+
+	ratio, ok, matchName := GetConfiguredModelRatio("compact-base-openai-compact")
+	require.True(t, ok)
+	require.Equal(t, "compact-base", matchName)
+	require.InDelta(t, 2.5, ratio, 1e-9)
+
+	completionInfo := GetCompletionRatioInfo("compact-base-openai-compact")
+	require.False(t, completionInfo.Locked)
+	require.InDelta(t, 4.0, completionInfo.Ratio, 1e-9)
+	require.InDelta(t, 4.0, GetCompletionRatio("compact-base-openai-compact"), 1e-9)
+
+	cacheRatio, hasCacheRatio := GetCacheRatio("compact-base-openai-compact")
+	require.True(t, hasCacheRatio)
+	require.InDelta(t, 0.25, cacheRatio, 1e-9)
+
+	createCacheRatio, hasCreateCacheRatio := GetCreateCacheRatio("compact-base-openai-compact")
+	require.True(t, hasCreateCacheRatio)
+	require.InDelta(t, 1.5, createCacheRatio, 1e-9)
+
+	modelPrice, hasModelPrice := GetModelPrice("compact-base-openai-compact", false)
+	require.True(t, hasModelPrice)
+	require.InDelta(t, 0.02, modelPrice, 1e-9)
+}
+
+func TestCompactModelPricingPrefersExplicitAndWildcardSettings(t *testing.T) {
+	resetPricingMapsForTest(t)
+
+	modelRatioMap.Set("compact-base", 2)
+	modelRatioMap.Set(CompactWildcardModelKey, 3)
+	modelRatioMap.Set("compact-base-openai-compact", 4)
+
+	ratio, ok, matchName := GetConfiguredModelRatio("compact-base-openai-compact")
+	require.True(t, ok)
+	require.Equal(t, "compact-base-openai-compact", matchName)
+	require.InDelta(t, 4.0, ratio, 1e-9)
+
+	modelRatioMap.Clear()
+	modelRatioMap.Set("compact-base", 2)
+	modelRatioMap.Set(CompactWildcardModelKey, 3)
+
+	ratio, ok, matchName = GetConfiguredModelRatio("compact-base-openai-compact")
+	require.True(t, ok)
+	require.Equal(t, CompactWildcardModelKey, matchName)
+	require.InDelta(t, 3.0, ratio, 1e-9)
+}
+
+func resetPricingMapsForTest(t *testing.T) {
+	t.Helper()
+	modelPriceMap.Clear()
+	modelRatioMap.Clear()
+	completionRatioMap.Clear()
+	cacheRatioMap.Clear()
+	createCacheRatioMap.Clear()
+	imageRatioMap.Clear()
+	audioRatioMap.Clear()
+	audioCompletionRatioMap.Clear()
+	t.Cleanup(func() {
+		modelPriceMap.Clear()
+		modelRatioMap.Clear()
+		completionRatioMap.Clear()
+		cacheRatioMap.Clear()
+		createCacheRatioMap.Clear()
+		imageRatioMap.Clear()
+		audioRatioMap.Clear()
+		audioCompletionRatioMap.Clear()
+		InitRatioSettings()
+	})
+}
+
 func floatPtr(v float64) *float64 {
 	return &v
 }

@@ -390,22 +390,28 @@ func UpdateModelPriceByJSONString(jsonStr string) error {
 	return types.LoadFromJsonStringWithCallback(modelPriceMap, jsonStr, InvalidateExposedDataCache)
 }
 
+func getCompactAwareMapValue(source *types.RWMap[string, float64], name string) (float64, bool, string) {
+	if value, ok := source.Get(name); ok {
+		return value, true, name
+	}
+	baseName, isCompact := CompactBaseModelName(name)
+	if !isCompact {
+		return 0, false, name
+	}
+	if value, ok := source.Get(CompactWildcardModelKey); ok {
+		return value, true, CompactWildcardModelKey
+	}
+	if value, ok := source.Get(baseName); ok {
+		return value, true, baseName
+	}
+	return 0, false, name
+}
+
 // GetModelPrice 返回模型的价格，如果模型不存在则返回-1，false
 func GetModelPrice(name string, printErr bool) (float64, bool) {
 	name = FormatMatchingModelName(name)
 
-	if price, ok := modelPriceMap.Get(name); ok {
-		return price, true
-	}
-
-	if strings.HasSuffix(name, CompactModelSuffix) {
-		price, ok := modelPriceMap.Get(CompactWildcardModelKey)
-		if !ok {
-			if printErr {
-				common.SysError("model price not found: " + name)
-			}
-			return -1, false
-		}
+	if price, ok, _ := getCompactAwareMapValue(modelPriceMap, name); ok {
 		return price, true
 	}
 
@@ -430,31 +436,18 @@ func handleThinkingBudgetModel(name, prefix, wildcard string) string {
 func GetModelRatio(name string) (float64, bool, string) {
 	name = FormatMatchingModelName(name)
 
-	ratio, ok := modelRatioMap.Get(name)
+	ratio, ok, matchName := getCompactAwareMapValue(modelRatioMap, name)
 	if !ok {
-		if strings.HasSuffix(name, CompactModelSuffix) {
-			if wildcardRatio, ok := modelRatioMap.Get(CompactWildcardModelKey); ok {
-				return wildcardRatio, true, name
-			}
-			//return 0, true, name
-		}
 		return 37.5, operation_setting.SelfUseModeEnabled, name
 	}
-	return ratio, true, name
+	return ratio, true, matchName
 }
 
 func GetConfiguredModelRatio(name string) (float64, bool, string) {
 	name = FormatMatchingModelName(name)
 
-	ratio, ok := modelRatioMap.Get(name)
-	if ok {
-		return ratio, true, name
-	}
-
-	if strings.HasSuffix(name, CompactModelSuffix) {
-		if wildcardRatio, ok := modelRatioMap.Get(CompactWildcardModelKey); ok {
-			return wildcardRatio, true, name
-		}
+	if ratio, ok, matchName := getCompactAwareMapValue(modelRatioMap, name); ok {
+		return ratio, true, matchName
 	}
 
 	return 0, false, name
@@ -499,6 +492,18 @@ func GetCompletionRatio(name string) float64 {
 	if ratio, ok := completionRatioMap.Get(name); ok {
 		return ratio
 	}
+	if baseName, isCompact := CompactBaseModelName(name); isCompact {
+		if ratio, ok := completionRatioMap.Get(CompactWildcardModelKey); ok {
+			return ratio
+		}
+		if ratio, ok := completionRatioMap.Get(baseName); ok {
+			return ratio
+		}
+		baseHardCodedRatio, baseContain := getHardcodedCompletionModelRatio(baseName)
+		if baseContain {
+			return baseHardCodedRatio
+		}
+	}
 	return hardCodedRatio
 }
 
@@ -531,6 +536,27 @@ func GetCompletionRatioInfo(name string) CompletionRatioInfo {
 		return CompletionRatioInfo{
 			Ratio:  ratio,
 			Locked: false,
+		}
+	}
+	if baseName, isCompact := CompactBaseModelName(name); isCompact {
+		if ratio, ok := completionRatioMap.Get(CompactWildcardModelKey); ok {
+			return CompletionRatioInfo{
+				Ratio:  ratio,
+				Locked: false,
+			}
+		}
+		if ratio, ok := completionRatioMap.Get(baseName); ok {
+			return CompletionRatioInfo{
+				Ratio:  ratio,
+				Locked: false,
+			}
+		}
+		baseHardCodedRatio, baseLocked := getHardcodedCompletionModelRatio(baseName)
+		if baseLocked {
+			return CompletionRatioInfo{
+				Ratio:  baseHardCodedRatio,
+				Locked: true,
+			}
 		}
 	}
 
