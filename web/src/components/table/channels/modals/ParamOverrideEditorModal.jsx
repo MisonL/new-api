@@ -1969,7 +1969,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
   return (
     <>
       <Modal
-        title={t('高级参数覆盖')}
+        title={t('高级请求规则')}
         visible={visible}
         width={
           isMobile ? 'calc(100vw - 16px)' : 'min(980px, calc(100vw - 24px))'
@@ -1998,11 +1998,11 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
             <div className='flex items-start justify-between gap-3 flex-wrap'>
               <div className='min-w-0' style={{ maxWidth: 640 }}>
                 <Text strong size='small'>
-                  {t('仅在特殊场景配置，普通请求头不要写在这里')}
+                  {t('只在特殊场景配置')}
                 </Text>
                 <Text type='tertiary' size='small' className='block mt-1'>
                   {t(
-                    '这里会影响请求体或运行期请求头。只改 User-Agent、X-Client-Name 等固定请求头时，请返回请求头模板。',
+                    '这里会改写请求体或透传运行期请求头。只改 User-Agent、X-Client-Name 等固定请求头时，请使用客户端模板。',
                   )}
                 </Text>
               </div>
@@ -2120,10 +2120,10 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                 >
                   <div className='flex items-start justify-between gap-3 flex-wrap'>
                     <div className='min-w-0' style={{ maxWidth: 620 }}>
-                      <Text strong>{t('当前未配置高级参数覆盖')}</Text>
+                      <Text strong>{t('当前未配置高级请求规则')}</Text>
                       <Text type='tertiary' size='small' className='block mt-1'>
                         {t(
-                          '如果只是给渠道设置请求头或 User-Agent，请返回使用请求头模板；只有需要改写请求体字段或透传客户端动态请求头时再新增规则。',
+                          '如果只是给渠道设置 User-Agent 或客户端名称，请返回选择客户端模板；只有需要改写请求体字段或透传客户端动态请求头时再新增规则。',
                         )}
                       </Text>
                     </div>

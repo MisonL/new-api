@@ -39,11 +39,11 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   assert.equal(HEADER_PROFILE_PRESETS['claude-code'].passthroughRequired, true);
   assert.match(
     HEADER_PROFILE_PRESETS['codex-cli'].description,
-    /请求头透传模板/,
+    /高级设置.*真实请求头透传/,
   );
   assert.match(
     HEADER_PROFILE_PRESETS['claude-code'].description,
-    /请求头透传模板/,
+    /高级设置.*真实请求头透传/,
   );
   assert.equal(HEADER_PROFILE_PRESETS['gemini-cli'].passthroughRequired, false);
 });
@@ -93,7 +93,7 @@ test('buildSelectedProfileItems keeps structured headers while main fields stay 
   );
   assert.equal(items[0].name, 'Codex CLI');
   assert.equal(items[0].passthroughRequired, true);
-  assert.match(items[0].description, /请求头透传模板/);
+  assert.match(items[0].description, /高级设置.*真实请求头透传/);
 });
 
 test('buildProfileItems merges builtin and user profiles into a normalized list', () => {

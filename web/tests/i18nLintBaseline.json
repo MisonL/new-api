@@ -716,47 +716,47 @@
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 689,
+    "line": 709,
     "text": "Doubao Coding Plan"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 2634,
+    "line": 2655,
     "text": "M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 3827,
+    "line": 3813,
     "text": "type-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4077,
+    "line": 4063,
     "text": "tight"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4453,
+    "line": 4439,
     "text": "Account ID"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4528,
+    "line": 4514,
     "text": "AZURE_OPENAI_ENDPOINT"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4726,
+    "line": 4712,
     "text": "models-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4928,
+    "line": 4914,
     "text": "groups-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 5198,
+    "line": 5184,
     "text": "M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
   },
   {

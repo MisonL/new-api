@@ -23,7 +23,6 @@ import {
   Button,
   Modal,
   Select,
-  Switch,
   Tag,
   Tooltip,
   Typography,
@@ -56,10 +55,10 @@ const HeaderProfileStrategySection = ({
   deletingProfileId = '',
   showLegacyBanner = false,
   passthroughWarning = '',
-  onEnabledChange,
   onModeChange,
   onToggleSelect,
   onRemoveSelected,
+  onClearSelected,
   onReorderSelected,
   onCreateProfile,
   onEditProfile,
@@ -83,15 +82,15 @@ const HeaderProfileStrategySection = ({
     [t],
   );
   const selectionHint = !strategy.enabled
-    ? t('关闭后不会应用任何请求头模板')
+    ? t('未启用模板，不会修改固定请求头')
     : strategy.mode === 'fixed'
-      ? t('固定模式只保留一个模板，重新选择会直接替换')
+      ? t('固定模式只使用一个模板，重新选择会直接替换')
       : strategy.mode === 'round_robin'
         ? t('轮询模式支持多选，并按列表顺序依次使用')
         : t('随机模式支持多选，并在每次请求时随机挑选使用');
   const selectionError =
     strategy.enabled && selectedCount === 0
-      ? t('已启用请求头模板，但还没有选择任何模板')
+      ? t('已启用客户端模板，但还没有选择模板')
       : '';
   const modeLabel = modeOptions.find(
     (item) => item.value === strategy.mode,
@@ -162,8 +161,11 @@ const HeaderProfileStrategySection = ({
         <div className='min-w-0'>
           <div className='flex items-center gap-2 flex-wrap'>
             <Text strong size='small'>
-              {t('请求头模板')}
+              {t('客户端模板')}
             </Text>
+            <Tag size='small' color='blue'>
+              {t('推荐入口')}
+            </Tag>
             <Tag size='small' color={strategy.enabled ? 'blue' : 'grey'}>
               {strategy.enabled ? t('已启用') : t('未启用')}
             </Tag>
@@ -174,19 +176,9 @@ const HeaderProfileStrategySection = ({
           <div className='mt-1'>
             <Text type='tertiary' size='small'>
               {t(
-                '普通用户只配置这里：先选模板；需要多个身份再用轮询或随机；看到“需透传”再配置高级参数覆盖。',
+                '大多数渠道只用这里。选择一个浏览器、AI CLI 或 SDK 模板即可；不选则保持默认请求。',
               )}
             </Text>
-          </div>
-        </div>
-        <div className='flex items-center gap-2 flex-wrap'>
-          <div className='flex items-center gap-1.5'>
-            <Text size='small'>{t('启用')}</Text>
-            <Switch
-              checked={strategy.enabled}
-              onChange={onEnabledChange}
-              aria-label={t('启用请求头模板')}
-            />
           </div>
         </div>
       </div>
@@ -252,7 +244,7 @@ const HeaderProfileStrategySection = ({
           <div className='min-w-0 flex-1'>
             <div className='flex items-center gap-2 flex-wrap'>
               <Text strong size='small'>
-                {t('当前模板')}
+                {t('当前选择')}
               </Text>
             </div>
             <div className='mt-1'>
@@ -267,11 +259,16 @@ const HeaderProfileStrategySection = ({
               type={selectedCount === 0 ? 'primary' : 'tertiary'}
               onClick={() => setLibraryVisible(true)}
             >
-              {selectedCount === 0 ? t('选择并启用模板') : t('管理模板')}
+              {selectedCount === 0 ? t('选择模板') : t('更换模板')}
             </Button>
+            {selectedCount > 0 && (
+              <Button size='small' type='tertiary' onClick={onClearSelected}>
+                {t('清空')}
+              </Button>
+            )}
           </div>
         </div>
-        {strategy.enabled && (
+        {strategy.enabled && selectedCount > 0 && (
           <div
             className='mt-2 rounded-md px-2.5 py-2'
             style={{
@@ -282,7 +279,7 @@ const HeaderProfileStrategySection = ({
             <div className='flex items-start justify-between gap-3 flex-wrap'>
               <div className='min-w-0 flex-1'>
                 <Text strong size='small'>
-                  {t('使用方式')}
+                  {t('多模板使用方式')}
                 </Text>
                 <Text type='tertiary' size='small' className='block mt-1'>
                   {selectionHint}
@@ -401,7 +398,7 @@ const HeaderProfileStrategySection = ({
       </div>
 
       <Modal
-        title={t('选择请求头模板')}
+        title={t('选择客户端模板')}
         visible={libraryVisible}
         width={
           isMobile ? 'calc(100vw - 16px)' : 'min(920px, calc(100vw - 24px))'

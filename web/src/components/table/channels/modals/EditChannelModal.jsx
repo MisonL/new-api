@@ -405,16 +405,20 @@ const EditChannelModal = (props) => {
         : '';
     if (!raw) {
       return {
+        isEmpty: true,
+        isValid: true,
         tagLabel: t('未配置'),
         tagColor: 'grey',
-        summary: t('未配置状态码复写，渠道会按上游原始状态码参与本地判断'),
+        summary: t('默认按上游原始状态码判断'),
       };
     }
     if (!verifyJSON(raw)) {
       return {
+        isEmpty: false,
+        isValid: false,
         tagLabel: t('JSON格式错误'),
         tagColor: 'red',
-        summary: t('当前状态码复写不是合法 JSON，需要修正后才能保存'),
+        summary: t('当前错误兼容配置不是合法 JSON，需要修正后才能保存'),
       };
     }
     try {
@@ -424,18 +428,22 @@ const EditChannelModal = (props) => {
           ? Object.keys(parsed).length
           : 0;
       return {
+        isEmpty: count === 0,
+        isValid: true,
         tagLabel: t('已配置 {{count}} 项', { count }),
         tagColor: count > 0 ? 'blue' : 'grey',
         summary:
           count > 0
-            ? t('仅影响本地错误判断和重试选择，不修改返回给客户端的状态码')
-            : t('未配置状态码复写，渠道会按上游原始状态码参与本地判断'),
+            ? t('仅影响本地错误判断和重试选择')
+            : t('默认按上游原始状态码判断'),
       };
     } catch (error) {
       return {
+        isEmpty: false,
+        isValid: false,
         tagLabel: t('JSON格式错误'),
         tagColor: 'red',
-        summary: t('当前状态码复写不是合法 JSON，需要修正后才能保存'),
+        summary: t('当前错误兼容配置不是合法 JSON，需要修正后才能保存'),
       };
     }
   }, [inputs.status_code_mapping, t]);
@@ -504,10 +512,22 @@ const EditChannelModal = (props) => {
   );
   const [requestHeaderAdvancedPanelKeys, setRequestHeaderAdvancedPanelKeys] =
     useState([]);
-  const openRequestPolicyModal = () => {
-    setRequestPolicyAdvancedKeys(
-      paramOverrideMeta.isValid ? [] : ['param-override-panel'],
-    );
+  const openRequestPolicyModal = (focusAdvanced = false) => {
+    const activeKeys = [];
+    if (
+      focusAdvanced ||
+      !paramOverrideMeta.isValid ||
+      !paramOverrideMeta.isEmpty
+    ) {
+      activeKeys.push('param-override-panel');
+    }
+    if (!statusCodeMappingMeta.isValid || !statusCodeMappingMeta.isEmpty) {
+      activeKeys.push('status-code-panel');
+    }
+    if (hasHeaderOverrideDraft) {
+      activeKeys.push('legacy-header-panel');
+    }
+    setRequestPolicyAdvancedKeys(activeKeys);
     setRequestPolicyModalVisible(true);
   };
   const openRequestHeaderAdvancedModal = () => {
@@ -574,7 +594,7 @@ const EditChannelModal = (props) => {
       return {
         tagLabel: t('请求头未启用'),
         tagColor: 'grey',
-        summary: t('未启用请求头模板'),
+        summary: t('未启用客户端模板'),
       };
     }
     const selectedCount = selectedHeaderProfileItems.length;
@@ -582,7 +602,7 @@ const EditChannelModal = (props) => {
       return {
         tagLabel: t('请求头待选择'),
         tagColor: 'orange',
-        summary: t('已启用请求头模板，但还没有选择任何模板'),
+        summary: t('已启用客户端模板，但还没有选择模板'),
       };
     }
     const modeLabel =
@@ -680,7 +700,7 @@ const EditChannelModal = (props) => {
       return '';
     }
     return t(
-      '{{names}} 模板只会写入固定请求头。若上游要求官方客户端身份，还需要在高级参数覆盖中追加对应的 CLI 请求头透传模板，保留真实客户端动态头。',
+      '{{names}} 模板只会写入固定请求头。若上游要求官方客户端身份，还需要在高级设置中开启对应的 CLI 真实请求头透传。',
       { names: warnings.join(' / ') },
     );
   }, [headerProfileStrategy, requestHeaderPassthroughStatus, t]);
@@ -875,18 +895,6 @@ const EditChannelModal = (props) => {
     }
   };
 
-  const handleHeaderProfileEnabledChange = (enabled) => {
-    if (!enabled) {
-      applyHeaderProfileStrategy(null);
-      return;
-    }
-    applyHeaderProfileStrategy({
-      enabled: true,
-      mode: headerProfileStrategy.mode,
-      selectedProfileIds: headerProfileStrategy.selectedProfileIds,
-    });
-  };
-
   const handleHeaderProfileModeChange = (mode) => {
     const nextMode = mode || 'fixed';
     const nextSelectedProfileIds =
@@ -921,6 +929,10 @@ const EditChannelModal = (props) => {
       mode: headerProfileStrategy.mode,
       selectedProfileIds: nextSelectedProfileIds,
     });
+  };
+
+  const handleClearSelectedHeaderProfiles = () => {
+    applyHeaderProfileStrategy(null);
   };
 
   const handleReorderSelectedHeaderProfiles = (
@@ -2183,7 +2195,7 @@ const EditChannelModal = (props) => {
         currentHeaderProfileStrategy.mode === 'fixed' &&
         currentHeaderProfileStrategy.selectedProfileIds.length !== 1
       ) {
-        showError(t('固定模式必须且只能选择 1 个请求头模板'));
+        showError(t('固定模式必须且只能选择 1 个客户端模板'));
         return;
       }
       if (
@@ -2191,7 +2203,7 @@ const EditChannelModal = (props) => {
           currentHeaderProfileStrategy.mode === 'random') &&
         currentHeaderProfileStrategy.selectedProfileIds.length < 1
       ) {
-        showError(t('已启用请求头模板，但还没有选择任何模板'));
+        showError(t('已启用客户端模板，但还没有选择模板'));
         return;
       }
     }
@@ -2373,6 +2385,15 @@ const EditChannelModal = (props) => {
   const hasHeaderOverrideDraft =
     typeof inputs.header_override === 'string' &&
     inputs.header_override.trim().length > 0;
+  const hasAdvancedRequestPolicy =
+    !paramOverrideMeta.isEmpty ||
+    !statusCodeMappingMeta.isEmpty ||
+    hasHeaderOverrideDraft;
+  const requestPolicyOverviewText = headerProfileStrategy.enabled
+    ? headerProfilePolicyMeta.summary
+    : hasAdvancedRequestPolicy
+      ? t('未选择客户端模板，但已启用高级规则')
+      : t('默认不修改请求；需要伪装浏览器或 AI 客户端时再选择模板');
   const requestHeaderAdvancedCount = hasHeaderOverrideDraft ? 1 : 0;
   const requestHeaderAdvancedSummary =
     requestHeaderAdvancedCount === 0 ? t('未配置') : t('旧版覆盖待处理');
@@ -2848,25 +2869,56 @@ const EditChannelModal = (props) => {
                             </Tag>
                           ) : null}
                           {requestHeaderAdvancedCount > 0 ? (
-                            <Tag size='small' color='blue'>
-                              {requestHeaderAdvancedSummary}
+                            <Tag size='small' color='orange'>
+                              {t('旧版待迁移')}
+                            </Tag>
+                          ) : null}
+                          {!statusCodeMappingMeta.isEmpty ? (
+                            <Tag
+                              size='small'
+                              color={statusCodeMappingMeta.tagColor}
+                            >
+                              {t('错误兼容已启用')}
                             </Tag>
                           ) : null}
                         </div>
                         <div className='mt-1'>
                           <Text type='tertiary' size='small'>
-                            {headerProfilePolicyMeta.summary}
+                            {requestPolicyOverviewText}
+                          </Text>
+                          <Text type='tertiary' size='small' className='block'>
+                            {t(
+                              '看不懂时保持默认即可；多数情况只需要选择一个客户端模板。',
+                            )}
                           </Text>
                         </div>
                       </div>
-                      <Button
-                        size='small'
-                        type='tertiary'
-                        theme='light'
-                        onClick={openRequestPolicyModal}
-                      >
-                        {t('配置策略')}
-                      </Button>
+                      <Space wrap spacing={6}>
+                        <Button
+                          size='small'
+                          type={
+                            headerProfileStrategy.enabled
+                              ? 'tertiary'
+                              : 'primary'
+                          }
+                          theme={
+                            headerProfileStrategy.enabled ? 'light' : 'solid'
+                          }
+                          onClick={() => openRequestPolicyModal(false)}
+                        >
+                          {headerProfileStrategy.enabled
+                            ? t('管理模板')
+                            : t('选择模板')}
+                        </Button>
+                        <Button
+                          size='small'
+                          type='tertiary'
+                          theme='light'
+                          onClick={() => openRequestPolicyModal(true)}
+                        >
+                          {t('高级设置')}
+                        </Button>
+                      </Space>
                     </div>
                   </div>
                   <Modal
@@ -2895,126 +2947,28 @@ const EditChannelModal = (props) => {
                     }
                   >
                     <div className='flex flex-col gap-3 min-w-0'>
-                      <div className='min-w-0'>
-                        <Text strong size='small'>
-                          {t('按使用场景选择配置，不需要全部填写')}
-                        </Text>
-                        <Text
-                          type='tertiary'
-                          size='small'
-                          className='block mt-1'
-                        >
-                          {hasHeaderOverrideDraft
-                            ? t(
-                                '普通渠道只配置请求头模板；只有需要改写请求体或透传真实客户端动态头时，才进入高级参数覆盖；旧版兼容仅用于迁移历史 header_override。',
-                              )
-                            : t(
-                                '普通渠道只配置请求头模板；只有需要改写请求体或透传真实客户端动态头时，才进入高级参数覆盖。',
+                      <Banner
+                        type='info'
+                        closeIcon={null}
+                        description={
+                          <div className='min-w-0'>
+                            <Text strong size='small'>
+                              {t(
+                                '快速上手：不懂请求头时，只需要选择一个客户端模板',
                               )}
-                        </Text>
-                      </div>
-                      <div
-                        className='rounded-lg p-3 min-w-0'
-                        style={{
-                          backgroundColor: 'var(--semi-color-fill-0)',
-                          border: '1px solid var(--semi-color-fill-2)',
-                        }}
-                      >
-                        <div
-                          className={
-                            hasHeaderOverrideDraft
-                              ? 'grid grid-cols-1 md:grid-cols-3 gap-2'
-                              : 'grid grid-cols-1 md:grid-cols-2 gap-2'
-                          }
-                        >
-                          <div
-                            className='rounded-md px-2.5 py-2'
-                            style={{
-                              backgroundColor: 'var(--semi-color-bg-0)',
-                            }}
-                          >
-                            <div className='flex items-center gap-2 flex-wrap'>
-                              <Tag size='small' color='blue'>
-                                {t('推荐')}
-                              </Tag>
-                              <Text strong size='small'>
-                                {t('请求头模板')}
-                              </Text>
-                            </div>
-                            <Text
-                              type='tertiary'
-                              size='small'
-                              className='block mt-1'
-                            >
-                              {t('设置 User-Agent、客户端名称等固定请求头。')}
                             </Text>
-                          </div>
-                          <div
-                            className='rounded-md px-2.5 py-2'
-                            style={{
-                              backgroundColor: 'var(--semi-color-bg-0)',
-                            }}
-                          >
-                            <div className='flex items-center gap-2 flex-wrap'>
-                              <Tag size='small' color='cyan'>
-                                {t('特殊场景')}
-                              </Tag>
-                              <Text strong size='small'>
-                                {t('高级参数覆盖')}
-                              </Text>
-                            </div>
                             <Text
                               type='tertiary'
                               size='small'
                               className='block mt-1'
                             >
                               {t(
-                                '改写请求体，或为 Codex / Claude 透传真实动态头。',
+                                '默认是不修改请求。只有上游要求浏览器、AI CLI 或特定 SDK 身份时，才在下面选择模板；其他高级项看不懂就不用配置。',
                               )}
                             </Text>
                           </div>
-                          {hasHeaderOverrideDraft ? (
-                            <div
-                              className='rounded-md px-2.5 py-2'
-                              style={{
-                                backgroundColor: 'var(--semi-color-bg-0)',
-                              }}
-                            >
-                              <div className='flex items-center gap-2 flex-wrap'>
-                                <Tag size='small' color='grey'>
-                                  {t('兼容')}
-                                </Tag>
-                                <Text strong size='small'>
-                                  {t('旧版请求头覆盖')}
-                                </Text>
-                              </div>
-                              <Text
-                                type='tertiary'
-                                size='small'
-                                className='block mt-1'
-                              >
-                                {t('只用于查看、清空或导入历史 JSON 配置。')}
-                              </Text>
-                            </div>
-                          ) : null}
-                        </div>
-                        <Space wrap spacing={6} className='mt-2'>
-                          <Tag size='small'>
-                            {t('浏览器/API SDK：只选请求头模板')}
-                          </Tag>
-                          <Tag size='small'>
-                            {t('Codex/Claude：模板 + CLI 透传')}
-                          </Tag>
-                          <Tag size='small'>
-                            {t('参数不兼容：再加高级规则')}
-                          </Tag>
-                          {hasHeaderOverrideDraft ? (
-                            <Tag size='small'>
-                              {t('历史 header_override：导入为模板')}
-                            </Tag>
-                          ) : null}
-                        </Space>
-                      </div>
+                        }
+                      />
                       <div
                         className='rounded-lg p-3 w-full min-w-0'
                         style={SOFT_SECTION_STYLE}
@@ -3027,10 +2981,10 @@ const EditChannelModal = (props) => {
                           deletingProfileId={headerProfileDeletingId}
                           showLegacyBanner={shouldShowHeaderProfileLegacyBanner}
                           passthroughWarning={headerProfilePassthroughWarning}
-                          onEnabledChange={handleHeaderProfileEnabledChange}
                           onModeChange={handleHeaderProfileModeChange}
                           onToggleSelect={handleToggleHeaderProfile}
                           onRemoveSelected={handleRemoveSelectedHeaderProfile}
+                          onClearSelected={handleClearSelectedHeaderProfiles}
                           onReorderSelected={
                             handleReorderSelectedHeaderProfiles
                           }
@@ -3041,6 +2995,20 @@ const EditChannelModal = (props) => {
                         />
                       </div>
 
+                      <div className='min-w-0'>
+                        <Text strong size='small'>
+                          {t('高级设置（可选）')}
+                        </Text>
+                        <Text
+                          type='tertiary'
+                          size='small'
+                          className='block mt-1'
+                        >
+                          {t(
+                            '普通用户可以跳过。这里用于动态请求头透传、请求参数改写、旧版配置迁移和上游错误兼容。',
+                          )}
+                        </Text>
+                      </div>
                       <Collapse
                         keepDOM
                         activeKey={requestPolicyAdvancedKeys}
@@ -3058,7 +3026,7 @@ const EditChannelModal = (props) => {
                               <div className='flex items-center gap-2 min-w-0'>
                                 <IconCode size={15} />
                                 <Text strong size='small'>
-                                  {t('高级参数覆盖（特殊场景）')}
+                                  {t('高级请求规则')}
                                 </Text>
                               </div>
                               <Tag
@@ -3088,7 +3056,7 @@ const EditChannelModal = (props) => {
                                   className='block mt-1'
                                 >
                                   {t(
-                                    '常规渠道无需配置；仅在需要改写请求体或透传 CLI 动态请求头时使用。',
+                                    '仅当需要改写请求体字段、补齐上游参数，或透传 CLI 真实动态头时使用。',
                                   )}
                                 </Text>
                               </div>
@@ -3154,15 +3122,77 @@ const EditChannelModal = (props) => {
                           </div>
                         </Collapse.Panel>
 
+                        <Collapse.Panel
+                          itemKey='status-code-panel'
+                          header={
+                            <div className='flex items-center justify-between gap-2 flex-wrap w-full min-w-0'>
+                              <div className='flex items-center gap-2 min-w-0'>
+                                <IconSetting size={15} />
+                                <Text strong size='small'>
+                                  {t('上游错误兼容')}
+                                </Text>
+                              </div>
+                              <Tag
+                                size='small'
+                                color={statusCodeMappingMeta.tagColor}
+                              >
+                                {statusCodeMappingMeta.tagLabel}
+                              </Tag>
+                            </div>
+                          }
+                        >
+                          <div className='px-1 py-1 min-w-0'>
+                            <div
+                              className={
+                                isMobile
+                                  ? 'flex flex-col gap-2 min-w-0'
+                                  : 'flex items-start justify-between gap-3 flex-wrap'
+                              }
+                            >
+                              <div className='min-w-0 flex-1'>
+                                <Text type='tertiary' size='small'>
+                                  {statusCodeMappingMeta.summary}
+                                </Text>
+                                <Text
+                                  type='tertiary'
+                                  size='small'
+                                  className='block mt-1'
+                                >
+                                  {t(
+                                    '仅当某些上游返回异常状态码导致本地误判时使用。默认关闭，不影响上游真实响应。',
+                                  )}
+                                </Text>
+                              </div>
+                              <Button
+                                size='small'
+                                type='tertiary'
+                                theme='light'
+                                style={
+                                  isMobile
+                                    ? { width: 'fit-content' }
+                                    : undefined
+                                }
+                                onClick={() =>
+                                  setStatusCodeMappingEditorVisible(true)
+                                }
+                              >
+                                {statusCodeMappingMeta.isEmpty
+                                  ? t('配置')
+                                  : t('编辑')}
+                              </Button>
+                            </div>
+                          </div>
+                        </Collapse.Panel>
+
                         {hasHeaderOverrideDraft ? (
                           <Collapse.Panel
-                            itemKey='expert-header-panel'
+                            itemKey='legacy-header-panel'
                             header={
                               <div className='flex items-center justify-between gap-2 flex-wrap w-full min-w-0'>
                                 <div className='flex items-center gap-2 min-w-0'>
                                   <IconSetting size={15} />
                                   <Text strong size='small'>
-                                    {t('旧版兼容请求头')}
+                                    {t('旧版 header_override 导入')}
                                   </Text>
                                 </div>
                                 <div className='flex items-center gap-1.5 flex-wrap'>
@@ -3213,7 +3243,7 @@ const EditChannelModal = (props) => {
                     </div>
                   </Modal>
                   <Modal
-                    title={t('专家请求头策略')}
+                    title={t('旧版 header_override 导入')}
                     visible={requestHeaderAdvancedVisible}
                     width={
                       isMobile
@@ -3240,7 +3270,7 @@ const EditChannelModal = (props) => {
                       <div>
                         <Text type='tertiary' size='small'>
                           {t(
-                            '常规渠道优先使用上方请求头模板；以下仅用于旧版 header_override 的兼容查看、清空和显式导入',
+                            '这里只处理历史 JSON 配置。新配置请使用客户端模板，避免在渠道里分散维护请求头。',
                           )}
                         </Text>
                       </div>
@@ -3376,91 +3406,47 @@ const EditChannelModal = (props) => {
                   </Modal>
                 </div>
 
-                {/* Error Handling Section */}
-                <div className='py-3 border-b border-gray-100'>
-                  <Text className='text-sm font-medium text-gray-500 mb-3 block'>
-                    {t('错误处理')}
-                  </Text>
-
-                  <div
-                    className='rounded-lg px-3 py-2'
-                    style={{
-                      backgroundColor: 'var(--semi-color-bg-0)',
-                      border: '1px solid var(--semi-color-border)',
-                    }}
-                  >
-                    <div className='flex items-start justify-between gap-3 flex-wrap'>
-                      <div className='min-w-0 flex-1'>
-                        <div className='flex items-center gap-2 flex-wrap'>
-                          <IconSetting size={15} />
-                          <Text strong size='small'>
-                            {t('错误处理策略')}
-                          </Text>
-                          <Tag
-                            size='small'
-                            color={statusCodeMappingMeta.tagColor}
-                          >
-                            {statusCodeMappingMeta.tagLabel}
-                          </Tag>
-                        </div>
-                        <div className='mt-1'>
-                          <Text type='tertiary' size='small'>
-                            {statusCodeMappingMeta.summary}
-                          </Text>
-                        </div>
-                      </div>
-                      <Button
-                        size='small'
-                        type='tertiary'
-                        theme='light'
-                        onClick={() => setStatusCodeMappingEditorVisible(true)}
-                      >
-                        {t('配置')}
-                      </Button>
-                    </div>
-                  </div>
-                  <Modal
-                    title={t('错误处理策略')}
-                    visible={statusCodeMappingEditorVisible}
-                    width='min(760px, calc(100vw - 24px))'
-                    onCancel={() => setStatusCodeMappingEditorVisible(false)}
-                    bodyStyle={{
-                      maxHeight: '72vh',
-                      overflowY: 'auto',
-                    }}
-                    footer={
-                      <Button
-                        onClick={() => setStatusCodeMappingEditorVisible(false)}
-                      >
-                        {t('完成')}
-                      </Button>
+                <Modal
+                  title={t('上游错误兼容')}
+                  visible={statusCodeMappingEditorVisible}
+                  width='min(760px, calc(100vw - 24px))'
+                  onCancel={() => setStatusCodeMappingEditorVisible(false)}
+                  bodyStyle={{
+                    maxHeight: '72vh',
+                    overflowY: 'auto',
+                  }}
+                  footer={
+                    <Button
+                      onClick={() => setStatusCodeMappingEditorVisible(false)}
+                    >
+                      {t('完成')}
+                    </Button>
+                  }
+                >
+                  <JSONEditor
+                    key={`status_code_mapping-${isEdit ? channelId : 'new'}`}
+                    field='status_code_mapping'
+                    label={t('状态码兼容规则')}
+                    placeholder={
+                      t(
+                        '仅当上游返回异常状态码导致本地误判时使用。键为上游原状态码，值为本地按哪个状态码判断；不会修改返回给客户端的真实响应。例如：',
+                      ) +
+                      '\n' +
+                      JSON.stringify(STATUS_CODE_MAPPING_EXAMPLE, null, 2)
                     }
-                  >
-                    <JSONEditor
-                      key={`status_code_mapping-${isEdit ? channelId : 'new'}`}
-                      field='status_code_mapping'
-                      label={t('状态码复写')}
-                      placeholder={
-                        t(
-                          '此项可选，用于复写返回的状态码，仅影响本地判断，不修改返回到上游的状态码，比如将claude渠道的400错误复写为500（用于重试），请勿滥用该功能，例如：',
-                        ) +
-                        '\n' +
-                        JSON.stringify(STATUS_CODE_MAPPING_EXAMPLE, null, 2)
-                      }
-                      value={inputs.status_code_mapping || ''}
-                      onChange={(value) =>
-                        handleInputChange('status_code_mapping', value)
-                      }
-                      template={STATUS_CODE_MAPPING_EXAMPLE}
-                      templateLabel={t('填入模板')}
-                      editorType='keyValue'
-                      formApi={formApiRef.current}
-                      extraText={t(
-                        '键为原状态码，值为要复写的状态码，仅影响本地判断',
-                      )}
-                    />
-                  </Modal>
-                </div>
+                    value={inputs.status_code_mapping || ''}
+                    onChange={(value) =>
+                      handleInputChange('status_code_mapping', value)
+                    }
+                    template={STATUS_CODE_MAPPING_EXAMPLE}
+                    templateLabel={t('填入模板')}
+                    editorType='keyValue'
+                    formApi={formApiRef.current}
+                    extraText={t(
+                      '默认关闭。仅影响本地错误判断和重试选择，不修改上游真实响应。',
+                    )}
+                  />
+                </Modal>
 
                 {/* Channel Behavior Section */}
                 <div className='py-3 border-b border-gray-100'>

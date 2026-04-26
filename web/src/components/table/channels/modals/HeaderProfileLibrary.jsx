@@ -53,16 +53,18 @@ function buildGroupItems(profiles) {
 
 function getProfileUsageHint(t, profile) {
   if (profile.id === 'codex-cli' || profile.id === 'claude-code') {
-    return t('固定请求头标识，官方客户端链路还需要高级参数覆盖透传动态头');
+    return t(
+      '固定客户端标识；如果官方 CLI 仍被拒绝，再到高级设置开启真实请求头透传',
+    );
   }
   if (profile.category === 'browser') {
-    return t('适合伪装常见浏览器访问上游');
+    return t('适合要求浏览器访问特征的上游');
   }
   if (profile.category === 'ai_coding_cli') {
-    return t('适合 AI Coding CLI 类客户端标识');
+    return t('适合 AI 编程客户端标识');
   }
   if (profile.category === 'api_sdk') {
-    return t('适合 API 调试工具或 SDK 风格请求');
+    return t('适合 API 调试工具或 SDK 请求');
   }
   return t('适合保存你自己的完整请求头组合');
 }
@@ -246,16 +248,16 @@ const HeaderProfileLibrary = ({
       <div className='flex items-center justify-between gap-2'>
         <div>
           <Text strong size='small'>
-            {t('请求头模板库')}
+            {t('选择客户端模板')}
           </Text>
           <div>
             <Text type='tertiary' size='small'>
-              {t('点击条目即可选择或取消；鼠标悬停可预览完整请求头')}
+              {t('点击模板即可使用；鼠标悬停可预览完整请求头')}
             </Text>
           </div>
         </div>
         <Button size='small' icon={<IconPlus />} onClick={onCreate}>
-          {t('新建模板')}
+          {t('新建自定义模板')}
         </Button>
       </div>
 
@@ -270,13 +272,13 @@ const HeaderProfileLibrary = ({
           {t('不知道选哪个？')}
         </Text>
         <Space wrap spacing={6} className='mt-1'>
-          <Tag size='small'>{t('普通网页上游：Chrome macOS')}</Tag>
-          <Tag size='small'>{t('AI 编程客户端：选择对应 CLI 模板')}</Tag>
-          <Tag size='small'>{t('调试工具：Postman Runtime')}</Tag>
+          <Tag size='small'>{t('网页上游选 Chrome macOS')}</Tag>
+          <Tag size='small'>{t('AI CLI 选对应工具')}</Tag>
+          <Tag size='small'>{t('调试工具选 Postman')}</Tag>
         </Space>
         <Text type='tertiary' size='small' className='block mt-1'>
           {t(
-            '这里选的是固定请求头组合；如果上游还要真实会话头，再回到高级参数覆盖追加透传模板。',
+            '保持不选就是不修改请求。只有上游识别客户端身份时才需要选择模板。',
           )}
         </Text>
       </div>

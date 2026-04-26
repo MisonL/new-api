@@ -80,7 +80,7 @@ const aiCodingCliProfiles = {
     'Codex CLI',
     'OpenAI Codex CLI/0.1',
     'codex-cli',
-    '固定请求头只用于普通渠道标识；Codex 官方客户端限制场景还必须在高级参数覆盖中启用 Codex CLI 请求头透传模板。',
+    '固定请求头只用于普通渠道标识；Codex 官方客户端限制场景还需要在高级设置中启用 Codex CLI 真实请求头透传。',
     true,
   ),
   'claude-code': buildAiCodingCliProfile(
@@ -88,7 +88,7 @@ const aiCodingCliProfiles = {
     'Claude Code',
     'Claude-Code/1.0',
     'claude-code',
-    '固定请求头只用于普通渠道标识；Claude 官方客户端链路如需保留会话与 SDK 元数据，还必须在高级参数覆盖中启用 Claude CLI 请求头透传模板。',
+    '固定请求头只用于普通渠道标识；Claude 官方客户端链路如需保留会话与 SDK 元数据，还需要在高级设置中启用 Claude CLI 真实请求头透传。',
     true,
   ),
   'gemini-cli': buildAiCodingCliProfile(
@@ -96,7 +96,7 @@ const aiCodingCliProfiles = {
     'Gemini CLI',
     'GeminiCLI/1.0',
     'gemini-cli',
-    '固定请求头用于普通渠道标识；若上游要求真实客户端会话头，应在高级参数覆盖中额外配置 pass_headers。',
+    '固定请求头用于普通渠道标识；若上游要求真实客户端会话头，应在高级设置中额外开启请求头透传。',
   ),
   'qwen-code': buildAiCodingCliProfile(
     'qwen-code',
