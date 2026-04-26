@@ -11,7 +11,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
 var group2model2channels map[string]map[string][]int // enabled channel
@@ -148,15 +147,24 @@ func requestChannelCacheRefreshAsync() {
 }
 
 func getRandomSatisfiedChannelFromCache(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
-	// First, try to find channels with the exact model name.
-	channels := group2model2channels[group][model]
-
-	// If no channels found, try to find channels with the normalized model name.
-	if len(channels) == 0 {
-		normalizedModel := ratio_setting.FormatMatchingModelName(model)
-		channels = group2model2channels[group][normalizedModel]
+	cacheHit := false
+	var lastErr error
+	for _, routeModel := range getGroupModelRouteCandidates(model) {
+		channel, err, hit := getRandomSatisfiedRouteModelFromCache(group, routeModel, retry, excluded)
+		if !hit {
+			continue
+		}
+		cacheHit = true
+		if channel != nil || err != nil {
+			return channel, err, true
+		}
+		lastErr = err
 	}
+	return nil, lastErr, cacheHit
+}
 
+func getRandomSatisfiedRouteModelFromCache(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
+	channels := group2model2channels[group][model]
 	if len(channels) == 0 {
 		return nil, nil, false
 	}
@@ -208,7 +216,7 @@ func getRandomSatisfiedChannelFromCache(group string, model string, retry int, e
 	}
 
 	if len(targetChannels) == 0 {
-		return nil, fmt.Errorf("no channel found, group: %s, model: %s, priority: %d", group, model, targetPriority), true
+		return nil, nil, true
 	}
 
 	// smoothing factor and adjustment

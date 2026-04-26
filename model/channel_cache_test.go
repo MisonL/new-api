@@ -28,9 +28,12 @@ func TestGetRandomSatisfiedChannelFallsBackToDatabaseOnCacheMiss(t *testing.T) {
 	prepareChannelCacheTest(t)
 
 	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
 	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
 	t.Cleanup(func() {
 		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
 	})
 
 	channel := &Channel{
@@ -64,9 +67,12 @@ func TestUpdateChannelStatusRefreshesMemoryCacheAfterEnable(t *testing.T) {
 	prepareChannelCacheTest(t)
 
 	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
 	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
 	t.Cleanup(func() {
 		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
 	})
 
 	channel := &Channel{
@@ -106,9 +112,12 @@ func TestGetRandomSatisfiedChannelExcludingSkipsUsedChannelsAtSamePriority(t *te
 	prepareChannelCacheTest(t)
 
 	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
 	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
 	t.Cleanup(func() {
 		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
 	})
 
 	priority := int64(10)
@@ -141,9 +150,12 @@ func TestIsChannelEnabledForGroupModelFallsBackToDatabaseOnCacheMiss(t *testing.
 	prepareChannelCacheTest(t)
 
 	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
 	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
 	t.Cleanup(func() {
 		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
 	})
 
 	channel := &Channel{
@@ -168,9 +180,12 @@ func TestInitChannelCacheKeepsPreviousSnapshotOnScanError(t *testing.T) {
 	prepareChannelCacheTest(t)
 
 	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
 	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
 	t.Cleanup(func() {
 		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
 	})
 
 	channel := &Channel{
@@ -223,4 +238,226 @@ func TestChannelInfoScanSupportsStringValue(t *testing.T) {
 	require.Equal(t, 0, info.MultiKeySize)
 	require.Equal(t, 0, info.MultiKeyPollingIndex)
 	require.Equal(t, "random", string(info.MultiKeyMode))
+}
+
+func TestGroupModelRouteHelperDisabledWhenExplicitlyTurnedOff(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	channel := &Channel{
+		Id:     105,
+		Name:   "group-model-disabled",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-4o-gizmo-*",
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-4o-gizmo-*",
+		ChannelId: channel.Id,
+		Enabled:   true,
+	}).Error)
+
+	InitChannelCache()
+
+	got, err := GetRandomSatisfiedChannel("default", "gpt-4o-gizmo-special", 0)
+	require.NoError(t, err)
+	require.Nil(t, got)
+	require.False(t, IsChannelEnabledForGroupModel("default", "gpt-4o-gizmo-special", channel.Id))
+}
+
+func TestGetRandomSatisfiedChannelUsesGroupModelRouteHelperWhenEnabled(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	channel := &Channel{
+		Id:     106,
+		Name:   "group-model-cache-hit",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-4o-gizmo-*",
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-4o-gizmo-*",
+		ChannelId: channel.Id,
+		Enabled:   true,
+	}).Error)
+
+	InitChannelCache()
+
+	got, err := GetRandomSatisfiedChannel("default", "gpt-4o-gizmo-special", 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+}
+
+func TestGetRandomSatisfiedChannelFallsBackToDatabaseWithGroupModelRouteHelperWhenEnabled(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	channel := &Channel{
+		Id:     107,
+		Name:   "group-model-db-fallback",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-4o-gizmo-*",
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-4o-gizmo-*",
+		ChannelId: channel.Id,
+		Enabled:   true,
+	}).Error)
+
+	got, err := GetRandomSatisfiedChannel("default", "gpt-4o-gizmo-special", 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+}
+
+func TestGetRandomSatisfiedChannelRetryFallsBackToNormalizedRouteWhenEnabled(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = false
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	channel := &Channel{
+		Id:     109,
+		Name:   "group-model-db-retry-fallback",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-4o-gizmo-*",
+	}
+	priority := int64(5)
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-4o-gizmo-*",
+		ChannelId: channel.Id,
+		Enabled:   true,
+		Priority:  &priority,
+	}).Error)
+
+	got, err := GetRandomSatisfiedChannel("default", "gpt-4o-gizmo-special", 1)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+}
+
+func TestGetRandomSatisfiedChannelFallsThroughExcludedExactRoute(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	exactChannel := &Channel{
+		Id:     110,
+		Name:   "group-model-exact-excluded",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-4o-gizmo-special",
+	}
+	normalizedChannel := &Channel{
+		Id:     111,
+		Name:   "group-model-normalized-fallback",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-4o-gizmo-*",
+	}
+	require.NoError(t, DB.Create(exactChannel).Error)
+	require.NoError(t, DB.Create(normalizedChannel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     exactChannel.Models,
+		ChannelId: exactChannel.Id,
+		Enabled:   true,
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     normalizedChannel.Models,
+		ChannelId: normalizedChannel.Id,
+		Enabled:   true,
+	}).Error)
+
+	InitChannelCache()
+
+	got, err := GetRandomSatisfiedChannelExcluding(
+		"default",
+		"gpt-4o-gizmo-special",
+		0,
+		map[int]struct{}{exactChannel.Id: {}},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, normalizedChannel.Id, got.Id)
+}
+
+func TestIsChannelEnabledForGroupModelUsesGroupModelRouteHelperWhenEnabled(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	channel := &Channel{
+		Id:     108,
+		Name:   "group-model-satisfy",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-4o-gizmo-*",
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-4o-gizmo-*",
+		ChannelId: channel.Id,
+		Enabled:   true,
+	}).Error)
+
+	require.True(t, IsChannelEnabledForGroupModel("default", "gpt-4o-gizmo-special", channel.Id))
 }

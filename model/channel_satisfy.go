@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
 // IsChannelEnabledForGroupModel reports whether a channel is enabled for a group/model pair.
@@ -21,14 +20,8 @@ func IsChannelEnabledForGroupModel(group string, modelName string, channelID int
 		channelSyncLock.RUnlock()
 		return isChannelEnabledForGroupModelDB(group, modelName, channelID)
 	}
-
-	if isChannelIDInList(group2model2channels[group][modelName], channelID) {
-		channelSyncLock.RUnlock()
-		return true
-	}
-	normalized := ratio_setting.FormatMatchingModelName(modelName)
-	if normalized != "" && normalized != modelName {
-		if isChannelIDInList(group2model2channels[group][normalized], channelID) {
+	for _, routeModel := range getGroupModelRouteCandidates(modelName) {
+		if isChannelIDInList(group2model2channels[group][routeModel], channelID) {
 			channelSyncLock.RUnlock()
 			return true
 		}
@@ -54,9 +47,9 @@ func HasResponsesBootstrapRecoveryEnabledChannel(groups []string, modelName stri
 	if len(groups) == 0 || modelName == "" {
 		return false
 	}
-	normalized := ratio_setting.FormatMatchingModelName(modelName)
+	routeModels := getGroupModelRouteCandidates(modelName)
 	if !common.MemoryCacheEnabled {
-		return hasResponsesBootstrapRecoveryEnabledChannelDB(groups, modelName, normalized)
+		return hasResponsesBootstrapRecoveryEnabledChannelDB(groups, routeModels)
 	}
 
 	channelSyncLock.RLock()
@@ -72,7 +65,7 @@ func HasResponsesBootstrapRecoveryEnabledChannel(groups []string, modelName stri
 		if !channelMatchesAnyGroup(channel, groups) {
 			continue
 		}
-		if channelSupportsModel(channel, modelName, normalized) {
+		if channelSupportsAnyModel(channel, routeModels) {
 			return true
 		}
 	}
@@ -83,9 +76,9 @@ func HasResponsesBootstrapRecoveryCandidateChannel(groups []string, modelName st
 	if len(groups) == 0 || modelName == "" {
 		return false
 	}
-	normalized := ratio_setting.FormatMatchingModelName(modelName)
+	routeModels := getGroupModelRouteCandidates(modelName)
 	if !common.MemoryCacheEnabled {
-		return hasResponsesBootstrapRecoveryCandidateChannelDB(groups, modelName, normalized)
+		return hasResponsesBootstrapRecoveryCandidateChannelDB(groups, routeModels)
 	}
 
 	channelSyncLock.RLock()
@@ -101,7 +94,7 @@ func HasResponsesBootstrapRecoveryCandidateChannel(groups []string, modelName st
 		if !channelMatchesAnyGroup(channel, groups) {
 			continue
 		}
-		if channelSupportsModel(channel, modelName, normalized) {
+		if channelSupportsAnyModel(channel, routeModels) {
 			return true
 		}
 	}
@@ -109,28 +102,21 @@ func HasResponsesBootstrapRecoveryCandidateChannel(groups []string, modelName st
 }
 
 func isChannelEnabledForGroupModelDB(group string, modelName string, channelID int) bool {
-	var count int64
 	groupColumn := "abilities." + commonGroupCol
-	err := DB.Model(&Ability{}).
-		Joins("JOIN channels ON channels.id = abilities.channel_id").
-		Where(groupColumn+" = ? and abilities.model = ? and abilities.channel_id = ? and abilities.enabled = ? and channels.status = ?", group, modelName, channelID, true, common.ChannelStatusEnabled).
-		Count(&count).Error
-	if err == nil && count > 0 {
-		return true
+	for _, routeModel := range getGroupModelRouteCandidates(modelName) {
+		var count int64
+		err := DB.Model(&Ability{}).
+			Joins("JOIN channels ON channels.id = abilities.channel_id").
+			Where(groupColumn+" = ? and abilities.model = ? and abilities.channel_id = ? and abilities.enabled = ? and channels.status = ?", group, routeModel, channelID, true, common.ChannelStatusEnabled).
+			Count(&count).Error
+		if err == nil && count > 0 {
+			return true
+		}
 	}
-	normalized := ratio_setting.FormatMatchingModelName(modelName)
-	if normalized == "" || normalized == modelName {
-		return false
-	}
-	count = 0
-	err = DB.Model(&Ability{}).
-		Joins("JOIN channels ON channels.id = abilities.channel_id").
-		Where(groupColumn+" = ? and abilities.model = ? and abilities.channel_id = ? and abilities.enabled = ? and channels.status = ?", group, normalized, channelID, true, common.ChannelStatusEnabled).
-		Count(&count).Error
-	return err == nil && count > 0
+	return false
 }
 
-func hasResponsesBootstrapRecoveryEnabledChannelDB(groups []string, modelName string, normalized string) bool {
+func hasResponsesBootstrapRecoveryEnabledChannelDB(groups []string, routeModels []string) bool {
 	var channels []*Channel
 	if err := DB.Where("status = ?", common.ChannelStatusEnabled).Find(&channels).Error; err != nil {
 		return false
@@ -145,14 +131,14 @@ func hasResponsesBootstrapRecoveryEnabledChannelDB(groups []string, modelName st
 		if !channelMatchesAnyGroup(channel, groups) {
 			continue
 		}
-		if channelSupportsModel(channel, modelName, normalized) {
+		if channelSupportsAnyModel(channel, routeModels) {
 			return true
 		}
 	}
 	return false
 }
 
-func hasResponsesBootstrapRecoveryCandidateChannelDB(groups []string, modelName string, normalized string) bool {
+func hasResponsesBootstrapRecoveryCandidateChannelDB(groups []string, routeModels []string) bool {
 	var channels []*Channel
 	if err := DB.Find(&channels).Error; err != nil {
 		return false
@@ -167,7 +153,7 @@ func hasResponsesBootstrapRecoveryCandidateChannelDB(groups []string, modelName 
 		if !channelMatchesAnyGroup(channel, groups) {
 			continue
 		}
-		if channelSupportsModel(channel, modelName, normalized) {
+		if channelSupportsAnyModel(channel, routeModels) {
 			return true
 		}
 	}
@@ -185,14 +171,16 @@ func channelMatchesAnyGroup(channel *Channel, groups []string) bool {
 	return false
 }
 
-func channelSupportsModel(channel *Channel, modelName string, normalized string) bool {
+func channelSupportsAnyModel(channel *Channel, routeModels []string) bool {
+	if len(routeModels) == 0 {
+		return false
+	}
 	for _, model := range channel.GetModels() {
 		trimmed := strings.TrimSpace(model)
-		if trimmed == modelName {
-			return true
-		}
-		if normalized != "" && normalized != modelName && trimmed == normalized {
-			return true
+		for _, routeModel := range routeModels {
+			if trimmed == routeModel {
+				return true
+			}
 		}
 	}
 	return false

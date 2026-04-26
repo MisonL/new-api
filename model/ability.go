@@ -13,6 +13,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+var errNoMatchingAbilities = errors.New("no matching abilities found")
+
 type Ability struct {
 	Group     string  `json:"group" gorm:"type:varchar(64);primaryKey;autoIncrement:false"`
 	Model     string  `json:"model" gorm:"type:varchar(255);primaryKey;autoIncrement:false"`
@@ -81,8 +83,7 @@ func getPriority(group string, model string, retry int) (int, error) {
 	}
 
 	if len(priorities) == 0 {
-		// 如果没有查询到优先级，则返回错误
-		return 0, errors.New("数据库一致性被破坏")
+		return 0, errNoMatchingAbilities
 	}
 
 	// 确定要使用的优先级
@@ -113,12 +114,28 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 }
 
 func GetChannel(group string, model string, retry int) (*Channel, error) {
+	for _, routeModel := range getGroupModelRouteCandidates(model) {
+		channel, found, err := getChannelByRouteModel(group, routeModel, retry)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			return channel, nil
+		}
+	}
+	return nil, nil
+}
+
+func getChannelByRouteModel(group string, model string, retry int) (*Channel, bool, error) {
 	var abilities []Ability
 
 	var err error = nil
 	channelQuery, err := getChannelQuery(group, model, retry)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, errNoMatchingAbilities) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 	if common.UsingSQLite || common.UsingPostgreSQL {
 		err = channelQuery.Order("weight DESC").Find(&abilities).Error
@@ -126,7 +143,7 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 		err = channelQuery.Order("weight DESC").Find(&abilities).Error
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	channel := Channel{}
 	if len(abilities) > 0 {
@@ -146,10 +163,10 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 			}
 		}
 	} else {
-		return nil, nil
+		return nil, false, nil
 	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
-	return &channel, err
+	return &channel, true, err
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {

@@ -10,15 +10,18 @@ func withResponsesBootstrapCacheFixture(t *testing.T, channels map[int]*Channel)
 	t.Helper()
 
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	originalGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
 	originalChannelsIDM := channelsIDM
 
 	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
 	channelSyncLock.Lock()
 	channelsIDM = channels
 	channelSyncLock.Unlock()
 
 	t.Cleanup(func() {
 		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = originalGroupModelRouteHelperEnabled
 		channelSyncLock.Lock()
 		channelsIDM = originalChannelsIDM
 		channelSyncLock.Unlock()
@@ -93,6 +96,28 @@ func TestHasResponsesBootstrapRecoveryCandidateChannelRejectsNonOptInChannel(t *
 
 	if HasResponsesBootstrapRecoveryCandidateChannel([]string{"default"}, "gpt-5") {
 		t.Fatal("non-opt-in channel should not satisfy bootstrap recovery candidate lookup")
+	}
+}
+
+func TestHasResponsesBootstrapRecoveryCandidateChannelRespectsRouteHelperFlag(t *testing.T) {
+	withResponsesBootstrapCacheFixture(t, map[int]*Channel{
+		1: {
+			Id:            1,
+			Status:        common.ChannelStatusEnabled,
+			Group:         "default",
+			Models:        "gpt-4o-gizmo-*",
+			OtherSettings: `{"responses_stream_bootstrap_recovery_enabled":true}`,
+		},
+	})
+
+	common.GroupModelRouteHelperEnabled = false
+	if HasResponsesBootstrapRecoveryCandidateChannel([]string{"default"}, "gpt-4o-gizmo-special") {
+		t.Fatal("disabled route helper should not match normalized bootstrap recovery models")
+	}
+
+	common.GroupModelRouteHelperEnabled = true
+	if !HasResponsesBootstrapRecoveryCandidateChannel([]string{"default"}, "gpt-4o-gizmo-special") {
+		t.Fatal("enabled route helper should match normalized bootstrap recovery models")
 	}
 }
 

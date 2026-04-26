@@ -1,13 +1,16 @@
 package middleware
 
 import (
+	"bytes"
 	"compress/gzip"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/andybalholm/brotli"
 	"github.com/gin-gonic/gin"
+	"github.com/klauspost/compress/zstd"
 )
 
 type readCloser struct {
@@ -39,7 +42,7 @@ func DecompressRequestMiddleware() gin.HandlerFunc {
 			return http.MaxBytesReader(c.Writer, body, maxBytes)
 		}
 
-		switch c.GetHeader("Content-Encoding") {
+		switch strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Encoding"))) {
 		case "gzip":
 			gzipReader, err := gzip.NewReader(origBody)
 			if err != nil {
@@ -61,6 +64,33 @@ func DecompressRequestMiddleware() gin.HandlerFunc {
 			c.Request.Body = wrapMaxBytes(&readCloser{
 				Reader: reader,
 				closeFn: func() error {
+					return origBody.Close()
+				},
+			})
+			c.Request.Header.Del("Content-Encoding")
+		case "zstd":
+			reader, err := zstd.NewReader(origBody)
+			if err != nil {
+				_ = origBody.Close()
+				c.AbortWithStatus(http.StatusBadRequest)
+				return
+			}
+			var firstByte [1]byte
+			n, readErr := reader.Read(firstByte[:])
+			if readErr != nil && readErr != io.EOF {
+				reader.Close()
+				_ = origBody.Close()
+				c.AbortWithStatus(http.StatusBadRequest)
+				return
+			}
+			var decompressed io.Reader = reader
+			if n > 0 {
+				decompressed = io.MultiReader(bytes.NewReader(firstByte[:n]), reader)
+			}
+			c.Request.Body = wrapMaxBytes(&readCloser{
+				Reader: decompressed,
+				closeFn: func() error {
+					reader.Close()
 					return origBody.Close()
 				},
 			})
