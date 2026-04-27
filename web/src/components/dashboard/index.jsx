@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect } from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
 import { getRelativeTime } from '../../helpers';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -57,6 +57,7 @@ const Dashboard = () => {
   // ========== Context ==========
   const [userState, userDispatch] = useContext(UserContext);
   const [statusState, statusDispatch] = useContext(StatusContext);
+  const userQuotaDataCacheRef = useRef(new Map());
 
   // ========== 主要数据管理 ==========
   const dashboardData = useDashboardData(userState, userDispatch, statusState);
@@ -87,36 +88,73 @@ const Dashboard = () => {
   );
 
   // ========== 数据处理 ==========
-  const loadUserData = async () => {
+  const getUserDataCacheKey = (overrideInputs, overrideDefaultTime) =>
+    [
+      overrideInputs.start_timestamp,
+      overrideInputs.end_timestamp,
+      overrideDefaultTime,
+    ].join('|');
+
+  const loadUserData = async (
+    overrideInputs = dashboardData.inputs,
+    overrideDefaultTime = dashboardData.dataExportDefaultTime,
+    options = {},
+  ) => {
     if (dashboardData.isAdminUser) {
-      const userData = await dashboardData.loadUserQuotaData();
-      if (userData && userData.length > 0) {
-        dashboardCharts.updateUserChartData(userData);
+      const cacheKey = getUserDataCacheKey(overrideInputs, overrideDefaultTime);
+      if (!options.force && userQuotaDataCacheRef.current.has(cacheKey)) {
+        const cachedData = userQuotaDataCacheRef.current.get(cacheKey);
+        dashboardCharts.updateUserChartData(cachedData, overrideDefaultTime);
+        return cachedData;
       }
+      const userData = await dashboardData.loadUserQuotaData(
+        overrideInputs,
+        overrideDefaultTime,
+      );
+      if (Array.isArray(userData)) {
+        userQuotaDataCacheRef.current.set(cacheKey, userData);
+        dashboardCharts.updateUserChartData(userData, overrideDefaultTime);
+      }
+      return userData;
     }
+    return [];
   };
 
   const initChart = async () => {
     await dashboardData.loadQuotaData().then((data) => {
       if (data && data.length > 0) {
-        dashboardCharts.updateChartData(data);
+        dashboardCharts.updateChartData(
+          data,
+          dashboardData.dataExportDefaultTime,
+        );
       }
     });
-    await loadUserData();
     await dashboardData.loadUptimeData();
   };
 
   const handleRefresh = async () => {
     const data = await dashboardData.refresh();
     if (data && data.length > 0) {
-      dashboardCharts.updateChartData(data);
+      dashboardCharts.updateChartData(
+        data,
+        dashboardData.dataExportDefaultTime,
+      );
     }
-    await loadUserData();
+    if (['5', '6'].includes(dashboardData.activeChartTab)) {
+      await loadUserData(
+        dashboardData.inputs,
+        dashboardData.dataExportDefaultTime,
+        { force: true },
+      );
+    }
   };
 
   const handleRangePresetChange = async (preset) => {
     if (preset === 'custom') {
       dashboardData.activateCustomRange();
+      return;
+    }
+    if (preset === dashboardData.activeRangePreset) {
       return;
     }
     const rangeState = dashboardData.applyChartRangePreset(preset);
@@ -128,7 +166,10 @@ const Dashboard = () => {
       rangeState.nextDefaultTime,
     );
     if (data && data.length > 0) {
-      dashboardCharts.updateChartData(data);
+      dashboardCharts.updateChartData(data, rangeState.nextDefaultTime);
+    }
+    if (['5', '6'].includes(dashboardData.activeChartTab)) {
+      await loadUserData(rangeState.nextInputs, rangeState.nextDefaultTime);
     }
   };
 
@@ -142,13 +183,25 @@ const Dashboard = () => {
       rangeState.nextDefaultTime,
     );
     if (data && data.length > 0) {
-      dashboardCharts.updateChartData(data);
+      dashboardCharts.updateChartData(data, rangeState.nextDefaultTime);
+    }
+    if (['5', '6'].includes(dashboardData.activeChartTab)) {
+      await loadUserData(rangeState.nextInputs, rangeState.nextDefaultTime);
     }
   };
 
   const handleSearchConfirm = async () => {
     await dashboardData.handleSearchConfirm(dashboardCharts.updateChartData);
-    await loadUserData();
+    if (['5', '6'].includes(dashboardData.activeChartTab)) {
+      await loadUserData();
+    }
+  };
+
+  const handleChartTabChange = async (activeKey) => {
+    dashboardData.setActiveChartTab(activeKey);
+    if (['5', '6'].includes(activeKey)) {
+      await loadUserData();
+    }
   };
 
   // ========== 数据准备 ==========
@@ -222,7 +275,7 @@ const Dashboard = () => {
         >
           <ChartsPanel
             activeChartTab={dashboardData.activeChartTab}
-            setActiveChartTab={dashboardData.setActiveChartTab}
+            setActiveChartTab={handleChartTabChange}
             spec_line={dashboardCharts.spec_line}
             spec_model_line={dashboardCharts.spec_model_line}
             spec_pie={dashboardCharts.spec_pie}
@@ -235,12 +288,13 @@ const Dashboard = () => {
             FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
             hasApiInfoPanel={dashboardData.hasApiInfoPanel}
             customRangeDraft={dashboardData.customRangeDraft}
-            timeOptions={dashboardData.timeOptions}
+            timeOptions={dashboardData.customRangeTimeOptions}
             activeRangePreset={dashboardData.activeRangePreset}
             quickRangeOptions={dashboardData.quickRangeOptions}
             handleRangePresetChange={handleRangePresetChange}
             handleCustomRangeChange={dashboardData.handleCustomRangeChange}
             handleCustomRangeConfirm={handleCustomRangeConfirm}
+            loading={dashboardData.loading}
             t={dashboardData.t}
           />
 

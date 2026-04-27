@@ -36,6 +36,7 @@ import {
   initializeMaps,
   processUserData,
 } from '../../helpers/dashboard';
+import { DEFAULTS } from '../../constants/dashboard.constants';
 
 const USER_COLORS = [
   '#3b82f6',
@@ -49,6 +50,27 @@ const USER_COLORS = [
   '#6366f1',
   '#14b8a6',
 ];
+
+const getTopModelSet = (modelTotals, limit) =>
+  new Set(
+    Array.from(modelTotals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([model]) => model),
+  );
+
+const getVisibleModels = (uniqueModels, topModelSet, otherLabel) => {
+  const visibleModels = Array.from(uniqueModels).filter((model) =>
+    topModelSet.has(model),
+  );
+  if (visibleModels.length < uniqueModels.size) {
+    visibleModels.push(otherLabel);
+  }
+  return visibleModels;
+};
+
+const getAggregatedValue = (aggregatedData, time, model, field) =>
+  aggregatedData.get(`${time}-${model}`)?.[field] || 0;
 
 export const useDashboardCharts = (
   dataExportDefaultTime,
@@ -415,10 +437,11 @@ export const useDashboardCharts = (
   }, []);
 
   const updateChartData = useCallback(
-    (data) => {
+    (data, overrideDefaultTime = dataExportDefaultTime) => {
+      const chartDefaultTime = overrideDefaultTime || dataExportDefaultTime;
       const processedData = processRawData(
         data,
-        dataExportDefaultTime,
+        chartDefaultTime,
         initializeMaps,
         updateMapValue,
       );
@@ -439,7 +462,7 @@ export const useDashboardCharts = (
         timeQuotaMap,
         timeTokensMap,
         timeCountMap,
-        dataExportDefaultTime,
+        chartDefaultTime,
       );
       setTrendData(trendDataResult);
 
@@ -448,40 +471,92 @@ export const useDashboardCharts = (
 
       const aggregatedData = aggregateDataByTimeAndModel(
         data,
-        dataExportDefaultTime,
+        chartDefaultTime,
       );
 
-      const modelTotals = new Map();
+      const modelCountTotals = new Map();
+      const modelQuotaTotals = new Map();
       for (let [_, value] of aggregatedData) {
-        updateMapValue(modelTotals, value.model, value.count);
+        updateMapValue(modelCountTotals, value.model, value.count);
+        updateMapValue(modelQuotaTotals, value.model, value.quota);
       }
-
-      const newPieData = Array.from(modelTotals)
-        .map(([model, count]) => ({
-          type: model,
-          value: count,
-        }))
-        .sort((a, b) => b.value - a.value);
 
       const chartTimePoints = generateChartTimePoints(
         aggregatedData,
         data,
-        dataExportDefaultTime,
+        chartDefaultTime,
       );
+      const otherLabel = t('其他');
+      const maxSeriesModels = DEFAULTS.MAX_DASHBOARD_SERIES_MODELS;
+      const topQuotaModelSet = getTopModelSet(
+        modelQuotaTotals,
+        maxSeriesModels,
+      );
+      const topCountModelSet = getTopModelSet(
+        modelCountTotals,
+        maxSeriesModels,
+      );
+      const quotaChartModels = getVisibleModels(
+        uniqueModels,
+        topQuotaModelSet,
+        otherLabel,
+      );
+      const countChartModels = getVisibleModels(
+        uniqueModels,
+        topCountModelSet,
+        otherLabel,
+      );
+      const displayModels = new Set([...quotaChartModels, ...countChartModels]);
+      const displayModelColors = generateModelColors(
+        displayModels,
+        newModelColors,
+      );
+      const newPieData = countChartModels
+        .map((model) => {
+          if (model !== otherLabel) {
+            return {
+              type: model,
+              value: modelCountTotals.get(model) || 0,
+            };
+          }
+          let otherCount = 0;
+          uniqueModels.forEach((item) => {
+            if (!topCountModelSet.has(item)) {
+              otherCount += modelCountTotals.get(item) || 0;
+            }
+          });
+          return {
+            type: otherLabel,
+            value: otherCount,
+          };
+        })
+        .filter((item) => item.value > 0)
+        .sort((a, b) => b.value - a.value);
 
       let newLineData = [];
 
       chartTimePoints.forEach((time) => {
-        let timeData = Array.from(uniqueModels).map((model) => {
-          const key = `${time}-${model}`;
-          const aggregated = aggregatedData.get(key);
+        let otherQuota = 0;
+        uniqueModels.forEach((model) => {
+          if (!topQuotaModelSet.has(model)) {
+            otherQuota += getAggregatedValue(
+              aggregatedData,
+              time,
+              model,
+              'quota',
+            );
+          }
+        });
+        let timeData = quotaChartModels.map((model) => {
+          const rawQuota =
+            model === otherLabel
+              ? otherQuota
+              : getAggregatedValue(aggregatedData, time, model, 'quota');
           return {
             Time: time,
             Model: model,
-            rawQuota: aggregated?.quota || 0,
-            Usage: aggregated?.quota
-              ? getQuotaWithUnit(aggregated.quota, 4)
-              : 0,
+            rawQuota,
+            Usage: rawQuota ? getQuotaWithUnit(rawQuota, 4) : 0,
           };
         });
 
@@ -497,7 +572,7 @@ export const useDashboardCharts = (
         setSpecPie,
         newPieData,
         `${t('总计')}：${renderNumber(totalTimes)}`,
-        newModelColors,
+        displayModelColors,
         'id0',
       );
 
@@ -505,20 +580,32 @@ export const useDashboardCharts = (
         setSpecLine,
         newLineData,
         `${t('总计')}：${renderQuota(totalQuota, 2)}`,
-        newModelColors,
+        displayModelColors,
         'barData',
       );
 
       // ===== 模型调用次数折线图 =====
       let modelLineData = [];
       chartTimePoints.forEach((time) => {
-        const timeData = Array.from(uniqueModels).map((model) => {
-          const key = `${time}-${model}`;
-          const aggregated = aggregatedData.get(key);
+        let otherCount = 0;
+        uniqueModels.forEach((model) => {
+          if (!topCountModelSet.has(model)) {
+            otherCount += getAggregatedValue(
+              aggregatedData,
+              time,
+              model,
+              'count',
+            );
+          }
+        });
+        const timeData = countChartModels.map((model) => {
           return {
             Time: time,
             Model: model,
-            Count: aggregated?.count || 0,
+            Count:
+              model === otherLabel
+                ? otherCount
+                : getAggregatedValue(aggregatedData, time, model, 'count'),
           };
         });
         modelLineData.push(...timeData);
@@ -527,7 +614,7 @@ export const useDashboardCharts = (
 
       // ===== 模型调用次数排行柱状图 =====
       const MAX_RANK_MODELS = 20;
-      const allRankData = Array.from(modelTotals)
+      const allRankData = Array.from(modelCountTotals)
         .map(([model, count]) => ({
           Model: model,
           Count: count,
@@ -549,7 +636,7 @@ export const useDashboardCharts = (
         setSpecModelLine,
         modelLineData,
         `${t('总计')}：${renderNumber(totalTimes)}`,
-        newModelColors,
+        displayModelColors,
         'lineData',
       );
 
@@ -557,7 +644,7 @@ export const useDashboardCharts = (
         setSpecRankBar,
         rankData,
         `${t('总计')}：${renderNumber(totalTimes)}`,
-        newModelColors,
+        displayModelColors,
         'rankData',
       );
 
@@ -583,10 +670,11 @@ export const useDashboardCharts = (
 
   // ========== 用户维度图表数据处理 ==========
   const updateUserChartData = useCallback(
-    (data) => {
+    (data, overrideDefaultTime = dataExportDefaultTime) => {
+      const chartDefaultTime = overrideDefaultTime || dataExportDefaultTime;
       const { rankingData, trendData: userTrend } = processUserData(
         data,
-        dataExportDefaultTime,
+        chartDefaultTime,
         10,
       );
 

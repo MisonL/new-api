@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Modal, Typography } from '@douyinfe/semi-ui';
 import { IconEyeOpened } from '@douyinfe/semi-icons';
@@ -49,6 +49,8 @@ const { Text } = Typography;
 
 export const useLogsData = () => {
   const { t } = useTranslation();
+  const logsRequestSeq = useRef(0);
+  const logsAbortControllerRef = useRef(null);
 
   // Define column keys for selection
   const COLUMN_KEYS = {
@@ -92,7 +94,8 @@ export const useLogsData = () => {
   // Statistics state
   const [stat, setStat] = useState({
     quota: 0,
-    token: 0,
+    rpm: 0,
+    tpm: 0,
   });
 
   // Form state
@@ -243,6 +246,14 @@ export const useLogsData = () => {
   }, [visibleColumns]);
 
   useEffect(() => {
+    return () => {
+      if (logsAbortControllerRef.current) {
+        logsAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem(BILLING_DISPLAY_MODE_STORAGE_KEY, billingDisplayMode);
   }, [BILLING_DISPLAY_MODE_STORAGE_KEY, billingDisplayMode]);
 
@@ -383,13 +394,18 @@ export const useLogsData = () => {
       return;
     }
     setLoadingStat(true);
-    if (isAdminUser) {
-      await getLogStat();
-    } else {
-      await getLogSelfStat();
+    try {
+      if (isAdminUser) {
+        await getLogStat();
+      } else {
+        await getLogSelfStat();
+      }
+      setShowStat(true);
+    } catch (error) {
+      showError(error?.message || t('查询统计数据失败'));
+    } finally {
+      setLoadingStat(false);
     }
-    setShowStat(true);
-    setLoadingStat(false);
   };
 
   // User info function
@@ -845,49 +861,72 @@ export const useLogsData = () => {
 
   // Load logs function
   const loadLogs = async (startIdx, pageSize, customLogType = null) => {
+    const requestSeq = ++logsRequestSeq.current;
     setLoading(true);
-
-    let url = '';
-    const {
-      username,
-      token_name,
-      model_name,
-      start_timestamp,
-      end_timestamp,
-      channel,
-      group,
-      request_id,
-      logType: formLogType,
-    } = getFormValues();
-
-    const currentLogType =
-      customLogType !== null
-        ? customLogType
-        : formLogType !== undefined
-          ? formLogType
-          : logType;
-
-    let localStartTimestamp = Date.parse(start_timestamp) / 1000;
-    let localEndTimestamp = Date.parse(end_timestamp) / 1000;
-    if (isAdminUser) {
-      url = `/api/log/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}&request_id=${request_id}`;
-    } else {
-      url = `/api/log/self/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}&request_id=${request_id}`;
+    if (logsAbortControllerRef.current) {
+      logsAbortControllerRef.current.abort();
     }
-    url = encodeURI(url);
-    const res = await API.get(url);
-    const { success, message, data } = res.data;
-    if (success) {
-      const newPageData = data.items;
-      setActivePage(data.page);
-      setPageSize(data.page_size);
-      setLogCount(data.total);
+    const abortController = new AbortController();
+    logsAbortControllerRef.current = abortController;
 
-      setLogsFormat(newPageData);
-    } else {
-      showError(message);
+    try {
+      let url = '';
+      const {
+        username,
+        token_name,
+        model_name,
+        start_timestamp,
+        end_timestamp,
+        channel,
+        group,
+        request_id,
+        logType: formLogType,
+      } = getFormValues();
+
+      const currentLogType =
+        customLogType !== null
+          ? customLogType
+          : formLogType !== undefined
+            ? formLogType
+            : logType;
+
+      let localStartTimestamp = Date.parse(start_timestamp) / 1000;
+      let localEndTimestamp = Date.parse(end_timestamp) / 1000;
+      if (isAdminUser) {
+        url = `/api/log/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}&request_id=${request_id}`;
+      } else {
+        url = `/api/log/self/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}&request_id=${request_id}`;
+      }
+      url = encodeURI(url);
+      const res = await API.get(url, {
+        signal: abortController.signal,
+        skipErrorHandler: true,
+        disableDuplicate: true,
+      });
+      if (requestSeq !== logsRequestSeq.current) {
+        return;
+      }
+      const { success, message, data } = res.data;
+      if (success) {
+        const newPageData = data.items;
+        setActivePage(data.page);
+        setPageSize(data.page_size);
+        setLogCount(data.total);
+
+        setLogsFormat(newPageData);
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      if (error?.code !== 'ERR_CANCELED') {
+        showError(error?.message || t('查询日志失败'));
+      }
+    } finally {
+      if (requestSeq === logsRequestSeq.current) {
+        logsAbortControllerRef.current = null;
+        setLoading(false);
+      }
     }
-    setLoading(false);
   };
 
   // Page handlers
@@ -900,7 +939,7 @@ export const useLogsData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    loadLogs(activePage, size)
+    loadLogs(1, size)
       .then()
       .catch((reason) => {
         showError(reason);
@@ -908,10 +947,14 @@ export const useLogsData = () => {
   };
 
   // Refresh function
-  const refresh = async () => {
-    setActivePage(1);
-    handleEyeClick();
-    await loadLogs(1, pageSize);
+  const refresh = async (page = 1, options = {}) => {
+    const targetPage = Number.isInteger(page) ? page : 1;
+    const shouldRefreshStat = options?.refreshStats ?? showStat;
+    setActivePage(targetPage);
+    await loadLogs(targetPage, pageSize);
+    if (shouldRefreshStat) {
+      await handleEyeClick();
+    }
   };
 
   const deleteLog = async (record) => {
@@ -1008,13 +1051,6 @@ export const useLogsData = () => {
         showError(reason);
       });
   }, []);
-
-  // Initialize statistics when formApi is available
-  useEffect(() => {
-    if (formApi) {
-      handleEyeClick();
-    }
-  }, [formApi]);
 
   // Check if any record has expandable content
   const hasExpandableRows = () => {

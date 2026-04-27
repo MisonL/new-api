@@ -419,6 +419,7 @@ export const processRawData = (
 
   // 检查数据是否跨年
   const showYear = isDataCrossYear(data.map((item) => item.created_at));
+  const timePointSet = new Set();
 
   data.forEach((item) => {
     result.uniqueModels.add(item.model_name);
@@ -431,7 +432,8 @@ export const processRawData = (
       dataExportDefaultTime,
       showYear,
     );
-    if (!result.timePoints.includes(timeKey)) {
+    if (!timePointSet.has(timeKey)) {
+      timePointSet.add(timeKey);
       result.timePoints.push(timeKey);
     }
 

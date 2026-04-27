@@ -56,12 +56,17 @@ func parseDashboardRange(c *gin.Context, maxSpanSeconds int64, spanErrorMessage 
 }
 
 func GetAllQuotaDates(c *gin.Context) {
-	startTimestamp, endTimestamp, ok := parseDashboardRange(c, 0, "")
+	startTimestamp, endTimestamp, ok := parseDashboardRange(
+		c,
+		dashboardAdminChannelRangeMaxSpanSeconds,
+		"时间跨度不能超过 3 个月",
+	)
 	if !ok {
 		return
 	}
 	username := c.Query("username")
-	dates, err := model.GetAllQuotaDates(startTimestamp, endTimestamp, username)
+	defaultTime := model.NormalizeDashboardTimeGranularityForRange(c.Query("default_time"), startTimestamp, endTimestamp)
+	dates, err := model.GetAllQuotaDates(startTimestamp, endTimestamp, username, defaultTime)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -82,7 +87,8 @@ func GetQuotaDatesByUser(c *gin.Context) {
 	if !ok {
 		return
 	}
-	dates, err := model.GetQuotaDataGroupByUser(startTimestamp, endTimestamp)
+	defaultTime := model.NormalizeDashboardTimeGranularityForRange(c.Query("default_time"), startTimestamp, endTimestamp)
+	dates, err := model.GetQuotaDataGroupByUser(startTimestamp, endTimestamp, defaultTime)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -104,7 +110,8 @@ func GetUserQuotaDates(c *gin.Context) {
 	if !ok {
 		return
 	}
-	dates, err := model.GetQuotaDataByUserId(userId, startTimestamp, endTimestamp)
+	defaultTime := model.NormalizeDashboardTimeGranularityForRange(c.Query("default_time"), startTimestamp, endTimestamp)
+	dates, err := model.GetQuotaDataByUserId(userId, startTimestamp, endTimestamp, defaultTime)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -126,7 +133,8 @@ func GetAllChannelQuotaDates(c *gin.Context) {
 		return
 	}
 	username := c.Query("username")
-	dates, err := model.GetAllChannelQuotaData(startTimestamp, endTimestamp, username)
+	defaultTime := model.NormalizeDashboardTimeGranularityForRange(c.Query("default_time"), startTimestamp, endTimestamp)
+	dates, err := model.GetAllChannelQuotaData(startTimestamp, endTimestamp, username, defaultTime)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -148,7 +156,8 @@ func GetUserChannelQuotaDates(c *gin.Context) {
 	if !ok {
 		return
 	}
-	dates, err := model.GetChannelQuotaDataByUserId(userId, startTimestamp, endTimestamp)
+	defaultTime := model.NormalizeDashboardTimeGranularityForRange(c.Query("default_time"), startTimestamp, endTimestamp)
+	dates, err := model.GetChannelQuotaDataByUserId(userId, startTimestamp, endTimestamp, defaultTime)
 	if err != nil {
 		common.ApiError(c, err)
 		return

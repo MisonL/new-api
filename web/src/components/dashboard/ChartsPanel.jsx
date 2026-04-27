@@ -53,6 +53,7 @@ const ChartsPanel = ({
   handleRangePresetChange,
   handleCustomRangeChange,
   handleCustomRangeConfirm,
+  loading,
   t,
 }) => {
   const customRangeValue = [
@@ -117,6 +118,7 @@ const ChartsPanel = ({
                   type={isActive ? 'primary' : 'tertiary'}
                   theme={isActive ? 'solid' : 'borderless'}
                   className='shrink-0 whitespace-nowrap'
+                  disabled={loading}
                   onClick={() => handleRangePresetChange(option.value)}
                 >
                   {option.label}
@@ -128,6 +130,7 @@ const ChartsPanel = ({
               type={activeRangePreset === 'custom' ? 'primary' : 'tertiary'}
               theme={activeRangePreset === 'custom' ? 'solid' : 'light'}
               className='shrink-0 whitespace-nowrap'
+              disabled={loading}
               onClick={() => handleRangePresetChange('custom')}
             >
               {t('自定义范围')}
@@ -149,6 +152,7 @@ const ChartsPanel = ({
             placeholder={[t('开始时间'), t('结束时间')]}
             showClear
             size='small'
+            disabled={loading}
             className='min-w-0 w-full lg:max-w-[420px]'
           />
           <div className='flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-end lg:w-auto'>
@@ -160,13 +164,17 @@ const ChartsPanel = ({
               }
               placeholder={t('时间粒度')}
               size='small'
+              disabled={loading}
               className='w-full sm:w-36'
             />
             <Button
               type='primary'
               size='small'
               className='w-full sm:w-auto'
-              disabled={!hasCompleteCustomRange || !isCustomRangeOrderValid}
+              loading={loading}
+              disabled={
+                loading || !hasCompleteCustomRange || !isCustomRangeOrderValid
+              }
               onClick={handleCustomRangeConfirm}
             >
               {t('应用')}

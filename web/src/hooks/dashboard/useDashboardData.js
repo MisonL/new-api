@@ -24,6 +24,7 @@ import { API, isAdmin, showError, timestamp2string } from '../../helpers';
 import {
   getInitialChartRange,
   getDashboardQuickRangeConfig,
+  normalizeDefaultTime,
   parseDashboardTimestamp,
   setStoredChartRange,
 } from '../../helpers/dashboard';
@@ -36,6 +37,8 @@ import { useIsMobile } from '../common/useIsMobile';
 import { useMinimumLoadingTime } from '../common/useMinimumLoadingTime';
 
 const END_TIME_BUFFER_SECONDS = 3600;
+const CUSTOM_RANGE_DAY_THRESHOLD_SECONDS = 7 * 24 * 60 * 60;
+const CUSTOM_RANGE_WEEK_THRESHOLD_SECONDS = 30 * 24 * 60 * 60;
 
 // useDashboardData manages dashboard filters, chart data, and auxiliary panels.
 export const useDashboardData = (userState, userDispatch, statusState) => {
@@ -44,6 +47,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const isMobile = useIsMobile();
   const initialized = useRef(false);
   const quotaRequestSeq = useRef(0);
+  const quotaAbortControllerRef = useRef(null);
 
   // Keep a small buffer so the latest records are not clipped near "now".
   const getCurrentEndTimestamp = useCallback(
@@ -83,10 +87,42 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     );
   }, []);
 
+  const normalizeRangeGranularity = useCallback(
+    (startTimestamp, endTimestamp, granularity) => {
+      const normalizedGranularity = normalizeDefaultTime(granularity);
+      const startTime = parseDashboardTimestamp(startTimestamp);
+      const endTime = parseDashboardTimestamp(endTimestamp);
+      if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) {
+        return normalizedGranularity;
+      }
+
+      const spanSeconds = (endTime - startTime) / 1000;
+      if (spanSeconds > CUSTOM_RANGE_WEEK_THRESHOLD_SECONDS) {
+        return 'week';
+      }
+      if (
+        spanSeconds > CUSTOM_RANGE_DAY_THRESHOLD_SECONDS &&
+        normalizedGranularity === 'hour'
+      ) {
+        return 'day';
+      }
+      return normalizedGranularity;
+    },
+    [],
+  );
+
   const initialChartRange = useMemo(() => {
     const endTimestamp = getCurrentEndTimestamp();
-    return getInitialChartRange(endTimestamp);
-  }, [getCurrentEndTimestamp]);
+    const range = getInitialChartRange(endTimestamp);
+    return {
+      ...range,
+      default_time: normalizeRangeGranularity(
+        range.start_timestamp,
+        range.end_timestamp,
+        range.default_time,
+      ),
+    };
+  }, [getCurrentEndTimestamp, normalizeRangeGranularity]);
 
   // ========== 基础状态 ==========
   const [loading, setLoading] = useState(false);
@@ -175,6 +211,28 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     [t],
   );
 
+  const customRangeTimeOptions = useMemo(
+    () =>
+      TIME_OPTIONS.map((option) => {
+        const normalizedValue = normalizeRangeGranularity(
+          customRangeDraft.start_timestamp,
+          customRangeDraft.end_timestamp,
+          option.value,
+        );
+        return {
+          ...option,
+          disabled: normalizedValue !== option.value,
+          label: t(option.label),
+        };
+      }),
+    [
+      customRangeDraft.end_timestamp,
+      customRangeDraft.start_timestamp,
+      normalizeRangeGranularity,
+      t,
+    ],
+  );
+
   const quickRangeOptions = useMemo(
     () => [
       { label: t('最近24小时'), value: '24h' },
@@ -220,18 +278,42 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   }, [t, userState?.user?.username]);
 
   // ========== 回调函数 ==========
-  const handleInputChange = useCallback((value, name) => {
-    if (name === 'data_export_default_time') {
-      setDataExportDefaultTime(value);
-      localStorage.setItem(STORAGE_KEYS.DATA_EXPORT_DEFAULT_TIME, value);
-      setActiveRangePreset('custom');
-      return;
-    }
-    if (name === 'start_timestamp' || name === 'end_timestamp') {
-      setActiveRangePreset('custom');
-    }
-    setInputs((inputs) => ({ ...inputs, [name]: value }));
-  }, []);
+  const handleInputChange = useCallback(
+    (value, name) => {
+      if (name === 'data_export_default_time') {
+        const normalizedDefaultTime = normalizeRangeGranularity(
+          inputs.start_timestamp,
+          inputs.end_timestamp,
+          value,
+        );
+        setDataExportDefaultTime(normalizedDefaultTime);
+        localStorage.setItem(
+          STORAGE_KEYS.DATA_EXPORT_DEFAULT_TIME,
+          normalizedDefaultTime,
+        );
+        setActiveRangePreset('custom');
+        return;
+      }
+      if (name === 'start_timestamp' || name === 'end_timestamp') {
+        const nextInputs = { ...inputs, [name]: value };
+        const normalizedDefaultTime = normalizeRangeGranularity(
+          nextInputs.start_timestamp,
+          nextInputs.end_timestamp,
+          dataExportDefaultTime,
+        );
+        setActiveRangePreset('custom');
+        setDataExportDefaultTime(normalizedDefaultTime);
+        localStorage.setItem(
+          STORAGE_KEYS.DATA_EXPORT_DEFAULT_TIME,
+          normalizedDefaultTime,
+        );
+        setInputs(nextInputs);
+        return;
+      }
+      setInputs((inputs) => ({ ...inputs, [name]: value }));
+    },
+    [dataExportDefaultTime, inputs, normalizeRangeGranularity],
+  );
 
   const persistChartRange = useCallback(
     (
@@ -312,18 +394,24 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     ) => {
       const normalizedRange = Array.isArray(rangeValue) ? rangeValue : [];
       const [startTimestamp = '', endTimestamp = ''] = normalizedRange;
+      const normalizedDefaultTime = normalizeRangeGranularity(
+        startTimestamp,
+        endTimestamp,
+        nextDefaultTime,
+      );
 
       setActiveRangePreset('custom');
       setCustomRangeDraft({
         start_timestamp: startTimestamp,
         end_timestamp: endTimestamp,
-        default_time: nextDefaultTime,
+        default_time: normalizedDefaultTime,
       });
     },
     [
       customRangeDraft.default_time,
       customRangeDraft.end_timestamp,
       customRangeDraft.start_timestamp,
+      normalizeRangeGranularity,
     ],
   );
 
@@ -336,21 +424,36 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       showError(t('请求参数无效'));
       return null;
     }
+    const normalizedDefaultTime = normalizeRangeGranularity(
+      start_timestamp,
+      end_timestamp,
+      default_time,
+    );
     const nextInputs = {
       ...inputs,
       start_timestamp,
       end_timestamp,
     };
     setInputs(nextInputs);
-    setDataExportDefaultTime(default_time);
+    setDataExportDefaultTime(normalizedDefaultTime);
     setActiveRangePreset('custom');
-    localStorage.setItem(STORAGE_KEYS.DATA_EXPORT_DEFAULT_TIME, default_time);
-    persistChartRange(nextInputs, default_time, 'custom');
+    localStorage.setItem(
+      STORAGE_KEYS.DATA_EXPORT_DEFAULT_TIME,
+      normalizedDefaultTime,
+    );
+    persistChartRange(nextInputs, normalizedDefaultTime, 'custom');
     return {
       nextInputs,
-      nextDefaultTime: default_time,
+      nextDefaultTime: normalizedDefaultTime,
     };
-  }, [customRangeDraft, inputs, isValidCustomRange, persistChartRange, t]);
+  }, [
+    customRangeDraft,
+    inputs,
+    isValidCustomRange,
+    normalizeRangeGranularity,
+    persistChartRange,
+    t,
+  ]);
 
   const showSearchModal = useCallback(() => {
     setSearchModalVisible(true);
@@ -386,13 +489,29 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
           : 0;
 
         if (isAdminUser) {
-          url = `/api/data/?username=${username}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${overrideDefaultTime}`;
+          url = '/api/data/';
         } else {
-          url = `/api/data/self/?start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${overrideDefaultTime}`;
+          url = '/api/data/self';
         }
 
+        if (quotaAbortControllerRef.current) {
+          quotaAbortControllerRef.current.abort();
+        }
+        const abortController = new AbortController();
+        quotaAbortControllerRef.current = abortController;
+
         try {
-          const res = await API.get(url);
+          const res = await API.get(url, {
+            params: {
+              username,
+              start_timestamp: localStartTimestamp,
+              end_timestamp: localEndTimestamp,
+              default_time: overrideDefaultTime,
+            },
+            signal: abortController.signal,
+            skipErrorHandler: true,
+            disableDuplicate: true,
+          });
           if (requestSeq !== quotaRequestSeq.current) {
             return null;
           }
@@ -415,6 +534,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
             return [];
           }
         } catch (error) {
+          if (error?.code === 'ERR_CANCELED') {
+            return null;
+          }
           if (requestSeq !== quotaRequestSeq.current) {
             return null;
           }
@@ -423,6 +545,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
         }
       } finally {
         if (requestSeq === quotaRequestSeq.current) {
+          quotaAbortControllerRef.current = null;
           setLoading(false);
         }
       }
@@ -450,26 +573,39 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, [activeUptimeTab]);
 
-  const loadUserQuotaData = useCallback(async () => {
-    if (!isAdminUser) return [];
-    try {
-      const { start_timestamp, end_timestamp } = inputs;
-      const localStartTimestamp = Date.parse(start_timestamp) / 1000;
-      const localEndTimestamp = Date.parse(end_timestamp) / 1000;
-      const url = `/api/data/users?start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}`;
-      const res = await API.get(url);
-      const { success, message, data } = res.data;
-      if (success) {
-        return data || [];
-      } else {
-        showError(message);
+  const loadUserQuotaData = useCallback(
+    async (
+      overrideInputs = inputs,
+      overrideDefaultTime = dataExportDefaultTime,
+    ) => {
+      if (!isAdminUser) return [];
+      try {
+        const { start_timestamp, end_timestamp } = overrideInputs;
+        const localStartTimestamp =
+          parseDashboardTimestamp(start_timestamp) / 1000;
+        const localEndTimestamp = parseDashboardTimestamp(end_timestamp) / 1000;
+        const res = await API.get('/api/data/users', {
+          params: {
+            start_timestamp: localStartTimestamp,
+            end_timestamp: localEndTimestamp,
+            default_time: overrideDefaultTime,
+          },
+          skipErrorHandler: true,
+        });
+        const { success, message, data } = res.data;
+        if (success) {
+          return data || [];
+        } else {
+          showError(message);
+          return [];
+        }
+      } catch (err) {
+        console.error(err);
         return [];
       }
-    } catch (err) {
-      console.error(err);
-      return [];
-    }
-  }, [inputs, isAdminUser]);
+    },
+    [dataExportDefaultTime, inputs, isAdminUser],
+  );
 
   const getUserData = useCallback(async () => {
     let res = await API.get(`/api/user/self`);
@@ -501,22 +637,28 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
         return;
       }
 
-      const nextPreset = detectQuickRangePreset(
+      const normalizedDefaultTime = normalizeRangeGranularity(
         start_timestamp,
         end_timestamp,
         dataExportDefaultTime,
       );
+      const nextPreset = detectQuickRangePreset(
+        start_timestamp,
+        end_timestamp,
+        normalizedDefaultTime,
+      );
+      setDataExportDefaultTime(normalizedDefaultTime);
       setActiveRangePreset(nextPreset);
       setCustomRangeDraft({
         start_timestamp,
         end_timestamp,
-        default_time: dataExportDefaultTime,
+        default_time: normalizedDefaultTime,
       });
-      persistChartRange(inputs, dataExportDefaultTime, nextPreset);
+      persistChartRange(inputs, normalizedDefaultTime, nextPreset);
 
-      const data = await loadQuotaData(inputs, dataExportDefaultTime);
+      const data = await loadQuotaData(inputs, normalizedDefaultTime);
       if (data && data.length > 0 && updateChartDataCallback) {
-        updateChartDataCallback(data);
+        updateChartDataCallback(data, normalizedDefaultTime);
       }
       setSearchModalVisible(false);
     },
@@ -526,6 +668,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       inputs,
       isValidCustomRange,
       loadQuotaData,
+      normalizeRangeGranularity,
       persistChartRange,
       t,
     ],
@@ -546,6 +689,14 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, [getUserData]);
 
+  useEffect(() => {
+    return () => {
+      if (quotaAbortControllerRef.current) {
+        quotaAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   return {
     // 基础状态
     loading: showLoading,
@@ -558,6 +709,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     activeRangePreset,
     quickRangeOptions,
     customRangeDraft,
+    customRangeTimeOptions,
 
     // 数据状态
     quotaData,

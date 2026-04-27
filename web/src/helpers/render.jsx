@@ -1306,7 +1306,12 @@ function renderDisplayAmountFromUsd(usdAmount, digits = 6) {
 }
 
 function formatBillingDisplayPrice(usdAmount, rate, digits = 6) {
-  return (usdAmount * rate).toFixed(digits);
+  const amount = Number(usdAmount);
+  const displayRate = Number(rate);
+  if (!Number.isFinite(amount) || !Number.isFinite(displayRate)) {
+    return null;
+  }
+  return (amount * displayRate).toFixed(digits);
 }
 
 function buildBillingText(key, vars) {
@@ -1317,9 +1322,13 @@ function buildBillingPriceText(
   key,
   { symbol, usdAmount, rate, amountKey = 'price', digits = 6, ...vars },
 ) {
+  const displayAmount = formatBillingDisplayPrice(usdAmount, rate, digits);
+  if (displayAmount === null) {
+    return null;
+  }
   return buildBillingText(key, {
     symbol,
-    [amountKey]: formatBillingDisplayPrice(usdAmount, rate, digits),
+    [amountKey]: displayAmount,
     ...vars,
   });
 }
@@ -1735,6 +1744,10 @@ export function renderModelPrice(opts) {
           },
         ),
       ]);
+    }
+
+    if (!Number.isFinite(Number(modelRatio))) {
+      return renderBillingArticle([buildBillingText('计费价格信息不可用')]);
     }
 
     const inputRatioPrice = modelRatio * 2.0;

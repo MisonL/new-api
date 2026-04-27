@@ -12,10 +12,10 @@ import (
 // QuotaData 柱状图数据
 type QuotaData struct {
 	Id        int    `json:"id"`
-	UserID    int    `json:"user_id" gorm:"index"`
-	Username  string `json:"username" gorm:"index:idx_qdt_model_user_name,priority:2;size:64;default:''"`
-	ModelName string `json:"model_name" gorm:"index:idx_qdt_model_user_name,priority:1;size:64;default:''"`
-	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_qdt_created_at,priority:2"`
+	UserID    int    `json:"user_id" gorm:"index;index:idx_qdt_user_created_at,priority:1"`
+	Username  string `json:"username" gorm:"index:idx_qdt_model_user_name,priority:2;index:idx_qdt_username_created_at,priority:1;size:64;default:''"`
+	ModelName string `json:"model_name" gorm:"index:idx_qdt_model_user_name,priority:1;index:idx_qdt_created_model,priority:2;size:64;default:''"`
+	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_qdt_created_at,priority:2;index:idx_qdt_user_created_at,priority:2;index:idx_qdt_username_created_at,priority:2;index:idx_qdt_created_model,priority:1"`
 	TokenUsed int    `json:"token_used" gorm:"default:0"`
 	Count     int    `json:"count" gorm:"default:0"`
 	Quota     int    `json:"quota" gorm:"default:0"`
@@ -29,6 +29,79 @@ type ChannelQuotaData struct {
 	TokenUsed   int    `json:"token_used" gorm:"column:token_used"`
 	Count       int    `json:"count" gorm:"column:count"`
 	Quota       int    `json:"quota" gorm:"column:quota"`
+}
+
+const (
+	DashboardTimeHour = "hour"
+	DashboardTimeDay  = "day"
+	DashboardTimeWeek = "week"
+
+	dashboardDayGranularityThresholdSeconds  int64 = 7 * 24 * 60 * 60
+	dashboardWeekGranularityThresholdSeconds int64 = 30 * 24 * 60 * 60
+	dashboardPostgresWorkMem                       = "64MB"
+)
+
+// NormalizeDashboardTimeGranularity keeps dashboard aggregation inputs bounded.
+func NormalizeDashboardTimeGranularity(defaultTime string) string {
+	switch defaultTime {
+	case DashboardTimeDay, DashboardTimeWeek:
+		return defaultTime
+	default:
+		return DashboardTimeHour
+	}
+}
+
+// NormalizeDashboardTimeGranularityForRange prevents large custom ranges from returning too many chart buckets.
+func NormalizeDashboardTimeGranularityForRange(defaultTime string, startTime int64, endTime int64) string {
+	normalizedTime := NormalizeDashboardTimeGranularity(defaultTime)
+	if endTime <= startTime {
+		return normalizedTime
+	}
+
+	rangeSeconds := endTime - startTime
+	if rangeSeconds > dashboardWeekGranularityThresholdSeconds {
+		return DashboardTimeWeek
+	}
+	if rangeSeconds > dashboardDayGranularityThresholdSeconds && normalizedTime == DashboardTimeHour {
+		return DashboardTimeDay
+	}
+	return normalizedTime
+}
+
+func dashboardGranularitySeconds(defaultTime string) int64 {
+	switch NormalizeDashboardTimeGranularity(defaultTime) {
+	case DashboardTimeDay:
+		return 86400
+	case DashboardTimeWeek:
+		return 604800
+	default:
+		return 3600
+	}
+}
+
+func getDashboardBucketExpression(db *gorm.DB, column string, defaultTime string) string {
+	seconds := dashboardGranularitySeconds(defaultTime)
+	switch db.Dialector.Name() {
+	case common.DatabaseTypePostgreSQL:
+		return fmt.Sprintf("((%s / %d) * %d)", column, seconds, seconds)
+	case common.DatabaseTypeMySQL:
+		return fmt.Sprintf("CAST(FLOOR(%s / %d) * %d AS SIGNED)", column, seconds, seconds)
+	default:
+		return fmt.Sprintf("CAST(%s / %d AS INTEGER) * %d", column, seconds, seconds)
+	}
+}
+
+func runDashboardAggregateQuery(db *gorm.DB, scan func(*gorm.DB) error) error {
+	if db.Dialector.Name() != common.DatabaseTypePostgreSQL {
+		return scan(db)
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SET LOCAL work_mem = '" + dashboardPostgresWorkMem + "'").Error; err != nil {
+			return err
+		}
+		return scan(tx)
+	})
 }
 
 func UpdateQuotaData() {
@@ -111,50 +184,58 @@ func increaseQuotaData(userId int, username string, modelName string, count int,
 	}
 }
 
-func GetQuotaDataByUsername(username string, startTime int64, endTime int64) (quotaData []*QuotaData, err error) {
+func getQuotaDataGroupedByModel(baseQuery *gorm.DB, defaultTime string) (quotaData []*QuotaData, err error) {
 	var quotaDatas []*QuotaData
-	// 从quota_data表中查询数据
-	err = DB.Table("quota_data").Where("username = ? and created_at >= ? and created_at <= ?", username, startTime, endTime).Find(&quotaDatas).Error
+	bucketExpression := getDashboardBucketExpression(DB, "created_at", defaultTime)
+	err = runDashboardAggregateQuery(baseQuery, func(tx *gorm.DB) error {
+		return tx.Select(
+			fmt.Sprintf(
+				"model_name, COALESCE(sum(count), 0) as count, COALESCE(sum(quota), 0) as quota, COALESCE(sum(token_used), 0) as token_used, %s as created_at",
+				bucketExpression,
+			),
+		).
+			Group(fmt.Sprintf("model_name, %s", bucketExpression)).
+			Find(&quotaDatas).Error
+	})
 	return quotaDatas, err
 }
 
-func GetQuotaDataByUserId(userId int, startTime int64, endTime int64) (quotaData []*QuotaData, err error) {
+func GetQuotaDataByUsername(username string, startTime int64, endTime int64, defaultTime string) (quotaData []*QuotaData, err error) {
+	baseQuery := DB.Table("quota_data").
+		Where("username = ? and created_at >= ? and created_at <= ?", username, startTime, endTime)
+	return getQuotaDataGroupedByModel(baseQuery, defaultTime)
+}
+
+func GetQuotaDataByUserId(userId int, startTime int64, endTime int64, defaultTime string) (quotaData []*QuotaData, err error) {
+	baseQuery := DB.Table("quota_data").
+		Where("user_id = ? and created_at >= ? and created_at <= ?", userId, startTime, endTime)
+	return getQuotaDataGroupedByModel(baseQuery, defaultTime)
+}
+
+func GetQuotaDataGroupByUser(startTime int64, endTime int64, defaultTime string) (quotaData []*QuotaData, err error) {
 	var quotaDatas []*QuotaData
-	// 从quota_data表中查询数据
-	err = DB.Table("quota_data").Where("user_id = ? and created_at >= ? and created_at <= ?", userId, startTime, endTime).Find(&quotaDatas).Error
+	bucketExpression := getDashboardBucketExpression(DB, "created_at", defaultTime)
+	err = runDashboardAggregateQuery(DB.Table("quota_data"), func(tx *gorm.DB) error {
+		return tx.Select(
+			fmt.Sprintf(
+				"username, %s as created_at, COALESCE(sum(count), 0) as count, COALESCE(sum(quota), 0) as quota, COALESCE(sum(token_used), 0) as token_used",
+				bucketExpression,
+			),
+		).
+			Where("created_at >= ? and created_at <= ?", startTime, endTime).
+			Group(fmt.Sprintf("username, %s", bucketExpression)).
+			Find(&quotaDatas).Error
+	})
 	return quotaDatas, err
 }
 
-func GetQuotaDataGroupByUser(startTime int64, endTime int64) (quotaData []*QuotaData, err error) {
-	var quotaDatas []*QuotaData
-	err = DB.Table("quota_data").
-		Select("username, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used").
-		Where("created_at >= ? and created_at <= ?", startTime, endTime).
-		Group("username, created_at").
-		Find(&quotaDatas).Error
-	return quotaDatas, err
-}
-
-func GetAllQuotaDates(startTime int64, endTime int64, username string) (quotaData []*QuotaData, err error) {
+func GetAllQuotaDates(startTime int64, endTime int64, username string, defaultTime string) (quotaData []*QuotaData, err error) {
 	if username != "" {
-		return GetQuotaDataByUsername(username, startTime, endTime)
+		return GetQuotaDataByUsername(username, startTime, endTime, defaultTime)
 	}
-	var quotaDatas []*QuotaData
-	// 从quota_data表中查询数据
-	// only select model_name, sum(count) as count, sum(quota) as quota, model_name, created_at from quota_data group by model_name, created_at;
-	//err = DB.Table("quota_data").Where("created_at >= ? and created_at <= ?", startTime, endTime).Find(&quotaDatas).Error
-	err = DB.Table("quota_data").Select("model_name, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, created_at").Where("created_at >= ? and created_at <= ?", startTime, endTime).Group("model_name, created_at").Find(&quotaDatas).Error
-	return quotaDatas, err
-}
-
-// getLogHourBucketExpression normalizes log timestamps into hourly buckets across databases.
-func getLogHourBucketExpression() string {
-	switch DB.Dialector.Name() {
-	case common.DatabaseTypePostgreSQL:
-		return "CAST(FLOOR(created_at / 3600.0) * 3600 AS BIGINT)"
-	default:
-		return "(created_at / 3600) * 3600"
-	}
+	baseQuery := DB.Table("quota_data").
+		Where("created_at >= ? and created_at <= ?", startTime, endTime)
+	return getQuotaDataGroupedByModel(baseQuery, defaultTime)
 }
 
 func attachChannelNames(channelData []*ChannelQuotaData) error {
@@ -225,18 +306,19 @@ assignChannelNames:
 }
 
 // getChannelQuotaData aggregates usage logs by channel and hour bucket for dashboard charts.
-func getChannelQuotaData(baseQuery *gorm.DB) (channelData []*ChannelQuotaData, err error) {
+func getChannelQuotaData(baseQuery *gorm.DB, defaultTime string) (channelData []*ChannelQuotaData, err error) {
 	var channelDatas []*ChannelQuotaData
-	bucketExpression := getLogHourBucketExpression()
-	err = baseQuery.
-		Select(
+	bucketExpression := getDashboardBucketExpression(LOG_DB, "created_at", defaultTime)
+	err = runDashboardAggregateQuery(baseQuery, func(tx *gorm.DB) error {
+		return tx.Select(
 			fmt.Sprintf(
 				"channel_id, COALESCE(sum(quota), 0) as quota, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) as token_used, count(*) as count, %s as created_at",
 				bucketExpression,
 			),
 		).
-		Group(fmt.Sprintf("channel_id, %s", bucketExpression)).
-		Find(&channelDatas).Error
+			Group(fmt.Sprintf("channel_id, %s", bucketExpression)).
+			Find(&channelDatas).Error
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -247,28 +329,28 @@ func getChannelQuotaData(baseQuery *gorm.DB) (channelData []*ChannelQuotaData, e
 }
 
 // GetChannelQuotaDataByUsername returns dashboard channel aggregates for the selected admin filter.
-func GetChannelQuotaDataByUsername(username string, startTime int64, endTime int64) (channelData []*ChannelQuotaData, err error) {
+func GetChannelQuotaDataByUsername(username string, startTime int64, endTime int64, defaultTime string) (channelData []*ChannelQuotaData, err error) {
 	baseQuery := LOG_DB.Table("logs").
 		Where("type = ?", LogTypeConsume).
 		Where("username = ? AND created_at >= ? AND created_at <= ?", username, startTime, endTime)
-	return getChannelQuotaData(baseQuery)
+	return getChannelQuotaData(baseQuery, defaultTime)
 }
 
 // GetChannelQuotaDataByUserId returns dashboard channel aggregates for a single user.
-func GetChannelQuotaDataByUserId(userId int, startTime int64, endTime int64) (channelData []*ChannelQuotaData, err error) {
+func GetChannelQuotaDataByUserId(userId int, startTime int64, endTime int64, defaultTime string) (channelData []*ChannelQuotaData, err error) {
 	baseQuery := LOG_DB.Table("logs").
 		Where("type = ?", LogTypeConsume).
 		Where("user_id = ? AND created_at >= ? AND created_at <= ?", userId, startTime, endTime)
-	return getChannelQuotaData(baseQuery)
+	return getChannelQuotaData(baseQuery, defaultTime)
 }
 
 // GetAllChannelQuotaData returns dashboard channel aggregates across all users or one username.
-func GetAllChannelQuotaData(startTime int64, endTime int64, username string) (channelData []*ChannelQuotaData, err error) {
+func GetAllChannelQuotaData(startTime int64, endTime int64, username string, defaultTime string) (channelData []*ChannelQuotaData, err error) {
 	if username != "" {
-		return GetChannelQuotaDataByUsername(username, startTime, endTime)
+		return GetChannelQuotaDataByUsername(username, startTime, endTime, defaultTime)
 	}
 	baseQuery := LOG_DB.Table("logs").
 		Where("type = ?", LogTypeConsume).
 		Where("created_at >= ? AND created_at <= ?", startTime, endTime)
-	return getChannelQuotaData(baseQuery)
+	return getChannelQuotaData(baseQuery, defaultTime)
 }

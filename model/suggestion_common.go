@@ -7,7 +7,10 @@ import (
 	"gorm.io/gorm"
 )
 
-const suggestionHardLimit = 20
+const (
+	suggestionHardLimit  = 20
+	suggestionScanWindow = 50000
+)
 
 type suggestionStringRow struct {
 	Value string `gorm:"column:value"`
@@ -47,20 +50,33 @@ func buildContainsLikePattern(keyword string) string {
 	return "%" + trimmed + "%"
 }
 
+func recentSuggestionBase(tx *gorm.DB, column string, timeColumn string, nonEmptyCondition string) *gorm.DB {
+	return tx.Select(column + " AS value, " + timeColumn + " AS suggestion_time").
+		Where(nonEmptyCondition).
+		Order(timeColumn + " DESC").
+		Limit(suggestionScanWindow)
+}
+
+func recentSuggestionQuery(tx *gorm.DB, recent *gorm.DB) *gorm.DB {
+	return tx.Session(&gorm.Session{NewDB: true}).
+		Table("(?) AS recent_suggestions", recent)
+}
+
 // scanStringSuggestions is internal-only. Callers must pass validated constant
 // column names from get*SuggestionFieldColumn and a fixed timestamp column.
 func scanStringSuggestions(tx *gorm.DB, column string, timeColumn string, keyword string, limit int) ([]string, error) {
 	pattern := buildContainsLikePattern(keyword)
-	query := tx.Where(column + " <> ''")
+	recent := recentSuggestionBase(tx, column, timeColumn, column+" <> ''")
+	query := recentSuggestionQuery(tx, recent)
 	if pattern != "" {
-		query = query.Where(column+" LIKE ? ESCAPE '!'", pattern)
+		query = query.Where("value LIKE ? ESCAPE '!'", pattern)
 	}
 
 	rows := make([]suggestionStringRow, 0, limit)
 	err := query.
-		Select(column + " AS value").
-		Group(column).
-		Order("MAX(" + timeColumn + ") DESC").
+		Select("value").
+		Group("value").
+		Order("MAX(suggestion_time) DESC").
 		Limit(limit).
 		Scan(&rows).Error
 	if err != nil {
@@ -85,16 +101,17 @@ func scanIntSuggestions(tx *gorm.DB, column string, timeColumn string, keyword s
 		return []string{}, nil
 	}
 
-	query := tx.Where(column + " <> 0")
+	recent := recentSuggestionBase(tx, column, timeColumn, column+" <> 0")
+	query := recentSuggestionQuery(tx, recent)
 	if keyword != "" {
-		query = query.Where(intColumnCastExpression(tx, column)+" LIKE ?", keyword+"%")
+		query = query.Where(intColumnCastExpression(tx, "value")+" LIKE ?", keyword+"%")
 	}
 
 	rows := make([]suggestionIntRow, 0, limit)
 	err := query.
-		Select(column + " AS value").
-		Group(column).
-		Order("MAX(" + timeColumn + ") DESC").
+		Select("value").
+		Group("value").
+		Order("MAX(suggestion_time) DESC").
 		Limit(limit).
 		Scan(&rows).Error
 	if err != nil {

@@ -23,6 +23,59 @@ import { renderQuota } from '../../../helpers';
 import CompactModeToggle from '../../common/ui/CompactModeToggle';
 import { useMinimumLoadingTime } from '../../../hooks/common/useMinimumLoadingTime';
 
+const LogStatButton = ({ loadingStat, handleEyeClick, t, label }) => (
+  <Button
+    type='tertiary'
+    theme='light'
+    size='small'
+    loading={loadingStat}
+    onClick={handleEyeClick}
+  >
+    {label || t('查看统计')}
+  </Button>
+);
+
+const LogStatsContent = ({ stat, loadingStat, handleEyeClick, t }) => (
+  <Space className='usage-logs-stats-list' wrap>
+    <Tag color='blue' className='usage-logs-stat-tag'>
+      {t('消耗额度')}: {renderQuota(stat.quota)}
+    </Tag>
+    <Tag color='pink' className='usage-logs-stat-tag'>
+      {t('RPM')}: {stat.rpm}
+    </Tag>
+    <Tag
+      color='white'
+      className='usage-logs-stat-tag usage-logs-stat-tag-neutral'
+    >
+      {t('TPM')}: {stat.tpm}
+    </Tag>
+    <LogStatButton
+      loadingStat={loadingStat}
+      handleEyeClick={handleEyeClick}
+      t={t}
+      label={t('刷新统计')}
+    />
+  </Space>
+);
+
+const LogsActionsToolbar = ({
+  batchDeleteLogs,
+  compactMode,
+  setCompactMode,
+  t,
+}) => (
+  <div className='usage-logs-actions-toolbar flex items-center gap-2'>
+    <Button type='danger' theme='light' onClick={batchDeleteLogs} size='small'>
+      {t('批量删除日志')}
+    </Button>
+    <CompactModeToggle
+      compactMode={compactMode}
+      setCompactMode={setCompactMode}
+      t={t}
+    />
+  </div>
+);
+
 const LogsActions = ({
   stat,
   loadingStat,
@@ -30,10 +83,11 @@ const LogsActions = ({
   compactMode,
   setCompactMode,
   batchDeleteLogs,
+  handleEyeClick,
   t,
 }) => {
   const showSkeleton = useMinimumLoadingTime(loadingStat);
-  const needSkeleton = !showStat || showSkeleton;
+  const needSkeleton = showStat && showSkeleton;
 
   const placeholder = (
     <Space>
@@ -45,33 +99,29 @@ const LogsActions = ({
 
   return (
     <div className='usage-logs-actions flex flex-col md:flex-row justify-between items-start md:items-center gap-2 w-full'>
-      <Skeleton loading={needSkeleton} active placeholder={placeholder}>
-        <Space className='usage-logs-stats-list' wrap>
-          <Tag color='blue' className='usage-logs-stat-tag'>
-            {t('消耗额度')}: {renderQuota(stat.quota)}
-          </Tag>
-          <Tag color='pink' className='usage-logs-stat-tag'>
-            RPM: {stat.rpm}
-          </Tag>
-          <Tag
-            color='white'
-            className='usage-logs-stat-tag usage-logs-stat-tag-neutral'
-          >
-            TPM: {stat.tpm}
-          </Tag>
-        </Space>
-      </Skeleton>
-
-      <div className='usage-logs-actions-toolbar flex items-center gap-2'>
-        <Button type='danger' theme='light' onClick={batchDeleteLogs}>
-          {t('批量删除日志')}
-        </Button>
-        <CompactModeToggle
-          compactMode={compactMode}
-          setCompactMode={setCompactMode}
+      {showStat ? (
+        <Skeleton loading={needSkeleton} active placeholder={placeholder}>
+          <LogStatsContent
+            stat={stat}
+            loadingStat={loadingStat}
+            handleEyeClick={handleEyeClick}
+            t={t}
+          />
+        </Skeleton>
+      ) : (
+        <LogStatButton
+          loadingStat={loadingStat}
+          handleEyeClick={handleEyeClick}
           t={t}
         />
-      </div>
+      )}
+
+      <LogsActionsToolbar
+        batchDeleteLogs={batchDeleteLogs}
+        compactMode={compactMode}
+        setCompactMode={setCompactMode}
+        t={t}
+      />
     </div>
   );
 };

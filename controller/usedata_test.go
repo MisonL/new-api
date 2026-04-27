@@ -86,3 +86,20 @@ func TestGetAllChannelQuotaDatesRejectsRangesOverThreeMonths(t *testing.T) {
 		t.Fatalf("unexpected admin channel range message: %q", response.Message)
 	}
 }
+
+func TestGetAllQuotaDatesRejectsRangesOverThreeMonths(t *testing.T) {
+	ctx, recorder := newDashboardRangeTestContext(
+		t,
+		"/api/data/?start_timestamp=0&end_timestamp=7776001",
+	)
+
+	GetAllQuotaDates(ctx)
+
+	response := decodeDashboardRangeResponse(t, recorder)
+	if response.Success {
+		t.Fatal("expected admin quota request to be rejected")
+	}
+	if response.Message != "时间跨度不能超过 3 个月" {
+		t.Fatalf("unexpected admin quota range message: %q", response.Message)
+	}
+}
