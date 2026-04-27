@@ -17,11 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { Button, Space } from '@douyinfe/semi-ui';
 import { showError } from '../../../helpers';
-import CopyTokensModal from './modals/CopyTokensModal';
-import DeleteTokensModal from './modals/DeleteTokensModal';
+
+const CopyTokensModal = lazy(() => import('./modals/CopyTokensModal'));
+const DeleteTokensModal = lazy(() => import('./modals/DeleteTokensModal'));
 
 const TokensActions = ({
   selectedKeys,
@@ -95,20 +96,28 @@ const TokensActions = ({
         </Button>
       </div>
 
-      <CopyTokensModal
-        visible={showCopyModal}
-        onCancel={() => setShowCopyModal(false)}
-        batchCopyTokens={batchCopyTokens}
-        t={t}
-      />
+      {showCopyModal ? (
+        <Suspense fallback={null}>
+          <CopyTokensModal
+            visible={showCopyModal}
+            onCancel={() => setShowCopyModal(false)}
+            batchCopyTokens={batchCopyTokens}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <DeleteTokensModal
-        visible={showDeleteModal}
-        onCancel={() => setShowDeleteModal(false)}
-        onConfirm={handleConfirmDelete}
-        selectedKeys={selectedKeys}
-        t={t}
-      />
+      {showDeleteModal ? (
+        <Suspense fallback={null}>
+          <DeleteTokensModal
+            visible={showDeleteModal}
+            onCancel={() => setShowDeleteModal(false)}
+            onConfirm={handleConfirmDelete}
+            selectedKeys={selectedKeys}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 };

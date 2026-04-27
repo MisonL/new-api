@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import {
   Notification,
   Button,
@@ -37,12 +37,13 @@ import TokensTable from './TokensTable';
 import TokensActions from './TokensActions';
 import TokensFilters from './TokensFilters';
 import TokensDescription from './TokensDescription';
-import EditTokenModal from './modals/EditTokenModal';
-import CCSwitchModal from './modals/CCSwitchModal';
 import { useTokensData } from '../../../hooks/tokens/useTokensData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
 import { getServerAddress } from '../../../helpers/token';
+
+const EditTokenModal = lazy(() => import('./modals/EditTokenModal'));
+const CCSwitchModal = lazy(() => import('./modals/CCSwitchModal'));
 
 function TokensPage() {
   // Define the function first, then pass it into the hook to avoid TDZ errors
@@ -370,19 +371,27 @@ function TokensPage() {
 
   return (
     <>
-      <EditTokenModal
-        refresh={refresh}
-        editingToken={editingToken}
-        visiable={showEdit}
-        handleClose={closeEdit}
-      />
+      {showEdit ? (
+        <Suspense fallback={null}>
+          <EditTokenModal
+            refresh={refresh}
+            editingToken={editingToken}
+            visiable={showEdit}
+            handleClose={closeEdit}
+          />
+        </Suspense>
+      ) : null}
 
-      <CCSwitchModal
-        visible={ccSwitchVisible}
-        onClose={() => setCCSwitchVisible(false)}
-        tokenKey={ccSwitchKey}
-        modelOptions={modelOptions}
-      />
+      {ccSwitchVisible ? (
+        <Suspense fallback={null}>
+          <CCSwitchModal
+            visible={ccSwitchVisible}
+            onClose={() => setCCSwitchVisible(false)}
+            tokenKey={ccSwitchKey}
+            modelOptions={modelOptions}
+          />
+        </Suspense>
+      ) : null}
 
       <CardPro
         type='type1'

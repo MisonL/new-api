@@ -17,16 +17,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
-import MissingModelsModal from './modals/MissingModelsModal';
-import PrefillGroupManagement from './modals/PrefillGroupManagement';
-import EditPrefillGroupModal from './modals/EditPrefillGroupModal';
+import React, { lazy, Suspense, useState } from 'react';
 import { Button, Modal, Popover, RadioGroup, Radio } from '@douyinfe/semi-ui';
 import { showSuccess, showError, copy } from '../../../helpers';
 import CompactModeToggle from '../../common/ui/CompactModeToggle';
 import SelectionNotification from './components/SelectionNotification';
-import UpstreamConflictModal from './modals/UpstreamConflictModal';
-import SyncWizardModal from './modals/SyncWizardModal';
+
+const MissingModelsModal = lazy(() => import('./modals/MissingModelsModal'));
+const PrefillGroupManagement = lazy(
+  () => import('./modals/PrefillGroupManagement'),
+);
+const EditPrefillGroupModal = lazy(
+  () => import('./modals/EditPrefillGroupModal'),
+);
+const UpstreamConflictModal = lazy(
+  () => import('./modals/UpstreamConflictModal'),
+);
+const SyncWizardModal = lazy(() => import('./modals/SyncWizardModal'));
 
 const ModelsActions = ({
   selectedKeys,
@@ -202,56 +209,76 @@ const ModelsActions = ({
         </div>
       </Modal>
 
-      <SyncWizardModal
-        visible={showSyncModal}
-        onClose={() => setShowSyncModal(false)}
-        loading={syncing || previewing}
-        t={t}
-        onConfirm={async ({ option, locale }) => {
-          setSyncLocale(locale);
-          if (option === 'official') {
-            await handleSyncUpstream(locale);
-          }
-          setShowSyncModal(false);
-        }}
-      />
+      {showSyncModal ? (
+        <Suspense fallback={null}>
+          <SyncWizardModal
+            visible={showSyncModal}
+            onClose={() => setShowSyncModal(false)}
+            loading={syncing || previewing}
+            t={t}
+            onConfirm={async ({ option, locale }) => {
+              setSyncLocale(locale);
+              if (option === 'official') {
+                await handleSyncUpstream(locale);
+              }
+              setShowSyncModal(false);
+            }}
+          />
+        </Suspense>
+      ) : null}
 
-      <MissingModelsModal
-        visible={showMissingModal}
-        onClose={() => setShowMissingModal(false)}
-        onConfigureModel={(name) => {
-          setEditingModel({ id: undefined, model_name: name });
-          setShowEdit(true);
-          setShowMissingModal(false);
-        }}
-        t={t}
-      />
+      {showMissingModal ? (
+        <Suspense fallback={null}>
+          <MissingModelsModal
+            visible={showMissingModal}
+            onClose={() => setShowMissingModal(false)}
+            onConfigureModel={(name) => {
+              setEditingModel({ id: undefined, model_name: name });
+              setShowEdit(true);
+              setShowMissingModal(false);
+            }}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <PrefillGroupManagement
-        visible={showGroupManagement}
-        onClose={() => setShowGroupManagement(false)}
-      />
+      {showGroupManagement ? (
+        <Suspense fallback={null}>
+          <PrefillGroupManagement
+            visible={showGroupManagement}
+            onClose={() => setShowGroupManagement(false)}
+          />
+        </Suspense>
+      ) : null}
 
-      <EditPrefillGroupModal
-        visible={showAddPrefill}
-        onClose={() => setShowAddPrefill(false)}
-        editingGroup={prefillInit}
-        onSuccess={() => setShowAddPrefill(false)}
-      />
+      {showAddPrefill ? (
+        <Suspense fallback={null}>
+          <EditPrefillGroupModal
+            visible={showAddPrefill}
+            onClose={() => setShowAddPrefill(false)}
+            editingGroup={prefillInit}
+            onSuccess={() => setShowAddPrefill(false)}
+          />
+        </Suspense>
+      ) : null}
 
-      <UpstreamConflictModal
-        visible={showConflict}
-        onClose={() => setShowConflict(false)}
-        conflicts={conflicts}
-        onSubmit={async (payload) => {
-          return await applyUpstreamOverwrite?.({
-            overwrite: payload,
-            locale: syncLocale,
-          });
-        }}
-        t={t}
-        loading={syncing}
-      />
+      {showConflict ? (
+        <Suspense fallback={null}>
+          <UpstreamConflictModal
+            visible={showConflict}
+            onClose={() => setShowConflict(false)}
+            conflicts={conflicts}
+            onSubmit={async (payload) => {
+              return await applyUpstreamOverwrite?.({
+                overwrite: payload,
+                locale: syncLocale,
+              });
+            }}
+            t={t}
+            loading={syncing}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 };

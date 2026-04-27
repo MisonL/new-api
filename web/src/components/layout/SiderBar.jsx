@@ -26,13 +26,13 @@ import React, {
 } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { getLucideIcon } from '../../helpers/render';
+import { getLucideIcon } from '../../helpers/sidebarIcons';
 import { ChevronLeft, RotateCcw } from 'lucide-react';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useSidebar } from '../../hooks/common/useSidebar';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
 import useRepeatingDomPatch from '../../hooks/common/useRepeatingDomPatch';
-import { isAdmin, isRoot, showError } from '../../helpers';
+import { isAdmin, isRoot, showError } from '../../helpers/utils';
 import SkeletonWrapper from './components/SkeletonWrapper';
 import {
   DEFAULT_SIDEBAR_WIDTH,

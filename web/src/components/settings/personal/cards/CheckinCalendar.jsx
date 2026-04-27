@@ -34,7 +34,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import Turnstile from 'react-turnstile';
+import Turnstile from '../../../common/lazy/LazyTurnstile';
 import { API, showError, showSuccess, renderQuota } from '../../../../helpers';
 
 const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {

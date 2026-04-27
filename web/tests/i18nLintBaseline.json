@@ -716,47 +716,47 @@
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 709,
+    "line": 725,
     "text": "Doubao Coding Plan"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 2655,
+    "line": 2671,
     "text": "M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 3813,
+    "line": 3829,
     "text": "type-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4063,
+    "line": 4079,
     "text": "tight"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4439,
+    "line": 4459,
     "text": "Account ID"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4514,
+    "line": 4534,
     "text": "AZURE_OPENAI_ENDPOINT"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4712,
+    "line": 4732,
     "text": "models-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4914,
+    "line": 4934,
     "text": "groups-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 5184,
+    "line": 5212,
     "text": "M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
   },
   {
@@ -1090,16 +1090,6 @@
     "text": "JSON"
   },
   {
-    "file": "src/components/table/usage-logs/UsageLogsActions.jsx",
-    "line": 53,
-    "text": "RPM:"
-  },
-  {
-    "file": "src/components/table/usage-logs/UsageLogsActions.jsx",
-    "line": 59,
-    "text": "TPM:"
-  },
-  {
     "file": "src/components/table/users/modals/AddUserModal.jsx",
     "line": 143,
     "text": "username"
@@ -1176,7 +1166,7 @@
   },
   {
     "file": "src/helpers/render.jsx",
-    "line": 608,
+    "line": 543,
     "text": "provider icon"
   },
   {
@@ -1331,52 +1321,52 @@
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 604,
+    "line": 617,
     "text": "N/A"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 930,
+    "line": 943,
     "text": "|"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 931,
+    "line": 944,
     "text": "O"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 945,
+    "line": 958,
     "text": "例如 100000…"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 966,
+    "line": 979,
     "text": "例如 3600…"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 989,
+    "line": 1002,
     "text": "|"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 990,
+    "line": 1003,
     "text": "O"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 1098,
+    "line": 1111,
     "text": "例如 prefer-by-conversation-id…"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 1183,
+    "line": 1196,
     "text": "^[-0-9A-Za-z._:]{1,128}$"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 1193,
+    "line": 1206,
     "text": "例如 600…"
   },
   {

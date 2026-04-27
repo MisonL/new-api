@@ -41,7 +41,7 @@ import {
   buildAssertionResult,
   isPasskeySupported,
 } from '../../helpers';
-import Turnstile from 'react-turnstile';
+import Turnstile from '../common/lazy/LazyTurnstile';
 import {
   Button,
   Card,
@@ -53,7 +53,7 @@ import {
 } from '@douyinfe/semi-ui';
 import Title from '@douyinfe/semi-ui/lib/es/typography/title';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
-import TelegramLoginButton from 'react-telegram-login';
+import TelegramLoginButton from '../common/lazy/LazyTelegramLoginButton';
 
 import {
   IconGithubLogo,

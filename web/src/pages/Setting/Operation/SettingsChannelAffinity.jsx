@@ -17,7 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Banner,
   Button,
@@ -58,7 +65,13 @@ import {
   CHANNEL_AFFINITY_RULE_TEMPLATES,
   cloneChannelAffinityTemplate,
 } from '../../../constants/channel-affinity-template.constants';
-import ParamOverrideEditorModal from '../../../components/table/channels/modals/ParamOverrideEditorModal';
+
+const ParamOverrideEditorModal = lazy(
+  () =>
+    import(
+      '../../../components/table/channels/modals/ParamOverrideEditorModal'
+    ),
+);
 
 const KEY_ENABLED = 'channel_affinity_setting.enabled';
 const KEY_SWITCH_ON_SUCCESS = 'channel_affinity_setting.switch_on_success';
@@ -1399,15 +1412,19 @@ export default function SettingsChannelAffinity(props) {
         </Form>
       </Modal>
 
-      <ParamOverrideEditorModal
-        visible={paramTemplateEditorVisible}
-        value={paramTemplateDraft || ''}
-        onSave={(nextValue) => {
-          updateParamTemplateDraft(nextValue || '');
-          setParamTemplateEditorVisible(false);
-        }}
-        onCancel={() => setParamTemplateEditorVisible(false)}
-      />
+      {paramTemplateEditorVisible ? (
+        <Suspense fallback={null}>
+          <ParamOverrideEditorModal
+            visible={paramTemplateEditorVisible}
+            value={paramTemplateDraft || ''}
+            onSave={(nextValue) => {
+              updateParamTemplateDraft(nextValue || '');
+              setParamTemplateEditorVisible(false);
+            }}
+            onCancel={() => setParamTemplateEditorVisible(false)}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 }

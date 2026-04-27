@@ -17,10 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, memo } from 'react';
-import PricingFilterModal from '../../modal/PricingFilterModal';
+import React, { lazy, memo, Suspense, useState } from 'react';
 import PricingVendorIntroWithSkeleton from './PricingVendorIntroWithSkeleton';
 import SearchActions from './SearchActions';
+
+const PricingFilterModal = lazy(() => import('../../modal/PricingFilterModal'));
 
 const PricingTopSection = memo(
   ({
@@ -79,12 +80,16 @@ const PricingTopSection = memo(
                 t={t}
               />
             </div>
-            <PricingFilterModal
-              visible={showFilterModal}
-              onClose={() => setShowFilterModal(false)}
-              sidebarProps={sidebarProps}
-              t={t}
-            />
+            {showFilterModal ? (
+              <Suspense fallback={null}>
+                <PricingFilterModal
+                  visible={showFilterModal}
+                  onClose={() => setShowFilterModal(false)}
+                  sidebarProps={sidebarProps}
+                  t={t}
+                />
+              </Suspense>
+            ) : null}
           </>
         ) : (
           <PricingVendorIntroWithSkeleton

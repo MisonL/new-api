@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useMemo, useState } from 'react';
+import React, { lazy, Suspense, useMemo, useState } from 'react';
 import { Empty } from '@douyinfe/semi-ui';
 import CardTable from '../../common/ui/CardTable';
 import {
@@ -26,12 +26,11 @@ import {
 } from '@douyinfe/semi-illustrations';
 import { getDeploymentsColumns } from './DeploymentsColumnDefs';
 
-// Import all the new modals
-import ViewLogsModal from './modals/ViewLogsModal';
-import ExtendDurationModal from './modals/ExtendDurationModal';
-import ViewDetailsModal from './modals/ViewDetailsModal';
-import UpdateConfigModal from './modals/UpdateConfigModal';
-import ConfirmationDialog from './modals/ConfirmationDialog';
+const ViewLogsModal = lazy(() => import('./modals/ViewLogsModal'));
+const ExtendDurationModal = lazy(() => import('./modals/ExtendDurationModal'));
+const ViewDetailsModal = lazy(() => import('./modals/ViewDetailsModal'));
+const UpdateConfigModal = lazy(() => import('./modals/UpdateConfigModal'));
+const ConfirmationDialog = lazy(() => import('./modals/ConfirmationDialog'));
 
 const DeploymentsTable = (deploymentsData) => {
   const {
@@ -200,46 +199,66 @@ const DeploymentsTable = (deploymentsData) => {
       />
 
       {/* Enhanced Modals */}
-      <ViewLogsModal
-        visible={showLogsModal}
-        onCancel={() => setShowLogsModal(false)}
-        deployment={selectedDeployment}
-        t={t}
-      />
+      {showLogsModal ? (
+        <Suspense fallback={null}>
+          <ViewLogsModal
+            visible={showLogsModal}
+            onCancel={() => setShowLogsModal(false)}
+            deployment={selectedDeployment}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <ExtendDurationModal
-        visible={showExtendModal}
-        onCancel={() => setShowExtendModal(false)}
-        deployment={selectedDeployment}
-        onSuccess={handleModalSuccess}
-        t={t}
-      />
+      {showExtendModal ? (
+        <Suspense fallback={null}>
+          <ExtendDurationModal
+            visible={showExtendModal}
+            onCancel={() => setShowExtendModal(false)}
+            deployment={selectedDeployment}
+            onSuccess={handleModalSuccess}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <ViewDetailsModal
-        visible={showDetailsModal}
-        onCancel={() => setShowDetailsModal(false)}
-        deployment={selectedDeployment}
-        t={t}
-      />
+      {showDetailsModal ? (
+        <Suspense fallback={null}>
+          <ViewDetailsModal
+            visible={showDetailsModal}
+            onCancel={() => setShowDetailsModal(false)}
+            deployment={selectedDeployment}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <UpdateConfigModal
-        visible={showConfigModal}
-        onCancel={() => setShowConfigModal(false)}
-        deployment={selectedDeployment}
-        onSuccess={handleModalSuccess}
-        t={t}
-      />
+      {showConfigModal ? (
+        <Suspense fallback={null}>
+          <UpdateConfigModal
+            visible={showConfigModal}
+            onCancel={() => setShowConfigModal(false)}
+            deployment={selectedDeployment}
+            onSuccess={handleModalSuccess}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <ConfirmationDialog
-        visible={showConfirmDialog}
-        onCancel={() => setShowConfirmDialog(false)}
-        onConfirm={handleConfirmAction}
-        title={t('确认操作')}
-        type='danger'
-        deployment={selectedDeployment}
-        operation={confirmOperation}
-        t={t}
-      />
+      {showConfirmDialog ? (
+        <Suspense fallback={null}>
+          <ConfirmationDialog
+            visible={showConfirmDialog}
+            onCancel={() => setShowConfirmDialog(false)}
+            onConfirm={handleConfirmAction}
+            title={t('确认操作')}
+            type='danger'
+            deployment={selectedDeployment}
+            operation={confirmOperation}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 };

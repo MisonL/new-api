@@ -17,16 +17,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import CardPro from '../../common/ui/CardPro';
 import RedemptionsTable from './RedemptionsTable';
 import RedemptionsActions from './RedemptionsActions';
 import RedemptionsFilters from './RedemptionsFilters';
 import RedemptionsDescription from './RedemptionsDescription';
-import EditRedemptionModal from './modals/EditRedemptionModal';
 import { useRedemptionsData } from '../../../hooks/redemptions/useRedemptionsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
+
+const EditRedemptionModal = lazy(() => import('./modals/EditRedemptionModal'));
 
 const RedemptionsPage = () => {
   const redemptionsData = useRedemptionsData();
@@ -63,12 +64,16 @@ const RedemptionsPage = () => {
 
   return (
     <>
-      <EditRedemptionModal
-        refresh={refresh}
-        editingRedemption={editingRedemption}
-        visiable={showEdit}
-        handleClose={closeEdit}
-      />
+      {showEdit ? (
+        <Suspense fallback={null}>
+          <EditRedemptionModal
+            refresh={refresh}
+            editingRedemption={editingRedemption}
+            visiable={showEdit}
+            handleClose={closeEdit}
+          />
+        </Suspense>
+      ) : null}
 
       <CardPro
         type='type1'

@@ -17,17 +17,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Layout } from '@douyinfe/semi-ui';
 import CardPro from '../../common/ui/CardPro';
 import MjLogsTable from './MjLogsTable';
 import MjLogsActions from './MjLogsActions';
 import MjLogsFilters from './MjLogsFilters';
-import ColumnSelectorModal from './modals/ColumnSelectorModal';
-import ContentModal from './modals/ContentModal';
 import { useMjLogsData } from '../../../hooks/mj-logs/useMjLogsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
+
+const ColumnSelectorModal = lazy(() => import('./modals/ColumnSelectorModal'));
+const ContentModal = lazy(() => import('./modals/ContentModal'));
 
 const MjLogsPage = () => {
   const mjLogsData = useMjLogsData();
@@ -36,8 +37,16 @@ const MjLogsPage = () => {
   return (
     <>
       {/* Modals */}
-      <ColumnSelectorModal {...mjLogsData} />
-      <ContentModal {...mjLogsData} />
+      {mjLogsData.showColumnSelector ? (
+        <Suspense fallback={null}>
+          <ColumnSelectorModal {...mjLogsData} />
+        </Suspense>
+      ) : null}
+      {mjLogsData.isModalOpen || mjLogsData.isModalOpenurl ? (
+        <Suspense fallback={null}>
+          <ContentModal {...mjLogsData} />
+        </Suspense>
+      ) : null}
 
       <Layout>
         <CardPro

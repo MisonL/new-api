@@ -17,19 +17,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import CardPro from '../../common/ui/CardPro';
 import LogsTable from './UsageLogsTable';
 import LogsActions from './UsageLogsActions';
 import LogsFilters from './UsageLogsFilters';
-import ColumnSelectorModal from './modals/ColumnSelectorModal';
-import ChannelAffinityUsageCacheModal from './modals/ChannelAffinityUsageCacheModal';
-import ParamOverrideModal from './modals/ParamOverrideModal';
-import PayloadContentModal from './modals/PayloadContentModal';
-import EditUserModal from '../users/modals/EditUserModal';
 import { useLogsData } from '../../../hooks/usage-logs/useUsageLogsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
+
+const ColumnSelectorModal = lazy(() => import('./modals/ColumnSelectorModal'));
+const ChannelAffinityUsageCacheModal = lazy(
+  () => import('./modals/ChannelAffinityUsageCacheModal'),
+);
+const ParamOverrideModal = lazy(() => import('./modals/ParamOverrideModal'));
+const PayloadContentModal = lazy(() => import('./modals/PayloadContentModal'));
+const EditUserModal = lazy(() => import('../users/modals/EditUserModal'));
 
 const LogsPage = () => {
   const logsData = useLogsData();
@@ -41,24 +44,34 @@ const LogsPage = () => {
     <>
       {/* Modals */}
       {logsData.showColumnSelector ? (
-        <ColumnSelectorModal {...logsData} />
+        <Suspense fallback={null}>
+          <ColumnSelectorModal {...logsData} />
+        </Suspense>
       ) : null}
       {logsData.showEditUser ? (
-        <EditUserModal
-          refresh={refreshCurrentPage}
-          visible={logsData.showEditUser}
-          handleClose={logsData.closeEditUserPanel}
-          editingUser={logsData.editingUser}
-        />
+        <Suspense fallback={null}>
+          <EditUserModal
+            refresh={refreshCurrentPage}
+            visible={logsData.showEditUser}
+            handleClose={logsData.closeEditUserPanel}
+            editingUser={logsData.editingUser}
+          />
+        </Suspense>
       ) : null}
       {logsData.showChannelAffinityUsageCacheModal ? (
-        <ChannelAffinityUsageCacheModal {...logsData} />
+        <Suspense fallback={null}>
+          <ChannelAffinityUsageCacheModal {...logsData} />
+        </Suspense>
       ) : null}
       {logsData.showParamOverrideModal ? (
-        <ParamOverrideModal {...logsData} />
+        <Suspense fallback={null}>
+          <ParamOverrideModal {...logsData} />
+        </Suspense>
       ) : null}
       {logsData.showPayloadContentModal ? (
-        <PayloadContentModal {...logsData} />
+        <Suspense fallback={null}>
+          <PayloadContentModal {...logsData} />
+        </Suspense>
       ) : null}
 
       {/* Main Content */}

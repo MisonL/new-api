@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { Banner, Button, Modal } from '@douyinfe/semi-ui';
 import { IconAlertTriangle, IconClose } from '@douyinfe/semi-icons';
 import CardPro from '../../common/ui/CardPro';
@@ -25,11 +25,12 @@ import ModelsTable from './ModelsTable';
 import ModelsActions from './ModelsActions';
 import ModelsFilters from './ModelsFilters';
 import ModelsTabs from './ModelsTabs';
-import EditModelModal from './modals/EditModelModal';
-import EditVendorModal from './modals/EditVendorModal';
 import { useModelsData } from '../../../hooks/models/useModelsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
+
+const EditModelModal = lazy(() => import('./modals/EditModelModal'));
+const EditVendorModal = lazy(() => import('./modals/EditVendorModal'));
 
 const MARKETPLACE_DISPLAY_NOTICE_STORAGE_KEY =
   'models_marketplace_display_notice_dismissed';
@@ -109,26 +110,34 @@ const ModelsPage = () => {
 
   return (
     <>
-      <EditModelModal
-        refresh={refresh}
-        editingModel={editingModel}
-        visiable={showEdit}
-        handleClose={closeEdit}
-      />
+      {showEdit ? (
+        <Suspense fallback={null}>
+          <EditModelModal
+            refresh={refresh}
+            editingModel={editingModel}
+            visiable={showEdit}
+            handleClose={closeEdit}
+          />
+        </Suspense>
+      ) : null}
 
-      <EditVendorModal
-        visible={showAddVendor || showEditVendor}
-        handleClose={() => {
-          setShowAddVendor(false);
-          setShowEditVendor(false);
-          setEditingVendor({ id: undefined });
-        }}
-        editingVendor={showEditVendor ? editingVendor : { id: undefined }}
-        refresh={() => {
-          loadVendors();
-          refresh();
-        }}
-      />
+      {showAddVendor || showEditVendor ? (
+        <Suspense fallback={null}>
+          <EditVendorModal
+            visible={showAddVendor || showEditVendor}
+            handleClose={() => {
+              setShowAddVendor(false);
+              setShowEditVendor(false);
+              setEditingVendor({ id: undefined });
+            }}
+            editingVendor={showEditVendor ? editingVendor : { id: undefined }}
+            refresh={() => {
+              loadVendors();
+              refresh();
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       {showMarketplaceDisplayNotice ? (
         <div style={{ position: 'relative', marginBottom: 12 }}>

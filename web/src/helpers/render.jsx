@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import i18next from 'i18next';
 import { Modal, Tag, Typography, Avatar } from '@douyinfe/semi-ui';
 import { copy, showSuccess } from './utils';
+import { stringToColor } from './color';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 import {
   BILLING_VARS,
@@ -62,24 +63,8 @@ import {
   Replicate,
 } from '@lobehub/icons';
 
-import {
-  LayoutDashboard,
-  TerminalSquare,
-  MessageSquare,
-  Key,
-  BarChart3,
-  Image as ImageIcon,
-  CheckSquare,
-  CreditCard,
-  Layers,
-  Gift,
-  User,
-  Settings,
-  CircleUser,
-  Package,
-  Server,
-  CalendarClock,
-} from 'lucide-react';
+import { Layers } from 'lucide-react';
+export { getLucideIcon } from './sidebarIcons';
 import {
   SiAtlassian,
   SiAuth0,
@@ -140,56 +125,6 @@ const lobeHubIconMap = {
   Perplexity,
   Replicate,
 };
-
-// 获取侧边栏Lucide图标组件
-export function getLucideIcon(key, selected = false) {
-  const size = 16;
-  const strokeWidth = 2;
-  const SELECTED_COLOR = 'var(--semi-color-primary)';
-  const iconColor = selected ? SELECTED_COLOR : 'currentColor';
-  const commonProps = {
-    size,
-    strokeWidth,
-    className: `transition-colors duration-200 ${selected ? 'transition-transform duration-200 scale-105' : ''}`,
-  };
-
-  // 根据不同的key返回不同的图标
-  switch (key) {
-    case 'detail':
-      return <LayoutDashboard {...commonProps} color={iconColor} />;
-    case 'playground':
-      return <TerminalSquare {...commonProps} color={iconColor} />;
-    case 'chat':
-      return <MessageSquare {...commonProps} color={iconColor} />;
-    case 'token':
-      return <Key {...commonProps} color={iconColor} />;
-    case 'log':
-      return <BarChart3 {...commonProps} color={iconColor} />;
-    case 'midjourney':
-      return <ImageIcon {...commonProps} color={iconColor} />;
-    case 'task':
-      return <CheckSquare {...commonProps} color={iconColor} />;
-    case 'topup':
-      return <CreditCard {...commonProps} color={iconColor} />;
-    case 'channel':
-      return <Layers {...commonProps} color={iconColor} />;
-    case 'redemption':
-      return <Gift {...commonProps} color={iconColor} />;
-    case 'user':
-    case 'personal':
-      return <User {...commonProps} color={iconColor} />;
-    case 'models':
-      return <Package {...commonProps} color={iconColor} />;
-    case 'deployment':
-      return <Server {...commonProps} color={iconColor} />;
-    case 'subscription':
-      return <CalendarClock {...commonProps} color={iconColor} />;
-    case 'setting':
-      return <Settings {...commonProps} color={iconColor} />;
-    default:
-      return <CircleUser {...commonProps} color={iconColor} />;
-  }
-}
 
 // 获取模型分类
 export const getModelCategories = (() => {
@@ -641,25 +576,6 @@ export function getOAuthProviderIcon(iconName, size = 20) {
   );
 }
 
-// 颜色列表
-const colors = [
-  'amber',
-  'blue',
-  'cyan',
-  'green',
-  'grey',
-  'indigo',
-  'light-blue',
-  'lime',
-  'orange',
-  'pink',
-  'purple',
-  'red',
-  'teal',
-  'violet',
-  'yellow',
-];
-
 // 基础10色色板 (N ≤ 10)
 const baseColors = [
   '#1664FF', // 主色
@@ -764,14 +680,7 @@ export function modelToColor(modelName) {
   return colorPalette[index];
 }
 
-export function stringToColor(str) {
-  let sum = 0;
-  for (let i = 0; i < str.length; i++) {
-    sum += str.charCodeAt(i);
-  }
-  let i = sum % colors.length;
-  return colors[i];
-}
+export { stringToColor };
 
 // 渲染带有模型图标的标签
 export function renderModelTag(modelName, options = {}) {

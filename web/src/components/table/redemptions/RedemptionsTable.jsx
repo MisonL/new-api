@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useMemo, useState } from 'react';
+import React, { lazy, Suspense, useMemo, useState } from 'react';
 import { Empty } from '@douyinfe/semi-ui';
 import CardTable from '../../common/ui/CardTable';
 import {
@@ -25,7 +25,10 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import { getRedemptionsColumns, isExpired } from './RedemptionsColumnDefs';
-import DeleteRedemptionModal from './modals/DeleteRedemptionModal';
+
+const DeleteRedemptionModal = lazy(
+  () => import('./modals/DeleteRedemptionModal'),
+);
 
 const RedemptionsTable = (redemptionsData) => {
   const {
@@ -127,16 +130,20 @@ const RedemptionsTable = (redemptionsData) => {
         size='middle'
       />
 
-      <DeleteRedemptionModal
-        visible={showDeleteModal}
-        onCancel={() => setShowDeleteModal(false)}
-        record={deletingRecord}
-        manageRedemption={manageRedemption}
-        refresh={refresh}
-        redemptions={redemptions}
-        activePage={activePage}
-        t={t}
-      />
+      {showDeleteModal ? (
+        <Suspense fallback={null}>
+          <DeleteRedemptionModal
+            visible={showDeleteModal}
+            onCancel={() => setShowDeleteModal(false)}
+            record={deletingRecord}
+            manageRedemption={manageRedemption}
+            refresh={refresh}
+            redemptions={redemptions}
+            activePage={activePage}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 };

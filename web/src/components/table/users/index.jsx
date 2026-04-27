@@ -17,17 +17,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import CardPro from '../../common/ui/CardPro';
 import UsersTable from './UsersTable';
 import UsersActions from './UsersActions';
 import UsersFilters from './UsersFilters';
 import UsersDescription from './UsersDescription';
-import AddUserModal from './modals/AddUserModal';
-import EditUserModal from './modals/EditUserModal';
 import { useUsersData } from '../../../hooks/users/useUsersData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
+
+const AddUserModal = lazy(() => import('./modals/AddUserModal'));
+const EditUserModal = lazy(() => import('./modals/EditUserModal'));
 
 const UsersPage = () => {
   const usersData = useUsersData();
@@ -64,18 +65,26 @@ const UsersPage = () => {
 
   return (
     <>
-      <AddUserModal
-        refresh={refresh}
-        visible={showAddUser}
-        handleClose={closeAddUser}
-      />
+      {showAddUser ? (
+        <Suspense fallback={null}>
+          <AddUserModal
+            refresh={refresh}
+            visible={showAddUser}
+            handleClose={closeAddUser}
+          />
+        </Suspense>
+      ) : null}
 
-      <EditUserModal
-        refresh={refresh}
-        visible={showEditUser}
-        handleClose={closeEditUser}
-        editingUser={editingUser}
-      />
+      {showEditUser ? (
+        <Suspense fallback={null}>
+          <EditUserModal
+            refresh={refresh}
+            visible={showEditUser}
+            handleClose={closeEditUser}
+            editingUser={editingUser}
+          />
+        </Suspense>
+      ) : null}
 
       <CardPro
         type='type1'

@@ -17,7 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, {
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  useRef,
+  useMemo,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   API,
@@ -61,16 +68,8 @@ import {
   getModelCategories,
   selectFilter,
 } from '../../../../helpers';
-import ModelSelectModal from './ModelSelectModal';
-import SingleModelSelectModal from './SingleModelSelectModal';
-import OllamaModelModal from './OllamaModelModal';
-import CodexOAuthModal from './CodexOAuthModal';
-import ParamOverrideEditorModal from './ParamOverrideEditorModal';
 import HeaderProfileStrategySection from './HeaderProfileStrategySection';
-import HeaderProfileEditorModal from './HeaderProfileEditorModal';
 import JSONEditor from '../../../common/ui/JSONEditor';
-import SecureVerificationModal from '../../../common/modals/SecureVerificationModal';
-import StatusCodeRiskGuardModal from './StatusCodeRiskGuardModal';
 import ChannelKeyDisplay from '../../../common/ui/ChannelKeyDisplay';
 import { useSecureVerification } from '../../../../hooks/common/useSecureVerification';
 import { parseChannelConnectionString } from '../../../../helpers/token';
@@ -107,6 +106,23 @@ import {
 } from '@douyinfe/semi-icons';
 
 const { Text, Title } = Typography;
+
+const ModelSelectModal = lazy(() => import('./ModelSelectModal'));
+const SingleModelSelectModal = lazy(() => import('./SingleModelSelectModal'));
+const OllamaModelModal = lazy(() => import('./OllamaModelModal'));
+const CodexOAuthModal = lazy(() => import('./CodexOAuthModal'));
+const ParamOverrideEditorModal = lazy(
+  () => import('./ParamOverrideEditorModal'),
+);
+const HeaderProfileEditorModal = lazy(
+  () => import('./HeaderProfileEditorModal'),
+);
+const SecureVerificationModal = lazy(
+  () => import('../../../common/modals/SecureVerificationModal'),
+);
+const StatusCodeRiskGuardModal = lazy(
+  () => import('./StatusCodeRiskGuardModal'),
+);
 
 const MODEL_MAPPING_EXAMPLE = {
   'gpt-3.5-turbo': 'gpt-3.5-turbo-0125',
@@ -4112,13 +4128,17 @@ const EditChannelModal = (props) => {
                                 showClear
                               />
 
-                              <CodexOAuthModal
-                                visible={codexOAuthModalVisible}
-                                onCancel={() =>
-                                  setCodexOAuthModalVisible(false)
-                                }
-                                onSuccess={handleCodexOAuthGenerated}
-                              />
+                              {codexOAuthModalVisible ? (
+                                <Suspense fallback={null}>
+                                  <CodexOAuthModal
+                                    visible={codexOAuthModalVisible}
+                                    onCancel={() =>
+                                      setCodexOAuthModalVisible(false)
+                                    }
+                                    onSuccess={handleCodexOAuthGenerated}
+                                  />
+                                </Suspense>
+                              ) : null}
                             </>
                           ) : inputs.type === 41 &&
                             (inputs.vertex_key_type || 'json') === 'json' ? (
@@ -5150,24 +5170,32 @@ const EditChannelModal = (props) => {
           onVisibleChange={(visible) => setIsModalOpenurl(visible)}
         />
       </SideSheet>
-      <StatusCodeRiskGuardModal
-        visible={statusCodeRiskConfirmVisible}
-        detailItems={statusCodeRiskDetailItems}
-        onCancel={() => resolveStatusCodeRiskConfirm(false)}
-        onConfirm={() => resolveStatusCodeRiskConfirm(true)}
-      />
+      {statusCodeRiskConfirmVisible ? (
+        <Suspense fallback={null}>
+          <StatusCodeRiskGuardModal
+            visible={statusCodeRiskConfirmVisible}
+            detailItems={statusCodeRiskDetailItems}
+            onCancel={() => resolveStatusCodeRiskConfirm(false)}
+            onConfirm={() => resolveStatusCodeRiskConfirm(true)}
+          />
+        </Suspense>
+      ) : null}
       {/* 使用通用安全验证模态框 */}
-      <SecureVerificationModal
-        visible={isModalVisible}
-        verificationMethods={verificationMethods}
-        verificationState={verificationState}
-        onVerify={executeVerification}
-        onCancel={cancelVerification}
-        onCodeChange={setVerificationCode}
-        onMethodSwitch={switchVerificationMethod}
-        title={verificationState.title}
-        description={verificationState.description}
-      />
+      {isModalVisible ? (
+        <Suspense fallback={null}>
+          <SecureVerificationModal
+            visible={isModalVisible}
+            verificationMethods={verificationMethods}
+            verificationState={verificationState}
+            onVerify={executeVerification}
+            onCancel={cancelVerification}
+            onCodeChange={setVerificationCode}
+            onMethodSwitch={switchVerificationMethod}
+            title={verificationState.title}
+            description={verificationState.description}
+          />
+        </Suspense>
+      ) : null}
 
       {/* 使用ChannelKeyDisplay组件显示密钥 */}
       <Modal
@@ -5210,113 +5238,137 @@ const EditChannelModal = (props) => {
         />
       </Modal>
 
-      <ParamOverrideEditorModal
-        visible={paramOverrideEditorVisible}
-        value={inputs.param_override || ''}
-        onCancel={() => setParamOverrideEditorVisible(false)}
-        onSave={(nextValue) => {
-          handleInputChange('param_override', nextValue);
-          setParamOverrideEditorVisible(false);
-        }}
-      />
+      {paramOverrideEditorVisible ? (
+        <Suspense fallback={null}>
+          <ParamOverrideEditorModal
+            visible={paramOverrideEditorVisible}
+            value={inputs.param_override || ''}
+            onCancel={() => setParamOverrideEditorVisible(false)}
+            onSave={(nextValue) => {
+              handleInputChange('param_override', nextValue);
+              setParamOverrideEditorVisible(false);
+            }}
+          />
+        </Suspense>
+      ) : null}
 
-      <HeaderProfileEditorModal
-        visible={headerProfileEditorVisible}
-        saving={headerProfileEditorSaving}
-        profile={headerProfileEditorProfile}
-        profiles={allHeaderProfiles}
-        onCancel={closeHeaderProfileEditor}
-        onSave={handleSaveHeaderProfile}
-      />
+      {headerProfileEditorVisible ? (
+        <Suspense fallback={null}>
+          <HeaderProfileEditorModal
+            visible={headerProfileEditorVisible}
+            saving={headerProfileEditorSaving}
+            profile={headerProfileEditorProfile}
+            profiles={allHeaderProfiles}
+            onCancel={closeHeaderProfileEditor}
+            onSave={handleSaveHeaderProfile}
+          />
+        </Suspense>
+      ) : null}
 
-      <ModelSelectModal
-        visible={modelModalVisible}
-        models={fetchedModels}
-        selected={inputs.models}
-        redirectModels={redirectModelList}
-        onConfirm={(selectedModels) => {
-          handleInputChange('models', selectedModels);
-          showSuccess(t('模型列表已更新'));
-          setModelModalVisible(false);
-        }}
-        onCancel={() => setModelModalVisible(false)}
-      />
+      {modelModalVisible ? (
+        <Suspense fallback={null}>
+          <ModelSelectModal
+            visible={modelModalVisible}
+            models={fetchedModels}
+            selected={inputs.models}
+            redirectModels={redirectModelList}
+            onConfirm={(selectedModels) => {
+              handleInputChange('models', selectedModels);
+              showSuccess(t('模型列表已更新'));
+              setModelModalVisible(false);
+            }}
+            onCancel={() => setModelModalVisible(false)}
+          />
+        </Suspense>
+      ) : null}
 
-      <SingleModelSelectModal
-        visible={modelMappingValueModalVisible}
-        models={modelMappingValueModalModels}
-        selected={modelMappingValueSelected}
-        onConfirm={(selectedModel) => {
-          const modelName = String(selectedModel ?? '').trim();
-          if (!modelName) {
-            showError(t('请先选择模型！'));
-            return;
-          }
+      {modelMappingValueModalVisible ? (
+        <Suspense fallback={null}>
+          <SingleModelSelectModal
+            visible={modelMappingValueModalVisible}
+            models={modelMappingValueModalModels}
+            selected={modelMappingValueSelected}
+            onConfirm={(selectedModel) => {
+              const modelName = String(selectedModel ?? '').trim();
+              if (!modelName) {
+                showError(t('请先选择模型！'));
+                return;
+              }
 
-          const mappingKey = String(modelMappingValueKey ?? '').trim();
-          if (!mappingKey) {
-            setModelMappingValueModalVisible(false);
-            return;
-          }
+              const mappingKey = String(modelMappingValueKey ?? '').trim();
+              if (!mappingKey) {
+                setModelMappingValueModalVisible(false);
+                return;
+              }
 
-          let parsed = {};
-          const currentMapping = inputs.model_mapping;
-          if (typeof currentMapping === 'string' && currentMapping.trim()) {
-            try {
-              parsed = JSON.parse(currentMapping);
-            } catch (error) {
-              parsed = {};
-            }
-          } else if (
-            currentMapping &&
-            typeof currentMapping === 'object' &&
-            !Array.isArray(currentMapping)
-          ) {
-            parsed = currentMapping;
-          }
-          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-            parsed = {};
-          }
+              let parsed = {};
+              const currentMapping = inputs.model_mapping;
+              if (typeof currentMapping === 'string' && currentMapping.trim()) {
+                try {
+                  parsed = JSON.parse(currentMapping);
+                } catch (error) {
+                  parsed = {};
+                }
+              } else if (
+                currentMapping &&
+                typeof currentMapping === 'object' &&
+                !Array.isArray(currentMapping)
+              ) {
+                parsed = currentMapping;
+              }
+              if (
+                !parsed ||
+                typeof parsed !== 'object' ||
+                Array.isArray(parsed)
+              ) {
+                parsed = {};
+              }
 
-          parsed[mappingKey] = modelName;
-          const nextMapping = JSON.stringify(parsed, null, 2);
-          handleInputChange('model_mapping', nextMapping);
-          if (formApiRef.current) {
-            formApiRef.current.setValue('model_mapping', nextMapping);
-          }
-          setModelMappingValueModalVisible(false);
-        }}
-        onCancel={() => setModelMappingValueModalVisible(false)}
-      />
+              parsed[mappingKey] = modelName;
+              const nextMapping = JSON.stringify(parsed, null, 2);
+              handleInputChange('model_mapping', nextMapping);
+              if (formApiRef.current) {
+                formApiRef.current.setValue('model_mapping', nextMapping);
+              }
+              setModelMappingValueModalVisible(false);
+            }}
+            onCancel={() => setModelMappingValueModalVisible(false)}
+          />
+        </Suspense>
+      ) : null}
 
-      <OllamaModelModal
-        visible={ollamaModalVisible}
-        onCancel={() => setOllamaModalVisible(false)}
-        channelId={channelId}
-        channelInfo={inputs}
-        onModelsUpdate={(options = {}) => {
-          // 当模型更新后，重新获取模型列表以更新表单
-          fetchUpstreamModelList('models', { silent: !!options.silent });
-        }}
-        onApplyModels={({ mode, modelIds } = {}) => {
-          if (!Array.isArray(modelIds) || modelIds.length === 0) {
-            return;
-          }
-          const existingModels = Array.isArray(inputs.models)
-            ? inputs.models.map(String)
-            : [];
-          const incoming = modelIds.map(String);
-          const nextModels = Array.from(
-            new Set([...existingModels, ...incoming]),
-          );
+      {ollamaModalVisible ? (
+        <Suspense fallback={null}>
+          <OllamaModelModal
+            visible={ollamaModalVisible}
+            onCancel={() => setOllamaModalVisible(false)}
+            channelId={channelId}
+            channelInfo={inputs}
+            onModelsUpdate={(options = {}) => {
+              // 当模型更新后，重新获取模型列表以更新表单
+              fetchUpstreamModelList('models', { silent: !!options.silent });
+            }}
+            onApplyModels={({ mode, modelIds } = {}) => {
+              if (!Array.isArray(modelIds) || modelIds.length === 0) {
+                return;
+              }
+              const existingModels = Array.isArray(inputs.models)
+                ? inputs.models.map(String)
+                : [];
+              const incoming = modelIds.map(String);
+              const nextModels = Array.from(
+                new Set([...existingModels, ...incoming]),
+              );
 
-          handleInputChange('models', nextModels);
-          if (formApiRef.current) {
-            formApiRef.current.setValue('models', nextModels);
-          }
-          showSuccess(t('模型列表已追加更新'));
-        }}
-      />
+              handleInputChange('models', nextModels);
+              if (formApiRef.current) {
+                formApiRef.current.setValue('models', nextModels);
+              }
+              showSuccess(t('模型列表已追加更新'));
+            }}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 };

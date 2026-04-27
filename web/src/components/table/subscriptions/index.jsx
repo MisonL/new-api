@@ -17,17 +17,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext } from 'react';
+import React, { lazy, Suspense, useContext } from 'react';
 import { Banner } from '@douyinfe/semi-ui';
 import CardPro from '../../common/ui/CardPro';
 import SubscriptionsTable from './SubscriptionsTable';
 import SubscriptionsActions from './SubscriptionsActions';
 import SubscriptionsDescription from './SubscriptionsDescription';
-import AddEditSubscriptionModal from './modals/AddEditSubscriptionModal';
 import { useSubscriptionsData } from '../../../hooks/subscriptions/useSubscriptionsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
 import { StatusContext } from '../../../context/Status';
+
+const AddEditSubscriptionModal = lazy(
+  () => import('./modals/AddEditSubscriptionModal'),
+);
 
 const SubscriptionsPage = () => {
   const subscriptionsData = useSubscriptionsData();
@@ -49,14 +52,18 @@ const SubscriptionsPage = () => {
 
   return (
     <>
-      <AddEditSubscriptionModal
-        visible={showEdit}
-        handleClose={closeEdit}
-        editingPlan={editingPlan}
-        placement={sheetPlacement}
-        refresh={refresh}
-        t={t}
-      />
+      {showEdit ? (
+        <Suspense fallback={null}>
+          <AddEditSubscriptionModal
+            visible={showEdit}
+            handleClose={closeEdit}
+            editingPlan={editingPlan}
+            placement={sheetPlacement}
+            refresh={refresh}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
       <CardPro
         type='type1'

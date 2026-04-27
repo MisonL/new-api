@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useMemo, useState } from 'react';
+import React, { lazy, Suspense, useMemo, useState } from 'react';
 import { Empty } from '@douyinfe/semi-ui';
 import CardTable from '../../common/ui/CardTable';
 import {
@@ -25,13 +25,18 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import { getUsersColumns } from './UsersColumnDefs';
-import PromoteUserModal from './modals/PromoteUserModal';
-import DemoteUserModal from './modals/DemoteUserModal';
-import EnableDisableUserModal from './modals/EnableDisableUserModal';
-import DeleteUserModal from './modals/DeleteUserModal';
-import ResetPasskeyModal from './modals/ResetPasskeyModal';
-import ResetTwoFAModal from './modals/ResetTwoFAModal';
-import UserSubscriptionsModal from './modals/UserSubscriptionsModal';
+
+const PromoteUserModal = lazy(() => import('./modals/PromoteUserModal'));
+const DemoteUserModal = lazy(() => import('./modals/DemoteUserModal'));
+const EnableDisableUserModal = lazy(
+  () => import('./modals/EnableDisableUserModal'),
+);
+const DeleteUserModal = lazy(() => import('./modals/DeleteUserModal'));
+const ResetPasskeyModal = lazy(() => import('./modals/ResetPasskeyModal'));
+const ResetTwoFAModal = lazy(() => import('./modals/ResetTwoFAModal'));
+const UserSubscriptionsModal = lazy(
+  () => import('./modals/UserSubscriptionsModal'),
+);
 
 const UsersTable = (usersData) => {
   const {
@@ -207,65 +212,93 @@ const UsersTable = (usersData) => {
       />
 
       {/* Modal components */}
-      <PromoteUserModal
-        visible={showPromoteModal}
-        onCancel={() => setShowPromoteModal(false)}
-        onConfirm={handlePromoteConfirm}
-        user={modalUser}
-        t={t}
-      />
+      {showPromoteModal ? (
+        <Suspense fallback={null}>
+          <PromoteUserModal
+            visible={showPromoteModal}
+            onCancel={() => setShowPromoteModal(false)}
+            onConfirm={handlePromoteConfirm}
+            user={modalUser}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <DemoteUserModal
-        visible={showDemoteModal}
-        onCancel={() => setShowDemoteModal(false)}
-        onConfirm={handleDemoteConfirm}
-        user={modalUser}
-        t={t}
-      />
+      {showDemoteModal ? (
+        <Suspense fallback={null}>
+          <DemoteUserModal
+            visible={showDemoteModal}
+            onCancel={() => setShowDemoteModal(false)}
+            onConfirm={handleDemoteConfirm}
+            user={modalUser}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <EnableDisableUserModal
-        visible={showEnableDisableModal}
-        onCancel={() => setShowEnableDisableModal(false)}
-        onConfirm={handleEnableDisableConfirm}
-        user={modalUser}
-        action={enableDisableAction}
-        t={t}
-      />
+      {showEnableDisableModal ? (
+        <Suspense fallback={null}>
+          <EnableDisableUserModal
+            visible={showEnableDisableModal}
+            onCancel={() => setShowEnableDisableModal(false)}
+            onConfirm={handleEnableDisableConfirm}
+            user={modalUser}
+            action={enableDisableAction}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <DeleteUserModal
-        visible={showDeleteModal}
-        onCancel={() => setShowDeleteModal(false)}
-        user={modalUser}
-        users={users}
-        activePage={activePage}
-        refresh={refresh}
-        manageUser={manageUser}
-        t={t}
-      />
+      {showDeleteModal ? (
+        <Suspense fallback={null}>
+          <DeleteUserModal
+            visible={showDeleteModal}
+            onCancel={() => setShowDeleteModal(false)}
+            user={modalUser}
+            users={users}
+            activePage={activePage}
+            refresh={refresh}
+            manageUser={manageUser}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <ResetPasskeyModal
-        visible={showResetPasskeyModal}
-        onCancel={() => setShowResetPasskeyModal(false)}
-        onConfirm={handleResetPasskeyConfirm}
-        user={modalUser}
-        t={t}
-      />
+      {showResetPasskeyModal ? (
+        <Suspense fallback={null}>
+          <ResetPasskeyModal
+            visible={showResetPasskeyModal}
+            onCancel={() => setShowResetPasskeyModal(false)}
+            onConfirm={handleResetPasskeyConfirm}
+            user={modalUser}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <ResetTwoFAModal
-        visible={showResetTwoFAModal}
-        onCancel={() => setShowResetTwoFAModal(false)}
-        onConfirm={handleResetTwoFAConfirm}
-        user={modalUser}
-        t={t}
-      />
+      {showResetTwoFAModal ? (
+        <Suspense fallback={null}>
+          <ResetTwoFAModal
+            visible={showResetTwoFAModal}
+            onCancel={() => setShowResetTwoFAModal(false)}
+            onConfirm={handleResetTwoFAConfirm}
+            user={modalUser}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <UserSubscriptionsModal
-        visible={showUserSubscriptionsModal}
-        onCancel={() => setShowUserSubscriptionsModal(false)}
-        user={modalUser}
-        t={t}
-        onSuccess={() => refresh?.()}
-      />
+      {showUserSubscriptionsModal ? (
+        <Suspense fallback={null}>
+          <UserSubscriptionsModal
+            visible={showUserSubscriptionsModal}
+            onCancel={() => setShowUserSubscriptionsModal(false)}
+            user={modalUser}
+            t={t}
+            onSuccess={() => refresh?.()}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 };

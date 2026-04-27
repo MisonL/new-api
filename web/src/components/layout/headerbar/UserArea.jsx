@@ -27,7 +27,7 @@ import {
   IconCreditCard,
   IconKey,
 } from '@douyinfe/semi-icons';
-import { stringToColor } from '../../../helpers';
+import { stringToColor } from '../../../helpers/color';
 import { useActualTheme } from '../../../context/Theme';
 import SkeletonWrapper from '../components/SkeletonWrapper';
 import HeaderPopupMenu from './HeaderPopupMenu';

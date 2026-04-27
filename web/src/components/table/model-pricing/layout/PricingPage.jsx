@@ -17,13 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Layout, ImagePreview } from '@douyinfe/semi-ui';
 import PricingSidebar from './PricingSidebar';
 import PricingContent from './content/PricingContent';
-import ModelDetailSideSheet from '../modal/ModelDetailSideSheet';
 import { useModelPricingData } from '../../../../hooks/model-pricing/useModelPricingData';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
+
+const ModelDetailSideSheet = lazy(
+  () => import('../modal/ModelDetailSideSheet'),
+);
 
 const PricingPage = () => {
   const pricingData = useModelPricingData();
@@ -63,22 +66,26 @@ const PricingPage = () => {
         onVisibleChange={(visible) => pricingData.setIsModalOpenurl(visible)}
       />
 
-      <ModelDetailSideSheet
-        visible={pricingData.showModelDetail}
-        onClose={pricingData.closeModelDetail}
-        modelData={pricingData.selectedModel}
-        groupRatio={pricingData.groupRatio}
-        usableGroup={pricingData.usableGroup}
-        currency={pricingData.currency}
-        siteDisplayType={pricingData.siteDisplayType}
-        tokenUnit={pricingData.tokenUnit}
-        displayPrice={pricingData.displayPrice}
-        showRatio={allProps.showRatio}
-        vendorsMap={pricingData.vendorsMap}
-        endpointMap={pricingData.endpointMap}
-        autoGroups={pricingData.autoGroups}
-        t={pricingData.t}
-      />
+      {pricingData.showModelDetail ? (
+        <Suspense fallback={null}>
+          <ModelDetailSideSheet
+            visible={pricingData.showModelDetail}
+            onClose={pricingData.closeModelDetail}
+            modelData={pricingData.selectedModel}
+            groupRatio={pricingData.groupRatio}
+            usableGroup={pricingData.usableGroup}
+            currency={pricingData.currency}
+            siteDisplayType={pricingData.siteDisplayType}
+            tokenUnit={pricingData.tokenUnit}
+            displayPrice={pricingData.displayPrice}
+            showRatio={allProps.showRatio}
+            vendorsMap={pricingData.vendorsMap}
+            endpointMap={pricingData.endpointMap}
+            autoGroups={pricingData.autoGroups}
+            t={pricingData.t}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 };

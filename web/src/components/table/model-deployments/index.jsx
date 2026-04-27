@@ -17,17 +17,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import CardPro from '../../common/ui/CardPro';
 import DeploymentsTable from './DeploymentsTable';
 import DeploymentsActions from './DeploymentsActions';
 import DeploymentsFilters from './DeploymentsFilters';
-import EditDeploymentModal from './modals/EditDeploymentModal';
-import CreateDeploymentModal from './modals/CreateDeploymentModal';
-import ColumnSelectorModal from './modals/ColumnSelectorModal';
 import { useDeploymentsData } from '../../../hooks/model-deployments/useDeploymentsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
+
+const EditDeploymentModal = lazy(() => import('./modals/EditDeploymentModal'));
+const CreateDeploymentModal = lazy(
+  () => import('./modals/CreateDeploymentModal'),
+);
+const ColumnSelectorModal = lazy(() => import('./modals/ColumnSelectorModal'));
 
 const DeploymentsPage = () => {
   const deploymentsData = useDeploymentsData();
@@ -76,28 +79,40 @@ const DeploymentsPage = () => {
   return (
     <>
       {/* Modals */}
-      <EditDeploymentModal
-        refresh={refresh}
-        editingDeployment={editingDeployment}
-        visible={showEdit}
-        handleClose={closeEdit}
-      />
+      {showEdit ? (
+        <Suspense fallback={null}>
+          <EditDeploymentModal
+            refresh={refresh}
+            editingDeployment={editingDeployment}
+            visible={showEdit}
+            handleClose={closeEdit}
+          />
+        </Suspense>
+      ) : null}
 
-      <CreateDeploymentModal
-        visible={showCreateModal}
-        onCancel={() => setShowCreateModal(false)}
-        onSuccess={refresh}
-        t={t}
-      />
+      {showCreateModal ? (
+        <Suspense fallback={null}>
+          <CreateDeploymentModal
+            visible={showCreateModal}
+            onCancel={() => setShowCreateModal(false)}
+            onSuccess={refresh}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
-      <ColumnSelectorModal
-        visible={showColumnSelector}
-        onCancel={() => setShowColumnSelector(false)}
-        visibleColumns={visibleColumns}
-        onVisibleColumnsChange={setVisibleColumns}
-        columnKeys={COLUMN_KEYS}
-        t={t}
-      />
+      {showColumnSelector ? (
+        <Suspense fallback={null}>
+          <ColumnSelectorModal
+            visible={showColumnSelector}
+            onCancel={() => setShowColumnSelector(false)}
+            visibleColumns={visibleColumns}
+            onVisibleColumnsChange={setVisibleColumns}
+            columnKeys={COLUMN_KEYS}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
       {/* Main Content */}
       <CardPro

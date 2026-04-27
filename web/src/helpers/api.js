@@ -18,78 +18,24 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import {
-  getUserIdFromLocalStorage,
   showError,
   showSuccess,
   formatMessageForAPI,
   isValidMessage,
 } from './utils';
-import axios from 'axios';
+import { API, buildAPIURL, updateAPI } from './apiCore';
+export {
+  API,
+  buildAPIURL,
+  getEffectiveServerAddress,
+  isUsingRuntimeServerAddress,
+  updateAPI,
+} from './apiCore';
 import i18n from '../i18n/i18n';
 import { MESSAGE_ROLES } from '../constants/playground.constants';
-import {
-  IS_READONLY_FRONTEND,
-  READONLY_FRONTEND_MESSAGE,
-} from '../constants/runtime.constants';
 import { isDesktopApp, openDesktopExternalUrl } from './desktopRuntime';
-
-export let API = axios.create({
-  baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
-    ? import.meta.env.VITE_REACT_APP_SERVER_URL
-    : '',
-  headers: {
-    'New-API-User': getUserIdFromLocalStorage(),
-    'Cache-Control': 'no-store',
-  },
-});
-
-const READONLY_SAFE_METHODS = new Set(['get', 'head', 'options']);
 const DESKTOP_OAUTH_POLL_INTERVAL_MS = 1000;
 const DESKTOP_OAUTH_TIMEOUT_MS = 2 * 60 * 1000;
-const READONLY_BLOCKED_PATHS = [
-  /^\/api\/oauth\//,
-  /^\/api\/auth\/external\//,
-  /^\/api\/user\/logout$/,
-  /^\/api\/setup$/,
-  /^\/api\/verification$/,
-  /^\/api\/reset_password$/,
-];
-
-function normalizeRequestPath(url) {
-  if (typeof url !== 'string' || url.trim() === '') {
-    return '';
-  }
-
-  try {
-    return new URL(url, window.location.origin).pathname;
-  } catch {
-    return url;
-  }
-}
-
-function applyReadonlyRequestGuard(instance) {
-  instance.interceptors.request.use((config) => {
-    if (!IS_READONLY_FRONTEND) {
-      return config;
-    }
-
-    const method = String(config.method || 'get').toLowerCase();
-    const path = normalizeRequestPath(config.url);
-
-    if (!READONLY_SAFE_METHODS.has(method)) {
-      return Promise.reject(new Error(READONLY_FRONTEND_MESSAGE));
-    }
-
-    const isBlockedReadonlyPath = READONLY_BLOCKED_PATHS.some((pattern) =>
-      pattern.test(path),
-    );
-    if (isBlockedReadonlyPath) {
-      return Promise.reject(new Error(READONLY_FRONTEND_MESSAGE));
-    }
-
-    return config;
-  });
-}
 
 function redirectToOAuthUrl(url, options = {}) {
   const {
@@ -192,61 +138,6 @@ function isTicketAcquireMode(mode) {
   return mode === 'ticket_exchange' || mode === 'ticket_validate';
 }
 
-const DEFAULT_LOCAL_SERVER_ADDRESSES = new Set([
-  'http://localhost:3000',
-  'https://localhost:3000',
-  'http://127.0.0.1:3000',
-  'https://127.0.0.1:3000',
-]);
-
-function normalizeServerAddress(
-  address,
-  fallbackOrigin = window.location.origin,
-) {
-  if (typeof address !== 'string' || address.trim() === '') {
-    return '';
-  }
-  try {
-    return new URL(address.trim(), fallbackOrigin)
-      .toString()
-      .replace(/\/$/, '');
-  } catch {
-    return '';
-  }
-}
-
-export function getEffectiveServerAddress(configuredAddress) {
-  const currentOrigin = normalizeServerAddress(window.location.origin);
-  const normalizedConfigured = normalizeServerAddress(configuredAddress);
-
-  if (!normalizedConfigured) {
-    return currentOrigin;
-  }
-
-  if (
-    DEFAULT_LOCAL_SERVER_ADDRESSES.has(normalizedConfigured) &&
-    normalizedConfigured !== currentOrigin
-  ) {
-    return currentOrigin;
-  }
-
-  return normalizedConfigured;
-}
-
-export function isUsingRuntimeServerAddress(configuredAddress) {
-  const currentOrigin = normalizeServerAddress(window.location.origin);
-  const normalizedConfigured = normalizeServerAddress(configuredAddress);
-
-  if (!normalizedConfigured) {
-    return true;
-  }
-
-  return (
-    DEFAULT_LOCAL_SERVER_ADDRESSES.has(normalizedConfigured) &&
-    normalizedConfigured !== currentOrigin
-  );
-}
-
 function supportsCustomProviderBrowserLogin(provider) {
   if (provider?.browser_login_supported !== undefined) {
     return Boolean(provider.browser_login_supported);
@@ -272,25 +163,6 @@ function supportsCustomProviderBrowserLogin(provider) {
     );
   }
   return Boolean(provider?.authorization_endpoint && provider?.client_id);
-}
-
-function buildAPIURL(path) {
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  const configuredBaseURL =
-    typeof API.defaults?.baseURL === 'string'
-      ? API.defaults.baseURL.trim()
-      : '';
-
-  if (!configuredBaseURL) {
-    return new URL(normalizedPath, window.location.origin);
-  }
-
-  const baseURL = new URL(configuredBaseURL, window.location.origin);
-  const basePath = baseURL.pathname.replace(/\/+$/, '');
-  baseURL.pathname = `${basePath}${normalizedPath}`;
-  baseURL.search = '';
-  baseURL.hash = '';
-  return baseURL;
 }
 
 function ensureAbsoluteOAuthURL(url) {
@@ -352,64 +224,6 @@ function buildCustomJWTAuthorizationUrl(provider, state) {
 
   return authUrl;
 }
-
-function patchAPIInstance(instance) {
-  const originalGet = instance.get.bind(instance);
-  const inFlightGetRequests = new Map();
-
-  const genKey = (url, config = {}) => {
-    const params = config.params ? JSON.stringify(config.params) : '{}';
-    return `${url}?${params}`;
-  };
-
-  instance.get = (url, config = {}) => {
-    if (config?.disableDuplicate) {
-      return originalGet(url, config);
-    }
-
-    const key = genKey(url, config);
-    if (inFlightGetRequests.has(key)) {
-      return inFlightGetRequests.get(key);
-    }
-
-    const reqPromise = originalGet(url, config).finally(() => {
-      inFlightGetRequests.delete(key);
-    });
-
-    inFlightGetRequests.set(key, reqPromise);
-    return reqPromise;
-  };
-}
-
-patchAPIInstance(API);
-applyReadonlyRequestGuard(API);
-
-export function updateAPI() {
-  API = axios.create({
-    baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
-      ? import.meta.env.VITE_REACT_APP_SERVER_URL
-      : '',
-    headers: {
-      'New-API-User': getUserIdFromLocalStorage(),
-      'Cache-Control': 'no-store',
-    },
-  });
-
-  patchAPIInstance(API);
-  applyReadonlyRequestGuard(API);
-}
-
-API.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    // 如果请求配置中显式要求跳过全局错误处理，则不弹出默认错误提示
-    if (error.config && error.config.skipErrorHandler) {
-      return Promise.reject(error);
-    }
-    showError(error);
-    return Promise.reject(error);
-  },
-);
 
 // playground
 

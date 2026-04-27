@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Banner } from '@douyinfe/semi-ui';
 import { IconAlertTriangle } from '@douyinfe/semi-icons';
 import CardPro from '../../common/ui/CardPro';
@@ -27,14 +27,17 @@ import ChannelsFilters from './ChannelsFilters';
 import ChannelsTabs from './ChannelsTabs';
 import { useChannelsData } from '../../../hooks/channels/useChannelsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
-import BatchTagModal from './modals/BatchTagModal';
-import ModelTestModal from './modals/ModelTestModal';
-import ColumnSelectorModal from './modals/ColumnSelectorModal';
-import EditChannelModal from './modals/EditChannelModal';
-import EditTagModal from './modals/EditTagModal';
-import MultiKeyManageModal from './modals/MultiKeyManageModal';
-import ChannelUpstreamUpdateModal from './modals/ChannelUpstreamUpdateModal';
 import { createCardProPagination } from '../../../helpers/utils';
+
+const BatchTagModal = lazy(() => import('./modals/BatchTagModal'));
+const ModelTestModal = lazy(() => import('./modals/ModelTestModal'));
+const ColumnSelectorModal = lazy(() => import('./modals/ColumnSelectorModal'));
+const EditChannelModal = lazy(() => import('./modals/EditChannelModal'));
+const EditTagModal = lazy(() => import('./modals/EditTagModal'));
+const MultiKeyManageModal = lazy(() => import('./modals/MultiKeyManageModal'));
+const ChannelUpstreamUpdateModal = lazy(
+  () => import('./modals/ChannelUpstreamUpdateModal'),
+);
 
 const ChannelsPage = () => {
   const channelsData = useChannelsData();
@@ -44,48 +47,62 @@ const ChannelsPage = () => {
     <>
       {/* Modals */}
       {channelsData.showColumnSelector ? (
-        <ColumnSelectorModal {...channelsData} />
+        <Suspense fallback={null}>
+          <ColumnSelectorModal {...channelsData} />
+        </Suspense>
       ) : null}
       {channelsData.showEditTag ? (
-        <EditTagModal
-          visible={channelsData.showEditTag}
-          tag={channelsData.editingTag}
-          handleClose={() => channelsData.setShowEditTag(false)}
-          refresh={channelsData.refresh}
-        />
+        <Suspense fallback={null}>
+          <EditTagModal
+            visible={channelsData.showEditTag}
+            tag={channelsData.editingTag}
+            handleClose={() => channelsData.setShowEditTag(false)}
+            refresh={channelsData.refresh}
+          />
+        </Suspense>
       ) : null}
       {channelsData.showEdit ? (
-        <EditChannelModal
-          refresh={channelsData.refresh}
-          visible={channelsData.showEdit}
-          handleClose={channelsData.closeEdit}
-          editingChannel={channelsData.editingChannel}
-        />
+        <Suspense fallback={null}>
+          <EditChannelModal
+            refresh={channelsData.refresh}
+            visible={channelsData.showEdit}
+            handleClose={channelsData.closeEdit}
+            editingChannel={channelsData.editingChannel}
+          />
+        </Suspense>
       ) : null}
       {channelsData.showBatchSetTag ? (
-        <BatchTagModal {...channelsData} />
+        <Suspense fallback={null}>
+          <BatchTagModal {...channelsData} />
+        </Suspense>
       ) : null}
       {channelsData.showModelTestModal ? (
-        <ModelTestModal {...channelsData} />
+        <Suspense fallback={null}>
+          <ModelTestModal {...channelsData} />
+        </Suspense>
       ) : null}
       {channelsData.showMultiKeyManageModal ? (
-        <MultiKeyManageModal
-          visible={channelsData.showMultiKeyManageModal}
-          onCancel={() => channelsData.setShowMultiKeyManageModal(false)}
-          channel={channelsData.currentMultiKeyChannel}
-          onRefresh={channelsData.refresh}
-        />
+        <Suspense fallback={null}>
+          <MultiKeyManageModal
+            visible={channelsData.showMultiKeyManageModal}
+            onCancel={() => channelsData.setShowMultiKeyManageModal(false)}
+            channel={channelsData.currentMultiKeyChannel}
+            onRefresh={channelsData.refresh}
+          />
+        </Suspense>
       ) : null}
       {channelsData.showUpstreamUpdateModal ? (
-        <ChannelUpstreamUpdateModal
-          visible={channelsData.showUpstreamUpdateModal}
-          addModels={channelsData.upstreamUpdateAddModels}
-          removeModels={channelsData.upstreamUpdateRemoveModels}
-          preferredTab={channelsData.upstreamUpdatePreferredTab}
-          confirmLoading={channelsData.upstreamApplyLoading}
-          onConfirm={channelsData.applyUpstreamUpdates}
-          onCancel={channelsData.closeUpstreamUpdateModal}
-        />
+        <Suspense fallback={null}>
+          <ChannelUpstreamUpdateModal
+            visible={channelsData.showUpstreamUpdateModal}
+            addModels={channelsData.upstreamUpdateAddModels}
+            removeModels={channelsData.upstreamUpdateRemoveModels}
+            preferredTab={channelsData.upstreamUpdatePreferredTab}
+            confirmLoading={channelsData.upstreamApplyLoading}
+            onConfirm={channelsData.applyUpstreamUpdates}
+            onCancel={channelsData.closeUpstreamUpdateModal}
+          />
+        </Suspense>
       ) : null}
 
       {/* Main Content */}

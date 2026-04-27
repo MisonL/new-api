@@ -17,19 +17,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Layout } from '@douyinfe/semi-ui';
 import CardPro from '../../common/ui/CardPro';
 import TaskLogsTable from './TaskLogsTable';
 import TaskLogsActions from './TaskLogsActions';
 import TaskLogsFilters from './TaskLogsFilters';
-import ColumnSelectorModal from './modals/ColumnSelectorModal';
-import ContentModal from './modals/ContentModal';
-import AudioPreviewModal from './modals/AudioPreviewModal';
-import EditUserModal from '../users/modals/EditUserModal';
 import { useTaskLogsData } from '../../../hooks/task-logs/useTaskLogsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
+
+const ColumnSelectorModal = lazy(() => import('./modals/ColumnSelectorModal'));
+const ContentModal = lazy(() => import('./modals/ContentModal'));
+const AudioPreviewModal = lazy(() => import('./modals/AudioPreviewModal'));
+const EditUserModal = lazy(() => import('../users/modals/EditUserModal'));
 
 const TaskLogsPage = () => {
   const taskLogsData = useTaskLogsData();
@@ -40,26 +41,46 @@ const TaskLogsPage = () => {
   return (
     <>
       {/* Modals */}
-      <ColumnSelectorModal {...taskLogsData} />
-      <ContentModal {...taskLogsData} isVideo={false} />
+      {taskLogsData.showColumnSelector ? (
+        <Suspense fallback={null}>
+          <ColumnSelectorModal {...taskLogsData} />
+        </Suspense>
+      ) : null}
+      {taskLogsData.isModalOpen ? (
+        <Suspense fallback={null}>
+          <ContentModal {...taskLogsData} isVideo={false} />
+        </Suspense>
+      ) : null}
       {/* 新增：视频预览弹窗 */}
-      <ContentModal
-        isModalOpen={taskLogsData.isVideoModalOpen}
-        setIsModalOpen={taskLogsData.setIsVideoModalOpen}
-        modalContent={taskLogsData.videoUrl}
-        isVideo={true}
-      />
-      <AudioPreviewModal
-        isModalOpen={taskLogsData.isAudioModalOpen}
-        setIsModalOpen={taskLogsData.setIsAudioModalOpen}
-        audioClips={taskLogsData.audioClips}
-      />
-      <EditUserModal
-        refresh={refreshCurrentPage}
-        visible={taskLogsData.showEditUser}
-        handleClose={taskLogsData.closeEditUserPanel}
-        editingUser={taskLogsData.editingUser}
-      />
+      {taskLogsData.isVideoModalOpen ? (
+        <Suspense fallback={null}>
+          <ContentModal
+            isModalOpen={taskLogsData.isVideoModalOpen}
+            setIsModalOpen={taskLogsData.setIsVideoModalOpen}
+            modalContent={taskLogsData.videoUrl}
+            isVideo={true}
+          />
+        </Suspense>
+      ) : null}
+      {taskLogsData.isAudioModalOpen ? (
+        <Suspense fallback={null}>
+          <AudioPreviewModal
+            isModalOpen={taskLogsData.isAudioModalOpen}
+            setIsModalOpen={taskLogsData.setIsAudioModalOpen}
+            audioClips={taskLogsData.audioClips}
+          />
+        </Suspense>
+      ) : null}
+      {taskLogsData.showEditUser ? (
+        <Suspense fallback={null}>
+          <EditUserModal
+            refresh={refreshCurrentPage}
+            visible={taskLogsData.showEditUser}
+            handleClose={taskLogsData.closeEditUserPanel}
+            editingUser={taskLogsData.editingUser}
+          />
+        </Suspense>
+      ) : null}
 
       <Layout>
         <CardPro
