@@ -27,12 +27,16 @@ import {
   Typography,
   Select,
   Switch,
-  Banner,
 } from '@douyinfe/semi-ui';
-import { IconSearch, IconInfoCircle } from '@douyinfe/semi-icons';
+import { IconSearch } from '@douyinfe/semi-icons';
 import { Settings } from 'lucide-react';
 import { copy, showError, showInfo, showSuccess } from '../../../../helpers';
 import { MODEL_TABLE_PAGE_SIZE } from '../../../../constants';
+import {
+  DEFAULT_MODEL_TEST_RUNTIME_CONFIG,
+  formatRuntimeResult,
+} from '../modelTestRuntimeConfig';
+import ModelTestRuntimeConfigPanel from './ModelTestRuntimeConfigPanel';
 
 const ModelTestModal = ({
   showModelTestModal,
@@ -53,6 +57,9 @@ const ModelTestModal = ({
   setSelectedEndpointType,
   isStreamTest,
   setIsStreamTest,
+  modelTestRuntimeConfig,
+  setModelTestRuntimeConfig,
+  globalPassThroughEnabled,
   allSelectingRef,
   isMobile,
   t,
@@ -70,6 +77,13 @@ const ModelTestModal = ({
       setIsStreamTest(false);
     }
   }, [streamToggleDisabled, isStreamTest, setIsStreamTest]);
+
+  React.useEffect(() => {
+    if (!showModelTestModal || !currentTestChannel?.id) {
+      return;
+    }
+    setModelTestRuntimeConfig(DEFAULT_MODEL_TEST_RUNTIME_CONFIG);
+  }, [showModelTestModal, currentTestChannel?.id, setModelTestRuntimeConfig]);
 
   const filteredModels = hasChannel
     ? currentTestChannel.models
@@ -168,6 +182,8 @@ const ModelTestModal = ({
           );
         }
 
+        const runtimeResult = formatRuntimeResult(testResult.runtimeConfig, t);
+
         return (
           <div className='flex flex-col gap-1'>
             <div className='flex items-center gap-2'>
@@ -208,6 +224,16 @@ const ModelTestModal = ({
                   </Button>
                 )}
               </div>
+            )}
+            {runtimeResult && (
+              <Typography.Text
+                type='tertiary'
+                size='small'
+                className='break-all'
+                style={{ maxWidth: '420px', fontSize: '12px' }}
+              >
+                {runtimeResult}
+              </Typography.Text>
             )}
           </div>
         );
@@ -261,7 +287,11 @@ const ModelTestModal = ({
               >
                 {currentTestChannel.name} {t('渠道的模型测试')}
               </Typography.Text>
-              <Typography.Text type='tertiary' size='small'>
+              <Typography.Text
+                type='tertiary'
+                size='small'
+                className='whitespace-nowrap'
+              >
                 {t('共')} {currentTestChannel.models.split(',').length}{' '}
                 {t('个模型')}
               </Typography.Text>
@@ -301,6 +331,12 @@ const ModelTestModal = ({
       maskClosable={!isBatchTesting}
       className='!rounded-lg'
       size={isMobile ? 'full-width' : 'large'}
+      bodyStyle={{
+        maxHeight: isMobile ? 'calc(100vh - 132px)' : 'calc(100vh - 180px)',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        overscrollBehavior: 'contain',
+      }}
     >
       {hasChannel && (
         <div className='model-test-scroll'>
@@ -333,14 +369,13 @@ const ModelTestModal = ({
             </div>
           </div>
 
-          <Banner
-            type='info'
-            closeIcon={null}
-            icon={<IconInfoCircle />}
-            className='!rounded-lg mb-2'
-            description={t(
-              '说明：本页测试为非流式请求；若渠道仅支持流式返回，可能出现测试失败，请以实际使用为准。',
-            )}
+          <ModelTestRuntimeConfigPanel
+            channel={currentTestChannel}
+            runtimeConfig={modelTestRuntimeConfig}
+            setRuntimeConfig={setModelTestRuntimeConfig}
+            isBatchTesting={isBatchTesting}
+            globalPassThroughEnabled={globalPassThroughEnabled}
+            t={t}
           />
 
           {/* 搜索与操作按钮 */}

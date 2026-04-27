@@ -39,6 +39,10 @@ import { useChannelUpstreamUpdates } from './useChannelUpstreamUpdates';
 import { parseUpstreamUpdateMeta } from './upstreamUpdateUtils';
 import { Modal, Button } from '@douyinfe/semi-ui';
 import { openCodexUsageModal } from '../../components/table/channels/modals/CodexUsageModal';
+import {
+  appendModelTestRuntimeParams,
+  DEFAULT_MODEL_TEST_RUNTIME_CONFIG,
+} from '../../components/table/channels/modelTestRuntimeConfig';
 
 export const useChannelsData = () => {
   const { t } = useTranslation();
@@ -90,6 +94,9 @@ export const useChannelsData = () => {
   const [modelTablePage, setModelTablePage] = useState(1);
   const [selectedEndpointType, setSelectedEndpointType] = useState('');
   const [isStreamTest, setIsStreamTest] = useState(false);
+  const [modelTestRuntimeConfig, setModelTestRuntimeConfig] = useState(
+    DEFAULT_MODEL_TEST_RUNTIME_CONFIG,
+  );
   const [globalPassThroughEnabled, setGlobalPassThroughEnabled] =
     useState(false);
 
@@ -876,13 +883,16 @@ export const useChannelsData = () => {
     setTestingModels((prev) => new Set([...prev, model]));
 
     try {
-      let url = `/api/channel/test/${record.id}?model=${model}`;
+      const params = new URLSearchParams();
+      params.set('model', model || '');
       if (endpointType) {
-        url += `&endpoint_type=${endpointType}`;
+        params.set('endpoint_type', endpointType);
       }
       if (stream) {
-        url += `&stream=true`;
+        params.set('stream', 'true');
       }
+      appendModelTestRuntimeParams(params, modelTestRuntimeConfig);
+      const url = `/api/channel/test/${record.id}?${params.toString()}`;
       const res = await API.get(url);
 
       // 检查是否在请求期间被停止
@@ -890,7 +900,7 @@ export const useChannelsData = () => {
         return Promise.resolve();
       }
 
-      const { success, message, time, error_code } = res.data;
+      const { success, message, time, error_code, runtime_config } = res.data;
 
       // 更新测试结果
       setModelTestResults((prev) => ({
@@ -901,6 +911,7 @@ export const useChannelsData = () => {
           time: time || 0,
           timestamp: Date.now(),
           errorCode: error_code || null,
+          runtimeConfig: runtime_config || null,
         },
       }));
 
@@ -1196,6 +1207,8 @@ export const useChannelsData = () => {
     setSelectedEndpointType,
     isStreamTest,
     setIsStreamTest,
+    modelTestRuntimeConfig,
+    setModelTestRuntimeConfig,
     allSelectingRef,
 
     // Multi-key management states

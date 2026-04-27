@@ -38,9 +38,10 @@ import (
 )
 
 type testResult struct {
-	context     *gin.Context
-	localErr    error
-	newAPIError *types.NewAPIError
+	context       *gin.Context
+	localErr      error
+	newAPIError   *types.NewAPIError
+	runtimeConfig *channelTestRuntimeSummary
 }
 
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
@@ -58,6 +59,19 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 }
 
 func testChannel(channel *model.Channel, testModel string, endpointType string, isStream bool) testResult {
+	return testChannelWithOptions(channel, testModel, endpointType, isStream, defaultChannelTestOptions())
+}
+
+func testChannelWithOptions(channel *model.Channel, testModel string, endpointType string, isStream bool, options channelTestOptions) (result testResult) {
+	options = normalizeChannelTestOptions(options)
+	var c *gin.Context
+	var info *relaycommon.RelayInfo
+	var runtimeSummary *channelTestRuntimeSummary
+	defer func() {
+		finalizeChannelTestRuntimeSummary(runtimeSummary, c, info)
+		result.runtimeConfig = runtimeSummary
+	}()
+
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
 		constant.ChannelTypeMidjourney,
@@ -75,7 +89,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 		}
 	}
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	createdContext, _ := gin.CreateTestContext(w)
+	c = createdContext
 
 	testModel = strings.TrimSpace(testModel)
 	if testModel == "" {
@@ -142,6 +157,16 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 		Body:   nil,
 		Header: make(http.Header),
 	}
+	runtimeSummary = buildChannelTestRuntimeSummary(channel, options, testModel, endpointType, requestPath, isStream)
+	runtimeChannel, err := buildChannelForTestOptions(channel, options)
+	if err != nil {
+		return testResult{
+			context:     c,
+			localErr:    err,
+			newAPIError: types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid),
+		}
+	}
+	channel = runtimeChannel
 
 	cache, err := model.GetUserCache(1)
 	if err != nil {
@@ -155,6 +180,19 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 
 	//c.Request.Header.Set("Authorization", "Bearer "+channel.Key)
 	c.Request.Header.Set("Content-Type", "application/json")
+	if options.UseHeaderConfig {
+		profileID, err := prepareChannelTestRequestHeaders(c, channel)
+		if err != nil {
+			return testResult{
+				context:     c,
+				localErr:    err,
+				newAPIError: types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid),
+			}
+		}
+		if profileID != "" && runtimeSummary != nil {
+			runtimeSummary.HeaderProfileID = profileID
+		}
+	}
 	c.Set("channel", channel.Type)
 	c.Set("base_url", channel.GetBaseURL())
 	group, _ := model.GetUserGroup(1, false)
@@ -221,7 +259,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 
 	request := buildTestRequest(testModel, endpointType, channel, isStream)
 
-	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
+	info, err = relaycommon.GenRelayInfo(c, relayFormat, request, nil)
 
 	if err != nil {
 		return testResult{
@@ -412,6 +450,10 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 			}
 		}
 	}
+	if !options.UseHeaderConfig {
+		info.RuntimeHeadersOverride = map[string]interface{}{}
+		info.UseRuntimeHeadersOverride = true
+	}
 
 	requestBody := bytes.NewBuffer(jsonData)
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(jsonData))
@@ -461,8 +503,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 			newAPIError: types.NewOpenAIError(usageErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
 		}
 	}
-	result := w.Result()
-	respBody, err := readTestResponseBody(result.Body, isStream)
+	httpResult := w.Result()
+	respBody, err := readTestResponseBody(httpResult.Body, isStream)
 	if err != nil {
 		return testResult{
 			context:     c,
@@ -798,13 +840,15 @@ func TestChannel(c *gin.Context) {
 	testModel := c.Query("model")
 	endpointType := c.Query("endpoint_type")
 	isStream, _ := strconv.ParseBool(c.Query("stream"))
+	options := parseChannelTestOptions(c)
 	tik := time.Now()
-	result := testChannel(channel, testModel, endpointType, isStream)
+	result := testChannelWithOptions(channel, testModel, endpointType, isStream, options)
 	if result.localErr != nil {
 		resp := gin.H{
-			"success": false,
-			"message": result.localErr.Error(),
-			"time":    0.0,
+			"success":        false,
+			"message":        result.localErr.Error(),
+			"time":           0.0,
+			"runtime_config": result.runtimeConfig,
 		}
 		if result.newAPIError != nil {
 			resp["error_code"] = result.newAPIError.GetErrorCode()
@@ -818,17 +862,19 @@ func TestChannel(c *gin.Context) {
 	consumedTime := float64(milliseconds) / 1000.0
 	if result.newAPIError != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"success":    false,
-			"message":    result.newAPIError.Error(),
-			"time":       consumedTime,
-			"error_code": result.newAPIError.GetErrorCode(),
+			"success":        false,
+			"message":        result.newAPIError.Error(),
+			"time":           consumedTime,
+			"error_code":     result.newAPIError.GetErrorCode(),
+			"runtime_config": result.runtimeConfig,
 		})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"time":    consumedTime,
+		"success":        true,
+		"message":        "",
+		"time":           consumedTime,
+		"runtime_config": result.runtimeConfig,
 	})
 }
 
