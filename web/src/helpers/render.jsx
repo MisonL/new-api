@@ -1128,8 +1128,20 @@ export function renderQuota(quota, digits = 2) {
   return symbol + fixedResult;
 }
 
+function isPresentFiniteNumber(value) {
+  return (
+    value !== null && value !== undefined && Number.isFinite(Number(value))
+  );
+}
+
 function isValidGroupRatio(ratio) {
-  return Number.isFinite(ratio) && ratio !== -1;
+  return isPresentFiniteNumber(ratio) && Number(ratio) !== -1;
+}
+
+function isValidCompletionRatio(completionRatio, completionTokens) {
+  return (
+    Number(completionTokens || 0) <= 0 || isPresentFiniteNumber(completionRatio)
+  );
 }
 
 /**
@@ -1193,7 +1205,7 @@ function joinBillingSummary(parts) {
 
 function getGroupRatioText(groupRatio, user_group_ratio) {
   const { ratio, label } = getEffectiveRatio(groupRatio, user_group_ratio);
-  if (!Number.isFinite(Number(ratio))) {
+  if (!isValidGroupRatio(ratio)) {
     return null;
   }
   return i18next.t('{{ratioType}} {{ratio}}x', {
@@ -1240,6 +1252,57 @@ function buildBillingPriceText(
     [amountKey]: displayAmount,
     ...vars,
   });
+}
+
+function renderBillingUnavailableArticle(title, reasons = [], extraLines = []) {
+  return renderBillingArticle([
+    title,
+    ...reasons.filter(Boolean),
+    ...extraLines.filter(Boolean),
+  ]);
+}
+
+function getMissingBillingReasons({
+  ratioLabel,
+  modelRatio,
+  completionRatio,
+  completionTokens = 0,
+  groupRatio,
+  audioRatio,
+  audioInputTokens = 0,
+  audioCompletionRatio,
+  audioCompletionTokens = 0,
+}) {
+  const reasons = [];
+
+  if (!isPresentFiniteNumber(modelRatio)) {
+    reasons.push(i18next.t('缺少模型倍率'));
+  }
+
+  if (!isValidCompletionRatio(completionRatio, completionTokens)) {
+    reasons.push(i18next.t('缺少输出倍率'));
+  }
+
+  if (Number(audioInputTokens || 0) > 0 && !isPresentFiniteNumber(audioRatio)) {
+    reasons.push(i18next.t('缺少音频输入倍率'));
+  }
+
+  if (
+    Number(audioCompletionTokens || 0) > 0 &&
+    !isPresentFiniteNumber(audioCompletionRatio)
+  ) {
+    reasons.push(i18next.t('缺少音频补全倍率'));
+  }
+
+  if (!isValidGroupRatio(groupRatio)) {
+    reasons.push(
+      i18next.t('{{ratioType}}信息不可用', {
+        ratioType: ratioLabel,
+      }),
+    );
+  }
+
+  return reasons;
 }
 
 function renderBillingArticle(lines, { showReferenceNote = true } = {}) {
@@ -1600,7 +1663,7 @@ export function renderModelPrice(opts) {
   const {
     prompt_tokens: inputTokens = 0,
     completion_tokens: completionTokens = 0,
-    model_ratio: modelRatio = 0,
+    model_ratio: modelRatio,
     model_price: modelPrice = -1,
     completion_ratio: completionRatio,
     group_ratio: _groupRatio,
@@ -1629,11 +1692,37 @@ export function renderModelPrice(opts) {
   );
   let groupRatio = effectiveGroupRatio;
   const normalizedCompletionRatio = completionRatio ?? 0;
+  const groupRatioText = getGroupRatioText(_groupRatio, user_group_ratio);
+  const missingBillingReasons = getMissingBillingReasons({
+    ratioLabel,
+    modelRatio,
+    completionRatio,
+    completionTokens,
+    groupRatio,
+  });
 
   const { symbol, rate } = getCurrencyConfig();
 
   if (!shouldUseRatioBillingProcess(modelPrice)) {
     if (modelPrice !== -1) {
+      if (!isValidGroupRatio(groupRatio)) {
+        return renderBillingUnavailableArticle(
+          i18next.t('计费价格信息不可用'),
+          [
+            i18next.t('{{ratioType}}信息不可用', {
+              ratioType: ratioLabel,
+            }),
+          ],
+          [
+            buildBillingPriceText('按次：{{symbol}}{{price}}', {
+              symbol,
+              usdAmount: modelPrice,
+              rate,
+            }),
+          ],
+        );
+      }
+
       return renderBillingArticle([
         buildBillingPriceText('按次：{{symbol}}{{price}}', {
           symbol,
@@ -1655,8 +1744,12 @@ export function renderModelPrice(opts) {
       ]);
     }
 
-    if (!Number.isFinite(Number(modelRatio))) {
-      return renderBillingArticle([buildBillingText('计费价格信息不可用')]);
+    if (missingBillingReasons.length > 0) {
+      return renderBillingUnavailableArticle(
+        i18next.t('计费价格信息不可用'),
+        missingBillingReasons,
+        [groupRatioText],
+      );
     }
 
     const inputRatioPrice = modelRatio * 2.0;
@@ -1855,6 +1948,18 @@ export function renderModelPrice(opts) {
   }
 
   if (modelPrice !== -1) {
+    if (!isValidGroupRatio(groupRatio)) {
+      return joinBillingSummary([
+        i18next.t('模型价格 {{symbol}}{{price}}', {
+          symbol,
+          price: (modelPrice * rate).toFixed(6),
+        }),
+        i18next.t('{{ratioType}}信息不可用', {
+          ratioType: ratioLabel,
+        }),
+      ]);
+    }
+
     const displayPrice = (modelPrice * rate).toFixed(6);
     const displayTotal = (modelPrice * groupRatio * rate).toFixed(6);
     return i18next.t(
@@ -1866,6 +1971,14 @@ export function renderModelPrice(opts) {
         total: displayTotal,
         ratioType: ratioLabel,
       },
+    );
+  }
+
+  if (missingBillingReasons.length > 0) {
+    return renderBillingUnavailableArticle(
+      i18next.t('计费倍率信息不可用'),
+      missingBillingReasons,
+      [groupRatioText],
     );
   }
 
@@ -2074,17 +2187,48 @@ export function renderLogContent(opts) {
     label: ratioLabel,
     useUserGroupRatio: useUserGroupRatio,
   } = getEffectiveRatio(groupRatio, user_group_ratio);
+  const normalizedCompletionRatio = completionRatio ?? 0;
+  const hasValidModelRatio = isPresentFiniteNumber(modelRatio);
+  const hasValidCompletionRatio = isPresentFiniteNumber(completionRatio);
+  const hasValidEffectiveGroupRatio = isValidGroupRatio(ratio);
 
   // 获取货币配置
   const { symbol, rate } = getCurrencyConfig();
 
   if (isPriceDisplayMode(displayMode, modelPrice)) {
     if (modelPrice !== -1) {
+      if (!hasValidEffectiveGroupRatio) {
+        return joinBillingSummary([
+          i18next.t('模型价格 {{symbol}}{{price}} / 次', {
+            symbol,
+            price: (modelPrice * rate).toFixed(6),
+          }),
+          i18next.t('{{ratioType}}信息不可用', {
+            ratioType: ratioLabel,
+          }),
+        ]);
+      }
+
       return joinBillingSummary([
         i18next.t('模型价格 {{symbol}}{{price}} / 次', {
           symbol,
           price: (modelPrice * rate).toFixed(6),
         }),
+        getGroupRatioText(groupRatio, user_group_ratio),
+      ]);
+    }
+
+    if (!hasValidModelRatio) {
+      return joinBillingSummary([
+        i18next.t('计费价格信息不可用'),
+        getGroupRatioText(groupRatio, user_group_ratio),
+      ]);
+    }
+
+    if (!hasValidCompletionRatio) {
+      return joinBillingSummary([
+        i18next.t('计费价格信息不可用'),
+        i18next.t('缺少输出倍率'),
         getGroupRatioText(groupRatio, user_group_ratio),
       ]);
     }
@@ -2096,7 +2240,7 @@ export function renderLogContent(opts) {
       }),
       i18next.t('输出价格 {{symbol}}{{price}} / 1M tokens', {
         symbol,
-        price: (modelRatio * 2.0 * completionRatio * rate).toFixed(6),
+        price: (modelRatio * 2.0 * normalizedCompletionRatio * rate).toFixed(6),
       }),
     ];
     appendPricePart(
@@ -2135,6 +2279,26 @@ export function renderLogContent(opts) {
     );
     parts.push(getGroupRatioText(groupRatio, user_group_ratio));
     return joinBillingSummary(parts);
+  }
+
+  if (!hasValidModelRatio) {
+    return i18next.t('计费倍率信息不可用');
+  }
+
+  if (!hasValidCompletionRatio) {
+    return joinBillingSummary([
+      i18next.t('计费倍率信息不可用'),
+      i18next.t('缺少输出倍率'),
+    ]);
+  }
+
+  if (!hasValidEffectiveGroupRatio) {
+    return joinBillingSummary([
+      i18next.t('计费倍率信息不可用'),
+      i18next.t('{{ratioType}}信息不可用', {
+        ratioType: ratioLabel,
+      }),
+    ]);
   }
 
   if (modelPrice !== -1) {
@@ -2379,7 +2543,7 @@ export function renderAudioModelPrice(opts) {
   const {
     prompt_tokens: inputTokens = 0,
     completion_tokens: completionTokens = 0,
-    model_ratio: modelRatio = 0,
+    model_ratio: modelRatio,
     model_price: modelPrice = -1,
     completion_ratio: completionRatio,
     audio_input: audioInputTokens = 0,
@@ -2400,12 +2564,42 @@ export function renderAudioModelPrice(opts) {
   const normalizedCompletionRatio = completionRatio ?? 0;
   const normalizedAudioRatio = Number.parseFloat(audioRatio ?? 0) || 0;
   const normalizedAudioCompletionRatio = audioCompletionRatio ?? 0;
+  const groupRatioText = getGroupRatioText(_groupRatio, user_group_ratio);
+  const missingBillingReasons = getMissingBillingReasons({
+    ratioLabel,
+    modelRatio,
+    completionRatio,
+    completionTokens,
+    groupRatio,
+    audioRatio,
+    audioInputTokens,
+    audioCompletionRatio,
+    audioCompletionTokens,
+  });
 
   // 获取货币配置
   const { symbol, rate } = getCurrencyConfig();
 
   if (!shouldUseRatioBillingProcess(modelPrice)) {
     if (modelPrice !== -1) {
+      if (!isValidGroupRatio(groupRatio)) {
+        return renderBillingUnavailableArticle(
+          i18next.t('计费价格信息不可用'),
+          [
+            i18next.t('{{ratioType}}信息不可用', {
+              ratioType: ratioLabel,
+            }),
+          ],
+          [
+            buildBillingPriceText('模型价格：{{symbol}}{{price}} / 次', {
+              symbol,
+              usdAmount: modelPrice,
+              rate,
+            }),
+          ],
+        );
+      }
+
       return renderBillingArticle([
         buildBillingPriceText('模型价格：{{symbol}}{{price}} / 次', {
           symbol,
@@ -2424,6 +2618,14 @@ export function renderAudioModelPrice(opts) {
           },
         ),
       ]);
+    }
+
+    if (missingBillingReasons.length > 0) {
+      return renderBillingUnavailableArticle(
+        i18next.t('计费价格信息不可用'),
+        missingBillingReasons,
+        [groupRatioText],
+      );
     }
 
     const inputRatioPrice = modelRatio * 2.0;
@@ -2509,6 +2711,18 @@ export function renderAudioModelPrice(opts) {
 
   // 1 ratio = $0.002 / 1K tokens
   if (modelPrice !== -1) {
+    if (!isValidGroupRatio(groupRatio)) {
+      return joinBillingSummary([
+        i18next.t('模型价格 {{symbol}}{{price}}', {
+          symbol,
+          price: (modelPrice * rate).toFixed(6),
+        }),
+        i18next.t('{{ratioType}}信息不可用', {
+          ratioType: ratioLabel,
+        }),
+      ]);
+    }
+
     return i18next.t(
       '模型价格：{{symbol}}{{price}} * {{ratioType}}：{{ratio}} = {{symbol}}{{total}}',
       {
@@ -2518,6 +2732,14 @@ export function renderAudioModelPrice(opts) {
         total: (modelPrice * groupRatio * rate).toFixed(6),
         ratioType: ratioLabel,
       },
+    );
+  }
+
+  if (missingBillingReasons.length > 0) {
+    return renderBillingUnavailableArticle(
+      i18next.t('计费倍率信息不可用'),
+      missingBillingReasons,
+      [groupRatioText],
     );
   }
 
@@ -2671,7 +2893,7 @@ export function renderClaudeModelPrice(opts) {
   const {
     prompt_tokens: inputTokens = 0,
     completion_tokens: completionTokens = 0,
-    model_ratio: modelRatio = 0,
+    model_ratio: modelRatio,
     model_price: modelPrice = -1,
     completion_ratio: completionRatio,
     group_ratio: _groupRatio,
@@ -2692,12 +2914,38 @@ export function renderClaudeModelPrice(opts) {
   );
   let groupRatio = effectiveGroupRatio;
   const normalizedCompletionRatio = completionRatio ?? 0;
+  const groupRatioText = getGroupRatioText(_groupRatio, user_group_ratio);
+  const missingBillingReasons = getMissingBillingReasons({
+    ratioLabel,
+    modelRatio,
+    completionRatio,
+    completionTokens,
+    groupRatio,
+  });
 
   // 获取货币配置
   const { symbol, rate } = getCurrencyConfig();
 
   if (!shouldUseRatioBillingProcess(modelPrice)) {
     if (modelPrice !== -1) {
+      if (!isValidGroupRatio(groupRatio)) {
+        return renderBillingUnavailableArticle(
+          i18next.t('计费价格信息不可用'),
+          [
+            i18next.t('{{ratioType}}信息不可用', {
+              ratioType: ratioLabel,
+            }),
+          ],
+          [
+            buildBillingPriceText('模型价格：{{symbol}}{{price}} / 次', {
+              symbol,
+              usdAmount: modelPrice,
+              rate,
+            }),
+          ],
+        );
+      }
+
       return renderBillingArticle([
         buildBillingPriceText('模型价格：{{symbol}}{{price}} / 次', {
           symbol,
@@ -2716,6 +2964,14 @@ export function renderClaudeModelPrice(opts) {
           },
         ),
       ]);
+    }
+
+    if (missingBillingReasons.length > 0) {
+      return renderBillingUnavailableArticle(
+        i18next.t('计费价格信息不可用'),
+        missingBillingReasons,
+        [groupRatioText],
+      );
     }
 
     const inputRatioPrice = modelRatio * 2.0;
@@ -2889,6 +3145,18 @@ export function renderClaudeModelPrice(opts) {
   }
 
   if (modelPrice !== -1) {
+    if (!isValidGroupRatio(groupRatio)) {
+      return joinBillingSummary([
+        i18next.t('模型价格 {{symbol}}{{price}}', {
+          symbol,
+          price: (modelPrice * rate).toFixed(6),
+        }),
+        i18next.t('{{ratioType}}信息不可用', {
+          ratioType: ratioLabel,
+        }),
+      ]);
+    }
+
     return i18next.t(
       '模型价格：{{symbol}}{{price}} * {{ratioType}}：{{ratio}} = {{symbol}}{{total}}',
       {
@@ -2898,6 +3166,14 @@ export function renderClaudeModelPrice(opts) {
         ratio: groupRatio,
         total: (modelPrice * groupRatio * rate).toFixed(6),
       },
+    );
+  }
+
+  if (missingBillingReasons.length > 0) {
+    return renderBillingUnavailableArticle(
+      i18next.t('计费倍率信息不可用'),
+      missingBillingReasons,
+      [groupRatioText],
     );
   }
 
@@ -3090,17 +3366,48 @@ export function renderClaudeLogContent(opts) {
     user_group_ratio,
   );
   let groupRatio = effectiveGroupRatio;
+  const normalizedCompletionRatio = completionRatio ?? 0;
+  const hasValidModelRatio = isPresentFiniteNumber(modelRatio);
+  const hasValidCompletionRatio = isPresentFiniteNumber(completionRatio);
+  const hasValidEffectiveGroupRatio = isValidGroupRatio(groupRatio);
 
   // 获取货币配置
   const { symbol, rate } = getCurrencyConfig();
 
   if (isPriceDisplayMode(displayMode, modelPrice)) {
     if (modelPrice !== -1) {
+      if (!hasValidEffectiveGroupRatio) {
+        return joinBillingSummary([
+          i18next.t('模型价格 {{symbol}}{{price}} / 次', {
+            symbol,
+            price: (modelPrice * rate).toFixed(6),
+          }),
+          i18next.t('{{ratioType}}信息不可用', {
+            ratioType: ratioLabel,
+          }),
+        ]);
+      }
+
       return joinBillingSummary([
         i18next.t('模型价格 {{symbol}}{{price}} / 次', {
           symbol,
           price: (modelPrice * rate).toFixed(6),
         }),
+        getGroupRatioText(groupRatio, user_group_ratio),
+      ]);
+    }
+
+    if (!hasValidModelRatio) {
+      return joinBillingSummary([
+        i18next.t('计费价格信息不可用'),
+        getGroupRatioText(groupRatio, user_group_ratio),
+      ]);
+    }
+
+    if (!hasValidCompletionRatio) {
+      return joinBillingSummary([
+        i18next.t('计费价格信息不可用'),
+        i18next.t('缺少输出倍率'),
         getGroupRatioText(groupRatio, user_group_ratio),
       ]);
     }
@@ -3112,7 +3419,7 @@ export function renderClaudeLogContent(opts) {
       }),
       i18next.t('输出价格 {{symbol}}{{price}} / 1M tokens', {
         symbol,
-        price: (modelRatio * 2.0 * completionRatio * rate).toFixed(6),
+        price: (modelRatio * 2.0 * normalizedCompletionRatio * rate).toFixed(6),
       }),
       i18next.t('缓存读取价格 {{symbol}}{{price}} / 1M tokens', {
         symbol,
@@ -3150,6 +3457,26 @@ export function renderClaudeLogContent(opts) {
     );
     parts.push(getGroupRatioText(groupRatio, user_group_ratio));
     return joinBillingSummary(parts);
+  }
+
+  if (!hasValidModelRatio) {
+    return i18next.t('计费倍率信息不可用');
+  }
+
+  if (!hasValidCompletionRatio) {
+    return joinBillingSummary([
+      i18next.t('计费倍率信息不可用'),
+      i18next.t('缺少输出倍率'),
+    ]);
+  }
+
+  if (!hasValidEffectiveGroupRatio) {
+    return joinBillingSummary([
+      i18next.t('计费倍率信息不可用'),
+      i18next.t('{{ratioType}}信息不可用', {
+        ratioType: ratioLabel,
+      }),
+    ]);
   }
 
   if (modelPrice !== -1) {
