@@ -20,7 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useMemo } from 'react';
 import { Modal, Button, Empty, Divider, Typography } from '@douyinfe/semi-ui';
 import { IconCopy } from '@douyinfe/semi-icons';
-import { copy, showError, showSuccess } from '../../../../helpers';
+import { copy, showError, showSuccess } from '../../../../helpers/utils';
 
 const { Text } = Typography;
 

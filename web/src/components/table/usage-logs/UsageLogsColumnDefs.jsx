@@ -26,15 +26,15 @@ import {
   Popover,
   Typography,
 } from '@douyinfe/semi-ui';
+import { stringToColor } from '../../../helpers/color';
+import { getLogOther } from '../../../helpers/log';
 import {
   renderGroup,
   renderQuota,
-  stringToColor,
-  getLogOther,
   renderModelTag,
   renderModelPriceSimple,
   renderTieredModelPriceSimple,
-} from '../../../helpers';
+} from '../../../helpers/render';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import { CircleAlert, Route, Sparkles } from 'lucide-react';
 import { shouldShowLogIp } from '../../../hooks/usage-logs/logAuditInfo';

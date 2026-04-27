@@ -20,7 +20,8 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect, useRef, useState } from 'react';
 import { Form, Spin } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
-import { API, showError } from '../../../helpers';
+import { API } from '../../../helpers/apiCore';
+import { showError } from '../../../helpers/utils';
 import { useDebouncedCallback } from 'use-debounce';
 import useRepeatingDomPatch from '../../../hooks/common/useRepeatingDomPatch';
 

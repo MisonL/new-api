@@ -19,7 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Descriptions, Spin, Typography } from '@douyinfe/semi-ui';
-import { API, showError, timestamp2string } from '../../../../helpers';
+import { API } from '../../../../helpers/apiCore';
+import { showError, timestamp2string } from '../../../../helpers/utils';
 
 const { Text } = Typography;
 

@@ -20,8 +20,8 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useCallback, useMemo } from 'react';
 import { Modal, Descriptions, Typography, Button } from '@douyinfe/semi-ui';
 import { IconDownload } from '@douyinfe/semi-icons';
-import CodeViewer from '../../../playground/CodeViewer';
-import { showError, showSuccess } from '../../../../helpers';
+import CodeViewer from '../../../playground/LazyCodeViewer';
+import { showError, showSuccess } from '../../../../helpers/utils';
 
 const { Text } = Typography;
 
