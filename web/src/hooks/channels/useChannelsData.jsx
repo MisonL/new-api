@@ -41,6 +41,7 @@ import { Modal, Button } from '@douyinfe/semi-ui';
 import { openCodexUsageModal } from '../../components/table/channels/modals/CodexUsageModal';
 import {
   appendModelTestRuntimeParams,
+  DEFAULT_MODEL_TEST_ENDPOINT_TYPE,
   DEFAULT_MODEL_TEST_RUNTIME_CONFIG,
 } from '../../components/table/channels/modelTestRuntimeConfig';
 
@@ -92,7 +93,9 @@ export const useChannelsData = () => {
   const [selectedModelKeys, setSelectedModelKeys] = useState([]);
   const [isBatchTesting, setIsBatchTesting] = useState(false);
   const [modelTablePage, setModelTablePage] = useState(1);
-  const [selectedEndpointType, setSelectedEndpointType] = useState('');
+  const [selectedEndpointType, setSelectedEndpointType] = useState(
+    DEFAULT_MODEL_TEST_ENDPOINT_TYPE,
+  );
   const [isStreamTest, setIsStreamTest] = useState(false);
   const [modelTestRuntimeConfig, setModelTestRuntimeConfig] = useState(
     DEFAULT_MODEL_TEST_RUNTIME_CONFIG,
@@ -900,7 +903,8 @@ export const useChannelsData = () => {
         return Promise.resolve();
       }
 
-      const { success, message, time, error_code, runtime_config } = res.data;
+      const { success, message, time, error_code, runtime_config, diagnosis } =
+        res.data;
 
       // 更新测试结果
       setModelTestResults((prev) => ({
@@ -912,6 +916,7 @@ export const useChannelsData = () => {
           timestamp: Date.now(),
           errorCode: error_code || null,
           runtimeConfig: runtime_config || null,
+          diagnosis: diagnosis || runtime_config?.error_diagnosis || null,
         },
       }));
 
@@ -1113,7 +1118,7 @@ export const useChannelsData = () => {
     setTestingModels(new Set());
     setSelectedModelKeys([]);
     setModelTablePage(1);
-    setSelectedEndpointType('');
+    setSelectedEndpointType(DEFAULT_MODEL_TEST_ENDPOINT_TYPE);
     setIsStreamTest(false);
     // 可选择性保留测试结果，这里不清空以便用户查看
   };

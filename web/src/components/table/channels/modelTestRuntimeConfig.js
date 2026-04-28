@@ -1,15 +1,44 @@
+export const DEFAULT_MODEL_TEST_ENDPOINT_TYPE = 'openai-response';
+
+export const MODEL_TEST_RESPONSE_PROTOCOLS = {
+  NATIVE: 'native',
+  CHAT_COMPLETIONS: 'chat_completions',
+};
+
 export const DEFAULT_MODEL_TEST_RUNTIME_CONFIG = {
   enabled: true,
   headerConfig: true,
   paramOverride: true,
   proxy: true,
   modelMapping: true,
+  responseProtocol: MODEL_TEST_RESPONSE_PROTOCOLS.NATIVE,
+  testPrompt: 'hi',
+  maxTokens: 16,
 };
 
-export const normalizeModelTestRuntimeConfig = (config) => ({
-  ...DEFAULT_MODEL_TEST_RUNTIME_CONFIG,
-  ...(config || {}),
-});
+export const normalizeModelTestRuntimeConfig = (config) => {
+  const normalized = {
+    ...DEFAULT_MODEL_TEST_RUNTIME_CONFIG,
+    ...(config || {}),
+  };
+  if (
+    !Object.values(MODEL_TEST_RESPONSE_PROTOCOLS).includes(
+      normalized.responseProtocol,
+    )
+  ) {
+    normalized.responseProtocol = MODEL_TEST_RESPONSE_PROTOCOLS.NATIVE;
+  }
+  normalized.testPrompt =
+    typeof normalized.testPrompt === 'string' && normalized.testPrompt.trim()
+      ? normalized.testPrompt.trim()
+      : DEFAULT_MODEL_TEST_RUNTIME_CONFIG.testPrompt;
+  const parsedMaxTokens = Number(normalized.maxTokens);
+  normalized.maxTokens =
+    Number.isFinite(parsedMaxTokens) && parsedMaxTokens > 0
+      ? Math.floor(parsedMaxTokens)
+      : DEFAULT_MODEL_TEST_RUNTIME_CONFIG.maxTokens;
+  return normalized;
+};
 
 export const appendModelTestRuntimeParams = (params, config) => {
   const runtimeConfig = normalizeModelTestRuntimeConfig(config);
@@ -18,6 +47,9 @@ export const appendModelTestRuntimeParams = (params, config) => {
   params.set('param_override', runtimeConfig.paramOverride ? 'true' : 'false');
   params.set('proxy', runtimeConfig.proxy ? 'true' : 'false');
   params.set('model_mapping', runtimeConfig.modelMapping ? 'true' : 'false');
+  params.set('response_protocol', runtimeConfig.responseProtocol);
+  params.set('test_prompt', runtimeConfig.testPrompt);
+  params.set('max_tokens', String(runtimeConfig.maxTokens));
 };
 
 const safeParseJsonObject = (value) => {
@@ -121,6 +153,23 @@ const summarizeModelMapping = (value, t) => {
   return firstItems.join(', ');
 };
 
+const formatHeaderPolicyMode = (mode, t) => {
+  const normalized = typeof mode === 'string' ? mode.trim() : '';
+  if (normalized === 'system_default') {
+    return t('系统默认');
+  }
+  if (normalized === 'channel_priority') {
+    return t('渠道优先');
+  }
+  if (normalized === 'tag_priority') {
+    return t('标签优先');
+  }
+  if (normalized === 'merge') {
+    return t('合并');
+  }
+  return normalized || t('已配置');
+};
+
 export const getModelTestRuntimeSnapshot = (channel, t) => {
   const channelSetting = safeParseJsonObject(channel?.setting);
   const channelSettings = safeParseJsonObject(channel?.settings);
@@ -130,10 +179,11 @@ export const getModelTestRuntimeSnapshot = (channel, t) => {
     : [];
   const hasHeaderProfile =
     strategy.enabled === true && selectedProfileIds.length > 0;
-  const hasHeaderPolicy =
-    Boolean(channelSettings.header_policy_mode) ||
+  const hasHeaderPolicyMode = Boolean(channelSettings.header_policy_mode);
+  const hasLegacyUserAgentPolicy =
     channelSettings.override_header_user_agent === true ||
     Boolean(channelSettings.ua_strategy);
+  const hasHeaderPolicy = hasHeaderPolicyMode || hasLegacyUserAgentPolicy;
   const hasHeaderOverride = hasConfigText(channel?.header_override);
   const proxy =
     typeof channelSetting.proxy === 'string' ? channelSetting.proxy : '';
@@ -141,9 +191,11 @@ export const getModelTestRuntimeSnapshot = (channel, t) => {
     ? `Header Profile: ${compactList(selectedProfileIds, 3)}`
     : hasHeaderOverride
       ? 'header_override'
-      : hasHeaderPolicy
+      : hasLegacyUserAgentPolicy
         ? t('旧版 UA 策略')
-        : '';
+        : hasHeaderPolicyMode
+          ? `${t('请求头策略')}: ${formatHeaderPolicyMode(channelSettings.header_policy_mode, t)}`
+          : '';
 
   return {
     headerConfigured: hasHeaderProfile || hasHeaderOverride || hasHeaderPolicy,
@@ -196,6 +248,22 @@ export const formatRuntimeResult = (runtimeConfig, t) => {
   ) {
     parts.push(
       `${runtimeConfig.origin_model} -> ${runtimeConfig.upstream_model}`,
+    );
+  }
+  if (runtimeConfig.final_request_path) {
+    const pathText =
+      runtimeConfig.request_path &&
+      runtimeConfig.request_path !== runtimeConfig.final_request_path
+        ? `${runtimeConfig.request_path} -> ${runtimeConfig.final_request_path}`
+        : runtimeConfig.final_request_path;
+    parts.push(`${t('路径')}: ${pathText}`);
+  }
+  if (
+    Array.isArray(runtimeConfig.request_conversion_chain) &&
+    runtimeConfig.request_conversion_chain.length > 1
+  ) {
+    parts.push(
+      `${t('协议')}: ${runtimeConfig.request_conversion_chain.join(' -> ')}`,
     );
   }
   return parts.join(' | ');

@@ -18,7 +18,17 @@ type channelTestOptions struct {
 	UseParamOverride bool
 	UseProxy         bool
 	UseModelMapping  bool
+	ResponseProtocol string
+	TestPrompt       string
+	MaxTokens        *uint
+	SourceHeaders    map[string]string
 }
+
+const (
+	channelTestDefaultPrompt                   = "hi"
+	channelTestResponseProtocolNative          = "native"
+	channelTestResponseProtocolChatCompletions = "chat_completions"
+)
 
 func defaultChannelTestOptions() channelTestOptions {
 	return channelTestOptions{
@@ -27,12 +37,28 @@ func defaultChannelTestOptions() channelTestOptions {
 		UseParamOverride: true,
 		UseProxy:         true,
 		UseModelMapping:  true,
+		ResponseProtocol: channelTestResponseProtocolNative,
+		TestPrompt:       channelTestDefaultPrompt,
 	}
 }
 
 func normalizeChannelTestOptions(options channelTestOptions) channelTestOptions {
+	options.ResponseProtocol = strings.TrimSpace(options.ResponseProtocol)
+	if options.ResponseProtocol != channelTestResponseProtocolChatCompletions {
+		options.ResponseProtocol = channelTestResponseProtocolNative
+	}
+	options.TestPrompt = strings.TrimSpace(options.TestPrompt)
+	if options.TestPrompt == "" {
+		options.TestPrompt = channelTestDefaultPrompt
+	}
+	if options.MaxTokens != nil && *options.MaxTokens == 0 {
+		options.MaxTokens = nil
+	}
 	if !options.UseRuntimeConfig {
-		return channelTestOptions{}
+		options.UseHeaderConfig = false
+		options.UseParamOverride = false
+		options.UseProxy = false
+		options.UseModelMapping = false
 	}
 	return options
 }
@@ -44,7 +70,39 @@ func parseChannelTestOptions(c *gin.Context) channelTestOptions {
 	options.UseParamOverride = getChannelTestQueryBool(c, options.UseParamOverride, "param_override", "use_param_override")
 	options.UseProxy = getChannelTestQueryBool(c, options.UseProxy, "proxy", "use_proxy")
 	options.UseModelMapping = getChannelTestQueryBool(c, options.UseModelMapping, "model_mapping", "use_model_mapping")
+	options.ResponseProtocol = getChannelTestQueryString(c, options.ResponseProtocol, "response_protocol", "protocol_strategy")
+	options.TestPrompt = getChannelTestQueryString(c, options.TestPrompt, "test_prompt", "prompt")
+	options.MaxTokens = getChannelTestQueryUint(c, options.MaxTokens, "max_tokens", "max_output_tokens")
+	options.SourceHeaders = collectChannelTestSourceHeaders(c)
 	return normalizeChannelTestOptions(options)
+}
+
+func collectChannelTestSourceHeaders(c *gin.Context) map[string]string {
+	if c == nil || c.Request == nil || len(c.Request.Header) == 0 {
+		return nil
+	}
+	headers := make(map[string]string)
+	for key := range c.Request.Header {
+		name := strings.TrimSpace(key)
+		value := strings.TrimSpace(c.Request.Header.Get(key))
+		if name == "" || value == "" || isSensitiveChannelTestSourceHeader(name) {
+			continue
+		}
+		headers[name] = value
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	return headers
+}
+
+func isSensitiveChannelTestSourceHeader(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "authorization", "cookie", "new-api-user", "proxy-authorization", "x-api-key":
+		return true
+	default:
+		return false
+	}
 }
 
 func getChannelTestQueryBool(c *gin.Context, defaultValue bool, keys ...string) bool {
@@ -60,6 +118,39 @@ func getChannelTestQueryBool(c *gin.Context, defaultValue bool, keys ...string) 
 		if err == nil {
 			return parsed
 		}
+	}
+	return defaultValue
+}
+
+func getChannelTestQueryString(c *gin.Context, defaultValue string, keys ...string) string {
+	if c == nil {
+		return defaultValue
+	}
+	for _, key := range keys {
+		raw, exists := c.GetQuery(key)
+		if !exists {
+			continue
+		}
+		return strings.TrimSpace(raw)
+	}
+	return defaultValue
+}
+
+func getChannelTestQueryUint(c *gin.Context, defaultValue *uint, keys ...string) *uint {
+	if c == nil {
+		return defaultValue
+	}
+	for _, key := range keys {
+		raw, exists := c.GetQuery(key)
+		if !exists {
+			continue
+		}
+		parsed, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 32)
+		if err != nil {
+			return defaultValue
+		}
+		value := uint(parsed)
+		return &value
 	}
 	return defaultValue
 }

@@ -1,8 +1,17 @@
 import React from 'react';
-import { Button, Switch, Tag, Typography } from '@douyinfe/semi-ui';
+import {
+  Button,
+  Input,
+  InputNumber,
+  Select,
+  Switch,
+  Tag,
+  Typography,
+} from '@douyinfe/semi-ui';
 import { IconInfoCircle } from '@douyinfe/semi-icons';
 import {
   getModelTestRuntimeSnapshot,
+  MODEL_TEST_RESPONSE_PROTOCOLS,
   normalizeModelTestRuntimeConfig,
 } from '../modelTestRuntimeConfig';
 
@@ -73,6 +82,7 @@ const ModelTestRuntimeConfigPanel = ({
   channel,
   runtimeConfig,
   setRuntimeConfig,
+  selectedEndpointType,
   isBatchTesting,
   globalPassThroughEnabled,
   t,
@@ -89,6 +99,27 @@ const ModelTestRuntimeConfigPanel = ({
     }));
   };
   const runtimeEnabled = normalizedRuntimeConfig.enabled;
+  const responseProtocolDisabled = ![
+    'openai-response',
+    'openai-response-compact',
+  ].includes(selectedEndpointType);
+  const responseProtocolOptions = [
+    {
+      value: MODEL_TEST_RESPONSE_PROTOCOLS.NATIVE,
+      label: t('原生 Responses 路径'),
+    },
+    {
+      value: MODEL_TEST_RESPONSE_PROTOCOLS.CHAT_COMPLETIONS,
+      label: t('转 Chat Completions 路径'),
+    },
+  ];
+  const responseProtocolHint = responseProtocolDisabled
+    ? t(
+        '当前端点不需要 Responses 协议切换；请求头、参数覆盖、代理和模型映射仍按下方开关生效。',
+      )
+    : t(
+        '默认用 Responses 原生路径；上游没有 compact 路径时，可手动切到 Chat Completions 路径验证。',
+      );
   const runtimeSummaryItems = [
     {
       key: 'headers',
@@ -160,11 +191,55 @@ const ModelTestRuntimeConfigPanel = ({
             <RuntimeSummaryTag key={item.key} {...item} t={t} />
           ))}
         </div>
+        <div className='grid grid-cols-1 gap-2 md:grid-cols-3'>
+          <div className='min-w-0'>
+            <Typography.Text strong size='small' className='mb-1 block'>
+              {t('Responses 上游路径')}
+            </Typography.Text>
+            <Select
+              value={normalizedRuntimeConfig.responseProtocol}
+              onChange={(value) =>
+                updateRuntimeConfig('responseProtocol', value)
+              }
+              optionList={responseProtocolOptions}
+              disabled={isBatchTesting || responseProtocolDisabled}
+              size='small'
+              className='!w-full'
+            />
+          </div>
+          <div className='min-w-0'>
+            <Typography.Text strong size='small' className='mb-1 block'>
+              {t('测试内容')}
+            </Typography.Text>
+            <Input
+              value={normalizedRuntimeConfig.testPrompt}
+              onChange={(value) => updateRuntimeConfig('testPrompt', value)}
+              disabled={isBatchTesting}
+              size='small'
+              showClear
+              placeholder={t('输入模型测试内容')}
+              name='components-table-channels-modals-modeltestruntimeconfigpanel-input-1'
+            />
+          </div>
+          <div className='min-w-0'>
+            <Typography.Text strong size='small' className='mb-1 block'>
+              {t('最大输出 Tokens')}
+            </Typography.Text>
+            <InputNumber
+              value={normalizedRuntimeConfig.maxTokens}
+              onChange={(value) => updateRuntimeConfig('maxTokens', value)}
+              disabled={isBatchTesting}
+              min={1}
+              max={8192}
+              size='small'
+              style={{ width: '100%' }}
+              name='components-table-channels-modals-modeltestruntimeconfigpanel-inputnumber-1'
+            />
+          </div>
+        </div>
         <div className='flex items-center justify-between gap-2'>
           <Typography.Text type='tertiary' size='small'>
-            {t(
-              '普通测试保持开启即可；需要定位原始连通性或单项配置时再展开诊断。',
-            )}
+            {responseProtocolHint}
           </Typography.Text>
           <Button
             theme='borderless'

@@ -157,6 +157,7 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 		Body:   nil,
 		Header: make(http.Header),
 	}
+	applyChannelTestSourceHeaders(c, options.SourceHeaders)
 	runtimeSummary = buildChannelTestRuntimeSummary(channel, options, testModel, endpointType, requestPath, isStream)
 	runtimeChannel, err := buildChannelForTestOptions(channel, options)
 	if err != nil {
@@ -257,7 +258,7 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 		}
 	}
 
-	request := buildTestRequest(testModel, endpointType, channel, isStream)
+	request := buildTestRequest(testModel, endpointType, channel, isStream, options)
 
 	info, err = relaycommon.GenRelayInfo(c, relayFormat, request, nil)
 
@@ -293,6 +294,15 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 	testModel = info.UpstreamModelName
 	// 更新请求中的模型名称
 	request.SetModelName(testModel)
+
+	request, err = applyChannelTestProtocolStrategy(c, info, request, options)
+	if err != nil {
+		return testResult{
+			context:     c,
+			localErr:    err,
+			newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest),
+		}
+	}
 
 	apiType, _ := common.ChannelType2APIType(channel.Type)
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact &&
@@ -547,6 +557,23 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 	}
 }
 
+func applyChannelTestSourceHeaders(c *gin.Context, headers map[string]string) {
+	if c == nil || c.Request == nil || len(headers) == 0 {
+		return
+	}
+	if c.Request.Header == nil {
+		c.Request.Header = make(http.Header)
+	}
+	for key, value := range headers {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" || isSensitiveChannelTestSourceHeader(key) {
+			continue
+		}
+		c.Request.Header.Set(key, value)
+	}
+}
+
 func attachTestBillingRequestInput(info *relaycommon.RelayInfo, request dto.Request) error {
 	if info == nil {
 		return nil
@@ -685,8 +712,146 @@ func detectErrorMessageFromJSONBytes(jsonBytes []byte) string {
 	return message
 }
 
-func buildTestRequest(model string, endpointType string, channel *model.Channel, isStream bool) dto.Request {
-	testResponsesInput := json.RawMessage(`[{"role":"user","content":"hi"}]`)
+func buildChannelTestResponsesInput(prompt string) json.RawMessage {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		prompt = channelTestDefaultPrompt
+	}
+	payload := []map[string]string{
+		{
+			"role":    "user",
+			"content": prompt,
+		},
+	}
+	raw, err := common.Marshal(payload)
+	if err != nil {
+		return json.RawMessage(`[{"role":"user","content":"hi"}]`)
+	}
+	return json.RawMessage(raw)
+}
+
+func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInfo, request dto.Request, options channelTestOptions) (dto.Request, error) {
+	options = normalizeChannelTestOptions(options)
+	if options.ResponseProtocol != channelTestResponseProtocolChatCompletions {
+		return request, nil
+	}
+	if info == nil {
+		return request, errors.New("relay info is nil")
+	}
+	if info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
+		return request, fmt.Errorf("response protocol %q only supports responses endpoints", options.ResponseProtocol)
+	}
+
+	var responsesReq *dto.OpenAIResponsesRequest
+	switch req := request.(type) {
+	case *dto.OpenAIResponsesRequest:
+		responsesReq = req
+	case *dto.OpenAIResponsesCompactionRequest:
+		responsesReq = &dto.OpenAIResponsesRequest{
+			Model:              req.Model,
+			Input:              req.Input,
+			Instructions:       req.Instructions,
+			PreviousResponseID: req.PreviousResponseID,
+		}
+	default:
+		return request, fmt.Errorf("invalid response request type: %T", request)
+	}
+
+	chatReq, err := service.ResponsesRequestToChatCompletionsRequest(responsesReq)
+	if err != nil {
+		return request, err
+	}
+	if options.MaxTokens != nil && chatReq.MaxTokens == nil {
+		chatReq.MaxTokens = common.GetPointer(*options.MaxTokens)
+	}
+
+	info.AppendRequestConversion(types.RelayFormatOpenAI)
+	info.RelayMode = relayconstant.RelayModeChatCompletions
+	info.RequestURLPath = "/v1/chat/completions"
+	info.Request = chatReq
+	if c != nil && c.Request != nil && c.Request.URL != nil {
+		c.Request.URL.Path = "/v1/chat/completions"
+	}
+	return chatReq, nil
+}
+
+func diagnoseChannelTestError(err error, newAPIError *types.NewAPIError, summary *channelTestRuntimeSummary) *channelTestErrorDiagnosis {
+	message := ""
+	if err != nil {
+		message = err.Error()
+	} else if newAPIError != nil {
+		message = newAPIError.Error()
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return nil
+	}
+
+	var errorCode types.ErrorCode
+	if newAPIError != nil {
+		errorCode = newAPIError.GetErrorCode()
+	}
+	lowerMessage := strings.ToLower(message)
+	requestPath := ""
+	if summary != nil {
+		requestPath = strings.ToLower(summary.RequestPath + " " + summary.FinalRequestPath)
+	}
+
+	if strings.Contains(lowerMessage, "compact") || strings.Contains(requestPath, "compact") {
+		if strings.Contains(lowerMessage, "no available channel") ||
+			strings.Contains(lowerMessage, "model") ||
+			strings.Contains(lowerMessage, "unsupported endpoint") {
+			return &channelTestErrorDiagnosis{
+				Category:   "compact_unavailable",
+				Summary:    "上游 compact 模型或 compact 路径不可用",
+				Suggestion: "如果上游只开放非 compact 模型，可在模型测试中切到 Chat Completions 路径验证，或配置模型映射到上游实际可用模型。",
+			}
+		}
+	}
+
+	if errorCode == types.ErrorCodeModelPriceError {
+		return &channelTestErrorDiagnosis{
+			Category:   "pricing",
+			Summary:    "模型价格或倍率配置缺失",
+			Suggestion: "请检查模型价格、分组倍率和端点价格配置后再测试。",
+		}
+	}
+	if strings.Contains(lowerMessage, "param override") || strings.Contains(lowerMessage, "参数覆盖") {
+		return &channelTestErrorDiagnosis{
+			Category:   "param_override",
+			Summary:    "参数覆盖规则执行失败",
+			Suggestion: "请检查参数覆盖 JSON、规则模式和 pass_headers 配置。",
+		}
+	}
+	if strings.Contains(lowerMessage, "header") || strings.Contains(lowerMessage, "请求头") {
+		return &channelTestErrorDiagnosis{
+			Category:   "header",
+			Summary:    "请求头配置执行失败",
+			Suggestion: "请检查 Header Profile、请求头名称和值格式。",
+		}
+	}
+	if strings.Contains(lowerMessage, "502") ||
+		strings.Contains(lowerMessage, "503") ||
+		strings.Contains(lowerMessage, "504") ||
+		strings.Contains(lowerMessage, "524") ||
+		strings.Contains(lowerMessage, "bad response") {
+		return &channelTestErrorDiagnosis{
+			Category:   "upstream_gateway",
+			Summary:    "上游网关或超时错误",
+			Suggestion: "请优先确认上游站点、CDN 超时、Base URL 和代理链路是否正常。",
+		}
+	}
+
+	return &channelTestErrorDiagnosis{
+		Category:   "unknown",
+		Summary:    "模型测试失败",
+		Suggestion: "请结合最终请求路径、上游模型、请求头和参数覆盖结果继续定位。",
+	}
+}
+
+func buildTestRequest(model string, endpointType string, channel *model.Channel, isStream bool, options channelTestOptions) dto.Request {
+	options = normalizeChannelTestOptions(options)
+	testResponsesInput := buildChannelTestResponsesInput(options.TestPrompt)
 
 	// 根据端点类型构建不同的测试请求
 	if endpointType != "" {
@@ -715,11 +880,15 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			}
 		case constant.EndpointTypeOpenAIResponse:
 			// 返回 OpenAIResponsesRequest
-			return &dto.OpenAIResponsesRequest{
+			req := &dto.OpenAIResponsesRequest{
 				Model:  model,
-				Input:  json.RawMessage(`[{"role":"user","content":"hi"}]`),
+				Input:  testResponsesInput,
 				Stream: lo.ToPtr(isStream),
 			}
+			if options.MaxTokens != nil {
+				req.MaxOutputTokens = common.GetPointer(*options.MaxTokens)
+			}
+			return req
 		case constant.EndpointTypeOpenAIResponseCompact:
 			// 返回 OpenAIResponsesCompactionRequest
 			return &dto.OpenAIResponsesCompactionRequest{
@@ -738,10 +907,14 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 				Messages: []dto.Message{
 					{
 						Role:    "user",
-						Content: "hi",
+						Content: options.TestPrompt,
 					},
 				},
-				MaxTokens: lo.ToPtr(maxTokens),
+			}
+			if options.MaxTokens != nil {
+				req.MaxTokens = common.GetPointer(*options.MaxTokens)
+			} else {
+				req.MaxTokens = lo.ToPtr(maxTokens)
 			}
 			if isStream {
 				req.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
@@ -781,11 +954,15 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 
 	// Responses-only models (e.g. codex series)
 	if strings.Contains(strings.ToLower(model), "codex") {
-		return &dto.OpenAIResponsesRequest{
+		req := &dto.OpenAIResponsesRequest{
 			Model:  model,
-			Input:  json.RawMessage(`[{"role":"user","content":"hi"}]`),
+			Input:  testResponsesInput,
 			Stream: lo.ToPtr(isStream),
 		}
+		if options.MaxTokens != nil {
+			req.MaxOutputTokens = common.GetPointer(*options.MaxTokens)
+		}
+		return req
 	}
 
 	// Chat/Completion 请求 - 返回 GeneralOpenAIRequest
@@ -795,7 +972,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 		Messages: []dto.Message{
 			{
 				Role:    "user",
-				Content: "hi",
+				Content: options.TestPrompt,
 			},
 		},
 	}
@@ -803,7 +980,9 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 		testRequest.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
 	}
 
-	if strings.HasPrefix(model, "o") {
+	if options.MaxTokens != nil {
+		testRequest.MaxTokens = common.GetPointer(*options.MaxTokens)
+	} else if strings.HasPrefix(model, "o") {
 		testRequest.MaxCompletionTokens = lo.ToPtr(uint(16))
 	} else if strings.Contains(model, "thinking") {
 		if !strings.Contains(model, "claude") {
@@ -844,11 +1023,18 @@ func TestChannel(c *gin.Context) {
 	tik := time.Now()
 	result := testChannelWithOptions(channel, testModel, endpointType, isStream, options)
 	if result.localErr != nil {
+		diagnosis := diagnoseChannelTestError(result.localErr, result.newAPIError, result.runtimeConfig)
+		if result.runtimeConfig != nil {
+			result.runtimeConfig.ErrorDiagnosis = diagnosis
+		}
 		resp := gin.H{
 			"success":        false,
 			"message":        result.localErr.Error(),
 			"time":           0.0,
 			"runtime_config": result.runtimeConfig,
+		}
+		if diagnosis != nil {
+			resp["diagnosis"] = diagnosis
 		}
 		if result.newAPIError != nil {
 			resp["error_code"] = result.newAPIError.GetErrorCode()
@@ -861,12 +1047,17 @@ func TestChannel(c *gin.Context) {
 	go channel.UpdateResponseTime(milliseconds)
 	consumedTime := float64(milliseconds) / 1000.0
 	if result.newAPIError != nil {
+		diagnosis := diagnoseChannelTestError(nil, result.newAPIError, result.runtimeConfig)
+		if result.runtimeConfig != nil {
+			result.runtimeConfig.ErrorDiagnosis = diagnosis
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success":        false,
 			"message":        result.newAPIError.Error(),
 			"time":           consumedTime,
 			"error_code":     result.newAPIError.GetErrorCode(),
 			"runtime_config": result.runtimeConfig,
+			"diagnosis":      diagnosis,
 		})
 		return
 	}

@@ -35,6 +35,8 @@ import { MODEL_TABLE_PAGE_SIZE } from '../../../../constants';
 import {
   DEFAULT_MODEL_TEST_RUNTIME_CONFIG,
   formatRuntimeResult,
+  MODEL_TEST_RESPONSE_PROTOCOLS,
+  normalizeModelTestRuntimeConfig,
 } from '../modelTestRuntimeConfig';
 import ModelTestRuntimeConfigPanel from './ModelTestRuntimeConfigPanel';
 
@@ -85,6 +87,15 @@ const ModelTestModal = ({
     setModelTestRuntimeConfig(DEFAULT_MODEL_TEST_RUNTIME_CONFIG);
   }, [showModelTestModal, currentTestChannel?.id, setModelTestRuntimeConfig]);
 
+  const switchToChatCompletionsPath = () => {
+    setSelectedEndpointType('openai-response-compact');
+    setModelTestRuntimeConfig((prev) => ({
+      ...normalizeModelTestRuntimeConfig(prev),
+      responseProtocol: MODEL_TEST_RESPONSE_PROTOCOLS.CHAT_COMPLETIONS,
+    }));
+    showInfo(t('已切换为 compact 转 Chat Completions 路径，请重新测试。'));
+  };
+
   const filteredModels = hasChannel
     ? currentTestChannel.models
         .split(',')
@@ -94,13 +105,16 @@ const ModelTestModal = ({
     : [];
 
   const endpointTypeOptions = [
-    { value: '', label: t('自动检测') },
+    {
+      value: 'openai-response',
+      label: t('OpenAI Response 默认') + ' (/v1/responses)',
+    },
     { value: 'openai', label: 'OpenAI (/v1/chat/completions)' },
-    { value: 'openai-response', label: 'OpenAI Response (/v1/responses)' },
     {
       value: 'openai-response-compact',
       label: 'OpenAI Response Compaction (/v1/responses/compact)',
     },
+    { value: '', label: t('自动检测（旧逻辑）') },
     { value: 'anthropic', label: 'Anthropic (/v1/messages)' },
     {
       value: 'gemini',
@@ -183,6 +197,8 @@ const ModelTestModal = ({
         }
 
         const runtimeResult = formatRuntimeResult(testResult.runtimeConfig, t);
+        const diagnosis =
+          testResult.diagnosis || testResult.runtimeConfig?.error_diagnosis;
 
         return (
           <div className='flex flex-col gap-1'>
@@ -209,6 +225,36 @@ const ModelTestModal = ({
                 >
                   {testResult.message}
                 </Typography.Text>
+                {diagnosis && (
+                  <div className='flex flex-col gap-1 rounded-md border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] px-2 py-1'>
+                    <div className='flex items-center gap-1'>
+                      <Tag color='orange' size='small'>
+                        {t('诊断')}
+                      </Tag>
+                      <Typography.Text size='small' strong>
+                        {diagnosis.summary}
+                      </Typography.Text>
+                    </div>
+                    <Typography.Text
+                      type='tertiary'
+                      size='small'
+                      className='break-all'
+                    >
+                      {diagnosis.suggestion}
+                    </Typography.Text>
+                  </div>
+                )}
+                {diagnosis?.category === 'compact_unavailable' && (
+                  <Button
+                    size='small'
+                    theme='light'
+                    type='warning'
+                    onClick={switchToChatCompletionsPath}
+                    style={{ width: 'fit-content' }}
+                  >
+                    {t('切到 Chat 路径')}
+                  </Button>
+                )}
                 {testResult.errorCode === 'model_price_error' && (
                   <Button
                     size='small'
@@ -230,7 +276,15 @@ const ModelTestModal = ({
                 type='tertiary'
                 size='small'
                 className='break-all'
-                style={{ maxWidth: '420px', fontSize: '12px' }}
+                title={runtimeResult}
+                style={{
+                  maxWidth: '520px',
+                  fontSize: '12px',
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                }}
               >
                 {runtimeResult}
               </Typography.Text>
@@ -373,6 +427,7 @@ const ModelTestModal = ({
             channel={currentTestChannel}
             runtimeConfig={modelTestRuntimeConfig}
             setRuntimeConfig={setModelTestRuntimeConfig}
+            selectedEndpointType={selectedEndpointType}
             isBatchTesting={isBatchTesting}
             globalPassThroughEnabled={globalPassThroughEnabled}
             t={t}

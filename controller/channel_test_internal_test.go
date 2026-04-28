@@ -1,15 +1,19 @@
 package controller
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -27,6 +31,93 @@ func TestParseChannelTestOptionsRuntimeOffDisablesSubOptions(t *testing.T) {
 	require.False(t, options.UseParamOverride)
 	require.False(t, options.UseProxy)
 	require.False(t, options.UseModelMapping)
+}
+
+func TestParseChannelTestOptionsParsesProtocolAndRequestParams(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/channel/test/1?response_protocol=chat_completions&test_prompt=explain%20compact&max_tokens=64", nil)
+	ctx.Request.Header.Set("User-Agent", "Codex/1.0")
+	ctx.Request.Header.Set("X-Codex-Beta-Features", "compact-edit")
+	ctx.Request.Header.Set("Cookie", "session=secret")
+	ctx.Request.Header.Set("New-Api-User", "12")
+
+	options := parseChannelTestOptions(ctx)
+
+	require.Equal(t, channelTestResponseProtocolChatCompletions, options.ResponseProtocol)
+	require.Equal(t, "explain compact", options.TestPrompt)
+	require.NotNil(t, options.MaxTokens)
+	require.Equal(t, uint(64), *options.MaxTokens)
+	require.Equal(t, "Codex/1.0", options.SourceHeaders["User-Agent"])
+	require.Equal(t, "compact-edit", options.SourceHeaders["X-Codex-Beta-Features"])
+	_, hasCookie := options.SourceHeaders["Cookie"]
+	require.False(t, hasCookie)
+	_, hasUser := options.SourceHeaders["New-Api-User"]
+	require.False(t, hasUser)
+}
+
+func TestBuildTestRequestAppliesResponsesPromptAndMaxTokens(t *testing.T) {
+	maxTokens := uint(64)
+	options := defaultChannelTestOptions()
+	options.TestPrompt = "explain compact"
+	options.MaxTokens = &maxTokens
+
+	request := buildTestRequest("gpt-5.5", string(constant.EndpointTypeOpenAIResponse), nil, false, options)
+
+	responsesReq, ok := request.(*dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.JSONEq(t, `[{"role":"user","content":"explain compact"}]`, string(responsesReq.Input))
+	require.NotNil(t, responsesReq.MaxOutputTokens)
+	require.Equal(t, uint(64), *responsesReq.MaxOutputTokens)
+}
+
+func TestApplyChannelTestProtocolStrategyConvertsResponsesCompactToChat(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	maxTokens := uint(64)
+	options := defaultChannelTestOptions()
+	options.ResponseProtocol = channelTestResponseProtocolChatCompletions
+	options.MaxTokens = &maxTokens
+	info := &relaycommon.RelayInfo{
+		RelayMode:              relayconstant.RelayModeResponsesCompact,
+		RequestURLPath:         "/v1/responses/compact",
+		RelayFormat:            types.RelayFormatOpenAIResponsesCompaction,
+		RequestConversionChain: []types.RelayFormat{types.RelayFormatOpenAIResponsesCompaction},
+	}
+	request := &dto.OpenAIResponsesCompactionRequest{
+		Model: "gpt-5.5-openai-compact",
+		Input: json.RawMessage(`[{"role":"user","content":"summarize"}]`),
+	}
+
+	converted, err := applyChannelTestProtocolStrategy(ctx, info, request, options)
+
+	require.NoError(t, err)
+	chatReq, ok := converted.(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.5-openai-compact", chatReq.Model)
+	require.NotNil(t, chatReq.MaxTokens)
+	require.Equal(t, uint(64), *chatReq.MaxTokens)
+	require.Equal(t, relayconstant.RelayModeChatCompletions, info.RelayMode)
+	require.Equal(t, "/v1/chat/completions", info.RequestURLPath)
+	require.Equal(t, "/v1/chat/completions", ctx.Request.URL.Path)
+	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponsesCompaction, types.RelayFormatOpenAI}, info.RequestConversionChain)
+}
+
+func TestDiagnoseChannelTestErrorDetectsCompactUnavailable(t *testing.T) {
+	summary := &channelTestRuntimeSummary{
+		RequestPath:      "/v1/responses/compact",
+		FinalRequestPath: "/v1/responses/compact",
+	}
+
+	diagnosis := diagnoseChannelTestError(
+		errors.New("No available channel for model gpt-5.5-openai-compact under group test"),
+		nil,
+		summary,
+	)
+
+	require.Equal(t, "compact_unavailable", diagnosis.Category)
+	require.Contains(t, diagnosis.Suggestion, "Chat Completions")
 }
 
 func TestBuildChannelForTestOptionsDisablesRuntimeSettingsWithoutMutatingChannel(t *testing.T) {
@@ -158,6 +249,28 @@ func TestPreparedHeaderProfileFeedsChannelTestPassHeaders(t *testing.T) {
 	headers := relaycommon.GetEffectiveHeaderOverride(info)
 	require.Equal(t, "OpenAI Codex CLI/0.1", headers["user-agent"])
 	require.Equal(t, "codex-cli", headers["x-client-name"])
+}
+
+func TestApplyChannelTestSourceHeadersSkipsSensitiveHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	applyChannelTestSourceHeaders(ctx, map[string]string{
+		"User-Agent":      "Codex/1.0",
+		"X-Codex-Trace":   "trace-1",
+		"Authorization":   "Bearer secret",
+		"Cookie":          "session=secret",
+		"New-Api-User":    "12",
+		"X-Forwarded-For": "127.0.0.1",
+	})
+
+	require.Equal(t, "Codex/1.0", ctx.Request.Header.Get("User-Agent"))
+	require.Equal(t, "trace-1", ctx.Request.Header.Get("X-Codex-Trace"))
+	require.Equal(t, "127.0.0.1", ctx.Request.Header.Get("X-Forwarded-For"))
+	require.Empty(t, ctx.Request.Header.Get("Authorization"))
+	require.Empty(t, ctx.Request.Header.Get("Cookie"))
+	require.Empty(t, ctx.Request.Header.Get("New-Api-User"))
 }
 
 func TestFinalizeChannelTestRuntimeSummaryMarksRuntimeHeaderParamOverrideApplied(t *testing.T) {

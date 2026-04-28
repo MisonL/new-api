@@ -10,35 +10,44 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
 
 type channelTestRuntimeSummary struct {
-	RuntimeConfigEnabled    bool     `json:"runtime_config_enabled"`
-	HeaderConfigEnabled     bool     `json:"header_config_enabled"`
-	HeaderConfigured        bool     `json:"header_configured"`
-	HeaderApplied           bool     `json:"header_applied"`
-	HeaderKeys              []string `json:"header_keys,omitempty"`
-	HeaderProfileID         string   `json:"header_profile_id,omitempty"`
-	HeaderProfileMode       string   `json:"header_profile_mode,omitempty"`
-	HeaderProfileApplied    bool     `json:"header_profile_applied"`
-	ParamOverrideEnabled    bool     `json:"param_override_enabled"`
-	ParamOverrideConfigured bool     `json:"param_override_configured"`
-	ParamOverrideApplied    bool     `json:"param_override_applied"`
-	ParamOverrideAudit      []string `json:"param_override_audit,omitempty"`
-	ProxyEnabled            bool     `json:"proxy_enabled"`
-	ProxyConfigured         bool     `json:"proxy_configured"`
-	ProxyDisplay            string   `json:"proxy_display,omitempty"`
-	ModelMappingEnabled     bool     `json:"model_mapping_enabled"`
-	ModelMappingConfigured  bool     `json:"model_mapping_configured"`
-	ModelMappingApplied     bool     `json:"model_mapping_applied"`
-	OriginModel             string   `json:"origin_model,omitempty"`
-	UpstreamModel           string   `json:"upstream_model,omitempty"`
-	EndpointType            string   `json:"endpoint_type,omitempty"`
-	RequestPath             string   `json:"request_path,omitempty"`
-	Stream                  bool     `json:"stream"`
-	ConfigWarnings          []string `json:"config_warnings,omitempty"`
+	RuntimeConfigEnabled    bool                       `json:"runtime_config_enabled"`
+	HeaderConfigEnabled     bool                       `json:"header_config_enabled"`
+	HeaderConfigured        bool                       `json:"header_configured"`
+	HeaderApplied           bool                       `json:"header_applied"`
+	HeaderKeys              []string                   `json:"header_keys,omitempty"`
+	HeaderProfileID         string                     `json:"header_profile_id,omitempty"`
+	HeaderProfileMode       string                     `json:"header_profile_mode,omitempty"`
+	HeaderProfileApplied    bool                       `json:"header_profile_applied"`
+	ParamOverrideEnabled    bool                       `json:"param_override_enabled"`
+	ParamOverrideConfigured bool                       `json:"param_override_configured"`
+	ParamOverrideApplied    bool                       `json:"param_override_applied"`
+	ParamOverrideAudit      []string                   `json:"param_override_audit,omitempty"`
+	ProxyEnabled            bool                       `json:"proxy_enabled"`
+	ProxyConfigured         bool                       `json:"proxy_configured"`
+	ProxyDisplay            string                     `json:"proxy_display,omitempty"`
+	ModelMappingEnabled     bool                       `json:"model_mapping_enabled"`
+	ModelMappingConfigured  bool                       `json:"model_mapping_configured"`
+	ModelMappingApplied     bool                       `json:"model_mapping_applied"`
+	OriginModel             string                     `json:"origin_model,omitempty"`
+	UpstreamModel           string                     `json:"upstream_model,omitempty"`
+	EndpointType            string                     `json:"endpoint_type,omitempty"`
+	RequestPath             string                     `json:"request_path,omitempty"`
+	FinalRequestPath        string                     `json:"final_request_path,omitempty"`
+	ProtocolStrategy        string                     `json:"protocol_strategy,omitempty"`
+	RelayFormat             string                     `json:"relay_format,omitempty"`
+	FinalRelayFormat        string                     `json:"final_relay_format,omitempty"`
+	RequestConversionChain  []string                   `json:"request_conversion_chain,omitempty"`
+	TestPrompt              string                     `json:"test_prompt,omitempty"`
+	MaxTokens               uint                       `json:"max_tokens,omitempty"`
+	Stream                  bool                       `json:"stream"`
+	ConfigWarnings          []string                   `json:"config_warnings,omitempty"`
+	ErrorDiagnosis          *channelTestErrorDiagnosis `json:"error_diagnosis,omitempty"`
 }
 
 func buildChannelTestRuntimeSummary(channel *model.Channel, options channelTestOptions, modelName string, endpointType string, requestPath string, isStream bool) *channelTestRuntimeSummary {
@@ -52,10 +61,16 @@ func buildChannelTestRuntimeSummary(channel *model.Channel, options channelTestO
 		OriginModel:          strings.TrimSpace(modelName),
 		EndpointType:         strings.TrimSpace(endpointType),
 		RequestPath:          strings.TrimSpace(requestPath),
+		FinalRequestPath:     strings.TrimSpace(requestPath),
+		ProtocolStrategy:     options.ResponseProtocol,
+		TestPrompt:           options.TestPrompt,
 		Stream:               isStream,
 		HeaderKeys:           []string{},
 		ParamOverrideAudit:   []string{},
 		ConfigWarnings:       []string{},
+	}
+	if options.MaxTokens != nil {
+		summary.MaxTokens = *options.MaxTokens
 	}
 	if channel == nil {
 		return summary
@@ -100,6 +115,12 @@ func finalizeChannelTestRuntimeSummary(summary *channelTestRuntimeSummary, c *gi
 		return
 	}
 	if info != nil {
+		if requestPath := strings.TrimSpace(info.RequestURLPath); requestPath != "" {
+			summary.FinalRequestPath = requestPath
+		}
+		summary.RelayFormat = string(info.RelayFormat)
+		summary.FinalRelayFormat = string(info.GetFinalRequestRelayFormat())
+		summary.RequestConversionChain = relayFormatsToStrings(info.RequestConversionChain)
 		if info.ChannelMeta != nil {
 			summary.UpstreamModel = strings.TrimSpace(info.UpstreamModelName)
 			summary.ModelMappingApplied = info.IsModelMapped || (summary.OriginModel != "" && summary.UpstreamModel != "" && summary.OriginModel != summary.UpstreamModel)
@@ -136,6 +157,27 @@ func finalizeChannelTestRuntimeSummary(summary *channelTestRuntimeSummary, c *gi
 			summary.HeaderKeys = mergeSortedStrings(summary.HeaderKeys, audit.AppliedHeaderKeys)
 		}
 	}
+}
+
+type channelTestErrorDiagnosis struct {
+	Category   string `json:"category"`
+	Summary    string `json:"summary"`
+	Suggestion string `json:"suggestion"`
+}
+
+func relayFormatsToStrings(formats []types.RelayFormat) []string {
+	if len(formats) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(formats))
+	for _, format := range formats {
+		value := strings.TrimSpace(string(format))
+		if value == "" {
+			continue
+		}
+		values = append(values, value)
+	}
+	return values
 }
 
 func parseChannelTestHeaderKeys(raw *string) []string {
