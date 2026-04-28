@@ -92,6 +92,7 @@ import {
   CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
   CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
 } from '../../../../constants/channel-affinity-template.constants';
+import { MODEL_TEST_EDIT_TARGETS } from '../modelTestRuntimeConfig';
 import {
   IconSave,
   IconClose,
@@ -104,7 +105,6 @@ import {
   IconSearch,
   IconChevronDown,
 } from '@douyinfe/semi-icons';
-
 const { Text, Title } = Typography;
 
 const ModelSelectModal = lazy(() => import('./ModelSelectModal'));
@@ -5369,8 +5369,139 @@ const EditChannelModal = (props) => {
           />
         </Suspense>
       ) : null}
+
+      <ChannelEditFocusController
+        visible={props.visible}
+        editFocusTarget={props.editFocusTarget}
+        onOpenAdvanced={() => toggleAdvancedSettings(true)}
+        onOpenRequestPolicy={(focusAdvanced) =>
+          openRequestPolicyModal(focusAdvanced)
+        }
+        t={t}
+      />
     </>
   );
+};
+
+const EDIT_FOCUS_SECTION_SELECTOR =
+  '.semi-form-field, .semi-collapse-item, .semi-card, .semi-modal-body, .semi-sidesheet-body';
+
+const isVisibleEditFocusElement = (element) => {
+  const rect = element.getBoundingClientRect();
+  const style = window.getComputedStyle(element);
+  return (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    style.display !== 'none' &&
+    style.visibility !== 'hidden'
+  );
+};
+
+const findEditFocusSection = (text) =>
+  Array.from(document.querySelectorAll(EDIT_FOCUS_SECTION_SELECTOR))
+    .reverse()
+    .find(
+      (item) =>
+        isVisibleEditFocusElement(item) && item.textContent?.includes(text),
+    );
+
+const focusEditSection = (text) => {
+  const element = findEditFocusSection(text);
+  if (!element) {
+    return;
+  }
+  element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if (typeof element.animate === 'function') {
+    element.animate(
+      [
+        { boxShadow: '0 0 0 0 rgba(0, 100, 250, 0)' },
+        { boxShadow: '0 0 0 4px rgba(0, 100, 250, 0.18)' },
+        { boxShadow: '0 0 0 0 rgba(0, 100, 250, 0)' },
+      ],
+      { duration: 1200, easing: 'ease-out' },
+    );
+  }
+};
+
+const waitForEditFocusSection = (text, callback, schedule, attempts = 12) => {
+  if (findEditFocusSection(text)) {
+    callback();
+    return;
+  }
+  if (attempts <= 0) {
+    return;
+  }
+  schedule(
+    () => waitForEditFocusSection(text, callback, schedule, attempts - 1),
+    120,
+  );
+};
+
+const ChannelEditFocusController = ({
+  visible,
+  editFocusTarget,
+  onOpenAdvanced,
+  onOpenRequestPolicy,
+  t,
+}) => {
+  const handledNonceRef = useRef(null);
+  const actionsRef = useRef({ onOpenAdvanced, onOpenRequestPolicy });
+
+  useEffect(() => {
+    actionsRef.current = { onOpenAdvanced, onOpenRequestPolicy };
+  }, [onOpenAdvanced, onOpenRequestPolicy]);
+
+  useEffect(() => {
+    const target = editFocusTarget?.target;
+    const nonce = editFocusTarget?.nonce;
+    if (!visible || typeof target !== 'number' || !nonce) {
+      return undefined;
+    }
+    if (
+      target === MODEL_TEST_EDIT_TARGETS.CORE ||
+      handledNonceRef.current === nonce
+    ) {
+      return undefined;
+    }
+    handledNonceRef.current = nonce;
+
+    const timers = [];
+    const schedule = (callback, delay) => {
+      const timer = window.setTimeout(callback, delay);
+      timers.push(timer);
+      return timer;
+    };
+    const openRequestPolicyWhenReady = (focusAdvanced, focusText) => {
+      actionsRef.current.onOpenAdvanced();
+      waitForEditFocusSection(
+        t('上游请求策略'),
+        () => {
+          actionsRef.current.onOpenRequestPolicy(focusAdvanced);
+          schedule(() => focusEditSection(focusText), 220);
+        },
+        schedule,
+      );
+    };
+    if (target === MODEL_TEST_EDIT_TARGETS.HEADER_CONFIG) {
+      openRequestPolicyWhenReady(
+        false,
+        t('快速上手：不懂请求头时，只需要选择一个客户端模板'),
+      );
+    } else if (target === MODEL_TEST_EDIT_TARGETS.PARAM_OVERRIDE) {
+      openRequestPolicyWhenReady(true, t('高级请求规则'));
+    } else if (target === MODEL_TEST_EDIT_TARGETS.PROXY) {
+      actionsRef.current.onOpenAdvanced();
+      schedule(() => focusEditSection(t('代理地址')), 260);
+    } else if (target === MODEL_TEST_EDIT_TARGETS.MODEL_MAPPING) {
+      schedule(() => focusEditSection(t('模型重定向')), 120);
+    }
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [visible, editFocusTarget, t]);
+
+  return null;
 };
 
 export default EditChannelModal;

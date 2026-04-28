@@ -61,16 +61,6 @@ const ChannelsPage = () => {
           />
         </Suspense>
       ) : null}
-      {channelsData.showEdit ? (
-        <Suspense fallback={null}>
-          <EditChannelModal
-            refresh={channelsData.refresh}
-            visible={channelsData.showEdit}
-            handleClose={channelsData.closeEdit}
-            editingChannel={channelsData.editingChannel}
-          />
-        </Suspense>
-      ) : null}
       {channelsData.showBatchSetTag ? (
         <Suspense fallback={null}>
           <BatchTagModal {...channelsData} />
@@ -79,6 +69,17 @@ const ChannelsPage = () => {
       {channelsData.showModelTestModal ? (
         <Suspense fallback={null}>
           <ModelTestModal {...channelsData} />
+        </Suspense>
+      ) : null}
+      {channelsData.showEdit ? (
+        <Suspense fallback={null}>
+          <EditChannelModal
+            refresh={channelsData.refresh}
+            visible={channelsData.showEdit}
+            handleClose={channelsData.closeEdit}
+            editingChannel={channelsData.editingChannel}
+            editFocusTarget={channelsData.editFocusTarget}
+          />
         </Suspense>
       ) : null}
       {channelsData.showMultiKeyManageModal ? (

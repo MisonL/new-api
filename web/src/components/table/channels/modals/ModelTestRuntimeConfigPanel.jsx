@@ -1,9 +1,27 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React from 'react';
 import {
   Button,
   Input,
   InputNumber,
-  Select,
   Switch,
   Tag,
   Typography,
@@ -11,7 +29,7 @@ import {
 import { IconInfoCircle } from '@douyinfe/semi-icons';
 import {
   getModelTestRuntimeSnapshot,
-  MODEL_TEST_RESPONSE_PROTOCOLS,
+  MODEL_TEST_EDIT_TARGETS,
   normalizeModelTestRuntimeConfig,
 } from '../modelTestRuntimeConfig';
 
@@ -23,6 +41,7 @@ const RuntimeSwitchItem = ({
   configured,
   value,
   onChange,
+  onEdit,
   t,
 }) => {
   const effectiveChecked = checked && configured;
@@ -34,7 +53,19 @@ const RuntimeSwitchItem = ({
       : t('已关闭');
 
   return (
-    <div className='flex items-center justify-between gap-3 rounded-md border border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-3 py-2 transition-colors hover:bg-[var(--semi-color-fill-0)]'>
+    <div
+      className='flex cursor-pointer items-center justify-between gap-3 rounded-md border border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-3 py-2 transition-colors hover:bg-[var(--semi-color-fill-0)]'
+      role='button'
+      tabIndex={0}
+      title={t('点击打开渠道编辑')}
+      onClick={onEdit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onEdit?.();
+        }
+      }}
+    >
       <div className='min-w-0'>
         <div className='flex items-center gap-2'>
           <Typography.Text strong size='small'>
@@ -53,28 +84,42 @@ const RuntimeSwitchItem = ({
           {value || description}
         </Typography.Text>
       </div>
-      <Switch
-        checked={effectiveChecked}
-        disabled={itemDisabled}
-        onChange={onChange}
-        size='small'
-        aria-label={label}
-      />
+      <div onClick={(event) => event.stopPropagation()}>
+        <Switch
+          checked={effectiveChecked}
+          disabled={itemDisabled}
+          onChange={onChange}
+          size='small'
+          aria-label={label}
+        />
+      </div>
     </div>
   );
 };
 
-const RuntimeSummaryTag = ({ label, configured, enabled, value, t }) => {
+const RuntimeSummaryTag = ({
+  label,
+  configured,
+  enabled,
+  value,
+  onEdit,
+  t,
+}) => {
   const text = configured ? value || t('已配置') : t('未配置');
   return (
-    <Tag color={configured && enabled ? 'green' : 'grey'} size='small'>
-      <span className='inline-flex max-w-[260px] items-center gap-1 truncate align-bottom'>
-        <span className='shrink-0'>{label}:</span>
-        <span className='truncate' title={text}>
-          {text}
+    <button
+      type='button'
+      className='m-0 inline-flex cursor-pointer border-0 bg-transparent p-0 text-left transition-opacity hover:opacity-80'
+      title={`${label}: ${text}。${t('点击打开渠道编辑')}`}
+      onClick={onEdit}
+    >
+      <Tag color={configured && enabled ? 'green' : 'grey'} size='small'>
+        <span className='inline-flex max-w-[260px] items-center gap-1 truncate align-bottom'>
+          <span className='shrink-0'>{label}:</span>
+          <span className='truncate'>{text}</span>
         </span>
-      </span>
-    </Tag>
+      </Tag>
+    </button>
   );
 };
 
@@ -85,6 +130,7 @@ const ModelTestRuntimeConfigPanel = ({
   selectedEndpointType,
   isBatchTesting,
   globalPassThroughEnabled,
+  onEditChannel,
   t,
 }) => {
   const normalizedRuntimeConfig =
@@ -99,27 +145,16 @@ const ModelTestRuntimeConfigPanel = ({
     }));
   };
   const runtimeEnabled = normalizedRuntimeConfig.enabled;
-  const responseProtocolDisabled = ![
-    'openai-response',
-    'openai-response-compact',
-  ].includes(selectedEndpointType);
-  const responseProtocolOptions = [
-    {
-      value: MODEL_TEST_RESPONSE_PROTOCOLS.NATIVE,
-      label: t('原生 Responses 路径'),
-    },
-    {
-      value: MODEL_TEST_RESPONSE_PROTOCOLS.CHAT_COMPLETIONS,
-      label: t('转 Chat Completions 路径'),
-    },
-  ];
-  const responseProtocolHint = responseProtocolDisabled
-    ? t(
-        '当前端点不需要 Responses 协议切换；请求头、参数覆盖、代理和模型映射仍按下方开关生效。',
-      )
-    : t(
-        '默认用 Responses 原生路径；上游没有 compact 路径时，可手动切到 Chat Completions 路径验证。',
-      );
+  const pathHint =
+    selectedEndpointType === 'image-generation'
+      ? t(
+          'GPT 生图测试会走 /v1/images/generations，并复用当前测试内容作为 prompt。',
+        )
+      : selectedEndpointType === 'openai'
+        ? t('当前测试路径为 /v1/chat/completions，适合验证上游普通 Chat 模型。')
+        : t(
+            '默认使用 /v1/responses；如上游只支持 Chat，可在顶部切换测试路径。',
+          );
   const runtimeSummaryItems = [
     {
       key: 'headers',
@@ -127,6 +162,7 @@ const ModelTestRuntimeConfigPanel = ({
       configured: runtimeSnapshot.headerConfigured,
       enabled: runtimeEnabled && normalizedRuntimeConfig.headerConfig,
       value: runtimeSnapshot.headerValue,
+      onEdit: () => onEditChannel?.(MODEL_TEST_EDIT_TARGETS.HEADER_CONFIG),
     },
     {
       key: 'paramOverride',
@@ -134,6 +170,7 @@ const ModelTestRuntimeConfigPanel = ({
       configured: runtimeSnapshot.paramConfigured,
       enabled: runtimeEnabled && normalizedRuntimeConfig.paramOverride,
       value: runtimeSnapshot.paramValue,
+      onEdit: () => onEditChannel?.(MODEL_TEST_EDIT_TARGETS.PARAM_OVERRIDE),
     },
     {
       key: 'proxy',
@@ -141,6 +178,7 @@ const ModelTestRuntimeConfigPanel = ({
       configured: runtimeSnapshot.proxyConfigured,
       enabled: runtimeEnabled && normalizedRuntimeConfig.proxy,
       value: runtimeSnapshot.proxyValue,
+      onEdit: () => onEditChannel?.(MODEL_TEST_EDIT_TARGETS.PROXY),
     },
     {
       key: 'modelMapping',
@@ -148,6 +186,7 @@ const ModelTestRuntimeConfigPanel = ({
       configured: runtimeSnapshot.modelMappingConfigured,
       enabled: runtimeEnabled && normalizedRuntimeConfig.modelMapping,
       value: runtimeSnapshot.modelMappingValue,
+      onEdit: () => onEditChannel?.(MODEL_TEST_EDIT_TARGETS.MODEL_MAPPING),
     },
   ];
 
@@ -178,35 +217,30 @@ const ModelTestRuntimeConfigPanel = ({
               )}
             </Typography.Text>
           </div>
-          <Switch
-            checked={normalizedRuntimeConfig.enabled}
-            onChange={(checked) => updateRuntimeConfig('enabled', checked)}
-            disabled={isBatchTesting}
-            size='small'
-            aria-label={t('按真实运行配置测试')}
-          />
+          <div className='flex items-center gap-2'>
+            <Button
+              theme='borderless'
+              type='tertiary'
+              size='small'
+              onClick={() => onEditChannel?.(MODEL_TEST_EDIT_TARGETS.CORE)}
+            >
+              {t('编辑渠道配置')}
+            </Button>
+            <Switch
+              checked={normalizedRuntimeConfig.enabled}
+              onChange={(checked) => updateRuntimeConfig('enabled', checked)}
+              disabled={isBatchTesting}
+              size='small'
+              aria-label={t('按真实运行配置测试')}
+            />
+          </div>
         </div>
-        <div className='flex flex-wrap gap-1.5'>
+        <div className='flex gap-1.5 overflow-x-auto whitespace-nowrap pb-1'>
           {runtimeSummaryItems.map((item) => (
             <RuntimeSummaryTag key={item.key} {...item} t={t} />
           ))}
         </div>
-        <div className='grid grid-cols-1 gap-2 md:grid-cols-3'>
-          <div className='min-w-0'>
-            <Typography.Text strong size='small' className='mb-1 block'>
-              {t('Responses 上游路径')}
-            </Typography.Text>
-            <Select
-              value={normalizedRuntimeConfig.responseProtocol}
-              onChange={(value) =>
-                updateRuntimeConfig('responseProtocol', value)
-              }
-              optionList={responseProtocolOptions}
-              disabled={isBatchTesting || responseProtocolDisabled}
-              size='small'
-              className='!w-full'
-            />
-          </div>
+        <div className='grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_220px]'>
           <div className='min-w-0'>
             <Typography.Text strong size='small' className='mb-1 block'>
               {t('测试内容')}
@@ -239,7 +273,7 @@ const ModelTestRuntimeConfigPanel = ({
         </div>
         <div className='flex items-center justify-between gap-2'>
           <Typography.Text type='tertiary' size='small'>
-            {responseProtocolHint}
+            {pathHint}
           </Typography.Text>
           <Button
             theme='borderless'
@@ -268,6 +302,9 @@ const ModelTestRuntimeConfigPanel = ({
                 onChange={(checked) =>
                   updateRuntimeConfig('headerConfig', checked)
                 }
+                onEdit={() =>
+                  onEditChannel?.(MODEL_TEST_EDIT_TARGETS.HEADER_CONFIG)
+                }
                 t={t}
               />
               <RuntimeSwitchItem
@@ -283,6 +320,9 @@ const ModelTestRuntimeConfigPanel = ({
                 onChange={(checked) =>
                   updateRuntimeConfig('paramOverride', checked)
                 }
+                onEdit={() =>
+                  onEditChannel?.(MODEL_TEST_EDIT_TARGETS.PARAM_OVERRIDE)
+                }
                 t={t}
               />
               <RuntimeSwitchItem
@@ -296,6 +336,7 @@ const ModelTestRuntimeConfigPanel = ({
                 configured={runtimeSnapshot.proxyConfigured}
                 value={runtimeSnapshot.proxyValue}
                 onChange={(checked) => updateRuntimeConfig('proxy', checked)}
+                onEdit={() => onEditChannel?.(MODEL_TEST_EDIT_TARGETS.PROXY)}
                 t={t}
               />
               <RuntimeSwitchItem
@@ -310,6 +351,9 @@ const ModelTestRuntimeConfigPanel = ({
                 value={runtimeSnapshot.modelMappingValue}
                 onChange={(checked) =>
                   updateRuntimeConfig('modelMapping', checked)
+                }
+                onEdit={() =>
+                  onEditChannel?.(MODEL_TEST_EDIT_TARGETS.MODEL_MAPPING)
                 }
                 t={t}
               />

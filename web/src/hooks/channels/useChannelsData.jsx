@@ -61,6 +61,7 @@ export const useChannelsData = () => {
 
   // UI states
   const [showEdit, setShowEdit] = useState(false);
+  const [editFocusTarget, setEditFocusTarget] = useState(null);
   const [enableBatchDelete, setEnableBatchDelete] = useState(false);
   const [editingChannel, setEditingChannel] = useState({ id: undefined });
   const [showEditTag, setShowEditTag] = useState(false);
@@ -152,6 +153,22 @@ export const useChannelsData = () => {
     WEIGHT: 'weight',
     OPERATE: 'operate',
   };
+
+  useEffect(() => {
+    if (!showModelTestModal || !currentTestChannel?.id) {
+      return;
+    }
+    const flattenChannels = (items) =>
+      items.flatMap((item) =>
+        Array.isArray(item.children) ? item.children : [item],
+      );
+    const latestChannel = flattenChannels(channels).find(
+      (channel) => channel.id === currentTestChannel.id,
+    );
+    if (latestChannel && latestChannel !== currentTestChannel) {
+      setCurrentTestChannel(latestChannel);
+    }
+  }, [channels, showModelTestModal, currentTestChannel]);
 
   // Initialize from localStorage
   useEffect(() => {
@@ -662,6 +679,7 @@ export const useChannelsData = () => {
   // Close edit
   const closeEdit = () => {
     setShowEdit(false);
+    setEditFocusTarget(null);
   };
 
   // Row style
@@ -1168,6 +1186,8 @@ export const useChannelsData = () => {
     // UI states
     showEdit,
     setShowEdit,
+    editFocusTarget,
+    setEditFocusTarget,
     editingChannel,
     setEditingChannel,
     showEditTag,

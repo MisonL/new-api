@@ -35,6 +35,7 @@ import { MODEL_TABLE_PAGE_SIZE } from '../../../../constants';
 import {
   DEFAULT_MODEL_TEST_RUNTIME_CONFIG,
   formatRuntimeResult,
+  MODEL_TEST_EDIT_TARGETS,
   MODEL_TEST_RESPONSE_PROTOCOLS,
   normalizeModelTestRuntimeConfig,
 } from '../modelTestRuntimeConfig';
@@ -63,6 +64,9 @@ const ModelTestModal = ({
   setModelTestRuntimeConfig,
   globalPassThroughEnabled,
   allSelectingRef,
+  setEditingChannel,
+  setShowEdit,
+  setEditFocusTarget,
   isMobile,
   t,
 }) => {
@@ -88,12 +92,22 @@ const ModelTestModal = ({
   }, [showModelTestModal, currentTestChannel?.id, setModelTestRuntimeConfig]);
 
   const switchToChatCompletionsPath = () => {
-    setSelectedEndpointType('openai-response-compact');
+    setSelectedEndpointType('openai');
     setModelTestRuntimeConfig((prev) => ({
       ...normalizeModelTestRuntimeConfig(prev),
-      responseProtocol: MODEL_TEST_RESPONSE_PROTOCOLS.CHAT_COMPLETIONS,
+      responseProtocol: MODEL_TEST_RESPONSE_PROTOCOLS.NATIVE,
     }));
-    showInfo(t('已切换为 compact 转 Chat Completions 路径，请重新测试。'));
+    showInfo(t('已切换为 /v1/chat/completions 测试路径，请重新测试。'));
+  };
+
+  const openChannelEditOverlay = (target = MODEL_TEST_EDIT_TARGETS.CORE) => {
+    if (!currentTestChannel) {
+      return;
+    }
+    setEditingChannel(currentTestChannel);
+    setEditFocusTarget?.({ target, nonce: Date.now() });
+    setShowEdit(true);
+    showInfo(t('已打开渠道编辑，保存后可回到测试窗口重新测试。'));
   };
 
   const filteredModels = hasChannel
@@ -107,12 +121,16 @@ const ModelTestModal = ({
   const endpointTypeOptions = [
     {
       value: 'openai-response',
-      label: t('OpenAI Response 默认') + ' (/v1/responses)',
+      label: '/v1/responses',
     },
-    { value: 'openai', label: 'OpenAI (/v1/chat/completions)' },
+    { value: 'openai', label: '/v1/chat/completions' },
+    {
+      value: 'image-generation',
+      label: t('GPT 生图') + ' (/v1/images/generations)',
+    },
     {
       value: 'openai-response-compact',
-      label: 'OpenAI Response Compaction (/v1/responses/compact)',
+      label: '/v1/responses/compact',
     },
     { value: '', label: t('自动检测（旧逻辑）') },
     { value: 'anthropic', label: 'Anthropic (/v1/messages)' },
@@ -121,10 +139,6 @@ const ModelTestModal = ({
       label: 'Gemini (/v1beta/models/{model}:generateContent)',
     },
     { value: 'jina-rerank', label: 'Jina Rerank (/v1/rerank)' },
-    {
-      value: 'image-generation',
-      label: t('图像生成') + ' (/v1/images/generations)',
-    },
     { value: 'embeddings', label: 'Embeddings (/v1/embeddings)' },
   ];
 
@@ -385,8 +399,10 @@ const ModelTestModal = ({
       maskClosable={!isBatchTesting}
       className='!rounded-lg'
       size={isMobile ? 'full-width' : 'large'}
+      width={isMobile ? '100vw' : 980}
+      style={{ top: isMobile ? 0 : 20, maxWidth: 'calc(100vw - 32px)' }}
       bodyStyle={{
-        maxHeight: isMobile ? 'calc(100vh - 132px)' : 'calc(100vh - 180px)',
+        maxHeight: isMobile ? 'calc(100vh - 260px)' : 'calc(100vh - 280px)',
         overflowY: 'auto',
         overflowX: 'hidden',
         overscrollBehavior: 'contain',
@@ -398,14 +414,14 @@ const ModelTestModal = ({
           <div className='flex flex-col sm:flex-row sm:items-center gap-2 w-full mb-2'>
             <div className='flex items-center gap-2 flex-1 min-w-0'>
               <Typography.Text strong className='shrink-0'>
-                {t('端点类型')}:
+                {t('测试路径')}:
               </Typography.Text>
               <Select
                 value={selectedEndpointType}
                 onChange={setSelectedEndpointType}
                 optionList={endpointTypeOptions}
                 className='!w-full min-w-0'
-                placeholder={t('选择端点类型')}
+                placeholder={t('选择测试路径')}
               />
             </div>
             <div className='flex items-center justify-between sm:justify-end gap-2 shrink-0'>
@@ -430,6 +446,7 @@ const ModelTestModal = ({
             selectedEndpointType={selectedEndpointType}
             isBatchTesting={isBatchTesting}
             globalPassThroughEnabled={globalPassThroughEnabled}
+            onEditChannel={openChannelEditOverlay}
             t={t}
           />
 
@@ -480,6 +497,7 @@ const ModelTestModal = ({
               showSizeChanger: false,
               onPageChange: (page) => setModelTablePage(page),
             }}
+            scroll={{ y: isMobile ? 320 : 360 }}
           />
         </div>
       )}
