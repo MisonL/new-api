@@ -278,6 +278,7 @@ cd web && bun run build
   - 旧版模板：面向 `header_override` 编辑区的 JSON 兼容入口。
   - Profile：面向用户级完整请求头资产管理与渠道选择。
 - `Codex CLI`、`Claude Code` 等 Profile 不能伪造官方客户端动态头；遇到 `only allows official clients`、会话追踪或 SDK 元数据校验类错误时，应同时配置高级参数覆盖中的 CLI 真实请求头透传模板。
+- 渠道模型测试窗口默认使用 `/v1/responses`，并会按开关应用请求头、参数覆盖、代理和模型映射。详细说明见 [渠道模型测试运行配置说明](docs/channel/model_test_runtime_config.md)。
 
 ## CI/CD
 

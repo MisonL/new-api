@@ -189,3 +189,4 @@ Claude CLI 透传模板当前包含 `X-Stainless-*`、`User-Agent`、`X-App`、`
   - 标签级请求头策略
   - 历史兼容 `ua_strategy`
 - 任何需要进入真实转发链路的配置，都必须在隔离环境做真实请求验证，不能只看表单保存成功。
+- 渠道模型测试窗口的运行配置说明见 [渠道模型测试运行配置说明](./model_test_runtime_config.md)。
