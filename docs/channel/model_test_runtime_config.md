@@ -10,7 +10,7 @@
 - 参数覆盖
 - 请求代理
 - 模型重定向
-- Responses / Chat Completions 协议路径选择
+- 测试路径选择
 
 因此，模型测试结果应尽量接近真实客户端调用结果，而不是只做裸连通性探测。
 
@@ -19,7 +19,7 @@
 打开模型测试窗口后，默认端点为：
 
 ```text
-OpenAI Response 默认 (/v1/responses)
+/v1/responses
 ```
 
 默认运行配置为：
@@ -31,22 +31,23 @@ OpenAI Response 默认 (/v1/responses)
 | 参数覆盖 | 开启 | 应用 `param_override`，包括 `pass_headers` 透传规则 |
 | 请求代理 | 开启 | 使用渠道代理配置 |
 | 模型重定向 | 开启 | 使用渠道模型映射 |
-| Responses 上游路径 | 原生 Responses 路径 | 直接请求 `/v1/responses` 或 `/v1/responses/compact` |
+| 测试路径 | `/v1/responses` | 控制本次模型测试实际走哪个接口路径 |
 | 测试内容 | `hi` | 本次测试发送给模型的最小输入 |
 | 最大输出 Tokens | `16` | 控制测试请求输出长度，降低测试成本 |
 
-## Responses 上游路径
+## 测试路径
 
-Responses 端点提供两种测试路径：
+模型测试窗口顶部的“测试路径”用于选择本次测试的接口形态：
 
 | 选项 | 说明 |
 | --- | --- |
-| 原生 Responses 路径 | 按当前端点直接请求上游 Responses 接口 |
-| 转 Chat Completions 路径 | 将本次测试请求显式转换为 Chat Completions，再请求 `/v1/chat/completions` |
+| `/v1/responses` | 默认路径，适合 OpenAI Responses / Codex 类模型 |
+| `/v1/chat/completions` | 适合验证上游普通 Chat Completions 模型 |
+| `GPT 生图 (/v1/images/generations)` | 适合验证 `gpt-image-*` 生图模型，会把“测试内容”作为 `prompt` |
+| `/v1/responses/compact` | 适合验证原生 compact 路径 |
+| 其它兼容路径 | 包括 Anthropic、Gemini、Jina Rerank、Embeddings 和自动检测旧逻辑 |
 
-当上游没有开放 compact 路径，但开放了等价的普通 Chat 模型时，可以手动切到“转 Chat Completions 路径”验证模型映射是否可用。
-
-该转换只在模型测试窗口中由用户显式选择，不会静默改变真实业务请求。
+当上游没有开放 compact 路径，但开放了等价的普通 Chat 模型时，可以手动切到 `/v1/chat/completions` 并配合模型映射验证。
 
 ## 运行结果怎么看
 
@@ -60,6 +61,8 @@ Responses 端点提供两种测试路径：
 | 模型映射 | 原始模型和最终上游模型是否不同 |
 | 路径 | 原始请求路径和最终请求路径 |
 | 协议 | 请求协议转换链，例如 `openai_responses -> openai` |
+
+运行配置摘要会固定在一行内横向滚动，避免渠道配置较多时撑高窗口。点击摘要项或高级诊断卡片，会在当前测试窗口上方叠加打开渠道编辑窗口；保存后回到测试窗口可继续测试。
 
 如果失败，窗口会尽量给出诊断分类和处理方向。例如：
 
@@ -88,4 +91,4 @@ Responses 端点提供两种测试路径：
 - 常规测试保持运行配置开启。
 - 想排查裸连通性时，再关闭请求头、参数覆盖、代理或模型映射中的单项开关。
 - 看到 compact 相关失败时，先确认最终请求路径和最终上游模型，再判断是上游未开放路径、模型映射缺失，还是价格配置缺失。
-- 不要把模型测试中的“转 Chat Completions 路径”理解为全局自动降级；它只是本次测试的显式诊断选项。
+- 不要把模型测试中的路径切换理解为全局自动降级；它只影响本次模型测试。

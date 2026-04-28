@@ -71,6 +71,21 @@ func TestBuildTestRequestAppliesResponsesPromptAndMaxTokens(t *testing.T) {
 	require.Equal(t, uint(64), *responsesReq.MaxOutputTokens)
 }
 
+func TestBuildTestRequestAppliesImageGenerationPrompt(t *testing.T) {
+	options := defaultChannelTestOptions()
+	options.TestPrompt = "draw a compact robot"
+
+	request := buildTestRequest("gpt-image-2", string(constant.EndpointTypeImageGeneration), nil, false, options)
+
+	imageReq, ok := request.(*dto.ImageRequest)
+	require.True(t, ok)
+	require.Equal(t, "gpt-image-2", imageReq.Model)
+	require.Equal(t, "draw a compact robot", imageReq.Prompt)
+	require.Equal(t, "1024x1024", imageReq.Size)
+	require.NotNil(t, imageReq.N)
+	require.Equal(t, uint(1), *imageReq.N)
+}
+
 func TestApplyChannelTestProtocolStrategyConvertsResponsesCompactToChat(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())

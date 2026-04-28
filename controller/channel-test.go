@@ -866,7 +866,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			// 返回 ImageRequest
 			return &dto.ImageRequest{
 				Model:  model,
-				Prompt: "a cute cat",
+				Prompt: options.TestPrompt,
 				N:      lo.ToPtr(uint(1)),
 				Size:   "1024x1024",
 			}
