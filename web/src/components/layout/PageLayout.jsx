@@ -81,6 +81,11 @@ const PageLayout = () => {
   const isConsoleRoute = location.pathname.startsWith('/console');
   const isHomeRoute = location.pathname === '/';
   const useHomeViewportLock = !isMobile && isHomeRoute;
+  const isViewportLockedConsoleRoute =
+    location.pathname === '/console/playground' ||
+    location.pathname.startsWith('/console/chat');
+  const useContentViewportLock =
+    !isMobile && (useHomeViewportLock || isViewportLockedConsoleRoute);
   const showSider = isConsoleRoute && (!isMobile || drawerOpen);
   const preferredLang = useMemo(() => {
     if (userState?.user?.setting) {
@@ -244,7 +249,11 @@ const PageLayout = () => {
             style={{
               flex: '1 1 auto',
               minHeight: 0,
-              overflowY: isMobile ? 'visible' : 'hidden',
+              overflowY: isMobile
+                ? 'visible'
+                : useContentViewportLock
+                  ? 'hidden'
+                  : 'auto',
               WebkitOverflowScrolling: 'touch',
               padding: shouldInnerPadding ? (isMobile ? '5px' : '24px') : '0',
               position: 'relative',
