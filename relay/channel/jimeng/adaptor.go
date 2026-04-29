@@ -112,6 +112,11 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
+	headerOverride, err := channel.ResolveHeaderOverride(info, c)
+	if err != nil {
+		return nil, err
+	}
+	channel.ApplyHeaderOverrideToRequest(req, headerOverride)
 	err = Sign(c, req, info.ApiKey)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)

@@ -477,6 +477,11 @@ func uploadFileFromForm(c *gin.Context, info *relaycommon.RelayInfo, fieldCandid
 	}
 	req.Header.Set("Content-Type", formContentType)
 	req.Header.Set("Authorization", "Bearer "+info.ApiKey)
+	headerOverride, err := channel.ResolveHeaderOverride(info, c)
+	if err != nil {
+		return "", err
+	}
+	channel.ApplyHeaderOverrideToRequest(req, headerOverride)
 
 	resp, err := service.GetHttpClient().Do(req)
 	if err != nil {

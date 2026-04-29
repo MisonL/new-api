@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -96,6 +97,12 @@ func uploadDifyFile(c *gin.Context, info *relaycommon.RelayInfo, user string, me
 
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", info.ApiKey))
+		headerOverride, err := channel.ResolveHeaderOverride(info, c)
+		if err != nil {
+			common.SysLog("failed to resolve header override: " + err.Error())
+			return nil
+		}
+		channel.ApplyHeaderOverrideToRequest(req, headerOverride)
 
 		// Send request
 		client := service.GetHttpClient()

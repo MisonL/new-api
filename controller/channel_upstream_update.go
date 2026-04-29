@@ -247,9 +247,13 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 
 	if channel.Type == constant.ChannelTypeOllama {
 		key := strings.TrimSpace(strings.Split(channel.Key, "\n")[0])
-		models, err := ollama.FetchOllamaModels(baseURL, key)
+		headers, err := service.BuildChannelRuntimeRequestHeaders(channel, key, http.Header{})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("构建 Ollama 模型同步请求头失败 channel_id=%d: %w", channel.Id, err)
+		}
+		models, err := ollama.FetchOllamaModels(baseURL, key, headers)
+		if err != nil {
+			return nil, fmt.Errorf("获取 Ollama 上游模型失败 channel_id=%d base_url=%s: %w", channel.Id, baseURL, err)
 		}
 		return normalizeModelNames(lo.Map(models, func(item ollama.OllamaModel, _ int) string {
 			return item.Name
@@ -262,9 +266,13 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 			return nil, fmt.Errorf("获取渠道密钥失败: %w", apiErr)
 		}
 		key = strings.TrimSpace(key)
-		models, err := gemini.FetchGeminiModels(baseURL, key, channel.GetSetting().Proxy)
+		headers, err := service.BuildChannelRuntimeRequestHeaders(channel, key, http.Header{})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("构建 Gemini 模型同步请求头失败 channel_id=%d: %w", channel.Id, err)
+		}
+		models, err := gemini.FetchGeminiModels(baseURL, key, channel.GetSetting().Proxy, headers)
+		if err != nil {
+			return nil, fmt.Errorf("获取 Gemini 上游模型失败 channel_id=%d base_url=%s: %w", channel.Id, baseURL, err)
 		}
 		return normalizeModelNames(models), nil
 	}

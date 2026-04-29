@@ -1595,7 +1595,7 @@ type GeminiModelsResponse struct {
 	NextPageToken string            `json:"nextPageToken"`
 }
 
-func FetchGeminiModels(baseURL, apiKey, proxyURL string) ([]string, error) {
+func FetchGeminiModels(baseURL, apiKey, proxyURL string, extraHeaders ...http.Header) ([]string, error) {
 	client, err := service.GetHttpClientWithProxy(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("创建HTTP客户端失败: %v", err)
@@ -1619,6 +1619,7 @@ func FetchGeminiModels(baseURL, apiKey, proxyURL string) ([]string, error) {
 		}
 
 		request.Header.Set("x-goog-api-key", apiKey)
+		applyFetchGeminiExtraHeaders(request, extraHeaders...)
 
 		response, err := client.Do(request)
 		if err != nil {
@@ -1661,6 +1662,12 @@ func FetchGeminiModels(baseURL, apiKey, proxyURL string) ([]string, error) {
 	}
 
 	return allModels, nil
+}
+
+func applyFetchGeminiExtraHeaders(request *http.Request, extraHeaders ...http.Header) {
+	for _, headers := range extraHeaders {
+		service.ApplyRuntimeRequestHeaders(request, headers)
+	}
 }
 
 // convertToolChoiceToGeminiConfig converts OpenAI tool_choice to Gemini toolConfig

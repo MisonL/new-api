@@ -3,6 +3,8 @@ package taskcommon
 import (
 	"encoding/base64"
 	"fmt"
+	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -58,6 +60,30 @@ func DecodeLocalTaskID(id string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// ApplyExtraHeaders replaces matching request headers with extra headers and updates Host when provided.
+func ApplyExtraHeaders(request *http.Request, extraHeaders ...http.Header) {
+	if request == nil {
+		return
+	}
+	if request.Header == nil {
+		request.Header = http.Header{}
+	}
+	for _, headers := range extraHeaders {
+		for key, values := range headers {
+			if len(values) == 0 {
+				continue
+			}
+			request.Header.Del(key)
+			for _, value := range values {
+				request.Header.Add(key, value)
+			}
+			if strings.EqualFold(key, "Host") {
+				request.Host = values[0]
+			}
+		}
+	}
 }
 
 // BuildProxyURL constructs the video proxy URL using the public task ID.

@@ -111,14 +111,19 @@ func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, erro
 
 // BuildRequestHeader sets required headers.
 func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo) error {
+	return a.BuildRequestHeaderWithRuntimeHeaderOverride(c, req, info, nil)
+}
+
+func (a *TaskAdaptor) BuildRequestHeaderWithRuntimeHeaderOverride(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo, headerOverride map[string]string) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	if isNewAPIRelay(info.ApiKey) {
 		req.Header.Set("Authorization", "Bearer "+info.ApiKey)
-	} else {
-		return a.signRequest(req, a.accessKey, a.secretKey)
+		channel.ApplyHeaderOverrideToRequest(req, headerOverride)
+		return nil
 	}
-	return nil
+	channel.ApplyHeaderOverrideToRequest(req, headerOverride)
+	return a.signRequest(req, a.accessKey, a.secretKey)
 }
 
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
@@ -212,7 +217,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 }
 
 // FetchTask fetch task status
-func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
+func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
 	taskID, ok := body["task_id"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid task_id")
@@ -238,6 +243,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
+	taskcommon.ApplyExtraHeaders(req, extraHeaders...)
 
 	if isNewAPIRelay(key) {
 		req.Header.Set("Authorization", "Bearer "+key)
@@ -290,7 +296,15 @@ func (a *TaskAdaptor) signRequest(req *http.Request, accessKey, secretKey string
 	xDate := t.Format("20060102T150405Z")
 	shortDate := t.Format("20060102")
 
-	req.Header.Set("Host", req.URL.Host)
+	host := strings.TrimSpace(req.Host)
+	if host == "" {
+		host = strings.TrimSpace(req.Header.Get("Host"))
+	}
+	if host == "" {
+		host = req.URL.Host
+	}
+	req.Host = host
+	req.Header.Set("Host", host)
 	req.Header.Set("X-Date", xDate)
 	req.Header.Set("X-Content-Sha256", hexPayloadHash)
 
@@ -312,7 +326,7 @@ func (a *TaskAdaptor) signRequest(req *http.Request, accessKey, secretKey string
 	canonicalQueryString := strings.Join(queryParts, "&")
 
 	headersToSign := map[string]string{
-		"host":             req.URL.Host,
+		"host":             host,
 		"x-date":           xDate,
 		"x-content-sha256": hexPayloadHash,
 	}
@@ -425,7 +439,7 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq, in
 	return &r, nil
 }
 
-func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
+func (a *TaskAdaptor) ParseTaskResult(respBody []byte, _ string, _ ...http.Header) (*relaycommon.TaskInfo, error) {
 	resTask := responseTask{}
 	if err := common.Unmarshal(respBody, &resTask); err != nil {
 		return nil, errors.Wrap(err, "unmarshal task result failed")

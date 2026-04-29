@@ -153,6 +153,7 @@ func InitOptionMap() {
 	common.OptionMap["DataExportDefaultTime"] = common.DataExportDefaultTime
 	common.OptionMap["DefaultCollapseSidebar"] = strconv.FormatBool(common.DefaultCollapseSidebar)
 	common.OptionMap["RequestHeaderPolicyDefaultMode"] = "prefer_channel"
+	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "true"
 	common.OptionMap["MjNotifyEnabled"] = strconv.FormatBool(setting.MjNotifyEnabled)
 	common.OptionMap["MjAccountFilterEnabled"] = strconv.FormatBool(setting.MjAccountFilterEnabled)
 	common.OptionMap["MjModeClearEnabled"] = strconv.FormatBool(setting.MjModeClearEnabled)
@@ -543,6 +544,12 @@ func normalizeOptionValueForInMemoryConfig(key string, value string) (string, er
 	switch key {
 	case "global.chat_completions_to_responses_policy":
 		return model_setting.NormalizeChatCompletionsToResponsesPolicyJSON(value)
+	case "RequestHeaderPolicyAuxiliaryRequestsEnabled":
+		enabled, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			return "", errors.New("RequestHeaderPolicyAuxiliaryRequestsEnabled 值不合法")
+		}
+		return strconv.FormatBool(enabled), nil
 	default:
 		return value, nil
 	}
@@ -563,6 +570,12 @@ func validateOptionValue(key string, value string) error {
 		default:
 			return errors.New("RequestHeaderPolicyDefaultMode 值不合法")
 		}
+	case "RequestHeaderPolicyAuxiliaryRequestsEnabled":
+		_, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			return errors.New("RequestHeaderPolicyAuxiliaryRequestsEnabled 值不合法")
+		}
+		return nil
 	default:
 		return nil
 	}

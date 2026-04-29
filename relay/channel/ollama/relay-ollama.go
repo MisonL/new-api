@@ -278,7 +278,7 @@ func ollamaEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	return usage, nil
 }
 
-func FetchOllamaModels(baseURL, apiKey string) ([]OllamaModel, error) {
+func FetchOllamaModels(baseURL, apiKey string, extraHeaders ...http.Header) ([]OllamaModel, error) {
 	url := fmt.Sprintf("%s/api/tags", baseURL)
 
 	client := &http.Client{}
@@ -291,6 +291,7 @@ func FetchOllamaModels(baseURL, apiKey string) ([]OllamaModel, error) {
 	if apiKey != "" {
 		request.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+	applyFetchOllamaExtraHeaders(request, extraHeaders...)
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -317,8 +318,17 @@ func FetchOllamaModels(baseURL, apiKey string) ([]OllamaModel, error) {
 	return tagsResponse.Models, nil
 }
 
+func applyFetchOllamaExtraHeaders(request *http.Request, extraHeaders ...http.Header) {
+	if request == nil {
+		return
+	}
+	for _, headers := range extraHeaders {
+		service.ApplyRuntimeRequestHeaders(request, headers)
+	}
+}
+
 // 拉取 Ollama 模型 (非流式)
-func PullOllamaModel(baseURL, apiKey, modelName string) error {
+func PullOllamaModel(baseURL, apiKey, modelName string, extraHeaders ...http.Header) error {
 	url := fmt.Sprintf("%s/api/pull", baseURL)
 
 	pullRequest := OllamaPullRequest{
@@ -343,6 +353,7 @@ func PullOllamaModel(baseURL, apiKey, modelName string) error {
 	if apiKey != "" {
 		request.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+	applyFetchOllamaExtraHeaders(request, extraHeaders...)
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -359,7 +370,7 @@ func PullOllamaModel(baseURL, apiKey, modelName string) error {
 }
 
 // 流式拉取 Ollama 模型 (支持进度回调)
-func PullOllamaModelStream(baseURL, apiKey, modelName string, progressCallback func(OllamaPullResponse)) error {
+func PullOllamaModelStream(baseURL, apiKey, modelName string, progressCallback func(OllamaPullResponse), extraHeaders ...http.Header) error {
 	url := fmt.Sprintf("%s/api/pull", baseURL)
 
 	pullRequest := OllamaPullRequest{
@@ -384,6 +395,7 @@ func PullOllamaModelStream(baseURL, apiKey, modelName string, progressCallback f
 	if apiKey != "" {
 		request.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+	applyFetchOllamaExtraHeaders(request, extraHeaders...)
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -436,7 +448,7 @@ func PullOllamaModelStream(baseURL, apiKey, modelName string, progressCallback f
 }
 
 // 删除 Ollama 模型
-func DeleteOllamaModel(baseURL, apiKey, modelName string) error {
+func DeleteOllamaModel(baseURL, apiKey, modelName string, extraHeaders ...http.Header) error {
 	url := fmt.Sprintf("%s/api/delete", baseURL)
 
 	deleteRequest := OllamaDeleteRequest{
@@ -458,6 +470,7 @@ func DeleteOllamaModel(baseURL, apiKey, modelName string) error {
 	if apiKey != "" {
 		request.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+	applyFetchOllamaExtraHeaders(request, extraHeaders...)
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -473,7 +486,7 @@ func DeleteOllamaModel(baseURL, apiKey, modelName string) error {
 	return nil
 }
 
-func FetchOllamaVersion(baseURL, apiKey string) (string, error) {
+func FetchOllamaVersion(baseURL, apiKey string, extraHeaders ...http.Header) (string, error) {
 	trimmedBase := strings.TrimRight(baseURL, "/")
 	if trimmedBase == "" {
 		return "", fmt.Errorf("baseURL 为空")
@@ -490,6 +503,7 @@ func FetchOllamaVersion(baseURL, apiKey string) (string, error) {
 	if apiKey != "" {
 		request.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+	applyFetchOllamaExtraHeaders(request, extraHeaders...)
 
 	response, err := client.Do(request)
 	if err != nil {

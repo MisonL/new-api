@@ -437,10 +437,15 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		return nil
 	}
 
+	headers, err := service.BuildChannelRuntimeRequestHeaders(channelModel, channelModel.Key, http.Header{})
+	if err != nil {
+		common.SysError(fmt.Sprintf("build runtime request headers failed for realtime fetch, channel_id=%d: %v", channelModel.Id, err))
+		return nil
+	}
 	resp, err := adaptor.FetchTask(baseURL, channelModel.Key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
-	}, proxy)
+	}, proxy, headers)
 	if err != nil || resp == nil {
 		return nil
 	}
@@ -450,7 +455,7 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		return nil
 	}
 
-	ti, err := adaptor.ParseTaskResult(body)
+	ti, err := adaptor.ParseTaskResult(body, channelModel.Key, headers)
 	if err != nil || ti == nil {
 		return nil
 	}

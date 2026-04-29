@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -400,6 +401,75 @@ func TestBuildFetchModelsHeadersNormalizesNonStringHeaderOverrideValues(t *testi
 	require.Equal(t, "true", headers.Get("X-Debug"))
 	require.Equal(t, "123", headers.Get("X-Count"))
 	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+}
+
+func TestBuildFetchModelsHeadersAppliesHeaderProfileStrategy(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI,
+		OtherSettings: marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"codex-cli"},
+			},
+		}),
+	}
+
+	headers, err := buildFetchModelsHeaders(channel, "sk-test")
+	require.NoError(t, err)
+	require.Equal(t, "OpenAI Codex CLI/0.1", headers.Get("User-Agent"))
+	require.Equal(t, "codex-cli", headers.Get("X-Client-Name"))
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+}
+
+func TestBuildChannelRuntimeRequestHeadersSkipsClientHeaderPlaceholders(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI,
+		HeaderOverride: common.GetPointer(`{
+			"User-Agent": "{client_header:User-Agent}",
+			"X-Api-Key": "{api_key}"
+		}`),
+	}
+
+	headers, err := service.BuildChannelRuntimeRequestHeaders(channel, "sk-test", http.Header{})
+	require.NoError(t, err)
+	require.Empty(t, headers.Get("User-Agent"))
+	require.Equal(t, "sk-test", headers.Get("X-Api-Key"))
+}
+
+func TestBuildChannelRuntimeRequestHeadersKeepsCustomAuthHeader(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeAIProxy,
+		OtherSettings: marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"codex-cli"},
+			},
+		}),
+	}
+	baseHeaders := http.Header{}
+	baseHeaders.Set("Api-Key", "sk-balance")
+
+	headers, err := service.BuildChannelRuntimeRequestHeaders(channel, "sk-balance", baseHeaders)
+	require.NoError(t, err)
+	require.Equal(t, "sk-balance", headers.Get("Api-Key"))
+	require.Equal(t, "OpenAI Codex CLI/0.1", headers.Get("User-Agent"))
+}
+
+func TestApplyRuntimeRequestHeadersSetsHost(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "https://origin.example/v1/models", nil)
+	headers := http.Header{}
+	headers.Set("Host", "upstream.example")
+	headers.Set("User-Agent", "Codex-Test")
+	headers.Add("X-Multi", "one")
+	headers.Add("X-Multi", "two")
+
+	service.ApplyRuntimeRequestHeaders(req, headers)
+
+	require.Equal(t, "upstream.example", req.Host)
+	require.Equal(t, "Codex-Test", req.Header.Get("User-Agent"))
+	require.Equal(t, []string{"one", "two"}, req.Header.Values("X-Multi"))
 }
 
 func TestBuildFetchModelsHeadersSkipsNilHeaderOverrideValues(t *testing.T) {

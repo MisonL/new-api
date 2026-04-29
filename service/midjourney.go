@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -170,7 +170,7 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 	var mapResult map[string]interface{}
 	// if get request, no need to read request body
 	if c.Request.Method != "GET" {
-		err := json.NewDecoder(c.Request.Body).Decode(&mapResult)
+		err := common.DecodeJson(c.Request.Body, &mapResult)
 		if err != nil {
 			return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "read_request_body_failed", http.StatusInternalServerError), nullBytes, err
 		}
@@ -192,7 +192,7 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 			mapResult["prompt"] = prompt
 		}
 	}
-	reqBody, err := json.Marshal(mapResult)
+	reqBody, err := common.Marshal(mapResult)
 	if err != nil {
 		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "marshal_request_body_failed", http.StatusInternalServerError), nullBytes, err
 	}
@@ -209,6 +209,10 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 	if auth != "" {
 		auth = strings.TrimPrefix(auth, "Bearer ")
 		req.Header.Set("mj-api-secret", auth)
+	}
+	if err := applyMidjourneyRuntimeHeaders(c, req, auth); err != nil {
+		cancel()
+		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "build_runtime_request_headers_failed", http.StatusInternalServerError), nullBytes, err
 	}
 	defer cancel()
 	resp, err := GetHttpClient().Do(req)
@@ -240,9 +244,9 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 	if respStr == "" {
 		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "empty_response_body", statusCode), responseBody, nil
 	} else {
-		err = json.Unmarshal(responseBody, &midjResponse)
+		err = common.Unmarshal(responseBody, &midjResponse)
 		if err != nil {
-			err2 := json.Unmarshal(responseBody, &midjourneyUploadsResponse)
+			err2 := common.Unmarshal(responseBody, &midjourneyUploadsResponse)
 			if err2 != nil {
 				return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "unmarshal_response_body_failed", statusCode), responseBody, err
 			}
@@ -256,4 +260,41 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 		StatusCode: statusCode,
 		Response:   midjResponse,
 	}, responseBody, nil
+}
+
+func applyMidjourneyRuntimeHeaders(c *gin.Context, req *http.Request, apiKey string) error {
+	if c == nil || req == nil {
+		return nil
+	}
+	if settings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting); ok {
+		profileHeaders, _, err := dto.ResolveHeaderProfileStrategyHeaders(settings.HeaderProfileStrategy, 0)
+		if err != nil {
+			return err
+		}
+		for name, value := range profileHeaders {
+			name = strings.TrimSpace(name)
+			value = strings.TrimSpace(value)
+			if name == "" || value == "" || isRuntimeProfileUnsafeHeader(name) {
+				continue
+			}
+			req.Header.Set(name, value)
+		}
+	}
+	for name, value := range common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride) {
+		if isRuntimeHeaderPassthroughRuleKey(name) || value == nil {
+			continue
+		}
+		str := strings.TrimSpace(fmt.Sprintf("%v", value))
+		if str == "" || strings.Contains(str, "{client_header:") {
+			continue
+		}
+		if strings.Contains(str, "{api_key}") {
+			str = strings.ReplaceAll(str, "{api_key}", apiKey)
+		}
+		req.Header.Set(name, str)
+		if strings.EqualFold(name, "Host") {
+			req.Host = str
+		}
+	}
+	return nil
 }

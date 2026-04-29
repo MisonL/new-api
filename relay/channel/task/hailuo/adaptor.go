@@ -111,7 +111,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	return hResp.TaskID, responseBody, nil
 }
 
-func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
+func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
 	taskID, ok := body["task_id"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid task_id")
@@ -126,6 +126,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
+	taskcommon.ApplyExtraHeaders(req, extraHeaders...)
 
 	client, err := service.GetHttpClientWithProxy(proxy)
 	if err != nil {
@@ -181,7 +182,7 @@ func (a *TaskAdaptor) parseResolutionFromSize(size string, modelConfig ModelConf
 	}
 }
 
-func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
+func (a *TaskAdaptor) ParseTaskResult(respBody []byte, key string, extraHeaders ...http.Header) (*relaycommon.TaskInfo, error) {
 	resTask := QueryTaskResponse{}
 	if err := common.Unmarshal(respBody, &resTask); err != nil {
 		return nil, errors.Wrap(err, "unmarshal task result failed")
@@ -208,7 +209,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 	case TaskStatusSuccess:
 		taskResult.Status = model.TaskStatusSuccess
 		taskResult.Progress = "100%"
-		taskResult.Url = a.buildVideoURL(resTask.TaskID, resTask.FileID)
+		taskResult.Url = a.buildVideoURL(resTask.TaskID, resTask.FileID, key, extraHeaders...)
 	case TaskStatusFailed:
 		taskResult.Status = model.TaskStatusFailure
 		taskResult.Progress = "100%"
@@ -245,8 +246,12 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 	return jsonData, nil
 }
 
-func (a *TaskAdaptor) buildVideoURL(_, fileID string) string {
-	if a.apiKey == "" || a.baseURL == "" {
+func (a *TaskAdaptor) buildVideoURL(_, fileID string, apiKey string, extraHeaders ...http.Header) string {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		apiKey = a.apiKey
+	}
+	if apiKey == "" || a.baseURL == "" {
 		return ""
 	}
 
@@ -258,7 +263,8 @@ func (a *TaskAdaptor) buildVideoURL(_, fileID string) string {
 	}
 
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+a.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	taskcommon.ApplyExtraHeaders(req, cloneRuntimeHeaders(extraHeaders...))
 
 	resp, err := service.GetHttpClient().Do(req)
 	if err != nil {
@@ -281,6 +287,21 @@ func (a *TaskAdaptor) buildVideoURL(_, fileID string) string {
 	}
 
 	return retrieveResp.File.DownloadURL
+}
+
+func cloneRuntimeHeaders(extraHeaders ...http.Header) http.Header {
+	var cloned http.Header
+	for _, headers := range extraHeaders {
+		for key, values := range headers {
+			for _, value := range values {
+				if cloned == nil {
+					cloned = http.Header{}
+				}
+				cloned.Add(key, value)
+			}
+		}
+	}
+	return cloned
 }
 
 func contains(slice []string, item string) bool {

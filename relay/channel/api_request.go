@@ -359,6 +359,14 @@ func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]s
 	}
 }
 
+func ApplyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]string) {
+	applyHeaderOverrideToRequest(req, headerOverride)
+}
+
+type taskRuntimeHeaderOverrideBuilder interface {
+	BuildRequestHeaderWithRuntimeHeaderOverride(c *gin.Context, req *http.Request, info *common.RelayInfo, headerOverride map[string]string) error
+}
+
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
@@ -614,7 +622,18 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 		return io.NopCloser(requestBody), nil
 	}
 
-	err = a.BuildRequestHeader(c, req, info)
+	headerOverride, err := processHeaderOverride(info, c)
+	if err != nil {
+		return nil, err
+	}
+	if builder, ok := a.(taskRuntimeHeaderOverrideBuilder); ok {
+		err = builder.BuildRequestHeaderWithRuntimeHeaderOverride(c, req, info, headerOverride)
+	} else {
+		err = a.BuildRequestHeader(c, req, info)
+		if err == nil {
+			applyHeaderOverrideToRequest(req, headerOverride)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}

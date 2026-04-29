@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,7 +35,8 @@ func setupChannelHeaderRuntimeTestDB(t *testing.T, tables ...interface{}) *gorm.
 	common.UsingPostgreSQL = false
 	common.RedisEnabled = false
 	common.OptionMap = map[string]string{
-		"RequestHeaderPolicyDefaultMode": "prefer_channel",
+		"RequestHeaderPolicyDefaultMode":              "prefer_channel",
+		"RequestHeaderPolicyAuxiliaryRequestsEnabled": "true",
 	}
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
@@ -173,7 +175,7 @@ func TestBuildChannelRuntimeHeaderOverrideMergeRoundRobinKeepsChannelStateIsolat
 	require.NoError(t, model.DB.Create(tagRecord).Error)
 
 	channelA := &model.Channel{
-		Id: 101,
+		Id:  101,
 		Tag: common.GetPointer("tag-shared"),
 	}
 	channelA.SetOtherSettings(dto.ChannelOtherSettings{
@@ -187,7 +189,7 @@ func TestBuildChannelRuntimeHeaderOverrideMergeRoundRobinKeepsChannelStateIsolat
 	})
 
 	channelB := &model.Channel{
-		Id: 202,
+		Id:  202,
 		Tag: common.GetPointer("tag-shared"),
 	}
 	channelB.SetOtherSettings(dto.ChannelOtherSettings{
@@ -407,4 +409,96 @@ func TestBuildChannelRuntimeHeaderOverrideRejectsInvalidSystemDefaultMode(t *tes
 	_, err := BuildChannelRuntimeHeaderOverride(channel)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "请求头优先级模式不合法")
+}
+
+func TestBuildChannelRuntimeRequestHeadersRespectsGlobalAuxiliarySwitch(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "false"
+
+	channel := &model.Channel{
+		Id:             15,
+		HeaderOverride: common.GetPointer(`{"X-Debug":"enabled"}`),
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+			Enabled:            true,
+			Mode:               dto.HeaderProfileModeFixed,
+			SelectedProfileIDs: []string{"codex-cli"},
+		},
+	})
+	baseHeaders := http.Header{}
+	baseHeaders.Set("Authorization", "Bearer sk-test")
+
+	headers, err := BuildChannelRuntimeRequestHeaders(channel, "sk-test", baseHeaders)
+	require.NoError(t, err)
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+	require.Empty(t, headers.Get("X-Debug"))
+	require.Empty(t, headers.Get("User-Agent"))
+}
+
+func TestBuildChannelRuntimeRequestHeadersRespectsChannelAuxiliarySwitch(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "true"
+
+	channel := &model.Channel{
+		Id:             16,
+		HeaderOverride: common.GetPointer(`{"X-Debug":"enabled"}`),
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AuxiliaryRequestHeaderPolicyEnabled: common.GetPointer(false),
+	})
+
+	headers, err := BuildChannelRuntimeRequestHeaders(channel, "sk-test", http.Header{})
+	require.NoError(t, err)
+	require.Empty(t, headers.Get("X-Debug"))
+}
+
+func TestBuildChannelRuntimeRequestHeadersAppliesChannelAuxiliaryPolicy(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "true"
+
+	channel := &model.Channel{
+		Id:             17,
+		HeaderOverride: common.GetPointer(`{"X-Debug":"enabled"}`),
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AuxiliaryRequestHeaderPolicyEnabled: common.GetPointer(true),
+		HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+			Enabled:            true,
+			Mode:               dto.HeaderProfileModeFixed,
+			SelectedProfileIDs: []string{"codex-cli"},
+		},
+	})
+	baseHeaders := http.Header{}
+	baseHeaders.Set("Authorization", "Bearer sk-test")
+
+	headers, err := BuildChannelRuntimeRequestHeaders(channel, "sk-test", baseHeaders)
+	require.NoError(t, err)
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+	require.Equal(t, "enabled", headers.Get("X-Debug"))
+	require.Equal(t, "OpenAI Codex CLI/0.1", headers.Get("User-Agent"))
+	require.Equal(t, "codex-cli", headers.Get("X-Client-Name"))
+}
+
+func TestBuildChannelRuntimeRequestHeadersAppliesOverrideWhenProfileDisabled(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "true"
+
+	channel := &model.Channel{
+		Id:             18,
+		HeaderOverride: common.GetPointer(`{"X-Debug":"enabled"}`),
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AuxiliaryRequestHeaderPolicyEnabled: common.GetPointer(true),
+		HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+			Enabled:            false,
+			Mode:               dto.HeaderProfileModeFixed,
+			SelectedProfileIDs: []string{"codex-cli"},
+		},
+	})
+
+	headers, err := BuildChannelRuntimeRequestHeaders(channel, "sk-test", http.Header{})
+	require.NoError(t, err)
+	require.Equal(t, "enabled", headers.Get("X-Debug"))
+	require.Empty(t, headers.Get("User-Agent"))
 }

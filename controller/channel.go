@@ -13,7 +13,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
-	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
 	"github.com/QuantumNous/new-api/service"
@@ -182,25 +181,19 @@ func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, e
 		headers = GetAuthHeader(key)
 	}
 
-	headerOverride := channel.GetHeaderOverride()
-	for k, v := range headerOverride {
-		if relaychannel.IsHeaderPassthroughRuleKey(k) {
-			continue
-		}
-		if v == nil {
-			continue
-		}
-		str := strings.TrimSpace(fmt.Sprintf("%v", v))
-		if str == "" {
-			continue
-		}
-		if strings.Contains(str, "{api_key}") {
-			str = strings.ReplaceAll(str, "{api_key}", key)
-		}
-		headers.Set(k, str)
-	}
+	return service.BuildChannelRuntimeRequestHeaders(channel, key, headers)
+}
 
-	return headers, nil
+func buildOllamaRuntimeHeaders(c *gin.Context, channel *model.Channel, key string) (http.Header, bool) {
+	headers, err := service.BuildChannelRuntimeRequestHeaders(channel, key, http.Header{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("构建请求头配置失败: %s", err.Error()),
+		})
+		return nil, false
+	}
+	return headers, true
 }
 
 func FetchUpstreamModels(c *gin.Context) {
@@ -1886,7 +1879,11 @@ func OllamaPullModel(c *gin.Context) {
 	}
 
 	key := strings.Split(channel.Key, "\n")[0]
-	err = ollama.PullOllamaModel(baseURL, key, req.ModelName)
+	headers, ok := buildOllamaRuntimeHeaders(c, channel, key)
+	if !ok {
+		return
+	}
+	err = ollama.PullOllamaModel(baseURL, key, req.ModelName, headers)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -1948,13 +1945,17 @@ func OllamaPullModelStream(c *gin.Context) {
 		baseURL = channel.GetBaseURL()
 	}
 
+	key := strings.Split(channel.Key, "\n")[0]
+	headers, ok := buildOllamaRuntimeHeaders(c, channel, key)
+	if !ok {
+		return
+	}
+
 	// 设置 SSE 头部
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("Access-Control-Allow-Origin", "*")
-
-	key := strings.Split(channel.Key, "\n")[0]
 
 	// 创建进度回调函数
 	progressCallback := func(progress ollama.OllamaPullResponse) {
@@ -1964,7 +1965,7 @@ func OllamaPullModelStream(c *gin.Context) {
 	}
 
 	// 执行拉取
-	err = ollama.PullOllamaModelStream(baseURL, key, req.ModelName, progressCallback)
+	err = ollama.PullOllamaModelStream(baseURL, key, req.ModelName, progressCallback, headers)
 
 	if err != nil {
 		errorData, _ := json.Marshal(gin.H{
@@ -2031,7 +2032,11 @@ func OllamaDeleteModel(c *gin.Context) {
 	}
 
 	key := strings.Split(channel.Key, "\n")[0]
-	err = ollama.DeleteOllamaModel(baseURL, key, req.ModelName)
+	headers, ok := buildOllamaRuntimeHeaders(c, channel, key)
+	if !ok {
+		return
+	}
+	err = ollama.DeleteOllamaModel(baseURL, key, req.ModelName, headers)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -2080,7 +2085,11 @@ func OllamaVersion(c *gin.Context) {
 	}
 
 	key := strings.Split(channel.Key, "\n")[0]
-	version, err := ollama.FetchOllamaVersion(baseURL, key)
+	headers, ok := buildOllamaRuntimeHeaders(c, channel, key)
+	if !ok {
+		return
+	}
+	version, err := ollama.FetchOllamaVersion(baseURL, key, headers)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,

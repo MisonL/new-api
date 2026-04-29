@@ -1,12 +1,16 @@
 package channel
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -202,6 +206,160 @@ func TestProcessHeaderOverride_HeaderProfileRoundRobinUsesRetryIndex(t *testing.
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
 	require.Equal(t, "B/1.0", headers["user-agent"])
+}
+
+func TestDoTaskApiRequestAppliesHeaderOverride(t *testing.T) {
+	// service.InitHttpClient mutates process-wide HTTP client state, keep this test serial.
+	var upstreamHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHeaders = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	service.InitHttpClient()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/generations", nil)
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey: "sk-test",
+			HeadersOverride: map[string]any{
+				"Authorization": "Bearer override",
+				"X-Static":      "yes",
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeFixed,
+					SelectedProfileIDs: []string{"codex-cli"},
+				},
+			},
+		},
+	}
+
+	resp, err := DoTaskApiRequest(&testTaskAdaptor{url: server.URL}, ctx, info, http.NoBody)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	defer resp.Body.Close()
+
+	require.Equal(t, "OpenAI Codex CLI/0.1", upstreamHeaders.Get("User-Agent"))
+	require.Equal(t, "codex-cli", upstreamHeaders.Get("X-Client-Name"))
+	require.Equal(t, "yes", upstreamHeaders.Get("X-Static"))
+	require.Equal(t, "Bearer override", upstreamHeaders.Get("Authorization"))
+}
+
+func TestDoTaskApiRequestLetsSignedAdaptorApplyOverrideBeforeSigning(t *testing.T) {
+	// service.InitHttpClient mutates process-wide HTTP client state, keep this test serial.
+	var upstreamHeaders http.Header
+	var upstreamHost string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHeaders = r.Header.Clone()
+		upstreamHost = r.Host
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	service.InitHttpClient()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/generations", nil)
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey: "ak|sk",
+			HeadersOverride: map[string]any{
+				"Content-Type": "application/vnd.signed+json",
+				"Host":         "signed.example.test",
+			},
+		},
+	}
+
+	resp, err := DoTaskApiRequest(&signedHeaderTaskAdaptor{
+		testTaskAdaptor: testTaskAdaptor{url: server.URL},
+	}, ctx, info, http.NoBody)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	defer resp.Body.Close()
+
+	require.Equal(t, "application/vnd.signed+json", upstreamHeaders.Get("Content-Type"))
+	require.Equal(t, "signed.example.test", upstreamHost)
+	require.Equal(t, "signed:application/vnd.signed+json:signed.example.test", upstreamHeaders.Get("Authorization"))
+}
+
+type testTaskAdaptor struct {
+	url string
+}
+
+func (a *testTaskAdaptor) Init(_ *relaycommon.RelayInfo) {}
+
+func (a *testTaskAdaptor) ValidateRequestAndSetAction(_ *gin.Context, _ *relaycommon.RelayInfo) *dto.TaskError {
+	return nil
+}
+
+func (a *testTaskAdaptor) EstimateBilling(_ *gin.Context, _ *relaycommon.RelayInfo) map[string]float64 {
+	return nil
+}
+
+func (a *testTaskAdaptor) AdjustBillingOnSubmit(_ *relaycommon.RelayInfo, _ []byte) map[string]float64 {
+	return nil
+}
+
+func (a *testTaskAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
+	return 0
+}
+
+func (a *testTaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
+	return a.url, nil
+}
+
+func (a *testTaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *relaycommon.RelayInfo) error {
+	req.Header.Set("Authorization", "Bearer original")
+	return nil
+}
+
+func (a *testTaskAdaptor) BuildRequestBody(_ *gin.Context, _ *relaycommon.RelayInfo) (io.Reader, error) {
+	return http.NoBody, nil
+}
+
+func (a *testTaskAdaptor) DoRequest(_ *gin.Context, _ *relaycommon.RelayInfo, _ io.Reader) (*http.Response, error) {
+	return nil, fmt.Errorf("DoRequest should not be called in this test")
+}
+
+func (a *testTaskAdaptor) DoResponse(_ *gin.Context, _ *http.Response, _ *relaycommon.RelayInfo) (string, []byte, *dto.TaskError) {
+	return "", nil, nil
+}
+
+func (a *testTaskAdaptor) GetModelList() []string {
+	return nil
+}
+
+func (a *testTaskAdaptor) GetChannelName() string {
+	return "test"
+}
+
+func (a *testTaskAdaptor) FetchTask(_ string, _ string, _ map[string]any, _ string, _ ...http.Header) (*http.Response, error) {
+	return nil, nil
+}
+
+func (a *testTaskAdaptor) ParseTaskResult(_ []byte, _ string, _ ...http.Header) (*relaycommon.TaskInfo, error) {
+	return nil, nil
+}
+
+type signedHeaderTaskAdaptor struct {
+	testTaskAdaptor
+}
+
+func (a *signedHeaderTaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
+	return a.url, nil
+}
+
+func (a *signedHeaderTaskAdaptor) BuildRequestHeaderWithRuntimeHeaderOverride(_ *gin.Context, req *http.Request, _ *relaycommon.RelayInfo, headerOverride map[string]string) error {
+	req.Header.Set("Content-Type", "application/json")
+	applyHeaderOverrideToRequest(req, headerOverride)
+	req.Header.Set("Authorization", "signed:"+req.Header.Get("Content-Type")+":"+req.Host)
+	return nil
 }
 
 func TestProcessHeaderOverride_HeaderProfileMissingFails(t *testing.T) {

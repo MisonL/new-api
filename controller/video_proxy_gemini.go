@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/service"
 )
 
 func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) (string, error) {
@@ -36,10 +38,14 @@ func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) 
 	}
 
 	proxy := channel.GetSetting().Proxy
+	headers, err := service.BuildChannelRuntimeRequestHeaders(channel, apiKey, http.Header{})
+	if err != nil {
+		return "", fmt.Errorf("build runtime request headers failed: %w", err)
+	}
 	resp, err := adaptor.FetchTask(baseURL, apiKey, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
-	}, proxy)
+	}, proxy, headers)
 	if err != nil {
 		return "", fmt.Errorf("fetch task failed: %w", err)
 	}
@@ -50,7 +56,7 @@ func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) 
 		return "", fmt.Errorf("read task response failed: %w", err)
 	}
 
-	taskInfo, parseErr := adaptor.ParseTaskResult(body)
+	taskInfo, parseErr := adaptor.ParseTaskResult(body, apiKey, headers)
 	if parseErr == nil && taskInfo != nil && taskInfo.RemoteUrl != "" {
 		return ensureAPIKey(taskInfo.RemoteUrl, apiKey), nil
 	}
@@ -171,10 +177,15 @@ func getVertexVideoURL(channel *model.Channel, task *model.Task) (string, error)
 		return "", fmt.Errorf("vertex key not available for task")
 	}
 
+	proxy := channel.GetSetting().Proxy
+	headers, err := service.BuildChannelRuntimeRequestHeaders(channel, key, http.Header{})
+	if err != nil {
+		return "", fmt.Errorf("build runtime request headers failed: %w", err)
+	}
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
-	}, channel.GetSetting().Proxy)
+	}, proxy, headers)
 	if err != nil {
 		return "", fmt.Errorf("fetch task failed: %w", err)
 	}
@@ -185,7 +196,7 @@ func getVertexVideoURL(channel *model.Channel, task *model.Task) (string, error)
 		return "", fmt.Errorf("read task response failed: %w", err)
 	}
 
-	taskInfo, parseErr := adaptor.ParseTaskResult(body)
+	taskInfo, parseErr := adaptor.ParseTaskResult(body, key, headers)
 	if parseErr == nil && taskInfo != nil && strings.TrimSpace(taskInfo.Url) != "" {
 		return taskInfo.Url, nil
 	}

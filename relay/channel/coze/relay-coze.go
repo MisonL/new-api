@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -226,6 +227,11 @@ func checkIfChatComplete(a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo
 	if err != nil {
 		return err, false
 	}
+	headerOverride, err := channel.ResolveHeaderOverride(info, c)
+	if err != nil {
+		return err, false
+	}
+	channel.ApplyHeaderOverrideToRequest(req, headerOverride)
 
 	resp, err := doRequest(req, info) // 调用 doRequest
 	if err != nil {
@@ -271,6 +277,11 @@ func getChatDetail(a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo) (*ht
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	headerOverride, err := channel.ResolveHeaderOverride(info, c)
+	if err != nil {
+		return nil, err
+	}
+	channel.ApplyHeaderOverrideToRequest(req, headerOverride)
 	resp, err := doRequest(req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)

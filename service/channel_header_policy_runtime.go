@@ -3,8 +3,10 @@ package service
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"net/textproto"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +46,138 @@ type RuntimeHeaderPolicyAudit struct {
 func BuildChannelRuntimeHeaderOverride(channel *model.Channel) (map[string]any, error) {
 	headerOverride, _, err := BuildChannelRuntimeHeaderOverrideWithAudit(channel)
 	return headerOverride, err
+}
+
+func BuildChannelRuntimeRequestHeaders(channel *model.Channel, key string, headers http.Header) (http.Header, error) {
+	if headers == nil {
+		headers = http.Header{}
+	}
+	if channel == nil {
+		return headers, nil
+	}
+	apply, err := ShouldApplyChannelRuntimeRequestHeaders(channel)
+	if err != nil {
+		return nil, err
+	}
+	if !apply {
+		return headers, nil
+	}
+
+	settings := channel.GetOtherSettings()
+	profileHeaders, _, err := dto.ResolveHeaderProfileStrategyHeaders(settings.HeaderProfileStrategy, 0)
+	if err != nil {
+		return nil, err
+	}
+	for name, value := range profileHeaders {
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+		if name == "" || value == "" || isRuntimeProfileUnsafeHeader(name) {
+			continue
+		}
+		headers.Set(name, value)
+	}
+
+	headerOverride, _, err := BuildChannelRuntimeHeaderOverrideWithAudit(channel)
+	if err != nil {
+		return nil, err
+	}
+	for name, value := range headerOverride {
+		if isRuntimeHeaderPassthroughRuleKey(name) || value == nil {
+			continue
+		}
+		str := strings.TrimSpace(fmt.Sprintf("%v", value))
+		if str == "" || strings.Contains(str, "{client_header:") {
+			continue
+		}
+		if strings.Contains(str, "{api_key}") {
+			str = strings.ReplaceAll(str, "{api_key}", key)
+		}
+		headers.Set(name, str)
+	}
+	return headers, nil
+}
+
+func ShouldApplyChannelRuntimeRequestHeaders(channel *model.Channel) (bool, error) {
+	globalEnabled, err := getRequestHeaderPolicyAuxiliaryRequestsEnabled()
+	if err != nil || !globalEnabled {
+		return false, err
+	}
+	if channel == nil {
+		return false, nil
+	}
+	settings := channel.GetOtherSettings()
+	if settings.AuxiliaryRequestHeaderPolicyEnabled == nil {
+		return true, nil
+	}
+	return *settings.AuxiliaryRequestHeaderPolicyEnabled, nil
+}
+
+func getRequestHeaderPolicyAuxiliaryRequestsEnabled() (bool, error) {
+	common.OptionMapRWMutex.RLock()
+	defer common.OptionMapRWMutex.RUnlock()
+
+	raw, exists := common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"]
+	if !exists || strings.TrimSpace(raw) == "" {
+		return true, nil
+	}
+	enabled, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return false, fmt.Errorf("辅助请求头策略全局开关不合法: %s", raw)
+	}
+	return enabled, nil
+}
+
+func ApplyRuntimeRequestHeaders(req *http.Request, headers http.Header) {
+	if req == nil {
+		return
+	}
+	for name, values := range headers {
+		if len(values) == 0 {
+			continue
+		}
+		req.Header.Del(name)
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
+		if strings.EqualFold(name, "Host") {
+			req.Host = values[0]
+		}
+	}
+}
+
+var runtimeProfileUnsafeHeaderNames = map[string]struct{}{
+	"accept-encoding":     {},
+	"authorization":       {},
+	"connection":          {},
+	"content-length":      {},
+	"cookie":              {},
+	"host":                {},
+	"keep-alive":          {},
+	"origin":              {},
+	"proxy-authenticate":  {},
+	"proxy-authorization": {},
+	"proxy-connection":    {},
+	"te":                  {},
+	"trailer":             {},
+	"transfer-encoding":   {},
+	"upgrade":             {},
+	"cf-connecting-ip":    {},
+	"forwarded":           {},
+	"x-api-key":           {},
+	"x-forwarded-for":     {},
+	"x-forwarded-host":    {},
+	"x-forwarded-proto":   {},
+	"x-goog-api-key":      {},
+	"x-real-ip":           {},
+}
+
+func isRuntimeProfileUnsafeHeader(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if strings.HasPrefix(normalized, "sec-fetch-") {
+		return true
+	}
+	_, exists := runtimeProfileUnsafeHeaderNames[normalized]
+	return exists
 }
 
 func BuildChannelRuntimeHeaderOverrideWithAudit(channel *model.Channel) (map[string]any, *RuntimeHeaderPolicyAudit, error) {

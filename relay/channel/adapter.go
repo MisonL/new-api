@@ -74,8 +74,8 @@ type TaskAdaptor interface {
 
 	// ── Polling ──────────────────────────────────────────────────────
 
-	FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error)
-	ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error)
+	FetchTask(baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error)
+	ParseTaskResult(respBody []byte, key string, extraHeaders ...http.Header) (*relaycommon.TaskInfo, error)
 }
 
 type OpenAIVideoConverter interface {
