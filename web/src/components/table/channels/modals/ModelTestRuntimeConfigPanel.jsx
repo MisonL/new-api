@@ -20,10 +20,11 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import {
   Button,
-  Input,
   InputNumber,
+  Modal,
   Switch,
   Tag,
+  TextArea,
   Typography,
 } from '@douyinfe/semi-ui';
 import { IconInfoCircle } from '@douyinfe/semi-icons';
@@ -137,6 +138,8 @@ const ModelTestRuntimeConfigPanel = ({
     normalizeModelTestRuntimeConfig(runtimeConfig);
   const runtimeSnapshot = getModelTestRuntimeSnapshot(channel, t);
   const [showAdvanced, setShowAdvanced] = React.useState(false);
+  const [showPromptEditor, setShowPromptEditor] = React.useState(false);
+  const [draftPrompt, setDraftPrompt] = React.useState('');
   const advancedPanelId = React.useId();
   const updateRuntimeConfig = (key, value) => {
     setRuntimeConfig((prev) => ({
@@ -144,7 +147,28 @@ const ModelTestRuntimeConfigPanel = ({
       [key]: value,
     }));
   };
+  const openPromptEditor = () => {
+    if (isBatchTesting) {
+      return;
+    }
+    setDraftPrompt(normalizedRuntimeConfig.testPrompt || '');
+    setShowPromptEditor(true);
+  };
+  const closePromptEditor = () => {
+    setShowPromptEditor(false);
+    setDraftPrompt(normalizedRuntimeConfig.testPrompt || '');
+  };
+  const applyPromptEditor = () => {
+    updateRuntimeConfig('testPrompt', draftPrompt);
+    setShowPromptEditor(false);
+  };
   const runtimeEnabled = normalizedRuntimeConfig.enabled;
+  const promptText = normalizedRuntimeConfig.testPrompt || '';
+  const promptPreview = promptText.trim().replace(/\s+/g, ' ');
+  const promptSummary = promptPreview || t('未填写，点击设置');
+  const promptMeta = promptPreview
+    ? t('已填写 {{count}} 个字符', { count: promptText.length })
+    : t('点击编辑测试内容');
   const pathHint =
     selectedEndpointType === 'image-generation'
       ? t(
@@ -196,14 +220,14 @@ const ModelTestRuntimeConfigPanel = ({
         <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
           <div className='min-w-0'>
             <div className='flex items-center gap-2'>
-              <Typography.Text strong>
-                {t('按真实运行配置测试')}
-              </Typography.Text>
+              <Typography.Text strong>{t('模型测试运行配置')}</Typography.Text>
               <Tag
                 color={normalizedRuntimeConfig.enabled ? 'green' : 'grey'}
                 size='small'
               >
-                {normalizedRuntimeConfig.enabled ? t('已开启') : t('已关闭')}
+                {normalizedRuntimeConfig.enabled
+                  ? t('套用渠道配置')
+                  : t('仅测原始连通')}
               </Tag>
               {globalPassThroughEnabled ? (
                 <Tag color='orange' size='small'>
@@ -213,26 +237,31 @@ const ModelTestRuntimeConfigPanel = ({
             </div>
             <Typography.Text type='tertiary' size='small'>
               {t(
-                '默认按真实请求链路执行。关闭后只用于排查原始连通性，不代表用户实际调用效果。',
+                '开启后，本次模型测试会套用该渠道的请求头、参数覆盖、代理和模型映射；关闭后只按基础路径测试原始连通性。',
               )}
             </Typography.Text>
           </div>
-          <div className='flex items-center gap-2'>
+          <div className='flex flex-wrap items-center justify-end gap-2'>
+            <div className='flex items-center gap-2 rounded-md bg-[var(--semi-color-bg-0)] px-2 py-1'>
+              <Typography.Text strong size='small'>
+                {t('套用渠道配置')}
+              </Typography.Text>
+              <Switch
+                checked={normalizedRuntimeConfig.enabled}
+                onChange={(checked) => updateRuntimeConfig('enabled', checked)}
+                disabled={isBatchTesting}
+                size='small'
+                aria-label={t('套用渠道配置')}
+              />
+            </div>
             <Button
               theme='borderless'
               type='tertiary'
               size='small'
               onClick={() => onEditChannel?.(MODEL_TEST_EDIT_TARGETS.CORE)}
             >
-              {t('编辑渠道配置')}
+              {t('修改渠道配置')}
             </Button>
-            <Switch
-              checked={normalizedRuntimeConfig.enabled}
-              onChange={(checked) => updateRuntimeConfig('enabled', checked)}
-              disabled={isBatchTesting}
-              size='small'
-              aria-label={t('按真实运行配置测试')}
-            />
           </div>
         </div>
         <div className='flex gap-1.5 overflow-x-auto whitespace-nowrap pb-1'>
@@ -240,22 +269,53 @@ const ModelTestRuntimeConfigPanel = ({
             <RuntimeSummaryTag key={item.key} {...item} t={t} />
           ))}
         </div>
-        <div className='grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_220px]'>
-          <div className='min-w-0'>
+        <div className='flex flex-col gap-2 md:flex-row md:items-end'>
+          <div
+            className='min-w-0 md:flex-[0_1_320px]'
+            style={{ maxWidth: '320px' }}
+          >
             <Typography.Text strong size='small' className='mb-1 block'>
               {t('测试内容')}
             </Typography.Text>
-            <Input
-              value={normalizedRuntimeConfig.testPrompt}
-              onChange={(value) => updateRuntimeConfig('testPrompt', value)}
-              disabled={isBatchTesting}
-              size='small'
-              showClear
-              placeholder={t('输入模型测试内容')}
-              name='components-table-channels-modals-modeltestruntimeconfigpanel-input-1'
-            />
+            <div
+              role='button'
+              tabIndex={isBatchTesting ? -1 : 0}
+              aria-disabled={isBatchTesting}
+              className={`flex min-h-[48px] items-center justify-between gap-3 rounded-md border border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-3 py-2 ${
+                isBatchTesting
+                  ? 'cursor-not-allowed opacity-60'
+                  : 'cursor-pointer transition-colors hover:bg-[var(--semi-color-fill-0)]'
+              }`}
+              title={t('点击编辑测试内容')}
+              onClick={openPromptEditor}
+              onKeyDown={(event) => {
+                if (isBatchTesting) {
+                  return;
+                }
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  openPromptEditor();
+                }
+              }}
+            >
+              <div className='min-w-0 flex-1'>
+                <Typography.Text
+                  size='small'
+                  className='block truncate'
+                  type={promptPreview ? 'primary' : 'tertiary'}
+                >
+                  {promptSummary}
+                </Typography.Text>
+                <Typography.Text type='tertiary' size='small'>
+                  {promptMeta}
+                </Typography.Text>
+              </div>
+              <Tag color='blue' size='small'>
+                {t('编辑')}
+              </Tag>
+            </div>
           </div>
-          <div className='min-w-0'>
+          <div className='min-w-0 md:w-[136px] md:shrink-0'>
             <Typography.Text strong size='small' className='mb-1 block'>
               {t('最大输出 Tokens')}
             </Typography.Text>
@@ -373,6 +433,33 @@ const ModelTestRuntimeConfigPanel = ({
           </div>
         ) : null}
       </div>
+      <Modal
+        title={t('编辑测试内容')}
+        visible={showPromptEditor}
+        onCancel={closePromptEditor}
+        onOk={applyPromptEditor}
+        okText={t('应用内容')}
+        cancelText={t('取消')}
+        closeOnEsc
+        maskClosable={!isBatchTesting}
+        width={560}
+      >
+        <div className='flex flex-col gap-2'>
+          <TextArea
+            value={draftPrompt}
+            onChange={setDraftPrompt}
+            disabled={isBatchTesting}
+            autosize={{ minRows: 5, maxRows: 10 }}
+            placeholder={t('输入模型测试内容')}
+            name='components-table-channels-modals-modeltestruntimeconfigpanel-textarea-1'
+          />
+          <Typography.Text type='tertiary' size='small'>
+            {selectedEndpointType === 'image-generation'
+              ? t('这里的内容会作为本次生图测试的 prompt 发送。')
+              : t('这里的内容会作为本次模型测试请求正文发送。')}
+          </Typography.Text>
+        </div>
+      </Modal>
     </div>
   );
 };

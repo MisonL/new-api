@@ -148,7 +148,7 @@ const CardPro = ({
 
     return (
       <div
-        className={`flex w-full pt-4 border-t ${isMobile ? 'justify-center' : 'justify-between items-center'}`}
+        className={`card-pro-pagination-footer flex w-full border-t ${isMobile ? 'justify-center' : 'justify-between items-center'}`}
         style={{ borderColor: 'var(--semi-color-border)' }}
       >
         {paginationArea}

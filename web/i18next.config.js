@@ -35,6 +35,7 @@ export default defineConfig({
       'clipRule',
       'color',
       'crossOrigin',
+      'dropdownClassName',
       'data-index',
       'data-name',
       'data-testid',

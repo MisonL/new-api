@@ -22,6 +22,7 @@ import {
   Modal,
   Button,
   Input,
+  Pagination,
   Table,
   Tag,
   Typography,
@@ -342,6 +343,15 @@ const ModelTestModal = ({
       key: model,
     }));
   })();
+  const paginationStart =
+    filteredModels.length > 0
+      ? (modelTablePage - 1) * MODEL_TABLE_PAGE_SIZE + 1
+      : 0;
+  const paginationEnd = Math.min(
+    modelTablePage * MODEL_TABLE_PAGE_SIZE,
+    filteredModels.length,
+  );
+  const paginationText = `${t('显示第')} ${paginationStart} ${t('条 - 第')} ${paginationEnd} ${t('条，共')} ${filteredModels.length} ${t('条')}`;
 
   return (
     <Modal
@@ -402,103 +412,119 @@ const ModelTestModal = ({
       width={isMobile ? '100vw' : 980}
       style={{ top: isMobile ? 0 : 20, maxWidth: 'calc(100vw - 32px)' }}
       bodyStyle={{
-        maxHeight: isMobile ? 'calc(100vh - 260px)' : 'calc(100vh - 280px)',
-        overflowY: 'auto',
-        overflowX: 'hidden',
+        height: isMobile ? 'calc(100vh - 230px)' : 'calc(100vh - 280px)',
+        maxHeight: isMobile ? 'calc(100vh - 230px)' : 'calc(100vh - 280px)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
         overscrollBehavior: 'contain',
       }}
     >
       {hasChannel && (
-        <div className='model-test-scroll'>
-          {/* Endpoint toolbar */}
-          <div className='flex flex-col sm:flex-row sm:items-center gap-2 w-full mb-2'>
-            <div className='flex items-center gap-2 flex-1 min-w-0'>
-              <Typography.Text strong className='shrink-0'>
-                {t('测试路径')}:
-              </Typography.Text>
-              <Select
-                value={selectedEndpointType}
-                onChange={setSelectedEndpointType}
-                optionList={endpointTypeOptions}
-                className='!w-full min-w-0'
-                placeholder={t('选择测试路径')}
-              />
+        <div className='model-test-modal-body'>
+          <div className='model-test-scroll'>
+            {/* Endpoint toolbar */}
+            <div className='flex flex-col sm:flex-row sm:items-center gap-2 w-full mb-2'>
+              <div className='flex items-center gap-2 flex-1 min-w-0'>
+                <Typography.Text strong className='shrink-0'>
+                  {t('测试路径')}:
+                </Typography.Text>
+                <Select
+                  value={selectedEndpointType}
+                  onChange={setSelectedEndpointType}
+                  optionList={endpointTypeOptions}
+                  className='!w-full min-w-0'
+                  placeholder={t('选择测试路径')}
+                />
+              </div>
+              <div className='flex items-center justify-between sm:justify-end gap-2 shrink-0'>
+                <Typography.Text strong className='shrink-0'>
+                  {t('流式')}:
+                </Typography.Text>
+                <Switch
+                  checked={isStreamTest}
+                  onChange={setIsStreamTest}
+                  size='small'
+                  disabled={streamToggleDisabled}
+                  aria-label={t('流式')}
+                  id='components-table-channels-modals-modeltestmodal-switch-1'
+                />
+              </div>
             </div>
-            <div className='flex items-center justify-between sm:justify-end gap-2 shrink-0'>
-              <Typography.Text strong className='shrink-0'>
-                {t('流式')}:
-              </Typography.Text>
-              <Switch
-                checked={isStreamTest}
-                onChange={setIsStreamTest}
-                size='small'
-                disabled={streamToggleDisabled}
-                aria-label={t('流式')}
-                id='components-table-channels-modals-modeltestmodal-switch-1'
-              />
-            </div>
-          </div>
 
-          <ModelTestRuntimeConfigPanel
-            channel={currentTestChannel}
-            runtimeConfig={modelTestRuntimeConfig}
-            setRuntimeConfig={setModelTestRuntimeConfig}
-            selectedEndpointType={selectedEndpointType}
-            isBatchTesting={isBatchTesting}
-            globalPassThroughEnabled={globalPassThroughEnabled}
-            onEditChannel={openChannelEditOverlay}
-            t={t}
-          />
-
-          {/* 搜索与操作按钮 */}
-          <div className='flex flex-col sm:flex-row sm:items-center gap-2 w-full mb-2'>
-            <Input
-              placeholder={t('搜索模型...')}
-              value={modelSearchKeyword}
-              onChange={(v) => {
-                setModelSearchKeyword(v);
-                setModelTablePage(1);
-              }}
-              className='!w-full sm:!flex-1'
-              prefix={<IconSearch />}
-              showClear
-              name='components-table-channels-modals-modeltestmodal-input-1'
+            <ModelTestRuntimeConfigPanel
+              channel={currentTestChannel}
+              runtimeConfig={modelTestRuntimeConfig}
+              setRuntimeConfig={setModelTestRuntimeConfig}
+              selectedEndpointType={selectedEndpointType}
+              isBatchTesting={isBatchTesting}
+              globalPassThroughEnabled={globalPassThroughEnabled}
+              onEditChannel={openChannelEditOverlay}
+              t={t}
             />
 
-            <div className='flex items-center justify-end gap-2'>
-              <Button onClick={handleCopySelected}>{t('复制已选')}</Button>
-              <Button type='tertiary' onClick={handleSelectSuccess}>
-                {t('选择成功')}
-              </Button>
-            </div>
-          </div>
+            {/* 搜索与操作按钮 */}
+            <div className='flex flex-col sm:flex-row sm:items-center gap-2 w-full mb-2'>
+              <Input
+                placeholder={t('搜索模型...')}
+                value={modelSearchKeyword}
+                onChange={(v) => {
+                  setModelSearchKeyword(v);
+                  setModelTablePage(1);
+                }}
+                className='!w-full sm:!flex-1'
+                prefix={<IconSearch />}
+                showClear
+                name='components-table-channels-modals-modeltestmodal-input-1'
+              />
 
-          <Table
-            columns={columns}
-            dataSource={dataSource}
-            rowSelection={{
-              selectedRowKeys: selectedModelKeys,
-              onChange: (keys) => {
-                if (allSelectingRef.current) {
-                  allSelectingRef.current = false;
-                  return;
-                }
-                setSelectedModelKeys(keys);
-              },
-              onSelectAll: (checked) => {
-                allSelectingRef.current = true;
-                setSelectedModelKeys(checked ? filteredModels : []);
-              },
-            }}
-            pagination={{
-              currentPage: modelTablePage,
-              pageSize: MODEL_TABLE_PAGE_SIZE,
-              total: filteredModels.length,
-              showSizeChanger: false,
-              onPageChange: (page) => setModelTablePage(page),
-            }}
-            scroll={{ y: isMobile ? 320 : 360 }}
-          />
+              <div className='flex items-center justify-end gap-2'>
+                <Button onClick={handleCopySelected}>{t('复制已选')}</Button>
+                <Button type='tertiary' onClick={handleSelectSuccess}>
+                  {t('选择成功')}
+                </Button>
+              </div>
+            </div>
+
+            <Table
+              className='model-test-table'
+              columns={columns}
+              dataSource={dataSource}
+              rowSelection={{
+                selectedRowKeys: selectedModelKeys,
+                onChange: (keys) => {
+                  if (allSelectingRef.current) {
+                    allSelectingRef.current = false;
+                    return;
+                  }
+                  setSelectedModelKeys(keys);
+                },
+                onSelectAll: (checked) => {
+                  allSelectingRef.current = true;
+                  setSelectedModelKeys(checked ? filteredModels : []);
+                },
+              }}
+              pagination={false}
+            />
+          </div>
+          {filteredModels.length > 0 ? (
+            <div className='model-test-pagination-footer'>
+              {!isMobile ? (
+                <span className='model-test-pagination-text'>
+                  {paginationText}
+                </span>
+              ) : null}
+              <Pagination
+                currentPage={modelTablePage}
+                pageSize={MODEL_TABLE_PAGE_SIZE}
+                total={filteredModels.length}
+                showSizeChanger={false}
+                onPageChange={(page) => setModelTablePage(page)}
+                size={isMobile ? 'small' : 'default'}
+                showTotal={isMobile}
+              />
+            </div>
+          ) : null}
         </div>
       )}
     </Modal>

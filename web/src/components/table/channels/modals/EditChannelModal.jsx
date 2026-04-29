@@ -152,6 +152,13 @@ const SOFT_SECTION_STYLE = {
   boxShadow: 'none',
 };
 
+const CHANNEL_EDIT_FOCUS_TARGETS = {
+  HEADER_CONFIG: 'header-config',
+  PARAM_OVERRIDE: 'param-override',
+  PROXY: 'proxy',
+  MODEL_MAPPING: 'model-mapping',
+};
+
 const normalizeCollapseKeys = (activeKey) => {
   if (Array.isArray(activeKey)) {
     return activeKey.filter(Boolean);
@@ -3010,6 +3017,9 @@ const EditChannelModal = (props) => {
                       />
                       <div
                         className='rounded-lg p-3 w-full min-w-0'
+                        data-channel-edit-focus-target={
+                          CHANNEL_EDIT_FOCUS_TARGETS.HEADER_CONFIG
+                        }
                         style={SOFT_SECTION_STYLE}
                       >
                         <HeaderProfileStrategySection
@@ -3090,7 +3100,12 @@ const EditChannelModal = (props) => {
                             </div>
                           }
                         >
-                          <div className='px-1 py-1 min-w-0'>
+                          <div
+                            className='px-1 py-1 min-w-0'
+                            data-channel-edit-focus-target={
+                              CHANNEL_EDIT_FOCUS_TARGETS.PARAM_OVERRIDE
+                            }
+                          >
                             <div
                               className={
                                 isMobile
@@ -3735,16 +3750,22 @@ const EditChannelModal = (props) => {
                     extraText={t('启用请求体透传功能')}
                   />
 
-                  <Form.Input
-                    field='proxy'
-                    label={t('代理地址')}
-                    placeholder={t('例如: socks5://user:pass@host:port')}
-                    onChange={(value) =>
-                      handleChannelSettingsChange('proxy', value)
+                  <div
+                    data-channel-edit-focus-target={
+                      CHANNEL_EDIT_FOCUS_TARGETS.PROXY
                     }
-                    showClear
-                    extraText={t('用于配置网络代理，支持 socks5 协议')}
-                  />
+                  >
+                    <Form.Input
+                      field='proxy'
+                      label={t('代理地址')}
+                      placeholder={t('例如: socks5://user:pass@host:port')}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('proxy', value)
+                      }
+                      showClear
+                      extraText={t('用于配置网络代理，支持 socks5 协议')}
+                    />
+                  </div>
 
                   <Form.TextArea
                     field='system_prompt'
@@ -4995,52 +5016,60 @@ const EditChannelModal = (props) => {
                       </div>
 
                       {/* Model Mapping - Core Config */}
-                      <JSONEditor
-                        key={`model_mapping-${isEdit ? channelId : 'new'}`}
-                        field='model_mapping'
-                        label={t('模型重定向')}
-                        placeholder={
-                          t(
-                            '此项可选，用于修改请求体中的模型名称，为一个 JSON 字符串，键为请求中模型名称，值为要替换的模型名称，例如：',
-                          ) +
-                          `\n${JSON.stringify(MODEL_MAPPING_EXAMPLE, null, 2)}`
+                      <div
+                        data-channel-edit-focus-target={
+                          CHANNEL_EDIT_FOCUS_TARGETS.MODEL_MAPPING
                         }
-                        value={inputs.model_mapping || ''}
-                        onChange={(value) =>
-                          handleInputChange('model_mapping', value)
-                        }
-                        template={MODEL_MAPPING_EXAMPLE}
-                        templateLabel={t('填入模板')}
-                        editorType='keyValue'
-                        formApi={formApiRef.current}
-                        renderStringValueSuffix={({ pairKey, value }) => {
-                          if (!MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type)) {
-                            return null;
+                      >
+                        <JSONEditor
+                          key={`model_mapping-${isEdit ? channelId : 'new'}`}
+                          field='model_mapping'
+                          label={t('模型重定向')}
+                          placeholder={
+                            t(
+                              '此项可选，用于修改请求体中的模型名称，为一个 JSON 字符串，键为请求中模型名称，值为要替换的模型名称，例如：',
+                            ) +
+                            `\n${JSON.stringify(MODEL_MAPPING_EXAMPLE, null, 2)}`
                           }
-                          const disabled = !String(pairKey ?? '').trim();
-                          return (
-                            <Tooltip content={t('选择模型')}>
-                              <Button
-                                type='tertiary'
-                                theme='borderless'
-                                size='small'
-                                icon={<IconSearch size={14} />}
-                                disabled={disabled}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openModelMappingValueModal({
-                                    pairKey,
-                                    value,
-                                  });
-                                }}
-                              />
-                            </Tooltip>
-                          );
-                        }}
-                        extraText={t(
-                          '键为请求中的模型名称，值为要替换的模型名称',
-                        )}
-                      />
+                          value={inputs.model_mapping || ''}
+                          onChange={(value) =>
+                            handleInputChange('model_mapping', value)
+                          }
+                          template={MODEL_MAPPING_EXAMPLE}
+                          templateLabel={t('填入模板')}
+                          editorType='keyValue'
+                          formApi={formApiRef.current}
+                          renderStringValueSuffix={({ pairKey, value }) => {
+                            if (
+                              !MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type)
+                            ) {
+                              return null;
+                            }
+                            const disabled = !String(pairKey ?? '').trim();
+                            return (
+                              <Tooltip content={t('选择模型')}>
+                                <Button
+                                  type='tertiary'
+                                  theme='borderless'
+                                  size='small'
+                                  icon={<IconSearch size={14} />}
+                                  disabled={disabled}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openModelMappingValueModal({
+                                      pairKey,
+                                      value,
+                                    });
+                                  }}
+                                />
+                              </Tooltip>
+                            );
+                          }}
+                          extraText={t(
+                            '键为请求中的模型名称，值为要替换的模型名称',
+                          )}
+                        />
+                      </div>
 
                       {/* Auto Ban - Core Config */}
                       <Form.Switch
@@ -5420,7 +5449,21 @@ const EditChannelModal = (props) => {
 };
 
 const EDIT_FOCUS_SECTION_SELECTOR =
-  '.semi-form-field, .semi-collapse-item, .semi-card, .semi-modal-body, .semi-sidesheet-body';
+  '[data-channel-edit-focus-target], .semi-form-field, .semi-collapse-item, .semi-card, .semi-modal-body, .semi-sidesheet-body';
+const EDIT_FOCUS_HIGHLIGHT_CLASS = 'channel-edit-focus-highlight';
+const EDIT_FOCUS_OVERLAY_CLASS = 'channel-edit-focus-overlay';
+const EDIT_FOCUS_OVERLAY_INSIDE_LABEL_CLASS =
+  'channel-edit-focus-overlay-label-inside';
+const EDIT_FOCUS_VISIBLE_MS = 3600;
+
+const clearEditFocusOverlay = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (typeof window.__channelEditFocusOverlayCleanup === 'function') {
+    window.__channelEditFocusOverlayCleanup();
+  }
+};
 
 const isVisibleEditFocusElement = (element) => {
   const rect = element.getBoundingClientRect();
@@ -5433,7 +5476,17 @@ const isVisibleEditFocusElement = (element) => {
   );
 };
 
-const findEditFocusSection = (text) =>
+const findEditFocusTarget = (targetName) =>
+  Array.from(document.querySelectorAll('[data-channel-edit-focus-target]'))
+    .reverse()
+    .find(
+      (item) =>
+        item.dataset.channelEditFocusTarget === targetName &&
+        isVisibleEditFocusElement(item),
+    );
+
+const findEditFocusSection = (text, targetName) =>
+  findEditFocusTarget(targetName) ||
   Array.from(document.querySelectorAll(EDIT_FOCUS_SECTION_SELECTOR))
     .reverse()
     .find(
@@ -5441,20 +5494,105 @@ const findEditFocusSection = (text) =>
         isVisibleEditFocusElement(item) && item.textContent?.includes(text),
     );
 
-const focusEditSection = (text) => {
-  const element = findEditFocusSection(text);
+const scrollEditFocusElementIntoView = (element) => {
+  try {
+    element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  } catch (error) {
+    element.scrollIntoView();
+  }
+};
+
+const showEditFocusOverlay = (element, hint) => {
+  clearEditFocusOverlay();
+
+  const overlay = document.createElement('div');
+  overlay.className = EDIT_FOCUS_OVERLAY_CLASS;
+  overlay.dataset.channelEditFocusHint = hint || '';
+  document.body.appendChild(overlay);
+
+  const syncOverlay = () => {
+    if (
+      !document.body.contains(element) ||
+      !isVisibleEditFocusElement(element)
+    ) {
+      clearEditFocusOverlay();
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+    const viewportWidth =
+      window.innerWidth || document.documentElement.clientWidth;
+    const viewportHeight =
+      window.innerHeight || document.documentElement.clientHeight;
+    const viewportGap = 12;
+    const overlayGap = 8;
+    const maxWidth = Math.max(120, viewportWidth - viewportGap * 2);
+    const maxHeight = Math.max(80, viewportHeight - viewportGap * 2);
+    const width = Math.min(rect.width + overlayGap * 2, maxWidth);
+    const height = Math.min(rect.height + overlayGap * 2, maxHeight);
+    const left = Math.min(
+      Math.max(rect.left - overlayGap, viewportGap),
+      viewportWidth - width - viewportGap,
+    );
+    const top = Math.min(
+      Math.max(rect.top - overlayGap, viewportGap),
+      viewportHeight - height - viewportGap,
+    );
+
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+    overlay.classList.toggle(EDIT_FOCUS_OVERLAY_INSIDE_LABEL_CLASS, top <= 36);
+  };
+
+  syncOverlay();
+  window.addEventListener('scroll', syncOverlay, true);
+  window.addEventListener('resize', syncOverlay);
+
+  let cleanup = null;
+  const timer = window.setTimeout(() => {
+    cleanup?.();
+  }, EDIT_FOCUS_VISIBLE_MS);
+  cleanup = () => {
+    window.removeEventListener('scroll', syncOverlay, true);
+    window.removeEventListener('resize', syncOverlay);
+    window.clearTimeout(timer);
+    overlay.remove();
+    if (window.__channelEditFocusOverlayCleanup === cleanup) {
+      window.__channelEditFocusOverlayCleanup = null;
+    }
+  };
+  window.__channelEditFocusOverlayCleanup = cleanup;
+};
+
+const focusEditSection = ({ text, targetName, hint }) => {
+  const element = findEditFocusSection(text, targetName);
   if (!element) {
     return;
   }
-  element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  scrollEditFocusElementIntoView(element);
+  element.dataset.channelEditFocusHint = hint || text || '';
+  element.classList.remove(EDIT_FOCUS_HIGHLIGHT_CLASS);
+  void element.offsetWidth;
+  element.classList.add(EDIT_FOCUS_HIGHLIGHT_CLASS);
+  showEditFocusOverlay(element, hint || text || '');
+  if (element.channelEditFocusTimer) {
+    window.clearTimeout(element.channelEditFocusTimer);
+  }
+  element.channelEditFocusTimer = window.setTimeout(() => {
+    element.classList.remove(EDIT_FOCUS_HIGHLIGHT_CLASS);
+    delete element.dataset.channelEditFocusHint;
+    element.channelEditFocusTimer = null;
+  }, EDIT_FOCUS_VISIBLE_MS);
   if (typeof element.animate === 'function') {
     element.animate(
       [
-        { boxShadow: '0 0 0 0 rgba(0, 100, 250, 0)' },
-        { boxShadow: '0 0 0 4px rgba(0, 100, 250, 0.18)' },
-        { boxShadow: '0 0 0 0 rgba(0, 100, 250, 0)' },
+        { transform: 'scale(1)' },
+        { transform: 'scale(1.018)' },
+        { transform: 'scale(1)' },
       ],
-      { duration: 1200, easing: 'ease-out' },
+      { duration: 820, easing: 'ease-out' },
     );
   }
 };
@@ -5507,29 +5645,50 @@ const ChannelEditFocusController = ({
       timers.push(timer);
       return timer;
     };
-    const openRequestPolicyWhenReady = (focusAdvanced, focusText) => {
+    const openRequestPolicyWhenReady = (focusAdvanced, focusOptions) => {
       actionsRef.current.onOpenAdvanced();
       waitForEditFocusSection(
         t('上游请求策略'),
         () => {
           actionsRef.current.onOpenRequestPolicy(focusAdvanced);
-          schedule(() => focusEditSection(focusText), 220);
+          schedule(() => focusEditSection(focusOptions), 220);
         },
         schedule,
       );
     };
     if (target === MODEL_TEST_EDIT_TARGETS.HEADER_CONFIG) {
-      openRequestPolicyWhenReady(
-        false,
-        t('快速上手：不懂请求头时，只需要选择一个客户端模板'),
-      );
+      openRequestPolicyWhenReady(false, {
+        targetName: CHANNEL_EDIT_FOCUS_TARGETS.HEADER_CONFIG,
+        text: t('客户端模板'),
+        hint: t('请求头配置在这里'),
+      });
     } else if (target === MODEL_TEST_EDIT_TARGETS.PARAM_OVERRIDE) {
-      openRequestPolicyWhenReady(true, t('高级请求规则'));
+      openRequestPolicyWhenReady(true, {
+        targetName: CHANNEL_EDIT_FOCUS_TARGETS.PARAM_OVERRIDE,
+        text: t('高级请求规则'),
+        hint: t('参数覆盖在这里'),
+      });
     } else if (target === MODEL_TEST_EDIT_TARGETS.PROXY) {
       actionsRef.current.onOpenAdvanced();
-      schedule(() => focusEditSection(t('代理地址')), 260);
+      schedule(
+        () =>
+          focusEditSection({
+            targetName: CHANNEL_EDIT_FOCUS_TARGETS.PROXY,
+            text: t('代理地址'),
+            hint: t('代理地址在这里'),
+          }),
+        260,
+      );
     } else if (target === MODEL_TEST_EDIT_TARGETS.MODEL_MAPPING) {
-      schedule(() => focusEditSection(t('模型重定向')), 120);
+      schedule(
+        () =>
+          focusEditSection({
+            targetName: CHANNEL_EDIT_FOCUS_TARGETS.MODEL_MAPPING,
+            text: t('模型重定向'),
+            hint: t('模型重定向在这里'),
+          }),
+        120,
+      );
     }
 
     return () => {

@@ -21,6 +21,29 @@ import React from 'react';
 import { Button, Form } from '@douyinfe/semi-ui';
 import { IconSearch } from '@douyinfe/semi-icons';
 
+const isEditableElement = (element) => {
+  if (!element) {
+    return false;
+  }
+  const tagName = element.tagName?.toLowerCase();
+  return (
+    element.isContentEditable ||
+    tagName === 'input' ||
+    tagName === 'textarea' ||
+    tagName === 'select'
+  );
+};
+
+const blurActiveEditableElement = () => {
+  if (typeof document === 'undefined') {
+    return;
+  }
+  const activeElement = document.activeElement;
+  if (isEditableElement(activeElement) && activeElement.blur) {
+    activeElement.blur();
+  }
+};
+
 const ChannelsFilters = ({
   setEditingChannel,
   setShowEdit,
@@ -36,6 +59,17 @@ const ChannelsFilters = ({
   searching,
   t,
 }) => {
+  const preventNativeContextMenu = (event) => {
+    event.preventDefault();
+  };
+  const handleAddChannel = () => {
+    blurActiveEditableElement();
+    setEditingChannel({
+      id: undefined,
+    });
+    setShowEdit(true);
+  };
+
   return (
     <div className='flex flex-col md:flex-row justify-between items-center gap-2 w-full'>
       <div className='flex gap-2 w-full md:w-auto order-2 md:order-1'>
@@ -43,13 +77,12 @@ const ChannelsFilters = ({
           size='small'
           theme='light'
           type='primary'
-          className='w-full md:w-auto'
-          onClick={() => {
-            setEditingChannel({
-              id: undefined,
-            });
-            setShowEdit(true);
-          }}
+          className='channel-toolbar-button w-full md:w-auto'
+          onPointerDown={blurActiveEditableElement}
+          onTouchStart={blurActiveEditableElement}
+          onMouseDown={blurActiveEditableElement}
+          onContextMenu={preventNativeContextMenu}
+          onClick={handleAddChannel}
         >
           {t('添加渠道')}
         </Button>
@@ -57,7 +90,11 @@ const ChannelsFilters = ({
         <Button
           size='small'
           type='tertiary'
-          className='w-full md:w-auto'
+          className='channel-toolbar-button w-full md:w-auto'
+          onPointerDown={blurActiveEditableElement}
+          onTouchStart={blurActiveEditableElement}
+          onMouseDown={blurActiveEditableElement}
+          onContextMenu={preventNativeContextMenu}
           onClick={refresh}
         >
           {t('刷新')}
@@ -66,8 +103,12 @@ const ChannelsFilters = ({
         <Button
           size='small'
           type='tertiary'
+          onPointerDown={blurActiveEditableElement}
+          onTouchStart={blurActiveEditableElement}
+          onMouseDown={blurActiveEditableElement}
+          onContextMenu={preventNativeContextMenu}
           onClick={() => setShowColumnSelector(true)}
-          className='w-full md:w-auto'
+          className='channel-toolbar-button w-full md:w-auto'
         >
           {t('列设置')}
         </Button>

@@ -185,11 +185,17 @@ const FilterAutoComplete = ({
   };
 
   return (
-    <div className='relative w-full' ref={popupContainerRef}>
+    <div
+      className='filter-autocomplete relative w-full'
+      ref={popupContainerRef}
+    >
       <Form.AutoComplete
         ref={autoCompleteRef}
+        className='filter-autocomplete-input'
         field={field}
         data={enableSuggestions ? options : []}
+        dropdownClassName='filter-autocomplete-dropdown'
+        dropdownStyle={{ width: '100%' }}
         prefix={prefix}
         placeholder={placeholder}
         showClear
