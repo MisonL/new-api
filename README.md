@@ -18,6 +18,7 @@
 - 企业 SSO 三条链路：`JWT Direct`、`Trusted Header`、`CAS`
 - `OpenAI Chat` 与 `OpenAI Responses` 协议转换策略可视化配置
 - 阶梯计费表达式与工具定价能力
+- 模型价格维护和历史消费金额修正流程：区分标准倍率、阶梯表达式、按次价格与历史日志回算
 - 请求/响应内容日志：用户授权开启、弹窗查看、JSON 导出、单条删除、批量删除
 - 渠道请求头模板策略：完整 `Header Profile`、轮询/随机选择、AI CLI 动态请求头透传提示；标签级请求头策略保留历史兼容能力
 - `Responses` 流式首包前恢复等待与相关稳定性增强
@@ -279,6 +280,13 @@ cd web && bun run build
   - Profile：面向用户级完整请求头资产管理与渠道选择。
 - `Codex CLI`、`Claude Code` 等 Profile 不能伪造官方客户端动态头；遇到 `only allows official clients`、会话追踪或 SDK 元数据校验类错误时，应同时配置高级参数覆盖中的 CLI 真实请求头透传模板。
 - 渠道模型测试窗口默认使用 `/v1/responses`，并会按开关应用请求头、参数覆盖、代理和模型映射。详细说明见 [渠道模型测试运行配置说明](docs/channel/model_test_runtime_config.md)。
+
+## 计费与价格维护
+
+- 标准 token 价格仍使用历史倍率口径：`ModelRatio = input_usd_per_1M / 2`，输出与缓存通过 `CompletionRatio`、`CacheRatio`、`CreateCacheRatio` 表达。
+- 阶梯计费表达式使用真实美元每百万 token 价格，不做 `/2` 换算。
+- 价格异常后的历史日志修正不能只改 `logs`，必须同步 `users`、`tokens`、`channels`、`quota_data` 和 Redis 缓存。
+- 详细操作规程见 [模型价格维护与历史日志修正规程](docs/operations/pricing-maintenance.md)。
 
 ## CI/CD
 

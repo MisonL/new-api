@@ -1,173 +1,148 @@
-# model ratio 默认回退风险复核（2026-04-21）
+# model ratio 默认回退风险复核
 
 ## Summary
 
-本轮针对“未配置模型是否会被错误按 `37.5` 计费”做了代码与正式库双重复核。
+本报告记录模型价格缺失、错误倍率和历史日志金额异常的复核结果。
 
-结论：
+当前状态更新于 2026-04-29：
 
-- `106` 渠道的历史错误日志已经修复完成
-- `/api/pricing` 展示层已经不再暴露错误的 `37.5`
-- 但系统级风险仍然存在：运行时真实计费链路仍可能在未配置模型时回退到 `37.5`
-- 正式库中除 `106` 以外，仍有其他渠道的同类历史日志残留
+- 正式库活跃注册模型均已配置 `ModelRatio` 或 `ModelPrice`，缺价数量为 `0`
+- 可按标准倍率公式继续回算的旧价格日志快照数量为 `0`
+- `106` 渠道历史错误日志已闭环
+- 全库可安全判定的同类历史金额异常已完成批量修正
+- 运行期价格维护口径已沉淀到 [pricing-maintenance.md](../operations/pricing-maintenance.md)
 
-这不是单点数据问题，而是“默认回退策略 + 用户允许未配置模型继续计费 + 模型别名未归一化”共同导致的系统性问题。
+本报告原始风险是“模型未显式配置价格时可能落到默认回退值，进而产生错误扣费日志”。当前正式库数据侧已完成清理，但后续新增模型仍必须按价格维护 runbook 做准入复核。
 
 ## Control Contract
 
 - Primary Setpoint
-  - 未显式配置价格的模型不得进入真实扣费链路
+  - 进入真实扣费链路的模型必须能命中显式价格配置或按次价格配置。
 - Acceptance
-  - 运行时计费与 `/api/pricing` 使用同一套“显式配置才可计费”的判定
-  - 正式库中不存在因未配置模型而落下的 `model_ratio=37.5` 脏日志
-  - 模型别名、命名空间前缀、大小写差异不会绕过定价匹配
+  - 活跃注册模型缺价数量为 `0`。
+  - 可安全回算的旧倍率日志残留数量为 `0`。
+  - 历史日志、用户余额、令牌余额、渠道用量和 `quota_data` 聚合口径一致。
 - Guardrails
-  - 不影响合法的 `gpt-4.5-preview` 等真实 `37.5` 模型
-  - 不误伤按次计费模型
-  - 不把订阅日志错误纳入钱包修复
+  - 不误伤真实高价模型，例如合法的 `gpt-4.5-preview`。
+  - 不用标准 token 倍率公式修复按次计费、阶梯表达式、工具附加费、图片附加费或订阅链路。
+  - 修复前必须创建可回滚备查表或导出快照。
 - Boundary
-  - `setting/ratio_setting/`
-  - `relay/helper/price.go`
-  - `model/pricing.go`
-  - `bin/repair_channel_quota_logs.go`
-  - 正式库 `logs` / `quota_data` / `users` / `tokens` / `channels`
+  - `options` 中的 `ModelRatio`、`CompletionRatio`、`CacheRatio`、`CreateCacheRatio`、`ModelPrice`
+  - 正式库 `logs`、`users`、`tokens`、`channels`、`quota_data`
+  - Redis 用户与令牌额度缓存
 
-## Findings
+## Current Findings
 
-### 1. 展示层已修，但运行时计费主链未完全收口
+### 1. 活跃模型价格覆盖已闭环
 
-`/api/pricing` 当前已改为只读取显式配置的 model ratio，不再把缺失模型展示成 `37.5`。
+2026-04-29 复核结果：
 
-位置：
+```text
+missing_price_active_models = 0
+```
 
-- [model/pricing.go](/Volumes/Work/code/new-api/model/pricing.go)
+该检查同时覆盖：
 
-但运行时真实计费仍调用 `GetModelRatio()`。该函数在未命中时仍可能返回 `37.5`。
+- `channels.models` 中启用渠道暴露的模型
+- `abilities` 中启用的模型路由
+- `options.ModelRatio`
+- `options.ModelPrice`
 
-位置：
+### 2. 可安全回算的旧倍率日志已清零
 
-- [setting/ratio_setting/model_ratio.go](/Volumes/Work/code/new-api/setting/ratio_setting/model_ratio.go)
-- [relay/helper/price.go](/Volumes/Work/code/new-api/relay/helper/price.go)
+2026-04-29 复核结果：
 
-### 2. 风险触发条件已在正式库中真实存在
+```text
+remaining_repairable_old_snapshot = 0
+```
 
-正式库用户 `mison` 的 `setting` 中当前包含：
+本次只修复满足以下条件的日志：
 
-- `accept_unset_model_ratio_model=true`
+- `logs.type = 2`
+- `other` 为 JSON 对象
+- `model_price < 0`
+- 未使用 `billing_mode=tiered_expr`
+- 不包含 `web_search`、`file_search`、`image_generation_call`、`audio_input_seperate_price`、`image`
+- 具备可回算的 `model_ratio`、`completion_ratio`、`cache_ratio`、`group_ratio` 和 token 用量
 
-这意味着只要模型未配置而代码未显式拒绝，真实扣费链路就可能继续接受默认回退值。
+未满足这些条件的日志不能用标准 token 倍率公式批量修复。
 
-### 3. `106` 渠道历史问题已闭环
+### 3. 历史金额修正结果
 
-已确认：
+本次正式库修正创建了备查表：
 
-- `channel_id=106` 且 `other` 中 `model_ratio=37.5` 的日志数量为 `0`
-- 最新 dry-run 结果为 `repaired_logs=0`
-- 历史小时桶在排除当前小时后，与 `quota_data` 聚合差异为 `0`
+```text
+pricing_repair_logs_20260429_124454
+```
 
-### 4. 全库仍有其他渠道残留同类历史日志
+修正汇总：
 
-复核时，全库仍存在 `134` 条 `model_ratio=37.5` 的历史日志，主要分布：
+| 项目 | 数值 |
+| --- | ---: |
+| 修正消费日志 | 27306 |
+| 旧 quota 合计 | 2072608248 |
+| 新 quota 合计 | 292275163 |
+| 差额 | -1780333085 |
 
-- `71`: 49 条
-- `72`: 23 条
-- `75`: 16 条
-- `76`: 16 条
-- `46`: 10 条
-- 其余：`1/58/59/87/115/124`
+同步更新范围：
 
-这些残留不在 `106`，说明问题不是单一渠道配置异常。
+- `logs.quota`
+- `logs.other` 中的价格快照字段
+- `users.quota` 与 `users.used_quota`
+- `tokens.remain_quota` 与 `tokens.used_quota`
+- `channels.used_quota`
+- `quota_data` 小时聚合
+- Redis 中受影响的用户与令牌缓存
 
-### 5. 当前修复工具只覆盖“可判定的钱包链路 + 可命中的模型名”
+### 4. 当前仍需关注的非阻断项
 
-当前工具已能修复：
+近 1 小时错误日志仍有上游失败，主要为 `gpt-5.5` 在部分渠道返回：
 
-- `billing_source=wallet`
-- 或 `billing_source` 缺失，但 `token_id=0` 且无订阅痕迹
-- 且模型名可被显式价格配置命中
+```text
+502, 503, 520, 522, 524, 525
+```
 
-位置：
+这些错误来自上游或 CDN 链路，不属于本次价格配置和历史金额修复残留。
 
-- [bin/repair_channel_quota_logs.go](/Volumes/Work/code/new-api/bin/repair_channel_quota_logs.go)
+另外，部分 `unlimited_quota=true` 的令牌可能存在负数 `remain_quota`。这不阻断无限额度令牌使用，但属于展示和数据卫生观察项，不能与用户余额扣费错误混为一类。
 
-因此它不是“全量历史修复器”，仍存在明确边界。
+## Standard Ratio Formula
 
-### 6. 结构性盲区是“模型别名未归一化”
+标准倍率配置不是直接写美元价格，而是沿用历史 quota 倍率：
 
-剩余残留中有多条模型名与价目表键名不一致，例如：
+```text
+ModelRatio = input_usd_per_1M / 2
+CompletionRatio = output_usd_per_1M / input_usd_per_1M
+CacheRatio = cached_input_usd_per_1M / input_usd_per_1M
+CreateCacheRatio = cache_write_usd_per_1M / input_usd_per_1M
+```
 
-- `z-ai/glm5`
-- `z-ai/glm4.7`
-- `moonshotai/kimi-k2.5`
-- `moonshotai/kimi-k2-thinking`
-- `moonshotai/Kimi-K2-Thinking`
-- `minimaxai/minimax-m2.5`
-- `deepseek-ai/deepseek-v3.1-terminus`
-
-这类名字不会被当前 `FormatMatchingModelName()` 归一化，因此：
-
-- 运行时计费可能继续未命中
-- 历史修复工具也无法命中
-
-位置：
-
-- [setting/ratio_setting/model_ratio.go](/Volumes/Work/code/new-api/setting/ratio_setting/model_ratio.go)
-
-### 7. 现有“不可信 37.5”检测只存在于比率同步流程
-
-仓库中已有“`model_ratio=37.5` 且 `completion_ratio=1` 不可信”的识别逻辑，但它仅在 ratio sync 逻辑中使用，不能阻止运行时计费继续吃到该回退。
-
-位置：
-
-- [controller/ratio_sync.go](/Volumes/Work/code/new-api/controller/ratio_sync.go)
-
-## Evidence
-
-本轮复核已确认以下事实：
-
-- `106` 渠道修复后，`other like '%"model_ratio":37.5%'` 结果为 `0`
-- 全库仍有 `134` 条同类历史日志，且 dry-run 显示多个渠道仍可被当前工具进一步修复
-- 运行时计费函数 `GetModelRatio()` 未命中时仍可返回 `37.5`
-- 正式库用户当前开启了 `accept_unset_model_ratio_model`
-
-## Fix Scope
-
-后续修复应至少覆盖三层：
-
-### A. 运行时计费策略收口
-
-- 未显式配置的模型不得进入真实扣费
-- 展示层与运行时层共享同一判定口径
-
-### B. 模型名归一化
-
-- 建立供应商前缀、命名空间、别名、大小写归一规则
-- 保证运行时计费、展示、日志修复都走同一归一化链路
-
-### C. 历史日志批量修复
-
-- 对非 `106` 渠道的残留分批 dry-run / apply
-- 修复后复核 `logs`、`users`、`tokens`、`channels`、`quota_data`
+阶梯计费表达式不同，表达式系数必须直接使用真实美元每百万 token 价格，不做 `/2` 换算。
 
 ## Verification Snapshot
 
-本轮相关验证包括：
+关键复核命令：
 
 ```bash
-go test ./bin ./pkg/pricingrepair ./setting/ratio_setting ./model
+docker exec postgres psql -X -v ON_ERROR_STOP=1 -P pager=off -U root -d new-api -AtF $'\t' -c "<SQL>"
 
-docker exec new-api /tmp/repair_channel_quota_logs_linux -dsn '<redacted>' -channel-id 106
-
-docker exec postgres psql -U root -d new-api -c "select count(*) from logs where channel_id=106 and other like '%\"model_ratio\":37.5%';"
-
-docker exec postgres psql -U root -d new-api -c "select count(*) as total, count(*) filter (where channel_id=106) as channel_106 from logs where other like '%\"model_ratio\":37.5%';"
+docker logs --since 15m new-api 2>&1 | rg -n '\[ERROR\]|\[FATAL\]|panic|invalid character|model_price_error|option sync failed'
 ```
 
-## Current Status
+复核结果：
 
-- 当前分支用途：记录问题与后续修复边界
-- 当前文档不表示问题已整体修复完成
-- 当前准确状态是：
-  - `106` 已修
-  - 系统根因未完全修
-  - 其他渠道历史残留仍待处理
+- 正式服务 `/api/status` 正常。
+- `new-api` 容器状态为 healthy。
+- 最近应用日志未发现 options 解析或计费配置错误。
+- 活跃模型缺价数量为 `0`。
+- 可继续回算的旧价格日志数量为 `0`。
+
+## Follow-up Rule
+
+后续新增或同步模型时必须先查官方价格，再按 [pricing-maintenance.md](../operations/pricing-maintenance.md) 完成：
+
+- 价格换算
+- options 更新
+- 活跃模型缺价检查
+- 真实请求日志抽样
+- 必要时历史日志修正

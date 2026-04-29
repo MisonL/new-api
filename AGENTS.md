@@ -113,6 +113,8 @@
 
 只要涉及表达式计费、阶梯计费、工具定价、预扣费或结算链路，必须先阅读 `pkg/billingexpr/expr.md`。
 
+涉及模型价格配置、`ModelRatio` / `CompletionRatio` / `CacheRatio` / `CreateCacheRatio`、`ModelPrice`、历史消费日志金额修正、`quota_data` 聚合修正、用户/令牌/渠道用量回算时，必须同时阅读 `docs/operations/pricing-maintenance.md`。
+
 ### 8. 中继请求 DTO 必须保留显式零值
 
 客户端 JSON 解析后再转发给上游的可选标量字段，必须使用带 `omitempty` 的指针类型，如：
