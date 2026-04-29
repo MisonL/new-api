@@ -44,6 +44,10 @@ type ClaudeConvertInfo struct {
 
 	ToolCallBaseIndex      int
 	ToolCallMaxIndexOffset int
+	ToolCallStarted        map[int]bool
+	ToolCallIDs            map[int]string
+	ToolCallNames          map[int]string
+	ToolCallPendingArgs    map[int]string
 }
 
 // RerankerInfo stores rerank request details needed during downstream processing.
