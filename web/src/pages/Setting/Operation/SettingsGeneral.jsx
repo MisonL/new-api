@@ -27,6 +27,7 @@ import {
   Spin,
   Modal,
   Input,
+  Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
 import {
@@ -40,31 +41,35 @@ import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
+const DEFAULT_GENERAL_INPUTS = {
+  TopUpLink: '',
+  'general_setting.docs_link': '',
+  'general_setting.responses_stream_bootstrap_recovery_enabled': false,
+  'general_setting.responses_stream_bootstrap_grace_period_seconds': 180,
+  'general_setting.responses_stream_bootstrap_probe_interval_milliseconds': 1000,
+  'general_setting.responses_stream_bootstrap_ping_interval_seconds': 10,
+  'general_setting.responses_stream_bootstrap_retryable_status_codes':
+    '[401,403,408,429,500,502,503,504]',
+  'general_setting.quota_display_type': 'USD',
+  'general_setting.custom_currency_symbol': '¤',
+  'general_setting.custom_currency_exchange_rate': '',
+  QuotaPerUnit: '',
+  RetryTimes: '',
+  USDExchangeRate: '',
+  DisplayTokenStatEnabled: false,
+  DefaultCollapseSidebar: false,
+  DemoSiteEnabled: false,
+  SelfUseModeEnabled: false,
+  RequestHeaderPolicyAuxiliaryRequestsEnabled: true,
+  'token_setting.max_user_tokens': 1000,
+};
+const DEFAULT_GENERAL_INPUT_KEYS = new Set(Object.keys(DEFAULT_GENERAL_INPUTS));
+
 export default function GeneralSettings(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [showQuotaWarning, setShowQuotaWarning] = useState(false);
-  const [inputs, setInputs] = useState({
-    TopUpLink: '',
-    'general_setting.docs_link': '',
-    'general_setting.responses_stream_bootstrap_recovery_enabled': false,
-    'general_setting.responses_stream_bootstrap_grace_period_seconds': 180,
-    'general_setting.responses_stream_bootstrap_probe_interval_milliseconds': 1000,
-    'general_setting.responses_stream_bootstrap_ping_interval_seconds': 10,
-    'general_setting.responses_stream_bootstrap_retryable_status_codes':
-      '[401,403,408,429,500,502,503,504]',
-    'general_setting.quota_display_type': 'USD',
-    'general_setting.custom_currency_symbol': '¤',
-    'general_setting.custom_currency_exchange_rate': '',
-    QuotaPerUnit: '',
-    RetryTimes: '',
-    USDExchangeRate: '',
-    DisplayTokenStatEnabled: false,
-    DefaultCollapseSidebar: false,
-    DemoSiteEnabled: false,
-    SelfUseModeEnabled: false,
-    'token_setting.max_user_tokens': 1000,
-  });
+  const [inputs, setInputs] = useState(() => ({ ...DEFAULT_GENERAL_INPUTS }));
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
 
@@ -205,33 +210,26 @@ export default function GeneralSettings(props) {
   }, [quotaDisplayType, combinedRate, inputs, t]);
 
   useEffect(() => {
-    const currentInputs = {};
-    for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
-        currentInputs[key] = props.options[key];
+    const currentInputs = { ...DEFAULT_GENERAL_INPUTS };
+    const optionValues = props.options || {};
+    const hasQuotaDisplayTypeOption = Object.prototype.hasOwnProperty.call(
+      optionValues,
+      'general_setting.quota_display_type',
+    );
+    for (let key in optionValues) {
+      if (DEFAULT_GENERAL_INPUT_KEYS.has(key)) {
+        currentInputs[key] = optionValues[key];
       }
     }
     // 若旧字段存在且新字段缺失，则做一次兜底映射
     if (
-      currentInputs['general_setting.quota_display_type'] === undefined &&
-      props.options?.DisplayInCurrencyEnabled !== undefined
+      !hasQuotaDisplayTypeOption &&
+      optionValues.DisplayInCurrencyEnabled !== undefined
     ) {
-      currentInputs['general_setting.quota_display_type'] = props.options
+      currentInputs['general_setting.quota_display_type'] = optionValues
         .DisplayInCurrencyEnabled
         ? 'USD'
         : 'TOKENS';
-    }
-    // 回填自定义货币相关字段（如果后端已存在）
-    if (props.options['general_setting.custom_currency_symbol'] !== undefined) {
-      currentInputs['general_setting.custom_currency_symbol'] =
-        props.options['general_setting.custom_currency_symbol'];
-    }
-    if (
-      props.options['general_setting.custom_currency_exchange_rate'] !==
-      undefined
-    ) {
-      currentInputs['general_setting.custom_currency_exchange_rate'] =
-        props.options['general_setting.custom_currency_exchange_rate'];
     }
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
@@ -383,8 +381,8 @@ export default function GeneralSettings(props) {
                   field={'DisplayTokenStatEnabled'}
                   label={t('额度查询接口返回令牌额度而非用户额度')}
                   size='default'
-                  checkedText='｜'
-                  uncheckedText='〇'
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
                   onChange={handleFieldChange('DisplayTokenStatEnabled')}
                 />
               </Col>
@@ -393,8 +391,8 @@ export default function GeneralSettings(props) {
                   field={'DefaultCollapseSidebar'}
                   label={t('默认折叠侧边栏')}
                   size='default'
-                  checkedText='｜'
-                  uncheckedText='〇'
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
                   onChange={handleFieldChange('DefaultCollapseSidebar')}
                 />
               </Col>
@@ -403,8 +401,8 @@ export default function GeneralSettings(props) {
                   field={'DemoSiteEnabled'}
                   label={t('演示站点模式')}
                   size='default'
-                  checkedText='｜'
-                  uncheckedText='〇'
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
                   onChange={handleFieldChange('DemoSiteEnabled')}
                 />
               </Col>
@@ -414,9 +412,37 @@ export default function GeneralSettings(props) {
                   label={t('自用模式')}
                   extraText={t('开启后不限制：必须设置模型倍率')}
                   size='default'
-                  checkedText='｜'
-                  uncheckedText='〇'
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
                   onChange={handleFieldChange('SelfUseModeEnabled')}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'RequestHeaderPolicyAuxiliaryRequestsEnabled'}
+                  label={t('辅助请求应用渠道请求头策略')}
+                  size='default'
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
+                  onChange={handleFieldChange(
+                    'RequestHeaderPolicyAuxiliaryRequestsEnabled',
+                  )}
+                  extraText={
+                    <span>
+                      {t(
+                        '控制模型测试、模型同步等辅助请求是否套用渠道请求头；主 API 请求不受影响。',
+                      )}
+                      <Tooltip
+                        content={t(
+                          '如果上游要求特定鉴权 Header、但模型测试失败，可关闭此项排查。',
+                        )}
+                      >
+                        <Text link size='small' style={{ marginLeft: 4 }}>
+                          {t('排查说明')}
+                        </Text>
+                      </Tooltip>
+                    </span>
+                  }
                 />
               </Col>
             </Row>

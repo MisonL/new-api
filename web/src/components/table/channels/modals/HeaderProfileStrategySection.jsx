@@ -23,29 +23,23 @@ import {
   Button,
   Modal,
   Select,
+  Switch,
   Tag,
   Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
-import { IconDelete, IconMenu } from '@douyinfe/semi-icons';
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconDelete,
+  IconMenu,
+} from '@douyinfe/semi-icons';
 
 import HeaderProfileLibrary from './HeaderProfileLibrary.jsx';
+import { getHeaderProfileCategoryLabel } from './headerProfile.helpers.js';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 
 const { Text } = Typography;
-
-function getCategoryLabel(t, category) {
-  switch (category) {
-    case 'browser':
-      return t('浏览器');
-    case 'ai_coding_cli':
-      return t('AI Coding CLI');
-    case 'api_sdk':
-      return t('API SDK / 调试');
-    default:
-      return t('自定义');
-  }
-}
 
 const HeaderProfileStrategySection = ({
   loading = false,
@@ -55,6 +49,10 @@ const HeaderProfileStrategySection = ({
   deletingProfileId = '',
   showLegacyBanner = false,
   passthroughWarning = '',
+  auxiliaryPolicyEnabled = true,
+  auxiliaryPolicyGlobalEnabled = true,
+  onAuxiliaryPolicyChange,
+  onEnabledChange,
   onModeChange,
   onToggleSelect,
   onRemoveSelected,
@@ -73,6 +71,16 @@ const HeaderProfileStrategySection = ({
   const [dragOverPosition, setDragOverPosition] = useState('before');
 
   const selectedCount = selectedItems.length;
+  const auxiliaryPolicyEffective =
+    auxiliaryPolicyGlobalEnabled && auxiliaryPolicyEnabled;
+  const auxiliarySwitchDisabled = !auxiliaryPolicyGlobalEnabled;
+  const auxiliaryScopeText = auxiliaryPolicyGlobalEnabled
+    ? t(
+        '主 API 请求始终应用请求头策略；辅助请求可按渠道关闭，用于排查模型测试、同步、余额查询等路径。',
+      )
+    : t(
+        '全局辅助请求头策略已关闭，本渠道设置暂不生效；主 API 请求仍会应用上方请求头策略。',
+      );
   const modeOptions = useMemo(
     () => [
       { label: t('固定'), value: 'fixed' },
@@ -180,6 +188,17 @@ const HeaderProfileStrategySection = ({
               )}
             </Text>
           </div>
+        </div>
+        <div className='flex items-center gap-2 shrink-0'>
+          <Text type='tertiary' size='small'>
+            {t('启用模板')}
+          </Text>
+          <Switch
+            size='small'
+            checked={strategy.enabled === true}
+            onChange={(checked) => onEnabledChange?.(checked)}
+            aria-label={t('启用模板')}
+          />
         </div>
       </div>
 
@@ -313,13 +332,18 @@ const HeaderProfileStrategySection = ({
               const showOrder = strategy.mode === 'round_robin';
               const isDragging = draggedProfileId === profile.id;
               const isDragTarget = dragOverProfileId === profile.id;
+              const previousProfileId = selectedItems[index - 1]?.id;
+              const nextProfileId = selectedItems[index + 1]?.id;
 
               return (
                 <Tooltip
                   key={profile.id}
                   position='topLeft'
                   content={
-                    <pre className='mb-0 text-xs leading-5 whitespace-pre-wrap break-all max-w-[420px] max-h-64 overflow-auto'>
+                    <pre
+                      className='mb-0 text-xs leading-5 whitespace-pre-wrap break-all max-h-64 overflow-auto'
+                      style={{ maxWidth: 'min(420px, 80vw)' }}
+                    >
                       {profile.previewText || t('暂无可预览内容')}
                     </pre>
                   }
@@ -361,7 +385,7 @@ const HeaderProfileStrategySection = ({
                             {profile.name}
                           </Text>
                           <Tag size='small'>
-                            {getCategoryLabel(t, profile.category)}
+                            {getHeaderProfileCategoryLabel(t, profile.category)}
                           </Tag>
                           {profile.missing && (
                             <Tag color='red' size='small'>
@@ -380,21 +404,99 @@ const HeaderProfileStrategySection = ({
                         </div>
                       </div>
                     </div>
-                    <Button
-                      size='small'
-                      type='tertiary'
-                      icon={<IconDelete />}
-                      aria-label={t('移除请求头模板 {{name}}', {
-                        name: profile.name,
-                      })}
-                      onClick={() => onRemoveSelected(profile.id)}
-                    />
+                    <div className='flex items-center gap-1 shrink-0'>
+                      {isMobile && showOrder && selectedCount > 1 && (
+                        <>
+                          <Button
+                            size='small'
+                            type='tertiary'
+                            icon={<IconChevronUp />}
+                            disabled={index === 0}
+                            aria-label={t('上移')}
+                            onClick={() => {
+                              if (!previousProfileId) {
+                                return;
+                              }
+                              onReorderSelected(
+                                profile.id,
+                                previousProfileId,
+                                'before',
+                              );
+                            }}
+                          />
+                          <Button
+                            size='small'
+                            type='tertiary'
+                            icon={<IconChevronDown />}
+                            disabled={index === selectedCount - 1}
+                            aria-label={t('下移')}
+                            onClick={() => {
+                              if (!nextProfileId) {
+                                return;
+                              }
+                              onReorderSelected(
+                                profile.id,
+                                nextProfileId,
+                                'after',
+                              );
+                            }}
+                          />
+                        </>
+                      )}
+                      <Button
+                        size='small'
+                        type='tertiary'
+                        icon={<IconDelete />}
+                        aria-label={t('移除请求头模板 {{name}}', {
+                          name: profile.name,
+                        })}
+                        onClick={() => onRemoveSelected(profile.id)}
+                      />
+                    </div>
                   </div>
                 </Tooltip>
               );
             })}
           </div>
         )}
+        <div
+          className='mt-2 pt-2 flex items-center justify-between gap-3 flex-wrap'
+          style={{ borderTop: '1px solid var(--semi-color-border)' }}
+        >
+          <div className='min-w-0 flex-1'>
+            <div className='flex items-center gap-1.5 flex-wrap min-w-0'>
+              <Text strong size='small'>
+                {t('应用范围')}
+              </Text>
+              <Tag
+                color={auxiliaryPolicyEffective ? 'blue' : 'grey'}
+                size='small'
+              >
+                {auxiliaryPolicyEffective ? t('已应用') : t('不应用')}
+              </Tag>
+              {!auxiliaryPolicyGlobalEnabled && (
+                <Tag color='orange' size='small'>
+                  {t('全局已关闭')}
+                </Tag>
+              )}
+            </div>
+            <Text type='tertiary' size='small' className='block mt-1'>
+              {auxiliaryScopeText}
+            </Text>
+          </div>
+          <div className='flex items-center gap-2 shrink-0'>
+            <Text type='tertiary' size='small'>
+              {t('辅助请求')}
+            </Text>
+            <Switch
+              size='small'
+              checked={auxiliaryPolicyEnabled}
+              disabled={auxiliarySwitchDisabled}
+              onChange={(checked) => onAuxiliaryPolicyChange?.(checked)}
+              aria-label={t('辅助请求应用渠道请求头策略')}
+            />
+          </div>
+        </div>
       </div>
 
       <Modal

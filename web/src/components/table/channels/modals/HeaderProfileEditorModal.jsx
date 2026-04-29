@@ -25,6 +25,7 @@ import {
   Modal,
   Select,
   TextArea,
+  Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
 
@@ -35,6 +36,15 @@ import {
 } from './headerProfile.helpers.js';
 
 const { Text } = Typography;
+
+const HEADER_PROFILE_EXAMPLE_TEXT = JSON.stringify(
+  {
+    'User-Agent': 'MyApp/1.0',
+    'X-Client-Name': 'my-client',
+  },
+  null,
+  2,
+);
 
 function buildDraft(profile) {
   if (!profile) {
@@ -88,6 +98,7 @@ const HeaderProfileEditorModal = ({
   const previewText = validation.parsedHeaders
     ? buildHeaderProfilePreviewText(validation.parsedHeaders)
     : '';
+  const canFillExample = draft.headersText.trim().length === 0;
   const categoryOptions = [
     ...HEADER_PROFILE_GROUPS.map((group) => ({
       label:
@@ -140,7 +151,7 @@ const HeaderProfileEditorModal = ({
       <div className='flex flex-col gap-4'>
         {profile?.source === 'legacy_header_override' && (
           <div
-            className='rounded-xl p-3'
+            className='rounded-lg p-3'
             style={{
               backgroundColor: 'var(--semi-color-warning-light-default)',
               border: '1px solid var(--semi-color-warning)',
@@ -183,7 +194,31 @@ const HeaderProfileEditorModal = ({
         </div>
 
         <div className='flex flex-col gap-1'>
-          <Text strong>{t('请求头 JSON')}</Text>
+          <div className='flex items-center justify-between gap-2 flex-wrap'>
+            <Text strong>{t('请求头 JSON')}</Text>
+            <Tooltip
+              content={
+                canFillExample
+                  ? t('填入一份示例请求头 JSON')
+                  : t('填入示例前请先清空当前内容')
+              }
+            >
+              <Button
+                size='small'
+                type='tertiary'
+                disabled={!canFillExample}
+                onClick={() => {
+                  setTouched((prev) => ({ ...prev, headersText: true }));
+                  setDraft((prev) => ({
+                    ...prev,
+                    headersText: HEADER_PROFILE_EXAMPLE_TEXT,
+                  }));
+                }}
+              >
+                {t('填入示例')}
+              </Button>
+            </Tooltip>
+          </div>
           <TextArea
             rows={12}
             value={draft.headersText}
@@ -204,7 +239,7 @@ const HeaderProfileEditorModal = ({
         </div>
 
         <div
-          className='rounded-xl p-3'
+          className='rounded-lg p-3'
           style={{
             backgroundColor: 'var(--semi-color-fill-0)',
             border: '1px solid var(--semi-color-fill-2)',

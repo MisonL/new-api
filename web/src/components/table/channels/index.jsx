@@ -79,6 +79,9 @@ const ChannelsPage = () => {
             handleClose={channelsData.closeEdit}
             editingChannel={channelsData.editingChannel}
             editFocusTarget={channelsData.editFocusTarget}
+            requestHeaderPolicyAuxiliaryRequestsEnabled={
+              channelsData.requestHeaderPolicyAuxiliaryRequestsEnabled
+            }
           />
         </Suspense>
       ) : null}

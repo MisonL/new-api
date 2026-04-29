@@ -30,23 +30,31 @@ import {
 import { useTranslation } from 'react-i18next';
 import HttpStatusCodeRulesInput from '../../../components/settings/HttpStatusCodeRulesInput';
 
+const DEFAULT_MONITORING_INPUTS = {
+  ChannelDisableThreshold: '',
+  QuotaRemindThreshold: '',
+  AutomaticDisableChannelEnabled: false,
+  AutomaticEnableChannelEnabled: false,
+  AutomaticDisableKeywords: '',
+  AutomaticDisableStatusCodes: '401',
+  AutomaticRetryStatusCodes:
+    '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
+  'monitor_setting.auto_test_channel_enabled': false,
+  'monitor_setting.auto_test_channel_minutes': 10,
+};
+
+const MONITORING_INPUT_KEYS = Object.keys(DEFAULT_MONITORING_INPUTS);
+
 export default function SettingsMonitoring(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
-  const [inputs, setInputs] = useState({
-    ChannelDisableThreshold: '',
-    QuotaRemindThreshold: '',
-    AutomaticDisableChannelEnabled: false,
-    AutomaticEnableChannelEnabled: false,
-    AutomaticDisableKeywords: '',
-    AutomaticDisableStatusCodes: '401',
-    AutomaticRetryStatusCodes:
-      '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
-    'monitor_setting.auto_test_channel_enabled': false,
-    'monitor_setting.auto_test_channel_minutes': 10,
-  });
+  const [inputs, setInputs] = useState(() => ({
+    ...DEFAULT_MONITORING_INPUTS,
+  }));
   const refForm = useRef();
-  const [inputsRow, setInputsRow] = useState(inputs);
+  const [inputsRow, setInputsRow] = useState(() => ({
+    ...DEFAULT_MONITORING_INPUTS,
+  }));
   const parsedAutoDisableStatusCodes = parseHttpStatusCodeRules(
     inputs.AutomaticDisableStatusCodes || '',
   );
@@ -110,9 +118,9 @@ export default function SettingsMonitoring(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
+    const currentInputs = { ...DEFAULT_MONITORING_INPUTS };
     for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
+      if (MONITORING_INPUT_KEYS.includes(key)) {
         currentInputs[key] = props.options[key];
       }
     }
@@ -136,8 +144,8 @@ export default function SettingsMonitoring(props) {
                   field={'monitor_setting.auto_test_channel_enabled'}
                   label={t('定时测试所有通道')}
                   size='default'
-                  checkedText='｜'
-                  uncheckedText='〇'
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
                   onChange={(value) =>
                     setInputs({
                       ...inputs,
@@ -209,8 +217,8 @@ export default function SettingsMonitoring(props) {
                   field={'AutomaticDisableChannelEnabled'}
                   label={t('失败时自动禁用通道')}
                   size='default'
-                  checkedText='｜'
-                  uncheckedText='〇'
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
                   onChange={(value) => {
                     setInputs({
                       ...inputs,
@@ -224,8 +232,8 @@ export default function SettingsMonitoring(props) {
                   field={'AutomaticEnableChannelEnabled'}
                   label={t('成功时自动启用通道')}
                   size='default'
-                  checkedText='｜'
-                  uncheckedText='〇'
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
                   onChange={(value) =>
                     setInputs({
                       ...inputs,

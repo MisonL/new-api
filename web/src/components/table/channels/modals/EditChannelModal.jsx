@@ -251,6 +251,7 @@ const EditChannelModal = (props) => {
     upstream_model_update_last_check_time: 0,
     upstream_model_update_last_detected_models: [],
     upstream_model_update_ignored_models: '',
+    auxiliary_request_header_policy_enabled: true,
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -376,20 +377,22 @@ const EditChannelModal = (props) => {
         !Array.isArray(parsed) &&
         Array.isArray(parsed.operations)
       ) {
+        const count = parsed.operations.length;
         return {
           isEmpty: false,
           isValid: true,
-          tagLabel: `${t('新格式模板')} (${parsed.operations.length})`,
+          tagLabel: t('已配置 {{count}} 条规则', { count }),
           tagColor: 'cyan',
           summary: t('按规则改写请求体或运行期请求头'),
           preview: pretty,
         };
       }
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const count = Object.keys(parsed).length;
         return {
           isEmpty: false,
           isValid: true,
-          tagLabel: `${t('旧格式模板')} (${Object.keys(parsed).length})`,
+          tagLabel: t('已配置 {{count}} 个字段', { count }),
           tagColor: 'blue',
           summary: t('按旧格式直接覆盖请求体字段'),
           preview: pretty,
@@ -530,18 +533,23 @@ const EditChannelModal = (props) => {
     useState([]);
   const openRequestPolicyModal = (focusAdvanced = false) => {
     const activeKeys = [];
-    if (
-      focusAdvanced ||
-      !paramOverrideMeta.isValid ||
-      !paramOverrideMeta.isEmpty
-    ) {
+    // Advanced entry opens panels with existing content; invalid JSON is always expanded.
+    if (focusAdvanced && !paramOverrideMeta.isEmpty) {
+      activeKeys.push('param-override-panel');
+    } else if (!paramOverrideMeta.isValid) {
       activeKeys.push('param-override-panel');
     }
-    if (!statusCodeMappingMeta.isValid || !statusCodeMappingMeta.isEmpty) {
+    if (focusAdvanced && !statusCodeMappingMeta.isEmpty) {
+      activeKeys.push('status-code-panel');
+    } else if (!statusCodeMappingMeta.isValid) {
       activeKeys.push('status-code-panel');
     }
-    if (hasHeaderOverrideDraft) {
+    if (focusAdvanced && hasHeaderOverrideDraft) {
       activeKeys.push('legacy-header-panel');
+    }
+    // If users explicitly ask for advanced settings but nothing exists yet, open the first editable panel.
+    if (focusAdvanced && activeKeys.length === 0) {
+      activeKeys.push('param-override-panel');
     }
     setRequestPolicyAdvancedKeys(activeKeys);
     setRequestPolicyModalVisible(true);
@@ -588,6 +596,10 @@ const EditChannelModal = (props) => {
       },
     [inputs.settings],
   );
+  const auxiliaryRequestHeaderPolicyGlobalEnabled =
+    props.requestHeaderPolicyAuxiliaryRequestsEnabled !== false;
+  const auxiliaryRequestHeaderPolicyEnabled =
+    inputs.auxiliary_request_header_policy_enabled !== false;
   const allHeaderProfiles = useMemo(
     () => buildProfileItems(headerProfiles),
     [headerProfiles],
@@ -921,6 +933,14 @@ const EditChannelModal = (props) => {
       enabled: true,
       mode: nextMode,
       selectedProfileIds: nextSelectedProfileIds,
+    });
+  };
+
+  const handleHeaderProfileEnabledChange = (enabled) => {
+    applyHeaderProfileStrategy({
+      enabled,
+      mode: headerProfileStrategy.mode,
+      selectedProfileIds: headerProfileStrategy.selectedProfileIds,
     });
   };
 
@@ -1376,6 +1396,8 @@ const EditChannelModal = (props) => {
           )
             ? parsedSettings.upstream_model_update_ignored_models.join(',')
             : '';
+          data.auxiliary_request_header_policy_enabled =
+            parsedSettings.auxiliary_request_header_policy_enabled !== false;
         } catch (error) {
           console.error('解析其他设置失败:', error);
           data.azure_responses_version = '';
@@ -1396,6 +1418,7 @@ const EditChannelModal = (props) => {
           data.upstream_model_update_last_check_time = 0;
           data.upstream_model_update_last_detected_models = [];
           data.upstream_model_update_ignored_models = '';
+          data.auxiliary_request_header_policy_enabled = true;
         }
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
@@ -1415,6 +1438,7 @@ const EditChannelModal = (props) => {
         data.upstream_model_update_last_check_time = 0;
         data.upstream_model_update_last_detected_models = [];
         data.upstream_model_update_ignored_models = '';
+        data.auxiliary_request_header_policy_enabled = true;
       }
 
       if (
@@ -2331,6 +2355,8 @@ const EditChannelModal = (props) => {
     if (typeof settings.upstream_model_update_last_check_time !== 'number') {
       settings.upstream_model_update_last_check_time = 0;
     }
+    settings.auxiliary_request_header_policy_enabled =
+      localInputs.auxiliary_request_header_policy_enabled !== false;
     localInputs.settings = JSON.stringify(settings);
 
     // 清理不需要发送到后端的字段
@@ -2359,6 +2385,7 @@ const EditChannelModal = (props) => {
     delete localInputs.upstream_model_update_last_check_time;
     delete localInputs.upstream_model_update_last_detected_models;
     delete localInputs.upstream_model_update_ignored_models;
+    delete localInputs.auxiliary_request_header_policy_enabled;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -2912,18 +2939,14 @@ const EditChannelModal = (props) => {
                       <Space wrap spacing={6}>
                         <Button
                           size='small'
-                          type={
-                            headerProfileStrategy.enabled
-                              ? 'tertiary'
-                              : 'primary'
-                          }
+                          type='primary'
                           theme={
                             headerProfileStrategy.enabled ? 'light' : 'solid'
                           }
                           onClick={() => openRequestPolicyModal(false)}
                         >
                           {headerProfileStrategy.enabled
-                            ? t('管理模板')
+                            ? t('更换模板')
                             : t('选择模板')}
                         </Button>
                         <Button
@@ -2997,6 +3020,19 @@ const EditChannelModal = (props) => {
                           deletingProfileId={headerProfileDeletingId}
                           showLegacyBanner={shouldShowHeaderProfileLegacyBanner}
                           passthroughWarning={headerProfilePassthroughWarning}
+                          auxiliaryPolicyEnabled={
+                            auxiliaryRequestHeaderPolicyEnabled
+                          }
+                          auxiliaryPolicyGlobalEnabled={
+                            auxiliaryRequestHeaderPolicyGlobalEnabled
+                          }
+                          onAuxiliaryPolicyChange={(value) =>
+                            handleChannelOtherSettingsChange(
+                              'auxiliary_request_header_policy_enabled',
+                              value,
+                            )
+                          }
+                          onEnabledChange={handleHeaderProfileEnabledChange}
                           onModeChange={handleHeaderProfileModeChange}
                           onToggleSelect={handleToggleHeaderProfile}
                           onRemoveSelected={handleRemoveSelectedHeaderProfile}

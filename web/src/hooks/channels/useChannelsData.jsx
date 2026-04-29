@@ -103,8 +103,12 @@ export const useChannelsData = () => {
   );
   const [globalPassThroughEnabled, setGlobalPassThroughEnabled] =
     useState(false);
+  const [
+    requestHeaderPolicyAuxiliaryRequestsEnabled,
+    setRequestHeaderPolicyAuxiliaryRequestsEnabled,
+  ] = useState(true);
 
-  const fetchGlobalPassThroughEnabled = async () => {
+  const fetchRuntimePolicyOptions = async () => {
     try {
       const res = await API.get('/api/option/');
       const { success, data } = res?.data || {};
@@ -117,8 +121,16 @@ export const useChannelsData = () => {
       if (option) {
         setGlobalPassThroughEnabled(toBoolean(option.value));
       }
+      const auxiliaryHeadersOption = data.find(
+        (item) => item?.key === 'RequestHeaderPolicyAuxiliaryRequestsEnabled',
+      );
+      setRequestHeaderPolicyAuxiliaryRequestsEnabled(
+        auxiliaryHeadersOption ? toBoolean(auxiliaryHeadersOption.value) : true,
+      );
     } catch (error) {
+      showError(error?.message || t('请求失败'));
       setGlobalPassThroughEnabled(false);
+      setRequestHeaderPolicyAuxiliaryRequestsEnabled(true);
     }
   };
 
@@ -192,7 +204,7 @@ export const useChannelsData = () => {
       });
     fetchGroups().then();
     loadChannelModels().then();
-    fetchGlobalPassThroughEnabled().then();
+    fetchRuntimePolicyOptions().then();
   }, []);
 
   // Column visibility management
@@ -1182,6 +1194,7 @@ export const useChannelsData = () => {
     statusFilter,
     compactMode,
     globalPassThroughEnabled,
+    requestHeaderPolicyAuxiliaryRequestsEnabled,
 
     // UI states
     showEdit,

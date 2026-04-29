@@ -22,20 +22,9 @@ import { useTranslation } from 'react-i18next';
 import { Button, Empty, Space, Tag, Typography } from '@douyinfe/semi-ui';
 import { IconDelete, IconEdit, IconPlus } from '@douyinfe/semi-icons';
 
-const { Text } = Typography;
+import { getHeaderProfileCategoryLabel } from './headerProfile.helpers.js';
 
-function getCategoryLabel(t, category) {
-  switch (category) {
-    case 'browser':
-      return t('浏览器');
-    case 'ai_coding_cli':
-      return t('AI Coding CLI');
-    case 'api_sdk':
-      return t('API SDK / 调试');
-    default:
-      return t('自定义');
-  }
-}
+const { Text } = Typography;
 
 function buildGroupItems(profiles) {
   return profiles.reduce(
@@ -159,7 +148,7 @@ const HeaderProfileLibrary = ({
               )}
             </span>
             <Text type='tertiary' size='small' className='block mt-0.5'>
-              {getCategoryLabel(t, profile.category)}
+              {getHeaderProfileCategoryLabel(t, profile.category)}
               {strategyMode === 'fixed' && selected
                 ? ` - ${t('点击其他模板会替换当前选择')}`
                 : ''}
@@ -229,7 +218,7 @@ const HeaderProfileLibrary = ({
           </Text>
           {previewProfile && (
             <Tag size='small'>
-              {getCategoryLabel(t, previewProfile.category)}
+              {getHeaderProfileCategoryLabel(t, previewProfile.category)}
             </Tag>
           )}
         </div>
@@ -248,11 +237,11 @@ const HeaderProfileLibrary = ({
       <div className='flex items-center justify-between gap-2'>
         <div>
           <Text strong size='small'>
-            {t('选择客户端模板')}
+            {t('点击模板即可使用')}
           </Text>
           <div>
             <Text type='tertiary' size='small'>
-              {t('点击模板即可使用；鼠标悬停可预览完整请求头')}
+              {t('悬停可预览完整请求头；固定模式会直接替换当前模板')}
             </Text>
           </div>
         </div>

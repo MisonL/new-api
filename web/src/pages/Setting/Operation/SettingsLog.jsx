@@ -253,8 +253,8 @@ export default function SettingsLog(props) {
                     field={'LogConsumeEnabled'}
                     label={t('启用额度消费日志记录')}
                     size='default'
-                    checkedText='｜'
-                    uncheckedText='〇'
+                    checkedText={t('开')}
+                    uncheckedText={t('关')}
                     onChange={(value) => {
                       setInputs({
                         ...inputs,
@@ -271,8 +271,8 @@ export default function SettingsLog(props) {
                       '控制使用日志、任务日志、绘图日志筛选输入框的联想提示',
                     )}
                     size='default'
-                    checkedText='｜'
-                    uncheckedText='〇'
+                    checkedText={t('开')}
+                    uncheckedText={t('关')}
                     onChange={(value) => {
                       setInputs({
                         ...inputs,

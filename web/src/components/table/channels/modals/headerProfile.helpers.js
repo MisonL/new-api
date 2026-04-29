@@ -48,6 +48,20 @@ export function buildHeaderProfilePreviewText(headers) {
     .join('\n');
 }
 
+export function getHeaderProfileCategoryLabel(t, category) {
+  const translate = typeof t === 'function' ? t : (key) => key;
+  switch (category) {
+    case 'browser':
+      return translate('浏览器');
+    case 'ai_coding_cli':
+      return translate('AI Coding CLI');
+    case 'api_sdk':
+      return translate('API SDK / 调试');
+    default:
+      return translate('自定义');
+  }
+}
+
 function isPlainHeaderObject(headers) {
   return !!headers && typeof headers === 'object' && !Array.isArray(headers);
 }

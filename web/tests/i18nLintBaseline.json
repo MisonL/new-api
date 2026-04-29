@@ -716,47 +716,47 @@
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 725,
+    "line": 737,
     "text": "Doubao Coding Plan"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 2671,
+    "line": 2698,
     "text": "M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 3829,
+    "line": 3865,
     "text": "type-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4079,
+    "line": 4115,
     "text": "tight"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4459,
+    "line": 4495,
     "text": "Account ID"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4534,
+    "line": 4570,
     "text": "AZURE_OPENAI_ENDPOINT"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4732,
+    "line": 4768,
     "text": "models-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4934,
+    "line": 4970,
     "text": "groups-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 5212,
+    "line": 5248,
     "text": "M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
   },
   {
@@ -1381,133 +1381,43 @@
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 288,
+    "line": 286,
     "text": "USD ($)"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 294,
+    "line": 292,
     "text": "CNY (¥)"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 300,
+    "line": 298,
     "text": "Tokens"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 317,
+    "line": 315,
     "text": "USD ($)"
+  },
+  {
+    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
+    "line": 316,
+    "text": "CNY (¥)"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
     "line": 318,
-    "text": "CNY (¥)"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 320,
     "text": "Tokens"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 333,
+    "line": 331,
     "text": "1 USD ="
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 386,
-    "text": "｜"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 387,
-    "text": "〇"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 396,
-    "text": "｜"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 397,
-    "text": "〇"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 406,
-    "text": "｜"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 407,
-    "text": "〇"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 417,
-    "text": "｜"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 418,
-    "text": "〇"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsLog.jsx",
     "line": 148,
     "text": "⚠️"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsLog.jsx",
-    "line": 256,
-    "text": "｜"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsLog.jsx",
-    "line": 257,
-    "text": "〇"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsLog.jsx",
-    "line": 274,
-    "text": "｜"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsLog.jsx",
-    "line": 275,
-    "text": "〇"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsMonitoring.jsx",
-    "line": 139,
-    "text": "｜"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsMonitoring.jsx",
-    "line": 140,
-    "text": "〇"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsMonitoring.jsx",
-    "line": 212,
-    "text": "｜"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsMonitoring.jsx",
-    "line": 213,
-    "text": "〇"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsMonitoring.jsx",
-    "line": 227,
-    "text": "｜"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsMonitoring.jsx",
-    "line": 228,
-    "text": "〇"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsSensitiveWords.jsx",
