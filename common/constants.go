@@ -105,11 +105,17 @@ var TelegramBotName = ""
 var QuotaForNewUser = 0
 var QuotaForInviter = 0
 var QuotaForInvitee = 0
+var InviteRebateRate = 0.0
 var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false
 var QuotaRemindThreshold = 1000
 var PreConsumedQuota = 500
+
+const (
+	InviteRebateRateMin = 0.0
+	InviteRebateRateMax = 100.0
+)
 
 var RetryTimes = 0
 

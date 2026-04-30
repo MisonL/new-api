@@ -350,6 +350,35 @@ func TransferAffQuota(c *gin.Context) {
 	common.ApiSuccessI18n(c, i18n.MsgUserTransferSuccess, nil)
 }
 
+func GetInvitationRecords(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	userId := c.GetInt("id")
+	filter := model.InvitationRecordFilter{
+		RecordType: c.Query("record_type"),
+		Source:     c.Query("source"),
+		Keyword:    c.Query("keyword"),
+	}
+	records, total, err := model.ListInvitationRecords(userId, filter, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	inviteeStats, err := model.ListInvitationInviteeStats(userId, filter, 8)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(records)
+	common.ApiSuccess(c, gin.H{
+		"items":         pageInfo.Items,
+		"page":          pageInfo.Page,
+		"page_size":     pageInfo.PageSize,
+		"total":         pageInfo.Total,
+		"invitee_stats": inviteeStats,
+	})
+}
+
 func GetAffCode(c *gin.Context) {
 	id := c.GetInt("id")
 	user, err := model.GetUserById(id, true)
@@ -394,31 +423,32 @@ func GetSelf(c *gin.Context) {
 
 	// 构建响应数据，包含用户信息和权限
 	responseData := map[string]interface{}{
-		"id":                user.Id,
-		"username":          user.Username,
-		"display_name":      user.DisplayName,
-		"role":              user.Role,
-		"status":            user.Status,
-		"email":             user.Email,
-		"github_id":         user.GitHubId,
-		"discord_id":        user.DiscordId,
-		"oidc_id":           user.OidcId,
-		"wechat_id":         user.WeChatId,
-		"telegram_id":       user.TelegramId,
-		"group":             user.Group,
-		"quota":             user.Quota,
-		"used_quota":        user.UsedQuota,
-		"request_count":     user.RequestCount,
-		"aff_code":          user.AffCode,
-		"aff_count":         user.AffCount,
-		"aff_quota":         user.AffQuota,
-		"aff_history_quota": user.AffHistoryQuota,
-		"inviter_id":        user.InviterId,
-		"linux_do_id":       user.LinuxDOId,
-		"setting":           user.Setting,
-		"stripe_customer":   user.StripeCustomer,
-		"sidebar_modules":   userSetting.SidebarModules, // 正确提取sidebar_modules字段
-		"permissions":       permissions,                // 新增权限字段
+		"id":                 user.Id,
+		"username":           user.Username,
+		"display_name":       user.DisplayName,
+		"role":               user.Role,
+		"status":             user.Status,
+		"email":              user.Email,
+		"github_id":          user.GitHubId,
+		"discord_id":         user.DiscordId,
+		"oidc_id":            user.OidcId,
+		"wechat_id":          user.WeChatId,
+		"telegram_id":        user.TelegramId,
+		"group":              user.Group,
+		"quota":              user.Quota,
+		"used_quota":         user.UsedQuota,
+		"request_count":      user.RequestCount,
+		"aff_code":           user.AffCode,
+		"aff_count":          user.AffCount,
+		"aff_quota":          user.AffQuota,
+		"aff_history_quota":  user.AffHistoryQuota,
+		"invite_rebate_rate": common.InviteRebateRate,
+		"inviter_id":         user.InviterId,
+		"linux_do_id":        user.LinuxDOId,
+		"setting":            user.Setting,
+		"stripe_customer":    user.StripeCustomer,
+		"sidebar_modules":    userSetting.SidebarModules, // 正确提取sidebar_modules字段
+		"permissions":        permissions,                // 新增权限字段
 	}
 
 	c.JSON(http.StatusOK, gin.H{

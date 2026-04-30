@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -127,6 +128,7 @@ func InitOptionMap() {
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
+	common.OptionMap["InviteRebateRate"] = strconv.FormatFloat(common.InviteRebateRate, 'f', -1, 64)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
 	common.OptionMap["ModelRequestRateLimitCount"] = strconv.Itoa(setting.ModelRequestRateLimitCount)
@@ -470,6 +472,8 @@ func updateOptionMap(key string, value string) (err error) {
 		common.QuotaForInviter, _ = strconv.Atoi(value)
 	case "QuotaForInvitee":
 		common.QuotaForInvitee, _ = strconv.Atoi(value)
+	case "InviteRebateRate":
+		common.InviteRebateRate, _ = strconv.ParseFloat(value, 64)
 	case "QuotaRemindThreshold":
 		common.QuotaRemindThreshold, _ = strconv.Atoi(value)
 	case "PreConsumedQuota":
@@ -550,9 +554,22 @@ func normalizeOptionValueForInMemoryConfig(key string, value string) (string, er
 			return "", errors.New("RequestHeaderPolicyAuxiliaryRequestsEnabled 值不合法")
 		}
 		return strconv.FormatBool(enabled), nil
+	case "InviteRebateRate":
+		return normalizeInviteRebateRate(value)
 	default:
 		return value, nil
 	}
+}
+
+func normalizeInviteRebateRate(value string) (string, error) {
+	rate, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return "", errors.New("邀请充值返利比例必须是 0 到 100 之间的数字")
+	}
+	if rate < common.InviteRebateRateMin || rate > common.InviteRebateRateMax {
+		return "", errors.New("邀请充值返利比例必须在 0 到 100 之间")
+	}
+	return strconv.FormatFloat(rate, 'f', -1, 64), nil
 }
 
 func validateOptionValue(key string, value string) error {
@@ -576,6 +593,9 @@ func validateOptionValue(key string, value string) error {
 			return errors.New("RequestHeaderPolicyAuxiliaryRequestsEnabled 值不合法")
 		}
 		return nil
+	case "InviteRebateRate":
+		_, err := normalizeInviteRebateRate(value)
+		return err
 	default:
 		return nil
 	}
