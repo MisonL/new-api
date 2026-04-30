@@ -411,6 +411,12 @@ func TestBuildChannelRuntimeHeaderOverrideRejectsInvalidSystemDefaultMode(t *tes
 	require.ErrorContains(t, err, "请求头优先级模式不合法")
 }
 
+func TestGetRuntimeHeaderStringValueIgnoresNilValue(t *testing.T) {
+	require.Empty(t, getRuntimeHeaderStringValue(map[string]any{
+		"User-Agent": nil,
+	}, "User-Agent"))
+}
+
 func TestBuildChannelRuntimeRequestHeadersRespectsGlobalAuxiliarySwitch(t *testing.T) {
 	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
 	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "false"

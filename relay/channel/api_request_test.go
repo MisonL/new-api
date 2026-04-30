@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -123,6 +125,9 @@ func TestProcessHeaderOverride_AppliesBuiltinHeaderProfile(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode: "prefer_channel",
+	})
 
 	info := &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
@@ -141,6 +146,40 @@ func TestProcessHeaderOverride_AppliesBuiltinHeaderProfile(t *testing.T) {
 	require.Equal(t, "OpenAI Codex CLI/0.1", headers["user-agent"])
 	require.Equal(t, "codex-cli", headers["x-client-name"])
 	require.Equal(t, "terminal", headers["x-client-platform"])
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, "prefer_channel", audit.HeaderPolicyMode)
+	require.Equal(t, "OpenAI Codex CLI/0.1", audit.AppliedUserAgent)
+	require.ElementsMatch(t, []string{"user-agent", "x-client-name", "x-client-platform"}, audit.AppliedHeaderKeys)
+}
+
+func TestProcessHeaderOverride_LegacyOverrideCreatesAuditWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			HeadersOverride: map[string]any{
+				"User-Agent": "LegacyUA/1.0",
+				"X-Legacy":   "legacy-only",
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "LegacyUA/1.0", headers["user-agent"])
+	require.Equal(t, "legacy-only", headers["x-legacy"])
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, "LegacyUA/1.0", audit.AppliedUserAgent)
+	require.ElementsMatch(t, []string{"user-agent", "x-legacy"}, audit.AppliedHeaderKeys)
 }
 
 func TestProcessHeaderOverride_AppliesUserHeaderProfileAndLegacyOverrideWins(t *testing.T) {

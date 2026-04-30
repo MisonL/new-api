@@ -287,6 +287,7 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 
 		headerOverride[key] = value
 	}
+	mergeFinalHeaderOverrideAudit(c, collectHeaderOverrideKeys(headerOverride), getHeaderOverrideUserAgent(headerOverride))
 	return headerOverride, nil
 }
 
@@ -300,6 +301,27 @@ func mergeHeaderProfileAudit(c *gin.Context, info *common.RelayInfo, profileID s
 	audit.HeaderProfileApplied = true
 	audit.AppliedHeaderKeys = mergeHeaderKeys(audit.AppliedHeaderKeys, headerKeys)
 	common2.SetContextKey(c, rootconstant.ContextKeyChannelHeaderPolicyAudit, audit)
+}
+
+func mergeFinalHeaderOverrideAudit(c *gin.Context, headerKeys []string, appliedUserAgent string) {
+	if c == nil {
+		return
+	}
+	audit, _ := common2.GetContextKeyType[service.RuntimeHeaderPolicyAudit](c, rootconstant.ContextKeyChannelHeaderPolicyAudit)
+	audit.AppliedHeaderKeys = mergeHeaderKeys(audit.AppliedHeaderKeys, headerKeys)
+	if appliedUserAgent != "" {
+		audit.AppliedUserAgent = appliedUserAgent
+	}
+	common2.SetContextKey(c, rootconstant.ContextKeyChannelHeaderPolicyAudit, audit)
+}
+
+func getHeaderOverrideUserAgent(headers map[string]string) string {
+	for key, value := range headers {
+		if strings.EqualFold(key, "User-Agent") {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func collectHeaderOverrideKeys(headers map[string]string) []string {

@@ -150,6 +150,9 @@ func AppendRequestHeaderPolicyInfo(ctx *gin.Context, other map[string]interface{
 	if audit.SelectedUserAgent != "" {
 		info["selected_user_agent"] = audit.SelectedUserAgent
 	}
+	if audit.AppliedUserAgent != "" {
+		info["applied_user_agent"] = audit.AppliedUserAgent
+	}
 	if audit.OverrideStaticUserAgent {
 		info["override_static_user_agent"] = true
 	}

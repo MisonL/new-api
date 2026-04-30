@@ -33,6 +33,7 @@ type runtimeHeaderPolicy struct {
 type RuntimeHeaderPolicyAudit struct {
 	HeaderPolicyMode        string   `json:"header_policy_mode"`
 	AppliedHeaderKeys       []string `json:"applied_header_keys,omitempty"`
+	AppliedUserAgent        string   `json:"applied_user_agent,omitempty"`
 	HeaderProfileID         string   `json:"header_profile_id,omitempty"`
 	HeaderProfileMode       string   `json:"header_profile_mode,omitempty"`
 	HeaderProfileApplied    bool     `json:"header_profile_applied"`
@@ -216,6 +217,7 @@ func BuildChannelRuntimeHeaderOverrideWithAudit(channel *model.Channel) (map[str
 		tagPolicy,
 	)
 	if finalStrategy == nil || !finalStrategy.Enabled {
+		finalizeRuntimeHeaderPolicyAudit(audit, finalHeaders)
 		return finalHeaders, audit, nil
 	}
 	audit.UserAgentStrategyMode = finalStrategy.Mode
@@ -227,6 +229,7 @@ func BuildChannelRuntimeHeaderOverrideWithAudit(channel *model.Channel) (map[str
 		return nil, nil, err
 	}
 	if selectedUA == "" {
+		finalizeRuntimeHeaderPolicyAudit(audit, finalHeaders)
 		return finalHeaders, audit, nil
 	}
 	audit.SelectedUserAgent = selectedUA
@@ -236,13 +239,13 @@ func BuildChannelRuntimeHeaderOverrideWithAudit(channel *model.Channel) (map[str
 			setRuntimeHeaderValue(finalHeaders, "User-Agent", selectedUA)
 			audit.UserAgentApplied = true
 		}
-		audit.AppliedHeaderKeys = collectRuntimeHeaderKeys(finalHeaders)
+		finalizeRuntimeHeaderPolicyAudit(audit, finalHeaders)
 		return finalHeaders, audit, nil
 	}
 
 	setRuntimeHeaderValue(finalHeaders, "User-Agent", selectedUA)
 	audit.UserAgentApplied = true
-	audit.AppliedHeaderKeys = collectRuntimeHeaderKeys(finalHeaders)
+	finalizeRuntimeHeaderPolicyAudit(audit, finalHeaders)
 	return finalHeaders, audit, nil
 }
 
@@ -689,4 +692,27 @@ func collectRuntimeHeaderKeys(source map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func finalizeRuntimeHeaderPolicyAudit(audit *RuntimeHeaderPolicyAudit, headers map[string]any) {
+	if audit == nil {
+		return
+	}
+	audit.AppliedHeaderKeys = collectRuntimeHeaderKeys(headers)
+	audit.AppliedUserAgent = getRuntimeHeaderStringValue(headers, "User-Agent")
+}
+
+func getRuntimeHeaderStringValue(source map[string]any, target string) string {
+	for key, value := range normalizeRuntimeHeaderOverrideMap(source) {
+		if isRuntimeHeaderPassthroughRuleKey(key) {
+			continue
+		}
+		if strings.EqualFold(key, target) {
+			if value == nil {
+				return ""
+			}
+			return strings.TrimSpace(fmt.Sprintf("%v", value))
+		}
+	}
+	return ""
 }
