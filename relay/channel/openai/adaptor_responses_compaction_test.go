@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -86,11 +87,14 @@ func TestConvertOpenAIResponsesRequestPreservesNonObjectArrayItems(t *testing.T)
 	require.Equal(t, "plain input item", first)
 }
 
-func TestConvertOpenAIResponsesCompactRequestPreservesCompactionInput(t *testing.T) {
+func TestConvertOpenAIResponsesCompactRequestPreservesCompactionInputForCodexChannel(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
 		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodex,
+		},
 	}
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
@@ -102,4 +106,51 @@ func TestConvertOpenAIResponsesCompactRequestPreservesCompactionInput(t *testing
 	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
 	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
+}
+
+func TestConvertOpenAIResponsesCompactRequestConvertsForOpenAICompatibleChannel(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_previous",
+		Input: json.RawMessage(`[
+			{"type":"compaction","encrypted_content":"opaque"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.Empty(t, convertedReq.PreviousResponseID)
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 1)
+	var itemType string
+	require.NoError(t, common.Unmarshal(items[0]["type"], &itemType))
+	require.Equal(t, "message", itemType)
+}
+
+func TestOpenAIResponsesCompactRequestURLUsesResponsesEndpointForOpenAICompatibleChannel(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode:      relayconstant.RelayModeResponsesCompact,
+		RequestURLPath: "/v1/responses/compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeOpenAI,
+			ChannelBaseUrl: "https://api.example.test",
+		},
+	}
+
+	requestURL, err := (&Adaptor{}).GetRequestURL(info)
+	require.NoError(t, err)
+	require.Equal(t, "https://api.example.test/v1/responses", requestURL)
 }

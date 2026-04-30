@@ -177,6 +177,9 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		url = strings.Replace(url, "{model}", info.UpstreamModelName, -1)
 		return url, nil
 	default:
+		if shouldUseOpenAICompatibleResponsesCompactConversion(info) {
+			return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, "/v1/responses", info.ChannelType), nil
+		}
 		if (info.RelayFormat == types.RelayFormatClaude || info.RelayFormat == types.RelayFormatGemini) &&
 			info.RelayMode != relayconstant.RelayModeResponses &&
 			info.RelayMode != relayconstant.RelayModeResponsesCompact {
@@ -601,7 +604,20 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
-	if info != nil && info.RelayMode == relayconstant.RelayModeResponses {
+	useOpenAICompatibleCompactConversion := shouldUseOpenAICompatibleResponsesCompactConversion(info)
+	if useOpenAICompatibleCompactConversion && request.PreviousResponseID != "" {
+		request.PreviousResponseID = ""
+		channelID := 0
+		if info.ChannelMeta != nil {
+			channelID = info.ChannelMeta.ChannelId
+		}
+		common.SysLog(fmt.Sprintf(
+			"responses compact previous_response_id removed for OpenAI-compatible channel: channel_id=%d model=%s",
+			channelID,
+			info.OriginModelName,
+		))
+	}
+	if info != nil && (info.RelayMode == relayconstant.RelayModeResponses || useOpenAICompatibleCompactConversion) {
 		input, removedCount, remainingCount, err := removeUnsupportedResponsesCompactionInput(request.Input)
 		if err != nil {
 			return nil, err
@@ -625,6 +641,13 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		}
 	}
 	return request, nil
+}
+
+func shouldUseOpenAICompatibleResponsesCompactConversion(info *relaycommon.RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+		info.ChannelType == constant.ChannelTypeOpenAI
 }
 
 func removeUnsupportedResponsesCompactionInput(input json.RawMessage) (json.RawMessage, int, int, error) {
