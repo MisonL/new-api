@@ -53,6 +53,12 @@ function buildSidecar() {
   const targetTriple = resolveTargetTriple();
   const goTarget = resolveGoTarget(targetTriple);
   const version = readVersion();
+  const commit = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  }).trim();
+  const buildDate = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const sourceUrl = process.env.BUILD_SOURCE || 'https://github.com/MisonL/new-api';
   const outputName = `new-api-${targetTriple}${goTarget.executable ? '.exe' : ''}`;
   const outputPath = join(binariesDir, outputName);
 
@@ -65,7 +71,13 @@ function buildSidecar() {
     [
       'build',
       '-ldflags',
-      `-s -w -X github.com/QuantumNous/new-api/common.Version=${version}`,
+      [
+        '-s -w',
+        `-X github.com/QuantumNous/new-api/common.Version=${version}`,
+        `-X github.com/QuantumNous/new-api/common.BuildCommit=${commit}`,
+        `-X github.com/QuantumNous/new-api/common.BuildDate=${buildDate}`,
+        `-X github.com/QuantumNous/new-api/common.BuildSource=${sourceUrl}`,
+      ].join(' '),
       '-o',
       outputPath,
       '.',

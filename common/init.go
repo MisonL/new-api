@@ -16,10 +16,11 @@ import (
 )
 
 var (
-	Port         = flag.Int("port", 3000, "the listening port")
-	PrintVersion = flag.Bool("version", false, "print version and exit")
-	PrintHelp    = flag.Bool("help", false, "print help and exit")
-	LogDir       = flag.String("log-dir", "./logs", "specify the log directory")
+	Port           = flag.Int("port", 3000, "the listening port")
+	PrintVersion   = flag.Bool("version", false, "print version and exit")
+	PrintBuildInfo = flag.Bool("build-info", false, "print build metadata and exit")
+	PrintHelp      = flag.Bool("help", false, "print help and exit")
+	LogDir         = flag.String("log-dir", "./logs", "specify the log directory")
 )
 
 func printHelp() {
@@ -27,7 +28,7 @@ func printHelp() {
 	fmt.Println("Repository: MisonL/new-api - https://github.com/MisonL/new-api")
 	fmt.Println("Upstream: QuantumNous/new-api - https://github.com/QuantumNous/new-api")
 	fmt.Println("Original Project: OneAPI by JustSong - https://github.com/songquanpeng/one-api")
-	fmt.Println("Usage: newapi [--port <port>] [--log-dir <log directory>] [--version] [--help]")
+	fmt.Println("Usage: newapi [--port <port>] [--log-dir <log directory>] [--version] [--build-info] [--help]")
 }
 
 func resolveVersion() string {
@@ -49,6 +50,13 @@ func InitEnv() {
 
 	if *PrintVersion {
 		fmt.Println(Version)
+		os.Exit(0)
+	}
+
+	if *PrintBuildInfo {
+		for _, line := range BuildInfoLines() {
+			fmt.Println(line)
+		}
 		os.Exit(0)
 	}
 

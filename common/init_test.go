@@ -2,6 +2,76 @@ package common
 
 import "testing"
 
+func TestBuildInfoLinesNormalizeEmptyValues(t *testing.T) {
+	oldVersion := Version
+	oldCommit := BuildCommit
+	oldDate := BuildDate
+	oldSource := BuildSource
+	t.Cleanup(func() {
+		Version = oldVersion
+		BuildCommit = oldCommit
+		BuildDate = oldDate
+		BuildSource = oldSource
+	})
+
+	Version = " v-test "
+	BuildCommit = ""
+	BuildDate = " 2026-05-01T00:00:00Z "
+	BuildSource = " "
+
+	lines := BuildInfoLines()
+	expected := []string{
+		"version=v-test",
+		"commit=unknown",
+		"date=2026-05-01T00:00:00Z",
+		"source=unknown",
+	}
+	for i := range expected {
+		if lines[i] != expected[i] {
+			t.Fatalf("line %d: got %q, want %q", i, lines[i], expected[i])
+		}
+	}
+}
+
+func TestBuildSummaryUsesVersionOnlyWithoutMetadata(t *testing.T) {
+	oldVersion := Version
+	oldCommit := BuildCommit
+	oldDate := BuildDate
+	t.Cleanup(func() {
+		Version = oldVersion
+		BuildCommit = oldCommit
+		BuildDate = oldDate
+	})
+
+	Version = "v-test"
+	BuildCommit = "unknown"
+	BuildDate = ""
+
+	if summary := BuildSummary(); summary != "v-test" {
+		t.Fatalf("unexpected summary: %q", summary)
+	}
+}
+
+func TestBuildSummaryIncludesMetadata(t *testing.T) {
+	oldVersion := Version
+	oldCommit := BuildCommit
+	oldDate := BuildDate
+	t.Cleanup(func() {
+		Version = oldVersion
+		BuildCommit = oldCommit
+		BuildDate = oldDate
+	})
+
+	Version = "v-test"
+	BuildCommit = "abc123"
+	BuildDate = "2026-05-01T00:00:00Z"
+
+	expected := "v-test commit=abc123 built=2026-05-01T00:00:00Z"
+	if summary := BuildSummary(); summary != expected {
+		t.Fatalf("unexpected summary: %q", summary)
+	}
+}
+
 func TestResolveSecretsFromEnvRejectsMissingSecrets(t *testing.T) {
 	_, _, err := resolveSecretsFromEnv("", "")
 	if err == nil {

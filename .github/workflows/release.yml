@@ -3,6 +3,7 @@ permissions:
   contents: write
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  BUILD_SOURCE: https://github.com/${{ github.repository }}
 
 on:
   workflow_dispatch:
@@ -65,14 +66,14 @@ jobs:
         run: |
           go mod download
           OUTPUT_FILE="new-api_${VERSION_NO_V}_linux_amd64"
-          go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION' -extldflags '-static'" -o "$OUTPUT_FILE"
+          go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION' -X 'github.com/QuantumNous/new-api/common.BuildCommit=$(git rev-parse HEAD)' -X 'github.com/QuantumNous/new-api/common.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'github.com/QuantumNous/new-api/common.BuildSource=$BUILD_SOURCE' -extldflags '-static'" -o "$OUTPUT_FILE"
           echo "OUTPUT_LINUX_AMD64=$OUTPUT_FILE" >> "$GITHUB_ENV"
       - name: Build Backend (arm64)
         run: |
           sudo apt-get update
           DEBIAN_FRONTEND=noninteractive sudo apt-get install -y gcc-aarch64-linux-gnu
           OUTPUT_FILE="new-api_${VERSION_NO_V}_linux_arm64"
-          CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION' -extldflags '-static'" -o "$OUTPUT_FILE"
+          CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION' -X 'github.com/QuantumNous/new-api/common.BuildCommit=$(git rev-parse HEAD)' -X 'github.com/QuantumNous/new-api/common.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'github.com/QuantumNous/new-api/common.BuildSource=$BUILD_SOURCE' -extldflags '-static'" -o "$OUTPUT_FILE"
           echo "OUTPUT_LINUX_ARM64=$OUTPUT_FILE" >> "$GITHUB_ENV"
       - name: Generate checksums
         run: |
@@ -150,7 +151,7 @@ jobs:
               ;;
           esac
           OUTPUT_FILE="new-api_${VERSION_NO_V}_macos_${TARGET_ARCH}"
-          GOOS=darwin GOARCH="$TARGET_ARCH" go build -ldflags "-X 'github.com/QuantumNous/new-api/common.Version=$VERSION'" -o "$OUTPUT_FILE"
+          GOOS=darwin GOARCH="$TARGET_ARCH" go build -ldflags "-X 'github.com/QuantumNous/new-api/common.Version=$VERSION' -X 'github.com/QuantumNous/new-api/common.BuildCommit=$(git rev-parse HEAD)' -X 'github.com/QuantumNous/new-api/common.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'github.com/QuantumNous/new-api/common.BuildSource=$BUILD_SOURCE'" -o "$OUTPUT_FILE"
           echo "OUTPUT_MACOS=$OUTPUT_FILE" >> "$GITHUB_ENV"
       - name: Generate checksums
         run: |
@@ -220,7 +221,7 @@ jobs:
         run: |
           go mod download
           OUTPUT_FILE="new-api_${VERSION_NO_V}_windows_amd64.exe"
-          GOOS=windows GOARCH=amd64 go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION'" -o "$OUTPUT_FILE"
+          GOOS=windows GOARCH=amd64 go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION' -X 'github.com/QuantumNous/new-api/common.BuildCommit=$(git rev-parse HEAD)' -X 'github.com/QuantumNous/new-api/common.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'github.com/QuantumNous/new-api/common.BuildSource=$BUILD_SOURCE'" -o "$OUTPUT_FILE"
           echo "OUTPUT_WINDOWS=$OUTPUT_FILE" >> "$GITHUB_ENV"
       - name: Generate checksums
         run: |

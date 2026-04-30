@@ -149,6 +149,23 @@ docker compose ps
 curl -fsS http://127.0.0.1:3000/api/status
 ```
 
+### 本地 Docker 构建
+
+本地正式镜像建议使用脚本构建，脚本会把版本、Git commit、构建时间和源码地址写入镜像标签与二进制构建信息：
+
+```bash
+scripts/build-docker-local.sh new-api-local:prod-main
+```
+
+构建后可核对：
+
+```bash
+docker image inspect new-api-local:prod-main
+docker run --rm new-api-local:prod-main --build-info
+```
+
+如果工作区存在未提交改动，脚本会在 commit 后追加 `-dirty`，避免把未提交内容伪装成干净提交。
+
 ### 升级（不丢配置）
 
 1. 备份当前配置与数据（至少包括 `.env`、数据目录、数据库卷）。

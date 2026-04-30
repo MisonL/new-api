@@ -71,6 +71,12 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Publishing version: $VERSION from $SOURCE_SHA for ${{ matrix.arch }}"
 
+      - name: Resolve build metadata
+        id: build_meta
+        run: |
+          echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+          echo "source=https://github.com/${GITHUB_REPOSITORY}" >> "$GITHUB_OUTPUT"
+
       - name: Prepare registry targets
         id: registry
         run: |
@@ -129,6 +135,11 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.value }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.value }}
+            VCS_REF=${{ needs.resolve_alpha_source.outputs.source_sha }}
+            BUILD_DATE=${{ steps.build_meta.outputs.created }}
+            SOURCE_URL=${{ steps.build_meta.outputs.source }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max

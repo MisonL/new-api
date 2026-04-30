@@ -39,6 +39,7 @@ jobs:
           ref: refs/tags/${{ github.event.inputs.tag }}
 
       - name: Resolve tag & validate VERSION
+        id: version
         run: |
           TAG="${{ github.event.inputs.tag }}"
           # Verify tag exists
@@ -56,6 +57,9 @@ jobs:
             exit 1
           fi
           echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+          echo "source=https://github.com/${GITHUB_REPOSITORY}" >> "$GITHUB_OUTPUT"
           echo "Building tag: $TAG for ${{ matrix.arch }}"
 
       - name: Prepare registry targets
@@ -116,6 +120,11 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.value }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ env.TAG }}
+            VCS_REF=${{ steps.version.outputs.source_sha }}
+            BUILD_DATE=${{ steps.version.outputs.created }}
+            SOURCE_URL=${{ steps.version.outputs.source }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max

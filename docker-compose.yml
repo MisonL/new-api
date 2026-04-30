@@ -10,11 +10,11 @@
 #   3. Uncomment mysql in depends_on (line 28)
 #   4. Uncomment mysql_data in volumes section (line 64)
 #
-# ⚠️  IMPORTANT: Change all default passwords before deploying to production!
+# IMPORTANT: Change all default passwords before deploying to production.
 
 services:
   new-api:
-    image: ${NEW_API_IMAGE:-new-api-local:prod-20260412-080601}
+    image: ${NEW_API_IMAGE:-new-api-local:prod-main}
     container_name: new-api
     restart: always
     command: --log-dir /app/logs
@@ -70,7 +70,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: root
-      POSTGRES_PASSWORD: 123456  # ⚠️ IMPORTANT: Change this password in production!
+      POSTGRES_PASSWORD: 123456  # IMPORTANT: Change this password in production.
       POSTGRES_DB: new-api
     volumes:
       - pg_data:/var/lib/postgresql/data
@@ -84,7 +84,7 @@ services:
 #    container_name: mysql
 #    restart: always
 #    environment:
-#      MYSQL_ROOT_PASSWORD: 123456  # ⚠️ IMPORTANT: Change this password in production!
+#      MYSQL_ROOT_PASSWORD: 123456  # IMPORTANT: Change this password in production.
 #      MYSQL_DATABASE: new-api
 #    volumes:
 #      - mysql_data:/var/lib/mysql
