@@ -28,6 +28,8 @@ func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 		"User-Agent",
 		"X-Codex-Beta-Features",
 		"X-Codex-Turn-Metadata",
+		"X-Codex-Window-Id",
+		"X-Client-Request-Id",
 	}, operation_setting.CodexCliPassThroughHeaders)
 	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "User-Agent")
 	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "X-App")
@@ -256,5 +258,9 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	_, exists := info.RuntimeHeadersOverride["x-codex-beta-features"]
 	require.False(t, exists)
 	_, exists = info.RuntimeHeadersOverride["x-codex-turn-metadata"]
+	require.False(t, exists)
+	_, exists = info.RuntimeHeadersOverride["x-codex-window-id"]
+	require.False(t, exists)
+	_, exists = info.RuntimeHeadersOverride["x-client-request-id"]
 	require.False(t, exists)
 }

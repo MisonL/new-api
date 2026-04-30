@@ -209,8 +209,8 @@ func TestPrepareChannelTestRequestHeadersSeedsAndFreezesHeaderProfile(t *testing
 
 	require.NoError(t, err)
 	require.Equal(t, "codex-cli", profileID)
-	require.Equal(t, "OpenAI Codex CLI/0.1", ctx.Request.Header.Get("User-Agent"))
-	require.Equal(t, "codex-cli", ctx.Request.Header.Get("X-Client-Name"))
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, ctx.Request.Header.Get("User-Agent"))
+	require.Equal(t, dto.BuiltinCodexCLIOriginator, ctx.Request.Header.Get("Originator"))
 
 	settings, err := parseChannelTestOtherSettings(channel)
 	require.NoError(t, err)
@@ -243,15 +243,15 @@ func TestPreparedHeaderProfileFeedsChannelTestPassHeaders(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		IsChannelTest: true,
 		RequestHeaders: map[string]string{
-			"User-Agent":    ctx.Request.Header.Get("User-Agent"),
-			"X-Client-Name": ctx.Request.Header.Get("X-Client-Name"),
+			"User-Agent": ctx.Request.Header.Get("User-Agent"),
+			"Originator": ctx.Request.Header.Get("Originator"),
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ParamOverride: map[string]interface{}{
 				"operations": []interface{}{
 					map[string]interface{}{
 						"mode":  "pass_headers",
-						"value": []interface{}{"User-Agent", "X-Client-Name"},
+						"value": []interface{}{"User-Agent", "Originator"},
 					},
 				},
 			},
@@ -262,8 +262,8 @@ func TestPreparedHeaderProfileFeedsChannelTestPassHeaders(t *testing.T) {
 	_, err = relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"gpt-5.5"}`), info)
 	require.NoError(t, err)
 	headers := relaycommon.GetEffectiveHeaderOverride(info)
-	require.Equal(t, "OpenAI Codex CLI/0.1", headers["user-agent"])
-	require.Equal(t, "codex-cli", headers["x-client-name"])
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers["user-agent"])
+	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers["originator"])
 }
 
 func TestApplyChannelTestSourceHeadersSkipsSensitiveHeaders(t *testing.T) {
@@ -295,7 +295,7 @@ func TestFinalizeChannelTestRuntimeSummaryMarksRuntimeHeaderParamOverrideApplied
 	info := &relaycommon.RelayInfo{
 		UseRuntimeHeadersOverride: true,
 		RuntimeHeadersOverride: map[string]interface{}{
-			"user-agent": "OpenAI Codex CLI/0.1",
+			"user-agent": dto.BuiltinCodexCLIUserAgent,
 		},
 	}
 

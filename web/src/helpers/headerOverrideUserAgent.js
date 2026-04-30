@@ -63,7 +63,11 @@ export const HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS = [
     key: 'ai-coding-cli',
     label: 'AI Coding CLI（固定 UA）',
     items: [
-      { id: 'codex-cli', label: 'Codex CLI 固定 UA', ua: 'codex-cli/1.0.0' },
+      {
+        id: 'codex-cli',
+        label: 'Codex CLI 固定 UA',
+        ua: 'codex_exec/0.125.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.125.0)',
+      },
       {
         id: 'claude-code',
         label: 'Claude Code 固定 UA',

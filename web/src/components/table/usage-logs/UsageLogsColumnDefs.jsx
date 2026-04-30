@@ -95,6 +95,138 @@ function buildChannelAffinityTooltip(affinity, t) {
   );
 }
 
+function formatChannelStatus(status, t) {
+  switch (Number(status)) {
+    case 1:
+      return t('已启用');
+    case 2:
+      return t('已禁用');
+    case 3:
+      return t('自动禁用');
+    default:
+      return t('未知状态');
+  }
+}
+
+function normalizeDisplayValue(value) {
+  if (value === undefined || value === null || value === '') {
+    return '';
+  }
+  return String(value).trim();
+}
+
+function addChannelInfoRow(rows, label, value, className = '') {
+  const normalized = normalizeDisplayValue(value);
+  if (!normalized) {
+    return;
+  }
+  rows.push({ label, value: normalized, className });
+}
+
+function renderChannelInfoTooltip(record, options, t) {
+  const detail = record?.channel_detail || {};
+  const other = getLogOther(record?.other);
+  const policy = getRequestHeaderPolicy(record);
+  const routeText = normalizeDisplayValue(
+    options?.routeText || record?.channel,
+  );
+  const channelName =
+    detail.name || record?.channel_name || other?.channel_name || t('未知渠道');
+  const channelType = detail.type_name
+    ? `${detail.type_name}${detail.type ? ` (#${detail.type})` : ''}`
+    : detail.type
+      ? `#${detail.type}`
+      : '';
+  const modelsCount = Number(detail.models_count || 0);
+  const multiKeyText =
+    detail.is_multi_key || options?.isMultiKey
+      ? `${t('是')}${detail.multi_key_size ? ` / ${t('共')} ${detail.multi_key_size}` : ''}`
+      : '';
+  const selectedKeyText =
+    Number.isInteger(options?.multiKeyIndex) && options.multiKeyIndex >= 0
+      ? `#${options.multiKeyIndex}`
+      : '';
+  const userAgent = getAppliedUserAgent(policy);
+  const headerKeys = getAppliedHeaderKeys(policy);
+  const rows = [];
+
+  addChannelInfoRow(rows, `${t('渠道')} ID`, record?.channel || detail.id);
+  addChannelInfoRow(rows, t('名称'), channelName);
+  addChannelInfoRow(rows, t('类型'), channelType);
+  if (detail.status !== undefined && detail.status !== null) {
+    addChannelInfoRow(rows, t('状态'), formatChannelStatus(detail.status, t));
+  }
+  addChannelInfoRow(rows, t('API地址'), detail.base_url, 'is-code');
+  addChannelInfoRow(rows, t('标签'), detail.tag);
+  addChannelInfoRow(rows, t('分组'), detail.group);
+  if (modelsCount > 0) {
+    addChannelInfoRow(rows, t('模型'), `${modelsCount}`);
+  }
+  addChannelInfoRow(rows, t('默认测试模型'), detail.test_model, 'is-code');
+  if (detail.response_time) {
+    addChannelInfoRow(rows, t('响应时间'), `${detail.response_time} ms`);
+  }
+  addChannelInfoRow(rows, t('优先级'), detail.priority);
+  addChannelInfoRow(rows, t('权重'), detail.weight);
+  if (detail.auto_ban !== undefined && detail.auto_ban !== null) {
+    addChannelInfoRow(rows, t('自动禁用'), detail.auto_ban ? t('是') : t('否'));
+  }
+  addChannelInfoRow(rows, t('密钥'), multiKeyText);
+  addChannelInfoRow(rows, t('Key'), selectedKeyText);
+  addChannelInfoRow(rows, t('本次路由'), routeText, 'is-code');
+  addChannelInfoRow(rows, t('请求路径'), other?.request_path, 'is-code');
+  addChannelInfoRow(
+    rows,
+    t('请求头策略'),
+    formatRequestHeaderPolicyMode(policy?.mode, t),
+  );
+  addChannelInfoRow(rows, t('请求头模板'), policy?.header_profile_id);
+  addChannelInfoRow(rows, t('UA 策略'), policy?.ua_strategy_mode);
+  addChannelInfoRow(rows, t('已选 UA'), userAgent, 'is-code');
+  addChannelInfoRow(rows, t('应用请求头'), headerKeys.join(', '), 'is-code');
+
+  if (!rows.length) {
+    return channelName;
+  }
+
+  return (
+    <div className='usage-log-channel-tooltip'>
+      <div className='usage-log-channel-tooltip-title'>
+        <Typography.Text strong>{t('渠道信息')}</Typography.Text>
+        {detail.type_name ? (
+          <Tag color='blue' shape='circle' size='small'>
+            {detail.type_name}
+          </Tag>
+        ) : null}
+      </div>
+      <div className='usage-log-channel-tooltip-grid'>
+        {rows.map(({ label, value, className }) => (
+          <React.Fragment key={label}>
+            <Typography.Text
+              type='tertiary'
+              className='usage-log-channel-tooltip-label'
+            >
+              {label}
+            </Typography.Text>
+            <Typography.Text
+              className={['usage-log-channel-tooltip-value', className]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              {value}
+            </Typography.Text>
+          </React.Fragment>
+        ))}
+      </div>
+      {options?.affinity ? (
+        <div className='usage-log-channel-tooltip-affinity'>
+          {buildChannelAffinityTooltip(options.affinity, t)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // Render functions
 function renderType(type, t) {
   switch (type) {
@@ -526,12 +658,7 @@ function renderRequestUserAgentCell(record, t) {
 
   return renderRequestHeaderPolicyTooltip(
     policy,
-    <Typography.Text
-      className='usage-log-user-agent-text'
-      ellipsis={{ showTooltip: false }}
-    >
-      {userAgent}
-    </Typography.Text>,
+    <span className='usage-log-user-agent-text'>{userAgent}</span>,
     t,
   );
 }
@@ -684,6 +811,7 @@ export const getLogsColumns = ({
         let isMultiKey = false;
         let multiKeyIndex = -1;
         let content = t('渠道') + `：${record.channel}`;
+        let routeText = String(record.channel || '');
         let affinity = null;
         let showMarker = false;
         let other = getLogOther(record.other);
@@ -697,7 +825,8 @@ export const getLogsColumns = ({
             Array.isArray(adminInfo.use_channel) &&
             adminInfo.use_channel.length > 0
           ) {
-            content = t('渠道') + `：${adminInfo.use_channel.join('->')}`;
+            routeText = adminInfo.use_channel.join(' -> ');
+            content = t('渠道') + `：${routeText}`;
           }
           if (adminInfo.channel_affinity) {
             affinity = adminInfo.channel_affinity;
@@ -712,7 +841,20 @@ export const getLogsColumns = ({
             record.type === 6) ? (
           <Space>
             <span style={{ position: 'relative', display: 'inline-block' }}>
-              <Tooltip content={record.channel_name || t('未知渠道')}>
+              <Tooltip
+                content={renderChannelInfoTooltip(
+                  record,
+                  {
+                    routeText,
+                    isMultiKey,
+                    multiKeyIndex,
+                    affinity,
+                  },
+                  t,
+                )}
+                position='topLeft'
+                showArrow
+              >
                 <span>
                   <Tag
                     color={colors[parseInt(text) % colors.length]}
@@ -895,30 +1037,6 @@ export const getLogsColumns = ({
       },
     },
     {
-      key: COLUMN_KEYS.REQUEST_UA,
-      title: t('已选 UA'),
-      dataIndex: 'other',
-      width: 220,
-      render: (text, record) => {
-        if (!(isAdminUser && (record.type === 2 || record.type === 5))) {
-          return <></>;
-        }
-        return renderRequestUserAgentCell(record, t);
-      },
-    },
-    {
-      key: COLUMN_KEYS.REQUEST_HEADERS,
-      title: t('应用请求头'),
-      dataIndex: 'other',
-      width: 190,
-      render: (text, record) => {
-        if (!(isAdminUser && (record.type === 2 || record.type === 5))) {
-          return <></>;
-        }
-        return renderRequestHeaderKeysCell(record, t);
-      },
-    },
-    {
       key: COLUMN_KEYS.USE_TIME,
       title: t('用时/首字'),
       dataIndex: 'use_time',
@@ -947,6 +1065,30 @@ export const getLogsColumns = ({
             </>
           );
         }
+      },
+    },
+    {
+      key: COLUMN_KEYS.REQUEST_UA,
+      title: t('已选 UA'),
+      dataIndex: 'other',
+      width: 160,
+      render: (text, record) => {
+        if (!(isAdminUser && (record.type === 2 || record.type === 5))) {
+          return <></>;
+        }
+        return renderRequestUserAgentCell(record, t);
+      },
+    },
+    {
+      key: COLUMN_KEYS.REQUEST_HEADERS,
+      title: t('应用请求头'),
+      dataIndex: 'other',
+      width: 150,
+      render: (text, record) => {
+        if (!(isAdminUser && (record.type === 2 || record.type === 5))) {
+          return <></>;
+        }
+        return renderRequestHeaderKeysCell(record, t);
       },
     },
     {

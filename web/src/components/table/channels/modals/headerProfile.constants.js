@@ -74,15 +74,24 @@ const buildAiCodingCliProfile = (
   },
 });
 
+const CODEX_CLI_USER_AGENT =
+  'codex_exec/0.125.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.125.0)';
+
 const aiCodingCliProfiles = {
-  'codex-cli': buildAiCodingCliProfile(
-    'codex-cli',
-    'Codex CLI',
-    'OpenAI Codex CLI/0.1',
-    'codex-cli',
-    '固定请求头只用于普通渠道标识；Codex 官方客户端限制场景还需要在高级设置中启用 Codex CLI 真实请求头透传。',
-    true,
-  ),
+  'codex-cli': {
+    key: 'codex-cli',
+    name: 'Codex CLI',
+    group: 'ai_coding_cli',
+    scope: 'builtin',
+    readonly: true,
+    passthroughRequired: true,
+    description:
+      '固定请求头是 Codex CLI 0.125.0 的静态快照；真实 CLI 会携带会话与窗口动态头，需在高级参数覆盖中启用 Codex CLI 请求头透传模板。',
+    headers: {
+      'User-Agent': CODEX_CLI_USER_AGENT,
+      Originator: 'codex_exec',
+    },
+  },
   'claude-code': buildAiCodingCliProfile(
     'claude-code',
     'Claude Code',

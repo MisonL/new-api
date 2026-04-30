@@ -417,8 +417,8 @@ func TestBuildFetchModelsHeadersAppliesHeaderProfileStrategy(t *testing.T) {
 
 	headers, err := buildFetchModelsHeaders(channel, "sk-test")
 	require.NoError(t, err)
-	require.Equal(t, "OpenAI Codex CLI/0.1", headers.Get("User-Agent"))
-	require.Equal(t, "codex-cli", headers.Get("X-Client-Name"))
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers.Get("User-Agent"))
+	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers.Get("Originator"))
 	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
 }
 
@@ -454,7 +454,7 @@ func TestBuildChannelRuntimeRequestHeadersKeepsCustomAuthHeader(t *testing.T) {
 	headers, err := service.BuildChannelRuntimeRequestHeaders(channel, "sk-balance", baseHeaders)
 	require.NoError(t, err)
 	require.Equal(t, "sk-balance", headers.Get("Api-Key"))
-	require.Equal(t, "OpenAI Codex CLI/0.1", headers.Get("User-Agent"))
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers.Get("User-Agent"))
 }
 
 func TestApplyRuntimeRequestHeadersSetsHost(t *testing.T) {

@@ -556,24 +556,37 @@ body.sidebar-resizing * {
 }
 
 .usage-log-user-agent-text {
-  display: inline-block;
-  max-width: 210px;
+  display: -webkit-box;
+  max-width: 150px;
+  max-height: calc(1.35em * 2);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--semi-color-text-1);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
   vertical-align: middle;
+  white-space: normal;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .usage-log-header-key-list {
   display: inline-flex;
-  max-width: 180px;
-  align-items: center;
+  max-width: 140px;
+  max-height: 44px;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 4px;
   overflow: hidden;
   vertical-align: middle;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .usage-log-header-key-text {
   display: inline-block;
-  max-width: 86px;
+  max-width: 70px;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: bottom;
@@ -599,6 +612,57 @@ body.sidebar-resizing * {
 .usage-log-header-audit-line {
   display: flex;
   gap: 4px;
+}
+
+.usage-log-channel-tooltip {
+  width: min(420px, calc(100vw - 32px));
+  max-width: 420px;
+  max-height: min(640px, calc(100vh - 96px));
+  padding-right: 2px;
+  overflow-y: auto;
+  color: var(--semi-color-text-0);
+  overscroll-behavior: contain;
+}
+
+.usage-log-channel-tooltip-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--semi-color-border);
+}
+
+.usage-log-channel-tooltip-grid {
+  display: grid;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 7px;
+  align-items: start;
+}
+
+.usage-log-channel-tooltip-label {
+  white-space: nowrap;
+}
+
+.usage-log-channel-tooltip-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.usage-log-channel-tooltip-value.is-code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.usage-log-channel-tooltip-affinity {
+  padding-top: 8px;
+  margin-top: 8px;
+  border-top: 1px dashed var(--semi-color-border);
 }
 
 .usage-logs-table .semi-table-expanded-row > .semi-table-row-cell {

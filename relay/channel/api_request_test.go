@@ -143,15 +143,14 @@ func TestProcessHeaderOverride_AppliesBuiltinHeaderProfile(t *testing.T) {
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	require.Equal(t, "OpenAI Codex CLI/0.1", headers["user-agent"])
-	require.Equal(t, "codex-cli", headers["x-client-name"])
-	require.Equal(t, "terminal", headers["x-client-platform"])
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers["user-agent"])
+	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers["originator"])
 
 	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
 	require.True(t, ok)
 	require.Equal(t, "prefer_channel", audit.HeaderPolicyMode)
-	require.Equal(t, "OpenAI Codex CLI/0.1", audit.AppliedUserAgent)
-	require.ElementsMatch(t, []string{"user-agent", "x-client-name", "x-client-platform"}, audit.AppliedHeaderKeys)
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, audit.AppliedUserAgent)
+	require.ElementsMatch(t, []string{"user-agent", "originator"}, audit.AppliedHeaderKeys)
 }
 
 func TestProcessHeaderOverride_LegacyOverrideCreatesAuditWhenMissing(t *testing.T) {
@@ -283,8 +282,8 @@ func TestDoTaskApiRequestAppliesHeaderOverride(t *testing.T) {
 	require.NotNil(t, resp)
 	defer resp.Body.Close()
 
-	require.Equal(t, "OpenAI Codex CLI/0.1", upstreamHeaders.Get("User-Agent"))
-	require.Equal(t, "codex-cli", upstreamHeaders.Get("X-Client-Name"))
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, upstreamHeaders.Get("User-Agent"))
+	require.Equal(t, dto.BuiltinCodexCLIOriginator, upstreamHeaders.Get("Originator"))
 	require.Equal(t, "yes", upstreamHeaders.Get("X-Static"))
 	require.Equal(t, "Bearer override", upstreamHeaders.Get("Authorization"))
 }

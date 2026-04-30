@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
 	"github.com/gin-gonic/gin"
@@ -113,8 +114,8 @@ func TestGenerateTextOtherInfoIncludesRequestHeaderPolicyAudit(t *testing.T) {
 		HeaderProfileMode:       "fixed",
 		HeaderProfileApplied:    true,
 		UserAgentApplied:        true,
-		SelectedUserAgent:       "codex-cli/1.0.0",
-		AppliedUserAgent:        "codex-cli/1.0.0",
+		SelectedUserAgent:       dto.BuiltinCodexCLIUserAgent,
+		AppliedUserAgent:        dto.BuiltinCodexCLIUserAgent,
 		UserAgentStrategyMode:   "round_robin",
 		UserAgentStrategyScope:  "tag:new.xem8k5.top",
 		OverrideStaticUserAgent: true,
@@ -129,8 +130,8 @@ func TestGenerateTextOtherInfoIncludesRequestHeaderPolicyAudit(t *testing.T) {
 	require.Equal(t, true, info["header_profile_applied"])
 	require.Equal(t, "round_robin", info["ua_strategy_mode"])
 	require.Equal(t, "tag:new.xem8k5.top", info["ua_strategy_scope"])
-	require.Equal(t, "codex-cli/1.0.0", info["selected_user_agent"])
-	require.Equal(t, "codex-cli/1.0.0", info["applied_user_agent"])
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, info["selected_user_agent"])
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, info["applied_user_agent"])
 	require.Equal(t, true, info["override_static_user_agent"])
 	require.Equal(t, true, info["user_agent_applied"])
 	require.Equal(t, []string{"User-Agent", "X-Test"}, info["applied_header_keys"])

@@ -482,8 +482,8 @@ func TestBuildChannelRuntimeRequestHeadersAppliesChannelAuxiliaryPolicy(t *testi
 	require.NoError(t, err)
 	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
 	require.Equal(t, "enabled", headers.Get("X-Debug"))
-	require.Equal(t, "OpenAI Codex CLI/0.1", headers.Get("User-Agent"))
-	require.Equal(t, "codex-cli", headers.Get("X-Client-Name"))
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers.Get("User-Agent"))
+	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers.Get("Originator"))
 }
 
 func TestBuildChannelRuntimeRequestHeadersAppliesOverrideWhenProfileDisabled(t *testing.T) {

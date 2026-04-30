@@ -33,6 +33,8 @@ export const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'User-Agent',
   'X-Codex-Beta-Features',
   'X-Codex-Turn-Metadata',
+  'X-Codex-Window-Id',
+  'X-Client-Request-Id',
 ];
 
 export const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [

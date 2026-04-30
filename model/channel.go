@@ -401,6 +401,31 @@ func BatchInsertChannels(channels []Channel) error {
 	return tx.Commit().Error
 }
 
+func InsertChannel(channel *Channel) error {
+	if channel == nil {
+		return errors.New("channel is nil")
+	}
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	if err := tx.Create(channel).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := channel.AddAbilities(tx); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit().Error
+}
+
 func BatchDeleteChannels(ids []int) error {
 	if len(ids) == 0 {
 		return nil

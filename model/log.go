@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -18,26 +19,46 @@ import (
 )
 
 type Log struct {
-	Id               int    `json:"id" gorm:"index:idx_created_at_id,priority:1;index:idx_user_id_id,priority:2;index:idx_logs_username_token_type_created_id,priority:5;index:idx_logs_username_model_type_created_id,priority:5;index:idx_logs_username_group_type_created_id,priority:5;index:idx_logs_model_group_type_created_id,priority:5;index:idx_logs_token_model_type_created_id,priority:5;index:idx_logs_channel_model_type_created_id,priority:5;index:idx_logs_token_group_type_created_id,priority:5;index:idx_logs_channel_group_type_created_id,priority:5;index:idx_logs_username_token_group_type_created_id,priority:6"`
-	UserId           int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1;index:idx_logs_user_created_at,priority:1;index:idx_logs_user_type_created_at,priority:1"`
-	CreatedAt        int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:2;index:idx_created_at_type;index:idx_logs_type_created_at,priority:2;index:idx_logs_user_created_at,priority:2;index:idx_logs_username_created_at,priority:2;index:idx_logs_token_created_at,priority:2;index:idx_logs_model_created_at,priority:2;index:idx_logs_channel_created_at,priority:2;index:idx_logs_group_created_at,priority:2;index:idx_logs_user_type_created_at,priority:3;index:idx_logs_username_type_created_at,priority:3;index:idx_logs_token_type_created_at,priority:3;index:idx_logs_model_type_created_at,priority:3;index:idx_logs_channel_type_created_at,priority:3;index:idx_logs_group_type_created_at,priority:3;index:idx_logs_username_token_type_created_id,priority:4;index:idx_logs_username_model_type_created_id,priority:4;index:idx_logs_username_group_type_created_id,priority:4;index:idx_logs_model_group_type_created_id,priority:4;index:idx_logs_token_model_type_created_id,priority:4;index:idx_logs_channel_model_type_created_id,priority:4;index:idx_logs_token_group_type_created_id,priority:4;index:idx_logs_channel_group_type_created_id,priority:4;index:idx_logs_username_token_group_type_created_id,priority:5"`
-	Type             int    `json:"type" gorm:"index:idx_created_at_type;index:idx_logs_type_created_at,priority:1;index:idx_logs_user_type_created_at,priority:2;index:idx_logs_username_type_created_at,priority:2;index:idx_logs_token_type_created_at,priority:2;index:idx_logs_model_type_created_at,priority:2;index:idx_logs_channel_type_created_at,priority:2;index:idx_logs_group_type_created_at,priority:2;index:idx_logs_username_token_type_created_id,priority:3;index:idx_logs_username_model_type_created_id,priority:3;index:idx_logs_username_group_type_created_id,priority:3;index:idx_logs_model_group_type_created_id,priority:3;index:idx_logs_token_model_type_created_id,priority:3;index:idx_logs_channel_model_type_created_id,priority:3;index:idx_logs_token_group_type_created_id,priority:3;index:idx_logs_channel_group_type_created_id,priority:3;index:idx_logs_username_token_group_type_created_id,priority:4"`
-	Content          string `json:"content"`
-	Username         string `json:"username" gorm:"index;index:index_username_model_name,priority:2;index:idx_logs_username_created_at,priority:1;index:idx_logs_username_type_created_at,priority:1;index:idx_logs_username_token_type_created_id,priority:1;index:idx_logs_username_model_type_created_id,priority:1;index:idx_logs_username_group_type_created_id,priority:1;index:idx_logs_username_token_group_type_created_id,priority:1;default:''"`
-	TokenName        string `json:"token_name" gorm:"index;index:idx_logs_token_created_at,priority:1;index:idx_logs_token_type_created_at,priority:1;index:idx_logs_username_token_type_created_id,priority:2;index:idx_logs_token_model_type_created_id,priority:1;index:idx_logs_token_group_type_created_id,priority:1;index:idx_logs_username_token_group_type_created_id,priority:2;default:''"`
-	ModelName        string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;index:idx_logs_model_created_at,priority:1;index:idx_logs_model_type_created_at,priority:1;index:idx_logs_username_model_type_created_id,priority:2;index:idx_logs_model_group_type_created_id,priority:1;index:idx_logs_token_model_type_created_id,priority:2;index:idx_logs_channel_model_type_created_id,priority:2;default:''"`
-	Quota            int    `json:"quota" gorm:"default:0"`
-	PromptTokens     int    `json:"prompt_tokens" gorm:"default:0"`
-	CompletionTokens int    `json:"completion_tokens" gorm:"default:0"`
-	UseTime          int    `json:"use_time" gorm:"default:0"`
-	IsStream         bool   `json:"is_stream"`
-	ChannelId        int    `json:"channel" gorm:"index;index:idx_logs_channel_created_at,priority:1;index:idx_logs_channel_type_created_at,priority:1;index:idx_logs_channel_model_type_created_id,priority:1;index:idx_logs_channel_group_type_created_id,priority:1"`
-	ChannelName      string `json:"channel_name" gorm:"->"`
-	TokenId          int    `json:"token_id" gorm:"default:0;index"`
-	Group            string `json:"group" gorm:"index;index:idx_logs_group_created_at,priority:1;index:idx_logs_group_type_created_at,priority:1;index:idx_logs_username_group_type_created_id,priority:2;index:idx_logs_model_group_type_created_id,priority:2;index:idx_logs_token_group_type_created_id,priority:2;index:idx_logs_channel_group_type_created_id,priority:2;index:idx_logs_username_token_group_type_created_id,priority:3"`
-	Ip               string `json:"ip" gorm:"index;default:''"`
-	RequestId        string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
-	Other            string `json:"other"`
+	Id               int               `json:"id" gorm:"index:idx_created_at_id,priority:1;index:idx_user_id_id,priority:2;index:idx_logs_username_token_type_created_id,priority:5;index:idx_logs_username_model_type_created_id,priority:5;index:idx_logs_username_group_type_created_id,priority:5;index:idx_logs_model_group_type_created_id,priority:5;index:idx_logs_token_model_type_created_id,priority:5;index:idx_logs_channel_model_type_created_id,priority:5;index:idx_logs_token_group_type_created_id,priority:5;index:idx_logs_channel_group_type_created_id,priority:5;index:idx_logs_username_token_group_type_created_id,priority:6"`
+	UserId           int               `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1;index:idx_logs_user_created_at,priority:1;index:idx_logs_user_type_created_at,priority:1"`
+	CreatedAt        int64             `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:2;index:idx_created_at_type;index:idx_logs_type_created_at,priority:2;index:idx_logs_user_created_at,priority:2;index:idx_logs_username_created_at,priority:2;index:idx_logs_token_created_at,priority:2;index:idx_logs_model_created_at,priority:2;index:idx_logs_channel_created_at,priority:2;index:idx_logs_group_created_at,priority:2;index:idx_logs_user_type_created_at,priority:3;index:idx_logs_username_type_created_at,priority:3;index:idx_logs_token_type_created_at,priority:3;index:idx_logs_model_type_created_at,priority:3;index:idx_logs_channel_type_created_at,priority:3;index:idx_logs_group_type_created_at,priority:3;index:idx_logs_username_token_type_created_id,priority:4;index:idx_logs_username_model_type_created_id,priority:4;index:idx_logs_username_group_type_created_id,priority:4;index:idx_logs_model_group_type_created_id,priority:4;index:idx_logs_token_model_type_created_id,priority:4;index:idx_logs_channel_model_type_created_id,priority:4;index:idx_logs_token_group_type_created_id,priority:4;index:idx_logs_channel_group_type_created_id,priority:4;index:idx_logs_username_token_group_type_created_id,priority:5"`
+	Type             int               `json:"type" gorm:"index:idx_created_at_type;index:idx_logs_type_created_at,priority:1;index:idx_logs_user_type_created_at,priority:2;index:idx_logs_username_type_created_at,priority:2;index:idx_logs_token_type_created_at,priority:2;index:idx_logs_model_type_created_at,priority:2;index:idx_logs_channel_type_created_at,priority:2;index:idx_logs_group_type_created_at,priority:2;index:idx_logs_username_token_type_created_id,priority:3;index:idx_logs_username_model_type_created_id,priority:3;index:idx_logs_username_group_type_created_id,priority:3;index:idx_logs_model_group_type_created_id,priority:3;index:idx_logs_token_model_type_created_id,priority:3;index:idx_logs_channel_model_type_created_id,priority:3;index:idx_logs_token_group_type_created_id,priority:3;index:idx_logs_channel_group_type_created_id,priority:3;index:idx_logs_username_token_group_type_created_id,priority:4"`
+	Content          string            `json:"content"`
+	Username         string            `json:"username" gorm:"index;index:index_username_model_name,priority:2;index:idx_logs_username_created_at,priority:1;index:idx_logs_username_type_created_at,priority:1;index:idx_logs_username_token_type_created_id,priority:1;index:idx_logs_username_model_type_created_id,priority:1;index:idx_logs_username_group_type_created_id,priority:1;index:idx_logs_username_token_group_type_created_id,priority:1;default:''"`
+	TokenName        string            `json:"token_name" gorm:"index;index:idx_logs_token_created_at,priority:1;index:idx_logs_token_type_created_at,priority:1;index:idx_logs_username_token_type_created_id,priority:2;index:idx_logs_token_model_type_created_id,priority:1;index:idx_logs_token_group_type_created_id,priority:1;index:idx_logs_username_token_group_type_created_id,priority:2;default:''"`
+	ModelName        string            `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;index:idx_logs_model_created_at,priority:1;index:idx_logs_model_type_created_at,priority:1;index:idx_logs_username_model_type_created_id,priority:2;index:idx_logs_model_group_type_created_id,priority:1;index:idx_logs_token_model_type_created_id,priority:2;index:idx_logs_channel_model_type_created_id,priority:2;default:''"`
+	Quota            int               `json:"quota" gorm:"default:0"`
+	PromptTokens     int               `json:"prompt_tokens" gorm:"default:0"`
+	CompletionTokens int               `json:"completion_tokens" gorm:"default:0"`
+	UseTime          int               `json:"use_time" gorm:"default:0"`
+	IsStream         bool              `json:"is_stream"`
+	ChannelId        int               `json:"channel" gorm:"index;index:idx_logs_channel_created_at,priority:1;index:idx_logs_channel_type_created_at,priority:1;index:idx_logs_channel_model_type_created_id,priority:1;index:idx_logs_channel_group_type_created_id,priority:1"`
+	ChannelName      string            `json:"channel_name" gorm:"->"`
+	ChannelDetail    *LogChannelDetail `json:"channel_detail,omitempty" gorm:"-"`
+	TokenId          int               `json:"token_id" gorm:"default:0;index"`
+	Group            string            `json:"group" gorm:"index;index:idx_logs_group_created_at,priority:1;index:idx_logs_group_type_created_at,priority:1;index:idx_logs_username_group_type_created_id,priority:2;index:idx_logs_model_group_type_created_id,priority:2;index:idx_logs_token_group_type_created_id,priority:2;index:idx_logs_channel_group_type_created_id,priority:2;index:idx_logs_username_token_group_type_created_id,priority:3"`
+	Ip               string            `json:"ip" gorm:"index;default:''"`
+	RequestId        string            `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
+	Other            string            `json:"other"`
+}
+
+type LogChannelDetail struct {
+	Id           int    `json:"id"`
+	Name         string `json:"name,omitempty"`
+	Type         int    `json:"type,omitempty"`
+	TypeName     string `json:"type_name,omitempty"`
+	Status       int    `json:"status,omitempty"`
+	BaseURL      string `json:"base_url,omitempty"`
+	Group        string `json:"group,omitempty"`
+	Tag          string `json:"tag,omitempty"`
+	TestModel    string `json:"test_model,omitempty"`
+	ResponseTime int    `json:"response_time,omitempty"`
+	Priority     *int64 `json:"priority,omitempty"`
+	Weight       *uint  `json:"weight,omitempty"`
+	AutoBan      *int   `json:"auto_ban,omitempty"`
+	ModelsCount  int    `json:"models_count,omitempty"`
+	IsMultiKey   bool   `json:"is_multi_key,omitempty"`
+	MultiKeySize int    `json:"multi_key_size,omitempty"`
 }
 
 // don't use iota, avoid change log type value
@@ -50,6 +71,48 @@ const (
 	LogTypeError   = 5
 	LogTypeRefund  = 6
 )
+
+func countChannelModels(models string) int {
+	count := 0
+	for _, modelName := range strings.Split(models, ",") {
+		if strings.TrimSpace(modelName) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func buildLogChannelDetail(channel *Channel) *LogChannelDetail {
+	if channel == nil {
+		return nil
+	}
+
+	detail := &LogChannelDetail{
+		Id:           channel.Id,
+		Name:         channel.Name,
+		Type:         channel.Type,
+		TypeName:     constant.GetChannelTypeName(channel.Type),
+		Status:       channel.Status,
+		Group:        channel.Group,
+		ResponseTime: channel.ResponseTime,
+		Priority:     channel.Priority,
+		Weight:       channel.Weight,
+		AutoBan:      channel.AutoBan,
+		ModelsCount:  countChannelModels(channel.Models),
+		IsMultiKey:   channel.ChannelInfo.IsMultiKey,
+		MultiKeySize: channel.ChannelInfo.MultiKeySize,
+	}
+	if channel.TestModel != nil {
+		detail.TestModel = *channel.TestModel
+	}
+	if channel.BaseURL != nil {
+		detail.BaseURL = *channel.BaseURL
+	}
+	if channel.Tag != nil {
+		detail.Tag = *channel.Tag
+	}
+	return detail
+}
 
 func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {
@@ -390,35 +453,41 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	}
 
 	if channelIds.Len() > 0 {
-		var channels []struct {
-			Id   int    `gorm:"column:id"`
-			Name string `gorm:"column:name"`
-		}
+		var channels []Channel
+		missingChannelIds := types.NewSet[int]()
 		if common.MemoryCacheEnabled {
 			// Cache get channel
 			for _, channelId := range channelIds.Items() {
 				if cacheChannel, err := CacheGetChannel(channelId); err == nil {
-					channels = append(channels, struct {
-						Id   int    `gorm:"column:id"`
-						Name string `gorm:"column:name"`
-					}{
-						Id:   channelId,
-						Name: cacheChannel.Name,
-					})
+					channels = append(channels, *cacheChannel)
+				} else {
+					missingChannelIds.Add(channelId)
 				}
 			}
 		} else {
-			// Bulk query channels from DB
-			if err = DB.Table("channels").Select("id, name").Where("id IN ?", channelIds.Items()).Find(&channels).Error; err != nil {
-				return logs, total, err
+			for _, channelId := range channelIds.Items() {
+				missingChannelIds.Add(channelId)
 			}
 		}
+		if missingChannelIds.Len() > 0 {
+			var dbChannels []Channel
+			if err = DB.Model(&Channel{}).
+				Select([]string{"id", "name", "type", "status", "base_url", "group", "tag", "models", "test_model", "response_time", "priority", "weight", "auto_ban", "channel_info"}).
+				Where("id IN ?", missingChannelIds.Items()).
+				Find(&dbChannels).Error; err != nil {
+				return logs, total, err
+			}
+			channels = append(channels, dbChannels...)
+		}
 		channelMap := make(map[int]string, len(channels))
-		for _, channel := range channels {
-			channelMap[channel.Id] = channel.Name
+		channelDetailMap := make(map[int]*LogChannelDetail, len(channels))
+		for i := range channels {
+			channelMap[channels[i].Id] = channels[i].Name
+			channelDetailMap[channels[i].Id] = buildLogChannelDetail(&channels[i])
 		}
 		for i := range logs {
 			logs[i].ChannelName = channelMap[logs[i].ChannelId]
+			logs[i].ChannelDetail = channelDetailMap[logs[i].ChannelId]
 		}
 	}
 

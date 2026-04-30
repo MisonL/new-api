@@ -9,14 +9,17 @@ import {
   normalizeUserAgentStrategy,
 } from '../src/helpers/headerOverrideUserAgent.js';
 
+const codexCliUserAgent =
+  'codex_exec/0.125.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.125.0)';
+
 test('空白 header_override 可写入最小 User-Agent JSON', () => {
   assert.deepEqual(
-    applyUserAgentPresetToHeaderOverride('', 'codex-cli/1.0.0'),
+    applyUserAgentPresetToHeaderOverride('', codexCliUserAgent),
     {
       ok: true,
       value: JSON.stringify(
         {
-          'User-Agent': 'codex-cli/1.0.0',
+          'User-Agent': codexCliUserAgent,
         },
         null,
         2,
@@ -81,12 +84,12 @@ test('normalize user agent strategy removes blanks and duplicates', () => {
     normalizeUserAgentStrategy({
       enabled: true,
       mode: 'round_robin',
-      userAgents: ['codex-cli/1.0.0', ' ', 'codex-cli/1.0.0', 'amp/1.0.0'],
+      userAgents: [codexCliUserAgent, ' ', codexCliUserAgent, 'amp/1.0.0'],
     }),
     {
       enabled: true,
       mode: 'round_robin',
-      userAgents: ['codex-cli/1.0.0', 'amp/1.0.0'],
+      userAgents: [codexCliUserAgent, 'amp/1.0.0'],
     },
   );
 });
@@ -97,14 +100,14 @@ test('build user agent strategy payload keeps explicit disabled state', () => {
       configured: true,
       enabled: false,
       mode: 'random',
-      userAgents: [' codex-cli/1.0.0 ', ''],
+      userAgents: [` ${codexCliUserAgent} `, ''],
     }),
     {
       ok: true,
       value: {
         enabled: false,
         mode: 'random',
-        user_agents: ['codex-cli/1.0.0'],
+        user_agents: [codexCliUserAgent],
       },
     },
   );
@@ -158,5 +161,5 @@ test('可通过 id 找到主流 AI Coding CLI 预置', () => {
 
   assert.equal(preset.id, 'codex-cli');
   assert.equal(preset.groupKey, 'ai-coding-cli');
-  assert.match(preset.ua, /^codex-cli\//);
+  assert.match(preset.ua, /^codex_exec\//);
 });

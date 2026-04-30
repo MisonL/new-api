@@ -48,6 +48,11 @@ type HeaderProfileStrategy struct {
 	Profiles           []HeaderProfile   `json:"profiles,omitempty"`
 }
 
+const (
+	BuiltinCodexCLIUserAgent  = "codex_exec/0.125.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.125.0)"
+	BuiltinCodexCLIOriginator = "codex_exec"
+)
+
 var BuiltinHeaderProfiles = []HeaderProfile{
 	{
 		ID:       "chrome-macos",
@@ -64,7 +69,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 			"User-Agent":         "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
 		},
 	},
-	newBuiltinAICodingCLIHeaderProfile("codex-cli", "Codex CLI", "OpenAI Codex CLI/0.1", "codex-cli", "固定请求头只用于普通渠道标识；Codex 官方客户端限制场景还必须在高级参数覆盖中启用 Codex CLI 请求头透传模板。", true),
+	newBuiltinCodexCLIHeaderProfile(),
 	newBuiltinAICodingCLIHeaderProfile("claude-code", "Claude Code", "Claude-Code/1.0", "claude-code", "固定请求头只用于普通渠道标识；Claude 官方客户端链路如需保留会话与 SDK 元数据，还必须在高级参数覆盖中启用 Claude CLI 请求头透传模板。", true),
 	newBuiltinAICodingCLIHeaderProfile("gemini-cli", "Gemini CLI", "GeminiCLI/1.0", "gemini-cli", "固定请求头用于普通渠道标识；若上游要求真实客户端会话头，应在高级参数覆盖中额外配置 pass_headers。", false),
 	newBuiltinAICodingCLIHeaderProfile("qwen-code", "Qwen Code", "Qwen-Code/1.0", "qwen-code", "固定请求头用于普通渠道标识；不能替代真实 CLI 请求中携带的动态会话头。", false),
@@ -84,6 +89,22 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 			"User-Agent":    "PostmanRuntime/7.43.0",
 		},
 	},
+}
+
+func newBuiltinCodexCLIHeaderProfile() HeaderProfile {
+	return HeaderProfile{
+		ID:                  "codex-cli",
+		Name:                "Codex CLI",
+		Category:            HeaderProfileCategoryAICodingCLI,
+		Scope:               HeaderProfileScopeBuiltin,
+		ReadOnly:            true,
+		Description:         "固定请求头是 Codex CLI 0.125.0 的静态快照；真实 CLI 会携带会话与窗口动态头，需在高级参数覆盖中启用 Codex CLI 请求头透传模板。",
+		PassthroughRequired: true,
+		Headers: map[string]string{
+			"User-Agent": BuiltinCodexCLIUserAgent,
+			"Originator": BuiltinCodexCLIOriginator,
+		},
+	}
 }
 
 func newBuiltinAICodingCLIHeaderProfile(id string, name string, userAgent string, clientName string, description string, passthroughRequired bool) HeaderProfile {

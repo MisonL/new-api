@@ -41,6 +41,8 @@ var CodexCliPassThroughHeaders = []string{
 	"User-Agent",
 	"X-Codex-Beta-Features",
 	"X-Codex-Turn-Metadata",
+	"X-Codex-Window-Id",
+	"X-Client-Request-Id",
 }
 
 var ClaudeCliPassThroughHeaders = []string{

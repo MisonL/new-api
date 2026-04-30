@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -85,4 +86,71 @@ func TestRecordTopupLogStoresAdminOnlyAuditFields(t *testing.T) {
 	require.EqualValues(t, 1, total)
 	require.Len(t, userLogs, 1)
 	require.NotContains(t, userLogs[0].Other, "admin_info")
+}
+
+func TestGetAllLogsAttachesNonSensitiveChannelDetail(t *testing.T) {
+	truncateTables(t)
+
+	baseURL := "https://upstream.example"
+	tag := "mynav"
+	testModel := "gpt-5.5"
+	priority := int64(12)
+	weight := uint(30)
+	autoBan := 1
+	require.NoError(t, DB.Create(&Channel{
+		Id:           301,
+		Type:         constant.ChannelTypeOpenAI,
+		Status:       common.ChannelStatusEnabled,
+		Name:         "mynav-primary",
+		Key:          "sk-hidden",
+		BaseURL:      &baseURL,
+		Models:       "gpt-5.5,gpt-5.5-compact",
+		Group:        "default,codex",
+		Tag:          &tag,
+		TestModel:    &testModel,
+		ResponseTime: 280,
+		Priority:     &priority,
+		Weight:       &weight,
+		AutoBan:      &autoBan,
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:   true,
+			MultiKeySize: 3,
+		},
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:    101,
+		Username:  "target-user",
+		CreatedAt: common.GetTimestamp(),
+		Type:      LogTypeConsume,
+		Content:   "consume",
+		ModelName: "gpt-5.5",
+		ChannelId: 301,
+		TokenName: "token-a",
+		Group:     "default",
+		RequestId: "req-a",
+		Other:     "{}",
+	}).Error)
+
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", "", "", 0, 10, 0, "", "")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, adminLogs, 1)
+	require.Equal(t, "mynav-primary", adminLogs[0].ChannelName)
+	require.NotNil(t, adminLogs[0].ChannelDetail)
+	require.Equal(t, 301, adminLogs[0].ChannelDetail.Id)
+	require.Equal(t, "mynav-primary", adminLogs[0].ChannelDetail.Name)
+	require.Equal(t, constant.ChannelTypeOpenAI, adminLogs[0].ChannelDetail.Type)
+	require.Equal(t, "OpenAI", adminLogs[0].ChannelDetail.TypeName)
+	require.Equal(t, common.ChannelStatusEnabled, adminLogs[0].ChannelDetail.Status)
+	require.Equal(t, baseURL, adminLogs[0].ChannelDetail.BaseURL)
+	require.Equal(t, "default,codex", adminLogs[0].ChannelDetail.Group)
+	require.Equal(t, tag, adminLogs[0].ChannelDetail.Tag)
+	require.Equal(t, testModel, adminLogs[0].ChannelDetail.TestModel)
+	require.Equal(t, 280, adminLogs[0].ChannelDetail.ResponseTime)
+	require.Equal(t, priority, *adminLogs[0].ChannelDetail.Priority)
+	require.Equal(t, weight, *adminLogs[0].ChannelDetail.Weight)
+	require.Equal(t, autoBan, *adminLogs[0].ChannelDetail.AutoBan)
+	require.Equal(t, 2, adminLogs[0].ChannelDetail.ModelsCount)
+	require.True(t, adminLogs[0].ChannelDetail.IsMultiKey)
+	require.Equal(t, 3, adminLogs[0].ChannelDetail.MultiKeySize)
 }
