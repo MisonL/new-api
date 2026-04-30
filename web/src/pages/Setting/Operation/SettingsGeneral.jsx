@@ -226,10 +226,8 @@ export default function GeneralSettings(props) {
       !hasQuotaDisplayTypeOption &&
       optionValues.DisplayInCurrencyEnabled !== undefined
     ) {
-      currentInputs['general_setting.quota_display_type'] = optionValues
-        .DisplayInCurrencyEnabled
-        ? 'USD'
-        : 'TOKENS';
+      currentInputs['general_setting.quota_display_type'] =
+        optionValues.DisplayInCurrencyEnabled ? 'USD' : 'TOKENS';
     }
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));

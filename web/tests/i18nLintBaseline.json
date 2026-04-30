@@ -6,37 +6,37 @@
   },
   {
     "file": "src/components/auth/LoginForm.jsx",
-    "line": 570,
+    "line": 594,
     "text": "Logo"
   },
   {
     "file": "src/components/auth/LoginForm.jsx",
-    "line": 790,
+    "line": 814,
     "text": "Logo"
   },
   {
     "file": "src/components/auth/LoginForm.jsx",
-    "line": 815,
+    "line": 839,
     "text": "username"
   },
   {
     "file": "src/components/auth/LoginForm.jsx",
-    "line": 831,
+    "line": 855,
     "text": "current-password"
   },
   {
     "file": "src/components/auth/LoginForm.jsx",
-    "line": 958,
+    "line": 982,
     "text": "微信二维码"
   },
   {
     "file": "src/components/auth/LoginForm.jsx",
-    "line": 996,
+    "line": 1020,
     "text": "M6 8a2 2 0 11-4 0 2 2 0 014 0zM8 7a1 1 0 100 2h8a1 1 0 100-2H8zM6 14a2 2 0 11-4 0 2 2 0 014 0zM8 13a1 1 0 100 2h8a1 1 0 100-2H8z"
   },
   {
     "file": "src/components/auth/LoginForm.jsx",
-    "line": 1000,
+    "line": 1024,
     "text": "两步验证"
   },
   {
@@ -61,42 +61,42 @@
   },
   {
     "file": "src/components/auth/RegisterForm.jsx",
-    "line": 457,
+    "line": 471,
     "text": "Logo"
   },
   {
     "file": "src/components/auth/RegisterForm.jsx",
-    "line": 624,
+    "line": 638,
     "text": "Logo"
   },
   {
     "file": "src/components/auth/RegisterForm.jsx",
-    "line": 639,
+    "line": 653,
     "text": "username"
   },
   {
     "file": "src/components/auth/RegisterForm.jsx",
-    "line": 655,
+    "line": 669,
     "text": "new-password"
   },
   {
     "file": "src/components/auth/RegisterForm.jsx",
-    "line": 656,
+    "line": 670,
     "text": "new-password"
   },
   {
     "file": "src/components/auth/RegisterForm.jsx",
-    "line": 676,
+    "line": 690,
     "text": "email"
   },
   {
     "file": "src/components/auth/RegisterForm.jsx",
-    "line": 702,
+    "line": 716,
     "text": "one-time-code"
   },
   {
     "file": "src/components/auth/RegisterForm.jsx",
-    "line": 820,
+    "line": 834,
     "text": "微信二维码"
   },
   {
@@ -716,47 +716,47 @@
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 744,
+    "line": 754,
     "text": "Doubao Coding Plan"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 2705,
+    "line": 2714,
     "text": "M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 3886,
+    "line": 3896,
     "text": "type-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4136,
+    "line": 4146,
     "text": "tight"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4516,
+    "line": 4526,
     "text": "Account ID"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4591,
+    "line": 4620,
     "text": "AZURE_OPENAI_ENDPOINT"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4789,
+    "line": 4818,
     "text": "models-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4991,
+    "line": 5020,
     "text": "groups-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 5277,
+    "line": 5306,
     "text": "M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
   },
   {
@@ -1381,37 +1381,37 @@
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 286,
+    "line": 284,
     "text": "USD ($)"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 292,
+    "line": 290,
     "text": "CNY (¥)"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 298,
+    "line": 296,
     "text": "Tokens"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 315,
+    "line": 313,
     "text": "USD ($)"
+  },
+  {
+    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
+    "line": 314,
+    "text": "CNY (¥)"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
     "line": 316,
-    "text": "CNY (¥)"
-  },
-  {
-    "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 318,
     "text": "Tokens"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsGeneral.jsx",
-    "line": 331,
+    "line": 329,
     "text": "1 USD ="
   },
   {

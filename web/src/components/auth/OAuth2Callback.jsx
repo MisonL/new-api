@@ -26,6 +26,7 @@ import {
   showSuccess,
   updateAPI,
   setUserData,
+  consumeAuthRedirectTarget,
 } from '../../helpers';
 import { UserContext } from '../../context/User';
 import Loading from '../common/ui/Loading';
@@ -84,7 +85,7 @@ const OAuth2Callback = (props) => {
     setUserData(data);
     updateAPI();
     showSuccess(t('登录成功！'));
-    navigate('/console/token');
+    navigate(consumeAuthRedirectTarget(null, '/console/token'));
   };
 
   const sendCode = async (code, state, retry = 0) => {

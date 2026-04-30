@@ -424,40 +424,147 @@ function formatRequestHeaderPolicyMode(mode, t) {
   }
 }
 
-function buildRequestHeaderPolicySegments(other, t) {
+function getRequestHeaderPolicy(record) {
+  const other = getLogOther(record?.other);
   const policy = other?.request_header_policy;
   if (!policy || typeof policy !== 'object') {
+    return null;
+  }
+  return policy;
+}
+
+function normalizeHeaderKeyList(value) {
+  if (!Array.isArray(value)) {
     return [];
   }
 
-  const segments = [];
+  const seen = new Set();
+  const keys = [];
+  value.forEach((item) => {
+    const key = String(item || '').trim();
+    if (!key) {
+      return;
+    }
+    const normalized = key.toLowerCase();
+    if (seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    keys.push(key);
+  });
+  return keys;
+}
+
+function isUserAgentHeaderKey(key) {
+  return (
+    String(key || '')
+      .trim()
+      .toLowerCase() === 'user-agent'
+  );
+}
+
+function getAppliedUserAgent(policy) {
+  return String(
+    policy?.applied_user_agent || policy?.selected_user_agent || '',
+  ).trim();
+}
+
+function getAppliedHeaderKeys(policy) {
+  return normalizeHeaderKeyList(policy?.applied_header_keys);
+}
+
+function renderEmptyCell() {
+  return <Typography.Text type='tertiary'>-</Typography.Text>;
+}
+
+function renderRequestHeaderPolicyTooltip(policy, children, t) {
+  if (!policy || typeof policy !== 'object') {
+    return children;
+  }
+
   const modeLabel = formatRequestHeaderPolicyMode(policy.mode, t);
-  if (modeLabel) {
-    segments.push({
-      text: `${t('请求头策略')}：${modeLabel}`,
-      tone: 'secondary',
-    });
+  const userAgent = getAppliedUserAgent(policy);
+  const headerKeys = getAppliedHeaderKeys(policy);
+  const lines = [
+    modeLabel ? [t('请求头策略'), modeLabel] : null,
+    policy.header_profile_id
+      ? [t('请求头模板'), policy.header_profile_id]
+      : null,
+    userAgent ? [t('已选 UA'), userAgent] : null,
+    headerKeys.length ? [t('应用请求头'), headerKeys.join(', ')] : null,
+  ].filter(Boolean);
+
+  if (!lines.length) {
+    return children;
   }
 
-  if (policy.selected_user_agent) {
-    segments.push({
-      text: `${t('已选 UA')}：${policy.selected_user_agent}`,
-      tone: 'secondary',
-    });
-    return segments;
+  return (
+    <Tooltip
+      content={
+        <div className='usage-log-header-audit-tooltip'>
+          {lines.map(([label, value]) => (
+            <div key={label} className='usage-log-header-audit-line'>
+              <Typography.Text strong>{label}：</Typography.Text>
+              <Typography.Text>{value}</Typography.Text>
+            </div>
+          ))}
+        </div>
+      }
+    >
+      <span className='usage-log-header-audit-trigger'>{children}</span>
+    </Tooltip>
+  );
+}
+
+function renderRequestUserAgentCell(record, t) {
+  const policy = getRequestHeaderPolicy(record);
+  const userAgent = getAppliedUserAgent(policy);
+
+  if (!userAgent) {
+    return renderEmptyCell();
   }
 
-  if (
-    Array.isArray(policy.applied_header_keys) &&
-    policy.applied_header_keys.length > 0
-  ) {
-    segments.push({
-      text: `${t('应用请求头')}：${policy.applied_header_keys.join(', ')}`,
-      tone: 'secondary',
-    });
+  return renderRequestHeaderPolicyTooltip(
+    policy,
+    <Typography.Text
+      className='usage-log-user-agent-text'
+      ellipsis={{ showTooltip: false }}
+    >
+      {userAgent}
+    </Typography.Text>,
+    t,
+  );
+}
+
+function renderRequestHeaderKeysCell(record, t) {
+  const policy = getRequestHeaderPolicy(record);
+  const headerKeys = getAppliedHeaderKeys(policy).filter(
+    (key) => !isUserAgentHeaderKey(key),
+  );
+
+  if (!headerKeys.length) {
+    return renderEmptyCell();
   }
 
-  return segments;
+  const visibleKeys = headerKeys.slice(0, 2);
+  const hiddenCount = headerKeys.length - visibleKeys.length;
+
+  return renderRequestHeaderPolicyTooltip(
+    policy,
+    <span className='usage-log-header-key-list'>
+      {visibleKeys.map((key) => (
+        <Tag key={key} color='blue' shape='circle'>
+          <span className='usage-log-header-key-text'>{key}</span>
+        </Tag>
+      ))}
+      {hiddenCount > 0 ? (
+        <Tag color='grey' shape='circle'>
+          +{hiddenCount}
+        </Tag>
+      ) : null}
+    </span>,
+    t,
+  );
 }
 
 function renderCompactDetailSummary(summarySegments) {
@@ -543,20 +650,14 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
 
   if (other?.billing_mode === 'tiered_expr') {
     return {
-      segments: [
-        ...renderTieredModelPriceSimple(summaryOpts),
-        ...buildRequestHeaderPolicySegments(other, t),
-      ],
+      segments: renderTieredModelPriceSimple(summaryOpts),
     };
   }
 
   return {
-    segments: [
-      ...(other?.claude
-        ? renderModelPriceSimple({ ...summaryOpts, provider: 'claude' })
-        : renderModelPriceSimple({ ...summaryOpts, provider: 'openai' })),
-      ...buildRequestHeaderPolicySegments(other, t),
-    ],
+    segments: other?.claude
+      ? renderModelPriceSimple({ ...summaryOpts, provider: 'claude' })
+      : renderModelPriceSimple({ ...summaryOpts, provider: 'openai' }),
   };
 }
 
@@ -791,6 +892,30 @@ export const getLogsColumns = ({
         ) : (
           <></>
         );
+      },
+    },
+    {
+      key: COLUMN_KEYS.REQUEST_UA,
+      title: t('已选 UA'),
+      dataIndex: 'other',
+      width: 220,
+      render: (text, record) => {
+        if (!(isAdminUser && (record.type === 2 || record.type === 5))) {
+          return <></>;
+        }
+        return renderRequestUserAgentCell(record, t);
+      },
+    },
+    {
+      key: COLUMN_KEYS.REQUEST_HEADERS,
+      title: t('应用请求头'),
+      dataIndex: 'other',
+      width: 190,
+      render: (text, record) => {
+        if (!(isAdminUser && (record.type === 2 || record.type === 5))) {
+          return <></>;
+        }
+        return renderRequestHeaderKeysCell(record, t);
       },
     },
     {

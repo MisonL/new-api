@@ -63,6 +63,8 @@ export const useLogsData = () => {
     GROUP: 'group',
     TYPE: 'type',
     MODEL: 'model',
+    REQUEST_UA: 'request_ua',
+    REQUEST_HEADERS: 'request_headers',
     USE_TIME: 'use_time',
     PROMPT: 'prompt',
     COMPLETION: 'completion',
@@ -127,6 +129,8 @@ export const useLogsData = () => {
       [COLUMN_KEYS.GROUP]: true,
       [COLUMN_KEYS.TYPE]: true,
       [COLUMN_KEYS.MODEL]: true,
+      [COLUMN_KEYS.REQUEST_UA]: isAdminUser,
+      [COLUMN_KEYS.REQUEST_HEADERS]: isAdminUser,
       [COLUMN_KEYS.USE_TIME]: true,
       [COLUMN_KEYS.PROMPT]: true,
       [COLUMN_KEYS.COMPLETION]: true,
@@ -153,6 +157,8 @@ export const useLogsData = () => {
         merged[COLUMN_KEYS.CHANNEL] = false;
         merged[COLUMN_KEYS.USERNAME] = false;
         merged[COLUMN_KEYS.RETRY] = false;
+        merged[COLUMN_KEYS.REQUEST_UA] = false;
+        merged[COLUMN_KEYS.REQUEST_HEADERS] = false;
       }
 
       return merged;
@@ -228,6 +234,8 @@ export const useLogsData = () => {
       if (
         (key === COLUMN_KEYS.CHANNEL ||
           key === COLUMN_KEYS.USERNAME ||
+          key === COLUMN_KEYS.REQUEST_UA ||
+          key === COLUMN_KEYS.REQUEST_HEADERS ||
           key === COLUMN_KEYS.RETRY) &&
         !isAdminUser
       ) {

@@ -27,6 +27,7 @@ import {
   buildSelectedProfileItems,
   createLegacyHeaderProfileDraft,
   getHeaderProfileStrategyFromSettings,
+  mergeChannelSubmitFormValues,
   normalizeHeaderProfileStrategy,
   reorderSelectedProfileIds,
   toggleSelectedProfile,
@@ -260,6 +261,93 @@ test('buildHeaderProfileStrategySettings stores passthrough metadata with api fi
     ),
     false,
   );
+});
+
+test('mergeChannelSubmitFormValues preserves request policy state when form values omit hidden fields', () => {
+  const settings = buildHeaderProfileStrategySettings('{}', {
+    enabled: true,
+    mode: 'fixed',
+    selectedProfileIds: ['codex-cli'],
+    profiles: [HEADER_PROFILE_PRESETS['codex-cli']],
+  });
+
+  const merged = mergeChannelSubmitFormValues(
+    {
+      name: 'channel-a',
+      models: ['gpt-5.5'],
+      settings: '',
+    },
+    {
+      name: 'stale-name',
+      models: ['old-model'],
+      settings,
+      param_override: '{"operations":[{"mode":"delete","path":"metadata"}]}',
+      header_override: '{"X-Test":"1"}',
+      status_code_mapping: '{"524":502}',
+    },
+  );
+
+  assert.equal(merged.name, 'channel-a');
+  assert.deepEqual(merged.models, ['gpt-5.5']);
+  assert.equal(merged.settings, settings);
+  assert.equal(
+    merged.param_override,
+    '{"operations":[{"mode":"delete","path":"metadata"}]}',
+  );
+  assert.equal(merged.header_override, '{"X-Test":"1"}');
+  assert.equal(merged.status_code_mapping, '{"524":502}');
+});
+
+test('mergeChannelSubmitFormValues treats empty hidden json fields as missing form state', () => {
+  const settings = buildHeaderProfileStrategySettings('{}', {
+    enabled: true,
+    mode: 'fixed',
+    selectedProfileIds: ['codex-cli'],
+    profiles: [HEADER_PROFILE_PRESETS['codex-cli']],
+  });
+
+  const merged = mergeChannelSubmitFormValues(
+    {
+      settings: '{}',
+      param_override: '  ',
+      header_override: '{}',
+      status_code_mapping: '{}',
+    },
+    {
+      settings,
+      param_override:
+        '{"operations":[{"mode":"pass_headers","value":["User-Agent"]}]}',
+      header_override: '{"User-Agent":"Codex CLI"}',
+      status_code_mapping: '{"524":502}',
+    },
+  );
+
+  assert.equal(merged.settings, settings);
+  assert.equal(
+    merged.param_override,
+    '{"operations":[{"mode":"pass_headers","value":["User-Agent"]}]}',
+  );
+  assert.equal(merged.header_override, '{"User-Agent":"Codex CLI"}');
+  assert.equal(merged.status_code_mapping, '{"524":502}');
+});
+
+test('mergeChannelSubmitFormValues keeps explicit cleared request policy state from inputs', () => {
+  const merged = mergeChannelSubmitFormValues(
+    {
+      models: ['gpt-5.5'],
+    },
+    {
+      settings: '{}',
+      param_override: '',
+      header_override: '',
+      status_code_mapping: '',
+    },
+  );
+
+  assert.equal(merged.settings, '{}');
+  assert.equal(merged.param_override, '');
+  assert.equal(merged.header_override, '');
+  assert.equal(merged.status_code_mapping, '');
 });
 
 test('reorderSelectedProfileIds follows before and after drop positions', () => {

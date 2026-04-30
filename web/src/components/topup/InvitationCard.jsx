@@ -27,7 +27,15 @@ import {
   Badge,
   Space,
 } from '@douyinfe/semi-ui';
-import { Copy, Users, BarChart2, TrendingUp, Gift, Zap } from 'lucide-react';
+import {
+  Copy,
+  Users,
+  BarChart2,
+  TrendingUp,
+  Gift,
+  Zap,
+  Percent,
+} from 'lucide-react';
 
 const { Text } = Typography;
 
@@ -38,7 +46,13 @@ const InvitationCard = ({
   setOpenTransfer,
   affLink,
   handleAffLinkClick,
+  setOpenInvitationRecords,
 }) => {
+  const inviteRebateRate = Number(userState?.user?.invite_rebate_rate || 0);
+  const displayInviteRebateRate = Number.isFinite(inviteRebateRate)
+    ? inviteRebateRate.toFixed(2).replace(/\.?0+$/, '')
+    : '0';
+
   return (
     <Card className='!rounded-2xl shadow-sm border-0'>
       {/* 卡片头部 */}
@@ -61,7 +75,7 @@ const InvitationCard = ({
           className='!rounded-xl w-full'
           cover={
             <div
-              className='relative h-30'
+              className='relative min-h-[11rem] sm:min-h-[8rem]'
               style={{
                 '--palette-primary-darkerChannel': '0 75 80',
                 backgroundImage: `linear-gradient(0deg, rgba(var(--palette-primary-darkerChannel) / 80%), rgba(var(--palette-primary-darkerChannel) / 80%)), url('/cover-4.webp')`,
@@ -72,28 +86,40 @@ const InvitationCard = ({
             >
               {/* 标题和按钮 */}
               <div className='relative z-10 h-full flex flex-col justify-between p-4'>
-                <div className='flex justify-between items-center'>
+                <div className='flex justify-between items-center gap-3'>
                   <Text strong style={{ color: 'white', fontSize: '16px' }}>
                     {t('收益统计')}
                   </Text>
-                  <Button
-                    type='primary'
-                    theme='solid'
-                    size='small'
-                    disabled={
-                      !userState?.user?.aff_quota ||
-                      userState?.user?.aff_quota <= 0
-                    }
-                    onClick={() => setOpenTransfer(true)}
-                    className='!rounded-lg'
-                  >
-                    <Zap size={12} className='mr-1' />
-                    {t('划转到余额')}
-                  </Button>
+                  <div className='flex items-center gap-2'>
+                    <Button
+                      theme='solid'
+                      type='tertiary'
+                      size='small'
+                      onClick={() => setOpenInvitationRecords(true)}
+                      className='!rounded-lg'
+                    >
+                      <BarChart2 size={12} className='mr-1' />
+                      {t('邀请记录')}
+                    </Button>
+                    <Button
+                      type='primary'
+                      theme='solid'
+                      size='small'
+                      disabled={
+                        !userState?.user?.aff_quota ||
+                        userState?.user?.aff_quota <= 0
+                      }
+                      onClick={() => setOpenTransfer(true)}
+                      className='!rounded-lg'
+                    >
+                      <Zap size={12} className='mr-1' />
+                      {t('划转到余额')}
+                    </Button>
+                  </div>
                 </div>
 
                 {/* 统计数据 */}
-                <div className='grid grid-cols-3 gap-6 mt-4'>
+                <div className='grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4'>
                   {/* 待使用收益 */}
                   <div className='text-center'>
                     <div
@@ -168,6 +194,31 @@ const InvitationCard = ({
                       </Text>
                     </div>
                   </div>
+
+                  {/* 返利比例 */}
+                  <div className='text-center'>
+                    <div
+                      className='text-base sm:text-2xl font-bold mb-2'
+                      style={{ color: 'white' }}
+                    >
+                      {displayInviteRebateRate}%
+                    </div>
+                    <div className='flex items-center justify-center text-sm'>
+                      <Percent
+                        size={14}
+                        className='mr-1'
+                        style={{ color: 'rgba(255,255,255,0.8)' }}
+                      />
+                      <Text
+                        style={{
+                          color: 'rgba(255,255,255,0.8)',
+                          fontSize: '12px',
+                        }}
+                      >
+                        {t('返利比例')}
+                      </Text>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -176,7 +227,7 @@ const InvitationCard = ({
           {/* 邀请链接部分 */}
           <Input
             value={affLink}
-            readonly
+            readOnly
             className='!rounded-lg'
             prefix={t('邀请链接')}
             suffix={
@@ -203,7 +254,10 @@ const InvitationCard = ({
             <div className='flex items-start gap-2'>
               <Badge dot type='success' />
               <Text type='tertiary' className='text-sm'>
-                {t('邀请好友注册，好友充值后您可获得相应奖励')}
+                {t(
+                  '邀请好友注册，好友充值后您可获得其实际到账额度 {{rate}}% 的返利',
+                  { rate: displayInviteRebateRate },
+                )}
               </Text>
             </div>
 

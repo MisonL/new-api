@@ -206,10 +206,12 @@ const HeaderProfileLibrary = ({
 
     return (
       <div
-        className='rounded-lg px-3 py-2'
+        className='flex flex-col rounded-lg px-3 py-2'
         style={{
           backgroundColor: 'var(--semi-color-fill-0)',
           border: '1px solid var(--semi-color-fill-2)',
+          boxSizing: 'border-box',
+          height: 176,
         }}
       >
         <div className='mb-1 flex items-center justify-between gap-2'>
@@ -222,10 +224,22 @@ const HeaderProfileLibrary = ({
             </Tag>
           )}
         </div>
-        <Text type='tertiary' size='small' className='mb-1 block'>
+        <Text
+          type='tertiary'
+          size='small'
+          className='mb-1 block'
+          style={{
+            display: '-webkit-box',
+            lineHeight: '18px',
+            minHeight: 36,
+            overflow: 'hidden',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: 2,
+          }}
+        >
           {descriptionText}
         </Text>
-        <pre className='m-0 max-h-28 overflow-auto whitespace-pre-wrap break-all text-xs leading-5'>
+        <pre className='m-0 min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all text-xs leading-5'>
           {previewText}
         </pre>
       </div>

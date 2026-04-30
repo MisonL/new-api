@@ -62,6 +62,7 @@ const HeaderProfileStrategySection = ({
   onEditProfile,
   onDeleteProfile,
   onImportLegacy,
+  openLibrarySignal = 0,
 }) => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -121,6 +122,13 @@ const HeaderProfileStrategySection = ({
     setDragOverProfileId('');
     setDragOverPosition('before');
   }, []);
+
+  React.useEffect(() => {
+    if (!openLibrarySignal) {
+      return;
+    }
+    setLibraryVisible(true);
+  }, [openLibrarySignal]);
 
   const handleDragStart = useCallback((event, profileId) => {
     setDraggedProfileId(profileId);

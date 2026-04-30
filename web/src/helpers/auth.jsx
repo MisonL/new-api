@@ -17,9 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
-import { Navigate } from 'react-router-dom';
-import { history } from './history';
+import React, { useEffect, useRef } from 'react';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import {
+  consumeAuthRedirectTarget,
+  rememberAuthRedirectTarget,
+} from './authRedirect';
 
 export function authHeader() {
   // return authorization header with jwt token
@@ -33,26 +36,40 @@ export function authHeader() {
 }
 
 export const AuthRedirect = ({ children }) => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const user = localStorage.getItem('user');
+  const wasInitiallyAuthenticated = useRef(Boolean(user));
+
+  useEffect(() => {
+    if (!user || !wasInitiallyAuthenticated.current) return;
+    navigate(consumeAuthRedirectTarget(location.state, '/console'), {
+      replace: true,
+    });
+  }, [location.state, navigate, user]);
 
   if (user) {
-    return <Navigate to='/console' replace />;
+    return null;
   }
 
   return children;
 };
 
 function PrivateRoute({ children }) {
+  const location = useLocation();
   if (!localStorage.getItem('user')) {
-    return <Navigate to='/login' state={{ from: history.location }} />;
+    rememberAuthRedirectTarget(location);
+    return <Navigate to='/login' replace state={{ from: location }} />;
   }
   return children;
 }
 
 export function AdminRoute({ children }) {
+  const location = useLocation();
   const raw = localStorage.getItem('user');
   if (!raw) {
-    return <Navigate to='/login' state={{ from: history.location }} />;
+    rememberAuthRedirectTarget(location);
+    return <Navigate to='/login' replace state={{ from: location }} />;
   }
   try {
     const user = JSON.parse(raw);

@@ -85,6 +85,7 @@ import {
   buildSelectedProfileItems,
   createLegacyHeaderProfileDraft,
   getHeaderProfileStrategyFromSettings,
+  mergeChannelSubmitFormValues,
   reorderSelectedProfileIds,
   toggleSelectedProfile,
 } from './headerProfile.helpers.js';
@@ -140,6 +141,7 @@ const REGION_EXAMPLE = {
 };
 const UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT = 8;
 const ADVANCED_SETTINGS_EXPANDED_KEY = 'channel-advanced-settings-expanded';
+const SILICONFLOW_PROVIDER_NAME = 'SiliconFlow';
 
 const DESKTOP_CHANNEL_SHEET_WIDTH = 720;
 const DESKTOP_ADVANCED_SETTINGS_PANEL_WIDTH = 600;
@@ -533,12 +535,17 @@ const EditChannelModal = (props) => {
     useState(false);
   const [requestPolicyModalVisible, setRequestPolicyModalVisible] =
     useState(false);
+  const [requestPolicyLibraryOpenSignal, setRequestPolicyLibraryOpenSignal] =
+    useState(0);
   const [requestPolicyAdvancedKeys, setRequestPolicyAdvancedKeys] = useState(
     [],
   );
   const [requestHeaderAdvancedPanelKeys, setRequestHeaderAdvancedPanelKeys] =
     useState([]);
-  const openRequestPolicyModal = (focusAdvanced = false) => {
+  const openRequestPolicyModal = (
+    focusAdvanced = false,
+    openLibrary = false,
+  ) => {
     const activeKeys = [];
     // Advanced entry opens panels with existing content; invalid JSON is always expanded.
     if (focusAdvanced && !paramOverrideMeta.isEmpty) {
@@ -560,6 +567,9 @@ const EditChannelModal = (props) => {
     }
     setRequestPolicyAdvancedKeys(activeKeys);
     setRequestPolicyModalVisible(true);
+    if (openLibrary) {
+      setRequestPolicyLibraryOpenSignal((value) => value + 1);
+    }
   };
   const openRequestHeaderAdvancedModal = () => {
     const activeKeys = [];
@@ -2041,8 +2051,7 @@ const EditChannelModal = (props) => {
 
   const submit = async () => {
     const formValues = formApiRef.current ? formApiRef.current.getValues() : {};
-    let localInputs = { ...formValues };
-    localInputs.param_override = inputs.param_override;
+    let localInputs = mergeChannelSubmitFormValues(formValues, inputs);
 
     if (localInputs.type === 57) {
       if (batch) {
@@ -2950,7 +2959,7 @@ const EditChannelModal = (props) => {
                           theme={
                             headerProfileStrategy.enabled ? 'light' : 'solid'
                           }
-                          onClick={() => openRequestPolicyModal(false)}
+                          onClick={() => openRequestPolicyModal(false, true)}
                         >
                           {headerProfileStrategy.enabled
                             ? t('更换模板')
@@ -3054,6 +3063,7 @@ const EditChannelModal = (props) => {
                           onEditProfile={openHeaderProfileEditor}
                           onDeleteProfile={handleDeleteHeaderProfile}
                           onImportLegacy={handleImportLegacyHeaderOverride}
+                          openLibrarySignal={requestPolicyLibraryOpenSignal}
                         />
                       </div>
 
@@ -4556,21 +4566,40 @@ const EditChannelModal = (props) => {
                             <Banner
                               type='info'
                               description={
-                                <div>
-                                  <Text strong>{t('邀请链接')}:</Text>
-                                  <Text
-                                    link
-                                    underline
-                                    className='ml-2 cursor-pointer'
+                                <Space wrap align='center'>
+                                  <Text strong>
+                                    {SILICONFLOW_PROVIDER_NAME}
+                                  </Text>
+                                  <Text type='tertiary' size='small'>
+                                    {t('官方服务入口')}
+                                  </Text>
+                                  <Button
+                                    size='small'
+                                    type='tertiary'
                                     onClick={() =>
                                       window.open(
-                                        'https://cloud.siliconflow.cn/i/hij0YNTZ',
+                                        'https://www.siliconflow.cn',
+                                        '_blank',
+                                        'noopener,noreferrer',
                                       )
                                     }
                                   >
-                                    https://cloud.siliconflow.cn/i/hij0YNTZ
-                                  </Text>
-                                </div>
+                                    {t('官方网站')}
+                                  </Button>
+                                  <Button
+                                    size='small'
+                                    type='tertiary'
+                                    onClick={() =>
+                                      window.open(
+                                        'https://docs.siliconflow.cn',
+                                        '_blank',
+                                        'noopener,noreferrer',
+                                      )
+                                    }
+                                  >
+                                    {t('官方文档')}
+                                  </Button>
+                                </Space>
                               }
                               className='!rounded-lg'
                             />

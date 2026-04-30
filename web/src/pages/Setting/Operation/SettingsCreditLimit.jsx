@@ -36,6 +36,7 @@ export default function SettingsCreditLimit(props) {
     PreConsumedQuota: '',
     QuotaForInviter: '',
     QuotaForInvitee: '',
+    InviteRebateRate: '',
     'quota_setting.enable_free_model_pre_consume': true,
   });
   const refForm = useRef();
@@ -59,6 +60,14 @@ export default function SettingsCreditLimit(props) {
     setLoading(true);
     Promise.all(requestQueue)
       .then((res) => {
+        const failedResponse = res.find(
+          (item) => item?.data?.success === false,
+        );
+        if (failedResponse) {
+          return showError(
+            failedResponse.data?.message || t('保存失败，请重试'),
+          );
+        }
         if (requestQueue.length === 1) {
           if (res.includes(undefined)) return;
         } else if (requestQueue.length > 1) {
@@ -162,6 +171,26 @@ export default function SettingsCreditLimit(props) {
                     setInputs({
                       ...inputs,
                       QuotaForInvitee: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={6}>
+                <Form.InputNumber
+                  label={t('邀请充值返利比例')}
+                  field={'InviteRebateRate'}
+                  step={0.1}
+                  min={0}
+                  max={100}
+                  suffix={'%'}
+                  extraText={t(
+                    '按被邀请用户实际到账额度计算，奖励进入可转返利额度',
+                  )}
+                  placeholder={'0'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      InviteRebateRate: String(value),
                     })
                   }
                 />

@@ -166,9 +166,6 @@ const ModelTestRuntimeConfigPanel = ({
   const promptText = normalizedRuntimeConfig.testPrompt || '';
   const promptPreview = promptText.trim().replace(/\s+/g, ' ');
   const promptSummary = promptPreview || t('未填写，点击设置');
-  const promptMeta = promptPreview
-    ? t('已填写 {{count}} 个字符', { count: promptText.length })
-    : t('点击编辑测试内容');
   const pathHint =
     selectedEndpointType === 'image-generation'
       ? t(
@@ -264,27 +261,26 @@ const ModelTestRuntimeConfigPanel = ({
             </Button>
           </div>
         </div>
-        <div className='flex gap-1.5 overflow-x-auto whitespace-nowrap pb-1'>
+        <div className='model-test-runtime-summary flex flex-wrap gap-1.5 pb-1'>
           {runtimeSummaryItems.map((item) => (
             <RuntimeSummaryTag key={item.key} {...item} t={t} />
           ))}
         </div>
         <div className='flex flex-col gap-2 md:flex-row md:items-end'>
-          <div
-            className='min-w-0 md:flex-[0_1_320px]'
-            style={{ maxWidth: '320px' }}
-          >
-            <Typography.Text strong size='small' className='mb-1 block'>
-              {t('测试内容')}
-            </Typography.Text>
+          <div className='model-test-runtime-field model-test-runtime-field-prompt'>
+            <div className='model-test-field-label-row'>
+              <Typography.Text strong size='small'>
+                {t('测试内容')}
+              </Typography.Text>
+            </div>
             <div
               role='button'
               tabIndex={isBatchTesting ? -1 : 0}
               aria-disabled={isBatchTesting}
-              className={`flex min-h-[48px] items-center justify-between gap-3 rounded-md border border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-3 py-2 ${
+              className={`model-test-prompt-trigger ${
                 isBatchTesting
-                  ? 'cursor-not-allowed opacity-60'
-                  : 'cursor-pointer transition-colors hover:bg-[var(--semi-color-fill-0)]'
+                  ? 'model-test-prompt-trigger-disabled'
+                  : 'model-test-prompt-trigger-enabled'
               }`}
               title={t('点击编辑测试内容')}
               onClick={openPromptEditor}
@@ -298,27 +294,22 @@ const ModelTestRuntimeConfigPanel = ({
                 }
               }}
             >
-              <div className='min-w-0 flex-1'>
-                <Typography.Text
-                  size='small'
-                  className='block truncate'
-                  type={promptPreview ? 'primary' : 'tertiary'}
-                >
-                  {promptSummary}
-                </Typography.Text>
-                <Typography.Text type='tertiary' size='small'>
-                  {promptMeta}
-                </Typography.Text>
-              </div>
-              <Tag color='blue' size='small'>
-                {t('编辑')}
-              </Tag>
+              <Typography.Text
+                size='small'
+                className='min-w-0 flex-1 truncate'
+                type={promptPreview ? 'primary' : 'tertiary'}
+              >
+                {promptSummary}
+              </Typography.Text>
+              <span className='model-test-prompt-edit-text'>{t('编辑')}</span>
             </div>
           </div>
-          <div className='min-w-0 md:w-[136px] md:shrink-0'>
-            <Typography.Text strong size='small' className='mb-1 block'>
-              {t('最大输出 Tokens')}
-            </Typography.Text>
+          <div className='model-test-runtime-field model-test-runtime-field-tokens'>
+            <div className='model-test-field-label-row'>
+              <Typography.Text strong size='small'>
+                {t('最大输出 Tokens')}
+              </Typography.Text>
+            </div>
             <InputNumber
               value={normalizedRuntimeConfig.maxTokens}
               onChange={(value) => updateRuntimeConfig('maxTokens', value)}

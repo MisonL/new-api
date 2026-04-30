@@ -280,6 +280,44 @@ export function buildHeaderProfileStrategySettings(settingsText, strategy) {
   return JSON.stringify(nextSettings);
 }
 
+const HIDDEN_SUBMIT_STATE_FIELDS = [
+  'settings',
+  'param_override',
+  'header_override',
+  'status_code_mapping',
+];
+
+function isEmptyHiddenSubmitValue(value) {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const trimmed = value.trim();
+  return trimmed === '' || trimmed === '{}';
+}
+
+export function mergeChannelSubmitFormValues(formValues = {}, inputs = {}) {
+  const merged = { ...inputs, ...formValues };
+
+  HIDDEN_SUBMIT_STATE_FIELDS.forEach((field) => {
+    const inputValue = inputs?.[field];
+    if (inputValue === undefined || inputValue === null) {
+      return;
+    }
+
+    const formValue = formValues?.[field];
+    const formValueMissing =
+      formValue === undefined ||
+      formValue === null ||
+      isEmptyHiddenSubmitValue(formValue);
+
+    if (formValueMissing) {
+      merged[field] = inputValue;
+    }
+  });
+
+  return merged;
+}
+
 export function createLegacyHeaderProfileDraft(headerOverrideText) {
   const rawText =
     typeof headerOverrideText === 'string' ? headerOverrideText.trim() : '';

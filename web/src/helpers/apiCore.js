@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import axios from 'axios';
 import { getUserIdFromLocalStorage, showError } from './utils';
+import { handleAuthExpired } from './authRedirect';
 import {
   IS_READONLY_FRONTEND,
   READONLY_FRONTEND_MESSAGE,
@@ -115,6 +116,28 @@ function patchAPIInstance(instance) {
   };
 }
 
+function applyResponseErrorHandler(instance) {
+  instance.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (error.config && error.config.skipErrorHandler) {
+        return Promise.reject(error);
+      }
+      if (error?.response?.status === 401) {
+        handleAuthExpired(window.location);
+      }
+      showError(error);
+      return Promise.reject(error);
+    },
+  );
+}
+
+function configureAPIInstance(instance) {
+  patchAPIInstance(instance);
+  applyReadonlyRequestGuard(instance);
+  applyResponseErrorHandler(instance);
+}
+
 function normalizeServerAddress(
   address,
   fallbackOrigin = window.location.origin,
@@ -193,20 +216,7 @@ export function updateAPI() {
     },
   });
 
-  patchAPIInstance(API);
-  applyReadonlyRequestGuard(API);
+  configureAPIInstance(API);
 }
 
-patchAPIInstance(API);
-applyReadonlyRequestGuard(API);
-
-API.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.config && error.config.skipErrorHandler) {
-      return Promise.reject(error);
-    }
-    showError(error);
-    return Promise.reject(error);
-  },
-);
+configureAPIInstance(API);

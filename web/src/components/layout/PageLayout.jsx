@@ -34,6 +34,7 @@ import { useTranslation } from 'react-i18next';
 import { API } from '../../helpers/apiCore';
 import { setStatusData } from '../../helpers/data';
 import { getLogo, getSystemName, showError } from '../../helpers/utils';
+import { handleAuthExpired } from '../../helpers/authRedirect';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useLocation } from 'react-router-dom';
@@ -43,6 +44,7 @@ import {
   READONLY_FRONTEND_MESSAGE,
 } from '../../constants/runtime.constants';
 const { Sider, Content, Header } = Layout;
+const SESSION_RESUME_CHECK_INTERVAL_MS = 30 * 1000;
 
 const PageLayout = () => {
   const [userState, userDispatch] = useContext(UserContext);
@@ -166,6 +168,59 @@ const PageLayout = () => {
       i18n.changeLanguage(preferredLang).catch(console.error);
     }
   }, [currentLanguage, i18n, preferredLang]);
+
+  useEffect(() => {
+    if (!isConsoleRoute || !localStorage.getItem('user')) {
+      return;
+    }
+
+    let checking = false;
+    let lastCheckedAt = 0;
+
+    const verifySession = async () => {
+      if (
+        checking ||
+        document.visibilityState !== 'visible' ||
+        !localStorage.getItem('user')
+      ) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastCheckedAt < SESSION_RESUME_CHECK_INTERVAL_MS) {
+        return;
+      }
+
+      checking = true;
+      lastCheckedAt = now;
+      try {
+        await API.get('/api/user/self', {
+          skipErrorHandler: true,
+          disableDuplicate: true,
+        });
+      } catch (error) {
+        if (error?.response?.status === 401) {
+          handleAuthExpired(window.location);
+        }
+      } finally {
+        checking = false;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        verifySession();
+      }
+    };
+
+    window.addEventListener('focus', verifySession);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', verifySession);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isConsoleRoute]);
 
   useFormFieldA11yPatch(`${location.pathname}${location.search}`);
 

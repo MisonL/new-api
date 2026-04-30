@@ -17,8 +17,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from 'react-router-dom';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import {
@@ -40,6 +52,7 @@ import {
   prepareCredentialRequestOptions,
   buildAssertionResult,
   isPasskeySupported,
+  consumeAuthRedirectTarget,
 } from '../../helpers';
 import Turnstile from '../common/lazy/LazyTurnstile';
 import {
@@ -70,6 +83,7 @@ import { SiDiscord } from 'react-icons/si';
 
 const LoginForm = () => {
   let navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const githubButtonTextKeyByState = {
     idle: '使用 GitHub 继续',
@@ -116,6 +130,10 @@ const LoginForm = () => {
 
   const logo = getLogo();
   const systemName = getSystemName();
+  const getPostLoginTarget = useCallback(
+    (fallback) => consumeAuthRedirectTarget(location.state, fallback),
+    [location.state],
+  );
 
   let affCode = new URLSearchParams(window.location.search).get('aff');
   if (affCode) {
@@ -199,11 +217,12 @@ const LoginForm = () => {
       );
       const { success, message, data } = res.data;
       if (success) {
+        const postLoginTarget = getPostLoginTarget('/');
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigate(postLoginTarget);
         showSuccess('登录成功！');
         setShowWeChatLoginModal(false);
       } else {
@@ -221,11 +240,12 @@ const LoginForm = () => {
       return false;
     }
 
+    const postLoginTarget = getPostLoginTarget('/console/token');
     userDispatch({ type: 'login', payload: result.user });
     localStorage.setItem('user', JSON.stringify(result.user));
     setUserData(result.user);
     updateAPI();
-    navigate('/console/token');
+    navigate(postLoginTarget);
     showSuccess(
       result.action === 'bind'
         ? t('检测到现有会话，已完成绑定并同步登录态')
@@ -267,6 +287,7 @@ const LoginForm = () => {
             return;
           }
 
+          const postLoginTarget = getPostLoginTarget('/console');
           userDispatch({ type: 'login', payload: data });
           setUserData(data);
           updateAPI();
@@ -278,7 +299,7 @@ const LoginForm = () => {
               centered: true,
             });
           }
-          navigate('/console');
+          navigate(postLoginTarget);
         } else {
           showError(message);
         }
@@ -318,12 +339,13 @@ const LoginForm = () => {
       const res = await API.get(`/api/oauth/telegram/login`, { params });
       const { success, message, data } = res.data;
       if (success) {
+        const postLoginTarget = getPostLoginTarget('/');
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
         showSuccess('登录成功！');
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigate(postLoginTarget);
       } else {
         showError(message);
       }
@@ -514,11 +536,12 @@ const LoginForm = () => {
       );
       const finish = finishRes.data;
       if (finish.success) {
+        const postLoginTarget = getPostLoginTarget('/console');
         userDispatch({ type: 'login', payload: finish.data });
         setUserData(finish.data);
         updateAPI();
         showSuccess('登录成功！');
-        navigate('/console');
+        navigate(postLoginTarget);
       } else {
         showError(finish.message || 'Passkey 登录失败，请重试');
       }
@@ -549,11 +572,12 @@ const LoginForm = () => {
 
   // 2FA验证成功处理
   const handle2FASuccess = (data) => {
+    const postLoginTarget = getPostLoginTarget('/console');
     userDispatch({ type: 'login', payload: data });
     setUserData(data);
     updateAPI();
     showSuccess('登录成功！');
-    navigate('/console');
+    navigate(postLoginTarget);
   };
 
   // 返回登录页面

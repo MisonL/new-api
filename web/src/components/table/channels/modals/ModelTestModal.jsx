@@ -181,15 +181,19 @@ const ModelTestModal = ({
     {
       title: t('模型名称'),
       dataIndex: 'model',
+      width: isMobile ? 118 : undefined,
       render: (text) => (
-        <div className='flex items-center'>
-          <Typography.Text strong>{text}</Typography.Text>
+        <div className='flex min-w-0 items-center'>
+          <Typography.Text strong className='model-test-model-name'>
+            {text}
+          </Typography.Text>
         </div>
       ),
     },
     {
       title: t('状态'),
       dataIndex: 'status',
+      width: isMobile ? 68 : undefined,
       render: (text, record) => {
         const testResult =
           modelTestResults[`${currentTestChannel.id}-${record.model}`];
@@ -311,6 +315,8 @@ const ModelTestModal = ({
     {
       title: '',
       dataIndex: 'operate',
+      width: isMobile ? 50 : undefined,
+      align: 'right',
       render: (text, record) => {
         const isTesting = testingModels.has(record.model);
         return (
@@ -407,7 +413,7 @@ const ModelTestModal = ({
         ) : null
       }
       maskClosable={!isBatchTesting}
-      className='!rounded-lg'
+      className='model-test-modal !rounded-lg'
       size={isMobile ? 'full-width' : 'large'}
       width={isMobile ? '100vw' : 980}
       style={{ top: isMobile ? 0 : 20, maxWidth: 'calc(100vw - 32px)' }}
@@ -434,6 +440,11 @@ const ModelTestModal = ({
                   onChange={setSelectedEndpointType}
                   optionList={endpointTypeOptions}
                   className='!w-full min-w-0'
+                  aria-label={`${t('测试路径')}: ${
+                    endpointTypeOptions.find(
+                      (option) => option.value === selectedEndpointType,
+                    )?.label || t('自动检测（旧逻辑）')
+                  }`}
                   placeholder={t('选择测试路径')}
                 />
               </div>

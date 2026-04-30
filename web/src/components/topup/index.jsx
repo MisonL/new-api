@@ -36,9 +36,11 @@ import { StatusContext } from '../../context/Status';
 
 import RechargeCard from './RechargeCard';
 import InvitationCard from './InvitationCard';
+import GiftCodeCard from './GiftCodeCard';
 import TransferModal from './modals/TransferModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
+import InvitationRecordsModal from './modals/InvitationRecordsModal';
 
 const TopUp = () => {
   const { t } = useTranslation();
@@ -89,7 +91,9 @@ const TopUp = () => {
   // 邀请相关状态
   const [affLink, setAffLink] = useState('');
   const [openTransfer, setOpenTransfer] = useState(false);
+  const [openInvitationRecords, setOpenInvitationRecords] = useState(false);
   const [transferAmount, setTransferAmount] = useState(0);
+  const giftCodeFromUrl = searchParams.get('gift_code') || '';
 
   // 账单Modal状态
   const [openHistory, setOpenHistory] = useState(false);
@@ -677,6 +681,17 @@ const TopUp = () => {
     setOpenTransfer(false);
   };
 
+  const handleInvitationRecordsCancel = () => {
+    setOpenInvitationRecords(false);
+  };
+
+  const clearGiftCodeParam = () => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    if (!nextSearchParams.get('gift_code')) return;
+    nextSearchParams.delete('gift_code');
+    setSearchParams(nextSearchParams, { replace: true });
+  };
+
   const handleOpenHistory = () => {
     setOpenHistory(true);
   };
@@ -751,6 +766,13 @@ const TopUp = () => {
         visible={openHistory}
         onCancel={handleHistoryCancel}
         t={t}
+      />
+
+      <InvitationRecordsModal
+        visible={openInvitationRecords}
+        onCancel={handleInvitationRecordsCancel}
+        t={t}
+        renderQuota={renderQuota}
       />
 
       {/* Creem 充值确认模态框 */}
@@ -829,14 +851,24 @@ const TopUp = () => {
           allSubscriptions={allSubscriptions}
           reloadSubscriptionSelf={getSubscriptionSelf}
         />
-        <InvitationCard
-          t={t}
-          userState={userState}
-          renderQuota={renderQuota}
-          setOpenTransfer={setOpenTransfer}
-          affLink={affLink}
-          handleAffLinkClick={handleAffLinkClick}
-        />
+        <div className='space-y-6'>
+          <InvitationCard
+            t={t}
+            userState={userState}
+            renderQuota={renderQuota}
+            setOpenTransfer={setOpenTransfer}
+            setOpenInvitationRecords={setOpenInvitationRecords}
+            affLink={affLink}
+            handleAffLinkClick={handleAffLinkClick}
+          />
+          <GiftCodeCard
+            t={t}
+            renderQuota={renderQuota}
+            reloadUserQuota={getUserQuota}
+            initialGiftCode={giftCodeFromUrl}
+            onGiftCodeHandled={clearGiftCodeParam}
+          />
+        </div>
       </div>
     </div>
   );

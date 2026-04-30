@@ -17,8 +17,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   API,
   getLogo,
@@ -32,6 +39,7 @@ import {
   onDiscordOAuthClicked,
   onCustomOAuthClicked,
   isDesktopApp,
+  consumeAuthRedirectTarget,
 } from '../../helpers';
 import Turnstile from '../common/lazy/LazyTurnstile';
 import {
@@ -68,6 +76,7 @@ import { SiDiscord } from 'react-icons/si';
 
 const RegisterForm = () => {
   let navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const githubButtonTextKeyByState = {
     idle: '使用 GitHub 继续',
@@ -114,6 +123,10 @@ const RegisterForm = () => {
 
   const logo = getLogo();
   const systemName = getSystemName();
+  const getPostLoginTarget = useCallback(
+    (fallback) => consumeAuthRedirectTarget(location.state, fallback),
+    [location.state],
+  );
 
   let affCode = new URLSearchParams(window.location.search).get('aff');
   if (affCode) {
@@ -289,11 +302,12 @@ const RegisterForm = () => {
       return false;
     }
 
+    const postLoginTarget = getPostLoginTarget('/console/token');
     userDispatch({ type: 'login', payload: result.user });
     localStorage.setItem('user', JSON.stringify(result.user));
     setUserData(result.user);
     updateAPI();
-    navigate('/console/token');
+    navigate(postLoginTarget);
     showSuccess(
       result.action === 'bind'
         ? t('检测到现有会话，已完成绑定并同步登录态')

@@ -18,7 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Modal, Typography, Input, InputNumber } from '@douyinfe/semi-ui';
+import {
+  Modal,
+  Typography,
+  Input,
+  InputNumber,
+  Button,
+} from '@douyinfe/semi-ui';
 import { CreditCard } from 'lucide-react';
 
 const TransferModal = ({
@@ -32,6 +38,21 @@ const TransferModal = ({
   transferAmount,
   setTransferAmount,
 }) => {
+  const availableAffQuota = Number(userState?.user?.aff_quota || 0);
+  const quotaPerUnit = Number(getQuotaPerUnit());
+  const normalizedTransferAmount = Number(transferAmount || 0);
+  const minTransferQuota =
+    Number.isFinite(quotaPerUnit) && quotaPerUnit > 0 ? quotaPerUnit : 0;
+  const hasValidTransferRule = minTransferQuota > 0;
+  const canTransferAll =
+    hasValidTransferRule && availableAffQuota >= minTransferQuota;
+  const inputMin = canTransferAll ? minTransferQuota : 0;
+  const inputMax = canTransferAll ? availableAffQuota : 0;
+  const canSubmitTransfer =
+    canTransferAll &&
+    normalizedTransferAmount >= minTransferQuota &&
+    normalizedTransferAmount <= availableAffQuota;
+
   return (
     <Modal
       title={
@@ -43,6 +64,9 @@ const TransferModal = ({
       visible={openTransfer}
       onOk={transfer}
       onCancel={handleTransferCancel}
+      okText={t('确认')}
+      cancelText={t('取消')}
+      okButtonProps={{ disabled: !canSubmitTransfer }}
       maskClosable={false}
       centered
     >
@@ -52,24 +76,46 @@ const TransferModal = ({
             {t('可用邀请额度')}
           </Typography.Text>
           <Input
-            value={renderQuota(userState?.user?.aff_quota)}
+            value={renderQuota(availableAffQuota)}
             disabled
             className='!rounded-lg'
             name='components-topup-modals-transfermodal-input-1'
           />
         </div>
         <div>
-          <Typography.Text strong className='block mb-2'>
-            {t('划转额度')} · {t('最低') + renderQuota(getQuotaPerUnit())}
-          </Typography.Text>
+          <div className='flex items-center justify-between gap-2 mb-2'>
+            <Typography.Text strong>
+              {t('划转额度')} · {t('最低') + renderQuota(minTransferQuota)}
+            </Typography.Text>
+            <Button
+              size='small'
+              type='tertiary'
+              disabled={!canTransferAll}
+              onClick={() => setTransferAmount(availableAffQuota)}
+            >
+              {t('全部划转')}
+            </Button>
+          </div>
           <InputNumber
-            min={getQuotaPerUnit()}
-            max={userState?.user?.aff_quota || 0}
+            min={inputMin}
+            max={inputMax}
+            disabled={!canTransferAll}
             value={transferAmount}
             onChange={(value) => setTransferAmount(value)}
             className='w-full !rounded-lg'
             name='components-topup-modals-transfermodal-inputnumber-1'
           />
+          {!canTransferAll && (
+            <Typography.Text
+              type='tertiary'
+              size='small'
+              className='block mt-2'
+            >
+              {hasValidTransferRule
+                ? t('邀请额度不足，需至少达到最低划转额度')
+                : t('划转规则未配置')}
+            </Typography.Text>
+          )}
         </div>
       </div>
     </Modal>
