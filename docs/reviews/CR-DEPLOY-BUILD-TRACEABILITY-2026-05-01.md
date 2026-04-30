@@ -119,7 +119,7 @@ docker compose ps
 - 临时镜像 OCI labels 包含 `org.opencontainers.image.revision=<HEAD>`。
 - 临时镜像已删除，未覆盖正式镜像。
 - 正式镜像已重建为 `new-api-local:prod-main`。
-- 运行中 `/new-api --build-info` 输出 `commit=1b5518a8c31ac12ad69e83f0096807e2d69a8223`。
+- 运行中 `/new-api --build-info` 输出 version、commit、date、source，commit 应等于当前部署提交。
 - `/api/status` 返回 `success=true`。
 - `new-api`、`redis`、`postgres` 的 Compose project、service、working_dir、config_files 标签均已回到 `/Volumes/Work/code/new-api`。
 
@@ -137,7 +137,7 @@ docker compose ps
 - Docker：旧正式镜像无 labels，新临时镜像有 revision/version/source/created labels。
 - Compose：旧 Redis 标签存在 `/volumes/...` 漂移；新 Compose 渲染默认镜像为 `new-api-local:prod-main`。
 - Logs：500 来自上游 EOF；400 来自上游客户端版本要求。
-- Deploy：新启动日志包含 `New API v1.1.0 commit=1b5518a8c31ac12ad69e83f0096807e2d69a8223 built=2026-04-30T16:47:49Z started`。
+- Deploy：新启动日志包含 `New API v1.1.0 commit=<deployed commit> built=<build date> started`。
 - Deploy：启动后的上游模型巡检任务报告 `checked_channels=17 changed_channels=3 detected_remove_models=63 failed_channels=0`，这是现有控制面任务产生的检测状态写入风险。
 
 ## Residual Risks / Gate Boundary
