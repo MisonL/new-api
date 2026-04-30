@@ -101,6 +101,13 @@ docker build --build-arg APP_VERSION=v1.1.0 --build-arg VCS_REF=<HEAD> --build-a
 docker run --rm new-api-buildinfo-check:tmp --build-info
 docker image inspect new-api-buildinfo-check:tmp
 docker image rm new-api-buildinfo-check:tmp
+git commit -m "chore: add build traceability metadata"
+scripts/build-docker-local.sh new-api-local:prod-main
+NEW_API_IMAGE=new-api-local:prod-main docker compose up -d new-api redis
+docker compose up -d --force-recreate --no-deps redis
+docker exec new-api /new-api --build-info
+curl -fsS http://127.0.0.1:3000/api/status
+docker compose ps
 ```
 
 关键结果：
@@ -111,11 +118,15 @@ docker image rm new-api-buildinfo-check:tmp
 - 临时镜像 `--build-info` 输出 version、commit、date、source。
 - 临时镜像 OCI labels 包含 `org.opencontainers.image.revision=<HEAD>`。
 - 临时镜像已删除，未覆盖正式镜像。
+- 正式镜像已重建为 `new-api-local:prod-main`。
+- 运行中 `/new-api --build-info` 输出 `commit=1b5518a8c31ac12ad69e83f0096807e2d69a8223`。
+- `/api/status` 返回 `success=true`。
+- `new-api`、`redis`、`postgres` 的 Compose project、service、working_dir、config_files 标签均已回到 `/Volumes/Work/code/new-api`。
 
 ## Recovery Evidence
 
-- 本轮代码验证阶段没有重启正式容器。
-- 若后续部署失败，可继续使用已有 `new-api-local:prod-main` 镜像或将 `.env` 中 `NEW_API_IMAGE` 改回上一标签后执行 `docker compose up -d`。
+- 本轮最终通过 Compose 重建了 `new-api`，并强制重建了 `redis` 以修正 Compose 路径标签。
+- 若后续部署失败，可将 `.env` 中 `NEW_API_IMAGE` 改回上一标签后执行 `docker compose up -d`。
 - 回滚验证信号：容器 health、`/api/status`、Compose labels、`--build-info`。
 
 ## Observability Evidence
@@ -126,10 +137,12 @@ docker image rm new-api-buildinfo-check:tmp
 - Docker：旧正式镜像无 labels，新临时镜像有 revision/version/source/created labels。
 - Compose：旧 Redis 标签存在 `/volumes/...` 漂移；新 Compose 渲染默认镜像为 `new-api-local:prod-main`。
 - Logs：500 来自上游 EOF；400 来自上游客户端版本要求。
+- Deploy：新启动日志包含 `New API v1.1.0 commit=1b5518a8c31ac12ad69e83f0096807e2d69a8223 built=2026-04-30T16:47:49Z started`。
+- Deploy：启动后的上游模型巡检任务报告 `checked_channels=17 changed_channels=3 detected_remove_models=63 failed_channels=0`，这是现有控制面任务产生的检测状态写入风险。
 
 ## Residual Risks / Gate Boundary
 
-- 运行中的正式容器需要重新构建并通过 Compose 收敛后，才能让生产二进制实际携带新的 `--build-info`。
-- Redis 路径标签漂移需要通过 canonical `/Volumes/Work/code/new-api` 下的 `docker compose up -d redis` 或整体 Compose 收敛修正。
 - 上游 `api.gettoken.dev` EOF 需要由上游渠道稳定性、网络或认证链路继续排查；本轮只做分类和证据归档。
 - `gpt-5.5` 400 需要升级调用端 Codex 或调整路由到兼容渠道；本轮不改客户端。
+- 部署后仍观察到渠道 `#155` 的 `gpt-5.5` 上游 429，这属于上游限流或并发容量问题，不是本轮构建溯源问题。
+- 上游模型巡检任务会在服务启动后检测并持久化差异状态；若要求部署零副作用，需要单独设计启动期巡检开关或冷却窗口。
