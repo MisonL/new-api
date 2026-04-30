@@ -601,7 +601,78 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
+	if info != nil && info.RelayMode == relayconstant.RelayModeResponses {
+		input, removedCount, remainingCount, err := removeUnsupportedResponsesCompactionInput(request.Input)
+		if err != nil {
+			return nil, err
+		}
+		if removedCount > 0 {
+			if remainingCount == 0 {
+				return nil, errors.New("responses compaction input is unsupported by this OpenAI-compatible channel and no other input items remain")
+			}
+			request.Input = input
+			channelID := 0
+			if info.ChannelMeta != nil {
+				channelID = info.ChannelMeta.ChannelId
+			}
+			common.SysLog(fmt.Sprintf(
+				"responses compaction input removed for OpenAI-compatible channel: channel_id=%d model=%s compact_items=%d remaining_items=%d",
+				channelID,
+				info.OriginModelName,
+				removedCount,
+				remainingCount,
+			))
+		}
+	}
 	return request, nil
+}
+
+func removeUnsupportedResponsesCompactionInput(input json.RawMessage) (json.RawMessage, int, int, error) {
+	trimmedInput := bytes.TrimSpace(input)
+	if len(trimmedInput) == 0 || trimmedInput[0] != '[' {
+		return input, 0, 0, nil
+	}
+
+	var items []json.RawMessage
+	if err := common.Unmarshal(input, &items); err != nil {
+		return input, 0, 0, err
+	}
+
+	filtered := make([]json.RawMessage, 0, len(items))
+	removedCount := 0
+	for _, rawItem := range items {
+		var item map[string]json.RawMessage
+		if err := common.Unmarshal(rawItem, &item); err != nil {
+			filtered = append(filtered, rawItem)
+			continue
+		}
+		if responsesItemType(item) == "compaction" {
+			removedCount++
+			continue
+		}
+		filtered = append(filtered, rawItem)
+	}
+	if removedCount == 0 {
+		return input, 0, len(items), nil
+	}
+
+	raw, err := common.Marshal(filtered)
+	if err != nil {
+		return input, removedCount, len(filtered), err
+	}
+	return json.RawMessage(raw), removedCount, len(filtered), nil
+}
+
+func responsesItemType(item map[string]json.RawMessage) string {
+	rawType := item["type"]
+	if len(rawType) == 0 {
+		return ""
+	}
+	var itemType string
+	if err := common.Unmarshal(rawType, &itemType); err != nil {
+		return ""
+	}
+	return itemType
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {

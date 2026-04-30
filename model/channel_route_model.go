@@ -13,9 +13,23 @@ func getGroupModelRouteCandidates(modelName string) []string {
 	if !common.GroupModelRouteHelperEnabled {
 		return candidates
 	}
-	normalized := ratio_setting.FormatMatchingModelName(modelName)
-	if normalized != "" && normalized != modelName {
-		candidates = append(candidates, normalized)
+	if baseName, isCompact := ratio_setting.CompactBaseModelName(modelName); isCompact {
+		candidates = appendRouteCandidate(candidates, baseName)
 	}
+	normalized := ratio_setting.FormatMatchingModelName(modelName)
+	candidates = appendRouteCandidate(candidates, normalized)
+	return candidates
+}
+
+func appendRouteCandidate(candidates []string, modelName string) []string {
+	if modelName == "" {
+		return candidates
+	}
+	for _, candidate := range candidates {
+		if candidate == modelName {
+			return candidates
+		}
+	}
+	candidates = append(candidates, modelName)
 	return candidates
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/require"
 )
 
@@ -305,6 +306,41 @@ func TestGetRandomSatisfiedChannelUsesGroupModelRouteHelperWhenEnabled(t *testin
 	InitChannelCache()
 
 	got, err := GetRandomSatisfiedChannel("default", "gpt-4o-gizmo-special", 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+}
+
+func TestGetRandomSatisfiedChannelRoutesCompactSuffixToBaseModelWhenEnabled(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	channel := &Channel{
+		Id:     112,
+		Name:   "compact-base-model",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-5.5",
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-5.5",
+		ChannelId: channel.Id,
+		Enabled:   true,
+	}).Error)
+
+	InitChannelCache()
+
+	got, err := GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.5"), 0)
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, channel.Id, got.Id)
