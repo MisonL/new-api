@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -27,6 +28,16 @@ func decodeCopyChannelAPIResponse(t *testing.T, recorderBody []byte) copyChannel
 	var response copyChannelAPIResponse
 	require.NoError(t, common.Unmarshal(recorderBody, &response))
 	return response
+}
+
+func countCSVParts(value string) int64 {
+	count := int64(0)
+	for _, item := range strings.Split(value, ",") {
+		if strings.TrimSpace(item) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func TestCopyChannelPreservesRuntimeConfiguration(t *testing.T) {
@@ -114,7 +125,9 @@ func TestCopyChannelPreservesRuntimeConfiguration(t *testing.T) {
 	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel/copy/"+strconv.Itoa(origin.Id), map[string]any{})
 	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(origin.Id)}}
 
+	beforeCopy := common.GetTimestamp()
 	CopyChannel(ctx)
+	afterCopy := common.GetTimestamp()
 
 	response := decodeCopyChannelAPIResponse(t, recorder.Body.Bytes())
 	require.True(t, response.Success, response.Message)
@@ -124,6 +137,9 @@ func TestCopyChannelPreservesRuntimeConfiguration(t *testing.T) {
 	clone, err := model.GetChannelById(response.Data.Id, true)
 	require.NoError(t, err)
 	require.Equal(t, origin.Name+"_复制", clone.Name)
+	require.NotEqual(t, origin.CreatedTime, clone.CreatedTime)
+	require.GreaterOrEqual(t, clone.CreatedTime, beforeCopy)
+	require.LessOrEqual(t, clone.CreatedTime, afterCopy)
 	require.Equal(t, int64(0), clone.TestTime)
 	require.Equal(t, 0, clone.ResponseTime)
 	require.Zero(t, clone.Balance)
@@ -162,5 +178,76 @@ func TestCopyChannelPreservesRuntimeConfiguration(t *testing.T) {
 
 	var abilityCount int64
 	require.NoError(t, model.DB.Model(&model.Ability{}).Where("channel_id = ?", clone.Id).Count(&abilityCount).Error)
-	require.Equal(t, int64(4), abilityCount)
+	expectedAbilities := countCSVParts(origin.Models) * countCSVParts(origin.Group)
+	require.Equal(t, expectedAbilities, abilityCount)
+}
+
+func TestCopyChannelMissingSourceReturnsError(t *testing.T) {
+	setupChannelControllerTestDB(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel/copy/404", map[string]any{})
+	ctx.Params = gin.Params{{Key: "id", Value: "404"}}
+
+	CopyChannel(ctx)
+
+	response := decodeCopyChannelAPIResponse(t, recorder.Body.Bytes())
+	require.False(t, response.Success)
+	require.NotEmpty(t, response.Message)
+}
+
+func TestCopyChannelAllowsEmptyOtherSettings(t *testing.T) {
+	setupChannelControllerTestDB(t)
+
+	origin := &model.Channel{
+		Type:   constant.ChannelTypeOpenAI,
+		Key:    "sk-copy-source",
+		Status: common.ChannelStatusEnabled,
+		Name:   "copy-empty-settings",
+		Models: "gpt-5.5",
+		Group:  "default",
+	}
+	require.NoError(t, model.DB.Create(origin).Error)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel/copy/"+strconv.Itoa(origin.Id), map[string]any{})
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(origin.Id)}}
+
+	CopyChannel(ctx)
+
+	response := decodeCopyChannelAPIResponse(t, recorder.Body.Bytes())
+	require.True(t, response.Success, response.Message)
+
+	clone, err := model.GetChannelById(response.Data.Id, true)
+	require.NoError(t, err)
+	require.Empty(t, clone.OtherSettings)
+	require.Equal(t, dto.ChannelOtherSettings{}, clone.GetOtherSettings())
+}
+
+func TestCopyChannelPreservesDisabledStatusAndAbilities(t *testing.T) {
+	setupChannelControllerTestDB(t)
+
+	origin := &model.Channel{
+		Type:   constant.ChannelTypeOpenAI,
+		Key:    "sk-copy-source",
+		Status: common.ChannelStatusManuallyDisabled,
+		Name:   "copy-disabled-source",
+		Models: "gpt-5.5",
+		Group:  "default",
+	}
+	require.NoError(t, model.DB.Create(origin).Error)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel/copy/"+strconv.Itoa(origin.Id), map[string]any{})
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(origin.Id)}}
+
+	CopyChannel(ctx)
+
+	response := decodeCopyChannelAPIResponse(t, recorder.Body.Bytes())
+	require.True(t, response.Success, response.Message)
+
+	clone, err := model.GetChannelById(response.Data.Id, true)
+	require.NoError(t, err)
+	require.Equal(t, common.ChannelStatusManuallyDisabled, clone.Status)
+
+	var enabledCount int64
+	require.NoError(t, model.DB.Model(&model.Ability{}).Where("channel_id = ? AND enabled = ?", clone.Id, true).Count(&enabledCount).Error)
+	require.Zero(t, enabledCount)
 }

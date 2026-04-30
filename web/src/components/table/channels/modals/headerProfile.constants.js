@@ -88,6 +88,7 @@ const aiCodingCliProfiles = {
     description:
       '固定请求头是 Codex CLI 0.125.0 的静态快照；真实 CLI 会携带会话与窗口动态头，需在高级参数覆盖中启用 Codex CLI 请求头透传模板。',
     headers: {
+      // Codex CLI 原生请求使用 Originator，不使用通用的 X-Client-Name。
       'User-Agent': CODEX_CLI_USER_AGENT,
       Originator: 'codex_exec',
     },

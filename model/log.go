@@ -472,7 +472,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 		if missingChannelIds.Len() > 0 {
 			var dbChannels []Channel
 			if err = DB.Model(&Channel{}).
-				Select([]string{"id", "name", "type", "status", "base_url", "group", "tag", "models", "test_model", "response_time", "priority", "weight", "auto_ban", "channel_info"}).
+				Select([]string{"id", "name", "type", "status", "base_url", commonGroupCol, "tag", "models", "test_model", "response_time", "priority", "weight", "auto_ban", "channel_info"}).
 				Where("id IN ?", missingChannelIds.Items()).
 				Find(&dbChannels).Error; err != nil {
 				return logs, total, err

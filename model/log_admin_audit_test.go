@@ -94,24 +94,26 @@ func TestGetAllLogsAttachesNonSensitiveChannelDetail(t *testing.T) {
 	baseURL := "https://upstream.example"
 	tag := "mynav"
 	testModel := "gpt-5.5"
+	openAIOrganization := "org-hidden"
 	priority := int64(12)
 	weight := uint(30)
 	autoBan := 1
 	require.NoError(t, DB.Create(&Channel{
-		Id:           301,
-		Type:         constant.ChannelTypeOpenAI,
-		Status:       common.ChannelStatusEnabled,
-		Name:         "mynav-primary",
-		Key:          "sk-hidden",
-		BaseURL:      &baseURL,
-		Models:       "gpt-5.5,gpt-5.5-compact",
-		Group:        "default,codex",
-		Tag:          &tag,
-		TestModel:    &testModel,
-		ResponseTime: 280,
-		Priority:     &priority,
-		Weight:       &weight,
-		AutoBan:      &autoBan,
+		Id:                 301,
+		Type:               constant.ChannelTypeOpenAI,
+		Status:             common.ChannelStatusEnabled,
+		Name:               "mynav-primary",
+		Key:                "sk-hidden",
+		OpenAIOrganization: &openAIOrganization,
+		BaseURL:            &baseURL,
+		Models:             "gpt-5.5,gpt-5.5-compact",
+		Group:              "default,codex",
+		Tag:                &tag,
+		TestModel:          &testModel,
+		ResponseTime:       280,
+		Priority:           &priority,
+		Weight:             &weight,
+		AutoBan:            &autoBan,
 		ChannelInfo: ChannelInfo{
 			IsMultiKey:   true,
 			MultiKeySize: 3,
@@ -153,4 +155,12 @@ func TestGetAllLogsAttachesNonSensitiveChannelDetail(t *testing.T) {
 	require.Equal(t, 2, adminLogs[0].ChannelDetail.ModelsCount)
 	require.True(t, adminLogs[0].ChannelDetail.IsMultiKey)
 	require.Equal(t, 3, adminLogs[0].ChannelDetail.MultiKeySize)
+
+	detailJSON, err := common.Marshal(adminLogs[0].ChannelDetail)
+	require.NoError(t, err)
+	detailPayload := string(detailJSON)
+	require.NotContains(t, detailPayload, "sk-hidden")
+	require.NotContains(t, detailPayload, "org-hidden")
+	require.NotContains(t, detailPayload, `"key"`)
+	require.NotContains(t, detailPayload, "openai_organization")
 }

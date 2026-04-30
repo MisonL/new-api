@@ -624,6 +624,24 @@ body.sidebar-resizing * {
   overscroll-behavior: contain;
 }
 
+.usage-log-channel-tooltip::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.usage-log-channel-tooltip::-webkit-scrollbar-thumb {
+  background: rgba(var(--semi-grey-2), 0.3);
+  border-radius: 2px;
+}
+
+.usage-log-channel-tooltip::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--semi-grey-2), 0.5);
+}
+
+.usage-log-channel-tooltip::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .usage-log-channel-tooltip-title {
   display: flex;
   align-items: center;

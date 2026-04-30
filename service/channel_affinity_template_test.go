@@ -234,9 +234,11 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 
 	info := &relaycommon.RelayInfo{
 		RequestHeaders: map[string]string{
-			"Originator": "Codex CLI",
-			"Session_id": "sess-123",
-			"User-Agent": "codex-cli-test",
+			"Originator":          "Codex CLI",
+			"Session_id":          "sess-123",
+			"User-Agent":          "codex-cli-test",
+			"X-Codex-Window-Id":   "window-abc",
+			"X-Client-Request-Id": "request-def",
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ParamOverride: mergedOverride,
@@ -254,13 +256,11 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	require.Equal(t, "Codex CLI", info.RuntimeHeadersOverride["originator"])
 	require.Equal(t, "sess-123", info.RuntimeHeadersOverride["session_id"])
 	require.Equal(t, "codex-cli-test", info.RuntimeHeadersOverride["user-agent"])
+	require.Equal(t, "window-abc", info.RuntimeHeadersOverride["x-codex-window-id"])
+	require.Equal(t, "request-def", info.RuntimeHeadersOverride["x-client-request-id"])
 
 	_, exists := info.RuntimeHeadersOverride["x-codex-beta-features"]
 	require.False(t, exists)
 	_, exists = info.RuntimeHeadersOverride["x-codex-turn-metadata"]
-	require.False(t, exists)
-	_, exists = info.RuntimeHeadersOverride["x-codex-window-id"]
-	require.False(t, exists)
-	_, exists = info.RuntimeHeadersOverride["x-client-request-id"]
 	require.False(t, exists)
 }

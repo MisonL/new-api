@@ -461,19 +461,23 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	ctx.Request.Header.Set("Originator", "Codex CLI")
 	ctx.Request.Header.Set("Session_id", "sess-123")
+	ctx.Request.Header.Set("X-Codex-Window-Id", "window-abc")
+	ctx.Request.Header.Set("X-Client-Request-Id", "request-def")
 
 	info := &relaycommon.RelayInfo{
 		IsChannelTest: false,
 		RequestHeaders: map[string]string{
-			"Originator": "Codex CLI",
-			"Session_id": "sess-123",
+			"Originator":          "Codex CLI",
+			"Session_id":          "sess-123",
+			"X-Codex-Window-Id":   "window-abc",
+			"X-Client-Request-Id": "request-def",
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ParamOverride: map[string]any{
 				"operations": []any{
 					map[string]any{
 						"mode":  "pass_headers",
-						"value": []any{"Originator", "Session_id", "X-Codex-Beta-Features"},
+						"value": []any{"Originator", "Session_id", "X-Codex-Beta-Features", "X-Codex-Window-Id", "X-Client-Request-Id"},
 					},
 				},
 			},
@@ -488,6 +492,8 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.True(t, info.UseRuntimeHeadersOverride)
 	require.Equal(t, "Codex CLI", info.RuntimeHeadersOverride["originator"])
 	require.Equal(t, "sess-123", info.RuntimeHeadersOverride["session_id"])
+	require.Equal(t, "window-abc", info.RuntimeHeadersOverride["x-codex-window-id"])
+	require.Equal(t, "request-def", info.RuntimeHeadersOverride["x-client-request-id"])
 	_, exists := info.RuntimeHeadersOverride["x-codex-beta-features"]
 	require.False(t, exists)
 	require.Equal(t, "legacy-value", info.RuntimeHeadersOverride["x-static"])
@@ -496,6 +502,8 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, "Codex CLI", headers["originator"])
 	require.Equal(t, "sess-123", headers["session_id"])
+	require.Equal(t, "window-abc", headers["x-codex-window-id"])
+	require.Equal(t, "request-def", headers["x-client-request-id"])
 	_, exists = headers["x-codex-beta-features"]
 	require.False(t, exists)
 
@@ -503,5 +511,7 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	applyHeaderOverrideToRequest(upstreamReq, headers)
 	require.Equal(t, "Codex CLI", upstreamReq.Header.Get("Originator"))
 	require.Equal(t, "sess-123", upstreamReq.Header.Get("Session_id"))
+	require.Equal(t, "window-abc", upstreamReq.Header.Get("X-Codex-Window-Id"))
+	require.Equal(t, "request-def", upstreamReq.Header.Get("X-Client-Request-Id"))
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
 }

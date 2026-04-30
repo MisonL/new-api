@@ -635,7 +635,7 @@ func removeUnsupportedResponsesCompactionInput(input json.RawMessage) (json.RawM
 
 	var items []json.RawMessage
 	if err := common.Unmarshal(input, &items); err != nil {
-		return input, 0, 0, err
+		return nil, 0, 0, err
 	}
 
 	filtered := make([]json.RawMessage, 0, len(items))
@@ -658,7 +658,7 @@ func removeUnsupportedResponsesCompactionInput(input json.RawMessage) (json.RawM
 
 	raw, err := common.Marshal(filtered)
 	if err != nil {
-		return input, removedCount, len(filtered), err
+		return nil, 0, 0, err
 	}
 	return json.RawMessage(raw), removedCount, len(filtered), nil
 }

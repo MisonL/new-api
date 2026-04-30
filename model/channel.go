@@ -372,7 +372,7 @@ func GetChannelById(id int, selectAll bool) (*Channel, error) {
 	return channel, nil
 }
 
-func BatchInsertChannels(channels []Channel) error {
+func BatchInsertChannels(channels []Channel) (err error) {
 	if len(channels) == 0 {
 		return nil
 	}
@@ -383,6 +383,7 @@ func BatchInsertChannels(channels []Channel) error {
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
+			err = fmt.Errorf("batch insert channels panic: %v", r)
 		}
 	}()
 
@@ -401,7 +402,7 @@ func BatchInsertChannels(channels []Channel) error {
 	return tx.Commit().Error
 }
 
-func InsertChannel(channel *Channel) error {
+func InsertChannel(channel *Channel) (err error) {
 	if channel == nil {
 		return errors.New("channel is nil")
 	}
@@ -412,6 +413,7 @@ func InsertChannel(channel *Channel) error {
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
+			err = fmt.Errorf("insert channel panic: %v", r)
 		}
 	}()
 

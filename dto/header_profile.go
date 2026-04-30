@@ -101,6 +101,7 @@ func newBuiltinCodexCLIHeaderProfile() HeaderProfile {
 		Description:         "固定请求头是 Codex CLI 0.125.0 的静态快照；真实 CLI 会携带会话与窗口动态头，需在高级参数覆盖中启用 Codex CLI 请求头透传模板。",
 		PassthroughRequired: true,
 		Headers: map[string]string{
+			// Codex CLI uses Originator rather than X-Client-Name in the captured native request.
 			"User-Agent": BuiltinCodexCLIUserAgent,
 			"Originator": BuiltinCodexCLIOriginator,
 		},
