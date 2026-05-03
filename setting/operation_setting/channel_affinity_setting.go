@@ -46,6 +46,7 @@ var CodexCliPassThroughHeaders = []string{
 }
 
 var ClaudeCliPassThroughHeaders = []string{
+	"X-Claude-Code-Session-Id",
 	"X-Stainless-Arch",
 	"X-Stainless-Lang",
 	"X-Stainless-Os",
@@ -61,22 +62,26 @@ var ClaudeCliPassThroughHeaders = []string{
 	"Anthropic-Version",
 }
 
-var OpenCodeCliPassThroughHeaders = []string{
+var QwenCodeCliPassThroughHeaders = []string{
 	"User-Agent",
-	"X-Session-Affinity",
+	"X-Stainless-Arch",
+	"X-Stainless-Lang",
+	"X-Stainless-Os",
+	"X-Stainless-Package-Version",
+	"X-Stainless-Retry-Count",
+	"X-Stainless-Runtime",
+	"X-Stainless-Runtime-Version",
 }
 
 var GeminiCliPassThroughHeaders = []string{
 	"User-Agent",
 	"X-Goog-Api-Client",
-	"X-Goog-Api-Version",
-	"X-Goog-User-Project",
 }
 
 var HeaderProfilePassThroughHeaders = map[string][]string{
 	"codex-cli":   CodexCliPassThroughHeaders,
 	"claude-code": ClaudeCliPassThroughHeaders,
-	"opencode":    OpenCodeCliPassThroughHeaders,
+	"qwen-code":   QwenCodeCliPassThroughHeaders,
 	"gemini-cli":  GeminiCliPassThroughHeaders,
 }
 

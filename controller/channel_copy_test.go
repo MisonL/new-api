@@ -61,7 +61,7 @@ func TestCopyChannelPreservesRuntimeConfiguration(t *testing.T) {
 		UserAgentStrategy: &dto.UserAgentStrategy{
 			Enabled:    true,
 			Mode:       "round_robin",
-			UserAgents: []string{dto.BuiltinCodexCLIUserAgent, "amp/1.0.0"},
+			UserAgents: []string{dto.BuiltinCodexCLIUserAgent, "CustomAgent/1.0"},
 		},
 		HeaderProfileStrategy: &dto.HeaderProfileStrategy{
 			Enabled:            true,
@@ -174,7 +174,7 @@ func TestCopyChannelPreservesRuntimeConfiguration(t *testing.T) {
 	require.NotNil(t, clonedSettings.HeaderProfileStrategy)
 	require.Equal(t, []string{"codex-cli"}, clonedSettings.HeaderProfileStrategy.SelectedProfileIDs)
 	require.NotNil(t, clonedSettings.UserAgentStrategy)
-	require.Equal(t, []string{dto.BuiltinCodexCLIUserAgent, "amp/1.0.0"}, clonedSettings.UserAgentStrategy.UserAgents)
+	require.Equal(t, []string{dto.BuiltinCodexCLIUserAgent, "CustomAgent/1.0"}, clonedSettings.UserAgentStrategy.UserAgents)
 
 	var abilityCount int64
 	require.NoError(t, model.DB.Model(&model.Ability{}).Where("channel_id = ?", clone.Id).Count(&abilityCount).Error)

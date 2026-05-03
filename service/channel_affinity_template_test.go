@@ -32,12 +32,17 @@ func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 		"X-Client-Request-Id",
 	}, operation_setting.CodexCliPassThroughHeaders)
 	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "User-Agent")
+	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "X-Claude-Code-Session-Id")
 	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "X-App")
 	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "Anthropic-Beta")
+	require.Contains(t, operation_setting.QwenCodeCliPassThroughHeaders, "User-Agent")
+	require.Contains(t, operation_setting.QwenCodeCliPassThroughHeaders, "X-Stainless-Package-Version")
 	require.Equal(t, []string{
 		"User-Agent",
-		"X-Session-Affinity",
-	}, operation_setting.OpenCodeCliPassThroughHeaders)
+		"X-Goog-Api-Client",
+	}, operation_setting.GeminiCliPassThroughHeaders)
+	_, exists := operation_setting.HeaderProfilePassThroughHeaders["opencode"]
+	require.False(t, exists)
 }
 
 func TestChannelAffinitySettingDoesNotRegisterOpenCodeRuleWithoutRuntimeSource(t *testing.T) {

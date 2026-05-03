@@ -55,8 +55,7 @@ const browserProfiles = {
 const buildAiCodingCliProfile = (
   key,
   name,
-  userAgent,
-  clientName,
+  headers,
   description,
   passthroughRequired = false,
 ) => ({
@@ -67,15 +66,11 @@ const buildAiCodingCliProfile = (
   readonly: true,
   passthroughRequired,
   description,
-  headers: {
-    'User-Agent': userAgent,
-    'X-Client-Name': clientName,
-    'X-Client-Platform': 'terminal',
-  },
+  headers,
 });
 
 const CODEX_CLI_USER_AGENT =
-  'codex-tui/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.128.0)';
+  'codex_exec/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.128.0)';
 
 const aiCodingCliProfiles = {
   'codex-cli': {
@@ -86,56 +81,40 @@ const aiCodingCliProfiles = {
     readonly: true,
     passthroughRequired: true,
     description:
-      '固定请求头是 codex-tui 0.128.0 交互模式的静态快照；选择此模板时会自动写入 Codex CLI 请求头透传规则，保留真实 CLI 的会话与窗口动态头。',
+      '固定请求头静态快照来自本机实抓 Codex CLI 0.128.0 /v1/responses 请求；选择此模板时会自动写入 Codex CLI 请求头透传规则，保留真实 CLI 的会话、窗口与 turn metadata 动态头。',
     headers: {
-      // Codex TUI 原生请求使用 Originator，不使用通用的 X-Client-Name。
+      // 实抓请求使用 Originator=codex_exec，不使用通用的 X-Client-Name。
       'User-Agent': CODEX_CLI_USER_AGENT,
-      Originator: 'codex-tui',
+      Originator: 'codex_exec',
     },
   },
   'claude-code': buildAiCodingCliProfile(
     'claude-code',
     'Claude Code',
-    'Claude-Code/1.0',
-    'claude-code',
-    '固定请求头只用于普通渠道标识；选择此模板时会自动写入 Claude CLI 请求头透传规则，保留官方客户端会话与 SDK 元数据。',
+    {
+      'User-Agent': 'claude-cli/2.1.126 (external, sdk-cli)',
+    },
+    '固定请求头静态快照来自本机实抓 Claude Code 2.1.126 /v1/messages?beta=true 请求；真实请求还会携带 X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等 SDK 头，选择此模板时会自动写入 Claude CLI 请求头透传规则。',
     true,
   ),
   'gemini-cli': buildAiCodingCliProfile(
     'gemini-cli',
     'Gemini CLI',
-    'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)',
-    'gemini-cli',
-    '固定请求头是 Gemini CLI 0.40.1 交互模式的静态快照；选择此模板时会自动写入 Gemini CLI 请求头透传规则，保留真实客户端的 x-goog-api-client 等运行时头。',
+    {
+      'User-Agent':
+        'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal) google-api-nodejs-client/9.15.1',
+    },
+    '固定请求头静态快照来自本机实抓 Gemini CLI 0.40.1 cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse 请求；真实请求还会携带 x-goog-api-client 等运行时头，选择此模板时会自动写入 Gemini CLI 请求头透传规则。',
     true,
   ),
   'qwen-code': buildAiCodingCliProfile(
     'qwen-code',
     'Qwen Code',
-    'QwenCode/0.15.6 (darwin; x64)',
-    'qwen-code',
-    '固定请求头是 Qwen Code 0.15.6 交互模式的静态快照；真实 CLI 还会附带 x-stainless-* 运行时头，严格复刻上游链路时应改用透传。',
-  ),
-  opencode: buildAiCodingCliProfile(
-    'opencode',
-    'OpenCode',
-    'ai-sdk/openai/2.0.71 ai-sdk/provider-utils/3.0.17 runtime/bun/1.3.5',
-    'opencode',
-    '固定请求头是 OpenCode 1.1.14 当前链路下的静态快照；真实客户端会直接走 OpenAI 兼容 Responses 请求，严格复刻上游链路时再按需补透传。',
-  ),
-  droid: buildAiCodingCliProfile(
-    'droid',
-    'Droid',
-    'Droid/1.0',
-    'droid',
-    '固定请求头用于普通渠道标识；不能替代真实客户端动态请求头。',
-  ),
-  amp: buildAiCodingCliProfile(
-    'amp',
-    'Amp',
-    'AmpCLI/1.0',
-    'amp',
-    '固定请求头用于普通渠道标识；不能替代真实客户端动态请求头。',
+    {
+      'User-Agent': 'QwenCode/0.15.6 (darwin; x64)',
+    },
+    '固定请求头静态快照来自本机 Qwen Code 0.15.6 的 OpenAI-compatible /chat/completions 请求；真实请求还会携带已实抓的 x-stainless-* 运行时头，选择此模板时会自动写入 Qwen Code 请求头透传规则。',
+    true,
   ),
 };
 

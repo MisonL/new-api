@@ -49,8 +49,8 @@ type HeaderProfileStrategy struct {
 }
 
 const (
-	BuiltinCodexCLIUserAgent  = "codex-tui/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.128.0)"
-	BuiltinCodexCLIOriginator = "codex-tui"
+	BuiltinCodexCLIUserAgent  = "codex_exec/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.128.0)"
+	BuiltinCodexCLIOriginator = "codex_exec"
 )
 
 var BuiltinHeaderProfiles = []HeaderProfile{
@@ -70,12 +70,33 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		},
 	},
 	newBuiltinCodexCLIHeaderProfile(),
-	newBuiltinAICodingCLIHeaderProfile("claude-code", "Claude Code", "Claude-Code/1.0", "claude-code", "固定请求头只用于普通渠道标识；选择此模板时会自动写入 Claude CLI 请求头透传规则，保留官方客户端会话与 SDK 元数据。", true),
-	newBuiltinAICodingCLIHeaderProfile("gemini-cli", "Gemini CLI", "GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)", "gemini-cli", "固定请求头是 Gemini CLI 0.40.1 交互模式的静态快照；选择此模板时会自动写入 Gemini CLI 请求头透传规则，保留真实客户端的 x-goog-api-client 等运行时头。", true),
-	newBuiltinAICodingCLIHeaderProfile("qwen-code", "Qwen Code", "QwenCode/0.15.6 (darwin; x64)", "qwen-code", "固定请求头是 Qwen Code 0.15.6 交互模式的静态快照；真实 CLI 还会附带 x-stainless-* 运行时头，严格复刻上游链路时应改用透传。", false),
-	newBuiltinAICodingCLIHeaderProfile("opencode", "OpenCode", "ai-sdk/openai/2.0.71 ai-sdk/provider-utils/3.0.17 runtime/bun/1.3.5", "opencode", "固定请求头是 OpenCode 1.1.14 当前链路下的静态快照；真实客户端会直接走 OpenAI 兼容 Responses 请求，严格复刻上游链路时再按需补透传。", false),
-	newBuiltinAICodingCLIHeaderProfile("droid", "Droid", "Droid/1.0", "droid", "固定请求头用于普通渠道标识；不能替代真实客户端动态请求头。", false),
-	newBuiltinAICodingCLIHeaderProfile("amp", "Amp", "AmpCLI/1.0", "amp", "固定请求头用于普通渠道标识；不能替代真实客户端动态请求头。", false),
+	newBuiltinCLIHeaderProfile(
+		"claude-code",
+		"Claude Code",
+		map[string]string{
+			"User-Agent": "claude-cli/2.1.126 (external, sdk-cli)",
+		},
+		"固定请求头静态快照来自本机实抓 Claude Code 2.1.126 `/v1/messages?beta=true` 请求；真实请求还会携带 X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等 SDK 头，选择此模板时会自动写入 Claude CLI 请求头透传规则。",
+		true,
+	),
+	newBuiltinCLIHeaderProfile(
+		"gemini-cli",
+		"Gemini CLI",
+		map[string]string{
+			"User-Agent": "GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal) google-api-nodejs-client/9.15.1",
+		},
+		"固定请求头静态快照来自本机实抓 Gemini CLI 0.40.1 `cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse` 请求；真实请求还会携带 x-goog-api-client 等运行时头，选择此模板时会自动写入 Gemini CLI 请求头透传规则。",
+		true,
+	),
+	newBuiltinCLIHeaderProfile(
+		"qwen-code",
+		"Qwen Code",
+		map[string]string{
+			"User-Agent": "QwenCode/0.15.6 (darwin; x64)",
+		},
+		"固定请求头静态快照来自本机 Qwen Code 0.15.6 的 OpenAI-compatible `/chat/completions` 请求；真实请求还会携带已实抓的 x-stainless-* 运行时头，选择此模板时会自动写入 Qwen Code 请求头透传规则。",
+		true,
+	),
 	{
 		ID:       "postman-runtime",
 		Name:     "Postman Runtime",
@@ -98,7 +119,7 @@ func newBuiltinCodexCLIHeaderProfile() HeaderProfile {
 		Category:            HeaderProfileCategoryAICodingCLI,
 		Scope:               HeaderProfileScopeBuiltin,
 		ReadOnly:            true,
-		Description:         "固定请求头是 codex-tui 0.128.0 交互模式的静态快照；选择此模板时会自动写入 Codex CLI 请求头透传规则，保留真实 CLI 的会话与窗口动态头。",
+		Description:         "固定请求头静态快照来自本机实抓 Codex CLI 0.128.0 `/v1/responses` 请求；选择此模板时会自动写入 Codex CLI 请求头透传规则，保留真实 CLI 的会话、窗口与 turn metadata 动态头。",
 		PassthroughRequired: true,
 		Headers: map[string]string{
 			// Codex TUI uses Originator rather than X-Client-Name in the captured native request.
@@ -108,7 +129,7 @@ func newBuiltinCodexCLIHeaderProfile() HeaderProfile {
 	}
 }
 
-func newBuiltinAICodingCLIHeaderProfile(id string, name string, userAgent string, clientName string, description string, passthroughRequired bool) HeaderProfile {
+func newBuiltinCLIHeaderProfile(id string, name string, headers map[string]string, description string, passthroughRequired bool) HeaderProfile {
 	return HeaderProfile{
 		ID:                  id,
 		Name:                name,
@@ -117,11 +138,7 @@ func newBuiltinAICodingCLIHeaderProfile(id string, name string, userAgent string
 		ReadOnly:            true,
 		Description:         description,
 		PassthroughRequired: passthroughRequired,
-		Headers: map[string]string{
-			"User-Agent":        userAgent,
-			"X-Client-Name":     clientName,
-			"X-Client-Platform": "terminal",
-		},
+		Headers:             headers,
 	}
 }
 

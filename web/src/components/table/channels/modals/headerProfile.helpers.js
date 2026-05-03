@@ -22,7 +22,7 @@ import {
   CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
   CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
   GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS,
-  OPENCODE_CLI_HEADER_PASSTHROUGH_HEADERS,
+  QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS,
 } from '../../../../constants/channel-affinity-template.constants.js';
 
 const STRATEGIES = new Set(['fixed', 'round_robin', 'random']);
@@ -97,7 +97,8 @@ function isBuiltinPassthroughProfileId(profileId) {
   return (
     profileId === 'codex-cli' ||
     profileId === 'claude-code' ||
-    profileId === 'gemini-cli'
+    profileId === 'gemini-cli' ||
+    profileId === 'qwen-code'
   );
 }
 
@@ -309,8 +310,8 @@ function requiredPassthroughHeadersForProfile(profile) {
       return CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS;
     case 'gemini-cli':
       return GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS;
-    case 'opencode':
-      return OPENCODE_CLI_HEADER_PASSTHROUGH_HEADERS;
+    case 'qwen-code':
+      return QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS;
     default:
       return Object.keys(profile?.headers || {}).sort();
   }

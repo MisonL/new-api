@@ -48,9 +48,6 @@ function getProfileUsageHint(t, profile) {
   ) {
     return t('固定客户端标识；选择后会自动写入真实请求头透传规则');
   }
-  if (profile.id === 'opencode') {
-    return t('固定客户端标识；默认不自动补透传，严格复刻上游链路时再按需补 pass_headers');
-  }
   if (profile.category === 'browser') {
     return t('适合要求浏览器访问特征的上游');
   }

@@ -38,6 +38,7 @@ export const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
 ];
 
 export const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
+  'X-Claude-Code-Session-Id',
   'X-Stainless-Arch',
   'X-Stainless-Lang',
   'X-Stainless-Os',
@@ -53,16 +54,20 @@ export const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'Anthropic-Version',
 ];
 
-export const OPENCODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
+export const QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'User-Agent',
-  'X-Session-Affinity',
+  'X-Stainless-Arch',
+  'X-Stainless-Lang',
+  'X-Stainless-Os',
+  'X-Stainless-Package-Version',
+  'X-Stainless-Retry-Count',
+  'X-Stainless-Runtime',
+  'X-Stainless-Runtime-Version',
 ];
 
 export const GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'User-Agent',
   'X-Goog-Api-Client',
-  'X-Goog-Api-Version',
-  'X-Goog-User-Project',
 ];
 
 export const CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
@@ -73,8 +78,8 @@ export const CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
   CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
 );
 
-export const OPENCODE_CLI_HEADER_PASSTHROUGH_TEMPLATE =
-  buildPassHeadersTemplate(OPENCODE_CLI_HEADER_PASSTHROUGH_HEADERS);
+export const QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE =
+  buildPassHeadersTemplate(QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS);
 
 export const GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
   GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS,

@@ -38,13 +38,14 @@ import { HEADER_PROFILE_PRESETS } from './headerProfile.constants.js';
 import {
   CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
   CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
+  QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS,
 } from '../../../../constants/channel-affinity-template.constants.js';
 
 test('builtin AI CLI profiles distinguish fixed headers from required passthrough', () => {
   assert.equal(HEADER_PROFILE_PRESETS['codex-cli'].passthroughRequired, true);
   assert.equal(HEADER_PROFILE_PRESETS['claude-code'].passthroughRequired, true);
   assert.equal(HEADER_PROFILE_PRESETS['gemini-cli'].passthroughRequired, true);
-  assert.equal(HEADER_PROFILE_PRESETS['opencode'].passthroughRequired, false);
+  assert.equal(HEADER_PROFILE_PRESETS['opencode'], undefined);
   assert.match(
     HEADER_PROFILE_PRESETS['codex-cli'].description,
     /自动写入 Codex CLI 请求头透传规则/,
@@ -53,31 +54,25 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
     HEADER_PROFILE_PRESETS['claude-code'].description,
     /自动写入 Claude CLI 请求头透传规则/,
   );
-  assert.match(
-    HEADER_PROFILE_PRESETS['opencode'].description,
-    /OpenAI 兼容 Responses 请求/,
-  );
-  assert.equal(
-    HEADER_PROFILE_PRESETS['opencode'].headers['User-Agent'],
-    'ai-sdk/openai/2.0.71 ai-sdk/provider-utils/3.0.17 runtime/bun/1.3.5',
-  );
   assert.equal(
     HEADER_PROFILE_PRESETS['gemini-cli'].headers['User-Agent'],
-    'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)',
+    'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal) google-api-nodejs-client/9.15.1',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['gemini-cli'].description,
     /x-goog-api-client/,
   );
-  assert.equal(HEADER_PROFILE_PRESETS['qwen-code'].passthroughRequired, false);
+  assert.equal(HEADER_PROFILE_PRESETS['qwen-code'].passthroughRequired, true);
   assert.equal(
     HEADER_PROFILE_PRESETS['qwen-code'].headers['User-Agent'],
     'QwenCode/0.15.6 (darwin; x64)',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['qwen-code'].description,
-    /x-stainless-\*/,
+    /自动写入 Qwen Code 请求头透传规则/,
   );
+  assert.equal(HEADER_PROFILE_PRESETS['droid'], undefined);
+  assert.equal(HEADER_PROFILE_PRESETS['amp'], undefined);
 });
 
 test('normalizeHeaderProfileStrategy falls back to fixed', () => {
@@ -118,7 +113,7 @@ test('buildSelectedProfileItems keeps structured headers while main fields stay 
   assert.equal(items.length, 1);
   assert.equal(items[0].name, HEADER_PROFILE_PRESETS['codex-cli'].name);
   assert.equal(items[0].category, HEADER_PROFILE_PRESETS['codex-cli'].group);
-  assert.match(items[0].previewText, /codex-tui\/0\.128\.0/i);
+  assert.match(items[0].previewText, /codex_exec\/0\.128\.0/i);
   assert.deepEqual(
     items[0].headers,
     HEADER_PROFILE_PRESETS['codex-cli'].headers,
@@ -148,7 +143,7 @@ test('buildProfileItems merges builtin and user profiles into a normalized list'
   assert.ok(builtin);
   assert.equal(builtin.scope, 'builtin');
   assert.equal(builtin.readonly, true);
-  assert.match(builtin.previewText, /codex-tui\/0\.128\.0/i);
+  assert.match(builtin.previewText, /codex_exec\/0\.128\.0/i);
 
   assert.ok(custom);
   assert.equal(custom.scope, 'user');
@@ -362,7 +357,7 @@ test('applyHeaderProfileStrategyToChannelInputs merges all required CLI passthro
   });
 });
 
-test('applyHeaderProfileStrategyToChannelInputs keeps param_override unchanged when applying OpenCode template', () => {
+test('applyHeaderProfileStrategyToChannelInputs keeps param_override unchanged for non-passthrough custom profile', () => {
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
       settings: '{}',
@@ -371,9 +366,17 @@ test('applyHeaderProfileStrategyToChannelInputs keeps param_override unchanged w
     strategy: {
       enabled: true,
       mode: 'fixed',
-      selectedProfileIds: ['opencode'],
+      selectedProfileIds: ['custom-fixed'],
     },
-    headerProfiles: [],
+    headerProfiles: [
+      {
+        id: 'custom-fixed',
+        name: 'Custom Fixed',
+        headers: {
+          'User-Agent': 'CustomAgent/1.0',
+        },
+      },
+    ],
     snapshotProfiles: [],
   });
 
@@ -559,7 +562,33 @@ test('applyHeaderProfileStrategyToChannelInputs adds Gemini pass_headers when ap
     operations: [
       {
         mode: 'pass_headers',
-        value: ['User-Agent', 'X-Goog-Api-Client', 'X-Goog-Api-Version', 'X-Goog-User-Project'],
+        value: ['User-Agent', 'X-Goog-Api-Client'],
+        keep_origin: true,
+      },
+    ],
+  });
+});
+
+test('applyHeaderProfileStrategyToChannelInputs adds Qwen pass_headers when applying Qwen template', () => {
+  const result = applyHeaderProfileStrategyToChannelInputs({
+    inputs: {
+      settings: '{}',
+      param_override: '{}',
+    },
+    strategy: {
+      enabled: true,
+      mode: 'fixed',
+      selectedProfileIds: ['qwen-code'],
+    },
+    headerProfiles: [],
+    snapshotProfiles: [],
+  });
+
+  assert.deepEqual(JSON.parse(result.param_override), {
+    operations: [
+      {
+        mode: 'pass_headers',
+        value: QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS,
         keep_origin: true,
       },
     ],
@@ -577,9 +606,17 @@ test('applyHeaderProfileStrategyToChannelInputs preserves param_override when no
     strategy: {
       enabled: true,
       mode: 'fixed',
-      selectedProfileIds: ['opencode'],
+      selectedProfileIds: ['custom-fixed'],
     },
-    headerProfiles: [],
+    headerProfiles: [
+      {
+        id: 'custom-fixed',
+        name: 'Custom Fixed',
+        headers: {
+          'User-Agent': 'CustomAgent/1.0',
+        },
+      },
+    ],
     snapshotProfiles: [],
   });
 

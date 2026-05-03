@@ -223,42 +223,7 @@ func TestUpdateChannelRejectsPassthroughRequiredHeaderProfileWithoutParamOverrid
 	require.Contains(t, response.Message, "X-Client-Request-Id")
 }
 
-func TestUpdateChannelAllowsOpenCodeHeaderProfileWithPassthrough(t *testing.T) {
-	setupChannelControllerTestDB(t)
-	channel := seedChannelForHeaderProfileTest(t)
-	paramOverride := `{"operations":[{"mode":"pass_headers","value":["User-Agent","X-Session-Affinity"],"keep_origin":true}]}`
-
-	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
-		"id":             channel.Id,
-		"type":           channel.Type,
-		"key":            channel.Key,
-		"status":         channel.Status,
-		"name":           channel.Name,
-		"group":          channel.Group,
-		"models":         channel.Models,
-		"param_override": paramOverride,
-		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
-			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
-				Enabled:            true,
-				Mode:               dto.HeaderProfileModeFixed,
-				SelectedProfileIDs: []string{"opencode"},
-			},
-		}),
-	})
-
-	UpdateChannel(ctx)
-
-	response := decodeChannelAPIResponse(t, recorder)
-	require.True(t, response.Success, response.Message)
-
-	loaded, err := model.GetChannelById(channel.Id, true)
-	require.NoError(t, err)
-	require.Equal(t, []string{"opencode"}, loaded.GetOtherSettings().HeaderProfileStrategy.SelectedProfileIDs)
-	require.NotNil(t, loaded.ParamOverride)
-	require.JSONEq(t, paramOverride, *loaded.ParamOverride)
-}
-
-func TestUpdateChannelAllowsOpenCodeHeaderProfileWithoutSessionAffinityPassthrough(t *testing.T) {
+func TestUpdateChannelRejectsOpenCodeHeaderProfileWithoutSnapshot(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
 	paramOverride := `{"operations":[{"mode":"pass_headers","value":["User-Agent"],"keep_origin":true}]}`
@@ -284,13 +249,8 @@ func TestUpdateChannelAllowsOpenCodeHeaderProfileWithoutSessionAffinityPassthrou
 	UpdateChannel(ctx)
 
 	response := decodeChannelAPIResponse(t, recorder)
-	require.True(t, response.Success, response.Message)
-
-	loaded, err := model.GetChannelById(channel.Id, true)
-	require.NoError(t, err)
-	require.Equal(t, []string{"opencode"}, loaded.GetOtherSettings().HeaderProfileStrategy.SelectedProfileIDs)
-	require.NotNil(t, loaded.ParamOverride)
-	require.JSONEq(t, paramOverride, *loaded.ParamOverride)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "缺少快照")
 }
 
 func TestUpdateChannelRejectsGeminiHeaderProfileWithoutRequiredGoogPassthrough(t *testing.T) {
@@ -322,8 +282,40 @@ func TestUpdateChannelRejectsGeminiHeaderProfileWithoutRequiredGoogPassthrough(t
 	require.False(t, response.Success)
 	require.Contains(t, response.Message, "pass_headers")
 	require.Contains(t, response.Message, "X-Goog-Api-Client")
-	require.Contains(t, response.Message, "X-Goog-Api-Version")
-	require.Contains(t, response.Message, "X-Goog-User-Project")
+}
+
+func TestUpdateChannelRejectsQwenHeaderProfileWithoutRequiredStainlessPassthrough(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+	paramOverride := `{"operations":[{"mode":"pass_headers","value":["User-Agent"],"keep_origin":true}]}`
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":             channel.Id,
+		"type":           channel.Type,
+		"key":            channel.Key,
+		"status":         channel.Status,
+		"name":           channel.Name,
+		"group":          channel.Group,
+		"models":         channel.Models,
+		"param_override": paramOverride,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"qwen-code"},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "pass_headers")
+	require.Contains(t, response.Message, "X-Stainless-Arch")
+	require.Contains(t, response.Message, "X-Stainless-Lang")
+	require.Contains(t, response.Message, "X-Stainless-Package-Version")
+	require.Contains(t, response.Message, "X-Stainless-Retry-Count")
 }
 
 func TestUpdateChannelRejectsConditionalPassHeadersForPassthroughRequiredProfile(t *testing.T) {
