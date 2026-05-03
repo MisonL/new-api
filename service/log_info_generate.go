@@ -82,8 +82,22 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendParamOverrideInfo(relayInfo, other)
 	AppendRequestHeaderPolicyInfo(ctx, other)
 	appendStreamStatus(relayInfo, other)
+	appendUpstreamMetadata(relayInfo, other)
 	return other
 }
+
+func appendUpstreamMetadata(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil {
+		return
+	}
+	if relayInfo.UpstreamRequestId != "" {
+		other["upstream_request_id"] = relayInfo.UpstreamRequestId
+	}
+	if relayInfo.UpstreamUsageMetadata != "" {
+		other["upstream_usage_metadata"] = relayInfo.UpstreamUsageMetadata
+	}
+}
+
 
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
 	if relayInfo == nil || other == nil || len(relayInfo.ParamOverrideAudit) == 0 {

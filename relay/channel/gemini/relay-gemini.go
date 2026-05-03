@@ -1269,6 +1269,7 @@ func handleFinalStream(c *gin.Context, info *relaycommon.RelayInfo, resp *dto.Ch
 }
 
 func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, callback func(data string, geminiResponse *dto.GeminiChatResponse) bool) (*dto.Usage, *types.NewAPIError) {
+	captureGeminiResponseHeaders(info, resp)
 	var usage = &dto.Usage{}
 	var imageCount int
 	responseText := strings.Builder{}
@@ -1415,6 +1416,7 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 }
 
 func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	captureGeminiResponseHeaders(info, resp)
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -1492,6 +1494,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 }
 
 func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	captureGeminiResponseHeaders(info, resp)
 	defer service.CloseResponseBodyGracefully(resp)
 
 	responseBody, readErr := io.ReadAll(resp.Body)
@@ -1537,6 +1540,7 @@ func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 }
 
 func GeminiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	captureGeminiResponseHeaders(info, resp)
 	responseBody, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
 		return nil, types.NewOpenAIError(readErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -1728,3 +1732,12 @@ func convertToolChoiceToGeminiConfig(toolChoice any) *dto.ToolConfig {
 	// Unsupported type, return nil
 	return nil
 }
+
+func captureGeminiResponseHeaders(info *relaycommon.RelayInfo, resp *http.Response) {
+	if info == nil || resp == nil {
+		return
+	}
+	info.UpstreamRequestId = resp.Header.Get("X-Goog-Request-Id")
+	info.UpstreamUsageMetadata = resp.Header.Get("X-Goog-Usage-Metadata")
+}
+
