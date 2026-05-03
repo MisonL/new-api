@@ -65,6 +65,17 @@ export const QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Stainless-Runtime-Version',
 ];
 
+export const DROID_CLI_HEADER_PASSTHROUGH_HEADERS = [
+  'User-Agent',
+  'X-Stainless-Arch',
+  'X-Stainless-Lang',
+  'X-Stainless-Os',
+  'X-Stainless-Package-Version',
+  'X-Stainless-Retry-Count',
+  'X-Stainless-Runtime',
+  'X-Stainless-Runtime-Version',
+];
+
 export const GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'User-Agent',
   'X-Goog-Api-Client',

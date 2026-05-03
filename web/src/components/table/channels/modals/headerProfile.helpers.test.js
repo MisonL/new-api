@@ -38,6 +38,7 @@ import { HEADER_PROFILE_PRESETS } from './headerProfile.constants.js';
 import {
   CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
   CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
+  DROID_CLI_HEADER_PASSTHROUGH_HEADERS,
   QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS,
 } from '../../../../constants/channel-affinity-template.constants.js';
 
@@ -56,7 +57,7 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   );
   assert.equal(
     HEADER_PROFILE_PRESETS['gemini-cli'].headers['User-Agent'],
-    'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal) google-api-nodejs-client/9.15.1',
+    'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['gemini-cli'].description,
@@ -71,8 +72,15 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
     HEADER_PROFILE_PRESETS['qwen-code'].description,
     /自动写入 Qwen Code 请求头透传规则/,
   );
-  assert.equal(HEADER_PROFILE_PRESETS['droid'], undefined);
-  assert.equal(HEADER_PROFILE_PRESETS['amp'], undefined);
+  assert.equal(HEADER_PROFILE_PRESETS['droid'].passthroughRequired, true);
+  assert.equal(
+    HEADER_PROFILE_PRESETS['droid'].headers['User-Agent'],
+    'factory-cli/0.115.0',
+  );
+  assert.match(
+    HEADER_PROFILE_PRESETS['droid'].description,
+    /自动写入 Droid CLI 请求头透传规则/,
+  );
 });
 
 test('normalizeHeaderProfileStrategy falls back to fixed', () => {
@@ -589,6 +597,32 @@ test('applyHeaderProfileStrategyToChannelInputs adds Qwen pass_headers when appl
       {
         mode: 'pass_headers',
         value: QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS,
+        keep_origin: true,
+      },
+    ],
+  });
+});
+
+test('applyHeaderProfileStrategyToChannelInputs adds Droid pass_headers when applying Droid template', () => {
+  const result = applyHeaderProfileStrategyToChannelInputs({
+    inputs: {
+      settings: '{}',
+      param_override: '{}',
+    },
+    strategy: {
+      enabled: true,
+      mode: 'fixed',
+      selectedProfileIds: ['droid'],
+    },
+    headerProfiles: [],
+    snapshotProfiles: [],
+  });
+
+  assert.deepEqual(JSON.parse(result.param_override), {
+    operations: [
+      {
+        mode: 'pass_headers',
+        value: DROID_CLI_HEADER_PASSTHROUGH_HEADERS,
         keep_origin: true,
       },
     ],

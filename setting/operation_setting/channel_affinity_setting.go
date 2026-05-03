@@ -73,6 +73,17 @@ var QwenCodeCliPassThroughHeaders = []string{
 	"X-Stainless-Runtime-Version",
 }
 
+var DroidCliPassThroughHeaders = []string{
+	"User-Agent",
+	"X-Stainless-Arch",
+	"X-Stainless-Lang",
+	"X-Stainless-Os",
+	"X-Stainless-Package-Version",
+	"X-Stainless-Retry-Count",
+	"X-Stainless-Runtime",
+	"X-Stainless-Runtime-Version",
+}
+
 var GeminiCliPassThroughHeaders = []string{
 	"User-Agent",
 	"X-Goog-Api-Client",
@@ -83,6 +94,7 @@ var HeaderProfilePassThroughHeaders = map[string][]string{
 	"claude-code": ClaudeCliPassThroughHeaders,
 	"qwen-code":   QwenCodeCliPassThroughHeaders,
 	"gemini-cli":  GeminiCliPassThroughHeaders,
+	"droid":       DroidCliPassThroughHeaders,
 }
 
 func buildPassHeaderTemplate(headers []string) map[string]interface{} {

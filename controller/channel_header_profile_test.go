@@ -318,6 +318,38 @@ func TestUpdateChannelRejectsQwenHeaderProfileWithoutRequiredStainlessPassthroug
 	require.Contains(t, response.Message, "X-Stainless-Retry-Count")
 }
 
+func TestUpdateChannelRejectsDroidHeaderProfileWithoutRequiredStainlessPassthrough(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+	paramOverride := `{"operations":[{"mode":"pass_headers","value":["User-Agent"],"keep_origin":true}]}`
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":             channel.Id,
+		"type":           channel.Type,
+		"key":            channel.Key,
+		"status":         channel.Status,
+		"name":           channel.Name,
+		"group":          channel.Group,
+		"models":         channel.Models,
+		"param_override": paramOverride,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"droid"},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "pass_headers")
+	require.Contains(t, response.Message, "X-Stainless-Arch")
+	require.Contains(t, response.Message, "X-Stainless-Runtime-Version")
+}
+
 func TestUpdateChannelRejectsConditionalPassHeadersForPassthroughRequiredProfile(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)

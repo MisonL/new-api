@@ -142,7 +142,6 @@
 - Qwen Code
 - OpenCode
 - Droid
-- AMP
 
 ### API SDK / 调试工具
 

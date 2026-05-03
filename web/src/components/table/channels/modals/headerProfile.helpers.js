@@ -21,6 +21,7 @@ import { HEADER_PROFILE_PRESETS } from './headerProfile.constants.js';
 import {
   CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
   CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
+  DROID_CLI_HEADER_PASSTHROUGH_HEADERS,
   GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS,
   QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS,
 } from '../../../../constants/channel-affinity-template.constants.js';
@@ -98,7 +99,8 @@ function isBuiltinPassthroughProfileId(profileId) {
     profileId === 'codex-cli' ||
     profileId === 'claude-code' ||
     profileId === 'gemini-cli' ||
-    profileId === 'qwen-code'
+    profileId === 'qwen-code' ||
+    profileId === 'droid'
   );
 }
 
@@ -312,6 +314,8 @@ function requiredPassthroughHeadersForProfile(profile) {
       return GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS;
     case 'qwen-code':
       return QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS;
+    case 'droid':
+      return DROID_CLI_HEADER_PASSTHROUGH_HEADERS;
     default:
       return Object.keys(profile?.headers || {}).sort();
   }

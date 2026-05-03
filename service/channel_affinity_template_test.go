@@ -39,8 +39,19 @@ func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 	require.Contains(t, operation_setting.QwenCodeCliPassThroughHeaders, "X-Stainless-Package-Version")
 	require.Equal(t, []string{
 		"User-Agent",
+		"X-Stainless-Arch",
+		"X-Stainless-Lang",
+		"X-Stainless-Os",
+		"X-Stainless-Package-Version",
+		"X-Stainless-Retry-Count",
+		"X-Stainless-Runtime",
+		"X-Stainless-Runtime-Version",
+	}, operation_setting.DroidCliPassThroughHeaders)
+	require.Equal(t, []string{
+		"User-Agent",
 		"X-Goog-Api-Client",
 	}, operation_setting.GeminiCliPassThroughHeaders)
+	require.Equal(t, operation_setting.DroidCliPassThroughHeaders, operation_setting.HeaderProfilePassThroughHeaders["droid"])
 	_, exists := operation_setting.HeaderProfilePassThroughHeaders["opencode"]
 	require.False(t, exists)
 }

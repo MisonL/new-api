@@ -13,7 +13,6 @@
 - `claude --version` -> `2.1.126 (Claude Code)`
 - `node -p "require('@google/gemini-cli/package.json').version"` -> `0.40.1`
 - `node -p "require('@qwen-code/qwen-code/package.json').version"` -> `0.15.6`
-- `amp version` -> `0.0.1777753404-g60c948`
 - `droid --version` -> `0.115.0`
 
 ### 2. 真实请求抓包 / 安装产物提取
@@ -57,13 +56,13 @@
     - `Anthropic-Version: 2023-06-01`
     - `X-App: cli`
 - Gemini CLI 本机真实请求日志：
-  - 目标 URL：`https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse`
-  - `User-Agent: GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal) google-api-nodejs-client/9.15.1`
+  - 路径：`/v1beta/models/gemini-3.1-pro-preview:streamGenerateContent?alt=sse`
+  - `User-Agent: GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)`
   - 同时存在：
-    - `x-goog-api-client: gl-node/24.14.0`
+    - `x-goog-api-client: google-genai-sdk/1.30.0 gl-node/v24.14.0`
   - 结论：
-    - 该命令链路实际走 `cloudcode-pa.googleapis.com`，不是简单的 `GOOGLE_GEMINI_BASE_URL` 覆盖路径
-    - 当前可实锤的默认固定头只有 `User-Agent` 和 `x-goog-api-client`
+    - `GOOGLE_GEMINI_BASE_URL` 可指向本地 capture，并命中 Gemini API 风格的 `streamGenerateContent` 路径
+    - 当前可实锤的固定头只有 `User-Agent`；`x-goog-api-client` 应作为运行时头透传
 - OpenCode 本机二进制提取：
   - 默认参数中存在 `--user-agent=opencode/1.1.14`
 - OpenCode 本机 live capture：
@@ -73,17 +72,25 @@
   - `@ai-sdk/openai` provider 命中 `POST /v1/responses`
   - 该请求 `User-Agent: ai-sdk/openai/2.0.71 ai-sdk/provider-utils/3.0.17 runtime/bun/1.3.5`
   - 两条可控 upstream 请求都未出现 `opencode/1.1.14` 或 `X-Session-Affinity`
+- Droid 本机 live capture：
+  - 使用临时 `~/.factory/settings.json` 配置 `customModels`，provider 为 `generic-chat-completion-api`
+  - `droid exec --model custom:capture-test` 命中 `POST /v1/chat/completions`
+  - `User-Agent: factory-cli/0.115.0`
+  - 同时存在：
+    - `X-Stainless-Arch`
+    - `X-Stainless-Lang`
+    - `X-Stainless-Os`
+    - `X-Stainless-Package-Version`
+    - `X-Stainless-Retry-Count`
+    - `X-Stainless-Runtime`
+    - `X-Stainless-Runtime-Version`
 
 ### 3. 未纳入固定模板的客户端
 
-- `droid`
-- `amp`
 - `opencode`
 
 原因：
 
-- 当前本机只能确认 CLI 自身版本和前置服务层存在，未拿到可审计的真实上游固定请求头值
-- 为避免继续向用户暴露 `Droid/1.0`、`AmpCLI/1.0` 这类伪值，本轮先从 shipped preset 中移除
 - OpenCode 虽已完成 live capture，但真实 upstream UA 来自 AI SDK provider，而不是 OpenCode 自身；不同 provider 对应 `/chat/completions` 与 `/responses` 两种路径，不适合继续作为唯一内置 OpenCode 固定模板
 
 ## 继续研究补充
@@ -95,26 +102,21 @@
   - 旧的 `claude-code/2.1.126` 只适合作为安装产物版本线索，不应继续当作固定 `User-Agent` 模板
   - 当前应以 live capture 的 `claude-cli/2.1.126 (external, sdk-cli)` 为固定快照，并把 `X-Claude-Code-Session-Id` 纳入透传白名单
 
-### 2. Amp
+### 2. Droid
 
-- 实测阻塞：
-  - 注入 `AMP_URL=http://127.0.0.1:<capture-port>` 与 `AMP_API_KEY=test-key` 后，CLI 直接返回 `Error: User not found`
-  - 本地捕获端点没有收到任何请求
+- 实测通过：
+  - 通过临时 `~/.factory/settings.json` 配置 `customModels`，provider 为 `generic-chat-completion-api`
+  - `FACTORY_API_KEY` 与自定义模型 API key 均使用测试值，未读取真实配置
+  - `droid exec --model custom:capture-test` 成功命中本地 capture
+  - 请求路径为 `/v1/chat/completions`
+  - 固定 UA 为 `factory-cli/0.115.0`
+  - 同时携带 `X-Stainless-*` 运行时头
 - 当前结论：
-  - 这轮只能确认 `amp` 在进入可控 upstream capture 之前就被服务侧身份校验挡住
-  - 仍不能把某个 `User-Agent` 或透传头当作已确认值写回模板
+  - Droid 可以纳入内置 `Header Profile`
+  - 固定快照只写 `User-Agent: factory-cli/0.115.0`
+  - `X-Stainless-*` 运行时头通过 `pass_headers` 透传
 
-### 3. Droid
-
-- 实测阻塞：
-  - 即使通过 `--settings /tmp/droid-capture-settings.json` 指向本地捕获端点并设置 `FACTORY_API_KEY=test-key`
-  - CLI 仍直接返回 `Authentication failed. Please log in using /login or set a valid FACTORY_API_KEY environment variable.`
-  - 本地捕获端点没有收到任何请求
-- 当前结论：
-  - 这轮只能确认它被平台鉴权前置挡住，尚未进入可控 upstream capture
-  - 仍不能把某个固定 `User-Agent` 或透传头写回模板
-
-### 4. OpenCode
+### 3. OpenCode
 
 - 官方配置与本机二进制中可确认：
   - 自定义 provider 可通过 `@ai-sdk/openai-compatible` 和 `@ai-sdk/openai` 配置 `options.baseURL`
@@ -136,25 +138,27 @@
   - 不能把 `X-Session-Affinity` 当作默认透传模板对外推荐
   - 本轮移除 OpenCode 内置 Header Profile 和对应透传白名单
 
-### 5. Gemini CLI
+### 4. Gemini CLI
 
 - 当前结论：
   - `gemini -p 'say ok' --yolo` 已给出 live request 错误日志，能直接读取真实目标 URL 和请求头
   - 旧的 `gemini-2.5-pro` 默认模型推断不再适合作为固定 UA 模板
-  - 当前应以 live request 的 `GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal) google-api-nodejs-client/9.15.1` 为固定快照
+  - 当前应以 live request 的 `GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)` 为固定快照
   - `X-Goog-Api-Version` 与 `X-Goog-User-Project` 本轮未实抓，不应继续放在必需透传白名单里
 
 ## 代码调整
 
 - `dto/header_profile.go`
   - Claude Code 固定 UA 改成 live capture 的 `claude-cli/2.1.126 (external, sdk-cli)`
-  - Gemini CLI 固定 UA 改成 live capture 的 `gemini-3.1-pro-preview` + `google-api-nodejs-client/9.15.1`
+  - Gemini CLI 固定 UA 改成 live capture 的 `GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)`
   - Qwen Code 描述改成 live capture 的 `/chat/completions` 口径
+  - 新增 Droid CLI 固定 UA `factory-cli/0.115.0`
   - 移除 OpenCode 内置 Header Profile，避免把 CLI 默认参数误当作 upstream 请求头
 - `setting/operation_setting/channel_affinity_setting.go`
   - Claude CLI 透传白名单新增 `X-Claude-Code-Session-Id`
   - Gemini CLI 透传白名单收紧为 `User-Agent` + `X-Goog-Api-Client`
   - Qwen Code 透传白名单移除未实抓的 `X-Stainless-Timeout`
+  - 新增 Droid CLI 的 `User-Agent` 与 `X-Stainless-*` 透传白名单
   - 移除 OpenCode 默认透传白名单
 - `web/src/components/table/channels/modals/headerProfile.constants.js`
   - 同步前端 builtin profile

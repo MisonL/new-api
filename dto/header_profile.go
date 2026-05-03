@@ -51,6 +51,7 @@ type HeaderProfileStrategy struct {
 const (
 	BuiltinCodexCLIUserAgent  = "codex_exec/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.128.0)"
 	BuiltinCodexCLIOriginator = "codex_exec"
+	BuiltinDroidCLIUserAgent  = "factory-cli/0.115.0"
 )
 
 var BuiltinHeaderProfiles = []HeaderProfile{
@@ -83,9 +84,9 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		"gemini-cli",
 		"Gemini CLI",
 		map[string]string{
-			"User-Agent": "GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal) google-api-nodejs-client/9.15.1",
+			"User-Agent": "GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)",
 		},
-		"固定请求头静态快照来自本机实抓 Gemini CLI 0.40.1 `cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse` 请求；真实请求还会携带 x-goog-api-client 等运行时头，选择此模板时会自动写入 Gemini CLI 请求头透传规则。",
+		"固定请求头静态快照来自本机实抓 Gemini CLI 0.40.1 的 streamGenerateContent 请求；真实请求还会携带 x-goog-api-client 等运行时头，选择此模板时会自动写入 Gemini CLI 请求头透传规则。",
 		true,
 	),
 	newBuiltinCLIHeaderProfile(
@@ -95,6 +96,15 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 			"User-Agent": "QwenCode/0.15.6 (darwin; x64)",
 		},
 		"固定请求头静态快照来自本机 Qwen Code 0.15.6 的 OpenAI-compatible `/chat/completions` 请求；真实请求还会携带已实抓的 x-stainless-* 运行时头，选择此模板时会自动写入 Qwen Code 请求头透传规则。",
+		true,
+	),
+	newBuiltinCLIHeaderProfile(
+		"droid",
+		"Droid CLI",
+		map[string]string{
+			"User-Agent": BuiltinDroidCLIUserAgent,
+		},
+		"固定请求头静态快照来自本机实抓 Droid 0.115.0 的 OpenAI-compatible `/v1/chat/completions` 请求；真实请求还会携带 X-Stainless-* 运行时头，选择此模板时会自动写入 Droid CLI 请求头透传规则。",
 		true,
 	),
 	{

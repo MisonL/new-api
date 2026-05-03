@@ -76,12 +76,17 @@ export const HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS = [
       {
         id: 'gemini-cli',
         label: 'Gemini CLI 固定 UA',
-        ua: 'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal) google-api-nodejs-client/9.15.1',
+        ua: 'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)',
       },
       {
         id: 'qwen-code',
         label: 'Qwen Code 固定 UA',
         ua: 'QwenCode/0.15.6 (darwin; x64)',
+      },
+      {
+        id: 'droid',
+        label: 'Droid CLI 固定 UA',
+        ua: 'factory-cli/0.115.0',
       },
     ],
   },
