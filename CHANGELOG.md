@@ -42,6 +42,7 @@
 - README 补充 Release 下载安装说明、后端二进制运行说明、Docker 新装/升级/回滚说明
 - 标签编辑中的请求头配置入口已切换为标签级运行时策略接口，不再复用旧的 bulk edit 写回渠道字段
 - README、渠道配置说明、桌面端 README 已按当前代码现状统一口径，明确区分静态请求头模板、UA 运行时策略和 Header Profile 资源库
+- README 与渠道配置说明补充当前 AI Coding CLI 内置 Header Profile 清单、`Codex CLI` 交互式 TUI 身份、各 CLI `pass_headers` 白名单，以及 OpenCode 不作为内置 Profile 的原因
 - README 和运维文档补充模型价格维护、标准倍率换算、历史日志金额修正与正式库复核口径
 - 钱包/充值页邀请奖励区补充邀请记录入口、全部划转入口和礼品码入口
 - 前端会话过期处理改为保留原访问路径，登录成功后返回原页面

@@ -83,6 +83,16 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   );
 });
 
+test('Codex CLI builtin profile does not reuse codex exec request identity', () => {
+  const headers = HEADER_PROFILE_PRESETS['codex-cli'].headers;
+  const serializedHeaders = JSON.stringify(headers).toLowerCase();
+
+  assert.equal(headers.Originator, 'codex-tui');
+  assert.match(headers['User-Agent'], /^codex-tui\//);
+  assert.doesNotMatch(serializedHeaders, /codex_exec/);
+  assert.doesNotMatch(serializedHeaders, /source=exec/);
+});
+
 test('normalizeHeaderProfileStrategy falls back to fixed', () => {
   assert.equal(normalizeHeaderProfileStrategy(undefined), 'fixed');
   assert.equal(normalizeHeaderProfileStrategy('unknown'), 'fixed');
@@ -121,7 +131,7 @@ test('buildSelectedProfileItems keeps structured headers while main fields stay 
   assert.equal(items.length, 1);
   assert.equal(items[0].name, HEADER_PROFILE_PRESETS['codex-cli'].name);
   assert.equal(items[0].category, HEADER_PROFILE_PRESETS['codex-cli'].group);
-  assert.match(items[0].previewText, /codex_exec\/0\.128\.0/i);
+  assert.doesNotMatch(items[0].previewText, /codex_exec/i);
   assert.deepEqual(
     items[0].headers,
     HEADER_PROFILE_PRESETS['codex-cli'].headers,
@@ -151,7 +161,7 @@ test('buildProfileItems merges builtin and user profiles into a normalized list'
   assert.ok(builtin);
   assert.equal(builtin.scope, 'builtin');
   assert.equal(builtin.readonly, true);
-  assert.match(builtin.previewText, /codex_exec\/0\.128\.0/i);
+  assert.doesNotMatch(builtin.previewText, /codex_exec/i);
 
   assert.ok(custom);
   assert.equal(custom.scope, 'user');

@@ -49,8 +49,8 @@ type HeaderProfileStrategy struct {
 }
 
 const (
-	BuiltinCodexCLIUserAgent  = "codex_exec/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.128.0)"
-	BuiltinCodexCLIOriginator = "codex_exec"
+	BuiltinCodexCLIUserAgent  = "codex-tui/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.128.0)"
+	BuiltinCodexCLIOriginator = "codex-tui"
 	BuiltinDroidCLIUserAgent  = "factory-cli/0.115.0"
 )
 
@@ -129,10 +129,9 @@ func newBuiltinCodexCLIHeaderProfile() HeaderProfile {
 		Category:            HeaderProfileCategoryAICodingCLI,
 		Scope:               HeaderProfileScopeBuiltin,
 		ReadOnly:            true,
-		Description:         "固定请求头静态快照来自本机实抓 Codex CLI 0.128.0 `/v1/responses` 请求；选择此模板时会自动写入 Codex CLI 请求头透传规则，保留真实 CLI 的会话、窗口与 turn metadata 动态头。",
+		Description:         "固定请求头静态快照来自 Codex CLI 0.128.0 交互式 TUI 请求头生成逻辑；选择此模板时会自动写入 Codex CLI 请求头透传规则，保留真实 CLI 的会话、窗口与 turn metadata 动态头。",
 		PassthroughRequired: true,
 		Headers: map[string]string{
-			// Codex TUI uses Originator rather than X-Client-Name in the captured native request.
 			"User-Agent": BuiltinCodexCLIUserAgent,
 			"Originator": BuiltinCodexCLIOriginator,
 		},

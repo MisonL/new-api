@@ -4,6 +4,7 @@
 
 - 仓库：`/Volumes/Work/code/new-api`
 - 目标：清理 `Header Profile` 内 AI Coding CLI 模板中的假值，改成有证据支撑的固定请求头快照，并补齐需要 `pass_headers` 的客户端
+- 修正补充：Codex CLI 模板必须代表交互式 TUI 真实使用场景，不能继续复用 `codex exec` 的 non-interactive 请求身份
 
 ## 证据来源
 
@@ -17,7 +18,7 @@
 
 ### 2. 真实请求抓包 / 安装产物提取
 
-- Codex CLI 本机真实请求抓包：
+- Codex CLI `codex exec` non-interactive 抓包：
   - 路径：`/v1/responses`
   - `User-Agent: codex_exec/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.128.0)`
   - `originator: codex_exec`
@@ -27,6 +28,13 @@
     - `x-codex-window-id`
     - `x-client-request-id`
     - `session_id`
+  - 结论：这组值只能证明 `source=exec` 的命令执行场景，不能作为 `Codex CLI` 交互式内置 Header Profile 的固定模板
+- Codex CLI 官方源码确认的交互式 TUI 口径：
+  - `codex-rs/exec/src/lib.rs` 显式把 non-interactive exec originator 设置为 `codex_exec`
+  - `codex-rs/tui/src/lib.rs` 中交互式 TUI 客户端 `client_name` 为 `codex-tui`
+  - `codex-rs/app-server/src/message_processor.rs` 使用 `clientInfo.name` 作为默认 originator，并用 `<name>; <version>` 写入 User-Agent suffix
+  - `codex-rs/login/src/auth/default_client.rs` 使用当前 originator 作为 User-Agent 前缀
+  - 结论：内置 `Codex CLI` 固定快照使用 `Originator: codex-tui`，固定 UA 使用 `codex-tui/0.128.0 ... (codex-tui; 0.128.0)`；会话、窗口、turn metadata 仍必须通过 `pass_headers` 透传真实客户端动态头
 - Qwen Code 本机真实请求抓包：
   - 路径：`/chat/completions`
   - `User-Agent: QwenCode/0.15.6 (darwin; x64)`
@@ -149,6 +157,7 @@
 ## 代码调整
 
 - `dto/header_profile.go`
+  - Codex CLI 固定 UA 与 Originator 从 `codex_exec` 修正为交互式 TUI 的 `codex-tui`
   - Claude Code 固定 UA 改成 live capture 的 `claude-cli/2.1.126 (external, sdk-cli)`
   - Gemini CLI 固定 UA 改成 live capture 的 `GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)`
   - Qwen Code 描述改成 live capture 的 `/chat/completions` 口径
@@ -166,6 +175,7 @@
   - 同步前端透传白名单收紧结果
 - `web/src/helpers/headerOverrideUserAgent.js`
   - 同步旧 UA 选择菜单中的真实固定值
+  - Codex CLI 固定 UA 从 `codex_exec` 修正为交互式 TUI 的 `codex-tui`
   - Claude / Gemini 改为 live capture 的真实固定 UA
   - 移除 OpenCode 固定 UA 选项
 
@@ -202,3 +212,29 @@ cd web && bun run build
 ```
 
 - 退出码：`0`
+
+### 5. Codex TUI 模板修正验证
+
+```bash
+go test -timeout 60s ./dto -run TestBuiltinCodexCLIHeaderProfileDoesNotUseExecIdentity -count=1
+go test -timeout 60s ./controller ./relay/channel -run 'HeaderProfile|HeaderOverride|ChannelTestPassHeaders|PrepareChannelTestRequestHeaders' -count=1
+go test -timeout 60s ./controller ./service -run 'HeaderProfile|CliHeaderPassthroughTemplateDefinitions' -count=1
+node --test web/src/components/table/channels/modals/headerProfile.helpers.test.js
+node --test web/tests/headerOverridePolicy.test.mjs
+(cd web && bun run build)
+```
+
+- 退出码：全部为 `0`
+- 范围确认：生产代码与前端模板中不再包含 `codex_exec` 或 `source=exec`；这些字符串只保留在测试禁用断言和本文档的 non-interactive 反例说明中
+
+### 6. 收尾验证
+
+```bash
+git diff --check
+rg -n "codex_exec|source=exec|X-Goog-Api-Version|X-Goog-User-Project|OpenCode" dto/header_profile.go web/src/components/table/channels/modals/headerProfile.constants.js web/src/helpers/headerOverrideUserAgent.js web/src/i18n/locales/en.json web/src/i18n/locales/zh-CN.json
+rg -n "X-Goog-Api-Version|X-Goog-User-Project" README.md docs/channel/other_setting.md docs/reviews/CR-CLI-HEADER-PROFILE-REALITY-2026-05-03.md dto web/src web/tests
+```
+
+- `git diff --check` 退出码：`0`
+- 生产 Header Profile 模板与旧 UA 菜单扫描退出码：`1`，无命中
+- 旧 Gemini 透传头只保留在本文档的反例说明中，正式说明与代码模板均无命中

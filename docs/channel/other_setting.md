@@ -100,6 +100,20 @@
 - 非法 `header_policy_mode` 会在保存阶段直接拒绝。
 - 非法 `ua_strategy.mode`、空 UA 池、启用策略但无合法 UA，都会在保存阶段直接拒绝。
 
+当前内置 `Header Profile`：
+
+| Profile ID | 名称 | 固定请求头快照 | 是否自动补 `pass_headers` |
+| --- | --- | --- | --- |
+| `chrome-macos` | Chrome macOS | 浏览器常见导航请求头 | 否 |
+| `codex-cli` | Codex CLI | `User-Agent: codex-tui/0.128.0 ...`、`Originator: codex-tui` | 是 |
+| `claude-code` | Claude Code | `User-Agent: claude-cli/2.1.126 (external, sdk-cli)` | 是 |
+| `gemini-cli` | Gemini CLI | `User-Agent: GeminiCLI/0.40.1/gemini-3.1-pro-preview ...` | 是 |
+| `qwen-code` | Qwen Code | `User-Agent: QwenCode/0.15.6 (darwin; x64)` | 是 |
+| `droid` | Droid CLI | `User-Agent: factory-cli/0.115.0` | 是 |
+| `postman-runtime` | Postman Runtime | Postman Runtime 调试请求头 | 否 |
+
+`codex-cli` 的固定快照代表交互式 TUI 场景。`codex exec` 的 non-interactive 请求会使用 `codex_exec`，不能作为 `Codex CLI` 内置 Profile 模板。
+
 ## 请求头模板与透传规则
 
 模板内容本身不保存在 `settings`，但会影响 `header_override` 的合法性。
@@ -147,20 +161,67 @@ Codex CLI 透传模板当前包含：
 ]
 ```
 
-Claude CLI 透传模板当前包含 `X-Stainless-*`、`User-Agent`、`X-App`、`Anthropic-Beta`、`Anthropic-Version` 等请求头。
+Claude CLI 透传模板当前包含：
+
+```json
+[
+  "X-Claude-Code-Session-Id",
+  "X-Stainless-Arch",
+  "X-Stainless-Lang",
+  "X-Stainless-Os",
+  "X-Stainless-Package-Version",
+  "X-Stainless-Retry-Count",
+  "X-Stainless-Runtime",
+  "X-Stainless-Runtime-Version",
+  "X-Stainless-Timeout",
+  "User-Agent",
+  "X-App",
+  "Anthropic-Beta",
+  "Anthropic-Dangerous-Direct-Browser-Access",
+  "Anthropic-Version"
+]
+```
 
 Gemini CLI 透传模板当前包含：
 
 ```json
 [
   "User-Agent",
-  "X-Goog-Api-Client",
-  "X-Goog-Api-Version",
-  "X-Goog-User-Project"
+  "X-Goog-Api-Client"
 ]
 ```
 
-OpenCode 预置 Profile 默认不自动补 `pass_headers`。它只提供当前抓到的静态 `User-Agent` 快照；只有在你明确需要严格复刻上游链路、并且已确认客户端真的会发送额外运行时头时，才手工补对应透传规则。
+Qwen Code 透传模板当前包含：
+
+```json
+[
+  "User-Agent",
+  "X-Stainless-Arch",
+  "X-Stainless-Lang",
+  "X-Stainless-Os",
+  "X-Stainless-Package-Version",
+  "X-Stainless-Retry-Count",
+  "X-Stainless-Runtime",
+  "X-Stainless-Runtime-Version"
+]
+```
+
+Droid CLI 透传模板当前包含：
+
+```json
+[
+  "User-Agent",
+  "X-Stainless-Arch",
+  "X-Stainless-Lang",
+  "X-Stainless-Os",
+  "X-Stainless-Package-Version",
+  "X-Stainless-Retry-Count",
+  "X-Stainless-Runtime",
+  "X-Stainless-Runtime-Version"
+]
+```
+
+OpenCode 当前不作为内置 `Header Profile` 提供。本机 live capture 中，模型 upstream 请求头来自 AI SDK provider 运行时，而不是 OpenCode 自身固定 UA；不要把 OpenCode CLI 默认参数当作上游请求头模板。
 
 如果客户端原始请求里没有这些头，`pass_headers` 不会伪造值；这类缺失应通过真实客户端调用链路修复，而不是用固定 UA 模板替代。
 

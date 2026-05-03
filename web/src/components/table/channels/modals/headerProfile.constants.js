@@ -70,7 +70,7 @@ const buildAiCodingCliProfile = (
 });
 
 const CODEX_CLI_USER_AGENT =
-  'codex_exec/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.128.0)';
+  'codex-tui/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.128.0)';
 
 const aiCodingCliProfiles = {
   'codex-cli': {
@@ -81,11 +81,10 @@ const aiCodingCliProfiles = {
     readonly: true,
     passthroughRequired: true,
     description:
-      '固定请求头静态快照来自本机实抓 Codex CLI 0.128.0 /v1/responses 请求；选择此模板时会自动写入 Codex CLI 请求头透传规则，保留真实 CLI 的会话、窗口与 turn metadata 动态头。',
+      '固定请求头静态快照来自 Codex CLI 0.128.0 交互式 TUI 请求头生成逻辑；选择此模板时会自动写入 Codex CLI 请求头透传规则，保留真实 CLI 的会话、窗口与 turn metadata 动态头。',
     headers: {
-      // 实抓请求使用 Originator=codex_exec，不使用通用的 X-Client-Name。
       'User-Agent': CODEX_CLI_USER_AGENT,
-      Originator: 'codex_exec',
+      Originator: 'codex-tui',
     },
   },
   'claude-code': buildAiCodingCliProfile(
