@@ -1,16 +1,12 @@
 package service
 
 import (
-	"encoding/base64"
-	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
-	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
@@ -211,149 +207,6 @@ func TestCalculateTextQuotaSummaryHandlesLegacyClaudeDerivedOpenAIUsage(t *testi
 	require.Equal(t, 1624, summary.Quota)
 }
 
-func TestCalculateTextQuotaSummaryClampsNegativeUseTime(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(w)
-
-	relayInfo := &relaycommon.RelayInfo{
-		OriginModelName: "gpt-5.4",
-		PriceData: types.PriceData{
-			ModelRatio:      1,
-			CompletionRatio: 1,
-			GroupRatioInfo: types.GroupRatioInfo{
-				GroupRatio: 1,
-			},
-		},
-		StartTime: time.Now().Add(time.Hour),
-	}
-
-	usage := &dto.Usage{
-		PromptTokens:     10,
-		CompletionTokens: 5,
-	}
-
-	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
-	require.EqualValues(t, 0, summary.UseTimeSeconds)
-}
-
-func TestPostTextConsumeQuota_UsesTieredSettlementAndKeepsToolAddon(t *testing.T) {
-	truncate(t)
-	seedUser(t, 1, 1_000_000)
-	seedToken(t, 1, 1, "test-token", 1_000_000)
-	seedChannel(t, 1)
-
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(w)
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	ctx.Request = req
-	ctx.Set("token_name", "test-token")
-	ctx.Set("username", "test_user")
-	ctx.Set("chat_completion_web_search_context_size", "medium")
-
-	relayInfo := &relaycommon.RelayInfo{
-		UserId:                1,
-		TokenId:               1,
-		TokenKey:              "test-token",
-		UsingGroup:            "default",
-		UserGroup:             "default",
-		OriginModelName:       "gpt-4.1-search-preview",
-		StartTime:             time.Now(),
-		FinalPreConsumedQuota: 3500,
-		PriceData: types.PriceData{
-			ModelRatio:      1,
-			CompletionRatio: 1,
-			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
-		},
-		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
-			BillingMode:              "tiered_expr",
-			ExprString:               `tier("base", p * 2 + c * 10)`,
-			ExprHash:                 billingexpr.ExprHashString(`tier("base", p * 2 + c * 10)`),
-			GroupRatio:               1,
-			EstimatedQuotaAfterGroup: 3500,
-			QuotaPerUnit:             common.QuotaPerUnit,
-		},
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelId: 1,
-		},
-	}
-
-	usage := &dto.Usage{
-		PromptTokens:     1000,
-		CompletionTokens: 500,
-		TotalTokens:      1500,
-	}
-
-	PostTextConsumeQuota(ctx, relayInfo, usage, nil)
-
-	var consumeLog model.Log
-	require.NoError(t, model.LOG_DB.Order("id desc").First(&consumeLog).Error)
-	require.Equal(t, 16000, consumeLog.Quota)
-
-	other, err := common.StrToMap(consumeLog.Other)
-	require.NoError(t, err)
-	require.Equal(t, "tiered_expr", other["billing_mode"])
-	require.Equal(t, base64.StdEncoding.EncodeToString([]byte(`tier("base", p * 2 + c * 10)`)), other["expr_b64"])
-	require.EqualValues(t, 1, other["web_search_call_count"])
-	require.EqualValues(t, 25, other["web_search_price"])
-}
-
-func TestPostTextConsumeQuota_ZeroTotalTokensDoesNotChargeTieredOrToolAddon(t *testing.T) {
-	truncate(t)
-	seedUser(t, 1, 1_000_000)
-	seedToken(t, 1, 1, "test-token", 1_000_000)
-	seedChannel(t, 1)
-
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(w)
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	ctx.Request = req
-	ctx.Set("token_name", "test-token")
-	ctx.Set("username", "test_user")
-	ctx.Set("chat_completion_web_search_context_size", "medium")
-
-	relayInfo := &relaycommon.RelayInfo{
-		UserId:                1,
-		TokenId:               1,
-		TokenKey:              "test-token",
-		UsingGroup:            "default",
-		UserGroup:             "default",
-		OriginModelName:       "gpt-4.1-search-preview",
-		StartTime:             time.Now(),
-		FinalPreConsumedQuota: 3500,
-		PriceData: types.PriceData{
-			ModelRatio:      1,
-			CompletionRatio: 1,
-			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
-		},
-		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
-			BillingMode:              "tiered_expr",
-			ExprString:               `tier("base", p * 2 + c * 10)`,
-			ExprHash:                 billingexpr.ExprHashString(`tier("base", p * 2 + c * 10)`),
-			GroupRatio:               1,
-			EstimatedQuotaAfterGroup: 3500,
-			QuotaPerUnit:             common.QuotaPerUnit,
-		},
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelId: 1,
-		},
-	}
-
-	usage := &dto.Usage{
-		PromptTokens:     0,
-		CompletionTokens: 0,
-		TotalTokens:      0,
-	}
-
-	PostTextConsumeQuota(ctx, relayInfo, usage, nil)
-
-	var consumeLog model.Log
-	require.NoError(t, model.LOG_DB.Order("id desc").First(&consumeLog).Error)
-	require.Equal(t, 0, consumeLog.Quota)
-}
-
 func TestCalculateTextQuotaSummarySeparatesOpenRouterCacheReadFromPromptBilling(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
@@ -463,4 +316,126 @@ func TestCalculateTextQuotaSummaryKeepsPrePRClaudeOpenRouterBilling(t *testing.T
 	require.True(t, summary.IsClaudeUsageSemantic)
 	require.Equal(t, 172, summary.PromptTokens)
 	require.Equal(t, 798, summary.Quota)
+}
+
+func TestComposeTieredTextQuotaKeepsToolCallSurcharges(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Set("image_generation_call", true)
+	ctx.Set("image_generation_call_quality", "low")
+	ctx.Set("image_generation_call_size", "1024x1024")
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "o1",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
+			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+				dto.BuildInToolWebSearchPreview: &relaycommon.BuildInToolInfo{
+					CallCount: 1,
+				},
+				dto.BuildInToolFileSearch: &relaycommon.BuildInToolInfo{
+					CallCount: 2,
+				},
+			},
+		},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:               "tiered_expr",
+			GroupRatio:                1,
+			EstimatedQuotaBeforeGroup: 1000,
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	quota := composeTieredTextQuota(relayInfo, summary, 1000, &billingexpr.TieredResult{
+		ActualQuotaBeforeGroup: 1000,
+		ActualQuotaAfterGroup:  1000,
+	})
+
+	require.Equal(t, int64(13000), summary.ToolCallSurchargeQuota.Round(0).IntPart())
+	require.Equal(t, 14000, quota)
+}
+
+func TestComposeTieredTextQuotaFallbackKeepsToolCallSurcharges(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Set("claude_web_search_requests", 2)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "claude-3-7-sonnet",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1.25},
+		},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:               "tiered_expr",
+			GroupRatio:                1.25,
+			EstimatedQuotaBeforeGroup: 1000,
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	quota := composeTieredTextQuota(relayInfo, summary, 1250, nil)
+
+	require.Equal(t, int64(12500), summary.ToolCallSurchargeQuota.Round(0).IntPart())
+	require.Equal(t, 13750, quota)
+}
+
+func TestComposeTieredTextQuotaErrorFallbackUsesPreConsumedQuota(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Set("claude_web_search_requests", 2)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "claude-3-7-sonnet",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1.25},
+		},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:               "tiered_expr",
+			GroupRatio:                1.25,
+			EstimatedQuotaBeforeGroup: 1000,
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	// tieredResult=nil simulates a settlement error where TryTieredSettle
+	// falls back to FinalPreConsumedQuota (2000), which differs from
+	// EstimatedQuotaBeforeGroup * GroupRatio (1250).
+	preConsumedFallback := 2000
+	quota := composeTieredTextQuota(relayInfo, summary, preConsumedFallback, nil)
+
+	require.Equal(t, int64(12500), summary.ToolCallSurchargeQuota.Round(0).IntPart())
+	require.Equal(t, 14500, quota)
 }

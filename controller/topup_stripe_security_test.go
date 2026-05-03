@@ -42,9 +42,15 @@ func TestStripeWebhookRejectsRequestsWhenWebhookSecretIsBlank(t *testing.T) {
 
 func TestStripeWebhookRejectsInvalidSignature(t *testing.T) {
 	previousSecret := setting.StripeWebhookSecret
+	previousAPISecret := setting.StripeApiSecret
+	previousPriceID := setting.StripePriceId
 	setting.StripeWebhookSecret = "whsec_test_secret"
+	setting.StripeApiSecret = "sk_test_secret"
+	setting.StripePriceId = "price_test"
 	t.Cleanup(func() {
 		setting.StripeWebhookSecret = previousSecret
+		setting.StripeApiSecret = previousAPISecret
+		setting.StripePriceId = previousPriceID
 	})
 
 	ctx, recorder := newStripeWebhookTestContext(t, `{}`, "t=12345,v1=invalid")

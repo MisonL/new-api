@@ -1,241 +1,235 @@
-# 计费表达式系统说明（billingexpr）
+# Billing Expression System (billingexpr)
 
-## 设计原则
+## Design Philosophy
 
-核心原则只有一句话：一条表达式就是一条完整计费规则。
+**One expression, one truth.** A single expression string completely defines a model's billing logic — pricing, tier conditions, cache/image/audio differentiation, time-based discounts, request-aware multipliers — all in one line. No scattered configuration, no implicit rules, no magic numbers.
 
-表达式本身直接决定：
+The expression is the billing contract between the administrator and the system. What you write is what gets executed. The system's job is to evaluate it faithfully, not to interpret it.
 
-- 输入与输出价格
-- 阶梯条件
-- 缓存、图片、音频等差异化计费
-- 请求条件附加倍率
-- 时间相关倍率
+### Core Principles
 
-系统只负责严格执行，不额外引入隐藏倍率、隐式换算或散落在别处的价格逻辑。
+1. **Expression is self-contained** — The expression string alone determines billing. No external ratio tables, no implicit completion multipliers, no hidden conversion factors. Given the same token counts and request context, the same expression always produces the same cost.
 
-## 核心约束
+2. **Variables are opt-in** — `p` (prompt) and `c` (completion) are the base. Cache (`cr`, `cc`, `cc1h`), image (`img`), and audio (`ai`, `ao`) variables are optional. If omitted, those tokens are included in `p`/`c` and priced at their rate. The system automatically detects which variables the expression uses (via AST introspection) and adjusts token normalization accordingly.
 
-### 1. 表达式自包含
+3. **Prices are real prices** — Expression coefficients are actual $/1M tokens prices as published by providers. No ratio conversion, no `/2` convention. `p * 2.5` means $2.50 per 1M prompt tokens.
 
-- 一条表达式必须能完整描述一个模型的计费逻辑
-- 不依赖隐藏表、隐式补全倍率或约定俗成的特殊换算
-- 相同输入、相同请求上下文，必须得到相同结果
+4. **Upstream-agnostic** — The expression doesn't need to know whether the upstream API is OpenAI-format (prompt_tokens includes cache) or Claude-format (input_tokens excludes cache). The system normalizes token counts before evaluation based on the upstream response format.
 
-### 2. 变量按需启用
+5. **Version-aware** — Expressions carry a version tag (`v1:`, default when omitted). The version controls the compile environment, token normalization, and quota conversion formula, enabling future evolution without breaking existing expressions.
 
-基础变量：
+---
 
-- `p`：输入 token
-- `c`：输出 token
+## Expression Language
 
-可选细分变量：
+Powered by [expr-lang/expr](https://github.com/expr-lang/expr). Expressions are compiled, cached, and evaluated against a runtime environment.
 
-- `cr`：缓存命中读取
-- `cc`：缓存创建
-- `cc1h`：1 小时缓存创建
-- `img`：图片输入
-- `img_o`：图片输出
-- `ai`：音频输入
-- `ao`：音频输出
+### Token Variables
 
-如果表达式没有单独使用某个细分变量，对应 token 会继续留在 `p` / `c` 中按基础价格计费。
+**输入侧变量：**
 
-### 3. 价格就是实际价格
+| 变量 | 含义 |
+|------|------|
+| `p` | 输入 token 数（**计价用**）。**自动排除**表达式中单独计价的子类别（见下方说明） |
+| `len` | 输入上下文总长度（**条件判断用**）。不受自动排除影响，始终反映完整输入长度。非 Claude：等于原始 `prompt_tokens`；Claude：等于文本输入 + 缓存读取 + 缓存创建 |
+| `cr` | 缓存命中（读取）token 数 |
+| `cc` | 缓存创建 token 数（Claude 5分钟 TTL / 通用） |
+| `cc1h` | 缓存创建 token 数 — 1小时 TTL（Claude 专用） |
+| `img` | 图片输入 token 数 |
+| `ai` | 音频输入 token 数 |
 
-- 表达式系数使用供应商真实的每百万 token 价格
-- 不引入 `/2`、倍率表换算等历史约定
-- 例如 `p * 2.5` 就表示输入每百万 token 价格为 2.5 美元
+**输出侧变量：**
 
-### 4. 与上游格式解耦
+| 变量 | 含义 |
+|------|------|
+| `c` | 输出 token 数。**自动排除**表达式中单独计价的子类别（见下方说明） |
+| `img_o` | 图片输出 token 数 |
+| `ao` | 音频输出 token 数 |
 
-表达式本身不需要关心上游是 OpenAI 风格还是 Claude 风格。
+#### `p` 和 `c` 的自动排除机制
 
-系统会在运行时做 token 归一化：
+`p` 和 `c` 是"兜底变量"——它们代表**所有没有被表达式单独定价的 token**。系统会根据表达式实际使用了哪些变量，自动从 `p` / `c` 中减去对应的子类别 token，避免重复计费。
 
-- OpenAI / GPT 风格：`prompt_tokens` 可能包含缓存、图片、音频
-- Claude 风格：`input_tokens` 通常只包含纯文本
+**规则：如果表达式使用了某个子类别变量，对应的 token 就从 `p` 或 `c` 中扣除；如果没使用，那些 token 就留在 `p` 或 `c` 里按基础价格计费。**
 
-### 5. 支持版本化
+> **重要：`len` 不受自动排除影响。** `len` 始终代表完整的输入上下文长度，不管表达式是否单独对缓存/图片/音频定价。因此**阶梯条件应使用 `len` 而非 `p`**，以避免缓存命中导致 `p` 降低而误判档位。
 
-- 支持 `v1:` 前缀
-- 不写前缀时默认按 `v1` 处理
-- 版本控制编译环境、token 归一化规则和额度换算方式
+举例说明（假设上游返回的原始数据：prompt_tokens=1000，其中包含 200 cache read、100 image）：
 
-## 变量说明
+| 表达式 | `p` 的值 | 说明 |
+|--------|---------|------|
+| `p * 3 + c * 15` | 1000 | 没用 `cr`/`img`，所以缓存和图片都包含在 `p` 里，全按 $3 计费 |
+| `p * 3 + c * 15 + cr * 0.3` | 800 | 用了 `cr`，缓存 200 从 `p` 中扣除，按 $0.3 单独计费；图片仍在 `p` 里按 $3 计费 |
+| `p * 3 + c * 15 + cr * 0.3 + img * 2` | 700 | 用了 `cr` 和 `img`，都从 `p` 中扣除，各自按自己的价格计费 |
 
-### 输入侧
+输出侧同理（假设 completion_tokens=500，其中包含 100 audio output）：
 
-| 变量 | 说明 |
-| --- | --- |
-| `p` | 输入 token，自动排除表达式中已单独计价的子类别 |
-| `cr` | 缓存命中读取 token |
-| `cc` | 缓存创建 token |
-| `cc1h` | 1 小时缓存创建 token |
-| `img` | 图片输入 token |
-| `ai` | 音频输入 token |
+| 表达式 | `c` 的值 | 说明 |
+|--------|---------|------|
+| `p * 3 + c * 15` | 500 | 没用 `ao`，音频输出包含在 `c` 里按 $15 计费 |
+| `p * 3 + c * 15 + ao * 50` | 400 | 用了 `ao`，音频 100 从 `c` 中扣除按 $50 计费 |
 
-### 输出侧
+> **注意：** 这个自动排除仅针对 GPT/OpenAI 格式的 API（prompt_tokens 包含所有子类别）。Claude 格式的 API（input_tokens 本身就只包含纯文本）不做任何减法。系统根据上游返回格式自动判断，表达式作者无需关心。
 
-| 变量 | 说明 |
-| --- | --- |
-| `c` | 输出 token，自动排除表达式中已单独计价的子类别 |
-| `img_o` | 图片输出 token |
-| `ao` | 音频输出 token |
+### Built-in Functions
 
-## `p` / `c` 自动排除规则
+| Function | Signature | Purpose |
+|----------|-----------|---------|
+| `tier` | `tier(name, value) → float64` | Records which pricing tier matched; must wrap the cost expression |
+| `param` | `param(path) → any` | Reads a JSON path from the request body (uses gjson) |
+| `header` | `header(key) → string` | Reads a request header value |
+| `has` | `has(source, substr) → bool` | Substring check |
+| `hour` | `hour(tz) → int` | Current hour in timezone (0-23) |
+| `minute` | `minute(tz) → int` | Current minute (0-59) |
+| `weekday` | `weekday(tz) → int` | Day of week (0=Sunday, 6=Saturday) |
+| `month` | `month(tz) → int` | Month (1-12) |
+| `day` | `day(tz) → int` | Day of month (1-31) |
+| `max` | `max(a, b) → float64` | Math max |
+| `min` | `min(a, b) → float64` | Math min |
+| `abs` | `abs(x) → float64` | Absolute value |
+| `ceil` | `ceil(x) → float64` | Ceiling |
+| `floor` | `floor(x) → float64` | Floor |
 
-`p` 和 `c` 是兜底变量，表示“没有被单独拿出来计价的剩余 token”。
+### Expression Examples
 
-规则如下：
-
-- 表达式用了某个子类别变量，该子类别 token 就从 `p` 或 `c` 中扣除
-- 表达式没用该变量，对应 token 就继续留在 `p` 或 `c` 中按基础价格计费
-
-示例：
-
-| 表达式 | `p` 的含义 |
-| --- | --- |
-| `p * 3 + c * 15` | 所有输入 token 都在 `p` 中 |
-| `p * 3 + c * 15 + cr * 0.3` | 缓存读取 token 从 `p` 中扣除，单独按 `cr` 计费 |
-| `p * 3 + c * 15 + cr * 0.3 + img * 2` | 缓存读取和图片输入都从 `p` 中扣除，各自单独计费 |
-
-注意：
-
-- OpenAI / GPT 风格需要做这类扣减
-- Claude 风格输入本身更接近纯文本，通常不需要额外扣减
-
-## 内置函数
-
-| 函数 | 作用 |
-| --- | --- |
-| `tier(name, value)` | 标记命中的阶梯，并返回当前阶梯价格 |
-| `param(path)` | 读取请求体中的 JSON 路径 |
-| `header(key)` | 读取请求头 |
-| `has(source, substr)` | 子串判断 |
-| `hour(tz)` / `minute(tz)` / `weekday(tz)` / `month(tz)` / `day(tz)` | 读取时区相关时间信息 |
-| `max` / `min` / `abs` / `ceil` / `floor` | 数学函数 |
-
-## 表达式示例
-
-```txt
+```
+# Simple flat pricing
 tier("base", p * 2.5 + c * 15 + cr * 0.25)
 
-p <= 200000
+# Multi-tier (Claude Sonnet style) — use len for tier conditions
+len <= 200000
   ? tier("standard", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6)
   : tier("long_context", p * 6 + c * 22.5 + cr * 0.6 + cc * 7.5 + cc1h * 12)
 
+# Image model (no separate cache/audio pricing — those tokens stay in p/c)
 tier("base", p * 2 + c * 8 + img * 2.5)
 
+# Multimodal with audio
 tier("base", p * 0.43 + c * 3.06 + img * 0.78 + ai * 3.81 + ao * 15.11)
 ```
 
-## 请求条件规则
+### Request Rules (appended after `|||`)
 
-请求条件规则通过 `|||` 拼接在主表达式后：
+Request-conditional multipliers are appended to the expression after a `|||` separator:
 
-```txt
+```
 tier("base", p * 5 + c * 25)|||when(header("anthropic-beta") has "fast-mode") * 6
 ```
 
-主表达式与请求条件规则由不同逻辑解析，但最终共同参与计费。
+These are parsed and applied separately by the request rule system.
 
-## 系统链路
+---
 
-整体链路如下：
+## Architecture
 
-```txt
-前端编辑器 -> 存储 -> 预扣费 -> 结算 -> 日志展示
+### Data Flow
+
+```
+Frontend Editor → Storage → Pre-consume → Settlement → Log Display
 ```
 
-### 1. 前端编辑
+### 1. Frontend Editor
 
-文件：`web/src/pages/Setting/Ratio/components/TieredPricingEditor.jsx`
+**File**: `web/src/pages/Setting/Ratio/components/TieredPricingEditor.jsx`
 
-- 可视化模式：填写变量价格和阶梯条件，自动生成表达式
-- 原始模式：直接编辑表达式字符串
+Two editing modes:
+- **Visual mode**: Fill in prices per variable, conditions per tier. Generates expression via `generateExprFromVisualConfig()`.
+- **Raw mode**: Edit the expression string directly. Includes preset templates for common models.
 
-最终写入时，会把计费表达式和请求条件规则组合后一起保存。
+The editor outputs a billing expression string and an optional request rule expression string. These are combined via `combineBillingExpr(billingExpr, requestRuleExpr)` before storage.
 
-### 2. 存储
+### 2. Storage
 
-文件：`setting/billing_setting/tiered_billing.go`
+**File**: `setting/billing_setting/tiered_billing.go`
 
-主要存储两类映射：
+Two option maps stored in the `options` DB table:
+- `ModelBillingMode`: `{ "model-name": "tiered_expr" }` — activates tiered billing for a model
+- `ModelBillingExpr`: `{ "model-name": "tier(\"base\", p * 2.5 + c * 15)" }` — the expression
 
-- `ModelBillingMode`
-- `ModelBillingExpr`
+On save, the expression is validated:
+1. Compiled via `billingexpr.CompileFromCache()` — syntax check
+2. Smoke-tested with sample token vectors — ensures non-negative results
 
-保存时必须完成：
+### 3. Pre-consume (Quota Estimation)
 
-- 编译校验
-- 样例 token 烟雾测试
-- 非负结果检查
+**File**: `relay/helper/price.go` → `modelPriceHelperTiered()`
 
-### 3. 预扣费
+When a request arrives and the model uses `tiered_expr` billing:
+1. Loads expression from `billing_setting.GetBillingExpr()`
+2. Builds `RequestInput` (headers + body) for `param()` / `header()` functions
+3. Runs expression with estimated tokens: `RunExprWithRequest(expr, {P, C}, requestInput)`
+4. Converts output to quota: `rawCost / 1,000,000 * QuotaPerUnit`
+5. Creates `BillingSnapshot` (frozen state for settlement) and stores on `RelayInfo`
 
-文件：`relay/helper/price.go`
+### 4. Settlement (Actual Billing)
 
-流程：
+**Files**: `service/tiered_settle.go`, `pkg/billingexpr/settle.go`
 
-1. 读取模型表达式
-2. 构造请求上下文，供 `param()`、`header()` 使用
-3. 用预估 token 执行表达式
-4. 将原始价格换算为内部额度
-5. 冻结 `BillingSnapshot`，供后续结算使用
+After the upstream response returns with actual token usage:
 
-### 4. 实际结算
+1. `BuildTieredTokenParams(usage, isClaudeUsageSemantic, usedVars)`:
+   - Reads actual token counts from `dto.Usage`
+   - For GPT-format APIs (prompt_tokens includes everything): subtracts sub-categories from P/C **only when** the expression uses their variables (detected via AST introspection of the compiled expression)
+   - For Claude-format APIs (input_tokens is text-only): no adjustment needed
 
-文件：
+2. `TryTieredSettle(relayInfo, params)`:
+   - Uses the frozen `BillingSnapshot` from pre-consume
+   - Re-runs the expression with actual token counts
+   - Converts via `quotaConversion()` (version-dispatched)
+   - Returns actual quota
 
-- `service/tiered_settle.go`
-- `pkg/billingexpr/settle.go`
+### 5. Log Display
 
-流程：
+**Files**: `service/log_info_generate.go`, `web/src/helpers/render.jsx`
 
-1. 根据真实用量构建结算参数
-2. 按表达式实际用到的变量做 token 归一化
-3. 基于预扣费时冻结的快照再次执行表达式
-4. 完成额度换算并返回真实扣费值
+Backend: `InjectTieredBillingInfo()` adds `billing_mode`, `expr_b64` (base64 expression), and `matched_tier` to the log's `other` JSON.
 
-### 5. 日志展示
+Frontend: Detects `billing_mode === "tiered_expr"`, decodes `expr_b64`, parses tiers via shared `parseTiersFromExpr()`, and renders pricing breakdown.
 
-相关文件：
+---
 
-- `service/log_info_generate.go`
-- `web/src/helpers/render.jsx`
+## Key Design Decisions
 
-后端会把表达式、命中的阶梯和计费模式写入日志 `other` 字段，前端再解码并展示价格拆解。
+### Token Normalization via AST Introspection
 
-## 关键设计决定
+Different upstream APIs report `prompt_tokens` differently:
+- **OpenAI/GPT**: `prompt_tokens` = total (text + cache + image + audio)
+- **Claude**: `input_tokens` = text only (cache reported separately)
 
-### AST 识别已使用变量
+The system normalizes `p` to mean "tokens not separately priced" by subtracting sub-categories **only when the expression references them**. This is determined by walking the compiled AST to find `IdentifierNode` references — zero runtime cost after first compilation (cached).
 
-系统会在表达式编译后识别其实际引用了哪些变量，再决定是否从 `p` / `c` 中扣除子类别 token。
+Example: `p * 2.5 + c * 15 + cr * 0.25`
+- Expression uses `cr` → cache read tokens subtracted from `p`
+- Expression doesn't use `img` → image tokens stay in `p`, priced at $2.50
 
-这保证了：
+### `len` — Context Length Variable
 
-- 不重复计费
-- 不需要作者手动理解不同上游的 token 统计差异
-- 编译缓存后不会引入明显运行时额外开销
+`len` represents the total input context length, designed for **tier condition evaluation** (e.g. `len <= 200000 ? ...`). Unlike `p`, `len` is never reduced by sub-category exclusion.
 
-### 额度换算
+**Computation rules:**
+- **Non-Claude (GPT/OpenAI format)**: `len = prompt_tokens` (the raw total from the upstream response)
+- **Claude format**: `len = input_tokens + cache_read_tokens + cache_creation_tokens` (since Claude's `input_tokens` is text-only, cache must be added back to reflect full context length)
 
-表达式产出是每百万 token 的原始价格，换算内部额度时使用：
+This ensures that heavy cache usage doesn't cause the tier condition to incorrectly evaluate to a lower tier. For example, if a request has 300K total context but 250K is cached, `p` with cache subtracted would be only 50K (standard tier), while `len` correctly reports 300K (long-context tier).
 
-```txt
-quota = exprOutput / 1000000 * QuotaPerUnit * groupRatio
+### Quota Conversion
+
+Expression coefficients are $/1M tokens. Conversion to internal quota:
+
+```
+quota = exprOutput / 1,000,000 * QuotaPerUnit * groupRatio
 ```
 
-### 版本前缀
+This matches the per-call billing pattern: `quota = modelPrice * QuotaPerUnit * groupRatio`.
 
-表达式支持带版本前缀，例如：
+### Expression Versioning
 
-```txt
-v1:tier("base", p * 2.5 + c * 15)
-```
+Expressions can carry a version prefix: `v1:tier(...)`. No prefix = v1.
 
-版本前缀用于约束未来演进时的兼容行为，避免新规则破坏旧表达式。
+Version controls:
+- Compile environment (available variables and functions)
+- Token normalization logic
+- Quota conversion formula
 
 This enables future evolution without breaking existing expressions.
 

@@ -27,6 +27,10 @@ type chatToolCallState struct {
 	sentAdded   bool
 }
 
+func marshalResponsesCompatArguments(arguments string) (common.RawMessage, error) {
+	return common.Marshal(arguments)
+}
+
 func getResponsesCompatID(c *gin.Context) string {
 	logID := c.GetString(common.RequestIdKey)
 	if logID == "" {
@@ -247,14 +251,19 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		if !sendResponseInProgress() {
 			return false
 		}
-		err := sendResponsesCompatEvent(c, dto.ResponsesOutputTypeItemAdded, dto.ResponsesStreamResponse{
+		argumentsRaw, err := marshalResponsesCompatArguments(state.arguments.String())
+		if err != nil {
+			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return false
+		}
+		err = sendResponsesCompatEvent(c, dto.ResponsesOutputTypeItemAdded, dto.ResponsesStreamResponse{
 			Item: &dto.ResponsesOutput{
 				Type:      "function_call",
 				ID:        state.itemID,
 				Status:    "in_progress",
 				CallId:    state.callID,
 				Name:      state.name,
-				Arguments: state.arguments.String(),
+				Arguments: argumentsRaw,
 			},
 			OutputIndex: common.GetPointer(state.outputIndex),
 		})
@@ -275,7 +284,12 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			if !sendToolItemAdded(state) {
 				return false
 			}
-			err := sendResponsesCompatRawEvent(c, "response.function_call_arguments.done", map[string]any{
+			argumentsRaw, err := marshalResponsesCompatArguments(state.arguments.String())
+			if err != nil {
+				streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+				return false
+			}
+			err = sendResponsesCompatRawEvent(c, "response.function_call_arguments.done", map[string]any{
 				"type":         "response.function_call_arguments.done",
 				"item_id":      state.itemID,
 				"output_index": state.outputIndex,
@@ -292,7 +306,7 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 					Status:    "completed",
 					CallId:    state.callID,
 					Name:      state.name,
-					Arguments: state.arguments.String(),
+					Arguments: argumentsRaw,
 				},
 				OutputIndex: common.GetPointer(state.outputIndex),
 			})
@@ -306,7 +320,7 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				Status:    "completed",
 				CallId:    state.callID,
 				Name:      state.name,
-				Arguments: state.arguments.String(),
+				Arguments: argumentsRaw,
 			})
 		}
 		return true

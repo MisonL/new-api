@@ -65,13 +65,14 @@ func TestRechargeRejectsNonStripeTopUpOrders(t *testing.T) {
 	require.NoError(t, db.Create(user).Error)
 
 	topUp := &TopUp{
-		UserId:        user.Id,
-		Amount:        100,
-		Money:         12.5,
-		TradeNo:       "test-epay-order",
-		PaymentMethod: "epay",
-		CreateTime:    common.GetTimestamp(),
-		Status:        common.TopUpStatusPending,
+		UserId:          user.Id,
+		Amount:          100,
+		Money:           12.5,
+		TradeNo:         "test-epay-order",
+		PaymentMethod:   "alipay",
+		PaymentProvider: PaymentProviderEpay,
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
 	}
 	require.NoError(t, topUp.Insert())
 

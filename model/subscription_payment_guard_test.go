@@ -33,7 +33,7 @@ func setupSubscriptionPaymentGuardTestDB(t *testing.T) *gorm.DB {
 	DB = db
 	LOG_DB = db
 
-	require.NoError(t, db.AutoMigrate(&User{}, &SubscriptionPlan{}, &SubscriptionOrder{}, &UserSubscription{}, &TopUp{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &SubscriptionPlan{}, &SubscriptionOrder{}, &UserSubscription{}, &TopUp{}, &Log{}))
 
 	t.Cleanup(func() {
 		common.UsingSQLite = previousUsingSQLite
@@ -52,7 +52,7 @@ func setupSubscriptionPaymentGuardTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func seedSubscriptionOrderGuardFixture(t *testing.T, db *gorm.DB, paymentMethod string, tradeNo string) *SubscriptionOrder {
+func seedSubscriptionOrderGuardFixture(t *testing.T, db *gorm.DB, paymentMethod string, paymentProvider string, tradeNo string) *SubscriptionOrder {
 	t.Helper()
 
 	user := &User{
@@ -82,13 +82,14 @@ func seedSubscriptionOrderGuardFixture(t *testing.T, db *gorm.DB, paymentMethod 
 	require.NoError(t, db.Create(plan).Error)
 
 	order := &SubscriptionOrder{
-		UserId:        user.Id,
-		PlanId:        plan.Id,
-		Money:         plan.PriceAmount,
-		TradeNo:       tradeNo,
-		PaymentMethod: paymentMethod,
-		CreateTime:    common.GetTimestamp(),
-		Status:        common.TopUpStatusPending,
+		UserId:          user.Id,
+		PlanId:          plan.Id,
+		Money:           plan.PriceAmount,
+		TradeNo:         tradeNo,
+		PaymentMethod:   paymentMethod,
+		PaymentProvider: paymentProvider,
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
 	}
 	require.NoError(t, db.Create(order).Error)
 	return order
@@ -96,10 +97,10 @@ func seedSubscriptionOrderGuardFixture(t *testing.T, db *gorm.DB, paymentMethod 
 
 func TestCompleteSubscriptionOrderWithPaymentMethodRejectsMismatch(t *testing.T) {
 	db := setupSubscriptionPaymentGuardTestDB(t)
-	order := seedSubscriptionOrderGuardFixture(t, db, PaymentProviderCreem, "sub-creem-order")
+	order := seedSubscriptionOrderGuardFixture(t, db, PaymentProviderCreem, PaymentProviderCreem, "sub-creem-order")
 
 	err := CompleteSubscriptionOrderWithPaymentMethod(order.TradeNo, "{}", PaymentProviderStripe)
-	require.ErrorIs(t, err, ErrSubscriptionOrderPaymentMethodMismatch)
+	require.ErrorIs(t, err, ErrPaymentMethodMismatch)
 
 	var refreshed SubscriptionOrder
 	require.NoError(t, db.Where("trade_no = ?", order.TradeNo).First(&refreshed).Error)
@@ -108,7 +109,7 @@ func TestCompleteSubscriptionOrderWithPaymentMethodRejectsMismatch(t *testing.T)
 
 func TestCompleteSubscriptionOrderWithPaymentMethodAcceptsEpayFamily(t *testing.T) {
 	db := setupSubscriptionPaymentGuardTestDB(t)
-	order := seedSubscriptionOrderGuardFixture(t, db, "alipay", "sub-epay-order")
+	order := seedSubscriptionOrderGuardFixture(t, db, "alipay", PaymentProviderEpay, "sub-epay-order")
 
 	err := CompleteSubscriptionOrderWithPaymentMethod(order.TradeNo, `{"provider":"epay"}`, PaymentProviderEpay)
 	require.NoError(t, err)
@@ -124,10 +125,10 @@ func TestCompleteSubscriptionOrderWithPaymentMethodAcceptsEpayFamily(t *testing.
 
 func TestExpireSubscriptionOrderWithPaymentMethodRejectsMismatch(t *testing.T) {
 	db := setupSubscriptionPaymentGuardTestDB(t)
-	order := seedSubscriptionOrderGuardFixture(t, db, PaymentProviderStripe, "sub-stripe-order")
+	order := seedSubscriptionOrderGuardFixture(t, db, PaymentProviderStripe, PaymentProviderStripe, "sub-stripe-order")
 
 	err := ExpireSubscriptionOrderWithPaymentMethod(order.TradeNo, PaymentProviderCreem)
-	require.ErrorIs(t, err, ErrSubscriptionOrderPaymentMethodMismatch)
+	require.ErrorIs(t, err, ErrPaymentMethodMismatch)
 
 	var refreshed SubscriptionOrder
 	require.NoError(t, db.Where("trade_no = ?", order.TradeNo).First(&refreshed).Error)

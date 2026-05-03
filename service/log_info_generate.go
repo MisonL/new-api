@@ -340,6 +340,9 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.Price
 // module-specific other map. Call this after GenerateTextOtherInfo /
 // GenerateClaudeOtherInfo / etc. when the request used tiered_expr billing.
 func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommon.RelayInfo, result *billingexpr.TieredResult) {
+	if relayInfo == nil || other == nil {
+		return
+	}
 	snap := relayInfo.TieredBillingSnapshot
 	if snap == nil {
 		return

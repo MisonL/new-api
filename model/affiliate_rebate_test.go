@@ -43,13 +43,14 @@ func TestRechargeWaffoAccruesInviteRebateOnce(t *testing.T) {
 	require.NoError(t, db.Create(&inviter).Error)
 	require.NoError(t, db.Create(&invitee).Error)
 	require.NoError(t, db.Create(&TopUp{
-		UserId:        invitee.Id,
-		Amount:        10,
-		Money:         10,
-		TradeNo:       "waffo-rebate-once",
-		PaymentMethod: "waffo",
-		CreateTime:    common.GetTimestamp(),
-		Status:        common.TopUpStatusPending,
+		UserId:          invitee.Id,
+		Amount:          10,
+		Money:           10,
+		TradeNo:         "waffo-rebate-once",
+		PaymentMethod:   "waffo",
+		PaymentProvider: PaymentProviderWaffo,
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
 	}).Error)
 
 	require.NoError(t, RechargeWaffo("waffo-rebate-once", "127.0.0.1"))
@@ -93,13 +94,14 @@ func TestRechargeEpayAccruesInviteRebate(t *testing.T) {
 	require.NoError(t, db.Create(&inviter).Error)
 	require.NoError(t, db.Create(&invitee).Error)
 	require.NoError(t, db.Create(&TopUp{
-		UserId:        invitee.Id,
-		Amount:        10,
-		Money:         10,
-		TradeNo:       "epay-rebate",
-		PaymentMethod: "alipay",
-		CreateTime:    common.GetTimestamp(),
-		Status:        common.TopUpStatusPending,
+		UserId:          invitee.Id,
+		Amount:          10,
+		Money:           10,
+		TradeNo:         "epay-rebate",
+		PaymentMethod:   "alipay",
+		PaymentProvider: PaymentProviderEpay,
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
 	}).Error)
 
 	require.NoError(t, RechargeEpay("epay-rebate", "127.0.0.1"))

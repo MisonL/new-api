@@ -74,7 +74,7 @@ func ComputeToolCallQuota(usage ToolCallUsage, groupRatio float64) ToolCallResul
 		items = append(items, ToolCallItem{
 			Name:       "image_generation",
 			CallCount:  1,
-			PricePer1K: price * 1000,
+			PricePer1K: price,
 			TotalPrice: price,
 			Quota:      quota,
 		})

@@ -1045,6 +1045,8 @@ func buildUsageFromGeminiMetadata(metadata dto.GeminiUsageMetadata, fallbackProm
 			usage.CompletionTokenDetails.ImageTokens += detail.TokenCount
 		case "AUDIO":
 			usage.CompletionTokenDetails.AudioTokens += detail.TokenCount
+		case "TEXT":
+			usage.CompletionTokenDetails.TextTokens += detail.TokenCount
 		}
 	}
 
@@ -1095,7 +1097,7 @@ func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse)
 						toolCalls = append(toolCalls, *call)
 					}
 				} else if part.Thought {
-					choice.Message.ReasoningContent = part.Text
+					choice.Message.ReasoningContent = &part.Text
 				} else {
 					if part.ExecutableCode != nil {
 						texts = append(texts, "```"+part.ExecutableCode.Language+"\n"+part.ExecutableCode.Code+"\n```")
@@ -1740,4 +1742,3 @@ func captureGeminiResponseHeaders(info *relaycommon.RelayInfo, resp *http.Respon
 	info.UpstreamRequestId = resp.Header.Get("X-Goog-Request-Id")
 	info.UpstreamUsageMetadata = resp.Header.Get("X-Goog-Usage-Metadata")
 }
-

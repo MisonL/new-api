@@ -13,9 +13,11 @@ import (
 func ResolveIncomingBillingExprRequestInput(c *gin.Context, info *relaycommon.RelayInfo) (billingexpr.RequestInput, error) {
 	if info != nil && info.BillingRequestInput != nil {
 		input := cloneRequestInput(*info.BillingRequestInput)
-		if len(input.Headers) == 0 {
-			input.Headers = cloneStringMap(info.RequestHeaders)
+		merged := cloneStringMap(info.RequestHeaders)
+		for k, v := range input.Headers {
+			merged[k] = v
 		}
+		input.Headers = merged
 		return input, nil
 	}
 

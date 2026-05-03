@@ -20,13 +20,14 @@ func TestExpirePendingTopUpByTradeNoForPaymentMethodRejectsMismatch(t *testing.T
 	require.NoError(t, db.Create(user).Error)
 
 	topUp := &TopUp{
-		UserId:        user.Id,
-		Amount:        100,
-		Money:         8,
-		TradeNo:       "topup-stripe-order",
-		PaymentMethod: PaymentProviderStripe,
-		CreateTime:    common.GetTimestamp(),
-		Status:        common.TopUpStatusPending,
+		UserId:          user.Id,
+		Amount:          100,
+		Money:           8,
+		TradeNo:         "topup-stripe-order",
+		PaymentMethod:   PaymentProviderStripe,
+		PaymentProvider: PaymentProviderStripe,
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
 	}
 	require.NoError(t, topUp.Insert())
 
@@ -51,13 +52,14 @@ func TestMarkPendingTopUpFailedByTradeNoForPaymentMethodRejectsMismatch(t *testi
 	require.NoError(t, db.Create(user).Error)
 
 	topUp := &TopUp{
-		UserId:        user.Id,
-		Amount:        100,
-		Money:         8,
-		TradeNo:       "topup-creem-order",
-		PaymentMethod: PaymentProviderCreem,
-		CreateTime:    common.GetTimestamp(),
-		Status:        common.TopUpStatusPending,
+		UserId:          user.Id,
+		Amount:          100,
+		Money:           8,
+		TradeNo:         "topup-creem-order",
+		PaymentMethod:   PaymentProviderCreem,
+		PaymentProvider: PaymentProviderCreem,
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
 	}
 	require.NoError(t, topUp.Insert())
 

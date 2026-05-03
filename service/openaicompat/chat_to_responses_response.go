@@ -114,13 +114,17 @@ func ChatCompletionsResponseToResponsesResponse(resp *dto.OpenAITextResponse, id
 		if callID == "" {
 			callID = fmt.Sprintf("call_%d", index)
 		}
+		argumentsRaw, err := common.Marshal(toolCall.Function.Arguments)
+		if err != nil {
+			return nil, nil, fmt.Errorf("tool call arguments marshal failed: %w", err)
+		}
 		output = append(output, dto.ResponsesOutput{
 			Type:      "function_call",
 			ID:        fmt.Sprintf("fc_%d", index),
 			Status:    "completed",
 			CallId:    callID,
 			Name:      name,
-			Arguments: toolCall.Function.Arguments,
+			Arguments: argumentsRaw,
 		})
 	}
 

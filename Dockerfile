@@ -6,12 +6,22 @@ ARG SOURCE_URL=https://github.com/MisonL/new-api
 FROM oven/bun:1@sha256:0733e50325078969732ebe3b15ce4c4be5082f18c4ac1a0f0ca4839c2e4e42a7 AS builder
 
 WORKDIR /build
-COPY web/package.json .
-COPY web/bun.lock .
+COPY web/default/package.json .
+COPY web/default/bun.lock .
 RUN bun install
-COPY ./web .
+COPY ./web/default .
 COPY ./VERSION .
 RUN DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
+
+FROM oven/bun:1@sha256:0733e50325078969732ebe3b15ce4c4be5082f18c4ac1a0f0ca4839c2e4e42a7 AS builder-classic
+
+WORKDIR /build
+COPY web/classic/package.json .
+COPY web/classic/bun.lock .
+RUN bun install
+COPY ./web/classic .
+COPY ./VERSION .
+RUN VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
 
 FROM golang:1.26.2-alpine@sha256:c2a1f7b2095d046ae14b286b18413a05bb82c9bca9b25fe7ff5efef0f0826166 AS builder2
 ENV GO111MODULE=on CGO_ENABLED=0
@@ -31,7 +41,8 @@ ADD go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-COPY --from=builder /build/dist ./web/dist
+COPY --from=builder /build/dist ./web/default/dist
+COPY --from=builder-classic /build/dist ./web/classic/dist
 RUN VERSION_VALUE="${APP_VERSION}"; \
     if [ "$VERSION_VALUE" = "unknown" ]; then VERSION_VALUE="$(cat VERSION)"; fi; \
     go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=${VERSION_VALUE}' -X 'github.com/QuantumNous/new-api/common.BuildCommit=${VCS_REF}' -X 'github.com/QuantumNous/new-api/common.BuildDate=${BUILD_DATE}' -X 'github.com/QuantumNous/new-api/common.BuildSource=${SOURCE_URL}'" -o new-api

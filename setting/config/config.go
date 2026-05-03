@@ -289,10 +289,14 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 					continue
 				}
 			}
-		case reflect.Map, reflect.Slice, reflect.Struct:
-			// 复杂类型使用JSON反序列化
-			err := common.UnmarshalJsonStr(strValue, field.Addr().Interface())
-			if err != nil {
+		case reflect.Map:
+			fresh := reflect.New(field.Type())
+			if err := common.UnmarshalJsonStr(strValue, fresh.Interface()); err != nil {
+				continue
+			}
+			field.Set(fresh.Elem())
+		case reflect.Slice, reflect.Struct:
+			if err := common.UnmarshalJsonStr(strValue, field.Addr().Interface()); err != nil {
 				continue
 			}
 		}
