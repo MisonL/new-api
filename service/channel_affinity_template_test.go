@@ -34,6 +34,19 @@ func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "User-Agent")
 	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "X-App")
 	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "Anthropic-Beta")
+	require.Equal(t, []string{
+		"User-Agent",
+		"X-Session-Affinity",
+	}, operation_setting.OpenCodeCliPassThroughHeaders)
+}
+
+func TestChannelAffinitySettingDoesNotRegisterOpenCodeRuleWithoutRuntimeSource(t *testing.T) {
+	setting := operation_setting.GetChannelAffinitySetting()
+	require.NotNil(t, setting)
+
+	for _, rule := range setting.Rules {
+		require.NotEqual(t, "opencode cli trace", strings.TrimSpace(rule.Name))
+	}
 }
 
 func TestApplyChannelAffinityOverrideTemplate_NoTemplate(t *testing.T) {

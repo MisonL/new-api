@@ -18,6 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { HEADER_PROFILE_PRESETS } from './headerProfile.constants.js';
+import {
+  CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
+  CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
+  GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS,
+  OPENCODE_CLI_HEADER_PASSTHROUGH_HEADERS,
+} from '../../../../constants/channel-affinity-template.constants.js';
 
 const STRATEGIES = new Set(['fixed', 'round_robin', 'random']);
 const FALLBACK_CATEGORY = 'custom';
@@ -29,6 +35,10 @@ function safeParseJson(text) {
   } catch (error) {
     return null;
   }
+}
+
+function stringifyJson(value) {
+  return JSON.stringify(value);
 }
 
 function verifyJsonText(text) {
@@ -83,6 +93,14 @@ function normalizeSelectedProfileIds(selectedProfileIds = []) {
   );
 }
 
+function isBuiltinPassthroughProfileId(profileId) {
+  return (
+    profileId === 'codex-cli' ||
+    profileId === 'claude-code' ||
+    profileId === 'gemini-cli'
+  );
+}
+
 function normalizeProfile(profile = {}) {
   const id = String(profile.id || profile.key || '').trim();
   const headers = isPlainHeaderObject(profile.headers) ? profile.headers : {};
@@ -101,6 +119,9 @@ function normalizeProfile(profile = {}) {
     profile.passthroughRequired === true ||
     profile.passthrough_required === true
   ) {
+    normalized.passthroughRequired = true;
+  }
+  if (isBuiltinPassthroughProfileId(id)) {
     normalized.passthroughRequired = true;
   }
   return normalized;
@@ -278,6 +299,205 @@ export function buildHeaderProfileStrategySettings(settingsText, strategy) {
       : [],
   };
   return JSON.stringify(nextSettings);
+}
+
+function requiredPassthroughHeadersForProfile(profile) {
+  switch (profile?.id) {
+    case 'codex-cli':
+      return CODEX_CLI_HEADER_PASSTHROUGH_HEADERS;
+    case 'claude-code':
+      return CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS;
+    case 'gemini-cli':
+      return GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS;
+    case 'opencode':
+      return OPENCODE_CLI_HEADER_PASSTHROUGH_HEADERS;
+    default:
+      return Object.keys(profile?.headers || {}).sort();
+  }
+}
+
+function collectRequiredPassthroughHeaders(selectedProfiles = []) {
+  const headers = new Set();
+  selectedProfiles.forEach((profile) => {
+    if (profile?.passthroughRequired !== true) {
+      return;
+    }
+    requiredPassthroughHeadersForProfile(profile).forEach((header) => {
+      if (header) {
+        headers.add(header);
+      }
+    });
+  });
+  return Array.from(headers);
+}
+
+function normalizeHeaderName(header) {
+  return String(header || '').trim();
+}
+
+function normalizeHeaderNameKey(header) {
+  return normalizeHeaderName(header).toLowerCase();
+}
+
+function normalizePassHeaderValue(value) {
+  if (value == null) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeHeaderName).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return [];
+    }
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      const parsed = safeParseJson(trimmed);
+      if (parsed !== null) {
+        return normalizePassHeaderValue(parsed);
+      }
+    }
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (value?.headers !== undefined) {
+    return normalizePassHeaderValue(value.headers);
+  }
+  if (value?.names !== undefined) {
+    return normalizePassHeaderValue(value.names);
+  }
+  if (value?.header !== undefined) {
+    return normalizePassHeaderValue([value.header]);
+  }
+  return [];
+}
+
+function buildMergedPassHeaders(existingHeaders = [], requiredHeaders = []) {
+  const seen = new Set();
+  const mergedHeaders = [];
+  const addHeader = (header) => {
+    const normalized = normalizeHeaderName(header);
+    if (!normalized) {
+      return;
+    }
+    const key = normalizeHeaderNameKey(normalized);
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    mergedHeaders.push(normalized);
+  };
+
+  existingHeaders.forEach(addHeader);
+  requiredHeaders.forEach(addHeader);
+  return mergedHeaders;
+}
+
+function hasConditions(operation) {
+  return (
+    Array.isArray(operation?.conditions) && operation.conditions.length > 0
+  );
+}
+
+function findUnconditionalPassHeaderOperation(operations = []) {
+  return operations.find(
+    (operation) =>
+      operation?.mode === 'pass_headers' &&
+      !hasConditions(operation) &&
+      !operation?.when,
+  );
+}
+
+function mergePassHeadersIntoOperations(operations = [], requiredHeaders = []) {
+  if (requiredHeaders.length === 0) {
+    return operations;
+  }
+  const passHeaderOperation = findUnconditionalPassHeaderOperation(operations);
+  if (!passHeaderOperation) {
+    return [
+      {
+        mode: 'pass_headers',
+        value: [...requiredHeaders],
+        keep_origin: true,
+      },
+      ...operations,
+    ];
+  }
+
+  const mergedHeaders = buildMergedPassHeaders(
+    normalizePassHeaderValue(passHeaderOperation.value),
+    requiredHeaders,
+  );
+  return operations.map((operation) =>
+    operation === passHeaderOperation
+      ? {
+          ...operation,
+          value: mergedHeaders,
+          keep_origin: operation.keep_origin !== false,
+        }
+      : operation,
+  );
+}
+
+export function buildParamOverrideWithRequiredPassHeaders(
+  paramOverrideText,
+  requiredHeaders = [],
+) {
+  if (requiredHeaders.length === 0) {
+    return paramOverrideText;
+  }
+  const rawText =
+    typeof paramOverrideText === 'string' ? paramOverrideText.trim() : '';
+  if (!rawText) {
+    const nextParamOverride = {
+      operations: mergePassHeadersIntoOperations([], requiredHeaders),
+    };
+    return stringifyJson(nextParamOverride);
+  }
+  const parsed = safeParseJson(rawText);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return paramOverrideText;
+  }
+  const nextParamOverride = parsed;
+  const operations = Array.isArray(nextParamOverride.operations)
+    ? nextParamOverride.operations
+    : [];
+  nextParamOverride.operations = mergePassHeadersIntoOperations(
+    operations,
+    requiredHeaders,
+  );
+  return stringifyJson(nextParamOverride);
+}
+
+export function applyHeaderProfileStrategyToChannelInputs({
+  inputs = {},
+  strategy,
+  headerProfiles = [],
+  snapshotProfiles = [],
+}) {
+  const selectedProfileIds = strategy?.selectedProfileIds || [];
+  const selectedProfiles = buildSelectedProfileItems(
+    selectedProfileIds,
+    headerProfiles,
+    snapshotProfiles,
+  ).filter((profile) => !profile.missing);
+  const settings = buildHeaderProfileStrategySettings(
+    inputs.settings,
+    strategy ? { ...strategy, profiles: selectedProfiles } : null,
+  );
+  const requiredHeaders =
+    strategy?.enabled === true
+      ? collectRequiredPassthroughHeaders(selectedProfiles)
+      : [];
+  return {
+    settings,
+    param_override: buildParamOverrideWithRequiredPassHeaders(
+      inputs.param_override,
+      requiredHeaders,
+    ),
+  };
 }
 
 const HIDDEN_SUBMIT_STATE_FIELDS = [

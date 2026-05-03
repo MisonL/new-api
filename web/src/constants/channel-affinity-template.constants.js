@@ -53,12 +53,31 @@ export const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'Anthropic-Version',
 ];
 
+export const OPENCODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
+  'User-Agent',
+  'X-Session-Affinity',
+];
+
+export const GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS = [
+  'User-Agent',
+  'X-Goog-Api-Client',
+  'X-Goog-Api-Version',
+  'X-Goog-User-Project',
+];
+
 export const CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
   CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
 );
 
 export const CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
   CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
+);
+
+export const OPENCODE_CLI_HEADER_PASSTHROUGH_TEMPLATE =
+  buildPassHeadersTemplate(OPENCODE_CLI_HEADER_PASSTHROUGH_HEADERS);
+
+export const GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
+  GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS,
 );
 
 export const CHANNEL_AFFINITY_RULE_TEMPLATES = {

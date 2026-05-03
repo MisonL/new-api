@@ -75,7 +75,7 @@ const buildAiCodingCliProfile = (
 });
 
 const CODEX_CLI_USER_AGENT =
-  'codex_exec/0.125.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.125.0)';
+  'codex-tui/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.128.0)';
 
 const aiCodingCliProfiles = {
   'codex-cli': {
@@ -86,11 +86,11 @@ const aiCodingCliProfiles = {
     readonly: true,
     passthroughRequired: true,
     description:
-      '固定请求头是 Codex CLI 0.125.0 的静态快照；真实 CLI 会携带会话与窗口动态头，需在高级参数覆盖中启用 Codex CLI 请求头透传模板。',
+      '固定请求头是 codex-tui 0.128.0 交互模式的静态快照；选择此模板时会自动写入 Codex CLI 请求头透传规则，保留真实 CLI 的会话与窗口动态头。',
     headers: {
-      // Codex CLI 原生请求使用 Originator，不使用通用的 X-Client-Name。
+      // Codex TUI 原生请求使用 Originator，不使用通用的 X-Client-Name。
       'User-Agent': CODEX_CLI_USER_AGENT,
-      Originator: 'codex_exec',
+      Originator: 'codex-tui',
     },
   },
   'claude-code': buildAiCodingCliProfile(
@@ -98,29 +98,30 @@ const aiCodingCliProfiles = {
     'Claude Code',
     'Claude-Code/1.0',
     'claude-code',
-    '固定请求头只用于普通渠道标识；Claude 官方客户端链路如需保留会话与 SDK 元数据，还需要在高级设置中启用 Claude CLI 真实请求头透传。',
+    '固定请求头只用于普通渠道标识；选择此模板时会自动写入 Claude CLI 请求头透传规则，保留官方客户端会话与 SDK 元数据。',
     true,
   ),
   'gemini-cli': buildAiCodingCliProfile(
     'gemini-cli',
     'Gemini CLI',
-    'GeminiCLI/1.0',
+    'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)',
     'gemini-cli',
-    '固定请求头用于普通渠道标识；若上游要求真实客户端会话头，应在高级设置中额外开启请求头透传。',
+    '固定请求头是 Gemini CLI 0.40.1 交互模式的静态快照；选择此模板时会自动写入 Gemini CLI 请求头透传规则，保留真实客户端的 x-goog-api-client 等运行时头。',
+    true,
   ),
   'qwen-code': buildAiCodingCliProfile(
     'qwen-code',
     'Qwen Code',
-    'Qwen-Code/1.0',
+    'QwenCode/0.15.6 (darwin; x64)',
     'qwen-code',
-    '固定请求头用于普通渠道标识；不能替代真实 CLI 请求中携带的动态会话头。',
+    '固定请求头是 Qwen Code 0.15.6 交互模式的静态快照；真实 CLI 还会附带 x-stainless-* 运行时头，严格复刻上游链路时应改用透传。',
   ),
   opencode: buildAiCodingCliProfile(
     'opencode',
     'OpenCode',
-    'OpenCode/1.0',
+    'ai-sdk/openai/2.0.71 ai-sdk/provider-utils/3.0.17 runtime/bun/1.3.5',
     'opencode',
-    '固定请求头用于普通渠道标识；不能替代真实客户端动态请求头。',
+    '固定请求头是 OpenCode 1.1.14 当前链路下的静态快照；真实客户端会直接走 OpenAI 兼容 Responses 请求，严格复刻上游链路时再按需补透传。',
   ),
   droid: buildAiCodingCliProfile(
     'droid',

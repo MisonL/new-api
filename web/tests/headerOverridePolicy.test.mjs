@@ -10,7 +10,7 @@ import {
 } from '../src/helpers/headerOverrideUserAgent.js';
 
 const codexCliUserAgent =
-  'codex_exec/0.125.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.125.0)';
+  'codex-tui/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.128.0)';
 
 test('空白 header_override 可写入最小 User-Agent JSON', () => {
   assert.deepEqual(
@@ -161,5 +161,5 @@ test('可通过 id 找到主流 AI Coding CLI 预置', () => {
 
   assert.equal(preset.id, 'codex-cli');
   assert.equal(preset.groupKey, 'ai-coding-cli');
-  assert.match(preset.ua, /^codex_exec\//);
+  assert.match(preset.ua, /^codex-tui\//);
 });

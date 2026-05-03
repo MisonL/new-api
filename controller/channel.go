@@ -529,6 +529,9 @@ func validateChannelOtherSettings(channel *model.Channel) error {
 	if err := validateHeaderProfileStrategy(settings.HeaderProfileStrategy); err != nil {
 		return err
 	}
+	if err := validateHeaderProfilePassthrough(channel, settings.HeaderProfileStrategy); err != nil {
+		return err
+	}
 
 	mode, err := normalizeOptionalHeaderPolicyModeForChannelSettings(settings.HeaderPolicyMode)
 	if err != nil {

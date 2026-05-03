@@ -72,8 +72,8 @@
     "enabled": true,
     "mode": "round_robin",
     "selected_profile_ids": [
-      "builtin_browser_chrome_macos",
-      "builtin_browser_edge_windows"
+      "chrome-macos",
+      "codex-cli"
     ]
   }
 }
@@ -96,7 +96,7 @@
 
 - `header_profile_strategy.mode=fixed` 时必须且只能选择 1 个 Profile。
 - `header_profile_strategy.mode=round_robin/random` 时至少要选择 1 个 Profile。
-- `header_profile_strategy` 中的 AI Coding CLI 预置 Profile 只写入固定请求头；如果上游校验官方客户端动态头，必须同时在 `param_override.operations` 中使用 `pass_headers` 透传模板。
+- `header_profile_strategy` 中标记为 `passthrough_required` 的 AI Coding CLI 预置 Profile 依赖真实客户端动态头；WebUI 选择这类模板时会自动在 `param_override.operations` 中合并对应 `pass_headers` 规则，直接写配置时也必须同时提供完整 `pass_headers`。
 - 非法 `header_policy_mode` 会在保存阶段直接拒绝。
 - 非法 `ua_strategy.mode`、空 UA 池、启用策略但无合法 UA，都会在保存阶段直接拒绝。
 
@@ -131,7 +131,7 @@
 
 ### `pass_headers` 与 CLI 客户端
 
-`pass_headers` 不生成固定请求头，只从当前客户端请求里读取同名请求头并写入上游请求。它用于保留 Codex CLI、Claude Code 等真实客户端携带的动态元数据。
+`pass_headers` 不生成固定请求头，只从当前客户端请求里读取同名请求头并写入上游请求。它用于保留 Codex CLI、Claude Code、Gemini CLI 等真实客户端携带的动态元数据。
 
 Codex CLI 透传模板当前包含：
 
@@ -141,11 +141,26 @@ Codex CLI 透传模板当前包含：
   "Session_id",
   "User-Agent",
   "X-Codex-Beta-Features",
-  "X-Codex-Turn-Metadata"
+  "X-Codex-Turn-Metadata",
+  "X-Codex-Window-Id",
+  "X-Client-Request-Id"
 ]
 ```
 
 Claude CLI 透传模板当前包含 `X-Stainless-*`、`User-Agent`、`X-App`、`Anthropic-Beta`、`Anthropic-Version` 等请求头。
+
+Gemini CLI 透传模板当前包含：
+
+```json
+[
+  "User-Agent",
+  "X-Goog-Api-Client",
+  "X-Goog-Api-Version",
+  "X-Goog-User-Project"
+]
+```
+
+OpenCode 预置 Profile 默认不自动补 `pass_headers`。它只提供当前抓到的静态 `User-Agent` 快照；只有在你明确需要严格复刻上游链路、并且已确认客户端真的会发送额外运行时头时，才手工补对应透传规则。
 
 如果客户端原始请求里没有这些头，`pass_headers` 不会伪造值；这类缺失应通过真实客户端调用链路修复，而不是用固定 UA 模板替代。
 

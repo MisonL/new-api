@@ -66,7 +66,7 @@ export const HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS = [
       {
         id: 'codex-cli',
         label: 'Codex CLI 固定 UA',
-        ua: 'codex_exec/0.125.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex_exec; 0.125.0)',
+        ua: 'codex-tui/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.128.0)',
       },
       {
         id: 'claude-code',
@@ -76,10 +76,18 @@ export const HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS = [
       {
         id: 'gemini-cli',
         label: 'Gemini CLI 固定 UA',
-        ua: 'gemini-cli/1.0.0',
+        ua: 'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)',
       },
-      { id: 'qwen-code', label: 'Qwen Code 固定 UA', ua: 'qwen-code/1.0.0' },
-      { id: 'opencode', label: 'OpenCode 固定 UA', ua: 'opencode/1.0.0' },
+      {
+        id: 'qwen-code',
+        label: 'Qwen Code 固定 UA',
+        ua: 'QwenCode/0.15.6 (darwin; x64)',
+      },
+      {
+        id: 'opencode',
+        label: 'OpenCode 固定 UA',
+        ua: 'ai-sdk/openai/2.0.71 ai-sdk/provider-utils/3.0.17 runtime/bun/1.3.5',
+      },
       { id: 'droid', label: 'Droid 固定 UA', ua: 'droid/1.0.0' },
       { id: 'amp', label: 'AMP 固定 UA', ua: 'amp/1.0.0' },
     ],

@@ -61,6 +61,25 @@ var ClaudeCliPassThroughHeaders = []string{
 	"Anthropic-Version",
 }
 
+var OpenCodeCliPassThroughHeaders = []string{
+	"User-Agent",
+	"X-Session-Affinity",
+}
+
+var GeminiCliPassThroughHeaders = []string{
+	"User-Agent",
+	"X-Goog-Api-Client",
+	"X-Goog-Api-Version",
+	"X-Goog-User-Project",
+}
+
+var HeaderProfilePassThroughHeaders = map[string][]string{
+	"codex-cli":   CodexCliPassThroughHeaders,
+	"claude-code": ClaudeCliPassThroughHeaders,
+	"opencode":    OpenCodeCliPassThroughHeaders,
+	"gemini-cli":  GeminiCliPassThroughHeaders,
+}
+
 func buildPassHeaderTemplate(headers []string) map[string]interface{} {
 	clonedHeaders := make([]string, 0, len(headers))
 	clonedHeaders = append(clonedHeaders, headers...)

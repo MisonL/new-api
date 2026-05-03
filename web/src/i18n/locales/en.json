@@ -205,7 +205,8 @@
     "专家请求头策略": "Expert Header Strategy",
     "固定请求头只用于普通渠道标识；Codex 官方客户端限制场景还必须在高级参数覆盖中启用 Codex CLI 请求头透传模板。": "Static headers are only for normal channel identification. Codex official-client restriction scenarios still require enabling the Codex CLI passthrough template in Advanced Parameter Override.",
     "固定请求头只用于普通渠道标识；Claude 官方客户端链路如需保留会话与 SDK 元数据，还必须在高级参数覆盖中启用 Claude CLI 请求头透传模板。": "Static headers are only for normal channel identification. Claude official-client flows that need session and SDK metadata still require enabling the Claude CLI passthrough template in Advanced Parameter Override.",
-    "固定请求头用于普通渠道标识；若上游要求真实客户端会话头，应在高级参数覆盖中额外配置 pass_headers。": "Static headers are for normal channel identification. If the upstream requires real client session headers, configure pass_headers in Advanced Parameter Override.",
+    "固定请求头用于普通渠道标识。Gemini CLI 在部分认证或统计场景还会附加额外请求头；若上游需要严格复刻真实客户端链路，请在高级设置中补充透传。": "Static headers are for normal channel identification. Gemini CLI may attach extra headers in some authentication or usage-statistics flows. If the upstream needs a strict real-client request shape, add passthrough rules in Advanced Settings.",
+    "固定请求头只用于普通渠道标识；选择此模板时会自动写入 OpenCode 会话透传规则，保留真实客户端的 session 相关动态头。": "Static headers are only for normal channel identification. Selecting this template automatically writes OpenCode session passthrough rules so the real client's session-related dynamic headers are preserved.",
     "仅在需要查看、清空或导入旧版 header_override 时配置": "Configure only when you need to view, clear, or import legacy header_override.",
     "常规渠道优先使用上方请求头模板；以下仅用于旧版 header_override 的兼容查看、清空和显式导入": "Use the header template above for normal channels. The options below only view, clear, or explicitly import legacy header_override.",
     "旧版 JSON 请求头覆盖": "Legacy JSON Header Override",
@@ -3844,6 +3845,13 @@
     "当前页暂无可统计收益": "No measurable rewards on this page",
     "当前筛选条件暂无可统计收益": "No measurable rewards for current filters",
     "加载邀请记录失败": "Failed to load invitation records",
-    "暂无邀请记录": "No invitation records"
+    "暂无邀请记录": "No invitation records",
+    "固定客户端标识；选择后会自动写入真实请求头透传规则": "Static client identity. Selecting it automatically writes the real header passthrough rule.",
+    "固定客户端标识；默认不自动补透传，严格复刻上游链路时再按需补 pass_headers": "Static client identity. By default it does not add passthrough automatically. Add pass_headers only when you need to reproduce the upstream request path strictly.",
+    "固定请求头是 codex-tui 0.128.0 交互模式的静态快照；选择此模板时会自动写入 Codex CLI 请求头透传规则，保留真实 CLI 的会话与窗口动态头。": "Static headers are a snapshot of codex-tui 0.128.0 interactive mode. Selecting this template automatically writes the Codex CLI header passthrough rule to preserve real CLI session and window headers.",
+    "固定请求头只用于普通渠道标识；选择此模板时会自动写入 Claude CLI 请求头透传规则，保留官方客户端会话与 SDK 元数据。": "Static headers are for normal channel identification. Selecting this template automatically writes the Claude CLI header passthrough rule to preserve official client session and SDK metadata.",
+    "固定请求头是 Gemini CLI 0.40.1 交互模式的静态快照；选择此模板时会自动写入 Gemini CLI 请求头透传规则，保留真实客户端的 x-goog-api-client 等运行时头。": "Static headers are a snapshot of Gemini CLI 0.40.1 interactive mode. Selecting this template automatically writes the Gemini CLI header passthrough rule to preserve runtime headers such as x-goog-api-client from the real client.",
+    "固定请求头是 Qwen Code 0.15.6 交互模式的静态快照；真实 CLI 还会附带 x-stainless-* 运行时头，严格复刻上游链路时应改用透传。": "Static headers are a snapshot of Qwen Code 0.15.6 interactive mode. The real CLI also sends x-stainless-* runtime headers, so strict upstream reproduction should use passthrough instead.",
+    "固定请求头是 OpenCode 1.1.14 当前链路下的静态快照；真实客户端会直接走 OpenAI 兼容 Responses 请求，严格复刻上游链路时再按需补透传。": "Static headers are a snapshot of OpenCode 1.1.14 on the current path. The real client directly uses OpenAI-compatible Responses requests, so add passthrough only when you need strict upstream reproduction."
   }
 }
