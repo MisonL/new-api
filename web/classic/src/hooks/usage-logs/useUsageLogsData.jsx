@@ -47,6 +47,7 @@ import {
   getManageOperatorEntryDescriptor,
   getTopupAuditEntryDescriptors,
 } from './logAuditInfo';
+import { moveColumnKey, normalizeColumnOrder } from './columnPreferences';
 const { Text } = Typography;
 
 export const useLogsData = () => {
@@ -91,6 +92,9 @@ export const useLogsData = () => {
   const STORAGE_KEY = isAdminUser
     ? 'logs-table-columns-admin'
     : 'logs-table-columns-user';
+  const ORDER_STORAGE_KEY = isAdminUser
+    ? 'logs-table-column-order-admin'
+    : 'logs-table-column-order-user';
   const BILLING_DISPLAY_MODE_STORAGE_KEY = isAdminUser
     ? 'logs-billing-display-mode-admin'
     : 'logs-billing-display-mode-user';
@@ -141,6 +145,25 @@ export const useLogsData = () => {
     };
   };
 
+  const getDefaultColumnOrder = () => [
+    COLUMN_KEYS.TIME,
+    COLUMN_KEYS.CHANNEL,
+    COLUMN_KEYS.USERNAME,
+    COLUMN_KEYS.TOKEN,
+    COLUMN_KEYS.GROUP,
+    COLUMN_KEYS.TYPE,
+    COLUMN_KEYS.MODEL,
+    COLUMN_KEYS.USE_TIME,
+    COLUMN_KEYS.PROMPT,
+    COLUMN_KEYS.COMPLETION,
+    COLUMN_KEYS.COST,
+    COLUMN_KEYS.REQUEST_UA,
+    COLUMN_KEYS.REQUEST_HEADERS,
+    COLUMN_KEYS.IP,
+    COLUMN_KEYS.RETRY,
+    COLUMN_KEYS.DETAILS,
+  ];
+
   const getInitialVisibleColumns = () => {
     const defaults = getDefaultColumnVisibility();
     const savedColumns = localStorage.getItem(STORAGE_KEY);
@@ -168,6 +191,22 @@ export const useLogsData = () => {
     }
   };
 
+  const getInitialColumnOrder = () => {
+    const defaultOrder = getDefaultColumnOrder();
+    const savedOrder = localStorage.getItem(ORDER_STORAGE_KEY);
+
+    if (!savedOrder) {
+      return defaultOrder;
+    }
+
+    try {
+      return normalizeColumnOrder(JSON.parse(savedOrder), defaultOrder);
+    } catch (e) {
+      console.error('Failed to parse saved column order', e);
+      return defaultOrder;
+    }
+  };
+
   const getInitialBillingDisplayMode = () => {
     const savedMode = localStorage.getItem(BILLING_DISPLAY_MODE_STORAGE_KEY);
     if (savedMode === 'price' || savedMode === 'ratio') {
@@ -182,6 +221,7 @@ export const useLogsData = () => {
   const [visibleColumns, setVisibleColumns] = useState(
     getInitialVisibleColumns,
   );
+  const [columnOrder, setColumnOrder] = useState(getInitialColumnOrder);
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [billingDisplayMode, setBillingDisplayMode] = useState(
     getInitialBillingDisplayMode,
@@ -215,14 +255,27 @@ export const useLogsData = () => {
   // Initialize default column visibility
   const initDefaultColumns = () => {
     const defaults = getDefaultColumnVisibility();
+    const defaultOrder = getDefaultColumnOrder();
     setVisibleColumns(defaults);
+    setColumnOrder(defaultOrder);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(defaults));
+    localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(defaultOrder));
   };
 
   // Handle column visibility change
   const handleColumnVisibilityChange = (columnKey, checked) => {
     const updatedColumns = { ...visibleColumns, [columnKey]: checked };
     setVisibleColumns(updatedColumns);
+  };
+
+  const handleColumnOrderChange = (columnKey, direction, movableKeys) => {
+    setColumnOrder((currentOrder) => {
+      const normalizedOrder = normalizeColumnOrder(
+        currentOrder,
+        getDefaultColumnOrder(),
+      );
+      return moveColumnKey(normalizedOrder, columnKey, direction, movableKeys);
+    });
   };
 
   // Handle "Select All" checkbox
@@ -254,6 +307,12 @@ export const useLogsData = () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(visibleColumns));
     }
   }, [visibleColumns]);
+
+  useEffect(() => {
+    if (columnOrder.length > 0) {
+      localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(columnOrder));
+    }
+  }, [columnOrder]);
 
   useEffect(() => {
     return () => {
@@ -1091,11 +1150,13 @@ export const useLogsData = () => {
 
     // Column visibility
     visibleColumns,
+    columnOrder,
     showColumnSelector,
     setShowColumnSelector,
     billingDisplayMode,
     setBillingDisplayMode,
     handleColumnVisibilityChange,
+    handleColumnOrderChange,
     handleSelectAll,
     initDefaultColumns,
     COLUMN_KEYS,

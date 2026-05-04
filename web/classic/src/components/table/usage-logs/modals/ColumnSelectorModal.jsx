@@ -19,13 +19,20 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Modal, Button, Checkbox, RadioGroup, Radio } from '@douyinfe/semi-ui';
+import { IconChevronDown, IconChevronUp } from '@douyinfe/semi-icons';
 import { getLogsColumns } from '../UsageLogsColumnDefs';
+import {
+  applyColumnOrder,
+  getMovableColumnKeys,
+} from '../../../../hooks/usage-logs/columnPreferences';
 
 const ColumnSelectorModal = ({
   showColumnSelector,
   setShowColumnSelector,
   visibleColumns,
+  columnOrder,
   handleColumnVisibilityChange,
+  handleColumnOrderChange,
   handleSelectAll,
   initDefaultColumns,
   billingDisplayMode,
@@ -44,21 +51,76 @@ const ColumnSelectorModal = ({
     typeof localStorage !== 'undefined' &&
     localStorage.getItem('quota_display_type') === 'TOKENS';
 
-  // Get all columns for display in selector
-  const allColumns = getLogsColumns({
-    t,
-    COLUMN_KEYS,
-    copyText,
-    openEditUserPanel,
-    isAdminUser,
-    billingDisplayMode,
-  });
+  const allColumns = React.useMemo(
+    () =>
+      getLogsColumns({
+        t,
+        COLUMN_KEYS,
+        copyText,
+        openEditUserPanel,
+        isAdminUser,
+        billingDisplayMode,
+      }),
+    [
+      t,
+      COLUMN_KEYS,
+      copyText,
+      openEditUserPanel,
+      isAdminUser,
+      billingDisplayMode,
+    ],
+  );
+  const orderedColumns = React.useMemo(
+    () => applyColumnOrder(allColumns, null, columnOrder),
+    [allColumns, columnOrder],
+  );
+  const selectableColumns = React.useMemo(
+    () =>
+      orderedColumns.filter((column) => {
+        if (!isAdminUser) {
+          return ![
+            COLUMN_KEYS.CHANNEL,
+            COLUMN_KEYS.USERNAME,
+            COLUMN_KEYS.REQUEST_UA,
+            COLUMN_KEYS.REQUEST_HEADERS,
+            COLUMN_KEYS.RETRY,
+          ].includes(column.key);
+        }
+        return true;
+      }),
+    [
+      orderedColumns,
+      isAdminUser,
+      COLUMN_KEYS.CHANNEL,
+      COLUMN_KEYS.USERNAME,
+      COLUMN_KEYS.REQUEST_UA,
+      COLUMN_KEYS.REQUEST_HEADERS,
+      COLUMN_KEYS.RETRY,
+    ],
+  );
+  const selectedStates = React.useMemo(
+    () => selectableColumns.map((column) => !!visibleColumns[column.key]),
+    [selectableColumns, visibleColumns],
+  );
+  const allSelected =
+    selectedStates.length > 0 && selectedStates.every((checked) => checked);
+  const partiallySelected =
+    selectedStates.some((checked) => checked) && !allSelected;
+  const movableColumnKeys = React.useMemo(
+    () => getMovableColumnKeys(selectableColumns),
+    [selectableColumns],
+  );
+  const movableColumnKeySet = React.useMemo(
+    () => new Set(movableColumnKeys),
+    [movableColumnKeys],
+  );
 
   return (
     <Modal
       title={t('列设置')}
       visible={showColumnSelector}
       onCancel={() => setShowColumnSelector(false)}
+      width='min(448px, calc(100vw - 24px))'
       footer={
         <div className='flex justify-end'>
           <Button onClick={() => initDefaultColumns()}>{t('重置')}</Button>
@@ -91,11 +153,8 @@ const ColumnSelectorModal = ({
           </RadioGroup>
         </div>
         <Checkbox
-          checked={Object.values(visibleColumns).every((v) => v === true)}
-          indeterminate={
-            Object.values(visibleColumns).some((v) => v === true) &&
-            !Object.values(visibleColumns).every((v) => v === true)
-          }
+          checked={allSelected}
+          indeterminate={partiallySelected}
           onChange={(e) => handleSelectAll(e.target.checked)}
           name='components-table-usage-logs-modals-columnselectormodal-checkbox-1'
         >
@@ -103,25 +162,29 @@ const ColumnSelectorModal = ({
         </Checkbox>
       </div>
       <div
-        className='flex flex-wrap max-h-96 overflow-y-auto rounded-lg p-4'
+        className='max-h-96 overflow-y-auto rounded-lg p-2'
         style={{ border: '1px solid var(--semi-color-border)' }}
       >
-        {allColumns.map((column) => {
-          // Skip admin-only columns for non-admin users
-          if (
-            !isAdminUser &&
-            (column.key === COLUMN_KEYS.CHANNEL ||
-              column.key === COLUMN_KEYS.USERNAME ||
-              column.key === COLUMN_KEYS.REQUEST_UA ||
-              column.key === COLUMN_KEYS.REQUEST_HEADERS ||
-              column.key === COLUMN_KEYS.RETRY)
-          ) {
-            return null;
-          }
+        {selectableColumns.map((column, index) => {
+          const movableIndex = movableColumnKeys.indexOf(column.key);
+          const canMoveUp = movableIndex > 0;
+          const canMoveDown =
+            movableIndex >= 0 && movableIndex < movableColumnKeys.length - 1;
+          const isMovable = movableColumnKeySet.has(column.key);
 
           return (
-            <div key={column.key} className='w-1/2 mb-4 pr-2'>
+            <div
+              key={column.key}
+              className='flex items-center justify-between gap-2 px-2 py-2'
+              style={{
+                borderBottom:
+                  index === selectableColumns.length - 1
+                    ? 'none'
+                    : '1px solid var(--semi-color-border)',
+              }}
+            >
               <Checkbox
+                className='min-w-0 flex-1'
                 checked={!!visibleColumns[column.key]}
                 onChange={(e) =>
                   handleColumnVisibilityChange(column.key, e.target.checked)
@@ -130,6 +193,36 @@ const ColumnSelectorModal = ({
               >
                 {column.title}
               </Checkbox>
+              <div className='flex shrink-0 gap-1'>
+                <Button
+                  aria-label={t('上移')}
+                  title={t('上移')}
+                  size='small'
+                  theme='borderless'
+                  type='tertiary'
+                  icon={<IconChevronUp />}
+                  disabled={!isMovable || !canMoveUp}
+                  onClick={() =>
+                    handleColumnOrderChange(column.key, 'up', movableColumnKeys)
+                  }
+                />
+                <Button
+                  aria-label={t('下移')}
+                  title={t('下移')}
+                  size='small'
+                  theme='borderless'
+                  type='tertiary'
+                  icon={<IconChevronDown />}
+                  disabled={!isMovable || !canMoveDown}
+                  onClick={() =>
+                    handleColumnOrderChange(
+                      column.key,
+                      'down',
+                      movableColumnKeys,
+                    )
+                  }
+                />
+              </div>
             </div>
           );
         })}

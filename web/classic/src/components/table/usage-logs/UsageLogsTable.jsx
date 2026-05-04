@@ -25,6 +25,7 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import { getLogsColumns } from './UsageLogsColumnDefs';
+import { applyColumnOrder } from '../../../hooks/usage-logs/columnPreferences';
 
 const LogsTable = (logsData) => {
   const {
@@ -36,6 +37,7 @@ const LogsTable = (logsData) => {
     logCount,
     compactMode,
     visibleColumns,
+    columnOrder = [],
     handlePageChange,
     handlePageSizeChange,
     copyText,
@@ -69,14 +71,9 @@ const LogsTable = (logsData) => {
     billingDisplayMode,
   ]);
 
-  // Filter columns based on visibility settings
-  const getVisibleColumns = () => {
-    return allColumns.filter((column) => visibleColumns[column.key]);
-  };
-
   const visibleColumnsList = useMemo(() => {
-    return getVisibleColumns();
-  }, [visibleColumns, allColumns]);
+    return applyColumnOrder(allColumns, visibleColumns, columnOrder);
+  }, [allColumns, visibleColumns, columnOrder]);
 
   const tableColumns = useMemo(() => {
     return compactMode

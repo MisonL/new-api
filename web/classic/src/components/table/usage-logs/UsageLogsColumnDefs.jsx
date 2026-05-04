@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import {
   Avatar,
+  Button,
   Space,
   Tag,
   Tooltip,
@@ -36,8 +37,16 @@ import {
   renderTieredModelPriceSimple,
 } from '../../../helpers/render';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
-import { CircleAlert, Route, Sparkles } from 'lucide-react';
+import { CircleAlert, Copy as CopyIcon, Route, Sparkles } from 'lucide-react';
 import { shouldShowLogIp } from '../../../hooks/usage-logs/logAuditInfo';
+import {
+  buildRequestHeaderAuditLines,
+  formatRequestHeaderPolicyMode,
+  getAppliedHeaderKeys,
+  getAppliedUserAgent,
+  isUserAgentHeaderKey,
+} from '../../../hooks/usage-logs/headerAuditInfo';
+import { copy, showError, showSuccess } from '../../../helpers/utils';
 
 const colors = [
   'amber',
@@ -543,19 +552,6 @@ function getUsageLogGroupSummary(groupRatio, userGroupRatio, t) {
   return `${useUserGroupRatio ? t('专属倍率') : t('分组')} ${formatRatio(ratio)}x`;
 }
 
-function formatRequestHeaderPolicyMode(mode, t) {
-  switch (mode) {
-    case 'prefer_channel':
-      return t('渠道优先');
-    case 'prefer_tag':
-      return t('标签优先');
-    case 'merge':
-      return t('合并');
-    default:
-      return String(mode || '').trim();
-  }
-}
-
 function getRequestHeaderPolicy(record) {
   const other = getLogOther(record?.other);
   const policy = other?.request_header_policy;
@@ -565,66 +561,32 @@ function getRequestHeaderPolicy(record) {
   return policy;
 }
 
-function normalizeHeaderKeyList(value) {
-  if (!Array.isArray(value)) {
-    return [];
+async function copyHeaderAuditValue(event, value, successMessage, t) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (!value) {
+    return;
   }
 
-  const seen = new Set();
-  const keys = [];
-  value.forEach((item) => {
-    const key = String(item || '').trim();
-    if (!key) {
-      return;
-    }
-    const normalized = key.toLowerCase();
-    if (seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    keys.push(key);
-  });
-  return keys;
-}
+  if (await copy(value)) {
+    showSuccess(successMessage);
+    return;
+  }
 
-function isUserAgentHeaderKey(key) {
-  return (
-    String(key || '')
-      .trim()
-      .toLowerCase() === 'user-agent'
-  );
-}
-
-function getAppliedUserAgent(policy) {
-  return String(
-    policy?.applied_user_agent || policy?.selected_user_agent || '',
-  ).trim();
-}
-
-function getAppliedHeaderKeys(policy) {
-  return normalizeHeaderKeyList(policy?.applied_header_keys);
+  showError(t('无法复制到剪贴板，请手动复制'));
 }
 
 function renderEmptyCell() {
   return <Typography.Text type='tertiary'>-</Typography.Text>;
 }
 
-function renderRequestHeaderPolicyTooltip(policy, children, t) {
+function renderRequestHeaderPolicyTooltip(policy, children, t, scope = 'all') {
   if (!policy || typeof policy !== 'object') {
     return children;
   }
 
-  const modeLabel = formatRequestHeaderPolicyMode(policy.mode, t);
-  const userAgent = getAppliedUserAgent(policy);
-  const headerKeys = getAppliedHeaderKeys(policy);
-  const lines = [
-    modeLabel ? [t('请求头策略'), modeLabel] : null,
-    policy.header_profile_id
-      ? [t('请求头模板'), policy.header_profile_id]
-      : null,
-    userAgent ? [t('已选 UA'), userAgent] : null,
-    headerKeys.length ? [t('应用请求头'), headerKeys.join(', ')] : null,
-  ].filter(Boolean);
+  const lines = buildRequestHeaderAuditLines(policy, scope, t);
 
   if (!lines.length) {
     return children;
@@ -632,12 +594,37 @@ function renderRequestHeaderPolicyTooltip(policy, children, t) {
 
   return (
     <Tooltip
+      className='usage-log-header-audit-tooltip-layer'
       content={
         <div className='usage-log-header-audit-tooltip'>
-          {lines.map(([label, value]) => (
-            <div key={label} className='usage-log-header-audit-line'>
-              <Typography.Text strong>{label}：</Typography.Text>
-              <Typography.Text>{value}</Typography.Text>
+          {lines.map(({ key, label, value, copyMessage }) => (
+            <div key={key} className='usage-log-header-audit-line'>
+              <div className='usage-log-header-audit-title'>
+                <Typography.Text
+                  className='usage-log-header-audit-label'
+                  strong
+                >
+                  {label}：
+                </Typography.Text>
+                {copyMessage ? (
+                  <Button
+                    className='usage-log-header-audit-copy-button'
+                    size='small'
+                    theme='borderless'
+                    type='tertiary'
+                    icon={<CopyIcon size={13} />}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) =>
+                      copyHeaderAuditValue(event, value, copyMessage, t)
+                    }
+                  >
+                    {t('复制')}
+                  </Button>
+                ) : null}
+              </div>
+              <Typography.Text className='usage-log-header-audit-value'>
+                {value}
+              </Typography.Text>
             </div>
           ))}
         </div>
@@ -660,6 +647,7 @@ function renderRequestUserAgentCell(record, t) {
     policy,
     <span className='usage-log-user-agent-text'>{userAgent}</span>,
     t,
+    'user-agent',
   );
 }
 
@@ -673,24 +661,19 @@ function renderRequestHeaderKeysCell(record, t) {
     return renderEmptyCell();
   }
 
-  const visibleKeys = headerKeys.slice(0, 2);
-  const hiddenCount = headerKeys.length - visibleKeys.length;
+  const primaryKey = headerKeys[0];
+  const remainingCount = headerKeys.length - 1;
 
   return renderRequestHeaderPolicyTooltip(
     policy,
-    <span className='usage-log-header-key-list'>
-      {visibleKeys.map((key) => (
-        <Tag key={key} color='blue' shape='circle'>
-          <span className='usage-log-header-key-text'>{key}</span>
-        </Tag>
-      ))}
-      {hiddenCount > 0 ? (
-        <Tag color='grey' shape='circle'>
-          +{hiddenCount}
-        </Tag>
+    <span className='usage-log-header-key-summary'>
+      <span className='usage-log-header-key-primary'>{primaryKey}</span>
+      {remainingCount > 0 ? (
+        <span className='usage-log-header-key-count'>+{remainingCount}</span>
       ) : null}
     </span>,
     t,
+    'headers',
   );
 }
 
@@ -1068,30 +1051,6 @@ export const getLogsColumns = ({
       },
     },
     {
-      key: COLUMN_KEYS.REQUEST_UA,
-      title: t('已选 UA'),
-      dataIndex: 'other',
-      width: 160,
-      render: (text, record) => {
-        if (!(isAdminUser && (record.type === 2 || record.type === 5))) {
-          return <></>;
-        }
-        return renderRequestUserAgentCell(record, t);
-      },
-    },
-    {
-      key: COLUMN_KEYS.REQUEST_HEADERS,
-      title: t('应用请求头'),
-      dataIndex: 'other',
-      width: 150,
-      render: (text, record) => {
-        if (!(isAdminUser && (record.type === 2 || record.type === 5))) {
-          return <></>;
-        }
-        return renderRequestHeaderKeysCell(record, t);
-      },
-    },
-    {
       key: COLUMN_KEYS.PROMPT,
       title: (
         <div className='flex items-center gap-1'>
@@ -1193,6 +1152,30 @@ export const getLogsColumns = ({
           );
         }
         return <>{renderQuota(text, 6)}</>;
+      },
+    },
+    {
+      key: COLUMN_KEYS.REQUEST_UA,
+      title: t('已选 UA'),
+      dataIndex: 'other',
+      width: 160,
+      render: (text, record) => {
+        if (!(isAdminUser && (record.type === 2 || record.type === 5))) {
+          return <></>;
+        }
+        return renderRequestUserAgentCell(record, t);
+      },
+    },
+    {
+      key: COLUMN_KEYS.REQUEST_HEADERS,
+      title: t('应用请求头'),
+      dataIndex: 'other',
+      width: 150,
+      render: (text, record) => {
+        if (!(isAdminUser && (record.type === 2 || record.type === 5))) {
+          return <></>;
+        }
+        return renderRequestHeaderKeysCell(record, t);
       },
     },
     {

@@ -92,8 +92,18 @@ const CardTable = ({
       />
     );
 
-    if (!hasHorizontalScroll || hasFixedColumns) {
+    if (!hasHorizontalScroll) {
       return tableNode;
+    }
+
+    if (hasFixedColumns) {
+      return (
+        <FixedTableScrollProxy
+          syncKey={`${columns.length}:${dataSource.length}:${loading}`}
+        >
+          {tableNode}
+        </FixedTableScrollProxy>
+      );
     }
 
     return (
@@ -263,6 +273,104 @@ const CardTable = ({
       )}
     </div>
   );
+};
+
+function getDesktopTableBody(container) {
+  return container?.querySelector('.semi-table-body') || null;
+}
+
+function createTableScrollSync(tableBody, scrollbar) {
+  const syncFromTable = () => {
+    if (scrollbar.scrollLeft !== tableBody.scrollLeft) {
+      scrollbar.scrollLeft = tableBody.scrollLeft;
+    }
+  };
+  const syncFromScrollbar = () => {
+    if (tableBody.scrollLeft !== scrollbar.scrollLeft) {
+      tableBody.scrollLeft = scrollbar.scrollLeft;
+    }
+  };
+
+  tableBody.addEventListener('scroll', syncFromTable, { passive: true });
+  scrollbar.addEventListener('scroll', syncFromScrollbar, { passive: true });
+
+  return () => {
+    tableBody.removeEventListener('scroll', syncFromTable);
+    scrollbar.removeEventListener('scroll', syncFromScrollbar);
+  };
+}
+
+function createTableMetricObserver(tableBody, updateMetrics) {
+  const resizeObserver = new ResizeObserver(updateMetrics);
+  const mutationObserver = new MutationObserver(updateMetrics);
+  resizeObserver.observe(tableBody);
+  mutationObserver.observe(tableBody, { childList: true, subtree: true });
+  const animationFrame = requestAnimationFrame(updateMetrics);
+
+  return () => {
+    cancelAnimationFrame(animationFrame);
+    resizeObserver.disconnect();
+    mutationObserver.disconnect();
+  };
+}
+
+function useFixedTableScrollMetrics(containerRef, scrollbarRef, syncKey) {
+  const [metrics, setMetrics] = useState({ clientWidth: 0, scrollWidth: 0 });
+
+  useEffect(() => {
+    const scrollbar = scrollbarRef.current;
+    const tableBody = getDesktopTableBody(containerRef.current);
+    if (!scrollbar || !tableBody) return undefined;
+
+    const updateMetrics = () => {
+      setMetrics({
+        clientWidth: tableBody.clientWidth,
+        scrollWidth: tableBody.scrollWidth,
+      });
+      scrollbar.scrollLeft = tableBody.scrollLeft;
+    };
+    const cleanupSync = createTableScrollSync(tableBody, scrollbar);
+    const cleanupObserver = createTableMetricObserver(tableBody, updateMetrics);
+
+    return () => {
+      cleanupObserver();
+      cleanupSync();
+    };
+  }, [syncKey]);
+
+  return metrics;
+}
+
+const FixedTableScrollProxy = ({ children, syncKey }) => {
+  const containerRef = useRef(null);
+  const scrollbarRef = useRef(null);
+  const metrics = useFixedTableScrollMetrics(
+    containerRef,
+    scrollbarRef,
+    syncKey,
+  );
+  const showScrollbar = metrics.scrollWidth > metrics.clientWidth + 1;
+
+  return (
+    <div className='card-table-fixed-scroll-shell' ref={containerRef}>
+      {children}
+      <div
+        className='card-table-fixed-scrollbar'
+        ref={scrollbarRef}
+        style={{ display: showScrollbar ? undefined : 'none' }}
+      >
+        <div
+          className='card-table-fixed-scrollbar-inner'
+          style={{ width: metrics.scrollWidth || 1 }}
+        />
+      </div>
+    </div>
+  );
+};
+
+FixedTableScrollProxy.propTypes = {
+  children: PropTypes.node,
+  syncKey: PropTypes.string,
 };
 
 CardTable.propTypes = {
