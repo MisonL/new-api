@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 ARG APP_VERSION=unknown
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
@@ -8,7 +9,8 @@ FROM oven/bun:1@sha256:0733e50325078969732ebe3b15ce4c4be5082f18c4ac1a0f0ca4839c2
 WORKDIR /build
 COPY web/default/package.json .
 COPY web/default/bun.lock .
-RUN bun install
+RUN --mount=type=cache,id=new-api-bun-install,target=/root/.bun/install/cache,sharing=locked \
+    bun install
 COPY ./web/default .
 COPY ./VERSION .
 RUN DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
@@ -18,7 +20,8 @@ FROM oven/bun:1@sha256:0733e50325078969732ebe3b15ce4c4be5082f18c4ac1a0f0ca4839c2
 WORKDIR /build
 COPY web/classic/package.json .
 COPY web/classic/bun.lock .
-RUN bun install
+RUN --mount=type=cache,id=new-api-bun-install,target=/root/.bun/install/cache,sharing=locked \
+    bun install
 COPY ./web/classic .
 COPY ./VERSION .
 RUN VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
@@ -32,18 +35,38 @@ ARG APP_VERSION=unknown
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG SOURCE_URL=https://github.com/MisonL/new-api
+ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64}
+ENV GOPROXY=${GOPROXY}
 ENV GOEXPERIMENT=greenteagc
 
 WORKDIR /build
 
-ADD go.mod go.sum ./
-RUN go mod download
+COPY go.mod go.sum ./
+RUN --mount=type=cache,id=new-api-go-mod,target=/go/pkg/mod,sharing=locked \
+    go mod download
 
-COPY . .
+COPY main.go VERSION ./
+COPY common ./common
+COPY constant ./constant
+COPY controller ./controller
+COPY dto ./dto
+COPY i18n ./i18n
+COPY logger ./logger
+COPY middleware ./middleware
+COPY model ./model
+COPY oauth ./oauth
+COPY pkg ./pkg
+COPY relay ./relay
+COPY router ./router
+COPY service ./service
+COPY setting ./setting
+COPY types ./types
 COPY --from=builder /build/dist ./web/default/dist
 COPY --from=builder-classic /build/dist ./web/classic/dist
-RUN VERSION_VALUE="${APP_VERSION}"; \
+RUN --mount=type=cache,id=new-api-go-mod,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=new-api-go-build,target=/root/.cache/go-build,sharing=locked \
+    VERSION_VALUE="${APP_VERSION}"; \
     if [ "$VERSION_VALUE" = "unknown" ]; then VERSION_VALUE="$(cat VERSION)"; fi; \
     go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=${VERSION_VALUE}' -X 'github.com/QuantumNous/new-api/common.BuildCommit=${VCS_REF}' -X 'github.com/QuantumNous/new-api/common.BuildDate=${BUILD_DATE}' -X 'github.com/QuantumNous/new-api/common.BuildSource=${SOURCE_URL}'" -o new-api
 

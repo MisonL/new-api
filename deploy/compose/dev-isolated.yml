@@ -22,6 +22,7 @@ services:
       - TZ=${DEV_TZ:-Asia/Shanghai}
       - ERROR_LOG_ENABLED=${DEV_ERROR_LOG_ENABLED:-true}
       - BATCH_UPDATE_ENABLED=${DEV_BATCH_UPDATE_ENABLED:-true}
+      - CHANNEL_UPSTREAM_MODEL_UPDATE_TASK_ENABLED=${DEV_CHANNEL_UPSTREAM_MODEL_UPDATE_TASK_ENABLED:-false}
       - NODE_NAME=${DEV_NODE_NAME:-dev-isolated-node-1}
     depends_on:
       redis:
