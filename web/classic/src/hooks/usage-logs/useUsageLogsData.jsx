@@ -47,7 +47,11 @@ import {
   getManageOperatorEntryDescriptor,
   getTopupAuditEntryDescriptors,
 } from './logAuditInfo';
-import { moveColumnKey, normalizeColumnOrder } from './columnPreferences';
+import {
+  moveColumnKey,
+  normalizeColumnOrder,
+  reorderColumnKey,
+} from './columnPreferences';
 const { Text } = Typography;
 
 export const useLogsData = () => {
@@ -275,6 +279,27 @@ export const useLogsData = () => {
         getDefaultColumnOrder(),
       );
       return moveColumnKey(normalizedOrder, columnKey, direction, movableKeys);
+    });
+  };
+
+  const handleColumnOrderReorder = (
+    sourceKey,
+    targetKey,
+    position,
+    movableKeys,
+  ) => {
+    setColumnOrder((currentOrder) => {
+      const normalizedOrder = normalizeColumnOrder(
+        currentOrder,
+        getDefaultColumnOrder(),
+      );
+      return reorderColumnKey(
+        normalizedOrder,
+        sourceKey,
+        targetKey,
+        position,
+        movableKeys,
+      );
     });
   };
 
@@ -1157,6 +1182,7 @@ export const useLogsData = () => {
     setBillingDisplayMode,
     handleColumnVisibilityChange,
     handleColumnOrderChange,
+    handleColumnOrderReorder,
     handleSelectAll,
     initDefaultColumns,
     COLUMN_KEYS,

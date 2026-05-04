@@ -19,12 +19,17 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Modal, Button, Checkbox, RadioGroup, Radio } from '@douyinfe/semi-ui';
-import { IconChevronDown, IconChevronUp } from '@douyinfe/semi-icons';
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconHandle,
+} from '@douyinfe/semi-icons';
 import { getLogsColumns } from '../UsageLogsColumnDefs';
 import {
   applyColumnOrder,
   getMovableColumnKeys,
 } from '../../../../hooks/usage-logs/columnPreferences';
+import { useColumnDragReorder } from '../../../../hooks/usage-logs/useColumnDragReorder';
 
 const ColumnSelectorModal = ({
   showColumnSelector,
@@ -33,6 +38,7 @@ const ColumnSelectorModal = ({
   columnOrder,
   handleColumnVisibilityChange,
   handleColumnOrderChange,
+  handleColumnOrderReorder,
   handleSelectAll,
   initDefaultColumns,
   billingDisplayMode,
@@ -110,10 +116,15 @@ const ColumnSelectorModal = ({
     () => getMovableColumnKeys(selectableColumns),
     [selectableColumns],
   );
-  const movableColumnKeySet = React.useMemo(
-    () => new Set(movableColumnKeys),
-    [movableColumnKeys],
-  );
+  const {
+    dragState,
+    finishPointerDrag,
+    handleDragPointerDown,
+    handleDragPointerMove,
+    movableColumnKeySet,
+    orderListRef,
+    resetDragState,
+  } = useColumnDragReorder(movableColumnKeys, handleColumnOrderReorder);
 
   return (
     <Modal
@@ -162,7 +173,8 @@ const ColumnSelectorModal = ({
         </Checkbox>
       </div>
       <div
-        className='max-h-96 overflow-y-auto rounded-lg p-2'
+        ref={orderListRef}
+        className='usage-log-column-order-list max-h-96 overflow-y-auto rounded-lg p-2'
         style={{ border: '1px solid var(--semi-color-border)' }}
       >
         {selectableColumns.map((column, index) => {
@@ -171,11 +183,29 @@ const ColumnSelectorModal = ({
           const canMoveDown =
             movableIndex >= 0 && movableIndex < movableColumnKeys.length - 1;
           const isMovable = movableColumnKeySet.has(column.key);
+          const isDragging = dragState.sourceKey === column.key;
+          const isDropTarget =
+            dragState.targetKey === column.key &&
+            dragState.sourceKey &&
+            dragState.sourceKey !== column.key;
 
           return (
             <div
               key={column.key}
-              className='flex items-center justify-between gap-2 px-2 py-2'
+              data-column-key={column.key}
+              className={[
+                'usage-log-column-order-row flex items-center justify-between gap-2 px-2 py-2',
+                isMovable ? 'is-movable' : 'is-fixed',
+                isDragging ? 'is-dragging' : '',
+                isDropTarget && dragState.position === 'before'
+                  ? 'is-drop-target-before'
+                  : '',
+                isDropTarget && dragState.position === 'after'
+                  ? 'is-drop-target-after'
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
               style={{
                 borderBottom:
                   index === selectableColumns.length - 1
@@ -183,6 +213,27 @@ const ColumnSelectorModal = ({
                     : '1px solid var(--semi-color-border)',
               }}
             >
+              <Button
+                aria-label={t('拖拽调整顺序')}
+                title={t('拖拽调整顺序')}
+                size='small'
+                theme='borderless'
+                type='tertiary'
+                disabled={!isMovable}
+                icon={<IconHandle />}
+                className={[
+                  'usage-log-column-drag-handle',
+                  isMovable ? 'is-enabled' : 'is-disabled',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onPointerDown={(event) =>
+                  handleDragPointerDown(event, column.key, isMovable)
+                }
+                onPointerMove={handleDragPointerMove}
+                onPointerUp={finishPointerDrag}
+                onPointerCancel={resetDragState}
+              />
               <Checkbox
                 className='min-w-0 flex-1'
                 checked={!!visibleColumns[column.key]}

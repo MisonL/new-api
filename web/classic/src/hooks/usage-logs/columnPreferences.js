@@ -80,6 +80,52 @@ export function moveColumnKey(columnOrder, columnKey, direction, movableKeys) {
   return nextOrder;
 }
 
+export function reorderColumnKey(
+  columnOrder,
+  sourceKey,
+  targetKey,
+  position,
+  movableKeys,
+) {
+  if (
+    !Array.isArray(columnOrder) ||
+    !columnOrder.includes(sourceKey) ||
+    !columnOrder.includes(targetKey)
+  ) {
+    return Array.isArray(columnOrder) ? [...columnOrder] : [];
+  }
+
+  if (sourceKey === targetKey) {
+    return [...columnOrder];
+  }
+
+  const movableKeySet = new Set(movableKeys || columnOrder);
+  if (!movableKeySet.has(sourceKey) || !movableKeySet.has(targetKey)) {
+    return [...columnOrder];
+  }
+
+  const movableOrder = columnOrder.filter((key) => movableKeySet.has(key));
+  const nextMovableOrder = movableOrder.filter((key) => key !== sourceKey);
+  const targetIndex = nextMovableOrder.indexOf(targetKey);
+
+  if (targetIndex < 0) {
+    return [...columnOrder];
+  }
+
+  const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex;
+  nextMovableOrder.splice(insertIndex, 0, sourceKey);
+
+  let movableIndex = 0;
+  return columnOrder.map((key) => {
+    if (!movableKeySet.has(key)) {
+      return key;
+    }
+    const nextKey = nextMovableOrder[movableIndex];
+    movableIndex += 1;
+    return nextKey;
+  });
+}
+
 function getFixedEdge(column) {
   if (column?.fixed === 'right') {
     return 'right';

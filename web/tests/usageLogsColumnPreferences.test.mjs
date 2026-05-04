@@ -6,6 +6,7 @@ import {
   getMovableColumnKeys,
   moveColumnKey,
   normalizeColumnOrder,
+  reorderColumnKey,
 } from "../classic/src/hooks/usage-logs/columnPreferences.js";
 
 test("normalizeColumnOrder preserves saved order and appends missing defaults", () => {
@@ -70,6 +71,56 @@ test("moveColumnKey skips non-movable columns when moving inside a filtered sele
       "cost",
     ]),
     ["model", "admin_only", "time", "cost"],
+  );
+});
+
+test("reorderColumnKey moves a column before a target key", () => {
+  assert.deepEqual(
+    reorderColumnKey(
+      ["time", "model", "cost", "details"],
+      "cost",
+      "time",
+      "before",
+      ["time", "model", "cost"],
+    ),
+    ["cost", "time", "model", "details"],
+  );
+});
+
+test("reorderColumnKey moves a column after a target key", () => {
+  assert.deepEqual(
+    reorderColumnKey(
+      ["time", "model", "cost", "details"],
+      "time",
+      "cost",
+      "after",
+      ["time", "model", "cost"],
+    ),
+    ["model", "cost", "time", "details"],
+  );
+});
+
+test("reorderColumnKey preserves non-movable columns and rejects fixed targets", () => {
+  assert.deepEqual(
+    reorderColumnKey(
+      ["time", "admin_only", "model", "cost", "details"],
+      "cost",
+      "time",
+      "before",
+      ["time", "model", "cost"],
+    ),
+    ["cost", "admin_only", "time", "model", "details"],
+  );
+
+  assert.deepEqual(
+    reorderColumnKey(
+      ["time", "model", "cost", "details"],
+      "cost",
+      "details",
+      "before",
+      ["time", "model", "cost"],
+    ),
+    ["time", "model", "cost", "details"],
   );
 });
 
