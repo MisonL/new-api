@@ -1982,6 +1982,17 @@ html.dark .with-pastel-balls::before {
   min-width: 0;
 }
 
+.card-table-fixed-scroll-shell .semi-table-body {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.card-table-fixed-scroll-shell .semi-table-body::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
 .card-table-fixed-scrollbar {
   position: sticky;
   bottom: 0;
