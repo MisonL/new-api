@@ -31,17 +31,35 @@ type runtimeHeaderPolicy struct {
 }
 
 type RuntimeHeaderPolicyAudit struct {
-	HeaderPolicyMode        string   `json:"header_policy_mode"`
-	AppliedHeaderKeys       []string `json:"applied_header_keys,omitempty"`
-	AppliedUserAgent        string   `json:"applied_user_agent,omitempty"`
-	HeaderProfileID         string   `json:"header_profile_id,omitempty"`
-	HeaderProfileMode       string   `json:"header_profile_mode,omitempty"`
-	HeaderProfileApplied    bool     `json:"header_profile_applied"`
-	UserAgentApplied        bool     `json:"user_agent_applied"`
-	SelectedUserAgent       string   `json:"selected_user_agent,omitempty"`
-	UserAgentStrategyMode   string   `json:"ua_strategy_mode,omitempty"`
-	UserAgentStrategyScope  string   `json:"ua_strategy_scope,omitempty"`
-	OverrideStaticUserAgent bool     `json:"override_static_user_agent,omitempty"`
+	HeaderPolicyMode        string                    `json:"header_policy_mode"`
+	AppliedHeaderKeys       []string                  `json:"applied_header_keys,omitempty"`
+	AppliedHeaders          []AppliedHeaderAuditEntry `json:"applied_headers,omitempty"`
+	AppliedUserAgent        string                    `json:"applied_user_agent,omitempty"`
+	HeaderProfileID         string                    `json:"header_profile_id,omitempty"`
+	HeaderProfileMode       string                    `json:"header_profile_mode,omitempty"`
+	HeaderProfileApplied    bool                      `json:"header_profile_applied"`
+	UserAgentApplied        bool                      `json:"user_agent_applied"`
+	SelectedUserAgent       string                    `json:"selected_user_agent,omitempty"`
+	UserAgentStrategyMode   string                    `json:"ua_strategy_mode,omitempty"`
+	UserAgentStrategyScope  string                    `json:"ua_strategy_scope,omitempty"`
+	OverrideStaticUserAgent bool                      `json:"override_static_user_agent,omitempty"`
+}
+
+type AppliedHeaderAuditEntry struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+const AppliedHeaderAuditRedactedValue = "[redacted]"
+
+var visibleHeaderAuditValueKeys = map[string]struct{}{
+	"originator":            {},
+	"session_id":            {},
+	"user-agent":            {},
+	"x-client-request-id":   {},
+	"x-codex-beta-features": {},
+	"x-codex-turn-metadata": {},
+	"x-codex-window-id":     {},
 }
 
 func BuildChannelRuntimeHeaderOverride(channel *model.Channel) (map[string]any, error) {
@@ -694,11 +712,69 @@ func collectRuntimeHeaderKeys(source map[string]any) []string {
 	return keys
 }
 
+func collectRuntimeHeaderAuditEntries(source map[string]any) []AppliedHeaderAuditEntry {
+	headers := normalizeRuntimeHeaderOverrideMap(source)
+	keys := collectRuntimeHeaderKeys(headers)
+	if len(keys) == 0 {
+		return nil
+	}
+
+	entries := make([]AppliedHeaderAuditEntry, 0, len(keys))
+	for _, key := range keys {
+		value, exists := headers[key]
+		if !exists {
+			continue
+		}
+		text := strings.TrimSpace(fmt.Sprintf("%v", value))
+		if text == "" {
+			continue
+		}
+		entries = append(entries, AppliedHeaderAuditEntry{
+			Key:   key,
+			Value: RedactHeaderAuditValue(key, text),
+		})
+	}
+	return entries
+}
+
+func RedactHeaderAuditValue(key string, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if isSensitiveHeaderAuditValue(value) {
+		return AppliedHeaderAuditRedactedValue
+	}
+	if _, ok := visibleHeaderAuditValueKeys[strings.ToLower(strings.TrimSpace(key))]; ok {
+		return value
+	}
+	return AppliedHeaderAuditRedactedValue
+}
+
+func isSensitiveHeaderAuditValue(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return false
+	}
+	if strings.HasPrefix(lower, "bearer ") ||
+		strings.HasPrefix(lower, "basic ") ||
+		strings.HasPrefix(lower, "digest ") ||
+		strings.HasPrefix(lower, "apikey ") ||
+		strings.HasPrefix(lower, "api-key ") ||
+		strings.HasPrefix(lower, "token ") ||
+		strings.HasPrefix(lower, "sk-") ||
+		strings.HasPrefix(lower, "sk_") {
+		return true
+	}
+	return strings.Contains(lower, "=") && strings.Contains(lower, ";")
+}
+
 func finalizeRuntimeHeaderPolicyAudit(audit *RuntimeHeaderPolicyAudit, headers map[string]any) {
 	if audit == nil {
 		return
 	}
 	audit.AppliedHeaderKeys = collectRuntimeHeaderKeys(headers)
+	audit.AppliedHeaders = collectRuntimeHeaderAuditEntries(headers)
 	audit.AppliedUserAgent = getRuntimeHeaderStringValue(headers, "User-Agent")
 }
 

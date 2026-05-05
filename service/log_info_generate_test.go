@@ -110,6 +110,7 @@ func TestGenerateTextOtherInfoIncludesRequestHeaderPolicyAudit(t *testing.T) {
 	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, RuntimeHeaderPolicyAudit{
 		HeaderPolicyMode:        "merge",
 		AppliedHeaderKeys:       []string{"User-Agent", "X-Test"},
+		AppliedHeaders:          []AppliedHeaderAuditEntry{{Key: "User-Agent", Value: dto.BuiltinCodexCLIUserAgent}, {Key: "X-Test", Value: "test-value"}},
 		HeaderProfileID:         "codex-cli",
 		HeaderProfileMode:       "fixed",
 		HeaderProfileApplied:    true,
@@ -135,6 +136,50 @@ func TestGenerateTextOtherInfoIncludesRequestHeaderPolicyAudit(t *testing.T) {
 	require.Equal(t, true, info["override_static_user_agent"])
 	require.Equal(t, true, info["user_agent_applied"])
 	require.Equal(t, []string{"User-Agent", "X-Test"}, info["applied_header_keys"])
+	require.Equal(t, []AppliedHeaderAuditEntry{{Key: "User-Agent", Value: dto.BuiltinCodexCLIUserAgent}, {Key: "X-Test", Value: AppliedHeaderAuditRedactedValue}}, info["applied_headers"])
+}
+
+func TestCollectRuntimeHeaderAuditEntriesRedactsNonVisibleHeaderValues(t *testing.T) {
+	entries := collectRuntimeHeaderAuditEntries(map[string]any{
+		"Api-Key":           "azure-secret",
+		"Originator":        "codex-tui",
+		"X-Codex-Window-Id": "window-123",
+		"X-Test":            "test-value",
+		"X-Upstream-Auth":   "Bearer copied-secret",
+	})
+
+	require.ElementsMatch(t, []AppliedHeaderAuditEntry{
+		{Key: "Api-Key", Value: AppliedHeaderAuditRedactedValue},
+		{Key: "Originator", Value: "codex-tui"},
+		{Key: "X-Codex-Window-Id", Value: "window-123"},
+		{Key: "X-Test", Value: AppliedHeaderAuditRedactedValue},
+		{Key: "X-Upstream-Auth", Value: AppliedHeaderAuditRedactedValue},
+	}, entries)
+}
+
+func TestAppendRequestHeaderPolicyInfoSanitizesRawAuditValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode:  "merge",
+		AppliedHeaderKeys: []string{"Originator", "X-Upstream-Auth"},
+		AppliedHeaders: []AppliedHeaderAuditEntry{
+			{Key: "Originator", Value: "codex-tui"},
+			{Key: "X-Upstream-Auth", Value: "Bearer copied-secret"},
+		},
+	})
+
+	other := map[string]interface{}{}
+	AppendRequestHeaderPolicyInfo(ctx, other)
+
+	info, ok := other["request_header_policy"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, []AppliedHeaderAuditEntry{
+		{Key: "Originator", Value: "codex-tui"},
+		{Key: "X-Upstream-Auth", Value: AppliedHeaderAuditRedactedValue},
+	}, info["applied_headers"])
 }
 
 func TestGenerateTextOtherInfoKeepsSelectedAndAppliedUserAgentSeparate(t *testing.T) {

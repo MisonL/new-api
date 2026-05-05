@@ -98,7 +98,6 @@ func appendUpstreamMetadata(relayInfo *relaycommon.RelayInfo, other map[string]i
 	}
 }
 
-
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
 	if relayInfo == nil || other == nil || len(relayInfo.ParamOverrideAudit) == 0 {
 		return
@@ -146,6 +145,9 @@ func AppendRequestHeaderPolicyInfo(ctx *gin.Context, other map[string]interface{
 	if len(audit.AppliedHeaderKeys) > 0 {
 		info["applied_header_keys"] = audit.AppliedHeaderKeys
 	}
+	if appliedHeaders := sanitizeAppliedHeaderAuditEntries(audit.AppliedHeaders); len(appliedHeaders) > 0 {
+		info["applied_headers"] = appliedHeaders
+	}
 	if audit.HeaderProfileID != "" {
 		info["header_profile_id"] = audit.HeaderProfileID
 	}
@@ -172,6 +174,24 @@ func AppendRequestHeaderPolicyInfo(ctx *gin.Context, other map[string]interface{
 	}
 	info["user_agent_applied"] = audit.UserAgentApplied
 	other["request_header_policy"] = info
+}
+
+func sanitizeAppliedHeaderAuditEntries(entries []AppliedHeaderAuditEntry) []AppliedHeaderAuditEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	sanitized := make([]AppliedHeaderAuditEntry, 0, len(entries))
+	for _, entry := range entries {
+		key := strings.TrimSpace(entry.Key)
+		if key == "" {
+			continue
+		}
+		sanitized = append(sanitized, AppliedHeaderAuditEntry{
+			Key:   key,
+			Value: RedactHeaderAuditValue(key, entry.Value),
+		})
+	}
+	return sanitized
 }
 
 func classifyStreamStatus(ss *relaycommon.StreamStatus) string {

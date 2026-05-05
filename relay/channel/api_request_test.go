@@ -151,6 +151,10 @@ func TestProcessHeaderOverride_AppliesBuiltinHeaderProfile(t *testing.T) {
 	require.Equal(t, "prefer_channel", audit.HeaderPolicyMode)
 	require.Equal(t, dto.BuiltinCodexCLIUserAgent, audit.AppliedUserAgent)
 	require.ElementsMatch(t, []string{"user-agent", "originator"}, audit.AppliedHeaderKeys)
+	require.ElementsMatch(t, []service.AppliedHeaderAuditEntry{
+		{Key: "originator", Value: dto.BuiltinCodexCLIOriginator},
+		{Key: "user-agent", Value: dto.BuiltinCodexCLIUserAgent},
+	}, audit.AppliedHeaders)
 }
 
 func TestProcessHeaderOverride_LegacyOverrideCreatesAuditWhenMissing(t *testing.T) {
@@ -164,8 +168,12 @@ func TestProcessHeaderOverride_LegacyOverrideCreatesAuditWhenMissing(t *testing.
 	info := &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
 			HeadersOverride: map[string]any{
-				"User-Agent": "LegacyUA/1.0",
-				"X-Legacy":   "legacy-only",
+				"User-Agent":      "LegacyUA/1.0",
+				"Originator":      "codex-tui",
+				"X-Legacy":        "legacy-only",
+				"Api-Key":         "azure-secret",
+				"Cookie":          "sid=session-secret; path=/",
+				"X-Upstream-Auth": "Bearer copied-secret",
 			},
 		},
 	}
@@ -173,12 +181,24 @@ func TestProcessHeaderOverride_LegacyOverrideCreatesAuditWhenMissing(t *testing.
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
 	require.Equal(t, "LegacyUA/1.0", headers["user-agent"])
+	require.Equal(t, "codex-tui", headers["originator"])
 	require.Equal(t, "legacy-only", headers["x-legacy"])
+	require.Equal(t, "azure-secret", headers["api-key"])
+	require.Equal(t, "sid=session-secret; path=/", headers["cookie"])
+	require.Equal(t, "Bearer copied-secret", headers["x-upstream-auth"])
 
 	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
 	require.True(t, ok)
 	require.Equal(t, "LegacyUA/1.0", audit.AppliedUserAgent)
-	require.ElementsMatch(t, []string{"user-agent", "x-legacy"}, audit.AppliedHeaderKeys)
+	require.ElementsMatch(t, []string{"api-key", "cookie", "originator", "user-agent", "x-legacy", "x-upstream-auth"}, audit.AppliedHeaderKeys)
+	require.ElementsMatch(t, []service.AppliedHeaderAuditEntry{
+		{Key: "api-key", Value: "[redacted]"},
+		{Key: "cookie", Value: "[redacted]"},
+		{Key: "originator", Value: "codex-tui"},
+		{Key: "user-agent", Value: "LegacyUA/1.0"},
+		{Key: "x-legacy", Value: "[redacted]"},
+		{Key: "x-upstream-auth", Value: "[redacted]"},
+	}, audit.AppliedHeaders)
 }
 
 func TestProcessHeaderOverride_AppliesUserHeaderProfileAndLegacyOverrideWins(t *testing.T) {

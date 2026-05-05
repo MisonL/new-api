@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -287,7 +288,7 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 
 		headerOverride[key] = value
 	}
-	mergeFinalHeaderOverrideAudit(c, collectHeaderOverrideKeys(headerOverride), getHeaderOverrideUserAgent(headerOverride))
+	mergeFinalHeaderOverrideAudit(c, headerOverride, getHeaderOverrideUserAgent(headerOverride))
 	return headerOverride, nil
 }
 
@@ -303,12 +304,13 @@ func mergeHeaderProfileAudit(c *gin.Context, info *common.RelayInfo, profileID s
 	common2.SetContextKey(c, rootconstant.ContextKeyChannelHeaderPolicyAudit, audit)
 }
 
-func mergeFinalHeaderOverrideAudit(c *gin.Context, headerKeys []string, appliedUserAgent string) {
+func mergeFinalHeaderOverrideAudit(c *gin.Context, headers map[string]string, appliedUserAgent string) {
 	if c == nil {
 		return
 	}
 	audit, _ := common2.GetContextKeyType[service.RuntimeHeaderPolicyAudit](c, rootconstant.ContextKeyChannelHeaderPolicyAudit)
-	audit.AppliedHeaderKeys = mergeHeaderKeys(audit.AppliedHeaderKeys, headerKeys)
+	audit.AppliedHeaderKeys = mergeHeaderKeys(audit.AppliedHeaderKeys, collectHeaderOverrideKeys(headers))
+	audit.AppliedHeaders = mergeHeaderAuditEntries(audit.AppliedHeaders, headers)
 	if appliedUserAgent != "" {
 		audit.AppliedUserAgent = appliedUserAgent
 	}
@@ -352,6 +354,47 @@ func mergeHeaderKeys(existing []string, added []string) []string {
 		}
 		seen[lower] = struct{}{}
 		merged = append(merged, trimmed)
+	}
+	return merged
+}
+
+func mergeHeaderAuditEntries(existing []service.AppliedHeaderAuditEntry, headers map[string]string) []service.AppliedHeaderAuditEntry {
+	if len(existing) == 0 && len(headers) == 0 {
+		return nil
+	}
+
+	values := map[string]service.AppliedHeaderAuditEntry{}
+	for _, entry := range existing {
+		key := strings.TrimSpace(entry.Key)
+		if key == "" {
+			continue
+		}
+		values[strings.ToLower(key)] = service.AppliedHeaderAuditEntry{
+			Key:   key,
+			Value: service.RedactHeaderAuditValue(key, entry.Value),
+		}
+	}
+	for key, value := range headers {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		values[strings.ToLower(key)] = service.AppliedHeaderAuditEntry{
+			Key:   key,
+			Value: service.RedactHeaderAuditValue(key, value),
+		}
+	}
+
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	merged := make([]service.AppliedHeaderAuditEntry, 0, len(keys))
+	for _, key := range keys {
+		merged = append(merged, values[key])
 	}
 	return merged
 }
