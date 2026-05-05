@@ -6,6 +6,10 @@ import { readVersion, repoRoot, tauriAppDir } from './lib/project.mjs';
 const binariesDir = join(tauriAppDir, 'src-tauri', 'binaries');
 const goCacheDir = join(tauriAppDir, '.cache', 'go-build');
 const goModCacheDir = join(tauriAppDir, '.cache', 'gomod');
+const embeddedWebDirs = [
+  join(repoRoot, 'web', 'default'),
+  join(repoRoot, 'web', 'classic'),
+];
 
 function resolveTargetTriple() {
   return (
@@ -65,6 +69,7 @@ function buildSidecar() {
   mkdirSync(binariesDir, { recursive: true });
   mkdirSync(goCacheDir, { recursive: true });
   mkdirSync(goModCacheDir, { recursive: true });
+  ensureEmbeddedWebDist(version);
 
   execFileSync(
     'go',
@@ -97,6 +102,28 @@ function buildSidecar() {
 
   syncDirectRunSidecar(outputPath, goTarget);
   console.log(`prepared sidecar: ${outputPath}`);
+}
+
+function ensureEmbeddedWebDist(version) {
+  for (const webDir of embeddedWebDirs) {
+    if (existsSync(join(webDir, 'dist', 'index.html'))) {
+      continue;
+    }
+
+    execFileSync('bun', ['install', '--backend=copyfile', '--frozen-lockfile'], {
+      cwd: webDir,
+      stdio: 'inherit',
+    });
+    execFileSync('bun', ['run', 'build'], {
+      cwd: webDir,
+      env: {
+        ...process.env,
+        DISABLE_ESLINT_PLUGIN: 'true',
+        VITE_REACT_APP_VERSION: version,
+      },
+      stdio: 'inherit',
+    });
+  }
 }
 
 function syncDirectRunSidecar(outputPath, goTarget) {
