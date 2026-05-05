@@ -7,7 +7,7 @@ const __dirname = dirname(__filename);
 
 export const tauriAppDir = resolve(__dirname, '..', '..');
 export const repoRoot = resolve(tauriAppDir, '..', '..');
-export const webDir = resolve(repoRoot, 'web');
+export const webDir = resolve(repoRoot, 'web', 'classic');
 export const versionFile = resolve(repoRoot, 'VERSION');
 export const tauriPackageJsonFile = resolve(tauriAppDir, 'package.json');
 export const tauriConfigFile = resolve(tauriAppDir, 'src-tauri', 'tauri.conf.json');

@@ -2297,7 +2297,7 @@ dependencies = [
 
 [[package]]
 name = "new-api-tauri-desktop"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "getrandom 0.3.4",
  "log",

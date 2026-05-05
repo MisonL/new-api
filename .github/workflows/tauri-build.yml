@@ -73,7 +73,8 @@ jobs:
 
       - name: Run web node contract tests
         run: |
-          cd web
+          cd web/classic
+          bun install --backend=copyfile --frozen-lockfile
           bun run test:node
 
       - name: Check desktop version sync
