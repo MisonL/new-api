@@ -70,6 +70,39 @@ export function getAppliedHeaderKeys(policy) {
   return normalizeHeaderKeyList(policy?.applied_header_keys);
 }
 
+export function normalizeHeaderEntryList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set();
+  const entries = [];
+  value.forEach((item) => {
+    const key = String(item?.key || '').trim();
+    if (!key) {
+      return;
+    }
+    const normalized = key.toLowerCase();
+    if (seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    entries.push({
+      key,
+      value: String(item?.value || '').trim(),
+    });
+  });
+  return entries;
+}
+
+export function getAppliedHeaderEntries(policy) {
+  const entries = normalizeHeaderEntryList(policy?.applied_headers);
+  if (entries.length) {
+    return entries;
+  }
+  return getAppliedHeaderKeys(policy).map((key) => ({ key, value: '' }));
+}
+
 export function buildRequestHeaderAuditLines(
   policy,
   scope = 'all',
@@ -89,9 +122,15 @@ export function buildRequestHeaderAuditLines(
   const modeLabel = formatRequestHeaderPolicyMode(policy.mode, t);
   const profileId = String(policy.header_profile_id || '').trim();
   const userAgent = getAppliedUserAgent(policy);
-  const headerKeys = getAppliedHeaderKeys(policy).filter(
-    (key) => !isUserAgentHeaderKey(key),
+  const headerEntries = getAppliedHeaderEntries(policy).filter(
+    ({ key }) => !isUserAgentHeaderKey(key),
   );
+  const headerKeys = headerEntries.map(({ key }) => key);
+  const headerValue = headerEntries.some(({ value }) => value)
+    ? headerEntries
+        .map(({ key, value }) => (value ? `${key}: ${value}` : key))
+        .join('\n')
+    : headerKeys.join(', ');
 
   return [
     modeLabel
@@ -116,7 +155,8 @@ export function buildRequestHeaderAuditLines(
       ? {
           key: 'headers',
           label: t('应用请求头'),
-          value: headerKeys.join(', '),
+          value: headerValue,
+          items: headerEntries,
           copyMessage: t('已复制请求头'),
         }
       : null,

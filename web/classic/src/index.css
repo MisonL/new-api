@@ -615,36 +615,50 @@ body.sidebar-resizing * {
 
 .usage-log-header-key-summary {
   display: inline-flex;
-  max-width: 140px;
+  max-width: 132px;
+  height: 22px;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 5px;
+  background: var(--semi-color-fill-0);
   overflow: hidden;
   color: var(--semi-color-text-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
   vertical-align: middle;
   white-space: nowrap;
 }
 
 .usage-log-header-key-primary {
-  display: inline-block;
+  display: inline-flex;
+  flex: 1 1 auto;
   min-width: 0;
+  height: 100%;
+  align-items: center;
   overflow: hidden;
-  font-size: 12px;
-  line-height: 1.35;
+  padding: 0 0 0 7px;
+  line-height: 20px;
   text-overflow: ellipsis;
   vertical-align: bottom;
   white-space: nowrap;
 }
 
 .usage-log-header-key-count {
+  display: inline-flex;
   flex: 0 0 auto;
-  padding: 0 6px;
-  border: 1px solid var(--semi-color-border);
-  border-radius: 999px;
-  background: var(--semi-color-fill-0);
+  height: 16px;
+  align-items: center;
+  margin-right: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--semi-color-fill-1);
   color: var(--semi-color-text-2);
   font-size: 11px;
-  line-height: 18px;
+  font-weight: 600;
+  line-height: 16px;
 }
 
 .usage-log-header-audit-trigger {
@@ -655,7 +669,9 @@ body.sidebar-resizing * {
 }
 
 .usage-log-header-audit-tooltip-layer.semi-tooltip-wrapper {
-  width: min(360px, calc(100vw - 32px));
+  box-sizing: border-box;
+  width: min(520px, calc(100vw - 32px));
+  max-width: min(520px, calc(100vw - 32px));
   border: 1px solid var(--semi-color-border);
   background: var(--semi-color-bg-2);
   color: var(--semi-color-text-0);
@@ -687,6 +703,16 @@ body.sidebar-resizing * {
   gap: 4px;
 }
 
+.usage-log-header-audit-line-headers {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.usage-log-header-audit-line-headers .usage-log-header-audit-title {
+  flex-direction: row;
+  align-items: center;
+}
+
 .usage-log-header-audit-title {
   display: flex;
   flex: 0 0 auto;
@@ -709,6 +735,50 @@ body.sidebar-resizing * {
   overflow-wrap: anywhere;
 }
 
+.usage-log-header-audit-value-list {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.usage-log-header-audit-value-row {
+  display: grid;
+  max-width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
+}
+
+.usage-log-header-audit-value-key,
+.usage-log-header-audit-value-text {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 5px;
+  background: var(--semi-color-fill-0);
+  color: var(--semi-color-text-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.usage-log-header-audit-value-key {
+  color: var(--semi-color-text-1);
+}
+
+.usage-log-header-audit-value-text {
+  background: var(--semi-color-fill-1);
+  color: var(--semi-color-text-0);
+}
+
 .usage-log-header-audit-copy-button.semi-button {
   height: 22px;
   min-width: 0;
@@ -728,7 +798,12 @@ body.sidebar-resizing * {
 
 @media (max-width: 480px) {
   .usage-log-header-audit-tooltip-layer.semi-tooltip-wrapper {
-    width: min(280px, calc(100vw - 32px));
+    width: min(300px, calc(100vw - 64px));
+    max-width: min(300px, calc(100vw - 64px));
+  }
+
+  .usage-log-header-audit-value-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

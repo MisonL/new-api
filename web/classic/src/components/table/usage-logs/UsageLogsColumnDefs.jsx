@@ -597,8 +597,11 @@ function renderRequestHeaderPolicyTooltip(policy, children, t, scope = 'all') {
       className='usage-log-header-audit-tooltip-layer'
       content={
         <div className='usage-log-header-audit-tooltip'>
-          {lines.map(({ key, label, value, copyMessage }) => (
-            <div key={key} className='usage-log-header-audit-line'>
+          {lines.map(({ key, label, value, items, copyMessage }) => (
+            <div
+              key={key}
+              className={`usage-log-header-audit-line usage-log-header-audit-line-${key}`}
+            >
               <div className='usage-log-header-audit-title'>
                 <Typography.Text
                   className='usage-log-header-audit-label'
@@ -622,9 +625,35 @@ function renderRequestHeaderPolicyTooltip(policy, children, t, scope = 'all') {
                   </Button>
                 ) : null}
               </div>
-              <Typography.Text className='usage-log-header-audit-value'>
-                {value}
-              </Typography.Text>
+              {key === 'headers' ? (
+                <div className='usage-log-header-audit-value-list'>
+                  {(items || [{ key: value, value: '' }]).map((header) => {
+                    const headerKey =
+                      typeof header === 'string' ? header : header.key;
+                    const headerValue =
+                      typeof header === 'string' ? '' : header.value;
+                    return (
+                      <div
+                        key={headerKey}
+                        className='usage-log-header-audit-value-row'
+                      >
+                        <span className='usage-log-header-audit-value-key'>
+                          {headerKey}
+                        </span>
+                        {headerValue ? (
+                          <span className='usage-log-header-audit-value-text'>
+                            {headerValue}
+                          </span>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <Typography.Text className='usage-log-header-audit-value'>
+                  {value}
+                </Typography.Text>
+              )}
             </div>
           ))}
         </div>
@@ -666,7 +695,10 @@ function renderRequestHeaderKeysCell(record, t) {
 
   return renderRequestHeaderPolicyTooltip(
     policy,
-    <span className='usage-log-header-key-summary'>
+    <span
+      className='usage-log-header-key-summary'
+      title={headerKeys.join(', ')}
+    >
       <span className='usage-log-header-key-primary'>{primaryKey}</span>
       {remainingCount > 0 ? (
         <span className='usage-log-header-key-count'>+{remainingCount}</span>

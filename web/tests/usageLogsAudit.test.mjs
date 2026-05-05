@@ -162,6 +162,72 @@ test("请求头审计气泡按列范围展示不同内容", () => {
   );
 });
 
+test("请求头审计气泡优先展示应用请求头键值", () => {
+  const policy = {
+    mode: "merge",
+    header_profile_id: "codex-cli",
+    applied_header_keys: ["originator", "x-codex-window-id"],
+    applied_headers: [
+      { key: "originator", value: "codex-tui" },
+      { key: "x-codex-window-id", value: "window-123" },
+    ],
+  };
+
+  const headersLine = buildRequestHeaderAuditLines(policy, "headers", t).find(
+    ({ key }) => key === "headers",
+  );
+
+  assert.equal(
+    headersLine.value,
+    "originator: codex-tui\nx-codex-window-id: window-123",
+  );
+  assert.deepEqual(headersLine.items, [
+    { key: "originator", value: "codex-tui" },
+    { key: "x-codex-window-id", value: "window-123" },
+  ]);
+});
+
+test("请求头审计气泡兼容旧日志应用请求头键列表", () => {
+  const policy = {
+    mode: "merge",
+    applied_header_keys: ["originator", "x-codex-window-id"],
+  };
+
+  const headersLine = buildRequestHeaderAuditLines(policy, "headers", t).find(
+    ({ key }) => key === "headers",
+  );
+
+  assert.equal(headersLine.value, "originator, x-codex-window-id");
+  assert.deepEqual(headersLine.items, [
+    { key: "originator", value: "" },
+    { key: "x-codex-window-id", value: "" },
+  ]);
+});
+
+test("请求头审计气泡过滤空键并按大小写去重键值", () => {
+  const policy = {
+    applied_headers: [
+      { key: "", value: "empty" },
+      { key: "Originator", value: "codex-tui" },
+      { key: "originator", value: "duplicate" },
+      { key: "x-codex-window-id", value: "window-123" },
+    ],
+  };
+
+  const headersLine = buildRequestHeaderAuditLines(policy, "headers", t).find(
+    ({ key }) => key === "headers",
+  );
+
+  assert.equal(
+    headersLine.value,
+    "Originator: codex-tui\nx-codex-window-id: window-123",
+  );
+  assert.deepEqual(headersLine.items, [
+    { key: "Originator", value: "codex-tui" },
+    { key: "x-codex-window-id", value: "window-123" },
+  ]);
+});
+
 test("请求头审计气泡安全处理空请求头和空策略", () => {
   assert.deepEqual(
     buildRequestHeaderAuditLines(
