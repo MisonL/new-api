@@ -577,6 +577,72 @@ async function copyHeaderAuditValue(event, value, successMessage, t) {
   showError(t('无法复制到剪贴板，请手动复制'));
 }
 
+function renderRequestHeaderPolicyTooltipContent(lines, t) {
+  return (
+    <div className='usage-log-header-audit-tooltip'>
+      {lines.map(({ key, label, value, items, copyMessage }) => (
+        <div
+          key={key}
+          className={`usage-log-header-audit-row usage-log-header-audit-row-${key}`}
+        >
+          <div className='usage-log-header-audit-label-wrap'>
+            <span
+              className={`usage-log-header-audit-label-tag usage-log-header-audit-label-tag-${key}`}
+            >
+              {label}
+            </span>
+            {copyMessage ? (
+              <Button
+                className='usage-log-header-audit-copy-button'
+                size='small'
+                theme='borderless'
+                type='tertiary'
+                icon={<CopyIcon size={13} />}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) =>
+                  copyHeaderAuditValue(event, value, copyMessage, t)
+                }
+              >
+                {t('复制')}
+              </Button>
+            ) : null}
+          </div>
+          {Array.isArray(items) && items.length ? (
+            <div className='usage-log-header-audit-header-list'>
+              {items.map((item, index) => {
+                const headerKey = typeof item === 'string' ? item : item.key;
+                const headerValue =
+                  typeof item === 'string' ? '' : item.value;
+                return (
+                  <div
+                    key={`${headerKey}-${index}`}
+                    className='usage-log-header-audit-header-item'
+                  >
+                    <span className='usage-log-header-audit-header-key'>
+                      {headerKey}
+                    </span>
+                    {headerValue ? (
+                      <span className='usage-log-header-audit-header-value'>
+                        {headerValue}
+                      </span>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <span
+              className={`usage-log-header-audit-value usage-log-header-audit-value-${key}`}
+            >
+              {value}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function renderEmptyCell() {
   return <Typography.Text type='tertiary'>-</Typography.Text>;
 }
@@ -595,71 +661,9 @@ function renderRequestHeaderPolicyTooltip(policy, children, t, scope = 'all') {
   return (
     <Tooltip
       className='usage-log-header-audit-tooltip-layer'
-      position='topLeft'
+      position='top'
       showArrow
-      content={
-        <div className='usage-log-header-audit-tooltip'>
-          {lines.map(({ key, label, value, items, copyMessage }) => (
-            <div
-              key={key}
-              className={`usage-log-header-audit-line usage-log-header-audit-line-${key}`}
-            >
-              <div className='usage-log-header-audit-title'>
-                <Typography.Text
-                  className='usage-log-header-audit-label'
-                  strong
-                >
-                  {label}：
-                </Typography.Text>
-                {copyMessage ? (
-                  <Button
-                    className='usage-log-header-audit-copy-button'
-                    size='small'
-                    theme='borderless'
-                    type='tertiary'
-                    icon={<CopyIcon size={13} />}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onClick={(event) =>
-                      copyHeaderAuditValue(event, value, copyMessage, t)
-                    }
-                  >
-                    {t('复制')}
-                  </Button>
-                ) : null}
-              </div>
-              {key === 'headers' ? (
-                <div className='usage-log-header-audit-value-list'>
-                  {(items || [{ key: value, value: '' }]).map((header) => {
-                    const headerKey =
-                      typeof header === 'string' ? header : header.key;
-                    const headerValue =
-                      typeof header === 'string' ? '' : header.value;
-                    return (
-                      <div
-                        key={headerKey}
-                        className='usage-log-header-audit-value-row'
-                      >
-                        <span className='usage-log-header-audit-value-key'>
-                          {headerKey}
-                        </span>
-                        {headerValue ? (
-                          <span className='usage-log-header-audit-value-text'>
-                            {headerValue}
-                          </span>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <Typography.Text className='usage-log-header-audit-value'>
-                  {value}
-                </Typography.Text>
-              )}
-            </div>
-          ))}
-        </div>
-      }
+      content={renderRequestHeaderPolicyTooltipContent(lines, t)}
     >
       <span className='usage-log-header-audit-trigger'>{children}</span>
     </Tooltip>
