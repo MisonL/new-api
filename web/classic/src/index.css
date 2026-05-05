@@ -670,12 +670,15 @@ body.sidebar-resizing * {
 
 .usage-log-header-audit-tooltip-layer.semi-tooltip-wrapper {
   box-sizing: border-box;
-  width: min(520px, calc(100vw - 32px));
-  max-width: min(520px, calc(100vw - 32px));
+  width: min(760px, calc(100vw - 96px));
+  max-width: min(760px, calc(100vw - 96px));
+  max-height: min(640px, calc(100vh - 96px));
+  overflow-y: auto;
   border: 1px solid var(--semi-color-border);
   background: var(--semi-color-bg-2);
   color: var(--semi-color-text-0);
   box-shadow: var(--semi-shadow-elevated);
+  overscroll-behavior: contain;
 }
 
 .usage-log-header-audit-tooltip-layer .semi-tooltip-content {
@@ -748,9 +751,9 @@ body.sidebar-resizing * {
   display: grid;
   max-width: 100%;
   min-width: 0;
-  grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr);
+  grid-template-columns: minmax(150px, 0.34fr) minmax(260px, 1fr);
   align-items: start;
-  gap: 6px;
+  gap: 8px;
 }
 
 .usage-log-header-audit-value-key,
@@ -796,10 +799,10 @@ body.sidebar-resizing * {
   height: 13px;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 640px) {
   .usage-log-header-audit-tooltip-layer.semi-tooltip-wrapper {
-    width: min(300px, calc(100vw - 64px));
-    max-width: min(300px, calc(100vw - 64px));
+    width: min(420px, calc(100vw - 32px));
+    max-width: min(420px, calc(100vw - 32px));
   }
 
   .usage-log-header-audit-value-row {

@@ -595,6 +595,8 @@ function renderRequestHeaderPolicyTooltip(policy, children, t, scope = 'all') {
   return (
     <Tooltip
       className='usage-log-header-audit-tooltip-layer'
+      position='topLeft'
+      showArrow
       content={
         <div className='usage-log-header-audit-tooltip'>
           {lines.map(({ key, label, value, items, copyMessage }) => (
