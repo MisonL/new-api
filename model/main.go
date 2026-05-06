@@ -118,8 +118,12 @@ func CheckSetup() {
 }
 
 func newGormLogger(writer io.Writer) gormlogger.Interface {
+	return newGormLoggerWithSlowThreshold(writer, 200*time.Millisecond)
+}
+
+func newGormLoggerWithSlowThreshold(writer io.Writer, slowThreshold time.Duration) gormlogger.Interface {
 	return gormlogger.New(log.New(writer, "\r\n", log.LstdFlags), gormlogger.Config{
-		SlowThreshold:             200 * time.Millisecond,
+		SlowThreshold:             slowThreshold,
 		LogLevel:                  gormlogger.Warn,
 		IgnoreRecordNotFoundError: true,
 		Colorful:                  false,
@@ -211,8 +215,7 @@ func InitDB() (err error) {
 		if common.UsingMySQL {
 			//_, _ = sqlDB.Exec("ALTER TABLE channels MODIFY model_mapping TEXT;") // TODO: delete this line when most users have upgraded
 		}
-		common.SysLog("database migration started")
-		err = migrateDB()
+		err = runDBMigration("main", DB, migrateDB)
 		return err
 	} else {
 		common.FatalLog(err)
@@ -248,13 +251,28 @@ func InitLogDB() (err error) {
 		if !common.IsMasterNode {
 			return nil
 		}
-		common.SysLog("database migration started")
-		err = migrateLOGDB()
+		err = runDBMigration("log", LOG_DB, migrateLOGDB)
 		return err
 	} else {
 		common.FatalLog(err)
 	}
 	return err
+}
+
+func runDBMigration(name string, db *gorm.DB, migrate func() error) error {
+	start := time.Now()
+	common.SysLog("database migration started: " + name)
+	previousLogger := db.Config.Logger
+	db.Config.Logger = newGormLoggerWithSlowThreshold(os.Stdout, 2*time.Second)
+	defer func() {
+		db.Config.Logger = previousLogger
+	}()
+	if err := migrate(); err != nil {
+		common.SysLog(fmt.Sprintf("database migration failed: %s in %s: %v", name, time.Since(start).Round(time.Millisecond), err))
+		return err
+	}
+	common.SysLog(fmt.Sprintf("database migration finished: %s in %s", name, time.Since(start).Round(time.Millisecond)))
+	return nil
 }
 
 func migrateDB() error {
