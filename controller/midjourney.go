@@ -21,14 +21,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const midjourneyTaskPollingInterval = 15 * time.Second
-
 func UpdateMidjourneyTaskBulk() {
 	//imageModel := "midjourney"
 	ctx := context.TODO()
-	time.Sleep(5 * time.Second)
+	common.SleepBeforeMaintenanceLoop(common.MidjourneyTaskPollingInitialDelay)
 	for {
-		time.Sleep(midjourneyTaskPollingInterval)
+		time.Sleep(common.MidjourneyTaskPollingInterval)
 
 		tasks := model.GetAllUnFinishTasks(constant.TaskQueryLimit)
 		if len(tasks) == 0 {

@@ -21,8 +21,6 @@ import (
 	"github.com/samber/lo"
 )
 
-const taskPollingInterval = 15 * time.Second
-
 // TaskPollingAdaptor 定义轮询所需的最小适配器接口，避免 service -> relay 的循环依赖
 type TaskPollingAdaptor interface {
 	Init(info *relaycommon.RelayInfo)
@@ -91,9 +89,9 @@ func sweepTimedOutTasks(ctx context.Context) {
 
 // TaskPollingLoop 主轮询循环，每 15 秒检查一次未完成的任务
 func TaskPollingLoop() {
-	time.Sleep(10 * time.Second)
+	common.SleepBeforeMaintenanceLoop(common.TaskPollingInitialDelay)
 	for {
-		time.Sleep(taskPollingInterval)
+		time.Sleep(common.TaskPollingInterval)
 		common.SysLog("任务进度轮询开始")
 		ctx := context.TODO()
 		sweepTimedOutTasks(ctx)

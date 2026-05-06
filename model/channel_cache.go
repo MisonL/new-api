@@ -121,7 +121,7 @@ func runChannelCacheRefreshLoop() {
 
 // SyncChannelCache periodically refreshes the in-memory channel cache.
 func SyncChannelCache(frequency int) {
-	time.Sleep(7 * time.Second)
+	common.SleepBeforeMaintenanceLoop(common.ChannelCacheSyncInitialDelay)
 	for {
 		time.Sleep(time.Duration(frequency) * time.Second)
 		common.SysLog("syncing channels from database")
