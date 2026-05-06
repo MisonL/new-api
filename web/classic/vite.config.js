@@ -31,6 +31,7 @@ process.env.BROWSERSLIST_IGNORE_OLD_DATA = '1';
 export default defineConfig(({ command }) => {
   const devProxyTarget =
     process.env.VITE_DEV_PROXY_TARGET || 'http://localhost:3000';
+  const fastBuild = process.env.VITE_FAST_BUILD === 'true';
   const plugins = [
     {
       name: 'treat-js-files-as-jsx',
@@ -79,6 +80,8 @@ export default defineConfig(({ command }) => {
     },
     build: {
       chunkSizeWarningLimit: 2000,
+      minify: fastBuild ? false : 'esbuild',
+      reportCompressedSize: !fastBuild,
       rollupOptions: {
         onwarn(warning, defaultHandler) {
           const warningId =
