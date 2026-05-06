@@ -27,7 +27,6 @@ import RehypeKatex from 'rehype-katex';
 import RemarkGfm from 'remark-gfm';
 import RehypeHighlight from 'rehype-highlight';
 import { useRef, useState, useEffect, useMemo } from 'react';
-import mermaid from 'mermaid';
 import React from 'react';
 import { useDebouncedCallback } from 'use-debounce';
 import clsx from 'clsx';
@@ -35,12 +34,32 @@ import { Button, Tooltip, Toast } from '@douyinfe/semi-ui';
 import { copy, rehypeSplitWordsIntoSpans } from '../../../helpers';
 import { IconCopy } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
+import {
+  MERMAID_SECURITY_LEVEL,
+  renderMermaidCode,
+} from './mermaidRenderer';
 
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'default',
-  securityLevel: 'loose',
-});
+let mermaidLoader;
+
+function loadMermaid() {
+  if (!mermaidLoader) {
+    mermaidLoader = import('mermaid')
+      .then((module) => {
+        const mermaid = module.default;
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: 'default',
+          securityLevel: MERMAID_SECURITY_LEVEL,
+        });
+        return mermaid;
+      })
+      .catch((error) => {
+        mermaidLoader = null;
+        throw error;
+      });
+  }
+  return mermaidLoader;
+}
 
 export function Mermaid(props) {
   const ref = useRef(null);
@@ -48,16 +67,25 @@ export function Mermaid(props) {
 
   useEffect(() => {
     if (props.code && ref.current) {
-      mermaid
-        .run({
-          nodes: [ref.current],
-          suppressErrors: true,
+      let cancelled = false;
+      loadMermaid()
+        .then((mermaid) => {
+          if (cancelled || !ref.current) return null;
+          return renderMermaidCode(mermaid, ref.current, props.code);
         })
         .catch((e) => {
+          if (cancelled) return;
           setHasError(true);
           console.error('[Mermaid] ', e.message);
         });
+      return () => {
+        cancelled = true;
+      };
     }
+  }, [props.code]);
+
+  useEffect(() => {
+    setHasError(false);
   }, [props.code]);
 
   function viewSvgInNewWindow() {
