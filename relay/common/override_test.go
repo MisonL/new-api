@@ -1901,6 +1901,39 @@ func TestApplyParamOverrideWithRelayInfoMixedLegacyAndOperations(t *testing.T) {
 	}
 }
 
+func TestApplyParamOverridePassHeadersUsesRequestHeadersOverStaticOverride(t *testing.T) {
+	info := &RelayInfo{
+		RequestHeaders: map[string]string{
+			"Originator": "Codex CLI",
+		},
+		ChannelMeta: &ChannelMeta{
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"mode":        "pass_headers",
+						"value":       []interface{}{"Originator"},
+						"keep_origin": true,
+					},
+				},
+			},
+			HeadersOverride: map[string]interface{}{
+				"Originator": "static-profile",
+			},
+		},
+	}
+
+	_, err := ApplyParamOverrideWithRelayInfo([]byte(`{"model":"gpt-5"}`), info)
+	if err != nil {
+		t.Fatalf("ApplyParamOverrideWithRelayInfo returned error: %v", err)
+	}
+	if !info.UseRuntimeHeadersOverride {
+		t.Fatalf("expected runtime header override to be enabled")
+	}
+	if info.RuntimeHeadersOverride["originator"] != "Codex CLI" {
+		t.Fatalf("expected pass_headers to use request header, got: %v", info.RuntimeHeadersOverride["originator"])
+	}
+}
+
 func TestApplyParamOverrideWithRelayInfoMoveAndCopyHeaders(t *testing.T) {
 	info := &RelayInfo{
 		ChannelMeta: &ChannelMeta{

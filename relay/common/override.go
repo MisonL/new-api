@@ -899,7 +899,7 @@ func applyOperations(jsonStr string, operations []ParamOperation, conditionConte
 				return "", parseErr
 			}
 			for _, headerName := range headerNames {
-				if err = copyHeaderInContext(context, headerName, headerName, op.KeepOrigin); err != nil {
+				if err = passRequestHeaderInContext(context, headerName); err != nil {
 					if errors.Is(err, errSourceHeaderNotFound) {
 						err = nil
 						continue
@@ -1201,6 +1201,18 @@ func copyHeaderInContext(context map[string]interface{}, fromHeader, toHeader st
 	return setHeaderOverrideInContext(context, toHeader, value, keepOrigin)
 }
 
+func passRequestHeaderInContext(context map[string]interface{}, headerName string) error {
+	headerName = normalizeHeaderContextKey(headerName)
+	if headerName == "" {
+		return fmt.Errorf("pass_headers header name is required")
+	}
+	value, exists := getRequestHeaderValueFromContext(context, headerName)
+	if !exists {
+		return fmt.Errorf("%w: %s", errSourceHeaderNotFound, headerName)
+	}
+	return setHeaderOverrideInContext(context, headerName, value, false)
+}
+
 func moveHeaderInContext(context map[string]interface{}, fromHeader, toHeader string, keepOrigin bool) error {
 	fromHeader = normalizeHeaderContextKey(fromHeader)
 	toHeader = normalizeHeaderContextKey(toHeader)
@@ -1457,6 +1469,23 @@ func getHeaderValueFromContext(context map[string]interface{}, headerName string
 		}
 	}
 	return "", false
+}
+
+func getRequestHeaderValueFromContext(context map[string]interface{}, headerName string) (string, bool) {
+	headerName = normalizeHeaderContextKey(headerName)
+	if headerName == "" {
+		return "", false
+	}
+	source := ensureMapKeyInContext(context, paramOverrideContextRequestHeaders)
+	raw, ok := source[headerName]
+	if !ok {
+		return "", false
+	}
+	value := strings.TrimSpace(fmt.Sprintf("%v", raw))
+	if value == "" {
+		return "", false
+	}
+	return value, true
 }
 
 func normalizeHeaderContextKey(key string) string {
