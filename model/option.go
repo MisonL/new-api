@@ -207,6 +207,7 @@ func loadOptionsFromDatabase() {
 }
 
 func SyncOptions(frequency int) {
+	time.Sleep(37 * time.Second)
 	for {
 		time.Sleep(time.Duration(frequency) * time.Second)
 		common.SysLog("syncing options from database")

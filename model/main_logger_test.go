@@ -59,3 +59,21 @@ func TestNewGormLoggerWithSlowThresholdKeepsRecordNotFoundFiltering(t *testing.T
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	require.NotContains(t, output.String(), "record not found")
 }
+
+func TestBackgroundDBUsesMaintenanceSlowThreshold(t *testing.T) {
+	var output bytes.Buffer
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: newGormLogger(&output),
+	})
+	require.NoError(t, err)
+
+	previousDB := DB
+	DB = db
+	t.Cleanup(func() {
+		DB = previousDB
+	})
+
+	require.NoError(t, backgroundDB().Exec("SELECT 1").Error)
+	require.NotContains(t, output.String(), "SLOW SQL")
+}

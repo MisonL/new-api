@@ -86,7 +86,7 @@ type CustomOAuthProvider struct {
 	Slug                       string `json:"slug" gorm:"type:varchar(64);uniqueIndex;not null"`                     // URL identifier, e.g., "github-enterprise"
 	Icon                       string `json:"icon" gorm:"type:varchar(128);default:''"`                              // Icon name from @lobehub/icons
 	Kind                       string `json:"kind" gorm:"type:varchar(32);default:'oauth_code'"`                     // oauth_code / cas / jwt_direct / trusted_header
-	Enabled                    bool   `json:"enabled" gorm:"default:false"`                                          // Whether this provider is enabled
+	Enabled                    bool   `json:"enabled" gorm:"default:false;index:idx_custom_oauth_providers_enabled"` // Whether this provider is enabled
 	ClientId                   string `json:"client_id" gorm:"type:varchar(256)"`                                    // OAuth client ID
 	ClientSecret               string `json:"-" gorm:"type:varchar(512)"`                                            // OAuth client secret (not returned to frontend)
 	AuthorizationEndpoint      string `json:"authorization_endpoint" gorm:"type:varchar(512)"`                       // Authorization URL
@@ -247,6 +247,16 @@ func GetEnabledCustomOAuthProviders() ([]*CustomOAuthProvider, error) {
 func GetEnabledCustomOAuthProvidersContext(ctx context.Context) ([]*CustomOAuthProvider, error) {
 	var providers []*CustomOAuthProvider
 	query := DB
+	if ctx != nil {
+		query = query.WithContext(ctx)
+	}
+	err := query.Where("enabled = ?", true).Order("id asc").Find(&providers).Error
+	return providers, err
+}
+
+func GetEnabledCustomOAuthProvidersForStatusContext(ctx context.Context) ([]*CustomOAuthProvider, error) {
+	var providers []*CustomOAuthProvider
+	query := backgroundDB()
 	if ctx != nil {
 		query = query.WithContext(ctx)
 	}

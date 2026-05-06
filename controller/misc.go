@@ -80,15 +80,12 @@ func getCustomOAuthStatusPayload() []customOAuthStatusInfo {
 	ctx, cancel := context.WithTimeout(context.Background(), customOAuthStatusQueryTimeout)
 	defer cancel()
 
-	customProviders, err := model.GetEnabledCustomOAuthProvidersContext(ctx)
+	customProviders, err := model.GetEnabledCustomOAuthProvidersForStatusContext(ctx)
 	if err != nil {
 		common.SysError("failed to load enabled custom auth providers for status payload: " + err.Error())
-		if len(stale) > 0 {
-			customOAuthStatusCache.payload = append([]customOAuthStatusInfo(nil), stale...)
-			customOAuthStatusCache.expiresAt = now.Add(customOAuthStatusCacheTTL)
-			return append([]customOAuthStatusInfo(nil), stale...)
-		}
-		return make([]customOAuthStatusInfo, 0)
+		customOAuthStatusCache.payload = append([]customOAuthStatusInfo(nil), stale...)
+		customOAuthStatusCache.expiresAt = now.Add(customOAuthStatusCacheTTL)
+		return append([]customOAuthStatusInfo(nil), stale...)
 	}
 
 	providersInfo := make([]customOAuthStatusInfo, 0, len(customProviders))

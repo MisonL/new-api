@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -20,13 +21,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const midjourneyTaskPollingInterval = 15 * time.Second
+
 func UpdateMidjourneyTaskBulk() {
 	//imageModel := "midjourney"
 	ctx := context.TODO()
+	time.Sleep(5 * time.Second)
 	for {
-		time.Sleep(time.Duration(15) * time.Second)
+		time.Sleep(midjourneyTaskPollingInterval)
 
-		tasks := model.GetAllUnFinishTasks()
+		tasks := model.GetAllUnFinishTasks(constant.TaskQueryLimit)
 		if len(tasks) == 0 {
 			continue
 		}

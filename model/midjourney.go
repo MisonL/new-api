@@ -1,7 +1,7 @@
 package model
 
 type Midjourney struct {
-	Id          int    `json:"id"`
+	Id          int    `json:"id" gorm:"index:idx_midjourneys_progress_id,priority:2"`
 	Code        int    `json:"code"`
 	UserId      int    `json:"user_id" gorm:"index"`
 	Action      string `json:"action" gorm:"type:varchar(40);index"`
@@ -17,7 +17,7 @@ type Midjourney struct {
 	VideoUrl    string `json:"video_url"`
 	VideoUrls   string `json:"video_urls"`
 	Status      string `json:"status" gorm:"type:varchar(20);index"`
-	Progress    string `json:"progress" gorm:"type:varchar(30);index"`
+	Progress    string `json:"progress" gorm:"type:varchar(30);index;index:idx_midjourneys_progress_id,priority:1"`
 	FailReason  string `json:"fail_reason"`
 	ChannelId   int    `json:"channel_id" gorm:"index"`
 	Quota       int    `json:"quota"`
@@ -90,11 +90,18 @@ func GetAllTasks(startIdx int, num int, queryParams TaskQueryParams) []*Midjourn
 	return tasks
 }
 
-func GetAllUnFinishTasks() []*Midjourney {
+func GetAllUnFinishTasks(limit int) []*Midjourney {
 	var tasks []*Midjourney
 	var err error
+	if limit <= 0 {
+		limit = 100
+	}
 	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Find(&tasks).Error
+	err = backgroundDB().Where("progress != ?", "100%").
+		Where("status NOT IN ?", []string{"FAILURE", "SUCCESS"}).
+		Order("id").
+		Limit(limit).
+		Find(&tasks).Error
 	if err != nil {
 		return nil
 	}

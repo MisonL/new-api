@@ -1,0 +1,12 @@
+package controller
+
+import (
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestMidjourneyTaskPollingIntervalStaysAtFifteenSeconds(t *testing.T) {
+	require.Equal(t, 15*time.Second, midjourneyTaskPollingInterval)
+}

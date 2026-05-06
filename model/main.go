@@ -121,6 +121,12 @@ func newGormLogger(writer io.Writer) gormlogger.Interface {
 	return newGormLoggerWithSlowThreshold(writer, 200*time.Millisecond)
 }
 
+func backgroundDB() *gorm.DB {
+	return DB.Session(&gorm.Session{
+		Logger: newGormLoggerWithSlowThreshold(os.Stdout, 30*time.Second),
+	})
+}
+
 func newGormLoggerWithSlowThreshold(writer io.Writer, slowThreshold time.Duration) gormlogger.Interface {
 	return gormlogger.New(log.New(writer, "\r\n", log.LstdFlags), gormlogger.Config{
 		SlowThreshold:             slowThreshold,

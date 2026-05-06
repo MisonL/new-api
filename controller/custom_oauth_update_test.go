@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -677,6 +678,37 @@ func TestGetCustomOAuthStatusPayloadReturnsCachedDataWhenDBBecomesUnavailable(t 
 	}
 	if second[0].Slug != "cached-provider" {
 		t.Fatalf("expected cached provider slug, got %q", second[0].Slug)
+	}
+}
+
+func TestGetCustomOAuthStatusPayloadCachesEmptyDataWhenDBBecomesUnavailable(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	invalidateCustomOAuthStatusCache()
+	t.Cleanup(invalidateCustomOAuthStatusCache)
+
+	sqlDB, err := model.DB.DB()
+	if err != nil {
+		t.Fatalf("failed to access sql db: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("failed to close sql db: %v", err)
+	}
+
+	first := getCustomOAuthStatusPayload()
+	if len(first) != 0 {
+		t.Fatalf("expected empty payload after db close, got %d items", len(first))
+	}
+
+	customOAuthStatusCache.RLock()
+	cacheExpiresAt := customOAuthStatusCache.expiresAt
+	customOAuthStatusCache.RUnlock()
+	if !cacheExpiresAt.After(time.Now()) {
+		t.Fatal("expected empty fallback payload to be cached")
+	}
+
+	second := getCustomOAuthStatusPayload()
+	if len(second) != 0 {
+		t.Fatalf("expected cached empty payload, got %d items", len(second))
 	}
 }
 

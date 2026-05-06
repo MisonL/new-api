@@ -232,7 +232,7 @@ func GetSubscriptionOrderByTradeNo(tradeNo string) *SubscriptionOrder {
 
 // User subscription instance
 type UserSubscription struct {
-	Id     int `json:"id"`
+	Id     int `json:"id" gorm:"index:idx_user_sub_status_end_id,priority:3"`
 	UserId int `json:"user_id" gorm:"index;index:idx_user_sub_active,priority:1"`
 	PlanId int `json:"plan_id" gorm:"index"`
 
@@ -240,8 +240,8 @@ type UserSubscription struct {
 	AmountUsed  int64 `json:"amount_used" gorm:"type:bigint;not null;default:0"`
 
 	StartTime int64  `json:"start_time" gorm:"bigint"`
-	EndTime   int64  `json:"end_time" gorm:"bigint;index;index:idx_user_sub_active,priority:3"`
-	Status    string `json:"status" gorm:"type:varchar(32);index;index:idx_user_sub_active,priority:2"` // active/expired/cancelled
+	EndTime   int64  `json:"end_time" gorm:"bigint;index;index:idx_user_sub_active,priority:3;index:idx_user_sub_status_end_id,priority:2"`
+	Status    string `json:"status" gorm:"type:varchar(32);index;index:idx_user_sub_active,priority:2;index:idx_user_sub_status_end_id,priority:1"` // active/expired/cancelled
 
 	Source string `json:"source" gorm:"type:varchar(32);default:'order'"` // order/admin
 
@@ -832,7 +832,8 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 	}
 	now := GetDBTimestamp()
 	var subs []UserSubscription
-	if err := DB.Where("status = ? AND end_time > 0 AND end_time <= ?", "active", now).
+	if err := backgroundDB().Select("id", "user_id", "plan_id", "status", "end_time", "upgrade_group").
+		Where("status = ? AND end_time > 0 AND end_time <= ?", "active", now).
 		Order("end_time asc, id asc").
 		Limit(limit).
 		Find(&subs).Error; err != nil {
@@ -1109,7 +1110,8 @@ func ResetDueSubscriptions(limit int) (int, error) {
 	}
 	now := GetDBTimestamp()
 	var subs []UserSubscription
-	if err := DB.Where("next_reset_time > 0 AND next_reset_time <= ? AND status = ?", now, "active").
+	if err := backgroundDB().Select("id", "plan_id", "status", "end_time", "next_reset_time").
+		Where("next_reset_time > 0 AND next_reset_time <= ? AND status = ?", now, "active").
 		Order("next_reset_time asc").
 		Limit(limit).
 		Find(&subs).Error; err != nil {

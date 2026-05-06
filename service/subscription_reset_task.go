@@ -36,6 +36,7 @@ func StartSubscriptionQuotaResetTask() {
 			ticker := time.NewTicker(subscriptionResetTickInterval)
 			defer ticker.Stop()
 
+			time.Sleep(20 * time.Second)
 			runSubscriptionQuotaResetOnce()
 			for range ticker.C {
 				runSubscriptionQuotaResetOnce()
