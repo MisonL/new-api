@@ -34,13 +34,13 @@ import (
 	_ "net/http/pprof"
 )
 
-//go:embed web/default/dist
+//go:embed all:web/default/dist
 var buildFS embed.FS
 
 //go:embed web/default/dist/index.html
 var indexPage []byte
 
-//go:embed web/classic/dist
+//go:embed all:web/classic/dist
 var classicBuildFS embed.FS
 
 //go:embed web/classic/dist/index.html
