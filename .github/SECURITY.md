@@ -1,5 +1,10 @@
 # Security Policy
 
+> [!IMPORTANT]
+> **Bulk Reporting Policy:** If you need to submit multiple vulnerability reports in bulk, coordinate with maintainers first through a private GitHub Security Advisory or the contact channel below. Uncoordinated bulk submissions may be closed without review, and repeated uncoordinated submissions may lead to blocking from further reports.
+>
+> Thorough security research is welcome, but bulk reports need prior coordination so they can be triaged safely.
+
 ## Supported Versions
 
 We provide security updates for the following versions:
