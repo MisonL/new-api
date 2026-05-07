@@ -42,6 +42,29 @@ export type PerformanceMetricsData = {
   }
 }
 
+export type PerfModelSummary = {
+  model_name: string
+  avg_latency_ms: number
+  success_rate: number
+  avg_tps: number
+  request_count: number
+}
+
+export type PerfSummaryAllData = {
+  success: boolean
+  message?: string
+  data: {
+    models: PerfModelSummary[]
+  }
+}
+
+export async function getPerfMetricsSummary(
+  hours = 24
+): Promise<PerfSummaryAllData> {
+  const res = await api.get(`/api/perf-metrics/summary?hours=${hours}`)
+  return res.data
+}
+
 export async function getPerfMetrics(
   modelName: string,
   hours = 24
