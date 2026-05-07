@@ -6,7 +6,9 @@
 
 结论：
 
-- 完全隔离开发环境已重建到 `3db3b5366783454c260435e23ae6abb24fb1215e`。
+- 初始重建时，完全隔离开发环境已重建到 `3db3b5366783454c260435e23ae6abb24fb1215e`。
+- 后续最终复核时，仓库 `main` / `origin/main` 已前进到 `4e1ace4c6d3e7781e64726a6a88051a0a3956a76`，但运行中的隔离开发容器仍为 `3db3b5366783454c260435e23ae6abb24fb1215e`。
+- 因此，截至最终复核，隔离开发环境健康，但不是当前 `main` 的最新版本。
 - `new-api-dev-isolated-new-api-1`、PostgreSQL、Redis 均为 `healthy`。
 - 后端 `/api/status` 返回 `success=true`。
 - 后端测试和 `web/default` 前端 lint、build、i18n sync、typecheck 均通过。
@@ -18,7 +20,9 @@
 - Repository: `/Volumes/Work/code/new-api`
 - Branch: `main`
 - Git state before cleanup: `main...origin/main`
-- Deployed commit: `3db3b5366783454c260435e23ae6abb24fb1215e`
+- Initial deployed commit: `3db3b5366783454c260435e23ae6abb24fb1215e`
+- Final repository commit: `4e1ace4c6d3e7781e64726a6a88051a0a3956a76`
+- Final running container commit: `3db3b5366783454c260435e23ae6abb24fb1215e`
 - Dev Compose file: `deploy/compose/dev-isolated.yml`
 - Dev env file: `deploy/env/dev-isolated.env`
 - Dev image: `new-api-local:dev`
@@ -134,3 +138,31 @@ curl -fsS http://127.0.0.1:3001/api/status
 - 本轮没有执行真实渠道写入、渠道批量测试或真实模型调用，避免对隔离数据面产生额外副作用。
 - 本轮没有把 `web/default` 构建产物切换成 `3001` 容器默认入口；`3001` 默认入口仍取决于系统配置。
 - 若后续验证目标是容器内嵌 `web/default` 产物，需要先调整系统主题配置或构建打包入口，再重新做容器内页面验证。
+
+## Final Current-State Check
+
+复核时间：2026-05-07。
+
+复核命令：
+
+```bash
+git status --short --branch
+git rev-parse HEAD
+git rev-parse origin/main
+docker exec new-api-dev-isolated-new-api-1 /new-api --build-info
+docker inspect new-api-dev-isolated-new-api-1 --format 'image={{.Config.Image}} created={{.Created}} status={{.State.Status}} health={{.State.Health.Status}} started={{.State.StartedAt}}'
+docker image inspect new-api-local:dev --format 'id={{.Id}} created={{.Created}}'
+```
+
+关键结果：
+
+- Git 输出 `main...origin/main`，`HEAD` 与 `origin/main` 均为 `4e1ace4c6d3e7781e64726a6a88051a0a3956a76`。
+- 运行中开发容器 `/new-api --build-info` 输出 `commit=3db3b5366783454c260435e23ae6abb24fb1215e`。
+- 运行中容器镜像为 `new-api-local:dev`，状态为 `running`，健康状态为 `healthy`。
+- `new-api-local:dev` 镜像创建时间为 `2026-05-07T07:33:46.984204313Z`。
+
+结论：
+
+- 当前隔离开发环境可用且健康。
+- 当前隔离开发环境不是当前 `main` / `origin/main` 的最新代码。
+- 需要重新执行 `scripts/build-docker-local.sh new-api-local:dev` 并重建 `new-api` 服务后，再用 `/new-api --build-info` 比对运行提交与 `git rev-parse HEAD`。
