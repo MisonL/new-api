@@ -1,4 +1,3 @@
-import * as z from 'zod'
 import type { Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useTranslation } from 'react-i18next'
@@ -19,18 +18,7 @@ import { FormNavigationGuard } from '../components/form-navigation-guard'
 import { SettingsSection } from '../components/settings-section'
 import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
-
-const quotaSchema = z.object({
-  QuotaForNewUser: z.coerce.number().min(0),
-  PreConsumedQuota: z.coerce.number().min(0),
-  QuotaForInviter: z.coerce.number().min(0),
-  QuotaForInvitee: z.coerce.number().min(0),
-  TopUpLink: z.string().url().optional().or(z.literal('')),
-  'general_setting.docs_link': z.string().url().optional().or(z.literal('')),
-  'quota_setting.enable_free_model_pre_consume': z.boolean(),
-})
-
-type QuotaFormValues = z.infer<typeof quotaSchema>
+import { quotaSchema, type QuotaFormValues } from './quota-settings-schema'
 
 type QuotaSettingsSectionProps = {
   defaultValues: QuotaFormValues
