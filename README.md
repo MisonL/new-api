@@ -232,6 +232,54 @@ cp deploy/env/dev-isolated.env.example deploy/env/dev-isolated.env
 docker compose -f deploy/compose/dev-isolated.yml --env-file deploy/env/dev-isolated.env up -d
 ```
 
+### 完全隔离开发环境重建与验证
+
+当用户要求“使用最新代码重新部署开发环境”时，默认目标是完全隔离开发环境，不是正式 `3000` 服务。
+
+推荐流程：
+
+```bash
+scripts/build-docker-local.sh new-api-local:dev
+docker compose -f deploy/compose/dev-isolated.yml --env-file deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api
+docker inspect new-api-dev-isolated-new-api-1 --format '{{.State.Health.Status}} {{index .Config.Labels "org.opencontainers.image.revision"}} {{.Config.Image}}'
+docker exec new-api-dev-isolated-new-api-1 /new-api --build-info
+curl -fsS http://127.0.0.1:3001/api/status
+```
+
+代码验证：
+
+```bash
+go test ./...
+cd web/default
+bun run lint
+bun run build
+bun run i18n:sync
+bun run typecheck
+```
+
+Web UI 验证注意事项：
+
+- `http://127.0.0.1:3001/` 是隔离后端容器对外入口，实际加载的前端主题取决于系统配置。
+- 若当前系统配置仍加载 classic 主题，`3001` 下的 `web/default` 新页面不一定可直接访问。
+- 验证 `web/default` 改动时，启动独立前端开发服务器并代理到隔离后端：
+
+```bash
+cd web/default
+VITE_REACT_APP_SERVER_URL=http://127.0.0.1:3001 bun run dev --host 127.0.0.1 --port 5176
+```
+
+建议至少浏览验证：
+
+- `/dashboard/models`
+- `/rankings`
+- `/channels`
+- `/keys`
+- `/usage-logs/common`
+- `/usage-logs/task`
+- `/system-settings/models/global`
+
+验证完成后清理临时前端开发服务器；隔离 Docker 栈可保留运行，便于继续验收。
+
 ### 只读前端联调环境启动
 
 先启动只读代理：
@@ -244,7 +292,7 @@ docker compose -f deploy/compose/frontend-readonly-proxy.yml --env-file deploy/e
 再启动本地前端开发服务器：
 
 ```bash
-cd web
+cd web/default
 VITE_DEV_PROXY_TARGET=http://127.0.0.1:3300 \
 VITE_REACT_APP_READONLY_MODE=true \
 bun run dev --host 0.0.0.0 --port 5173
@@ -261,9 +309,9 @@ bun run dev --host 0.0.0.0 --port 5173
 
 ```bash
 go test ./controller ./model ./relay/common ./relay/helper ./service
-cd web && bun install
-cd web && bun run lint
-cd web && bun run build
+cd web/default && bun install
+cd web/default && bun run lint
+cd web/default && bun run build
 ```
 
 ## 请求头策略能力
