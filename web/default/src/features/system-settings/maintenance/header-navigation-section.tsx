@@ -27,6 +27,8 @@ const headerNavSchema = z.object({
   console: z.boolean(),
   pricingEnabled: z.boolean(),
   pricingRequireAuth: z.boolean(),
+  rankingsEnabled: z.boolean(),
+  rankingsRequireAuth: z.boolean(),
   docs: z.boolean(),
   about: z.boolean(),
 })
@@ -53,6 +55,14 @@ const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
     config.pricing?.requireAuth === undefined
       ? HEADER_NAV_DEFAULT.pricing.requireAuth
       : Boolean(config.pricing.requireAuth),
+  rankingsEnabled:
+    config.rankings?.enabled === undefined
+      ? HEADER_NAV_DEFAULT.rankings.enabled
+      : Boolean(config.rankings.enabled),
+  rankingsRequireAuth:
+    config.rankings?.requireAuth === undefined
+      ? HEADER_NAV_DEFAULT.rankings.requireAuth
+      : Boolean(config.rankings.requireAuth),
   docs:
     config.docs === undefined ? HEADER_NAV_DEFAULT.docs : Boolean(config.docs),
   about:
@@ -89,6 +99,11 @@ export function HeaderNavigationSection({
         ...(config.pricing ?? HEADER_NAV_DEFAULT.pricing),
         enabled: values.pricingEnabled,
         requireAuth: values.pricingRequireAuth,
+      },
+      rankings: {
+        ...(config.rankings ?? HEADER_NAV_DEFAULT.rankings),
+        enabled: values.rankingsEnabled,
+        requireAuth: values.rankingsRequireAuth,
       },
     }
 
@@ -215,6 +230,59 @@ export function HeaderNavigationSection({
                       checked={field.value}
                       onCheckedChange={field.onChange}
                       disabled={!form.watch('pricingEnabled')}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          <div className='rounded-lg border p-4'>
+            <FormField
+              control={form.control}
+              name='rankingsEnabled'
+              render={({ field }) => (
+                <FormItem className='flex flex-row items-start justify-between rounded-lg border p-4'>
+                  <div className='space-y-0.5 pe-4'>
+                    <FormLabel className='text-base'>{t('Rankings')}</FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Exposes the live model usage leaderboard in the top navigation.'
+                      )}
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='rankingsRequireAuth'
+              render={({ field }) => (
+                <FormItem className='mt-4 flex flex-row items-start justify-between rounded-lg border border-dashed p-4'>
+                  <div className='space-y-0.5 pe-4'>
+                    <FormLabel className='text-base'>
+                      {t('Require login to view rankings')}
+                    </FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Visitors must authenticate before accessing the rankings page.'
+                      )}
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      disabled={!form.watch('rankingsEnabled')}
                     />
                   </FormControl>
                   <FormMessage />
