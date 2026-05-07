@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useMemo, useCallback, type ReactNode } from 'react'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import { useQueryClient, useIsFetching } from '@tanstack/react-query'
 import { ChevronDown, Eye, EyeOff, Loader2, RotateCcw, Search } from 'lucide-react'
@@ -48,14 +48,14 @@ export function CommonLogsFilterBar({
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
 
   const [expanded, setExpanded] = useState(false)
-  const [filters, setFilters] = useState<CommonLogFilters>(() => {
+  const searchState = useMemo(() => {
     const { start, end } = getDefaultTimeRange()
-    return { startTime: start, endTime: end }
-  })
-  const [logType, setLogType] = useState<LogTypeValue | ''>('')
-
-  useEffect(() => {
-    const next: Partial<CommonLogFilters> = {}
+    const next: CommonLogFilters = {
+      startTime: searchParams.startTime
+        ? new Date(searchParams.startTime)
+        : start,
+      endTime: searchParams.endTime ? new Date(searchParams.endTime) : end,
+    }
     if (searchParams.startTime)
       next.startTime = new Date(searchParams.startTime)
     if (searchParams.endTime) next.endTime = new Date(searchParams.endTime)
@@ -66,13 +66,23 @@ export function CommonLogsFilterBar({
     if (searchParams.username) next.username = searchParams.username
     if (searchParams.requestId) next.requestId = searchParams.requestId
 
-    if (Object.keys(next).length > 0) {
-      setFilters((prev) => ({ ...prev, ...next }))
-    }
-
     const typeArr = searchParams.type
-    if (Array.isArray(typeArr) && typeArr.length === 1) {
-      setLogType(typeArr[0])
+    const nextLogType: LogTypeValue | '' =
+      Array.isArray(typeArr) &&
+      typeArr.length === 1 &&
+      isLogTypeValue(typeArr[0])
+        ? typeArr[0]
+        : ''
+
+    return {
+      key: JSON.stringify({
+        ...next,
+        startTime: next.startTime?.getTime(),
+        endTime: next.endTime?.getTime(),
+        type: nextLogType,
+      }),
+      filters: next,
+      logType: nextLogType,
     }
   }, [
     searchParams.startTime,
@@ -85,6 +95,19 @@ export function CommonLogsFilterBar({
     searchParams.requestId,
     searchParams.type,
   ])
+  const [appliedSearchKey, setAppliedSearchKey] = useState(searchState.key)
+  const [filters, setFilters] = useState<CommonLogFilters>(
+    () => searchState.filters
+  )
+  const [logType, setLogType] = useState<LogTypeValue | ''>(
+    () => searchState.logType
+  )
+
+  if (appliedSearchKey !== searchState.key) {
+    setAppliedSearchKey(searchState.key)
+    setFilters(searchState.filters)
+    setLogType(searchState.logType)
+  }
 
   const handleChange = useCallback(
     (field: keyof CommonLogFilters, value: Date | string | undefined) => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useMemo, useCallback, type ReactNode } from 'react'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import { useQueryClient, useIsFetching } from '@tanstack/react-query'
 import { Loader2, RotateCcw, Search } from 'lucide-react'
@@ -54,12 +54,7 @@ export function TaskLogsFilterBar(props: TaskLogsFilterBarProps) {
   const isAdmin = useIsAdmin()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
 
-  const [filters, setFilters] = useState<TaskLogsFilters>(() => {
-    const { start, end } = getDefaultTimeRange()
-    return { startTime: start, endTime: end }
-  })
-
-  useEffect(() => {
+  const searchState = useMemo(() => {
     const { start, end } = getDefaultTimeRange()
     const baseFilters = {
       startTime: searchParams.startTime ? new Date(searchParams.startTime) : start,
@@ -77,7 +72,15 @@ export function TaskLogsFilterBar(props: TaskLogsFilterBarProps) {
             ...(searchParams.filter ? { taskId: searchParams.filter } : {}),
           }
 
-    setFilters(next)
+    return {
+      key: JSON.stringify({
+        ...next,
+        startTime: next.startTime?.getTime(),
+        endTime: next.endTime?.getTime(),
+        logCategory: props.logCategory,
+      }),
+      filters: next,
+    }
   }, [
     props.logCategory,
     searchParams.startTime,
@@ -85,6 +88,15 @@ export function TaskLogsFilterBar(props: TaskLogsFilterBarProps) {
     searchParams.channel,
     searchParams.filter,
   ])
+  const [appliedSearchKey, setAppliedSearchKey] = useState(searchState.key)
+  const [filters, setFilters] = useState<TaskLogsFilters>(
+    () => searchState.filters
+  )
+
+  if (appliedSearchKey !== searchState.key) {
+    setAppliedSearchKey(searchState.key)
+    setFilters(searchState.filters)
+  }
 
   const handleChange = useCallback(
     (field: keyof TaskLogsFilters, value: Date | string | undefined) => {

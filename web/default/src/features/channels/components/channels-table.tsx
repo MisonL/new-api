@@ -55,6 +55,7 @@ import { useChannels } from './channels-provider'
 import { DataTableBulkActions } from './data-table-bulk-actions'
 
 const route = getRouteApi('/_authenticated/channels/')
+const EMPTY_COLUMN_FILTER: string[] = []
 
 const CHANNEL_SORTABLE_COLUMNS = new Set<ChannelSortBy>([
   'id',
@@ -112,11 +113,14 @@ export function ChannelsTable() {
 
   // Extract filters from column filters
   const statusFilter =
-    (columnFilters.find((f) => f.id === 'status')?.value as string[]) || []
+    (columnFilters.find((f) => f.id === 'status')?.value as string[]) ??
+    EMPTY_COLUMN_FILTER
   const typeFilter =
-    (columnFilters.find((f) => f.id === 'type')?.value as string[]) || []
+    (columnFilters.find((f) => f.id === 'type')?.value as string[]) ??
+    EMPTY_COLUMN_FILTER
   const groupFilter =
-    (columnFilters.find((f) => f.id === 'group')?.value as string[]) || []
+    (columnFilters.find((f) => f.id === 'group')?.value as string[]) ??
+    EMPTY_COLUMN_FILTER
   const modelFilterFromUrl =
     (columnFilters.find((f) => f.id === 'model')?.value as string) || ''
 
