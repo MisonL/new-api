@@ -200,7 +200,7 @@ export function RatioSettingsCard({
     mutationFn: resetModelRatios,
     onSuccess: (data) => {
       if (data.success) {
-        toast.success(t('Model ratios reset successfully'))
+        toast.success(t('Model prices reset successfully'))
         queryClient.invalidateQueries({ queryKey: ['system-options'] })
         setConfirmOpen(false)
       } else {
@@ -423,7 +423,7 @@ export function RatioSettingsCard({
     >
       <Tabs defaultValue='models' className='space-y-6'>
         <TabsList className='grid w-full grid-cols-4'>
-          <TabsTrigger value='models'>{t('Model ratios')}</TabsTrigger>
+          <TabsTrigger value='models'>{t('Model prices')}</TabsTrigger>
           <TabsTrigger value='groups'>{t('Group ratios')}</TabsTrigger>
           <TabsTrigger value='tool-prices'>{t('Tool prices')}</TabsTrigger>
           <TabsTrigger value='upstream-sync'>
@@ -474,7 +474,7 @@ export function RatioSettingsCard({
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        title={t('Reset all model ratios?')}
+        title={t('Reset all model prices?')}
         desc={t(
           'This will clear custom pricing ratios and revert to upstream defaults.'
         )}
