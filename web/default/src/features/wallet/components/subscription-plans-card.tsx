@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { useStatus } from '@/hooks/use-status'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -43,17 +42,15 @@ import type {
   PlanRecord,
   UserSubscriptionRecord,
 } from '@/features/subscriptions/types'
-import type { PaymentMethod, TopupInfo } from '../types'
+import {
+  getBillingPreferenceLabel,
+  getSubscriptionPaymentOptions,
+} from '../lib/subscription-display'
+import type { TopupInfo } from '../types'
 
 interface SubscriptionPlansCardProps {
   topupInfo: TopupInfo | null
   onAvailabilityChange?: (available: boolean) => void
-}
-
-function getEpayMethods(payMethods: PaymentMethod[] = []): PaymentMethod[] {
-  return payMethods.filter(
-    (m) => m?.type && m.type !== 'stripe' && m.type !== 'creem'
-  )
 }
 
 export function SubscriptionPlansCard({
@@ -61,7 +58,6 @@ export function SubscriptionPlansCard({
   onAvailabilityChange,
 }: SubscriptionPlansCardProps) {
   const { t } = useTranslation()
-  const { status } = useStatus()
 
   const [plans, setPlans] = useState<PlanRecord[]>([])
   const [activeSubscriptions, setActiveSubscriptions] = useState<
@@ -78,13 +74,11 @@ export function SubscriptionPlansCard({
   const [purchaseOpen, setPurchaseOpen] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<PlanRecord | null>(null)
 
-  const enableStripe = !!status?.enable_stripe_topup
-  const enableCreem = !!topupInfo?.enable_creem_topup
-  const enableOnlineTopUp = !!status?.enable_online_topup
-  const epayMethods = useMemo(
-    () => getEpayMethods(topupInfo?.pay_methods),
-    [topupInfo?.pay_methods]
-  )
+  const { enableStripe, enableCreem, enableOnlineTopUp, epayMethods } =
+    useMemo(
+      () => getSubscriptionPaymentOptions(topupInfo),
+      [topupInfo]
+    )
 
   const fetchPlans = useCallback(async () => {
     try {
@@ -268,28 +262,30 @@ export function SubscriptionPlansCard({
                   onValueChange={handlePreferenceChange}
                 >
                   <SelectTrigger className='h-8 flex-1 text-xs sm:w-[140px] sm:flex-none'>
-                    <SelectValue />
+                    <SelectValue>
+                      {getBillingPreferenceLabel(displayPref, t)}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem
                       value='subscription_first'
                       disabled={disablePref}
                     >
-                      {t('Subscription First')}
+                      {getBillingPreferenceLabel('subscription_first', t)}
                       {disablePref ? ` (${t('No Active')})` : ''}
                     </SelectItem>
                     <SelectItem value='wallet_first'>
-                      {t('Wallet First')}
+                      {getBillingPreferenceLabel('wallet_first', t)}
                     </SelectItem>
                     <SelectItem
                       value='subscription_only'
                       disabled={disablePref}
                     >
-                      {t('Subscription Only')}
+                      {getBillingPreferenceLabel('subscription_only', t)}
                       {disablePref ? ` (${t('No Active')})` : ''}
                     </SelectItem>
                     <SelectItem value='wallet_only'>
-                      {t('Wallet Only')}
+                      {getBillingPreferenceLabel('wallet_only', t)}
                     </SelectItem>
                   </SelectContent>
                 </Select>
