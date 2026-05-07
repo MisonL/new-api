@@ -4,6 +4,13 @@ import { ArrowLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { Button } from '@/components/ui/button'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -13,33 +20,27 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
 import { CopyButton } from '@/components/copy-button'
 import { GroupBadge } from '@/components/group-badge'
 import { PublicLayout } from '@/components/layout'
 import { DEFAULT_TOKEN_UNIT, QUOTA_TYPE_VALUES } from '../constants'
 import { usePricingData } from '../hooks/use-pricing-data'
-import { parseTags } from '../lib/filters'
-import {
-  getAvailableGroups,
-  replaceModelInPath,
-  isTokenBasedModel,
-} from '../lib/model-helpers'
 import {
   getDynamicPriceEntries,
   getDynamicPricingSummary,
   getDynamicPricingTiers,
   isDynamicPricingModel,
 } from '../lib/dynamic-price'
+import { parseTags } from '../lib/filters'
+import {
+  getAvailableGroups,
+  replaceModelInPath,
+  isTokenBasedModel,
+} from '../lib/model-helpers'
 import { formatGroupPrice, formatFixedPrice } from '../lib/price'
 import type { PricingModel, TokenUnit, PriceType } from '../types'
 import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
+import { ModelDetailsPerformance } from './model-details-performance'
 
 function SectionTitle(props: { children: React.ReactNode }) {
   return (
@@ -128,13 +129,8 @@ function PriceSection(props: {
   showRechargePrice: boolean
 }) {
   const { t } = useTranslation()
-  const {
-    model,
-    priceRate,
-    usdExchangeRate,
-    tokenUnit,
-    showRechargePrice,
-  } = props
+  const { model, priceRate, usdExchangeRate, tokenUnit, showRechargePrice } =
+    props
   const isTokenBased = isTokenBasedModel(model)
   const tokenUnitLabel = tokenUnit === 'K' ? '1K' : '1M'
   const baseGroupKey = '_base'
@@ -190,7 +186,7 @@ function PriceSection(props: {
         <section className='border-b py-4'>
           <SectionTitle>{t('Base Price')}</SectionTitle>
           <div className='rounded-lg border border-amber-200/70 bg-amber-50/70 p-3 dark:border-amber-500/20 dark:bg-amber-500/10'>
-            <div className='text-amber-800 text-sm font-medium dark:text-amber-200'>
+            <div className='text-sm font-medium text-amber-800 dark:text-amber-200'>
               {t('Special billing expression')}
             </div>
             <p className='text-muted-foreground mt-1 text-xs'>
@@ -200,7 +196,7 @@ function PriceSection(props: {
               <div className='text-muted-foreground mb-1 text-[10px] font-medium tracking-wider uppercase'>
                 {t('Raw expression')}
               </div>
-              <code className='text-muted-foreground block max-h-28 overflow-auto rounded-md border bg-background/80 px-2 py-1.5 font-mono text-xs break-all'>
+              <code className='text-muted-foreground bg-background/80 block max-h-28 overflow-auto rounded-md border px-2 py-1.5 font-mono text-xs break-all'>
                 {dynamicSummary.rawExpression}
               </code>
             </div>
@@ -215,7 +211,10 @@ function PriceSection(props: {
         {dynamicSummary.primaryEntries.length > 0 ? (
           <div className='grid grid-cols-2 gap-2'>
             {dynamicSummary.primaryEntries.map((entry) => (
-              <div key={entry.key} className='rounded-lg border bg-muted/20 p-3'>
+              <div
+                key={entry.key}
+                className='bg-muted/20 rounded-lg border p-3'
+              >
                 <div className='text-muted-foreground text-xs'>
                   {t(entry.shortLabel)}
                 </div>
@@ -306,7 +305,7 @@ function PriceSection(props: {
       <SectionTitle>{t('Base Price')}</SectionTitle>
       <div className='grid grid-cols-2 gap-2'>
         {primaryPriceTypes.map((item) => (
-          <div key={item.type} className='rounded-lg border bg-muted/20 p-3'>
+          <div key={item.type} className='bg-muted/20 rounded-lg border p-3'>
             <div className='text-muted-foreground text-xs'>{item.label}</div>
             <div className='text-foreground mt-1 font-mono text-base font-semibold tabular-nums'>
               {renderPrice(item.type)}
@@ -482,7 +481,7 @@ function GroupPricingSection(props: {
           <SectionTitle>{t('Pricing by Group')}</SectionTitle>
           <AutoGroupChain model={model} autoGroups={autoGroups} />
           <div className='rounded-lg border border-amber-200/70 bg-amber-50/70 p-3 dark:border-amber-500/20 dark:bg-amber-500/10'>
-            <div className='text-amber-800 text-sm font-medium dark:text-amber-200'>
+            <div className='text-sm font-medium text-amber-800 dark:text-amber-200'>
               {t('Special billing expression')}
             </div>
             <p className='text-muted-foreground mt-1 text-xs'>
@@ -494,7 +493,7 @@ function GroupPricingSection(props: {
               <div className='text-muted-foreground mb-1 text-[10px] font-medium tracking-wider uppercase'>
                 {t('Raw expression')}
               </div>
-              <code className='text-muted-foreground block max-h-28 overflow-auto rounded-md border bg-background/80 px-2 py-1.5 font-mono text-xs break-all'>
+              <code className='text-muted-foreground bg-background/80 block max-h-28 overflow-auto rounded-md border px-2 py-1.5 font-mono text-xs break-all'>
                 {model.billing_expr}
               </code>
             </div>
@@ -724,6 +723,7 @@ export interface ModelDetailsContentProps {
 }
 
 export function ModelDetailsContent(props: ModelDetailsContentProps) {
+  const { t } = useTranslation()
   const {
     model,
     groupRatio,
@@ -766,6 +766,11 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
         tokenUnit={tokenUnit}
         showRechargePrice={showRechargePrice}
       />
+
+      <section className='border-t py-4'>
+        <SectionTitle>{t('Performance')}</SectionTitle>
+        <ModelDetailsPerformance model={model} />
+      </section>
     </>
   )
 }

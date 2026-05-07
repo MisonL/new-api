@@ -102,6 +102,14 @@ const MAINTENANCE_SECTIONS = [
             settings['performance_setting.monitor_memory_threshold'] ?? 90,
           'performance_setting.monitor_disk_threshold':
             settings['performance_setting.monitor_disk_threshold'] ?? 95,
+          'perf_metrics_setting.enabled':
+            settings['perf_metrics_setting.enabled'] ?? true,
+          'perf_metrics_setting.flush_interval':
+            settings['perf_metrics_setting.flush_interval'] ?? 5,
+          'perf_metrics_setting.bucket_time':
+            settings['perf_metrics_setting.bucket_time'] ?? 'hour',
+          'perf_metrics_setting.retention_days':
+            settings['perf_metrics_setting.retention_days'] ?? 0,
         }}
       />
     ),
