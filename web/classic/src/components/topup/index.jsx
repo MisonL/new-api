@@ -851,7 +851,7 @@ const TopUp = () => {
           allSubscriptions={allSubscriptions}
           reloadSubscriptionSelf={getSubscriptionSelf}
         />
-        <div className='space-y-6'>
+        <div>
           <InvitationCard
             t={t}
             userState={userState}

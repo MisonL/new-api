@@ -244,7 +244,7 @@ const GiftCodeCard = ({
   };
 
   return (
-    <Card className='!rounded-2xl shadow-sm border-0'>
+    <Card className='!rounded-2xl shadow-sm border-0' style={{ marginTop: 8 }}>
       <div className='flex items-center mb-4'>
         <Avatar size='small' color='amber' className='mr-3 shadow-md'>
           <Gift size={16} />
@@ -398,7 +398,6 @@ const GiftCodeCard = ({
           </div>
         )}
       </Space>
-
       <Modal
         title={
           <div className='flex items-center'>
