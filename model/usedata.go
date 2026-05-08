@@ -37,7 +37,7 @@ const (
 	DashboardTimeWeek = "week"
 
 	dashboardDayGranularityThresholdSeconds  int64 = 7 * 24 * 60 * 60
-	dashboardWeekGranularityThresholdSeconds int64 = 30 * 24 * 60 * 60
+	dashboardWeekGranularityThresholdSeconds int64 = 90 * 24 * 60 * 60
 	dashboardPostgresWorkMem                       = "64MB"
 )
 

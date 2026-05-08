@@ -211,6 +211,7 @@ func TestNormalizeDashboardTimeGranularityForRange(t *testing.T) {
 	require.Equal(t, DashboardTimeHour, NormalizeDashboardTimeGranularityForRange(DashboardTimeHour, 0, 86400))
 	require.Equal(t, DashboardTimeDay, NormalizeDashboardTimeGranularityForRange(DashboardTimeHour, 0, 8*86400))
 	require.Equal(t, DashboardTimeDay, NormalizeDashboardTimeGranularityForRange(DashboardTimeDay, 0, 30*86400))
-	require.Equal(t, DashboardTimeWeek, NormalizeDashboardTimeGranularityForRange(DashboardTimeHour, 0, 31*86400))
-	require.Equal(t, DashboardTimeWeek, NormalizeDashboardTimeGranularityForRange(DashboardTimeDay, 0, 31*86400))
+	require.Equal(t, DashboardTimeDay, NormalizeDashboardTimeGranularityForRange(DashboardTimeHour, 0, 31*86400))
+	require.Equal(t, DashboardTimeDay, NormalizeDashboardTimeGranularityForRange(DashboardTimeDay, 0, 90*86400))
+	require.Equal(t, DashboardTimeWeek, NormalizeDashboardTimeGranularityForRange(DashboardTimeDay, 0, 91*86400))
 }
