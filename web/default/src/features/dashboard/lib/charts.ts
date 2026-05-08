@@ -69,6 +69,15 @@ export function processChartData(
     const collapseOverflow = options?.collapseOverflow ?? true
 
     return (array: TooltipLineItem[]) => {
+      let sum = 0
+      for (const item of array) {
+        if (item.datum && item.datum.TimeSum) {
+          sum = Number(item.datum.TimeSum) || sum
+          break
+        }
+      }
+
+      array = array.filter((item) => (Number(item.value) || 0) > 0)
       const modelItems = array.filter((item) => !isOtherTooltipKey(item.key))
       const otherItems = array.filter((item) => isOtherTooltipKey(item.key))
       modelItems.sort(
@@ -76,16 +85,8 @@ export function processChartData(
       )
       array = [...modelItems, ...otherItems]
 
-      let sum = 0
       for (let i = 0; i < array.length; i++) {
         const v = Number(array[i].value) || 0
-        if (
-          array[i].datum &&
-          (array[i].datum as Record<string, unknown>)?.TimeSum
-        ) {
-          sum =
-            Number((array[i].datum as Record<string, unknown>)?.TimeSum) || sum
-        }
         array[i].value = formatQuotaValue(v)
       }
 
