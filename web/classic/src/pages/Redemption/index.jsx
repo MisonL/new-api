@@ -19,12 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import RedemptionsTable from '../../components/table/redemptions';
+import ConsolePageLayout from '../../components/layout/ConsolePageLayout';
 
 const Redemption = () => {
   return (
-    <div className='mt-[60px] px-2'>
+    <ConsolePageLayout>
       <RedemptionsTable />
-    </div>
+    </ConsolePageLayout>
   );
 };
 

@@ -19,11 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import Dashboard from '../../components/dashboard';
+import ConsolePageLayout from '../../components/layout/ConsolePageLayout';
 
 const Detail = () => (
-  <div className='mt-[60px] px-2'>
+  <ConsolePageLayout>
     <Dashboard />
-  </div>
+  </ConsolePageLayout>
 );
 
 export default Detail;

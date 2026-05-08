@@ -54,9 +54,12 @@ const InvitationCard = ({
     : '0';
 
   return (
-    <Card className='!rounded-2xl shadow-sm border-0'>
+    <Card
+      className='!rounded-2xl shadow-sm border-0'
+      bodyStyle={{ padding: 12 }}
+    >
       {/* 卡片头部 */}
-      <div className='flex items-center mb-4'>
+      <div className='flex items-center mb-3'>
         <Avatar size='small' color='green' className='mr-3 shadow-md'>
           <Gift size={16} />
         </Avatar>
@@ -69,13 +72,13 @@ const InvitationCard = ({
       </div>
 
       {/* 收益展示区域 */}
-      <Space vertical style={{ width: '100%' }}>
+      <Space vertical spacing={8} style={{ width: '100%' }}>
         {/* 统计数据统一卡片 */}
         <Card
           className='!rounded-xl w-full'
           cover={
             <div
-              className='relative min-h-[11rem] sm:min-h-[8rem]'
+              className='relative min-h-[11rem] sm:min-h-[8rem] lg:min-h-[7rem]'
               style={{
                 '--palette-primary-darkerChannel': '0 75 80',
                 backgroundImage: `linear-gradient(0deg, rgba(var(--palette-primary-darkerChannel) / 80%), rgba(var(--palette-primary-darkerChannel) / 80%)), url('/cover-4.webp')`,
@@ -85,7 +88,7 @@ const InvitationCard = ({
               }}
             >
               {/* 标题和按钮 */}
-              <div className='relative z-10 h-full flex flex-col justify-between p-4'>
+              <div className='relative z-10 h-full flex flex-col justify-between p-3 lg:p-4'>
                 <div className='flex justify-between items-center gap-3'>
                   <Text strong style={{ color: 'white', fontSize: '16px' }}>
                     {t('收益统计')}
@@ -119,11 +122,11 @@ const InvitationCard = ({
                 </div>
 
                 {/* 统计数据 */}
-                <div className='grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4'>
+                <div className='grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3'>
                   {/* 待使用收益 */}
                   <div className='text-center'>
                     <div
-                      className='text-base sm:text-2xl font-bold mb-2'
+                      className='text-base sm:text-xl font-bold mb-1'
                       style={{ color: 'white' }}
                     >
                       {renderQuota(userState?.user?.aff_quota || 0)}
@@ -148,7 +151,7 @@ const InvitationCard = ({
                   {/* 总收益 */}
                   <div className='text-center'>
                     <div
-                      className='text-base sm:text-2xl font-bold mb-2'
+                      className='text-base sm:text-xl font-bold mb-1'
                       style={{ color: 'white' }}
                     >
                       {renderQuota(userState?.user?.aff_history_quota || 0)}
@@ -173,7 +176,7 @@ const InvitationCard = ({
                   {/* 邀请人数 */}
                   <div className='text-center'>
                     <div
-                      className='text-base sm:text-2xl font-bold mb-2'
+                      className='text-base sm:text-xl font-bold mb-1'
                       style={{ color: 'white' }}
                     >
                       {userState?.user?.aff_count || 0}
@@ -198,7 +201,7 @@ const InvitationCard = ({
                   {/* 返利比例 */}
                   <div className='text-center'>
                     <div
-                      className='text-base sm:text-2xl font-bold mb-2'
+                      className='text-base sm:text-xl font-bold mb-1'
                       style={{ color: 'white' }}
                     >
                       {displayInviteRebateRate}%
@@ -248,9 +251,10 @@ const InvitationCard = ({
         {/* 奖励说明 */}
         <Card
           className='!rounded-xl w-full'
+          bodyStyle={{ padding: 12 }}
           title={<Text type='tertiary'>{t('奖励说明')}</Text>}
         >
-          <div className='space-y-3'>
+          <div className='grid grid-cols-1 lg:grid-cols-3 gap-2'>
             <div className='flex items-start gap-2'>
               <Badge dot type='success' />
               <Text type='tertiary' className='text-sm'>

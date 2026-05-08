@@ -45,6 +45,7 @@ import EmailBindModal from './personal/modals/EmailBindModal';
 import WeChatBindModal from './personal/modals/WeChatBindModal';
 import AccountDeleteModal from './personal/modals/AccountDeleteModal';
 import ChangePasswordModal from './personal/modals/ChangePasswordModal';
+import ConsolePageLayout from '../layout/ConsolePageLayout';
 
 const PersonalSetting = () => {
   const [userState, userDispatch] = useContext(UserContext);
@@ -515,7 +516,7 @@ const PersonalSetting = () => {
   };
 
   return (
-    <div className='mt-[60px]'>
+    <ConsolePageLayout padding='none'>
       <div className='flex justify-center'>
         <div className='w-full max-w-7xl mx-auto px-2'>
           {/* 顶部用户信息区域 */}
@@ -630,7 +631,7 @@ const PersonalSetting = () => {
           setTurnstileToken={setTurnstileToken}
         />
       ) : null}
-    </div>
+    </ConsolePageLayout>
   );
 };
 

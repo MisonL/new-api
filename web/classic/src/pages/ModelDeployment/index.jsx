@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import DeploymentsTable from '../../components/table/model-deployments';
 import DeploymentAccessGuard from '../../components/model-deployments/DeploymentAccessGuard';
+import ConsolePageLayout from '../../components/layout/ConsolePageLayout';
 import { useModelDeploymentSettings } from '../../hooks/model-deployments/useModelDeploymentSettings';
 
 const ModelDeploymentPage = () => {
@@ -41,9 +42,9 @@ const ModelDeploymentPage = () => {
       connectionError={connectionError}
       onRetry={() => testConnection()}
     >
-      <div className='mt-[60px] px-2'>
+      <ConsolePageLayout>
         <DeploymentsTable />
-      </div>
+      </ConsolePageLayout>
     </DeploymentAccessGuard>
   );
 };

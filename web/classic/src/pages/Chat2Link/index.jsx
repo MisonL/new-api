@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { useTokenKeys } from '../../hooks/chat/useTokenKeys';
+import ConsolePageLayout from '../../components/layout/ConsolePageLayout';
 
 const chat2page = () => {
   const { keys, chatLink, serverAddress, isLoading } = useTokenKeys();
@@ -36,9 +37,9 @@ const chat2page = () => {
   }
 
   return (
-    <div className='mt-[60px] px-2'>
+    <ConsolePageLayout>
       <h3>正在加载，请稍候...</h3>
-    </div>
+    </ConsolePageLayout>
   );
 };
 

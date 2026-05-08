@@ -22,6 +22,7 @@ import { Card, Button, Typography } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Settings, Server, AlertCircle, WifiOff } from 'lucide-react';
+import ConsolePageLayout from '../layout/ConsolePageLayout';
 
 const { Title, Text } = Typography;
 
@@ -43,20 +44,20 @@ const DeploymentAccessGuard = ({
 
   if (loading) {
     return (
-      <div className='mt-[60px] px-2'>
+      <ConsolePageLayout>
         <Card loading={true} style={{ minHeight: '400px' }}>
           <div style={{ textAlign: 'center', padding: '50px 0' }}>
             <Text type='secondary'>{t('加载设置中...')}</Text>
           </div>
         </Card>
-      </div>
+      </ConsolePageLayout>
     );
   }
 
   if (!isEnabled) {
     return (
-      <div
-        className='mt-[60px] px-4'
+      <ConsolePageLayout
+        padding='relaxed'
         style={{
           minHeight: 'calc(100vh - 60px)',
           display: 'flex',
@@ -276,19 +277,19 @@ const DeploymentAccessGuard = ({
             </Text>
           </Card>
         </div>
-      </div>
+      </ConsolePageLayout>
     );
   }
 
   if (connectionLoading || (connectionOk === null && !connectionError)) {
     return (
-      <div className='mt-[60px] px-2'>
+      <ConsolePageLayout>
         <Card loading={true} style={{ minHeight: '400px' }}>
           <div style={{ textAlign: 'center', padding: '50px 0' }}>
             <Text type='secondary'>{t('正在检查 io.net 连接...')}</Text>
           </div>
         </Card>
-      </div>
+      </ConsolePageLayout>
     );
   }
 
@@ -301,8 +302,8 @@ const DeploymentAccessGuard = ({
     const detail = connectionError?.message || '';
 
     return (
-      <div
-        className='mt-[60px] px-4'
+      <ConsolePageLayout
+        padding='relaxed'
         style={{
           minHeight: 'calc(100vh - 60px)',
           display: 'flex',
@@ -402,7 +403,7 @@ const DeploymentAccessGuard = ({
             </div>
           </Card>
         </div>
-      </div>
+      </ConsolePageLayout>
     );
   }
 

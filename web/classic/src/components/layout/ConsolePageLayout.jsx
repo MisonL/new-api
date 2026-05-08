@@ -18,15 +18,28 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import UsersTable from '../../components/table/users';
-import ConsolePageLayout from '../../components/layout/ConsolePageLayout';
 
-const User = () => {
+const paddingClasses = {
+  none: '',
+  compact: 'px-2',
+  relaxed: 'px-4',
+};
+
+const ConsolePageLayout = ({
+  children,
+  className = '',
+  padding = 'compact',
+  ...props
+}) => {
+  const classes = ['mt-[60px] md:mt-0', paddingClasses[padding], className]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <ConsolePageLayout>
-      <UsersTable />
-    </ConsolePageLayout>
+    <div className={classes} {...props}>
+      {children}
+    </div>
   );
 };
 
-export default User;
+export default ConsolePageLayout;

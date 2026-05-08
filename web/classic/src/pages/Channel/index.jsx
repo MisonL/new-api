@@ -19,12 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import ChannelsTable from '../../components/table/channels';
+import ConsolePageLayout from '../../components/layout/ConsolePageLayout';
 
 const File = () => {
   return (
-    <div className='mt-[60px] px-2'>
+    <ConsolePageLayout>
       <ChannelsTable />
-    </div>
+    </ConsolePageLayout>
   );
 };
 

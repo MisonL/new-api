@@ -244,8 +244,11 @@ const GiftCodeCard = ({
   };
 
   return (
-    <Card className='!rounded-2xl shadow-sm border-0' style={{ marginTop: 8 }}>
-      <div className='flex items-center mb-4'>
+    <Card
+      className='!rounded-2xl shadow-sm border-0'
+      bodyStyle={{ padding: 12 }}
+    >
+      <div className='flex items-center mb-3'>
         <Avatar size='small' color='amber' className='mr-3 shadow-md'>
           <Gift size={16} />
         </Avatar>
@@ -259,10 +262,10 @@ const GiftCodeCard = ({
         </div>
       </div>
 
-      <Space vertical align='start' style={{ width: '100%' }}>
-        <div className='grid grid-cols-1 sm:grid-cols-2 gap-3 w-full'>
+      <Space vertical spacing={8} align='start' style={{ width: '100%' }}>
+        <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 w-full'>
           <div>
-            <Text strong className='block mb-2'>
+            <Text strong className='block mb-1'>
               {t('礼品额度')}
             </Text>
             <InputNumber
@@ -273,7 +276,7 @@ const GiftCodeCard = ({
             />
           </div>
           <div>
-            <Text strong className='block mb-2'>
+            <Text strong className='block mb-1'>
               {t('有效期')}
             </Text>
             <DatePicker
@@ -287,7 +290,7 @@ const GiftCodeCard = ({
           </div>
         </div>
 
-        <div className='grid grid-cols-1 sm:grid-cols-2 gap-3 w-full'>
+        <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 w-full'>
           <Select
             value={receiverType}
             onChange={(value) => {
@@ -309,7 +312,7 @@ const GiftCodeCard = ({
         <TextArea
           value={message}
           onChange={setMessage}
-          rows={2}
+          rows={1}
           maxCount={500}
           placeholder={t('给接收人的留言，可选')}
           style={{ width: '100%' }}
@@ -332,7 +335,7 @@ const GiftCodeCard = ({
 
         {manualCopyLink && (
           <div
-            className='w-full rounded-lg p-3'
+            className='w-full rounded-lg p-2'
             style={{
               backgroundColor: 'var(--semi-color-warning-light-default)',
             }}
@@ -353,10 +356,10 @@ const GiftCodeCard = ({
             className='w-full pt-2'
             style={{ borderTop: '1px solid var(--semi-color-border)' }}
           >
-            <Text strong className='block mb-2'>
+            <Text strong className='block mb-1'>
               {t('最近生成')}
             </Text>
-            <Space vertical align='start' style={{ width: '100%' }}>
+            <Space vertical spacing={6} align='start' style={{ width: '100%' }}>
               {giftCodes.slice(0, 5).map((giftCode) => {
                 const status = getGiftCodeStatus(t, giftCode);
                 return (

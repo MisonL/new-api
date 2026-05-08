@@ -50,6 +50,7 @@ import PaymentSetting from '../../components/settings/PaymentSetting';
 import ModelDeploymentSetting from '../../components/settings/ModelDeploymentSetting';
 import PerformanceSetting from '../../components/settings/PerformanceSetting';
 import SelectableButtonGroup from '../../components/common/ui/SelectableButtonGroup';
+import ConsolePageLayout from '../../components/layout/ConsolePageLayout';
 
 const Setting = () => {
   const { t } = useTranslation();
@@ -165,7 +166,7 @@ const Setting = () => {
   }));
 
   return (
-    <div className='mt-[60px] px-2'>
+    <ConsolePageLayout>
       <Layout>
         <Layout.Content>
           <SelectableButtonGroup
@@ -185,7 +186,7 @@ const Setting = () => {
           ) : null}
         </Layout.Content>
       </Layout>
-    </div>
+    </ConsolePageLayout>
   );
 };
 

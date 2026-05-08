@@ -41,6 +41,7 @@ import TransferModal from './modals/TransferModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
 import InvitationRecordsModal from './modals/InvitationRecordsModal';
+import ConsolePageLayout from '../layout/ConsolePageLayout';
 
 const TopUp = () => {
   const { t } = useTranslation();
@@ -728,7 +729,7 @@ const TopUp = () => {
   };
 
   return (
-    <div className='w-full max-w-7xl mx-auto relative min-h-screen lg:min-h-0 mt-[60px] lg:mt-0 px-2'>
+    <ConsolePageLayout className='w-full max-w-7xl mx-auto relative min-h-screen lg:min-h-0'>
       {/* 划转模态框 */}
       <TransferModal
         t={t}
@@ -802,7 +803,7 @@ const TopUp = () => {
       </Modal>
 
       {/* 主布局区域 */}
-      <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
+      <div className='grid grid-cols-1 lg:grid-cols-2 gap-4'>
         <RechargeCard
           t={t}
           enableOnlineTopUp={enableOnlineTopUp}
@@ -849,7 +850,7 @@ const TopUp = () => {
           allSubscriptions={allSubscriptions}
           reloadSubscriptionSelf={getSubscriptionSelf}
         />
-        <div>
+        <div className='space-y-3'>
           <InvitationCard
             t={t}
             userState={userState}
@@ -868,7 +869,7 @@ const TopUp = () => {
           />
         </div>
       </div>
-    </div>
+    </ConsolePageLayout>
   );
 };
 
