@@ -186,8 +186,8 @@ export const createDashboardChartAreaClickGuard = () => {
   let chartClickHandled = false;
 
   return {
-    markChartClickHandled: () => {
-      chartClickHandled = true;
+    markChartClickHandled: (target) => {
+      chartClickHandled = Boolean(target?.time);
     },
     shouldHandleAreaClick: () => {
       if (!chartClickHandled) {

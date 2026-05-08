@@ -334,10 +334,18 @@ export function processChartData(
   const topAreaModels = new Set(
     rankedQuotaModels.slice(0, MAX_AREA_MODELS).map((m) => m.Model)
   )
+  const collapsedAreaModels = rankedQuotaModels
+    .slice(MAX_AREA_MODELS)
+    .map((m) => m.Model)
 
-  const areaValues: typeof lineValues = []
+  const areaValues: Array<
+    (typeof lineValues)[number] & { CollapsedModels?: string[] }
+  > = []
   chartTimes.forEach((time) => {
-    const buckets = new Map<string, { rawQuota: number; usage: number }>()
+    const buckets = new Map<
+      string,
+      { rawQuota: number; usage: number; collapsedModels?: string[] }
+    >()
     const modelMap = timeModelMap.get(time)
     let timeSum = 0
     sortedModels.forEach((model) => {
@@ -348,9 +356,14 @@ export function processChartData(
       timeSum += rawQuota
       const key = topAreaModels.has(model) ? model : otherLabel
       const prev = buckets.get(key) || { rawQuota: 0, usage: 0 }
+      const collapsedModels =
+        key === otherLabel && rawQuota > 0
+          ? [...(prev.collapsedModels || []), model]
+          : prev.collapsedModels
       buckets.set(key, {
         rawQuota: prev.rawQuota + rawQuota,
         usage: Number((prev.usage + usage).toFixed(4)),
+        collapsedModels,
       })
     })
     for (const [model, vals] of buckets) {
@@ -360,6 +373,9 @@ export function processChartData(
         rawQuota: vals.rawQuota,
         Usage: vals.usage,
         TimeSum: timeSum,
+        ...(model === otherLabel
+          ? { CollapsedModels: vals.collapsedModels || collapsedAreaModels }
+          : {}),
       })
     }
   })

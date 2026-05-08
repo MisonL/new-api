@@ -65,6 +65,11 @@ const DashboardLogsModal = ({
     () => getDashboardLogColumns({ isAdminUser, t }),
     [isAdminUser, t],
   );
+  const modalBodyStyle = {
+    padding: '10px 14px 14px',
+    maxHeight: 'calc(100dvh - 64px)',
+    overflow: 'hidden',
+  };
 
   const loadLogs = useCallback(
     async (nextPage, nextPageSize, filterValues) => {
@@ -149,10 +154,12 @@ const DashboardLogsModal = ({
       visible={visible}
       onCancel={onClose}
       footer={null}
-      width={1180}
+      width='min(1280px, calc(100vw - 32px))'
+      centered
+      bodyStyle={modalBodyStyle}
       closeOnEsc
     >
-      <div className='flex flex-col gap-4'>
+      <div className='flex max-h-[calc(100dvh-112px)] min-h-0 flex-col gap-2'>
         <Form
           layout='vertical'
           initValues={initialFilters}
@@ -160,9 +167,9 @@ const DashboardLogsModal = ({
           onSubmit={handleSearch}
           autoComplete='off'
         >
-          <div className='rounded-lg border border-semi-color-border bg-semi-color-fill-0 p-3'>
-            <div className='grid grid-cols-1 gap-x-3 gap-y-2 md:grid-cols-2 xl:grid-cols-4'>
-              <div className='md:col-span-2'>
+          <div className='max-h-[34dvh] overflow-y-auto rounded-lg border border-semi-color-border bg-semi-color-fill-0 p-2 md:max-h-none md:overflow-visible'>
+            <div className='grid grid-cols-1 gap-x-2 gap-y-1 md:grid-cols-4 xl:grid-cols-9'>
+              <div className='md:col-span-2 xl:col-span-3'>
                 <Form.DatePicker
                   field='dateRange'
                   label={t('时间范围')}
@@ -219,53 +226,58 @@ const DashboardLogsModal = ({
                 </>
               ) : null}
             </div>
-            <Form.RadioGroup
-              field='logType'
-              label={t('日志类型')}
-              type='button'
-              className='mt-3'
-            >
-              {DASHBOARD_LOG_TYPES.map((item) => (
-                <Radio key={item.value} value={item.value}>
-                  {t(item.label)}
-                </Radio>
-              ))}
-            </Form.RadioGroup>
-            <div className='mt-3 flex justify-end'>
-              <Space>
-                <Button
-                  type='primary'
-                  htmlType='submit'
-                  loading={loading}
-                  size='small'
-                  icon={<IconSearch />}
-                >
-                  {t('查询')}
-                </Button>
-                <Button
-                  type='tertiary'
-                  onClick={() => loadLogs(page, pageSize)}
-                  loading={loading}
-                  size='small'
-                  icon={<IconRefresh />}
-                >
-                  {t('刷新')}
-                </Button>
-                <Button type='tertiary' onClick={handleReset} size='small'>
-                  {t('重置')}
-                </Button>
-              </Space>
+            <div className='mt-1.5 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between'>
+              <Form.RadioGroup
+                field='logType'
+                label={t('日志类型')}
+                type='button'
+                className='m-0 min-w-0 flex-1'
+              >
+                {DASHBOARD_LOG_TYPES.map((item) => (
+                  <Radio key={item.value} value={item.value}>
+                    {t(item.label)}
+                  </Radio>
+                ))}
+              </Form.RadioGroup>
+              <div className='flex justify-end lg:shrink-0'>
+                <Space>
+                  <Button
+                    type='primary'
+                    htmlType='submit'
+                    loading={loading}
+                    size='small'
+                    icon={<IconSearch />}
+                  >
+                    {t('查询')}
+                  </Button>
+                  <Button
+                    type='tertiary'
+                    onClick={() => loadLogs(page, pageSize)}
+                    loading={loading}
+                    size='small'
+                    icon={<IconRefresh />}
+                  >
+                    {t('刷新')}
+                  </Button>
+                  <Button type='tertiary' onClick={handleReset} size='small'>
+                    {t('重置')}
+                  </Button>
+                </Space>
+              </div>
             </div>
           </div>
         </Form>
-        <div className='overflow-hidden rounded-lg border border-semi-color-border bg-semi-color-bg-0'>
+        <div className='min-h-0 flex-1 overflow-hidden rounded-lg border border-semi-color-border bg-semi-color-bg-0'>
           <Table
             columns={columns}
             dataSource={logs}
             rowKey='id'
             loading={loading}
             size='small'
-            scroll={{ x: 'max-content', y: 420 }}
+            scroll={{
+              x: 'max-content',
+              y: 'max(260px, calc(100dvh - 280px))',
+            }}
             pagination={{
               currentPage: page,
               pageSize,

@@ -38,7 +38,7 @@ export const useDashboardDrilldown = ({
   const openDrilldown = useCallback(
     (target) => {
       if (!target) {
-        return;
+        return false;
       }
       const detail = buildDashboardDrilldown({
         quotaData,
@@ -48,21 +48,22 @@ export const useDashboardDrilldown = ({
         t,
       });
       if (!detail || detail.rows.length === 0) {
-        return;
+        return false;
       }
       setDrilldownDetail(detail);
+      return true;
     },
     [dataExportDefaultTime, quotaData, t],
   );
 
   const handleQuotaBarClick = useCallback(
     (event) => {
-      areaClickGuardRef.current.markChartClickHandled();
-      openDrilldown(
-        getDashboardDrilldownTarget({
-          datum: event?.datum || event?.item?.getDatum?.(),
-          otherLabel: t('其他'),
-        }),
+      const target = getDashboardDrilldownTarget({
+        datum: event?.datum || event?.item?.getDatum?.(),
+        otherLabel: t('其他'),
+      });
+      areaClickGuardRef.current.markChartClickHandled(
+        openDrilldown(target) ? target : null,
       );
     },
     [openDrilldown, t],
@@ -70,11 +71,11 @@ export const useDashboardDrilldown = ({
 
   const handleQuotaDimensionClick = useCallback(
     (event) => {
-      areaClickGuardRef.current.markChartClickHandled();
-      openDrilldown(
-        getDashboardDimensionDrilldownTarget({
-          dimensionInfo: event?.dimensionInfo,
-        }),
+      const target = getDashboardDimensionDrilldownTarget({
+        dimensionInfo: event?.dimensionInfo,
+      });
+      areaClickGuardRef.current.markChartClickHandled(
+        openDrilldown(target) ? target : null,
       );
     },
     [openDrilldown],

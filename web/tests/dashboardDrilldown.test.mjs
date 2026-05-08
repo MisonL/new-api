@@ -222,8 +222,19 @@ test("dashboard chart area click guard skips clicks already handled by chart dat
   const guard = createDashboardChartAreaClickGuard();
 
   assert.equal(guard.shouldHandleAreaClick(), true);
-  guard.markChartClickHandled();
+  guard.markChartClickHandled({
+    time: "05-01",
+    models: null,
+  });
   assert.equal(guard.shouldHandleAreaClick(), false);
+  assert.equal(guard.shouldHandleAreaClick(), true);
+});
+
+test("dashboard chart area click guard ignores chart clicks without target", () => {
+  const guard = createDashboardChartAreaClickGuard();
+
+  guard.markChartClickHandled(null);
+
   assert.equal(guard.shouldHandleAreaClick(), true);
 });
 
