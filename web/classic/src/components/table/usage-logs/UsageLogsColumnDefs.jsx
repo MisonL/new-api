@@ -611,8 +611,7 @@ function renderRequestHeaderPolicyTooltipContent(lines, t) {
             <div className='usage-log-header-audit-header-list'>
               {items.map((item, index) => {
                 const headerKey = typeof item === 'string' ? item : item.key;
-                const headerValue =
-                  typeof item === 'string' ? '' : item.value;
+                const headerValue = typeof item === 'string' ? '' : item.value;
                 return (
                   <div
                     key={`${headerKey}-${index}`}

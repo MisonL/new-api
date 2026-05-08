@@ -34,10 +34,7 @@ import { Button, Tooltip, Toast } from '@douyinfe/semi-ui';
 import { copy, rehypeSplitWordsIntoSpans } from '../../../helpers';
 import { IconCopy } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
-import {
-  MERMAID_SECURITY_LEVEL,
-  renderMermaidCode,
-} from './mermaidRenderer';
+import { MERMAID_SECURITY_LEVEL, renderMermaidCode } from './mermaidRenderer';
 
 let mermaidLoader;
 

@@ -2106,6 +2106,7 @@ html.dark .with-pastel-balls::before {
 }
 
 .card-table-fixed-scroll-shell .semi-table-body {
+  padding-bottom: 14px;
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
