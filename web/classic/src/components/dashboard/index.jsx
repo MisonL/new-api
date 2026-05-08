@@ -282,6 +282,9 @@ const Dashboard = () => {
             spec_rank_bar={dashboardCharts.spec_rank_bar}
             spec_user_rank={dashboardCharts.spec_user_rank}
             spec_user_trend={dashboardCharts.spec_user_trend}
+            quotaData={dashboardData.quotaData}
+            modelColors={dashboardData.modelColors}
+            dashboardInputs={dashboardData.inputs}
             isAdminUser={dashboardData.isAdminUser}
             CARD_PROPS={CARD_PROPS}
             CHART_CONFIG={CHART_CONFIG}
@@ -289,6 +292,7 @@ const Dashboard = () => {
             hasApiInfoPanel={dashboardData.hasApiInfoPanel}
             customRangeDraft={dashboardData.customRangeDraft}
             timeOptions={dashboardData.customRangeTimeOptions}
+            dataExportDefaultTime={dashboardData.dataExportDefaultTime}
             activeRangePreset={dashboardData.activeRangePreset}
             quickRangeOptions={dashboardData.quickRangeOptions}
             handleRangePresetChange={handleRangePresetChange}

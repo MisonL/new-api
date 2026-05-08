@@ -17,19 +17,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
-import {
-  Button,
-  Card,
-  DatePicker,
-  Select,
-  Tabs,
-  TabPane,
-} from '@douyinfe/semi-ui';
-import { PieChart } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Card } from '@douyinfe/semi-ui';
 import { VChart } from '@visactor/react-vchart';
-import { DATE_RANGE_PRESETS } from '../../constants/console.constants';
 import { parseDashboardTimestamp } from '../../helpers/dashboard';
+import { useDashboardDrilldown } from '../../hooks/dashboard/useDashboardDrilldown';
+import ChartsPanelHeader from './ChartsPanelHeader';
+import ChartsRangeToolbar from './ChartsRangeToolbar';
+import DashboardDrilldownModal from './DashboardDrilldownModal';
+import DashboardLogsModal from './DashboardLogsModal';
 
 // ChartsPanel renders the dashboard charts together with time-range controls.
 const ChartsPanel = ({
@@ -41,6 +37,9 @@ const ChartsPanel = ({
   spec_rank_bar,
   spec_user_rank,
   spec_user_trend,
+  quotaData,
+  modelColors,
+  dashboardInputs,
   isAdminUser,
   CARD_PROPS,
   CHART_CONFIG,
@@ -48,6 +47,7 @@ const ChartsPanel = ({
   hasApiInfoPanel,
   customRangeDraft,
   timeOptions,
+  dataExportDefaultTime,
   activeRangePreset,
   quickRangeOptions,
   handleRangePresetChange,
@@ -56,6 +56,7 @@ const ChartsPanel = ({
   loading,
   t,
 }) => {
+  const [logScope, setLogScope] = useState(null);
   const customRangeValue = [
     customRangeDraft.start_timestamp,
     customRangeDraft.end_timestamp,
@@ -68,141 +69,137 @@ const ChartsPanel = ({
     (Number.isFinite(customRangeStart) &&
       Number.isFinite(customRangeEnd) &&
       customRangeStart < customRangeEnd);
+  const activeGranularityLabel =
+    timeOptions.find((option) => option.value === dataExportDefaultTime)
+      ?.label || dataExportDefaultTime;
+  const {
+    drilldownDetail,
+    closeDrilldown,
+    handleQuotaBarClick,
+    handleQuotaDimensionClick,
+    handleQuotaChartAreaClick,
+  } = useDashboardDrilldown({
+    quotaData,
+    dataExportDefaultTime,
+    specLine: spec_line,
+    t,
+  });
+  const fallbackLogRange = useMemo(
+    () => ({
+      startTimestamp: Math.floor(customRangeStart / 1000) || 0,
+      endTimestamp: Math.floor(customRangeEnd / 1000) || 0,
+    }),
+    [customRangeEnd, customRangeStart],
+  );
+  const buildBaseLogScope = () => ({
+    title: t('相关日志'),
+    startTimestamp: fallbackLogRange.startTimestamp,
+    endTimestamp: fallbackLogRange.endTimestamp,
+    username: dashboardInputs?.username || '',
+    token_name: dashboardInputs?.token_name || '',
+    model_name: dashboardInputs?.model_name || '',
+    channel: dashboardInputs?.channel || '',
+    group: dashboardInputs?.group || '',
+    request_id: dashboardInputs?.request_id || '',
+    logType: 2,
+  });
+  const openDashboardLogs = () => {
+    setLogScope(buildBaseLogScope());
+  };
+  const openDrilldownLogs = () => {
+    if (!drilldownDetail) {
+      return;
+    }
+    setLogScope({
+      ...buildBaseLogScope(),
+      title: `${t('相关日志')} · ${drilldownDetail.time}`,
+      startTimestamp: drilldownDetail.startTimestamp,
+      endTimestamp: drilldownDetail.endTimestamp,
+    });
+  };
+  const closeLogs = () => setLogScope(null);
 
   return (
-    <Card
-      {...CARD_PROPS}
-      className={`!rounded-2xl ${hasApiInfoPanel ? 'lg:col-span-3' : ''}`}
-      title={
-        <div className='flex w-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
-          <div className={`${FLEX_CENTER_GAP2} shrink-0`}>
-            <PieChart size={16} />
-            {t('模型数据分析')}
-          </div>
-          <div className='min-w-0 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'>
-            <div className='min-w-max'>
-              <Tabs
-                type='slash'
-                activeKey={activeChartTab}
-                onChange={setActiveChartTab}
-              >
-                <TabPane tab={<span>{t('消耗分布')}</span>} itemKey='1' />
-                <TabPane tab={<span>{t('调用趋势')}</span>} itemKey='2' />
-                <TabPane tab={<span>{t('调用次数分布')}</span>} itemKey='3' />
-                <TabPane tab={<span>{t('调用次数排行')}</span>} itemKey='4' />
-                {isAdminUser && (
-                  <TabPane tab={<span>{t('用户消耗排行')}</span>} itemKey='5' />
-                )}
-                {isAdminUser && (
-                  <TabPane tab={<span>{t('用户消耗趋势')}</span>} itemKey='6' />
-                )}
-              </Tabs>
-            </div>
-          </div>
-        </div>
-      }
-      bodyStyle={{ padding: 0 }}
-    >
-      <div className='flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3'>
-        <div className='min-w-0 flex-1 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'>
-          <div className='flex min-w-max items-center gap-2'>
-            <span className='shrink-0 text-xs font-medium text-gray-500'>
-              {t('时间范围')}
-            </span>
-            {quickRangeOptions.map((option) => {
-              const isActive = activeRangePreset === option.value;
-              return (
-                <Button
-                  key={option.value}
-                  size='small'
-                  type={isActive ? 'primary' : 'tertiary'}
-                  theme={isActive ? 'solid' : 'borderless'}
-                  className='shrink-0 whitespace-nowrap'
-                  disabled={loading}
-                  onClick={() => handleRangePresetChange(option.value)}
-                >
-                  {option.label}
-                </Button>
-              );
-            })}
-            <Button
-              size='small'
-              type={activeRangePreset === 'custom' ? 'primary' : 'tertiary'}
-              theme={activeRangePreset === 'custom' ? 'solid' : 'light'}
-              className='shrink-0 whitespace-nowrap'
-              disabled={loading}
-              onClick={() => handleRangePresetChange('custom')}
-            >
-              {t('自定义范围')}
-            </Button>
-          </div>
-        </div>
-      </div>
-      {activeRangePreset === 'custom' && (
-        <div className='flex flex-col gap-3 border-b border-gray-100 bg-gray-50/60 px-4 py-3 lg:flex-row lg:items-center lg:justify-between'>
-          <DatePicker
-            type='dateTimeRange'
-            value={customRangeValue}
-            onChange={(_, dateStrings) => handleCustomRangeChange(dateStrings)}
-            presets={DATE_RANGE_PRESETS.map((preset) => ({
-              text: t(preset.text),
-              start: preset.start(),
-              end: preset.end(),
-            }))}
-            placeholder={[t('开始时间'), t('结束时间')]}
-            showClear
-            size='small'
-            disabled={loading}
-            className='min-w-0 w-full lg:max-w-[420px]'
+    <>
+      <Card
+        {...CARD_PROPS}
+        className={`!rounded-2xl ${hasApiInfoPanel ? 'lg:col-span-3' : ''}`}
+        title={
+          <ChartsPanelHeader
+            activeChartTab={activeChartTab}
+            setActiveChartTab={setActiveChartTab}
+            isAdminUser={isAdminUser}
+            flexCenterGap2={FLEX_CENTER_GAP2}
+            onOpenLogs={openDashboardLogs}
+            t={t}
           />
-          <div className='flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-end lg:w-auto'>
-            <Select
-              value={customRangeDraft.default_time}
-              optionList={timeOptions}
-              onChange={(value) =>
-                handleCustomRangeChange(customRangeValue, value)
-              }
-              placeholder={t('时间粒度')}
-              size='small'
-              disabled={loading}
-              className='w-full sm:w-36'
-            />
-            <Button
-              type='primary'
-              size='small'
-              className='w-full sm:w-auto'
-              loading={loading}
-              disabled={
-                loading || !hasCompleteCustomRange || !isCustomRangeOrderValid
-              }
-              onClick={handleCustomRangeConfirm}
+        }
+        bodyStyle={{ padding: 0 }}
+      >
+        <ChartsRangeToolbar
+          activeRangePreset={activeRangePreset}
+          activeGranularityLabel={activeGranularityLabel}
+          customRangeDraft={customRangeDraft}
+          customRangeValue={customRangeValue}
+          hasCompleteCustomRange={hasCompleteCustomRange}
+          isCustomRangeOrderValid={isCustomRangeOrderValid}
+          loading={loading}
+          quickRangeOptions={quickRangeOptions}
+          timeOptions={timeOptions}
+          handleRangePresetChange={handleRangePresetChange}
+          handleCustomRangeChange={handleCustomRangeChange}
+          handleCustomRangeConfirm={handleCustomRangeConfirm}
+          t={t}
+        />
+        <div className='h-96 p-2 pt-0'>
+          {activeChartTab === '1' && (
+            <div
+              className='h-full cursor-pointer'
+              onClick={handleQuotaChartAreaClick}
             >
-              {t('应用')}
-            </Button>
-          </div>
+              <VChart
+                spec={spec_line}
+                option={CHART_CONFIG}
+                onClick={handleQuotaBarClick}
+                onPointerTap={handleQuotaBarClick}
+                onDimensionClick={handleQuotaDimensionClick}
+              />
+            </div>
+          )}
+          {activeChartTab === '2' && (
+            <VChart spec={spec_model_line} option={CHART_CONFIG} />
+          )}
+          {activeChartTab === '3' && (
+            <VChart spec={spec_pie} option={CHART_CONFIG} />
+          )}
+          {activeChartTab === '4' && (
+            <VChart spec={spec_rank_bar} option={CHART_CONFIG} />
+          )}
+          {activeChartTab === '5' && isAdminUser && (
+            <VChart spec={spec_user_rank} option={CHART_CONFIG} />
+          )}
+          {activeChartTab === '6' && isAdminUser && (
+            <VChart spec={spec_user_trend} option={CHART_CONFIG} />
+          )}
         </div>
-      )}
-      <div className='h-96 p-2 pt-0'>
-        {activeChartTab === '1' && (
-          <VChart spec={spec_line} option={CHART_CONFIG} />
-        )}
-        {activeChartTab === '2' && (
-          <VChart spec={spec_model_line} option={CHART_CONFIG} />
-        )}
-        {activeChartTab === '3' && (
-          <VChart spec={spec_pie} option={CHART_CONFIG} />
-        )}
-        {activeChartTab === '4' && (
-          <VChart spec={spec_rank_bar} option={CHART_CONFIG} />
-        )}
-        {activeChartTab === '5' && isAdminUser && (
-          <VChart spec={spec_user_rank} option={CHART_CONFIG} />
-        )}
-        {activeChartTab === '6' && isAdminUser && (
-          <VChart spec={spec_user_trend} option={CHART_CONFIG} />
-        )}
-      </div>
-    </Card>
+      </Card>
+      <DashboardDrilldownModal
+        detail={drilldownDetail}
+        modelColors={modelColors}
+        chartConfig={CHART_CONFIG}
+        onClose={closeDrilldown}
+        onOpenLogs={openDrilldownLogs}
+        t={t}
+      />
+      <DashboardLogsModal
+        visible={!!logScope}
+        scope={logScope}
+        fallbackRange={fallbackLogRange}
+        isAdminUser={isAdminUser}
+        onClose={closeLogs}
+        t={t}
+      />
+    </>
   );
 };
 

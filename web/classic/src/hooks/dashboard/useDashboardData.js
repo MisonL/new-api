@@ -38,7 +38,7 @@ import { useMinimumLoadingTime } from '../common/useMinimumLoadingTime';
 
 const END_TIME_BUFFER_SECONDS = 3600;
 const CUSTOM_RANGE_DAY_THRESHOLD_SECONDS = 7 * 24 * 60 * 60;
-const CUSTOM_RANGE_WEEK_THRESHOLD_SECONDS = 30 * 24 * 60 * 60;
+const CUSTOM_RANGE_WEEK_THRESHOLD_SECONDS = 90 * 24 * 60 * 60;
 
 // useDashboardData manages dashboard filters, chart data, and auxiliary panels.
 export const useDashboardData = (userState, userDispatch, statusState) => {
@@ -235,10 +235,14 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   const quickRangeOptions = useMemo(
     () => [
-      { label: t('最近24小时'), value: '24h' },
-      { label: t('最近7天'), value: '7d' },
-      { label: t('最近30天'), value: '30d' },
-      { label: t('最近90天'), value: '90d' },
+      {
+        label: t('最近24小时'),
+        value: '24h',
+        granularityLabel: t('小时'),
+      },
+      { label: t('最近7天'), value: '7d', granularityLabel: t('天') },
+      { label: t('最近30天'), value: '30d', granularityLabel: t('天') },
+      { label: t('最近90天'), value: '90d', granularityLabel: t('天') },
     ],
     [t],
   );

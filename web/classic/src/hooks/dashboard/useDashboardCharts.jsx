@@ -187,8 +187,18 @@ export const useDashboardCharts = (
           },
         ],
         updateContent: (array) => {
-          array.sort((a, b) => b.value - a.value);
           let sum = 0;
+          for (const item of array) {
+            if (item.datum && item.datum.TimeSum) {
+              sum = item.datum.TimeSum;
+              break;
+            }
+          }
+          array = array.filter((item) => {
+            const value = parseFloat(item.value);
+            return !isNaN(value) && value > 0;
+          });
+          array.sort((a, b) => b.value - a.value);
           for (let i = 0; i < array.length; i++) {
             if (array[i].key == '其他') {
               continue;
@@ -196,9 +206,6 @@ export const useDashboardCharts = (
             let value = parseFloat(array[i].value);
             if (isNaN(value)) {
               value = 0;
-            }
-            if (array[i].datum && array[i].datum.TimeSum) {
-              sum = array[i].datum.TimeSum;
             }
             array[i].value = renderQuota(value, 4);
           }
@@ -537,14 +544,19 @@ export const useDashboardCharts = (
 
       chartTimePoints.forEach((time) => {
         let otherQuota = 0;
+        const collapsedQuotaModels = [];
         uniqueModels.forEach((model) => {
           if (!topQuotaModelSet.has(model)) {
-            otherQuota += getAggregatedValue(
+            const quota = getAggregatedValue(
               aggregatedData,
               time,
               model,
               'quota',
             );
+            otherQuota += quota;
+            if (quota > 0) {
+              collapsedQuotaModels.push(model);
+            }
           }
         });
         let timeData = quotaChartModels.map((model) => {
@@ -557,6 +569,8 @@ export const useDashboardCharts = (
             Model: model,
             rawQuota,
             Usage: rawQuota ? getQuotaWithUnit(rawQuota, 4) : 0,
+            CollapsedModels:
+              model === otherLabel ? collapsedQuotaModels : undefined,
           };
         });
 
