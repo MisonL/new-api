@@ -164,6 +164,100 @@ test("default dashboard dimension target preserves other collapsed models", () =
   });
 });
 
+test("default dashboard dimension target prefers scoped other datum", () => {
+  const target = getDashboardDimensionDrilldownTarget({
+    otherLabel: "Other",
+    dimensionInfo: [
+      {
+        value: "05-01",
+        data: [
+          {
+            datum: {
+              Time: "05-01",
+              Model: "model-01",
+            },
+          },
+          {
+            datum: {
+              Time: "05-01",
+              Model: "Other",
+              CollapsedModels: ["model-16"],
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(target, {
+    time: "05-01",
+    models: ["model-16"],
+  });
+});
+
+test("default dashboard dimension target keeps scoped other first", () => {
+  const target = getDashboardDimensionDrilldownTarget({
+    otherLabel: "Other",
+    dimensionInfo: [
+      {
+        value: "05-01",
+        data: [
+          {
+            datum: {
+              Time: "05-01",
+              Model: "Other",
+              CollapsedModels: ["model-16"],
+            },
+          },
+          {
+            datum: {
+              Time: "05-01",
+              Model: "model-01",
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(target, {
+    time: "05-01",
+    models: ["model-16"],
+  });
+});
+
+test("default dashboard dimension target uses first scoped other datum", () => {
+  const target = getDashboardDimensionDrilldownTarget({
+    otherLabel: "Other",
+    dimensionInfo: [
+      {
+        value: "05-01",
+        data: [
+          {
+            datum: {
+              Time: "05-01",
+              Model: "Other",
+              CollapsedModels: ["model-16"],
+            },
+          },
+          {
+            datum: {
+              Time: "05-01",
+              Model: "Other",
+              CollapsedModels: ["model-17"],
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(target, {
+    time: "05-01",
+    models: ["model-16"],
+  });
+});
+
 test("default dashboard area target maps click position to time bucket", () => {
   const target = getDashboardChartAreaDrilldownTarget({
     clientX: 260,
@@ -186,7 +280,10 @@ test("default dashboard area target maps click position to time bucket", () => {
 });
 
 test("default dashboard area other points carry collapsed models", () => {
-  const data = Array.from({ length: 17 }, (_, index) => ({
+  const visibleCount = 15;
+  const extraForCollapse = 2;
+  const totalItems = visibleCount + extraForCollapse;
+  const data = Array.from({ length: totalItems }, (_, index) => ({
     created_at: 1714550400,
     model_name: `model-${String(index + 1).padStart(2, "0")}`,
     quota: 170 - index,
@@ -214,6 +311,141 @@ test("default dashboard area other points carry collapsed models", () => {
   assert.deepEqual(
     detail.rows.map((item) => item.model),
     ["model-16", "model-17"],
+  );
+});
+
+test("default dashboard drilldown rejects invalid timestamps", () => {
+  for (const createdAt of [Number.NaN, undefined, null, -1, "invalid string"]) {
+    assert.throws(
+      () =>
+        buildDashboardDrilldown({
+          data: [
+            {
+              created_at: createdAt,
+              model_name: "gpt-5.4",
+              quota: 1,
+              count: 1,
+              token_used: 1,
+            },
+          ],
+          targetTime: "05-01",
+          granularity: "day",
+        }),
+      /Invalid timestamp/,
+    );
+  }
+});
+
+test("default dashboard drilldown target falls back without collapsed other", () => {
+  const target = getDashboardDrilldownTarget({
+    datum: {
+      Time: "05-01",
+      Model: "Other",
+    },
+    otherLabel: "Other",
+  });
+
+  assert.deepEqual(target, {
+    time: "05-01",
+    models: null,
+  });
+});
+
+test("default dashboard drilldown target traverses deeply nested arrays", () => {
+  const target = getDashboardDrilldownTarget({
+    datum: [
+      [
+        [
+          {
+            Time: "05-01",
+            Model: "Other",
+            CollapsedModels: ["model-16"],
+          },
+        ],
+      ],
+    ],
+    otherLabel: "Other",
+  });
+
+  assert.deepEqual(target, {
+    time: "05-01",
+    models: ["model-16"],
+  });
+});
+
+test("default dashboard drilldown target returns null without datum time", () => {
+  const target = getDashboardDrilldownTarget({
+    datum: [[{ Model: "Other", CollapsedModels: ["model-16"] }]],
+    otherLabel: "Other",
+  });
+
+  assert.equal(target, null);
+});
+
+test("default dashboard drilldown preserves unscoped timestamp zero", () => {
+  const detail = buildDashboardDrilldown({
+    data: [
+      {
+        created_at: 0,
+        model_name: "gpt-5.4",
+        quota: 1,
+        count: 1,
+        token_used: 1,
+      },
+    ],
+    targetTime: "01-01",
+    granularity: "day",
+  });
+
+  assert.equal(detail.totalQuota, 1);
+});
+
+test("default dashboard drilldown keeps empty model filter scoped", () => {
+  const detail = buildDashboardDrilldown({
+    data: rows,
+    targetTime: "05-01",
+    granularity: "day",
+    models: [],
+  });
+
+  assert.equal(detail.totalQuota, 0);
+  assert.deepEqual(detail.rows, []);
+});
+
+test("default dashboard drilldown treats null model filter as unscoped", () => {
+  for (const models of [undefined, null]) {
+    const detail = buildDashboardDrilldown({
+      data: rows,
+      targetTime: "05-01",
+      granularity: "day",
+      models,
+    });
+
+    assert.equal(detail.totalQuota, 200);
+    assert.deepEqual(
+      detail.rows.map((item) => item.model),
+      ["gpt-5.4", "gpt-5.3-codex"],
+    );
+  }
+});
+
+test("default dashboard drilldown rejects null created_at in matching data", () => {
+  assert.throws(
+    () =>
+      buildDashboardDrilldown({
+        data: [
+          {
+            created_at: null,
+            model_name: "gpt-5.4",
+            quota: 1,
+            count: 1,
+            token_used: 1,
+          },
+        ],
+        targetTime: "05-01",
+        granularity: "day",
+      }),
+    /Invalid timestamp/,
   );
 });
 

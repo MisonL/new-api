@@ -34,7 +34,10 @@ export function getDashboardDrilldownTarget(options: {
   datum: unknown
   otherLabel?: string
 }): DashboardDrilldownTarget | null {
-  const matchedDatum = findDashboardDrilldownDatum(options.datum)
+  const matchedDatum = findDashboardDrilldownDatum(
+    options.datum,
+    options.otherLabel
+  )
   if (!matchedDatum) return null
 
   if (
@@ -148,7 +151,7 @@ export function buildDashboardDrilldown(options: {
 
   for (const item of options.data) {
     const timeKey = formatDashboardTime(
-      Number(item.created_at),
+      parseDashboardTimestamp(item.created_at),
       options.granularity
     )
     if (timeKey !== options.targetTime) continue
@@ -189,10 +192,24 @@ export function buildDashboardDrilldown(options: {
   }
 }
 
-function findDashboardDrilldownDatum(datum: unknown): DashboardDatum | null {
+function findDashboardDrilldownDatum(
+  datum: unknown,
+  otherLabel?: string
+): DashboardDatum | null {
   if (Array.isArray(datum)) {
+    // Dimension events include every series at a time bucket; prefer the scoped Other datum.
+    const scopedOtherDatum = datum
+      .map((item) => findDashboardDrilldownDatum(item, otherLabel))
+      .find(
+        (item) =>
+          item &&
+          item.Model === otherLabel &&
+          Array.isArray(item.CollapsedModels)
+      )
+    if (scopedOtherDatum) return scopedOtherDatum
+
     for (const item of datum) {
-      const matched = findDashboardDrilldownDatum(item)
+      const matched = findDashboardDrilldownDatum(item, otherLabel)
       if (matched) return matched
     }
     return null
@@ -221,6 +238,10 @@ function formatDashboardTime(
   timestamp: number,
   granularity: TimeGranularity
 ): string {
+  if (!Number.isFinite(timestamp) || timestamp < 0) {
+    throw new Error('Invalid timestamp')
+  }
+
   const date = new Date(timestamp * 1000)
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
@@ -234,6 +255,18 @@ function formatDashboardTime(
     return `${base} - ${String(weekEnd.getMonth() + 1).padStart(2, '0')}-${String(weekEnd.getDate()).padStart(2, '0')}`
   }
   return base
+}
+
+function parseDashboardTimestamp(value: unknown): number {
+  if (value == null) {
+    throw new Error('Invalid timestamp')
+  }
+
+  const timestamp = Number(value)
+  if (!Number.isFinite(timestamp) || timestamp < 0) {
+    throw new Error('Invalid timestamp')
+  }
+  return timestamp
 }
 
 function toFiniteNumber(value: unknown): number {

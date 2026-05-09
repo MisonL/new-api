@@ -73,12 +73,13 @@ export const useDashboardDrilldown = ({
     (event) => {
       const target = getDashboardDimensionDrilldownTarget({
         dimensionInfo: event?.dimensionInfo,
+        otherLabel: t('其他'),
       });
       areaClickGuardRef.current.markChartClickHandled(
         openDrilldown(target) ? target : null,
       );
     },
-    [openDrilldown],
+    [openDrilldown, t],
   );
 
   const handleQuotaChartAreaClick = useCallback(

@@ -86,6 +86,19 @@ test("buildDashboardDrilldown aggregates one time bucket by model", () => {
   ]);
 });
 
+test("buildDashboardDrilldown keeps empty model filter scoped", () => {
+  const detail = buildDashboardDrilldown({
+    quotaData: rows,
+    targetTime: "05-01",
+    granularity: "day",
+    models: [],
+    t: translate,
+  });
+
+  assert.equal(detail.totalQuota, 0);
+  assert.deepEqual(detail.rows, []);
+});
+
 test("getDashboardBucketLogRange returns bucket start and end seconds", () => {
   assert.deepEqual(
     getDashboardBucketLogRange({
@@ -125,6 +138,22 @@ test("getDashboardDrilldownTarget expands collapsed other models", () => {
   assert.deepEqual(target, {
     time: "2024-05-01",
     models: ["rare-a", "rare-b"],
+  });
+});
+
+test("getDashboardDrilldownTarget keeps empty collapsed other scoped", () => {
+  const target = getDashboardDrilldownTarget({
+    datum: {
+      Time: "2024-05-01",
+      Model: "其他",
+      CollapsedModels: [],
+    },
+    otherLabel: "其他",
+  });
+
+  assert.deepEqual(target, {
+    time: "2024-05-01",
+    models: [],
   });
 });
 
@@ -197,6 +226,100 @@ test("getDashboardDimensionDrilldownTarget prefers nested datum time", () => {
   });
 });
 
+test("getDashboardDimensionDrilldownTarget prefers scoped other datum", () => {
+  const target = getDashboardDimensionDrilldownTarget({
+    otherLabel: "其他",
+    dimensionInfo: [
+      {
+        value: "05-01",
+        data: [
+          {
+            datum: {
+              Time: "05-01",
+              Model: "gpt-4o",
+            },
+          },
+          {
+            datum: {
+              Time: "05-01",
+              Model: "其他",
+              CollapsedModels: ["rare-a"],
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(target, {
+    time: "05-01",
+    models: ["rare-a"],
+  });
+});
+
+test("getDashboardDimensionDrilldownTarget keeps scoped other first", () => {
+  const target = getDashboardDimensionDrilldownTarget({
+    otherLabel: "其他",
+    dimensionInfo: [
+      {
+        value: "05-01",
+        data: [
+          {
+            datum: {
+              Time: "05-01",
+              Model: "其他",
+              CollapsedModels: ["rare-a"],
+            },
+          },
+          {
+            datum: {
+              Time: "05-01",
+              Model: "gpt-4o",
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(target, {
+    time: "05-01",
+    models: ["rare-a"],
+  });
+});
+
+test("getDashboardDimensionDrilldownTarget uses first scoped other datum", () => {
+  const target = getDashboardDimensionDrilldownTarget({
+    otherLabel: "其他",
+    dimensionInfo: [
+      {
+        value: "05-01",
+        data: [
+          {
+            datum: {
+              Time: "05-01",
+              Model: "其他",
+              CollapsedModels: ["rare-a"],
+            },
+          },
+          {
+            datum: {
+              Time: "05-01",
+              Model: "其他",
+              CollapsedModels: ["rare-b"],
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(target, {
+    time: "05-01",
+    models: ["rare-a"],
+  });
+});
+
 test("getDashboardChartAreaDrilldownTarget maps click position to time bucket", () => {
   const target = getDashboardChartAreaDrilldownTarget({
     clientX: 260,
@@ -235,6 +358,16 @@ test("dashboard chart area click guard ignores chart clicks without target", () 
 
   guard.markChartClickHandled(null);
 
+  assert.equal(guard.shouldHandleAreaClick(), true);
+  assert.equal(guard.shouldHandleAreaClick(), true);
+});
+
+test("dashboard chart area click guard preserves legacy handled clicks", () => {
+  const guard = createDashboardChartAreaClickGuard();
+
+  guard.markChartClickHandled();
+
+  assert.equal(guard.shouldHandleAreaClick(), false);
   assert.equal(guard.shouldHandleAreaClick(), true);
 });
 

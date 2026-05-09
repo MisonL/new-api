@@ -24,7 +24,7 @@ import {
 } from './dashboardTimeBucket.js';
 
 const normalizeModelFilter = (models) => {
-  if (!Array.isArray(models) || models.length === 0) {
+  if (!Array.isArray(models)) {
     return null;
   }
   return new Set(models.filter((model) => typeof model === 'string' && model));
@@ -90,10 +90,23 @@ export const getDashboardBucketLogRange = ({
   };
 };
 
-const findDrilldownDatum = (datum) => {
+const findDrilldownDatum = (datum, otherLabel) => {
   if (Array.isArray(datum)) {
+    // Dimension events include every series at a time bucket; prefer the scoped Other datum.
+    const scopedOtherDatum = datum
+      .map((item) => findDrilldownDatum(item, otherLabel))
+      .find(
+        (item) =>
+          item &&
+          item.Model === otherLabel &&
+          Array.isArray(item.CollapsedModels),
+      );
+    if (scopedOtherDatum) {
+      return scopedOtherDatum;
+    }
+
     for (const item of datum) {
-      const matched = findDrilldownDatum(item);
+      const matched = findDrilldownDatum(item, otherLabel);
       if (matched) {
         return matched;
       }
@@ -107,19 +120,20 @@ const findDrilldownDatum = (datum) => {
 };
 
 export const getDashboardDrilldownTarget = ({ datum, otherLabel }) => {
-  const matchedDatum = findDrilldownDatum(datum);
+  const matchedDatum = findDrilldownDatum(datum, otherLabel);
   if (!matchedDatum) {
     return null;
   }
 
   if (
     matchedDatum.Model === otherLabel &&
-    Array.isArray(matchedDatum.CollapsedModels) &&
-    matchedDatum.CollapsedModels.length > 0
+    Array.isArray(matchedDatum.CollapsedModels)
   ) {
     return {
       time: matchedDatum.Time,
-      models: matchedDatum.CollapsedModels,
+      models: matchedDatum.CollapsedModels.filter(
+        (model) => typeof model === 'string' && model,
+      ),
     };
   }
 
@@ -129,7 +143,10 @@ export const getDashboardDrilldownTarget = ({ datum, otherLabel }) => {
   };
 };
 
-export const getDashboardDimensionDrilldownTarget = ({ dimensionInfo }) => {
+export const getDashboardDimensionDrilldownTarget = ({
+  dimensionInfo,
+  otherLabel,
+}) => {
   const firstDimension = Array.isArray(dimensionInfo) ? dimensionInfo[0] : null;
   if (!firstDimension) {
     return null;
@@ -140,6 +157,7 @@ export const getDashboardDimensionDrilldownTarget = ({ dimensionInfo }) => {
     : null;
   const datumTarget = getDashboardDrilldownTarget({
     datum: dimensionDatum,
+    otherLabel,
   });
   if (datumTarget) {
     return datumTarget;
@@ -186,8 +204,8 @@ export const createDashboardChartAreaClickGuard = () => {
   let chartClickHandled = false;
 
   return {
-    markChartClickHandled: (target) => {
-      chartClickHandled = Boolean(target?.time);
+    markChartClickHandled(target) {
+      chartClickHandled = arguments.length === 0 ? true : Boolean(target?.time);
     },
     shouldHandleAreaClick: () => {
       if (!chartClickHandled) {
