@@ -217,6 +217,32 @@ export const createDashboardChartAreaClickGuard = () => {
   };
 };
 
+const getDatumRecord = ({ datum, item }) => {
+  const itemDatum = item?.getDatum?.();
+  const candidate = datum || itemDatum;
+  if (Array.isArray(candidate)) {
+    return candidate.find(
+      (entry) => entry && typeof entry === 'object' && entry.type != null,
+    );
+  }
+  if (!candidate || typeof candidate !== 'object') {
+    return null;
+  }
+  return candidate;
+};
+
+export const getDashboardDistributionLogRow = ({ datum, item, rows }) => {
+  if (!Array.isArray(rows)) {
+    return null;
+  }
+  const record = getDatumRecord({ datum, item });
+  if (!record || record.type == null) {
+    return null;
+  }
+  const model = String(record.type);
+  return rows.find((row) => row?.model === model) || null;
+};
+
 export const buildDashboardDrilldown = ({
   quotaData,
   targetTime,

@@ -7,6 +7,7 @@ import {
   getDashboardBucketLogRange,
   getDashboardChartAreaDrilldownTarget,
   getDashboardDimensionDrilldownTarget,
+  getDashboardDistributionLogRow,
   getDashboardDrilldownTarget,
 } from "../classic/src/helpers/dashboardDrilldown.js";
 import { formatDashboardTimeBucket } from "../classic/src/helpers/dashboardTimeBucket.js";
@@ -124,6 +125,45 @@ test("buildDashboardDrilldown keeps raw model name for log filters", () => {
 
   assert.equal(detail.rows[0].model, "未知模型");
   assert.equal(detail.rows[0].logModelName, "");
+});
+
+test("getDashboardDistributionLogRow maps clicked pie datum to log row", () => {
+  const detail = buildDashboardDrilldown({
+    quotaData: rows,
+    targetTime: "05-01",
+    granularity: "day",
+    t: translate,
+  });
+
+  const row = getDashboardDistributionLogRow({
+    datum: { type: "gpt-4o-mini", value: 80 },
+    rows: detail.rows,
+  });
+
+  assert.equal(row.model, "gpt-4o-mini");
+  assert.equal(row.logModelName, "gpt-4o-mini");
+});
+
+test("getDashboardDistributionLogRow reads nested vchart item datum", () => {
+  const row = getDashboardDistributionLogRow({
+    datum: null,
+    item: {
+      getDatum: () => ({ type: "未知模型", value: 10 }),
+    },
+    rows: [
+      {
+        model: "未知模型",
+        logModelName: "",
+        quota: 10,
+        count: 1,
+        tokens: 20,
+        ratio: 1,
+      },
+    ],
+  });
+
+  assert.equal(row.model, "未知模型");
+  assert.equal(row.logModelName, "");
 });
 
 test("getDashboardBucketLogRange returns bucket start and end seconds", () => {
@@ -504,4 +544,54 @@ test("dashboard log refresh controls do not submit the filter form", () => {
     modalSource,
     /htmlType='button'[\s\S]{0,120}onClick=\{handleReset\}/,
   );
+});
+
+test("dashboard log modal does not force desktop horizontal overflow", () => {
+  const modalSource = fs.readFileSync(
+    path.join(
+      testDir,
+      "../classic/src/components/dashboard/DashboardLogsModal.jsx",
+    ),
+    "utf8",
+  );
+
+  assert.doesNotMatch(modalSource, /const tableScrollX/);
+  assert.doesNotMatch(modalSource, /x:\s*(?:1210|1330|tableScrollX)/);
+  assert.match(modalSource, /x:\s*'max-content'/);
+});
+
+test("dashboard distribution chart opens scoped row logs", () => {
+  const modalSource = fs.readFileSync(
+    path.join(
+      testDir,
+      "../classic/src/components/dashboard/DashboardDrilldownModal.jsx",
+    ),
+    "utf8",
+  );
+
+  assert.match(modalSource, /const handleDistributionClick = \(event\) => \{/);
+  assert.match(modalSource, /getDashboardDistributionLogRow\(\{/);
+  assert.doesNotMatch(modalSource, /getDashboardDistributionClickLogRow/);
+  assert.match(modalSource, /onOpenRowLogs\?\.\(row\)/);
+  assert.doesNotMatch(modalSource, /onClick=\{handleDistributionAreaClick\}/);
+  assert.match(
+    modalSource,
+    /onClick=\{handleDistributionClick\}[\s\S]{0,120}onPointerTap=\{handleDistributionClick\}/,
+  );
+});
+
+test("dashboard distribution chart enlarges hovered ring segment", () => {
+  const modalSource = fs.readFileSync(
+    path.join(
+      testDir,
+      "../classic/src/components/dashboard/DashboardDrilldownModal.jsx",
+    ),
+    "utf8",
+  );
+
+  assert.match(modalSource, /pie:\s*\{/);
+  assert.match(modalSource, /state:\s*\{\s*hover:\s*\{/);
+  assert.match(modalSource, /outerRadius:\s*0\.83/);
+  assert.match(modalSource, /stroke:\s*'#000'/);
+  assert.match(modalSource, /lineWidth:\s*1/);
 });

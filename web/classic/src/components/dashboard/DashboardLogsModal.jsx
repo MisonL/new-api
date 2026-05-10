@@ -51,7 +51,6 @@ const DashboardLogsModal = ({
     ? (statusState.status.log_filter_autocomplete_enabled ?? true)
     : false;
   const isMobile = useIsMobile();
-  const tableScrollX = isAdminUser ? 1330 : 1210;
   const tableScrollY = isMobile
     ? 'clamp(180px, calc(100dvh - 600px), 280px)'
     : 'clamp(240px, calc(100dvh - 480px), 360px)';
@@ -312,7 +311,7 @@ const DashboardLogsModal = ({
             loading={loading}
             size='small'
             scroll={{
-              x: tableScrollX,
+              x: 'max-content',
               y: tableScrollY,
             }}
             pagination={{

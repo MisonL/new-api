@@ -28,6 +28,7 @@ import {
   Typography,
 } from '@douyinfe/semi-ui';
 import { renderNumber, renderQuota } from '../../helpers';
+import { getDashboardDistributionLogRow } from '../../helpers/dashboardDrilldown';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import LazyVChart from './LazyVChart';
 
@@ -131,6 +132,15 @@ const DashboardDrilldownModal = ({
       padAngle: 0.6,
       valueField: 'value',
       categoryField: 'type',
+      pie: {
+        state: {
+          hover: {
+            outerRadius: 0.83,
+            stroke: '#000',
+            lineWidth: 1,
+          },
+        },
+      },
       legends: { visible: true, orient: 'right' },
       tooltip: {
         mark: {
@@ -146,6 +156,16 @@ const DashboardDrilldownModal = ({
     }),
     [detail?.distribution, modelColors],
   );
+  const handleDistributionClick = (event) => {
+    const row = getDashboardDistributionLogRow({
+      datum: event?.datum,
+      item: event?.item,
+      rows: detail?.rows,
+    });
+    if (row) {
+      onOpenRowLogs?.(row);
+    }
+  };
 
   return (
     <Modal
@@ -212,7 +232,12 @@ const DashboardDrilldownModal = ({
             <TabPane tab={t('分布')} itemKey='distribution'>
               <div className='h-[clamp(220px,calc(100dvh-360px),360px)] rounded-lg border border-semi-color-border bg-semi-color-bg-1 p-3'>
                 {detail.distribution.length > 0 ? (
-                  <LazyVChart spec={spec} option={chartConfig} />
+                  <LazyVChart
+                    spec={spec}
+                    option={chartConfig}
+                    onClick={handleDistributionClick}
+                    onPointerTap={handleDistributionClick}
+                  />
                 ) : (
                   <Empty title={t('暂无数据')} />
                 )}
