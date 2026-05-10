@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	suggestionHardLimit  = 20
-	suggestionScanWindow = 50000
+	suggestionHardLimit          = 20
+	suggestionScanWindow         = 50000
+	requestIDSuggestionMinPrefix = 8
 )
 
 type suggestionStringRow struct {
@@ -50,6 +51,24 @@ func buildContainsLikePattern(keyword string) string {
 	return "%" + trimmed + "%"
 }
 
+func normalizePrefixKeyword(keyword string) string {
+	return strings.TrimSpace(keyword)
+}
+
+func nextStringPrefix(prefix string) (string, bool) {
+	if prefix == "" {
+		return "", false
+	}
+	bytes := []byte(prefix)
+	for i := len(bytes) - 1; i >= 0; i-- {
+		if bytes[i] != 0xff {
+			bytes[i]++
+			return string(bytes[:i+1]), true
+		}
+	}
+	return "", false
+}
+
 func recentSuggestionBase(tx *gorm.DB, column string, timeColumn string, nonEmptyCondition string) *gorm.DB {
 	return tx.Select(column + " AS value, " + timeColumn + " AS suggestion_time").
 		Where(nonEmptyCondition).
@@ -62,13 +81,28 @@ func recentSuggestionQuery(tx *gorm.DB, recent *gorm.DB) *gorm.DB {
 		Table("(?) AS recent_suggestions", recent)
 }
 
+func usePrefixStringSuggestion(column string) bool {
+	return column == "request_id"
+}
+
 // scanStringSuggestions is internal-only. Callers must pass validated constant
 // column names from get*SuggestionFieldColumn and a fixed timestamp column.
 func scanStringSuggestions(tx *gorm.DB, column string, timeColumn string, keyword string, limit int) ([]string, error) {
-	pattern := buildContainsLikePattern(keyword)
 	recent := recentSuggestionBase(tx, column, timeColumn, column+" <> ''")
+	pattern := buildContainsLikePattern(keyword)
+	if usePrefixStringSuggestion(column) {
+		prefix := normalizePrefixKeyword(keyword)
+		if len(prefix) < requestIDSuggestionMinPrefix {
+			return []string{}, nil
+		}
+		recent = recent.Where(column+" >= ?", prefix)
+		if upper, ok := nextStringPrefix(prefix); ok {
+			recent = recent.Where(column+" < ?", upper)
+		}
+		pattern = ""
+	}
 	query := recentSuggestionQuery(tx, recent)
-	if pattern != "" {
+	if pattern != "" && !usePrefixStringSuggestion(column) {
 		query = query.Where("value LIKE ? ESCAPE '!'", pattern)
 	}
 

@@ -45,8 +45,11 @@ const (
 
 var customOAuthStatusCache = struct {
 	sync.RWMutex
-	expiresAt time.Time
-	payload   []customOAuthStatusInfo
+	expiresAt            time.Time
+	payload              []customOAuthStatusInfo
+	refreshing           bool
+	refreshingGeneration uint64
+	generation           uint64
 }{
 	payload: make([]customOAuthStatusInfo, 0),
 }
@@ -55,38 +58,38 @@ func invalidateCustomOAuthStatusCache() {
 	customOAuthStatusCache.Lock()
 	customOAuthStatusCache.expiresAt = time.Time{}
 	customOAuthStatusCache.payload = make([]customOAuthStatusInfo, 0)
+	customOAuthStatusCache.refreshing = false
+	customOAuthStatusCache.refreshingGeneration = 0
+	customOAuthStatusCache.generation++
 	customOAuthStatusCache.Unlock()
 }
 
-func getCustomOAuthStatusPayload() []customOAuthStatusInfo {
-	now := time.Now()
-	customOAuthStatusCache.RLock()
-	if now.Before(customOAuthStatusCache.expiresAt) {
-		cached := append([]customOAuthStatusInfo(nil), customOAuthStatusCache.payload...)
-		customOAuthStatusCache.RUnlock()
-		return cached
-	}
-	stale := append([]customOAuthStatusInfo(nil), customOAuthStatusCache.payload...)
-	customOAuthStatusCache.RUnlock()
-
-	customOAuthStatusCache.Lock()
-	defer customOAuthStatusCache.Unlock()
-
-	now = time.Now()
-	if now.Before(customOAuthStatusCache.expiresAt) {
-		return append([]customOAuthStatusInfo(nil), customOAuthStatusCache.payload...)
-	}
-
+func loadCustomOAuthStatusPayload(now time.Time, stale []customOAuthStatusInfo) []customOAuthStatusInfo {
 	ctx, cancel := context.WithTimeout(context.Background(), customOAuthStatusQueryTimeout)
 	defer cancel()
 
-	customProviders, err := model.GetEnabledCustomOAuthProvidersForStatusContext(ctx)
-	if err != nil {
-		common.SysError("failed to load enabled custom auth providers for status payload: " + err.Error())
-		customOAuthStatusCache.payload = append([]customOAuthStatusInfo(nil), stale...)
-		customOAuthStatusCache.expiresAt = now.Add(customOAuthStatusCacheTTL)
-		return append([]customOAuthStatusInfo(nil), stale...)
+	type queryResult struct {
+		providers []*model.CustomOAuthProvider
+		err       error
 	}
+	resultCh := make(chan queryResult, 1)
+	go func() {
+		customProviders, err := model.GetEnabledCustomOAuthProvidersForStatusContext(ctx)
+		resultCh <- queryResult{providers: customProviders, err: err}
+	}()
+
+	var result queryResult
+	select {
+	case result = <-resultCh:
+	case <-ctx.Done():
+		common.SysError("failed to load enabled custom auth providers for status payload: " + ctx.Err().Error())
+		return stale
+	}
+	if result.err != nil {
+		common.SysError("failed to load enabled custom auth providers for status payload: " + result.err.Error())
+		return stale
+	}
+	customProviders := result.providers
 
 	providersInfo := make([]customOAuthStatusInfo, 0, len(customProviders))
 	for _, config := range customProviders {
@@ -125,8 +128,69 @@ func getCustomOAuthStatusPayload() []customOAuthStatusInfo {
 			BrowserLoginSupported:     sanitized.SupportsBrowserLogin(),
 		})
 	}
+	return providersInfo
+}
+
+func refreshCustomOAuthStatusPayload(stale []customOAuthStatusInfo, generation uint64) {
+	now := time.Now()
+	providersInfo := loadCustomOAuthStatusPayload(now, stale)
+	customOAuthStatusCache.Lock()
+	defer customOAuthStatusCache.Unlock()
+	if customOAuthStatusCache.generation != generation {
+		if customOAuthStatusCache.refreshing && customOAuthStatusCache.refreshingGeneration == generation {
+			customOAuthStatusCache.refreshing = false
+			customOAuthStatusCache.refreshingGeneration = 0
+		}
+		return
+	}
 	customOAuthStatusCache.payload = append([]customOAuthStatusInfo(nil), providersInfo...)
 	customOAuthStatusCache.expiresAt = now.Add(customOAuthStatusCacheTTL)
+	customOAuthStatusCache.refreshing = false
+	customOAuthStatusCache.refreshingGeneration = 0
+}
+
+func getCustomOAuthStatusPayload() []customOAuthStatusInfo {
+	now := time.Now()
+	customOAuthStatusCache.RLock()
+	if now.Before(customOAuthStatusCache.expiresAt) {
+		cached := append([]customOAuthStatusInfo(nil), customOAuthStatusCache.payload...)
+		customOAuthStatusCache.RUnlock()
+		return cached
+	}
+	stale := append([]customOAuthStatusInfo(nil), customOAuthStatusCache.payload...)
+	refreshing := customOAuthStatusCache.refreshing
+	customOAuthStatusCache.RUnlock()
+	if len(stale) > 0 && refreshing {
+		return stale
+	}
+
+	customOAuthStatusCache.Lock()
+	defer customOAuthStatusCache.Unlock()
+
+	now = time.Now()
+	if now.Before(customOAuthStatusCache.expiresAt) {
+		return append([]customOAuthStatusInfo(nil), customOAuthStatusCache.payload...)
+	}
+	stale = append([]customOAuthStatusInfo(nil), customOAuthStatusCache.payload...)
+	if len(stale) > 0 {
+		if !customOAuthStatusCache.refreshing {
+			customOAuthStatusCache.refreshing = true
+			customOAuthStatusCache.refreshingGeneration = customOAuthStatusCache.generation
+			go refreshCustomOAuthStatusPayload(stale, customOAuthStatusCache.refreshingGeneration)
+		}
+		return stale
+	}
+	if customOAuthStatusCache.refreshing {
+		return stale
+	}
+
+	customOAuthStatusCache.refreshing = true
+	customOAuthStatusCache.refreshingGeneration = customOAuthStatusCache.generation
+	providersInfo := loadCustomOAuthStatusPayload(now, stale)
+	customOAuthStatusCache.payload = append([]customOAuthStatusInfo(nil), providersInfo...)
+	customOAuthStatusCache.expiresAt = now.Add(customOAuthStatusCacheTTL)
+	customOAuthStatusCache.refreshing = false
+	customOAuthStatusCache.refreshingGeneration = 0
 	return providersInfo
 }
 

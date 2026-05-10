@@ -26,14 +26,14 @@ func TestRecordLogWithAdminInfoKeepsAuditForAdminsOnly(t *testing.T) {
 		"admin_username": "root-admin",
 	})
 
-	adminLogs, total, err := GetAllLogs(LogTypeManage, 0, 0, "", "", "", 0, 10, 0, "", "")
+	adminLogs, total, err := GetAllLogs(LogTypeManage, 0, 0, "", false, "", "", 0, 10, 0, "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, adminLogs, 1)
 	require.Contains(t, adminLogs[0].Other, "admin_info")
 	require.Equal(t, "管理员增加用户额度 1000", adminLogs[0].Content)
 
-	userLogs, total, err := GetUserLogs(101, LogTypeManage, 0, 0, "", "", 0, 10, "", "")
+	userLogs, total, err := GetUserLogs(101, LogTypeManage, 0, 0, "", false, "", 0, 10, "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, userLogs, 1)
@@ -81,7 +81,7 @@ func TestRecordTopupLogStoresAdminOnlyAuditFields(t *testing.T) {
 	require.Equal(t, "dev-node-a", adminInfo["node_name"])
 	require.Contains(t, adminInfo, "server_ip")
 
-	userLogs, total, err := GetUserLogs(102, LogTypeTopup, 0, 0, "", "", 0, 10, "", "")
+	userLogs, total, err := GetUserLogs(102, LogTypeTopup, 0, 0, "", false, "", 0, 10, "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, userLogs, 1)
@@ -133,7 +133,7 @@ func TestGetAllLogsAttachesNonSensitiveChannelDetail(t *testing.T) {
 		Other:     "{}",
 	}).Error)
 
-	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", "", "", 0, 10, 0, "", "")
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 10, 0, "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, adminLogs, 1)
@@ -163,4 +163,228 @@ func TestGetAllLogsAttachesNonSensitiveChannelDetail(t *testing.T) {
 	require.NotContains(t, detailPayload, "org-hidden")
 	require.NotContains(t, detailPayload, `"key"`)
 	require.NotContains(t, detailPayload, "openai_organization")
+}
+
+func TestGetLogsCanFilterEmptyModelName(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, LOG_DB.Create([]Log{
+		{
+			UserId:    101,
+			Username:  "target-user",
+			CreatedAt: 1714550400,
+			Type:      LogTypeConsume,
+			Content:   "empty model",
+			ModelName: "",
+			TokenName: "token-a",
+			Group:     "default",
+			RequestId: "req-empty",
+			Other:     "{}",
+		},
+		{
+			UserId:    101,
+			Username:  "target-user",
+			CreatedAt: 1714550401,
+			Type:      LogTypeConsume,
+			Content:   "named model",
+			ModelName: "gpt-5.5",
+			TokenName: "token-a",
+			Group:     "default",
+			RequestId: "req-named",
+			Other:     "{}",
+		},
+	}).Error)
+
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", true, "", "", 0, 10, 0, "", "", false, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, adminLogs, 1)
+	require.Equal(t, "", adminLogs[0].ModelName)
+	require.Equal(t, "req-empty", adminLogs[0].RequestId)
+
+	userLogs, total, err := GetUserLogs(101, LogTypeConsume, 0, 0, "", true, "", 0, 10, "", "", false, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, userLogs, 1)
+	require.Equal(t, "", userLogs[0].ModelName)
+	require.Equal(t, "req-empty", userLogs[0].RequestId)
+}
+
+func TestGetAllLogsCapsExpensiveTotalCount(t *testing.T) {
+	truncateTables(t)
+
+	logs := make([]Log, 0, logSearchCountLimit+1)
+	for i := 0; i < logSearchCountLimit+1; i++ {
+		logs = append(logs, Log{
+			UserId:    101,
+			Username:  "target-user",
+			CreatedAt: int64(1714550400 + i),
+			Type:      LogTypeConsume,
+			Content:   "consume",
+			ModelName: "gpt-5.5",
+			TokenName: "token-a",
+			Group:     "default",
+			RequestId: "req-count",
+			Other:     "{}",
+		})
+	}
+	require.NoError(t, LOG_DB.CreateInBatches(logs, 500).Error)
+
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 10, 0, "", "", false, false)
+	require.NoError(t, err)
+	require.EqualValues(t, logSearchCountLimit, total)
+	require.Len(t, adminLogs, 10)
+}
+
+func TestGetAllLogsFastPageSkipsExpensiveTotalCount(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, LOG_DB.Create([]Log{
+		{
+			UserId:    101,
+			Username:  "target-user",
+			CreatedAt: 1714550400,
+			Type:      LogTypeConsume,
+			Content:   "consume-old",
+			ModelName: "gpt-5.5",
+			TokenName: "token-a",
+			Group:     "default",
+			RequestId: "req-fast-1",
+			Other:     "{}",
+		},
+		{
+			UserId:    101,
+			Username:  "target-user",
+			CreatedAt: 1714550401,
+			Type:      LogTypeConsume,
+			Content:   "consume-mid",
+			ModelName: "gpt-5.5",
+			TokenName: "token-a",
+			Group:     "default",
+			RequestId: "req-fast-2",
+			Other:     "{}",
+		},
+		{
+			UserId:    101,
+			Username:  "target-user",
+			CreatedAt: 1714550402,
+			Type:      LogTypeConsume,
+			Content:   "consume-new",
+			ModelName: "gpt-5.5",
+			TokenName: "token-a",
+			Group:     "default",
+			RequestId: "req-fast-3",
+			Other:     "{}",
+		},
+	}).Error)
+
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 2, 0, "", "", true, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, total)
+	require.Len(t, adminLogs, 2)
+	require.Equal(t, "consume-new", adminLogs[0].Content)
+	require.Equal(t, "consume-mid", adminLogs[1].Content)
+
+	userLogs, total, err := GetUserLogs(101, LogTypeConsume, 0, 0, "", false, "", 2, 2, "", "", true, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, total)
+	require.Len(t, userLogs, 1)
+	require.Equal(t, "consume-old", userLogs[0].Content)
+}
+
+func TestGetAllLogsFastPageNormalizesInvalidPageSize(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:    101,
+		Username:  "target-user",
+		CreatedAt: 1714550400,
+		Type:      LogTypeConsume,
+		Content:   "consume",
+		ModelName: "gpt-5.5",
+		TokenName: "token-a",
+		Group:     "default",
+		RequestId: "req-invalid-size",
+		Other:     "{}",
+	}).Error)
+
+	require.NotPanics(t, func() {
+		adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, -1, 0, "", "", true, false)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, total)
+		require.Len(t, adminLogs, 1)
+		require.Equal(t, "req-invalid-size", adminLogs[0].RequestId)
+	})
+}
+
+func TestGetAllLogsFastPageNormalizesNegativeStartIndex(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:    101,
+		Username:  "target-user",
+		CreatedAt: 1714550400,
+		Type:      LogTypeConsume,
+		Content:   "consume",
+		ModelName: "gpt-5.5",
+		TokenName: "token-a",
+		Group:     "default",
+		RequestId: "req-negative-start",
+		Other:     "{}",
+	}).Error)
+
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", -10, 1, 0, "", "", true, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, adminLogs, 1)
+	require.Equal(t, "req-negative-start", adminLogs[0].RequestId)
+}
+
+func TestGetAllLogsCompactOmitsHeavyFields(t *testing.T) {
+	truncateTables(t)
+
+	baseURL := "https://upstream.example"
+	require.NoError(t, DB.Create(&Channel{
+		Id:      301,
+		Type:    constant.ChannelTypeOpenAI,
+		Status:  common.ChannelStatusEnabled,
+		Name:    "mynav-primary",
+		BaseURL: &baseURL,
+		Group:   "default",
+		Models:  "gpt-5.5",
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:           101,
+		Username:         "target-user",
+		CreatedAt:        1714550400,
+		Type:             LogTypeConsume,
+		Content:          "consume payload",
+		ModelName:        "gpt-5.5",
+		TokenName:        "token-a",
+		Quota:            123,
+		PromptTokens:     45,
+		CompletionTokens: 6,
+		ChannelId:        301,
+		Group:            "default",
+		RequestId:        "req-compact",
+		Other:            `{"large":"payload"}`,
+	}).Error)
+
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 10, 0, "", "", true, true)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, adminLogs, 1)
+	require.Equal(t, "target-user", adminLogs[0].Username)
+	require.Equal(t, "gpt-5.5", adminLogs[0].ModelName)
+	require.Equal(t, "token-a", adminLogs[0].TokenName)
+	require.Equal(t, 123, adminLogs[0].Quota)
+	require.Equal(t, 45, adminLogs[0].PromptTokens)
+	require.Equal(t, 6, adminLogs[0].CompletionTokens)
+	require.Equal(t, 301, adminLogs[0].ChannelId)
+	require.Equal(t, "default", adminLogs[0].Group)
+	require.Equal(t, "req-compact", adminLogs[0].RequestId)
+	require.Empty(t, adminLogs[0].Content)
+	require.Empty(t, adminLogs[0].Other)
+	require.Empty(t, adminLogs[0].ChannelName)
+	require.Nil(t, adminLogs[0].ChannelDetail)
 }

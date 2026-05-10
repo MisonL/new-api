@@ -26,9 +26,17 @@ var (
 	subscriptionCleanupLast  atomic.Int64
 )
 
+func subscriptionQuotaResetTaskEnabled() bool {
+	return common.GetEnvOrDefaultBool("SUBSCRIPTION_QUOTA_RESET_TASK_ENABLED", true)
+}
+
 func StartSubscriptionQuotaResetTask() {
 	subscriptionResetOnce.Do(func() {
 		if !common.IsMasterNode {
+			return
+		}
+		if !subscriptionQuotaResetTaskEnabled() {
+			common.SysLog("subscription quota reset task disabled by SUBSCRIPTION_QUOTA_RESET_TASK_ENABLED")
 			return
 		}
 		gopool.Go(func() {

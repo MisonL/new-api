@@ -20,10 +20,13 @@ func GetAllLogs(c *gin.Context) {
 	username := c.Query("username")
 	tokenName := c.Query("token_name")
 	modelName := c.Query("model_name")
+	modelNameEmpty := c.Query("model_name_empty") == "true"
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
 	requestId := c.Query("request_id")
-	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId)
+	fastPage := c.Query("fast_page") == "true"
+	compact := c.Query("compact") == "true"
+	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, modelNameEmpty, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, fastPage, compact)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -42,9 +45,12 @@ func GetUserLogs(c *gin.Context) {
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
 	tokenName := c.Query("token_name")
 	modelName := c.Query("model_name")
+	modelNameEmpty := c.Query("model_name_empty") == "true"
 	group := c.Query("group")
 	requestId := c.Query("request_id")
-	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId)
+	fastPage := c.Query("fast_page") == "true"
+	compact := c.Query("compact") == "true"
+	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, modelNameEmpty, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, fastPage, compact)
 	if err != nil {
 		common.ApiError(c, err)
 		return

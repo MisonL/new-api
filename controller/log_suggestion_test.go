@@ -159,6 +159,79 @@ func TestGetAllLogSuggestionsSupportsAdminOnlyField(t *testing.T) {
 	}
 }
 
+func TestGetAllLogSuggestionsUsesPrefixMatchForRequestID(t *testing.T) {
+	db := setupLogSuggestionControllerTestDB(t)
+	logs := []model.Log{
+		{
+			UserId:    1,
+			Username:  "alice",
+			RequestId: "20260509-newest",
+			CreatedAt: 300,
+			Type:      model.LogTypeConsume,
+		},
+		{
+			UserId:    1,
+			Username:  "alice",
+			RequestId: "z-20260509-middle",
+			CreatedAt: 400,
+			Type:      model.LogTypeConsume,
+		},
+		{
+			UserId:    1,
+			Username:  "alice",
+			RequestId: "20260509-oldest",
+			CreatedAt: 100,
+			Type:      model.LogTypeConsume,
+		},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatalf("failed to seed request id logs: %v", err)
+	}
+
+	ctx, recorder := newSuggestionContext(t, "/api/log/suggestions?field=request_id&keyword=20260509", 0)
+	GetAllLogSuggestions(ctx)
+
+	response := decodeSuggestionResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected success, got %s", response.Message)
+	}
+	items := decodeSuggestionItems(t, response)
+	expected := []string{"20260509-newest", "20260509-oldest"}
+	if len(items) != len(expected) {
+		t.Fatalf("unexpected request id suggestions: %#v", items)
+	}
+	for i := range expected {
+		if items[i] != expected[i] {
+			t.Fatalf("unexpected request id suggestions: %#v", items)
+		}
+	}
+}
+
+func TestGetAllLogSuggestionsSkipsShortRequestIDPrefix(t *testing.T) {
+	db := setupLogSuggestionControllerTestDB(t)
+	if err := db.Create(&model.Log{
+		UserId:    1,
+		Username:  "alice",
+		RequestId: "20260509-request",
+		CreatedAt: 300,
+		Type:      model.LogTypeConsume,
+	}).Error; err != nil {
+		t.Fatalf("failed to seed request id log: %v", err)
+	}
+
+	ctx, recorder := newSuggestionContext(t, "/api/log/suggestions?field=request_id&keyword=2026", 0)
+	GetAllLogSuggestions(ctx)
+
+	response := decodeSuggestionResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected success, got %s", response.Message)
+	}
+	items := decodeSuggestionItems(t, response)
+	if len(items) != 0 {
+		t.Fatalf("expected short request id prefix to skip suggestions, got %#v", items)
+	}
+}
+
 func TestGetUserTaskSuggestionsRejectsAdminOnlyField(t *testing.T) {
 	setupLogSuggestionControllerTestDB(t)
 

@@ -19,6 +19,10 @@ var channelSyncLock sync.RWMutex
 var channelCacheRefreshInFlight atomic.Bool
 var channelCacheRefreshPending atomic.Bool
 
+func channelCacheSyncEnabled() bool {
+	return common.GetEnvOrDefaultBool("CHANNEL_CACHE_SYNC_ENABLED", true)
+}
+
 // InitChannelCache rebuilds the in-memory channel cache from database state.
 func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
@@ -121,6 +125,10 @@ func runChannelCacheRefreshLoop() {
 
 // SyncChannelCache periodically refreshes the in-memory channel cache.
 func SyncChannelCache(frequency int) {
+	if !channelCacheSyncEnabled() {
+		common.SysLog("channel cache sync disabled by CHANNEL_CACHE_SYNC_ENABLED")
+		return
+	}
 	common.SleepBeforeMaintenanceLoop(common.ChannelCacheSyncInitialDelay)
 	for {
 		time.Sleep(time.Duration(frequency) * time.Second)

@@ -21,7 +21,7 @@ import (
 type Log struct {
 	Id               int               `json:"id" gorm:"index:idx_created_at_id,priority:1;index:idx_user_id_id,priority:2;index:idx_logs_username_token_type_created_id,priority:5;index:idx_logs_username_model_type_created_id,priority:5;index:idx_logs_username_group_type_created_id,priority:5;index:idx_logs_model_group_type_created_id,priority:5;index:idx_logs_token_model_type_created_id,priority:5;index:idx_logs_channel_model_type_created_id,priority:5;index:idx_logs_token_group_type_created_id,priority:5;index:idx_logs_channel_group_type_created_id,priority:5;index:idx_logs_username_token_group_type_created_id,priority:6"`
 	UserId           int               `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1;index:idx_logs_user_created_at,priority:1;index:idx_logs_user_type_created_at,priority:1"`
-	CreatedAt        int64             `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:2;index:idx_created_at_type;index:idx_logs_type_created_at,priority:2;index:idx_logs_user_created_at,priority:2;index:idx_logs_username_created_at,priority:2;index:idx_logs_token_created_at,priority:2;index:idx_logs_model_created_at,priority:2;index:idx_logs_channel_created_at,priority:2;index:idx_logs_group_created_at,priority:2;index:idx_logs_user_type_created_at,priority:3;index:idx_logs_username_type_created_at,priority:3;index:idx_logs_token_type_created_at,priority:3;index:idx_logs_model_type_created_at,priority:3;index:idx_logs_channel_type_created_at,priority:3;index:idx_logs_group_type_created_at,priority:3;index:idx_logs_username_token_type_created_id,priority:4;index:idx_logs_username_model_type_created_id,priority:4;index:idx_logs_username_group_type_created_id,priority:4;index:idx_logs_model_group_type_created_id,priority:4;index:idx_logs_token_model_type_created_id,priority:4;index:idx_logs_channel_model_type_created_id,priority:4;index:idx_logs_token_group_type_created_id,priority:4;index:idx_logs_channel_group_type_created_id,priority:4;index:idx_logs_username_token_group_type_created_id,priority:5"`
+	CreatedAt        int64             `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:2;index:idx_created_at_type;index:idx_logs_type_created_at,priority:2;index:idx_logs_user_created_at,priority:2;index:idx_logs_username_created_at,priority:2;index:idx_logs_token_created_at,priority:2;index:idx_logs_model_created_at,priority:2;index:idx_logs_channel_created_at,priority:2;index:idx_logs_group_created_at,priority:2;index:idx_logs_request_id_created_at,priority:2;index:idx_logs_user_type_created_at,priority:3;index:idx_logs_username_type_created_at,priority:3;index:idx_logs_token_type_created_at,priority:3;index:idx_logs_model_type_created_at,priority:3;index:idx_logs_channel_type_created_at,priority:3;index:idx_logs_group_type_created_at,priority:3;index:idx_logs_username_token_type_created_id,priority:4;index:idx_logs_username_model_type_created_id,priority:4;index:idx_logs_username_group_type_created_id,priority:4;index:idx_logs_model_group_type_created_id,priority:4;index:idx_logs_token_model_type_created_id,priority:4;index:idx_logs_channel_model_type_created_id,priority:4;index:idx_logs_token_group_type_created_id,priority:4;index:idx_logs_channel_group_type_created_id,priority:4;index:idx_logs_username_token_group_type_created_id,priority:5"`
 	Type             int               `json:"type" gorm:"index:idx_created_at_type;index:idx_logs_type_created_at,priority:1;index:idx_logs_user_type_created_at,priority:2;index:idx_logs_username_type_created_at,priority:2;index:idx_logs_token_type_created_at,priority:2;index:idx_logs_model_type_created_at,priority:2;index:idx_logs_channel_type_created_at,priority:2;index:idx_logs_group_type_created_at,priority:2;index:idx_logs_username_token_type_created_id,priority:3;index:idx_logs_username_model_type_created_id,priority:3;index:idx_logs_username_group_type_created_id,priority:3;index:idx_logs_model_group_type_created_id,priority:3;index:idx_logs_token_model_type_created_id,priority:3;index:idx_logs_channel_model_type_created_id,priority:3;index:idx_logs_token_group_type_created_id,priority:3;index:idx_logs_channel_group_type_created_id,priority:3;index:idx_logs_username_token_group_type_created_id,priority:4"`
 	Content          string            `json:"content"`
 	Username         string            `json:"username" gorm:"index;index:index_username_model_name,priority:2;index:idx_logs_username_created_at,priority:1;index:idx_logs_username_type_created_at,priority:1;index:idx_logs_username_token_type_created_id,priority:1;index:idx_logs_username_model_type_created_id,priority:1;index:idx_logs_username_group_type_created_id,priority:1;index:idx_logs_username_token_group_type_created_id,priority:1;default:''"`
@@ -38,7 +38,7 @@ type Log struct {
 	TokenId          int               `json:"token_id" gorm:"default:0;index"`
 	Group            string            `json:"group" gorm:"index;index:idx_logs_group_created_at,priority:1;index:idx_logs_group_type_created_at,priority:1;index:idx_logs_username_group_type_created_id,priority:2;index:idx_logs_model_group_type_created_id,priority:2;index:idx_logs_token_group_type_created_id,priority:2;index:idx_logs_channel_group_type_created_id,priority:2;index:idx_logs_username_token_group_type_created_id,priority:3"`
 	Ip               string            `json:"ip" gorm:"index;default:''"`
-	RequestId        string            `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
+	RequestId        string            `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;index:idx_logs_request_id_created_at,priority:1;default:''"`
 	Other            string            `json:"other"`
 }
 
@@ -59,6 +59,27 @@ type LogChannelDetail struct {
 	ModelsCount  int    `json:"models_count,omitempty"`
 	IsMultiKey   bool   `json:"is_multi_key,omitempty"`
 	MultiKeySize int    `json:"multi_key_size,omitempty"`
+}
+
+func dashboardLogColumns() []string {
+	return []string{
+		"id",
+		"user_id",
+		"created_at",
+		"type",
+		"username",
+		"token_name",
+		"model_name",
+		"quota",
+		"prompt_tokens",
+		"completion_tokens",
+		"use_time",
+		"is_stream",
+		"channel_id",
+		"token_id",
+		logGroupCol,
+		"request_id",
+	}
 }
 
 // don't use iota, avoid change log type value
@@ -364,6 +385,7 @@ type LogFilter struct {
 	StartTimestamp int64
 	EndTimestamp   int64
 	ModelName      string
+	ModelNameEmpty bool
 	Username       string
 	TokenName      string
 	Channel        int
@@ -390,7 +412,9 @@ func applyLogFilters(tx *gorm.DB, filter LogFilter) (*gorm.DB, error) {
 	if filter.LogType != LogTypeUnknown {
 		tx = tx.Where("logs.type = ?", filter.LogType)
 	}
-	if filter.ModelName != "" {
+	if filter.ModelNameEmpty {
+		tx = tx.Where("logs.model_name = ?", "")
+	} else if filter.ModelName != "" {
 		nextTx, err := applyModelNameFilter(tx, "logs.model_name", filter.ModelName)
 		if err != nil {
 			return nil, err
@@ -421,12 +445,56 @@ func applyLogFilters(tx *gorm.DB, filter LogFilter) (*gorm.DB, error) {
 	return tx, nil
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string) (logs []*Log, total int64, err error) {
+const logSearchCountLimit = 10000
+
+func countLogsBounded(tx *gorm.DB) (int64, error) {
+	var total int64
+	limited := tx.Session(&gorm.Session{}).
+		Model(&Log{}).
+		Select("logs.id").
+		Limit(logSearchCountLimit + 1)
+	err := LOG_DB.Session(&gorm.Session{NewDB: true}).
+		Table("(?) AS bounded_logs", limited).
+		Count(&total).Error
+	if total > logSearchCountLimit {
+		total = logSearchCountLimit
+	}
+	return total, err
+}
+
+func normalizeLogPagination(startIdx int, num int) (int, int) {
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if num <= 0 {
+		num = common.ItemsPerPage
+	}
+	return startIdx, num
+}
+
+func findLogsFastPage(tx *gorm.DB, startIdx int, num int) (logs []*Log, total int64, err error) {
+	startIdx, num = normalizeLogPagination(startIdx, num)
+	fetchLimit := num + 1
+	err = tx.Order("logs.created_at desc, logs.id desc").Limit(fetchLimit).Offset(startIdx).Find(&logs).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	hasNext := len(logs) > num
+	if hasNext {
+		logs = logs[:num]
+		return logs, int64(startIdx + num + 1), nil
+	}
+	return logs, int64(startIdx + len(logs)), nil
+}
+
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, modelNameEmpty bool, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, fastPage bool, compact bool) (logs []*Log, total int64, err error) {
+	startIdx, num = normalizeLogPagination(startIdx, num)
 	tx, err := applyLogFilters(LOG_DB, LogFilter{
 		LogType:        logType,
 		StartTimestamp: startTimestamp,
 		EndTimestamp:   endTimestamp,
 		ModelName:      modelName,
+		ModelNameEmpty: modelNameEmpty,
 		Username:       username,
 		TokenName:      tokenName,
 		Channel:        channel,
@@ -436,13 +504,23 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if err != nil {
 		return nil, 0, err
 	}
-	err = tx.Model(&Log{}).Count(&total).Error
-	if err != nil {
-		return nil, 0, err
+	if compact {
+		tx = tx.Select(dashboardLogColumns())
 	}
-	err = tx.Order("logs.created_at desc, logs.id desc").Limit(num).Offset(startIdx).Find(&logs).Error
-	if err != nil {
-		return nil, 0, err
+	if fastPage {
+		logs, total, err = findLogsFastPage(tx, startIdx, num)
+		if err != nil {
+			return nil, 0, err
+		}
+	} else {
+		total, err = countLogsBounded(tx)
+		if err != nil {
+			return nil, 0, err
+		}
+		err = tx.Order("logs.created_at desc, logs.id desc").Limit(num).Offset(startIdx).Find(&logs).Error
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	channelIds := types.NewSet[int]()
@@ -452,7 +530,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 		}
 	}
 
-	if channelIds.Len() > 0 {
+	if channelIds.Len() > 0 && !compact {
 		var channels []Channel
 		missingChannelIds := types.NewSet[int]()
 		if common.MemoryCacheEnabled {
@@ -494,15 +572,15 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	return logs, total, err
 }
 
-const logSearchCountLimit = 10000
-
-func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string) (logs []*Log, total int64, err error) {
+func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, modelNameEmpty bool, tokenName string, startIdx int, num int, group string, requestId string, fastPage bool, compact bool) (logs []*Log, total int64, err error) {
+	startIdx, num = normalizeLogPagination(startIdx, num)
 	tx, err := applyLogFilters(LOG_DB, LogFilter{
 		UserId:         userId,
 		LogType:        logType,
 		StartTimestamp: startTimestamp,
 		EndTimestamp:   endTimestamp,
 		ModelName:      modelName,
+		ModelNameEmpty: modelNameEmpty,
 		TokenName:      tokenName,
 		Group:          group,
 		RequestId:      requestId,
@@ -510,15 +588,26 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	if err != nil {
 		return nil, 0, err
 	}
-	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
-	if err != nil {
-		common.SysError("failed to count user logs: " + err.Error())
-		return nil, 0, errors.New("查询日志失败")
+	if compact {
+		tx = tx.Select(dashboardLogColumns())
 	}
-	err = tx.Order("logs.created_at desc, logs.id desc").Limit(num).Offset(startIdx).Find(&logs).Error
-	if err != nil {
-		common.SysError("failed to search user logs: " + err.Error())
-		return nil, 0, errors.New("查询日志失败")
+	if fastPage {
+		logs, total, err = findLogsFastPage(tx, startIdx, num)
+		if err != nil {
+			common.SysError("failed to fast search user logs: " + err.Error())
+			return nil, 0, errors.New("查询日志失败")
+		}
+	} else {
+		total, err = countLogsBounded(tx)
+		if err != nil {
+			common.SysError("failed to count user logs: " + err.Error())
+			return nil, 0, errors.New("查询日志失败")
+		}
+		err = tx.Order("logs.created_at desc, logs.id desc").Limit(num).Offset(startIdx).Find(&logs).Error
+		if err != nil {
+			common.SysError("failed to search user logs: " + err.Error())
+			return nil, 0, errors.New("查询日志失败")
+		}
 	}
 
 	formatUserLogs(logs, startIdx)

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -709,6 +710,83 @@ func TestGetCustomOAuthStatusPayloadCachesEmptyDataWhenDBBecomesUnavailable(t *t
 	second := getCustomOAuthStatusPayload()
 	if len(second) != 0 {
 		t.Fatalf("expected cached empty payload, got %d items", len(second))
+	}
+}
+
+func TestGetCustomOAuthStatusPayloadReturnsStaleDataWhileRefreshInFlight(t *testing.T) {
+	invalidateCustomOAuthStatusCache()
+	t.Cleanup(invalidateCustomOAuthStatusCache)
+
+	stale := []customOAuthStatusInfo{{Slug: "stale-provider"}}
+	customOAuthStatusCache.Lock()
+	customOAuthStatusCache.payload = append([]customOAuthStatusInfo(nil), stale...)
+	customOAuthStatusCache.expiresAt = time.Now().Add(-time.Second)
+	customOAuthStatusCache.refreshing = true
+	customOAuthStatusCache.Unlock()
+
+	payload := getCustomOAuthStatusPayload()
+	if len(payload) != 1 {
+		t.Fatalf("expected stale payload while refresh is in flight, got %d providers", len(payload))
+	}
+	if payload[0].Slug != "stale-provider" {
+		t.Fatalf("expected stale provider slug, got %q", payload[0].Slug)
+	}
+}
+
+func TestLoadCustomOAuthStatusPayloadRespectsQueryTimeout(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	invalidateCustomOAuthStatusCache()
+	t.Cleanup(invalidateCustomOAuthStatusCache)
+
+	sqlDB, err := model.DB.DB()
+	if err != nil {
+		t.Fatalf("failed to access sql db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+
+	conn, err := sqlDB.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("failed to reserve db connection: %v", err)
+	}
+	defer conn.Close()
+
+	stale := []customOAuthStatusInfo{{Slug: "stale-provider"}}
+	startedAt := time.Now()
+	payload := loadCustomOAuthStatusPayload(time.Now(), stale)
+	elapsed := time.Since(startedAt)
+
+	if elapsed > customOAuthStatusQueryTimeout+250*time.Millisecond {
+		t.Fatalf("expected status payload query to respect timeout, elapsed %s", elapsed)
+	}
+	if len(payload) != 1 || payload[0].Slug != "stale-provider" {
+		t.Fatalf("expected stale payload after timeout, got %+v", payload)
+	}
+}
+
+func TestRefreshCustomOAuthStatusPayloadDoesNotOverwriteInvalidation(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	invalidateCustomOAuthStatusCache()
+	t.Cleanup(invalidateCustomOAuthStatusCache)
+
+	stale := []customOAuthStatusInfo{{Slug: "stale-provider"}}
+	customOAuthStatusCache.Lock()
+	customOAuthStatusCache.payload = append([]customOAuthStatusInfo(nil), stale...)
+	customOAuthStatusCache.expiresAt = time.Now().Add(-time.Second)
+	customOAuthStatusCache.refreshing = true
+	generation := customOAuthStatusCache.generation
+	customOAuthStatusCache.Unlock()
+
+	invalidateCustomOAuthStatusCache()
+	refreshCustomOAuthStatusPayload(stale, generation)
+
+	customOAuthStatusCache.RLock()
+	defer customOAuthStatusCache.RUnlock()
+	if len(customOAuthStatusCache.payload) != 0 {
+		t.Fatalf("expected invalidated cache to stay empty, got %+v", customOAuthStatusCache.payload)
+	}
+	if !customOAuthStatusCache.expiresAt.IsZero() {
+		t.Fatalf("expected invalidated cache expiry to stay zero, got %s", customOAuthStatusCache.expiresAt)
 	}
 }
 

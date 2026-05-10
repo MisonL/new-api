@@ -546,3 +546,15 @@ func TestIsChannelEnabledForGroupModelUsesGroupModelRouteHelperWhenEnabled(t *te
 
 	require.True(t, IsChannelEnabledForGroupModel("default", "gpt-4o-gizmo-special", channel.Id))
 }
+
+func TestChannelCacheSyncEnabledDefaultsToTrue(t *testing.T) {
+	t.Setenv("CHANNEL_CACHE_SYNC_ENABLED", "")
+
+	require.True(t, channelCacheSyncEnabled())
+}
+
+func TestChannelCacheSyncEnabledCanBeDisabled(t *testing.T) {
+	t.Setenv("CHANNEL_CACHE_SYNC_ENABLED", "false")
+
+	require.False(t, channelCacheSyncEnabled())
+}
