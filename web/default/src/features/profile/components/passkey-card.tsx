@@ -204,43 +204,43 @@ export function PasskeyCard({ loading: pageLoading }: PasskeyCardProps) {
           <div className='space-y-6'>
             <div className='flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between xl:flex-col 2xl:flex-row'>
               <div className='flex items-start gap-4'>
-              <div className='bg-muted rounded-md p-2'>
-                <KeyRound className='h-5 w-5' />
-              </div>
-              <div className='space-y-1'>
-                <div className='flex flex-wrap items-center gap-2'>
-                  <p className='font-medium'>{t('Passkey Authentication')}</p>
-                  <StatusBadge
-                    label={enabled ? t('Enabled') : t('Disabled')}
-                    variant={enabled ? 'success' : 'neutral'}
-                    showDot
-                    copyable={false}
-                  />
-                  {status?.backup_eligible !== undefined && (
+                <div className='bg-muted rounded-md p-2'>
+                  <KeyRound className='h-5 w-5' />
+                </div>
+                <div className='space-y-1'>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <p className='font-medium'>{t('Passkey Authentication')}</p>
                     <StatusBadge
-                      label={
-                        status.backup_eligible
-                          ? status.backup_state
-                            ? t('Backed up')
-                            : t('Not backed up')
-                          : t('No backup')
-                      }
-                      variant={
-                        status.backup_eligible
-                          ? status.backup_state
-                            ? 'success'
-                            : 'warning'
-                          : 'neutral'
-                      }
+                      label={enabled ? t('Enabled') : t('Disabled')}
+                      variant={enabled ? 'success' : 'neutral'}
                       showDot
                       copyable={false}
                     />
-                  )}
+                    {status?.backup_eligible !== undefined && (
+                      <StatusBadge
+                        label={
+                          status.backup_eligible
+                            ? status.backup_state
+                              ? t('Backed up')
+                              : t('Not backed up')
+                            : t('No backup')
+                        }
+                        variant={
+                          status.backup_eligible
+                            ? status.backup_state
+                              ? 'success'
+                              : 'warning'
+                            : 'neutral'
+                        }
+                        showDot
+                        copyable={false}
+                      />
+                    )}
+                  </div>
+                  <p className='text-muted-foreground text-sm'>
+                    {t('Last used:')} {formattedLastUsed}
+                  </p>
                 </div>
-                <p className='text-muted-foreground text-sm'>
-                  {t('Last used:')} {formattedLastUsed}
-                </p>
-              </div>
               </div>
 
               {!enabled && (

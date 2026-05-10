@@ -65,7 +65,7 @@ import {
   DEFAULT_CURRENCY_CONFIG,
   type CurrencyConfig,
   type CurrencyDisplayType,
-} from '@/stores/system-config-store'
+} from '../stores/system-config-store.ts'
 
 export interface CurrencyFormatOptions {
   /** Fraction digits to use when |value| >= 1 */

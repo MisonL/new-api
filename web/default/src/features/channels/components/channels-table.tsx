@@ -415,7 +415,9 @@ export function ChannelsTable() {
             emptyTitle='No Channels Found'
             emptyDescription='No channels available. Create your first channel to get started.'
             getRowClassName={(row) =>
-              isDisabledChannelRow(row.original) ? DISABLED_ROW_MOBILE : undefined
+              isDisabledChannelRow(row.original)
+                ? DISABLED_ROW_MOBILE
+                : undefined
             }
           />
         ) : (

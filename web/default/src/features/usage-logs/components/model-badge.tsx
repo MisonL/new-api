@@ -83,7 +83,7 @@ function ModelBadgeContent(props: ModelBadgeProps) {
       showDot={!provider}
       autoColor={provider ? undefined : props.modelName}
       className={cn(
-        'rounded-md border border-border/60 bg-muted/30 px-1.5 py-0.5 font-mono',
+        'border-border/60 bg-muted/30 rounded-md border px-1.5 py-0.5 font-mono',
         provider && 'text-foreground',
         props.className
       )}

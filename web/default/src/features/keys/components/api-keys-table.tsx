@@ -14,12 +14,20 @@ import {
   useReactTable,
 } from '@tanstack/react-table'
 import { useMediaQuery } from '@/hooks'
+import { Database } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { Database } from 'lucide-react'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -36,15 +44,7 @@ import {
   TableSkeleton,
   TableEmpty,
 } from '@/components/data-table'
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from '@/components/ui/empty'
 import { PageFooterPortal } from '@/components/layout'
-import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/status-badge'
 import { getApiKeys, searchApiKeys } from '../api'
 import {
@@ -318,10 +318,7 @@ export function ApiKeysTable() {
           </div>
         </div>
         {isMobile ? (
-          <ApiKeysMobileList
-            table={table}
-            isLoading={isLoading}
-          />
+          <ApiKeysMobileList table={table} isLoading={isLoading} />
         ) : (
           <div
             className={cn(

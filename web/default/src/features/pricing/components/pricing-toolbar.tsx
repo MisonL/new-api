@@ -1,11 +1,5 @@
 import { useCallback, useState } from 'react'
-import {
-  ArrowUpDown,
-  Check,
-  Filter,
-  Grid2X2,
-  Table2,
-} from 'lucide-react'
+import { ArrowUpDown, Check, Filter, Grid2X2, Table2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -170,9 +164,7 @@ export function PricingToolbar(props: PricingToolbarProps) {
             <span className='text-foreground font-semibold tabular-nums'>
               {props.filteredCount.toLocaleString()}
             </span>
-            <span>
-              {props.filteredCount === 1 ? t('model') : t('models')}
-            </span>
+            <span>{props.filteredCount === 1 ? t('model') : t('models')}</span>
             {props.hasActiveFilters && props.totalCount && (
               <span className='text-muted-foreground/60 text-xs'>
                 / {props.totalCount.toLocaleString()}

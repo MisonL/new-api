@@ -17,11 +17,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { DataTableColumnHeader } from '@/components/data-table'
-import {
-  StatusBadge,
-  type StatusBadgeProps,
-} from '@/components/status-badge'
+import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import type { UsageLog } from '../../data/schema'
+import { getLogAvatarStyle } from '../../lib/avatar-color'
 import {
   formatModelName,
   getFirstResponseTimeColor,
@@ -31,7 +29,6 @@ import {
   parseLogOther,
   isViolationFeeLog,
 } from '../../lib/format'
-import { getLogAvatarStyle } from '../../lib/avatar-color'
 import {
   isDisplayableLogType,
   isTimingLogType,
@@ -131,11 +128,9 @@ function buildDetailSegments(
 
       const cacheEntries = tieredSummary.priceEntries
         .filter((entry) =>
-          [
-            'cacheReadPrice',
-            'cacheCreatePrice',
-            'cacheCreate1hPrice',
-          ].includes(entry.field)
+          ['cacheReadPrice', 'cacheCreatePrice', 'cacheCreate1hPrice'].includes(
+            entry.field
+          )
         )
         .map((entry) => {
           return formatPriceCompact(entry.price)
@@ -194,8 +189,7 @@ function buildDetailSegments(
           other.cache_ratio != null && other.cache_ratio !== 1
             ? formatPriceCompact(inputPriceUSD * other.cache_ratio)
             : null,
-          other.cache_creation_ratio != null &&
-          other.cache_creation_ratio !== 1
+          other.cache_creation_ratio != null && other.cache_creation_ratio !== 1
             ? formatPriceCompact(inputPriceUSD * other.cache_creation_ratio)
             : null,
           other.cache_creation_ratio_1h != null &&
@@ -285,11 +279,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           <DataTableColumnHeader column={column} title={t('Channel')} />
         ),
         cell: function ChannelCell({ row }) {
-          const {
-            sensitiveVisible,
-            setAffinityTarget,
-            setAffinityDialogOpen,
-          } = useUsageLogsContext()
+          const { sensitiveVisible, setAffinityTarget, setAffinityDialogOpen } =
+            useUsageLogsContext()
           const log = row.original
 
           if (!isDisplayableLogType(log.type)) return null
@@ -351,7 +342,9 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                 </TooltipTrigger>
                 <TooltipContent>
                   <div className='space-y-1'>
-                    <p>{sensitiveVisible ? channelDisplay : channelIdDisplay}</p>
+                    <p>
+                      {sensitiveVisible ? channelDisplay : channelIdDisplay}
+                    </p>
                     {channelChain && (
                       <p className='text-muted-foreground text-xs'>
                         {t('Chain')}: {channelChain}
@@ -387,11 +380,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           <DataTableColumnHeader column={column} title={t('User')} />
         ),
         cell: function UserCell({ row }) {
-          const {
-            sensitiveVisible,
-            setSelectedUserId,
-            setUserInfoDialogOpen,
-          } = useUsageLogsContext()
+          const { sensitiveVisible, setSelectedUserId, setUserInfoDialogOpen } =
+            useUsageLogsContext()
           const log = row.original
 
           if (!log.username) return null
@@ -406,7 +396,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                 setUserInfoDialogOpen(true)
               }}
             >
-              <Avatar className='size-6 ring-1 ring-border/60'>
+              <Avatar className='ring-border/60 size-6 ring-1'>
                 <AvatarFallback
                   className={cn(
                     'text-[11px] font-semibold',
@@ -467,7 +457,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             copyText={sensitiveVisible ? tokenName : undefined}
             size='sm'
             showDot={false}
-            className='max-w-full overflow-hidden rounded-md border border-border/60 bg-muted/30 px-1.5 py-0.5 font-mono text-foreground'
+            className='border-border/60 bg-muted/30 text-foreground max-w-full overflow-hidden rounded-md border px-1.5 py-0.5 font-mono'
           />
           {metaParts.length > 0 && (
             <span className='text-muted-foreground/60 truncate text-[11px]'>
@@ -521,10 +511,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           useTime > 0 && log.completion_tokens > 0
             ? log.completion_tokens / useTime
             : null
-        const timeVariant = getResponseTimeColor(
-          useTime,
-          log.completion_tokens
-        )
+        const timeVariant = getResponseTimeColor(useTime, log.completion_tokens)
         const frtVariant = frt ? getFirstResponseTimeColor(frt / 1000) : null
 
         const pillBg: Record<string, string> = {
@@ -565,21 +552,22 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                 />
                 {formatUseTime(useTime)}
               </span>
-              {log.is_stream && (frt != null && frt > 0 ? (
-                <span
-                  className={cn(
-                    'inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-xs font-medium',
-                    pillBg[frtVariant!],
-                    pillText[frtVariant!]
-                  )}
-                >
-                  {formatUseTime(frt / 1000)}
-                </span>
-              ) : (
-                <span className='inline-flex items-center rounded-md border border-border/60 px-1.5 py-0.5 text-[11px] text-muted-foreground/50'>
-                  N/A
-                </span>
-              ))}
+              {log.is_stream &&
+                (frt != null && frt > 0 ? (
+                  <span
+                    className={cn(
+                      'inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-xs font-medium',
+                      pillBg[frtVariant!],
+                      pillText[frtVariant!]
+                    )}
+                  >
+                    {formatUseTime(frt / 1000)}
+                  </span>
+                ) : (
+                  <span className='border-border/60 text-muted-foreground/50 inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px]'>
+                    N/A
+                  </span>
+                ))}
             </div>
             <div className='flex items-center gap-1 text-[11px]'>
               <span className='text-muted-foreground/60'>
@@ -654,7 +642,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         return (
           <div className='flex flex-col gap-0.5'>
             <span className='font-mono text-xs font-medium tabular-nums'>
-              {promptTokens.toLocaleString()} / {completionTokens.toLocaleString()}
+              {promptTokens.toLocaleString()} /{' '}
+              {completionTokens.toLocaleString()}
             </span>
             {(cacheReadTokens > 0 || cacheWriteTokens > 0) && (
               <div className='flex items-center gap-1 text-[11px]'>
@@ -695,7 +684,10 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className='inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'>
-                    <span className='size-1.5 rounded-full bg-emerald-500' aria-hidden='true' />
+                    <span
+                      className='size-1.5 rounded-full bg-emerald-500'
+                      aria-hidden='true'
+                    />
                     {t('Subscription')}
                   </span>
                 </TooltipTrigger>
@@ -713,7 +705,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         return (
           <div className='flex flex-col gap-0.5'>
-            <span className='border-border/80 inline-flex w-fit items-center rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-xs font-semibold tabular-nums'>
+            <span className='border-border/80 bg-muted/60 inline-flex w-fit items-center rounded-md border px-1.5 py-0.5 font-mono text-xs font-semibold tabular-nums'>
               {quotaStr}
             </span>
           </div>

@@ -84,7 +84,7 @@ function ApiKeyFormSection(props: ApiKeyFormSectionProps) {
           <Icon className='size-4 sm:size-5' />
         </div>
         <div className='min-w-0'>
-          <h3 className='text-sm font-medium leading-none'>{props.title}</h3>
+          <h3 className='text-sm leading-none font-medium'>{props.title}</h3>
           <p className='text-muted-foreground mt-0.5 text-xs sm:mt-1'>
             {props.description}
           </p>
@@ -285,10 +285,7 @@ export function ApiKeysMutateDrawer({
                   <FormItem>
                     <FormLabel>{t('Name')}</FormLabel>
                     <FormControl>
-                      <Input
-                        {...field}
-                        placeholder={t('Enter a name')}
-                      />
+                      <Input {...field} placeholder={t('Enter a name')} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -501,7 +498,7 @@ export function ApiKeysMutateDrawer({
                       <Settings2 className='size-4 sm:size-5' />
                     </div>
                     <div className='min-w-0 flex-1'>
-                      <h3 className='text-sm font-medium leading-none'>
+                      <h3 className='text-sm leading-none font-medium'>
                         {t('Advanced Settings')}
                       </h3>
                       <p className='text-muted-foreground mt-1 text-xs'>

@@ -1,12 +1,13 @@
-import { dataScheme as vchartDefaultDataScheme } from '@visactor/vchart/esm/theme/color-scheme/builtin/default'
-import { getCurrencyDisplay } from '@/lib/currency'
-import { formatChartTime, type TimeGranularity } from '@/lib/time'
-import { MAX_CHART_TREND_POINTS } from '@/features/dashboard/constants'
+import { dataScheme as vchartDefaultDataScheme } from '@visactor/vchart/esm/theme/color-scheme/builtin/default.js'
+import { getCurrencyDisplay } from '../../../lib/currency.ts'
+import { MAX_CHART_TREND_POINTS } from '../constants.ts'
 import type {
   QuotaDataItem,
   ProcessedChartData,
   ProcessedUserChartData,
-} from '@/features/dashboard/types'
+} from '../types.ts'
+
+type TimeGranularity = 'hour' | 'day' | 'week'
 
 type TFunction = (key: string) => string
 type TooltipLineItem = {
@@ -41,6 +42,29 @@ function renderQuotaCompat(rawQuota: number, digits = 4): string {
     return symbol + Math.pow(10, -digits).toFixed(digits)
   }
   return symbol + fixed
+}
+
+function formatChartTime(
+  timestamp: number,
+  granularity: TimeGranularity = 'day'
+): string {
+  const date = new Date(timestamp * 1000)
+  const monthDay = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate()
+  ).padStart(2, '0')}`
+  if (granularity === 'hour') {
+    return `${monthDay} ${String(date.getHours()).padStart(2, '0')}:00`
+  }
+  if (granularity === 'week') {
+    const weekEnd = new Date(date)
+    weekEnd.setDate(weekEnd.getDate() + 6)
+    const endMonthDay = `${String(weekEnd.getMonth() + 1).padStart(
+      2,
+      '0'
+    )}-${String(weekEnd.getDate()).padStart(2, '0')}`
+    return `${monthDay} - ${endMonthDay}`
+  }
+  return monthDay
 }
 
 /**
@@ -80,9 +104,7 @@ export function processChartData(
       array = array.filter((item) => (Number(item.value) || 0) > 0)
       const modelItems = array.filter((item) => !isOtherTooltipKey(item.key))
       const otherItems = array.filter((item) => isOtherTooltipKey(item.key))
-      modelItems.sort(
-        (a, b) => (Number(b.value) || 0) - (Number(a.value) || 0)
-      )
+      modelItems.sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0))
       array = [...modelItems, ...otherItems]
 
       for (let i = 0; i < array.length; i++) {
@@ -92,13 +114,15 @@ export function processChartData(
 
       if (collapseOverflow && array.length > MAX_TOOLTIP_MODELS) {
         const visible = modelItems.slice(0, MAX_TOOLTIP_MODELS)
-        const otherSum = [...modelItems.slice(MAX_TOOLTIP_MODELS), ...otherItems]
-          .reduce((sum, item) => {
-            const raw = item.datum
-              ? Number((item.datum as Record<string, unknown>)?.rawQuota) || 0
-              : 0
-            return sum + raw
-          }, 0)
+        const otherSum = [
+          ...modelItems.slice(MAX_TOOLTIP_MODELS),
+          ...otherItems,
+        ].reduce((sum, item) => {
+          const raw = item.datum
+            ? Number((item.datum as Record<string, unknown>)?.rawQuota) || 0
+            : 0
+          return sum + raw
+        }, 0)
         array = [
           ...visible,
           {

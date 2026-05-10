@@ -169,10 +169,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
         isCommon && logType != null ? (logTypeRowTint[logType] ?? '') : ''
 
       return (
-        <TableRow
-          key={row.id}
-          className={cn('transition-colors', tintClass)}
-        >
+        <TableRow key={row.id} className={cn('transition-colors', tintClass)}>
           {row.getVisibleCells().map((cell) => (
             <TableCell key={cell.id} className={isCommon ? 'py-2' : 'py-3.5'}>
               {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -187,14 +184,14 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     <>
       <div className='space-y-3 sm:space-y-4'>
         {logCategory === 'common' ? (
-          <div className='rounded-md border bg-card/50 p-2 shadow-xs sm:p-3'>
+          <div className='bg-card/50 rounded-md border p-2 shadow-xs sm:p-3'>
             <CommonLogsFilterBar
               stats={<CommonLogsStats />}
               viewOptions={<DataTableViewOptions table={table} />}
             />
           </div>
         ) : (
-          <div className='rounded-md border bg-card/50 p-2 shadow-xs sm:p-3'>
+          <div className='bg-card/50 rounded-md border p-2 shadow-xs sm:p-3'>
             <TaskLogsFilterBar
               logCategory={logCategory}
               viewOptions={<DataTableViewOptions table={table} />}

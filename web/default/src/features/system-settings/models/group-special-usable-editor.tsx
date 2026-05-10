@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { GroupSpecialUsableSection } from './group-special-usable-section'
 import {
   flattenRules,
   OP_APPEND,
@@ -19,7 +20,6 @@ import {
   uid,
   type Rule,
 } from './group-special-usable-utils'
-import { GroupSpecialUsableSection } from './group-special-usable-section'
 
 const sectionCardClassName =
   'relative shadow-sm ring-0 before:pointer-events-none before:absolute before:inset-0 before:rounded-xl before:border before:border-border/90'

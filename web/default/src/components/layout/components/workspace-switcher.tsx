@@ -196,7 +196,7 @@ export function WorkspaceSwitcher({
           <SidebarMenuButton
             asChild
             size='lg'
-            className='cursor-default hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground'
+            className='hover:text-sidebar-foreground active:text-sidebar-foreground cursor-default hover:bg-transparent active:bg-transparent'
           >
             <div>{workspaceButtonContent}</div>
           </SidebarMenuButton>

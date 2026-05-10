@@ -11,11 +11,6 @@ import {
   CardStaggerItem,
   FadeIn,
 } from '@/components/page-transition'
-import {
-  buildDefaultDashboardFilters,
-  getSavedChartPreferences,
-  saveChartPreferences,
-} from './lib'
 import { ModelsChartPreferences } from './components/models/models-chart-preferences'
 import { ModelsFilter } from './components/models/models-filter-dialog'
 import { AnnouncementsPanel } from './components/overview/announcements-panel'
@@ -24,6 +19,11 @@ import { FAQPanel } from './components/overview/faq-panel'
 import { SummaryCards } from './components/overview/summary-cards'
 import { UptimePanel } from './components/overview/uptime-panel'
 import { DEFAULT_TIME_GRANULARITY } from './constants'
+import {
+  buildDefaultDashboardFilters,
+  getSavedChartPreferences,
+  saveChartPreferences,
+} from './lib'
 import {
   type DashboardSectionId,
   DASHBOARD_DEFAULT_SECTION,
@@ -168,7 +168,8 @@ export function Dashboard() {
     },
     [navigate]
   )
-  const showSectionTabs = activeSection !== 'overview' && visibleSections.length > 1
+  const showSectionTabs =
+    activeSection !== 'overview' && visibleSections.length > 1
   const modelActions =
     activeSection === 'models' ? (
       <>

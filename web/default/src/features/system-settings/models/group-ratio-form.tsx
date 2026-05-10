@@ -60,11 +60,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   return (
     <div className='space-y-6'>
       <div className='flex flex-wrap justify-end gap-2'>
-        <Button
-          variant='outline'
-          size='sm'
-          onClick={() => setGuideOpen(true)}
-        >
+        <Button variant='outline' size='sm' onClick={() => setGuideOpen(true)}>
           <HelpCircle className='mr-2 h-4 w-4' />
           {t('Usage guide')}
         </Button>

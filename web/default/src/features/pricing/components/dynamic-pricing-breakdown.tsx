@@ -242,8 +242,7 @@ export function DynamicPricingBreakdown({
                   key={`tier-mobile-${i}`}
                   className={cn(
                     'rounded-md border p-2',
-                    isMatched &&
-                      'border-emerald-500/40 bg-emerald-500/10'
+                    isMatched && 'border-emerald-500/40 bg-emerald-500/10'
                   )}
                 >
                   <div className='mb-1.5 flex flex-wrap items-center gap-1.5'>
