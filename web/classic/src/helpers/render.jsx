@@ -28,40 +28,38 @@ import {
   BILLING_VAR_REGEX,
 } from '../constants';
 import { visit } from 'unist-util-visit';
-import {
-  OpenAI,
-  Claude,
-  Gemini,
-  Moonshot,
-  Zhipu,
-  Qwen,
-  DeepSeek,
-  Minimax,
-  Wenxin,
-  Spark,
-  Midjourney,
-  Hunyuan,
-  Cohere,
-  Cloudflare,
-  Ai360,
-  Yi,
-  Jina,
-  Mistral,
-  XAI,
-  Ollama,
-  Doubao,
-  Suno,
-  Xinference,
-  OpenRouter,
-  Dify,
-  Coze,
-  SiliconCloud,
-  FastGPT,
-  Kling,
-  Jimeng,
-  Perplexity,
-  Replicate,
-} from '@lobehub/icons';
+import OpenAI from '@lobehub/icons/es/OpenAI';
+import Claude from '@lobehub/icons/es/Claude';
+import Gemini from '@lobehub/icons/es/Gemini';
+import Moonshot from '@lobehub/icons/es/Moonshot';
+import Zhipu from '@lobehub/icons/es/Zhipu';
+import Qwen from '@lobehub/icons/es/Qwen';
+import DeepSeek from '@lobehub/icons/es/DeepSeek';
+import Minimax from '@lobehub/icons/es/Minimax';
+import Wenxin from '@lobehub/icons/es/Wenxin';
+import Spark from '@lobehub/icons/es/Spark';
+import Midjourney from '@lobehub/icons/es/Midjourney';
+import Hunyuan from '@lobehub/icons/es/Hunyuan';
+import Cohere from '@lobehub/icons/es/Cohere';
+import Cloudflare from '@lobehub/icons/es/Cloudflare';
+import Ai360 from '@lobehub/icons/es/Ai360';
+import Yi from '@lobehub/icons/es/Yi';
+import Jina from '@lobehub/icons/es/Jina';
+import Mistral from '@lobehub/icons/es/Mistral';
+import XAI from '@lobehub/icons/es/XAI';
+import Ollama from '@lobehub/icons/es/Ollama';
+import Doubao from '@lobehub/icons/es/Doubao';
+import Suno from '@lobehub/icons/es/Suno';
+import Xinference from '@lobehub/icons/es/Xinference';
+import OpenRouter from '@lobehub/icons/es/OpenRouter';
+import Dify from '@lobehub/icons/es/Dify';
+import Coze from '@lobehub/icons/es/Coze';
+import SiliconCloud from '@lobehub/icons/es/SiliconCloud';
+import FastGPT from '@lobehub/icons/es/FastGPT';
+import Kling from '@lobehub/icons/es/Kling';
+import Jimeng from '@lobehub/icons/es/Jimeng';
+import Perplexity from '@lobehub/icons/es/Perplexity';
+import Replicate from '@lobehub/icons/es/Replicate';
 
 import { Layers } from 'lucide-react';
 export { getLucideIcon } from './sidebarIcons';

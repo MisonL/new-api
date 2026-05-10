@@ -245,7 +245,8 @@ export const buildDashboardDrilldown = ({
       return;
     }
 
-    const model = item.model_name || translate('未知模型');
+    const rawModelName = item.model_name || '';
+    const model = rawModelName || translate('未知模型');
     if (modelFilter && !modelFilter.has(model)) {
       return;
     }
@@ -258,6 +259,7 @@ export const buildDashboardDrilldown = ({
     };
     modelMap.set(model, {
       model,
+      logModelName: rawModelName,
       quota: prev.quota + toDashboardFiniteNumber(item.quota),
       count: prev.count + toDashboardFiniteNumber(item.count),
       tokens: prev.tokens + toDashboardFiniteNumber(item.token_used),

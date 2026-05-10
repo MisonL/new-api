@@ -21,11 +21,90 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, transformWithEsbuild } from 'vite';
 import pkg from '@douyinfe/vite-plugin-semi';
 import path from 'path';
+import fs from 'fs';
+import { createRequire } from 'module';
 import { codeInspectorPlugin } from 'code-inspector-plugin';
 const { vitePluginSemi } = pkg;
+const require = createRequire(import.meta.url);
 
 // Silence the known Browserslist stale-data notice when upstream has no newer dataset.
 process.env.BROWSERSLIST_IGNORE_OLD_DATA = '1';
+
+const copyDir = (sourceDir, targetDir) => {
+  fs.mkdirSync(targetDir, { recursive: true });
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDir(sourcePath, targetPath);
+    } else if (entry.isFile() && entry.name.endsWith('.mjs')) {
+      fs.copyFileSync(sourcePath, targetPath);
+    }
+  }
+};
+
+const resolveMermaidVendorPaths = () => {
+  const mermaidDistDir = path.dirname(
+    require.resolve('mermaid/dist/mermaid.esm.min.mjs'),
+  );
+  return {
+    mermaidDistDir,
+    mermaidEntry: path.join(mermaidDistDir, 'mermaid.esm.min.mjs'),
+    mermaidChunksDir: path.join(mermaidDistDir, 'chunks', 'mermaid.esm.min'),
+  };
+};
+
+const serveMermaidVendor = (server, mermaidDistDir) => {
+  server.middlewares.use((req, res, next) => {
+    if (!req.url?.startsWith('/vendor/mermaid/')) {
+      next();
+      return;
+    }
+    const relativePath = decodeURIComponent(
+      req.url.replace('/vendor/mermaid/', '').split('?')[0],
+    );
+    const filePath = path.join(mermaidDistDir, relativePath);
+    const boundary = path.relative(mermaidDistDir, filePath);
+    if (
+      boundary.startsWith('..') ||
+      path.isAbsolute(boundary) ||
+      !fs.existsSync(filePath)
+    ) {
+      next();
+      return;
+    }
+    res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+    fs.createReadStream(filePath).pipe(res);
+  });
+};
+
+const copyMermaidVendor = (outputDir, mermaidEntry, mermaidChunksDir) => {
+  const targetDir = path.join(outputDir, 'vendor', 'mermaid');
+  fs.mkdirSync(path.join(targetDir, 'chunks', 'mermaid.esm.min'), {
+    recursive: true,
+  });
+  fs.copyFileSync(mermaidEntry, path.join(targetDir, 'mermaid.esm.min.mjs'));
+  copyDir(mermaidChunksDir, path.join(targetDir, 'chunks', 'mermaid.esm.min'));
+};
+
+const mermaidVendorPlugin = () => {
+  const { mermaidDistDir, mermaidEntry, mermaidChunksDir } =
+    resolveMermaidVendorPaths();
+
+  return {
+    name: 'vendor-mermaid-prebuilt',
+    configureServer(server) {
+      serveMermaidVendor(server, mermaidDistDir);
+    },
+    writeBundle(options) {
+      const outputDir =
+        typeof options.dir === 'string'
+          ? options.dir
+          : path.resolve(__dirname, 'dist');
+      copyMermaidVendor(outputDir, mermaidEntry, mermaidChunksDir);
+    },
+  };
+};
 
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => {
@@ -52,6 +131,7 @@ export default defineConfig(({ command }) => {
     vitePluginSemi({
       cssLayer: true,
     }),
+    mermaidVendorPlugin(),
   ];
 
   if (command === 'serve') {

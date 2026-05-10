@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Empty,
@@ -27,8 +27,9 @@ import {
   Tabs,
   Typography,
 } from '@douyinfe/semi-ui';
-import { VChart } from '@visactor/react-vchart';
 import { renderNumber, renderQuota } from '../../helpers';
+import { useIsMobile } from '../../hooks/common/useIsMobile';
+import LazyVChart from './LazyVChart';
 
 const { Text } = Typography;
 
@@ -38,8 +39,26 @@ const DashboardDrilldownModal = ({
   chartConfig,
   onClose,
   onOpenLogs,
+  onOpenRowLogs,
   t,
 }) => {
+  const isMobile = useIsMobile();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(8);
+  const modalViewportGap = 'clamp(32px, 6vw, 96px)';
+  const modalBodyStyle = {
+    padding: '10px 14px 14px',
+    maxHeight: `calc(100dvh - ${modalViewportGap} - 64px)`,
+    overflow: 'hidden',
+  };
+  const tableScrollY = isMobile
+    ? 'clamp(160px, calc(100dvh - 620px), 240px)'
+    : 'clamp(180px, calc(100dvh - 460px), 360px)';
+
+  useEffect(() => {
+    setPage(1);
+  }, [detail?.time]);
+
   const columns = useMemo(
     () => [
       {
@@ -83,6 +102,23 @@ const DashboardDrilldownModal = ({
     ],
     [t],
   );
+  const detailRowsLength = detail?.rows?.length || 0;
+  const detailPagination =
+    detailRowsLength > 0
+      ? {
+          currentPage: page,
+          pageSize,
+          total: detailRowsLength,
+          pageSizeOptions: [8, 10, 20, 50],
+          showSizeChanger: !isMobile,
+          showQuickJumper: !isMobile,
+          onPageChange: setPage,
+          onPageSizeChange: (nextPageSize) => {
+            setPageSize(nextPageSize);
+            setPage(1);
+          },
+        }
+      : false;
 
   const spec = useMemo(
     () => ({
@@ -117,10 +153,13 @@ const DashboardDrilldownModal = ({
       visible={!!detail}
       onCancel={onClose}
       footer={null}
-      width={960}
+      width={`min(960px, calc(100vw - ${modalViewportGap}))`}
+      centered
+      bodyStyle={modalBodyStyle}
+      closeOnEsc
     >
       {detail ? (
-        <div className='flex flex-col gap-4'>
+        <div className='flex max-h-[calc(100dvh-clamp(144px,14vw,200px))] min-h-0 flex-col gap-3'>
           <div className='grid grid-cols-1 gap-3 sm:grid-cols-3'>
             <SummaryItem
               label={t('总消耗')}
@@ -139,6 +178,7 @@ const DashboardDrilldownModal = ({
             type='line'
             defaultActiveKey='detail'
             keepDOM={false}
+            className='min-h-0 flex-1'
             tabBarExtraContent={
               <Button
                 size='small'
@@ -151,22 +191,28 @@ const DashboardDrilldownModal = ({
             }
           >
             <TabPane tab={t('明细')} itemKey='detail'>
-              <Table
-                columns={columns}
-                dataSource={detail.rows}
-                rowKey='model'
-                pagination={
-                  detail.rows.length > 8
-                    ? { pageSize: 8, showSizeChanger: false }
-                    : false
-                }
-                size='small'
-              />
+              <div className='min-h-0 overflow-hidden rounded-lg border border-semi-color-border bg-semi-color-bg-0'>
+                <Table
+                  columns={columns}
+                  dataSource={detail.rows}
+                  rowKey='model'
+                  pagination={detailPagination}
+                  size='small'
+                  scroll={{
+                    x: 760,
+                    y: tableScrollY,
+                  }}
+                  onRow={(record) => ({
+                    className: 'cursor-pointer',
+                    onClick: () => onOpenRowLogs?.(record),
+                  })}
+                />
+              </div>
             </TabPane>
             <TabPane tab={t('分布')} itemKey='distribution'>
-              <div className='h-[360px] rounded-lg border border-semi-color-border bg-semi-color-bg-1 p-3'>
+              <div className='h-[clamp(220px,calc(100dvh-360px),360px)] rounded-lg border border-semi-color-border bg-semi-color-bg-1 p-3'>
                 {detail.distribution.length > 0 ? (
-                  <VChart spec={spec} option={chartConfig} />
+                  <LazyVChart spec={spec} option={chartConfig} />
                 ) : (
                   <Empty title={t('暂无数据')} />
                 )}

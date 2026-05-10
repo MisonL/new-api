@@ -44,7 +44,6 @@ import {
   UPTIME_STATUS_MAP,
 } from '../../constants/dashboard.constants';
 import {
-  getTrendSpec,
   handleCopyUrl,
   handleSpeedTest,
   getUptimeStatusColor,
@@ -263,9 +262,7 @@ const Dashboard = () => {
       <StatsCards
         groupedStatsData={groupedStatsData}
         loading={dashboardData.loading}
-        getTrendSpec={getTrendSpec}
         CARD_PROPS={CARD_PROPS}
-        CHART_CONFIG={CHART_CONFIG}
       />
 
       {/* API信息和图表面板 */}

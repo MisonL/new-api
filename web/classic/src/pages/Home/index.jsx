@@ -40,28 +40,26 @@ import {
 } from '@douyinfe/semi-icons';
 import { Link } from 'react-router-dom';
 import NoticeModal from '../../components/layout/NoticeModal';
-import {
-  Moonshot,
-  OpenAI,
-  XAI,
-  Zhipu,
-  Volcengine,
-  Cohere,
-  Claude,
-  Gemini,
-  Suno,
-  Minimax,
-  Wenxin,
-  Spark,
-  Qingyan,
-  DeepSeek,
-  Qwen,
-  Midjourney,
-  Grok,
-  AzureAI,
-  Hunyuan,
-  Xinference,
-} from '@lobehub/icons';
+import Moonshot from '@lobehub/icons/es/Moonshot';
+import OpenAI from '@lobehub/icons/es/OpenAI';
+import XAI from '@lobehub/icons/es/XAI';
+import Zhipu from '@lobehub/icons/es/Zhipu';
+import Volcengine from '@lobehub/icons/es/Volcengine';
+import Cohere from '@lobehub/icons/es/Cohere';
+import Claude from '@lobehub/icons/es/Claude';
+import Gemini from '@lobehub/icons/es/Gemini';
+import Suno from '@lobehub/icons/es/Suno';
+import Minimax from '@lobehub/icons/es/Minimax';
+import Wenxin from '@lobehub/icons/es/Wenxin';
+import Spark from '@lobehub/icons/es/Spark';
+import Qingyan from '@lobehub/icons/es/Qingyan';
+import DeepSeek from '@lobehub/icons/es/DeepSeek';
+import Qwen from '@lobehub/icons/es/Qwen';
+import Midjourney from '@lobehub/icons/es/Midjourney';
+import Grok from '@lobehub/icons/es/Grok';
+import AzureAI from '@lobehub/icons/es/AzureAI';
+import Hunyuan from '@lobehub/icons/es/Hunyuan';
+import Xinference from '@lobehub/icons/es/Xinference';
 
 const { Text } = Typography;
 

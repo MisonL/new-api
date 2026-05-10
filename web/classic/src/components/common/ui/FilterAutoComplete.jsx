@@ -31,6 +31,8 @@ const DEFAULT_DEBOUNCE_MS = 250;
 const FilterAutoComplete = ({
   field,
   endpoint,
+  className = '',
+  label = null,
   placeholder,
   buildParams,
   enableSuggestions = true,
@@ -186,13 +188,14 @@ const FilterAutoComplete = ({
 
   return (
     <div
-      className='filter-autocomplete relative w-full'
+      className={`filter-autocomplete relative w-full ${className}`.trim()}
       ref={popupContainerRef}
     >
       <Form.AutoComplete
         ref={autoCompleteRef}
         className='filter-autocomplete-input'
         field={field}
+        label={label}
         data={enableSuggestions ? options : []}
         dropdownClassName='filter-autocomplete-dropdown'
         dropdownStyle={{ width: '100%' }}

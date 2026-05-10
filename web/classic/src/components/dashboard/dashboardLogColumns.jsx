@@ -43,8 +43,12 @@ export const getDashboardLogColumns = ({ isAdminUser, t }) => [
     title: t('模型'),
     dataIndex: 'model_name',
     key: 'model_name',
+    width: 180,
     render: (value) => (
-      <Typography.Text ellipsis={{ showTooltip: true }}>
+      <Typography.Text
+        className='block max-w-full'
+        ellipsis={{ showTooltip: true }}
+      >
         {value || '-'}
       </Typography.Text>
     ),
@@ -95,9 +99,12 @@ export const getDashboardLogColumns = ({ isAdminUser, t }) => [
     title: t('请求 ID'),
     dataIndex: 'request_id',
     key: 'request_id',
-    width: 180,
+    width: 320,
     render: (value) => (
-      <Typography.Text ellipsis={{ showTooltip: true }}>
+      <Typography.Text
+        className='block max-w-full'
+        ellipsis={{ showTooltip: true }}
+      >
         {value || '-'}
       </Typography.Text>
     ),

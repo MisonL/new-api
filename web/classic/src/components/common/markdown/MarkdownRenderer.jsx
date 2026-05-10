@@ -37,10 +37,11 @@ import { useTranslation } from 'react-i18next';
 import { MERMAID_SECURITY_LEVEL, renderMermaidCode } from './mermaidRenderer';
 
 let mermaidLoader;
+const MERMAID_VENDOR_ENTRY = '/vendor/mermaid/mermaid.esm.min.mjs';
 
 function loadMermaid() {
   if (!mermaidLoader) {
-    mermaidLoader = import('mermaid')
+    mermaidLoader = import(/* @vite-ignore */ MERMAID_VENDOR_ENTRY)
       .then((module) => {
         const mermaid = module.default;
         mermaid.initialize({

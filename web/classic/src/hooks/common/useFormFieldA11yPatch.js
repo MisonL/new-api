@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useEffect } from 'react';
 
-const PATCH_INTERVAL_MS = 800;
 const AUTOCOMPLETE_DISABLED_INPUT_TYPES = new Set([
   'hidden',
   'checkbox',
@@ -424,11 +423,6 @@ const useFormFieldA11yPatch = (routeKey) => {
       window.setTimeout(schedulePatch, 2000),
       window.setTimeout(schedulePatch, 4000),
     ];
-    const patchIntervalId = window.setInterval(
-      schedulePatch,
-      PATCH_INTERVAL_MS,
-    );
-
     const observer = new MutationObserver(() => {
       schedulePatch();
     });
@@ -452,7 +446,6 @@ const useFormFieldA11yPatch = (routeKey) => {
     return () => {
       observer.disconnect();
       delayedPatchTimers.forEach((timerId) => window.clearTimeout(timerId));
-      window.clearInterval(patchIntervalId);
     };
   }, [routeKey]);
 };

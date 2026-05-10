@@ -14,8 +14,11 @@ import {
   buildDashboardLogInitialFilters,
   normalizeDashboardLogFilters,
 } from "../classic/src/helpers/dashboardLogs.js";
+import fs from "node:fs";
+import path from "node:path";
 
 const translate = (text) => text;
+const testDir = path.dirname(new URL(import.meta.url).pathname);
 
 const rows = [
   {
@@ -58,6 +61,7 @@ test("buildDashboardDrilldown aggregates one time bucket by model", () => {
   assert.deepEqual(
     detail.rows.map((item) => ({
       model: item.model,
+      logModelName: item.logModelName,
       quota: item.quota,
       count: item.count,
       tokens: item.tokens,
@@ -66,6 +70,7 @@ test("buildDashboardDrilldown aggregates one time bucket by model", () => {
     [
       {
         model: "gpt-4o",
+        logModelName: "gpt-4o",
         quota: 120,
         count: 3,
         tokens: 3000,
@@ -73,6 +78,7 @@ test("buildDashboardDrilldown aggregates one time bucket by model", () => {
       },
       {
         model: "gpt-4o-mini",
+        logModelName: "gpt-4o-mini",
         quota: 80,
         count: 5,
         tokens: 2400,
@@ -97,6 +103,26 @@ test("buildDashboardDrilldown keeps empty model filter scoped", () => {
 
   assert.equal(detail.totalQuota, 0);
   assert.deepEqual(detail.rows, []);
+});
+
+test("buildDashboardDrilldown keeps raw model name for log filters", () => {
+  const detail = buildDashboardDrilldown({
+    quotaData: [
+      {
+        created_at: 1714550400,
+        model_name: "",
+        quota: 10,
+        count: 1,
+        token_used: 20,
+      },
+    ],
+    targetTime: "05-01",
+    granularity: "day",
+    t: translate,
+  });
+
+  assert.equal(detail.rows[0].model, "未知模型");
+  assert.equal(detail.rows[0].logModelName, "");
 });
 
 test("getDashboardBucketLogRange returns bucket start and end seconds", () => {
@@ -381,6 +407,8 @@ test("dashboard log filters preserve inherited scope fields", () => {
       channel: "7",
       group: "default",
       request_id: "req-1",
+      fast_page: true,
+      compact: true,
       startTimestamp: 1714550400,
       endTimestamp: 1714636799,
     },
@@ -397,6 +425,8 @@ test("dashboard log filters preserve inherited scope fields", () => {
   assert.equal(initial.channel, "7");
   assert.equal(initial.group, "default");
   assert.equal(initial.request_id, "req-1");
+  assert.equal(initial.fast_page, true);
+  assert.equal(initial.compact, true);
 
   const normalized = normalizeDashboardLogFilters(initial);
   assert.deepEqual(
@@ -408,6 +438,8 @@ test("dashboard log filters preserve inherited scope fields", () => {
       channel: normalized.channel,
       group: normalized.group,
       request_id: normalized.request_id,
+      fast_page: normalized.fast_page,
+      compact: normalized.compact,
       start_timestamp: normalized.start_timestamp,
       end_timestamp: normalized.end_timestamp,
     },
@@ -419,8 +451,56 @@ test("dashboard log filters preserve inherited scope fields", () => {
       channel: "7",
       group: "default",
       request_id: "req-1",
+      fast_page: "true",
+      compact: "true",
       start_timestamp: 1714550400,
       end_timestamp: 1714636799,
     },
+  );
+});
+
+test("dashboard log filters encode empty model scope explicitly", () => {
+  const initial = buildDashboardLogInitialFilters(
+    {
+      logType: 2,
+      model_name: "",
+      model_name_empty: true,
+      model_name_empty_label: "未知模型",
+      startTimestamp: 1714550400,
+      endTimestamp: 1714636799,
+    },
+    {
+      startTimestamp: 1,
+      endTimestamp: 2,
+    },
+  );
+
+  assert.equal(initial.model_name, "未知模型");
+  assert.equal(initial.model_name_empty, true);
+  assert.equal(initial.model_name_empty_label, "未知模型");
+
+  const normalized = normalizeDashboardLogFilters(initial);
+  assert.equal(normalized.model_name, "");
+  assert.equal(normalized.model_name_empty, "true");
+  assert.equal(normalized.start_timestamp, 1714550400);
+  assert.equal(normalized.end_timestamp, 1714636799);
+});
+
+test("dashboard log refresh controls do not submit the filter form", () => {
+  const modalSource = fs.readFileSync(
+    path.join(
+      testDir,
+      "../classic/src/components/dashboard/DashboardLogsModal.jsx",
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    modalSource,
+    /htmlType='button'[\s\S]{0,120}onClick=\{\(\) => loadLogs\(page, pageSize\)\}/,
+  );
+  assert.match(
+    modalSource,
+    /htmlType='button'[\s\S]{0,120}onClick=\{handleReset\}/,
   );
 });

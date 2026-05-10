@@ -27,12 +27,15 @@ import React, {
 import { Button, Form, Modal, Radio, Space, Table } from '@douyinfe/semi-ui';
 import { IconRefresh, IconSearch } from '@douyinfe/semi-icons';
 import { API, showError } from '../../helpers';
+import { StatusContext } from '../../context/Status';
 import {
   DASHBOARD_LOG_PAGE_SIZE,
   DASHBOARD_LOG_TYPES,
   buildDashboardLogInitialFilters,
   normalizeDashboardLogFilters,
 } from '../../helpers/dashboardLogs';
+import { useIsMobile } from '../../hooks/common/useIsMobile';
+import FilterAutoComplete from '../common/ui/FilterAutoComplete';
 import { getDashboardLogColumns } from './dashboardLogColumns';
 
 const DashboardLogsModal = ({
@@ -43,12 +46,22 @@ const DashboardLogsModal = ({
   onClose,
   t,
 }) => {
+  const [statusState] = React.useContext(StatusContext);
+  const autocompleteEnabled = statusState?.status
+    ? (statusState.status.log_filter_autocomplete_enabled ?? true)
+    : false;
+  const isMobile = useIsMobile();
+  const tableScrollX = isAdminUser ? 1330 : 1210;
+  const tableScrollY = isMobile
+    ? 'clamp(180px, calc(100dvh - 600px), 280px)'
+    : 'clamp(240px, calc(100dvh - 480px), 360px)';
   const [formApi, setFormApi] = useState(null);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DASHBOARD_LOG_PAGE_SIZE);
   const [total, setTotal] = useState(0);
+  const fastPage = scope?.fast_page === true;
   const requestSeqRef = useRef(0);
   const autoLoadKeyRef = useRef('');
 
@@ -65,11 +78,19 @@ const DashboardLogsModal = ({
     () => getDashboardLogColumns({ isAdminUser, t }),
     [isAdminUser, t],
   );
+  const modalViewportGap = 'clamp(32px, 6vw, 96px)';
   const modalBodyStyle = {
     padding: '10px 14px 14px',
-    maxHeight: 'calc(100dvh - 64px)',
+    maxHeight: `calc(100dvh - ${modalViewportGap} - 64px)`,
     overflow: 'hidden',
   };
+  const suggestionEndpoint = isAdminUser
+    ? '/api/log/suggestions'
+    : '/api/log/self/suggestions';
+  const buildSuggestionParams = () =>
+    normalizeDashboardLogFilters(
+      formApi ? formApi.getValues() : initialFilters,
+    );
 
   const loadLogs = useCallback(
     async (nextPage, nextPageSize, filterValues) => {
@@ -154,12 +175,12 @@ const DashboardLogsModal = ({
       visible={visible}
       onCancel={onClose}
       footer={null}
-      width='min(1280px, calc(100vw - 32px))'
+      width={`min(1180px, calc(100vw - ${modalViewportGap}))`}
       centered
       bodyStyle={modalBodyStyle}
       closeOnEsc
     >
-      <div className='flex max-h-[calc(100dvh-112px)] min-h-0 flex-col gap-2'>
+      <div className='flex max-h-[calc(100dvh-clamp(144px,14vw,200px))] min-h-0 flex-col gap-2'>
         <Form
           layout='vertical'
           initValues={initialFilters}
@@ -172,56 +193,66 @@ const DashboardLogsModal = ({
               <div className='md:col-span-2 xl:col-span-3'>
                 <Form.DatePicker
                   field='dateRange'
-                  label={t('时间范围')}
                   type='dateTimeRange'
                   className='w-full'
                   placeholder={[t('开始时间'), t('结束时间')]}
+                  showClear
+                  pure
                   size='small'
                 />
               </div>
-              <Form.Input
+              <FilterAutoComplete
                 field='model_name'
-                label={t('模型名称')}
+                endpoint={suggestionEndpoint}
+                buildParams={buildSuggestionParams}
+                enableSuggestions={autocompleteEnabled}
                 prefix={<IconSearch />}
                 placeholder={t('模型名称')}
-                size='small'
               />
-              <Form.Input
+              <FilterAutoComplete
                 field='token_name'
-                label={t('令牌名称')}
+                endpoint={suggestionEndpoint}
+                buildParams={buildSuggestionParams}
+                enableSuggestions={autocompleteEnabled}
                 prefix={<IconSearch />}
                 placeholder={t('令牌名称')}
-                size='small'
               />
-              <Form.Input
+              <FilterAutoComplete
                 field='group'
-                label={t('分组')}
+                endpoint={suggestionEndpoint}
+                buildParams={buildSuggestionParams}
+                enableSuggestions={autocompleteEnabled}
                 prefix={<IconSearch />}
                 placeholder={t('分组')}
-                size='small'
               />
-              <Form.Input
+              <FilterAutoComplete
                 field='request_id'
-                label={t('请求 ID')}
+                endpoint={suggestionEndpoint}
+                buildParams={buildSuggestionParams}
+                enableSuggestions={autocompleteEnabled}
                 prefix={<IconSearch />}
                 placeholder={t('请求 ID')}
-                size='small'
+                minLength={1}
               />
               {isAdminUser ? (
                 <>
-                  <Form.Input
+                  <FilterAutoComplete
                     field='channel'
-                    label={t('渠道 ID')}
+                    endpoint={suggestionEndpoint}
+                    buildParams={buildSuggestionParams}
+                    enableSuggestions={autocompleteEnabled}
                     prefix={<IconSearch />}
                     placeholder={t('渠道 ID')}
-                    size='small'
+                    minLength={1}
                   />
-                  <Form.Input
+                  <FilterAutoComplete
                     field='username'
-                    label={t('用户名称')}
+                    endpoint={suggestionEndpoint}
+                    buildParams={buildSuggestionParams}
+                    enableSuggestions={autocompleteEnabled}
                     prefix={<IconSearch />}
                     placeholder={t('用户名称')}
-                    size='small'
+                    minLength={1}
                   />
                 </>
               ) : null}
@@ -252,6 +283,7 @@ const DashboardLogsModal = ({
                   </Button>
                   <Button
                     type='tertiary'
+                    htmlType='button'
                     onClick={() => loadLogs(page, pageSize)}
                     loading={loading}
                     size='small'
@@ -259,7 +291,12 @@ const DashboardLogsModal = ({
                   >
                     {t('刷新')}
                   </Button>
-                  <Button type='tertiary' onClick={handleReset} size='small'>
+                  <Button
+                    type='tertiary'
+                    htmlType='button'
+                    onClick={handleReset}
+                    size='small'
+                  >
                     {t('重置')}
                   </Button>
                 </Space>
@@ -275,15 +312,16 @@ const DashboardLogsModal = ({
             loading={loading}
             size='small'
             scroll={{
-              x: 'max-content',
-              y: 'max(260px, calc(100dvh - 280px))',
+              x: tableScrollX,
+              y: tableScrollY,
             }}
             pagination={{
               currentPage: page,
               pageSize,
               total,
               pageSizeOptions: [10, 20, 50, 100],
-              showSizeChanger: true,
+              showSizeChanger: !isMobile,
+              showTotal: fastPage ? false : undefined,
               onPageChange: (nextPage) => loadLogs(nextPage, pageSize),
               onPageSizeChange: (nextPageSize) => {
                 setPageSize(nextPageSize);

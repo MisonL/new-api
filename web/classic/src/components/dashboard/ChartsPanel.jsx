@@ -19,13 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useMemo, useState } from 'react';
 import { Card } from '@douyinfe/semi-ui';
-import { VChart } from '@visactor/react-vchart';
 import { parseDashboardTimestamp } from '../../helpers/dashboard';
 import { useDashboardDrilldown } from '../../hooks/dashboard/useDashboardDrilldown';
 import ChartsPanelHeader from './ChartsPanelHeader';
 import ChartsRangeToolbar from './ChartsRangeToolbar';
 import DashboardDrilldownModal from './DashboardDrilldownModal';
 import DashboardLogsModal from './DashboardLogsModal';
+import LazyVChart, { DashboardChartWarmup } from './LazyVChart';
 
 // ChartsPanel renders the dashboard charts together with time-range controls.
 const ChartsPanel = ({
@@ -93,6 +93,8 @@ const ChartsPanel = ({
   );
   const buildBaseLogScope = () => ({
     title: t('相关日志'),
+    fast_page: true,
+    compact: true,
     startTimestamp: fallbackLogRange.startTimestamp,
     endTimestamp: fallbackLogRange.endTimestamp,
     username: dashboardInputs?.username || '',
@@ -117,10 +119,26 @@ const ChartsPanel = ({
       endTimestamp: drilldownDetail.endTimestamp,
     });
   };
+  const openDrilldownRowLogs = (row) => {
+    if (!drilldownDetail || !row?.model) {
+      return;
+    }
+    const isEmptyModel = row.logModelName === '';
+    setLogScope({
+      ...buildBaseLogScope(),
+      title: `${t('相关日志')} - ${drilldownDetail.time} - ${row.model}`,
+      startTimestamp: drilldownDetail.startTimestamp,
+      endTimestamp: drilldownDetail.endTimestamp,
+      model_name: isEmptyModel ? '' : row.logModelName || row.model,
+      model_name_empty: isEmptyModel,
+      model_name_empty_label: row.model,
+    });
+  };
   const closeLogs = () => setLogScope(null);
 
   return (
     <>
+      <DashboardChartWarmup />
       <Card
         {...CARD_PROPS}
         className={`!rounded-2xl ${hasApiInfoPanel ? 'lg:col-span-3' : ''}`}
@@ -157,7 +175,7 @@ const ChartsPanel = ({
               className='h-full cursor-pointer'
               onClick={handleQuotaChartAreaClick}
             >
-              <VChart
+              <LazyVChart
                 spec={spec_line}
                 option={CHART_CONFIG}
                 onClick={handleQuotaBarClick}
@@ -167,19 +185,19 @@ const ChartsPanel = ({
             </div>
           )}
           {activeChartTab === '2' && (
-            <VChart spec={spec_model_line} option={CHART_CONFIG} />
+            <LazyVChart spec={spec_model_line} option={CHART_CONFIG} />
           )}
           {activeChartTab === '3' && (
-            <VChart spec={spec_pie} option={CHART_CONFIG} />
+            <LazyVChart spec={spec_pie} option={CHART_CONFIG} />
           )}
           {activeChartTab === '4' && (
-            <VChart spec={spec_rank_bar} option={CHART_CONFIG} />
+            <LazyVChart spec={spec_rank_bar} option={CHART_CONFIG} />
           )}
           {activeChartTab === '5' && isAdminUser && (
-            <VChart spec={spec_user_rank} option={CHART_CONFIG} />
+            <LazyVChart spec={spec_user_rank} option={CHART_CONFIG} />
           )}
           {activeChartTab === '6' && isAdminUser && (
-            <VChart spec={spec_user_trend} option={CHART_CONFIG} />
+            <LazyVChart spec={spec_user_trend} option={CHART_CONFIG} />
           )}
         </div>
       </Card>
@@ -189,6 +207,7 @@ const ChartsPanel = ({
         chartConfig={CHART_CONFIG}
         onClose={closeDrilldown}
         onOpenLogs={openDrilldownLogs}
+        onOpenRowLogs={openDrilldownRowLogs}
         t={t}
       />
       <DashboardLogsModal

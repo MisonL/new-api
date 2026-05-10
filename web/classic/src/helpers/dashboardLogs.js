@@ -54,14 +54,22 @@ export const buildDashboardLogInitialFilters = (scope, fallbackRange) => {
   const endTimestamp = toSafeTimestamp(
     scope?.endTimestamp || fallbackRange.endTimestamp,
   );
+  const modelNameEmpty = scope?.model_name_empty === true;
+  const modelName = modelNameEmpty
+    ? scope?.model_name_empty_label || ''
+    : scope?.model_name || '';
   return {
     logType: scope?.logType ?? 2,
     username: scope?.username || '',
     token_name: scope?.token_name || '',
-    model_name: scope?.model_name || '',
+    model_name: modelName,
+    model_name_empty: modelNameEmpty,
+    model_name_empty_label: modelNameEmpty ? modelName : '',
     channel: scope?.channel || '',
     group: scope?.group || '',
     request_id: scope?.request_id || '',
+    fast_page: scope?.fast_page === true,
+    compact: scope?.compact === true,
     dateRange: [
       formatDashboardLogTimestamp(startTimestamp),
       formatDashboardLogTimestamp(endTimestamp),
@@ -79,14 +87,21 @@ const toUnixSeconds = (value) => {
 
 export const normalizeDashboardLogFilters = (values) => {
   const dateRange = Array.isArray(values.dateRange) ? values.dateRange : [];
+  const modelName = values.model_name || '';
+  const modelNameEmpty =
+    values.model_name_empty === true &&
+    modelName === (values.model_name_empty_label || '');
   return {
     type: Number(values.logType || 0),
     username: values.username || '',
     token_name: values.token_name || '',
-    model_name: values.model_name || '',
+    model_name: modelNameEmpty ? '' : modelName,
+    model_name_empty: modelNameEmpty ? 'true' : '',
     channel: values.channel || '',
     group: values.group || '',
     request_id: values.request_id || '',
+    fast_page: values.fast_page === true ? 'true' : '',
+    compact: values.compact === true ? 'true' : '',
     start_timestamp: toUnixSeconds(dateRange[0]),
     end_timestamp: toUnixSeconds(dateRange[1]),
   };
