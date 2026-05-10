@@ -73,7 +73,9 @@ jobs:
 
       - name: Run web node contract tests
         run: |
-          cd web/classic
+          cd web/default
+          bun install --backend=copyfile --frozen-lockfile
+          cd ../classic
           bun install --backend=copyfile --frozen-lockfile
           bun run test:node
 
