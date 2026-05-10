@@ -16,9 +16,10 @@ import {
 } from "../classic/src/helpers/dashboardLogs.js";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const translate = (text) => text;
-const testDir = path.dirname(new URL(import.meta.url).pathname);
+const testDir = path.dirname(fileURLToPath(import.meta.url));
 
 const rows = [
   {
