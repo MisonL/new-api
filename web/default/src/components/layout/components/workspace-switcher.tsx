@@ -23,23 +23,22 @@ import { useWorkspace } from '../context/workspace-context'
 import { getWorkspaceByPath, WORKSPACE_IDS } from '../lib/workspace-registry'
 import { type Workspace } from '../types'
 
-type WorkspaceSwitcherProps = {
+type SystemBrandProps = {
   workspaces: Workspace[]
   defaultName?: string
   defaultVersion?: string
 }
 
 /**
- * Workspace switcher component
- * Allows users to switch between different workspaces
- * - Regular users can only see the default workspace
- * - Super administrators can see the system settings workspace
+ * System brand component
+ * Shows the current system identity and keeps system settings navigation available
+ * for super administrators.
  */
-export function WorkspaceSwitcher({
+export function SystemBrand({
   workspaces,
   defaultName = 'New API',
   defaultVersion,
-}: WorkspaceSwitcherProps) {
+}: SystemBrandProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -51,9 +50,7 @@ export function WorkspaceSwitcher({
   )
   const { activeWorkspace, setActiveWorkspace } = useWorkspace()
 
-  // Handle workspace list:
-  // 1. Populate first workspace with system info
-  // 2. Filter based on user permissions (non-super admins cannot see system settings)
+  // Build brand targets from the existing workspace registry and permissions.
   const availableWorkspaces = React.useMemo(
     () =>
       workspaces
@@ -81,14 +78,11 @@ export function WorkspaceSwitcher({
     ]
   )
 
-  // Initialize and synchronize active workspace
-  // Detect from URL first, then sync from activeWorkspace
+  // Keep the active brand synchronized with the current route.
   React.useEffect(() => {
-    // Detect which workspace should be active from workspace registry
     const detectedWorkspace = getWorkspaceByPath(pathname)
 
     if (detectedWorkspace.id === WORKSPACE_IDS.SYSTEM_SETTINGS) {
-      // Currently in system settings route, should activate System Settings workspace
       const systemSettingsWorkspace = availableWorkspaces.find(
         (w) => w.id === WORKSPACE_IDS.SYSTEM_SETTINGS
       )
@@ -96,7 +90,6 @@ export function WorkspaceSwitcher({
         setActiveWorkspace(systemSettingsWorkspace)
       }
     } else {
-      // Currently in main workspace route, should activate main workspace
       const mainWorkspace =
         availableWorkspaces.find((w) => w.id === WORKSPACE_IDS.DEFAULT) ||
         availableWorkspaces[0]
@@ -107,8 +100,6 @@ export function WorkspaceSwitcher({
   }, [pathname, availableWorkspaces, setActiveWorkspace])
 
   const handleWorkspaceChange = (workspace: Workspace) => {
-    // Only navigate, let useEffect synchronize workspace state based on new pathname
-    // This avoids race conditions and context loss issues
     if (workspace.id === WORKSPACE_IDS.SYSTEM_SETTINGS) {
       navigate({ to: '/system-settings/general' })
     } else {
@@ -121,7 +112,7 @@ export function WorkspaceSwitcher({
   }
 
   const canSwitchWorkspace = availableWorkspaces.length > 1
-  const workspaceButtonContent = (
+  const brandButtonContent = (
     <>
       {activeWorkspace.id === WORKSPACE_IDS.SYSTEM_SETTINGS ? (
         <div className='bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg'>
@@ -156,7 +147,7 @@ export function WorkspaceSwitcher({
                 size='lg'
                 className='data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground'
               >
-                {workspaceButtonContent}
+                {brandButtonContent}
               </SidebarMenuButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent
@@ -166,7 +157,7 @@ export function WorkspaceSwitcher({
               sideOffset={4}
             >
               <DropdownMenuLabel className='text-muted-foreground text-xs'>
-                {t('Workspaces')}
+                {t('System')}
               </DropdownMenuLabel>
               {availableWorkspaces.map((workspace, index) => (
                 <DropdownMenuItem
@@ -198,7 +189,7 @@ export function WorkspaceSwitcher({
             size='lg'
             className='hover:text-sidebar-foreground active:text-sidebar-foreground cursor-default hover:bg-transparent active:bg-transparent'
           >
-            <div>{workspaceButtonContent}</div>
+            <div>{brandButtonContent}</div>
           </SidebarMenuButton>
         )}
       </SidebarMenuItem>

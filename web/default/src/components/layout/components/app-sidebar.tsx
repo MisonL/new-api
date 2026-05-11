@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/sidebar'
 import { getNavGroupsForPath } from '../lib/workspace-registry'
 import { NavGroup } from './nav-group'
-import { WorkspaceSwitcher } from './workspace-switcher'
+import { SystemBrand } from './workspace-switcher'
 
 /**
  * Application sidebar component
@@ -52,7 +52,7 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible={collapsible} variant={variant}>
       <SidebarHeader>
-        <WorkspaceSwitcher workspaces={sidebarData.workspaces} />
+        <SystemBrand workspaces={sidebarData.workspaces} />
       </SidebarHeader>
       <SidebarContent>
         {currentNavGroups.map((props) => {
