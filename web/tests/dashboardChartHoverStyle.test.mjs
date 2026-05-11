@@ -23,3 +23,23 @@ test("dashboard 图表 hover/selected 状态不使用黑色描边", () => {
     );
   }
 });
+
+test("模型消耗分布柱图 hover 时轻微放大柱体", () => {
+  const defaultSource = fs.readFileSync(
+    path.join(testDir, "../default/src/features/dashboard/lib/charts.ts"),
+    "utf8",
+  );
+  const classicSource = fs.readFileSync(
+    path.join(testDir, "../classic/src/hooks/dashboard/useDashboardCharts.jsx"),
+    "utf8",
+  );
+
+  assert.match(
+    defaultSource,
+    /spec_line:\s*\{[\s\S]*?bar:\s*\{[\s\S]*?hover:\s*\{[\s\S]*?scaleX:\s*CHART_BAR_HOVER_SCALE[\s\S]*?scaleY:\s*CHART_BAR_HOVER_SCALE/,
+  );
+  assert.match(
+    classicSource,
+    /const \[spec_line[\s\S]*?bar:\s*\{[\s\S]*?hover:\s*\{[\s\S]*?scaleX:\s*DASHBOARD_CHART_BAR_HOVER_SCALE[\s\S]*?scaleY:\s*DASHBOARD_CHART_BAR_HOVER_SCALE/,
+  );
+});

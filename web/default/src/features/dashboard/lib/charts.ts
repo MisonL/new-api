@@ -11,6 +11,7 @@ type TimeGranularity = 'hour' | 'day' | 'week'
 
 type TFunction = (key: string) => string
 const CHART_HOVER_STROKE = 'rgba(17, 24, 39, 0.18)'
+const CHART_BAR_HOVER_SCALE = 1.03
 const THEME_CHART_COLOR_VARIABLES = [
   '--chart-1',
   '--chart-2',
@@ -559,7 +560,12 @@ export function processChartData(
       color: modelColor,
       bar: {
         state: {
-          hover: { stroke: CHART_HOVER_STROKE, lineWidth: 1 },
+          hover: {
+            scaleX: CHART_BAR_HOVER_SCALE,
+            scaleY: CHART_BAR_HOVER_SCALE,
+            stroke: CHART_HOVER_STROKE,
+            lineWidth: 1,
+          },
         },
       },
       tooltip: {

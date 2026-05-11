@@ -63,6 +63,7 @@ export const DEFAULT_TIME_RANGE = {
 };
 
 export const DASHBOARD_CHART_HOVER_STROKE = 'rgba(17, 24, 39, 0.18)';
+export const DASHBOARD_CHART_BAR_HOVER_SCALE = 1.03;
 
 // ========== 图表默认配置 ==========
 export const DEFAULT_CHART_SPECS = {

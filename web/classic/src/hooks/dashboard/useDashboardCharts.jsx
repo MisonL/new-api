@@ -36,6 +36,7 @@ import {
   processUserData,
 } from '../../helpers/dashboard';
 import {
+  DASHBOARD_CHART_BAR_HOVER_SCALE,
   DASHBOARD_CHART_HOVER_STROKE,
   DEFAULTS,
 } from '../../constants/dashboard.constants';
@@ -167,6 +168,8 @@ export const useDashboardCharts = (
     bar: {
       state: {
         hover: {
+          scaleX: DASHBOARD_CHART_BAR_HOVER_SCALE,
+          scaleY: DASHBOARD_CHART_BAR_HOVER_SCALE,
           stroke: DASHBOARD_CHART_HOVER_STROKE,
           lineWidth: 1,
         },
