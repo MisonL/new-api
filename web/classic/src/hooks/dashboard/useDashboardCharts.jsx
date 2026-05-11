@@ -35,7 +35,10 @@ import {
   initializeMaps,
   processUserData,
 } from '../../helpers/dashboard';
-import { DEFAULTS } from '../../constants/dashboard.constants';
+import {
+  DASHBOARD_CHART_HOVER_STROKE,
+  DEFAULTS,
+} from '../../constants/dashboard.constants';
 
 const USER_COLORS = [
   '#3b82f6',
@@ -103,12 +106,12 @@ export const useDashboardCharts = (
       state: {
         hover: {
           outerRadius: 0.85,
-          stroke: '#000',
+          stroke: DASHBOARD_CHART_HOVER_STROKE,
           lineWidth: 1,
         },
         selected: {
           outerRadius: 0.85,
-          stroke: '#000',
+          stroke: DASHBOARD_CHART_HOVER_STROKE,
           lineWidth: 1,
         },
       },
@@ -164,7 +167,7 @@ export const useDashboardCharts = (
     bar: {
       state: {
         hover: {
-          stroke: '#000',
+          stroke: DASHBOARD_CHART_HOVER_STROKE,
           lineWidth: 1,
         },
       },
@@ -302,7 +305,7 @@ export const useDashboardCharts = (
     bar: {
       state: {
         hover: {
-          stroke: '#000',
+          stroke: DASHBOARD_CHART_HOVER_STROKE,
           lineWidth: 1,
         },
       },
@@ -337,7 +340,9 @@ export const useDashboardCharts = (
       subtext: '',
     },
     bar: {
-      state: { hover: { stroke: '#000', lineWidth: 1 } },
+      state: {
+        hover: { stroke: DASHBOARD_CHART_HOVER_STROKE, lineWidth: 1 },
+      },
     },
     label: {
       visible: true,

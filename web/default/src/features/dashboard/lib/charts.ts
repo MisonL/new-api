@@ -10,6 +10,7 @@ import type {
 type TimeGranularity = 'hour' | 'day' | 'week'
 
 type TFunction = (key: string) => string
+const CHART_HOVER_STROKE = 'rgba(17, 24, 39, 0.18)'
 type TooltipLineItem = {
   key: string
   value: string | number
@@ -481,8 +482,16 @@ export function processChartData(
       pie: {
         style: { cornerRadius: 10 },
         state: {
-          hover: { outerRadius: 0.85, stroke: '#000', lineWidth: 1 },
-          selected: { outerRadius: 0.85, stroke: '#000', lineWidth: 1 },
+          hover: {
+            outerRadius: 0.85,
+            stroke: CHART_HOVER_STROKE,
+            lineWidth: 1,
+          },
+          selected: {
+            outerRadius: 0.85,
+            stroke: CHART_HOVER_STROKE,
+            lineWidth: 1,
+          },
         },
       },
       title: {
@@ -517,7 +526,7 @@ export function processChartData(
       color: modelColor,
       bar: {
         state: {
-          hover: { stroke: '#000', lineWidth: 1 },
+          hover: { stroke: CHART_HOVER_STROKE, lineWidth: 1 },
         },
       },
       tooltip: {
@@ -684,7 +693,7 @@ export function processChartData(
       },
       bar: {
         state: {
-          hover: { stroke: '#000', lineWidth: 1 },
+          hover: { stroke: CHART_HOVER_STROKE, lineWidth: 1 },
         },
       },
       tooltip: {
@@ -845,7 +854,7 @@ export function processUserChartData(
       },
       legends: { visible: false },
       bar: {
-        state: { hover: { stroke: '#000', lineWidth: 1 } },
+        state: { hover: { stroke: CHART_HOVER_STROKE, lineWidth: 1 } },
       },
       label: {
         visible: true,

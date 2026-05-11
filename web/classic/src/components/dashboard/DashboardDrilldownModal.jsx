@@ -29,6 +29,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { renderNumber, renderQuota } from '../../helpers';
 import { getDashboardDistributionLogRow } from '../../helpers/dashboardDrilldown';
+import { DASHBOARD_CHART_HOVER_STROKE } from '../../constants/dashboard.constants';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import LazyVChart from './LazyVChart';
 
@@ -136,7 +137,7 @@ const DashboardDrilldownModal = ({
         state: {
           hover: {
             outerRadius: 0.83,
-            stroke: '#000',
+            stroke: DASHBOARD_CHART_HOVER_STROKE,
             lineWidth: 1,
           },
         },

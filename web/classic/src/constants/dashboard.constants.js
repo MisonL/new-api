@@ -62,6 +62,8 @@ export const DEFAULT_TIME_RANGE = {
   WEEK: 'week',
 };
 
+export const DASHBOARD_CHART_HOVER_STROKE = 'rgba(17, 24, 39, 0.18)';
+
 // ========== 图表默认配置 ==========
 export const DEFAULT_CHART_SPECS = {
   PIE: {
@@ -78,12 +80,12 @@ export const DEFAULT_CHART_SPECS = {
       state: {
         hover: {
           outerRadius: 0.85,
-          stroke: '#000',
+          stroke: DASHBOARD_CHART_HOVER_STROKE,
           lineWidth: 1,
         },
         selected: {
           outerRadius: 0.85,
-          stroke: '#000',
+          stroke: DASHBOARD_CHART_HOVER_STROKE,
           lineWidth: 1,
         },
       },
@@ -107,7 +109,7 @@ export const DEFAULT_CHART_SPECS = {
     bar: {
       state: {
         hover: {
-          stroke: '#000',
+          stroke: DASHBOARD_CHART_HOVER_STROKE,
           lineWidth: 1,
         },
       },

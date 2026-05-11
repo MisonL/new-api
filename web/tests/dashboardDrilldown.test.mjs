@@ -592,6 +592,7 @@ test("dashboard distribution chart enlarges hovered ring segment", () => {
   assert.match(modalSource, /pie:\s*\{/);
   assert.match(modalSource, /state:\s*\{\s*hover:\s*\{/);
   assert.match(modalSource, /outerRadius:\s*0\.83/);
-  assert.match(modalSource, /stroke:\s*'#000'/);
+  assert.match(modalSource, /DASHBOARD_CHART_HOVER_STROKE/);
+  assert.match(modalSource, /stroke:\s*DASHBOARD_CHART_HOVER_STROKE/);
   assert.match(modalSource, /lineWidth:\s*1/);
 });
