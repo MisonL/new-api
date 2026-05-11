@@ -82,4 +82,5 @@ test('dashboard charts read series colors from CSS chart tokens with fallbacks',
     source,
     /export function processUserChartData\([\s\S]*themeKey\?: string[\s\S]*\): ProcessedUserChartData/
   )
+  assert.match(source, /style:\s*\{\s*cornerRadius:\s*10,\s*cursor:\s*'pointer'\s*\}/)
 })

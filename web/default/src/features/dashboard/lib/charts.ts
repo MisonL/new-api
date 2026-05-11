@@ -513,7 +513,7 @@ export function processChartData(
       valueField: 'value',
       categoryField: 'type',
       pie: {
-        style: { cornerRadius: 10 },
+        style: { cornerRadius: 10, cursor: 'pointer' },
         state: {
           hover: {
             outerRadius: 0.85,

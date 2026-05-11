@@ -134,6 +134,9 @@ const DashboardDrilldownModal = ({
       valueField: 'value',
       categoryField: 'type',
       pie: {
+        style: {
+          cursor: 'pointer',
+        },
         state: {
           hover: {
             outerRadius: 0.83,
@@ -231,7 +234,7 @@ const DashboardDrilldownModal = ({
               </div>
             </TabPane>
             <TabPane tab={t('分布')} itemKey='distribution'>
-              <div className='h-[clamp(220px,calc(100dvh-360px),360px)] rounded-lg border border-semi-color-border bg-semi-color-bg-1 p-3'>
+              <div className='h-[clamp(220px,calc(100dvh-360px),360px)] cursor-pointer rounded-lg border border-semi-color-border bg-semi-color-bg-1 p-3'>
                 {detail.distribution.length > 0 ? (
                   <LazyVChart
                     spec={spec}

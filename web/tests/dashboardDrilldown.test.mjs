@@ -578,6 +578,10 @@ test("dashboard distribution chart opens scoped row logs", () => {
     modalSource,
     /onClick=\{handleDistributionClick\}[\s\S]{0,120}onPointerTap=\{handleDistributionClick\}/,
   );
+  assert.match(
+    modalSource,
+    /className='h-\[clamp\(220px,calc\(100dvh-360px\),360px\)\] cursor-pointer/,
+  );
 });
 
 test("dashboard distribution chart enlarges hovered ring segment", () => {
@@ -590,6 +594,7 @@ test("dashboard distribution chart enlarges hovered ring segment", () => {
   );
 
   assert.match(modalSource, /pie:\s*\{/);
+  assert.match(modalSource, /style:\s*\{\s*cursor:\s*'pointer'/);
   assert.match(modalSource, /state:\s*\{\s*hover:\s*\{/);
   assert.match(modalSource, /outerRadius:\s*0\.83/);
   assert.match(modalSource, /DASHBOARD_CHART_HOVER_STROKE/);
