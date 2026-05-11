@@ -56,3 +56,26 @@
 | `node --test web/tests/defaultThemeTokenContracts.test.mjs web/tests/dashboardChartHoverStyle.test.mjs web/tests/defaultDashboardDrilldown.test.mjs web/tests/defaultLayoutContracts.test.mjs` | 0 | 26 项通过，dashboard drilldown 语义保持 |
 | `cd web/default && bun run lint` | 0 | ESLint 通过 |
 | `cd web/default && bun run build` | 0 | Rsbuild 输出 `ready built in 2 m 36.1 s` |
+
+## Follow-up Root Dark Preset Fix
+
+采样时间：2026-05-11
+
+复查发现 `ThemeProvider` 将 `.dark` 类添加到 `documentElement`。如果后续 `data-theme-preset` 也挂在根元素上，原先仅覆盖 `.dark [data-theme-preset]` 的深色 preset bridge 不会命中。
+
+修复：
+
+- `web/default/src/styles/theme.css` 同时覆盖 `.dark[data-theme-preset]:not([data-theme-preset='default'])` 和 `.dark [data-theme-preset]:not([data-theme-preset='default'])`。
+- `web/tests/defaultThemeTokenContracts.test.mjs` 增加根元素 dark preset selector 合约断言。
+
+补充验证：
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `bun test web/tests/defaultThemeTokenContracts.test.mjs web/tests/defaultLayoutContracts.test.mjs` | 0 | 5 项通过 |
+| `cd web/default && bun run lint` | 0 | ESLint 通过 |
+| `cd web/default && ./node_modules/.bin/rsbuild build` | 0 | Rsbuild 构建通过 |
+| `scripts/build-docker-local.sh new-api-local:dev` | 0 | 镜像 `new-api-local:dev` 构建到 `3a6c2633c0d05f6f158d114d5df03ae897e3e5b3` |
+| `docker compose -f deploy/compose/dev-isolated.yml --env-file deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api` | 0 | `new-api-dev-isolated-new-api-1` 已重建并恢复 `healthy` |
+| `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info` | 0 | 运行 commit 为 `3a6c2633c0d05f6f158d114d5df03ae897e3e5b3` |
+| `curl -fsS http://127.0.0.1:3001/api/status` | 0 | 返回 `success:true`，`theme:"classic"` |
