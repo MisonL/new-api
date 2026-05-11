@@ -31,6 +31,10 @@ test('default theme includes preset surface bridge without requiring runtime pre
     source,
     /\.dark \[data-theme-preset\]:not\(\[data-theme-preset='default'\]\)/
   )
+  assert.match(
+    source,
+    /\.dark\[data-theme-preset\]:not\(\[data-theme-preset='default'\]\)/
+  )
 
   for (const token of [
     'card',

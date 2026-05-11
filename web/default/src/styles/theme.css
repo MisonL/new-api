@@ -170,6 +170,7 @@
   --neutral: var(--muted-foreground);
 }
 
+.dark[data-theme-preset]:not([data-theme-preset='default']),
 .dark [data-theme-preset]:not([data-theme-preset='default']) {
   --card: color-mix(in oklch, var(--primary) 8%, var(--background));
   --popover: color-mix(in oklch, var(--primary) 12%, var(--background));
