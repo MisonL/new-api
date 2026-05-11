@@ -815,13 +815,23 @@ body.sidebar-resizing * {
 }
 
 .usage-log-channel-tooltip {
-  width: min(420px, calc(100vw - 32px));
-  max-width: 420px;
+  width: 100%;
   max-height: min(640px, calc(100vh - 96px));
   padding-right: 2px;
   overflow-y: auto;
   color: inherit;
   overscroll-behavior: contain;
+}
+
+.usage-log-channel-tooltip-popover.semi-tooltip-wrapper {
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 32px));
+  max-width: min(420px, calc(100vw - 32px));
+}
+
+.usage-log-channel-tooltip-popover .semi-tooltip-content {
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .usage-log-channel-tooltip .semi-typography {

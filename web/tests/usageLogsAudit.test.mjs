@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   getManageOperatorEntryDescriptor,
@@ -9,6 +12,7 @@ import {
 import { buildRequestHeaderAuditLines } from "../classic/src/hooks/usage-logs/headerAuditInfo.js";
 
 const t = (value) => value;
+const testDir = path.dirname(fileURLToPath(import.meta.url));
 
 test("充值日志审计字段仅对管理员返回并保留关键字段顺序", () => {
   const entries = getTopupAuditEntryDescriptors({
@@ -226,6 +230,37 @@ test("请求头审计气泡过滤空键并按大小写去重键值", () => {
     { key: "Originator", value: "codex-tui" },
     { key: "x-codex-window-id", value: "window-123" },
   ]);
+});
+
+test("渠道信息气泡外层宽度与内容宽度保持一致", () => {
+  const columnSource = fs.readFileSync(
+    path.join(
+      testDir,
+      "../classic/src/components/table/usage-logs/UsageLogsColumnDefs.jsx",
+    ),
+    "utf8",
+  );
+  const cssSource = fs.readFileSync(
+    path.join(testDir, "../classic/src/index.css"),
+    "utf8",
+  );
+
+  assert.match(
+    columnSource,
+    /<Tooltip[\s\S]{0,240}className=["']usage-log-channel-tooltip-popover["']/,
+  );
+  assert.match(
+    cssSource,
+    /\.usage-log-channel-tooltip-popover\.semi-tooltip-wrapper\s*\{[\s\S]*?width:\s*min\(420px,\s*calc\(100vw\s*-\s*32px\)\)/,
+  );
+  assert.match(
+    cssSource,
+    /\.usage-log-channel-tooltip-popover\s+\.semi-tooltip-content\s*\{[\s\S]*?width:\s*100%/,
+  );
+  assert.match(
+    cssSource,
+    /\.usage-log-channel-tooltip\s*\{[\s\S]*?width:\s*100%/,
+  );
 });
 
 test("请求头审计气泡安全处理空请求头和空策略", () => {

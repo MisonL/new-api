@@ -862,6 +862,7 @@ export const getLogsColumns = ({
           <Space>
             <span style={{ position: 'relative', display: 'inline-block' }}>
               <Tooltip
+                className='usage-log-channel-tooltip-popover'
                 content={renderChannelInfoTooltip(
                   record,
                   {
