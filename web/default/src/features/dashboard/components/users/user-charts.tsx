@@ -117,9 +117,10 @@ export function UserCharts() {
         isLoading ? [] : (userData ?? []),
         timeGranularity,
         t,
-        topUserLimit
+        topUserLimit,
+        resolvedTheme
       ),
-    [userData, isLoading, timeGranularity, t, topUserLimit]
+    [userData, isLoading, resolvedTheme, timeGranularity, t, topUserLimit]
   )
 
   return (

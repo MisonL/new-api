@@ -36,3 +36,23 @@
 - `3001` 隔离容器当前系统配置返回 `theme:"classic"`，不能用它单独代表 `web/default` 页面验证。
 - `web/default` 已通过独立 dev server 代理到 `3001` 进行运行态打开验证。
 - 图表 hover 黑描边防回归由既有 `web/tests/dashboardChartHoverStyle.test.mjs` 覆盖；当前第一阶段没有继续改写 dashboard 数据语义。
+
+## Follow-up Token Intake
+
+采样时间：2026-05-11
+
+继续补齐 `a7475a1e6` 中可安全吸纳的 token / chart preset 部分：
+
+- 在 `web/default/src/styles/theme.css` 中补充 `success`、`warning`、`info`、`neutral` 语义状态 token 及 Tailwind `@theme inline` 映射。
+- 在现有单文件主题结构中加入兼容的 `[data-theme-preset]` surface bridge。当前仓库没有独立 `theme-presets.css` 或 `theme-customization-provider`，因此不原样搬上游运行时 preset provider。
+- Dashboard 图表颜色优先读取 CSS `--chart-1` 到 `--chart-5`，无 DOM 环境时回退 VChart 默认色板。
+- `processChartData` 与 `processUserChartData` 的新增 `themeKey` 参数保持可选，不改变已有数据聚合、drilldown、日志筛选或 pricing 口径。
+
+补充验证：
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `node --test web/tests/defaultThemeTokenContracts.test.mjs` | 0 | 语义 token、preset bridge、dashboard CSS chart token 合约通过 |
+| `node --test web/tests/defaultThemeTokenContracts.test.mjs web/tests/dashboardChartHoverStyle.test.mjs web/tests/defaultDashboardDrilldown.test.mjs web/tests/defaultLayoutContracts.test.mjs` | 0 | 26 项通过，dashboard drilldown 语义保持 |
+| `cd web/default && bun run lint` | 0 | ESLint 通过 |
+| `cd web/default && bun run build` | 0 | Rsbuild 输出 `ready built in 2 m 36.1 s` |

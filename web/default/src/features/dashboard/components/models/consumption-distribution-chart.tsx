@@ -84,8 +84,14 @@ export function ConsumptionDistributionChart(
   }, [resolvedTheme])
 
   const chartData = useMemo(
-    () => processChartData(props.loading ? [] : props.data, timeGranularity, t),
-    [props.data, props.loading, timeGranularity, t]
+    () =>
+      processChartData(
+        props.loading ? [] : props.data,
+        timeGranularity,
+        t,
+        resolvedTheme
+      ),
+    [props.data, props.loading, resolvedTheme, timeGranularity, t]
   )
   const spec = chartType === 'bar' ? chartData.spec_line : chartData.spec_area
   const chartValues = spec?.data?.[0]?.values

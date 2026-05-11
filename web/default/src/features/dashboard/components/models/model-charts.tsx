@@ -70,8 +70,14 @@ export function ModelCharts(props: ModelChartsProps) {
   }, [resolvedTheme])
 
   const chartData = useMemo(
-    () => processChartData(props.loading ? [] : props.data, timeGranularity, t),
-    [props.data, props.loading, timeGranularity, t]
+    () =>
+      processChartData(
+        props.loading ? [] : props.data,
+        timeGranularity,
+        t,
+        resolvedTheme
+      ),
+    [props.data, props.loading, resolvedTheme, timeGranularity, t]
   )
 
   const spec = chartData[CHART_SPEC_KEYS[activeTab]]
