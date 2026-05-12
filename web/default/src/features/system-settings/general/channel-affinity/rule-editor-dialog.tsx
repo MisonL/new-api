@@ -12,6 +12,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -28,7 +29,11 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { RULE_TEMPLATES } from './constants'
+import {
+  PARAM_OVERRIDE_TEMPLATES,
+  RULE_TEMPLATES,
+  cloneTemplate,
+} from './constants'
 import type { AffinityRule, KeySource } from './types'
 
 const KEY_SOURCE_TYPES = ['context_int', 'context_string', 'gjson'] as const
@@ -87,6 +92,7 @@ export function RuleEditorDialog(props: Props) {
     { type: 'gjson', path: '' },
   ])
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [paramOverrideTemplateKey, setParamOverrideTemplateKey] = useState('')
 
   const form = useForm<RuleFormValues>({
     defaultValues: {
@@ -105,6 +111,12 @@ export function RuleEditorDialog(props: Props) {
   })
 
   const resetFromRule = (r: Partial<AffinityRule>) => {
+    const hasAdvancedSettings =
+      !!r.param_override_template ||
+      !!r.value_regex ||
+      !!r.ttl_seconds ||
+      (r.user_agent_include || []).length > 0
+
     form.reset({
       name: r.name || '',
       model_regex_text: (r.model_regex || []).join('\n'),
@@ -122,7 +134,8 @@ export function RuleEditorDialog(props: Props) {
     })
     const sources = (r.key_sources || []).map(normalizeKeySource)
     setKeySources(sources.length > 0 ? sources : [{ type: 'gjson', path: '' }])
-    if (r.param_override_template) setAdvancedOpen(true)
+    setAdvancedOpen(hasAdvancedSettings)
+    setParamOverrideTemplateKey('')
   }
 
   useEffect(() => {
@@ -147,9 +160,24 @@ export function RuleEditorDialog(props: Props) {
         param_override_template_json: '',
       })
       setKeySources([{ type: 'gjson', path: '' }])
+      setAdvancedOpen(false)
+      setParamOverrideTemplateKey('')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.open, props.rule, props.templateKey])
+
+  const applyParamOverrideTemplate = () => {
+    const template = PARAM_OVERRIDE_TEMPLATES[paramOverrideTemplateKey]
+    if (!template) {
+      toast.error(t('Please select a parameter override template'))
+      return
+    }
+    form.setValue(
+      'param_override_template_json',
+      JSON.stringify(cloneTemplate(template.payload), null, 2),
+      { shouldDirty: true, shouldTouch: true }
+    )
+  }
 
   const handleSave = (values: RuleFormValues) => {
     const modelRegex = normalizeStringList(values.model_regex_text)
@@ -210,6 +238,9 @@ export function RuleEditorDialog(props: Props) {
       <DialogContent className='max-h-[85vh] max-w-2xl overflow-y-auto'>
         <DialogHeader>
           <DialogTitle>{isEdit ? t('Edit Rule') : t('Add Rule')}</DialogTitle>
+          <DialogDescription className='sr-only'>
+            {t('Configure channel affinity (sticky routing) rules')}
+          </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={form.handleSubmit(handleSave)} className='space-y-4'>
@@ -221,7 +252,7 @@ export function RuleEditorDialog(props: Props) {
             />
           </div>
 
-          <div className='grid grid-cols-2 gap-3'>
+          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
             <div className='grid gap-1.5'>
               <Label>{t('Model Regex (one per line)')} *</Label>
               <Textarea
@@ -274,7 +305,10 @@ export function RuleEditorDialog(props: Props) {
             </p>
             <div className='space-y-2'>
               {keySources.map((src, idx) => (
-                <div key={idx} className='flex items-center gap-2'>
+                <div
+                  key={idx}
+                  className='flex flex-col gap-2 sm:flex-row sm:items-center'
+                >
                   <Select
                     value={src.type}
                     onValueChange={(v: KeySource['type']) => {
@@ -283,7 +317,7 @@ export function RuleEditorDialog(props: Props) {
                       setKeySources(next)
                     }}
                   >
-                    <SelectTrigger className='w-[160px]'>
+                    <SelectTrigger className='w-full sm:w-[160px]'>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -295,7 +329,7 @@ export function RuleEditorDialog(props: Props) {
                     </SelectContent>
                   </Select>
                   <Input
-                    className='flex-1'
+                    className='w-full flex-1'
                     placeholder={
                       src.type === 'gjson'
                         ? 'metadata.conversation_id'
@@ -318,6 +352,7 @@ export function RuleEditorDialog(props: Props) {
                     type='button'
                     variant='ghost'
                     size='icon'
+                    className='self-end sm:self-auto'
                     onClick={() =>
                       setKeySources((prev) => prev.filter((_, i) => i !== idx))
                     }
@@ -352,7 +387,7 @@ export function RuleEditorDialog(props: Props) {
                 />
               </div>
 
-              <div className='grid grid-cols-2 gap-3'>
+              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                 <div className='grid gap-1.5'>
                   <Label>{t('Value Regex')}</Label>
                   <Input
@@ -372,6 +407,35 @@ export function RuleEditorDialog(props: Props) {
 
               <div className='grid gap-1.5'>
                 <Label>{t('Parameter Override Template (JSON)')}</Label>
+                <div className='flex flex-col gap-2 sm:flex-row'>
+                  <Select
+                    value={paramOverrideTemplateKey}
+                    onValueChange={setParamOverrideTemplateKey}
+                  >
+                    <SelectTrigger className='w-full sm:flex-1'>
+                      <SelectValue
+                        placeholder={t('Select a common template')}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(PARAM_OVERRIDE_TEMPLATES).map(
+                        ([key, template]) => (
+                          <SelectItem key={key} value={key}>
+                            {t(template.label)}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    className='w-full sm:w-auto sm:shrink-0'
+                    onClick={applyParamOverrideTemplate}
+                  >
+                    {t('Apply Template')}
+                  </Button>
+                </div>
                 <Textarea
                   rows={5}
                   placeholder='{"operations": [...]}'
@@ -380,7 +444,7 @@ export function RuleEditorDialog(props: Props) {
                 />
               </div>
 
-              <div className='grid grid-cols-3 gap-3'>
+              <div className='grid grid-cols-1 gap-3 sm:grid-cols-3'>
                 <div className='flex items-center gap-2'>
                   <Switch
                     checked={form.watch('include_using_group')}
