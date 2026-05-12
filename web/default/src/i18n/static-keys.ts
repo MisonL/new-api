@@ -183,6 +183,16 @@ export const STATIC_I18N_KEYS = [
   // Channel Affinity section
   'Channel Affinity',
   'Configure channel affinity (sticky routing) rules',
+  'Apply Template',
+  'Codex Desktop Header Passthrough',
+  'Codex Desktop Compat: Remove Image Generation Tool',
+  'Codex Desktop Compat: Headers + Remove Image Tool',
+  'Claude Code Header Passthrough',
+  'Droid CLI Header Passthrough',
+  'Gemini CLI Header Passthrough',
+  'Please select a parameter override template',
+  'Qwen Code Header Passthrough',
+  'Select a common template',
 
   // Models constants
   'Exact Match',
