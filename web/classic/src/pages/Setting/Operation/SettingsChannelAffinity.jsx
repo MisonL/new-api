@@ -63,7 +63,10 @@ import {
 import { useTranslation } from 'react-i18next';
 import {
   CHANNEL_AFFINITY_RULE_TEMPLATES,
+  PARAM_OVERRIDE_TEMPLATES,
+  appendParamOverrideTemplatePayload,
   cloneChannelAffinityTemplate,
+  stringifyParamOverrideTemplatePayload,
 } from '../../../constants/channel-affinity-template.constants';
 
 const ParamOverrideEditorModal = lazy(
@@ -273,6 +276,17 @@ export default function SettingsChannelAffinity(props) {
   const [paramTemplateDraft, setParamTemplateDraft] = useState('');
   const [paramTemplateEditorVisible, setParamTemplateEditorVisible] =
     useState(false);
+  const [paramTemplatePresetKey, setParamTemplatePresetKey] =
+    useState('codexHeaders');
+
+  const paramTemplatePresetOptions = useMemo(
+    () =>
+      Object.entries(PARAM_OVERRIDE_TEMPLATES).map(([value, config]) => ({
+        value,
+        label: t(config.label),
+      })),
+    [t],
+  );
 
   const effectiveDefaultTTLSeconds =
     Number(inputs?.[KEY_DEFAULT_TTL] || 0) > 0
@@ -346,6 +360,29 @@ export default function SettingsChannelAffinity(props) {
     }
     try {
       updateParamTemplateDraft(JSON.stringify(JSON.parse(raw), null, 2));
+    } catch (error) {
+      showError(t('参数覆盖模板 JSON 格式不正确'));
+    }
+  };
+
+  const applyParamOverrideTemplate = (mode) => {
+    const template =
+      PARAM_OVERRIDE_TEMPLATES[paramTemplatePresetKey] ||
+      PARAM_OVERRIDE_TEMPLATES.codexHeaders;
+    if (!template) {
+      showError(t('请选择参数覆盖模板'));
+      return;
+    }
+
+    try {
+      const nextValue =
+        mode === 'append'
+          ? appendParamOverrideTemplatePayload(
+              paramTemplateDraft,
+              template.payload,
+            )
+          : stringifyParamOverrideTemplatePayload(template.payload);
+      updateParamTemplateDraft(nextValue);
     } catch (error) {
       showError(t('参数覆盖模板 JSON 格式不正确'));
     }
@@ -703,6 +740,7 @@ export default function SettingsChannelAffinity(props) {
     const initValues = buildModalFormValues(nextRule);
     setModalInitValues(initValues);
     setParamTemplateDraft(initValues.param_override_template_json || '');
+    setParamTemplatePresetKey('codexHeaders');
     setParamTemplateEditorVisible(false);
     setModalAdvancedActiveKey([]);
     setModalFormKey((k) => k + 1);
@@ -724,6 +762,7 @@ export default function SettingsChannelAffinity(props) {
     const initValues = buildModalFormValues(nextRule);
     setModalInitValues(initValues);
     setParamTemplateDraft(initValues.param_override_template_json || '');
+    setParamTemplatePresetKey('codexHeaders');
     setParamTemplateEditorVisible(false);
     setModalAdvancedActiveKey([]);
     setModalFormKey((k) => k + 1);
@@ -1090,6 +1129,7 @@ export default function SettingsChannelAffinity(props) {
           setModalInitValues(null);
           setModalAdvancedActiveKey([]);
           setParamTemplateDraft('');
+          setParamTemplatePresetKey('codexHeaders');
           setParamTemplateEditorVisible(false);
         }}
         onOk={handleModalSave}
@@ -1248,7 +1288,35 @@ export default function SettingsChannelAffinity(props) {
                       <Tag color={paramTemplatePreviewMeta.tagColor}>
                         {paramTemplatePreviewMeta.tagLabel}
                       </Tag>
-                      <Space>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <Select
+                          size='small'
+                          value={paramTemplatePresetKey}
+                          optionList={paramTemplatePresetOptions}
+                          onChange={(value) =>
+                            setParamTemplatePresetKey(value || 'codexHeaders')
+                          }
+                          style={{ width: 260 }}
+                        />
+                        <Button
+                          size='small'
+                          onClick={() => applyParamOverrideTemplate('replace')}
+                        >
+                          {t('替换模板')}
+                        </Button>
+                        <Button
+                          size='small'
+                          onClick={() => applyParamOverrideTemplate('append')}
+                        >
+                          {t('追加模板')}
+                        </Button>
                         <Button
                           size='small'
                           type='primary'
@@ -1267,7 +1335,7 @@ export default function SettingsChannelAffinity(props) {
                         >
                           {t('清空')}
                         </Button>
-                      </Space>
+                      </div>
                     </div>
                     <pre
                       style={{

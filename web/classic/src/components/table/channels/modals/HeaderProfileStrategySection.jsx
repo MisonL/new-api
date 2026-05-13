@@ -527,6 +527,7 @@ const HeaderProfileStrategySection = ({
       >
         <HeaderProfileLibrary
           profiles={profiles}
+          selectedProfiles={selectedItems}
           selectedProfileIds={strategy.selectedProfileIds}
           strategyMode={strategy.mode}
           loading={loading}

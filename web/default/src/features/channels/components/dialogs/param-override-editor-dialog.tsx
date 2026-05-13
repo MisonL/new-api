@@ -279,14 +279,15 @@ const GEMINI_IMAGE_4K_TEMPLATE = {
 }
 
 const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'Originator',
   'Session_id',
-  'User-Agent',
   'X-Codex-Beta-Features',
   'X-Codex-Turn-Metadata',
+  'X-Codex-Window-Id',
+  'X-Client-Request-Id',
 ]
 
 const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
+  'X-Claude-Code-Session-Id',
   'X-Stainless-Arch',
   'X-Stainless-Lang',
   'X-Stainless-Os',
@@ -295,12 +296,33 @@ const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Stainless-Runtime',
   'X-Stainless-Runtime-Version',
   'X-Stainless-Timeout',
-  'User-Agent',
   'X-App',
   'Anthropic-Beta',
   'Anthropic-Dangerous-Direct-Browser-Access',
   'Anthropic-Version',
 ]
+
+const QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
+  'X-Stainless-Arch',
+  'X-Stainless-Lang',
+  'X-Stainless-Os',
+  'X-Stainless-Package-Version',
+  'X-Stainless-Retry-Count',
+  'X-Stainless-Runtime',
+  'X-Stainless-Runtime-Version',
+]
+
+const DROID_CLI_HEADER_PASSTHROUGH_HEADERS = [
+  'X-Stainless-Arch',
+  'X-Stainless-Lang',
+  'X-Stainless-Os',
+  'X-Stainless-Package-Version',
+  'X-Stainless-Retry-Count',
+  'X-Stainless-Runtime',
+  'X-Stainless-Runtime-Version',
+]
+
+const GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS = ['X-Goog-Api-Client']
 
 const buildPassHeadersTemplate = (headers: string[]) => ({
   operations: [
@@ -313,6 +335,15 @@ const CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
 )
 const CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
   CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS
+)
+const GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
+  GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS
+)
+const QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
+  QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS
+)
+const DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
+  DROID_CLI_HEADER_PASSTHROUGH_HEADERS
 )
 
 const AWS_BEDROCK_ANTHROPIC_COMPAT_TEMPLATE = {
@@ -399,6 +430,21 @@ const TEMPLATE_PRESET_CONFIG: Record<string, TemplatePresetConfig> = {
     label: 'Codex CLI Header Passthrough',
     kind: 'operations',
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  gemini_cli_headers_passthrough: {
+    label: 'Gemini CLI Header Passthrough',
+    kind: 'operations',
+    payload: GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  qwen_code_headers_passthrough: {
+    label: 'Qwen Code Header Passthrough',
+    kind: 'operations',
+    payload: QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  droid_cli_headers_passthrough: {
+    label: 'Droid CLI Header Passthrough',
+    kind: 'operations',
+    payload: DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   aws_bedrock_anthropic_beta_override: {
     label: 'AWS Bedrock Claude Compat',

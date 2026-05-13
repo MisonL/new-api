@@ -28,9 +28,7 @@ const buildPassHeadersTemplate = (headers) => ({
 });
 
 export const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'Originator',
   'Session_id',
-  'User-Agent',
   'X-Codex-Beta-Features',
   'X-Codex-Turn-Metadata',
   'X-Codex-Window-Id',
@@ -47,7 +45,6 @@ export const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Stainless-Runtime',
   'X-Stainless-Runtime-Version',
   'X-Stainless-Timeout',
-  'User-Agent',
   'X-App',
   'Anthropic-Beta',
   'Anthropic-Dangerous-Direct-Browser-Access',
@@ -55,7 +52,6 @@ export const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
 ];
 
 export const QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'User-Agent',
   'X-Stainless-Arch',
   'X-Stainless-Lang',
   'X-Stainless-Os',
@@ -66,7 +62,6 @@ export const QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
 ];
 
 export const DROID_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'User-Agent',
   'X-Stainless-Arch',
   'X-Stainless-Lang',
   'X-Stainless-Os',
@@ -76,10 +71,7 @@ export const DROID_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Stainless-Runtime-Version',
 ];
 
-export const GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'User-Agent',
-  'X-Goog-Api-Client',
-];
+export const GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS = ['X-Goog-Api-Client'];
 
 export const CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
   CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
@@ -96,13 +88,69 @@ export const GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
   GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS,
 );
 
+export const DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
+  DROID_CLI_HEADER_PASSTHROUGH_HEADERS,
+);
+
+const PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE = {
+  operations: [
+    {
+      path: 'tools',
+      mode: 'prune_objects',
+      value: {
+        type: 'image_generation',
+        recursive: false,
+      },
+    },
+  ],
+};
+
+const combineParamOverrideTemplates = (...templates) => ({
+  operations: templates.flatMap((template) =>
+    Array.isArray(template?.operations) ? template.operations : [],
+  ),
+});
+
+export const PARAM_OVERRIDE_TEMPLATES = {
+  codexHeaders: {
+    label: 'Codex Desktop Header Passthrough',
+    payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  codexWithoutImageTool: {
+    label: 'Codex Desktop Compat: Remove Image Generation Tool',
+    payload: PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE,
+  },
+  codexHeadersWithoutImageTool: {
+    label: 'Codex Desktop Compat: Headers + Remove Image Tool',
+    payload: combineParamOverrideTemplates(
+      CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+      PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE,
+    ),
+  },
+  claudeHeaders: {
+    label: 'Claude Code Header Passthrough',
+    payload: CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  geminiHeaders: {
+    label: 'Gemini CLI Header Passthrough',
+    payload: GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  qwenCodeHeaders: {
+    label: 'Qwen Code Header Passthrough',
+    payload: QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  droidHeaders: {
+    label: 'Droid CLI Header Passthrough',
+    payload: DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+};
+
 export const CHANNEL_AFFINITY_RULE_TEMPLATES = {
   codexCli: {
     name: 'codex cli trace',
     model_regex: ['^gpt-.*$'],
     path_regex: ['/v1/responses'],
     key_sources: [{ type: 'gjson', path: 'prompt_cache_key' }],
-    param_override_template: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
     value_regex: '',
     ttl_seconds: 0,
     skip_retry_on_failure: true,
@@ -114,7 +162,6 @@ export const CHANNEL_AFFINITY_RULE_TEMPLATES = {
     model_regex: ['^claude-.*$'],
     path_regex: ['/v1/messages'],
     key_sources: [{ type: 'gjson', path: 'metadata.user_id' }],
-    param_override_template: CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
     value_regex: '',
     ttl_seconds: 0,
     skip_retry_on_failure: true,
@@ -125,3 +172,45 @@ export const CHANNEL_AFFINITY_RULE_TEMPLATES = {
 
 export const cloneChannelAffinityTemplate = (template) =>
   JSON.parse(JSON.stringify(template || {}));
+
+const isPlainRecord = (value) =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+export const stringifyParamOverrideTemplatePayload = (payload) =>
+  JSON.stringify(cloneChannelAffinityTemplate(payload), null, 2);
+
+export const appendParamOverrideTemplatePayload = (currentJson, payload) => {
+  const nextPayload = cloneChannelAffinityTemplate(payload);
+  const raw = String(currentJson || '').trim();
+  if (!raw) {
+    return stringifyParamOverrideTemplatePayload(nextPayload);
+  }
+
+  const current = JSON.parse(raw);
+  if (!isPlainRecord(current)) {
+    throw new Error('Parameter override template must be a JSON object');
+  }
+
+  if (
+    Array.isArray(current.operations) &&
+    Array.isArray(nextPayload.operations)
+  ) {
+    return JSON.stringify(
+      {
+        ...current,
+        operations: [...current.operations, ...nextPayload.operations],
+      },
+      null,
+      2,
+    );
+  }
+
+  return JSON.stringify(
+    {
+      ...current,
+      ...nextPayload,
+    },
+    null,
+    2,
+  );
+};

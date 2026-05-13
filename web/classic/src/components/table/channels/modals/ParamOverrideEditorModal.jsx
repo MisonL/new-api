@@ -39,6 +39,9 @@ import { copy, showError, showSuccess, verifyJSON } from '../../../../helpers';
 import {
   CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
 } from '../../../../constants/channel-affinity-template.constants';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 
@@ -260,7 +263,7 @@ const getModeValuePlaceholder = (mode) => {
       '}',
     ].join('\n');
   }
-  if (mode === 'pass_headers') return 'Originator, Session_id, User-Agent';
+  if (mode === 'pass_headers') return 'Session_id, X-Client-Request-Id';
   if (
     mode === 'trim_prefix' ||
     mode === 'trim_suffix' ||
@@ -435,6 +438,24 @@ const TEMPLATE_PRESET_CONFIG = {
     label: 'Codex CLI 真实请求头透传',
     kind: 'operations',
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  gemini_cli_headers_passthrough: {
+    group: 'scenario',
+    label: 'Gemini CLI 真实请求头透传',
+    kind: 'operations',
+    payload: GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  qwen_code_headers_passthrough: {
+    group: 'scenario',
+    label: 'Qwen Code 真实请求头透传',
+    kind: 'operations',
+    payload: QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  droid_cli_headers_passthrough: {
+    group: 'scenario',
+    label: 'Droid CLI 真实请求头透传',
+    kind: 'operations',
+    payload: DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   aws_bedrock_anthropic_beta_override: {
     group: 'scenario',

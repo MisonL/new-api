@@ -86,6 +86,7 @@ import {
   createLegacyHeaderProfileDraft,
   getHeaderProfileStrategyFromSettings,
   mergeChannelSubmitFormValues,
+  removeEquivalentVersionedProfileIds,
   reorderSelectedProfileIds,
   toggleSelectedProfile,
 } from './headerProfile.helpers.js';
@@ -889,16 +890,34 @@ const EditChannelModal = (props) => {
     });
   };
 
-  const handleToggleHeaderProfile = (profileId) => {
+  const handleToggleHeaderProfile = (profileId, profile) => {
+    const currentSelectedProfileIds = removeEquivalentVersionedProfileIds(
+      headerProfileStrategy.selectedProfileIds,
+      selectedHeaderProfileItems,
+      profileId,
+      profile,
+    );
     const nextSelectedProfileIds = toggleSelectedProfile({
       strategy: headerProfileStrategy.mode,
-      selectedProfileIds: headerProfileStrategy.selectedProfileIds,
+      selectedProfileIds: currentSelectedProfileIds,
       profileId,
     });
+    const selectedProfileSnapshotMap = new Map(
+      selectedHeaderProfileItems
+        .filter((item) => item && !item.missing)
+        .map((item) => [item.id, item]),
+    );
+    if (profile?.id) {
+      selectedProfileSnapshotMap.set(profile.id, profile);
+    }
+    const selectedProfiles = nextSelectedProfileIds
+      .map((id) => selectedProfileSnapshotMap.get(id))
+      .filter(Boolean);
     applyHeaderProfileStrategy({
       enabled: true,
       mode: headerProfileStrategy.mode,
       selectedProfileIds: nextSelectedProfileIds,
+      profiles: selectedProfiles,
     });
   };
 

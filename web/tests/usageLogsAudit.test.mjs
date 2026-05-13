@@ -138,7 +138,7 @@ test("请求头审计气泡按列范围展示不同内容", () => {
   const policy = {
     mode: "merge",
     header_profile_id: "codex-cli",
-    applied_user_agent: "codex-tui/0.128.0",
+    applied_user_agent: "codex-tui/0.130.0",
     applied_header_keys: ["User-Agent", "originator", "x-codex-window-id"],
   };
 
@@ -149,7 +149,7 @@ test("请求头审计气泡按列范围展示不同内容", () => {
     [
       ["mode", "合并"],
       ["profile", "codex-cli"],
-      ["user-agent", "codex-tui/0.128.0"],
+      ["user-agent", "codex-tui/0.130.0"],
     ],
   );
 

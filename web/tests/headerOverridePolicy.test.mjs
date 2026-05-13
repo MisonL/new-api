@@ -10,8 +10,8 @@ import {
 } from "../classic/src/helpers/headerOverrideUserAgent.js";
 
 const codexCliUserAgent =
-  "codex-tui/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.128.0)";
-const droidCliUserAgent = "factory-cli/0.115.0";
+  "codex-tui/0.130.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.130.0)";
+const droidCliUserAgent = "factory-cli/0.123.0";
 
 test("空白 header_override 可写入最小 User-Agent JSON", () => {
   assert.deepEqual(

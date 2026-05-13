@@ -1,9 +1,7 @@
 import type { AffinityRule } from './types'
 
 const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'Originator',
   'Session_id',
-  'User-Agent',
   'X-Codex-Beta-Features',
   'X-Codex-Turn-Metadata',
   'X-Codex-Window-Id',
@@ -20,7 +18,6 @@ const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Stainless-Runtime',
   'X-Stainless-Runtime-Version',
   'X-Stainless-Timeout',
-  'User-Agent',
   'X-App',
   'Anthropic-Beta',
   'Anthropic-Dangerous-Direct-Browser-Access',
@@ -28,7 +25,6 @@ const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
 ]
 
 const QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'User-Agent',
   'X-Stainless-Arch',
   'X-Stainless-Lang',
   'X-Stainless-Os',
@@ -39,7 +35,6 @@ const QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
 ]
 
 const DROID_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'User-Agent',
   'X-Stainless-Arch',
   'X-Stainless-Lang',
   'X-Stainless-Os',
@@ -50,7 +45,6 @@ const DROID_CLI_HEADER_PASSTHROUGH_HEADERS = [
 ]
 
 const GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'User-Agent',
   'X-Goog-Api-Client',
 ]
 
@@ -130,15 +124,61 @@ export const PARAM_OVERRIDE_TEMPLATES: Record<string, ParamOverrideTemplate> = {
   },
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function stringifyParamOverrideTemplatePayload(
+  payload: Record<string, unknown>
+): string {
+  return JSON.stringify(cloneTemplate(payload), null, 2)
+}
+
+export function appendParamOverrideTemplatePayload(
+  currentJson: string,
+  payload: Record<string, unknown>
+): string {
+  const nextPayload = cloneTemplate(payload)
+  const raw = String(currentJson || '').trim()
+  if (!raw) {
+    return stringifyParamOverrideTemplatePayload(nextPayload)
+  }
+
+  const current = JSON.parse(raw)
+  if (!isPlainRecord(current)) {
+    throw new Error('Parameter override template must be a JSON object')
+  }
+
+  if (
+    Array.isArray(current.operations) &&
+    Array.isArray(nextPayload.operations)
+  ) {
+    return JSON.stringify(
+      {
+        ...current,
+        operations: [...current.operations, ...nextPayload.operations],
+      },
+      null,
+      2
+    )
+  }
+
+  return JSON.stringify(
+    {
+      ...current,
+      ...nextPayload,
+    },
+    null,
+    2
+  )
+}
+
 export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
   codexCli: {
     name: 'codex cli trace',
     model_regex: ['^gpt-.*$'],
     path_regex: ['/v1/responses'],
     key_sources: [{ type: 'gjson', path: 'prompt_cache_key' }],
-    param_override_template: buildPassHeadersTemplate(
-      CODEX_CLI_HEADER_PASSTHROUGH_HEADERS
-    ),
     value_regex: '',
     ttl_seconds: 0,
     skip_retry_on_failure: true,
@@ -151,9 +191,6 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
     model_regex: ['^claude-.*$'],
     path_regex: ['/v1/messages'],
     key_sources: [{ type: 'gjson', path: 'metadata.user_id' }],
-    param_override_template: buildPassHeadersTemplate(
-      CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS
-    ),
     value_regex: '',
     ttl_seconds: 0,
     skip_retry_on_failure: true,

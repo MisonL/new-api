@@ -30,56 +30,66 @@ import {
   getHeaderProfileStrategyFromSettings,
   mergeChannelSubmitFormValues,
   normalizeHeaderProfileStrategy,
+  removeEquivalentVersionedProfileIds,
   reorderSelectedProfileIds,
   toggleSelectedProfile,
   validateHeaderProfileDraft,
 } from './headerProfile.helpers.js';
-import { HEADER_PROFILE_PRESETS } from './headerProfile.constants.js';
 import {
-  CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
-  CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
-  DROID_CLI_HEADER_PASSTHROUGH_HEADERS,
-  QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS,
+  buildAiCodingCliUserAgent,
+  buildNpmCliVersionOptions,
+  buildVersionedAiCodingCliProfile,
+  fetchNpmCliVersionOptions,
+  HEADER_PROFILE_PRESETS,
+  normalizeNpmCliVersionOptions,
+} from './headerProfile.constants.js';
+import {
+  appendParamOverrideTemplatePayload,
+  PARAM_OVERRIDE_TEMPLATES,
+  stringifyParamOverrideTemplatePayload,
 } from '../../../../constants/channel-affinity-template.constants.js';
 
 test('builtin AI CLI profiles distinguish fixed headers from required passthrough', () => {
-  assert.equal(HEADER_PROFILE_PRESETS['codex-cli'].passthroughRequired, true);
-  assert.equal(HEADER_PROFILE_PRESETS['claude-code'].passthroughRequired, true);
-  assert.equal(HEADER_PROFILE_PRESETS['gemini-cli'].passthroughRequired, true);
+  assert.equal(HEADER_PROFILE_PRESETS['codex-cli'].passthroughRequired, false);
+  assert.equal(
+    HEADER_PROFILE_PRESETS['claude-code'].passthroughRequired,
+    false,
+  );
+  assert.equal(HEADER_PROFILE_PRESETS['gemini-cli'].passthroughRequired, false);
   assert.equal(HEADER_PROFILE_PRESETS['opencode'], undefined);
   assert.match(
     HEADER_PROFILE_PRESETS['codex-cli'].description,
-    /自动写入 Codex CLI 请求头透传规则/,
+    /显式选择 Codex CLI 请求头透传模板/,
   );
   assert.match(
     HEADER_PROFILE_PRESETS['claude-code'].description,
-    /自动写入 Claude CLI 请求头透传规则/,
+    /显式选择 Claude CLI 请求头透传模板/,
   );
   assert.equal(
     HEADER_PROFILE_PRESETS['gemini-cli'].headers['User-Agent'],
-    'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)',
+    'GeminiCLI/0.41.2/gemini-3.1-pro-preview (darwin; x64; terminal)',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['gemini-cli'].description,
     /x-goog-api-client/,
   );
-  assert.equal(HEADER_PROFILE_PRESETS['qwen-code'].passthroughRequired, true);
+  assert.equal(HEADER_PROFILE_PRESETS['qwen-code'].passthroughRequired, false);
   assert.equal(
     HEADER_PROFILE_PRESETS['qwen-code'].headers['User-Agent'],
-    'QwenCode/0.15.6 (darwin; x64)',
+    'QwenCode/0.15.10 (darwin; x64)',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['qwen-code'].description,
-    /自动写入 Qwen Code 请求头透传规则/,
+    /显式选择 Qwen Code 请求头透传模板/,
   );
-  assert.equal(HEADER_PROFILE_PRESETS['droid'].passthroughRequired, true);
+  assert.equal(HEADER_PROFILE_PRESETS['droid'].passthroughRequired, false);
   assert.equal(
     HEADER_PROFILE_PRESETS['droid'].headers['User-Agent'],
-    'factory-cli/0.115.0',
+    'factory-cli/0.123.0',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['droid'].description,
-    /自动写入 Droid CLI 请求头透传规则/,
+    /显式选择 Droid CLI 请求头透传模板/,
   );
 });
 
@@ -91,6 +101,165 @@ test('Codex CLI builtin profile does not reuse codex exec request identity', () 
   assert.match(headers['User-Agent'], /^codex-tui\//);
   assert.doesNotMatch(serializedHeaders, /codex_exec/);
   assert.doesNotMatch(serializedHeaders, /source=exec/);
+});
+
+test('npm cli version options use latest first and keep five stable choices', () => {
+  const options = buildNpmCliVersionOptions({
+    'dist-tags': { latest: '0.130.0' },
+    versions: {
+      '1.0.0': {},
+      '1.1.0': {},
+      '1.2.0-beta.1': {},
+      '1.2.0': {},
+      '1.3.0': {},
+      '1.4.0': {},
+      '1.5.0-alpha.1': {},
+    },
+  });
+
+  assert.deepEqual(
+    options.map((option) => option.value),
+    ['0.130.0', '1.4.0', '1.3.0', '1.2.0', '1.1.0'],
+  );
+  assert.equal(options[0].isLatest, true);
+});
+
+test('normalizeNpmCliVersionOptions keeps backend option contract strict', () => {
+  assert.deepEqual(
+    normalizeNpmCliVersionOptions([
+      { value: '1.0.0', label: '1.0.0 (latest)', is_latest: true },
+      { value: '0.9.0' },
+      { value: '' },
+      null,
+    ]),
+    [
+      { value: '1.0.0', label: '1.0.0 (latest)', isLatest: true },
+      { value: '0.9.0', label: '0.9.0', isLatest: false },
+    ],
+  );
+});
+
+test('fetchNpmCliVersionOptions requests new-api backend instead of npm registry', async () => {
+  let requestedUrl = '';
+  let requestedOptions = null;
+  const options = await fetchNpmCliVersionOptions(
+    '@openai/codex',
+    async (url, requestOptions) => {
+      requestedUrl = url;
+      requestedOptions = requestOptions;
+      return {
+        data: {
+          success: true,
+          data: [{ value: '1.0.0', label: '1.0.0 (latest)', isLatest: true }],
+        },
+      };
+    },
+  );
+
+  assert.equal(requestedUrl, '/api/channel/npm_version_options');
+  assert.deepEqual(requestedOptions.params, { package: '@openai/codex' });
+  assert.equal(requestedOptions.skipErrorHandler, true);
+  assert.equal(requestedOptions.disableDuplicate, true);
+  assert.equal(requestedOptions.timeout, 5000);
+  assert.deepEqual(options, [
+    { value: '1.0.0', label: '1.0.0 (latest)', isLatest: true },
+  ]);
+});
+
+test('fetchNpmCliVersionOptions rejects failed backend responses', async () => {
+  await assert.rejects(
+    fetchNpmCliVersionOptions('@openai/codex', async () => ({
+      data: {
+        success: false,
+        message: 'package is not allowed',
+      },
+    })),
+    /package is not allowed/,
+  );
+});
+
+test('versioned AI CLI profiles generate pinned User-Agent snapshots', () => {
+  const codexProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    '0.130.0',
+  );
+  const claudeProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['claude-code'],
+    '2.1.139',
+  );
+
+  assert.equal(codexProfile.id, 'codex-cli@0.130.0');
+  assert.equal(codexProfile.versionMeta.packageName, '@openai/codex');
+  assert.equal(
+    codexProfile.headers['User-Agent'],
+    buildAiCodingCliUserAgent('codex-cli', '0.130.0'),
+  );
+  assert.equal(codexProfile.headers.Originator, 'codex-tui');
+  assert.equal(
+    claudeProfile.headers['User-Agent'],
+    'claude-cli/2.1.139 (external, sdk-cli)',
+  );
+});
+
+test('param override template payloads can replace rule template JSON', () => {
+  const text = stringifyParamOverrideTemplatePayload(
+    PARAM_OVERRIDE_TEMPLATES.codexHeaders.payload,
+  );
+
+  assert.deepEqual(JSON.parse(text), {
+    operations: [
+      {
+        mode: 'pass_headers',
+        value: [
+          'Session_id',
+          'X-Codex-Beta-Features',
+          'X-Codex-Turn-Metadata',
+          'X-Codex-Window-Id',
+          'X-Client-Request-Id',
+        ],
+        keep_origin: true,
+      },
+    ],
+  });
+});
+
+test('param override template append preserves existing operations order', () => {
+  const text = appendParamOverrideTemplatePayload(
+    JSON.stringify({
+      operations: [
+        {
+          mode: 'trim_prefix',
+          path: 'model',
+          value: 'openai/',
+        },
+      ],
+    }),
+    PARAM_OVERRIDE_TEMPLATES.geminiHeaders.payload,
+  );
+
+  assert.deepEqual(JSON.parse(text).operations, [
+    {
+      mode: 'trim_prefix',
+      path: 'model',
+      value: 'openai/',
+    },
+    {
+      mode: 'pass_headers',
+      value: ['X-Goog-Api-Client'],
+      keep_origin: true,
+    },
+  ]);
+});
+
+test('param override template append rejects non-object JSON', () => {
+  assert.throws(
+    () =>
+      appendParamOverrideTemplatePayload(
+        '[]',
+        PARAM_OVERRIDE_TEMPLATES.codexHeaders.payload,
+      ),
+    /JSON object/,
+  );
 });
 
 test('normalizeHeaderProfileStrategy falls back to fixed', () => {
@@ -137,8 +306,8 @@ test('buildSelectedProfileItems keeps structured headers while main fields stay 
     HEADER_PROFILE_PRESETS['codex-cli'].headers,
   );
   assert.equal(items[0].name, 'Codex CLI');
-  assert.equal(items[0].passthroughRequired, true);
-  assert.match(items[0].description, /自动写入 Codex CLI 请求头透传规则/);
+  assert.notEqual(items[0].passthroughRequired, true);
+  assert.match(items[0].description, /显式选择 Codex CLI 请求头透传模板/);
 });
 
 test('buildProfileItems merges builtin and user profiles into a normalized list', () => {
@@ -277,7 +446,7 @@ test('buildHeaderProfileStrategySettings writes and removes header_profile_strat
   });
 });
 
-test('buildHeaderProfileStrategySettings stores passthrough metadata with api field names', () => {
+test('buildHeaderProfileStrategySettings omits passthrough metadata for Codex profile', () => {
   const written = buildHeaderProfileStrategySettings('{}', {
     enabled: true,
     mode: 'fixed',
@@ -295,7 +464,6 @@ test('buildHeaderProfileStrategySettings stores passthrough metadata with api fi
       readonly: true,
       description: HEADER_PROFILE_PRESETS['codex-cli'].description,
       headers: HEADER_PROFILE_PRESETS['codex-cli'].headers,
-      passthrough_required: true,
     },
   ]);
   assert.equal(
@@ -307,7 +475,7 @@ test('buildHeaderProfileStrategySettings stores passthrough metadata with api fi
   );
 });
 
-test('applyHeaderProfileStrategyToChannelInputs adds Codex pass_headers when applying Codex template', () => {
+test('applyHeaderProfileStrategyToChannelInputs does not add Codex pass_headers when applying Codex template', () => {
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
       settings: '{}',
@@ -329,19 +497,91 @@ test('applyHeaderProfileStrategyToChannelInputs adds Codex pass_headers when app
   assert.deepEqual(settings.header_profile_strategy.selected_profile_ids, [
     'codex-cli',
   ]);
-  assert.deepEqual(paramOverride.operations[0], {
-    mode: 'pass_headers',
-    value: CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
-    keep_origin: true,
-  });
-  assert.deepEqual(paramOverride.operations[1], {
-    mode: 'trim_prefix',
-    path: 'model',
-    value: 'openai/',
-  });
+  assert.deepEqual(paramOverride.operations, [
+    {
+      mode: 'trim_prefix',
+      path: 'model',
+      value: 'openai/',
+    },
+  ]);
 });
 
-test('applyHeaderProfileStrategyToChannelInputs merges all required CLI passthrough templates without duplicates', () => {
+test('applyHeaderProfileStrategyToChannelInputs persists selected CLI version snapshot', () => {
+  const versionedProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    '0.130.0',
+  );
+  const result = applyHeaderProfileStrategyToChannelInputs({
+    inputs: {
+      settings: '{}',
+      param_override: '{}',
+    },
+    strategy: {
+      enabled: true,
+      mode: 'fixed',
+      selectedProfileIds: [versionedProfile.id],
+      profiles: [versionedProfile],
+    },
+    headerProfiles: [],
+    snapshotProfiles: [],
+  });
+
+  const settings = JSON.parse(result.settings);
+
+  assert.deepEqual(settings.header_profile_strategy.selected_profile_ids, [
+    'codex-cli@0.130.0',
+  ]);
+  assert.deepEqual(settings.header_profile_strategy.profiles[0].version_meta, {
+    base_profile_id: 'codex-cli',
+    package_name: '@openai/codex',
+    source: 'npm',
+    version: '0.130.0',
+  });
+  assert.equal(
+    settings.header_profile_strategy.profiles[0].headers['User-Agent'],
+    buildAiCodingCliUserAgent('codex-cli', '0.130.0'),
+  );
+});
+
+test('applyHeaderProfileStrategyToChannelInputs persists multiple selected CLI version snapshots', () => {
+  const codexProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    '0.130.0',
+  );
+  const claudeProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['claude-code'],
+    '2.1.139',
+  );
+  const result = applyHeaderProfileStrategyToChannelInputs({
+    inputs: {
+      settings: '{}',
+      param_override: '{}',
+    },
+    strategy: {
+      enabled: true,
+      mode: 'round_robin',
+      selectedProfileIds: [codexProfile.id, claudeProfile.id],
+      profiles: [codexProfile, claudeProfile],
+    },
+    headerProfiles: [],
+    snapshotProfiles: [],
+  });
+
+  const settings = JSON.parse(result.settings);
+
+  assert.deepEqual(settings.header_profile_strategy.selected_profile_ids, [
+    'codex-cli@0.130.0',
+    'claude-code@2.1.139',
+  ]);
+  assert.deepEqual(
+    settings.header_profile_strategy.profiles.map(
+      (profile) => profile.version_meta.version,
+    ),
+    ['0.130.0', '2.1.139'],
+  );
+});
+
+test('applyHeaderProfileStrategyToChannelInputs does not add built-in CLI passthrough templates', () => {
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
       settings: '{}',
@@ -351,27 +591,26 @@ test('applyHeaderProfileStrategyToChannelInputs merges all required CLI passthro
     strategy: {
       enabled: true,
       mode: 'round_robin',
-      selectedProfileIds: ['codex-cli', 'claude-code'],
+      selectedProfileIds: [
+        'codex-cli',
+        'claude-code',
+        'gemini-cli',
+        'qwen-code',
+        'droid',
+      ],
     },
     headerProfiles: [],
     snapshotProfiles: [],
   });
 
-  const operations = JSON.parse(result.param_override).operations;
-  const passHeaderOperations = operations.filter(
-    (operation) => operation.mode === 'pass_headers',
-  );
-  const passedHeaders = new Set(
-    passHeaderOperations.flatMap((operation) => operation.value),
-  );
-
-  assert.equal(passHeaderOperations.length, 1);
-  assert.equal(operations.length, 1);
-  CODEX_CLI_HEADER_PASSTHROUGH_HEADERS.forEach((header) => {
-    assert.equal(passedHeaders.has(header), true);
-  });
-  CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS.forEach((header) => {
-    assert.equal(passedHeaders.has(header), true);
+  assert.deepEqual(JSON.parse(result.param_override), {
+    operations: [
+      {
+        mode: 'pass_headers',
+        value: ['User-Agent', 'Originator'],
+        keep_origin: true,
+      },
+    ],
   });
 });
 
@@ -401,7 +640,7 @@ test('applyHeaderProfileStrategyToChannelInputs keeps param_override unchanged f
   assert.equal(result.param_override, '{}');
 });
 
-test('applyHeaderProfileStrategyToChannelInputs preserves stringified JSON pass_headers values when adding required headers', () => {
+test('applyHeaderProfileStrategyToChannelInputs preserves stringified JSON pass_headers values when adding custom required headers', () => {
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
       settings: '{}',
@@ -411,9 +650,19 @@ test('applyHeaderProfileStrategyToChannelInputs preserves stringified JSON pass_
     strategy: {
       enabled: true,
       mode: 'fixed',
-      selectedProfileIds: ['codex-cli'],
+      selectedProfileIds: ['custom-cli'],
     },
-    headerProfiles: [],
+    headerProfiles: [
+      {
+        id: 'custom-cli',
+        name: 'Custom CLI',
+        headers: {
+          'X-Client-Z': 'z',
+          'User-Agent': 'Custom/1.0',
+        },
+        passthrough_required: true,
+      },
+    ],
     snapshotProfiles: [],
   });
 
@@ -421,12 +670,12 @@ test('applyHeaderProfileStrategyToChannelInputs preserves stringified JSON pass_
   assert.equal(operations.length, 1);
   assert.deepEqual(operations[0], {
     mode: 'pass_headers',
-    value: ['X-Trace-Id', ...CODEX_CLI_HEADER_PASSTHROUGH_HEADERS],
+    value: ['X-Trace-Id', 'User-Agent', 'X-Client-Z'],
     keep_origin: true,
   });
 });
 
-test('applyHeaderProfileStrategyToChannelInputs preserves object names pass_headers values when adding required headers', () => {
+test('applyHeaderProfileStrategyToChannelInputs preserves object names pass_headers values when adding custom required headers', () => {
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
       settings: '{}',
@@ -436,9 +685,19 @@ test('applyHeaderProfileStrategyToChannelInputs preserves object names pass_head
     strategy: {
       enabled: true,
       mode: 'fixed',
-      selectedProfileIds: ['codex-cli'],
+      selectedProfileIds: ['custom-cli'],
     },
-    headerProfiles: [],
+    headerProfiles: [
+      {
+        id: 'custom-cli',
+        name: 'Custom CLI',
+        headers: {
+          'X-Client-Z': 'z',
+          'User-Agent': 'Custom/1.0',
+        },
+        passthrough_required: true,
+      },
+    ],
     snapshotProfiles: [],
   });
 
@@ -446,24 +705,34 @@ test('applyHeaderProfileStrategyToChannelInputs preserves object names pass_head
   assert.equal(operations.length, 1);
   assert.deepEqual(operations[0], {
     mode: 'pass_headers',
-    value: ['X-Trace-Id', ...CODEX_CLI_HEADER_PASSTHROUGH_HEADERS],
+    value: ['X-Trace-Id', 'User-Agent', 'X-Client-Z'],
     keep_origin: true,
   });
 });
 
-test('applyHeaderProfileStrategyToChannelInputs keeps conditional pass_headers separate from required CLI passthrough', () => {
+test('applyHeaderProfileStrategyToChannelInputs keeps conditional pass_headers separate from custom required passthrough', () => {
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
       settings: '{}',
       param_override:
-        '{"operations":[{"mode":"pass_headers","value":["X-Trace-Id"],"conditions":[{"path":"model","mode":"prefix","value":"gpt-4"}],"keep_origin":true}]}',
+        '{"operations":[{"mode":"pass_headers","value":["X-Trace-Id"],"conditions":[{"path":"model","mode":"prefix","value":"custom"}],"keep_origin":true}]}',
     },
     strategy: {
       enabled: true,
       mode: 'fixed',
-      selectedProfileIds: ['codex-cli'],
+      selectedProfileIds: ['custom-cli'],
     },
-    headerProfiles: [],
+    headerProfiles: [
+      {
+        id: 'custom-cli',
+        name: 'Custom CLI',
+        headers: {
+          'X-Client-Z': 'z',
+          'User-Agent': 'Custom/1.0',
+        },
+        passthrough_required: true,
+      },
+    ],
     snapshotProfiles: [],
   });
 
@@ -471,22 +740,22 @@ test('applyHeaderProfileStrategyToChannelInputs keeps conditional pass_headers s
   assert.equal(operations.length, 2);
   assert.deepEqual(operations[0], {
     mode: 'pass_headers',
-    value: CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
+    value: ['User-Agent', 'X-Client-Z'],
     keep_origin: true,
   });
   assert.deepEqual(operations[1], {
     mode: 'pass_headers',
     value: ['X-Trace-Id'],
-    conditions: [{ path: 'model', mode: 'prefix', value: 'gpt-4' }],
+    conditions: [{ path: 'model', mode: 'prefix', value: 'custom' }],
     keep_origin: true,
   });
 });
 
-test('applyHeaderProfileStrategyToChannelInputs backfills Codex pass_headers for existing strategy on submit', () => {
+test('applyHeaderProfileStrategyToChannelInputs does not backfill built-in pass_headers for legacy strategy on submit', () => {
   const strategy = {
     enabled: true,
-    mode: 'fixed',
-    selectedProfileIds: ['codex-cli'],
+    mode: 'round_robin',
+    selectedProfileIds: ['codex-cli', 'claude-code'],
     profiles: [
       {
         id: 'codex-cli',
@@ -496,6 +765,16 @@ test('applyHeaderProfileStrategyToChannelInputs backfills Codex pass_headers for
         readonly: true,
         description: HEADER_PROFILE_PRESETS['codex-cli'].description,
         headers: HEADER_PROFILE_PRESETS['codex-cli'].headers,
+        passthroughRequired: true,
+      },
+      {
+        id: 'claude-code',
+        name: 'Claude Code',
+        category: 'ai_coding_cli',
+        scope: 'builtin',
+        readonly: true,
+        description: HEADER_PROFILE_PRESETS['claude-code'].description,
+        headers: HEADER_PROFILE_PRESETS['claude-code'].headers,
         passthroughRequired: true,
       },
     ],
@@ -511,18 +790,10 @@ test('applyHeaderProfileStrategyToChannelInputs backfills Codex pass_headers for
     snapshotProfiles: strategy.profiles,
   });
 
-  assert.deepEqual(JSON.parse(result.param_override), {
-    operations: [
-      {
-        mode: 'pass_headers',
-        value: CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
-        keep_origin: true,
-      },
-    ],
-  });
+  assert.equal(result.param_override, '');
 });
 
-test('applyHeaderProfileStrategyToChannelInputs backfills passthrough for legacy builtin snapshot without passthrough flag', () => {
+test('applyHeaderProfileStrategyToChannelInputs keeps legacy Codex builtin snapshot without passthrough flag unchanged', () => {
   const strategy = {
     enabled: true,
     mode: 'fixed',
@@ -550,18 +821,10 @@ test('applyHeaderProfileStrategyToChannelInputs backfills passthrough for legacy
     snapshotProfiles: strategy.profiles,
   });
 
-  assert.deepEqual(JSON.parse(result.param_override), {
-    operations: [
-      {
-        mode: 'pass_headers',
-        value: CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
-        keep_origin: true,
-      },
-    ],
-  });
+  assert.equal(result.param_override, '');
 });
 
-test('applyHeaderProfileStrategyToChannelInputs adds Gemini pass_headers when applying Gemini template', () => {
+test('applyHeaderProfileStrategyToChannelInputs does not add Gemini pass_headers when applying Gemini template', () => {
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
       settings: '{}',
@@ -576,18 +839,10 @@ test('applyHeaderProfileStrategyToChannelInputs adds Gemini pass_headers when ap
     snapshotProfiles: [],
   });
 
-  assert.deepEqual(JSON.parse(result.param_override), {
-    operations: [
-      {
-        mode: 'pass_headers',
-        value: ['User-Agent', 'X-Goog-Api-Client'],
-        keep_origin: true,
-      },
-    ],
-  });
+  assert.equal(result.param_override, '{}');
 });
 
-test('applyHeaderProfileStrategyToChannelInputs adds Qwen pass_headers when applying Qwen template', () => {
+test('applyHeaderProfileStrategyToChannelInputs does not add Qwen pass_headers when applying Qwen template', () => {
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
       settings: '{}',
@@ -602,18 +857,10 @@ test('applyHeaderProfileStrategyToChannelInputs adds Qwen pass_headers when appl
     snapshotProfiles: [],
   });
 
-  assert.deepEqual(JSON.parse(result.param_override), {
-    operations: [
-      {
-        mode: 'pass_headers',
-        value: QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS,
-        keep_origin: true,
-      },
-    ],
-  });
+  assert.equal(result.param_override, '{}');
 });
 
-test('applyHeaderProfileStrategyToChannelInputs adds Droid pass_headers when applying Droid template', () => {
+test('applyHeaderProfileStrategyToChannelInputs does not add Droid pass_headers when applying Droid template', () => {
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
       settings: '{}',
@@ -628,15 +875,7 @@ test('applyHeaderProfileStrategyToChannelInputs adds Droid pass_headers when app
     snapshotProfiles: [],
   });
 
-  assert.deepEqual(JSON.parse(result.param_override), {
-    operations: [
-      {
-        mode: 'pass_headers',
-        value: DROID_CLI_HEADER_PASSTHROUGH_HEADERS,
-        keep_origin: true,
-      },
-    ],
-  });
+  assert.equal(result.param_override, '{}');
 });
 
 test('applyHeaderProfileStrategyToChannelInputs preserves param_override when no selected template requires passthrough', () => {
@@ -884,6 +1123,73 @@ test('reorderSelectedProfileIds follows before and after drop positions', () => 
       'after',
     ),
     ['profile-b', 'profile-c', 'profile-a'],
+  );
+});
+
+test('removeEquivalentVersionedProfileIds replaces selected version variants', () => {
+  const selectedCodexProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    '0.130.0',
+  );
+  const nextCodexProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    '0.129.0',
+  );
+
+  assert.deepEqual(
+    removeEquivalentVersionedProfileIds(
+      ['codex-cli@0.130.0', 'claude-code@2.1.139'],
+      [
+        selectedCodexProfile,
+        buildVersionedAiCodingCliProfile(
+          HEADER_PROFILE_PRESETS['claude-code'],
+          '2.1.139',
+        ),
+      ],
+      nextCodexProfile.id,
+      nextCodexProfile,
+    ),
+    ['claude-code@2.1.139'],
+  );
+});
+
+test('removeEquivalentVersionedProfileIds replaces legacy base selection', () => {
+  const nextCodexProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    '0.130.0',
+  );
+
+  assert.deepEqual(
+    removeEquivalentVersionedProfileIds(
+      ['codex-cli', 'claude-code'],
+      [
+        HEADER_PROFILE_PRESETS['codex-cli'],
+        HEADER_PROFILE_PRESETS['claude-code'],
+      ],
+      nextCodexProfile.id,
+      nextCodexProfile,
+    ),
+    ['claude-code'],
+  );
+});
+
+test('removeEquivalentVersionedProfileIds replaces missing versioned selection by id base', () => {
+  const nextCodexProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    '0.129.0',
+  );
+
+  assert.deepEqual(
+    removeEquivalentVersionedProfileIds(
+      ['codex-cli@0.130.0', 'claude-code@2.1.139'],
+      [
+        { id: 'codex-cli@0.130.0', missing: true },
+        { id: 'claude-code@2.1.139', missing: true },
+      ],
+      nextCodexProfile.id,
+      nextCodexProfile,
+    ),
+    ['claude-code@2.1.139'],
   );
 });
 

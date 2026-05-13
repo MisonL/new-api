@@ -18,13 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { HEADER_PROFILE_PRESETS } from './headerProfile.constants.js';
-import {
-  CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
-  CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
-  DROID_CLI_HEADER_PASSTHROUGH_HEADERS,
-  GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS,
-  QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS,
-} from '../../../../constants/channel-affinity-template.constants.js';
 
 const STRATEGIES = new Set(['fixed', 'round_robin', 'random']);
 const FALLBACK_CATEGORY = 'custom';
@@ -94,14 +87,38 @@ function normalizeSelectedProfileIds(selectedProfileIds = []) {
   );
 }
 
-function isBuiltinPassthroughProfileId(profileId) {
-  return (
-    profileId === 'codex-cli' ||
-    profileId === 'claude-code' ||
-    profileId === 'gemini-cli' ||
-    profileId === 'qwen-code' ||
-    profileId === 'droid'
-  );
+function isBuiltinAiCodingCliProfileId(profileId) {
+  const baseProfileId = String(profileId || '').split('@')[0];
+  return [
+    'codex-cli',
+    'claude-code',
+    'gemini-cli',
+    'qwen-code',
+    'droid',
+  ].includes(baseProfileId);
+}
+
+function normalizeVersionMeta(profile = {}) {
+  const rawMeta = profile.versionMeta || profile.version_meta;
+  if (!rawMeta || typeof rawMeta !== 'object' || Array.isArray(rawMeta)) {
+    return null;
+  }
+  const version = String(rawMeta.version || '').trim();
+  const baseProfileId = String(
+    rawMeta.baseProfileId || rawMeta.base_profile_id || '',
+  ).trim();
+  const packageName = String(
+    rawMeta.packageName || rawMeta.package_name || '',
+  ).trim();
+  if (!version || !baseProfileId) {
+    return null;
+  }
+  return {
+    baseProfileId,
+    packageName,
+    source: String(rawMeta.source || '').trim() || 'npm',
+    version,
+  };
 }
 
 function normalizeProfile(profile = {}) {
@@ -118,13 +135,27 @@ function normalizeProfile(profile = {}) {
     headers,
     previewText: buildHeaderProfilePreviewText(headers),
   };
-  if (
-    profile.passthroughRequired === true ||
-    profile.passthrough_required === true
-  ) {
-    normalized.passthroughRequired = true;
+  const versionMeta = normalizeVersionMeta(profile);
+  if (versionMeta) {
+    normalized.versionMeta = versionMeta;
   }
-  if (isBuiltinPassthroughProfileId(id)) {
+  if (
+    profile.versionSource &&
+    typeof profile.versionSource === 'object' &&
+    !Array.isArray(profile.versionSource)
+  ) {
+    normalized.versionSource = {
+      packageName: String(profile.versionSource.packageName || '').trim(),
+      fallbackVersion: String(
+        profile.versionSource.fallbackVersion || '',
+      ).trim(),
+    };
+  }
+  if (
+    !isBuiltinAiCodingCliProfileId(id) &&
+    (profile.passthroughRequired === true ||
+      profile.passthrough_required === true)
+  ) {
     normalized.passthroughRequired = true;
   }
   return normalized;
@@ -237,6 +268,46 @@ export function reorderSelectedProfileIds(
   return nextIds;
 }
 
+function getVersionBaseProfileId(profile = {}) {
+  const versionMeta = profile.versionMeta || profile.version_meta;
+  return String(
+    versionMeta?.baseProfileId || versionMeta?.base_profile_id || '',
+  ).trim();
+}
+
+function isVersionedProfileIdForBase(profileId, baseProfileId) {
+  return (
+    typeof profileId === 'string' &&
+    profileId.startsWith(`${baseProfileId}@`) &&
+    profileId.length > baseProfileId.length + 1
+  );
+}
+
+export function removeEquivalentVersionedProfileIds(
+  selectedProfileIds = [],
+  selectedProfiles = [],
+  nextProfileId,
+  nextProfile = {},
+) {
+  const currentProfileIds = normalizeSelectedProfileIds(selectedProfileIds);
+  const versionBaseProfileId = getVersionBaseProfileId(nextProfile);
+  if (!versionBaseProfileId || currentProfileIds.includes(nextProfileId)) {
+    return currentProfileIds;
+  }
+  return currentProfileIds.filter((profileId) => {
+    if (profileId === versionBaseProfileId) {
+      return false;
+    }
+    const selectedProfile = selectedProfiles.find(
+      (profile) => profile.id === profileId,
+    );
+    if (getVersionBaseProfileId(selectedProfile) === versionBaseProfileId) {
+      return false;
+    }
+    return !isVersionedProfileIdForBase(profileId, versionBaseProfileId);
+  });
+}
+
 export function getHeaderProfileStrategyFromSettings(settingsText) {
   if (typeof settingsText !== 'string' || settingsText.trim() === '') {
     return null;
@@ -297,6 +368,14 @@ export function buildHeaderProfileStrategySettings(settingsText, strategy) {
             if (profile.passthroughRequired === true) {
               snapshot.passthrough_required = true;
             }
+            if (profile.versionMeta) {
+              snapshot.version_meta = {
+                base_profile_id: profile.versionMeta.baseProfileId,
+                package_name: profile.versionMeta.packageName,
+                source: profile.versionMeta.source,
+                version: profile.versionMeta.version,
+              };
+            }
             return snapshot;
           })
       : [],
@@ -305,20 +384,7 @@ export function buildHeaderProfileStrategySettings(settingsText, strategy) {
 }
 
 function requiredPassthroughHeadersForProfile(profile) {
-  switch (profile?.id) {
-    case 'codex-cli':
-      return CODEX_CLI_HEADER_PASSTHROUGH_HEADERS;
-    case 'claude-code':
-      return CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS;
-    case 'gemini-cli':
-      return GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS;
-    case 'qwen-code':
-      return QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS;
-    case 'droid':
-      return DROID_CLI_HEADER_PASSTHROUGH_HEADERS;
-    default:
-      return Object.keys(profile?.headers || {}).sort();
-  }
+  return Object.keys(profile?.headers || {}).sort();
 }
 
 function collectRequiredPassthroughHeaders(selectedProfiles = []) {
@@ -483,10 +549,13 @@ export function applyHeaderProfileStrategyToChannelInputs({
   snapshotProfiles = [],
 }) {
   const selectedProfileIds = strategy?.selectedProfileIds || [];
+  const strategyProfiles = Array.isArray(strategy?.profiles)
+    ? strategy.profiles
+    : [];
   const selectedProfiles = buildSelectedProfileItems(
     selectedProfileIds,
     headerProfiles,
-    snapshotProfiles,
+    [...snapshotProfiles, ...strategyProfiles],
   ).filter((profile) => !profile.missing);
   const settings = buildHeaderProfileStrategySettings(
     inputs.settings,

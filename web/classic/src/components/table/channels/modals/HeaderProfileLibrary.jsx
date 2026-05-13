@@ -17,14 +17,54 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Empty, Space, Tag, Typography } from '@douyinfe/semi-ui';
+import {
+  Button,
+  Empty,
+  Select,
+  Space,
+  Tag,
+  Typography,
+} from '@douyinfe/semi-ui';
 import { IconDelete, IconEdit, IconPlus } from '@douyinfe/semi-icons';
 
+import { API } from '../../../../helpers';
 import { getHeaderProfileCategoryLabel } from './headerProfile.helpers.js';
+import {
+  buildVersionedAiCodingCliProfile,
+  fetchNpmCliVersionOptions,
+  getAiCodingCliVersionSource,
+} from './headerProfile.constants.js';
 
 const { Text } = Typography;
+const EMPTY_VERSION_OPTIONS = [];
+const CLI_VERSION_OPTIONS_CACHE_TTL_MS = 10 * 60 * 1000;
+const NPM_VERSION_LOAD_ERROR_CODE = 'npm_version_load_failed';
+const cliVersionOptionsRequestCache = new Map();
+
+function loadCliVersionOptions(packageName) {
+  const cached = cliVersionOptionsRequestCache.get(packageName);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return cached.request;
+  }
+  if (cached) {
+    cliVersionOptionsRequestCache.delete(packageName);
+  }
+  const request = fetchNpmCliVersionOptions(
+    packageName,
+    API.get.bind(API),
+  ).catch((error) => {
+    cliVersionOptionsRequestCache.delete(packageName);
+    throw error;
+  });
+  cliVersionOptionsRequestCache.set(packageName, {
+    expiresAt: now + CLI_VERSION_OPTIONS_CACHE_TTL_MS,
+    request,
+  });
+  return request;
+}
 
 function buildGroupItems(profiles) {
   return profiles.reduce(
@@ -44,9 +84,13 @@ function getProfileUsageHint(t, profile) {
   if (
     profile.id === 'codex-cli' ||
     profile.id === 'claude-code' ||
-    profile.id === 'gemini-cli'
+    profile.id === 'gemini-cli' ||
+    profile.id === 'qwen-code' ||
+    profile.id === 'droid'
   ) {
-    return t('固定客户端标识；选择后会自动写入真实请求头透传规则');
+    return t(
+      '固定客户端标识；默认不自动补透传，严格复刻上游链路时再按需补 pass_headers',
+    );
   }
   if (profile.category === 'browser') {
     return t('适合要求浏览器访问特征的上游');
@@ -62,6 +106,7 @@ function getProfileUsageHint(t, profile) {
 
 const HeaderProfileLibrary = ({
   profiles = [],
+  selectedProfiles = [],
   selectedProfileIds = [],
   strategyMode = 'fixed',
   loading = false,
@@ -73,10 +118,39 @@ const HeaderProfileLibrary = ({
 }) => {
   const { t } = useTranslation();
   const [previewProfileId, setPreviewProfileId] = useState('');
+  const [cliVersionState, setCliVersionState] = useState({});
   const groups = useMemo(() => buildGroupItems(profiles), [profiles]);
   const selectedProfileIdSet = useMemo(
     () => new Set(selectedProfileIds),
     [selectedProfileIds],
+  );
+  const selectedVersionByBaseId = useMemo(() => {
+    const versionMap = new Map();
+    selectedProfiles.forEach((profile) => {
+      const versionMeta = profile?.versionMeta || profile?.version_meta;
+      const baseProfileId =
+        versionMeta?.baseProfileId || versionMeta?.base_profile_id;
+      const version = versionMeta?.version;
+      if (baseProfileId && version) {
+        versionMap.set(baseProfileId, {
+          profileId: profile.id,
+          version,
+        });
+      }
+    });
+    return versionMap;
+  }, [selectedProfiles]);
+  const versionedProfiles = useMemo(
+    () => profiles.filter((profile) => getAiCodingCliVersionSource(profile)),
+    [profiles],
+  );
+  const versionedProfileDescriptors = useMemo(
+    () =>
+      versionedProfiles.map((profile) => ({
+        id: profile.id,
+        versionSource: getAiCodingCliVersionSource(profile),
+      })),
+    [versionedProfiles],
   );
   const previewProfile = useMemo(() => {
     return (
@@ -86,12 +160,192 @@ const HeaderProfileLibrary = ({
     );
   }, [previewProfileId, profiles, selectedProfileIdSet]);
 
+  useEffect(() => {
+    if (selectedVersionByBaseId.size === 0) {
+      return;
+    }
+    setCliVersionState((current) => {
+      let changed = false;
+      const nextState = { ...current };
+      selectedVersionByBaseId.forEach((versionInfo, profileId) => {
+        const selectedVersion = versionInfo?.version || '';
+        if (
+          selectedVersion &&
+          nextState[profileId]?.selectedVersion !== selectedVersion
+        ) {
+          nextState[profileId] = {
+            ...(nextState[profileId] || {}),
+            selectedVersion,
+          };
+          changed = true;
+        }
+      });
+      return changed ? nextState : current;
+    });
+  }, [selectedVersionByBaseId]);
+
+  useEffect(() => {
+    if (versionedProfileDescriptors.length === 0) {
+      return undefined;
+    }
+    let active = true;
+
+    versionedProfileDescriptors.forEach((profile) => {
+      const versionSource = profile.versionSource;
+      if (!versionSource?.packageName) {
+        return;
+      }
+
+      setCliVersionState((current) => {
+        const currentState = current[profile.id] || {};
+        const fallbackVersion =
+          currentState.selectedVersion || versionSource.fallbackVersion;
+        const fallbackOptions =
+          Array.isArray(currentState.options) && currentState.options.length > 0
+            ? currentState.options
+            : [
+                {
+                  value: fallbackVersion,
+                  label: fallbackVersion,
+                  isLatest: true,
+                },
+              ];
+        return {
+          ...current,
+          [profile.id]: {
+            ...currentState,
+            loading: true,
+            error: '',
+            options: fallbackOptions,
+            packageName: versionSource.packageName,
+            selectedVersion: fallbackVersion,
+          },
+        };
+      });
+
+      loadCliVersionOptions(versionSource.packageName)
+        .then((options) => {
+          if (!active) {
+            return;
+          }
+          const fallbackOptions =
+            options.length > 0
+              ? options
+              : [
+                  {
+                    value: versionSource.fallbackVersion,
+                    label: versionSource.fallbackVersion,
+                    isLatest: true,
+                  },
+                ];
+          setCliVersionState((current) => {
+            const currentState = current[profile.id] || {};
+            const selectedVersion =
+              currentState.selectedVersion ||
+              fallbackOptions[0]?.value ||
+              versionSource.fallbackVersion;
+            return {
+              ...current,
+              [profile.id]: {
+                ...currentState,
+                loading: false,
+                error: '',
+                options: fallbackOptions,
+                packageName: versionSource.packageName,
+                selectedVersion,
+              },
+            };
+          });
+        })
+        .catch(() => {
+          if (!active) {
+            return;
+          }
+          setCliVersionState((current) => {
+            const currentState = current[profile.id] || {};
+            const fallbackVersion =
+              currentState.selectedVersion || versionSource.fallbackVersion;
+            return {
+              ...current,
+              [profile.id]: {
+                ...currentState,
+                loading: false,
+                error: NPM_VERSION_LOAD_ERROR_CODE,
+                options: [
+                  {
+                    value: fallbackVersion,
+                    label: fallbackVersion,
+                    isLatest: true,
+                  },
+                ],
+                packageName: versionSource.packageName,
+                selectedVersion: fallbackVersion,
+              },
+            };
+          });
+        });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [versionedProfileDescriptors]);
+
+  const getSelectedVersionForProfile = (profile) => {
+    const versionSource = getAiCodingCliVersionSource(profile);
+    const versionState = cliVersionState[profile.id] || {};
+    return (
+      versionState.selectedVersion ||
+      selectedVersionByBaseId.get(profile.id)?.version ||
+      versionState.options?.[0]?.value ||
+      versionSource?.fallbackVersion ||
+      ''
+    );
+  };
+
+  const buildProfileForSelection = (profile) => {
+    const versionSource = getAiCodingCliVersionSource(profile);
+    if (!versionSource) {
+      return profile;
+    }
+    return buildVersionedAiCodingCliProfile(
+      profile,
+      getSelectedVersionForProfile(profile),
+      cliVersionState[profile.id]?.error ? 'fallback' : 'npm',
+    );
+  };
+
   const renderCard = (profile) => {
-    const selected = selectedProfileIdSet.has(profile.id);
+    const selectedVersionInfo = selectedVersionByBaseId.get(profile.id);
+    const selected =
+      selectedProfileIdSet.has(profile.id) || !!selectedVersionInfo;
     const previewed = previewProfileId === profile.id;
+    const versionSource = getAiCodingCliVersionSource(profile);
+    const versionState = cliVersionState[profile.id] || {};
+    const versionOptions = versionState.options || EMPTY_VERSION_OPTIONS;
+    const selectedVersion = getSelectedVersionForProfile(profile);
     const activateProfile = () => {
       setPreviewProfileId(profile.id);
-      onToggleSelect(profile.id);
+      const nextProfile = buildProfileForSelection(profile);
+      onToggleSelect(nextProfile.id || profile.id, nextProfile);
+    };
+    const updateProfileVersion = (version) => {
+      setCliVersionState((current) => ({
+        ...current,
+        [profile.id]: {
+          ...(current[profile.id] || {}),
+          selectedVersion: version,
+        },
+      }));
+      if (!selected || selectedVersionInfo?.version === version) {
+        return;
+      }
+      const nextProfile = buildVersionedAiCodingCliProfile(
+        profile,
+        version,
+        versionState.error ? 'fallback' : 'npm',
+      );
+      onToggleSelect(nextProfile.id || profile.id, nextProfile);
     };
 
     return (
@@ -145,7 +399,11 @@ const HeaderProfileLibrary = ({
               )}
               {selected && (
                 <Tag size='small' color='blue'>
-                  {t('当前使用')}
+                  {selectedVersionInfo?.version
+                    ? t('当前使用 {{version}}', {
+                        version: selectedVersionInfo.version,
+                      })
+                    : t('当前使用')}
                 </Tag>
               )}
             </span>
@@ -169,6 +427,26 @@ const HeaderProfileLibrary = ({
           </span>
         </button>
         <div className='flex items-start justify-between gap-2'>
+          {versionSource && (
+            <div className='w-36 py-1.5 pr-1.5'>
+              <Select
+                size='small'
+                value={selectedVersion}
+                loading={versionState.loading === true}
+                optionList={versionOptions}
+                placeholder={t('选择版本')}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                onChange={updateProfileVersion}
+                style={{ width: '100%' }}
+              />
+              {versionState.error && (
+                <Text type='warning' size='small' className='block mt-1'>
+                  {t('npm 版本加载失败，已使用内置版本')}
+                </Text>
+              )}
+            </div>
+          )}
           {!profile.readonly && (
             <Space spacing={4} className='py-1.5 pr-1.5'>
               <Button
@@ -201,10 +479,20 @@ const HeaderProfileLibrary = ({
   };
 
   const renderPreview = () => {
-    const descriptionText = previewProfile?.description
-      ? t(previewProfile.description)
+    const displayPreviewProfile =
+      previewProfile && getAiCodingCliVersionSource(previewProfile)
+        ? buildProfileForSelection(previewProfile)
+        : previewProfile;
+    const descriptionText = displayPreviewProfile?.description
+      ? t(displayPreviewProfile.description)
       : t('悬停模板后在这里预览完整请求头');
-    const previewText = previewProfile?.previewText || t('暂无可预览内容');
+    const previewText =
+      displayPreviewProfile?.headers &&
+      Object.keys(displayPreviewProfile.headers).length > 0
+        ? Object.entries(displayPreviewProfile.headers)
+            .map(([key, value]) => `${key}: ${value}`)
+            .join('\n')
+        : t('暂无可预览内容');
 
     return (
       <div
@@ -218,11 +506,13 @@ const HeaderProfileLibrary = ({
       >
         <div className='mb-1 flex items-center justify-between gap-2'>
           <Text strong size='small'>
-            {previewProfile ? previewProfile.name : t('请求头预览')}
+            {displayPreviewProfile
+              ? displayPreviewProfile.name
+              : t('请求头预览')}
           </Text>
-          {previewProfile && (
+          {displayPreviewProfile && (
             <Tag size='small'>
-              {getHeaderProfileCategoryLabel(t, previewProfile.category)}
+              {getHeaderProfileCategoryLabel(t, displayPreviewProfile.category)}
             </Tag>
           )}
         </div>

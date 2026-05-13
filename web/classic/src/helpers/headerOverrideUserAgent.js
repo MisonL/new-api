@@ -66,27 +66,27 @@ export const HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS = [
       {
         id: 'codex-cli',
         label: 'Codex CLI 固定 UA',
-        ua: 'codex-tui/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.128.0)',
+        ua: 'codex-tui/0.130.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.130.0)',
       },
       {
         id: 'claude-code',
         label: 'Claude Code 固定 UA',
-        ua: 'claude-cli/2.1.126 (external, sdk-cli)',
+        ua: 'claude-cli/2.1.139 (external, sdk-cli)',
       },
       {
         id: 'gemini-cli',
         label: 'Gemini CLI 固定 UA',
-        ua: 'GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)',
+        ua: 'GeminiCLI/0.41.2/gemini-3.1-pro-preview (darwin; x64; terminal)',
       },
       {
         id: 'qwen-code',
         label: 'Qwen Code 固定 UA',
-        ua: 'QwenCode/0.15.6 (darwin; x64)',
+        ua: 'QwenCode/0.15.10 (darwin; x64)',
       },
       {
         id: 'droid',
         label: 'Droid CLI 固定 UA',
-        ua: 'factory-cli/0.115.0',
+        ua: 'factory-cli/0.123.0',
       },
     ],
   },

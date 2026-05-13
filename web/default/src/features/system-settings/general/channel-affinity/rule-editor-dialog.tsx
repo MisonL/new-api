@@ -32,7 +32,9 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   PARAM_OVERRIDE_TEMPLATES,
   RULE_TEMPLATES,
+  appendParamOverrideTemplatePayload,
   cloneTemplate,
+  stringifyParamOverrideTemplatePayload,
 } from './constants'
 import type { AffinityRule, KeySource } from './types'
 
@@ -166,15 +168,26 @@ export function RuleEditorDialog(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.open, props.rule, props.templateKey])
 
-  const applyParamOverrideTemplate = () => {
+  const applyParamOverrideTemplate = (mode: 'replace' | 'append') => {
     const template = PARAM_OVERRIDE_TEMPLATES[paramOverrideTemplateKey]
     if (!template) {
       toast.error(t('Please select a parameter override template'))
       return
     }
+    const currentValue = form.getValues('param_override_template_json') || ''
+    let nextValue: string
+    try {
+      nextValue =
+        mode === 'append'
+          ? appendParamOverrideTemplatePayload(currentValue, template.payload)
+          : stringifyParamOverrideTemplatePayload(cloneTemplate(template.payload))
+    } catch {
+      toast.error(t('Invalid JSON in parameter override template'))
+      return
+    }
     form.setValue(
       'param_override_template_json',
-      JSON.stringify(cloneTemplate(template.payload), null, 2),
+      nextValue,
       { shouldDirty: true, shouldTouch: true }
     )
   }
@@ -431,9 +444,17 @@ export function RuleEditorDialog(props: Props) {
                     type='button'
                     variant='outline'
                     className='w-full sm:w-auto sm:shrink-0'
-                    onClick={applyParamOverrideTemplate}
+                    onClick={() => applyParamOverrideTemplate('replace')}
                   >
-                    {t('Apply Template')}
+                    {t('Replace Template')}
+                  </Button>
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    className='w-full sm:w-auto sm:shrink-0'
+                    onClick={() => applyParamOverrideTemplate('append')}
+                  >
+                    {t('Append Template')}
                   </Button>
                 </div>
                 <Textarea

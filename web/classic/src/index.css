@@ -677,7 +677,13 @@ body.sidebar-resizing * {
   box-shadow: var(--semi-shadow-elevated);
 }
 
+.usage-log-header-audit-tooltip-layer .semi-tooltip-content {
+  background: var(--semi-color-bg-2);
+  color: var(--semi-color-text-0);
+}
+
 .usage-log-header-audit-tooltip-layer .semi-tooltip-icon-arrow {
+  background: var(--semi-color-bg-2);
   color: var(--semi-color-bg-2);
 }
 
@@ -698,15 +704,15 @@ body.sidebar-resizing * {
 
 .usage-log-header-audit-row {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  align-items: baseline;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 4px;
 }
 
 .usage-log-header-audit-label-wrap {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  flex-direction: row;
+  align-items: center;
   gap: 4px;
 }
 
@@ -787,13 +793,14 @@ body.sidebar-resizing * {
 .usage-log-header-audit-header-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .usage-log-header-audit-header-item {
   display: flex;
   min-width: 0;
-  gap: 4px;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .usage-log-header-audit-header-key {
@@ -827,11 +834,22 @@ body.sidebar-resizing * {
   box-sizing: border-box;
   width: min(420px, calc(100vw - 32px));
   max-width: min(420px, calc(100vw - 32px));
+  border: 1px solid var(--semi-color-border);
+  background: var(--semi-color-bg-2);
+  color: var(--semi-color-text-0);
+  box-shadow: var(--semi-shadow-elevated);
 }
 
 .usage-log-channel-tooltip-popover .semi-tooltip-content {
   box-sizing: border-box;
   width: 100%;
+  background: var(--semi-color-bg-2);
+  color: var(--semi-color-text-0);
+}
+
+.usage-log-channel-tooltip-popover .semi-tooltip-icon-arrow {
+  background: var(--semi-color-bg-2);
+  color: var(--semi-color-bg-2);
 }
 
 .usage-log-channel-tooltip .semi-typography {
@@ -869,9 +887,8 @@ body.sidebar-resizing * {
 
 .usage-log-channel-tooltip-grid {
   display: grid;
-  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
-  column-gap: 10px;
-  row-gap: 7px;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 3px;
   align-items: start;
 }
 
@@ -882,6 +899,7 @@ body.sidebar-resizing * {
 
 .usage-log-channel-tooltip-value {
   min-width: 0;
+  margin-bottom: 5px;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
