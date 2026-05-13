@@ -41,14 +41,19 @@ func (p ChatCompletionsToResponsesPolicy) IsChannelEnabled(channelID int, channe
 }
 
 type ProtocolConversionRule struct {
-	Name           string   `json:"name,omitempty"`
-	Enabled        bool     `json:"enabled"`
-	SourceEndpoint string   `json:"source_endpoint,omitempty"`
-	TargetEndpoint string   `json:"target_endpoint,omitempty"`
-	AllChannels    bool     `json:"all_channels"`
-	ChannelIDs     []int    `json:"channel_ids,omitempty"`
-	ChannelTypes   []int    `json:"channel_types,omitempty"`
-	ModelPatterns  []string `json:"model_patterns,omitempty"`
+	Name           string                     `json:"name,omitempty"`
+	Enabled        bool                       `json:"enabled"`
+	SourceEndpoint string                     `json:"source_endpoint,omitempty"`
+	TargetEndpoint string                     `json:"target_endpoint,omitempty"`
+	AllChannels    bool                       `json:"all_channels"`
+	ChannelIDs     []int                      `json:"channel_ids,omitempty"`
+	ChannelTypes   []int                      `json:"channel_types,omitempty"`
+	ModelPatterns  []string                   `json:"model_patterns,omitempty"`
+	Options        *ProtocolConversionOptions `json:"options,omitempty"`
+}
+
+type ProtocolConversionOptions struct {
+	EnableCustomToolBridge bool `json:"enable_custom_tool_bridge,omitempty"`
 }
 
 func (r ProtocolConversionRule) IsChannelEnabled(channelID int, channelType int) bool {

@@ -19,7 +19,10 @@ func TestNormalizeChatCompletionsToResponsesPolicyJSON_ValidRule(t *testing.T) {
 				"all_channels": false,
 				"channel_ids": [3, 3, -1, 0, 2],
 				"channel_types": [1, 1, 0],
-				"model_patterns": [" ^gpt-5.*$ ", "", "   "]
+				"model_patterns": [" ^gpt-5.*$ ", "", "   "],
+				"options": {
+					"enable_custom_tool_bridge": true
+				}
 			}
 		]
 	}`
@@ -37,6 +40,8 @@ func TestNormalizeChatCompletionsToResponsesPolicyJSON_ValidRule(t *testing.T) {
 	assert.Equal(t, []int{3, 2}, rule.ChannelIDs)
 	assert.Equal(t, []int{1}, rule.ChannelTypes)
 	assert.Equal(t, []string{"^gpt-5.*$"}, rule.ModelPatterns)
+	require.NotNil(t, rule.Options)
+	assert.True(t, rule.Options.EnableCustomToolBridge)
 }
 
 func TestNormalizeChatCompletionsToResponsesPolicyJSON_RejectSameEndpoint(t *testing.T) {

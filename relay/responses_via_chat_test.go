@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -169,7 +170,7 @@ func TestResponsesViaChatNonStream(t *testing.T) {
 	}
 	info := newResponsesViaChatInfo()
 
-	usage, newAPIErr := responsesViaChat(c, info, adaptor, req)
+	usage, newAPIErr := responsesViaChat(c, info, adaptor, req, service.ResponsesChatCompatibilityOptions{})
 	require.Nil(t, newAPIErr)
 	require.NotNil(t, usage)
 	require.Equal(t, 10, usage.TotalTokens)
@@ -275,7 +276,7 @@ func TestResponsesViaChatStream(t *testing.T) {
 	}
 	info := newResponsesViaChatInfo()
 
-	usage, newAPIErr := responsesViaChat(c, info, adaptor, req)
+	usage, newAPIErr := responsesViaChat(c, info, adaptor, req, service.ResponsesChatCompatibilityOptions{})
 	require.Nil(t, newAPIErr)
 	require.NotNil(t, usage)
 	require.Equal(t, 3, usage.TotalTokens)

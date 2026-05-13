@@ -54,12 +54,8 @@ func FindProtocolConversionRulePolicy(policy model_setting.ChatCompletionsToResp
 	return nil
 }
 
-func ShouldConvertProtocolPolicy(policy model_setting.ChatCompletionsToResponsesPolicy, sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string) bool {
-	return FindProtocolConversionRulePolicy(policy, sourceEndpoint, targetEndpoint, channelID, channelType, model) != nil
-}
-
-func ShouldConvertProtocolGlobal(sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string) bool {
-	return ShouldConvertProtocolPolicy(
+func FindProtocolConversionRuleGlobal(sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string) *model_setting.ProtocolConversionRule {
+	return FindProtocolConversionRulePolicy(
 		model_setting.GetGlobalSettings().ChatCompletionsToResponsesPolicy,
 		sourceEndpoint,
 		targetEndpoint,
@@ -67,6 +63,20 @@ func ShouldConvertProtocolGlobal(sourceEndpoint string, targetEndpoint string, c
 		channelType,
 		model,
 	)
+}
+
+func ShouldConvertProtocolPolicy(policy model_setting.ChatCompletionsToResponsesPolicy, sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string) bool {
+	return FindProtocolConversionRulePolicy(policy, sourceEndpoint, targetEndpoint, channelID, channelType, model) != nil
+}
+
+func ShouldConvertProtocolGlobal(sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string) bool {
+	return FindProtocolConversionRuleGlobal(
+		sourceEndpoint,
+		targetEndpoint,
+		channelID,
+		channelType,
+		model,
+	) != nil
 }
 
 func ShouldChatCompletionsUseResponsesPolicy(policy model_setting.ChatCompletionsToResponsesPolicy, channelID int, channelType int, model string) bool {

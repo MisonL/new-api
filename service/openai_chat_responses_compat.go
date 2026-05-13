@@ -5,6 +5,8 @@ import (
 	"github.com/QuantumNous/new-api/service/openaicompat"
 )
 
+type ResponsesChatCompatibilityOptions = openaicompat.ResponsesChatCompatibilityOptions
+
 func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.OpenAIResponsesRequest, error) {
 	return openaicompat.ChatCompletionsRequestToResponsesRequest(req)
 }
@@ -13,12 +15,20 @@ func ResponsesRequestToChatCompletionsRequest(req *dto.OpenAIResponsesRequest) (
 	return openaicompat.ResponsesRequestToChatCompletionsRequest(req)
 }
 
+func ResponsesRequestToChatCompletionsRequestWithOptions(req *dto.OpenAIResponsesRequest, options ResponsesChatCompatibilityOptions) (*dto.GeneralOpenAIRequest, error) {
+	return openaicompat.ResponsesRequestToChatCompletionsRequestWithOptions(req, options)
+}
+
 func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesResponse, id string) (*dto.OpenAITextResponse, *dto.Usage, error) {
 	return openaicompat.ResponsesResponseToChatCompletionsResponse(resp, id)
 }
 
 func ChatCompletionsResponseToResponsesResponse(resp *dto.OpenAITextResponse, id string) (*dto.OpenAIResponsesResponse, *dto.Usage, error) {
 	return openaicompat.ChatCompletionsResponseToResponsesResponse(resp, id)
+}
+
+func ChatCompletionsResponseToResponsesResponseWithOptions(resp *dto.OpenAITextResponse, id string, options ResponsesChatCompatibilityOptions) (*dto.OpenAIResponsesResponse, *dto.Usage, error) {
+	return openaicompat.ChatCompletionsResponseToResponsesResponseWithOptions(resp, id, options)
 }
 
 func ExtractOutputTextFromResponses(resp *dto.OpenAIResponsesResponse) string {

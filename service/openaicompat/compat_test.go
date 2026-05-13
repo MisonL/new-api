@@ -92,6 +92,113 @@ func TestResponsesRequestToChatCompletionsRequestRejectsUnsupportedPreviousRespo
 	require.Contains(t, err.Error(), "previous_response_id")
 }
 
+func TestResponsesRequestToChatCompletionsRequestAllowsIgnoredInclude(t *testing.T) {
+	chatReq, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+		Model:   "gpt-5",
+		Input:   mustMarshalJSON(t, "hello"),
+		Include: mustMarshalJSON(t, []string{"reasoning.encrypted_content"}),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5", chatReq.Model)
+	require.Len(t, chatReq.Messages, 1)
+	require.Equal(t, "hello", chatReq.Messages[0].StringContent())
+}
+
+func TestResponsesRequestToChatCompletionsRequestRejectsUnsupportedInclude(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+		Model:   "gpt-5",
+		Input:   mustMarshalJSON(t, "hello"),
+		Include: mustMarshalJSON(t, []string{"message.output_text.logprobs"}),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "message.output_text.logprobs")
+}
+
+func TestResponsesRequestToChatCompletionsRequestRejectsInvalidIncludeShape(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+		Model:   "gpt-5",
+		Input:   mustMarshalJSON(t, "hello"),
+		Include: mustMarshalJSON(t, "reasoning.encrypted_content"),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "include must be an array")
+}
+
+func TestResponsesRequestToChatCompletionsRequestRejectsCustomToolsByDefault(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: mustMarshalJSON(t, []map[string]any{
+			{
+				"type":    "custom_tool_call",
+				"call_id": "call_custom_1",
+				"name":    "shell",
+				"input":   "pwd",
+			},
+		}),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "custom tool bridge is not enabled")
+}
+
+func TestResponsesRequestToChatCompletionsRequestBridgesCustomToolsWhenEnabled(t *testing.T) {
+	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: mustMarshalJSON(t, []map[string]any{
+			{
+				"role":    "user",
+				"content": "run the command",
+			},
+			{
+				"type":    "custom_tool_call",
+				"call_id": "call_custom_1",
+				"name":    "shell",
+				"input":   "pwd",
+			},
+			{
+				"type":    "custom_tool_call_output",
+				"call_id": "call_custom_1",
+				"output":  "/tmp/work",
+			},
+		}),
+		ToolChoice: mustMarshalJSON(t, map[string]any{"type": "custom", "name": "shell"}),
+		Tools: mustMarshalJSON(t, []map[string]any{
+			{
+				"type": "web_search",
+			},
+			{
+				"type":        "custom",
+				"name":        "shell",
+				"description": "Run a shell command.",
+				"format": map[string]any{
+					"type": "text",
+				},
+			},
+		}),
+	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+	require.NoError(t, err)
+	require.Len(t, chatReq.Tools, 1)
+	require.Equal(t, dto.CustomType, chatReq.Tools[0].Type)
+	require.JSONEq(t, `{"name":"shell","description":"Run a shell command.","format":{"type":"text"}}`, string(chatReq.Tools[0].Custom))
+	require.Equal(t, map[string]any{
+		"type": "custom",
+		"custom": map[string]any{
+			"name": "shell",
+		},
+	}, chatReq.ToolChoice)
+
+	require.Len(t, chatReq.Messages, 3)
+	require.Equal(t, "user", chatReq.Messages[0].Role)
+	require.Equal(t, "assistant", chatReq.Messages[1].Role)
+	toolCalls := chatReq.Messages[1].ParseToolCalls()
+	require.Len(t, toolCalls, 1)
+	require.Equal(t, "call_custom_1", toolCalls[0].ID)
+	require.Equal(t, dto.CustomType, toolCalls[0].Type)
+	require.JSONEq(t, `{"name":"shell","input":"pwd"}`, string(toolCalls[0].Custom))
+	require.Equal(t, "tool", chatReq.Messages[2].Role)
+	require.Equal(t, "call_custom_1", chatReq.Messages[2].ToolCallId)
+	require.Equal(t, "/tmp/work", chatReq.Messages[2].StringContent())
+}
+
 func TestChatCompletionsResponseToResponsesResponse(t *testing.T) {
 	chatResp := &dto.OpenAITextResponse{
 		Id:      "chatcmpl_123",
@@ -138,4 +245,66 @@ func TestChatCompletionsResponseToResponsesResponse(t *testing.T) {
 	require.Equal(t, 10, usage.InputTokens)
 	require.Equal(t, 5, usage.OutputTokens)
 	require.Equal(t, 15, usage.TotalTokens)
+}
+
+func TestChatCompletionsResponseToResponsesResponseRejectsCustomToolCallByDefault(t *testing.T) {
+	chatResp := &dto.OpenAITextResponse{
+		Id:      "chatcmpl_custom",
+		Model:   "gpt-5",
+		Object:  "chat.completion",
+		Created: int64(12345),
+		Choices: []dto.OpenAITextResponseChoice{
+			{
+				Index:        0,
+				Message:      dto.Message{Role: "assistant", Content: ""},
+				FinishReason: "tool_calls",
+			},
+		},
+	}
+	chatResp.Choices[0].Message.SetToolCalls([]dto.ToolCallRequest{
+		{
+			ID:     "call_custom_1",
+			Type:   dto.CustomType,
+			Custom: mustMarshalJSON(t, map[string]any{"name": "apply_patch", "input": "*** Begin Patch\n*** End Patch"}),
+		},
+	})
+
+	_, _, err := ChatCompletionsResponseToResponsesResponse(chatResp, "resp_custom")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "custom tool bridge is not enabled")
+}
+
+func TestChatCompletionsResponseToResponsesResponseBridgesCustomToolCallWhenEnabled(t *testing.T) {
+	chatResp := &dto.OpenAITextResponse{
+		Id:      "chatcmpl_custom",
+		Model:   "gpt-5",
+		Object:  "chat.completion",
+		Created: int64(12345),
+		Choices: []dto.OpenAITextResponseChoice{
+			{
+				Index:        0,
+				Message:      dto.Message{Role: "assistant", Content: ""},
+				FinishReason: "tool_calls",
+			},
+		},
+	}
+	chatResp.Choices[0].Message.SetToolCalls([]dto.ToolCallRequest{
+		{
+			ID:     "call_custom_1",
+			Type:   dto.CustomType,
+			Custom: mustMarshalJSON(t, map[string]any{"name": "apply_patch", "input": "*** Begin Patch\n*** End Patch"}),
+		},
+	})
+
+	responsesResp, _, err := ChatCompletionsResponseToResponsesResponseWithOptions(
+		chatResp,
+		"resp_custom",
+		ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true},
+	)
+	require.NoError(t, err)
+	require.Len(t, responsesResp.Output, 1)
+	require.Equal(t, "custom_tool_call", responsesResp.Output[0].Type)
+	require.Equal(t, "call_custom_1", responsesResp.Output[0].CallId)
+	require.Equal(t, "apply_patch", responsesResp.Output[0].Name)
+	require.Equal(t, "*** Begin Patch\n*** End Patch", responsesResp.Output[0].Input)
 }

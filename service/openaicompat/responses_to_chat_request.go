@@ -8,6 +8,20 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 )
 
+type ResponsesChatCompatibilityOptions struct {
+	EnableCustomToolBridge bool
+}
+
+func isResponsesIncludeIgnoredInChatCompatibility(includeValue string) bool {
+	switch includeValue {
+	case "reasoning.encrypted_content":
+		// This is an optional Responses side channel. Chat upstreams cannot emit it,
+		// but clients such as Codex tolerate it being absent in compatibility mode.
+		return true
+	default:
+		return false
+	}
+}
 func rawMessageEnabled(raw []byte) bool {
 	jsonType := common.GetJsonType(raw)
 	return jsonType != "" && jsonType != "null" && jsonType != "unknown"
@@ -39,6 +53,30 @@ func rawMessageToBoolPointer(raw []byte, fieldName string) (*bool, error) {
 		return nil, fmt.Errorf("failed to parse %s: %w", fieldName, err)
 	}
 	return &out, nil
+}
+
+func validateResponsesIncludeForChatCompatibility(raw []byte) error {
+	if !rawMessageEnabled(raw) {
+		return nil
+	}
+	if common.GetJsonType(raw) != "array" {
+		return fmt.Errorf("include must be an array")
+	}
+
+	var includeValues []string
+	if err := common.Unmarshal(raw, &includeValues); err != nil {
+		return fmt.Errorf("failed to parse include: %w", err)
+	}
+	for _, includeValue := range includeValues {
+		normalized := strings.TrimSpace(includeValue)
+		if normalized == "" {
+			return fmt.Errorf("include contains an empty value")
+		}
+		if !isResponsesIncludeIgnoredInChatCompatibility(normalized) {
+			return fmt.Errorf("include value %q is not supported in chat compatibility mode", normalized)
+		}
+	}
+	return nil
 }
 
 func convertResponsesTextToChatResponseFormat(raw []byte) (*dto.ResponseFormat, error) {
@@ -96,7 +134,7 @@ func convertResponsesTextToChatResponseFormat(raw []byte) (*dto.ResponseFormat, 
 	return responseFormat, nil
 }
 
-func convertResponsesToolChoiceToChat(raw []byte) (any, error) {
+func convertResponsesToolChoiceToChat(raw []byte, options ResponsesChatCompatibilityOptions) (any, error) {
 	if !rawMessageEnabled(raw) {
 		return nil, nil
 	}
@@ -114,6 +152,21 @@ func convertResponsesToolChoiceToChat(raw []byte) (any, error) {
 			return nil, fmt.Errorf("failed to parse tool_choice: %w", err)
 		}
 		toolType := strings.TrimSpace(common.Interface2String(toolChoice["type"]))
+		if toolType == dto.CustomType {
+			if !options.EnableCustomToolBridge {
+				return nil, fmt.Errorf("custom tool bridge is not enabled in chat compatibility mode")
+			}
+			name := extractResponsesToolName(toolChoice)
+			if name == "" {
+				return nil, fmt.Errorf("tool_choice custom name is required")
+			}
+			return map[string]any{
+				"type": dto.CustomType,
+				"custom": map[string]any{
+					"name": name,
+				},
+			}, nil
+		}
 		if toolType != "function" {
 			return nil, fmt.Errorf("tool_choice type %q is not supported in chat compatibility mode", toolType)
 		}
@@ -138,7 +191,49 @@ func convertResponsesToolChoiceToChat(raw []byte) (any, error) {
 	}
 }
 
-func convertResponsesToolsToChat(raw []byte) ([]dto.ToolCallRequest, error) {
+func extractResponsesToolName(tool map[string]any) string {
+	name := strings.TrimSpace(common.Interface2String(tool["name"]))
+	if name != "" {
+		return name
+	}
+	if functionMap, ok := tool["function"].(map[string]any); ok {
+		name = strings.TrimSpace(common.Interface2String(functionMap["name"]))
+		if name != "" {
+			return name
+		}
+	}
+	if customMap, ok := tool["custom"].(map[string]any); ok {
+		return strings.TrimSpace(common.Interface2String(customMap["name"]))
+	}
+	return ""
+}
+
+func buildChatCustomToolPayload(tool map[string]any, name string) (common.RawMessage, error) {
+	customPayload := make(map[string]any)
+	if customMap, ok := tool["custom"].(map[string]any); ok {
+		for key, value := range customMap {
+			customPayload[key] = value
+		}
+	}
+	customPayload["name"] = name
+	for _, key := range []string{"description", "format"} {
+		if value, ok := tool[key]; ok && value != nil {
+			customPayload[key] = value
+		}
+	}
+	return common.Marshal(customPayload)
+}
+
+func isResponsesToolIgnoredInChatCompatibility(toolType string) bool {
+	switch toolType {
+	case "web_search", dto.BuildInToolWebSearchPreview, dto.BuildInToolFileSearch:
+		return true
+	default:
+		return false
+	}
+}
+
+func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityOptions) ([]dto.ToolCallRequest, error) {
 	if !rawMessageEnabled(raw) {
 		return nil, nil
 	}
@@ -154,6 +249,27 @@ func convertResponsesToolsToChat(raw []byte) ([]dto.ToolCallRequest, error) {
 	tools := make([]dto.ToolCallRequest, 0, len(rawTools))
 	for _, tool := range rawTools {
 		toolType := strings.TrimSpace(common.Interface2String(tool["type"]))
+		if isResponsesToolIgnoredInChatCompatibility(toolType) {
+			continue
+		}
+		if toolType == dto.CustomType {
+			if !options.EnableCustomToolBridge {
+				return nil, fmt.Errorf("custom tool bridge is not enabled in chat compatibility mode")
+			}
+			name := extractResponsesToolName(tool)
+			if name == "" {
+				return nil, fmt.Errorf("custom tool name is required")
+			}
+			customPayload, err := buildChatCustomToolPayload(tool, name)
+			if err != nil {
+				return nil, fmt.Errorf("failed to encode custom tool: %w", err)
+			}
+			tools = append(tools, dto.ToolCallRequest{
+				Type:   dto.CustomType,
+				Custom: customPayload,
+			})
+			continue
+		}
 		if toolType != "function" {
 			return nil, fmt.Errorf("tool type %q is not supported in chat compatibility mode", toolType)
 		}
@@ -259,7 +375,7 @@ func flushPendingUserMessage(messages *[]dto.Message, pending []dto.MediaContent
 	return pending[:0]
 }
 
-func convertResponsesInputToChatMessages(raw []byte) ([]dto.Message, error) {
+func convertResponsesInputToChatMessages(raw []byte, options ResponsesChatCompatibilityOptions) ([]dto.Message, error) {
 	if !rawMessageEnabled(raw) {
 		return nil, nil
 	}
@@ -358,6 +474,38 @@ func convertResponsesInputToChatMessages(raw []byte) ([]dto.Message, error) {
 				},
 			})
 			messages = append(messages, message)
+		case "custom_tool_call":
+			if !options.EnableCustomToolBridge {
+				return nil, fmt.Errorf("custom tool bridge is not enabled in chat compatibility mode")
+			}
+			pendingUserParts = flushPendingUserMessage(&messages, pendingUserParts)
+
+			callID := strings.TrimSpace(common.Interface2String(item["call_id"]))
+			name := strings.TrimSpace(common.Interface2String(item["name"]))
+			if callID == "" || name == "" {
+				return nil, fmt.Errorf("custom_tool_call requires call_id and name")
+			}
+
+			customPayload := map[string]any{
+				"name": name,
+			}
+			if input, ok := item["input"]; ok {
+				customPayload["input"] = input
+			}
+			customRaw, err := common.Marshal(customPayload)
+			if err != nil {
+				return nil, fmt.Errorf("failed to encode custom_tool_call: %w", err)
+			}
+
+			message := dto.Message{Role: "assistant", Content: ""}
+			message.SetToolCalls([]dto.ToolCallRequest{
+				{
+					ID:     callID,
+					Type:   dto.CustomType,
+					Custom: customRaw,
+				},
+			})
+			messages = append(messages, message)
 		case "function_call_output":
 			pendingUserParts = flushPendingUserMessage(&messages, pendingUserParts)
 
@@ -368,6 +516,25 @@ func convertResponsesInputToChatMessages(raw []byte) ([]dto.Message, error) {
 			output, err := stringifyResponsesOutput(item["output"])
 			if err != nil {
 				return nil, fmt.Errorf("failed to encode function_call_output: %w", err)
+			}
+			messages = append(messages, dto.Message{
+				Role:       "tool",
+				Content:    output,
+				ToolCallId: callID,
+			})
+		case "custom_tool_call_output":
+			if !options.EnableCustomToolBridge {
+				return nil, fmt.Errorf("custom tool bridge is not enabled in chat compatibility mode")
+			}
+			pendingUserParts = flushPendingUserMessage(&messages, pendingUserParts)
+
+			callID := strings.TrimSpace(common.Interface2String(item["call_id"]))
+			if callID == "" {
+				return nil, fmt.Errorf("custom_tool_call_output requires call_id")
+			}
+			output, err := stringifyResponsesOutput(item["output"])
+			if err != nil {
+				return nil, fmt.Errorf("failed to encode custom_tool_call_output: %w", err)
 			}
 			messages = append(messages, dto.Message{
 				Role:       "tool",
@@ -390,6 +557,10 @@ func convertResponsesInputToChatMessages(raw []byte) ([]dto.Message, error) {
 }
 
 func ResponsesRequestToChatCompletionsRequest(req *dto.OpenAIResponsesRequest) (*dto.GeneralOpenAIRequest, error) {
+	return ResponsesRequestToChatCompletionsRequestWithOptions(req, ResponsesChatCompatibilityOptions{})
+}
+
+func ResponsesRequestToChatCompletionsRequestWithOptions(req *dto.OpenAIResponsesRequest, options ResponsesChatCompatibilityOptions) (*dto.GeneralOpenAIRequest, error) {
 	if req == nil {
 		return nil, fmt.Errorf("request is nil")
 	}
@@ -399,8 +570,8 @@ func ResponsesRequestToChatCompletionsRequest(req *dto.OpenAIResponsesRequest) (
 	if strings.TrimSpace(req.PreviousResponseID) != "" {
 		return nil, fmt.Errorf("previous_response_id is not supported in chat compatibility mode")
 	}
-	if rawMessageEnabled(req.Include) {
-		return nil, fmt.Errorf("include is not supported in chat compatibility mode")
+	if err := validateResponsesIncludeForChatCompatibility(req.Include); err != nil {
+		return nil, err
 	}
 	if rawMessageEnabled(req.Conversation) {
 		return nil, fmt.Errorf("conversation is not supported in chat compatibility mode")
@@ -464,13 +635,13 @@ func ResponsesRequestToChatCompletionsRequest(req *dto.OpenAIResponsesRequest) (
 	}
 	out.ParallelTooCalls = parallelToolCalls
 
-	toolChoice, err := convertResponsesToolChoiceToChat(req.ToolChoice)
+	toolChoice, err := convertResponsesToolChoiceToChat(req.ToolChoice, options)
 	if err != nil {
 		return nil, err
 	}
 	out.ToolChoice = toolChoice
 
-	tools, err := convertResponsesToolsToChat(req.Tools)
+	tools, err := convertResponsesToolsToChat(req.Tools, options)
 	if err != nil {
 		return nil, err
 	}
@@ -482,7 +653,7 @@ func ResponsesRequestToChatCompletionsRequest(req *dto.OpenAIResponsesRequest) (
 	}
 	out.ResponseFormat = responseFormat
 
-	messages, err := convertResponsesInputToChatMessages(req.Input)
+	messages, err := convertResponsesInputToChatMessages(req.Input, options)
 	if err != nil {
 		return nil, err
 	}

@@ -17,7 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.OpenAIResponsesRequest) (*dto.Usage, *types.NewAPIError) {
+func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.OpenAIResponsesRequest, options service.ResponsesChatCompatibilityOptions) (*dto.Usage, *types.NewAPIError) {
 	responsesJSON, err := common.Marshal(request)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
@@ -40,7 +40,7 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 		return nil, types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
 	}
 
-	chatReq, err := service.ResponsesRequestToChatCompletionsRequest(&overriddenResponsesReq)
+	chatReq, err := service.ResponsesRequestToChatCompletionsRequestWithOptions(&overriddenResponsesReq, options)
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
@@ -91,7 +91,7 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 	}
 
 	if info.IsStream {
-		usage, newApiErr := openaichannel.OaiChatToResponsesStreamHandler(c, info, httpResp)
+		usage, newApiErr := openaichannel.OaiChatToResponsesStreamHandlerWithOptions(c, info, httpResp, options)
 		if newApiErr != nil {
 			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 			return nil, newApiErr
@@ -99,7 +99,7 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 		return usage, nil
 	}
 
-	usage, newApiErr := openaichannel.OaiChatToResponsesHandler(c, info, httpResp)
+	usage, newApiErr := openaichannel.OaiChatToResponsesHandlerWithOptions(c, info, httpResp, options)
 	if newApiErr != nil {
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 		return nil, newApiErr

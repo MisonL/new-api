@@ -45,7 +45,30 @@ func buildResponsesUsageFromChat(resp *dto.OpenAITextResponse) *dto.Usage {
 	return &usage
 }
 
+func parseChatCustomToolPayload(raw []byte) (string, string, error) {
+	if len(raw) == 0 {
+		return "", "", fmt.Errorf("custom tool payload is required")
+	}
+	var custom map[string]any
+	if err := common.Unmarshal(raw, &custom); err != nil {
+		return "", "", fmt.Errorf("failed to parse custom tool payload: %w", err)
+	}
+	name := strings.TrimSpace(common.Interface2String(custom["name"]))
+	if name == "" {
+		return "", "", fmt.Errorf("custom tool name is required")
+	}
+	input, err := stringifyResponsesOutput(custom["input"])
+	if err != nil {
+		return "", "", fmt.Errorf("failed to encode custom tool input: %w", err)
+	}
+	return name, input, nil
+}
+
 func ChatCompletionsResponseToResponsesResponse(resp *dto.OpenAITextResponse, id string) (*dto.OpenAIResponsesResponse, *dto.Usage, error) {
+	return ChatCompletionsResponseToResponsesResponseWithOptions(resp, id, ResponsesChatCompatibilityOptions{})
+}
+
+func ChatCompletionsResponseToResponsesResponseWithOptions(resp *dto.OpenAITextResponse, id string, options ResponsesChatCompatibilityOptions) (*dto.OpenAIResponsesResponse, *dto.Usage, error) {
 	if resp == nil {
 		return nil, nil, fmt.Errorf("response is nil")
 	}
@@ -103,16 +126,34 @@ func ChatCompletionsResponseToResponsesResponse(resp *dto.OpenAITextResponse, id
 
 	for index, toolCall := range message.ParseToolCalls() {
 		toolType := strings.TrimSpace(toolCall.Type)
-		if toolType != "" && toolType != "function" {
-			return nil, nil, fmt.Errorf("tool call type %q is not supported in responses compatibility mode", toolType)
-		}
 		name := strings.TrimSpace(toolCall.Function.Name)
-		if name == "" {
-			return nil, nil, fmt.Errorf("tool call name is required")
-		}
 		callID := strings.TrimSpace(toolCall.ID)
 		if callID == "" {
 			callID = fmt.Sprintf("call_%d", index)
+		}
+		if toolType == dto.CustomType {
+			if !options.EnableCustomToolBridge {
+				return nil, nil, fmt.Errorf("custom tool bridge is not enabled in responses compatibility mode")
+			}
+			name, input, err := parseChatCustomToolPayload(toolCall.Custom)
+			if err != nil {
+				return nil, nil, err
+			}
+			output = append(output, dto.ResponsesOutput{
+				Type:   "custom_tool_call",
+				ID:     fmt.Sprintf("ctc_%d", index),
+				Status: "completed",
+				CallId: callID,
+				Name:   name,
+				Input:  input,
+			})
+			continue
+		}
+		if toolType != "" && toolType != "function" {
+			return nil, nil, fmt.Errorf("tool call type %q is not supported in responses compatibility mode", toolType)
+		}
+		if name == "" {
+			return nil, nil, fmt.Errorf("tool call name is required")
 		}
 		argumentsRaw, err := common.Marshal(toolCall.Function.Arguments)
 		if err != nil {

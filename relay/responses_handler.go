@@ -71,8 +71,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	adaptor.Init(info)
 	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
-	if shouldRouteResponsesViaChat(info, passThroughGlobal) {
-		usage, newApiErr := responsesViaChat(c, info, adaptor, request)
+	conversionRule := findResponsesViaChatRule(info, passThroughGlobal)
+	if conversionRule != nil {
+		usage, newApiErr := responsesViaChat(c, info, adaptor, request, responsesViaChatOptionsFromRule(conversionRule))
 		if newApiErr != nil {
 			return newApiErr
 		}
@@ -175,9 +176,30 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 }
 
 func shouldRouteResponsesViaChat(info *relaycommon.RelayInfo, passThroughGlobal bool) bool {
-	return info != nil &&
-		info.RelayMode == relayconstant.RelayModeResponses &&
-		!passThroughGlobal &&
-		!info.ChannelSetting.PassThroughBodyEnabled &&
-		service.ShouldResponsesUseChatCompletionsGlobal(info.ChannelId, info.ChannelType, info.OriginModelName)
+	return findResponsesViaChatRule(info, passThroughGlobal) != nil
+}
+
+func findResponsesViaChatRule(info *relaycommon.RelayInfo, passThroughGlobal bool) *model_setting.ProtocolConversionRule {
+	if info == nil ||
+		info.RelayMode != relayconstant.RelayModeResponses ||
+		passThroughGlobal ||
+		info.ChannelSetting.PassThroughBodyEnabled {
+		return nil
+	}
+	return service.FindProtocolConversionRuleGlobal(
+		model_setting.ProtocolEndpointResponses,
+		model_setting.ProtocolEndpointChatCompletions,
+		info.ChannelId,
+		info.ChannelType,
+		info.OriginModelName,
+	)
+}
+
+func responsesViaChatOptionsFromRule(rule *model_setting.ProtocolConversionRule) service.ResponsesChatCompatibilityOptions {
+	if rule == nil || rule.Options == nil {
+		return service.ResponsesChatCompatibilityOptions{}
+	}
+	return service.ResponsesChatCompatibilityOptions{
+		EnableCustomToolBridge: rule.Options.EnableCustomToolBridge,
+	}
 }

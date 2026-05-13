@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -24,6 +25,13 @@ func marshalStreamChunk(t *testing.T, chunk dto.ChatCompletionsStreamResponse) s
 	raw, err := common.Marshal(chunk)
 	require.NoError(t, err)
 	return "data: " + string(raw) + "\n"
+}
+
+func mustMarshalJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := common.Marshal(value)
+	require.NoError(t, err)
+	return raw
 }
 
 func indexAfter(t *testing.T, text string, marker string, after int) int {
@@ -177,4 +185,135 @@ func TestOaiChatToResponsesStreamHandler(t *testing.T) {
 	require.Contains(t, output, "\"name\":\"lookup\"")
 	require.Contains(t, output, "\"arguments\":\"{\\\"q\\\":\\\"x\\\"}\"")
 	require.Contains(t, output, "\"total_tokens\":15")
+}
+
+func TestOaiChatToResponsesStreamHandlerRejectsCustomToolCallByDefault(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+	})
+
+	toolIndex := 0
+	toolChunk := dto.ChatCompletionsStreamResponse{
+		Id:      "chatcmpl_custom",
+		Object:  "chat.completion.chunk",
+		Created: 1710000001,
+		Model:   "gpt-5",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{
+			{
+				Index: 0,
+				Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+					ToolCalls: []dto.ToolCallResponse{
+						{
+							Index:  common.GetPointer(toolIndex),
+							ID:     "call_custom_1",
+							Type:   dto.CustomType,
+							Custom: mustMarshalJSON(t, map[string]any{"name": "apply_patch", "input": "*** Begin Patch"}),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	body := strings.Builder{}
+	body.WriteString(marshalStreamChunk(t, toolChunk))
+	body.WriteString("data: [DONE]\n")
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	resp := &http.Response{
+		Body: io.NopCloser(strings.NewReader(body.String())),
+	}
+	info := &relaycommon.RelayInfo{
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5",
+		},
+	}
+
+	_, apiErr := OaiChatToResponsesStreamHandler(c, info, resp)
+	require.NotNil(t, apiErr)
+	require.Contains(t, apiErr.Error(), "custom tool bridge is not enabled")
+}
+
+func TestOaiChatToResponsesStreamHandlerCustomToolCallWhenEnabled(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+	})
+
+	toolIndex := 0
+	toolChunk := dto.ChatCompletionsStreamResponse{
+		Id:      "chatcmpl_custom",
+		Object:  "chat.completion.chunk",
+		Created: 1710000001,
+		Model:   "gpt-5",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{
+			{
+				Index: 0,
+				Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+					ToolCalls: []dto.ToolCallResponse{
+						{
+							Index:  common.GetPointer(toolIndex),
+							ID:     "call_custom_1",
+							Type:   dto.CustomType,
+							Custom: mustMarshalJSON(t, map[string]any{"name": "apply_patch", "input": "*** Begin Patch"}),
+						},
+					},
+				},
+			},
+		},
+	}
+	finishReason := "tool_calls"
+	finishChunk := dto.ChatCompletionsStreamResponse{
+		Id:      "chatcmpl_custom",
+		Object:  "chat.completion.chunk",
+		Created: 1710000001,
+		Model:   "gpt-5",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{
+			{
+				Index:        0,
+				FinishReason: &finishReason,
+			},
+		},
+	}
+
+	body := strings.Builder{}
+	body.WriteString(marshalStreamChunk(t, toolChunk))
+	body.WriteString(marshalStreamChunk(t, finishChunk))
+	body.WriteString("data: [DONE]\n")
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	resp := &http.Response{
+		Body: io.NopCloser(strings.NewReader(body.String())),
+	}
+	info := &relaycommon.RelayInfo{
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5",
+		},
+	}
+
+	_, apiErr := OaiChatToResponsesStreamHandlerWithOptions(
+		c,
+		info,
+		resp,
+		service.ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true},
+	)
+	require.Nil(t, apiErr)
+
+	output := recorder.Body.String()
+	require.Contains(t, output, "\"type\":\"custom_tool_call\"")
+	require.Contains(t, output, "\"call_id\":\"call_custom_1\"")
+	require.Contains(t, output, "\"name\":\"apply_patch\"")
+	require.Contains(t, output, "\"input\":\"*** Begin Patch\"")
+	require.NotContains(t, output, "response.function_call_arguments.delta")
 }

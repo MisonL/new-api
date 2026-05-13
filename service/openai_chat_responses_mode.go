@@ -20,3 +20,7 @@ func ShouldResponsesUseChatCompletionsPolicy(policy model_setting.ChatCompletion
 func ShouldResponsesUseChatCompletionsGlobal(channelID int, channelType int, model string) bool {
 	return openaicompat.ShouldResponsesUseChatCompletionsGlobal(channelID, channelType, model)
 }
+
+func FindProtocolConversionRuleGlobal(sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string) *model_setting.ProtocolConversionRule {
+	return openaicompat.FindProtocolConversionRuleGlobal(sourceEndpoint, targetEndpoint, channelID, channelType, model)
+}
