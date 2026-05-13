@@ -513,7 +513,7 @@ func validateHeaderProfileStrategySnapshots(strategy *dto.HeaderProfileStrategy)
 	return nil
 }
 
-func validateChannelOtherSettings(channel *model.Channel) error {
+func validateChannelOtherSettings(channel *model.Channel, passedHeaders map[string]struct{}) error {
 	if channel == nil || channel.OtherSettings == "" {
 		return nil
 	}
@@ -526,7 +526,7 @@ func validateChannelOtherSettings(channel *model.Channel) error {
 	if err := validateHeaderProfileStrategy(settings.HeaderProfileStrategy); err != nil {
 		return err
 	}
-	if err := validateHeaderProfilePassthrough(channel, settings.HeaderProfileStrategy); err != nil {
+	if err := validateHeaderProfilePassthrough(settings.HeaderProfileStrategy, passedHeaders); err != nil {
 		return err
 	}
 
@@ -573,10 +573,11 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
 	}
-	if err := validateChannelParamOverride(channel); err != nil {
+	passedHeaders, err := validateChannelParamOverride(channel)
+	if err != nil {
 		return err
 	}
-	if err := validateChannelOtherSettings(channel); err != nil {
+	if err := validateChannelOtherSettings(channel, passedHeaders); err != nil {
 		return err
 	}
 

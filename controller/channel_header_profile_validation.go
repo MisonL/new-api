@@ -11,16 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
-func validateHeaderProfilePassthrough(channel *model.Channel, strategy *dto.HeaderProfileStrategy) error {
-	if channel == nil {
-		return nil
-	}
-
-	passedHeaders, err := collectParamOverridePassHeaders(channel.ParamOverride)
-	if err != nil {
-		return fmt.Errorf("param_override pass_headers 格式错误: %s", err.Error())
-	}
-
+func validateHeaderProfilePassthrough(strategy *dto.HeaderProfileStrategy, passedHeaders map[string]struct{}) error {
 	if strategy == nil || !strategy.Enabled {
 		return nil
 	}
@@ -28,17 +19,21 @@ func validateHeaderProfilePassthrough(channel *model.Channel, strategy *dto.Head
 	if len(requiredHeaders) == 0 {
 		return nil
 	}
+	if passedHeaders == nil {
+		passedHeaders = map[string]struct{}{}
+	}
 	return requireParamOverridePassHeaders(requiredHeaders, passedHeaders)
 }
 
-func validateChannelParamOverride(channel *model.Channel) error {
+func validateChannelParamOverride(channel *model.Channel) (map[string]struct{}, error) {
 	if channel == nil {
-		return nil
+		return map[string]struct{}{}, nil
 	}
-	if _, err := collectParamOverridePassHeaders(channel.ParamOverride); err != nil {
-		return fmt.Errorf("param_override pass_headers 格式错误: %s", err.Error())
+	passedHeaders, err := collectParamOverridePassHeaders(channel.ParamOverride)
+	if err != nil {
+		return nil, fmt.Errorf("param_override pass_headers 格式错误: %s", err.Error())
 	}
-	return nil
+	return passedHeaders, nil
 }
 
 func collectRequiredHeaderProfilePassthroughHeaders(strategy *dto.HeaderProfileStrategy) []string {
