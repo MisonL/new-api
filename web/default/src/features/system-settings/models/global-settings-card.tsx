@@ -50,6 +50,27 @@ const chatToResponsesPolicyAllChannelsExample = JSON.stringify(
   2
 )
 
+const responsesToChatCustomToolsPolicyExample = JSON.stringify(
+  {
+    rules: [
+      {
+        name: 'responses-to-chat-codex-custom-tools',
+        enabled: true,
+        source_endpoint: 'responses',
+        target_endpoint: 'chat_completions',
+        all_channels: false,
+        channel_ids: [1],
+        model_patterns: ['^gpt-5.*$'],
+        options: {
+          enable_custom_tool_bridge: true,
+        },
+      },
+    ],
+  },
+  null,
+  2
+)
+
 const jsonString = z.string().refine((value) => {
   const trimmed = value.trim()
   if (!trimmed) return true
@@ -242,7 +263,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
           <div className='space-y-4'>
             <div className='flex items-center gap-2'>
               <h3 className='text-base font-semibold'>
-                {t('ChatCompletions -> Responses Compatibility')}
+                {t('Protocol Conversion Compatibility')}
               </h3>
               <StatusBadge
                 label={t('Preview')}
@@ -269,7 +290,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                   <FormControl>
                     <Textarea
                       rows={8}
-                      placeholder={`${t('Example (specific channels):')}\n${chatToResponsesPolicyExample}\n\n${t('Example (all channels):')}\n${chatToResponsesPolicyAllChannelsExample}`}
+                      placeholder={`${t('Example (specific channels):')}\n${chatToResponsesPolicyExample}\n\n${t('Example (all channels):')}\n${chatToResponsesPolicyAllChannelsExample}\n\n${t('Example (Responses to Chat custom tools):')}\n${responsesToChatCustomToolsPolicyExample}`}
                       {...field}
                       onChange={(event) => field.onChange(event.target.value)}
                     />
@@ -305,6 +326,20 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                       }
                     >
                       {t('Fill example (all channels)')}
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() =>
+                        form.setValue(
+                          'global.chat_completions_to_responses_policy',
+                          responsesToChatCustomToolsPolicyExample,
+                          { shouldDirty: true }
+                        )
+                      }
+                    >
+                      {t('Fill custom tools example')}
                     </Button>
                     <Button
                       type='button'
