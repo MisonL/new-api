@@ -113,6 +113,24 @@ func seedChannelForHeaderProfileTest(t *testing.T) *model.Channel {
 	return channel
 }
 
+func passthroughRequiredCustomHeaderProfileStrategy() *dto.HeaderProfileStrategy {
+	return &dto.HeaderProfileStrategy{
+		Enabled:            true,
+		Mode:               dto.HeaderProfileModeFixed,
+		SelectedProfileIDs: []string{"custom-cli"},
+		Profiles: []dto.HeaderProfile{
+			{
+				ID:                  "custom-cli",
+				Name:                "Custom CLI",
+				Category:            dto.HeaderProfileCategoryAICodingCLI,
+				Scope:               dto.HeaderProfileScopeUser,
+				Headers:             map[string]string{"User-Agent": "Custom/1.0", "X-Client-Z": "z"},
+				PassthroughRequired: true,
+			},
+		},
+	}
+}
+
 func TestUpdateChannelPersistsHeaderProfileStrategy(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
@@ -134,7 +152,16 @@ func TestUpdateChannelPersistsHeaderProfileStrategy(t *testing.T) {
 					"profile-b",
 				},
 				Profiles: []dto.HeaderProfile{
-					{ID: "profile-a", Headers: map[string]string{"User-Agent": "A/1.0"}},
+					{
+						ID:      "profile-a",
+						Headers: map[string]string{"User-Agent": "A/1.0"},
+						VersionMeta: &dto.HeaderProfileVersionMeta{
+							BaseProfileID: "codex-cli",
+							PackageName:   "@openai/codex",
+							Source:        "npm",
+							Version:       "0.130.0",
+						},
+					},
 					{ID: "profile-b", Headers: map[string]string{"User-Agent": "B/1.0"}},
 				},
 			},
@@ -156,6 +183,12 @@ func TestUpdateChannelPersistsHeaderProfileStrategy(t *testing.T) {
 	require.Equal(t, []string{"profile-a", "profile-b"}, strategy.SelectedProfileIDs)
 	require.Len(t, strategy.Profiles, 2)
 	require.Equal(t, "A/1.0", strategy.Profiles[0].Headers["User-Agent"])
+	require.Equal(t, &dto.HeaderProfileVersionMeta{
+		BaseProfileID: "codex-cli",
+		PackageName:   "@openai/codex",
+		Source:        "npm",
+		Version:       "0.130.0",
+	}, strategy.Profiles[0].VersionMeta)
 }
 
 func TestUpdateChannelAllowsBuiltinHeaderProfileWithPassthrough(t *testing.T) {
@@ -193,7 +226,7 @@ func TestUpdateChannelAllowsBuiltinHeaderProfileWithPassthrough(t *testing.T) {
 	require.JSONEq(t, paramOverride, *loaded.ParamOverride)
 }
 
-func TestUpdateChannelRejectsPassthroughRequiredHeaderProfileWithoutParamOverride(t *testing.T) {
+func TestUpdateChannelAllowsBuiltinCLIHeaderProfileWithoutParamOverride(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
 
@@ -217,10 +250,33 @@ func TestUpdateChannelRejectsPassthroughRequiredHeaderProfileWithoutParamOverrid
 	UpdateChannel(ctx)
 
 	response := decodeChannelAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+}
+
+func TestUpdateChannelRejectsPassthroughRequiredCustomHeaderProfileWithoutParamOverride(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":     channel.Id,
+		"type":   channel.Type,
+		"key":    channel.Key,
+		"status": channel.Status,
+		"name":   channel.Name,
+		"group":  channel.Group,
+		"models": channel.Models,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: passthroughRequiredCustomHeaderProfileStrategy(),
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
 	require.False(t, response.Success)
 	require.Contains(t, response.Message, "pass_headers")
-	require.Contains(t, response.Message, "X-Codex-Window-Id")
-	require.Contains(t, response.Message, "X-Client-Request-Id")
+	require.Contains(t, response.Message, "User-Agent")
+	require.Contains(t, response.Message, "X-Client-Z")
 }
 
 func TestUpdateChannelRejectsOpenCodeHeaderProfileWithoutSnapshot(t *testing.T) {
@@ -253,7 +309,7 @@ func TestUpdateChannelRejectsOpenCodeHeaderProfileWithoutSnapshot(t *testing.T) 
 	require.Contains(t, response.Message, "缺少快照")
 }
 
-func TestUpdateChannelRejectsGeminiHeaderProfileWithoutRequiredGoogPassthrough(t *testing.T) {
+func TestUpdateChannelAllowsGeminiHeaderProfileWithPartialPassthrough(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
 	paramOverride := `{"operations":[{"mode":"pass_headers","value":["User-Agent"],"keep_origin":true}]}`
@@ -279,12 +335,10 @@ func TestUpdateChannelRejectsGeminiHeaderProfileWithoutRequiredGoogPassthrough(t
 	UpdateChannel(ctx)
 
 	response := decodeChannelAPIResponse(t, recorder)
-	require.False(t, response.Success)
-	require.Contains(t, response.Message, "pass_headers")
-	require.Contains(t, response.Message, "X-Goog-Api-Client")
+	require.True(t, response.Success, response.Message)
 }
 
-func TestUpdateChannelRejectsQwenHeaderProfileWithoutRequiredStainlessPassthrough(t *testing.T) {
+func TestUpdateChannelAllowsQwenHeaderProfileWithPartialPassthrough(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
 	paramOverride := `{"operations":[{"mode":"pass_headers","value":["User-Agent"],"keep_origin":true}]}`
@@ -310,15 +364,10 @@ func TestUpdateChannelRejectsQwenHeaderProfileWithoutRequiredStainlessPassthroug
 	UpdateChannel(ctx)
 
 	response := decodeChannelAPIResponse(t, recorder)
-	require.False(t, response.Success)
-	require.Contains(t, response.Message, "pass_headers")
-	require.Contains(t, response.Message, "X-Stainless-Arch")
-	require.Contains(t, response.Message, "X-Stainless-Lang")
-	require.Contains(t, response.Message, "X-Stainless-Package-Version")
-	require.Contains(t, response.Message, "X-Stainless-Retry-Count")
+	require.True(t, response.Success, response.Message)
 }
 
-func TestUpdateChannelRejectsDroidHeaderProfileWithoutRequiredStainlessPassthrough(t *testing.T) {
+func TestUpdateChannelAllowsDroidHeaderProfileWithPartialPassthrough(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
 	paramOverride := `{"operations":[{"mode":"pass_headers","value":["User-Agent"],"keep_origin":true}]}`
@@ -344,16 +393,13 @@ func TestUpdateChannelRejectsDroidHeaderProfileWithoutRequiredStainlessPassthrou
 	UpdateChannel(ctx)
 
 	response := decodeChannelAPIResponse(t, recorder)
-	require.False(t, response.Success)
-	require.Contains(t, response.Message, "pass_headers")
-	require.Contains(t, response.Message, "X-Stainless-Arch")
-	require.Contains(t, response.Message, "X-Stainless-Runtime-Version")
+	require.True(t, response.Success, response.Message)
 }
 
-func TestUpdateChannelRejectsConditionalPassHeadersForPassthroughRequiredProfile(t *testing.T) {
+func TestUpdateChannelRejectsConditionalPassHeadersForPassthroughRequiredCustomHeaderProfile(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
-	paramOverride := `{"operations":[{"mode":"pass_headers","value":["Originator","Session_id","User-Agent","X-Codex-Beta-Features","X-Codex-Turn-Metadata","X-Codex-Window-Id","X-Client-Request-Id"],"conditions":[{"path":"model","mode":"prefix","value":"gpt-4"}],"keep_origin":true}]}`
+	paramOverride := `{"operations":[{"mode":"pass_headers","value":["User-Agent","X-Client-Z"],"conditions":[{"path":"model","mode":"prefix","value":"gpt-4"}],"keep_origin":true}]}`
 
 	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
 		"id":             channel.Id,
@@ -365,11 +411,7 @@ func TestUpdateChannelRejectsConditionalPassHeadersForPassthroughRequiredProfile
 		"models":         channel.Models,
 		"param_override": paramOverride,
 		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
-			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
-				Enabled:            true,
-				Mode:               dto.HeaderProfileModeFixed,
-				SelectedProfileIDs: []string{"codex-cli"},
-			},
+			HeaderProfileStrategy: passthroughRequiredCustomHeaderProfileStrategy(),
 		}),
 	})
 
@@ -378,10 +420,10 @@ func TestUpdateChannelRejectsConditionalPassHeadersForPassthroughRequiredProfile
 	response := decodeChannelAPIResponse(t, recorder)
 	require.False(t, response.Success)
 	require.Contains(t, response.Message, "pass_headers")
-	require.Contains(t, response.Message, "Originator")
+	require.Contains(t, response.Message, "User-Agent")
 }
 
-func TestUpdateChannelRejectsLegacyBuiltinSnapshotWithoutPassthroughMetadata(t *testing.T) {
+func TestUpdateChannelAllowsLegacyBuiltinSnapshotWithoutPassthroughMetadata(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
 
@@ -416,9 +458,7 @@ func TestUpdateChannelRejectsLegacyBuiltinSnapshotWithoutPassthroughMetadata(t *
 	UpdateChannel(ctx)
 
 	response := decodeChannelAPIResponse(t, recorder)
-	require.False(t, response.Success)
-	require.Contains(t, response.Message, "pass_headers")
-	require.Contains(t, response.Message, "X-Codex-Window-Id")
+	require.True(t, response.Success, response.Message)
 }
 
 func TestUpdateChannelRejectsMissingCustomHeaderProfileSnapshot(t *testing.T) {
@@ -517,7 +557,7 @@ func TestAddChannelRejectsRandomModeWithoutProfiles(t *testing.T) {
 	require.EqualValues(t, 0, count)
 }
 
-func TestAddChannelRejectsPassthroughRequiredHeaderProfileWithoutParamOverride(t *testing.T) {
+func TestAddChannelAllowsBuiltinCLIHeaderProfileWithoutParamOverride(t *testing.T) {
 	setupChannelControllerTestDB(t)
 
 	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel", map[string]any{
@@ -542,10 +582,38 @@ func TestAddChannelRejectsPassthroughRequiredHeaderProfileWithoutParamOverride(t
 	AddChannel(ctx)
 
 	response := decodeChannelAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Channel{}).Count(&count).Error)
+	require.EqualValues(t, 1, count)
+}
+
+func TestAddChannelRejectsPassthroughRequiredCustomHeaderProfileWithoutParamOverride(t *testing.T) {
+	setupChannelControllerTestDB(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel", map[string]any{
+		"mode": "single",
+		"channel": map[string]any{
+			"type":   constant.ChannelTypeOpenAI,
+			"key":    "sk-add-custom-profile-no-pass-headers",
+			"status": common.ChannelStatusEnabled,
+			"name":   "add-custom-profile-no-pass-headers",
+			"group":  "default",
+			"models": "gpt-5.5",
+			"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+				HeaderProfileStrategy: passthroughRequiredCustomHeaderProfileStrategy(),
+			}),
+		},
+	})
+
+	AddChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
 	require.False(t, response.Success)
 	require.Contains(t, response.Message, "pass_headers")
-	require.Contains(t, response.Message, "X-Codex-Window-Id")
-	require.Contains(t, response.Message, "X-Client-Request-Id")
+	require.Contains(t, response.Message, "User-Agent")
+	require.Contains(t, response.Message, "X-Client-Z")
 
 	var count int64
 	require.NoError(t, model.DB.Model(&model.Channel{}).Count(&count).Error)
@@ -567,11 +635,7 @@ func TestUpdateChannelRejectsInvalidPassthroughHeaderJSONValue(t *testing.T) {
 		"models":         channel.Models,
 		"param_override": paramOverride,
 		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
-			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
-				Enabled:            true,
-				Mode:               dto.HeaderProfileModeFixed,
-				SelectedProfileIDs: []string{"codex-cli"},
-			},
+			HeaderProfileStrategy: passthroughRequiredCustomHeaderProfileStrategy(),
 		}),
 	})
 
@@ -580,6 +644,57 @@ func TestUpdateChannelRejectsInvalidPassthroughHeaderJSONValue(t *testing.T) {
 	response := decodeChannelAPIResponse(t, recorder)
 	require.False(t, response.Success)
 	require.Contains(t, response.Message, "param_override pass_headers 格式错误")
+}
+
+func TestUpdateChannelRejectsInvalidPassthroughHeaderWithoutSettings(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+	paramOverride := `{"operations":[{"mode":"pass_headers","value":"[User-Agent"}]}`
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":             channel.Id,
+		"type":           channel.Type,
+		"key":            channel.Key,
+		"status":         channel.Status,
+		"name":           channel.Name,
+		"group":          channel.Group,
+		"models":         channel.Models,
+		"param_override": paramOverride,
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "param_override pass_headers 格式错误")
+}
+
+func TestAddChannelRejectsInvalidPassthroughHeaderWithoutSettings(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	paramOverride := `{"operations":[{"mode":"pass_headers","value":"[User-Agent"}]}`
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel", map[string]any{
+		"mode": "single",
+		"channel": map[string]any{
+			"type":           constant.ChannelTypeOpenAI,
+			"key":            "sk-add-invalid-param-override",
+			"status":         common.ChannelStatusEnabled,
+			"name":           "add-invalid-param-override",
+			"group":          "default",
+			"models":         "gpt-4o-mini",
+			"param_override": paramOverride,
+		},
+	})
+
+	AddChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "param_override pass_headers 格式错误")
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Channel{}).Count(&count).Error)
+	require.EqualValues(t, 0, count)
 }
 
 func TestUpdateChannelRejectsInvalidPassthroughHeaderObjectField(t *testing.T) {
@@ -597,11 +712,7 @@ func TestUpdateChannelRejectsInvalidPassthroughHeaderObjectField(t *testing.T) {
 		"models":         channel.Models,
 		"param_override": paramOverride,
 		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
-			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
-				Enabled:            true,
-				Mode:               dto.HeaderProfileModeFixed,
-				SelectedProfileIDs: []string{"codex-cli"},
-			},
+			HeaderProfileStrategy: passthroughRequiredCustomHeaderProfileStrategy(),
 		}),
 	})
 

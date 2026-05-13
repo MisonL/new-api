@@ -36,9 +36,7 @@ type ChannelAffinitySetting struct {
 }
 
 var CodexCliPassThroughHeaders = []string{
-	"Originator",
 	"Session_id",
-	"User-Agent",
 	"X-Codex-Beta-Features",
 	"X-Codex-Turn-Metadata",
 	"X-Codex-Window-Id",
@@ -55,7 +53,6 @@ var ClaudeCliPassThroughHeaders = []string{
 	"X-Stainless-Runtime",
 	"X-Stainless-Runtime-Version",
 	"X-Stainless-Timeout",
-	"User-Agent",
 	"X-App",
 	"Anthropic-Beta",
 	"Anthropic-Dangerous-Direct-Browser-Access",
@@ -63,7 +60,6 @@ var ClaudeCliPassThroughHeaders = []string{
 }
 
 var QwenCodeCliPassThroughHeaders = []string{
-	"User-Agent",
 	"X-Stainless-Arch",
 	"X-Stainless-Lang",
 	"X-Stainless-Os",
@@ -74,7 +70,6 @@ var QwenCodeCliPassThroughHeaders = []string{
 }
 
 var DroidCliPassThroughHeaders = []string{
-	"User-Agent",
 	"X-Stainless-Arch",
 	"X-Stainless-Lang",
 	"X-Stainless-Os",
@@ -85,7 +80,6 @@ var DroidCliPassThroughHeaders = []string{
 }
 
 var GeminiCliPassThroughHeaders = []string{
-	"User-Agent",
 	"X-Goog-Api-Client",
 }
 
@@ -124,13 +118,12 @@ var channelAffinitySetting = ChannelAffinitySetting{
 			KeySources: []ChannelAffinityKeySource{
 				{Type: "gjson", Path: "prompt_cache_key"},
 			},
-			ValueRegex:            "",
-			TTLSeconds:            0,
-			ParamOverrideTemplate: buildPassHeaderTemplate(CodexCliPassThroughHeaders),
-			SkipRetryOnFailure:    true,
-			IncludeUsingGroup:     true,
-			IncludeRuleName:       true,
-			UserAgentInclude:      nil,
+			ValueRegex:         "",
+			TTLSeconds:         0,
+			SkipRetryOnFailure: true,
+			IncludeUsingGroup:  true,
+			IncludeRuleName:    true,
+			UserAgentInclude:   nil,
 		},
 		{
 			Name:       "claude cli trace",
@@ -139,13 +132,12 @@ var channelAffinitySetting = ChannelAffinitySetting{
 			KeySources: []ChannelAffinityKeySource{
 				{Type: "gjson", Path: "metadata.user_id"},
 			},
-			ValueRegex:            "",
-			TTLSeconds:            0,
-			ParamOverrideTemplate: buildPassHeaderTemplate(ClaudeCliPassThroughHeaders),
-			SkipRetryOnFailure:    true,
-			IncludeUsingGroup:     true,
-			IncludeRuleName:       true,
-			UserAgentInclude:      nil,
+			ValueRegex:         "",
+			TTLSeconds:         0,
+			SkipRetryOnFailure: true,
+			IncludeUsingGroup:  true,
+			IncludeRuleName:    true,
+			UserAgentInclude:   nil,
 		},
 	},
 }

@@ -12,18 +12,33 @@ import (
 )
 
 func validateHeaderProfilePassthrough(channel *model.Channel, strategy *dto.HeaderProfileStrategy) error {
-	if channel == nil || strategy == nil || !strategy.Enabled {
+	if channel == nil {
+		return nil
+	}
+
+	passedHeaders, err := collectParamOverridePassHeaders(channel.ParamOverride)
+	if err != nil {
+		return fmt.Errorf("param_override pass_headers 格式错误: %s", err.Error())
+	}
+
+	if strategy == nil || !strategy.Enabled {
 		return nil
 	}
 	requiredHeaders := collectRequiredHeaderProfilePassthroughHeaders(strategy)
 	if len(requiredHeaders) == 0 {
 		return nil
 	}
-	passedHeaders, err := collectParamOverridePassHeaders(channel.ParamOverride)
-	if err != nil {
+	return requireParamOverridePassHeaders(requiredHeaders, passedHeaders)
+}
+
+func validateChannelParamOverride(channel *model.Channel) error {
+	if channel == nil {
+		return nil
+	}
+	if _, err := collectParamOverridePassHeaders(channel.ParamOverride); err != nil {
 		return fmt.Errorf("param_override pass_headers 格式错误: %s", err.Error())
 	}
-	return requireParamOverridePassHeaders(requiredHeaders, passedHeaders)
+	return nil
 }
 
 func collectRequiredHeaderProfilePassthroughHeaders(strategy *dto.HeaderProfileStrategy) []string {

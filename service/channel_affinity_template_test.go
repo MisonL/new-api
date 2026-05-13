@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -23,22 +22,37 @@ func buildChannelAffinityTemplateContextForTest(meta channelAffinityMeta) *gin.C
 
 func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 	require.Equal(t, []string{
-		"Originator",
 		"Session_id",
-		"User-Agent",
 		"X-Codex-Beta-Features",
 		"X-Codex-Turn-Metadata",
 		"X-Codex-Window-Id",
 		"X-Client-Request-Id",
 	}, operation_setting.CodexCliPassThroughHeaders)
-	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "User-Agent")
-	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "X-Claude-Code-Session-Id")
-	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "X-App")
-	require.Contains(t, operation_setting.ClaudeCliPassThroughHeaders, "Anthropic-Beta")
-	require.Contains(t, operation_setting.QwenCodeCliPassThroughHeaders, "User-Agent")
-	require.Contains(t, operation_setting.QwenCodeCliPassThroughHeaders, "X-Stainless-Package-Version")
 	require.Equal(t, []string{
-		"User-Agent",
+		"X-Claude-Code-Session-Id",
+		"X-Stainless-Arch",
+		"X-Stainless-Lang",
+		"X-Stainless-Os",
+		"X-Stainless-Package-Version",
+		"X-Stainless-Retry-Count",
+		"X-Stainless-Runtime",
+		"X-Stainless-Runtime-Version",
+		"X-Stainless-Timeout",
+		"X-App",
+		"Anthropic-Beta",
+		"Anthropic-Dangerous-Direct-Browser-Access",
+		"Anthropic-Version",
+	}, operation_setting.ClaudeCliPassThroughHeaders)
+	require.Equal(t, []string{
+		"X-Stainless-Arch",
+		"X-Stainless-Lang",
+		"X-Stainless-Os",
+		"X-Stainless-Package-Version",
+		"X-Stainless-Retry-Count",
+		"X-Stainless-Runtime",
+		"X-Stainless-Runtime-Version",
+	}, operation_setting.QwenCodeCliPassThroughHeaders)
+	require.Equal(t, []string{
 		"X-Stainless-Arch",
 		"X-Stainless-Lang",
 		"X-Stainless-Os",
@@ -48,7 +62,6 @@ func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 		"X-Stainless-Runtime-Version",
 	}, operation_setting.DroidCliPassThroughHeaders)
 	require.Equal(t, []string{
-		"User-Agent",
 		"X-Goog-Api-Client",
 	}, operation_setting.GeminiCliPassThroughHeaders)
 	require.Equal(t, operation_setting.DroidCliPassThroughHeaders, operation_setting.HeaderProfilePassThroughHeaders["droid"])
@@ -62,6 +75,7 @@ func TestChannelAffinitySettingDoesNotRegisterOpenCodeRuleWithoutRuntimeSource(t
 
 	for _, rule := range setting.Rules {
 		require.NotEqual(t, "opencode cli trace", strings.TrimSpace(rule.Name))
+		require.Empty(t, rule.ParamOverrideTemplate)
 	}
 }
 
@@ -220,7 +234,7 @@ func TestShouldSkipRetryAfterChannelAffinityFailure(t *testing.T) {
 	}
 }
 
-func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
+func TestChannelAffinityHitCodexDoesNotInjectPassHeadersByDefault(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	setting := operation_setting.GetChannelAffinitySetting()
@@ -258,38 +272,8 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 		"temperature": 0.2,
 	}
 	mergedOverride, applied := ApplyChannelAffinityOverrideTemplate(ctx, baseOverride)
-	require.True(t, applied)
+	require.False(t, applied)
 	require.Equal(t, 0.2, mergedOverride["temperature"])
+	require.NotContains(t, mergedOverride, "operations")
 
-	info := &relaycommon.RelayInfo{
-		RequestHeaders: map[string]string{
-			"Originator":          "Codex CLI",
-			"Session_id":          "sess-123",
-			"User-Agent":          "codex-cli-test",
-			"X-Codex-Window-Id":   "window-abc",
-			"X-Client-Request-Id": "request-def",
-		},
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ParamOverride: mergedOverride,
-			HeadersOverride: map[string]interface{}{
-				"X-Static": "legacy-static",
-			},
-		},
-	}
-
-	_, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"gpt-5"}`), info)
-	require.NoError(t, err)
-	require.True(t, info.UseRuntimeHeadersOverride)
-
-	require.Equal(t, "legacy-static", info.RuntimeHeadersOverride["x-static"])
-	require.Equal(t, "Codex CLI", info.RuntimeHeadersOverride["originator"])
-	require.Equal(t, "sess-123", info.RuntimeHeadersOverride["session_id"])
-	require.Equal(t, "codex-cli-test", info.RuntimeHeadersOverride["user-agent"])
-	require.Equal(t, "window-abc", info.RuntimeHeadersOverride["x-codex-window-id"])
-	require.Equal(t, "request-def", info.RuntimeHeadersOverride["x-client-request-id"])
-
-	_, exists := info.RuntimeHeadersOverride["x-codex-beta-features"]
-	require.False(t, exists)
-	_, exists = info.RuntimeHeadersOverride["x-codex-turn-metadata"]
-	require.False(t, exists)
 }

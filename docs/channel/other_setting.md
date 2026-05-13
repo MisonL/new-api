@@ -34,25 +34,27 @@
 
 字段说明：
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `force_format` | `bool` | 强制格式化返回为 OpenAI 风格响应 |
-| `thinking_to_content` | `bool` | 将 `reasoning_content` 拼接为 `<think>` 内容返回 |
-| `proxy` | `string` | 上游请求代理地址 |
-| `pass_through_body_enabled` | `bool` | 允许更原始地透传请求体，是否可用取决于具体渠道 |
-| `system_prompt` | `string` | 渠道级系统提示词 |
-| `system_prompt_override` | `bool` | 是否强制覆盖请求中的系统提示词 |
+| 字段                        | 类型     | 说明                                             |
+| --------------------------- | -------- | ------------------------------------------------ |
+| `force_format`              | `bool`   | 强制格式化返回为 OpenAI 风格响应                 |
+| `thinking_to_content`       | `bool`   | 将 `reasoning_content` 拼接为 `<think>` 内容返回 |
+| `proxy`                     | `string` | 上游请求代理地址                                 |
+| `pass_through_body_enabled` | `bool`   | 允许更原始地透传请求体，是否可用取决于具体渠道   |
+| `system_prompt`             | `string` | 渠道级系统提示词                                 |
+| `system_prompt_override`    | `bool`   | 是否强制覆盖请求中的系统提示词                   |
 
 ## 请求头策略字段
 
 这部分是当前仓库里最容易混淆的区域，当前推荐口径是：
 
 1. `header_override`
+
    - 独立渠道字段，不在 `settings` 里。
    - 仅作为旧版静态请求头 JSON 兼容字段。
    - 新配置建议显式导入或保存为 `Header Profile` 后再选择。
 
 2. `header_profile_strategy`
+
    - 位于 `settings` 中。
    - 控制渠道选择哪些 `Header Profile` 资产以及选择模式。
    - `User-Agent` 只是 `Header Profile.headers` 中的普通字段。
@@ -71,46 +73,43 @@
   "header_profile_strategy": {
     "enabled": true,
     "mode": "round_robin",
-    "selected_profile_ids": [
-      "chrome-macos",
-      "codex-cli"
-    ]
+    "selected_profile_ids": ["chrome-macos", "codex-cli"]
   }
 }
 ```
 
 字段说明：
 
-| 字段 | 类型 | 允许值 | 说明 |
-| --- | --- | --- | --- |
-| `header_profile_strategy.enabled` | `bool` | `true` / `false` | 是否启用 Header Profile 选择 |
-| `header_profile_strategy.mode` | `string` | `fixed` / `round_robin` / `random` | Profile 选择模式 |
-| `header_profile_strategy.selected_profile_ids` | `string[]` | 非空字符串数组 | 选中的 Profile ID 列表 |
-| `header_policy_mode` | `string` | `system_default` / `prefer_channel` / `prefer_tag` / `merge` | 历史兼容：渠道级与标签级旧请求头策略的优先级模式 |
-| `override_header_user_agent` | `bool` | `true` / `false` | 历史兼容：是否用 `ua_strategy` 结果覆盖静态 `header_override.User-Agent` |
-| `ua_strategy.enabled` | `bool` | `true` / `false` | 历史兼容：是否启用 UA 运行时策略 |
-| `ua_strategy.mode` | `string` | `round_robin` / `random` | 历史兼容：UA 池选择模式 |
-| `ua_strategy.user_agents` | `string[]` | 非空字符串数组 | 历史兼容：UA 候选池 |
+| 字段                                           | 类型       | 允许值                                                       | 说明                                                                     |
+| ---------------------------------------------- | ---------- | ------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `header_profile_strategy.enabled`              | `bool`     | `true` / `false`                                             | 是否启用 Header Profile 选择                                             |
+| `header_profile_strategy.mode`                 | `string`   | `fixed` / `round_robin` / `random`                           | Profile 选择模式                                                         |
+| `header_profile_strategy.selected_profile_ids` | `string[]` | 非空字符串数组                                               | 选中的 Profile ID 列表                                                   |
+| `header_policy_mode`                           | `string`   | `system_default` / `prefer_channel` / `prefer_tag` / `merge` | 历史兼容：渠道级与标签级旧请求头策略的优先级模式                         |
+| `override_header_user_agent`                   | `bool`     | `true` / `false`                                             | 历史兼容：是否用 `ua_strategy` 结果覆盖静态 `header_override.User-Agent` |
+| `ua_strategy.enabled`                          | `bool`     | `true` / `false`                                             | 历史兼容：是否启用 UA 运行时策略                                         |
+| `ua_strategy.mode`                             | `string`   | `round_robin` / `random`                                     | 历史兼容：UA 池选择模式                                                  |
+| `ua_strategy.user_agents`                      | `string[]` | 非空字符串数组                                               | 历史兼容：UA 候选池                                                      |
 
 保存时的关键校验：
 
 - `header_profile_strategy.mode=fixed` 时必须且只能选择 1 个 Profile。
 - `header_profile_strategy.mode=round_robin/random` 时至少要选择 1 个 Profile。
-- `header_profile_strategy` 中标记为 `passthrough_required` 的 AI Coding CLI 预置 Profile 依赖真实客户端动态头；WebUI 选择这类模板时会自动在 `param_override.operations` 中合并对应 `pass_headers` 规则，直接写配置时也必须同时提供完整 `pass_headers`。
+- 内置 AI Coding CLI 预置 Profile 只固定客户端身份，不自动补 `pass_headers`；需要真实客户端动态头时，在高级参数覆盖中显式选择对应 CLI 请求头透传模板。自定义 Profile 若标记为 `passthrough_required`，WebUI 仍会在 `param_override.operations` 中合并对应 `pass_headers` 规则。
 - 非法 `header_policy_mode` 会在保存阶段直接拒绝。
 - 非法 `ua_strategy.mode`、空 UA 池、启用策略但无合法 UA，都会在保存阶段直接拒绝。
 
 当前内置 `Header Profile`：
 
-| Profile ID | 名称 | 固定请求头快照 | 是否自动补 `pass_headers` |
-| --- | --- | --- | --- |
-| `chrome-macos` | Chrome macOS | 浏览器常见导航请求头 | 否 |
-| `codex-cli` | Codex CLI | `User-Agent: codex-tui/0.128.0 ...`、`Originator: codex-tui` | 是 |
-| `claude-code` | Claude Code | `User-Agent: claude-cli/2.1.126 (external, sdk-cli)` | 是 |
-| `gemini-cli` | Gemini CLI | `User-Agent: GeminiCLI/0.40.1/gemini-3.1-pro-preview ...` | 是 |
-| `qwen-code` | Qwen Code | `User-Agent: QwenCode/0.15.6 (darwin; x64)` | 是 |
-| `droid` | Droid CLI | `User-Agent: factory-cli/0.115.0` | 是 |
-| `postman-runtime` | Postman Runtime | Postman Runtime 调试请求头 | 否 |
+| Profile ID        | 名称            | 固定请求头快照                                               | 是否自动补 `pass_headers` |
+| ----------------- | --------------- | ------------------------------------------------------------ | ------------------------- |
+| `chrome-macos`    | Chrome macOS    | 浏览器常见导航请求头                                         | 否                        |
+| `codex-cli`       | Codex CLI       | `User-Agent: codex-tui/0.130.0 ...`、`Originator: codex-tui` | 否                        |
+| `claude-code`     | Claude Code     | `User-Agent: claude-cli/2.1.139 (external, sdk-cli)`         | 否                        |
+| `gemini-cli`      | Gemini CLI      | `User-Agent: GeminiCLI/0.41.2/gemini-3.1-pro-preview ...`    | 否                        |
+| `qwen-code`       | Qwen Code       | `User-Agent: QwenCode/0.15.10 (darwin; x64)`                 | 否                        |
+| `droid`           | Droid CLI       | `User-Agent: factory-cli/0.123.0`                            | 否                        |
+| `postman-runtime` | Postman Runtime | Postman Runtime 调试请求头                                   | 否                        |
 
 `codex-cli` 的固定快照代表交互式 TUI 场景。`codex exec` 的 non-interactive 请求会使用 `codex_exec`，不能作为 `Codex CLI` 内置 Profile 模板。
 
@@ -151,9 +150,7 @@ Codex CLI 透传模板当前包含：
 
 ```json
 [
-  "Originator",
   "Session_id",
-  "User-Agent",
   "X-Codex-Beta-Features",
   "X-Codex-Turn-Metadata",
   "X-Codex-Window-Id",
@@ -174,7 +171,6 @@ Claude CLI 透传模板当前包含：
   "X-Stainless-Runtime",
   "X-Stainless-Runtime-Version",
   "X-Stainless-Timeout",
-  "User-Agent",
   "X-App",
   "Anthropic-Beta",
   "Anthropic-Dangerous-Direct-Browser-Access",
@@ -185,17 +181,13 @@ Claude CLI 透传模板当前包含：
 Gemini CLI 透传模板当前包含：
 
 ```json
-[
-  "User-Agent",
-  "X-Goog-Api-Client"
-]
+["X-Goog-Api-Client"]
 ```
 
 Qwen Code 透传模板当前包含：
 
 ```json
 [
-  "User-Agent",
   "X-Stainless-Arch",
   "X-Stainless-Lang",
   "X-Stainless-Os",
@@ -210,7 +202,6 @@ Droid CLI 透传模板当前包含：
 
 ```json
 [
-  "User-Agent",
   "X-Stainless-Arch",
   "X-Stainless-Lang",
   "X-Stainless-Os",
@@ -229,32 +220,32 @@ OpenCode 当前不作为内置 `Header Profile` 提供。本机 live capture 中
 
 这组字段用于“上游模型自动检查/自动同步”能力：
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `upstream_model_update_check_enabled` | `bool` | 是否启用上游模型更新检查 |
-| `upstream_model_update_auto_sync_enabled` | `bool` | 是否自动同步上游模型更新 |
-| `upstream_model_update_last_check_time` | `int64` | 上次检查时间戳 |
-| `upstream_model_update_last_detected_models` | `string[]` | 最近检测到可新增的模型 |
-| `upstream_model_update_last_removed_models` | `string[]` | 最近检测到可移除的模型 |
-| `upstream_model_update_ignored_models` | `string[]` | 忽略列表 |
+| 字段                                         | 类型       | 说明                     |
+| -------------------------------------------- | ---------- | ------------------------ |
+| `upstream_model_update_check_enabled`        | `bool`     | 是否启用上游模型更新检查 |
+| `upstream_model_update_auto_sync_enabled`    | `bool`     | 是否自动同步上游模型更新 |
+| `upstream_model_update_last_check_time`      | `int64`    | 上次检查时间戳           |
+| `upstream_model_update_last_detected_models` | `string[]` | 最近检测到可新增的模型   |
+| `upstream_model_update_last_removed_models`  | `string[]` | 最近检测到可移除的模型   |
+| `upstream_model_update_ignored_models`       | `string[]` | 忽略列表                 |
 
 ## 渠道专属字段
 
 下列字段只在对应渠道类型下有意义：
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `azure_responses_version` | `string` | Azure Responses API 版本 |
-| `vertex_key_type` | `string` | `json` 或 `api_key` |
-| `aws_key_type` | `string` | `ak_sk` 或 `api_key` |
-| `openrouter_enterprise` | `bool` | OpenRouter Enterprise 标志 |
-| `claude_beta_query` | `bool` | Claude 渠道是否追加 `?beta=true` |
-| `allow_service_tier` | `bool` | 是否允许 `service_tier` 透传 |
-| `allow_inference_geo` | `bool` | 是否允许 `inference_geo` 透传 |
-| `allow_speed` | `bool` | 是否允许 `speed` 透传 |
-| `allow_safety_identifier` | `bool` | 是否允许 `safety_identifier` 透传 |
-| `disable_store` | `bool` | 是否禁用 `store` 透传 |
-| `allow_include_obfuscation` | `bool` | 是否允许 `stream_options.include_obfuscation` 透传 |
+| 字段                        | 类型     | 说明                                               |
+| --------------------------- | -------- | -------------------------------------------------- |
+| `azure_responses_version`   | `string` | Azure Responses API 版本                           |
+| `vertex_key_type`           | `string` | `json` 或 `api_key`                                |
+| `aws_key_type`              | `string` | `ak_sk` 或 `api_key`                               |
+| `openrouter_enterprise`     | `bool`   | OpenRouter Enterprise 标志                         |
+| `claude_beta_query`         | `bool`   | Claude 渠道是否追加 `?beta=true`                   |
+| `allow_service_tier`        | `bool`   | 是否允许 `service_tier` 透传                       |
+| `allow_inference_geo`       | `bool`   | 是否允许 `inference_geo` 透传                      |
+| `allow_speed`               | `bool`   | 是否允许 `speed` 透传                              |
+| `allow_safety_identifier`   | `bool`   | 是否允许 `safety_identifier` 透传                  |
+| `disable_store`             | `bool`   | 是否禁用 `store` 透传                              |
+| `allow_include_obfuscation` | `bool`   | 是否允许 `stream_options.include_obfuscation` 透传 |
 
 ## 使用建议
 

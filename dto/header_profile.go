@@ -31,14 +31,22 @@ const (
 )
 
 type HeaderProfile struct {
-	ID                  string                `json:"id,omitempty"`
-	Name                string                `json:"name,omitempty"`
-	Category            HeaderProfileCategory `json:"category,omitempty"`
-	Scope               HeaderProfileScope    `json:"scope,omitempty"`
-	Headers             map[string]string     `json:"headers,omitempty"`
-	ReadOnly            bool                  `json:"readonly,omitempty"`
-	Description         string                `json:"description,omitempty"`
-	PassthroughRequired bool                  `json:"passthrough_required,omitempty"`
+	ID                  string                    `json:"id,omitempty"`
+	Name                string                    `json:"name,omitempty"`
+	Category            HeaderProfileCategory     `json:"category,omitempty"`
+	Scope               HeaderProfileScope        `json:"scope,omitempty"`
+	Headers             map[string]string         `json:"headers,omitempty"`
+	ReadOnly            bool                      `json:"readonly,omitempty"`
+	Description         string                    `json:"description,omitempty"`
+	PassthroughRequired bool                      `json:"passthrough_required,omitempty"`
+	VersionMeta         *HeaderProfileVersionMeta `json:"version_meta,omitempty"`
+}
+
+type HeaderProfileVersionMeta struct {
+	BaseProfileID string `json:"base_profile_id,omitempty"`
+	PackageName   string `json:"package_name,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Version       string `json:"version,omitempty"`
 }
 
 type HeaderProfileStrategy struct {
@@ -49,9 +57,9 @@ type HeaderProfileStrategy struct {
 }
 
 const (
-	BuiltinCodexCLIUserAgent  = "codex-tui/0.128.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.128.0)"
+	BuiltinCodexCLIUserAgent  = "codex-tui/0.130.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.130.0)"
 	BuiltinCodexCLIOriginator = "codex-tui"
-	BuiltinDroidCLIUserAgent  = "factory-cli/0.115.0"
+	BuiltinDroidCLIUserAgent  = "factory-cli/0.123.0"
 )
 
 var BuiltinHeaderProfiles = []HeaderProfile{
@@ -75,28 +83,28 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		"claude-code",
 		"Claude Code",
 		map[string]string{
-			"User-Agent": "claude-cli/2.1.126 (external, sdk-cli)",
+			"User-Agent": "claude-cli/2.1.139 (external, sdk-cli)",
 		},
-		"固定请求头静态快照来自本机实抓 Claude Code 2.1.126 `/v1/messages?beta=true` 请求；真实请求还会携带 X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等 SDK 头，选择此模板时会自动写入 Claude CLI 请求头透传规则。",
-		true,
+		"固定请求头静态快照来自本机实抓 Claude Code 2.1.139 `/v1/messages?beta=true` 请求；此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。",
+		false,
 	),
 	newBuiltinCLIHeaderProfile(
 		"gemini-cli",
 		"Gemini CLI",
 		map[string]string{
-			"User-Agent": "GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)",
+			"User-Agent": "GeminiCLI/0.41.2/gemini-3.1-pro-preview (darwin; x64; terminal)",
 		},
-		"固定请求头静态快照来自本机实抓 Gemini CLI 0.40.1 的 streamGenerateContent 请求；真实请求还会携带 x-goog-api-client 等运行时头，选择此模板时会自动写入 Gemini CLI 请求头透传规则。",
-		true,
+		"固定请求头静态快照来自本机实抓 Gemini CLI 0.41.2 的 streamGenerateContent 请求；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。",
+		false,
 	),
 	newBuiltinCLIHeaderProfile(
 		"qwen-code",
 		"Qwen Code",
 		map[string]string{
-			"User-Agent": "QwenCode/0.15.6 (darwin; x64)",
+			"User-Agent": "QwenCode/0.15.10 (darwin; x64)",
 		},
-		"固定请求头静态快照来自本机 Qwen Code 0.15.6 的 OpenAI-compatible `/chat/completions` 请求；真实请求还会携带已实抓的 x-stainless-* 运行时头，选择此模板时会自动写入 Qwen Code 请求头透传规则。",
-		true,
+		"固定请求头静态快照来自本机 Qwen Code 0.15.10 的 OpenAI-compatible `/chat/completions` 请求；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。",
+		false,
 	),
 	newBuiltinCLIHeaderProfile(
 		"droid",
@@ -104,8 +112,8 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		map[string]string{
 			"User-Agent": BuiltinDroidCLIUserAgent,
 		},
-		"固定请求头静态快照来自本机实抓 Droid 0.115.0 的 OpenAI-compatible `/v1/chat/completions` 请求；真实请求还会携带 X-Stainless-* 运行时头，选择此模板时会自动写入 Droid CLI 请求头透传规则。",
-		true,
+		"固定请求头静态快照来自本机实抓 Droid 0.123.0 的 OpenAI-compatible `/v1/chat/completions` 请求；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。",
+		false,
 	),
 	{
 		ID:       "postman-runtime",
@@ -129,8 +137,8 @@ func newBuiltinCodexCLIHeaderProfile() HeaderProfile {
 		Category:            HeaderProfileCategoryAICodingCLI,
 		Scope:               HeaderProfileScopeBuiltin,
 		ReadOnly:            true,
-		Description:         "固定请求头静态快照来自 Codex CLI 0.128.0 交互式 TUI 请求头生成逻辑；选择此模板时会自动写入 Codex CLI 请求头透传规则，保留真实 CLI 的会话、窗口与 turn metadata 动态头。",
-		PassthroughRequired: true,
+		Description:         "固定请求头静态快照来自 Codex CLI 0.130.0 交互式 TUI 请求头生成逻辑；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。",
+		PassthroughRequired: false,
 		Headers: map[string]string{
 			"User-Agent": BuiltinCodexCLIUserAgent,
 			"Originator": BuiltinCodexCLIOriginator,

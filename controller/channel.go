@@ -573,6 +573,9 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
 	}
+	if err := validateChannelParamOverride(channel); err != nil {
+		return err
+	}
 	if err := validateChannelOtherSettings(channel); err != nil {
 		return err
 	}
