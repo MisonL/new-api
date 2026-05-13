@@ -152,6 +152,18 @@ const HeaderProfileLibrary = ({
       })),
     [versionedProfiles],
   );
+  const versionedProfileDescriptorKey = useMemo(
+    () =>
+      versionedProfileDescriptors
+        .map(
+          (profile) =>
+            `${profile.id}:${profile.versionSource?.packageName || ''}:${
+              profile.versionSource?.fallbackVersion || ''
+            }`,
+        )
+        .join('|'),
+    [versionedProfileDescriptors],
+  );
   const previewProfile = useMemo(() => {
     return (
       profiles.find((profile) => profile.id === previewProfileId) ||
@@ -289,7 +301,7 @@ const HeaderProfileLibrary = ({
     return () => {
       active = false;
     };
-  }, [versionedProfileDescriptors]);
+  }, [versionedProfileDescriptorKey]);
 
   const getSelectedVersionForProfile = (profile) => {
     const versionSource = getAiCodingCliVersionSource(profile);
