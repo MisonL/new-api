@@ -20,7 +20,7 @@
 当前重点增强：
 
 - 企业 SSO：JWT Direct、Trusted Header、CAS、OIDC、OAuth、Passkey
-- 协议转换：OpenAI Chat、OpenAI Responses、Claude、Gemini 等格式适配
+- 协议转换：OpenAI Chat、OpenAI Responses、Claude、Gemini 等格式适配，支持按策略做 Chat/Responses 双向转换和 Responses 自定义工具桥接
 - 计费能力：阶梯计费表达式、工具定价、模型价格维护、历史消费金额修正
 - 渠道策略：Header Profile、AI Coding CLI 动态请求头透传、模型测试运行配置
 - 运营后台：请求/响应内容日志、Dashboard、排行、筛选联想、邀请返利、礼品码
@@ -85,15 +85,15 @@ export CRYPTO_SECRET='replace-with-stable-secret'
 
 ## 配置
 
-| 变量 | 用途 | 备注 |
-| --- | --- | --- |
-| `SESSION_SECRET` | 会话签名密钥 | 必填，必须稳定 |
-| `CRYPTO_SECRET` | 敏感数据加密密钥 | 必填，必须稳定 |
-| `SQL_DSN` | 数据库连接 | 未设置时使用 SQLite |
-| `REDIS_CONN_STRING` | Redis 连接 | 可选，用于缓存和共享状态 |
-| `NEW_API_IMAGE` | Docker 镜像 | 正式部署建议固定版本 |
-| `NEW_API_DATA_DIR` | 数据目录 | 建议显式设置 |
-| `NEW_API_LOG_DIR` | 日志目录 | 建议显式设置 |
+| 变量                | 用途             | 备注                     |
+| ------------------- | ---------------- | ------------------------ |
+| `SESSION_SECRET`    | 会话签名密钥     | 必填，必须稳定           |
+| `CRYPTO_SECRET`     | 敏感数据加密密钥 | 必填，必须稳定           |
+| `SQL_DSN`           | 数据库连接       | 未设置时使用 SQLite      |
+| `REDIS_CONN_STRING` | Redis 连接       | 可选，用于缓存和共享状态 |
+| `NEW_API_IMAGE`     | Docker 镜像      | 正式部署建议固定版本     |
+| `NEW_API_DATA_DIR`  | 数据目录         | 建议显式设置             |
+| `NEW_API_LOG_DIR`   | 日志目录         | 建议显式设置             |
 
 支持 SQLite、MySQL、PostgreSQL。跨数据库改动必须保持三者兼容。
 
@@ -139,6 +139,7 @@ docker exec new-api-dev-isolated-new-api-1 /new-api --build-info
 - [渠道模型测试运行配置](docs/channel/model_test_runtime_config.md)
 - [邀请返利与礼品码](docs/operations/invitation-rebate-gift-code.md)
 - [模型价格维护与历史日志修正](docs/operations/pricing-maintenance.md)
+- [协议转换自定义工具桥接复核](docs/reviews/CR-PROTOCOL-CONVERSION-CUSTOM-TOOLS-2026-05-13.md)
 - [隔离开发环境复核记录](docs/reviews/CR-DEV-ISOLATED-VERIFY-2026-05-07.md)
 - [部署构建可追溯审计](docs/reviews/CR-DEPLOY-BUILD-TRACEABILITY-2026-05-01.md)
 

@@ -187,3 +187,11 @@ curl -s \
 - 管理台协议转换策略可视化编辑器可用
 - 关键交互链路已验证，包括新增、展开、删除、无效作用域提示
 - 删除规则后的展开态回归问题已修复并复测通过
+
+## 后续状态：2026-05-13
+
+`main` 后续补充了 Responses 到 Chat Completions 的自定义工具桥接能力，并在 `web/default` 全局模型配置页补充“填充自定义工具示例”。
+
+最新复核入口：
+
+- [CR-PROTOCOL-CONVERSION-CUSTOM-TOOLS-2026-05-13](./CR-PROTOCOL-CONVERSION-CUSTOM-TOOLS-2026-05-13.md)
