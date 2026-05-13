@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -16,6 +17,7 @@ import (
 
 const (
 	npmCliVersionOptionLimit      = 5
+	npmCliVersionCacheTTL         = 10 * time.Minute
 	npmRegistryRequestTimeout     = 5 * time.Second
 	npmRegistryMetadataMaxBytes   = 4 << 20
 	defaultNpmRegistryMetadataURL = "https://registry.npmjs.org"
@@ -29,10 +31,22 @@ var allowedNpmCLIPackages = map[string]struct{}{
 	"droid":                     {},
 }
 
+var npmCliVersionCache = struct {
+	sync.RWMutex
+	items map[string]npmCliVersionCacheEntry
+}{
+	items: make(map[string]npmCliVersionCacheEntry),
+}
+
 type NpmCLIVersionOption struct {
 	Value    string `json:"value"`
 	Label    string `json:"label"`
 	IsLatest bool   `json:"isLatest"`
+}
+
+type npmCliVersionCacheEntry struct {
+	expiresAt time.Time
+	options   []NpmCLIVersionOption
 }
 
 type npmPackageMetadata struct {
@@ -46,7 +60,24 @@ func IsAllowedNpmCLIPackage(packageName string) bool {
 }
 
 func FetchNpmCLIVersionOptions(ctx context.Context, packageName string) ([]NpmCLIVersionOption, error) {
-	return fetchNpmCLIVersionOptions(ctx, packageName, http.DefaultClient, defaultNpmRegistryMetadataURL)
+	normalizedPackageName := strings.TrimSpace(packageName)
+	if normalizedPackageName == "" {
+		return nil, fmt.Errorf("package is required")
+	}
+	if !IsAllowedNpmCLIPackage(normalizedPackageName) {
+		return nil, fmt.Errorf("unsupported npm package: %s", normalizedPackageName)
+	}
+
+	if options, ok := getCachedNpmCLIVersionOptions(normalizedPackageName, time.Now()); ok {
+		return options, nil
+	}
+
+	options, err := fetchNpmCLIVersionOptions(ctx, normalizedPackageName, defaultNpmRegistryHTTPClient(), defaultNpmRegistryMetadataURL)
+	if err != nil {
+		return nil, err
+	}
+	setCachedNpmCLIVersionOptions(normalizedPackageName, options, time.Now().Add(npmCliVersionCacheTTL))
+	return cloneNpmCLIVersionOptions(options), nil
 }
 
 func fetchNpmCLIVersionOptions(ctx context.Context, packageName string, client *http.Client, registryBaseURL string) ([]NpmCLIVersionOption, error) {
@@ -58,7 +89,7 @@ func fetchNpmCLIVersionOptions(ctx context.Context, packageName string, client *
 		return nil, fmt.Errorf("unsupported npm package: %s", normalizedPackageName)
 	}
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultNpmRegistryHTTPClient()
 	}
 	if strings.TrimSpace(registryBaseURL) == "" {
 		registryBaseURL = defaultNpmRegistryMetadataURL
@@ -88,11 +119,64 @@ func fetchNpmCLIVersionOptions(ctx context.Context, packageName string, client *
 	}
 
 	var metadata npmPackageMetadata
-	if err := common.DecodeJson(io.LimitReader(response.Body, npmRegistryMetadataMaxBytes), &metadata); err != nil {
+	if err := decodeNpmPackageMetadata(response.Body, &metadata); err != nil {
 		return nil, fmt.Errorf("decode npm registry metadata for %s: %w", normalizedPackageName, err)
 	}
 
 	return buildNpmCLIVersionOptions(metadata), nil
+}
+
+func defaultNpmRegistryHTTPClient() *http.Client {
+	if client := GetHttpClient(); client != nil {
+		return client
+	}
+	return http.DefaultClient
+}
+
+func getCachedNpmCLIVersionOptions(packageName string, now time.Time) ([]NpmCLIVersionOption, bool) {
+	npmCliVersionCache.RLock()
+	entry, exists := npmCliVersionCache.items[packageName]
+	npmCliVersionCache.RUnlock()
+	if !exists || !entry.expiresAt.After(now) {
+		if exists {
+			npmCliVersionCache.Lock()
+			if current, ok := npmCliVersionCache.items[packageName]; ok && !current.expiresAt.After(now) {
+				delete(npmCliVersionCache.items, packageName)
+			}
+			npmCliVersionCache.Unlock()
+		}
+		return nil, false
+	}
+	return cloneNpmCLIVersionOptions(entry.options), true
+}
+
+func setCachedNpmCLIVersionOptions(packageName string, options []NpmCLIVersionOption, expiresAt time.Time) {
+	npmCliVersionCache.Lock()
+	npmCliVersionCache.items[packageName] = npmCliVersionCacheEntry{
+		expiresAt: expiresAt,
+		options:   cloneNpmCLIVersionOptions(options),
+	}
+	npmCliVersionCache.Unlock()
+}
+
+func cloneNpmCLIVersionOptions(options []NpmCLIVersionOption) []NpmCLIVersionOption {
+	if len(options) == 0 {
+		return []NpmCLIVersionOption{}
+	}
+	cloned := make([]NpmCLIVersionOption, len(options))
+	copy(cloned, options)
+	return cloned
+}
+
+func decodeNpmPackageMetadata(reader io.Reader, metadata *npmPackageMetadata) error {
+	data, err := io.ReadAll(io.LimitReader(reader, npmRegistryMetadataMaxBytes+1))
+	if err != nil {
+		return fmt.Errorf("read metadata: %w", err)
+	}
+	if len(data) > npmRegistryMetadataMaxBytes {
+		return fmt.Errorf("metadata exceeds maximum size of %d bytes", npmRegistryMetadataMaxBytes)
+	}
+	return common.Unmarshal(data, metadata)
 }
 
 func buildNpmCLIVersionOptions(metadata npmPackageMetadata) []NpmCLIVersionOption {

@@ -1,11 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/require"
@@ -84,6 +87,133 @@ func TestFetchNpmCLIVersionOptionsRejectsUnsupportedPackage(t *testing.T) {
 	require.Contains(t, err.Error(), "unsupported npm package")
 }
 
+func TestFetchNpmCLIVersionOptionsUsesServiceHTTPClient(t *testing.T) {
+	previousClient := httpClient
+	defer func() {
+		httpClient = previousClient
+		resetNpmCLIVersionCacheForTest()
+	}()
+	resetNpmCLIVersionCacheForTest()
+
+	called := false
+	payload, err := common.Marshal(map[string]any{
+		"dist-tags": map[string]string{"latest": "1.0.0"},
+		"versions": map[string]any{
+			"1.0.0": map[string]any{},
+		},
+	})
+	require.NoError(t, err)
+
+	httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		called = true
+		require.Equal(t, "registry.npmjs.org", request.URL.Host)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(payload)),
+			Request:    request,
+		}, nil
+	})}
+
+	options, err := FetchNpmCLIVersionOptions(context.Background(), "@openai/codex")
+	require.NoError(t, err)
+	require.True(t, called)
+	require.Equal(t, []NpmCLIVersionOption{
+		{Value: "1.0.0", Label: "1.0.0 (latest)", IsLatest: true},
+	}, options)
+}
+
+func TestFetchNpmCLIVersionOptionsCachesSuccessfulResults(t *testing.T) {
+	previousClient := httpClient
+	defer func() {
+		httpClient = previousClient
+		resetNpmCLIVersionCacheForTest()
+	}()
+	resetNpmCLIVersionCacheForTest()
+
+	calls := 0
+	httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		payload, err := common.Marshal(map[string]any{
+			"dist-tags": map[string]string{"latest": "1.0.0"},
+			"versions": map[string]any{
+				"1.0.0": map[string]any{},
+			},
+		})
+		require.NoError(t, err)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(payload)),
+			Request:    request,
+		}, nil
+	})}
+
+	firstOptions, err := FetchNpmCLIVersionOptions(context.Background(), "@openai/codex")
+	require.NoError(t, err)
+	firstOptions[0].Value = "mutated"
+	secondOptions, err := FetchNpmCLIVersionOptions(context.Background(), "@openai/codex")
+	require.NoError(t, err)
+
+	require.Equal(t, 1, calls)
+	require.Equal(t, "1.0.0", secondOptions[0].Value)
+}
+
+func TestFetchNpmCLIVersionOptionsDoesNotCacheErrors(t *testing.T) {
+	previousClient := httpClient
+	defer func() {
+		httpClient = previousClient
+		resetNpmCLIVersionCacheForTest()
+	}()
+	resetNpmCLIVersionCacheForTest()
+
+	calls := 0
+	httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("temporary registry error")
+		}
+		payload, err := common.Marshal(map[string]any{
+			"dist-tags": map[string]string{"latest": "1.0.1"},
+			"versions": map[string]any{
+				"1.0.1": map[string]any{},
+			},
+		})
+		require.NoError(t, err)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(payload)),
+			Request:    request,
+		}, nil
+	})}
+
+	_, err := FetchNpmCLIVersionOptions(context.Background(), "@openai/codex")
+	require.Error(t, err)
+	options, err := FetchNpmCLIVersionOptions(context.Background(), "@openai/codex")
+	require.NoError(t, err)
+
+	require.Equal(t, 2, calls)
+	require.Equal(t, "1.0.1", options[0].Value)
+}
+
+func TestGetCachedNpmCLIVersionOptionsExpiresEntries(t *testing.T) {
+	resetNpmCLIVersionCacheForTest()
+	defer resetNpmCLIVersionCacheForTest()
+
+	now := time.Unix(100, 0)
+	setCachedNpmCLIVersionOptions("@openai/codex", []NpmCLIVersionOption{
+		{Value: "1.0.0", Label: "1.0.0 (latest)", IsLatest: true},
+	}, now.Add(time.Second))
+
+	options, ok := getCachedNpmCLIVersionOptions("@openai/codex", now)
+	require.True(t, ok)
+	require.Equal(t, "1.0.0", options[0].Value)
+
+	_, ok = getCachedNpmCLIVersionOptions("@openai/codex", now.Add(2*time.Second))
+	require.False(t, ok)
+}
+
 func TestFetchNpmCLIVersionOptionsHandlesRegistryStatusError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -133,6 +263,18 @@ func TestFetchNpmCLIVersionOptionsBuildsRegistryRequest(t *testing.T) {
 	}, options)
 }
 
+func TestFetchNpmCLIVersionOptionsRejectsOversizedRegistryMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(bytes.Repeat([]byte(" "), npmRegistryMetadataMaxBytes+1))
+	}))
+	defer server.Close()
+
+	_, err := fetchNpmCLIVersionOptions(context.Background(), "@openai/codex", server.Client(), server.URL)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "metadata exceeds maximum size")
+}
+
 func TestFetchNpmCLIVersionOptionsPropagatesRequestError(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("network unavailable")
@@ -147,4 +289,10 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return fn(request)
+}
+
+func resetNpmCLIVersionCacheForTest() {
+	npmCliVersionCache.Lock()
+	npmCliVersionCache.items = make(map[string]npmCliVersionCacheEntry)
+	npmCliVersionCache.Unlock()
 }
