@@ -10,6 +10,90 @@ const OBFUSCATED_KEYS = [
     serialized: 'footer.new\\u0061pi.projectAttributionSuffix',
   },
 ]
+const UNTRANSLATED_SKIP_PATTERNS = [
+  /^https?:\/\//,
+  /^\//,
+  /^[{\[]/,
+  /^"/,
+  /^smtp\./,
+  /^socks5:/,
+  /^name@/,
+  /^noreply@/,
+  /^org-/,
+  /^price_/,
+  /^whsec_/,
+  /^edit_this$/,
+  /^my-status$/,
+  /^gpt-/,
+  /^checkout\./,
+  /^footer\./,
+  /^example\.com/,
+  /^AZURE_/,
+  /^AccessKey/,
+  /^API URL$/,
+  /^Client ID$/,
+  /^Client Secret$/,
+  /^OAuth Client Secret$/,
+  /^Webhook URL:?$/,
+  /^Well-Known URL$/,
+  /^Worker URL$/,
+  /^Uptime Kuma/,
+  /^Quota:$/,
+]
+const UNTRANSLATED_SKIP_VALUES = new Set([
+  'AI Proxy',
+  'AIGC2D',
+  'Anthropic',
+  'API2GPT',
+  'Baidu V2',
+  'Claude',
+  'Cloudflare',
+  'Cohere',
+  'DeepSeek',
+  'Discord',
+  'DoubaoVideo',
+  'FastGPT',
+  'Gemini',
+  'Gemini Image 4K',
+  'GitHub',
+  'Jimeng',
+  'JustSong',
+  'LingYiWanWu',
+  'LinuxDO',
+  'Midjourney',
+  'MidjourneyPlus',
+  'Midjourney-Proxy',
+  'MiniMax',
+  'Mistral',
+  'MokaAI',
+  'Moonshot',
+  'New API',
+  'New API &lt;noreply@example.com&gt;',
+  'NewAPI',
+  'OhMyGPT',
+  'Ollama',
+  'One API',
+  'OpenAI',
+  'OpenAIMax',
+  'OpenRouter',
+  'Passkey',
+  'Perplexity',
+  'QuantumNous',
+  'Replicate',
+  'SiliconFlow',
+  'Stripe',
+  'Submodel',
+  'SunoAPI',
+  'Telegram',
+  'Tencent',
+  'Vertex AI',
+  'VolcEngine',
+  'WeChat',
+  'Xinference',
+  'Xunfei',
+  'Zhipu V4',
+  'neko-api-key-tool',
+])
 
 function isPlainObject(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -81,6 +165,8 @@ function isLikelyUntranslated({ locale, baseValue, value }) {
   const s = baseValue.trim()
   if (s.length < 6) return false
   if (!/[A-Za-z]{3,}/.test(s)) return false
+  if (UNTRANSLATED_SKIP_VALUES.has(s)) return false
+  if (UNTRANSLATED_SKIP_PATTERNS.some((pattern) => pattern.test(s))) return false
 
   // For locales with non-latin scripts, equality with EN is a strong signal.
   if (locale === 'ja' || locale === 'zh') return true
@@ -169,6 +255,8 @@ async function main() {
 
     if (Object.keys(extras).length > 0) {
       await fs.writeFile(path.join(extrasDir, `${locale}.extras.json`), stableStringify(extras), 'utf8')
+    } else {
+      await fs.rm(path.join(extrasDir, `${locale}.extras.json`), { force: true })
     }
     if (Object.keys(untranslated).length > 0) {
       await fs.writeFile(
@@ -176,6 +264,8 @@ async function main() {
         stableStringify(untranslated),
         'utf8',
       )
+    } else {
+      await fs.rm(path.join(reportsDir, `${locale}.untranslated.json`), { force: true })
     }
 
     // Rewrite locale file in base order (even for en to normalize formatting)
