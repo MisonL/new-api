@@ -64,6 +64,7 @@ const HeaderProfileStrategySection = ({
   onDeleteProfile,
   onImportLegacy,
   openLibrarySignal = 0,
+  onOpenNestedModal,
 }) => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -131,12 +132,17 @@ const HeaderProfileStrategySection = ({
     setDragOverPosition('before');
   }, []);
 
+  const openLibrary = useCallback(() => {
+    onOpenNestedModal?.();
+    setLibraryVisible(true);
+  }, [onOpenNestedModal]);
+
   React.useEffect(() => {
     if (!openLibrarySignal) {
       return;
     }
-    setLibraryVisible(true);
-  }, [openLibrarySignal]);
+    openLibrary();
+  }, [openLibrary, openLibrarySignal]);
 
   const handleDragStart = useCallback((event, profileId) => {
     setDraggedProfileId(profileId);
@@ -292,7 +298,7 @@ const HeaderProfileStrategySection = ({
             <Button
               size='small'
               type={selectedCount === 0 ? 'primary' : 'tertiary'}
-              onClick={() => setLibraryVisible(true)}
+              onClick={openLibrary}
             >
               {selectedCount === 0 ? t('选择模板') : t('更换模板')}
             </Button>

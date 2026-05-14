@@ -540,66 +540,21 @@ const EditChannelModal = (props) => {
   );
   const [requestHeaderAdvancedPanelKeys, setRequestHeaderAdvancedPanelKeys] =
     useState([]);
-  const openRequestPolicyModal = (
-    focusAdvanced = false,
-    openLibrary = false,
-  ) => {
-    const activeKeys = [];
-    // Advanced entry opens panels with existing content; invalid JSON is always expanded.
-    if (focusAdvanced && !paramOverrideMeta.isEmpty) {
-      activeKeys.push('param-override-panel');
-    } else if (!paramOverrideMeta.isValid) {
-      activeKeys.push('param-override-panel');
-    }
-    if (focusAdvanced && !statusCodeMappingMeta.isEmpty) {
-      activeKeys.push('status-code-panel');
-    } else if (!statusCodeMappingMeta.isValid) {
-      activeKeys.push('status-code-panel');
-    }
-    if (focusAdvanced && hasHeaderOverrideDraft) {
-      activeKeys.push('legacy-header-panel');
-    }
-    // If users explicitly ask for advanced settings but nothing exists yet, open the first editable panel.
-    if (focusAdvanced && activeKeys.length === 0) {
-      activeKeys.push('param-override-panel');
-    }
-    setRequestPolicyAdvancedKeys(activeKeys);
-    setRequestPolicyModalVisible(true);
-    if (openLibrary) {
-      setRequestPolicyLibraryOpenSignal((value) => value + 1);
-    }
+  const requestPolicyPendingFocusRef = useRef(null);
+  const editFocusTimersRef = useRef([]);
+  const clearEditFocusTimers = () => {
+    editFocusTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    editFocusTimersRef.current = [];
   };
-  const openRequestPolicyAdvancedFromCard = () => {
-    openRequestPolicyModal(true);
-    const timers = [];
-    const schedule = (callback, delay) => {
-      const timer = window.setTimeout(callback, delay);
-      timers.push(timer);
-      return timer;
-    };
-    waitForEditFocusSection(
-      t('高级请求规则'),
-      () => {
-        focusEditSection({
-          targetName: CHANNEL_EDIT_FOCUS_TARGETS.PARAM_OVERRIDE,
-          text: t('高级请求规则'),
-          hint: t('参数覆盖在这里'),
-        });
-      },
-      schedule,
-    );
-  };
-  const openRequestHeaderAdvancedModal = () => {
-    const activeKeys = [];
-    if (hasHeaderOverrideDraft) {
-      activeKeys.push('header-override-panel');
-    }
-    setRequestHeaderAdvancedPanelKeys(activeKeys);
-    setRequestHeaderAdvancedVisible(true);
-  };
-  const toggleAdvancedSettings = (open) => {
-    setAdvancedSettingsOpen(open);
-    localStorage.setItem(ADVANCED_SETTINGS_EXPANDED_KEY, String(open));
+  const scheduleEditFocusTimer = (callback, delay) => {
+    const timer = window.setTimeout(() => {
+      editFocusTimersRef.current = editFocusTimersRef.current.filter(
+        (item) => item !== timer,
+      );
+      callback();
+    }, delay);
+    editFocusTimersRef.current.push(timer);
+    return timer;
   };
   const [viewportWidth, setViewportWidth] = useState(() => {
     if (typeof window === 'undefined') {
@@ -613,12 +568,42 @@ const EditChannelModal = (props) => {
 
   useEffect(() => {
     if (!props.visible) {
+      requestPolicyPendingFocusRef.current = null;
+      clearEditFocusTimers();
+      clearEditFocusFeedback();
       setRequestHeaderAdvancedVisible(false);
       setRequestPolicyModalVisible(false);
       setRequestPolicyAdvancedKeys([]);
       setRequestHeaderAdvancedPanelKeys([]);
     }
   }, [props.visible]);
+
+  useEffect(
+    () => () => {
+      requestPolicyPendingFocusRef.current = null;
+      clearEditFocusTimers();
+      clearEditFocusFeedback();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const focusOptions = requestPolicyPendingFocusRef.current;
+    if (!requestPolicyModalVisible || !focusOptions) {
+      return;
+    }
+
+    waitForEditFocusSection({
+      text: focusOptions.text,
+      targetName: focusOptions.targetName,
+      onReady: () => {
+        requestPolicyPendingFocusRef.current = null;
+        scheduleEditFocusTimer(() => focusEditSection(focusOptions), 80);
+      },
+      schedule: scheduleEditFocusTimer,
+    });
+  }, [requestPolicyAdvancedKeys, requestPolicyModalVisible]);
+
   const initialModelsRef = useRef([]);
   const initialModelMappingRef = useRef('');
   const initialStatusCodeMappingRef = useRef('');
@@ -742,6 +727,38 @@ const EditChannelModal = (props) => {
       }
     },
   });
+
+  useEffect(() => {
+    if (
+      requestHeaderAdvancedVisible ||
+      statusCodeMappingEditorVisible ||
+      paramOverrideEditorVisible ||
+      headerProfileEditorVisible ||
+      modelModalVisible ||
+      modelMappingValueModalVisible ||
+      ollamaModalVisible ||
+      codexOAuthModalVisible ||
+      isModalVisible ||
+      keyDisplayState.showModal ||
+      show2FAVerifyModal ||
+      statusCodeRiskConfirmVisible
+    ) {
+      clearEditFocusFeedback();
+    }
+  }, [
+    codexOAuthModalVisible,
+    headerProfileEditorVisible,
+    isModalVisible,
+    keyDisplayState.showModal,
+    modelMappingValueModalVisible,
+    modelModalVisible,
+    ollamaModalVisible,
+    paramOverrideEditorVisible,
+    requestHeaderAdvancedVisible,
+    show2FAVerifyModal,
+    statusCodeMappingEditorVisible,
+    statusCodeRiskConfirmVisible,
+  ]);
 
   // 重置密钥显示状态
   const resetKeyDisplayState = () => {
@@ -2422,6 +2439,55 @@ const EditChannelModal = (props) => {
     !paramOverrideMeta.isEmpty ||
     !statusCodeMappingMeta.isEmpty ||
     hasHeaderOverrideDraft;
+  const openRequestPolicyModal = (
+    focusAdvanced = false,
+    openLibrary = false,
+  ) => {
+    const activeKeys = [];
+    // Advanced entry opens panels with existing content; invalid JSON is always expanded.
+    if (focusAdvanced && !paramOverrideMeta.isEmpty) {
+      activeKeys.push('param-override-panel');
+    } else if (!paramOverrideMeta.isValid) {
+      activeKeys.push('param-override-panel');
+    }
+    if (focusAdvanced && !statusCodeMappingMeta.isEmpty) {
+      activeKeys.push('status-code-panel');
+    } else if (!statusCodeMappingMeta.isValid) {
+      activeKeys.push('status-code-panel');
+    }
+    if (focusAdvanced && hasHeaderOverrideDraft) {
+      activeKeys.push('legacy-header-panel');
+    }
+    // If users explicitly ask for advanced settings but nothing exists yet, open the first editable panel.
+    if (focusAdvanced && activeKeys.length === 0) {
+      activeKeys.push('param-override-panel');
+    }
+    setRequestPolicyAdvancedKeys(activeKeys);
+    setRequestPolicyModalVisible(true);
+    if (openLibrary) {
+      setRequestPolicyLibraryOpenSignal((value) => value + 1);
+    }
+  };
+  const openRequestPolicyAdvancedFromCard = () => {
+    requestPolicyPendingFocusRef.current = {
+      targetName: CHANNEL_EDIT_FOCUS_TARGETS.PARAM_OVERRIDE,
+      text: t('高级请求规则'),
+      hint: t('参数覆盖在这里'),
+    };
+    openRequestPolicyModal(true);
+  };
+  const openRequestHeaderAdvancedModal = () => {
+    const activeKeys = [];
+    if (hasHeaderOverrideDraft) {
+      activeKeys.push('header-override-panel');
+    }
+    setRequestHeaderAdvancedPanelKeys(activeKeys);
+    setRequestHeaderAdvancedVisible(true);
+  };
+  const toggleAdvancedSettings = (open) => {
+    setAdvancedSettingsOpen(open);
+    localStorage.setItem(ADVANCED_SETTINGS_EXPANDED_KEY, String(open));
+  };
   const requestPolicyOverviewText = headerProfileStrategy.enabled
     ? headerProfilePolicyMeta.summary
     : hasAdvancedRequestPolicy
@@ -3036,6 +3102,7 @@ const EditChannelModal = (props) => {
                           onDeleteProfile={handleDeleteHeaderProfile}
                           onImportLegacy={handleImportLegacyHeaderOverride}
                           openLibrarySignal={requestPolicyLibraryOpenSignal}
+                          onOpenNestedModal={clearEditFocusFeedback}
                         />
                       </div>
 
@@ -5455,7 +5522,7 @@ const EDIT_FOCUS_HIGHLIGHT_CLASS = 'channel-edit-focus-highlight';
 const EDIT_FOCUS_OVERLAY_CLASS = 'channel-edit-focus-overlay';
 const EDIT_FOCUS_OVERLAY_INSIDE_LABEL_CLASS =
   'channel-edit-focus-overlay-label-inside';
-const EDIT_FOCUS_VISIBLE_MS = 3600;
+const EDIT_FOCUS_VISIBLE_MS = 2000;
 
 const clearEditFocusOverlay = () => {
   if (typeof window === 'undefined') {
@@ -5464,6 +5531,23 @@ const clearEditFocusOverlay = () => {
   if (typeof window.__channelEditFocusOverlayCleanup === 'function') {
     window.__channelEditFocusOverlayCleanup();
   }
+};
+
+const clearEditFocusFeedback = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  clearEditFocusOverlay();
+  document
+    .querySelectorAll(`.${EDIT_FOCUS_HIGHLIGHT_CLASS}`)
+    .forEach((element) => {
+      if (element.channelEditFocusTimer) {
+        window.clearTimeout(element.channelEditFocusTimer);
+        element.channelEditFocusTimer = null;
+      }
+      element.classList.remove(EDIT_FOCUS_HIGHLIGHT_CLASS);
+      delete element.dataset.channelEditFocusHint;
+    });
 };
 
 const isVisibleEditFocusElement = (element) => {
@@ -5598,16 +5682,29 @@ const focusEditSection = ({ text, targetName, hint }) => {
   }
 };
 
-const waitForEditFocusSection = (text, callback, schedule, attempts = 12) => {
-  if (findEditFocusSection(text)) {
-    callback();
+const waitForEditFocusSection = ({
+  text,
+  targetName,
+  onReady,
+  schedule,
+  attempts = 12,
+}) => {
+  if (findEditFocusSection(text, targetName)) {
+    onReady();
     return;
   }
   if (attempts <= 0) {
     return;
   }
   schedule(
-    () => waitForEditFocusSection(text, callback, schedule, attempts - 1),
+    () =>
+      waitForEditFocusSection({
+        text,
+        targetName,
+        onReady,
+        schedule,
+        attempts: attempts - 1,
+      }),
     120,
   );
 };
@@ -5648,14 +5745,14 @@ const ChannelEditFocusController = ({
     };
     const openRequestPolicyWhenReady = (focusAdvanced, focusOptions) => {
       actionsRef.current.onOpenAdvanced();
-      waitForEditFocusSection(
-        t('上游请求策略'),
-        () => {
+      waitForEditFocusSection({
+        text: t('上游请求策略'),
+        onReady: () => {
           actionsRef.current.onOpenRequestPolicy(focusAdvanced);
           schedule(() => focusEditSection(focusOptions), 220);
         },
         schedule,
-      );
+      });
     };
     if (target === MODEL_TEST_EDIT_TARGETS.HEADER_CONFIG) {
       openRequestPolicyWhenReady(false, {
