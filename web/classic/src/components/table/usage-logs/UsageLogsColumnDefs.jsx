@@ -124,12 +124,17 @@ function normalizeDisplayValue(value) {
   return String(value).trim();
 }
 
-function addChannelInfoRow(rows, label, value, className = '') {
+function addChannelInfoRow(rows, label, value, options = {}) {
   const normalized = normalizeDisplayValue(value);
   if (!normalized) {
     return;
   }
-  rows.push({ label, value: normalized, className });
+  rows.push({
+    label,
+    value: normalized,
+    className: options.className || '',
+    isCode: Boolean(options.isCode),
+  });
 }
 
 function renderChannelInfoSection({ key, title, rows }) {
@@ -150,17 +155,19 @@ function renderChannelInfoSection({ key, title, rows }) {
         </span>
       </div>
       <div className='usage-log-channel-tooltip-row-grid'>
-        {rows.map(({ label, value, className }) => (
+        {rows.map(({ label, value, className, isCode }) => (
           <div
             className='usage-log-channel-tooltip-row'
             key={`${key}-${label}`}
           >
             <span className='usage-log-channel-tooltip-label'>{label}</span>
-            {String(className || '')
-              .split(/\s+/)
-              .includes('is-code') ? (
+            {isCode ? (
               <code
-                className={['usage-log-channel-tooltip-value', className]
+                className={[
+                  'usage-log-channel-tooltip-value',
+                  'is-code',
+                  className,
+                ]
                   .filter(Boolean)
                   .join(' ')}
               >
@@ -226,10 +233,18 @@ function renderChannelInfoTooltip(record, options, t) {
   if (modelsCount > 0) {
     addChannelInfoRow(basicRows, t('模型'), `${modelsCount}`);
   }
-  addChannelInfoRow(routeRows, t('API地址'), detail.base_url, 'is-code');
-  addChannelInfoRow(routeRows, t('默认测试模型'), detail.test_model, 'is-code');
-  addChannelInfoRow(routeRows, t('本次路由'), routeText, 'is-code');
-  addChannelInfoRow(routeRows, t('请求路径'), other?.request_path, 'is-code');
+  addChannelInfoRow(routeRows, t('API地址'), detail.base_url, {
+    isCode: true,
+  });
+  addChannelInfoRow(routeRows, t('默认测试模型'), detail.test_model, {
+    isCode: true,
+  });
+  addChannelInfoRow(routeRows, t('本次路由'), routeText, {
+    isCode: true,
+  });
+  addChannelInfoRow(routeRows, t('请求路径'), other?.request_path, {
+    isCode: true,
+  });
   addChannelInfoRow(
     policyRows,
     t('请求头策略'),
@@ -237,13 +252,12 @@ function renderChannelInfoTooltip(record, options, t) {
   );
   addChannelInfoRow(policyRows, t('请求头模板'), policy?.header_profile_id);
   addChannelInfoRow(policyRows, t('UA 策略'), policy?.ua_strategy_mode);
-  addChannelInfoRow(policyRows, t('已选 UA'), userAgent, 'is-code');
-  addChannelInfoRow(
-    policyRows,
-    t('应用请求头'),
-    headerKeys.join(', '),
-    'is-code',
-  );
+  addChannelInfoRow(policyRows, t('已选 UA'), userAgent, {
+    isCode: true,
+  });
+  addChannelInfoRow(policyRows, t('应用请求头'), headerKeys.join(', '), {
+    isCode: true,
+  });
   if (detail.response_time) {
     addChannelInfoRow(
       dispatchRows,

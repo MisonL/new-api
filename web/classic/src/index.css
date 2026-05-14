@@ -826,7 +826,7 @@ body.sidebar-resizing * {
   box-sizing: border-box;
   width: max-content;
   max-width: 100%;
-  max-height: min(360px, calc(100vh - 96px));
+  max-height: min(520px, calc(100vh - 96px));
   flex-direction: column;
   gap: 8px;
   overflow: auto;
