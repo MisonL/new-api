@@ -822,11 +822,18 @@ body.sidebar-resizing * {
 }
 
 .usage-log-channel-tooltip {
-  width: 100%;
-  max-height: min(640px, calc(100vh - 96px));
-  padding-right: 2px;
-  overflow-y: auto;
+  display: flex;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 100%;
+  max-height: min(360px, calc(100vh - 96px));
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
   color: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
   overscroll-behavior: contain;
 }
 
@@ -874,49 +881,112 @@ body.sidebar-resizing * {
   background: transparent;
 }
 
-.usage-log-channel-tooltip-title {
+.usage-log-channel-tooltip-header {
   display: flex;
+  min-width: 0;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding-bottom: 8px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid currentColor;
-  border-bottom-color: color-mix(in srgb, currentColor 22%, transparent);
+  gap: 6px;
 }
 
-.usage-log-channel-tooltip-grid {
+.usage-log-channel-tooltip-name {
+  min-width: 0;
+  max-width: 280px;
+  font-size: 12px;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-log-channel-tooltip-sections {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  row-gap: 3px;
-  align-items: start;
+  gap: 8px;
+}
+
+.usage-log-channel-tooltip-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usage-log-channel-tooltip-section-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.usage-log-channel-tooltip-label-tag-policy {
+  background: var(--semi-color-warning-light-default);
+  color: var(--semi-color-warning);
+}
+
+.usage-log-channel-tooltip-label-tag-route {
+  background: var(--semi-color-success-light-default);
+  color: var(--semi-color-success);
+}
+
+.usage-log-channel-tooltip-label-tag-dispatch {
+  background: var(--semi-color-secondary-light-default);
+  color: var(--semi-color-secondary);
+}
+
+.usage-log-channel-tooltip-label-tag-channel {
+  flex: 0 0 auto;
+}
+
+.usage-log-channel-tooltip-row-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 12px;
+  row-gap: 5px;
+}
+
+.usage-log-channel-tooltip-row {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .usage-log-channel-tooltip-label {
-  opacity: 0.72;
+  color: var(--semi-color-text-2);
+  font-size: 11px;
+  line-height: 16px;
   white-space: nowrap;
 }
 
 .usage-log-channel-tooltip-value {
   min-width: 0;
-  margin-bottom: 5px;
+  color: var(--semi-color-text-0);
+  font-size: 12px;
+  line-height: 18px;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .usage-log-channel-tooltip-value.is-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
   font-size: 12px;
-  line-height: 1.45;
-  opacity: 0.92;
+  line-height: 18px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
 }
 
 .usage-log-channel-tooltip-affinity {
-  padding-top: 8px;
-  margin-top: 8px;
+  padding-top: 6px;
   border-top: 1px dashed currentColor;
   border-top-color: color-mix(in srgb, currentColor 22%, transparent);
+}
+
+@media (max-width: 640px) {
+  .usage-log-channel-tooltip-row-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .usage-logs-table .semi-table-expanded-row > .semi-table-row-cell {
