@@ -44,9 +44,7 @@ const DROID_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Stainless-Runtime-Version',
 ]
 
-const GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'X-Goog-Api-Client',
-]
+const GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS = ['X-Goog-Api-Client']
 
 function buildPassHeadersTemplate(headers: string[]) {
   return {

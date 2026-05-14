@@ -180,16 +180,17 @@ export function RuleEditorDialog(props: Props) {
       nextValue =
         mode === 'append'
           ? appendParamOverrideTemplatePayload(currentValue, template.payload)
-          : stringifyParamOverrideTemplatePayload(cloneTemplate(template.payload))
+          : stringifyParamOverrideTemplatePayload(
+              cloneTemplate(template.payload)
+            )
     } catch {
       toast.error(t('Invalid JSON in parameter override template'))
       return
     }
-    form.setValue(
-      'param_override_template_json',
-      nextValue,
-      { shouldDirty: true, shouldTouch: true }
-    )
+    form.setValue('param_override_template_json', nextValue, {
+      shouldDirty: true,
+      shouldTouch: true,
+    })
   }
 
   const handleSave = (values: RuleFormValues) => {
