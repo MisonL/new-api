@@ -4,12 +4,12 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"sync/atomic"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sort"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 

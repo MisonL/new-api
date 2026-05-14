@@ -12,13 +12,13 @@ func TestClearPayloadAuditFieldsByFilterRemovesOnlySelectedPayloadFields(t *test
 	truncateTables(t)
 
 	requestAndResponse := common.MapToJsonStr(map[string]any{
-		"request_content":          `{"input":"hello"}`,
-		"request_content_type":     "application/json",
-		"request_content_bytes":    17,
+		"request_content":           `{"input":"hello"}`,
+		"request_content_type":      "application/json",
+		"request_content_bytes":     17,
 		"request_content_truncated": true,
-		"response_content":         `{"output":"world"}`,
-		"response_content_type":    "application/json",
-		"response_content_bytes":   18,
+		"response_content":          `{"output":"world"}`,
+		"response_content_type":     "application/json",
+		"response_content_bytes":    18,
 	})
 	otherUserPayload := common.MapToJsonStr(map[string]any{
 		"request_content": `{"input":"keep"}`,
