@@ -132,6 +132,56 @@ function addChannelInfoRow(rows, label, value, className = '') {
   rows.push({ label, value: normalized, className });
 }
 
+function renderChannelInfoSection({ key, title, rows }) {
+  if (!rows.length) {
+    return null;
+  }
+
+  return (
+    <div
+      key={key}
+      className={`usage-log-channel-tooltip-section usage-log-channel-tooltip-section-${key}`}
+    >
+      <div className='usage-log-channel-tooltip-section-title'>
+        <span
+          className={`usage-log-header-audit-label-tag usage-log-channel-tooltip-label-tag usage-log-channel-tooltip-label-tag-${key}`}
+        >
+          {title}
+        </span>
+      </div>
+      <div className='usage-log-channel-tooltip-row-grid'>
+        {rows.map(({ label, value, className }) => (
+          <div
+            className='usage-log-channel-tooltip-row'
+            key={`${key}-${label}`}
+          >
+            <span className='usage-log-channel-tooltip-label'>{label}</span>
+            {String(className || '')
+              .split(/\s+/)
+              .includes('is-code') ? (
+              <code
+                className={['usage-log-channel-tooltip-value', className]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                {value}
+              </code>
+            ) : (
+              <span
+                className={['usage-log-channel-tooltip-value', className]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                {value}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function renderChannelInfoTooltip(record, options, t) {
   const detail = record?.channel_detail || {};
   const other = getLogOther(record?.other);
@@ -157,75 +207,89 @@ function renderChannelInfoTooltip(record, options, t) {
       : '';
   const userAgent = getAppliedUserAgent(policy);
   const headerKeys = getAppliedHeaderKeys(policy);
-  const rows = [];
+  const basicRows = [];
+  const routeRows = [];
+  const policyRows = [];
+  const dispatchRows = [];
 
-  addChannelInfoRow(rows, `${t('渠道')} ID`, record?.channel || detail.id);
-  addChannelInfoRow(rows, t('名称'), channelName);
-  addChannelInfoRow(rows, t('类型'), channelType);
+  addChannelInfoRow(basicRows, `${t('渠道')} ID`, record?.channel || detail.id);
+  addChannelInfoRow(basicRows, t('类型'), channelType);
   if (detail.status !== undefined && detail.status !== null) {
-    addChannelInfoRow(rows, t('状态'), formatChannelStatus(detail.status, t));
+    addChannelInfoRow(
+      basicRows,
+      t('状态'),
+      formatChannelStatus(detail.status, t),
+    );
   }
-  addChannelInfoRow(rows, t('API地址'), detail.base_url, 'is-code');
-  addChannelInfoRow(rows, t('标签'), detail.tag);
-  addChannelInfoRow(rows, t('分组'), detail.group);
+  addChannelInfoRow(basicRows, t('标签'), detail.tag);
+  addChannelInfoRow(basicRows, t('分组'), detail.group);
   if (modelsCount > 0) {
-    addChannelInfoRow(rows, t('模型'), `${modelsCount}`);
+    addChannelInfoRow(basicRows, t('模型'), `${modelsCount}`);
   }
-  addChannelInfoRow(rows, t('默认测试模型'), detail.test_model, 'is-code');
-  if (detail.response_time) {
-    addChannelInfoRow(rows, t('响应时间'), `${detail.response_time} ms`);
-  }
-  addChannelInfoRow(rows, t('优先级'), detail.priority);
-  addChannelInfoRow(rows, t('权重'), detail.weight);
-  if (detail.auto_ban !== undefined && detail.auto_ban !== null) {
-    addChannelInfoRow(rows, t('自动禁用'), detail.auto_ban ? t('是') : t('否'));
-  }
-  addChannelInfoRow(rows, t('密钥'), multiKeyText);
-  addChannelInfoRow(rows, t('Key'), selectedKeyText);
-  addChannelInfoRow(rows, t('本次路由'), routeText, 'is-code');
-  addChannelInfoRow(rows, t('请求路径'), other?.request_path, 'is-code');
+  addChannelInfoRow(routeRows, t('API地址'), detail.base_url, 'is-code');
+  addChannelInfoRow(routeRows, t('默认测试模型'), detail.test_model, 'is-code');
+  addChannelInfoRow(routeRows, t('本次路由'), routeText, 'is-code');
+  addChannelInfoRow(routeRows, t('请求路径'), other?.request_path, 'is-code');
   addChannelInfoRow(
-    rows,
+    policyRows,
     t('请求头策略'),
     formatRequestHeaderPolicyMode(policy?.mode, t),
   );
-  addChannelInfoRow(rows, t('请求头模板'), policy?.header_profile_id);
-  addChannelInfoRow(rows, t('UA 策略'), policy?.ua_strategy_mode);
-  addChannelInfoRow(rows, t('已选 UA'), userAgent, 'is-code');
-  addChannelInfoRow(rows, t('应用请求头'), headerKeys.join(', '), 'is-code');
+  addChannelInfoRow(policyRows, t('请求头模板'), policy?.header_profile_id);
+  addChannelInfoRow(policyRows, t('UA 策略'), policy?.ua_strategy_mode);
+  addChannelInfoRow(policyRows, t('已选 UA'), userAgent, 'is-code');
+  addChannelInfoRow(
+    policyRows,
+    t('应用请求头'),
+    headerKeys.join(', '),
+    'is-code',
+  );
+  if (detail.response_time) {
+    addChannelInfoRow(
+      dispatchRows,
+      t('响应时间'),
+      `${detail.response_time} ms`,
+    );
+  }
+  addChannelInfoRow(dispatchRows, t('优先级'), detail.priority);
+  addChannelInfoRow(dispatchRows, t('权重'), detail.weight);
+  if (detail.auto_ban !== undefined && detail.auto_ban !== null) {
+    addChannelInfoRow(
+      dispatchRows,
+      t('自动禁用'),
+      detail.auto_ban ? t('是') : t('否'),
+    );
+  }
+  addChannelInfoRow(dispatchRows, t('密钥'), multiKeyText);
+  addChannelInfoRow(dispatchRows, t('Key'), selectedKeyText);
 
-  if (!rows.length) {
+  const sections = [
+    { key: 'basic', title: t('基础'), rows: basicRows },
+    { key: 'route', title: t('路由'), rows: routeRows },
+    { key: 'policy', title: t('策略'), rows: policyRows },
+    { key: 'dispatch', title: t('调度'), rows: dispatchRows },
+  ].filter((section) => section.rows.length);
+
+  if (!sections.length) {
     return channelName;
   }
 
   return (
     <div className='usage-log-channel-tooltip'>
-      <div className='usage-log-channel-tooltip-title'>
-        <Typography.Text strong>{t('渠道信息')}</Typography.Text>
-        {detail.type_name ? (
-          <Tag color='blue' shape='circle' size='small'>
-            {detail.type_name}
-          </Tag>
-        ) : null}
+      <div className='usage-log-channel-tooltip-header'>
+        <span className='usage-log-header-audit-label-tag usage-log-channel-tooltip-label-tag-channel'>
+          {t('渠道信息')}
+        </span>
+        <Typography.Text
+          strong
+          className='usage-log-channel-tooltip-name'
+          title={channelName}
+        >
+          {channelName}
+        </Typography.Text>
       </div>
-      <div className='usage-log-channel-tooltip-grid'>
-        {rows.map(({ label, value, className }) => (
-          <React.Fragment key={label}>
-            <Typography.Text
-              type='tertiary'
-              className='usage-log-channel-tooltip-label'
-            >
-              {label}
-            </Typography.Text>
-            <Typography.Text
-              className={['usage-log-channel-tooltip-value', className]
-                .filter(Boolean)
-                .join(' ')}
-            >
-              {value}
-            </Typography.Text>
-          </React.Fragment>
-        ))}
+      <div className='usage-log-channel-tooltip-sections'>
+        {sections.map(renderChannelInfoSection)}
       </div>
       {options?.affinity ? (
         <div className='usage-log-channel-tooltip-affinity'>
@@ -873,7 +937,7 @@ export const getLogsColumns = ({
                   },
                   t,
                 )}
-                position='topLeft'
+                position='top'
                 showArrow
               >
                 <span>
