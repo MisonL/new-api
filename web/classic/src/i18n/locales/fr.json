@@ -3008,6 +3008,9 @@
     "主 API 请求始终应用请求头策略；辅助请求可按渠道关闭，用于排查模型测试、同步、余额查询等路径。": "Les requêtes API principales appliquent toujours la politique d'en-têtes. Les requêtes auxiliaires peuvent être désactivées par canal pour diagnostiquer les tests de modèle, la synchronisation, la vérification du solde et les chemins similaires.",
     "全局辅助请求头策略已关闭，本渠道设置暂不生效；主 API 请求仍会应用上方请求头策略。": "La politique globale des en-têtes auxiliaires est désactivée ; ce réglage de canal est donc inactif. Les requêtes API principales appliquent toujours la politique ci-dessus.",
     "辅助请求": "Requêtes auxiliaires",
+    "辅助请求说明": "Aide sur les requêtes auxiliaires",
+    "开启后，模型测试、模型同步、余额查询等辅助请求也会套用当前客户端模板。关闭后，仅主 API 请求套用模板。该设置只统一请求头特征，不保证隐藏中转链路。": "Une fois activé, les requêtes auxiliaires comme les tests de modèle, la synchronisation et la vérification du solde utilisent aussi le modèle client actuel. Une fois désactivé, seules les requêtes API principales utilisent le modèle. Ce réglage aligne seulement les en-têtes et ne garantit pas que la chaîne de relais soit masquée.",
+    "全局辅助请求头策略已关闭，本渠道开关暂不生效。主 API 请求仍会套用当前客户端模板。": "La politique globale des en-têtes auxiliaires est désactivée ; ce commutateur de canal est donc inactif. Les requêtes API principales utilisent toujours le modèle client actuel.",
     "已应用": "Appliqué",
     "不应用": "Non appliqué",
     "全局已关闭": "Désactivé globalement",
@@ -3708,7 +3711,8 @@
     "当前页暂无可统计收益": "Aucun gain mesurable sur cette page",
     "当前筛选条件暂无可统计收益": "Aucun gain mesurable pour les filtres actuels",
     "加载邀请记录失败": "Échec du chargement des invitations",
-    "暂无邀请记录": "Aucune invitation"
+    "暂无邀请记录": "Aucune invitation",
+    "再次点击可取消选择": "Cliquez à nouveau pour désélectionner"
   },
   "启用 Responses 流启动恢复": "Enable responses stream startup recovery",
   "仅在 /v1/responses 流式请求首包前生效，用于短时故障恢复。": "S'applique uniquement avant le premier payload des requêtes en streaming /v1/responses pour la récupération après une panne courte ; vous devez aussi l'activer sur chaque canal.",

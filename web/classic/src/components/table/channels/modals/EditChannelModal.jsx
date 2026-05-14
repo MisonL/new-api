@@ -84,6 +84,7 @@ import {
   buildProfileItems,
   buildSelectedProfileItems,
   createLegacyHeaderProfileDraft,
+  disableEmptyHeaderProfileStrategy,
   getHeaderProfileStrategyFromSettings,
   mergeChannelSubmitFormValues,
   removeEquivalentVersionedProfileIds,
@@ -933,6 +934,21 @@ const EditChannelModal = (props) => {
 
   const handleClearSelectedHeaderProfiles = () => {
     applyHeaderProfileStrategy(null);
+  };
+
+  const closeRequestPolicyModal = () => {
+    const currentStrategy = getHeaderProfileStrategyFromSettings(
+      inputs.settings,
+    );
+    const normalizedStrategy =
+      disableEmptyHeaderProfileStrategy(currentStrategy);
+    if (
+      currentStrategy?.enabled === true &&
+      normalizedStrategy?.enabled === false
+    ) {
+      applyHeaderProfileStrategy(normalizedStrategy);
+    }
+    setRequestPolicyModalVisible(false);
   };
 
   const handleReorderSelectedHeaderProfiles = (
@@ -2190,10 +2206,10 @@ const EditChannelModal = (props) => {
       }
     }
 
-    const currentHeaderProfileStrategy = getHeaderProfileStrategyFromSettings(
-      localInputs.settings,
+    const currentHeaderProfileStrategy = disableEmptyHeaderProfileStrategy(
+      getHeaderProfileStrategyFromSettings(localInputs.settings),
     );
-    if (currentHeaderProfileStrategy?.enabled) {
+    if (currentHeaderProfileStrategy) {
       localInputs = {
         ...localInputs,
         ...applyHeaderProfileStrategyToChannelInputs({
@@ -2943,7 +2959,7 @@ const EditChannelModal = (props) => {
                         : 'min(960px, calc(100vw - 24px))'
                     }
                     style={isMobile ? { margin: '8px auto' } : undefined}
-                    onCancel={() => setRequestPolicyModalVisible(false)}
+                    onCancel={closeRequestPolicyModal}
                     bodyStyle={{
                       maxHeight: isMobile ? 'calc(100vh - 152px)' : '72vh',
                       overflowY: 'auto',
@@ -2952,9 +2968,7 @@ const EditChannelModal = (props) => {
                       paddingTop: isMobile ? 8 : 12,
                     }}
                     footer={
-                      <Button
-                        onClick={() => setRequestPolicyModalVisible(false)}
-                      >
+                      <Button onClick={closeRequestPolicyModal}>
                         {t('完成')}
                       </Button>
                     }

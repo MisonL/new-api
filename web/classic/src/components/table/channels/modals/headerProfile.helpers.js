@@ -215,6 +215,9 @@ export function toggleSelectedProfile({
   }
 
   if (normalizedStrategy === 'fixed') {
+    if (currentSelectedProfileIds.includes(currentProfileId)) {
+      return [];
+    }
     return [currentProfileId];
   }
 
@@ -331,6 +334,27 @@ export function getHeaderProfileStrategyFromSettings(settingsText) {
           .map(normalizeProfile)
           .filter((profile) => profile.id)
       : [],
+  };
+}
+
+export function disableEmptyHeaderProfileStrategy(strategy) {
+  if (!strategy || typeof strategy !== 'object') {
+    return strategy || null;
+  }
+  const selectedProfileIds = normalizeSelectedProfileIds(
+    strategy.selectedProfileIds || strategy.selected_profile_ids,
+  );
+  if (strategy.enabled !== true || selectedProfileIds.length > 0) {
+    return {
+      ...strategy,
+      selectedProfileIds,
+    };
+  }
+  return {
+    ...strategy,
+    enabled: false,
+    selectedProfileIds: [],
+    profiles: [],
   };
 }
 

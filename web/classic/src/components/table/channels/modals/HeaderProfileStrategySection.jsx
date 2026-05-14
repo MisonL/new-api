@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Button,
   Modal,
+  Popover,
   Select,
   Switch,
   Tag,
@@ -81,6 +82,13 @@ const HeaderProfileStrategySection = ({
       )
     : t(
         '全局辅助请求头策略已关闭，本渠道设置暂不生效；主 API 请求仍会应用上方请求头策略。',
+      );
+  const auxiliaryHelpText = auxiliaryPolicyGlobalEnabled
+    ? t(
+        '开启后，模型测试、模型同步、余额查询等辅助请求也会套用当前客户端模板。关闭后，仅主 API 请求套用模板。该设置只统一请求头特征，不保证隐藏中转链路。',
+      )
+    : t(
+        '全局辅助请求头策略已关闭，本渠道开关暂不生效。主 API 请求仍会套用当前客户端模板。',
       );
   const modeOptions = useMemo(
     () => [
@@ -493,9 +501,32 @@ const HeaderProfileStrategySection = ({
             </Text>
           </div>
           <div className='flex items-center gap-2 shrink-0'>
-            <Text type='tertiary' size='small'>
-              {t('辅助请求')}
-            </Text>
+            <div className='flex items-center gap-1'>
+              <Text type='tertiary' size='small'>
+                {t('辅助请求')}
+              </Text>
+              <Popover
+                content={
+                  <div className='p-2 max-w-[360px] text-[var(--semi-color-text-2)] text-sm'>
+                    {auxiliaryHelpText}
+                  </div>
+                }
+                trigger={isMobile ? 'click' : 'hover'}
+                position='topRight'
+              >
+                <Button
+                  size='small'
+                  type='tertiary'
+                  theme='borderless'
+                  className='!px-1 !h-5'
+                  aria-label={t('辅助请求说明')}
+                >
+                  <Tag color='grey' size='small'>
+                    ?
+                  </Tag>
+                </Button>
+              </Popover>
+            </div>
             <Switch
               size='small'
               checked={auxiliaryPolicyEnabled}

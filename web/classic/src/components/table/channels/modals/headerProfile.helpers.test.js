@@ -27,6 +27,7 @@ import {
   buildProfileItems,
   buildSelectedProfileItems,
   createLegacyHeaderProfileDraft,
+  disableEmptyHeaderProfileStrategy,
   getHeaderProfileStrategyFromSettings,
   mergeChannelSubmitFormValues,
   normalizeHeaderProfileStrategy,
@@ -278,6 +279,16 @@ test('toggleSelectedProfile replaces selection in fixed mode', () => {
   assert.deepEqual(result, ['claude-code']);
 });
 
+test('toggleSelectedProfile deselects current profile in fixed mode', () => {
+  const result = toggleSelectedProfile({
+    strategy: 'fixed',
+    selectedProfileIds: ['codex-cli@0.130.0'],
+    profileId: 'codex-cli@0.130.0',
+  });
+
+  assert.deepEqual(result, []);
+});
+
 test('toggleSelectedProfile toggles multiple items in round_robin mode', () => {
   const added = toggleSelectedProfile({
     strategy: 'round_robin',
@@ -444,6 +455,55 @@ test('buildHeaderProfileStrategySettings writes and removes header_profile_strat
   assert.deepEqual(JSON.parse(removed), {
     azure_responses_version: 'preview',
   });
+});
+
+test('disableEmptyHeaderProfileStrategy turns enabled empty selections off', () => {
+  assert.deepEqual(
+    disableEmptyHeaderProfileStrategy({
+      enabled: true,
+      mode: 'fixed',
+      selectedProfileIds: [],
+    }),
+    {
+      enabled: false,
+      mode: 'fixed',
+      selectedProfileIds: [],
+      profiles: [],
+    },
+  );
+
+  assert.deepEqual(
+    disableEmptyHeaderProfileStrategy({
+      enabled: true,
+      mode: 'round_robin',
+      selected_profile_ids: [''],
+      profiles: [{ id: 'stale-profile' }],
+    }),
+    {
+      enabled: false,
+      mode: 'round_robin',
+      selected_profile_ids: [''],
+      selectedProfileIds: [],
+      profiles: [],
+    },
+  );
+});
+
+test('disableEmptyHeaderProfileStrategy keeps enabled selections intact', () => {
+  assert.deepEqual(
+    disableEmptyHeaderProfileStrategy({
+      enabled: true,
+      mode: 'fixed',
+      selectedProfileIds: ['codex-cli'],
+      profiles: [{ id: 'codex-cli' }],
+    }),
+    {
+      enabled: true,
+      mode: 'fixed',
+      selectedProfileIds: ['codex-cli'],
+      profiles: [{ id: 'codex-cli' }],
+    },
+  );
 });
 
 test('buildHeaderProfileStrategySettings omits passthrough metadata for Codex profile', () => {

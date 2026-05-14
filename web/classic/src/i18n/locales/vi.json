@@ -3164,7 +3164,6 @@
     "表格视图": "Chế độ xem bảng",
     "被封禁": "Bị cấm",
     "被禁用": "Bị vô hiệu hóa",
-    "覆盖": "Ghi đè",
     "覆盖原模型": "Ghi đè mô hình gốc",
     "覆盖模式": "Chế độ ghi đè",
     "覆盖模式：将完全替换现有的所有密钥": "Chế độ ghi đè: sẽ thay thế hoàn toàn tất cả các khóa hiện có",
@@ -3381,6 +3380,9 @@
     "主 API 请求始终应用请求头策略；辅助请求可按渠道关闭，用于排查模型测试、同步、余额查询等路径。": "Yêu cầu API chính luôn áp dụng chiến lược header. Yêu cầu phụ có thể tắt theo từng kênh để chẩn đoán kiểm thử mô hình, đồng bộ, kiểm tra số dư và các đường dẫn tương tự.",
     "全局辅助请求头策略已关闭，本渠道设置暂不生效；主 API 请求仍会应用上方请求头策略。": "Chiến lược header cho yêu cầu phụ toàn cục đã tắt, nên thiết lập kênh này tạm thời không có hiệu lực. Yêu cầu API chính vẫn áp dụng chiến lược header phía trên.",
     "辅助请求": "Yêu cầu phụ",
+    "辅助请求说明": "Trợ giúp về yêu cầu phụ",
+    "开启后，模型测试、模型同步、余额查询等辅助请求也会套用当前客户端模板。关闭后，仅主 API 请求套用模板。该设置只统一请求头特征，不保证隐藏中转链路。": "Khi bật, các yêu cầu phụ như kiểm thử mô hình, đồng bộ mô hình và kiểm tra số dư cũng dùng mẫu client hiện tại. Khi tắt, chỉ yêu cầu API chính dùng mẫu này. Thiết lập này chỉ đồng nhất đặc điểm header và không đảm bảo che giấu chuỗi chuyển tiếp.",
+    "全局辅助请求头策略已关闭，本渠道开关暂不生效。主 API 请求仍会套用当前客户端模板。": "Chiến lược header cho yêu cầu phụ toàn cục đã tắt, nên công tắc kênh này tạm thời không có hiệu lực. Yêu cầu API chính vẫn dùng mẫu client hiện tại.",
     "已应用": "Đã áp dụng",
     "不应用": "Không áp dụng",
     "全局已关闭": "Toàn cục đã tắt",
@@ -4237,7 +4239,8 @@
     "当前页暂无可统计收益": "Trang này chưa có thưởng để thống kê",
     "当前筛选条件暂无可统计收益": "Bộ lọc hiện tại chưa có thưởng để thống kê",
     "加载邀请记录失败": "Không tải được lịch sử lời mời",
-    "暂无邀请记录": "Chưa có lịch sử lời mời"
+    "暂无邀请记录": "Chưa có lịch sử lời mời",
+    "再次点击可取消选择": "Bấm lại để bỏ chọn"
   },
   "启用 Responses 流启动恢复": "Enable responses stream startup recovery",
   "仅在 /v1/responses 流式请求首包前生效，用于短时故障恢复。": "Chỉ áp dụng trước payload đầu tiên của các yêu cầu stream /v1/responses để phục hồi khi sự cố ngắn hạn; đồng thời bạn phải bật nó riêng trên từng kênh.",

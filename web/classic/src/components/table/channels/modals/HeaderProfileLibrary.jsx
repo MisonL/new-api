@@ -422,7 +422,7 @@ const HeaderProfileLibrary = ({
             <Text type='tertiary' size='small' className='block mt-0.5'>
               {getHeaderProfileCategoryLabel(t, profile.category)}
               {strategyMode === 'fixed' && selected
-                ? ` - ${t('点击其他模板会替换当前选择')}`
+                ? ` - ${t('再次点击可取消选择')}`
                 : ''}
             </Text>
             <Text
