@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Table,
@@ -279,24 +279,13 @@ function getDesktopTableBody(container) {
   return container?.querySelector('.semi-table-body') || null;
 }
 
-function createTableScrollSync(tableBody, scrollbar) {
-  const syncFromTable = () => {
-    if (scrollbar.scrollLeft !== tableBody.scrollLeft) {
-      scrollbar.scrollLeft = tableBody.scrollLeft;
-    }
-  };
-  const syncFromScrollbar = () => {
-    if (tableBody.scrollLeft !== scrollbar.scrollLeft) {
-      tableBody.scrollLeft = scrollbar.scrollLeft;
-    }
-  };
+function createTableScrollSync(tableBody, updateScrollLeft) {
+  const syncFromTable = () => updateScrollLeft(tableBody.scrollLeft);
 
   tableBody.addEventListener('scroll', syncFromTable, { passive: true });
-  scrollbar.addEventListener('scroll', syncFromScrollbar, { passive: true });
 
   return () => {
     tableBody.removeEventListener('scroll', syncFromTable);
-    scrollbar.removeEventListener('scroll', syncFromScrollbar);
   };
 }
 
@@ -314,22 +303,36 @@ function createTableMetricObserver(tableBody, updateMetrics) {
   };
 }
 
-function useFixedTableScrollMetrics(containerRef, scrollbarRef, syncKey) {
-  const [metrics, setMetrics] = useState({ clientWidth: 0, scrollWidth: 0 });
+function useFixedTableScrollMetrics(containerRef, syncKey) {
+  const [metrics, setMetrics] = useState({
+    clientWidth: 0,
+    scrollWidth: 0,
+    scrollLeft: 0,
+    trackWidth: 0,
+  });
 
   useEffect(() => {
-    const scrollbar = scrollbarRef.current;
     const tableBody = getDesktopTableBody(containerRef.current);
-    if (!scrollbar || !tableBody) return undefined;
+    if (!tableBody) return undefined;
+    const track = containerRef.current?.querySelector(
+      '.card-table-fixed-scrollbar',
+    );
 
     const updateMetrics = () => {
       setMetrics({
         clientWidth: tableBody.clientWidth,
         scrollWidth: tableBody.scrollWidth,
+        scrollLeft: tableBody.scrollLeft,
+        trackWidth: Math.max(
+          (track?.clientWidth || tableBody.clientWidth) - 8,
+          0,
+        ),
       });
-      scrollbar.scrollLeft = tableBody.scrollLeft;
     };
-    const cleanupSync = createTableScrollSync(tableBody, scrollbar);
+    const updateScrollLeft = (scrollLeft) => {
+      setMetrics((current) => ({ ...current, scrollLeft }));
+    };
+    const cleanupSync = createTableScrollSync(tableBody, updateScrollLeft);
     const cleanupObserver = createTableMetricObserver(tableBody, updateMetrics);
 
     return () => {
@@ -343,25 +346,189 @@ function useFixedTableScrollMetrics(containerRef, scrollbarRef, syncKey) {
 
 const FixedTableScrollProxy = ({ children, syncKey }) => {
   const containerRef = useRef(null);
-  const scrollbarRef = useRef(null);
-  const metrics = useFixedTableScrollMetrics(
-    containerRef,
-    scrollbarRef,
-    syncKey,
-  );
+  const trackRef = useRef(null);
+  const dragStateRef = useRef(null);
+  const metrics = useFixedTableScrollMetrics(containerRef, syncKey);
   const showScrollbar = metrics.scrollWidth > metrics.clientWidth + 1;
+  const scrollableWidth = Math.max(
+    metrics.scrollWidth - metrics.clientWidth,
+    0,
+  );
+  const thumbWidth =
+    showScrollbar && metrics.trackWidth > 0
+      ? Math.max(
+          44,
+          (metrics.clientWidth / metrics.scrollWidth) * metrics.trackWidth,
+        )
+      : metrics.trackWidth;
+  const maxThumbLeft = Math.max(metrics.trackWidth - thumbWidth, 0);
+  const thumbLeft =
+    showScrollbar && scrollableWidth > 0
+      ? Math.min(
+          (metrics.scrollLeft / scrollableWidth) * maxThumbLeft,
+          maxThumbLeft,
+        )
+      : 0;
+
+  const setTableScrollLeft = useCallback((nextScrollLeft) => {
+    const tableBody = getDesktopTableBody(containerRef.current);
+    if (!tableBody) return;
+    tableBody.scrollLeft = Math.max(
+      0,
+      Math.min(nextScrollLeft, tableBody.scrollWidth - tableBody.clientWidth),
+    );
+  }, []);
+
+  const getTableScrollLeft = useCallback(() => {
+    const tableBody = getDesktopTableBody(containerRef.current);
+    return tableBody?.scrollLeft ?? metrics.scrollLeft;
+  }, [metrics.scrollLeft]);
+
+  const scrollToPointer = useCallback(
+    (clientX) => {
+      const track = trackRef.current;
+      if (!track || !showScrollbar || maxThumbLeft <= 0) return;
+      const rect = track.getBoundingClientRect();
+      const trackWidth = Math.max(rect.width - 8, 0);
+      const maxThumbPixelLeft = trackWidth - thumbWidth;
+      if (maxThumbPixelLeft <= 0) return;
+      const nextThumbLeft = Math.max(
+        0,
+        Math.min(clientX - rect.left - 4 - thumbWidth / 2, maxThumbPixelLeft),
+      );
+      setTableScrollLeft((nextThumbLeft / maxThumbPixelLeft) * scrollableWidth);
+    },
+    [
+      maxThumbLeft,
+      scrollableWidth,
+      setTableScrollLeft,
+      showScrollbar,
+      thumbWidth,
+    ],
+  );
+
+  const handleTrackPointerDown = useCallback(
+    (event) => {
+      scrollToPointer(event.clientX);
+    },
+    [scrollToPointer],
+  );
+
+  const handleThumbPointerDown = useCallback(
+    (event) => {
+      if (!showScrollbar) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const track = trackRef.current;
+      if (!track) return;
+      dragStateRef.current = {
+        startX: event.clientX,
+        startScrollLeft: getTableScrollLeft(),
+        trackWidth: Math.max(track.getBoundingClientRect().width - 8, 0),
+      };
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    },
+    [getTableScrollLeft, showScrollbar],
+  );
+
+  const handleThumbPointerMove = useCallback(
+    (event) => {
+      const dragState = dragStateRef.current;
+      if (!dragState || !showScrollbar || maxThumbLeft <= 0) return;
+      const maxThumbPixelLeft = dragState.trackWidth - thumbWidth;
+      if (maxThumbPixelLeft <= 0) return;
+      const deltaX = event.clientX - dragState.startX;
+      setTableScrollLeft(
+        dragState.startScrollLeft +
+          (deltaX / maxThumbPixelLeft) * scrollableWidth,
+      );
+    },
+    [
+      maxThumbLeft,
+      scrollableWidth,
+      setTableScrollLeft,
+      showScrollbar,
+      thumbWidth,
+    ],
+  );
+
+  const handleThumbPointerEnd = useCallback((event) => {
+    dragStateRef.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    }
+  }, []);
+
+  const handleScrollbarKeyDown = useCallback(
+    (event) => {
+      if (!showScrollbar) return;
+      const currentScrollLeft = getTableScrollLeft();
+      const smallStep = Math.max(metrics.clientWidth * 0.1, 40);
+      const pageStep = Math.max(metrics.clientWidth * 0.8, 40);
+      let nextScrollLeft = currentScrollLeft;
+
+      switch (event.key) {
+        case 'ArrowLeft':
+          nextScrollLeft -= smallStep;
+          break;
+        case 'ArrowRight':
+          nextScrollLeft += smallStep;
+          break;
+        case 'PageUp':
+          nextScrollLeft -= pageStep;
+          break;
+        case 'PageDown':
+          nextScrollLeft += pageStep;
+          break;
+        case 'Home':
+          nextScrollLeft = 0;
+          break;
+        case 'End':
+          nextScrollLeft = scrollableWidth;
+          break;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      setTableScrollLeft(nextScrollLeft);
+    },
+    [
+      getTableScrollLeft,
+      metrics.clientWidth,
+      scrollableWidth,
+      setTableScrollLeft,
+      showScrollbar,
+    ],
+  );
 
   return (
     <div className='card-table-fixed-scroll-shell' ref={containerRef}>
       {children}
       <div
         className='card-table-fixed-scrollbar'
-        ref={scrollbarRef}
         style={{ display: showScrollbar ? undefined : 'none' }}
+        ref={trackRef}
+        onPointerDown={handleTrackPointerDown}
+        onKeyDown={handleScrollbarKeyDown}
+        role='scrollbar'
+        aria-label='Horizontal table scroll'
+        tabIndex={showScrollbar ? 0 : -1}
+        aria-orientation='horizontal'
+        aria-valuemin={0}
+        aria-valuemax={Math.round(scrollableWidth)}
+        aria-valuenow={Math.round(metrics.scrollLeft)}
       >
         <div
-          className='card-table-fixed-scrollbar-inner'
-          style={{ width: metrics.scrollWidth || 1 }}
+          className='card-table-fixed-scrollbar-thumb'
+          style={{
+            left: `${thumbLeft}px`,
+            width: `${thumbWidth}px`,
+          }}
+          onPointerDown={handleThumbPointerDown}
+          onPointerMove={handleThumbPointerMove}
+          onPointerUp={handleThumbPointerEnd}
+          onPointerCancel={handleThumbPointerEnd}
         />
       </div>
     </div>

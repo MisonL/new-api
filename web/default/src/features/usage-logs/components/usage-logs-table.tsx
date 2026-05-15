@@ -18,7 +18,6 @@ import { cn } from '@/lib/utils'
 import { useIsAdmin } from '@/hooks/use-admin'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -210,11 +209,11 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
         ) : (
           <div
             className={cn(
-              'overflow-hidden rounded-md border transition-opacity duration-150',
+              'relative max-h-[clamp(22rem,calc(100dvh-26rem),44rem)] overflow-auto rounded-md border transition-opacity duration-150',
               isFetching && !isLoadingData && 'pointer-events-none opacity-50'
             )}
           >
-            <Table>
+            <table data-slot='table' className='w-full caption-bottom text-sm'>
               <TableHeader className='bg-muted/30 sticky top-0 z-10'>
                 {table.getHeaderGroups().map((headerGroup) => (
                   <TableRow key={headerGroup.id}>
@@ -246,7 +245,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
                   renderRows()
                 )}
               </TableBody>
-            </Table>
+            </table>
           </div>
         )}
       </div>
