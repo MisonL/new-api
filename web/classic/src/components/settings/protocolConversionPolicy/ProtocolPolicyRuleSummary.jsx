@@ -23,6 +23,7 @@ import {
   getEndpointLabel,
   getRuleModelSummary,
   getRuleScopeSummary,
+  isResponsesToChatRule,
   isRuleScopeValid,
 } from './utils';
 
@@ -39,6 +40,8 @@ export default function ProtocolPolicyRuleSummary({
   updateRule,
 }) {
   const scopeInvalid = !isRuleScopeValid(rule);
+  const customToolBridgeEnabled =
+    isResponsesToChatRule(rule) && rule.enable_custom_tool_bridge === true;
 
   return (
     <div
@@ -73,6 +76,13 @@ export default function ProtocolPolicyRuleSummary({
           </Tag>
           {directionInvalid ? <Tag color='red'>{t('方向无效')}</Tag> : null}
           {scopeInvalid ? <Tag color='red'>{t('范围未命中')}</Tag> : null}
+          {customToolBridgeEnabled ? (
+            <Tag color='purple'>{t('自定义工具桥接')}</Tag>
+          ) : null}
+          {Object.keys(rule.__extra || {}).length > 0 ||
+          Object.keys(rule.__options_extra || {}).length > 0 ? (
+            <Tag color='orange'>{t('包含高级字段')}</Tag>
+          ) : null}
         </div>
         <div
           style={{

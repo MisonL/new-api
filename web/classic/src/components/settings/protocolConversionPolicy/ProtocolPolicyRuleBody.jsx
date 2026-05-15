@@ -23,6 +23,7 @@ import {
   Button,
   Col,
   Input,
+  Popconfirm,
   Row,
   Select,
   Switch,
@@ -31,6 +32,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { ENDPOINT_OPTIONS, panelStyle } from './constants';
 import {
+  isResponsesToChatRule,
   isRuleScopeValid,
   parseIntegerList,
   parseTextList,
@@ -197,6 +199,48 @@ function ScopePanel({ channelTypeOptions, index, rule, t, updateRule }) {
   );
 }
 
+function AdvancedPanel({ index, rule, t, updateRule }) {
+  const bridgeSupported = isResponsesToChatRule(rule);
+  return (
+    <div style={panelStyle}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+          alignItems: 'center',
+        }}
+      >
+        <div>
+          <Text strong>{t('高级选项')}</Text>
+          <div>
+            <Text type='tertiary' size='small'>
+              {bridgeSupported
+                ? t('Responses 自定义工具会桥接到 Chat Completions 工具调用。')
+                : t('自定义工具桥接仅适用于 Responses -> Chat Completions。')}
+            </Text>
+          </div>
+        </div>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <Text>{t('自定义工具桥接')}</Text>
+          <Switch
+            id={`protocol-rule-custom-tool-bridge-${index}`}
+            name={`protocol-rule-custom-tool-bridge-${index}`}
+            checked={bridgeSupported && rule.enable_custom_tool_bridge === true}
+            checkedText={t('开')}
+            disabled={!bridgeSupported}
+            uncheckedText={t('关')}
+            onChange={(checked) =>
+              updateRule(index, { enable_custom_tool_bridge: checked })
+            }
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ProtocolPolicyRuleBody({
   channelTypeOptions,
   directionInvalid,
@@ -222,14 +266,18 @@ export default function ProtocolPolicyRuleBody({
         t={t}
         updateRule={updateRule}
       />
+      <AdvancedPanel index={index} rule={rule} t={t} updateRule={updateRule} />
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <Button
-          type='danger'
-          theme='borderless'
-          onClick={() => removeRule(index)}
+        <Popconfirm
+          content={t('删除后需要重新保存配置才会生效，确定删除这条规则吗？')}
+          okText={t('删除')}
+          cancelText={t('取消')}
+          onConfirm={() => removeRule(index)}
         >
-          {t('删除当前规则')}
-        </Button>
+          <Button type='danger' theme='borderless'>
+            {t('删除当前规则')}
+          </Button>
+        </Popconfirm>
       </div>
     </div>
   );
