@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestConvertOpenAIResponsesRequestRemovesUnsupportedCompactionInput(t *testing.T) {
+func TestConvertOpenAIResponsesRequestPreservesCompactionInputByDefault(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
@@ -32,22 +32,54 @@ func TestConvertOpenAIResponsesRequestRemovesUnsupportedCompactionInput(t *testi
 	require.NoError(t, err)
 	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
-
-	var items []map[string]json.RawMessage
-	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 2)
-	for _, item := range items {
-		var itemType string
-		require.NoError(t, common.Unmarshal(item["type"], &itemType))
-		require.NotEqual(t, "compaction", itemType)
-	}
+	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
 }
 
-func TestConvertOpenAIResponsesRequestRejectsCompactionOnlyInput(t *testing.T) {
+func TestConvertOpenAIResponsesRequestStripsCodexEncryptedContextWhenEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
 		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[
+			{"type":"message","role":"developer","content":[{"type":"input_text","text":"keep prior summary"}]},
+			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"old answer"}]},
+			{"type":"compaction","encrypted_content":"compact"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 2)
+
+	require.Equal(t, "developer", responseItemRole(t, items[0]))
+	require.Equal(t, "user", responseItemRole(t, items[1]))
+}
+
+func TestConvertOpenAIResponsesRequestRejectsCompactionOnlyInputWhenStripEnabled(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
 	}
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
@@ -59,11 +91,16 @@ func TestConvertOpenAIResponsesRequestRejectsCompactionOnlyInput(t *testing.T) {
 	require.Contains(t, err.Error(), "compaction input")
 }
 
-func TestConvertOpenAIResponsesRequestPreservesNonObjectArrayItems(t *testing.T) {
+func TestConvertOpenAIResponsesRequestPreservesNonObjectArrayItemsWhenStripEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
 		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
 	}
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
@@ -85,6 +122,186 @@ func TestConvertOpenAIResponsesRequestPreservesNonObjectArrayItems(t *testing.T)
 	var first string
 	require.NoError(t, common.Unmarshal(items[0], &first))
 	require.Equal(t, "plain input item", first)
+}
+
+func TestConvertOpenAIResponsesRequestRejectsEncryptedReasoningOnlyInputWhenStripEnabled(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[
+			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"old answer"}]}
+		]`),
+	}
+
+	_, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "encrypted reasoning context")
+}
+
+func TestConvertOpenAIResponsesRequestPreservesNonAdjacentAssistantWhenStripEnabled(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[
+			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"fresh answer"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 2)
+	require.Equal(t, "user", responseItemRole(t, items[0]))
+	require.Equal(t, "assistant", responseItemRole(t, items[1]))
+	require.Equal(t, "fresh answer", responseItemText(t, items[1]))
+}
+
+func TestConvertOpenAIResponsesRequestStripsAssistantToolCallsUntilNextClientContext(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[
+			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+			{"type":"function_call","call_id":"call_1","name":"edit","arguments":"{}"},
+			{"type":"custom_tool_call","call_id":"call_2","name":"shell","input":"go test"},
+			{"type":"function_call_output","call_id":"call_1","output":"ok"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"fresh answer"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 3)
+	require.Equal(t, "user", responseItemRole(t, items[0]))
+	require.Contains(t, responseItemText(t, items[0]), "Tool output call_1")
+	require.Equal(t, "user", responseItemRole(t, items[1]))
+	require.Equal(t, "assistant", responseItemRole(t, items[2]))
+}
+
+func TestConvertOpenAIResponsesRequestPreservesPlainReasoningWhenStripEnabled(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[
+			{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"visible reasoning"}]},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"keep answer"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
+}
+
+func TestConvertOpenAIResponsesRequestPreservesEmptyEncryptedReasoningWhenStripEnabled(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[
+			{"type":"reasoning","id":"rs_1","encrypted_content":""},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"keep answer"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
+}
+
+func TestConvertOpenAIResponsesRequestRewritesToolOutputWithoutRawFallback(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[
+			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+			{"type":"function_call","call_id":"call_1","name":"edit","arguments":"{}"},
+			{"type":"function_call_output","call_id":"call_1","metadata":{"secret":"internal"}},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 2)
+	require.Equal(t, "Tool output call_1", responseItemText(t, items[0]))
+	require.NotContains(t, responseItemText(t, items[0]), "metadata")
+	require.Equal(t, "user", responseItemRole(t, items[1]))
 }
 
 func TestConvertOpenAIResponsesCompactRequestPreservesCompactionInputForCodexChannel(t *testing.T) {
@@ -140,6 +357,74 @@ func TestConvertOpenAIResponsesCompactRequestConvertsForOpenAICompatibleChannel(
 	require.Equal(t, "message", itemType)
 }
 
+func TestConvertOpenAIResponsesCompactRequestStripsEncryptedReasoningWhenEnabled(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_previous",
+		Input: json.RawMessage(`[
+			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"old answer"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.Empty(t, convertedReq.PreviousResponseID)
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 1)
+	require.Equal(t, "user", responseItemRole(t, items[0]))
+}
+
+func TestConvertAzureResponsesCompactRequestStripsEncryptedReasoningWhenEnabled(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.5-azure-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeAzure,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_previous",
+		Input: json.RawMessage(`[
+			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"old answer"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.Equal(t, "resp_previous", convertedReq.PreviousResponseID)
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 1)
+	require.Equal(t, "user", responseItemRole(t, items[0]))
+}
+
 func TestOpenAIResponsesCompactRequestURLUsesResponsesEndpointForOpenAICompatibleChannel(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		RelayMode:      relayconstant.RelayModeResponsesCompact,
@@ -153,4 +438,21 @@ func TestOpenAIResponsesCompactRequestURLUsesResponsesEndpointForOpenAICompatibl
 	requestURL, err := (&Adaptor{}).GetRequestURL(info)
 	require.NoError(t, err)
 	require.Equal(t, "https://api.example.test/v1/responses", requestURL)
+}
+
+func responseItemRole(t *testing.T, item map[string]json.RawMessage) string {
+	t.Helper()
+	var role string
+	require.NoError(t, common.Unmarshal(item["role"], &role))
+	return role
+}
+
+func responseItemText(t *testing.T, item map[string]json.RawMessage) string {
+	t.Helper()
+	var content []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(item["content"], &content))
+	require.NotEmpty(t, content)
+	var text string
+	require.NoError(t, common.Unmarshal(content[0]["text"], &text))
+	return text
 }

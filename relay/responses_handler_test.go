@@ -3,6 +3,8 @@ package relay
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -92,4 +94,36 @@ func TestFindResponsesViaChatRuleCarriesCustomToolBridgeOption(t *testing.T) {
 	require.NotNil(t, rule)
 	require.True(t, responsesViaChatOptionsFromRule(rule).EnableCustomToolBridge)
 	require.False(t, responsesViaChatOptionsFromRule(nil).EnableCustomToolBridge)
+}
+
+func TestShouldConvertResponsesRequestForCodexEncryptedContextStrip(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				StripCodexEncryptedContext: true,
+			},
+		},
+	}
+	require.True(t, shouldConvertResponsesRequest(info))
+
+	info.ChannelOtherSettings.StripCodexEncryptedContext = false
+	require.False(t, shouldConvertResponsesRequest(info))
+
+	info.RelayMode = relayconstant.RelayModeResponsesCompact
+	info.ChannelOtherSettings.StripCodexEncryptedContext = true
+	info.ChannelType = constant.ChannelTypeCodex
+	require.False(t, shouldConvertResponsesRequest(info))
+
+	info.ChannelType = constant.ChannelTypeOpenAI
+	require.True(t, shouldConvertResponsesRequest(info))
+
+	info.ChannelType = constant.ChannelTypeAzure
+	require.True(t, shouldConvertResponsesRequest(info))
+
+	info.ChannelOtherSettings.StripCodexEncryptedContext = false
+	require.False(t, shouldConvertResponsesRequest(info))
+
+	info.ChannelType = constant.ChannelTypeOpenAI
+	require.True(t, shouldConvertResponsesRequest(info))
 }

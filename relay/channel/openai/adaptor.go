@@ -613,30 +613,48 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 			info.OriginModelName,
 		))
 	}
-	if info != nil && (info.RelayMode == relayconstant.RelayModeResponses || useOpenAICompatibleCompactConversion) {
-		input, removedCount, remainingCount, err := removeUnsupportedResponsesCompactionInput(request.Input)
+	stripCodexContext := shouldStripCodexEncryptedContext(info)
+	if info != nil && (stripCodexContext || useOpenAICompatibleCompactConversion) {
+		result, err := stripUnsupportedResponsesInput(request.Input, stripCodexContext)
 		if err != nil {
 			return nil, err
 		}
-		if removedCount > 0 {
-			if remainingCount == 0 {
+		if result.removedCount() > 0 {
+			if result.remainingCount == 0 {
+				if result.encryptedReasoningCount > 0 {
+					return nil, errors.New("responses encrypted reasoning context is unsupported by this OpenAI-compatible channel and no other input items remain")
+				}
 				return nil, errors.New("responses compaction input is unsupported by this OpenAI-compatible channel and no other input items remain")
 			}
-			request.Input = input
+			request.Input = result.input
 			channelID := 0
 			if info.ChannelMeta != nil {
 				channelID = info.ChannelMeta.ChannelId
 			}
 			common.SysLog(fmt.Sprintf(
-				"responses compaction input removed for OpenAI-compatible channel: channel_id=%d model=%s compact_items=%d remaining_items=%d",
+				"responses unsupported context removed for OpenAI-compatible channel: channel_id=%d model=%s compact_items=%d encrypted_reasoning_items=%d assistant_items=%d tool_output_messages=%d remaining_items=%d",
 				channelID,
 				info.OriginModelName,
-				removedCount,
-				remainingCount,
+				result.compactionCount,
+				result.encryptedReasoningCount,
+				result.assistantMessageCount,
+				result.toolOutputMessageCount,
+				result.remainingCount,
 			))
 		}
 	}
 	return request, nil
+}
+
+func shouldStripCodexEncryptedContext(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil || !info.ChannelOtherSettings.StripCodexEncryptedContext {
+		return false
+	}
+	if info.RelayMode == relayconstant.RelayModeResponses {
+		return true
+	}
+	return info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+		(info.ChannelType == constant.ChannelTypeOpenAI || info.ChannelType == constant.ChannelTypeAzure)
 }
 
 func shouldUseOpenAICompatibleResponsesCompactConversion(info *relaycommon.RelayInfo) bool {
@@ -646,40 +664,82 @@ func shouldUseOpenAICompatibleResponsesCompactConversion(info *relaycommon.Relay
 		info.ChannelType == constant.ChannelTypeOpenAI
 }
 
-func removeUnsupportedResponsesCompactionInput(input json.RawMessage) (json.RawMessage, int, int, error) {
+type responsesInputStripResult struct {
+	input                   json.RawMessage
+	compactionCount         int
+	encryptedReasoningCount int
+	assistantMessageCount   int
+	toolOutputMessageCount  int
+	remainingCount          int
+}
+
+func (r responsesInputStripResult) removedCount() int {
+	return r.compactionCount + r.encryptedReasoningCount + r.assistantMessageCount
+}
+
+func stripUnsupportedResponsesInput(input json.RawMessage, stripEncryptedReasoning bool) (responsesInputStripResult, error) {
+	result := responsesInputStripResult{
+		input: input,
+	}
 	trimmedInput := bytes.TrimSpace(input)
 	if len(trimmedInput) == 0 || trimmedInput[0] != '[' {
-		return input, 0, 0, nil
+		return result, nil
 	}
 
 	var items []json.RawMessage
 	if err := common.Unmarshal(input, &items); err != nil {
-		return nil, 0, 0, err
+		return result, err
 	}
 
 	filtered := make([]json.RawMessage, 0, len(items))
-	removedCount := 0
+	removeDependentAssistantOutput := false
 	for _, rawItem := range items {
 		var item map[string]json.RawMessage
 		if err := common.Unmarshal(rawItem, &item); err != nil {
 			filtered = append(filtered, rawItem)
+			removeDependentAssistantOutput = false
 			continue
 		}
-		if responsesItemType(item) == "compaction" {
-			removedCount++
+		itemType := responsesItemType(item)
+		if itemType == "compaction" {
+			result.compactionCount++
 			continue
+		}
+		if stripEncryptedReasoning && itemType == "reasoning" && responsesItemHasEncryptedContent(item) {
+			result.encryptedReasoningCount++
+			removeDependentAssistantOutput = true
+			continue
+		}
+		if removeDependentAssistantOutput && responsesItemIsAssistantOutput(item) {
+			result.assistantMessageCount++
+			continue
+		}
+		if removeDependentAssistantOutput && responsesItemIsToolOutput(item) {
+			rewritten, err := responsesToolOutputAsUserMessage(item)
+			if err != nil {
+				return result, err
+			}
+			result.toolOutputMessageCount++
+			filtered = append(filtered, rewritten)
+			continue
+		}
+		if responsesItemStartsClientContext(item) {
+			removeDependentAssistantOutput = false
 		}
 		filtered = append(filtered, rawItem)
 	}
-	if removedCount == 0 {
-		return input, 0, len(items), nil
+	if result.removedCount() == 0 {
+		result.remainingCount = len(items)
+		return result, nil
 	}
 
 	raw, err := common.Marshal(filtered)
 	if err != nil {
-		return nil, 0, 0, err
+		return result, err
 	}
-	return json.RawMessage(raw), removedCount, len(filtered), nil
+	result.input = json.RawMessage(raw)
+	result.remainingCount = len(filtered)
+	return result, nil
 }
 
 func responsesItemType(item map[string]json.RawMessage) string {
@@ -692,6 +752,99 @@ func responsesItemType(item map[string]json.RawMessage) string {
 		return ""
 	}
 	return itemType
+}
+
+func responsesItemHasEncryptedContent(item map[string]json.RawMessage) bool {
+	raw := bytes.TrimSpace(item["encrypted_content"])
+	if len(raw) == 0 || string(raw) == "null" {
+		return false
+	}
+	var encryptedContent string
+	if err := common.Unmarshal(raw, &encryptedContent); err == nil {
+		return encryptedContent != ""
+	}
+	return true
+}
+
+func responsesItemStringField(item map[string]json.RawMessage, field string) string {
+	rawValue := item[field]
+	if len(rawValue) == 0 {
+		return ""
+	}
+	var value string
+	if err := common.Unmarshal(rawValue, &value); err != nil {
+		return ""
+	}
+	return value
+}
+
+func responsesItemIsAssistantOutput(item map[string]json.RawMessage) bool {
+	itemType := responsesItemType(item)
+	if itemType == "message" {
+		return responsesItemStringField(item, "role") == "assistant"
+	}
+	if responsesItemIsToolOutput(item) {
+		return false
+	}
+	return strings.HasSuffix(itemType, "_call")
+}
+
+func responsesItemIsToolOutput(item map[string]json.RawMessage) bool {
+	return strings.HasSuffix(responsesItemType(item), "_call_output")
+}
+
+func responsesToolOutputAsUserMessage(item map[string]json.RawMessage) (json.RawMessage, error) {
+	callID := responsesItemStringField(item, "call_id")
+	output := responsesItemOutputText(item)
+	// Best-effort lossy conversion for OpenAI-compatible channels after the original tool call is stripped.
+	text := "Tool output"
+	if callID != "" {
+		text += " " + callID
+	}
+	if output != "" {
+		text += ":\n" + output
+	}
+	raw, err := common.Marshal(map[string]any{
+		"type": "message",
+		"role": "user",
+		"content": []map[string]string{
+			{
+				"type": "input_text",
+				"text": text,
+			},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(raw), nil
+}
+
+func responsesItemOutputText(item map[string]json.RawMessage) string {
+	rawOutput := bytes.TrimSpace(item["output"])
+	if len(rawOutput) == 0 {
+		rawOutput = bytes.TrimSpace(item["content"])
+	}
+	if len(rawOutput) == 0 {
+		return ""
+	}
+	var output string
+	if err := common.Unmarshal(rawOutput, &output); err == nil {
+		return output
+	}
+	return string(rawOutput)
+}
+
+func responsesItemStartsClientContext(item map[string]json.RawMessage) bool {
+	if responsesItemType(item) != "message" {
+		return false
+	}
+	switch responsesItemStringField(item, "role") {
+	case "system", "developer", "user":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
