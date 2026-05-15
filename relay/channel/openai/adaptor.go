@@ -613,7 +613,7 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 			info.OriginModelName,
 		))
 	}
-	stripCodexContext := shouldStripCodexEncryptedContext(info)
+	stripCodexContext := relaycommon.ShouldStripCodexEncryptedContext(info)
 	if info != nil && (stripCodexContext || useOpenAICompatibleCompactConversion) {
 		result, err := stripUnsupportedResponsesInput(request.Input, stripCodexContext)
 		if err != nil {
@@ -644,17 +644,6 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		}
 	}
 	return request, nil
-}
-
-func shouldStripCodexEncryptedContext(info *relaycommon.RelayInfo) bool {
-	if info == nil || info.ChannelMeta == nil || !info.ChannelOtherSettings.StripCodexEncryptedContext {
-		return false
-	}
-	if info.RelayMode == relayconstant.RelayModeResponses {
-		return true
-	}
-	return info.RelayMode == relayconstant.RelayModeResponsesCompact &&
-		(info.ChannelType == constant.ChannelTypeOpenAI || info.ChannelType == constant.ChannelTypeAzure)
 }
 
 func shouldUseOpenAICompatibleResponsesCompactConversion(info *relaycommon.RelayInfo) bool {

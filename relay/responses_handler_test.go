@@ -105,25 +105,25 @@ func TestShouldConvertResponsesRequestForCodexEncryptedContextStrip(t *testing.T
 			},
 		},
 	}
-	require.True(t, shouldConvertResponsesRequest(info))
+	require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
 
 	info.ChannelOtherSettings.StripCodexEncryptedContext = false
-	require.False(t, shouldConvertResponsesRequest(info))
+	require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
 
 	info.RelayMode = relayconstant.RelayModeResponsesCompact
 	info.ChannelOtherSettings.StripCodexEncryptedContext = true
 	info.ChannelType = constant.ChannelTypeCodex
-	require.False(t, shouldConvertResponsesRequest(info))
+	require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
 
 	info.ChannelType = constant.ChannelTypeOpenAI
-	require.True(t, shouldConvertResponsesRequest(info))
+	require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
 
 	info.ChannelType = constant.ChannelTypeAzure
-	require.True(t, shouldConvertResponsesRequest(info))
+	require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
 
 	info.ChannelOtherSettings.StripCodexEncryptedContext = false
-	require.False(t, shouldConvertResponsesRequest(info))
+	require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
 
 	info.ChannelType = constant.ChannelTypeOpenAI
-	require.True(t, shouldConvertResponsesRequest(info))
+	require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
 }

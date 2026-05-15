@@ -195,6 +195,28 @@ type RelayInfo struct {
 	*TaskRelayInfo
 }
 
+func ShouldStripCodexEncryptedContext(info *RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil || !info.ChannelOtherSettings.StripCodexEncryptedContext {
+		return false
+	}
+	if info.RelayMode == relayconstant.RelayModeResponses {
+		return true
+	}
+	return info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+		(info.ChannelType == constant.ChannelTypeOpenAI || info.ChannelType == constant.ChannelTypeAzure)
+}
+
+func ShouldConvertResponsesRequest(info *RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	if ShouldStripCodexEncryptedContext(info) {
+		return true
+	}
+	return info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+		info.ChannelType == constant.ChannelTypeOpenAI
+}
+
 // ResetBillingMetadata refunds the active billing session and clears cached billing fields.
 func (info *RelayInfo) ResetBillingMetadata(c *gin.Context) {
 	if info == nil {

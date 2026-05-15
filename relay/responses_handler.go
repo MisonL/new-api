@@ -86,7 +86,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		return nil
 	}
 	var requestBody io.Reader
-	if (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) && !shouldConvertResponsesRequest(info) {
+	if (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) && !relaycommon.ShouldConvertResponsesRequest(info) {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
@@ -173,21 +173,6 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		service.PostTextConsumeQuota(c, info, usageDto, nil)
 	}
 	return nil
-}
-
-func shouldConvertResponsesRequest(info *relaycommon.RelayInfo) bool {
-	if info == nil || info.ChannelMeta == nil {
-		return false
-	}
-	if info.ChannelOtherSettings.StripCodexEncryptedContext {
-		if info.RelayMode == relayconstant.RelayModeResponses {
-			return true
-		}
-		return info.RelayMode == relayconstant.RelayModeResponsesCompact &&
-			(info.ChannelType == appconstant.ChannelTypeOpenAI || info.ChannelType == appconstant.ChannelTypeAzure)
-	}
-	return info.RelayMode == relayconstant.RelayModeResponsesCompact &&
-		info.ChannelType == appconstant.ChannelTypeOpenAI
 }
 
 func shouldRouteResponsesViaChat(info *relaycommon.RelayInfo, passThroughGlobal bool) bool {
