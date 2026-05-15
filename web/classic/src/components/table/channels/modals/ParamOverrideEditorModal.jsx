@@ -41,6 +41,7 @@ import {
   CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  PARAM_OVERRIDE_TEMPLATES,
   QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
 } from '../../../../constants/channel-affinity-template.constants';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
@@ -310,9 +311,49 @@ const OPERATION_TEMPLATE = {
 const HEADER_PASSTHROUGH_TEMPLATE = {
   operations: [
     {
-      description: 'Pass through X-Request-Id header to upstream.',
+      description: 'Pass through common tracing headers to upstream.',
       mode: 'pass_headers',
-      value: ['X-Request-Id'],
+      value: ['X-Request-Id', 'X-Trace-Id', 'X-Correlation-Id', 'Traceparent'],
+      keep_origin: true,
+    },
+  ],
+};
+
+const OPENAI_SDK_HEADER_PASSTHROUGH_TEMPLATE = {
+  operations: [
+    {
+      description:
+        'Pass through OpenAI SDK organization, project and Stainless metadata headers.',
+      mode: 'pass_headers',
+      value: [
+        'OpenAI-Organization',
+        'OpenAI-Project',
+        'X-Stainless-Arch',
+        'X-Stainless-Lang',
+        'X-Stainless-Os',
+        'X-Stainless-Package-Version',
+        'X-Stainless-Retry-Count',
+        'X-Stainless-Runtime',
+        'X-Stainless-Runtime-Version',
+        'X-Stainless-Timeout',
+      ],
+      keep_origin: true,
+    },
+  ],
+};
+
+const ANTHROPIC_RUNTIME_HEADER_PASSTHROUGH_TEMPLATE = {
+  operations: [
+    {
+      description:
+        'Pass through Anthropic runtime beta/version headers from the original client request.',
+      mode: 'pass_headers',
+      value: [
+        'Anthropic-Beta',
+        'Anthropic-Version',
+        'Anthropic-Dangerous-Direct-Browser-Access',
+        'X-App',
+      ],
       keep_origin: true,
     },
   ],
@@ -418,52 +459,96 @@ const TEMPLATE_PRESET_CONFIG = {
   pass_headers_auth: {
     group: 'scenario',
     label: '请求头透传（通用 Trace）',
+    description:
+      '透传 X-Request-Id、X-Trace-Id、X-Correlation-Id、Traceparent。',
     kind: 'operations',
     payload: HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  openai_sdk_headers_passthrough: {
+    group: 'scenario',
+    label: 'OpenAI SDK 元数据透传',
+    description:
+      '透传 OpenAI-Organization、OpenAI-Project 和 X-Stainless-* 客户端元数据。',
+    kind: 'operations',
+    payload: OPENAI_SDK_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  anthropic_runtime_headers_passthrough: {
+    group: 'scenario',
+    label: 'Anthropic Beta/Version 透传',
+    description:
+      '透传 Anthropic-Beta、Anthropic-Version 和 X-App 等运行时请求头。',
+    kind: 'operations',
+    payload: ANTHROPIC_RUNTIME_HEADER_PASSTHROUGH_TEMPLATE,
   },
   gemini_image_4k: {
     group: 'scenario',
     label: 'Gemini 图片 4K',
+    description: '当模型名包含 gemini/image 并以 4k 结尾时写入 imageSize=4K。',
     kind: 'operations',
     payload: GEMINI_IMAGE_4K_TEMPLATE,
   },
   claude_cli_headers_passthrough: {
     group: 'scenario',
     label: 'Claude CLI 真实请求头透传',
+    description: '透传 Claude Code 会话、Anthropic Beta 和 Stainless 动态头。',
     kind: 'operations',
     payload: CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   codex_cli_headers_passthrough: {
     group: 'scenario',
     label: 'Codex CLI 真实请求头透传',
+    description: '透传 Codex 会话、窗口、turn metadata 和客户端请求 ID。',
     kind: 'operations',
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  codex_cli_headers_without_image_tool: {
+    group: 'scenario',
+    label: 'Codex CLI 透传 + 移除图片工具',
+    description:
+      '透传 Codex 动态头，并移除上游不兼容的 image_generation 工具。',
+    kind: 'operations',
+    payload: PARAM_OVERRIDE_TEMPLATES.codexHeadersWithoutImageTool.payload,
   },
   gemini_cli_headers_passthrough: {
     group: 'scenario',
     label: 'Gemini CLI 真实请求头透传',
+    description: '透传 Gemini CLI 的 x-goog-api-client 动态头。',
     kind: 'operations',
     payload: GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   qwen_code_headers_passthrough: {
     group: 'scenario',
     label: 'Qwen Code 真实请求头透传',
+    description: '透传 Qwen Code 使用的 Stainless 客户端动态头。',
     kind: 'operations',
     payload: QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   droid_cli_headers_passthrough: {
     group: 'scenario',
     label: 'Droid CLI 真实请求头透传',
+    description: '透传 Droid CLI 使用的 Stainless 客户端动态头。',
     kind: 'operations',
     payload: DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   aws_bedrock_anthropic_beta_override: {
     group: 'scenario',
     label: 'AWS Bedrock Claude 兼容模板',
+    description: '规范化 anthropic-beta，并移除 Bedrock 不兼容的工具示例字段。',
     kind: 'operations',
     payload: AWS_BEDROCK_ANTHROPIC_COMPAT_TEMPLATE,
   },
 };
+
+const QUICK_TEMPLATE_PRESETS = [
+  'codex_cli_headers_passthrough',
+  'claude_cli_headers_passthrough',
+  'gemini_cli_headers_passthrough',
+  'codex_cli_headers_without_image_tool',
+  'aws_bedrock_anthropic_beta_override',
+  'pass_headers_auth',
+  'openai_sdk_headers_passthrough',
+  'anthropic_runtime_headers_passthrough',
+];
 
 const FIELD_GUIDE_TARGET_OPTIONS = [
   { label: '填入目标路径', value: 'path' },
@@ -1526,22 +1611,35 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     TEMPLATE_PRESET_CONFIG[templatePresetKey] ||
     TEMPLATE_PRESET_CONFIG.operations_default;
 
-  const fillTemplateFromLibrary = () => {
-    const preset = getSelectedTemplatePreset();
+  const selectedTemplatePreset = getSelectedTemplatePreset();
+
+  const applyTemplatePreset = (presetKey, action = 'fill') => {
+    const preset =
+      TEMPLATE_PRESET_CONFIG[presetKey] ||
+      TEMPLATE_PRESET_CONFIG.operations_default;
+    setTemplateGroupKey(preset.group || 'basic');
+    setTemplatePresetKey(presetKey);
     if (preset.kind === 'legacy') {
-      fillLegacyTemplate(preset.payload || {});
+      if (action === 'append') {
+        appendLegacyTemplate(preset.payload || {});
+      } else {
+        fillLegacyTemplate(preset.payload || {});
+      }
       return;
     }
-    fillOperationsTemplate(preset.payload?.operations || []);
+    if (action === 'append') {
+      appendOperationsTemplate(preset.payload?.operations || []);
+    } else {
+      fillOperationsTemplate(preset.payload?.operations || []);
+    }
+  };
+
+  const fillTemplateFromLibrary = () => {
+    applyTemplatePreset(templatePresetKey, 'fill');
   };
 
   const appendTemplateFromLibrary = () => {
-    const preset = getSelectedTemplatePreset();
-    if (preset.kind === 'legacy') {
-      appendLegacyTemplate(preset.payload || {});
-      return;
-    }
-    appendOperationsTemplate(preset.payload?.operations || []);
+    applyTemplatePreset(templatePresetKey, 'append');
   };
 
   const resetEditorState = () => {
@@ -2057,8 +2155,38 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
               <Tag size='small'>{t('透传 CLI 动态头')}</Tag>
               <Tag size='small'>{t('兼容上游参数差异')}</Tag>
             </Space>
+            <div className='mt-3 flex items-start gap-2 flex-wrap'>
+              <Text strong size='small' className='leading-8'>
+                {t('常用模板')}
+              </Text>
+              <Space wrap spacing={6}>
+                {QUICK_TEMPLATE_PRESETS.map((presetKey) => {
+                  const preset = TEMPLATE_PRESET_CONFIG[presetKey];
+                  if (!preset) return null;
+                  return (
+                    <Button
+                      key={presetKey}
+                      size='small'
+                      type='tertiary'
+                      onClick={() => applyTemplatePreset(presetKey, 'fill')}
+                    >
+                      {t(preset.label)}
+                    </Button>
+                  );
+                })}
+              </Space>
+            </div>
+            <Text type='tertiary' size='small' className='block mt-1'>
+              {t(
+                '点击会直接套用模板并覆盖当前规则；需要叠加规则时可展开模板区选择追加。',
+              )}
+            </Text>
           </div>
-          <Collapse keepDOM defaultActiveKey={[]} style={{ width: '100%' }}>
+          <Collapse
+            keepDOM
+            defaultActiveKey={['templates']}
+            style={{ width: '100%' }}
+          >
             <Collapse.Panel
               itemKey='templates'
               header={
@@ -2105,6 +2233,11 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                   '模板会写入参数覆盖规则；保存前仍可继续编辑或切换到 JSON 文本。',
                 )}
               </Text>
+              {selectedTemplatePreset?.description ? (
+                <Text type='tertiary' size='small' className='block mt-1'>
+                  {t(selectedTemplatePreset.description)}
+                </Text>
+              ) : null}
             </Collapse.Panel>
           </Collapse>
 

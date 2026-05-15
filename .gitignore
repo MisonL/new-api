@@ -25,6 +25,7 @@ tiktoken_cache
 plans
 .claude
 backups/
+.deploy-backups/
 .worktrees/
 .cursor
 
