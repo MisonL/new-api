@@ -29,6 +29,22 @@ export type ParsedProtocolPolicy =
       error: string
     }
 
+export type ProtocolPreviewState = {
+  channelId: string
+  channelType: string
+  model: string
+}
+
+export type ProtocolPreviewResult = {
+  matched: boolean
+  reason: string
+}
+
+export type DraftTextState = {
+  source: string
+  value: string
+}
+
 const POLICY_FIELDS = new Set([
   'enabled',
   'all_channels',
@@ -118,6 +134,87 @@ export function getProtocolRuleWarningKeys(rule: ProtocolRule) {
   return warnings
 }
 
+export function getProtocolPreviewResult(
+  rule: ProtocolRule,
+  preview: ProtocolPreviewState,
+  passThroughEnabled: boolean
+): ProtocolPreviewResult {
+  if (!rule.enabled) return { matched: false, reason: 'Rule is disabled.' }
+
+  if (
+    !rule.all_channels &&
+    rule.channel_ids.length === 0 &&
+    rule.channel_types.length === 0
+  ) {
+    return {
+      matched: false,
+      reason: 'Channel scope is empty. This rule will not match.',
+    }
+  }
+
+  if (rule.model_patterns.length === 0) {
+    return {
+      matched: false,
+      reason: 'Model patterns are empty. This rule will not match.',
+    }
+  }
+
+  const channelId = Number.parseInt(preview.channelId, 10)
+  const channelType = Number.parseInt(preview.channelType, 10)
+
+  if (!rule.all_channels) {
+    const idMatched =
+      Number.isInteger(channelId) && rule.channel_ids.includes(channelId)
+    const typeMatched =
+      Number.isInteger(channelType) && rule.channel_types.includes(channelType)
+    if (!idMatched && !typeMatched) {
+      return { matched: false, reason: 'Channel scope does not match.' }
+    }
+  }
+
+  const model = preview.model.trim()
+  if (!model) return { matched: false, reason: 'Model is required for preview.' }
+
+  const matched = rule.model_patterns.some((pattern) => {
+    try {
+      return new RegExp(pattern).test(model)
+    } catch {
+      return false
+    }
+  })
+  if (!matched) {
+    return { matched: false, reason: 'Model pattern does not match.' }
+  }
+
+  if (passThroughEnabled) {
+    return {
+      matched: true,
+      reason:
+        'Sample request matches this rule, but passthrough will skip conversion.',
+    }
+  }
+
+  return { matched: true, reason: 'Sample request matches this rule.' }
+}
+
+export function createCommittedDraftText(value: string): DraftTextState {
+  return { source: value, value }
+}
+
+export function createDraftTextChange(
+  value: string,
+  parsedSource: string
+): DraftTextState {
+  return { source: parsedSource, value }
+}
+
+export function getDraftTextValue(
+  draft: DraftTextState,
+  source: string
+): string {
+  return draft.source === source ? draft.value : source
+}
+
 export function createProtocolRule(
   overrides: Partial<ProtocolRule> = {}
 ): ProtocolRule {
@@ -147,12 +244,14 @@ function ruleFromRecord(
   const targetFallback =
     source === ENDPOINT_CHAT ? ENDPOINT_RESPONSES : ENDPOINT_CHAT
   const target = normalizeEndpoint(value.target_endpoint, targetFallback)
+  const normalizedTarget = target === source ? targetFallback : target
+  const name = String(value.name || fallbackName)
 
   return createProtocolRule({
-    name: String(value.name || fallbackName),
+    name,
     enabled: value.enabled !== false,
     source_endpoint: source,
-    target_endpoint: target === source ? targetFallback : target,
+    target_endpoint: normalizedTarget,
     all_channels: value.all_channels !== false,
     channel_ids: toPositiveIntegers(value.channel_ids),
     channel_types: toPositiveIntegers(value.channel_types),

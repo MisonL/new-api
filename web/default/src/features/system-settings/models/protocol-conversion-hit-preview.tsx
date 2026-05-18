@@ -3,13 +3,11 @@ import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import type { ProtocolRule } from './protocol-conversion-policy-utils'
-
-export type ProtocolPreviewState = {
-  channelId: string
-  channelType: string
-  model: string
-}
+import {
+  getProtocolPreviewResult,
+  type ProtocolPreviewState,
+  type ProtocolRule,
+} from './protocol-conversion-policy-utils'
 
 type ProtocolConversionHitPreviewProps = {
   rule: ProtocolRule
@@ -25,7 +23,7 @@ export function ProtocolConversionHitPreview({
   onPreviewChange,
 }: ProtocolConversionHitPreviewProps) {
   const { t } = useTranslation()
-  const result = getPreviewResult(rule, preview, passThroughEnabled)
+  const result = getProtocolPreviewResult(rule, preview, passThroughEnabled)
 
   return (
     <div className='space-y-3 rounded-md border p-3'>
@@ -81,51 +79,4 @@ function PreviewField(props: { label: string; children: ReactNode }) {
       {props.children}
     </div>
   )
-}
-
-function getPreviewResult(
-  rule: ProtocolRule,
-  preview: ProtocolPreviewState,
-  passThroughEnabled: boolean
-) {
-  if (!rule.enabled) return { matched: false, reason: 'Rule is disabled.' }
-
-  const channelId = Number.parseInt(preview.channelId, 10)
-  const channelType = Number.parseInt(preview.channelType, 10)
-
-  if (!rule.all_channels) {
-    const idMatched =
-      Number.isInteger(channelId) && rule.channel_ids.includes(channelId)
-    const typeMatched =
-      Number.isInteger(channelType) && rule.channel_types.includes(channelType)
-    if (!idMatched && !typeMatched) {
-      return { matched: false, reason: 'Channel scope does not match.' }
-    }
-  }
-
-  const model = preview.model.trim()
-  if (rule.model_patterns.length > 0) {
-    if (!model)
-      return { matched: false, reason: 'Model is required for preview.' }
-    const matched = rule.model_patterns.some((pattern) => {
-      try {
-        return new RegExp(pattern).test(model)
-      } catch {
-        return false
-      }
-    })
-    if (!matched) {
-      return { matched: false, reason: 'Model pattern does not match.' }
-    }
-  }
-
-  if (passThroughEnabled) {
-    return {
-      matched: true,
-      reason:
-        'Sample request matches this rule, but passthrough will skip conversion.',
-    }
-  }
-
-  return { matched: true, reason: 'Sample request matches this rule.' }
 }

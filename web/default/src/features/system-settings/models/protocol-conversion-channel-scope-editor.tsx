@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Plus, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +10,9 @@ import { Switch } from '@/components/ui/switch'
 import { CHANNEL_TYPE_OPTIONS } from '@/features/channels/constants'
 import type { Channel } from '@/features/channels/types'
 import {
+  createCommittedDraftText,
+  createDraftTextChange,
+  getDraftTextValue,
   parseIntegerText,
   type ProtocolRule,
 } from './protocol-conversion-policy-utils'
@@ -32,11 +35,33 @@ export function ProtocolConversionChannelScopeEditor({
   onUpdate,
 }: ProtocolConversionChannelScopeEditorProps) {
   const { t } = useTranslation()
+  const channelTypesValue = rule.channel_types.join(', ')
+  const [channelTypesDraft, setChannelTypesDraft] = useState(() =>
+    createCommittedDraftText(channelTypesValue)
+  )
+  const channelTypesInput = getDraftTextValue(
+    channelTypesDraft,
+    channelTypesValue
+  )
   const channelById = new Map(channels.map((channel) => [channel.id, channel]))
   const channelOptions = channels.map((channel) => ({
     value: String(channel.id),
     label: `#${channel.id} ${channel.name}`,
   }))
+
+  const commitChannelTypesDraft = () => {
+    const nextChannelTypes = parseIntegerText(channelTypesInput)
+    const nextValue = nextChannelTypes.join(', ')
+    setChannelTypesDraft(createCommittedDraftText(nextValue))
+    onUpdate({ channel_types: nextChannelTypes })
+  }
+
+  const updateChannelTypesDraft = (value: string) => {
+    const nextChannelTypes = parseIntegerText(value)
+    const nextValue = nextChannelTypes.join(', ')
+    setChannelTypesDraft(createDraftTextChange(value, nextValue))
+    onUpdate({ channel_types: nextChannelTypes })
+  }
 
   return (
     <div className='space-y-3 rounded-md border p-3'>
@@ -96,10 +121,9 @@ export function ProtocolConversionChannelScopeEditor({
         <ScopeField label={t('Channel types')}>
           <Input
             disabled={rule.all_channels}
-            value={rule.channel_types.join(', ')}
-            onChange={(event) =>
-              onUpdate({ channel_types: parseIntegerText(event.target.value) })
-            }
+            value={channelTypesInput}
+            onChange={(event) => updateChannelTypesDraft(event.target.value)}
+            onBlur={commitChannelTypesDraft}
             placeholder={CHANNEL_TYPE_OPTIONS.slice(0, 4)
               .map((item) => `${item.value}`)
               .join(', ')}

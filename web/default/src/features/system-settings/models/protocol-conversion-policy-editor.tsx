@@ -31,6 +31,13 @@ type ProtocolConversionPolicyEditorProps = {
   onChange: (value: string) => void
 }
 
+let editorRuleKeyCounter = 0
+
+function nextEditorRuleKey() {
+  editorRuleKeyCounter += 1
+  return `protocol-rule-editor-${Date.now()}-${editorRuleKeyCounter}`
+}
+
 export function ProtocolConversionPolicyEditor({
   value,
   savedValue,
@@ -38,12 +45,14 @@ export function ProtocolConversionPolicyEditor({
   onChange,
 }: ProtocolConversionPolicyEditorProps) {
   const { t } = useTranslation()
-  const [jsonOpen, setJsonOpen] = useState(false)
-  const [jsonDraft, setJsonDraft] = useState(value || '{}')
-
   const parsed = useMemo(() => parseProtocolPolicy(value), [value])
   const rules = parsed.ok ? parsed.rules : []
   const policyExtra = parsed.ok ? parsed.policyExtra : {}
+  const [ruleKeys, setRuleKeys] = useState(() =>
+    rules.map(() => nextEditorRuleKey())
+  )
+  const [jsonOpen, setJsonOpen] = useState(false)
+  const [jsonDraft, setJsonDraft] = useState(value || '{}')
 
   const { data: channelsData } = useQuery({
     queryKey: channelsQueryKeys.list({ p: 1, page_size: 200 }),
@@ -54,10 +63,10 @@ export function ProtocolConversionPolicyEditor({
     onChange(serializeProtocolPolicy(nextRules, policyExtra))
   }
 
-  const updateRule = (clientKey: string, patch: Partial<ProtocolRule>) => {
+  const updateRule = (ruleIndex: number, patch: Partial<ProtocolRule>) => {
     commitRules(
-      rules.map((rule) => {
-        if (rule.clientKey !== clientKey) return rule
+      rules.map((rule, index) => {
+        if (index !== ruleIndex) return rule
         const nextRule = { ...rule, ...patch }
         if (!isResponsesToChatRule(nextRule)) {
           nextRule.enable_custom_tool_bridge = false
@@ -73,8 +82,28 @@ export function ProtocolConversionPolicyEditor({
       toast.error(next.error)
       return
     }
+    setRuleKeys(next.rules.map(() => nextEditorRuleKey()))
     onChange(serializeProtocolPolicy(next.rules, next.policyExtra))
     setJsonOpen(false)
+  }
+
+  const restoreSavedValue = () => {
+    const nextValue = savedValue || '{}'
+    const next = parseProtocolPolicy(nextValue)
+    setRuleKeys(next.ok ? next.rules.map(() => nextEditorRuleKey()) : [])
+    onChange(nextValue)
+  }
+
+  const addRule = () => {
+    setRuleKeys((currentKeys) => [...currentKeys, nextEditorRuleKey()])
+    commitRules([...rules, createProtocolRule()])
+  }
+
+  const removeRule = (ruleIndex: number) => {
+    setRuleKeys((currentKeys) =>
+      currentKeys.filter((_, index) => index !== ruleIndex)
+    )
+    commitRules(rules.filter((_, index) => index !== ruleIndex))
   }
 
   return (
@@ -105,16 +134,12 @@ export function ProtocolConversionPolicyEditor({
             type='button'
             variant='outline'
             size='sm'
-            onClick={() => onChange(savedValue || '{}')}
+            onClick={restoreSavedValue}
           >
             <RotateCcw className='size-4' />
             {t('Restore saved')}
           </Button>
-          <Button
-            type='button'
-            size='sm'
-            onClick={() => commitRules([...rules, createProtocolRule()])}
-          >
+          <Button type='button' size='sm' onClick={addRule}>
             <Plus className='size-4' />
             {t('Add rule')}
           </Button>
@@ -135,17 +160,13 @@ export function ProtocolConversionPolicyEditor({
         <div className='space-y-3'>
           {rules.map((rule, index) => (
             <ProtocolConversionRuleCard
-              key={rule.clientKey}
+              key={ruleKeys[index] ?? `external-rule-${index}`}
               index={index}
               rule={rule}
               channels={channelsData?.data?.items ?? []}
               passThroughEnabled={passThroughEnabled}
-              onUpdate={(patch) => updateRule(rule.clientKey, patch)}
-              onRemove={() =>
-                commitRules(
-                  rules.filter((item) => item.clientKey !== rule.clientKey)
-                )
-              }
+              onUpdate={(patch) => updateRule(index, patch)}
+              onRemove={() => removeRule(index)}
             />
           ))}
         </div>

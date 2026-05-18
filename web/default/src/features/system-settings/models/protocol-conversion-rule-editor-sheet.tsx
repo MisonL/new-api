@@ -21,16 +21,17 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import type { Channel } from '@/features/channels/types'
 import { ProtocolConversionChannelScopeEditor } from './protocol-conversion-channel-scope-editor'
+import { ProtocolConversionHitPreview } from './protocol-conversion-hit-preview'
 import {
-  ProtocolConversionHitPreview,
-  type ProtocolPreviewState,
-} from './protocol-conversion-hit-preview'
-import {
+  createCommittedDraftText,
+  createDraftTextChange,
   ENDPOINT_CHAT,
   ENDPOINT_RESPONSES,
+  getDraftTextValue,
   isResponsesToChatRule,
   parseLines,
   type ProtocolEndpoint,
+  type ProtocolPreviewState,
   type ProtocolRule,
 } from './protocol-conversion-policy-utils'
 import { ProtocolConversionRuleImpactAlert } from './protocol-conversion-rule-impact-alert'
@@ -64,6 +65,14 @@ export function ProtocolConversionRuleEditorSheet({
     channelType: '',
     model: '',
   })
+  const modelPatternsValue = rule.model_patterns.join('\n')
+  const [modelPatternsDraft, setModelPatternsDraft] = useState(() =>
+    createCommittedDraftText(modelPatternsValue)
+  )
+  const modelPatternsInput = getDraftTextValue(
+    modelPatternsDraft,
+    modelPatternsValue
+  )
   const bridgeSupported = isResponsesToChatRule(rule)
 
   const setEndpoint = (field: 'source_endpoint' | 'target_endpoint') => {
@@ -88,6 +97,20 @@ export function ProtocolConversionRuleEditorSheet({
     }
     onUpdate({ all_channels: false, channel_ids: [...rule.channel_ids, id] })
     setSelectedChannelId('')
+  }
+
+  const commitModelPatternsDraft = () => {
+    const nextPatterns = parseLines(modelPatternsInput)
+    const nextValue = nextPatterns.join('\n')
+    setModelPatternsDraft(createCommittedDraftText(nextValue))
+    onUpdate({ model_patterns: nextPatterns })
+  }
+
+  const updateModelPatternsDraft = (value: string) => {
+    const nextPatterns = parseLines(value)
+    const nextValue = nextPatterns.join('\n')
+    setModelPatternsDraft(createDraftTextChange(value, nextValue))
+    onUpdate({ model_patterns: nextPatterns })
   }
 
   return (
@@ -140,10 +163,9 @@ export function ProtocolConversionRuleEditorSheet({
           <Field label={t('Model patterns')}>
             <Textarea
               rows={4}
-              value={rule.model_patterns.join('\n')}
-              onChange={(event) =>
-                onUpdate({ model_patterns: parseLines(event.target.value) })
-              }
+              value={modelPatternsInput}
+              onChange={(event) => updateModelPatternsDraft(event.target.value)}
+              onBlur={commitModelPatternsDraft}
               placeholder={'^gpt-4o.*$\n^gpt-5.*$'}
             />
           </Field>
