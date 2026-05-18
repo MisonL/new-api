@@ -362,6 +362,71 @@ func normalizeProtocolRuleOptionsRaw(originalRule map[string]common.RawMessage, 
 	originalRule["options"] = encoded
 }
 
+func rawTrimmedString(data common.RawMessage) (string, bool) {
+	var value string
+	if err := common.Unmarshal(data, &value); err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(value), true
+}
+
+func rawNormalizedProtocolField(data common.RawMessage, key string) (string, bool) {
+	value, ok := rawTrimmedString(data)
+	if !ok {
+		return "", false
+	}
+	if key == "source_endpoint" || key == "target_endpoint" {
+		return normalizeProtocolEndpoint(value), true
+	}
+	return value, true
+}
+
+func rawProtocolFieldsEqual(left common.RawMessage, right common.RawMessage, key string) bool {
+	leftValue, leftOk := rawNormalizedProtocolField(left, key)
+	rightValue, rightOk := rawNormalizedProtocolField(right, key)
+	return leftOk && rightOk && leftValue == rightValue
+}
+
+func protocolRuleIdentityMatches(originalRule map[string]common.RawMessage, normalizedRule map[string]common.RawMessage) bool {
+	for _, key := range []string{"name", "source_endpoint", "target_endpoint"} {
+		originalValue, hasOriginal := originalRule[key]
+		normalizedValue, hasNormalized := normalizedRule[key]
+		if !hasOriginal || !hasNormalized {
+			return false
+		}
+		if !rawProtocolFieldsEqual(originalValue, normalizedValue, key) {
+			return false
+		}
+	}
+	return true
+}
+
+func findOriginalProtocolRule(
+	originalRules []common.RawMessage,
+	usedOriginalRules []bool,
+	normalizedRule map[string]common.RawMessage,
+	preferredIndex int,
+) map[string]common.RawMessage {
+	if preferredIndex < len(originalRules) && !usedOriginalRules[preferredIndex] {
+		originalRule := rawObjectFromMessage(originalRules[preferredIndex])
+		if protocolRuleIdentityMatches(originalRule, normalizedRule) {
+			usedOriginalRules[preferredIndex] = true
+			return originalRule
+		}
+	}
+	for index, originalRuleRaw := range originalRules {
+		if usedOriginalRules[index] {
+			continue
+		}
+		originalRule := rawObjectFromMessage(originalRuleRaw)
+		if protocolRuleIdentityMatches(originalRule, normalizedRule) {
+			usedOriginalRules[index] = true
+			return originalRule
+		}
+	}
+	return map[string]common.RawMessage{}
+}
+
 func normalizeProtocolRulesRaw(original map[string]common.RawMessage, normalized map[string]common.RawMessage) error {
 	normalizedRulesRaw, ok := normalized["rules"]
 	if !ok {
@@ -379,12 +444,10 @@ func normalizeProtocolRulesRaw(original map[string]common.RawMessage, normalized
 	}
 
 	mergedRules := make([]map[string]common.RawMessage, 0, len(normalizedRules))
+	usedOriginalRules := make([]bool, len(originalRules))
 	for i, normalizedRuleRaw := range normalizedRules {
-		originalRule := map[string]common.RawMessage{}
-		if i < len(originalRules) {
-			originalRule = rawObjectFromMessage(originalRules[i])
-		}
 		normalizedRule := rawObjectFromMessage(normalizedRuleRaw)
+		originalRule := findOriginalProtocolRule(originalRules, usedOriginalRules, normalizedRule, i)
 		replaceKnownRawFields(originalRule, normalizedRule, protocolRuleKnownFields)
 		normalizeProtocolRuleOptionsRaw(originalRule, normalizedRule)
 		mergedRules = append(mergedRules, originalRule)

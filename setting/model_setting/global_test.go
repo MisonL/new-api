@@ -184,6 +184,159 @@ func TestNormalizeChatCompletionsToResponsesPolicyJSON_PreservesUnknownFields(t 
 	assert.JSONEq(t, `"keep"`, string(options["some_future_field"]))
 }
 
+func TestNormalizeChatCompletionsToResponsesPolicyJSON_DoesNotAttachUnknownFieldsToDifferentRule(t *testing.T) {
+	raw := `{
+		"rules": [
+			{
+				"name": " first ",
+				"enabled": true,
+				"source_endpoint": "responses",
+				"target_endpoint": "chat_completions",
+				"all_channels": true,
+				"model_patterns": ["^gpt-5.*$"],
+				"future_rule": "first-only"
+			},
+			{
+				"name": "second",
+				"enabled": true,
+				"source_endpoint": "chat_completions",
+				"target_endpoint": "responses",
+				"all_channels": true,
+				"model_patterns": ["^gpt-4o.*$"]
+			}
+		]
+	}`
+
+	normalized, err := NormalizeChatCompletionsToResponsesPolicyJSON(raw)
+	require.NoError(t, err)
+
+	var policyRaw map[string]common.RawMessage
+	require.NoError(t, common.Unmarshal([]byte(normalized), &policyRaw))
+	var rules []map[string]common.RawMessage
+	require.NoError(t, common.Unmarshal(policyRaw["rules"], &rules))
+	require.Len(t, rules, 2)
+	assert.JSONEq(t, `"first-only"`, string(rules[0]["future_rule"]))
+	assert.NotContains(t, rules[1], "future_rule")
+}
+
+func TestNormalizeProtocolRulesRaw_DropsUnknownFieldsWhenRuleIdentityChanges(t *testing.T) {
+	original := map[string]common.RawMessage{
+		"rules": common.RawMessage(`[
+			{
+				"name": "first",
+				"enabled": true,
+				"source_endpoint": "responses",
+				"target_endpoint": "chat_completions",
+				"all_channels": true,
+				"model_patterns": ["^gpt-5.*$"],
+				"future_rule": "first-only"
+			}
+		]`),
+	}
+	normalized := map[string]common.RawMessage{
+		"rules": common.RawMessage(`[
+			{
+				"name": "second",
+				"enabled": true,
+				"source_endpoint": "chat_completions",
+				"target_endpoint": "responses",
+				"all_channels": true,
+				"model_patterns": ["^gpt-4o.*$"]
+			}
+		]`),
+	}
+
+	require.NoError(t, normalizeProtocolRulesRaw(original, normalized))
+
+	var rules []map[string]common.RawMessage
+	require.NoError(t, common.Unmarshal(original["rules"], &rules))
+	require.Len(t, rules, 1)
+	assert.JSONEq(t, `"second"`, string(rules[0]["name"]))
+	assert.NotContains(t, rules[0], "future_rule")
+}
+
+func TestNormalizeProtocolRulesRaw_PreservesUnknownFieldsAfterRuleDeletion(t *testing.T) {
+	original := map[string]common.RawMessage{
+		"rules": common.RawMessage(`[
+			{
+				"name": "deleted-rule",
+				"enabled": true,
+				"source_endpoint": "responses",
+				"target_endpoint": "chat_completions",
+				"all_channels": true,
+				"model_patterns": ["^gpt-5.*$"],
+				"future_rule": "delete-me"
+			},
+			{
+				"name": "kept-rule",
+				"enabled": true,
+				"source_endpoint": "chat_completions",
+				"target_endpoint": "responses",
+				"all_channels": true,
+				"model_patterns": ["^gpt-4o.*$"],
+				"future_rule": "keep-me",
+				"options": {
+					"future_option": "keep-option"
+				}
+			}
+		]`),
+	}
+	normalized := map[string]common.RawMessage{
+		"rules": common.RawMessage(`[
+			{
+				"name": "kept-rule",
+				"enabled": false,
+				"source_endpoint": "chat_completions",
+				"target_endpoint": "responses",
+				"all_channels": true,
+				"model_patterns": ["^gpt-4o.*$"],
+				"options": {}
+			}
+		]`),
+	}
+
+	require.NoError(t, normalizeProtocolRulesRaw(original, normalized))
+
+	var rules []map[string]common.RawMessage
+	require.NoError(t, common.Unmarshal(original["rules"], &rules))
+	require.Len(t, rules, 1)
+	assert.JSONEq(t, `"kept-rule"`, string(rules[0]["name"]))
+	assert.JSONEq(t, `false`, string(rules[0]["enabled"]))
+	assert.JSONEq(t, `"keep-me"`, string(rules[0]["future_rule"]))
+
+	var options map[string]common.RawMessage
+	require.NoError(t, common.Unmarshal(rules[0]["options"], &options))
+	assert.JSONEq(t, `"keep-option"`, string(options["future_option"]))
+}
+
+func TestNormalizeChatCompletionsToResponsesPolicyJSON_PreservesUnknownFieldsWithEndpointAliases(t *testing.T) {
+	raw := `{
+		"rules": [
+			{
+				"name": "alias-rule",
+				"enabled": true,
+				"source_endpoint": "/v1/chat/completions",
+				"target_endpoint": "/v1/responses",
+				"all_channels": true,
+				"model_patterns": ["^gpt-4o.*$"],
+				"future_rule": "keep"
+			}
+		]
+	}`
+
+	normalized, err := NormalizeChatCompletionsToResponsesPolicyJSON(raw)
+	require.NoError(t, err)
+
+	var policyRaw map[string]common.RawMessage
+	require.NoError(t, common.Unmarshal([]byte(normalized), &policyRaw))
+	var rules []map[string]common.RawMessage
+	require.NoError(t, common.Unmarshal(policyRaw["rules"], &rules))
+	require.Len(t, rules, 1)
+	assert.JSONEq(t, `"keep"`, string(rules[0]["future_rule"]))
+	assert.JSONEq(t, `"chat_completions"`, string(rules[0]["source_endpoint"]))
+	assert.JSONEq(t, `"responses"`, string(rules[0]["target_endpoint"]))
+}
+
 func TestNormalizeChatCompletionsToResponsesPolicyJSON_EmptyInput(t *testing.T) {
 	normalized, err := NormalizeChatCompletionsToResponsesPolicyJSON("")
 	require.NoError(t, err)
