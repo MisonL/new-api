@@ -2165,6 +2165,29 @@ html.dark .with-pastel-balls::before {
   flex: 0 0 auto;
 }
 
+.channel-table-card.table-scroll-card {
+  height: calc(100vh - 110px);
+  height: calc(100dvh - 110px);
+  max-height: calc(100vh - 110px);
+  max-height: calc(100dvh - 110px);
+}
+
+.channel-table-card.table-scroll-card > .semi-card-header,
+.channel-table-card.table-scroll-card > .semi-card-footer {
+  flex: 0 0 auto;
+}
+
+.channel-table-card .card-table-fixed-scroll-shell .semi-table-body {
+  max-height: none;
+}
+
+.channel-table-card
+  .semi-table-tbody
+  .semi-table-row
+  .semi-table-cell-fixed-right {
+  background: inherit;
+}
+
 .card-table-desktop-scroll {
   width: 100%;
   overflow-x: auto;
@@ -2286,6 +2309,13 @@ html.dark .with-pastel-balls::before {
   }
 
   .usage-logs-card.table-scroll-card {
+    height: calc(100vh - 77px);
+    height: calc(100dvh - 77px);
+    max-height: calc(100vh - 77px);
+    max-height: calc(100dvh - 77px);
+  }
+
+  .channel-table-card.table-scroll-card {
     height: calc(100vh - 77px);
     height: calc(100dvh - 77px);
     max-height: calc(100vh - 77px);
