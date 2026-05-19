@@ -67,6 +67,67 @@ const verifyJSON = (raw) => {
   }
 };
 
+const createParseError = (message) => new Error(message);
+
+const ruleFieldPath = (fieldName, ruleIndex) =>
+  ruleIndex == null ? fieldName : `rules[${ruleIndex}].${fieldName}`;
+
+const normalizeEndpointStrict = (value, fieldName, ruleIndex) => {
+  const endpoint = normalizeEndpoint(value);
+  const path = ruleFieldPath(fieldName, ruleIndex);
+  if (!endpoint) {
+    throw createParseError(`${path} is required`);
+  }
+  if (!SUPPORTED_ENDPOINT_VALUES.has(endpoint)) {
+    throw createParseError(`${path} is unsupported`);
+  }
+  return endpoint;
+};
+
+const toPositiveIntegerArray = (value, fieldName, ruleIndex) => {
+  if (value === undefined) {
+    return [];
+  }
+  const path = ruleFieldPath(fieldName, ruleIndex);
+  if (!Array.isArray(value)) {
+    throw createParseError(`${path} must be an array`);
+  }
+  for (const item of value) {
+    if (!Number.isInteger(item) || item <= 0) {
+      throw createParseError(`${path} must contain positive integers`);
+    }
+  }
+  return Array.from(new Set(value));
+};
+
+const toModelPatternArray = (value, ruleIndex) => {
+  if (value === undefined) {
+    return [];
+  }
+  const path = ruleFieldPath('model_patterns', ruleIndex);
+  if (!Array.isArray(value)) {
+    throw createParseError(`${path} must be an array`);
+  }
+  const patterns = [];
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      throw createParseError(`${path} must contain strings`);
+    }
+    const pattern = item.trim();
+    if (!pattern) {
+      continue;
+    }
+    try {
+      new RegExp(pattern);
+    } catch (error) {
+      const detail = error instanceof Error ? `: ${error.message}` : '';
+      throw createParseError(`${path} contains an invalid regex${detail}`);
+    }
+    patterns.push(pattern);
+  }
+  return patterns;
+};
+
 const ensureRuleClientKey = (rule) => {
   const currentKey =
     rule &&
@@ -113,7 +174,7 @@ export const parseIntegerList = (text) =>
   Array.from(
     new Set(
       String(text || '')
-        .split(',')
+        .split(/[\s,，、]+/)
         .map((item) => Number(item.trim()))
         .filter((item) => Number.isInteger(item) && item > 0),
     ),
@@ -136,34 +197,66 @@ export const isRuleScopeValid = (rule) =>
   (Array.isArray(rule?.channel_ids) && rule.channel_ids.length > 0) ||
   (Array.isArray(rule?.channel_types) && rule.channel_types.length > 0);
 
-export const sanitizeRule = (rule, fallbackName) => {
-  const channelTypes = Array.isArray(rule?.channel_types)
-    ? rule.channel_types
-        .map((item) => Number(item))
-        .filter((item) => Number.isInteger(item) && item > 0)
-    : [];
+export const sanitizeRule = (rule, fallbackName, ruleIndex) => {
+  if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
+    throw createParseError(`rules[${ruleIndex}] must be an object`);
+  }
+  if (rule.options !== undefined) {
+    if (
+      !rule.options ||
+      typeof rule.options !== 'object' ||
+      Array.isArray(rule.options)
+    ) {
+      throw createParseError(`rules[${ruleIndex}].options must be an object`);
+    }
+  }
+  const sourceEndpoint = normalizeEndpointStrict(
+    rule.source_endpoint,
+    'source_endpoint',
+    ruleIndex,
+  );
+  const targetEndpoint = normalizeEndpointStrict(
+    rule.target_endpoint,
+    'target_endpoint',
+    ruleIndex,
+  );
+  if (sourceEndpoint === targetEndpoint) {
+    throw createParseError(
+      `rules[${ruleIndex}].source_endpoint and target_endpoint must be different`,
+    );
+  }
+
+  const enableCustomToolBridge =
+    rule?.options?.enable_custom_tool_bridge === true ||
+    rule?.enable_custom_tool_bridge === true;
+  if (
+    enableCustomToolBridge &&
+    (sourceEndpoint !== ENDPOINT_RESPONSES || targetEndpoint !== ENDPOINT_CHAT)
+  ) {
+    throw createParseError(
+      `rules[${ruleIndex}].enable_custom_tool_bridge only supports Responses to Chat Completions`,
+    );
+  }
 
   return {
     [RULE_CLIENT_KEY_FIELD]: ensureRuleClientKey(rule),
     name: String(rule?.name || fallbackName || '').trim() || 'rule',
     enabled: rule?.enabled !== false,
-    source_endpoint: normalizeEndpoint(rule?.source_endpoint),
-    target_endpoint: normalizeEndpoint(rule?.target_endpoint),
+    source_endpoint: sourceEndpoint,
+    target_endpoint: targetEndpoint,
     all_channels: rule?.all_channels !== false,
-    channel_ids: Array.isArray(rule?.channel_ids)
-      ? rule.channel_ids
-          .map((item) => Number(item))
-          .filter((item) => Number.isInteger(item) && item > 0)
-      : [],
-    channel_types: channelTypes,
-    model_patterns: Array.isArray(rule?.model_patterns)
-      ? rule.model_patterns
-          .map((item) => String(item || '').trim())
-          .filter((item) => item.length > 0)
-      : [],
-    enable_custom_tool_bridge:
-      rule?.options?.enable_custom_tool_bridge === true ||
-      rule?.enable_custom_tool_bridge === true,
+    channel_ids: toPositiveIntegerArray(
+      rule?.channel_ids,
+      'channel_ids',
+      ruleIndex,
+    ),
+    channel_types: toPositiveIntegerArray(
+      rule?.channel_types,
+      'channel_types',
+      ruleIndex,
+    ),
+    model_patterns: toModelPatternArray(rule?.model_patterns, ruleIndex),
+    enable_custom_tool_bridge: enableCustomToolBridge,
     [RULE_EXTRA_FIELD]: {
       ...pickExtraFields(rule?.[RULE_EXTRA_FIELD], new Set()),
       ...pickExtraFields(rule, RULE_KNOWN_FIELDS),
@@ -182,9 +275,9 @@ export const extractRulesFromPolicy = (policy) => {
   if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
     return [];
   }
-  if (Array.isArray(policy.rules) && policy.rules.length > 0) {
+  if (Array.isArray(policy.rules)) {
     return policy.rules.map((rule, index) =>
-      sanitizeRule(rule, `rule-${index + 1}`),
+      sanitizeRule(rule, `rule-${index + 1}`, index),
     );
   }
 
@@ -212,6 +305,7 @@ export const extractRulesFromPolicy = (policy) => {
         model_patterns: policy.model_patterns || [],
       },
       'legacy-chat-to-responses',
+      0,
     ),
   ];
 };

@@ -419,7 +419,8 @@
     "Average TPM": "Average TPM",
     "Average TTFT": "Average TTFT",
     "AWS": "AWS",
-    "AWS Bedrock Claude Compat": "AWS Bedrock Claude Compat",
+    "AWS Bedrock Claude Beta Header": "AWS Bedrock Claude Beta Header",
+    "AWS Bedrock Remove Input Examples": "AWS Bedrock Remove Input Examples",
     "AWS Key Format": "AWS Key Format",
     "Azure": "Azure",
     "AZURE_OPENAI_ENDPOINT *": "AZURE_OPENAI_ENDPOINT *",
@@ -684,7 +685,6 @@
     "Codex Authorization": "Codex Authorization",
     "Codex channels use an OAuth JSON credential as the key.": "Codex channels use an OAuth JSON credential as the key.",
     "Codex CLI Header Passthrough": "Codex CLI Header Passthrough",
-    "Codex Desktop Compat: Headers + Remove Image Tool": "Codex Desktop Compat: Headers + Remove Image Tool",
     "Codex Desktop Compat: Remove Image Generation Tool": "Codex Desktop Compat: Remove Image Generation Tool",
     "Codex Desktop Header Passthrough": "Codex Desktop Header Passthrough",
     "Cohere": "Cohere",
@@ -4076,6 +4076,9 @@
     "Model patterns": "Model patterns",
     "Bridge Responses custom tools into Chat Completions tools.": "Bridge Responses custom tools into Chat Completions tools.",
     "Custom tool bridge only applies to Responses to Chat Completions.": "Custom tool bridge only applies to Responses to Chat Completions.",
+    "Loading channels...": "Loading channels...",
+    "Failed to load channels for selector.": "Failed to load channels for selector.",
+    "Only the first {{loaded}} of {{total}} channels are available in the selector. Use channel type or JSON for channels beyond this range.": "Only the first {{loaded}} of {{total}} channels are available in the selector. Use channel type or JSON for channels beyond this range.",
     "Empty rule list will be saved as {}. JSON import remains available for advanced fields.": "Empty rule list will be saved as {}. JSON import remains available for advanced fields."
   }
 }

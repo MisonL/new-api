@@ -117,6 +117,13 @@ export default function SettingGlobalModel(props) {
     setLoading(true);
     Promise.all(requestQueue)
       .then((res) => {
+        const failedResponse = res.find(
+          (item) => item?.data?.success === false,
+        );
+        if (failedResponse) {
+          showError(failedResponse.data?.message || t('保存失败，请重试'));
+          return;
+        }
         if (requestQueue.length === 1) {
           if (res.includes(undefined)) return;
         } else if (requestQueue.length > 1) {

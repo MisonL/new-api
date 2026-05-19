@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Code2, Plus, RotateCcw } from 'lucide-react'
+import { Code2, Loader2, Plus, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -12,14 +13,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { getChannels } from '@/features/channels/api'
 import { channelsQueryKeys } from '@/features/channels/lib'
 import {
-  createProtocolRule,
+  TEMPLATE_BIDIRECTIONAL,
+  TEMPLATE_CHAT_TO_RESPONSES,
+  TEMPLATE_RESPONSES_TO_CHAT,
+  createProtocolRuleFromTemplate,
   isResponsesToChatRule,
   parseProtocolPolicy,
   serializeProtocolPolicy,
+  type ProtocolRuleTemplate,
   type ProtocolRule,
 } from './protocol-conversion-policy-utils'
 import { ProtocolConversionRuleCard } from './protocol-conversion-rule-card'
@@ -30,6 +42,11 @@ type ProtocolConversionPolicyEditorProps = {
   passThroughEnabled: boolean
   onChange: (value: string) => void
 }
+
+// The selector is an aid, not the source of truth; truncated results show a JSON fallback hint.
+const CHANNEL_SELECTOR_PAGE_SIZE = 1000
+const CHANNEL_SELECTOR_STALE_TIME_MS = 60_000
+const CHANNEL_SELECTOR_GC_TIME_MS = 5 * 60_000
 
 let editorRuleKeyCounter = 0
 
@@ -53,11 +70,27 @@ export function ProtocolConversionPolicyEditor({
   )
   const [jsonOpen, setJsonOpen] = useState(false)
   const [jsonDraft, setJsonDraft] = useState(value || '{}')
+  const [ruleTemplate, setRuleTemplate] = useState<ProtocolRuleTemplate>(
+    TEMPLATE_RESPONSES_TO_CHAT
+  )
 
-  const { data: channelsData } = useQuery({
-    queryKey: channelsQueryKeys.list({ p: 1, page_size: 200 }),
-    queryFn: () => getChannels({ p: 1, page_size: 200 }),
+  const {
+    data: channelsData,
+    isLoading: isChannelsLoading,
+    isError: isChannelsError,
+  } = useQuery({
+    queryKey: channelsQueryKeys.list({
+      p: 1,
+      page_size: CHANNEL_SELECTOR_PAGE_SIZE,
+    }),
+    queryFn: () => getChannels({ p: 1, page_size: CHANNEL_SELECTOR_PAGE_SIZE }),
+    staleTime: CHANNEL_SELECTOR_STALE_TIME_MS,
+    gcTime: CHANNEL_SELECTOR_GC_TIME_MS,
+    refetchOnWindowFocus: false,
   })
+  const channels = channelsData?.data?.items ?? []
+  const channelTotal = channelsData?.data?.total ?? 0
+  const channelsTruncated = channelTotal > channels.length
 
   const commitRules = (nextRules: ProtocolRule[]) => {
     onChange(serializeProtocolPolicy(nextRules, policyExtra))
@@ -90,13 +123,21 @@ export function ProtocolConversionPolicyEditor({
   const restoreSavedValue = () => {
     const nextValue = savedValue || '{}'
     const next = parseProtocolPolicy(nextValue)
-    setRuleKeys(next.ok ? next.rules.map(() => nextEditorRuleKey()) : [])
+    if (!next.ok) {
+      toast.error(next.error)
+      return
+    }
+    setRuleKeys(next.rules.map(() => nextEditorRuleKey()))
     onChange(nextValue)
   }
 
   const addRule = () => {
-    setRuleKeys((currentKeys) => [...currentKeys, nextEditorRuleKey()])
-    commitRules([...rules, createProtocolRule()])
+    const nextRules = createProtocolRuleFromTemplate(ruleTemplate, rules)
+    setRuleKeys((currentKeys) => [
+      ...currentKeys,
+      ...nextRules.map(() => nextEditorRuleKey()),
+    ])
+    commitRules([...rules, ...nextRules])
   }
 
   const removeRule = (ruleIndex: number) => {
@@ -118,6 +159,30 @@ export function ProtocolConversionPolicyEditor({
           </div>
         </div>
         <div className='flex flex-wrap gap-2'>
+          <Select
+            value={ruleTemplate}
+            onValueChange={(value) =>
+              setRuleTemplate(value as ProtocolRuleTemplate)
+            }
+          >
+            <SelectTrigger
+              className='h-8 w-[180px]'
+              aria-label={t('Rule template')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TEMPLATE_RESPONSES_TO_CHAT}>
+                {t('Responses -> Chat')}
+              </SelectItem>
+              <SelectItem value={TEMPLATE_CHAT_TO_RESPONSES}>
+                {t('Chat -> Responses')}
+              </SelectItem>
+              <SelectItem value={TEMPLATE_BIDIRECTIONAL}>
+                {t('Bidirectional')}
+              </SelectItem>
+            </SelectContent>
+          </Select>
           <Button
             type='button'
             variant='outline'
@@ -158,12 +223,35 @@ export function ProtocolConversionPolicyEditor({
         </div>
       ) : (
         <div className='space-y-3'>
+          {isChannelsError ? (
+            <Alert variant='destructive'>
+              <AlertDescription>
+                {t('Failed to load channels for selector.')}
+              </AlertDescription>
+            </Alert>
+          ) : isChannelsLoading ? (
+            <Alert>
+              <Loader2 className='size-4 animate-spin' />
+              <AlertDescription>{t('Loading channels...')}</AlertDescription>
+            </Alert>
+          ) : channelsTruncated ? (
+            <Alert>
+              <AlertDescription>
+                {t(
+                  'Only the first {{loaded}} of {{total}} channels are available in the selector. Use channel type or JSON for channels beyond this range.',
+                  { loaded: channels.length, total: channelTotal }
+                )}
+              </AlertDescription>
+            </Alert>
+          ) : null}
           {rules.map((rule, index) => (
             <ProtocolConversionRuleCard
               key={ruleKeys[index] ?? `external-rule-${index}`}
               index={index}
               rule={rule}
-              channels={channelsData?.data?.items ?? []}
+              channels={channels}
+              channelsLoading={isChannelsLoading}
+              channelsError={isChannelsError}
               passThroughEnabled={passThroughEnabled}
               onUpdate={(patch) => updateRule(index, patch)}
               onRemove={() => removeRule(index)}

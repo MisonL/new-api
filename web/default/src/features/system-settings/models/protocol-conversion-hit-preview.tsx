@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { parseChannelSettings } from '@/features/channels/lib/channel-utils'
+import type { Channel } from '@/features/channels/types'
 import {
   getProtocolPreviewResult,
   type ProtocolPreviewState,
@@ -12,6 +14,7 @@ import {
 type ProtocolConversionHitPreviewProps = {
   rule: ProtocolRule
   preview: ProtocolPreviewState
+  channels: Channel[]
   passThroughEnabled: boolean
   onPreviewChange: (preview: ProtocolPreviewState) => void
 }
@@ -19,11 +22,23 @@ type ProtocolConversionHitPreviewProps = {
 export function ProtocolConversionHitPreview({
   rule,
   preview,
+  channels,
   passThroughEnabled,
   onPreviewChange,
 }: ProtocolConversionHitPreviewProps) {
   const { t } = useTranslation()
-  const result = getProtocolPreviewResult(rule, preview, passThroughEnabled)
+  const channelId = Number.parseInt(preview.channelId, 10)
+  const previewChannel = channels.find((channel) => channel.id === channelId)
+  const channelPassThroughEnabled =
+    previewChannel != null
+      ? parseChannelSettings(previewChannel.setting)
+          .pass_through_body_enabled === true
+      : false
+  const result = getProtocolPreviewResult(
+    rule,
+    preview,
+    passThroughEnabled || channelPassThroughEnabled
+  )
 
   return (
     <div className='space-y-3 rounded-md border p-3'>

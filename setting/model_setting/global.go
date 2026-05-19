@@ -339,11 +339,11 @@ func rawObjectFromMessage(data common.RawMessage) map[string]common.RawMessage {
 	return rawObjectFromBytes(data)
 }
 
-func normalizeProtocolRuleOptionsRaw(originalRule map[string]common.RawMessage, normalizedRule map[string]common.RawMessage) {
+func normalizeProtocolRuleOptionsRaw(originalRule map[string]common.RawMessage, normalizedRule map[string]common.RawMessage) error {
 	originalOptions, hadOriginalOptions := originalRule["options"]
 	normalizedOptions, hasNormalizedOptions := normalizedRule["options"]
 	if !hadOriginalOptions && !hasNormalizedOptions {
-		return
+		return nil
 	}
 
 	optionsRaw := rawObjectFromMessage(originalOptions)
@@ -351,15 +351,15 @@ func normalizeProtocolRuleOptionsRaw(originalRule map[string]common.RawMessage, 
 	replaceKnownRawFields(optionsRaw, normalizedOptionsRaw, protocolOptionsKnownFields)
 	if len(optionsRaw) == 0 {
 		delete(originalRule, "options")
-		return
+		return nil
 	}
 
 	encoded, err := common.Marshal(optionsRaw)
 	if err != nil {
-		delete(originalRule, "options")
-		return
+		return fmt.Errorf("策略规则 options 序列化失败: %w", err)
 	}
 	originalRule["options"] = encoded
+	return nil
 }
 
 func rawTrimmedString(data common.RawMessage) (string, bool) {
@@ -387,11 +387,32 @@ func rawProtocolFieldsEqual(left common.RawMessage, right common.RawMessage, key
 	return leftOk && rightOk && leftValue == rightValue
 }
 
+func rawNamePresenceMatches(originalValue common.RawMessage, hasOriginal bool, normalizedValue common.RawMessage, hasNormalized bool) bool {
+	if hasOriginal == hasNormalized {
+		return true
+	}
+	if hasOriginal {
+		originalName, ok := rawTrimmedString(originalValue)
+		return ok && originalName == ""
+	}
+	normalizedName, ok := rawTrimmedString(normalizedValue)
+	return ok && normalizedName == ""
+}
+
 func protocolRuleIdentityMatches(originalRule map[string]common.RawMessage, normalizedRule map[string]common.RawMessage) bool {
 	for _, key := range []string{"name", "source_endpoint", "target_endpoint"} {
 		originalValue, hasOriginal := originalRule[key]
 		normalizedValue, hasNormalized := normalizedRule[key]
-		if !hasOriginal || !hasNormalized {
+		if !hasOriginal && !hasNormalized {
+			continue
+		}
+		if key == "name" && hasOriginal != hasNormalized {
+			if !rawNamePresenceMatches(originalValue, hasOriginal, normalizedValue, hasNormalized) {
+				return false
+			}
+			continue
+		}
+		if hasOriginal != hasNormalized {
 			return false
 		}
 		if !rawProtocolFieldsEqual(originalValue, normalizedValue, key) {
@@ -449,7 +470,9 @@ func normalizeProtocolRulesRaw(original map[string]common.RawMessage, normalized
 		normalizedRule := rawObjectFromMessage(normalizedRuleRaw)
 		originalRule := findOriginalProtocolRule(originalRules, usedOriginalRules, normalizedRule, i)
 		replaceKnownRawFields(originalRule, normalizedRule, protocolRuleKnownFields)
-		normalizeProtocolRuleOptionsRaw(originalRule, normalizedRule)
+		if err := normalizeProtocolRuleOptionsRaw(originalRule, normalizedRule); err != nil {
+			return err
+		}
 		mergedRules = append(mergedRules, originalRule)
 	}
 
@@ -458,6 +481,32 @@ func normalizeProtocolRulesRaw(original map[string]common.RawMessage, normalized
 		return err
 	}
 	original["rules"] = encoded
+	return nil
+}
+
+func validateProtocolRuleOptionsRaw(policy map[string]common.RawMessage) error {
+	rulesRaw, ok := policy["rules"]
+	if !ok {
+		return nil
+	}
+
+	var rules []map[string]common.RawMessage
+	if err := common.Unmarshal(rulesRaw, &rules); err != nil {
+		return fmt.Errorf("策略 rules 必须是对象数组: %w", err)
+	}
+	for i, rule := range rules {
+		if rule == nil {
+			return fmt.Errorf("规则 #%d 不能为 null", i+1)
+		}
+		optionsRaw, ok := rule["options"]
+		if !ok {
+			continue
+		}
+		var options map[string]common.RawMessage
+		if err := common.Unmarshal(optionsRaw, &options); err != nil || options == nil {
+			return fmt.Errorf("规则 #%d options 必须是对象（不接受 null）", i+1)
+		}
+	}
 	return nil
 }
 
@@ -473,6 +522,9 @@ func NormalizeChatCompletionsToResponsesPolicyJSON(raw string) (string, error) {
 	}
 	if original == nil {
 		original = map[string]common.RawMessage{}
+	}
+	if err := validateProtocolRuleOptionsRaw(original); err != nil {
+		return "", err
 	}
 
 	var policy ChatCompletionsToResponsesPolicy

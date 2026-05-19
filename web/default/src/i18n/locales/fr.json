@@ -419,7 +419,8 @@
     "Average TPM": "TPM moyen",
     "Average TTFT": "TTFT moyen",
     "AWS": "AWS",
-    "AWS Bedrock Claude Compat": "AWS Bedrock Claude Compat",
+    "AWS Bedrock Claude Beta Header": "En-tête bêta Claude AWS Bedrock",
+    "AWS Bedrock Remove Input Examples": "AWS Bedrock supprimer les exemples d’entrée",
     "AWS Key Format": "Format de clé AWS",
     "Azure": "Azure",
     "AZURE_OPENAI_ENDPOINT *": "AZURE_OPENAI_ENDPOINT *",
@@ -684,7 +685,6 @@
     "Codex Authorization": "Autorisation Codex",
     "Codex channels use an OAuth JSON credential as the key.": "Les canaux Codex utilisent un identifiant OAuth JSON comme clé.",
     "Codex CLI Header Passthrough": "Passthrough en-tête Codex CLI",
-    "Codex Desktop Compat: Headers + Remove Image Tool": "Compatibilité Codex Desktop : en-têtes + suppression de l'outil image",
     "Codex Desktop Compat: Remove Image Generation Tool": "Compatibilité Codex Desktop : supprimer l'outil de génération d'images",
     "Codex Desktop Header Passthrough": "Transmission des en-têtes Codex Desktop",
     "Cohere": "Cohere",
@@ -4076,6 +4076,9 @@
     "Model patterns": "Motifs de modèles",
     "Bridge Responses custom tools into Chat Completions tools.": "Convertit les outils personnalisés Responses en outils Chat Completions.",
     "Custom tool bridge only applies to Responses to Chat Completions.": "Le pont d'outils personnalisés s'applique uniquement de Responses vers Chat Completions.",
+    "Loading channels...": "Chargement des canaux...",
+    "Failed to load channels for selector.": "Impossible de charger les canaux pour le sélecteur.",
+    "Only the first {{loaded}} of {{total}} channels are available in the selector. Use channel type or JSON for channels beyond this range.": "Seuls les {{loaded}} premiers canaux sur {{total}} sont disponibles dans le sélecteur. Utilisez le type de canal ou le JSON pour les canaux au-delà de cette limite.",
     "Empty rule list will be saved as {}. JSON import remains available for advanced fields.": "Une liste de règles vide sera enregistrée sous {}. L'import JSON reste disponible pour les champs avancés."
   }
 }

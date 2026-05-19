@@ -237,10 +237,10 @@ WebUI 读取时转换为一条 legacy 规则展示：
 
 后端保存链路要求：
 
-- 实施前强类型 normalize 会丢未知字段，因此本方案实施时必须同步改造后端规范化逻辑。
-- 可选实现是先解析为 `map[string]json.RawMessage`，再解析已知字段做校验和规范化，最后把未知字段合并回原层级。
+- 后端规范化逻辑必须先解析为 `map[string]json.RawMessage`，再解析已知字段做校验和规范化，最后把未知字段合并回原层级。
 - 顶层、`rules[]`、`rules[].options` 三个层级都必须覆盖。
-- 若后端未完成未知字段保留，前端不得宣称“可视化编辑不丢高级字段”。
+- 缺少 `name` 的规则仅在未插入、删除或重排规则的单次 save/load round-trip 中按索引和协议方向保留未知字段；若允许编辑列表结构，前端必须先为无名规则分配稳定临时标识，避免 `future_field` 等未知字段串到其他规则。
+- `options` 必须是对象；非对象值应显式报错，不能静默删除。
 
 ### 6.3 classic 修复要求
 
@@ -251,7 +251,15 @@ WebUI 读取时转换为一条 legacy 规则展示：
 - 可视化模式如果暂不提供完整高级选项，也不能丢字段。
 - 删除规则必须二次确认。
 
-该修复必须在 `web/default` 规则管理器发布前完成，并作为同一发布门禁验收。否则管理员在 `web/default` 配好自定义工具桥接后，只要再通过 `web/classic` 保存一次，就可能破坏生产配置。
+本轮发布门禁要求 `web/default` 与 `web/classic` 的可视化保存链路都保留 `options.enable_custom_tool_bridge`。否则管理员在 `web/default` 配好自定义工具桥接后，只要再通过 `web/classic` 保存一次，就可能破坏生产配置。
+
+后续发布加固项：
+
+- 当前发布门禁已覆盖本轮代码内的 default/classic 可视化保存 round-trip 测试，确认 `options` 与 `options.enable_custom_tool_bridge` 不会在本轮编辑器中丢失。
+- 后续发布加固可增加 CI 集成测试，同时覆盖 `web/default` 和 `web/classic` 打包产物，避免未来双前端回归。
+- 后续发布加固可增加发布检查清单，确认 `web/default` 与 `web/classic` 打包版本一致后再发布。
+- 后续发布加固可增加运行时版本检测；发现 `web/default` 与 `web/classic` 版本不一致时，向管理员给出清晰告警；若存在破坏配置风险，应阻断相关发布或加载流程。
+- 风险说明：若未来出现不同前端版本交替保存同一配置，仍应优先从审计记录或备份 JSON 恢复，并补充对应 CI 复现用例。
 
 ## 7. 校验规则
 
@@ -425,6 +433,12 @@ go test ./setting/... ./service/... ./relay/...
 - 导入 JSON。
 - 查看 JSON。
 - 保存后刷新页面回显。
+- 以下预览文案为示例，实际实现必须走项目现有 i18n 机制，不得硬编码；当前实现使用英文源文案作为翻译 key。
+- 开启全局透传时，命中预览显示“规则匹配，但运行时会跳过转换”。
+- 开启目标渠道透传时，命中预览显示“规则匹配，但运行时会跳过转换”。
+- 全局透传和目标渠道透传同时开启时，命中预览合并为同一条跳过转换提示。
+- 渠道数据加载中或加载失败时，命中预览只能根据已知全局透传状态判断；渠道选择器必须展示加载或错误状态。
+- 关闭全局或目标渠道透传后，命中预览恢复正常命中状态，不再显示透传跳过提示。
 
 配置 round-trip 验证：
 
@@ -432,7 +446,9 @@ go test ./setting/... ./service/... ./relay/...
 - rules JSON 导入后进入可视化模式，修改规则名称并保存，刷新后语义不变。
 - JSON 中包含顶层未知字段，保存后字段和值保持不变。
 - JSON 中包含 `rules[].unknown_field`，保存后字段和值保持不变。
+- JSON 中规则缺少 `name` 但包含 `rules[].unknown_field` 时，保存后字段和值仍按索引和协议方向保留在对应规则上。
 - JSON 中包含 `rules[].options.some_future_field`，可视化修改其他字段并保存后，该字段和值保持不变。
+- JSON 中 `rules[].options` 为字符串、数组或 `null` 时，后端必须返回显式校验错误并拒绝保存，不能静默删除 `options`。
 - JSON 模式和可视化模式来回切换，不丢 `options.enable_custom_tool_bridge`。
 - default 与 classic 分别保存同一份配置，不丢 `options` 和未知字段。
 
@@ -453,3 +469,4 @@ go test ./setting/... ./service/... ./relay/...
 - classic 防丢字段与 default 规则管理器同一发布完成。
 - 命中预览明确展示 passthrough 跳过转换的情况。
 - 相关验证命令通过，并在实施完成后补充到 `docs/reviews/`。
+- 后续发布加固项已记录 default/classic 联合 CI、双前端版本一致性检查、运行时版本不一致告警或阻断；这些不阻断本轮协议转换 WebUI 交付。

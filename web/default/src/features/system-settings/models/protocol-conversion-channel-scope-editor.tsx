@@ -21,6 +21,8 @@ type ProtocolConversionChannelScopeEditorProps = {
   rule: ProtocolRule
   channels: Channel[]
   selectedChannelId: string
+  channelsLoading: boolean
+  channelsError: boolean
   onSelectedChannelIdChange: (value: string) => void
   onAddSelectedChannel: () => void
   onUpdate: (patch: Partial<ProtocolRule>) => void
@@ -30,15 +32,22 @@ export function ProtocolConversionChannelScopeEditor({
   rule,
   channels,
   selectedChannelId,
+  channelsLoading,
+  channelsError,
   onSelectedChannelIdChange,
   onAddSelectedChannel,
   onUpdate,
 }: ProtocolConversionChannelScopeEditorProps) {
   const { t } = useTranslation()
+  const channelIdsValue = rule.channel_ids.join(', ')
+  const [channelIdsDraft, setChannelIdsDraft] = useState(() =>
+    createCommittedDraftText(channelIdsValue)
+  )
   const channelTypesValue = rule.channel_types.join(', ')
   const [channelTypesDraft, setChannelTypesDraft] = useState(() =>
     createCommittedDraftText(channelTypesValue)
   )
+  const channelIdsInput = getDraftTextValue(channelIdsDraft, channelIdsValue)
   const channelTypesInput = getDraftTextValue(
     channelTypesDraft,
     channelTypesValue
@@ -48,6 +57,25 @@ export function ProtocolConversionChannelScopeEditor({
     value: String(channel.id),
     label: `#${channel.id} ${channel.name}`,
   }))
+  const channelSelectorLabel = channelsLoading
+    ? t('Loading channels...')
+    : channelsError
+      ? t('Failed to load channels for selector.')
+      : null
+
+  const commitChannelIdsDraft = () => {
+    const nextChannelIds = parseIntegerText(channelIdsInput)
+    const nextValue = nextChannelIds.join(', ')
+    setChannelIdsDraft(createCommittedDraftText(nextValue))
+    onUpdate({ channel_ids: nextChannelIds })
+  }
+
+  const updateChannelIdsDraft = (value: string) => {
+    const nextChannelIds = parseIntegerText(value)
+    const nextValue = nextChannelIds.join(', ')
+    setChannelIdsDraft(createDraftTextChange(value, nextValue))
+    onUpdate({ channel_ids: nextChannelIds })
+  }
 
   const commitChannelTypesDraft = () => {
     const nextChannelTypes = parseIntegerText(channelTypesInput)
@@ -81,9 +109,10 @@ export function ProtocolConversionChannelScopeEditor({
               options={channelOptions}
               value={selectedChannelId}
               onValueChange={onSelectedChannelIdChange}
-              placeholder={t('Select channel')}
+              placeholder={channelSelectorLabel ?? t('Select channel')}
               searchPlaceholder={t('Search channels')}
-              emptyText={t('No channels found')}
+              emptyText={channelSelectorLabel ?? t('No channels found')}
+              disabled={channelsLoading || channelsError}
             />
             <Button
               type='button'
@@ -117,6 +146,15 @@ export function ProtocolConversionChannelScopeEditor({
               </Badge>
             ))}
           </div>
+        </ScopeField>
+        <ScopeField label={t('Channel IDs')}>
+          <Input
+            disabled={rule.all_channels}
+            value={channelIdsInput}
+            onChange={(event) => updateChannelIdsDraft(event.target.value)}
+            onBlur={commitChannelIdsDraft}
+            placeholder='35, 36, 37'
+          />
         </ScopeField>
         <ScopeField label={t('Channel types')}>
           <Input

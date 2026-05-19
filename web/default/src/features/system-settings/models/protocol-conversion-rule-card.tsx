@@ -26,6 +26,8 @@ type ProtocolConversionRuleCardProps = {
   index: number
   rule: ProtocolRule
   channels: Channel[]
+  channelsLoading: boolean
+  channelsError: boolean
   passThroughEnabled: boolean
   onUpdate: (patch: Partial<ProtocolRule>) => void
   onRemove: () => void
@@ -35,6 +37,8 @@ export function ProtocolConversionRuleCard({
   index,
   rule,
   channels,
+  channelsLoading,
+  channelsError,
   passThroughEnabled,
   onUpdate,
   onRemove,
@@ -101,6 +105,8 @@ export function ProtocolConversionRuleCard({
             index={index}
             rule={rule}
             channels={channels}
+            channelsLoading={channelsLoading}
+            channelsError={channelsError}
             passThroughEnabled={passThroughEnabled}
             onUpdate={onUpdate}
           >

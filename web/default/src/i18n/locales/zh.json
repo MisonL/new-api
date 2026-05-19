@@ -419,7 +419,8 @@
     "Average TPM": "平均 TPM",
     "Average TTFT": "平均 TTFT",
     "AWS": "AWS",
-    "AWS Bedrock Claude Compat": "AWS Bedrock Claude 兼容模板",
+    "AWS Bedrock Claude Beta Header": "AWS Bedrock Claude Beta 头规范化",
+    "AWS Bedrock Remove Input Examples": "AWS Bedrock 删除工具示例字段",
     "AWS Key Format": "AWS 密钥格式",
     "Azure": "Azure",
     "AZURE_OPENAI_ENDPOINT *": "AZURE_OPENAI_ENDPOINT *",
@@ -684,7 +685,6 @@
     "Codex Authorization": "Codex 授权",
     "Codex channels use an OAuth JSON credential as the key.": "Codex 频道使用 OAuth JSON 凭据作为密钥。",
     "Codex CLI Header Passthrough": "Codex CLI 请求头透传",
-    "Codex Desktop Compat: Headers + Remove Image Tool": "Codex Desktop 兼容：请求头透传 + 移除图片工具",
     "Codex Desktop Compat: Remove Image Generation Tool": "Codex Desktop 兼容：移除图片生成工具",
     "Codex Desktop Header Passthrough": "Codex Desktop 请求头透传",
     "Cohere": "Cohere",
@@ -4076,6 +4076,9 @@
     "Model patterns": "模型匹配规则",
     "Bridge Responses custom tools into Chat Completions tools.": "将 Responses 自定义工具桥接为 Chat Completions 工具。",
     "Custom tool bridge only applies to Responses to Chat Completions.": "自定义工具桥接仅适用于 Responses 到 Chat Completions。",
+    "Loading channels...": "正在加载渠道...",
+    "Failed to load channels for selector.": "渠道选择器加载失败。",
+    "Only the first {{loaded}} of {{total}} channels are available in the selector. Use channel type or JSON for channels beyond this range.": "选择器仅加载前 {{loaded}} / {{total}} 个渠道；超出范围的渠道请使用渠道类型或 JSON 方式选择。",
     "Empty rule list will be saved as {}. JSON import remains available for advanced fields.": "空规则列表将保存为 {}。高级字段仍可通过 JSON 导入维护。"
   }
 }

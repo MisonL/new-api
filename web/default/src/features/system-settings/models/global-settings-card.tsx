@@ -110,6 +110,8 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
   }, [defaultValues, form])
 
   const pingEnabled = form.watch('general_setting.ping_interval_enabled')
+  const passThroughEnabled =
+    form.watch('global.pass_through_request_enabled') === true
 
   const formatJsonField = (
     field:
@@ -253,10 +255,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                         defaultValues.global
                           .chat_completions_to_responses_policy
                       }
-                      passThroughEnabled={
-                        form.watch('global.pass_through_request_enabled') ===
-                        true
-                      }
+                      passThroughEnabled={passThroughEnabled}
                       onChange={field.onChange}
                     />
                   </FormControl>

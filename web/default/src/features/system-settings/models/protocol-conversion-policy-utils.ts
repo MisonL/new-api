@@ -45,6 +45,15 @@ export type DraftTextState = {
   value: string
 }
 
+export const TEMPLATE_CHAT_TO_RESPONSES = 'chat_to_responses'
+export const TEMPLATE_RESPONSES_TO_CHAT = 'responses_to_chat'
+export const TEMPLATE_BIDIRECTIONAL = 'bidirectional'
+
+export type ProtocolRuleTemplate =
+  | typeof TEMPLATE_CHAT_TO_RESPONSES
+  | typeof TEMPLATE_RESPONSES_TO_CHAT
+  | typeof TEMPLATE_BIDIRECTIONAL
+
 const POLICY_FIELDS = new Set([
   'enabled',
   'all_channels',
@@ -79,6 +88,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
+function createParseError(message: string): Error {
+  return new Error(message)
+}
+
 function pickExtra(
   value: unknown,
   knownFields: Set<string>
@@ -89,26 +102,82 @@ function pickExtra(
   )
 }
 
-function toPositiveIntegers(value: unknown): number[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map((item) =>
-      typeof item === 'number' ? item : Number.parseInt(String(item), 10)
-    )
-    .filter((item) => Number.isInteger(item) && item > 0)
+function ruleFieldPath(fieldName: string, ruleIndex?: number): string {
+  return ruleIndex == null ? fieldName : `rules[${ruleIndex}].${fieldName}`
 }
 
-function toTextList(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map((item) => String(item ?? '').trim())
-    .filter((item) => item.length > 0)
+function toPositiveIntegers(
+  value: unknown,
+  fieldName: string,
+  ruleIndex?: number
+): number[] {
+  const path = ruleFieldPath(fieldName, ruleIndex)
+  if (value === undefined) return []
+  if (!Array.isArray(value)) {
+    throw createParseError(`${path} must be an array`)
+  }
+  for (const item of value) {
+    if (!Number.isInteger(item) || item <= 0) {
+      throw createParseError(`${path} must contain positive integers`)
+    }
+  }
+  return Array.from(new Set(value))
 }
 
-function normalizeEndpoint(value: unknown, fallback: ProtocolEndpoint) {
-  return value === ENDPOINT_RESPONSES || value === ENDPOINT_CHAT
-    ? value
-    : fallback
+function toModelPatterns(value: unknown, ruleIndex?: number): string[] {
+  const path = ruleFieldPath('model_patterns', ruleIndex)
+  if (value === undefined) return []
+  if (!Array.isArray(value)) {
+    throw createParseError(`${path} must be an array`)
+  }
+  const patterns: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      throw createParseError(`${path} must contain strings`)
+    }
+    const pattern = item.trim()
+    if (!pattern) continue
+    try {
+      new RegExp(pattern)
+    } catch (error) {
+      const detail = error instanceof Error ? `: ${error.message}` : ''
+      throw createParseError(`${path} contains an invalid regex${detail}`)
+    }
+    patterns.push(pattern)
+  }
+  return patterns
+}
+
+function normalizeEndpoint(
+  value: unknown,
+  fieldName: string,
+  ruleIndex: number
+): ProtocolEndpoint {
+  const endpoint = String(value ?? '')
+    .trim()
+    .toLowerCase()
+  if (!endpoint) {
+    throw createParseError(`rules[${ruleIndex}].${fieldName} is required`)
+  }
+  if (
+    endpoint === 'openai' ||
+    endpoint === 'chat' ||
+    endpoint === ENDPOINT_CHAT ||
+    endpoint === 'chat-completions' ||
+    endpoint === '/v1/chat/completions'
+  ) {
+    return ENDPOINT_CHAT
+  }
+  if (
+    endpoint === ENDPOINT_RESPONSES ||
+    endpoint === 'response' ||
+    endpoint === 'openai-response' ||
+    endpoint === 'openai-responses' ||
+    endpoint === '/v1/responses'
+  ) {
+    return ENDPOINT_RESPONSES
+  }
+  throw createParseError(`rules[${ruleIndex}].${fieldName} is unsupported`)
 }
 
 export function isResponsesToChatRule(rule: ProtocolRule) {
@@ -173,7 +242,8 @@ export function getProtocolPreviewResult(
   }
 
   const model = preview.model.trim()
-  if (!model) return { matched: false, reason: 'Model is required for preview.' }
+  if (!model)
+    return { matched: false, reason: 'Model is required for preview.' }
 
   const matched = rule.model_patterns.some((pattern) => {
     try {
@@ -235,30 +305,109 @@ export function createProtocolRule(
   }
 }
 
+export function createProtocolRuleFromTemplate(
+  template: ProtocolRuleTemplate,
+  existingRules: ProtocolRule[] = []
+): ProtocolRule[] {
+  const templates: ProtocolRuleTemplate[] =
+    template === TEMPLATE_BIDIRECTIONAL
+      ? [TEMPLATE_RESPONSES_TO_CHAT, TEMPLATE_CHAT_TO_RESPONSES]
+      : [template]
+  return templates.map((item) =>
+    createProtocolRule({
+      name: nextTemplateRuleName(item, existingRules),
+      source_endpoint:
+        item === TEMPLATE_RESPONSES_TO_CHAT
+          ? ENDPOINT_RESPONSES
+          : ENDPOINT_CHAT,
+      target_endpoint:
+        item === TEMPLATE_RESPONSES_TO_CHAT
+          ? ENDPOINT_CHAT
+          : ENDPOINT_RESPONSES,
+      all_channels: false,
+      channel_ids: [],
+      channel_types: [1],
+      model_patterns:
+        item === TEMPLATE_RESPONSES_TO_CHAT
+          ? ['^gpt-5.*$', '^o[13].*$']
+          : ['^gpt-4o.*$', '^gpt-5.*$'],
+    })
+  )
+}
+
+function nextTemplateRuleName(
+  template: ProtocolRuleTemplate,
+  existingRules: ProtocolRule[]
+) {
+  const baseName =
+    template === TEMPLATE_RESPONSES_TO_CHAT
+      ? 'responses-to-chat'
+      : 'chat-to-responses'
+  const existingNames = new Set(existingRules.map((rule) => rule.name))
+  let name = baseName
+  let index = 2
+  while (existingNames.has(name)) {
+    name = `${baseName}-${index}`
+    index += 1
+  }
+  return name
+}
+
 function ruleFromRecord(
   value: Record<string, unknown>,
-  fallbackName: string
+  fallbackName: string,
+  ruleIndex: number
 ): ProtocolRule {
+  if (value.options !== undefined && !isRecord(value.options)) {
+    throw createParseError(`rules[${ruleIndex}].options must be an object`)
+  }
   const options = isRecord(value.options) ? value.options : {}
-  const source = normalizeEndpoint(value.source_endpoint, ENDPOINT_CHAT)
-  const targetFallback =
-    source === ENDPOINT_CHAT ? ENDPOINT_RESPONSES : ENDPOINT_CHAT
-  const target = normalizeEndpoint(value.target_endpoint, targetFallback)
-  const normalizedTarget = target === source ? targetFallback : target
+  const source = normalizeEndpoint(
+    value.source_endpoint,
+    'source_endpoint',
+    ruleIndex
+  )
+  const target = normalizeEndpoint(
+    value.target_endpoint,
+    'target_endpoint',
+    ruleIndex
+  )
+  if (target === source) {
+    throw createParseError(
+      `rules[${ruleIndex}].source_endpoint and target_endpoint must be different`
+    )
+  }
   const name = String(value.name || fallbackName)
+  const enableCustomToolBridge =
+    options.enable_custom_tool_bridge === true ||
+    value.enable_custom_tool_bridge === true
+  if (
+    enableCustomToolBridge &&
+    (source !== ENDPOINT_RESPONSES || target !== ENDPOINT_CHAT)
+  ) {
+    throw createParseError(
+      `rules[${ruleIndex}].enable_custom_tool_bridge only supports Responses to Chat Completions`
+    )
+  }
 
   return createProtocolRule({
     name,
     enabled: value.enabled !== false,
     source_endpoint: source,
-    target_endpoint: normalizedTarget,
+    target_endpoint: target,
     all_channels: value.all_channels !== false,
-    channel_ids: toPositiveIntegers(value.channel_ids),
-    channel_types: toPositiveIntegers(value.channel_types),
-    model_patterns: toTextList(value.model_patterns),
-    enable_custom_tool_bridge:
-      options.enable_custom_tool_bridge === true ||
-      value.enable_custom_tool_bridge === true,
+    channel_ids: toPositiveIntegers(
+      value.channel_ids,
+      'channel_ids',
+      ruleIndex
+    ),
+    channel_types: toPositiveIntegers(
+      value.channel_types,
+      'channel_types',
+      ruleIndex
+    ),
+    model_patterns: toModelPatterns(value.model_patterns, ruleIndex),
+    enable_custom_tool_bridge: enableCustomToolBridge,
     extra: pickExtra(value, RULE_FIELDS),
     optionsExtra: pickExtra(options, OPTION_FIELDS),
   })
@@ -282,9 +431,9 @@ function legacyRuleFromPolicy(policy: Record<string, unknown>): ProtocolRule[] {
       source_endpoint: ENDPOINT_CHAT,
       target_endpoint: ENDPOINT_RESPONSES,
       all_channels: policy.all_channels === true,
-      channel_ids: toPositiveIntegers(policy.channel_ids),
-      channel_types: toPositiveIntegers(policy.channel_types),
-      model_patterns: toTextList(policy.model_patterns),
+      channel_ids: toPositiveIntegers(policy.channel_ids, 'channel_ids'),
+      channel_types: toPositiveIntegers(policy.channel_types, 'channel_types'),
+      model_patterns: toModelPatterns(policy.model_patterns),
     }),
   ]
 }
@@ -302,15 +451,21 @@ export function parseProtocolPolicy(rawValue: string): ParsedProtocolPolicy {
     }
 
     const policyExtra = pickExtra(policy, POLICY_FIELDS)
+    if (policy.rules !== undefined && !Array.isArray(policy.rules)) {
+      return { ok: false, error: 'rules must be an array' }
+    }
     const ruleValues = Array.isArray(policy.rules) ? policy.rules : []
-    const rules = ruleValues
-      .filter(isRecord)
-      .map((rule, index) => ruleFromRecord(rule, `Rule ${index + 1}`))
+    const rules = ruleValues.map((rule, index) => {
+      if (!isRecord(rule)) {
+        throw createParseError(`rules[${index}] must be an object`)
+      }
+      return ruleFromRecord(rule, `Rule ${index + 1}`, index)
+    })
 
     return {
       ok: true,
       policyExtra,
-      rules: rules.length > 0 ? rules : legacyRuleFromPolicy(policy),
+      rules: Array.isArray(policy.rules) ? rules : legacyRuleFromPolicy(policy),
     }
   } catch (error) {
     return {
@@ -367,7 +522,7 @@ export function serializeProtocolPolicy(
 
 export function parseIntegerText(value: string) {
   return value
-    .split(',')
+    .split(/[\s,，、]+/)
     .map((item) => Number.parseInt(item.trim(), 10))
     .filter((item) => Number.isInteger(item) && item > 0)
 }

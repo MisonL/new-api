@@ -20,7 +20,14 @@ For commercial licensing, please contact support@quantumnous.com
 import { describe, expect, test } from 'bun:test';
 
 import {
+  CHAT_TO_RESPONSES_TEMPLATE,
+  RESPONSES_TO_CHAT_TEMPLATE,
+} from '../src/components/settings/protocolConversionPolicy/constants.js';
+import {
+  buildTemplateRule,
   deserializePolicy,
+  getEndpointLabel,
+  parseIntegerList,
   serializeRules,
 } from '../src/components/settings/protocolConversionPolicy/utils.js';
 
@@ -58,7 +65,7 @@ describe('classic protocol conversion policy utils', () => {
     expect(serialized.rules[0].options.future_option).toBe('option-extra');
   });
 
-  test('drops custom tool bridge when visual direction is not responses to chat', () => {
+  test('rejects custom tool bridge when visual direction is not responses to chat', () => {
     const raw = JSON.stringify({
       rules: [
         {
@@ -76,11 +83,94 @@ describe('classic protocol conversion policy utils', () => {
     });
 
     const parsed = deserializePolicy(raw);
-    expect(parsed).not.toBeNull();
+    expect(parsed).toBeNull();
+  });
 
-    const serialized = JSON.parse(
-      serializeRules(parsed.rules, parsed.policyExtra),
+  test('keeps explicit empty rules from falling back to legacy fields', () => {
+    const parsed = deserializePolicy(
+      JSON.stringify({
+        enabled: true,
+        all_channels: true,
+        model_patterns: ['^gpt-5.*$'],
+        rules: [],
+      }),
     );
-    expect(serialized.rules[0].options).toBeUndefined();
+
+    expect(parsed).not.toBeNull();
+    expect(parsed.rules).toEqual([]);
+    expect(JSON.parse(serializeRules(parsed.rules, parsed.policyExtra))).toEqual(
+      {},
+    );
+  });
+
+  test('template labels and generated rules keep the same direction', () => {
+    const chatToResponses = buildTemplateRule(CHAT_TO_RESPONSES_TEMPLATE, []);
+    const responsesToChat = buildTemplateRule(RESPONSES_TO_CHAT_TEMPLATE, []);
+
+    expect(chatToResponses.name).toBe('chat-to-responses');
+    expect(
+      `${getEndpointLabel(chatToResponses.source_endpoint)} -> ${getEndpointLabel(chatToResponses.target_endpoint)}`,
+    ).toBe('/v1/chat/completions -> /v1/responses');
+
+    expect(responsesToChat.name).toBe('responses-to-chat');
+    expect(
+      `${getEndpointLabel(responsesToChat.source_endpoint)} -> ${getEndpointLabel(responsesToChat.target_endpoint)}`,
+    ).toBe('/v1/responses -> /v1/chat/completions');
+  });
+
+  test('rejects non-object options instead of silently dropping them', () => {
+    const parsed = deserializePolicy(
+      JSON.stringify({
+        rules: [
+          {
+            name: 'invalid-options',
+            enabled: true,
+            source_endpoint: 'responses',
+            target_endpoint: 'chat_completions',
+            all_channels: true,
+            model_patterns: ['^gpt-5.*$'],
+            options: null,
+          },
+        ],
+      }),
+    );
+
+    expect(parsed).toBeNull();
+  });
+
+  test('rejects invalid rule and scope shapes instead of filtering them', () => {
+    expect(
+      deserializePolicy(
+        JSON.stringify({
+          rules: [null],
+        }),
+      ),
+    ).toBeNull();
+
+    expect(
+      deserializePolicy(
+        JSON.stringify({
+          rules: [
+            {
+              name: 'invalid-channel',
+              enabled: true,
+              source_endpoint: 'responses',
+              target_endpoint: 'chat_completions',
+              all_channels: false,
+              channel_ids: [117, -1],
+              model_patterns: ['^gpt-5.*$'],
+            },
+          ],
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  test('parses channel id text with common separators', () => {
+    expect(parseIntegerList('35,36, 37')).toEqual([35, 36, 37]);
+    expect(parseIntegerList('35，36、37\n38 39')).toEqual([
+      35, 36, 37, 38, 39,
+    ]);
+    expect(parseIntegerList('35,')).toEqual([35]);
   });
 });

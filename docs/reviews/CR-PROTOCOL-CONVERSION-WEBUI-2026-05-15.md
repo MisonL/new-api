@@ -15,6 +15,8 @@
 - 规则编辑器已能在可视化模式维护 `rules[].options.enable_custom_tool_bridge`。
 - 前端 round-trip 测试覆盖顶层、规则、`options` 未知字段保留，legacy 升级，以及错误方向移除自定义工具桥接。
 - 后端保存链路已验证：通过浏览器登录态写入含未知字段的策略后，读取结果保留顶层、规则和 `options` 扩展字段，并规范化规则名称和模型正则。
+- 2026-05-19 review-fix 已补充并验证：无 `name` 规则的双向未知字段保留、`options` 非对象显式报错、`options: null` 显式报错、endpoint alias 未知字段保留，以及 Default 前端 JSON 导入严格校验，避免前端静默过滤非法规则。
+- 2026-05-19 review-fix 已实现命中预览对目标渠道 `pass_through_body_enabled` 的代码支持；浏览器人工复验渠道透传路径已完成，覆盖全局透传、渠道透传、双重透传和无透传四条路径。
 - `3001` 隔离开发容器已使用当前工作区源码重建，运行镜像为 `new-api-local:dev`。
 
 ## 验证记录
@@ -64,6 +66,44 @@ bun run format:check
 ```
 
 结果：全部通过。
+
+### 2026-05-19 review-fix 增量验证
+
+```bash
+go test ./setting/model_setting ./service/openaicompat
+```
+
+结果：通过。覆盖非对象 options 显式报错、`options: null` 显式报错、无 name 规则的双向未知字段保留和 endpoint alias 未知字段保留。
+
+```bash
+cd web/default && bun test tests/protocol-conversion-policy-utils.test.ts
+```
+
+结果：通过，15 pass, 0 fail。覆盖 Default 前端 JSON 导入严格校验、显式 `rules: []` 不回退 legacy 字段、规则字段错误路径展示、缺失 endpoint 的 required 提示。
+
+```bash
+cd web/default && bun run lint
+cd web/default && bun run typecheck
+cd web/default && bun run build
+```
+
+结果：通过。代码实施已通过 typecheck 与 build；渠道透传路径已于 2026-05-19 完成浏览器复验。
+
+```bash
+cd web/classic && bun test tests/protocolConversionPolicyUtils.test.js
+cd web/classic && bun run build
+```
+
+结果：通过。
+
+浏览器复验：渠道透传路径已覆盖以下四个场景：
+
+- 全局透传：开启 `global.pass_through_request_enabled`，创建 `responses` 到 `chat_completions` 规则，限定渠道 `117`，模型正则 `^gpt-5.*$`；预览输入 `channel_id=117`、`channel_type=1`、`model=gpt-5.1`，显示 1 条透传跳过转换提示。
+- 渠道透传：关闭全局透传，开启渠道 `117` 的 `pass_through_body_enabled`，使用同一规则和预览输入，显示 1 条透传跳过转换提示。
+- 双重透传：同时开启全局透传和渠道透传，显示 1 条跳过转换提示，未重复提示。
+- 无透传：关闭全局透传和渠道透传，使用同一规则和预览输入，显示正常命中，不出现跳过转换提示。
+
+复验后已恢复 `global.chat_completions_to_responses_policy`、`global.pass_through_request_enabled`、渠道 `117` 的 `setting`，并恢复临时测试管理员密码哈希。
 
 ### web/classic
 

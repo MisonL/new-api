@@ -40,6 +40,8 @@ type ProtocolConversionRuleEditorSheetProps = {
   index: number
   rule: ProtocolRule
   channels: Channel[]
+  channelsLoading: boolean
+  channelsError: boolean
   passThroughEnabled: boolean
   onUpdate: (patch: Partial<ProtocolRule>) => void
   children: ReactNode
@@ -54,6 +56,8 @@ export function ProtocolConversionRuleEditorSheet({
   index,
   rule,
   channels,
+  channelsLoading,
+  channelsError,
   passThroughEnabled,
   onUpdate,
   children,
@@ -155,6 +159,8 @@ export function ProtocolConversionRuleEditorSheet({
             rule={rule}
             channels={channels}
             selectedChannelId={selectedChannelId}
+            channelsLoading={channelsLoading}
+            channelsError={channelsError}
             onSelectedChannelIdChange={setSelectedChannelId}
             onAddSelectedChannel={addSelectedChannel}
             onUpdate={onUpdate}
@@ -197,6 +203,7 @@ export function ProtocolConversionRuleEditorSheet({
           <ProtocolConversionHitPreview
             rule={rule}
             preview={preview}
+            channels={channels}
             passThroughEnabled={passThroughEnabled}
             onPreviewChange={setPreview}
           />

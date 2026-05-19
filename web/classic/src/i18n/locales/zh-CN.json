@@ -3400,7 +3400,6 @@
     "替换模板": "替换模板",
     "Codex Desktop Header Passthrough": "Codex Desktop 请求头透传",
     "Codex Desktop Compat: Remove Image Generation Tool": "Codex Desktop 兼容：移除图片生成工具",
-    "Codex Desktop Compat: Headers + Remove Image Tool": "Codex Desktop 兼容：请求头 + 移除图片工具",
     "Claude Code Header Passthrough": "Claude Code 请求头透传",
     "Droid CLI Header Passthrough": "Droid CLI 请求头透传",
     "Gemini CLI Header Passthrough": "Gemini CLI 请求头透传",
@@ -3411,6 +3410,10 @@
     "固定请求头静态快照来自本机实抓 Gemini CLI 0.41.2 的 streamGenerateContent 请求；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。": "固定请求头静态快照来自本机实抓 Gemini CLI 0.41.2 的 streamGenerateContent 请求；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。",
     "固定请求头静态快照来自本机 Qwen Code 0.15.10 的 OpenAI-compatible /chat/completions 请求；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。": "固定请求头静态快照来自本机 Qwen Code 0.15.10 的 OpenAI-compatible /chat/completions 请求；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。",
     "固定请求头静态快照来自本机实抓 Droid 0.123.0 的 OpenAI-compatible /v1/chat/completions 请求；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。": "固定请求头静态快照来自本机实抓 Droid 0.123.0 的 OpenAI-compatible /v1/chat/completions 请求；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。",
+    "AWS Bedrock Claude Beta 头规范化": "AWS Bedrock Claude Beta 头规范化",
+    "AWS Bedrock 删除工具示例字段": "AWS Bedrock 删除工具示例字段",
+    "规范化 anthropic-beta 请求头，适配 Bedrock 支持的 beta token。": "规范化 anthropic-beta 请求头，适配 Bedrock 支持的 beta token。",
+    "移除 Bedrock 不兼容的 tools.*.custom.input_examples 字段。": "移除 Bedrock 不兼容的 tools.*.custom.input_examples 字段。",
     "再次点击可取消选择": "再次点击可取消选择"
   }
 }

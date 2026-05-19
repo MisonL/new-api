@@ -419,7 +419,8 @@
     "Average TPM": "TPM trung bình",
     "Average TTFT": "TTFT trung bình",
     "AWS": "AWS",
-    "AWS Bedrock Claude Compat": "AWS Bedrock Claude tương thích",
+    "AWS Bedrock Claude Beta Header": "Header beta Claude AWS Bedrock",
+    "AWS Bedrock Remove Input Examples": "AWS Bedrock xóa ví dụ đầu vào",
     "AWS Key Format": "Định dạng khóa AWS",
     "Azure": "Azure",
     "AZURE_OPENAI_ENDPOINT *": "AZURE_OPENAI_ENDPOINT *",
@@ -684,7 +685,6 @@
     "Codex Authorization": "Ủy quyền Codex",
     "Codex channels use an OAuth JSON credential as the key.": "Kênh Codex dùng thông tin xác thực OAuth JSON làm khóa.",
     "Codex CLI Header Passthrough": "Chuyển tiếp header Codex CLI",
-    "Codex Desktop Compat: Headers + Remove Image Tool": "Tương thích Codex Desktop: header + xóa công cụ hình ảnh",
     "Codex Desktop Compat: Remove Image Generation Tool": "Tương thích Codex Desktop: xóa công cụ tạo hình ảnh",
     "Codex Desktop Header Passthrough": "Chuyển tiếp header Codex Desktop",
     "Cohere": "Cohere",
@@ -4076,6 +4076,9 @@
     "Model patterns": "Mẫu mô hình",
     "Bridge Responses custom tools into Chat Completions tools.": "Chuyển công cụ tùy chỉnh Responses thành công cụ Chat Completions.",
     "Custom tool bridge only applies to Responses to Chat Completions.": "Cầu nối công cụ tùy chỉnh chỉ áp dụng từ Responses sang Chat Completions.",
+    "Loading channels...": "Đang tải kênh...",
+    "Failed to load channels for selector.": "Không thể tải kênh cho bộ chọn.",
+    "Only the first {{loaded}} of {{total}} channels are available in the selector. Use channel type or JSON for channels beyond this range.": "Bộ chọn chỉ có {{loaded}} kênh đầu tiên trong tổng số {{total}} kênh. Hãy dùng loại kênh hoặc JSON cho kênh ngoài phạm vi này.",
     "Empty rule list will be saved as {}. JSON import remains available for advanced fields.": "Danh sách quy tắc rỗng sẽ được lưu là {}. Vẫn có thể nhập JSON cho trường nâng cao."
   }
 }

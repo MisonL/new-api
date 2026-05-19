@@ -41,6 +41,46 @@ import {
 
 const { Text } = Typography;
 
+function IntegerListInput({ disabled, name, onChange, placeholder, value }) {
+  const committedValue = stringifyIntegerList(value);
+  const [draft, setDraft] = React.useState({
+    source: committedValue,
+    value: committedValue,
+  });
+  const inputValue =
+    draft.source === committedValue ? draft.value : committedValue;
+
+  const updateDraft = (nextValue) => {
+    const nextList = parseIntegerList(nextValue);
+    setDraft({
+      source: stringifyIntegerList(nextList),
+      value: nextValue,
+    });
+    onChange(nextList);
+  };
+
+  const commitDraft = () => {
+    const nextList = parseIntegerList(inputValue);
+    const nextValue = stringifyIntegerList(nextList);
+    setDraft({
+      source: nextValue,
+      value: nextValue,
+    });
+    onChange(nextList);
+  };
+
+  return (
+    <Input
+      name={name}
+      disabled={disabled}
+      value={inputValue}
+      placeholder={placeholder}
+      onBlur={commitDraft}
+      onChange={updateDraft}
+    />
+  );
+}
+
 function BasicPanel({ directionInvalid, index, rule, t, updateRule }) {
   return (
     <div style={panelStyle}>
@@ -140,13 +180,13 @@ function ScopePanel({ channelTypeOptions, index, rule, t, updateRule }) {
         <Col xs={24} md={12}>
           <div style={{ marginBottom: 12 }}>
             <Text strong>{t('指定渠道 ID')}</Text>
-            <Input
+            <IntegerListInput
               name={`protocol-rule-channel-ids-${index}`}
               disabled={rule.all_channels}
-              value={stringifyIntegerList(rule.channel_ids)}
+              value={rule.channel_ids}
               placeholder={t('多个 ID 用逗号分隔，例如：35,36,37')}
-              onChange={(nextValue) =>
-                updateRule(index, { channel_ids: parseIntegerList(nextValue) })
+              onChange={(nextList) =>
+                updateRule(index, { channel_ids: nextList })
               }
             />
           </div>
