@@ -23,8 +23,17 @@ func TestBuiltinCodexCLIHeaderProfileDoesNotUseExecIdentity(t *testing.T) {
 	}
 }
 
+func TestBuiltinCodexDesktopHeaderProfileUsesCapturedDesktopIdentity(t *testing.T) {
+	profile, exists := ResolveHeaderProfile("codex-desktop", nil)
+	require.True(t, exists)
+	require.Contains(t, profile.Description, "Codex Desktop")
+	require.Equal(t, BuiltinCodexDesktopUserAgent, profile.Headers["User-Agent"])
+	require.True(t, strings.HasPrefix(profile.Headers["User-Agent"], "Codex Desktop/"))
+	require.NotContains(t, profile.Headers["User-Agent"], "codex-cli@")
+}
+
 func TestBuiltinAICodingCLIHeaderProfilesDoNotRequireAutomaticPassthrough(t *testing.T) {
-	for _, profileID := range []string{"codex-cli", "claude-code", "gemini-cli", "qwen-code", "droid"} {
+	for _, profileID := range []string{"codex-cli", "codex-desktop", "claude-code", "gemini-cli", "qwen-code", "droid"} {
 		profile, exists := ResolveHeaderProfile(profileID, nil)
 		require.True(t, exists, profileID)
 		require.False(t, profile.PassthroughRequired, profileID)

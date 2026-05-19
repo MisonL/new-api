@@ -69,6 +69,11 @@ export const HEADER_OVERRIDE_USER_AGENT_PRESET_GROUPS = [
         ua: 'codex-tui/0.130.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.130.0)',
       },
       {
+        id: 'codex-desktop',
+        label: 'Codex Desktop 固定 UA',
+        ua: 'Codex Desktop/0.131.0-alpha.9 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.513.31313)',
+      },
+      {
         id: 'claude-code',
         label: 'Claude Code 固定 UA',
         ua: 'claude-cli/2.1.139 (external, sdk-cli)',

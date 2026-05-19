@@ -57,9 +57,10 @@ type HeaderProfileStrategy struct {
 }
 
 const (
-	BuiltinCodexCLIUserAgent  = "codex-tui/0.130.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.130.0)"
-	BuiltinCodexCLIOriginator = "codex-tui"
-	BuiltinDroidCLIUserAgent  = "factory-cli/0.123.0"
+	BuiltinCodexCLIUserAgent     = "codex-tui/0.130.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.130.0)"
+	BuiltinCodexCLIOriginator    = "codex-tui"
+	BuiltinCodexDesktopUserAgent = "Codex Desktop/0.131.0-alpha.9 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.513.31313)"
+	BuiltinDroidCLIUserAgent     = "factory-cli/0.123.0"
 )
 
 var BuiltinHeaderProfiles = []HeaderProfile{
@@ -79,6 +80,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		},
 	},
 	newBuiltinCodexCLIHeaderProfile(),
+	newBuiltinCodexDesktopHeaderProfile(),
 	newBuiltinCLIHeaderProfile(
 		"claude-code",
 		"Claude Code",
@@ -142,6 +144,21 @@ func newBuiltinCodexCLIHeaderProfile() HeaderProfile {
 		Headers: map[string]string{
 			"User-Agent": BuiltinCodexCLIUserAgent,
 			"Originator": BuiltinCodexCLIOriginator,
+		},
+	}
+}
+
+func newBuiltinCodexDesktopHeaderProfile() HeaderProfile {
+	return HeaderProfile{
+		ID:                  "codex-desktop",
+		Name:                "Codex Desktop",
+		Category:            HeaderProfileCategoryAICodingCLI,
+		Scope:               HeaderProfileScopeBuiltin,
+		ReadOnly:            true,
+		Description:         "固定请求头静态快照来自 Codex Desktop 0.131.0-alpha.9 真实请求；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。",
+		PassthroughRequired: false,
+		Headers: map[string]string{
+			"User-Agent": BuiltinCodexDesktopUserAgent,
 		},
 	}
 }

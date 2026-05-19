@@ -91,6 +91,7 @@ function isBuiltinAiCodingCliProfileId(profileId) {
   const baseProfileId = String(profileId || '').split('@')[0];
   return [
     'codex-cli',
+    'codex-desktop',
     'claude-code',
     'gemini-cli',
     'qwen-code',

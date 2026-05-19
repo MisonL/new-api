@@ -28,6 +28,8 @@ const buildPassHeadersTemplate = (headers) => ({
 });
 
 export const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
+  'User-Agent',
+  'Originator',
   'Session_id',
   'X-Codex-Beta-Features',
   'X-Codex-Turn-Metadata',
@@ -105,12 +107,6 @@ const PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE = {
   ],
 };
 
-const combineParamOverrideTemplates = (...templates) => ({
-  operations: templates.flatMap((template) =>
-    Array.isArray(template?.operations) ? template.operations : [],
-  ),
-});
-
 export const PARAM_OVERRIDE_TEMPLATES = {
   codexHeaders: {
     label: 'Codex Desktop Header Passthrough',
@@ -119,13 +115,6 @@ export const PARAM_OVERRIDE_TEMPLATES = {
   codexWithoutImageTool: {
     label: 'Codex Desktop Compat: Remove Image Generation Tool',
     payload: PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE,
-  },
-  codexHeadersWithoutImageTool: {
-    label: 'Codex Desktop Compat: Headers + Remove Image Tool',
-    payload: combineParamOverrideTemplates(
-      CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
-      PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE,
-    ),
   },
   claudeHeaders: {
     label: 'Claude Code Header Passthrough',

@@ -860,6 +860,25 @@ func TestBuildFetchModelsHeadersAppliesHeaderProfileStrategy(t *testing.T) {
 	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
 }
 
+func TestBuildFetchModelsHeadersAppliesCodexDesktopHeaderProfile(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI,
+		OtherSettings: marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"codex-desktop"},
+			},
+		}),
+	}
+
+	headers, err := buildFetchModelsHeaders(channel, "sk-test")
+	require.NoError(t, err)
+	require.Equal(t, dto.BuiltinCodexDesktopUserAgent, headers.Get("User-Agent"))
+	require.Empty(t, headers.Get("Originator"))
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+}
+
 func TestBuildChannelRuntimeRequestHeadersSkipsClientHeaderPlaceholders(t *testing.T) {
 	channel := &model.Channel{
 		Type: constant.ChannelTypeOpenAI,

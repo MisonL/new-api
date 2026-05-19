@@ -389,7 +389,7 @@ const GEMINI_IMAGE_4K_TEMPLATE = {
   ],
 };
 
-const AWS_BEDROCK_ANTHROPIC_COMPAT_TEMPLATE = {
+const AWS_BEDROCK_ANTHROPIC_BETA_TEMPLATE = {
   operations: [
     {
       description:
@@ -429,6 +429,11 @@ const AWS_BEDROCK_ANTHROPIC_COMPAT_TEMPLATE = {
         'oauth-2025-04-20': null,
       },
     },
+  ],
+};
+
+const AWS_BEDROCK_REMOVE_INPUT_EXAMPLES_TEMPLATE = {
+  operations: [
     {
       description:
         'Remove all tools[*].custom.input_examples before upstream relay.',
@@ -501,14 +506,6 @@ const TEMPLATE_PRESET_CONFIG = {
     kind: 'operations',
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
-  codex_cli_headers_without_image_tool: {
-    group: 'scenario',
-    label: 'Codex CLI 透传 + 移除图片工具',
-    description:
-      '透传 Codex 动态头，并移除上游不兼容的 image_generation 工具。',
-    kind: 'operations',
-    payload: PARAM_OVERRIDE_TEMPLATES.codexHeadersWithoutImageTool.payload,
-  },
   gemini_cli_headers_passthrough: {
     group: 'scenario',
     label: 'Gemini CLI 真实请求头透传',
@@ -532,10 +529,17 @@ const TEMPLATE_PRESET_CONFIG = {
   },
   aws_bedrock_anthropic_beta_override: {
     group: 'scenario',
-    label: 'AWS Bedrock Claude 兼容模板',
-    description: '规范化 anthropic-beta，并移除 Bedrock 不兼容的工具示例字段。',
+    label: 'AWS Bedrock Claude Beta 头规范化',
+    description: '规范化 anthropic-beta 请求头，适配 Bedrock 支持的 beta token。',
     kind: 'operations',
-    payload: AWS_BEDROCK_ANTHROPIC_COMPAT_TEMPLATE,
+    payload: AWS_BEDROCK_ANTHROPIC_BETA_TEMPLATE,
+  },
+  aws_bedrock_remove_input_examples: {
+    group: 'scenario',
+    label: 'AWS Bedrock 删除工具示例字段',
+    description: '移除 Bedrock 不兼容的 tools.*.custom.input_examples 字段。',
+    kind: 'operations',
+    payload: AWS_BEDROCK_REMOVE_INPUT_EXAMPLES_TEMPLATE,
   },
 };
 
@@ -543,8 +547,8 @@ const QUICK_TEMPLATE_PRESETS = [
   'codex_cli_headers_passthrough',
   'claude_cli_headers_passthrough',
   'gemini_cli_headers_passthrough',
-  'codex_cli_headers_without_image_tool',
   'aws_bedrock_anthropic_beta_override',
+  'aws_bedrock_remove_input_examples',
   'pass_headers_auth',
   'openai_sdk_headers_passthrough',
   'anthropic_runtime_headers_passthrough',

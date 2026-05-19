@@ -11,6 +11,8 @@ import {
 
 const codexCliUserAgent =
   "codex-tui/0.130.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.130.0)";
+const codexDesktopUserAgent =
+  "Codex Desktop/0.131.0-alpha.9 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.513.31313)";
 const droidCliUserAgent = "factory-cli/0.123.0";
 
 test("空白 header_override 可写入最小 User-Agent JSON", () => {
@@ -170,6 +172,14 @@ test("可通过 id 找到主流 AI Coding CLI 预置", () => {
   assert.match(preset.ua, /^codex-tui\//);
   assert.doesNotMatch(preset.ua.toLowerCase(), /codex_exec/);
   assert.doesNotMatch(preset.ua.toLowerCase(), /source=exec/);
+});
+
+test("可通过 id 找到 Codex Desktop 预置", () => {
+  const preset = findHeaderOverrideUserAgentPreset("codex-desktop");
+
+  assert.equal(preset.id, "codex-desktop");
+  assert.equal(preset.groupKey, "ai-coding-cli");
+  assert.equal(preset.ua, codexDesktopUserAgent);
 });
 
 test("可通过 id 找到 Droid CLI 预置", () => {
