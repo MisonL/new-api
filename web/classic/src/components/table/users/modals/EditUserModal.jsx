@@ -373,7 +373,7 @@ const EditUserModal = (props) => {
                         name='username'
                         label={t('用户名')}
                         placeholder={t('请输入新的用户名')}
-                        autocomplete='username'
+                        autoComplete='username'
                         rules={[{ required: true, message: t('请输入用户名') }]}
                         showClear
                       />
@@ -385,7 +385,7 @@ const EditUserModal = (props) => {
                         name='password'
                         label={t('密码')}
                         placeholder={t('请输入新的密码，最短 8 位')}
-                        autocomplete='new-password'
+                        autoComplete='new-password'
                         mode='password'
                         showClear
                       />
@@ -397,7 +397,7 @@ const EditUserModal = (props) => {
                         name='display_name'
                         label={t('显示名称')}
                         placeholder={t('请输入新的显示名称')}
-                        autocomplete='name'
+                        autoComplete='name'
                         showClear
                       />
                     </Col>
@@ -408,7 +408,7 @@ const EditUserModal = (props) => {
                         name='remark'
                         label={t('备注')}
                         placeholder={t('请输入备注（仅管理员可见）')}
-                        autocomplete='off'
+                        autoComplete='off'
                         showClear
                       />
                     </Col>

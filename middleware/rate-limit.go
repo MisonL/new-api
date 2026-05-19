@@ -18,6 +18,19 @@ const (
 	desktopOAuthHandoffTokenMaxLength = 128
 )
 
+var webStaticRootPaths = map[string]struct{}{
+	"/azure_model_name.png": {},
+	"/cover-4.webp":         {},
+	"/favicon.ico":          {},
+	"/index.html":           {},
+	"/logo.png":             {},
+	"/pay-apple.png":        {},
+	"/pay-card.png":         {},
+	"/pay-google.png":       {},
+	"/ratio.png":            {},
+	"/robots.txt":           {},
+}
+
 var inMemoryRateLimiter common.InMemoryRateLimiter
 
 var defNext = func(c *gin.Context) {
@@ -98,9 +111,26 @@ func rateLimitFactory(maxRequestNum int, duration int64, mark string) func(c *gi
 
 func GlobalWebRateLimit() func(c *gin.Context) {
 	if common.GlobalWebRateLimitEnable {
-		return rateLimitFactory(common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration, "GW")
+		limiter := rateLimitFactory(common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration, "GW")
+		return func(c *gin.Context) {
+			if IsWebStaticResourcePath(c.Request.URL.Path) {
+				c.Next()
+				return
+			}
+			limiter(c)
+		}
 	}
 	return defNext
+}
+
+func IsWebStaticResourcePath(resourcePath string) bool {
+	if strings.HasPrefix(resourcePath, "/assets/") ||
+		strings.HasPrefix(resourcePath, "/static/") ||
+		strings.HasPrefix(resourcePath, "/.well-known/") {
+		return true
+	}
+	_, ok := webStaticRootPaths[resourcePath]
+	return ok
 }
 
 func GlobalAPIRateLimit() func(c *gin.Context) {

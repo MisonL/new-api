@@ -58,15 +58,14 @@ const ChatPage = () => {
       src={iframeSrc}
       style={{
         width: '100%',
-        height: 'calc(100vh - 64px)',
+        height: '100%',
         border: 'none',
-        marginTop: '64px',
       }}
       title='Token Frame'
       allow='camera;microphone'
     />
   ) : (
-    <div className='fixed inset-0 w-screen h-screen flex items-center justify-center bg-white/80 z-[1000] mt-[60px]'>
+    <div className='absolute inset-0 flex items-center justify-center bg-white/80 z-[1000]'>
       <div className='flex flex-col items-center'>
         <Spin size='large' spinning={true} tip={null} />
         <span

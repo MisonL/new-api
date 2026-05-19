@@ -42,17 +42,44 @@ import {
 } from '../../components/table/channels/modelTestRuntimeConfig';
 
 const CHANNEL_PAGE_SIZE_STORAGE_KEY = 'channel-page-size';
+const LEGACY_PAGE_SIZE_STORAGE_KEY = 'page-size';
 const DEFAULT_CHANNEL_PAGE_SIZE = 20;
-const CHANNEL_PAGE_SIZE_OPTIONS = [20, 50, 100];
+const CHANNEL_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+
+const parseStoredChannelPageSize = (value) => {
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    return null;
+  }
+  const size = Number(value);
+  return CHANNEL_PAGE_SIZE_OPTIONS.includes(size) ? size : null;
+};
 
 const getStoredChannelPageSize = () => {
-  const storedSize = parseInt(
-    localStorage.getItem(CHANNEL_PAGE_SIZE_STORAGE_KEY),
-    10,
-  );
-  return CHANNEL_PAGE_SIZE_OPTIONS.includes(storedSize)
-    ? storedSize
-    : DEFAULT_CHANNEL_PAGE_SIZE;
+  try {
+    const storedSize = parseStoredChannelPageSize(
+      localStorage.getItem(CHANNEL_PAGE_SIZE_STORAGE_KEY),
+    );
+    if (storedSize) {
+      return storedSize;
+    }
+
+    const legacySize = parseStoredChannelPageSize(
+      localStorage.getItem(LEGACY_PAGE_SIZE_STORAGE_KEY),
+    );
+    if (legacySize) {
+      localStorage.setItem(CHANNEL_PAGE_SIZE_STORAGE_KEY, String(legacySize));
+      return legacySize;
+    }
+  } catch (error) {
+    console.error('getStoredChannelPageSize failed', {
+      key: CHANNEL_PAGE_SIZE_STORAGE_KEY,
+      legacyKey: LEGACY_PAGE_SIZE_STORAGE_KEY,
+      error,
+    });
+    return DEFAULT_CHANNEL_PAGE_SIZE;
+  }
+
+  return DEFAULT_CHANNEL_PAGE_SIZE;
 };
 
 export const useChannelsData = () => {
@@ -65,7 +92,7 @@ export const useChannelsData = () => {
   const [activePage, setActivePage] = useState(1);
   const [idSort, setIdSort] = useState(false);
   const [searching, setSearching] = useState(false);
-  const [pageSize, setPageSize] = useState(DEFAULT_CHANNEL_PAGE_SIZE);
+  const [pageSize, setPageSize] = useState(() => getStoredChannelPageSize());
   const [channelCount, setChannelCount] = useState(0);
   const [groupOptions, setGroupOptions] = useState([]);
 
@@ -202,7 +229,6 @@ export const useChannelsData = () => {
       localStorage.getItem('enable-batch-delete') === 'true';
 
     setIdSort(localIdSort);
-    setPageSize(localPageSize);
     setEnableTagMode(localEnableTagMode);
     setEnableBatchDelete(localEnableBatchDelete);
 
@@ -583,7 +609,7 @@ export const useChannelsData = () => {
   };
 
   const handlePageSizeChange = async (size) => {
-    localStorage.setItem(CHANNEL_PAGE_SIZE_STORAGE_KEY, size + '');
+    localStorage.setItem(CHANNEL_PAGE_SIZE_STORAGE_KEY, String(size));
     setPageSize(size);
     setActivePage(1);
     const { searchKeyword, searchGroup, searchModel } = getFormValues();

@@ -206,7 +206,7 @@ const EditPrefillGroupModal = ({
                     field='name'
                     label={t('组名')}
                     placeholder={t('请输入组名')}
-                    autocomplete='off'
+                    autoComplete='off'
                     rules={[{ required: true, message: t('请输入组名') }]}
                     showClear
                   />
@@ -227,7 +227,7 @@ const EditPrefillGroupModal = ({
                     field='description'
                     label={t('描述')}
                     placeholder={t('请输入组描述')}
-                    autocomplete='off'
+                    autoComplete='off'
                     rows={3}
                     showClear
                   />

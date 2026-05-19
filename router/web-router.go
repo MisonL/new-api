@@ -3,6 +3,7 @@ package router
 import (
 	"embed"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -12,6 +13,28 @@ import (
 	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 )
+
+var webRootStaticExtensions = map[string]struct{}{
+	".css":         {},
+	".gif":         {},
+	".ico":         {},
+	".jpeg":        {},
+	".jpg":         {},
+	".js":          {},
+	".json":        {},
+	".map":         {},
+	".mjs":         {},
+	".otf":         {},
+	".png":         {},
+	".svg":         {},
+	".ttf":         {},
+	".txt":         {},
+	".webmanifest": {},
+	".webp":        {},
+	".woff":        {},
+	".woff2":       {},
+	".xml":         {},
+}
 
 // ThemeAssets holds the embedded frontend assets for both themes.
 type ThemeAssets struct {
@@ -32,7 +55,7 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	router.Use(static.Serve("/", themeFS))
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
-		if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
+		if shouldReturnRelayNotFound(c.Request.RequestURI, c.Request.URL.Path) {
 			controller.RelayNotFound(c)
 			return
 		}
@@ -43,4 +66,20 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 			c.Data(http.StatusOK, "text/html; charset=utf-8", assets.DefaultIndexPage)
 		}
 	})
+}
+
+func shouldReturnRelayNotFound(requestURI string, requestPath string) bool {
+	return strings.HasPrefix(requestURI, "/v1") ||
+		strings.HasPrefix(requestURI, "/api") ||
+		middleware.IsWebStaticResourcePath(requestPath) ||
+		isRootWebStaticFilePath(requestPath)
+}
+
+func isRootWebStaticFilePath(requestPath string) bool {
+	trimmed := strings.TrimPrefix(requestPath, "/")
+	if trimmed == "" || strings.Contains(trimmed, "/") {
+		return false
+	}
+	_, ok := webRootStaticExtensions[strings.ToLower(filepath.Ext(trimmed))]
+	return ok
 }

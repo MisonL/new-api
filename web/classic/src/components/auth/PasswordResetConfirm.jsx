@@ -152,7 +152,6 @@ const PasswordResetConfirm = () => {
                     label={t('邮箱')}
                     name='email'
                     autoComplete='email'
-                    autocomplete='email'
                     disabled={true}
                     prefix={<IconMail />}
                     placeholder={email ? '' : t('等待获取邮箱信息...')}

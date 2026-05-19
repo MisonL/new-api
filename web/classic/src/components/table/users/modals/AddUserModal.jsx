@@ -144,7 +144,7 @@ const AddUserModal = (props) => {
                       name='username'
                       label={t('用户名')}
                       placeholder={t('请输入用户名')}
-                      autocomplete='username'
+                      autoComplete='username'
                       rules={[{ required: true, message: t('请输入用户名') }]}
                       showClear
                     />
@@ -155,7 +155,7 @@ const AddUserModal = (props) => {
                       name='display_name'
                       label={t('显示名称')}
                       placeholder={t('请输入显示名称')}
-                      autocomplete='name'
+                      autoComplete='name'
                       showClear
                     />
                   </Col>
@@ -166,7 +166,7 @@ const AddUserModal = (props) => {
                       label={t('密码')}
                       type='password'
                       placeholder={t('请输入密码')}
-                      autocomplete='new-password'
+                      autoComplete='new-password'
                       rules={[{ required: true, message: t('请输入密码') }]}
                       showClear
                     />
@@ -177,7 +177,7 @@ const AddUserModal = (props) => {
                       name='remark'
                       label={t('备注')}
                       placeholder={t('请输入备注（仅管理员可见）')}
-                      autocomplete='off'
+                      autoComplete='off'
                       showClear
                     />
                   </Col>

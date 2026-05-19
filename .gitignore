@@ -19,6 +19,7 @@ new-api
 .DS_Store
 tiktoken_cache
 .eslintcache
+*.timestamp-*.mjs
 .gocache
 .gomodcache/
 .cache

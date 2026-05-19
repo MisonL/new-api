@@ -21,6 +21,7 @@ import i18next from 'i18next';
 import { Modal, Tag, Typography, Avatar } from '@douyinfe/semi-ui';
 import { copy, showSuccess } from './utils';
 import { stringToColor } from './color';
+import { resolveLobeHubIconTarget } from './lobeHubIconResolver';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 import {
   BILLING_VARS,
@@ -409,16 +410,10 @@ function parseLobeHubIconValue(raw) {
 }
 
 function resolveLobeHubIcon(baseIcon, iconName, size) {
-  const segments = String(iconName).split('.');
-  let iconComponent = undefined;
-  let propStartIndex = 1;
-
-  if (baseIcon && segments.length > 1 && baseIcon[segments[1]]) {
-    iconComponent = baseIcon[segments[1]];
-    propStartIndex = 2;
-  } else {
-    iconComponent = baseIcon;
-  }
+  const { iconComponent, propSegments } = resolveLobeHubIconTarget(
+    baseIcon,
+    iconName,
+  );
 
   if (
     !iconComponent ||
@@ -428,8 +423,7 @@ function resolveLobeHubIcon(baseIcon, iconName, size) {
   }
 
   const props = {};
-  for (let i = propStartIndex; i < segments.length; i++) {
-    const segment = segments[i];
+  for (const segment of propSegments) {
     if (!segment) continue;
     const equalIndex = segment.indexOf('=');
     if (equalIndex === -1) {

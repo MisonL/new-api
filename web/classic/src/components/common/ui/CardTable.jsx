@@ -70,15 +70,6 @@ const CardTable = ({
       id: desktopTableId,
       ...tableOnlyProps
     } = finalTableProps;
-    const desktopScrollInnerStyle = hasHorizontalScroll
-      ? {
-          minWidth: '100%',
-          width:
-            horizontalScrollWidth === 'max-content'
-              ? 'max-content'
-              : horizontalScrollWidth,
-        }
-      : undefined;
     const tableNode = (
       <Table
         columns={columns}
@@ -96,25 +87,12 @@ const CardTable = ({
       return tableNode;
     }
 
-    if (hasFixedColumns) {
-      return (
-        <FixedTableScrollProxy
-          syncKey={`${columns.length}:${dataSource.length}:${loading}`}
-        >
-          {tableNode}
-        </FixedTableScrollProxy>
-      );
-    }
-
     return (
-      <div className='card-table-desktop-scroll'>
-        <div
-          className='card-table-desktop-scroll-inner'
-          style={desktopScrollInnerStyle}
-        >
-          {tableNode}
-        </div>
-      </div>
+      <DesktopTableScrollProxy
+        syncKey={`${columns.length}:${dataSource.length}:${loading}:${hasFixedColumns}`}
+      >
+        {tableNode}
+      </DesktopTableScrollProxy>
     );
   }
 
@@ -289,10 +267,13 @@ function createTableScrollSync(tableBody, updateScrollLeft) {
   };
 }
 
-function createTableMetricObserver(tableBody, updateMetrics) {
+function createTableMetricObserver(elements, updateMetrics) {
   const resizeObserver = new ResizeObserver(updateMetrics);
   const mutationObserver = new MutationObserver(updateMetrics);
-  resizeObserver.observe(tableBody);
+  elements.filter(Boolean).forEach((element) => {
+    resizeObserver.observe(element);
+  });
+  const tableBody = elements[0];
   mutationObserver.observe(tableBody, { childList: true, subtree: true });
   const animationFrame = requestAnimationFrame(updateMetrics);
 
@@ -303,7 +284,7 @@ function createTableMetricObserver(tableBody, updateMetrics) {
   };
 }
 
-function useFixedTableScrollMetrics(containerRef, syncKey) {
+function useDesktopTableScrollMetrics(containerRef, syncKey) {
   const [metrics, setMetrics] = useState({
     clientWidth: 0,
     scrollWidth: 0,
@@ -312,13 +293,30 @@ function useFixedTableScrollMetrics(containerRef, syncKey) {
   });
 
   useEffect(() => {
-    const tableBody = getDesktopTableBody(containerRef.current);
+    const container = containerRef.current;
+    const tableBody = getDesktopTableBody(container);
     if (!tableBody) return undefined;
-    const track = containerRef.current?.querySelector(
-      '.card-table-fixed-scrollbar',
-    );
+    const cardBody = container?.closest('.semi-card-body');
+    const track = container?.querySelector('.card-table-scrollbar');
 
     const updateMetrics = () => {
+      if (container && cardBody && track) {
+        const cardBodyRect = cardBody.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        const trackStyle = getComputedStyle(track);
+        const trackOuterHeight =
+          track.offsetHeight + parseFloat(trackStyle.marginTop || '0');
+        const availableHeight =
+          cardBody.clientHeight -
+          Math.max(containerRect.top - cardBodyRect.top, 0) -
+          trackOuterHeight;
+        if (availableHeight > 0) {
+          container.style.setProperty(
+            '--card-table-body-max-height',
+            `${Math.floor(availableHeight)}px`,
+          );
+        }
+      }
       setMetrics({
         clientWidth: tableBody.clientWidth,
         scrollWidth: tableBody.scrollWidth,
@@ -333,22 +331,26 @@ function useFixedTableScrollMetrics(containerRef, syncKey) {
       setMetrics((current) => ({ ...current, scrollLeft }));
     };
     const cleanupSync = createTableScrollSync(tableBody, updateScrollLeft);
-    const cleanupObserver = createTableMetricObserver(tableBody, updateMetrics);
+    const cleanupObserver = createTableMetricObserver(
+      [tableBody, container, cardBody, track],
+      updateMetrics,
+    );
 
     return () => {
       cleanupObserver();
       cleanupSync();
+      container?.style.removeProperty('--card-table-body-max-height');
     };
   }, [syncKey]);
 
   return metrics;
 }
 
-const FixedTableScrollProxy = ({ children, syncKey }) => {
+const DesktopTableScrollProxy = ({ children, syncKey }) => {
   const containerRef = useRef(null);
   const trackRef = useRef(null);
   const dragStateRef = useRef(null);
-  const metrics = useFixedTableScrollMetrics(containerRef, syncKey);
+  const metrics = useDesktopTableScrollMetrics(containerRef, syncKey);
   const showScrollbar = metrics.scrollWidth > metrics.clientWidth + 1;
   const scrollableWidth = Math.max(
     metrics.scrollWidth - metrics.clientWidth,
@@ -503,10 +505,10 @@ const FixedTableScrollProxy = ({ children, syncKey }) => {
   );
 
   return (
-    <div className='card-table-fixed-scroll-shell' ref={containerRef}>
+    <div className='card-table-scroll-shell' ref={containerRef}>
       {children}
       <div
-        className='card-table-fixed-scrollbar'
+        className='card-table-scrollbar'
         style={{ display: showScrollbar ? undefined : 'none' }}
         ref={trackRef}
         onPointerDown={handleTrackPointerDown}
@@ -520,7 +522,7 @@ const FixedTableScrollProxy = ({ children, syncKey }) => {
         aria-valuenow={Math.round(metrics.scrollLeft)}
       >
         <div
-          className='card-table-fixed-scrollbar-thumb'
+          className='card-table-scrollbar-thumb'
           style={{
             left: `${thumbLeft}px`,
             width: `${thumbWidth}px`,
@@ -535,7 +537,7 @@ const FixedTableScrollProxy = ({ children, syncKey }) => {
   );
 };
 
-FixedTableScrollProxy.propTypes = {
+DesktopTableScrollProxy.propTypes = {
   children: PropTypes.node,
   syncKey: PropTypes.string,
 };
