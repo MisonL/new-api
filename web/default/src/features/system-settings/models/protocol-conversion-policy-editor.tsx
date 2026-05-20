@@ -34,6 +34,7 @@ import {
   type ProtocolRuleTemplate,
   type ProtocolRule,
 } from './protocol-conversion-policy-utils'
+import { reconcileProtocolRuleEditorKeys } from './protocol-conversion-policy-editor-keys'
 import { ProtocolConversionRuleCard } from './protocol-conversion-rule-card'
 
 type ProtocolConversionPolicyEditorProps = {
@@ -47,12 +48,21 @@ type ProtocolConversionPolicyEditorProps = {
 const CHANNEL_SELECTOR_PAGE_SIZE = 1000
 const CHANNEL_SELECTOR_STALE_TIME_MS = 60_000
 const CHANNEL_SELECTOR_GC_TIME_MS = 5 * 60_000
+const EMPTY_PROTOCOL_RULES: ProtocolRule[] = []
 
 let editorRuleKeyCounter = 0
 
 function nextEditorRuleKey() {
   editorRuleKeyCounter += 1
   return `protocol-rule-editor-${Date.now()}-${editorRuleKeyCounter}`
+}
+
+function createEditorRuleKeys(ruleCount: number) {
+  return Array.from({ length: ruleCount }, nextEditorRuleKey)
+}
+
+function fallbackEditorRuleKey(index: number) {
+  return `external-rule-${index}`
 }
 
 export function ProtocolConversionPolicyEditor({
@@ -63,10 +73,10 @@ export function ProtocolConversionPolicyEditor({
 }: ProtocolConversionPolicyEditorProps) {
   const { t } = useTranslation()
   const parsed = useMemo(() => parseProtocolPolicy(value), [value])
-  const rules = parsed.ok ? parsed.rules : []
+  const rules = parsed.ok ? parsed.rules : EMPTY_PROTOCOL_RULES
   const policyExtra = parsed.ok ? parsed.policyExtra : {}
   const [ruleKeys, setRuleKeys] = useState(() =>
-    rules.map(() => nextEditorRuleKey())
+    createEditorRuleKeys(rules.length)
   )
   const [jsonOpen, setJsonOpen] = useState(false)
   const [jsonDraft, setJsonDraft] = useState(value || '{}')
@@ -115,7 +125,7 @@ export function ProtocolConversionPolicyEditor({
       toast.error(next.error)
       return
     }
-    setRuleKeys(next.rules.map(() => nextEditorRuleKey()))
+    setRuleKeys(createEditorRuleKeys(next.rules.length))
     onChange(serializeProtocolPolicy(next.rules, next.policyExtra))
     setJsonOpen(false)
   }
@@ -127,24 +137,39 @@ export function ProtocolConversionPolicyEditor({
       toast.error(next.error)
       return
     }
-    setRuleKeys(next.rules.map(() => nextEditorRuleKey()))
+    setRuleKeys(createEditorRuleKeys(next.rules.length))
     onChange(nextValue)
   }
 
   const addRule = () => {
     const nextRules = createProtocolRuleFromTemplate(ruleTemplate, rules)
-    setRuleKeys((currentKeys) => [
-      ...currentKeys,
-      ...nextRules.map(() => nextEditorRuleKey()),
-    ])
-    commitRules([...rules, ...nextRules])
+    setRuleKeys((currentKeys) =>
+      [
+        ...reconcileProtocolRuleEditorKeys(
+          currentKeys,
+          rules.length,
+          nextEditorRuleKey,
+          fallbackEditorRuleKey
+        ),
+        ...createEditorRuleKeys(nextRules.length),
+      ]
+    )
+    const updatedRules = [...rules, ...nextRules]
+    commitRules(updatedRules)
   }
 
   const removeRule = (ruleIndex: number) => {
-    setRuleKeys((currentKeys) =>
-      currentKeys.filter((_, index) => index !== ruleIndex)
-    )
-    commitRules(rules.filter((_, index) => index !== ruleIndex))
+    setRuleKeys((currentKeys) => {
+      const currentRuleKeys = reconcileProtocolRuleEditorKeys(
+        currentKeys,
+        rules.length,
+        nextEditorRuleKey,
+        fallbackEditorRuleKey
+      )
+      return currentRuleKeys.filter((_, index) => index !== ruleIndex)
+    })
+    const updatedRules = rules.filter((_, index) => index !== ruleIndex)
+    commitRules(updatedRules)
   }
 
   return (
@@ -246,7 +271,7 @@ export function ProtocolConversionPolicyEditor({
           ) : null}
           {rules.map((rule, index) => (
             <ProtocolConversionRuleCard
-              key={ruleKeys[index] ?? `external-rule-${index}`}
+              key={ruleKeys[index] ?? fallbackEditorRuleKey(index)}
               index={index}
               rule={rule}
               channels={channels}

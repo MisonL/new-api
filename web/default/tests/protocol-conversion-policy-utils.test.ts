@@ -329,6 +329,51 @@ describe('protocol conversion policy utils', () => {
     expect(parseIntegerText('1, ')).toEqual([1])
     expect(parseIntegerText('1, 2,')).toEqual([1, 2])
     expect(parseIntegerText('1，2、3\n4 5')).toEqual([1, 2, 3, 4, 5])
+    expect(parseIntegerText('1abc')).toEqual([])
+    expect(parseIntegerText('1abc, 2, 3x')).toEqual([2])
+  })
+
+  test('preview rejects dirty channel identifiers', () => {
+    const parsed = parseProtocolPolicy(
+      JSON.stringify({
+        rules: [
+          {
+            name: 'channel-scope',
+            enabled: true,
+            source_endpoint: ENDPOINT_CHAT,
+            target_endpoint: ENDPOINT_RESPONSES,
+            all_channels: false,
+            channel_ids: [1],
+            channel_types: [2],
+            model_patterns: ['^gpt-5.*$'],
+          },
+        ],
+      })
+    )
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    expect(
+      getProtocolPreviewResult(
+        parsed.rules[0],
+        { channelId: '1abc', channelType: '', model: 'gpt-5' },
+        false
+      )
+    ).toEqual({
+      matched: false,
+      reason: 'Channel scope does not match.',
+    })
+
+    expect(
+      getProtocolPreviewResult(
+        parsed.rules[0],
+        { channelId: '', channelType: '2abc', model: 'gpt-5' },
+        false
+      )
+    ).toEqual({
+      matched: false,
+      reason: 'Channel scope does not match.',
+    })
   })
 
   test('keeps draft text visible while the parsed parent value is already synchronized', () => {

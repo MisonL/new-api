@@ -228,14 +228,13 @@ export function getProtocolPreviewResult(
     }
   }
 
-  const channelId = Number.parseInt(preview.channelId, 10)
-  const channelType = Number.parseInt(preview.channelType, 10)
+  const channelId = parseStrictPositiveInteger(preview.channelId)
+  const channelType = parseStrictPositiveInteger(preview.channelType)
 
   if (!rule.all_channels) {
-    const idMatched =
-      Number.isInteger(channelId) && rule.channel_ids.includes(channelId)
+    const idMatched = channelId != null && rule.channel_ids.includes(channelId)
     const typeMatched =
-      Number.isInteger(channelType) && rule.channel_types.includes(channelType)
+      channelType != null && rule.channel_types.includes(channelType)
     if (!idMatched && !typeMatched) {
       return { matched: false, reason: 'Channel scope does not match.' }
     }
@@ -520,11 +519,18 @@ export function serializeProtocolPolicy(
   return JSON.stringify(policy, null, 2)
 }
 
+function parseStrictPositiveInteger(value: string) {
+  const token = value.trim()
+  if (!/^\d+$/.test(token)) return null
+  const parsed = Number.parseInt(token, 10)
+  return parsed > 0 ? parsed : null
+}
+
 export function parseIntegerText(value: string) {
   return value
     .split(/[\s,，、]+/)
-    .map((item) => Number.parseInt(item.trim(), 10))
-    .filter((item) => Number.isInteger(item) && item > 0)
+    .map(parseStrictPositiveInteger)
+    .filter((item): item is number => item != null)
 }
 
 export function parseLines(value: string) {

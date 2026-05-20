@@ -38,6 +38,7 @@ import {
   buildTemplateRule,
   deserializePolicy,
   getRuleKey,
+  isResponsesToChatRule,
   isRuleScopeValid,
   isRuleDirectionValid,
   serializeRules,
@@ -180,9 +181,14 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
 
   const updateRule = (index, patch) =>
     applyRules(
-      rules.map((rule, currentIndex) =>
-        currentIndex === index ? { ...rule, ...patch } : rule,
-      ),
+      rules.map((rule, currentIndex) => {
+        if (currentIndex !== index) return rule;
+        const nextRule = { ...rule, ...patch };
+        if (!isResponsesToChatRule(nextRule)) {
+          nextRule.enable_custom_tool_bridge = false;
+        }
+        return nextRule;
+      }),
     );
 
   const removeRule = (targetIndex) => {

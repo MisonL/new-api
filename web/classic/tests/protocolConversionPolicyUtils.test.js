@@ -98,9 +98,9 @@ describe('classic protocol conversion policy utils', () => {
 
     expect(parsed).not.toBeNull();
     expect(parsed.rules).toEqual([]);
-    expect(JSON.parse(serializeRules(parsed.rules, parsed.policyExtra))).toEqual(
-      {},
-    );
+    expect(
+      JSON.parse(serializeRules(parsed.rules, parsed.policyExtra)),
+    ).toEqual({});
   });
 
   test('template labels and generated rules keep the same direction', () => {
@@ -168,9 +168,7 @@ describe('classic protocol conversion policy utils', () => {
 
   test('parses channel id text with common separators', () => {
     expect(parseIntegerList('35,36, 37')).toEqual([35, 36, 37]);
-    expect(parseIntegerList('35，36、37\n38 39')).toEqual([
-      35, 36, 37, 38, 39,
-    ]);
+    expect(parseIntegerList('35，36、37\n38 39')).toEqual([35, 36, 37, 38, 39]);
     expect(parseIntegerList('35,')).toEqual([35]);
   });
 });

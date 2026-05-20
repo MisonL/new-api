@@ -50,10 +50,19 @@ function IntegerListInput({ disabled, name, onChange, placeholder, value }) {
   const inputValue =
     draft.source === committedValue ? draft.value : committedValue;
 
+  React.useEffect(() => {
+    setDraft((current) =>
+      current.source === committedValue
+        ? current
+        : { source: committedValue, value: committedValue },
+    );
+  }, [committedValue]);
+
   const updateDraft = (nextValue) => {
     const nextList = parseIntegerList(nextValue);
+    const normalizedValue = stringifyIntegerList(nextList);
     setDraft({
-      source: stringifyIntegerList(nextList),
+      source: normalizedValue,
       value: nextValue,
     });
     onChange(nextList);
@@ -77,6 +86,7 @@ function IntegerListInput({ disabled, name, onChange, placeholder, value }) {
       placeholder={placeholder}
       onBlur={commitDraft}
       onChange={updateDraft}
+      onEnterPress={commitDraft}
     />
   );
 }
@@ -267,7 +277,7 @@ function AdvancedPanel({ index, rule, t, updateRule }) {
           <Switch
             id={`protocol-rule-custom-tool-bridge-${index}`}
             name={`protocol-rule-custom-tool-bridge-${index}`}
-            checked={bridgeSupported && rule.enable_custom_tool_bridge === true}
+            checked={Boolean(bridgeSupported && rule.enable_custom_tool_bridge)}
             checkedText={t('开')}
             disabled={!bridgeSupported}
             uncheckedText={t('关')}

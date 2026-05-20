@@ -16,6 +16,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { shouldResetComboboxOnDisabledChange } from './combobox-state'
 
 export type ComboboxOption = {
   value: string
@@ -49,6 +50,7 @@ export function Combobox({
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
   const [searchValue, setSearchValue] = React.useState('')
+  const previousDisabledRef = React.useRef(disabled)
 
   const selectedOption = options.find((option) => option.value === value)
   const displayValue = selectedOption?.label || value || placeholder
@@ -64,10 +66,16 @@ export function Combobox({
   }, [options, searchValue])
 
   React.useEffect(() => {
-    if (disabled) {
+    if (
+      shouldResetComboboxOnDisabledChange(
+        previousDisabledRef.current,
+        disabled
+      )
+    ) {
       setOpen(false)
       setSearchValue('')
     }
+    previousDisabledRef.current = disabled
   }, [disabled])
 
   const handleSelect = (selectedValue: string) => {

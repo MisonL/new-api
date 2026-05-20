@@ -112,13 +112,18 @@ export function ProtocolConversionChannelScopeEditor({
               placeholder={channelSelectorLabel ?? t('Select channel')}
               searchPlaceholder={t('Search channels')}
               emptyText={channelSelectorLabel ?? t('No channels found')}
-              disabled={channelsLoading || channelsError}
+              disabled={rule.all_channels || channelsLoading || channelsError}
             />
             <Button
               type='button'
               variant='outline'
               size='icon'
-              disabled={rule.all_channels || !selectedChannelId}
+              disabled={
+                rule.all_channels ||
+                !selectedChannelId ||
+                channelsLoading ||
+                channelsError
+              }
               onClick={onAddSelectedChannel}
               aria-label={t('Add channel')}
             >

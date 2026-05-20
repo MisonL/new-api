@@ -420,7 +420,7 @@
     "Average TTFT": "TTFT moyen",
     "AWS": "AWS",
     "AWS Bedrock Claude Beta Header": "En-tête bêta Claude AWS Bedrock",
-    "AWS Bedrock Remove Input Examples": "AWS Bedrock supprimer les exemples d’entrée",
+    "AWS Bedrock Remove Input Examples": "AWS Bedrock Supprimer les exemples d’entrée",
     "AWS Key Format": "Format de clé AWS",
     "Azure": "Azure",
     "AZURE_OPENAI_ENDPOINT *": "AZURE_OPENAI_ENDPOINT *",
