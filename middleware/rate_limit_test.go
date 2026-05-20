@@ -113,6 +113,11 @@ func TestGlobalWebRateLimitSkipsStaticAssets(t *testing.T) {
 	router.GET("/unknown.js", func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
+	newRequest := func(path string, remoteAddr string) *http.Request {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.RemoteAddr = remoteAddr
+		return request
+	}
 
 	staticPaths := []string{
 		"/assets/chunk.js",
@@ -137,10 +142,22 @@ func TestGlobalWebRateLimitSkipsStaticAssets(t *testing.T) {
 		}
 	}
 
+	firstUnknown := httptest.NewRecorder()
+	router.ServeHTTP(firstUnknown, newRequest("/unknown.js", "203.0.113.10:10001"))
+	if firstUnknown.Code != http.StatusOK {
+		t.Fatalf("expected first unknown static-looking path to pass, got %d", firstUnknown.Code)
+	}
+
+	secondUnknown := httptest.NewRecorder()
+	router.ServeHTTP(secondUnknown, newRequest("/unknown.js", "203.0.113.10:10002"))
+	if secondUnknown.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second unknown static-looking path to stay rate limited, got %d", secondUnknown.Code)
+	}
+
 	firstPage := httptest.NewRecorder()
 	router.ServeHTTP(
 		firstPage,
-		httptest.NewRequest(http.MethodGet, "/console/midjourney", nil),
+		newRequest("/console/midjourney", "203.0.113.11:10001"),
 	)
 	if firstPage.Code != http.StatusOK {
 		t.Fatalf("expected first page request to pass, got %d", firstPage.Code)
@@ -149,15 +166,9 @@ func TestGlobalWebRateLimitSkipsStaticAssets(t *testing.T) {
 	secondPage := httptest.NewRecorder()
 	router.ServeHTTP(
 		secondPage,
-		httptest.NewRequest(http.MethodGet, "/console/midjourney", nil),
+		newRequest("/console/midjourney", "203.0.113.11:10002"),
 	)
 	if secondPage.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected second page request to be rate limited, got %d", secondPage.Code)
-	}
-
-	firstUnknown := httptest.NewRecorder()
-	router.ServeHTTP(firstUnknown, httptest.NewRequest(http.MethodGet, "/unknown.js", nil))
-	if firstUnknown.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected unknown static-looking path to stay rate limited, got %d", firstUnknown.Code)
 	}
 }

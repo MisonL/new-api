@@ -58,6 +58,18 @@ func TestShouldReturnRelayNotFound(t *testing.T) {
 			want:        true,
 		},
 		{
+			name:        "missing root mp4",
+			requestURI:  "/preview.mp4",
+			requestPath: "/preview.mp4",
+			want:        true,
+		},
+		{
+			name:        "missing root webm",
+			requestURI:  "/preview.webm",
+			requestPath: "/preview.webm",
+			want:        true,
+		},
+		{
 			name:        "browser well-known probe",
 			requestURI:  "/.well-known/appspecific/com.chrome.devtools.json",
 			requestPath: "/.well-known/appspecific/com.chrome.devtools.json",
