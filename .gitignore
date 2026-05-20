@@ -29,6 +29,7 @@ backups/
 .deploy-backups/
 .worktrees/
 .cursor
+.antigravitycli/
 
 data/
 .gomodcache/
