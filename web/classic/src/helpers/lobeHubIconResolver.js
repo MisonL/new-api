@@ -17,12 +17,30 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
+const unsafeIconSegmentKeys = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+]);
+
+function hasSafeOwnIconSegment(baseIcon, segment) {
+  return (
+    segment &&
+    !unsafeIconSegmentKeys.has(segment) &&
+    Object.prototype.hasOwnProperty.call(baseIcon, segment)
+  );
+}
+
 export function resolveLobeHubIconTarget(baseIcon, iconName) {
   const segments = String(iconName).split('.');
   let iconComponent = baseIcon;
   let propStartIndex = 1;
 
-  if (baseIcon && segments.length > 1 && baseIcon[segments[1]]) {
+  if (
+    baseIcon &&
+    segments.length > 1 &&
+    hasSafeOwnIconSegment(baseIcon, segments[1])
+  ) {
     iconComponent = baseIcon[segments[1]];
     propStartIndex = 2;
   } else if (segments.length > 1 && !segments[1].includes('=')) {

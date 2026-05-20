@@ -257,8 +257,14 @@ test('param override template payloads can replace rule template JSON', () => {
   });
 });
 
+test('legacy combined param override preset is absent', () => {
+  assert.equal(
+    Object.hasOwn(PARAM_OVERRIDE_TEMPLATES, 'codexHeadersWithoutImageTool'),
+    false,
+  );
+});
+
 test('param override preset templates each contain one operation', () => {
-  assert.equal(PARAM_OVERRIDE_TEMPLATES.codexHeadersWithoutImageTool, undefined);
   for (const [key, template] of Object.entries(PARAM_OVERRIDE_TEMPLATES)) {
     const operations = template.payload.operations;
     assert.ok(Array.isArray(operations), key);

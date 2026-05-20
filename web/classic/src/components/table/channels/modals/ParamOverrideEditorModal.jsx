@@ -530,7 +530,8 @@ const TEMPLATE_PRESET_CONFIG = {
   aws_bedrock_anthropic_beta_override: {
     group: 'scenario',
     label: 'AWS Bedrock Claude Beta 头规范化',
-    description: '规范化 anthropic-beta 请求头，适配 Bedrock 支持的 beta token。',
+    description:
+      '规范化 anthropic-beta 请求头，适配 Bedrock 支持的 beta token。',
     kind: 'operations',
     payload: AWS_BEDROCK_ANTHROPIC_BETA_TEMPLATE,
   },

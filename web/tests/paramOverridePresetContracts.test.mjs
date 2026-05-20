@@ -133,10 +133,13 @@ test("advanced preset operation arrays contain one top-level rule", () => {
   for (const sourcePath of presetSources) {
     const source = readRepoFile(sourcePath);
     const counts = extractOperationsObjectCounts(source);
-    const literalCounts = counts.filter((count) => count > 0);
-    assert.ok(literalCounts.length > 0, sourcePath);
-    for (const count of literalCounts) {
-      assert.equal(count, 1, `${sourcePath} contains ${count} operations`);
+    assert.ok(counts.length > 0, sourcePath);
+    assert.ok(
+      counts.some((count) => count === 1),
+      `${sourcePath} does not contain a literal single-operation preset`,
+    );
+    for (const count of counts) {
+      assert.ok(count <= 1, `${sourcePath} contains ${count} operations`);
     }
   }
 });

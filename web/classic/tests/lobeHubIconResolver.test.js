@@ -47,4 +47,22 @@ describe('classic LobeHub icon resolver', () => {
     expect(result.iconComponent).toBe(AvatarIcon);
     expect(result.propSegments).toEqual(["shape='square'"]);
   });
+
+  test('does not resolve inherited or unsafe segment names', () => {
+    const BaseIcon = () => null;
+    BaseIcon.Safe = () => null;
+
+    const inherited = resolveLobeHubIconTarget(BaseIcon, 'OpenRouter.toString');
+    expect(inherited.iconComponent).toBe(BaseIcon);
+    expect(inherited.propSegments).toEqual([]);
+
+    for (const segment of ['__proto__', 'constructor', 'prototype']) {
+      const unsafe = resolveLobeHubIconTarget(
+        BaseIcon,
+        `OpenRouter.${segment}`,
+      );
+      expect(unsafe.iconComponent).toBe(BaseIcon);
+      expect(unsafe.propSegments).toEqual([]);
+    }
+  });
 });
