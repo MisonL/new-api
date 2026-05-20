@@ -292,7 +292,6 @@ function TokensPage() {
 
     const existing = document.querySelector(selector);
     if (existing) {
-      console.log('Fluent container detected (initial):', existing);
       window.dispatchEvent(
         new CustomEvent('fluent-container:appeared', { detail: existing }),
       );
@@ -314,7 +313,6 @@ function TokensPage() {
           if (isOrContainsTarget(added)) {
             const el = document.querySelector(selector);
             if (el) {
-              console.log('Fluent container appeared:', el);
               window.dispatchEvent(
                 new CustomEvent('fluent-container:appeared', { detail: el }),
               );
@@ -327,7 +325,6 @@ function TokensPage() {
           if (isOrContainsTarget(removed)) {
             const elNow = document.querySelector(selector);
             if (!elNow) {
-              console.log('Fluent container removed');
               window.dispatchEvent(new CustomEvent('fluent-container:removed'));
             }
             break;

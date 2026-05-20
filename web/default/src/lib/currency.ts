@@ -502,7 +502,7 @@ export function isCurrencyDisplayEnabled(): boolean {
 /**
  * Format an amount that is ALREADY in local currency.
  *
- * ⚠️ CRITICAL: This function does NOT apply exchange rate conversion.
+ * CRITICAL: This function does NOT apply exchange rate conversion.
  * Only use this for values that have already been converted to local currency
  * via priceRatio or other means.
  *
@@ -532,11 +532,11 @@ export function isCurrencyDisplayEnabled(): boolean {
  *
  * Common mistake:
  * ```ts
- * // ❌ WRONG - Double conversion
+ * // WRONG - uses exchangeRate instead of the payment price ratio
  * const payment = usdAmount * exchangeRate
- * formatLocalCurrencyAmount(payment) // Will apply exchange rate again!
+ * formatLocalCurrencyAmount(payment) // Only formats the already-calculated amount
  *
- * // ✅ CORRECT - Already in local currency
+ * // CORRECT - Already in local currency
  * const payment = usdAmount * priceRatio
  * formatLocalCurrencyAmount(payment) // Just formats with symbol
  * ```

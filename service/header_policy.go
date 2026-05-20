@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 )
 
@@ -36,8 +37,7 @@ type headerTemplateEntry struct {
 }
 
 func parseHeaderTemplateEntries(raw string) ([]headerTemplateEntry, error) {
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.UseNumber()
+	decoder := common.NewJsonDecoderUseNumber(strings.NewReader(raw))
 
 	token, err := decoder.Token()
 	if err != nil {
@@ -166,7 +166,7 @@ func isValidHeaderFieldName(name string) bool {
 
 func decodeHeaderTemplateValue(decoder *json.Decoder, name string) (string, error) {
 	var value interface{}
-	if err := decoder.Decode(&value); err != nil {
+	if err := common.DecodeJsonFromDecoder(decoder, &value); err != nil {
 		return "", fmt.Errorf("请求头覆盖必须是合法的 JSON 格式")
 	}
 

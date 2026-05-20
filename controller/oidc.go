@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -63,7 +62,7 @@ func getOidcUserInfoByCode(code string) (*OidcUser, error) {
 	}
 	defer res.Body.Close()
 	var oidcResponse OidcResponse
-	err = json.NewDecoder(res.Body).Decode(&oidcResponse)
+	err = common.DecodeJson(res.Body, &oidcResponse)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +89,7 @@ func getOidcUserInfoByCode(code string) (*OidcUser, error) {
 	}
 
 	var oidcUser OidcUser
-	err = json.NewDecoder(res2.Body).Decode(&oidcUser)
+	err = common.DecodeJson(res2.Body, &oidcUser)
 	if err != nil {
 		return nil, err
 	}

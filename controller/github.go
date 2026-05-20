@@ -2,7 +2,6 @@ package controller
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -33,7 +32,7 @@ func getGitHubUserInfoByCode(code string) (*GitHubUser, error) {
 		return nil, errors.New("无效的参数")
 	}
 	values := map[string]string{"client_id": common.GitHubClientId, "client_secret": common.GitHubClientSecret, "code": code}
-	jsonData, err := json.Marshal(values)
+	jsonData, err := common.Marshal(values)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +52,7 @@ func getGitHubUserInfoByCode(code string) (*GitHubUser, error) {
 	}
 	defer res.Body.Close()
 	var oAuthResponse GitHubOAuthResponse
-	err = json.NewDecoder(res.Body).Decode(&oAuthResponse)
+	err = common.DecodeJson(res.Body, &oAuthResponse)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +68,7 @@ func getGitHubUserInfoByCode(code string) (*GitHubUser, error) {
 	}
 	defer res2.Body.Close()
 	var githubUser GitHubUser
-	err = json.NewDecoder(res2.Body).Decode(&githubUser)
+	err = common.DecodeJson(res2.Body, &githubUser)
 	if err != nil {
 		return nil, err
 	}

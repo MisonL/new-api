@@ -3,9 +3,6 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 
 export function handleServerError(error: unknown) {
-  // eslint-disable-next-line no-console
-  console.log(error)
-
   let errMsg = i18next.t('Something went wrong!')
 
   if (

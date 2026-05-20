@@ -57,7 +57,7 @@ function fallbackCopyToClipboard(text: string): boolean {
  * ```ts
  * const success = await copyToClipboard('Hello, World!')
  * if (success) {
- *   console.log('Copied successfully')
+ *   // Copy succeeded
  * }
  * ```
  */

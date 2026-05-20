@@ -29,7 +29,6 @@ const ChatPage = () => {
   const { keys, serverAddress, isLoading } = useTokenKeys(id);
 
   const comLink = (key) => {
-    // console.log('chatLink:', chatLink);
     if (!serverAddress || !key) return '';
     let link = '';
     if (id) {

@@ -26,6 +26,16 @@ func DecodeJsonUseNumber(reader io.Reader, v any) error {
 	return decoder.Decode(v)
 }
 
+func NewJsonDecoderUseNumber(reader io.Reader) *json.Decoder {
+	decoder := json.NewDecoder(reader)
+	decoder.UseNumber()
+	return decoder
+}
+
+func DecodeJsonFromDecoder(decoder *json.Decoder, v any) error {
+	return decoder.Decode(v)
+}
+
 func Marshal(v any) ([]byte, error) {
 	return json.Marshal(v)
 }

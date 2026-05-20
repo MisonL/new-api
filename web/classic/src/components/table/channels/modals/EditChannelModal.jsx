@@ -710,7 +710,6 @@ const EditChannelModal = (props) => {
   } = useSecureVerification({
     onSuccess: (result) => {
       // 验证成功后显示密钥
-      console.log('Verification success, result:', result);
       if (result && result.success && result.data?.key) {
         showSuccess(t('密钥获取成功'));
         setKeyDisplayState({

@@ -732,11 +732,11 @@ Deduplication works recursively. Impact varies by data type:
 **More examples:**
 
 ```tsx
-// ❌ Bad
+// Bad
 <C users={users} active={users.filter(u => u.active)} />
 <C product={product} productName={product.name} />
 
-// ✅ Good
+// Good
 <C users={users} />
 <C product={product} />
 // Do filtering/destructuring in client
@@ -1580,12 +1580,12 @@ function TodoList() {
   // Callback must depend on items, recreated on every items change
   const addItems = useCallback((newItems: Item[]) => {
     setItems([...items, ...newItems])
-  }, [items])  // ❌ items dependency causes recreations
+  }, [items])  // Bad: items dependency causes recreations
 
   // Risk of stale closure if dependency is forgotten
   const removeItem = useCallback((id: string) => {
     setItems(items.filter(item => item.id !== id))
-  }, [])  // ❌ Missing items dependency - will use stale items!
+  }, [])  // Bad: missing items dependency - will use stale items!
 
   return <ItemsEditor items={items} onAdd={addItems} onRemove={removeItem} />
 }
@@ -1602,12 +1602,12 @@ function TodoList() {
   // Stable callback, never recreated
   const addItems = useCallback((newItems: Item[]) => {
     setItems(curr => [...curr, ...newItems])
-  }, [])  // ✅ No dependencies needed
+  }, [])  // Good: no dependencies needed
 
   // Always uses latest state, no stale closure risk
   const removeItem = useCallback((id: string) => {
     setItems(curr => curr.filter(item => item.id !== id))
-  }, [])  // ✅ Safe and stable
+  }, [])  // Good: safe and stable
 
   return <ItemsEditor items={items} onAdd={addItems} onRemove={removeItem} />
 }

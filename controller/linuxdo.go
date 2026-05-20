@@ -2,7 +2,6 @@ package controller
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -120,7 +119,7 @@ func getLinuxdoUserInfoByCode(code string, c *gin.Context) (*LinuxdoUser, error)
 		AccessToken string `json:"access_token"`
 		Message     string `json:"message"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&tokenRes); err != nil {
+	if err := common.DecodeJson(res.Body, &tokenRes); err != nil {
 		return nil, err
 	}
 
@@ -144,7 +143,7 @@ func getLinuxdoUserInfoByCode(code string, c *gin.Context) (*LinuxdoUser, error)
 	defer res2.Body.Close()
 
 	var linuxdoUser LinuxdoUser
-	if err := json.NewDecoder(res2.Body).Decode(&linuxdoUser); err != nil {
+	if err := common.DecodeJson(res2.Body, &linuxdoUser); err != nil {
 		return nil, err
 	}
 
