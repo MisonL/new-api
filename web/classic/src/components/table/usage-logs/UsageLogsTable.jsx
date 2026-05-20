@@ -126,6 +126,7 @@ const LogsTable = (logsData) => {
         onPageSizeChange: (size) => {
           handlePageSizeChange(size);
         },
+        showQuickJumper: true,
         onPageChange: handlePageChange,
       }}
       hidePagination={true}

@@ -143,6 +143,7 @@ const ChannelsTable = (channelsData) => {
         pageSizeOpts: [10, 20, 50, 100],
         showSizeChanger: true,
         onPageSizeChange: handlePageSizeChange,
+        showQuickJumper: true,
         onPageChange: handlePageChange,
       }}
       hidePagination={true}

@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { PageJumpInput } from './page-jump-input'
 
 type DataTablePaginationProps<TData> = {
   table: Table<TData>
@@ -111,6 +112,11 @@ export function DataTablePagination<TData>({
               )}
             </div>
           ))}
+          <PageJumpInput
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={(page) => table.setPageIndex(page - 1)}
+          />
 
           <Button
             variant='outline'

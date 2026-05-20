@@ -51,6 +51,7 @@ const CardTable = ({
   const { t } = useTranslation();
 
   const showSkeleton = useMinimumLoadingTime(loading);
+  const pagination = normalizePagination(tableProps.pagination);
 
   const getRowKey = (record, index) => {
     if (typeof rowKey === 'function') return rowKey(record);
@@ -58,9 +59,10 @@ const CardTable = ({
   };
 
   if (!isMobile) {
+    const normalizedTableProps = { ...tableProps, pagination };
     const finalTableProps = hidePagination
       ? { ...tableProps, pagination: false }
-      : tableProps;
+      : normalizedTableProps;
     const horizontalScrollWidth = finalTableProps?.scroll?.x;
     const hasHorizontalScroll = Boolean(horizontalScrollWidth);
     const hasFixedColumns = columns.some((column) => Boolean(column?.fixed));
@@ -244,9 +246,9 @@ const CardTable = ({
           index={index}
         />
       ))}
-      {!hidePagination && tableProps.pagination && dataSource.length > 0 && (
+      {!hidePagination && pagination && dataSource.length > 0 && (
         <div className='mt-2 flex justify-center'>
-          <Pagination {...tableProps.pagination} />
+          <Pagination {...pagination} />
         </div>
       )}
     </div>
@@ -315,6 +317,8 @@ function useDesktopTableScrollMetrics(containerRef, syncKey) {
             '--card-table-body-max-height',
             `${Math.floor(availableHeight)}px`,
           );
+        } else {
+          container.style.removeProperty('--card-table-body-max-height');
         }
       }
       setMetrics({
@@ -549,5 +553,11 @@ CardTable.propTypes = {
   rowKey: PropTypes.oneOfType([PropTypes.string, PropTypes.func]),
   hidePagination: PropTypes.bool,
 };
+
+function normalizePagination(pagination) {
+  if (!pagination || pagination === false) return pagination;
+  if (pagination === true) return { showQuickJumper: true };
+  return { ...pagination, showQuickJumper: true };
+}
 
 export default CardTable;

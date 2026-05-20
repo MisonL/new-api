@@ -113,7 +113,7 @@ const DashboardDrilldownModal = ({
           total: detailRowsLength,
           pageSizeOptions: [8, 10, 20, 50],
           showSizeChanger: !isMobile,
-          showQuickJumper: !isMobile,
+          showQuickJumper: true,
           onPageChange: setPage,
           onPageSizeChange: (nextPageSize) => {
             setPageSize(nextPageSize);

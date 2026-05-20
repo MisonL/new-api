@@ -4,6 +4,7 @@ import { Loader2, RefreshCw, Trash2, Power, PowerOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import {
   Dialog,
   DialogContent,
@@ -393,6 +394,13 @@ export function MultiKeyManageDialog({
                   >
                     {t('Previous')}
                   </Button>
+                  <PageJumpInput
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    disabled={isLoading}
+                    showLabel={false}
+                    onPageChange={handlePageChange}
+                  />
                   <Button
                     variant='outline'
                     size='sm'

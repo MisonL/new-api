@@ -376,7 +376,7 @@ const PricingCardView = ({
             showSizeChanger={true}
             pageSizeOptions={[10, 20, 50, 100]}
             size={isMobile ? 'small' : 'default'}
-            showQuickJumper={isMobile}
+            showQuickJumper
             onPageChange={(page) => setCurrentPage(page)}
             onPageSizeChange={(size) => {
               setPageSize(size);

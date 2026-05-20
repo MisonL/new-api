@@ -530,6 +530,7 @@ const ModelTestModal = ({
                 pageSize={MODEL_TABLE_PAGE_SIZE}
                 total={filteredModels.length}
                 showSizeChanger={false}
+                showQuickJumper
                 onPageChange={(page) => setModelTablePage(page)}
                 size={isMobile ? 'small' : 'default'}
                 showTotal={isMobile}

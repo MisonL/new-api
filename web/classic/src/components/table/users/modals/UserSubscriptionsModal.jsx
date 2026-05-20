@@ -409,6 +409,7 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
             total: subs.length,
             pageSizeOpts: [10, 20, 50],
             showSizeChanger: false,
+            showQuickJumper: true,
             onPageChange: handlePageChange,
           }}
           empty={

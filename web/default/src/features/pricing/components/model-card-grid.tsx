@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
+import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import { getPerfMetricsSummary } from '../api'
 import { DEFAULT_PRICING_PAGE_SIZE, DEFAULT_TOKEN_UNIT } from '../constants'
 import type { PricingModel, TokenUnit } from '../types'
@@ -88,6 +89,12 @@ export function ModelCardGrid(props: ModelCardGridProps) {
               <ChevronLeft className='size-4' />
               {t('Previous')}
             </Button>
+            <PageJumpInput
+              currentPage={safePage}
+              totalPages={totalPages}
+              showLabel={false}
+              onPageChange={setPage}
+            />
             <Button
               type='button'
               variant='outline'

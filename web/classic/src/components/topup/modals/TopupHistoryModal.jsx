@@ -281,6 +281,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           total: total,
           showSizeChanger: true,
           pageSizeOpts: [10, 20, 50, 100],
+          showQuickJumper: true,
           onPageChange: handlePageChange,
           onPageSizeChange: handlePageSizeChange,
         }}

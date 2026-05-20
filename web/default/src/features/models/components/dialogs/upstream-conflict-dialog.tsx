@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { Button } from '@/components/ui/button'
+import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
@@ -591,6 +592,13 @@ export function UpstreamConflictDialog({
                             total: totalPagesDisplay,
                           })}
                         </span>
+                        <PageJumpInput
+                          currentPage={currentPageDisplay || 1}
+                          totalPages={totalPagesDisplay}
+                          disabled={totalFilteredFields === 0}
+                          showLabel={false}
+                          onPageChange={(page) => setPageIndex(page - 1)}
+                        />
                         <Button
                           variant='outline'
                           size='icon'

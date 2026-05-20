@@ -306,6 +306,7 @@ const UpstreamConflictModal = ({
                 pageSize: MODEL_TABLE_PAGE_SIZE,
                 total: filteredDataSource.length,
                 showSizeChanger: false,
+                showQuickJumper: true,
                 onPageChange: (page) => setCurrentPage(page),
               }}
               scroll={{ x: 'max-content' }}

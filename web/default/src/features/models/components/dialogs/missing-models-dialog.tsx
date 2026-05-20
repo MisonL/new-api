@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Loader2, Plus, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { Button } from '@/components/ui/button'
+import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import {
   Dialog,
   DialogContent,
@@ -206,6 +207,12 @@ export function MissingModelsDialog({
                       >
                         <ChevronLeft className='h-4 w-4' />
                       </Button>
+                      <PageJumpInput
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        showLabel={false}
+                        onPageChange={setCurrentPage}
+                      />
                       <Button
                         variant='outline'
                         size='icon'

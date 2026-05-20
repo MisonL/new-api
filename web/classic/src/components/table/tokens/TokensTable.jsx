@@ -111,6 +111,7 @@ const TokensTable = (tokensData) => {
         showSizeChanger: true,
         pageSizeOptions: [10, 20, 50, 100],
         onPageSizeChange: handlePageSizeChange,
+        showQuickJumper: true,
         onPageChange: handlePageChange,
       }}
       hidePagination={true}
