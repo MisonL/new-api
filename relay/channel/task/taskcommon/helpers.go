@@ -14,7 +14,7 @@ import (
 )
 
 // UnmarshalMetadata converts a map[string]any metadata to a typed struct via JSON round-trip.
-// This replaces the repeated pattern: json.Marshal(metadata) → json.Unmarshal(bytes, &target).
+// This replaces the repeated pattern: json.Marshal(metadata) -> json.Unmarshal(bytes, &target).
 func UnmarshalMetadata(metadata map[string]any, target any) error {
 	if metadata == nil {
 		return nil
@@ -101,7 +101,7 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// BaseBilling — embeddable no-op implementations for TaskAdaptor billing methods.
+// BaseBilling - embeddable no-op implementations for TaskAdaptor billing methods.
 // Adaptors that do not need custom billing can embed this struct directly.
 // ---------------------------------------------------------------------------
 

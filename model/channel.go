@@ -259,7 +259,7 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 				return keys[idx], idx, nil
 			}
 		}
-		// Fallback – should not happen, but return first enabled key
+		// Fallback - should not happen, but return first enabled key
 		return keys[enabledIdx[0]], enabledIdx[0], nil
 	default:
 		// Unknown mode, default to first enabled key (or original key string)

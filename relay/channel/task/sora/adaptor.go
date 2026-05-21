@@ -305,7 +305,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte, _ string, _ ...http.Heade
 		taskResult.Status = model.TaskStatusInProgress
 	case "completed":
 		taskResult.Status = model.TaskStatusSuccess
-		// Url intentionally left empty — the caller constructs the proxy URL using the public task ID
+		// Url intentionally left empty - the caller constructs the proxy URL using the public task ID
 	case "failed", "cancelled":
 		taskResult.Status = model.TaskStatusFailure
 		if resTask.Error != nil {

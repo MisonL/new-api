@@ -2,21 +2,21 @@
 
 ## Design Philosophy
 
-**One expression, one truth.** A single expression string completely defines a model's billing logic — pricing, tier conditions, cache/image/audio differentiation, time-based discounts, request-aware multipliers — all in one line. No scattered configuration, no implicit rules, no magic numbers.
+**One expression, one truth.** A single expression string completely defines a model's billing logic - pricing, tier conditions, cache/image/audio differentiation, time-based discounts, request-aware multipliers - all in one line. No scattered configuration, no implicit rules, no magic numbers.
 
 The expression is the billing contract between the administrator and the system. What you write is what gets executed. The system's job is to evaluate it faithfully, not to interpret it.
 
 ### Core Principles
 
-1. **Expression is self-contained** — The expression string alone determines billing. No external ratio tables, no implicit completion multipliers, no hidden conversion factors. Given the same token counts and request context, the same expression always produces the same cost.
+1. **Expression is self-contained** - The expression string alone determines billing. No external ratio tables, no implicit completion multipliers, no hidden conversion factors. Given the same token counts and request context, the same expression always produces the same cost.
 
-2. **Variables are opt-in** — `p` (prompt) and `c` (completion) are the base. Cache (`cr`, `cc`, `cc1h`), image (`img`), and audio (`ai`, `ao`) variables are optional. If omitted, those tokens are included in `p`/`c` and priced at their rate. The system automatically detects which variables the expression uses (via AST introspection) and adjusts token normalization accordingly.
+2. **Variables are opt-in** - `p` (prompt) and `c` (completion) are the base. Cache (`cr`, `cc`, `cc1h`), image (`img`), and audio (`ai`, `ao`) variables are optional. If omitted, those tokens are included in `p`/`c` and priced at their rate. The system automatically detects which variables the expression uses (via AST introspection) and adjusts token normalization accordingly.
 
-3. **Prices are real prices** — Expression coefficients are actual $/1M tokens prices as published by providers. No ratio conversion, no `/2` convention. `p * 2.5` means $2.50 per 1M prompt tokens.
+3. **Prices are real prices** - Expression coefficients are actual $/1M tokens prices as published by providers. No ratio conversion, no `/2` convention. `p * 2.5` means $2.50 per 1M prompt tokens.
 
-4. **Upstream-agnostic** — The expression doesn't need to know whether the upstream API is OpenAI-format (prompt_tokens includes cache) or Claude-format (input_tokens excludes cache). The system normalizes token counts before evaluation based on the upstream response format.
+4. **Upstream-agnostic** - The expression doesn't need to know whether the upstream API is OpenAI-format (prompt_tokens includes cache) or Claude-format (input_tokens excludes cache). The system normalizes token counts before evaluation based on the upstream response format.
 
-5. **Version-aware** — Expressions carry a version tag (`v1:`, default when omitted). The version controls the compile environment, token normalization, and quota conversion formula, enabling future evolution without breaking existing expressions.
+5. **Version-aware** - Expressions carry a version tag (`v1:`, default when omitted). The version controls the compile environment, token normalization, and quota conversion formula, enabling future evolution without breaking existing expressions.
 
 ---
 
@@ -34,7 +34,7 @@ Powered by [expr-lang/expr](https://github.com/expr-lang/expr). Expressions are 
 | `len` | 输入上下文总长度（**条件判断用**）。不受自动排除影响，始终反映完整输入长度。非 Claude：等于原始 `prompt_tokens`；Claude：等于文本输入 + 缓存读取 + 缓存创建 |
 | `cr` | 缓存命中（读取）token 数 |
 | `cc` | 缓存创建 token 数（Claude 5分钟 TTL / 通用） |
-| `cc1h` | 缓存创建 token 数 — 1小时 TTL（Claude 专用） |
+| `cc1h` | 缓存创建 token 数 - 1小时 TTL（Claude 专用） |
 | `img` | 图片输入 token 数 |
 | `ai` | 音频输入 token 数 |
 
@@ -48,7 +48,7 @@ Powered by [expr-lang/expr](https://github.com/expr-lang/expr). Expressions are 
 
 #### `p` 和 `c` 的自动排除机制
 
-`p` 和 `c` 是"兜底变量"——它们代表**所有没有被表达式单独定价的 token**。系统会根据表达式实际使用了哪些变量，自动从 `p` / `c` 中减去对应的子类别 token，避免重复计费。
+`p` 和 `c` 是"兜底变量" - 它们代表**所有没有被表达式单独定价的 token**。系统会根据表达式实际使用了哪些变量，自动从 `p` / `c` 中减去对应的子类别 token，避免重复计费。
 
 **规则：如果表达式使用了某个子类别变量，对应的 token 就从 `p` 或 `c` 中扣除；如果没使用，那些 token 就留在 `p` 或 `c` 里按基础价格计费。**
 
@@ -75,20 +75,20 @@ Powered by [expr-lang/expr](https://github.com/expr-lang/expr). Expressions are 
 
 | Function | Signature | Purpose |
 |----------|-----------|---------|
-| `tier` | `tier(name, value) → float64` | Records which pricing tier matched; must wrap the cost expression |
-| `param` | `param(path) → any` | Reads a JSON path from the request body (uses gjson) |
-| `header` | `header(key) → string` | Reads a request header value |
-| `has` | `has(source, substr) → bool` | Substring check |
-| `hour` | `hour(tz) → int` | Current hour in timezone (0-23) |
-| `minute` | `minute(tz) → int` | Current minute (0-59) |
-| `weekday` | `weekday(tz) → int` | Day of week (0=Sunday, 6=Saturday) |
-| `month` | `month(tz) → int` | Month (1-12) |
-| `day` | `day(tz) → int` | Day of month (1-31) |
-| `max` | `max(a, b) → float64` | Math max |
-| `min` | `min(a, b) → float64` | Math min |
-| `abs` | `abs(x) → float64` | Absolute value |
-| `ceil` | `ceil(x) → float64` | Ceiling |
-| `floor` | `floor(x) → float64` | Floor |
+| `tier` | `tier(name, value) -> float64` | Records which pricing tier matched; must wrap the cost expression |
+| `param` | `param(path) -> any` | Reads a JSON path from the request body (uses gjson) |
+| `header` | `header(key) -> string` | Reads a request header value |
+| `has` | `has(source, substr) -> bool` | Substring check |
+| `hour` | `hour(tz) -> int` | Current hour in timezone (0-23) |
+| `minute` | `minute(tz) -> int` | Current minute (0-59) |
+| `weekday` | `weekday(tz) -> int` | Day of week (0=Sunday, 6=Saturday) |
+| `month` | `month(tz) -> int` | Month (1-12) |
+| `day` | `day(tz) -> int` | Day of month (1-31) |
+| `max` | `max(a, b) -> float64` | Math max |
+| `min` | `min(a, b) -> float64` | Math min |
+| `abs` | `abs(x) -> float64` | Absolute value |
+| `ceil` | `ceil(x) -> float64` | Ceiling |
+| `floor` | `floor(x) -> float64` | Floor |
 
 ### Expression Examples
 
@@ -96,12 +96,12 @@ Powered by [expr-lang/expr](https://github.com/expr-lang/expr). Expressions are 
 # Simple flat pricing
 tier("base", p * 2.5 + c * 15 + cr * 0.25)
 
-# Multi-tier (Claude Sonnet style) — use len for tier conditions
+# Multi-tier (Claude Sonnet style) - use len for tier conditions
 len <= 200000
   ? tier("standard", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6)
   : tier("long_context", p * 6 + c * 22.5 + cr * 0.6 + cc * 7.5 + cc1h * 12)
 
-# Image model (no separate cache/audio pricing — those tokens stay in p/c)
+# Image model (no separate cache/audio pricing - those tokens stay in p/c)
 tier("base", p * 2 + c * 8 + img * 2.5)
 
 # Multimodal with audio
@@ -125,7 +125,7 @@ These are parsed and applied separately by the request rule system.
 ### Data Flow
 
 ```
-Frontend Editor → Storage → Pre-consume → Settlement → Log Display
+Frontend Editor -> Storage -> Pre-consume -> Settlement -> Log Display
 ```
 
 ### 1. Frontend Editor
@@ -143,16 +143,16 @@ The editor outputs a billing expression string and an optional request rule expr
 **File**: `setting/billing_setting/tiered_billing.go`
 
 Two option maps stored in the `options` DB table:
-- `ModelBillingMode`: `{ "model-name": "tiered_expr" }` — activates tiered billing for a model
-- `ModelBillingExpr`: `{ "model-name": "tier(\"base\", p * 2.5 + c * 15)" }` — the expression
+- `ModelBillingMode`: `{ "model-name": "tiered_expr" }` - activates tiered billing for a model
+- `ModelBillingExpr`: `{ "model-name": "tier(\"base\", p * 2.5 + c * 15)" }` - the expression
 
 On save, the expression is validated:
-1. Compiled via `billingexpr.CompileFromCache()` — syntax check
-2. Smoke-tested with sample token vectors — ensures non-negative results
+1. Compiled via `billingexpr.CompileFromCache()` - syntax check
+2. Smoke-tested with sample token vectors - ensures non-negative results
 
 ### 3. Pre-consume (Quota Estimation)
 
-**File**: `relay/helper/price.go` → `modelPriceHelperTiered()`
+**File**: `relay/helper/price.go` -> `modelPriceHelperTiered()`
 
 When a request arrives and the model uses `tiered_expr` billing:
 1. Loads expression from `billing_setting.GetBillingExpr()`
@@ -196,13 +196,13 @@ Different upstream APIs report `prompt_tokens` differently:
 - **OpenAI/GPT**: `prompt_tokens` = total (text + cache + image + audio)
 - **Claude**: `input_tokens` = text only (cache reported separately)
 
-The system normalizes `p` to mean "tokens not separately priced" by subtracting sub-categories **only when the expression references them**. This is determined by walking the compiled AST to find `IdentifierNode` references — zero runtime cost after first compilation (cached).
+The system normalizes `p` to mean "tokens not separately priced" by subtracting sub-categories **only when the expression references them**. This is determined by walking the compiled AST to find `IdentifierNode` references - zero runtime cost after first compilation (cached).
 
 Example: `p * 2.5 + c * 15 + cr * 0.25`
-- Expression uses `cr` → cache read tokens subtracted from `p`
-- Expression doesn't use `img` → image tokens stay in `p`, priced at $2.50
+- Expression uses `cr` -> cache read tokens subtracted from `p`
+- Expression doesn't use `img` -> image tokens stay in `p`, priced at $2.50
 
-### `len` — Context Length Variable
+### `len` - Context Length Variable
 
 `len` represents the total input context length, designed for **tier condition evaluation** (e.g. `len <= 200000 ? ...`). Unlike `p`, `len` is never reduced by sub-category exclusion.
 

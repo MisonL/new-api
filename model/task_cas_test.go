@@ -65,7 +65,7 @@ func insertTask(t *testing.T, task *Task) {
 }
 
 // ---------------------------------------------------------------------------
-// Snapshot / Equal — pure logic tests (no DB)
+// Snapshot / Equal - pure logic tests (no DB)
 // ---------------------------------------------------------------------------
 
 func TestSnapshotEqual_Same(t *testing.T) {
@@ -129,7 +129,7 @@ func TestSnapshot_Roundtrip(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// UpdateWithStatus CAS — DB integration tests
+// UpdateWithStatus CAS - DB integration tests
 // ---------------------------------------------------------------------------
 
 func TestUpdateWithStatus_Win(t *testing.T) {

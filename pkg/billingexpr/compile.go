@@ -17,7 +17,7 @@ const maxCacheSize = 256
 const DefaultExprVersion = 1
 
 // ParseExprVersion extracts the version tag and body from an expression string.
-// Format: "v1:tier(...)" → version=1, body="tier(...)".
+// Format: "v1:tier(...)" -> version=1, body="tier(...)".
 // No prefix defaults to DefaultExprVersion.
 func ParseExprVersion(exprStr string) (version int, body string) {
 	if strings.HasPrefix(exprStr, "v1:") {

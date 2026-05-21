@@ -76,8 +76,8 @@ func (p *RetryParam) ResetRetryNextTry() {
 //	Retry=1: GroupA, priority1 (startRetryIndex=0, priorityRetry=1)
 //	         分组A, 优先级1
 //
-//	Retry=2: GroupA exhausted → GroupB, priority0 (startRetryIndex=2, priorityRetry=0)
-//	         分组A用完 → 分组B, 优先级0
+//	Retry=2: GroupA exhausted -> GroupB, priority0 (startRetryIndex=2, priorityRetry=0)
+//	         分组A用完 -> 分组B, 优先级0
 //
 //	Retry=3: GroupB, priority1 (startRetryIndex=2, priorityRetry=1)
 //	         分组B, 优先级1

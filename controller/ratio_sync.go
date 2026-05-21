@@ -746,7 +746,7 @@ func convertOpenRouterToRatioData(reader io.Reader) (map[string]any, error) {
 		completionPrice, compErr := strconv.ParseFloat(m.Pricing.Completion, 64)
 
 		if promptErr != nil && compErr != nil {
-			// Both unparseable — skip this model
+			// Both unparseable - skip this model
 			continue
 		}
 
@@ -758,7 +758,7 @@ func convertOpenRouterToRatioData(reader io.Reader) (map[string]any, error) {
 			completionPrice = 0
 		}
 
-		// Negative values are sentinel values (e.g., -1 for dynamic/variable pricing) — skip
+		// Negative values are sentinel values (e.g., -1 for dynamic/variable pricing) - skip
 		if promptPrice < 0 || completionPrice < 0 {
 			continue
 		}

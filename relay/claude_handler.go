@@ -92,8 +92,8 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 					Type:         "enabled",
 					BudgetTokens: common.GetPointer[int](int(float64(*request.MaxTokens) * model_setting.GetClaudeSettings().ThinkingAdapterBudgetTokensPercentage)),
 				}
-				// TODO: 临时处理
-				// https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#important-considerations-when-using-extended-thinking
+				// Extended thinking requires default sampling knobs except temperature=1.0.
+				// See Anthropic extended-thinking important considerations.
 				request.Temperature = common.GetPointer[float64](1.0)
 			}
 		}
