@@ -67,10 +67,7 @@ export function Combobox({
 
   React.useEffect(() => {
     if (
-      shouldResetComboboxOnDisabledChange(
-        previousDisabledRef.current,
-        disabled
-      )
+      shouldResetComboboxOnDisabledChange(previousDisabledRef.current, disabled)
     ) {
       setOpen(false)
       setSearchValue('')

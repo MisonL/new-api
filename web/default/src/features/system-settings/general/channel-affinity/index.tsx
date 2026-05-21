@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { LazyMount } from '@/components/lazy-mount'
 import { StatusBadge } from '@/components/status-badge'
 import { SettingsSection } from '../../components/settings-section'
 import { useUpdateOption } from '../../hooks/use-update-option'
@@ -93,6 +94,8 @@ export function ChannelAffinitySection(props: Props) {
   const [clearAllDialogOpen, setClearAllDialogOpen] = useState(false)
   const [clearRuleName, setClearRuleName] = useState<string | null>(null)
   const [fillTemplateDialogOpen, setFillTemplateDialogOpen] = useState(false)
+  const [clearAllLoading, setClearAllLoading] = useState(false)
+  const [clearRuleLoading, setClearRuleLoading] = useState(false)
 
   useEffect(() => {
     setEnabled(props.defaultValues['channel_affinity_setting.enabled'])
@@ -265,22 +268,33 @@ export function ChannelAffinitySection(props: Props) {
   }
 
   const handleClearAll = async () => {
-    const res = await clearAllCache()
-    if (res.success) {
-      toast.success(t('Cleared'))
-      refreshCache()
+    if (clearAllLoading) return
+    setClearAllLoading(true)
+    try {
+      const res = await clearAllCache()
+      if (res.success) {
+        toast.success(t('Cleared'))
+        refreshCache()
+      }
+      setClearAllDialogOpen(false)
+    } finally {
+      setClearAllLoading(false)
     }
-    setClearAllDialogOpen(false)
   }
 
   const handleClearRule = async () => {
-    if (!clearRuleName) return
-    const res = await clearRuleCache(clearRuleName)
-    if (res.success) {
-      toast.success(t('Cleared'))
-      refreshCache()
+    if (!clearRuleName || clearRuleLoading) return
+    setClearRuleLoading(true)
+    try {
+      const res = await clearRuleCache(clearRuleName)
+      if (res.success) {
+        toast.success(t('Cleared'))
+        refreshCache()
+      }
+      setClearRuleName(null)
+    } finally {
+      setClearRuleLoading(false)
     }
-    setClearRuleName(null)
   }
 
   const switchToJsonMode = () => {
@@ -652,45 +666,53 @@ export function ChannelAffinitySection(props: Props) {
         )}
       </SettingsSection>
 
-      <RuleEditorDialog
-        open={ruleEditorOpen}
-        onOpenChange={setRuleEditorOpen}
-        rule={editingRule}
-        onSave={handleRuleSave}
-        templateKey={ruleTemplateKey}
-      />
+      <LazyMount open={ruleEditorOpen}>
+        <RuleEditorDialog
+          open={ruleEditorOpen}
+          onOpenChange={setRuleEditorOpen}
+          rule={editingRule}
+          onSave={handleRuleSave}
+          templateKey={ruleTemplateKey}
+        />
+      </LazyMount>
 
-      <ConfirmDialog
-        open={clearAllDialogOpen}
-        onOpenChange={setClearAllDialogOpen}
-        title={t('Confirm clearing all channel affinity cache')}
-        desc={t(
-          'This will delete all channel affinity cache entries still in memory.'
-        )}
-        handleConfirm={handleClearAll}
-        destructive
-      />
-
-      {clearRuleName !== null && (
+      <LazyMount open={clearAllDialogOpen}>
         <ConfirmDialog
-          open
+          open={clearAllDialogOpen}
+          onOpenChange={setClearAllDialogOpen}
+          title={t('Confirm clearing all channel affinity cache')}
+          desc={t(
+            'This will delete all channel affinity cache entries still in memory.'
+          )}
+          handleConfirm={handleClearAll}
+          isLoading={clearAllLoading}
+          destructive
+        />
+      </LazyMount>
+
+      <LazyMount open={clearRuleName !== null}>
+        <ConfirmDialog
+          open={clearRuleName !== null}
           onOpenChange={(v) => !v && setClearRuleName(null)}
           title={t('Confirm clearing cache for this rule')}
           desc={`${t('Rule')}: ${clearRuleName}`}
           handleConfirm={handleClearRule}
+          isLoading={clearRuleLoading}
           destructive
         />
-      )}
+      </LazyMount>
 
-      <ConfirmDialog
-        open={fillTemplateDialogOpen}
-        onOpenChange={setFillTemplateDialogOpen}
-        title={t('Fill Codex CLI / Claude CLI Templates')}
-        desc={t(
-          'This will append 2 template rules (Codex CLI and Claude CLI) to the existing rule list.'
-        )}
-        handleConfirm={appendCliTemplates}
-      />
+      <LazyMount open={fillTemplateDialogOpen}>
+        <ConfirmDialog
+          open={fillTemplateDialogOpen}
+          onOpenChange={setFillTemplateDialogOpen}
+          title={t('Fill Codex CLI / Claude CLI Templates')}
+          desc={t(
+            'This will append 2 template rules (Codex CLI and Claude CLI) to the existing rule list.'
+          )}
+          handleConfirm={appendCliTemplates}
+        />
+      </LazyMount>
     </>
   )
 }

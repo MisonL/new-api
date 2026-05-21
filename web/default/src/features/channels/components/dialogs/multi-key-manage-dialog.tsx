@@ -4,7 +4,6 @@ import { Loader2, RefreshCw, Trash2, Power, PowerOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import {
   Dialog,
   DialogContent,
@@ -29,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import { StatusBadge } from '@/components/status-badge'
 import {
   getMultiKeyStatus,

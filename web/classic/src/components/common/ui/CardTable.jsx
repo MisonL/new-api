@@ -156,6 +156,7 @@ const CardTable = ({
 
   const MobileRowCard = ({ record, index }) => {
     const [showDetails, setShowDetails] = useState(false);
+    const [hasOpenedDetails, setHasOpenedDetails] = useState(false);
     const rowKeyVal = getRowKey(record, index);
 
     const hasDetails =
@@ -212,6 +213,7 @@ const CardTable = ({
               icon={showDetails ? <IconChevronUp /> : <IconChevronDown />}
               onClick={(e) => {
                 e.stopPropagation();
+                setHasOpenedDetails(true);
                 setShowDetails(!showDetails);
               }}
             >
@@ -219,7 +221,9 @@ const CardTable = ({
             </Button>
             <Collapsible isOpen={showDetails} keepDOM>
               <div className='pt-2'>
-                {tableProps.expandedRowRender(record, index)}
+                {hasOpenedDetails
+                  ? tableProps.expandedRowRender(record, index)
+                  : null}
               </div>
             </Collapsible>
           </>

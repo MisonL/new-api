@@ -4,7 +4,6 @@ import { ChevronLeft, ChevronRight, Loader2, Plus, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { Button } from '@/components/ui/button'
-import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import {
   Dialog,
   DialogContent,
@@ -20,6 +19,7 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
+import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import { StatusBadge } from '@/components/status-badge'
 import { getMissingModels } from '../../api'
 import { DEFAULT_PAGE_SIZE } from '../../constants'

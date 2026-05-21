@@ -48,7 +48,10 @@ export function DataTablePagination<TData>({
           <Select
             value={`${table.getState().pagination.pageSize}`}
             onValueChange={(value) => {
-              table.setPageSize(Number(value))
+              const nextPageSize = Number(value)
+              if (nextPageSize !== table.getState().pagination.pageSize) {
+                table.setPageSize(nextPageSize)
+              }
             }}
           >
             <SelectTrigger className='h-8 w-[64px] sm:w-[70px]'>
@@ -104,7 +107,11 @@ export function DataTablePagination<TData>({
                 <Button
                   variant={currentPage === pageNumber ? 'default' : 'outline'}
                   className='h-8 min-w-8 px-2'
-                  onClick={() => table.setPageIndex((pageNumber as number) - 1)}
+                  onClick={() => {
+                    if (currentPage !== pageNumber) {
+                      table.setPageIndex((pageNumber as number) - 1)
+                    }
+                  }}
                 >
                   <span className='sr-only'>Go to page {pageNumber}</span>
                   {pageNumber}

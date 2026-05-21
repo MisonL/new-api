@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next'
 import type { TimeGranularity } from '@/lib/time'
 import { VCHART_OPTION } from '@/lib/vchart'
 import { useTheme } from '@/context/theme-provider'
+import { useRetainedValue } from '@/hooks/use-retained-value'
+import { LazyMount } from '@/components/lazy-mount'
 import {
   CONSUMPTION_DISTRIBUTION_CHART_OPTIONS,
   DEFAULT_TIME_GRANULARITY,
@@ -54,6 +56,10 @@ export function ConsumptionDistributionChart(
   const [themeReady, setThemeReady] = useState(false)
   const [drilldownDetail, setDrilldownDetail] =
     useState<DashboardDrilldownDetail | null>(null)
+  const retainedDrilldownDetail = useRetainedValue(
+    drilldownDetail,
+    Boolean(drilldownDetail)
+  )
   const themeManagerRef = useRef<
     (typeof import('@visactor/vchart'))['ThemeManager'] | null
   >(null)
@@ -197,13 +203,17 @@ export function ConsumptionDistributionChart(
           )}
         </div>
       </div>
-      <DashboardDrilldownDialog
-        detail={drilldownDetail}
-        open={Boolean(drilldownDetail)}
-        onOpenChange={(open) => {
-          if (!open) setDrilldownDetail(null)
-        }}
-      />
+      <LazyMount open={Boolean(drilldownDetail)}>
+        {retainedDrilldownDetail ? (
+          <DashboardDrilldownDialog
+            detail={retainedDrilldownDetail}
+            open={Boolean(drilldownDetail)}
+            onOpenChange={(open) => {
+              if (!open) setDrilldownDetail(null)
+            }}
+          />
+        ) : null}
+      </LazyMount>
     </>
   )
 }

@@ -34,7 +34,9 @@ export function PageJumpInput({
       setPageInput(`${currentPage}`)
       return
     }
-    onPageChange(targetPage)
+    if (targetPage !== currentPage) {
+      onPageChange(targetPage)
+    }
     setPageInput(`${targetPage}`)
   }
 

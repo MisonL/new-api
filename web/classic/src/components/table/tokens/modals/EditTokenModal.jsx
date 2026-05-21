@@ -629,9 +629,7 @@ const EditTokenModal = (props) => {
                         aria-hidden={true}
                         style={{
                           marginRight: 4,
-                          transform: showQuotaInput
-                            ? 'none'
-                            : 'rotate(-90deg)',
+                          transform: showQuotaInput ? 'none' : 'rotate(-90deg)',
                         }}
                       />
                       {showQuotaInput

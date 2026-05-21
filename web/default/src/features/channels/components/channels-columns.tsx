@@ -29,6 +29,7 @@ import {
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { DataTableColumnHeader } from '@/components/data-table/column-header'
 import { GroupBadge } from '@/components/group-badge'
+import { LazyMount } from '@/components/lazy-mount'
 import {
   StatusBadge,
   dotColorMap,
@@ -194,19 +195,21 @@ function PriorityCell({ channel }: { channel: Channel }) {
           }}
           min={-999}
         />
-        <ConfirmDialog
-          open={confirmOpen}
-          onOpenChange={setConfirmOpen}
-          title={t('Confirm Batch Update')}
-          desc={`This will update the priority to ${pendingValue} for all ${channelCount} channel(s) with tag "${tag}". Continue?`}
-          confirmText='Update'
-          handleConfirm={() => {
-            if (pendingValue !== null) {
-              handleUpdateTagField(tag, 'priority', pendingValue, queryClient)
-            }
-            setConfirmOpen(false)
-          }}
-        />
+        <LazyMount open={confirmOpen}>
+          <ConfirmDialog
+            open={confirmOpen}
+            onOpenChange={setConfirmOpen}
+            title={t('Confirm Batch Update')}
+            desc={`This will update the priority to ${pendingValue} for all ${channelCount} channel(s) with tag "${tag}". Continue?`}
+            confirmText='Update'
+            handleConfirm={() => {
+              if (pendingValue !== null) {
+                handleUpdateTagField(tag, 'priority', pendingValue, queryClient)
+              }
+              setConfirmOpen(false)
+            }}
+          />
+        </LazyMount>
       </>
     )
   }
@@ -249,19 +252,21 @@ function WeightCell({ channel }: { channel: Channel }) {
           }}
           min={0}
         />
-        <ConfirmDialog
-          open={confirmOpen}
-          onOpenChange={setConfirmOpen}
-          title={t('Confirm Batch Update')}
-          desc={`This will update the weight to ${pendingValue} for all ${channelCount} channel(s) with tag "${tag}". Continue?`}
-          confirmText='Update'
-          handleConfirm={() => {
-            if (pendingValue !== null) {
-              handleUpdateTagField(tag, 'weight', pendingValue, queryClient)
-            }
-            setConfirmOpen(false)
-          }}
-        />
+        <LazyMount open={confirmOpen}>
+          <ConfirmDialog
+            open={confirmOpen}
+            onOpenChange={setConfirmOpen}
+            title={t('Confirm Batch Update')}
+            desc={`This will update the weight to ${pendingValue} for all ${channelCount} channel(s) with tag "${tag}". Continue?`}
+            confirmText='Update'
+            handleConfirm={() => {
+              if (pendingValue !== null) {
+                handleUpdateTagField(tag, 'weight', pendingValue, queryClient)
+              }
+              setConfirmOpen(false)
+            }}
+          />
+        </LazyMount>
       </>
     )
   }
@@ -392,33 +397,35 @@ function BalanceCell({ channel }: { channel: Channel }) {
         </Tooltip>
       </div>
 
-      <CodexUsageDialog
-        open={codexUsageOpen}
-        onOpenChange={setCodexUsageOpen}
-        channelName={channel.name}
-        channelId={channel.id}
-        response={codexUsageResponse}
-        onRefresh={async () => {
-          if (isUpdating) return
-          setIsUpdating(true)
-          try {
-            const res = await getCodexUsage(channel.id)
-            if (!res.success) {
-              throw new Error(res.message || t('Failed to fetch usage'))
+      <LazyMount open={codexUsageOpen}>
+        <CodexUsageDialog
+          open={codexUsageOpen}
+          onOpenChange={setCodexUsageOpen}
+          channelName={channel.name}
+          channelId={channel.id}
+          response={codexUsageResponse}
+          onRefresh={async () => {
+            if (isUpdating) return
+            setIsUpdating(true)
+            try {
+              const res = await getCodexUsage(channel.id)
+              if (!res.success) {
+                throw new Error(res.message || t('Failed to fetch usage'))
+              }
+              setCodexUsageResponse(res)
+            } catch (error) {
+              toast.error(
+                error instanceof Error
+                  ? error.message
+                  : t('Failed to fetch usage')
+              )
+            } finally {
+              setIsUpdating(false)
             }
-            setCodexUsageResponse(res)
-          } catch (error) {
-            toast.error(
-              error instanceof Error
-                ? error.message
-                : t('Failed to fetch usage')
-            )
-          } finally {
-            setIsUpdating(false)
-          }
-        }}
-        isRefreshing={isUpdating}
-      />
+          }}
+          isRefreshing={isUpdating}
+        />
+      </LazyMount>
     </TooltipProvider>
   )
 }

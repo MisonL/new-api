@@ -11,6 +11,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { DataTableColumnHeader } from '@/components/data-table'
+import { LazyMount } from '@/components/lazy-mount'
 import { StatusBadge } from '@/components/status-badge'
 import { formatDuration } from '../../lib/format'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
@@ -238,11 +239,13 @@ export function createFailReasonColumn<T>(config: {
               {failReason}
             </span>
           </button>
-          <FailReasonDialog
-            failReason={failReason}
-            open={dialogOpen}
-            onOpenChange={setDialogOpen}
-          />
+          <LazyMount open={dialogOpen}>
+            <FailReasonDialog
+              failReason={failReason}
+              open={dialogOpen}
+              onOpenChange={setDialogOpen}
+            />
+          </LazyMount>
         </>
       )
     },

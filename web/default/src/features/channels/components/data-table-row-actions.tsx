@@ -33,6 +33,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { LazyMount } from '@/components/lazy-mount'
 import { MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   channelsQueryKeys,
@@ -288,18 +289,20 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <ConfirmDialog
-        open={deleteConfirmOpen}
-        onOpenChange={setDeleteConfirmOpen}
-        title={t('Delete Channel')}
-        desc={`Are you sure you want to delete "${channel.name}"? This action cannot be undone.`}
-        confirmText='Delete'
-        destructive
-        handleConfirm={() => {
-          handleDeleteChannel(channel.id, queryClient)
-          setDeleteConfirmOpen(false)
-        }}
-      />
+      <LazyMount open={deleteConfirmOpen}>
+        <ConfirmDialog
+          open={deleteConfirmOpen}
+          onOpenChange={setDeleteConfirmOpen}
+          title={t('Delete Channel')}
+          desc={`Are you sure you want to delete "${channel.name}"? This action cannot be undone.`}
+          confirmText='Delete'
+          destructive
+          handleConfirm={() => {
+            handleDeleteChannel(channel.id, queryClient)
+            setDeleteConfirmOpen(false)
+          }}
+        />
+      </LazyMount>
     </div>
   )
 }

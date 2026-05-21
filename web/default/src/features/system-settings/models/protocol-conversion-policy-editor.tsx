@@ -23,6 +23,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { getChannels } from '@/features/channels/api'
 import { channelsQueryKeys } from '@/features/channels/lib'
+import { reconcileProtocolRuleEditorKeys } from './protocol-conversion-policy-editor-keys'
 import {
   TEMPLATE_BIDIRECTIONAL,
   TEMPLATE_CHAT_TO_RESPONSES,
@@ -34,7 +35,6 @@ import {
   type ProtocolRuleTemplate,
   type ProtocolRule,
 } from './protocol-conversion-policy-utils'
-import { reconcileProtocolRuleEditorKeys } from './protocol-conversion-policy-editor-keys'
 import { ProtocolConversionRuleCard } from './protocol-conversion-rule-card'
 
 type ProtocolConversionPolicyEditorProps = {
@@ -143,17 +143,15 @@ export function ProtocolConversionPolicyEditor({
 
   const addRule = () => {
     const nextRules = createProtocolRuleFromTemplate(ruleTemplate, rules)
-    setRuleKeys((currentKeys) =>
-      [
-        ...reconcileProtocolRuleEditorKeys(
-          currentKeys,
-          rules.length,
-          nextEditorRuleKey,
-          fallbackEditorRuleKey
-        ),
-        ...createEditorRuleKeys(nextRules.length),
-      ]
-    )
+    setRuleKeys((currentKeys) => [
+      ...reconcileProtocolRuleEditorKeys(
+        currentKeys,
+        rules.length,
+        nextEditorRuleKey,
+        fallbackEditorRuleKey
+      ),
+      ...createEditorRuleKeys(nextRules.length),
+    ])
     const updatedRules = [...rules, ...nextRules]
     commitRules(updatedRules)
   }

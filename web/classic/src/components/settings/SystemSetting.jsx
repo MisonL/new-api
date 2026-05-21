@@ -755,10 +755,7 @@ const SystemSetting = () => {
 
     if (optionKey === 'PasswordLoginEnabled' && !value) {
       setShowPasswordLoginConfirmModal(true);
-    } else if (
-      optionKey === 'fetch_setting.enable_ssrf_protection' &&
-      !value
-    ) {
+    } else if (optionKey === 'fetch_setting.enable_ssrf_protection' && !value) {
       setShowSSRFProtectionConfirmModal(true);
     } else {
       await updateOptions([{ key: optionKey, value }]);

@@ -30,7 +30,7 @@ import { applyColumnOrder } from '../../../hooks/usage-logs/columnPreferences';
 const LogsTable = (logsData) => {
   const {
     logs,
-    expandData,
+    getLogExpandData,
     loading,
     activePage,
     pageSize,
@@ -86,7 +86,7 @@ const LogsTable = (logsData) => {
       <div className='usage-log-expanded-panel'>
         <Descriptions
           className='usage-log-expanded-descriptions'
-          data={expandData[record.key]}
+          data={getLogExpandData(record)}
         />
       </div>
     );
@@ -98,8 +98,7 @@ const LogsTable = (logsData) => {
       {...(hasExpandableRows() && {
         expandedRowRender: expandRowRender,
         expandRowByClick: true,
-        rowExpandable: (record) =>
-          expandData[record.key] && expandData[record.key].length > 0,
+        rowExpandable: () => true,
       })}
       dataSource={logs}
       rowKey='key'

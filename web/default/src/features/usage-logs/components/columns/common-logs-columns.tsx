@@ -17,6 +17,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { DataTableColumnHeader } from '@/components/data-table'
+import { LazyMount } from '@/components/lazy-mount'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import type { UsageLog } from '../../data/schema'
 import { getLogAvatarStyle } from '../../lib/avatar-color'
@@ -760,12 +761,14 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                 <span className='text-muted-foreground/40'>—</span>
               )}
             </button>
-            <DetailsDialog
-              log={log}
-              isAdmin={isAdmin}
-              open={dialogOpen}
-              onOpenChange={setDialogOpen}
-            />
+            <LazyMount open={dialogOpen}>
+              <DetailsDialog
+                log={log}
+                isAdmin={isAdmin}
+                open={dialogOpen}
+                onOpenChange={setDialogOpen}
+              />
+            </LazyMount>
           </>
         )
       },

@@ -114,19 +114,21 @@ export function ProviderTable(props: ProviderTableProps) {
         </Table>
       )}
 
-      <ConfirmDialog
-        open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title={t('Delete Provider')}
-        desc={t(
-          'Are you sure you want to delete "{{name}}"? Users who authenticated with this provider will no longer be able to log in.',
-          { name: deleteTarget?.name || '' }
-        )}
-        confirmText={t('Delete')}
-        destructive
-        handleConfirm={handleDelete}
-        isLoading={deleteProvider.isPending}
-      />
+      {deleteTarget ? (
+        <ConfirmDialog
+          open={!!deleteTarget}
+          onOpenChange={(open) => !open && setDeleteTarget(null)}
+          title={t('Delete Provider')}
+          desc={t(
+            'Are you sure you want to delete "{{name}}"? Users who authenticated with this provider will no longer be able to log in.',
+            { name: deleteTarget?.name || '' }
+          )}
+          confirmText={t('Delete')}
+          destructive
+          handleConfirm={handleDelete}
+          isLoading={deleteProvider.isPending}
+        />
+      ) : null}
     </>
   )
 }

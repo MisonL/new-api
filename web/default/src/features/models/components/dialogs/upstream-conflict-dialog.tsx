@@ -18,7 +18,6 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { Button } from '@/components/ui/button'
-import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
@@ -49,6 +48,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import { StatusBadge } from '@/components/status-badge'
 import { applyUpstreamOverwrite } from '../../api'
 import { modelsQueryKeys, vendorsQueryKeys } from '../../lib'

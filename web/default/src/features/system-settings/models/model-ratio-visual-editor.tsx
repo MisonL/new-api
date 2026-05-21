@@ -27,6 +27,7 @@ import {
   DataTableToolbar,
   DataTablePagination,
 } from '@/components/data-table'
+import { LazyMount } from '@/components/lazy-mount'
 import { StatusBadge } from '@/components/status-badge'
 import {
   combineBillingExpr,
@@ -758,12 +759,14 @@ export const ModelRatioVisualEditor = memo(
           <DataTablePagination table={table} />
         )}
 
-        <ModelRatioDialog
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          onSave={handleSave}
-          editData={editData}
-        />
+        <LazyMount open={dialogOpen}>
+          <ModelRatioDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            onSave={handleSave}
+            editData={editData}
+          />
+        </LazyMount>
       </div>
     )
   },

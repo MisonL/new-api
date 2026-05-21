@@ -81,6 +81,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { JsonEditor } from '@/components/json-editor'
+import { LazyMount } from '@/components/lazy-mount'
 import { MultiSelect } from '@/components/multi-select'
 import {
   SecureVerificationDialog,
@@ -2012,13 +2013,15 @@ export function ChannelMutateDrawer({
                   </div>
                 )}
 
-                <CodexOAuthDialog
-                  open={codexOAuthDialogOpen}
-                  onOpenChange={setCodexOAuthDialogOpen}
-                  onKeyGenerated={(key) => {
-                    form.setValue('key', key, { shouldDirty: true })
-                  }}
-                />
+                <LazyMount open={codexOAuthDialogOpen}>
+                  <CodexOAuthDialog
+                    open={codexOAuthDialogOpen}
+                    onOpenChange={setCodexOAuthDialogOpen}
+                    onKeyGenerated={(key) => {
+                      form.setValue('key', key, { shouldDirty: true })
+                    }}
+                  />
+                </LazyMount>
 
                 {isEditing && isMultiKeyChannel && (
                   <FormField
@@ -3341,7 +3344,7 @@ export function ChannelMutateDrawer({
       )}
 
       {/* Fetch Models Dialog (for editing mode) */}
-      {isEditing && currentRow && (
+      <LazyMount open={fetchModelsDialogOpen && isEditing && !!currentRow}>
         <FetchModelsDialog
           open={fetchModelsDialogOpen}
           onOpenChange={setFetchModelsDialogOpen}
@@ -3352,41 +3355,47 @@ export function ChannelMutateDrawer({
           redirectModels={redirectModelList}
           redirectSourceModels={redirectModelKeyList}
         />
-      )}
+      </LazyMount>
 
-      <SecureVerificationDialog
-        open={verificationOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            cancelVerification()
-          }
-        }}
-        methods={verificationMethods}
-        state={verificationState}
-        onVerify={async (method, code) => {
-          await executeVerification(method, code)
-        }}
-        onCancel={cancelVerification}
-        onCodeChange={setVerificationCode}
-        onMethodChange={switchVerificationMethod}
-      />
+      <LazyMount open={verificationOpen}>
+        <SecureVerificationDialog
+          open={verificationOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              cancelVerification()
+            }
+          }}
+          methods={verificationMethods}
+          state={verificationState}
+          onVerify={async (method, code) => {
+            await executeVerification(method, code)
+          }}
+          onCancel={cancelVerification}
+          onCodeChange={setVerificationCode}
+          onMethodChange={switchVerificationMethod}
+        />
+      </LazyMount>
 
       {/* Missing Models Confirmation Dialog */}
-      <MissingModelsConfirmationDialog
-        open={missingModelsDialogOpen}
-        missingModels={missingModelsList}
-        onConfirm={handleMissingModelsAction}
-        onOpenChange={setMissingModelsDialogOpen}
-      />
+      <LazyMount open={missingModelsDialogOpen}>
+        <MissingModelsConfirmationDialog
+          open={missingModelsDialogOpen}
+          missingModels={missingModelsList}
+          onConfirm={handleMissingModelsAction}
+          onOpenChange={setMissingModelsDialogOpen}
+        />
+      </LazyMount>
 
-      <StatusCodeRiskDialog
-        open={statusCodeRiskOpen}
-        onOpenChange={(v) => {
-          if (!v) handleStatusCodeRiskAction(false)
-        }}
-        detailItems={statusCodeRiskDetailItems}
-        onConfirm={() => handleStatusCodeRiskAction(true)}
-      />
+      <LazyMount open={statusCodeRiskOpen}>
+        <StatusCodeRiskDialog
+          open={statusCodeRiskOpen}
+          onOpenChange={(v) => {
+            if (!v) handleStatusCodeRiskAction(false)
+          }}
+          detailItems={statusCodeRiskDetailItems}
+          onConfirm={() => handleStatusCodeRiskAction(true)}
+        />
+      </LazyMount>
     </>
   )
 }

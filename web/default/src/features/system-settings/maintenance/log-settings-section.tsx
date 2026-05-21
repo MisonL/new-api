@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/form'
 import { Switch } from '@/components/ui/switch'
 import { DateTimePicker } from '@/components/datetime-picker'
+import { LazyMount } from '@/components/lazy-mount'
 import { deleteLogsBefore } from '../api'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
@@ -212,32 +213,40 @@ export function LogSettingsSection({
           </Button>
         </form>
       </Form>
-      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('Confirm log cleanup')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {formattedPurgeDate
-                ? t(
-                    'This will permanently remove all log entries created before {{date}}.',
-                    { date: formattedPurgeDate }
-                  )
-                : t(
-                    'This will permanently remove log entries before the selected timestamp.'
-                  )}{' '}
-              {t('This action cannot be undone.')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isCleaning}>
-              {t('Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction onClick={handleCleanLogs} disabled={isCleaning}>
-              {isCleaning ? t('Cleaning...') : t('Delete logs')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <LazyMount open={showConfirmDialog}>
+        <AlertDialog
+          open={showConfirmDialog}
+          onOpenChange={setShowConfirmDialog}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('Confirm log cleanup')}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {formattedPurgeDate
+                  ? t(
+                      'This will permanently remove all log entries created before {{date}}.',
+                      { date: formattedPurgeDate }
+                    )
+                  : t(
+                      'This will permanently remove log entries before the selected timestamp.'
+                    )}{' '}
+                {t('This action cannot be undone.')}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isCleaning}>
+                {t('Cancel')}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleCleanLogs}
+                disabled={isCleaning}
+              >
+                {isCleaning ? t('Cleaning...') : t('Delete logs')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </LazyMount>
     </SettingsSection>
   )
 }

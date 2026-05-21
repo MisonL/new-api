@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { LazyMount } from '@/components/lazy-mount'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
 import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
 import {
@@ -243,37 +244,45 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <ConfirmDialog
-        open={resetPasskeyOpen}
-        onOpenChange={setResetPasskeyOpen}
-        title={t('Reset Passkey')}
-        desc={`Reset Passkey for ${user.username}? The user will need to register a new Passkey before using passwordless login.`}
-        confirmText='Reset Passkey'
-        handleConfirm={handleResetPasskey}
-      />
+      <LazyMount open={resetPasskeyOpen}>
+        <ConfirmDialog
+          open={resetPasskeyOpen}
+          onOpenChange={setResetPasskeyOpen}
+          title={t('Reset Passkey')}
+          desc={`Reset Passkey for ${user.username}? The user will need to register a new Passkey before using passwordless login.`}
+          confirmText='Reset Passkey'
+          handleConfirm={handleResetPasskey}
+        />
+      </LazyMount>
 
-      <ConfirmDialog
-        open={resetTwoFAOpen}
-        onOpenChange={setResetTwoFAOpen}
-        title={t('Reset Two-Factor Authentication')}
-        desc={`Reset 2FA for ${user.username}? The user must set up 2FA again to continue using it.`}
-        confirmText='Reset 2FA'
-        handleConfirm={handleResetTwoFA}
-      />
+      <LazyMount open={resetTwoFAOpen}>
+        <ConfirmDialog
+          open={resetTwoFAOpen}
+          onOpenChange={setResetTwoFAOpen}
+          title={t('Reset Two-Factor Authentication')}
+          desc={`Reset 2FA for ${user.username}? The user must set up 2FA again to continue using it.`}
+          confirmText='Reset 2FA'
+          handleConfirm={handleResetTwoFA}
+        />
+      </LazyMount>
 
-      <UserBindingDialog
-        open={bindingDialogOpen}
-        onOpenChange={setBindingDialogOpen}
-        userId={user.id}
-        onUnbindSuccess={triggerRefresh}
-      />
+      <LazyMount open={bindingDialogOpen}>
+        <UserBindingDialog
+          open={bindingDialogOpen}
+          onOpenChange={setBindingDialogOpen}
+          userId={user.id}
+          onUnbindSuccess={triggerRefresh}
+        />
+      </LazyMount>
 
-      <UserSubscriptionsDialog
-        open={subscriptionsDialogOpen}
-        onOpenChange={setSubscriptionsDialogOpen}
-        user={{ id: user.id, username: user.username }}
-        onSuccess={triggerRefresh}
-      />
+      <LazyMount open={subscriptionsDialogOpen}>
+        <UserSubscriptionsDialog
+          open={subscriptionsDialogOpen}
+          onOpenChange={setSubscriptionsDialogOpen}
+          user={{ id: user.id, username: user.username }}
+          onSuccess={triggerRefresh}
+        />
+      </LazyMount>
     </>
   )
 }

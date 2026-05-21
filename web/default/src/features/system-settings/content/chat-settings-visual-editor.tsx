@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { LazyMount } from '@/components/lazy-mount'
 import { safeJsonParseWithValidation } from '../utils/json-parser'
 import { isArray } from '../utils/json-validators'
 import { ChatDialog, type ChatEntryData } from './chat-dialog'
@@ -181,12 +182,14 @@ export function ChatSettingsVisualEditor({
         </div>
       )}
 
-      <ChatDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        onSave={handleSave}
-        editData={editData}
-      />
+      <LazyMount open={dialogOpen}>
+        <ChatDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          onSave={handleSave}
+          editData={editData}
+        />
+      </LazyMount>
     </div>
   )
 }

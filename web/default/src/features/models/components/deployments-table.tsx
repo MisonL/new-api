@@ -11,6 +11,7 @@ import { useMediaQuery } from '@/hooks'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { useRetainedValue } from '@/hooks/use-retained-value'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import {
   AlertDialog,
@@ -38,6 +39,7 @@ import {
 } from '@/components/data-table'
 import { DataTablePagination } from '@/components/data-table/pagination'
 import { PageFooterPortal } from '@/components/layout'
+import { LazyMount } from '@/components/lazy-mount'
 import { deleteDeployment, listDeployments, searchDeployments } from '../api'
 import { getDeploymentStatusOptions } from '../constants'
 import { deploymentsQueryKeys } from '../lib'
@@ -110,6 +112,23 @@ export function DeploymentsTable() {
     string | number | null
   >(null)
   const [renameCurrentName, setRenameCurrentName] = useState<string>('')
+  const retainedLogsDeploymentId = useRetainedValue(logsDeploymentId, logsOpen)
+  const retainedDetailsDeploymentId = useRetainedValue(
+    detailsDeploymentId,
+    detailsOpen
+  )
+  const retainedUpdateDeploymentId = useRetainedValue(
+    updateDeploymentId,
+    updateOpen
+  )
+  const retainedExtendDeploymentId = useRetainedValue(
+    extendDeploymentId,
+    extendOpen
+  )
+  const retainedRenameDeploymentId = useRetainedValue(
+    renameDeploymentId,
+    renameOpen
+  )
 
   // Delete confirm
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -319,51 +338,71 @@ export function DeploymentsTable() {
         />
       </PageFooterPortal>
 
-      <ViewLogsDialog
-        open={logsOpen}
-        onOpenChange={(open) => {
-          setLogsOpen(open)
-          if (!open) setLogsDeploymentId(null)
-        }}
-        deploymentId={logsDeploymentId}
-      />
+      <LazyMount open={logsOpen && retainedLogsDeploymentId !== null}>
+        {retainedLogsDeploymentId !== null ? (
+          <ViewLogsDialog
+            open={logsOpen}
+            onOpenChange={(open) => {
+              setLogsOpen(open)
+              if (!open) setLogsDeploymentId(null)
+            }}
+            deploymentId={retainedLogsDeploymentId}
+          />
+        ) : null}
+      </LazyMount>
 
-      <ViewDetailsDialog
-        open={detailsOpen}
-        onOpenChange={(open) => {
-          setDetailsOpen(open)
-          if (!open) setDetailsDeploymentId(null)
-        }}
-        deploymentId={detailsDeploymentId}
-      />
+      <LazyMount open={detailsOpen && retainedDetailsDeploymentId !== null}>
+        {retainedDetailsDeploymentId !== null ? (
+          <ViewDetailsDialog
+            open={detailsOpen}
+            onOpenChange={(open) => {
+              setDetailsOpen(open)
+              if (!open) setDetailsDeploymentId(null)
+            }}
+            deploymentId={retainedDetailsDeploymentId}
+          />
+        ) : null}
+      </LazyMount>
 
-      <UpdateConfigDialog
-        open={updateOpen}
-        onOpenChange={(open) => {
-          setUpdateOpen(open)
-          if (!open) setUpdateDeploymentId(null)
-        }}
-        deploymentId={updateDeploymentId}
-      />
+      <LazyMount open={updateOpen && retainedUpdateDeploymentId !== null}>
+        {retainedUpdateDeploymentId !== null ? (
+          <UpdateConfigDialog
+            open={updateOpen}
+            onOpenChange={(open) => {
+              setUpdateOpen(open)
+              if (!open) setUpdateDeploymentId(null)
+            }}
+            deploymentId={retainedUpdateDeploymentId}
+          />
+        ) : null}
+      </LazyMount>
 
-      <ExtendDeploymentDialog
-        open={extendOpen}
-        onOpenChange={(open) => {
-          setExtendOpen(open)
-          if (!open) setExtendDeploymentId(null)
-        }}
-        deploymentId={extendDeploymentId}
-      />
+      <LazyMount open={extendOpen && retainedExtendDeploymentId !== null}>
+        {retainedExtendDeploymentId !== null ? (
+          <ExtendDeploymentDialog
+            open={extendOpen}
+            onOpenChange={(open) => {
+              setExtendOpen(open)
+              if (!open) setExtendDeploymentId(null)
+            }}
+            deploymentId={retainedExtendDeploymentId}
+          />
+        ) : null}
+      </LazyMount>
 
-      <RenameDeploymentDialog
-        open={renameOpen}
-        onOpenChange={(open) => {
-          setRenameOpen(open)
-          if (!open) setRenameDeploymentId(null)
-        }}
-        deploymentId={renameDeploymentId}
-        currentName={renameCurrentName}
-      />
+      <LazyMount open={renameOpen && retainedRenameDeploymentId !== null}>
+        {retainedRenameDeploymentId !== null ? (
+          <RenameDeploymentDialog
+            open={renameOpen}
+            onOpenChange={(open) => {
+              setRenameOpen(open)
+              if (!open) setRenameDeploymentId(null)
+            }}
+            deploymentId={retainedRenameDeploymentId}
+            currentName={renameCurrentName}
+          />
+        ) : null}
+      </LazyMount>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
