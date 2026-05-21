@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -117,6 +118,62 @@ func TestApplyChannelTestProtocolStrategyConvertsResponsesCompactToChat(t *testi
 	require.Equal(t, "/v1/chat/completions", info.RequestURLPath)
 	require.Equal(t, "/v1/chat/completions", ctx.Request.URL.Path)
 	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponsesCompaction, types.RelayFormatOpenAI}, info.RequestConversionChain)
+}
+
+func TestApplyChannelTestProtocolStrategyUsesGlobalResponsesToChatRuleByDefault(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	withGlobalProtocolPolicyForTest(t, model_setting.ChatCompletionsToResponsesPolicy{
+		Rules: []model_setting.ProtocolConversionRule{
+			{
+				Name:           "channel-146-all-models",
+				Enabled:        true,
+				SourceEndpoint: model_setting.ProtocolEndpointResponses,
+				TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+				ChannelIDs:     []int{146},
+			},
+		},
+	}, false)
+	info := &relaycommon.RelayInfo{
+		RelayMode:              relayconstant.RelayModeResponses,
+		OriginModelName:        "deepseek-v4-flash",
+		RequestURLPath:         "/v1/responses",
+		RelayFormat:            types.RelayFormatOpenAIResponses,
+		RequestConversionChain: []types.RelayFormat{types.RelayFormatOpenAIResponses},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   146,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Model: "deepseek-v4-flash",
+		Input: json.RawMessage(`[{"role":"user","content":"ping"}]`),
+	}
+
+	converted, err := applyChannelTestProtocolStrategy(ctx, info, request, defaultChannelTestOptions())
+
+	require.NoError(t, err)
+	chatReq, ok := converted.(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+	require.Equal(t, "deepseek-v4-flash", chatReq.Model)
+	require.Equal(t, relayconstant.RelayModeChatCompletions, info.RelayMode)
+	require.Equal(t, "/v1/chat/completions", info.RequestURLPath)
+	require.Equal(t, "/v1/chat/completions", ctx.Request.URL.Path)
+	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponses, types.RelayFormatOpenAI}, info.RequestConversionChain)
+}
+
+func withGlobalProtocolPolicyForTest(t *testing.T, policy model_setting.ChatCompletionsToResponsesPolicy, passThrough bool) {
+	t.Helper()
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	settings.ChatCompletionsToResponsesPolicy = policy
+	settings.PassThroughRequestEnabled = passThrough
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
 }
 
 func TestDiagnoseChannelTestErrorDetectsCompactUnavailable(t *testing.T) {

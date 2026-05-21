@@ -41,6 +41,24 @@ func TestProtocolConversionPolicySupportsLegacyAndRules(t *testing.T) {
 	require.False(t, ShouldChatCompletionsUseResponsesPolicy(rulePolicy, 1, 1, "gpt-5"))
 }
 
+func TestProtocolConversionPolicyEmptyModelPatternsMatchAllNonEmptyModels(t *testing.T) {
+	policy := model_setting.ChatCompletionsToResponsesPolicy{
+		Rules: []model_setting.ProtocolConversionRule{
+			{
+				Name:           "responses-to-chat-all-models",
+				Enabled:        true,
+				SourceEndpoint: model_setting.ProtocolEndpointResponses,
+				TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+				AllChannels:    false,
+				ChannelIDs:     []int{146},
+			},
+		},
+	}
+
+	require.True(t, ShouldResponsesUseChatCompletionsPolicy(policy, 146, 1, "deepseek-v4-flash"))
+	require.False(t, ShouldResponsesUseChatCompletionsPolicy(policy, 146, 1, ""))
+}
+
 func TestResponsesRequestToChatCompletionsRequest(t *testing.T) {
 	req := &dto.OpenAIResponsesRequest{
 		Model:             "gpt-5",

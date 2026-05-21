@@ -284,9 +284,6 @@ func ChatCompletionsToResponsesPolicyWarnings(policy ChatCompletionsToResponsesP
 		if !rule.AllChannels && len(rule.ChannelIDs) == 0 && len(rule.ChannelTypes) == 0 {
 			warnings = append(warnings, fmt.Sprintf("%s 渠道范围为空，不会命中", label))
 		}
-		if len(rule.ModelPatterns) == 0 {
-			warnings = append(warnings, fmt.Sprintf("%s 模型正则为空，不会命中", label))
-		}
 	}
 	if passThroughEnabled && len(rules) > 0 {
 		warnings = append(warnings, "全局请求透传已开启，协议转换运行时会被跳过")

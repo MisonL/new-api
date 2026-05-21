@@ -26,6 +26,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -732,14 +733,23 @@ func buildChannelTestResponsesInput(prompt string) json.RawMessage {
 
 func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInfo, request dto.Request, options channelTestOptions) (dto.Request, error) {
 	options = normalizeChannelTestOptions(options)
-	if options.ResponseProtocol != channelTestResponseProtocolChatCompletions {
-		return request, nil
+	explicitChatProtocol := options.ResponseProtocol == channelTestResponseProtocolChatCompletions
+	var conversionOptions service.ResponsesChatCompatibilityOptions
+	if !explicitChatProtocol {
+		conversionRule := findChannelTestResponsesViaChatRule(info)
+		if conversionRule == nil {
+			return request, nil
+		}
+		conversionOptions = channelTestResponsesChatOptionsFromRule(conversionRule)
 	}
 	if info == nil {
 		return request, errors.New("relay info is nil")
 	}
-	if info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
+	if explicitChatProtocol && info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
 		return request, fmt.Errorf("response protocol %q only supports responses endpoints", options.ResponseProtocol)
+	}
+	if !explicitChatProtocol && info.RelayMode != relayconstant.RelayModeResponses {
+		return request, nil
 	}
 
 	var responsesReq *dto.OpenAIResponsesRequest
@@ -757,7 +767,7 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 		return request, fmt.Errorf("invalid response request type: %T", request)
 	}
 
-	chatReq, err := service.ResponsesRequestToChatCompletionsRequest(responsesReq)
+	chatReq, err := service.ResponsesRequestToChatCompletionsRequestWithOptions(responsesReq, conversionOptions)
 	if err != nil {
 		return request, err
 	}
@@ -773,6 +783,33 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 		c.Request.URL.Path = "/v1/chat/completions"
 	}
 	return chatReq, nil
+}
+
+func findChannelTestResponsesViaChatRule(info *relaycommon.RelayInfo) *model_setting.ProtocolConversionRule {
+	settings := model_setting.GetGlobalSettings()
+	if info == nil ||
+		info.ChannelMeta == nil ||
+		info.RelayMode != relayconstant.RelayModeResponses ||
+		settings.PassThroughRequestEnabled ||
+		info.ChannelSetting.PassThroughBodyEnabled {
+		return nil
+	}
+	return service.FindProtocolConversionRuleGlobal(
+		model_setting.ProtocolEndpointResponses,
+		model_setting.ProtocolEndpointChatCompletions,
+		info.ChannelId,
+		info.ChannelType,
+		info.OriginModelName,
+	)
+}
+
+func channelTestResponsesChatOptionsFromRule(rule *model_setting.ProtocolConversionRule) service.ResponsesChatCompatibilityOptions {
+	if rule == nil || rule.Options == nil {
+		return service.ResponsesChatCompatibilityOptions{}
+	}
+	return service.ResponsesChatCompatibilityOptions{
+		EnableCustomToolBridge: rule.Options.EnableCustomToolBridge,
+	}
 }
 
 func diagnoseChannelTestError(err error, newAPIError *types.NewAPIError, summary *channelTestRuntimeSummary) *channelTestErrorDiagnosis {

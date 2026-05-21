@@ -506,6 +506,6 @@ func TestChatCompletionsToResponsesPolicyWarnings(t *testing.T) {
 	warnings := ChatCompletionsToResponsesPolicyWarnings(policy, true)
 	assert.Contains(t, warnings, "disabled-empty 已停用，不会参与匹配")
 	assert.Contains(t, warnings, "disabled-empty 渠道范围为空，不会命中")
-	assert.Contains(t, warnings, "disabled-empty 模型正则为空，不会命中")
+	assert.NotContains(t, warnings, "disabled-empty 模型正则为空，不会命中")
 	assert.Contains(t, warnings, "全局请求透传已开启，协议转换运行时会被跳过")
 }
