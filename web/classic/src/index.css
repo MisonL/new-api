@@ -2209,6 +2209,15 @@ html.dark .with-pastel-balls::before {
   scrollbar-color: rgba(var(--semi-grey-2), 0.3) transparent;
 }
 
+.channel-table-card.table-scroll-card
+  .card-table-scroll-shell
+  .semi-table-body {
+  max-height: var(
+    --card-table-body-max-height,
+    clamp(320px, calc(100dvh - 430px), 560px)
+  );
+}
+
 .card-table-scroll-shell .semi-table-body::-webkit-scrollbar {
   width: 6px;
   height: 0 !important;
