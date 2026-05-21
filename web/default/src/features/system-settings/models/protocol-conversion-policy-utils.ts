@@ -197,9 +197,6 @@ export function getProtocolRuleWarningKeys(rule: ProtocolRule) {
   ) {
     warnings.push('Channel scope is empty. This rule will not match.')
   }
-  if (rule.model_patterns.length === 0) {
-    warnings.push('Model patterns are empty. This rule will not match.')
-  }
   return warnings
 }
 
@@ -221,13 +218,6 @@ export function getProtocolPreviewResult(
     }
   }
 
-  if (rule.model_patterns.length === 0) {
-    return {
-      matched: false,
-      reason: 'Model patterns are empty. This rule will not match.',
-    }
-  }
-
   const channelId = parseStrictPositiveInteger(preview.channelId)
   const channelType = parseStrictPositiveInteger(preview.channelType)
 
@@ -244,13 +234,15 @@ export function getProtocolPreviewResult(
   if (!model)
     return { matched: false, reason: 'Model is required for preview.' }
 
-  const matched = rule.model_patterns.some((pattern) => {
-    try {
-      return new RegExp(pattern).test(model)
-    } catch {
-      return false
-    }
-  })
+  const matched =
+    rule.model_patterns.length === 0 ||
+    rule.model_patterns.some((pattern) => {
+      try {
+        return new RegExp(pattern).test(model)
+      } catch {
+        return false
+      }
+    })
   if (!matched) {
     return { matched: false, reason: 'Model pattern does not match.' }
   }

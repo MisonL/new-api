@@ -89,9 +89,11 @@ export function ProtocolConversionRuleCard({
             </span>
             <span>{scopeLabel}</span>
             <span>
-              {t('{{count}} model patterns', {
-                count: rule.model_patterns.length,
-              })}
+              {rule.model_patterns.length === 0
+                ? t('All Models')
+                : t('{{count}} model patterns', {
+                    count: rule.model_patterns.length,
+                  })}
             </span>
           </div>
         </div>

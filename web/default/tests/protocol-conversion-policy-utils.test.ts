@@ -10,6 +10,7 @@ import {
   createProtocolRuleFromTemplate,
   getDraftTextValue,
   getProtocolPreviewResult,
+  getProtocolRuleWarningKeys,
   parseIntegerText,
   parseLines,
   parseProtocolPolicy,
@@ -288,7 +289,7 @@ describe('protocol conversion policy utils', () => {
     expect(parsed.error).toContain('enable_custom_tool_bridge')
   })
 
-  test('preview does not match when model patterns are empty', () => {
+  test('preview matches all non-empty models when model patterns are empty', () => {
     const parsed = parseProtocolPolicy(
       JSON.stringify({
         rules: [
@@ -308,13 +309,16 @@ describe('protocol conversion policy utils', () => {
 
     const result = getProtocolPreviewResult(
       parsed.rules[0],
-      { channelId: '1', channelType: '1', model: 'gpt-5' },
+      { channelId: '1', channelType: '1', model: 'deepseek-v4-flash' },
       false
     )
     expect(result).toEqual({
-      matched: false,
-      reason: 'Model patterns are empty. This rule will not match.',
+      matched: true,
+      reason: 'Sample request matches this rule.',
     })
+    expect(getProtocolRuleWarningKeys(parsed.rules[0])).not.toContain(
+      'Model patterns are empty. This rule will not match.'
+    )
   })
 
   test('parses draft model patterns without requiring committed input cleanup', () => {
