@@ -4240,7 +4240,8 @@
     "当前筛选条件暂无可统计收益": "Bộ lọc hiện tại chưa có thưởng để thống kê",
     "加载邀请记录失败": "Không tải được lịch sử lời mời",
     "暂无邀请记录": "Chưa có lịch sử lời mời",
-    "再次点击可取消选择": "Bấm lại để bỏ chọn"
+    "再次点击可取消选择": "Bấm lại để bỏ chọn",
+    "协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。": "Chuyển đổi giao thức sẽ gửi tiếp yêu cầu bằng định dạng giao diện khác. Hiện chỉ hỗ trợ chuyển đổi hai chiều giữa /v1/chat/completions và /v1/responses; regex mô hình trống sẽ khớp tất cả mô hình, còn phạm vi kênh trống sẽ không khớp."
   },
   "启用 Responses 流启动恢复": "Enable responses stream startup recovery",
   "仅在 /v1/responses 流式请求首包前生效，用于短时故障恢复。": "Chỉ áp dụng trước payload đầu tiên của các yêu cầu stream /v1/responses để phục hồi khi sự cố ngắn hạn; đồng thời bạn phải bật nó riêng trên từng kênh.",

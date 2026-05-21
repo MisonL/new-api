@@ -27,6 +27,7 @@ import {
   buildTemplateRule,
   deserializePolicy,
   getEndpointLabel,
+  getRuleModelSummary,
   parseIntegerList,
   serializeRules,
 } from '../src/components/settings/protocolConversionPolicy/utils.js';
@@ -170,5 +171,11 @@ describe('classic protocol conversion policy utils', () => {
     expect(parseIntegerList('35,36, 37')).toEqual([35, 36, 37]);
     expect(parseIntegerList('35，36、37\n38 39')).toEqual([35, 36, 37, 38, 39]);
     expect(parseIntegerList('35,')).toEqual([35]);
+  });
+
+  test('summarizes empty model patterns as all models', () => {
+    expect(getRuleModelSummary({ model_patterns: [] }, (value) => value)).toBe(
+      '全部模型',
+    );
   });
 });

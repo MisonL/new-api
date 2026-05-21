@@ -3712,7 +3712,8 @@
     "当前筛选条件暂无可统计收益": "Aucun gain mesurable pour les filtres actuels",
     "加载邀请记录失败": "Échec du chargement des invitations",
     "暂无邀请记录": "Aucune invitation",
-    "再次点击可取消选择": "Cliquez à nouveau pour désélectionner"
+    "再次点击可取消选择": "Cliquez à nouveau pour désélectionner",
+    "协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。": "La conversion de protocole envoie les requêtes dans un autre format d'interface. Actuellement, seule la conversion bidirectionnelle entre /v1/chat/completions et /v1/responses est prise en charge ; une regex de modèle vide correspond à tous les modèles, tandis qu'une portée de canal vide ne correspondra à rien."
   },
   "启用 Responses 流启动恢复": "Enable responses stream startup recovery",
   "仅在 /v1/responses 流式请求首包前生效，用于短时故障恢复。": "S'applique uniquement avant le premier payload des requêtes en streaming /v1/responses pour la récupération après une panne courte ; vous devez aussi l'activer sur chaque canal.",

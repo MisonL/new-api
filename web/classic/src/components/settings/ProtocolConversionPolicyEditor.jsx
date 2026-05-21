@@ -225,7 +225,7 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
       <Banner
         type='info'
         description={t(
-          '协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空或渠道范围为空时，该规则不会命中。',
+          '协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。',
         )}
       />
       <ProtocolPolicyHeader {...headerProps} />

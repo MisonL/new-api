@@ -3822,6 +3822,7 @@
     "固定请求头静态快照来自本机实抓 Gemini CLI 0.41.2 的 streamGenerateContent 请求；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。": "Static headers come from a local capture of Gemini CLI 0.41.2 streamGenerateContent. This template only fixes client identity. Dynamic headers such as x-goog-api-client must be enabled explicitly with the Gemini CLI header passthrough template in Advanced Parameter Override.",
     "固定请求头静态快照来自本机 Qwen Code 0.15.10 的 OpenAI-compatible /chat/completions 请求；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。": "Static headers come from local Qwen Code 0.15.10 OpenAI-compatible /chat/completions requests. This template only fixes client identity. x-stainless-* dynamic headers must be enabled explicitly with the Qwen Code header passthrough template in Advanced Parameter Override.",
     "固定请求头静态快照来自本机实抓 Droid 0.123.0 的 OpenAI-compatible /v1/chat/completions 请求；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。": "Static headers come from a local capture of Droid 0.123.0 OpenAI-compatible /v1/chat/completions. This template only fixes client identity. X-Stainless-* dynamic headers must be enabled explicitly with the Droid CLI header passthrough template in Advanced Parameter Override.",
-    "再次点击可取消选择": "Click again to deselect"
+    "再次点击可取消选择": "Click again to deselect",
+    "协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。": "Protocol conversion sends requests onward using another endpoint format. Currently only bidirectional conversion between /v1/chat/completions and /v1/responses is supported. Empty model regex matches all models; empty channel scope will not match."
   }
 }

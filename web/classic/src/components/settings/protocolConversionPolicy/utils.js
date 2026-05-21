@@ -426,7 +426,7 @@ export const getRuleScopeSummary = (rule, t) => {
 
 export const getRuleModelSummary = (rule, t) => {
   if (!Array.isArray(rule.model_patterns) || rule.model_patterns.length === 0) {
-    return t('未配置，不会命中');
+    return t('全部模型');
   }
   if (rule.model_patterns.length === 1) {
     return rule.model_patterns[0];
