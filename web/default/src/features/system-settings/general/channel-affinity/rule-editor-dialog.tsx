@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -388,7 +388,12 @@ export function RuleEditorDialog(props: Props) {
                 variant='ghost'
                 className='w-full justify-start'
               >
-                {advancedOpen ? '▼' : '▶'} {t('Advanced Settings')}
+                {advancedOpen ? (
+                  <ChevronDown className='h-4 w-4' aria-hidden='true' />
+                ) : (
+                  <ChevronRight className='h-4 w-4' aria-hidden='true' />
+                )}
+                {t('Advanced Settings')}
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className='space-y-3 pt-2'>

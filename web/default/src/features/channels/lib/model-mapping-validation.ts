@@ -30,7 +30,7 @@ export function normalizeModelName(model: string): string {
 
 /**
  * Extract source keys from model_mapping JSON
- * (the keys of the mapping object — models being remapped FROM)
+ * (the keys of the mapping object - models being remapped FROM)
  */
 export function extractMappingSourceModels(modelMapping: string): string[] {
   if (typeof modelMapping !== 'string') return []

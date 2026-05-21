@@ -122,7 +122,7 @@ function parseSidebarConfig(
 
 /**
  * Parse user-level sidebar_modules. Returns null when the value is empty,
- * invalid, or otherwise unusable — the caller treats null as "do not narrow",
+ * invalid, or otherwise unusable - the caller treats null as "do not narrow",
  * so legacy users with an empty sidebar_modules field keep the full admin view.
  */
 function parseUserSidebarConfig(
@@ -180,7 +180,7 @@ function isNavItemVisible(
   adminConfig: SidebarModulesAdminConfig,
   userConfig: SidebarModulesUserConfig
 ): boolean {
-  // Handle dynamic chat presets type — also runs the admin × user AND gate
+  // Handle dynamic chat presets type - also runs the admin x user AND gate
   if ('type' in item && item.type === 'chat-presets') {
     const adminChat = adminConfig.chat
     const adminAllowed = Boolean(adminChat?.enabled && adminChat.chat === true)
@@ -238,13 +238,13 @@ function filterNavItems(
 }
 
 /**
- * Filter sidebar navigation groups by admin × user sidebar_modules config.
+ * Filter sidebar navigation groups by admin x user sidebar_modules config.
  *
  * Two layers, AND-combined:
- *   1. Admin (status.SidebarModulesAdmin) — authoritative, falls back to
+ *   1. Admin (status.SidebarModulesAdmin) - authoritative, falls back to
  *      DEFAULT_SIDEBAR_MODULES when empty/invalid. Disabling here hides the
  *      item for everyone regardless of user preference.
- *   2. User (auth.user.sidebar_modules) — narrower overlay, null sentinel
+ *   2. User (auth.user.sidebar_modules) - narrower overlay, null sentinel
  *      means "don't narrow". A section/module is only hidden if the user
  *      explicitly set it to false; undefined fields default to visible so
  *      legacy users with empty sidebar_modules keep the full admin view.
@@ -267,7 +267,7 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
 
   const userConfig = useMemo(() => {
     // If the backend marks the user as unable to configure the sidebar
-    // (e.g. root accounts), skip the user overlay entirely — a stale
+    // (e.g. root accounts), skip the user overlay entirely - a stale
     // historical sidebar_modules value from a previous role would otherwise
     // hide admin entries for someone who has no in-product UI to restore
     // them.

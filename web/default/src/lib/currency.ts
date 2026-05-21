@@ -34,11 +34,11 @@
  *
  * User Flow:
  * 1. Recharge option: 10 USD
- *    - Display: formatCurrencyFromUSD(10) → "¥70"
- * 2. Payment amount: 10 × 5 = 50 (already in CNY)
- *    - Display: formatLocalCurrencyAmount(50) → "¥50"
+ *    - Display: formatCurrencyFromUSD(10) -> "¥70"
+ * 2. Payment amount: 10 x 5 = 50 (already in CNY)
+ *    - Display: formatLocalCurrencyAmount(50) -> "¥50"
  * 3. User receives: 10 USD credit
- *    - Balance display: formatCurrencyFromUSD(10) → "¥70"
+ *    - Balance display: formatCurrencyFromUSD(10) -> "¥70"
  *
  * ## Quick Reference Guide
  *
@@ -50,7 +50,7 @@
  * | Billing history Amount | USD (from DB) | `formatCurrencyFromUSD()` | Historical USD needs conversion |
  * | Billing history Payment | Local currency | `formatNumber()` | Just show number, no symbol |
  * | Model pricing | USD | `formatBillingCurrencyFromUSD()` | Never show as tokens |
- * | Raw quota from API | Tokens | `formatQuotaWithCurrency()` | Convert tokens → USD → display |
+ * | Raw quota from API | Tokens | `formatQuotaWithCurrency()` | Convert tokens -> USD -> display |
  *
  * ## Critical Rules
  *
@@ -304,19 +304,19 @@ export function getCurrencyDisplay() {
  *
  * @example
  * // With quotaDisplayType: 'USD'
- * formatCurrencyFromUSD(10) → "$10"
+ * formatCurrencyFromUSD(10) -> "$10"
  *
  * @example
  * // With quotaDisplayType: 'CNY', usdExchangeRate: 7
- * formatCurrencyFromUSD(10) → "¥70"
+ * formatCurrencyFromUSD(10) -> "¥70"
  *
  * @example
  * // With quotaDisplayType: 'TOKENS', quotaPerUnit: 500000
- * formatCurrencyFromUSD(10) → "5,000,000"
+ * formatCurrencyFromUSD(10) -> "5,000,000"
  *
  * @example
  * // With quotaDisplayType: 'CUSTOM', customCurrencySymbol: '€', customCurrencyExchangeRate: 0.9
- * formatCurrencyFromUSD(10) → "€9"
+ * formatCurrencyFromUSD(10) -> "€9"
  *
  * @remarks
  * Use this function for:
@@ -326,8 +326,8 @@ export function getCurrencyDisplay() {
  * - Any value stored in database as USD
  *
  * DO NOT use for:
- * - Payment amounts already converted via priceRatio → use formatLocalCurrencyAmount()
- * - Raw token values → use formatQuotaWithCurrency()
+ * - Payment amounts already converted via priceRatio -> use formatLocalCurrencyAmount()
+ * - Raw token values -> use formatQuotaWithCurrency()
  */
 export function formatCurrencyFromUSD(
   amountUSD: number | null | undefined,
@@ -369,11 +369,11 @@ export function formatCurrencyFromUSD(
  *
  * @example
  * // With quotaDisplayType: 'TOKENS' - still shows currency
- * formatBillingCurrencyFromUSD(10) → "$10"  (not "5,000,000 tokens")
+ * formatBillingCurrencyFromUSD(10) -> "$10"  (not "5,000,000 tokens")
  *
  * @example
  * // With quotaDisplayType: 'CNY', usdExchangeRate: 7
- * formatBillingCurrencyFromUSD(10) → "¥70"
+ * formatBillingCurrencyFromUSD(10) -> "¥70"
  *
  * @remarks
  * Use this function for:
@@ -383,8 +383,8 @@ export function formatCurrencyFromUSD(
  * - Any monetary value where tokens don't make sense
  *
  * DO NOT use for:
- * - User balance/quota → use formatCurrencyFromUSD()
- * - Payment amounts already in local currency → use formatLocalCurrencyAmount()
+ * - User balance/quota -> use formatCurrencyFromUSD()
+ * - Payment amounts already in local currency -> use formatLocalCurrencyAmount()
  */
 export function formatBillingCurrencyFromUSD(
   amountUSD: number | null | undefined,
@@ -416,20 +416,20 @@ export function formatBillingCurrencyFromUSD(
  *
  * @example
  * // With quotaPerUnit: 500000, quotaDisplayType: 'USD'
- * formatQuotaWithCurrency(5000000) → "$10"
+ * formatQuotaWithCurrency(5000000) -> "$10"
  *
  * @example
  * // With quotaPerUnit: 500000, quotaDisplayType: 'CNY', usdExchangeRate: 7
- * formatQuotaWithCurrency(5000000) → "¥70"
+ * formatQuotaWithCurrency(5000000) -> "¥70"
  *
  * @remarks
  * Use this function for:
  * - Raw quota values from database (stored as tokens)
- * - When you need to convert tokens → USD → display currency
+ * - When you need to convert tokens -> USD -> display currency
  *
  * DO NOT use for:
- * - Values already in USD → use formatCurrencyFromUSD()
- * - Payment amounts → use formatLocalCurrencyAmount()
+ * - Values already in USD -> use formatCurrencyFromUSD()
+ * - Payment amounts -> use formatLocalCurrencyAmount()
  */
 export function formatQuotaWithCurrency(
   quota: number | null | undefined,
@@ -451,9 +451,9 @@ export function formatQuotaWithCurrency(
  * @returns Currency label string (e.g., "USD", "CNY", "Tokens")
  *
  * @example
- * getCurrencyLabel() → "USD"
- * getCurrencyLabel() → "CNY"
- * getCurrencyLabel() → "Tokens"
+ * getCurrencyLabel() -> "USD"
+ * getCurrencyLabel() -> "CNY"
+ * getCurrencyLabel() -> "Tokens"
  *
  * @remarks
  * Use this for:
@@ -486,10 +486,10 @@ export function getCurrencyLabel(): string {
  *
  * @example
  * // With quotaDisplayType: 'USD' or 'CNY'
- * isCurrencyDisplayEnabled() → true
+ * isCurrencyDisplayEnabled() -> true
  *
  * // With quotaDisplayType: 'TOKENS'
- * isCurrencyDisplayEnabled() → false
+ * isCurrencyDisplayEnabled() -> false
  *
  * @remarks
  * Use this to conditionally show currency-specific UI elements
@@ -511,24 +511,24 @@ export function isCurrencyDisplayEnabled(): boolean {
  * @returns Formatted string with appropriate currency symbol
  *
  * @example
- * // Payment amount already calculated: 10 USD × priceRatio(5) = 50 CNY
+ * // Payment amount already calculated: 10 USD x priceRatio(5) = 50 CNY
  * // With quotaDisplayType: 'CNY'
- * formatLocalCurrencyAmount(50) → "¥50"
- * // NOT "¥350" (which would be 50 × 7 exchangeRate)
+ * formatLocalCurrencyAmount(50) -> "¥50"
+ * // NOT "¥350" (which would be 50 x 7 exchangeRate)
  *
  * @example
  * // With quotaDisplayType: 'USD'
- * formatLocalCurrencyAmount(10) → "$10"
+ * formatLocalCurrencyAmount(10) -> "$10"
  *
  * @remarks
  * Use this function for:
- * - Payment amounts calculated via priceRatio (amount × price)
+ * - Payment amounts calculated via priceRatio (amount x price)
  * - Actual money charged to user's payment method
  * - Values that are already in the target currency
  *
  * DO NOT use for:
- * - USD values that need conversion → use formatCurrencyFromUSD()
- * - Raw quota values → use formatQuotaWithCurrency()
+ * - USD values that need conversion -> use formatCurrencyFromUSD()
+ * - Raw quota values -> use formatQuotaWithCurrency()
  *
  * Common mistake:
  * ```ts
