@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/textproto"
@@ -44,7 +43,7 @@ func parseHeaderTemplateEntries(raw string) ([]headerTemplateEntry, error) {
 		return nil, fmt.Errorf("请求头覆盖必须是合法的 JSON 格式")
 	}
 
-	delim, ok := token.(json.Delim)
+	delim, ok := token.(common.JsonDelim)
 	if !ok || delim != '{' {
 		return nil, fmt.Errorf("请求头覆盖必须是 JSON 对象")
 	}
@@ -91,7 +90,7 @@ func parseHeaderTemplateEntries(raw string) ([]headerTemplateEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("请求头覆盖必须是合法的 JSON 格式")
 	}
-	endDelim, ok := endToken.(json.Delim)
+	endDelim, ok := endToken.(common.JsonDelim)
 	if !ok || endDelim != '}' {
 		return nil, fmt.Errorf("请求头覆盖必须是合法的 JSON 格式")
 	}
@@ -164,7 +163,7 @@ func isValidHeaderFieldName(name string) bool {
 	return true
 }
 
-func decodeHeaderTemplateValue(decoder *json.Decoder, name string) (string, error) {
+func decodeHeaderTemplateValue(decoder *common.JsonDecoder, name string) (string, error) {
 	var value interface{}
 	if err := common.DecodeJsonFromDecoder(decoder, &value); err != nil {
 		return "", fmt.Errorf("请求头覆盖必须是合法的 JSON 格式")
@@ -175,7 +174,7 @@ func decodeHeaderTemplateValue(decoder *json.Decoder, name string) (string, erro
 		return v, nil
 	case bool:
 		return fmt.Sprintf("%t", v), nil
-	case json.Number:
+	case common.JsonNumber:
 		return v.String(), nil
 	default:
 		return "", fmt.Errorf("请求头值类型不受支持: %s", name)

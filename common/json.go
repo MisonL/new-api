@@ -7,6 +7,9 @@ import (
 )
 
 type RawMessage = json.RawMessage
+type JsonDecoder = json.Decoder
+type JsonDelim = json.Delim
+type JsonNumber = json.Number
 
 func Unmarshal(data []byte, v any) error {
 	return json.Unmarshal(data, v)
@@ -26,13 +29,13 @@ func DecodeJsonUseNumber(reader io.Reader, v any) error {
 	return decoder.Decode(v)
 }
 
-func NewJsonDecoderUseNumber(reader io.Reader) *json.Decoder {
+func NewJsonDecoderUseNumber(reader io.Reader) *JsonDecoder {
 	decoder := json.NewDecoder(reader)
 	decoder.UseNumber()
 	return decoder
 }
 
-func DecodeJsonFromDecoder(decoder *json.Decoder, v any) error {
+func DecodeJsonFromDecoder(decoder *JsonDecoder, v any) error {
 	return decoder.Decode(v)
 }
 
