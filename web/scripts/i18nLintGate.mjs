@@ -1,9 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = process.cwd();
-const baselinePath = path.join(repoRoot, 'tests', 'i18nLintBaseline.json');
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const webRoot = path.resolve(scriptDir, '..');
+const currentWorkingDir = process.cwd();
+const classicRoot = path.join(webRoot, 'classic');
+const lintRoot = fs.existsSync(path.join(currentWorkingDir, 'i18next.config.js'))
+  ? currentWorkingDir
+  : classicRoot;
+const baselinePath = path.join(webRoot, 'tests', 'i18nLintBaseline.json');
+const baselineDisplayPath = path.relative(webRoot, baselinePath);
 const isWindows = process.platform === 'win32';
 const bunxCommand = isWindows ? 'bunx.cmd' : 'bunx';
 
@@ -73,7 +81,7 @@ const args = process.argv.slice(2);
 const writeBaseline = args.includes('--write-baseline');
 
 const lintResult = spawnSync(bunxCommand, ['i18next-cli', 'lint'], {
-  cwd: repoRoot,
+  cwd: lintRoot,
   encoding: 'utf8',
   shell: false,
 });
@@ -84,7 +92,7 @@ const issues = parseIssues(combinedOutput);
 if (writeBaseline) {
   saveBaseline(issues);
   console.log(
-    `已更新 i18n lint 基线，共记录 ${issues.length} 条历史问题：${path.relative(repoRoot, baselinePath)}`,
+    `已更新 i18n lint 基线，共记录 ${issues.length} 条历史问题：${baselineDisplayPath}`,
   );
   process.exit(0);
 }

@@ -25,7 +25,7 @@ import {
   showError,
   showSuccess,
 } from '../../../helpers';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { BookOpen, TriangleAlert } from 'lucide-react';
 
 export default function SettingsPaymentGateway(props) {
@@ -164,23 +164,25 @@ export default function SettingsPaymentGateway(props) {
             icon={<BookOpen size={16} />}
             description={
               <>
-                Stripe 密钥、Webhook 等设置请
-                <a
-                  href='https://dashboard.stripe.com/developers'
-                  target='_blank'
-                  rel='noreferrer'
-                >
-                  点击此处
-                </a>
-                进行设置，建议先在
-                <a
-                  href='https://dashboard.stripe.com/test/developers'
-                  target='_blank'
-                  rel='noreferrer'
-                >
-                  测试环境
-                </a>
-                完成联调。
+                <Trans
+                  i18nKey='Stripe 密钥、Webhook 等设置请<dashboardLink>点击此处</dashboardLink>进行设置，建议先在<testLink>测试环境</testLink>完成联调。'
+                  components={{
+                    dashboardLink: (
+                      <a
+                        href='https://dashboard.stripe.com/developers'
+                        target='_blank'
+                        rel='noreferrer'
+                      />
+                    ),
+                    testLink: (
+                      <a
+                        href='https://dashboard.stripe.com/test/developers'
+                        target='_blank'
+                        rel='noreferrer'
+                      />
+                    ),
+                  }}
+                />
                 <br />
                 {t('回调地址')}：
                 {props.options.ServerAddress
@@ -194,7 +196,9 @@ export default function SettingsPaymentGateway(props) {
           <Banner
             type='warning'
             icon={<TriangleAlert size={16} />}
-            description='需要包含事件：checkout.session.completed 和 checkout.session.expired'
+            description={t(
+              '需要包含事件：checkout.session.completed 和 checkout.session.expired',
+            )}
             style={{ marginBottom: 16 }}
           />
           <Row gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}>
@@ -252,8 +256,6 @@ export default function SettingsPaymentGateway(props) {
               <Form.Switch
                 field='StripePromotionCodesEnabled'
                 size='default'
-                checkedText='｜'
-                uncheckedText='〇'
                 label={t('允许在 Stripe 支付中输入促销码')}
               />
             </Col>

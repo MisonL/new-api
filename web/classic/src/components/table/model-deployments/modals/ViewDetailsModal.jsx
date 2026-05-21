@@ -480,7 +480,11 @@ const ViewDetailsModal = ({ visible, onCancel, deployment, t }) => {
             <Card
               title={
                 <div className='flex items-center gap-2'>
-                  <FaMapMarkerAlt className='text-orange-500' />
+                  <FaMapMarkerAlt
+                    className='text-orange-500'
+                    aria-hidden={true}
+                    focusable={false}
+                  />
                   <span>{t('部署位置')}</span>
                 </div>
               }
@@ -490,7 +494,11 @@ const ViewDetailsModal = ({ visible, onCancel, deployment, t }) => {
                 {details.locations.map((location) => (
                   <Tag key={location.id} color='orange' size='large'>
                     <div className='flex items-center gap-1'>
-                      <span>🌍</span>
+                      <FaMapMarkerAlt
+                        className='text-orange-500'
+                        aria-hidden={true}
+                        focusable={false}
+                      />
                       <span>
                         {location.name} ({location.iso2})
                       </span>

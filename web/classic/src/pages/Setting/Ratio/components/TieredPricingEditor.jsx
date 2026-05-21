@@ -31,7 +31,7 @@ import {
   TextArea,
   Typography,
 } from '@douyinfe/semi-ui';
-import { IconDelete, IconPlus } from '@douyinfe/semi-icons';
+import { IconChevronDown, IconDelete, IconPlus } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../../helpers/render';
 import {
   BILLING_EXTRA_VARS,
@@ -420,7 +420,14 @@ function ExtendedPriceBlock({ tier, index, onUpdate, t }) {
           fontSize: 12,
         }}
       >
-        {expanded ? '▾' : '▸'} {t('扩展价格')}
+        <IconChevronDown
+          size='small'
+          style={{
+            marginRight: 4,
+            transform: expanded ? 'none' : 'rotate(-90deg)',
+          }}
+        />
+        {t('扩展价格')}
       </Button>
       <Collapsible isOpen={expanded}>
         <div
