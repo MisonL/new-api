@@ -1,0 +1,10 @@
+{
+	admin off
+}
+
+:{$NEW_API_LAN_PROXY_PORT:3000} {
+	reverse_proxy 127.0.0.1:{$NEW_API_LOOPBACK_PORT:13000} {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+	}
+}
