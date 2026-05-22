@@ -23,8 +23,16 @@ const (
 	AwsKeyTypeApiKey AwsKeyType = "api_key"
 )
 
+type ResponsesCompactMode string
+
+const (
+	ResponsesCompactModeUnsupported ResponsesCompactMode = "unsupported"
+	ResponsesCompactModeNative      ResponsesCompactMode = "native"
+)
+
 type ChannelOtherSettings struct {
 	AzureResponsesVersion                 string                 `json:"azure_responses_version,omitempty"`
+	ResponsesCompactMode                  ResponsesCompactMode   `json:"responses_compact_mode,omitempty"`
 	VertexKeyType                         VertexKeyType          `json:"vertex_key_type,omitempty"` // "json" or "api_key"
 	OpenRouterEnterprise                  *bool                  `json:"openrouter_enterprise,omitempty"`
 	ClaudeBetaQuery                       bool                   `json:"claude_beta_query,omitempty"`         // Claude 渠道是否强制追加 ?beta=true
@@ -54,4 +62,8 @@ func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
 		return false
 	}
 	return *s.OpenRouterEnterprise
+}
+
+func (s *ChannelOtherSettings) HasNativeResponsesCompact() bool {
+	return s != nil && s.ResponsesCompactMode == ResponsesCompactModeNative
 }

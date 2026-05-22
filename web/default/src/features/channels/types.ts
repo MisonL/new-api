@@ -70,8 +70,11 @@ export interface ChannelSettings {
   system_prompt_override?: boolean
 }
 
+export type ResponsesCompactMode = 'unsupported' | 'native'
+
 export interface ChannelOtherSettings {
   azure_responses_version?: string
+  responses_compact_mode?: ResponsesCompactMode
   vertex_key_type?: 'json' | 'api_key'
   openrouter_enterprise?: boolean
   aws_key_type?: 'ak_sk' | 'api_key'

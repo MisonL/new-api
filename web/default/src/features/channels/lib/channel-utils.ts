@@ -11,6 +11,9 @@ import {
 } from '../constants'
 import type { Channel, ChannelSettings, ChannelOtherSettings } from '../types'
 
+export const RESPONSES_COMPACT_MODE_UNSUPPORTED = 'unsupported' as const
+export const RESPONSES_COMPACT_MODE_NATIVE = 'native' as const
+
 // ============================================================================
 // Channel Type Utilities
 // ============================================================================
@@ -257,10 +260,66 @@ export function parseChannelOtherSettings(
 ): ChannelOtherSettings {
   if (!settingsStr || settingsStr === '{}') return {}
   try {
-    return JSON.parse(settingsStr) as ChannelOtherSettings
+    const parsed = JSON.parse(settingsStr) as ChannelOtherSettings
+    if (!parsed.responses_compact_mode) {
+      parsed.responses_compact_mode = RESPONSES_COMPACT_MODE_UNSUPPORTED
+    }
+    return parsed
   } catch {
     return {}
   }
+}
+
+export function getResponsesCompactMode(
+  settingsStr: string | null | undefined
+): ChannelOtherSettings['responses_compact_mode'] {
+  return (
+    parseChannelOtherSettings(settingsStr).responses_compact_mode ||
+    RESPONSES_COMPACT_MODE_UNSUPPORTED
+  )
+}
+
+export function hasResponsesCompactModelConfigured(
+  models: string,
+  modelMapping: string
+): boolean {
+  const compactSuffix = '-openai-compact'
+  const hasCompactModel = models
+    .split(',')
+    .map((model) => model.trim())
+    .some((model) => model.endsWith(compactSuffix))
+
+  if (hasCompactModel) return true
+  if (!modelMapping?.trim()) return false
+
+  try {
+    const parsed = JSON.parse(modelMapping)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return false
+    }
+    return Object.entries(parsed).some(([key, value]) => {
+      if (key.trim().endsWith(compactSuffix)) return true
+      return typeof value === 'string' && value.trim().endsWith(compactSuffix)
+    })
+  } catch {
+    return modelMapping.includes(compactSuffix)
+  }
+}
+
+export function getResponsesCompactConfigurationDiagnostic(
+  channelType: number,
+  settingsStr: string | null | undefined,
+  models: string,
+  modelMapping: string
+): string | undefined {
+  if (channelType !== 1) return undefined
+  if (getResponsesCompactMode(settingsStr) === RESPONSES_COMPACT_MODE_NATIVE) {
+    return undefined
+  }
+  if (hasResponsesCompactModelConfigured(models, modelMapping)) {
+    return 'Compact model configured but native compact disabled'
+  }
+  return 'Compact unsupported'
 }
 
 /**

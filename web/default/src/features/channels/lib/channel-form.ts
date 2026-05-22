@@ -54,6 +54,7 @@ export const channelFormSchema = z.object({
   allow_safety_identifier: z.boolean().optional(), // OpenAI only
   allow_include_obfuscation: z.boolean().optional(), // OpenAI: include usage obfuscation
   strip_codex_encrypted_context: z.boolean().optional(), // OpenAI: strip Codex encrypted context
+  responses_compact_mode: z.enum(['unsupported', 'native']).optional(),
   allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
   allow_speed: z.boolean().optional(), // Anthropic: speed mode control
   claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
@@ -113,6 +114,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_safety_identifier: false,
   allow_include_obfuscation: false,
   strip_codex_encrypted_context: false,
+  responses_compact_mode: 'unsupported',
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
@@ -168,6 +170,7 @@ export function transformChannelToFormDefaults(
   let allowSafetyIdentifier = false
   let allowIncludeObfuscation = false
   let stripCodexEncryptedContext = false
+  let responsesCompactMode: 'unsupported' | 'native' = 'unsupported'
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
@@ -187,6 +190,8 @@ export function transformChannelToFormDefaults(
       allowSafetyIdentifier = parsed.allow_safety_identifier === true
       allowIncludeObfuscation = parsed.allow_include_obfuscation === true
       stripCodexEncryptedContext = parsed.strip_codex_encrypted_context === true
+      responsesCompactMode =
+        parsed.responses_compact_mode === 'native' ? 'native' : 'unsupported'
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
@@ -246,6 +251,7 @@ export function transformChannelToFormDefaults(
     claude_beta_query: claudeBetaQuery,
     allow_safety_identifier: allowSafetyIdentifier,
     strip_codex_encrypted_context: stripCodexEncryptedContext,
+    responses_compact_mode: responsesCompactMode,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
@@ -326,6 +332,15 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       formData.strip_codex_encrypted_context === true
   } else if ('strip_codex_encrypted_context' in settingsObj) {
     delete settingsObj.strip_codex_encrypted_context
+  }
+
+  if (formData.type === 1) {
+    settingsObj.responses_compact_mode =
+      formData.responses_compact_mode === 'native'
+        ? 'native'
+        : 'unsupported'
+  } else if ('responses_compact_mode' in settingsObj) {
+    delete settingsObj.responses_compact_mode
   }
 
   if (formData.type === 1) {

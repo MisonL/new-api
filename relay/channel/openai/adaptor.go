@@ -163,9 +163,6 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		url = strings.Replace(url, "{model}", info.UpstreamModelName, -1)
 		return url, nil
 	default:
-		if shouldUseOpenAICompatibleResponsesCompactConversion(info) {
-			return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, "/v1/responses", info.ChannelType), nil
-		}
 		if (info.RelayFormat == types.RelayFormatClaude || info.RelayFormat == types.RelayFormatGemini) &&
 			info.RelayMode != relayconstant.RelayModeResponses &&
 			info.RelayMode != relayconstant.RelayModeResponsesCompact {
@@ -600,21 +597,14 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
-	useOpenAICompatibleCompactConversion := shouldUseOpenAICompatibleResponsesCompactConversion(info)
-	if useOpenAICompatibleCompactConversion && request.PreviousResponseID != "" {
-		request.PreviousResponseID = ""
-		channelID := 0
-		if info.ChannelMeta != nil {
-			channelID = info.ChannelMeta.ChannelId
-		}
-		common.SysLog(fmt.Sprintf(
-			"responses compact previous_response_id removed for OpenAI-compatible channel: channel_id=%d model=%s",
-			channelID,
-			info.OriginModelName,
-		))
+	if relaycommon.IsUnsupportedOpenAICompatibleResponsesCompact(info) {
+		return nil, errors.New("responses compact requires native responses compact support on OpenAI-compatible channels")
+	}
+	if relaycommon.IsNativeOpenAICompatibleResponsesCompact(info) {
+		return request, nil
 	}
 	stripCodexContext := relaycommon.ShouldStripCodexEncryptedContext(info)
-	if info != nil && (stripCodexContext || useOpenAICompatibleCompactConversion) {
+	if info != nil && stripCodexContext {
 		result, err := stripUnsupportedResponsesInput(request.Input, stripCodexContext)
 		if err != nil {
 			return nil, err
@@ -644,13 +634,6 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		}
 	}
 	return request, nil
-}
-
-func shouldUseOpenAICompatibleResponsesCompactConversion(info *relaycommon.RelayInfo) bool {
-	return info != nil &&
-		info.ChannelMeta != nil &&
-		info.RelayMode == relayconstant.RelayModeResponsesCompact &&
-		info.ChannelType == constant.ChannelTypeOpenAI
 }
 
 type responsesInputStripResult struct {

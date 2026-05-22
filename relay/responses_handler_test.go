@@ -125,5 +125,8 @@ func TestShouldConvertResponsesRequestForCodexEncryptedContextStrip(t *testing.T
 	require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
 
 	info.ChannelType = constant.ChannelTypeOpenAI
-	require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
+	require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
+
+	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeNative
+	require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
 }

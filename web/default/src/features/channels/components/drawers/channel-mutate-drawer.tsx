@@ -10,6 +10,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertTriangle,
   ArrowRight,
   HelpCircle,
   Loader2,
@@ -125,6 +126,7 @@ import {
   extractMappingSourceModels,
   hasModelConfigChanged,
   findMissingModelsInMapping,
+  getResponsesCompactConfigurationDiagnostic,
   validateModelMappingJson,
 } from '../../lib'
 import {
@@ -222,6 +224,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
     values.strip_codex_encrypted_context ||
+    values.responses_compact_mode === 'native' ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
@@ -378,6 +381,7 @@ export function ChannelMutateDrawer({
   const currentBaseUrl = form.watch('base_url')
   const currentModels = form.watch('models')
   const currentModelMapping = form.watch('model_mapping')
+  const responsesCompactMode = form.watch('responses_compact_mode')
   const awsKeyType = form.watch('aws_key_type')
   const upstreamModelUpdateCheckEnabled = form.watch(
     'upstream_model_update_check_enabled'
@@ -467,6 +471,30 @@ export function ChannelMutateDrawer({
     }
     return options
   }, [currentType, t])
+
+  const responsesCompactSettingsForPreview = useMemo(
+    () =>
+      JSON.stringify({
+        responses_compact_mode: responsesCompactMode || 'unsupported',
+      }),
+    [responsesCompactMode]
+  )
+
+  const responsesCompactDiagnostic = useMemo(
+    () =>
+      getResponsesCompactConfigurationDiagnostic(
+        currentType,
+        responsesCompactSettingsForPreview,
+        currentModels || '',
+        currentModelMapping || ''
+      ),
+    [
+      currentType,
+      currentModels,
+      currentModelMapping,
+      responsesCompactSettingsForPreview,
+    ]
+  )
 
   // Extract redirect models from model_mapping (target values)
   const redirectModelList = useMemo(
@@ -1009,6 +1037,26 @@ export function ChannelMutateDrawer({
             form.setValue('models', data.models)
           }
         }
+      }
+
+      const compactDiagnostic = getResponsesCompactConfigurationDiagnostic(
+        data.type,
+        JSON.stringify({
+          responses_compact_mode: data.responses_compact_mode || 'unsupported',
+        }),
+        data.models || '',
+        data.model_mapping || ''
+      )
+      if (
+        compactDiagnostic ===
+        'Compact model configured but native compact disabled'
+      ) {
+        form.setError('responses_compact_mode', {
+          type: 'manual',
+          message: compactDiagnostic,
+        })
+        toast.error(t(compactDiagnostic))
+        return
       }
 
       setIsSubmitting(true)
@@ -2856,6 +2904,64 @@ export function ChannelMutateDrawer({
 
                               {currentType === 1 && (
                                 <>
+                                  <FormField
+                                    control={form.control}
+                                    name='responses_compact_mode'
+                                    render={({ field }) => (
+                                      <FormItem className='space-y-2 px-4 py-3'>
+                                        <div className='space-y-0.5'>
+                                          <FormLabel className='text-sm'>
+                                            {t(
+                                              'Responses Compact capability'
+                                            )}
+                                          </FormLabel>
+                                          <FormDescription>
+                                            {t(
+                                              'Controls whether this channel may receive /v1/responses/compact requests'
+                                            )}
+                                          </FormDescription>
+                                        </div>
+                                        <Select
+                                          value={field.value || 'unsupported'}
+                                          onValueChange={field.onChange}
+                                        >
+                                          <FormControl>
+                                            <SelectTrigger className='w-full'>
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                          </FormControl>
+                                          <SelectContent>
+                                            <SelectItem value='unsupported'>
+                                              {t('Unsupported')}
+                                            </SelectItem>
+                                            <SelectItem value='native'>
+                                              {t(
+                                                'Native /v1/responses/compact'
+                                              )}
+                                            </SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                        {responsesCompactDiagnostic ===
+                                          'Compact model configured but native compact disabled' && (
+                                          <Alert className='border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200'>
+                                            <AlertTriangle className='h-4 w-4' />
+                                            <AlertDescription>
+                                              {t(responsesCompactDiagnostic)}
+                                            </AlertDescription>
+                                          </Alert>
+                                        )}
+                                        {field.value === 'native' && (
+                                          <p className='text-muted-foreground text-xs'>
+                                            {t(
+                                              'Model mapping may map compact virtual models to upstream model names, while the endpoint remains /v1/responses/compact.'
+                                            )}
+                                          </p>
+                                        )}
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+
                                   <FormField
                                     control={form.control}
                                     name='disable_store'

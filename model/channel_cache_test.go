@@ -311,7 +311,7 @@ func TestGetRandomSatisfiedChannelUsesGroupModelRouteHelperWhenEnabled(t *testin
 	require.Equal(t, channel.Id, got.Id)
 }
 
-func TestGetRandomSatisfiedChannelRoutesCompactSuffixToBaseModelWhenEnabled(t *testing.T) {
+func TestGetRandomSatisfiedChannelDoesNotRouteCompactSuffixToBaseModelByDefault(t *testing.T) {
 	prepareChannelCacheTest(t)
 
 	prevMemoryCacheEnabled := common.MemoryCacheEnabled
@@ -342,8 +342,7 @@ func TestGetRandomSatisfiedChannelRoutesCompactSuffixToBaseModelWhenEnabled(t *t
 
 	got, err := GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.5"), 0)
 	require.NoError(t, err)
-	require.NotNil(t, got)
-	require.Equal(t, channel.Id, got.Id)
+	require.Nil(t, got)
 }
 
 func TestGetRandomSatisfiedChannelPrefersExactCompactModelWhenEnabled(t *testing.T) {

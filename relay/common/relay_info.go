@@ -213,8 +213,24 @@ func ShouldConvertResponsesRequest(info *RelayInfo) bool {
 	if ShouldStripCodexEncryptedContext(info) {
 		return true
 	}
-	return info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+	return false
+}
+
+func IsOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.RelayMode == relayconstant.RelayModeResponsesCompact &&
 		info.ChannelType == constant.ChannelTypeOpenAI
+}
+
+func IsNativeOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
+	return IsOpenAICompatibleResponsesCompact(info) &&
+		info.ChannelOtherSettings.HasNativeResponsesCompact()
+}
+
+func IsUnsupportedOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
+	return IsOpenAICompatibleResponsesCompact(info) &&
+		!info.ChannelOtherSettings.HasNativeResponsesCompact()
 }
 
 // ResetBillingMetadata refunds the active billing session and clears cached billing fields.

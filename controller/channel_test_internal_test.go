@@ -163,6 +163,77 @@ func TestApplyChannelTestProtocolStrategyUsesGlobalResponsesToChatRuleByDefault(
 	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponses, types.RelayFormatOpenAI}, info.RequestConversionChain)
 }
 
+func TestValidateChannelTestResponsesCompactCapabilityRejectsUnsupportedOpenAIChannel(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+
+	err := validateChannelTestResponsesCompactCapability(info)
+
+	require.Error(t, err)
+	require.Equal(t, responsesCompactChannelTestCapabilityError, err.Error())
+}
+
+func TestValidateChannelTestResponsesCompactCapabilityAllowsNativeOpenAIChannel(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeNative,
+			},
+		},
+	}
+
+	err := validateChannelTestResponsesCompactCapability(info)
+
+	require.NoError(t, err)
+}
+
+func TestChannelTestResponsesCompactUnsupportedOpenAIChannelFailsBeforeHTTP(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	require.NoError(t, model.DB.Create(&model.User{
+		Id:       1,
+		Username: "compact-test-user",
+		Password: "test",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Quota:    1000,
+		Group:    "default",
+	}).Error)
+
+	channel := &model.Channel{
+		Id:            910003,
+		Type:          constant.ChannelTypeOpenAI,
+		Name:          "compact-unsupported-test",
+		Status:        common.ChannelStatusEnabled,
+		Key:           "test-key",
+		Models:        "gpt-5-openai-compact",
+		Group:         "default",
+		OtherSettings: `{}`,
+	}
+
+	result := testChannelWithOptions(
+		channel,
+		"gpt-5-openai-compact",
+		string(constant.EndpointTypeOpenAIResponseCompact),
+		false,
+		channelTestOptions{UseRuntimeConfig: false},
+	)
+
+	require.Error(t, result.localErr)
+	require.Equal(t, responsesCompactChannelTestCapabilityError, result.localErr.Error())
+	require.NotNil(t, result.newAPIError)
+	require.NotNil(t, result.runtimeConfig)
+	require.Equal(t, "/v1/responses/compact", result.runtimeConfig.RequestPath)
+	require.Equal(t, "/v1/responses/compact", result.runtimeConfig.FinalRequestPath)
+	require.NotNil(t, result.context)
+	require.Nil(t, result.context.Request.Body)
+}
+
 func withGlobalProtocolPolicyForTest(t *testing.T, policy model_setting.ChatCompletionsToResponsesPolicy, passThrough bool) {
 	t.Helper()
 	settings := model_setting.GetGlobalSettings()

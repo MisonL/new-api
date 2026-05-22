@@ -33,6 +33,14 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 				types.ErrOptionWithSkipRetry(),
 			)
 		}
+		if relaycommon.IsUnsupportedOpenAICompatibleResponsesCompact(info) {
+			return types.NewErrorWithStatusCode(
+				fmt.Errorf("responses compact requires native responses compact support on OpenAI-compatible channels"),
+				types.ErrorCodeInvalidRequest,
+				http.StatusBadRequest,
+				types.ErrOptionWithSkipRetry(),
+			)
+		}
 	}
 
 	var responsesReq *dto.OpenAIResponsesRequest

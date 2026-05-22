@@ -49,6 +49,9 @@ import {
   parseModelsList,
   parseGroupsList,
   parseChannelSettings,
+  getResponsesCompactConfigurationDiagnostic,
+  getResponsesCompactMode,
+  RESPONSES_COMPACT_MODE_NATIVE,
   handleUpdateChannelField,
   handleUpdateTagField,
   handleUpdateChannelBalance,
@@ -544,6 +547,35 @@ export function useChannelsColumns({
         // Regular channel row
         const settings = parseChannelSettings(channel.setting)
         const isPassThrough = settings.pass_through_body_enabled === true
+        const compactDiagnostic = getResponsesCompactConfigurationDiagnostic(
+          channel.type,
+          channel.settings,
+          channel.models,
+          channel.model_mapping || ''
+        )
+        const compactMode = getResponsesCompactMode(channel.settings)
+        const compactBadge =
+          channel.type === 1
+            ? compactMode === RESPONSES_COMPACT_MODE_NATIVE
+              ? {
+                  label: 'Compact Native',
+                  tooltip: 'Compact Native',
+                  variant: 'success' as const,
+                }
+              : compactDiagnostic ===
+                  'Compact model configured but native compact disabled'
+                ? {
+                    label: 'Compact Configured',
+                    tooltip:
+                      'Compact model configured but native compact disabled',
+                    variant: 'warning' as const,
+                  }
+                : {
+                    label: 'Compact Unsupported',
+                    tooltip: 'Compact Unsupported',
+                    variant: 'neutral' as const,
+                  }
+            : null
 
         return (
           <div className='flex items-center gap-2'>
@@ -571,6 +603,25 @@ export function useChannelsColumns({
                     size='sm'
                     copyable={false}
                   />
+                )}
+                {compactBadge && (
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <StatusBadge
+                            label={t(compactBadge.label)}
+                            variant={compactBadge.variant}
+                            size='sm'
+                            copyable={false}
+                          />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side='top'>
+                        {t(compactBadge.tooltip)}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 )}
                 <UpstreamUpdateTags channel={channel} />
               </div>
