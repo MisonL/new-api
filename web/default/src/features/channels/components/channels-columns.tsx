@@ -433,7 +433,11 @@ function BalanceCell({ channel }: { channel: Channel }) {
 /**
  * Generate channels columns configuration
  */
-export function useChannelsColumns(): ColumnDef<Channel>[] {
+export function useChannelsColumns({
+  getTopPriority,
+}: {
+  getTopPriority: () => Promise<number>
+}): ColumnDef<Channel>[] {
   const { t } = useTranslation()
   return [
     // Checkbox column
@@ -1041,7 +1045,7 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
           )
         }
 
-        return <DataTableRowActions row={row} />
+        return <DataTableRowActions row={row} getTopPriority={getTopPriority} />
       },
       size: 132,
       enableSorting: false,

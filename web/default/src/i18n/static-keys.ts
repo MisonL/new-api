@@ -381,6 +381,9 @@ export const STATIC_I18N_KEYS = [
   'Edit',
   'Disable',
   'Enable',
+  'Pin to Top',
+  'Pinning...',
+  'Failed to pin channel',
 
   // User subscription management
   'User Subscription Management',
