@@ -134,7 +134,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                       rel='noopener noreferrer'
                       className='text-muted-foreground hover:text-foreground rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200'
                     >
-                      {t(link.title)}
+                      {link.title}
                     </a>
                   )
                 }
@@ -149,7 +149,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                         : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {t(link.title)}
+                    {link.title}
                   </Link>
                 )
               })}
@@ -255,7 +255,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                     transitionDelay: mobileOpen ? `${100 + i * 50}ms` : '0ms',
                   }}
                 >
-                  {t(link.title)}
+                  {link.title}
                 </Link>
               )
             })}
