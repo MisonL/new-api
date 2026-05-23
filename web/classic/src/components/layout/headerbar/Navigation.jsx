@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { Button, Dropdown } from '@douyinfe/semi-ui';
+import { IconMenu } from '@douyinfe/semi-icons';
 import SkeletonWrapper from '../components/SkeletonWrapper';
 
 const Navigation = ({
@@ -27,6 +29,7 @@ const Navigation = ({
   isLoading,
   userState,
   pricingRequireAuth,
+  t,
 }) => {
   const renderNavLinks = () => {
     const baseClasses =
@@ -68,6 +71,73 @@ const Navigation = ({
       );
     });
   };
+
+  if (isMobile) {
+    return (
+      <div className='flex flex-1 items-center justify-end mx-1'>
+        <SkeletonWrapper
+          loading={isLoading}
+          type='navigation'
+          count={1}
+          width={32}
+          height={32}
+          isMobile={isMobile}
+        >
+          <Dropdown
+            trigger='click'
+            position='bottomRight'
+            render={
+              <Dropdown.Menu>
+                {mainNavLinks.map((link) => {
+                  let targetPath = link.to;
+                  if (link.itemKey === 'console' && !userState.user) {
+                    targetPath = '/login';
+                  }
+                  if (
+                    link.itemKey === 'pricing' &&
+                    pricingRequireAuth &&
+                    !userState.user
+                  ) {
+                    targetPath = '/login';
+                  }
+
+                  return (
+                    <Dropdown.Item key={link.itemKey}>
+                      {link.isExternal ? (
+                        <a
+                          href={link.externalLink}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          className='block min-w-28 px-2 py-1 text-semi-color-text-0'
+                        >
+                          {link.text}
+                        </a>
+                      ) : (
+                        <Link
+                          to={targetPath}
+                          className='block min-w-28 px-2 py-1 text-semi-color-text-0'
+                        >
+                          {link.text}
+                        </Link>
+                      )}
+                    </Dropdown.Item>
+                  );
+                })}
+              </Dropdown.Menu>
+            }
+          >
+            <Button
+              theme='borderless'
+              type='tertiary'
+              icon={<IconMenu />}
+              aria-label={t('打开导航菜单')}
+              className='!p-2 !text-current'
+            />
+          </Dropdown>
+        </SkeletonWrapper>
+      </div>
+    );
+  }
 
   return (
     <nav className='flex flex-1 items-center gap-1 lg:gap-2 mx-2 md:mx-4 overflow-x-auto whitespace-nowrap scrollbar-hide'>

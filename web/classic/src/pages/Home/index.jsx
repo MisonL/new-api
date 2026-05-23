@@ -332,13 +332,13 @@ const Home = () => {
                     <Input
                       readonly
                       value={serverAddress}
+                      aria-label={t('API 基址')}
                       className='flex-1 !rounded-full'
                       size={isMobile ? 'default' : 'large'}
                       suffix={
                         <div className='flex items-center gap-2'>
                           <div
-                            role='listbox'
-                            aria-label={t('API端点')}
+                            aria-hidden='true'
                             style={{
                               height: `${ENDPOINT_ITEM_HEIGHT}px`,
                               overflow: 'hidden',
@@ -356,12 +356,6 @@ const Home = () => {
                               {endpointTrackItems.map((item, idx) => (
                                 <div
                                   key={`home-endpoint-${item.value}-${idx}`}
-                                  role='option'
-                                  aria-selected={
-                                    endpointItems.length > 0 &&
-                                    idx % endpointItems.length ===
-                                      endpointActiveIndex
-                                  }
                                   style={{
                                     height: `${ENDPOINT_ITEM_HEIGHT}px`,
                                     lineHeight: `${ENDPOINT_ITEM_HEIGHT}px`,
@@ -379,6 +373,7 @@ const Home = () => {
                             type='primary'
                             onClick={handleCopyBaseURL}
                             icon={<IconCopy />}
+                            aria-label={t('复制 API 基址')}
                             className='!rounded-full'
                           />
                         </div>
