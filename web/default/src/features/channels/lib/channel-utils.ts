@@ -19,6 +19,8 @@ import type {
 export const RESPONSES_COMPACT_MODE_CONVERT = 'convert' as const
 export const RESPONSES_COMPACT_MODE_NATIVE = 'native' as const
 export const RESPONSES_COMPACT_MODE_DISABLED = 'disabled' as const
+export const RESPONSES_COMPACT_MODE_DEFAULT =
+  RESPONSES_COMPACT_MODE_NATIVE
 
 export const RESPONSES_COMPACT_BADGE_LABELS = {
   convert: 'Compact Convert',
@@ -59,6 +61,9 @@ export function normalizeResponsesCompactMode(
   }
   if (mode === RESPONSES_COMPACT_MODE_DISABLED || mode === 'unsupported') {
     return RESPONSES_COMPACT_MODE_DISABLED
+  }
+  if (mode === undefined || mode === null || mode === '') {
+    return RESPONSES_COMPACT_MODE_DEFAULT
   }
   return RESPONSES_COMPACT_MODE_CONVERT
 }
@@ -308,12 +313,12 @@ export function parseChannelOtherSettings(
   settingsStr: string | null | undefined
 ): ChannelOtherSettings {
   if (!settingsStr || settingsStr === '{}') {
-    return { responses_compact_mode: RESPONSES_COMPACT_MODE_CONVERT }
+    return { responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT }
   }
   try {
     const parsed = JSON.parse(settingsStr) as unknown
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { responses_compact_mode: RESPONSES_COMPACT_MODE_CONVERT }
+      return { responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT }
     }
     const settings = parsed as ChannelOtherSettings
     return {
@@ -323,7 +328,7 @@ export function parseChannelOtherSettings(
       ),
     }
   } catch {
-    return { responses_compact_mode: RESPONSES_COMPACT_MODE_CONVERT }
+    return { responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT }
   }
 }
 

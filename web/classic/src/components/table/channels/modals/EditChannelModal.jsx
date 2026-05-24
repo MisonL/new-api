@@ -80,6 +80,12 @@ import {
   collectNewDisallowedStatusCodeRedirects,
 } from './statusCodeRiskGuard';
 import {
+  RESPONSES_COMPACT_MODE_DEFAULT,
+  RESPONSES_COMPACT_MODE_OPTIONS,
+  buildResponsesCompactSettings,
+  normalizeResponsesCompactMode,
+} from '../../../../helpers/responsesCompactSettings.js';
+import {
   applyHeaderProfileStrategyToChannelInputs,
   buildProfileItems,
   buildSelectedProfileItems,
@@ -252,6 +258,7 @@ const EditChannelModal = (props) => {
     allow_inference_geo: false,
     allow_speed: false,
     claude_beta_query: false,
+    responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
     responses_stream_bootstrap_recovery_enabled: false,
     upstream_model_update_check_enabled: false,
     upstream_model_update_auto_sync_enabled: false,
@@ -1374,6 +1381,9 @@ const EditChannelModal = (props) => {
             parsedSettings.allow_inference_geo || false;
           data.allow_speed = parsedSettings.allow_speed || false;
           data.claude_beta_query = parsedSettings.claude_beta_query || false;
+          data.responses_compact_mode = normalizeResponsesCompactMode(
+            parsedSettings.responses_compact_mode,
+          );
           data.responses_stream_bootstrap_recovery_enabled =
             parsedSettings.responses_stream_bootstrap_recovery_enabled === true;
           data.upstream_model_update_check_enabled =
@@ -1408,6 +1418,7 @@ const EditChannelModal = (props) => {
           data.allow_inference_geo = false;
           data.allow_speed = false;
           data.claude_beta_query = false;
+          data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
           data.responses_stream_bootstrap_recovery_enabled = false;
           data.upstream_model_update_check_enabled = false;
           data.upstream_model_update_auto_sync_enabled = false;
@@ -1428,6 +1439,7 @@ const EditChannelModal = (props) => {
         data.allow_inference_geo = false;
         data.allow_speed = false;
         data.claude_beta_query = false;
+        data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
         data.responses_stream_bootstrap_recovery_enabled = false;
         data.upstream_model_update_check_enabled = false;
         data.upstream_model_update_auto_sync_enabled = false;
@@ -2320,6 +2332,13 @@ const EditChannelModal = (props) => {
       settings.allow_service_tier = localInputs.allow_service_tier === true;
       // 仅 OpenAI 渠道需要 store / safety_identifier / include_obfuscation
       if (localInputs.type === 1) {
+        Object.assign(
+          settings,
+          buildResponsesCompactSettings(
+            localInputs.type,
+            localInputs.responses_compact_mode,
+          ),
+        );
         settings.disable_store = localInputs.disable_store === true;
         settings.allow_safety_identifier =
           localInputs.allow_safety_identifier === true;
@@ -2331,6 +2350,9 @@ const EditChannelModal = (props) => {
         settings.allow_speed = localInputs.allow_speed === true;
         settings.claude_beta_query = localInputs.claude_beta_query === true;
       }
+    }
+    if (localInputs.type !== 1 && 'responses_compact_mode' in settings) {
+      delete settings.responses_compact_mode;
     }
     if (supportsResponsesBootstrapRecovery(localInputs.type)) {
       settings.responses_stream_bootstrap_recovery_enabled =
@@ -2385,6 +2407,7 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_inference_geo;
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
+    delete localInputs.responses_compact_mode;
     delete localInputs.responses_stream_bootstrap_recovery_enabled;
     delete localInputs.upstream_model_update_check_enabled;
     delete localInputs.upstream_model_update_auto_sync_enabled;
@@ -2837,6 +2860,39 @@ const EditChannelModal = (props) => {
                   : 'rotate(-90deg)';
             const advancedSettingsContent = (
               <div className='space-y-4'>
+                {inputs.type === 1 && (
+                  <div className='pb-3 border-b border-gray-100'>
+                    <Text className='text-sm font-medium text-gray-500 mb-3 block'>
+                      {t('Responses Compact 能力')}
+                    </Text>
+                    <Form.Select
+                      field='responses_compact_mode'
+                      label={t('Responses Compact 能力')}
+                      placeholder={t('请选择 Responses Compact 处理方式')}
+                      optionList={RESPONSES_COMPACT_MODE_OPTIONS.map(
+                        (option) => ({
+                          ...option,
+                          label: t(option.label),
+                        }),
+                      )}
+                      style={{ width: '100%' }}
+                      value={
+                        inputs.responses_compact_mode ||
+                        RESPONSES_COMPACT_MODE_DEFAULT
+                      }
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'responses_compact_mode',
+                          normalizeResponsesCompactMode(value),
+                        )
+                      }
+                      extraText={t(
+                        '控制该 OpenAI 渠道是否接收 /v1/responses/compact 请求。原生模式会保留 compact 路径并映射内部 compact 模型名。',
+                      )}
+                    />
+                  </div>
+                )}
+
                 {/* Upstream Model Management Section */}
                 {MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type) && (
                   <div className='pb-3 border-b border-gray-100'>

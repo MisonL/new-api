@@ -68,19 +68,22 @@ function makeChannel(overrides: Partial<Channel> = {}): Channel {
 }
 
 describe('channel responses compact settings', () => {
-  test('defaults missing compact mode to convert', () => {
+  test('defaults missing compact mode to native', () => {
     const defaults = transformChannelToFormDefaults(makeChannel())
 
     expect(defaults.responses_compact_mode).toBe(
-      RESPONSES_COMPACT_MODE_CONVERT
+      RESPONSES_COMPACT_MODE_NATIVE
     )
-    expect(getResponsesCompactMode('{}')).toBe(RESPONSES_COMPACT_MODE_CONVERT)
-    expect(getResponsesCompactMode('')).toBe(RESPONSES_COMPACT_MODE_CONVERT)
+    expect(CHANNEL_FORM_DEFAULT_VALUES.responses_compact_mode).toBe(
+      RESPONSES_COMPACT_MODE_NATIVE
+    )
+    expect(getResponsesCompactMode('{}')).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    expect(getResponsesCompactMode('')).toBe(RESPONSES_COMPACT_MODE_NATIVE)
     expect(getResponsesCompactMode('{bad json')).toBe(
-      RESPONSES_COMPACT_MODE_CONVERT
+      RESPONSES_COMPACT_MODE_NATIVE
     )
-    expect(getResponsesCompactMode('null')).toBe(RESPONSES_COMPACT_MODE_CONVERT)
-    expect(getResponsesCompactMode('[]')).toBe(RESPONSES_COMPACT_MODE_CONVERT)
+    expect(getResponsesCompactMode('null')).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    expect(getResponsesCompactMode('[]')).toBe(RESPONSES_COMPACT_MODE_NATIVE)
   })
 
   test('normalizes legacy and unknown compact modes', () => {
@@ -96,7 +99,7 @@ describe('channel responses compact settings', () => {
     ).toBe(RESPONSES_COMPACT_MODE_CONVERT)
   })
 
-  test('defaults existing Azure and empty records to convert', () => {
+  test('defaults existing Azure and empty records to native', () => {
     expect(
       transformChannelToFormDefaults(
         makeChannel({
@@ -104,7 +107,7 @@ describe('channel responses compact settings', () => {
           settings: '{}',
         })
       ).responses_compact_mode
-    ).toBe(RESPONSES_COMPACT_MODE_CONVERT)
+    ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
 
     expect(
       transformChannelToFormDefaults(
@@ -112,7 +115,7 @@ describe('channel responses compact settings', () => {
           settings: '',
         })
       ).responses_compact_mode
-    ).toBe(RESPONSES_COMPACT_MODE_CONVERT)
+    ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
   })
 
   test('loads legacy and unknown compact modes into form defaults', () => {
@@ -198,7 +201,7 @@ describe('channel responses compact settings', () => {
     expect(hasResponsesCompactModelConfigured('gpt-5.5', '{}')).toBe(false)
   })
 
-  test('reports compact model configuration as safe in default convert mode', () => {
+  test('reports compact model configuration as safe in default native mode', () => {
     expect(
       getResponsesCompactConfigurationDiagnostic(
         1,

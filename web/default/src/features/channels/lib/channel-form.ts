@@ -1,7 +1,10 @@
 import { z } from 'zod'
 import { CHANNEL_STATUS, MODEL_FETCHABLE_TYPES } from '../constants'
 import type { Channel } from '../types'
-import { normalizeResponsesCompactMode } from './channel-utils'
+import {
+  RESPONSES_COMPACT_MODE_DEFAULT,
+  normalizeResponsesCompactMode,
+} from './channel-utils'
 
 // ============================================================================
 // Form Validation Schema
@@ -115,7 +118,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_safety_identifier: false,
   allow_include_obfuscation: false,
   strip_codex_encrypted_context: false,
-  responses_compact_mode: 'convert',
+  responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
@@ -171,7 +174,8 @@ export function transformChannelToFormDefaults(
   let allowSafetyIdentifier = false
   let allowIncludeObfuscation = false
   let stripCodexEncryptedContext = false
-  let responsesCompactMode: 'convert' | 'native' | 'disabled' = 'convert'
+  let responsesCompactMode: 'convert' | 'native' | 'disabled' =
+    RESPONSES_COMPACT_MODE_DEFAULT
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
@@ -338,11 +342,11 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
 
   if (formData.type === 1) {
     settingsObj.responses_compact_mode =
-      formData.responses_compact_mode === 'native'
-        ? 'native'
+      formData.responses_compact_mode === 'convert'
+        ? 'convert'
         : formData.responses_compact_mode === 'disabled'
           ? 'disabled'
-          : 'convert'
+          : 'native'
   } else if ('responses_compact_mode' in settingsObj) {
     delete settingsObj.responses_compact_mode
   }

@@ -127,6 +127,7 @@ import {
   hasModelConfigChanged,
   findMissingModelsInMapping,
   getResponsesCompactConfigurationDiagnostic,
+  RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED,
   validateModelMappingJson,
 } from '../../lib'
@@ -226,7 +227,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.system_prompt_override ||
     values.strip_codex_encrypted_context ||
     (values.responses_compact_mode &&
-      values.responses_compact_mode !== 'convert') ||
+      values.responses_compact_mode !== RESPONSES_COMPACT_MODE_DEFAULT) ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
@@ -477,7 +478,8 @@ export function ChannelMutateDrawer({
   const responsesCompactSettingsForPreview = useMemo(
     () =>
       JSON.stringify({
-        responses_compact_mode: responsesCompactMode || 'convert',
+        responses_compact_mode:
+          responsesCompactMode || RESPONSES_COMPACT_MODE_DEFAULT,
       }),
     [responsesCompactMode]
   )
@@ -1044,7 +1046,8 @@ export function ChannelMutateDrawer({
       const compactDiagnostic = getResponsesCompactConfigurationDiagnostic(
         data.type,
         JSON.stringify({
-          responses_compact_mode: data.responses_compact_mode || 'convert',
+          responses_compact_mode:
+            data.responses_compact_mode || RESPONSES_COMPACT_MODE_DEFAULT,
         }),
         data.models || '',
         data.model_mapping || ''
@@ -2925,7 +2928,10 @@ export function ChannelMutateDrawer({
                                           </FormDescription>
                                         </div>
                                         <Select
-                                          value={field.value || 'convert'}
+                                          value={
+                                            field.value ||
+                                            RESPONSES_COMPACT_MODE_DEFAULT
+                                          }
                                           onValueChange={field.onChange}
                                         >
                                           <FormControl>
