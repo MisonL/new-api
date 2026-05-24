@@ -21,6 +21,7 @@ Environment overrides:
   NEW_API_DEFAULT_PORT_MAPPING=3000:3000
   NEW_API_PORT_MAPPING=127.0.0.1:13000:3000
   NEW_API_ABNORMAL_TUN_IP_REGEX=
+  NEW_API_ALLOW_ACTIVE_REQUESTS=0
   CADDY_LOG_FILE=/tmp/<COMPOSE_SERVICE>-macos-tun-caddy-<LAN_PORT>.log
   CADDY_PID_FILE=/tmp/<COMPOSE_SERVICE>-macos-tun-caddy-<LAN_PORT>.pid
 EOF
@@ -102,6 +103,7 @@ LOOPBACK_PORT="${NEW_API_LOOPBACK_PORT:-$(tun_env_value NEW_API_LOOPBACK_PORT 13
 CONTAINER_PORT="${NEW_API_CONTAINER_PORT:-$(tun_env_value NEW_API_CONTAINER_PORT 3000)}"
 HEALTH_PATH="${NEW_API_HEALTH_PATH:-$(tun_env_value NEW_API_HEALTH_PATH /api/status)}"
 ABNORMAL_TUN_IP_REGEX="${NEW_API_ABNORMAL_TUN_IP_REGEX:-$(tun_env_value NEW_API_ABNORMAL_TUN_IP_REGEX '')}"
+ALLOW_ACTIVE_REQUESTS="${NEW_API_ALLOW_ACTIVE_REQUESTS:-$(tun_env_value NEW_API_ALLOW_ACTIVE_REQUESTS 0)}"
 CONFIGURED_PORT_MAPPING="${NEW_API_PORT_MAPPING:-$(tun_env_value NEW_API_PORT_MAPPING '')}"
 PORT_MAPPING="127.0.0.1:${LOOPBACK_PORT}:${CONTAINER_PORT}"
 DEFAULT_PORT_MAPPING="${NEW_API_DEFAULT_PORT_MAPPING:-$(tun_env_value NEW_API_DEFAULT_PORT_MAPPING "${LAN_PORT}:${CONTAINER_PORT}")}"
@@ -287,6 +289,7 @@ validate_tun_env_scope() {
         NEW_API_CONTAINER_PORT | \
         NEW_API_HEALTH_PATH | \
         NEW_API_DEFAULT_PORT_MAPPING | \
+        NEW_API_ALLOW_ACTIVE_REQUESTS | \
         NEW_API_ABNORMAL_TUN_IP_REGEX | \
         NEW_API_PORT_MAPPING)
         ;;
@@ -333,7 +336,56 @@ if (
 ):
     sys.exit(0)
 sys.exit(1)
-'
+  '
+}
+
+current_service_active_connections() {
+  local fd_count owner_pids pid total
+
+  total=0
+  owner_pids="$(lsof -nP -iTCP:"$LAN_PORT" -sTCP:LISTEN -t 2>/dev/null | sort -u || true)"
+  [[ -n "$owner_pids" ]] || {
+    printf '0'
+    return 0
+  }
+
+  while IFS= read -r pid; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    fd_count="$(lsof -nP -a -p "$pid" -iTCP:"$LAN_PORT" -sTCP:ESTABLISHED 2>/dev/null | tail -n +2 | wc -l | tr -d '[:space:]')"
+    [[ "$fd_count" =~ ^[0-9]+$ ]] || fd_count=0
+    total=$((total + fd_count))
+  done <<<"$owner_pids"
+
+  printf '%s' "$total"
+}
+
+print_active_connection_sample() {
+  local owner_pids pid
+
+  owner_pids="$(lsof -nP -iTCP:"$LAN_PORT" -sTCP:LISTEN -t 2>/dev/null | sort -u || true)"
+  [[ -n "$owner_pids" ]] || return 0
+
+  while IFS= read -r pid; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    lsof -nP -a -p "$pid" -iTCP:"$LAN_PORT" -sTCP:ESTABLISHED 2>/dev/null \
+      | awk '
+          NR == 1 { next }
+          shown >= 20 { skipped = 1; next }
+          {
+            name = $9
+            for (i = 10; i <= NF; i++) {
+              name = name " " $i
+            }
+            printf "  %s pid=%s fd=%s %s %s\n", $1, $2, $4, $8, name
+            shown++
+          }
+          END {
+            if (skipped) {
+              print "  ..."
+            }
+          }
+        '
+  done <<<"$owner_pids"
 }
 
 managed_caddy_is_running() {
@@ -513,10 +565,11 @@ on_error() {
 trap 'on_error "$LINENO"' ERR
 
 preflight() {
-  local secret_requirement tun_config_json
+  local active_connections secret_requirement tun_config_json
 
   [[ "$(uname -s)" == "Darwin" ]] || fail "this script is intended for macOS hosts"
   [[ "$HEALTH_PATH" == /* ]] || fail "NEW_API_HEALTH_PATH must start with /"
+  [[ "$ALLOW_ACTIVE_REQUESTS" =~ ^[01]$ ]] || fail "NEW_API_ALLOW_ACTIVE_REQUESTS must be 0 or 1"
   validate_port NEW_API_LAN_PROXY_PORT "$LAN_PORT"
   validate_port NEW_API_LOOPBACK_PORT "$LOOPBACK_PORT"
   validate_port NEW_API_CONTAINER_PORT "$CONTAINER_PORT"
@@ -577,16 +630,32 @@ sys.exit(1)
   validate_required_service_env tun "$APPLY" || fail "SESSION_SECRET and CRYPTO_SECRET must ${secret_requirement} for TUN deployment"
   validate_required_service_env default "$APPLY" || fail "SESSION_SECRET and CRYPTO_SECRET must ${secret_requirement} for rollback deployment"
 
-  if [[ "$APPLY" -eq 1 ]]; then
-    if lsof -nP -iTCP:"$LAN_PORT" -sTCP:LISTEN >/dev/null 2>&1 && ! lan_port_owner_is_expected; then
-      fail "LAN proxy port ${LAN_PORT} is already in use by an unmanaged process"
+  log "checking current port ownership"
+  if lsof -nP -iTCP:"$LAN_PORT" -sTCP:LISTEN >/dev/null 2>&1 && ! lan_port_owner_is_expected; then
+    fail "LAN proxy port ${LAN_PORT} is already in use by an unmanaged process"
+  fi
+  if lsof -nP -iTCP:"$LOOPBACK_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    if current_service_has_loopback_port; then
+      log "loopback backend port ${LOOPBACK_PORT} is already used by ${COMPOSE_SERVICE}; continuing"
+    else
+      fail "loopback backend port ${LOOPBACK_PORT} is already in use"
     fi
-    if lsof -nP -iTCP:"$LOOPBACK_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-      if current_service_has_loopback_port; then
-        log "loopback backend port ${LOOPBACK_PORT} is already used by ${COMPOSE_SERVICE}; continuing"
+  fi
+
+  active_connections="$(current_service_active_connections)"
+  if [[ "$active_connections" != "0" ]]; then
+    log "found ${active_connections} established connection(s) on ${LAN_PORT}"
+    print_active_connection_sample >&2 || true
+    if [[ "$APPLY" -eq 0 ]]; then
+      if [[ "$ALLOW_ACTIVE_REQUESTS" == "1" ]]; then
+        log "warning: --apply will interrupt these connections because NEW_API_ALLOW_ACTIVE_REQUESTS=1"
       else
-        fail "loopback backend port ${LOOPBACK_PORT} is already in use"
+        log "warning: default --apply will refuse to continue until these connections drain"
       fi
+    elif [[ "$ALLOW_ACTIVE_REQUESTS" == "1" ]]; then
+      log "warning: established connections on ${LAN_PORT} will be interrupted"
+    else
+      fail "${active_connections} established connection(s) on ${LAN_PORT}; set NEW_API_ALLOW_ACTIVE_REQUESTS=1 to proceed"
     fi
   fi
 }
@@ -606,7 +675,7 @@ start_caddy_proxy() {
 }
 
 verify_after_apply() {
-  local container_id
+  local container_id probe_start
 
   log "checking backend ${BACKEND_URL}"
   wait_for_url "$BACKEND_URL" 60 || fail "backend health check failed"
@@ -617,16 +686,17 @@ verify_after_apply() {
   log "checking public entry ${HEALTH_URL}"
   wait_for_url "$HEALTH_URL" 30 || fail "public entry health check failed"
 
+  probe_start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   curl -fsS --max-time 5 "$HEALTH_URL" >/dev/null
   sleep 1
 
   local recent_logs
-  recent_logs="$(docker logs --since 20s "$container_id" 2>&1 || true)"
+  recent_logs="$(docker logs --since "$probe_start" "$container_id" 2>&1 || true)"
   if [[ -n "$ABNORMAL_TUN_IP_REGEX" ]] && printf '%s\n' "$recent_logs" | grep -E -q "${ABNORMAL_TUN_IP_REGEX}.*GET ${HEALTH_PATH}"; then
     fail "abnormal TUN IP still appears in new-api logs"
   fi
   if ! printf '%s\n' "$recent_logs" | grep -q "127\\.0\\.0\\.1.*GET ${HEALTH_PATH}"; then
-    log "warning: did not find 127.0.0.1 health log in the last 20 seconds; inspect docker logs manually"
+    fail "did not find 127.0.0.1 health log after Caddy handoff"
   fi
 
   log "current Docker port mapping:"

@@ -94,6 +94,8 @@ scripts/deploy-macos-docker-tun.sh --check-only
 
 如果 `PROD_ENV_FILE` 指向的正式 env 文件不存在，脚本会同时给 TUN 模式和默认回滚模式传入 `--env-file /dev/null`，显式禁止 Docker Compose 隐式读取当前目录 `.env`。这种情况下，只有调用方 shell 中显式导出的变量和 `deploy/env/macos-docker-tun.env` 白名单变量会参与渲染。
 
+`--check-only` 也会检查 LAN 入口端口上的已建立连接，并打印最多 20 条连接样本。若仍有连接且 `NEW_API_ALLOW_ACTIVE_REQUESTS=0`，正式 `--apply` 会拒绝继续；若设置为 `1`，正式实施会中断这些连接。
+
 `deploy/env/macos-docker-tun.env` 支持以下通用参数：
 
 ```bash
@@ -103,6 +105,7 @@ NEW_API_LOOPBACK_PORT=13000
 NEW_API_CONTAINER_PORT=3000
 NEW_API_HEALTH_PATH=/api/status
 NEW_API_DEFAULT_PORT_MAPPING=3000:3000
+NEW_API_ALLOW_ACTIVE_REQUESTS=0
 NEW_API_ABNORMAL_TUN_IP_REGEX=
 NEW_API_PORT_MAPPING=127.0.0.1:13000:3000
 ```
@@ -127,11 +130,12 @@ scripts/deploy-macos-docker-tun.sh --apply
 - 校验 TUN 模式和默认回滚模式的 Compose 端口映射。
 - 校验 `SESSION_SECRET` 和 `CRYPTO_SECRET` 在 TUN 模式和默认回滚模式中都已设置，正式实施时拒绝明显占位值。
 - 校验 LAN 入口端口没有被非当前服务、非脚本管理 Caddy 的进程占用；校验 Docker loopback 后端端口空闲，或已由当前服务的同一 loopback 映射占用。
+- 默认拒绝在 LAN 入口端口仍有已建立连接时重建 `new-api`，并输出连接样本；若接受中断活跃请求，可显式设置 `NEW_API_ALLOW_ACTIVE_REQUESTS=1`。
 - 重建 `COMPOSE_SERVICE` 指定的服务到 `127.0.0.1:13000:3000`。
 - 使用专用 PID 文件启动宿主机 Caddy 接管 `3000`。
 - 确认 PID 文件指向的 Caddy 进程仍存活、命令行匹配当前 Caddyfile，且实际监听 LAN 入口端口。
 - 检查 `127.0.0.1:13000/api/status` 和 `127.0.0.1:3000/api/status`。
-- 若健康检查失败，或配置了 `NEW_API_ABNORMAL_TUN_IP_REGEX` 且异常 TUN IP 仍出现，只停止 PID 文件指向的专用 Caddy 进程，并回滚到 `NEW_API_DEFAULT_PORT_MAPPING`。
+- 若健康检查失败、未在切换后的新日志窗口看到 `127.0.0.1` health 请求，或配置了 `NEW_API_ABNORMAL_TUN_IP_REGEX` 且异常 TUN IP 仍出现，只停止 PID 文件指向的专用 Caddy 进程，并回滚到 `NEW_API_DEFAULT_PORT_MAPPING`。
 
 以下手动步骤仅用于排障或不使用脚本时参考。
 
