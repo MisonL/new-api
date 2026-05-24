@@ -51,6 +51,8 @@ import {
   parseChannelSettings,
   getResponsesCompactConfigurationDiagnostic,
   getResponsesCompactMode,
+  RESPONSES_COMPACT_BADGE_LABELS,
+  RESPONSES_COMPACT_MODE_DISABLED,
   RESPONSES_COMPACT_MODE_NATIVE,
   handleUpdateChannelField,
   handleUpdateTagField,
@@ -558,22 +560,22 @@ export function useChannelsColumns({
           channel.type === 1
             ? compactMode === RESPONSES_COMPACT_MODE_NATIVE
               ? {
-                  label: 'Compact Native',
-                  tooltip: 'Compact Native',
+                  label: RESPONSES_COMPACT_BADGE_LABELS.native,
+                  tooltip: RESPONSES_COMPACT_BADGE_LABELS.native,
                   variant: 'success' as const,
                 }
-              : compactDiagnostic ===
-                  'Compact model configured but native compact disabled'
+              : compactMode === RESPONSES_COMPACT_MODE_DISABLED
                 ? {
-                    label: 'Compact Configured',
+                    label: RESPONSES_COMPACT_BADGE_LABELS.disabled,
                     tooltip:
-                      'Compact model configured but native compact disabled',
+                      compactDiagnostic?.messageKey ||
+                      RESPONSES_COMPACT_BADGE_LABELS.disabled,
                     variant: 'warning' as const,
                   }
                 : {
-                    label: 'Compact Unsupported',
-                    tooltip: 'Compact Unsupported',
-                    variant: 'neutral' as const,
+                    label: RESPONSES_COMPACT_BADGE_LABELS.convert,
+                    tooltip: RESPONSES_COMPACT_BADGE_LABELS.convert,
+                    variant: 'blue' as const,
                   }
             : null
 

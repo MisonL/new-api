@@ -127,6 +127,7 @@ import {
   hasModelConfigChanged,
   findMissingModelsInMapping,
   getResponsesCompactConfigurationDiagnostic,
+  RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED,
   validateModelMappingJson,
 } from '../../lib'
 import {
@@ -224,7 +225,8 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
     values.strip_codex_encrypted_context ||
-    values.responses_compact_mode === 'native' ||
+    (values.responses_compact_mode &&
+      values.responses_compact_mode !== 'convert') ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
@@ -475,7 +477,7 @@ export function ChannelMutateDrawer({
   const responsesCompactSettingsForPreview = useMemo(
     () =>
       JSON.stringify({
-        responses_compact_mode: responsesCompactMode || 'unsupported',
+        responses_compact_mode: responsesCompactMode || 'convert',
       }),
     [responsesCompactMode]
   )
@@ -1042,20 +1044,21 @@ export function ChannelMutateDrawer({
       const compactDiagnostic = getResponsesCompactConfigurationDiagnostic(
         data.type,
         JSON.stringify({
-          responses_compact_mode: data.responses_compact_mode || 'unsupported',
+          responses_compact_mode: data.responses_compact_mode || 'convert',
         }),
         data.models || '',
         data.model_mapping || ''
       )
       if (
-        compactDiagnostic ===
-        'Compact model configured but native compact disabled'
+        compactDiagnostic?.code ===
+        RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED
       ) {
+        const localizedMessage = t(compactDiagnostic.messageKey)
         form.setError('responses_compact_mode', {
           type: 'manual',
-          message: compactDiagnostic,
+          message: localizedMessage,
         })
-        toast.error(t(compactDiagnostic))
+        toast.error(localizedMessage)
         return
       }
 
@@ -2922,7 +2925,7 @@ export function ChannelMutateDrawer({
                                           </FormDescription>
                                         </div>
                                         <Select
-                                          value={field.value || 'unsupported'}
+                                          value={field.value || 'convert'}
                                           onValueChange={field.onChange}
                                         >
                                           <FormControl>
@@ -2931,29 +2934,44 @@ export function ChannelMutateDrawer({
                                             </SelectTrigger>
                                           </FormControl>
                                           <SelectContent>
-                                            <SelectItem value='unsupported'>
-                                              {t('Unsupported')}
+                                            <SelectItem value='convert'>
+                                              {t(
+                                                'Convert to /v1/responses'
+                                              )}
                                             </SelectItem>
                                             <SelectItem value='native'>
                                               {t(
                                                 'Native /v1/responses/compact'
                                               )}
                                             </SelectItem>
+                                            <SelectItem value='disabled'>
+                                              {t('Disabled')}
+                                            </SelectItem>
                                           </SelectContent>
                                         </Select>
-                                        {responsesCompactDiagnostic ===
-                                          'Compact model configured but native compact disabled' && (
+                                        {responsesCompactDiagnostic?.code ===
+                                          RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED && (
                                           <Alert className='border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200'>
                                             <AlertTriangle className='h-4 w-4' />
                                             <AlertDescription>
-                                              {t(responsesCompactDiagnostic)}
+                                              {t(
+                                                responsesCompactDiagnostic.messageKey
+                                              )}
                                             </AlertDescription>
                                           </Alert>
                                         )}
                                         {field.value === 'native' && (
                                           <p className='text-muted-foreground text-xs'>
                                             {t(
-                                              'Model mapping may map compact virtual models to upstream model names, while the endpoint remains /v1/responses/compact.'
+                                              'In native mode, model mapping may map compact virtual models to upstream model names while the endpoint remains /v1/responses/compact.'
+                                            )}
+                                          </p>
+                                        )}
+                                        {(!field.value ||
+                                          field.value === 'convert') && (
+                                          <p className='text-muted-foreground text-xs'>
+                                            {t(
+                                              'In convert mode, model mapping may map compact virtual models to ordinary upstream Responses models while preserving previous_response_id.'
                                             )}
                                           </p>
                                         )}

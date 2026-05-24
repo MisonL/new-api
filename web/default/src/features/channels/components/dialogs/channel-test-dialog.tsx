@@ -48,7 +48,7 @@ import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-ta
 import { DataTablePagination } from '@/components/data-table/pagination'
 import { StatusBadge } from '@/components/status-badge'
 import {
-  RESPONSES_COMPACT_MODE_NATIVE,
+  RESPONSES_COMPACT_BADGE_LABELS,
   formatResponseTime,
   getResponsesCompactMode,
   handleTestChannel,
@@ -79,7 +79,7 @@ const endpointTypeOptions: Array<{ value: string; label: string }> = [
   { value: 'openai-response', label: 'OpenAI Responses (/v1/responses)' },
   {
     value: 'openai-response-compact',
-    label: 'OpenAI Response Compaction (/v1/responses/compact)',
+    label: 'OpenAI Responses Compact (/v1/responses/compact)',
   },
   { value: 'anthropic', label: 'Anthropic (/v1/messages)' },
   {
@@ -143,9 +143,8 @@ export function ChannelTestDialog({
   const compactTestDiagnostic =
     endpointType === 'openai-response-compact' &&
     currentRow?.type === 1 &&
-    getResponsesCompactMode(currentRow.settings) !==
-      RESPONSES_COMPACT_MODE_NATIVE
-      ? 'OpenAI Response Compaction test requires native Responses Compact support on this channel.'
+    getResponsesCompactMode(currentRow.settings) === 'disabled'
+      ? RESPONSES_COMPACT_BADGE_LABELS.openaiCompactDisabled
       : undefined
 
   useEffect(() => {
@@ -204,9 +203,10 @@ export function ChannelTestDialog({
       if (!currentRow) return
 
       if (compactTestDiagnostic) {
+        const localizedError = t(compactTestDiagnostic)
         updateTestResult(model, {
           status: 'error',
-          error: compactTestDiagnostic,
+          error: localizedError,
         })
         return
       }
@@ -246,6 +246,7 @@ export function ChannelTestDialog({
       endpointType,
       isStreamTest,
       markModelTesting,
+      t,
       updateTestResult,
     ]
   )
