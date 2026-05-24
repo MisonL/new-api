@@ -163,6 +163,9 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		url = strings.Replace(url, "{model}", info.UpstreamModelName, -1)
 		return url, nil
 	default:
+		if relaycommon.IsConvertOpenAICompatibleResponsesCompact(info) {
+			return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, "/v1/responses", info.ChannelType), nil
+		}
 		if (info.RelayFormat == types.RelayFormatClaude || info.RelayFormat == types.RelayFormatGemini) &&
 			info.RelayMode != relayconstant.RelayModeResponses &&
 			info.RelayMode != relayconstant.RelayModeResponsesCompact {
@@ -597,14 +600,15 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
-	if relaycommon.IsUnsupportedOpenAICompatibleResponsesCompact(info) {
-		return nil, errors.New("responses compact requires native responses compact support on OpenAI-compatible channels")
+	if relaycommon.IsDisabledOpenAICompatibleResponsesCompact(info) {
+		return nil, errors.New("responses compact disabled for this OpenAI-compatible channel")
 	}
 	if relaycommon.IsNativeOpenAICompatibleResponsesCompact(info) {
 		return request, nil
 	}
 	stripCodexContext := relaycommon.ShouldStripCodexEncryptedContext(info)
-	if info != nil && stripCodexContext {
+	convertResponsesCompact := relaycommon.IsConvertOpenAICompatibleResponsesCompact(info)
+	if info != nil && (stripCodexContext || convertResponsesCompact) {
 		result, err := stripUnsupportedResponsesInput(request.Input, stripCodexContext)
 		if err != nil {
 			return nil, err

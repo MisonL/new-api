@@ -213,7 +213,7 @@ func ShouldConvertResponsesRequest(info *RelayInfo) bool {
 	if ShouldStripCodexEncryptedContext(info) {
 		return true
 	}
-	return false
+	return IsConvertOpenAICompatibleResponsesCompact(info)
 }
 
 func IsOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
@@ -228,9 +228,18 @@ func IsNativeOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
 		info.ChannelOtherSettings.HasNativeResponsesCompact()
 }
 
-func IsUnsupportedOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
+func IsConvertOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
 	return IsOpenAICompatibleResponsesCompact(info) &&
-		!info.ChannelOtherSettings.HasNativeResponsesCompact()
+		info.ChannelOtherSettings.ResponsesCompactModeOrDefault() == dto.ResponsesCompactModeConvert
+}
+
+func IsDisabledOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
+	return IsOpenAICompatibleResponsesCompact(info) &&
+		info.ChannelOtherSettings.HasDisabledResponsesCompact()
+}
+
+func IsUnsupportedOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
+	return IsDisabledOpenAICompatibleResponsesCompact(info)
 }
 
 // ResetBillingMetadata refunds the active billing session and clears cached billing fields.
@@ -914,8 +923,8 @@ func FailTaskInfo(reason string) *TaskInfo {
 // store: 数据存储授权字段，涉及用户隐私（仅 OpenAI、Responses API 支持，默认允许透传，禁用后可能导致 Codex 无法使用）
 // safety_identifier: 安全标识符，用于向 OpenAI 报告违规用户（仅 OpenAI 支持，涉及用户隐私）
 // stream_options.include_obfuscation: 响应流混淆控制字段（仅 OpenAI Responses API 支持）
-func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings, channelPassThroughEnabled bool) ([]byte, error) {
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelPassThroughEnabled {
+func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings, actualPassThroughBody bool) ([]byte, error) {
+	if actualPassThroughBody {
 		return jsonData, nil
 	}
 

@@ -26,8 +26,12 @@ const (
 type ResponsesCompactMode string
 
 const (
-	ResponsesCompactModeUnsupported ResponsesCompactMode = "unsupported"
+	// Keep the public setting tri-state. Empty or unknown values normalize to convert;
+	// the legacy unsupported value normalizes to disabled for existing records.
+	ResponsesCompactModeConvert     ResponsesCompactMode = "convert"
 	ResponsesCompactModeNative      ResponsesCompactMode = "native"
+	ResponsesCompactModeDisabled    ResponsesCompactMode = "disabled"
+	ResponsesCompactModeUnsupported ResponsesCompactMode = "unsupported"
 )
 
 type ChannelOtherSettings struct {
@@ -66,4 +70,22 @@ func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
 
 func (s *ChannelOtherSettings) HasNativeResponsesCompact() bool {
 	return s != nil && s.ResponsesCompactMode == ResponsesCompactModeNative
+}
+
+func (s *ChannelOtherSettings) ResponsesCompactModeOrDefault() ResponsesCompactMode {
+	if s == nil || s.ResponsesCompactMode == "" {
+		return ResponsesCompactModeConvert
+	}
+	switch s.ResponsesCompactMode {
+	case ResponsesCompactModeNative:
+		return ResponsesCompactModeNative
+	case ResponsesCompactModeDisabled, ResponsesCompactModeUnsupported:
+		return ResponsesCompactModeDisabled
+	default:
+		return ResponsesCompactModeConvert
+	}
+}
+
+func (s *ChannelOtherSettings) HasDisabledResponsesCompact() bool {
+	return s != nil && s.ResponsesCompactModeOrDefault() == ResponsesCompactModeDisabled
 }

@@ -45,7 +45,7 @@ type testResult struct {
 	runtimeConfig *channelTestRuntimeSummary
 }
 
-const responsesCompactChannelTestCapabilityError = "OpenAI Response Compaction test requires native Responses Compact support on this channel"
+const responsesCompactChannelTestCapabilityError = "OpenAI Responses Compact is disabled on this channel."
 
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
 	normalized := strings.TrimSpace(endpointType)
@@ -795,7 +795,7 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func validateChannelTestResponsesCompactCapability(info *relaycommon.RelayInfo) error {
-	if relaycommon.IsUnsupportedOpenAICompatibleResponsesCompact(info) {
+	if relaycommon.IsDisabledOpenAICompatibleResponsesCompact(info) {
 		return errors.New(responsesCompactChannelTestCapabilityError)
 	}
 	return nil

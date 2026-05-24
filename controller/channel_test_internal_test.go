@@ -163,11 +163,27 @@ func TestApplyChannelTestProtocolStrategyUsesGlobalResponsesToChatRuleByDefault(
 	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponses, types.RelayFormatOpenAI}, info.RequestConversionChain)
 }
 
-func TestValidateChannelTestResponsesCompactCapabilityRejectsUnsupportedOpenAIChannel(t *testing.T) {
+func TestValidateChannelTestResponsesCompactCapabilityAllowsDefaultConvertOpenAIChannel(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeResponsesCompact,
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+
+	err := validateChannelTestResponsesCompactCapability(info)
+
+	require.NoError(t, err)
+}
+
+func TestValidateChannelTestResponsesCompactCapabilityRejectsDisabledOpenAIChannel(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeDisabled,
+			},
 		},
 	}
 
@@ -193,7 +209,7 @@ func TestValidateChannelTestResponsesCompactCapabilityAllowsNativeOpenAIChannel(
 	require.NoError(t, err)
 }
 
-func TestChannelTestResponsesCompactUnsupportedOpenAIChannelFailsBeforeHTTP(t *testing.T) {
+func TestChannelTestResponsesCompactDisabledOpenAIChannelFailsBeforeHTTP(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	require.NoError(t, model.DB.Create(&model.User{
 		Id:       1,
@@ -205,6 +221,11 @@ func TestChannelTestResponsesCompactUnsupportedOpenAIChannelFailsBeforeHTTP(t *t
 		Group:    "default",
 	}).Error)
 
+	otherSettings, err := common.Marshal(map[string]dto.ResponsesCompactMode{
+		"responses_compact_mode": dto.ResponsesCompactModeDisabled,
+	})
+	require.NoError(t, err)
+
 	channel := &model.Channel{
 		Id:            910003,
 		Type:          constant.ChannelTypeOpenAI,
@@ -213,7 +234,7 @@ func TestChannelTestResponsesCompactUnsupportedOpenAIChannelFailsBeforeHTTP(t *t
 		Key:           "test-key",
 		Models:        "gpt-5-openai-compact",
 		Group:         "default",
-		OtherSettings: `{}`,
+		OtherSettings: string(otherSettings),
 	}
 
 	result := testChannelWithOptions(

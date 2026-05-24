@@ -33,9 +33,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 				types.ErrOptionWithSkipRetry(),
 			)
 		}
-		if relaycommon.IsUnsupportedOpenAICompatibleResponsesCompact(info) {
+		if relaycommon.IsDisabledOpenAICompatibleResponsesCompact(info) {
 			return types.NewErrorWithStatusCode(
-				fmt.Errorf("responses compact requires native responses compact support on OpenAI-compatible channels"),
+				fmt.Errorf("responses compact disabled for this OpenAI-compatible channel"),
 				types.ErrorCodeInvalidRequest,
 				http.StatusBadRequest,
 				types.ErrOptionWithSkipRetry(),
@@ -94,7 +94,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		return nil
 	}
 	var requestBody io.Reader
-	if (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) && !relaycommon.ShouldConvertResponsesRequest(info) {
+	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) && !relaycommon.ShouldConvertResponsesRequest(info)
+	if actualPassThroughBody {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
@@ -111,8 +112,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 
-		// remove disabled fields for OpenAI Responses API
-		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+		// Converted requests always use filtering; raw pass-through is the only path that preserves user-controlled fields.
+		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, actualPassThroughBody)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
