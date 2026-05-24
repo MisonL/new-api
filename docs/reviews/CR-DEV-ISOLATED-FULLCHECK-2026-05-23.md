@@ -56,15 +56,10 @@ Checked pages:
 - `http://127.0.0.1:5176/pricing`
 - `http://127.0.0.1:5176/sign-in`
 
-Screenshots:
+Visual evidence boundary:
 
-- `.dev-docker/runtime/isolated/classic-home-desktop.png`
-- `.dev-docker/runtime/isolated/classic-home-mobile.png`
-- `.dev-docker/runtime/isolated/default-home-desktop.png`
-- `.dev-docker/runtime/isolated/default-home-mobile.png`
-- `.dev-docker/runtime/isolated/default-pricing-desktop.png`
-- `.dev-docker/runtime/isolated/default-signin-desktop.png`
-- `.dev-docker/runtime/isolated/default-signin-mobile.png`
+- Visual captures were local audit artifacts and are not part of this Git record.
+- The committed evidence for this section is the page list, console observations, accessibility observations, and command results recorded below.
 
 ## Findings
 
@@ -111,9 +106,10 @@ Browser recheck:
 - `http://127.0.0.1:5176/` no longer emits `i18next::translator: missingKey` logs for public navigation labels. The only observed console message was the dev-server WebSocket connection.
 - `http://127.0.0.1:5176/sign-in` no longer emits the Chrome autocomplete issue. The username input has `autocomplete="username"` and the password input has `autocomplete="current-password"`.
 
-New screenshot:
+Visual evidence boundary:
 
-- `.dev-docker/runtime/isolated/classic-home-mobile-fixed.png`
+- The mobile recheck visual capture was local-only and is not part of this Git record.
+- The committed evidence for this follow-up is the browser recheck summary above plus the command results in this section.
 
 ## Second Full Redeploy And Recheck
 
@@ -185,19 +181,21 @@ Browser and UI/UX recheck:
 - `web/default/sign-in`: no horizontal overflow; username/password autocomplete values are present.
 - `web/default/dashboard` while unauthenticated redirects to `/sign-in?redirect=%2Fdashboard`.
 - Browser console: classic deployed pages had no console messages after reload; default dev pages only showed the Rsbuild WebSocket info message. No repeated `i18next missingKey` logs or Chrome autocomplete issue appeared.
-- Default dev screenshots still show TanStack devtools floating controls. This is local dev-server audit noise, not deployed `3001` product behavior.
+- Default dev visual inspection still showed TanStack devtools floating controls. This is local dev-server audit noise, not deployed `3001` product behavior.
 
-Screenshot artifacts:
+Visual evidence boundary:
 
-- `docs/reviews/artifacts/dev-3001-classic-desktop-home-2026-05-23.png`
-- `docs/reviews/artifacts/dev-3001-classic-mobile-home-2026-05-23.png`
-- `docs/reviews/artifacts/dev-3001-classic-mobile-menu-2026-05-23.png`
-- `docs/reviews/artifacts/dev-default-desktop-home-2026-05-23.png`
-- `docs/reviews/artifacts/dev-default-mobile-home-2026-05-23.png`
+- Visual captures from this recheck were local audit artifacts and are not part of this Git record.
+- The committed evidence for the UI/UX recheck is the browser observation list above.
 
 Conclusion:
 
 The isolated development environment on `3001` was rebuilt from the current dirty worktree and is running the expected dirty build. Backend package tests, full Go tests, both frontend lint/build paths, Docker build, container health, HTTP probes, and browser UI/UX checks passed. No new blocking backend, runtime, visual, accessibility, or console issue was found in this recheck.
+
+Evidence boundary:
+
+- This recheck proves the local dirty worktree content that later became the frontend fixes and this report.
+- It does not prove a clean `48ca2dd77` HEAD image was rebuilt after the commits were created.
 
 ## Review Fix Follow-up
 
@@ -307,12 +305,16 @@ Browser and UI/UX recheck:
 - `web/default/dashboard` while unauthenticated redirects to `/sign-in?redirect=%2Fdashboard`.
 - Default browser console showed only development server and i18next initialization messages; no `missingKey` log appeared.
 
-Screenshot artifacts:
+Visual evidence boundary:
 
-- `docs/reviews/artifacts/dev-3001-classic-mobile-recheck-2026-05-23-1331.png`
-- `docs/reviews/artifacts/dev-default-desktop-recheck-2026-05-23-1332.png`
-- `docs/reviews/artifacts/dev-default-mobile-recheck-2026-05-23-1332.png`
+- Visual captures from this recheck were local audit artifacts and are not part of this Git record.
+- The committed evidence for the UI/UX recheck is the browser observation list above.
 
 Conclusion:
 
 The isolated development environment on `3001` was rebuilt again from the current dirty worktree and is running the expected build dated `2026-05-23T05:28:33Z`. Backend tests, frontend lint/build, locale checks, Docker build, runtime health, HTTP/API probes, logs, and browser UI/UX checks all passed. No new blocking issue was found.
+
+Evidence boundary:
+
+- This final recheck proves the local dirty worktree content that later became commits `b4f3ab789`, `9c103f1ae`, and `48ca2dd77`.
+- It does not prove a clean `48ca2dd77` HEAD image was rebuilt after those commits were created.
