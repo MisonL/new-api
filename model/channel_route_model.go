@@ -13,7 +13,9 @@ func getGroupModelRouteCandidates(modelName string) []string {
 	if !common.GroupModelRouteHelperEnabled {
 		return candidates
 	}
-	if _, isCompact := ratio_setting.CompactBaseModelName(modelName); isCompact {
+	if baseModelName, isCompact := ratio_setting.CompactBaseModelName(modelName); isCompact {
+		candidates = appendRouteCandidate(candidates, baseModelName)
+		candidates = appendRouteCandidate(candidates, ratio_setting.FormatMatchingModelName(baseModelName))
 		return candidates
 	}
 	normalized := ratio_setting.FormatMatchingModelName(modelName)
