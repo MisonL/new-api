@@ -2862,9 +2862,6 @@ const EditChannelModal = (props) => {
               <div className='space-y-4'>
                 {inputs.type === 1 && (
                   <div className='pb-3 border-b border-gray-100'>
-                    <Text className='text-sm font-medium text-gray-500 mb-3 block'>
-                      {t('Responses Compact 能力')}
-                    </Text>
                     <Form.Select
                       field='responses_compact_mode'
                       label={t('Responses Compact 能力')}

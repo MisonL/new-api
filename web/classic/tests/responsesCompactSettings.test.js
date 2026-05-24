@@ -18,6 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   RESPONSES_COMPACT_MODE_DEFAULT,
@@ -27,6 +30,8 @@ import {
   buildResponsesCompactSettings,
   normalizeResponsesCompactMode,
 } from '../src/helpers/responsesCompactSettings.js';
+
+const currentDir = dirname(fileURLToPath(import.meta.url));
 
 describe('classic responses compact settings', () => {
   test('defaults missing compact mode to native', () => {
@@ -58,5 +63,19 @@ describe('classic responses compact settings', () => {
     expect(
       buildResponsesCompactSettings(14, RESPONSES_COMPACT_MODE_NATIVE),
     ).toEqual({});
+  });
+
+  test('renders a single compact field label in channel advanced settings', () => {
+    const source = readFileSync(
+      resolve(
+        currentDir,
+        '../src/components/table/channels/modals/EditChannelModal.jsx',
+      ),
+      'utf8',
+    );
+
+    expect(source.match(/t\('Responses Compact 能力'\)/g) ?? []).toHaveLength(
+      1,
+    );
   });
 });
