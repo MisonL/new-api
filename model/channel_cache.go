@@ -158,8 +158,8 @@ func requestChannelCacheRefreshAsync() {
 func getRandomSatisfiedChannelFromCache(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
 	cacheHit := false
 	var lastErr error
-	for _, routeModel := range getGroupModelRouteCandidates(model) {
-		channel, err, hit := getRandomSatisfiedRouteModelFromCache(group, routeModel, retry, excluded)
+	for _, routeCandidate := range getGroupModelRouteCandidateMeta(model) {
+		channel, err, hit := getRandomSatisfiedRouteModelFromCache(group, routeCandidate, retry, excluded)
 		if !hit {
 			continue
 		}
@@ -172,8 +172,8 @@ func getRandomSatisfiedChannelFromCache(group string, model string, retry int, e
 	return nil, lastErr, cacheHit
 }
 
-func getRandomSatisfiedRouteModelFromCache(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
-	channels := group2model2channels[group][model]
+func getRandomSatisfiedRouteModelFromCache(group string, routeCandidate routeModelCandidate, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
+	channels := group2model2channels[group][routeCandidate.model]
 	if len(channels) == 0 {
 		return nil, nil, false
 	}
@@ -183,6 +183,9 @@ func getRandomSatisfiedRouteModelFromCache(group string, model string, retry int
 			return nil, nil, true
 		}
 		if channel, ok := channelsIDM[channels[0]]; ok {
+			if !channelSupportsCompactRouteCandidate(channel, routeCandidate) {
+				return nil, nil, true
+			}
 			return channel, nil, true
 		}
 		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0]), true
@@ -191,10 +194,16 @@ func getRandomSatisfiedRouteModelFromCache(group string, model string, retry int
 	uniquePriorities := make(map[int]bool)
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
+			if !channelSupportsCompactRouteCandidate(channel, routeCandidate) {
+				continue
+			}
 			uniquePriorities[int(channel.GetPriority())] = true
 		} else {
 			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId), true
 		}
+	}
+	if len(uniquePriorities) == 0 {
+		return nil, nil, true
 	}
 	var sortedUniquePriorities []int
 	for priority := range uniquePriorities {
@@ -215,6 +224,9 @@ func getRandomSatisfiedRouteModelFromCache(group string, model string, retry int
 			continue
 		}
 		if channel, ok := channelsIDM[channelId]; ok {
+			if !channelSupportsCompactRouteCandidate(channel, routeCandidate) {
+				continue
+			}
 			if channel.GetPriority() == targetPriority {
 				sumWeight += channel.GetWeight()
 				targetChannels = append(targetChannels, channel)

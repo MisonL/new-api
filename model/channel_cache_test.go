@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/require"
 )
@@ -325,11 +327,15 @@ func TestGetRandomSatisfiedChannelFallsBackFromCompactSuffixToBaseModel(t *testi
 
 	channel := &Channel{
 		Id:     112,
+		Type:   constant.ChannelTypeOpenAI,
 		Name:   "compact-base-model",
 		Status: common.ChannelStatusEnabled,
 		Group:  "default",
 		Models: "gpt-5.5",
 	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeNative,
+	})
 	require.NoError(t, DB.Create(channel).Error)
 	require.NoError(t, DB.Create(&Ability{
 		Group:     "default",
@@ -399,6 +405,72 @@ func TestGetRandomSatisfiedChannelPrefersExactCompactModelWhenEnabled(t *testing
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, compactChannel.Id, got.Id)
+}
+
+func TestGetRandomSatisfiedChannelSkipsNonNativeOpenAIBaseFallbackForCompact(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	nonNativePriority := int64(12)
+	nativePriority := int64(11)
+	nonNativeChannel := &Channel{
+		Id:       115,
+		Type:     constant.ChannelTypeOpenAI,
+		Name:     "compact-base-non-native",
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "gpt-5.5",
+		Priority: &nonNativePriority,
+	}
+	nativeChannel := &Channel{
+		Id:       116,
+		Type:     constant.ChannelTypeOpenAI,
+		Name:     "compact-base-native",
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "gpt-5.5",
+		Priority: &nativePriority,
+	}
+	nativeChannel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeNative,
+	})
+	require.NoError(t, DB.Create(nonNativeChannel).Error)
+	require.NoError(t, DB.Create(nativeChannel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-5.5",
+		ChannelId: nonNativeChannel.Id,
+		Enabled:   true,
+		Priority:  &nonNativePriority,
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-5.5",
+		ChannelId: nativeChannel.Id,
+		Enabled:   true,
+		Priority:  &nativePriority,
+	}).Error)
+
+	InitChannelCache()
+
+	got, err := GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.5"), 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, nativeChannel.Id, got.Id)
+
+	common.MemoryCacheEnabled = false
+	got, err = GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.5"), 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, nativeChannel.Id, got.Id)
 }
 
 func TestGetRandomSatisfiedChannelFallsBackToDatabaseWithGroupModelRouteHelperWhenEnabled(t *testing.T) {
