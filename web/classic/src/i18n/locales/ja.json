@@ -67,6 +67,7 @@
     "API 基址": "APIベースURL",
     "复制 API 基址": "APIベースURLをコピー",
     "打开导航菜单": "ナビゲーションメニューを開く",
+    "主导航": "メインナビゲーション",
     "Authorization Endpoint": "Authorization Endpoint",
     "Authorization callback URL 填": "Authorization callback URLを入力してください",
     "Bark推送URL": "BarkプッシュURL",

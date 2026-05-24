@@ -35,6 +35,7 @@ VITE_REACT_APP_SERVER_URL=http://127.0.0.1:3001 bun run dev --host 127.0.0.1 --p
 | `go test ./... -timeout=60s` | Passed |
 | `cd web/default && bun run lint` | Passed |
 | `cd web/default && bun run build` | Passed |
+| `cd web/default && bun run test` | Skipped: no `test` script is defined in `web/default/package.json` |
 
 The first plain `go test ./...` run produced no output for a long period and was terminated before rerunning with an explicit timeout. The timeout run completed successfully and covered all Go packages.
 
@@ -46,6 +47,8 @@ The isolated `3001` backend was verified with a temporary fake upstream and temp
 - Native compact route returned HTTP 200 and forwarded to `/v1/responses/compact`.
 - The upstream capture preserved `previous_response_id` and `input[0].type = "compaction"`.
 - Temporary smoke rows were cleaned up after verification.
+- Cleanup verification checked the temporary channel, token, and ability rows by their smoke-test identifiers and observed zero remaining rows after teardown.
+- The fake upstream capture was used only for the smoke window and confirmed the unsupported route made no upstream business request while the native route hit `/v1/responses/compact`.
 
 ## Browser And UI Checks
 
@@ -177,6 +180,7 @@ Browser and UI/UX recheck:
 - `3001` classic home accessibility: readonly base URL textbox is exposed as `API 基址`; copy button is exposed as `复制 API 基址`.
 - `3001` classic login: username input has `autocomplete="username"` and password input has `autocomplete="current-password"`.
 - `web/default` was checked through a dev server proxied to `3001`. Requested port `5176` was occupied, so Rsbuild used `http://127.0.0.1:5177/`.
+- The process occupying `5176` was treated as a pre-existing local dev server; the audit used the actual Rsbuild URL and did not claim `5176` for that pass.
 - `web/default` desktop and mobile home: no horizontal overflow observed; hierarchy, CTA grouping, cards, and responsive stacking were visually coherent.
 - `web/default/sign-in`: no horizontal overflow; username/password autocomplete values are present.
 - `web/default/dashboard` while unauthenticated redirects to `/sign-in?redirect=%2Fdashboard`.
@@ -235,6 +239,8 @@ Browser recheck:
 ## Third Full Redeploy And Recheck
 
 Time: 2026-05-23 13:28-13:35 Asia/Shanghai.
+
+Trigger: re-verify the classic locale additions for `API 基址`, `复制 API 基址`, and `打开导航菜单` after the review follow-up. Pass criteria were: all locale JSON files parse, every classic locale contains the three keys, the isolated dev container is rebuilt and healthy, and browser checks show no missing-key console output for the verified pages.
 
 Current repository state:
 
@@ -299,6 +305,7 @@ Browser and UI/UX recheck:
 - `3001` classic home accessibility: base URL textbox exposed as `API 基址`; copy button exposed as `复制 API 基址`.
 - `3001` classic login: username input has `autocomplete="username"` and password input has `autocomplete="current-password"`.
 - Classic browser console only showed the existing `WE LOVE NEWAPI` log.
+- Locale key coverage was verified for `en`, `fr`, `ja`, `ru`, `vi`, `zh`, `zh-CN`, and `zh-TW` by parsing each classic locale JSON file and asserting the required accessibility label keys exist. A later review follow-up also added and verified the mobile navigation landmark key `主导航`.
 - `web/default` dev server was started with `VITE_REACT_APP_SERVER_URL=http://127.0.0.1:3001` on `http://127.0.0.1:5176/`.
 - `web/default` desktop home at 1440px and mobile home at 390px: no horizontal overflow; hierarchy, CTA grouping, cards, and responsive stacking remained coherent.
 - `web/default/sign-in`: no horizontal overflow; username/password autocomplete values are present.

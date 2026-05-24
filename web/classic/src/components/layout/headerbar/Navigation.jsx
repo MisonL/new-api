@@ -31,6 +31,17 @@ const Navigation = ({
   pricingRequireAuth,
   t,
 }) => {
+  // getNavTarget keeps unauthenticated redirects consistent for userState.user and pricingRequireAuth.
+  const getNavTarget = (link) => {
+    if (link.itemKey === 'console' && !userState.user) {
+      return '/login';
+    }
+    if (link.itemKey === 'pricing' && pricingRequireAuth && !userState.user) {
+      return '/login';
+    }
+    return link.to;
+  };
+
   const renderNavLinks = () => {
     const baseClasses =
       'flex-shrink-0 flex items-center gap-1 font-semibold rounded-md transition-all duration-200 ease-in-out';
@@ -56,13 +67,7 @@ const Navigation = ({
         );
       }
 
-      let targetPath = link.to;
-      if (link.itemKey === 'console' && !userState.user) {
-        targetPath = '/login';
-      }
-      if (link.itemKey === 'pricing' && pricingRequireAuth && !userState.user) {
-        targetPath = '/login';
-      }
+      const targetPath = getNavTarget(link);
 
       return (
         <Link key={link.itemKey} to={targetPath} className={commonLinkClasses}>
@@ -74,7 +79,10 @@ const Navigation = ({
 
   if (isMobile) {
     return (
-      <div className='flex flex-1 items-center justify-end mx-1'>
+      <nav
+        aria-label={t('主导航')}
+        className='flex flex-1 items-center justify-end mx-1'
+      >
         <SkeletonWrapper
           loading={isLoading}
           type='navigation'
@@ -89,17 +97,7 @@ const Navigation = ({
             render={
               <Dropdown.Menu>
                 {mainNavLinks.map((link) => {
-                  let targetPath = link.to;
-                  if (link.itemKey === 'console' && !userState.user) {
-                    targetPath = '/login';
-                  }
-                  if (
-                    link.itemKey === 'pricing' &&
-                    pricingRequireAuth &&
-                    !userState.user
-                  ) {
-                    targetPath = '/login';
-                  }
+                  const targetPath = getNavTarget(link);
 
                   return (
                     <Dropdown.Item key={link.itemKey}>
@@ -135,7 +133,7 @@ const Navigation = ({
             />
           </Dropdown>
         </SkeletonWrapper>
-      </div>
+      </nav>
     );
   }
 
