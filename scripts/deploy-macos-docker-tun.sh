@@ -22,6 +22,7 @@ Environment overrides:
   NEW_API_PORT_MAPPING=127.0.0.1:13000:3000
   NEW_API_ABNORMAL_TUN_IP_REGEX=
   NEW_API_ALLOW_ACTIVE_REQUESTS=0
+  NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT=30
   CADDY_LOG_FILE=/tmp/<COMPOSE_SERVICE>-macos-tun-caddy-<LAN_PORT>.log
   CADDY_PID_FILE=/tmp/<COMPOSE_SERVICE>-macos-tun-caddy-<LAN_PORT>.pid
 EOF
@@ -104,6 +105,7 @@ CONTAINER_PORT="${NEW_API_CONTAINER_PORT:-$(tun_env_value NEW_API_CONTAINER_PORT
 HEALTH_PATH="${NEW_API_HEALTH_PATH:-$(tun_env_value NEW_API_HEALTH_PATH /api/status)}"
 ABNORMAL_TUN_IP_REGEX="${NEW_API_ABNORMAL_TUN_IP_REGEX:-$(tun_env_value NEW_API_ABNORMAL_TUN_IP_REGEX '')}"
 ALLOW_ACTIVE_REQUESTS="${NEW_API_ALLOW_ACTIVE_REQUESTS:-$(tun_env_value NEW_API_ALLOW_ACTIVE_REQUESTS 0)}"
+ACTIVE_CONNECTION_DRAIN_TIMEOUT="${NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT:-$(tun_env_value NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT 30)}"
 CONFIGURED_PORT_MAPPING="${NEW_API_PORT_MAPPING:-$(tun_env_value NEW_API_PORT_MAPPING '')}"
 PORT_MAPPING="127.0.0.1:${LOOPBACK_PORT}:${CONTAINER_PORT}"
 DEFAULT_PORT_MAPPING="${NEW_API_DEFAULT_PORT_MAPPING:-$(tun_env_value NEW_API_DEFAULT_PORT_MAPPING "${LAN_PORT}:${CONTAINER_PORT}")}"
@@ -290,6 +292,7 @@ validate_tun_env_scope() {
         NEW_API_HEALTH_PATH | \
         NEW_API_DEFAULT_PORT_MAPPING | \
         NEW_API_ALLOW_ACTIVE_REQUESTS | \
+        NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT | \
         NEW_API_ABNORMAL_TUN_IP_REGEX | \
         NEW_API_PORT_MAPPING)
         ;;
@@ -386,6 +389,21 @@ print_active_connection_sample() {
           }
         '
   done <<<"$owner_pids"
+}
+
+wait_for_active_connections_to_drain() {
+  local timeout="$1"
+  local active_connections start
+
+  start="$(date +%s)"
+  while true; do
+    active_connections="$(current_service_active_connections)"
+    [[ "$active_connections" == "0" ]] && return 0
+    if (( "$(date +%s)" - start >= timeout )); then
+      return 1
+    fi
+    sleep 1
+  done
 }
 
 managed_caddy_is_running() {
@@ -536,6 +554,67 @@ wait_for_url() {
   done
 }
 
+container_utc_timestamp() {
+  local container_id="$1"
+  local timeout="${2:-10}"
+  local epoch
+  local start
+
+  start="$(date +%s)"
+  while true; do
+    if epoch="$(docker exec "$container_id" date -u +%s 2>/dev/null)" && [[ "$epoch" =~ ^[0-9]+$ ]]; then
+      python3 -c '
+from datetime import datetime, timezone
+import sys
+
+epoch = max(0, int(sys.argv[1]) - 2)
+print(datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+' "$epoch"
+      return 0
+    fi
+    if (( "$(date +%s)" - start >= timeout )); then
+      return 1
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+public_health_probe_request_id() {
+  curl -fsS --max-time 5 -D - -o /dev/null "$HEALTH_URL" \
+    | awk -F': *' '
+        tolower($1) == "x-oneapi-request-id" {
+          gsub(/^[[:space:]]+/, "", $2)
+          gsub(/[[:space:]\r]+$/, "", $2)
+          print $2
+          exit
+        }
+      '
+}
+
+wait_for_probe_log_line() {
+  local container_id="$1"
+  local since="$2"
+  local request_id="$3"
+  local timeout="$4"
+  local line logs start
+
+  start="$(date +%s)"
+  while true; do
+    logs="$(docker logs --since "$since" "$container_id" 2>&1 || true)"
+    line="$(printf '%s\n' "$logs" | grep -F "$request_id" | tail -n 1 || true)"
+    if [[ -n "$line" ]]; then
+      printf '%s\n' "$line"
+      return 0
+    fi
+    if (( "$(date +%s)" - start >= timeout )); then
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 rollback() {
   local rollback_ok=0
 
@@ -565,11 +644,12 @@ on_error() {
 trap 'on_error "$LINENO"' ERR
 
 preflight() {
-  local active_connections secret_requirement tun_config_json
+  local active_connections caddy_validate_output secret_requirement tun_config_json
 
   [[ "$(uname -s)" == "Darwin" ]] || fail "this script is intended for macOS hosts"
   [[ "$HEALTH_PATH" == /* ]] || fail "NEW_API_HEALTH_PATH must start with /"
   [[ "$ALLOW_ACTIVE_REQUESTS" =~ ^[01]$ ]] || fail "NEW_API_ALLOW_ACTIVE_REQUESTS must be 0 or 1"
+  [[ "$ACTIVE_CONNECTION_DRAIN_TIMEOUT" =~ ^[0-9]+$ ]] || fail "NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT must be a non-negative integer"
   validate_port NEW_API_LAN_PROXY_PORT "$LAN_PORT"
   validate_port NEW_API_LOOPBACK_PORT "$LOOPBACK_PORT"
   validate_port NEW_API_CONTAINER_PORT "$CONTAINER_PORT"
@@ -588,7 +668,10 @@ preflight() {
   validate_tun_env_scope
 
   log "validating Caddyfile"
-  run_caddy validate --config "$CADDYFILE" >/dev/null
+  if ! caddy_validate_output="$(run_caddy validate --config "$CADDYFILE" 2>&1 >/dev/null)"; then
+    printf '%s\n' "$caddy_validate_output" >&2
+    fail "Caddyfile validation failed"
+  fi
 
   log "validating compose port mapping"
   tun_config_json="$(compose_tun config --format json)" || fail "compose does not render expected port mapping ${PORT_MAPPING}"
@@ -650,11 +733,21 @@ sys.exit(1)
       if [[ "$ALLOW_ACTIVE_REQUESTS" == "1" ]]; then
         log "warning: --apply will interrupt these connections because NEW_API_ALLOW_ACTIVE_REQUESTS=1"
       else
-        log "warning: default --apply will refuse to continue until these connections drain"
+        log "warning: default --apply will wait up to ${ACTIVE_CONNECTION_DRAIN_TIMEOUT}s for these connections to drain"
       fi
     elif [[ "$ALLOW_ACTIVE_REQUESTS" == "1" ]]; then
       log "warning: established connections on ${LAN_PORT} will be interrupted"
     else
+      if (( 10#$ACTIVE_CONNECTION_DRAIN_TIMEOUT > 0 )); then
+        log "waiting up to ${ACTIVE_CONNECTION_DRAIN_TIMEOUT}s for established connections on ${LAN_PORT} to drain"
+        if wait_for_active_connections_to_drain "$ACTIVE_CONNECTION_DRAIN_TIMEOUT"; then
+          log "established connections drained"
+          return 0
+        fi
+        active_connections="$(current_service_active_connections)"
+        log "found ${active_connections} established connection(s) on ${LAN_PORT} after drain timeout"
+        print_active_connection_sample >&2 || true
+      fi
       fail "${active_connections} established connection(s) on ${LAN_PORT}; set NEW_API_ALLOW_ACTIVE_REQUESTS=1 to proceed"
     fi
   fi
@@ -675,7 +768,7 @@ start_caddy_proxy() {
 }
 
 verify_after_apply() {
-  local container_id probe_start
+  local container_id probe_log_line probe_request_id probe_start
 
   log "checking backend ${BACKEND_URL}"
   wait_for_url "$BACKEND_URL" 60 || fail "backend health check failed"
@@ -686,18 +779,19 @@ verify_after_apply() {
   log "checking public entry ${HEALTH_URL}"
   wait_for_url "$HEALTH_URL" 30 || fail "public entry health check failed"
 
-  probe_start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  curl -fsS --max-time 5 "$HEALTH_URL" >/dev/null
-  sleep 1
-
-  local recent_logs
-  recent_logs="$(docker logs --since "$probe_start" "$container_id" 2>&1 || true)"
-  if [[ -n "$ABNORMAL_TUN_IP_REGEX" ]] && printf '%s\n' "$recent_logs" | grep -E -q "${ABNORMAL_TUN_IP_REGEX}.*GET ${HEALTH_PATH}"; then
+  probe_start="$(container_utc_timestamp "$container_id" 10)" || fail "could not read container UTC timestamp for log verification"
+  probe_request_id="$(public_health_probe_request_id)"
+  [[ -n "$probe_request_id" ]] || fail "public health probe did not return X-Oneapi-Request-Id; check new-api version compatibility, RequestId middleware, and proxy response headers"
+  if ! probe_log_line="$(wait_for_probe_log_line "$container_id" "$probe_start" "$probe_request_id" 10)"; then
+    fail "did not find public health probe log after Caddy handoff"
+  fi
+  if [[ -n "$ABNORMAL_TUN_IP_REGEX" ]] && printf '%s\n' "$probe_log_line" | grep -E -q "${ABNORMAL_TUN_IP_REGEX}"; then
     fail "abnormal TUN IP still appears in new-api logs"
   fi
-  if ! printf '%s\n' "$recent_logs" | grep -q "127\\.0\\.0\\.1.*GET ${HEALTH_PATH}"; then
+  if ! printf '%s\n' "$probe_log_line" | grep -q "127\\.0\\.0\\.1"; then
     fail "did not find 127.0.0.1 health log after Caddy handoff"
   fi
+  log "verified public health probe log: ${probe_log_line}"
 
   log "current Docker port mapping:"
   docker inspect "$container_id" --format '{{json .NetworkSettings.Ports}}'
