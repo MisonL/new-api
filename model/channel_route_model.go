@@ -94,12 +94,90 @@ func channelAllowsNativeCompactFallback(channel *Channel, settings dto.ChannelOt
 	}
 
 	compactSignals := compactModelSignals(settings)
+	for _, mappedBaseModelName := range compactMappedBaseModelCandidates(channel, baseModelName, compactModelName) {
+		if compactRouteTargetAllowed(channel, compactSignals, mappedBaseModelName) {
+			return true
+		}
+	}
 	// Without compactSignals, allow base-model fallback only before upstream model checks start.
 	if len(compactSignals) == 0 {
 		return !settings.UpstreamModelUpdateCheckEnabled || settings.UpstreamModelUpdateLastCheckTime == 0
 	}
 	_, ok := compactSignals[compactModelName]
 	return ok
+}
+
+func compactRouteTargetAllowed(channel *Channel, compactSignals map[string]struct{}, baseModelName string) bool {
+	baseModelName = strings.TrimSpace(baseModelName)
+	if baseModelName == "" {
+		return false
+	}
+	compactModelName := ratio_setting.WithCompactModelSuffix(baseModelName)
+	if len(compactSignals) > 0 {
+		_, ok := compactSignals[compactModelName]
+		return ok
+	}
+	return modelListContains(channel.GetModels(), baseModelName) || modelListContains(channel.GetModels(), compactModelName)
+}
+
+func compactMappedBaseModelCandidates(channel *Channel, baseModelName string, compactModelName string) []string {
+	if channel == nil || channel.ModelMapping == nil {
+		return nil
+	}
+	modelMapping := strings.TrimSpace(channel.GetModelMapping())
+	if modelMapping == "" || modelMapping == "{}" {
+		return nil
+	}
+	modelMap := make(map[string]string)
+	if err := common.UnmarshalJsonStr(modelMapping, &modelMap); err != nil {
+		return nil
+	}
+	candidates := make([]string, 0, 2)
+	if mappedModel := strings.TrimSpace(modelMap[compactModelName]); mappedModel != "" {
+		return appendCompactMappedCandidate(candidates, mappedModel)
+	}
+	if mappedModel, ok := resolveCompactBaseModelMapping(modelMap, baseModelName); ok {
+		return appendCompactMappedCandidate(candidates, mappedModel)
+	}
+	return candidates
+}
+
+func resolveCompactBaseModelMapping(modelMap map[string]string, modelName string) (string, bool) {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return "", false
+	}
+	visited := map[string]struct{}{modelName: {}}
+	currentModel := modelName
+	mapped := false
+	for {
+		nextModel := strings.TrimSpace(modelMap[currentModel])
+		if nextModel == "" {
+			return currentModel, mapped
+		}
+		if _, ok := visited[nextModel]; ok {
+			return "", false
+		}
+		visited[nextModel] = struct{}{}
+		currentModel = nextModel
+		mapped = true
+	}
+}
+
+func appendCompactMappedCandidate(candidates []string, modelName string) []string {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return candidates
+	}
+	if baseModelName, isCompact := ratio_setting.CompactBaseModelName(modelName); isCompact {
+		modelName = baseModelName
+	}
+	for _, candidate := range candidates {
+		if candidate == modelName {
+			return candidates
+		}
+	}
+	return append(candidates, modelName)
 }
 
 func compactModelSignals(settings dto.ChannelOtherSettings) map[string]struct{} {

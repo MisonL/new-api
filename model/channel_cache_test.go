@@ -416,6 +416,58 @@ func TestGetRandomSatisfiedChannelRestrictsCompactFallbackToDetectedCompactModel
 	require.Equal(t, channel.Id, got.Id)
 }
 
+func TestGetRandomSatisfiedChannelAllowsCompactFallbackThroughExplicitMapping(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	modelMapping := `{"gpt-5.4-openai-compact":"gpt-5.5"}`
+	channel := &Channel{
+		Id:           120,
+		Type:         constant.ChannelTypeOpenAI,
+		Name:         "compact-mapped-model",
+		Status:       common.ChannelStatusEnabled,
+		Group:        "default",
+		Models:       "gpt-5.4,gpt-5.5",
+		ModelMapping: &modelMapping,
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeNative,
+		UpstreamModelUpdateLastDetectedModels: []string{
+			ratio_setting.WithCompactModelSuffix("gpt-5.5"),
+		},
+	})
+	require.NoError(t, DB.Create(channel).Error)
+	for _, modelName := range []string{"gpt-5.4", "gpt-5.5"} {
+		require.NoError(t, DB.Create(&Ability{
+			Group:     "default",
+			Model:     modelName,
+			ChannelId: channel.Id,
+			Enabled:   true,
+		}).Error)
+	}
+
+	InitChannelCache()
+
+	got, err := GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.4"), 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+
+	common.MemoryCacheEnabled = false
+	got, err = GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.4"), 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+}
+
 func TestGetRandomSatisfiedChannelSkipsCheckedNativeChannelWithoutCompactSignals(t *testing.T) {
 	prepareChannelCacheTest(t)
 
