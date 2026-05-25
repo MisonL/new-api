@@ -358,6 +358,144 @@ func TestGetRandomSatisfiedChannelFallsBackFromCompactSuffixToBaseModel(t *testi
 	require.Equal(t, channel.Id, got.Id)
 }
 
+func TestGetRandomSatisfiedChannelRestrictsCompactFallbackToDetectedCompactModels(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	channel := &Channel{
+		Id:     117,
+		Type:   constant.ChannelTypeOpenAI,
+		Name:   "compact-detected-subset",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-5.4,gpt-5.5",
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeNative,
+		UpstreamModelUpdateLastDetectedModels: []string{
+			ratio_setting.WithCompactModelSuffix("gpt-5.5"),
+		},
+	})
+	require.NoError(t, DB.Create(channel).Error)
+	for _, modelName := range []string{"gpt-5.4", "gpt-5.5"} {
+		require.NoError(t, DB.Create(&Ability{
+			Group:     "default",
+			Model:     modelName,
+			ChannelId: channel.Id,
+			Enabled:   true,
+		}).Error)
+	}
+
+	InitChannelCache()
+
+	got, err := GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.4"), 0)
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	got, err = GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.5"), 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+
+	common.MemoryCacheEnabled = false
+	got, err = GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.4"), 0)
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	got, err = GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.5"), 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+}
+
+func TestGetRandomSatisfiedChannelSkipsCheckedNativeChannelWithoutCompactSignals(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	channel := &Channel{
+		Id:     118,
+		Type:   constant.ChannelTypeOpenAI,
+		Name:   "compact-checked-without-signal",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-5.4",
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode:                  dto.ResponsesCompactModeNative,
+		UpstreamModelUpdateCheckEnabled:       true,
+		UpstreamModelUpdateLastCheckTime:      12345,
+		UpstreamModelUpdateLastDetectedModels: []string{},
+	})
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-5.4",
+		ChannelId: channel.Id,
+		Enabled:   true,
+	}).Error)
+
+	InitChannelCache()
+
+	got, err := GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.4"), 0)
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	common.MemoryCacheEnabled = false
+	got, err = GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.4"), 0)
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	common.MemoryCacheEnabled = true
+	uncheckedChannel := &Channel{
+		Id:     119,
+		Type:   constant.ChannelTypeOpenAI,
+		Name:   "compact-unchecked-without-signal",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-5.4",
+	}
+	uncheckedChannel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode:            dto.ResponsesCompactModeNative,
+		UpstreamModelUpdateCheckEnabled: true,
+	})
+	require.NoError(t, DB.Create(uncheckedChannel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-5.4",
+		ChannelId: uncheckedChannel.Id,
+		Enabled:   true,
+	}).Error)
+
+	InitChannelCache()
+
+	got, err = GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.4"), 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uncheckedChannel.Id, got.Id)
+
+	common.MemoryCacheEnabled = false
+	got, err = GetRandomSatisfiedChannel("default", ratio_setting.WithCompactModelSuffix("gpt-5.4"), 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uncheckedChannel.Id, got.Id)
+}
+
 func TestGetRandomSatisfiedChannelPrefersExactCompactModelWhenEnabled(t *testing.T) {
 	prepareChannelCacheTest(t)
 

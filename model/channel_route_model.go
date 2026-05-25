@@ -1,6 +1,8 @@
 package model
 
 import (
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
@@ -61,7 +63,8 @@ func channelSupportsCompactRouteCandidate(channel *Channel, candidate routeModel
 	}
 	switch channel.Type {
 	case constant.ChannelTypeOpenAI:
-		return channelHasNativeResponsesCompact(channel)
+		settings, ok := channelNativeResponsesCompactSettings(channel)
+		return ok && channelAllowsNativeCompactFallback(channel, settings, candidate.model)
 	case constant.ChannelTypeCodex:
 		return true
 	default:
@@ -69,13 +72,52 @@ func channelSupportsCompactRouteCandidate(channel *Channel, candidate routeModel
 	}
 }
 
-func channelHasNativeResponsesCompact(channel *Channel) bool {
-	if channel == nil || channel.OtherSettings == "" {
-		return false
-	}
+func channelNativeResponsesCompactSettings(channel *Channel) (dto.ChannelOtherSettings, bool) {
 	settings := dto.ChannelOtherSettings{}
+	if channel == nil || channel.OtherSettings == "" {
+		return settings, false
+	}
 	if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+		return settings, false
+	}
+	return settings, settings.HasNativeResponsesCompact()
+}
+
+func channelAllowsNativeCompactFallback(channel *Channel, settings dto.ChannelOtherSettings, baseModelName string) bool {
+	baseModelName = strings.TrimSpace(baseModelName)
+	if baseModelName == "" {
 		return false
 	}
-	return settings.HasNativeResponsesCompact()
+	compactModelName := ratio_setting.WithCompactModelSuffix(baseModelName)
+	if modelListContains(channel.GetModels(), compactModelName) {
+		return true
+	}
+
+	compactSignals := compactModelSignals(settings)
+	// Without compactSignals, allow base-model fallback only before upstream model checks start.
+	if len(compactSignals) == 0 {
+		return !settings.UpstreamModelUpdateCheckEnabled || settings.UpstreamModelUpdateLastCheckTime == 0
+	}
+	_, ok := compactSignals[compactModelName]
+	return ok
+}
+
+func compactModelSignals(settings dto.ChannelOtherSettings) map[string]struct{} {
+	signals := make(map[string]struct{})
+	for _, modelName := range settings.UpstreamModelUpdateLastDetectedModels {
+		modelName = ratio_setting.FormatMatchingModelName(strings.TrimSpace(modelName))
+		if _, isCompact := ratio_setting.CompactBaseModelName(modelName); isCompact {
+			signals[modelName] = struct{}{}
+		}
+	}
+	return signals
+}
+
+func modelListContains(models []string, target string) bool {
+	for _, modelName := range models {
+		if strings.TrimSpace(modelName) == target {
+			return true
+		}
+	}
+	return false
 }
