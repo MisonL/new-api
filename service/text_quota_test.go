@@ -254,6 +254,33 @@ func TestAppendResponsesCompactLogInfoWritesContentAndOther(t *testing.T) {
 	require.Equal(t, true, annotatedOther["existing"])
 }
 
+func TestAppendResponsesCompactLogInfoUsesRelayInfoForErrorLogs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeAuto,
+			},
+		},
+	}
+
+	content, annotatedOther := AppendResponsesCompactLogInfo(ctx, info, []string{"status_code=500"}, nil, now)
+
+	require.Equal(t, []string{
+		"status_code=500",
+		"Responses Compact mode=native setting=auto path=/v1/responses/compact",
+	}, content)
+	require.Equal(t, "native", annotatedOther["responses_compact_mode"])
+	require.Equal(t, "auto", annotatedOther["responses_compact_setting"])
+	require.Equal(t, "/v1/responses/compact", annotatedOther["responses_compact_upstream_path"])
+}
+
 func TestResponsesCompactLogInfoCanUseContextForErrorLogs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
