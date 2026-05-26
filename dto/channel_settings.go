@@ -1,5 +1,7 @@
 package dto
 
+import "time"
+
 type ChannelSettings struct {
 	ForceFormat            bool   `json:"force_format,omitempty"`
 	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
@@ -26,8 +28,9 @@ const (
 type ResponsesCompactMode string
 
 const (
-	// Only native compact and synthetic summary compatibility are public modes.
+	// Auto mode tries native compact first and can temporarily fall back to synthetic summaries.
 	// Legacy convert mode keeps its compatible /v1/responses behavior via synthetic summaries.
+	ResponsesCompactModeAuto      ResponsesCompactMode = "auto"
 	ResponsesCompactModeNative    ResponsesCompactMode = "native"
 	ResponsesCompactModeSynthetic ResponsesCompactMode = "synthetic_summary"
 )
@@ -35,6 +38,8 @@ const (
 type ChannelOtherSettings struct {
 	AzureResponsesVersion                 string                 `json:"azure_responses_version,omitempty"`
 	ResponsesCompactMode                  ResponsesCompactMode   `json:"responses_compact_mode,omitempty"`
+	ResponsesCompactAutoFallbackDate      int                    `json:"responses_compact_auto_fallback_date,omitempty"`
+	ResponsesCompactAutoFallbackReason    string                 `json:"responses_compact_auto_fallback_reason,omitempty"`
 	VertexKeyType                         VertexKeyType          `json:"vertex_key_type,omitempty"` // "json" or "api_key"
 	OpenRouterEnterprise                  *bool                  `json:"openrouter_enterprise,omitempty"`
 	ClaudeBetaQuery                       bool                   `json:"claude_beta_query,omitempty"`         // Claude 渠道是否强制追加 ?beta=true
@@ -74,11 +79,44 @@ func (s *ChannelOtherSettings) HasSyntheticResponsesCompact() bool {
 	return s != nil && s.ResponsesCompactModeOrDefault() == ResponsesCompactModeSynthetic
 }
 
+func (s *ChannelOtherSettings) IsAutoResponsesCompact() bool {
+	return s == nil || s.ResponsesCompactMode == "" || s.ResponsesCompactMode == ResponsesCompactModeAuto
+}
+
+func (s *ChannelOtherSettings) NormalizedResponsesCompactModeSetting() ResponsesCompactMode {
+	if s == nil || s.ResponsesCompactMode == "" {
+		return ResponsesCompactModeAuto
+	}
+	switch s.ResponsesCompactMode {
+	case ResponsesCompactModeAuto:
+		return ResponsesCompactModeAuto
+	case ResponsesCompactModeNative:
+		return ResponsesCompactModeNative
+	case ResponsesCompactModeSynthetic:
+		return ResponsesCompactModeSynthetic
+	case ResponsesCompactMode("convert"):
+		return ResponsesCompactModeSynthetic
+	case ResponsesCompactMode("disabled"), ResponsesCompactMode("unsupported"):
+		return ResponsesCompactModeNative
+	default:
+		return ResponsesCompactModeAuto
+	}
+}
+
 func (s *ChannelOtherSettings) ResponsesCompactModeOrDefault() ResponsesCompactMode {
+	return s.ResponsesCompactModeOrDefaultAt(time.Now())
+}
+
+func (s *ChannelOtherSettings) ResponsesCompactModeOrDefaultAt(now time.Time) ResponsesCompactMode {
 	if s == nil || s.ResponsesCompactMode == "" {
 		return ResponsesCompactModeNative
 	}
 	switch s.ResponsesCompactMode {
+	case ResponsesCompactModeAuto:
+		if s.HasActiveResponsesCompactAutoFallback(now) {
+			return ResponsesCompactModeSynthetic
+		}
+		return ResponsesCompactModeNative
 	case ResponsesCompactModeNative:
 		return ResponsesCompactModeNative
 	case ResponsesCompactModeSynthetic:
@@ -88,4 +126,30 @@ func (s *ChannelOtherSettings) ResponsesCompactModeOrDefault() ResponsesCompactM
 	default:
 		return ResponsesCompactModeNative
 	}
+}
+
+func (s *ChannelOtherSettings) HasActiveResponsesCompactAutoFallback(now time.Time) bool {
+	if s == nil || s.ResponsesCompactMode != ResponsesCompactModeAuto {
+		return false
+	}
+	return s.ResponsesCompactAutoFallbackDate == ResponsesCompactAutoFallbackDate(now)
+}
+
+func (s *ChannelOtherSettings) MarkResponsesCompactAutoFallback(now time.Time, reason string) {
+	if s == nil {
+		return
+	}
+	if s.ResponsesCompactMode == "" {
+		s.ResponsesCompactMode = ResponsesCompactModeAuto
+	}
+	if s.ResponsesCompactMode != ResponsesCompactModeAuto {
+		return
+	}
+	s.ResponsesCompactAutoFallbackDate = ResponsesCompactAutoFallbackDate(now)
+	s.ResponsesCompactAutoFallbackReason = reason
+}
+
+func ResponsesCompactAutoFallbackDate(t time.Time) int {
+	year, month, day := t.UTC().Date()
+	return year*10000 + int(month)*100 + day
 }

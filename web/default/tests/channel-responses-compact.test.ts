@@ -6,9 +6,12 @@ import {
 } from '../src/features/channels/lib/channel-form'
 import {
   RESPONSES_COMPACT_BADGE_KEYS,
+  RESPONSES_COMPACT_MODE_AUTO,
   RESPONSES_COMPACT_MODE_NATIVE,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+  getResponsesCompactAutoFallbackReason,
   getResponsesCompactMode,
+  isResponsesCompactAutoFallbackActive,
 } from '../src/features/channels/lib/channel-utils'
 import type { Channel } from '../src/features/channels/types'
 import en from '../src/i18n/locales/en.json'
@@ -63,22 +66,22 @@ function makeChannel(overrides: Partial<Channel> = {}): Channel {
 }
 
 describe('channel responses compact settings', () => {
-  test('defaults missing compact mode to native', () => {
+  test('defaults missing compact mode to auto', () => {
     const defaults = transformChannelToFormDefaults(makeChannel())
 
     expect(defaults.responses_compact_mode).toBe(
-      RESPONSES_COMPACT_MODE_NATIVE
+      RESPONSES_COMPACT_MODE_AUTO
     )
     expect(CHANNEL_FORM_DEFAULT_VALUES.responses_compact_mode).toBe(
-      RESPONSES_COMPACT_MODE_NATIVE
+      RESPONSES_COMPACT_MODE_AUTO
     )
-    expect(getResponsesCompactMode('{}')).toBe(RESPONSES_COMPACT_MODE_NATIVE)
-    expect(getResponsesCompactMode('')).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    expect(getResponsesCompactMode('{}')).toBe(RESPONSES_COMPACT_MODE_AUTO)
+    expect(getResponsesCompactMode('')).toBe(RESPONSES_COMPACT_MODE_AUTO)
     expect(getResponsesCompactMode('{bad json')).toBe(
-      RESPONSES_COMPACT_MODE_NATIVE
+      RESPONSES_COMPACT_MODE_AUTO
     )
-    expect(getResponsesCompactMode('null')).toBe(RESPONSES_COMPACT_MODE_NATIVE)
-    expect(getResponsesCompactMode('[]')).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    expect(getResponsesCompactMode('null')).toBe(RESPONSES_COMPACT_MODE_AUTO)
+    expect(getResponsesCompactMode('[]')).toBe(RESPONSES_COMPACT_MODE_AUTO)
   })
 
   test('normalizes legacy and unknown compact modes', () => {
@@ -94,16 +97,32 @@ describe('channel responses compact settings', () => {
       )
     ).toBe(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY)
 
-    for (const mode of ['auto', 'disabled', 'unsupported', 'unexpected']) {
+    expect(
+      getResponsesCompactMode(JSON.stringify({ responses_compact_mode: 'auto' }))
+    ).toBe(RESPONSES_COMPACT_MODE_AUTO)
+
+    for (const mode of ['disabled', 'unsupported']) {
       expect(
         getResponsesCompactMode(
           JSON.stringify({ responses_compact_mode: mode })
         )
       ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
     }
+    expect(
+      getResponsesCompactMode(
+        JSON.stringify({ responses_compact_mode: 'unexpected' })
+      )
+    ).toBe(RESPONSES_COMPACT_MODE_AUTO)
+    for (const mode of ['Auto', 'AUTO', 0]) {
+      expect(
+        getResponsesCompactMode(
+          JSON.stringify({ responses_compact_mode: mode })
+        )
+      ).toBe(RESPONSES_COMPACT_MODE_AUTO)
+    }
   })
 
-  test('defaults existing Azure and empty records to native', () => {
+  test('defaults existing Azure and empty records to auto', () => {
     expect(
       transformChannelToFormDefaults(
         makeChannel({
@@ -111,7 +130,7 @@ describe('channel responses compact settings', () => {
           settings: '{}',
         })
       ).responses_compact_mode
-    ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    ).toBe(RESPONSES_COMPACT_MODE_AUTO)
 
     expect(
       transformChannelToFormDefaults(
@@ -119,7 +138,7 @@ describe('channel responses compact settings', () => {
           settings: '',
         })
       ).responses_compact_mode
-    ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    ).toBe(RESPONSES_COMPACT_MODE_AUTO)
   })
 
   test('loads synthetic and normalizes legacy compact modes into form defaults', () => {
@@ -141,7 +160,7 @@ describe('channel responses compact settings', () => {
       ).responses_compact_mode
     ).toBe(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY)
 
-    for (const mode of ['auto', 'disabled', 'unsupported', 'unexpected']) {
+    for (const mode of ['disabled', 'unsupported']) {
       expect(
         transformChannelToFormDefaults(
           makeChannel({
@@ -150,6 +169,13 @@ describe('channel responses compact settings', () => {
         ).responses_compact_mode
       ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
     }
+    expect(
+      transformChannelToFormDefaults(
+        makeChannel({
+          settings: JSON.stringify({ responses_compact_mode: 'unexpected' }),
+        })
+      ).responses_compact_mode
+    ).toBe(RESPONSES_COMPACT_MODE_AUTO)
   })
 
   test('loads and stores native compact mode for OpenAI channels', () => {
@@ -175,15 +201,132 @@ describe('channel responses compact settings', () => {
     expect(stored.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_NATIVE)
   })
 
-  test('drops compact mode from non OpenAI channel settings', () => {
+  test('loads and stores auto compact mode for OpenAI channels', () => {
+    const defaults = transformChannelToFormDefaults(
+      makeChannel({
+        settings: JSON.stringify({
+          responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+        }),
+      })
+    )
+
+    expect(defaults.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_AUTO)
+
+    const payload = transformFormDataToCreatePayload({
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      type: 1,
+      responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+    })
+    const stored = JSON.parse(String(payload.channel.settings))
+
+    expect(stored.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_AUTO)
+    expect(stored.responses_compact_auto_fallback_date).toBeUndefined()
+  })
+
+  test('preserves auto fallback state unless compact mode changes', () => {
+    const base = {
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      type: 1,
+      settings: JSON.stringify({
+        responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+        responses_compact_auto_fallback_date: 20260526,
+        responses_compact_auto_fallback_reason: 'status_code=404',
+      }),
+    }
+
+    const unchanged = JSON.parse(
+      String(
+        transformFormDataToCreatePayload({
+          ...base,
+          responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+        }).channel.settings
+      )
+    )
+    expect(unchanged.responses_compact_auto_fallback_date).toBe(20260526)
+
+    const changed = JSON.parse(
+      String(
+        transformFormDataToCreatePayload({
+          ...base,
+          responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
+        }).channel.settings
+      )
+    )
+    expect(changed.responses_compact_auto_fallback_date).toBeUndefined()
+    expect(changed.responses_compact_auto_fallback_reason).toBeUndefined()
+
+    const synthetic = JSON.parse(
+      String(
+        transformFormDataToCreatePayload({
+          ...base,
+          responses_compact_mode: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+        }).channel.settings
+      )
+    )
+    expect(synthetic.responses_compact_auto_fallback_date).toBeUndefined()
+    expect(synthetic.responses_compact_auto_fallback_reason).toBeUndefined()
+  })
+
+  test('drops compact metadata from non OpenAI channel settings', () => {
     const payload = transformFormDataToCreatePayload({
       ...CHANNEL_FORM_DEFAULT_VALUES,
       type: 14,
       responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
+      settings: JSON.stringify({
+        responses_compact_auto_fallback_date: 20260526,
+        responses_compact_auto_fallback_reason: 'status_code=404',
+      }),
     })
     const stored = JSON.parse(String(payload.channel.settings))
 
     expect(stored.responses_compact_mode).toBeUndefined()
+    expect(stored.responses_compact_auto_fallback_date).toBeUndefined()
+    expect(stored.responses_compact_auto_fallback_reason).toBeUndefined()
+  })
+
+  test('detects auto fallback state by UTC date', () => {
+    const settings = JSON.stringify({
+      responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+      responses_compact_auto_fallback_date: 20260526,
+      responses_compact_auto_fallback_reason: 'status_code=404',
+    })
+
+    expect(
+      isResponsesCompactAutoFallbackActive(
+        settings,
+        new Date('2026-05-26T23:30:00.000Z')
+      )
+    ).toBe(true)
+    expect(
+      isResponsesCompactAutoFallbackActive(
+        settings,
+        new Date('2026-05-27T00:00:00.000Z')
+      )
+    ).toBe(false)
+    expect(getResponsesCompactAutoFallbackReason(settings)).toBe(
+      'status_code=404'
+    )
+    expect(getResponsesCompactAutoFallbackReason('{}')).toBe('')
+    expect(
+      isResponsesCompactAutoFallbackActive(
+        JSON.stringify({
+          responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
+          responses_compact_auto_fallback_date: 20260526,
+        }),
+        new Date('2026-05-26T12:00:00.000Z')
+      )
+    ).toBe(false)
+    for (const fallbackDate of [undefined, 'bad', -1]) {
+      expect(
+        isResponsesCompactAutoFallbackActive(
+          JSON.stringify({
+            responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+            responses_compact_auto_fallback_date: fallbackDate,
+          }),
+          new Date('2026-05-26T12:00:00.000Z')
+        )
+      ).toBe(false)
+    }
   })
 
   test('normalizes legacy convert compact mode to synthetic before storing', () => {

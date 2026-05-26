@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
@@ -326,6 +327,9 @@ func migrateDB() error {
 	if err := migratePrefillGroupTable(); err != nil {
 		return err
 	}
+	if err := migrateResponsesCompactModeAuto(); err != nil {
+		return err
+	}
 	if common.UsingSQLite {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -402,6 +406,9 @@ func migrateDBFast() error {
 	if err := migratePrefillGroupTable(); err != nil {
 		return err
 	}
+	if err := migrateResponsesCompactModeAuto(); err != nil {
+		return err
+	}
 	if common.UsingSQLite {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -421,6 +428,66 @@ func migrateLOGDB() error {
 		return err
 	}
 	return nil
+}
+
+const (
+	responsesCompactModeAutoMigrationOptionKey = "migration.responses_compact_mode_auto.20260526"
+	responsesCompactModeAutoMigrationBatchSize = 100
+)
+
+func migrateResponsesCompactModeAuto() error {
+	var marker Option
+	if err := DB.First(&marker, "key = ?", responsesCompactModeAutoMigrationOptionKey).Error; err == nil {
+		return nil
+	} else if err != nil && err != gorm.ErrRecordNotFound {
+		return err
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var channels []Channel
+		updated := 0
+		resetInvalid := 0
+		if err := tx.Where("type = ?", constant.ChannelTypeOpenAI).FindInBatches(&channels, responsesCompactModeAutoMigrationBatchSize, func(_ *gorm.DB, _ int) error {
+			for i := range channels {
+				channel := &channels[i]
+				settings := dto.ChannelOtherSettings{}
+				if channel.OtherSettings != "" {
+					if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+						common.SysLog(fmt.Sprintf(
+							"Warning: reset invalid channel settings during responses compact auto migration: channel_id=%d error=%v",
+							channel.Id,
+							err,
+						))
+						settings = dto.ChannelOtherSettings{}
+						resetInvalid++
+					}
+				}
+				settings.ResponsesCompactMode = dto.ResponsesCompactModeAuto
+				settings.ResponsesCompactAutoFallbackDate = 0
+				settings.ResponsesCompactAutoFallbackReason = ""
+				raw, err := common.Marshal(settings)
+				if err != nil {
+					return fmt.Errorf("failed to marshal channel %d settings for responses compact auto migration: %w", channel.Id, err)
+				}
+				if err := tx.Model(&Channel{}).Where("id = ?", channel.Id).Update("settings", string(raw)).Error; err != nil {
+					return err
+				}
+				updated++
+			}
+			return nil
+		}).Error; err != nil {
+			return err
+		}
+		marker = Option{
+			Key:   responsesCompactModeAutoMigrationOptionKey,
+			Value: "done",
+		}
+		if err := tx.Save(&marker).Error; err != nil {
+			return err
+		}
+		common.SysLog(fmt.Sprintf("responses compact auto migration finished: updated_channels=%d reset_invalid_settings=%d", updated, resetInvalid))
+		return nil
+	})
 }
 
 type sqliteColumnDef struct {

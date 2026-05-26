@@ -83,7 +83,9 @@ import {
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_MODE_OPTIONS,
   buildResponsesCompactSettings,
+  clearResponsesCompactSettings,
   normalizeResponsesCompactMode,
+  resetResponsesCompactAutoFallbackOnModeChange,
 } from '../../../../helpers/responsesCompactSettings.js';
 import {
   applyHeaderProfileStrategyToChannelInputs,
@@ -614,6 +616,7 @@ const EditChannelModal = (props) => {
   const initialModelsRef = useRef([]);
   const initialModelMappingRef = useRef('');
   const initialStatusCodeMappingRef = useRef('');
+  const initialResponsesCompactModeRef = useRef(RESPONSES_COMPACT_MODE_DEFAULT);
   const headerProfileStrategy = useMemo(
     () =>
       getHeaderProfileStrategyFromSettings(inputs.settings) || {
@@ -1483,6 +1486,7 @@ const EditChannelModal = (props) => {
         .filter(Boolean);
       initialModelMappingRef.current = data.model_mapping || '';
       initialStatusCodeMappingRef.current = data.status_code_mapping || '';
+      initialResponsesCompactModeRef.current = data.responses_compact_mode;
 
       let parsedIonet = null;
       if (data.other_info) {
@@ -1855,6 +1859,7 @@ const EditChannelModal = (props) => {
       initialModelsRef.current = [];
       initialModelMappingRef.current = '';
       initialStatusCodeMappingRef.current = '';
+      initialResponsesCompactModeRef.current = RESPONSES_COMPACT_MODE_DEFAULT;
     }
   }, [isEdit, props.visible]);
 
@@ -2332,6 +2337,11 @@ const EditChannelModal = (props) => {
       settings.allow_service_tier = localInputs.allow_service_tier === true;
       // 仅 OpenAI 渠道需要 store / safety_identifier / include_obfuscation
       if (localInputs.type === 1) {
+        resetResponsesCompactAutoFallbackOnModeChange(
+          settings,
+          localInputs.responses_compact_mode,
+          initialResponsesCompactModeRef.current,
+        );
         Object.assign(
           settings,
           buildResponsesCompactSettings(
@@ -2351,8 +2361,8 @@ const EditChannelModal = (props) => {
         settings.claude_beta_query = localInputs.claude_beta_query === true;
       }
     }
-    if (localInputs.type !== 1 && 'responses_compact_mode' in settings) {
-      delete settings.responses_compact_mode;
+    if (localInputs.type !== 1) {
+      clearResponsesCompactSettings(settings);
     }
     if (supportsResponsesBootstrapRecovery(localInputs.type)) {
       settings.responses_stream_bootstrap_recovery_enabled =

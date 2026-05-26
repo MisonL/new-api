@@ -80,6 +80,10 @@ func channelSupportsCompactRouteCandidate(channel *Channel, candidate routeModel
 		if compactBaseModelName, isCompact := ratio_setting.CompactBaseModelName(candidate.model); isCompact {
 			baseModelName = compactBaseModelName
 		}
+		if settings.IsAutoResponsesCompact() {
+			return channelAllowsNativeCompactFallback(channel, settings, baseModelName) ||
+				channelAllowsSyntheticCompactFallback(channel, baseModelName)
+		}
 		if settings.HasNativeResponsesCompact() {
 			return channelAllowsNativeCompactFallback(channel, settings, baseModelName)
 		}

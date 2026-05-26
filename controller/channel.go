@@ -541,6 +541,7 @@ func validateChannelOtherSettings(channel *model.Channel, passedHeaders map[stri
 		return err
 	}
 	settings.UserAgentStrategy = strategy
+	clearResponsesCompactSettingsForNonOpenAI(channel.Type, &settings)
 
 	raw, err := common.Marshal(settings)
 	if err != nil {
@@ -984,6 +985,7 @@ func UpdateChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	rawOtherSettings := channel.OtherSettings
 
 	// 使用统一的校验函数
 	if err := validateChannel(&channel.Channel, false); err != nil {
@@ -993,6 +995,7 @@ func UpdateChannel(c *gin.Context) {
 		})
 		return
 	}
+	responsesCompactAutoFallbackExplicitlySet := responsesCompactAutoFallbackMetadataExplicitlySet(rawOtherSettings)
 	// Preserve existing ChannelInfo to ensure multi-key channels keep correct state even if the client does not send ChannelInfo in the request.
 	originChannel, err := model.GetChannelById(channel.Id, true)
 	if err != nil {
@@ -1010,6 +1013,7 @@ func UpdateChannel(c *gin.Context) {
 	if channel.MultiKeyMode != nil && *channel.MultiKeyMode != "" {
 		channel.ChannelInfo.MultiKeyMode = constant.MultiKeyMode(*channel.MultiKeyMode)
 	}
+	resetResponsesCompactAutoFallbackOnModeChange(&channel.Channel, originChannel, responsesCompactAutoFallbackExplicitlySet)
 
 	// 处理多key模式下的密钥追加/覆盖逻辑
 	if channel.KeyMode != nil && channel.ChannelInfo.IsMultiKey {
@@ -1106,6 +1110,75 @@ func UpdateChannel(c *gin.Context) {
 		"data":    channel,
 	})
 	return
+}
+
+func resetResponsesCompactAutoFallbackOnModeChange(channel *model.Channel, originChannel *model.Channel, fallbackMetadataExplicitlySet bool) {
+	if channel == nil || originChannel == nil {
+		return
+	}
+	if channel.Type != constant.ChannelTypeOpenAI {
+		clearResponsesCompactSettings(channel)
+		return
+	}
+	nextSettings := channel.GetOtherSettings()
+	originSettings := originChannel.GetOtherSettings()
+	nextMode := nextSettings.NormalizedResponsesCompactModeSetting()
+	originMode := originSettings.NormalizedResponsesCompactModeSetting()
+	if nextMode != originMode {
+		nextSettings.ResponsesCompactAutoFallbackDate = 0
+		nextSettings.ResponsesCompactAutoFallbackReason = ""
+		channel.SetOtherSettings(nextSettings)
+		return
+	}
+	if !fallbackMetadataExplicitlySet && nextSettings.ResponsesCompactAutoFallbackDate == 0 && originSettings.ResponsesCompactAutoFallbackDate != 0 {
+		nextSettings.ResponsesCompactAutoFallbackDate = originSettings.ResponsesCompactAutoFallbackDate
+		nextSettings.ResponsesCompactAutoFallbackReason = originSettings.ResponsesCompactAutoFallbackReason
+		channel.SetOtherSettings(nextSettings)
+	}
+}
+
+func responsesCompactAutoFallbackMetadataExplicitlySet(rawSettings string) bool {
+	if strings.TrimSpace(rawSettings) == "" {
+		return false
+	}
+	settings := map[string]any{}
+	if err := common.UnmarshalJsonStr(rawSettings, &settings); err != nil {
+		return false
+	}
+	_, hasDate := settings["responses_compact_auto_fallback_date"]
+	_, hasReason := settings["responses_compact_auto_fallback_reason"]
+	return hasDate || hasReason
+}
+
+func clearResponsesCompactSettings(channel *model.Channel) {
+	settings := channel.GetOtherSettings()
+	if clearResponsesCompactSettingsForNonOpenAI(channel.Type, &settings) {
+		channel.SetOtherSettings(settings)
+	}
+}
+
+func clearResponsesCompactSettingsForNonOpenAI(channelType int, settings *dto.ChannelOtherSettings) bool {
+	if channelType == constant.ChannelTypeOpenAI || settings == nil {
+		return false
+	}
+	compactSettings := responsesCompactSettingsOnly{
+		Mode:           settings.ResponsesCompactMode,
+		FallbackDate:   settings.ResponsesCompactAutoFallbackDate,
+		FallbackReason: settings.ResponsesCompactAutoFallbackReason,
+	}
+	if compactSettings == (responsesCompactSettingsOnly{}) {
+		return false
+	}
+	settings.ResponsesCompactMode = ""
+	settings.ResponsesCompactAutoFallbackDate = 0
+	settings.ResponsesCompactAutoFallbackReason = ""
+	return true
+}
+
+type responsesCompactSettingsOnly struct {
+	Mode           dto.ResponsesCompactMode
+	FallbackDate   int
+	FallbackReason string
 }
 
 func FetchModels(c *gin.Context) {

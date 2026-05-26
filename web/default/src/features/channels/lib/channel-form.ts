@@ -58,7 +58,9 @@ export const channelFormSchema = z.object({
   allow_safety_identifier: z.boolean().optional(), // OpenAI only
   allow_include_obfuscation: z.boolean().optional(), // OpenAI: include usage obfuscation
   strip_codex_encrypted_context: z.boolean().optional(), // OpenAI: strip Codex encrypted context
-  responses_compact_mode: z.enum(['native', 'synthetic_summary']).optional(),
+  responses_compact_mode: z
+    .enum(['auto', 'native', 'synthetic_summary'])
+    .optional(),
   allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
   allow_speed: z.boolean().optional(), // Anthropic: speed mode control
   claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
@@ -341,11 +343,21 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
   }
 
   if (formData.type === 1) {
-    settingsObj.responses_compact_mode = normalizeResponsesCompactMode(
+    const previousResponsesCompactMode = normalizeResponsesCompactMode(
+      settingsObj.responses_compact_mode
+    )
+    const nextResponsesCompactMode = normalizeResponsesCompactMode(
       formData.responses_compact_mode
     )
-  } else if ('responses_compact_mode' in settingsObj) {
+    settingsObj.responses_compact_mode = nextResponsesCompactMode
+    if (previousResponsesCompactMode !== nextResponsesCompactMode) {
+      delete settingsObj.responses_compact_auto_fallback_date
+      delete settingsObj.responses_compact_auto_fallback_reason
+    }
+  } else {
     delete settingsObj.responses_compact_mode
+    delete settingsObj.responses_compact_auto_fallback_date
+    delete settingsObj.responses_compact_auto_fallback_reason
   }
 
   if (formData.type === 1) {

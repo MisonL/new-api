@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -985,6 +986,45 @@ func (channel *Channel) SetOtherSettings(setting dto.ChannelOtherSettings) {
 		return
 	}
 	channel.OtherSettings = string(settingBytes)
+}
+
+func MarkResponsesCompactAutoFallback(channelId int, reason string) error {
+	if channelId <= 0 {
+		return nil
+	}
+	var updatedChannel *Channel
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		channel := &Channel{}
+		query := tx
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(channel, channelId).Error; err != nil {
+			return err
+		}
+		settings := dto.ChannelOtherSettings{}
+		if channel.OtherSettings != "" {
+			if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+				return err
+			}
+		}
+		if !settings.IsAutoResponsesCompact() {
+			return nil
+		}
+		settings.MarkResponsesCompactAutoFallback(time.Now().UTC(), reason)
+		channel.SetOtherSettings(settings)
+		if err := tx.Model(&Channel{}).Where("id = ?", channelId).Update("settings", channel.OtherSettings).Error; err != nil {
+			return err
+		}
+		updatedChannel = channel
+		return nil
+	}); err != nil {
+		return err
+	}
+	if updatedChannel != nil {
+		CacheUpdateChannel(updatedChannel)
+	}
+	return nil
 }
 
 func (channel *Channel) GetParamOverride() map[string]interface{} {

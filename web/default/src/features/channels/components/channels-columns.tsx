@@ -49,8 +49,15 @@ import {
   parseModelsList,
   parseGroupsList,
   parseChannelSettings,
-  getResponsesCompactMode,
+  parseChannelOtherSettings,
+  isResponsesCompactAutoFallbackActiveFromSettings,
+  getResponsesCompactAutoFallbackReasonFromSettings,
+  getResponsesCompactModeFromSettings,
+  RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL,
+  RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP,
+  RESPONSES_COMPACT_AUTO_TOOLTIP,
   RESPONSES_COMPACT_BADGE_LABELS,
+  RESPONSES_COMPACT_MODE_AUTO,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   handleUpdateChannelField,
   handleUpdateTagField,
@@ -546,22 +553,47 @@ export function useChannelsColumns({
 
         // Regular channel row
         const settings = parseChannelSettings(channel.setting)
+        const compactSettings = parseChannelOtherSettings(channel.settings)
         const isPassThrough = settings.pass_through_body_enabled === true
-        const compactMode = getResponsesCompactMode(channel.settings)
-        const compactBadge =
+        const compactMode = getResponsesCompactModeFromSettings(compactSettings)
+        const compactAutoFallbackActive =
+          isResponsesCompactAutoFallbackActiveFromSettings(compactSettings)
+        const compactAutoFallbackReason = compactAutoFallbackActive
+          ? getResponsesCompactAutoFallbackReasonFromSettings(compactSettings)
+          : ''
+        const compactBadge: {
+          label: string
+          tooltip: string
+          variant: 'amber' | 'blue' | 'purple' | 'success'
+          detail?: string
+        } | null =
           channel.type === 1
-            ? compactMode === RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
+            ? compactMode === RESPONSES_COMPACT_MODE_AUTO &&
+              compactAutoFallbackActive
+              ? {
+                  label: RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL,
+                  tooltip: RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP,
+                  variant: 'amber',
+                  detail: compactAutoFallbackReason || undefined,
+                }
+              : compactMode === RESPONSES_COMPACT_MODE_AUTO
+                ? {
+                    label: RESPONSES_COMPACT_BADGE_LABELS.auto,
+                    tooltip: RESPONSES_COMPACT_AUTO_TOOLTIP,
+                    variant: 'blue',
+                  }
+                : compactMode === RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
               ? {
                   label:
                     RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
                   tooltip:
                     RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
-                  variant: 'purple' as const,
+                  variant: 'purple',
                 }
               : {
                   label: RESPONSES_COMPACT_BADGE_LABELS.native,
                   tooltip: RESPONSES_COMPACT_BADGE_LABELS.native,
-                  variant: 'success' as const,
+                  variant: 'success',
                 }
             : null
 
@@ -606,7 +638,14 @@ export function useChannelsColumns({
                         </span>
                       </TooltipTrigger>
                       <TooltipContent side='top'>
-                        {t(compactBadge.tooltip)}
+                        <div className='max-w-xs space-y-1'>
+                          <div>{t(compactBadge.tooltip)}</div>
+                          {compactBadge.detail && (
+                            <div className='text-muted-foreground text-xs'>
+                              {compactBadge.detail}
+                            </div>
+                          )}
+                        </div>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>

@@ -125,6 +125,8 @@ import {
   extractMappingSourceModels,
   hasModelConfigChanged,
   findMissingModelsInMapping,
+  isResponsesCompactAutoFallbackActive,
+  getResponsesCompactAutoFallbackReason,
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   validateModelMappingJson,
@@ -387,6 +389,11 @@ export function ChannelMutateDrawer({
     'upstream_model_update_check_enabled'
   )
   const currentSettings = form.watch('settings')
+  const compactAutoFallbackActive = isResponsesCompactAutoFallbackActive(
+    currentSettings
+  )
+  const compactAutoFallbackReason =
+    getResponsesCompactAutoFallbackReason(currentSettings)
   const {
     unlocked: doubaoApiEditUnlocked,
     handleClick: handleApiConfigSecretClick,
@@ -2888,6 +2895,11 @@ export function ChannelMutateDrawer({
                                             </SelectTrigger>
                                           </FormControl>
                                           <SelectContent>
+                                            <SelectItem value='auto'>
+                                              {t(
+                                                'Auto: native first, synthetic fallback'
+                                              )}
+                                            </SelectItem>
                                             <SelectItem value='native'>
                                               {t(
                                                 'Native /v1/responses/compact'
@@ -2904,6 +2916,25 @@ export function ChannelMutateDrawer({
                                             </SelectItem>
                                           </SelectContent>
                                         </Select>
+                                        {field.value === 'auto' && (
+                                          <div className='space-y-1'>
+                                            <p className='text-muted-foreground text-xs'>
+                                              {t(
+                                                'Auto mode tries native compact first, falls back to synthetic summary after an upstream compatibility failure, and retries native once per day.'
+                                              )}
+                                            </p>
+                                            {compactAutoFallbackActive && (
+                                              <p className='text-amber-600 dark:text-amber-400 text-xs'>
+                                                {t(
+                                                  'Auto mode is using synthetic summary fallback today. Native compact will be retried automatically on the next day.'
+                                                )}
+                                                {compactAutoFallbackReason
+                                                  ? ` ${compactAutoFallbackReason}`
+                                                  : ''}
+                                              </p>
+                                            )}
+                                          </div>
+                                        )}
                                         {field.value === 'native' && (
                                           <p className='text-muted-foreground text-xs'>
                                             {t(

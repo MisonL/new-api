@@ -23,32 +23,39 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  RESPONSES_COMPACT_MODE_AUTO,
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_MODE_NATIVE,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   buildResponsesCompactSettings,
+  clearResponsesCompactSettings,
   normalizeResponsesCompactMode,
+  resetResponsesCompactAutoFallbackOnModeChange,
 } from '../src/helpers/responsesCompactSettings.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
 describe('classic responses compact settings', () => {
-  test('defaults missing compact mode to native', () => {
-    expect(RESPONSES_COMPACT_MODE_DEFAULT).toBe(RESPONSES_COMPACT_MODE_NATIVE);
+  test('defaults missing compact mode to auto', () => {
+    expect(RESPONSES_COMPACT_MODE_DEFAULT).toBe(RESPONSES_COMPACT_MODE_AUTO);
     expect(normalizeResponsesCompactMode(undefined)).toBe(
-      RESPONSES_COMPACT_MODE_NATIVE,
+      RESPONSES_COMPACT_MODE_AUTO,
     );
-    expect(normalizeResponsesCompactMode('')).toBe(
-      RESPONSES_COMPACT_MODE_NATIVE,
-    );
+    expect(normalizeResponsesCompactMode('')).toBe(RESPONSES_COMPACT_MODE_AUTO);
     expect(normalizeResponsesCompactMode('convert')).toBe(
       RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
     );
-    for (const mode of ['auto', 'disabled', 'unsupported', 'unexpected']) {
+    expect(normalizeResponsesCompactMode('auto')).toBe(
+      RESPONSES_COMPACT_MODE_AUTO,
+    );
+    for (const mode of ['disabled', 'unsupported']) {
       expect(normalizeResponsesCompactMode(mode)).toBe(
         RESPONSES_COMPACT_MODE_NATIVE,
       );
     }
+    expect(normalizeResponsesCompactMode('unexpected')).toBe(
+      RESPONSES_COMPACT_MODE_AUTO,
+    );
   });
 
   test('keeps synthetic compact mode explicit', () => {
@@ -59,7 +66,10 @@ describe('classic responses compact settings', () => {
 
   test('stores compact mode only for OpenAI channels', () => {
     expect(buildResponsesCompactSettings(1, undefined)).toEqual({
-      responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
+      responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+    });
+    expect(buildResponsesCompactSettings(1, RESPONSES_COMPACT_MODE_AUTO)).toEqual({
+      responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
     });
     expect(
       buildResponsesCompactSettings(
@@ -75,6 +85,70 @@ describe('classic responses compact settings', () => {
     expect(
       buildResponsesCompactSettings(14, RESPONSES_COMPACT_MODE_NATIVE),
     ).toEqual({});
+  });
+
+  test('resets auto fallback state only when compact mode changes', () => {
+    const settings = {
+      responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+      responses_compact_auto_fallback_date: 20260526,
+      responses_compact_auto_fallback_reason: 'status_code=404',
+    };
+    expect(
+      resetResponsesCompactAutoFallbackOnModeChange(
+        settings,
+        RESPONSES_COMPACT_MODE_AUTO,
+      ),
+    ).toBe(false);
+    expect(settings.responses_compact_auto_fallback_date).toBe(20260526);
+
+    expect(
+      resetResponsesCompactAutoFallbackOnModeChange(
+        settings,
+        RESPONSES_COMPACT_MODE_NATIVE,
+      ),
+    ).toBe(true);
+    expect(settings.responses_compact_auto_fallback_date).toBeUndefined();
+    expect(settings.responses_compact_auto_fallback_reason).toBeUndefined();
+
+    expect(
+      resetResponsesCompactAutoFallbackOnModeChange(
+        null,
+        RESPONSES_COMPACT_MODE_NATIVE,
+      ),
+    ).toBe(false);
+  });
+
+  test('resets auto fallback state using initial compact mode override', () => {
+    const settings = {
+      responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
+      responses_compact_auto_fallback_date: 20260526,
+      responses_compact_auto_fallback_reason: 'status_code=404',
+    };
+
+    expect(
+      resetResponsesCompactAutoFallbackOnModeChange(
+        settings,
+        RESPONSES_COMPACT_MODE_NATIVE,
+        RESPONSES_COMPACT_MODE_AUTO,
+      ),
+    ).toBe(true);
+
+    expect(settings.responses_compact_auto_fallback_date).toBeUndefined();
+    expect(settings.responses_compact_auto_fallback_reason).toBeUndefined();
+  });
+
+  test('clears all compact metadata for non OpenAI channels', () => {
+    const settings = {
+      responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+      responses_compact_auto_fallback_date: 20260526,
+      responses_compact_auto_fallback_reason: 'status_code=404',
+    };
+
+    clearResponsesCompactSettings(settings);
+
+    expect(settings.responses_compact_mode).toBeUndefined();
+    expect(settings.responses_compact_auto_fallback_date).toBeUndefined();
+    expect(settings.responses_compact_auto_fallback_reason).toBeUndefined();
   });
 
   test('renders a single compact field label in channel advanced settings', () => {
