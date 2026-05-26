@@ -49,11 +49,9 @@ import {
   parseModelsList,
   parseGroupsList,
   parseChannelSettings,
-  getResponsesCompactConfigurationDiagnostic,
   getResponsesCompactMode,
   RESPONSES_COMPACT_BADGE_LABELS,
-  RESPONSES_COMPACT_MODE_DISABLED,
-  RESPONSES_COMPACT_MODE_NATIVE,
+  RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   handleUpdateChannelField,
   handleUpdateTagField,
   handleUpdateChannelBalance,
@@ -549,34 +547,22 @@ export function useChannelsColumns({
         // Regular channel row
         const settings = parseChannelSettings(channel.setting)
         const isPassThrough = settings.pass_through_body_enabled === true
-        const compactDiagnostic = getResponsesCompactConfigurationDiagnostic(
-          channel.type,
-          channel.settings,
-          channel.models,
-          channel.model_mapping || ''
-        )
         const compactMode = getResponsesCompactMode(channel.settings)
         const compactBadge =
           channel.type === 1
-            ? compactMode === RESPONSES_COMPACT_MODE_NATIVE
+            ? compactMode === RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
               ? {
+                  label:
+                    RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
+                  tooltip:
+                    RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
+                  variant: 'purple' as const,
+                }
+              : {
                   label: RESPONSES_COMPACT_BADGE_LABELS.native,
                   tooltip: RESPONSES_COMPACT_BADGE_LABELS.native,
                   variant: 'success' as const,
                 }
-              : compactMode === RESPONSES_COMPACT_MODE_DISABLED
-                ? {
-                    label: RESPONSES_COMPACT_BADGE_LABELS.disabled,
-                    tooltip:
-                      compactDiagnostic?.messageKey ||
-                      RESPONSES_COMPACT_BADGE_LABELS.disabled,
-                    variant: 'warning' as const,
-                  }
-                : {
-                    label: RESPONSES_COMPACT_BADGE_LABELS.convert,
-                    tooltip: RESPONSES_COMPACT_BADGE_LABELS.convert,
-                    variant: 'blue' as const,
-                  }
             : null
 
         return (

@@ -7,15 +7,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestChannelOtherSettingsDefaultsResponsesCompactConvert(t *testing.T) {
+func TestChannelOtherSettingsDefaultsResponsesCompactNative(t *testing.T) {
 	channel := &Channel{OtherSettings: `{}`}
 
 	settings := channel.GetOtherSettings()
 
-	require.False(t, settings.HasNativeResponsesCompact())
 	require.Empty(t, settings.ResponsesCompactMode)
-	require.Equal(t, dto.ResponsesCompactModeConvert, settings.ResponsesCompactModeOrDefault())
-	require.False(t, settings.HasDisabledResponsesCompact())
+	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactModeOrDefault())
+	require.True(t, settings.HasNativeResponsesCompact())
 }
 
 func TestChannelOtherSettingsResponsesCompactNativeRoundTrip(t *testing.T) {
@@ -29,33 +28,52 @@ func TestChannelOtherSettingsResponsesCompactNativeRoundTrip(t *testing.T) {
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactMode)
 	require.True(t, settings.HasNativeResponsesCompact())
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactModeOrDefault())
-	require.False(t, settings.HasDisabledResponsesCompact())
 }
 
-func TestChannelOtherSettingsResponsesCompactCompatibilityModes(t *testing.T) {
+func TestChannelOtherSettingsResponsesCompactSyntheticRoundTrip(t *testing.T) {
+	channel := &Channel{}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeSynthetic,
+	})
+
+	settings := channel.GetOtherSettings()
+
+	require.Equal(t, dto.ResponsesCompactModeSynthetic, settings.ResponsesCompactMode)
+	require.True(t, settings.HasSyntheticResponsesCompact())
+	require.Equal(t, dto.ResponsesCompactModeSynthetic, settings.ResponsesCompactModeOrDefault())
+	require.False(t, settings.HasNativeResponsesCompact())
+}
+
+func TestChannelOtherSettingsResponsesCompactLegacyModesNormalizeSafely(t *testing.T) {
 	tests := []struct {
 		name     string
 		rawMode  dto.ResponsesCompactMode
 		expected dto.ResponsesCompactMode
-		disabled bool
 	}{
 		{
-			name:     "disabled",
-			rawMode:  dto.ResponsesCompactModeDisabled,
-			expected: dto.ResponsesCompactModeDisabled,
-			disabled: true,
+			name:     "legacy convert",
+			rawMode:  dto.ResponsesCompactMode("convert"),
+			expected: dto.ResponsesCompactModeSynthetic,
+		},
+		{
+			name:     "legacy auto",
+			rawMode:  dto.ResponsesCompactMode("auto"),
+			expected: dto.ResponsesCompactModeNative,
+		},
+		{
+			name:     "legacy disabled",
+			rawMode:  dto.ResponsesCompactMode("disabled"),
+			expected: dto.ResponsesCompactModeNative,
 		},
 		{
 			name:     "legacy unsupported",
-			rawMode:  dto.ResponsesCompactModeUnsupported,
-			expected: dto.ResponsesCompactModeDisabled,
-			disabled: true,
+			rawMode:  dto.ResponsesCompactMode("unsupported"),
+			expected: dto.ResponsesCompactModeNative,
 		},
 		{
 			name:     "unknown",
 			rawMode:  dto.ResponsesCompactMode("unexpected"),
-			expected: dto.ResponsesCompactModeConvert,
-			disabled: false,
+			expected: dto.ResponsesCompactModeNative,
 		},
 	}
 
@@ -66,7 +84,8 @@ func TestChannelOtherSettingsResponsesCompactCompatibilityModes(t *testing.T) {
 			}
 
 			require.Equal(t, tt.expected, settings.ResponsesCompactModeOrDefault())
-			require.Equal(t, tt.disabled, settings.HasDisabledResponsesCompact())
+			require.Equal(t, tt.expected == dto.ResponsesCompactModeNative, settings.HasNativeResponsesCompact())
+			require.Equal(t, tt.expected == dto.ResponsesCompactModeSynthetic, settings.HasSyntheticResponsesCompact())
 		})
 	}
 }

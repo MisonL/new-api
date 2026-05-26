@@ -8,9 +8,8 @@ import {
   getPaginationRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { AlertTriangle, Loader2, Settings } from 'lucide-react'
+import { Loader2, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -47,12 +46,7 @@ import {
 import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-table'
 import { DataTablePagination } from '@/components/data-table/pagination'
 import { StatusBadge } from '@/components/status-badge'
-import {
-  RESPONSES_COMPACT_BADGE_LABELS,
-  formatResponseTime,
-  getResponsesCompactMode,
-  handleTestChannel,
-} from '../../lib'
+import { formatResponseTime, handleTestChannel } from '../../lib'
 import { useChannels } from '../channels-provider'
 
 type ChannelTestDialogProps = {
@@ -140,13 +134,6 @@ export function ChannelTestDialog({
   }, [open, currentRow?.id, resetState])
 
   const streamDisabled = STREAM_INCOMPATIBLE_ENDPOINTS.has(endpointType)
-  const compactTestDiagnostic =
-    endpointType === 'openai-response-compact' &&
-    currentRow?.type === 1 &&
-    getResponsesCompactMode(currentRow.settings) === 'disabled'
-      ? RESPONSES_COMPACT_BADGE_LABELS.openaiCompactDisabled
-      : undefined
-
   useEffect(() => {
     if (streamDisabled) {
       setIsStreamTest(false)
@@ -202,15 +189,6 @@ export function ChannelTestDialog({
     async (model: string) => {
       if (!currentRow) return
 
-      if (compactTestDiagnostic) {
-        const localizedError = t(compactTestDiagnostic)
-        updateTestResult(model, {
-          status: 'error',
-          error: localizedError,
-        })
-        return
-      }
-
       markModelTesting(model, true)
       updateTestResult(model, { status: 'testing' })
 
@@ -240,15 +218,7 @@ export function ChannelTestDialog({
         markModelTesting(model, false)
       }
     },
-    [
-      compactTestDiagnostic,
-      currentRow,
-      endpointType,
-      isStreamTest,
-      markModelTesting,
-      t,
-      updateTestResult,
-    ]
+    [currentRow, endpointType, isStreamTest, markModelTesting, updateTestResult]
   )
 
   const handleBatchTest = useCallback(
@@ -500,13 +470,6 @@ export function ChannelTestDialog({
               </p>
             </div>
           </div>
-
-          {compactTestDiagnostic && (
-            <Alert className='border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200'>
-              <AlertTriangle className='h-4 w-4' />
-              <AlertDescription>{t(compactTestDiagnostic)}</AlertDescription>
-            </Alert>
-          )}
 
           <div className='space-y-3 max-sm:has-[div[role="toolbar"]]:pb-16'>
             <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>

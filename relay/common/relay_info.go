@@ -195,6 +195,26 @@ type RelayInfo struct {
 	*TaskRelayInfo
 }
 
+func (info *RelayInfo) SyntheticCompactScope() types.SyntheticCompactStateScope {
+	if info == nil {
+		return types.SyntheticCompactStateScope{}
+	}
+	group := strings.TrimSpace(info.UsingGroup)
+	if group == "" {
+		group = strings.TrimSpace(info.TokenGroup)
+	}
+	scope := types.SyntheticCompactStateScope{
+		UserID:  info.UserId,
+		TokenID: info.TokenId,
+		Group:   group,
+	}
+	if info.ChannelMeta != nil {
+		scope.ChannelID = info.ChannelId
+		scope.ChannelType = info.ChannelType
+	}
+	return scope
+}
+
 func ShouldStripCodexEncryptedContext(info *RelayInfo) bool {
 	if info == nil || info.ChannelMeta == nil || !info.ChannelOtherSettings.StripCodexEncryptedContext {
 		return false
@@ -213,7 +233,7 @@ func ShouldConvertResponsesRequest(info *RelayInfo) bool {
 	if ShouldStripCodexEncryptedContext(info) {
 		return true
 	}
-	return IsConvertOpenAICompatibleResponsesCompact(info)
+	return IsSyntheticOpenAICompatibleResponsesCompact(info)
 }
 
 func IsOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
@@ -223,23 +243,29 @@ func IsOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
 		info.ChannelType == constant.ChannelTypeOpenAI
 }
 
+func IsOpenAICompatibleResponses(info *RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		(info.RelayMode == relayconstant.RelayModeResponses || info.RelayMode == relayconstant.RelayModeResponsesCompact) &&
+		(info.ChannelType == constant.ChannelTypeOpenAI || info.ChannelType == constant.ChannelTypeAzure)
+}
+
 func IsNativeOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
 	return IsOpenAICompatibleResponsesCompact(info) &&
 		info.ChannelOtherSettings.HasNativeResponsesCompact()
 }
 
-func IsConvertOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
+func IsSyntheticOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
 	return IsOpenAICompatibleResponsesCompact(info) &&
-		info.ChannelOtherSettings.ResponsesCompactModeOrDefault() == dto.ResponsesCompactModeConvert
+		info.ChannelOtherSettings.HasSyntheticResponsesCompact()
 }
 
-func IsDisabledOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
-	return IsOpenAICompatibleResponsesCompact(info) &&
-		info.ChannelOtherSettings.HasDisabledResponsesCompact()
-}
-
-func IsUnsupportedOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
-	return IsDisabledOpenAICompatibleResponsesCompact(info)
+func ShouldHandleSyntheticOpenAICompatibleResponses(info *RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ChannelType == constant.ChannelTypeOpenAI &&
+		(info.RelayMode == relayconstant.RelayModeResponses || info.RelayMode == relayconstant.RelayModeResponsesCompact) &&
+		info.ChannelOtherSettings.HasSyntheticResponsesCompact()
 }
 
 // ResetBillingMetadata refunds the active billing session and clears cached billing fields.

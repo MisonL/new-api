@@ -6,14 +6,9 @@ import {
 } from '../src/features/channels/lib/channel-form'
 import {
   RESPONSES_COMPACT_BADGE_KEYS,
-  RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED,
-  RESPONSES_COMPACT_DIAGNOSTIC_MESSAGE_KEYS,
-  RESPONSES_COMPACT_MODE_CONVERT,
-  RESPONSES_COMPACT_MODE_DISABLED,
   RESPONSES_COMPACT_MODE_NATIVE,
-  getResponsesCompactConfigurationDiagnostic,
+  RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   getResponsesCompactMode,
-  hasResponsesCompactModelConfigured,
 } from '../src/features/channels/lib/channel-utils'
 import type { Channel } from '../src/features/channels/types'
 import en from '../src/i18n/locales/en.json'
@@ -89,14 +84,23 @@ describe('channel responses compact settings', () => {
   test('normalizes legacy and unknown compact modes', () => {
     expect(
       getResponsesCompactMode(
-        JSON.stringify({ responses_compact_mode: 'unsupported' })
+        JSON.stringify({ responses_compact_mode: 'synthetic_summary' })
       )
-    ).toBe(RESPONSES_COMPACT_MODE_DISABLED)
+    ).toBe(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY)
+
     expect(
       getResponsesCompactMode(
-        JSON.stringify({ responses_compact_mode: 'unexpected' })
+        JSON.stringify({ responses_compact_mode: 'convert' })
       )
-    ).toBe(RESPONSES_COMPACT_MODE_CONVERT)
+    ).toBe(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY)
+
+    for (const mode of ['auto', 'disabled', 'unsupported', 'unexpected']) {
+      expect(
+        getResponsesCompactMode(
+          JSON.stringify({ responses_compact_mode: mode })
+        )
+      ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    }
   })
 
   test('defaults existing Azure and empty records to native', () => {
@@ -118,22 +122,34 @@ describe('channel responses compact settings', () => {
     ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
   })
 
-  test('loads legacy and unknown compact modes into form defaults', () => {
+  test('loads synthetic and normalizes legacy compact modes into form defaults', () => {
     expect(
       transformChannelToFormDefaults(
         makeChannel({
-          settings: JSON.stringify({ responses_compact_mode: 'unsupported' }),
+          settings: JSON.stringify({
+            responses_compact_mode: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+          }),
         })
       ).responses_compact_mode
-    ).toBe(RESPONSES_COMPACT_MODE_DISABLED)
+    ).toBe(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY)
 
     expect(
       transformChannelToFormDefaults(
         makeChannel({
-          settings: JSON.stringify({ responses_compact_mode: 'unexpected' }),
+          settings: JSON.stringify({ responses_compact_mode: 'convert' }),
         })
       ).responses_compact_mode
-    ).toBe(RESPONSES_COMPACT_MODE_CONVERT)
+    ).toBe(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY)
+
+    for (const mode of ['auto', 'disabled', 'unsupported', 'unexpected']) {
+      expect(
+        transformChannelToFormDefaults(
+          makeChannel({
+            settings: JSON.stringify({ responses_compact_mode: mode }),
+          })
+        ).responses_compact_mode
+      ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    }
   })
 
   test('loads and stores native compact mode for OpenAI channels', () => {
@@ -156,9 +172,7 @@ describe('channel responses compact settings', () => {
     })
     const stored = JSON.parse(String(payload.channel.settings))
 
-    expect(stored.responses_compact_mode).toBe(
-      RESPONSES_COMPACT_MODE_NATIVE
-    )
+    expect(stored.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_NATIVE)
   })
 
   test('drops compact mode from non OpenAI channel settings', () => {
@@ -172,97 +186,35 @@ describe('channel responses compact settings', () => {
     expect(stored.responses_compact_mode).toBeUndefined()
   })
 
-  test('stores disabled compact mode for OpenAI channels', () => {
+  test('normalizes legacy convert compact mode to synthetic before storing', () => {
     const payload = transformFormDataToCreatePayload({
       ...CHANNEL_FORM_DEFAULT_VALUES,
       type: 1,
-      responses_compact_mode: RESPONSES_COMPACT_MODE_DISABLED,
+      responses_compact_mode: 'convert' as never,
     })
     const stored = JSON.parse(String(payload.channel.settings))
 
     expect(stored.responses_compact_mode).toBe(
-      RESPONSES_COMPACT_MODE_DISABLED
+      RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
     )
   })
 
-  test('detects compact model configuration in models and mappings', () => {
-    expect(
-      hasResponsesCompactModelConfigured(
-        'gpt-5.5-openai-compact,gpt-5.5',
-        ''
-      )
-    ).toBe(true)
-    expect(
-      hasResponsesCompactModelConfigured(
-        'gpt-5.5',
-        '{"gpt-5.5-openai-compact":"gpt-5.5"}'
-      )
-    ).toBe(true)
-    expect(hasResponsesCompactModelConfigured('gpt-5.5', '{}')).toBe(false)
-  })
-
-  test('reports compact model configuration as safe in default native mode', () => {
-    expect(
-      getResponsesCompactConfigurationDiagnostic(
-        1,
-        '{}',
-        'gpt-5.5-openai-compact',
-        '{}'
-      )
-    ).toBeUndefined()
-  })
-
-  test('reports compact model configuration when compact is disabled', () => {
-    expect(
-      getResponsesCompactConfigurationDiagnostic(
-        1,
-        JSON.stringify({
-          responses_compact_mode: RESPONSES_COMPACT_MODE_DISABLED,
-        }),
-        'gpt-5.5-openai-compact',
-        '{}'
-      )
-    ).toEqual({
-      code: RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED,
-      messageKey:
-        RESPONSES_COMPACT_DIAGNOSTIC_MESSAGE_KEYS[
-          RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED
-        ],
+  test('stores synthetic summary compact mode for OpenAI channels', () => {
+    const payload = transformFormDataToCreatePayload({
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      type: 1,
+      responses_compact_mode: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
     })
-    expect(
-      getResponsesCompactConfigurationDiagnostic(
-        1,
-        JSON.stringify({ responses_compact_mode: 'native' }),
-        'gpt-5.5-openai-compact',
-        '{}'
-      )
-    ).toBeUndefined()
-    expect(
-      getResponsesCompactConfigurationDiagnostic(
-        14,
-        '{}',
-        'gpt-5.5-openai-compact',
-        '{}'
-      )
-    ).toBeUndefined()
+    const stored = JSON.parse(String(payload.channel.settings))
+
+    expect(stored.responses_compact_mode).toBe(
+      RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
+    )
   })
 
   test('has translations for dynamic compact badge labels and tooltips', () => {
     for (const locale of Object.values(locales)) {
       for (const key of RESPONSES_COMPACT_BADGE_KEYS) {
-        expect(locale.translation[key]).toBeDefined()
-        expect(locale.translation[key]).not.toBe('')
-      }
-    }
-  })
-
-  test('has translations for compact diagnostic messages', () => {
-    const diagnosticKeys = Object.values(
-      RESPONSES_COMPACT_DIAGNOSTIC_MESSAGE_KEYS
-    )
-
-    for (const locale of Object.values(locales)) {
-      for (const key of diagnosticKeys) {
         expect(locale.translation[key]).toBeDefined()
         expect(locale.translation[key]).not.toBe('')
       }

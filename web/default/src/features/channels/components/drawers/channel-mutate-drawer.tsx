@@ -10,7 +10,6 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AlertTriangle,
   ArrowRight,
   HelpCircle,
   Loader2,
@@ -126,9 +125,8 @@ import {
   extractMappingSourceModels,
   hasModelConfigChanged,
   findMissingModelsInMapping,
-  getResponsesCompactConfigurationDiagnostic,
   RESPONSES_COMPACT_MODE_DEFAULT,
-  RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED,
+  RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   validateModelMappingJson,
 } from '../../lib'
 import {
@@ -384,7 +382,6 @@ export function ChannelMutateDrawer({
   const currentBaseUrl = form.watch('base_url')
   const currentModels = form.watch('models')
   const currentModelMapping = form.watch('model_mapping')
-  const responsesCompactMode = form.watch('responses_compact_mode')
   const awsKeyType = form.watch('aws_key_type')
   const upstreamModelUpdateCheckEnabled = form.watch(
     'upstream_model_update_check_enabled'
@@ -474,31 +471,6 @@ export function ChannelMutateDrawer({
     }
     return options
   }, [currentType, t])
-
-  const responsesCompactSettingsForPreview = useMemo(
-    () =>
-      JSON.stringify({
-        responses_compact_mode:
-          responsesCompactMode || RESPONSES_COMPACT_MODE_DEFAULT,
-      }),
-    [responsesCompactMode]
-  )
-
-  const responsesCompactDiagnostic = useMemo(
-    () =>
-      getResponsesCompactConfigurationDiagnostic(
-        currentType,
-        responsesCompactSettingsForPreview,
-        currentModels || '',
-        currentModelMapping || ''
-      ),
-    [
-      currentType,
-      currentModels,
-      currentModelMapping,
-      responsesCompactSettingsForPreview,
-    ]
-  )
 
   // Extract redirect models from model_mapping (target values)
   const redirectModelList = useMemo(
@@ -1041,28 +1013,6 @@ export function ChannelMutateDrawer({
             form.setValue('models', data.models)
           }
         }
-      }
-
-      const compactDiagnostic = getResponsesCompactConfigurationDiagnostic(
-        data.type,
-        JSON.stringify({
-          responses_compact_mode:
-            data.responses_compact_mode || RESPONSES_COMPACT_MODE_DEFAULT,
-        }),
-        data.models || '',
-        data.model_mapping || ''
-      )
-      if (
-        compactDiagnostic?.code ===
-        RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED
-      ) {
-        const localizedMessage = t(compactDiagnostic.messageKey)
-        form.setError('responses_compact_mode', {
-          type: 'manual',
-          message: localizedMessage,
-        })
-        toast.error(localizedMessage)
-        return
       }
 
       setIsSubmitting(true)
@@ -2917,9 +2867,7 @@ export function ChannelMutateDrawer({
                                       <FormItem className='space-y-2 px-4 py-3'>
                                         <div className='space-y-0.5'>
                                           <FormLabel className='text-sm'>
-                                            {t(
-                                              'Responses Compact capability'
-                                            )}
+                                            {t('Responses Compact capability')}
                                           </FormLabel>
                                           <FormDescription>
                                             {t(
@@ -2940,32 +2888,22 @@ export function ChannelMutateDrawer({
                                             </SelectTrigger>
                                           </FormControl>
                                           <SelectContent>
-                                            <SelectItem value='convert'>
-                                              {t(
-                                                'Convert to /v1/responses'
-                                              )}
-                                            </SelectItem>
                                             <SelectItem value='native'>
                                               {t(
                                                 'Native /v1/responses/compact'
                                               )}
                                             </SelectItem>
-                                            <SelectItem value='disabled'>
-                                              {t('Disabled')}
+                                            <SelectItem
+                                              value={
+                                                RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
+                                              }
+                                            >
+                                              {t(
+                                                'Synthetic summary via /v1/responses'
+                                              )}
                                             </SelectItem>
                                           </SelectContent>
                                         </Select>
-                                        {responsesCompactDiagnostic?.code ===
-                                          RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED && (
-                                          <Alert className='border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200'>
-                                            <AlertTriangle className='h-4 w-4' />
-                                            <AlertDescription>
-                                              {t(
-                                                responsesCompactDiagnostic.messageKey
-                                              )}
-                                            </AlertDescription>
-                                          </Alert>
-                                        )}
                                         {field.value === 'native' && (
                                           <p className='text-muted-foreground text-xs'>
                                             {t(
@@ -2973,11 +2911,11 @@ export function ChannelMutateDrawer({
                                             )}
                                           </p>
                                         )}
-                                        {(!field.value ||
-                                          field.value === 'convert') && (
+                                        {field.value ===
+                                          RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY && (
                                           <p className='text-muted-foreground text-xs'>
                                             {t(
-                                              'In convert mode, model mapping may map compact virtual models to ordinary upstream Responses models while preserving previous_response_id.'
+                                              'Synthetic summary mode stores a generated summary in New API and injects it into later Responses requests.'
                                             )}
                                           </p>
                                         )}

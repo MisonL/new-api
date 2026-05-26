@@ -17,9 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-export const RESPONSES_COMPACT_MODE_CONVERT = 'convert';
 export const RESPONSES_COMPACT_MODE_NATIVE = 'native';
-export const RESPONSES_COMPACT_MODE_DISABLED = 'disabled';
+export const RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY = 'synthetic_summary';
 export const RESPONSES_COMPACT_MODE_DEFAULT = RESPONSES_COMPACT_MODE_NATIVE;
 
 export const RESPONSES_COMPACT_MODE_OPTIONS = [
@@ -28,12 +27,8 @@ export const RESPONSES_COMPACT_MODE_OPTIONS = [
     value: RESPONSES_COMPACT_MODE_NATIVE,
   },
   {
-    label: '转换为 /v1/responses',
-    value: RESPONSES_COMPACT_MODE_CONVERT,
-  },
-  {
-    label: '关闭',
-    value: RESPONSES_COMPACT_MODE_DISABLED,
+    label: '模拟摘要兼容',
+    value: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   },
 ];
 
@@ -41,16 +36,13 @@ export function normalizeResponsesCompactMode(mode) {
   if (mode === RESPONSES_COMPACT_MODE_NATIVE) {
     return RESPONSES_COMPACT_MODE_NATIVE;
   }
-  if (mode === RESPONSES_COMPACT_MODE_CONVERT) {
-    return RESPONSES_COMPACT_MODE_CONVERT;
+  if (mode === RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY) {
+    return RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY;
   }
-  if (mode === RESPONSES_COMPACT_MODE_DISABLED || mode === 'unsupported') {
-    return RESPONSES_COMPACT_MODE_DISABLED;
+  if (mode === 'convert') {
+    return RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY;
   }
-  if (mode === undefined || mode === null || mode === '') {
-    return RESPONSES_COMPACT_MODE_DEFAULT;
-  }
-  return RESPONSES_COMPACT_MODE_CONVERT;
+  return RESPONSES_COMPACT_MODE_DEFAULT;
 }
 
 export function buildResponsesCompactSettings(channelType, mode) {

@@ -275,13 +275,6 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 
 	info.IsChannelTest = true
 	info.InitChannelMeta(c)
-	if err := validateChannelTestResponsesCompactCapability(info); err != nil {
-		return testResult{
-			context:     c,
-			localErr:    err,
-			newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest),
-		}
-	}
 
 	err = attachTestBillingRequestInput(info, request)
 	if err != nil {
@@ -792,13 +785,6 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 		c.Request.URL.Path = "/v1/chat/completions"
 	}
 	return chatReq, nil
-}
-
-func validateChannelTestResponsesCompactCapability(info *relaycommon.RelayInfo) error {
-	if relaycommon.IsDisabledOpenAICompatibleResponsesCompact(info) {
-		return errors.New(responsesCompactChannelTestCapabilityError)
-	}
-	return nil
 }
 
 func findChannelTestResponsesViaChatRule(info *relaycommon.RelayInfo) *model_setting.ProtocolConversionRule {

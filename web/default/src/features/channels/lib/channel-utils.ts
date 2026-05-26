@@ -16,42 +16,22 @@ import type {
   ResponsesCompactMode,
 } from '../types'
 
-export const RESPONSES_COMPACT_MODE_CONVERT = 'convert' as const
 export const RESPONSES_COMPACT_MODE_NATIVE = 'native' as const
-export const RESPONSES_COMPACT_MODE_DISABLED = 'disabled' as const
-export const RESPONSES_COMPACT_MODE_DEFAULT =
-  RESPONSES_COMPACT_MODE_NATIVE
+export const RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY =
+  'synthetic_summary' as const
+export const RESPONSES_COMPACT_MODE_DEFAULT = RESPONSES_COMPACT_MODE_NATIVE
 
-export const RESPONSES_COMPACT_BADGE_LABELS = {
-  convert: 'Compact Convert',
+export const RESPONSES_COMPACT_BADGE_LABELS: Record<
+  ResponsesCompactMode,
+  string
+> = {
   native: 'Compact Native',
-  disabled: 'Compact Disabled',
-  disabledTooltip: 'Compact disabled',
-  openaiCompactDisabled: 'OpenAI Responses Compact is disabled on this channel.',
+  synthetic_summary: 'Compact Synthetic',
 } as const
 
 export const RESPONSES_COMPACT_BADGE_KEYS = Object.values(
   RESPONSES_COMPACT_BADGE_LABELS
 )
-
-export const RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED =
-  'compact_model_disabled_with_compact_model' as const
-export const RESPONSES_COMPACT_DIAGNOSTIC_DISABLED =
-  'compact_disabled' as const
-
-export const RESPONSES_COMPACT_DIAGNOSTIC_MESSAGE_KEYS = {
-  [RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED]:
-    'Compact model configured but compact disabled',
-  [RESPONSES_COMPACT_DIAGNOSTIC_DISABLED]: 'Compact disabled',
-} as const
-
-type ResponsesCompactDiagnosticCode =
-  keyof typeof RESPONSES_COMPACT_DIAGNOSTIC_MESSAGE_KEYS
-
-export type ResponsesCompactConfigurationDiagnostic = {
-  code: ResponsesCompactDiagnosticCode
-  messageKey: (typeof RESPONSES_COMPACT_DIAGNOSTIC_MESSAGE_KEYS)[ResponsesCompactDiagnosticCode]
-}
 
 export function normalizeResponsesCompactMode(
   mode: unknown
@@ -59,13 +39,13 @@ export function normalizeResponsesCompactMode(
   if (mode === RESPONSES_COMPACT_MODE_NATIVE) {
     return RESPONSES_COMPACT_MODE_NATIVE
   }
-  if (mode === RESPONSES_COMPACT_MODE_DISABLED || mode === 'unsupported') {
-    return RESPONSES_COMPACT_MODE_DISABLED
+  if (mode === RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY) {
+    return RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
   }
-  if (mode === undefined || mode === null || mode === '') {
-    return RESPONSES_COMPACT_MODE_DEFAULT
+  if (mode === 'convert') {
+    return RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
   }
-  return RESPONSES_COMPACT_MODE_CONVERT
+  return RESPONSES_COMPACT_MODE_DEFAULT
 }
 
 // ============================================================================
@@ -338,65 +318,6 @@ export function getResponsesCompactMode(
   return normalizeResponsesCompactMode(
     parseChannelOtherSettings(settingsStr).responses_compact_mode
   )
-}
-
-export function hasResponsesCompactModelConfigured(
-  models: string,
-  modelMapping: string
-): boolean {
-  const compactSuffix = '-openai-compact'
-  const hasCompactModel = models
-    .split(',')
-    .map((model) => model.trim())
-    .some((model) => model.endsWith(compactSuffix))
-
-  if (hasCompactModel) return true
-  if (!modelMapping?.trim()) return false
-
-  try {
-    const parsed = JSON.parse(modelMapping)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return false
-    }
-    return Object.entries(parsed).some(([key, value]) => {
-      if (key.trim().endsWith(compactSuffix)) return true
-      return typeof value === 'string' && value.trim().endsWith(compactSuffix)
-    })
-  } catch {
-    return modelMapping.includes(compactSuffix)
-  }
-}
-
-export function getResponsesCompactConfigurationDiagnostic(
-  channelType: number,
-  settingsStr: string | null | undefined,
-  models: string,
-  modelMapping: string
-): ResponsesCompactConfigurationDiagnostic | undefined {
-  if (channelType !== 1) return undefined
-  const compactMode = getResponsesCompactMode(settingsStr)
-  if (compactMode === RESPONSES_COMPACT_MODE_NATIVE) {
-    return undefined
-  }
-  if (compactMode === RESPONSES_COMPACT_MODE_DISABLED) {
-    if (hasResponsesCompactModelConfigured(models, modelMapping)) {
-      return {
-        code: RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED,
-        messageKey:
-          RESPONSES_COMPACT_DIAGNOSTIC_MESSAGE_KEYS[
-            RESPONSES_COMPACT_DIAGNOSTIC_COMPACT_MODEL_DISABLED
-          ],
-      }
-    }
-    return {
-      code: RESPONSES_COMPACT_DIAGNOSTIC_DISABLED,
-      messageKey:
-        RESPONSES_COMPACT_DIAGNOSTIC_MESSAGE_KEYS[
-          RESPONSES_COMPACT_DIAGNOSTIC_DISABLED
-        ],
-    }
-  }
-  return undefined
 }
 
 /**

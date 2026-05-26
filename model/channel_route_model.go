@@ -11,6 +11,7 @@ import (
 
 type routeModelCandidate struct {
 	model           string
+	compactRequest  bool
 	compactFallback bool
 }
 
@@ -27,11 +28,15 @@ func getGroupModelRouteCandidateMeta(modelName string) []routeModelCandidate {
 	if modelName == "" {
 		return nil
 	}
-	candidates := []routeModelCandidate{{model: modelName}}
+	baseModelName, isCompact := ratio_setting.CompactBaseModelName(modelName)
+	candidates := []routeModelCandidate{{
+		model:          modelName,
+		compactRequest: isCompact,
+	}}
 	if !common.GroupModelRouteHelperEnabled {
 		return candidates
 	}
-	if baseModelName, isCompact := ratio_setting.CompactBaseModelName(modelName); isCompact {
+	if isCompact {
 		candidates = appendRouteCandidate(candidates, baseModelName, true)
 		candidates = appendRouteCandidate(candidates, ratio_setting.FormatMatchingModelName(baseModelName), true)
 		return candidates
@@ -52,19 +57,36 @@ func appendRouteCandidate(candidates []routeModelCandidate, modelName string, co
 	}
 	candidates = append(candidates, routeModelCandidate{
 		model:           modelName,
+		compactRequest:  compactFallback,
 		compactFallback: compactFallback,
 	})
 	return candidates
 }
 
 func channelSupportsCompactRouteCandidate(channel *Channel, candidate routeModelCandidate) bool {
-	if channel == nil || !candidate.compactFallback {
+	if channel == nil {
+		return false
+	}
+	if !candidate.compactRequest {
 		return true
 	}
 	switch channel.Type {
 	case constant.ChannelTypeOpenAI:
-		settings, ok := channelNativeResponsesCompactSettings(channel)
-		return ok && channelAllowsNativeCompactFallback(channel, settings, candidate.model)
+		settings, ok := channelResponsesCompactSettings(channel)
+		if !ok {
+			return false
+		}
+		baseModelName := candidate.model
+		if compactBaseModelName, isCompact := ratio_setting.CompactBaseModelName(candidate.model); isCompact {
+			baseModelName = compactBaseModelName
+		}
+		if settings.HasNativeResponsesCompact() {
+			return channelAllowsNativeCompactFallback(channel, settings, baseModelName)
+		}
+		if settings.HasSyntheticResponsesCompact() {
+			return channelAllowsSyntheticCompactFallback(channel, baseModelName)
+		}
+		return false
 	case constant.ChannelTypeCodex:
 		return true
 	default:
@@ -72,15 +94,18 @@ func channelSupportsCompactRouteCandidate(channel *Channel, candidate routeModel
 	}
 }
 
-func channelNativeResponsesCompactSettings(channel *Channel) (dto.ChannelOtherSettings, bool) {
+func channelResponsesCompactSettings(channel *Channel) (dto.ChannelOtherSettings, bool) {
 	settings := dto.ChannelOtherSettings{}
-	if channel == nil || channel.OtherSettings == "" {
+	if channel == nil {
 		return settings, false
+	}
+	if channel.OtherSettings == "" {
+		return settings, true
 	}
 	if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
 		return settings, false
 	}
-	return settings, settings.HasNativeResponsesCompact()
+	return settings, true
 }
 
 func channelAllowsNativeCompactFallback(channel *Channel, settings dto.ChannelOtherSettings, baseModelName string) bool {
@@ -105,6 +130,24 @@ func channelAllowsNativeCompactFallback(channel *Channel, settings dto.ChannelOt
 	}
 	_, ok := compactSignals[compactModelName]
 	return ok
+}
+
+func channelAllowsSyntheticCompactFallback(channel *Channel, baseModelName string) bool {
+	baseModelName = strings.TrimSpace(baseModelName)
+	if baseModelName == "" {
+		return false
+	}
+	compactModelName := ratio_setting.WithCompactModelSuffix(baseModelName)
+	if modelListContains(channel.GetModels(), compactModelName) || modelListContains(channel.GetModels(), baseModelName) {
+		return true
+	}
+	for _, mappedBaseModelName := range compactMappedBaseModelCandidates(channel, baseModelName, compactModelName) {
+		if modelListContains(channel.GetModels(), mappedBaseModelName) ||
+			modelListContains(channel.GetModels(), ratio_setting.WithCompactModelSuffix(mappedBaseModelName)) {
+			return true
+		}
+	}
+	return false
 }
 
 func compactRouteTargetAllowed(channel *Channel, compactSignals map[string]struct{}, baseModelName string) bool {

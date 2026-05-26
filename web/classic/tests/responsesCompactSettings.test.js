@@ -24,9 +24,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   RESPONSES_COMPACT_MODE_DEFAULT,
-  RESPONSES_COMPACT_MODE_CONVERT,
-  RESPONSES_COMPACT_MODE_DISABLED,
   RESPONSES_COMPACT_MODE_NATIVE,
+  RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   buildResponsesCompactSettings,
   normalizeResponsesCompactMode,
 } from '../src/helpers/responsesCompactSettings.js';
@@ -42,23 +41,36 @@ describe('classic responses compact settings', () => {
     expect(normalizeResponsesCompactMode('')).toBe(
       RESPONSES_COMPACT_MODE_NATIVE,
     );
-    expect(normalizeResponsesCompactMode('unexpected')).toBe(
-      RESPONSES_COMPACT_MODE_CONVERT,
+    expect(normalizeResponsesCompactMode('convert')).toBe(
+      RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
     );
+    for (const mode of ['auto', 'disabled', 'unsupported', 'unexpected']) {
+      expect(normalizeResponsesCompactMode(mode)).toBe(
+        RESPONSES_COMPACT_MODE_NATIVE,
+      );
+    }
   });
 
-  test('keeps legacy unsupported mode disabled', () => {
-    expect(normalizeResponsesCompactMode('unsupported')).toBe(
-      RESPONSES_COMPACT_MODE_DISABLED,
-    );
-    expect(normalizeResponsesCompactMode(RESPONSES_COMPACT_MODE_DISABLED)).toBe(
-      RESPONSES_COMPACT_MODE_DISABLED,
-    );
+  test('keeps synthetic compact mode explicit', () => {
+    expect(
+      normalizeResponsesCompactMode(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY),
+    ).toBe(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY);
   });
 
   test('stores compact mode only for OpenAI channels', () => {
     expect(buildResponsesCompactSettings(1, undefined)).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
+    });
+    expect(
+      buildResponsesCompactSettings(
+        1,
+        RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+      ),
+    ).toEqual({
+      responses_compact_mode: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+    });
+    expect(buildResponsesCompactSettings(1, 'convert')).toEqual({
+      responses_compact_mode: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
     });
     expect(
       buildResponsesCompactSettings(14, RESPONSES_COMPACT_MODE_NATIVE),

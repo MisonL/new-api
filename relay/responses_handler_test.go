@@ -1,13 +1,16 @@
 package relay
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -125,11 +128,41 @@ func TestShouldConvertResponsesRequestForCodexEncryptedContextStrip(t *testing.T
 	require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
 
 	info.ChannelType = constant.ChannelTypeOpenAI
-	require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
+	require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
 
 	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeNative
 	require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
 
-	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeDisabled
-	require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
+	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeSynthetic
+	require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
+}
+
+func TestShouldHandleSyntheticResponsesForSyntheticCompactMode(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeSynthetic,
+			},
+		},
+	}
+
+	require.True(t, relaycommon.ShouldHandleSyntheticOpenAICompatibleResponses(info))
+
+	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeNative
+	require.False(t, relaycommon.ShouldHandleSyntheticOpenAICompatibleResponses(info))
+}
+
+func TestNewResponsesConvertRequestErrorMapsSyntheticClientErrorsToBadRequest(t *testing.T) {
+	for _, err := range []error{
+		service.ErrSyntheticCompactStateNotFound,
+		service.ErrSyntheticCompactRequiresVisibleInput,
+		service.ErrSyntheticCompactStateScopeMismatch,
+	} {
+		err := newResponsesConvertRequestError(err)
+
+		require.Equal(t, http.StatusBadRequest, err.StatusCode)
+		require.Equal(t, types.ErrorCodeConvertRequestFailed, err.GetErrorCode())
+	}
 }

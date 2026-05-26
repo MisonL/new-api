@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -28,14 +30,6 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		default:
 			return types.NewErrorWithStatusCode(
 				fmt.Errorf("unsupported endpoint %q for api type %d", "/v1/responses/compact", info.ApiType),
-				types.ErrorCodeInvalidRequest,
-				http.StatusBadRequest,
-				types.ErrOptionWithSkipRetry(),
-			)
-		}
-		if relaycommon.IsDisabledOpenAICompatibleResponsesCompact(info) {
-			return types.NewErrorWithStatusCode(
-				fmt.Errorf("responses compact disabled for this OpenAI-compatible channel"),
 				types.ErrorCodeInvalidRequest,
 				http.StatusBadRequest,
 				types.ErrOptionWithSkipRetry(),
@@ -93,72 +87,12 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		}
 		return nil
 	}
-	var requestBody io.Reader
-	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) && !relaycommon.ShouldConvertResponsesRequest(info)
-	if actualPassThroughBody {
-		storage, err := common.GetBodyStorage(c)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
-		}
-		requestBody = common.ReaderOnly(storage)
-	} else {
-		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-		relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
-		jsonData, err := common.Marshal(convertedRequest)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
 
-		// Converted requests always use filtering; raw pass-through is the only path that preserves user-controlled fields.
-		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, actualPassThroughBody)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-
-		// apply param override
-		if len(info.ParamOverride) > 0 {
-			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
-			if err != nil {
-				return newAPIErrorFromParamOverride(err)
-			}
-		}
-
-		if common.DebugEnabled {
-			println("requestBody: ", string(jsonData))
-		}
-		requestBody = bytes.NewBuffer(jsonData)
-	}
-
-	var httpResp *http.Response
-	resp, err := adaptor.DoRequest(c, info, requestBody)
-	if err != nil {
-		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
-	}
-
-	statusCodeMappingStr := c.GetString("status_code_mapping")
-
-	if resp != nil {
-		httpResp = resp.(*http.Response)
-
-		if httpResp.StatusCode != http.StatusOK {
-			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
-			// reset status code 重置状态码
-			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
-			return newAPIError
-		}
-	}
-
-	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
+	usageDto, newAPIError := executeOpenAIResponsesRequest(c, info, adaptor, request, passThroughGlobal)
 	if newAPIError != nil {
-		// reset status code 重置状态码
-		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
 	}
 
-	usageDto := usage.(*dto.Usage)
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		originModelName := info.OriginModelName
 		originPriceData := info.PriceData
@@ -182,6 +116,99 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		service.PostTextConsumeQuota(c, info, usageDto, nil)
 	}
 	return nil
+}
+
+func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, request *dto.OpenAIResponsesRequest, passThroughGlobal bool) (*dto.Usage, *types.NewAPIError) {
+	if request == nil {
+		return nil, types.NewErrorWithStatusCode(
+			fmt.Errorf("responses request is required"),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	var requestBody io.Reader
+	syntheticCompactReference := relaycommon.IsOpenAICompatibleResponses(info) &&
+		service.HasSyntheticCompactReference(*request)
+	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) &&
+		!relaycommon.ShouldConvertResponsesRequest(info) &&
+		!syntheticCompactReference
+	if actualPassThroughBody {
+		storage, err := common.GetBodyStorage(c)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
+		requestBody = common.ReaderOnly(storage)
+	} else {
+		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
+		if err != nil {
+			return nil, newResponsesConvertRequestError(err)
+		}
+		relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
+		jsonData, err := common.Marshal(convertedRequest)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+
+		// Converted requests always use filtering; raw pass-through is the only path that preserves user-controlled fields.
+		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, actualPassThroughBody)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+
+		// apply param override
+		if len(info.ParamOverride) > 0 {
+			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+			if err != nil {
+				return nil, newAPIErrorFromParamOverride(err)
+			}
+		}
+
+		if common.DebugEnabled {
+			println("requestBody: ", string(jsonData))
+		}
+		requestBody = bytes.NewBuffer(jsonData)
+	}
+
+	var httpResp *http.Response
+	resp, err := adaptor.DoRequest(c, info, requestBody)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+	}
+
+	statusCodeMappingStr := c.GetString("status_code_mapping")
+
+	if resp != nil {
+		httpResp = resp.(*http.Response)
+
+		if httpResp.StatusCode != http.StatusOK {
+			newAPIError := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
+			// reset status code 重置状态码
+			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
+			return nil, newAPIError
+		}
+	}
+
+	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
+	if newAPIError != nil {
+		// reset status code 重置状态码
+		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
+		return nil, newAPIError
+	}
+
+	usageDto := usage.(*dto.Usage)
+	return usageDto, nil
+}
+
+func newResponsesConvertRequestError(err error) *types.NewAPIError {
+	options := []types.NewAPIErrorOptions{types.ErrOptionWithSkipRetry()}
+	if errors.Is(err, service.ErrSyntheticCompactStateNotFound) ||
+		errors.Is(err, service.ErrSyntheticCompactRequiresVisibleInput) ||
+		errors.Is(err, service.ErrSyntheticCompactStateScopeMismatch) ||
+		errors.Is(err, service.ErrSyntheticCompactMultipleMarkers) {
+		options = append(options, types.ErrOptionWithStatusCode(http.StatusBadRequest))
+	}
+	return types.NewError(err, types.ErrorCodeConvertRequestFailed, options...)
 }
 
 func shouldRouteResponsesViaChat(info *relaycommon.RelayInfo, passThroughGlobal bool) bool {

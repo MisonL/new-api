@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -54,6 +55,16 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
 	isCompact := info != nil && info.RelayMode == relayconstant.RelayModeResponsesCompact
+	if !isCompact && service.HasSyntheticCompactReference(request) {
+		convertedRequest, ok, err := service.ApplySyntheticCompactState(c.Request.Context(), service.SyntheticCompactScopeFromSource(info), request)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, service.ErrSyntheticCompactStateNotFound
+		}
+		request = convertedRequest
+	}
 
 	if info != nil && info.ChannelSetting.SystemPrompt != "" {
 		systemPrompt := info.ChannelSetting.SystemPrompt

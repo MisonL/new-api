@@ -131,7 +131,7 @@ func getChannelByRouteModel(group string, routeCandidate routeModelCandidate, re
 
 	var err error = nil
 	var channelQuery *gorm.DB
-	if routeCandidate.compactFallback {
+	if routeCandidate.compactRequest {
 		channelQuery = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, routeCandidate.model, true)
 	} else {
 		channelQuery, err = getChannelQuery(group, routeCandidate.model, retry)

@@ -26,12 +26,10 @@ const (
 type ResponsesCompactMode string
 
 const (
-	// Keep the public setting tri-state. Empty or unknown values normalize to convert;
-	// the legacy unsupported value normalizes to disabled for existing records.
-	ResponsesCompactModeConvert     ResponsesCompactMode = "convert"
-	ResponsesCompactModeNative      ResponsesCompactMode = "native"
-	ResponsesCompactModeDisabled    ResponsesCompactMode = "disabled"
-	ResponsesCompactModeUnsupported ResponsesCompactMode = "unsupported"
+	// Only native compact and synthetic summary compatibility are public modes.
+	// Legacy convert mode keeps its compatible /v1/responses behavior via synthetic summaries.
+	ResponsesCompactModeNative    ResponsesCompactMode = "native"
+	ResponsesCompactModeSynthetic ResponsesCompactMode = "synthetic_summary"
 )
 
 type ChannelOtherSettings struct {
@@ -69,23 +67,25 @@ func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
 }
 
 func (s *ChannelOtherSettings) HasNativeResponsesCompact() bool {
-	return s != nil && s.ResponsesCompactMode == ResponsesCompactModeNative
+	return s != nil && s.ResponsesCompactModeOrDefault() == ResponsesCompactModeNative
+}
+
+func (s *ChannelOtherSettings) HasSyntheticResponsesCompact() bool {
+	return s != nil && s.ResponsesCompactModeOrDefault() == ResponsesCompactModeSynthetic
 }
 
 func (s *ChannelOtherSettings) ResponsesCompactModeOrDefault() ResponsesCompactMode {
 	if s == nil || s.ResponsesCompactMode == "" {
-		return ResponsesCompactModeConvert
+		return ResponsesCompactModeNative
 	}
 	switch s.ResponsesCompactMode {
 	case ResponsesCompactModeNative:
 		return ResponsesCompactModeNative
-	case ResponsesCompactModeDisabled, ResponsesCompactModeUnsupported:
-		return ResponsesCompactModeDisabled
+	case ResponsesCompactModeSynthetic:
+		return ResponsesCompactModeSynthetic
+	case ResponsesCompactMode("convert"):
+		return ResponsesCompactModeSynthetic
 	default:
-		return ResponsesCompactModeConvert
+		return ResponsesCompactModeNative
 	}
-}
-
-func (s *ChannelOtherSettings) HasDisabledResponsesCompact() bool {
-	return s != nil && s.ResponsesCompactModeOrDefault() == ResponsesCompactModeDisabled
 }

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { CHANNEL_STATUS, MODEL_FETCHABLE_TYPES } from '../constants'
-import type { Channel } from '../types'
+import type { Channel, ResponsesCompactMode } from '../types'
 import {
   RESPONSES_COMPACT_MODE_DEFAULT,
   normalizeResponsesCompactMode,
@@ -58,7 +58,7 @@ export const channelFormSchema = z.object({
   allow_safety_identifier: z.boolean().optional(), // OpenAI only
   allow_include_obfuscation: z.boolean().optional(), // OpenAI: include usage obfuscation
   strip_codex_encrypted_context: z.boolean().optional(), // OpenAI: strip Codex encrypted context
-  responses_compact_mode: z.enum(['convert', 'native', 'disabled']).optional(),
+  responses_compact_mode: z.enum(['native', 'synthetic_summary']).optional(),
   allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
   allow_speed: z.boolean().optional(), // Anthropic: speed mode control
   claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
@@ -174,7 +174,7 @@ export function transformChannelToFormDefaults(
   let allowSafetyIdentifier = false
   let allowIncludeObfuscation = false
   let stripCodexEncryptedContext = false
-  let responsesCompactMode: 'convert' | 'native' | 'disabled' =
+  let responsesCompactMode: ResponsesCompactMode =
     RESPONSES_COMPACT_MODE_DEFAULT
   let allowInferenceGeo = false
   let allowSpeed = false
@@ -341,12 +341,9 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
   }
 
   if (formData.type === 1) {
-    settingsObj.responses_compact_mode =
-      formData.responses_compact_mode === 'convert'
-        ? 'convert'
-        : formData.responses_compact_mode === 'disabled'
-          ? 'disabled'
-          : 'native'
+    settingsObj.responses_compact_mode = normalizeResponsesCompactMode(
+      formData.responses_compact_mode
+    )
   } else if ('responses_compact_mode' in settingsObj) {
     delete settingsObj.responses_compact_mode
   }
