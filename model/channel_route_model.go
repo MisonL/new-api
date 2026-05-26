@@ -63,6 +63,12 @@ func appendRouteCandidate(candidates []routeModelCandidate, modelName string, co
 	return candidates
 }
 
+func shouldPoolCompactRouteCandidates(candidates []routeModelCandidate) bool {
+	// Compact requests intentionally pool the exact compact model and eligible base-model fallbacks
+	// so explicit compact abilities do not monopolize compact traffic.
+	return len(candidates) > 1 && candidates[0].compactRequest
+}
+
 func channelSupportsCompactRouteCandidate(channel *Channel, candidate routeModelCandidate) bool {
 	if channel == nil {
 		return false

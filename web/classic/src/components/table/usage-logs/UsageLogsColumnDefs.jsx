@@ -830,6 +830,147 @@ function renderCompactDetailSummary(summarySegments) {
   );
 }
 
+function renderUsageLogInfoPopover(title, rows, options = {}) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return null;
+  }
+
+  const rootClassName = options.rootClassName || 'usage-log-info-popover';
+  const tagClassName =
+    options.tagClassName || 'usage-log-info-popover-label-tag';
+
+  return (
+    <div className={rootClassName}>
+      <div className='usage-log-info-popover-header'>
+        <span className={`usage-log-header-audit-label-tag ${tagClassName}`}>
+          {title}
+        </span>
+      </div>
+      <div className='usage-log-info-popover-row-grid'>
+        {rows.map(({ key, label, value, className }) => (
+          <div key={key || label} className='usage-log-info-popover-row'>
+            <span className='usage-log-info-popover-label'>{label}</span>
+            <span
+              className={['usage-log-info-popover-value', className]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              {value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function getResponsesCompactModeLabel(mode, t) {
+  switch (mode) {
+    case 'native':
+      return t('Compact 原生');
+    case 'synthetic_summary':
+      return t('Compact 模拟摘要');
+    default:
+      return mode ? String(mode) : '';
+  }
+}
+
+function getResponsesCompactBadgeLabel(mode, t) {
+  switch (mode) {
+    case 'native':
+      return t('原生');
+    case 'synthetic_summary':
+      return t('模拟');
+    default:
+      return t('Compact');
+  }
+}
+
+function getResponsesCompactTagColor(mode) {
+  switch (mode) {
+    case 'native':
+      return 'teal';
+    case 'synthetic_summary':
+      return 'violet';
+    default:
+      return 'grey';
+  }
+}
+
+function buildResponsesCompactTooltipRows(other, t) {
+  const mode = other?.responses_compact_mode;
+  if (!mode) {
+    return [];
+  }
+
+  const rows = [
+    {
+      key: 'mode',
+      label: t('模式'),
+      value: getResponsesCompactModeLabel(mode, t),
+      className: 'usage-log-info-popover-value-mode',
+    },
+  ];
+  if (other?.responses_compact_setting) {
+    rows.push({
+      key: 'setting',
+      label: t('配置'),
+      value: other.responses_compact_setting,
+      className: 'usage-log-info-popover-value-setting',
+    });
+  }
+  if (other?.responses_compact_upstream_path) {
+    rows.push({
+      key: 'path',
+      label: t('上游路径'),
+      value: other.responses_compact_upstream_path,
+      className: 'usage-log-info-popover-value-path is-code',
+    });
+  }
+  if (other?.responses_compact_auto_fallback === true) {
+    rows.push({
+      key: 'fallback',
+      label: t('自动回退'),
+      value: t('是'),
+      className: 'usage-log-info-popover-value-fallback',
+    });
+  }
+
+  return rows;
+}
+
+function buildResponsesCompactTooltip(other, t) {
+  const rows = buildResponsesCompactTooltipRows(other, t);
+
+  return renderUsageLogInfoPopover(t('Responses Compact'), rows, {
+    tagClassName: 'usage-log-compact-popover-label-tag',
+  });
+}
+
+function renderResponsesCompactTag(other, t) {
+  const mode = other?.responses_compact_mode;
+  if (!mode) {
+    return null;
+  }
+
+  return (
+    <span style={{ position: 'relative', display: 'inline-block' }}>
+      <Tooltip
+        className='usage-log-info-popover-layer'
+        content={buildResponsesCompactTooltip(other, t)}
+        position='top'
+        showArrow
+      >
+        <span>
+          <Tag color={getResponsesCompactTagColor(mode)} shape='circle'>
+            {getResponsesCompactBadgeLabel(mode, t)}
+          </Tag>
+        </span>
+      </Tooltip>
+    </span>
+  );
+}
+
 function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
   const other = getLogOther(record.other);
 
@@ -1151,15 +1292,18 @@ export const getLogsColumns = ({
                 {renderUseTime(text, t)}
                 {renderFirstUseTime(other?.frt, t)}
                 {renderIsStream(record.is_stream, t, other?.stream_status)}
+                {renderResponsesCompactTag(other, t)}
               </Space>
             </>
           );
         } else {
+          let other = getLogOther(record.other);
           return (
             <>
               <Space>
                 {renderUseTime(text, t)}
                 {renderIsStream(record.is_stream, t)}
+                {renderResponsesCompactTag(other, t)}
               </Space>
             </>
           );

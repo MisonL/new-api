@@ -5,10 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -170,6 +172,107 @@ func TestCacheWriteTokensTotal(t *testing.T) {
 		}
 		require.Equal(t, 30, cacheWriteTokensTotal(summary))
 	})
+}
+
+func TestResponsesCompactLogInfoRecordsNativeAutoMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeAuto,
+			},
+		},
+	}
+
+	logInfo, ok := responsesCompactLogInfo(ctx, info, now)
+
+	require.True(t, ok)
+	require.Equal(t, "native", logInfo.Mode)
+	require.Equal(t, "auto", logInfo.Setting)
+	require.Equal(t, "/v1/responses/compact", logInfo.UpstreamPath)
+	require.False(t, logInfo.AutoFallback)
+}
+
+func TestResponsesCompactLogInfoRecordsSyntheticAutoFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:             dto.ResponsesCompactModeAuto,
+				ResponsesCompactAutoFallbackDate: dto.ResponsesCompactAutoFallbackDate(now),
+			},
+		},
+	}
+
+	logInfo, ok := responsesCompactLogInfo(ctx, info, now)
+
+	require.True(t, ok)
+	require.Equal(t, "synthetic_summary", logInfo.Mode)
+	require.Equal(t, "auto", logInfo.Setting)
+	require.Equal(t, "/v1/responses", logInfo.UpstreamPath)
+	require.True(t, logInfo.AutoFallback)
+}
+
+func TestAppendResponsesCompactLogInfoWritesContentAndOther(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeSynthetic,
+			},
+		},
+	}
+	other := map[string]interface{}{"existing": true}
+
+	content, annotatedOther := appendResponsesCompactLogInfo(ctx, info, []string{"模型倍率 1.00"}, other, now)
+
+	require.Equal(t, []string{
+		"模型倍率 1.00",
+		"Responses Compact mode=synthetic_summary setting=synthetic_summary path=/v1/responses",
+	}, content)
+	require.Equal(t, "synthetic_summary", annotatedOther["responses_compact_mode"])
+	require.Equal(t, "synthetic_summary", annotatedOther["responses_compact_setting"])
+	require.Equal(t, "/v1/responses", annotatedOther["responses_compact_upstream_path"])
+	require.Equal(t, true, annotatedOther["existing"])
+}
+
+func TestResponsesCompactLogInfoCanUseContextForErrorLogs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+	ctx.Set("relay_mode", relayconstant.RelayModeResponsesCompact)
+	ctx.Set("channel_type", constant.ChannelTypeOpenAI)
+	common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeAuto,
+	})
+	ctx.Set("responses_compact_auto_fallback_attempted", true)
+
+	logInfo, ok := responsesCompactLogInfo(ctx, nil, now)
+
+	require.True(t, ok)
+	require.Equal(t, "synthetic_summary", logInfo.Mode)
+	require.Equal(t, "auto", logInfo.Setting)
+	require.Equal(t, "/v1/responses", logInfo.UpstreamPath)
+	require.True(t, logInfo.AutoFallback)
 }
 
 func TestCalculateTextQuotaSummaryHandlesLegacyClaudeDerivedOpenAIUsage(t *testing.T) {

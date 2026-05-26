@@ -47,6 +47,23 @@ interface DetailSegment {
   danger?: boolean
 }
 
+interface ResponsesCompactInfo {
+  mode: string
+  modeLabel: string
+  badgeLabel: string
+  setting?: string
+  upstreamPath?: string
+  autoFallback?: boolean
+  className: string
+}
+
+interface ResponsesCompactTooltipRow {
+  key: string
+  label: string
+  value: string
+  className?: string
+}
+
 function formatRatioCompact(ratio: number | undefined): string {
   if (ratio == null || !Number.isFinite(ratio)) return '-'
   return ratio % 1 === 0
@@ -70,6 +87,106 @@ function getGroupRatioText(other: LogOtherData | null): string | null {
   }
 
   return null
+}
+
+function getResponsesCompactModeLabel(
+  mode: string | undefined,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): string {
+  switch (mode) {
+    case 'native':
+      return t('Compact Native')
+    case 'synthetic_summary':
+      return t('Compact Synthetic')
+    default:
+      return mode ? String(mode) : ''
+  }
+}
+
+function getResponsesCompactBadgeLabel(
+  mode: string | undefined,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): string {
+  switch (mode) {
+    case 'native':
+      return t('Compact Native Badge')
+    case 'synthetic_summary':
+      return t('Compact Synthetic Badge')
+    default:
+      return t('Compact')
+  }
+}
+
+function getResponsesCompactBadgeClassName(mode: string | undefined): string {
+  switch (mode) {
+    case 'native':
+      return 'border border-cyan-200/50 bg-cyan-50/45 text-cyan-700/85 dark:border-cyan-900/40 dark:bg-cyan-950/20 dark:text-cyan-300/85'
+    case 'synthetic_summary':
+      return 'border border-violet-200/50 bg-violet-50/45 text-violet-700/85 dark:border-violet-900/40 dark:bg-violet-950/20 dark:text-violet-300/85'
+    default:
+      return 'border-border/60 bg-muted/40 text-muted-foreground'
+  }
+}
+
+function buildResponsesCompactInfo(
+  other: LogOtherData | null,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): ResponsesCompactInfo | null {
+  const mode = other?.responses_compact_mode
+  if (!mode) return null
+
+  return {
+    mode,
+    modeLabel: getResponsesCompactModeLabel(mode, t),
+    badgeLabel: getResponsesCompactBadgeLabel(mode, t),
+    setting: other.responses_compact_setting,
+    upstreamPath: other.responses_compact_upstream_path,
+    autoFallback: other.responses_compact_auto_fallback,
+    className: getResponsesCompactBadgeClassName(mode),
+  }
+}
+
+function buildResponsesCompactTooltipRows(
+  compactInfo: ResponsesCompactInfo,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): ResponsesCompactTooltipRow[] {
+  const rows: ResponsesCompactTooltipRow[] = [
+    {
+      key: 'mode',
+      label: t('Mode'),
+      value: compactInfo.modeLabel,
+      className: 'text-secondary-foreground font-semibold',
+    },
+  ]
+
+  if (compactInfo.setting) {
+    rows.push({
+      key: 'setting',
+      label: t('Configuration'),
+      value: compactInfo.setting,
+      className: 'text-primary font-semibold',
+    })
+  }
+
+  if (compactInfo.upstreamPath) {
+    rows.push({
+      key: 'path',
+      label: t('Path'),
+      value: compactInfo.upstreamPath,
+      className: 'font-mono text-foreground/80',
+    })
+  }
+
+  if (compactInfo.autoFallback === true) {
+    rows.push({
+      key: 'fallback',
+      label: t('Compact Auto Fallback'),
+      value: t('Yes'),
+      className: 'text-secondary-foreground font-semibold',
+    })
+  }
+
+  return rows
 }
 
 function buildDetailSegments(
@@ -514,6 +631,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             : null
         const timeVariant = getResponseTimeColor(useTime, log.completion_tokens)
         const frtVariant = frt ? getFirstResponseTimeColor(frt / 1000) : null
+        const compactInfo = buildResponsesCompactInfo(other, t)
 
         const pillBg: Record<string, string> = {
           success:
@@ -569,6 +687,58 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     N/A
                   </span>
                 ))}
+              {compactInfo && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className={cn(
+                          'inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium',
+                          compactInfo.className
+                        )}
+                      >
+                        {compactInfo.badgeLabel}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side='top'
+                      sideOffset={4}
+                      className='border-border bg-popover text-popover-foreground z-[100] w-[min(20rem,calc(100vw-2rem))] p-0 shadow-lg'
+                      arrowClassName='bg-popover fill-popover'
+                    >
+                      <div className='flex flex-col gap-2 p-3 text-xs leading-5'>
+                        <div className='flex min-w-0 items-center'>
+                          <span className='inline-flex rounded-md border border-violet-200/60 bg-violet-50 px-1.5 py-0.5 font-semibold text-violet-700 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-300'>
+                            {t('Responses Compact capability')}
+                          </span>
+                        </div>
+                        <div className='grid grid-cols-2 gap-x-3 gap-y-1.5'>
+                          {buildResponsesCompactTooltipRows(compactInfo, t).map(
+                            (row) => (
+                              <div
+                                key={row.key}
+                                className='flex min-w-0 flex-col gap-0.5'
+                              >
+                                <span className='text-muted-foreground text-[11px] leading-4 whitespace-nowrap'>
+                                  {row.label}
+                                </span>
+                                <span
+                                  className={cn(
+                                    'min-w-0 break-words',
+                                    row.className
+                                  )}
+                                >
+                                  {row.value}
+                                </span>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
             <div className='flex items-center gap-1 text-[11px]'>
               <span className='text-muted-foreground/60'>

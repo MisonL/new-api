@@ -642,7 +642,20 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			startTime = time.Now()
 		}
 		useTimeSeconds := int(relaycommon.SafeElapsedSeconds(startTime, time.Now()))
-		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
+		contentParts, other := service.AppendResponsesCompactLogInfo(c, nil, []string{err.MaskSensitiveErrorWithStatusCode()}, other, time.Now())
+		model.RecordErrorLog(
+			c,
+			userId,
+			channelId,
+			modelName,
+			tokenName,
+			strings.Join(contentParts, ", "),
+			tokenId,
+			useTimeSeconds,
+			common.GetContextKeyBool(c, constant.ContextKeyIsStream),
+			userGroup,
+			other,
+		)
 	}
 
 }

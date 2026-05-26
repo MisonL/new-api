@@ -142,6 +142,10 @@ export interface LogOtherData {
   is_system_prompt_overwritten?: boolean
   po?: string[]
   billing_source?: string
+  responses_compact_mode?: string
+  responses_compact_setting?: string
+  responses_compact_upstream_path?: string
+  responses_compact_auto_fallback?: boolean
   group?: string
   stream_status?: {
     status?: string

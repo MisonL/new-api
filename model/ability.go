@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -114,8 +115,23 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 }
 
 func GetChannel(group string, model string, retry int) (*Channel, error) {
-	for _, routeCandidate := range getGroupModelRouteCandidateMeta(model) {
-		channel, found, err := getChannelByRouteModel(group, routeCandidate, retry)
+	return getChannelExcluding(group, model, retry, nil)
+}
+
+func getChannelExcluding(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error) {
+	routeCandidates := getGroupModelRouteCandidateMeta(model)
+	if shouldPoolCompactRouteCandidates(routeCandidates) {
+		channel, found, err := getChannelByRouteModels(group, routeCandidates, retry, excluded)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			return channel, nil
+		}
+		return nil, nil
+	}
+	for _, routeCandidate := range routeCandidates {
+		channel, found, err := getChannelByRouteModel(group, routeCandidate, retry, excluded)
 		if err != nil {
 			return nil, err
 		}
@@ -126,22 +142,22 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 	return nil, nil
 }
 
-func getChannelByRouteModel(group string, routeCandidate routeModelCandidate, retry int) (*Channel, bool, error) {
-	var abilities []Ability
-
-	var err error = nil
-	var channelQuery *gorm.DB
+func getRouteCandidateAbilityQuery(group string, routeCandidate routeModelCandidate, retry int) (*gorm.DB, error) {
 	if routeCandidate.compactRequest {
-		channelQuery = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, routeCandidate.model, true)
-	} else {
-		channelQuery, err = getChannelQuery(group, routeCandidate.model, retry)
-		if err != nil {
-			if errors.Is(err, errNoMatchingAbilities) {
-				return nil, false, nil
-			}
-			return nil, false, err
-		}
+		return DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, routeCandidate.model, true), nil
 	}
+	return getChannelQuery(group, routeCandidate.model, retry)
+}
+
+func getChannelByRouteModel(group string, routeCandidate routeModelCandidate, retry int, excluded map[int]struct{}) (*Channel, bool, error) {
+	channelQuery, err := getRouteCandidateAbilityQuery(group, routeCandidate, retry)
+	if err != nil {
+		if errors.Is(err, errNoMatchingAbilities) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	var abilities []Ability
 	if common.UsingSQLite || common.UsingPostgreSQL {
 		err = channelQuery.Order("priority DESC, weight DESC").Find(&abilities).Error
 	} else {
@@ -154,18 +170,60 @@ func getChannelByRouteModel(group string, routeCandidate routeModelCandidate, re
 		return nil, false, nil
 	}
 
-	channels, channelWeights, err := loadRouteCandidateChannels(abilities, routeCandidate)
+	channels, channelWeights, err := loadRouteCandidateChannels(abilities, routeCandidate, false)
 	if err != nil {
 		return nil, false, err
 	}
 	if len(channels) == 0 {
 		return nil, false, nil
 	}
-	channels, channelWeights = filterChannelsByRetryPriority(channels, channelWeights, retry)
+	channels, channelWeights = filterChannelsByRetryPriority(channels, channelWeights, retry, excluded)
+	if len(channels) == 0 {
+		return nil, true, nil
+	}
 	return chooseWeightedChannel(channels, channelWeights), true, nil
 }
 
-func loadRouteCandidateChannels(abilities []Ability, routeCandidate routeModelCandidate) ([]*Channel, []uint, error) {
+func getChannelByRouteModels(group string, routeCandidates []routeModelCandidate, retry int, excluded map[int]struct{}) (*Channel, bool, error) {
+	channels := make([]*Channel, 0, len(routeCandidates))
+	channelWeights := make([]uint, 0, len(routeCandidates))
+	seen := make(map[int]struct{})
+	for _, routeCandidate := range routeCandidates {
+		channelQuery, err := getRouteCandidateAbilityQuery(group, routeCandidate, retry)
+		if err != nil {
+			if errors.Is(err, errNoMatchingAbilities) {
+				continue
+			}
+			return nil, false, err
+		}
+		var abilities []Ability
+		if err := channelQuery.Order("priority DESC, weight DESC").Find(&abilities).Error; err != nil {
+			return nil, false, err
+		}
+		candidateChannels, candidateWeights, err := loadRouteCandidateChannels(abilities, routeCandidate, true)
+		if err != nil {
+			return nil, false, err
+		}
+		for i, channel := range candidateChannels {
+			if _, ok := seen[channel.Id]; ok {
+				continue
+			}
+			seen[channel.Id] = struct{}{}
+			channels = append(channels, channel)
+			channelWeights = append(channelWeights, candidateWeights[i])
+		}
+	}
+	if len(channels) == 0 {
+		return nil, false, nil
+	}
+	channels, channelWeights = filterChannelsByRetryPriority(channels, channelWeights, retry, excluded)
+	if len(channels) == 0 {
+		return nil, true, nil
+	}
+	return chooseWeightedChannel(channels, channelWeights), true, nil
+}
+
+func loadRouteCandidateChannels(abilities []Ability, routeCandidate routeModelCandidate, useChannelWeights bool) ([]*Channel, []uint, error) {
 	channels := make([]*Channel, 0, len(abilities))
 	weights := make([]uint, 0, len(abilities))
 	for _, ability := range abilities {
@@ -177,12 +235,16 @@ func loadRouteCandidateChannels(abilities []Ability, routeCandidate routeModelCa
 			continue
 		}
 		channels = append(channels, &channel)
-		weights = append(weights, ability.Weight)
+		weight := ability.Weight
+		if useChannelWeights {
+			weight = uint(channel.GetWeight())
+		}
+		weights = append(weights, weight)
 	}
 	return channels, weights, nil
 }
 
-func filterChannelsByRetryPriority(channels []*Channel, weights []uint, retry int) ([]*Channel, []uint) {
+func filterChannelsByRetryPriority(channels []*Channel, weights []uint, retry int, excluded map[int]struct{}) ([]*Channel, []uint) {
 	priorities := make([]int64, 0, len(channels))
 	seen := make(map[int64]struct{}, len(channels))
 	for _, channel := range channels {
@@ -196,6 +258,9 @@ func filterChannelsByRetryPriority(channels []*Channel, weights []uint, retry in
 	if len(priorities) == 0 {
 		return channels, weights
 	}
+	sort.Slice(priorities, func(i, j int) bool {
+		return priorities[i] > priorities[j]
+	})
 	if retry >= len(priorities) {
 		retry = len(priorities) - 1
 	}
@@ -204,6 +269,9 @@ func filterChannelsByRetryPriority(channels []*Channel, weights []uint, retry in
 	filteredWeights := make([]uint, 0, len(weights))
 	for i, channel := range channels {
 		if channel.GetPriority() != targetPriority {
+			continue
+		}
+		if _, skip := excluded[channel.Id]; skip {
 			continue
 		}
 		filteredChannels = append(filteredChannels, channel)

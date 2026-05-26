@@ -33,6 +33,11 @@ export const RESPONSES_COMPACT_BADGE_LABELS: Record<
 
 export const RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL =
   'Compact Auto Fallback'
+export const RESPONSES_COMPACT_USAGE_LOG_BADGE_LABELS = [
+  'Compact',
+  'Compact Native Badge',
+  'Compact Synthetic Badge',
+] as const
 export const RESPONSES_COMPACT_AUTO_TOOLTIP =
   'Auto mode tries native compact first, falls back to synthetic summary after an upstream compatibility failure, and retries native once per day.'
 export const RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP =
@@ -40,6 +45,7 @@ export const RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP =
 
 export const RESPONSES_COMPACT_BADGE_KEYS = [
   ...Object.values(RESPONSES_COMPACT_BADGE_LABELS),
+  ...RESPONSES_COMPACT_USAGE_LOG_BADGE_LABELS,
   RESPONSES_COMPACT_AUTO_TOOLTIP,
   RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL,
   RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP,

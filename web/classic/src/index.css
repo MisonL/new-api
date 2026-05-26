@@ -675,6 +675,7 @@ body.sidebar-resizing * {
   background: var(--semi-color-bg-2);
   color: var(--semi-color-text-0);
   box-shadow: var(--semi-shadow-elevated);
+  z-index: 1030;
 }
 
 .usage-log-header-audit-tooltip-layer .semi-tooltip-content {
@@ -845,6 +846,7 @@ body.sidebar-resizing * {
   background: var(--semi-color-bg-2);
   color: var(--semi-color-text-0);
   box-shadow: var(--semi-shadow-elevated);
+  z-index: 1030;
 }
 
 .usage-log-channel-tooltip-popover .semi-tooltip-content {
@@ -983,8 +985,127 @@ body.sidebar-resizing * {
   border-top-color: color-mix(in srgb, currentColor 22%, transparent);
 }
 
+.usage-log-info-popover-layer.semi-tooltip-wrapper {
+  box-sizing: border-box;
+  width: min(300px, calc(100vw - 32px));
+  max-width: min(300px, calc(100vw - 32px));
+  border: 1px solid var(--semi-color-border);
+  background: var(--semi-color-bg-2);
+  color: var(--semi-color-text-0);
+  box-shadow: var(--semi-shadow-elevated);
+  z-index: 1030;
+}
+
+.usage-log-info-popover-layer .semi-tooltip-content {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--semi-color-bg-2);
+  color: var(--semi-color-text-0);
+}
+
+.usage-log-info-popover-layer .semi-tooltip-icon-arrow {
+  background: var(--semi-color-bg-2);
+  color: var(--semi-color-bg-2);
+}
+
+.usage-log-info-popover {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  flex-direction: column;
+  gap: 8px;
+  color: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.usage-log-info-popover-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.usage-log-info-popover-label-tag {
+  background: var(--semi-color-secondary-light-default);
+  color: var(--semi-color-secondary);
+}
+
+.usage-log-compact-popover-label-tag {
+  background: var(--semi-color-violet-light-default);
+  color: var(--semi-color-violet);
+}
+
+.usage-log-info-popover-row-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 12px;
+  row-gap: 5px;
+}
+
+.usage-log-info-popover-row {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.usage-log-info-popover-label {
+  color: var(--semi-color-text-2);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.usage-log-info-popover-value {
+  min-width: 0;
+  color: var(--semi-color-text-0);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.usage-log-info-popover-value.is-code {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.usage-log-info-popover-value-mode,
+.usage-log-info-popover-value-fallback {
+  color: var(--semi-color-secondary);
+  font-weight: 600;
+}
+
+.usage-log-info-popover-value-setting {
+  color: var(--semi-color-primary);
+  font-weight: 600;
+}
+
+.usage-log-info-popover-value-path {
+  color: var(--semi-color-text-1);
+}
+
+html.dark .usage-log-compact-popover-label-tag {
+  background: color-mix(
+    in srgb,
+    var(--semi-color-violet-light-default) 88%,
+    transparent
+  );
+}
+
 @media (max-width: 640px) {
   .usage-log-channel-tooltip-row-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .usage-log-info-popover-row-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
