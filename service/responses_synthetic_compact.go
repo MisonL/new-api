@@ -22,9 +22,9 @@ const (
 	syntheticCompactTTL          = 24 * time.Hour
 )
 
-const syntheticCompactSummaryPrompt = "You are creating a synthetic compact summary for a Responses client. Start with the current pending user request and active task state. Preserve durable facts, user intent, decisions, open tasks, tool results, file paths, ids, constraints, and unresolved errors. Do not invent facts. Return only the compact summary text."
-const syntheticCompactPreviousResponsePrompt = "Create a compact summary of the conversation available in this response chain before this request. Use the existing previous_response_id context as the source of truth. Start with the current pending user request and active task state. Return only the compact summary text."
-const syntheticCompactResumeDirective = "Synthetic compact resume directive: use the recovered summary as active conversation state. If post-compact input is only repeated setup or repository instructions, do not acknowledge it; continue the latest pending user request from the summary. If post-compact input contains a new explicit user request, answer that request using the summary as context."
+const syntheticCompactSummaryPrompt = "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.\nInclude:\n- Current progress and key decisions made\n- Important context, constraints, or user preferences\n- What remains to be done (clear next steps)\n- Any critical data, examples, or references needed to continue\nBe concise, structured, and focused on helping the next LLM seamlessly continue the work.\nDo not invent facts. Return only the compact summary text."
+const syntheticCompactPreviousResponsePrompt = "Use the existing previous_response_id context as the source of truth for the compaction. Create the handoff summary from the conversation available in that response chain. Return only the compact summary text."
+const syntheticCompactResumeDirective = "Another language model produced the compact summary above. Use it to build on the work that has already been done and avoid duplicating work. If post-compact input is only repeated setup or repository instructions from the client, treat it as background and continue the latest pending task from the summary. If post-compact input contains a new explicit user request, answer that request using the summary as context."
 
 type SyntheticCompactState struct {
 	ID          string `json:"id"`
@@ -318,7 +318,7 @@ func ApplySyntheticCompactState(ctx context.Context, scope SyntheticCompactState
 }
 
 func syntheticCompactRecoveredSummaryText(summary string) string {
-	return "Synthetic compact summary recovered by new-api. Treat this summary as the authoritative prior conversation state before any post-compact input. Continue from the latest unresolved user request and open tasks captured here. Post-compact input may include repeated setup or repository instructions from the client; treat those as background unless they contain a new explicit user request.\n\nSummary:\n" + strings.TrimSpace(summary)
+	return "Another language model started to solve this problem and produced a compact handoff summary. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:\n\n" + strings.TrimSpace(summary)
 }
 
 func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactStateScope, model string, upstream dto.OpenAIResponsesResponse) (*dto.OpenAIResponsesCompactionResponse, *dto.Usage, error) {

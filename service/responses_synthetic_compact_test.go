@@ -48,7 +48,7 @@ func TestBuildSyntheticCompactSummaryRequestUsesStoredSummaryAndClearsSyntheticP
 	require.NoError(t, err)
 	require.Empty(t, got.PreviousResponseID)
 	require.JSONEq(t, `[
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"You are creating a synthetic compact summary for a Responses client. Start with the current pending user request and active task state. Preserve durable facts, user intent, decisions, open tasks, tool results, file paths, ids, constraints, and unresolved errors. Do not invent facts. Return only the compact summary text."}]},
+		{"type":"message","role":"developer","content":[{"type":"input_text","text":"You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.\nInclude:\n- Current progress and key decisions made\n- Important context, constraints, or user preferences\n- What remains to be done (clear next steps)\n- Any critical data, examples, or references needed to continue\nBe concise, structured, and focused on helping the next LLM seamlessly continue the work.\nDo not invent facts. Return only the compact summary text."}]},
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"Previous synthetic summary:\nPrior synthetic summary.\n\nVisible conversation to compact:\n[user] Continue the task."}]}
 	]`, string(got.Input))
 }
@@ -70,8 +70,9 @@ func TestBuildSyntheticCompactSummaryRequestPreservesUpstreamPreviousID(t *testi
 	require.NoError(t, err)
 	require.Equal(t, "resp_previous", got.PreviousResponseID)
 	body := string(got.Input)
-	require.Contains(t, body, "Use the existing previous_response_id context as the source of truth.")
-	require.Contains(t, body, "Start with the current pending user request and active task state.")
+	require.Contains(t, body, "Use the existing previous_response_id context as the source of truth for the compaction.")
+	require.Contains(t, body, "CONTEXT CHECKPOINT COMPACTION")
+	require.Contains(t, body, "What remains to be done")
 	require.NotContains(t, body, "Visible conversation to compact")
 	require.NotContains(t, body, "/tmp/result.txt")
 	require.NotContains(t, body, "Continue the task.")
@@ -177,13 +178,13 @@ func TestApplySyntheticCompactStateInjectsSummaryAndRemovesMarker(t *testing.T) 
 	require.True(t, applied)
 	require.Empty(t, got.PreviousResponseID)
 	require.JSONEq(t, `[
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Synthetic compact summary recovered by new-api. Treat this summary as the authoritative prior conversation state before any post-compact input. Continue from the latest unresolved user request and open tasks captured here. Post-compact input may include repeated setup or repository instructions from the client; treat those as background unless they contain a new explicit user request.\n\nSummary:\nStored compact state."}]},
+		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Another language model started to solve this problem and produced a compact handoff summary. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:\n\nStored compact state."}]},
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"What is next?"}]},
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Synthetic compact resume directive: use the recovered summary as active conversation state. If post-compact input is only repeated setup or repository instructions, do not acknowledge it; continue the latest pending user request from the summary. If post-compact input contains a new explicit user request, answer that request using the summary as context."}]}
+		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Another language model produced the compact summary above. Use it to build on the work that has already been done and avoid duplicating work. If post-compact input is only repeated setup or repository instructions from the client, treat it as background and continue the latest pending task from the summary. If post-compact input contains a new explicit user request, answer that request using the summary as context."}]}
 	]`, string(got.Input))
 }
 
-func TestApplySyntheticCompactStateAddsResumeDirectiveAfterRepeatedSetup(t *testing.T) {
+func TestApplySyntheticCompactStateUsesHandoffPromptAfterRepeatedSetup(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 
 	state := SyntheticCompactState{
@@ -207,9 +208,11 @@ func TestApplySyntheticCompactStateAddsResumeDirectiveAfterRepeatedSetup(t *test
 	require.NoError(t, err)
 	require.True(t, applied)
 	body := string(got.Input)
+	require.Contains(t, body, "Another language model started to solve this problem")
+	require.Contains(t, body, "avoid duplicating work")
 	require.Contains(t, body, "Current pending user request: diagnose why synthetic compact caused memory loss.")
-	require.Contains(t, body, "If post-compact input is only repeated setup or repository instructions, do not acknowledge it")
-	require.Contains(t, body, "continue the latest pending user request from the summary")
+	require.Contains(t, body, "If post-compact input is only repeated setup or repository instructions from the client")
+	require.Contains(t, body, "continue the latest pending task from the summary")
 	require.Contains(t, body, "AGENTS.md instructions")
 }
 
@@ -265,10 +268,10 @@ func TestApplySyntheticCompactStateHandlesMixedInputArrayItems(t *testing.T) {
 	require.True(t, applied)
 	require.Empty(t, got.PreviousResponseID)
 	require.JSONEq(t, `[
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Synthetic compact summary recovered by new-api. Treat this summary as the authoritative prior conversation state before any post-compact input. Continue from the latest unresolved user request and open tasks captured here. Post-compact input may include repeated setup or repository instructions from the client; treat those as background unless they contain a new explicit user request.\n\nSummary:\nStored compact state."}]},
+		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Another language model started to solve this problem and produced a compact handoff summary. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:\n\nStored compact state."}]},
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue from this string."}]},
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"And this object."}]},
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Synthetic compact resume directive: use the recovered summary as active conversation state. If post-compact input is only repeated setup or repository instructions, do not acknowledge it; continue the latest pending user request from the summary. If post-compact input contains a new explicit user request, answer that request using the summary as context."}]}
+		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Another language model produced the compact summary above. Use it to build on the work that has already been done and avoid duplicating work. If post-compact input is only repeated setup or repository instructions from the client, treat it as background and continue the latest pending task from the summary. If post-compact input contains a new explicit user request, answer that request using the summary as context."}]}
 	]`, string(got.Input))
 }
 

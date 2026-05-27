@@ -411,7 +411,7 @@ func TestConvertOpenAIResponsesCompactRequestBuildsSyntheticSummaryRequest(t *te
 	require.NotContains(t, string(convertedReq.Input), "opaque")
 	require.NotContains(t, string(convertedReq.Input), "Visible conversation to compact")
 	require.NotContains(t, string(convertedReq.Input), "[user] continue")
-	require.Contains(t, string(convertedReq.Input), "Use the existing previous_response_id context as the source of truth.")
+	require.Contains(t, string(convertedReq.Input), "Use the existing previous_response_id context as the source of truth for the compaction.")
 }
 
 func TestConvertOpenAIResponsesCompactNativeModeRestoresSyntheticState(t *testing.T) {
