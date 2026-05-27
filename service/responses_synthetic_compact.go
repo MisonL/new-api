@@ -23,6 +23,7 @@ const (
 )
 
 const syntheticCompactSummaryPrompt = "You are creating a synthetic compact summary for a Responses client. Preserve durable facts, user intent, decisions, open tasks, tool results, file paths, ids, constraints, and unresolved errors. Do not invent facts. Return only the compact summary text."
+const syntheticCompactPreviousResponsePrompt = "Create a compact summary of the conversation available in this response chain before this request. Use the existing previous_response_id context as the source of truth. Return only the compact summary text."
 
 type SyntheticCompactState struct {
 	ID          string `json:"id"`
@@ -246,6 +247,11 @@ func BuildSyntheticCompactSummaryRequest(ctx context.Context, scope SyntheticCom
 	if !found && HasSyntheticCompactReference(req) {
 		return dto.OpenAIResponsesRequest{}, ErrSyntheticCompactStateNotFound
 	}
+	if !found {
+		if previousResponseID := strings.TrimSpace(req.PreviousResponseID); previousResponseID != "" {
+			return buildSyntheticCompactPreviousResponseRequest(req.Model, previousResponseID)
+		}
+	}
 	cleanInput := removeSyntheticCompactMarkers(req.Input)
 	visibleParts := visibleResponsesInputParts(cleanInput)
 	if len(visibleParts) == 0 && (!found || strings.TrimSpace(state.Summary) == "") {
@@ -263,6 +269,18 @@ func BuildSyntheticCompactSummaryRequest(ctx context.Context, scope SyntheticCom
 		Input: input,
 	}
 	return out, nil
+}
+
+func buildSyntheticCompactPreviousResponseRequest(model string, previousResponseID string) (dto.OpenAIResponsesRequest, error) {
+	input, err := syntheticCompactPromptInput(syntheticCompactSummaryPrompt, syntheticCompactPreviousResponsePrompt)
+	if err != nil {
+		return dto.OpenAIResponsesRequest{}, err
+	}
+	return dto.OpenAIResponsesRequest{
+		Model:              model,
+		PreviousResponseID: previousResponseID,
+		Input:              input,
+	}, nil
 }
 
 func ApplySyntheticCompactState(ctx context.Context, scope SyntheticCompactStateScope, req dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool, error) {

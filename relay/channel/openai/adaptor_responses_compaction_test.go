@@ -407,10 +407,11 @@ func TestConvertOpenAIResponsesCompactRequestBuildsSyntheticSummaryRequest(t *te
 	require.NoError(t, err)
 	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
-	require.Empty(t, convertedReq.PreviousResponseID)
+	require.Equal(t, "resp_previous", convertedReq.PreviousResponseID)
 	require.NotContains(t, string(convertedReq.Input), "opaque")
-	require.Contains(t, string(convertedReq.Input), "Visible conversation to compact")
-	require.Contains(t, string(convertedReq.Input), "[user] continue")
+	require.NotContains(t, string(convertedReq.Input), "Visible conversation to compact")
+	require.NotContains(t, string(convertedReq.Input), "[user] continue")
+	require.Contains(t, string(convertedReq.Input), "Use the existing previous_response_id context as the source of truth.")
 }
 
 func TestConvertOpenAIResponsesCompactNativeModeRestoresSyntheticState(t *testing.T) {

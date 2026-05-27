@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,7 +53,7 @@ func TestBuildSyntheticCompactSummaryRequestUsesStoredSummaryAndClearsSyntheticP
 	]`, string(got.Input))
 }
 
-func TestBuildSyntheticCompactSummaryRequestDropsUnknownPreviousID(t *testing.T) {
+func TestBuildSyntheticCompactSummaryRequestPreservesUpstreamPreviousID(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 
 	req := dto.OpenAIResponsesRequest{
@@ -67,9 +68,39 @@ func TestBuildSyntheticCompactSummaryRequestDropsUnknownPreviousID(t *testing.T)
 	got, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, req)
 
 	require.NoError(t, err)
-	require.Empty(t, got.PreviousResponseID)
-	require.Contains(t, string(got.Input), "[function_call_output] call_id=call_1\\noutput={\\\"path\\\":\\\"/tmp/result.txt\\\",\\\"ok\\\":true}")
-	require.Contains(t, string(got.Input), "[user] Continue the task.")
+	require.Equal(t, "resp_previous", got.PreviousResponseID)
+	body := string(got.Input)
+	require.Contains(t, body, "Use the existing previous_response_id context as the source of truth.")
+	require.NotContains(t, body, "Visible conversation to compact")
+	require.NotContains(t, body, "/tmp/result.txt")
+	require.NotContains(t, body, "Continue the task.")
+}
+
+func TestBuildSyntheticCompactSummaryRequestDoesNotReplayLongInputWithUpstreamPreviousID(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+
+	longText := strings.Repeat("long visible context ", 4096)
+	input, err := common.Marshal([]map[string]any{
+		{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]string{
+				{"type": "input_text", "text": longText},
+			},
+		},
+	})
+	require.NoError(t, err)
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5",
+		PreviousResponseID: "resp_previous",
+		Input:              input,
+	}
+
+	got, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, req)
+
+	require.NoError(t, err)
+	require.Equal(t, "resp_previous", got.PreviousResponseID)
+	require.NotContains(t, string(got.Input), "long visible context")
 }
 
 func TestBuildSyntheticCompactSummaryRequestIncludesToolCallMetadata(t *testing.T) {
