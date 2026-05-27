@@ -22,8 +22,9 @@ const (
 	syntheticCompactTTL          = 24 * time.Hour
 )
 
-const syntheticCompactSummaryPrompt = "You are creating a synthetic compact summary for a Responses client. Preserve durable facts, user intent, decisions, open tasks, tool results, file paths, ids, constraints, and unresolved errors. Do not invent facts. Return only the compact summary text."
-const syntheticCompactPreviousResponsePrompt = "Create a compact summary of the conversation available in this response chain before this request. Use the existing previous_response_id context as the source of truth. Return only the compact summary text."
+const syntheticCompactSummaryPrompt = "You are creating a synthetic compact summary for a Responses client. Start with the current pending user request and active task state. Preserve durable facts, user intent, decisions, open tasks, tool results, file paths, ids, constraints, and unresolved errors. Do not invent facts. Return only the compact summary text."
+const syntheticCompactPreviousResponsePrompt = "Create a compact summary of the conversation available in this response chain before this request. Use the existing previous_response_id context as the source of truth. Start with the current pending user request and active task state. Return only the compact summary text."
+const syntheticCompactResumeDirective = "Synthetic compact resume directive: use the recovered summary as active conversation state. If post-compact input is only repeated setup or repository instructions, do not acknowledge it; continue the latest pending user request from the summary. If post-compact input contains a new explicit user request, answer that request using the summary as context."
 
 type SyntheticCompactState struct {
 	ID          string `json:"id"`
@@ -295,13 +296,18 @@ func ApplySyntheticCompactState(ctx context.Context, scope SyntheticCompactState
 		return dto.OpenAIResponsesRequest{}, true, err
 	}
 	cleanInput := removeSyntheticCompactMarkers(req.Input)
-	summaryText := "Synthetic compact summary recovered by new-api:\n" + strings.TrimSpace(state.Summary)
+	summaryText := syntheticCompactRecoveredSummaryText(state.Summary)
 	summaryItem, err := responseMessageInput("developer", summaryText)
 	if err != nil {
 		return dto.OpenAIResponsesRequest{}, false, err
 	}
 	items := []common.RawMessage{summaryItem}
 	items = append(items, normalizeResponsesInputItems(cleanInput)...)
+	resumeItem, err := responseMessageInput("developer", syntheticCompactResumeDirective)
+	if err != nil {
+		return dto.OpenAIResponsesRequest{}, false, err
+	}
+	items = append(items, resumeItem)
 	input, err := common.Marshal(items)
 	if err != nil {
 		return dto.OpenAIResponsesRequest{}, false, err
@@ -309,6 +315,10 @@ func ApplySyntheticCompactState(ctx context.Context, scope SyntheticCompactState
 	req.Input = input
 	req.PreviousResponseID = ""
 	return req, true, nil
+}
+
+func syntheticCompactRecoveredSummaryText(summary string) string {
+	return "Synthetic compact summary recovered by new-api. Treat this summary as the authoritative prior conversation state before any post-compact input. Continue from the latest unresolved user request and open tasks captured here. Post-compact input may include repeated setup or repository instructions from the client; treat those as background unless they contain a new explicit user request.\n\nSummary:\n" + strings.TrimSpace(summary)
 }
 
 func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactStateScope, model string, upstream dto.OpenAIResponsesResponse) (*dto.OpenAIResponsesCompactionResponse, *dto.Usage, error) {

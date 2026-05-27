@@ -48,7 +48,7 @@ func TestBuildSyntheticCompactSummaryRequestUsesStoredSummaryAndClearsSyntheticP
 	require.NoError(t, err)
 	require.Empty(t, got.PreviousResponseID)
 	require.JSONEq(t, `[
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"You are creating a synthetic compact summary for a Responses client. Preserve durable facts, user intent, decisions, open tasks, tool results, file paths, ids, constraints, and unresolved errors. Do not invent facts. Return only the compact summary text."}]},
+		{"type":"message","role":"developer","content":[{"type":"input_text","text":"You are creating a synthetic compact summary for a Responses client. Start with the current pending user request and active task state. Preserve durable facts, user intent, decisions, open tasks, tool results, file paths, ids, constraints, and unresolved errors. Do not invent facts. Return only the compact summary text."}]},
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"Previous synthetic summary:\nPrior synthetic summary.\n\nVisible conversation to compact:\n[user] Continue the task."}]}
 	]`, string(got.Input))
 }
@@ -71,6 +71,7 @@ func TestBuildSyntheticCompactSummaryRequestPreservesUpstreamPreviousID(t *testi
 	require.Equal(t, "resp_previous", got.PreviousResponseID)
 	body := string(got.Input)
 	require.Contains(t, body, "Use the existing previous_response_id context as the source of truth.")
+	require.Contains(t, body, "Start with the current pending user request and active task state.")
 	require.NotContains(t, body, "Visible conversation to compact")
 	require.NotContains(t, body, "/tmp/result.txt")
 	require.NotContains(t, body, "Continue the task.")
@@ -176,9 +177,40 @@ func TestApplySyntheticCompactStateInjectsSummaryAndRemovesMarker(t *testing.T) 
 	require.True(t, applied)
 	require.Empty(t, got.PreviousResponseID)
 	require.JSONEq(t, `[
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Synthetic compact summary recovered by new-api:\nStored compact state."}]},
-		{"type":"message","role":"user","content":[{"type":"input_text","text":"What is next?"}]}
+		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Synthetic compact summary recovered by new-api. Treat this summary as the authoritative prior conversation state before any post-compact input. Continue from the latest unresolved user request and open tasks captured here. Post-compact input may include repeated setup or repository instructions from the client; treat those as background unless they contain a new explicit user request.\n\nSummary:\nStored compact state."}]},
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"What is next?"}]},
+		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Synthetic compact resume directive: use the recovered summary as active conversation state. If post-compact input is only repeated setup or repository instructions, do not acknowledge it; continue the latest pending user request from the summary. If post-compact input contains a new explicit user request, answer that request using the summary as context."}]}
 	]`, string(got.Input))
+}
+
+func TestApplySyntheticCompactStateAddsResumeDirectiveAfterRepeatedSetup(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+
+	state := SyntheticCompactState{
+		ID:      "resp_newapi_synthcmp_prev",
+		Model:   "gpt-5",
+		Summary: "Current pending user request: diagnose why synthetic compact caused memory loss.",
+	}
+	require.NoError(t, storeSyntheticCompactState(context.Background(), state))
+
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5",
+		PreviousResponseID: state.ID,
+		Input: common.RawMessage(`[
+			{"type":"message","role":"developer","content":[{"type":"input_text","text":"AGENTS.md instructions for /Volumes/Work/code/new-api"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"收到。我会按 project-doc 中的 new-api 仓库规则执行。"}]}
+		]`),
+	}
+
+	got, applied, err := ApplySyntheticCompactState(context.Background(), SyntheticCompactStateScope{}, req)
+
+	require.NoError(t, err)
+	require.True(t, applied)
+	body := string(got.Input)
+	require.Contains(t, body, "Current pending user request: diagnose why synthetic compact caused memory loss.")
+	require.Contains(t, body, "If post-compact input is only repeated setup or repository instructions, do not acknowledge it")
+	require.Contains(t, body, "continue the latest pending user request from the summary")
+	require.Contains(t, body, "AGENTS.md instructions")
 }
 
 func TestApplySyntheticCompactStateClearsNonSyntheticPreviousID(t *testing.T) {
@@ -233,9 +265,10 @@ func TestApplySyntheticCompactStateHandlesMixedInputArrayItems(t *testing.T) {
 	require.True(t, applied)
 	require.Empty(t, got.PreviousResponseID)
 	require.JSONEq(t, `[
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Synthetic compact summary recovered by new-api:\nStored compact state."}]},
+		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Synthetic compact summary recovered by new-api. Treat this summary as the authoritative prior conversation state before any post-compact input. Continue from the latest unresolved user request and open tasks captured here. Post-compact input may include repeated setup or repository instructions from the client; treat those as background unless they contain a new explicit user request.\n\nSummary:\nStored compact state."}]},
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue from this string."}]},
-		{"type":"message","role":"user","content":[{"type":"input_text","text":"And this object."}]}
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"And this object."}]},
+		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Synthetic compact resume directive: use the recovered summary as active conversation state. If post-compact input is only repeated setup or repository instructions, do not acknowledge it; continue the latest pending user request from the summary. If post-compact input contains a new explicit user request, answer that request using the summary as context."}]}
 	]`, string(got.Input))
 }
 
