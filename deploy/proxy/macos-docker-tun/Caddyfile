@@ -6,8 +6,5 @@
 	reverse_proxy 127.0.0.1:{$NEW_API_LOOPBACK_PORT:13000} {
 		header_up Host {host}
 		header_up X-Real-IP {remote_host}
-		# Keep this delete+set pair together; Caddy applies header deletions before sets.
-		header_up -X-Forwarded-For
-		header_up X-Forwarded-For {remote_host}
 	}
 }

@@ -408,7 +408,8 @@ wait_for_active_connections_to_drain() {
 
 managed_caddy_is_running() {
   local pid
-  if ! pid="$(managed_caddy_pid)"; then
+  pid="$(managed_caddy_pid || true)"
+  if [[ -z "$pid" ]]; then
     return 1
   fi
   if ! kill -0 "$pid" >/dev/null 2>&1; then
@@ -468,7 +469,8 @@ managed_caddy_owns_lan_port() {
 
 stop_managed_caddy() {
   local pid
-  if ! pid="$(managed_caddy_pid)"; then
+  pid="$(managed_caddy_pid || true)"
+  if [[ -z "$pid" ]]; then
     rm -f "$CADDY_PID_FILE"
     return 0
   fi
@@ -527,7 +529,8 @@ start_managed_caddy() {
 wait_for_managed_caddy_pid() {
   local pid
   for _ in {1..20}; do
-    if pid="$(managed_caddy_pid)" \
+    pid="$(managed_caddy_pid || true)"
+    if [[ -n "$pid" ]] \
       && kill -0 "$pid" >/dev/null 2>&1 \
       && managed_caddy_command_matches "$pid" \
       && managed_caddy_owns_lan_port "$pid"; then

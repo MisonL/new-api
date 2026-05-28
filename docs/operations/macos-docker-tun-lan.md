@@ -98,7 +98,7 @@ scripts/deploy-macos-docker-tun.sh --check-only
 
 `NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT=0` 表示不等待连接排空；如果同时保持 `NEW_API_ALLOW_ACTIVE_REQUESTS=0`，正式 `--apply` 会在发现活跃连接后立即拒绝继续。
 
-宿主机 Caddy 会显式重写 `X-Real-IP` 和 `X-Forwarded-For` 为当前连接的远端地址，避免客户端自带 `X-Forwarded-For` 伪造记录 IP。
+宿主机 Caddy 会显式重写 `X-Real-IP` 为当前连接的远端地址；`X-Forwarded-For` 使用 Caddy `reverse_proxy` 默认生成值，避免客户端自带 `X-Forwarded-For` 伪造记录 IP。
 
 `deploy/env/macos-docker-tun.env` 支持以下通用参数：
 
