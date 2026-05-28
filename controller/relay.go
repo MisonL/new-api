@@ -514,7 +514,7 @@ func shouldFallbackResponsesCompactAuto(c *gin.Context, info *relaycommon.RelayI
 		http.StatusMethodNotAllowed,
 		http.StatusUnprocessableEntity,
 		http.StatusNotImplemented:
-		return isResponsesCompactNativeCompatibilityError(err)
+		return isResponsesCompactNativeCompatibilityError(info, err)
 	default:
 		return false
 	}
@@ -681,7 +681,7 @@ func isResponsesCompactContextLengthError(err *types.NewAPIError) bool {
 	return false
 }
 
-func isResponsesCompactNativeCompatibilityError(err *types.NewAPIError) bool {
+func isResponsesCompactNativeCompatibilityError(info *relaycommon.RelayInfo, err *types.NewAPIError) bool {
 	if err == nil {
 		return false
 	}
@@ -693,7 +693,10 @@ func isResponsesCompactNativeCompatibilityError(err *types.NewAPIError) bool {
 	}, " "))
 	normalized := normalizeResponsesCompactCompatibilityMessage(message)
 	compactPathMentioned := strings.Contains(message, "responses/compact") || strings.Contains(normalized, "responses compact")
-	payloadCompatibility := isResponsesCompactNativePayloadCompatibilityError(message, normalized)
+	payloadCompatibility := isResponsesCompactNativePayloadCompatibilityError(normalized)
+	if payloadCompatibility && !responsesCompactRequestHasContextPayload(info) {
+		return false
+	}
 	if !compactPathMentioned && !payloadCompatibility {
 		return false
 	}
@@ -729,8 +732,74 @@ func isResponsesCompactNativeCompatibilityError(err *types.NewAPIError) bool {
 	return false
 }
 
-func isResponsesCompactNativePayloadCompatibilityError(message string, normalized string) bool {
-	if strings.Contains(message, "请求包含不允许的内容") {
+func responsesCompactRequestHasContextPayload(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	switch req := info.Request.(type) {
+	case *dto.OpenAIResponsesCompactionRequest:
+		return responsesRequestHasContextPayload(req.PreviousResponseID, req.Input)
+	case *dto.OpenAIResponsesRequest:
+		return responsesRequestHasContextPayload(req.PreviousResponseID, req.Input)
+	default:
+		return false
+	}
+}
+
+func responsesRequestHasContextPayload(previousResponseID string, input common.RawMessage) bool {
+	if strings.TrimSpace(previousResponseID) != "" {
+		return true
+	}
+	if common.GetJsonType(input) != "array" {
+		return false
+	}
+	var items []common.RawMessage
+	if err := common.Unmarshal(input, &items); err != nil {
+		return false
+	}
+	for _, rawItem := range items {
+		var item map[string]common.RawMessage
+		if err := common.Unmarshal(rawItem, &item); err != nil {
+			continue
+		}
+		switch responsesCompactInputItemType(item) {
+		case "compaction":
+			return true
+		case "reasoning":
+			if responsesCompactInputHasEncryptedContent(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func responsesCompactInputItemType(item map[string]common.RawMessage) string {
+	rawType := item["type"]
+	if len(rawType) == 0 {
+		return ""
+	}
+	var itemType string
+	if err := common.Unmarshal(rawType, &itemType); err != nil {
+		return ""
+	}
+	return itemType
+}
+
+func responsesCompactInputHasEncryptedContent(item map[string]common.RawMessage) bool {
+	raw := strings.TrimSpace(string(item["encrypted_content"]))
+	if raw == "" || raw == "null" {
+		return false
+	}
+	var encryptedContent string
+	if err := common.Unmarshal(item["encrypted_content"], &encryptedContent); err == nil {
+		return strings.TrimSpace(encryptedContent) != ""
+	}
+	return true
+}
+
+func isResponsesCompactNativePayloadCompatibilityError(normalized string) bool {
+	if strings.Contains(strings.ReplaceAll(normalized, " ", ""), "请求包含不允许的内容") {
 		return true
 	}
 	for _, indicator := range []string{

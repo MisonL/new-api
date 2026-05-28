@@ -116,10 +116,40 @@ func TestShouldFallbackResponsesCompactAutoRequiresCompatibilityError(t *testing
 			want:       true,
 		},
 		{
+			name:       "native payload spaced chinese content rejection falls back",
+			statusCode: http.StatusBadRequest,
+			message:    "请求 包含 不允许 的内容，请修改后重试",
+			want:       true,
+		},
+		{
 			name:       "native payload disallowed content falls back",
 			statusCode: http.StatusBadRequest,
 			message:    "request contains disallowed content",
 			want:       true,
+		},
+		{
+			name:       "native payload input disallowed content falls back",
+			statusCode: http.StatusBadRequest,
+			message:    "input contains disallowed content",
+			want:       true,
+		},
+		{
+			name:       "native payload content not allowed falls back",
+			statusCode: http.StatusBadRequest,
+			message:    "content is not allowed",
+			want:       true,
+		},
+		{
+			name:       "model lookup still wins over payload content rejection",
+			statusCode: http.StatusNotFound,
+			message:    "model gpt-5 not found: request contains disallowed content",
+			want:       false,
+		},
+		{
+			name:       "parameter error still wins over payload content rejection",
+			statusCode: http.StatusBadRequest,
+			message:    "unsupported parameter temperature: payload contains disallowed content",
+			want:       false,
 		},
 		{
 			name:       "generic content policy block does not fallback",
@@ -162,20 +192,73 @@ func TestShouldFallbackResponsesCompactAutoRequiresCompatibilityError(t *testing
 				Code:    string(types.ErrorCodeBadResponseStatusCode),
 			}, tc.statusCode)
 
-			require.Equal(t, tc.want, shouldFallbackResponsesCompactAuto(c, compactAutoFallbackRelayInfo(), err))
+			info := compactAutoFallbackRelayInfo()
+			info.Request = compactPayloadRequest()
+			require.Equal(t, tc.want, shouldFallbackResponsesCompactAuto(c, info, err))
 			_, exists := c.Get("responses_compact_auto_fallback_attempted")
 			require.False(t, exists)
 		})
 	}
 }
 
-func TestResponsesCompactNativeCompatibilityPayloadRejection(t *testing.T) {
+func TestShouldFallbackResponsesCompactAutoRequiresContextPayloadForContentRejection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
 	err := types.WithOpenAIError(types.OpenAIError{
 		Message: "request contains disallowed content",
 		Code:    string(types.ErrorCodeBadResponseStatusCode),
 	}, http.StatusBadRequest)
+	info := compactAutoFallbackRelayInfo()
+	info.Request = &dto.OpenAIResponsesCompactionRequest{
+		Model: "gpt-5.5-openai-compact",
+		Input: []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"unsafe user prompt"}]}]`),
+	}
 
-	require.True(t, isResponsesCompactNativeCompatibilityError(err))
+	require.False(t, shouldFallbackResponsesCompactAuto(c, info, err))
+}
+
+func TestResponsesCompactRequestHasContextPayload(t *testing.T) {
+	testCases := []struct {
+		name string
+		req  dto.Request
+		want bool
+	}{
+		{
+			name: "previous response id",
+			req: &dto.OpenAIResponsesCompactionRequest{
+				PreviousResponseID: "resp_123",
+			},
+			want: true,
+		},
+		{
+			name: "compaction item",
+			req: &dto.OpenAIResponsesCompactionRequest{
+				Input: []byte(`[{"type":"compaction","encrypted_content":"opaque"}]`),
+			},
+			want: true,
+		},
+		{
+			name: "encrypted reasoning item",
+			req: &dto.OpenAIResponsesCompactionRequest{
+				Input: []byte(`[{"type":"reasoning","encrypted_content":"opaque"}]`),
+			},
+			want: true,
+		},
+		{
+			name: "visible input only",
+			req: &dto.OpenAIResponsesCompactionRequest{
+				Input: []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]`),
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, responsesCompactRequestHasContextPayload(&relaycommon.RelayInfo{Request: tc.req}))
+		})
+	}
 }
 
 func TestShouldFallbackResponsesCompactAutoHonorsAttemptedFlag(t *testing.T) {
@@ -282,5 +365,12 @@ func compactAutoFallbackRelayInfo() *relaycommon.RelayInfo {
 				ResponsesCompactMode: dto.ResponsesCompactModeAuto,
 			},
 		},
+	}
+}
+
+func compactPayloadRequest() *dto.OpenAIResponsesCompactionRequest {
+	return &dto.OpenAIResponsesCompactionRequest{
+		Model: "gpt-5.5-openai-compact",
+		Input: []byte(`[{"type":"compaction","encrypted_content":"opaque"}]`),
 	}
 }
