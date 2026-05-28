@@ -21,6 +21,9 @@ export const RESPONSES_COMPACT_MODE_AUTO = 'auto';
 export const RESPONSES_COMPACT_MODE_NATIVE = 'native';
 export const RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY = 'synthetic_summary';
 export const RESPONSES_COMPACT_MODE_DEFAULT = RESPONSES_COMPACT_MODE_AUTO;
+export const RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT = true;
+export const RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT = true;
+export const RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT = ['gpt-5.4'];
 
 export const RESPONSES_COMPACT_MODE_OPTIONS = [
   {
@@ -57,12 +60,41 @@ export function normalizeResponsesCompactMode(mode) {
   return RESPONSES_COMPACT_MODE_DEFAULT;
 }
 
-export function buildResponsesCompactSettings(channelType, mode) {
+export function normalizeResponsesCompactSummaryFallbackModels(models) {
+  const rawModels = Array.isArray(models)
+    ? models
+    : String(models || '').split(',');
+  const seen = new Set();
+  const normalized = [];
+  for (const model of rawModels) {
+    const value = String(model || '').trim();
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    normalized.push(value);
+  }
+  return normalized.length > 0
+    ? normalized
+    : [...RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT];
+}
+
+export function buildResponsesCompactSettings(
+  channelType,
+  mode,
+  contextFallback = RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
+  summaryModelFallback = RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
+  summaryFallbackModels = RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+) {
   if (channelType !== 1) {
     return {};
   }
   return {
     responses_compact_mode: normalizeResponsesCompactMode(mode),
+    responses_compact_context_fallback: contextFallback !== false,
+    responses_compact_summary_model_fallback: summaryModelFallback !== false,
+    responses_compact_summary_fallback_models:
+      normalizeResponsesCompactSummaryFallbackModels(summaryFallbackModels),
   };
 }
 
@@ -73,6 +105,9 @@ export function clearResponsesCompactSettings(settings) {
   delete settings.responses_compact_mode;
   delete settings.responses_compact_auto_fallback_date;
   delete settings.responses_compact_auto_fallback_reason;
+  delete settings.responses_compact_context_fallback;
+  delete settings.responses_compact_summary_model_fallback;
+  delete settings.responses_compact_summary_fallback_models;
 }
 
 export function resetResponsesCompactAutoFallbackOnModeChange(

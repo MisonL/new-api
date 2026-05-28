@@ -1161,24 +1161,28 @@ func clearResponsesCompactSettingsForNonOpenAI(channelType int, settings *dto.Ch
 	if channelType == constant.ChannelTypeOpenAI || settings == nil {
 		return false
 	}
-	compactSettings := responsesCompactSettingsOnly{
-		Mode:           settings.ResponsesCompactMode,
-		FallbackDate:   settings.ResponsesCompactAutoFallbackDate,
-		FallbackReason: settings.ResponsesCompactAutoFallbackReason,
-	}
-	if compactSettings == (responsesCompactSettingsOnly{}) {
+	if !hasResponsesCompactSettings(settings) {
 		return false
 	}
 	settings.ResponsesCompactMode = ""
 	settings.ResponsesCompactAutoFallbackDate = 0
 	settings.ResponsesCompactAutoFallbackReason = ""
+	settings.ResponsesCompactContextFallback = nil
+	settings.ResponsesCompactSummaryModelFallback = nil
+	settings.ResponsesCompactSummaryFallbackModels = nil
 	return true
 }
 
-type responsesCompactSettingsOnly struct {
-	Mode           dto.ResponsesCompactMode
-	FallbackDate   int
-	FallbackReason string
+func hasResponsesCompactSettings(settings *dto.ChannelOtherSettings) bool {
+	if settings == nil {
+		return false
+	}
+	return settings.ResponsesCompactMode != "" ||
+		settings.ResponsesCompactAutoFallbackDate != 0 ||
+		settings.ResponsesCompactAutoFallbackReason != "" ||
+		settings.ResponsesCompactContextFallback != nil ||
+		settings.ResponsesCompactSummaryModelFallback != nil ||
+		len(settings.ResponsesCompactSummaryFallbackModels) > 0
 }
 
 func FetchModels(c *gin.Context) {

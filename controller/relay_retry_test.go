@@ -179,6 +179,72 @@ func TestShouldFallbackResponsesCompactAutoSkipsActiveFallbackWindow(t *testing.
 	require.False(t, exists)
 }
 
+func TestShouldFallbackResponsesCompactNativeContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	info := compactAutoFallbackRelayInfo()
+	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeNative
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "This model's maximum context length is 128000 tokens. Your request has too many tokens.",
+		Code:    "context_length_exceeded",
+	}, http.StatusBadRequest)
+
+	require.True(t, shouldFallbackResponsesCompactNativeContext(c, info, err))
+
+	disabled := false
+	info.ChannelOtherSettings.ResponsesCompactContextFallback = &disabled
+	require.False(t, shouldFallbackResponsesCompactNativeContext(c, info, err))
+}
+
+func TestShouldFallbackResponsesCompactSummaryModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	info := compactAutoFallbackRelayInfo()
+	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeSynthetic
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "input too large for context window",
+		Code:    "context_length_exceeded",
+	}, http.StatusRequestEntityTooLarge)
+
+	require.True(t, shouldFallbackResponsesCompactSummaryModel(c, info, err))
+
+	c.Set("responses_compact_summary_model_fallback_attempted", true)
+	require.False(t, shouldFallbackResponsesCompactSummaryModel(c, info, err))
+}
+
+func TestShouldFallbackResponsesCompactSummaryModelSkipsCurrentModelOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	info := compactAutoFallbackRelayInfo()
+	info.UpstreamModelName = "gpt-5.4"
+	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeSynthetic
+	info.ChannelOtherSettings.ResponsesCompactSummaryFallbackModels = []string{"gpt-5.4"}
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "context window exceeded",
+		Code:    "context_length_exceeded",
+	}, http.StatusBadRequest)
+
+	require.False(t, shouldFallbackResponsesCompactSummaryModel(c, info, err))
+}
+
+func TestResponsesCompactContextLengthErrorRejectsModelLookup(t *testing.T) {
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "model gpt-5.4 was not found",
+		Code:    string(types.ErrorCodeBadResponseStatusCode),
+	}, http.StatusNotFound)
+
+	require.False(t, isResponsesCompactContextLengthError(err))
+}
+
+func TestResponsesCompactContextLengthErrorRejectsGenericLimit(t *testing.T) {
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "quota exceeds the limit for this account",
+		Code:    string(types.ErrorCodeBadResponseStatusCode),
+	}, http.StatusBadRequest)
+
+	require.False(t, isResponsesCompactContextLengthError(err))
+}
+
 func compactAutoFallbackRelayInfo() *relaycommon.RelayInfo {
 	return &relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeResponsesCompact,

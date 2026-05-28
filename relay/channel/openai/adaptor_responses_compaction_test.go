@@ -501,10 +501,12 @@ func TestConvertOpenAIResponsesRequestRestoresSyntheticStateBeforeStrip(t *testi
 
 	var items []map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 2)
+	require.Len(t, items, 3)
 	require.Equal(t, "developer", responseItemRole(t, items[0]))
 	require.Contains(t, responseItemText(t, items[0]), "Stored synthetic summary.")
 	require.Equal(t, "user", responseItemRole(t, items[1]))
+	require.Equal(t, "developer", responseItemRole(t, items[2]))
+	require.Contains(t, responseItemText(t, items[2]), "Another language model produced the compact summary above")
 	require.NotContains(t, string(convertedReq.Input), "opaque")
 	require.NotContains(t, string(convertedReq.Input), "old answer")
 }

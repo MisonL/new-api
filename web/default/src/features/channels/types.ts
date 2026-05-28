@@ -77,6 +77,9 @@ export interface ChannelOtherSettings {
   responses_compact_mode?: ResponsesCompactMode
   responses_compact_auto_fallback_date?: number
   responses_compact_auto_fallback_reason?: string
+  responses_compact_context_fallback?: boolean
+  responses_compact_summary_model_fallback?: boolean
+  responses_compact_summary_fallback_models?: string[]
   vertex_key_type?: 'json' | 'api_key'
   openrouter_enterprise?: boolean
   aws_key_type?: 'ak_sk' | 'api_key'

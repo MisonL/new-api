@@ -6,12 +6,16 @@ import {
 } from '../src/features/channels/lib/channel-form'
 import {
   RESPONSES_COMPACT_BADGE_KEYS,
+  RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
   RESPONSES_COMPACT_MODE_AUTO,
   RESPONSES_COMPACT_MODE_NATIVE,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+  RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
   getResponsesCompactAutoFallbackReason,
   getResponsesCompactMode,
   isResponsesCompactAutoFallbackActive,
+  normalizeResponsesCompactFallbackModels,
 } from '../src/features/channels/lib/channel-utils'
 import type { Channel } from '../src/features/channels/types'
 import en from '../src/i18n/locales/en.json'
@@ -75,6 +79,15 @@ describe('channel responses compact settings', () => {
     expect(CHANNEL_FORM_DEFAULT_VALUES.responses_compact_mode).toBe(
       RESPONSES_COMPACT_MODE_AUTO
     )
+    expect(CHANNEL_FORM_DEFAULT_VALUES.responses_compact_context_fallback).toBe(
+      RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT
+    )
+    expect(
+      CHANNEL_FORM_DEFAULT_VALUES.responses_compact_summary_model_fallback
+    ).toBe(RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT)
+    expect(
+      CHANNEL_FORM_DEFAULT_VALUES.responses_compact_summary_fallback_models
+    ).toBe(RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(','))
     expect(getResponsesCompactMode('{}')).toBe(RESPONSES_COMPACT_MODE_AUTO)
     expect(getResponsesCompactMode('')).toBe(RESPONSES_COMPACT_MODE_AUTO)
     expect(getResponsesCompactMode('{bad json')).toBe(
@@ -120,6 +133,23 @@ describe('channel responses compact settings', () => {
         )
       ).toBe(RESPONSES_COMPACT_MODE_AUTO)
     }
+  })
+
+  test('normalizes synthetic summary fallback models safely', () => {
+    expect(
+      normalizeResponsesCompactFallbackModels(
+        ' gpt-5.4, gpt-5.4, gpt-5.4-large '
+      )
+    ).toEqual(['gpt-5.4', 'gpt-5.4-large'])
+    expect(normalizeResponsesCompactFallbackModels([' ', ''])).toEqual([
+      'gpt-5.4',
+    ])
+
+    const defaults = normalizeResponsesCompactFallbackModels(undefined)
+    defaults.push('mutated')
+    expect(normalizeResponsesCompactFallbackModels(undefined)).toEqual([
+      'gpt-5.4',
+    ])
   })
 
   test('defaults existing Azure and empty records to auto', () => {
@@ -190,15 +220,27 @@ describe('channel responses compact settings', () => {
     expect(defaults.responses_compact_mode).toBe(
       RESPONSES_COMPACT_MODE_NATIVE
     )
+    expect(defaults.responses_compact_context_fallback).toBe(true)
+    expect(defaults.responses_compact_summary_model_fallback).toBe(true)
+    expect(defaults.responses_compact_summary_fallback_models).toBe('gpt-5.4')
 
     const payload = transformFormDataToCreatePayload({
       ...CHANNEL_FORM_DEFAULT_VALUES,
       type: 1,
       responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
+      responses_compact_context_fallback: false,
+      responses_compact_summary_model_fallback: true,
+      responses_compact_summary_fallback_models: 'gpt-5.4,gpt-5.4-large',
     })
     const stored = JSON.parse(String(payload.channel.settings))
 
     expect(stored.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    expect(stored.responses_compact_context_fallback).toBe(false)
+    expect(stored.responses_compact_summary_model_fallback).toBe(true)
+    expect(stored.responses_compact_summary_fallback_models).toEqual([
+      'gpt-5.4',
+      'gpt-5.4-large',
+    ])
   })
 
   test('loads and stores auto compact mode for OpenAI channels', () => {
@@ -275,6 +317,9 @@ describe('channel responses compact settings', () => {
       settings: JSON.stringify({
         responses_compact_auto_fallback_date: 20260526,
         responses_compact_auto_fallback_reason: 'status_code=404',
+        responses_compact_context_fallback: true,
+        responses_compact_summary_model_fallback: true,
+        responses_compact_summary_fallback_models: ['gpt-5.4'],
       }),
     })
     const stored = JSON.parse(String(payload.channel.settings))
@@ -282,6 +327,9 @@ describe('channel responses compact settings', () => {
     expect(stored.responses_compact_mode).toBeUndefined()
     expect(stored.responses_compact_auto_fallback_date).toBeUndefined()
     expect(stored.responses_compact_auto_fallback_reason).toBeUndefined()
+    expect(stored.responses_compact_context_fallback).toBeUndefined()
+    expect(stored.responses_compact_summary_model_fallback).toBeUndefined()
+    expect(stored.responses_compact_summary_fallback_models).toBeUndefined()
   })
 
   test('detects auto fallback state by UTC date', () => {

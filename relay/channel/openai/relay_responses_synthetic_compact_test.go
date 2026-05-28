@@ -77,6 +77,57 @@ func TestOaiSyntheticResponsesCompactionHandlerReturnsSyntheticCompactionOutput(
 	require.Contains(t, string(applied.Input), "Synthetic summary text.")
 }
 
+func TestOaiSyntheticResponsesCompactionHandlerStoresOriginalModelWhenFallbackModelWasUsed(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	body := `{
+		"id":"resp_upstream",
+		"object":"response",
+		"created_at":1710000000,
+		"model":"gpt-5.4",
+		"output":[
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Fallback summary text."}]}
+		],
+		"usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14}
+	}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		UserId:          10,
+		TokenId:         20,
+		UsingGroup:      "default",
+		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			ChannelId:         163,
+			UpstreamModelName: "gpt-5.4",
+		},
+	}
+
+	usage, err := OaiSyntheticResponsesCompactionHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.Equal(t, 10, usage.PromptTokens)
+	var compactResp dto.OpenAIResponsesCompactionResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &compactResp))
+	applied, ok, applyErr := service.ApplySyntheticCompactState(c.Request.Context(), service.SyntheticCompactStateScope{
+		UserID:  10,
+		TokenID: 20,
+		Group:   "default",
+	}, dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: compactResp.ID,
+		Input:              common.RawMessage(`"continue"`),
+	})
+	require.NoError(t, applyErr)
+	require.True(t, ok)
+	require.Contains(t, string(applied.Input), "Fallback summary text.")
+}
+
 func TestOaiSyntheticResponsesCompactionHandlerReturnsUpstreamOpenAIError(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

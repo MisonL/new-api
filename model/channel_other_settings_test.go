@@ -17,6 +17,9 @@ func TestChannelOtherSettingsDefaultsResponsesCompactAuto(t *testing.T) {
 	require.True(t, settings.IsAutoResponsesCompact())
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactModeOrDefault())
 	require.True(t, settings.HasNativeResponsesCompact())
+	require.True(t, settings.ResponsesCompactContextFallbackEnabled())
+	require.True(t, settings.ResponsesCompactSummaryModelFallbackEnabled())
+	require.Equal(t, []string{"gpt-5.4"}, settings.ResponsesCompactSummaryFallbackModelsOrDefault())
 }
 
 func TestChannelOtherSettingsResponsesCompactAutoRoundTrip(t *testing.T) {
@@ -166,4 +169,22 @@ func TestChannelOtherSettingsResponsesCompactLegacyModesNormalizeSafely(t *testi
 			require.Equal(t, tt.expected == dto.ResponsesCompactModeSynthetic, settings.HasSyntheticResponsesCompact())
 		})
 	}
+}
+
+func TestChannelOtherSettingsResponsesCompactFallbackControls(t *testing.T) {
+	enabled := true
+	disabled := false
+	settings := dto.ChannelOtherSettings{
+		ResponsesCompactContextFallback:       &disabled,
+		ResponsesCompactSummaryModelFallback:  &enabled,
+		ResponsesCompactSummaryFallbackModels: []string{" gpt-5.4 ", "", "gpt-5.4", "gpt-5.4-large"},
+	}
+
+	require.False(t, settings.ResponsesCompactContextFallbackEnabled())
+	require.True(t, settings.ResponsesCompactSummaryModelFallbackEnabled())
+	require.Equal(t, []string{"gpt-5.4", "gpt-5.4-large"}, settings.ResponsesCompactSummaryFallbackModelsOrDefault())
+
+	settings.ResponsesCompactSummaryFallbackModels = []string{" ", ""}
+	require.True(t, settings.ResponsesCompactSummaryModelFallbackEnabled())
+	require.Equal(t, []string{"gpt-5.4"}, settings.ResponsesCompactSummaryFallbackModelsOrDefault())
 }

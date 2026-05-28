@@ -10,6 +10,8 @@ const (
 	ContextKeyOriginalModel                   ContextKey = "original_model"
 	ContextKeyRequestStartTime                ContextKey = "request_start_time"
 	ContextKeyResponsesBootstrapRecoveryState ContextKey = "responses_bootstrap_recovery_state"
+	ContextKeyResponsesCompactSummaryModel    ContextKey = "responses_compact_summary_model"
+	ContextKeyResponsesCompactSummaryModels   ContextKey = "responses_compact_summary_models"
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"

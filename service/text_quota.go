@@ -321,10 +321,14 @@ func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) 
 }
 
 type responsesCompactLogDetails struct {
-	Mode         string
-	Setting      string
-	UpstreamPath string
-	AutoFallback bool
+	Mode              string
+	Setting           string
+	UpstreamPath      string
+	AutoFallback      bool
+	ContextFallback   bool
+	SummaryModel      string
+	SummaryModels     []string
+	SummaryModelRetry bool
 }
 
 func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, now time.Time) (responsesCompactLogDetails, bool) {
@@ -359,6 +363,18 @@ func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 		effective = dto.ResponsesCompactModeSynthetic
 		autoFallback = true
 	}
+	contextFallback := false
+	summaryModelRetry := false
+	summaryModel := ""
+	if ctx != nil {
+		contextFallback = ctx.GetBool("responses_compact_context_fallback_attempted")
+		summaryModelRetry = ctx.GetBool("responses_compact_summary_model_fallback_attempted")
+		summaryModel = common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactSummaryModel)
+	}
+	summaryModels := []string(nil)
+	if ctx != nil {
+		summaryModels = common.GetContextKeyStringSlice(ctx, constant.ContextKeyResponsesCompactSummaryModels)
+	}
 
 	mode := string(dto.ResponsesCompactModeNative)
 	upstreamPath := "/v1/responses/compact"
@@ -368,10 +384,14 @@ func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	}
 
 	return responsesCompactLogDetails{
-		Mode:         mode,
-		Setting:      string(setting),
-		UpstreamPath: upstreamPath,
-		AutoFallback: autoFallback,
+		Mode:              mode,
+		Setting:           string(setting),
+		UpstreamPath:      upstreamPath,
+		AutoFallback:      autoFallback,
+		ContextFallback:   contextFallback,
+		SummaryModel:      summaryModel,
+		SummaryModels:     summaryModels,
+		SummaryModelRetry: summaryModelRetry,
 	}, true
 }
 
@@ -389,9 +409,33 @@ func appendResponsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.Rela
 	if logInfo.AutoFallback {
 		other["responses_compact_auto_fallback"] = true
 	}
+	if logInfo.ContextFallback {
+		other["responses_compact_context_fallback"] = true
+	}
+	if logInfo.SummaryModelRetry {
+		other["responses_compact_summary_model_fallback"] = true
+	}
+	if logInfo.SummaryModel != "" {
+		other["responses_compact_summary_model"] = logInfo.SummaryModel
+	}
+	if len(logInfo.SummaryModels) > 0 {
+		other["responses_compact_summary_models"] = logInfo.SummaryModels
+	}
 	content := fmt.Sprintf("Responses Compact mode=%s setting=%s path=%s", logInfo.Mode, logInfo.Setting, logInfo.UpstreamPath)
 	if logInfo.AutoFallback {
 		content += " auto_fallback=true"
+	}
+	if logInfo.ContextFallback {
+		content += " context_fallback=true"
+	}
+	if logInfo.SummaryModelRetry {
+		content += " summary_model_fallback=true"
+	}
+	if logInfo.SummaryModel != "" {
+		content += fmt.Sprintf(" summary_model=%s", logInfo.SummaryModel)
+	}
+	if len(logInfo.SummaryModels) > 0 {
+		content += fmt.Sprintf(" summary_models=%s", strings.Join(logInfo.SummaryModels, ","))
 	}
 	if ctx != nil {
 		logger.LogInfo(ctx, content)

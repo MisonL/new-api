@@ -30,9 +30,12 @@ func OaiSyntheticResponsesCompactionHandler(c *gin.Context, info *relaycommon.Re
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
-	model := responsesResp.Model
-	if model == "" && info != nil {
+	model := ""
+	if info != nil {
 		model = info.OriginModelName
+	}
+	if model == "" {
+		model = responsesResp.Model
 	}
 	if model == "" {
 		return nil, types.NewOpenAIError(errors.New("model name is required"), types.ErrorCodeInvalidRequest, http.StatusBadRequest)

@@ -80,11 +80,15 @@ import {
   collectNewDisallowedStatusCodeRedirects,
 } from './statusCodeRiskGuard';
 import {
+  RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_MODE_OPTIONS,
+  RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
   buildResponsesCompactSettings,
   clearResponsesCompactSettings,
   normalizeResponsesCompactMode,
+  normalizeResponsesCompactSummaryFallbackModels,
   resetResponsesCompactAutoFallbackOnModeChange,
 } from '../../../../helpers/responsesCompactSettings.js';
 import {
@@ -261,6 +265,12 @@ const EditChannelModal = (props) => {
     allow_speed: false,
     claude_beta_query: false,
     responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
+    responses_compact_context_fallback:
+      RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
+    responses_compact_summary_model_fallback:
+      RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
+    responses_compact_summary_fallback_models:
+      RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(','),
     responses_stream_bootstrap_recovery_enabled: false,
     upstream_model_update_check_enabled: false,
     upstream_model_update_auto_sync_enabled: false,
@@ -1387,6 +1397,14 @@ const EditChannelModal = (props) => {
           data.responses_compact_mode = normalizeResponsesCompactMode(
             parsedSettings.responses_compact_mode,
           );
+          data.responses_compact_context_fallback =
+            parsedSettings.responses_compact_context_fallback !== false;
+          data.responses_compact_summary_model_fallback =
+            parsedSettings.responses_compact_summary_model_fallback !== false;
+          data.responses_compact_summary_fallback_models =
+            normalizeResponsesCompactSummaryFallbackModels(
+              parsedSettings.responses_compact_summary_fallback_models,
+            ).join(',');
           data.responses_stream_bootstrap_recovery_enabled =
             parsedSettings.responses_stream_bootstrap_recovery_enabled === true;
           data.upstream_model_update_check_enabled =
@@ -1422,6 +1440,12 @@ const EditChannelModal = (props) => {
           data.allow_speed = false;
           data.claude_beta_query = false;
           data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
+          data.responses_compact_context_fallback =
+            RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT;
+          data.responses_compact_summary_model_fallback =
+            RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT;
+          data.responses_compact_summary_fallback_models =
+            RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',');
           data.responses_stream_bootstrap_recovery_enabled = false;
           data.upstream_model_update_check_enabled = false;
           data.upstream_model_update_auto_sync_enabled = false;
@@ -1443,6 +1467,12 @@ const EditChannelModal = (props) => {
         data.allow_speed = false;
         data.claude_beta_query = false;
         data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
+        data.responses_compact_context_fallback =
+          RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT;
+        data.responses_compact_summary_model_fallback =
+          RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT;
+        data.responses_compact_summary_fallback_models =
+          RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',');
         data.responses_stream_bootstrap_recovery_enabled = false;
         data.upstream_model_update_check_enabled = false;
         data.upstream_model_update_auto_sync_enabled = false;
@@ -2347,6 +2377,9 @@ const EditChannelModal = (props) => {
           buildResponsesCompactSettings(
             localInputs.type,
             localInputs.responses_compact_mode,
+            localInputs.responses_compact_context_fallback,
+            localInputs.responses_compact_summary_model_fallback,
+            localInputs.responses_compact_summary_fallback_models,
           ),
         );
         settings.disable_store = localInputs.disable_store === true;
@@ -2418,6 +2451,9 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
     delete localInputs.responses_compact_mode;
+    delete localInputs.responses_compact_context_fallback;
+    delete localInputs.responses_compact_summary_model_fallback;
+    delete localInputs.responses_compact_summary_fallback_models;
     delete localInputs.responses_stream_bootstrap_recovery_enabled;
     delete localInputs.upstream_model_update_check_enabled;
     delete localInputs.upstream_model_update_auto_sync_enabled;
@@ -2895,6 +2931,67 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t(
                         '控制该 OpenAI 渠道是否接收 /v1/responses/compact 请求。原生模式会保留 compact 路径并映射内部 compact 模型名。',
+                      )}
+                    />
+                    <Form.Switch
+                      field='responses_compact_context_fallback'
+                      label={t('原生 compact 上下文超限时回退')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      checked={
+                        inputs.responses_compact_context_fallback !== false
+                      }
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'responses_compact_context_fallback',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '原生 compact 因上下文过大失败时，改用模拟摘要重试。',
+                      )}
+                    />
+                    <Form.Switch
+                      field='responses_compact_summary_model_fallback'
+                      label={t('模拟摘要模型超限时回退')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      checked={
+                        inputs.responses_compact_summary_model_fallback !==
+                        false
+                      }
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'responses_compact_summary_model_fallback',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '模拟摘要超过当前模型上下文时，使用配置的回退模型重试。',
+                      )}
+                    />
+                    <Form.Input
+                      field='responses_compact_summary_fallback_models'
+                      label={t('模拟摘要回退模型')}
+                      placeholder='gpt-5.4'
+                      disabled={
+                        inputs.responses_compact_summary_model_fallback ===
+                        false
+                      }
+                      value={
+                        inputs.responses_compact_summary_fallback_models ||
+                        RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(
+                          ',',
+                        )
+                      }
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'responses_compact_summary_fallback_models',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '按顺序使用的模型名称，多个模型用英文逗号分隔，例如 gpt-5.4。',
                       )}
                     />
                   </div>

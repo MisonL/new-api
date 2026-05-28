@@ -66,6 +66,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
+	applyResponsesCompactSummaryModelOverride(c, info, request)
 
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {
@@ -209,6 +210,18 @@ func newResponsesConvertRequestError(err error) *types.NewAPIError {
 		options = append(options, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 	}
 	return types.NewError(err, types.ErrorCodeConvertRequestFailed, options...)
+}
+
+func applyResponsesCompactSummaryModelOverride(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) {
+	if c == nil || request == nil || !relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
+		return
+	}
+	model := strings.TrimSpace(common.GetContextKeyString(c, appconstant.ContextKeyResponsesCompactSummaryModel))
+	if model == "" {
+		return
+	}
+	request.SetModelName(model)
+	info.UpstreamModelName = model
 }
 
 func shouldRouteResponsesViaChat(info *relaycommon.RelayInfo, passThroughGlobal bool) bool {

@@ -23,13 +23,17 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
   RESPONSES_COMPACT_MODE_AUTO,
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_MODE_NATIVE,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+  RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
   buildResponsesCompactSettings,
   clearResponsesCompactSettings,
   normalizeResponsesCompactMode,
+  normalizeResponsesCompactSummaryFallbackModels,
   resetResponsesCompactAutoFallbackOnModeChange,
 } from '../src/helpers/responsesCompactSettings.js';
 
@@ -67,9 +71,20 @@ describe('classic responses compact settings', () => {
   test('stores compact mode only for OpenAI channels', () => {
     expect(buildResponsesCompactSettings(1, undefined)).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+      responses_compact_context_fallback:
+        RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
+      responses_compact_summary_model_fallback:
+        RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
+      responses_compact_summary_fallback_models:
+        RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
     });
-    expect(buildResponsesCompactSettings(1, RESPONSES_COMPACT_MODE_AUTO)).toEqual({
+    expect(
+      buildResponsesCompactSettings(1, RESPONSES_COMPACT_MODE_AUTO),
+    ).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+      responses_compact_context_fallback: true,
+      responses_compact_summary_model_fallback: true,
+      responses_compact_summary_fallback_models: ['gpt-5.4'],
     });
     expect(
       buildResponsesCompactSettings(
@@ -78,13 +93,39 @@ describe('classic responses compact settings', () => {
       ),
     ).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+      responses_compact_context_fallback: true,
+      responses_compact_summary_model_fallback: true,
+      responses_compact_summary_fallback_models: ['gpt-5.4'],
     });
     expect(buildResponsesCompactSettings(1, 'convert')).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+      responses_compact_context_fallback: true,
+      responses_compact_summary_model_fallback: true,
+      responses_compact_summary_fallback_models: ['gpt-5.4'],
     });
     expect(
       buildResponsesCompactSettings(14, RESPONSES_COMPACT_MODE_NATIVE),
     ).toEqual({});
+  });
+
+  test('stores compact fallback controls for OpenAI channels', () => {
+    expect(
+      buildResponsesCompactSettings(
+        1,
+        RESPONSES_COMPACT_MODE_AUTO,
+        false,
+        false,
+        'gpt-5.4, gpt-5.4, gpt-5.4-mini',
+      ),
+    ).toEqual({
+      responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+      responses_compact_context_fallback: false,
+      responses_compact_summary_model_fallback: false,
+      responses_compact_summary_fallback_models: ['gpt-5.4', 'gpt-5.4-mini'],
+    });
+    expect(normalizeResponsesCompactSummaryFallbackModels('')).toEqual([
+      'gpt-5.4',
+    ]);
   });
 
   test('resets auto fallback state only when compact mode changes', () => {
@@ -142,6 +183,9 @@ describe('classic responses compact settings', () => {
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
       responses_compact_auto_fallback_date: 20260526,
       responses_compact_auto_fallback_reason: 'status_code=404',
+      responses_compact_context_fallback: true,
+      responses_compact_summary_model_fallback: true,
+      responses_compact_summary_fallback_models: ['gpt-5.4'],
     };
 
     clearResponsesCompactSettings(settings);
@@ -149,6 +193,9 @@ describe('classic responses compact settings', () => {
     expect(settings.responses_compact_mode).toBeUndefined();
     expect(settings.responses_compact_auto_fallback_date).toBeUndefined();
     expect(settings.responses_compact_auto_fallback_reason).toBeUndefined();
+    expect(settings.responses_compact_context_fallback).toBeUndefined();
+    expect(settings.responses_compact_summary_model_fallback).toBeUndefined();
+    expect(settings.responses_compact_summary_fallback_models).toBeUndefined();
   });
 
   test('renders a single compact field label in channel advanced settings', () => {
@@ -163,5 +210,12 @@ describe('classic responses compact settings', () => {
     expect(source.match(/t\('Responses Compact 能力'\)/g) ?? []).toHaveLength(
       1,
     );
+    expect(
+      source.match(/t\('原生 compact 上下文超限时回退'\)/g) ?? [],
+    ).toHaveLength(1);
+    expect(source.match(/t\('模拟摘要模型超限时回退'\)/g) ?? []).toHaveLength(
+      1,
+    );
+    expect(source.match(/t\('模拟摘要回退模型'\)/g) ?? []).toHaveLength(1);
   });
 });

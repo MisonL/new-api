@@ -1,6 +1,9 @@
 package dto
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type ChannelSettings struct {
 	ForceFormat            bool   `json:"force_format,omitempty"`
@@ -35,11 +38,16 @@ const (
 	ResponsesCompactModeSynthetic ResponsesCompactMode = "synthetic_summary"
 )
 
+const DefaultResponsesCompactSyntheticFallbackModel = "gpt-5.4"
+
 type ChannelOtherSettings struct {
 	AzureResponsesVersion                 string                 `json:"azure_responses_version,omitempty"`
 	ResponsesCompactMode                  ResponsesCompactMode   `json:"responses_compact_mode,omitempty"`
 	ResponsesCompactAutoFallbackDate      int                    `json:"responses_compact_auto_fallback_date,omitempty"`
 	ResponsesCompactAutoFallbackReason    string                 `json:"responses_compact_auto_fallback_reason,omitempty"`
+	ResponsesCompactContextFallback       *bool                  `json:"responses_compact_context_fallback,omitempty"`
+	ResponsesCompactSummaryModelFallback  *bool                  `json:"responses_compact_summary_model_fallback,omitempty"`
+	ResponsesCompactSummaryFallbackModels []string               `json:"responses_compact_summary_fallback_models,omitempty"`
 	VertexKeyType                         VertexKeyType          `json:"vertex_key_type,omitempty"` // "json" or "api_key"
 	OpenRouterEnterprise                  *bool                  `json:"openrouter_enterprise,omitempty"`
 	ClaudeBetaQuery                       bool                   `json:"claude_beta_query,omitempty"`         // Claude 渠道是否强制追加 ?beta=true
@@ -81,6 +89,38 @@ func (s *ChannelOtherSettings) HasSyntheticResponsesCompact() bool {
 
 func (s *ChannelOtherSettings) IsAutoResponsesCompact() bool {
 	return s == nil || s.ResponsesCompactMode == "" || s.ResponsesCompactMode == ResponsesCompactModeAuto
+}
+
+func (s *ChannelOtherSettings) ResponsesCompactContextFallbackEnabled() bool {
+	return s == nil || s.ResponsesCompactContextFallback == nil || *s.ResponsesCompactContextFallback
+}
+
+func (s *ChannelOtherSettings) ResponsesCompactSummaryModelFallbackEnabled() bool {
+	return s == nil || s.ResponsesCompactSummaryModelFallback == nil || *s.ResponsesCompactSummaryModelFallback
+}
+
+func (s *ChannelOtherSettings) ResponsesCompactSummaryFallbackModelsOrDefault() []string {
+	models := []string{DefaultResponsesCompactSyntheticFallbackModel}
+	if s != nil && len(s.ResponsesCompactSummaryFallbackModels) > 0 {
+		models = s.ResponsesCompactSummaryFallbackModels
+	}
+	result := make([]string, 0, len(models))
+	seen := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if _, ok := seen[model]; ok {
+			continue
+		}
+		seen[model] = struct{}{}
+		result = append(result, model)
+	}
+	if len(result) == 0 {
+		return []string{DefaultResponsesCompactSyntheticFallbackModel}
+	}
+	return result
 }
 
 func (s *ChannelOtherSettings) NormalizedResponsesCompactModeSetting() ResponsesCompactMode {

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -11,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -165,4 +167,28 @@ func TestNewResponsesConvertRequestErrorMapsSyntheticClientErrorsToBadRequest(t 
 		require.Equal(t, http.StatusBadRequest, err.StatusCode)
 		require.Equal(t, types.ErrorCodeConvertRequestFailed, err.GetErrorCode())
 	}
+}
+
+func TestApplyResponsesCompactSummaryModelOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModel, "gpt-5.4")
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			UpstreamModelName: "gpt-5.5",
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeSynthetic,
+			},
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{Model: "gpt-5.5"}
+
+	applyResponsesCompactSummaryModelOverride(c, info, request)
+
+	require.Equal(t, "gpt-5.4", request.Model)
+	require.Equal(t, "gpt-5.4", info.UpstreamModelName)
+	require.Equal(t, "gpt-5.5-openai-compact", info.OriginModelName)
 }

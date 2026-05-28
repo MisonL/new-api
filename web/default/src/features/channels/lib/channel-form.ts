@@ -3,7 +3,9 @@ import { CHANNEL_STATUS, MODEL_FETCHABLE_TYPES } from '../constants'
 import type { Channel, ResponsesCompactMode } from '../types'
 import {
   RESPONSES_COMPACT_MODE_DEFAULT,
+  RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
   normalizeResponsesCompactMode,
+  normalizeResponsesCompactFallbackModels,
 } from './channel-utils'
 
 // ============================================================================
@@ -61,6 +63,9 @@ export const channelFormSchema = z.object({
   responses_compact_mode: z
     .enum(['auto', 'native', 'synthetic_summary'])
     .optional(),
+  responses_compact_context_fallback: z.boolean().optional(),
+  responses_compact_summary_model_fallback: z.boolean().optional(),
+  responses_compact_summary_fallback_models: z.string().optional(),
   allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
   allow_speed: z.boolean().optional(), // Anthropic: speed mode control
   claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
@@ -121,6 +126,10 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_include_obfuscation: false,
   strip_codex_encrypted_context: false,
   responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
+  responses_compact_context_fallback: true,
+  responses_compact_summary_model_fallback: true,
+  responses_compact_summary_fallback_models:
+    RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(','),
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
@@ -178,6 +187,10 @@ export function transformChannelToFormDefaults(
   let stripCodexEncryptedContext = false
   let responsesCompactMode: ResponsesCompactMode =
     RESPONSES_COMPACT_MODE_DEFAULT
+  let responsesCompactContextFallback = true
+  let responsesCompactSummaryModelFallback = true
+  let responsesCompactSummaryFallbackModels =
+    RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',')
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
@@ -200,6 +213,14 @@ export function transformChannelToFormDefaults(
       responsesCompactMode = normalizeResponsesCompactMode(
         parsed.responses_compact_mode
       )
+      responsesCompactContextFallback =
+        parsed.responses_compact_context_fallback !== false
+      responsesCompactSummaryModelFallback =
+        parsed.responses_compact_summary_model_fallback !== false
+      responsesCompactSummaryFallbackModels =
+        normalizeResponsesCompactFallbackModels(
+          parsed.responses_compact_summary_fallback_models
+        ).join(',')
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
@@ -260,6 +281,11 @@ export function transformChannelToFormDefaults(
     allow_safety_identifier: allowSafetyIdentifier,
     strip_codex_encrypted_context: stripCodexEncryptedContext,
     responses_compact_mode: responsesCompactMode,
+    responses_compact_context_fallback: responsesCompactContextFallback,
+    responses_compact_summary_model_fallback:
+      responsesCompactSummaryModelFallback,
+    responses_compact_summary_fallback_models:
+      responsesCompactSummaryFallbackModels,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
@@ -350,6 +376,17 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       formData.responses_compact_mode
     )
     settingsObj.responses_compact_mode = nextResponsesCompactMode
+    settingsObj.responses_compact_context_fallback =
+      formData.responses_compact_context_fallback !== false
+    settingsObj.responses_compact_summary_model_fallback =
+      formData.responses_compact_summary_model_fallback !== false
+    settingsObj.responses_compact_summary_fallback_models =
+      normalizeResponsesCompactFallbackModels(
+        String(formData.responses_compact_summary_fallback_models || '')
+          .split(',')
+          .map((model) => model.trim())
+          .filter(Boolean)
+      )
     if (previousResponsesCompactMode !== nextResponsesCompactMode) {
       delete settingsObj.responses_compact_auto_fallback_date
       delete settingsObj.responses_compact_auto_fallback_reason
@@ -358,6 +395,9 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     delete settingsObj.responses_compact_mode
     delete settingsObj.responses_compact_auto_fallback_date
     delete settingsObj.responses_compact_auto_fallback_reason
+    delete settingsObj.responses_compact_context_fallback
+    delete settingsObj.responses_compact_summary_model_fallback
+    delete settingsObj.responses_compact_summary_fallback_models
   }
 
   if (formData.type === 1) {

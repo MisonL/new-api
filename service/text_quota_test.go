@@ -254,6 +254,36 @@ func TestAppendResponsesCompactLogInfoWritesContentAndOther(t *testing.T) {
 	require.Equal(t, true, annotatedOther["existing"])
 }
 
+func TestAppendResponsesCompactLogInfoRecordsContextAndSummaryModelFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+	ctx.Set("responses_compact_context_fallback_attempted", true)
+	ctx.Set("responses_compact_summary_model_fallback_attempted", true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactSummaryModel, "gpt-5.4")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactSummaryModels, []string{"gpt-5.4"})
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeSynthetic,
+			},
+		},
+	}
+
+	content, annotatedOther := appendResponsesCompactLogInfo(ctx, info, nil, nil, now)
+
+	require.Equal(t, []string{
+		"Responses Compact mode=synthetic_summary setting=synthetic_summary path=/v1/responses context_fallback=true summary_model_fallback=true summary_model=gpt-5.4 summary_models=gpt-5.4",
+	}, content)
+	require.Equal(t, true, annotatedOther["responses_compact_context_fallback"])
+	require.Equal(t, true, annotatedOther["responses_compact_summary_model_fallback"])
+	require.Equal(t, "gpt-5.4", annotatedOther["responses_compact_summary_model"])
+	require.Equal(t, []string{"gpt-5.4"}, annotatedOther["responses_compact_summary_models"])
+}
+
 func TestAppendResponsesCompactLogInfoUsesRelayInfoForErrorLogs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

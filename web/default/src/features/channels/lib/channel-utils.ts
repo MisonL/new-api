@@ -42,6 +42,9 @@ export const RESPONSES_COMPACT_AUTO_TOOLTIP =
   'Auto mode tries native compact first, falls back to synthetic summary after an upstream compatibility failure, and retries native once per day.'
 export const RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP =
   'Auto mode is using synthetic summary fallback today. Native compact will be retried automatically on the next day.'
+export const RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT = true
+export const RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT = true
+export const RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT = ['gpt-5.4']
 
 export const RESPONSES_COMPACT_BADGE_KEYS = [
   ...Object.values(RESPONSES_COMPACT_BADGE_LABELS),
@@ -316,23 +319,65 @@ export function parseChannelSettings(
 export function parseChannelOtherSettings(
   settingsStr: string | null | undefined
 ): ChannelOtherSettings {
+  const defaults = defaultResponsesCompactOtherSettings()
   if (!settingsStr || settingsStr === '{}') {
-    return { responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT }
+    return defaults
   }
   try {
     const parsed = JSON.parse(settingsStr) as unknown
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT }
+      return defaults
     }
     const settings = parsed as ChannelOtherSettings
     return {
+      ...defaults,
       ...settings,
       responses_compact_mode: normalizeResponsesCompactMode(
         settings.responses_compact_mode
       ),
+      responses_compact_context_fallback:
+        settings.responses_compact_context_fallback !== false,
+      responses_compact_summary_model_fallback:
+        settings.responses_compact_summary_model_fallback !== false,
+      responses_compact_summary_fallback_models:
+        normalizeResponsesCompactFallbackModels(
+          settings.responses_compact_summary_fallback_models
+        ),
     }
   } catch {
-    return { responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT }
+    return defaults
+  }
+}
+
+export function normalizeResponsesCompactFallbackModels(
+  models: unknown
+): string[] {
+  const rawModels = Array.isArray(models)
+    ? models
+    : typeof models === 'string'
+      ? models.split(',')
+      : []
+  const result = Array.from(
+    new Set(
+      rawModels
+        .map((model) => String(model).trim())
+        .filter((model) => model.length > 0)
+    )
+  )
+  return result.length > 0
+    ? result
+    : [...RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT]
+}
+
+function defaultResponsesCompactOtherSettings(): ChannelOtherSettings {
+  return {
+    responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
+    responses_compact_context_fallback:
+      RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
+    responses_compact_summary_model_fallback:
+      RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
+    responses_compact_summary_fallback_models:
+      [...RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT],
   }
 }
 
