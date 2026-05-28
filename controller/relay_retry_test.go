@@ -110,6 +110,24 @@ func TestShouldFallbackResponsesCompactAutoRequiresCompatibilityError(t *testing
 			want:       true,
 		},
 		{
+			name:       "native payload content rejection falls back",
+			statusCode: http.StatusBadRequest,
+			message:    "请求包含不允许的内容，请修改后重试",
+			want:       true,
+		},
+		{
+			name:       "native payload disallowed content falls back",
+			statusCode: http.StatusBadRequest,
+			message:    "request contains disallowed content",
+			want:       true,
+		},
+		{
+			name:       "generic content policy block does not fallback",
+			statusCode: http.StatusBadRequest,
+			message:    "content policy violation",
+			want:       false,
+		},
+		{
 			name:       "compact unprocessable entity falls back",
 			statusCode: http.StatusUnprocessableEntity,
 			message:    "Responses compact is unsupported by this upstream",
@@ -149,6 +167,15 @@ func TestShouldFallbackResponsesCompactAutoRequiresCompatibilityError(t *testing
 			require.False(t, exists)
 		})
 	}
+}
+
+func TestResponsesCompactNativeCompatibilityPayloadRejection(t *testing.T) {
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "request contains disallowed content",
+		Code:    string(types.ErrorCodeBadResponseStatusCode),
+	}, http.StatusBadRequest)
+
+	require.True(t, isResponsesCompactNativeCompatibilityError(err))
 }
 
 func TestShouldFallbackResponsesCompactAutoHonorsAttemptedFlag(t *testing.T) {

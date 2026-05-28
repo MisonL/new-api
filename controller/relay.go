@@ -692,7 +692,9 @@ func isResponsesCompactNativeCompatibilityError(err *types.NewAPIError) bool {
 		fmt.Sprint(openAIError.Code),
 	}, " "))
 	normalized := normalizeResponsesCompactCompatibilityMessage(message)
-	if !strings.Contains(message, "responses/compact") && !strings.Contains(normalized, "responses compact") {
+	compactPathMentioned := strings.Contains(message, "responses/compact") || strings.Contains(normalized, "responses compact")
+	payloadCompatibility := isResponsesCompactNativePayloadCompatibilityError(message, normalized)
+	if !compactPathMentioned && !payloadCompatibility {
 		return false
 	}
 	if isModelLookupError(normalized) {
@@ -700,6 +702,9 @@ func isResponsesCompactNativeCompatibilityError(err *types.NewAPIError) bool {
 	}
 	if isRequestParameterError(normalized) {
 		return false
+	}
+	if payloadCompatibility {
+		return true
 	}
 	for _, indicator := range []string{
 		"not supported",
@@ -716,6 +721,28 @@ func isResponsesCompactNativeCompatibilityError(err *types.NewAPIError) bool {
 		"not found",
 		"unknown",
 		"unrecognized",
+	} {
+		if strings.Contains(normalized, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+func isResponsesCompactNativePayloadCompatibilityError(message string, normalized string) bool {
+	if strings.Contains(message, "请求包含不允许的内容") {
+		return true
+	}
+	for _, indicator := range []string{
+		"request contains disallowed content",
+		"request contains not allowed content",
+		"payload contains disallowed content",
+		"payload contains not allowed content",
+		"input contains disallowed content",
+		"input contains not allowed content",
+		"content is not allowed",
+		"content not allowed",
+		"disallowed content",
 	} {
 		if strings.Contains(normalized, indicator) {
 			return true
