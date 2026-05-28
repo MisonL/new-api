@@ -25,6 +25,8 @@ Environment overrides:
   NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT=30
   CADDY_LOG_FILE=/tmp/<COMPOSE_SERVICE>-macos-tun-caddy-<LAN_PORT>.log
   CADDY_PID_FILE=/tmp/<COMPOSE_SERVICE>-macos-tun-caddy-<LAN_PORT>.pid
+  CADDY_LAUNCHD_LABEL=com.new-api.macos-tun.<COMPOSE_SERVICE>.<LAN_PORT>
+  CADDY_LAUNCHD_PLIST=~/Library/LaunchAgents/<LABEL>.plist
 EOF
 }
 
@@ -98,6 +100,16 @@ tun_env_value() {
   printf '%s' "$fallback"
 }
 
+expand_home_path() {
+  local path="$1"
+
+  case "$path" in
+    \~) printf '%s' "$HOME" ;;
+    \~/*) printf '%s/%s' "$HOME" "${path#~/}" ;;
+    *) printf '%s' "$path" ;;
+  esac
+}
+
 COMPOSE_SERVICE="${COMPOSE_SERVICE:-$(tun_env_value COMPOSE_SERVICE new-api)}"
 LAN_PORT="${NEW_API_LAN_PROXY_PORT:-$(tun_env_value NEW_API_LAN_PROXY_PORT 3000)}"
 LOOPBACK_PORT="${NEW_API_LOOPBACK_PORT:-$(tun_env_value NEW_API_LOOPBACK_PORT 13000)}"
@@ -113,6 +125,10 @@ HEALTH_URL="http://127.0.0.1:${LAN_PORT}${HEALTH_PATH}"
 BACKEND_URL="http://127.0.0.1:${LOOPBACK_PORT}${HEALTH_PATH}"
 CADDY_LOG_FILE="${CADDY_LOG_FILE:-/tmp/${COMPOSE_SERVICE}-macos-tun-caddy-${LAN_PORT}.log}"
 CADDY_PID_FILE="${CADDY_PID_FILE:-/tmp/${COMPOSE_SERVICE}-macos-tun-caddy-${LAN_PORT}.pid}"
+CADDY_LAUNCHD_LABEL="${CADDY_LAUNCHD_LABEL:-$(tun_env_value CADDY_LAUNCHD_LABEL "com.new-api.macos-tun.${COMPOSE_SERVICE}.${LAN_PORT}")}"
+CADDY_LAUNCHD_PLIST="${CADDY_LAUNCHD_PLIST:-$(tun_env_value CADDY_LAUNCHD_PLIST "${HOME}/Library/LaunchAgents/${CADDY_LAUNCHD_LABEL}.plist")}"
+CADDY_LAUNCHD_PLIST="$(expand_home_path "$CADDY_LAUNCHD_PLIST")"
+LAUNCHD_DOMAIN="gui/$(id -u)"
 
 COMPOSE_ENV_ARGS=()
 TUN_COMPOSE_ENV_ARGS=()
@@ -294,7 +310,9 @@ validate_tun_env_scope() {
         NEW_API_ALLOW_ACTIVE_REQUESTS | \
         NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT | \
         NEW_API_ABNORMAL_TUN_IP_REGEX | \
-        NEW_API_PORT_MAPPING)
+        NEW_API_PORT_MAPPING | \
+        CADDY_LAUNCHD_LABEL | \
+        CADDY_LAUNCHD_PLIST)
         ;;
       *)
         fail "TUN env file must not define ${key}; put runtime settings in ${PROD_ENV_FILE}"
@@ -434,6 +452,15 @@ run_caddy() {
     caddy "$@"
 }
 
+xml_escape() {
+  python3 -c '
+import html
+import sys
+
+print(html.escape(sys.argv[1], quote=True))
+' "$1"
+}
+
 validate_port() {
   local name="$1"
   local value="$2"
@@ -469,6 +496,20 @@ managed_caddy_owns_lan_port() {
 
 stop_managed_caddy() {
   local pid
+
+  if launchctl print "${LAUNCHD_DOMAIN}/${CADDY_LAUNCHD_LABEL}" >/dev/null 2>&1; then
+    log "unloading Caddy launch agent ${CADDY_LAUNCHD_LABEL}"
+    launchctl bootout "${LAUNCHD_DOMAIN}/${CADDY_LAUNCHD_LABEL}" >/dev/null 2>&1 \
+      || launchctl bootout "$LAUNCHD_DOMAIN" "$CADDY_LAUNCHD_PLIST" >/dev/null 2>&1 \
+      || true
+    for _ in {1..40}; do
+      if ! launchctl print "${LAUNCHD_DOMAIN}/${CADDY_LAUNCHD_LABEL}" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.25
+    done
+  fi
+
   pid="$(managed_caddy_pid || true)"
   if [[ -z "$pid" ]]; then
     rm -f "$CADDY_PID_FILE"
@@ -512,18 +553,62 @@ stop_managed_caddy() {
 }
 
 start_managed_caddy() {
+  local caddy_bin escaped_caddyfile escaped_label escaped_log_file escaped_loopback_port escaped_lan_port escaped_pid_file escaped_root_dir
+
   rm -f "$CADDY_PID_FILE"
   : >"$CADDY_LOG_FILE"
-  if run_caddy start --config "$CADDYFILE" --pidfile "$CADDY_PID_FILE" >>"$CADDY_LOG_FILE" 2>&1; then
-    return 0
-  fi
+  caddy_bin="$(command -v caddy)"
+  mkdir -p "$(dirname "$CADDY_LAUNCHD_PLIST")"
 
-  log "caddy start failed; trying nohup caddy run"
-  nohup env \
-    NEW_API_LAN_PROXY_PORT="$LAN_PORT" \
-    NEW_API_LOOPBACK_PORT="$LOOPBACK_PORT" \
-    caddy run --config "$CADDYFILE" --pidfile "$CADDY_PID_FILE" \
-    >"$CADDY_LOG_FILE" 2>&1 &
+  escaped_label="$(xml_escape "$CADDY_LAUNCHD_LABEL")"
+  escaped_caddyfile="$(xml_escape "$CADDYFILE")"
+  escaped_pid_file="$(xml_escape "$CADDY_PID_FILE")"
+  escaped_log_file="$(xml_escape "$CADDY_LOG_FILE")"
+  escaped_lan_port="$(xml_escape "$LAN_PORT")"
+  escaped_loopback_port="$(xml_escape "$LOOPBACK_PORT")"
+  escaped_root_dir="$(xml_escape "$ROOT_DIR")"
+  caddy_bin="$(xml_escape "$caddy_bin")"
+
+  cat >"$CADDY_LAUNCHD_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${escaped_label}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${caddy_bin}</string>
+    <string>run</string>
+    <string>--config</string>
+    <string>${escaped_caddyfile}</string>
+    <string>--pidfile</string>
+    <string>${escaped_pid_file}</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NEW_API_LAN_PROXY_PORT</key>
+    <string>${escaped_lan_port}</string>
+    <key>NEW_API_LOOPBACK_PORT</key>
+    <string>${escaped_loopback_port}</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${escaped_log_file}</string>
+  <key>StandardErrorPath</key>
+  <string>${escaped_log_file}</string>
+  <key>WorkingDirectory</key>
+  <string>${escaped_root_dir}</string>
+</dict>
+</plist>
+EOF
+
+  launchctl bootout "$LAUNCHD_DOMAIN" "$CADDY_LAUNCHD_PLIST" >/dev/null 2>&1 || true
+  launchctl bootstrap "$LAUNCHD_DOMAIN" "$CADDY_LAUNCHD_PLIST"
+  launchctl kickstart -k "${LAUNCHD_DOMAIN}/${CADDY_LAUNCHD_LABEL}"
 }
 
 wait_for_managed_caddy_pid() {
@@ -653,6 +738,8 @@ preflight() {
   [[ "$HEALTH_PATH" == /* ]] || fail "NEW_API_HEALTH_PATH must start with /"
   [[ "$ALLOW_ACTIVE_REQUESTS" =~ ^[01]$ ]] || fail "NEW_API_ALLOW_ACTIVE_REQUESTS must be 0 or 1"
   [[ "$ACTIVE_CONNECTION_DRAIN_TIMEOUT" =~ ^[0-9]+$ ]] || fail "NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT must be a non-negative integer"
+  [[ "$CADDY_LAUNCHD_LABEL" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fail "CADDY_LAUNCHD_LABEL contains unsupported characters"
+  [[ "$CADDY_LAUNCHD_PLIST" == /* ]] || fail "CADDY_LAUNCHD_PLIST must be an absolute path"
   validate_port NEW_API_LAN_PROXY_PORT "$LAN_PORT"
   validate_port NEW_API_LOOPBACK_PORT "$LOOPBACK_PORT"
   validate_port NEW_API_CONTAINER_PORT "$CONTAINER_PORT"
@@ -662,6 +749,7 @@ preflight() {
   fi
   command -v docker >/dev/null || fail "docker is required"
   command -v caddy >/dev/null || fail "caddy is required"
+  command -v launchctl >/dev/null || fail "launchctl is required"
   command -v curl >/dev/null || fail "curl is required"
   command -v lsof >/dev/null || fail "lsof is required"
   command -v python3 >/dev/null || fail "python3 is required"
