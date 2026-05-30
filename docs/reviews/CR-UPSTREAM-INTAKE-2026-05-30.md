@@ -235,6 +235,19 @@ Batch 2 子批次验证记录：
 - native compact 失败后未按本项目策略进入 synthetic。
 - fallback 请求上下文或模型回退行为与当前设计不一致。
 
+当前执行记录：
+
+- 已手工吸纳 `0d4b25795` 的后端审计语义：param override 对 `messages`、`input`、`instructions`、`system`、`contents`、`systemInstruction`、`system_instruction` 等会话/提示词字段的改写，在 debug 关闭时也会写入 `ParamOverrideAudit`；同时加入 `from` 路径审计，避免 copy/move/replace 的来源敏感字段被漏记。
+- 未吸纳 `0d4b25795` 的 default usage log 前端可见性改动：当前仍保留 Param Override 详情仅管理员可见，避免普通用户看到渠道级提示词/请求改写策略。
+- 延后 `fddf54ccc` 及其在 `relay/responses_handler.go` 中引入的 `NewOutboundJSONBody`：该改动跨 request body 生命周期、param override、Responses/Compact、Gemini/Claude/OpenAI/Image/Rerank 多路径，继续作为独立性能专题处理。
+- `relay/responses_handler.go` 的上游小 diff 仅为 debug logging 和 outbound body 改造的一部分；没有发现可脱离 `fddf54ccc` 单独吸收的 compact 语义修复。
+
+Batch 3 子批次验证记录：
+
+- `go test ./relay/common -run 'TestApplyParamOverrideWithRelayInfoRecords(OnlyKeyOperations|ConversationBodyOperations|OperationAudit)|TestShouldAuditParamPathUsesFieldBoundaryPrefixMatching' -count=1 -v`：通过。
+- `go test ./relay/common -count=1`：通过。
+- `git diff --check`：通过。
+
 ### Batch 4：支付、订阅与合规功能
 
 这些属于产品能力扩展，不应混入稳定性修复。
