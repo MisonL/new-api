@@ -124,14 +124,14 @@
 - 已提交 `a566ce68d`：手工吸纳 `aa56667b8` 的 upstream request id 追踪，但按本项目语义调整为独立 `logs.upstream_request_id` 字段、usage logs 筛选和详情展示，并通过请求头复制过滤避免上游 `X-Oneapi-Request-Id` 覆盖本地 request id。
 - 已提交 `a566ce68d`：手工吸纳 `128802818` 的超长上游错误日志截断，但只截断本地运行日志输出；数据库日志内容、`showBodyWhenFail` 和结构化上游错误消息保持完整，避免降低审计和排障能力。
 - 已提交 `a566ce68d`：修正 usage log 统计接口，使 request id 和 upstream request id 筛选同时影响列表与统计。
-- 当前未提交子批次：手工吸纳 `ebbe31553` 中 multi-key key 匹配、实际可用 key 判断和重新启用恢复语义；保留本项目事务写库后 `InitChannelCache()` 的 cache 刷新方式。
+- 已提交 `e015ed0bd`：手工吸纳 `ebbe31553` 中 multi-key key 匹配、实际可用 key 判断和重新启用恢复语义；保留本项目事务写库后 `InitChannelCache()` 的 cache 刷新方式。
 - 已等价跳过 `38a3314b9`：当前代码已保留 OpenAI image edit JSON 请求、`images`、`mask`、`input_fidelity` 字段，并有 `relay/channel/openai/image_edit_test.go` 和 `relay/helper/openai_image_request_test.go` 覆盖。
 - 已等价跳过 `5b86ce0d7`：当前 `model/utils.go` 已通过 `collectUserBatchDeltas` 和 `updateUserBatchDelta` 合并用户 quota、used_quota、request_count 更新，并有 `model/batch_update_test.go` 覆盖。
-- 当前未提交子批次：手工吸纳 `ae6a03364` 的 JSON `model/group` 快速提取，避免为分发阶段完整反序列化大 JSON；保持请求体可复读，并保持非字符串 `model/group` 显式报错。
-- 当前未提交子批次：手工吸纳 `fddf54ccc` 中 disk-backed JSON 在 `UnmarshalBodyReusable` 直接 `DecodeJson` 的小片段，避免 `diskStorage.Bytes()` 再把大文件整体读回堆内存。
+- 已提交 `a020eccbf`：手工吸纳 `ae6a03364` 的 JSON `model/group` 快速提取，避免为分发阶段完整反序列化大 JSON；保持请求体可复读，并保持非字符串 `model/group` 显式报错。
+- 已提交 `a020eccbf`：手工吸纳 `fddf54ccc` 中 disk-backed JSON 在 `UnmarshalBodyReusable` 直接 `DecodeJson` 的小片段，避免 `diskStorage.Bytes()` 再把大文件整体读回堆内存。
 - 延后 `fddf54ccc` 剩余 outbound body 生命周期改造：该部分跨 `relay/common/override.go`、Gemini/Claude/Responses/Embedding/Image/Rerank/Compatible handlers，会影响 compact/responses 和 param override 生命周期，需作为单独性能专题验证。
 
-当前未提交子批次验证记录：
+Batch 1 子批次验证记录：
 
 - `go test ./model -run 'Test(GetLogsCanFilterUpstreamRequestId|RecordConsumeLogCopiesUpstreamRequestIdFromOther|SumUsedQuota)' -count=1 -v`：通过。
 - `go test ./controller ./model ./service ./relay/common ./relay/channel/openai ./relay/channel/claude ./relay/channel/gemini -count=1`：通过。
@@ -142,6 +142,14 @@
 - `go test ./relay/channel/openai ./relay/helper -run 'Test(ConvertImageEditJSONRequestPreservesBody|DoImageEditJSONRequestUsesJSONRequestPath|GetAndValidOpenAIImageEditJSONPreservesReferenceFields)' -count=1 -v`：通过。
 - `go test ./common -run 'Test(UnmarshalBodyReusableDiskJSONAvoidsBytes|BuildPayloadAuditRecordFromStorageReadsPreviewOnly)' -count=1 -v`：通过。
 - `go test ./middleware -run 'TestGetModelFromJSONBody|TestDistributeResponsesBootstrap' -count=1 -v`：通过。
+
+Batch 1 收口回归：
+
+- `git diff --check`：通过。
+- `go test ./controller ./model ./service ./middleware ./common ./relay/common ./relay/helper ./relay/channel/openai ./relay/channel/claude ./relay/channel/gemini -count=1`：通过。
+- `cd web/default && bun run lint`：通过。
+- `cd web/default && bun run build`：通过。
+- 当前未吸纳项：`fddf54ccc` outbound body 生命周期和 param override 大规模 byte-based 改造，需单独性能专题验证。
 
 ### Batch 2：日志、计费、模型与管理功能修复
 
