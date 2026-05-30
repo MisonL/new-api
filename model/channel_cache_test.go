@@ -111,6 +111,97 @@ func TestUpdateChannelStatusRefreshesMemoryCacheAfterEnable(t *testing.T) {
 	require.True(t, isChannelIDInList(group2model2channels["default"]["gpt-5.4"], channel.Id))
 }
 
+func TestUpdateMultiKeyStatusIgnoresUnknownUsingKey(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+	})
+
+	channel := &Channel{
+		Id:     103,
+		Name:   "multi-key-unknown",
+		Key:    "key-a\nkey-b",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-5.4",
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:      true,
+			MultiKeySize:    2,
+			MultiKeyMode:    constant.MultiKeyModePolling,
+			MultiKeyStatusList: map[int]int{
+				1: common.ChannelStatusAutoDisabled,
+			},
+		},
+	}
+	require.NoError(t, DB.Create(channel).Error)
+
+	require.False(t, UpdateChannelStatus(channel.Id, "missing-key", common.ChannelStatusAutoDisabled, "bad key"))
+
+	var updated Channel
+	require.NoError(t, DB.First(&updated, "id = ?", channel.Id).Error)
+	require.Equal(t, common.ChannelStatusEnabled, updated.Status)
+	require.Equal(t, map[int]int{1: common.ChannelStatusAutoDisabled}, updated.ChannelInfo.MultiKeyStatusList)
+}
+
+func TestUpdateMultiKeyStatusDisablesAndRestoresChannel(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	channel := &Channel{
+		Id:     104,
+		Name:   "multi-key-routing",
+		Key:    "key-a\nkey-b",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-5.4",
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:   true,
+			MultiKeySize: 2,
+			MultiKeyMode: constant.MultiKeyModePolling,
+		},
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-5.4",
+		ChannelId: channel.Id,
+		Enabled:   true,
+	}).Error)
+	InitChannelCache()
+
+	require.True(t, UpdateChannelStatus(channel.Id, "key-a", common.ChannelStatusAutoDisabled, "key a failed"))
+	got, err := GetRandomSatisfiedChannel("default", "gpt-5.4", 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+
+	require.True(t, UpdateChannelStatus(channel.Id, "key-b", common.ChannelStatusAutoDisabled, "key b failed"))
+	got, err = GetRandomSatisfiedChannel("default", "gpt-5.4", 0)
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	var disabled Channel
+	require.NoError(t, DB.First(&disabled, "id = ?", channel.Id).Error)
+	require.Equal(t, common.ChannelStatusAutoDisabled, disabled.Status)
+
+	require.True(t, UpdateChannelStatus(channel.Id, "key-a", common.ChannelStatusEnabled, ""))
+	got, err = GetRandomSatisfiedChannel("default", "gpt-5.4", 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+}
+
 func TestGetRandomSatisfiedChannelExcludingSkipsUsedChannelsAtSamePriority(t *testing.T) {
 	prepareChannelCacheTest(t)
 

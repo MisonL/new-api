@@ -121,10 +121,13 @@
 - 已提交 `ac32b4404`：结合 `74985fa87`、`1d3203736`、`554defe4f`、`b9bc6f0e2` 处理日志过滤，保留显式通配语义。
 - 已提交 `698da0236`、`550d506aa`：手工吸纳 `465c5edab`、`ff06067a1`，修复 Gemini/Claude 工具流兼容和 Claude 并发工具索引。
 - 已提交 `6455f3ceb`：手工吸纳 `2a528d46c`，保留 image quality 日志。
-- 当前未提交子批次：手工吸纳 `aa56667b8` 的 upstream request id 追踪，但按本项目语义调整为独立 `logs.upstream_request_id` 字段、usage logs 筛选和详情展示，并通过请求头复制过滤避免上游 `X-Oneapi-Request-Id` 覆盖本地 request id。
-- 当前未提交子批次：手工吸纳 `128802818` 的超长上游错误日志截断，但只截断本地运行日志输出；数据库日志内容、`showBodyWhenFail` 和结构化上游错误消息保持完整，避免降低审计和排障能力。
-- 当前未提交子批次：修正 usage log 统计接口，使 request id 和 upstream request id 筛选同时影响列表与统计。
-- 待继续复核：`ebbe31553` multi-key channel cache 清理、`fddf54ccc` 大 base64/body 生命周期优化、`ae6a03364` 请求 metadata 提取剩余部分、`38a3314b9` OpenAI image edit reference fields、`5b86ce0d7` batch update 优化。
+- 已提交 `a566ce68d`：手工吸纳 `aa56667b8` 的 upstream request id 追踪，但按本项目语义调整为独立 `logs.upstream_request_id` 字段、usage logs 筛选和详情展示，并通过请求头复制过滤避免上游 `X-Oneapi-Request-Id` 覆盖本地 request id。
+- 已提交 `a566ce68d`：手工吸纳 `128802818` 的超长上游错误日志截断，但只截断本地运行日志输出；数据库日志内容、`showBodyWhenFail` 和结构化上游错误消息保持完整，避免降低审计和排障能力。
+- 已提交 `a566ce68d`：修正 usage log 统计接口，使 request id 和 upstream request id 筛选同时影响列表与统计。
+- 当前未提交子批次：手工吸纳 `ebbe31553` 中 multi-key key 匹配、实际可用 key 判断和重新启用恢复语义；保留本项目事务写库后 `InitChannelCache()` 的 cache 刷新方式。
+- 已等价跳过 `38a3314b9`：当前代码已保留 OpenAI image edit JSON 请求、`images`、`mask`、`input_fidelity` 字段，并有 `relay/channel/openai/image_edit_test.go` 和 `relay/helper/openai_image_request_test.go` 覆盖。
+- 已等价跳过 `5b86ce0d7`：当前 `model/utils.go` 已通过 `collectUserBatchDeltas` 和 `updateUserBatchDelta` 合并用户 quota、used_quota、request_count 更新，并有 `model/batch_update_test.go` 覆盖。
+- 待继续复核：`fddf54ccc` 大 base64/body 生命周期优化、`ae6a03364` 请求 metadata 提取剩余部分。
 
 当前未提交子批次验证记录：
 
@@ -133,6 +136,8 @@
 - `git diff --check`：通过。
 - `cd web/default && bun run lint`：通过。
 - `cd web/default && bun run build`：通过。
+- `go test ./model -run 'TestUpdateMultiKeyStatus|TestUpdateChannelStatusRefreshesMemoryCacheAfterEnable|TestBatchUpdateMergesUserCounters' -count=1 -v`：通过。
+- `go test ./relay/channel/openai ./relay/helper -run 'Test(ConvertImageEditJSONRequestPreservesBody|DoImageEditJSONRequestUsesJSONRequestPath|GetAndValidOpenAIImageEditJSONPreservesReferenceFields)' -count=1 -v`：通过。
 
 ### Batch 2：日志、计费、模型与管理功能修复
 
