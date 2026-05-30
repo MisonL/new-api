@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -109,4 +110,49 @@ func TestSearchChannelsEscapesGroupFilterWildcards(t *testing.T) {
 	matched, err := SearchChannels("", "paid%team", "gpt", false, NewChannelSortOptions("id", "asc", false))
 	require.NoError(t, err)
 	require.Equal(t, []int{1}, channelIDs(matched))
+}
+
+func insertPreferredOwnerCandidate(
+	t *testing.T,
+	channelID int,
+	modelName string,
+	group string,
+	channelType int,
+	priority int64,
+	weight uint,
+	channelStatus int,
+	abilityEnabled bool,
+) {
+	t.Helper()
+	require.NoError(t, DB.Create(&Channel{
+		Id:     channelID,
+		Type:   channelType,
+		Key:    fmt.Sprintf("key-%d", channelID),
+		Status: channelStatus,
+		Name:   fmt.Sprintf("channel-%d", channelID),
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     group,
+		Model:     modelName,
+		ChannelId: channelID,
+		Enabled:   abilityEnabled,
+		Priority:  &priority,
+		Weight:    weight,
+	}).Error)
+}
+
+func TestGetPreferredModelOwnerChannelTypes(t *testing.T) {
+	setupChannelSortTestDB(t)
+	require.NoError(t, DB.AutoMigrate(&Ability{}))
+
+	insertPreferredOwnerCandidate(t, 1, "gpt-5", "default", constant.ChannelTypeOpenAI, 1, 100, common.ChannelStatusEnabled, true)
+	insertPreferredOwnerCandidate(t, 2, "gpt-5", "default", constant.ChannelTypeCodex, 2, 0, common.ChannelStatusEnabled, true)
+	insertPreferredOwnerCandidate(t, 3, "gpt-5", "vip", constant.ChannelTypeAnthropic, 10, 100, common.ChannelStatusEnabled, true)
+	insertPreferredOwnerCandidate(t, 4, "gpt-4", "default", constant.ChannelTypeGemini, 1, 0, common.ChannelStatusManuallyDisabled, true)
+
+	owners, err := GetPreferredModelOwnerChannelTypes([]string{"gpt-5", "gpt-4"}, []string{"default"})
+	require.NoError(t, err)
+	require.Equal(t, constant.ChannelTypeCodex, owners["gpt-5"])
+	_, ok := owners["gpt-4"]
+	require.False(t, ok)
 }
