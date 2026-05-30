@@ -2106,6 +2106,19 @@ func TestRemoveDisabledFieldsDefaultFiltering(t *testing.T) {
 	assertJSONEqual(t, `{"cache_control":{"type":"ephemeral"},"store":true}`, string(out))
 }
 
+func TestRemoveDisabledFieldsNoControlledFieldsKeepsBody(t *testing.T) {
+	input := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+	settings := dto.ChannelOtherSettings{}
+
+	out, err := RemoveDisabledFields([]byte(input), settings, false)
+	if err != nil {
+		t.Fatalf("RemoveDisabledFields returned error: %v", err)
+	}
+	if string(out) != input {
+		t.Fatalf("expected body to stay unchanged, got: %s", string(out))
+	}
+}
+
 func TestRemoveDisabledFieldsAllowInferenceGeo(t *testing.T) {
 	input := `{
 		"inference_geo":"eu",
