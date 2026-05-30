@@ -116,3 +116,28 @@ func TestBuildPayloadAuditRecordFromStorageReadsPreviewOnly(t *testing.T) {
 		t.Fatalf("expected truncated marker, got %s", record.Content)
 	}
 }
+
+func TestUnmarshalBodyReusableDiskJSONAvoidsBytes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	storage := newSpyBodyStorage([]byte(`{"model":"gpt-5.4","stream":true}`))
+	ctx.Set(KeyBodyStorage, storage)
+
+	var got struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
+	}
+	if err := UnmarshalBodyReusable(ctx, &got); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	if storage.bytesCall != 0 {
+		t.Fatalf("expected disk JSON decode to avoid Bytes(), got %d calls", storage.bytesCall)
+	}
+	if got.Model != "gpt-5.4" || !got.Stream {
+		t.Fatalf("unexpected decoded body: %+v", got)
+	}
+}

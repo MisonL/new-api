@@ -127,7 +127,9 @@
 - 当前未提交子批次：手工吸纳 `ebbe31553` 中 multi-key key 匹配、实际可用 key 判断和重新启用恢复语义；保留本项目事务写库后 `InitChannelCache()` 的 cache 刷新方式。
 - 已等价跳过 `38a3314b9`：当前代码已保留 OpenAI image edit JSON 请求、`images`、`mask`、`input_fidelity` 字段，并有 `relay/channel/openai/image_edit_test.go` 和 `relay/helper/openai_image_request_test.go` 覆盖。
 - 已等价跳过 `5b86ce0d7`：当前 `model/utils.go` 已通过 `collectUserBatchDeltas` 和 `updateUserBatchDelta` 合并用户 quota、used_quota、request_count 更新，并有 `model/batch_update_test.go` 覆盖。
-- 待继续复核：`fddf54ccc` 大 base64/body 生命周期优化、`ae6a03364` 请求 metadata 提取剩余部分。
+- 当前未提交子批次：手工吸纳 `ae6a03364` 的 JSON `model/group` 快速提取，避免为分发阶段完整反序列化大 JSON；保持请求体可复读，并保持非字符串 `model/group` 显式报错。
+- 当前未提交子批次：手工吸纳 `fddf54ccc` 中 disk-backed JSON 在 `UnmarshalBodyReusable` 直接 `DecodeJson` 的小片段，避免 `diskStorage.Bytes()` 再把大文件整体读回堆内存。
+- 延后 `fddf54ccc` 剩余 outbound body 生命周期改造：该部分跨 `relay/common/override.go`、Gemini/Claude/Responses/Embedding/Image/Rerank/Compatible handlers，会影响 compact/responses 和 param override 生命周期，需作为单独性能专题验证。
 
 当前未提交子批次验证记录：
 
@@ -138,6 +140,8 @@
 - `cd web/default && bun run build`：通过。
 - `go test ./model -run 'TestUpdateMultiKeyStatus|TestUpdateChannelStatusRefreshesMemoryCacheAfterEnable|TestBatchUpdateMergesUserCounters' -count=1 -v`：通过。
 - `go test ./relay/channel/openai ./relay/helper -run 'Test(ConvertImageEditJSONRequestPreservesBody|DoImageEditJSONRequestUsesJSONRequestPath|GetAndValidOpenAIImageEditJSONPreservesReferenceFields)' -count=1 -v`：通过。
+- `go test ./common -run 'Test(UnmarshalBodyReusableDiskJSONAvoidsBytes|BuildPayloadAuditRecordFromStorageReadsPreviewOnly)' -count=1 -v`：通过。
+- `go test ./middleware -run 'TestGetModelFromJSONBody|TestDistributeResponsesBootstrap' -count=1 -v`：通过。
 
 ### Batch 2：日志、计费、模型与管理功能修复
 
