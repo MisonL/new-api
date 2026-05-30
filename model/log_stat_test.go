@@ -59,3 +59,44 @@ func TestSumUsedQuotaUsesSingleFilteredConsumeStat(t *testing.T) {
 	require.Equal(t, 1, stat.Rpm)
 	require.Equal(t, 20, stat.Tpm)
 }
+
+func TestSumUsedQuotaWildcardUsernameIsExplicit(t *testing.T) {
+	truncateTables(t)
+	require.NoError(t, LOG_DB.Exec("DELETE FROM logs").Error)
+
+	now := time.Now().Unix()
+	require.NoError(t, LOG_DB.Create([]Log{
+		{
+			CreatedAt:        now - 10,
+			Type:             LogTypeConsume,
+			Username:         "alice",
+			TokenName:        "token-a",
+			ModelName:        "gpt-5",
+			Quota:            100,
+			PromptTokens:     12,
+			CompletionTokens: 8,
+			Group:            "default",
+		},
+		{
+			CreatedAt:        now - 10,
+			Type:             LogTypeConsume,
+			Username:         "alice-extra",
+			TokenName:        "token-b",
+			ModelName:        "gpt-5",
+			Quota:            60,
+			PromptTokens:     5,
+			CompletionTokens: 5,
+			Group:            "default",
+		},
+	}).Error)
+
+	exactStat, err := SumUsedQuota(0, now-120, now+1, "gpt-5", "alice%", "", 0, "default")
+	require.NoError(t, err)
+	require.Equal(t, 0, exactStat.Quota)
+
+	wildcardStat, err := SumUsedQuotaWithWildcardUsername(0, now-120, now+1, "gpt-5", "alice%", "", 0, "default")
+	require.NoError(t, err)
+	require.Equal(t, 160, wildcardStat.Quota)
+	require.Equal(t, 2, wildcardStat.Rpm)
+	require.Equal(t, 30, wildcardStat.Tpm)
+}

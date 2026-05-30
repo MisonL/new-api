@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -208,6 +209,81 @@ func TestGetLogsCanFilterEmptyModelName(t *testing.T) {
 	require.Len(t, userLogs, 1)
 	require.Equal(t, "", userLogs[0].ModelName)
 	require.Equal(t, "req-empty", userLogs[0].RequestId)
+}
+
+func seedExplicitWildcardLogFilters(t *testing.T) {
+	t.Helper()
+	require.NoError(t, LOG_DB.Create([]Log{
+		{
+			UserId:    101,
+			Username:  "alice",
+			CreatedAt: 1714550400,
+			Type:      LogTypeConsume,
+			Content:   "exact",
+			ModelName: "gpt-5",
+			TokenName: "token-a",
+			Group:     "default",
+			RequestId: "req-exact",
+			Other:     "{}",
+		},
+		{
+			UserId:    102,
+			Username:  "alice-extra",
+			CreatedAt: 1714550401,
+			Type:      LogTypeConsume,
+			Content:   "wildcard",
+			ModelName: "gpt-5-mini",
+			TokenName: "token-a-extra",
+			Group:     "default",
+			RequestId: "req-wildcard",
+			Other:     "{}",
+		},
+	}).Error)
+}
+
+func TestGetAllLogsTextFiltersUseExplicitWildcardsOnly(t *testing.T) {
+	truncateTables(t)
+	seedExplicitWildcardLogFilters(t)
+
+	logs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "gpt-5", false, "", "", 0, 10, 0, "", "", false, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, logs, 1)
+	require.Equal(t, "req-exact", logs[0].RequestId)
+
+	logs, total, err = GetAllLogs(LogTypeConsume, 0, 0, "gpt-5%", false, "", "", 0, 10, 0, "", "", false, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	require.Len(t, logs, 2)
+
+	logs, total, err = GetAllLogs(LogTypeConsume, 0, 0, "", false, "alice%", "", 0, 10, 0, "", "", false, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	require.Len(t, logs, 2)
+
+	logs, total, err = GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "token-a%", 0, 10, 0, "", "", false, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, total)
+	require.Empty(t, logs)
+}
+
+func TestDestructiveLogFiltersKeepUsernameExact(t *testing.T) {
+	truncateTables(t)
+	seedExplicitWildcardLogFilters(t)
+
+	deleted, err := DeleteLogsByFilter(
+		context.Background(),
+		LogFilter{
+			LogType:  LogTypeConsume,
+			Username: "alice%",
+		},
+	)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, deleted)
+
+	var remaining int64
+	require.NoError(t, LOG_DB.Model(&Log{}).Count(&remaining).Error)
+	require.EqualValues(t, 2, remaining)
 }
 
 func TestGetAllLogsCapsExpensiveTotalCount(t *testing.T) {

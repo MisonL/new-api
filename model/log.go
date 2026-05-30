@@ -387,6 +387,7 @@ type LogFilter struct {
 	ModelName      string
 	ModelNameEmpty bool
 	Username       string
+	UsernameLike   bool
 	TokenName      string
 	Channel        int
 	Group          string
@@ -394,15 +395,32 @@ type LogFilter struct {
 	UserId         int
 }
 
+func applyExplicitLogTextFilter(tx *gorm.DB, column string, value string) (*gorm.DB, error) {
+	if value == "" {
+		return tx, nil
+	}
+	if strings.Contains(value, "%") {
+		pattern, err := sanitizeLikePattern(value)
+		if err != nil {
+			return nil, err
+		}
+		return tx.Where(column+" LIKE ? ESCAPE '!'", pattern), nil
+	}
+	return tx.Where(column+" = ?", value), nil
+}
+
 func applyModelNameFilter(tx *gorm.DB, column string, modelName string) (*gorm.DB, error) {
-	modelNamePattern, err := sanitizeLikePattern(modelName)
-	if err != nil {
-		return nil, err
+	return applyExplicitLogTextFilter(tx, column, modelName)
+}
+
+func applyUsernameFilter(tx *gorm.DB, column string, username string, allowWildcard bool) (*gorm.DB, error) {
+	if username == "" {
+		return tx, nil
 	}
-	if strings.Contains(modelNamePattern, "%") {
-		return tx.Where(column+" LIKE ? ESCAPE '!'", modelNamePattern), nil
+	if allowWildcard {
+		return applyExplicitLogTextFilter(tx, column, username)
 	}
-	return tx.Where(column+" = ?", modelName), nil
+	return tx.Where(column+" = ?", username), nil
 }
 
 func applyLogFilters(tx *gorm.DB, filter LogFilter) (*gorm.DB, error) {
@@ -422,7 +440,11 @@ func applyLogFilters(tx *gorm.DB, filter LogFilter) (*gorm.DB, error) {
 		tx = nextTx
 	}
 	if filter.Username != "" {
-		tx = tx.Where("logs.username = ?", filter.Username)
+		nextTx, err := applyUsernameFilter(tx, "logs.username", filter.Username, filter.UsernameLike)
+		if err != nil {
+			return nil, err
+		}
+		tx = nextTx
 	}
 	if filter.TokenName != "" {
 		tx = tx.Where("logs.token_name = ?", filter.TokenName)
@@ -496,6 +518,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 		ModelName:      modelName,
 		ModelNameEmpty: modelNameEmpty,
 		Username:       username,
+		UsernameLike:   true,
 		TokenName:      tokenName,
 		Channel:        channel,
 		Group:          group,
@@ -620,7 +643,7 @@ type Stat struct {
 	Tpm   int `json:"tpm"`
 }
 
-func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
+func sumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, usernameLike bool, tokenName string, channel int, group string) (stat Stat, err error) {
 	recentCutoff := time.Now().Add(-60 * time.Second).Unix()
 	tx := LOG_DB.Table("logs").Select(
 		`COALESCE(SUM(quota), 0) quota,
@@ -631,7 +654,12 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	)
 
 	if username != "" {
-		tx = tx.Where("username = ?", username)
+		var nextTx *gorm.DB
+		nextTx, err = applyUsernameFilter(tx, "username", username, usernameLike)
+		if err != nil {
+			return stat, err
+		}
+		tx = nextTx
 	}
 	if tokenName != "" {
 		tx = tx.Where("token_name = ?", tokenName)
@@ -664,6 +692,14 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	}
 
 	return stat, nil
+}
+
+func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
+	return sumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, false, tokenName, channel, group)
+}
+
+func SumUsedQuotaWithWildcardUsername(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
+	return sumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, true, tokenName, channel, group)
 }
 
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {
