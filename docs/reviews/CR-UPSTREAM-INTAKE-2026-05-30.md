@@ -179,6 +179,16 @@ Batch 1 收口回归：
 - 计费展示或 ratio 计算无法解释为等价或明确修复。
 - 后台接口需要的 `New-Api-User` 头或 session 语义被绕开。
 
+当前执行记录：
+
+- 已手工吸纳 `30025aeba`：后台手动渠道测试改用当前请求上下文中的用户 ID，自动批量测试和内部 helper 通过 root 用户解析兜底；保留本项目 channel test runtime options、Header Profile、param override 和 compact 诊断逻辑。
+
+Batch 2 子批次验证记录：
+
+- `go test ./controller -run 'TestResolveChannelTestUserIDUsesRequestUser|TestParseChannelTestOptions|TestApplyChannelTestProtocolStrategy|TestBuildChannelForTestOptions|TestPrepareChannelTestRequestHeaders|TestSettleTestQuota|TestBuildTestLogOther' -count=1 -v`：通过。
+- `go test ./controller ./model ./service -count=1`：通过。
+- `git diff --check`：通过。
+
 ### Batch 3：responses、compact 与协议转换专项
 
 上游当前 diff 对本项目 responses/compact 路径主要表现为删除本地能力，不能整包吸纳。

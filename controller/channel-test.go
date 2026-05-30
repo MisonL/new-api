@@ -61,11 +61,43 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	return normalized
 }
 
+func resolveChannelTestUserID(c *gin.Context) (int, error) {
+	if c != nil {
+		if userID := c.GetInt("id"); userID > 0 {
+			return userID, nil
+		}
+	}
+
+	var rootUser model.User
+	if err := model.DB.Select("id").Where("role = ?", common.RoleRootUser).First(&rootUser).Error; err != nil {
+		return 0, fmt.Errorf("failed to resolve channel test user: %w", err)
+	}
+	if rootUser.Id == 0 {
+		return 0, errors.New("failed to resolve channel test user")
+	}
+	return rootUser.Id, nil
+}
+
 func testChannel(channel *model.Channel, testModel string, endpointType string, isStream bool) testResult {
 	return testChannelWithOptions(channel, testModel, endpointType, isStream, defaultChannelTestOptions())
 }
 
 func testChannelWithOptions(channel *model.Channel, testModel string, endpointType string, isStream bool, options channelTestOptions) (result testResult) {
+	testUserID, err := resolveChannelTestUserID(nil)
+	if err != nil {
+		return testResult{
+			localErr: err,
+		}
+	}
+	return testChannelWithOptionsForUser(channel, testUserID, testModel, endpointType, isStream, options)
+}
+
+func testChannelWithOptionsForUser(channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool, options channelTestOptions) (result testResult) {
+	if testUserID <= 0 {
+		return testResult{
+			localErr: errors.New("invalid channel test user id"),
+		}
+	}
 	options = normalizeChannelTestOptions(options)
 	var c *gin.Context
 	var info *relaycommon.RelayInfo
@@ -172,7 +204,7 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 	}
 	channel = runtimeChannel
 
-	cache, err := model.GetUserCache(1)
+	cache, err := model.GetUserCache(testUserID)
 	if err != nil {
 		return testResult{
 			localErr:    err,
@@ -180,7 +212,7 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 		}
 	}
 	cache.WriteContext(c)
-	c.Set("id", 1)
+	c.Set("id", testUserID)
 
 	//c.Request.Header.Set("Authorization", "Bearer "+channel.Key)
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -199,7 +231,7 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 	}
 	c.Set("channel", channel.Type)
 	c.Set("base_url", channel.GetBaseURL())
-	group, _ := model.GetUserGroup(1, false)
+	group, _ := model.GetUserGroup(testUserID, false)
 	c.Set("group", group)
 
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, testModel)
@@ -539,7 +571,7 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 	milliseconds := tok.Sub(tik).Milliseconds()
 	consumedTime := float64(milliseconds) / 1000.0
 	other := buildTestLogOther(c, info, priceData, usage, tieredResult)
-	model.RecordConsumeLog(c, 1, model.RecordConsumeLogParams{
+	model.RecordConsumeLog(c, testUserID, model.RecordConsumeLogParams{
 		ChannelId:        channel.Id,
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
@@ -1059,8 +1091,13 @@ func TestChannel(c *gin.Context) {
 	endpointType := c.Query("endpoint_type")
 	isStream, _ := strconv.ParseBool(c.Query("stream"))
 	options := parseChannelTestOptions(c)
+	testUserID, err := resolveChannelTestUserID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	tik := time.Now()
-	result := testChannelWithOptions(channel, testModel, endpointType, isStream, options)
+	result := testChannelWithOptionsForUser(channel, testUserID, testModel, endpointType, isStream, options)
 	if result.localErr != nil {
 		diagnosis := diagnoseChannelTestError(result.localErr, result.newAPIError, result.runtimeConfig)
 		if result.runtimeConfig != nil {
@@ -1112,6 +1149,10 @@ var testAllChannelsLock sync.Mutex
 var testAllChannelsRunning bool = false
 
 func testAllChannels(notify bool) error {
+	testUserID, err := resolveChannelTestUserID(nil)
+	if err != nil {
+		return err
+	}
 
 	testAllChannelsLock.Lock()
 	if testAllChannelsRunning {
@@ -1142,7 +1183,7 @@ func testAllChannels(notify bool) error {
 			}
 			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
 			tik := time.Now()
-			result := testChannel(channel, "", "", false)
+			result := testChannelWithOptionsForUser(channel, testUserID, "", "", false, defaultChannelTestOptions())
 			tok := time.Now()
 			milliseconds := tok.Sub(tik).Milliseconds()
 
