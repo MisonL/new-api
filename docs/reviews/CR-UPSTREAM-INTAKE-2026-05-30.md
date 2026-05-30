@@ -334,6 +334,22 @@ B4 auth/user 小修验证记录：
 - 文案/i18n key 缺失。
 - 移动端或暗色主题明显破坏。
 
+Batch 5 小修子批次执行记录：
+
+- 执行日期：2026-05-31。
+- 已手工吸纳 `fde2cac9d`：playground 读取 `localStorage` 消息时先校验 JSON 顶层是否为数组；旧 classic 形状或脏数据会移除并返回空状态，避免加载时继续进入消息清洗逻辑。
+- 已手工吸纳 `146dd77b8`：API key 创建/编辑抽屉 footer 的保存按钮不再依赖跨 DOM `form='api-key-form'` 触发表单提交，改为 `type='button'` 并直接调用 `form.handleSubmit(onSubmit)`；表单内原生 submit 路径仍保留。
+- 跳过 `2b89989f6`：本地 `DropdownMenu` 仍基于 Radix，`onSelect` 是原生支持；上游 Base UI 兼容桥会引入不匹配抽象。
+- 跳过 `51b5cbe1b`：上游 diff 目标为不同形态的 `combobox-input.tsx`，本地当前该组件没有 `allowCustomValue`、`selectedOption`、`setSearchValue` 状态组合；同类 `combobox.tsx` 目前在打开弹窗时不会用已选值重置搜索。
+- 延后 `ad224ecf5`：涉及全局 axios config 类型、channel API action 默认跳过全局业务错误 toast、多个 channel dialog/action 错误处理路径，应作为 channel action 错误展示专题评估，不混入本小批次。
+
+Batch 5 小修验证记录：
+
+- `cd web/default && bun run typecheck`：通过。
+- `cd web/default && bun run lint`：通过。
+- `cd web/default && bun run build`：通过。
+- `git diff --check`：通过。
+
 ### Batch 6：classic UI
 
 classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，也不能用 default 验证替代。
@@ -447,15 +463,15 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 | `03d537328` | fix(default): improve performance health panel layout | Batch 5，性能指标 UI 专题 |
 | `3057f04a1` | fix(wallet): read topup gateway flags from topupInfo instead of status (#4599) | Batch 2，钱包/状态 API 兼容复核 |
 | `7fe896d2f` | fix: use getUserGroups for ratio display to respect GroupGroupRatio (#4772) | Batch 2，ratio 语义复核 |
-| `2b89989f6` | fix(default): support DropdownMenuItem onSelect (#4787) | Batch 5，UI 小修 |
-| `fde2cac9d` | fix(web/default): guard playground messages against legacy classic shape (#4650) | Batch 5，playground UI 小修 |
+| `2b89989f6` | fix(default): support DropdownMenuItem onSelect (#4787) | 跳过，本地 Radix DropdownMenu 已原生支持 onSelect |
+| `fde2cac9d` | fix(web/default): guard playground messages against legacy classic shape (#4650) | 已手工吸纳，Batch 5 小修 |
 | `469d3747a` | fix: defaut ui triage (#4802) | Batch 5，UI 小修集合，拆分吸纳 |
 | `3856b9d2c` | chore(deps): bump axios from 1.15.0 to 1.15.2 in /web/classic (#4634) | Batch 7，依赖专题 |
 | `428e3d91f` | chore: refresh related resources | Batch 8，仓库资源选择性复核 |
 | `aa56667b8` | feat: track upstream request ID and prevent response header override | Batch 1，优先吸纳但独立小提交 |
 | `0526a2264` | feat: require compliance confirmation for paid features | Batch 4，支付合规专题 |
 | `3e588b4d4` | chore(deps-dev): bump ip-address from 10.1.0 to 10.2.0 in /electron (#4811) | Batch 7，Electron 相关，当前不替换 Tauri |
-| `51b5cbe1b` | fix: prevent combobox from over-filtering options on focus (#4829) | Batch 5，UI 小修 |
+| `51b5cbe1b` | fix: prevent combobox from over-filtering options on focus (#4829) | 跳过，本地 combobox-input 形态不适用 |
 | `18282e610` | chore(deps): update axios from 1.15.0 to 1.15.2 | Batch 7，依赖专题 |
 | `3caa6e467` | fix(web/default): batch fix new UI issues #4880 #4893 #4817 #4877 #4898 | Batch 5，UI 小修集合，拆分吸纳 |
 | `8f9ee9ba8` | fix: allow clearing channel remark (#4886) | Batch 1，优先吸纳 |
@@ -479,7 +495,7 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 | `032993ed4` | fix: check save result in handleSaveAll and add slate to validColors (#4823) | Batch 5，settings/theme 小修 |
 | `0cd9a3a06` | fix(auth): use aff_code field name in registration payload (#4945) (#4965) | 已手工吸纳，B4 auth/user 小修 |
 | `5e88f97ac` | fix(data-table): make faceted filter popover width adaptive (#4905) (#4966) | Batch 5，data table UI 小修 |
-| `146dd77b8` | fix(keys): call submit handler directly to avoid stale form linkage (#4858) (#4967) | Batch 5，keys UI 小修 |
+| `146dd77b8` | fix(keys): call submit handler directly to avoid stale form linkage (#4858) (#4967) | 已手工吸纳，Batch 5 小修 |
 | `0d4b25795` | fix: expose param override audits for sensitive message fields (#4974) | Batch 2，日志审计专题，需保留本项目 param override |
 | `2d1ca1538` | fix: respect dashboard content visibility settings (#4975) | Batch 2，dashboard 设置语义复核 |
 | `20d3e7373` | fix: filter perf metrics summary by active groups (#4976) | Batch 2，性能指标后端复核 |
@@ -510,7 +526,7 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 | `3d850d38b` | refactor(channels): rebuild channel create/edit drawer with modular sections and improved form UX | Batch 5，channels UI 专题，不能整包覆盖 |
 | `336088264` | refactor(channels): rebuild channel editor UX with modular sections and Base UI multi-select | Batch 5，channels UI 专题，不能整包覆盖 |
 | `a64f26d1d` | feat(web/default): add Anthropic theme preset and configurable serif typography | Batch 5，theme 专题 |
-| `ad224ecf5` | fix: prevent duplicate channel action toasts (#5015) | Batch 5，channels UI 小修 |
+| `ad224ecf5` | fix: prevent duplicate channel action toasts (#5015) | 延后，channel action 错误展示专题 |
 | `bc8110ce3` | refactor(badge): restore status-badge sizes and classic color scheme | Batch 5，UI 小修 |
 | `101193498` | fix(theme): default theme font preset falls back to Sans instead of Serif | Batch 5，theme 小修 |
 | `6b6c9904a` | feat(subscription): support balance purchases | Batch 4，subscription 专题 |
