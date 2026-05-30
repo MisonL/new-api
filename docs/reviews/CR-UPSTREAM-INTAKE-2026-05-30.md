@@ -285,6 +285,25 @@ Batch 3 子批次验证记录：
 - webhook 幂等或签名校验没有测试。
 - 新增付费入口绕过合规确认。
 
+当前执行记录：
+
+- 执行日期：2026-05-31。
+- 已手工吸纳 `0cd9a3a06`：default 注册请求 payload 从 `aff` 改为后端模型实际字段 `aff_code`，仅影响密码注册表单提交，不改变 OAuth 路由继续使用 URL query `aff` 的边界。
+- 已手工吸纳 `b397c58ba`：`/api/status` 暴露 `register_enabled` 与 `password_register_enabled`，default 登录页在 `register_enabled === false` 时隐藏注册入口，同时保留 `self_use_mode_enabled` 原有门禁。
+- 已手工吸纳 `ee9736bbc`：忘记密码表单按钮补 `type='submit'`，避免在不同 Button 默认行为下无法触发表单提交。
+- 已手工吸纳 `8ae095c3b` 的独立 user/auth 小修部分：`DeleteUser` 在 hard delete 失败时返回 `success:false`，成功时显式返回 `success:true`；default 用户创建抽屉按后端模型约束校验密码长度 8 到 20。
+- 继续延后 `0526a226`、`19f1821`、`f2c7647`、`0354c38`、`c91ba0c`、`6b6c990`、`1588027`：这些仍属于支付、Waffo 或 subscription 专题，不混入本轮 auth/user 小修。
+- 未触碰正式 3000。3001 隔离开发环境重建和 smoke 保留为批次集成验证门槛。
+
+B4 auth/user 小修验证记录：
+
+- `go test ./controller -run 'Test(GetStatusExposesRegisterSwitches|DeleteUserReturns)' -count=1`：通过。
+- `go test ./controller ./model ./service -count=1`：通过。
+- `cd web/default && bun run typecheck`：通过。
+- `cd web/default && bun run lint`：通过。
+- `cd web/default && bun run build`：通过。
+- `git diff --check`：通过。
+
 ### Batch 5：default UI 大改
 
 上游 default UI 已进入大范围 Base UI、主题、表格工具栏、渠道编辑器、系统设置重构。不能整包吸纳。
@@ -449,16 +468,16 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 | `f69ceb696` | fix: 修复新 UI 语言与文案显示问题 (#4876) | Batch 5，i18n/UI 专题 |
 | `5dd0d3bcb` | fix: add analytics placeholder (#4928) | Batch 5，UI 小修，低优先级 |
 | `0936e2504` | perf: avoid eager formatting in debug log calls (#4929) | 单独复核，可能作为后端性能小修 |
-| `ee9736bbc` | fix: add type="submit" to forgot password form button (#4910) | Batch 5，auth UI 小修 |
+| `ee9736bbc` | fix: add type="submit" to forgot password form button (#4910) | 已手工吸纳，B4 auth/user 小修 |
 | `04b4483d7` | fix(web): normalize model detail tabs layout (#4938) | Batch 5，models UI 小修 |
-| `8ae095c3b` | fix user create and delete handling (#4818) | 单独复核，用户管理路径 |
-| `b397c58ba` | fix(auth): expose register_enabled in /api/status and gate sign-up link (#4871) | 单独复核，状态 API 与注册入口 |
+| `8ae095c3b` | fix user create and delete handling (#4818) | 已手工吸纳独立小修，B4 auth/user 小修 |
+| `b397c58ba` | fix(auth): expose register_enabled in /api/status and gate sign-up link (#4871) | 已手工吸纳，B4 auth/user 小修 |
 | `fc08c133e` | fix(web/default): update pagination button labels in ModelCardGrid (#4675) | Batch 5，pricing UI 小修 |
 | `cb9270ed2` | fix(auth): localize reset password confirmation (#4769) | 单独复核，auth i18n 小修 |
 | `8db32213e` | fix(web/default/wallet): make recharge preset selection visible in dark mode (#4897) | Batch 5，wallet UI 小修 |
 | `c78573ce0` | fix(web/default): api-info color dot shows wrong color due to semantic token mismatch (#4824) | Batch 5，theme/UI 小修 |
 | `032993ed4` | fix: check save result in handleSaveAll and add slate to validColors (#4823) | Batch 5，settings/theme 小修 |
-| `0cd9a3a06` | fix(auth): use aff_code field name in registration payload (#4945) (#4965) | 单独复核，注册 payload 兼容 |
+| `0cd9a3a06` | fix(auth): use aff_code field name in registration payload (#4945) (#4965) | 已手工吸纳，B4 auth/user 小修 |
 | `5e88f97ac` | fix(data-table): make faceted filter popover width adaptive (#4905) (#4966) | Batch 5，data table UI 小修 |
 | `146dd77b8` | fix(keys): call submit handler directly to avoid stale form linkage (#4858) (#4967) | Batch 5，keys UI 小修 |
 | `0d4b25795` | fix: expose param override audits for sensitive message fields (#4974) | Batch 2，日志审计专题，需保留本项目 param override |
