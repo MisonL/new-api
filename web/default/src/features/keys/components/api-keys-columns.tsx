@@ -1,8 +1,6 @@
-import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { type ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
-import { useAuthStore } from '@/stores/auth-store'
 import { getUserGroups } from '@/lib/api'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -16,7 +14,6 @@ import {
 import { DataTableColumnHeader } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
-import { getSystemOptions } from '@/features/system-settings/api'
 import { API_KEY_STATUSES } from '../constants'
 import { type ApiKey } from '../types'
 import {
@@ -33,48 +30,24 @@ function getQuotaProgressColor(percentage: number): string {
 }
 
 function useGroupRatios(): Record<string, number> {
-  const isAdmin = useAuthStore((s) =>
-    Boolean(s.auth.user?.role && s.auth.user.role >= 10)
-  )
-
-  const { data: adminData } = useQuery({
-    queryKey: ['system-options-group-ratio'],
-    queryFn: getSystemOptions,
-    enabled: isAdmin,
-    staleTime: 5 * 60 * 1000,
-    select: (res) => {
-      if (!res.success || !res.data) return {}
-      const option = res.data.find((o) => o.key === 'GroupRatio')
-      if (!option?.value) return {}
-      try {
-        return JSON.parse(option.value) as Record<string, number>
-      } catch {
-        return {}
-      }
-    },
-  })
-
-  const { data: userGroupsData } = useQuery({
+  const { data } = useQuery({
     queryKey: ['user-self-groups'],
     queryFn: getUserGroups,
-    enabled: !isAdmin,
     staleTime: 5 * 60 * 1000,
     select: (res) => {
       if (!res.success || !res.data) return {}
       const ratios: Record<string, number> = {}
       for (const [group, info] of Object.entries(res.data)) {
-        if (typeof info.ratio === 'number') {
-          ratios[group] = info.ratio
+        const ratio = Number(info.ratio)
+        if (Number.isFinite(ratio)) {
+          ratios[group] = ratio
         }
       }
       return ratios
     },
   })
 
-  return useMemo(
-    () => (isAdmin ? adminData : userGroupsData) ?? {},
-    [isAdmin, adminData, userGroupsData]
-  )
+  return data ?? {}
 }
 
 export function useApiKeysColumns(): ColumnDef<ApiKey>[] {

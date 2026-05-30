@@ -186,6 +186,9 @@ Batch 1 收口回归：
 - 已手工吸纳 `20d3e7373`：模型性能指标摘要和单模型明细都只展示当前活跃分组和 `auto`，摘要同时覆盖已落盘 `perf_metrics` 汇总和内存 hot bucket 汇总。
 - 已手工吸纳 `8f9ee9ba8`：default 渠道更新表单对可清空的文本字段发送显式空字符串，避免 GORM struct updates 因 nil 指针跳过更新；同时保留 priority、weight 的显式 0 值。
 - 已手工吸纳 `349d5429c`：default API Keys 搜索改为处理后端分页响应，名称搜索和 API key 搜索分别走 `keyword` 与 `token` 查询参数，并补齐 keys 路由 search schema 的 `token` 字段，避免 URL 状态丢失。
+- 已手工吸纳 `6f11d198`：按本项目现有 `model-ratio-dialog` 结构加入定价数字显示归一化，修正价格/倍率互算时的浮点漂移，不改变 `ModelRatio`、`CompletionRatio`、`ModelPrice` 存储口径。
+- 已手工吸纳 `7fe896d2`：API Keys 分组倍率展示统一读取 `/api/user/self/groups`，与后端 `service.GetUserGroupRatio` 使用的 `GroupGroupRatio(userGroup, usingGroup)` 口径一致。
+- 延后 `58ba867d`：该提交是渠道测试弹窗大范围 UI 重构和多语言补充，涉及弹窗布局、失败详情抽屉、可访问性和 i18n，不混入当前计费/表格小修批次。
 
 Batch 2 子批次验证记录：
 
@@ -203,6 +206,10 @@ Batch 2 子批次验证记录：
 - `cd web/default && bun run lint`：通过（吸纳 `349d5429c` 后复跑）。
 - `cd web/default && bun run build`：通过（吸纳 `349d5429c` 后复跑）。
 - `git diff --check`：通过（吸纳 `349d5429c` 后复跑）。
+- `cd web/default && bun run typecheck`：通过（吸纳 `6f11d198`、`7fe896d2` 后复跑）。
+- `cd web/default && bun run lint`：通过（吸纳 `6f11d198`、`7fe896d2` 后复跑）。
+- `cd web/default && bun run build`：通过（吸纳 `6f11d198`、`7fe896d2` 后复跑）。
+- `git diff --check`：通过（吸纳 `6f11d198`、`7fe896d2` 后复跑）。
 
 ### Batch 3：responses、compact 与协议转换专项
 
