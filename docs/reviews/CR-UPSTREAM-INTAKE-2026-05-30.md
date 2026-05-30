@@ -247,6 +247,8 @@ Batch 3 子批次验证记录：
 - `go test ./relay/common -run 'TestApplyParamOverrideWithRelayInfoRecords(OnlyKeyOperations|ConversationBodyOperations|OperationAudit)|TestShouldAuditParamPathUsesFieldBoundaryPrefixMatching' -count=1 -v`：通过。
 - `go test ./relay/common -count=1`：通过。
 - `git diff --check`：通过。
+- `go test ./relay/common ./relay/channel/openai ./relay ./service -run 'Test.*(Compact|Compaction|Synthetic|Responses|ParamOverride|Bootstrap)' -count=1`：通过。
+- `go test ./relay/common ./relay/channel/openai ./relay ./service -count=1`：通过。
 
 ### Batch 4：支付、订阅与合规功能
 
