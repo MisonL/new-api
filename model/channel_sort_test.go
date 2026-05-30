@@ -95,3 +95,18 @@ func TestSearchChannelsAppliesWhitelistedServerSideSort(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int{1, 3, 2}, channelIDs(channels))
 }
+
+func TestSearchChannelsEscapesGroupFilterWildcards(t *testing.T) {
+	setupChannelSortTestDB(t)
+	channels := []*Channel{
+		{Id: 1, Name: "alpha", Key: "sk-alpha", Models: "gpt-5", Group: "paid%team", Priority: common.GetPointer[int64](30)},
+		{Id: 2, Name: "beta", Key: "sk-beta", Models: "gpt-5", Group: "paid-team", Priority: common.GetPointer[int64](20)},
+	}
+	for _, channel := range channels {
+		require.NoError(t, DB.Create(channel).Error)
+	}
+
+	matched, err := SearchChannels("", "paid%team", "gpt", false, NewChannelSortOptions("id", "asc", false))
+	require.NoError(t, err)
+	require.Equal(t, []int{1}, channelIDs(matched))
+}
