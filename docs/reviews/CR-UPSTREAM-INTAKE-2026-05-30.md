@@ -184,6 +184,8 @@ Batch 1 收口回归：
 - 已手工吸纳 `30025aeba`：后台手动渠道测试改用当前请求上下文中的用户 ID，自动批量测试和内部 helper 通过 root 用户解析兜底；保留本项目 channel test runtime options、Header Profile、param override 和 compact 诊断逻辑。
 - 已等价跳过 `faa0f1425`：当前 `model/perf_metric.go` 已通过 `perfMetricIncrementExpr` 为 upsert 增量列加 `perf_metrics.` 前缀，并有 `model/perf_metric_test.go` 覆盖 PostgreSQL 下 `group` 列和增量表达式。
 - 已手工吸纳 `20d3e7373`：模型性能指标摘要和单模型明细都只展示当前活跃分组和 `auto`，摘要同时覆盖已落盘 `perf_metrics` 汇总和内存 hot bucket 汇总。
+- `132d7b9`、`2d968c3` 已在 Batch 1 提交 `e6a8e6214` 手工吸纳：channel list group filter 已生效，避免重复处理。
+- `aa56667b` 已在 Batch 1 提交 `a566ce68d` 作为独立日志安全专题吸纳：保留本地 request id，新增 upstream request id 追踪和 usage log 筛选。
 - 已手工吸纳 `8f9ee9ba8`：default 渠道更新表单对可清空的文本字段发送显式空字符串，避免 GORM struct updates 因 nil 指针跳过更新；同时保留 priority、weight 的显式 0 值。
 - 已手工吸纳 `349d5429c`：default API Keys 搜索改为处理后端分页响应，名称搜索和 API key 搜索分别走 `keyword` 与 `token` 查询参数，并补齐 keys 路由 search schema 的 `token` 字段，避免 URL 状态丢失。
 - 已手工吸纳 `6f11d198`：按本项目现有 `model-ratio-dialog` 结构加入定价数字显示归一化，修正价格/倍率互算时的浮点漂移，不改变 `ModelRatio`、`CompletionRatio`、`ModelPrice` 存储口径。
