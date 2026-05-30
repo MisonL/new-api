@@ -12,9 +12,11 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -537,4 +539,23 @@ func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 2, userID)
+}
+
+func TestFilterActiveGroupsKeepsConfiguredGroupsAndAuto(t *testing.T) {
+	originalGroupRatio := ratio_setting.GroupRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatio))
+	})
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1}`))
+
+	filtered := filterActiveGroups([]perfmetrics.GroupResult{
+		{Group: "default", RequestCount: 1},
+		{Group: "legacy", RequestCount: 2},
+		{Group: "auto", RequestCount: 3},
+	})
+
+	require.Equal(t, []perfmetrics.GroupResult{
+		{Group: "default", RequestCount: 1},
+		{Group: "auto", RequestCount: 3},
+	}, filtered)
 }

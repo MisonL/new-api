@@ -120,7 +120,7 @@ func Query(params QueryParams) (QueryResult, error) {
 	return buildQueryResult(params.Model, merged), nil
 }
 
-func QuerySummaryAll(hours int) (SummaryAllResult, error) {
+func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 	if hours <= 0 {
 		hours = 24
 	}
@@ -129,8 +129,9 @@ func QuerySummaryAll(hours int) (SummaryAllResult, error) {
 	}
 	endTs := time.Now().Unix()
 	startTs := endTs - int64(hours)*3600
+	allowedGroups := allowedGroupSet(groups)
 
-	rows, err := model.GetPerfMetricsSummaryAll(startTs, endTs)
+	rows, err := model.GetPerfMetricsSummaryAll(startTs, endTs, groups)
 	if err != nil {
 		return SummaryAllResult{}, err
 	}
@@ -146,24 +147,7 @@ func QuerySummaryAll(hours int) (SummaryAllResult, error) {
 		}
 	}
 
-	hotBuckets.Range(func(key, value any) bool {
-		k := key.(bucketKey)
-		if k.bucketTs < startTs || k.bucketTs > endTs {
-			return true
-		}
-		snap := value.(*atomicBucket).snapshot()
-		if snap.requestCount == 0 {
-			return true
-		}
-		cur := totals[k.model]
-		cur.requestCount += snap.requestCount
-		cur.successCount += snap.successCount
-		cur.totalLatencyMs += snap.totalLatencyMs
-		cur.outputTokens += snap.outputTokens
-		cur.generationMs += snap.generationMs
-		totals[k.model] = cur
-		return true
-	})
+	mergeHotBucketSummaries(totals, startTs, endTs, allowedGroups)
 
 	models := make([]ModelSummary, 0, len(totals))
 	for name, total := range totals {
@@ -183,6 +167,43 @@ func QuerySummaryAll(hours int) (SummaryAllResult, error) {
 	})
 
 	return SummaryAllResult{Models: models}, nil
+}
+
+func mergeHotBucketSummaries(totals map[string]counters, startTs int64, endTs int64, allowedGroups map[string]struct{}) {
+	hotBuckets.Range(func(key, value any) bool {
+		k := key.(bucketKey)
+		if k.bucketTs < startTs || k.bucketTs > endTs {
+			return true
+		}
+		if allowedGroups != nil {
+			if _, ok := allowedGroups[k.group]; !ok {
+				return true
+			}
+		}
+		snap := value.(*atomicBucket).snapshot()
+		if snap.requestCount == 0 {
+			return true
+		}
+		cur := totals[k.model]
+		cur.requestCount += snap.requestCount
+		cur.successCount += snap.successCount
+		cur.totalLatencyMs += snap.totalLatencyMs
+		cur.outputTokens += snap.outputTokens
+		cur.generationMs += snap.generationMs
+		totals[k.model] = cur
+		return true
+	})
+}
+
+func allowedGroupSet(groups []string) map[string]struct{} {
+	if groups == nil {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		allowed[group] = struct{}{}
+	}
+	return allowed
 }
 
 func bucketStart(ts int64) int64 {
