@@ -185,6 +185,7 @@ Batch 1 收口回归：
 - 已等价跳过 `faa0f1425`：当前 `model/perf_metric.go` 已通过 `perfMetricIncrementExpr` 为 upsert 增量列加 `perf_metrics.` 前缀，并有 `model/perf_metric_test.go` 覆盖 PostgreSQL 下 `group` 列和增量表达式。
 - 已手工吸纳 `20d3e7373`：模型性能指标摘要和单模型明细都只展示当前活跃分组和 `auto`，摘要同时覆盖已落盘 `perf_metrics` 汇总和内存 hot bucket 汇总。
 - 已手工吸纳 `8f9ee9ba8`：default 渠道更新表单对可清空的文本字段发送显式空字符串，避免 GORM struct updates 因 nil 指针跳过更新；同时保留 priority、weight 的显式 0 值。
+- 已手工吸纳 `349d5429c`：default API Keys 搜索改为处理后端分页响应，名称搜索和 API key 搜索分别走 `keyword` 与 `token` 查询参数，并补齐 keys 路由 search schema 的 `token` 字段，避免 URL 状态丢失。
 
 Batch 2 子批次验证记录：
 
@@ -198,6 +199,10 @@ Batch 2 子批次验证记录：
 - `cd web/default && bun run lint`：通过。
 - `cd web/default && bun run build`：通过。
 - `git diff --check`：通过。
+- `cd web/default && bun run typecheck`：通过（吸纳 `349d5429c` 后复跑）。
+- `cd web/default && bun run lint`：通过（吸纳 `349d5429c` 后复跑）。
+- `cd web/default && bun run build`：通过（吸纳 `349d5429c` 后复跑）。
+- `git diff --check`：通过（吸纳 `349d5429c` 后复跑）。
 
 ### Batch 3：responses、compact 与协议转换专项
 
