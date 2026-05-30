@@ -502,6 +502,24 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 />
               )}
 
+              {props.log.upstream_request_id && (
+                <DetailRow
+                  label={t('Upstream Request ID')}
+                  value={props.log.upstream_request_id}
+                  mono
+                />
+              )}
+
+              {!props.log.upstream_request_id &&
+                other?.upstream_request_id &&
+                props.isAdmin && (
+                  <DetailRow
+                    label={t('Upstream Request ID')}
+                    value={other.upstream_request_id}
+                    mono
+                  />
+                )}
+
               {props.isAdmin && props.log.channel > 0 && (
                 <DetailRow
                   label={t('Channel')}

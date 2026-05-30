@@ -2,10 +2,13 @@ package model
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,14 +30,14 @@ func TestRecordLogWithAdminInfoKeepsAuditForAdminsOnly(t *testing.T) {
 		"admin_username": "root-admin",
 	})
 
-	adminLogs, total, err := GetAllLogs(LogTypeManage, 0, 0, "", false, "", "", 0, 10, 0, "", "", false, false)
+	adminLogs, total, err := GetAllLogs(LogTypeManage, 0, 0, "", false, "", "", 0, 10, 0, "", "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, adminLogs, 1)
 	require.Contains(t, adminLogs[0].Other, "admin_info")
 	require.Equal(t, "管理员增加用户额度 1000", adminLogs[0].Content)
 
-	userLogs, total, err := GetUserLogs(101, LogTypeManage, 0, 0, "", false, "", 0, 10, "", "", false, false)
+	userLogs, total, err := GetUserLogs(101, LogTypeManage, 0, 0, "", false, "", 0, 10, "", "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, userLogs, 1)
@@ -82,7 +85,7 @@ func TestRecordTopupLogStoresAdminOnlyAuditFields(t *testing.T) {
 	require.Equal(t, "dev-node-a", adminInfo["node_name"])
 	require.Contains(t, adminInfo, "server_ip")
 
-	userLogs, total, err := GetUserLogs(102, LogTypeTopup, 0, 0, "", false, "", 0, 10, "", "", false, false)
+	userLogs, total, err := GetUserLogs(102, LogTypeTopup, 0, 0, "", false, "", 0, 10, "", "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, userLogs, 1)
@@ -134,7 +137,7 @@ func TestGetAllLogsAttachesNonSensitiveChannelDetail(t *testing.T) {
 		Other:     "{}",
 	}).Error)
 
-	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 10, 0, "", "", false, false)
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 10, 0, "", "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, adminLogs, 1)
@@ -196,19 +199,96 @@ func TestGetLogsCanFilterEmptyModelName(t *testing.T) {
 		},
 	}).Error)
 
-	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", true, "", "", 0, 10, 0, "", "", false, false)
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", true, "", "", 0, 10, 0, "", "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, adminLogs, 1)
 	require.Equal(t, "", adminLogs[0].ModelName)
 	require.Equal(t, "req-empty", adminLogs[0].RequestId)
 
-	userLogs, total, err := GetUserLogs(101, LogTypeConsume, 0, 0, "", true, "", 0, 10, "", "", false, false)
+	userLogs, total, err := GetUserLogs(101, LogTypeConsume, 0, 0, "", true, "", 0, 10, "", "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, userLogs, 1)
 	require.Equal(t, "", userLogs[0].ModelName)
 	require.Equal(t, "req-empty", userLogs[0].RequestId)
+}
+
+func TestGetLogsCanFilterUpstreamRequestId(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, LOG_DB.Create([]Log{
+		{
+			UserId:            101,
+			Username:          "target-user",
+			CreatedAt:         1714550400,
+			Type:              LogTypeConsume,
+			Content:           "first",
+			ModelName:         "gpt-5.5",
+			TokenName:         "token-a",
+			Group:             "default",
+			RequestId:         "local-a",
+			UpstreamRequestId: "upstream-a",
+			Other:             "{}",
+		},
+		{
+			UserId:            101,
+			Username:          "target-user",
+			CreatedAt:         1714550401,
+			Type:              LogTypeConsume,
+			Content:           "second",
+			ModelName:         "gpt-5.5",
+			TokenName:         "token-a",
+			Group:             "default",
+			RequestId:         "local-b",
+			UpstreamRequestId: "upstream-b",
+			Other:             "{}",
+		},
+	}).Error)
+
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 10, 0, "", "", "upstream-a", false, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, adminLogs, 1)
+	require.Equal(t, "local-a", adminLogs[0].RequestId)
+	require.Equal(t, "upstream-a", adminLogs[0].UpstreamRequestId)
+
+	userLogs, total, err := GetUserLogs(101, LogTypeConsume, 0, 0, "", false, "", 0, 10, "", "", "upstream-b", false, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, userLogs, 1)
+	require.Equal(t, "local-b", userLogs[0].RequestId)
+	require.Equal(t, "upstream-b", userLogs[0].UpstreamRequestId)
+}
+
+func TestRecordConsumeLogCopiesUpstreamRequestIdFromOther(t *testing.T) {
+	truncateTables(t)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Set("username", "target-user")
+	c.Set(common.RequestIdKey, "local-req")
+
+	RecordConsumeLog(c, 101, RecordConsumeLogParams{
+		ChannelId:        24,
+		PromptTokens:     1,
+		CompletionTokens: 2,
+		ModelName:        "gpt-5.5",
+		TokenName:        "token-a",
+		Quota:            100,
+		Content:          "ok",
+		TokenId:          7,
+		Group:            "default",
+		Other: map[string]interface{}{
+			"upstream_request_id": "upstream-from-other",
+		},
+	})
+
+	var stored Log
+	require.NoError(t, LOG_DB.Last(&stored).Error)
+	require.Equal(t, "local-req", stored.RequestId)
+	require.Equal(t, "upstream-from-other", stored.UpstreamRequestId)
 }
 
 func seedExplicitWildcardLogFilters(t *testing.T) {
@@ -245,23 +325,23 @@ func TestGetAllLogsTextFiltersUseExplicitWildcardsOnly(t *testing.T) {
 	truncateTables(t)
 	seedExplicitWildcardLogFilters(t)
 
-	logs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "gpt-5", false, "", "", 0, 10, 0, "", "", false, false)
+	logs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "gpt-5", false, "", "", 0, 10, 0, "", "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, logs, 1)
 	require.Equal(t, "req-exact", logs[0].RequestId)
 
-	logs, total, err = GetAllLogs(LogTypeConsume, 0, 0, "gpt-5%", false, "", "", 0, 10, 0, "", "", false, false)
+	logs, total, err = GetAllLogs(LogTypeConsume, 0, 0, "gpt-5%", false, "", "", 0, 10, 0, "", "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, total)
 	require.Len(t, logs, 2)
 
-	logs, total, err = GetAllLogs(LogTypeConsume, 0, 0, "", false, "alice%", "", 0, 10, 0, "", "", false, false)
+	logs, total, err = GetAllLogs(LogTypeConsume, 0, 0, "", false, "alice%", "", 0, 10, 0, "", "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, total)
 	require.Len(t, logs, 2)
 
-	logs, total, err = GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "token-a%", 0, 10, 0, "", "", false, false)
+	logs, total, err = GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "token-a%", 0, 10, 0, "", "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 0, total)
 	require.Empty(t, logs)
@@ -306,7 +386,7 @@ func TestGetAllLogsCapsExpensiveTotalCount(t *testing.T) {
 	}
 	require.NoError(t, LOG_DB.CreateInBatches(logs, 500).Error)
 
-	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 10, 0, "", "", false, false)
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 10, 0, "", "", "", false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, logSearchCountLimit, total)
 	require.Len(t, adminLogs, 10)
@@ -354,14 +434,14 @@ func TestGetAllLogsFastPageSkipsExpensiveTotalCount(t *testing.T) {
 		},
 	}).Error)
 
-	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 2, 0, "", "", true, false)
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 2, 0, "", "", "", true, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, total)
 	require.Len(t, adminLogs, 2)
 	require.Equal(t, "consume-new", adminLogs[0].Content)
 	require.Equal(t, "consume-mid", adminLogs[1].Content)
 
-	userLogs, total, err := GetUserLogs(101, LogTypeConsume, 0, 0, "", false, "", 2, 2, "", "", true, false)
+	userLogs, total, err := GetUserLogs(101, LogTypeConsume, 0, 0, "", false, "", 2, 2, "", "", "", true, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, total)
 	require.Len(t, userLogs, 1)
@@ -385,7 +465,7 @@ func TestGetAllLogsFastPageNormalizesInvalidPageSize(t *testing.T) {
 	}).Error)
 
 	require.NotPanics(t, func() {
-		adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, -1, 0, "", "", true, false)
+		adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, -1, 0, "", "", "", true, false)
 		require.NoError(t, err)
 		require.EqualValues(t, 1, total)
 		require.Len(t, adminLogs, 1)
@@ -409,7 +489,7 @@ func TestGetAllLogsFastPageNormalizesNegativeStartIndex(t *testing.T) {
 		Other:     "{}",
 	}).Error)
 
-	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", -10, 1, 0, "", "", true, false)
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", -10, 1, 0, "", "", "", true, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, adminLogs, 1)
@@ -446,7 +526,7 @@ func TestGetAllLogsCompactOmitsHeavyFields(t *testing.T) {
 		Other:            `{"large":"payload"}`,
 	}).Error)
 
-	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 10, 0, "", "", true, true)
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 10, 0, "", "", "", true, true)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, adminLogs, 1)

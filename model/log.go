@@ -19,27 +19,28 @@ import (
 )
 
 type Log struct {
-	Id               int               `json:"id" gorm:"index:idx_created_at_id,priority:1;index:idx_user_id_id,priority:2;index:idx_logs_username_token_type_created_id,priority:5;index:idx_logs_username_model_type_created_id,priority:5;index:idx_logs_username_group_type_created_id,priority:5;index:idx_logs_model_group_type_created_id,priority:5;index:idx_logs_token_model_type_created_id,priority:5;index:idx_logs_channel_model_type_created_id,priority:5;index:idx_logs_token_group_type_created_id,priority:5;index:idx_logs_channel_group_type_created_id,priority:5;index:idx_logs_username_token_group_type_created_id,priority:6"`
-	UserId           int               `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1;index:idx_logs_user_created_at,priority:1;index:idx_logs_user_type_created_at,priority:1"`
-	CreatedAt        int64             `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:2;index:idx_created_at_type;index:idx_logs_type_created_at,priority:2;index:idx_logs_user_created_at,priority:2;index:idx_logs_username_created_at,priority:2;index:idx_logs_token_created_at,priority:2;index:idx_logs_model_created_at,priority:2;index:idx_logs_channel_created_at,priority:2;index:idx_logs_group_created_at,priority:2;index:idx_logs_request_id_created_at,priority:2;index:idx_logs_user_type_created_at,priority:3;index:idx_logs_username_type_created_at,priority:3;index:idx_logs_token_type_created_at,priority:3;index:idx_logs_model_type_created_at,priority:3;index:idx_logs_channel_type_created_at,priority:3;index:idx_logs_group_type_created_at,priority:3;index:idx_logs_username_token_type_created_id,priority:4;index:idx_logs_username_model_type_created_id,priority:4;index:idx_logs_username_group_type_created_id,priority:4;index:idx_logs_model_group_type_created_id,priority:4;index:idx_logs_token_model_type_created_id,priority:4;index:idx_logs_channel_model_type_created_id,priority:4;index:idx_logs_token_group_type_created_id,priority:4;index:idx_logs_channel_group_type_created_id,priority:4;index:idx_logs_username_token_group_type_created_id,priority:5"`
-	Type             int               `json:"type" gorm:"index:idx_created_at_type;index:idx_logs_type_created_at,priority:1;index:idx_logs_user_type_created_at,priority:2;index:idx_logs_username_type_created_at,priority:2;index:idx_logs_token_type_created_at,priority:2;index:idx_logs_model_type_created_at,priority:2;index:idx_logs_channel_type_created_at,priority:2;index:idx_logs_group_type_created_at,priority:2;index:idx_logs_username_token_type_created_id,priority:3;index:idx_logs_username_model_type_created_id,priority:3;index:idx_logs_username_group_type_created_id,priority:3;index:idx_logs_model_group_type_created_id,priority:3;index:idx_logs_token_model_type_created_id,priority:3;index:idx_logs_channel_model_type_created_id,priority:3;index:idx_logs_token_group_type_created_id,priority:3;index:idx_logs_channel_group_type_created_id,priority:3;index:idx_logs_username_token_group_type_created_id,priority:4"`
-	Content          string            `json:"content"`
-	Username         string            `json:"username" gorm:"index;index:index_username_model_name,priority:2;index:idx_logs_username_created_at,priority:1;index:idx_logs_username_type_created_at,priority:1;index:idx_logs_username_token_type_created_id,priority:1;index:idx_logs_username_model_type_created_id,priority:1;index:idx_logs_username_group_type_created_id,priority:1;index:idx_logs_username_token_group_type_created_id,priority:1;default:''"`
-	TokenName        string            `json:"token_name" gorm:"index;index:idx_logs_token_created_at,priority:1;index:idx_logs_token_type_created_at,priority:1;index:idx_logs_username_token_type_created_id,priority:2;index:idx_logs_token_model_type_created_id,priority:1;index:idx_logs_token_group_type_created_id,priority:1;index:idx_logs_username_token_group_type_created_id,priority:2;default:''"`
-	ModelName        string            `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;index:idx_logs_model_created_at,priority:1;index:idx_logs_model_type_created_at,priority:1;index:idx_logs_username_model_type_created_id,priority:2;index:idx_logs_model_group_type_created_id,priority:1;index:idx_logs_token_model_type_created_id,priority:2;index:idx_logs_channel_model_type_created_id,priority:2;default:''"`
-	Quota            int               `json:"quota" gorm:"default:0"`
-	PromptTokens     int               `json:"prompt_tokens" gorm:"default:0"`
-	CompletionTokens int               `json:"completion_tokens" gorm:"default:0"`
-	UseTime          int               `json:"use_time" gorm:"default:0"`
-	IsStream         bool              `json:"is_stream"`
-	ChannelId        int               `json:"channel" gorm:"index;index:idx_logs_channel_created_at,priority:1;index:idx_logs_channel_type_created_at,priority:1;index:idx_logs_channel_model_type_created_id,priority:1;index:idx_logs_channel_group_type_created_id,priority:1"`
-	ChannelName      string            `json:"channel_name" gorm:"->"`
-	ChannelDetail    *LogChannelDetail `json:"channel_detail,omitempty" gorm:"-"`
-	TokenId          int               `json:"token_id" gorm:"default:0;index"`
-	Group            string            `json:"group" gorm:"index;index:idx_logs_group_created_at,priority:1;index:idx_logs_group_type_created_at,priority:1;index:idx_logs_username_group_type_created_id,priority:2;index:idx_logs_model_group_type_created_id,priority:2;index:idx_logs_token_group_type_created_id,priority:2;index:idx_logs_channel_group_type_created_id,priority:2;index:idx_logs_username_token_group_type_created_id,priority:3"`
-	Ip               string            `json:"ip" gorm:"index;default:''"`
-	RequestId        string            `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;index:idx_logs_request_id_created_at,priority:1;default:''"`
-	Other            string            `json:"other"`
+	Id                int               `json:"id" gorm:"index:idx_created_at_id,priority:1;index:idx_user_id_id,priority:2;index:idx_logs_username_token_type_created_id,priority:5;index:idx_logs_username_model_type_created_id,priority:5;index:idx_logs_username_group_type_created_id,priority:5;index:idx_logs_model_group_type_created_id,priority:5;index:idx_logs_token_model_type_created_id,priority:5;index:idx_logs_channel_model_type_created_id,priority:5;index:idx_logs_token_group_type_created_id,priority:5;index:idx_logs_channel_group_type_created_id,priority:5;index:idx_logs_username_token_group_type_created_id,priority:6"`
+	UserId            int               `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1;index:idx_logs_user_created_at,priority:1;index:idx_logs_user_type_created_at,priority:1"`
+	CreatedAt         int64             `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:2;index:idx_created_at_type;index:idx_logs_type_created_at,priority:2;index:idx_logs_user_created_at,priority:2;index:idx_logs_username_created_at,priority:2;index:idx_logs_token_created_at,priority:2;index:idx_logs_model_created_at,priority:2;index:idx_logs_channel_created_at,priority:2;index:idx_logs_group_created_at,priority:2;index:idx_logs_request_id_created_at,priority:2;index:idx_logs_user_type_created_at,priority:3;index:idx_logs_username_type_created_at,priority:3;index:idx_logs_token_type_created_at,priority:3;index:idx_logs_model_type_created_at,priority:3;index:idx_logs_channel_type_created_at,priority:3;index:idx_logs_group_type_created_at,priority:3;index:idx_logs_username_token_type_created_id,priority:4;index:idx_logs_username_model_type_created_id,priority:4;index:idx_logs_username_group_type_created_id,priority:4;index:idx_logs_model_group_type_created_id,priority:4;index:idx_logs_token_model_type_created_id,priority:4;index:idx_logs_channel_model_type_created_id,priority:4;index:idx_logs_token_group_type_created_id,priority:4;index:idx_logs_channel_group_type_created_id,priority:4;index:idx_logs_username_token_group_type_created_id,priority:5"`
+	Type              int               `json:"type" gorm:"index:idx_created_at_type;index:idx_logs_type_created_at,priority:1;index:idx_logs_user_type_created_at,priority:2;index:idx_logs_username_type_created_at,priority:2;index:idx_logs_token_type_created_at,priority:2;index:idx_logs_model_type_created_at,priority:2;index:idx_logs_channel_type_created_at,priority:2;index:idx_logs_group_type_created_at,priority:2;index:idx_logs_username_token_type_created_id,priority:3;index:idx_logs_username_model_type_created_id,priority:3;index:idx_logs_username_group_type_created_id,priority:3;index:idx_logs_model_group_type_created_id,priority:3;index:idx_logs_token_model_type_created_id,priority:3;index:idx_logs_channel_model_type_created_id,priority:3;index:idx_logs_token_group_type_created_id,priority:3;index:idx_logs_channel_group_type_created_id,priority:3;index:idx_logs_username_token_group_type_created_id,priority:4"`
+	Content           string            `json:"content"`
+	Username          string            `json:"username" gorm:"index;index:index_username_model_name,priority:2;index:idx_logs_username_created_at,priority:1;index:idx_logs_username_type_created_at,priority:1;index:idx_logs_username_token_type_created_id,priority:1;index:idx_logs_username_model_type_created_id,priority:1;index:idx_logs_username_group_type_created_id,priority:1;index:idx_logs_username_token_group_type_created_id,priority:1;default:''"`
+	TokenName         string            `json:"token_name" gorm:"index;index:idx_logs_token_created_at,priority:1;index:idx_logs_token_type_created_at,priority:1;index:idx_logs_username_token_type_created_id,priority:2;index:idx_logs_token_model_type_created_id,priority:1;index:idx_logs_token_group_type_created_id,priority:1;index:idx_logs_username_token_group_type_created_id,priority:2;default:''"`
+	ModelName         string            `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;index:idx_logs_model_created_at,priority:1;index:idx_logs_model_type_created_at,priority:1;index:idx_logs_username_model_type_created_id,priority:2;index:idx_logs_model_group_type_created_id,priority:1;index:idx_logs_token_model_type_created_id,priority:2;index:idx_logs_channel_model_type_created_id,priority:2;default:''"`
+	Quota             int               `json:"quota" gorm:"default:0"`
+	PromptTokens      int               `json:"prompt_tokens" gorm:"default:0"`
+	CompletionTokens  int               `json:"completion_tokens" gorm:"default:0"`
+	UseTime           int               `json:"use_time" gorm:"default:0"`
+	IsStream          bool              `json:"is_stream"`
+	ChannelId         int               `json:"channel" gorm:"index;index:idx_logs_channel_created_at,priority:1;index:idx_logs_channel_type_created_at,priority:1;index:idx_logs_channel_model_type_created_id,priority:1;index:idx_logs_channel_group_type_created_id,priority:1"`
+	ChannelName       string            `json:"channel_name" gorm:"->"`
+	ChannelDetail     *LogChannelDetail `json:"channel_detail,omitempty" gorm:"-"`
+	TokenId           int               `json:"token_id" gorm:"default:0;index"`
+	Group             string            `json:"group" gorm:"index;index:idx_logs_group_created_at,priority:1;index:idx_logs_group_type_created_at,priority:1;index:idx_logs_username_group_type_created_id,priority:2;index:idx_logs_model_group_type_created_id,priority:2;index:idx_logs_token_group_type_created_id,priority:2;index:idx_logs_channel_group_type_created_id,priority:2;index:idx_logs_username_token_group_type_created_id,priority:3"`
+	Ip                string            `json:"ip" gorm:"index;default:''"`
+	RequestId         string            `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;index:idx_logs_request_id_created_at,priority:1;default:''"`
+	UpstreamRequestId string            `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;index:idx_logs_upstream_request_id_created_at,priority:1;default:''"`
+	Other             string            `json:"other"`
 }
 
 type LogChannelDetail struct {
@@ -79,6 +80,7 @@ func dashboardLogColumns() []string {
 		"token_id",
 		logGroupCol,
 		"request_id",
+		"upstream_request_id",
 	}
 }
 
@@ -223,12 +225,26 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 	}
 }
 
+func upstreamRequestIdFromLogContext(c *gin.Context, other map[string]interface{}) string {
+	if id := c.GetString(common.UpstreamRequestIdKey); id != "" {
+		return id
+	}
+	if other == nil {
+		return ""
+	}
+	if id, ok := other["upstream_request_id"].(string); ok {
+		return id
+	}
+	return ""
+}
+
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
 	isStream bool, group string, other map[string]interface{}) {
-	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, content))
+	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	other = common.AppendPayloadAuditFields(c, other)
+	upstreamRequestId := upstreamRequestIdFromLogContext(c, other)
 	otherStr := common.MapToJsonStr(other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -259,8 +275,9 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 			}
 			return ""
 		}(),
-		RequestId: requestId,
-		Other:     otherStr,
+		RequestId:         requestId,
+		UpstreamRequestId: upstreamRequestId,
+		Other:             otherStr,
 	}
 	err := LOG_DB.Create(log).Error
 	if err != nil {
@@ -293,6 +310,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	params.Other = common.AppendPayloadAuditFields(c, params.Other)
+	upstreamRequestId := upstreamRequestIdFromLogContext(c, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -323,8 +341,9 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			}
 			return ""
 		}(),
-		RequestId: requestId,
-		Other:     otherStr,
+		RequestId:         requestId,
+		UpstreamRequestId: upstreamRequestId,
+		Other:             otherStr,
 	}
 	err := LOG_DB.Create(log).Error
 	if err != nil {
@@ -381,18 +400,19 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 }
 
 type LogFilter struct {
-	LogType        int
-	StartTimestamp int64
-	EndTimestamp   int64
-	ModelName      string
-	ModelNameEmpty bool
-	Username       string
-	UsernameLike   bool
-	TokenName      string
-	Channel        int
-	Group          string
-	RequestId      string
-	UserId         int
+	LogType           int
+	StartTimestamp    int64
+	EndTimestamp      int64
+	ModelName         string
+	ModelNameEmpty    bool
+	Username          string
+	UsernameLike      bool
+	TokenName         string
+	Channel           int
+	Group             string
+	RequestId         string
+	UpstreamRequestId string
+	UserId            int
 }
 
 func applyExplicitLogTextFilter(tx *gorm.DB, column string, value string) (*gorm.DB, error) {
@@ -452,6 +472,9 @@ func applyLogFilters(tx *gorm.DB, filter LogFilter) (*gorm.DB, error) {
 	if filter.RequestId != "" {
 		tx = tx.Where("logs.request_id = ?", filter.RequestId)
 	}
+	if filter.UpstreamRequestId != "" {
+		tx = tx.Where("logs.upstream_request_id = ?", filter.UpstreamRequestId)
+	}
 	if filter.StartTimestamp != 0 {
 		tx = tx.Where("logs.created_at >= ?", filter.StartTimestamp)
 	}
@@ -509,20 +532,21 @@ func findLogsFastPage(tx *gorm.DB, startIdx int, num int) (logs []*Log, total in
 	return logs, int64(startIdx + len(logs)), nil
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, modelNameEmpty bool, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, fastPage bool, compact bool) (logs []*Log, total int64, err error) {
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, modelNameEmpty bool, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, fastPage bool, compact bool) (logs []*Log, total int64, err error) {
 	startIdx, num = normalizeLogPagination(startIdx, num)
 	tx, err := applyLogFilters(LOG_DB, LogFilter{
-		LogType:        logType,
-		StartTimestamp: startTimestamp,
-		EndTimestamp:   endTimestamp,
-		ModelName:      modelName,
-		ModelNameEmpty: modelNameEmpty,
-		Username:       username,
-		UsernameLike:   true,
-		TokenName:      tokenName,
-		Channel:        channel,
-		Group:          group,
-		RequestId:      requestId,
+		LogType:           logType,
+		StartTimestamp:    startTimestamp,
+		EndTimestamp:      endTimestamp,
+		ModelName:         modelName,
+		ModelNameEmpty:    modelNameEmpty,
+		Username:          username,
+		UsernameLike:      true,
+		TokenName:         tokenName,
+		Channel:           channel,
+		Group:             group,
+		RequestId:         requestId,
+		UpstreamRequestId: upstreamRequestId,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -595,18 +619,19 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	return logs, total, err
 }
 
-func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, modelNameEmpty bool, tokenName string, startIdx int, num int, group string, requestId string, fastPage bool, compact bool) (logs []*Log, total int64, err error) {
+func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, modelNameEmpty bool, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, fastPage bool, compact bool) (logs []*Log, total int64, err error) {
 	startIdx, num = normalizeLogPagination(startIdx, num)
 	tx, err := applyLogFilters(LOG_DB, LogFilter{
-		UserId:         userId,
-		LogType:        logType,
-		StartTimestamp: startTimestamp,
-		EndTimestamp:   endTimestamp,
-		ModelName:      modelName,
-		ModelNameEmpty: modelNameEmpty,
-		TokenName:      tokenName,
-		Group:          group,
-		RequestId:      requestId,
+		UserId:            userId,
+		LogType:           logType,
+		StartTimestamp:    startTimestamp,
+		EndTimestamp:      endTimestamp,
+		ModelName:         modelName,
+		ModelNameEmpty:    modelNameEmpty,
+		TokenName:         tokenName,
+		Group:             group,
+		RequestId:         requestId,
+		UpstreamRequestId: upstreamRequestId,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -643,7 +668,7 @@ type Stat struct {
 	Tpm   int `json:"tpm"`
 }
 
-func sumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, usernameLike bool, tokenName string, channel int, group string) (stat Stat, err error) {
+func sumUsedQuota(filter LogFilter) (stat Stat, err error) {
 	recentCutoff := time.Now().Add(-60 * time.Second).Unix()
 	tx := LOG_DB.Table("logs").Select(
 		`COALESCE(SUM(quota), 0) quota,
@@ -653,38 +678,11 @@ func sumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		recentCutoff,
 	)
 
-	if username != "" {
-		var nextTx *gorm.DB
-		nextTx, err = applyUsernameFilter(tx, "username", username, usernameLike)
-		if err != nil {
-			return stat, err
-		}
-		tx = nextTx
+	filter.LogType = LogTypeConsume
+	tx, err = applyLogFilters(tx, filter)
+	if err != nil {
+		return stat, err
 	}
-	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
-	}
-	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
-	}
-	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
-	}
-	if modelName != "" {
-		nextTx, err := applyModelNameFilter(tx, "model_name", modelName)
-		if err != nil {
-			return stat, err
-		}
-		tx = nextTx
-	}
-	if channel != 0 {
-		tx = tx.Where("channel_id = ?", channel)
-	}
-	if group != "" {
-		tx = tx.Where(logGroupCol+" = ?", group)
-	}
-
-	tx = tx.Where("type = ?", LogTypeConsume)
 
 	if err := tx.Scan(&stat).Error; err != nil {
 		common.SysError("failed to query log stat: " + err.Error())
@@ -695,11 +693,34 @@ func sumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
-	return sumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, false, tokenName, channel, group)
+	return SumUsedQuotaByFilter(LogFilter{
+		LogType:        logType,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		ModelName:      modelName,
+		Username:       username,
+		TokenName:      tokenName,
+		Channel:        channel,
+		Group:          group,
+	})
 }
 
 func SumUsedQuotaWithWildcardUsername(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
-	return sumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, true, tokenName, channel, group)
+	return SumUsedQuotaByFilter(LogFilter{
+		LogType:        logType,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		ModelName:      modelName,
+		Username:       username,
+		UsernameLike:   true,
+		TokenName:      tokenName,
+		Channel:        channel,
+		Group:          group,
+	})
+}
+
+func SumUsedQuotaByFilter(filter LogFilter) (stat Stat, err error) {
+	return sumUsedQuota(filter)
 }
 
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {

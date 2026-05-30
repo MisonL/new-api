@@ -24,9 +24,10 @@ func GetAllLogs(c *gin.Context) {
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
 	requestId := c.Query("request_id")
+	upstreamRequestId := c.Query("upstream_request_id")
 	fastPage := c.Query("fast_page") == "true"
 	compact := c.Query("compact") == "true"
-	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, modelNameEmpty, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, fastPage, compact)
+	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, modelNameEmpty, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, upstreamRequestId, fastPage, compact)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -48,9 +49,10 @@ func GetUserLogs(c *gin.Context) {
 	modelNameEmpty := c.Query("model_name_empty") == "true"
 	group := c.Query("group")
 	requestId := c.Query("request_id")
+	upstreamRequestId := c.Query("upstream_request_id")
 	fastPage := c.Query("fast_page") == "true"
 	compact := c.Query("compact") == "true"
-	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, modelNameEmpty, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, fastPage, compact)
+	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, modelNameEmpty, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, upstreamRequestId, fastPage, compact)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -110,7 +112,21 @@ func GetLogsStat(c *gin.Context) {
 	modelName := c.Query("model_name")
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
-	stat, err := model.SumUsedQuotaWithWildcardUsername(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
+	requestId := c.Query("request_id")
+	upstreamRequestId := c.Query("upstream_request_id")
+	stat, err := model.SumUsedQuotaByFilter(model.LogFilter{
+		LogType:           logType,
+		StartTimestamp:    startTimestamp,
+		EndTimestamp:      endTimestamp,
+		ModelName:         modelName,
+		Username:          username,
+		UsernameLike:      true,
+		TokenName:         tokenName,
+		Channel:           channel,
+		Group:             group,
+		RequestId:         requestId,
+		UpstreamRequestId: upstreamRequestId,
+	})
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -137,7 +153,20 @@ func GetLogsSelfStat(c *gin.Context) {
 	modelName := c.Query("model_name")
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
-	quotaNum, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
+	requestId := c.Query("request_id")
+	upstreamRequestId := c.Query("upstream_request_id")
+	quotaNum, err := model.SumUsedQuotaByFilter(model.LogFilter{
+		LogType:           logType,
+		StartTimestamp:    startTimestamp,
+		EndTimestamp:      endTimestamp,
+		ModelName:         modelName,
+		Username:          username,
+		TokenName:         tokenName,
+		Channel:           channel,
+		Group:             group,
+		RequestId:         requestId,
+		UpstreamRequestId: upstreamRequestId,
+	})
 	if err != nil {
 		common.ApiError(c, err)
 		return

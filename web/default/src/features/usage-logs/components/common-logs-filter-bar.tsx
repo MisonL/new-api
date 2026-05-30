@@ -72,6 +72,8 @@ export function CommonLogsFilterBar({
     if (searchParams.group) next.group = searchParams.group
     if (searchParams.username) next.username = searchParams.username
     if (searchParams.requestId) next.requestId = searchParams.requestId
+    if (searchParams.upstreamRequestId)
+      next.upstreamRequestId = searchParams.upstreamRequestId
 
     const typeArr = searchParams.type
     const nextLogType: LogTypeValue | '' =
@@ -100,6 +102,7 @@ export function CommonLogsFilterBar({
     searchParams.group,
     searchParams.username,
     searchParams.requestId,
+    searchParams.upstreamRequestId,
     searchParams.type,
   ])
   const [appliedSearchKey, setAppliedSearchKey] = useState(searchState.key)
@@ -168,7 +171,8 @@ export function CommonLogsFilterBar({
     !!filters.token ||
     !!filters.username ||
     !!filters.channel ||
-    !!filters.requestId
+    !!filters.requestId ||
+    !!filters.upstreamRequestId
 
   return (
     <div className='space-y-2 sm:space-y-3'>
@@ -274,6 +278,15 @@ export function CommonLogsFilterBar({
               placeholder={t('Request ID')}
               value={filters.requestId || ''}
               onChange={(e) => handleChange('requestId', e.target.value)}
+              onKeyDown={handleKeyDown}
+              className='h-9'
+            />
+            <Input
+              placeholder={t('Upstream Request ID')}
+              value={filters.upstreamRequestId || ''}
+              onChange={(e) =>
+                handleChange('upstreamRequestId', e.target.value)
+              }
               onKeyDown={handleKeyDown}
               className='h-9'
             />

@@ -14,28 +14,32 @@ func TestSumUsedQuotaUsesSingleFilteredConsumeStat(t *testing.T) {
 	now := time.Now().Unix()
 	logs := []*Log{
 		{
-			CreatedAt:        now - 10,
-			Type:             LogTypeConsume,
-			Username:         "alice",
-			TokenName:        "codex-token",
-			ModelName:        "gpt-5.5",
-			Quota:            100,
-			PromptTokens:     12,
-			CompletionTokens: 8,
-			ChannelId:        24,
-			Group:            "default",
+			CreatedAt:         now - 10,
+			Type:              LogTypeConsume,
+			Username:          "alice",
+			TokenName:         "codex-token",
+			ModelName:         "gpt-5.5",
+			Quota:             100,
+			PromptTokens:      12,
+			CompletionTokens:  8,
+			ChannelId:         24,
+			Group:             "default",
+			RequestId:         "local-a",
+			UpstreamRequestId: "upstream-a",
 		},
 		{
-			CreatedAt:        now - 90,
-			Type:             LogTypeConsume,
-			Username:         "alice",
-			TokenName:        "codex-token",
-			ModelName:        "gpt-5.5",
-			Quota:            60,
-			PromptTokens:     30,
-			CompletionTokens: 20,
-			ChannelId:        24,
-			Group:            "default",
+			CreatedAt:         now - 90,
+			Type:              LogTypeConsume,
+			Username:          "alice",
+			TokenName:         "codex-token",
+			ModelName:         "gpt-5.5",
+			Quota:             60,
+			PromptTokens:      30,
+			CompletionTokens:  20,
+			ChannelId:         24,
+			Group:             "default",
+			RequestId:         "local-b",
+			UpstreamRequestId: "upstream-b",
 		},
 		{
 			CreatedAt:        now - 5,
@@ -58,6 +62,17 @@ func TestSumUsedQuotaUsesSingleFilteredConsumeStat(t *testing.T) {
 	require.Equal(t, 160, stat.Quota)
 	require.Equal(t, 1, stat.Rpm)
 	require.Equal(t, 20, stat.Tpm)
+
+	filteredStat, err := SumUsedQuotaByFilter(LogFilter{
+		StartTimestamp:    now - 120,
+		EndTimestamp:      now + 1,
+		RequestId:         "local-a",
+		UpstreamRequestId: "upstream-a",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 100, filteredStat.Quota)
+	require.Equal(t, 1, filteredStat.Rpm)
+	require.Equal(t, 20, filteredStat.Tpm)
 }
 
 func TestSumUsedQuotaWildcardUsernameIsExplicit(t *testing.T) {
