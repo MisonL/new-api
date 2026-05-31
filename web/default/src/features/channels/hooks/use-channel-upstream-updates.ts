@@ -99,7 +99,10 @@ export function useChannelUpstreamUpdates(refresh: () => Promise<void>) {
             ignore_models: ignoreModels,
             remove_models: normalizeModelList(selectedRemove),
           },
-          { skipErrorHandler: true } as Record<string, unknown>
+          {
+            skipBusinessError: true,
+            skipErrorHandler: true,
+          } as Record<string, unknown>
         )
         const { success, message, data } = res.data || {}
         if (!success) {
@@ -144,7 +147,10 @@ export function useChannelUpstreamUpdates(refresh: () => Promise<void>) {
       const res = await api.post(
         '/api/channel/upstream_updates/apply_all',
         {},
-        { skipErrorHandler: true } as Record<string, unknown>
+        {
+          skipBusinessError: true,
+          skipErrorHandler: true,
+        } as Record<string, unknown>
       )
       const { success, message, data } = res.data || {}
       if (!success) {
@@ -188,7 +194,10 @@ export function useChannelUpstreamUpdates(refresh: () => Promise<void>) {
         const res = await api.post(
           '/api/channel/upstream_updates/detect',
           { id: ch.id },
-          { skipErrorHandler: true } as Record<string, unknown>
+          {
+            skipBusinessError: true,
+            skipErrorHandler: true,
+          } as Record<string, unknown>
         )
         const { success, message, data } = res.data || {}
         if (!success) {
@@ -226,7 +235,10 @@ export function useChannelUpstreamUpdates(refresh: () => Promise<void>) {
       const res = await api.post(
         '/api/channel/upstream_updates/detect_all',
         {},
-        { skipErrorHandler: true } as Record<string, unknown>
+        {
+          skipBusinessError: true,
+          skipErrorHandler: true,
+        } as Record<string, unknown>
       )
       const { success, message, data } = res.data || {}
       if (!success) {

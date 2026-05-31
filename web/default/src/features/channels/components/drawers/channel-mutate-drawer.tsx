@@ -1050,6 +1050,8 @@ export function ChannelMutateDrawer({
           if (response.success) {
             toast.success(t(SUCCESS_MESSAGES.UPDATED))
             handleSuccess()
+          } else {
+            toast.error(response.message || t(ERROR_MESSAGES.UPDATE_FAILED))
           }
         } else {
           // Create new channel(s)
@@ -1058,6 +1060,8 @@ export function ChannelMutateDrawer({
           if (response.success) {
             toast.success(t(SUCCESS_MESSAGES.CREATED))
             handleSuccess()
+          } else {
+            toast.error(response.message || t(ERROR_MESSAGES.CREATE_FAILED))
           }
         }
       } catch (error: unknown) {
