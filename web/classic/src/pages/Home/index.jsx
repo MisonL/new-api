@@ -330,7 +330,7 @@ const Home = () => {
                     className={`flex flex-col md:flex-row items-center justify-center gap-4 w-full ${isTightHeight ? 'mt-3 md:mt-4' : 'mt-4 md:mt-6'} max-w-md`}
                   >
                     <Input
-                      readonly
+                      readOnly
                       value={serverAddress}
                       aria-label={t('API 基址')}
                       className='flex-1 !rounded-full'
@@ -338,7 +338,7 @@ const Home = () => {
                       suffix={
                         <div className='flex items-center gap-2'>
                           <div
-                            aria-hidden='true'
+                            aria-hidden={true}
                             style={{
                               height: `${ENDPOINT_ITEM_HEIGHT}px`,
                               overflow: 'hidden',

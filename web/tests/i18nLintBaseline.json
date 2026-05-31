@@ -231,12 +231,12 @@
   },
   {
     "file": "src/components/common/ui/CardTable.jsx",
-    "line": 235,
+    "line": 239,
     "text": "No Data"
   },
   {
     "file": "src/components/common/ui/CardTable.jsx",
-    "line": 523,
+    "line": 527,
     "text": "horizontal"
   },
   {
@@ -646,42 +646,42 @@
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 832,
+    "line": 829,
     "text": "new-api-worker"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 842,
+    "line": 839,
     "text": "例如：https://workername.yourdomain.workers.dev"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 849,
+    "line": 846,
     "text": "敏感信息不会发送到前端显示"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 1474,
+    "line": 1471,
     "text": "启用邮箱域名白名单"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 1488,
+    "line": 1485,
     "text": "启用邮箱别名限制"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 1561,
+    "line": 1558,
     "text": "敏感信息不会发送到前端显示"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 1772,
+    "line": 1769,
     "text": "LinuxDO Minimum Trust Level"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 1773,
+    "line": 1770,
     "text": "允许注册的最低信任等级"
   },
   {
@@ -701,47 +701,47 @@
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 685,
+    "line": 705,
     "text": "Doubao Coding Plan"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 2753,
+    "line": 2822,
     "text": "M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 3934,
+    "line": 4096,
     "text": "type-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4184,
+    "line": 4346,
     "text": "tight"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4564,
+    "line": 4726,
     "text": "Account ID"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4658,
+    "line": 4820,
     "text": "AZURE_OPENAI_ENDPOINT"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4856,
+    "line": 5018,
     "text": "models-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 5058,
+    "line": 5220,
     "text": "groups-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 5344,
+    "line": 5506,
     "text": "M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
   },
   {
@@ -1036,7 +1036,7 @@
   },
   {
     "file": "src/components/table/tokens/modals/EditTokenModal.jsx",
-    "line": 705,
+    "line": 703,
     "text": "token-model-limits-label"
   },
   {
@@ -1146,7 +1146,7 @@
   },
   {
     "file": "src/pages/Home/index.jsx",
-    "line": 474,
+    "line": 469,
     "text": "30+"
   },
   {

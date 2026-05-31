@@ -2973,7 +2973,9 @@ const EditChannelModal = (props) => {
                     <Form.Input
                       field='responses_compact_summary_fallback_models'
                       label={t('模拟摘要回退模型')}
-                      placeholder='gpt-5.4'
+                      placeholder={RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(
+                        ',',
+                      )}
                       disabled={
                         inputs.responses_compact_summary_model_fallback ===
                         false
