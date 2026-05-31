@@ -687,9 +687,9 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 | `cd web/default && bun run lint` | 通过 | `eslint .` 退出码 0 |
 | `git diff --check` | 通过 | 无空白错误 |
 | `cd web/default && bun run build` | 通过 | `rsbuild build` 退出码 0 |
-| `scripts/build-docker-local.sh new-api-local:dev` | 通过 | 预提交镜像 build-info: `commit=54342a7257528848f109c0d66b53d476710d9245-dirty`, `date=2026-05-31T05:12:33Z`；该 dirty 标记来自本批未提交 diff |
-| `docker compose -f deploy/compose/dev-isolated.yml --env-file /Volumes/Work/code/new-api/deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api` | 通过 | 重建 `new-api-dev-isolated-new-api-1`，未操作 3000 production |
-| `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info` | 通过 | 返回 `version=v1.1.0`, `commit=54342a7257528848f109c0d66b53d476710d9245-dirty`, `date=2026-05-31T05:12:33Z` |
+| `scripts/build-docker-local.sh new-api-local:dev` | 通过 | 预提交镜像 build-info: `commit=54342a7257528848f109c0d66b53d476710d9245-dirty`, `date=2026-05-31T05:12:33Z`；提交后已重建最终镜像，build-info: `commit=3775d927bbb0ef1d834282d67b6f7bb266da4723`, `date=2026-05-31T05:25:17Z` |
+| `docker compose -f deploy/compose/dev-isolated.yml --env-file /Volumes/Work/code/new-api/deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api` | 通过 | 使用最终镜像重建 `new-api-dev-isolated-new-api-1`，未操作 3000 production |
+| `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info` | 通过 | 返回 `version=v1.1.0`, `commit=3775d927bbb0ef1d834282d67b6f7bb266da4723`, `date=2026-05-31T05:25:17Z` |
 | `curl -fsS http://127.0.0.1:3001/api/status` | 通过 | 返回 `success:true` |
 
 CodeRabbit 复查闭环：
