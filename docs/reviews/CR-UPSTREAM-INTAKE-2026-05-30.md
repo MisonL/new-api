@@ -341,7 +341,11 @@ Batch 5 小修子批次执行记录：
 - 已手工吸纳 `146dd77b8`：API key 创建/编辑抽屉 footer 的保存按钮不再依赖跨 DOM `form='api-key-form'` 触发表单提交，改为 `type='button'` 并直接调用 `form.handleSubmit(onSubmit)`；表单内原生 submit 路径仍保留。
 - 跳过 `2b89989f6`：本地 `DropdownMenu` 仍基于 Radix，`onSelect` 是原生支持；上游 Base UI 兼容桥会引入不匹配抽象。
 - 跳过 `51b5cbe1b`：上游 diff 目标为不同形态的 `combobox-input.tsx`，本地当前该组件没有 `allowCustomValue`、`selectedOption`、`setSearchValue` 状态组合；同类 `combobox.tsx` 目前在打开弹窗时不会用已选值重置搜索。
-- 延后 `ad224ecf5`：涉及全局 axios config 类型、channel API action 默认跳过全局业务错误 toast、多个 channel dialog/action 错误处理路径，应作为 channel action 错误展示专题评估，不混入本小批次。
+- 已手工吸纳 `cb9270ed2`：重置密码确认页移除硬编码英文，新增 `auth.resetPasswordConfirm.*` 多语言键，覆盖 `en/fr/ja/ru/vi/zh`。
+- 已手工吸纳 `8e5e89bb5`：注册页 Turnstile 不再依赖邮箱验证码区域展示；提交注册前统一执行 Turnstile 校验，避免开启 Turnstile 但未开启邮箱验证时注册页无验证控件。
+- 已手工吸纳 `e79cee1e9`：默认前端表单提交失败后聚焦首个校验错误；按本项目当前 Radix Slot 版 `Form` 手工适配，没有整包切换到上游 Base UI 版本。
+- 已手工吸纳 `e13d67345`：修正 default 前端残留 classic 路由链接。io.net 部署跳转到 `/models/deployments?dFilter=...`；模型计价设置跳转按本项目现有 section registry 适配为 `/system-settings/models/ratio`，不是上游当前的 `/system-settings/billing/model-pricing`。
+- 已手工吸纳 `ad224ecf5`：渠道 action API 默认关闭全局业务错误 toast 和 HTTP 错误 toast，由 action/dialog/drawer 调用层显式展示一次错误；同时保留全局 401 auth reset，避免跳过全局 toast 后漏掉会话状态回收。
 
 Batch 5 小修验证记录：
 
@@ -349,6 +353,10 @@ Batch 5 小修验证记录：
 - `cd web/default && bun run lint`：通过。
 - `cd web/default && bun run build`：通过。
 - `git diff --check`：通过。
+- `cd web/default && bun run typecheck`：通过（吸纳 `cb9270ed2`、`8e5e89bb5`、`e79cee1e9`、`e13d67345`、`ad224ecf5` 后复跑）。
+- `cd web/default && bun run lint`：通过（吸纳 `cb9270ed2`、`8e5e89bb5`、`e79cee1e9`、`e13d67345`、`ad224ecf5` 后复跑）。
+- `cd web/default && bun run build`：通过（吸纳 `cb9270ed2`、`8e5e89bb5`、`e79cee1e9`、`e13d67345`、`ad224ecf5` 后复跑）。
+- `git diff --check`：通过（吸纳 `cb9270ed2`、`8e5e89bb5`、`e79cee1e9`、`e13d67345`、`ad224ecf5` 后复跑）。
 
 ### Batch 6：classic UI
 
@@ -439,6 +447,7 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 - `543cc64ea` 的 `NOTICE` / `THIRD-PARTY-LICENSES.md` 不能直接复制：上游文件包含 Electron、Base UI、Waffo、上游版本号等依赖快照，本项目当前仍是 Tauri、Radix、保留自有部署/桌面能力，直接复制会造成合规信息失真。
 - `5fa103fa5` 的 `.dockerignore` 例外规则只有在本地化 `THIRD-PARTY-LICENSES.md` 落地后才有意义；当前延后。
 - `428e3d91f` 中 README 的 `neko-api-key-tool` 到 `new-api-key-tool` 链接修正不适用本项目当前短 README；本项目 README 已改为独立定位和文档索引，不引用该旧链接。
+- 已手工吸纳 `63ead2bf7`：`.gitignore` 新增 `.playwright-mcp`，避免 Playwright MCP 本地运行产物进入工作区。
 - 后续可执行项：生成本项目自己的 `NOTICE` 和 `THIRD-PARTY-LICENSES.md`，来源必须以当前 `go.mod`、`web/default/package.json`、`web/classic/package.json`、`desktop/tauri-app/*` 为准；生成后再考虑 Dockerfile copy 和 `.dockerignore` 例外。
 
 ## 集成验证与并发覆盖记录
@@ -566,7 +575,7 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 | `8ae095c3b` | fix user create and delete handling (#4818) | 已手工吸纳独立小修，B4 auth/user 小修 |
 | `b397c58ba` | fix(auth): expose register_enabled in /api/status and gate sign-up link (#4871) | 已手工吸纳，B4 auth/user 小修 |
 | `fc08c133e` | fix(web/default): update pagination button labels in ModelCardGrid (#4675) | Batch 5，pricing UI 小修 |
-| `cb9270ed2` | fix(auth): localize reset password confirmation (#4769) | 单独复核，auth i18n 小修 |
+| `cb9270ed2` | fix(auth): localize reset password confirmation (#4769) | 已手工吸纳，auth i18n 小修 |
 | `8db32213e` | fix(web/default/wallet): make recharge preset selection visible in dark mode (#4897) | Batch 5，wallet UI 小修 |
 | `c78573ce0` | fix(web/default): api-info color dot shows wrong color due to semantic token mismatch (#4824) | Batch 5，theme/UI 小修 |
 | `032993ed4` | fix: check save result in handleSaveAll and add slate to validColors (#4823) | Batch 5，settings/theme 小修 |
@@ -580,8 +589,8 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 | `6f11d1987` | fix: normalize model pricing display drift (#4985) | Batch 2，定价展示复核 |
 | `006e80165` | fix: resolve model owned_by from active channels (#4416) | Batch 1，优先吸纳 |
 | `ae6a03364` | perf: optimize request metadata extraction and disabled field filtering (#5009) | Batch 1，谨慎吸纳 |
-| `e13d67345` | fix: update default frontend hardcoded route links (#5016) | Batch 5，UI 路由小修 |
-| `8e5e89bb5` | 修复 切换新版前端Turnstile 开启后注册页未显示验证的问题 (#5011) | Batch 5，auth UI 小修 |
+| `e13d67345` | fix: update default frontend hardcoded route links (#5016) | 已手工吸纳，按本项目路由适配 |
+| `8e5e89bb5` | 修复 切换新版前端Turnstile 开启后注册页未显示验证的问题 (#5011) | 已手工吸纳，auth UI 小修 |
 | `19f1821fc` | Feature Request: Waffo Pancake gateway full integration with subscription support and admin catalog binding flow (#4935) | Batch 4，Waffo 专题 |
 | `f2c7647ec` | fix: enforce Waffo subscription compliance and product ID update (#5038) | Batch 4，Waffo 专题 |
 | `b9bc6f0e2` | Revert "fix: correct usage logs filtering (#4883)" | 单独复核，和 `554defe4f`、`1d3203736` 成组判断 |
@@ -603,7 +612,7 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 | `3d850d38b` | refactor(channels): rebuild channel create/edit drawer with modular sections and improved form UX | Batch 5，channels UI 专题，不能整包覆盖 |
 | `336088264` | refactor(channels): rebuild channel editor UX with modular sections and Base UI multi-select | Batch 5，channels UI 专题，不能整包覆盖 |
 | `a64f26d1d` | feat(web/default): add Anthropic theme preset and configurable serif typography | Batch 5，theme 专题 |
-| `ad224ecf5` | fix: prevent duplicate channel action toasts (#5015) | 延后，channel action 错误展示专题 |
+| `ad224ecf5` | fix: prevent duplicate channel action toasts (#5015) | 已手工吸纳，channel action 错误展示专题 |
 | `bc8110ce3` | refactor(badge): restore status-badge sizes and classic color scheme | Batch 5，UI 小修 |
 | `101193498` | fix(theme): default theme font preset falls back to Sans instead of Serif | Batch 5，theme 小修 |
 | `6b6c9904a` | feat(subscription): support balance purchases | Batch 4，subscription 专题 |
@@ -619,8 +628,8 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 | `1d3203736` | fix: keep usage log filters exact unless wildcard is explicit (#5097) | Batch 1，优先吸纳 |
 | `74985fa87` | fix: keep token log filters exact | Batch 1，优先吸纳 |
 | `5b86ce0d7` | fix: optimize batch update process | Batch 1，优先吸纳前确认批量更新范围 |
-| `63ead2bf7` | chore(repo): ignore playwright mcp artifacts | Batch 8，仓库卫生小修 |
-| `e79cee1e9` | perf(form): focus first validation error on submit | Batch 5，表单体验小修 |
+| `63ead2bf7` | chore(repo): ignore playwright mcp artifacts | 已手工吸纳，仓库卫生小修 |
+| `e79cee1e9` | perf(form): focus first validation error on submit | 已手工吸纳，表单体验小修 |
 | `38bf2d8da` | feat(keys/cc-switch-dialog): 修复自定义cc-switch名称失焦后重置问题 (#5170) | Batch 5，keys UI 小修 |
 | `158802708` | feat: add subscription balance redemption toggle (#3071) | Batch 4，subscription 专题 |
 
