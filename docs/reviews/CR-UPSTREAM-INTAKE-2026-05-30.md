@@ -484,6 +484,14 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 - 随后共享镜像 tag 和共享容器被另一个 Codex 会话覆盖。当前复核 `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info` 返回 `06f7fa5322c1ef469259e40380a786a5468c856a-dirty`，已不再代表本 intake worktree。
 - 因此，3001 验证记录仅作为本轮历史通过证据；当前运行中的 3001 不能作为本 worktree 最新状态证明。为避免覆盖并发会话现场，本轮不再继续重建共享 3001。
 
+推送记录：
+
+- 本地推送前验证已通过：`go test ./controller ./model ./service`、`cd web/default && bun run lint`、`cd web/default && bun run build`、`cd web/default && bun run typecheck`、`git diff --check`。
+- `git status --short --branch` 显示工作区干净。
+- `git ls-remote --heads origin codex/upstream-intake-20260530` 和 `git push -u origin codex/upstream-intake-20260530` 均失败于 `LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443`。
+- `curl -I --connect-timeout 15 https://github.com/MisonL/new-api` 同样失败于 `LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443`。
+- SSH 直连 `git@github.com` 的 22 端口和 `ssh.github.com` 的 443 端口均返回 `Connection closed`。当前未完成项只剩远端网络恢复后的 push。
+
 ## 推荐执行顺序
 
 1. 保护当前 dirty worktree。
