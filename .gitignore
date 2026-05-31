@@ -30,6 +30,7 @@ backups/
 .worktrees/
 .cursor
 .antigravitycli/
+.playwright-mcp
 
 data/
 .gomodcache/
