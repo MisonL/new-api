@@ -825,7 +825,6 @@
     "留言": "Message",
     "最近生成": "Créés récemment",
     "写一句感谢回信，可选": "Écrire un message de remerciement facultatif",
-    "列出的模型将不会自动添加或移除-thinking/-nothinking 后缀": "Les modèles listés ici n'ajouteront ni ne retireront automatiquement le suffixe -thinking/-nothinking.",
     "列设置": "Colonnes",
     "创建": "Create",
     "创建令牌可选": "Selectable when creating tokens",
@@ -2531,7 +2530,6 @@
     "禁用后用户端不再展示，但历史订单不受影响。是否继续？": "Après désactivation, il ne sera plus affiché côté utilisateur, mais les commandes historiques ne sont pas affectées. Continuer ?",
     "禁用后的影响：": "Impact après la désactivation :",
     "禁用密钥失败": "Échec de la désactivation de la clé",
-    "禁用思考处理的模型列表": "Liste noire des modèles pour le traitement thinking",
     "禁用所有密钥失败": "Échec de la désactivation de toutes les clés",
     "禁用时间": "Heure de désactivation",
     "私有IP访问详细说明": "Avertissement de sécurité : l'activation de cette option autorise l'accès aux ressources du réseau interne (localhost, réseaux privés). N'activez cette option que si vous devez accéder à des services internes et que vous comprenez les implications en matière de sécurité.",
@@ -3717,7 +3715,9 @@
     "加载邀请记录失败": "Échec du chargement des invitations",
     "暂无邀请记录": "Aucune invitation",
     "再次点击可取消选择": "Cliquez à nouveau pour désélectionner",
-    "协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。": "La conversion de protocole envoie les requêtes dans un autre format d'interface. Actuellement, seule la conversion bidirectionnelle entre /v1/chat/completions et /v1/responses est prise en charge ; une regex de modèle vide correspond à tous les modèles, tandis qu'une portée de canal vide ne correspondra à rien."
+    "协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。": "La conversion de protocole envoie les requêtes dans un autre format d'interface. Actuellement, seule la conversion bidirectionnelle entre /v1/chat/completions et /v1/responses est prise en charge ; une regex de modèle vide correspond à tous les modèles, tandis qu'une portée de canal vide ne correspondra à rien.",
+    "列出的模型会跳过-thinking/-nothinking 后缀的自动适配": "Les modèles listés ici ignorent l'adaptation automatique des suffixes -thinking/-nothinking.",
+    "跳过思考后缀适配的模型列表": "Modèles ignorant l'adaptation des suffixes thinking"
   },
   "启用 Responses 流启动恢复": "Enable responses stream startup recovery",
   "仅在 /v1/responses 流式请求首包前生效，用于短时故障恢复。": "S'applique uniquement avant le premier payload des requêtes en streaming /v1/responses pour la récupération après une panne courte ; vous devez aussi l'activer sur chaque canal.",

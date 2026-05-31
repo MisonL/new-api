@@ -27,21 +27,45 @@ const buildPassHeadersTemplate = (headers) => ({
   ],
 });
 
+const CODEX_SESSION_ID_FALLBACK_OPERATION = {
+  mode: 'copy_header',
+  from: 'X-Client-Request-Id',
+  to: 'Session_id',
+  keep_origin: true,
+};
+
+const buildCodexHeaderPassthroughTemplate = (headers) => ({
+  operations: [
+    {
+      mode: 'pass_headers',
+      value: [...headers],
+      keep_origin: true,
+    },
+    { ...CODEX_SESSION_ID_FALLBACK_OPERATION },
+  ],
+});
+
 export const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'User-Agent',
   'Originator',
   'Session_id',
+  'Session-Id',
+  'Thread-Id',
   'X-Codex-Beta-Features',
   'X-Codex-Turn-Metadata',
   'X-Codex-Window-Id',
   'X-Client-Request-Id',
 ];
 
+export const CODEX_DESKTOP_HEADER_PASSTHROUGH_HEADERS = [
+  ...CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
+];
+
 export const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Claude-Code-Session-Id',
   'X-Stainless-Arch',
   'X-Stainless-Lang',
-  'X-Stainless-Os',
+  'X-Stainless-OS',
   'X-Stainless-Package-Version',
   'X-Stainless-Retry-Count',
   'X-Stainless-Runtime',
@@ -56,7 +80,7 @@ export const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
 export const QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Stainless-Arch',
   'X-Stainless-Lang',
-  'X-Stainless-Os',
+  'X-Stainless-OS',
   'X-Stainless-Package-Version',
   'X-Stainless-Retry-Count',
   'X-Stainless-Runtime',
@@ -66,7 +90,7 @@ export const QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
 export const DROID_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Stainless-Arch',
   'X-Stainless-Lang',
-  'X-Stainless-Os',
+  'X-Stainless-OS',
   'X-Stainless-Package-Version',
   'X-Stainless-Retry-Count',
   'X-Stainless-Runtime',
@@ -75,9 +99,11 @@ export const DROID_CLI_HEADER_PASSTHROUGH_HEADERS = [
 
 export const GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS = ['X-Goog-Api-Client'];
 
-export const CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
-  CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
-);
+export const CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE =
+  buildCodexHeaderPassthroughTemplate(CODEX_CLI_HEADER_PASSTHROUGH_HEADERS);
+
+export const CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE =
+  buildCodexHeaderPassthroughTemplate(CODEX_DESKTOP_HEADER_PASSTHROUGH_HEADERS);
 
 export const CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
   CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS,
@@ -108,9 +134,13 @@ const PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE = {
 };
 
 export const PARAM_OVERRIDE_TEMPLATES = {
+  codexCliHeaders: {
+    label: 'Codex CLI Header Passthrough',
+    payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
   codexHeaders: {
     label: 'Codex Desktop Header Passthrough',
-    payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+    payload: CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE,
   },
   codexWithoutImageTool: {
     label: 'Codex Desktop Compat: Remove Image Generation Tool',

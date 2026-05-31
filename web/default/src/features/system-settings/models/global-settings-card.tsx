@@ -188,7 +188,9 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
             name='global.thinking_model_blacklist'
             render={({ field }) => (
               <FormItem>
-                <FormLabel>{t('Disable thinking processing models')}</FormLabel>
+                <FormLabel>
+                  {t('Skip thinking suffix adaptation models')}
+                </FormLabel>
                 <FormControl>
                   <Textarea
                     rows={4}
@@ -199,7 +201,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                 </FormControl>
                 <FormDescription>
                   {t(
-                    'Models listed here will not automatically append or remove -thinking / -nothinking suffixes.'
+                    'Models listed here skip automatic -thinking / -nothinking suffix adaptation.'
                   )}
                 </FormDescription>
                 <div className='flex flex-wrap gap-2'>

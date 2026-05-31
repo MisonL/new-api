@@ -43,11 +43,11 @@ const browserProfiles = {
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
       'Sec-CH-UA':
-        '"Google Chrome";v="135", "Chromium";v="135", "Not.A/Brand";v="24"',
+        '"Google Chrome";v="148", "Chromium";v="148", "Not.A/Brand";v="24"',
       'Sec-CH-UA-Mobile': '?0',
       'Sec-CH-UA-Platform': '"macOS"',
       'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
     },
   },
 };
@@ -74,23 +74,23 @@ const buildAiCodingCliProfile = (
 const AI_CODING_CLI_VERSION_SOURCES = {
   'codex-cli': {
     packageName: '@openai/codex',
-    fallbackVersion: '0.130.0',
+    fallbackVersion: '0.134.0',
   },
   'claude-code': {
     packageName: '@anthropic-ai/claude-code',
-    fallbackVersion: '2.1.139',
+    fallbackVersion: '2.1.153',
   },
   'gemini-cli': {
     packageName: '@google/gemini-cli',
-    fallbackVersion: '0.41.2',
+    fallbackVersion: '0.44.0',
   },
   'qwen-code': {
     packageName: '@qwen-code/qwen-code',
-    fallbackVersion: '0.15.10',
+    fallbackVersion: '0.16.2',
   },
   droid: {
     packageName: 'droid',
-    fallbackVersion: '0.123.0',
+    fallbackVersion: '0.135.0',
   },
 };
 
@@ -130,8 +130,8 @@ const aiCodingCliProfiles = {
     passthroughRequired: false,
     versionSource: AI_CODING_CLI_VERSION_SOURCES['codex-cli'],
     description:
-      '固定请求头静态快照来自 Codex CLI 0.130.0 交互式 TUI 请求头生成逻辑；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。',
-    headers: buildAiCodingCliHeaders('codex-cli', '0.130.0', {
+      '固定请求头静态快照来自 Codex CLI 0.134.0 交互式 TUI 请求头生成逻辑；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。',
+    headers: buildAiCodingCliHeaders('codex-cli', '0.134.0', {
       Originator: 'codex-tui',
     }),
   },
@@ -140,41 +140,42 @@ const aiCodingCliProfiles = {
     'Codex Desktop',
     {
       'User-Agent':
-        'Codex Desktop/0.131.0-alpha.9 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.513.31313)',
+        'Codex Desktop/0.133.0-alpha.1 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.519.41501)',
+      Originator: 'Codex Desktop',
     },
-    '固定请求头静态快照来自 Codex Desktop 0.131.0-alpha.9 真实请求；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。',
+    '固定请求头静态快照来自 Codex Desktop App 0.133.0-alpha.1 真实请求；此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。',
     null,
     false,
   ),
   'claude-code': buildAiCodingCliProfile(
     'claude-code',
     'Claude Code',
-    buildAiCodingCliHeaders('claude-code', '2.1.139'),
-    '固定请求头静态快照来自本机实抓 Claude Code 2.1.139 /v1/messages?beta=true 请求；此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。',
+    buildAiCodingCliHeaders('claude-code', '2.1.153'),
+    '固定请求头静态快照按 Claude Code 2.1.153 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES['claude-code'],
     false,
   ),
   'gemini-cli': buildAiCodingCliProfile(
     'gemini-cli',
     'Gemini CLI',
-    buildAiCodingCliHeaders('gemini-cli', '0.41.2'),
-    '固定请求头静态快照来自本机实抓 Gemini CLI 0.41.2 的 streamGenerateContent 请求；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。',
+    buildAiCodingCliHeaders('gemini-cli', '0.44.0'),
+    '固定请求头静态快照按 Gemini CLI 0.44.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES['gemini-cli'],
     false,
   ),
   'qwen-code': buildAiCodingCliProfile(
     'qwen-code',
     'Qwen Code',
-    buildAiCodingCliHeaders('qwen-code', '0.15.10'),
-    '固定请求头静态快照来自本机 Qwen Code 0.15.10 的 OpenAI-compatible /chat/completions 请求；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。',
+    buildAiCodingCliHeaders('qwen-code', '0.16.2'),
+    '固定请求头静态快照按 Qwen Code 0.16.2 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES['qwen-code'],
     false,
   ),
   droid: buildAiCodingCliProfile(
     'droid',
     'Droid CLI',
-    buildAiCodingCliHeaders('droid', '0.123.0'),
-    '固定请求头静态快照来自本机实抓 Droid 0.123.0 的 OpenAI-compatible /v1/chat/completions 请求；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。',
+    buildAiCodingCliHeaders('droid', '0.135.0'),
+    '固定请求头静态快照按 Droid 0.135.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES.droid,
     false,
   ),
@@ -191,7 +192,7 @@ const apiSdkProfiles = {
       Accept: '*/*',
       'Cache-Control': 'no-cache',
       'Postman-Token': '00000000-0000-0000-0000-000000000000',
-      'User-Agent': 'PostmanRuntime/7.43.0',
+      'User-Agent': 'PostmanRuntime/7.54.0',
     },
   },
 };

@@ -694,10 +694,11 @@ func isResponsesCompactNativeCompatibilityError(info *relaycommon.RelayInfo, err
 	normalized := normalizeResponsesCompactCompatibilityMessage(message)
 	compactPathMentioned := strings.Contains(message, "responses/compact") || strings.Contains(normalized, "responses compact")
 	payloadCompatibility := isResponsesCompactNativePayloadCompatibilityError(normalized)
+	genericEndpointStatus := isGenericResponsesCompactEndpointStatus(err.StatusCode)
 	if payloadCompatibility && !responsesCompactRequestHasContextPayload(info) {
 		return false
 	}
-	if !compactPathMentioned && !payloadCompatibility {
+	if !compactPathMentioned && !payloadCompatibility && !genericEndpointStatus {
 		return false
 	}
 	if isModelLookupError(normalized) {
@@ -707,6 +708,9 @@ func isResponsesCompactNativeCompatibilityError(info *relaycommon.RelayInfo, err
 		return false
 	}
 	if payloadCompatibility {
+		return true
+	}
+	if genericEndpointStatus {
 		return true
 	}
 	for _, indicator := range []string{
@@ -730,6 +734,15 @@ func isResponsesCompactNativeCompatibilityError(info *relaycommon.RelayInfo, err
 		}
 	}
 	return false
+}
+
+func isGenericResponsesCompactEndpointStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return true
+	default:
+		return false
+	}
 }
 
 func responsesCompactRequestHasContextPayload(info *relaycommon.RelayInfo) bool {

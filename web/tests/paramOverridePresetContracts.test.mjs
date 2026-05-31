@@ -79,10 +79,19 @@ function extractOperationsObjectCounts(source) {
     const openIndex = source.indexOf("[", match.index);
     const closeIndex = findMatchingBracket(source, openIndex);
     if (closeIndex < 0) continue;
-    counts.push(countTopLevelObjects(source.slice(openIndex + 1, closeIndex)));
+    const body = source.slice(openIndex + 1, closeIndex);
+    counts.push({ count: countTopLevelObjects(body), body });
     pattern.lastIndex = closeIndex + 1;
   }
   return counts;
+}
+
+function isCodexSessionFallbackOperations(entry) {
+  return (
+    entry.count === 2 &&
+    entry.body.includes("pass_headers") &&
+    entry.body.includes("CODEX_SESSION_ID_FALLBACK_OPERATION")
+  );
 }
 
 const presetSources = [
@@ -135,11 +144,14 @@ test("advanced preset operation arrays contain one top-level rule", () => {
     const counts = extractOperationsObjectCounts(source);
     assert.ok(counts.length > 0, sourcePath);
     assert.ok(
-      counts.some((count) => count === 1),
+      counts.some((entry) => entry.count === 1),
       `${sourcePath} does not contain a literal single-operation preset`,
     );
-    for (const count of counts) {
-      assert.ok(count <= 1, `${sourcePath} contains ${count} operations`);
+    for (const entry of counts) {
+      assert.ok(
+        entry.count <= 1 || isCodexSessionFallbackOperations(entry),
+        `${sourcePath} contains ${entry.count} operations`,
+      );
     }
   }
 });

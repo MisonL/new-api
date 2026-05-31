@@ -141,16 +141,18 @@ func TestGenerateTextOtherInfoIncludesRequestHeaderPolicyAudit(t *testing.T) {
 
 func TestCollectRuntimeHeaderAuditEntriesRedactsNonVisibleHeaderValues(t *testing.T) {
 	entries := collectRuntimeHeaderAuditEntries(map[string]any{
-		"Api-Key":           "azure-secret",
-		"Originator":        "codex-tui",
-		"X-Codex-Window-Id": "window-123",
-		"X-Test":            "test-value",
-		"X-Upstream-Auth":   "Bearer copied-secret",
+		"Api-Key":               "azure-secret",
+		"Originator":            "codex-tui",
+		"X-Codex-Turn-Metadata": `{"session_id":"session-123","workspaces":{"/repo":{"associated_remote_urls":{"origin":"https://example.com/repo.git"}}}}`,
+		"X-Codex-Window-Id":     "window-123",
+		"X-Test":                "test-value",
+		"X-Upstream-Auth":       "Bearer copied-secret",
 	})
 
 	require.ElementsMatch(t, []AppliedHeaderAuditEntry{
 		{Key: "Api-Key", Value: AppliedHeaderAuditRedactedValue},
 		{Key: "Originator", Value: "codex-tui"},
+		{Key: "X-Codex-Turn-Metadata", Value: AppliedHeaderAuditRedactedValue},
 		{Key: "X-Codex-Window-Id", Value: "window-123"},
 		{Key: "X-Test", Value: AppliedHeaderAuditRedactedValue},
 		{Key: "X-Upstream-Auth", Value: AppliedHeaderAuditRedactedValue},

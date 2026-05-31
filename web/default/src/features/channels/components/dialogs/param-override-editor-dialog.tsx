@@ -282,17 +282,23 @@ const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'User-Agent',
   'Originator',
   'Session_id',
+  'Session-Id',
+  'Thread-Id',
   'X-Codex-Beta-Features',
   'X-Codex-Turn-Metadata',
   'X-Codex-Window-Id',
   'X-Client-Request-Id',
 ]
 
+const CODEX_DESKTOP_HEADER_PASSTHROUGH_HEADERS = [
+  ...CODEX_CLI_HEADER_PASSTHROUGH_HEADERS,
+]
+
 const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Claude-Code-Session-Id',
   'X-Stainless-Arch',
   'X-Stainless-Lang',
-  'X-Stainless-Os',
+  'X-Stainless-OS',
   'X-Stainless-Package-Version',
   'X-Stainless-Retry-Count',
   'X-Stainless-Runtime',
@@ -307,7 +313,7 @@ const CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS = [
 const QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Stainless-Arch',
   'X-Stainless-Lang',
-  'X-Stainless-Os',
+  'X-Stainless-OS',
   'X-Stainless-Package-Version',
   'X-Stainless-Retry-Count',
   'X-Stainless-Runtime',
@@ -317,7 +323,7 @@ const QWEN_CODE_CLI_HEADER_PASSTHROUGH_HEADERS = [
 const DROID_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'X-Stainless-Arch',
   'X-Stainless-Lang',
-  'X-Stainless-Os',
+  'X-Stainless-OS',
   'X-Stainless-Package-Version',
   'X-Stainless-Retry-Count',
   'X-Stainless-Runtime',
@@ -332,9 +338,24 @@ const buildPassHeadersTemplate = (headers: string[]) => ({
   ],
 })
 
-const CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
-  CODEX_CLI_HEADER_PASSTHROUGH_HEADERS
-)
+const CODEX_SESSION_ID_FALLBACK_OPERATION = {
+  mode: 'copy_header',
+  from: 'X-Client-Request-Id',
+  to: 'Session_id',
+  keep_origin: true,
+}
+
+const buildCodexHeaderPassthroughTemplate = (headers: string[]) => ({
+  operations: [
+    { mode: 'pass_headers', value: [...headers], keep_origin: true },
+    { ...CODEX_SESSION_ID_FALLBACK_OPERATION },
+  ],
+})
+
+const CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE =
+  buildCodexHeaderPassthroughTemplate(CODEX_CLI_HEADER_PASSTHROUGH_HEADERS)
+const CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE =
+  buildCodexHeaderPassthroughTemplate(CODEX_DESKTOP_HEADER_PASSTHROUGH_HEADERS)
 const CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
   CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS
 )
@@ -437,6 +458,11 @@ const TEMPLATE_PRESET_CONFIG: Record<string, TemplatePresetConfig> = {
     label: 'Codex CLI Header Passthrough',
     kind: 'operations',
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  codex_desktop_headers_passthrough: {
+    label: 'Codex Desktop Header Passthrough',
+    kind: 'operations',
+    payload: CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE,
   },
   gemini_cli_headers_passthrough: {
     label: 'Gemini CLI Header Passthrough',

@@ -104,15 +104,15 @@
 | Profile ID        | 名称            | 固定请求头快照                                               | 是否自动补 `pass_headers` |
 | ----------------- | --------------- | ------------------------------------------------------------ | ------------------------- |
 | `chrome-macos`    | Chrome macOS    | 浏览器常见导航请求头                                         | 否                        |
-| `codex-cli`       | Codex CLI       | `User-Agent: codex-tui/0.130.0 ...`、`Originator: codex-tui` | 否                        |
-| `codex-desktop`   | Codex Desktop   | `User-Agent: Codex Desktop/0.131.0-alpha.9 ...`              | 否                        |
-| `claude-code`     | Claude Code     | `User-Agent: claude-cli/2.1.139 (external, sdk-cli)`         | 否                        |
-| `gemini-cli`      | Gemini CLI      | `User-Agent: GeminiCLI/0.41.2/gemini-3.1-pro-preview ...`    | 否                        |
-| `qwen-code`       | Qwen Code       | `User-Agent: QwenCode/0.15.10 (darwin; x64)`                 | 否                        |
-| `droid`           | Droid CLI       | `User-Agent: factory-cli/0.123.0`                            | 否                        |
+| `codex-cli`       | Codex CLI       | `User-Agent: codex-tui/0.134.0 ...`、`Originator: codex-tui` | 否                        |
+| `codex-desktop`   | Codex Desktop   | `User-Agent: Codex Desktop/0.133.0-alpha.1 ...`、`Originator: Codex Desktop` | 否        |
+| `claude-code`     | Claude Code     | `User-Agent: claude-cli/2.1.153 (external, sdk-cli)`         | 否                        |
+| `gemini-cli`      | Gemini CLI      | `User-Agent: GeminiCLI/0.44.0/gemini-3.1-pro-preview ...`    | 否                        |
+| `qwen-code`       | Qwen Code       | `User-Agent: QwenCode/0.16.2 (darwin; x64)`                  | 否                        |
+| `droid`           | Droid CLI       | `User-Agent: factory-cli/0.135.0`                            | 否                        |
 | `postman-runtime` | Postman Runtime | Postman Runtime 调试请求头                                   | 否                        |
 
-`codex-cli` 的固定快照代表交互式 TUI 场景。`codex-desktop` 的固定快照代表 Codex Desktop 场景。`codex exec` 的 non-interactive 请求会使用 `codex_exec`，不能作为 `Codex CLI` 内置 Profile 模板。
+`codex-cli` 的固定快照代表交互式 TUI 场景。`codex-desktop` 的固定快照代表 Codex App / Codex Desktop 产品身份，两者不能互相替代。`codex exec` 的 non-interactive 请求会使用 `codex_exec`，不能作为 `Codex CLI` 内置 Profile 模板。
 
 ## 请求头模板与透传规则
 
@@ -147,19 +147,23 @@
 
 `pass_headers` 不生成固定请求头，只从当前客户端请求里读取同名请求头并写入上游请求。它用于保留 Codex CLI、Codex Desktop、Claude Code、Gemini CLI 等真实客户端携带的动态元数据。
 
-Codex CLI / Codex Desktop 透传模板当前包含：
+Codex CLI 与 Codex Desktop 透传模板当前包含同一组动态头：
 
 ```json
 [
   "User-Agent",
   "Originator",
   "Session_id",
+  "Session-Id",
+  "Thread-Id",
   "X-Codex-Beta-Features",
   "X-Codex-Turn-Metadata",
   "X-Codex-Window-Id",
   "X-Client-Request-Id"
 ]
 ```
+
+Codex CLI 与 Codex Desktop 透传模板还会追加一条 `copy_header` 规则：当上游请求尚未存在 `Session_id`，且客户端请求带有 `X-Client-Request-Id` 时，将 `X-Client-Request-Id` 复制为 `Session_id`。这用于兼容部分上游对稳定会话头更敏感的缓存策略；如果客户端已经带有真实 `Session_id`，模板会保留原值。新版 Codex 客户端同时会发送 `Session-Id` 与 `Thread-Id`，模板会按原始名称透传。
 
 Claude CLI 透传模板当前包含：
 
@@ -168,7 +172,7 @@ Claude CLI 透传模板当前包含：
   "X-Claude-Code-Session-Id",
   "X-Stainless-Arch",
   "X-Stainless-Lang",
-  "X-Stainless-Os",
+  "X-Stainless-OS",
   "X-Stainless-Package-Version",
   "X-Stainless-Retry-Count",
   "X-Stainless-Runtime",
@@ -193,7 +197,7 @@ Qwen Code 透传模板当前包含：
 [
   "X-Stainless-Arch",
   "X-Stainless-Lang",
-  "X-Stainless-Os",
+  "X-Stainless-OS",
   "X-Stainless-Package-Version",
   "X-Stainless-Retry-Count",
   "X-Stainless-Runtime",
@@ -207,7 +211,7 @@ Droid CLI 透传模板当前包含：
 [
   "X-Stainless-Arch",
   "X-Stainless-Lang",
-  "X-Stainless-Os",
+  "X-Stainless-OS",
   "X-Stainless-Package-Version",
   "X-Stainless-Retry-Count",
   "X-Stainless-Runtime",
@@ -218,6 +222,8 @@ Droid CLI 透传模板当前包含：
 OpenCode 当前不作为内置 `Header Profile` 提供。本机 live capture 中，模型 upstream 请求头来自 AI SDK provider 运行时，而不是 OpenCode 自身固定 UA；不要把 OpenCode CLI 默认参数当作上游请求头模板。
 
 如果客户端原始请求里没有这些头，`pass_headers` 不会伪造值；这类缺失应通过真实客户端调用链路修复，而不是用固定 UA 模板替代。
+
+请求日志只应依赖 `applied_header_keys` 判断是否透传了 `X-Codex-Turn-Metadata`。该头包含会话与工作区元数据，日志审计会保留 key 但不记录完整值。
 
 ## 模型更新检查相关字段
 

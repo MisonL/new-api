@@ -816,7 +816,6 @@
     "留言": "Lời nhắn",
     "最近生成": "Đã tạo gần đây",
     "写一句感谢回信，可选": "Viết lời cảm ơn tùy chọn",
-    "列出的模型将不会自动添加或移除-thinking/-nothinking 后缀": "Các mô hình được liệt kê sẽ không tự động thêm hoặc xóa hậu tố -thinking/-nothinking.",
     "列设置": "Cài đặt cột",
     "创建": "Create",
     "创建令牌可选": "Selectable when creating tokens",
@@ -2749,7 +2748,6 @@
     "禁用后用户端不再展示，但历史订单不受影响。是否继续？": "Sau khi tắt, gói sẽ không hiển thị cho người dùng nhưng lịch sử đơn hàng không bị ảnh hưởng. Tiếp tục?",
     "禁用后的影响：": "Tác động sau khi vô hiệu hóa:",
     "禁用密钥失败": "Vô hiệu hóa khóa thất bại",
-    "禁用思考处理的模型列表": "Danh sách mô hình bỏ qua xử lý tư duy",
     "禁用成功": "Vô hiệu hóa thành công",
     "禁用所有密钥": "Vô hiệu hóa tất cả các khóa",
     "禁用所有密钥失败": "Vô hiệu hóa tất cả các khóa thất bại",
@@ -4245,7 +4243,9 @@
     "加载邀请记录失败": "Không tải được lịch sử lời mời",
     "暂无邀请记录": "Chưa có lịch sử lời mời",
     "再次点击可取消选择": "Bấm lại để bỏ chọn",
-    "协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。": "Chuyển đổi giao thức sẽ gửi tiếp yêu cầu bằng định dạng giao diện khác. Hiện chỉ hỗ trợ chuyển đổi hai chiều giữa /v1/chat/completions và /v1/responses; regex mô hình trống sẽ khớp tất cả mô hình, còn phạm vi kênh trống sẽ không khớp."
+    "协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。": "Chuyển đổi giao thức sẽ gửi tiếp yêu cầu bằng định dạng giao diện khác. Hiện chỉ hỗ trợ chuyển đổi hai chiều giữa /v1/chat/completions và /v1/responses; regex mô hình trống sẽ khớp tất cả mô hình, còn phạm vi kênh trống sẽ không khớp.",
+    "列出的模型会跳过-thinking/-nothinking 后缀的自动适配": "Các mô hình được liệt kê sẽ bỏ qua thích ứng tự động hậu tố -thinking/-nothinking.",
+    "跳过思考后缀适配的模型列表": "Danh sách mô hình bỏ qua thích ứng hậu tố thinking"
   },
   "启用 Responses 流启动恢复": "Enable responses stream startup recovery",
   "仅在 /v1/responses 流式请求首包前生效，用于短时故障恢复。": "Chỉ áp dụng trước payload đầu tiên của các yêu cầu stream /v1/responses để phục hồi khi sự cố ngắn hạn; đồng thời bạn phải bật nó riêng trên từng kênh.",

@@ -39,6 +39,7 @@ import { copy, showError, showSuccess, verifyJSON } from '../../../../helpers';
 import {
   CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE,
   DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   PARAM_OVERRIDE_TEMPLATES,
@@ -330,7 +331,7 @@ const OPENAI_SDK_HEADER_PASSTHROUGH_TEMPLATE = {
         'OpenAI-Project',
         'X-Stainless-Arch',
         'X-Stainless-Lang',
-        'X-Stainless-Os',
+        'X-Stainless-OS',
         'X-Stainless-Package-Version',
         'X-Stainless-Retry-Count',
         'X-Stainless-Runtime',
@@ -502,9 +503,18 @@ const TEMPLATE_PRESET_CONFIG = {
   codex_cli_headers_passthrough: {
     group: 'scenario',
     label: 'Codex CLI 真实请求头透传',
-    description: '透传 Codex 会话、窗口、turn metadata 和客户端请求 ID。',
+    description:
+      '透传 Codex 会话、窗口、turn metadata 和客户端请求 ID；缺少 Session_id 时用 X-Client-Request-Id 补齐。',
     kind: 'operations',
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  codex_desktop_headers_passthrough: {
+    group: 'scenario',
+    label: 'Codex Desktop 真实请求头透传',
+    description:
+      '透传 Codex Desktop 会话、窗口、turn metadata 和客户端请求 ID；缺少 Session_id 时用 X-Client-Request-Id 补齐。',
+    kind: 'operations',
+    payload: CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE,
   },
   gemini_cli_headers_passthrough: {
     group: 'scenario',
@@ -546,6 +556,7 @@ const TEMPLATE_PRESET_CONFIG = {
 
 const QUICK_TEMPLATE_PRESETS = [
   'codex_cli_headers_passthrough',
+  'codex_desktop_headers_passthrough',
   'claude_cli_headers_passthrough',
   'gemini_cli_headers_passthrough',
   'aws_bedrock_anthropic_beta_override',

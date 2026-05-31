@@ -916,7 +916,6 @@
     "留言": "Message",
     "最近生成": "Recently created",
     "写一句感谢回信，可选": "Write an optional thank-you reply",
-    "列出的模型将不会自动添加或移除-thinking/-nothinking 后缀": "Models in this list will not automatically add or remove the -thinking/-nothinking suffix.",
     "列设置": "Column settings",
     "创建": "Create",
     "创建令牌默认选择auto分组，初始令牌也将设为auto（否则留空，为用户默认分组）": "Create token with auto group by default, initial token will also be set to auto (otherwise leave blank for user default group)",
@@ -2481,7 +2480,6 @@
     "禁用后用户端不再展示，但历史订单不受影响。是否继续？": "After disabling, it will no longer be shown to users, but historical orders are not affected. Continue?",
     "禁用后的影响：": "Impact after disabling:",
     "禁用密钥失败": "Failed to disable key",
-    "禁用思考处理的模型列表": "Models skipping thinking handling",
     "禁用所有密钥失败": "Failed to disable all keys",
     "禁用时间": "Disable time",
     "私有IP访问详细说明": "Security Warning: Enabling this allows access to internal network resources (localhost, private networks). Only enable if you need to access internal services and understand the security implications.",
@@ -3821,12 +3819,16 @@
     "Gemini CLI Header Passthrough": "Gemini CLI Header Passthrough",
     "Qwen Code Header Passthrough": "Qwen Code Header Passthrough",
     "固定客户端标识；默认不自动补透传，严格复刻上游链路时再按需补 pass_headers": "Static client identity. By default it does not add passthrough automatically. Add pass_headers only when you need to reproduce the upstream request path strictly.",
-    "固定请求头静态快照来自 Codex CLI 0.130.0 交互式 TUI 请求头生成逻辑；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。": "Static headers come from the Codex CLI 0.130.0 interactive TUI header generation logic. This template only fixes client identity. Session, window, and turn metadata dynamic headers must be enabled explicitly with the Codex CLI header passthrough template in Advanced Parameter Override.",
-    "固定请求头静态快照来自本机实抓 Claude Code 2.1.139 /v1/messages?beta=true 请求；此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。": "Static headers come from a local capture of Claude Code 2.1.139 /v1/messages?beta=true. This template only fixes client identity. Dynamic headers such as X-Claude-Code-Session-Id, Anthropic-Version, Anthropic-Beta, and X-Stainless-* must be enabled explicitly with the Claude CLI header passthrough template in Advanced Parameter Override.",
-    "固定请求头静态快照来自本机实抓 Gemini CLI 0.41.2 的 streamGenerateContent 请求；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。": "Static headers come from a local capture of Gemini CLI 0.41.2 streamGenerateContent. This template only fixes client identity. Dynamic headers such as x-goog-api-client must be enabled explicitly with the Gemini CLI header passthrough template in Advanced Parameter Override.",
-    "固定请求头静态快照来自本机 Qwen Code 0.15.10 的 OpenAI-compatible /chat/completions 请求；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。": "Static headers come from local Qwen Code 0.15.10 OpenAI-compatible /chat/completions requests. This template only fixes client identity. x-stainless-* dynamic headers must be enabled explicitly with the Qwen Code header passthrough template in Advanced Parameter Override.",
-    "固定请求头静态快照来自本机实抓 Droid 0.123.0 的 OpenAI-compatible /v1/chat/completions 请求；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。": "Static headers come from a local capture of Droid 0.123.0 OpenAI-compatible /v1/chat/completions. This template only fixes client identity. X-Stainless-* dynamic headers must be enabled explicitly with the Droid CLI header passthrough template in Advanced Parameter Override.",
     "再次点击可取消选择": "Click again to deselect",
-    "协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。": "Protocol conversion sends requests onward using another endpoint format. Currently only bidirectional conversion between /v1/chat/completions and /v1/responses is supported. Empty model regex matches all models; empty channel scope will not match."
+    "协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。": "Protocol conversion sends requests onward using another endpoint format. Currently only bidirectional conversion between /v1/chat/completions and /v1/responses is supported. Empty model regex matches all models; empty channel scope will not match.",
+    "Codex CLI Header Passthrough": "Codex CLI Header Passthrough",
+    "列出的模型会跳过-thinking/-nothinking 后缀的自动适配": "Models in this list skip automatic -thinking/-nothinking suffix adaptation.",
+    "固定请求头静态快照按 Claude Code 2.1.153 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。": "Static headers use the public latest Claude Code 2.1.153 version with the existing client UA format. This template only fixes client identity. Dynamic headers such as X-Claude-Code-Session-Id, Anthropic-Version, Anthropic-Beta, and X-Stainless-* must be enabled explicitly with the Claude CLI header passthrough template in Advanced Parameter Override.",
+    "固定请求头静态快照按 Droid 0.135.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。": "Static headers use the public latest Droid 0.135.0 version with the existing client UA format. This template only fixes client identity. X-Stainless-* dynamic headers must be enabled explicitly with the Droid CLI header passthrough template in Advanced Parameter Override.",
+    "固定请求头静态快照按 Gemini CLI 0.44.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。": "Static headers use the public latest Gemini CLI 0.44.0 version with the existing client UA format. This template only fixes client identity. Dynamic headers such as x-goog-api-client must be enabled explicitly with the Gemini CLI header passthrough template in Advanced Parameter Override.",
+    "固定请求头静态快照按 Qwen Code 0.16.2 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。": "Static headers use the public latest Qwen Code 0.16.2 version with the existing client UA format. This template only fixes client identity. x-stainless-* dynamic headers must be enabled explicitly with the Qwen Code header passthrough template in Advanced Parameter Override.",
+    "固定请求头静态快照来自 Codex CLI 0.134.0 交互式 TUI 请求头生成逻辑；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。": "Static headers come from the Codex CLI 0.134.0 interactive TUI header generation logic. This template only fixes client identity. Session, window, and turn metadata dynamic headers must be enabled explicitly with the Codex CLI header passthrough template in Advanced Parameter Override.",
+    "固定请求头静态快照来自 Codex Desktop App 0.133.0-alpha.1 真实请求；此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。": "Static headers come from a real Codex Desktop App 0.133.0-alpha.1 request. This template only fixes the Codex App client identity and must not be mixed with codex-tui. Session, window, and turn metadata dynamic headers must be enabled explicitly with the Codex Desktop header passthrough template in Advanced Parameter Override.",
+    "跳过思考后缀适配的模型列表": "Models skipping thinking suffix adaptation"
   }
 }

@@ -39,17 +39,21 @@ var CodexCliPassThroughHeaders = []string{
 	"User-Agent",
 	"Originator",
 	"Session_id",
+	"Session-Id",
+	"Thread-Id",
 	"X-Codex-Beta-Features",
 	"X-Codex-Turn-Metadata",
 	"X-Codex-Window-Id",
 	"X-Client-Request-Id",
 }
 
+var CodexDesktopPassThroughHeaders = append([]string(nil), CodexCliPassThroughHeaders...)
+
 var ClaudeCliPassThroughHeaders = []string{
 	"X-Claude-Code-Session-Id",
 	"X-Stainless-Arch",
 	"X-Stainless-Lang",
-	"X-Stainless-Os",
+	"X-Stainless-OS",
 	"X-Stainless-Package-Version",
 	"X-Stainless-Retry-Count",
 	"X-Stainless-Runtime",
@@ -64,7 +68,7 @@ var ClaudeCliPassThroughHeaders = []string{
 var QwenCodeCliPassThroughHeaders = []string{
 	"X-Stainless-Arch",
 	"X-Stainless-Lang",
-	"X-Stainless-Os",
+	"X-Stainless-OS",
 	"X-Stainless-Package-Version",
 	"X-Stainless-Retry-Count",
 	"X-Stainless-Runtime",
@@ -74,7 +78,7 @@ var QwenCodeCliPassThroughHeaders = []string{
 var DroidCliPassThroughHeaders = []string{
 	"X-Stainless-Arch",
 	"X-Stainless-Lang",
-	"X-Stainless-Os",
+	"X-Stainless-OS",
 	"X-Stainless-Package-Version",
 	"X-Stainless-Retry-Count",
 	"X-Stainless-Runtime",
@@ -86,11 +90,12 @@ var GeminiCliPassThroughHeaders = []string{
 }
 
 var HeaderProfilePassThroughHeaders = map[string][]string{
-	"codex-cli":   CodexCliPassThroughHeaders,
-	"claude-code": ClaudeCliPassThroughHeaders,
-	"qwen-code":   QwenCodeCliPassThroughHeaders,
-	"gemini-cli":  GeminiCliPassThroughHeaders,
-	"droid":       DroidCliPassThroughHeaders,
+	"codex-cli":     CodexCliPassThroughHeaders,
+	"codex-desktop": CodexDesktopPassThroughHeaders,
+	"claude-code":   ClaudeCliPassThroughHeaders,
+	"qwen-code":     QwenCodeCliPassThroughHeaders,
+	"gemini-cli":    GeminiCliPassThroughHeaders,
+	"droid":         DroidCliPassThroughHeaders,
 }
 
 func buildPassHeaderTemplate(headers []string) map[string]interface{} {
@@ -101,6 +106,26 @@ func buildPassHeaderTemplate(headers []string) map[string]interface{} {
 			{
 				"mode":        "pass_headers",
 				"value":       clonedHeaders,
+				"keep_origin": true,
+			},
+		},
+	}
+}
+
+func BuildCodexHeaderPassthroughTemplate(headers []string) map[string]interface{} {
+	clonedHeaders := make([]string, 0, len(headers))
+	clonedHeaders = append(clonedHeaders, headers...)
+	return map[string]interface{}{
+		"operations": []map[string]interface{}{
+			{
+				"mode":        "pass_headers",
+				"value":       clonedHeaders,
+				"keep_origin": true,
+			},
+			{
+				"mode":        "copy_header",
+				"from":        "X-Client-Request-Id",
+				"to":          "Session_id",
 				"keep_origin": true,
 			},
 		},

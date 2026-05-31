@@ -88,7 +88,11 @@ const PageLayout = () => {
     location.pathname.startsWith('/console/chat');
   const useContentViewportLock =
     !isMobile && (useHomeViewportLock || isViewportLockedConsoleRoute);
-  const showSider = isConsoleRoute && (!isMobile || drawerOpen);
+  const hasStoredUser = Boolean(
+    userState?.user || localStorage.getItem('user'),
+  );
+  const showSider =
+    isConsoleRoute && hasStoredUser && (!isMobile || drawerOpen);
   const preferredLang = useMemo(() => {
     if (userState?.user?.setting) {
       try {

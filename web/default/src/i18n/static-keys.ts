@@ -186,6 +186,7 @@ export const STATIC_I18N_KEYS = [
   'Append Template',
   'AWS Bedrock Claude Beta Header',
   'AWS Bedrock Remove Input Examples',
+  'Codex CLI Header Passthrough',
   'Codex Desktop Header Passthrough',
   'Codex Desktop Compat: Remove Image Generation Tool',
   'Claude Code Header Passthrough',

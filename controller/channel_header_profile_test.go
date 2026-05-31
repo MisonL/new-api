@@ -194,7 +194,7 @@ func TestUpdateChannelPersistsHeaderProfileStrategy(t *testing.T) {
 func TestUpdateChannelAllowsBuiltinHeaderProfileWithPassthrough(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
-	paramOverride := `{"operations":[{"mode":"pass_headers","value":["Originator","Session_id","User-Agent","X-Codex-Beta-Features","X-Codex-Turn-Metadata","X-Codex-Window-Id","X-Client-Request-Id"],"keep_origin":true}]}`
+	paramOverride := `{"operations":[{"mode":"pass_headers","value":["Originator","Session_id","Session-Id","Thread-Id","User-Agent","X-Codex-Beta-Features","X-Codex-Turn-Metadata","X-Codex-Window-Id","X-Client-Request-Id"],"keep_origin":true}]}`
 
 	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
 		"id":             channel.Id,
@@ -875,7 +875,7 @@ func TestBuildFetchModelsHeadersAppliesCodexDesktopHeaderProfile(t *testing.T) {
 	headers, err := buildFetchModelsHeaders(channel, "sk-test")
 	require.NoError(t, err)
 	require.Equal(t, dto.BuiltinCodexDesktopUserAgent, headers.Get("User-Agent"))
-	require.Empty(t, headers.Get("Originator"))
+	require.Equal(t, dto.BuiltinCodexDesktopOriginator, headers.Get("Originator"))
 	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
 }
 

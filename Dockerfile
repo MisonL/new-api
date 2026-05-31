@@ -12,6 +12,7 @@ COPY web/default/bun.lock .
 RUN --mount=type=cache,id=new-api-bun-install,target=/root/.bun/install/cache,sharing=locked \
     bun install
 COPY ./web/default .
+COPY ./web/scripts /scripts
 COPY ./VERSION .
 RUN DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
 
@@ -23,6 +24,7 @@ COPY web/classic/bun.lock .
 RUN --mount=type=cache,id=new-api-bun-install,target=/root/.bun/install/cache,sharing=locked \
     bun install
 COPY ./web/classic .
+COPY ./web/scripts /scripts
 COPY ./VERSION .
 RUN VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
 

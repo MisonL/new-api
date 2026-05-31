@@ -86,6 +86,18 @@ func TestShouldFallbackResponsesCompactAutoRequiresCompatibilityError(t *testing
 			want:       true,
 		},
 		{
+			name:       "generic compact 404 falls back",
+			statusCode: http.StatusNotFound,
+			message:    "bad response status code 404",
+			want:       true,
+		},
+		{
+			name:       "generic compact method not allowed falls back",
+			statusCode: http.StatusMethodNotAllowed,
+			message:    "bad response status code 405",
+			want:       true,
+		},
+		{
 			name:       "ordinary bad request does not fallback",
 			statusCode: http.StatusBadRequest,
 			message:    "unsupported parameter: temperature",
