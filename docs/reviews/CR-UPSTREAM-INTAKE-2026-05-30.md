@@ -488,9 +488,10 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 
 - 本地推送前验证已通过：`go test ./controller ./model ./service`、`cd web/default && bun run lint`、`cd web/default && bun run build`、`cd web/default && bun run typecheck`、`git diff --check`。
 - `git status --short --branch` 显示工作区干净。
-- `git ls-remote --heads origin codex/upstream-intake-20260530` 和 `git push -u origin codex/upstream-intake-20260530` 均失败于 `LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443`。
-- `curl -I --connect-timeout 15 https://github.com/MisonL/new-api` 同样失败于 `LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443`。
-- SSH 直连 `git@github.com` 的 22 端口和 `ssh.github.com` 的 443 端口均返回 `Connection closed`。当前未完成项只剩远端网络恢复后的 push。
+- 历史阻碍：`git ls-remote --heads origin codex/upstream-intake-20260530` 和 `git push -u origin codex/upstream-intake-20260530` 曾失败于 `LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443`；同一时间 `curl -I --connect-timeout 15 https://github.com/MisonL/new-api` 也失败，SSH 直连 GitHub 22/443 返回 `Connection closed`。
+- 网络恢复后，`curl -I --connect-timeout 15 https://github.com/MisonL/new-api` 返回 `HTTP/2 200`，`git ls-remote --heads origin codex/upstream-intake-20260530` 可访问且无同名远端分支。
+- `git push --porcelain -u origin codex/upstream-intake-20260530`：退出码 0；创建远端分支 `origin/codex/upstream-intake-20260530`，本地分支已设置 upstream。
+- 推送后复核 `git ls-remote --heads origin codex/upstream-intake-20260530` 返回 `3746fef3a062ddc241a57d8e0d5d86d923e48016`，与本地当时 HEAD 一致。
 
 ## 推荐执行顺序
 
