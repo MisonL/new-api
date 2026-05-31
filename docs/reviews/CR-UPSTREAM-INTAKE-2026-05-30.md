@@ -441,6 +441,42 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 - `428e3d91f` 中 README 的 `neko-api-key-tool` 到 `new-api-key-tool` 链接修正不适用本项目当前短 README；本项目 README 已改为独立定位和文档索引，不引用该旧链接。
 - 后续可执行项：生成本项目自己的 `NOTICE` 和 `THIRD-PARTY-LICENSES.md`，来源必须以当前 `go.mod`、`web/default/package.json`、`web/classic/package.json`、`desktop/tauri-app/*` 为准；生成后再考虑 Dockerfile copy 和 `.dockerignore` 例外。
 
+## 最终集成验证记录
+
+执行日期：2026-05-31。
+
+验证对象：
+
+- intake worktree：`/Volumes/Work/code/new-api-upstream-intake-20260530`
+- 分支：`codex/upstream-intake-20260530`
+- 验证应用提交：`8d904c357923c3acf924c34f58abb3fe0503a730`
+- 隔离开发容器：`new-api-dev-isolated-new-api-1`
+- 正式容器只读比对：`new-api`
+
+命令与结果：
+
+- `scripts/build-docker-local.sh new-api-local:dev`：退出码 0；镜像 build-info 为 `version=v1.1.0`、`commit=8d904c357923c3acf924c34f58abb3fe0503a730`、`date=2026-05-31T00:04:59Z`。
+- `docker compose -f deploy/compose/dev-isolated.yml --env-file /Volumes/Work/code/new-api/deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api`：退出码 0；仅重建 `new-api-dev-isolated-new-api-1`。
+- `docker ps --format ... | rg 'new-api-dev-isolated|new-api\s'`：`new-api-dev-isolated-new-api-1` 使用 `new-api-local:dev`，端口 `0.0.0.0:3001->3000/tcp`，compose project 为 `new-api-dev-isolated`；正式 `new-api` 使用 `new-api-local:prod-main`，端口 `127.0.0.1:13000->3000/tcp`，compose project 为 `new-api`。
+- `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info`：退出码 0；commit 为 `8d904c357923c3acf924c34f58abb3fe0503a730`。
+- `docker exec new-api /new-api --build-info`：退出码 0；正式容器仍为 `06f7fa5322c1ef469259e40380a786a5468c856a-dirty`，未被本轮重建。
+- `curl -fsS http://127.0.0.1:3001/api/status`：退出码 0；返回 `success:true`，并包含 `register_enabled:true` 与 `password_register_enabled:true`。
+- `curl -fsSI http://127.0.0.1:3001/`：退出码 0；返回 `HTTP/1.1 200 OK` 与 `X-New-Api-Version: v1.1.0`。
+- `docker inspect new-api-dev-isolated-new-api-1 --format ...`：退出码 0；最终状态为 `healthy new-api-dev-isolated new-api`。
+
+迁移等待记录：
+
+- 首次重建后，`/api/status` 和 `/` 在应用尚未监听时返回 `curl: (56) Recv failure: Connection reset by peer`，容器健康状态为 `unhealthy new-api-dev-isolated new-api`。
+- `docker logs --tail=200 new-api-dev-isolated-new-api-1` 显示启动停在 `database migration started: main`。
+- PostgreSQL `pg_stat_progress_create_index` 显示活动 SQL 为 `CREATE INDEX IF NOT EXISTS "idx_logs_upstream_request_id" ON "logs" ("upstream_request_id")`，进度为 `26350/46290` blocks，等待事件为 `IO/DataFileRead`。
+- 迁移完成后应用日志显示该索引创建耗时 `241610.862ms`，主库迁移总耗时 `4m19.898s`，应用 `ready in 260031 ms`。等待迁移完成后重试，3001 状态接口、首页和健康检查全部通过。
+
+边界说明：
+
+- 本轮没有 merge 或 rebase `upstream/main`。
+- 本轮没有升级正式服务；正式容器只做 build-info 只读比对。
+- 本段验证记录写入文档后会形成文档提交；运行中的 3001 镜像对应上一应用提交，文档提交不改变二进制内容。
+
 ## 推荐执行顺序
 
 1. 保护当前 dirty worktree。
