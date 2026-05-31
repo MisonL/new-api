@@ -22,13 +22,13 @@ import type {
 } from './types'
 
 // Extended API config types
-interface ExtendedApiConfig extends AxiosRequestConfig {
+export interface ExtendedApiConfig extends AxiosRequestConfig {
   skipBusinessError?: boolean
   skipErrorHandler?: boolean
   disableDuplicate?: boolean
 }
 
-const channelActionConfig = (
+export const channelActionConfig = (
   config: ExtendedApiConfig = {}
 ): ExtendedApiConfig => ({
   ...config,
@@ -236,7 +236,11 @@ export async function fixChannelAbilities(): Promise<{
   message?: string
   data?: { success: number; fails: number }
 }> {
-  const res = await api.post('/api/channel/fix', undefined, channelActionConfig())
+  const res = await api.post(
+    '/api/channel/fix',
+    undefined,
+    channelActionConfig()
+  )
   return res.data
 }
 

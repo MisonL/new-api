@@ -670,3 +670,45 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 - 变更被拆成可回滚提交。
 - 3001 隔离环境在需要时验证通过。
 - 正式 3000 未被操作，除非用户明确授权。
+
+## 2026-05-31 Review Polish
+
+本次针对 2026-05-31 审查中仍可直接修复的前端细节做收尾优化：
+
+- `web/default/src/components/turnstile.tsx`：修复已存在 Turnstile script 时的新组件挂载竞态；记录并卸载 widget，避免重复渲染泄漏；将 validation error 与 expiry 分离，错误路径显式输出日志或交给 `onError`。（see layer 3: Turnstile 组件竞态修复）
+- `web/default/src/features/channels/api.ts` 与 `web/default/src/features/channels/hooks/use-channel-upstream-updates.ts`：导出并复用 `channelActionConfig()`，让上游模型更新的 business error / global error handler 跳过配置只有一个来源。（see layers 5-8: channelActionConfig 导出复用）
+- `web/default/src/i18n/locales/ja.json`：缩短 reset password confirmation 的日文按钮文案为 `確認`，降低按钮溢出风险。（see layer 2: 重置密码页国际化与翻译键补全）
+
+验证记录：
+
+| 命令 | 结果 | 说明 |
+| --- | --- | --- |
+| `cd web/default && bun run typecheck` | 通过 | `tsc -b` 退出码 0 |
+| `cd web/default && bun run lint` | 通过 | `eslint .` 退出码 0 |
+| `git diff --check` | 通过 | 无空白错误 |
+| `cd web/default && bun run build` | 通过 | `rsbuild build` 退出码 0 |
+| `scripts/build-docker-local.sh new-api-local:dev` | 通过 | 预提交镜像 build-info: `commit=54342a7257528848f109c0d66b53d476710d9245-dirty`, `date=2026-05-31T05:12:33Z`；该 dirty 标记来自本批未提交 diff |
+| `docker compose -f deploy/compose/dev-isolated.yml --env-file /Volumes/Work/code/new-api/deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api` | 通过 | 重建 `new-api-dev-isolated-new-api-1`，未操作 3000 production |
+| `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info` | 通过 | 返回 `version=v1.1.0`, `commit=54342a7257528848f109c0d66b53d476710d9245-dirty`, `date=2026-05-31T05:12:33Z` |
+| `curl -fsS http://127.0.0.1:3001/api/status` | 通过 | 返回 `success:true` |
+
+CodeRabbit 复查闭环：
+
+| ID | 反馈 | 状态 |
+| --- | --- | --- |
+| CR-FE-01 | Turnstile 已存在 script 时可能丢失 load 事件 | Fixed |
+| CR-FE-02 | Turnstile widget 未记录 ID 且 unmount 前未 remove | Fixed |
+| CR-FE-03 | Turnstile script 同时设置 `async` 与 `defer` | Fixed |
+| CR-FE-04 | Turnstile loaded script 但 `window.turnstile` 未就绪时缺少重试 | Fixed |
+| CR-FE-05 | Turnstile `error-callback` 混用 expiry 处理 | Fixed |
+| CR-FE-06 | Turnstile `render` 类型过窄，未处理 `null` / `undefined` | Fixed |
+| CR-FE-07 | 上游更新请求 skip 配置重复且带本地 cast | Fixed |
+| CR-FE-08 | 上游更新请求应复用 `channelActionConfig()` | Fixed |
+| CR-FE-09 | 日文 reset confirmation 按钮文案过长 | Fixed |
+| CR-DOC-01 | 审计记录缺少 layer 追溯和反馈闭环 | Fixed |
+| CR-DOC-02 | Turnstile race、日文按钮视觉溢出、channel config 复用缺少专项自动化或浏览器验证 | Boundary recorded |
+
+验证边界：
+
+- 本次已完成静态门禁、生产构建、Docker 镜像构建、3001 isolated dev 重建和 `/api/status` smoke。
+- 未新增 Turnstile 并发挂载/卸载自动化测试、内存泄漏测试，也未产出日文按钮浏览器截图；上述属于后续专项 UI/E2E 覆盖项，不在本次收尾提交中伪装为已覆盖。

@@ -2,6 +2,7 @@ import { useRef, useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { channelActionConfig } from '../api'
 import { normalizeModelList } from '../lib/upstream-update-utils'
 
 function getManualIgnoredModelCount(settings: unknown): number {
@@ -99,10 +100,7 @@ export function useChannelUpstreamUpdates(refresh: () => Promise<void>) {
             ignore_models: ignoreModels,
             remove_models: normalizeModelList(selectedRemove),
           },
-          {
-            skipBusinessError: true,
-            skipErrorHandler: true,
-          } as Record<string, unknown>
+          channelActionConfig()
         )
         const { success, message, data } = res.data || {}
         if (!success) {
@@ -147,10 +145,7 @@ export function useChannelUpstreamUpdates(refresh: () => Promise<void>) {
       const res = await api.post(
         '/api/channel/upstream_updates/apply_all',
         {},
-        {
-          skipBusinessError: true,
-          skipErrorHandler: true,
-        } as Record<string, unknown>
+        channelActionConfig()
       )
       const { success, message, data } = res.data || {}
       if (!success) {
@@ -194,10 +189,7 @@ export function useChannelUpstreamUpdates(refresh: () => Promise<void>) {
         const res = await api.post(
           '/api/channel/upstream_updates/detect',
           { id: ch.id },
-          {
-            skipBusinessError: true,
-            skipErrorHandler: true,
-          } as Record<string, unknown>
+          channelActionConfig()
         )
         const { success, message, data } = res.data || {}
         if (!success) {
@@ -235,10 +227,7 @@ export function useChannelUpstreamUpdates(refresh: () => Promise<void>) {
       const res = await api.post(
         '/api/channel/upstream_updates/detect_all',
         {},
-        {
-          skipBusinessError: true,
-          skipErrorHandler: true,
-        } as Record<string, unknown>
+        channelActionConfig()
       )
       const { success, message, data } = res.data || {}
       if (!success) {
