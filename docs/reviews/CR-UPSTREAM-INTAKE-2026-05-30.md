@@ -366,6 +366,14 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 - `cd web/classic && bun run build`
 - 与 default 同步检查 i18n JSON 可解析。
 
+当前复核记录：
+
+- 执行日期：2026-05-31。
+- `git diff --name-status HEAD..upstream/main -- web/classic` 显示上游 classic diff 同时删除 `HeaderProfileEditorModal.jsx`、`HeaderProfileLibrary.jsx`、`HeaderProfileStrategySection.jsx`、`UserHeaderTemplateManager.jsx`、`ModelTestRuntimeConfigPanel.jsx`、`modelTestRuntimeConfig.js`、`desktopRuntime.js`、`responsesCompactSettings.js` 等本项目能力入口。
+- 裁决：拒绝 classic 整包吸纳；任何 classic 改动必须按页面和能力点拆分，先证明不删除 Header Profile、param override、model test runtime config、desktop runtime、usage log audit 后才能进入实现。
+- 可单独复核项：`3856b9d2c` / `18282e610` 的 axios 依赖更新可作为依赖安全专题处理；`49bc3a117` 属于 Waffo/classic 支付显示，必须跟 Batch 4 支付专题一起评审。
+- 当前不落代码，仅沉淀门禁；未运行 classic build，因为本轮没有修改 classic 文件。
+
 ### Batch 7：桌面与部署
 
 上游新增 `electron/` 并删除 `desktop/tauri-app/`，同时删除本项目隔离开发和只读联调 Compose。当前裁决为不吸纳整包变更。
@@ -395,6 +403,14 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 - dev/prod 端口和 compose project 隔离被破坏。
 - 正式服务 3000 被误操作。
 
+当前复核记录：
+
+- 执行日期：2026-05-31。
+- `git diff --name-status HEAD..upstream/main -- desktop/tauri-app deploy .github/workflows/tauri-build.yml .github/workflows/tauri-release.yml electron .github/workflows/electron-build.yml docker-compose.yml Dockerfile .dockerignore` 显示上游删除 `desktop/tauri-app/`、Tauri build/release workflow、`deploy/compose/dev-isolated.yml`、`deploy/compose/frontend-readonly-proxy.yml`、`deploy/env/dev-isolated.env.example`、`deploy/env/frontend-readonly.env.example`、macOS Docker tunnel 相关文件，并新增 `electron/`。
+- 裁决：拒绝 Electron 替代 Tauri 的整包路径；拒绝删除隔离开发环境和只读联调代理。
+- Dockerfile / `.dockerignore` 仅可在 license 文件完成本地化后再吸纳：当前 Dockerfile 已保留本项目 build-info labels、default/classic 双前端构建和 final image metadata；不能为复制上游 license 片段而破坏这些链路。
+- 3001 隔离环境验证仍作为最终集成门槛：重建 `new-api-local:dev`、只重建 `new-api-dev-isolated-new-api-1`、比对 `/new-api --build-info` 和 `/api/status`，不得触碰正式 3000。
+
 ### Batch 8：文档、license、issue template
 
 可低风险选择性吸纳：
@@ -415,6 +431,15 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 
 - 文档链接存在性检查。
 - 不引用不存在截图、Demo 或上游不适用于本项目的部署方式。
+
+当前复核记录：
+
+- 执行日期：2026-05-31。
+- `ee190b604` 的 bulk reporting policy 已在本项目 `.github/SECURITY.md` 中等价存在，且已改成本项目联系边界；无需重复吸纳。
+- `543cc64ea` 的 `NOTICE` / `THIRD-PARTY-LICENSES.md` 不能直接复制：上游文件包含 Electron、Base UI、Waffo、上游版本号等依赖快照，本项目当前仍是 Tauri、Radix、保留自有部署/桌面能力，直接复制会造成合规信息失真。
+- `5fa103fa5` 的 `.dockerignore` 例外规则只有在本地化 `THIRD-PARTY-LICENSES.md` 落地后才有意义；当前延后。
+- `428e3d91f` 中 README 的 `neko-api-key-tool` 到 `new-api-key-tool` 链接修正不适用本项目当前短 README；本项目 README 已改为独立定位和文档索引，不引用该旧链接。
+- 后续可执行项：生成本项目自己的 `NOTICE` 和 `THIRD-PARTY-LICENSES.md`，来源必须以当前 `go.mod`、`web/default/package.json`、`web/classic/package.json`、`desktop/tauri-app/*` 为准；生成后再考虑 Dockerfile copy 和 `.dockerignore` 例外。
 
 ## 推荐执行顺序
 
