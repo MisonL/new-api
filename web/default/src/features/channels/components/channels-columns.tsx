@@ -748,10 +748,10 @@ export function useChannelsColumns({
                       onClick={(e) => {
                         e.stopPropagation()
                         if (!deploymentId) return
-                        const targetUrl = `/console/deployment?deployment_id=${deploymentId}`
-                        window.open(targetUrl, '_blank', 'noopener')
-                      }}
-                    >
+                          const targetUrl = `/models/deployments?dFilter=${encodeURIComponent(String(deploymentId))}`
+                          window.open(targetUrl, '_blank', 'noopener')
+                        }}
+                      >
                       <span className='text-muted-foreground/30'>·</span>
                       <span className={cn(textColorMap.purple)}>IO.NET</span>
                     </span>
