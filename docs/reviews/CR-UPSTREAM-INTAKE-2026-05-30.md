@@ -441,7 +441,7 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 - `428e3d91f` 中 README 的 `neko-api-key-tool` 到 `new-api-key-tool` 链接修正不适用本项目当前短 README；本项目 README 已改为独立定位和文档索引，不引用该旧链接。
 - 后续可执行项：生成本项目自己的 `NOTICE` 和 `THIRD-PARTY-LICENSES.md`，来源必须以当前 `go.mod`、`web/default/package.json`、`web/classic/package.json`、`desktop/tauri-app/*` 为准；生成后再考虑 Dockerfile copy 和 `.dockerignore` 例外。
 
-## 最终集成验证记录
+## 集成验证与并发覆盖记录
 
 执行日期：2026-05-31。
 
@@ -450,6 +450,7 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 - intake worktree：`/Volumes/Work/code/new-api-upstream-intake-20260530`
 - 分支：`codex/upstream-intake-20260530`
 - 验证应用提交：`8d904c357923c3acf924c34f58abb3fe0503a730`
+- 文档记录提交：`2bc136681915516ae1ea985ccf22b71009c68ad2`
 - 隔离开发容器：`new-api-dev-isolated-new-api-1`
 - 正式容器只读比对：`new-api`
 
@@ -476,6 +477,12 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 - 本轮没有 merge 或 rebase `upstream/main`。
 - 本轮没有升级正式服务；正式容器只做 build-info 只读比对。
 - 本段验证记录写入文档后会形成文档提交；运行中的 3001 镜像对应上一应用提交，文档提交不改变二进制内容。
+
+并发覆盖复核：
+
+- 文档提交后，曾再次以最终 HEAD `2bc136681915516ae1ea985ccf22b71009c68ad2` 构建 `new-api-local:dev`，并重建 `new-api-dev-isolated-new-api-1`；当时 `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info` 返回 commit `2bc136681915516ae1ea985ccf22b71009c68ad2`，`curl -fsS http://127.0.0.1:3001/api/status` 返回 `success:true`，`curl -fsSI http://127.0.0.1:3001/` 返回 `HTTP/1.1 200 OK`。
+- 随后共享镜像 tag 和共享容器被另一个 Codex 会话覆盖。当前复核 `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info` 返回 `06f7fa5322c1ef469259e40380a786a5468c856a-dirty`，已不再代表本 intake worktree。
+- 因此，3001 验证记录仅作为本轮历史通过证据；当前运行中的 3001 不能作为本 worktree 最新状态证明。为避免覆盖并发会话现场，本轮不再继续重建共享 3001。
 
 ## 推荐执行顺序
 
