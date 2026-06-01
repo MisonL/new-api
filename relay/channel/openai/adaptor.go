@@ -663,13 +663,11 @@ func stripUnsupportedResponsesInputForRequest(info *relaycommon.RelayInfo, reque
 		}
 	}
 	common.SysLog(fmt.Sprintf(
-		"responses unsupported context removed for OpenAI-compatible channel: channel_id=%d model=%s compact_items=%d encrypted_reasoning_items=%d assistant_items=%d tool_output_messages=%d remaining_items=%d",
+		"responses unsupported context removed for OpenAI-compatible channel: channel_id=%d model=%s compact_items=%d encrypted_reasoning_items=%d remaining_items=%d",
 		channelID,
 		originModelName,
 		result.compactionCount,
 		result.encryptedReasoningCount,
-		result.assistantMessageCount,
-		result.toolOutputMessageCount,
 		result.remainingCount,
 	))
 	return request, nil
@@ -686,13 +684,11 @@ type responsesInputStripResult struct {
 	input                   json.RawMessage
 	compactionCount         int
 	encryptedReasoningCount int
-	assistantMessageCount   int
-	toolOutputMessageCount  int
 	remainingCount          int
 }
 
 func (r responsesInputStripResult) removedCount() int {
-	return r.compactionCount + r.encryptedReasoningCount + r.assistantMessageCount
+	return r.compactionCount + r.encryptedReasoningCount
 }
 
 func stripUnsupportedResponsesInput(input json.RawMessage, stripEncryptedReasoning bool) (responsesInputStripResult, error) {
@@ -710,12 +706,10 @@ func stripUnsupportedResponsesInput(input json.RawMessage, stripEncryptedReasoni
 	}
 
 	filtered := make([]json.RawMessage, 0, len(items))
-	removeDependentAssistantOutput := false
 	for _, rawItem := range items {
 		var item map[string]json.RawMessage
 		if err := common.Unmarshal(rawItem, &item); err != nil {
 			filtered = append(filtered, rawItem)
-			removeDependentAssistantOutput = false
 			continue
 		}
 		itemType := responsesItemType(item)
@@ -725,24 +719,7 @@ func stripUnsupportedResponsesInput(input json.RawMessage, stripEncryptedReasoni
 		}
 		if stripEncryptedReasoning && itemType == "reasoning" && responsesItemHasEncryptedContent(item) {
 			result.encryptedReasoningCount++
-			removeDependentAssistantOutput = true
 			continue
-		}
-		if removeDependentAssistantOutput && responsesItemIsAssistantOutput(item) {
-			result.assistantMessageCount++
-			continue
-		}
-		if removeDependentAssistantOutput && responsesItemIsToolOutput(item) {
-			rewritten, err := responsesToolOutputAsUserMessage(item)
-			if err != nil {
-				return result, err
-			}
-			result.toolOutputMessageCount++
-			filtered = append(filtered, rewritten)
-			continue
-		}
-		if responsesItemStartsClientContext(item) {
-			removeDependentAssistantOutput = false
 		}
 		filtered = append(filtered, rawItem)
 	}
