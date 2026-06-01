@@ -25,6 +25,7 @@ import { StatusContext } from '../../context/Status';
 import { useSetTheme, useTheme, useActualTheme } from '../../context/Theme';
 import { API } from '../../helpers/apiCore';
 import { getLogo, getSystemName, showSuccess } from '../../helpers/utils';
+import { postMessageToIframe } from '../../helpers/iframeMessaging';
 import { normalizeLanguage } from '../../i18n/language';
 import { useIsMobile } from './useIsMobile';
 import { useSidebarCollapsed } from './useSidebarCollapsed';
@@ -108,15 +109,8 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
 
   // Send theme to iframe
   useEffect(() => {
-    try {
-      const iframe = document.querySelector('iframe');
-      const cw = iframe && iframe.contentWindow;
-      if (cw) {
-        cw.postMessage({ themeMode: actualTheme }, '*');
-      }
-    } catch (e) {
-      // Silently ignore cross-origin or access errors
-    }
+    const iframe = document.querySelector('iframe');
+    postMessageToIframe(iframe, { themeMode: actualTheme });
   }, [actualTheme]);
 
   // Language change effect
@@ -124,15 +118,8 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     const handleLanguageChanged = (lng) => {
       const normalizedLang = normalizeLanguage(lng);
       setCurrentLang(normalizedLang);
-      try {
-        const iframe = document.querySelector('iframe');
-        const cw = iframe && iframe.contentWindow;
-        if (cw) {
-          cw.postMessage({ lang: normalizedLang }, '*');
-        }
-      } catch (e) {
-        // Silently ignore cross-origin or access errors
-      }
+      const iframe = document.querySelector('iframe');
+      postMessageToIframe(iframe, { lang: normalizedLang });
     };
 
     i18n.on('languageChanged', handleLanguageChanged);

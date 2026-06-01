@@ -17,19 +17,33 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-export * from './history';
-export * from './auth';
-export * from './authRedirect';
-export * from './utils';
-export * from './base64';
-export * from './api';
-export * from './render';
-export * from './log';
-export * from './data';
-export * from './token';
-export * from './boolean';
-export * from './dashboard';
-export * from './passkey';
-export * from './statusCodeRules';
-export * from './desktopRuntime';
-export * from './iframeMessaging';
+export function getIframeTargetOrigin(iframe) {
+  if (!iframe || typeof window === 'undefined') {
+    return null;
+  }
+
+  const src = iframe.getAttribute('src') || iframe.src;
+  if (!src) {
+    return null;
+  }
+
+  try {
+    const url = new URL(src, window.location.href);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return null;
+    }
+    return url.origin;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function postMessageToIframe(iframe, message) {
+  const targetOrigin = getIframeTargetOrigin(iframe);
+  const contentWindow = iframe && iframe.contentWindow;
+  if (!contentWindow || !targetOrigin) {
+    return false;
+  }
+  contentWindow.postMessage(message, targetOrigin);
+  return true;
+}
