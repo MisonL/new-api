@@ -841,7 +841,6 @@ const LoginForm = () => {
                   placeholder={t('请输入您的用户名或邮箱地址')}
                   name='username'
                   autoComplete='username'
-                  autocomplete='username'
                   onChange={(value) => handleChange('username', value)}
                   prefix={<IconMail />}
                 />
@@ -853,7 +852,6 @@ const LoginForm = () => {
                   name='password'
                   mode='password'
                   autoComplete='current-password'
-                  autocomplete='current-password'
                   onChange={(value) => handleChange('password', value)}
                   prefix={<IconLock />}
                 />

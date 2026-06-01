@@ -37,6 +37,7 @@ export function DataTableBulkActions<TData>({
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const selectedRows = table.getFilteredSelectedRowModel().rows
   const selectedIds = selectedRows.reduce<number[]>((ids, row) => {
@@ -63,11 +64,17 @@ export function DataTableBulkActions<TData>({
     handleBatchDisableModels(selectedIds, queryClient, handleClearSelection)
   }
 
-  const handleDeleteAll = () => {
-    handleBatchDeleteModels(selectedIds, queryClient, () => {
-      setShowDeleteConfirm(false)
-      handleClearSelection()
-    })
+  const handleDeleteAll = async () => {
+    if (isDeleting) return
+    setIsDeleting(true)
+    try {
+      await handleBatchDeleteModels(selectedIds, queryClient, () => {
+        setShowDeleteConfirm(false)
+        handleClearSelection()
+      })
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   const handleCopyNames = async () => {
@@ -175,11 +182,16 @@ export function DataTableBulkActions<TData>({
             <Button
               variant='outline'
               onClick={() => setShowDeleteConfirm(false)}
+              disabled={isDeleting}
             >
               {t('Cancel')}
             </Button>
-            <Button variant='destructive' onClick={handleDeleteAll}>
-              {t('Delete')}
+            <Button
+              variant='destructive'
+              onClick={handleDeleteAll}
+              disabled={isDeleting}
+            >
+              {isDeleting ? t('Deleting...') : t('Delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

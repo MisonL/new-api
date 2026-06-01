@@ -22,6 +22,8 @@ func buildChannelAffinityTemplateContextForTest(meta channelAffinityMeta) *gin.C
 
 func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 	require.Equal(t, []string{
+		"User-Agent",
+		"Originator",
 		"Session_id",
 		"X-Codex-Beta-Features",
 		"X-Codex-Turn-Metadata",
@@ -65,6 +67,8 @@ func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 		"X-Goog-Api-Client",
 	}, operation_setting.GeminiCliPassThroughHeaders)
 	require.Equal(t, operation_setting.DroidCliPassThroughHeaders, operation_setting.HeaderProfilePassThroughHeaders["droid"])
+	_, desktopExists := operation_setting.HeaderProfilePassThroughHeaders["codex-desktop"]
+	require.False(t, desktopExists)
 	_, exists := operation_setting.HeaderProfilePassThroughHeaders["opencode"]
 	require.False(t, exists)
 }

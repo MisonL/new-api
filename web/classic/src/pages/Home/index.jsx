@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useState } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Button, Typography, Input } from '@douyinfe/semi-ui';
 import {
   API,
@@ -88,6 +94,7 @@ const Home = () => {
   const [endpointIndex, setEndpointIndex] = useState(0);
   const [endpointTransitionEnabled, setEndpointTransitionEnabled] =
     useState(true);
+  const homePageIframeRef = useRef(null);
   const endpointActiveIndex =
     endpointItems.length > 0 ? endpointIndex % endpointItems.length : -1;
   const [viewportHeight, setViewportHeight] = useState(getViewportHeight);
@@ -177,23 +184,27 @@ const Home = () => {
       }
       setHomePageContent(content);
       localStorage.setItem('home_page_content', content);
-
-      // 如果内容是 URL，则发送主题模式
-      if (data.startsWith('https://')) {
-        const iframe = document.querySelector('iframe');
-        if (iframe) {
-          iframe.onload = () => {
-            iframe.contentWindow.postMessage({ themeMode: actualTheme }, '*');
-            iframe.contentWindow.postMessage({ lang: i18n.language }, '*');
-          };
-        }
-      }
     } else {
       showError(message);
       setHomePageContent('加载首页内容失败...');
     }
     setHomePageContentLoaded(true);
   };
+
+  const postHomePageIframeSettings = useCallback(() => {
+    const iframe = homePageIframeRef.current;
+    if (!iframe?.contentWindow) {
+      return;
+    }
+    iframe.contentWindow.postMessage({ themeMode: actualTheme }, '*');
+    iframe.contentWindow.postMessage({ lang: i18n.language }, '*');
+  }, [actualTheme, i18n.language]);
+
+  useEffect(() => {
+    if (homePageContent.startsWith('https://')) {
+      postHomePageIframeSettings();
+    }
+  }, [homePageContent, postHomePageIframeSettings]);
 
   const handleCopyBaseURL = async () => {
     const ok = await copy(serverAddress);
@@ -330,15 +341,15 @@ const Home = () => {
                     className={`flex flex-col md:flex-row items-center justify-center gap-4 w-full ${isTightHeight ? 'mt-3 md:mt-4' : 'mt-4 md:mt-6'} max-w-md`}
                   >
                     <Input
-                      readonly
+                      readOnly
                       value={serverAddress}
+                      aria-label={t('API 基址')}
                       className='flex-1 !rounded-full'
                       size={isMobile ? 'default' : 'large'}
                       suffix={
                         <div className='flex items-center gap-2'>
                           <div
-                            role='listbox'
-                            aria-label={t('API端点')}
+                            aria-hidden={true}
                             style={{
                               height: `${ENDPOINT_ITEM_HEIGHT}px`,
                               overflow: 'hidden',
@@ -356,12 +367,6 @@ const Home = () => {
                               {endpointTrackItems.map((item, idx) => (
                                 <div
                                   key={`home-endpoint-${item.value}-${idx}`}
-                                  role='option'
-                                  aria-selected={
-                                    endpointItems.length > 0 &&
-                                    idx % endpointItems.length ===
-                                      endpointActiveIndex
-                                  }
                                   style={{
                                     height: `${ENDPOINT_ITEM_HEIGHT}px`,
                                     lineHeight: `${ENDPOINT_ITEM_HEIGHT}px`,
@@ -379,6 +384,7 @@ const Home = () => {
                             type='primary'
                             onClick={handleCopyBaseURL}
                             icon={<IconCopy />}
+                            aria-label={t('复制 API 基址')}
                             className='!rounded-full'
                           />
                         </div>
@@ -485,8 +491,10 @@ const Home = () => {
         <div className='overflow-x-hidden w-full'>
           {homePageContent.startsWith('https://') ? (
             <iframe
+              ref={homePageIframeRef}
               src={homePageContent}
               className='w-full h-screen border-none'
+              onLoad={postHomePageIframeSettings}
             />
           ) : (
             <div

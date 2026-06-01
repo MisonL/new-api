@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
+import { useRetainedValue } from '@/hooks/use-retained-value'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -36,8 +37,16 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
+import { LazyMount } from '@/components/lazy-mount'
 import { createUser, updateUser, getUser, getGroups } from '../api'
-import { BINDING_FIELDS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
+import {
+  BINDING_FIELDS,
+  ERROR_MESSAGES,
+  SUCCESS_MESSAGES,
+  USER_PASSWORD_LENGTH_MESSAGE,
+  USER_PASSWORD_MAX_LENGTH,
+  USER_PASSWORD_MIN_LENGTH,
+} from '../constants'
 import {
   userFormSchema,
   type UserFormValues,
@@ -65,6 +74,10 @@ export function UsersMutateDrawer({
   const { triggerRefresh } = useUsers()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [quotaDialogOpen, setQuotaDialogOpen] = useState(false)
+  const retainedQuotaUser = useRetainedValue(
+    currentRow,
+    quotaDialogOpen && !!currentRow
+  )
 
   // Fetch groups
   const { data: groupsData } = useQuery({
@@ -102,6 +115,19 @@ export function UsersMutateDrawer({
   const currentQuotaRaw = form.watch('quota_dollars') || 0
 
   const onSubmit = async (data: UserFormValues) => {
+    if (
+      !isUpdate &&
+      (!data.password ||
+        data.password.length < USER_PASSWORD_MIN_LENGTH ||
+        data.password.length > USER_PASSWORD_MAX_LENGTH)
+    ) {
+      form.setError('password', {
+        type: 'manual',
+        message: t(USER_PASSWORD_LENGTH_MESSAGE),
+      })
+      return
+    }
+
     setIsSubmitting(true)
     try {
       const payload = transformFormDataToPayload(data, currentRow?.id)
@@ -260,7 +286,7 @@ export function UsersMutateDrawer({
                           placeholder={
                             isUpdate
                               ? t('Leave empty to keep unchanged')
-                              : t('Enter password (min 8 characters)')
+                              : t(USER_PASSWORD_LENGTH_MESSAGE)
                           }
                         />
                       </FormControl>
@@ -408,15 +434,17 @@ export function UsersMutateDrawer({
       </Sheet>
 
       {/* Adjust Quota Dialog */}
-      {currentRow && (
-        <UserQuotaDialog
-          open={quotaDialogOpen}
-          onOpenChange={setQuotaDialogOpen}
-          userId={currentRow.id}
-          currentQuota={parseQuotaFromDollars(currentQuotaRaw || 0)}
-          onSuccess={refreshUserData}
-        />
-      )}
+      <LazyMount open={quotaDialogOpen && !!retainedQuotaUser}>
+        {retainedQuotaUser ? (
+          <UserQuotaDialog
+            open={quotaDialogOpen}
+            onOpenChange={setQuotaDialogOpen}
+            userId={retainedQuotaUser.id}
+            currentQuota={parseQuotaFromDollars(currentQuotaRaw || 0)}
+            onSuccess={refreshUserData}
+          />
+        ) : null}
+      </LazyMount>
     </>
   )
 }

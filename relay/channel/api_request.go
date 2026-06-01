@@ -629,6 +629,8 @@ func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	return doRequest(c, req, info)
 }
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
+	c.Set(common2.UpstreamRequestIdKey, "")
+
 	var client *http.Client
 	var err error
 	if info.ChannelSetting.Proxy != "" {
@@ -667,6 +669,10 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 	if resp == nil {
 		return nil, errors.New("resp is nil")
+	}
+
+	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
+		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 
 	_ = req.Body.Close()

@@ -37,7 +37,6 @@ export const useUserPermissions = () => {
       if (res.data.success) {
         const userPermissions = res.data.data.permissions;
         setPermissions(userPermissions);
-        console.log('用户权限加载成功:', userPermissions);
       } else {
         setError(res.data.message || '获取权限失败');
         console.error('获取权限失败:', res.data.message);

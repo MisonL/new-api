@@ -58,6 +58,9 @@ export const useLogsData = () => {
   const { t } = useTranslation();
   const logsRequestSeq = useRef(0);
   const logsAbortControllerRef = useRef(null);
+  const logsInFlightRequestRef = useRef({ key: '', promise: null });
+  const expandDataCacheRef = useRef({});
+  const suppressedPageChangeRef = useRef(null);
 
   // Define column keys for selection
   const COLUMN_KEYS = {
@@ -81,7 +84,6 @@ export const useLogsData = () => {
 
   // Basic state
   const [logs, setLogs] = useState([]);
-  const [expandData, setExpandData] = useState({});
   const [showStat, setShowStat] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingStat, setLoadingStat] = useState(false);
@@ -348,6 +350,7 @@ export const useLogsData = () => {
   }, []);
 
   useEffect(() => {
+    expandDataCacheRef.current = {};
     localStorage.setItem(BILLING_DISPLAY_MODE_STORAGE_KEY, billingDisplayMode);
   }, [BILLING_DISPLAY_MODE_STORAGE_KEY, billingDisplayMode]);
 
@@ -573,388 +576,429 @@ export const useLogsData = () => {
     });
   };
 
-  // Format logs data
-  const setLogsFormat = (logs) => {
-    const requestConversionDisplayValue = (conversionChain) => {
-      const chain = Array.isArray(conversionChain)
-        ? conversionChain.filter(Boolean)
-        : [];
-      if (chain.length <= 1) {
-        return t('原生格式');
-      }
-      return `${chain.join(' -> ')}`;
-    };
+  const requestConversionDisplayValue = (conversionChain) => {
+    const chain = Array.isArray(conversionChain)
+      ? conversionChain.filter(Boolean)
+      : [];
+    if (chain.length <= 1) {
+      return t('原生格式');
+    }
+    return `${chain.join(' -> ')}`;
+  };
 
-    let expandDatesLocal = {};
-    for (let i = 0; i < logs.length; i++) {
-      logs[i].timestamp2string = timestamp2string(logs[i].created_at);
-      logs[i].key = logs[i].id;
-      let other = getLogOther(logs[i].other);
-      let expandDataLocal = [];
+  const buildLogExpandData = (log) => {
+    const other = getLogOther(log.other);
+    const expandDataLocal = [];
 
-      if (
-        isAdminUser &&
-        (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)
-      ) {
+    if (isAdminUser && (log.type === 0 || log.type === 2 || log.type === 6)) {
+      expandDataLocal.push({
+        key: t('渠道信息'),
+        value: `${log.channel} - ${log.channel_name || '[未知]'}`,
+      });
+    }
+    if (log.request_id) {
+      expandDataLocal.push({
+        key: t('Request ID'),
+        value: log.request_id,
+      });
+    }
+    if (other?.ws || other?.audio) {
+      expandDataLocal.push({
+        key: t('语音输入'),
+        value: other.audio_input,
+      });
+      expandDataLocal.push({
+        key: t('语音输出'),
+        value: other.audio_output,
+      });
+      expandDataLocal.push({
+        key: t('文字输入'),
+        value: other.text_input,
+      });
+      expandDataLocal.push({
+        key: t('文字输出'),
+        value: other.text_output,
+      });
+    }
+    if (other?.cache_tokens > 0) {
+      expandDataLocal.push({
+        key: t('缓存 Tokens'),
+        value: other.cache_tokens,
+      });
+    }
+    if (other?.cache_creation_tokens > 0) {
+      expandDataLocal.push({
+        key: t('缓存创建 Tokens'),
+        value: other.cache_creation_tokens,
+      });
+    }
+    if (log.type === 2) {
+      if (other?.billing_mode !== 'tiered_expr') {
         expandDataLocal.push({
-          key: t('渠道信息'),
-          value: `${logs[i].channel} - ${logs[i].channel_name || '[未知]'}`,
+          key: t('日志详情'),
+          value: other?.claude
+            ? renderClaudeLogContent({
+                ...other,
+                displayMode: billingDisplayMode,
+              })
+            : renderLogContent({
+                ...other,
+                displayMode: billingDisplayMode,
+              }),
         });
       }
-      if (logs[i].request_id) {
+      if (log?.content) {
         expandDataLocal.push({
-          key: t('Request ID'),
-          value: logs[i].request_id,
+          key: t('其他详情'),
+          value: log.content,
         });
       }
-      if (other?.ws || other?.audio) {
+      if (isAdminUser && other?.reject_reason) {
         expandDataLocal.push({
-          key: t('语音输入'),
-          value: other.audio_input,
-        });
-        expandDataLocal.push({
-          key: t('语音输出'),
-          value: other.audio_output,
-        });
-        expandDataLocal.push({
-          key: t('文字输入'),
-          value: other.text_input,
-        });
-        expandDataLocal.push({
-          key: t('文字输出'),
-          value: other.text_output,
+          key: t('拦截原因'),
+          value: other.reject_reason,
         });
       }
-      if (other?.cache_tokens > 0) {
+    }
+    const hasRequestPayload = hasPayloadAuditField(other, 'request');
+    const hasResponsePayload = hasPayloadAuditField(other, 'response');
+    if (hasRequestPayload || hasResponsePayload) {
+      const payloadEntries = [];
+      if (hasRequestPayload) {
+        const requestMetaText = buildPayloadMetaText('request', other);
+        payloadEntries.push(
+          <div key='request' className='usage-log-payload-entry'>
+            <div className='usage-log-payload-entry-header'>
+              <Text strong>{t('请求内容')}</Text>
+              <Button
+                theme='light'
+                type='primary'
+                size='small'
+                icon={<IconEyeOpened />}
+                className='usage-log-payload-entry-button'
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openPayloadContentModal({
+                    title: t('请求内容'),
+                    content: other.request_content,
+                    contentType: other.request_content_type,
+                    metaText: requestMetaText,
+                    requestId: log.request_id,
+                    requestPath: other.request_path,
+                    modelName: log.model_name,
+                  });
+                }}
+              >
+                {t('查看内容')}
+              </Button>
+            </div>
+            {requestMetaText ? (
+              <Text
+                type='tertiary'
+                size='small'
+                className='usage-log-payload-entry-meta'
+              >
+                {requestMetaText}
+              </Text>
+            ) : null}
+          </div>,
+        );
+      }
+      if (hasResponsePayload) {
+        const responseMetaText = buildPayloadMetaText('response', other);
+        payloadEntries.push(
+          <div key='response' className='usage-log-payload-entry'>
+            <div className='usage-log-payload-entry-header'>
+              <Text strong>{t('返回内容')}</Text>
+              <Button
+                theme='light'
+                type='primary'
+                size='small'
+                icon={<IconEyeOpened />}
+                className='usage-log-payload-entry-button'
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openPayloadContentModal({
+                    title: t('返回内容'),
+                    content: other.response_content,
+                    contentType: other.response_content_type,
+                    metaText: responseMetaText,
+                    requestId: log.request_id,
+                    requestPath: other.request_path,
+                    modelName: log.model_name,
+                  });
+                }}
+              >
+                {t('查看内容')}
+              </Button>
+            </div>
+            {responseMetaText ? (
+              <Text
+                type='tertiary'
+                size='small'
+                className='usage-log-payload-entry-meta'
+              >
+                {responseMetaText}
+              </Text>
+            ) : null}
+          </div>,
+        );
+      }
+      expandDataLocal.push({
+        key: t('内容日志'),
+        value: <div className='usage-log-payload-group'>{payloadEntries}</div>,
+      });
+    }
+    if (log.type === 2) {
+      const modelMapped =
+        other?.is_model_mapped &&
+        other?.upstream_model_name &&
+        other?.upstream_model_name !== '';
+      if (modelMapped) {
         expandDataLocal.push({
-          key: t('缓存 Tokens'),
-          value: other.cache_tokens,
+          key: t('请求并计费模型'),
+          value: log.model_name,
+        });
+        expandDataLocal.push({
+          key: t('实际模型'),
+          value: other.upstream_model_name,
         });
       }
-      if (other?.cache_creation_tokens > 0) {
-        expandDataLocal.push({
-          key: t('缓存创建 Tokens'),
-          value: other.cache_creation_tokens,
-        });
-      }
-      if (logs[i].type === 2) {
-        if (other?.billing_mode !== 'tiered_expr') {
-          expandDataLocal.push({
-            key: t('日志详情'),
-            value: other?.claude
-              ? renderClaudeLogContent({
-                  ...other,
-                  displayMode: billingDisplayMode,
-                })
-              : renderLogContent({ ...other, displayMode: billingDisplayMode }),
-          });
-        }
-        if (logs[i]?.content) {
-          expandDataLocal.push({
-            key: t('其他详情'),
-            value: logs[i].content,
-          });
-        }
-        if (isAdminUser && other?.reject_reason) {
-          expandDataLocal.push({
-            key: t('拦截原因'),
-            value: other.reject_reason,
-          });
-        }
-      }
-      const hasRequestPayload = hasPayloadAuditField(other, 'request');
-      const hasResponsePayload = hasPayloadAuditField(other, 'response');
-      if (hasRequestPayload || hasResponsePayload) {
-        const payloadEntries = [];
-        if (hasRequestPayload) {
-          const requestMetaText = buildPayloadMetaText('request', other);
-          payloadEntries.push(
-            <div key='request' className='usage-log-payload-entry'>
-              <div className='usage-log-payload-entry-header'>
-                <Text strong>{t('请求内容')}</Text>
-                <Button
-                  theme='light'
-                  type='primary'
-                  size='small'
-                  icon={<IconEyeOpened />}
-                  className='usage-log-payload-entry-button'
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openPayloadContentModal({
-                      title: t('请求内容'),
-                      content: other.request_content,
-                      contentType: other.request_content_type,
-                      metaText: requestMetaText,
-                      requestId: logs[i].request_id,
-                      requestPath: other.request_path,
-                      modelName: logs[i].model_name,
-                    });
-                  }}
-                >
-                  {t('查看内容')}
-                </Button>
-              </div>
-              {requestMetaText ? (
-                <Text
-                  type='tertiary'
-                  size='small'
-                  className='usage-log-payload-entry-meta'
-                >
-                  {requestMetaText}
-                </Text>
-              ) : null}
-            </div>,
-          );
-        }
-        if (hasResponsePayload) {
-          const responseMetaText = buildPayloadMetaText('response', other);
-          payloadEntries.push(
-            <div key='response' className='usage-log-payload-entry'>
-              <div className='usage-log-payload-entry-header'>
-                <Text strong>{t('返回内容')}</Text>
-                <Button
-                  theme='light'
-                  type='primary'
-                  size='small'
-                  icon={<IconEyeOpened />}
-                  className='usage-log-payload-entry-button'
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openPayloadContentModal({
-                      title: t('返回内容'),
-                      content: other.response_content,
-                      contentType: other.response_content_type,
-                      metaText: responseMetaText,
-                      requestId: logs[i].request_id,
-                      requestPath: other.request_path,
-                      modelName: logs[i].model_name,
-                    });
-                  }}
-                >
-                  {t('查看内容')}
-                </Button>
-              </div>
-              {responseMetaText ? (
-                <Text
-                  type='tertiary'
-                  size='small'
-                  className='usage-log-payload-entry-meta'
-                >
-                  {responseMetaText}
-                </Text>
-              ) : null}
-            </div>,
-          );
-        }
-        expandDataLocal.push({
-          key: t('内容日志'),
-          value: (
-            <div className='usage-log-payload-group'>{payloadEntries}</div>
-          ),
-        });
-      }
-      if (logs[i].type === 2) {
-        let modelMapped =
-          other?.is_model_mapped &&
-          other?.upstream_model_name &&
-          other?.upstream_model_name !== '';
-        if (modelMapped) {
-          expandDataLocal.push({
-            key: t('请求并计费模型'),
-            value: logs[i].model_name,
-          });
-          expandDataLocal.push({
-            key: t('实际模型'),
-            value: other.upstream_model_name,
-          });
-        }
 
-        const isViolationFeeLog =
-          other?.violation_fee === true ||
-          Boolean(other?.violation_fee_code) ||
-          Boolean(other?.violation_fee_marker);
+      const isViolationFeeLog =
+        other?.violation_fee === true ||
+        Boolean(other?.violation_fee_code) ||
+        Boolean(other?.violation_fee_marker);
 
+      if (!isViolationFeeLog && other?.billing_mode !== 'tiered_expr') {
+        const logOpts = {
+          ...other,
+          prompt_tokens: log.prompt_tokens,
+          completion_tokens: log.completion_tokens,
+          displayMode: billingDisplayMode,
+        };
         let content = '';
-        if (!isViolationFeeLog && other?.billing_mode !== 'tiered_expr') {
-          const logOpts = {
-            ...other,
-            prompt_tokens: logs[i].prompt_tokens,
-            completion_tokens: logs[i].completion_tokens,
-            displayMode: billingDisplayMode,
-          };
-          if (other?.ws || other?.audio) {
-            content = renderAudioModelPrice(logOpts);
-          } else if (other?.claude) {
-            content = renderClaudeModelPrice(logOpts);
-          } else {
-            content = renderModelPrice(logOpts);
-          }
-          expandDataLocal.push({
-            key: t('计费过程'),
-            value: content,
-          });
-        }
-        if (other?.reasoning_effort) {
-          expandDataLocal.push({
-            key: t('Reasoning Effort'),
-            value: other.reasoning_effort,
-          });
-        }
-        if (other?.billing_mode === 'tiered_expr' && other?.expr_b64) {
-          expandDataLocal.push({
-            key: t('计费过程'),
-            value: renderTieredModelPrice({
-              ...other,
-              prompt_tokens: logs[i].prompt_tokens,
-              completion_tokens: logs[i].completion_tokens,
-            }),
-          });
-        }
-      }
-      if (logs[i].type === 6) {
-        if (other?.task_id) {
-          expandDataLocal.push({
-            key: t('任务ID'),
-            value: other.task_id,
-          });
-        }
-        if (other?.reason) {
-          expandDataLocal.push({
-            key: t('失败原因'),
-            value: (
-              <div className='usage-log-expand-text-block'>{other.reason}</div>
-            ),
-          });
-        }
-      }
-      if (other?.request_path) {
-        expandDataLocal.push({
-          key: t('请求路径'),
-          value: other.request_path,
-        });
-      }
-      if (other?.billing_source === 'subscription') {
-        const planId = other?.subscription_plan_id;
-        const planTitle = other?.subscription_plan_title || '';
-        const subscriptionId = other?.subscription_id;
-        const unit = t('额度');
-        const pre = other?.subscription_pre_consumed ?? 0;
-        const postDelta = other?.subscription_post_delta ?? 0;
-        const finalConsumed = other?.subscription_consumed ?? pre + postDelta;
-        const remain = other?.subscription_remain;
-        const total = other?.subscription_total;
-        // Use multiple Description items to avoid an overlong single line.
-        if (planId) {
-          expandDataLocal.push({
-            key: t('订阅套餐'),
-            value: `#${planId} ${planTitle}`.trim(),
-          });
-        }
-        if (subscriptionId) {
-          expandDataLocal.push({
-            key: t('订阅实例'),
-            value: `#${subscriptionId}`,
-          });
-        }
-        const settlementLines = [
-          `${t('预扣')}：${pre} ${unit}`,
-          `${t('结算差额')}：${postDelta > 0 ? '+' : ''}${postDelta} ${unit}`,
-          `${t('最终抵扣')}：${finalConsumed} ${unit}`,
-        ]
-          .filter(Boolean)
-          .join('\n');
-        expandDataLocal.push({
-          key: t('订阅结算'),
-          value: (
-            <div className='usage-log-expand-preline'>{settlementLines}</div>
-          ),
-        });
-        if (remain !== undefined && total !== undefined) {
-          expandDataLocal.push({
-            key: t('订阅剩余'),
-            value: `${remain}/${total} ${unit}`,
-          });
-        }
-        expandDataLocal.push({
-          key: t('订阅说明'),
-          value: t(
-            'token 会按倍率换算成“额度/次数”，请求结束后再做差额结算（补扣/返还）。',
-          ),
-        });
-      }
-      if (isAdminUser && logs[i].type !== 6 && logs[i].type !== 1) {
-        expandDataLocal.push({
-          key: t('请求转换'),
-          value: requestConversionDisplayValue(other?.request_conversion),
-        });
-      }
-      if (isAdminUser && logs[i].type !== 6 && logs[i].type !== 1) {
-        let localCountMode = '';
-        if (other?.admin_info?.local_count_tokens) {
-          localCountMode = t('本地计费');
+        if (other?.ws || other?.audio) {
+          content = renderAudioModelPrice(logOpts);
+        } else if (other?.claude) {
+          content = renderClaudeModelPrice(logOpts);
         } else {
-          localCountMode = t('上游返回');
+          content = renderModelPrice(logOpts);
         }
         expandDataLocal.push({
-          key: t('计费模式'),
-          value: localCountMode,
+          key: t('计费过程'),
+          value: content,
         });
       }
-      if (isAdminUser && logs[i].type === 1) {
-        const topupAuditEntries = getTopupAuditEntryDescriptors({
-          isAdminUser,
-          logType: logs[i].type,
-          adminInfo: other?.admin_info,
-          t,
-        });
-        topupAuditEntries.forEach((entry) => {
-          expandDataLocal.push({
-            key: entry.key,
-            value: entry.warning ? (
-              <span style={{ color: 'var(--semi-color-warning)' }}>
-                {entry.value}
-              </span>
-            ) : (
-              entry.value
-            ),
-          });
+      if (other?.reasoning_effort) {
+        expandDataLocal.push({
+          key: t('Reasoning Effort'),
+          value: other.reasoning_effort,
         });
       }
-      const manageOperatorEntry = getManageOperatorEntryDescriptor({
+      if (other?.billing_mode === 'tiered_expr' && other?.expr_b64) {
+        expandDataLocal.push({
+          key: t('计费过程'),
+          value: renderTieredModelPrice({
+            ...other,
+            prompt_tokens: log.prompt_tokens,
+            completion_tokens: log.completion_tokens,
+          }),
+        });
+      }
+    }
+    if (log.type === 6) {
+      if (other?.task_id) {
+        expandDataLocal.push({
+          key: t('任务ID'),
+          value: other.task_id,
+        });
+      }
+      if (other?.reason) {
+        expandDataLocal.push({
+          key: t('失败原因'),
+          value: (
+            <div className='usage-log-expand-text-block'>{other.reason}</div>
+          ),
+        });
+      }
+    }
+    if (other?.request_path) {
+      expandDataLocal.push({
+        key: t('请求路径'),
+        value: other.request_path,
+      });
+    }
+    if (other?.billing_source === 'subscription') {
+      const planId = other?.subscription_plan_id;
+      const planTitle = other?.subscription_plan_title || '';
+      const subscriptionId = other?.subscription_id;
+      const unit = t('额度');
+      const pre = other?.subscription_pre_consumed ?? 0;
+      const postDelta = other?.subscription_post_delta ?? 0;
+      const finalConsumed = other?.subscription_consumed ?? pre + postDelta;
+      const remain = other?.subscription_remain;
+      const total = other?.subscription_total;
+      if (planId) {
+        expandDataLocal.push({
+          key: t('订阅套餐'),
+          value: `#${planId} ${planTitle}`.trim(),
+        });
+      }
+      if (subscriptionId) {
+        expandDataLocal.push({
+          key: t('订阅实例'),
+          value: `#${subscriptionId}`,
+        });
+      }
+      const settlementLines = [
+        `${t('预扣')}：${pre} ${unit}`,
+        `${t('结算差额')}：${postDelta > 0 ? '+' : ''}${postDelta} ${unit}`,
+        `${t('最终抵扣')}：${finalConsumed} ${unit}`,
+      ].join('\n');
+      expandDataLocal.push({
+        key: t('订阅结算'),
+        value: (
+          <div className='usage-log-expand-preline'>{settlementLines}</div>
+        ),
+      });
+      if (remain !== undefined && total !== undefined) {
+        expandDataLocal.push({
+          key: t('订阅剩余'),
+          value: `${remain}/${total} ${unit}`,
+        });
+      }
+      expandDataLocal.push({
+        key: t('订阅说明'),
+        value: t(
+          'token 会按倍率换算成“额度/次数”，请求结束后再做差额结算（补扣/返还）。',
+        ),
+      });
+    }
+    if (isAdminUser && log.type !== 6 && log.type !== 1) {
+      expandDataLocal.push({
+        key: t('请求转换'),
+        value: requestConversionDisplayValue(other?.request_conversion),
+      });
+    }
+    if (isAdminUser && log.type !== 6 && log.type !== 1) {
+      expandDataLocal.push({
+        key: t('计费模式'),
+        value: other?.admin_info?.local_count_tokens
+          ? t('本地计费')
+          : t('上游返回'),
+      });
+    }
+    if (isAdminUser && log.type === 1) {
+      const topupAuditEntries = getTopupAuditEntryDescriptors({
         isAdminUser,
-        logType: logs[i].type,
+        logType: log.type,
         adminInfo: other?.admin_info,
         t,
       });
-      if (manageOperatorEntry) {
-        expandDataLocal.push(manageOperatorEntry);
-      }
-      expandDataLocal.push({
-        key: t('操作'),
-        value: (
-          <Button
-            theme='light'
-            type='danger'
-            size='small'
-            className='usage-log-delete-button'
-            onClick={(event) => {
-              event.stopPropagation();
-              confirmDeleteLog(logs[i]);
-            }}
-          >
-            {t('删除')}
-          </Button>
-        ),
+      topupAuditEntries.forEach((entry) => {
+        expandDataLocal.push({
+          key: entry.key,
+          value: entry.warning ? (
+            <span style={{ color: 'var(--semi-color-warning)' }}>
+              {entry.value}
+            </span>
+          ) : (
+            entry.value
+          ),
+        });
       });
-      expandDatesLocal[logs[i].key] = expandDataLocal;
     }
+    const manageOperatorEntry = getManageOperatorEntryDescriptor({
+      isAdminUser,
+      logType: log.type,
+      adminInfo: other?.admin_info,
+      t,
+    });
+    if (manageOperatorEntry) {
+      expandDataLocal.push(manageOperatorEntry);
+    }
+    expandDataLocal.push({
+      key: t('操作'),
+      value: (
+        <Button
+          theme='light'
+          type='danger'
+          size='small'
+          className='usage-log-delete-button'
+          onClick={(event) => {
+            event.stopPropagation();
+            confirmDeleteLog(log);
+          }}
+        >
+          {t('删除')}
+        </Button>
+      ),
+    });
 
-    setExpandData(expandDatesLocal);
-    setLogs(logs);
+    return expandDataLocal;
+  };
+
+  const getLogExpandData = (log) => {
+    if (!log?.key) {
+      return [];
+    }
+    if (!expandDataCacheRef.current[log.key]) {
+      expandDataCacheRef.current[log.key] = buildLogExpandData(log);
+    }
+    return expandDataCacheRef.current[log.key];
+  };
+
+  // Format logs data
+  const setLogsFormat = (logs) => {
+    expandDataCacheRef.current = {};
+    setLogs(
+      logs.map((log) => ({
+        ...log,
+        timestamp2string: timestamp2string(log.created_at),
+        key: log.id,
+      })),
+    );
   };
 
   // Load logs function
   const loadLogs = async (startIdx, pageSize, customLogType = null) => {
+    let url = '';
+    const {
+      username,
+      token_name,
+      model_name,
+      start_timestamp,
+      end_timestamp,
+      channel,
+      group,
+      request_id,
+      logType: formLogType,
+    } = getFormValues();
+
+    const currentLogType =
+      customLogType !== null
+        ? customLogType
+        : formLogType !== undefined
+          ? formLogType
+          : logType;
+
+    const localStartTimestamp = Date.parse(start_timestamp) / 1000;
+    const localEndTimestamp = Date.parse(end_timestamp) / 1000;
+    if (isAdminUser) {
+      url = `/api/log/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}&request_id=${request_id}`;
+    } else {
+      url = `/api/log/self/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}&request_id=${request_id}`;
+    }
+    url = encodeURI(url);
+
+    if (
+      logsInFlightRequestRef.current.key === url &&
+      logsInFlightRequestRef.current.promise
+    ) {
+      return logsInFlightRequestRef.current.promise;
+    }
+
     const requestSeq = ++logsRequestSeq.current;
     setLoading(true);
     if (logsAbortControllerRef.current) {
@@ -964,39 +1008,13 @@ export const useLogsData = () => {
     logsAbortControllerRef.current = abortController;
 
     try {
-      let url = '';
-      const {
-        username,
-        token_name,
-        model_name,
-        start_timestamp,
-        end_timestamp,
-        channel,
-        group,
-        request_id,
-        logType: formLogType,
-      } = getFormValues();
-
-      const currentLogType =
-        customLogType !== null
-          ? customLogType
-          : formLogType !== undefined
-            ? formLogType
-            : logType;
-
-      let localStartTimestamp = Date.parse(start_timestamp) / 1000;
-      let localEndTimestamp = Date.parse(end_timestamp) / 1000;
-      if (isAdminUser) {
-        url = `/api/log/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}&request_id=${request_id}`;
-      } else {
-        url = `/api/log/self/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}&request_id=${request_id}`;
-      }
-      url = encodeURI(url);
-      const res = await API.get(url, {
+      const requestPromise = API.get(url, {
         signal: abortController.signal,
         skipErrorHandler: true,
         disableDuplicate: true,
       });
+      logsInFlightRequestRef.current = { key: url, promise: requestPromise };
+      const res = await requestPromise;
       if (requestSeq !== logsRequestSeq.current) {
         return;
       }
@@ -1020,17 +1038,33 @@ export const useLogsData = () => {
         logsAbortControllerRef.current = null;
         setLoading(false);
       }
+      if (logsInFlightRequestRef.current.key === url) {
+        logsInFlightRequestRef.current = { key: '', promise: null };
+      }
     }
   };
 
   // Page handlers
   const handlePageChange = (page) => {
+    if (suppressedPageChangeRef.current === page) {
+      suppressedPageChangeRef.current = null;
+      return;
+    }
+    if (page === activePage) {
+      return;
+    }
     setActivePage(page);
     loadLogs(page, pageSize).then((r) => {});
   };
 
   const handlePageSizeChange = async (size) => {
     localStorage.setItem('page-size', size + '');
+    suppressedPageChangeRef.current = 1;
+    setTimeout(() => {
+      if (suppressedPageChangeRef.current === 1) {
+        suppressedPageChangeRef.current = null;
+      }
+    }, 0);
     setPageSize(size);
     setActivePage(1);
     loadLogs(1, size)
@@ -1148,15 +1182,13 @@ export const useLogsData = () => {
 
   // Check if any record has expandable content
   const hasExpandableRows = () => {
-    return logs.some(
-      (log) => expandData[log.key] && expandData[log.key].length > 0,
-    );
+    return logs.length > 0;
   };
 
   return {
     // Basic state
     logs,
-    expandData,
+    getLogExpandData,
     showStat,
     loading,
     loadingStat,

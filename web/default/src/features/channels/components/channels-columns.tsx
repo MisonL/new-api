@@ -29,6 +29,7 @@ import {
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { DataTableColumnHeader } from '@/components/data-table/column-header'
 import { GroupBadge } from '@/components/group-badge'
+import { LazyMount } from '@/components/lazy-mount'
 import {
   StatusBadge,
   dotColorMap,
@@ -48,6 +49,16 @@ import {
   parseModelsList,
   parseGroupsList,
   parseChannelSettings,
+  parseChannelOtherSettings,
+  isResponsesCompactAutoFallbackActiveFromSettings,
+  getResponsesCompactAutoFallbackReasonFromSettings,
+  getResponsesCompactModeFromSettings,
+  RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL,
+  RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP,
+  RESPONSES_COMPACT_AUTO_TOOLTIP,
+  RESPONSES_COMPACT_BADGE_LABELS,
+  RESPONSES_COMPACT_MODE_AUTO,
+  RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   handleUpdateChannelField,
   handleUpdateTagField,
   handleUpdateChannelBalance,
@@ -194,19 +205,21 @@ function PriorityCell({ channel }: { channel: Channel }) {
           }}
           min={-999}
         />
-        <ConfirmDialog
-          open={confirmOpen}
-          onOpenChange={setConfirmOpen}
-          title={t('Confirm Batch Update')}
-          desc={`This will update the priority to ${pendingValue} for all ${channelCount} channel(s) with tag "${tag}". Continue?`}
-          confirmText='Update'
-          handleConfirm={() => {
-            if (pendingValue !== null) {
-              handleUpdateTagField(tag, 'priority', pendingValue, queryClient)
-            }
-            setConfirmOpen(false)
-          }}
-        />
+        <LazyMount open={confirmOpen}>
+          <ConfirmDialog
+            open={confirmOpen}
+            onOpenChange={setConfirmOpen}
+            title={t('Confirm Batch Update')}
+            desc={`This will update the priority to ${pendingValue} for all ${channelCount} channel(s) with tag "${tag}". Continue?`}
+            confirmText='Update'
+            handleConfirm={() => {
+              if (pendingValue !== null) {
+                handleUpdateTagField(tag, 'priority', pendingValue, queryClient)
+              }
+              setConfirmOpen(false)
+            }}
+          />
+        </LazyMount>
       </>
     )
   }
@@ -249,19 +262,21 @@ function WeightCell({ channel }: { channel: Channel }) {
           }}
           min={0}
         />
-        <ConfirmDialog
-          open={confirmOpen}
-          onOpenChange={setConfirmOpen}
-          title={t('Confirm Batch Update')}
-          desc={`This will update the weight to ${pendingValue} for all ${channelCount} channel(s) with tag "${tag}". Continue?`}
-          confirmText='Update'
-          handleConfirm={() => {
-            if (pendingValue !== null) {
-              handleUpdateTagField(tag, 'weight', pendingValue, queryClient)
-            }
-            setConfirmOpen(false)
-          }}
-        />
+        <LazyMount open={confirmOpen}>
+          <ConfirmDialog
+            open={confirmOpen}
+            onOpenChange={setConfirmOpen}
+            title={t('Confirm Batch Update')}
+            desc={`This will update the weight to ${pendingValue} for all ${channelCount} channel(s) with tag "${tag}". Continue?`}
+            confirmText='Update'
+            handleConfirm={() => {
+              if (pendingValue !== null) {
+                handleUpdateTagField(tag, 'weight', pendingValue, queryClient)
+              }
+              setConfirmOpen(false)
+            }}
+          />
+        </LazyMount>
       </>
     )
   }
@@ -392,33 +407,35 @@ function BalanceCell({ channel }: { channel: Channel }) {
         </Tooltip>
       </div>
 
-      <CodexUsageDialog
-        open={codexUsageOpen}
-        onOpenChange={setCodexUsageOpen}
-        channelName={channel.name}
-        channelId={channel.id}
-        response={codexUsageResponse}
-        onRefresh={async () => {
-          if (isUpdating) return
-          setIsUpdating(true)
-          try {
-            const res = await getCodexUsage(channel.id)
-            if (!res.success) {
-              throw new Error(res.message || t('Failed to fetch usage'))
+      <LazyMount open={codexUsageOpen}>
+        <CodexUsageDialog
+          open={codexUsageOpen}
+          onOpenChange={setCodexUsageOpen}
+          channelName={channel.name}
+          channelId={channel.id}
+          response={codexUsageResponse}
+          onRefresh={async () => {
+            if (isUpdating) return
+            setIsUpdating(true)
+            try {
+              const res = await getCodexUsage(channel.id)
+              if (!res.success) {
+                throw new Error(res.message || t('Failed to fetch usage'))
+              }
+              setCodexUsageResponse(res)
+            } catch (error) {
+              toast.error(
+                error instanceof Error
+                  ? error.message
+                  : t('Failed to fetch usage')
+              )
+            } finally {
+              setIsUpdating(false)
             }
-            setCodexUsageResponse(res)
-          } catch (error) {
-            toast.error(
-              error instanceof Error
-                ? error.message
-                : t('Failed to fetch usage')
-            )
-          } finally {
-            setIsUpdating(false)
-          }
-        }}
-        isRefreshing={isUpdating}
-      />
+          }}
+          isRefreshing={isUpdating}
+        />
+      </LazyMount>
     </TooltipProvider>
   )
 }
@@ -426,7 +443,11 @@ function BalanceCell({ channel }: { channel: Channel }) {
 /**
  * Generate channels columns configuration
  */
-export function useChannelsColumns(): ColumnDef<Channel>[] {
+export function useChannelsColumns({
+  getTopPriority,
+}: {
+  getTopPriority: () => Promise<number>
+}): ColumnDef<Channel>[] {
   const { t } = useTranslation()
   return [
     // Checkbox column
@@ -532,7 +553,49 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
 
         // Regular channel row
         const settings = parseChannelSettings(channel.setting)
+        const compactSettings = parseChannelOtherSettings(channel.settings)
         const isPassThrough = settings.pass_through_body_enabled === true
+        const compactMode = getResponsesCompactModeFromSettings(compactSettings)
+        const compactAutoFallbackActive =
+          isResponsesCompactAutoFallbackActiveFromSettings(compactSettings)
+        const compactAutoFallbackReason = compactAutoFallbackActive
+          ? getResponsesCompactAutoFallbackReasonFromSettings(compactSettings)
+          : ''
+        const compactBadge: {
+          label: string
+          tooltip: string
+          variant: 'amber' | 'blue' | 'purple' | 'success'
+          detail?: string
+        } | null =
+          channel.type === 1
+            ? compactMode === RESPONSES_COMPACT_MODE_AUTO &&
+              compactAutoFallbackActive
+              ? {
+                  label: RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL,
+                  tooltip: RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP,
+                  variant: 'amber',
+                  detail: compactAutoFallbackReason || undefined,
+                }
+              : compactMode === RESPONSES_COMPACT_MODE_AUTO
+                ? {
+                    label: RESPONSES_COMPACT_BADGE_LABELS.auto,
+                    tooltip: RESPONSES_COMPACT_AUTO_TOOLTIP,
+                    variant: 'blue',
+                  }
+                : compactMode === RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
+              ? {
+                  label:
+                    RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
+                  tooltip:
+                    RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
+                  variant: 'purple',
+                }
+              : {
+                  label: RESPONSES_COMPACT_BADGE_LABELS.native,
+                  tooltip: RESPONSES_COMPACT_BADGE_LABELS.native,
+                  variant: 'success',
+                }
+            : null
 
         return (
           <div className='flex items-center gap-2'>
@@ -560,6 +623,32 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
                     size='sm'
                     copyable={false}
                   />
+                )}
+                {compactBadge && (
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <StatusBadge
+                            label={t(compactBadge.label)}
+                            variant={compactBadge.variant}
+                            size='sm'
+                            copyable={false}
+                          />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side='top'>
+                        <div className='max-w-xs space-y-1'>
+                          <div>{t(compactBadge.tooltip)}</div>
+                          {compactBadge.detail && (
+                            <div className='text-muted-foreground text-xs'>
+                              {compactBadge.detail}
+                            </div>
+                          )}
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 )}
                 <UpstreamUpdateTags channel={channel} />
               </div>
@@ -659,10 +748,10 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
                       onClick={(e) => {
                         e.stopPropagation()
                         if (!deploymentId) return
-                        const targetUrl = `/console/deployment?deployment_id=${deploymentId}`
-                        window.open(targetUrl, '_blank', 'noopener')
-                      }}
-                    >
+                          const targetUrl = `/models/deployments?dFilter=${encodeURIComponent(String(deploymentId))}`
+                          window.open(targetUrl, '_blank', 'noopener')
+                        }}
+                      >
                       <span className='text-muted-foreground/30'>·</span>
                       <span className={cn(textColorMap.purple)}>IO.NET</span>
                     </span>
@@ -1034,7 +1123,7 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
           )
         }
 
-        return <DataTableRowActions row={row} />
+        return <DataTableRowActions row={row} getTopPriority={getTopPriority} />
       },
       size: 132,
       enableSorting: false,

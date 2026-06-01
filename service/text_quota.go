@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -319,6 +320,133 @@ func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) 
 	return "openai"
 }
 
+type responsesCompactLogDetails struct {
+	Mode              string
+	Setting           string
+	UpstreamPath      string
+	AutoFallback      bool
+	ContextFallback   bool
+	SummaryModel      string
+	SummaryModels     []string
+	SummaryModelRetry bool
+}
+
+func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, now time.Time) (responsesCompactLogDetails, bool) {
+	if relayInfo == nil || relayInfo.RelayMode != relayconstant.RelayModeResponsesCompact {
+		if ctx == nil || ctx.GetInt("relay_mode") != relayconstant.RelayModeResponsesCompact {
+			return responsesCompactLogDetails{}, false
+		}
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	settings := dto.ChannelOtherSettings{}
+	channelType := 0
+	if relayInfo != nil && relayInfo.ChannelMeta != nil {
+		settings = relayInfo.ChannelMeta.ChannelOtherSettings
+		channelType = relayInfo.ChannelMeta.ChannelType
+	}
+	if ctx != nil {
+		if channelType == 0 {
+			channelType = ctx.GetInt("channel_type")
+		}
+		if ctxSettings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](ctx, constant.ContextKeyChannelOtherSetting); ok {
+			settings = ctxSettings
+		}
+	}
+
+	setting := settings.NormalizedResponsesCompactModeSetting()
+	effective := settings.ResponsesCompactModeOrDefaultAt(now)
+	autoFallback := setting == dto.ResponsesCompactModeAuto && settings.HasActiveResponsesCompactAutoFallback(now)
+	if ctx != nil && ctx.GetBool("responses_compact_auto_fallback_attempted") {
+		setting = dto.ResponsesCompactModeAuto
+		effective = dto.ResponsesCompactModeSynthetic
+		autoFallback = true
+	}
+	contextFallback := false
+	summaryModelRetry := false
+	summaryModel := ""
+	if ctx != nil {
+		contextFallback = ctx.GetBool("responses_compact_context_fallback_attempted")
+		summaryModelRetry = ctx.GetBool("responses_compact_summary_model_fallback_attempted")
+		summaryModel = common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactSummaryModel)
+	}
+	summaryModels := []string(nil)
+	if ctx != nil {
+		summaryModels = common.GetContextKeyStringSlice(ctx, constant.ContextKeyResponsesCompactSummaryModels)
+	}
+
+	mode := string(dto.ResponsesCompactModeNative)
+	upstreamPath := "/v1/responses/compact"
+	if channelType == constant.ChannelTypeOpenAI && effective == dto.ResponsesCompactModeSynthetic {
+		mode = string(dto.ResponsesCompactModeSynthetic)
+		upstreamPath = "/v1/responses"
+	}
+
+	return responsesCompactLogDetails{
+		Mode:              mode,
+		Setting:           string(setting),
+		UpstreamPath:      upstreamPath,
+		AutoFallback:      autoFallback,
+		ContextFallback:   contextFallback,
+		SummaryModel:      summaryModel,
+		SummaryModels:     summaryModels,
+		SummaryModelRetry: summaryModelRetry,
+	}, true
+}
+
+func appendResponsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, extraContent []string, other map[string]interface{}, now time.Time) ([]string, map[string]interface{}) {
+	logInfo, ok := responsesCompactLogInfo(ctx, relayInfo, now)
+	if !ok {
+		return extraContent, other
+	}
+	if other == nil {
+		other = make(map[string]interface{})
+	}
+	other["responses_compact_mode"] = logInfo.Mode
+	other["responses_compact_setting"] = logInfo.Setting
+	other["responses_compact_upstream_path"] = logInfo.UpstreamPath
+	if logInfo.AutoFallback {
+		other["responses_compact_auto_fallback"] = true
+	}
+	if logInfo.ContextFallback {
+		other["responses_compact_context_fallback"] = true
+	}
+	if logInfo.SummaryModelRetry {
+		other["responses_compact_summary_model_fallback"] = true
+	}
+	if logInfo.SummaryModel != "" {
+		other["responses_compact_summary_model"] = logInfo.SummaryModel
+	}
+	if len(logInfo.SummaryModels) > 0 {
+		other["responses_compact_summary_models"] = logInfo.SummaryModels
+	}
+	content := fmt.Sprintf("Responses Compact mode=%s setting=%s path=%s", logInfo.Mode, logInfo.Setting, logInfo.UpstreamPath)
+	if logInfo.AutoFallback {
+		content += " auto_fallback=true"
+	}
+	if logInfo.ContextFallback {
+		content += " context_fallback=true"
+	}
+	if logInfo.SummaryModelRetry {
+		content += " summary_model_fallback=true"
+	}
+	if logInfo.SummaryModel != "" {
+		content += fmt.Sprintf(" summary_model=%s", logInfo.SummaryModel)
+	}
+	if len(logInfo.SummaryModels) > 0 {
+		content += fmt.Sprintf(" summary_models=%s", strings.Join(logInfo.SummaryModels, ","))
+	}
+	if ctx != nil {
+		logger.LogInfo(ctx, content)
+	}
+	return append(extraContent, content), other
+}
+
+func AppendResponsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, extraContent []string, other map[string]interface{}, now time.Time) ([]string, map[string]interface{}) {
+	return appendResponsesCompactLogInfo(ctx, relayInfo, extraContent, other, now)
+}
+
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) {
 	originUsage := usage
 	if usage == nil {
@@ -384,7 +512,6 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		extraContent = append(extraContent, fmt.Sprintf("模型 %s", summary.ModelName))
 	}
 
-	logContent := strings.Join(extraContent, ", ")
 	var other map[string]interface{}
 	if summary.IsClaudeUsageSemantic {
 		other = GenerateClaudeOtherInfo(ctx, relayInfo,
@@ -458,6 +585,8 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if tieredBillingApplied {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
+	extraContent, other = appendResponsesCompactLogInfo(ctx, relayInfo, extraContent, other, time.Now())
+	logContent := strings.Join(extraContent, ", ")
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,

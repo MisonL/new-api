@@ -28,11 +28,7 @@ import {
   copy,
   toBoolean,
 } from '../../helpers';
-import {
-  CHANNEL_OPTIONS,
-  ITEMS_PER_PAGE,
-  MODEL_TABLE_PAGE_SIZE,
-} from '../../constants';
+import { CHANNEL_OPTIONS, MODEL_TABLE_PAGE_SIZE } from '../../constants';
 import { useIsMobile } from '../common/useIsMobile';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 import { useChannelUpstreamUpdates } from './useChannelUpstreamUpdates';
@@ -45,6 +41,47 @@ import {
   DEFAULT_MODEL_TEST_RUNTIME_CONFIG,
 } from '../../components/table/channels/modelTestRuntimeConfig';
 
+const CHANNEL_PAGE_SIZE_STORAGE_KEY = 'channel-page-size';
+const LEGACY_PAGE_SIZE_STORAGE_KEY = 'page-size';
+const DEFAULT_CHANNEL_PAGE_SIZE = 20;
+const CHANNEL_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+
+const parseStoredChannelPageSize = (value) => {
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    return null;
+  }
+  const size = Number(value);
+  return CHANNEL_PAGE_SIZE_OPTIONS.includes(size) ? size : null;
+};
+
+const getStoredChannelPageSize = () => {
+  try {
+    const storedSize = parseStoredChannelPageSize(
+      localStorage.getItem(CHANNEL_PAGE_SIZE_STORAGE_KEY),
+    );
+    if (storedSize) {
+      return storedSize;
+    }
+
+    const legacySize = parseStoredChannelPageSize(
+      localStorage.getItem(LEGACY_PAGE_SIZE_STORAGE_KEY),
+    );
+    if (legacySize) {
+      localStorage.setItem(CHANNEL_PAGE_SIZE_STORAGE_KEY, String(legacySize));
+      return legacySize;
+    }
+  } catch (error) {
+    console.error('getStoredChannelPageSize failed', {
+      key: CHANNEL_PAGE_SIZE_STORAGE_KEY,
+      legacyKey: LEGACY_PAGE_SIZE_STORAGE_KEY,
+      error,
+    });
+    return DEFAULT_CHANNEL_PAGE_SIZE;
+  }
+
+  return DEFAULT_CHANNEL_PAGE_SIZE;
+};
+
 export const useChannelsData = () => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -55,7 +92,7 @@ export const useChannelsData = () => {
   const [activePage, setActivePage] = useState(1);
   const [idSort, setIdSort] = useState(false);
   const [searching, setSearching] = useState(false);
-  const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
+  const [pageSize, setPageSize] = useState(() => getStoredChannelPageSize());
   const [channelCount, setChannelCount] = useState(0);
   const [groupOptions, setGroupOptions] = useState([]);
 
@@ -185,15 +222,13 @@ export const useChannelsData = () => {
   // Initialize from localStorage
   useEffect(() => {
     const localIdSort = localStorage.getItem('id-sort') === 'true';
-    const localPageSize =
-      parseInt(localStorage.getItem('page-size')) || ITEMS_PER_PAGE;
+    const localPageSize = getStoredChannelPageSize();
     const localEnableTagMode =
       localStorage.getItem('enable-tag-mode') === 'true';
     const localEnableBatchDelete =
       localStorage.getItem('enable-batch-delete') === 'true';
 
     setIdSort(localIdSort);
-    setPageSize(localPageSize);
     setEnableTagMode(localEnableTagMode);
     setEnableBatchDelete(localEnableBatchDelete);
 
@@ -574,7 +609,7 @@ export const useChannelsData = () => {
   };
 
   const handlePageSizeChange = async (size) => {
-    localStorage.setItem('page-size', size + '');
+    localStorage.setItem(CHANNEL_PAGE_SIZE_STORAGE_KEY, String(size));
     setPageSize(size);
     setActivePage(1);
     const { searchKeyword, searchGroup, searchModel } = getFormValues();
@@ -1186,6 +1221,7 @@ export const useChannelsData = () => {
     searching,
     activePage,
     pageSize,
+    pageSizeOptions: CHANNEL_PAGE_SIZE_OPTIONS,
     channelCount,
     groupOptions,
     idSort,

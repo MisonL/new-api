@@ -105,7 +105,7 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		info.ApiKey = key
 	}
 
-	// 提取 remix 参数（时长、分辨率 → OtherRatios）
+	// 提取 remix 参数（时长、分辨率 -> OtherRatios）
 	if info.Action == constant.TaskActionRemix {
 		if originTask.PrivateData.BillingContext != nil {
 			// 新的 remix 逻辑：直接从原始任务的 BillingContext 中提取 OtherRatios（如果存在）
@@ -137,14 +137,14 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 }
 
 // RelayTaskSubmit 完成 task 提交的全部流程（每次尝试调用一次）：
-// 刷新渠道元数据 → 确定 platform/adaptor → 验证请求 →
-// 估算计费(EstimateBilling) → 计算价格 → 预扣费（仅首次）→
-// 构建/发送/解析上游请求 → 提交后计费调整(AdjustBillingOnSubmit)。
+// 刷新渠道元数据 -> 确定 platform/adaptor -> 验证请求 ->
+// 估算计费(EstimateBilling) -> 计算价格 -> 预扣费（仅首次）->
+// 构建/发送/解析上游请求 -> 提交后计费调整(AdjustBillingOnSubmit)。
 // 控制器负责 defer Refund 和成功后 Settle。
 func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
 	info.InitChannelMeta(c)
 
-	// 1. 确定 platform → 创建适配器 → 验证请求
+	// 1. 确定 platform -> 创建适配器 -> 验证请求
 	platform := constant.TaskPlatform(c.GetString("platform"))
 	if platform == "" {
 		platform = GetTaskPlatform(c)
@@ -202,7 +202,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 
-	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
+	// 7. 预扣费（仅首次 - 重试时 info.Billing 已存在，跳过）
 	if info.Billing == nil && !info.PriceData.FreeModel {
 		info.ForcePreConsume = true
 		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
@@ -258,7 +258,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。
-// 公式: baseQuota × ∏(ratio) — 其中 baseQuota 是不含 OtherRatios 的基础额度。
+// 公式: baseQuota x ∏(ratio) - 其中 baseQuota 是不含 OtherRatios 的基础额度。
 func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float64) int {
 	// 从 PriceData 获取不含 OtherRatios 的基础价格
 	baseQuota := info.PriceData.Quota
@@ -470,11 +470,11 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		task.Progress = ti.Progress
 	}
 	if strings.HasPrefix(ti.Url, "data:") {
-		// data: URI — kept in Data, not ResultURL
+		// data: URI - kept in Data, not ResultURL
 	} else if ti.Url != "" {
 		task.PrivateData.ResultURL = ti.Url
 	} else if task.Status == model.TaskStatusSuccess {
-		// No URL from adaptor — construct proxy URL using public task ID
+		// No URL from adaptor - construct proxy URL using public task ID
 		task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 	}
 

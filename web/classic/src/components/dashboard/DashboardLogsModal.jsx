@@ -321,6 +321,7 @@ const DashboardLogsModal = ({
               pageSizeOptions: [10, 20, 50, 100],
               showSizeChanger: !isMobile,
               showTotal: fastPage ? false : undefined,
+              showQuickJumper: true,
               onPageChange: (nextPage) => loadLogs(nextPage, pageSize),
               onPageSizeChange: (nextPageSize) => {
                 setPageSize(nextPageSize);

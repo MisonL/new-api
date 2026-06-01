@@ -84,6 +84,10 @@ export const getUserRoleOptions = (t: (key: string) => string) => [
 
 export const DEFAULT_GROUP = 'default' as const
 
+export const USER_PASSWORD_MIN_LENGTH = 8
+export const USER_PASSWORD_MAX_LENGTH = 20
+export const USER_PASSWORD_LENGTH_MESSAGE = 'Enter password (8-20 characters)'
+
 // ============================================================================
 // Third-party Binding Fields
 // ============================================================================

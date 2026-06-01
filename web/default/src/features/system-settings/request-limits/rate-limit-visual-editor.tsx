@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { LazyMount } from '@/components/lazy-mount'
 import { safeJsonParseWithValidation } from '../utils/json-parser'
 import { isObjectRecord } from '../utils/json-validators'
 import { RateLimitDialog, type RateLimitEntryData } from './rate-limit-dialog'
@@ -188,12 +189,14 @@ export function RateLimitVisualEditor({
         </div>
       )}
 
-      <RateLimitDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        onSave={handleSave}
-        editData={editData}
-      />
+      <LazyMount open={dialogOpen}>
+        <RateLimitDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          onSave={handleSave}
+          editData={editData}
+        />
+      </LazyMount>
     </div>
   )
 }

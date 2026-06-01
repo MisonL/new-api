@@ -122,21 +122,18 @@ const ViewDetailsModal = ({ visible, onCancel, deployment, t }) => {
 
   const getStatusConfig = (status) => {
     const statusConfig = {
-      running: { color: 'green', text: '运行中', icon: '🟢' },
-      completed: { color: 'green', text: '已完成', icon: '✅' },
-      'deployment requested': { color: 'blue', text: '部署请求中', icon: '🔄' },
-      'termination requested': {
-        color: 'orange',
-        text: '终止请求中',
-        icon: '⏸️',
-      },
-      destroyed: { color: 'red', text: '已销毁', icon: '🔴' },
-      failed: { color: 'red', text: '失败', icon: '❌' },
+      running: { color: 'green', text: '运行中' },
+      completed: { color: 'green', text: '已完成' },
+      'deployment requested': { color: 'blue', text: '部署请求中' },
+      'termination requested': { color: 'orange', text: '终止请求中' },
+      destroyed: { color: 'red', text: '已销毁' },
+      failed: { color: 'red', text: '失败' },
     };
-    return statusConfig[status] || { color: 'grey', text: status, icon: '❓' };
+    return statusConfig[status] || { color: 'grey', text: status };
   };
 
-  const statusConfig = getStatusConfig(deployment?.status);
+  const currentStatus = details?.status || deployment?.status;
+  const statusConfig = getStatusConfig(currentStatus);
 
   return (
     <Modal
@@ -211,7 +208,6 @@ const ViewDetailsModal = ({ visible, onCancel, deployment, t }) => {
                   key: t('状态'),
                   value: (
                     <div className='flex items-center gap-2'>
-                      <span>{statusConfig.icon}</span>
                       <Tag color={statusConfig.color}>
                         {t(statusConfig.text)}
                       </Tag>
@@ -484,7 +480,11 @@ const ViewDetailsModal = ({ visible, onCancel, deployment, t }) => {
             <Card
               title={
                 <div className='flex items-center gap-2'>
-                  <FaMapMarkerAlt className='text-orange-500' />
+                  <FaMapMarkerAlt
+                    className='text-orange-500'
+                    aria-hidden={true}
+                    focusable={false}
+                  />
                   <span>{t('部署位置')}</span>
                 </div>
               }
@@ -494,7 +494,11 @@ const ViewDetailsModal = ({ visible, onCancel, deployment, t }) => {
                 {details.locations.map((location) => (
                   <Tag key={location.id} color='orange' size='large'>
                     <div className='flex items-center gap-1'>
-                      <span>🌍</span>
+                      <FaMapMarkerAlt
+                        className='text-orange-500'
+                        aria-hidden={true}
+                        focusable={false}
+                      />
                       <span>
                         {location.name} ({location.iso2})
                       </span>

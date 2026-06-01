@@ -58,7 +58,6 @@ const ChangePasswordModal = ({
             placeholder={t('请输入原密码')}
             type='password'
             autoComplete='current-password'
-            autocomplete='current-password'
             value={inputs.original_password}
             onChange={(value) => handleInputChange('original_password', value)}
             size='large'
@@ -76,7 +75,6 @@ const ChangePasswordModal = ({
             placeholder={t('请输入新密码')}
             type='password'
             autoComplete='new-password'
-            autocomplete='new-password'
             value={inputs.set_new_password}
             onChange={(value) => handleInputChange('set_new_password', value)}
             size='large'
@@ -94,7 +92,6 @@ const ChangePasswordModal = ({
             placeholder={t('请再次输入新密码')}
             type='password'
             autoComplete='new-password'
-            autocomplete='new-password'
             value={inputs.set_new_password_confirmation}
             onChange={(value) =>
               handleInputChange('set_new_password_confirmation', value)

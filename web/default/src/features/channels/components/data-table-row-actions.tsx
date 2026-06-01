@@ -16,6 +16,7 @@ import {
   Trash2,
   RefreshCw,
   Loader2,
+  Pin,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -32,13 +33,17 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { toast } from 'sonner'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { LazyMount } from '@/components/lazy-mount'
 import { MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   channelsQueryKeys,
   handleDeleteChannel,
   handleTestChannel,
   handleToggleChannelStatus,
+  handleUpdateChannelField,
+  getNextTopChannelPriority,
   isChannelEnabled,
   isMultiKeyChannel,
 } from '../lib'
@@ -48,9 +53,13 @@ import { useChannels } from './channels-provider'
 
 interface DataTableRowActionsProps {
   row: Row<Channel>
+  getTopPriority: () => Promise<number>
 }
 
-export function DataTableRowActions({ row }: DataTableRowActionsProps) {
+export function DataTableRowActions({
+  row,
+  getTopPriority,
+}: DataTableRowActionsProps) {
   const { t } = useTranslation()
   const channel = row.original
   const { setOpen, setCurrentRow, upstream } = useChannels()
@@ -58,6 +67,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
+  const [isPinning, setIsPinning] = useState(false)
 
   const isEnabled = isChannelEnabled(channel)
   const isMultiKey = isMultiKeyChannel(channel)
@@ -102,6 +112,28 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const handleCopy = () => {
     setCurrentRow(channel)
     setOpen('copy-channel')
+  }
+
+  const handlePinToTop = async () => {
+    setIsPinning(true)
+    try {
+      const topPriority = await getTopPriority()
+      const nextPriority = getNextTopChannelPriority(channel, [
+        { priority: topPriority },
+      ])
+      await handleUpdateChannelField(
+        channel.id,
+        'priority',
+        nextPriority,
+        queryClient
+      )
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t('Failed to pin channel')
+      )
+    } finally {
+      setIsPinning(false)
+    }
   }
 
   const handleManageKeys = () => {
@@ -181,6 +213,20 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align='end' className='w-48'>
+          {/* Pin to top */}
+          <DropdownMenuItem onClick={handlePinToTop} disabled={isPinning}>
+            {isPinning ? t('Pinning...') : t('Pin to Top')}
+            <DropdownMenuShortcut>
+              {isPinning ? (
+                <Loader2 size={16} className='animate-spin' />
+              ) : (
+                <Pin size={16} />
+              )}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+
           {/* Edit */}
           <DropdownMenuItem onClick={handleEdit}>
             {t('Edit')}
@@ -288,18 +334,20 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <ConfirmDialog
-        open={deleteConfirmOpen}
-        onOpenChange={setDeleteConfirmOpen}
-        title={t('Delete Channel')}
-        desc={`Are you sure you want to delete "${channel.name}"? This action cannot be undone.`}
-        confirmText='Delete'
-        destructive
-        handleConfirm={() => {
-          handleDeleteChannel(channel.id, queryClient)
-          setDeleteConfirmOpen(false)
-        }}
-      />
+      <LazyMount open={deleteConfirmOpen}>
+        <ConfirmDialog
+          open={deleteConfirmOpen}
+          onOpenChange={setDeleteConfirmOpen}
+          title={t('Delete Channel')}
+          desc={`Are you sure you want to delete "${channel.name}"? This action cannot be undone.`}
+          confirmText='Delete'
+          destructive
+          handleConfirm={() => {
+            handleDeleteChannel(channel.id, queryClient)
+            setDeleteConfirmOpen(false)
+          }}
+        />
+      </LazyMount>
     </div>
   )
 }

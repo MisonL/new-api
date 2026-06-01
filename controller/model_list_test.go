@@ -146,6 +146,17 @@ func decodeListModelsResponse(t *testing.T, recorder *httptest.ResponseRecorder)
 	return ids
 }
 
+func decodeListModelsPayload(t *testing.T, recorder *httptest.ResponseRecorder) listModelsResponse {
+	t.Helper()
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload listModelsResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.True(t, payload.Success)
+	require.Equal(t, "list", payload.Object)
+	return payload
+}
+
 func pricingByModelName(pricings []model.Pricing) map[string]model.Pricing {
 	byName := make(map[string]model.Pricing, len(pricings))
 	for _, pricing := range pricings {
@@ -239,4 +250,46 @@ func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 	require.NotContains(t, ids, "zz-token-tiered-empty-expr-model")
 	require.NotContains(t, ids, "zz-token-tiered-missing-expr-model")
 	require.NotContains(t, ids, "zz-token-unpriced-model")
+}
+
+func TestListModelsUsesActiveChannelOwner(t *testing.T) {
+	previousSelfUseMode := operation_setting.SelfUseModeEnabled
+	operation_setting.SelfUseModeEnabled = true
+	t.Cleanup(func() {
+		operation_setting.SelfUseModeEnabled = previousSelfUseMode
+	})
+
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.User{
+		Id:       1002,
+		Username: "model-owner-user",
+		Password: "password",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Channel{
+		{Id: 1, Name: "openai-disabled", Key: "sk-openai", Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusManuallyDisabled},
+		{Id: 2, Name: "codex-enabled", Key: "sk-codex", Type: constant.ChannelTypeCodex, Status: common.ChannelStatusEnabled},
+	}).Error)
+	codexPriority := int64(10)
+	openAIPriority := int64(100)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "gpt-5", ChannelId: 1, Enabled: true, Priority: &openAIPriority},
+		{Group: "default", Model: "gpt-5", ChannelId: 2, Enabled: true, Priority: &codexPriority},
+	}).Error)
+	require.Contains(t, model.GetGroupEnabledModels("default"), "gpt-5")
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	ctx.Set("id", 1002)
+
+	ListModels(ctx, constant.ChannelTypeOpenAI)
+
+	payload := decodeListModelsPayload(t, recorder)
+	owners := make(map[string]string, len(payload.Data))
+	for _, item := range payload.Data {
+		owners[item.Id] = item.OwnedBy
+	}
+	require.Equal(t, "codex", owners["gpt-5"])
 }

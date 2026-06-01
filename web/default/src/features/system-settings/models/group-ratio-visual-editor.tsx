@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { LazyMount } from '@/components/lazy-mount'
 import { safeJsonParse } from '../utils/json-parser'
 
 type GroupRatioVisualEditorProps = {
@@ -745,92 +746,108 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
       </Card>
 
       {/* Simple Group Dialog */}
-      <SimpleGroupDialog
-        open={simpleDialogOpen}
-        onOpenChange={setSimpleDialogOpen}
-        onSave={handleSimpleSave}
-        editData={simpleEditData}
-        type={simpleDialogType}
-      />
+      <LazyMount open={simpleDialogOpen}>
+        <SimpleGroupDialog
+          open={simpleDialogOpen}
+          onOpenChange={setSimpleDialogOpen}
+          onSave={handleSimpleSave}
+          editData={simpleEditData}
+          type={simpleDialogType}
+        />
+      </LazyMount>
 
       {/* Usable Group Dialog */}
-      <UsableGroupDialog
-        open={usableDialogOpen}
-        onOpenChange={setUsableDialogOpen}
-        onSave={handleUsableSave}
-        editData={usableEditData}
-      />
+      <LazyMount open={usableDialogOpen}>
+        <UsableGroupDialog
+          open={usableDialogOpen}
+          onOpenChange={setUsableDialogOpen}
+          onSave={handleUsableSave}
+          editData={usableEditData}
+        />
+      </LazyMount>
 
       {/* Auto Group Dialog */}
-      <Dialog open={autoGroupDialogOpen} onOpenChange={setAutoGroupDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('Add auto group')}</DialogTitle>
-            <DialogDescription>
-              {t('Add a group identifier to the auto assignment list.')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className='space-y-4 py-4'>
-            <div className='space-y-2'>
-              <Label>{t('Group identifier')}</Label>
-              <Input
-                value={autoGroupInput}
-                onChange={(e) => setAutoGroupInput(e.target.value)}
-                placeholder={t('default')}
-              />
+      <LazyMount open={autoGroupDialogOpen}>
+        <Dialog
+          open={autoGroupDialogOpen}
+          onOpenChange={setAutoGroupDialogOpen}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('Add auto group')}</DialogTitle>
+              <DialogDescription>
+                {t('Add a group identifier to the auto assignment list.')}
+              </DialogDescription>
+            </DialogHeader>
+            <div className='space-y-4 py-4'>
+              <div className='space-y-2'>
+                <Label>{t('Group identifier')}</Label>
+                <Input
+                  value={autoGroupInput}
+                  onChange={(e) => setAutoGroupInput(e.target.value)}
+                  placeholder={t('default')}
+                />
+              </div>
             </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant='outline'
-              onClick={() => setAutoGroupDialogOpen(false)}
-            >
-              {t('Cancel')}
-            </Button>
-            <Button onClick={handleAutoGroupSave}>{t('Add')}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button
+                variant='outline'
+                onClick={() => setAutoGroupDialogOpen(false)}
+              >
+                {t('Cancel')}
+              </Button>
+              <Button onClick={handleAutoGroupSave}>{t('Add')}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </LazyMount>
 
       {/* User Group Dialog */}
-      <Dialog open={userGroupDialogOpen} onOpenChange={setUserGroupDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('Add user group')}</DialogTitle>
-            <DialogDescription>
-              {t('Create a new user group to configure ratio overrides for.')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className='space-y-4 py-4'>
-            <div className='space-y-2'>
-              <Label>{t('User group name')}</Label>
-              <Input
-                value={userGroupInput}
-                onChange={(e) => setUserGroupInput(e.target.value)}
-                placeholder={t('vip')}
-              />
+      <LazyMount open={userGroupDialogOpen}>
+        <Dialog
+          open={userGroupDialogOpen}
+          onOpenChange={setUserGroupDialogOpen}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('Add user group')}</DialogTitle>
+              <DialogDescription>
+                {t('Create a new user group to configure ratio overrides for.')}
+              </DialogDescription>
+            </DialogHeader>
+            <div className='space-y-4 py-4'>
+              <div className='space-y-2'>
+                <Label>{t('User group name')}</Label>
+                <Input
+                  value={userGroupInput}
+                  onChange={(e) => setUserGroupInput(e.target.value)}
+                  placeholder={t('vip')}
+                />
+              </div>
             </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant='outline'
-              onClick={() => setUserGroupDialogOpen(false)}
-            >
-              {t('Cancel')}
-            </Button>
-            <Button onClick={handleUserGroupSave}>{t('Add')}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button
+                variant='outline'
+                onClick={() => setUserGroupDialogOpen(false)}
+              >
+                {t('Cancel')}
+              </Button>
+              <Button onClick={handleUserGroupSave}>{t('Add')}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </LazyMount>
 
       {/* Group Override Dialog */}
-      <GroupOverrideDialog
-        open={groupOverrideDialogOpen}
-        onOpenChange={setGroupOverrideDialogOpen}
-        onSave={handleOverrideSave}
-        editData={groupOverrideEditData}
-        userGroup={groupOverrideUserGroup}
-      />
+      <LazyMount open={groupOverrideDialogOpen}>
+        <GroupOverrideDialog
+          open={groupOverrideDialogOpen}
+          onOpenChange={setGroupOverrideDialogOpen}
+          onSave={handleOverrideSave}
+          editData={groupOverrideEditData}
+          userGroup={groupOverrideUserGroup}
+        />
+      </LazyMount>
     </div>
   )
 })

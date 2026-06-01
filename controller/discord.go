@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -61,7 +60,7 @@ func getDiscordUserInfoByCode(code string) (*DiscordUser, error) {
 	}
 	defer res.Body.Close()
 	var discordResponse DiscordResponse
-	err = json.NewDecoder(res.Body).Decode(&discordResponse)
+	err = common.DecodeJson(res.Body, &discordResponse)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +87,7 @@ func getDiscordUserInfoByCode(code string) (*DiscordUser, error) {
 	}
 
 	var discordUser DiscordUser
-	err = json.NewDecoder(res2.Body).Decode(&discordUser)
+	err = common.DecodeJson(res2.Body, &discordUser)
 	if err != nil {
 		return nil, err
 	}

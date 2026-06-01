@@ -2049,7 +2049,7 @@ func TestGetEffectiveHeaderOverrideSkipsNilValues(t *testing.T) {
 	}
 }
 
-func TestRemoveDisabledFieldsSkipWhenChannelPassThroughEnabled(t *testing.T) {
+func TestRemoveDisabledFieldsSkipOnlyForActualPassThroughBody(t *testing.T) {
 	input := `{
 		"service_tier":"flex",
 		"safety_identifier":"user-123",
@@ -2065,7 +2065,7 @@ func TestRemoveDisabledFieldsSkipWhenChannelPassThroughEnabled(t *testing.T) {
 	assertJSONEqual(t, input, string(out))
 }
 
-func TestRemoveDisabledFieldsSkipWhenGlobalPassThroughEnabled(t *testing.T) {
+func TestRemoveDisabledFieldsFiltersConvertedBodyWhenGlobalPassThroughEnabled(t *testing.T) {
 	original := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	model_setting.GetGlobalSettings().PassThroughRequestEnabled = true
 	t.Cleanup(func() {
@@ -2075,6 +2075,7 @@ func TestRemoveDisabledFieldsSkipWhenGlobalPassThroughEnabled(t *testing.T) {
 	input := `{
 		"service_tier":"flex",
 		"safety_identifier":"user-123",
+		"store":true,
 		"stream_options":{"include_obfuscation":false}
 	}`
 	settings := dto.ChannelOtherSettings{}
@@ -2083,7 +2084,7 @@ func TestRemoveDisabledFieldsSkipWhenGlobalPassThroughEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RemoveDisabledFields returned error: %v", err)
 	}
-	assertJSONEqual(t, input, string(out))
+	assertJSONEqual(t, `{"store":true}`, string(out))
 }
 
 func TestRemoveDisabledFieldsDefaultFiltering(t *testing.T) {
@@ -2103,6 +2104,19 @@ func TestRemoveDisabledFieldsDefaultFiltering(t *testing.T) {
 		t.Fatalf("RemoveDisabledFields returned error: %v", err)
 	}
 	assertJSONEqual(t, `{"cache_control":{"type":"ephemeral"},"store":true}`, string(out))
+}
+
+func TestRemoveDisabledFieldsNoControlledFieldsKeepsBody(t *testing.T) {
+	input := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+	settings := dto.ChannelOtherSettings{}
+
+	out, err := RemoveDisabledFields([]byte(input), settings, false)
+	if err != nil {
+		t.Fatalf("RemoveDisabledFields returned error: %v", err)
+	}
+	if string(out) != input {
+		t.Fatalf("expected body to stay unchanged, got: %s", string(out))
+	}
 }
 
 func TestRemoveDisabledFieldsAllowInferenceGeo(t *testing.T) {
@@ -2233,6 +2247,110 @@ func TestApplyParamOverrideWithRelayInfoRecordsOnlyKeyOperationsWhenDebugDisable
 	}
 	if !reflect.DeepEqual(info.ParamOverrideAudit, expected) {
 		t.Fatalf("unexpected param override audit, got %#v", info.ParamOverrideAudit)
+	}
+}
+
+func TestApplyParamOverrideWithRelayInfoRecordsConversationBodyOperationsWhenDebugDisabled(t *testing.T) {
+	originalDebugEnabled := common2.DebugEnabled
+	common2.DebugEnabled = false
+	t.Cleanup(func() {
+		common2.DebugEnabled = originalDebugEnabled
+	})
+
+	info := &RelayInfo{
+		ChannelMeta: &ChannelMeta{
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"mode": "replace",
+						"path": "messages.0.content",
+						"from": "hello",
+						"to":   "hi",
+					},
+					map[string]interface{}{
+						"mode":  "set",
+						"path":  "input.0.content.0.text",
+						"value": "rewritten response input",
+					},
+					map[string]interface{}{
+						"mode":  "set",
+						"path":  "instructions",
+						"value": "new instruction",
+					},
+					map[string]interface{}{
+						"mode":  "append",
+						"path":  "contents.0.parts",
+						"value": map[string]interface{}{"text": "new gemini part"},
+					},
+					map[string]interface{}{
+						"mode": "copy",
+						"from": "system",
+						"to":   "metadata.system_copy",
+					},
+					map[string]interface{}{
+						"mode":  "set",
+						"path":  "temperature",
+						"value": 0.1,
+					},
+				},
+			},
+		},
+	}
+
+	out, err := ApplyParamOverrideWithRelayInfo([]byte(`{
+		"messages":[{"role":"user","content":"hello world"}],
+		"input":[{"role":"user","content":[{"type":"input_text","text":"original response input"}]}],
+		"instructions":"old instruction",
+		"system":"old system",
+		"contents":[{"role":"user","parts":[{"text":"hello gemini"}]}],
+		"temperature":0.7
+	}`), info)
+	if err != nil {
+		t.Fatalf("ApplyParamOverrideWithRelayInfo returned error: %v", err)
+	}
+	assertJSONEqual(t, `{
+		"messages":[{"role":"user","content":"hi world"}],
+		"input":[{"role":"user","content":[{"type":"input_text","text":"rewritten response input"}]}],
+		"instructions":"new instruction",
+		"system":"old system",
+		"contents":[{"role":"user","parts":[{"text":"hello gemini"},{"text":"new gemini part"}]}],
+		"temperature":0.1,
+		"metadata":{"system_copy":"old system"}
+	}`, string(out))
+
+	expected := []string{
+		"replace messages.0.content from hello to hi",
+		"set input.0.content.0.text = rewritten response input",
+		"set instructions = new instruction",
+		"append contents.0.parts with {\"text\":\"new gemini part\"}",
+		"copy system -> metadata.system_copy",
+	}
+	if !reflect.DeepEqual(info.ParamOverrideAudit, expected) {
+		t.Fatalf("unexpected param override audit, got %#v", info.ParamOverrideAudit)
+	}
+}
+
+func TestShouldAuditParamPathUsesFieldBoundaryPrefixMatching(t *testing.T) {
+	originalDebugEnabled := common2.DebugEnabled
+	common2.DebugEnabled = false
+	t.Cleanup(func() {
+		common2.DebugEnabled = originalDebugEnabled
+	})
+
+	if !shouldAuditParamPath("messages") {
+		t.Fatal("expected messages to be audited")
+	}
+	if !shouldAuditParamPath("messages.0.content") {
+		t.Fatal("expected nested messages path to be audited")
+	}
+	if !shouldAuditParamPath("systemInstruction.parts.0.text") {
+		t.Fatal("expected nested systemInstruction path to be audited")
+	}
+	if shouldAuditParamPath("model_name") {
+		t.Fatal("expected model_name not to match model boundary")
+	}
+	if shouldAuditParamPath("message") {
+		t.Fatal("expected message not to match messages boundary")
 	}
 }
 

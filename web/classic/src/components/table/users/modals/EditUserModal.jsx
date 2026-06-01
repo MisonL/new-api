@@ -49,6 +49,7 @@ import {
   Radio,
 } from '@douyinfe/semi-ui';
 import {
+  IconChevronDown,
   IconUser,
   IconSave,
   IconClose,
@@ -373,7 +374,7 @@ const EditUserModal = (props) => {
                         name='username'
                         label={t('用户名')}
                         placeholder={t('请输入新的用户名')}
-                        autocomplete='username'
+                        autoComplete='username'
                         rules={[{ required: true, message: t('请输入用户名') }]}
                         showClear
                       />
@@ -385,7 +386,7 @@ const EditUserModal = (props) => {
                         name='password'
                         label={t('密码')}
                         placeholder={t('请输入新的密码，最短 8 位')}
-                        autocomplete='new-password'
+                        autoComplete='new-password'
                         mode='password'
                         showClear
                       />
@@ -397,7 +398,7 @@ const EditUserModal = (props) => {
                         name='display_name'
                         label={t('显示名称')}
                         placeholder={t('请输入新的显示名称')}
-                        autocomplete='name'
+                        autoComplete='name'
                         showClear
                       />
                     </Col>
@@ -408,7 +409,7 @@ const EditUserModal = (props) => {
                         name='remark'
                         label={t('备注')}
                         placeholder={t('请输入备注（仅管理员可见）')}
-                        autocomplete='off'
+                        autoComplete='off'
                         showClear
                       />
                     </Col>
@@ -483,13 +484,34 @@ const EditUserModal = (props) => {
                         <div
                           className='text-xs cursor-pointer'
                           style={{ color: 'var(--semi-color-text-2)' }}
+                          role='button'
+                          tabIndex={0}
+                          aria-expanded={showQuotaInput}
+                          aria-controls='user-quota-raw-panel'
                           onClick={() => setShowQuotaInput((v) => !v)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              setShowQuotaInput((v) => !v);
+                            }
+                          }}
                         >
+                          <IconChevronDown
+                            size='small'
+                            aria-hidden={true}
+                            style={{
+                              marginRight: 4,
+                              transform: showQuotaInput
+                                ? 'none'
+                                : 'rotate(-90deg)',
+                            }}
+                          />
                           {showQuotaInput
-                            ? `▾ ${t('收起原生额度输入')}`
-                            : `▸ ${t('使用原生额度输入')}`}
+                            ? t('收起原生额度输入')
+                            : t('使用原生额度输入')}
                         </div>
                         <div
+                          id='user-quota-raw-panel'
                           style={{ display: showQuotaInput ? 'block' : 'none' }}
                           className='mt-2'
                         >
@@ -624,13 +646,30 @@ const EditUserModal = (props) => {
         <div
           className='text-xs cursor-pointer mt-2'
           style={{ color: 'var(--semi-color-text-2)' }}
+          role='button'
+          tabIndex={0}
+          aria-expanded={showAdjustQuotaRaw}
+          aria-controls='user-adjust-quota-raw-panel'
           onClick={() => setShowAdjustQuotaRaw((v) => !v)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              setShowAdjustQuotaRaw((v) => !v);
+            }
+          }}
         >
-          {showAdjustQuotaRaw
-            ? `▾ ${t('收起原生额度输入')}`
-            : `▸ ${t('使用原生额度输入')}`}
+          <IconChevronDown
+            size='small'
+            aria-hidden={true}
+            style={{
+              marginRight: 4,
+              transform: showAdjustQuotaRaw ? 'none' : 'rotate(-90deg)',
+            }}
+          />
+          {showAdjustQuotaRaw ? t('收起原生额度输入') : t('使用原生额度输入')}
         </div>
         <div
+          id='user-adjust-quota-raw-panel'
           style={{ display: showAdjustQuotaRaw ? 'block' : 'none' }}
           className='mt-2'
         >

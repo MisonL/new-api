@@ -4,6 +4,7 @@ import { useDialogs } from '@/hooks/use-dialog'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TitledCard } from '@/components/ui/titled-card'
+import { LazyMount } from '@/components/lazy-mount'
 import type { UserProfile } from '../types'
 import { AccessTokenDialog } from './dialogs/access-token-dialog'
 import { ChangePasswordDialog } from './dialogs/change-password-dialog'
@@ -109,28 +110,34 @@ export function ProfileSecurityCard({
       </TitledCard>
 
       {/* Dialogs */}
-      <ChangePasswordDialog
-        open={dialogs.isOpen('password')}
-        onOpenChange={(open) =>
-          open ? dialogs.open('password') : dialogs.close('password')
-        }
-        username={profile.username}
-      />
+      <LazyMount open={dialogs.isOpen('password')}>
+        <ChangePasswordDialog
+          open={dialogs.isOpen('password')}
+          onOpenChange={(open) =>
+            open ? dialogs.open('password') : dialogs.close('password')
+          }
+          username={profile.username}
+        />
+      </LazyMount>
 
-      <AccessTokenDialog
-        open={dialogs.isOpen('token')}
-        onOpenChange={(open) =>
-          open ? dialogs.open('token') : dialogs.close('token')
-        }
-      />
+      <LazyMount open={dialogs.isOpen('token')}>
+        <AccessTokenDialog
+          open={dialogs.isOpen('token')}
+          onOpenChange={(open) =>
+            open ? dialogs.open('token') : dialogs.close('token')
+          }
+        />
+      </LazyMount>
 
-      <DeleteAccountDialog
-        open={dialogs.isOpen('delete')}
-        onOpenChange={(open) =>
-          open ? dialogs.open('delete') : dialogs.close('delete')
-        }
-        username={profile.username}
-      />
+      <LazyMount open={dialogs.isOpen('delete')}>
+        <DeleteAccountDialog
+          open={dialogs.isOpen('delete')}
+          onOpenChange={(open) =>
+            open ? dialogs.open('delete') : dialogs.close('delete')
+          }
+          username={profile.username}
+        />
+      </LazyMount>
     </>
   )
 }

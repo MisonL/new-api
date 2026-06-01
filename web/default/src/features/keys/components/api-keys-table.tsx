@@ -13,7 +13,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { useMediaQuery } from '@/hooks'
+import { useDebounce, useMediaQuery } from '@/hooks'
 import { Database } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -27,6 +27,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -206,8 +207,34 @@ export function ApiKeysTable() {
     navigate: route.useNavigate(),
     pagination: { defaultPage: 1, defaultPageSize: 20 },
     globalFilter: { enabled: true, key: 'filter' },
-    columnFilters: [{ columnId: 'status', searchKey: 'status', type: 'array' }],
+    columnFilters: [
+      { columnId: 'status', searchKey: 'status', type: 'array' },
+      { columnId: '_tokenSearch', searchKey: 'token', type: 'string' },
+    ],
   })
+
+  const tokenFilterFromUrl =
+    (columnFilters.find((f) => f.id === '_tokenSearch')?.value as string) || ''
+  const [tokenFilterInput, setTokenFilterInput] = useState(tokenFilterFromUrl)
+  const debouncedTokenFilter = useDebounce(tokenFilterInput, 500)
+
+  useEffect(() => {
+    setTokenFilterInput(tokenFilterFromUrl)
+  }, [tokenFilterFromUrl])
+
+  useEffect(() => {
+    if (debouncedTokenFilter !== tokenFilterFromUrl) {
+      onColumnFiltersChange((prev) => {
+        const filtered = prev.filter((f) => f.id !== '_tokenSearch')
+        return debouncedTokenFilter
+          ? [...filtered, { id: '_tokenSearch', value: debouncedTokenFilter }]
+          : filtered
+      })
+    }
+  }, [debouncedTokenFilter, tokenFilterFromUrl, onColumnFiltersChange])
+
+  const tokenFilter = tokenFilterFromUrl
+  const shouldSearch = Boolean(globalFilter?.trim() || tokenFilter.trim())
 
   // Fetch data with React Query
   // eslint-disable-next-line @tanstack/query/exhaustive-deps
@@ -217,32 +244,31 @@ export function ApiKeysTable() {
       pagination.pageIndex + 1,
       pagination.pageSize,
       globalFilter,
+      tokenFilter,
       refreshTrigger,
     ],
     queryFn: async () => {
-      // If there's a global filter, use search
-      const hasFilter = globalFilter?.trim()
-
-      if (hasFilter) {
-        const result = await searchApiKeys({ keyword: globalFilter })
-        if (!result.success) {
-          toast.error(result.message || t(ERROR_MESSAGES.SEARCH_FAILED))
-          return { items: [], total: 0 }
-        }
-        return {
-          items: result.data || [],
-          total: result.data?.length || 0,
-        }
-      }
-
-      // Otherwise use pagination
-      const result = await getApiKeys({
-        p: pagination.pageIndex + 1,
-        size: pagination.pageSize,
-      })
+      const result = shouldSearch
+        ? await searchApiKeys({
+            keyword: globalFilter,
+            token: tokenFilter,
+            p: pagination.pageIndex + 1,
+            size: pagination.pageSize,
+          })
+        : await getApiKeys({
+            p: pagination.pageIndex + 1,
+            size: pagination.pageSize,
+          })
 
       if (!result.success) {
-        toast.error(result.message || t(ERROR_MESSAGES.LOAD_FAILED))
+        toast.error(
+          result.message ||
+            t(
+              shouldSearch
+                ? ERROR_MESSAGES.SEARCH_FAILED
+                : ERROR_MESSAGES.LOAD_FAILED
+            )
+        )
         return { items: [], total: 0 }
       }
 
@@ -271,13 +297,7 @@ export function ApiKeysTable() {
     onRowSelectionChange: setRowSelection,
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
-    globalFilterFn: (row, _columnId, filterValue) => {
-      const name = String(row.getValue('name')).toLowerCase()
-      const key = String(row.original.key).toLowerCase()
-      const searchValue = String(filterValue).toLowerCase()
-
-      return name.includes(searchValue) || key.includes(searchValue)
-    },
+    globalFilterFn: () => true,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -287,10 +307,8 @@ export function ApiKeysTable() {
     onPaginationChange,
     onGlobalFilterChange,
     onColumnFiltersChange,
-    manualPagination: !globalFilter,
-    pageCount: globalFilter
-      ? Math.ceil((data?.total || 0) / pagination.pageSize)
-      : Math.ceil((data?.total || 0) / pagination.pageSize),
+    manualPagination: true,
+    pageCount: Math.ceil((data?.total || 0) / pagination.pageSize),
   })
 
   const pageCount = table.getPageCount()
@@ -306,7 +324,16 @@ export function ApiKeysTable() {
           <div className='min-w-0 sm:flex sm:justify-end'>
             <DataTableToolbar
               table={table}
-              searchPlaceholder={t('Filter by name or key...')}
+              searchPlaceholder={t('Filter by name...')}
+              additionalSearch={
+                <Input
+                  placeholder={t('Filter by API key...')}
+                  aria-label={t('Filter by API key...')}
+                  value={tokenFilterInput}
+                  onChange={(e) => setTokenFilterInput(e.target.value)}
+                  className='h-8 w-full sm:w-[150px] lg:w-[200px]'
+                />
+              }
               filters={[
                 {
                   columnId: 'status',

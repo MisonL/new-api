@@ -12,8 +12,11 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -117,6 +120,172 @@ func TestApplyChannelTestProtocolStrategyConvertsResponsesCompactToChat(t *testi
 	require.Equal(t, "/v1/chat/completions", info.RequestURLPath)
 	require.Equal(t, "/v1/chat/completions", ctx.Request.URL.Path)
 	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponsesCompaction, types.RelayFormatOpenAI}, info.RequestConversionChain)
+}
+
+func TestApplyChannelTestProtocolStrategyUsesGlobalResponsesToChatRuleByDefault(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	withGlobalProtocolPolicyForTest(t, model_setting.ChatCompletionsToResponsesPolicy{
+		Rules: []model_setting.ProtocolConversionRule{
+			{
+				Name:           "channel-146-all-models",
+				Enabled:        true,
+				SourceEndpoint: model_setting.ProtocolEndpointResponses,
+				TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+				ChannelIDs:     []int{146},
+			},
+		},
+	}, false)
+	info := &relaycommon.RelayInfo{
+		RelayMode:              relayconstant.RelayModeResponses,
+		OriginModelName:        "deepseek-v4-flash",
+		RequestURLPath:         "/v1/responses",
+		RelayFormat:            types.RelayFormatOpenAIResponses,
+		RequestConversionChain: []types.RelayFormat{types.RelayFormatOpenAIResponses},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   146,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Model: "deepseek-v4-flash",
+		Input: json.RawMessage(`[{"role":"user","content":"ping"}]`),
+	}
+
+	converted, err := applyChannelTestProtocolStrategy(ctx, info, request, defaultChannelTestOptions())
+
+	require.NoError(t, err)
+	chatReq, ok := converted.(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+	require.Equal(t, "deepseek-v4-flash", chatReq.Model)
+	require.Equal(t, relayconstant.RelayModeChatCompletions, info.RelayMode)
+	require.Equal(t, "/v1/chat/completions", info.RequestURLPath)
+	require.Equal(t, "/v1/chat/completions", ctx.Request.URL.Path)
+	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponses, types.RelayFormatOpenAI}, info.RequestConversionChain)
+}
+
+func TestResetResponsesCompactAutoFallbackClearsNonOpenAISettings(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeAnthropic,
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AzureResponsesVersion:              "preview",
+		ResponsesCompactMode:               dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackDate:   20260526,
+		ResponsesCompactAutoFallbackReason: "status_code=404",
+	})
+	originChannel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+
+	resetResponsesCompactAutoFallbackOnModeChange(channel, originChannel, false)
+
+	settings := channel.GetOtherSettings()
+	require.Equal(t, "preview", settings.AzureResponsesVersion)
+	require.Empty(t, settings.ResponsesCompactMode)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
+	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
+}
+
+func TestValidateChannelOtherSettingsClearsCompactMetadataForNonOpenAI(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeAnthropic,
+		OtherSettings: `{
+			"azure_responses_version":"preview",
+			"responses_compact_mode":"auto",
+			"responses_compact_auto_fallback_date":20260526,
+			"responses_compact_auto_fallback_reason":"status_code=404"
+		}`,
+	}
+
+	require.NoError(t, validateChannelOtherSettings(channel, map[string]struct{}{}))
+
+	settings := channel.GetOtherSettings()
+	require.Equal(t, "preview", settings.AzureResponsesVersion)
+	require.Empty(t, settings.ResponsesCompactMode)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
+	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
+}
+
+func TestResetResponsesCompactAutoFallbackClearsWhenModeChanges(t *testing.T) {
+	channel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode:               dto.ResponsesCompactModeNative,
+		ResponsesCompactAutoFallbackDate:   20260526,
+		ResponsesCompactAutoFallbackReason: "status_code=404",
+	})
+	originChannel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+	originChannel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode:               dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackDate:   20260526,
+		ResponsesCompactAutoFallbackReason: "status_code=404",
+	})
+
+	resetResponsesCompactAutoFallbackOnModeChange(channel, originChannel, false)
+
+	settings := channel.GetOtherSettings()
+	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactMode)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
+	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
+}
+
+func TestResetResponsesCompactAutoFallbackPreservesWhenModeUnchanged(t *testing.T) {
+	channel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeAuto,
+	})
+	originChannel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+	originChannel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode:               dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackDate:   20260526,
+		ResponsesCompactAutoFallbackReason: "status_code=404",
+	})
+
+	resetResponsesCompactAutoFallbackOnModeChange(channel, originChannel, false)
+
+	settings := channel.GetOtherSettings()
+	require.Equal(t, dto.ResponsesCompactModeAuto, settings.ResponsesCompactMode)
+	require.Equal(t, 20260526, settings.ResponsesCompactAutoFallbackDate)
+	require.Equal(t, "status_code=404", settings.ResponsesCompactAutoFallbackReason)
+}
+
+func TestResetResponsesCompactAutoFallbackAllowsExplicitClearWhenModeUnchanged(t *testing.T) {
+	channel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeAuto,
+	})
+	originChannel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+	originChannel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode:               dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackDate:   20260526,
+		ResponsesCompactAutoFallbackReason: "status_code=404",
+	})
+
+	resetResponsesCompactAutoFallbackOnModeChange(channel, originChannel, true)
+
+	settings := channel.GetOtherSettings()
+	require.Equal(t, dto.ResponsesCompactModeAuto, settings.ResponsesCompactMode)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
+	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
+}
+
+func TestResponsesCompactAutoFallbackMetadataExplicitlySet(t *testing.T) {
+	require.False(t, responsesCompactAutoFallbackMetadataExplicitlySet(""))
+	require.False(t, responsesCompactAutoFallbackMetadataExplicitlySet(`{"responses_compact_mode":"auto"}`))
+	require.True(t, responsesCompactAutoFallbackMetadataExplicitlySet(`{"responses_compact_auto_fallback_date":0}`))
+	require.True(t, responsesCompactAutoFallbackMetadataExplicitlySet(`{"responses_compact_auto_fallback_reason":""}`))
+}
+
+func withGlobalProtocolPolicyForTest(t *testing.T, policy model_setting.ChatCompletionsToResponsesPolicy, passThrough bool) {
+	t.Helper()
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	settings.ChatCompletionsToResponsesPolicy = policy
+	settings.PassThroughRequestEnabled = passThrough
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
 }
 
 func TestDiagnoseChannelTestErrorDetectsCompactUnavailable(t *testing.T) {
@@ -359,4 +528,34 @@ func TestBuildTestLogOtherInjectsTieredInfo(t *testing.T) {
 	require.Equal(t, "tiered_expr", other["billing_mode"])
 	require.Equal(t, "base", other["matched_tier"])
 	require.NotEmpty(t, other["expr_b64"])
+}
+
+func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("id", 2)
+
+	userID, err := resolveChannelTestUserID(ctx)
+
+	require.NoError(t, err)
+	require.Equal(t, 2, userID)
+}
+
+func TestFilterActiveGroupsKeepsConfiguredGroupsAndAuto(t *testing.T) {
+	originalGroupRatio := ratio_setting.GroupRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatio))
+	})
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1}`))
+
+	filtered := filterActiveGroups([]perfmetrics.GroupResult{
+		{Group: "default", RequestCount: 1},
+		{Group: "legacy", RequestCount: 2},
+		{Group: "auto", RequestCount: 3},
+	})
+
+	require.Equal(t, []perfmetrics.GroupResult{
+		{Group: "default", RequestCount: 1},
+		{Group: "auto", RequestCount: 3},
+	}, filtered)
 }

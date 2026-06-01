@@ -34,6 +34,7 @@ export interface CommonLogFilters extends CommonFilters {
   group?: string
   username?: string
   requestId?: string
+  upstreamRequestId?: string
 }
 
 /**
@@ -92,6 +93,7 @@ export interface LogOtherData {
     admin_id?: number | string
   }
   request_path?: string
+  upstream_request_id?: string
   request_conversion?: string[]
   ws?: boolean
   audio?: boolean
@@ -142,6 +144,10 @@ export interface LogOtherData {
   is_system_prompt_overwritten?: boolean
   po?: string[]
   billing_source?: string
+  responses_compact_mode?: string
+  responses_compact_setting?: string
+  responses_compact_upstream_path?: string
+  responses_compact_auto_fallback?: boolean
   group?: string
   stream_status?: {
     status?: string
@@ -249,6 +255,7 @@ export interface GetLogsParams {
   channel?: number
   group?: string
   request_id?: string
+  upstream_request_id?: string
 }
 
 export interface GetLogsResponse {
@@ -272,6 +279,7 @@ export interface GetLogStatsParams {
   channel?: number
   group?: string
   request_id?: string
+  upstream_request_id?: string
 }
 
 export interface GetLogStatsResponse {

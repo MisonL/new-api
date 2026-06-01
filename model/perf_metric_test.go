@@ -3,6 +3,7 @@ package model
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/require"
@@ -62,4 +63,43 @@ func TestUpsertPerfMetricQualifiesIncrementColumns(t *testing.T) {
 		require.True(t, strings.HasPrefix(expr.SQL, "perf_metrics."))
 		require.NotEqual(t, assignment.Column.Name+" + ?", expr.SQL)
 	}
+}
+
+func TestGetPerfMetricsSummaryAllFiltersGroups(t *testing.T) {
+	truncateTables(t)
+
+	now := time.Now().Unix()
+	require.NoError(t, DB.Create(&[]PerfMetric{
+		{
+			ModelName:      "gpt-test",
+			Group:          "default",
+			BucketTs:       now,
+			RequestCount:   2,
+			SuccessCount:   2,
+			TotalLatencyMs: 200,
+			OutputTokens:   40,
+			GenerationMs:   20,
+		},
+		{
+			ModelName:      "gpt-test",
+			Group:          "legacy",
+			BucketTs:       now,
+			RequestCount:   9,
+			SuccessCount:   9,
+			TotalLatencyMs: 900,
+			OutputTokens:   90,
+			GenerationMs:   30,
+		},
+	}).Error)
+
+	summaries, err := GetPerfMetricsSummaryAll(now-1, now+1, []string{"default"})
+
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	require.Equal(t, "gpt-test", summaries[0].ModelName)
+	require.Equal(t, int64(2), summaries[0].RequestCount)
+	require.Equal(t, int64(2), summaries[0].SuccessCount)
+	require.Equal(t, int64(200), summaries[0].TotalLatencyMs)
+	require.Equal(t, int64(40), summaries[0].OutputTokens)
+	require.Equal(t, int64(20), summaries[0].GenerationMs)
 }

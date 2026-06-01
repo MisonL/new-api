@@ -48,6 +48,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import { StatusBadge } from '@/components/status-badge'
 import { applyUpstreamOverwrite } from '../../api'
 import { modelsQueryKeys, vendorsQueryKeys } from '../../lib'
@@ -591,6 +592,13 @@ export function UpstreamConflictDialog({
                             total: totalPagesDisplay,
                           })}
                         </span>
+                        <PageJumpInput
+                          currentPage={currentPageDisplay || 1}
+                          totalPages={totalPagesDisplay}
+                          disabled={totalFilteredFields === 0}
+                          showLabel={false}
+                          onPageChange={(page) => setPageIndex(page - 1)}
+                        />
                         <Button
                           variant='outline'
                           size='icon'

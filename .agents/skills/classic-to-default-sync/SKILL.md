@@ -43,15 +43,15 @@ For each logical change found in Step 1, locate the equivalent file(s) in `web/d
 
 Classify every logical change as one of:
 
-| Status | Meaning |
-|--------|---------|
-| ✅ Already present & optimal | No action needed |
-| ⚠️ Present but suboptimal | Improve: logic, layout, style, or code quality |
-| ❌ Missing | Implement from scratch in default's stack |
+| Status | Meaning | Action |
+|--------|---------|--------|
+| OK | Already present & optimal | No action needed |
+| IMPROVE | Present but suboptimal | Improve: logic, layout, style, or code quality |
+| MISSING | Missing | Implement from scratch in default's stack |
 
 ### Step 4 — Implement
 
-For each **⚠️** or **❌** item:
+For each **IMPROVE** or **MISSING** item:
 
 1. **Read the target file(s) in `web/default`** before editing (required by project conventions).
 2. Implement using `web/default` conventions:
@@ -80,9 +80,9 @@ Summarise the work in a concise table:
 
 | # | Change (from classic commit) | Status | Action taken |
 |---|------------------------------|--------|--------------|
-| 1 | … | ✅ / ⚠️ / ❌ | None / Improved / Implemented |
+| 1 | ... | OK / IMPROVE / MISSING | None / Improved / Implemented |
 
-If every item is ✅ with no action needed, simply reply: **"已完成 — web/default 已具备此次提交的所有功能，且实现质量良好，无需修改。"**
+If every item is OK with no action needed, simply reply: **"已完成 - web/default 已具备此次提交的所有功能，且实现质量良好，无需修改。"**
 
 ## Quality bar
 

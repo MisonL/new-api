@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/tidwall/gjson"
 )
 
 // ThinkingContentInfo tracks streaming state for reasoning/thinking content emission.
@@ -195,6 +196,26 @@ type RelayInfo struct {
 	*TaskRelayInfo
 }
 
+func (info *RelayInfo) SyntheticCompactScope() types.SyntheticCompactStateScope {
+	if info == nil {
+		return types.SyntheticCompactStateScope{}
+	}
+	group := strings.TrimSpace(info.UsingGroup)
+	if group == "" {
+		group = strings.TrimSpace(info.TokenGroup)
+	}
+	scope := types.SyntheticCompactStateScope{
+		UserID:  info.UserId,
+		TokenID: info.TokenId,
+		Group:   group,
+	}
+	if info.ChannelMeta != nil {
+		scope.ChannelID = info.ChannelId
+		scope.ChannelType = info.ChannelType
+	}
+	return scope
+}
+
 func ShouldStripCodexEncryptedContext(info *RelayInfo) bool {
 	if info == nil || info.ChannelMeta == nil || !info.ChannelOtherSettings.StripCodexEncryptedContext {
 		return false
@@ -213,8 +234,39 @@ func ShouldConvertResponsesRequest(info *RelayInfo) bool {
 	if ShouldStripCodexEncryptedContext(info) {
 		return true
 	}
-	return info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+	return IsSyntheticOpenAICompatibleResponsesCompact(info)
+}
+
+func IsOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.RelayMode == relayconstant.RelayModeResponsesCompact &&
 		info.ChannelType == constant.ChannelTypeOpenAI
+}
+
+func IsOpenAICompatibleResponses(info *RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		(info.RelayMode == relayconstant.RelayModeResponses || info.RelayMode == relayconstant.RelayModeResponsesCompact) &&
+		(info.ChannelType == constant.ChannelTypeOpenAI || info.ChannelType == constant.ChannelTypeAzure)
+}
+
+func IsNativeOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
+	return IsOpenAICompatibleResponsesCompact(info) &&
+		info.ChannelOtherSettings.HasNativeResponsesCompact()
+}
+
+func IsSyntheticOpenAICompatibleResponsesCompact(info *RelayInfo) bool {
+	return IsOpenAICompatibleResponsesCompact(info) &&
+		info.ChannelOtherSettings.HasSyntheticResponsesCompact()
+}
+
+func ShouldHandleSyntheticOpenAICompatibleResponses(info *RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ChannelType == constant.ChannelTypeOpenAI &&
+		(info.RelayMode == relayconstant.RelayModeResponses || info.RelayMode == relayconstant.RelayModeResponsesCompact) &&
+		info.ChannelOtherSettings.HasSyntheticResponsesCompact()
 }
 
 // ResetBillingMetadata refunds the active billing session and clears cached billing fields.
@@ -898,8 +950,11 @@ func FailTaskInfo(reason string) *TaskInfo {
 // store: 数据存储授权字段，涉及用户隐私（仅 OpenAI、Responses API 支持，默认允许透传，禁用后可能导致 Codex 无法使用）
 // safety_identifier: 安全标识符，用于向 OpenAI 报告违规用户（仅 OpenAI 支持，涉及用户隐私）
 // stream_options.include_obfuscation: 响应流混淆控制字段（仅 OpenAI Responses API 支持）
-func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings, channelPassThroughEnabled bool) ([]byte, error) {
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelPassThroughEnabled {
+func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings, actualPassThroughBody bool) ([]byte, error) {
+	if actualPassThroughBody {
+		return jsonData, nil
+	}
+	if !hasRemovableDisabledField(jsonData, channelOtherSettings) {
 		return jsonData, nil
 	}
 
@@ -966,6 +1021,25 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 		return jsonData, nil
 	}
 	return jsonDataAfter, nil
+}
+
+func hasRemovableDisabledField(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings) bool {
+	values := gjson.GetManyBytes(
+		jsonData,
+		"service_tier",
+		"inference_geo",
+		"speed",
+		"store",
+		"safety_identifier",
+		"stream_options.include_obfuscation",
+	)
+
+	return (!channelOtherSettings.AllowServiceTier && values[0].Exists()) ||
+		(!channelOtherSettings.AllowInferenceGeo && values[1].Exists()) ||
+		(!channelOtherSettings.AllowSpeed && values[2].Exists()) ||
+		(channelOtherSettings.DisableStore && values[3].Exists()) ||
+		(!channelOtherSettings.AllowSafetyIdentifier && values[4].Exists()) ||
+		(!channelOtherSettings.AllowIncludeObfuscation && values[5].Exists())
 }
 
 // RemoveGeminiDisabledFields removes disabled fields from Gemini request JSON data

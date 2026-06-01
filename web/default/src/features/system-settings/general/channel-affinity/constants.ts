@@ -1,6 +1,8 @@
 import type { AffinityRule } from './types'
 
 const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
+  'User-Agent',
+  'Originator',
   'Session_id',
   'X-Codex-Beta-Features',
   'X-Codex-Turn-Metadata',
@@ -71,16 +73,6 @@ const PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE = {
   ],
 }
 
-function combineParamOverrideTemplates(
-  ...templates: Array<Record<string, unknown>>
-) {
-  return {
-    operations: templates.flatMap((template) =>
-      Array.isArray(template.operations) ? template.operations : []
-    ),
-  }
-}
-
 export type RuleTemplate = Omit<AffinityRule, 'id'>
 
 export type ParamOverrideTemplate = {
@@ -96,13 +88,6 @@ export const PARAM_OVERRIDE_TEMPLATES: Record<string, ParamOverrideTemplate> = {
   codexWithoutImageTool: {
     label: 'Codex Desktop Compat: Remove Image Generation Tool',
     payload: PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE,
-  },
-  codexHeadersWithoutImageTool: {
-    label: 'Codex Desktop Compat: Headers + Remove Image Tool',
-    payload: combineParamOverrideTemplates(
-      buildPassHeadersTemplate(CODEX_CLI_HEADER_PASSTHROUGH_HEADERS),
-      PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE
-    ),
   },
   claudeHeaders: {
     label: 'Claude Code Header Passthrough',

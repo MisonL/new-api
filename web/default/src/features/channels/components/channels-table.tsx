@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import {
@@ -150,6 +150,42 @@ export function ChannelsTable() {
   // Determine whether to use search or regular list API
   const shouldSearch = Boolean(globalFilter?.trim() || modelFilter.trim())
 
+  const channelBaseFilters = useMemo(
+    () => ({
+      group:
+        groupFilter.length > 0 && !groupFilter.includes('all')
+          ? groupFilter[0]
+          : undefined,
+      status:
+        statusFilter.length > 0 && !statusFilter.includes('all')
+          ? statusFilter[0]
+          : undefined,
+      type:
+        typeFilter.length > 0 && !typeFilter.includes('all')
+          ? Number(typeFilter[0])
+          : undefined,
+    }),
+    [groupFilter, statusFilter, typeFilter]
+  )
+
+  const channelQueryFilters = useMemo(
+    () => ({
+      ...channelBaseFilters,
+      tag_mode: enableTagMode,
+      id_sort: idSort,
+    }),
+    [channelBaseFilters, enableTagMode, idSort]
+  )
+
+  const channelSearchFilters = useMemo(
+    () => ({
+      keyword: globalFilter,
+      model: modelFilter,
+      ...channelQueryFilters,
+    }),
+    [channelQueryFilters, globalFilter, modelFilter]
+  )
+
   const sortParams = useMemo(() => {
     const activeSort = sorting[0]
     if (
@@ -191,25 +227,9 @@ export function ChannelsTable() {
   )
 
   // Fetch channels data
-  // eslint-disable-next-line @tanstack/query/exhaustive-deps
   const { data, isLoading, isFetching } = useQuery({
     queryKey: channelsQueryKeys.list({
-      keyword: globalFilter,
-      model: modelFilter,
-      group:
-        groupFilter.length > 0 && !groupFilter.includes('all')
-          ? groupFilter[0]
-          : undefined,
-      status:
-        statusFilter.length > 0 && !statusFilter.includes('all')
-          ? statusFilter[0]
-          : undefined,
-      type:
-        typeFilter.length > 0 && !typeFilter.includes('all')
-          ? Number(typeFilter[0])
-          : undefined,
-      tag_mode: enableTagMode,
-      id_sort: idSort,
+      ...(shouldSearch ? channelSearchFilters : channelQueryFilters),
       ...sortParams,
       p: pagination.pageIndex + 1,
       page_size: pagination.pageSize,
@@ -217,42 +237,14 @@ export function ChannelsTable() {
     queryFn: async () => {
       if (shouldSearch) {
         return searchChannels({
-          keyword: globalFilter,
-          model: modelFilter,
-          group:
-            groupFilter.length > 0 && !groupFilter.includes('all')
-              ? groupFilter[0]
-              : undefined,
-          status:
-            statusFilter.length > 0 && !statusFilter.includes('all')
-              ? statusFilter[0]
-              : undefined,
-          type:
-            typeFilter.length > 0 && !typeFilter.includes('all')
-              ? Number(typeFilter[0])
-              : undefined,
-          tag_mode: enableTagMode,
-          id_sort: idSort,
+          ...channelSearchFilters,
           ...sortParams,
           p: pagination.pageIndex + 1,
           page_size: pagination.pageSize,
         })
       } else {
         return getChannels({
-          group:
-            groupFilter.length > 0 && !groupFilter.includes('all')
-              ? groupFilter[0]
-              : undefined,
-          status:
-            statusFilter.length > 0 && !statusFilter.includes('all')
-              ? statusFilter[0]
-              : undefined,
-          type:
-            typeFilter.length > 0 && !typeFilter.includes('all')
-              ? Number(typeFilter[0])
-              : undefined,
-          tag_mode: enableTagMode,
-          id_sort: idSort,
+          ...channelQueryFilters,
           ...sortParams,
           p: pagination.pageIndex + 1,
           page_size: pagination.pageSize,
@@ -276,8 +268,26 @@ export function ChannelsTable() {
   const totalCount = data?.data?.total || 0
   const typeCounts = data?.data?.type_counts
 
+  const getTopPriority = useCallback(async () => {
+    const response = await getChannels({
+      sort_by: 'priority' as const,
+      sort_order: 'desc' as const,
+      p: 1,
+      page_size: 1,
+    })
+
+    if (!response.success) {
+      throw new Error(response.message || t('Failed to pin channel'))
+    }
+
+    const priority = response.data?.items?.[0]?.priority
+    return typeof priority === 'number' && Number.isFinite(priority)
+      ? priority
+      : 0
+  }, [t])
+
   // Columns configuration
-  const columns = useChannelsColumns()
+  const columns = useChannelsColumns({ getTopPriority })
 
   // React Table instance
   const table = useReactTable({

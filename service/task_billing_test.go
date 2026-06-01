@@ -638,7 +638,7 @@ func (m *mockAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.Task
 }
 
 // ===========================================================================
-// PerCallBilling tests — settleTaskBillingOnComplete
+// PerCallBilling tests - settleTaskBillingOnComplete
 // ===========================================================================
 
 func TestSettle_PerCallBilling_SkipsAdaptorAdjust(t *testing.T) {

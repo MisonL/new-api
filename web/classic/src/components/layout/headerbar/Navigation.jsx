@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { Button, Dropdown } from '@douyinfe/semi-ui';
+import { IconMenu } from '@douyinfe/semi-icons';
 import SkeletonWrapper from '../components/SkeletonWrapper';
 
 const Navigation = ({
@@ -27,7 +29,19 @@ const Navigation = ({
   isLoading,
   userState,
   pricingRequireAuth,
+  t,
 }) => {
+  // getNavTarget keeps unauthenticated redirects consistent for userState.user and pricingRequireAuth.
+  const getNavTarget = (link) => {
+    if (link.itemKey === 'console' && !userState.user) {
+      return '/login';
+    }
+    if (link.itemKey === 'pricing' && pricingRequireAuth && !userState.user) {
+      return '/login';
+    }
+    return link.to;
+  };
+
   const renderNavLinks = () => {
     const baseClasses =
       'flex-shrink-0 flex items-center gap-1 font-semibold rounded-md transition-all duration-200 ease-in-out';
@@ -53,13 +67,7 @@ const Navigation = ({
         );
       }
 
-      let targetPath = link.to;
-      if (link.itemKey === 'console' && !userState.user) {
-        targetPath = '/login';
-      }
-      if (link.itemKey === 'pricing' && pricingRequireAuth && !userState.user) {
-        targetPath = '/login';
-      }
+      const targetPath = getNavTarget(link);
 
       return (
         <Link key={link.itemKey} to={targetPath} className={commonLinkClasses}>
@@ -68,6 +76,66 @@ const Navigation = ({
       );
     });
   };
+
+  if (isMobile) {
+    return (
+      <nav
+        aria-label={t('主导航')}
+        className='flex flex-1 items-center justify-end mx-1'
+      >
+        <SkeletonWrapper
+          loading={isLoading}
+          type='navigation'
+          count={1}
+          width={32}
+          height={32}
+          isMobile={isMobile}
+        >
+          <Dropdown
+            trigger='click'
+            position='bottomRight'
+            render={
+              <Dropdown.Menu>
+                {mainNavLinks.map((link) => {
+                  const targetPath = getNavTarget(link);
+
+                  return (
+                    <Dropdown.Item key={link.itemKey}>
+                      {link.isExternal ? (
+                        <a
+                          href={link.externalLink}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          className='block min-w-28 px-2 py-1 text-semi-color-text-0'
+                        >
+                          {link.text}
+                        </a>
+                      ) : (
+                        <Link
+                          to={targetPath}
+                          className='block min-w-28 px-2 py-1 text-semi-color-text-0'
+                        >
+                          {link.text}
+                        </Link>
+                      )}
+                    </Dropdown.Item>
+                  );
+                })}
+              </Dropdown.Menu>
+            }
+          >
+            <Button
+              theme='borderless'
+              type='tertiary'
+              icon={<IconMenu />}
+              aria-label={t('打开导航菜单')}
+              className='!p-2 !text-current'
+            />
+          </Dropdown>
+        </SkeletonWrapper>
+      </nav>
+    );
+  }
 
   return (
     <nav className='flex flex-1 items-center gap-1 lg:gap-2 mx-2 md:mx-4 overflow-x-auto whitespace-nowrap scrollbar-hide'>

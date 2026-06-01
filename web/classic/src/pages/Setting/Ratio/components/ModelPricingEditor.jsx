@@ -358,6 +358,7 @@ export default function ModelPricingEditor({
                     currentPage,
                     pageSize: PAGE_SIZE,
                     total: filteredModels.length,
+                    showQuickJumper: true,
                     onPageChange: (page) => setCurrentPage(page),
                     showTotal: true,
                     showSizeChanger: false,

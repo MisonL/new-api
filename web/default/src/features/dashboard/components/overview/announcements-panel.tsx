@@ -5,6 +5,7 @@ import { getAnnouncementColorClass } from '@/lib/colors'
 import { formatDateTimeObject } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { LazyMount } from '@/components/lazy-mount'
 import { useAnnouncements } from '@/features/dashboard/hooks/use-status-data'
 import { getPreviewText } from '@/features/dashboard/lib'
 import type { AnnouncementItem } from '@/features/dashboard/types'
@@ -87,11 +88,13 @@ export function AnnouncementsPanel() {
         </div>
       </ScrollArea>
 
-      <AnnouncementDetailModal
-        open={isDialogOpen}
-        onOpenChange={setIsDialogOpen}
-        announcement={selectedAnnouncement}
-      />
+      <LazyMount open={isDialogOpen}>
+        <AnnouncementDetailModal
+          open={isDialogOpen}
+          onOpenChange={setIsDialogOpen}
+          announcement={selectedAnnouncement}
+        />
+      </LazyMount>
     </PanelWrapper>
   )
 }

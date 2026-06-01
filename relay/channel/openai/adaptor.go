@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -163,7 +164,7 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		url = strings.Replace(url, "{model}", info.UpstreamModelName, -1)
 		return url, nil
 	default:
-		if shouldUseOpenAICompatibleResponsesCompactConversion(info) {
+		if relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
 			return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, "/v1/responses", info.ChannelType), nil
 		}
 		if (info.RelayFormat == types.RelayFormatClaude || info.RelayFormat == types.RelayFormatGemini) &&
@@ -600,57 +601,85 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
-	useOpenAICompatibleCompactConversion := shouldUseOpenAICompatibleResponsesCompactConversion(info)
-	if useOpenAICompatibleCompactConversion && request.PreviousResponseID != "" {
-		request.PreviousResponseID = ""
-		channelID := 0
-		if info.ChannelMeta != nil {
-			channelID = info.ChannelMeta.ChannelId
-		}
-		common.SysLog(fmt.Sprintf(
-			"responses compact previous_response_id removed for OpenAI-compatible channel: channel_id=%d model=%s",
-			channelID,
-			info.OriginModelName,
-		))
-	}
 	stripCodexContext := relaycommon.ShouldStripCodexEncryptedContext(info)
-	if info != nil && (stripCodexContext || useOpenAICompatibleCompactConversion) {
-		result, err := stripUnsupportedResponsesInput(request.Input, stripCodexContext)
+	syntheticContinuation := relaycommon.IsOpenAICompatibleResponses(info) &&
+		!relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) &&
+		service.HasSyntheticCompactReference(request)
+	if syntheticContinuation {
+		convertedRequest, _, err := service.ApplySyntheticCompactState(ginRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
 		if err != nil {
 			return nil, err
 		}
-		if result.removedCount() > 0 {
-			if result.remainingCount == 0 {
-				if result.encryptedReasoningCount > 0 {
-					return nil, errors.New("responses encrypted reasoning context is unsupported by this OpenAI-compatible channel and no other input items remain")
-				}
-				return nil, errors.New("responses compaction input is unsupported by this OpenAI-compatible channel and no other input items remain")
-			}
-			request.Input = result.input
-			channelID := 0
-			if info.ChannelMeta != nil {
-				channelID = info.ChannelMeta.ChannelId
-			}
-			common.SysLog(fmt.Sprintf(
-				"responses unsupported context removed for OpenAI-compatible channel: channel_id=%d model=%s compact_items=%d encrypted_reasoning_items=%d assistant_items=%d tool_output_messages=%d remaining_items=%d",
-				channelID,
-				info.OriginModelName,
-				result.compactionCount,
-				result.encryptedReasoningCount,
-				result.assistantMessageCount,
-				result.toolOutputMessageCount,
-				result.remainingCount,
-			))
+		if stripCodexContext && !relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
+			return stripUnsupportedResponsesInputForRequest(info, convertedRequest, stripCodexContext)
 		}
+		return convertedRequest, nil
+	}
+	if info != nil && stripCodexContext && !relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
+		var err error
+		request, err = stripUnsupportedResponsesInputForRequest(info, request, stripCodexContext)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if relaycommon.IsNativeOpenAICompatibleResponsesCompact(info) {
+		return request, nil
+	}
+	if relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
+		return service.BuildSyntheticCompactSummaryRequest(ginRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+	}
+	if relaycommon.ShouldHandleSyntheticOpenAICompatibleResponses(info) {
+		convertedRequest, _, err := service.ApplySyntheticCompactState(ginRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+		return convertedRequest, err
 	}
 	return request, nil
 }
 
-func shouldUseOpenAICompatibleResponsesCompactConversion(info *relaycommon.RelayInfo) bool {
-	return info != nil &&
-		info.ChannelMeta != nil &&
-		info.RelayMode == relayconstant.RelayModeResponsesCompact &&
-		info.ChannelType == constant.ChannelTypeOpenAI
+func syntheticCompactScopeFromRelayInfo(info *relaycommon.RelayInfo) service.SyntheticCompactStateScope {
+	return service.SyntheticCompactScopeFromSource(info)
+}
+
+func stripUnsupportedResponsesInputForRequest(info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest, stripEncryptedReasoning bool) (dto.OpenAIResponsesRequest, error) {
+	result, err := stripUnsupportedResponsesInput(request.Input, stripEncryptedReasoning)
+	if err != nil {
+		return dto.OpenAIResponsesRequest{}, err
+	}
+	if result.removedCount() == 0 {
+		return request, nil
+	}
+	if result.remainingCount == 0 {
+		if result.encryptedReasoningCount > 0 {
+			return dto.OpenAIResponsesRequest{}, errors.New("responses encrypted reasoning context is unsupported by this OpenAI-compatible channel and no other input items remain")
+		}
+		return dto.OpenAIResponsesRequest{}, errors.New("responses compaction input is unsupported by this OpenAI-compatible channel and no other input items remain")
+	}
+	request.Input = result.input
+	channelID := 0
+	originModelName := ""
+	if info != nil {
+		originModelName = info.OriginModelName
+		if info.ChannelMeta != nil {
+			channelID = info.ChannelMeta.ChannelId
+		}
+	}
+	common.SysLog(fmt.Sprintf(
+		"responses unsupported context removed for OpenAI-compatible channel: channel_id=%d model=%s compact_items=%d encrypted_reasoning_items=%d assistant_items=%d tool_output_messages=%d remaining_items=%d",
+		channelID,
+		originModelName,
+		result.compactionCount,
+		result.encryptedReasoningCount,
+		result.assistantMessageCount,
+		result.toolOutputMessageCount,
+		result.remainingCount,
+	))
+	return request, nil
+}
+
+func ginRequestContext(c *gin.Context) context.Context {
+	if c == nil || c.Request == nil {
+		return context.Background()
+	}
+	return c.Request.Context()
 }
 
 type responsesInputStripResult struct {
@@ -869,7 +898,11 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 			usage, err = OaiResponsesHandler(c, info, resp)
 		}
 	case relayconstant.RelayModeResponsesCompact:
-		usage, err = OaiResponsesCompactionHandler(c, resp)
+		if relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
+			usage, err = OaiSyntheticResponsesCompactionHandler(c, info, resp)
+		} else {
+			usage, err = OaiResponsesCompactionHandler(c, resp)
+		}
 	default:
 		if info.IsStream {
 			usage, err = OaiStreamHandler(c, info, resp)

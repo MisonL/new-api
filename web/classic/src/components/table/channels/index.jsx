@@ -128,6 +128,7 @@ const ChannelsPage = () => {
       ) : null}
       <CardPro
         type='type3'
+        className='channel-table-card'
         tabsArea={<ChannelsTabs {...channelsData} />}
         actionsArea={<ChannelsActions {...channelsData} />}
         searchArea={<ChannelsFilters {...channelsData} />}
@@ -137,6 +138,7 @@ const ChannelsPage = () => {
           total: channelsData.channelCount,
           onPageChange: channelsData.handlePageChange,
           onPageSizeChange: channelsData.handlePageSizeChange,
+          pageSizeOpts: channelsData.pageSizeOptions,
           isMobile: isMobile,
           t: channelsData.t,
         })}

@@ -110,6 +110,7 @@ const RedemptionsTable = (redemptionsData) => {
           showSizeChanger: true,
           pageSizeOptions: [10, 20, 50, 100],
           onPageSizeChange: redemptionsData.handlePageSizeChange,
+          showQuickJumper: true,
           onPageChange: handlePageChange,
         }}
         hidePagination={true}

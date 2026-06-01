@@ -400,7 +400,6 @@ const NotificationSettings = ({
           saveNotificationSettings();
         })
         .catch((errors) => {
-          console.log('表单验证失败:', errors);
           Toast.error(t('请检查表单填写是否正确'));
         });
     } else {

@@ -68,7 +68,7 @@ func (b *baseFileSource) Mu() *sync.Mutex {
 }
 
 // ---------------------------------------------------------------------------
-// URLSource — URL 来源的 FileSource 实现
+// URLSource - URL 来源的 FileSource 实现
 // ---------------------------------------------------------------------------
 
 type URLSource struct {
@@ -90,7 +90,7 @@ func (u *URLSource) GetRawData() string { return u.URL }
 func (u *URLSource) ClearRawData() {}
 
 // ---------------------------------------------------------------------------
-// Base64Source — Base64 内联数据来源的 FileSource 实现
+// Base64Source - Base64 内联数据来源的 FileSource 实现
 // ---------------------------------------------------------------------------
 
 type Base64Source struct {
@@ -139,7 +139,7 @@ func NewFileSourceFromData(data string, mimeType string) FileSource {
 }
 
 // ---------------------------------------------------------------------------
-// CachedFileData — 缓存的文件数据（支持内存和磁盘两种模式）
+// CachedFileData - 缓存的文件数据（支持内存和磁盘两种模式）
 // ---------------------------------------------------------------------------
 
 type CachedFileData struct {

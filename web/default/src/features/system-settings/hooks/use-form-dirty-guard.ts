@@ -21,11 +21,11 @@ import { useBlocker } from '@tanstack/react-router'
  *
  * @example
  * ```tsx
- * // ❌ Old way (deprecated)
+ * // Old way (deprecated)
  * const form = useForm()
  * useFormDirtyGuard(form.formState.isDirty)
  *
- * // ✅ New way (recommended)
+ * // New way (recommended)
  * <FormNavigationGuard when={form.formState.isDirty} />
  * ```
  */

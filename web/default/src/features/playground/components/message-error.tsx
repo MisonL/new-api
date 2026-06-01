@@ -39,7 +39,7 @@ export function MessageError({ message, className = '' }: MessageErrorProps) {
               variant='outline'
               size='sm'
               onClick={() =>
-                window.open('/console/setting?tab=ratio', '_blank')
+                window.open('/system-settings/models/ratio', '_blank')
               }
             >
               <Settings className='mr-1 h-3.5 w-3.5' />

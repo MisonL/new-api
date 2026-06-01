@@ -20,8 +20,16 @@ func IsChannelEnabledForGroupModel(group string, modelName string, channelID int
 		channelSyncLock.RUnlock()
 		return isChannelEnabledForGroupModelDB(group, modelName, channelID)
 	}
-	for _, routeModel := range getGroupModelRouteCandidates(modelName) {
-		if isChannelIDInList(group2model2channels[group][routeModel], channelID) {
+	for _, routeCandidate := range getGroupModelRouteCandidateMeta(modelName) {
+		if !isChannelIDInList(group2model2channels[group][routeCandidate.model], channelID) {
+			continue
+		}
+		if !routeCandidate.compactRequest {
+			channelSyncLock.RUnlock()
+			return true
+		}
+		channel, ok := channelsIDM[channelID]
+		if ok && channelSupportsCompactRouteCandidate(channel, routeCandidate) {
 			channelSyncLock.RUnlock()
 			return true
 		}
@@ -103,13 +111,14 @@ func HasResponsesBootstrapRecoveryCandidateChannel(groups []string, modelName st
 
 func isChannelEnabledForGroupModelDB(group string, modelName string, channelID int) bool {
 	groupColumn := "abilities." + commonGroupCol
-	for _, routeModel := range getGroupModelRouteCandidates(modelName) {
-		var count int64
-		err := DB.Model(&Ability{}).
+	for _, routeCandidate := range getGroupModelRouteCandidateMeta(modelName) {
+		var channel Channel
+		err := DB.Table("abilities").
+			Select("channels.*").
 			Joins("JOIN channels ON channels.id = abilities.channel_id").
-			Where(groupColumn+" = ? and abilities.model = ? and abilities.channel_id = ? and abilities.enabled = ? and channels.status = ?", group, routeModel, channelID, true, common.ChannelStatusEnabled).
-			Count(&count).Error
-		if err == nil && count > 0 {
+			Where(groupColumn+" = ? and abilities.model = ? and abilities.channel_id = ? and abilities.enabled = ? and channels.status = ?", group, routeCandidate.model, channelID, true, common.ChannelStatusEnabled).
+			Take(&channel).Error
+		if err == nil && channelSupportsCompactRouteCandidate(&channel, routeCandidate) {
 			return true
 		}
 	}

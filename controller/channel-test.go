@@ -26,6 +26,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -44,6 +45,8 @@ type testResult struct {
 	runtimeConfig *channelTestRuntimeSummary
 }
 
+const responsesCompactChannelTestCapabilityError = "OpenAI Responses Compact is disabled on this channel."
+
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
 	normalized := strings.TrimSpace(endpointType)
 	if normalized != "" {
@@ -58,11 +61,43 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	return normalized
 }
 
+func resolveChannelTestUserID(c *gin.Context) (int, error) {
+	if c != nil {
+		if userID := c.GetInt("id"); userID > 0 {
+			return userID, nil
+		}
+	}
+
+	var rootUser model.User
+	if err := model.DB.Select("id").Where("role = ?", common.RoleRootUser).First(&rootUser).Error; err != nil {
+		return 0, fmt.Errorf("failed to resolve channel test user: %w", err)
+	}
+	if rootUser.Id == 0 {
+		return 0, errors.New("failed to resolve channel test user")
+	}
+	return rootUser.Id, nil
+}
+
 func testChannel(channel *model.Channel, testModel string, endpointType string, isStream bool) testResult {
 	return testChannelWithOptions(channel, testModel, endpointType, isStream, defaultChannelTestOptions())
 }
 
 func testChannelWithOptions(channel *model.Channel, testModel string, endpointType string, isStream bool, options channelTestOptions) (result testResult) {
+	testUserID, err := resolveChannelTestUserID(nil)
+	if err != nil {
+		return testResult{
+			localErr: err,
+		}
+	}
+	return testChannelWithOptionsForUser(channel, testUserID, testModel, endpointType, isStream, options)
+}
+
+func testChannelWithOptionsForUser(channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool, options channelTestOptions) (result testResult) {
+	if testUserID <= 0 {
+		return testResult{
+			localErr: errors.New("invalid channel test user id"),
+		}
+	}
 	options = normalizeChannelTestOptions(options)
 	var c *gin.Context
 	var info *relaycommon.RelayInfo
@@ -169,7 +204,7 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 	}
 	channel = runtimeChannel
 
-	cache, err := model.GetUserCache(1)
+	cache, err := model.GetUserCache(testUserID)
 	if err != nil {
 		return testResult{
 			localErr:    err,
@@ -177,7 +212,7 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 		}
 	}
 	cache.WriteContext(c)
-	c.Set("id", 1)
+	c.Set("id", testUserID)
 
 	//c.Request.Header.Set("Authorization", "Bearer "+channel.Key)
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -196,7 +231,7 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 	}
 	c.Set("channel", channel.Type)
 	c.Set("base_url", channel.GetBaseURL())
-	group, _ := model.GetUserGroup(1, false)
+	group, _ := model.GetUserGroup(testUserID, false)
 	c.Set("group", group)
 
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, testModel)
@@ -536,7 +571,7 @@ func testChannelWithOptions(channel *model.Channel, testModel string, endpointTy
 	milliseconds := tok.Sub(tik).Milliseconds()
 	consumedTime := float64(milliseconds) / 1000.0
 	other := buildTestLogOther(c, info, priceData, usage, tieredResult)
-	model.RecordConsumeLog(c, 1, model.RecordConsumeLogParams{
+	model.RecordConsumeLog(c, testUserID, model.RecordConsumeLogParams{
 		ChannelId:        channel.Id,
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
@@ -732,14 +767,23 @@ func buildChannelTestResponsesInput(prompt string) json.RawMessage {
 
 func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInfo, request dto.Request, options channelTestOptions) (dto.Request, error) {
 	options = normalizeChannelTestOptions(options)
-	if options.ResponseProtocol != channelTestResponseProtocolChatCompletions {
-		return request, nil
+	explicitChatProtocol := options.ResponseProtocol == channelTestResponseProtocolChatCompletions
+	var conversionOptions service.ResponsesChatCompatibilityOptions
+	if !explicitChatProtocol {
+		conversionRule := findChannelTestResponsesViaChatRule(info)
+		if conversionRule == nil {
+			return request, nil
+		}
+		conversionOptions = channelTestResponsesChatOptionsFromRule(conversionRule)
 	}
 	if info == nil {
 		return request, errors.New("relay info is nil")
 	}
-	if info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
+	if explicitChatProtocol && info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
 		return request, fmt.Errorf("response protocol %q only supports responses endpoints", options.ResponseProtocol)
+	}
+	if !explicitChatProtocol && info.RelayMode != relayconstant.RelayModeResponses {
+		return request, nil
 	}
 
 	var responsesReq *dto.OpenAIResponsesRequest
@@ -757,7 +801,7 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 		return request, fmt.Errorf("invalid response request type: %T", request)
 	}
 
-	chatReq, err := service.ResponsesRequestToChatCompletionsRequest(responsesReq)
+	chatReq, err := service.ResponsesRequestToChatCompletionsRequestWithOptions(responsesReq, conversionOptions)
 	if err != nil {
 		return request, err
 	}
@@ -773,6 +817,33 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 		c.Request.URL.Path = "/v1/chat/completions"
 	}
 	return chatReq, nil
+}
+
+func findChannelTestResponsesViaChatRule(info *relaycommon.RelayInfo) *model_setting.ProtocolConversionRule {
+	settings := model_setting.GetGlobalSettings()
+	if info == nil ||
+		info.ChannelMeta == nil ||
+		info.RelayMode != relayconstant.RelayModeResponses ||
+		settings.PassThroughRequestEnabled ||
+		info.ChannelSetting.PassThroughBodyEnabled {
+		return nil
+	}
+	return service.FindProtocolConversionRuleGlobal(
+		model_setting.ProtocolEndpointResponses,
+		model_setting.ProtocolEndpointChatCompletions,
+		info.ChannelId,
+		info.ChannelType,
+		info.OriginModelName,
+	)
+}
+
+func channelTestResponsesChatOptionsFromRule(rule *model_setting.ProtocolConversionRule) service.ResponsesChatCompatibilityOptions {
+	if rule == nil || rule.Options == nil {
+		return service.ResponsesChatCompatibilityOptions{}
+	}
+	return service.ResponsesChatCompatibilityOptions{
+		EnableCustomToolBridge: rule.Options.EnableCustomToolBridge,
+	}
 }
 
 func diagnoseChannelTestError(err error, newAPIError *types.NewAPIError, summary *channelTestRuntimeSummary) *channelTestErrorDiagnosis {
@@ -1020,8 +1091,13 @@ func TestChannel(c *gin.Context) {
 	endpointType := c.Query("endpoint_type")
 	isStream, _ := strconv.ParseBool(c.Query("stream"))
 	options := parseChannelTestOptions(c)
+	testUserID, err := resolveChannelTestUserID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	tik := time.Now()
-	result := testChannelWithOptions(channel, testModel, endpointType, isStream, options)
+	result := testChannelWithOptionsForUser(channel, testUserID, testModel, endpointType, isStream, options)
 	if result.localErr != nil {
 		diagnosis := diagnoseChannelTestError(result.localErr, result.newAPIError, result.runtimeConfig)
 		if result.runtimeConfig != nil {
@@ -1073,6 +1149,10 @@ var testAllChannelsLock sync.Mutex
 var testAllChannelsRunning bool = false
 
 func testAllChannels(notify bool) error {
+	testUserID, err := resolveChannelTestUserID(nil)
+	if err != nil {
+		return err
+	}
 
 	testAllChannelsLock.Lock()
 	if testAllChannelsRunning {
@@ -1103,7 +1183,7 @@ func testAllChannels(notify bool) error {
 			}
 			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
 			tik := time.Now()
-			result := testChannel(channel, "", "", false)
+			result := testChannelWithOptionsForUser(channel, testUserID, "", "", false, defaultChannelTestOptions())
 			tok := time.Now()
 			milliseconds := tok.Sub(tik).Milliseconds()
 
@@ -1125,7 +1205,7 @@ func testAllChannels(notify bool) error {
 
 			// disable channel
 			if isChannelEnabled && shouldBanChannel && channel.GetAutoBan() {
-				processChannelError(result.context, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+				processChannelError(result.context, nil, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 			}
 
 			// enable channel

@@ -135,6 +135,17 @@ const aiCodingCliProfiles = {
       Originator: 'codex-tui',
     }),
   },
+  'codex-desktop': buildAiCodingCliProfile(
+    'codex-desktop',
+    'Codex Desktop',
+    {
+      'User-Agent':
+        'Codex Desktop/0.131.0-alpha.9 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.513.31313)',
+    },
+    '固定请求头静态快照来自 Codex Desktop 0.131.0-alpha.9 真实请求；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。',
+    null,
+    false,
+  ),
   'claude-code': buildAiCodingCliProfile(
     'claude-code',
     'Claude Code',

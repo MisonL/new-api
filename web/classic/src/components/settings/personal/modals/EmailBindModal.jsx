@@ -60,7 +60,7 @@ const EmailBindModal = ({
             onChange={(value) => handleInputChange('email', value)}
             name='email'
             type='email'
-            autocomplete='email'
+            autoComplete='email'
             size='large'
             className='!rounded-lg flex-1'
             prefix={<IconMail />}
@@ -86,7 +86,7 @@ const EmailBindModal = ({
           onChange={(value) =>
             handleInputChange('email_verification_code', value)
           }
-          autocomplete='one-time-code'
+          autoComplete='one-time-code'
           size='large'
           className='!rounded-lg'
           prefix={<IconKey />}

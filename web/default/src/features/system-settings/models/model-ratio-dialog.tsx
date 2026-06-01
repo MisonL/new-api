@@ -30,6 +30,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { formatPricingNumber } from './pricing-format'
 import { TieredPricingEditor } from './tiered-pricing-editor'
 
 const createModelDialogSchema = (t: (key: string) => string) =>
@@ -118,10 +119,10 @@ export function ModelRatioDialog({
         setPricingMode('per-token')
         if (editData.ratio) {
           const tokenPrice = parseFloat(editData.ratio) * 2
-          setPromptPrice(tokenPrice.toString())
+          setPromptPrice(formatPricingNumber(tokenPrice))
           if (editData.completionRatio) {
             const compPrice = tokenPrice * parseFloat(editData.completionRatio)
-            setCompletionPrice(compPrice.toString())
+            setCompletionPrice(formatPricingNumber(compPrice))
           }
         }
       }
@@ -185,7 +186,7 @@ export function ModelRatioDialog({
     setPromptPrice(value)
     if (value && !isNaN(parseFloat(value))) {
       const ratio = parseFloat(value) / 2
-      form.setValue('ratio', ratio.toString())
+      form.setValue('ratio', formatPricingNumber(ratio))
     } else {
       form.setValue('ratio', '')
     }
@@ -201,7 +202,7 @@ export function ModelRatioDialog({
       parseFloat(promptPrice) > 0
     ) {
       const completionRatio = parseFloat(value) / parseFloat(promptPrice)
-      form.setValue('completionRatio', completionRatio.toString())
+      form.setValue('completionRatio', formatPricingNumber(completionRatio))
     } else {
       form.setValue('completionRatio', '')
     }
@@ -352,7 +353,9 @@ export function ModelRatioDialog({
                                   field.onChange(value)
                                   if (value) {
                                     setPromptPrice(
-                                      (parseFloat(value) * 2).toString()
+                                      formatPricingNumber(
+                                        parseFloat(value) * 2
+                                      )
                                     )
                                   } else {
                                     setPromptPrice('')
@@ -397,7 +400,9 @@ export function ModelRatioDialog({
                                   if (value && ratio) {
                                     const compPrice =
                                       parseFloat(ratio) * 2 * parseFloat(value)
-                                    setCompletionPrice(compPrice.toString())
+                                    setCompletionPrice(
+                                      formatPricingNumber(compPrice)
+                                    )
                                   } else {
                                     setCompletionPrice('')
                                   }

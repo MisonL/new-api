@@ -53,6 +53,10 @@ import {
 test('builtin AI CLI profiles distinguish fixed headers from required passthrough', () => {
   assert.equal(HEADER_PROFILE_PRESETS['codex-cli'].passthroughRequired, false);
   assert.equal(
+    HEADER_PROFILE_PRESETS['codex-desktop'].passthroughRequired,
+    false,
+  );
+  assert.equal(
     HEADER_PROFILE_PRESETS['claude-code'].passthroughRequired,
     false,
   );
@@ -61,6 +65,14 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   assert.match(
     HEADER_PROFILE_PRESETS['codex-cli'].description,
     /显式选择 Codex CLI 请求头透传模板/,
+  );
+  assert.equal(
+    HEADER_PROFILE_PRESETS['codex-desktop'].headers['User-Agent'],
+    'Codex Desktop/0.131.0-alpha.9 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.513.31313)',
+  );
+  assert.match(
+    HEADER_PROFILE_PRESETS['codex-desktop'].description,
+    /显式选择 Codex Desktop 请求头透传模板/,
   );
   assert.match(
     HEADER_PROFILE_PRESETS['claude-code'].description,
@@ -102,6 +114,13 @@ test('Codex CLI builtin profile does not reuse codex exec request identity', () 
   assert.match(headers['User-Agent'], /^codex-tui\//);
   assert.doesNotMatch(serializedHeaders, /codex_exec/);
   assert.doesNotMatch(serializedHeaders, /source=exec/);
+});
+
+test('Codex Desktop builtin profile uses captured desktop User-Agent', () => {
+  const headers = HEADER_PROFILE_PRESETS['codex-desktop'].headers;
+
+  assert.match(headers['User-Agent'], /^Codex Desktop\//);
+  assert.doesNotMatch(headers['User-Agent'], /codex-cli@/);
 });
 
 test('npm cli version options use latest first and keep five stable choices', () => {
@@ -202,6 +221,18 @@ test('versioned AI CLI profiles generate pinned User-Agent snapshots', () => {
   );
 });
 
+test('Codex Desktop profile is not converted to codex-cli version ids', () => {
+  const codexDesktopProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-desktop'],
+    '0.131.0-alpha.9',
+  );
+
+  assert.equal(codexDesktopProfile.id, undefined);
+  assert.equal(codexDesktopProfile.key, 'codex-desktop');
+  assert.equal(codexDesktopProfile.versionMeta, undefined);
+  assert.match(codexDesktopProfile.headers['User-Agent'], /^Codex Desktop\//);
+});
+
 test('param override template payloads can replace rule template JSON', () => {
   const text = stringifyParamOverrideTemplatePayload(
     PARAM_OVERRIDE_TEMPLATES.codexHeaders.payload,
@@ -212,6 +243,8 @@ test('param override template payloads can replace rule template JSON', () => {
       {
         mode: 'pass_headers',
         value: [
+          'User-Agent',
+          'Originator',
           'Session_id',
           'X-Codex-Beta-Features',
           'X-Codex-Turn-Metadata',
@@ -222,6 +255,21 @@ test('param override template payloads can replace rule template JSON', () => {
       },
     ],
   });
+});
+
+test('legacy combined param override preset is absent', () => {
+  assert.equal(
+    Object.hasOwn(PARAM_OVERRIDE_TEMPLATES, 'codexHeadersWithoutImageTool'),
+    false,
+  );
+});
+
+test('param override preset templates each contain one operation', () => {
+  for (const [key, template] of Object.entries(PARAM_OVERRIDE_TEMPLATES)) {
+    const operations = template.payload.operations;
+    assert.ok(Array.isArray(operations), key);
+    assert.equal(operations.length, 1, key);
+  }
 });
 
 test('param override template append preserves existing operations order', () => {
@@ -653,6 +701,7 @@ test('applyHeaderProfileStrategyToChannelInputs does not add built-in CLI passth
       mode: 'round_robin',
       selectedProfileIds: [
         'codex-cli',
+        'codex-desktop',
         'claude-code',
         'gemini-cli',
         'qwen-code',

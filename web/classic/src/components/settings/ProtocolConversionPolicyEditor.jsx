@@ -36,8 +36,9 @@ import {
 } from './protocolConversionPolicy/constants';
 import {
   buildTemplateRule,
-  deserializeRules,
+  deserializePolicy,
   getRuleKey,
+  isResponsesToChatRule,
   isRuleScopeValid,
   isRuleDirectionValid,
   serializeRules,
@@ -74,22 +75,27 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
   const { t } = useTranslation();
   const [editMode, setEditMode] = useState(EDIT_MODE_VISUAL);
   const [rules, setRules] = useState([]);
+  const [policyExtra, setPolicyExtra] = useState({});
   const [expandedRuleKeys, setExpandedRuleKeys] = useState([]);
   const [newRuleTemplateType, setNewRuleTemplateType] = useState(
     TEMPLATE_TYPE_CHAT_TO_RESPONSES,
   );
 
   useEffect(() => {
-    const parsedRules = deserializeRules(value);
-    if (parsedRules) {
-      const nextSerialized = serializeRules(parsedRules);
-      const currentSerialized = serializeRules(rules);
+    const parsedPolicy = deserializePolicy(value);
+    if (parsedPolicy) {
+      const nextSerialized = serializeRules(
+        parsedPolicy.rules,
+        parsedPolicy.policyExtra,
+      );
+      const currentSerialized = serializeRules(rules, policyExtra);
       if (nextSerialized === currentSerialized) {
         return;
       }
-      setRules(parsedRules);
+      setRules(parsedPolicy.rules);
+      setPolicyExtra(parsedPolicy.policyExtra);
     }
-  }, [value, rules]);
+  }, [value, rules, policyExtra]);
 
   useEffect(() => {
     if (rules.length === 0) {
@@ -132,24 +138,26 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
     [expandedRuleKeys.length, ruleKeys.length],
   );
 
-  const applyRules = (nextRules) => {
+  const applyRules = (nextRules, nextPolicyExtra = policyExtra) => {
     setRules(nextRules);
-    onChange(serializeRules(nextRules));
+    setPolicyExtra(nextPolicyExtra);
+    onChange(serializeRules(nextRules, nextPolicyExtra));
   };
 
   const switchToVisualMode = () => {
-    const parsedRules = deserializeRules(value);
-    if (parsedRules === null) {
+    const parsedPolicy = deserializePolicy(value);
+    if (parsedPolicy === null) {
       showError(t('JSON 配置不合法，无法切换到可视化模式'));
       return;
     }
-    if (!validateRulesForVisualMode(parsedRules)) {
+    if (!validateRulesForVisualMode(parsedPolicy.rules)) {
       showError(t('当前 JSON 中存在暂不支持的协议值，请先在 JSON 模式下修正'));
       return;
     }
-    setRules(parsedRules);
+    setRules(parsedPolicy.rules);
+    setPolicyExtra(parsedPolicy.policyExtra);
     setEditMode(EDIT_MODE_VISUAL);
-    onChange(serializeRules(parsedRules));
+    onChange(serializeRules(parsedPolicy.rules, parsedPolicy.policyExtra));
   };
 
   const addRuleByTemplateType = () => {
@@ -173,9 +181,14 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
 
   const updateRule = (index, patch) =>
     applyRules(
-      rules.map((rule, currentIndex) =>
-        currentIndex === index ? { ...rule, ...patch } : rule,
-      ),
+      rules.map((rule, currentIndex) => {
+        if (currentIndex !== index) return rule;
+        const nextRule = { ...rule, ...patch };
+        if (!isResponsesToChatRule(nextRule)) {
+          nextRule.enable_custom_tool_bridge = false;
+        }
+        return nextRule;
+      }),
     );
 
   const removeRule = (targetIndex) => {
@@ -189,11 +202,12 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
     editMode,
     editModeOptions,
     enabledRuleCount,
-    formatJsonValue: () => onChange(serializeRules(rules)),
+    formatJsonValue: () => onChange(serializeRules(rules, policyExtra)),
     handleEditModeChange: (nextValue) =>
       nextValue === EDIT_MODE_VISUAL
         ? switchToVisualMode()
-        : (setEditMode(EDIT_MODE_JSON), onChange(serializeRules(rules))),
+        : (setEditMode(EDIT_MODE_JSON),
+          onChange(serializeRules(rules, policyExtra))),
     invalidDirectionRuleCount,
     invalidScopeRuleCount,
     isAllRulesExpanded,
@@ -211,7 +225,7 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
       <Banner
         type='info'
         description={t(
-          '协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空或渠道范围为空时，该规则不会命中。',
+          '协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。',
         )}
       />
       <ProtocolPolicyHeader {...headerProps} />

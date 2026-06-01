@@ -5,6 +5,7 @@ import { useSidebarConfig } from '@/hooks/use-sidebar-config'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SectionPageLayout } from '@/components/layout'
 import type { NavGroup } from '@/components/layout/types'
+import { LazyMount } from '@/components/lazy-mount'
 import { CacheStatsDialog } from '@/features/system-settings/general/channel-affinity/cache-stats-dialog'
 import { UserInfoDialog } from './components/dialogs/user-info-dialog'
 import {
@@ -123,29 +124,33 @@ function UsageLogsContent() {
         </SectionPageLayout.Content>
       </SectionPageLayout>
 
-      <UserInfoDialog
-        userId={selectedUserId}
-        open={userInfoDialogOpen}
-        onOpenChange={setUserInfoDialogOpen}
-      />
+      <LazyMount open={userInfoDialogOpen}>
+        <UserInfoDialog
+          userId={selectedUserId}
+          open={userInfoDialogOpen}
+          onOpenChange={setUserInfoDialogOpen}
+        />
+      </LazyMount>
 
-      <CacheStatsDialog
-        open={affinityDialogOpen}
-        onOpenChange={setAffinityDialogOpen}
-        target={
-          affinityTarget
-            ? {
-                rule_name: affinityTarget.rule_name || '',
-                using_group:
-                  affinityTarget.using_group ||
-                  affinityTarget.selected_group ||
-                  '',
-                key_hint: affinityTarget.key_hint || '',
-                key_fp: affinityTarget.key_fp || '',
-              }
-            : null
-        }
-      />
+      <LazyMount open={affinityDialogOpen}>
+        <CacheStatsDialog
+          open={affinityDialogOpen}
+          onOpenChange={setAffinityDialogOpen}
+          target={
+            affinityTarget
+              ? {
+                  rule_name: affinityTarget.rule_name || '',
+                  using_group:
+                    affinityTarget.using_group ||
+                    affinityTarget.selected_group ||
+                    '',
+                  key_hint: affinityTarget.key_hint || '',
+                  key_fp: affinityTarget.key_fp || '',
+                }
+              : null
+          }
+        />
+      </LazyMount>
     </>
   )
 }

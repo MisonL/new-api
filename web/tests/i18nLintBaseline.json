@@ -16,27 +16,17 @@
   },
   {
     "file": "src/components/auth/LoginForm.jsx",
-    "line": 839,
-    "text": "username"
-  },
-  {
-    "file": "src/components/auth/LoginForm.jsx",
-    "line": 855,
-    "text": "current-password"
-  },
-  {
-    "file": "src/components/auth/LoginForm.jsx",
-    "line": 982,
+    "line": 980,
     "text": "微信二维码"
   },
   {
     "file": "src/components/auth/LoginForm.jsx",
-    "line": 1020,
+    "line": 1018,
     "text": "M6 8a2 2 0 11-4 0 2 2 0 014 0zM8 7a1 1 0 100 2h8a1 1 0 100-2H8zM6 14a2 2 0 11-4 0 2 2 0 014 0zM8 13a1 1 0 100 2h8a1 1 0 100-2H8z"
   },
   {
     "file": "src/components/auth/LoginForm.jsx",
-    "line": 1024,
+    "line": 1022,
     "text": "两步验证"
   },
   {
@@ -45,19 +35,9 @@
     "text": "Logo"
   },
   {
-    "file": "src/components/auth/PasswordResetConfirm.jsx",
-    "line": 151,
-    "text": "email"
-  },
-  {
     "file": "src/components/auth/PasswordResetForm.jsx",
     "line": 121,
     "text": "Logo"
-  },
-  {
-    "file": "src/components/auth/PasswordResetForm.jsx",
-    "line": 136,
-    "text": "email"
   },
   {
     "file": "src/components/auth/RegisterForm.jsx",
@@ -71,32 +51,7 @@
   },
   {
     "file": "src/components/auth/RegisterForm.jsx",
-    "line": 653,
-    "text": "username"
-  },
-  {
-    "file": "src/components/auth/RegisterForm.jsx",
-    "line": 669,
-    "text": "new-password"
-  },
-  {
-    "file": "src/components/auth/RegisterForm.jsx",
-    "line": 670,
-    "text": "new-password"
-  },
-  {
-    "file": "src/components/auth/RegisterForm.jsx",
-    "line": 690,
-    "text": "email"
-  },
-  {
-    "file": "src/components/auth/RegisterForm.jsx",
-    "line": 716,
-    "text": "one-time-code"
-  },
-  {
-    "file": "src/components/auth/RegisterForm.jsx",
-    "line": 834,
+    "line": 829,
     "text": "微信二维码"
   },
   {
@@ -221,32 +176,32 @@
   },
   {
     "file": "src/components/common/markdown/MarkdownRenderer.jsx",
-    "line": 124,
+    "line": 150,
     "text": "allow-same-origin"
   },
   {
     "file": "src/components/common/markdown/MarkdownRenderer.jsx",
-    "line": 126,
+    "line": 152,
     "text": "HTML Preview"
   },
   {
     "file": "src/components/common/markdown/MarkdownRenderer.jsx",
-    "line": 270,
+    "line": 296,
     "text": "HTML预览:"
   },
   {
     "file": "src/components/common/markdown/MarkdownRenderer.jsx",
-    "line": 423,
+    "line": 449,
     "text": "auto"
   },
   {
     "file": "src/components/common/markdown/MarkdownRenderer.jsx",
-    "line": 584,
+    "line": 610,
     "text": "auto"
   },
   {
     "file": "src/components/common/markdown/MarkdownRenderer.jsx",
-    "line": 682,
+    "line": 708,
     "text": "正在渲染..."
   },
   {
@@ -265,9 +220,24 @@
     "text": "M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z"
   },
   {
+    "file": "src/components/common/modals/TwoFactorAuthModal.jsx",
+    "line": 68,
+    "text": "M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+  },
+  {
+    "file": "src/components/common/modals/TwoFactorAuthModal.jsx",
+    "line": 105,
+    "text": "M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+  },
+  {
     "file": "src/components/common/ui/CardTable.jsx",
-    "line": 245,
+    "line": 239,
     "text": "No Data"
+  },
+  {
+    "file": "src/components/common/ui/CardTable.jsx",
+    "line": 527,
+    "text": "horizontal"
   },
   {
     "file": "src/components/common/ui/ChannelKeyDisplay.jsx",
@@ -293,6 +263,26 @@
     "file": "src/components/common/ui/ChannelKeyDisplay.jsx",
     "line": 255,
     "text": "M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+  },
+  {
+    "file": "src/components/dashboard/Sparkline.jsx",
+    "line": 65,
+    "text": "true"
+  },
+  {
+    "file": "src/components/dashboard/Sparkline.jsx",
+    "line": 67,
+    "text": "false"
+  },
+  {
+    "file": "src/components/dashboard/Sparkline.jsx",
+    "line": 74,
+    "text": "round"
+  },
+  {
+    "file": "src/components/dashboard/Sparkline.jsx",
+    "line": 75,
+    "text": "round"
   },
   {
     "file": "src/components/layout/Footer.jsx",
@@ -373,6 +363,16 @@
     "file": "src/components/layout/SiderBar.jsx",
     "line": 613,
     "text": "vertical"
+  },
+  {
+    "file": "src/components/model-deployments/DeploymentAccessGuard.jsx",
+    "line": 60,
+    "text": "relaxed"
+  },
+  {
+    "file": "src/components/model-deployments/DeploymentAccessGuard.jsx",
+    "line": 306,
+    "text": "relaxed"
   },
   {
     "file": "src/components/playground/CodeViewer.jsx",
@@ -586,52 +586,52 @@
   },
   {
     "file": "src/components/settings/personal/cards/NotificationSettings.jsx",
-    "line": 489,
+    "line": 488,
     "text": "webhook"
   },
   {
     "file": "src/components/settings/personal/cards/NotificationSettings.jsx",
-    "line": 625,
+    "line": 624,
     "text": "json"
   },
   {
     "file": "src/components/settings/personal/cards/NotificationSettings.jsx",
-    "line": 630,
+    "line": 629,
     "text": "type:"
   },
   {
     "file": "src/components/settings/personal/cards/NotificationSettings.jsx",
-    "line": 634,
+    "line": 633,
     "text": "title:"
   },
   {
     "file": "src/components/settings/personal/cards/NotificationSettings.jsx",
-    "line": 637,
+    "line": 636,
     "text": "content:"
   },
   {
     "file": "src/components/settings/personal/cards/NotificationSettings.jsx",
-    "line": 641,
+    "line": 640,
     "text": "values:"
   },
   {
     "file": "src/components/settings/personal/cards/NotificationSettings.jsx",
-    "line": 645,
+    "line": 644,
     "text": "timestamp:"
   },
   {
     "file": "src/components/settings/personal/cards/NotificationSettings.jsx",
-    "line": 687,
+    "line": 686,
     "text": "?sound=alarm&group=quota"
   },
   {
     "file": "src/components/settings/personal/cards/NotificationSettings.jsx",
-    "line": 705,
+    "line": 704,
     "text": "Bark"
   },
   {
     "file": "src/components/settings/personal/cards/NotificationSettings.jsx",
-    "line": 810,
+    "line": 809,
     "text": "Gotify"
   },
   {
@@ -640,68 +640,48 @@
     "text": "ID:"
   },
   {
-    "file": "src/components/settings/personal/modals/ChangePasswordModal.jsx",
-    "line": 60,
-    "text": "current-password"
-  },
-  {
-    "file": "src/components/settings/personal/modals/ChangePasswordModal.jsx",
-    "line": 78,
-    "text": "new-password"
-  },
-  {
-    "file": "src/components/settings/personal/modals/ChangePasswordModal.jsx",
-    "line": 79,
-    "text": "new-password"
-  },
-  {
-    "file": "src/components/settings/personal/modals/EmailBindModal.jsx",
-    "line": 60,
-    "text": "email"
-  },
-  {
-    "file": "src/components/settings/personal/modals/EmailBindModal.jsx",
-    "line": 89,
-    "text": "one-time-code"
+    "file": "src/components/settings/PersonalSetting.jsx",
+    "line": 519,
+    "text": "none"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 818,
+    "line": 829,
     "text": "new-api-worker"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 828,
+    "line": 839,
     "text": "例如：https://workername.yourdomain.workers.dev"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 835,
+    "line": 846,
     "text": "敏感信息不会发送到前端显示"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 1456,
+    "line": 1471,
     "text": "启用邮箱域名白名单"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 1470,
+    "line": 1485,
     "text": "启用邮箱别名限制"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 1543,
+    "line": 1558,
     "text": "敏感信息不会发送到前端显示"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 1754,
+    "line": 1769,
     "text": "LinuxDO Minimum Trust Level"
   },
   {
     "file": "src/components/settings/SystemSetting.jsx",
-    "line": 1755,
+    "line": 1770,
     "text": "允许注册的最低信任等级"
   },
   {
@@ -715,48 +695,53 @@
     "text": "tight"
   },
   {
+    "file": "src/components/table/channels/modals/CodexUsageModal.jsx",
+    "line": 349,
+    "text": "metered_feature"
+  },
+  {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 698,
+    "line": 705,
     "text": "Doubao Coding Plan"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 2653,
+    "line": 2826,
     "text": "M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 3835,
+    "line": 4097,
     "text": "type-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4085,
+    "line": 4347,
     "text": "tight"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4465,
+    "line": 4727,
     "text": "Account ID"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4559,
+    "line": 4821,
     "text": "AZURE_OPENAI_ENDPOINT"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4757,
+    "line": 5019,
     "text": "models-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 4959,
+    "line": 5221,
     "text": "groups-label"
   },
   {
     "file": "src/components/table/channels/modals/EditChannelModal.jsx",
-    "line": 5245,
+    "line": 5507,
     "text": "M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
   },
   {
@@ -806,47 +791,47 @@
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 2630,
+    "line": 2789,
     "text": "forced_bad_request"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 2646,
+    "line": 2805,
     "text": "invalid_request_error"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 2806,
+    "line": 2965,
     "text": "redacted_thinking"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 2973,
+    "line": 3132,
     "text": "type"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 3017,
+    "line": 3176,
     "text": "redacted_thinking"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 3208,
+    "line": 3367,
     "text": "session_id"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 3248,
+    "line": 3407,
     "text": "prompt_cache_key"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 3470,
+    "line": 3629,
     "text": "model"
   },
   {
     "file": "src/components/table/channels/modals/ParamOverrideEditorModal.jsx",
-    "line": 3512,
+    "line": 3671,
     "text": "gpt"
   },
   {
@@ -911,12 +896,7 @@
   },
   {
     "file": "src/components/table/model-deployments/modals/ViewDetailsModal.jsx",
-    "line": 497,
-    "text": "🌍"
-  },
-  {
-    "file": "src/components/table/model-deployments/modals/ViewDetailsModal.jsx",
-    "line": 525,
+    "line": 529,
     "text": "USDC"
   },
   {
@@ -960,31 +940,6 @@
     "text": "AI"
   },
   {
-    "file": "src/components/table/models/modals/EditPrefillGroupModal.jsx",
-    "line": 209,
-    "text": "off"
-  },
-  {
-    "file": "src/components/table/models/modals/EditPrefillGroupModal.jsx",
-    "line": 230,
-    "text": "off"
-  },
-  {
-    "file": "src/components/table/models/modals/EditVendorModal.jsx",
-    "line": 139,
-    "text": "off"
-  },
-  {
-    "file": "src/components/table/models/modals/EditVendorModal.jsx",
-    "line": 149,
-    "text": "off"
-  },
-  {
-    "file": "src/components/table/models/modals/EditVendorModal.jsx",
-    "line": 159,
-    "text": "off"
-  },
-  {
     "file": "src/components/table/models/modals/SyncWizardModal.jsx",
     "line": 115,
     "text": "en"
@@ -1023,6 +978,11 @@
     "file": "src/components/table/models/modals/SyncWizardModal.jsx",
     "line": 124,
     "text": "日本語"
+  },
+  {
+    "file": "src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+    "line": 379,
+    "text": "redemption-quota-raw-panel"
   },
   {
     "file": "src/components/table/subscriptions/modals/AddEditSubscriptionModal.jsx",
@@ -1066,12 +1026,17 @@
   },
   {
     "file": "src/components/table/tokens/modals/EditTokenModal.jsx",
-    "line": 226,
+    "line": 227,
     "text": "expired_time-label"
   },
   {
     "file": "src/components/table/tokens/modals/EditTokenModal.jsx",
-    "line": 683,
+    "line": 618,
+    "text": "token-quota-raw-panel"
+  },
+  {
+    "file": "src/components/table/tokens/modals/EditTokenModal.jsx",
+    "line": 703,
     "text": "token-model-limits-label"
   },
   {
@@ -1090,44 +1055,14 @@
     "text": "JSON"
   },
   {
-    "file": "src/components/table/users/modals/AddUserModal.jsx",
-    "line": 143,
-    "text": "username"
-  },
-  {
-    "file": "src/components/table/users/modals/AddUserModal.jsx",
-    "line": 158,
-    "text": "name"
-  },
-  {
-    "file": "src/components/table/users/modals/AddUserModal.jsx",
-    "line": 169,
-    "text": "new-password"
-  },
-  {
-    "file": "src/components/table/users/modals/AddUserModal.jsx",
-    "line": 180,
-    "text": "off"
+    "file": "src/components/table/users/modals/EditUserModal.jsx",
+    "line": 490,
+    "text": "user-quota-raw-panel"
   },
   {
     "file": "src/components/table/users/modals/EditUserModal.jsx",
-    "line": 372,
-    "text": "username"
-  },
-  {
-    "file": "src/components/table/users/modals/EditUserModal.jsx",
-    "line": 388,
-    "text": "new-password"
-  },
-  {
-    "file": "src/components/table/users/modals/EditUserModal.jsx",
-    "line": 400,
-    "text": "name"
-  },
-  {
-    "file": "src/components/table/users/modals/EditUserModal.jsx",
-    "line": 411,
-    "text": "off"
+    "line": 652,
+    "text": "user-adjust-quota-raw-panel"
   },
   {
     "file": "src/components/table/users/modals/UserSubscriptionsModal.jsx",
@@ -1136,12 +1071,12 @@
   },
   {
     "file": "src/components/table/users/UsersColumnDefs.jsx",
-    "line": 161,
+    "line": 168,
     "text": "%)"
   },
   {
     "file": "src/components/topup/modals/PaymentConfirmModal.jsx",
-    "line": 180,
+    "line": 191,
     "text": "Stripe"
   },
   {
@@ -1166,7 +1101,7 @@
   },
   {
     "file": "src/helpers/render.jsx",
-    "line": 543,
+    "line": 535,
     "text": "provider icon"
   },
   {
@@ -1196,22 +1131,22 @@
   },
   {
     "file": "src/pages/Chat/index.jsx",
-    "line": 65,
+    "line": 63,
     "text": "Token Frame"
   },
   {
     "file": "src/pages/Chat/index.jsx",
-    "line": 66,
+    "line": 64,
     "text": "camera;microphone"
   },
   {
     "file": "src/pages/Chat2Link/index.jsx",
-    "line": 40,
+    "line": 41,
     "text": "正在加载，请稍候..."
   },
   {
     "file": "src/pages/Home/index.jsx",
-    "line": 476,
+    "line": 480,
     "text": "30+"
   },
   {
@@ -1306,12 +1241,12 @@
   },
   {
     "file": "src/pages/Setting/index.jsx",
-    "line": 179,
+    "line": 180,
     "text": "teal"
   },
   {
     "file": "src/pages/Setting/Model/SettingGlobalModel.jsx",
-    "line": 243,
+    "line": 250,
     "text": "测试版"
   },
   {
@@ -1321,52 +1256,52 @@
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 617,
+    "line": 654,
     "text": "N/A"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 943,
+    "line": 982,
     "text": "|"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 944,
+    "line": 983,
     "text": "O"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 958,
+    "line": 997,
     "text": "例如 100000…"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 979,
+    "line": 1018,
     "text": "例如 3600…"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 1002,
+    "line": 1041,
     "text": "|"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 1003,
+    "line": 1042,
     "text": "O"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 1111,
+    "line": 1151,
     "text": "例如 prefer-by-conversation-id…"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 1196,
+    "line": 1236,
     "text": "^[-0-9A-Za-z._:]{1,128}$"
   },
   {
     "file": "src/pages/Setting/Operation/SettingsChannelAffinity.jsx",
-    "line": 1206,
+    "line": 1246,
     "text": "例如 600…"
   },
   {
@@ -1415,11 +1350,6 @@
     "text": "1 USD ="
   },
   {
-    "file": "src/pages/Setting/Operation/SettingsLog.jsx",
-    "line": 148,
-    "text": "⚠️"
-  },
-  {
     "file": "src/pages/Setting/Operation/SettingsSensitiveWords.jsx",
     "line": 103,
     "text": "｜"
@@ -1441,43 +1371,8 @@
   },
   {
     "file": "src/pages/Setting/Payment/SettingsPaymentGatewayCreem.jsx",
-    "line": 265,
+    "line": 270,
     "text": "Creem Official Site"
-  },
-  {
-    "file": "src/pages/Setting/Payment/SettingsPaymentGatewayStripe.jsx",
-    "line": 169,
-    "text": "Stripe 密钥、Webhook 等设置请"
-  },
-  {
-    "file": "src/pages/Setting/Payment/SettingsPaymentGatewayStripe.jsx",
-    "line": 175,
-    "text": "点击此处"
-  },
-  {
-    "file": "src/pages/Setting/Payment/SettingsPaymentGatewayStripe.jsx",
-    "line": 177,
-    "text": "进行设置，最好先在"
-  },
-  {
-    "file": "src/pages/Setting/Payment/SettingsPaymentGatewayStripe.jsx",
-    "line": 183,
-    "text": "测试环境"
-  },
-  {
-    "file": "src/pages/Setting/Payment/SettingsPaymentGatewayStripe.jsx",
-    "line": 185,
-    "text": "进行测试。"
-  },
-  {
-    "file": "src/pages/Setting/Payment/SettingsPaymentGatewayStripe.jsx",
-    "line": 247,
-    "text": "｜"
-  },
-  {
-    "file": "src/pages/Setting/Payment/SettingsPaymentGatewayStripe.jsx",
-    "line": 248,
-    "text": "〇"
   },
   {
     "file": "src/pages/Setting/Payment/SettingsPaymentGatewayWaffo.jsx",
@@ -1551,37 +1446,37 @@
   },
   {
     "file": "src/pages/Setting/Ratio/components/TieredPricingEditor.jsx",
-    "line": 520,
+    "line": 527,
     "text": "),"
   },
   {
     "file": "src/pages/Setting/Ratio/components/TieredPricingEditor.jsx",
-    "line": 1061,
+    "line": 1068,
     "text": "),"
   },
   {
     "file": "src/pages/Setting/Ratio/components/TieredPricingEditor.jsx",
-    "line": 1062,
+    "line": 1069,
     "text": "),"
   },
   {
     "file": "src/pages/Setting/Ratio/components/TieredPricingEditor.jsx",
-    "line": 1063,
+    "line": 1070,
     "text": "),"
   },
   {
     "file": "src/pages/Setting/Ratio/components/TieredPricingEditor.jsx",
-    "line": 1518,
+    "line": 1525,
     "text": "x"
   },
   {
     "file": "src/pages/Setting/Ratio/components/TieredPricingEditor.jsx",
-    "line": 1840,
+    "line": 1847,
     "text": "(p)"
   },
   {
     "file": "src/pages/Setting/Ratio/components/TieredPricingEditor.jsx",
-    "line": 1851,
+    "line": 1858,
     "text": "(c)"
   },
   {

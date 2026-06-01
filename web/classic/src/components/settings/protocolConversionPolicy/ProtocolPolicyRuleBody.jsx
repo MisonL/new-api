@@ -23,6 +23,7 @@ import {
   Button,
   Col,
   Input,
+  Popconfirm,
   Row,
   Select,
   Switch,
@@ -31,6 +32,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { ENDPOINT_OPTIONS, panelStyle } from './constants';
 import {
+  isResponsesToChatRule,
   isRuleScopeValid,
   parseIntegerList,
   parseTextList,
@@ -38,6 +40,56 @@ import {
 } from './utils';
 
 const { Text } = Typography;
+
+function IntegerListInput({ disabled, name, onChange, placeholder, value }) {
+  const committedValue = stringifyIntegerList(value);
+  const [draft, setDraft] = React.useState({
+    source: committedValue,
+    value: committedValue,
+  });
+  const inputValue =
+    draft.source === committedValue ? draft.value : committedValue;
+
+  React.useEffect(() => {
+    setDraft((current) =>
+      current.source === committedValue
+        ? current
+        : { source: committedValue, value: committedValue },
+    );
+  }, [committedValue]);
+
+  const updateDraft = (nextValue) => {
+    const nextList = parseIntegerList(nextValue);
+    const normalizedValue = stringifyIntegerList(nextList);
+    setDraft({
+      source: normalizedValue,
+      value: nextValue,
+    });
+    onChange(nextList);
+  };
+
+  const commitDraft = () => {
+    const nextList = parseIntegerList(inputValue);
+    const nextValue = stringifyIntegerList(nextList);
+    setDraft({
+      source: nextValue,
+      value: nextValue,
+    });
+    onChange(nextList);
+  };
+
+  return (
+    <Input
+      name={name}
+      disabled={disabled}
+      value={inputValue}
+      placeholder={placeholder}
+      onBlur={commitDraft}
+      onChange={updateDraft}
+      onEnterPress={commitDraft}
+    />
+  );
+}
 
 function BasicPanel({ directionInvalid, index, rule, t, updateRule }) {
   return (
@@ -138,13 +190,13 @@ function ScopePanel({ channelTypeOptions, index, rule, t, updateRule }) {
         <Col xs={24} md={12}>
           <div style={{ marginBottom: 12 }}>
             <Text strong>{t('指定渠道 ID')}</Text>
-            <Input
+            <IntegerListInput
               name={`protocol-rule-channel-ids-${index}`}
               disabled={rule.all_channels}
-              value={stringifyIntegerList(rule.channel_ids)}
+              value={rule.channel_ids}
               placeholder={t('多个 ID 用逗号分隔，例如：35,36,37')}
-              onChange={(nextValue) =>
-                updateRule(index, { channel_ids: parseIntegerList(nextValue) })
+              onChange={(nextList) =>
+                updateRule(index, { channel_ids: nextList })
               }
             />
           </div>
@@ -197,6 +249,48 @@ function ScopePanel({ channelTypeOptions, index, rule, t, updateRule }) {
   );
 }
 
+function AdvancedPanel({ index, rule, t, updateRule }) {
+  const bridgeSupported = isResponsesToChatRule(rule);
+  return (
+    <div style={panelStyle}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+          alignItems: 'center',
+        }}
+      >
+        <div>
+          <Text strong>{t('高级选项')}</Text>
+          <div>
+            <Text type='tertiary' size='small'>
+              {bridgeSupported
+                ? t('Responses 自定义工具会桥接到 Chat Completions 工具调用。')
+                : t('自定义工具桥接仅适用于 Responses -> Chat Completions。')}
+            </Text>
+          </div>
+        </div>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <Text>{t('自定义工具桥接')}</Text>
+          <Switch
+            id={`protocol-rule-custom-tool-bridge-${index}`}
+            name={`protocol-rule-custom-tool-bridge-${index}`}
+            checked={Boolean(bridgeSupported && rule.enable_custom_tool_bridge)}
+            checkedText={t('开')}
+            disabled={!bridgeSupported}
+            uncheckedText={t('关')}
+            onChange={(checked) =>
+              updateRule(index, { enable_custom_tool_bridge: checked })
+            }
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ProtocolPolicyRuleBody({
   channelTypeOptions,
   directionInvalid,
@@ -222,14 +316,18 @@ export default function ProtocolPolicyRuleBody({
         t={t}
         updateRule={updateRule}
       />
+      <AdvancedPanel index={index} rule={rule} t={t} updateRule={updateRule} />
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <Button
-          type='danger'
-          theme='borderless'
-          onClick={() => removeRule(index)}
+        <Popconfirm
+          content={t('删除后需要重新保存配置才会生效，确定删除这条规则吗？')}
+          okText={t('删除')}
+          cancelText={t('取消')}
+          onConfirm={() => removeRule(index)}
         >
-          {t('删除当前规则')}
-        </Button>
+          <Button type='danger' theme='borderless'>
+            {t('删除当前规则')}
+          </Button>
+        </Popconfirm>
       </div>
     </div>
   );

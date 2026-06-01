@@ -7,6 +7,7 @@ import { formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DataTableColumnHeader } from '@/components/data-table'
+import { LazyMount } from '@/components/lazy-mount'
 import { StatusBadge } from '@/components/status-badge'
 import { TASK_ACTIONS, TASK_STATUS } from '../../constants'
 import { getLogAvatarStyle } from '../../lib/avatar-color'
@@ -62,11 +63,13 @@ function AudioPreviewCell({ log }: { log: TaskLog }) {
           {t('Click to preview audio')}
         </span>
       </button>
-      <AudioPreviewDialog
-        open={open}
-        onOpenChange={setOpen}
-        clips={clips as AudioClip[]}
-      />
+      <LazyMount open={open}>
+        <AudioPreviewDialog
+          open={open}
+          onOpenChange={setOpen}
+          clips={clips as AudioClip[]}
+        />
+      </LazyMount>
     </>
   )
 }
@@ -269,11 +272,13 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
                 {failReason}
               </span>
             </button>
-            <FailReasonDialog
-              failReason={failReason}
-              open={dialogOpen}
-              onOpenChange={setDialogOpen}
-            />
+            <LazyMount open={dialogOpen}>
+              <FailReasonDialog
+                failReason={failReason}
+                open={dialogOpen}
+                onOpenChange={setDialogOpen}
+              />
+            </LazyMount>
           </>
         )
       },

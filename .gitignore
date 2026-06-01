@@ -19,6 +19,7 @@ new-api
 .DS_Store
 tiktoken_cache
 .eslintcache
+*.timestamp-*.mjs
 .gocache
 .gomodcache/
 .cache
@@ -28,6 +29,8 @@ backups/
 .deploy-backups/
 .worktrees/
 .cursor
+.antigravitycli/
+.playwright-mcp
 
 data/
 .gomodcache/
@@ -39,3 +42,4 @@ skills-lock.json
 .dev-docker/runtime/
 deploy/env/*.env
 !deploy/env/*.env.example
+docs/reviews/artifacts/

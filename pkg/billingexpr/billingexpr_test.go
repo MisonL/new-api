@@ -457,7 +457,7 @@ func TestCachePresent_LongContextTier(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Cache variables: absent (all zero) — same expression still works
+// Cache variables: absent (all zero) - same expression still works
 // ---------------------------------------------------------------------------
 
 func TestCacheAbsent_ZeroCacheTokens(t *testing.T) {
@@ -942,7 +942,7 @@ func TestTimeFunctions_MonthDayPattern(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Either 1000 (not Jan 1) or 500 (Jan 1) — both are valid
+	// Either 1000 (not Jan 1) or 500 (Jan 1) - both are valid
 	if cost != 1000 && cost != 500 {
 		t.Errorf("cost = %f, want 1000 or 500", cost)
 	}
@@ -1001,7 +1001,7 @@ func TestImageAudioZero(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// len variable tests — tier conditions based on context length
+// len variable tests - tier conditions based on context length
 // ---------------------------------------------------------------------------
 
 const lenTieredExpr = `len <= 200000 ? tier("standard", p * 3 + c * 15 + cr * 0.3) : tier("long_context", p * 6 + c * 22.5 + cr * 0.6)`

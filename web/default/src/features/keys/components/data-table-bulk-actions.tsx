@@ -11,6 +11,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-table'
+import { LazyMount } from '@/components/lazy-mount'
 import { type ApiKey } from '../types'
 import { ApiKeysMultiDeleteDialog } from './api-keys-multi-delete-dialog'
 import { useApiKeys } from './api-keys-provider'
@@ -104,11 +105,13 @@ export function DataTableBulkActions<TData>({
         </Tooltip>
       </BulkActionsToolbar>
 
-      <ApiKeysMultiDeleteDialog
-        open={showDeleteConfirm}
-        onOpenChange={setShowDeleteConfirm}
-        table={table}
-      />
+      <LazyMount open={showDeleteConfirm}>
+        <ApiKeysMultiDeleteDialog
+          open={showDeleteConfirm}
+          onOpenChange={setShowDeleteConfirm}
+          table={table}
+        />
+      </LazyMount>
     </>
   )
 }

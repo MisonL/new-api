@@ -376,6 +376,7 @@ const InvitationRecordsModal = ({ visible, onCancel, t, renderQuota }) => {
         total={total}
         showSizeChanger
         pageSizeOpts={[10, 20, 50, 100]}
+        showQuickJumper
         onPageChange={setPage}
         onPageSizeChange={(value) => {
           setPageSize(value);
@@ -572,6 +573,7 @@ const InvitationRecordsModal = ({ visible, onCancel, t, renderQuota }) => {
               total,
               showSizeChanger: true,
               pageSizeOpts: [10, 20, 50, 100],
+              showQuickJumper: true,
               onPageChange: setPage,
               onPageSizeChange: (value) => {
                 setPageSize(value);

@@ -80,6 +80,18 @@ import {
   collectNewDisallowedStatusCodeRedirects,
 } from './statusCodeRiskGuard';
 import {
+  RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
+  RESPONSES_COMPACT_MODE_DEFAULT,
+  RESPONSES_COMPACT_MODE_OPTIONS,
+  RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
+  buildResponsesCompactSettings,
+  clearResponsesCompactSettings,
+  normalizeResponsesCompactMode,
+  normalizeResponsesCompactSummaryFallbackModels,
+  resetResponsesCompactAutoFallbackOnModeChange,
+} from '../../../../helpers/responsesCompactSettings.js';
+import {
   applyHeaderProfileStrategyToChannelInputs,
   buildProfileItems,
   buildSelectedProfileItems,
@@ -252,6 +264,13 @@ const EditChannelModal = (props) => {
     allow_inference_geo: false,
     allow_speed: false,
     claude_beta_query: false,
+    responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
+    responses_compact_context_fallback:
+      RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
+    responses_compact_summary_model_fallback:
+      RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
+    responses_compact_summary_fallback_models:
+      RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(','),
     responses_stream_bootstrap_recovery_enabled: false,
     upstream_model_update_check_enabled: false,
     upstream_model_update_auto_sync_enabled: false,
@@ -607,6 +626,7 @@ const EditChannelModal = (props) => {
   const initialModelsRef = useRef([]);
   const initialModelMappingRef = useRef('');
   const initialStatusCodeMappingRef = useRef('');
+  const initialResponsesCompactModeRef = useRef(RESPONSES_COMPACT_MODE_DEFAULT);
   const headerProfileStrategy = useMemo(
     () =>
       getHeaderProfileStrategyFromSettings(inputs.settings) || {
@@ -693,10 +713,6 @@ const EditChannelModal = (props) => {
     </Tooltip>
   );
 
-  // 2FA状态更新辅助函数
-  const updateTwoFAState = (updates) => {
-    setTwoFAState((prev) => ({ ...prev, ...updates }));
-  };
   // 使用通用安全验证 Hook
   const {
     isModalVisible,
@@ -710,7 +726,6 @@ const EditChannelModal = (props) => {
   } = useSecureVerification({
     onSuccess: (result) => {
       // 验证成功后显示密钥
-      console.log('Verification success, result:', result);
       if (result && result.success && result.data?.key) {
         showSuccess(t('密钥获取成功'));
         setKeyDisplayState({
@@ -1140,9 +1155,6 @@ const EditChannelModal = (props) => {
     ) {
       return;
     }
-    if (formApiRef.current) {
-      formApiRef.current.setValue(name, value);
-    }
     if (name === 'models' && Array.isArray(value)) {
       value = Array.from(new Set(value.map((m) => (m || '').trim())));
     }
@@ -1153,10 +1165,21 @@ const EditChannelModal = (props) => {
         content:
           '不需要在末尾加/v1，New API会自动处理，添加后可能导致请求失败，是否继续？',
         onOk: () => {
+          if (formApiRef.current) {
+            formApiRef.current.setValue(name, value);
+          }
           setInputs((inputs) => ({ ...inputs, [name]: value }));
+        },
+        onCancel: () => {
+          if (formApiRef.current) {
+            formApiRef.current.setValue(name, inputs[name] || '');
+          }
         },
       });
       return;
+    }
+    if (formApiRef.current) {
+      formApiRef.current.setValue(name, value);
     }
     setInputs((inputs) => ({ ...inputs, [name]: value }));
     if (name === 'type') {
@@ -1375,6 +1398,17 @@ const EditChannelModal = (props) => {
             parsedSettings.allow_inference_geo || false;
           data.allow_speed = parsedSettings.allow_speed || false;
           data.claude_beta_query = parsedSettings.claude_beta_query || false;
+          data.responses_compact_mode = normalizeResponsesCompactMode(
+            parsedSettings.responses_compact_mode,
+          );
+          data.responses_compact_context_fallback =
+            parsedSettings.responses_compact_context_fallback !== false;
+          data.responses_compact_summary_model_fallback =
+            parsedSettings.responses_compact_summary_model_fallback !== false;
+          data.responses_compact_summary_fallback_models =
+            normalizeResponsesCompactSummaryFallbackModels(
+              parsedSettings.responses_compact_summary_fallback_models,
+            ).join(',');
           data.responses_stream_bootstrap_recovery_enabled =
             parsedSettings.responses_stream_bootstrap_recovery_enabled === true;
           data.upstream_model_update_check_enabled =
@@ -1409,6 +1443,13 @@ const EditChannelModal = (props) => {
           data.allow_inference_geo = false;
           data.allow_speed = false;
           data.claude_beta_query = false;
+          data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
+          data.responses_compact_context_fallback =
+            RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT;
+          data.responses_compact_summary_model_fallback =
+            RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT;
+          data.responses_compact_summary_fallback_models =
+            RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',');
           data.responses_stream_bootstrap_recovery_enabled = false;
           data.upstream_model_update_check_enabled = false;
           data.upstream_model_update_auto_sync_enabled = false;
@@ -1429,6 +1470,13 @@ const EditChannelModal = (props) => {
         data.allow_inference_geo = false;
         data.allow_speed = false;
         data.claude_beta_query = false;
+        data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
+        data.responses_compact_context_fallback =
+          RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT;
+        data.responses_compact_summary_model_fallback =
+          RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT;
+        data.responses_compact_summary_fallback_models =
+          RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',');
         data.responses_stream_bootstrap_recovery_enabled = false;
         data.upstream_model_update_check_enabled = false;
         data.upstream_model_update_auto_sync_enabled = false;
@@ -1472,6 +1520,7 @@ const EditChannelModal = (props) => {
         .filter(Boolean);
       initialModelMappingRef.current = data.model_mapping || '';
       initialStatusCodeMappingRef.current = data.status_code_mapping || '';
+      initialResponsesCompactModeRef.current = data.responses_compact_mode;
 
       let parsedIonet = null;
       if (data.other_info) {
@@ -1844,6 +1893,7 @@ const EditChannelModal = (props) => {
       initialModelsRef.current = [];
       initialModelMappingRef.current = '';
       initialStatusCodeMappingRef.current = '';
+      initialResponsesCompactModeRef.current = RESPONSES_COMPACT_MODE_DEFAULT;
     }
   }, [isEdit, props.visible]);
 
@@ -2321,6 +2371,21 @@ const EditChannelModal = (props) => {
       settings.allow_service_tier = localInputs.allow_service_tier === true;
       // 仅 OpenAI 渠道需要 store / safety_identifier / include_obfuscation
       if (localInputs.type === 1) {
+        resetResponsesCompactAutoFallbackOnModeChange(
+          settings,
+          localInputs.responses_compact_mode,
+          initialResponsesCompactModeRef.current,
+        );
+        Object.assign(
+          settings,
+          buildResponsesCompactSettings(
+            localInputs.type,
+            localInputs.responses_compact_mode,
+            localInputs.responses_compact_context_fallback,
+            localInputs.responses_compact_summary_model_fallback,
+            localInputs.responses_compact_summary_fallback_models,
+          ),
+        );
         settings.disable_store = localInputs.disable_store === true;
         settings.allow_safety_identifier =
           localInputs.allow_safety_identifier === true;
@@ -2332,6 +2397,9 @@ const EditChannelModal = (props) => {
         settings.allow_speed = localInputs.allow_speed === true;
         settings.claude_beta_query = localInputs.claude_beta_query === true;
       }
+    }
+    if (localInputs.type !== 1) {
+      clearResponsesCompactSettings(settings);
     }
     if (supportsResponsesBootstrapRecovery(localInputs.type)) {
       settings.responses_stream_bootstrap_recovery_enabled =
@@ -2386,6 +2454,10 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_inference_geo;
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
+    delete localInputs.responses_compact_mode;
+    delete localInputs.responses_compact_context_fallback;
+    delete localInputs.responses_compact_summary_model_fallback;
+    delete localInputs.responses_compact_summary_fallback_models;
     delete localInputs.responses_stream_bootstrap_recovery_enabled;
     delete localInputs.upstream_model_update_check_enabled;
     delete localInputs.upstream_model_update_auto_sync_enabled;
@@ -2838,6 +2910,96 @@ const EditChannelModal = (props) => {
                   : 'rotate(-90deg)';
             const advancedSettingsContent = (
               <div className='space-y-4'>
+                {inputs.type === 1 && (
+                  <div className='pb-3 border-b border-gray-100'>
+                    <Form.Select
+                      field='responses_compact_mode'
+                      label={t('Responses Compact 能力')}
+                      placeholder={t('请选择 Responses Compact 处理方式')}
+                      optionList={RESPONSES_COMPACT_MODE_OPTIONS.map(
+                        (option) => ({
+                          ...option,
+                          label: t(option.label),
+                        }),
+                      )}
+                      style={{ width: '100%' }}
+                      value={
+                        inputs.responses_compact_mode ||
+                        RESPONSES_COMPACT_MODE_DEFAULT
+                      }
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'responses_compact_mode',
+                          normalizeResponsesCompactMode(value),
+                        )
+                      }
+                      extraText={t(
+                        '控制该 OpenAI 渠道是否接收 /v1/responses/compact 请求。原生模式会保留 compact 路径并映射内部 compact 模型名。',
+                      )}
+                    />
+                    <Form.Switch
+                      field='responses_compact_context_fallback'
+                      label={t('原生 compact 上下文超限时回退')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      checked={
+                        inputs.responses_compact_context_fallback !== false
+                      }
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'responses_compact_context_fallback',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '原生 compact 因上下文过大失败时，改用模拟摘要重试。',
+                      )}
+                    />
+                    <Form.Switch
+                      field='responses_compact_summary_model_fallback'
+                      label={t('模拟摘要模型超限时回退')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      checked={
+                        inputs.responses_compact_summary_model_fallback !==
+                        false
+                      }
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'responses_compact_summary_model_fallback',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '模拟摘要超过当前模型上下文时，使用配置的回退模型重试。',
+                      )}
+                    />
+                    <Form.Input
+                      field='responses_compact_summary_fallback_models'
+                      label={t('模拟摘要回退模型')}
+                      placeholder={RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(
+                        ',',
+                      )}
+                      disabled={
+                        inputs.responses_compact_summary_model_fallback ===
+                        false
+                      }
+                      value={
+                        inputs.responses_compact_summary_fallback_models ?? ''
+                      }
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'responses_compact_summary_fallback_models',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '按顺序使用的模型名称，多个模型用英文逗号分隔，例如 gpt-5.4。',
+                      )}
+                    />
+                  </div>
+                )}
+
                 {/* Upstream Model Management Section */}
                 {MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type) && (
                   <div className='pb-3 border-b border-gray-100'>

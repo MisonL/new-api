@@ -420,7 +420,7 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 }
 
 // TaskBulkUpdate performs an unconditional bulk UPDATE by upstream task_id strings.
-// Same caveats as TaskBulkUpdateByID — no CAS guard.
+// Same caveats as TaskBulkUpdateByID - no CAS guard.
 func TaskBulkUpdate(taskIds []string, params map[string]any) error {
 	if len(taskIds) == 0 {
 		return nil
@@ -431,7 +431,7 @@ func TaskBulkUpdate(taskIds []string, params map[string]any) error {
 }
 
 // TaskBulkUpdateByID performs an unconditional bulk UPDATE by primary key IDs.
-// WARNING: This function has NO CAS (Compare-And-Swap) guard — it will overwrite
+// WARNING: This function has NO CAS (Compare-And-Swap) guard - it will overwrite
 // any concurrent status changes. DO NOT use in billing/quota lifecycle flows
 // (e.g., timeout, success, failure transitions that trigger refunds or settlements).
 // For status transitions that involve billing, use Task.UpdateWithStatus() instead.

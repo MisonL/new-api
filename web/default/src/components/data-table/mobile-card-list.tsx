@@ -96,7 +96,7 @@ function FallbackListSkeleton() {
 }
 
 /**
- * Compact list row — structured layout with title header + side-by-side fields.
+ * Compact list row - structured layout with title header + side-by-side fields.
  * Used when columns define mobileTitle or mobileBadge meta.
  *
  * Visual structure per row:
@@ -168,7 +168,7 @@ function CompactRow<TData>({ row }: { row: Row<TData> }) {
 }
 
 /**
- * Fallback list row — condensed label:value pairs for tables without
+ * Fallback list row - condensed label:value pairs for tables without
  * mobileTitle/mobileBadge. Still respects mobileHidden.
  */
 function FallbackRow<TData>({ row }: { row: Row<TData> }) {
@@ -221,13 +221,13 @@ function FallbackRow<TData>({ row }: { row: Row<TData> }) {
 /**
  * Mobile-optimized list view for table data.
  *
- * Renders rows inside a single bordered container with dividers —
+ * Renders rows inside a single bordered container with dividers -
  * a Vercel/Stripe-style list rather than individual cards.
  *
  * Column meta extensions:
- * - `mobileTitle`  — card header (left, larger text)
- * - `mobileBadge`  — inline with title (right, e.g. status badge)
- * - `mobileHidden` — hidden on mobile
+ * - `mobileTitle`  - card header (left, larger text)
+ * - `mobileBadge`  - inline with title (right, e.g. status badge)
+ * - `mobileHidden` - hidden on mobile
  *
  * When mobileTitle or mobileBadge is set on any column, uses a structured
  * two-tier layout: title+badge header, then 2 key fields side-by-side.

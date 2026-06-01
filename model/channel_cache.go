@@ -158,8 +158,12 @@ func requestChannelCacheRefreshAsync() {
 func getRandomSatisfiedChannelFromCache(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
 	cacheHit := false
 	var lastErr error
-	for _, routeModel := range getGroupModelRouteCandidates(model) {
-		channel, err, hit := getRandomSatisfiedRouteModelFromCache(group, routeModel, retry, excluded)
+	routeCandidates := getGroupModelRouteCandidateMeta(model)
+	if shouldPoolCompactRouteCandidates(routeCandidates) {
+		return getRandomSatisfiedPooledRouteModelsFromCache(group, routeCandidates, retry, excluded)
+	}
+	for _, routeCandidate := range routeCandidates {
+		channel, err, hit := getRandomSatisfiedRouteModelFromCache(group, routeCandidate, retry, excluded)
 		if !hit {
 			continue
 		}
@@ -172,8 +176,40 @@ func getRandomSatisfiedChannelFromCache(group string, model string, retry int, e
 	return nil, lastErr, cacheHit
 }
 
-func getRandomSatisfiedRouteModelFromCache(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
-	channels := group2model2channels[group][model]
+func getRandomSatisfiedPooledRouteModelsFromCache(group string, routeCandidates []routeModelCandidate, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
+	cacheHit := false
+	seen := make(map[int]struct{})
+	targetChannels := make([]*Channel, 0, len(routeCandidates))
+	for _, routeCandidate := range routeCandidates {
+		channels := group2model2channels[group][routeCandidate.model]
+		if len(channels) == 0 {
+			continue
+		}
+		cacheHit = true
+		for _, channelId := range channels {
+			if _, ok := seen[channelId]; ok {
+				continue
+			}
+			channel, ok := channelsIDM[channelId]
+			if !ok {
+				return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId), true
+			}
+			if !channelSupportsCompactRouteCandidate(channel, routeCandidate) {
+				continue
+			}
+			seen[channelId] = struct{}{}
+			targetChannels = append(targetChannels, channel)
+		}
+	}
+	if len(targetChannels) == 0 {
+		return nil, nil, cacheHit
+	}
+	channel, err := chooseCachedRouteChannel(targetChannels, retry, excluded)
+	return channel, err, true
+}
+
+func getRandomSatisfiedRouteModelFromCache(group string, routeCandidate routeModelCandidate, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
+	channels := group2model2channels[group][routeCandidate.model]
 	if len(channels) == 0 {
 		return nil, nil, false
 	}
@@ -183,18 +219,41 @@ func getRandomSatisfiedRouteModelFromCache(group string, model string, retry int
 			return nil, nil, true
 		}
 		if channel, ok := channelsIDM[channels[0]]; ok {
+			if !channelSupportsCompactRouteCandidate(channel, routeCandidate) {
+				return nil, nil, true
+			}
 			return channel, nil, true
 		}
 		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0]), true
 	}
 
-	uniquePriorities := make(map[int]bool)
+	var targetChannels []*Channel
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
-			uniquePriorities[int(channel.GetPriority())] = true
+			if !channelSupportsCompactRouteCandidate(channel, routeCandidate) {
+				continue
+			}
+			targetChannels = append(targetChannels, channel)
 		} else {
 			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId), true
 		}
+	}
+
+	if len(targetChannels) == 0 {
+		return nil, nil, true
+	}
+
+	channel, err := chooseCachedRouteChannel(targetChannels, retry, excluded)
+	return channel, err, true
+}
+
+func chooseCachedRouteChannel(targetChannels []*Channel, retry int, excluded map[int]struct{}) (*Channel, error) {
+	if len(targetChannels) == 0 {
+		return nil, nil
+	}
+	uniquePriorities := make(map[int]bool)
+	for _, channel := range targetChannels {
+		uniquePriorities[int(channel.GetPriority())] = true
 	}
 	var sortedUniquePriorities []int
 	for priority := range uniquePriorities {
@@ -207,25 +266,23 @@ func getRandomSatisfiedRouteModelFromCache(group string, model string, retry int
 	}
 	targetPriority := int64(sortedUniquePriorities[retry])
 
-	// get the priority for the given retry number
-	var sumWeight = 0
-	var targetChannels []*Channel
-	for _, channelId := range channels {
-		if _, skip := excluded[channelId]; skip {
+	filteredChannels := make([]*Channel, 0, len(targetChannels))
+	for _, channel := range targetChannels {
+		if _, skip := excluded[channel.Id]; skip {
 			continue
 		}
-		if channel, ok := channelsIDM[channelId]; ok {
-			if channel.GetPriority() == targetPriority {
-				sumWeight += channel.GetWeight()
-				targetChannels = append(targetChannels, channel)
-			}
-		} else {
-			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId), true
+		if channel.GetPriority() == targetPriority {
+			filteredChannels = append(filteredChannels, channel)
 		}
 	}
-
+	targetChannels = filteredChannels
 	if len(targetChannels) == 0 {
-		return nil, nil, true
+		return nil, nil
+	}
+
+	sumWeight := 0
+	for _, channel := range targetChannels {
+		sumWeight += channel.GetWeight()
 	}
 
 	// smoothing factor and adjustment
@@ -252,10 +309,10 @@ func getRandomSatisfiedRouteModelFromCache(group string, model string, retry int
 	for _, channel := range targetChannels {
 		randomWeight -= channel.GetWeight()*smoothingFactor + smoothingAdjustment
 		if randomWeight < 0 {
-			return channel, nil, true
+			return channel, nil
 		}
 	}
-	return nil, errors.New("channel not found"), true
+	return nil, errors.New("channel not found")
 }
 
 // GetRandomSatisfiedChannel returns a channel for the requested group/model pair.
@@ -267,7 +324,7 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry)
+		return getChannelExcluding(group, model, retry, excluded)
 	}
 
 	channelSyncLock.RLock()
@@ -277,7 +334,7 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 		return channel, cacheErr
 	}
 
-	fallbackChannel, fallbackErr := GetChannel(group, model, retry)
+	fallbackChannel, fallbackErr := getChannelExcluding(group, model, retry, excluded)
 	if fallbackErr != nil {
 		if cacheErr != nil {
 			return nil, cacheErr

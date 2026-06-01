@@ -13,11 +13,11 @@ import (
 
 // RunExpr compiles (with cache) and executes an expression string.
 // The environment exposes:
-//   - p, c             — prompt / completion tokens (auto-excluding separately-priced sub-categories)
-//   - len              — total input context length for tier conditions (never reduced by sub-category exclusion)
-//   - cr, cc, cc1h     — cache read / creation / creation-1h tokens
-//   - tier(name, value) — trace callback that records which tier matched
-//   - max, min, abs, ceil, floor — standard math helpers
+//   - p, c             - prompt / completion tokens (auto-excluding separately-priced sub-categories)
+//   - len              - total input context length for tier conditions (never reduced by sub-category exclusion)
+//   - cr, cc, cc1h     - cache read / creation / creation-1h tokens
+//   - tier(name, value) - trace callback that records which tier matched
+//   - max, min, abs, ceil, floor - standard math helpers
 //
 // Returns the resulting float64 quota (before group ratio) and a TraceResult
 // with side-channel info captured by tier() during execution.

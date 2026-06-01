@@ -49,7 +49,7 @@ func setupChannelControllerTestDB(t *testing.T) *gorm.DB {
 	model.DB = db
 	model.LOG_DB = db
 
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.User{}))
 
 	t.Cleanup(func() {
 		common.UsingSQLite = previousUsingSQLite
@@ -857,6 +857,25 @@ func TestBuildFetchModelsHeadersAppliesHeaderProfileStrategy(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers.Get("User-Agent"))
 	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers.Get("Originator"))
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+}
+
+func TestBuildFetchModelsHeadersAppliesCodexDesktopHeaderProfile(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI,
+		OtherSettings: marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"codex-desktop"},
+			},
+		}),
+	}
+
+	headers, err := buildFetchModelsHeaders(channel, "sk-test")
+	require.NoError(t, err)
+	require.Equal(t, dto.BuiltinCodexDesktopUserAgent, headers.Get("User-Agent"))
+	require.Empty(t, headers.Get("Originator"))
 	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
 }
 

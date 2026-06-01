@@ -3,6 +3,7 @@ package middleware
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -171,12 +172,146 @@ func Distribute() func(c *gin.Context) {
 // - application/x-www-form-urlencoded
 // - multipart/form-data
 func getModelFromRequest(c *gin.Context) (*ModelRequest, error) {
+	if strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json") {
+		modelRequest, err := getModelFromJSONBody(c)
+		if err != nil {
+			return nil, errors.New(i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
+		}
+		return modelRequest, nil
+	}
+
 	var modelRequest ModelRequest
 	err := common.UnmarshalBodyReusable(c, &modelRequest)
 	if err != nil {
 		return nil, errors.New(i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 	}
 	return &modelRequest, nil
+}
+
+func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, err
+	}
+
+	modelRequest, err := decodeModelRequestFields(storage)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, seekErr := storage.Seek(0, io.SeekStart); seekErr != nil {
+		return nil, seekErr
+	}
+	c.Request.Body = io.NopCloser(storage)
+
+	return modelRequest, nil
+}
+
+func decodeModelRequestFields(reader io.Reader) (*ModelRequest, error) {
+	decoder := common.NewJsonDecoderUseNumber(reader)
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	delim, ok := token.(common.JsonDelim)
+	if !ok || delim != '{' {
+		return nil, errors.New("invalid JSON request body")
+	}
+
+	modelRequest := &ModelRequest{}
+	for decoder.More() {
+		token, err = decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		field, ok := token.(string)
+		if !ok {
+			return nil, errors.New("invalid JSON field name")
+		}
+		switch field {
+		case "model":
+			value, err := decodeOptionalJSONString(decoder, field)
+			if err != nil {
+				return nil, err
+			}
+			modelRequest.Model = value
+		case "group":
+			value, err := decodeOptionalJSONString(decoder, field)
+			if err != nil {
+				return nil, err
+			}
+			modelRequest.Group = value
+		default:
+			if err := skipJSONValue(decoder); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return nil, err
+	}
+	if token, err := decoder.Token(); err != io.EOF {
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("unexpected JSON token after request body: %v", token)
+	}
+	return modelRequest, nil
+}
+
+func decodeOptionalJSONString(decoder *common.JsonDecoder, field string) (string, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return "", err
+	}
+	if token == nil {
+		return "", nil
+	}
+	value, ok := token.(string)
+	if !ok {
+		return "", fmt.Errorf("field %s must be a string", field)
+	}
+	return value, nil
+}
+
+func skipJSONValue(decoder *common.JsonDecoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := token.(common.JsonDelim)
+	if !ok {
+		return nil
+	}
+
+	var end common.JsonDelim
+	switch delim {
+	case '{':
+		end = '}'
+	case '[':
+		end = ']'
+	default:
+		return nil
+	}
+
+	for decoder.More() {
+		if delim == '{' {
+			if _, err := decoder.Token(); err != nil {
+				return err
+			}
+		}
+		if err := skipJSONValue(decoder); err != nil {
+			return err
+		}
+	}
+	token, err = decoder.Token()
+	if err != nil {
+		return err
+	}
+	if token != end {
+		return errors.New("invalid JSON request body")
+	}
+	return nil
 }
 
 func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {

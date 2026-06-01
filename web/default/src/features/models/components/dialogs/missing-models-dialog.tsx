@@ -19,6 +19,7 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
+import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import { StatusBadge } from '@/components/status-badge'
 import { getMissingModels } from '../../api'
 import { DEFAULT_PAGE_SIZE } from '../../constants'
@@ -206,6 +207,12 @@ export function MissingModelsDialog({
                       >
                         <ChevronLeft className='h-4 w-4' />
                       </Button>
+                      <PageJumpInput
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        showLabel={false}
+                        onPageChange={setCurrentPage}
+                      />
                       <Button
                         variant='outline'
                         size='icon'

@@ -257,8 +257,8 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 				Type:         "enabled",
 				BudgetTokens: common.GetPointer[int](int(float64(*claudeRequest.MaxTokens) * model_setting.GetClaudeSettings().ThinkingAdapterBudgetTokensPercentage)),
 			}
-			// TODO: 临时处理
-			// https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#important-considerations-when-using-extended-thinking
+			// Extended thinking requires default sampling knobs except temperature=1.0.
+			// See Anthropic extended-thinking important considerations.
 			claudeRequest.TopP = nil
 			claudeRequest.Temperature = common.GetPointer[float64](1.0)
 		}
@@ -518,10 +518,7 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 	tools := make([]dto.ToolCallResponse, 0)
 	fcIdx := 0
 	if claudeResponse.Index != nil {
-		fcIdx = *claudeResponse.Index - 1
-		if fcIdx < 0 {
-			fcIdx = 0
-		}
+		fcIdx = *claudeResponse.Index
 	}
 	var choice dto.ChatCompletionsStreamResponseChoice
 	if claudeResponse.Type == "message_start" {
@@ -914,7 +911,7 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 		if common.DebugEnabled {
 			common.SysLog("claude response usage is not complete, maybe upstream error")
 		}
-		// 只补缺失字段，不整份覆盖——保留 message_start 已拿到的 cache 字段
+		// 只补缺失字段，不整份覆盖，保留 message_start 已拿到的 cache 字段
 		fallback := service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		if claudeInfo.Usage.CompletionTokens == 0 ||
 			(!claudeInfo.Done && fallback.CompletionTokens > claudeInfo.Usage.CompletionTokens) {

@@ -449,13 +449,13 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			task.FinishTime = now
 		}
 		if strings.HasPrefix(taskResult.Url, "data:") {
-			// data: URI (e.g. Vertex base64 encoded video) — keep in Data, not in ResultURL
+			// data: URI (e.g. Vertex base64 encoded video) - keep in Data, not in ResultURL
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 		} else if taskResult.Url != "" {
 			// Direct upstream URL (e.g. Kling, Ali, Doubao, etc.)
 			task.PrivateData.ResultURL = taskResult.Url
 		} else {
-			// No URL from adaptor — construct proxy URL using public task ID
+			// No URL from adaptor - construct proxy URL using public task ID
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 		}
 		shouldSettle = true
@@ -545,10 +545,10 @@ func truncateBase64(s string) string {
 }
 
 // settleTaskBillingOnComplete 任务完成时的统一计费调整。
-// 优先级：1. adaptor.AdjustBillingOnComplete 返回正数 → 使用 adaptor 计算的额度
+// 优先级：1. adaptor.AdjustBillingOnComplete 返回正数 -> 使用 adaptor 计算的额度
 //
-//  2. taskResult.TotalTokens > 0 → 按 token 重算
-//  3. 都不满足 → 保持预扣额度不变
+//  2. taskResult.TotalTokens > 0 -> 按 token 重算
+//  3. 都不满足 -> 保持预扣额度不变
 func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
 	// 0. 按次计费的任务不做差额结算
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.PerCallBilling {

@@ -74,7 +74,7 @@ export default defineConfig(({ envMode }) => {
       distPath: {
         root: 'dist',
       },
-      // Rely on Rsbuild default legalComments ("linked" → per-chunk *.LICENSE.txt) in all modes.
+      // Rely on Rsbuild default legalComments ("linked" -> per-chunk *.LICENSE.txt) in all modes.
       // Do not set "none" in production: that strips minifier-preserved third-party notices and
       // extracted license files, which some distributions require for open-source compliance.
     },

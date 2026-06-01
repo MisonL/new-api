@@ -8,8 +8,11 @@ import (
 var compiledRegexCache sync.Map // map[string]*regexp.Regexp
 
 func matchAnyRegex(patterns []string, s string) bool {
-	if len(patterns) == 0 || s == "" {
+	if s == "" {
 		return false
+	}
+	if len(patterns) == 0 {
+		return true
 	}
 	for _, pattern := range patterns {
 		if pattern == "" {

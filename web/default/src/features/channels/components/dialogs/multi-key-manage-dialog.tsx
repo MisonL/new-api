@@ -28,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import { StatusBadge } from '@/components/status-badge'
 import {
   getMultiKeyStatus,
@@ -116,6 +117,8 @@ export function MultiKeyManageDialog({
         setEnabledCount(response.data.enabled_count || 0)
         setManualDisabledCount(response.data.manual_disabled_count || 0)
         setAutoDisabledCount(response.data.auto_disabled_count || 0)
+      } else {
+        toast.error(response.message || t('Failed to load key status'))
       }
     } catch (error: unknown) {
       toast.error(
@@ -393,6 +396,13 @@ export function MultiKeyManageDialog({
                   >
                     {t('Previous')}
                   </Button>
+                  <PageJumpInput
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    disabled={isLoading}
+                    showLabel={false}
+                    onPageChange={handlePageChange}
+                  />
                   <Button
                     variant='outline'
                     size='sm'

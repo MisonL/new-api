@@ -1,6 +1,12 @@
 import { z } from 'zod'
 import { CHANNEL_STATUS, MODEL_FETCHABLE_TYPES } from '../constants'
-import type { Channel } from '../types'
+import type { Channel, ResponsesCompactMode } from '../types'
+import {
+  RESPONSES_COMPACT_MODE_DEFAULT,
+  RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  normalizeResponsesCompactMode,
+  normalizeResponsesCompactFallbackModels,
+} from './channel-utils'
 
 // ============================================================================
 // Form Validation Schema
@@ -54,6 +60,12 @@ export const channelFormSchema = z.object({
   allow_safety_identifier: z.boolean().optional(), // OpenAI only
   allow_include_obfuscation: z.boolean().optional(), // OpenAI: include usage obfuscation
   strip_codex_encrypted_context: z.boolean().optional(), // OpenAI: strip Codex encrypted context
+  responses_compact_mode: z
+    .enum(['auto', 'native', 'synthetic_summary'])
+    .optional(),
+  responses_compact_context_fallback: z.boolean().optional(),
+  responses_compact_summary_model_fallback: z.boolean().optional(),
+  responses_compact_summary_fallback_models: z.string().optional(),
   allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
   allow_speed: z.boolean().optional(), // Anthropic: speed mode control
   claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
@@ -113,6 +125,11 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_safety_identifier: false,
   allow_include_obfuscation: false,
   strip_codex_encrypted_context: false,
+  responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
+  responses_compact_context_fallback: true,
+  responses_compact_summary_model_fallback: true,
+  responses_compact_summary_fallback_models:
+    RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(','),
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
@@ -168,6 +185,12 @@ export function transformChannelToFormDefaults(
   let allowSafetyIdentifier = false
   let allowIncludeObfuscation = false
   let stripCodexEncryptedContext = false
+  let responsesCompactMode: ResponsesCompactMode =
+    RESPONSES_COMPACT_MODE_DEFAULT
+  let responsesCompactContextFallback = true
+  let responsesCompactSummaryModelFallback = true
+  let responsesCompactSummaryFallbackModels =
+    RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',')
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
@@ -187,6 +210,17 @@ export function transformChannelToFormDefaults(
       allowSafetyIdentifier = parsed.allow_safety_identifier === true
       allowIncludeObfuscation = parsed.allow_include_obfuscation === true
       stripCodexEncryptedContext = parsed.strip_codex_encrypted_context === true
+      responsesCompactMode = normalizeResponsesCompactMode(
+        parsed.responses_compact_mode
+      )
+      responsesCompactContextFallback =
+        parsed.responses_compact_context_fallback !== false
+      responsesCompactSummaryModelFallback =
+        parsed.responses_compact_summary_model_fallback !== false
+      responsesCompactSummaryFallbackModels =
+        normalizeResponsesCompactFallbackModels(
+          parsed.responses_compact_summary_fallback_models
+        ).join(',')
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
@@ -246,6 +280,12 @@ export function transformChannelToFormDefaults(
     claude_beta_query: claudeBetaQuery,
     allow_safety_identifier: allowSafetyIdentifier,
     strip_codex_encrypted_context: stripCodexEncryptedContext,
+    responses_compact_mode: responsesCompactMode,
+    responses_compact_context_fallback: responsesCompactContextFallback,
+    responses_compact_summary_model_fallback:
+      responsesCompactSummaryModelFallback,
+    responses_compact_summary_fallback_models:
+      responsesCompactSummaryFallbackModels,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
@@ -329,6 +369,38 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
   }
 
   if (formData.type === 1) {
+    const previousResponsesCompactMode = normalizeResponsesCompactMode(
+      settingsObj.responses_compact_mode
+    )
+    const nextResponsesCompactMode = normalizeResponsesCompactMode(
+      formData.responses_compact_mode
+    )
+    settingsObj.responses_compact_mode = nextResponsesCompactMode
+    settingsObj.responses_compact_context_fallback =
+      formData.responses_compact_context_fallback !== false
+    settingsObj.responses_compact_summary_model_fallback =
+      formData.responses_compact_summary_model_fallback !== false
+    settingsObj.responses_compact_summary_fallback_models =
+      normalizeResponsesCompactFallbackModels(
+        String(formData.responses_compact_summary_fallback_models || '')
+          .split(',')
+          .map((model) => model.trim())
+          .filter(Boolean)
+      )
+    if (previousResponsesCompactMode !== nextResponsesCompactMode) {
+      delete settingsObj.responses_compact_auto_fallback_date
+      delete settingsObj.responses_compact_auto_fallback_reason
+    }
+  } else {
+    delete settingsObj.responses_compact_mode
+    delete settingsObj.responses_compact_auto_fallback_date
+    delete settingsObj.responses_compact_auto_fallback_reason
+    delete settingsObj.responses_compact_context_fallback
+    delete settingsObj.responses_compact_summary_model_fallback
+    delete settingsObj.responses_compact_summary_fallback_models
+  }
+
+  if (formData.type === 1) {
     settingsObj.disable_store = formData.disable_store === true
     settingsObj.allow_safety_identifier =
       formData.allow_safety_identifier === true
@@ -404,8 +476,8 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     models: formData.models,
     group: formatGroups(formData.group),
     model_mapping: formData.model_mapping || null,
-    priority: formData.priority || null,
-    weight: formData.weight || null,
+    priority: formData.priority ?? 0,
+    weight: formData.weight ?? 0,
     test_model: formData.test_model || null,
     auto_ban: formData.auto_ban ?? 1,
     status: formData.status,
@@ -452,8 +524,8 @@ export function transformFormDataToUpdatePayload(
     models: formData.models,
     group: formatGroups(formData.group),
     model_mapping: formData.model_mapping || null,
-    priority: formData.priority || null,
-    weight: formData.weight || null,
+    priority: formData.priority ?? 0,
+    weight: formData.weight ?? 0,
     test_model: formData.test_model || null,
     auto_ban: formData.auto_ban ?? 1,
     status: formData.status,
@@ -478,6 +550,17 @@ export function transformFormDataToUpdatePayload(
       ;(payload as Record<string, unknown>)[key] = null
     }
   })
+
+  // Send explicit empty strings for nullable fields so GORM updates can clear them.
+  payload.base_url = formData.base_url || ''
+  payload.openai_organization = formData.openai_organization || ''
+  payload.test_model = formData.test_model || ''
+  payload.tag = formData.tag || ''
+  payload.remark = formData.remark || ''
+  payload.model_mapping = formData.model_mapping || ''
+  payload.status_code_mapping = formData.status_code_mapping || ''
+  payload.param_override = formData.param_override || ''
+  payload.header_override = formData.header_override || ''
 
   return payload
 }

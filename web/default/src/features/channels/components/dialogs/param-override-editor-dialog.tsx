@@ -279,6 +279,8 @@ const GEMINI_IMAGE_4K_TEMPLATE = {
 }
 
 const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
+  'User-Agent',
+  'Originator',
   'Session_id',
   'X-Codex-Beta-Features',
   'X-Codex-Turn-Metadata',
@@ -346,7 +348,7 @@ const DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
   DROID_CLI_HEADER_PASSTHROUGH_HEADERS
 )
 
-const AWS_BEDROCK_ANTHROPIC_COMPAT_TEMPLATE = {
+const AWS_BEDROCK_ANTHROPIC_BETA_TEMPLATE = {
   operations: [
     {
       description:
@@ -385,6 +387,11 @@ const AWS_BEDROCK_ANTHROPIC_COMPAT_TEMPLATE = {
         'oauth-2025-04-20': null,
       },
     },
+  ],
+}
+
+const AWS_BEDROCK_REMOVE_INPUT_EXAMPLES_TEMPLATE = {
+  operations: [
     {
       description:
         'Remove all tools[*].custom.input_examples before upstream relay.',
@@ -447,9 +454,14 @@ const TEMPLATE_PRESET_CONFIG: Record<string, TemplatePresetConfig> = {
     payload: DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   aws_bedrock_anthropic_beta_override: {
-    label: 'AWS Bedrock Claude Compat',
+    label: 'AWS Bedrock Claude Beta Header',
     kind: 'operations',
-    payload: AWS_BEDROCK_ANTHROPIC_COMPAT_TEMPLATE,
+    payload: AWS_BEDROCK_ANTHROPIC_BETA_TEMPLATE,
+  },
+  aws_bedrock_remove_input_examples: {
+    label: 'AWS Bedrock Remove Input Examples',
+    kind: 'operations',
+    payload: AWS_BEDROCK_REMOVE_INPUT_EXAMPLES_TEMPLATE,
   },
 }
 

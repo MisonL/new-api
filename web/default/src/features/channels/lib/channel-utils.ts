@@ -9,7 +9,71 @@ import {
   RESPONSE_TIME_THRESHOLDS,
   TYPE_TO_KEY_PROMPT,
 } from '../constants'
-import type { Channel, ChannelSettings, ChannelOtherSettings } from '../types'
+import type {
+  Channel,
+  ChannelSettings,
+  ChannelOtherSettings,
+  ResponsesCompactMode,
+} from '../types'
+
+export const RESPONSES_COMPACT_MODE_AUTO = 'auto' as const
+export const RESPONSES_COMPACT_MODE_NATIVE = 'native' as const
+export const RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY =
+  'synthetic_summary' as const
+export const RESPONSES_COMPACT_MODE_DEFAULT = RESPONSES_COMPACT_MODE_AUTO
+
+export const RESPONSES_COMPACT_BADGE_LABELS: Record<
+  ResponsesCompactMode,
+  string
+> = {
+  auto: 'Compact Auto',
+  native: 'Compact Native',
+  synthetic_summary: 'Compact Synthetic',
+} as const
+
+export const RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL =
+  'Compact Auto Fallback'
+export const RESPONSES_COMPACT_USAGE_LOG_BADGE_LABELS = [
+  'Compact',
+  'Compact Native Badge',
+  'Compact Synthetic Badge',
+] as const
+export const RESPONSES_COMPACT_AUTO_TOOLTIP =
+  'Auto mode tries native compact first, falls back to synthetic summary after an upstream compatibility failure, and retries native once per day.'
+export const RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP =
+  'Auto mode is using synthetic summary fallback today. Native compact will be retried automatically on the next day.'
+export const RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT = true
+export const RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT = true
+export const RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT = ['gpt-5.4']
+
+export const RESPONSES_COMPACT_BADGE_KEYS = [
+  ...Object.values(RESPONSES_COMPACT_BADGE_LABELS),
+  ...RESPONSES_COMPACT_USAGE_LOG_BADGE_LABELS,
+  RESPONSES_COMPACT_AUTO_TOOLTIP,
+  RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL,
+  RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP,
+]
+
+export function normalizeResponsesCompactMode(
+  mode: unknown
+): ResponsesCompactMode {
+  if (mode === RESPONSES_COMPACT_MODE_AUTO) {
+    return RESPONSES_COMPACT_MODE_AUTO
+  }
+  if (mode === RESPONSES_COMPACT_MODE_NATIVE) {
+    return RESPONSES_COMPACT_MODE_NATIVE
+  }
+  if (mode === RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY) {
+    return RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
+  }
+  if (mode === 'convert') {
+    return RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
+  }
+  if (mode === 'disabled' || mode === 'unsupported') {
+    return RESPONSES_COMPACT_MODE_NATIVE
+  }
+  return RESPONSES_COMPACT_MODE_DEFAULT
+}
 
 // ============================================================================
 // Channel Type Utilities
@@ -255,12 +319,130 @@ export function parseChannelSettings(
 export function parseChannelOtherSettings(
   settingsStr: string | null | undefined
 ): ChannelOtherSettings {
-  if (!settingsStr || settingsStr === '{}') return {}
-  try {
-    return JSON.parse(settingsStr) as ChannelOtherSettings
-  } catch {
-    return {}
+  const defaults = defaultResponsesCompactOtherSettings()
+  if (!settingsStr || settingsStr === '{}') {
+    return defaults
   }
+  try {
+    const parsed = JSON.parse(settingsStr) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return defaults
+    }
+    const settings = parsed as ChannelOtherSettings
+    return {
+      ...defaults,
+      ...settings,
+      responses_compact_mode: normalizeResponsesCompactMode(
+        settings.responses_compact_mode
+      ),
+      responses_compact_context_fallback:
+        settings.responses_compact_context_fallback !== false,
+      responses_compact_summary_model_fallback:
+        settings.responses_compact_summary_model_fallback !== false,
+      responses_compact_summary_fallback_models:
+        normalizeResponsesCompactFallbackModels(
+          settings.responses_compact_summary_fallback_models
+        ),
+    }
+  } catch {
+    return defaults
+  }
+}
+
+export function normalizeResponsesCompactFallbackModels(
+  models: unknown
+): string[] {
+  const rawModels = Array.isArray(models)
+    ? models
+    : typeof models === 'string'
+      ? models.split(',')
+      : []
+  const result = Array.from(
+    new Set(
+      rawModels
+        .map((model) => String(model).trim())
+        .filter((model) => model.length > 0)
+    )
+  )
+  return result.length > 0
+    ? result
+    : [...RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT]
+}
+
+function defaultResponsesCompactOtherSettings(): ChannelOtherSettings {
+  return {
+    responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
+    responses_compact_context_fallback:
+      RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
+    responses_compact_summary_model_fallback:
+      RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
+    responses_compact_summary_fallback_models:
+      [...RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT],
+  }
+}
+
+export function getResponsesCompactMode(
+  settingsStr: string | null | undefined
+): ResponsesCompactMode {
+  return getResponsesCompactModeFromSettings(
+    parseChannelOtherSettings(settingsStr)
+  )
+}
+
+export function getResponsesCompactModeFromSettings(
+  settings: ChannelOtherSettings
+): ResponsesCompactMode {
+  return normalizeResponsesCompactMode(settings.responses_compact_mode)
+}
+
+export function isResponsesCompactAutoFallbackActive(
+  settingsStr: string | null | undefined,
+  now: Date = new Date()
+): boolean {
+  return isResponsesCompactAutoFallbackActiveFromSettings(
+    parseChannelOtherSettings(settingsStr),
+    now
+  )
+}
+
+export function isResponsesCompactAutoFallbackActiveFromSettings(
+  settings: ChannelOtherSettings,
+  now: Date = new Date()
+): boolean {
+  if (
+    getResponsesCompactModeFromSettings(settings) !==
+    RESPONSES_COMPACT_MODE_AUTO
+  ) {
+    return false
+  }
+  const fallbackDate = Number(settings.responses_compact_auto_fallback_date)
+  if (!Number.isFinite(fallbackDate) || fallbackDate <= 0) {
+    return false
+  }
+  return fallbackDate === responsesCompactFallbackDate(now)
+}
+
+export function getResponsesCompactAutoFallbackReason(
+  settingsStr: string | null | undefined
+): string {
+  return getResponsesCompactAutoFallbackReasonFromSettings(
+    parseChannelOtherSettings(settingsStr)
+  )
+}
+
+export function getResponsesCompactAutoFallbackReasonFromSettings(
+  settings: ChannelOtherSettings
+): string {
+  const reason = settings.responses_compact_auto_fallback_reason
+  return typeof reason === 'string' ? reason : ''
+}
+
+function responsesCompactFallbackDate(date: Date): number {
+  return (
+    date.getUTCFullYear() * 10000 +
+    (date.getUTCMonth() + 1) * 100 +
+    date.getUTCDate()
+  )
 }
 
 /**

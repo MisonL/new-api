@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -126,6 +127,41 @@ func resolveChannelSortOptions(idSort bool, sortOptions []ChannelSortOptions) Ch
 	options := sortOptions[0]
 	options.IDSort = options.IDSort || idSort
 	return options
+}
+
+func NormalizeChannelGroupFilter(group string) string {
+	group = strings.TrimSpace(group)
+	if group == "" || strings.EqualFold(group, "all") || strings.EqualFold(group, "null") {
+		return ""
+	}
+	return group
+}
+
+func channelGroupFilterCondition() string {
+	if commonGroupCol == "" {
+		initCol()
+	}
+	if common.UsingMySQL {
+		return `CONCAT(',', ` + commonGroupCol + `, ',') LIKE ? ESCAPE '!'`
+	}
+	return `(',' || ` + commonGroupCol + ` || ',') LIKE ? ESCAPE '!'`
+}
+
+func channelGroupFilterPattern(group string) string {
+	group = strings.NewReplacer(
+		"!", "!!",
+		"%", "!%",
+		"_", "!_",
+	).Replace(group)
+	return "%," + group + ",%"
+}
+
+func ApplyChannelGroupFilter(query *gorm.DB, group string) *gorm.DB {
+	group = NormalizeChannelGroupFilter(group)
+	if group == "" {
+		return query
+	}
+	return query.Where(channelGroupFilterCondition(), channelGroupFilterPattern(group))
 }
 
 // Value implements driver.Valuer interface
@@ -259,7 +295,7 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 				return keys[idx], idx, nil
 			}
 		}
-		// Fallback – should not happen, but return first enabled key
+		// Fallback - should not happen, but return first enabled key
 		return keys[enabledIdx[0]], enabledIdx[0], nil
 	default:
 		// Unknown mode, default to first enabled key (or original key string)
@@ -384,26 +420,12 @@ func SearchChannels(keyword string, group string, model string, idSort bool, sor
 	// 构造基础查询
 	baseQuery := DB.Model(&Channel{}).Omit("key")
 
-	// 构造WHERE子句
-	var whereClause string
-	var args []interface{}
-	if group != "" && group != "null" {
-		var groupCondition string
-		if common.UsingMySQL {
-			groupCondition = `CONCAT(',', ` + commonGroupCol + `, ',') LIKE ?`
-		} else {
-			// sqlite, PostgreSQL
-			groupCondition = `(',' || ` + commonGroupCol + ` || ',') LIKE ?`
-		}
-		whereClause = "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + ` LIKE ? AND ` + groupCondition
-		args = append(args, common.String2Int(keyword), "%"+keyword+"%", keyword, "%"+keyword+"%", "%"+model+"%", "%,"+group+",%")
-	} else {
-		whereClause = "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + " LIKE ?"
-		args = append(args, common.String2Int(keyword), "%"+keyword+"%", keyword, "%"+keyword+"%", "%"+model+"%")
-	}
+	whereClause := "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + " LIKE ?"
+	args := []any{common.String2Int(keyword), "%" + keyword + "%", keyword, "%" + keyword + "%", "%" + model + "%"}
+	baseQuery = ApplyChannelGroupFilter(baseQuery.Where(whereClause, args...), group)
 
 	// 执行查询
-	err := order.Apply(baseQuery.Where(whereClause, args...)).Find(&channels).Error
+	err := order.Apply(baseQuery).Find(&channels).Error
 	if err != nil {
 		return nil, err
 	}
@@ -669,42 +691,70 @@ func CleanupChannelPollingLocks() {
 	})
 }
 
-func handlerMultiKeyUpdate(channel *Channel, usingKey string, status int, reason string) {
+func handlerMultiKeyUpdate(channel *Channel, usingKey string, status int, reason string) bool {
 	keys := channel.GetKeys()
 	if len(keys) == 0 {
 		channel.Status = status
-	} else {
-		var keyIndex int
-		for i, key := range keys {
-			if key == usingKey {
-				keyIndex = i
-				break
-			}
-		}
-		if channel.ChannelInfo.MultiKeyStatusList == nil {
-			channel.ChannelInfo.MultiKeyStatusList = make(map[int]int)
-		}
-		if status == common.ChannelStatusEnabled {
-			delete(channel.ChannelInfo.MultiKeyStatusList, keyIndex)
-		} else {
-			channel.ChannelInfo.MultiKeyStatusList[keyIndex] = status
-			if channel.ChannelInfo.MultiKeyDisabledReason == nil {
-				channel.ChannelInfo.MultiKeyDisabledReason = make(map[int]string)
-			}
-			if channel.ChannelInfo.MultiKeyDisabledTime == nil {
-				channel.ChannelInfo.MultiKeyDisabledTime = make(map[int]int64)
-			}
-			channel.ChannelInfo.MultiKeyDisabledReason[keyIndex] = reason
-			channel.ChannelInfo.MultiKeyDisabledTime[keyIndex] = common.GetTimestamp()
-		}
-		if len(channel.ChannelInfo.MultiKeyStatusList) >= channel.ChannelInfo.MultiKeySize {
-			channel.Status = common.ChannelStatusAutoDisabled
-			info := channel.GetOtherInfo()
-			info["status_reason"] = "All keys are disabled"
-			info["status_time"] = common.GetTimestamp()
-			channel.SetOtherInfo(info)
+		return true
+	}
+	keyIndex := -1
+	for i, key := range keys {
+		if key == usingKey {
+			keyIndex = i
+			break
 		}
 	}
+	if keyIndex < 0 {
+		if usingKey != "" {
+			common.SysLog(fmt.Sprintf("failed to update multi-key status: channel_id=%d, using key not found", channel.Id))
+			return false
+		}
+		channel.Status = status
+		info := channel.GetOtherInfo()
+		info["status_reason"] = reason
+		info["status_time"] = common.GetTimestamp()
+		channel.SetOtherInfo(info)
+		return true
+	}
+	if channel.ChannelInfo.MultiKeyStatusList == nil {
+		channel.ChannelInfo.MultiKeyStatusList = make(map[int]int)
+	}
+	if status == common.ChannelStatusEnabled {
+		delete(channel.ChannelInfo.MultiKeyStatusList, keyIndex)
+	} else {
+		channel.ChannelInfo.MultiKeyStatusList[keyIndex] = status
+		if channel.ChannelInfo.MultiKeyDisabledReason == nil {
+			channel.ChannelInfo.MultiKeyDisabledReason = make(map[int]string)
+		}
+		if channel.ChannelInfo.MultiKeyDisabledTime == nil {
+			channel.ChannelInfo.MultiKeyDisabledTime = make(map[int]int64)
+		}
+		channel.ChannelInfo.MultiKeyDisabledReason[keyIndex] = reason
+		channel.ChannelInfo.MultiKeyDisabledTime[keyIndex] = common.GetTimestamp()
+	}
+	if !hasEnabledMultiKey(keys, channel.ChannelInfo.MultiKeyStatusList) {
+		channel.Status = common.ChannelStatusAutoDisabled
+		info := channel.GetOtherInfo()
+		info["status_reason"] = "All keys are disabled"
+		info["status_time"] = common.GetTimestamp()
+		channel.SetOtherInfo(info)
+	} else if status == common.ChannelStatusEnabled {
+		channel.Status = common.ChannelStatusEnabled
+	}
+	return true
+}
+
+func hasEnabledMultiKey(keys []string, statusList map[int]int) bool {
+	for i := range keys {
+		if statusList == nil {
+			return true
+		}
+		status, ok := statusList[i]
+		if !ok || status == common.ChannelStatusEnabled {
+			return true
+		}
+	}
+	return false
 }
 
 // UpdateChannelStatus updates channel state and its ability visibility atomically.
@@ -727,8 +777,11 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			// Protect map writes with the same per-channel lock used by readers
 			pollingLock := GetChannelPollingLock(channelId)
 			pollingLock.Lock()
-			handlerMultiKeyUpdate(channel, usingKey, status, reason)
+			changed := handlerMultiKeyUpdate(channel, usingKey, status, reason)
 			pollingLock.Unlock()
+			if !changed {
+				return false
+			}
 			if beforeStatus != channel.Status {
 				shouldUpdateAbilities = true
 			}
@@ -870,8 +923,18 @@ func DeleteDisabledChannel() (int64, error) {
 }
 
 func GetPaginatedTags(offset int, limit int) ([]*string, error) {
+	return GetPaginatedChannelTags(DB.Model(&Channel{}), offset, limit)
+}
+
+func GetPaginatedChannelTags(query *gorm.DB, offset int, limit int) ([]*string, error) {
 	var tags []*string
-	err := DB.Model(&Channel{}).Select("DISTINCT tag").Where("tag != ''").Offset(offset).Limit(limit).Find(&tags).Error
+	err := query.
+		Select("DISTINCT tag").
+		Where("tag is not null AND tag != ''").
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "tag"}}).
+		Offset(offset).
+		Limit(limit).
+		Find(&tags).Error
 	return tags, err
 }
 
@@ -898,27 +961,13 @@ func SearchTags(keyword string, group string, model string, idSort bool) ([]*str
 	// 构造基础查询
 	baseQuery := DB.Model(&Channel{}).Omit("key")
 
-	// 构造WHERE子句
-	var whereClause string
-	var args []interface{}
-	if group != "" && group != "null" {
-		var groupCondition string
-		if common.UsingMySQL {
-			groupCondition = `CONCAT(',', ` + commonGroupCol + `, ',') LIKE ?`
-		} else {
-			// sqlite, PostgreSQL
-			groupCondition = `(',' || ` + commonGroupCol + ` || ',') LIKE ?`
-		}
-		whereClause = "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + ` LIKE ? AND ` + groupCondition
-		args = append(args, common.String2Int(keyword), "%"+keyword+"%", keyword, "%"+keyword+"%", "%"+model+"%", "%,"+group+",%")
-	} else {
-		whereClause = "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + " LIKE ?"
-		args = append(args, common.String2Int(keyword), "%"+keyword+"%", keyword, "%"+keyword+"%", "%"+model+"%")
-	}
+	whereClause := "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + " LIKE ?"
+	args := []any{common.String2Int(keyword), "%" + keyword + "%", keyword, "%" + keyword + "%", "%" + model + "%"}
+	baseQuery = ApplyChannelGroupFilter(baseQuery.Where(whereClause, args...), group)
 
-	subQuery := baseQuery.Where(whereClause, args...).
+	subQuery := baseQuery.
 		Select("tag").
-		Where("tag != ''").
+		Where("tag is not null AND tag != ''").
 		Order(order)
 
 	err := DB.Table("(?) as sub", subQuery).
@@ -985,6 +1034,45 @@ func (channel *Channel) SetOtherSettings(setting dto.ChannelOtherSettings) {
 		return
 	}
 	channel.OtherSettings = string(settingBytes)
+}
+
+func MarkResponsesCompactAutoFallback(channelId int, reason string) error {
+	if channelId <= 0 {
+		return nil
+	}
+	var updatedChannel *Channel
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		channel := &Channel{}
+		query := tx
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(channel, channelId).Error; err != nil {
+			return err
+		}
+		settings := dto.ChannelOtherSettings{}
+		if channel.OtherSettings != "" {
+			if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+				return err
+			}
+		}
+		if !settings.IsAutoResponsesCompact() {
+			return nil
+		}
+		settings.MarkResponsesCompactAutoFallback(time.Now().UTC(), reason)
+		channel.SetOtherSettings(settings)
+		if err := tx.Model(&Channel{}).Where("id = ?", channelId).Update("settings", channel.OtherSettings).Error; err != nil {
+			return err
+		}
+		updatedChannel = channel
+		return nil
+	}); err != nil {
+		return err
+	}
+	if updatedChannel != nil {
+		CacheUpdateChannel(updatedChannel)
+	}
+	return nil
 }
 
 func (channel *Channel) GetParamOverride() map[string]interface{} {
@@ -1057,8 +1145,12 @@ func CountAllChannels() (int64, error) {
 
 // CountAllTags returns number of non-empty distinct tags
 func CountAllTags() (int64, error) {
+	return CountChannelTags(DB.Model(&Channel{}))
+}
+
+func CountChannelTags(query *gorm.DB) (int64, error) {
 	var total int64
-	err := DB.Model(&Channel{}).Where("tag is not null AND tag != ''").Distinct("tag").Count(&total).Error
+	err := query.Where("tag is not null AND tag != ''").Distinct("tag").Count(&total).Error
 	return total, err
 }
 

@@ -16,6 +16,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { shouldResetComboboxOnDisabledChange } from './combobox-state'
 
 export type ComboboxOption = {
   value: string
@@ -32,6 +33,7 @@ interface ComboboxProps {
   emptyText?: string
   className?: string
   allowCustomValue?: boolean
+  disabled?: boolean
 }
 
 export function Combobox({
@@ -43,10 +45,12 @@ export function Combobox({
   emptyText = 'No option found.',
   className,
   allowCustomValue = false,
+  disabled = false,
 }: ComboboxProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
   const [searchValue, setSearchValue] = React.useState('')
+  const previousDisabledRef = React.useRef(disabled)
 
   const selectedOption = options.find((option) => option.value === value)
   const displayValue = selectedOption?.label || value || placeholder
@@ -61,13 +65,25 @@ export function Combobox({
     )
   }, [options, searchValue])
 
+  React.useEffect(() => {
+    if (
+      shouldResetComboboxOnDisabledChange(previousDisabledRef.current, disabled)
+    ) {
+      setOpen(false)
+      setSearchValue('')
+    }
+    previousDisabledRef.current = disabled
+  }, [disabled])
+
   const handleSelect = (selectedValue: string) => {
+    if (disabled) return
     onValueChange(selectedValue === value ? '' : selectedValue)
     setOpen(false)
     setSearchValue('')
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return
     if (allowCustomValue && e.key === 'Enter' && searchValue) {
       e.preventDefault()
       // Check if search value matches any existing option
@@ -85,13 +101,21 @@ export function Combobox({
     }
   }
 
+  const popoverOpen = disabled ? false : open
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={popoverOpen}
+      onOpenChange={(nextOpen) => {
+        if (!disabled) setOpen(nextOpen)
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           variant='outline'
           role='combobox'
-          aria-expanded={open}
+          aria-expanded={popoverOpen}
+          disabled={disabled}
           className={cn('w-full justify-between', className)}
         >
           <span className='truncate'>

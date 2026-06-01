@@ -25,7 +25,7 @@ import {
   showError,
   showSuccess,
 } from '../../../helpers';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { BookOpen, TriangleAlert } from 'lucide-react';
 
 const defaultInputs = {
@@ -237,15 +237,18 @@ export default function SettingsPaymentGatewayWaffoPancake(props) {
             icon={<BookOpen size={16} />}
             description={
               <>
-                Waffo Pancake 的商户、商品和签名密钥请
-                <a
-                  href='https://docs.waffo.ai'
-                  target='_blank'
-                  rel='noreferrer'
-                >
-                  点击此处
-                </a>
-                获取，建议先在测试环境完成联调。
+                <Trans
+                  i18nKey='Waffo Pancake 的商户、商品和签名密钥请<docsLink>点击此处</docsLink>获取，建议先在测试环境完成联调。'
+                  components={{
+                    docsLink: (
+                      <a
+                        href='https://docs.waffo.ai'
+                        target='_blank'
+                        rel='noreferrer'
+                      />
+                    ),
+                  }}
+                />
                 <br />
                 {t('回调地址')}：
                 {props.options.ServerAddress
@@ -269,16 +272,12 @@ export default function SettingsPaymentGatewayWaffoPancake(props) {
               <Form.Switch
                 field='WaffoPancakeEnabled'
                 label={t('启用 Waffo Pancake')}
-                checkedText='｜'
-                uncheckedText='〇'
               />
             </Col>
             <Col xs={24} sm={12} md={8} lg={8} xl={8}>
               <Form.Switch
                 field='WaffoPancakeSandbox'
                 label={t('沙盒模式')}
-                checkedText='｜'
-                uncheckedText='〇'
                 extraText={t('用于切换当前下单和回调校验所使用的环境')}
               />
             </Col>
@@ -286,7 +285,7 @@ export default function SettingsPaymentGatewayWaffoPancake(props) {
               <Form.Input
                 field='WaffoPancakeCurrency'
                 label={t('货币')}
-                placeholder='USD'
+                placeholder={t('例如：USD')}
                 extraText={t('默认使用 USD 结算')}
               />
             </Col>

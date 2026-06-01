@@ -119,6 +119,8 @@ const SystemSetting = () => {
   const [emailDomainWhitelist, setEmailDomainWhitelist] = useState([]);
   const [showPasswordLoginConfirmModal, setShowPasswordLoginConfirmModal] =
     useState(false);
+  const [showSSRFProtectionConfirmModal, setShowSSRFProtectionConfirmModal] =
+    useState(false);
   const [linuxDOOAuthEnabled, setLinuxDOOAuthEnabled] = useState(false);
   const [emailToAdd, setEmailToAdd] = useState('');
   const [domainFilterMode, setDomainFilterMode] = useState(true);
@@ -753,6 +755,8 @@ const SystemSetting = () => {
 
     if (optionKey === 'PasswordLoginEnabled' && !value) {
       setShowPasswordLoginConfirmModal(true);
+    } else if (optionKey === 'fetch_setting.enable_ssrf_protection' && !value) {
+      setShowSSRFProtectionConfirmModal(true);
     } else {
       await updateOptions([{ key: optionKey, value }]);
     }
@@ -764,6 +768,13 @@ const SystemSetting = () => {
   const handlePasswordLoginConfirm = async () => {
     await updateOptions([{ key: 'PasswordLoginEnabled', value: false }]);
     setShowPasswordLoginConfirmModal(false);
+  };
+
+  const handleSSRFProtectionConfirm = async () => {
+    await updateOptions([
+      { key: 'fetch_setting.enable_ssrf_protection', value: false },
+    ]);
+    setShowSSRFProtectionConfirmModal(false);
   };
 
   return (
@@ -859,7 +870,6 @@ const SystemSetting = () => {
                       <Form.Checkbox
                         field='fetch_setting.enable_ssrf_protection'
                         noLabel
-                        extraText={t('SSRF防护开关详细说明')}
                         onChange={(e) =>
                           handleCheckboxChange(
                             'fetch_setting.enable_ssrf_protection',
@@ -869,6 +879,11 @@ const SystemSetting = () => {
                       >
                         {t('启用SSRF防护（推荐开启以保护服务器安全）')}
                       </Form.Checkbox>
+                      <Banner
+                        type='warning'
+                        description={t('SSRF防护开关详细说明')}
+                        style={{ marginTop: 8 }}
+                      />
                     </Col>
                   </Row>
 
@@ -1867,6 +1882,25 @@ const SystemSetting = () => {
                     '您确定要取消密码登录功能吗？这可能会影响用户的登录方式。',
                   )}
                 </p>
+              </Modal>
+              <Modal
+                title={t('SSRF防护设置')}
+                visible={showSSRFProtectionConfirmModal}
+                onOk={handleSSRFProtectionConfirm}
+                onCancel={() => {
+                  setShowSSRFProtectionConfirmModal(false);
+                  formApiRef.current.setValue(
+                    'fetch_setting.enable_ssrf_protection',
+                    true,
+                  );
+                }}
+                okText={t('确认')}
+                cancelText={t('取消')}
+                okButtonProps={{ type: 'danger' }}
+              >
+                <Text type='danger' strong>
+                  {t('SSRF防护开关详细说明')}
+                </Text>
               </Modal>
             </div>
           )}

@@ -1,3 +1,4 @@
+import { LazyMount } from '@/components/lazy-mount'
 import { useChannels } from './channels-provider'
 import { BalanceQueryDialog } from './dialogs/balance-query-dialog'
 import { ChannelTestDialog } from './dialogs/channel-test-dialog'
@@ -16,70 +17,90 @@ export function ChannelsDialogs() {
   return (
     <>
       {/* Channel Create/Update Drawer */}
-      <ChannelMutateDrawer
-        open={open === 'create-channel' || open === 'update-channel'}
-        onOpenChange={(v) => !v && setOpen(null)}
-        currentRow={open === 'update-channel' ? currentRow : null}
-      />
+      <LazyMount open={open === 'create-channel' || open === 'update-channel'}>
+        <ChannelMutateDrawer
+          open={open === 'create-channel' || open === 'update-channel'}
+          onOpenChange={(v) => !v && setOpen(null)}
+          currentRow={open === 'update-channel' ? currentRow : null}
+        />
+      </LazyMount>
 
       {/* Test Channel Dialog */}
-      <ChannelTestDialog
-        open={open === 'test-channel'}
-        onOpenChange={(v) => !v && setOpen(null)}
-      />
+      <LazyMount open={open === 'test-channel'}>
+        <ChannelTestDialog
+          open={open === 'test-channel'}
+          onOpenChange={(v) => !v && setOpen(null)}
+        />
+      </LazyMount>
 
       {/* Balance Query Dialog */}
-      <BalanceQueryDialog
-        open={open === 'balance-query'}
-        onOpenChange={(v) => !v && setOpen(null)}
-      />
+      <LazyMount open={open === 'balance-query'}>
+        <BalanceQueryDialog
+          open={open === 'balance-query'}
+          onOpenChange={(v) => !v && setOpen(null)}
+        />
+      </LazyMount>
 
       {/* Fetch Models Dialog */}
-      <FetchModelsDialog
-        open={open === 'fetch-models'}
-        onOpenChange={(v) => !v && setOpen(null)}
-      />
+      <LazyMount open={open === 'fetch-models'}>
+        <FetchModelsDialog
+          open={open === 'fetch-models'}
+          onOpenChange={(v) => !v && setOpen(null)}
+        />
+      </LazyMount>
 
       {/* Ollama Models Dialog */}
-      <OllamaModelsDialog
-        open={open === 'ollama-models'}
-        onOpenChange={(v) => !v && setOpen(null)}
-      />
+      <LazyMount open={open === 'ollama-models'}>
+        <OllamaModelsDialog
+          open={open === 'ollama-models'}
+          onOpenChange={(v) => !v && setOpen(null)}
+        />
+      </LazyMount>
 
       {/* Copy Channel Dialog */}
-      <CopyChannelDialog
-        open={open === 'copy-channel'}
-        onOpenChange={(v) => !v && setOpen(null)}
-      />
+      <LazyMount open={open === 'copy-channel'}>
+        <CopyChannelDialog
+          open={open === 'copy-channel'}
+          onOpenChange={(v) => !v && setOpen(null)}
+        />
+      </LazyMount>
 
       {/* Multi-Key Management Dialog */}
-      <MultiKeyManageDialog
-        open={open === 'multi-key-manage'}
-        onOpenChange={(v) => !v && setOpen(null)}
-      />
+      <LazyMount open={open === 'multi-key-manage'}>
+        <MultiKeyManageDialog
+          open={open === 'multi-key-manage'}
+          onOpenChange={(v) => !v && setOpen(null)}
+        />
+      </LazyMount>
 
       {/* Tag Batch Edit Dialog */}
-      <TagBatchEditDialog
-        open={open === 'tag-batch-edit'}
-        onOpenChange={(v) => !v && setOpen(null)}
-      />
+      <LazyMount open={open === 'tag-batch-edit'}>
+        <TagBatchEditDialog
+          open={open === 'tag-batch-edit'}
+          onOpenChange={(v) => !v && setOpen(null)}
+        />
+      </LazyMount>
 
       {/* Edit Tag Dialog */}
-      <EditTagDialog
-        open={open === 'edit-tag'}
-        onOpenChange={(v) => !v && setOpen(null)}
-      />
+      <LazyMount open={open === 'edit-tag'}>
+        <EditTagDialog
+          open={open === 'edit-tag'}
+          onOpenChange={(v) => !v && setOpen(null)}
+        />
+      </LazyMount>
 
       {/* Upstream Model Update Dialog */}
-      <UpstreamUpdateDialog
-        open={upstream.showModal}
-        addModels={upstream.addModels}
-        removeModels={upstream.removeModels}
-        preferredTab={upstream.preferredTab}
-        confirmLoading={upstream.applyLoading}
-        onConfirm={upstream.applyUpdates}
-        onCancel={upstream.closeModal}
-      />
+      <LazyMount open={upstream.showModal}>
+        <UpstreamUpdateDialog
+          open={upstream.showModal}
+          addModels={upstream.addModels}
+          removeModels={upstream.removeModels}
+          preferredTab={upstream.preferredTab}
+          confirmLoading={upstream.applyLoading}
+          onConfirm={upstream.applyUpdates}
+          onCancel={upstream.closeModal}
+        />
+      </LazyMount>
     </>
   )
 }

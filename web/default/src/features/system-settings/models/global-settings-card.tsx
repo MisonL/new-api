@@ -22,51 +22,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { StatusBadge } from '@/components/status-badge'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { ProtocolConversionPolicyEditor } from './protocol-conversion-policy-editor'
 
 const thinkingBlacklistExample = JSON.stringify(
   ['moonshotai/kimi-k2-thinking', 'kimi-k2-thinking'],
-  null,
-  2
-)
-
-const chatToResponsesPolicyExample = JSON.stringify(
-  {
-    enabled: true,
-    all_channels: false,
-    channel_ids: [1, 2],
-    model_patterns: ['^gpt-4o.*$', '^gpt-5.*$'],
-  },
-  null,
-  2
-)
-
-const chatToResponsesPolicyAllChannelsExample = JSON.stringify(
-  {
-    enabled: true,
-    all_channels: true,
-    model_patterns: ['^gpt-4o.*$', '^gpt-5.*$'],
-  },
-  null,
-  2
-)
-
-const responsesToChatCustomToolsPolicyExample = JSON.stringify(
-  {
-    rules: [
-      {
-        name: 'responses-to-chat-codex-custom-tools',
-        enabled: true,
-        source_endpoint: 'responses',
-        target_endpoint: 'chat_completions',
-        all_channels: false,
-        channel_ids: [1],
-        model_patterns: ['^gpt-5.*$'],
-        options: {
-          enable_custom_tool_bridge: true,
-        },
-      },
-    ],
-  },
   null,
   2
 )
@@ -151,6 +110,8 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
   }, [defaultValues, form])
 
   const pingEnabled = form.watch('general_setting.ping_interval_enabled')
+  const passThroughEnabled =
+    form.watch('global.pass_through_request_enabled') === true
 
   const formatJsonField = (
     field:
@@ -286,61 +247,24 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
               name='global.chat_completions_to_responses_policy'
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{t('Policy JSON')}</FormLabel>
+                  <FormLabel>{t('Policy rules')}</FormLabel>
                   <FormControl>
-                    <Textarea
-                      rows={8}
-                      placeholder={`${t('Example (specific channels):')}\n${chatToResponsesPolicyExample}\n\n${t('Example (all channels):')}\n${chatToResponsesPolicyAllChannelsExample}\n\n${t('Example (Responses to Chat custom tools):')}\n${responsesToChatCustomToolsPolicyExample}`}
-                      {...field}
-                      onChange={(event) => field.onChange(event.target.value)}
+                    <ProtocolConversionPolicyEditor
+                      value={field.value}
+                      savedValue={
+                        defaultValues.global
+                          .chat_completions_to_responses_policy
+                      }
+                      passThroughEnabled={passThroughEnabled}
+                      onChange={field.onChange}
                     />
                   </FormControl>
                   <FormDescription>
-                    {t('Empty value will be saved as {}.')}
+                    {t(
+                      'Empty rule list will be saved as {}. JSON import remains available for advanced fields.'
+                    )}
                   </FormDescription>
                   <div className='flex flex-wrap gap-2'>
-                    <Button
-                      type='button'
-                      variant='outline'
-                      size='sm'
-                      onClick={() =>
-                        form.setValue(
-                          'global.chat_completions_to_responses_policy',
-                          chatToResponsesPolicyExample,
-                          { shouldDirty: true }
-                        )
-                      }
-                    >
-                      {t('Fill example (specific channels)')}
-                    </Button>
-                    <Button
-                      type='button'
-                      variant='outline'
-                      size='sm'
-                      onClick={() =>
-                        form.setValue(
-                          'global.chat_completions_to_responses_policy',
-                          chatToResponsesPolicyAllChannelsExample,
-                          { shouldDirty: true }
-                        )
-                      }
-                    >
-                      {t('Fill example (all channels)')}
-                    </Button>
-                    <Button
-                      type='button'
-                      variant='outline'
-                      size='sm'
-                      onClick={() =>
-                        form.setValue(
-                          'global.chat_completions_to_responses_policy',
-                          responsesToChatCustomToolsPolicyExample,
-                          { shouldDirty: true }
-                        )
-                      }
-                    >
-                      {t('Fill custom tools example')}
-                    </Button>
                     <Button
                       type='button'
                       variant='outline'

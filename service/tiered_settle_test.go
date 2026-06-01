@@ -291,7 +291,7 @@ func TestTryTieredSettle_RequestProbeInfluencesBilling(t *testing.T) {
 
 func TestTryTieredSettle_NoRequestInput_FallsBackToDefault(t *testing.T) {
 	info := makeRelayInfo(probeExpr, 1.0, 1000, 500)
-	// No BillingRequestInput set — param("service_tier") returns nil, not "fast"
+	// No BillingRequestInput set - param("service_tier") returns nil, not "fast"
 
 	ok, quota, result := TryTieredSettle(info, billingexpr.TokenParams{P: 1000, C: 500})
 	if !ok {
@@ -336,7 +336,7 @@ func TestTryTieredSettle_GroupRatioZero(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Ratio mode (negative tests) — TryTieredSettle must return false
+// Ratio mode (negative tests) - TryTieredSettle must return false
 // ---------------------------------------------------------------------------
 
 func TestTryTieredSettle_RatioMode_NilSnapshot(t *testing.T) {
@@ -463,7 +463,7 @@ func TestBuildTieredTokenParams_GPT_WithCache(t *testing.T) {
 	}
 	expr := `tier("base", p * 2.5 + c * 15 + cr * 0.25)`
 	got := tieredQuota(expr, usage, false, 1.0)
-	// P=800, C=500, CR=200 → (800*2.5 + 500*15 + 200*0.25) * 0.5 = 4775
+	// P=800, C=500, CR=200 -> (800*2.5 + 500*15 + 200*0.25) * 0.5 = 4775
 	want := 4775.0
 	if math.Abs(got-want) > 0.01 {
 		t.Fatalf("quota = %f, want %f", got, want)
@@ -481,7 +481,7 @@ func TestBuildTieredTokenParams_GPT_NoCacheVar(t *testing.T) {
 	}
 	expr := `tier("base", p * 2.5 + c * 15)`
 	got := tieredQuota(expr, usage, false, 1.0)
-	// No cr → P=1000 (cache stays in P), C=500 → (1000*2.5 + 500*15) * 0.5 = 5000
+	// No cr -> P=1000 (cache stays in P), C=500 -> (1000*2.5 + 500*15) * 0.5 = 5000
 	want := 5000.0
 	if math.Abs(got-want) > 0.01 {
 		t.Fatalf("quota = %f, want %f", got, want)
@@ -499,7 +499,7 @@ func TestBuildTieredTokenParams_GPT_WithImage(t *testing.T) {
 	}
 	expr := `tier("base", p * 2 + c * 8 + img * 2.5)`
 	got := tieredQuota(expr, usage, false, 1.0)
-	// P=800, C=500, Img=200 → (800*2 + 500*8 + 200*2.5) * 0.5 = 3050
+	// P=800, C=500, Img=200 -> (800*2 + 500*8 + 200*2.5) * 0.5 = 3050
 	want := 3050.0
 	if math.Abs(got-want) > 0.01 {
 		t.Fatalf("quota = %f, want %f", got, want)
@@ -517,7 +517,7 @@ func TestBuildTieredTokenParams_Claude_WithCache(t *testing.T) {
 	}
 	expr := `tier("base", p * 3 + c * 15 + cr * 0.3)`
 	got := tieredQuota(expr, usage, true, 1.0)
-	// Claude: P=800 (no subtraction), C=500, CR=200 → (800*3 + 500*15 + 200*0.3) * 0.5 = 4980
+	// Claude: P=800 (no subtraction), C=500, CR=200 -> (800*3 + 500*15 + 200*0.3) * 0.5 = 4980
 	want := 4980.0
 	if math.Abs(got-want) > 0.01 {
 		t.Fatalf("quota = %f, want %f", got, want)
@@ -535,7 +535,7 @@ func TestBuildTieredTokenParams_GPT_AudioOutput(t *testing.T) {
 	}
 	expr := `tier("base", p * 2 + c * 10 + ao * 50)`
 	got := tieredQuota(expr, usage, false, 1.0)
-	// C=600-100=500, AO=100 → (1000*2 + 500*10 + 100*50) * 0.5 = 6000
+	// C=600-100=500, AO=100 -> (1000*2 + 500*10 + 100*50) * 0.5 = 6000
 	want := 6000.0
 	if math.Abs(got-want) > 0.01 {
 		t.Fatalf("quota = %f, want %f", got, want)
@@ -553,7 +553,7 @@ func TestBuildTieredTokenParams_GPT_AudioOutputNoVar(t *testing.T) {
 	}
 	expr := `tier("base", p * 2 + c * 10)`
 	got := tieredQuota(expr, usage, false, 1.0)
-	// No ao → C=600 (audio stays in C) → (1000*2 + 600*10) * 0.5 = 4000
+	// No ao -> C=600 (audio stays in C) -> (1000*2 + 600*10) * 0.5 = 4000
 	want := 4000.0
 	if math.Abs(got-want) > 0.01 {
 		t.Fatalf("quota = %f, want %f", got, want)

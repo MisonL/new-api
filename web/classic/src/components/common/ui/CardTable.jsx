@@ -51,6 +51,7 @@ const CardTable = ({
   const { t } = useTranslation();
 
   const showSkeleton = useMinimumLoadingTime(loading);
+  const pagination = normalizePagination(tableProps.pagination);
 
   const getRowKey = (record, index) => {
     if (typeof rowKey === 'function') return rowKey(record);
@@ -58,9 +59,10 @@ const CardTable = ({
   };
 
   if (!isMobile) {
+    const normalizedTableProps = { ...tableProps, pagination };
     const finalTableProps = hidePagination
       ? { ...tableProps, pagination: false }
-      : tableProps;
+      : normalizedTableProps;
     const horizontalScrollWidth = finalTableProps?.scroll?.x;
     const hasHorizontalScroll = Boolean(horizontalScrollWidth);
     const hasFixedColumns = columns.some((column) => Boolean(column?.fixed));
@@ -70,15 +72,6 @@ const CardTable = ({
       id: desktopTableId,
       ...tableOnlyProps
     } = finalTableProps;
-    const desktopScrollInnerStyle = hasHorizontalScroll
-      ? {
-          minWidth: '100%',
-          width:
-            horizontalScrollWidth === 'max-content'
-              ? 'max-content'
-              : horizontalScrollWidth,
-        }
-      : undefined;
     const tableNode = (
       <Table
         columns={columns}
@@ -96,25 +89,12 @@ const CardTable = ({
       return tableNode;
     }
 
-    if (hasFixedColumns) {
-      return (
-        <FixedTableScrollProxy
-          syncKey={`${columns.length}:${dataSource.length}:${loading}`}
-        >
-          {tableNode}
-        </FixedTableScrollProxy>
-      );
-    }
-
     return (
-      <div className='card-table-desktop-scroll'>
-        <div
-          className='card-table-desktop-scroll-inner'
-          style={desktopScrollInnerStyle}
-        >
-          {tableNode}
-        </div>
-      </div>
+      <DesktopTableScrollProxy
+        syncKey={`${columns.length}:${dataSource.length}:${loading}:${hasFixedColumns}`}
+      >
+        {tableNode}
+      </DesktopTableScrollProxy>
     );
   }
 
@@ -176,6 +156,7 @@ const CardTable = ({
 
   const MobileRowCard = ({ record, index }) => {
     const [showDetails, setShowDetails] = useState(false);
+    const [hasOpenedDetails, setHasOpenedDetails] = useState(false);
     const rowKeyVal = getRowKey(record, index);
 
     const hasDetails =
@@ -232,6 +213,7 @@ const CardTable = ({
               icon={showDetails ? <IconChevronUp /> : <IconChevronDown />}
               onClick={(e) => {
                 e.stopPropagation();
+                setHasOpenedDetails(true);
                 setShowDetails(!showDetails);
               }}
             >
@@ -239,7 +221,9 @@ const CardTable = ({
             </Button>
             <Collapsible isOpen={showDetails} keepDOM>
               <div className='pt-2'>
-                {tableProps.expandedRowRender(record, index)}
+                {hasOpenedDetails
+                  ? tableProps.expandedRowRender(record, index)
+                  : null}
               </div>
             </Collapsible>
           </>
@@ -266,9 +250,9 @@ const CardTable = ({
           index={index}
         />
       ))}
-      {!hidePagination && tableProps.pagination && dataSource.length > 0 && (
+      {!hidePagination && pagination && dataSource.length > 0 && (
         <div className='mt-2 flex justify-center'>
-          <Pagination {...tableProps.pagination} />
+          <Pagination {...pagination} />
         </div>
       )}
     </div>
@@ -289,10 +273,13 @@ function createTableScrollSync(tableBody, updateScrollLeft) {
   };
 }
 
-function createTableMetricObserver(tableBody, updateMetrics) {
+function createTableMetricObserver(elements, updateMetrics) {
   const resizeObserver = new ResizeObserver(updateMetrics);
   const mutationObserver = new MutationObserver(updateMetrics);
-  resizeObserver.observe(tableBody);
+  elements.filter(Boolean).forEach((element) => {
+    resizeObserver.observe(element);
+  });
+  const tableBody = elements[0];
   mutationObserver.observe(tableBody, { childList: true, subtree: true });
   const animationFrame = requestAnimationFrame(updateMetrics);
 
@@ -303,7 +290,7 @@ function createTableMetricObserver(tableBody, updateMetrics) {
   };
 }
 
-function useFixedTableScrollMetrics(containerRef, syncKey) {
+function useDesktopTableScrollMetrics(containerRef, syncKey) {
   const [metrics, setMetrics] = useState({
     clientWidth: 0,
     scrollWidth: 0,
@@ -312,13 +299,32 @@ function useFixedTableScrollMetrics(containerRef, syncKey) {
   });
 
   useEffect(() => {
-    const tableBody = getDesktopTableBody(containerRef.current);
+    const container = containerRef.current;
+    const tableBody = getDesktopTableBody(container);
     if (!tableBody) return undefined;
-    const track = containerRef.current?.querySelector(
-      '.card-table-fixed-scrollbar',
-    );
+    const cardBody = container?.closest('.semi-card-body');
+    const track = container?.querySelector('.card-table-scrollbar');
 
     const updateMetrics = () => {
+      if (container && cardBody && track) {
+        const cardBodyRect = cardBody.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        const trackStyle = getComputedStyle(track);
+        const trackOuterHeight =
+          track.offsetHeight + parseFloat(trackStyle.marginTop || '0');
+        const availableHeight =
+          cardBody.clientHeight -
+          Math.max(containerRect.top - cardBodyRect.top, 0) -
+          trackOuterHeight;
+        if (availableHeight > 0) {
+          container.style.setProperty(
+            '--card-table-body-max-height',
+            `${Math.floor(availableHeight)}px`,
+          );
+        } else {
+          container.style.removeProperty('--card-table-body-max-height');
+        }
+      }
       setMetrics({
         clientWidth: tableBody.clientWidth,
         scrollWidth: tableBody.scrollWidth,
@@ -333,22 +339,26 @@ function useFixedTableScrollMetrics(containerRef, syncKey) {
       setMetrics((current) => ({ ...current, scrollLeft }));
     };
     const cleanupSync = createTableScrollSync(tableBody, updateScrollLeft);
-    const cleanupObserver = createTableMetricObserver(tableBody, updateMetrics);
+    const cleanupObserver = createTableMetricObserver(
+      [tableBody, container, cardBody, track],
+      updateMetrics,
+    );
 
     return () => {
       cleanupObserver();
       cleanupSync();
+      container?.style.removeProperty('--card-table-body-max-height');
     };
   }, [syncKey]);
 
   return metrics;
 }
 
-const FixedTableScrollProxy = ({ children, syncKey }) => {
+const DesktopTableScrollProxy = ({ children, syncKey }) => {
   const containerRef = useRef(null);
   const trackRef = useRef(null);
   const dragStateRef = useRef(null);
-  const metrics = useFixedTableScrollMetrics(containerRef, syncKey);
+  const metrics = useDesktopTableScrollMetrics(containerRef, syncKey);
   const showScrollbar = metrics.scrollWidth > metrics.clientWidth + 1;
   const scrollableWidth = Math.max(
     metrics.scrollWidth - metrics.clientWidth,
@@ -503,10 +513,10 @@ const FixedTableScrollProxy = ({ children, syncKey }) => {
   );
 
   return (
-    <div className='card-table-fixed-scroll-shell' ref={containerRef}>
+    <div className='card-table-scroll-shell' ref={containerRef}>
       {children}
       <div
-        className='card-table-fixed-scrollbar'
+        className='card-table-scrollbar'
         style={{ display: showScrollbar ? undefined : 'none' }}
         ref={trackRef}
         onPointerDown={handleTrackPointerDown}
@@ -520,7 +530,7 @@ const FixedTableScrollProxy = ({ children, syncKey }) => {
         aria-valuenow={Math.round(metrics.scrollLeft)}
       >
         <div
-          className='card-table-fixed-scrollbar-thumb'
+          className='card-table-scrollbar-thumb'
           style={{
             left: `${thumbLeft}px`,
             width: `${thumbWidth}px`,
@@ -535,7 +545,7 @@ const FixedTableScrollProxy = ({ children, syncKey }) => {
   );
 };
 
-FixedTableScrollProxy.propTypes = {
+DesktopTableScrollProxy.propTypes = {
   children: PropTypes.node,
   syncKey: PropTypes.string,
 };
@@ -547,5 +557,11 @@ CardTable.propTypes = {
   rowKey: PropTypes.oneOfType([PropTypes.string, PropTypes.func]),
   hidePagination: PropTypes.bool,
 };
+
+function normalizePagination(pagination) {
+  if (!pagination || pagination === false) return pagination;
+  if (pagination === true) return { showQuickJumper: true };
+  return { ...pagination, showQuickJumper: true };
+}
 
 export default CardTable;

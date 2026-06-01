@@ -81,6 +81,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { JsonEditor } from '@/components/json-editor'
+import { LazyMount } from '@/components/lazy-mount'
 import { MultiSelect } from '@/components/multi-select'
 import {
   SecureVerificationDialog,
@@ -124,6 +125,12 @@ import {
   extractMappingSourceModels,
   hasModelConfigChanged,
   findMissingModelsInMapping,
+  isResponsesCompactAutoFallbackActive,
+  getResponsesCompactAutoFallbackReason,
+  RESPONSES_COMPACT_MODE_DEFAULT,
+  RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+  RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  normalizeResponsesCompactFallbackModels,
   validateModelMappingJson,
 } from '../../lib'
 import {
@@ -221,6 +228,14 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
     values.strip_codex_encrypted_context ||
+    (values.responses_compact_mode &&
+      values.responses_compact_mode !== RESPONSES_COMPACT_MODE_DEFAULT) ||
+    values.responses_compact_context_fallback === false ||
+    values.responses_compact_summary_model_fallback === false ||
+    (normalizeResponsesCompactFallbackModels(
+      values.responses_compact_summary_fallback_models
+    ).join(',') !==
+      RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',')) ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
@@ -382,6 +397,11 @@ export function ChannelMutateDrawer({
     'upstream_model_update_check_enabled'
   )
   const currentSettings = form.watch('settings')
+  const compactAutoFallbackActive = isResponsesCompactAutoFallbackActive(
+    currentSettings
+  )
+  const compactAutoFallbackReason =
+    getResponsesCompactAutoFallbackReason(currentSettings)
   const {
     unlocked: doubaoApiEditUnlocked,
     handleClick: handleApiConfigSecretClick,
@@ -1030,6 +1050,8 @@ export function ChannelMutateDrawer({
           if (response.success) {
             toast.success(t(SUCCESS_MESSAGES.UPDATED))
             handleSuccess()
+          } else {
+            toast.error(response.message || t(ERROR_MESSAGES.UPDATE_FAILED))
           }
         } else {
           // Create new channel(s)
@@ -1038,6 +1060,8 @@ export function ChannelMutateDrawer({
           if (response.success) {
             toast.success(t(SUCCESS_MESSAGES.CREATED))
             handleSuccess()
+          } else {
+            toast.error(response.message || t(ERROR_MESSAGES.CREATE_FAILED))
           }
         }
       } catch (error: unknown) {
@@ -1858,8 +1882,7 @@ export function ChannelMutateDrawer({
                             {...field}
                           />
                         </FormControl>
-                        <FormDescription>
-                          <div className='flex flex-col gap-2'>
+                        <div className='text-muted-foreground flex flex-col gap-2 text-sm'>
                             <span>
                               {isEditing ? (
                                 <>
@@ -1895,8 +1918,7 @@ export function ChannelMutateDrawer({
                                 {t('Remove Duplicates')}
                               </Button>
                             )}
-                          </div>
-                        </FormDescription>
+                        </div>
                         {isEditing && (
                           <div className='mt-4 space-y-3 rounded-lg border border-dashed p-4'>
                             <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
@@ -2012,13 +2034,15 @@ export function ChannelMutateDrawer({
                   </div>
                 )}
 
-                <CodexOAuthDialog
-                  open={codexOAuthDialogOpen}
-                  onOpenChange={setCodexOAuthDialogOpen}
-                  onKeyGenerated={(key) => {
-                    form.setValue('key', key, { shouldDirty: true })
-                  }}
-                />
+                <LazyMount open={codexOAuthDialogOpen}>
+                  <CodexOAuthDialog
+                    open={codexOAuthDialogOpen}
+                    onOpenChange={setCodexOAuthDialogOpen}
+                    onKeyGenerated={(key) => {
+                      form.setValue('key', key, { shouldDirty: true })
+                    }}
+                  />
+                </LazyMount>
 
                 {isEditing && isMultiKeyChannel && (
                   <FormField
@@ -2125,8 +2149,7 @@ export function ChannelMutateDrawer({
                           placeholder={t('Select models or add custom ones')}
                         />
                       </FormControl>
-                      <FormDescription>
-                        <div className='flex flex-col gap-2'>
+                      <div className='text-muted-foreground flex flex-col gap-2 text-sm'>
                           <span>{t(FIELD_DESCRIPTIONS.MODELS)}</span>
                           <div className='flex flex-wrap gap-2'>
                             <Button
@@ -2195,8 +2218,7 @@ export function ChannelMutateDrawer({
                               </Button>
                             ))}
                           </div>
-                        </div>
-                      </FormDescription>
+                      </div>
                       {modelMappingGuardrail.exposedTargetModels.length > 0 && (
                         <Alert className='mt-3 border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-50'>
                           <AlertDescription>
@@ -2855,6 +2877,180 @@ export function ChannelMutateDrawer({
                                 <>
                                   <FormField
                                     control={form.control}
+                                    name='responses_compact_mode'
+                                    render={({ field }) => (
+                                      <FormItem className='space-y-2 px-4 py-3'>
+                                        <div className='space-y-0.5'>
+                                          <FormLabel className='text-sm'>
+                                            {t('Responses Compact capability')}
+                                          </FormLabel>
+                                          <FormDescription>
+                                            {t(
+                                              'Controls whether this channel may receive /v1/responses/compact requests'
+                                            )}
+                                          </FormDescription>
+                                        </div>
+                                        <Select
+                                          value={
+                                            field.value ||
+                                            RESPONSES_COMPACT_MODE_DEFAULT
+                                          }
+                                          onValueChange={field.onChange}
+                                        >
+                                          <FormControl>
+                                            <SelectTrigger className='w-full'>
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                          </FormControl>
+                                          <SelectContent>
+                                            <SelectItem value='auto'>
+                                              {t(
+                                                'Auto: native first, synthetic fallback'
+                                              )}
+                                            </SelectItem>
+                                            <SelectItem value='native'>
+                                              {t(
+                                                'Native /v1/responses/compact'
+                                              )}
+                                            </SelectItem>
+                                            <SelectItem
+                                              value={
+                                                RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
+                                              }
+                                            >
+                                              {t(
+                                                'Synthetic summary via /v1/responses'
+                                              )}
+                                            </SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                        {field.value === 'auto' && (
+                                          <div className='space-y-1'>
+                                            <p className='text-muted-foreground text-xs'>
+                                              {t(
+                                                'Auto mode tries native compact first, falls back to synthetic summary after an upstream compatibility failure, and retries native once per day.'
+                                              )}
+                                            </p>
+                                            {compactAutoFallbackActive && (
+                                              <p className='text-amber-600 dark:text-amber-400 text-xs'>
+                                                {t(
+                                                  'Auto mode is using synthetic summary fallback today. Native compact will be retried automatically on the next day.'
+                                                )}
+                                                {compactAutoFallbackReason
+                                                  ? ` ${compactAutoFallbackReason}`
+                                                  : ''}
+                                              </p>
+                                            )}
+                                          </div>
+                                        )}
+                                        {field.value === 'native' && (
+                                          <p className='text-muted-foreground text-xs'>
+                                            {t(
+                                              'In native mode, model mapping may map compact virtual models to upstream model names while the endpoint remains /v1/responses/compact.'
+                                            )}
+                                          </p>
+                                        )}
+                                        {field.value ===
+                                          RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY && (
+                                          <p className='text-muted-foreground text-xs'>
+                                            {t(
+                                              'Synthetic summary mode stores a generated summary in New API and injects it into later Responses requests.'
+                                            )}
+                                          </p>
+                                        )}
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+
+                                  <FormField
+                                    control={form.control}
+                                    name='responses_compact_context_fallback'
+                                    render={({ field }) => (
+                                      <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                                        <div className='space-y-0.5'>
+                                          <FormLabel className='text-sm'>
+                                            {t(
+                                              'Fallback native compact on context limit'
+                                            )}
+                                          </FormLabel>
+                                          <FormDescription>
+                                            {t(
+                                              'When native compact fails because the context is too large, retry through synthetic summary'
+                                            )}
+                                          </FormDescription>
+                                        </div>
+                                        <FormControl>
+                                          <Switch
+                                            checked={field.value !== false}
+                                            onCheckedChange={field.onChange}
+                                          />
+                                        </FormControl>
+                                      </FormItem>
+                                    )}
+                                  />
+
+                                  <FormField
+                                    control={form.control}
+                                    name='responses_compact_summary_model_fallback'
+                                    render={({ field }) => (
+                                      <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                                        <div className='space-y-0.5'>
+                                          <FormLabel className='text-sm'>
+                                            {t(
+                                              'Fallback synthetic summary model'
+                                            )}
+                                          </FormLabel>
+                                          <FormDescription>
+                                            {t(
+                                              'When synthetic summary exceeds the current model context, retry with the configured fallback model'
+                                            )}
+                                          </FormDescription>
+                                        </div>
+                                        <FormControl>
+                                          <Switch
+                                            checked={field.value !== false}
+                                            onCheckedChange={field.onChange}
+                                          />
+                                        </FormControl>
+                                      </FormItem>
+                                    )}
+                                  />
+
+                                  <FormField
+                                    control={form.control}
+                                    name='responses_compact_summary_fallback_models'
+                                    render={({ field }) => (
+                                      <FormItem className='space-y-2 px-4 py-3'>
+                                        <div className='space-y-0.5'>
+                                          <FormLabel className='text-sm'>
+                                            {t('Synthetic summary fallback models')}
+                                          </FormLabel>
+                                          <FormDescription>
+                                            {t(
+                                              'Comma-separated model names used in order, for example gpt-5.4'
+                                            )}
+                                          </FormDescription>
+                                        </div>
+                                        <FormControl>
+                                          <Input
+                                            value={field.value || ''}
+                                            onChange={field.onChange}
+                                            placeholder='gpt-5.4'
+                                            disabled={
+                                              form.watch(
+                                                'responses_compact_summary_model_fallback'
+                                              ) === false
+                                            }
+                                          />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+
+                                  <FormField
+                                    control={form.control}
                                     name='disable_store'
                                     render={({ field }) => (
                                       <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
@@ -3341,7 +3537,7 @@ export function ChannelMutateDrawer({
       )}
 
       {/* Fetch Models Dialog (for editing mode) */}
-      {isEditing && currentRow && (
+      <LazyMount open={fetchModelsDialogOpen && isEditing && !!currentRow}>
         <FetchModelsDialog
           open={fetchModelsDialogOpen}
           onOpenChange={setFetchModelsDialogOpen}
@@ -3352,41 +3548,47 @@ export function ChannelMutateDrawer({
           redirectModels={redirectModelList}
           redirectSourceModels={redirectModelKeyList}
         />
-      )}
+      </LazyMount>
 
-      <SecureVerificationDialog
-        open={verificationOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            cancelVerification()
-          }
-        }}
-        methods={verificationMethods}
-        state={verificationState}
-        onVerify={async (method, code) => {
-          await executeVerification(method, code)
-        }}
-        onCancel={cancelVerification}
-        onCodeChange={setVerificationCode}
-        onMethodChange={switchVerificationMethod}
-      />
+      <LazyMount open={verificationOpen}>
+        <SecureVerificationDialog
+          open={verificationOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              cancelVerification()
+            }
+          }}
+          methods={verificationMethods}
+          state={verificationState}
+          onVerify={async (method, code) => {
+            await executeVerification(method, code)
+          }}
+          onCancel={cancelVerification}
+          onCodeChange={setVerificationCode}
+          onMethodChange={switchVerificationMethod}
+        />
+      </LazyMount>
 
       {/* Missing Models Confirmation Dialog */}
-      <MissingModelsConfirmationDialog
-        open={missingModelsDialogOpen}
-        missingModels={missingModelsList}
-        onConfirm={handleMissingModelsAction}
-        onOpenChange={setMissingModelsDialogOpen}
-      />
+      <LazyMount open={missingModelsDialogOpen}>
+        <MissingModelsConfirmationDialog
+          open={missingModelsDialogOpen}
+          missingModels={missingModelsList}
+          onConfirm={handleMissingModelsAction}
+          onOpenChange={setMissingModelsDialogOpen}
+        />
+      </LazyMount>
 
-      <StatusCodeRiskDialog
-        open={statusCodeRiskOpen}
-        onOpenChange={(v) => {
-          if (!v) handleStatusCodeRiskAction(false)
-        }}
-        detailItems={statusCodeRiskDetailItems}
-        onConfirm={() => handleStatusCodeRiskAction(true)}
-      />
+      <LazyMount open={statusCodeRiskOpen}>
+        <StatusCodeRiskDialog
+          open={statusCodeRiskOpen}
+          onOpenChange={(v) => {
+            if (!v) handleStatusCodeRiskAction(false)
+          }}
+          detailItems={statusCodeRiskDetailItems}
+          onConfirm={() => handleStatusCodeRiskAction(true)}
+        />
+      </LazyMount>
     </>
   )
 }

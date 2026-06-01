@@ -36,6 +36,8 @@ type ChannelAffinitySetting struct {
 }
 
 var CodexCliPassThroughHeaders = []string{
+	"User-Agent",
+	"Originator",
 	"Session_id",
 	"X-Codex-Beta-Features",
 	"X-Codex-Turn-Metadata",

@@ -23,7 +23,7 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
 
-	responsesJSON, err = relaycommon.RemoveDisabledFields(responsesJSON, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+	responsesJSON, err = relaycommon.RemoveDisabledFields(responsesJSON, info.ChannelOtherSettings, false)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
@@ -68,7 +68,7 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
 
-	jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+	jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, false)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}

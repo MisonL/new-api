@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { LazyMount } from '@/components/lazy-mount'
 import {
   handleDeleteModel,
   handleToggleModelStatus,
@@ -31,6 +32,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { setOpen, setCurrentRow } = useModels()
   const queryClient = useQueryClient()
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const isEnabled = isModelEnabled(model)
 
@@ -101,18 +103,27 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </DropdownMenuItem>
       </DropdownMenuContent>
 
-      <ConfirmDialog
-        open={deleteConfirmOpen}
-        onOpenChange={setDeleteConfirmOpen}
-        title={t('Delete Model')}
-        desc={`Are you sure you want to delete "${model.model_name}"? This action cannot be undone.`}
-        confirmText='Delete'
-        destructive
-        handleConfirm={() => {
-          handleDeleteModel(model.id, queryClient)
-          setDeleteConfirmOpen(false)
-        }}
-      />
+      <LazyMount open={deleteConfirmOpen}>
+        <ConfirmDialog
+          open={deleteConfirmOpen}
+          onOpenChange={setDeleteConfirmOpen}
+          title={t('Delete Model')}
+          desc={`Are you sure you want to delete "${model.model_name}"? This action cannot be undone.`}
+          confirmText='Delete'
+          destructive
+          isLoading={isDeleting}
+          handleConfirm={async () => {
+            if (isDeleting) return
+            setIsDeleting(true)
+            try {
+              await handleDeleteModel(model.id, queryClient)
+              setDeleteConfirmOpen(false)
+            } finally {
+              setIsDeleting(false)
+            }
+          }}
+        />
+      </LazyMount>
     </DropdownMenu>
   )
 }

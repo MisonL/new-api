@@ -655,7 +655,6 @@ const RegisterForm = () => {
                   placeholder={t('请输入用户名')}
                   name='username'
                   autoComplete='username'
-                  autocomplete='username'
                   onChange={(value) => handleChange('username', value)}
                   prefix={<IconUser />}
                 />
@@ -667,7 +666,6 @@ const RegisterForm = () => {
                   name='password'
                   mode='password'
                   autoComplete='new-password'
-                  autocomplete='new-password'
                   onChange={(value) => handleChange('password', value)}
                   prefix={<IconLock />}
                 />
@@ -679,7 +677,6 @@ const RegisterForm = () => {
                   name='password2'
                   mode='password'
                   autoComplete='new-password'
-                  autocomplete='new-password'
                   onChange={(value) => handleChange('password2', value)}
                   prefix={<IconLock />}
                 />
@@ -693,7 +690,6 @@ const RegisterForm = () => {
                       name='email'
                       type='email'
                       autoComplete='email'
-                      autocomplete='email'
                       onChange={(value) => handleChange('email', value)}
                       prefix={<IconMail />}
                       suffix={
@@ -714,7 +710,6 @@ const RegisterForm = () => {
                       placeholder={t('输入验证码')}
                       name='verification_code'
                       autoComplete='one-time-code'
-                      autocomplete='one-time-code'
                       onChange={(value) =>
                         handleChange('verification_code', value)
                       }

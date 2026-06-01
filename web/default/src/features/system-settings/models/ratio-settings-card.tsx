@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { LazyMount } from '@/components/lazy-mount'
 import { resetModelRatios } from '../api'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
@@ -471,18 +472,20 @@ export function RatioSettingsCard({
         </TabsContent>
       </Tabs>
 
-      <ConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        title={t('Reset all model prices?')}
-        desc={t(
-          'This will clear custom pricing ratios and revert to upstream defaults.'
-        )}
-        destructive
-        isLoading={resetMutation.isPending}
-        handleConfirm={handleConfirmReset}
-        confirmText={t('Reset')}
-      />
+      <LazyMount open={confirmOpen}>
+        <ConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          title={t('Reset all model prices?')}
+          desc={t(
+            'This will clear custom pricing ratios and revert to upstream defaults.'
+          )}
+          destructive
+          isLoading={resetMutation.isPending}
+          handleConfirm={handleConfirmReset}
+          confirmText={t('Reset')}
+        />
+      </LazyMount>
     </SettingsSection>
   )
 }

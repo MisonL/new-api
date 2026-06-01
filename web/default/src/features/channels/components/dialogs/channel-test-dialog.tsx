@@ -73,7 +73,7 @@ const endpointTypeOptions: Array<{ value: string; label: string }> = [
   { value: 'openai-response', label: 'OpenAI Responses (/v1/responses)' },
   {
     value: 'openai-response-compact',
-    label: 'OpenAI Response Compaction (/v1/responses/compact)',
+    label: 'OpenAI Responses Compact (/v1/responses/compact)',
   },
   { value: 'anthropic', label: 'Anthropic (/v1/messages)' },
   {
@@ -134,7 +134,6 @@ export function ChannelTestDialog({
   }, [open, currentRow?.id, resetState])
 
   const streamDisabled = STREAM_INCOMPATIBLE_ENDPOINTS.has(endpointType)
-
   useEffect(() => {
     if (streamDisabled) {
       setIsStreamTest(false)
@@ -352,7 +351,7 @@ export function ChannelTestDialog({
                   size='sm'
                   className='w-fit'
                   onClick={() =>
-                    window.open('/console/setting?tab=ratio', '_blank')
+                    window.open('/system-settings/models/ratio', '_blank')
                   }
                 >
                   <Settings className='mr-1 h-3 w-3' />

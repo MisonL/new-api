@@ -105,13 +105,14 @@
 | ----------------- | --------------- | ------------------------------------------------------------ | ------------------------- |
 | `chrome-macos`    | Chrome macOS    | 浏览器常见导航请求头                                         | 否                        |
 | `codex-cli`       | Codex CLI       | `User-Agent: codex-tui/0.130.0 ...`、`Originator: codex-tui` | 否                        |
+| `codex-desktop`   | Codex Desktop   | `User-Agent: Codex Desktop/0.131.0-alpha.9 ...`              | 否                        |
 | `claude-code`     | Claude Code     | `User-Agent: claude-cli/2.1.139 (external, sdk-cli)`         | 否                        |
 | `gemini-cli`      | Gemini CLI      | `User-Agent: GeminiCLI/0.41.2/gemini-3.1-pro-preview ...`    | 否                        |
 | `qwen-code`       | Qwen Code       | `User-Agent: QwenCode/0.15.10 (darwin; x64)`                 | 否                        |
 | `droid`           | Droid CLI       | `User-Agent: factory-cli/0.123.0`                            | 否                        |
 | `postman-runtime` | Postman Runtime | Postman Runtime 调试请求头                                   | 否                        |
 
-`codex-cli` 的固定快照代表交互式 TUI 场景。`codex exec` 的 non-interactive 请求会使用 `codex_exec`，不能作为 `Codex CLI` 内置 Profile 模板。
+`codex-cli` 的固定快照代表交互式 TUI 场景。`codex-desktop` 的固定快照代表 Codex Desktop 场景。`codex exec` 的 non-interactive 请求会使用 `codex_exec`，不能作为 `Codex CLI` 内置 Profile 模板。
 
 ## 请求头模板与透传规则
 
@@ -144,12 +145,14 @@
 
 ### `pass_headers` 与 CLI 客户端
 
-`pass_headers` 不生成固定请求头，只从当前客户端请求里读取同名请求头并写入上游请求。它用于保留 Codex CLI、Claude Code、Gemini CLI 等真实客户端携带的动态元数据。
+`pass_headers` 不生成固定请求头，只从当前客户端请求里读取同名请求头并写入上游请求。它用于保留 Codex CLI、Codex Desktop、Claude Code、Gemini CLI 等真实客户端携带的动态元数据。
 
-Codex CLI 透传模板当前包含：
+Codex CLI / Codex Desktop 透传模板当前包含：
 
 ```json
 [
+  "User-Agent",
+  "Originator",
   "Session_id",
   "X-Codex-Beta-Features",
   "X-Codex-Turn-Metadata",

@@ -21,6 +21,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { formatTimestampToDate } from '@/lib/format'
 import { DataTableColumnHeader } from '@/components/data-table'
+import { LazyMount } from '@/components/lazy-mount'
 import { StatusBadge } from '@/components/status-badge'
 import { MJ_TASK_TYPES } from '../../constants'
 import {
@@ -207,12 +208,14 @@ export function useDrawingLogsColumns(
                 {t('View')}
               </span>
             </button>
-            <ImageDialog
-              imageUrl={imageUrl}
-              taskId={log.mj_id}
-              open={dialogOpen}
-              onOpenChange={setDialogOpen}
-            />
+            <LazyMount open={dialogOpen}>
+              <ImageDialog
+                imageUrl={imageUrl}
+                taskId={log.mj_id}
+                open={dialogOpen}
+                onOpenChange={setDialogOpen}
+              />
+            </LazyMount>
           </>
         )
       },
@@ -244,12 +247,14 @@ export function useDrawingLogsColumns(
                 {prompt}
               </span>
             </button>
-            <PromptDialog
-              prompt={prompt}
-              promptEn={log.prompt_en}
-              open={dialogOpen}
-              onOpenChange={setDialogOpen}
-            />
+            <LazyMount open={dialogOpen}>
+              <PromptDialog
+                prompt={prompt}
+                promptEn={log.prompt_en}
+                open={dialogOpen}
+                onOpenChange={setDialogOpen}
+              />
+            </LazyMount>
           </>
         )
       },
