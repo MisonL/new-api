@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -365,6 +366,31 @@ func TestResponsesCompactContextLengthErrorRejectsGenericLimit(t *testing.T) {
 	}, http.StatusBadRequest)
 
 	require.False(t, isResponsesCompactContextLengthError(err))
+}
+
+func TestResponsesCompactContextLengthErrorAcceptsUpstreamRequestTooLarge(t *testing.T) {
+	err := types.NewOpenAIError(
+		errors.New("upstream request too large: status code 413"),
+		types.ErrorCodeUpstreamRequestTooLarge,
+		http.StatusRequestEntityTooLarge,
+	)
+
+	require.True(t, isResponsesCompactContextLengthError(err))
+}
+
+func TestFormatNoAvailableChannelErrorMessageIncludesLastError(t *testing.T) {
+	lastErr := types.NewErrorWithStatusCode(
+		errors.New("upstream transport interrupted: do request failed"),
+		types.ErrorCodeUpstreamTransportInterrupted,
+		http.StatusBadGateway,
+	)
+
+	message := formatNoAvailableChannelErrorMessage("default", "claude-opus-4-8-thinking", lastErr)
+
+	require.Contains(t, message, "分组 default 下模型 claude-opus-4-8-thinking 的可用渠道不存在（retry）")
+	require.Contains(t, message, "上一错误")
+	require.Contains(t, message, "status_code=502")
+	require.Contains(t, message, "upstream transport interrupted")
 }
 
 func compactAutoFallbackRelayInfo() *relaycommon.RelayInfo {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -69,14 +70,16 @@ const (
 	ErrorCodeBadRequestBody ErrorCode = "bad_request_body"
 
 	// response error
-	ErrorCodeReadResponseBodyFailed ErrorCode = "read_response_body_failed"
-	ErrorCodeBadResponseStatusCode  ErrorCode = "bad_response_status_code"
-	ErrorCodeBadResponse            ErrorCode = "bad_response"
-	ErrorCodeBadResponseBody        ErrorCode = "bad_response_body"
-	ErrorCodeEmptyResponse          ErrorCode = "empty_response"
-	ErrorCodeAwsInvokeError         ErrorCode = "aws_invoke_error"
-	ErrorCodeModelNotFound          ErrorCode = "model_not_found"
-	ErrorCodePromptBlocked          ErrorCode = "prompt_blocked"
+	ErrorCodeReadResponseBodyFailed       ErrorCode = "read_response_body_failed"
+	ErrorCodeBadResponseStatusCode        ErrorCode = "bad_response_status_code"
+	ErrorCodeBadResponse                  ErrorCode = "bad_response"
+	ErrorCodeBadResponseBody              ErrorCode = "bad_response_body"
+	ErrorCodeEmptyResponse                ErrorCode = "empty_response"
+	ErrorCodeUpstreamRequestTooLarge      ErrorCode = "upstream_request_too_large"
+	ErrorCodeUpstreamTransportInterrupted ErrorCode = "upstream_transport_interrupted"
+	ErrorCodeAwsInvokeError               ErrorCode = "aws_invoke_error"
+	ErrorCodeModelNotFound                ErrorCode = "model_not_found"
+	ErrorCodePromptBlocked                ErrorCode = "prompt_blocked"
 
 	// sql error
 	ErrorCodeQueryDataError  ErrorCode = "query_data_error"
@@ -86,6 +89,45 @@ const (
 	ErrorCodeInsufficientUserQuota      ErrorCode = "insufficient_user_quota"
 	ErrorCodePreConsumeTokenQuotaFailed ErrorCode = "pre_consume_token_quota_failed"
 )
+
+func UpstreamHTTPStatusErrorCode(statusCode int) (ErrorCode, bool) {
+	switch statusCode {
+	case http.StatusRequestEntityTooLarge:
+		return ErrorCodeUpstreamRequestTooLarge, true
+	default:
+		return "", false
+	}
+}
+
+func UpstreamHTTPStatusErrorMessage(errorCode ErrorCode, statusCode int) string {
+	switch errorCode {
+	case ErrorCodeUpstreamRequestTooLarge:
+		return fmt.Sprintf("upstream request too large: status code %d", statusCode)
+	default:
+		return fmt.Sprintf("bad response status code %d", statusCode)
+	}
+}
+
+func IsUpstreamTransportInterruptedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	for _, indicator := range []string{
+		"unexpected eof",
+		"server sent goaway",
+		"http2: server sent goaway",
+		"connection reset by peer",
+	} {
+		if strings.Contains(message, indicator) {
+			return true
+		}
+	}
+	return false
+}
 
 type NewAPIError struct {
 	Err            error
@@ -393,6 +435,12 @@ func ErrOptionWithNoRecordErrorLog() NewAPIErrorOptions {
 func ErrOptionWithStatusCode(statusCode int) NewAPIErrorOptions {
 	return func(e *NewAPIError) {
 		e.StatusCode = statusCode
+	}
+}
+
+func ErrOptionWithErrorCode(errorCode ErrorCode) NewAPIErrorOptions {
+	return func(e *NewAPIError) {
+		e.errorCode = errorCode
 	}
 }
 

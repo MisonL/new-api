@@ -1,11 +1,54 @@
 package service
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRelayErrorHandlerClassifiesHTML413(t *testing.T) {
+	t.Parallel()
+
+	resp := &http.Response{
+		StatusCode: http.StatusRequestEntityTooLarge,
+		Body:       io.NopCloser(strings.NewReader("<html><body>413 Request Entity Too Large</body></html>")),
+	}
+
+	err := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusRequestEntityTooLarge, err.StatusCode)
+	require.Equal(t, types.ErrorCodeUpstreamRequestTooLarge, err.GetErrorCode())
+	require.Contains(t, err.Error(), "upstream request too large")
+}
+
+func TestRelayErrorHandlerClassifiesJSON413WithoutDroppingUpstreamMessage(t *testing.T) {
+	t.Parallel()
+
+	resp := &http.Response{
+		StatusCode: http.StatusRequestEntityTooLarge,
+		Body: io.NopCloser(strings.NewReader(`{
+			"error": {
+				"message": "context window exceeded",
+				"type": "invalid_request_error",
+				"code": "context_length_exceeded"
+			}
+		}`)),
+	}
+
+	err := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusRequestEntityTooLarge, err.StatusCode)
+	require.Equal(t, types.ErrorCodeUpstreamRequestTooLarge, err.GetErrorCode())
+	require.Contains(t, err.Error(), "context window exceeded")
+	require.Equal(t, "context_length_exceeded", err.ToOpenAIError().Code)
+}
 
 func TestResetStatusCode(t *testing.T) {
 	t.Parallel()
