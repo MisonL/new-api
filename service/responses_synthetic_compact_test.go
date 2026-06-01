@@ -398,6 +398,74 @@ func TestApplySyntheticCompactStateScopeRejectsDifferentGroup(t *testing.T) {
 	require.Contains(t, err.Error(), "different group")
 }
 
+func TestApplySyntheticCompactStateScopeRejectsMissingScopeBinding(t *testing.T) {
+	cases := []struct {
+		name    string
+		state   SyntheticCompactState
+		scope   SyntheticCompactStateScope
+		wantErr string
+	}{
+		{
+			name: "missing user",
+			state: SyntheticCompactState{
+				ID:      "resp_newapi_synthcmp_missing_user",
+				Model:   "gpt-5",
+				Summary: "Scoped compact state.",
+				UserID:  10,
+				TokenID: 20,
+				Group:   "default",
+			},
+			scope:   SyntheticCompactStateScope{TokenID: 20, Group: "default"},
+			wantErr: "different user",
+		},
+		{
+			name: "missing token",
+			state: SyntheticCompactState{
+				ID:      "resp_newapi_synthcmp_missing_token",
+				Model:   "gpt-5",
+				Summary: "Scoped compact state.",
+				UserID:  10,
+				TokenID: 20,
+				Group:   "default",
+			},
+			scope:   SyntheticCompactStateScope{UserID: 10, Group: "default"},
+			wantErr: "different token",
+		},
+		{
+			name: "missing group",
+			state: SyntheticCompactState{
+				ID:      "resp_newapi_synthcmp_missing_group",
+				Model:   "gpt-5",
+				Summary: "Scoped compact state.",
+				UserID:  10,
+				TokenID: 20,
+				Group:   "default",
+			},
+			scope:   SyntheticCompactStateScope{UserID: 10, TokenID: 20},
+			wantErr: "different group",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetSyntheticCompactMemoryStoreForTest()
+			require.NoError(t, storeSyntheticCompactState(context.Background(), tc.state))
+
+			req := dto.OpenAIResponsesRequest{
+				Model:              "gpt-5",
+				PreviousResponseID: tc.state.ID,
+				Input:              common.RawMessage(`"continue"`),
+			}
+
+			_, applied, err := ApplySyntheticCompactState(context.Background(), tc.scope, req)
+
+			require.Error(t, err)
+			require.True(t, applied)
+			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
 func TestBuildSyntheticCompactSummaryRequestScopeRejectsDifferentModel(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 

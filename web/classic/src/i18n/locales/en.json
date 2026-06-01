@@ -3827,6 +3827,18 @@
     "固定请求头静态快照来自本机 Qwen Code 0.15.10 的 OpenAI-compatible /chat/completions 请求；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。": "Static headers come from local Qwen Code 0.15.10 OpenAI-compatible /chat/completions requests. This template only fixes client identity. x-stainless-* dynamic headers must be enabled explicitly with the Qwen Code header passthrough template in Advanced Parameter Override.",
     "固定请求头静态快照来自本机实抓 Droid 0.123.0 的 OpenAI-compatible /v1/chat/completions 请求；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。": "Static headers come from a local capture of Droid 0.123.0 OpenAI-compatible /v1/chat/completions. This template only fixes client identity. X-Stainless-* dynamic headers must be enabled explicitly with the Droid CLI header passthrough template in Advanced Parameter Override.",
     "再次点击可取消选择": "Click again to deselect",
-    "协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。": "Protocol conversion sends requests onward using another endpoint format. Currently only bidirectional conversion between /v1/chat/completions and /v1/responses is supported. Empty model regex matches all models; empty channel scope will not match."
+    "协议转换会把请求转到另一种接口格式继续发送。当前仅支持 /v1/chat/completions 与 /v1/responses 双向转换；模型正则为空时匹配全部模型，渠道范围为空时不会命中。": "Protocol conversion sends requests onward using another endpoint format. Currently only bidirectional conversion between /v1/chat/completions and /v1/responses is supported. Empty model regex matches all models; empty channel scope will not match.",
+    "Responses Compact 能力": "Responses Compact capability",
+    "请选择 Responses Compact 处理方式": "Select how Responses Compact should be handled",
+    "自动：优先原生，失败回退模拟摘要": "Auto: prefer native, fall back to synthetic summary on failure",
+    "原生 /v1/responses/compact": "Native /v1/responses/compact",
+    "模拟摘要兼容": "Synthetic summary compatibility",
+    "控制该 OpenAI 渠道是否接收 /v1/responses/compact 请求。原生模式会保留 compact 路径并映射内部 compact 模型名。": "Controls whether this OpenAI channel accepts /v1/responses/compact requests. Native mode keeps the compact path and maps the internal compact model name.",
+    "原生 compact 上下文超限时回退": "Fallback when native compact exceeds context",
+    "原生 compact 因上下文过大失败时，改用模拟摘要重试。": "When native compact fails because the context is too large, retry with a synthetic summary.",
+    "模拟摘要模型超限时回退": "Fallback when synthetic summary model exceeds context",
+    "模拟摘要超过当前模型上下文时，使用配置的回退模型重试。": "When the synthetic summary exceeds the current model context, retry with the configured fallback models.",
+    "模拟摘要回退模型": "Synthetic summary fallback models",
+    "按顺序使用的模型名称，多个模型用英文逗号分隔，例如 gpt-5.4。": "Model names used in order, separated by commas, for example gpt-5.4."
   }
 }

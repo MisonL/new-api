@@ -370,13 +370,13 @@ func validateSyntheticCompactState(scope SyntheticCompactStateScope, model strin
 	}
 	// ChannelID and ChannelType are intentionally not part of the reuse boundary.
 	// Synthetic compact state may be restored on another compatible channel after routing changes.
-	if state.UserID != 0 && scope.UserID != 0 && state.UserID != scope.UserID {
+	if state.UserID != 0 && state.UserID != scope.UserID {
 		return fmt.Errorf("%w: synthetic compact state belongs to a different user", ErrSyntheticCompactStateScopeMismatch)
 	}
-	if state.TokenID != 0 && scope.TokenID != 0 && state.TokenID != scope.TokenID {
+	if state.TokenID != 0 && state.TokenID != scope.TokenID {
 		return fmt.Errorf("%w: synthetic compact state belongs to a different token", ErrSyntheticCompactStateScopeMismatch)
 	}
-	if state.Group != "" && scope.Group != "" && state.Group != strings.TrimSpace(scope.Group) {
+	if state.Group != "" && state.Group != strings.TrimSpace(scope.Group) {
 		return fmt.Errorf("%w: synthetic compact state belongs to a different group", ErrSyntheticCompactStateScopeMismatch)
 	}
 	if !syntheticCompactModelCompatible(state.Model, model) {

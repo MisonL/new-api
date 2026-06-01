@@ -713,10 +713,6 @@ const EditChannelModal = (props) => {
     </Tooltip>
   );
 
-  // 2FA状态更新辅助函数
-  const updateTwoFAState = (updates) => {
-    setTwoFAState((prev) => ({ ...prev, ...updates }));
-  };
   // 使用通用安全验证 Hook
   const {
     isModalVisible,
@@ -1159,9 +1155,6 @@ const EditChannelModal = (props) => {
     ) {
       return;
     }
-    if (formApiRef.current) {
-      formApiRef.current.setValue(name, value);
-    }
     if (name === 'models' && Array.isArray(value)) {
       value = Array.from(new Set(value.map((m) => (m || '').trim())));
     }
@@ -1172,10 +1165,21 @@ const EditChannelModal = (props) => {
         content:
           '不需要在末尾加/v1，New API会自动处理，添加后可能导致请求失败，是否继续？',
         onOk: () => {
+          if (formApiRef.current) {
+            formApiRef.current.setValue(name, value);
+          }
           setInputs((inputs) => ({ ...inputs, [name]: value }));
+        },
+        onCancel: () => {
+          if (formApiRef.current) {
+            formApiRef.current.setValue(name, inputs[name] || '');
+          }
         },
       });
       return;
+    }
+    if (formApiRef.current) {
+      formApiRef.current.setValue(name, value);
     }
     setInputs((inputs) => ({ ...inputs, [name]: value }));
     if (name === 'type') {
@@ -2981,10 +2985,7 @@ const EditChannelModal = (props) => {
                         false
                       }
                       value={
-                        inputs.responses_compact_summary_fallback_models ||
-                        RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(
-                          ',',
-                        )
+                        inputs.responses_compact_summary_fallback_models ?? ''
                       }
                       onChange={(value) =>
                         handleChannelOtherSettingsChange(

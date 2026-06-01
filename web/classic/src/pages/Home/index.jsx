@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useState } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Button, Typography, Input } from '@douyinfe/semi-ui';
 import {
   API,
@@ -88,6 +94,7 @@ const Home = () => {
   const [endpointIndex, setEndpointIndex] = useState(0);
   const [endpointTransitionEnabled, setEndpointTransitionEnabled] =
     useState(true);
+  const homePageIframeRef = useRef(null);
   const endpointActiveIndex =
     endpointItems.length > 0 ? endpointIndex % endpointItems.length : -1;
   const [viewportHeight, setViewportHeight] = useState(getViewportHeight);
@@ -177,23 +184,27 @@ const Home = () => {
       }
       setHomePageContent(content);
       localStorage.setItem('home_page_content', content);
-
-      // 如果内容是 URL，则发送主题模式
-      if (data.startsWith('https://')) {
-        const iframe = document.querySelector('iframe');
-        if (iframe) {
-          iframe.onload = () => {
-            iframe.contentWindow.postMessage({ themeMode: actualTheme }, '*');
-            iframe.contentWindow.postMessage({ lang: i18n.language }, '*');
-          };
-        }
-      }
     } else {
       showError(message);
       setHomePageContent('加载首页内容失败...');
     }
     setHomePageContentLoaded(true);
   };
+
+  const postHomePageIframeSettings = useCallback(() => {
+    const iframe = homePageIframeRef.current;
+    if (!iframe?.contentWindow) {
+      return;
+    }
+    iframe.contentWindow.postMessage({ themeMode: actualTheme }, '*');
+    iframe.contentWindow.postMessage({ lang: i18n.language }, '*');
+  }, [actualTheme, i18n.language]);
+
+  useEffect(() => {
+    if (homePageContent.startsWith('https://')) {
+      postHomePageIframeSettings();
+    }
+  }, [homePageContent, postHomePageIframeSettings]);
 
   const handleCopyBaseURL = async () => {
     const ok = await copy(serverAddress);
@@ -480,8 +491,10 @@ const Home = () => {
         <div className='overflow-x-hidden w-full'>
           {homePageContent.startsWith('https://') ? (
             <iframe
+              ref={homePageIframeRef}
               src={homePageContent}
               className='w-full h-screen border-none'
+              onLoad={postHomePageIframeSettings}
             />
           ) : (
             <div

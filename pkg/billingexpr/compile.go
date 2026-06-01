@@ -12,6 +12,7 @@ import (
 )
 
 const maxCacheSize = 256
+const cacheEvictBatchSize = maxCacheSize / 4
 
 // DefaultExprVersion is used when an expression string has no version prefix.
 const DefaultExprVersion = 1
@@ -102,7 +103,7 @@ func compileFromCacheByHash(exprStr, hash string) (*vm.Program, error) {
 
 	cacheMu.Lock()
 	if len(cache) >= maxCacheSize {
-		cache = make(map[string]*cachedEntry, 64)
+		evictCacheEntries(cacheEvictBatchSize)
 	}
 	cache[hash] = &cachedEntry{prog: prog, usedVars: vars, version: version}
 	cacheMu.Unlock()
@@ -164,6 +165,20 @@ func UsedVars(exprStr string) map[string]bool {
 		return entry.usedVars
 	}
 	return nil
+}
+
+func evictCacheEntries(limit int) {
+	if limit <= 0 {
+		return
+	}
+	count := 0
+	for hash := range cache {
+		delete(cache, hash)
+		count++
+		if count >= limit {
+			return
+		}
+	}
 }
 
 // InvalidateCache clears the compiled-expression cache.
