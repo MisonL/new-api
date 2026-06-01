@@ -24,6 +24,9 @@ export const RESPONSES_COMPACT_MODE_DEFAULT = RESPONSES_COMPACT_MODE_AUTO;
 export const RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT = true;
 export const RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT = true;
 export const RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT = ['gpt-5.4'];
+export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT = 3;
+export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN = 1;
+export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX = 168;
 
 export const RESPONSES_COMPACT_MODE_OPTIONS = [
   {
@@ -79,18 +82,38 @@ export function normalizeResponsesCompactSummaryFallbackModels(models) {
     : [...RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT];
 }
 
+export function normalizeResponsesCompactAutoFallbackRetryIntervalHours(hours) {
+  const parsed = Number(hours);
+  if (!Number.isFinite(parsed) || parsed === 0) {
+    return RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT;
+  }
+  const rounded = Math.trunc(parsed);
+  if (rounded < RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN) {
+    return RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN;
+  }
+  if (rounded > RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX) {
+    return RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX;
+  }
+  return rounded;
+}
+
 export function buildResponsesCompactSettings(
   channelType,
   mode,
   contextFallback = RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
   summaryModelFallback = RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
   summaryFallbackModels = RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  autoFallbackRetryIntervalHours = RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
 ) {
   if (channelType !== 1) {
     return {};
   }
   return {
     responses_compact_mode: normalizeResponsesCompactMode(mode),
+    responses_compact_auto_fallback_retry_interval_hours:
+      normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+        autoFallbackRetryIntervalHours,
+      ),
     responses_compact_context_fallback: contextFallback !== false,
     responses_compact_summary_model_fallback: summaryModelFallback !== false,
     responses_compact_summary_fallback_models:
@@ -104,7 +127,9 @@ export function clearResponsesCompactSettings(settings) {
   }
   delete settings.responses_compact_mode;
   delete settings.responses_compact_auto_fallback_date;
+  delete settings.responses_compact_auto_fallback_at;
   delete settings.responses_compact_auto_fallback_reason;
+  delete settings.responses_compact_auto_fallback_retry_interval_hours;
   delete settings.responses_compact_context_fallback;
   delete settings.responses_compact_summary_model_fallback;
   delete settings.responses_compact_summary_fallback_models;
@@ -124,6 +149,7 @@ export function resetResponsesCompactAutoFallbackOnModeChange(
   );
   if (nextMode !== previousMode) {
     delete settings.responses_compact_auto_fallback_date;
+    delete settings.responses_compact_auto_fallback_at;
     delete settings.responses_compact_auto_fallback_reason;
     return true;
   }

@@ -290,7 +290,7 @@ func TestShouldFallbackResponsesCompactAutoSkipsActiveFallbackWindow(t *testing.
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)
 	info := compactAutoFallbackRelayInfo()
-	info.ChannelOtherSettings.ResponsesCompactAutoFallbackDate = dto.ResponsesCompactAutoFallbackDate(time.Now())
+	info.ChannelOtherSettings.ResponsesCompactAutoFallbackAt = time.Now().Unix()
 	err := types.WithOpenAIError(types.OpenAIError{
 		Message: "no route for /v1/responses/compact",
 		Code:    string(types.ErrorCodeBadResponseStatusCode),

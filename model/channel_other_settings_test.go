@@ -37,7 +37,7 @@ func TestChannelOtherSettingsResponsesCompactAutoRoundTrip(t *testing.T) {
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactModeOrDefault())
 }
 
-func TestChannelOtherSettingsResponsesCompactAutoFallbackIsDaily(t *testing.T) {
+func TestChannelOtherSettingsResponsesCompactAutoFallbackUsesDefaultThreeHourInterval(t *testing.T) {
 	now := time.Date(2026, 5, 26, 23, 30, 0, 0, time.UTC)
 	settings := dto.ChannelOtherSettings{
 		ResponsesCompactMode: dto.ResponsesCompactModeAuto,
@@ -47,7 +47,53 @@ func TestChannelOtherSettingsResponsesCompactAutoFallbackIsDaily(t *testing.T) {
 
 	require.True(t, settings.HasActiveResponsesCompactAutoFallback(now))
 	require.Equal(t, dto.ResponsesCompactModeSynthetic, settings.ResponsesCompactModeOrDefaultAt(now))
+	require.True(t, settings.HasActiveResponsesCompactAutoFallback(now.Add(3*time.Hour-time.Second)))
+	require.False(t, settings.HasActiveResponsesCompactAutoFallback(now.Add(3*time.Hour)))
+	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
+	require.Equal(t, now.Unix(), settings.ResponsesCompactAutoFallbackAt)
+}
+
+func TestChannelOtherSettingsResponsesCompactAutoFallbackUsesConfiguredInterval(t *testing.T) {
+	now := time.Date(2026, 5, 26, 23, 30, 0, 0, time.UTC)
+	settings := dto.ChannelOtherSettings{
+		ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackRetryIntervalHours: 6,
+	}
+
+	settings.MarkResponsesCompactAutoFallback(now, "status_code=404")
+
+	require.True(t, settings.HasActiveResponsesCompactAutoFallback(now.Add(6*time.Hour-time.Second)))
+	require.False(t, settings.HasActiveResponsesCompactAutoFallback(now.Add(6*time.Hour)))
+}
+
+func TestChannelOtherSettingsResponsesCompactAutoFallbackKeepsLegacyDateCompatible(t *testing.T) {
+	now := time.Date(2026, 5, 26, 23, 30, 0, 0, time.UTC)
+	settings := dto.ChannelOtherSettings{
+		ResponsesCompactMode:             dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackDate: dto.ResponsesCompactAutoFallbackDate(now),
+	}
+
+	require.True(t, settings.HasActiveResponsesCompactAutoFallback(now))
 	require.False(t, settings.HasActiveResponsesCompactAutoFallback(now.AddDate(0, 0, 1)))
+}
+
+func TestChannelOtherSettingsResponsesCompactAutoFallbackRetryIntervalBounds(t *testing.T) {
+	require.Equal(t, 3, (*dto.ChannelOtherSettings)(nil).ResponsesCompactAutoFallbackRetryIntervalHoursOrDefault())
+	for _, tt := range []struct {
+		raw      int
+		expected int
+	}{
+		{raw: 0, expected: 3},
+		{raw: -1, expected: 1},
+		{raw: 1, expected: 1},
+		{raw: 168, expected: 168},
+		{raw: 169, expected: 168},
+	} {
+		settings := dto.ChannelOtherSettings{
+			ResponsesCompactAutoFallbackRetryIntervalHours: tt.raw,
+		}
+		require.Equal(t, tt.expected, settings.ResponsesCompactAutoFallbackRetryIntervalHoursOrDefault())
+	}
 }
 
 func TestChannelOtherSettingsDoesNotMarkFallbackForExplicitNonAutoMode(t *testing.T) {
@@ -60,6 +106,7 @@ func TestChannelOtherSettingsDoesNotMarkFallbackForExplicitNonAutoMode(t *testin
 
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactMode)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackAt)
 	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
 }
 
@@ -86,15 +133,17 @@ func TestMarkResponsesCompactAutoFallbackPersistsState(t *testing.T) {
 	})
 	require.NoError(t, DB.Create(channel).Error)
 
-	before := dto.ResponsesCompactAutoFallbackDate(time.Now())
+	before := time.Now().UTC().Unix()
 	require.NoError(t, MarkResponsesCompactAutoFallback(channel.Id, "status_code=404"))
-	after := dto.ResponsesCompactAutoFallbackDate(time.Now())
+	after := time.Now().UTC().Unix()
 
 	var got Channel
 	require.NoError(t, DB.First(&got, channel.Id).Error)
 	settings := got.GetOtherSettings()
 	require.Equal(t, dto.ResponsesCompactModeAuto, settings.ResponsesCompactMode)
-	require.Contains(t, []int{before, after}, settings.ResponsesCompactAutoFallbackDate)
+	require.GreaterOrEqual(t, settings.ResponsesCompactAutoFallbackAt, before)
+	require.LessOrEqual(t, settings.ResponsesCompactAutoFallbackAt, after)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
 	require.Equal(t, "status_code=404", settings.ResponsesCompactAutoFallbackReason)
 }
 

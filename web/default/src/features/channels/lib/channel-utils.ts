@@ -39,12 +39,15 @@ export const RESPONSES_COMPACT_USAGE_LOG_BADGE_LABELS = [
   'Compact Synthetic Badge',
 ] as const
 export const RESPONSES_COMPACT_AUTO_TOOLTIP =
-  'Auto mode tries native compact first, falls back to synthetic summary after an upstream compatibility failure, and retries native once per day.'
+  'Auto mode tries native compact first, falls back to synthetic summary after an upstream compatibility failure, and retries native after the configured interval.'
 export const RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP =
-  'Auto mode is using synthetic summary fallback today. Native compact will be retried automatically on the next day.'
+  'Auto mode is using synthetic summary fallback. Native compact will be retried automatically after the configured interval.'
 export const RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT = true
 export const RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT = true
 export const RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT = ['gpt-5.4']
+export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT = 3
+export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN = 1
+export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX = 168
 
 export const RESPONSES_COMPACT_BADGE_KEYS = [
   ...Object.values(RESPONSES_COMPACT_BADGE_LABELS),
@@ -335,6 +338,10 @@ export function parseChannelOtherSettings(
       responses_compact_mode: normalizeResponsesCompactMode(
         settings.responses_compact_mode
       ),
+      responses_compact_auto_fallback_retry_interval_hours:
+        normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+          settings.responses_compact_auto_fallback_retry_interval_hours
+        ),
       responses_compact_context_fallback:
         settings.responses_compact_context_fallback !== false,
       responses_compact_summary_model_fallback:
@@ -369,15 +376,35 @@ export function normalizeResponsesCompactFallbackModels(
     : [...RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT]
 }
 
+export function normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+  hours: unknown
+): number {
+  const parsed = Number(hours)
+  if (!Number.isFinite(parsed) || parsed === 0) {
+    return RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT
+  }
+  const rounded = Math.trunc(parsed)
+  if (rounded < RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN) {
+    return RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN
+  }
+  if (rounded > RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX) {
+    return RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX
+  }
+  return rounded
+}
+
 function defaultResponsesCompactOtherSettings(): ChannelOtherSettings {
   return {
     responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
+    responses_compact_auto_fallback_retry_interval_hours:
+      RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
     responses_compact_context_fallback:
       RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
     responses_compact_summary_model_fallback:
       RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
-    responses_compact_summary_fallback_models:
-      [...RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT],
+    responses_compact_summary_fallback_models: [
+      ...RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+    ],
   }
 }
 
@@ -415,11 +442,23 @@ export function isResponsesCompactAutoFallbackActiveFromSettings(
   ) {
     return false
   }
-  const fallbackDate = Number(settings.responses_compact_auto_fallback_date)
-  if (!Number.isFinite(fallbackDate) || fallbackDate <= 0) {
-    return false
+  const fallbackAt = Number(settings.responses_compact_auto_fallback_at)
+  if (Number.isFinite(fallbackAt) && fallbackAt > 0) {
+    const elapsedSeconds = Math.floor(now.getTime() / 1000) - fallbackAt
+    const intervalSeconds =
+      normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+        settings.responses_compact_auto_fallback_retry_interval_hours
+      ) *
+      60 *
+      60
+    return elapsedSeconds >= 0 && elapsedSeconds < intervalSeconds
   }
-  return fallbackDate === responsesCompactFallbackDate(now)
+  const fallbackDate = Number(settings.responses_compact_auto_fallback_date)
+  return (
+    Number.isFinite(fallbackDate) &&
+    fallbackDate > 0 &&
+    fallbackDate === responsesCompactFallbackDate(now)
+  )
 }
 
 export function getResponsesCompactAutoFallbackReason(

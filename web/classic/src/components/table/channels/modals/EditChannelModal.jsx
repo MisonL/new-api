@@ -80,6 +80,9 @@ import {
   collectNewDisallowedStatusCodeRedirects,
 } from './statusCodeRiskGuard';
 import {
+  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
+  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX,
+  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN,
   RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_MODE_OPTIONS,
@@ -87,6 +90,7 @@ import {
   RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
   buildResponsesCompactSettings,
   clearResponsesCompactSettings,
+  normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactMode,
   normalizeResponsesCompactSummaryFallbackModels,
   resetResponsesCompactAutoFallbackOnModeChange,
@@ -265,6 +269,8 @@ const EditChannelModal = (props) => {
     allow_speed: false,
     claude_beta_query: false,
     responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
+    responses_compact_auto_fallback_retry_interval_hours:
+      RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
     responses_compact_context_fallback:
       RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
     responses_compact_summary_model_fallback:
@@ -1397,6 +1403,10 @@ const EditChannelModal = (props) => {
           data.responses_compact_mode = normalizeResponsesCompactMode(
             parsedSettings.responses_compact_mode,
           );
+          data.responses_compact_auto_fallback_retry_interval_hours =
+            normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+              parsedSettings.responses_compact_auto_fallback_retry_interval_hours,
+            );
           data.responses_compact_context_fallback =
             parsedSettings.responses_compact_context_fallback !== false;
           data.responses_compact_summary_model_fallback =
@@ -1440,6 +1450,8 @@ const EditChannelModal = (props) => {
           data.allow_speed = false;
           data.claude_beta_query = false;
           data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
+          data.responses_compact_auto_fallback_retry_interval_hours =
+            RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT;
           data.responses_compact_context_fallback =
             RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT;
           data.responses_compact_summary_model_fallback =
@@ -1467,6 +1479,8 @@ const EditChannelModal = (props) => {
         data.allow_speed = false;
         data.claude_beta_query = false;
         data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
+        data.responses_compact_auto_fallback_retry_interval_hours =
+          RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT;
         data.responses_compact_context_fallback =
           RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT;
         data.responses_compact_summary_model_fallback =
@@ -2380,6 +2394,7 @@ const EditChannelModal = (props) => {
             localInputs.responses_compact_context_fallback,
             localInputs.responses_compact_summary_model_fallback,
             localInputs.responses_compact_summary_fallback_models,
+            localInputs.responses_compact_auto_fallback_retry_interval_hours,
           ),
         );
         settings.disable_store = localInputs.disable_store === true;
@@ -2451,6 +2466,7 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
     delete localInputs.responses_compact_mode;
+    delete localInputs.responses_compact_auto_fallback_retry_interval_hours;
     delete localInputs.responses_compact_context_fallback;
     delete localInputs.responses_compact_summary_model_fallback;
     delete localInputs.responses_compact_summary_fallback_models;
@@ -2949,6 +2965,32 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t(
                         '原生 compact 因上下文过大失败时，改用模拟摘要重试。',
+                      )}
+                    />
+                    <Form.InputNumber
+                      field='responses_compact_auto_fallback_retry_interval_hours'
+                      label={t('自动回退重试间隔（小时）')}
+                      min={
+                        RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN
+                      }
+                      max={
+                        RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX
+                      }
+                      precision={0}
+                      value={
+                        inputs.responses_compact_auto_fallback_retry_interval_hours ||
+                        RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT
+                      }
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'responses_compact_auto_fallback_retry_interval_hours',
+                          normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+                            value,
+                          ),
+                        )
+                      }
+                      extraText={t(
+                        '原生 compact 失败后，在该间隔内使用模拟摘要；默认 3 小时。',
                       )}
                     />
                     <Form.Switch

@@ -127,9 +127,13 @@ import {
   findMissingModelsInMapping,
   isResponsesCompactAutoFallbackActive,
   getResponsesCompactAutoFallbackReason,
+  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
+  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX,
+  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN,
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactFallbackModels,
   validateModelMappingJson,
 } from '../../lib'
@@ -232,10 +236,10 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
       values.responses_compact_mode !== RESPONSES_COMPACT_MODE_DEFAULT) ||
     values.responses_compact_context_fallback === false ||
     values.responses_compact_summary_model_fallback === false ||
-    (normalizeResponsesCompactFallbackModels(
+    normalizeResponsesCompactFallbackModels(
       values.responses_compact_summary_fallback_models
     ).join(',') !==
-      RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',')) ||
+      RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',') ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
@@ -397,9 +401,8 @@ export function ChannelMutateDrawer({
     'upstream_model_update_check_enabled'
   )
   const currentSettings = form.watch('settings')
-  const compactAutoFallbackActive = isResponsesCompactAutoFallbackActive(
-    currentSettings
-  )
+  const compactAutoFallbackActive =
+    isResponsesCompactAutoFallbackActive(currentSettings)
   const compactAutoFallbackReason =
     getResponsesCompactAutoFallbackReason(currentSettings)
   const {
@@ -1879,41 +1882,39 @@ export function ChannelMutateDrawer({
                           />
                         </FormControl>
                         <div className='text-muted-foreground flex flex-col gap-2 text-sm'>
-                            <span>
-                              {isEditing ? (
-                                <>
-                                  {t(
-                                    'Enter new key to update, or leave empty to keep current key'
-                                  )}
-                                  {isMultiKeyChannel && (
-                                    <span className='text-warning mt-1 block'>
-                                      {t('Multi-key channel: Keys will be')}{' '}
-                                      {keyMode === 'replace'
-                                        ? t('replaced')
-                                        : t('appended')}
-                                    </span>
-                                  )}
-                                </>
-                              ) : isBatchMode ? (
-                                t(
-                                  'Enter one API key per line for batch creation'
-                                )
-                              ) : (
-                                t(FIELD_DESCRIPTIONS.KEY)
-                              )}
-                            </span>
-                            {isBatchMode && (
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                onClick={handleDeduplicateKeys}
-                                className='w-fit'
-                              >
-                                <Trash2 className='mr-2 h-4 w-4' />
-                                {t('Remove Duplicates')}
-                              </Button>
+                          <span>
+                            {isEditing ? (
+                              <>
+                                {t(
+                                  'Enter new key to update, or leave empty to keep current key'
+                                )}
+                                {isMultiKeyChannel && (
+                                  <span className='text-warning mt-1 block'>
+                                    {t('Multi-key channel: Keys will be')}{' '}
+                                    {keyMode === 'replace'
+                                      ? t('replaced')
+                                      : t('appended')}
+                                  </span>
+                                )}
+                              </>
+                            ) : isBatchMode ? (
+                              t('Enter one API key per line for batch creation')
+                            ) : (
+                              t(FIELD_DESCRIPTIONS.KEY)
                             )}
+                          </span>
+                          {isBatchMode && (
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='sm'
+                              onClick={handleDeduplicateKeys}
+                              className='w-fit'
+                            >
+                              <Trash2 className='mr-2 h-4 w-4' />
+                              {t('Remove Duplicates')}
+                            </Button>
+                          )}
                         </div>
                         {isEditing && (
                           <div className='mt-4 space-y-3 rounded-lg border border-dashed p-4'>
@@ -2146,74 +2147,74 @@ export function ChannelMutateDrawer({
                         />
                       </FormControl>
                       <div className='text-muted-foreground flex flex-col gap-2 text-sm'>
-                          <span>{t(FIELD_DESCRIPTIONS.MODELS)}</span>
-                          <div className='flex flex-wrap gap-2'>
+                        <span>{t(FIELD_DESCRIPTIONS.MODELS)}</span>
+                        <div className='flex flex-wrap gap-2'>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            size='sm'
+                            onClick={handleFillRelatedModels}
+                            disabled={!basicModels.length}
+                          >
+                            <FileText className='mr-2 h-4 w-4' />
+                            {t('Fill Related Models')}
+                          </Button>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            size='sm'
+                            onClick={handleFillAllModels}
+                            disabled={!allModelsList.length}
+                          >
+                            <Plus className='mr-2 h-4 w-4' />
+                            {t('Fill All Models')}
+                          </Button>
+                          {MODEL_FETCHABLE_TYPES.has(currentType) && (
                             <Button
                               type='button'
                               variant='outline'
                               size='sm'
-                              onClick={handleFillRelatedModels}
-                              disabled={!basicModels.length}
+                              onClick={handleFetchModels}
+                              disabled={isFetchingModels}
                             >
-                              <FileText className='mr-2 h-4 w-4' />
-                              {t('Fill Related Models')}
+                              {isFetchingModels ? (
+                                <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                              ) : (
+                                <Sparkles className='mr-2 h-4 w-4' />
+                              )}
+                              {t('Fetch from Upstream')}
                             </Button>
+                          )}
+                          <Button
+                            type='button'
+                            variant='outline'
+                            size='sm'
+                            onClick={handleClearModels}
+                          >
+                            <Eraser className='mr-2 h-4 w-4' />
+                            {t('Clear All')}
+                          </Button>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            size='sm'
+                            onClick={handleCopyModels}
+                          >
+                            <Copy className='mr-2 h-4 w-4' />
+                            {t('Copy All')}
+                          </Button>
+                          {prefillGroups.map((group) => (
                             <Button
+                              key={group.id}
                               type='button'
-                              variant='outline'
+                              variant='secondary'
                               size='sm'
-                              onClick={handleFillAllModels}
-                              disabled={!allModelsList.length}
+                              onClick={() => handleAddPrefillGroup(group)}
                             >
-                              <Plus className='mr-2 h-4 w-4' />
-                              {t('Fill All Models')}
+                              {group.name}
                             </Button>
-                            {MODEL_FETCHABLE_TYPES.has(currentType) && (
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                onClick={handleFetchModels}
-                                disabled={isFetchingModels}
-                              >
-                                {isFetchingModels ? (
-                                  <Loader2 className='mr-2 h-4 w-4 animate-spin' />
-                                ) : (
-                                  <Sparkles className='mr-2 h-4 w-4' />
-                                )}
-                                {t('Fetch from Upstream')}
-                              </Button>
-                            )}
-                            <Button
-                              type='button'
-                              variant='outline'
-                              size='sm'
-                              onClick={handleClearModels}
-                            >
-                              <Eraser className='mr-2 h-4 w-4' />
-                              {t('Clear All')}
-                            </Button>
-                            <Button
-                              type='button'
-                              variant='outline'
-                              size='sm'
-                              onClick={handleCopyModels}
-                            >
-                              <Copy className='mr-2 h-4 w-4' />
-                              {t('Copy All')}
-                            </Button>
-                            {prefillGroups.map((group) => (
-                              <Button
-                                key={group.id}
-                                type='button'
-                                variant='secondary'
-                                size='sm'
-                                onClick={() => handleAddPrefillGroup(group)}
-                              >
-                                {group.name}
-                              </Button>
-                            ))}
-                          </div>
+                          ))}
+                        </div>
                       </div>
                       {modelMappingGuardrail.exposedTargetModels.length > 0 && (
                         <Alert className='mt-3 border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-50'>
@@ -2924,13 +2925,13 @@ export function ChannelMutateDrawer({
                                           <div className='space-y-1'>
                                             <p className='text-muted-foreground text-xs'>
                                               {t(
-                                                'Auto mode tries native compact first, falls back to synthetic summary after an upstream compatibility failure, and retries native once per day.'
+                                                'Auto mode tries native compact first, falls back to synthetic summary after an upstream compatibility failure, and retries native after the configured interval.'
                                               )}
                                             </p>
                                             {compactAutoFallbackActive && (
-                                              <p className='text-amber-600 dark:text-amber-400 text-xs'>
+                                              <p className='text-xs text-amber-600 dark:text-amber-400'>
                                                 {t(
-                                                  'Auto mode is using synthetic summary fallback today. Native compact will be retried automatically on the next day.'
+                                                  'Auto mode is using synthetic summary fallback. Native compact will be retried automatically after the configured interval.'
                                                 )}
                                                 {compactAutoFallbackReason
                                                   ? ` ${compactAutoFallbackReason}`
@@ -2988,6 +2989,51 @@ export function ChannelMutateDrawer({
 
                                   <FormField
                                     control={form.control}
+                                    name='responses_compact_auto_fallback_retry_interval_hours'
+                                    render={({ field }) => (
+                                      <FormItem className='space-y-2 px-4 py-3'>
+                                        <div className='space-y-0.5'>
+                                          <FormLabel className='text-sm'>
+                                            {t(
+                                              'Auto fallback retry interval (hours)'
+                                            )}
+                                          </FormLabel>
+                                          <FormDescription>
+                                            {t(
+                                              'After native compact fails, synthetic summary is used during this interval; default is 3 hours.'
+                                            )}
+                                          </FormDescription>
+                                        </div>
+                                        <FormControl>
+                                          <Input
+                                            type='number'
+                                            min={
+                                              RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN
+                                            }
+                                            max={
+                                              RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX
+                                            }
+                                            step={1}
+                                            value={
+                                              field.value ??
+                                              RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT
+                                            }
+                                            onChange={(event) =>
+                                              field.onChange(
+                                                normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+                                                  event.target.value
+                                                )
+                                              )
+                                            }
+                                          />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+
+                                  <FormField
+                                    control={form.control}
                                     name='responses_compact_summary_model_fallback'
                                     render={({ field }) => (
                                       <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
@@ -3020,7 +3066,9 @@ export function ChannelMutateDrawer({
                                       <FormItem className='space-y-2 px-4 py-3'>
                                         <div className='space-y-0.5'>
                                           <FormLabel className='text-sm'>
-                                            {t('Synthetic summary fallback models')}
+                                            {t(
+                                              'Synthetic summary fallback models'
+                                            )}
                                           </FormLabel>
                                           <FormDescription>
                                             {t(

@@ -76,7 +76,9 @@ export interface ChannelOtherSettings {
   azure_responses_version?: string
   responses_compact_mode?: ResponsesCompactMode
   responses_compact_auto_fallback_date?: number
+  responses_compact_auto_fallback_at?: number
   responses_compact_auto_fallback_reason?: string
+  responses_compact_auto_fallback_retry_interval_hours?: number
   responses_compact_context_fallback?: boolean
   responses_compact_summary_model_fallback?: boolean
   responses_compact_summary_fallback_models?: string[]

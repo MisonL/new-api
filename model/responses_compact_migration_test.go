@@ -26,7 +26,7 @@ func TestMigrateResponsesCompactModeAutoUpdatesOpenAIChannelsOnce(t *testing.T) 
 		Key:           "test-key",
 		Models:        "gpt-5",
 		Group:         "default",
-		OtherSettings: `{"responses_compact_mode":"native","responses_compact_auto_fallback_date":20260526,"responses_compact_auto_fallback_reason":"status_code=404","azure_responses_version":"preview"}`,
+		OtherSettings: `{"responses_compact_mode":"native","responses_compact_auto_fallback_date":20260526,"responses_compact_auto_fallback_at":1780000000,"responses_compact_auto_fallback_reason":"status_code=404","azure_responses_version":"preview"}`,
 	}
 	anthropicChannel := Channel{
 		Id:            9502,
@@ -47,6 +47,7 @@ func TestMigrateResponsesCompactModeAutoUpdatesOpenAIChannelsOnce(t *testing.T) 
 	openAISettings := migratedOpenAI.GetOtherSettings()
 	require.Equal(t, dto.ResponsesCompactModeAuto, openAISettings.ResponsesCompactMode)
 	require.Zero(t, openAISettings.ResponsesCompactAutoFallbackDate)
+	require.Zero(t, openAISettings.ResponsesCompactAutoFallbackAt)
 	require.Empty(t, openAISettings.ResponsesCompactAutoFallbackReason)
 	require.Equal(t, "preview", openAISettings.AzureResponsesVersion)
 
