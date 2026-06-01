@@ -26,8 +26,8 @@ func OaiSyntheticResponsesCompactionHandler(c *gin.Context, info *relaycommon.Re
 	if err := common.Unmarshal(responseBody, &responsesResp); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	if oaiError := responsesResp.GetOpenAIError(); oaiError != nil && (oaiError.Type != "" || oaiError.Message != "" || oaiError.Param != "" || oaiError.Code != nil) {
-		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	if oaiError := responsesResp.GetOpenAIError(); responsesCompactOpenAIErrorHasContent(oaiError) {
+		return nil, types.WithOpenAIError(*oaiError, responsesCompactOpenAIErrorStatus(resp.StatusCode, oaiError))
 	}
 
 	model := ""

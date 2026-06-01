@@ -145,6 +145,31 @@ func TestOaiSyntheticResponsesCompactionHandlerReturnsUpstreamOpenAIError(t *tes
 	require.Equal(t, http.StatusBadRequest, err.StatusCode)
 }
 
+func TestOaiSyntheticResponsesCompactionHandlerNormalizesHTTP200ErrorBody(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{
+			"error": {
+				"message": "Your input exceeds the context window of this model. Please adjust your input and try again.",
+				"type": "invalid_request_error",
+				"code": "context_too_large"
+			}
+		}`)),
+	}
+
+	usage, err := OaiSyntheticResponsesCompactionHandler(c, nil, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, "context_too_large", err.ToOpenAIError().Code)
+	require.Empty(t, recorder.Body.String())
+}
+
 func TestOaiSyntheticResponsesCompactionHandlerRejectsMalformedJSON(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
