@@ -443,7 +443,7 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 	if channel == nil {
-		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		return nil, types.NewError(errors.New(formatNoAvailableChannelErrorMessage(selectGroup, info.OriginModelName, info.LastError)), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
@@ -451,6 +451,14 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		return nil, newAPIError
 	}
 	return channel, nil
+}
+
+func formatNoAvailableChannelErrorMessage(group string, model string, lastErr *types.NewAPIError) string {
+	message := fmt.Sprintf("分组 %s 下模型 %s 的可用渠道不存在（retry）", group, model)
+	if lastErr == nil {
+		return message
+	}
+	return fmt.Sprintf("%s，上一错误：%s", message, lastErr.MaskSensitiveErrorWithStatusCode())
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
@@ -694,10 +702,11 @@ func isResponsesCompactNativeCompatibilityError(info *relaycommon.RelayInfo, err
 	normalized := normalizeResponsesCompactCompatibilityMessage(message)
 	compactPathMentioned := strings.Contains(message, "responses/compact") || strings.Contains(normalized, "responses compact")
 	payloadCompatibility := isResponsesCompactNativePayloadCompatibilityError(normalized)
+	genericEndpointStatus := isGenericResponsesCompactEndpointStatus(err.StatusCode)
 	if payloadCompatibility && !responsesCompactRequestHasContextPayload(info) {
 		return false
 	}
-	if !compactPathMentioned && !payloadCompatibility {
+	if !compactPathMentioned && !payloadCompatibility && !genericEndpointStatus {
 		return false
 	}
 	if isModelLookupError(normalized) {
@@ -707,6 +716,9 @@ func isResponsesCompactNativeCompatibilityError(info *relaycommon.RelayInfo, err
 		return false
 	}
 	if payloadCompatibility {
+		return true
+	}
+	if genericEndpointStatus {
 		return true
 	}
 	for _, indicator := range []string{
@@ -730,6 +742,15 @@ func isResponsesCompactNativeCompatibilityError(info *relaycommon.RelayInfo, err
 		}
 	}
 	return false
+}
+
+func isGenericResponsesCompactEndpointStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return true
+	default:
+		return false
+	}
 }
 
 func responsesCompactRequestHasContextPayload(info *relaycommon.RelayInfo) bool {

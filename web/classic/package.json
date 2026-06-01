@@ -42,9 +42,10 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node ../scripts/safari-compatibility.mjs dist && node ../scripts/check-browser-compatibility.mjs dist",
     "build:fast": "VITE_FAST_BUILD=true vite build",
     "build:profile": "DEBUG=vite:time vite build",
+    "test:browser-compat": "node ../scripts/browser-cross-verify.mjs --url http://localhost:3000/console",
     "test:desktop-runtime": "node --test ../tests/desktopRuntime.test.mjs",
     "test:setup-validation": "node --test ../tests/setupValidation.test.mjs",
     "test:node": "node --test ../tests/*.test.mjs",

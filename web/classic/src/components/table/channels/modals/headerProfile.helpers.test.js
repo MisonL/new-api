@@ -68,7 +68,11 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   );
   assert.equal(
     HEADER_PROFILE_PRESETS['codex-desktop'].headers['User-Agent'],
-    'Codex Desktop/0.131.0-alpha.9 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.513.31313)',
+    'Codex Desktop/0.133.0-alpha.1 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.519.41501)',
+  );
+  assert.equal(
+    HEADER_PROFILE_PRESETS['codex-desktop'].headers.Originator,
+    'Codex Desktop',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['codex-desktop'].description,
@@ -80,7 +84,7 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   );
   assert.equal(
     HEADER_PROFILE_PRESETS['gemini-cli'].headers['User-Agent'],
-    'GeminiCLI/0.41.2/gemini-3.1-pro-preview (darwin; x64; terminal)',
+    'GeminiCLI/0.44.0/gemini-3.1-pro-preview (darwin; x64; terminal)',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['gemini-cli'].description,
@@ -89,7 +93,7 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   assert.equal(HEADER_PROFILE_PRESETS['qwen-code'].passthroughRequired, false);
   assert.equal(
     HEADER_PROFILE_PRESETS['qwen-code'].headers['User-Agent'],
-    'QwenCode/0.15.10 (darwin; x64)',
+    'QwenCode/0.16.2 (darwin; x64)',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['qwen-code'].description,
@@ -98,7 +102,7 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   assert.equal(HEADER_PROFILE_PRESETS['droid'].passthroughRequired, false);
   assert.equal(
     HEADER_PROFILE_PRESETS['droid'].headers['User-Agent'],
-    'factory-cli/0.123.0',
+    'factory-cli/0.135.0',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['droid'].description,
@@ -116,16 +120,18 @@ test('Codex CLI builtin profile does not reuse codex exec request identity', () 
   assert.doesNotMatch(serializedHeaders, /source=exec/);
 });
 
-test('Codex Desktop builtin profile uses captured desktop User-Agent', () => {
+test('Codex Desktop builtin profile uses desktop app identity', () => {
   const headers = HEADER_PROFILE_PRESETS['codex-desktop'].headers;
 
   assert.match(headers['User-Agent'], /^Codex Desktop\//);
+  assert.equal(headers.Originator, 'Codex Desktop');
   assert.doesNotMatch(headers['User-Agent'], /codex-cli@/);
+  assert.doesNotMatch(headers['User-Agent'], /codex-tui/);
 });
 
 test('npm cli version options use latest first and keep five stable choices', () => {
   const options = buildNpmCliVersionOptions({
-    'dist-tags': { latest: '0.130.0' },
+    'dist-tags': { latest: '0.134.0' },
     versions: {
       '1.0.0': {},
       '1.1.0': {},
@@ -139,7 +145,7 @@ test('npm cli version options use latest first and keep five stable choices', ()
 
   assert.deepEqual(
     options.map((option) => option.value),
-    ['0.130.0', '1.4.0', '1.3.0', '1.2.0', '1.1.0'],
+    ['0.134.0', '1.4.0', '1.3.0', '1.2.0', '1.1.0'],
   );
   assert.equal(options[0].isLatest, true);
 });
@@ -201,36 +207,37 @@ test('fetchNpmCliVersionOptions rejects failed backend responses', async () => {
 test('versioned AI CLI profiles generate pinned User-Agent snapshots', () => {
   const codexProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-cli'],
-    '0.130.0',
+    '0.134.0',
   );
   const claudeProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['claude-code'],
-    '2.1.139',
+    '2.1.153',
   );
 
-  assert.equal(codexProfile.id, 'codex-cli@0.130.0');
+  assert.equal(codexProfile.id, 'codex-cli@0.134.0');
   assert.equal(codexProfile.versionMeta.packageName, '@openai/codex');
   assert.equal(
     codexProfile.headers['User-Agent'],
-    buildAiCodingCliUserAgent('codex-cli', '0.130.0'),
+    buildAiCodingCliUserAgent('codex-cli', '0.134.0'),
   );
   assert.equal(codexProfile.headers.Originator, 'codex-tui');
   assert.equal(
     claudeProfile.headers['User-Agent'],
-    'claude-cli/2.1.139 (external, sdk-cli)',
+    'claude-cli/2.1.153 (external, sdk-cli)',
   );
 });
 
 test('Codex Desktop profile is not converted to codex-cli version ids', () => {
   const codexDesktopProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-desktop'],
-    '0.131.0-alpha.9',
+    '0.133.0-alpha.1',
   );
 
   assert.equal(codexDesktopProfile.id, undefined);
   assert.equal(codexDesktopProfile.key, 'codex-desktop');
   assert.equal(codexDesktopProfile.versionMeta, undefined);
   assert.match(codexDesktopProfile.headers['User-Agent'], /^Codex Desktop\//);
+  assert.equal(codexDesktopProfile.headers.Originator, 'Codex Desktop');
 });
 
 test('param override template payloads can replace rule template JSON', () => {
@@ -246,11 +253,19 @@ test('param override template payloads can replace rule template JSON', () => {
           'User-Agent',
           'Originator',
           'Session_id',
+          'Session-Id',
+          'Thread-Id',
           'X-Codex-Beta-Features',
           'X-Codex-Turn-Metadata',
           'X-Codex-Window-Id',
           'X-Client-Request-Id',
         ],
+        keep_origin: true,
+      },
+      {
+        mode: 'copy_header',
+        from: 'X-Client-Request-Id',
+        to: 'Session_id',
         keep_origin: true,
       },
     ],
@@ -264,11 +279,15 @@ test('legacy combined param override preset is absent', () => {
   );
 });
 
-test('param override preset templates each contain one operation', () => {
+test('param override preset templates contain expected operations', () => {
   for (const [key, template] of Object.entries(PARAM_OVERRIDE_TEMPLATES)) {
     const operations = template.payload.operations;
     assert.ok(Array.isArray(operations), key);
-    assert.equal(operations.length, 1, key);
+    assert.equal(
+      operations.length,
+      ['codexCliHeaders', 'codexHeaders'].includes(key) ? 2 : 1,
+      key,
+    );
   }
 });
 
@@ -330,8 +349,8 @@ test('toggleSelectedProfile replaces selection in fixed mode', () => {
 test('toggleSelectedProfile deselects current profile in fixed mode', () => {
   const result = toggleSelectedProfile({
     strategy: 'fixed',
-    selectedProfileIds: ['codex-cli@0.130.0'],
-    profileId: 'codex-cli@0.130.0',
+    selectedProfileIds: ['codex-cli@0.134.0'],
+    profileId: 'codex-cli@0.134.0',
   });
 
   assert.deepEqual(result, []);
@@ -617,7 +636,7 @@ test('applyHeaderProfileStrategyToChannelInputs does not add Codex pass_headers 
 test('applyHeaderProfileStrategyToChannelInputs persists selected CLI version snapshot', () => {
   const versionedProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-cli'],
-    '0.130.0',
+    '0.134.0',
   );
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
@@ -637,28 +656,28 @@ test('applyHeaderProfileStrategyToChannelInputs persists selected CLI version sn
   const settings = JSON.parse(result.settings);
 
   assert.deepEqual(settings.header_profile_strategy.selected_profile_ids, [
-    'codex-cli@0.130.0',
+    'codex-cli@0.134.0',
   ]);
   assert.deepEqual(settings.header_profile_strategy.profiles[0].version_meta, {
     base_profile_id: 'codex-cli',
     package_name: '@openai/codex',
     source: 'npm',
-    version: '0.130.0',
+    version: '0.134.0',
   });
   assert.equal(
     settings.header_profile_strategy.profiles[0].headers['User-Agent'],
-    buildAiCodingCliUserAgent('codex-cli', '0.130.0'),
+    buildAiCodingCliUserAgent('codex-cli', '0.134.0'),
   );
 });
 
 test('applyHeaderProfileStrategyToChannelInputs persists multiple selected CLI version snapshots', () => {
   const codexProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-cli'],
-    '0.130.0',
+    '0.134.0',
   );
   const claudeProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['claude-code'],
-    '2.1.139',
+    '2.1.153',
   );
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
@@ -678,14 +697,14 @@ test('applyHeaderProfileStrategyToChannelInputs persists multiple selected CLI v
   const settings = JSON.parse(result.settings);
 
   assert.deepEqual(settings.header_profile_strategy.selected_profile_ids, [
-    'codex-cli@0.130.0',
-    'claude-code@2.1.139',
+    'codex-cli@0.134.0',
+    'claude-code@2.1.153',
   ]);
   assert.deepEqual(
     settings.header_profile_strategy.profiles.map(
       (profile) => profile.version_meta.version,
     ),
-    ['0.130.0', '2.1.139'],
+    ['0.134.0', '2.1.153'],
   );
 });
 
@@ -1238,7 +1257,7 @@ test('reorderSelectedProfileIds follows before and after drop positions', () => 
 test('removeEquivalentVersionedProfileIds replaces selected version variants', () => {
   const selectedCodexProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-cli'],
-    '0.130.0',
+    '0.134.0',
   );
   const nextCodexProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-cli'],
@@ -1247,25 +1266,25 @@ test('removeEquivalentVersionedProfileIds replaces selected version variants', (
 
   assert.deepEqual(
     removeEquivalentVersionedProfileIds(
-      ['codex-cli@0.130.0', 'claude-code@2.1.139'],
+      ['codex-cli@0.134.0', 'claude-code@2.1.153'],
       [
         selectedCodexProfile,
         buildVersionedAiCodingCliProfile(
           HEADER_PROFILE_PRESETS['claude-code'],
-          '2.1.139',
+          '2.1.153',
         ),
       ],
       nextCodexProfile.id,
       nextCodexProfile,
     ),
-    ['claude-code@2.1.139'],
+    ['claude-code@2.1.153'],
   );
 });
 
 test('removeEquivalentVersionedProfileIds replaces legacy base selection', () => {
   const nextCodexProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-cli'],
-    '0.130.0',
+    '0.134.0',
   );
 
   assert.deepEqual(
@@ -1290,15 +1309,15 @@ test('removeEquivalentVersionedProfileIds replaces missing versioned selection b
 
   assert.deepEqual(
     removeEquivalentVersionedProfileIds(
-      ['codex-cli@0.130.0', 'claude-code@2.1.139'],
+      ['codex-cli@0.134.0', 'claude-code@2.1.153'],
       [
-        { id: 'codex-cli@0.130.0', missing: true },
-        { id: 'claude-code@2.1.139', missing: true },
+        { id: 'codex-cli@0.134.0', missing: true },
+        { id: 'claude-code@2.1.153', missing: true },
       ],
       nextCodexProfile.id,
       nextCodexProfile,
     ),
-    ['claude-code@2.1.139'],
+    ['claude-code@2.1.153'],
   );
 });
 

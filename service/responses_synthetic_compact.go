@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -20,6 +21,7 @@ const (
 	syntheticCompactMarkerPrefix = "newapi.synthetic.compact:"
 	syntheticCompactRedisPrefix  = "new-api:responses:synthetic-compact:"
 	syntheticCompactTTL          = 24 * time.Hour
+	syntheticCompactTextPartMax  = 8 * 1024 * 1024
 )
 
 const syntheticCompactSummaryPrompt = "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.\nInclude:\n- Current progress and key decisions made\n- Important context, constraints, or user preferences\n- What remains to be done (clear next steps)\n- Any critical data, examples, or references needed to continue\nBe concise, structured, and focused on helping the next LLM seamlessly continue the work.\nDo not invent facts. Return only the compact summary text."
@@ -296,18 +298,13 @@ func ApplySyntheticCompactState(ctx context.Context, scope SyntheticCompactState
 		return dto.OpenAIResponsesRequest{}, true, err
 	}
 	cleanInput := removeSyntheticCompactMarkers(req.Input)
-	summaryText := syntheticCompactRecoveredSummaryText(state.Summary)
-	summaryItem, err := responseMessageInput("developer", summaryText)
+	contextText := syntheticCompactRecoveredContextText(state.Summary)
+	contextItem, err := responseMessageInput("developer", contextText)
 	if err != nil {
 		return dto.OpenAIResponsesRequest{}, false, err
 	}
-	items := []common.RawMessage{summaryItem}
+	items := []common.RawMessage{contextItem}
 	items = append(items, normalizeResponsesInputItems(cleanInput)...)
-	resumeItem, err := responseMessageInput("developer", syntheticCompactResumeDirective)
-	if err != nil {
-		return dto.OpenAIResponsesRequest{}, false, err
-	}
-	items = append(items, resumeItem)
 	input, err := common.Marshal(items)
 	if err != nil {
 		return dto.OpenAIResponsesRequest{}, false, err
@@ -315,6 +312,10 @@ func ApplySyntheticCompactState(ctx context.Context, scope SyntheticCompactState
 	req.Input = input
 	req.PreviousResponseID = ""
 	return req, true, nil
+}
+
+func syntheticCompactRecoveredContextText(summary string) string {
+	return syntheticCompactRecoveredSummaryText(summary) + "\n\n" + syntheticCompactResumeDirective
 }
 
 func syntheticCompactRecoveredSummaryText(summary string) string {
@@ -461,11 +462,13 @@ func syntheticCompactPromptInput(systemText string, userText string) (common.Raw
 }
 
 func responseMessageInput(role string, text string) (common.RawMessage, error) {
-	content := []map[string]string{
-		{
+	parts := splitSyntheticCompactTextParts(text)
+	content := make([]map[string]string, 0, len(parts))
+	for _, part := range parts {
+		content = append(content, map[string]string{
 			"type": "input_text",
-			"text": text,
-		},
+			"text": part,
+		})
 	}
 	item := map[string]any{
 		"type":    "message",
@@ -473,6 +476,32 @@ func responseMessageInput(role string, text string) (common.RawMessage, error) {
 		"content": content,
 	}
 	return common.Marshal(item)
+}
+
+func splitSyntheticCompactTextParts(text string) []string {
+	if len(text) <= syntheticCompactTextPartMax {
+		return []string{text}
+	}
+	parts := make([]string, 0, len(text)/syntheticCompactTextPartMax+1)
+	for start := 0; start < len(text); {
+		end := start + syntheticCompactTextPartMax
+		if end >= len(text) {
+			parts = append(parts, text[start:])
+			break
+		}
+		for end > start && !utf8.RuneStart(text[end]) {
+			end--
+		}
+		if end == start {
+			end = start + syntheticCompactTextPartMax
+		}
+		parts = append(parts, text[start:end])
+		start = end
+	}
+	if len(parts) == 0 {
+		return []string{text}
+	}
+	return parts
 }
 
 func removeSyntheticCompactMarkers(input common.RawMessage) common.RawMessage {

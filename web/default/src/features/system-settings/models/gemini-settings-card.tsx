@@ -211,7 +211,7 @@ export function GeminiSettingsCard({ defaultValues }: GeminiSettingsCardProps) {
     <SettingsSection
       title={t('Gemini')}
       description={t(
-        'Configure Gemini safety behavior, version overrides, and thinking adapter'
+        'Configure Gemini safety behavior, version overrides, and thinking suffix adaptation'
       )}
     >
       <Form {...form}>
@@ -285,13 +285,11 @@ export function GeminiSettingsCard({ defaultValues }: GeminiSettingsCardProps) {
                 <FormItem className='flex flex-row items-center justify-between'>
                   <div className='space-y-0.5'>
                     <FormLabel className='text-base'>
-                      {t('Thinking Adapter')}
+                      {t('Thinking Suffix Adapter')}
                     </FormLabel>
                     <FormDescription>
-                      {t('Supports `-thinking`, `-thinking-')}
-                      {'{{budget}}'}
                       {t(
-                        '`, and `-nothinking` suffixes while routing to the correct Gemini variant.'
+                        'Supports `-thinking`, `-thinking-{budget}`, and `-nothinking` suffixes while routing to the correct Gemini variant.'
                       )}
                     </FormDescription>
                   </div>

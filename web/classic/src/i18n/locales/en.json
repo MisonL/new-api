@@ -3836,9 +3836,20 @@
     "控制该 OpenAI 渠道是否接收 /v1/responses/compact 请求。原生模式会保留 compact 路径并映射内部 compact 模型名。": "Controls whether this OpenAI channel accepts /v1/responses/compact requests. Native mode keeps the compact path and maps the internal compact model name.",
     "原生 compact 上下文超限时回退": "Fallback when native compact exceeds context",
     "原生 compact 因上下文过大失败时，改用模拟摘要重试。": "When native compact fails because the context is too large, retry with a synthetic summary.",
+    "自动回退重试间隔（小时）": "Auto fallback retry interval (hours)",
+    "原生 compact 失败后，在该间隔内使用模拟摘要；默认 3 小时。": "After native compact fails, synthetic summary is used during this interval; default is 3 hours.",
     "模拟摘要模型超限时回退": "Fallback when synthetic summary model exceeds context",
     "模拟摘要超过当前模型上下文时，使用配置的回退模型重试。": "When the synthetic summary exceeds the current model context, retry with the configured fallback models.",
     "模拟摘要回退模型": "Synthetic summary fallback models",
-    "按顺序使用的模型名称，多个模型用英文逗号分隔，例如 gpt-5.4。": "Model names used in order, separated by commas, for example gpt-5.4."
+    "按顺序使用的模型名称，多个模型用英文逗号分隔，例如 gpt-5.4。": "Model names used in order, separated by commas, for example gpt-5.4.",
+    "Codex CLI Header Passthrough": "Codex CLI Header Passthrough",
+    "列出的模型会跳过-thinking/-nothinking 后缀的自动适配": "Models in this list skip automatic -thinking/-nothinking suffix adaptation.",
+    "固定请求头静态快照按 Claude Code 2.1.153 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。": "Static headers use the public latest Claude Code 2.1.153 version with the existing client UA format. This template only fixes client identity. Dynamic headers such as X-Claude-Code-Session-Id, Anthropic-Version, Anthropic-Beta, and X-Stainless-* must be enabled explicitly with the Claude CLI header passthrough template in Advanced Parameter Override.",
+    "固定请求头静态快照按 Droid 0.135.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。": "Static headers use the public latest Droid 0.135.0 version with the existing client UA format. This template only fixes client identity. X-Stainless-* dynamic headers must be enabled explicitly with the Droid CLI header passthrough template in Advanced Parameter Override.",
+    "固定请求头静态快照按 Gemini CLI 0.44.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。": "Static headers use the public latest Gemini CLI 0.44.0 version with the existing client UA format. This template only fixes client identity. Dynamic headers such as x-goog-api-client must be enabled explicitly with the Gemini CLI header passthrough template in Advanced Parameter Override.",
+    "固定请求头静态快照按 Qwen Code 0.16.2 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。": "Static headers use the public latest Qwen Code 0.16.2 version with the existing client UA format. This template only fixes client identity. x-stainless-* dynamic headers must be enabled explicitly with the Qwen Code header passthrough template in Advanced Parameter Override.",
+    "固定请求头静态快照来自 Codex CLI 0.134.0 交互式 TUI 请求头生成逻辑；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。": "Static headers come from the Codex CLI 0.134.0 interactive TUI header generation logic. This template only fixes client identity. Session, window, and turn metadata dynamic headers must be enabled explicitly with the Codex CLI header passthrough template in Advanced Parameter Override.",
+    "固定请求头静态快照来自 Codex Desktop App 0.133.0-alpha.1 真实请求；此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。": "Static headers come from a real Codex Desktop App 0.133.0-alpha.1 request. This template only fixes the Codex App client identity and must not be mixed with codex-tui. Session, window, and turn metadata dynamic headers must be enabled explicitly with the Codex Desktop header passthrough template in Advanced Parameter Override.",
+    "跳过思考后缀适配的模型列表": "Models skipping thinking suffix adaptation"
   }
 }

@@ -210,8 +210,8 @@ func TestResponsesCompactLogInfoRecordsSyntheticAutoFallback(t *testing.T) {
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType: constant.ChannelTypeOpenAI,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
-				ResponsesCompactMode:             dto.ResponsesCompactModeAuto,
-				ResponsesCompactAutoFallbackDate: dto.ResponsesCompactAutoFallbackDate(now),
+				ResponsesCompactMode:           dto.ResponsesCompactModeAuto,
+				ResponsesCompactAutoFallbackAt: now.Unix(),
 			},
 		},
 	}

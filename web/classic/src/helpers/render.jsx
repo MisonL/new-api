@@ -881,7 +881,7 @@ export const renderGroupOption = (item) => {
     padding: '8px 16px',
     cursor: disabled ? 'not-allowed' : 'pointer',
     backgroundColor: focused ? 'var(--semi-color-fill-0)' : 'transparent',
-    opacity: disabled ? 0.5 : 1,
+    opacity: disabled ? '0.5' : 1,
     ...(selected && {
       backgroundColor: 'var(--semi-color-primary-light-default)',
     }),

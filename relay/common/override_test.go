@@ -1422,6 +1422,89 @@ func TestApplyParamOverrideCopyHeaderSkipsMissingSource(t *testing.T) {
 	}
 }
 
+func TestApplyParamOverrideCodexSessionFallbackPreservesOrigin(t *testing.T) {
+	input := []byte(`{"temperature":0.7}`)
+	override := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{
+				"mode":        "pass_headers",
+				"value":       []interface{}{"Session_id", "X-Client-Request-Id"},
+				"keep_origin": true,
+			},
+			map[string]interface{}{
+				"mode":        "copy_header",
+				"from":        "X-Client-Request-Id",
+				"to":          "Session_id",
+				"keep_origin": true,
+			},
+		},
+	}
+	ctx := map[string]interface{}{
+		"request_headers": map[string]interface{}{
+			"session_id":          "sess-real",
+			"x-client-request-id": "client-request-1",
+		},
+	}
+
+	out, err := ApplyParamOverride(input, override, ctx)
+	if err != nil {
+		t.Fatalf("ApplyParamOverride returned error: %v", err)
+	}
+	assertJSONEqual(t, `{"temperature":0.7}`, string(out))
+
+	headers, ok := ctx["header_override"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected header_override context map")
+	}
+	if headers["session_id"] != "sess-real" {
+		t.Fatalf("expected real session_id to be preserved, got: %v", headers["session_id"])
+	}
+	if headers["x-client-request-id"] != "client-request-1" {
+		t.Fatalf("expected x-client-request-id to be passed, got: %v", headers["x-client-request-id"])
+	}
+}
+
+func TestApplyParamOverrideCodexSessionFallbackCopiesClientRequestID(t *testing.T) {
+	input := []byte(`{"temperature":0.7}`)
+	override := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{
+				"mode":        "pass_headers",
+				"value":       []interface{}{"Session_id", "X-Client-Request-Id"},
+				"keep_origin": true,
+			},
+			map[string]interface{}{
+				"mode":        "copy_header",
+				"from":        "X-Client-Request-Id",
+				"to":          "Session_id",
+				"keep_origin": true,
+			},
+		},
+	}
+	ctx := map[string]interface{}{
+		"request_headers": map[string]interface{}{
+			"x-client-request-id": "client-request-1",
+		},
+	}
+
+	out, err := ApplyParamOverride(input, override, ctx)
+	if err != nil {
+		t.Fatalf("ApplyParamOverride returned error: %v", err)
+	}
+	assertJSONEqual(t, `{"temperature":0.7}`, string(out))
+
+	headers, ok := ctx["header_override"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected header_override context map")
+	}
+	if headers["session_id"] != "client-request-1" {
+		t.Fatalf("expected session_id fallback from x-client-request-id, got: %v", headers["session_id"])
+	}
+	if headers["x-client-request-id"] != "client-request-1" {
+		t.Fatalf("expected x-client-request-id to be passed, got: %v", headers["x-client-request-id"])
+	}
+}
+
 func TestApplyParamOverrideMoveHeaderSkipsMissingSource(t *testing.T) {
 	input := []byte(`{"temperature":0.7}`)
 	override := map[string]interface{}{
@@ -1931,6 +2014,68 @@ func TestApplyParamOverridePassHeadersUsesRequestHeadersOverStaticOverride(t *te
 	}
 	if info.RuntimeHeadersOverride["originator"] != "Codex CLI" {
 		t.Fatalf("expected pass_headers to use request header, got: %v", info.RuntimeHeadersOverride["originator"])
+	}
+}
+
+func TestApplyParamOverridePassHeadersPreservesCodexDynamicHeaders(t *testing.T) {
+	turnMetadata := `{"session_id":"session-123","cwd":"/repo"}`
+	info := &RelayInfo{
+		RequestHeaders: map[string]string{
+			"User-Agent":              "codex-tui/0.134.0",
+			"Originator":              "codex-tui",
+			"X-Codex-Turn-Metadata":   turnMetadata,
+			"X-Codex-Window-Id":       "window-123",
+			"X-Client-Request-Id":     "request-123",
+			"X-Stainless-OS":          "MacOS",
+			"X-Stainless-Runtime":     "node",
+			"X-Stainless-Retry-Count": "0",
+		},
+		ChannelMeta: &ChannelMeta{
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"mode": "pass_headers",
+						"value": []interface{}{
+							"User-Agent",
+							"Originator",
+							"Session_id",
+							"X-Codex-Turn-Metadata",
+							"X-Codex-Window-Id",
+							"X-Client-Request-Id",
+							"x-stainless-os",
+							"X-Stainless-Runtime",
+							"X-Stainless-Retry-Count",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := ApplyParamOverrideWithRelayInfo([]byte(`{"model":"gpt-5"}`), info)
+	if err != nil {
+		t.Fatalf("ApplyParamOverrideWithRelayInfo returned error: %v", err)
+	}
+	if !info.UseRuntimeHeadersOverride {
+		t.Fatalf("expected runtime header override to be enabled")
+	}
+	expectedHeaders := map[string]string{
+		"user-agent":              "codex-tui/0.134.0",
+		"originator":              "codex-tui",
+		"x-codex-turn-metadata":   turnMetadata,
+		"x-codex-window-id":       "window-123",
+		"x-client-request-id":     "request-123",
+		"x-stainless-os":          "MacOS",
+		"x-stainless-runtime":     "node",
+		"x-stainless-retry-count": "0",
+	}
+	for key, expected := range expectedHeaders {
+		if info.RuntimeHeadersOverride[key] != expected {
+			t.Fatalf("expected %s to be passed as %q, got %v", key, expected, info.RuntimeHeadersOverride[key])
+		}
+	}
+	if _, exists := info.RuntimeHeadersOverride["session_id"]; exists {
+		t.Fatalf("expected missing Session_id not to be synthesized")
 	}
 }
 

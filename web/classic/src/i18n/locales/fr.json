@@ -3726,6 +3726,8 @@
     "控制该 OpenAI 渠道是否接收 /v1/responses/compact 请求。原生模式会保留 compact 路径并映射内部 compact 模型名。": "Controle si ce canal OpenAI accepte les requetes /v1/responses/compact. Le mode natif conserve le chemin compact et mappe le nom du modele compact interne.",
     "原生 compact 上下文超限时回退": "Repli lorsque le compact natif depasse le contexte",
     "原生 compact 因上下文过大失败时，改用模拟摘要重试。": "Lorsque le compact natif echoue car le contexte est trop grand, recommencer avec un resume synthetique.",
+    "自动回退重试间隔（小时）": "Intervalle de nouvelle tentative auto (heures)",
+    "原生 compact 失败后，在该间隔内使用模拟摘要；默认 3 小时。": "Après un échec du compact natif, le résumé synthétique est utilisé pendant cet intervalle ; valeur par défaut : 3 heures.",
     "模拟摘要模型超限时回退": "Repli lorsque le modele de resume synthetique depasse le contexte",
     "模拟摘要超过当前模型上下文时，使用配置的回退模型重试。": "Lorsque le resume synthetique depasse le contexte du modele actuel, recommencer avec les modeles de repli configures.",
     "模拟摘要回退模型": "Modeles de repli pour resume synthetique",
@@ -3738,7 +3740,9 @@
     "例如：gpt-4.1-nano,regex:^claude-.*$,regex:^sora-.*$": "Exemple : gpt-4.1-nano,regex:^claude-.*$,regex:^sora-.*$",
     "支持精确匹配；使用 regex: 开头可按正则匹配。": "Prend en charge les correspondances exactes. Utilisez le prefixe regex: pour les expressions regulieres.",
     "上次检测时间": "Heure de la derniere verification",
-    "上次检测到可加入模型": "Modeles ajoutables detectes lors de la derniere verification"
+    "上次检测到可加入模型": "Modeles ajoutables detectes lors de la derniere verification",
+    "列出的模型会跳过-thinking/-nothinking 后缀的自动适配": "Les modèles listés ici ignorent l'adaptation automatique des suffixes -thinking/-nothinking.",
+    "跳过思考后缀适配的模型列表": "Modèles ignorant l'adaptation des suffixes thinking"
   },
   "启用 Responses 流启动恢复": "Enable responses stream startup recovery",
   "仅在 /v1/responses 流式请求首包前生效，用于短时故障恢复。": "S'applique uniquement avant le premier payload des requêtes en streaming /v1/responses pour la récupération après une panne courte ; vous devez aussi l'activer sur chaque canal.",

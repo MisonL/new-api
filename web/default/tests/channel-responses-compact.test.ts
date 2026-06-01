@@ -6,6 +6,7 @@ import {
 } from '../src/features/channels/lib/channel-form'
 import {
   RESPONSES_COMPACT_BADGE_KEYS,
+  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
   RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
   RESPONSES_COMPACT_MODE_AUTO,
   RESPONSES_COMPACT_MODE_NATIVE,
@@ -15,6 +16,7 @@ import {
   getResponsesCompactAutoFallbackReason,
   getResponsesCompactMode,
   isResponsesCompactAutoFallbackActive,
+  normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactFallbackModels,
 } from '../src/features/channels/lib/channel-utils'
 import type { Channel } from '../src/features/channels/types'
@@ -88,6 +90,9 @@ describe('channel responses compact settings', () => {
     expect(
       CHANNEL_FORM_DEFAULT_VALUES.responses_compact_summary_fallback_models
     ).toBe(RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(','))
+    expect(
+      CHANNEL_FORM_DEFAULT_VALUES.responses_compact_auto_fallback_retry_interval_hours
+    ).toBe(RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT)
     expect(getResponsesCompactMode('{}')).toBe(RESPONSES_COMPACT_MODE_AUTO)
     expect(getResponsesCompactMode('')).toBe(RESPONSES_COMPACT_MODE_AUTO)
     expect(getResponsesCompactMode('{bad json')).toBe(
@@ -150,6 +155,12 @@ describe('channel responses compact settings', () => {
     expect(normalizeResponsesCompactFallbackModels(undefined)).toEqual([
       'gpt-5.4',
     ])
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours()).toBe(3)
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(0)).toBe(3)
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(-1)).toBe(1)
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(169)).toBe(
+      168
+    )
   })
 
   test('defaults existing Azure and empty records to auto', () => {
@@ -220,6 +231,9 @@ describe('channel responses compact settings', () => {
     expect(defaults.responses_compact_mode).toBe(
       RESPONSES_COMPACT_MODE_NATIVE
     )
+    expect(
+      defaults.responses_compact_auto_fallback_retry_interval_hours
+    ).toBe(3)
     expect(defaults.responses_compact_context_fallback).toBe(true)
     expect(defaults.responses_compact_summary_model_fallback).toBe(true)
     expect(defaults.responses_compact_summary_fallback_models).toBe('gpt-5.4')
@@ -228,6 +242,7 @@ describe('channel responses compact settings', () => {
       ...CHANNEL_FORM_DEFAULT_VALUES,
       type: 1,
       responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
+      responses_compact_auto_fallback_retry_interval_hours: 6,
       responses_compact_context_fallback: false,
       responses_compact_summary_model_fallback: true,
       responses_compact_summary_fallback_models: 'gpt-5.4,gpt-5.4-large',
@@ -235,6 +250,9 @@ describe('channel responses compact settings', () => {
     const stored = JSON.parse(String(payload.channel.settings))
 
     expect(stored.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    expect(
+      stored.responses_compact_auto_fallback_retry_interval_hours
+    ).toBe(6)
     expect(stored.responses_compact_context_fallback).toBe(false)
     expect(stored.responses_compact_summary_model_fallback).toBe(true)
     expect(stored.responses_compact_summary_fallback_models).toEqual([
@@ -253,15 +271,22 @@ describe('channel responses compact settings', () => {
     )
 
     expect(defaults.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_AUTO)
+    expect(
+      defaults.responses_compact_auto_fallback_retry_interval_hours
+    ).toBe(3)
 
     const payload = transformFormDataToCreatePayload({
       ...CHANNEL_FORM_DEFAULT_VALUES,
       type: 1,
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+      responses_compact_auto_fallback_retry_interval_hours: 6,
     })
     const stored = JSON.parse(String(payload.channel.settings))
 
     expect(stored.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_AUTO)
+    expect(
+      stored.responses_compact_auto_fallback_retry_interval_hours
+    ).toBe(6)
     expect(stored.responses_compact_auto_fallback_date).toBeUndefined()
   })
 
@@ -269,10 +294,13 @@ describe('channel responses compact settings', () => {
     const base = {
       ...CHANNEL_FORM_DEFAULT_VALUES,
       type: 1,
+      responses_compact_auto_fallback_retry_interval_hours: 6,
       settings: JSON.stringify({
         responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
         responses_compact_auto_fallback_date: 20260526,
+        responses_compact_auto_fallback_at: 1780000000,
         responses_compact_auto_fallback_reason: 'status_code=404',
+        responses_compact_auto_fallback_retry_interval_hours: 6,
       }),
     }
 
@@ -285,6 +313,10 @@ describe('channel responses compact settings', () => {
       )
     )
     expect(unchanged.responses_compact_auto_fallback_date).toBe(20260526)
+    expect(unchanged.responses_compact_auto_fallback_at).toBe(1780000000)
+    expect(
+      unchanged.responses_compact_auto_fallback_retry_interval_hours
+    ).toBe(6)
 
     const changed = JSON.parse(
       String(
@@ -295,7 +327,9 @@ describe('channel responses compact settings', () => {
       )
     )
     expect(changed.responses_compact_auto_fallback_date).toBeUndefined()
+    expect(changed.responses_compact_auto_fallback_at).toBeUndefined()
     expect(changed.responses_compact_auto_fallback_reason).toBeUndefined()
+    expect(changed.responses_compact_auto_fallback_retry_interval_hours).toBe(6)
 
     const synthetic = JSON.parse(
       String(
@@ -306,7 +340,11 @@ describe('channel responses compact settings', () => {
       )
     )
     expect(synthetic.responses_compact_auto_fallback_date).toBeUndefined()
+    expect(synthetic.responses_compact_auto_fallback_at).toBeUndefined()
     expect(synthetic.responses_compact_auto_fallback_reason).toBeUndefined()
+    expect(synthetic.responses_compact_auto_fallback_retry_interval_hours).toBe(
+      6
+    )
   })
 
   test('drops compact metadata from non OpenAI channel settings', () => {
@@ -316,7 +354,9 @@ describe('channel responses compact settings', () => {
       responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
       settings: JSON.stringify({
         responses_compact_auto_fallback_date: 20260526,
+        responses_compact_auto_fallback_at: 1780000000,
         responses_compact_auto_fallback_reason: 'status_code=404',
+        responses_compact_auto_fallback_retry_interval_hours: 6,
         responses_compact_context_fallback: true,
         responses_compact_summary_model_fallback: true,
         responses_compact_summary_fallback_models: ['gpt-5.4'],
@@ -326,13 +366,48 @@ describe('channel responses compact settings', () => {
 
     expect(stored.responses_compact_mode).toBeUndefined()
     expect(stored.responses_compact_auto_fallback_date).toBeUndefined()
+    expect(stored.responses_compact_auto_fallback_at).toBeUndefined()
     expect(stored.responses_compact_auto_fallback_reason).toBeUndefined()
+    expect(
+      stored.responses_compact_auto_fallback_retry_interval_hours
+    ).toBeUndefined()
     expect(stored.responses_compact_context_fallback).toBeUndefined()
     expect(stored.responses_compact_summary_model_fallback).toBeUndefined()
     expect(stored.responses_compact_summary_fallback_models).toBeUndefined()
   })
 
-  test('detects auto fallback state by UTC date', () => {
+  test('detects auto fallback state by retry interval and legacy UTC date', () => {
+    const fallbackAt = Date.parse('2026-05-26T23:30:00.000Z') / 1000
+    const intervalSettings = JSON.stringify({
+      responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+      responses_compact_auto_fallback_at: fallbackAt,
+      responses_compact_auto_fallback_retry_interval_hours: 3,
+      responses_compact_auto_fallback_reason: 'status_code=404',
+    })
+
+    expect(
+      isResponsesCompactAutoFallbackActive(
+        intervalSettings,
+        new Date('2026-05-27T02:29:59.000Z')
+      )
+    ).toBe(true)
+    expect(
+      isResponsesCompactAutoFallbackActive(
+        intervalSettings,
+        new Date('2026-05-27T02:30:00.000Z')
+      )
+    ).toBe(false)
+    expect(
+      isResponsesCompactAutoFallbackActive(
+        JSON.stringify({
+          responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+          responses_compact_auto_fallback_at: fallbackAt,
+          responses_compact_auto_fallback_retry_interval_hours: 6,
+        }),
+        new Date('2026-05-27T05:29:59.000Z')
+      )
+    ).toBe(true)
+
     const settings = JSON.stringify({
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
       responses_compact_auto_fallback_date: 20260526,

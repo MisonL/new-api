@@ -66,10 +66,12 @@ func TestConvertOpenAIResponsesRequestStripsCodexEncryptedContextWhenEnabled(t *
 
 	var items []map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 2)
+	require.Len(t, items, 3)
 
 	require.Equal(t, "developer", responseItemRole(t, items[0]))
-	require.Equal(t, "user", responseItemRole(t, items[1]))
+	require.Equal(t, "assistant", responseItemRole(t, items[1]))
+	require.Equal(t, "old answer", responseItemText(t, items[1]))
+	require.Equal(t, "user", responseItemRole(t, items[2]))
 }
 
 func TestConvertOpenAIResponsesRequestRejectsCompactionOnlyInputWhenStripEnabled(t *testing.T) {
@@ -126,7 +128,7 @@ func TestConvertOpenAIResponsesRequestPreservesNonObjectArrayItemsWhenStripEnabl
 	require.Equal(t, "plain input item", first)
 }
 
-func TestConvertOpenAIResponsesRequestRejectsEncryptedReasoningOnlyInputWhenStripEnabled(t *testing.T) {
+func TestConvertOpenAIResponsesRequestPreservesAssistantAfterEncryptedReasoningWhenStripEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
@@ -145,9 +147,16 @@ func TestConvertOpenAIResponsesRequestRejectsEncryptedReasoningOnlyInputWhenStri
 		]`),
 	}
 
-	_, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "encrypted reasoning context")
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 1)
+	require.Equal(t, "assistant", responseItemRole(t, items[0]))
+	require.Equal(t, "old answer", responseItemText(t, items[0]))
 }
 
 func TestConvertOpenAIResponsesRequestPreservesNonAdjacentAssistantWhenStripEnabled(t *testing.T) {
@@ -183,7 +192,7 @@ func TestConvertOpenAIResponsesRequestPreservesNonAdjacentAssistantWhenStripEnab
 	require.Equal(t, "fresh answer", responseItemText(t, items[1]))
 }
 
-func TestConvertOpenAIResponsesRequestStripsAssistantToolCallsUntilNextClientContext(t *testing.T) {
+func TestConvertOpenAIResponsesRequestPreservesAssistantToolCallsWhenStripEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
@@ -213,11 +222,12 @@ func TestConvertOpenAIResponsesRequestStripsAssistantToolCallsUntilNextClientCon
 
 	var items []map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 3)
-	require.Equal(t, "user", responseItemRole(t, items[0]))
-	require.Contains(t, responseItemText(t, items[0]), "Tool output call_1")
-	require.Equal(t, "user", responseItemRole(t, items[1]))
-	require.Equal(t, "assistant", responseItemRole(t, items[2]))
+	require.Len(t, items, 5)
+	require.Equal(t, "function_call", responseItemType(t, items[0]))
+	require.Equal(t, "custom_tool_call", responseItemType(t, items[1]))
+	require.Equal(t, "function_call_output", responseItemType(t, items[2]))
+	require.Equal(t, "user", responseItemRole(t, items[3]))
+	require.Equal(t, "assistant", responseItemRole(t, items[4]))
 }
 
 func TestConvertOpenAIResponsesRequestPreservesPlainReasoningWhenStripEnabled(t *testing.T) {
@@ -272,7 +282,7 @@ func TestConvertOpenAIResponsesRequestPreservesEmptyEncryptedReasoningWhenStripE
 	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
 }
 
-func TestConvertOpenAIResponsesRequestRewritesToolOutputWithoutRawFallback(t *testing.T) {
+func TestConvertOpenAIResponsesRequestPreservesToolOutputWhenStripEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
@@ -300,10 +310,11 @@ func TestConvertOpenAIResponsesRequestRewritesToolOutputWithoutRawFallback(t *te
 
 	var items []map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 2)
-	require.Equal(t, "Tool output call_1", responseItemText(t, items[0]))
-	require.NotContains(t, responseItemText(t, items[0]), "metadata")
-	require.Equal(t, "user", responseItemRole(t, items[1]))
+	require.Len(t, items, 3)
+	require.Equal(t, "function_call", responseItemType(t, items[0]))
+	require.Equal(t, "function_call_output", responseItemType(t, items[1]))
+	require.Contains(t, string(items[1]["metadata"]), "internal")
+	require.Equal(t, "user", responseItemRole(t, items[2]))
 }
 
 func TestConvertOpenAIResponsesCompactRequestPreservesCompactionInputForCodexChannel(t *testing.T) {
@@ -504,11 +515,11 @@ func TestConvertOpenAIResponsesRequestRestoresSyntheticStateBeforeStrip(t *testi
 	require.Len(t, items, 3)
 	require.Equal(t, "developer", responseItemRole(t, items[0]))
 	require.Contains(t, responseItemText(t, items[0]), "Stored synthetic summary.")
-	require.Equal(t, "user", responseItemRole(t, items[1]))
-	require.Equal(t, "developer", responseItemRole(t, items[2]))
-	require.Contains(t, responseItemText(t, items[2]), "Another language model produced the compact summary above")
+	require.Contains(t, responseItemText(t, items[0]), "Another language model produced the compact summary above")
+	require.Equal(t, "assistant", responseItemRole(t, items[1]))
+	require.Equal(t, "old answer", responseItemText(t, items[1]))
+	require.Equal(t, "user", responseItemRole(t, items[2]))
 	require.NotContains(t, string(convertedReq.Input), "opaque")
-	require.NotContains(t, string(convertedReq.Input), "old answer")
 }
 
 func TestConvertOpenAIResponsesCompactRequestStripsNativeCompactWhenEncryptedContextStripEnabled(t *testing.T) {
@@ -543,8 +554,10 @@ func TestConvertOpenAIResponsesCompactRequestStripsNativeCompactWhenEncryptedCon
 
 	var items []map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 1)
-	require.Equal(t, "user", responseItemRole(t, items[0]))
+	require.Len(t, items, 2)
+	require.Equal(t, "assistant", responseItemRole(t, items[0]))
+	require.Equal(t, "old answer", responseItemText(t, items[0]))
+	require.Equal(t, "user", responseItemRole(t, items[1]))
 	require.NotContains(t, string(convertedReq.Input), "opaque")
 	require.NotContains(t, string(convertedReq.Input), "compact")
 }
@@ -579,8 +592,10 @@ func TestConvertOpenAIResponsesCompactRequestConvertsAndStripsEncryptedContextWh
 
 	var items []map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 1)
-	require.Equal(t, "user", responseItemRole(t, items[0]))
+	require.Len(t, items, 2)
+	require.Equal(t, "assistant", responseItemRole(t, items[0]))
+	require.Equal(t, "old answer", responseItemText(t, items[0]))
+	require.Equal(t, "user", responseItemRole(t, items[1]))
 }
 
 func TestConvertAzureResponsesCompactRequestStripsEncryptedReasoningWhenEnabled(t *testing.T) {
@@ -613,8 +628,10 @@ func TestConvertAzureResponsesCompactRequestStripsEncryptedReasoningWhenEnabled(
 
 	var items []map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 1)
-	require.Equal(t, "user", responseItemRole(t, items[0]))
+	require.Len(t, items, 2)
+	require.Equal(t, "assistant", responseItemRole(t, items[0]))
+	require.Equal(t, "old answer", responseItemText(t, items[0]))
+	require.Equal(t, "user", responseItemRole(t, items[1]))
 }
 
 func TestOpenAIResponsesCompactRequestURLUsesCompactEndpointForNativeOpenAICompatibleChannel(t *testing.T) {
@@ -673,6 +690,13 @@ func responseItemRole(t *testing.T, item map[string]json.RawMessage) string {
 	var role string
 	require.NoError(t, common.Unmarshal(item["role"], &role))
 	return role
+}
+
+func responseItemType(t *testing.T, item map[string]json.RawMessage) string {
+	t.Helper()
+	var itemType string
+	require.NoError(t, common.Unmarshal(item["type"], &itemType))
+	return itemType
 }
 
 func responseItemText(t *testing.T, item map[string]json.RawMessage) string {

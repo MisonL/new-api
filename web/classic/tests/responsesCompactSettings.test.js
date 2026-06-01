@@ -23,6 +23,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
   RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
   RESPONSES_COMPACT_MODE_AUTO,
   RESPONSES_COMPACT_MODE_DEFAULT,
@@ -32,6 +33,7 @@ import {
   RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
   buildResponsesCompactSettings,
   clearResponsesCompactSettings,
+  normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactMode,
   normalizeResponsesCompactSummaryFallbackModels,
   resetResponsesCompactAutoFallbackOnModeChange,
@@ -71,6 +73,8 @@ describe('classic responses compact settings', () => {
   test('stores compact mode only for OpenAI channels', () => {
     expect(buildResponsesCompactSettings(1, undefined)).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+      responses_compact_auto_fallback_retry_interval_hours:
+        RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
       responses_compact_context_fallback:
         RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
       responses_compact_summary_model_fallback:
@@ -82,6 +86,7 @@ describe('classic responses compact settings', () => {
       buildResponsesCompactSettings(1, RESPONSES_COMPACT_MODE_AUTO),
     ).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+      responses_compact_auto_fallback_retry_interval_hours: 3,
       responses_compact_context_fallback: true,
       responses_compact_summary_model_fallback: true,
       responses_compact_summary_fallback_models: ['gpt-5.4'],
@@ -93,12 +98,14 @@ describe('classic responses compact settings', () => {
       ),
     ).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+      responses_compact_auto_fallback_retry_interval_hours: 3,
       responses_compact_context_fallback: true,
       responses_compact_summary_model_fallback: true,
       responses_compact_summary_fallback_models: ['gpt-5.4'],
     });
     expect(buildResponsesCompactSettings(1, 'convert')).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+      responses_compact_auto_fallback_retry_interval_hours: 3,
       responses_compact_context_fallback: true,
       responses_compact_summary_model_fallback: true,
       responses_compact_summary_fallback_models: ['gpt-5.4'],
@@ -116,9 +123,11 @@ describe('classic responses compact settings', () => {
         false,
         false,
         'gpt-5.4, gpt-5.4, gpt-5.4-mini',
+        6,
       ),
     ).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+      responses_compact_auto_fallback_retry_interval_hours: 6,
       responses_compact_context_fallback: false,
       responses_compact_summary_model_fallback: false,
       responses_compact_summary_fallback_models: ['gpt-5.4', 'gpt-5.4-mini'],
@@ -126,13 +135,21 @@ describe('classic responses compact settings', () => {
     expect(normalizeResponsesCompactSummaryFallbackModels('')).toEqual([
       'gpt-5.4',
     ]);
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours()).toBe(3);
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(0)).toBe(3);
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(-1)).toBe(1);
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(169)).toBe(
+      168,
+    );
   });
 
   test('resets auto fallback state only when compact mode changes', () => {
     const settings = {
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
       responses_compact_auto_fallback_date: 20260526,
+      responses_compact_auto_fallback_at: 1780000000,
       responses_compact_auto_fallback_reason: 'status_code=404',
+      responses_compact_auto_fallback_retry_interval_hours: 6,
     };
     expect(
       resetResponsesCompactAutoFallbackOnModeChange(
@@ -141,6 +158,10 @@ describe('classic responses compact settings', () => {
       ),
     ).toBe(false);
     expect(settings.responses_compact_auto_fallback_date).toBe(20260526);
+    expect(settings.responses_compact_auto_fallback_at).toBe(1780000000);
+    expect(settings.responses_compact_auto_fallback_retry_interval_hours).toBe(
+      6,
+    );
 
     expect(
       resetResponsesCompactAutoFallbackOnModeChange(
@@ -149,7 +170,11 @@ describe('classic responses compact settings', () => {
       ),
     ).toBe(true);
     expect(settings.responses_compact_auto_fallback_date).toBeUndefined();
+    expect(settings.responses_compact_auto_fallback_at).toBeUndefined();
     expect(settings.responses_compact_auto_fallback_reason).toBeUndefined();
+    expect(settings.responses_compact_auto_fallback_retry_interval_hours).toBe(
+      6,
+    );
 
     expect(
       resetResponsesCompactAutoFallbackOnModeChange(
@@ -163,7 +188,9 @@ describe('classic responses compact settings', () => {
     const settings = {
       responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
       responses_compact_auto_fallback_date: 20260526,
+      responses_compact_auto_fallback_at: 1780000000,
       responses_compact_auto_fallback_reason: 'status_code=404',
+      responses_compact_auto_fallback_retry_interval_hours: 6,
     };
 
     expect(
@@ -175,14 +202,20 @@ describe('classic responses compact settings', () => {
     ).toBe(true);
 
     expect(settings.responses_compact_auto_fallback_date).toBeUndefined();
+    expect(settings.responses_compact_auto_fallback_at).toBeUndefined();
     expect(settings.responses_compact_auto_fallback_reason).toBeUndefined();
+    expect(settings.responses_compact_auto_fallback_retry_interval_hours).toBe(
+      6,
+    );
   });
 
   test('clears all compact metadata for non OpenAI channels', () => {
     const settings = {
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
       responses_compact_auto_fallback_date: 20260526,
+      responses_compact_auto_fallback_at: 1780000000,
       responses_compact_auto_fallback_reason: 'status_code=404',
+      responses_compact_auto_fallback_retry_interval_hours: 6,
       responses_compact_context_fallback: true,
       responses_compact_summary_model_fallback: true,
       responses_compact_summary_fallback_models: ['gpt-5.4'],
@@ -192,7 +225,11 @@ describe('classic responses compact settings', () => {
 
     expect(settings.responses_compact_mode).toBeUndefined();
     expect(settings.responses_compact_auto_fallback_date).toBeUndefined();
+    expect(settings.responses_compact_auto_fallback_at).toBeUndefined();
     expect(settings.responses_compact_auto_fallback_reason).toBeUndefined();
+    expect(
+      settings.responses_compact_auto_fallback_retry_interval_hours,
+    ).toBeUndefined();
     expect(settings.responses_compact_context_fallback).toBeUndefined();
     expect(settings.responses_compact_summary_model_fallback).toBeUndefined();
     expect(settings.responses_compact_summary_fallback_models).toBeUndefined();
@@ -208,6 +245,9 @@ describe('classic responses compact settings', () => {
     );
 
     expect(source.match(/t\('Responses Compact 能力'\)/g) ?? []).toHaveLength(
+      1,
+    );
+    expect(source.match(/t\('自动回退重试间隔（小时）'\)/g) ?? []).toHaveLength(
       1,
     );
     expect(

@@ -170,10 +170,12 @@ func TestResetResponsesCompactAutoFallbackClearsNonOpenAISettings(t *testing.T) 
 		Type: constant.ChannelTypeAnthropic,
 	}
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
-		AzureResponsesVersion:              "preview",
-		ResponsesCompactMode:               dto.ResponsesCompactModeAuto,
-		ResponsesCompactAutoFallbackDate:   20260526,
-		ResponsesCompactAutoFallbackReason: "status_code=404",
+		AzureResponsesVersion:                          "preview",
+		ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackDate:               20260526,
+		ResponsesCompactAutoFallbackAt:                 1780000000,
+		ResponsesCompactAutoFallbackReason:             "status_code=404",
+		ResponsesCompactAutoFallbackRetryIntervalHours: 6,
 	})
 	originChannel := &model.Channel{Type: constant.ChannelTypeOpenAI}
 
@@ -183,7 +185,9 @@ func TestResetResponsesCompactAutoFallbackClearsNonOpenAISettings(t *testing.T) 
 	require.Equal(t, "preview", settings.AzureResponsesVersion)
 	require.Empty(t, settings.ResponsesCompactMode)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackAt)
 	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackRetryIntervalHours)
 }
 
 func TestValidateChannelOtherSettingsClearsCompactMetadataForNonOpenAI(t *testing.T) {
@@ -193,7 +197,9 @@ func TestValidateChannelOtherSettingsClearsCompactMetadataForNonOpenAI(t *testin
 			"azure_responses_version":"preview",
 			"responses_compact_mode":"auto",
 			"responses_compact_auto_fallback_date":20260526,
-			"responses_compact_auto_fallback_reason":"status_code=404"
+			"responses_compact_auto_fallback_at":1780000000,
+			"responses_compact_auto_fallback_reason":"status_code=404",
+			"responses_compact_auto_fallback_retry_interval_hours":6
 		}`,
 	}
 
@@ -203,21 +209,44 @@ func TestValidateChannelOtherSettingsClearsCompactMetadataForNonOpenAI(t *testin
 	require.Equal(t, "preview", settings.AzureResponsesVersion)
 	require.Empty(t, settings.ResponsesCompactMode)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackAt)
 	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackRetryIntervalHours)
+}
+
+func TestValidateChannelOtherSettingsRejectsInvalidCompactRetryInterval(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI,
+		OtherSettings: `{
+			"responses_compact_mode":"auto",
+			"responses_compact_auto_fallback_retry_interval_hours":0
+		}`,
+	}
+	require.NoError(t, validateChannelOtherSettings(channel, map[string]struct{}{}))
+
+	channel.OtherSettings = `{
+		"responses_compact_mode":"auto",
+		"responses_compact_auto_fallback_retry_interval_hours":169
+	}`
+	require.ErrorContains(t, validateChannelOtherSettings(channel, map[string]struct{}{}), "responses compact 自动回退重试间隔必须在 1 到 168 小时之间")
 }
 
 func TestResetResponsesCompactAutoFallbackClearsWhenModeChanges(t *testing.T) {
 	channel := &model.Channel{Type: constant.ChannelTypeOpenAI}
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
-		ResponsesCompactMode:               dto.ResponsesCompactModeNative,
-		ResponsesCompactAutoFallbackDate:   20260526,
-		ResponsesCompactAutoFallbackReason: "status_code=404",
+		ResponsesCompactMode:                           dto.ResponsesCompactModeNative,
+		ResponsesCompactAutoFallbackDate:               20260526,
+		ResponsesCompactAutoFallbackAt:                 1780000000,
+		ResponsesCompactAutoFallbackReason:             "status_code=404",
+		ResponsesCompactAutoFallbackRetryIntervalHours: 6,
 	})
 	originChannel := &model.Channel{Type: constant.ChannelTypeOpenAI}
 	originChannel.SetOtherSettings(dto.ChannelOtherSettings{
-		ResponsesCompactMode:               dto.ResponsesCompactModeAuto,
-		ResponsesCompactAutoFallbackDate:   20260526,
-		ResponsesCompactAutoFallbackReason: "status_code=404",
+		ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackDate:               20260526,
+		ResponsesCompactAutoFallbackAt:                 1780000000,
+		ResponsesCompactAutoFallbackReason:             "status_code=404",
+		ResponsesCompactAutoFallbackRetryIntervalHours: 6,
 	})
 
 	resetResponsesCompactAutoFallbackOnModeChange(channel, originChannel, false)
@@ -225,7 +254,9 @@ func TestResetResponsesCompactAutoFallbackClearsWhenModeChanges(t *testing.T) {
 	settings := channel.GetOtherSettings()
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactMode)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackAt)
 	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
+	require.Equal(t, 6, settings.ResponsesCompactAutoFallbackRetryIntervalHours)
 }
 
 func TestResetResponsesCompactAutoFallbackPreservesWhenModeUnchanged(t *testing.T) {
@@ -235,9 +266,11 @@ func TestResetResponsesCompactAutoFallbackPreservesWhenModeUnchanged(t *testing.
 	})
 	originChannel := &model.Channel{Type: constant.ChannelTypeOpenAI}
 	originChannel.SetOtherSettings(dto.ChannelOtherSettings{
-		ResponsesCompactMode:               dto.ResponsesCompactModeAuto,
-		ResponsesCompactAutoFallbackDate:   20260526,
-		ResponsesCompactAutoFallbackReason: "status_code=404",
+		ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackDate:               20260526,
+		ResponsesCompactAutoFallbackAt:                 1780000000,
+		ResponsesCompactAutoFallbackReason:             "status_code=404",
+		ResponsesCompactAutoFallbackRetryIntervalHours: 6,
 	})
 
 	resetResponsesCompactAutoFallbackOnModeChange(channel, originChannel, false)
@@ -245,19 +278,24 @@ func TestResetResponsesCompactAutoFallbackPreservesWhenModeUnchanged(t *testing.
 	settings := channel.GetOtherSettings()
 	require.Equal(t, dto.ResponsesCompactModeAuto, settings.ResponsesCompactMode)
 	require.Equal(t, 20260526, settings.ResponsesCompactAutoFallbackDate)
+	require.Equal(t, int64(1780000000), settings.ResponsesCompactAutoFallbackAt)
 	require.Equal(t, "status_code=404", settings.ResponsesCompactAutoFallbackReason)
+	require.Equal(t, 6, settings.ResponsesCompactAutoFallbackRetryIntervalHours)
 }
 
 func TestResetResponsesCompactAutoFallbackAllowsExplicitClearWhenModeUnchanged(t *testing.T) {
 	channel := &model.Channel{Type: constant.ChannelTypeOpenAI}
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
-		ResponsesCompactMode: dto.ResponsesCompactModeAuto,
+		ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackRetryIntervalHours: 6,
 	})
 	originChannel := &model.Channel{Type: constant.ChannelTypeOpenAI}
 	originChannel.SetOtherSettings(dto.ChannelOtherSettings{
-		ResponsesCompactMode:               dto.ResponsesCompactModeAuto,
-		ResponsesCompactAutoFallbackDate:   20260526,
-		ResponsesCompactAutoFallbackReason: "status_code=404",
+		ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackDate:               20260526,
+		ResponsesCompactAutoFallbackAt:                 1780000000,
+		ResponsesCompactAutoFallbackReason:             "status_code=404",
+		ResponsesCompactAutoFallbackRetryIntervalHours: 6,
 	})
 
 	resetResponsesCompactAutoFallbackOnModeChange(channel, originChannel, true)
@@ -265,14 +303,18 @@ func TestResetResponsesCompactAutoFallbackAllowsExplicitClearWhenModeUnchanged(t
 	settings := channel.GetOtherSettings()
 	require.Equal(t, dto.ResponsesCompactModeAuto, settings.ResponsesCompactMode)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
+	require.Zero(t, settings.ResponsesCompactAutoFallbackAt)
 	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
+	require.Equal(t, 6, settings.ResponsesCompactAutoFallbackRetryIntervalHours)
 }
 
 func TestResponsesCompactAutoFallbackMetadataExplicitlySet(t *testing.T) {
 	require.False(t, responsesCompactAutoFallbackMetadataExplicitlySet(""))
 	require.False(t, responsesCompactAutoFallbackMetadataExplicitlySet(`{"responses_compact_mode":"auto"}`))
 	require.True(t, responsesCompactAutoFallbackMetadataExplicitlySet(`{"responses_compact_auto_fallback_date":0}`))
+	require.True(t, responsesCompactAutoFallbackMetadataExplicitlySet(`{"responses_compact_auto_fallback_at":0}`))
 	require.True(t, responsesCompactAutoFallbackMetadataExplicitlySet(`{"responses_compact_auto_fallback_reason":""}`))
+	require.False(t, responsesCompactAutoFallbackMetadataExplicitlySet(`{"responses_compact_auto_fallback_retry_interval_hours":6}`))
 }
 
 func withGlobalProtocolPolicyForTest(t *testing.T, policy model_setting.ChatCompletionsToResponsesPolicy, passThrough bool) {

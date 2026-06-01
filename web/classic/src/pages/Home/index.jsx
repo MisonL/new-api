@@ -31,6 +31,7 @@ import {
   copy,
   showSuccess,
   getEffectiveServerAddress,
+  postMessageToIframe,
 } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { API_ENDPOINTS } from '../../constants/common.constant';
@@ -75,6 +76,11 @@ const ENDPOINT_ROTATE_INTERVAL_MS = 5000;
 const ENDPOINT_ITEM_HEIGHT = 32;
 const ENDPOINT_ANIMATION_DURATION_MS = 320;
 
+function sendHomeIframeState(iframe, actualTheme, language) {
+  postMessageToIframe(iframe, { themeMode: actualTheme });
+  postMessageToIframe(iframe, { lang: language });
+}
+
 const Home = () => {
   const { t, i18n } = useTranslation();
   const [statusState] = useContext(StatusContext);
@@ -94,7 +100,7 @@ const Home = () => {
   const [endpointIndex, setEndpointIndex] = useState(0);
   const [endpointTransitionEnabled, setEndpointTransitionEnabled] =
     useState(true);
-  const homePageIframeRef = useRef(null);
+  const homeIframeRef = useRef(null);
   const endpointActiveIndex =
     endpointItems.length > 0 ? endpointIndex % endpointItems.length : -1;
   const [viewportHeight, setViewportHeight] = useState(getViewportHeight);
@@ -192,12 +198,7 @@ const Home = () => {
   };
 
   const postHomePageIframeSettings = useCallback(() => {
-    const iframe = homePageIframeRef.current;
-    if (!iframe?.contentWindow) {
-      return;
-    }
-    iframe.contentWindow.postMessage({ themeMode: actualTheme }, '*');
-    iframe.contentWindow.postMessage({ lang: i18n.language }, '*');
+    sendHomeIframeState(homeIframeRef.current, actualTheme, i18n.language);
   }, [actualTheme, i18n.language]);
 
   useEffect(() => {
@@ -491,7 +492,7 @@ const Home = () => {
         <div className='overflow-x-hidden w-full'>
           {homePageContent.startsWith('https://') ? (
             <iframe
-              ref={homePageIframeRef}
+              ref={homeIframeRef}
               src={homePageContent}
               className='w-full h-screen border-none'
               onLoad={postHomePageIframeSettings}

@@ -57,10 +57,11 @@ type HeaderProfileStrategy struct {
 }
 
 const (
-	BuiltinCodexCLIUserAgent     = "codex-tui/0.130.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.130.0)"
-	BuiltinCodexCLIOriginator    = "codex-tui"
-	BuiltinCodexDesktopUserAgent = "Codex Desktop/0.131.0-alpha.9 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.513.31313)"
-	BuiltinDroidCLIUserAgent     = "factory-cli/0.123.0"
+	BuiltinCodexCLIUserAgent      = "codex-tui/0.134.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.134.0)"
+	BuiltinCodexCLIOriginator     = "codex-tui"
+	BuiltinCodexDesktopUserAgent  = "Codex Desktop/0.133.0-alpha.1 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.519.41501)"
+	BuiltinCodexDesktopOriginator = "Codex Desktop"
+	BuiltinDroidCLIUserAgent      = "factory-cli/0.135.0"
 )
 
 var BuiltinHeaderProfiles = []HeaderProfile{
@@ -73,10 +74,10 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		Headers: map[string]string{
 			"Accept":             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 			"Accept-Language":    "en-US,en;q=0.9",
-			"Sec-CH-UA":          "\"Google Chrome\";v=\"135\", \"Chromium\";v=\"135\", \"Not.A/Brand\";v=\"24\"",
+			"Sec-CH-UA":          "\"Google Chrome\";v=\"148\", \"Chromium\";v=\"148\", \"Not.A/Brand\";v=\"24\"",
 			"Sec-CH-UA-Mobile":   "?0",
 			"Sec-CH-UA-Platform": "\"macOS\"",
-			"User-Agent":         "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+			"User-Agent":         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
 		},
 	},
 	newBuiltinCodexCLIHeaderProfile(),
@@ -85,27 +86,27 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		"claude-code",
 		"Claude Code",
 		map[string]string{
-			"User-Agent": "claude-cli/2.1.139 (external, sdk-cli)",
+			"User-Agent": "claude-cli/2.1.153 (external, sdk-cli)",
 		},
-		"固定请求头静态快照来自本机实抓 Claude Code 2.1.139 `/v1/messages?beta=true` 请求；此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。",
+		"固定请求头静态快照按 Claude Code 2.1.153 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。",
 		false,
 	),
 	newBuiltinCLIHeaderProfile(
 		"gemini-cli",
 		"Gemini CLI",
 		map[string]string{
-			"User-Agent": "GeminiCLI/0.41.2/gemini-3.1-pro-preview (darwin; x64; terminal)",
+			"User-Agent": "GeminiCLI/0.44.0/gemini-3.1-pro-preview (darwin; x64; terminal)",
 		},
-		"固定请求头静态快照来自本机实抓 Gemini CLI 0.41.2 的 streamGenerateContent 请求；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。",
+		"固定请求头静态快照按 Gemini CLI 0.44.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。",
 		false,
 	),
 	newBuiltinCLIHeaderProfile(
 		"qwen-code",
 		"Qwen Code",
 		map[string]string{
-			"User-Agent": "QwenCode/0.15.10 (darwin; x64)",
+			"User-Agent": "QwenCode/0.16.2 (darwin; x64)",
 		},
-		"固定请求头静态快照来自本机 Qwen Code 0.15.10 的 OpenAI-compatible `/chat/completions` 请求；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。",
+		"固定请求头静态快照按 Qwen Code 0.16.2 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。",
 		false,
 	),
 	newBuiltinCLIHeaderProfile(
@@ -114,7 +115,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		map[string]string{
 			"User-Agent": BuiltinDroidCLIUserAgent,
 		},
-		"固定请求头静态快照来自本机实抓 Droid 0.123.0 的 OpenAI-compatible `/v1/chat/completions` 请求；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。",
+		"固定请求头静态快照按 Droid 0.135.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。",
 		false,
 	),
 	{
@@ -127,7 +128,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 			"Accept":        "*/*",
 			"Cache-Control": "no-cache",
 			"Postman-Token": "00000000-0000-0000-0000-000000000000",
-			"User-Agent":    "PostmanRuntime/7.43.0",
+			"User-Agent":    "PostmanRuntime/7.54.0",
 		},
 	},
 }
@@ -139,7 +140,7 @@ func newBuiltinCodexCLIHeaderProfile() HeaderProfile {
 		Category:            HeaderProfileCategoryAICodingCLI,
 		Scope:               HeaderProfileScopeBuiltin,
 		ReadOnly:            true,
-		Description:         "固定请求头静态快照来自 Codex CLI 0.130.0 交互式 TUI 请求头生成逻辑；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。",
+		Description:         "固定请求头静态快照来自 Codex CLI 0.134.0 交互式 TUI 请求头生成逻辑；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。",
 		PassthroughRequired: false,
 		Headers: map[string]string{
 			"User-Agent": BuiltinCodexCLIUserAgent,
@@ -155,10 +156,11 @@ func newBuiltinCodexDesktopHeaderProfile() HeaderProfile {
 		Category:            HeaderProfileCategoryAICodingCLI,
 		Scope:               HeaderProfileScopeBuiltin,
 		ReadOnly:            true,
-		Description:         "固定请求头静态快照来自 Codex Desktop 0.131.0-alpha.9 真实请求；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。",
+		Description:         "固定请求头静态快照来自 Codex Desktop App 0.133.0-alpha.1 真实请求；此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。",
 		PassthroughRequired: false,
 		Headers: map[string]string{
 			"User-Agent": BuiltinCodexDesktopUserAgent,
+			"Originator": BuiltinCodexDesktopOriginator,
 		},
 	}
 }

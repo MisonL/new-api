@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -58,6 +59,20 @@ type slowReader struct {
 func (s *slowReader) Read(p []byte) (int, error) {
 	time.Sleep(s.delay)
 	return s.r.Read(p)
+}
+
+type errAfterDataReader struct {
+	data []byte
+	done bool
+	err  error
+}
+
+func (r *errAfterDataReader) Read(p []byte) (int, error) {
+	if !r.done {
+		r.done = true
+		return copy(p, r.data), nil
+	}
+	return 0, r.err
 }
 
 // ---------- Basic correctness ----------
@@ -470,6 +485,39 @@ func TestStreamScannerHandler_StreamStatus_EOFWithoutDone(t *testing.T) {
 	require.NotNil(t, info.StreamStatus)
 	assert.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
 	assert.True(t, info.StreamStatus.IsNormalEnd())
+}
+
+func TestStreamScannerHandler_StreamStatus_UpstreamInterrupted(t *testing.T) {
+	t.Parallel()
+
+	reader := &errAfterDataReader{
+		data: []byte("data: {\"id\":1}\n"),
+		err:  io.ErrUnexpectedEOF,
+	}
+	c, resp, info := setupStreamTest(t, reader)
+
+	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {})
+
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonUpstreamInterrupted, info.StreamStatus.EndReason)
+	assert.ErrorIs(t, info.StreamStatus.EndError, io.ErrUnexpectedEOF)
+	assert.False(t, info.StreamStatus.IsNormalEnd())
+}
+
+func TestStreamScannerHandler_StreamStatus_ConnectionResetFromUpstream(t *testing.T) {
+	t.Parallel()
+
+	reader := &errAfterDataReader{
+		data: []byte("data: {\"id\":1}\n"),
+		err:  errors.New("read tcp 127.0.0.1:1->127.0.0.1:2: connection reset by peer"),
+	}
+	c, resp, info := setupStreamTest(t, reader)
+
+	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {})
+
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonUpstreamInterrupted, info.StreamStatus.EndReason)
+	assert.False(t, info.StreamStatus.IsNormalEnd())
 }
 
 func TestStreamScannerHandler_StreamStatus_HandlerStop(t *testing.T) {

@@ -58,7 +58,6 @@ var visibleHeaderAuditValueKeys = map[string]struct{}{
 	"user-agent":            {},
 	"x-client-request-id":   {},
 	"x-codex-beta-features": {},
-	"x-codex-turn-metadata": {},
 	"x-codex-window-id":     {},
 }
 

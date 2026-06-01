@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
 
@@ -288,7 +289,13 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 		if err := scanner.Err(); err != nil {
 			if err != io.EOF {
-				if info.StreamStatus.IsCanceled() || relaycommon.IsBenignDisconnectErrorMessage(err.Error()) {
+				if info.StreamStatus.IsCanceled() {
+					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, err)
+					logger.LogInfo(c, "scanner closed after client disconnect: "+err.Error())
+				} else if types.IsUpstreamTransportInterruptedError(err) {
+					logger.LogError(c, "upstream stream interrupted: "+err.Error())
+					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonUpstreamInterrupted, err)
+				} else if relaycommon.IsBenignDisconnectErrorMessage(err.Error()) {
 					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, err)
 					logger.LogInfo(c, "scanner closed after client disconnect: "+err.Error())
 				} else {

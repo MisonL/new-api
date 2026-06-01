@@ -48,6 +48,7 @@ func TestStreamStatus_SetEndReason_Concurrent(t *testing.T) {
 		StreamEndReasonScannerErr,
 		StreamEndReasonHandlerStop,
 		StreamEndReasonEOF,
+		StreamEndReasonUpstreamInterrupted,
 		StreamEndReasonPanic,
 		StreamEndReasonPingFail,
 	}
@@ -140,6 +141,7 @@ func TestStreamStatus_IsNormalEnd(t *testing.T) {
 		{StreamEndReasonTimeout, false},
 		{StreamEndReasonClientGone, false},
 		{StreamEndReasonScannerErr, false},
+		{StreamEndReasonUpstreamInterrupted, false},
 		{StreamEndReasonPanic, false},
 		{StreamEndReasonPingFail, false},
 		{StreamEndReasonNone, false},
@@ -215,6 +217,12 @@ func TestStreamStatus_Summary(t *testing.T) {
 	summary2 := s2.Summary()
 	assert.Contains(t, summary2, "reason=timeout")
 	assert.Contains(t, summary2, "soft_errors=2")
+
+	s3 := NewStreamStatus()
+	s3.SetEndReason(StreamEndReasonUpstreamInterrupted, fmt.Errorf("unexpected EOF"))
+	summary3 := s3.Summary()
+	assert.Contains(t, summary3, "reason=upstream_transport_interrupted")
+	assert.Contains(t, summary3, "end_error=\"unexpected EOF\"")
 }
 
 func TestStreamStatus_Summary_NilSafe(t *testing.T) {

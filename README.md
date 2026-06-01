@@ -85,15 +85,16 @@ export CRYPTO_SECRET='replace-with-stable-secret'
 
 ## 配置
 
-| 变量                | 用途             | 备注                     |
-| ------------------- | ---------------- | ------------------------ |
-| `SESSION_SECRET`    | 会话签名密钥     | 必填，必须稳定           |
-| `CRYPTO_SECRET`     | 敏感数据加密密钥 | 必填，必须稳定           |
-| `SQL_DSN`           | 数据库连接       | 未设置时使用 SQLite      |
-| `REDIS_CONN_STRING` | Redis 连接       | 可选，用于缓存和共享状态 |
-| `NEW_API_IMAGE`     | Docker 镜像      | 正式部署建议固定版本     |
-| `NEW_API_DATA_DIR`  | 数据目录         | 建议显式设置             |
-| `NEW_API_LOG_DIR`   | 日志目录         | 建议显式设置             |
+| 变量                   | 用途             | 备注                                                             |
+| ---------------------- | ---------------- | ---------------------------------------------------------------- |
+| `SESSION_SECRET`       | 会话签名密钥     | 必填，必须稳定                                                   |
+| `CRYPTO_SECRET`        | 敏感数据加密密钥 | 必填，必须稳定                                                   |
+| `SQL_DSN`              | 数据库连接       | 未设置时使用 SQLite                                              |
+| `REDIS_CONN_STRING`    | Redis 连接       | 可选，用于缓存和共享状态                                         |
+| `NEW_API_IMAGE`        | Docker 镜像      | 正式部署建议固定版本                                             |
+| `NEW_API_PORT_MAPPING` | Docker 端口映射  | 默认 `3000:3000`，本机代理场景可设为 `127.0.0.1:13000:3000` |
+| `NEW_API_DATA_DIR`     | 数据目录         | 建议显式设置                                                     |
+| `NEW_API_LOG_DIR`      | 日志目录         | 建议显式设置                                                     |
 
 支持 SQLite、MySQL、PostgreSQL。跨数据库改动必须保持三者兼容。
 

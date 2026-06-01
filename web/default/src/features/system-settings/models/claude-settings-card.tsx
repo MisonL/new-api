@@ -158,7 +158,7 @@ export function ClaudeSettingsCard({ defaultValues }: ClaudeSettingsCardProps) {
     <SettingsSection
       title={t('Claude')}
       description={t(
-        'Override Anthropic headers, defaults, and thinking adapter behavior'
+        'Override Anthropic headers, defaults, and thinking suffix adaptation behavior'
       )}
     >
       <Form {...form}>
@@ -209,11 +209,11 @@ export function ClaudeSettingsCard({ defaultValues }: ClaudeSettingsCardProps) {
                 <FormItem className='flex flex-row items-center justify-between'>
                   <div className='space-y-0.5'>
                     <FormLabel className='text-base'>
-                      {t('Thinking Adapter')}
+                      {t('Thinking Suffix Adapter')}
                     </FormLabel>
                     <FormDescription>
                       {t(
-                        'Translate `-thinking` suffixes into Anthropic native thinking models while keeping pricing predictable.'
+                        'Adapt requests with `-thinking` suffixes to Anthropic native thinking behavior while keeping pricing predictable.'
                       )}
                     </FormDescription>
                   </div>

@@ -664,6 +664,15 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if types.IsUpstreamTransportInterruptedError(err) {
+			logger.LogError(c, "upstream transport interrupted: "+err.Error())
+			return nil, types.NewErrorWithStatusCode(
+				err,
+				types.ErrorCodeUpstreamTransportInterrupted,
+				http.StatusBadGateway,
+				types.ErrOptionWithHideErrMsg("upstream transport interrupted: do request failed"),
+			)
+		}
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}

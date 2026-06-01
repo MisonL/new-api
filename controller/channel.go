@@ -566,6 +566,11 @@ func validateChannelOtherSettings(channel *model.Channel, passedHeaders map[stri
 	}
 	settings.UserAgentStrategy = strategy
 	clearResponsesCompactSettingsForNonOpenAI(channel.Type, &settings)
+	if channel.Type == constant.ChannelTypeOpenAI {
+		if err := validateResponsesCompactAutoFallbackRetryInterval(&settings); err != nil {
+			return err
+		}
+	}
 
 	raw, err := common.Marshal(settings)
 	if err != nil {
@@ -573,6 +578,22 @@ func validateChannelOtherSettings(channel *model.Channel, passedHeaders map[stri
 	}
 	channel.OtherSettings = string(raw)
 
+	return nil
+}
+
+func validateResponsesCompactAutoFallbackRetryInterval(settings *dto.ChannelOtherSettings) error {
+	if settings == nil || settings.ResponsesCompactAutoFallbackRetryIntervalHours == 0 {
+		return nil
+	}
+	hours := settings.ResponsesCompactAutoFallbackRetryIntervalHours
+	if hours < dto.MinResponsesCompactAutoFallbackRetryIntervalHours ||
+		hours > dto.MaxResponsesCompactAutoFallbackRetryIntervalHours {
+		return fmt.Errorf(
+			"responses compact 自动回退重试间隔必须在 %d 到 %d 小时之间",
+			dto.MinResponsesCompactAutoFallbackRetryIntervalHours,
+			dto.MaxResponsesCompactAutoFallbackRetryIntervalHours,
+		)
+	}
 	return nil
 }
 
@@ -1148,17 +1169,34 @@ func resetResponsesCompactAutoFallbackOnModeChange(channel *model.Channel, origi
 	originSettings := originChannel.GetOtherSettings()
 	nextMode := nextSettings.NormalizedResponsesCompactModeSetting()
 	originMode := originSettings.NormalizedResponsesCompactModeSetting()
+	preservedRetryInterval := false
+	if nextSettings.ResponsesCompactAutoFallbackRetryIntervalHours == 0 && originSettings.ResponsesCompactAutoFallbackRetryIntervalHours != 0 {
+		nextSettings.ResponsesCompactAutoFallbackRetryIntervalHours = originSettings.ResponsesCompactAutoFallbackRetryIntervalHoursOrDefault()
+		preservedRetryInterval = true
+	}
 	if nextMode != originMode {
 		nextSettings.ResponsesCompactAutoFallbackDate = 0
+		nextSettings.ResponsesCompactAutoFallbackAt = 0
 		nextSettings.ResponsesCompactAutoFallbackReason = ""
 		channel.SetOtherSettings(nextSettings)
 		return
 	}
-	if !fallbackMetadataExplicitlySet && nextSettings.ResponsesCompactAutoFallbackDate == 0 && originSettings.ResponsesCompactAutoFallbackDate != 0 {
+	if !fallbackMetadataExplicitlySet && !hasResponsesCompactAutoFallbackState(&nextSettings) && hasResponsesCompactAutoFallbackState(&originSettings) {
 		nextSettings.ResponsesCompactAutoFallbackDate = originSettings.ResponsesCompactAutoFallbackDate
+		nextSettings.ResponsesCompactAutoFallbackAt = originSettings.ResponsesCompactAutoFallbackAt
 		nextSettings.ResponsesCompactAutoFallbackReason = originSettings.ResponsesCompactAutoFallbackReason
 		channel.SetOtherSettings(nextSettings)
 	}
+	if preservedRetryInterval {
+		channel.SetOtherSettings(nextSettings)
+	}
+}
+
+func hasResponsesCompactAutoFallbackState(settings *dto.ChannelOtherSettings) bool {
+	return settings != nil &&
+		(settings.ResponsesCompactAutoFallbackDate != 0 ||
+			settings.ResponsesCompactAutoFallbackAt != 0 ||
+			settings.ResponsesCompactAutoFallbackReason != "")
 }
 
 func responsesCompactAutoFallbackMetadataExplicitlySet(rawSettings string) bool {
@@ -1170,8 +1208,9 @@ func responsesCompactAutoFallbackMetadataExplicitlySet(rawSettings string) bool 
 		return false
 	}
 	_, hasDate := settings["responses_compact_auto_fallback_date"]
+	_, hasAt := settings["responses_compact_auto_fallback_at"]
 	_, hasReason := settings["responses_compact_auto_fallback_reason"]
-	return hasDate || hasReason
+	return hasDate || hasAt || hasReason
 }
 
 func clearResponsesCompactSettings(channel *model.Channel) {
@@ -1190,7 +1229,9 @@ func clearResponsesCompactSettingsForNonOpenAI(channelType int, settings *dto.Ch
 	}
 	settings.ResponsesCompactMode = ""
 	settings.ResponsesCompactAutoFallbackDate = 0
+	settings.ResponsesCompactAutoFallbackAt = 0
 	settings.ResponsesCompactAutoFallbackReason = ""
+	settings.ResponsesCompactAutoFallbackRetryIntervalHours = 0
 	settings.ResponsesCompactContextFallback = nil
 	settings.ResponsesCompactSummaryModelFallback = nil
 	settings.ResponsesCompactSummaryFallbackModels = nil
@@ -1203,7 +1244,9 @@ func hasResponsesCompactSettings(settings *dto.ChannelOtherSettings) bool {
 	}
 	return settings.ResponsesCompactMode != "" ||
 		settings.ResponsesCompactAutoFallbackDate != 0 ||
+		settings.ResponsesCompactAutoFallbackAt != 0 ||
 		settings.ResponsesCompactAutoFallbackReason != "" ||
+		settings.ResponsesCompactAutoFallbackRetryIntervalHours != 0 ||
 		settings.ResponsesCompactContextFallback != nil ||
 		settings.ResponsesCompactSummaryModelFallback != nil ||
 		len(settings.ResponsesCompactSummaryFallbackModels) > 0

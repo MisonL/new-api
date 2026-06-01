@@ -83,6 +83,7 @@ function buildGroupItems(profiles) {
 function getProfileUsageHint(t, profile) {
   if (
     profile.id === 'codex-cli' ||
+    profile.id === 'codex-desktop' ||
     profile.id === 'claude-code' ||
     profile.id === 'gemini-cli' ||
     profile.id === 'qwen-code' ||

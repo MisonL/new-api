@@ -4254,6 +4254,8 @@
     "控制该 OpenAI 渠道是否接收 /v1/responses/compact 请求。原生模式会保留 compact 路径并映射内部 compact 模型名。": "Kiểm soát việc kênh OpenAI này có nhận yêu cầu /v1/responses/compact hay không. Chế độ gốc giữ đường dẫn compact và ánh xạ tên mô hình compact nội bộ.",
     "原生 compact 上下文超限时回退": "Dự phòng khi compact gốc vượt quá ngữ cảnh",
     "原生 compact 因上下文过大失败时，改用模拟摘要重试。": "Khi compact gốc thất bại vì ngữ cảnh quá lớn, thử lại bằng tóm tắt mô phỏng.",
+    "自动回退重试间隔（小时）": "Khoảng thử lại fallback tự động (giờ)",
+    "原生 compact 失败后，在该间隔内使用模拟摘要；默认 3 小时。": "Sau khi compact gốc thất bại, tóm tắt mô phỏng được dùng trong khoảng này; mặc định là 3 giờ.",
     "模拟摘要模型超限时回退": "Dự phòng khi mô hình tóm tắt mô phỏng vượt quá ngữ cảnh",
     "模拟摘要超过当前模型上下文时，使用配置的回退模型重试。": "Khi tóm tắt mô phỏng vượt quá ngữ cảnh của mô hình hiện tại, thử lại bằng các mô hình dự phòng đã cấu hình.",
     "模拟摘要回退模型": "Mô hình dự phòng cho tóm tắt mô phỏng",
@@ -4266,7 +4268,9 @@
     "例如：gpt-4.1-nano,regex:^claude-.*$,regex:^sora-.*$": "Ví dụ: gpt-4.1-nano,regex:^claude-.*$,regex:^sora-.*$",
     "支持精确匹配；使用 regex: 开头可按正则匹配。": "Hỗ trợ khớp chính xác. Dùng tiền tố regex: để khớp bằng biểu thức chính quy.",
     "上次检测时间": "Thời gian kiểm tra gần nhất",
-    "上次检测到可加入模型": "Mô hình có thể thêm được phát hiện lần trước"
+    "上次检测到可加入模型": "Mô hình có thể thêm được phát hiện lần trước",
+    "列出的模型会跳过-thinking/-nothinking 后缀的自动适配": "Các mô hình được liệt kê sẽ bỏ qua thích ứng tự động hậu tố -thinking/-nothinking.",
+    "跳过思考后缀适配的模型列表": "Danh sách mô hình bỏ qua thích ứng hậu tố thinking"
   },
   "启用 Responses 流启动恢复": "Enable responses stream startup recovery",
   "仅在 /v1/responses 流式请求首包前生效，用于短时故障恢复。": "Chỉ áp dụng trước payload đầu tiên của các yêu cầu stream /v1/responses để phục hồi khi sự cố ngắn hạn; đồng thời bạn phải bật nó riêng trên từng kênh.",

@@ -84,7 +84,12 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 }
 
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
-	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+	statusErrorCode := types.ErrorCodeBadResponseStatusCode
+	if code, ok := types.UpstreamHTTPStatusErrorCode(resp.StatusCode); ok {
+		statusErrorCode = code
+	}
+	statusMessage := types.UpstreamHTTPStatusErrorMessage(statusErrorCode, resp.StatusCode)
+	newApiErr = types.InitOpenAIError(statusErrorCode, resp.StatusCode)
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -96,9 +101,9 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 	responseBodyPreview := common.LocalLogPreview(responseBodyText)
 	buildErrWithBody := func(message string) error {
 		if message == "" {
-			return fmt.Errorf("bad response status code %d, body: %s", resp.StatusCode, responseBodyText)
+			return fmt.Errorf("%s, body: %s", statusMessage, responseBodyText)
 		}
-		return fmt.Errorf("bad response status code %d, message: %s, body: %s", resp.StatusCode, message, responseBodyText)
+		return fmt.Errorf("%s, message: %s, body: %s", statusMessage, message, responseBodyText)
 	}
 
 	err = common.Unmarshal(responseBody, &errResponse)
@@ -106,8 +111,8 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		if showBodyWhenFail {
 			newApiErr.Err = buildErrWithBody("")
 		} else {
-			logger.LogError(ctx, fmt.Sprintf("bad response status code %d, body: %s", resp.StatusCode, responseBodyPreview))
-			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
+			logger.LogError(ctx, fmt.Sprintf("%s, body: %s", statusMessage, responseBodyPreview))
+			newApiErr.Err = errors.New(statusMessage)
 		}
 		return
 	}
@@ -116,14 +121,18 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		oaiError := errResponse.TryToOpenAIError()
 		if oaiError != nil {
-			newApiErr = types.WithOpenAIError(*oaiError, resp.StatusCode)
+			options := make([]types.NewAPIErrorOptions, 0, 1)
+			if statusErrorCode != types.ErrorCodeBadResponseStatusCode {
+				options = append(options, types.ErrOptionWithErrorCode(statusErrorCode))
+			}
+			newApiErr = types.WithOpenAIError(*oaiError, resp.StatusCode, options...)
 			if showBodyWhenFail {
 				newApiErr.Err = buildErrWithBody(newApiErr.Error())
 			}
 			return
 		}
 	}
-	newApiErr = types.NewOpenAIError(errors.New(errResponse.ToMessage()), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+	newApiErr = types.NewOpenAIError(errors.New(errResponse.ToMessage()), statusErrorCode, resp.StatusCode)
 	if showBodyWhenFail {
 		newApiErr.Err = buildErrWithBody(newApiErr.Error())
 	}

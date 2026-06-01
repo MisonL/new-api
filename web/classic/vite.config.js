@@ -24,6 +24,10 @@ import path from 'path';
 import fs from 'fs';
 import { createRequire } from 'module';
 import { codeInspectorPlugin } from 'code-inspector-plugin';
+import {
+  rewriteJavaScriptFilesInDirectory,
+  rewriteSafariAmbiguousDecimals,
+} from '../scripts/safari-compatibility.mjs';
 const { vitePluginSemi } = pkg;
 const require = createRequire(import.meta.url);
 
@@ -106,6 +110,27 @@ const mermaidVendorPlugin = () => {
   };
 };
 
+const safariDecimalCompatibilityPlugin = () => ({
+  name: 'safari-decimal-compatibility',
+  renderChunk(code) {
+    const rewritten = rewriteSafariAmbiguousDecimals(code);
+    if (rewritten === code) {
+      return null;
+    }
+    return {
+      code: rewritten,
+      map: null,
+    };
+  },
+  writeBundle(options) {
+    const outputDir =
+      typeof options.dir === 'string'
+        ? options.dir
+        : path.resolve(__dirname, 'dist');
+    rewriteJavaScriptFilesInDirectory(outputDir);
+  },
+});
+
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => {
   const devProxyTarget =
@@ -132,6 +157,7 @@ export default defineConfig(({ command }) => {
       cssLayer: true,
     }),
     mermaidVendorPlugin(),
+    safariDecimalCompatibilityPlugin(),
   ];
 
   if (command === 'serve') {

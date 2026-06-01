@@ -3,6 +3,11 @@ import { fileURLToPath } from 'url'
 import { defineConfig, loadEnv } from '@rsbuild/core'
 import { pluginReact } from '@rsbuild/plugin-react'
 import { tanstackRouter } from '@tanstack/router-plugin/rspack'
+import {
+  hasSafariAmbiguousDecimals,
+  isJavaScriptAssetName,
+  rewriteSafariAmbiguousDecimals,
+} from '../scripts/safari-compatibility.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -20,6 +25,85 @@ export default defineConfig(({ envMode }) => {
       { target: serverUrl, changeOrigin: true },
     ]),
   ) as Record<string, { target: string; changeOrigin: boolean }>
+
+  const safariDecimalCompatibilityPlugin = {
+    name: 'safari-decimal-compatibility',
+    apply(compiler: {
+      hooks: {
+        thisCompilation: {
+          tap: (
+            name: string,
+            callback: (compilation: {
+              hooks: {
+                processAssets: {
+                  tap: (
+                    options: { name: string; stage: number },
+                    callback: (assets: Record<string, { source(): string }>) => void,
+                  ) => void
+                }
+              }
+              getAsset: (assetName: string) =>
+                | {
+                    source: { source: () => string | Buffer }
+                    info: Record<string, unknown>
+                  }
+                | undefined
+              updateAsset: (
+                assetName: string,
+                newSource: unknown,
+                newInfo?: Record<string, unknown>,
+              ) => void
+            }) => void,
+          ) => void
+        }
+      }
+      webpack: {
+        Compilation: {
+          PROCESS_ASSETS_STAGE_OPTIMIZE_COMPATIBILITY: number
+        }
+        sources: {
+          RawSource: new (value: string) => unknown
+        }
+      }
+    }) {
+      compiler.hooks.thisCompilation.tap(
+        'safari-decimal-compatibility',
+        (compilation) => {
+          compilation.hooks.processAssets.tap(
+            {
+              name: 'safari-decimal-compatibility',
+              stage:
+                compiler.webpack.Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_COMPATIBILITY,
+            },
+            (assets) => {
+              for (const assetName of Object.keys(assets)) {
+                if (!isJavaScriptAssetName(assetName)) {
+                  continue
+                }
+
+                const asset = compilation.getAsset(assetName)
+                if (!asset) {
+                  continue
+                }
+
+                const original = asset.source.source().toString()
+                if (!hasSafariAmbiguousDecimals(original)) {
+                  continue
+                }
+
+                const rewritten = rewriteSafariAmbiguousDecimals(original)
+                compilation.updateAsset(
+                  assetName,
+                  new compiler.webpack.sources.RawSource(rewritten),
+                  asset.info,
+                )
+              }
+            },
+          )
+        },
+      )
+    },
+  }
 
   return {
     plugins: [pluginReact()],
@@ -96,6 +180,7 @@ export default defineConfig(({ envMode }) => {
             // Prod: keep route-based code splitting.
             autoCodeSplitting: isProd,
           }),
+          safariDecimalCompatibilityPlugin,
         ],
       },
     },

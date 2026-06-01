@@ -2,8 +2,10 @@ import { z } from 'zod'
 import { CHANNEL_STATUS, MODEL_FETCHABLE_TYPES } from '../constants'
 import type { Channel, ResponsesCompactMode } from '../types'
 import {
+  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactMode,
   normalizeResponsesCompactFallbackModels,
 } from './channel-utils'
@@ -63,6 +65,7 @@ export const channelFormSchema = z.object({
   responses_compact_mode: z
     .enum(['auto', 'native', 'synthetic_summary'])
     .optional(),
+  responses_compact_auto_fallback_retry_interval_hours: z.number().optional(),
   responses_compact_context_fallback: z.boolean().optional(),
   responses_compact_summary_model_fallback: z.boolean().optional(),
   responses_compact_summary_fallback_models: z.string().optional(),
@@ -126,6 +129,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_include_obfuscation: false,
   strip_codex_encrypted_context: false,
   responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
+  responses_compact_auto_fallback_retry_interval_hours:
+    RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
   responses_compact_context_fallback: true,
   responses_compact_summary_model_fallback: true,
   responses_compact_summary_fallback_models:
@@ -187,6 +192,8 @@ export function transformChannelToFormDefaults(
   let stripCodexEncryptedContext = false
   let responsesCompactMode: ResponsesCompactMode =
     RESPONSES_COMPACT_MODE_DEFAULT
+  let responsesCompactAutoFallbackRetryIntervalHours =
+    RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT
   let responsesCompactContextFallback = true
   let responsesCompactSummaryModelFallback = true
   let responsesCompactSummaryFallbackModels =
@@ -213,6 +220,10 @@ export function transformChannelToFormDefaults(
       responsesCompactMode = normalizeResponsesCompactMode(
         parsed.responses_compact_mode
       )
+      responsesCompactAutoFallbackRetryIntervalHours =
+        normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+          parsed.responses_compact_auto_fallback_retry_interval_hours
+        )
       responsesCompactContextFallback =
         parsed.responses_compact_context_fallback !== false
       responsesCompactSummaryModelFallback =
@@ -281,6 +292,8 @@ export function transformChannelToFormDefaults(
     allow_safety_identifier: allowSafetyIdentifier,
     strip_codex_encrypted_context: stripCodexEncryptedContext,
     responses_compact_mode: responsesCompactMode,
+    responses_compact_auto_fallback_retry_interval_hours:
+      responsesCompactAutoFallbackRetryIntervalHours,
     responses_compact_context_fallback: responsesCompactContextFallback,
     responses_compact_summary_model_fallback:
       responsesCompactSummaryModelFallback,
@@ -376,6 +389,10 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       formData.responses_compact_mode
     )
     settingsObj.responses_compact_mode = nextResponsesCompactMode
+    settingsObj.responses_compact_auto_fallback_retry_interval_hours =
+      normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+        formData.responses_compact_auto_fallback_retry_interval_hours
+      )
     settingsObj.responses_compact_context_fallback =
       formData.responses_compact_context_fallback !== false
     settingsObj.responses_compact_summary_model_fallback =
@@ -389,12 +406,15 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       )
     if (previousResponsesCompactMode !== nextResponsesCompactMode) {
       delete settingsObj.responses_compact_auto_fallback_date
+      delete settingsObj.responses_compact_auto_fallback_at
       delete settingsObj.responses_compact_auto_fallback_reason
     }
   } else {
     delete settingsObj.responses_compact_mode
     delete settingsObj.responses_compact_auto_fallback_date
+    delete settingsObj.responses_compact_auto_fallback_at
     delete settingsObj.responses_compact_auto_fallback_reason
+    delete settingsObj.responses_compact_auto_fallback_retry_interval_hours
     delete settingsObj.responses_compact_context_fallback
     delete settingsObj.responses_compact_summary_model_fallback
     delete settingsObj.responses_compact_summary_fallback_models

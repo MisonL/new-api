@@ -464,6 +464,7 @@ func migrateResponsesCompactModeAuto() error {
 				}
 				settings.ResponsesCompactMode = dto.ResponsesCompactModeAuto
 				settings.ResponsesCompactAutoFallbackDate = 0
+				settings.ResponsesCompactAutoFallbackAt = 0
 				settings.ResponsesCompactAutoFallbackReason = ""
 				raw, err := common.Marshal(settings)
 				if err != nil {

@@ -11,6 +11,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type syntheticCompactTestContent struct {
+	Text string `json:"text"`
+}
+
+type syntheticCompactTestMessage struct {
+	Role    string                        `json:"role"`
+	Content []syntheticCompactTestContent `json:"content"`
+}
+
+func decodeSyntheticCompactTestMessages(t *testing.T, input common.RawMessage) []syntheticCompactTestMessage {
+	t.Helper()
+	var items []syntheticCompactTestMessage
+	require.NoError(t, common.Unmarshal(input, &items))
+	return items
+}
+
 func TestBuildSyntheticCompactSummaryRequestRejectsOpaqueOnlyInput(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 
@@ -153,6 +169,44 @@ func TestBuildSyntheticCompactSummaryRequestHandlesMixedInputArrayItems(t *testi
 	require.NotContains(t, body, "requires visible input")
 }
 
+func TestBuildSyntheticCompactSummaryRequestSplitsLargeVisibleInput(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+
+	longText := strings.Repeat("界", syntheticCompactTextPartMax/3+1024)
+	input, err := common.Marshal([]map[string]any{
+		{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]string{
+				{"type": "input_text", "text": longText},
+			},
+		},
+	})
+	require.NoError(t, err)
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: input,
+	}
+
+	got, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, req)
+
+	require.NoError(t, err)
+	var items []struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	require.NoError(t, common.Unmarshal(got.Input, &items))
+	require.Len(t, items, 2)
+	require.Equal(t, "user", items[1].Role)
+	require.Greater(t, len(items[1].Content), 1)
+	for _, part := range items[1].Content {
+		require.LessOrEqual(t, len(part.Text), syntheticCompactTextPartMax)
+		require.True(t, strings.Contains(part.Text, "界"))
+	}
+}
+
 func TestApplySyntheticCompactStateInjectsSummaryAndRemovesMarker(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 
@@ -177,11 +231,15 @@ func TestApplySyntheticCompactStateInjectsSummaryAndRemovesMarker(t *testing.T) 
 	require.NoError(t, err)
 	require.True(t, applied)
 	require.Empty(t, got.PreviousResponseID)
-	require.JSONEq(t, `[
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Another language model started to solve this problem and produced a compact handoff summary. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:\n\nStored compact state."}]},
-		{"type":"message","role":"user","content":[{"type":"input_text","text":"What is next?"}]},
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Another language model produced the compact summary above. Use it to build on the work that has already been done and avoid duplicating work. If post-compact input is only repeated setup or repository instructions from the client, treat it as background and continue the latest pending task from the summary. If post-compact input contains a new explicit user request, answer that request using the summary as context."}]}
-	]`, string(got.Input))
+	items := decodeSyntheticCompactTestMessages(t, got.Input)
+	require.Len(t, items, 2)
+	require.Equal(t, "developer", items[0].Role)
+	require.Len(t, items[0].Content, 1)
+	require.Contains(t, items[0].Content[0].Text, "Stored compact state.")
+	require.Contains(t, items[0].Content[0].Text, "If post-compact input is only repeated setup")
+	require.Equal(t, "user", items[1].Role)
+	require.Len(t, items[1].Content, 1)
+	require.Equal(t, "What is next?", items[1].Content[0].Text)
 }
 
 func TestApplySyntheticCompactStateUsesHandoffPromptAfterRepeatedSetup(t *testing.T) {
@@ -214,6 +272,7 @@ func TestApplySyntheticCompactStateUsesHandoffPromptAfterRepeatedSetup(t *testin
 	require.Contains(t, body, "If post-compact input is only repeated setup or repository instructions from the client")
 	require.Contains(t, body, "continue the latest pending task from the summary")
 	require.Contains(t, body, "AGENTS.md instructions")
+	require.Less(t, strings.Index(body, "If post-compact input is only repeated setup"), strings.Index(body, "AGENTS.md instructions"))
 }
 
 func TestApplySyntheticCompactStateClearsNonSyntheticPreviousID(t *testing.T) {
@@ -267,12 +326,18 @@ func TestApplySyntheticCompactStateHandlesMixedInputArrayItems(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, applied)
 	require.Empty(t, got.PreviousResponseID)
-	require.JSONEq(t, `[
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Another language model started to solve this problem and produced a compact handoff summary. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:\n\nStored compact state."}]},
-		{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue from this string."}]},
-		{"type":"message","role":"user","content":[{"type":"input_text","text":"And this object."}]},
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"Another language model produced the compact summary above. Use it to build on the work that has already been done and avoid duplicating work. If post-compact input is only repeated setup or repository instructions from the client, treat it as background and continue the latest pending task from the summary. If post-compact input contains a new explicit user request, answer that request using the summary as context."}]}
-	]`, string(got.Input))
+	items := decodeSyntheticCompactTestMessages(t, got.Input)
+	require.Len(t, items, 3)
+	require.Equal(t, "developer", items[0].Role)
+	require.Len(t, items[0].Content, 1)
+	require.Contains(t, items[0].Content[0].Text, "Stored compact state.")
+	require.Contains(t, items[0].Content[0].Text, "If post-compact input is only repeated setup")
+	require.Equal(t, "user", items[1].Role)
+	require.Len(t, items[1].Content, 1)
+	require.Equal(t, "Continue from this string.", items[1].Content[0].Text)
+	require.Equal(t, "user", items[2].Role)
+	require.Len(t, items[2].Content, 1)
+	require.Equal(t, "And this object.", items[2].Content[0].Text)
 }
 
 func TestApplySyntheticCompactStateRejectsMissingReferencedState(t *testing.T) {

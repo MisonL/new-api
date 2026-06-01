@@ -208,7 +208,7 @@ export default function SettingGlobalModel(props) {
             <Row>
               <Col span={24}>
                 <Form.TextArea
-                  label={t('禁用思考处理的模型列表')}
+                  label={t('跳过思考后缀适配的模型列表')}
                   field={'global.thinking_model_blacklist'}
                   placeholder={t('例如：') + '\n' + thinkingExample}
                   rows={4}
@@ -222,7 +222,7 @@ export default function SettingGlobalModel(props) {
                     },
                   ]}
                   extraText={t(
-                    '列出的模型将不会自动添加或移除-thinking/-nothinking 后缀',
+                    '列出的模型会跳过-thinking/-nothinking 后缀的自动适配',
                   )}
                   onChange={(value) =>
                     setInputs({

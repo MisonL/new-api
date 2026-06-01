@@ -25,16 +25,19 @@ func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 		"User-Agent",
 		"Originator",
 		"Session_id",
+		"Session-Id",
+		"Thread-Id",
 		"X-Codex-Beta-Features",
 		"X-Codex-Turn-Metadata",
 		"X-Codex-Window-Id",
 		"X-Client-Request-Id",
 	}, operation_setting.CodexCliPassThroughHeaders)
+	require.Equal(t, operation_setting.CodexCliPassThroughHeaders, operation_setting.CodexDesktopPassThroughHeaders)
 	require.Equal(t, []string{
 		"X-Claude-Code-Session-Id",
 		"X-Stainless-Arch",
 		"X-Stainless-Lang",
-		"X-Stainless-Os",
+		"X-Stainless-OS",
 		"X-Stainless-Package-Version",
 		"X-Stainless-Retry-Count",
 		"X-Stainless-Runtime",
@@ -48,7 +51,7 @@ func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 	require.Equal(t, []string{
 		"X-Stainless-Arch",
 		"X-Stainless-Lang",
-		"X-Stainless-Os",
+		"X-Stainless-OS",
 		"X-Stainless-Package-Version",
 		"X-Stainless-Retry-Count",
 		"X-Stainless-Runtime",
@@ -57,7 +60,7 @@ func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 	require.Equal(t, []string{
 		"X-Stainless-Arch",
 		"X-Stainless-Lang",
-		"X-Stainless-Os",
+		"X-Stainless-OS",
 		"X-Stainless-Package-Version",
 		"X-Stainless-Retry-Count",
 		"X-Stainless-Runtime",
@@ -67,10 +70,28 @@ func TestCliHeaderPassthroughTemplateDefinitions(t *testing.T) {
 		"X-Goog-Api-Client",
 	}, operation_setting.GeminiCliPassThroughHeaders)
 	require.Equal(t, operation_setting.DroidCliPassThroughHeaders, operation_setting.HeaderProfilePassThroughHeaders["droid"])
-	_, desktopExists := operation_setting.HeaderProfilePassThroughHeaders["codex-desktop"]
-	require.False(t, desktopExists)
+	require.Equal(t, operation_setting.CodexDesktopPassThroughHeaders, operation_setting.HeaderProfilePassThroughHeaders["codex-desktop"])
 	_, exists := operation_setting.HeaderProfilePassThroughHeaders["opencode"]
 	require.False(t, exists)
+}
+
+func TestCodexHeaderPassthroughTemplateIncludesSessionFallback(t *testing.T) {
+	template := operation_setting.BuildCodexHeaderPassthroughTemplate(operation_setting.CodexCliPassThroughHeaders)
+	ops, ok := template["operations"].([]map[string]interface{})
+	require.True(t, ok)
+	require.Len(t, ops, 2)
+
+	require.Equal(t, map[string]interface{}{
+		"mode":        "pass_headers",
+		"value":       operation_setting.CodexCliPassThroughHeaders,
+		"keep_origin": true,
+	}, ops[0])
+	require.Equal(t, map[string]interface{}{
+		"mode":        "copy_header",
+		"from":        "X-Client-Request-Id",
+		"to":          "Session_id",
+		"keep_origin": true,
+	}, ops[1])
 }
 
 func TestChannelAffinitySettingDoesNotRegisterOpenCodeRuleWithoutRuntimeSource(t *testing.T) {

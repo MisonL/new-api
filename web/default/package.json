@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "rsbuild dev",
-    "build": "rsbuild build",
+    "build": "rsbuild build && node ../scripts/safari-compatibility.mjs dist && node ../scripts/check-browser-compatibility.mjs dist",
     "build:check": "tsc -b && rsbuild build",
+    "test:browser-compat": "node ../scripts/browser-cross-verify.mjs --url http://localhost:3000/console",
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "preview": "rsbuild preview",
@@ -109,5 +110,17 @@
     "shadcn": "^3.7.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.2"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
   }
 }
