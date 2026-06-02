@@ -249,6 +249,7 @@ oauth.token_failed: "{{.Provider}} 獲取 Token 失敗，請檢查設定"
 oauth.user_info_empty: "{{.Provider}} 獲取使用者資訊為空，請檢查設定"
 oauth.trust_level_low: "Linux DO 信任等級未達到管理員設定的最低信任等級"
 oauth.ticket_missing: "缺少 CAS 服務票據"
+oauth.ticket_replayed: "CAS 服務票據已被使用"
 
 # Model layer error messages
 redeem.failed: "兌換失敗，請稍後重試"

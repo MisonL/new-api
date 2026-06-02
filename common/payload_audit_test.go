@@ -2,6 +2,7 @@ package common
 
 import (
 	"bytes"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -69,6 +70,9 @@ type spyBodyStorage struct {
 	*bytes.Reader
 	data      []byte
 	bytesCall int
+	seekCall  int
+	seekErrAt int
+	seekErr   error
 }
 
 func newSpyBodyStorage(data []byte) *spyBodyStorage {
@@ -80,6 +84,14 @@ func newSpyBodyStorage(data []byte) *spyBodyStorage {
 
 func (s *spyBodyStorage) Close() error {
 	return nil
+}
+
+func (s *spyBodyStorage) Seek(offset int64, whence int) (int64, error) {
+	s.seekCall++
+	if s.seekErrAt > 0 && s.seekCall == s.seekErrAt {
+		return 0, s.seekErr
+	}
+	return s.Reader.Seek(offset, whence)
 }
 
 func (s *spyBodyStorage) Bytes() ([]byte, error) {
@@ -139,5 +151,31 @@ func TestUnmarshalBodyReusableDiskJSONAvoidsBytes(t *testing.T) {
 	}
 	if got.Model != "gpt-5.4" || !got.Stream {
 		t.Fatalf("unexpected decoded body: %+v", got)
+	}
+}
+
+func TestUnmarshalBodyReusablePreservesDecodeErrorWhenResetFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	resetErr := errors.New("forced reset failure")
+	storage := newSpyBodyStorage([]byte(`{"model":`))
+	storage.seekErrAt = 3
+	storage.seekErr = resetErr
+	ctx.Set(KeyBodyStorage, storage)
+
+	var got map[string]any
+	err := UnmarshalBodyReusable(ctx, &got)
+	if err == nil {
+		t.Fatal("expected unmarshal error")
+	}
+	if !strings.Contains(err.Error(), "unexpected EOF") {
+		t.Fatalf("expected JSON decode error to be preserved, got %v", err)
+	}
+	if errors.Is(err, resetErr) {
+		t.Fatalf("expected reset error to remain context only, got %v", err)
 	}
 }

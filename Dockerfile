@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-ARG APP_VERSION=unknown
+ARG APP_VERSION
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG SOURCE_URL=https://github.com/MisonL/new-api
@@ -14,7 +14,14 @@ RUN --mount=type=cache,id=new-api-bun-install,target=/root/.bun/install/cache,sh
 COPY ./web/default .
 COPY ./web/scripts /scripts
 COPY ./VERSION .
-RUN DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
+COPY ./scripts/write-frontend-release-metadata.sh /scripts/write-frontend-release-metadata.sh
+ARG APP_VERSION
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+RUN VERSION_VALUE="${APP_VERSION}"; \
+    if [ -z "$VERSION_VALUE" ] || [ "$VERSION_VALUE" = "unknown" ]; then echo "APP_VERSION build arg is required" >&2; exit 1; fi; \
+    DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION="$VERSION_VALUE" bun run build && \
+    sh /scripts/write-frontend-release-metadata.sh default dist "$VERSION_VALUE" "$VCS_REF" "$BUILD_DATE"
 
 FROM oven/bun:1@sha256:0733e50325078969732ebe3b15ce4c4be5082f18c4ac1a0f0ca4839c2e4e42a7 AS builder-classic
 
@@ -26,14 +33,21 @@ RUN --mount=type=cache,id=new-api-bun-install,target=/root/.bun/install/cache,sh
 COPY ./web/classic .
 COPY ./web/scripts /scripts
 COPY ./VERSION .
-RUN VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
+COPY ./scripts/write-frontend-release-metadata.sh /scripts/write-frontend-release-metadata.sh
+ARG APP_VERSION
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+RUN VERSION_VALUE="${APP_VERSION}"; \
+    if [ -z "$VERSION_VALUE" ] || [ "$VERSION_VALUE" = "unknown" ]; then echo "APP_VERSION build arg is required" >&2; exit 1; fi; \
+    DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION="$VERSION_VALUE" bun run build && \
+    sh /scripts/write-frontend-release-metadata.sh classic dist "$VERSION_VALUE" "$VCS_REF" "$BUILD_DATE"
 
 FROM golang:1.26.2-alpine@sha256:c2a1f7b2095d046ae14b286b18413a05bb82c9bca9b25fe7ff5efef0f0826166 AS builder2
 ENV GO111MODULE=on CGO_ENABLED=0
 
 ARG TARGETOS
 ARG TARGETARCH
-ARG APP_VERSION=unknown
+ARG APP_VERSION
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG SOURCE_URL=https://github.com/MisonL/new-api
@@ -69,12 +83,12 @@ COPY --from=builder-classic /build/dist ./web/classic/dist
 RUN --mount=type=cache,id=new-api-go-mod,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,id=new-api-go-build,target=/root/.cache/go-build,sharing=locked \
     VERSION_VALUE="${APP_VERSION}"; \
-    if [ "$VERSION_VALUE" = "unknown" ]; then VERSION_VALUE="$(cat VERSION)"; fi; \
+    if [ -z "$VERSION_VALUE" ] || [ "$VERSION_VALUE" = "unknown" ]; then echo "APP_VERSION build arg is required" >&2; exit 1; fi; \
     go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=${VERSION_VALUE}' -X 'github.com/QuantumNous/new-api/common.BuildCommit=${VCS_REF}' -X 'github.com/QuantumNous/new-api/common.BuildDate=${BUILD_DATE}' -X 'github.com/QuantumNous/new-api/common.BuildSource=${SOURCE_URL}'" -o new-api
 
 FROM alpine:3.22.2@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1
 
-ARG APP_VERSION=unknown
+ARG APP_VERSION
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG SOURCE_URL=https://github.com/MisonL/new-api

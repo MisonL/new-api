@@ -23,6 +23,7 @@ import {
   buildAssertionResult,
   isPasskeySupported,
 } from '../helpers/passkey';
+import { buildViewChannelKeyRequest } from './secureVerification.api';
 
 /**
  * 通用安全验证服务
@@ -172,8 +173,8 @@ export const createApiCalls = {
    * @param {number} channelId - 渠道ID
    */
   viewChannelKey: (channelId) => async () => {
-    // 新系统中，验证已通过中间件处理，直接调用 API 即可
-    const response = await API.post(`/api/channel/${channelId}/key`, {});
+    const request = buildViewChannelKeyRequest(channelId);
+    const response = await API.post(request.url, request.data, request.config);
     return response.data;
   },
 

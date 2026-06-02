@@ -111,3 +111,28 @@ func TestGetAllChannelsTagModeAppliesGroupFilterQuery(t *testing.T) {
 	require.Len(t, response.Data.Items, 2)
 	require.Equal(t, []int{2, 3}, []int{response.Data.Items[0].Id, response.Data.Items[1].Id})
 }
+
+func TestSearchChannelsTagModePreservesSearchFilters(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	alpha := "alpha"
+	channels := []*model.Channel{
+		{Id: 1, Name: "paid-alpha-match", Key: "sk-match", Models: "gpt-5", Group: "paid", Tag: &alpha, Priority: common.GetPointer[int64](30)},
+		{Id: 2, Name: "paid-alpha-other", Key: "sk-other", Models: "gpt-5", Group: "paid", Tag: &alpha, Priority: common.GetPointer[int64](20)},
+		{Id: 3, Name: "free-alpha-match", Key: "sk-free", Models: "gpt-5", Group: "free", Tag: &alpha, Priority: common.GetPointer[int64](10)},
+		{Id: 4, Name: "paid-alpha-match-gpt4", Key: "sk-gpt4", Models: "gpt-4", Group: "paid", Tag: &alpha, Priority: common.GetPointer[int64](5)},
+	}
+	for _, channel := range channels {
+		require.NoError(t, model.DB.Create(channel).Error)
+	}
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodGet, "/api/channel/search?tag_mode=true&keyword=match&group=paid&model=gpt-5&p=1&page_size=10", nil)
+
+	SearchChannels(ctx)
+
+	var response channelListResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success, response.Message)
+	require.Equal(t, 1, response.Data.Total)
+	require.Len(t, response.Data.Items, 1)
+	require.Equal(t, 1, response.Data.Items[0].Id)
+}

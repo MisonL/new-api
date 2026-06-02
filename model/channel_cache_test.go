@@ -128,9 +128,9 @@ func TestUpdateMultiKeyStatusIgnoresUnknownUsingKey(t *testing.T) {
 		Group:  "default",
 		Models: "gpt-5.4",
 		ChannelInfo: ChannelInfo{
-			IsMultiKey:      true,
-			MultiKeySize:    2,
-			MultiKeyMode:    constant.MultiKeyModePolling,
+			IsMultiKey:   true,
+			MultiKeySize: 2,
+			MultiKeyMode: constant.MultiKeyModePolling,
 			MultiKeyStatusList: map[int]int{
 				1: common.ChannelStatusAutoDisabled,
 			},
@@ -200,6 +200,46 @@ func TestUpdateMultiKeyStatusDisablesAndRestoresChannel(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, channel.Id, got.Id)
+
+	var restored Channel
+	require.NoError(t, DB.First(&restored, "id = ?", channel.Id).Error)
+	require.NotContains(t, restored.ChannelInfo.MultiKeyDisabledReason, 0)
+	require.NotContains(t, restored.ChannelInfo.MultiKeyDisabledTime, 0)
+}
+
+func TestUpdateMultiKeyStatusRestoresKeyWhenChannelAlreadyEnabled(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	channel := &Channel{
+		Id:        105,
+		Name:      "multi-key-already-enabled",
+		Key:       "key-a\nkey-b",
+		Status:    common.ChannelStatusEnabled,
+		Group:     "default",
+		Models:    "gpt-5.4",
+		OtherInfo: `{"status_reason":"previous failure","status_time":123}`,
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:             true,
+			MultiKeySize:           2,
+			MultiKeyMode:           constant.MultiKeyModePolling,
+			MultiKeyStatusList:     map[int]int{1: common.ChannelStatusAutoDisabled},
+			MultiKeyDisabledReason: map[int]string{1: "key b failed"},
+			MultiKeyDisabledTime:   map[int]int64{1: 123},
+		},
+	}
+	require.NoError(t, DB.Create(channel).Error)
+
+	require.True(t, UpdateChannelStatus(channel.Id, "key-b", common.ChannelStatusEnabled, ""))
+
+	var updated Channel
+	require.NoError(t, DB.First(&updated, "id = ?", channel.Id).Error)
+	require.Equal(t, common.ChannelStatusEnabled, updated.Status)
+	require.Empty(t, updated.ChannelInfo.MultiKeyStatusList)
+	require.Empty(t, updated.ChannelInfo.MultiKeyDisabledReason)
+	require.Empty(t, updated.ChannelInfo.MultiKeyDisabledTime)
+	info := updated.GetOtherInfo()
+	require.NotContains(t, info, "status_reason")
+	require.NotContains(t, info, "status_time")
 }
 
 func TestGetRandomSatisfiedChannelExcludingSkipsUsedChannelsAtSamePriority(t *testing.T) {

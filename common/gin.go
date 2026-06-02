@@ -116,6 +116,10 @@ func UnmarshalBodyReusable(c *gin.Context, v any) error {
 			return seekErr
 		}
 		if err := DecodeJson(storage, v); err != nil {
+			if _, seekErr := storage.Seek(0, io.SeekStart); seekErr != nil {
+				return fmt.Errorf("failed to reset request body after JSON decode error: %w (reset error: %v)", err, seekErr)
+			}
+			c.Request.Body = io.NopCloser(storage)
 			return err
 		}
 		if _, seekErr := storage.Seek(0, io.SeekStart); seekErr != nil {

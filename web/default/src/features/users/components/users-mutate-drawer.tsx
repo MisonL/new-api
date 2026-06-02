@@ -43,9 +43,9 @@ import {
   BINDING_FIELDS,
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
-  USER_PASSWORD_LENGTH_MESSAGE,
   USER_PASSWORD_MAX_LENGTH,
   USER_PASSWORD_MIN_LENGTH,
+  formatUserPasswordLengthMessage,
 } from '../constants'
 import {
   userFormSchema,
@@ -111,6 +111,7 @@ export function UsersMutateDrawer({
   const { meta: currencyMeta } = getCurrencyDisplay()
   const currencyLabel = getCurrencyLabel()
   const tokensOnly = currencyMeta.kind === 'tokens'
+  const passwordLengthMessage = formatUserPasswordLengthMessage(t)
 
   const currentQuotaRaw = form.watch('quota_dollars') || 0
 
@@ -123,7 +124,7 @@ export function UsersMutateDrawer({
     ) {
       form.setError('password', {
         type: 'manual',
-        message: t(USER_PASSWORD_LENGTH_MESSAGE),
+        message: passwordLengthMessage,
       })
       return
     }
@@ -286,7 +287,7 @@ export function UsersMutateDrawer({
                           placeholder={
                             isUpdate
                               ? t('Leave empty to keep unchanged')
-                              : t(USER_PASSWORD_LENGTH_MESSAGE)
+                              : passwordLengthMessage
                           }
                         />
                       </FormControl>

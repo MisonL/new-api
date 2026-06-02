@@ -50,6 +50,10 @@ type ThemeAssets struct {
 }
 
 func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
+	if err := validateFrontendReleaseAssets(assets.DefaultBuildFS, assets.ClassicBuildFS); err != nil {
+		common.FatalLog("frontend release assets validation failed: " + err.Error())
+	}
+
 	defaultFS := common.EmbedFolder(assets.DefaultBuildFS, "web/default/dist")
 	classicFS := common.EmbedFolder(assets.ClassicBuildFS, "web/classic/dist")
 	themeFS := common.NewThemeAwareFS(defaultFS, classicFS)

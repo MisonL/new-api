@@ -1,6 +1,7 @@
 package system_setting
 
 import (
+	"net"
 	"net/url"
 	"strings"
 
@@ -62,7 +63,30 @@ func derivePasskeyRPIDFromServerAddress(serverAddr string) string {
 
 func canDerivePasskeyFromServerAddress(serverAddr string) bool {
 	trimmed := strings.TrimSpace(serverAddr)
-	return trimmed != "" && trimmed != defaultPasskeyOriginPlaceholder
+	if trimmed == "" || trimmed == defaultPasskeyOriginPlaceholder {
+		return false
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "https":
+		return parsed.Hostname() != ""
+	case "http":
+		return isPasskeyDerivableLoopbackHost(parsed.Hostname())
+	default:
+		return false
+	}
+}
+
+func isPasskeyDerivableLoopbackHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func GetPasskeySettingsForServerAddress(serverAddr string) *PasskeySettings {

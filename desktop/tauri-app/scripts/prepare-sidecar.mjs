@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { readVersion, repoRoot, tauriAppDir } from './lib/project.mjs';
@@ -7,8 +7,8 @@ const binariesDir = join(tauriAppDir, 'src-tauri', 'binaries');
 const goCacheDir = join(tauriAppDir, '.cache', 'go-build');
 const goModCacheDir = join(tauriAppDir, '.cache', 'gomod');
 const embeddedWebDirs = [
-  join(repoRoot, 'web', 'default'),
-  join(repoRoot, 'web', 'classic'),
+  { name: 'default', dir: join(repoRoot, 'web', 'default') },
+  { name: 'classic', dir: join(repoRoot, 'web', 'classic') },
 ];
 
 function resolveTargetTriple() {
@@ -69,7 +69,7 @@ function buildSidecar() {
   mkdirSync(binariesDir, { recursive: true });
   mkdirSync(goCacheDir, { recursive: true });
   mkdirSync(goModCacheDir, { recursive: true });
-  ensureEmbeddedWebDist(version);
+  ensureEmbeddedWebDist(version, commit, buildDate);
 
   execFileSync(
     'go',
@@ -104,26 +104,68 @@ function buildSidecar() {
   console.log(`prepared sidecar: ${outputPath}`);
 }
 
-function ensureEmbeddedWebDist(version) {
-  for (const webDir of embeddedWebDirs) {
-    if (existsSync(join(webDir, 'dist', 'index.html'))) {
-      continue;
-    }
+function ensureEmbeddedWebDist(version, commit, buildDate) {
+  for (const { name, dir } of embeddedWebDirs) {
+    const distDir = join(dir, 'dist');
+    if (shouldBuildEmbeddedWebDist(name, distDir, version, commit)) {
+      execFileSync('bun', ['install', '--backend=copyfile', '--frozen-lockfile'], {
+        cwd: dir,
+        stdio: 'inherit',
+      });
+      execFileSync('bun', ['run', 'build'], {
+        cwd: dir,
+        env: {
+          ...process.env,
+          DISABLE_ESLINT_PLUGIN: 'true',
+          VITE_REACT_APP_VERSION: version,
+        },
+        stdio: 'inherit',
+      });
 
-    execFileSync('bun', ['install', '--backend=copyfile', '--frozen-lockfile'], {
-      cwd: webDir,
-      stdio: 'inherit',
-    });
-    execFileSync('bun', ['run', 'build'], {
-      cwd: webDir,
-      env: {
-        ...process.env,
-        DISABLE_ESLINT_PLUGIN: 'true',
-        VITE_REACT_APP_VERSION: version,
-      },
-      stdio: 'inherit',
-    });
+      execFileSync(
+        'sh',
+        [
+          join(repoRoot, 'scripts', 'write-frontend-release-metadata.sh'),
+          name,
+          distDir,
+          version,
+          commit,
+          buildDate,
+        ],
+        {
+          cwd: repoRoot,
+          stdio: 'inherit',
+        },
+      );
+    }
   }
+}
+
+function shouldBuildEmbeddedWebDist(frontend, distDir, version, commit) {
+  if (!existsSync(join(distDir, 'index.html'))) {
+    return true;
+  }
+
+  const metadataPath = join(distDir, 'new-api-release.json');
+  if (!existsSync(metadataPath)) {
+    return true;
+  }
+
+  let metadata;
+  try {
+    metadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Rebuilding ${frontend}: failed to parse ${metadataPath}: ${message}`);
+    return true;
+  }
+
+  return (
+    metadata?.app !== 'new-api' ||
+    metadata?.frontend !== frontend ||
+    metadata?.version !== version ||
+    metadata?.build_commit !== commit
+  );
 }
 
 function syncDirectRunSidecar(outputPath, goTarget) {

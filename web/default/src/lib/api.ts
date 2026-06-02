@@ -79,10 +79,10 @@ api.interceptors.response.use(
     if (status === 401) {
       try {
         useAuthStore.getState().auth.reset()
-      } catch {
-        /* empty */
+      } catch (resetError) {
+        // eslint-disable-next-line no-console
+        console.error('Auth reset failed:', resetError)
       }
-
       if (!skip) {
         toast.error(i18next.t('Session expired!'))
       }

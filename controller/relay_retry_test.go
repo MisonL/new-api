@@ -6,13 +6,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestShouldRetryResponsesCompactTimeoutStatusCodes(t *testing.T) {
@@ -63,6 +68,169 @@ func TestShouldRetryResponsesCompactTimeoutStillHonorsRetryBudget(t *testing.T) 
 	err := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, 524)
 
 	require.False(t, shouldRetry(c, err, 0))
+}
+
+func TestShouldRetryAllowsRateLimitDespiteChannelAffinitySkip(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testCases := []struct {
+		name       string
+		statusCode int
+		want       bool
+	}{
+		{
+			name:       "rate limit can switch channel",
+			statusCode: http.StatusTooManyRequests,
+			want:       true,
+		},
+		{
+			name:       "non rate limit keeps affinity skip",
+			statusCode: http.StatusInternalServerError,
+			want:       false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(nil)
+			c.Set("channel_affinity_skip_retry_on_failure", true)
+			err := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, tc.statusCode)
+
+			require.Equal(t, tc.want, shouldRetry(c, err, 1))
+		})
+	}
+}
+
+func TestShouldRetryTaskRelayAllowsRateLimitDespiteChannelAffinitySkip(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testCases := []struct {
+		name       string
+		statusCode int
+		want       bool
+	}{
+		{
+			name:       "rate limit can switch task channel",
+			statusCode: http.StatusTooManyRequests,
+			want:       true,
+		},
+		{
+			name:       "non rate limit keeps affinity skip",
+			statusCode: http.StatusInternalServerError,
+			want:       false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(nil)
+			c.Set("channel_affinity_skip_retry_on_failure", true)
+			taskErr := &dto.TaskError{StatusCode: tc.statusCode}
+
+			require.Equal(t, tc.want, shouldRetryTaskRelay(c, 1, taskErr, 1))
+		})
+	}
+}
+
+func TestGetChannelInitialRequestUsesDistributedChannel(t *testing.T) {
+	db := setupChannelControllerTestDB(t)
+	rateLimited, _ := seedRateLimitRetryChannels(t, db)
+	ctx, _ := gin.CreateTestContext(nil)
+	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, rateLimited, "gpt-5.5"))
+
+	info := &relaycommon.RelayInfo{
+		TokenGroup:      "default",
+		UsingGroup:      "default",
+		UserGroup:       "default",
+		OriginModelName: "gpt-5.5",
+	}
+	channel, err := getChannel(ctx, info, &service.RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-5.5",
+		Retry:      common.GetPointer(0),
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, 206, channel.Id)
+	require.Nil(t, info.ChannelMeta)
+}
+
+func TestGetChannelRateLimitRetrySwitchesChannelAndRefreshesMeta(t *testing.T) {
+	db := setupChannelControllerTestDB(t)
+	rateLimited, fallback := seedRateLimitRetryChannels(t, db)
+	ctx, _ := gin.CreateTestContext(nil)
+	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, rateLimited, "gpt-5.5"))
+	addUsedChannel(ctx, rateLimited.Id)
+
+	info := &relaycommon.RelayInfo{
+		TokenGroup:      "default",
+		UsingGroup:      "default",
+		UserGroup:       "default",
+		OriginModelName: "gpt-5.5",
+	}
+	info.InitChannelMeta(ctx)
+	err429 := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests)
+	require.True(t, shouldRetry(ctx, err429, 1))
+
+	channel, err := getChannel(ctx, info, &service.RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-5.5",
+		Retry:      common.GetPointer(1),
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, fallback.Id, channel.Id)
+	require.Equal(t, fallback.Id, common.GetContextKeyInt(ctx, constant.ContextKeyChannelId))
+	require.NotNil(t, info.ChannelMeta)
+	require.Equal(t, fallback.Id, info.ChannelMeta.ChannelId)
+	require.Equal(t, fallback.Name, common.GetContextKeyString(ctx, constant.ContextKeyChannelName))
+}
+
+func seedRateLimitRetryChannels(t *testing.T, gormDB *gorm.DB) (*model.Channel, *model.Channel) {
+	t.Helper()
+
+	priority := int64(10)
+	weight := uint(1)
+	rateLimited := &model.Channel{
+		Id:       206,
+		Name:     "rate-limited",
+		Key:      "sk-rate-limited",
+		Type:     constant.ChannelTypeOpenAI,
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "gpt-5.5",
+		Priority: &priority,
+		Weight:   &weight,
+	}
+	fallback := &model.Channel{
+		Id:       207,
+		Name:     "fallback",
+		Key:      "sk-fallback",
+		Type:     constant.ChannelTypeOpenAI,
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "gpt-5.5",
+		Priority: &priority,
+		Weight:   &weight,
+	}
+	for _, channel := range []*model.Channel{rateLimited, fallback} {
+		require.NoError(t, gormDB.Create(channel).Error)
+		require.NoError(t, gormDB.Create(&model.Ability{
+			Group:     "default",
+			Model:     "gpt-5.5",
+			ChannelId: channel.Id,
+			Enabled:   true,
+			Priority:  channel.Priority,
+			Weight:    *channel.Weight,
+		}).Error)
+	}
+	return rateLimited, fallback
 }
 
 func TestShouldFallbackResponsesCompactAutoRequiresCompatibilityError(t *testing.T) {

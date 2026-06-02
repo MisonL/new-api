@@ -29,13 +29,23 @@ func LocalLogPreview(content string) string {
 		return content
 	}
 	end := LocalLogContentLimit
-	for end > 0 && !utf8.RuneStart(content[end]) {
-		end--
+	validUTF8 := utf8.ValidString(content)
+	if validUTF8 {
+		for end > 0 && !utf8.RuneStart(content[end]) {
+			end--
+		}
+		if end == 0 {
+			// Defensive fallback: valid UTF-8 input should always have a rune start before the limit.
+			SysLog(fmt.Sprintf("LocalLogPreview unexpected rune boundary fallback: content_length=%d limit=%d", len(content), LocalLogContentLimit))
+			end = LocalLogContentLimit
+		}
 	}
-	if end == 0 {
-		end = LocalLogContentLimit
+	preview := content[:end]
+	if !validUTF8 {
+		preview = strings.ToValidUTF8(preview, "?")
+		return fmt.Sprintf("%s... [truncated, contains invalid UTF-8, original_length=%d, limit=%d]", preview, len(content), LocalLogContentLimit)
 	}
-	return fmt.Sprintf("%s... [truncated, original_length=%d, limit=%d]", content[:end], len(content), LocalLogContentLimit)
+	return fmt.Sprintf("%s... [truncated, original_length=%d, limit=%d]", preview, len(content), LocalLogContentLimit)
 }
 
 func GetStringIfEmpty(str string, defaultValue string) string {

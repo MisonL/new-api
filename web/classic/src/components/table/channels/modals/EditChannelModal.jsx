@@ -2981,10 +2981,9 @@ const EditChannelModal = (props) => {
                         RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX
                       }
                       precision={0}
-                      value={
-                        inputs.responses_compact_auto_fallback_retry_interval_hours ||
-                        RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT
-                      }
+                      value={normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+                        inputs.responses_compact_auto_fallback_retry_interval_hours,
+                      )}
                       onChange={(value) =>
                         handleChannelOtherSettingsChange(
                           'responses_compact_auto_fallback_retry_interval_hours',

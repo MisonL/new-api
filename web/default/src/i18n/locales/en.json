@@ -4112,6 +4112,7 @@
     "Your Turnstile site key": "Your Turnstile site key",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Enter password ({{min}}-{{max}} characters)": "Enter password ({{min}}-{{max}} characters)"
   }
 }

@@ -29,6 +29,8 @@ import zh from '../src/i18n/locales/zh.json'
 
 const locales = { en, zh, fr, ja, ru, vi }
 
+// Retry interval rules: default 3 hours, minimum 1 hour, maximum 168 hours.
+
 function makeChannel(overrides: Partial<Channel> = {}): Channel {
   return {
     id: 1,
@@ -156,8 +158,16 @@ describe('channel responses compact settings', () => {
       'gpt-5.4',
     ])
     expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours()).toBe(3)
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(2)).toBe(2)
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(3)).toBe(3)
     expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(0)).toBe(3)
     expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(-1)).toBe(1)
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(167)).toBe(
+      167
+    )
+    expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(168)).toBe(
+      168
+    )
     expect(normalizeResponsesCompactAutoFallbackRetryIntervalHours(169)).toBe(
       168
     )
@@ -405,6 +415,41 @@ describe('channel responses compact settings', () => {
           responses_compact_auto_fallback_retry_interval_hours: 6,
         }),
         new Date('2026-05-27T05:29:59.000Z')
+      )
+    ).toBe(true)
+    expect(
+      isResponsesCompactAutoFallbackActive(
+        JSON.stringify({
+          responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+          responses_compact_auto_fallback_at: Date.parse(
+            '2026-05-26T23:31:00.000Z'
+          ) / 1000,
+        }),
+        new Date('2026-05-26T23:30:00.000Z')
+      )
+    ).toBe(false)
+    expect(
+      isResponsesCompactAutoFallbackActive(
+        JSON.stringify({
+          responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+          responses_compact_auto_fallback_at: Date.parse(
+            '2026-05-26T23:31:00.000Z'
+          ) / 1000,
+          responses_compact_auto_fallback_date: 20260526,
+        }),
+        new Date('2026-05-26T23:31:00.000Z')
+      )
+    ).toBe(true)
+    expect(
+      isResponsesCompactAutoFallbackActive(
+        JSON.stringify({
+          responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
+          responses_compact_auto_fallback_at: Date.parse(
+            '2026-05-27T00:01:00.000Z'
+          ) / 1000,
+          responses_compact_auto_fallback_date: 20260526,
+        }),
+        new Date('2026-05-26T23:30:00.000Z')
       )
     ).toBe(true)
 

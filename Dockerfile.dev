@@ -18,7 +18,9 @@ COPY . .
 
 RUN mkdir -p web/default/dist web/classic/dist && \
     echo '<!doctype html><html><head><title>dev</title></head><body>use frontend dev server</body></html>' > web/default/dist/index.html && \
-    echo '<!doctype html><html><head><title>dev</title></head><body>use frontend dev server</body></html>' > web/classic/dist/index.html
+    echo '<!doctype html><html><head><title>dev</title></head><body>use frontend dev server</body></html>' > web/classic/dist/index.html && \
+    sh scripts/write-frontend-release-metadata.sh default web/default/dist "$(cat VERSION)" unknown unknown && \
+    sh scripts/write-frontend-release-metadata.sh classic web/classic/dist "$(cat VERSION)" unknown unknown
 
 RUN go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api
 

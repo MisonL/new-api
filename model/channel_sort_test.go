@@ -112,6 +112,72 @@ func TestSearchChannelsEscapesGroupFilterWildcards(t *testing.T) {
 	require.Equal(t, []int{1}, channelIDs(matched))
 }
 
+func TestSearchChannelsTreatsAllAndNullGroupAsUnfiltered(t *testing.T) {
+	setupChannelSortTestDB(t)
+	channels := []*Channel{
+		{Id: 1, Name: "alpha", Key: "sk-alpha", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](30)},
+		{Id: 2, Name: "beta", Key: "sk-beta", Models: "gpt-5", Group: "paid", Priority: common.GetPointer[int64](20)},
+	}
+	for _, channel := range channels {
+		require.NoError(t, DB.Create(channel).Error)
+	}
+
+	for _, group := range []string{"all", "null"} {
+		t.Run(group, func(t *testing.T) {
+			matched, err := SearchChannels("", group, "gpt", false, NewChannelSortOptions("id", "asc", false))
+			require.NoError(t, err)
+			require.Equal(t, []int{1, 2}, channelIDs(matched))
+		})
+	}
+}
+
+func TestSearchChannelsAllowsEmptyKeywordAndModelWithoutWideLikeFilters(t *testing.T) {
+	setupChannelSortTestDB(t)
+	channels := []*Channel{
+		{Id: 1, Name: "alpha", Key: "sk-alpha", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](30)},
+		{Id: 2, Name: "beta", Key: "sk-beta", Models: "gpt-4", Group: "default", Priority: common.GetPointer[int64](20)},
+		{Id: 3, Name: "gamma", Key: "sk-gamma", Models: "claude", Group: "paid", Priority: common.GetPointer[int64](10)},
+	}
+	for _, channel := range channels {
+		require.NoError(t, DB.Create(channel).Error)
+	}
+
+	matched, err := SearchChannels("", "default", "", false, NewChannelSortOptions("id", "asc", false))
+	require.NoError(t, err)
+	require.Equal(t, []int{1, 2}, channelIDs(matched))
+
+	var unfiltered []*Channel
+	require.NoError(t, DB.Model(&Channel{}).Order("id asc").Find(&unfiltered).Error)
+	var filtered []*Channel
+	require.NoError(t, ApplyChannelSearchFilters(DB.Model(&Channel{}), "", "", "").Order("id asc").Find(&filtered).Error)
+	require.Equal(t, channelIDs(unfiltered), channelIDs(filtered))
+}
+
+func TestSearchChannelsEscapesKeywordWildcards(t *testing.T) {
+	setupChannelSortTestDB(t)
+	channels := []*Channel{
+		{Id: 1, Name: "team%alpha", Key: "sk-alpha", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](30)},
+		{Id: 2, Name: "teamXalpha", Key: "sk-beta", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](20)},
+		{Id: 3, Name: "team_alpha", Key: "sk-gamma", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](10)},
+		{Id: 4, Name: "team!alpha", Key: "sk-delta", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](5)},
+	}
+	for _, channel := range channels {
+		require.NoError(t, DB.Create(channel).Error)
+	}
+
+	matchedPercent, err := SearchChannels("team%alpha", "default", "gpt", false, NewChannelSortOptions("id", "asc", false))
+	require.NoError(t, err)
+	require.Equal(t, []int{1}, channelIDs(matchedPercent))
+
+	matchedUnderscore, err := SearchChannels("team_alpha", "default", "gpt", false, NewChannelSortOptions("id", "asc", false))
+	require.NoError(t, err)
+	require.Equal(t, []int{3}, channelIDs(matchedUnderscore))
+
+	matchedEscape, err := SearchChannels("team!alpha", "default", "gpt", false, NewChannelSortOptions("id", "asc", false))
+	require.NoError(t, err)
+	require.Equal(t, []int{4}, channelIDs(matchedEscape))
+}
+
 func insertPreferredOwnerCandidate(
 	t *testing.T,
 	channelID int,

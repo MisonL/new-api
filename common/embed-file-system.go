@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path"
+	"strings"
 
 	"github.com/gin-contrib/static"
 )
@@ -13,10 +15,11 @@ import (
 
 type embedFileSystem struct {
 	http.FileSystem
+	hiddenFiles map[string]struct{}
 }
 
-func (e *embedFileSystem) Exists(prefix string, path string) bool {
-	_, err := e.Open(path)
+func (e *embedFileSystem) Exists(prefix string, relPath string) bool {
+	_, err := e.Open(relPath)
 	if err != nil {
 		return false
 	}
@@ -29,6 +32,10 @@ func (e *embedFileSystem) Open(name string) (http.File, error) {
 		// which will use the replaced index bytes with analytic codes.
 		return nil, os.ErrNotExist
 	}
+	cleanName := normalizeStaticFileName(name)
+	if _, hidden := e.hiddenFiles[cleanName]; hidden {
+		return nil, os.ErrNotExist
+	}
 	return e.FileSystem.Open(name)
 }
 
@@ -39,7 +46,15 @@ func EmbedFolder(fsEmbed embed.FS, targetPath string) static.ServeFileSystem {
 	}
 	return &embedFileSystem{
 		FileSystem: http.FS(efs),
+		hiddenFiles: map[string]struct{}{
+			"new-api-release.json": {},
+		},
 	}
+}
+
+func normalizeStaticFileName(name string) string {
+	cleanName := path.Clean("/" + name)
+	return strings.TrimPrefix(cleanName, "/")
 }
 
 // themeAwareFileSystem delegates to the appropriate embedded FS based on
@@ -50,11 +65,11 @@ type themeAwareFileSystem struct {
 	classicFS static.ServeFileSystem
 }
 
-func (t *themeAwareFileSystem) Exists(prefix string, path string) bool {
+func (t *themeAwareFileSystem) Exists(prefix string, relPath string) bool {
 	if GetTheme() == "classic" {
-		return t.classicFS.Exists(prefix, path)
+		return t.classicFS.Exists(prefix, relPath)
 	}
-	return t.defaultFS.Exists(prefix, path)
+	return t.defaultFS.Exists(prefix, relPath)
 }
 
 func (t *themeAwareFileSystem) Open(name string) (http.File, error) {

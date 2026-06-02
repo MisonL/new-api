@@ -2481,7 +2481,7 @@
     "禁用后用户端不再展示，但历史订单不受影响。是否继续？": "After disabling, it will no longer be shown to users, but historical orders are not affected. Continue?",
     "禁用后的影响：": "Impact after disabling:",
     "禁用密钥失败": "Failed to disable key",
-    "禁用思考处理的模型列表": "Models skipping thinking handling",
+    "禁用思考处理的模型列表": "Models with thinking handling disabled",
     "禁用所有密钥失败": "Failed to disable all keys",
     "禁用时间": "Disable time",
     "私有IP访问详细说明": "Security Warning: Enabling this allows access to internal network resources (localhost, private networks). Only enable if you need to access internal services and understand the security implications.",

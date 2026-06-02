@@ -86,7 +86,16 @@ export const DEFAULT_GROUP = 'default' as const
 
 export const USER_PASSWORD_MIN_LENGTH = 8
 export const USER_PASSWORD_MAX_LENGTH = 20
-export const USER_PASSWORD_LENGTH_MESSAGE = 'Enter password (8-20 characters)'
+
+/** Builds the localized password length hint from the shared user password limits. */
+export function formatUserPasswordLengthMessage(
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
+  return t('Enter password ({{min}}-{{max}} characters)', {
+    min: USER_PASSWORD_MIN_LENGTH,
+    max: USER_PASSWORD_MAX_LENGTH,
+  })
+}
 
 // ============================================================================
 // Third-party Binding Fields

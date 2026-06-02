@@ -5,12 +5,38 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	miniredis "github.com/alicebob/miniredis/v2"
+	"github.com/go-redis/redis/v8"
 )
+
+var casTicketGuardTestMu sync.Mutex
+
+// resetCASTicketGuardForTest resets the global casTicketGuard. Tests using it must not run in parallel.
+func resetCASTicketGuardForTest(t *testing.T) {
+	t.Helper()
+	casTicketGuardTestMu.Lock()
+	previous := casTicketGuard
+	t.Cleanup(func() {
+		casTicketGuard = previous
+		casTicketGuardTestMu.Unlock()
+	})
+	t.Log("resetCASTicketGuardForTest resets global casTicketGuard; do not use t.Parallel() with these tests")
+	casTicketGuard = newInMemoryCASTicketGuard(casTicketReplayTTL)
+}
+
+func expireInMemoryCASTicketForTest(guard *inMemoryCASTicketGuard, key string) {
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	guard.entries[key] = time.Now().Add(-time.Second)
+}
 
 func createCASProviderForTest(t *testing.T, validateURL string) *model.CustomOAuthProvider {
 	t.Helper()
@@ -182,6 +208,7 @@ func TestHandleCustomOAuthCASStartFallsBackToRequestOriginWhenConfigured(t *test
 
 func TestHandleCustomOAuthCASCallbackCreatesUser(t *testing.T) {
 	setupCustomOAuthJWTControllerTestDB(t)
+	resetCASTicketGuardForTest(t)
 	handlerErrors := newAsyncHandlerErrorSink(2)
 	defer handlerErrors.failIfAny(t)
 
@@ -262,8 +289,305 @@ func TestHandleCustomOAuthCASCallbackCreatesUser(t *testing.T) {
 	}
 }
 
+func TestHandleCustomOAuthCASCallbackRejectsReplayTicketBeforeValidation(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	resetCASTicketGuardForTest(t)
+	handlerErrors := newAsyncHandlerErrorSink(2)
+	defer handlerErrors.failIfAny(t)
+
+	var validationCalls int32
+	validationServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&validationCalls, 1) > 1 {
+			handlerErrors.reportf("expected replay ticket to be rejected before upstream validation")
+			http.Error(w, "unexpected replay validation", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+  <cas:authenticationSuccess>
+    <cas:user>cas-user-replay</cas:user>
+    <cas:attributes>
+      <cas:loginid>cas-user-replay</cas:loginid>
+      <cas:userName>CAS Replay User</cas:userName>
+      <cas:mailbox>cas-replay@example.com</cas:mailbox>
+      <cas:group>engineering</cas:group>
+    </cas:attributes>
+  </cas:authenticationSuccess>
+</cas:serviceResponse>`))
+	}))
+	defer validationServer.Close()
+
+	createCASProviderForTest(t, validationServer.URL)
+
+	router := newCustomOAuthJWTRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	previousServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = server.URL
+	t.Cleanup(func() {
+		system_setting.ServerAddress = previousServerAddress
+	})
+
+	client := newTestHTTPClient(t)
+	state := fetchOAuthStateForTest(t, client, server.URL)
+	callbackURL := server.URL + "/api/auth/external/acme-sso/cas/callback?ticket=ST-REPLAY-1&state=" + state
+
+	firstResp, err := client.Get(callbackURL)
+	if err != nil {
+		t.Fatalf("failed to execute first cas callback: %v", err)
+	}
+	defer firstResp.Body.Close()
+	var firstResponse oauthJWTAPIResponse
+	if err := common.DecodeJson(firstResp.Body, &firstResponse); err != nil {
+		t.Fatalf("failed to decode first cas callback response: %v", err)
+	}
+	if !firstResponse.Success {
+		t.Fatalf("expected first cas callback success, got %s", firstResponse.Message)
+	}
+
+	secondResp, err := client.Get(callbackURL)
+	if err != nil {
+		t.Fatalf("failed to execute replay cas callback: %v", err)
+	}
+	defer secondResp.Body.Close()
+	var secondResponse oauthJWTAPIResponse
+	if err := common.DecodeJson(secondResp.Body, &secondResponse); err != nil {
+		t.Fatalf("failed to decode replay cas callback response: %v", err)
+	}
+	if secondResponse.Success {
+		t.Fatal("expected replay cas callback to fail")
+	}
+	if got := atomic.LoadInt32(&validationCalls); got != 1 {
+		t.Fatalf("expected one upstream validation call, got %d", got)
+	}
+}
+
+func TestHandleCustomOAuthCASCallbackReleasesTicketWhenLocalLoginFails(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	resetCASTicketGuardForTest(t)
+	handlerErrors := newAsyncHandlerErrorSink(2)
+	defer handlerErrors.failIfAny(t)
+
+	disabledUser := createUserWithEmailForTest(t, "cas-disabled-merge", "cas-disabled@example.com")
+	disabledUser.Status = common.UserStatusDisabled
+	if err := model.DB.Model(disabledUser).Update("status", common.UserStatusDisabled).Error; err != nil {
+		t.Fatalf("failed to disable merge target user: %v", err)
+	}
+
+	var validationCalls int32
+	validationServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&validationCalls, 1)
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+  <cas:authenticationSuccess>
+    <cas:user>cas-disabled-replay</cas:user>
+    <cas:attributes>
+      <cas:loginid>cas-disabled-replay</cas:loginid>
+      <cas:userName>CAS Disabled User</cas:userName>
+      <cas:mailbox>cas-disabled@example.com</cas:mailbox>
+      <cas:group>engineering</cas:group>
+    </cas:attributes>
+  </cas:authenticationSuccess>
+</cas:serviceResponse>`))
+	}))
+	defer validationServer.Close()
+
+	provider := createCASProviderForTest(t, validationServer.URL)
+	provider.AutoMergeByEmail = true
+	if err := model.UpdateCustomOAuthProvider(provider); err != nil {
+		t.Fatalf("failed to enable cas email merge: %v", err)
+	}
+
+	router := newCustomOAuthJWTRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	previousServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = server.URL
+	t.Cleanup(func() {
+		system_setting.ServerAddress = previousServerAddress
+	})
+
+	client := newTestHTTPClient(t)
+	state := fetchOAuthStateForTest(t, client, server.URL)
+	callbackURL := server.URL + "/api/auth/external/acme-sso/cas/callback?ticket=ST-RESOLVED-LOCAL-FAIL&state=" + state
+
+	firstResp, err := client.Get(callbackURL)
+	if err != nil {
+		t.Fatalf("failed to execute first cas callback: %v", err)
+	}
+	defer firstResp.Body.Close()
+	var firstResponse oauthJWTAPIResponse
+	if err := common.DecodeJson(firstResp.Body, &firstResponse); err != nil {
+		t.Fatalf("failed to decode first cas callback response: %v", err)
+	}
+	if firstResponse.Success {
+		t.Fatal("expected disabled merged user cas callback to fail")
+	}
+	if model.IsProviderUserIdTaken(provider.Id, "cas-disabled-replay") {
+		t.Fatal("expected disabled merged user not to receive cas binding")
+	}
+
+	secondResp, err := client.Get(callbackURL)
+	if err != nil {
+		t.Fatalf("failed to execute replay cas callback: %v", err)
+	}
+	defer secondResp.Body.Close()
+	var secondResponse oauthJWTAPIResponse
+	if err := common.DecodeJson(secondResp.Body, &secondResponse); err != nil {
+		t.Fatalf("failed to decode replay cas callback response: %v", err)
+	}
+	if secondResponse.Success {
+		t.Fatal("expected retried local login to still fail for disabled user")
+	}
+	if got := atomic.LoadInt32(&validationCalls); got != 2 {
+		t.Fatalf("expected failed local login to release ticket for a retry, got %d upstream validation calls", got)
+	}
+}
+
+func TestReserveCASTicketFailsWhenRedisClientMissing(t *testing.T) {
+	previousRedisEnabled := common.RedisEnabled
+	previousRDB := common.RDB
+	common.RedisEnabled = true
+	common.RDB = nil
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		common.RDB = previousRDB
+	})
+
+	releaseTicket, err := reserveCASTicket(1, "ST-MISSING-REDIS", "https://example.com/callback")
+	if err == nil {
+		if releaseTicket != nil {
+			releaseTicket()
+		}
+		t.Fatal("expected missing redis client to fail")
+	}
+	if isCASTicketReplayError(err) {
+		t.Fatalf("expected guard infrastructure error, got replay error: %v", err)
+	}
+}
+
+func TestReserveCASTicketUsesRedisReservation(t *testing.T) {
+	server, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer server.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	defer client.Close()
+
+	previousRedisEnabled := common.RedisEnabled
+	previousRDB := common.RDB
+	common.RedisEnabled = true
+	common.RDB = client
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		common.RDB = previousRDB
+	})
+
+	releaseTicket, err := reserveCASTicket(1, "ST-REDIS-1", "https://example.com/callback")
+	if err != nil {
+		t.Fatalf("expected first redis reservation to succeed: %v", err)
+	}
+	releaseReplay, err := reserveCASTicket(1, "ST-REDIS-1", "https://example.com/callback")
+	if err == nil {
+		releaseReplay()
+		t.Fatal("expected duplicate redis reservation to fail")
+	}
+	if !isCASTicketReplayError(err) {
+		t.Fatalf("expected replay error, got %v", err)
+	}
+
+	releaseTicket()
+	releaseAfterRelease, err := reserveCASTicket(1, "ST-REDIS-1", "https://example.com/callback")
+	if err != nil {
+		t.Fatalf("expected redis reservation after release to succeed: %v", err)
+	}
+	releaseAfterRelease()
+}
+
+func TestReserveCASTicketRedisReleaseUsesOriginalClient(t *testing.T) {
+	server, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer server.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	defer client.Close()
+
+	otherServer, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed to start replacement miniredis: %v", err)
+	}
+	defer otherServer.Close()
+	otherClient := redis.NewClient(&redis.Options{Addr: otherServer.Addr()})
+	defer otherClient.Close()
+
+	previousRedisEnabled := common.RedisEnabled
+	previousRDB := common.RDB
+	common.RedisEnabled = true
+	common.RDB = client
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		common.RDB = previousRDB
+	})
+
+	releaseTicket, err := reserveCASTicket(1, "ST-REDIS-SWITCH", "https://example.com/callback")
+	if err != nil {
+		t.Fatalf("expected redis reservation to succeed: %v", err)
+	}
+
+	common.RDB = otherClient
+	releaseTicket()
+
+	common.RDB = client
+	releaseAfterRelease, err := reserveCASTicket(1, "ST-REDIS-SWITCH", "https://example.com/callback")
+	if err != nil {
+		t.Fatalf("expected original redis reservation to be released: %v", err)
+	}
+	releaseAfterRelease()
+}
+
+func TestInMemoryCASTicketReleaseDoesNotRemoveNewReservation(t *testing.T) {
+	guard := newInMemoryCASTicketGuard(time.Hour)
+	releaseExpired, err := guard.reserve("cas-ticket-test-key")
+	if err != nil {
+		t.Fatalf("expected first reservation to succeed: %v", err)
+	}
+
+	expireInMemoryCASTicketForTest(guard, "cas-ticket-test-key")
+
+	releaseCurrent, err := guard.reserve("cas-ticket-test-key")
+	if err != nil {
+		t.Fatalf("expected new reservation after expiry to succeed: %v", err)
+	}
+	releaseExpired()
+
+	releaseReplay, err := guard.reserve("cas-ticket-test-key")
+	if err == nil {
+		releaseReplay()
+		t.Fatal("expected old release callback to preserve current reservation")
+	}
+	if !isCASTicketReplayError(err) {
+		t.Fatalf("expected replay error, got %v", err)
+	}
+
+	releaseCurrent()
+	releaseAfterCurrent, err := guard.reserve("cas-ticket-test-key")
+	if err != nil {
+		t.Fatalf("expected current release callback to remove reservation: %v", err)
+	}
+	releaseAfterCurrent()
+}
+
 func TestHandleCustomOAuthCASCallbackUsesConfiguredServiceURLWithState(t *testing.T) {
 	setupCustomOAuthJWTControllerTestDB(t)
+	resetCASTicketGuardForTest(t)
 	handlerErrors := newAsyncHandlerErrorSink(2)
 	defer handlerErrors.failIfAny(t)
 
@@ -348,6 +672,7 @@ func TestHandleCustomOAuthCASCallbackUsesConfiguredServiceURLWithState(t *testin
 
 func TestHandleCustomOAuthCASCallbackRejectsInvalidState(t *testing.T) {
 	setupCustomOAuthJWTControllerTestDB(t)
+	resetCASTicketGuardForTest(t)
 	createCASProviderForTest(t, "https://cas.example.com/cas/serviceValidate")
 
 	router := newCustomOAuthJWTRouter(t)
@@ -388,6 +713,7 @@ func TestHandleCustomOAuthCASCallbackRejectsInvalidState(t *testing.T) {
 
 func TestHandleCustomOAuthCASCallbackRejectsMissingTicket(t *testing.T) {
 	setupCustomOAuthJWTControllerTestDB(t)
+	resetCASTicketGuardForTest(t)
 	createCASProviderForTest(t, "https://cas.example.com/cas/serviceValidate")
 
 	router := newCustomOAuthJWTRouter(t)

@@ -127,27 +127,29 @@ func completeCustomOAuthIdentityLogin(
 	return result, audit, nil
 }
 
-func finalizeCustomOAuthIdentityLogin(c *gin.Context, provider oauth.Provider, result *customOAuthJWTLoginResult, audit *customOAuthJWTAuditInfo) {
+// finalizeCustomOAuthIdentityLogin returns true only after the external identity has been
+// consumed by a completed bind or login response.
+func finalizeCustomOAuthIdentityLogin(c *gin.Context, provider oauth.Provider, result *customOAuthJWTLoginResult, audit *customOAuthJWTAuditInfo) bool {
 	if result.Action == "bind" {
 		recordCustomOAuthJWTAudit(audit)
 		common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, gin.H{
 			"action": "bind",
 		})
-		return
+		return true
 	}
 
 	if result.User.Status != common.UserStatusEnabled {
 		audit.FailureReason = "user_disabled"
 		recordCustomOAuthJWTAudit(audit)
 		common.ApiErrorI18n(c, i18n.MsgOAuthUserBanned)
-		return
+		return false
 	}
 	if result.BindAfterStatusCheck {
 		if err := bindOAuthIdentityToUser(result.User, provider, result.ProviderUserID); err != nil {
 			audit.FailureReason = oauthAuditFailureReason(err)
 			recordCustomOAuthJWTAudit(audit)
 			handleCustomOAuthJWTLoginError(c, err)
-			return
+			return false
 		}
 	}
 
@@ -157,9 +159,10 @@ func finalizeCustomOAuthIdentityLogin(c *gin.Context, provider oauth.Provider, r
 		}
 		audit.FailureReason = "session_save_failed"
 		recordCustomOAuthJWTAudit(audit)
-		return
+		return false
 	}
 	recordCustomOAuthJWTAudit(audit)
+	return true
 }
 
 func oauthAuditFailureReason(err error) string {

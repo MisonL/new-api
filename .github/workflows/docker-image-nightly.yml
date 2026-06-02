@@ -37,11 +37,19 @@ jobs:
       - name: Determine nightly version
         id: version
         run: |
+          SOURCE_SHA="$(git rev-parse HEAD)"
           VERSION="nightly-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
           echo "$VERSION" > VERSION
           echo "value=$VERSION" >> $GITHUB_OUTPUT
+          echo "source_sha=$SOURCE_SHA" >> $GITHUB_OUTPUT
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "Publishing version: $VERSION for ${{ matrix.arch }}"
+
+      - name: Resolve build metadata
+        id: build_meta
+        run: |
+          echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+          echo "source=https://github.com/${GITHUB_REPOSITORY}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -69,6 +77,11 @@ jobs:
             calciumion/new-api:nightly-${{ matrix.arch }}
             calciumion/new-api:${{ steps.version.outputs.value }}-${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.value }}
+            VCS_REF=${{ steps.version.outputs.source_sha }}
+            BUILD_DATE=${{ steps.build_meta.outputs.created }}
+            SOURCE_URL=${{ steps.build_meta.outputs.source }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false

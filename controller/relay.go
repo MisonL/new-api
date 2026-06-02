@@ -422,7 +422,7 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
-	if info.ChannelMeta == nil {
+	if info.ChannelMeta == nil && retryParam.GetRetry() == 0 {
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
 		if !autoBan {
@@ -450,6 +450,7 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	if newAPIError != nil {
 		return nil, newAPIError
 	}
+	info.InitChannelMeta(c)
 	return channel, nil
 }
 
@@ -465,7 +466,7 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if openaiErr == nil {
 		return false
 	}
-	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) && !isUpstreamRateLimitError(openaiErr.StatusCode) {
 		return false
 	}
 	if types.IsChannelError(openaiErr) {
@@ -494,6 +495,10 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return false
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
+func isUpstreamRateLimitError(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests
 }
 
 func shouldRetryTimeoutForResponsesCompact(c *gin.Context, statusCode int) bool {
@@ -1176,7 +1181,7 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 	if taskErr == nil {
 		return false
 	}
-	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) && !isUpstreamRateLimitError(taskErr.StatusCode) {
 		return false
 	}
 	if retryTimes <= 0 {

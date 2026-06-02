@@ -292,6 +292,11 @@ export function RuleEditorDialog(props: Props) {
             />
             <Label>{t('Skip retry on failure')}</Label>
           </div>
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'When enabled, matched request failures do not switch channels for retry; upstream 429 rate limits still switch channels.'
+            )}
+          </p>
 
           <Separator />
 

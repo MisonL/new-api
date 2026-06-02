@@ -52,7 +52,47 @@ function parseIssues(output) {
 }
 
 function issueKey(issue) {
-  return `${issue.file}:${issue.line}:${issue.text}`;
+  return `${issue.file}:${issue.text}`;
+}
+
+function countIssues(issues) {
+  const counts = new Map();
+  for (const issue of issues) {
+    const key = issueKey(issue);
+    const entry = counts.get(key) || { count: 0, issue };
+    entry.count += 1;
+    counts.set(key, entry);
+  }
+  return counts;
+}
+
+function compareIssueCounts(currentIssues, baselineIssues) {
+  const currentCounts = countIssues(currentIssues);
+  const baselineCounts = countIssues(baselineIssues);
+  const newIssues = [];
+  const resolvedIssues = [];
+
+  for (const [key, current] of currentCounts) {
+    const baseline = baselineCounts.get(key);
+    const baselineCount = baseline?.count || 0;
+    if (current.count > baselineCount) {
+      for (let i = baselineCount; i < current.count; i += 1) {
+        newIssues.push(current.issue);
+      }
+    }
+  }
+
+  for (const [key, baseline] of baselineCounts) {
+    const current = currentCounts.get(key);
+    const currentCount = current?.count || 0;
+    if (baseline.count > currentCount) {
+      for (let i = currentCount; i < baseline.count; i += 1) {
+        resolvedIssues.push(baseline.issue);
+      }
+    }
+  }
+
+  return { newIssues, resolvedIssues };
 }
 
 function loadBaseline() {
@@ -109,13 +149,7 @@ if (!combinedOutput.includes('Linter found') && issues.length === 0) {
 }
 
 const baseline = loadBaseline();
-const baselineKeys = new Set(baseline.map(issueKey));
-const currentKeys = new Set(issues.map(issueKey));
-
-const newIssues = issues.filter((issue) => !baselineKeys.has(issueKey(issue)));
-const resolvedIssues = baseline.filter(
-  (issue) => !currentKeys.has(issueKey(issue)),
-);
+const { newIssues, resolvedIssues } = compareIssueCounts(issues, baseline);
 
 console.log(
   `i18n lint 当前共 ${issues.length} 条，基线 ${baseline.length} 条，新增 ${newIssues.length} 条，已解决 ${resolvedIssues.length} 条。`,

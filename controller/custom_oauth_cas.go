@@ -95,6 +95,34 @@ func HandleCustomOAuthCASCallback(c *gin.Context) {
 		return
 	}
 
+	releaseTicket, err := reserveCASTicket(providerConfig.Id, req.Ticket, serviceURL)
+	if err != nil {
+		if isCASTicketReplayError(err) {
+			audit.FailureReason = "cas_ticket_replay"
+			recordCustomOAuthJWTAudit(audit)
+			common.ApiErrorI18n(c, i18n.MsgOAuthTicketReplayed)
+			return
+		}
+		audit.FailureReason = "cas_ticket_guard_error"
+		recordCustomOAuthJWTAudit(audit)
+		common.SysError("failed to reserve CAS ticket: " + err.Error())
+		common.ApiErrorI18n(c, i18n.MsgOAuthTokenFailed, providerParams(providerConfig.Name))
+		return
+	}
+	if releaseTicket == nil {
+		audit.FailureReason = "cas_ticket_guard_error"
+		recordCustomOAuthJWTAudit(audit)
+		common.SysError("failed to reserve CAS ticket: release callback is nil")
+		common.ApiErrorI18n(c, i18n.MsgOAuthTokenFailed, providerParams(providerConfig.Name))
+		return
+	}
+	shouldReleaseTicket := true
+	defer func() {
+		if shouldReleaseTicket {
+			releaseTicket()
+		}
+	}()
+
 	identity, err := provider.ResolveIdentityFromTicket(c.Request.Context(), req.Ticket, serviceURL)
 	if err != nil {
 		if audit != nil && audit.FailureReason == "" {
@@ -124,7 +152,9 @@ func HandleCustomOAuthCASCallback(c *gin.Context) {
 		return
 	}
 
-	finalizeCustomOAuthIdentityLogin(c, provider, result, audit)
+	if finalizeCustomOAuthIdentityLogin(c, provider, result, audit) {
+		shouldReleaseTicket = false
+	}
 }
 
 func loadCustomCASProvider(c *gin.Context) (*model.CustomOAuthProvider, *oauth.CASProvider) {

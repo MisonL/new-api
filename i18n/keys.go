@@ -298,6 +298,7 @@ const (
 	MsgOAuthUserInfoEmpty        = "oauth.user_info_empty"
 	MsgOAuthTrustLevelLow        = "oauth.trust_level_low"
 	MsgOAuthTicketMissing        = "oauth.ticket_missing"
+	MsgOAuthTicketReplayed       = "oauth.ticket_replayed"
 	MsgOAuthJWTMissing           = "oauth.jwt_missing"
 	MsgOAuthTrustedHeaderMissing = "oauth.trusted_header_missing"
 	MsgOAuthTrustedProxyDenied   = "oauth.trusted_proxy_denied"

@@ -178,9 +178,13 @@ type modelListGroups struct {
 func getModelListGroups(c *gin.Context, requireUserGroup bool) (modelListGroups, error) {
 	tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-	if userGroup == "" && (tokenGroup == "" || tokenGroup == "auto") && (requireUserGroup || c.GetInt("id") > 0) {
+	userID := c.GetInt("id")
+	if userGroup == "" && (tokenGroup == "" || tokenGroup == "auto") && requireUserGroup && userID <= 0 {
+		return modelListGroups{}, fmt.Errorf("missing user context")
+	}
+	if userGroup == "" && (tokenGroup == "" || tokenGroup == "auto") && userID > 0 {
 		var err error
-		userGroup, err = model.GetUserGroup(c.GetInt("id"), false)
+		userGroup, err = model.GetUserGroup(userID, false)
 		if err != nil {
 			return modelListGroups{}, err
 		}

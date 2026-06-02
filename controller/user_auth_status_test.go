@@ -94,6 +94,11 @@ func TestDeleteUserReturnsErrorWhenHardDeleteFails(t *testing.T) {
 	require.NoError(t, model.DB.Callback().Delete().Before("gorm:delete").Register("test:force_delete_error", func(db *gorm.DB) {
 		db.AddError(expectedErr)
 	}))
+	t.Cleanup(func() {
+		if err := model.DB.Callback().Delete().Remove("test:force_delete_error"); err != nil {
+			t.Errorf("failed to remove forced delete callback: %v", err)
+		}
+	})
 
 	recorder := performDeleteUser(t, targetUser.Id)
 

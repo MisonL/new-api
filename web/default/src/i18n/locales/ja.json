@@ -4112,6 +4112,7 @@
     "Your Turnstile site key": "あなたのTurnstileサイトキー",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Enter password ({{min}}-{{max}} characters)": "パスワードを入力 ({{min}}～{{max}}文字)"
   }
 }

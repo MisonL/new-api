@@ -15,4 +15,5 @@ func TestRuntimePollingIndexesAutoMigrate(t *testing.T) {
 	require.True(t, db.Migrator().HasIndex(&Task{}, "idx_tasks_progress_status_id"))
 	require.True(t, db.Migrator().HasIndex(&UserSubscription{}, "idx_user_sub_status_end_id"))
 	require.True(t, db.Migrator().HasIndex(&Log{}, "idx_logs_request_id_created_at"))
+	require.True(t, db.Migrator().HasIndex(&Log{}, "idx_logs_upstream_request_id_created_at"))
 }

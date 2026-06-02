@@ -1188,7 +1188,9 @@ export default function SettingsChannelAffinity(props) {
                 label={t('失败后不重试')}
               />
               <Text type='tertiary' size='small'>
-                {t('开启后，若该规则命中且请求失败，将不会切换渠道重试。')}
+                {t(
+                  '开启后，若该规则命中且请求失败，将不会切换渠道重试；上游 429 限流仍会切换渠道重试。',
+                )}
               </Text>
             </Col>
           </Row>

@@ -148,12 +148,7 @@ func channelGroupFilterCondition() string {
 }
 
 func channelGroupFilterPattern(group string) string {
-	group = strings.NewReplacer(
-		"!", "!!",
-		"%", "!%",
-		"_", "!_",
-	).Replace(group)
-	return "%," + group + ",%"
+	return "%," + escapeChannelLikeLiteral(group) + ",%"
 }
 
 func ApplyChannelGroupFilter(query *gorm.DB, group string) *gorm.DB {
@@ -397,32 +392,50 @@ func GetChannelsByTag(tag string, idSort bool, selectAll bool, sortOptions ...Ch
 	return channels, err
 }
 
-func SearchChannels(keyword string, group string, model string, idSort bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {
+func ApplyChannelSearchFilters(query *gorm.DB, keyword string, group string, model string) *gorm.DB {
 	if commonGroupCol == "" || commonKeyCol == "" {
 		initCol()
 	}
-	var channels []*Channel
 	modelsCol := "`models`"
-
-	// 如果是 PostgreSQL，使用双引号
 	if common.UsingPostgreSQL {
 		modelsCol = `"models"`
 	}
-
 	baseURLCol := "`base_url`"
-	// 如果是 PostgreSQL，使用双引号
 	if common.UsingPostgreSQL {
 		baseURLCol = `"base_url"`
 	}
 
+	keyword = strings.TrimSpace(keyword)
+	model = strings.TrimSpace(model)
+	if keyword != "" {
+		keywordLikePattern := "%" + escapeChannelLikeLiteral(keyword) + "%"
+		query = query.Where(
+			"(id = ? OR name LIKE ? ESCAPE '!' OR "+commonKeyCol+" = ? OR "+baseURLCol+" LIKE ? ESCAPE '!')",
+			common.String2Int(keyword),
+			keywordLikePattern,
+			keyword,
+			keywordLikePattern,
+		)
+	}
+	if model != "" {
+		modelLikePattern := "%" + escapeChannelLikeLiteral(model) + "%"
+		query = query.Where(modelsCol+" LIKE ? ESCAPE '!'", modelLikePattern)
+	}
+	return ApplyChannelGroupFilter(query, group)
+}
+
+func escapeChannelLikeLiteral(input string) string {
+	return strings.NewReplacer(
+		"!", "!!",
+		"%", "!%",
+		"_", "!_",
+	).Replace(input)
+}
+
+func SearchChannels(keyword string, group string, model string, idSort bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {
+	var channels []*Channel
 	order := resolveChannelSortOptions(idSort, sortOptions)
-
-	// 构造基础查询
-	baseQuery := DB.Model(&Channel{}).Omit("key")
-
-	whereClause := "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + " LIKE ?"
-	args := []any{common.String2Int(keyword), "%" + keyword + "%", keyword, "%" + keyword + "%", "%" + model + "%"}
-	baseQuery = ApplyChannelGroupFilter(baseQuery.Where(whereClause, args...), group)
+	baseQuery := ApplyChannelSearchFilters(DB.Model(&Channel{}).Omit("key"), keyword, group, model)
 
 	// 执行查询
 	err := order.Apply(baseQuery).Find(&channels).Error
@@ -721,6 +734,8 @@ func handlerMultiKeyUpdate(channel *Channel, usingKey string, status int, reason
 	}
 	if status == common.ChannelStatusEnabled {
 		delete(channel.ChannelInfo.MultiKeyStatusList, keyIndex)
+		delete(channel.ChannelInfo.MultiKeyDisabledReason, keyIndex)
+		delete(channel.ChannelInfo.MultiKeyDisabledTime, keyIndex)
 	} else {
 		channel.ChannelInfo.MultiKeyStatusList[keyIndex] = status
 		if channel.ChannelInfo.MultiKeyDisabledReason == nil {
@@ -740,6 +755,10 @@ func handlerMultiKeyUpdate(channel *Channel, usingKey string, status int, reason
 		channel.SetOtherInfo(info)
 	} else if status == common.ChannelStatusEnabled {
 		channel.Status = common.ChannelStatusEnabled
+		info := channel.GetOtherInfo()
+		delete(info, "status_reason")
+		delete(info, "status_time")
+		channel.SetOtherInfo(info)
 	}
 	return true
 }
@@ -767,32 +786,30 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 	channel, err := GetChannelById(channelId, true)
 	if err != nil {
 		return false
+	}
+	if channel.ChannelInfo.IsMultiKey {
+		beforeStatus := channel.Status
+		// Protect map writes with the same per-channel lock used by readers
+		pollingLock := GetChannelPollingLock(channelId)
+		pollingLock.Lock()
+		changed := handlerMultiKeyUpdate(channel, usingKey, status, reason)
+		pollingLock.Unlock()
+		if !changed {
+			return false
+		}
+		if beforeStatus != channel.Status {
+			shouldUpdateAbilities = true
+		}
 	} else {
 		if channel.Status == status {
 			return false
 		}
-
-		if channel.ChannelInfo.IsMultiKey {
-			beforeStatus := channel.Status
-			// Protect map writes with the same per-channel lock used by readers
-			pollingLock := GetChannelPollingLock(channelId)
-			pollingLock.Lock()
-			changed := handlerMultiKeyUpdate(channel, usingKey, status, reason)
-			pollingLock.Unlock()
-			if !changed {
-				return false
-			}
-			if beforeStatus != channel.Status {
-				shouldUpdateAbilities = true
-			}
-		} else {
-			info := channel.GetOtherInfo()
-			info["status_reason"] = reason
-			info["status_time"] = common.GetTimestamp()
-			channel.SetOtherInfo(info)
-			channel.Status = status
-			shouldUpdateAbilities = true
-		}
+		info := channel.GetOtherInfo()
+		info["status_reason"] = reason
+		info["status_time"] = common.GetTimestamp()
+		channel.SetOtherInfo(info)
+		channel.Status = status
+		shouldUpdateAbilities = true
 	}
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Omit("key").Save(channel).Error; err != nil {
@@ -940,30 +957,13 @@ func GetPaginatedChannelTags(query *gorm.DB, offset int, limit int) ([]*string, 
 
 func SearchTags(keyword string, group string, model string, idSort bool) ([]*string, error) {
 	var tags []*string
-	modelsCol := "`models`"
-
-	// 如果是 PostgreSQL，使用双引号
-	if common.UsingPostgreSQL {
-		modelsCol = `"models"`
-	}
-
-	baseURLCol := "`base_url`"
-	// 如果是 PostgreSQL，使用双引号
-	if common.UsingPostgreSQL {
-		baseURLCol = `"base_url"`
-	}
-
 	order := "priority desc"
 	if idSort {
 		order = "id desc"
 	}
 
 	// 构造基础查询
-	baseQuery := DB.Model(&Channel{}).Omit("key")
-
-	whereClause := "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + " LIKE ?"
-	args := []any{common.String2Int(keyword), "%" + keyword + "%", keyword, "%" + keyword + "%", "%" + model + "%"}
-	baseQuery = ApplyChannelGroupFilter(baseQuery.Where(whereClause, args...), group)
+	baseQuery := ApplyChannelSearchFilters(DB.Model(&Channel{}).Omit("key"), keyword, group, model)
 
 	subQuery := baseQuery.
 		Select("tag").

@@ -288,8 +288,11 @@ func TestListModelsUsesActiveChannelOwner(t *testing.T) {
 
 	payload := decodeListModelsPayload(t, recorder)
 	owners := make(map[string]string, len(payload.Data))
+	counts := make(map[string]int, len(payload.Data))
 	for _, item := range payload.Data {
 		owners[item.Id] = item.OwnedBy
+		counts[item.Id]++
 	}
+	require.Equal(t, 1, counts["gpt-5"])
 	require.Equal(t, "codex", owners["gpt-5"])
 }

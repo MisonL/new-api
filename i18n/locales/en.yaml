@@ -248,6 +248,7 @@ oauth.token_failed: "Failed to get token from {{.Provider}}, please check settin
 oauth.user_info_empty: "{{.Provider}} returned empty user info, please check settings"
 oauth.trust_level_low: "Linux DO trust level does not meet the minimum required by administrator"
 oauth.ticket_missing: "Missing CAS service ticket"
+oauth.ticket_replayed: "CAS service ticket has already been used"
 
 # Model layer error messages
 redeem.failed: "Redemption failed, please try again later"

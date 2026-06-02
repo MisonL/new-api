@@ -91,3 +91,22 @@ func TestGetPasskeySettingsForServerAddressDerivesValues(t *testing.T) {
 		t.Fatalf("GetPasskeySettingsForServerAddress().Origins = %q, want %q", got.Origins, "https://127.0.0.1:13020")
 	}
 }
+
+func TestGetPasskeySettingsForServerAddressSkipsNonLoopbackHTTP(t *testing.T) {
+	previousSettings := defaultPasskeySettings
+	defaultPasskeySettings = PasskeySettings{
+		RPID:    "",
+		Origins: "",
+	}
+	defer func() {
+		defaultPasskeySettings = previousSettings
+	}()
+
+	got := GetPasskeySettingsForServerAddress("http://new-api-dev-isolated-new-api-1:3000")
+	if got.RPID != "" {
+		t.Fatalf("GetPasskeySettingsForServerAddress().RPID = %q, want empty", got.RPID)
+	}
+	if got.Origins != "" {
+		t.Fatalf("GetPasskeySettingsForServerAddress().Origins = %q, want empty", got.Origins)
+	}
+}
