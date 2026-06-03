@@ -253,6 +253,197 @@ func TestUpdateChannelAllowsBuiltinCLIHeaderProfileWithoutParamOverride(t *testi
 	require.True(t, response.Success, response.Message)
 }
 
+func TestUpdateChannelAllowsBuiltinLatestHeaderProfileWithoutSnapshot(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":     channel.Id,
+		"type":   channel.Type,
+		"key":    channel.Key,
+		"status": channel.Status,
+		"name":   channel.Name,
+		"group":  channel.Group,
+		"models": channel.Models,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"codex-cli@latest"},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+
+	loaded, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	strategy := loaded.GetOtherSettings().HeaderProfileStrategy
+	require.NotNil(t, strategy)
+	require.Equal(t, []string{"codex-cli@latest"}, strategy.SelectedProfileIDs)
+	require.Empty(t, strategy.Profiles)
+}
+
+func TestUpdateChannelAllowsHeaderProfileVersionMetaPlatforms(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+	}{
+		{name: "macos-arm64", platform: dto.HeaderProfilePlatformMacOSArm64},
+		{name: "linux-x64", platform: dto.HeaderProfilePlatformLinuxX64},
+		{name: "linux-arm64", platform: dto.HeaderProfilePlatformLinuxArm64},
+		{name: "windows-x64", platform: dto.HeaderProfilePlatformWindowsX64},
+		{name: "windows-arm64", platform: dto.HeaderProfilePlatformWindowsArm64},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setupChannelControllerTestDB(t)
+			channel := seedChannelForHeaderProfileTest(t)
+
+			ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+				"id":     channel.Id,
+				"type":   channel.Type,
+				"key":    channel.Key,
+				"status": channel.Status,
+				"name":   channel.Name,
+				"group":  channel.Group,
+				"models": channel.Models,
+				"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+					HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+						Enabled:            true,
+						Mode:               dto.HeaderProfileModeFixed,
+						SelectedProfileIDs: []string{"gemini-cli@latest"},
+						Profiles: []dto.HeaderProfile{
+							{
+								ID:      "gemini-cli@latest",
+								Headers: map[string]string{"User-Agent": "GeminiCLI/0.44.0/gemini-3.1-pro-preview (darwin; x64; terminal)"},
+								VersionMeta: &dto.HeaderProfileVersionMeta{
+									BaseProfileID: "gemini-cli",
+									PackageName:   "@google/gemini-cli",
+									Source:        "npm",
+									Version:       dto.HeaderProfileLatestVersion,
+									Platform:      test.platform,
+								},
+							},
+						},
+					},
+				}),
+			})
+
+			UpdateChannel(ctx)
+
+			response := decodeChannelAPIResponse(t, recorder)
+			require.True(t, response.Success, response.Message)
+
+			loaded, err := model.GetChannelById(channel.Id, true)
+			require.NoError(t, err)
+			strategy := loaded.GetOtherSettings().HeaderProfileStrategy
+			require.NotNil(t, strategy)
+			require.Len(t, strategy.Profiles, 1)
+			require.Equal(t, test.platform, strategy.Profiles[0].VersionMeta.Platform)
+		})
+	}
+}
+
+func TestUpdateChannelRejectsInvalidHeaderProfileVersionMeta(t *testing.T) {
+	tests := []struct {
+		name        string
+		profileID   string
+		versionMeta *dto.HeaderProfileVersionMeta
+		message     string
+	}{
+		{
+			name:      "invalid-version",
+			profileID: "codex-cli@latest",
+			versionMeta: &dto.HeaderProfileVersionMeta{
+				BaseProfileID: "codex-cli",
+				PackageName:   "@openai/codex",
+				Source:        "npm",
+				Version:       "0.200.0\nInjected",
+				Platform:      dto.HeaderProfilePlatformMacOSX64,
+			},
+			message: "version_meta.version",
+		},
+		{
+			name:      "invalid-platform",
+			profileID: "codex-cli@latest",
+			versionMeta: &dto.HeaderProfileVersionMeta{
+				BaseProfileID: "codex-cli",
+				PackageName:   "@openai/codex",
+				Source:        "npm",
+				Version:       dto.HeaderProfileLatestVersion,
+				Platform:      "plan9-x64",
+			},
+			message: "version_meta.platform",
+		},
+		{
+			name:      "base-profile-mismatch",
+			profileID: "codex-cli@latest",
+			versionMeta: &dto.HeaderProfileVersionMeta{
+				BaseProfileID: "gemini-cli",
+				PackageName:   "@google/gemini-cli",
+				Source:        "npm",
+				Version:       dto.HeaderProfileLatestVersion,
+				Platform:      dto.HeaderProfilePlatformLinuxArm64,
+			},
+			message: "version_meta.base_profile_id",
+		},
+		{
+			name:      "package-mismatch",
+			profileID: "custom-cli-snapshot",
+			versionMeta: &dto.HeaderProfileVersionMeta{
+				BaseProfileID: "gemini-cli",
+				PackageName:   "@openai/codex",
+				Source:        "npm",
+				Version:       dto.HeaderProfileLatestVersion,
+				Platform:      dto.HeaderProfilePlatformLinuxArm64,
+			},
+			message: "version_meta.package_name",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setupChannelControllerTestDB(t)
+			channel := seedChannelForHeaderProfileTest(t)
+
+			ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+				"id":     channel.Id,
+				"type":   channel.Type,
+				"key":    channel.Key,
+				"status": channel.Status,
+				"name":   channel.Name,
+				"group":  channel.Group,
+				"models": channel.Models,
+				"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+					HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+						Enabled:            true,
+						Mode:               dto.HeaderProfileModeFixed,
+						SelectedProfileIDs: []string{test.profileID},
+						Profiles: []dto.HeaderProfile{
+							{
+								ID:          test.profileID,
+								Headers:     map[string]string{"User-Agent": dto.BuiltinCodexCLIUserAgent},
+								VersionMeta: test.versionMeta,
+							},
+						},
+					},
+				}),
+			})
+
+			UpdateChannel(ctx)
+
+			response := decodeChannelAPIResponse(t, recorder)
+			require.False(t, response.Success)
+			require.Contains(t, response.Message, test.message)
+		})
+	}
+}
+
 func TestUpdateChannelRejectsPassthroughRequiredCustomHeaderProfileWithoutParamOverride(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
@@ -857,6 +1048,99 @@ func TestBuildFetchModelsHeadersAppliesHeaderProfileStrategy(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers.Get("User-Agent"))
 	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers.Get("Originator"))
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+}
+
+func TestBuildFetchModelsHeadersResolvesLatestHeaderProfileVersion(t *testing.T) {
+	previousResolver := dto.ResolveNpmCLILatestVersion
+	dto.ResolveNpmCLILatestVersion = func(packageName string) (string, bool) {
+		require.Equal(t, "@openai/codex", packageName)
+		return "0.200.0", true
+	}
+	defer func() {
+		dto.ResolveNpmCLILatestVersion = previousResolver
+	}()
+
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI,
+		OtherSettings: marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"codex-cli@latest"},
+				Profiles: []dto.HeaderProfile{
+					{
+						ID:       "codex-cli@latest",
+						Name:     "Codex CLI latest (0.134.0)",
+						Category: dto.HeaderProfileCategoryAICodingCLI,
+						Scope:    dto.HeaderProfileScopeBuiltin,
+						ReadOnly: true,
+						Headers: map[string]string{
+							"User-Agent": dto.BuiltinCodexCLIUserAgent,
+							"Originator": dto.BuiltinCodexCLIOriginator,
+						},
+						VersionMeta: &dto.HeaderProfileVersionMeta{
+							BaseProfileID: "codex-cli",
+							PackageName:   "@openai/codex",
+							Source:        "npm",
+							Version:       dto.HeaderProfileLatestVersion,
+						},
+					},
+				},
+			},
+		}),
+	}
+
+	headers, err := buildFetchModelsHeaders(channel, "sk-test")
+	require.NoError(t, err)
+	require.Equal(t, "codex-tui/0.200.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.200.0)", headers.Get("User-Agent"))
+	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers.Get("Originator"))
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+}
+
+func TestBuildFetchModelsHeadersResolvesLatestHeaderProfilePlatform(t *testing.T) {
+	previousResolver := dto.ResolveNpmCLILatestVersion
+	dto.ResolveNpmCLILatestVersion = func(packageName string) (string, bool) {
+		require.Equal(t, "@qwen-code/qwen-code", packageName)
+		return "0.20.0", true
+	}
+	defer func() {
+		dto.ResolveNpmCLILatestVersion = previousResolver
+	}()
+
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI,
+		OtherSettings: marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"qwen-code@latest"},
+				Profiles: []dto.HeaderProfile{
+					{
+						ID:       "qwen-code@latest",
+						Name:     "Qwen Code latest Linux arm64",
+						Category: dto.HeaderProfileCategoryAICodingCLI,
+						Scope:    dto.HeaderProfileScopeBuiltin,
+						ReadOnly: true,
+						Headers: map[string]string{
+							"User-Agent": "QwenCode/0.16.2 (darwin; x64)",
+						},
+						VersionMeta: &dto.HeaderProfileVersionMeta{
+							BaseProfileID: "qwen-code",
+							PackageName:   "@qwen-code/qwen-code",
+							Source:        "npm",
+							Version:       dto.HeaderProfileLatestVersion,
+							Platform:      dto.HeaderProfilePlatformLinuxArm64,
+						},
+					},
+				},
+			},
+		}),
+	}
+
+	headers, err := buildFetchModelsHeaders(channel, "sk-test")
+	require.NoError(t, err)
+	require.Equal(t, "QwenCode/0.20.0 (linux; arm64)", headers.Get("User-Agent"))
 	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
 }
 

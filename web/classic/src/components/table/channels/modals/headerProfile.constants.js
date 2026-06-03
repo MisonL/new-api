@@ -95,17 +95,104 @@ const AI_CODING_CLI_VERSION_SOURCES = {
 };
 
 export const NPM_VERSION_OPTION_LIMIT = 5;
+export const NPM_VERSION_LATEST_ALIAS = 'latest';
+export const AI_CODING_CLI_DEFAULT_PLATFORM = 'macos-x64';
+export const AI_CODING_CLI_PLATFORM_OPTIONS = [
+  {
+    value: 'macos-x64',
+    label: 'macOS x64',
+    codexOS: 'Mac OS 15.7.3',
+    codexArch: 'x86_64',
+    geminiOS: 'darwin',
+    geminiArch: 'x64',
+    qwenOS: 'darwin',
+    qwenArch: 'x64',
+  },
+  {
+    value: 'macos-arm64',
+    label: 'macOS arm64',
+    codexOS: 'Mac OS 15.7.3',
+    codexArch: 'aarch64',
+    geminiOS: 'darwin',
+    geminiArch: 'arm64',
+    qwenOS: 'darwin',
+    qwenArch: 'arm64',
+  },
+  {
+    value: 'linux-x64',
+    label: 'Linux x64',
+    codexOS: 'Linux',
+    codexArch: 'x86_64',
+    geminiOS: 'linux',
+    geminiArch: 'x64',
+    qwenOS: 'linux',
+    qwenArch: 'x64',
+  },
+  {
+    value: 'linux-arm64',
+    label: 'Linux arm64',
+    codexOS: 'Linux',
+    codexArch: 'aarch64',
+    geminiOS: 'linux',
+    geminiArch: 'arm64',
+    qwenOS: 'linux',
+    qwenArch: 'arm64',
+  },
+  {
+    value: 'windows-x64',
+    label: 'Windows x64',
+    codexOS: 'Windows NT 10.0',
+    codexArch: 'x86_64',
+    geminiOS: 'win32',
+    geminiArch: 'x64',
+    qwenOS: 'win32',
+    qwenArch: 'x64',
+  },
+  {
+    value: 'windows-arm64',
+    label: 'Windows arm64',
+    codexOS: 'Windows NT 10.0',
+    codexArch: 'aarch64',
+    geminiOS: 'win32',
+    geminiArch: 'arm64',
+    qwenOS: 'win32',
+    qwenArch: 'arm64',
+  },
+];
 
-export function buildAiCodingCliUserAgent(profileId, version) {
+export function normalizeAiCodingCliPlatform(platform) {
+  const normalizedPlatform = String(platform || '').trim();
+  return AI_CODING_CLI_PLATFORM_OPTIONS.some(
+    (option) => option.value === normalizedPlatform,
+  )
+    ? normalizedPlatform
+    : AI_CODING_CLI_DEFAULT_PLATFORM;
+}
+
+function getAiCodingCliPlatformTokens(platform) {
+  const normalizedPlatform = normalizeAiCodingCliPlatform(platform);
+  return (
+    AI_CODING_CLI_PLATFORM_OPTIONS.find(
+      (option) => option.value === normalizedPlatform,
+    ) || AI_CODING_CLI_PLATFORM_OPTIONS[0]
+  );
+}
+
+export function buildAiCodingCliUserAgent(
+  profileId,
+  version,
+  platform = AI_CODING_CLI_DEFAULT_PLATFORM,
+) {
+  const platformTokens = getAiCodingCliPlatformTokens(platform);
   switch (profileId) {
     case 'codex-cli':
-      return `codex-tui/${version} (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; ${version})`;
+      return `codex-tui/${version} (${platformTokens.codexOS}; ${platformTokens.codexArch}) ghostty/1.3.1 (codex-tui; ${version})`;
     case 'claude-code':
       return `claude-cli/${version} (external, sdk-cli)`;
     case 'gemini-cli':
-      return `GeminiCLI/${version}/gemini-3.1-pro-preview (darwin; x64; terminal)`;
+      return `GeminiCLI/${version}/gemini-3.1-pro-preview (${platformTokens.geminiOS}; ${platformTokens.geminiArch}; terminal)`;
     case 'qwen-code':
-      return `QwenCode/${version} (darwin; x64)`;
+      return `QwenCode/${version} (${platformTokens.qwenOS}; ${platformTokens.qwenArch})`;
     case 'droid':
       return `factory-cli/${version}`;
     default:
@@ -113,10 +200,15 @@ export function buildAiCodingCliUserAgent(profileId, version) {
   }
 }
 
-function buildAiCodingCliHeaders(profileId, version, extraHeaders = {}) {
+function buildAiCodingCliHeaders(
+  profileId,
+  version,
+  extraHeaders = {},
+  platform = AI_CODING_CLI_DEFAULT_PLATFORM,
+) {
   return {
     ...extraHeaders,
-    'User-Agent': buildAiCodingCliUserAgent(profileId, version),
+    'User-Agent': buildAiCodingCliUserAgent(profileId, version, platform),
   };
 }
 
@@ -130,7 +222,7 @@ const aiCodingCliProfiles = {
     passthroughRequired: false,
     versionSource: AI_CODING_CLI_VERSION_SOURCES['codex-cli'],
     description:
-      '固定请求头静态快照来自 Codex CLI 0.134.0 交互式 TUI 请求头生成逻辑；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。',
+      '默认使用 Codex CLI npm latest 版本套用交互式 TUI 请求头生成逻辑；清单暂不可用时保留内置快照。此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。',
     headers: buildAiCodingCliHeaders('codex-cli', '0.134.0', {
       Originator: 'codex-tui',
     }),
@@ -151,7 +243,7 @@ const aiCodingCliProfiles = {
     'claude-code',
     'Claude Code',
     buildAiCodingCliHeaders('claude-code', '2.1.153'),
-    '固定请求头静态快照按 Claude Code 2.1.153 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。',
+    '默认使用 Claude Code npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES['claude-code'],
     false,
   ),
@@ -159,7 +251,7 @@ const aiCodingCliProfiles = {
     'gemini-cli',
     'Gemini CLI',
     buildAiCodingCliHeaders('gemini-cli', '0.44.0'),
-    '固定请求头静态快照按 Gemini CLI 0.44.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。',
+    '默认使用 Gemini CLI npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES['gemini-cli'],
     false,
   ),
@@ -167,7 +259,7 @@ const aiCodingCliProfiles = {
     'qwen-code',
     'Qwen Code',
     buildAiCodingCliHeaders('qwen-code', '0.16.2'),
-    '固定请求头静态快照按 Qwen Code 0.16.2 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。',
+    '默认使用 Qwen Code npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES['qwen-code'],
     false,
   ),
@@ -175,7 +267,7 @@ const aiCodingCliProfiles = {
     'droid',
     'Droid CLI',
     buildAiCodingCliHeaders('droid', '0.135.0'),
-    '固定请求头静态快照按 Droid 0.135.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。',
+    '默认使用 Droid npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES.droid,
     false,
   ),
@@ -232,39 +324,68 @@ function compareStableVersionsDesc(left, right) {
 }
 
 function addUniqueVersion(target, version) {
-  const normalizedVersion = String(version || '').trim();
+  const normalizedVersion = normalizeNpmCliVersionValue(version);
   if (!normalizedVersion || target.includes(normalizedVersion)) {
     return;
   }
   target.push(normalizedVersion);
 }
 
+function normalizeNpmCliVersionValue(version) {
+  const normalizedVersion = String(version || '').trim();
+  if (
+    !normalizedVersion ||
+    normalizedVersion === NPM_VERSION_LATEST_ALIAS ||
+    normalizedVersion.length > 64 ||
+    !/^[0-9][0-9A-Za-z.+-]*$/.test(normalizedVersion)
+  ) {
+    return '';
+  }
+  return normalizedVersion;
+}
+
 export function buildNpmCliVersionOptions(
   packageMetadata,
   limit = NPM_VERSION_OPTION_LIMIT,
 ) {
-  const latestVersion = String(
-    packageMetadata?.['dist-tags']?.latest || '',
-  ).trim();
+  let latestVersion = normalizeNpmCliVersionValue(
+    packageMetadata?.['dist-tags']?.latest,
+  );
   const allVersions = packageMetadata?.versions
     ? Object.keys(packageMetadata.versions)
     : [];
   const stableVersions = allVersions
     .filter((version) => parseStableVersion(version) !== null)
     .sort(compareStableVersionsDesc);
+  if (!latestVersion && stableVersions.length > 0) {
+    latestVersion = stableVersions[0];
+  }
   const selectedVersions = [];
   addUniqueVersion(selectedVersions, latestVersion);
   stableVersions.forEach((version) =>
     addUniqueVersion(selectedVersions, version),
   );
-  return selectedVersions.slice(0, limit).map((version) => ({
+  const pinnedOptions = selectedVersions.slice(0, limit).map((version) => ({
     value: version,
-    label: version === latestVersion ? `${version} (latest)` : version,
-    isLatest: version === latestVersion,
+    label: version,
+    isLatest: false,
+    resolvedVersion: version,
   }));
+  if (!latestVersion) {
+    return pinnedOptions;
+  }
+  return [
+    {
+      value: NPM_VERSION_LATEST_ALIAS,
+      label: `${NPM_VERSION_LATEST_ALIAS} (${latestVersion})`,
+      isLatest: true,
+      resolvedVersion: latestVersion,
+    },
+    ...pinnedOptions,
+  ];
 }
 
-function normalizeNpmCliVersionOption(option = {}) {
+function normalizeNpmCliVersionOption(option = {}, latestVersion = '') {
   if (!option || typeof option !== 'object' || Array.isArray(option)) {
     return null;
   }
@@ -272,10 +393,44 @@ function normalizeNpmCliVersionOption(option = {}) {
   if (!value) {
     return null;
   }
+  if (value === NPM_VERSION_LATEST_ALIAS) {
+    const resolvedVersion = normalizeNpmCliVersionValue(
+      option.resolvedVersion || option.resolved_version || latestVersion,
+    );
+    if (!resolvedVersion) {
+      return null;
+    }
+    return {
+      value: NPM_VERSION_LATEST_ALIAS,
+      label:
+        String(option.label || '').trim() ||
+        `${NPM_VERSION_LATEST_ALIAS} (${resolvedVersion})`,
+      isLatest: true,
+      resolvedVersion,
+    };
+  }
+  const normalizedValue = normalizeNpmCliVersionValue(value);
+  if (!normalizedValue) {
+    return null;
+  }
+  if (option.isLatest === true || option.is_latest === true) {
+    return {
+      value: NPM_VERSION_LATEST_ALIAS,
+      label:
+        String(option.label || '').trim() ||
+        `${NPM_VERSION_LATEST_ALIAS} (${normalizedValue})`,
+      isLatest: true,
+      resolvedVersion: normalizedValue,
+    };
+  }
   return {
-    value,
-    label: String(option.label || value).trim() || value,
-    isLatest: option.isLatest === true || option.is_latest === true,
+    value: normalizedValue,
+    label: String(option.label || normalizedValue).trim() || normalizedValue,
+    isLatest: false,
+    resolvedVersion:
+      normalizeNpmCliVersionValue(
+        option.resolvedVersion || option.resolved_version || '',
+      ) || normalizedValue,
   };
 }
 
@@ -283,10 +438,32 @@ export function normalizeNpmCliVersionOptions(options) {
   if (!Array.isArray(options)) {
     return [];
   }
-  return options
-    .map((option) => normalizeNpmCliVersionOption(option))
-    .filter(Boolean)
-    .slice(0, NPM_VERSION_OPTION_LIMIT);
+  const normalizedOptions = [];
+  const seenValues = new Set();
+  let latestVersion = '';
+  options.forEach((option) => {
+    const normalizedOption = normalizeNpmCliVersionOption(
+      option,
+      latestVersion,
+    );
+    if (!normalizedOption || seenValues.has(normalizedOption.value)) {
+      return;
+    }
+    if (normalizedOption.value === NPM_VERSION_LATEST_ALIAS) {
+      latestVersion = normalizedOption.resolvedVersion;
+    }
+    seenValues.add(normalizedOption.value);
+    normalizedOptions.push(normalizedOption);
+  });
+  const latestOption = normalizedOptions.find(
+    (option) => option.value === NPM_VERSION_LATEST_ALIAS,
+  );
+  const pinnedOptions = normalizedOptions.filter(
+    (option) => option.value !== NPM_VERSION_LATEST_ALIAS,
+  );
+  return (
+    latestOption ? [latestOption, ...pinnedOptions] : pinnedOptions
+  ).slice(0, NPM_VERSION_OPTION_LIMIT + 1);
 }
 
 export function getAiCodingCliVersionSource(profile) {
@@ -294,33 +471,84 @@ export function getAiCodingCliVersionSource(profile) {
   return profile?.versionSource || AI_CODING_CLI_VERSION_SOURCES[profileId];
 }
 
+export function buildAiCodingCliVersionMeta(
+  profile,
+  version,
+  platform = AI_CODING_CLI_DEFAULT_PLATFORM,
+) {
+  const baseProfileId = String(profile?.id || profile?.key || '').trim();
+  const rawVersion = String(version || '').trim();
+  const normalizedVersion =
+    rawVersion === NPM_VERSION_LATEST_ALIAS
+      ? NPM_VERSION_LATEST_ALIAS
+      : normalizeNpmCliVersionValue(rawVersion);
+  const versionSource = getAiCodingCliVersionSource(profile);
+  if (!baseProfileId || !normalizedVersion || !versionSource?.packageName) {
+    return null;
+  }
+  return {
+    baseProfileId,
+    packageName: versionSource.packageName,
+    source: 'npm',
+    version: normalizedVersion,
+    platform: normalizeAiCodingCliPlatform(platform),
+  };
+}
+
 export function buildVersionedAiCodingCliProfile(
   profile,
   version,
   source = 'npm',
+  resolvedVersion = '',
+  platform = AI_CODING_CLI_DEFAULT_PLATFORM,
 ) {
   const baseProfileId = String(profile?.id || profile?.key || '').trim();
-  const normalizedVersion = String(version || '').trim();
+  const rawVersion = String(version || '').trim();
+  const normalizedVersion =
+    rawVersion === NPM_VERSION_LATEST_ALIAS
+      ? NPM_VERSION_LATEST_ALIAS
+      : normalizeNpmCliVersionValue(rawVersion);
   const versionSource = getAiCodingCliVersionSource(profile);
-  if (!baseProfileId || !normalizedVersion || !versionSource) {
+  const effectiveVersion = normalizeNpmCliVersionValue(
+    resolvedVersion ||
+      (normalizedVersion === NPM_VERSION_LATEST_ALIAS
+        ? versionSource?.fallbackVersion
+        : normalizedVersion) ||
+      '',
+  );
+  if (
+    !baseProfileId ||
+    !normalizedVersion ||
+    !effectiveVersion ||
+    !versionSource?.packageName
+  ) {
     return profile;
   }
   const baseName = String(profile.name || baseProfileId).trim();
+  const normalizedPlatform = normalizeAiCodingCliPlatform(platform);
+  const platformLabel = getAiCodingCliPlatformTokens(normalizedPlatform).label;
+  const displayVersion =
+    normalizedVersion === NPM_VERSION_LATEST_ALIAS
+      ? `${NPM_VERSION_LATEST_ALIAS} (${effectiveVersion})`
+      : normalizedVersion;
   return {
     ...profile,
     id: `${baseProfileId}@${normalizedVersion}`,
     key: `${baseProfileId}@${normalizedVersion}`,
-    name: `${baseName} ${normalizedVersion}`,
+    name: `${baseName} ${displayVersion} ${platformLabel}`,
     headers: buildAiCodingCliHeaders(
       baseProfileId,
-      normalizedVersion,
+      effectiveVersion,
       baseProfileId === 'codex-cli' ? { Originator: 'codex-tui' } : {},
+      normalizedPlatform,
     ),
     versionMeta: {
-      baseProfileId,
-      packageName: versionSource.packageName,
+      ...buildAiCodingCliVersionMeta(
+        profile,
+        normalizedVersion,
+        normalizedPlatform,
+      ),
       source,
-      version: normalizedVersion,
     },
   };
 }

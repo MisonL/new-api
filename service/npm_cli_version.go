@@ -17,10 +17,11 @@ import (
 
 const (
 	npmCliVersionOptionLimit      = 5
-	npmCliVersionCacheTTL         = 10 * time.Minute
+	npmCliVersionRefreshInterval  = 10 * time.Minute
 	npmRegistryRequestTimeout     = 5 * time.Second
 	npmRegistryMetadataMaxBytes   = 4 << 20
 	defaultNpmRegistryMetadataURL = "https://registry.npmjs.org"
+	NpmCLIVersionLatestAlias      = "latest"
 )
 
 var allowedNpmCLIPackages = map[string]struct{}{
@@ -39,14 +40,16 @@ var npmCliVersionCache = struct {
 }
 
 type NpmCLIVersionOption struct {
-	Value    string `json:"value"`
-	Label    string `json:"label"`
-	IsLatest bool   `json:"isLatest"`
+	Value           string `json:"value"`
+	Label           string `json:"label"`
+	IsLatest        bool   `json:"isLatest"`
+	ResolvedVersion string `json:"resolvedVersion,omitempty"`
 }
 
 type npmCliVersionCacheEntry struct {
-	expiresAt time.Time
-	options   []NpmCLIVersionOption
+	fetchedAt     time.Time
+	latestVersion string
+	options       []NpmCLIVersionOption
 }
 
 type npmPackageMetadata struct {
@@ -68,16 +71,12 @@ func FetchNpmCLIVersionOptions(ctx context.Context, packageName string) ([]NpmCL
 		return nil, fmt.Errorf("unsupported npm package: %s", normalizedPackageName)
 	}
 
-	if options, ok := getCachedNpmCLIVersionOptions(normalizedPackageName, time.Now()); ok {
+	loadRecordedNpmCLIVersionOptions()
+	if options, ok := getCachedNpmCLIVersionOptions(normalizedPackageName); ok {
 		return options, nil
 	}
 
-	options, err := fetchNpmCLIVersionOptions(ctx, normalizedPackageName, defaultNpmRegistryHTTPClient(), defaultNpmRegistryMetadataURL)
-	if err != nil {
-		return nil, err
-	}
-	setCachedNpmCLIVersionOptions(normalizedPackageName, options, time.Now().Add(npmCliVersionCacheTTL))
-	return cloneNpmCLIVersionOptions(options), nil
+	return nil, fmt.Errorf("npm version options not recorded for package: %s", normalizedPackageName)
 }
 
 func fetchNpmCLIVersionOptions(ctx context.Context, packageName string, client *http.Client, registryBaseURL string) ([]NpmCLIVersionOption, error) {
@@ -123,7 +122,11 @@ func fetchNpmCLIVersionOptions(ctx context.Context, packageName string, client *
 		return nil, fmt.Errorf("decode npm registry metadata for %s: %w", normalizedPackageName, err)
 	}
 
-	return buildNpmCLIVersionOptions(metadata), nil
+	options := buildNpmCLIVersionOptions(metadata)
+	if len(options) == 0 {
+		return nil, fmt.Errorf("npm registry metadata for %s contains no usable versions", normalizedPackageName)
+	}
+	return options, nil
 }
 
 func defaultNpmRegistryHTTPClient() *http.Client {
@@ -131,32 +134,6 @@ func defaultNpmRegistryHTTPClient() *http.Client {
 		return client
 	}
 	return http.DefaultClient
-}
-
-func getCachedNpmCLIVersionOptions(packageName string, now time.Time) ([]NpmCLIVersionOption, bool) {
-	npmCliVersionCache.RLock()
-	entry, exists := npmCliVersionCache.items[packageName]
-	npmCliVersionCache.RUnlock()
-	if !exists || !entry.expiresAt.After(now) {
-		if exists {
-			npmCliVersionCache.Lock()
-			if current, ok := npmCliVersionCache.items[packageName]; ok && !current.expiresAt.After(now) {
-				delete(npmCliVersionCache.items, packageName)
-			}
-			npmCliVersionCache.Unlock()
-		}
-		return nil, false
-	}
-	return cloneNpmCLIVersionOptions(entry.options), true
-}
-
-func setCachedNpmCLIVersionOptions(packageName string, options []NpmCLIVersionOption, expiresAt time.Time) {
-	npmCliVersionCache.Lock()
-	npmCliVersionCache.items[packageName] = npmCliVersionCacheEntry{
-		expiresAt: expiresAt,
-		options:   cloneNpmCLIVersionOptions(options),
-	}
-	npmCliVersionCache.Unlock()
 }
 
 func cloneNpmCLIVersionOptions(options []NpmCLIVersionOption) []NpmCLIVersionOption {
@@ -180,16 +157,19 @@ func decodeNpmPackageMetadata(reader io.Reader, metadata *npmPackageMetadata) er
 }
 
 func buildNpmCLIVersionOptions(metadata npmPackageMetadata) []NpmCLIVersionOption {
-	latestVersion := strings.TrimSpace(metadata.DistTags["latest"])
+	latestVersion := normalizeNpmCLIVersionValue(metadata.DistTags["latest"])
 	stableVersions := make([]string, 0, len(metadata.Versions))
 	for version := range metadata.Versions {
 		if _, ok := parseStableVersion(version); ok {
-			stableVersions = append(stableVersions, version)
+			stableVersions = append(stableVersions, strings.TrimSpace(version))
 		}
 	}
 	sort.SliceStable(stableVersions, func(i, j int) bool {
 		return compareStableVersionsDesc(stableVersions[i], stableVersions[j]) < 0
 	})
+	if latestVersion == "" && len(stableVersions) > 0 {
+		latestVersion = stableVersions[0]
+	}
 
 	selectedVersions := make([]string, 0, npmCliVersionOptionLimit)
 	selectedVersions = addUniqueNpmVersion(selectedVersions, latestVersion)
@@ -200,23 +180,49 @@ func buildNpmCLIVersionOptions(metadata npmPackageMetadata) []NpmCLIVersionOptio
 		}
 	}
 
-	options := make([]NpmCLIVersionOption, 0, len(selectedVersions))
+	options := make([]NpmCLIVersionOption, 0, len(selectedVersions)+1)
+	if latestVersion != "" {
+		options = append(options, NpmCLIVersionOption{
+			Value:           NpmCLIVersionLatestAlias,
+			Label:           fmt.Sprintf("%s (%s)", NpmCLIVersionLatestAlias, latestVersion),
+			IsLatest:        true,
+			ResolvedVersion: latestVersion,
+		})
+	}
 	for _, version := range selectedVersions {
 		option := NpmCLIVersionOption{
-			Value:    version,
-			Label:    version,
-			IsLatest: version == latestVersion,
-		}
-		if option.IsLatest {
-			option.Label = version + " (latest)"
+			Value:           version,
+			Label:           version,
+			IsLatest:        false,
+			ResolvedVersion: version,
 		}
 		options = append(options, option)
 	}
 	return options
 }
 
+func latestNpmCLIVersionFromOptions(options []NpmCLIVersionOption) string {
+	for _, option := range options {
+		if strings.TrimSpace(option.Value) == NpmCLIVersionLatestAlias {
+			if version := normalizeNpmCLIVersionValue(option.ResolvedVersion); version != "" {
+				return version
+			}
+			continue
+		}
+		if option.IsLatest {
+			if version := normalizeNpmCLIVersionValue(option.ResolvedVersion); version != "" {
+				return version
+			}
+			if version := normalizeNpmCLIVersionValue(option.Value); version != "" {
+				return version
+			}
+		}
+	}
+	return ""
+}
+
 func addUniqueNpmVersion(target []string, version string) []string {
-	normalizedVersion := strings.TrimSpace(version)
+	normalizedVersion := normalizeNpmCLIVersionValue(version)
 	if normalizedVersion == "" {
 		return target
 	}
@@ -226,6 +232,34 @@ func addUniqueNpmVersion(target []string, version string) []string {
 		}
 	}
 	return append(target, normalizedVersion)
+}
+
+func normalizeNpmCLIVersionValue(version string) string {
+	normalizedVersion := strings.TrimSpace(version)
+	if normalizedVersion == "" ||
+		normalizedVersion == NpmCLIVersionLatestAlias ||
+		len(normalizedVersion) > 64 {
+		return ""
+	}
+	for index, char := range normalizedVersion {
+		if index == 0 && (char < '0' || char > '9') {
+			return ""
+		}
+		if char >= '0' && char <= '9' {
+			continue
+		}
+		if char >= 'A' && char <= 'Z' {
+			continue
+		}
+		if char >= 'a' && char <= 'z' {
+			continue
+		}
+		if char == '.' || char == '-' || char == '+' {
+			continue
+		}
+		return ""
+	}
+	return normalizedVersion
 }
 
 func compareStableVersionsDesc(left string, right string) int {

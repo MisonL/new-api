@@ -106,6 +106,17 @@ const HeaderProfileStrategySection = ({
       : strategy.mode === 'round_robin'
         ? t('轮询模式支持多选，并按列表顺序依次使用')
         : t('随机模式支持多选，并在每次请求时随机挑选使用');
+  const multiTemplateMode =
+    strategy.mode === 'round_robin' || strategy.mode === 'random';
+  const libraryButtonText =
+    selectedCount === 0
+      ? t('选择模板')
+      : multiTemplateMode
+        ? t('添加/管理模板')
+        : t('更换模板');
+  const libraryTitle = multiTemplateMode
+    ? t('管理客户端模板')
+    : t('选择客户端模板');
   const selectionError =
     strategy.enabled && selectedCount === 0
       ? t('已启用客户端模板，但还没有选择模板')
@@ -206,7 +217,7 @@ const HeaderProfileStrategySection = ({
           <div className='mt-1'>
             <Text type='tertiary' size='small'>
               {t(
-                '大多数渠道只用这里。选择一个浏览器、AI CLI 或 SDK 模板即可；不选则保持默认请求。',
+                '大多数渠道只用这里。固定模式选择一个模板；轮询或随机模式可以添加多个模板。',
               )}
             </Text>
           </div>
@@ -300,7 +311,7 @@ const HeaderProfileStrategySection = ({
               type={selectedCount === 0 ? 'primary' : 'tertiary'}
               onClick={openLibrary}
             >
-              {selectedCount === 0 ? t('选择模板') : t('更换模板')}
+              {libraryButtonText}
             </Button>
             {selectedCount > 0 && (
               <Button size='small' type='tertiary' onClick={onClearSelected}>
@@ -309,7 +320,7 @@ const HeaderProfileStrategySection = ({
             )}
           </div>
         </div>
-        {strategy.enabled && selectedCount > 0 && (
+        {strategy.enabled && (
           <div
             className='mt-2 rounded-md px-2.5 py-2'
             style={{
@@ -545,7 +556,7 @@ const HeaderProfileStrategySection = ({
       </div>
 
       <Modal
-        title={t('选择客户端模板')}
+        title={libraryTitle}
         visible={libraryVisible}
         width={
           isMobile ? 'calc(100vw - 16px)' : 'min(920px, calc(100vw - 24px))'

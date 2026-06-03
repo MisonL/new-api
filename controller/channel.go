@@ -517,6 +517,9 @@ func validateHeaderProfileStrategySnapshots(strategy *dto.HeaderProfileStrategy)
 				return fmt.Errorf("header_profile_strategy profile %s 存在空请求头值", profile.ID)
 			}
 		}
+		if err := dto.ValidateHeaderProfileVersionMeta(profile); err != nil {
+			return fmt.Errorf("header_profile_strategy profile %s %s", profile.ID, err.Error())
+		}
 		profileMap[profile.ID] = profile
 	}
 

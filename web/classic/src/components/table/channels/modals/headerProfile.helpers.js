@@ -17,7 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { HEADER_PROFILE_PRESETS } from './headerProfile.constants.js';
+import {
+  AI_CODING_CLI_DEFAULT_PLATFORM,
+  buildAiCodingCliVersionMeta,
+  buildVersionedAiCodingCliProfile,
+  HEADER_PROFILE_PRESETS,
+  NPM_VERSION_LATEST_ALIAS,
+  normalizeAiCodingCliPlatform,
+} from './headerProfile.constants.js';
 
 const STRATEGIES = new Set(['fixed', 'round_robin', 'random']);
 const FALLBACK_CATEGORY = 'custom';
@@ -99,18 +106,33 @@ function isBuiltinAiCodingCliProfileId(profileId) {
   ].includes(baseProfileId);
 }
 
+function getBaseProfileIdFromProfileId(profileId) {
+  return String(profileId || '')
+    .split('@')[0]
+    .trim();
+}
+
 function normalizeVersionMeta(profile = {}) {
   const rawMeta = profile.versionMeta || profile.version_meta;
   if (!rawMeta || typeof rawMeta !== 'object' || Array.isArray(rawMeta)) {
     return null;
   }
   const version = String(rawMeta.version || '').trim();
+  const profileId = String(profile.id || profile.key || '').trim();
+  const inferredBaseProfileId = getBaseProfileIdFromProfileId(profileId);
   const baseProfileId = String(
-    rawMeta.baseProfileId || rawMeta.base_profile_id || '',
+    rawMeta.baseProfileId ||
+      rawMeta.base_profile_id ||
+      inferredBaseProfileId ||
+      '',
   ).trim();
-  const packageName = String(
+  let packageName = String(
     rawMeta.packageName || rawMeta.package_name || '',
   ).trim();
+  if (!packageName && baseProfileId) {
+    packageName =
+      HEADER_PROFILE_PRESETS[baseProfileId]?.versionSource?.packageName || '';
+  }
   if (!version || !baseProfileId) {
     return null;
   }
@@ -119,6 +141,7 @@ function normalizeVersionMeta(profile = {}) {
     packageName,
     source: String(rawMeta.source || '').trim() || 'npm',
     version,
+    platform: normalizeAiCodingCliPlatform(rawMeta.platform),
   };
 }
 
@@ -162,6 +185,17 @@ function normalizeProfile(profile = {}) {
   return normalized;
 }
 
+function getDefaultVersionMeta(profile) {
+  if (!profile || profile.versionMeta) {
+    return profile?.versionMeta || null;
+  }
+  return buildAiCodingCliVersionMeta(
+    profile,
+    NPM_VERSION_LATEST_ALIAS,
+    AI_CODING_CLI_DEFAULT_PLATFORM,
+  );
+}
+
 function createMissingProfileItem(profileId) {
   return {
     id: profileId,
@@ -176,11 +210,23 @@ function createMissingProfileItem(profileId) {
   };
 }
 
-function buildProfileMap(profiles = []) {
+function buildProfileMap(profiles = [], options = {}) {
   const profileMap = new Map();
+  const includeVersionedAliases = options.includeVersionedAliases === true;
   for (const builtinProfile of Object.values(HEADER_PROFILE_PRESETS)) {
     const normalized = normalizeProfile(builtinProfile);
     profileMap.set(normalized.id, normalized);
+    if (!includeVersionedAliases) {
+      continue;
+    }
+    const latestProfile = buildVersionedAiCodingCliProfile(
+      builtinProfile,
+      NPM_VERSION_LATEST_ALIAS,
+    );
+    if (latestProfile !== builtinProfile) {
+      const normalizedLatest = normalizeProfile(latestProfile);
+      profileMap.set(normalizedLatest.id, normalizedLatest);
+    }
   }
   for (const profile of profiles) {
     const normalized = normalizeProfile(profile);
@@ -189,6 +235,21 @@ function buildProfileMap(profiles = []) {
     }
   }
   return profileMap;
+}
+
+function resolveBuiltinVersionedProfile(profileId) {
+  const normalizedProfileId = String(profileId || '').trim();
+  const [baseProfileId, version] = normalizedProfileId.split('@');
+  const baseProfile = HEADER_PROFILE_PRESETS[baseProfileId];
+  if (!baseProfile || !version) {
+    return null;
+  }
+  const versionedProfile = buildVersionedAiCodingCliProfile(
+    baseProfile,
+    version,
+  );
+  const normalized = normalizeProfile(versionedProfile);
+  return normalized.id === normalizedProfileId ? normalized : null;
 }
 
 export function normalizeHeaderProfileStrategy(strategy) {
@@ -238,10 +299,16 @@ export function buildSelectedProfileItems(
   profiles = [],
   snapshotProfiles = [],
 ) {
-  const profileMap = buildProfileMap([...snapshotProfiles, ...profiles]);
+  const profileMap = buildProfileMap([...snapshotProfiles, ...profiles], {
+    includeVersionedAliases: true,
+  });
   return normalizeSelectedProfileIds(selectedProfileIds).map((profileId) => {
     if (profileMap.has(profileId)) {
       return profileMap.get(profileId);
+    }
+    const builtinVersionedProfile = resolveBuiltinVersionedProfile(profileId);
+    if (builtinVersionedProfile) {
+      return builtinVersionedProfile;
     }
     return createMissingProfileItem(profileId);
   });
@@ -393,12 +460,14 @@ export function buildHeaderProfileStrategySettings(settingsText, strategy) {
             if (profile.passthroughRequired === true) {
               snapshot.passthrough_required = true;
             }
-            if (profile.versionMeta) {
+            const versionMeta = getDefaultVersionMeta(profile);
+            if (versionMeta) {
               snapshot.version_meta = {
-                base_profile_id: profile.versionMeta.baseProfileId,
-                package_name: profile.versionMeta.packageName,
-                source: profile.versionMeta.source,
-                version: profile.versionMeta.version,
+                base_profile_id: versionMeta.baseProfileId,
+                package_name: versionMeta.packageName,
+                source: versionMeta.source,
+                version: versionMeta.version,
+                platform: normalizeAiCodingCliPlatform(versionMeta.platform),
               };
             }
             return snapshot;

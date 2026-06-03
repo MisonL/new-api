@@ -7,6 +7,8 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -60,4 +62,30 @@ func TestApplyMidjourneyRuntimeHeadersStringifiesValuesAndApiKey(t *testing.T) {
 	require.Equal(t, "3", req.Header.Get("X-Count"))
 	require.Equal(t, "true", req.Header.Get("X-Flag"))
 	require.Equal(t, "Bearer sk-test", req.Header.Get("X-Key"))
+}
+
+func TestApplyMidjourneyRuntimeHeadersAdvancesHeaderProfileRoundRobin(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/mj/submit", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelId, 31)
+	common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+		HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+			Enabled:            true,
+			Mode:               dto.HeaderProfileModeRoundRobin,
+			SelectedProfileIDs: []string{"codex-cli", "claude-code"},
+		},
+	})
+
+	first, err := http.NewRequest(http.MethodPost, "https://origin.example.com/mj/submit", nil)
+	require.NoError(t, err)
+	require.NoError(t, applyMidjourneyRuntimeHeaders(ctx, first, "sk-test"))
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, first.Header.Get("User-Agent"))
+
+	second, err := http.NewRequest(http.MethodPost, "https://origin.example.com/mj/submit", nil)
+	require.NoError(t, err)
+	require.NoError(t, applyMidjourneyRuntimeHeaders(ctx, second, "sk-test"))
+	require.Equal(t, "claude-cli/2.1.153 (external, sdk-cli)", second.Header.Get("User-Agent"))
 }

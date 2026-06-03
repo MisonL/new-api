@@ -486,6 +486,34 @@ func TestBuildChannelRuntimeRequestHeadersAppliesChannelAuxiliaryPolicy(t *testi
 	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers.Get("Originator"))
 }
 
+func TestBuildChannelRuntimeRequestHeadersAdvancesHeaderProfileRoundRobin(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "true"
+
+	channel := &model.Channel{Id: 19}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AuxiliaryRequestHeaderPolicyEnabled: common.GetPointer(true),
+		HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+			Enabled:            true,
+			Mode:               dto.HeaderProfileModeRoundRobin,
+			SelectedProfileIDs: []string{"codex-cli", "claude-code"},
+		},
+	})
+
+	first, err := BuildChannelRuntimeRequestHeaders(channel, "sk-test", http.Header{})
+	require.NoError(t, err)
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, first.Get("User-Agent"))
+
+	second, err := BuildChannelRuntimeRequestHeaders(channel, "sk-test", http.Header{})
+	require.NoError(t, err)
+	require.Equal(t, "claude-cli/2.1.153 (external, sdk-cli)", second.Get("User-Agent"))
+
+	state := model.RequestHeaderStrategyState{}
+	require.NoError(t, model.DB.Where("scope_type = ? AND scope_key = ?", runtimeHeaderProfileScopeType, "channel:19").First(&state).Error)
+	require.Equal(t, int64(2), state.RoundRobinCursor)
+	require.Equal(t, int64(2), state.Version)
+}
+
 func TestBuildChannelRuntimeRequestHeadersAppliesOverrideWhenProfileDisabled(t *testing.T) {
 	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
 	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "true"

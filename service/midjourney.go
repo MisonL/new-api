@@ -267,7 +267,10 @@ func applyMidjourneyRuntimeHeaders(c *gin.Context, req *http.Request, apiKey str
 		return nil
 	}
 	if settings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting); ok {
-		profileHeaders, _, err := dto.ResolveHeaderProfileStrategyHeaders(settings.HeaderProfileStrategy, 0)
+		profileHeaders, _, err := resolveChannelRuntimeHeaderProfileHeaders(
+			common.GetContextKeyInt(c, constant.ContextKeyChannelId),
+			settings.HeaderProfileStrategy,
+		)
 		if err != nil {
 			return err
 		}

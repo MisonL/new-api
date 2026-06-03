@@ -117,6 +117,9 @@ func main() {
 	// Codex credential auto-refresh check every 10 minutes, refresh when expires within 1 day
 	service.StartCodexCredentialAutoRefreshTask()
 
+	// NPM CLI version options are refreshed in background so UI and latest profiles do not depend on request-time registry fetches.
+	service.StartNpmCLIVersionRefreshTask()
+
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
 

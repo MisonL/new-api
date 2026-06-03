@@ -47,6 +47,7 @@ type HeaderProfileVersionMeta struct {
 	PackageName   string `json:"package_name,omitempty"`
 	Source        string `json:"source,omitempty"`
 	Version       string `json:"version,omitempty"`
+	Platform      string `json:"platform,omitempty"`
 }
 
 type HeaderProfileStrategy struct {
@@ -62,7 +63,19 @@ const (
 	BuiltinCodexDesktopUserAgent  = "Codex Desktop/0.133.0-alpha.1 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.519.41501)"
 	BuiltinCodexDesktopOriginator = "Codex Desktop"
 	BuiltinDroidCLIUserAgent      = "factory-cli/0.135.0"
+	HeaderProfileLatestVersion    = "latest"
+	HeaderProfilePlatformMacOSX64 = "macos-x64"
 )
+
+var ResolveNpmCLILatestVersion func(packageName string) (string, bool)
+
+var builtinAICodingCLIPackageNames = map[string]string{
+	"codex-cli":   "@openai/codex",
+	"claude-code": "@anthropic-ai/claude-code",
+	"gemini-cli":  "@google/gemini-cli",
+	"qwen-code":   "@qwen-code/qwen-code",
+	"droid":       "droid",
+}
 
 var BuiltinHeaderProfiles = []HeaderProfile{
 	{
@@ -88,7 +101,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		map[string]string{
 			"User-Agent": "claude-cli/2.1.153 (external, sdk-cli)",
 		},
-		"固定请求头静态快照按 Claude Code 2.1.153 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。",
+		"默认使用 Claude Code npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。",
 		false,
 	),
 	newBuiltinCLIHeaderProfile(
@@ -97,7 +110,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		map[string]string{
 			"User-Agent": "GeminiCLI/0.44.0/gemini-3.1-pro-preview (darwin; x64; terminal)",
 		},
-		"固定请求头静态快照按 Gemini CLI 0.44.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。",
+		"默认使用 Gemini CLI npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。",
 		false,
 	),
 	newBuiltinCLIHeaderProfile(
@@ -106,7 +119,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		map[string]string{
 			"User-Agent": "QwenCode/0.16.2 (darwin; x64)",
 		},
-		"固定请求头静态快照按 Qwen Code 0.16.2 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。",
+		"默认使用 Qwen Code npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。",
 		false,
 	),
 	newBuiltinCLIHeaderProfile(
@@ -115,7 +128,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		map[string]string{
 			"User-Agent": BuiltinDroidCLIUserAgent,
 		},
-		"固定请求头静态快照按 Droid 0.135.0 公开 latest 版本套用既有客户端 UA 格式；此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。",
+		"默认使用 Droid npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。",
 		false,
 	),
 	{
@@ -140,12 +153,13 @@ func newBuiltinCodexCLIHeaderProfile() HeaderProfile {
 		Category:            HeaderProfileCategoryAICodingCLI,
 		Scope:               HeaderProfileScopeBuiltin,
 		ReadOnly:            true,
-		Description:         "固定请求头静态快照来自 Codex CLI 0.134.0 交互式 TUI 请求头生成逻辑；此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。",
+		Description:         "默认使用 Codex CLI npm latest 版本套用交互式 TUI 请求头生成逻辑；清单暂不可用时保留内置快照。此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。",
 		PassthroughRequired: false,
 		Headers: map[string]string{
 			"User-Agent": BuiltinCodexCLIUserAgent,
 			"Originator": BuiltinCodexCLIOriginator,
 		},
+		VersionMeta: newBuiltinNpmHeaderProfileVersionMeta("codex-cli"),
 	}
 }
 
@@ -175,6 +189,21 @@ func newBuiltinCLIHeaderProfile(id string, name string, headers map[string]strin
 		Description:         description,
 		PassthroughRequired: passthroughRequired,
 		Headers:             headers,
+		VersionMeta:         newBuiltinNpmHeaderProfileVersionMeta(id),
+	}
+}
+
+func newBuiltinNpmHeaderProfileVersionMeta(baseProfileID string) *HeaderProfileVersionMeta {
+	packageName := builtinAICodingCLIPackageNames[strings.TrimSpace(baseProfileID)]
+	if packageName == "" {
+		return nil
+	}
+	return &HeaderProfileVersionMeta{
+		BaseProfileID: strings.TrimSpace(baseProfileID),
+		PackageName:   packageName,
+		Source:        "npm",
+		Version:       HeaderProfileLatestVersion,
+		Platform:      HeaderProfilePlatformMacOSX64,
 	}
 }
 
@@ -190,6 +219,31 @@ func ResolveHeaderProfile(profileID string, profiles []HeaderProfile) (HeaderPro
 	}
 	for _, profile := range BuiltinHeaderProfiles {
 		if profile.ID == profileID {
+			return profile, true
+		}
+	}
+	if baseProfileID, version, ok := strings.Cut(profileID, "@"); ok {
+		normalizedBaseProfileID := strings.TrimSpace(baseProfileID)
+		for _, profile := range BuiltinHeaderProfiles {
+			if profile.ID != normalizedBaseProfileID {
+				continue
+			}
+			meta := newBuiltinNpmHeaderProfileVersionMeta(profile.ID)
+			normalizedVersion := normalizeHeaderProfileVersionValue(version, true)
+			if meta == nil || normalizedVersion == "" {
+				return HeaderProfile{}, false
+			}
+			profile.ID = normalizedBaseProfileID + "@" + normalizedVersion
+			profile.Name = strings.TrimSpace(profile.Name + " " + normalizedVersion)
+			profile.VersionMeta = meta
+			profile.VersionMeta.Version = normalizedVersion
+			profile.VersionMeta.Platform = normalizeHeaderProfilePlatform(profile.VersionMeta.Platform)
+			if normalizedVersion != HeaderProfileLatestVersion {
+				if userAgent := buildAICodingCLIUserAgent(normalizedBaseProfileID, normalizedVersion, profile.VersionMeta.Platform); userAgent != "" {
+					profile.Headers = copyHeaderProfileHeaders(profile.Headers)
+					profile.Headers["User-Agent"] = userAgent
+				}
+			}
 			return profile, true
 		}
 	}
@@ -211,7 +265,9 @@ func ResolveHeaderProfileStrategyHeaders(strategy *HeaderProfileStrategy, reques
 	if len(profile.Headers) == 0 {
 		return nil, "", fmt.Errorf("header_profile_strategy selected profile has empty headers: %s", profileID)
 	}
-	return copyHeaderProfileHeaders(profile.Headers), profile.ID, nil
+	headers := copyHeaderProfileHeaders(profile.Headers)
+	resolveLatestHeaderProfileHeaders(profile, headers)
+	return headers, profile.ID, nil
 }
 
 func selectHeaderProfileID(strategy *HeaderProfileStrategy, requestIndex int) (string, error) {

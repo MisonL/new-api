@@ -19,6 +19,7 @@ import (
 const (
 	runtimeRoundRobinMaxAttempts  = 12
 	runtimeRoundRobinRetryBackoff = 2 * time.Millisecond
+	runtimeHeaderProfileScopeType = "channel_header_profile"
 )
 
 type runtimeHeaderPolicy struct {
@@ -82,7 +83,7 @@ func BuildChannelRuntimeRequestHeaders(channel *model.Channel, key string, heade
 	}
 
 	settings := channel.GetOtherSettings()
-	profileHeaders, _, err := dto.ResolveHeaderProfileStrategyHeaders(settings.HeaderProfileStrategy, 0)
+	profileHeaders, _, err := resolveChannelRuntimeHeaderProfileHeaders(channel.Id, settings.HeaderProfileStrategy)
 	if err != nil {
 		return nil, err
 	}
@@ -532,8 +533,15 @@ func selectRuntimeUserAgent(strategy *dto.UserAgentStrategy, scopeType string, s
 }
 
 func nextRoundRobinRuntimeUserAgent(scopeType string, scopeKey string, userAgents []string) (string, error) {
+	return nextRoundRobinRuntimeValue(scopeType, scopeKey, userAgents)
+}
+
+func nextRoundRobinRuntimeValue(scopeType string, scopeKey string, values []string) (string, error) {
 	if scopeType == "" || scopeKey == "" {
-		return "", errors.New("UA轮询作用域不能为空")
+		return "", errors.New("轮询作用域不能为空")
+	}
+	if len(values) == 0 {
+		return "", errors.New("轮询列表不能为空")
 	}
 
 	now := common.GetTimestamp()
@@ -556,11 +564,11 @@ func nextRoundRobinRuntimeUserAgent(scopeType string, scopeKey string, userAgent
 				}
 				return "", err
 			}
-			return userAgents[0], nil
+			return values[0], nil
 		case err != nil:
 			return "", err
 		default:
-			index := int(state.RoundRobinCursor % int64(len(userAgents)))
+			index := int(state.RoundRobinCursor % int64(len(values)))
 			result := model.DB.Model(&model.RequestHeaderStrategyState{}).
 				Where("scope_type = ? AND scope_key = ? AND version = ?", scopeType, scopeKey, state.Version).
 				Updates(map[string]any{
@@ -572,13 +580,62 @@ func nextRoundRobinRuntimeUserAgent(scopeType string, scopeKey string, userAgent
 				return "", result.Error
 			}
 			if result.RowsAffected == 1 {
-				return userAgents[index], nil
+				return values[index], nil
 			}
 			sleepRuntimeRoundRobinRetry(attempt)
 		}
 	}
 
-	return "", errors.New("UA轮询状态更新失败")
+	return "", errors.New("轮询状态更新失败")
+}
+
+func resolveChannelRuntimeHeaderProfileHeaders(channelID int, strategy *dto.HeaderProfileStrategy) (map[string]string, string, error) {
+	if strategy == nil || !strategy.Enabled {
+		return nil, "", nil
+	}
+
+	requestIndex := 0
+	if strategy.Mode == dto.HeaderProfileModeRoundRobin {
+		selectedProfileIDs := normalizeRuntimeHeaderProfileIDs(strategy.SelectedProfileIDs)
+		if len(selectedProfileIDs) > 1 {
+			if channelID <= 0 {
+				return nil, "", errors.New("请求头模板轮询需要有效渠道 ID")
+			}
+			selectedProfileID, err := nextRoundRobinRuntimeValue(
+				runtimeHeaderProfileScopeType,
+				fmt.Sprintf("channel:%d", channelID),
+				selectedProfileIDs,
+			)
+			if err != nil {
+				return nil, "", err
+			}
+			for index, profileID := range selectedProfileIDs {
+				if profileID == selectedProfileID {
+					requestIndex = index
+					break
+				}
+			}
+		}
+	}
+
+	return dto.ResolveHeaderProfileStrategyHeaders(strategy, requestIndex)
+}
+
+func normalizeRuntimeHeaderProfileIDs(profileIDs []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(profileIDs))
+	for _, profileID := range profileIDs {
+		trimmedID := strings.TrimSpace(profileID)
+		if trimmedID == "" {
+			continue
+		}
+		if _, exists := seen[trimmedID]; exists {
+			continue
+		}
+		seen[trimmedID] = struct{}{}
+		result = append(result, trimmedID)
+	}
+	return result
 }
 
 func sleepRuntimeRoundRobinRetry(attempt int) {

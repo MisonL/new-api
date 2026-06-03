@@ -929,18 +929,24 @@ const EditChannelModal = (props) => {
     });
   };
 
-  const handleToggleHeaderProfile = (profileId, profile) => {
+  const handleToggleHeaderProfile = (profileId, profile, options = {}) => {
     const currentSelectedProfileIds = removeEquivalentVersionedProfileIds(
       headerProfileStrategy.selectedProfileIds,
       selectedHeaderProfileItems,
       profileId,
       profile,
     );
-    const nextSelectedProfileIds = toggleSelectedProfile({
-      strategy: headerProfileStrategy.mode,
-      selectedProfileIds: currentSelectedProfileIds,
-      profileId,
-    });
+    const nextSelectedProfileIds =
+      options?.replace === true
+        ? [
+            ...currentSelectedProfileIds.filter((id) => id !== profileId),
+            profileId,
+          ]
+        : toggleSelectedProfile({
+            strategy: headerProfileStrategy.mode,
+            selectedProfileIds: currentSelectedProfileIds,
+            profileId,
+          });
     const selectedProfileSnapshotMap = new Map(
       selectedHeaderProfileItems
         .filter((item) => item && !item.missing)
@@ -3190,7 +3196,7 @@ const EditChannelModal = (props) => {
                           </Text>
                           <Text type='tertiary' size='small' className='block'>
                             {t(
-                              '看不懂时保持默认即可；多数情况只需要选择一个客户端模板。',
+                              '看不懂时保持默认即可；固定模式只用一个模板，轮询或随机模式可以添加多个模板。',
                             )}
                           </Text>
                         </div>
@@ -3205,7 +3211,9 @@ const EditChannelModal = (props) => {
                           onClick={() => openRequestPolicyModal(false, true)}
                         >
                           {headerProfileStrategy.enabled
-                            ? t('更换模板')
+                            ? headerProfileStrategy.mode === 'fixed'
+                              ? t('更换模板')
+                              : t('添加/管理模板')
                             : t('选择模板')}
                         </Button>
                         <Button
@@ -3250,7 +3258,7 @@ const EditChannelModal = (props) => {
                           <div className='min-w-0'>
                             <Text strong size='small'>
                               {t(
-                                '快速上手：不懂请求头时，只需要选择一个客户端模板',
+                                '快速上手：通常选择一个客户端模板，需要轮换时可多选',
                               )}
                             </Text>
                             <Text
@@ -3259,7 +3267,7 @@ const EditChannelModal = (props) => {
                               className='block mt-1'
                             >
                               {t(
-                                '默认是不修改请求。只有上游要求浏览器、AI CLI 或特定 SDK 身份时，才在下面选择模板；其他高级项看不懂就不用配置。',
+                                '默认是不修改请求。固定模式选择一个模板；轮询或随机模式可以选择多个模板并按策略使用。',
                               )}
                             </Text>
                           </div>

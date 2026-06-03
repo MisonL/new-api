@@ -95,22 +95,22 @@
 
 - `header_profile_strategy.mode=fixed` 时必须且只能选择 1 个 Profile。
 - `header_profile_strategy.mode=round_robin/random` 时至少要选择 1 个 Profile。
-- 内置 AI Coding CLI 预置 Profile 只固定客户端身份，不自动补 `pass_headers`；需要真实客户端动态头时，在高级参数覆盖中显式选择对应 CLI 请求头透传模板。自定义 Profile 若标记为 `passthrough_required`，WebUI 仍会在 `param_override.operations` 中合并对应 `pass_headers` 规则。
+- 内置 AI Coding CLI 预置 Profile 只固定客户端身份，不自动补 `pass_headers`；默认使用 `latest` 版本语义，运行时会按后端定时记录的 npm 可用清单解析最新版本，清单暂不可用时保留保存时的请求头快照。版本化快照的 `version_meta.platform` 支持 `macos-x64`、`macos-arm64`、`linux-x64`、`linux-arm64`、`windows-x64`、`windows-arm64`，缺省按 `macos-x64` 兼容旧配置。需要真实客户端动态头时，在高级参数覆盖中显式选择对应 CLI 请求头透传模板。自定义 Profile 若标记为 `passthrough_required`，WebUI 仍会在 `param_override.operations` 中合并对应 `pass_headers` 规则。
 - 非法 `header_policy_mode` 会在保存阶段直接拒绝。
 - 非法 `ua_strategy.mode`、空 UA 池、启用策略但无合法 UA，都会在保存阶段直接拒绝。
 
 当前内置 `Header Profile`：
 
-| Profile ID        | 名称            | 固定请求头快照                                               | 是否自动补 `pass_headers` |
-| ----------------- | --------------- | ------------------------------------------------------------ | ------------------------- |
-| `chrome-macos`    | Chrome macOS    | 浏览器常见导航请求头                                         | 否                        |
-| `codex-cli`       | Codex CLI       | `User-Agent: codex-tui/0.134.0 ...`、`Originator: codex-tui` | 否                        |
-| `codex-desktop`   | Codex Desktop   | `User-Agent: Codex Desktop/0.133.0-alpha.1 ...`、`Originator: Codex Desktop` | 否        |
-| `claude-code`     | Claude Code     | `User-Agent: claude-cli/2.1.153 (external, sdk-cli)`         | 否                        |
-| `gemini-cli`      | Gemini CLI      | `User-Agent: GeminiCLI/0.44.0/gemini-3.1-pro-preview ...`    | 否                        |
-| `qwen-code`       | Qwen Code       | `User-Agent: QwenCode/0.16.2 (darwin; x64)`                  | 否                        |
-| `droid`           | Droid CLI       | `User-Agent: factory-cli/0.135.0`                            | 否                        |
-| `postman-runtime` | Postman Runtime | Postman Runtime 调试请求头                                   | 否                        |
+| Profile ID        | 名称            | 请求头快照与版本语义                                           | 是否自动补 `pass_headers` |
+| ----------------- | --------------- | -------------------------------------------------------------- | ------------------------- |
+| `chrome-macos`    | Chrome macOS    | 浏览器常见导航请求头                                           | 否                        |
+| `codex-cli`       | Codex CLI       | `latest` 解析为 `codex-tui/<npm latest> ...`，并保留 `Originator: codex-tui`，平台由 `version_meta.platform` 决定 | 否 |
+| `codex-desktop`   | Codex Desktop   | `User-Agent: Codex Desktop/0.133.0-alpha.1 ...`、`Originator: Codex Desktop` | 否 |
+| `claude-code`     | Claude Code     | `latest` 解析为 `claude-cli/<npm latest> (external, sdk-cli)`  | 否                        |
+| `gemini-cli`      | Gemini CLI      | `latest` 解析为 `GeminiCLI/<npm latest>/gemini-3.1-pro-preview ...`，平台由 `version_meta.platform` 决定 | 否 |
+| `qwen-code`       | Qwen Code       | `latest` 解析为 `QwenCode/<npm latest> (...)`，平台由 `version_meta.platform` 决定 | 否 |
+| `droid`           | Droid CLI       | `latest` 解析为 `factory-cli/<npm latest>`                     | 否                        |
+| `postman-runtime` | Postman Runtime | Postman Runtime 调试请求头                                     | 否                        |
 
 `codex-cli` 的固定快照代表交互式 TUI 场景。`codex-desktop` 的固定快照代表 Codex App / Codex Desktop 产品身份，两者不能互相替代。`codex exec` 的 non-interactive 请求会使用 `codex_exec`，不能作为 `Codex CLI` 内置 Profile 模板。
 
