@@ -178,7 +178,39 @@ func TestSearchChannelsEscapesKeywordWildcards(t *testing.T) {
 	require.Equal(t, []int{4}, channelIDs(matchedEscape))
 }
 
-func TestSearchChannelsDoesNotMatchRawChannelKey(t *testing.T) {
+func TestSearchChannelsMatchesExactKeyWithoutLeakingKey(t *testing.T) {
+	setupChannelSortTestDB(t)
+	channels := []*Channel{
+		{Id: 1, Name: "alpha", Key: "sk-alpha-secret", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](30)},
+		{Id: 2, Name: "beta", Key: "sk-beta-secret", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](20)},
+	}
+	for _, channel := range channels {
+		require.NoError(t, DB.Create(channel).Error)
+	}
+
+	matched, err := SearchChannels("sk-beta-secret", "default", "gpt", false, NewChannelSortOptions("id", "asc", false))
+	require.NoError(t, err)
+	require.Equal(t, []int{2}, channelIDs(matched))
+	require.Empty(t, matched[0].Key)
+}
+
+func TestSearchChannelsDoesNotMatchPartialKey(t *testing.T) {
+	setupChannelSortTestDB(t)
+	require.NoError(t, DB.Create(&Channel{
+		Id:       1,
+		Name:     "alpha",
+		Key:      "sk-alpha-secret",
+		Models:   "gpt-5",
+		Group:    "default",
+		Priority: common.GetPointer[int64](30),
+	}).Error)
+
+	matched, err := SearchChannels("alpha-secret", "default", "gpt", false, NewChannelSortOptions("id", "asc", false))
+	require.NoError(t, err)
+	require.Empty(t, matched)
+}
+
+func TestSearchChannelsMatchesRawChannelKeyWithoutLeakingKey(t *testing.T) {
 	setupChannelSortTestDB(t)
 	channel := &Channel{
 		Id:       11,
@@ -192,7 +224,8 @@ func TestSearchChannelsDoesNotMatchRawChannelKey(t *testing.T) {
 
 	matched, err := SearchChannels("sk-sensitive-search-token", "default", "gpt", false, NewChannelSortOptions("id", "asc", false))
 	require.NoError(t, err)
-	require.Empty(t, matched)
+	require.Equal(t, []int{11}, channelIDs(matched))
+	require.Empty(t, matched[0].Key)
 }
 
 func insertPreferredOwnerCandidate(

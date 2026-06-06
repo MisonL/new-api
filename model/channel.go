@@ -409,9 +409,10 @@ func ApplyChannelSearchFilters(query *gorm.DB, keyword string, group string, mod
 	if keyword != "" {
 		keywordLikePattern := "%" + escapeChannelLikeLiteral(keyword) + "%"
 		query = query.Where(
-			"(id = ? OR name LIKE ? ESCAPE '!' OR "+baseURLCol+" LIKE ? ESCAPE '!')",
+			"(id = ? OR name LIKE ? ESCAPE '!' OR "+commonKeyCol+" = ? OR "+baseURLCol+" LIKE ? ESCAPE '!')",
 			common.String2Int(keyword),
 			keywordLikePattern,
+			keyword,
 			keywordLikePattern,
 		)
 	}
