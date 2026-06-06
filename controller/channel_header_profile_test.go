@@ -253,6 +253,39 @@ func TestUpdateChannelAllowsBuiltinCLIHeaderProfileWithoutParamOverride(t *testi
 	require.True(t, response.Success, response.Message)
 }
 
+func TestUpdateChannelNormalizesEmptyHeaderProfileModeToFixed(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":     channel.Id,
+		"type":   channel.Type,
+		"key":    channel.Key,
+		"status": channel.Status,
+		"name":   channel.Name,
+		"group":  channel.Group,
+		"models": channel.Models,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				SelectedProfileIDs: []string{"codex-cli"},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+
+	loaded, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	strategy := loaded.GetOtherSettings().HeaderProfileStrategy
+	require.NotNil(t, strategy)
+	require.Equal(t, dto.HeaderProfileModeFixed, strategy.Mode)
+	require.Equal(t, []string{"codex-cli"}, strategy.SelectedProfileIDs)
+}
+
 func TestUpdateChannelAllowsBuiltinLatestHeaderProfileWithoutSnapshot(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)

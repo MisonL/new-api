@@ -433,7 +433,7 @@ export function ChannelAffinitySection(props: Props) {
                   setRuleEditorOpen(true)
                 }}
               >
-                Claude CLI
+                Claude Code
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -706,9 +706,9 @@ export function ChannelAffinitySection(props: Props) {
         <ConfirmDialog
           open={fillTemplateDialogOpen}
           onOpenChange={setFillTemplateDialogOpen}
-          title={t('Fill Codex CLI / Claude CLI Templates')}
+          title={t('Fill Codex CLI / Claude Code Templates')}
           desc={t(
-            'This will append 2 template rules (Codex CLI and Claude CLI) to the existing rule list.'
+            'This will append 2 template rules (Codex CLI and Claude Code) to the existing rule list.'
           )}
           handleConfirm={appendCliTemplates}
         />

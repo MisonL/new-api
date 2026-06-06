@@ -114,9 +114,6 @@ func ValidateHeaderProfileVersionMeta(profile HeaderProfile) error {
 	if version == "" {
 		return fmt.Errorf("version_meta.version invalid")
 	}
-	if !IsSupportedHeaderProfilePlatform(meta.Platform) {
-		return fmt.Errorf("version_meta.platform invalid: %s", meta.Platform)
-	}
 	return nil
 }
 

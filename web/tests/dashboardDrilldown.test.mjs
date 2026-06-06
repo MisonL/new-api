@@ -9,6 +9,7 @@ import {
   getDashboardDimensionDrilldownTarget,
   getDashboardDistributionLogRow,
   getDashboardDrilldownTarget,
+  getDashboardLegendDrilldownTarget,
 } from "../classic/src/helpers/dashboardDrilldown.js";
 import { formatDashboardTimeBucket } from "../classic/src/helpers/dashboardTimeBucket.js";
 import {
@@ -408,6 +409,63 @@ test("getDashboardChartAreaDrilldownTarget maps click position to time bucket", 
   });
 });
 
+test("dashboard legend target uses full chart range for one model", () => {
+  const target = getDashboardLegendDrilldownTarget({
+    event: { event: { detail: { data: { id: "gpt-4o" } } } },
+    otherLabel: "其他",
+    chartValues: [
+      { Time: "05-01", Model: "gpt-4o" },
+      { Time: "05-01", Model: "gpt-4o-mini" },
+      { Time: "05-02", Model: "gpt-4o" },
+    ],
+  });
+
+  assert.deepEqual(target, {
+    time: "05-01 - 05-02",
+    times: ["05-01", "05-02"],
+    models: ["gpt-4o"],
+  });
+});
+
+test("dashboard legend target expands other models across chart range", () => {
+  const target = getDashboardLegendDrilldownTarget({
+    event: { data: { id: "其他" } },
+    otherLabel: "其他",
+    chartValues: [
+      { Time: "05-01", Model: "其他", CollapsedModels: ["rare-a"] },
+      { Time: "05-02", Model: "其他", CollapsedModels: ["rare-a", "rare-b"] },
+    ],
+  });
+
+  assert.deepEqual(target, {
+    time: "05-01 - 05-02",
+    times: ["05-01", "05-02"],
+    models: ["rare-a", "rare-b"],
+  });
+});
+
+test("buildDashboardDrilldown aggregates full legend time range", () => {
+  const detail = buildDashboardDrilldown({
+    quotaData: rows,
+    targetTime: "05-01 - 05-02",
+    targetTimes: ["05-01", "05-02"],
+    granularity: "day",
+    models: ["gpt-4o"],
+    t: translate,
+  });
+
+  assert.equal(detail.time, "05-01 - 05-02");
+  assert.equal(detail.totalQuota, 160);
+  assert.equal(detail.totalCount, 4);
+  assert.equal(detail.totalTokens, 3900);
+  assert.equal(detail.startTimestamp, 1714550400);
+  assert.equal(detail.endTimestamp, 1714723199);
+  assert.deepEqual(
+    detail.rows.map((item) => item.model),
+    ["gpt-4o"],
+  );
+});
+
 test("dashboard chart area click guard skips clicks already handled by chart datum", () => {
   const guard = createDashboardChartAreaClickGuard();
 
@@ -538,7 +596,7 @@ test("dashboard log refresh controls do not submit the filter form", () => {
 
   assert.match(
     modalSource,
-    /htmlType='button'[\s\S]{0,120}onClick=\{\(\) => loadLogs\(page, pageSize\)\}/,
+    /htmlType='button'[\s\S]{0,240}cancelScheduledAutoLoad\(\);[\s\S]{0,80}loadLogs\(page, pageSize\);/,
   );
   assert.match(
     modalSource,

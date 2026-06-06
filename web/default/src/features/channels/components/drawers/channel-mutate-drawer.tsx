@@ -95,6 +95,7 @@ import {
   getChannelKey,
   getGroups,
   getPrefillGroups,
+  getUserHeaderProfiles,
   refreshCodexCredential,
   updateChannel,
 } from '../../api'
@@ -138,6 +139,14 @@ import {
   validateModelMappingJson,
 } from '../../lib'
 import {
+  buildHeaderProfileStrategySettings,
+  disableEmptyHeaderProfileStrategy,
+  getHeaderProfileStrategyFromSettings,
+  normalizeProfile,
+  type HeaderProfile,
+  type HeaderProfileStrategy,
+} from '../../lib/header-profile-utils'
+import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
@@ -151,6 +160,7 @@ import {
 } from '../dialogs/missing-models-confirmation-dialog'
 import { ParamOverrideEditorDialog } from '../dialogs/param-override-editor-dialog'
 import { StatusCodeRiskDialog } from '../dialogs/status-code-risk-dialog'
+import { HeaderProfileStrategyEditor } from '../header-profile-strategy-editor'
 import { ModelMappingEditor } from '../model-mapping-editor'
 
 type ChannelMutateDrawerProps = {
@@ -220,6 +230,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.model_mapping?.trim() ||
     values.param_override?.trim() ||
     values.header_override?.trim() ||
+    getHeaderProfileStrategyFromSettings(values.settings)?.enabled ||
     values.status_code_mapping?.trim() ||
     values.tag?.trim() ||
     values.remark?.trim() ||
@@ -245,6 +256,16 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.upstream_model_update_auto_sync_enabled ||
     values.upstream_model_update_ignored_models?.trim()
   )
+}
+
+function normalizeHeaderProfileStrategyForSubmit(
+  data: ChannelFormValues
+): ChannelFormValues {
+  const strategy = disableEmptyHeaderProfileStrategy(
+    getHeaderProfileStrategyFromSettings(data.settings)
+  )
+  const settings = buildHeaderProfileStrategySettings(data.settings, strategy)
+  return settings === data.settings ? data : { ...data, settings }
 }
 
 function parseSettingsRecord(
@@ -355,6 +376,12 @@ export function ChannelMutateDrawer({
     queryFn: () => getPrefillGroups('model'),
   })
 
+  const { data: userHeaderProfilesData } = useQuery({
+    queryKey: ['user_header_profiles'],
+    queryFn: getUserHeaderProfiles,
+    enabled: open,
+  })
+
   const { copyToClipboard } = useCopyToClipboard()
 
   const {
@@ -401,6 +428,17 @@ export function ChannelMutateDrawer({
     'upstream_model_update_check_enabled'
   )
   const currentSettings = form.watch('settings')
+  const headerProfileStrategy = useMemo(
+    () => getHeaderProfileStrategyFromSettings(currentSettings),
+    [currentSettings]
+  )
+  const userHeaderProfiles = useMemo<HeaderProfile[]>(
+    () =>
+      (userHeaderProfilesData?.data || [])
+        .map(normalizeProfile)
+        .filter((profile) => profile.id && Object.keys(profile.headers).length),
+    [userHeaderProfilesData]
+  )
   const compactAutoFallbackActive =
     isResponsesCompactAutoFallbackActive(currentSettings)
   const compactAutoFallbackReason =
@@ -1035,14 +1073,28 @@ export function ChannelMutateDrawer({
 
       setIsSubmitting(true)
       try {
+        let submitData: ChannelFormValues
+        try {
+          submitData = normalizeHeaderProfileStrategyForSubmit(data)
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : t('Invalid channel settings')
+          toast.error(message)
+          return
+        }
         if (isEditing && currentRow) {
           // Update existing channel
-          const payload = transformFormDataToUpdatePayload(data, currentRow.id)
+          const payload = transformFormDataToUpdatePayload(
+            submitData,
+            currentRow.id
+          )
           const payloadWithKeyMode =
-            isMultiKeyChannel && data.key_mode
+            isMultiKeyChannel && submitData.key_mode
               ? {
                   ...payload,
-                  key_mode: data.key_mode,
+                  key_mode: submitData.key_mode,
                 }
               : payload
 
@@ -1058,7 +1110,7 @@ export function ChannelMutateDrawer({
           }
         } else {
           // Create new channel(s)
-          const payload = transformFormDataToCreatePayload(data)
+          const payload = transformFormDataToCreatePayload(submitData)
           const response = await createChannel(payload)
           if (response.success) {
             toast.success(t(SUCCESS_MESSAGES.CREATED))
@@ -1106,6 +1158,30 @@ export function ChannelMutateDrawer({
       )
     }
   }, [])
+
+  const handleHeaderProfileStrategyChange = useCallback(
+    (strategy: HeaderProfileStrategy | null) => {
+      let nextSettings: string
+      try {
+        nextSettings = buildHeaderProfileStrategySettings(
+          form.getValues('settings'),
+          strategy
+        )
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t('Invalid channel settings')
+        )
+        return
+      }
+      form.setValue('settings', nextSettings, {
+        shouldDirty: true,
+        shouldTouch: true,
+      })
+    },
+    [form, t]
+  )
 
   return (
     <>
@@ -2571,6 +2647,13 @@ export function ChannelMutateDrawer({
                         icon={<Code className='h-3.5 w-3.5' />}
                       />
 
+                      <HeaderProfileStrategyEditor
+                        value={headerProfileStrategy}
+                        customProfiles={userHeaderProfiles}
+                        onChange={handleHeaderProfileStrategyChange}
+                        disabled={isSubmitting}
+                      />
+
                       <FormField
                         control={form.control}
                         name='status_code_mapping'
@@ -2860,7 +2943,7 @@ export function ChannelMutateDrawer({
                                       </FormLabel>
                                       <FormDescription>
                                         {t(
-                                          'Remove encrypted reasoning and compaction input before forwarding Responses requests'
+                                          'Remove encrypted reasoning context before forwarding Responses requests'
                                         )}
                                       </FormDescription>
                                     </div>

@@ -19,7 +19,8 @@ import (
 
 var casTicketGuardTestMu sync.Mutex
 
-// resetCASTicketGuardForTest resets the global casTicketGuard. Tests using it must not run in parallel.
+// resetCASTicketGuardForTest resets the global casTicketGuard. DO NOT use t.Parallel()
+// in tests that call this helper because the guard is process-global state.
 func resetCASTicketGuardForTest(t *testing.T) {
 	t.Helper()
 	casTicketGuardTestMu.Lock()

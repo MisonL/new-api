@@ -7,6 +7,7 @@ import {
   getDashboardChartAreaDrilldownTarget,
   getDashboardDimensionDrilldownTarget,
   getDashboardDrilldownTarget,
+  getDashboardLegendDrilldownTarget,
 } from "../default/src/features/dashboard/lib/drilldown.ts";
 import { processChartData } from "../default/src/features/dashboard/lib/charts.ts";
 
@@ -277,6 +278,51 @@ test("default dashboard area target maps click position to time bucket", () => {
     time: "05-02",
     models: null,
   });
+});
+
+test("default dashboard legend target uses full chart range for one model", () => {
+  const target = getDashboardLegendDrilldownTarget({
+    event: { event: { detail: { data: { id: "gpt-5.4" } } } },
+    otherLabel: "Other",
+    chartValues: [
+      { Time: "05-01", Model: "gpt-5.4" },
+      { Time: "05-01", Model: "gpt-5.3-codex" },
+      { Time: "05-02", Model: "gpt-5.4" },
+    ],
+  });
+
+  assert.deepEqual(target, {
+    time: "05-01 - 05-02",
+    times: ["05-01", "05-02"],
+    models: ["gpt-5.4"],
+  });
+});
+
+test("default dashboard legend range aggregates selected model", () => {
+  const target = getDashboardLegendDrilldownTarget({
+    event: { data: { id: "gpt-5.4" } },
+    otherLabel: "Other",
+    chartValues: [
+      { Time: "05-01", Model: "gpt-5.4" },
+      { Time: "05-02", Model: "gpt-5.4" },
+    ],
+  });
+  const detail = buildDashboardDrilldown({
+    data: rows,
+    targetTime: target.time,
+    targetTimes: target.times,
+    granularity: "day",
+    models: target.models,
+  });
+
+  assert.equal(detail.time, "05-01 - 05-02");
+  assert.equal(detail.totalQuota, 160);
+  assert.equal(detail.totalCount, 4);
+  assert.equal(detail.totalTokens, 3900);
+  assert.deepEqual(
+    detail.rows.map((item) => item.model),
+    ["gpt-5.4"],
+  );
 });
 
 test("default dashboard area other points carry collapsed models", () => {

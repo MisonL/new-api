@@ -557,7 +557,7 @@ export default function SettingsChannelAffinity(props) {
     }
 
     Modal.confirm({
-      title: t('填充 Codex CLI / Claude CLI 模版'),
+      title: t('填充 Codex CLI / Claude Code 模板'),
       content: (
         <div style={{ lineHeight: '1.6' }}>
           <Text type='tertiary'>{t('将追加 2 条规则到现有规则列表。')}</Text>
@@ -1068,7 +1068,7 @@ export default function SettingsChannelAffinity(props) {
                 {t('JSON 模式')}
               </Button>
               <Button onClick={appendCodexAndClaudeCodeTemplates}>
-                {t('填充 Codex CLI / Claude CLI 模版')}
+                {t('填充 Codex CLI / Claude Code 模板')}
               </Button>
               <Button icon={<IconPlus />} onClick={openAddModal}>
                 {t('新增规则')}
@@ -1311,13 +1311,13 @@ export default function SettingsChannelAffinity(props) {
                           size='small'
                           onClick={() => applyParamOverrideTemplate('replace')}
                         >
-                          {t('替换模板')}
+                          {t('替换当前规则')}
                         </Button>
                         <Button
                           size='small'
                           onClick={() => applyParamOverrideTemplate('append')}
                         >
-                          {t('追加模板')}
+                          {t('追加到现有规则')}
                         </Button>
                         <Button
                           size='small'

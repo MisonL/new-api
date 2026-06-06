@@ -648,10 +648,7 @@ func stripUnsupportedResponsesInputForRequest(info *relaycommon.RelayInfo, reque
 		return request, nil
 	}
 	if result.remainingCount == 0 {
-		if result.encryptedReasoningCount > 0 {
-			return dto.OpenAIResponsesRequest{}, errors.New("responses encrypted reasoning context is unsupported by this OpenAI-compatible channel and no other input items remain")
-		}
-		return dto.OpenAIResponsesRequest{}, errors.New("responses compaction input is unsupported by this OpenAI-compatible channel and no other input items remain")
+		return dto.OpenAIResponsesRequest{}, errors.New("responses encrypted reasoning context is unsupported by this OpenAI-compatible channel and no other input items remain")
 	}
 	request.Input = result.input
 	channelID := 0
@@ -663,10 +660,9 @@ func stripUnsupportedResponsesInputForRequest(info *relaycommon.RelayInfo, reque
 		}
 	}
 	common.SysLog(fmt.Sprintf(
-		"responses unsupported context removed for OpenAI-compatible channel: channel_id=%d model=%s compact_items=%d encrypted_reasoning_items=%d remaining_items=%d",
+		"responses encrypted reasoning context removed for OpenAI-compatible channel: channel_id=%d model=%s encrypted_reasoning_items=%d remaining_items=%d",
 		channelID,
 		originModelName,
-		result.compactionCount,
 		result.encryptedReasoningCount,
 		result.remainingCount,
 	))
@@ -682,13 +678,12 @@ func ginRequestContext(c *gin.Context) context.Context {
 
 type responsesInputStripResult struct {
 	input                   json.RawMessage
-	compactionCount         int
 	encryptedReasoningCount int
 	remainingCount          int
 }
 
 func (r responsesInputStripResult) removedCount() int {
-	return r.compactionCount + r.encryptedReasoningCount
+	return r.encryptedReasoningCount
 }
 
 func stripUnsupportedResponsesInput(input json.RawMessage, stripEncryptedReasoning bool) (responsesInputStripResult, error) {
@@ -713,10 +708,6 @@ func stripUnsupportedResponsesInput(input json.RawMessage, stripEncryptedReasoni
 			continue
 		}
 		itemType := responsesItemType(item)
-		if itemType == "compaction" {
-			result.compactionCount++
-			continue
-		}
 		if stripEncryptedReasoning && itemType == "reasoning" && responsesItemHasEncryptedContent(item) {
 			result.encryptedReasoningCount++
 			continue

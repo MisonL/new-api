@@ -457,38 +457,59 @@ func (m *Message) ParseToolCalls() []ToolCallRequest {
 		return nil
 	}
 	var toolCalls []ToolCallRequest
-	if err := json.Unmarshal(m.ToolCalls, &toolCalls); err == nil {
+	if err := common.Unmarshal(m.ToolCalls, &toolCalls); err == nil {
 		return toolCalls
 	}
 	return toolCalls
 }
 
 func (m *Message) SetToolCalls(toolCalls any) {
-	toolCallsJson, _ := json.Marshal(toolCalls)
+	toolCallsJson, _ := common.Marshal(toolCalls)
 	m.ToolCalls = toolCallsJson
 }
 
 func (m *Message) StringContent() string {
-	switch m.Content.(type) {
+	switch content := m.Content.(type) {
 	case string:
-		return m.Content.(string)
+		return content
+	case []MediaContent:
+		return mediaContentsString(content)
 	case []any:
-		var contentStr string
-		for _, contentItem := range m.Content.([]any) {
-			contentMap, ok := contentItem.(map[string]any)
-			if !ok {
-				continue
+		return mediaContentsStringFromAny(content)
+	}
+	if len(m.parsedContent) > 0 {
+		return mediaContentsString(m.parsedContent)
+	}
+	return ""
+}
+
+func mediaContentsString(messages []MediaContent) string {
+	var contentStr string
+	for _, contentItem := range messages {
+		if contentItem.Type == ContentTypeText {
+			contentStr += contentItem.Text
+		}
+	}
+	return contentStr
+}
+
+func mediaContentsStringFromAny(messages []any) string {
+	var contentStr string
+	for _, contentItem := range messages {
+		switch item := contentItem.(type) {
+		case MediaContent:
+			if item.Type == ContentTypeText {
+				contentStr += item.Text
 			}
-			if contentMap["type"] == ContentTypeText {
-				if subStr, ok := contentMap["text"].(string); ok {
+		case map[string]any:
+			if item["type"] == ContentTypeText {
+				if subStr, ok := item["text"].(string); ok {
 					contentStr += subStr
 				}
 			}
 		}
-		return contentStr
 	}
-
-	return ""
+	return contentStr
 }
 
 func (m *Message) SetNullContent() {

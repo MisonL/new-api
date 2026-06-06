@@ -234,7 +234,6 @@ func loadRecordedNpmCLIVersionOptions() {
 		npmCliVersionRecordedState.Unlock()
 		return
 	}
-	npmCliVersionRecordedState.raw = raw
 	npmCliVersionRecordedState.Unlock()
 
 	var recorded recordedNpmCLIVersionOptions
@@ -254,6 +253,9 @@ func loadRecordedNpmCLIVersionOptions() {
 			packageRecord.LatestVersion,
 		)
 	}
+	npmCliVersionRecordedState.Lock()
+	npmCliVersionRecordedState.raw = raw
+	npmCliVersionRecordedState.Unlock()
 }
 
 func persistRecordedNpmCLIVersionOptions() {

@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -134,6 +135,19 @@ func GetAndValidateResponsesCompactionRequest(c *gin.Context) (*dto.OpenAIRespon
 	}
 	if request.Model == "" {
 		return nil, errors.New("model is required")
+	}
+	trimmedInput := bytes.TrimSpace(request.Input)
+	if len(trimmedInput) == 0 || bytes.Equal(trimmedInput, []byte("null")) {
+		return nil, errors.New("input is required")
+	}
+	if common.GetJsonType(request.Input) == "array" {
+		var items []common.RawMessage
+		if err := common.Unmarshal(request.Input, &items); err != nil {
+			return nil, fmt.Errorf("input is invalid: %w", err)
+		}
+		if len(items) == 0 {
+			return nil, errors.New("input must contain at least one item")
+		}
 	}
 	return request, nil
 }

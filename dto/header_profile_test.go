@@ -44,6 +44,21 @@ func TestBuiltinAICodingCLIHeaderProfilesDoNotRequireAutomaticPassthrough(t *tes
 	}
 }
 
+func TestBuiltinClaudeCodeHeaderProfileDescriptionUsesClaudeCodeTemplateName(t *testing.T) {
+	profile, exists := ResolveHeaderProfile("claude-code", nil)
+	require.True(t, exists)
+	require.Contains(t, profile.Description, "Claude Code 请求头透传模板")
+	require.NotContains(t, profile.Description, "Claude CLI 请求头透传模板")
+}
+
+func TestBuiltinDroidHeaderProfileDescriptionUsesDroidCLITemplateName(t *testing.T) {
+	profile, exists := ResolveHeaderProfile("droid", nil)
+	require.True(t, exists)
+	require.Contains(t, profile.Description, "Droid CLI npm latest")
+	require.Contains(t, profile.Description, "Droid CLI 请求头透传模板")
+	require.NotContains(t, profile.Description, "Droid npm latest")
+}
+
 func TestBuiltinAICodingCLIHeaderProfilesDefaultToLatestVersionMeta(t *testing.T) {
 	tests := []struct {
 		profileID   string

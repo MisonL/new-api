@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/log_retention_setting"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
@@ -610,6 +611,9 @@ func normalizeInviteRebateRate(value string) (string, error) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if strings.HasPrefix(key, log_retention_setting.ConfigName+".") {
+		return log_retention_setting.ValidateValue(strings.TrimPrefix(key, log_retention_setting.ConfigName+"."), value)
+	}
 	switch key {
 	case "billing_setting.billing_mode":
 		return billing_setting.ValidateBillingModeJSON(value)

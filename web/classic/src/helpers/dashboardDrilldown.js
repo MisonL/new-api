@@ -46,6 +46,16 @@ const getUniqueChartTimes = (chartValues) => {
   return times;
 };
 
+const formatRangeLabel = (times) => {
+  if (!Array.isArray(times) || times.length === 0) {
+    return '';
+  }
+  if (times.length === 1) {
+    return times[0];
+  }
+  return `${times[0]} - ${times[times.length - 1]}`;
+};
+
 const getBucketDurationSeconds = (granularity) => {
   if (granularity === 'week') {
     return 7 * 24 * 60 * 60;
@@ -140,6 +150,74 @@ export const getDashboardDrilldownTarget = ({ datum, otherLabel }) => {
   return {
     time: matchedDatum.Time,
     models: null,
+  };
+};
+
+const extractLegendModel = (event) => {
+  const candidates = [
+    event?.event?.detail?.data?.id,
+    event?.event?.detail?.data?.label,
+    event?.event?.detail?.data?.value,
+    event?.detail?.data?.id,
+    event?.detail?.data?.label,
+    event?.detail?.data?.value,
+    event?.data?.id,
+    event?.data?.label,
+    event?.data?.value,
+    event?.datum?.Model,
+    event?.Model,
+    event?.value,
+  ];
+  const matched = candidates.find(
+    (value) => typeof value === 'string' && value !== '',
+  );
+  return matched || '';
+};
+
+const getCollapsedModelsForChartRange = (chartValues, otherLabel) => {
+  if (!Array.isArray(chartValues)) {
+    return [];
+  }
+
+  const models = [];
+  const seen = new Set();
+  chartValues.forEach((item) => {
+    if (
+      !item ||
+      item.Model !== otherLabel ||
+      !Array.isArray(item.CollapsedModels)
+    ) {
+      return;
+    }
+    item.CollapsedModels.forEach((model) => {
+      if (typeof model !== 'string' || model === '' || seen.has(model)) {
+        return;
+      }
+      seen.add(model);
+      models.push(model);
+    });
+  });
+  return models;
+};
+
+export const getDashboardLegendDrilldownTarget = ({
+  event,
+  chartValues,
+  otherLabel,
+}) => {
+  const model = extractLegendModel(event);
+  const times = getUniqueChartTimes(chartValues);
+  if (!model || times.length === 0) {
+    return null;
+  }
+
+  return {
+    time: formatRangeLabel(times),
+    times,
+    models:
+      model === otherLabel
+        ? getCollapsedModelsForChartRange(chartValues, otherLabel)
+        : [model],
   };
 };
 
@@ -246,12 +324,16 @@ export const getDashboardDistributionLogRow = ({ datum, item, rows }) => {
 export const buildDashboardDrilldown = ({
   quotaData,
   targetTime,
+  targetTimes,
   granularity,
   models,
   t,
 }) => {
   const translate = typeof t === 'function' ? t : (text) => text;
-  if (!targetTime || !Array.isArray(quotaData)) {
+  const targetTimeSet = Array.isArray(targetTimes)
+    ? new Set(targetTimes.filter((time) => typeof time === 'string' && time))
+    : null;
+  if ((!targetTime && !targetTimeSet) || !Array.isArray(quotaData)) {
     return null;
   }
 
@@ -260,6 +342,8 @@ export const buildDashboardDrilldown = ({
     quotaData.map((item) => item.created_at),
   );
   const modelMap = new Map();
+  let logRangeStart = 0;
+  let logRangeEnd = 0;
 
   quotaData.forEach((item) => {
     const timeKey = formatDashboardTimeBucket(
@@ -267,8 +351,19 @@ export const buildDashboardDrilldown = ({
       granularity,
       showYear,
     );
-    if (timeKey !== targetTime) {
+    if (targetTimeSet ? !targetTimeSet.has(timeKey) : timeKey !== targetTime) {
       return;
+    }
+
+    const startTimestamp = toDashboardFiniteNumber(item.created_at);
+    if (startTimestamp > 0) {
+      const endTimestamp =
+        startTimestamp + getBucketDurationSeconds(granularity) - 1;
+      logRangeStart =
+        logRangeStart === 0
+          ? startTimestamp
+          : Math.min(logRangeStart, startTimestamp);
+      logRangeEnd = Math.max(logRangeEnd, endTimestamp);
     }
 
     const rawModelName = item.model_name || '';
@@ -295,24 +390,23 @@ export const buildDashboardDrilldown = ({
   const rows = Array.from(modelMap.values())
     .filter((item) => item.quota > 0 || item.count > 0 || item.tokens > 0)
     .sort((a, b) => b.quota - a.quota || b.count - a.count);
-  const totalQuota = rows.reduce((sum, item) => sum + item.quota, 0);
-  const totalCount = rows.reduce((sum, item) => sum + item.count, 0);
-  const totalTokens = rows.reduce((sum, item) => sum + item.tokens, 0);
+  const totals = rows.reduce(
+    (sum, item) => ({
+      quota: sum.quota + item.quota,
+      count: sum.count + item.count,
+      tokens: sum.tokens + item.tokens,
+    }),
+    { quota: 0, count: 0, tokens: 0 },
+  );
   const detailRows = rows.map((item) => ({
     ...item,
-    ratio: totalQuota > 0 ? item.quota / totalQuota : 0,
+    ratio: totals.quota > 0 ? item.quota / totals.quota : 0,
   }));
 
-  const logRange = getDashboardBucketLogRange({
-    quotaData,
-    targetTime,
-    granularity,
-  });
-
   return {
-    time: targetTime,
-    startTimestamp: logRange.startTimestamp,
-    endTimestamp: logRange.endTimestamp,
+    time: targetTime || formatRangeLabel(Array.from(targetTimeSet || [])),
+    startTimestamp: logRangeStart,
+    endTimestamp: logRangeEnd,
     rows: detailRows,
     distribution: detailRows
       .filter((item) => item.quota > 0)
@@ -320,8 +414,8 @@ export const buildDashboardDrilldown = ({
         type: item.model,
         value: item.quota,
       })),
-    totalQuota,
-    totalCount,
-    totalTokens,
+    totalQuota: totals.quota,
+    totalCount: totals.count,
+    totalTokens: totals.tokens,
   };
 };

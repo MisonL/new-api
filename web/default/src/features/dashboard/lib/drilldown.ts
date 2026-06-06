@@ -11,6 +11,7 @@ interface QuotaDataItem {
 
 export interface DashboardDrilldownTarget {
   time: string
+  times?: string[]
   models: string[] | null
 }
 
@@ -112,6 +113,28 @@ export function getDashboardChartAreaDrilldownTarget(options: {
   }
 }
 
+export function getDashboardLegendDrilldownTarget(options: {
+  event: unknown
+  chartValues: unknown
+  otherLabel?: string
+}): DashboardDrilldownTarget | null {
+  const model = extractLegendModel(options.event)
+  const times = getUniqueChartTimes(options.chartValues)
+  if (!model || times.length === 0) return null
+
+  return {
+    time: formatRangeLabel(times),
+    times,
+    models:
+      model === options.otherLabel
+        ? getCollapsedModelsForChartRange(
+            options.chartValues,
+            options.otherLabel
+          )
+        : [model],
+  }
+}
+
 export function createDashboardChartAreaClickGuard() {
   let chartClickHandled = false
 
@@ -130,11 +153,21 @@ export function createDashboardChartAreaClickGuard() {
 export function buildDashboardDrilldown(options: {
   data: QuotaDataItem[]
   targetTime: string
+  targetTimes?: string[]
   granularity: TimeGranularity
   models?: string[] | null
   unknownLabel?: string
 }): DashboardDrilldownDetail | null {
-  if (!options.targetTime || !Array.isArray(options.data)) return null
+  const targetTimeSet = Array.isArray(options.targetTimes)
+    ? new Set(
+        options.targetTimes.filter(
+          (time): time is string => typeof time === 'string' && time !== ''
+        )
+      )
+    : null
+  if ((!options.targetTime && !targetTimeSet) || !Array.isArray(options.data)) {
+    return null
+  }
 
   const modelFilter = Array.isArray(options.models)
     ? new Set(options.models)
@@ -154,7 +187,13 @@ export function buildDashboardDrilldown(options: {
       parseDashboardTimestamp(item.created_at),
       options.granularity
     )
-    if (timeKey !== options.targetTime) continue
+    if (
+      targetTimeSet
+        ? !targetTimeSet.has(timeKey)
+        : timeKey !== options.targetTime
+    ) {
+      continue
+    }
 
     const model = item.model_name || options.unknownLabel || 'Unknown'
     if (modelFilter && !modelFilter.has(model)) continue
@@ -176,19 +215,25 @@ export function buildDashboardDrilldown(options: {
   const rows = Array.from(modelMap.values())
     .filter((item) => item.quota > 0 || item.count > 0 || item.tokens > 0)
     .sort((a, b) => b.quota - a.quota || b.count - a.count)
-  const totalQuota = rows.reduce((sum, item) => sum + item.quota, 0)
-  const totalCount = rows.reduce((sum, item) => sum + item.count, 0)
-  const totalTokens = rows.reduce((sum, item) => sum + item.tokens, 0)
+  const totals = rows.reduce(
+    (sum, item) => ({
+      quota: sum.quota + item.quota,
+      count: sum.count + item.count,
+      tokens: sum.tokens + item.tokens,
+    }),
+    { quota: 0, count: 0, tokens: 0 }
+  )
 
   return {
-    time: options.targetTime,
+    time:
+      options.targetTime || formatRangeLabel(Array.from(targetTimeSet || [])),
     rows: rows.map((item) => ({
       ...item,
-      ratio: totalQuota > 0 ? item.quota / totalQuota : 0,
+      ratio: totals.quota > 0 ? item.quota / totals.quota : 0,
     })),
-    totalQuota,
-    totalCount,
-    totalTokens,
+    totalQuota: totals.quota,
+    totalCount: totals.count,
+    totalTokens: totals.tokens,
   }
 }
 
@@ -232,6 +277,67 @@ function getUniqueChartTimes(chartValues: unknown): string[] {
     times.push(String(time))
   }
   return times
+}
+
+function formatRangeLabel(times: string[]): string {
+  if (times.length === 0) return ''
+  if (times.length === 1) return times[0]
+  return `${times[0]} - ${times[times.length - 1]}`
+}
+
+function extractLegendModel(event: unknown): string {
+  const candidates = [
+    getPathValue(event, ['event', 'detail', 'data', 'id']),
+    getPathValue(event, ['event', 'detail', 'data', 'label']),
+    getPathValue(event, ['event', 'detail', 'data', 'value']),
+    getPathValue(event, ['detail', 'data', 'id']),
+    getPathValue(event, ['detail', 'data', 'label']),
+    getPathValue(event, ['detail', 'data', 'value']),
+    getPathValue(event, ['data', 'id']),
+    getPathValue(event, ['data', 'label']),
+    getPathValue(event, ['data', 'value']),
+    getPathValue(event, ['datum', 'Model']),
+    getPathValue(event, ['Model']),
+    getPathValue(event, ['value']),
+  ]
+  const matched = candidates.find(
+    (value) => typeof value === 'string' && value !== ''
+  )
+  return typeof matched === 'string' ? matched : ''
+}
+
+function getCollapsedModelsForChartRange(
+  chartValues: unknown,
+  otherLabel?: string
+): string[] {
+  if (!Array.isArray(chartValues)) return []
+
+  const models: string[] = []
+  const seen = new Set<string>()
+  for (const item of chartValues) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as DashboardDatum
+    if (record.Model !== otherLabel || !Array.isArray(record.CollapsedModels)) {
+      continue
+    }
+    for (const model of record.CollapsedModels) {
+      if (typeof model !== 'string' || model === '' || seen.has(model)) {
+        continue
+      }
+      seen.add(model)
+      models.push(model)
+    }
+  }
+  return models
+}
+
+function getPathValue(source: unknown, path: string[]): unknown {
+  let current = source
+  for (const key of path) {
+    if (!current || typeof current !== 'object') return undefined
+    current = (current as Record<string, unknown>)[key]
+  }
+  return current
 }
 
 function formatDashboardTime(

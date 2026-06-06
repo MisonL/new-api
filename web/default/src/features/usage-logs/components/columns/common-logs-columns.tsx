@@ -180,7 +180,7 @@ function buildResponsesCompactTooltipRows(
   if (compactInfo.autoFallback === true) {
     rows.push({
       key: 'fallback',
-      label: t('Compact Auto Fallback'),
+      label: t('Compact Auto Recent Fallback'),
       value: t('Yes'),
       className: 'text-secondary-foreground font-semibold',
     })

@@ -451,7 +451,7 @@ describe('channel responses compact settings', () => {
         }),
         new Date('2026-05-26T23:30:00.000Z')
       )
-    ).toBe(true)
+    ).toBe(false)
 
     const settings = JSON.stringify({
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,

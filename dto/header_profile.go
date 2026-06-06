@@ -62,6 +62,8 @@ const (
 	BuiltinCodexCLIOriginator     = "codex-tui"
 	BuiltinCodexDesktopUserAgent  = "Codex Desktop/0.133.0-alpha.1 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.519.41501)"
 	BuiltinCodexDesktopOriginator = "Codex Desktop"
+	BuiltinClaudeCodeUserAgent    = "claude-cli/2.1.153 (external, sdk-cli)"
+	BuiltinQwenCodeUserAgent      = "QwenCode/0.16.2 (darwin; x64)"
 	BuiltinDroidCLIUserAgent      = "factory-cli/0.135.0"
 	HeaderProfileLatestVersion    = "latest"
 	HeaderProfilePlatformMacOSX64 = "macos-x64"
@@ -99,9 +101,9 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		"claude-code",
 		"Claude Code",
 		map[string]string{
-			"User-Agent": "claude-cli/2.1.153 (external, sdk-cli)",
+			"User-Agent": BuiltinClaudeCodeUserAgent,
 		},
-		"默认使用 Claude Code npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude CLI 请求头透传模板。",
+		"默认使用 Claude Code npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude Code 请求头透传模板。",
 		false,
 	),
 	newBuiltinCLIHeaderProfile(
@@ -117,7 +119,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		"qwen-code",
 		"Qwen Code",
 		map[string]string{
-			"User-Agent": "QwenCode/0.16.2 (darwin; x64)",
+			"User-Agent": BuiltinQwenCodeUserAgent,
 		},
 		"默认使用 Qwen Code npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。",
 		false,
@@ -128,7 +130,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		map[string]string{
 			"User-Agent": BuiltinDroidCLIUserAgent,
 		},
-		"默认使用 Droid npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。",
+		"默认使用 Droid CLI npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。",
 		false,
 	),
 	{

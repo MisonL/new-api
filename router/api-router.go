@@ -331,6 +331,7 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self/suggestions", middleware.UserAuth(), middleware.SuggestionRateLimit(), controller.GetUserLogSuggestions)
 		logRoute.DELETE("/:id", middleware.AdminAuth(), controller.DeleteLog)
 		logRoute.POST("/batch_delete", middleware.AdminAuth(), controller.BatchDeleteLogs)
+		logRoute.POST("/retention/execute", middleware.AdminAuth(), controller.ExecuteLogRetention)
 
 		dataRoute := apiRouter.Group("/data")
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)

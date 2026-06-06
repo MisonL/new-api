@@ -87,7 +87,7 @@ export function collectInvalidStatusCodeEntries(statusCodeMappingStr) {
     const fromCode = parseStatusCodeKey(rawKey);
     const toCode = parseStatusCodeMappingTarget(rawValue);
     if (fromCode === null || toCode === null) {
-      invalid.push(`${rawKey} → ${rawValue}`);
+      invalid.push(`${rawKey} -> ${rawValue}`);
     }
   }
 

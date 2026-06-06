@@ -95,7 +95,7 @@ function normalizeSelectedProfileIds(selectedProfileIds = []) {
 }
 
 function isBuiltinAiCodingCliProfileId(profileId) {
-  const baseProfileId = String(profileId || '').split('@')[0];
+  const baseProfileId = getBaseProfileIdFromProfileId(profileId);
   return [
     'codex-cli',
     'codex-desktop',
@@ -107,9 +107,15 @@ function isBuiltinAiCodingCliProfileId(profileId) {
 }
 
 function getBaseProfileIdFromProfileId(profileId) {
-  return String(profileId || '')
-    .split('@')[0]
-    .trim();
+  const normalizedProfileId = String(profileId || '').trim();
+  const separatorIndex = normalizedProfileId.indexOf('@');
+  if (
+    separatorIndex <= 0 ||
+    separatorIndex !== normalizedProfileId.lastIndexOf('@')
+  ) {
+    return normalizedProfileId;
+  }
+  return normalizedProfileId.slice(0, separatorIndex).trim();
 }
 
 function normalizeVersionMeta(profile = {}) {
@@ -239,7 +245,15 @@ function buildProfileMap(profiles = [], options = {}) {
 
 function resolveBuiltinVersionedProfile(profileId) {
   const normalizedProfileId = String(profileId || '').trim();
-  const [baseProfileId, version] = normalizedProfileId.split('@');
+  const separatorIndex = normalizedProfileId.indexOf('@');
+  if (
+    separatorIndex <= 0 ||
+    separatorIndex !== normalizedProfileId.lastIndexOf('@')
+  ) {
+    return null;
+  }
+  const baseProfileId = normalizedProfileId.slice(0, separatorIndex).trim();
+  const version = normalizedProfileId.slice(separatorIndex + 1).trim();
   const baseProfile = HEADER_PROFILE_PRESETS[baseProfileId];
   if (!baseProfile || !version) {
     return null;
@@ -377,6 +391,49 @@ export function removeEquivalentVersionedProfileIds(
     }
     return !isVersionedProfileIdForBase(profileId, versionBaseProfileId);
   });
+}
+
+export function replaceSelectedProfilePreservingOrder({
+  selectedProfileIds = [],
+  selectedProfiles = [],
+  profileId,
+  profile = {},
+}) {
+  const nextProfileId = String(profileId || '').trim();
+  const currentProfileIds = normalizeSelectedProfileIds(selectedProfileIds);
+  if (!nextProfileId) {
+    return currentProfileIds;
+  }
+
+  const versionBaseProfileId =
+    getVersionBaseProfileId(profile) || profile.id || nextProfileId;
+  const selectedProfileById = new Map(
+    selectedProfiles.filter((item) => item?.id).map((item) => [item.id, item]),
+  );
+  const nextProfileIds = [];
+  let replaced = false;
+  currentProfileIds.forEach((currentProfileId) => {
+    const selectedProfile = selectedProfileById.get(currentProfileId);
+    const sameProfile = currentProfileId === nextProfileId;
+    const sameVersionBase =
+      versionBaseProfileId &&
+      (currentProfileId === versionBaseProfileId ||
+        getVersionBaseProfileId(selectedProfile) === versionBaseProfileId ||
+        isVersionedProfileIdForBase(currentProfileId, versionBaseProfileId));
+    if (sameProfile || sameVersionBase) {
+      if (!replaced) {
+        nextProfileIds.push(nextProfileId);
+        replaced = true;
+      }
+      return;
+    }
+    nextProfileIds.push(currentProfileId);
+  });
+
+  if (!replaced) {
+    nextProfileIds.push(nextProfileId);
+  }
+  return nextProfileIds;
 }
 
 export function getHeaderProfileStrategyFromSettings(settingsText) {

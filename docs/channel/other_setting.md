@@ -112,7 +112,7 @@
 | `droid`           | Droid CLI       | `latest` 解析为 `factory-cli/<npm latest>`                     | 否                        |
 | `postman-runtime` | Postman Runtime | Postman Runtime 调试请求头                                     | 否                        |
 
-`codex-cli` 的固定快照代表交互式 TUI 场景。`codex-desktop` 的固定快照代表 Codex App / Codex Desktop 产品身份，两者不能互相替代。`codex exec` 的 non-interactive 请求会使用 `codex_exec`，不能作为 `Codex CLI` 内置 Profile 模板。
+`codex-cli` 的请求头默认按 `latest` 解析，清单不可用时回落到保存时快照，代表交互式 TUI 场景。`codex-desktop` 的固定快照代表 Codex App / Codex Desktop 产品身份，两者不能互相替代。`codex exec` 的 non-interactive 请求会使用 `codex_exec`，不能作为 `Codex CLI` 内置 Profile 模板。
 
 ## 请求头模板与透传规则
 
@@ -165,7 +165,7 @@ Codex CLI 与 Codex Desktop 透传模板当前包含同一组动态头：
 
 Codex CLI 与 Codex Desktop 透传模板还会追加一条 `copy_header` 规则：当上游请求尚未存在 `Session_id`，且客户端请求带有 `X-Client-Request-Id` 时，将 `X-Client-Request-Id` 复制为 `Session_id`。这用于兼容部分上游对稳定会话头更敏感的缓存策略；如果客户端已经带有真实 `Session_id`，模板会保留原值。新版 Codex 客户端同时会发送 `Session-Id` 与 `Thread-Id`，模板会按原始名称透传。
 
-Claude CLI 透传模板当前包含：
+Claude Code 透传模板当前包含：
 
 ```json
 [

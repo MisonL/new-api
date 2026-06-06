@@ -108,6 +108,10 @@ func buildClaudeMediaMessageFromFile(
 	return nil, true, nil
 }
 
+func hasNonEmptyToolCalls(message dto.Message) bool {
+	return len(message.ParseToolCalls()) > 0
+}
+
 func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
 	claudeTools := make([]any, 0, len(textRequest.Tools))
 
@@ -325,23 +329,33 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 			textRequest.Messages[i].Role = "user"
 		}
 		fmtMessage := dto.Message{
-			Role:    message.Role,
-			Content: message.Content,
+			Role:             message.Role,
+			Content:          message.Content,
+			ReasoningContent: message.ReasoningContent,
+			Reasoning:        message.Reasoning,
 		}
 		if message.Role == "tool" {
 			fmtMessage.ToolCallId = message.ToolCallId
 		}
-		if message.Role == "assistant" && message.ToolCalls != nil {
+		if message.Role == "assistant" && hasNonEmptyToolCalls(message) {
 			fmtMessage.ToolCalls = message.ToolCalls
 		}
-		if lastMessage.Role == message.Role && lastMessage.Role != "tool" {
+		hasReasoningOrToolCalls := fmtMessage.Role == "assistant" &&
+			(fmtMessage.GetReasoningContent() != "" || hasNonEmptyToolCalls(fmtMessage))
+		lastHasReasoningOrToolCalls := lastMessage.Role == "assistant" &&
+			(lastMessage.GetReasoningContent() != "" || hasNonEmptyToolCalls(lastMessage))
+		if lastMessage.Role == message.Role &&
+			lastMessage.Role != "tool" &&
+			!hasReasoningOrToolCalls &&
+			!lastHasReasoningOrToolCalls {
 			if lastMessage.IsStringContent() && message.IsStringContent() {
 				fmtMessage.SetStringContent(strings.Trim(fmt.Sprintf("%s %s", lastMessage.StringContent(), message.StringContent()), "\""))
 				// delete last message
 				formatMessages = formatMessages[:len(formatMessages)-1]
 			}
 		}
-		if fmtMessage.Content == nil || (fmtMessage.IsStringContent() && fmtMessage.StringContent() == "") {
+		if (fmtMessage.Content == nil || (fmtMessage.IsStringContent() && fmtMessage.StringContent() == "")) &&
+			!hasReasoningOrToolCalls {
 			fmtMessage.SetStringContent("...")
 		}
 		formatMessages = append(formatMessages, fmtMessage)
@@ -395,6 +409,7 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 			claudeMessage := dto.ClaudeMessage{
 				Role: message.Role,
 			}
+			hasAssistantReasoning := message.Role == "assistant" && message.GetReasoningContent() != ""
 			if message.Role == "tool" {
 				if len(claudeMessages) > 0 && claudeMessages[len(claudeMessages)-1].Role == "user" {
 					lastMessage := claudeMessages[len(claudeMessages)-1]
@@ -423,7 +438,7 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 						},
 					}
 				}
-			} else if message.IsStringContent() && message.ToolCalls == nil {
+			} else if message.IsStringContent() && !hasNonEmptyToolCalls(message) && !hasAssistantReasoning {
 				text := message.StringContent()
 				if text == "" {
 					text = "..."
@@ -431,6 +446,14 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 				claudeMessage.Content = text
 			} else {
 				claudeMediaMessages := make([]dto.ClaudeMediaMessage, 0)
+				if message.Role == "assistant" {
+					if reasoningContent := message.GetReasoningContent(); reasoningContent != "" {
+						claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
+							Type:     "thinking",
+							Thinking: common.GetPointer[string](reasoningContent),
+						})
+					}
+				}
 				for _, mediaMessage := range message.ParseContent() {
 					switch mediaMessage.Type {
 					case "text":
@@ -479,10 +502,10 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 					}
 				}
 
-				if message.ToolCalls != nil {
+				if hasNonEmptyToolCalls(message) {
 					for _, toolCall := range message.ParseToolCalls() {
 						inputObj := make(map[string]any)
-						if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &inputObj); err != nil {
+						if err := common.Unmarshal([]byte(toolCall.Function.Arguments), &inputObj); err != nil {
 							common.SysLog("tool call function arguments is not a map[string]any: " + fmt.Sprintf("%v", toolCall.Function.Arguments))
 							continue
 						}
@@ -598,22 +621,15 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 		Object:  "chat.completion",
 		Created: common.GetTimestamp(),
 	}
-	var responseText string
-	var responseThinking string
-	if len(claudeResponse.Content) > 0 {
-		responseText = claudeResponse.Content[0].GetText()
-		if claudeResponse.Content[0].Thinking != nil {
-			responseThinking = *claudeResponse.Content[0].Thinking
-		}
-	}
+	var responseText strings.Builder
+	var responseThinking strings.Builder
 	tools := make([]dto.ToolCallResponse, 0)
-	thinkingContent := ""
 
 	fullTextResponse.Id = claudeResponse.Id
 	for _, message := range claudeResponse.Content {
 		switch message.Type {
 		case "tool_use":
-			args, _ := json.Marshal(message.Input)
+			args, _ := common.Marshal(message.Input)
 			tools = append(tools, dto.ToolCallResponse{
 				ID:   message.Id,
 				Type: "function", // compatible with other OpenAI derivative applications
@@ -623,12 +639,11 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 				},
 			})
 		case "thinking":
-			// 加密的不管， 只输出明文的推理过程
-			if message.Thinking != nil {
-				thinkingContent = *message.Thinking
+			if message.Thinking != nil && *message.Thinking != "" {
+				appendClaudeThinkingText(&responseThinking, *message.Thinking)
 			}
 		case "text":
-			responseText = message.GetText()
+			responseText.WriteString(message.GetText())
 		}
 	}
 	choice := dto.OpenAITextResponseChoice{
@@ -638,20 +653,28 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 		},
 		FinishReason: stopReasonClaude2OpenAI(claudeResponse.StopReason),
 	}
-	choice.SetStringContent(responseText)
-	if len(responseThinking) > 0 {
-		choice.ReasoningContent = &responseThinking
+	choice.SetStringContent(responseText.String())
+	if responseThinking.Len() > 0 {
+		thinkingContent := responseThinking.String()
+		choice.ReasoningContent = &thinkingContent
 	}
 	if len(tools) > 0 {
 		choice.Message.SetToolCalls(tools)
-	}
-	if thinkingContent != "" {
-		choice.Message.ReasoningContent = &thinkingContent
 	}
 	fullTextResponse.Model = claudeResponse.Model
 	choices = append(choices, choice)
 	fullTextResponse.Choices = choices
 	return &fullTextResponse
+}
+
+func appendClaudeThinkingText(builder *strings.Builder, text string) {
+	if text == "" {
+		return
+	}
+	if builder.Len() > 0 {
+		builder.WriteString("\n")
+	}
+	builder.WriteString(text)
 }
 
 type ClaudeResponseInfo struct {
@@ -992,7 +1015,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	case types.RelayFormatOpenAI:
 		openaiResponse := ResponseClaude2OpenAI(&claudeResponse)
 		openaiResponse.Usage = buildOpenAIStyleUsageFromClaudeUsage(claudeInfo.Usage)
-		responseData, err = json.Marshal(openaiResponse)
+		responseData, err = common.Marshal(openaiResponse)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
 		}

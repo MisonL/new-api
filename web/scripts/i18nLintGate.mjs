@@ -59,8 +59,9 @@ function countIssues(issues) {
   const counts = new Map();
   for (const issue of issues) {
     const key = issueKey(issue);
-    const entry = counts.get(key) || { count: 0, issue };
+    const entry = counts.get(key) || { count: 0, issues: [] };
     entry.count += 1;
+    entry.issues.push({ ...issue });
     counts.set(key, entry);
   }
   return counts;
@@ -77,7 +78,7 @@ function compareIssueCounts(currentIssues, baselineIssues) {
     const baselineCount = baseline?.count || 0;
     if (current.count > baselineCount) {
       for (let i = baselineCount; i < current.count; i += 1) {
-        newIssues.push(current.issue);
+        newIssues.push(current.issues[i]);
       }
     }
   }
@@ -87,7 +88,7 @@ function compareIssueCounts(currentIssues, baselineIssues) {
     const currentCount = current?.count || 0;
     if (baseline.count > currentCount) {
       for (let i = currentCount; i < baseline.count; i += 1) {
-        resolvedIssues.push(baseline.issue);
+        resolvedIssues.push(baseline.issues[i]);
       }
     }
   }

@@ -454,6 +454,18 @@ func TestShouldFallbackResponsesCompactAutoHonorsAttemptedFlag(t *testing.T) {
 	require.False(t, shouldFallbackResponsesCompactAuto(c, compactAutoFallbackRelayInfo(), err))
 }
 
+func TestShouldFallbackResponsesCompactAutoHandlesMalformedNativeOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	err := types.NewOpenAIError(
+		errors.New("provider returned malformed compact output: no compaction output"),
+		types.ErrorCodeBadResponseBody,
+		http.StatusBadGateway,
+	)
+
+	require.True(t, shouldFallbackResponsesCompactAuto(c, compactAutoFallbackRelayInfo(), err))
+}
+
 func TestShouldFallbackResponsesCompactAutoSkipsActiveFallbackWindow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)
@@ -485,6 +497,48 @@ func TestShouldFallbackResponsesCompactNativeContext(t *testing.T) {
 	disabled := false
 	info.ChannelOtherSettings.ResponsesCompactContextFallback = &disabled
 	require.False(t, shouldFallbackResponsesCompactNativeContext(c, info, err))
+}
+
+func TestRetryResponsesCompactSyntheticSummaryRestoresModeOnFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	info := compactAutoFallbackRelayInfo()
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, info.ChannelOtherSettings)
+	triggerErr := types.NewOpenAIError(
+		errors.New("provider returned malformed compact output: no compaction output"),
+		types.ErrorCodeBadResponseBody,
+		http.StatusBadGateway,
+	)
+
+	err := retryResponsesCompactSyntheticSummary(c, info, failingSeekBody{}, triggerErr)
+
+	require.NotNil(t, err)
+	require.Equal(t, dto.ResponsesCompactModeAuto, info.ChannelOtherSettings.ResponsesCompactMode)
+	ctxSettings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)
+	require.True(t, ok)
+	require.Equal(t, dto.ResponsesCompactModeAuto, ctxSettings.ResponsesCompactMode)
+}
+
+func TestResponsesCompactFallbackContextSnapshotRestoresFailedAttemptMarkers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	c.Set("responses_compact_context_fallback_attempted", true)
+	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModel, "gpt-5.4")
+
+	snapshot := snapshotResponsesCompactFallbackContext(c)
+	c.Set("responses_compact_auto_fallback_attempted", true)
+	c.Set("responses_compact_summary_model_fallback_attempted", true)
+	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModel, "gpt-5.3")
+	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModels, []string{"gpt-5.3"})
+
+	restoreResponsesCompactFallbackContext(c, snapshot)
+
+	require.False(t, c.GetBool("responses_compact_auto_fallback_attempted"))
+	require.True(t, c.GetBool("responses_compact_context_fallback_attempted"))
+	require.False(t, c.GetBool("responses_compact_summary_model_fallback_attempted"))
+	require.Equal(t, "gpt-5.4", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactSummaryModel))
+	_, exists := common.GetContextKey(c, constant.ContextKeyResponsesCompactSummaryModels)
+	require.False(t, exists)
 }
 
 func TestShouldFallbackResponsesCompactSummaryModel(t *testing.T) {
@@ -579,4 +633,14 @@ func compactPayloadRequest() *dto.OpenAIResponsesCompactionRequest {
 		Model: "gpt-5.5-openai-compact",
 		Input: []byte(`[{"type":"compaction","encrypted_content":"opaque"}]`),
 	}
+}
+
+type failingSeekBody struct{}
+
+func (failingSeekBody) Read(_ []byte) (int, error) {
+	return 0, errors.New("read not used")
+}
+
+func (failingSeekBody) Seek(_ int64, _ int) (int64, error) {
+	return 0, errors.New("seek failed")
 }

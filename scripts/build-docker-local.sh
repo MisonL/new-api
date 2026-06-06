@@ -12,6 +12,7 @@ source_url="${SOURCE_URL:-https://github.com/MisonL/new-api}"
 
 docker build \
   --build-arg APP_VERSION="$version" \
+  --build-arg EFFECTIVE_APP_VERSION="$version" \
   --build-arg VCS_REF="$commit" \
   --build-arg BUILD_DATE="$build_date" \
   --build-arg SOURCE_URL="$source_url" \

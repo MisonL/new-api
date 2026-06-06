@@ -42,12 +42,35 @@ import {
   CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE,
   DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE,
-  PARAM_OVERRIDE_TEMPLATES,
   QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
 } from '../../../../constants/channel-affinity-template.constants';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 
 const { Text } = Typography;
+
+const FIELD_NAME_PLACEHOLDER = 'temperature';
+const HEADER_NAME_PLACEHOLDER = 'X-Client-Request-Id';
+const HEADER_DIRECT_VALUE_PLACEHOLDER = 'Bearer sk-xxx';
+const HEADER_APPEND_TOKENS_PLACEHOLDER =
+  'context-1m-2025-08-07, interleaved-thinking-2025-05-14';
+const HEADER_TOKEN_PLACEHOLDER = 'advanced-tool-use-2025-11-20';
+const HEADER_REPLACEMENT_PLACEHOLDER = 'tool-search-tool-2025-10-19';
+const OBJECT_KEY_PLACEHOLDER = 'key';
+const BOOLEAN_TRUE_LABEL = 'true';
+const BOOLEAN_FALSE_LABEL = 'false';
+const MAX_STRUCTURED_VALUE_DEPTH = 8;
+const STRUCTURED_VALUE_DEPTH_ERROR = `Structured value nesting depth exceeds ${MAX_STRUCTURED_VALUE_DEPTH}`;
+
+const isCompleteStructuredNumberText = (text) => {
+  const trimmed = String(text ?? '').trim();
+  return (
+    trimmed !== '' &&
+    trimmed !== '-' &&
+    trimmed !== '.' &&
+    trimmed !== '-.' &&
+    Number.isFinite(Number(trimmed))
+  );
+};
 
 const OPERATION_MODE_OPTIONS = [
   { label: '设置字段', value: 'set' },
@@ -168,7 +191,7 @@ const MODE_DESCRIPTIONS = {
   return_error: '立即返回自定义错误',
   prune_objects: '按条件清理对象中的子项',
   pass_headers:
-    '把客户端原始请求里的指定请求头透传到上游；适合 Codex / Claude CLI 等要求真实客户端动态头的渠道',
+    '把客户端原始请求里的指定请求头透传到上游；适合 Codex CLI / Claude Code 等要求真实客户端动态头的渠道',
   sync_fields: '在一个字段有值、另一个缺失时自动补齐',
   set_header:
     '设置运行期请求头：可直接覆盖整条值，也可对逗号分隔的 token 做删除、替换、追加或白名单保留',
@@ -283,6 +306,26 @@ const getModeValuePlaceholder = (mode) => {
 const SYNC_TARGET_TYPE_OPTIONS = [
   { label: '请求体字段', value: 'json' },
   { label: '请求头字段', value: 'header' },
+];
+
+const STRUCTURED_VALUE_TYPE_OPTIONS = [
+  { label: '文本', value: 'string' },
+  { label: '数字', value: 'number' },
+  { label: '布尔值', value: 'boolean' },
+  { label: '空值', value: 'null' },
+  { label: '对象', value: 'object' },
+  { label: '数组', value: 'array' },
+];
+
+const HEADER_VALUE_MODE_OPTIONS = [
+  { label: '整条请求头值', value: 'direct' },
+  { label: 'Token 映射', value: 'mapping' },
+];
+
+const HEADER_TOKEN_ACTION_OPTIONS = [
+  { label: '替换', value: 'replace' },
+  { label: '删除', value: 'delete' },
+  { label: '保留', value: 'keep' },
 ];
 
 const LEGACY_TEMPLATE = {
@@ -444,64 +487,30 @@ const AWS_BEDROCK_REMOVE_INPUT_EXAMPLES_TEMPLATE = {
   ],
 };
 
+const CODEX_REMOVE_IMAGE_GENERATION_TOOL_TEMPLATE = {
+  operations: [
+    {
+      description:
+        'Remove image_generation tool objects before upstream relay.',
+      path: 'tools',
+      mode: 'prune_objects',
+      value: {
+        type: 'image_generation',
+        recursive: false,
+      },
+    },
+  ],
+};
+
 const TEMPLATE_GROUP_OPTIONS = [
-  { label: '基础模板', value: 'basic' },
-  { label: '场景模板', value: 'scenario' },
+  { label: '推荐场景', value: 'recommended' },
+  { label: '高级兼容', value: 'advanced' },
+  { label: '示例起点', value: 'examples' },
 ];
 
 const TEMPLATE_PRESET_CONFIG = {
-  operations_default: {
-    group: 'basic',
-    label: '新格式模板（规则集）',
-    kind: 'operations',
-    payload: OPERATION_TEMPLATE,
-  },
-  legacy_default: {
-    group: 'basic',
-    label: '旧格式模板（JSON 对象）',
-    kind: 'legacy',
-    payload: LEGACY_TEMPLATE,
-  },
-  pass_headers_auth: {
-    group: 'scenario',
-    label: '请求头透传（通用 Trace）',
-    description:
-      '透传 X-Request-Id、X-Trace-Id、X-Correlation-Id、Traceparent。',
-    kind: 'operations',
-    payload: HEADER_PASSTHROUGH_TEMPLATE,
-  },
-  openai_sdk_headers_passthrough: {
-    group: 'scenario',
-    label: 'OpenAI SDK 元数据透传',
-    description:
-      '透传 OpenAI-Organization、OpenAI-Project 和 X-Stainless-* 客户端元数据。',
-    kind: 'operations',
-    payload: OPENAI_SDK_HEADER_PASSTHROUGH_TEMPLATE,
-  },
-  anthropic_runtime_headers_passthrough: {
-    group: 'scenario',
-    label: 'Anthropic Beta/Version 透传',
-    description:
-      '透传 Anthropic-Beta、Anthropic-Version 和 X-App 等运行时请求头。',
-    kind: 'operations',
-    payload: ANTHROPIC_RUNTIME_HEADER_PASSTHROUGH_TEMPLATE,
-  },
-  gemini_image_4k: {
-    group: 'scenario',
-    label: 'Gemini 图片 4K',
-    description: '当模型名包含 gemini/image 并以 4k 结尾时写入 imageSize=4K。',
-    kind: 'operations',
-    payload: GEMINI_IMAGE_4K_TEMPLATE,
-  },
-  claude_cli_headers_passthrough: {
-    group: 'scenario',
-    label: 'Claude CLI 真实请求头透传',
-    description: '透传 Claude Code 会话、Anthropic Beta 和 Stainless 动态头。',
-    kind: 'operations',
-    payload: CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
-  },
   codex_cli_headers_passthrough: {
-    group: 'scenario',
+    group: 'recommended',
     label: 'Codex CLI 真实请求头透传',
     description:
       '透传 Codex 会话、窗口、turn metadata 和客户端请求 ID；缺少 Session_id 时用 X-Client-Request-Id 补齐。',
@@ -509,48 +518,107 @@ const TEMPLATE_PRESET_CONFIG = {
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   codex_desktop_headers_passthrough: {
-    group: 'scenario',
+    group: 'recommended',
     label: 'Codex Desktop 真实请求头透传',
     description:
       '透传 Codex Desktop 会话、窗口、turn metadata 和客户端请求 ID；缺少 Session_id 时用 X-Client-Request-Id 补齐。',
     kind: 'operations',
     payload: CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE,
   },
-  gemini_cli_headers_passthrough: {
-    group: 'scenario',
-    label: 'Gemini CLI 真实请求头透传',
-    description: '透传 Gemini CLI 的 x-goog-api-client 动态头。',
+  claude_cli_headers_passthrough: {
+    group: 'recommended',
+    label: 'Claude Code 真实请求头透传',
+    description: '透传 Claude Code 会话、Anthropic Beta 和 Stainless 动态头。',
     kind: 'operations',
-    payload: GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+    payload: CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
-  qwen_code_headers_passthrough: {
-    group: 'scenario',
-    label: 'Qwen Code 真实请求头透传',
-    description: '透传 Qwen Code 使用的 Stainless 客户端动态头。',
+  openai_sdk_headers_passthrough: {
+    group: 'recommended',
+    label: 'OpenAI SDK 元数据透传',
+    description:
+      '透传 OpenAI-Organization、OpenAI-Project 和 X-Stainless-* 客户端元数据。',
     kind: 'operations',
-    payload: QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
-  },
-  droid_cli_headers_passthrough: {
-    group: 'scenario',
-    label: 'Droid CLI 真实请求头透传',
-    description: '透传 Droid CLI 使用的 Stainless 客户端动态头。',
-    kind: 'operations',
-    payload: DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+    payload: OPENAI_SDK_HEADER_PASSTHROUGH_TEMPLATE,
   },
   aws_bedrock_anthropic_beta_override: {
-    group: 'scenario',
+    group: 'recommended',
     label: 'AWS Bedrock Claude Beta 头规范化',
     description:
       '规范化 anthropic-beta 请求头，适配 Bedrock 支持的 beta token。',
     kind: 'operations',
     payload: AWS_BEDROCK_ANTHROPIC_BETA_TEMPLATE,
   },
+  remove_image_generation_tool: {
+    group: 'recommended',
+    label: '上游兼容：移除图片生成工具',
+    description: '移除上游不接受的 image_generation 工具对象。',
+    kind: 'operations',
+    payload: CODEX_REMOVE_IMAGE_GENERATION_TOOL_TEMPLATE,
+  },
   aws_bedrock_remove_input_examples: {
-    group: 'scenario',
+    group: 'advanced',
     label: 'AWS Bedrock 删除工具示例字段',
     description: '移除 Bedrock 不兼容的 tools.*.custom.input_examples 字段。',
     kind: 'operations',
     payload: AWS_BEDROCK_REMOVE_INPUT_EXAMPLES_TEMPLATE,
+  },
+  anthropic_runtime_headers_passthrough: {
+    group: 'advanced',
+    label: 'Anthropic Beta/Version 透传',
+    description:
+      '透传 Anthropic-Beta、Anthropic-Version 和 X-App 等运行时请求头。',
+    kind: 'operations',
+    payload: ANTHROPIC_RUNTIME_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  gemini_cli_headers_passthrough: {
+    group: 'advanced',
+    label: 'Gemini CLI 真实请求头透传',
+    description: '透传 Gemini CLI 的 x-goog-api-client 动态头。',
+    kind: 'operations',
+    payload: GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  qwen_code_headers_passthrough: {
+    group: 'advanced',
+    label: 'Qwen Code 真实请求头透传',
+    description: '透传 Qwen Code 使用的 Stainless 客户端动态头。',
+    kind: 'operations',
+    payload: QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  droid_cli_headers_passthrough: {
+    group: 'advanced',
+    label: 'Droid CLI 真实请求头透传',
+    description: '透传 Droid CLI 使用的 Stainless 客户端动态头。',
+    kind: 'operations',
+    payload: DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  pass_headers_auth: {
+    group: 'advanced',
+    label: 'Trace 请求头透传',
+    description:
+      '透传 X-Request-Id、X-Trace-Id、X-Correlation-Id、Traceparent。',
+    kind: 'operations',
+    payload: HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  gemini_image_4k: {
+    group: 'advanced',
+    label: 'Gemini 图片 4K',
+    description: '当模型名包含 gemini/image 并以 4k 结尾时写入 imageSize=4K。',
+    kind: 'operations',
+    payload: GEMINI_IMAGE_4K_TEMPLATE,
+  },
+  operations_default: {
+    group: 'examples',
+    label: '示例：按模型设置 temperature',
+    description: '示例规则：当模型名以 openai/ 开头时设置 temperature。',
+    kind: 'operations',
+    payload: OPERATION_TEMPLATE,
+  },
+  legacy_default: {
+    group: 'examples',
+    label: '示例：旧格式字段对象',
+    description: '旧格式顶层字段对象示例，适合简单字段覆盖。',
+    kind: 'legacy',
+    payload: LEGACY_TEMPLATE,
   },
 };
 
@@ -558,12 +626,9 @@ const QUICK_TEMPLATE_PRESETS = [
   'codex_cli_headers_passthrough',
   'codex_desktop_headers_passthrough',
   'claude_cli_headers_passthrough',
-  'gemini_cli_headers_passthrough',
-  'aws_bedrock_anthropic_beta_override',
-  'aws_bedrock_remove_input_examples',
-  'pass_headers_auth',
   'openai_sdk_headers_passthrough',
-  'anthropic_runtime_headers_passthrough',
+  'aws_bedrock_anthropic_beta_override',
+  'remove_image_generation_tool',
 ];
 
 const FIELD_GUIDE_TARGET_OPTIONS = [
@@ -652,6 +717,9 @@ const parsePassHeaderNames = (rawValue) => {
     return rawValue.map((item) => String(item ?? '').trim()).filter(Boolean);
   }
   if (rawValue && typeof rawValue === 'object') {
+    if (rawValue.names !== undefined) {
+      return parsePassHeaderNames(rawValue.names);
+    }
     if (Array.isArray(rawValue.headers)) {
       return rawValue.headers
         .map((item) => String(item ?? '').trim())
@@ -670,6 +738,398 @@ const parsePassHeaderNames = (rawValue) => {
       .filter(Boolean);
   }
   return [];
+};
+
+const parsePassHeadersDraft = (valueText) => {
+  const parsed = parseLooseValue(valueText);
+  const headers = parsePassHeaderNames(parsed);
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    if (parsed.names !== undefined) return { sourceKey: 'names', headers };
+    if (parsed.header !== undefined) return { sourceKey: 'header', headers };
+  }
+  return { sourceKey: 'headers', headers };
+};
+
+const buildPassHeadersValueText = (draft = {}) => {
+  const cleanHeaders = Array.from(
+    new Set((draft.headers || []).map((item) => item.trim()).filter(Boolean)),
+  );
+  if (draft.sourceKey === 'names') {
+    return JSON.stringify({ names: cleanHeaders });
+  }
+  if (draft.sourceKey === 'header') {
+    return JSON.stringify({ header: cleanHeaders[0] || '' });
+  }
+  return JSON.stringify(cleanHeaders);
+};
+
+const createStructuredValueNode = (kind = 'string') => ({
+  id: nextLocalId(),
+  kind,
+  text: kind === 'number' ? '0' : '',
+  boolValue: true,
+  objectEntries: [],
+  arrayItems: [],
+});
+
+const isJsonLikeStructuredValueText = (valueText) => {
+  const trimmed = String(valueText ?? '').trim();
+  if (trimmed === '') return false;
+  if ('[{'.includes(trimmed[0])) return true;
+  if (trimmed[0] === '"') return true;
+  if (trimmed === 'true' || trimmed === 'false' || trimmed === 'null') {
+    return true;
+  }
+  return /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(trimmed);
+};
+
+const normalizeStructuredValueNode = (value, depth = 0) => {
+  if (depth > MAX_STRUCTURED_VALUE_DEPTH) {
+    throw new Error(STRUCTURED_VALUE_DEPTH_ERROR);
+  }
+  if (value === null) {
+    return createStructuredValueNode('null');
+  }
+  if (Array.isArray(value)) {
+    return {
+      ...createStructuredValueNode('array'),
+      arrayItems: value.map((item) => ({
+        id: nextLocalId(),
+        value: normalizeStructuredValueNode(item, depth + 1),
+      })),
+    };
+  }
+  if (value && typeof value === 'object') {
+    return {
+      ...createStructuredValueNode('object'),
+      objectEntries: Object.entries(value).map(([key, item]) => ({
+        id: nextLocalId(),
+        key,
+        value: normalizeStructuredValueNode(item, depth + 1),
+      })),
+    };
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return { ...createStructuredValueNode('number'), text: String(value) };
+  }
+  if (typeof value === 'boolean') {
+    return { ...createStructuredValueNode('boolean'), boolValue: value };
+  }
+  return { ...createStructuredValueNode('string'), text: String(value ?? '') };
+};
+
+const parseStructuredValueNode = (valueText) => {
+  const raw = String(valueText ?? '');
+  if (raw.trim() === '') {
+    return createStructuredValueNode('string');
+  }
+  if (!isJsonLikeStructuredValueText(raw)) {
+    return normalizeStructuredValueNode(raw);
+  }
+  return normalizeStructuredValueNode(JSON.parse(raw));
+};
+
+const parseStructuredValueNodeForDisplay = (valueText) => {
+  try {
+    return parseStructuredValueNode(valueText);
+  } catch (error) {
+    return normalizeStructuredValueNode(valueText);
+  }
+};
+
+const assertStructuredValueInvariant = (condition, message) => {
+  if (!condition) {
+    throw new Error(message);
+  }
+};
+
+const getStructuredText = (node) => {
+  assertStructuredValueInvariant(
+    typeof node.text === 'string',
+    'Invalid structured value node text',
+  );
+  return node.text;
+};
+
+const getStructuredBooleanValue = (node) => {
+  assertStructuredValueInvariant(
+    typeof node.boolValue === 'boolean',
+    'Invalid structured value boolean',
+  );
+  return node.boolValue;
+};
+
+const getStructuredObjectEntries = (node) => {
+  assertStructuredValueInvariant(
+    Array.isArray(node.objectEntries),
+    'Invalid structured value object entries',
+  );
+  return node.objectEntries;
+};
+
+const getStructuredArrayItems = (node) => {
+  assertStructuredValueInvariant(
+    Array.isArray(node.arrayItems),
+    'Invalid structured value array items',
+  );
+  return node.arrayItems;
+};
+
+const buildStructuredValue = (node) => {
+  switch (node.kind) {
+    case 'number': {
+      const text = getStructuredText(node);
+      const numberValue = Number(text);
+      if (!isCompleteStructuredNumberText(text)) {
+        throw new Error('Invalid number value');
+      }
+      return numberValue;
+    }
+    case 'boolean':
+      return getStructuredBooleanValue(node);
+    case 'null':
+      return null;
+    case 'object': {
+      const payload = {};
+      getStructuredObjectEntries(node).forEach((entry) => {
+        assertStructuredValueInvariant(
+          typeof entry.key === 'string',
+          'Invalid structured value object key',
+        );
+        const key = entry.key.trim();
+        if (key) {
+          payload[key] = buildStructuredValue(entry.value);
+        }
+      });
+      return payload;
+    }
+    case 'array':
+      return getStructuredArrayItems(node).map((item) =>
+        buildStructuredValue(item.value),
+      );
+    case 'string':
+      return getStructuredText(node);
+    default:
+      throw new Error('Invalid structured value kind');
+  }
+};
+
+const shouldQuoteStructuredString = (value) => {
+  if (value !== value.trim()) return true;
+  if (value.trim() === '') return false;
+  try {
+    JSON.parse(value);
+    return true;
+  } catch (error) {
+    return false;
+  }
+};
+
+const buildStructuredValueText = (node) => {
+  const value = buildStructuredValue(node);
+  if (node.kind === 'string') {
+    const text = String(value ?? '');
+    return shouldQuoteStructuredString(text) ? JSON.stringify(text) : text;
+  }
+  return JSON.stringify(value);
+};
+
+const canSerializeStructuredValueNode = (node) => {
+  switch (node.kind) {
+    case 'number':
+      return isCompleteStructuredNumberText(getStructuredText(node));
+    case 'boolean':
+      getStructuredBooleanValue(node);
+      return true;
+    case 'object':
+      return getStructuredObjectEntries(node).every((entry) =>
+        canSerializeStructuredValueNode(entry.value),
+      );
+    case 'array':
+      return getStructuredArrayItems(node).every((item) =>
+        canSerializeStructuredValueNode(item.value),
+      );
+    case 'string':
+      getStructuredText(node);
+      return true;
+    case 'null':
+      return true;
+    default:
+      throw new Error('Invalid structured value kind');
+  }
+};
+
+const parseStructuredValueText = (valueText) =>
+  buildStructuredValue(parseStructuredValueNode(valueText));
+
+const normalizeLegacyEntry = (key, value) => ({
+  id: nextLocalId(),
+  key,
+  value_text: toValueText(value),
+});
+
+const createDefaultLegacyEntry = () => normalizeLegacyEntry('', '');
+
+const getLegacyEntriesFromObject = (source, options = {}) => {
+  const entries = Object.entries(source || {})
+    .filter(([key]) => !(options.excludeOperations && key === 'operations'))
+    .map(([key, value]) => normalizeLegacyEntry(key, value));
+  return entries.length > 0 ? entries : [createDefaultLegacyEntry()];
+};
+
+const parseLegacyEntries = (valueText, options = {}) => {
+  const raw = String(valueText ?? '').trim();
+  if (!raw) return [createDefaultLegacyEntry()];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return [createDefaultLegacyEntry()];
+    }
+    return getLegacyEntriesFromObject(parsed, options);
+  } catch (error) {
+    return [createDefaultLegacyEntry()];
+  }
+};
+
+const buildLegacyValueText = (entries = []) => {
+  const payload = {};
+  entries.forEach((entry) => {
+    const key = String(entry.key || '').trim();
+    if (!key) return;
+    payload[key] = parseStructuredValueText(entry.value_text);
+  });
+  return Object.keys(payload).length > 0
+    ? JSON.stringify(payload, null, 2)
+    : '';
+};
+
+const buildLegacyPreviewPayload = (entries = []) => {
+  const payload = {};
+  entries.forEach((entry) => {
+    const key = String(entry.key || '').trim();
+    if (!key) return;
+    payload[key] = parseStructuredValueText(entry.value_text);
+  });
+  return payload;
+};
+
+const buildLegacyOverridePayload = (entries = [], t) => {
+  const payload = {};
+  let count = 0;
+  entries.forEach((entry) => {
+    const key = String(entry.key || '').trim();
+    const valueText = String(entry.value_text ?? '').trim();
+    if (!key && !valueText) return;
+    if (!key) {
+      throw new Error(t('旧格式字段名不能为空'));
+    }
+    if (key === 'operations') {
+      throw new Error(t('旧格式字段名不能为 operations'));
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      throw new Error(t('旧格式字段名不能重复'));
+    }
+    payload[key] = parseStructuredValueText(entry.value_text);
+    count += 1;
+  });
+  return { value: payload, count };
+};
+
+const splitHeaderTokenText = (value) => {
+  if (Array.isArray(value)) {
+    return value.flatMap(splitHeaderTokenText).filter(Boolean);
+  }
+  return String(value ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+const parseHeaderValueDraft = (valueText) => {
+  const defaults = {
+    mode: 'direct',
+    directText: '',
+    keepOnlyDeclared: false,
+    appendText: '',
+    wildcardAction: 'none',
+    wildcardReplacement: '',
+    rows: [],
+  };
+  const raw = String(valueText ?? '').trim();
+  if (!raw) return defaults;
+  const parsed = parseLooseValue(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ...defaults, directText: String(parsed ?? '') };
+  }
+  const rows = [];
+  Object.entries(parsed).forEach(([token, replacement]) => {
+    if (token === '$append' || token === '$keep_only_declared') return;
+    if (token === '*') return;
+    if (replacement === null) {
+      rows.push({
+        id: nextLocalId(),
+        token,
+        action: 'delete',
+        replacement: '',
+      });
+      return;
+    }
+    const replacementText = splitHeaderTokenText(replacement).join(', ');
+    rows.push({
+      id: nextLocalId(),
+      token,
+      action: replacementText === token ? 'keep' : 'replace',
+      replacement: replacementText,
+    });
+  });
+  return {
+    mode: 'mapping',
+    directText: '',
+    keepOnlyDeclared: parsed.$keep_only_declared === true,
+    appendText: splitHeaderTokenText(parsed.$append).join(', '),
+    wildcardAction: Object.prototype.hasOwnProperty.call(parsed, '*')
+      ? parsed['*'] === null
+        ? 'delete'
+        : 'replace'
+      : 'none',
+    wildcardReplacement:
+      Object.prototype.hasOwnProperty.call(parsed, '*') && parsed['*'] !== null
+        ? splitHeaderTokenText(parsed['*']).join(', ')
+        : '',
+    rows,
+  };
+};
+
+const buildHeaderValueText = (draft = {}) => {
+  if (draft.mode === 'direct') {
+    return JSON.stringify(String(draft.directText ?? ''));
+  }
+  const payload = {};
+  if (draft.keepOnlyDeclared) payload.$keep_only_declared = true;
+  const appendTokens = splitHeaderTokenText(draft.appendText);
+  if (appendTokens.length > 0) payload.$append = appendTokens;
+  if (draft.wildcardAction === 'delete') {
+    payload['*'] = null;
+  } else if (draft.wildcardAction === 'replace') {
+    const wildcardTokens = splitHeaderTokenText(draft.wildcardReplacement);
+    payload['*'] =
+      wildcardTokens.length > 1 ? wildcardTokens : wildcardTokens[0] || '';
+  }
+  (draft.rows || []).forEach((row) => {
+    const token = String(row.token || '').trim();
+    if (!token) return;
+    if (row.action === 'delete') {
+      payload[token] = null;
+      return;
+    }
+    if (row.action === 'keep') {
+      payload[token] = token;
+      return;
+    }
+    const tokens = splitHeaderTokenText(row.replacement);
+    payload[token] = tokens.length > 1 ? tokens : tokens[0] || '';
+  });
+  return JSON.stringify(payload);
 };
 
 const parseReturnErrorDraft = (valueText) => {
@@ -752,7 +1212,7 @@ const normalizePruneRule = (rule = {}) => ({
   pass_missing_key: rule.pass_missing_key === true,
 });
 
-const parsePruneObjectsDraft = (valueText) => {
+export const parsePruneObjectsDraft = (valueText) => {
   const defaults = {
     simpleMode: true,
     typeText: '',
@@ -848,7 +1308,7 @@ const parsePruneObjectsDraft = (valueText) => {
   }
 };
 
-const buildPruneObjectsValueText = (draft = {}) => {
+export const buildPruneObjectsValueText = (draft = {}) => {
   const typeText = String(draft.typeText || '').trim();
   if (draft.simpleMode) {
     return typeText;
@@ -861,9 +1321,7 @@ const buildPruneObjectsValueText = (draft = {}) => {
   if (String(draft.logic || 'AND').toUpperCase() === 'OR') {
     payload.logic = 'OR';
   }
-  if (draft.recursive === false) {
-    payload.recursive = false;
-  }
+  payload.recursive = draft.recursive !== false;
 
   const conditions = (draft.rules || [])
     .filter((rule) => String(rule.path || '').trim())
@@ -874,7 +1332,7 @@ const buildPruneObjectsValueText = (draft = {}) => {
       };
       const valueRaw = String(rule.value_text || '').trim();
       if (valueRaw !== '') {
-        conditionPayload.value = parseLooseValue(valueRaw);
+        conditionPayload.value = parseStructuredValueText(valueRaw);
       }
       if (rule.invert) {
         conditionPayload.invert = true;
@@ -890,7 +1348,10 @@ const buildPruneObjectsValueText = (draft = {}) => {
   }
 
   if (!payload.type && !payload.conditions) {
-    return JSON.stringify({ logic: 'AND' });
+    return JSON.stringify({
+      logic: String(draft.logic || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND',
+      recursive: draft.recursive !== false,
+    });
   }
   return JSON.stringify(payload);
 };
@@ -924,6 +1385,29 @@ const normalizeCondition = (condition = {}) => ({
   pass_missing_key: condition.pass_missing_key === true,
 });
 
+const normalizeConditionList = (rawConditions) => {
+  if (Array.isArray(rawConditions)) {
+    return rawConditions
+      .filter(
+        (condition) =>
+          condition &&
+          typeof condition === 'object' &&
+          !Array.isArray(condition),
+      )
+      .map(normalizeCondition);
+  }
+  if (
+    rawConditions &&
+    typeof rawConditions === 'object' &&
+    !Array.isArray(rawConditions)
+  ) {
+    return Object.entries(rawConditions).map(([path, value]) =>
+      normalizeCondition({ path, mode: 'full', value }),
+    );
+  }
+  return [];
+};
+
 const createDefaultCondition = () => normalizeCondition({});
 
 const normalizeOperation = (operation = {}) => ({
@@ -937,9 +1421,7 @@ const normalizeOperation = (operation = {}) => ({
   from: typeof operation.from === 'string' ? operation.from : '',
   to: typeof operation.to === 'string' ? operation.to : '',
   logic: String(operation.logic || 'OR').toUpperCase() === 'AND' ? 'AND' : 'OR',
-  conditions: Array.isArray(operation.conditions)
-    ? operation.conditions.map(normalizeCondition)
-    : [],
+  conditions: normalizeConditionList(operation.conditions),
 });
 
 const createDefaultOperation = () => normalizeOperation({ mode: 'set' });
@@ -1009,6 +1491,7 @@ const parseInitialState = (rawValue) => {
       editMode: 'visual',
       visualMode: 'operations',
       legacyValue: '',
+      legacyEntries: [createDefaultLegacyEntry()],
       operations: [createDefaultOperation()],
       jsonText: '',
       jsonError: '',
@@ -1020,6 +1503,7 @@ const parseInitialState = (rawValue) => {
       editMode: 'json',
       visualMode: 'operations',
       legacyValue: '',
+      legacyEntries: [createDefaultLegacyEntry()],
       operations: [createDefaultOperation()],
       jsonText: text,
       jsonError: 'JSON 格式不正确',
@@ -1039,6 +1523,9 @@ const parseInitialState = (rawValue) => {
       editMode: 'visual',
       visualMode: 'operations',
       legacyValue: '',
+      legacyEntries: getLegacyEntriesFromObject(parsed, {
+        excludeOperations: true,
+      }),
       operations:
         parsed.operations.length > 0
           ? parsed.operations.map(normalizeOperation)
@@ -1053,6 +1540,7 @@ const parseInitialState = (rawValue) => {
       editMode: 'visual',
       visualMode: 'legacy',
       legacyValue: pretty,
+      legacyEntries: parseLegacyEntries(pretty),
       operations: [createDefaultOperation()],
       jsonText: pretty,
       jsonError: '',
@@ -1063,6 +1551,7 @@ const parseInitialState = (rawValue) => {
     editMode: 'json',
     visualMode: 'operations',
     legacyValue: '',
+    legacyEntries: [createDefaultLegacyEntry()],
     operations: [createDefaultOperation()],
     jsonText: pretty,
     jsonError: '',
@@ -1095,7 +1584,7 @@ const buildConditionPayload = (condition) => {
   const payload = {
     path,
     mode: condition.mode || 'full',
-    value: parseLooseValue(condition.value_text),
+    value: parseStructuredValueText(condition.value_text),
   };
   if (condition.invert) payload.invert = true;
   if (condition.pass_missing_key) payload.pass_missing_key = true;
@@ -1125,10 +1614,10 @@ const validateOperations = (operations, t) => {
         return t('第 {{line}} 条操作缺少目标字段', { line });
       }
     }
-    if (meta.from && !fromValue) {
+    if (meta.from && !fromValue && !(meta.pathAlias && pathValue)) {
       return t('第 {{line}} 条操作缺少来源字段', { line });
     }
-    if (meta.to && !toValue) {
+    if (meta.to && !toValue && !(meta.pathAlias && pathValue)) {
       return t('第 {{line}} 条操作缺少目标字段', { line });
     }
     if (
@@ -1145,7 +1634,11 @@ const validateOperations = (operations, t) => {
       try {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          if (!String(parsed.message || '').trim()) {
+          if (
+            !String(
+              parsed.message !== undefined ? parsed.message : parsed.msg || '',
+            ).trim()
+          ) {
             return t('第 {{line}} 条 return_error 需要 message 字段', { line });
           }
         }
@@ -1192,6 +1685,24 @@ const validateOperations = (operations, t) => {
       }
     }
 
+    if (mode === 'set_header') {
+      const parsed = parseLooseValue(op.value_text);
+      if (parsed === null || parsed === undefined) {
+        return t('第 {{line}} 条操作缺少值', { line });
+      }
+      if (typeof parsed === 'string' && !parsed.trim()) {
+        return t('第 {{line}} 条操作缺少值', { line });
+      }
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed) &&
+        Object.keys(parsed).length === 0
+      ) {
+        return t('第 {{line}} 条操作缺少值', { line });
+      }
+    }
+
     if (mode === 'pass_headers') {
       const raw = String(op.value_text ?? '').trim();
       if (!raw) {
@@ -1214,6 +1725,9 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
   const [editMode, setEditMode] = useState('visual');
   const [visualMode, setVisualMode] = useState('operations');
   const [legacyValue, setLegacyValue] = useState('');
+  const [legacyEntries, setLegacyEntries] = useState([
+    createDefaultLegacyEntry(),
+  ]);
   const [operations, setOperations] = useState([createDefaultOperation()]);
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState('');
@@ -1223,9 +1737,10 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
   const [draggedOperationId, setDraggedOperationId] = useState('');
   const [dragOverOperationId, setDragOverOperationId] = useState('');
   const [dragOverPosition, setDragOverPosition] = useState('before');
-  const [templateGroupKey, setTemplateGroupKey] = useState('basic');
-  const [templatePresetKey, setTemplatePresetKey] =
-    useState('operations_default');
+  const [templateGroupKey, setTemplateGroupKey] = useState('recommended');
+  const [templatePresetKey, setTemplatePresetKey] = useState(
+    'codex_cli_headers_passthrough',
+  );
   const [headerValueExampleVisible, setHeaderValueExampleVisible] =
     useState(false);
   const [fieldGuideVisible, setFieldGuideVisible] = useState(false);
@@ -1239,6 +1754,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     setEditMode(nextState.editMode);
     setVisualMode(nextState.visualMode);
     setLegacyValue(nextState.legacyValue);
+    setLegacyEntries(nextState.legacyEntries);
     setOperations(nextState.operations);
     setJsonText(nextState.jsonText);
     setJsonError(nextState.jsonError);
@@ -1248,13 +1764,8 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     setDraggedOperationId('');
     setDragOverOperationId('');
     setDragOverPosition('before');
-    if (nextState.visualMode === 'legacy') {
-      setTemplateGroupKey('basic');
-      setTemplatePresetKey('legacy_default');
-    } else {
-      setTemplateGroupKey('basic');
-      setTemplatePresetKey('operations_default');
-    }
+    setTemplateGroupKey('recommended');
+    setTemplatePresetKey('codex_cli_headers_passthrough');
     setHeaderValueExampleVisible(false);
     setFieldGuideVisible(false);
     setFieldGuideTarget('path');
@@ -1395,7 +1906,16 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
           payload.path = pathValue;
         }
         if (meta.value) {
-          payload.value = parseLooseValue(operation.value_text);
+          if (
+            mode === 'pass_headers' ||
+            mode === 'set_header' ||
+            mode === 'return_error' ||
+            mode === 'prune_objects'
+          ) {
+            payload.value = parseLooseValue(operation.value_text);
+          } else {
+            payload.value = parseStructuredValueText(operation.value_text);
+          }
         }
         if (meta.keepOrigin && operation.keep_origin) {
           payload.keep_origin = true;
@@ -1435,21 +1955,47 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     [t],
   );
 
+  const getOperationDedupKey = useCallback(
+    (operation) => buildOperationsJson([operation], { validate: false }),
+    [buildOperationsJson],
+  );
+
   const buildVisualJson = useCallback(() => {
+    const legacyPayload = buildLegacyOverridePayload(legacyEntries, t);
     if (visualMode === 'legacy') {
-      const trimmed = legacyValue.trim();
-      if (!trimmed) return '';
-      if (!verifyJSON(trimmed)) {
-        throw new Error(t('参数覆盖必须是合法的 JSON 格式！'));
+      if (legacyPayload.count === 0) {
+        return '';
       }
-      const parsed = JSON.parse(trimmed);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error(t('旧格式必须是 JSON 对象'));
-      }
-      return JSON.stringify(parsed, null, 2);
+      return JSON.stringify(legacyPayload.value, null, 2);
     }
-    return buildOperationsJson(operations, { validate: true });
-  }, [buildOperationsJson, legacyValue, operations, t, visualMode]);
+    const operationsJson = buildOperationsJson(operations, { validate: true });
+    if (!operationsJson) {
+      return legacyPayload.count > 0
+        ? JSON.stringify(legacyPayload.value, null, 2)
+        : '';
+    }
+    const operationsPayload = JSON.parse(operationsJson);
+    return JSON.stringify(
+      { ...legacyPayload.value, ...operationsPayload },
+      null,
+      2,
+    );
+  }, [buildOperationsJson, legacyEntries, operations, t, visualMode]);
+
+  const buildVisualJsonPreview = useCallback(() => {
+    if (visualMode === 'legacy') {
+      return buildLegacyValueText(legacyEntries);
+    }
+    const legacyPayload = buildLegacyPreviewPayload(legacyEntries);
+    const operationsJson = buildOperationsJson(operations, { validate: false });
+    if (!operationsJson) {
+      return Object.keys(legacyPayload).length > 0
+        ? JSON.stringify(legacyPayload, null, 2)
+        : '';
+    }
+    const operationsPayload = JSON.parse(operationsJson);
+    return JSON.stringify({ ...legacyPayload, ...operationsPayload }, null, 2);
+  }, [buildOperationsJson, legacyEntries, operations, visualMode]);
 
   const switchToJsonMode = () => {
     if (editMode === 'json') return;
@@ -1458,11 +2004,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       setJsonError('');
     } catch (error) {
       showError(error.message);
-      if (visualMode === 'legacy') {
-        setJsonText(legacyValue);
-      } else {
-        setJsonText(buildOperationsJson(operations, { validate: false }));
-      }
+      setJsonText(buildVisualJsonPreview());
       setJsonError(error.message || t('参数配置有误'));
     }
     setEditMode('json');
@@ -1477,6 +2019,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       setOperations([fallback]);
       setSelectedOperationId(fallback.id);
       setLegacyValue('');
+      setLegacyEntries([createDefaultLegacyEntry()]);
       setJsonError('');
       setEditMode('visual');
       setOperationEditorActive(false);
@@ -1501,10 +2044,13 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       setOperations(nextOperations);
       setSelectedOperationId(nextOperations[0]?.id || '');
       setLegacyValue('');
+      setLegacyEntries(
+        getLegacyEntriesFromObject(parsed, { excludeOperations: true }),
+      );
       setJsonError('');
       setEditMode('visual');
-      setTemplateGroupKey('basic');
-      setTemplatePresetKey('operations_default');
+      setTemplateGroupKey('recommended');
+      setTemplatePresetKey('codex_cli_headers_passthrough');
       setOperationEditorActive(
         nextOperations.some((item) => !isOperationBlank(item)),
       );
@@ -1513,13 +2059,15 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const fallback = createDefaultOperation();
       setVisualMode('legacy');
-      setLegacyValue(JSON.stringify(parsed, null, 2));
+      const text = JSON.stringify(parsed, null, 2);
+      setLegacyValue(text);
+      setLegacyEntries(parseLegacyEntries(text));
       setOperations([fallback]);
       setSelectedOperationId(fallback.id);
       setJsonError('');
       setEditMode('visual');
-      setTemplateGroupKey('basic');
-      setTemplatePresetKey('legacy_default');
+      setTemplateGroupKey('recommended');
+      setTemplatePresetKey('codex_cli_headers_passthrough');
       setOperationEditorActive(true);
       return;
     }
@@ -1531,6 +2079,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     const fallback = createDefaultOperation();
     setVisualMode('legacy');
     setLegacyValue(text);
+    setLegacyEntries(parseLegacyEntries(text));
     setOperations([fallback]);
     setSelectedOperationId(fallback.id);
     setExpandedConditionMap({});
@@ -1558,20 +2107,18 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
 
   const appendLegacyTemplate = (legacyPayload) => {
     let parsedCurrent = {};
-    if (visualMode === 'legacy') {
-      const trimmed = legacyValue.trim();
-      if (trimmed) {
-        if (!verifyJSON(trimmed)) {
-          showError(t('当前旧格式 JSON 不合法，无法追加模板'));
-          return;
-        }
-        const parsed = JSON.parse(trimmed);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          showError(t('当前旧格式不是 JSON 对象，无法追加模板'));
-          return;
-        }
-        parsedCurrent = parsed;
+    const trimmed = legacyValue.trim();
+    if (trimmed) {
+      if (!verifyJSON(trimmed)) {
+        showError(t('当前旧格式 JSON 不合法，无法追加模板'));
+        return;
       }
+      const parsed = JSON.parse(trimmed);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        showError(t('当前旧格式不是 JSON 对象，无法追加模板'));
+        return;
+      }
+      parsedCurrent = parsed;
     }
 
     const merged = {
@@ -1579,11 +2126,8 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       ...parsedCurrent,
     };
     const text = JSON.stringify(merged, null, 2);
-    const fallback = createDefaultOperation();
-    setVisualMode('legacy');
     setLegacyValue(text);
-    setOperations([fallback]);
-    setSelectedOperationId(fallback.id);
+    setLegacyEntries(parseLegacyEntries(text));
     setExpandedConditionMap({});
     setJsonText(text);
     setJsonError('');
@@ -1597,12 +2141,22 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       visualMode === 'operations'
         ? operations.filter((item) => !isOperationBlank(item))
         : [];
-    const nextOperations = [...existing, ...appended];
+    const existingKeys = new Set(existing.map(getOperationDedupKey));
+    const uniqueAppended = appended.filter((operation) => {
+      const key = getOperationDedupKey(operation);
+      if (existingKeys.has(key)) {
+        return false;
+      }
+      existingKeys.add(key);
+      return true;
+    });
+    const nextOperations = [...existing, ...uniqueAppended];
     setVisualMode('operations');
     setOperations(nextOperations.length > 0 ? nextOperations : appended);
-    setSelectedOperationId(nextOperations[0]?.id || appended[0]?.id || '');
+    setSelectedOperationId(
+      uniqueAppended[0]?.id || nextOperations[0]?.id || appended[0]?.id || '',
+    );
     setExpandedConditionMap({});
-    setLegacyValue('');
     setJsonError('');
     setEditMode('visual');
     setJsonText('');
@@ -1613,49 +2167,58 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     const fallback = createDefaultOperation();
     setVisualMode('operations');
     setLegacyValue('');
+    setLegacyEntries([createDefaultLegacyEntry()]);
     setOperations([fallback]);
     setSelectedOperationId(fallback.id);
     setExpandedConditionMap({});
     setJsonText('');
     setJsonError('');
-    setTemplateGroupKey('basic');
-    setTemplatePresetKey('operations_default');
+    setTemplateGroupKey('recommended');
+    setTemplatePresetKey('codex_cli_headers_passthrough');
     setOperationEditorActive(false);
   };
 
   const getSelectedTemplatePreset = () =>
     TEMPLATE_PRESET_CONFIG[templatePresetKey] ||
-    TEMPLATE_PRESET_CONFIG.operations_default;
+    TEMPLATE_PRESET_CONFIG.codex_cli_headers_passthrough;
 
   const selectedTemplatePreset = getSelectedTemplatePreset();
 
-  const applyTemplatePreset = (presetKey, action = 'fill') => {
+  const selectTemplatePreset = (presetKey) => {
     const preset =
       TEMPLATE_PRESET_CONFIG[presetKey] ||
-      TEMPLATE_PRESET_CONFIG.operations_default;
-    setTemplateGroupKey(preset.group || 'basic');
+      TEMPLATE_PRESET_CONFIG.codex_cli_headers_passthrough;
+    setTemplateGroupKey(preset.group || 'recommended');
+    setTemplatePresetKey(presetKey);
+  };
+
+  const applyTemplatePreset = (presetKey, action = 'replace') => {
+    const preset =
+      TEMPLATE_PRESET_CONFIG[presetKey] ||
+      TEMPLATE_PRESET_CONFIG.codex_cli_headers_passthrough;
+    setTemplateGroupKey(preset.group || 'recommended');
     setTemplatePresetKey(presetKey);
     if (preset.kind === 'legacy') {
-      if (action === 'append') {
+      if (action === 'add') {
         appendLegacyTemplate(preset.payload || {});
       } else {
         fillLegacyTemplate(preset.payload || {});
       }
       return;
     }
-    if (action === 'append') {
+    if (action === 'add') {
       appendOperationsTemplate(preset.payload?.operations || []);
     } else {
       fillOperationsTemplate(preset.payload?.operations || []);
     }
   };
 
-  const fillTemplateFromLibrary = () => {
-    applyTemplatePreset(templatePresetKey, 'fill');
+  const replaceWithSelectedTemplate = () => {
+    applyTemplatePreset(templatePresetKey, 'replace');
   };
 
-  const appendTemplateFromLibrary = () => {
-    applyTemplatePreset(templatePresetKey, 'append');
+  const addSelectedTemplate = () => {
+    applyTemplatePreset(templatePresetKey, 'add');
   };
 
   const resetEditorState = () => {
@@ -1755,23 +2318,30 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     );
   };
 
-  const formatSelectedOperationValueAsJson = useCallback(() => {
-    if (!selectedOperation) return;
-    const raw = String(selectedOperation.value_text || '').trim();
-    if (!raw) return;
-    if (!verifyJSON(raw)) {
-      showError(t('当前值不是合法 JSON，无法格式化'));
-      return;
-    }
-    try {
-      updateOperation(selectedOperation.id, {
-        value_text: JSON.stringify(JSON.parse(raw), null, 2),
-      });
-      showSuccess(t('JSON 已格式化'));
-    } catch (error) {
-      showError(t('当前值不是合法 JSON，无法格式化'));
-    }
-  }, [selectedOperation, t, updateOperation]);
+  const updateLegacyEntry = (entryId, patch) => {
+    setLegacyEntries((prev) => {
+      const nextEntries = prev.map((entry) =>
+        entry.id === entryId ? { ...entry, ...patch } : entry,
+      );
+      setLegacyValue(buildLegacyValueText(nextEntries));
+      return nextEntries;
+    });
+  };
+
+  const addLegacyEntry = () => {
+    setLegacyEntries((prev) => [...prev, createDefaultLegacyEntry()]);
+  };
+
+  const removeLegacyEntry = (entryId) => {
+    setLegacyEntries((prev) => {
+      const nextEntries =
+        prev.length <= 1
+          ? [createDefaultLegacyEntry()]
+          : prev.filter((entry) => entry.id !== entryId);
+      setLegacyValue(buildLegacyValueText(nextEntries));
+      return nextEntries;
+    });
+  };
 
   const updateReturnErrorDraft = (operationId, draftPatch = {}) => {
     const current = operations.find((item) => item.id === operationId);
@@ -2173,18 +2743,20 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
             </Space>
             <div className='mt-3 flex items-start gap-2 flex-wrap'>
               <Text strong size='small' className='leading-8'>
-                {t('常用模板')}
+                {t('快速选择')}
               </Text>
               <Space wrap spacing={6}>
                 {QUICK_TEMPLATE_PRESETS.map((presetKey) => {
                   const preset = TEMPLATE_PRESET_CONFIG[presetKey];
                   if (!preset) return null;
+                  const isSelected = presetKey === templatePresetKey;
                   return (
                     <Button
                       key={presetKey}
                       size='small'
-                      type='tertiary'
-                      onClick={() => applyTemplatePreset(presetKey, 'fill')}
+                      type={isSelected ? 'primary' : 'tertiary'}
+                      theme={isSelected ? 'solid' : 'light'}
+                      onClick={() => selectTemplatePreset(presetKey)}
                     >
                       {t(preset.label)}
                     </Button>
@@ -2193,9 +2765,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
               </Space>
             </div>
             <Text type='tertiary' size='small' className='block mt-1'>
-              {t(
-                '点击会直接套用模板并覆盖当前规则；需要叠加规则时可展开模板区选择追加。',
-              )}
+              {t('先选择方案。只有点击应用按钮后，才会修改当前规则。')}
             </Text>
           </div>
           <Collapse
@@ -2208,45 +2778,62 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
               header={
                 <Space wrap spacing={8}>
                   <Text className='font-medium' size='small'>
-                    {t('从模板开始（可选）')}
+                    {t('预置规则方案库')}
                   </Text>
                   <Tag size='small' color='grey'>
-                    {t('高级入口')}
+                    {t('先选择，再应用')}
                   </Tag>
                 </Space>
               }
             >
-              <Space wrap spacing={8} style={{ width: '100%' }}>
-                <Select
-                  value={templateGroupKey}
-                  optionList={TEMPLATE_GROUP_OPTIONS}
-                  onChange={(nextValue) =>
-                    setTemplateGroupKey(nextValue || 'basic')
-                  }
-                  style={{ width: 130 }}
-                />
-                <Select
-                  value={templatePresetKey}
-                  optionList={templatePresetOptions}
-                  onChange={(nextValue) =>
-                    setTemplatePresetKey(nextValue || 'operations_default')
-                  }
-                  style={{ minWidth: 220, flex: '1 1 260px' }}
-                />
-                <Button size='small' onClick={fillTemplateFromLibrary}>
-                  {t('填充模板')}
-                </Button>
-                <Button
-                  size='small'
-                  type='tertiary'
-                  onClick={appendTemplateFromLibrary}
-                >
-                  {t('追加模板')}
-                </Button>
+              <Space vertical spacing={8} style={{ width: '100%' }}>
+                <Space wrap spacing={8} style={{ width: '100%' }}>
+                  <Text type='tertiary' size='small' className='leading-8'>
+                    {t('分类')}
+                  </Text>
+                  <Select
+                    value={templateGroupKey}
+                    optionList={TEMPLATE_GROUP_OPTIONS}
+                    onChange={(nextValue) =>
+                      setTemplateGroupKey(nextValue || 'recommended')
+                    }
+                    style={{ width: 130 }}
+                  />
+                  <Text type='tertiary' size='small' className='leading-8'>
+                    {t('所选预设')}
+                  </Text>
+                  <Select
+                    value={templatePresetKey}
+                    optionList={templatePresetOptions}
+                    onChange={(nextValue) =>
+                      setTemplatePresetKey(
+                        nextValue || 'codex_cli_headers_passthrough',
+                      )
+                    }
+                    style={{ minWidth: 220, flex: '1 1 260px' }}
+                  />
+                </Space>
+                <Space wrap spacing={8} style={{ width: '100%' }}>
+                  <Button
+                    size='small'
+                    type='primary'
+                    onClick={replaceWithSelectedTemplate}
+                  >
+                    {t('替换当前规则')}
+                  </Button>
+                  <Button
+                    size='small'
+                    type='tertiary'
+                    icon={<IconPlus />}
+                    onClick={addSelectedTemplate}
+                  >
+                    {t('追加到现有规则')}
+                  </Button>
+                </Space>
               </Space>
               <Text type='tertiary' size='small' className='block mt-2'>
                 {t(
-                  '模板会写入参数覆盖规则；保存前仍可继续编辑或切换到 JSON 文本。',
+                  '替换当前规则会先删除现有规则；追加到现有规则会把所选方案添加到规则末尾。',
                 )}
               </Text>
               {selectedTemplatePreset?.description ? (
@@ -2260,26 +2847,13 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
           {editMode === 'visual' ? (
             <div className='min-w-0' style={{ width: '100%' }}>
               {visualMode === 'legacy' ? (
-                <Card
-                  className='!rounded-lg !border-0'
-                  bodyStyle={{
-                    padding: 14,
-                    background: 'var(--semi-color-fill-0)',
-                  }}
-                >
-                  <Text className='mb-2 block'>{t('旧格式（JSON 对象）')}</Text>
-                  <TextArea
-                    value={legacyValue}
-                    autosize={{ minRows: 10, maxRows: 20 }}
-                    placeholder={JSON.stringify(LEGACY_TEMPLATE, null, 2)}
-                    onChange={(nextValue) => setLegacyValue(nextValue)}
-                    showClear
-                    name='components-table-channels-modals-paramoverrideeditormodal-textarea-1'
-                  />
-                  <Text type='tertiary' size='small' className='mt-2 block'>
-                    {t('这里直接编辑 JSON 对象。适合简单覆盖参数的场景。')}
-                  </Text>
-                </Card>
+                <LegacyOverrideEditor
+                  t={t}
+                  entries={legacyEntries}
+                  addEntry={addLegacyEntry}
+                  updateEntry={updateLegacyEntry}
+                  removeEntry={removeLegacyEntry}
+                />
               ) : shouldShowOperationEmptyState ? (
                 <Card
                   className='!rounded-lg !border-0'
@@ -2309,9 +2883,9 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                       <Button
                         size='small'
                         type='tertiary'
-                        onClick={fillTemplateFromLibrary}
+                        onClick={replaceWithSelectedTemplate}
                       >
-                        {t('从模板填充')}
+                        {t('用所选预设创建规则')}
                       </Button>
                       <Button
                         size='small'
@@ -2325,6 +2899,37 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                 </Card>
               ) : (
                 <div>
+                  <Collapse keepDOM style={{ marginBottom: 8 }}>
+                    <Collapse.Panel
+                      itemKey='top_level_field_overrides'
+                      header={
+                        <Space spacing={8}>
+                          <Text strong size='small'>
+                            {t('顶层字段覆盖')}
+                          </Text>
+                          <Tag size='small' color='grey'>
+                            {
+                              legacyEntries.filter(
+                                (entry) =>
+                                  String(entry.key || '').trim() ||
+                                  String(entry.value_text ?? '').trim(),
+                              ).length
+                            }
+                          </Tag>
+                        </Space>
+                      }
+                    >
+                      <LegacyOverrideEditor
+                        t={t}
+                        compact
+                        entries={legacyEntries}
+                        addEntry={addLegacyEntry}
+                        updateEntry={updateLegacyEntry}
+                        removeEntry={removeLegacyEntry}
+                      />
+                    </Collapse.Panel>
+                  </Collapse>
+
                   <div className='flex items-center justify-between gap-2 mb-2 flex-wrap'>
                     <Space wrap spacing={8}>
                       <Text strong size='small'>
@@ -2977,7 +3582,11 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                       onChange={(nextValue) =>
                                         updatePruneObjectsDraft(
                                           selectedOperation.id,
-                                          { typeText: nextValue },
+                                          {
+                                            simpleMode:
+                                              pruneObjectsDraft.simpleMode,
+                                            typeText: nextValue,
+                                          },
                                         )
                                       }
                                       name='components-table-channels-modals-paramoverrideeditormodal-input-7'
@@ -2994,6 +3603,18 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                         )}
                                       </Text>
                                     ) : (
+                                      <Text
+                                        type='tertiary'
+                                        size='small'
+                                        className='mt-2 block'
+                                      >
+                                        {t(
+                                          '高级模式已启用，可配置递归策略、匹配逻辑和附加对象字段条件。',
+                                        )}
+                                      </Text>
+                                    )}
+
+                                    {!pruneObjectsDraft.simpleMode ? (
                                       <>
                                         <Row
                                           gutter={12}
@@ -3019,7 +3640,10 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                               onChange={(nextValue) =>
                                                 updatePruneObjectsDraft(
                                                   selectedOperation.id,
-                                                  { logic: nextValue || 'AND' },
+                                                  {
+                                                    simpleMode: false,
+                                                    logic: nextValue || 'AND',
+                                                  },
                                                 )
                                               }
                                             />
@@ -3042,7 +3666,10 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                                 onClick={() =>
                                                   updatePruneObjectsDraft(
                                                     selectedOperation.id,
-                                                    { recursive: true },
+                                                    {
+                                                      simpleMode: false,
+                                                      recursive: true,
+                                                    },
                                                   )
                                                 }
                                               >
@@ -3058,7 +3685,10 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                                 onClick={() =>
                                                   updatePruneObjectsDraft(
                                                     selectedOperation.id,
-                                                    { recursive: false },
+                                                    {
+                                                      simpleMode: false,
+                                                      recursive: false,
+                                                    },
                                                   )
                                                 }
                                               >
@@ -3182,20 +3812,27 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                                       >
                                                         {t('匹配值（可选）')}
                                                       </Text>
-                                                      <Input
-                                                        value={rule.value_text}
+                                                      <StructuredValueNodeEditor
+                                                        t={t}
+                                                        node={parseStructuredValueNodeForDisplay(
+                                                          rule.value_text,
+                                                        )}
+                                                        sourceKey={
+                                                          rule.value_text
+                                                        }
                                                         placeholder='redacted_thinking'
-                                                        onChange={(nextValue) =>
+                                                        onChange={(node) =>
                                                           updatePruneRule(
                                                             selectedOperation.id,
                                                             rule.id,
                                                             {
                                                               value_text:
-                                                                nextValue,
+                                                                buildStructuredValueText(
+                                                                  node,
+                                                                ),
                                                             },
                                                           )
                                                         }
-                                                        name='components-table-channels-modals-paramoverrideeditormodal-input-9'
                                                       />
                                                     </Col>
                                                   </Row>
@@ -3251,71 +3888,36 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                           )}
                                         </div>
                                       </>
-                                    )}
+                                    ) : null}
                                   </div>
+                                ) : mode === 'pass_headers' ? (
+                                  <PassHeadersEditor
+                                    t={t}
+                                    operationId={selectedOperation.id}
+                                    valueText={selectedOperation.value_text}
+                                    updateOperation={updateOperation}
+                                  />
+                                ) : mode === 'set_header' ? (
+                                  <HeaderValueEditor
+                                    t={t}
+                                    operationId={selectedOperation.id}
+                                    valueText={selectedOperation.value_text}
+                                    updateOperation={updateOperation}
+                                    onShowExample={() =>
+                                      setHeaderValueExampleVisible(true)
+                                    }
+                                  />
                                 ) : (
                                   <div className='mt-2'>
-                                    <div className='flex items-center justify-between gap-2'>
-                                      <Text type='tertiary' size='small'>
-                                        {t(getModeValueLabel(mode))}
-                                      </Text>
-                                      {mode === 'set_header' ? (
-                                        <Space spacing={6}>
-                                          <Button
-                                            size='small'
-                                            type='tertiary'
-                                            onClick={() =>
-                                              setHeaderValueExampleVisible(true)
-                                            }
-                                          >
-                                            {t('查看 JSON 示例')}
-                                          </Button>
-                                          <Button
-                                            size='small'
-                                            type='tertiary'
-                                            onClick={
-                                              formatSelectedOperationValueAsJson
-                                            }
-                                          >
-                                            {t('格式化 JSON')}
-                                          </Button>
-                                        </Space>
-                                      ) : null}
-                                    </div>
-                                    {mode === 'pass_headers' ? (
-                                      <Text
-                                        type='tertiary'
-                                        size='small'
-                                        className='mt-1 mb-2 block'
-                                      >
-                                        {t(
-                                          '这里不会生成固定请求头，只会把客户端请求中实际存在的同名请求头转发给上游；目标已有值时可开启保留原值。',
-                                        )}
-                                      </Text>
-                                    ) : null}
-                                    {mode === 'set_header' ? (
-                                      <Text
-                                        type='tertiary'
-                                        size='small'
-                                        className='mt-1 mb-2 block'
-                                      >
-                                        {t(
-                                          '纯字符串会直接覆盖整条请求头，或者点击“查看 JSON 示例”按 token 规则处理。',
-                                        )}
-                                      </Text>
-                                    ) : null}
-                                    <TextArea
-                                      value={selectedOperation.value_text}
-                                      autosize={{ minRows: 1, maxRows: 4 }}
+                                    <StructuredValueEditor
+                                      t={t}
+                                      operationId={selectedOperation.id}
+                                      label={getModeValueLabel(mode)}
+                                      valueText={selectedOperation.value_text}
                                       placeholder={getModeValuePlaceholder(
                                         mode,
                                       )}
-                                      onChange={(nextValue) =>
-                                        updateOperation(selectedOperation.id, {
-                                          value_text: nextValue,
-                                        })
-                                      }
-                                      name='components-table-channels-modals-paramoverrideeditormodal-textarea-3'
+                                      updateOperation={updateOperation}
                                     />
                                   </div>
                                 )
@@ -3677,17 +4279,27 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                                 >
                                                   {t('匹配值')}
                                                 </Text>
-                                                <Input
-                                                  value={condition.value_text}
+                                                <StructuredValueNodeEditor
+                                                  t={t}
+                                                  node={parseStructuredValueNodeForDisplay(
+                                                    condition.value_text,
+                                                  )}
+                                                  sourceKey={
+                                                    condition.value_text
+                                                  }
                                                   placeholder='gpt'
-                                                  onChange={(nextValue) =>
+                                                  onChange={(node) =>
                                                     updateCondition(
                                                       selectedOperation.id,
                                                       condition.id,
-                                                      { value_text: nextValue },
+                                                      {
+                                                        value_text:
+                                                          buildStructuredValueText(
+                                                            node,
+                                                          ),
+                                                      },
                                                     )
                                                   }
-                                                  name='components-table-channels-modals-paramoverrideeditormodal-input-15'
                                                 />
                                               </Col>
                                             </Row>
@@ -3991,6 +4603,836 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
         </Space>
       </Modal>
     </>
+  );
+};
+
+const LegacyOverrideEditor = ({
+  t,
+  entries,
+  addEntry,
+  updateEntry,
+  removeEntry,
+  compact = false,
+}) => (
+  <Card
+    className='!rounded-lg !border-0'
+    bodyStyle={{
+      padding: compact ? 10 : 14,
+      background: 'var(--semi-color-fill-0)',
+    }}
+  >
+    <div className='mb-3 flex items-center justify-between gap-2 flex-wrap'>
+      <div>
+        <Text strong>{compact ? t('顶层字段覆盖') : t('旧格式字段覆盖')}</Text>
+        <Text type='tertiary' size='small' className='block mt-1'>
+          {t(
+            compact
+              ? '这些字段会和 operations 保存在同一个 param_override 对象中。'
+              : '逐项设置顶层请求字段和值，保存后仍生成旧格式 JSON 对象。',
+          )}
+        </Text>
+      </div>
+      <Button size='small' icon={<IconPlus />} onClick={addEntry}>
+        {t('新增字段')}
+      </Button>
+    </div>
+    <div className='flex flex-col gap-3'>
+      {entries.map((entry, index) => (
+        <div
+          key={entry.id}
+          className='rounded-lg p-3'
+          style={{
+            background: 'var(--semi-color-bg-1)',
+            border: '1px solid var(--semi-color-border)',
+          }}
+        >
+          <div className='mb-2 flex items-center justify-between gap-2'>
+            <Tag size='small'>{`#${index + 1}`}</Tag>
+            <Button
+              size='small'
+              type='danger'
+              theme='borderless'
+              icon={<IconDelete />}
+              onClick={() => removeEntry(entry.id)}
+            >
+              {t('删除字段')}
+            </Button>
+          </div>
+          <Row gutter={12}>
+            <Col xs={24} md={compact ? 24 : 8}>
+              <Text type='tertiary' size='small'>
+                {t('字段名')}
+              </Text>
+              <Input
+                value={entry.key}
+                placeholder={FIELD_NAME_PLACEHOLDER}
+                onChange={(nextValue) =>
+                  updateEntry(entry.id, { key: nextValue || '' })
+                }
+              />
+            </Col>
+            <Col xs={24} md={compact ? 24 : 16}>
+              <Text type='tertiary' size='small'>
+                {t('字段值')}
+              </Text>
+              <StructuredValueNodeEditor
+                t={t}
+                node={parseStructuredValueNodeForDisplay(entry.value_text)}
+                sourceKey={entry.value_text}
+                placeholder='0.7'
+                onChange={(node) =>
+                  updateEntry(entry.id, {
+                    value_text: buildStructuredValueText(node),
+                  })
+                }
+              />
+            </Col>
+          </Row>
+        </div>
+      ))}
+    </div>
+  </Card>
+);
+
+const PassHeadersEditor = ({ t, operationId, valueText, updateOperation }) => {
+  const draft = useMemo(() => parsePassHeadersDraft(valueText), [valueText]);
+  const headers = draft.headers;
+  const [headerRows, setHeaderRows] = useState(() =>
+    headers.map((header) => ({ id: nextLocalId(), value: header })),
+  );
+
+  useEffect(() => {
+    setHeaderRows((currentRows) => {
+      const nextRows = [];
+      const usedRowIds = new Set();
+      headers.forEach((header) => {
+        const existingRow = currentRows.find(
+          (row) => !usedRowIds.has(row.id) && row.value === header,
+        );
+        if (existingRow) {
+          usedRowIds.add(existingRow.id);
+          nextRows.push(existingRow);
+        } else {
+          nextRows.push({ id: nextLocalId(), value: header });
+        }
+      });
+      return nextRows;
+    });
+  }, [headers]);
+
+  const sourceShapeOptions = useMemo(
+    () => [
+      { label: t('数组'), value: 'headers' },
+      { label: t('对象名称'), value: 'names' },
+      { label: t('单个请求头'), value: 'header' },
+    ],
+    [t],
+  );
+
+  const commitDraft = useCallback(
+    (nextDraft) => {
+      updateOperation(operationId, {
+        value_text: buildPassHeadersValueText(nextDraft),
+      });
+    },
+    [operationId, updateOperation],
+  );
+
+  const commitHeaders = useCallback(
+    (nextHeaders) =>
+      commitDraft({
+        ...draft,
+        headers:
+          draft.sourceKey === 'header' ? nextHeaders.slice(0, 1) : nextHeaders,
+      }),
+    [commitDraft, draft],
+  );
+
+  return (
+    <div
+      className='mt-2 rounded-xl p-3'
+      style={{
+        background: 'var(--semi-color-bg-1)',
+        border: '1px solid var(--semi-color-border)',
+      }}
+    >
+      <div className='flex items-start justify-between gap-2 mb-2'>
+        <div>
+          <Text strong>{t('透传请求头')}</Text>
+          <Text type='tertiary' size='small' className='block mt-1'>
+            {t(
+              '只会透传客户端原始请求中实际存在的同名请求头，不会生成固定请求头。',
+            )}
+          </Text>
+        </div>
+        <Button
+          size='small'
+          icon={<IconPlus />}
+          disabled={draft.sourceKey === 'header' && headers.length > 0}
+          onClick={() =>
+            commitHeaders(
+              draft.sourceKey === 'header' && headers.length > 0
+                ? headers
+                : Array.from(new Set([...headers, 'X-Header-Name'])),
+            )
+          }
+        >
+          {t('新增请求头')}
+        </Button>
+      </div>
+      <Row gutter={8} style={{ marginBottom: 8 }}>
+        <Col xs={24} md={8}>
+          <Text type='tertiary' size='small'>
+            {t('保存形态')}
+          </Text>
+          <Select
+            value={draft.sourceKey}
+            optionList={sourceShapeOptions}
+            style={{ width: '100%' }}
+            onChange={(nextValue) =>
+              commitDraft({
+                ...draft,
+                sourceKey: nextValue || 'headers',
+                headers:
+                  nextValue === 'header'
+                    ? draft.headers.slice(0, 1)
+                    : draft.headers,
+              })
+            }
+          />
+        </Col>
+        <Col xs={24} md={16}>
+          <Text type='tertiary' size='small' className='block mt-6'>
+            {t('用于兼容已存在的 pass_headers value 格式。')}
+          </Text>
+        </Col>
+      </Row>
+      {headerRows.length === 0 ? (
+        <Text type='tertiary' size='small'>
+          {t('未配置透传请求头。')}
+        </Text>
+      ) : (
+        <div className='flex flex-col gap-2'>
+          {headerRows.map((headerRow, index) => (
+            <div
+              key={headerRow.id}
+              className='grid gap-2'
+              style={{ gridTemplateColumns: '1fr auto' }}
+            >
+              <Input
+                value={headerRow.value}
+                placeholder={HEADER_NAME_PLACEHOLDER}
+                onChange={(nextValue) => {
+                  const nextHeaders = [...headers];
+                  nextHeaders[index] = nextValue || '';
+                  commitHeaders(nextHeaders);
+                }}
+              />
+              <Button
+                type='danger'
+                theme='borderless'
+                icon={<IconDelete />}
+                aria-label={t('删除请求头')}
+                onClick={() =>
+                  commitHeaders(
+                    headers.filter((_, itemIndex) => itemIndex !== index),
+                  )
+                }
+              />
+            </div>
+          ))}
+        </div>
+      )}
+      <Space wrap spacing={6} style={{ marginTop: 8 }}>
+        {[
+          'User-Agent',
+          'Session_id',
+          'X-Client-Request-Id',
+          'X-Codex-Turn-Metadata',
+          'Anthropic-Beta',
+          'X-Stainless-Runtime',
+        ].map((header) => (
+          <Tag
+            key={header}
+            size='small'
+            color='cyan'
+            className='cursor-pointer'
+            onClick={() =>
+              commitHeaders(
+                draft.sourceKey === 'header'
+                  ? [header]
+                  : Array.from(new Set([...headers, header])),
+              )
+            }
+          >
+            {header}
+          </Tag>
+        ))}
+      </Space>
+    </div>
+  );
+};
+
+const HeaderValueEditor = ({
+  t,
+  operationId,
+  valueText,
+  updateOperation,
+  onShowExample,
+}) => {
+  const draft = useMemo(() => parseHeaderValueDraft(valueText), [valueText]);
+
+  const updateDraft = useCallback(
+    (patch) => {
+      const nextDraft = { ...draft, ...patch };
+      updateOperation(operationId, {
+        value_text: buildHeaderValueText(nextDraft),
+      });
+    },
+    [draft, operationId, updateOperation],
+  );
+
+  const updateRow = useCallback(
+    (rowId, patch) => {
+      updateDraft({
+        rows: draft.rows.map((row) =>
+          row.id === rowId ? { ...row, ...patch } : row,
+        ),
+      });
+    },
+    [draft.rows, updateDraft],
+  );
+
+  return (
+    <div
+      className='mt-2 rounded-xl p-3'
+      style={{
+        background: 'var(--semi-color-bg-1)',
+        border: '1px solid var(--semi-color-border)',
+      }}
+    >
+      <div className='flex items-start justify-between gap-2 mb-2 flex-wrap'>
+        <div>
+          <Text strong>{t('请求头值')}</Text>
+          <Text type='tertiary' size='small' className='block mt-1'>
+            {t(
+              '整值模式会覆盖整条请求头；Token 映射模式用于处理逗号分隔的 beta / feature token。',
+            )}
+          </Text>
+        </div>
+        <Space spacing={6}>
+          <Select
+            value={draft.mode}
+            optionList={HEADER_VALUE_MODE_OPTIONS}
+            onChange={(nextValue) =>
+              updateDraft({ mode: nextValue || 'direct' })
+            }
+            style={{ width: 160 }}
+          />
+          <Button size='small' type='tertiary' onClick={onShowExample}>
+            {t('查看示例')}
+          </Button>
+        </Space>
+      </div>
+
+      {draft.mode === 'direct' ? (
+        <Input
+          value={draft.directText}
+          placeholder={HEADER_DIRECT_VALUE_PLACEHOLDER}
+          onChange={(nextValue) => updateDraft({ directText: nextValue || '' })}
+        />
+      ) : (
+        <div className='flex flex-col gap-3'>
+          <div className='flex items-center gap-2'>
+            <Switch
+              checked={Boolean(draft.keepOnlyDeclared)}
+              checkedText={t('开')}
+              uncheckedText={t('关')}
+              onChange={(nextValue) =>
+                updateDraft({ keepOnlyDeclared: nextValue })
+              }
+              id='components-table-channels-modals-paramoverrideeditormodal-header-keep-only'
+            />
+            <Text type='tertiary' size='small'>
+              {t('只保留已声明的 token')}
+            </Text>
+          </div>
+          <div>
+            <Text type='tertiary' size='small'>
+              {t('追加 token')}
+            </Text>
+            <Input
+              value={draft.appendText}
+              placeholder={HEADER_APPEND_TOKENS_PLACEHOLDER}
+              onChange={(nextValue) => updateDraft({ appendText: nextValue })}
+            />
+          </div>
+          <Row gutter={8}>
+            <Col xs={24} md={9}>
+              <Text type='tertiary' size='small'>
+                {t('通配规则')}
+              </Text>
+              <Select
+                value={draft.wildcardAction}
+                optionList={[
+                  { label: t('不处理未声明 token'), value: 'none' },
+                  { label: t('替换未声明 token'), value: 'replace' },
+                  { label: t('删除未声明 token'), value: 'delete' },
+                ]}
+                onChange={(nextValue) =>
+                  updateDraft({ wildcardAction: nextValue || 'none' })
+                }
+                style={{ width: '100%' }}
+              />
+            </Col>
+            <Col xs={24} md={15}>
+              <Text type='tertiary' size='small'>
+                {t('通配替换为')}
+              </Text>
+              <Input
+                value={draft.wildcardReplacement}
+                disabled={draft.wildcardAction !== 'replace'}
+                placeholder={HEADER_REPLACEMENT_PLACEHOLDER}
+                onChange={(nextValue) =>
+                  updateDraft({ wildcardReplacement: nextValue || '' })
+                }
+              />
+            </Col>
+          </Row>
+          <div>
+            <div className='flex items-center justify-between mb-2'>
+              <Text strong>{t('Token 规则')}</Text>
+              <Button
+                size='small'
+                icon={<IconPlus />}
+                onClick={() =>
+                  updateDraft({
+                    rows: [
+                      ...draft.rows,
+                      {
+                        id: nextLocalId(),
+                        token: '',
+                        action: 'replace',
+                        replacement: '',
+                      },
+                    ],
+                  })
+                }
+              >
+                {t('新增规则')}
+              </Button>
+            </div>
+            {draft.rows.length === 0 ? (
+              <Text type='tertiary' size='small'>
+                {t('未配置 token 规则。')}
+              </Text>
+            ) : (
+              <div className='flex flex-col gap-2'>
+                {draft.rows.map((row) => (
+                  <div
+                    key={row.id}
+                    className='rounded-lg p-2'
+                    style={{
+                      border: '1px solid var(--semi-color-border)',
+                      background: 'var(--semi-color-bg-0)',
+                    }}
+                  >
+                    <Row gutter={8}>
+                      <Col xs={24} md={9}>
+                        <Text type='tertiary' size='small'>
+                          {t('原 token')}
+                        </Text>
+                        <Input
+                          value={row.token}
+                          placeholder={HEADER_TOKEN_PLACEHOLDER}
+                          onChange={(nextValue) =>
+                            updateRow(row.id, { token: nextValue || '' })
+                          }
+                        />
+                      </Col>
+                      <Col xs={24} md={5}>
+                        <Text type='tertiary' size='small'>
+                          {t('动作')}
+                        </Text>
+                        <Select
+                          value={row.action}
+                          optionList={HEADER_TOKEN_ACTION_OPTIONS}
+                          onChange={(nextValue) =>
+                            updateRow(row.id, {
+                              action: nextValue || 'replace',
+                            })
+                          }
+                          style={{ width: '100%' }}
+                        />
+                      </Col>
+                      <Col xs={24} md={8}>
+                        <Text type='tertiary' size='small'>
+                          {t('替换为')}
+                        </Text>
+                        <Input
+                          value={row.replacement}
+                          disabled={row.action !== 'replace'}
+                          placeholder={HEADER_REPLACEMENT_PLACEHOLDER}
+                          onChange={(nextValue) =>
+                            updateRow(row.id, {
+                              replacement: nextValue || '',
+                            })
+                          }
+                        />
+                      </Col>
+                      <Col xs={24} md={2}>
+                        <Button
+                          type='danger'
+                          theme='borderless'
+                          icon={<IconDelete />}
+                          aria-label={t('删除规则')}
+                          style={{ marginTop: 20 }}
+                          onClick={() =>
+                            updateDraft({
+                              rows: draft.rows.filter(
+                                (item) => item.id !== row.id,
+                              ),
+                            })
+                          }
+                        />
+                      </Col>
+                    </Row>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const StructuredValueEditor = ({
+  t,
+  operationId,
+  label,
+  valueText,
+  placeholder,
+  updateOperation,
+}) => {
+  const node = useMemo(
+    () => parseStructuredValueNodeForDisplay(valueText),
+    [valueText],
+  );
+
+  const commitNode = useCallback(
+    (nextNode) => {
+      updateOperation(operationId, {
+        value_text: buildStructuredValueText(nextNode),
+      });
+    },
+    [operationId, updateOperation],
+  );
+
+  return (
+    <div
+      className='rounded-xl p-3'
+      style={{
+        background: 'var(--semi-color-bg-1)',
+        border: '1px solid var(--semi-color-border)',
+      }}
+    >
+      <div className='flex items-center justify-between mb-2'>
+        <Text strong>{t(label)}</Text>
+        <Text type='tertiary' size='small'>
+          {t('值类型')}
+        </Text>
+      </div>
+      <StructuredValueNodeEditor
+        t={t}
+        node={node}
+        sourceKey={valueText}
+        placeholder={placeholder}
+        onChange={commitNode}
+      />
+    </div>
+  );
+};
+
+const StructuredValueNodeEditor = ({
+  t,
+  node,
+  sourceKey,
+  placeholder,
+  depth = 0,
+  onChange,
+}) => {
+  const source = sourceKey ?? node;
+  const [draftState, setDraftState] = useState(() => ({
+    source,
+    draft: node,
+  }));
+  const currentNode = Object.is(draftState.source, source)
+    ? draftState.draft
+    : node;
+  const emitNode = useCallback(
+    (nextNode) => {
+      setDraftState({
+        source,
+        draft: nextNode,
+      });
+      if (!canSerializeStructuredValueNode(nextNode)) {
+        return;
+      }
+      onChange(nextNode);
+    },
+    [onChange, source],
+  );
+  const updateNode = useCallback(
+    (patch) => emitNode({ ...currentNode, ...patch }),
+    [currentNode, emitNode],
+  );
+  const compact = depth > 1;
+  const canAddChild = depth < MAX_STRUCTURED_VALUE_DEPTH;
+  const numberInvalid =
+    currentNode.kind === 'number' &&
+    !isCompleteStructuredNumberText(currentNode.text);
+
+  return (
+    <div className='flex flex-col gap-2'>
+      <Select
+        value={currentNode.kind}
+        optionList={STRUCTURED_VALUE_TYPE_OPTIONS}
+        onChange={(nextKind) => {
+          const nextNode = createStructuredValueNode(nextKind || 'string');
+          emitNode({ ...nextNode, id: currentNode.id });
+        }}
+        style={{ width: 150 }}
+      />
+
+      {currentNode.kind === 'string' || currentNode.kind === 'number' ? (
+        <div className='flex flex-col gap-1'>
+          <Input
+            value={currentNode.text}
+            placeholder={
+              currentNode.kind === 'number' ? '0.7' : placeholder || 'value'
+            }
+            validateStatus={numberInvalid ? 'error' : 'default'}
+            onChange={(nextValue) => {
+              const nextText = nextValue ?? '';
+              updateNode({ text: nextText });
+            }}
+          />
+          {numberInvalid ? (
+            <Text type='danger' size='small'>
+              {t('数字值无效')}
+            </Text>
+          ) : null}
+        </div>
+      ) : null}
+
+      {currentNode.kind === 'boolean' ? (
+        <Space spacing={6}>
+          <Button
+            size='small'
+            type={currentNode.boolValue ? 'primary' : 'tertiary'}
+            onClick={() => updateNode({ boolValue: true })}
+          >
+            {BOOLEAN_TRUE_LABEL}
+          </Button>
+          <Button
+            size='small'
+            type={currentNode.boolValue ? 'tertiary' : 'primary'}
+            onClick={() => updateNode({ boolValue: false })}
+          >
+            {BOOLEAN_FALSE_LABEL}
+          </Button>
+        </Space>
+      ) : null}
+
+      {currentNode.kind === 'null' ? (
+        <Text type='tertiary' size='small'>
+          {t('该值会保存为 null。')}
+        </Text>
+      ) : null}
+
+      {currentNode.kind === 'object' ? (
+        <div
+          className='rounded-lg p-2'
+          style={{ border: '1px solid var(--semi-color-border)' }}
+        >
+          <div className='flex items-center justify-between mb-2'>
+            <Text strong size='small'>
+              {t('对象字段')}
+            </Text>
+            <Button
+              size='small'
+              icon={<IconPlus />}
+              disabled={!canAddChild}
+              onClick={() =>
+                updateNode({
+                  objectEntries: [
+                    ...(currentNode.objectEntries || []),
+                    {
+                      id: nextLocalId(),
+                      key: '',
+                      value: createStructuredValueNode('string'),
+                    },
+                  ],
+                })
+              }
+            >
+              {t('新增字段')}
+            </Button>
+          </div>
+          {!canAddChild ? (
+            <Text type='tertiary' size='small'>
+              {t('已达到最大嵌套深度')}
+            </Text>
+          ) : null}
+          {(currentNode.objectEntries || []).length === 0 ? (
+            <Text type='tertiary' size='small'>
+              {t('未配置对象字段。')}
+            </Text>
+          ) : (
+            <div className='flex flex-col gap-2'>
+              {(currentNode.objectEntries || []).map((entry) => (
+                <div
+                  key={entry.id}
+                  className='grid gap-2'
+                  style={{ gridTemplateColumns: '150px 1fr auto' }}
+                >
+                  <Input
+                    value={entry.key}
+                    placeholder={OBJECT_KEY_PLACEHOLDER}
+                    onChange={(nextValue) =>
+                      updateNode({
+                        objectEntries: currentNode.objectEntries.map((item) =>
+                          item.id === entry.id
+                            ? { ...item, key: nextValue || '' }
+                            : item,
+                        ),
+                      })
+                    }
+                  />
+                  <StructuredValueNodeEditor
+                    t={t}
+                    node={entry.value}
+                    depth={depth + 1}
+                    onChange={(value) =>
+                      updateNode({
+                        objectEntries: currentNode.objectEntries.map((item) =>
+                          item.id === entry.id ? { ...item, value } : item,
+                        ),
+                      })
+                    }
+                  />
+                  <Button
+                    type='danger'
+                    theme='borderless'
+                    icon={<IconDelete />}
+                    aria-label={t('删除字段')}
+                    onClick={() =>
+                      updateNode({
+                        objectEntries: currentNode.objectEntries.filter(
+                          (item) => item.id !== entry.id,
+                        ),
+                      })
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {currentNode.kind === 'array' ? (
+        <div
+          className='rounded-lg p-2'
+          style={{ border: '1px solid var(--semi-color-border)' }}
+        >
+          <div className='flex items-center justify-between mb-2'>
+            <Text strong size='small'>
+              {t('数组项')}
+            </Text>
+            <Button
+              size='small'
+              icon={<IconPlus />}
+              disabled={!canAddChild}
+              onClick={() =>
+                updateNode({
+                  arrayItems: [
+                    ...(currentNode.arrayItems || []),
+                    {
+                      id: nextLocalId(),
+                      value: createStructuredValueNode('string'),
+                    },
+                  ],
+                })
+              }
+            >
+              {t('新增项')}
+            </Button>
+          </div>
+          {!canAddChild ? (
+            <Text type='tertiary' size='small'>
+              {t('已达到最大嵌套深度')}
+            </Text>
+          ) : null}
+          {(currentNode.arrayItems || []).length === 0 ? (
+            <Text type='tertiary' size='small'>
+              {t('未配置数组项。')}
+            </Text>
+          ) : (
+            <div className='flex flex-col gap-2'>
+              {(currentNode.arrayItems || []).map((item, index) => (
+                <div
+                  key={item.id}
+                  className='grid gap-2'
+                  style={{ gridTemplateColumns: '42px 1fr auto' }}
+                >
+                  <Text type='tertiary' size='small' className='leading-8'>
+                    {`#${index + 1}`}
+                  </Text>
+                  <StructuredValueNodeEditor
+                    t={t}
+                    node={item.value}
+                    depth={depth + 1}
+                    onChange={(value) =>
+                      updateNode({
+                        arrayItems: currentNode.arrayItems.map((entry) =>
+                          entry.id === item.id ? { ...entry, value } : entry,
+                        ),
+                      })
+                    }
+                  />
+                  <Button
+                    type='danger'
+                    theme='borderless'
+                    icon={<IconDelete />}
+                    aria-label={t('删除项')}
+                    onClick={() =>
+                      updateNode({
+                        arrayItems: currentNode.arrayItems.filter(
+                          (entry) => entry.id !== item.id,
+                        ),
+                      })
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {compact ? null : (
+        <Text type='tertiary' size='small'>
+          {`${t('预览')}: ${
+            canSerializeStructuredValueNode(currentNode)
+              ? buildStructuredValueText(currentNode) || '-'
+              : '-'
+          }`}
+        </Text>
+      )}
+    </div>
   );
 };
 

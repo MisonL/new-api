@@ -3,8 +3,10 @@ package channel
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -14,8 +16,63 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
+
+func setupApiRequestHeaderRuntimeTestDB(t *testing.T, tables ...interface{}) *gorm.DB {
+	t.Helper()
+
+	previousUsingSQLite := common.UsingSQLite
+	previousUsingMySQL := common.UsingMySQL
+	previousUsingPostgreSQL := common.UsingPostgreSQL
+	previousRedisEnabled := common.RedisEnabled
+	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+	previousOptionMap := common.OptionMap
+
+	common.UsingSQLite = true
+	common.UsingMySQL = false
+	common.UsingPostgreSQL = false
+	common.RedisEnabled = false
+	common.OptionMap = map[string]string{
+		"RequestHeaderPolicyDefaultMode":              "prefer_channel",
+		"RequestHeaderPolicyAuxiliaryRequestsEnabled": "true",
+	}
+
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{
+			LogLevel:                  gormlogger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  false,
+		}),
+	})
+	require.NoError(t, err)
+
+	model.DB = db
+	model.LOG_DB = db
+	require.NoError(t, db.AutoMigrate(tables...))
+
+	t.Cleanup(func() {
+		common.UsingSQLite = previousUsingSQLite
+		common.UsingMySQL = previousUsingMySQL
+		common.UsingPostgreSQL = previousUsingPostgreSQL
+		common.RedisEnabled = previousRedisEnabled
+		common.OptionMap = previousOptionMap
+		model.DB = previousDB
+		model.LOG_DB = previousLogDB
+
+		sqlDB, err := db.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	return db
+}
 
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	t.Parallel()
@@ -236,8 +293,8 @@ func TestProcessHeaderOverride_AppliesUserHeaderProfileAndLegacyOverrideWins(t *
 	require.Equal(t, "from-legacy", headers["x-custom"])
 }
 
-func TestProcessHeaderOverride_HeaderProfileRoundRobinUsesRetryIndex(t *testing.T) {
-	t.Parallel()
+func TestProcessHeaderOverride_HeaderProfileRoundRobinAdvancesRuntimeState(t *testing.T) {
+	db := setupApiRequestHeaderRuntimeTestDB(t, &model.RequestHeaderStrategyState{})
 
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -245,8 +302,8 @@ func TestProcessHeaderOverride_HeaderProfileRoundRobinUsesRetryIndex(t *testing.
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
 	info := &relaycommon.RelayInfo{
-		RetryIndex: 1,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 29,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
 					Enabled:            true,
@@ -263,7 +320,16 @@ func TestProcessHeaderOverride_HeaderProfileRoundRobinUsesRetryIndex(t *testing.
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
+	require.Equal(t, "A/1.0", headers["user-agent"])
+
+	headers, err = processHeaderOverride(info, ctx)
+	require.NoError(t, err)
 	require.Equal(t, "B/1.0", headers["user-agent"])
+
+	state := model.RequestHeaderStrategyState{}
+	require.NoError(t, db.First(&state, "scope_type = ?", "channel_header_profile").Error)
+	require.Equal(t, int64(2), state.RoundRobinCursor)
+	require.Equal(t, int64(2), state.Version)
 }
 
 func TestDoTaskApiRequestAppliesHeaderOverride(t *testing.T) {

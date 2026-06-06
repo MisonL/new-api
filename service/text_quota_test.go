@@ -199,7 +199,7 @@ func TestResponsesCompactLogInfoRecordsNativeAutoMode(t *testing.T) {
 	require.False(t, logInfo.AutoFallback)
 }
 
-func TestResponsesCompactLogInfoRecordsSyntheticAutoFallback(t *testing.T) {
+func TestResponsesCompactLogInfoRecordsSyntheticDuringActiveAutoFallbackWindow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(w)
@@ -282,6 +282,33 @@ func TestAppendResponsesCompactLogInfoRecordsContextAndSummaryModelFallback(t *t
 	require.Equal(t, true, annotatedOther["responses_compact_summary_model_fallback"])
 	require.Equal(t, "gpt-5.4", annotatedOther["responses_compact_summary_model"])
 	require.Equal(t, []string{"gpt-5.4"}, annotatedOther["responses_compact_summary_models"])
+}
+
+func TestAppendResponsesCompactLogInfoRecordsContextFallbackAfterModeRestored(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+	ctx.Set("responses_compact_context_fallback_attempted", true)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeNative,
+			},
+		},
+	}
+
+	content, annotatedOther := appendResponsesCompactLogInfo(ctx, info, nil, nil, now)
+
+	require.Equal(t, []string{
+		"Responses Compact mode=synthetic_summary setting=native path=/v1/responses context_fallback=true",
+	}, content)
+	require.Equal(t, "synthetic_summary", annotatedOther["responses_compact_mode"])
+	require.Equal(t, "native", annotatedOther["responses_compact_setting"])
+	require.Equal(t, "/v1/responses", annotatedOther["responses_compact_upstream_path"])
+	require.Equal(t, true, annotatedOther["responses_compact_context_fallback"])
 }
 
 func TestAppendResponsesCompactLogInfoUsesRelayInfoForErrorLogs(t *testing.T) {

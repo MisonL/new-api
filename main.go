@@ -23,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
+	_ "github.com/QuantumNous/new-api/setting/log_retention_setting"
 	_ "github.com/QuantumNous/new-api/setting/perf_metrics_setting"
 	_ "github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -122,6 +123,9 @@ func main() {
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
+
+	// Prune expired synthetic compact state records persisted as Redis/process restart fallback.
+	service.StartSyntheticCompactStatePruneTask()
 
 	// Wire task polling adaptor factory (breaks service -> relay import cycle)
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
@@ -309,6 +313,7 @@ func InitResources() error {
 	if err != nil {
 		return err
 	}
+	controller.StartLogRetentionTask()
 
 	// Initialize Redis
 	err = common.InitRedisClient()

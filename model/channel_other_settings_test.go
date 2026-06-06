@@ -49,6 +49,7 @@ func TestChannelOtherSettingsResponsesCompactAutoFallbackUsesDefaultThreeHourInt
 	require.Equal(t, dto.ResponsesCompactModeSynthetic, settings.ResponsesCompactModeOrDefaultAt(now))
 	require.True(t, settings.HasActiveResponsesCompactAutoFallback(now.Add(3*time.Hour-time.Second)))
 	require.False(t, settings.HasActiveResponsesCompactAutoFallback(now.Add(3*time.Hour)))
+	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactModeOrDefaultAt(now.Add(3*time.Hour)))
 	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
 	require.Equal(t, now.Unix(), settings.ResponsesCompactAutoFallbackAt)
 }

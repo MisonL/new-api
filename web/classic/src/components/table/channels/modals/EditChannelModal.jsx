@@ -104,6 +104,7 @@ import {
   getHeaderProfileStrategyFromSettings,
   mergeChannelSubmitFormValues,
   removeEquivalentVersionedProfileIds,
+  replaceSelectedProfilePreservingOrder,
   reorderSelectedProfileIds,
   toggleSelectedProfile,
 } from './headerProfile.helpers.js';
@@ -930,23 +931,29 @@ const EditChannelModal = (props) => {
   };
 
   const handleToggleHeaderProfile = (profileId, profile, options = {}) => {
-    const currentSelectedProfileIds = removeEquivalentVersionedProfileIds(
-      headerProfileStrategy.selectedProfileIds,
-      selectedHeaderProfileItems,
-      profileId,
-      profile,
-    );
-    const nextSelectedProfileIds =
-      options?.replace === true
-        ? [
-            ...currentSelectedProfileIds.filter((id) => id !== profileId),
-            profileId,
-          ]
-        : toggleSelectedProfile({
-            strategy: headerProfileStrategy.mode,
+    const shouldReplace = options?.replace === true;
+    const currentSelectedProfileIds = shouldReplace
+      ? headerProfileStrategy.selectedProfileIds
+      : removeEquivalentVersionedProfileIds(
+          headerProfileStrategy.selectedProfileIds,
+          selectedHeaderProfileItems,
+          profileId,
+          profile,
+        );
+    const nextSelectedProfileIds = shouldReplace
+      ? headerProfileStrategy.mode === 'fixed'
+        ? [String(profileId || '').trim()].filter(Boolean)
+        : replaceSelectedProfilePreservingOrder({
             selectedProfileIds: currentSelectedProfileIds,
+            selectedProfiles: selectedHeaderProfileItems,
             profileId,
-          });
+            profile,
+          })
+      : toggleSelectedProfile({
+          strategy: headerProfileStrategy.mode,
+          selectedProfileIds: currentSelectedProfileIds,
+          profileId,
+        });
     const selectedProfileSnapshotMap = new Map(
       selectedHeaderProfileItems
         .filter((item) => item && !item.missing)

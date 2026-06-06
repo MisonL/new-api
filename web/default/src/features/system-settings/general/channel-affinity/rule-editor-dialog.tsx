@@ -457,7 +457,7 @@ export function RuleEditorDialog(props: Props) {
                     className='w-full sm:w-auto sm:shrink-0'
                     onClick={() => applyParamOverrideTemplate('replace')}
                   >
-                    {t('Replace Template')}
+                    {t('Replace Current Rules')}
                   </Button>
                   <Button
                     type='button'
@@ -465,7 +465,7 @@ export function RuleEditorDialog(props: Props) {
                     className='w-full sm:w-auto sm:shrink-0'
                     onClick={() => applyParamOverrideTemplate('append')}
                   >
-                    {t('Append Template')}
+                    {t('Append to Existing Rules')}
                   </Button>
                 </div>
                 <Textarea

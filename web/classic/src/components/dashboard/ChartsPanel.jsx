@@ -78,6 +78,7 @@ const ChartsPanel = ({
     handleQuotaBarClick,
     handleQuotaDimensionClick,
     handleQuotaChartAreaClick,
+    handleQuotaLegendClick,
   } = useDashboardDrilldown({
     quotaData,
     dataExportDefaultTime,
@@ -181,6 +182,7 @@ const ChartsPanel = ({
                 onClick={handleQuotaBarClick}
                 onPointerTap={handleQuotaBarClick}
                 onDimensionClick={handleQuotaDimensionClick}
+                onLegendItemClick={handleQuotaLegendClick}
               />
             </div>
           )}

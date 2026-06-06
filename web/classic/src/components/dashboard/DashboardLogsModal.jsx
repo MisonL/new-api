@@ -63,6 +63,7 @@ const DashboardLogsModal = ({
   const fastPage = scope?.fast_page === true;
   const requestSeqRef = useRef(0);
   const autoLoadKeyRef = useRef('');
+  const autoLoadTimerRef = useRef(null);
 
   const initialFilters = useMemo(
     () => buildDashboardLogInitialFilters(scope, fallbackRange),
@@ -90,6 +91,14 @@ const DashboardLogsModal = ({
     normalizeDashboardLogFilters(
       formApi ? formApi.getValues() : initialFilters,
     );
+
+  const cancelScheduledAutoLoad = useCallback(() => {
+    if (autoLoadTimerRef.current == null) {
+      return;
+    }
+    window.clearTimeout(autoLoadTimerRef.current);
+    autoLoadTimerRef.current = null;
+  }, []);
 
   const loadLogs = useCallback(
     async (nextPage, nextPageSize, filterValues) => {
@@ -138,6 +147,7 @@ const DashboardLogsModal = ({
 
   useEffect(() => {
     if (!visible) {
+      cancelScheduledAutoLoad();
       autoLoadKeyRef.current = '';
       return;
     }
@@ -153,15 +163,29 @@ const DashboardLogsModal = ({
     setTotal(0);
     setPage(1);
     setPageSize(DASHBOARD_LOG_PAGE_SIZE);
-    loadLogs(1, DASHBOARD_LOG_PAGE_SIZE, initialFilters);
-  }, [formApi, initialFilters, initialFiltersKey, loadLogs, visible]);
+    cancelScheduledAutoLoad();
+    autoLoadTimerRef.current = window.setTimeout(() => {
+      autoLoadTimerRef.current = null;
+      loadLogs(1, DASHBOARD_LOG_PAGE_SIZE, initialFilters);
+    }, 0);
+    return cancelScheduledAutoLoad;
+  }, [
+    cancelScheduledAutoLoad,
+    formApi,
+    initialFilters,
+    initialFiltersKey,
+    loadLogs,
+    visible,
+  ]);
 
   const handleSearch = () => {
+    cancelScheduledAutoLoad();
     setPage(1);
     loadLogs(1, pageSize);
   };
 
   const handleReset = () => {
+    cancelScheduledAutoLoad();
     const nextFilters = buildDashboardLogInitialFilters(scope, fallbackRange);
     formApi?.setValues(nextFilters);
     setPage(1);
@@ -283,7 +307,10 @@ const DashboardLogsModal = ({
                   <Button
                     type='tertiary'
                     htmlType='button'
-                    onClick={() => loadLogs(page, pageSize)}
+                    onClick={() => {
+                      cancelScheduledAutoLoad();
+                      loadLogs(page, pageSize);
+                    }}
                     loading={loading}
                     size='small'
                     icon={<IconRefresh />}

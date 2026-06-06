@@ -157,11 +157,26 @@ func decodeNpmPackageMetadata(reader io.Reader, metadata *npmPackageMetadata) er
 }
 
 func buildNpmCLIVersionOptions(metadata npmPackageMetadata) []NpmCLIVersionOption {
-	latestVersion := normalizeNpmCLIVersionValue(metadata.DistTags["latest"])
+	availableVersions := make(map[string]struct{}, len(metadata.Versions))
 	stableVersions := make([]string, 0, len(metadata.Versions))
 	for version := range metadata.Versions {
-		if _, ok := parseStableVersion(version); ok {
-			stableVersions = append(stableVersions, strings.TrimSpace(version))
+		normalizedVersion := normalizeNpmCLIVersionValue(version)
+		if normalizedVersion == "" {
+			continue
+		}
+		if _, exists := availableVersions[normalizedVersion]; exists {
+			continue
+		}
+		availableVersions[normalizedVersion] = struct{}{}
+		if _, ok := parseStableVersion(normalizedVersion); ok {
+			stableVersions = append(stableVersions, normalizedVersion)
+		}
+	}
+
+	latestVersion := normalizeNpmCLIVersionValue(metadata.DistTags["latest"])
+	if latestVersion != "" {
+		if _, exists := availableVersions[latestVersion]; !exists {
+			latestVersion = ""
 		}
 	}
 	sort.SliceStable(stableVersions, func(i, j int) bool {

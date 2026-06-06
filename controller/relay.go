@@ -128,7 +128,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if common.IsRequestBodyTooLargeError(err) || errors.Is(err, common.ErrRequestBodyTooLarge) {
 			newAPIError = types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
 		} else {
-			newAPIError = types.NewError(err, types.ErrorCodeInvalidRequest)
+			newAPIError = types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
 		return
 	}
@@ -249,6 +249,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			relayInfo.LastError = newAPIError
 
 			if shouldFallbackResponsesCompactNativeContext(c, relayInfo, newAPIError) {
+				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				c.Set("responses_compact_context_fallback_attempted", true)
 				logger.LogWarn(c, fmt.Sprintf(
 					"responses compact context fallback to synthetic summary: channel_id=%d status_code=%d error=%s",
@@ -256,16 +257,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					newAPIError.StatusCode,
 					newAPIError.MaskSensitiveError(),
 				))
-				setResponsesCompactSyntheticMode(c, relayInfo)
 				newAPIError = retryResponsesCompactSyntheticSummary(c, relayInfo, bodyStorage, newAPIError)
 				if newAPIError == nil {
 					relayInfo.LastError = nil
 					return
 				}
+				restoreResponsesCompactFallbackContext(c, fallbackSnapshot)
 				relayInfo.LastError = newAPIError
 			}
 
 			if shouldFallbackResponsesCompactAuto(c, relayInfo, newAPIError) {
+				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				c.Set("responses_compact_auto_fallback_attempted", true)
 				fallbackReason := newAPIError.MaskSensitiveErrorWithStatusCode()
 				logger.LogWarn(c, fmt.Sprintf(
@@ -274,7 +276,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					newAPIError.StatusCode,
 					newAPIError.MaskSensitiveError(),
 				))
-				setResponsesCompactSyntheticMode(c, relayInfo)
 				newAPIError = retryResponsesCompactSyntheticSummary(c, relayInfo, bodyStorage, newAPIError)
 				if newAPIError == nil {
 					if err := model.MarkResponsesCompactAutoFallback(relayInfo.ChannelMeta.ChannelId, fallbackReason); err != nil {
@@ -283,15 +284,18 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					relayInfo.LastError = nil
 					return
 				}
+				restoreResponsesCompactFallbackContext(c, fallbackSnapshot)
 				relayInfo.LastError = newAPIError
 			}
 
 			if shouldFallbackResponsesCompactSummaryModel(c, relayInfo, newAPIError) {
+				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				newAPIError = retryResponsesCompactSummaryFallbackModels(c, relayInfo, bodyStorage, newAPIError)
 				if newAPIError == nil {
 					relayInfo.LastError = nil
 					return
 				}
+				restoreResponsesCompactFallbackContext(c, fallbackSnapshot)
 				relayInfo.LastError = newAPIError
 			}
 
@@ -517,17 +521,22 @@ func shouldFallbackResponsesCompactAuto(c *gin.Context, info *relaycommon.RelayI
 	}
 	if info.RelayMode != relayconstant.RelayModeResponsesCompact ||
 		info.ChannelType != constant.ChannelTypeOpenAI ||
-		!info.ChannelOtherSettings.IsAutoResponsesCompact() ||
-		info.ChannelOtherSettings.HasActiveResponsesCompactAutoFallback(time.Now()) {
+		!info.ChannelOtherSettings.IsAutoResponsesCompact() {
+		return false
+	}
+	if info.ChannelOtherSettings.HasActiveResponsesCompactAutoFallback(time.Now()) {
 		return false
 	}
 	switch err.StatusCode {
 	case http.StatusBadRequest,
+		http.StatusBadGateway,
 		http.StatusNotFound,
 		http.StatusMethodNotAllowed,
 		http.StatusUnprocessableEntity,
 		http.StatusNotImplemented:
 		return isResponsesCompactNativeCompatibilityError(info, err)
+	case http.StatusGatewayTimeout, 524:
+		return true
 	default:
 		return false
 	}
@@ -548,10 +557,70 @@ func setResponsesCompactSyntheticMode(c *gin.Context, info *relaycommon.RelayInf
 	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, settings)
 }
 
+func restoreResponsesCompactMode(c *gin.Context, info *relaycommon.RelayInfo, settings dto.ChannelOtherSettings) {
+	if info == nil || info.ChannelMeta == nil {
+		return
+	}
+	info.ChannelMeta.ChannelOtherSettings = settings
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, settings)
+}
+
+type responsesCompactFallbackContextValue struct {
+	exists bool
+	value  any
+}
+
+var responsesCompactFallbackContextKeys = []string{
+	"responses_compact_auto_fallback_attempted",
+	"responses_compact_context_fallback_attempted",
+	"responses_compact_summary_model_fallback_attempted",
+	string(constant.ContextKeyResponsesCompactSummaryModel),
+	string(constant.ContextKeyResponsesCompactSummaryModels),
+}
+
+func snapshotResponsesCompactFallbackContext(c *gin.Context) map[string]responsesCompactFallbackContextValue {
+	snapshot := make(map[string]responsesCompactFallbackContextValue, len(responsesCompactFallbackContextKeys))
+	if c == nil {
+		return snapshot
+	}
+	for _, key := range responsesCompactFallbackContextKeys {
+		value, exists := c.Get(key)
+		snapshot[key] = responsesCompactFallbackContextValue{
+			exists: exists,
+			value:  value,
+		}
+	}
+	return snapshot
+}
+
+func restoreResponsesCompactFallbackContext(c *gin.Context, snapshot map[string]responsesCompactFallbackContextValue) {
+	if c == nil {
+		return
+	}
+	for _, key := range responsesCompactFallbackContextKeys {
+		entry, exists := snapshot[key]
+		if exists && entry.exists {
+			c.Set(key, entry.value)
+			continue
+		}
+		if c.Keys != nil {
+			delete(c.Keys, key)
+		}
+	}
+}
+
 func retryResponsesCompactSyntheticSummary(c *gin.Context, info *relaycommon.RelayInfo, bodyStorage requestBodyReadSeeker, triggerErr *types.NewAPIError) *types.NewAPIError {
+	if info == nil || info.ChannelMeta == nil {
+		return triggerErr
+	}
+	originalSettings := info.ChannelMeta.ChannelOtherSettings
+	setResponsesCompactSyntheticMode(c, info)
 	err := retryResponsesCompactWithBody(c, info, bodyStorage, triggerErr)
 	if shouldFallbackResponsesCompactSummaryModel(c, info, err) {
-		return retryResponsesCompactSummaryFallbackModels(c, info, bodyStorage, err)
+		err = retryResponsesCompactSummaryFallbackModels(c, info, bodyStorage, err)
+	}
+	if err != nil {
+		restoreResponsesCompactMode(c, info, originalSettings)
 	}
 	return err
 }
@@ -706,12 +775,13 @@ func isResponsesCompactNativeCompatibilityError(info *relaycommon.RelayInfo, err
 	}, " "))
 	normalized := normalizeResponsesCompactCompatibilityMessage(message)
 	compactPathMentioned := strings.Contains(message, "responses/compact") || strings.Contains(normalized, "responses compact")
+	malformedCompactOutput := strings.Contains(normalized, "malformed compact output")
 	payloadCompatibility := isResponsesCompactNativePayloadCompatibilityError(normalized)
 	genericEndpointStatus := isGenericResponsesCompactEndpointStatus(err.StatusCode)
 	if payloadCompatibility && !responsesCompactRequestHasContextPayload(info) {
 		return false
 	}
-	if !compactPathMentioned && !payloadCompatibility && !genericEndpointStatus {
+	if !compactPathMentioned && !malformedCompactOutput && !payloadCompatibility && !genericEndpointStatus {
 		return false
 	}
 	if isModelLookupError(normalized) {
@@ -721,6 +791,9 @@ func isResponsesCompactNativeCompatibilityError(info *relaycommon.RelayInfo, err
 		return false
 	}
 	if payloadCompatibility {
+		return true
+	}
+	if malformedCompactOutput {
 		return true
 	}
 	if genericEndpointStatus {

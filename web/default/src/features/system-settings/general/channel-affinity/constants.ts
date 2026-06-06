@@ -54,6 +54,19 @@ const DROID_CLI_HEADER_PASSTHROUGH_HEADERS = [
 
 const GEMINI_CLI_HEADER_PASSTHROUGH_HEADERS = ['X-Goog-Api-Client']
 
+const OPENAI_SDK_HEADER_PASSTHROUGH_HEADERS = [
+  'OpenAI-Organization',
+  'OpenAI-Project',
+  'X-Stainless-Arch',
+  'X-Stainless-Lang',
+  'X-Stainless-OS',
+  'X-Stainless-Package-Version',
+  'X-Stainless-Retry-Count',
+  'X-Stainless-Runtime',
+  'X-Stainless-Runtime-Version',
+  'X-Stainless-Timeout',
+]
+
 function buildPassHeadersTemplate(headers: string[]) {
   return {
     operations: [
@@ -120,12 +133,16 @@ export const PARAM_OVERRIDE_TEMPLATES: Record<string, ParamOverrideTemplate> = {
     ),
   },
   codexWithoutImageTool: {
-    label: 'Codex Desktop Compat: Remove Image Generation Tool',
+    label: 'Upstream Compat: Remove Image Generation Tool',
     payload: PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE,
   },
   claudeHeaders: {
     label: 'Claude Code Header Passthrough',
     payload: buildPassHeadersTemplate(CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS),
+  },
+  openaiSdkHeaders: {
+    label: 'OpenAI SDK Metadata Passthrough',
+    payload: buildPassHeadersTemplate(OPENAI_SDK_HEADER_PASSTHROUGH_HEADERS),
   },
   geminiHeaders: {
     label: 'Gemini CLI Header Passthrough',
@@ -204,7 +221,7 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
     include_rule_name: true,
   },
   claudeCli: {
-    name: 'claude cli trace',
+    name: 'claude code trace',
     model_regex: ['^claude-.*$'],
     path_regex: ['/v1/messages'],
     key_sources: [{ type: 'gjson', path: 'metadata.user_id' }],

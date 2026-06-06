@@ -310,6 +310,192 @@ func TestRequestOpenAI2ClaudeMessage_IgnoresUnsupportedFileContent(t *testing.T)
 	require.Equal(t, "see attachment", *content[0].Text)
 }
 
+func TestRequestOpenAI2ClaudeMessage_PreservesAssistantReasoningContentWithToolCalls(t *testing.T) {
+	reasoning := "Need to call a tool before answering."
+	message := dto.Message{
+		Role:             "assistant",
+		ReasoningContent: &reasoning,
+	}
+	message.SetToolCalls([]dto.ToolCallRequest{
+		{
+			ID:   "call_1",
+			Type: "function",
+			Function: dto.FunctionRequest{
+				Name:      "get_weather",
+				Arguments: `{"city":"Hangzhou"}`,
+			},
+		},
+	})
+	request := dto.GeneralOpenAIRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "How is the weather?",
+			},
+			message,
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.Len(t, claudeRequest.Messages, 2)
+
+	content, ok := claudeRequest.Messages[1].Content.([]dto.ClaudeMediaMessage)
+	require.True(t, ok)
+	require.Len(t, content, 2)
+	require.Equal(t, "thinking", content[0].Type)
+	require.NotNil(t, content[0].Thinking)
+	require.Equal(t, reasoning, *content[0].Thinking)
+	require.Equal(t, "tool_use", content[1].Type)
+	require.Equal(t, "call_1", content[1].Id)
+	require.Equal(t, "get_weather", content[1].Name)
+	require.Equal(t, map[string]any{"city": "Hangzhou"}, content[1].Input)
+}
+
+func TestRequestOpenAI2ClaudeMessage_TreatsEmptyToolCallsAsNoToolCalls(t *testing.T) {
+	request := dto.GeneralOpenAIRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "Start.",
+			},
+			{
+				Role:      "assistant",
+				Content:   "First.",
+				ToolCalls: []byte(`[]`),
+			},
+			{
+				Role:    "assistant",
+				Content: "Second.",
+			},
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.Len(t, claudeRequest.Messages, 2)
+	require.Equal(t, "assistant", claudeRequest.Messages[1].Role)
+	require.Equal(t, "First. Second.", claudeRequest.Messages[1].Content)
+}
+
+func TestRequestOpenAI2ClaudeMessage_DoesNotMergeAssistantReasoningWithAdjacentText(t *testing.T) {
+	reasoning := "The tool result must be passed back."
+	request := dto.GeneralOpenAIRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "Read the file.",
+			},
+			{
+				Role:             "assistant",
+				Content:          "Reading it now.",
+				ReasoningContent: &reasoning,
+			},
+			{
+				Role:    "assistant",
+				Content: "Final answer.",
+			},
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.Len(t, claudeRequest.Messages, 3)
+
+	reasoningContent, ok := claudeRequest.Messages[1].Content.([]dto.ClaudeMediaMessage)
+	require.True(t, ok)
+	require.Len(t, reasoningContent, 2)
+	require.Equal(t, "thinking", reasoningContent[0].Type)
+	require.NotNil(t, reasoningContent[0].Thinking)
+	require.Equal(t, reasoning, *reasoningContent[0].Thinking)
+	require.Equal(t, "text", reasoningContent[1].Type)
+	require.NotNil(t, reasoningContent[1].Text)
+	require.Equal(t, "Reading it now.", *reasoningContent[1].Text)
+	require.Equal(t, "Final answer.", claudeRequest.Messages[2].Content)
+}
+
+func TestResponseClaude2OpenAI_PreservesThinkingAndToolUse(t *testing.T) {
+	thinking := "Need to call a tool before answering."
+	text := "Let me check that."
+	claudeResponse := &dto.ClaudeResponse{
+		Id:         "msg_test",
+		Model:      "mimo-v2.5-pro",
+		StopReason: "tool_use",
+		Content: []dto.ClaudeMediaMessage{
+			{
+				Type:     "thinking",
+				Thinking: &thinking,
+			},
+			{
+				Type: "text",
+				Text: &text,
+			},
+			{
+				Type: "tool_use",
+				Id:   "toolu_01",
+				Name: "get_weather",
+				Input: map[string]any{
+					"city": "Shanghai",
+				},
+			},
+		},
+	}
+
+	openAIResponse := ResponseClaude2OpenAI(claudeResponse)
+	require.Len(t, openAIResponse.Choices, 1)
+
+	choice := openAIResponse.Choices[0]
+	require.Equal(t, "assistant", choice.Message.Role)
+	require.Equal(t, "tool_calls", choice.FinishReason)
+	require.Equal(t, text, choice.Message.StringContent())
+	require.Equal(t, thinking, choice.Message.GetReasoningContent())
+
+	toolCalls := choice.Message.ParseToolCalls()
+	require.Len(t, toolCalls, 1)
+	require.Equal(t, "toolu_01", toolCalls[0].ID)
+	require.Equal(t, "function", toolCalls[0].Type)
+	require.Equal(t, "get_weather", toolCalls[0].Function.Name)
+	require.JSONEq(t, `{"city":"Shanghai"}`, toolCalls[0].Function.Arguments)
+}
+
+func TestResponseClaude2OpenAI_ConcatenatesMultipleThinkingBlocks(t *testing.T) {
+	firstThinking := "first step"
+	secondThinking := "second step"
+	firstText := "alpha"
+	secondText := " beta"
+	claudeResponse := &dto.ClaudeResponse{
+		Id:         "msg_test",
+		Model:      "deepseek-v4-pro",
+		StopReason: "end_turn",
+		Content: []dto.ClaudeMediaMessage{
+			{
+				Type:     "thinking",
+				Thinking: &firstThinking,
+			},
+			{
+				Type: "text",
+				Text: &firstText,
+			},
+			{
+				Type:     "thinking",
+				Thinking: &secondThinking,
+			},
+			{
+				Type: "text",
+				Text: &secondText,
+			},
+		},
+	}
+
+	openAIResponse := ResponseClaude2OpenAI(claudeResponse)
+	require.Len(t, openAIResponse.Choices, 1)
+	require.Equal(t, "alpha beta", openAIResponse.Choices[0].Message.StringContent())
+	require.Equal(t, "first step\nsecond step", openAIResponse.Choices[0].Message.GetReasoningContent())
+}
+
 func TestRequestOpenAI2ClaudeMessage_SupportsPDFFileContent(t *testing.T) {
 	request := dto.GeneralOpenAIRequest{
 		Model: "claude-3-5-sonnet",

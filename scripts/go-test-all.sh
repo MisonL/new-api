@@ -7,6 +7,17 @@ if ! command -v rg >/dev/null 2>&1; then
 fi
 
 find_module_root() {
+  if [ -n "${REPO_ROOT:-}" ]; then
+    if [ -f "$REPO_ROOT/go.mod" ]; then
+      printf '%s\n' "$REPO_ROOT"
+      return 0
+    fi
+    echo "REPO_ROOT does not contain go.mod, falling back to auto-detect: $REPO_ROOT" >&2
+  fi
+  if git_root="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -f "$git_root/go.mod" ]; then
+    printf '%s\n' "$git_root"
+    return 0
+  fi
   local dir="$PWD"
   while [ "$dir" != "/" ]; do
     if [ -f "$dir/go.mod" ]; then

@@ -20,6 +20,7 @@ import type {
   SearchChannelsResponse,
   TagOperationParams,
 } from './types'
+import type { HeaderProfile } from './lib/header-profile-utils'
 
 // Extended API config types
 export interface ExtendedApiConfig extends AxiosRequestConfig {
@@ -77,6 +78,12 @@ export type CodexCredentialRefreshResponse = {
   }
 }
 
+export type UserHeaderProfilesResponse = {
+  success: boolean
+  message?: string
+  data?: HeaderProfile[]
+}
+
 // ============================================================================
 // Base Channel CRUD Operations
 // ============================================================================
@@ -106,6 +113,11 @@ export async function searchChannels(
  */
 export async function getChannel(id: number): Promise<GetChannelResponse> {
   const res = await api.get(`/api/channel/${id}`)
+  return res.data
+}
+
+export async function getUserHeaderProfiles(): Promise<UserHeaderProfilesResponse> {
+  const res = await api.get('/api/user/header_profiles')
   return res.data
 }
 

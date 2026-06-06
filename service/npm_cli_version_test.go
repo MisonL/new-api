@@ -123,6 +123,24 @@ func TestBuildNpmCLIVersionOptionsRejectsInvalidLatestTag(t *testing.T) {
 	}, options)
 }
 
+func TestBuildNpmCLIVersionOptionsRequiresLatestTagInVersions(t *testing.T) {
+	options := buildNpmCLIVersionOptions(npmPackageMetadata{
+		DistTags: map[string]string{
+			"latest": "9.9.9",
+		},
+		Versions: map[string]common.RawMessage{
+			"1.0.0": {},
+			"1.2.0": {},
+		},
+	})
+
+	require.Equal(t, []NpmCLIVersionOption{
+		{Value: "latest", Label: "latest (1.2.0)", IsLatest: true, ResolvedVersion: "1.2.0"},
+		{Value: "1.2.0", Label: "1.2.0", IsLatest: false, ResolvedVersion: "1.2.0"},
+		{Value: "1.0.0", Label: "1.0.0", IsLatest: false, ResolvedVersion: "1.0.0"},
+	}, options)
+}
+
 func TestFetchNpmCLIVersionOptionsRejectsEmptyUsableRegistryVersions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		payload, err := common.Marshal(map[string]any{
@@ -427,6 +445,41 @@ func TestFetchNpmCLIVersionOptionsLoadsRecordedOptionsFromOptionMap(t *testing.T
 	require.Equal(t, []NpmCLIVersionOption{
 		{Value: "latest", Label: "latest (1.0.0)", IsLatest: true, ResolvedVersion: "1.0.0"},
 	}, options)
+}
+
+func TestLoadRecordedNpmCLIVersionOptionsRetriesAfterInvalidRaw(t *testing.T) {
+	previousOptionMap := common.OptionMap
+	defer func() {
+		common.OptionMap = previousOptionMap
+		resetNpmCLIVersionCacheForTest()
+	}()
+	resetNpmCLIVersionCacheForTest()
+
+	common.OptionMap = map[string]string{
+		npmCliVersionRecordedOptionsKey: "{invalid",
+	}
+	loadRecordedNpmCLIVersionOptions()
+
+	recorded := recordedNpmCLIVersionOptions{
+		Packages: map[string]recordedNpmCLIPackageOptions{
+			"@openai/codex": {
+				FetchedAt:     time.Unix(1000, 0).UTC(),
+				LatestVersion: "1.0.0",
+				Options: []NpmCLIVersionOption{
+					{Value: "latest", Label: "latest (1.0.0)", IsLatest: true, ResolvedVersion: "1.0.0"},
+				},
+			},
+		},
+	}
+	payload, err := common.Marshal(recorded)
+	require.NoError(t, err)
+	common.OptionMap[npmCliVersionRecordedOptionsKey] = string(payload)
+
+	loadRecordedNpmCLIVersionOptions()
+
+	version, ok := ResolveNpmCLILatestVersion("@openai/codex")
+	require.True(t, ok)
+	require.Equal(t, "1.0.0", version)
 }
 
 func TestLoadRecordedNpmCLIVersionOptionsUsesRecordedLatestVersionFallback(t *testing.T) {

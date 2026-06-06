@@ -4,6 +4,10 @@ import { toast } from 'sonner'
 import { updateSystemOption } from '../api'
 import type { UpdateOptionRequest } from '../types'
 
+type UpdateOptionMutationRequest = UpdateOptionRequest & {
+  silent?: boolean
+}
+
 // Configuration keys that require status refresh
 const STATUS_RELATED_KEYS = [
   'theme.frontend',
@@ -24,8 +28,9 @@ export function useUpdateOption() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (request: UpdateOptionRequest) => {
-      const data = await updateSystemOption(request)
+    mutationFn: async (request: UpdateOptionMutationRequest) => {
+      const { silent: _silent, ...payload } = request
+      const data = await updateSystemOption(payload)
       if (!data.success) {
         throw new Error(data.message || i18next.t('Failed to update setting'))
       }
@@ -40,7 +45,9 @@ export function useUpdateOption() {
         queryClient.invalidateQueries({ queryKey: ['status'] })
       }
 
-      toast.success(i18next.t('Setting updated successfully'))
+      if (!variables.silent) {
+        toast.success(i18next.t('Setting updated successfully'))
+      }
     },
     onError: (error: Error) => {
       toast.error(error.message || i18next.t('Failed to update setting'))

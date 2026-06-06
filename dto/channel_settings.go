@@ -31,7 +31,7 @@ const (
 type ResponsesCompactMode string
 
 const (
-	// Auto mode tries native compact first and can temporarily fall back to synthetic summaries.
+	// Auto mode tries native compact first and temporarily falls back to synthetic summaries after native compatibility failures.
 	// Legacy convert mode keeps its compatible /v1/responses behavior via synthetic summaries.
 	ResponsesCompactModeAuto      ResponsesCompactMode = "auto"
 	ResponsesCompactModeNative    ResponsesCompactMode = "native"

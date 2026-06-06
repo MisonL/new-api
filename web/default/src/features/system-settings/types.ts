@@ -27,6 +27,47 @@ export type DeleteLogsResponse = {
   data?: number
 }
 
+export type LogRetentionPolicyResult = {
+  type: number
+  name: string
+  retention_days: number
+  cutoff: number
+  matched: number
+  deleted: number
+}
+
+export type PayloadRetentionResult = {
+  field: string
+  retention_days: number
+  cutoff: number
+  matched: number
+  updated: number
+}
+
+export type ServerLogRetentionResult = {
+  enabled: boolean
+  log_dir: string
+  matched_files: number
+  deleted_files: number
+  freed_bytes: number
+  failed_files?: string[]
+}
+
+export type LogRetentionExecutionResult = {
+  preview: boolean
+  started_at: number
+  finished_at: number
+  database_logs: LogRetentionPolicyResult[]
+  payloads: PayloadRetentionResult[]
+  server_log_files: ServerLogRetentionResult
+}
+
+export type LogRetentionExecutionResponse = {
+  success: boolean
+  message: string
+  data?: LogRetentionExecutionResult
+}
+
 export type GeneralSettings = {
   'theme.frontend': string
   Notice: string
@@ -244,6 +285,23 @@ export type ModelSettings = {
 export type MaintenanceSettings = {
   Notice: string
   LogConsumeEnabled: boolean
+  'log_retention_setting.enabled': boolean
+  'log_retention_setting.run_interval_hours': number
+  'log_retention_setting.batch_size': number
+  'log_retention_setting.max_batches': number
+  'log_retention_setting.consume_retention_days': number
+  'log_retention_setting.error_retention_days': number
+  'log_retention_setting.system_retention_days': number
+  'log_retention_setting.manage_retention_days': number
+  'log_retention_setting.topup_retention_days': number
+  'log_retention_setting.refund_retention_days': number
+  'log_retention_setting.unknown_retention_days': number
+  'log_retention_setting.request_payload_retention_days': number
+  'log_retention_setting.response_payload_retention_days': number
+  'log_retention_setting.server_log_cleanup_enabled': boolean
+  'log_retention_setting.server_log_keep_files': number
+  'log_retention_setting.server_log_keep_days': number
+  'log_retention_setting.server_log_max_total_size_mb': number
   HeaderNavModules: string
   SidebarModulesAdmin: string
   'performance_setting.disk_cache_enabled': boolean

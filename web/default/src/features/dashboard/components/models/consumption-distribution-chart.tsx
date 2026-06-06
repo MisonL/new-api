@@ -18,6 +18,7 @@ import {
   getDashboardChartAreaDrilldownTarget,
   getDashboardDimensionDrilldownTarget,
   getDashboardDrilldownTarget,
+  getDashboardLegendDrilldownTarget,
   type DashboardDrilldownDetail,
 } from '@/features/dashboard/lib/drilldown'
 import type {
@@ -109,6 +110,7 @@ export function ConsumptionDistributionChart(
     const detail = buildDashboardDrilldown({
       data: props.data,
       targetTime: target.time,
+      targetTimes: target.times,
       granularity: timeGranularity,
       models: target.models,
       unknownLabel: t('Unknown'),
@@ -131,6 +133,15 @@ export function ConsumptionDistributionChart(
   const handleDimensionClick = (event: { dimensionInfo?: unknown }) => {
     const target = getDashboardDimensionDrilldownTarget({
       dimensionInfo: event?.dimensionInfo,
+      otherLabel: t('Other'),
+    })
+    areaClickGuardRef.current.markChartClickHandled(target)
+    openDrilldown(target)
+  }
+  const handleLegendClick = (event: unknown) => {
+    const target = getDashboardLegendDrilldownTarget({
+      event,
+      chartValues,
       otherLabel: t('Other'),
     })
     areaClickGuardRef.current.markChartClickHandled(target)
@@ -199,6 +210,7 @@ export function ConsumptionDistributionChart(
               onClick={handleChartClick}
               onPointerTap={handleChartClick}
               onDimensionClick={handleDimensionClick}
+              onLegendItemClick={handleLegendClick}
             />
           )}
         </div>

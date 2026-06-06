@@ -242,6 +242,37 @@ func TestUpdateMultiKeyStatusRestoresKeyWhenChannelAlreadyEnabled(t *testing.T) 
 	require.NotContains(t, info, "status_time")
 }
 
+func TestUpdateMultiKeyStatusRestoresKeyWithNilDisableMetadata(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	channel := &Channel{
+		Id:     106,
+		Name:   "multi-key-nil-disable-metadata",
+		Key:    "key-a\nkey-b",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-5.4",
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:         true,
+			MultiKeySize:       2,
+			MultiKeyMode:       constant.MultiKeyModePolling,
+			MultiKeyStatusList: map[int]int{1: common.ChannelStatusAutoDisabled},
+		},
+	}
+	require.NoError(t, DB.Create(channel).Error)
+
+	require.NotPanics(t, func() {
+		require.True(t, UpdateChannelStatus(channel.Id, "key-b", common.ChannelStatusEnabled, ""))
+	})
+
+	var updated Channel
+	require.NoError(t, DB.First(&updated, "id = ?", channel.Id).Error)
+	require.Equal(t, common.ChannelStatusEnabled, updated.Status)
+	require.Empty(t, updated.ChannelInfo.MultiKeyStatusList)
+	require.Empty(t, updated.ChannelInfo.MultiKeyDisabledReason)
+	require.Empty(t, updated.ChannelInfo.MultiKeyDisabledTime)
+}
+
 func TestGetRandomSatisfiedChannelExcludingSkipsUsedChannelsAtSamePriority(t *testing.T) {
 	prepareChannelCacheTest(t)
 

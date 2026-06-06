@@ -32,6 +32,7 @@ import {
   mergeChannelSubmitFormValues,
   normalizeHeaderProfileStrategy,
   removeEquivalentVersionedProfileIds,
+  replaceSelectedProfilePreservingOrder,
   reorderSelectedProfileIds,
   toggleSelectedProfile,
   validateHeaderProfileDraft,
@@ -82,7 +83,7 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   );
   assert.match(
     HEADER_PROFILE_PRESETS['claude-code'].description,
-    /显式选择 Claude CLI 请求头透传模板/,
+    /显式选择 Claude Code 请求头透传模板/,
   );
   assert.equal(
     HEADER_PROFILE_PRESETS['gemini-cli'].headers['User-Agent'],
@@ -109,6 +110,14 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   assert.match(
     HEADER_PROFILE_PRESETS['droid'].description,
     /显式选择 Droid CLI 请求头透传模板/,
+  );
+  assert.match(
+    HEADER_PROFILE_PRESETS['droid'].description,
+    /Droid CLI npm latest/,
+  );
+  assert.doesNotMatch(
+    HEADER_PROFILE_PRESETS['droid'].description,
+    /Droid npm latest/,
   );
 });
 
@@ -379,8 +388,8 @@ test('fetchNpmCliVersionOptions requests new-api backend instead of npm registry
             {
               value: 'latest',
               label: 'latest (1.0.0)',
-              isLatest: true,
-              resolvedVersion: '1.0.0',
+              is_latest: true,
+              resolved_version: '1.0.0',
             },
           ],
         },
@@ -500,6 +509,29 @@ test('param override preset templates contain expected operations', () => {
       key,
     );
   }
+});
+
+test('channel affinity exposes OpenAI SDK metadata as a high-value preset', () => {
+  assert.ok(Object.hasOwn(PARAM_OVERRIDE_TEMPLATES, 'openaiSdkHeaders'));
+  assert.deepEqual(
+    PARAM_OVERRIDE_TEMPLATES.openaiSdkHeaders.payload.operations[0],
+    {
+      mode: 'pass_headers',
+      value: [
+        'OpenAI-Organization',
+        'OpenAI-Project',
+        'X-Stainless-Arch',
+        'X-Stainless-Lang',
+        'X-Stainless-OS',
+        'X-Stainless-Package-Version',
+        'X-Stainless-Retry-Count',
+        'X-Stainless-Runtime',
+        'X-Stainless-Runtime-Version',
+        'X-Stainless-Timeout',
+      ],
+      keep_origin: true,
+    },
+  );
 });
 
 test('param override template append preserves existing operations order', () => {
@@ -673,6 +705,86 @@ test('random versioned profile selection keeps existing template when adding ano
   ]);
 });
 
+test('versioned profile replacement preserves round robin order', () => {
+  const codexLatestProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    'latest',
+    'npm',
+    '0.134.0',
+  );
+  const claudeProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['claude-code'],
+    'latest',
+    'npm',
+    '2.1.153',
+  );
+  const codexPinnedProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    '0.136.0',
+  );
+
+  const nextSelectedProfileIds = replaceSelectedProfilePreservingOrder({
+    selectedProfileIds: [codexLatestProfile.id, claudeProfile.id],
+    selectedProfiles: [codexLatestProfile, claudeProfile],
+    profileId: codexPinnedProfile.id,
+    profile: codexPinnedProfile,
+  });
+
+  assert.deepEqual(nextSelectedProfileIds, [
+    'codex-cli@0.136.0',
+    'claude-code@latest',
+  ]);
+});
+
+test('versioned profile replacement appends when base profile was not selected', () => {
+  const codexProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    'latest',
+    'npm',
+    '0.134.0',
+  );
+  const qwenProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['qwen-code'],
+    'latest',
+    'npm',
+    '0.16.2',
+  );
+
+  const nextSelectedProfileIds = replaceSelectedProfilePreservingOrder({
+    selectedProfileIds: [codexProfile.id],
+    selectedProfiles: [codexProfile],
+    profileId: qwenProfile.id,
+    profile: qwenProfile,
+  });
+
+  assert.deepEqual(nextSelectedProfileIds, [
+    'codex-cli@latest',
+    'qwen-code@latest',
+  ]);
+});
+
+test('base profile replacement preserves versioned profile position', () => {
+  const codexPinnedProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    '0.136.0',
+  );
+  const claudeProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['claude-code'],
+    'latest',
+    'npm',
+    '2.1.153',
+  );
+
+  const nextSelectedProfileIds = replaceSelectedProfilePreservingOrder({
+    selectedProfileIds: [codexPinnedProfile.id, claudeProfile.id],
+    selectedProfiles: [codexPinnedProfile, claudeProfile],
+    profileId: 'codex-cli',
+    profile: HEADER_PROFILE_PRESETS['codex-cli'],
+  });
+
+  assert.deepEqual(nextSelectedProfileIds, ['codex-cli', 'claude-code@latest']);
+});
+
 test('buildSelectedProfileItems keeps structured headers while main fields stay name/group/preview', () => {
   const items = buildSelectedProfileItems(['codex-cli']);
 
@@ -829,6 +941,32 @@ test('buildSelectedProfileItems keeps unknown selected ids removable', () => {
       missing: true,
     },
   ]);
+});
+
+test('buildSelectedProfileItems keeps scoped custom ids containing @ unchanged', () => {
+  const items = buildSelectedProfileItems(
+    ['@team/custom-cli'],
+    [
+      {
+        id: '@team/custom-cli',
+        name: 'Scoped Custom CLI',
+        category: 'custom',
+        scope: 'user',
+        headers: {
+          'User-Agent': 'ScopedCustomCLI/1.0',
+        },
+      },
+    ],
+  );
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].id, '@team/custom-cli');
+  assert.equal(items[0].name, 'Scoped Custom CLI');
+  assert.equal(items[0].scope, 'user');
+  assert.equal(items[0].missing, undefined);
+  assert.deepEqual(items[0].headers, {
+    'User-Agent': 'ScopedCustomCLI/1.0',
+  });
 });
 
 test('buildHeaderProfilePreviewText returns empty string for empty headers', () => {

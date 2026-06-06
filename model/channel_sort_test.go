@@ -178,6 +178,23 @@ func TestSearchChannelsEscapesKeywordWildcards(t *testing.T) {
 	require.Equal(t, []int{4}, channelIDs(matchedEscape))
 }
 
+func TestSearchChannelsDoesNotMatchRawChannelKey(t *testing.T) {
+	setupChannelSortTestDB(t)
+	channel := &Channel{
+		Id:       11,
+		Name:     "key-search-target",
+		Key:      "sk-sensitive-search-token",
+		Models:   "gpt-5",
+		Group:    "default",
+		Priority: common.GetPointer[int64](10),
+	}
+	require.NoError(t, DB.Create(channel).Error)
+
+	matched, err := SearchChannels("sk-sensitive-search-token", "default", "gpt", false, NewChannelSortOptions("id", "asc", false))
+	require.NoError(t, err)
+	require.Empty(t, matched)
+}
+
 func insertPreferredOwnerCandidate(
 	t *testing.T,
 	channelID int,

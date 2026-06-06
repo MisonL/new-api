@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
+  FileSliders,
   GripVertical,
   Plus,
   Search,
@@ -38,7 +39,9 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -69,6 +72,17 @@ type ParamOverrideOperation = {
   keep_origin: boolean
   logic: string
   conditions: ParamOverrideCondition[]
+}
+
+type LegacyOverrideEntry = {
+  id: string
+  key: string
+  value_text: string
+}
+
+type LegacyOverrideBuildResult = {
+  value: Record<string, unknown>
+  count: number
 }
 
 export type ParamOverrideEditorDialogProps = {
@@ -232,6 +246,26 @@ const SYNC_TARGET_TYPE_OPTIONS = [
   { label: 'Request Header Field', value: 'header' },
 ]
 
+const STRUCTURED_VALUE_TYPE_OPTIONS = [
+  { label: 'Text', value: 'string' },
+  { label: 'Number', value: 'number' },
+  { label: 'Boolean', value: 'boolean' },
+  { label: 'Null', value: 'null' },
+  { label: 'Object', value: 'object' },
+  { label: 'Array', value: 'array' },
+]
+
+const HEADER_VALUE_MODE_OPTIONS = [
+  { label: 'Whole Header Value', value: 'direct' },
+  { label: 'Token Mapping', value: 'mapping' },
+]
+
+const HEADER_TOKEN_ACTION_OPTIONS = [
+  { label: 'Replace', value: 'replace' },
+  { label: 'Delete', value: 'delete' },
+  { label: 'Keep', value: 'keep' },
+]
+
 // Templates
 
 const LEGACY_TEMPLATE = { temperature: 0, max_tokens: 1000 }
@@ -252,9 +286,49 @@ const OPERATION_TEMPLATE = {
 const HEADER_PASSTHROUGH_TEMPLATE = {
   operations: [
     {
-      description: 'Pass through X-Request-Id header to upstream.',
+      description: 'Pass through common tracing headers to upstream.',
       mode: 'pass_headers',
-      value: ['X-Request-Id'],
+      value: ['X-Request-Id', 'X-Trace-Id', 'X-Correlation-Id', 'Traceparent'],
+      keep_origin: true,
+    },
+  ],
+}
+
+const OPENAI_SDK_HEADER_PASSTHROUGH_TEMPLATE = {
+  operations: [
+    {
+      description:
+        'Pass through OpenAI SDK organization, project and Stainless metadata headers.',
+      mode: 'pass_headers',
+      value: [
+        'OpenAI-Organization',
+        'OpenAI-Project',
+        'X-Stainless-Arch',
+        'X-Stainless-Lang',
+        'X-Stainless-OS',
+        'X-Stainless-Package-Version',
+        'X-Stainless-Retry-Count',
+        'X-Stainless-Runtime',
+        'X-Stainless-Runtime-Version',
+        'X-Stainless-Timeout',
+      ],
+      keep_origin: true,
+    },
+  ],
+}
+
+const ANTHROPIC_RUNTIME_HEADER_PASSTHROUGH_TEMPLATE = {
+  operations: [
+    {
+      description:
+        'Pass through Anthropic runtime beta/version headers from the original client request.',
+      mode: 'pass_headers',
+      value: [
+        'Anthropic-Beta',
+        'Anthropic-Version',
+        'Anthropic-Dangerous-Direct-Browser-Access',
+        'X-App',
+      ],
       keep_origin: true,
     },
   ],
@@ -422,74 +496,163 @@ const AWS_BEDROCK_REMOVE_INPUT_EXAMPLES_TEMPLATE = {
   ],
 }
 
+const CODEX_REMOVE_IMAGE_GENERATION_TOOL_TEMPLATE = {
+  operations: [
+    {
+      description:
+        'Remove image_generation tool objects before upstream relay.',
+      path: 'tools',
+      mode: 'prune_objects',
+      value: {
+        type: 'image_generation',
+        recursive: false,
+      },
+    },
+  ],
+}
+
 type TemplatePresetConfig = {
   label: string
+  group: 'recommended' | 'advanced' | 'examples'
+  description?: string
   kind: 'operations' | 'legacy'
   payload: Record<string, unknown>
 }
 
+const TEMPLATE_GROUPS = [
+  { label: 'Recommended Scenarios', value: 'recommended' },
+  { label: 'Advanced Compatibility', value: 'advanced' },
+  { label: 'Examples and Starting Points', value: 'examples' },
+] as const
+
 const TEMPLATE_PRESET_CONFIG: Record<string, TemplatePresetConfig> = {
-  operations_default: {
-    label: 'New Format Template',
-    kind: 'operations',
-    payload: OPERATION_TEMPLATE,
-  },
-  legacy_default: {
-    label: 'Legacy Format Template',
-    kind: 'legacy',
-    payload: LEGACY_TEMPLATE,
-  },
-  pass_headers_auth: {
-    label: 'Header Passthrough (X-Request-Id)',
-    kind: 'operations',
-    payload: HEADER_PASSTHROUGH_TEMPLATE,
-  },
-  gemini_image_4k: {
-    label: 'Gemini Image 4K',
-    kind: 'operations',
-    payload: GEMINI_IMAGE_4K_TEMPLATE,
-  },
-  claude_cli_headers_passthrough: {
-    label: 'Claude CLI Header Passthrough',
-    kind: 'operations',
-    payload: CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
-  },
   codex_cli_headers_passthrough: {
     label: 'Codex CLI Header Passthrough',
+    group: 'recommended',
+    description:
+      'Pass through Codex CLI session, window, turn metadata and request id headers.',
     kind: 'operations',
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   codex_desktop_headers_passthrough: {
     label: 'Codex Desktop Header Passthrough',
+    group: 'recommended',
+    description:
+      'Pass through Codex Desktop session, window, turn metadata and request id headers.',
     kind: 'operations',
     payload: CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE,
   },
+  claude_cli_headers_passthrough: {
+    label: 'Claude Code Header Passthrough',
+    group: 'recommended',
+    description:
+      'Pass through Claude Code session, Anthropic beta/version and Stainless runtime headers.',
+    kind: 'operations',
+    payload: CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  openai_sdk_headers_passthrough: {
+    label: 'OpenAI SDK Metadata Passthrough',
+    group: 'recommended',
+    description:
+      'Pass through OpenAI organization, project and Stainless client metadata headers.',
+    kind: 'operations',
+    payload: OPENAI_SDK_HEADER_PASSTHROUGH_TEMPLATE,
+  },
+  aws_bedrock_anthropic_beta_override: {
+    label: 'AWS Bedrock Claude Beta Header',
+    group: 'recommended',
+    description:
+      'Normalize anthropic-beta header tokens for Bedrock compatibility.',
+    kind: 'operations',
+    payload: AWS_BEDROCK_ANTHROPIC_BETA_TEMPLATE,
+  },
+  remove_image_generation_tool: {
+    label: 'Upstream Compat: Remove Image Generation Tool',
+    group: 'recommended',
+    description:
+      'Remove image_generation tool objects when an upstream rejects that tool type.',
+    kind: 'operations',
+    payload: CODEX_REMOVE_IMAGE_GENERATION_TOOL_TEMPLATE,
+  },
+  aws_bedrock_remove_input_examples: {
+    label: 'AWS Bedrock Remove Input Examples',
+    group: 'advanced',
+    description:
+      'Remove tools.*.custom.input_examples before sending requests to Bedrock.',
+    kind: 'operations',
+    payload: AWS_BEDROCK_REMOVE_INPUT_EXAMPLES_TEMPLATE,
+  },
+  anthropic_runtime_headers_passthrough: {
+    label: 'Anthropic Beta/Version Passthrough',
+    group: 'advanced',
+    description:
+      'Pass through Anthropic runtime beta/version headers from the original request.',
+    kind: 'operations',
+    payload: ANTHROPIC_RUNTIME_HEADER_PASSTHROUGH_TEMPLATE,
+  },
   gemini_cli_headers_passthrough: {
     label: 'Gemini CLI Header Passthrough',
+    group: 'advanced',
+    description: 'Pass through Gemini CLI x-goog-api-client metadata.',
     kind: 'operations',
     payload: GEMINI_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   qwen_code_headers_passthrough: {
     label: 'Qwen Code Header Passthrough',
+    group: 'advanced',
+    description: 'Pass through Qwen Code Stainless client metadata headers.',
     kind: 'operations',
     payload: QWEN_CODE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   droid_cli_headers_passthrough: {
     label: 'Droid CLI Header Passthrough',
+    group: 'advanced',
+    description: 'Pass through Droid CLI Stainless client metadata headers.',
     kind: 'operations',
     payload: DROID_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
-  aws_bedrock_anthropic_beta_override: {
-    label: 'AWS Bedrock Claude Beta Header',
+  pass_headers_auth: {
+    label: 'Trace Headers Passthrough',
+    group: 'advanced',
+    description:
+      'Pass through common tracing headers such as X-Request-Id and Traceparent.',
     kind: 'operations',
-    payload: AWS_BEDROCK_ANTHROPIC_BETA_TEMPLATE,
+    payload: HEADER_PASSTHROUGH_TEMPLATE,
   },
-  aws_bedrock_remove_input_examples: {
-    label: 'AWS Bedrock Remove Input Examples',
+  gemini_image_4k: {
+    label: 'Gemini Image 4K',
+    group: 'advanced',
+    description:
+      'Set generationConfig.imageConfig.imageSize to 4K for matching Gemini image models.',
     kind: 'operations',
-    payload: AWS_BEDROCK_REMOVE_INPUT_EXAMPLES_TEMPLATE,
+    payload: GEMINI_IMAGE_4K_TEMPLATE,
+  },
+  operations_default: {
+    label: 'Example: Set Temperature by Model',
+    group: 'examples',
+    description:
+      'Example rule that sets temperature when the model name starts with openai/.',
+    kind: 'operations',
+    payload: OPERATION_TEMPLATE,
+  },
+  legacy_default: {
+    label: 'Example: Legacy Field Object',
+    group: 'examples',
+    description:
+      'Legacy top-level field object example for simple field overrides.',
+    kind: 'legacy',
+    payload: LEGACY_TEMPLATE,
   },
 }
+
+const QUICK_TEMPLATE_PRESETS = [
+  'codex_cli_headers_passthrough',
+  'codex_desktop_headers_passthrough',
+  'claude_cli_headers_passthrough',
+  'openai_sdk_headers_passthrough',
+  'aws_bedrock_anthropic_beta_override',
+  'remove_image_generation_tool',
+]
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -540,8 +703,55 @@ const normalizeCondition = (
   pass_missing_key: condition.pass_missing_key === true,
 })
 
+const normalizeConditionList = (
+  rawConditions: unknown
+): ParamOverrideCondition[] => {
+  if (Array.isArray(rawConditions)) {
+    return rawConditions
+      .filter(
+        (condition): condition is Record<string, unknown> =>
+          condition !== null &&
+          typeof condition === 'object' &&
+          !Array.isArray(condition)
+      )
+      .map(normalizeCondition)
+  }
+  if (
+    rawConditions &&
+    typeof rawConditions === 'object' &&
+    !Array.isArray(rawConditions)
+  ) {
+    return Object.entries(rawConditions as Record<string, unknown>).map(
+      ([path, value]) => normalizeCondition({ path, mode: 'full', value })
+    )
+  }
+  return []
+}
+
 const createDefaultCondition = (): ParamOverrideCondition =>
   normalizeCondition({})
+
+const normalizeLegacyEntry = (
+  key: string,
+  value: unknown
+): LegacyOverrideEntry => ({
+  id: nextLocalId(),
+  key,
+  value_text: toValueText(value),
+})
+
+const createDefaultLegacyEntry = (): LegacyOverrideEntry =>
+  normalizeLegacyEntry('', '')
+
+const getLegacyEntriesFromObject = (
+  source: Record<string, unknown>,
+  options: { excludeOperations?: boolean } = {}
+): LegacyOverrideEntry[] => {
+  const entries = Object.entries(source)
+    .filter(([key]) => !(options.excludeOperations && key === 'operations'))
+    .map(([key, value]) => normalizeLegacyEntry(key, value))
+  return entries.length > 0 ? entries : [createDefaultLegacyEntry()]
+}
 
 const normalizeOperation = (
   operation: Record<string, unknown> = {}
@@ -558,11 +768,7 @@ const normalizeOperation = (
   from: typeof operation.from === 'string' ? operation.from : '',
   to: typeof operation.to === 'string' ? operation.to : '',
   logic: String(operation.logic || 'OR').toUpperCase() === 'AND' ? 'AND' : 'OR',
-  conditions: Array.isArray(operation.conditions)
-    ? (operation.conditions as Record<string, unknown>[]).map(
-        normalizeCondition
-      )
-    : [],
+  conditions: normalizeConditionList(operation.conditions),
 })
 
 const createDefaultOperation = (): ParamOverrideOperation =>
@@ -900,7 +1106,7 @@ const buildPruneObjectsValueText = (draft: PruneObjectsDraft): string => {
   const payload: Record<string, unknown> = {}
   if (typeText) payload.type = typeText
   if (String(draft.logic || 'AND').toUpperCase() === 'OR') payload.logic = 'OR'
-  if (draft.recursive === false) payload.recursive = false
+  payload.recursive = draft.recursive !== false
   const conditions = (draft.rules || [])
     .filter((rule) => String(rule.path || '').trim())
     .map((rule) => {
@@ -909,15 +1115,34 @@ const buildPruneObjectsValueText = (draft: PruneObjectsDraft): string => {
         mode: CONDITION_MODE_VALUES.has(rule.mode) ? rule.mode : 'full',
       }
       const valueRaw = String(rule.value_text || '').trim()
-      if (valueRaw !== '') conditionPayload.value = parseLooseValue(valueRaw)
+      if (valueRaw !== '') {
+        conditionPayload.value = parseStructuredValueText(valueRaw)
+      }
       if (rule.invert) conditionPayload.invert = true
       if (rule.pass_missing_key) conditionPayload.pass_missing_key = true
       return conditionPayload
     })
   if (conditions.length > 0) payload.conditions = conditions
   if (!payload.type && !payload.conditions)
-    return JSON.stringify({ logic: 'AND' })
+    return JSON.stringify({
+      logic: String(draft.logic || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND',
+      recursive: draft.recursive !== false,
+    })
   return JSON.stringify(payload)
+}
+
+const getPruneAdvancedSummaryParts = (draft: PruneObjectsDraft): string[] => {
+  const parts = [
+    draft.recursive ? 'Recursive' : 'Current Level Only',
+    String(draft.logic || 'AND').toUpperCase() === 'OR'
+      ? 'Any Match (OR)'
+      : 'All Must Match (AND)',
+  ]
+  const extraRules = draft.rules.filter((rule) =>
+    String(rule.path || '').trim()
+  ).length
+  if (extraRules > 0) parts.push('Additional Conditions: {{count}}')
+  return parts
 }
 
 // pass_headers helpers
@@ -927,6 +1152,7 @@ const parsePassHeaderNames = (rawValue: unknown): string[] => {
     return rawValue.map((i) => String(i ?? '').trim()).filter(Boolean)
   if (rawValue && typeof rawValue === 'object') {
     const obj = rawValue as Record<string, unknown>
+    if (obj.names !== undefined) return parsePassHeaderNames(obj.names)
     if (Array.isArray(obj.headers))
       return obj.headers.map((i) => String(i ?? '').trim()).filter(Boolean)
     if (obj.header !== undefined) {
@@ -943,6 +1169,399 @@ const parsePassHeaderNames = (rawValue: unknown): string[] => {
   return []
 }
 
+type PassHeadersDraft = {
+  sourceKey: 'headers' | 'names' | 'header'
+  headers: string[]
+}
+
+type PassHeaderRow = {
+  id: string
+  value: string
+}
+
+const MAX_STRUCTURED_VALUE_DEPTH = 8
+const STRUCTURED_VALUE_DEPTH_ERROR = `Structured value nesting depth exceeds ${MAX_STRUCTURED_VALUE_DEPTH}`
+const isCompleteStructuredNumberText = (text: string): boolean => {
+  const trimmed = text.trim()
+  return (
+    trimmed !== '' &&
+    trimmed !== '-' &&
+    trimmed !== '.' &&
+    trimmed !== '-.' &&
+    Number.isFinite(Number(trimmed))
+  )
+}
+
+const parsePassHeadersDraft = (valueText: string): PassHeadersDraft => {
+  const parsed = parseLooseValue(valueText)
+  const headers = parsePassHeaderNames(parsed)
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>
+    if (obj.names !== undefined) return { sourceKey: 'names', headers }
+    if (obj.header !== undefined) return { sourceKey: 'header', headers }
+  }
+  return { sourceKey: 'headers', headers }
+}
+
+const buildPassHeadersValueText = (draft: PassHeadersDraft): string => {
+  const cleanHeaders = Array.from(
+    new Set(draft.headers.map((item) => item.trim()).filter(Boolean))
+  )
+  if (draft.sourceKey === 'names') {
+    return JSON.stringify({ names: cleanHeaders })
+  }
+  if (draft.sourceKey === 'header') {
+    return JSON.stringify({ header: cleanHeaders[0] || '' })
+  }
+  return JSON.stringify(cleanHeaders)
+}
+
+type StructuredValueNodeKind =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'null'
+  | 'object'
+  | 'array'
+
+type StructuredObjectEntry = {
+  id: string
+  key: string
+  value: StructuredValueNode
+}
+
+type StructuredArrayItem = {
+  id: string
+  value: StructuredValueNode
+}
+
+type StructuredValueNode = {
+  id: string
+  kind: StructuredValueNodeKind
+  text: string
+  boolValue: boolean
+  objectEntries: StructuredObjectEntry[]
+  arrayItems: StructuredArrayItem[]
+}
+
+const createStructuredValueNode = (
+  kind: StructuredValueNodeKind = 'string'
+): StructuredValueNode => ({
+  id: nextLocalId(),
+  kind,
+  text: kind === 'number' ? '0' : '',
+  boolValue: true,
+  objectEntries: [],
+  arrayItems: [],
+})
+
+const isJsonLikeStructuredValueText = (valueText: string): boolean => {
+  const trimmed = valueText.trim()
+  if (trimmed === '') return false
+  if ('[{'.includes(trimmed[0])) return true
+  if (trimmed[0] === '"') return true
+  if (trimmed === 'true' || trimmed === 'false' || trimmed === 'null') {
+    return true
+  }
+  return /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(trimmed)
+}
+
+const normalizeStructuredValueNode = (
+  value: unknown,
+  depth = 0
+): StructuredValueNode => {
+  if (depth > MAX_STRUCTURED_VALUE_DEPTH) {
+    throw new Error(STRUCTURED_VALUE_DEPTH_ERROR)
+  }
+  if (value === null) return createStructuredValueNode('null')
+  if (Array.isArray(value)) {
+    return {
+      ...createStructuredValueNode('array'),
+      arrayItems: value.map((item) => ({
+        id: nextLocalId(),
+        value: normalizeStructuredValueNode(item, depth + 1),
+      })),
+    }
+  }
+  if (typeof value === 'object' && value !== null) {
+    return {
+      ...createStructuredValueNode('object'),
+      objectEntries: Object.entries(value as Record<string, unknown>).map(
+        ([key, item]) => ({
+          id: nextLocalId(),
+          key,
+          value: normalizeStructuredValueNode(item, depth + 1),
+        })
+      ),
+    }
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return { ...createStructuredValueNode('number'), text: String(value) }
+  }
+  if (typeof value === 'boolean') {
+    return { ...createStructuredValueNode('boolean'), boolValue: value }
+  }
+  return { ...createStructuredValueNode('string'), text: String(value ?? '') }
+}
+
+const parseStructuredValueNode = (valueText: string): StructuredValueNode => {
+  const raw = String(valueText ?? '')
+  if (raw.trim() === '') return createStructuredValueNode('string')
+  if (!isJsonLikeStructuredValueText(raw)) {
+    return normalizeStructuredValueNode(raw)
+  }
+  return normalizeStructuredValueNode(JSON.parse(raw))
+}
+
+const parseStructuredValueNodeForDisplay = (
+  valueText: string
+): StructuredValueNode => {
+  try {
+    return parseStructuredValueNode(valueText)
+  } catch {
+    return normalizeStructuredValueNode(valueText)
+  }
+}
+
+function assertStructuredValueInvariant(
+  condition: unknown,
+  message: string
+): asserts condition {
+  if (!condition) throw new Error(message)
+}
+
+const getStructuredText = (node: StructuredValueNode): string => {
+  assertStructuredValueInvariant(
+    typeof node.text === 'string',
+    'Invalid structured value node text'
+  )
+  return node.text
+}
+
+const getStructuredBooleanValue = (node: StructuredValueNode): boolean => {
+  assertStructuredValueInvariant(
+    typeof node.boolValue === 'boolean',
+    'Invalid structured value boolean'
+  )
+  return node.boolValue
+}
+
+const getStructuredObjectEntries = (
+  node: StructuredValueNode
+): StructuredObjectEntry[] => {
+  assertStructuredValueInvariant(
+    Array.isArray(node.objectEntries),
+    'Invalid structured value object entries'
+  )
+  return node.objectEntries
+}
+
+const getStructuredArrayItems = (
+  node: StructuredValueNode
+): StructuredArrayItem[] => {
+  assertStructuredValueInvariant(
+    Array.isArray(node.arrayItems),
+    'Invalid structured value array items'
+  )
+  return node.arrayItems
+}
+
+const buildStructuredValue = (node: StructuredValueNode): unknown => {
+  switch (node.kind) {
+    case 'number': {
+      const text = getStructuredText(node)
+      const numberValue = Number(text)
+      if (!isCompleteStructuredNumberText(text)) {
+        throw new Error('Invalid number value')
+      }
+      return numberValue
+    }
+    case 'boolean':
+      return getStructuredBooleanValue(node)
+    case 'null':
+      return null
+    case 'object': {
+      const payload: Record<string, unknown> = {}
+      for (const entry of getStructuredObjectEntries(node)) {
+        assertStructuredValueInvariant(
+          typeof entry.key === 'string',
+          'Invalid structured value object key'
+        )
+        const key = entry.key.trim()
+        if (key) payload[key] = buildStructuredValue(entry.value)
+      }
+      return payload
+    }
+    case 'array':
+      return getStructuredArrayItems(node).map((item) =>
+        buildStructuredValue(item.value)
+      )
+    case 'string':
+      return getStructuredText(node)
+    default:
+      throw new Error('Invalid structured value kind')
+  }
+}
+
+const shouldQuoteStructuredString = (value: string): boolean => {
+  if (value !== value.trim()) return true
+  if (value.trim() === '') return false
+  try {
+    JSON.parse(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const buildStructuredValueText = (node: StructuredValueNode): string => {
+  const value = buildStructuredValue(node)
+  if (node.kind === 'string') {
+    const text = String(value ?? '')
+    return shouldQuoteStructuredString(text) ? JSON.stringify(text) : text
+  }
+  return JSON.stringify(value)
+}
+
+const canSerializeStructuredValueNode = (
+  node: StructuredValueNode
+): boolean => {
+  switch (node.kind) {
+    case 'number':
+      return isCompleteStructuredNumberText(getStructuredText(node))
+    case 'boolean':
+      getStructuredBooleanValue(node)
+      return true
+    case 'object':
+      return getStructuredObjectEntries(node).every((entry) =>
+        canSerializeStructuredValueNode(entry.value)
+      )
+    case 'array':
+      return getStructuredArrayItems(node).every((item) =>
+        canSerializeStructuredValueNode(item.value)
+      )
+    case 'string':
+      getStructuredText(node)
+      return true
+    case 'null':
+      return true
+    default:
+      throw new Error('Invalid structured value kind')
+  }
+}
+
+const parseStructuredValueText = (valueText: string): unknown => {
+  const node = parseStructuredValueNode(valueText)
+  return buildStructuredValue(node)
+}
+
+type HeaderValueMappingRow = {
+  id: string
+  token: string
+  action: string
+  replacement: string
+}
+
+type HeaderValueDraft = {
+  mode: 'direct' | 'mapping'
+  directText: string
+  keepOnlyDeclared: boolean
+  appendText: string
+  wildcardAction: string
+  wildcardReplacement: string
+  rows: HeaderValueMappingRow[]
+}
+
+const splitHeaderTokenText = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.flatMap(splitHeaderTokenText).filter(Boolean)
+  }
+  return String(value ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+const parseHeaderValueDraft = (valueText: string): HeaderValueDraft => {
+  const defaults: HeaderValueDraft = {
+    mode: 'direct',
+    directText: '',
+    keepOnlyDeclared: false,
+    appendText: '',
+    wildcardAction: 'none',
+    wildcardReplacement: '',
+    rows: [],
+  }
+  const raw = String(valueText ?? '').trim()
+  if (!raw) return defaults
+  const parsed = parseLooseValue(raw)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ...defaults, directText: String(parsed ?? '') }
+  }
+  const mapping = parsed as Record<string, unknown>
+  const rows: HeaderValueMappingRow[] = []
+  for (const [token, replacement] of Object.entries(mapping)) {
+    if (token === '$append' || token === '$keep_only_declared') continue
+    if (token === '*') continue
+    if (replacement === null) {
+      rows.push({ id: nextLocalId(), token, action: 'delete', replacement: '' })
+      continue
+    }
+    const replacementText = splitHeaderTokenText(replacement).join(', ')
+    rows.push({
+      id: nextLocalId(),
+      token,
+      action: replacementText === token ? 'keep' : 'replace',
+      replacement: replacementText,
+    })
+  }
+  return {
+    mode: 'mapping',
+    directText: '',
+    keepOnlyDeclared: mapping.$keep_only_declared === true,
+    appendText: splitHeaderTokenText(mapping.$append).join(', '),
+    wildcardAction: Object.prototype.hasOwnProperty.call(mapping, '*')
+      ? mapping['*'] === null
+        ? 'delete'
+        : 'replace'
+      : 'none',
+    wildcardReplacement:
+      Object.prototype.hasOwnProperty.call(mapping, '*') &&
+      mapping['*'] !== null
+        ? splitHeaderTokenText(mapping['*']).join(', ')
+        : '',
+    rows,
+  }
+}
+
+const buildHeaderValueText = (draft: HeaderValueDraft): string => {
+  if (draft.mode === 'direct') return JSON.stringify(draft.directText)
+  const payload: Record<string, unknown> = {}
+  if (draft.keepOnlyDeclared) payload.$keep_only_declared = true
+  const appendTokens = splitHeaderTokenText(draft.appendText)
+  if (appendTokens.length > 0) payload.$append = appendTokens
+  if (draft.wildcardAction === 'delete') {
+    payload['*'] = null
+  } else if (draft.wildcardAction === 'replace') {
+    const wildcardTokens = splitHeaderTokenText(draft.wildcardReplacement)
+    payload['*'] =
+      wildcardTokens.length > 1 ? wildcardTokens : wildcardTokens[0] || ''
+  }
+  for (const row of draft.rows) {
+    const token = row.token.trim()
+    if (!token) continue
+    if (row.action === 'delete') {
+      payload[token] = null
+    } else if (row.action === 'keep') {
+      payload[token] = token
+    } else {
+      const tokens = splitHeaderTokenText(row.replacement)
+      payload[token] = tokens.length > 1 ? tokens : tokens[0] || ''
+    }
+  }
+  return JSON.stringify(payload)
+}
+
 // Condition payload builder
 const buildConditionPayload = (
   condition: ParamOverrideCondition
@@ -952,10 +1571,45 @@ const buildConditionPayload = (
   const payload: Record<string, unknown> = {
     path,
     mode: condition.mode || 'full',
-    value: parseLooseValue(condition.value_text),
+    value: parseStructuredValueText(condition.value_text),
   }
   if (condition.invert) payload.invert = true
   if (condition.pass_missing_key) payload.pass_missing_key = true
+  return payload
+}
+
+const buildLegacyOverridePayload = (
+  entries: LegacyOverrideEntry[],
+  t: (key: string, options?: Record<string, unknown>) => string
+): LegacyOverrideBuildResult => {
+  const payload: Record<string, unknown> = {}
+  let count = 0
+  for (const entry of entries) {
+    const key = entry.key.trim()
+    const valueText = entry.value_text.trim()
+    if (!key && !valueText) continue
+    if (!key) throw new Error(t('Legacy override field name is required'))
+    if (key === 'operations') {
+      throw new Error(t('Legacy override field name cannot be operations'))
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      throw new Error(t('Legacy override field names must be unique'))
+    }
+    payload[key] = parseStructuredValueText(entry.value_text)
+    count += 1
+  }
+  return { value: payload, count }
+}
+
+const buildLegacyPreviewPayload = (
+  entries: LegacyOverrideEntry[]
+): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {}
+  for (const entry of entries) {
+    const key = entry.key.trim()
+    if (!key) continue
+    payload[key] = parseStructuredValueText(entry.value_text)
+  }
   return payload
 }
 
@@ -993,7 +1647,14 @@ const validateOperations = (
       try {
         const parsed = JSON.parse(raw)
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          if (!String((parsed as Record<string, unknown>).message || '').trim())
+          const parsedObject = parsed as Record<string, unknown>
+          if (
+            !String(
+              parsedObject.message !== undefined
+                ? parsedObject.message
+                : parsedObject.msg || ''
+            ).trim()
+          )
             return t('Rule {{line}} return_error requires a message field', {
               line,
             })
@@ -1007,6 +1668,31 @@ const validateOperations = (
       const raw = op.value_text.trim()
       if (!raw)
         return t('Rule {{line}} prune_objects is missing conditions', { line })
+      const draft = parsePruneObjectsDraft(raw)
+      if (
+        !draft.typeText.trim() &&
+        !draft.rules.some((rule) => rule.path.trim())
+      ) {
+        return t('Rule {{line}} prune_objects is missing conditions', { line })
+      }
+    }
+
+    if (mode === 'set_header') {
+      const parsed = parseLooseValue(op.value_text)
+      if (parsed === null || parsed === undefined) {
+        return t('Rule {{line}} is missing value', { line })
+      }
+      if (typeof parsed === 'string' && !parsed.trim()) {
+        return t('Rule {{line}} is missing value', { line })
+      }
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed) &&
+        Object.keys(parsed as Record<string, unknown>).length === 0
+      ) {
+        return t('Rule {{line}} is missing value', { line })
+      }
     }
 
     if (mode === 'pass_headers') {
@@ -1027,7 +1713,7 @@ const validateOperations = (
 type EditorState = {
   editMode: 'visual' | 'json'
   visualMode: 'operations' | 'legacy'
-  legacyValue: string
+  legacyEntries: LegacyOverrideEntry[]
   operations: ParamOverrideOperation[]
   jsonText: string
   jsonError: string
@@ -1040,7 +1726,7 @@ const parseInitialState = (rawValue: string): EditorState => {
     return {
       editMode: 'visual',
       visualMode: 'operations',
-      legacyValue: '',
+      legacyEntries: [createDefaultLegacyEntry()],
       operations: [createDefaultOperation()],
       jsonText: '',
       jsonError: '',
@@ -1051,7 +1737,7 @@ const parseInitialState = (rawValue: string): EditorState => {
     return {
       editMode: 'json',
       visualMode: 'operations',
-      legacyValue: '',
+      legacyEntries: [createDefaultLegacyEntry()],
       operations: [createDefaultOperation()],
       jsonText: text,
       jsonError: 'Invalid JSON format',
@@ -1070,7 +1756,10 @@ const parseInitialState = (rawValue: string): EditorState => {
     return {
       editMode: 'visual',
       visualMode: 'operations',
-      legacyValue: '',
+      legacyEntries: getLegacyEntriesFromObject(
+        parsed as Record<string, unknown>,
+        { excludeOperations: true }
+      ),
       operations:
         (parsed.operations as Record<string, unknown>[]).length > 0
           ? (parsed.operations as Record<string, unknown>[]).map(
@@ -1086,7 +1775,9 @@ const parseInitialState = (rawValue: string): EditorState => {
     return {
       editMode: 'visual',
       visualMode: 'legacy',
-      legacyValue: pretty,
+      legacyEntries: getLegacyEntriesFromObject(
+        parsed as Record<string, unknown>
+      ),
       operations: [createDefaultOperation()],
       jsonText: pretty,
       jsonError: '',
@@ -1096,7 +1787,7 @@ const parseInitialState = (rawValue: string): EditorState => {
   return {
     editMode: 'json',
     visualMode: 'operations',
-    legacyValue: '',
+    legacyEntries: [createDefaultLegacyEntry()],
     operations: [createDefaultOperation()],
     jsonText: pretty,
     jsonError: '',
@@ -1129,7 +1820,17 @@ const buildOperationsJson = (
     if (descriptionValue) payload.description = descriptionValue
     if (meta.path) payload.path = pathValue
     if (meta.pathOptional && pathValue) payload.path = pathValue
-    if (meta.value) payload.value = parseLooseValue(operation.value_text)
+    if (meta.value) {
+      if (mode === 'pass_headers') {
+        payload.value = parseLooseValue(operation.value_text)
+      } else if (mode === 'set_header') {
+        payload.value = parseLooseValue(operation.value_text)
+      } else if (mode === 'return_error' || mode === 'prune_objects') {
+        payload.value = parseLooseValue(operation.value_text)
+      } else {
+        payload.value = parseStructuredValueText(operation.value_text)
+      }
+    }
     if (meta.keepOrigin && operation.keep_origin) payload.keep_origin = true
     if (meta.from) payload.from = fromValue
     if (!meta.to && operation.to.trim()) payload.to = toValue
@@ -1151,6 +1852,9 @@ const buildOperationsJson = (
   return JSON.stringify({ operations: payloadOps }, null, 2)
 }
 
+const getOperationDedupKey = (operation: ParamOverrideOperation): string =>
+  buildOperationsJson([operation], { validate: false }, (key) => key)
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -1164,7 +1868,9 @@ export function ParamOverrideEditorDialog(
   const [visualMode, setVisualMode] = useState<'operations' | 'legacy'>(
     'operations'
   )
-  const [legacyValue, setLegacyValue] = useState('')
+  const [legacyEntries, setLegacyEntries] = useState<LegacyOverrideEntry[]>([
+    createDefaultLegacyEntry(),
+  ])
   const [operations, setOperations] = useState<ParamOverrideOperation[]>([
     createDefaultOperation(),
   ])
@@ -1180,8 +1886,9 @@ export function ParamOverrideEditorDialog(
   const [dragOverPosition, setDragOverPosition] = useState<'before' | 'after'>(
     'before'
   )
-  const [templatePresetKey, setTemplatePresetKey] =
-    useState('operations_default')
+  const [templatePresetKey, setTemplatePresetKey] = useState(
+    'codex_cli_headers_passthrough'
+  )
 
   // Initialize state when dialog opens
   useEffect(() => {
@@ -1189,7 +1896,7 @@ export function ParamOverrideEditorDialog(
     const state = parseInitialState(props.value)
     setEditMode(state.editMode)
     setVisualMode(state.visualMode)
-    setLegacyValue(state.legacyValue)
+    setLegacyEntries(state.legacyEntries)
     setOperations(state.operations)
     setJsonText(state.jsonText)
     setJsonError(state.jsonError)
@@ -1199,11 +1906,7 @@ export function ParamOverrideEditorDialog(
     setDraggedOperationId('')
     setDragOverOperationId('')
     setDragOverPosition('before')
-    if (state.visualMode === 'legacy') {
-      setTemplatePresetKey('legacy_default')
-    } else {
-      setTemplatePresetKey('operations_default')
-    }
+    setTemplatePresetKey('codex_cli_headers_passthrough')
   }, [props.open, props.value])
 
   // Keep selectedOperationId valid
@@ -1217,13 +1920,27 @@ export function ParamOverrideEditorDialog(
     }
   }, [operations, selectedOperationId])
 
-  // Template preset options filtered by group
+  // Template presets
+  const quickTemplatePresets = useMemo(
+    () =>
+      QUICK_TEMPLATE_PRESETS.map((key) => ({
+        key,
+        config: TEMPLATE_PRESET_CONFIG[key],
+      })).filter((item) => item.config),
+    []
+  )
+
   const templatePresetOptions = useMemo(
     () =>
-      Object.entries(TEMPLATE_PRESET_CONFIG).map(([value, config]) => ({
-        value,
-        label: config.label,
-      })),
+      TEMPLATE_GROUPS.map((group) => ({
+        ...group,
+        options: Object.entries(TEMPLATE_PRESET_CONFIG)
+          .filter(([, config]) => config.group === group.value)
+          .map(([value, config]) => ({
+            value,
+            label: config.label,
+          })),
+      })).filter((group) => group.options.length > 0),
     []
   )
 
@@ -1284,6 +2001,10 @@ export function ParamOverrideEditorDialog(
       .slice(0, 4)
   }, [operations])
 
+  const selectedTemplatePreset =
+    TEMPLATE_PRESET_CONFIG[templatePresetKey] ||
+    TEMPLATE_PRESET_CONFIG.codex_cli_headers_passthrough
+
   // ---------------------------------------------------------------------------
   // Operations
   // ---------------------------------------------------------------------------
@@ -1313,7 +2034,13 @@ export function ParamOverrideEditorDialog(
         description: source.description,
         path: source.path,
         mode: source.mode,
-        value: parseLooseValue(source.value_text),
+        value:
+          source.mode === 'set_header' ||
+          source.mode === 'pass_headers' ||
+          source.mode === 'return_error' ||
+          source.mode === 'prune_objects'
+            ? parseLooseValue(source.value_text)
+            : parseStructuredValueText(source.value_text),
         keep_origin: source.keep_origin,
         from: source.from,
         to: source.to,
@@ -1321,7 +2048,7 @@ export function ParamOverrideEditorDialog(
         conditions: source.conditions.map((c) => ({
           path: c.path,
           mode: c.mode,
-          value: parseLooseValue(c.value_text),
+          value: parseStructuredValueText(c.value_text),
           invert: c.invert,
           pass_missing_key: c.pass_missing_key,
         })),
@@ -1391,6 +2118,28 @@ export function ParamOverrideEditorDialog(
     },
     []
   )
+
+  const updateLegacyEntry = useCallback(
+    (entryId: string, patch: Partial<LegacyOverrideEntry>) => {
+      setLegacyEntries((prev) =>
+        prev.map((entry) =>
+          entry.id === entryId ? { ...entry, ...patch } : entry
+        )
+      )
+    },
+    []
+  )
+
+  const addLegacyEntry = useCallback(() => {
+    setLegacyEntries((prev) => [...prev, createDefaultLegacyEntry()])
+  }, [])
+
+  const removeLegacyEntry = useCallback((entryId: string) => {
+    setLegacyEntries((prev) => {
+      if (prev.length <= 1) return [createDefaultLegacyEntry()]
+      return prev.filter((entry) => entry.id !== entryId)
+    })
+  }, [])
 
   // return_error draft
   const updateReturnErrorDraft = useCallback(
@@ -1523,18 +2272,53 @@ export function ParamOverrideEditorDialog(
   // ---------------------------------------------------------------------------
 
   const buildVisualJson = useCallback((): string => {
+    const legacyPayload = buildLegacyOverridePayload(legacyEntries, t)
     if (visualMode === 'legacy') {
-      const trimmed = legacyValue.trim()
-      if (!trimmed) return ''
-      if (!verifyJSON(trimmed))
-        throw new Error(t('Parameter override must be valid JSON format'))
-      const parsed = JSON.parse(trimmed) as unknown
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-        throw new Error(t('Legacy format must be a JSON object'))
-      return JSON.stringify(parsed, null, 2)
+      if (legacyPayload.count === 0) return ''
+      return JSON.stringify(legacyPayload.value, null, 2)
     }
-    return buildOperationsJson(operations, { validate: true }, t)
-  }, [legacyValue, operations, t, visualMode])
+    const operationsJson = buildOperationsJson(
+      operations,
+      { validate: true },
+      t
+    )
+    if (!operationsJson) {
+      return legacyPayload.count > 0
+        ? JSON.stringify(legacyPayload.value, null, 2)
+        : ''
+    }
+    const operationsPayload = JSON.parse(operationsJson) as Record<
+      string,
+      unknown
+    >
+    return JSON.stringify(
+      { ...legacyPayload.value, ...operationsPayload },
+      null,
+      2
+    )
+  }, [legacyEntries, operations, t, visualMode])
+
+  const buildVisualJsonPreview = useCallback((): string => {
+    if (visualMode === 'legacy') {
+      return JSON.stringify(buildLegacyPreviewPayload(legacyEntries), null, 2)
+    }
+    const legacyPayload = buildLegacyPreviewPayload(legacyEntries)
+    const operationsJson = buildOperationsJson(
+      operations,
+      { validate: false },
+      t
+    )
+    if (!operationsJson) {
+      return Object.keys(legacyPayload).length > 0
+        ? JSON.stringify(legacyPayload, null, 2)
+        : ''
+    }
+    const operationsPayload = JSON.parse(operationsJson) as Record<
+      string,
+      unknown
+    >
+    return JSON.stringify({ ...legacyPayload, ...operationsPayload }, null, 2)
+  }, [legacyEntries, operations, t, visualMode])
 
   const switchToJsonMode = useCallback(() => {
     if (editMode === 'json') return
@@ -1543,17 +2327,13 @@ export function ParamOverrideEditorDialog(
       setJsonError('')
     } catch (error) {
       toast.error((error as Error).message)
-      if (visualMode === 'legacy') {
-        setJsonText(legacyValue)
-      } else {
-        setJsonText(buildOperationsJson(operations, { validate: false }, t))
-      }
+      setJsonText(buildVisualJsonPreview())
       setJsonError(
         (error as Error).message || t('Parameter configuration error')
       )
     }
     setEditMode('json')
-  }, [buildVisualJson, editMode, legacyValue, operations, t, visualMode])
+  }, [buildVisualJson, buildVisualJsonPreview, editMode, t])
 
   const switchToVisualMode = useCallback(() => {
     if (editMode === 'visual') return
@@ -1563,7 +2343,7 @@ export function ParamOverrideEditorDialog(
       setVisualMode('operations')
       setOperations([fallback])
       setSelectedOperationId(fallback.id)
-      setLegacyValue('')
+      setLegacyEntries([createDefaultLegacyEntry()])
       setJsonError('')
       setEditMode('visual')
       return
@@ -1588,58 +2368,70 @@ export function ParamOverrideEditorDialog(
       setVisualMode('operations')
       setOperations(nextOps)
       setSelectedOperationId(nextOps[0]?.id || '')
-      setLegacyValue('')
+      setLegacyEntries(
+        getLegacyEntriesFromObject(parsed as Record<string, unknown>, {
+          excludeOperations: true,
+        })
+      )
       setJsonError('')
       setEditMode('visual')
-      setTemplatePresetKey('operations_default')
+      setTemplatePresetKey('codex_cli_headers_passthrough')
       return
     }
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const fallback = createDefaultOperation()
       setVisualMode('legacy')
-      setLegacyValue(JSON.stringify(parsed, null, 2))
+      const entries = Object.entries(parsed as Record<string, unknown>).map(
+        ([key, value]) => normalizeLegacyEntry(key, value)
+      )
+      setLegacyEntries(
+        entries.length > 0 ? entries : [createDefaultLegacyEntry()]
+      )
       setOperations([fallback])
       setSelectedOperationId(fallback.id)
       setJsonError('')
       setEditMode('visual')
-      setTemplatePresetKey('legacy_default')
+      setTemplatePresetKey('codex_cli_headers_passthrough')
       return
     }
     toast.error(t('Parameter override must be a valid JSON object'))
   }, [editMode, jsonText, t])
 
-  const fillTemplate = useCallback(
-    (mode: 'fill' | 'append') => {
+  const applyTemplate = useCallback(
+    (action: 'replace' | 'add') => {
       const preset =
         TEMPLATE_PRESET_CONFIG[templatePresetKey] ||
-        TEMPLATE_PRESET_CONFIG.operations_default
+        TEMPLATE_PRESET_CONFIG.codex_cli_headers_passthrough
       const payload = preset.payload as Record<string, unknown>
 
       if (preset.kind === 'legacy') {
-        if (mode === 'append' && visualMode === 'legacy') {
-          const trimmed = legacyValue.trim()
-          let parsedCurrent: Record<string, unknown> = {}
-          if (trimmed) {
-            if (!verifyJSON(trimmed)) {
-              toast.error(t('Current legacy JSON is invalid, cannot append'))
-              return
-            }
-            parsedCurrent = JSON.parse(trimmed) as Record<string, unknown>
+        if (action === 'add') {
+          const current: Record<string, unknown> = {}
+          for (const entry of legacyEntries) {
+            const key = entry.key.trim()
+            if (!key) continue
+            current[key] = parseStructuredValueText(entry.value_text)
           }
-          const merged = { ...(payload || {}), ...parsedCurrent }
-          const text = JSON.stringify(merged, null, 2)
-          setVisualMode('legacy')
-          setLegacyValue(text)
-          setOperations([createDefaultOperation()])
-          setJsonText(text)
+          const merged = { ...(payload || {}), ...current }
+          const entries = Object.entries(merged).map(([key, value]) =>
+            normalizeLegacyEntry(key, value)
+          )
+          setLegacyEntries(
+            entries.length > 0 ? entries : [createDefaultLegacyEntry()]
+          )
+          setJsonText(JSON.stringify(merged, null, 2))
           setJsonError('')
           setEditMode('visual')
         } else {
-          const text = JSON.stringify(payload, null, 2)
+          const entries = Object.entries(payload || {}).map(([key, value]) =>
+            normalizeLegacyEntry(key, value)
+          )
           setVisualMode('legacy')
-          setLegacyValue(text)
+          setLegacyEntries(
+            entries.length > 0 ? entries : [createDefaultLegacyEntry()]
+          )
           setOperations([createDefaultOperation()])
-          setJsonText(text)
+          setJsonText(JSON.stringify(payload, null, 2))
           setJsonError('')
           setEditMode('visual')
         }
@@ -1649,17 +2441,25 @@ export function ParamOverrideEditorDialog(
       const operationsPayload = ((payload as Record<string, unknown>)
         .operations || []) as Record<string, unknown>[]
 
-      if (mode === 'append') {
+      if (action === 'add') {
         const appended = operationsPayload.map(normalizeOperation)
         const existing =
           visualMode === 'operations'
             ? operations.filter((o) => !isOperationBlank(o))
             : []
-        const nextOps = [...existing, ...appended]
+        const existingKeys = new Set(existing.map(getOperationDedupKey))
+        const uniqueAppended = appended.filter((operation) => {
+          const key = getOperationDedupKey(operation)
+          if (existingKeys.has(key)) return false
+          existingKeys.add(key)
+          return true
+        })
+        const nextOps = [...existing, ...uniqueAppended]
         setVisualMode('operations')
         setOperations(nextOps.length > 0 ? nextOps : appended)
-        setSelectedOperationId(nextOps[0]?.id || appended[0]?.id || '')
-        setLegacyValue('')
+        setSelectedOperationId(
+          uniqueAppended[0]?.id || nextOps[0]?.id || appended[0]?.id || ''
+        )
         setJsonError('')
         setEditMode('visual')
         setJsonText('')
@@ -1671,22 +2471,23 @@ export function ParamOverrideEditorDialog(
         setOperations(finalOps)
         setSelectedOperationId(finalOps[0]?.id || '')
         setJsonText(JSON.stringify({ operations: operationsPayload }, null, 2))
+        setLegacyEntries([createDefaultLegacyEntry()])
         setJsonError('')
         setEditMode('visual')
       }
     },
-    [legacyValue, operations, templatePresetKey, visualMode, t]
+    [legacyEntries, operations, templatePresetKey, visualMode]
   )
 
   const resetEditorState = useCallback(() => {
     const fallback = createDefaultOperation()
     setVisualMode('operations')
-    setLegacyValue('')
+    setLegacyEntries([createDefaultLegacyEntry()])
     setOperations([fallback])
     setSelectedOperationId(fallback.id)
     setJsonText('')
     setJsonError('')
-    setTemplatePresetKey('operations_default')
+    setTemplatePresetKey('codex_cli_headers_passthrough')
     setEditMode('visual')
   }, [])
 
@@ -1779,73 +2580,125 @@ export function ParamOverrideEditorDialog(
 
         {/* Toolbar */}
         <div className='bg-muted/30 border-b px-4 py-3'>
-          <div className='flex flex-wrap items-center gap-2'>
-            <span className='text-muted-foreground text-xs font-medium'>
-              {t('Mode')}
-            </span>
-            <Button
-              type='button'
-              variant={editMode === 'visual' ? 'default' : 'outline'}
-              size='sm'
-              onClick={switchToVisualMode}
-            >
-              {t('Visual')}
-            </Button>
-            <Button
-              type='button'
-              variant={editMode === 'json' ? 'default' : 'outline'}
-              size='sm'
-              onClick={switchToJsonMode}
-            >
-              {t('JSON Text')}
-            </Button>
+          <div className='flex flex-col gap-3'>
+            <div className='flex flex-wrap items-center justify-between gap-2'>
+              <div className='flex flex-wrap items-center gap-2'>
+                <span className='text-muted-foreground text-xs font-medium'>
+                  {t('Edit Mode')}
+                </span>
+                <Button
+                  type='button'
+                  variant={editMode === 'visual' ? 'default' : 'outline'}
+                  size='sm'
+                  onClick={switchToVisualMode}
+                >
+                  {t('Visual')}
+                </Button>
+                <Button
+                  type='button'
+                  variant={editMode === 'json' ? 'default' : 'outline'}
+                  size='sm'
+                  onClick={switchToJsonMode}
+                >
+                  {t('JSON Text')}
+                </Button>
+              </div>
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                onClick={resetEditorState}
+              >
+                {t('Reset')}
+              </Button>
+            </div>
 
-            <div className='bg-border mx-1 h-5 w-px' />
+            <div className='bg-background rounded-lg border p-3'>
+              <div className='flex flex-wrap items-start justify-between gap-2'>
+                <div className='min-w-0'>
+                  <p className='text-sm font-medium'>
+                    {t('Preset Rule Library')}
+                  </p>
+                  <p className='text-muted-foreground mt-1 text-xs'>
+                    {t(
+                      'Pick a scenario first. It will not change this channel until you apply it.'
+                    )}
+                  </p>
+                </div>
+                <Badge variant='secondary' className='max-w-full truncate'>
+                  {t(selectedTemplatePreset.label)}
+                </Badge>
+              </div>
 
-            <span className='text-muted-foreground text-xs font-medium'>
-              {t('Template')}
-            </span>
-            <Select
-              value={templatePresetKey}
-              onValueChange={(v) =>
-                setTemplatePresetKey(v || 'operations_default')
-              }
-            >
-              <SelectTrigger className='h-8 w-[220px]'>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {templatePresetOptions.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {t(o.label)}
-                  </SelectItem>
+              <div className='mt-3 flex flex-wrap gap-2'>
+                {quickTemplatePresets.map(({ key, config }) => (
+                  <Button
+                    key={key}
+                    type='button'
+                    variant={key === templatePresetKey ? 'default' : 'outline'}
+                    size='sm'
+                    className='h-8 max-w-full justify-start truncate text-xs'
+                    onClick={() => setTemplatePresetKey(key)}
+                  >
+                    {t(config.label)}
+                  </Button>
                 ))}
-              </SelectContent>
-            </Select>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              onClick={() => fillTemplate('fill')}
-            >
-              {t('Fill Template')}
-            </Button>
-            <Button
-              type='button'
-              variant='ghost'
-              size='sm'
-              onClick={() => fillTemplate('append')}
-            >
-              {t('Append Template')}
-            </Button>
-            <Button
-              type='button'
-              variant='ghost'
-              size='sm'
-              onClick={resetEditorState}
-            >
-              {t('Reset')}
-            </Button>
+              </div>
+
+              <div className='mt-3 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_auto_auto]'>
+                <Select
+                  value={templatePresetKey}
+                  onValueChange={(v) =>
+                    setTemplatePresetKey(v || 'codex_cli_headers_passthrough')
+                  }
+                >
+                  <SelectTrigger className='h-8 w-full'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templatePresetOptions.map((group) => (
+                      <SelectGroup key={group.value}>
+                        <SelectLabel>{t(group.label)}</SelectLabel>
+                        {group.options.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {t(o.label)}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type='button'
+                  variant='default'
+                  size='sm'
+                  className='whitespace-nowrap'
+                  onClick={() => applyTemplate('replace')}
+                >
+                  {t('Replace Current Rules')}
+                </Button>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  className='whitespace-nowrap'
+                  onClick={() => applyTemplate('add')}
+                >
+                  <Plus className='mr-1 h-3.5 w-3.5' />
+                  {t('Append to Existing Rules')}
+                </Button>
+              </div>
+              {selectedTemplatePreset.description ? (
+                <p className='text-muted-foreground mt-2 text-xs'>
+                  {t(selectedTemplatePreset.description)}
+                </p>
+              ) : null}
+              <p className='text-muted-foreground mt-2 text-xs'>
+                {t(
+                  'Replace Current Rules removes existing rules first. Append keeps existing rules and adds the selected preset after them.'
+                )}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -1854,21 +2707,12 @@ export function ParamOverrideEditorDialog(
           {editMode === 'visual' ? (
             visualMode === 'legacy' ? (
               <div className='p-4'>
-                <p className='text-muted-foreground mb-2 text-sm'>
-                  {t('Legacy Format (JSON Object)')}
-                </p>
-                <Textarea
-                  value={legacyValue}
-                  onChange={(e) => setLegacyValue(e.target.value)}
-                  placeholder={JSON.stringify(LEGACY_TEMPLATE, null, 2)}
-                  rows={14}
-                  className='font-mono text-xs'
+                <LegacyOverrideEditor
+                  entries={legacyEntries}
+                  updateEntry={updateLegacyEntry}
+                  addEntry={addLegacyEntry}
+                  removeEntry={removeLegacyEntry}
                 />
-                <p className='text-muted-foreground mt-2 text-xs'>
-                  {t(
-                    'Edit JSON object directly. Suitable for simple parameter overrides.'
-                  )}
-                </p>
               </div>
             ) : (
               <div className='flex h-full'>
@@ -2030,6 +2874,36 @@ export function ParamOverrideEditorDialog(
 
                 {/* Right panel - Rule editor */}
                 <div className='flex min-w-0 flex-1 flex-col overflow-y-auto'>
+                  <div className='border-b p-3'>
+                    <Collapsible>
+                      <CollapsibleTrigger className='hover:bg-muted/50 flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left'>
+                        <div className='flex items-center gap-2'>
+                          <FileSliders className='text-muted-foreground h-3.5 w-3.5' />
+                          <span className='text-xs font-medium'>
+                            {t('Top-level Field Overrides')}
+                          </span>
+                          <Badge variant='secondary' className='text-[10px]'>
+                            {
+                              legacyEntries.filter(
+                                (entry) =>
+                                  entry.key.trim() || entry.value_text.trim()
+                              ).length
+                            }
+                          </Badge>
+                        </div>
+                        <ChevronDown className='text-muted-foreground h-3.5 w-3.5' />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className='pt-2'>
+                        <LegacyOverrideEditor
+                          compact
+                          entries={legacyEntries}
+                          updateEntry={updateLegacyEntry}
+                          addEntry={addLegacyEntry}
+                          removeEntry={removeLegacyEntry}
+                        />
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </div>
                   {selectedOperation ? (
                     <RuleEditor
                       operation={selectedOperation}
@@ -2127,6 +3001,106 @@ export function ParamOverrideEditorDialog(
 // ---------------------------------------------------------------------------
 // RuleEditor sub-component
 // ---------------------------------------------------------------------------
+
+type LegacyOverrideEditorProps = {
+  entries: LegacyOverrideEntry[]
+  updateEntry: (entryId: string, patch: Partial<LegacyOverrideEntry>) => void
+  addEntry: () => void
+  removeEntry: (entryId: string) => void
+  compact?: boolean
+}
+
+function LegacyOverrideEditor(props: LegacyOverrideEditorProps) {
+  const { t } = useTranslation()
+
+  return (
+    <div
+      className={cn('rounded-lg border p-3', props.compact && 'border-dashed')}
+    >
+      <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+        <div>
+          <p className='text-sm font-medium'>
+            {props.compact
+              ? t('Top-level Field Overrides')
+              : t('Legacy Field Overrides')}
+          </p>
+          <p className='text-muted-foreground mt-1 text-xs'>
+            {t(
+              props.compact
+                ? 'These fields are saved next to operations in the same param_override object.'
+                : 'Set top-level request fields with typed values. This matches the legacy JSON object format.'
+            )}
+          </p>
+        </div>
+        <Button
+          type='button'
+          variant='outline'
+          size='sm'
+          className='h-8 text-xs'
+          onClick={props.addEntry}
+        >
+          <Plus className='mr-1 h-3 w-3' />
+          {t('Add Field')}
+        </Button>
+      </div>
+
+      <div className='space-y-3'>
+        {props.entries.map((entry, index) => (
+          <div key={entry.id} className='rounded-md border p-3'>
+            <div className='mb-2 flex items-center justify-between gap-2'>
+              <Badge variant='outline' className='text-[10px]'>
+                #{index + 1}
+              </Badge>
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                className='text-destructive hover:text-destructive h-7 text-xs'
+                onClick={() => props.removeEntry(entry.id)}
+              >
+                <Trash2 className='mr-1 h-3 w-3' />
+                {t('Delete')}
+              </Button>
+            </div>
+            <div
+              className={cn(
+                'grid gap-3',
+                props.compact ? 'grid-cols-1' : 'sm:grid-cols-[220px_1fr]'
+              )}
+            >
+              <div className='space-y-1.5'>
+                <label className='text-xs font-medium'>{t('Field Name')}</label>
+                <Input
+                  value={entry.key}
+                  onChange={(event) =>
+                    props.updateEntry(entry.id, { key: event.target.value })
+                  }
+                  placeholder='temperature'
+                  className='h-8 text-xs'
+                />
+              </div>
+              <div className='space-y-1.5'>
+                <label className='text-xs font-medium'>
+                  {t('Field Value')}
+                </label>
+                <StructuredValueNodeEditor
+                  node={parseStructuredValueNodeForDisplay(entry.value_text)}
+                  sourceKey={entry.value_text}
+                  placeholder='0.7'
+                  onChange={(node) =>
+                    props.updateEntry(entry.id, {
+                      value_text: buildStructuredValueText(node),
+                    })
+                  }
+                />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 type RuleEditorProps = {
   operation: ParamOverrideOperation
@@ -2311,45 +3285,26 @@ function RuleEditor(ruleEditorProps: RuleEditorProps) {
               updateRule={ruleEditorProps.updatePruneRule}
               removeRule={ruleEditorProps.removePruneRule}
             />
+          ) : mode === 'pass_headers' ? (
+            <PassHeadersEditor
+              operationId={operation.id}
+              valueText={operation.value_text}
+              updateOperation={ruleEditorProps.updateOperation}
+            />
+          ) : mode === 'set_header' ? (
+            <HeaderValueEditor
+              operationId={operation.id}
+              valueText={operation.value_text}
+              updateOperation={ruleEditorProps.updateOperation}
+            />
           ) : (
-            <div className='space-y-1.5'>
-              <div className='flex items-center justify-between'>
-                <label className='text-xs font-medium'>
-                  {t(getModeValueLabel(mode))}
-                </label>
-                {operation.value_text.trim().startsWith('{') && (
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='sm'
-                    className='text-muted-foreground h-auto px-1.5 py-0.5 text-xs'
-                    onClick={() => {
-                      try {
-                        const parsed = JSON.parse(operation.value_text)
-                        ruleEditorProps.updateOperation(operation.id, {
-                          value_text: JSON.stringify(parsed, null, 2),
-                        })
-                      } catch (_e) {
-                        /* not valid JSON */
-                      }
-                    }}
-                  >
-                    {t('Format')}
-                  </Button>
-                )}
-              </div>
-              <Textarea
-                value={operation.value_text}
-                onChange={(e) =>
-                  ruleEditorProps.updateOperation(operation.id, {
-                    value_text: e.target.value,
-                  })
-                }
-                placeholder={getModeValuePlaceholder(mode)}
-                rows={3}
-                className='max-h-[200px] resize-y overflow-y-auto font-mono text-xs'
-              />
-            </div>
+            <StructuredValueEditor
+              operationId={operation.id}
+              label={getModeValueLabel(mode)}
+              valueText={operation.value_text}
+              placeholder={getModeValuePlaceholder(mode)}
+              updateOperation={ruleEditorProps.updateOperation}
+            />
           ))}
 
         {/* keep_origin */}
@@ -2574,7 +3529,7 @@ function ConditionEditor(conditionEditorProps: ConditionEditorProps) {
                 {t('Delete Condition')}
               </Button>
             </div>
-            <div className='grid gap-2 sm:grid-cols-3'>
+            <div className='grid gap-2 sm:grid-cols-[1fr_150px_1.4fr]'>
               <div className='space-y-1'>
                 <label className='text-[10px] font-medium'>
                   {t('Field Path')}
@@ -2622,17 +3577,17 @@ function ConditionEditor(conditionEditorProps: ConditionEditorProps) {
                 <label className='text-[10px] font-medium'>
                   {t('Match Value')}
                 </label>
-                <Input
-                  value={condition.value_text}
-                  onChange={(e) =>
+                <StructuredValueNodeEditor
+                  node={parseStructuredValueNodeForDisplay(condition.value_text)}
+                  sourceKey={condition.value_text}
+                  placeholder='gpt'
+                  onChange={(node) =>
                     conditionEditorProps.updateCondition(
                       conditionEditorProps.operationId,
                       condition.id,
-                      { value_text: e.target.value }
+                      { value_text: buildStructuredValueText(node) }
                     )
                   }
-                  placeholder='gpt'
-                  className='h-8 text-xs'
                 />
               </div>
             </div>
@@ -2722,7 +3677,7 @@ function ReturnErrorEditor(returnErrorEditorProps: ReturnErrorEditorProps) {
               )
             }
           >
-            {t('Advanced')}
+            {t('Condition Mode')}
           </Button>
         </div>
       </div>
@@ -2907,11 +3862,28 @@ type PruneObjectsEditorProps = {
 function PruneObjectsEditor(pruneObjectsEditorProps: PruneObjectsEditorProps) {
   const { t } = useTranslation()
   const draft = pruneObjectsEditorProps.draft
+  const advancedSummaryParts = getPruneAdvancedSummaryParts(draft)
+  const advancedConditionCount = draft.rules.filter((rule) =>
+    String(rule.path || '').trim()
+  ).length
 
   return (
     <div className='rounded-lg border p-3'>
-      <div className='mb-2 flex items-center justify-between'>
-        <span className='text-sm font-medium'>{t('Object Prune Rules')}</span>
+      <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
+        <div>
+          <span className='text-sm font-medium'>{t('Object Prune Rules')}</span>
+          <p className='text-muted-foreground mt-1 text-xs'>
+            {draft.simpleMode
+              ? t('Simple mode only matches the object type field.')
+              : advancedSummaryParts
+                  .map((part) =>
+                    part === 'Additional Conditions: {{count}}'
+                      ? t(part, { count: advancedConditionCount })
+                      : t(part)
+                  )
+                  .join(' / ')}
+          </p>
+        </div>
         <div className='flex items-center gap-1'>
           <span className='text-muted-foreground text-xs'>{t('Mode')}</span>
           <Button
@@ -2945,28 +3917,46 @@ function PruneObjectsEditor(pruneObjectsEditorProps: PruneObjectsEditorProps) {
         </div>
       </div>
 
-      <div className='space-y-1.5'>
-        <label className='text-xs font-medium'>{t('Type (common)')}</label>
-        <Input
-          value={draft.typeText}
-          onChange={(e) =>
-            pruneObjectsEditorProps.updateDraft(
-              pruneObjectsEditorProps.operationId,
-              { typeText: e.target.value }
-            )
-          }
-          placeholder='redacted_thinking'
-          className='h-8 text-xs'
-        />
-      </div>
-
       {draft.simpleMode ? (
-        <p className='text-muted-foreground mt-2 text-xs'>
-          {t('Simple mode: prune objects by type, e.g. redacted_thinking.')}
-        </p>
+        <div className='space-y-1.5'>
+          <label className='text-xs font-medium'>{t('Type (common)')}</label>
+          <Input
+            value={draft.typeText}
+            onChange={(e) =>
+              pruneObjectsEditorProps.updateDraft(
+                pruneObjectsEditorProps.operationId,
+                { typeText: e.target.value }
+              )
+            }
+            placeholder='redacted_thinking'
+            className='h-8 text-xs'
+          />
+        </div>
       ) : (
-        <>
-          <div className='mt-3 grid gap-3 sm:grid-cols-2'>
+        <div className='space-y-3'>
+          <div className='bg-muted/40 rounded-md border px-3 py-2 text-xs'>
+            {t(
+              'Condition mode is active. Configure recursion, match logic, and extra object field conditions below.'
+            )}
+          </div>
+
+          <div className='grid gap-3 sm:grid-cols-2'>
+            <div className='space-y-1'>
+              <label className='text-xs font-medium'>
+                {t('Type (common)')}
+              </label>
+              <Input
+                value={draft.typeText}
+                onChange={(e) =>
+                  pruneObjectsEditorProps.updateDraft(
+                    pruneObjectsEditorProps.operationId,
+                    { simpleMode: false, typeText: e.target.value }
+                  )
+                }
+                placeholder='redacted_thinking'
+                className='h-8 text-xs'
+              />
+            </div>
             <div className='space-y-1'>
               <label className='text-xs font-medium'>{t('Logic')}</label>
               <Select
@@ -2974,7 +3964,7 @@ function PruneObjectsEditor(pruneObjectsEditorProps: PruneObjectsEditorProps) {
                 onValueChange={(v) =>
                   pruneObjectsEditorProps.updateDraft(
                     pruneObjectsEditorProps.operationId,
-                    { logic: v || 'AND' }
+                    { simpleMode: false, logic: v || 'AND' }
                   )
                 }
               >
@@ -2989,44 +3979,45 @@ function PruneObjectsEditor(pruneObjectsEditorProps: PruneObjectsEditorProps) {
                 </SelectContent>
               </Select>
             </div>
-            <div className='space-y-1'>
-              <label className='text-xs font-medium'>
-                {t('Recursion Strategy')}
-              </label>
-              <div className='flex gap-1'>
-                <Button
-                  type='button'
-                  variant={draft.recursive ? 'default' : 'outline'}
-                  size='sm'
-                  className='h-8 text-xs'
-                  onClick={() =>
-                    pruneObjectsEditorProps.updateDraft(
-                      pruneObjectsEditorProps.operationId,
-                      { recursive: true }
-                    )
-                  }
-                >
-                  {t('Recursive')}
-                </Button>
-                <Button
-                  type='button'
-                  variant={draft.recursive ? 'outline' : 'default'}
-                  size='sm'
-                  className='h-8 text-xs'
-                  onClick={() =>
-                    pruneObjectsEditorProps.updateDraft(
-                      pruneObjectsEditorProps.operationId,
-                      { recursive: false }
-                    )
-                  }
-                >
-                  {t('Current Level Only')}
-                </Button>
-              </div>
+          </div>
+
+          <div className='space-y-1'>
+            <label className='text-xs font-medium'>
+              {t('Recursion Strategy')}
+            </label>
+            <div className='flex flex-wrap gap-1'>
+              <Button
+                type='button'
+                variant={draft.recursive ? 'default' : 'outline'}
+                size='sm'
+                className='h-8 text-xs'
+                onClick={() =>
+                  pruneObjectsEditorProps.updateDraft(
+                    pruneObjectsEditorProps.operationId,
+                    { simpleMode: false, recursive: true }
+                  )
+                }
+              >
+                {t('Recursive')}
+              </Button>
+              <Button
+                type='button'
+                variant={draft.recursive ? 'outline' : 'default'}
+                size='sm'
+                className='h-8 text-xs'
+                onClick={() =>
+                  pruneObjectsEditorProps.updateDraft(
+                    pruneObjectsEditorProps.operationId,
+                    { simpleMode: false, recursive: false }
+                  )
+                }
+              >
+                {t('Current Level Only')}
+              </Button>
             </div>
           </div>
 
-          <div className='bg-muted/30 mt-3 rounded-md border p-2'>
+          <div className='bg-muted/30 rounded-md border p-2'>
             <div className='mb-2 flex items-center justify-between'>
               <span className='text-xs font-medium'>
                 {t('Additional Conditions')}
@@ -3079,7 +4070,7 @@ function PruneObjectsEditor(pruneObjectsEditorProps: PruneObjectsEditorProps) {
                         {t('Delete')}
                       </Button>
                     </div>
-                    <div className='grid gap-2 sm:grid-cols-3'>
+                    <div className='grid gap-2 sm:grid-cols-[1fr_150px_1.4fr]'>
                       <div className='space-y-0.5'>
                         <label className='text-[10px] font-medium'>
                           {t('Field Path')}
@@ -3127,17 +4118,17 @@ function PruneObjectsEditor(pruneObjectsEditorProps: PruneObjectsEditorProps) {
                         <label className='text-[10px] font-medium'>
                           {t('Match Value (optional)')}
                         </label>
-                        <Input
-                          value={rule.value_text}
-                          onChange={(e) =>
+                        <StructuredValueNodeEditor
+                          node={parseStructuredValueNodeForDisplay(rule.value_text)}
+                          sourceKey={rule.value_text}
+                          placeholder='redacted_thinking'
+                          onChange={(node) =>
                             pruneObjectsEditorProps.updateRule(
                               pruneObjectsEditorProps.operationId,
                               rule.id,
-                              { value_text: e.target.value }
+                              { value_text: buildStructuredValueText(node) }
                             )
                           }
-                          placeholder='redacted_thinking'
-                          className='h-7 text-xs'
                         />
                       </div>
                     </div>
@@ -3174,7 +4165,775 @@ function PruneObjectsEditor(pruneObjectsEditorProps: PruneObjectsEditorProps) {
               </div>
             )}
           </div>
-        </>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// PassHeadersEditor
+// ---------------------------------------------------------------------------
+
+type PassHeadersEditorProps = {
+  operationId: string
+  valueText: string
+  updateOperation: (
+    operationId: string,
+    patch: Partial<ParamOverrideOperation>
+  ) => void
+}
+
+function PassHeadersEditor(passHeadersEditorProps: PassHeadersEditorProps) {
+  const { t } = useTranslation()
+  const draft = useMemo(
+    () => parsePassHeadersDraft(passHeadersEditorProps.valueText),
+    [passHeadersEditorProps.valueText]
+  )
+  const headers = draft.headers
+  const headerRows = useMemo<PassHeaderRow[]>(
+    () =>
+      headers.map((header, index) => ({
+        id: `pass-header-${index}`,
+        value: header,
+      })),
+    [headers]
+  )
+
+  const commitDraft = useCallback(
+    (nextDraft: PassHeadersDraft) => {
+      passHeadersEditorProps.updateOperation(
+        passHeadersEditorProps.operationId,
+        {
+          value_text: buildPassHeadersValueText(nextDraft),
+        }
+      )
+    },
+    [passHeadersEditorProps]
+  )
+
+  const commitHeaders = useCallback(
+    (nextHeaders: string[]) => {
+      commitDraft({ ...draft, headers: nextHeaders })
+    },
+    [commitDraft, draft]
+  )
+
+  return (
+    <div className='rounded-lg border p-3'>
+      <div className='mb-2 flex items-center justify-between gap-2'>
+        <div>
+          <span className='text-sm font-medium'>
+            {t('Pass-through Headers')}
+          </span>
+          <p className='text-muted-foreground mt-1 text-xs'>
+            {t(
+              'Only headers that exist on the original client request are forwarded.'
+            )}
+          </p>
+        </div>
+        <Button
+          type='button'
+          variant='outline'
+          size='sm'
+          className='h-7 text-xs'
+          disabled={draft.sourceKey === 'header' && headers.length > 0}
+          onClick={() =>
+            commitHeaders(
+              draft.sourceKey === 'header' && headers.length > 0
+                ? headers
+                : Array.from(new Set([...headers, 'X-Header-Name']))
+            )
+          }
+        >
+          <Plus className='mr-1 h-3 w-3' />
+          {t('Add Header')}
+        </Button>
+      </div>
+      <div className='mb-2 grid gap-2 sm:grid-cols-[180px_1fr]'>
+        <div className='space-y-1'>
+          <label className='text-xs font-medium'>{t('Value Shape')}</label>
+          <Select
+            value={draft.sourceKey}
+            onValueChange={(value) =>
+              commitDraft({
+                ...draft,
+                sourceKey: value as PassHeadersDraft['sourceKey'],
+                headers:
+                  value === 'header'
+                    ? draft.headers.slice(0, 1)
+                    : draft.headers,
+              })
+            }
+          >
+            <SelectTrigger className='h-8 text-xs'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='headers'>{t('Array')}</SelectItem>
+              <SelectItem value='names'>{t('Object Names')}</SelectItem>
+              <SelectItem value='header'>{t('Single Header')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <p className='text-muted-foreground self-end pb-1 text-xs'>
+          {t(
+            'Choose the saved value shape for compatibility with existing configurations.'
+          )}
+        </p>
+      </div>
+      {headerRows.length === 0 ? (
+        <div className='text-muted-foreground rounded-md border border-dashed px-3 py-4 text-center text-xs'>
+          {t('No pass-through headers configured.')}
+        </div>
+      ) : (
+        <div className='space-y-2'>
+          {headerRows.map((headerRow, index) => (
+            <div key={headerRow.id} className='grid grid-cols-[1fr_auto] gap-2'>
+              <Input
+                value={headerRow.value}
+                onChange={(event) => {
+                  const nextHeaders = [...headers]
+                  nextHeaders[index] = event.target.value
+                  commitHeaders(nextHeaders)
+                }}
+                placeholder='X-Client-Request-Id'
+                className='h-8 text-xs'
+              />
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                className='text-destructive hover:text-destructive h-8 px-2'
+                onClick={() =>
+                  commitHeaders(
+                    headers.filter((_, itemIndex) => itemIndex !== index)
+                  )
+                }
+              >
+                <Trash2 className='h-3.5 w-3.5' />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className='mt-2 flex flex-wrap gap-1'>
+        {[
+          'User-Agent',
+          'Session_id',
+          'X-Client-Request-Id',
+          'X-Codex-Turn-Metadata',
+          'Anthropic-Beta',
+          'X-Stainless-Runtime',
+        ].map((header) => (
+          <Button
+            key={header}
+            type='button'
+            variant='outline'
+            size='sm'
+            className='h-6 text-[10px]'
+            onClick={() =>
+              commitHeaders(
+                draft.sourceKey === 'header'
+                  ? [header]
+                  : Array.from(new Set([...headers, header]))
+              )
+            }
+          >
+            {header}
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// HeaderValueEditor
+// ---------------------------------------------------------------------------
+
+type HeaderValueEditorProps = {
+  operationId: string
+  valueText: string
+  updateOperation: (
+    operationId: string,
+    patch: Partial<ParamOverrideOperation>
+  ) => void
+}
+
+function HeaderValueEditor(headerValueEditorProps: HeaderValueEditorProps) {
+  const { t } = useTranslation()
+  const draft = useMemo(
+    () => parseHeaderValueDraft(headerValueEditorProps.valueText),
+    [headerValueEditorProps.valueText]
+  )
+
+  const updateDraft = useCallback(
+    (patch: Partial<HeaderValueDraft>) => {
+      const nextDraft = { ...draft, ...patch }
+      headerValueEditorProps.updateOperation(
+        headerValueEditorProps.operationId,
+        {
+          value_text: buildHeaderValueText(nextDraft),
+        }
+      )
+    },
+    [draft, headerValueEditorProps]
+  )
+
+  const updateRow = useCallback(
+    (rowId: string, patch: Partial<HeaderValueMappingRow>) => {
+      updateDraft({
+        rows: draft.rows.map((row) =>
+          row.id === rowId ? { ...row, ...patch } : row
+        ),
+      })
+    },
+    [draft.rows, updateDraft]
+  )
+
+  return (
+    <div className='rounded-lg border p-3'>
+      <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
+        <div>
+          <span className='text-sm font-medium'>{t('Header Value')}</span>
+          <p className='text-muted-foreground mt-1 text-xs'>
+            {t(
+              'Use direct mode for a whole value, or mapping mode for comma-separated header tokens.'
+            )}
+          </p>
+        </div>
+        <Select
+          value={draft.mode}
+          onValueChange={(value) =>
+            updateDraft({ mode: value as HeaderValueDraft['mode'] })
+          }
+        >
+          <SelectTrigger className='h-8 w-[180px] text-xs'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {HEADER_VALUE_MODE_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {t(option.label)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {draft.mode === 'direct' ? (
+        <Input
+          value={draft.directText}
+          onChange={(event) => updateDraft({ directText: event.target.value })}
+          placeholder='Bearer sk-xxx'
+          className='h-8 text-xs'
+        />
+      ) : (
+        <div className='space-y-3'>
+          <label className='flex items-center gap-2 text-xs'>
+            <Switch
+              checked={draft.keepOnlyDeclared}
+              onCheckedChange={(checked) =>
+                updateDraft({ keepOnlyDeclared: checked })
+              }
+            />
+            {t('Keep only declared tokens')}
+          </label>
+          <div className='space-y-1'>
+            <label className='text-xs font-medium'>{t('Append Tokens')}</label>
+            <Input
+              value={draft.appendText}
+              onChange={(event) =>
+                updateDraft({ appendText: event.target.value })
+              }
+              placeholder='context-1m-2025-08-07, interleaved-thinking-2025-05-14'
+              className='h-8 text-xs'
+            />
+          </div>
+          <div className='grid gap-2 sm:grid-cols-[180px_1fr]'>
+            <div className='space-y-1'>
+              <label className='text-xs font-medium'>
+                {t('Wildcard Rule')}
+              </label>
+              <Select
+                value={draft.wildcardAction}
+                onValueChange={(value) =>
+                  updateDraft({ wildcardAction: value })
+                }
+              >
+                <SelectTrigger className='h-8 text-xs'>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value='none'>{t('No wildcard rule')}</SelectItem>
+                  <SelectItem value='replace'>
+                    {t('Replace undeclared tokens')}
+                  </SelectItem>
+                  <SelectItem value='delete'>
+                    {t('Delete undeclared tokens')}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className='space-y-1'>
+              <label className='text-xs font-medium'>
+                {t('Wildcard Replacement')}
+              </label>
+              <Input
+                value={draft.wildcardReplacement}
+                disabled={draft.wildcardAction !== 'replace'}
+                onChange={(event) =>
+                  updateDraft({ wildcardReplacement: event.target.value })
+                }
+                placeholder='tool-search-tool-2025-10-19'
+                className='h-8 text-xs'
+              />
+            </div>
+          </div>
+          <div className='space-y-2'>
+            <div className='flex items-center justify-between'>
+              <span className='text-xs font-medium'>{t('Token Rules')}</span>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                className='h-7 text-xs'
+                onClick={() =>
+                  updateDraft({
+                    rows: [
+                      ...draft.rows,
+                      {
+                        id: nextLocalId(),
+                        token: '',
+                        action: 'replace',
+                        replacement: '',
+                      },
+                    ],
+                  })
+                }
+              >
+                <Plus className='mr-1 h-3 w-3' />
+                {t('Add Rule')}
+              </Button>
+            </div>
+            {draft.rows.length === 0 ? (
+              <div className='text-muted-foreground rounded-md border border-dashed px-3 py-4 text-center text-xs'>
+                {t('No token rules configured.')}
+              </div>
+            ) : (
+              draft.rows.map((row) => (
+                <div
+                  key={row.id}
+                  className='grid gap-2 rounded-md border p-2 sm:grid-cols-[1fr_120px_1fr_auto]'
+                >
+                  <Input
+                    value={row.token}
+                    onChange={(event) =>
+                      updateRow(row.id, { token: event.target.value })
+                    }
+                    placeholder='advanced-tool-use-2025-11-20'
+                    className='h-8 text-xs'
+                  />
+                  <Select
+                    value={row.action}
+                    onValueChange={(value) =>
+                      updateRow(row.id, { action: value })
+                    }
+                  >
+                    <SelectTrigger className='h-8 text-xs'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {HEADER_TOKEN_ACTION_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {t(option.label)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    value={row.replacement}
+                    disabled={row.action !== 'replace'}
+                    onChange={(event) =>
+                      updateRow(row.id, { replacement: event.target.value })
+                    }
+                    placeholder='tool-search-tool-2025-10-19'
+                    className='h-8 text-xs'
+                  />
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='sm'
+                    className='text-destructive hover:text-destructive h-8 px-2'
+                    onClick={() =>
+                      updateDraft({
+                        rows: draft.rows.filter((item) => item.id !== row.id),
+                      })
+                    }
+                  >
+                    <Trash2 className='h-3.5 w-3.5' />
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// StructuredValueEditor
+// ---------------------------------------------------------------------------
+
+type StructuredValueEditorProps = {
+  operationId: string
+  label: string
+  valueText: string
+  placeholder: string
+  updateOperation: (
+    operationId: string,
+    patch: Partial<ParamOverrideOperation>
+  ) => void
+}
+
+function StructuredValueEditor({
+  operationId,
+  label,
+  valueText,
+  placeholder,
+  updateOperation,
+}: StructuredValueEditorProps) {
+  const { t } = useTranslation()
+  const node = useMemo(
+    () => parseStructuredValueNodeForDisplay(valueText),
+    [valueText]
+  )
+
+  const commitNode = useCallback(
+    (nextNode: StructuredValueNode) => {
+      updateOperation(operationId, {
+        value_text: buildStructuredValueText(nextNode),
+      })
+    },
+    [operationId, updateOperation]
+  )
+
+  return (
+    <div className='rounded-lg border p-3'>
+      <div className='mb-2 flex items-center justify-between'>
+        <span className='text-sm font-medium'>{t(label)}</span>
+        <span className='text-muted-foreground text-[10px]'>
+          {t('Value Type')}
+        </span>
+      </div>
+      <StructuredValueNodeEditor
+        node={node}
+        sourceKey={valueText}
+        placeholder={placeholder}
+        onChange={commitNode}
+      />
+    </div>
+  )
+}
+
+type StructuredValueNodeEditorProps = {
+  node: StructuredValueNode
+  sourceKey?: string
+  placeholder?: string
+  depth?: number
+  onChange: (node: StructuredValueNode) => void
+}
+
+function StructuredValueNodeEditor({
+  node: propNode,
+  sourceKey,
+  placeholder,
+  depth = 0,
+  onChange,
+}: StructuredValueNodeEditorProps) {
+  const { t } = useTranslation()
+  const source = sourceKey ?? propNode
+  const [draftState, setDraftState] = useState<{
+    source: string | StructuredValueNode
+    draft: StructuredValueNode
+  }>(() => ({
+    source,
+    draft: propNode,
+  }))
+  const node = Object.is(draftState.source, source)
+    ? draftState.draft
+    : propNode
+  const compact = depth > 1
+  const emitNode = useCallback(
+    (nextNode: StructuredValueNode) => {
+      setDraftState({
+        source,
+        draft: nextNode,
+      })
+      if (!canSerializeStructuredValueNode(nextNode)) {
+        return
+      }
+      onChange(nextNode)
+    },
+    [onChange, source]
+  )
+  const updateNode = useCallback(
+    (patch: Partial<StructuredValueNode>) => emitNode({ ...node, ...patch }),
+    [emitNode, node]
+  )
+  const canAddChild = depth < MAX_STRUCTURED_VALUE_DEPTH
+  const numberInvalid =
+    node.kind === 'number' && !isCompleteStructuredNumberText(node.text)
+
+  return (
+    <div className='space-y-2'>
+      <Select
+        value={node.kind}
+        onValueChange={(value) => {
+          const nextNode = createStructuredValueNode(
+            value as StructuredValueNodeKind
+          )
+          emitNode({
+            ...nextNode,
+            id: node.id,
+          })
+        }}
+      >
+        <SelectTrigger className='h-8 w-[160px] text-xs'>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {STRUCTURED_VALUE_TYPE_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {t(option.label)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {node.kind === 'string' || node.kind === 'number' ? (
+        <div className='space-y-1'>
+          <Input
+            value={node.text}
+            onChange={(event) => {
+              const nextText = event.target.value
+              updateNode({ text: nextText })
+            }}
+            placeholder={
+              node.kind === 'number' ? '0.7' : placeholder || 'value'
+            }
+            aria-invalid={numberInvalid}
+            className={cn(
+              'h-8 text-xs',
+              numberInvalid ? 'border-destructive' : ''
+            )}
+          />
+          {numberInvalid ? (
+            <p className='text-destructive text-xs'>{t('Invalid number')}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {node.kind === 'boolean' ? (
+        <div className='flex gap-1'>
+          <Button
+            type='button'
+            variant={node.boolValue ? 'default' : 'outline'}
+            size='sm'
+            className='h-7 text-xs'
+            onClick={() => updateNode({ boolValue: true })}
+          >
+            true
+          </Button>
+          <Button
+            type='button'
+            variant={node.boolValue ? 'outline' : 'default'}
+            size='sm'
+            className='h-7 text-xs'
+            onClick={() => updateNode({ boolValue: false })}
+          >
+            false
+          </Button>
+        </div>
+      ) : null}
+
+      {node.kind === 'null' ? (
+        <p className='text-muted-foreground text-xs'>
+          {t('This value will be saved as null.')}
+        </p>
+      ) : null}
+
+      {node.kind === 'object' ? (
+        <div className='space-y-2 rounded-md border p-2'>
+          <div className='flex items-center justify-between'>
+            <span className='text-xs font-medium'>{t('Object Fields')}</span>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className='h-7 text-xs'
+              disabled={!canAddChild}
+              onClick={() =>
+                updateNode({
+                  objectEntries: [
+                    ...node.objectEntries,
+                    {
+                      id: nextLocalId(),
+                      key: '',
+                      value: createStructuredValueNode('string'),
+                    },
+                  ],
+                })
+              }
+            >
+              <Plus className='mr-1 h-3 w-3' />
+              {t('Add Field')}
+            </Button>
+          </div>
+          {!canAddChild ? (
+            <p className='text-muted-foreground text-xs'>
+              {t('Maximum nesting depth reached')}
+            </p>
+          ) : null}
+          {node.objectEntries.length === 0 ? (
+            <p className='text-muted-foreground text-xs'>
+              {t('No object fields configured.')}
+            </p>
+          ) : (
+            node.objectEntries.map((entry) => (
+              <div
+                key={entry.id}
+                className='grid gap-2 rounded-md border p-2 sm:grid-cols-[160px_1fr_auto]'
+              >
+                <Input
+                  value={entry.key}
+                  onChange={(event) =>
+                    updateNode({
+                      objectEntries: node.objectEntries.map((item) =>
+                        item.id === entry.id
+                          ? { ...item, key: event.target.value }
+                          : item
+                      ),
+                    })
+                  }
+                  placeholder='key'
+                  className='h-8 text-xs'
+                />
+                <StructuredValueNodeEditor
+                  node={entry.value}
+                  depth={depth + 1}
+                  onChange={(value) =>
+                    updateNode({
+                      objectEntries: node.objectEntries.map((item) =>
+                        item.id === entry.id ? { ...item, value } : item
+                      ),
+                    })
+                  }
+                />
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='sm'
+                  className='text-destructive hover:text-destructive h-8 px-2'
+                  onClick={() =>
+                    updateNode({
+                      objectEntries: node.objectEntries.filter(
+                        (item) => item.id !== entry.id
+                      ),
+                    })
+                  }
+                >
+                  <Trash2 className='h-3.5 w-3.5' />
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
+
+      {node.kind === 'array' ? (
+        <div className='space-y-2 rounded-md border p-2'>
+          <div className='flex items-center justify-between'>
+            <span className='text-xs font-medium'>{t('Array Items')}</span>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className='h-7 text-xs'
+              disabled={!canAddChild}
+              onClick={() =>
+                updateNode({
+                  arrayItems: [
+                    ...node.arrayItems,
+                    { id: nextLocalId(), value: createStructuredValueNode() },
+                  ],
+                })
+              }
+            >
+              <Plus className='mr-1 h-3 w-3' />
+              {t('Add Item')}
+            </Button>
+          </div>
+          {!canAddChild ? (
+            <p className='text-muted-foreground text-xs'>
+              {t('Maximum nesting depth reached')}
+            </p>
+          ) : null}
+          {node.arrayItems.length === 0 ? (
+            <p className='text-muted-foreground text-xs'>
+              {t('No array items configured.')}
+            </p>
+          ) : (
+            node.arrayItems.map((item, index) => (
+              <div
+                key={item.id}
+                className='grid gap-2 rounded-md border p-2 sm:grid-cols-[40px_1fr_auto]'
+              >
+                <span className='text-muted-foreground pt-2 text-xs'>
+                  #{index + 1}
+                </span>
+                <StructuredValueNodeEditor
+                  node={item.value}
+                  depth={depth + 1}
+                  onChange={(value) =>
+                    updateNode({
+                      arrayItems: node.arrayItems.map((entry) =>
+                        entry.id === item.id ? { ...entry, value } : entry
+                      ),
+                    })
+                  }
+                />
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='sm'
+                  className='text-destructive hover:text-destructive h-8 px-2'
+                  onClick={() =>
+                    updateNode({
+                      arrayItems: node.arrayItems.filter(
+                        (entry) => entry.id !== item.id
+                      ),
+                    })
+                  }
+                >
+                  <Trash2 className='h-3.5 w-3.5' />
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
+
+      {compact ? null : (
+        <p className='text-muted-foreground text-xs'>
+          {t('Preview')}:{' '}
+          {canSerializeStructuredValueNode(node)
+            ? buildStructuredValueText(node) || '-'
+            : '-'}
+        </p>
       )}
     </div>
   )

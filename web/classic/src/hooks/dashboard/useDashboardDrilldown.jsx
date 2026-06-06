@@ -24,6 +24,7 @@ import {
   getDashboardChartAreaDrilldownTarget,
   getDashboardDimensionDrilldownTarget,
   getDashboardDrilldownTarget,
+  getDashboardLegendDrilldownTarget,
 } from '../../helpers/dashboardDrilldown';
 
 export const useDashboardDrilldown = ({
@@ -43,6 +44,7 @@ export const useDashboardDrilldown = ({
       const detail = buildDashboardDrilldown({
         quotaData,
         targetTime: target.time,
+        targetTimes: target.times,
         granularity: dataExportDefaultTime,
         models: target.models,
         t,
@@ -98,11 +100,26 @@ export const useDashboardDrilldown = ({
     [openDrilldown, specLine],
   );
 
+  const handleQuotaLegendClick = useCallback(
+    (event) => {
+      const target = getDashboardLegendDrilldownTarget({
+        event,
+        chartValues: specLine?.data?.[0]?.values,
+        otherLabel: t('其他'),
+      });
+      areaClickGuardRef.current.markChartClickHandled(
+        openDrilldown(target) ? target : null,
+      );
+    },
+    [openDrilldown, specLine, t],
+  );
+
   return {
     drilldownDetail,
     closeDrilldown: () => setDrilldownDetail(null),
     handleQuotaBarClick,
     handleQuotaDimensionClick,
     handleQuotaChartAreaClick,
+    handleQuotaLegendClick,
   };
 };

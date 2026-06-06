@@ -401,6 +401,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 
 type LogFilter struct {
 	LogType           int
+	LogTypeSet        bool
 	StartTimestamp    int64
 	EndTimestamp      int64
 	ModelName         string
@@ -447,7 +448,7 @@ func applyLogFilters(tx *gorm.DB, filter LogFilter) (*gorm.DB, error) {
 	if filter.UserId > 0 {
 		tx = tx.Where("logs.user_id = ?", filter.UserId)
 	}
-	if filter.LogType != LogTypeUnknown {
+	if filter.LogType != LogTypeUnknown || filter.LogTypeSet {
 		tx = tx.Where("logs.type = ?", filter.LogType)
 	}
 	if filter.ModelNameEmpty {
@@ -795,25 +796,114 @@ func DeleteLogsByFilter(ctx context.Context, filter LogFilter) (int64, error) {
 	return result.RowsAffected, result.Error
 }
 
+func CountLogsByFilter(filter LogFilter) (int64, error) {
+	tx, err := applyLogFilters(LOG_DB.Model(&Log{}), filter)
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	err = tx.Count(&count).Error
+	return count, err
+}
+
+func CountLogsWithPayloadAuditFieldsByFilter(filter LogFilter, countRequest bool, countResponse bool) (int64, error) {
+	if !countRequest && !countResponse {
+		return 0, nil
+	}
+	tx, err := applyLogFilters(LOG_DB.Model(&Log{}), filter)
+	if err != nil {
+		return 0, err
+	}
+	tx = applyPayloadAuditFieldFilter(tx, countRequest, countResponse)
+	var count int64
+	err = tx.Count(&count).Error
+	return count, err
+}
+
+func applyPayloadAuditFieldFilter(tx *gorm.DB, countRequest bool, countResponse bool) *gorm.DB {
+	if countRequest && countResponse {
+		return tx.Where("other LIKE ? OR other LIKE ?", `%"request_content":%`, `%"response_content":%`)
+	}
+	if countRequest {
+		return tx.Where("other LIKE ?", `%"request_content":%`)
+	}
+	return tx.Where("other LIKE ?", `%"response_content":%`)
+}
+
+func DeleteLogsByFilterBatches(ctx context.Context, filter LogFilter, batchSize int, maxBatches int) (int64, error) {
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+	if maxBatches == 0 {
+		maxBatches = 1
+	}
+
+	var total int64
+	for batch := 0; maxBatches < 0 || batch < maxBatches; batch++ {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+
+		scopedDB := LOG_DB.WithContext(ctx)
+		tx, err := applyLogFilters(scopedDB.Model(&Log{}), filter)
+		if err != nil {
+			return total, err
+		}
+
+		var ids []int
+		if err := tx.Select("logs.id").Order("logs.id asc").Limit(batchSize).Pluck("logs.id", &ids).Error; err != nil {
+			return total, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+
+		result := scopedDB.Where("id IN ?", ids).Delete(&Log{})
+		if result.Error != nil {
+			return total, result.Error
+		}
+		if result.RowsAffected == 0 {
+			return total, errors.New("log deletion made no progress")
+		}
+		total += result.RowsAffected
+		if len(ids) < batchSize {
+			break
+		}
+	}
+
+	return total, nil
+}
+
+const payloadAuditClearAllBatches = -1
+
 func ClearPayloadAuditFieldsByFilter(ctx context.Context, filter LogFilter, clearRequest bool, clearResponse bool, batchSize int) (int64, error) {
+	return ClearPayloadAuditFieldsByFilterBatches(ctx, filter, clearRequest, clearResponse, batchSize, payloadAuditClearAllBatches)
+}
+
+func ClearPayloadAuditFieldsByFilterBatches(ctx context.Context, filter LogFilter, clearRequest bool, clearResponse bool, batchSize int, maxBatches int) (int64, error) {
 	if !clearRequest && !clearResponse {
 		return 0, nil
 	}
 	if batchSize <= 0 {
 		batchSize = 200
 	}
+	if maxBatches == 0 {
+		maxBatches = 1
+	}
 
 	var total int64
 	lastID := 0
-	for {
+	for batch := 0; maxBatches < 0 || batch < maxBatches; batch++ {
 		if err := ctx.Err(); err != nil {
 			return total, err
 		}
 
-		tx, err := applyLogFilters(LOG_DB.Model(&Log{}), filter)
+		scopedDB := LOG_DB.WithContext(ctx)
+		tx, err := applyLogFilters(scopedDB.Model(&Log{}), filter)
 		if err != nil {
 			return total, err
 		}
+		tx = applyPayloadAuditFieldFilter(tx, clearRequest, clearResponse)
 
 		var logs []Log
 		err = tx.Where("id > ?", lastID).Order("id asc").Limit(batchSize).Find(&logs).Error
@@ -840,7 +930,7 @@ func ClearPayloadAuditFieldsByFilter(ctx context.Context, filter LogFilter, clea
 			if !changed {
 				continue
 			}
-			if err := LOG_DB.Model(&Log{}).Where("id = ?", log.Id).Update("other", common.MapToJsonStr(otherMap)).Error; err != nil {
+			if err := scopedDB.Model(&Log{}).Where("id = ?", log.Id).Update("other", common.MapToJsonStr(otherMap)).Error; err != nil {
 				return total, err
 			}
 			total++

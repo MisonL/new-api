@@ -1,6 +1,8 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -114,6 +116,10 @@ func BuildChannelRuntimeRequestHeaders(channel *model.Channel, key string, heade
 		headers.Set(name, str)
 	}
 	return headers, nil
+}
+
+func ResolveChannelRuntimeHeaderProfileHeaders(channelID int, strategy *dto.HeaderProfileStrategy) (map[string]string, string, error) {
+	return resolveChannelRuntimeHeaderProfileHeaders(channelID, strategy)
 }
 
 func ShouldApplyChannelRuntimeRequestHeaders(channel *model.Channel) (bool, error) {
@@ -601,9 +607,10 @@ func resolveChannelRuntimeHeaderProfileHeaders(channelID int, strategy *dto.Head
 			if channelID <= 0 {
 				return nil, "", errors.New("请求头模板轮询需要有效渠道 ID")
 			}
+			scopeKey := fmt.Sprintf("channel:%d:%s", channelID, runtimeRoundRobinValuesFingerprint(selectedProfileIDs))
 			selectedProfileID, err := nextRoundRobinRuntimeValue(
 				runtimeHeaderProfileScopeType,
-				fmt.Sprintf("channel:%d", channelID),
+				scopeKey,
 				selectedProfileIDs,
 			)
 			if err != nil {
@@ -636,6 +643,16 @@ func normalizeRuntimeHeaderProfileIDs(profileIDs []string) []string {
 		result = append(result, trimmedID)
 	}
 	return result
+}
+
+func runtimeRoundRobinValuesFingerprint(values []string) string {
+	hash := sha256.New()
+	for _, value := range values {
+		hash.Write([]byte(strings.TrimSpace(value)))
+		hash.Write([]byte{0})
+	}
+	sum := hash.Sum(nil)
+	return hex.EncodeToString(sum[:16])
 }
 
 func sleepRuntimeRoundRobinRetry(attempt int) {

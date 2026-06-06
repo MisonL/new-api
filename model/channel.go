@@ -2,7 +2,6 @@ package model
 
 import (
 	"database/sql/driver"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -197,7 +196,7 @@ func (channel *Channel) GetKeys() []string {
 	trimmed := strings.TrimSpace(channel.Key)
 	// If the key starts with '[', try to parse it as a JSON array (e.g., for Vertex AI scenarios)
 	if strings.HasPrefix(trimmed, "[") {
-		var arr []json.RawMessage
+		var arr []common.RawMessage
 		if err := common.Unmarshal([]byte(trimmed), &arr); err == nil {
 			res := make([]string, len(arr))
 			for i, v := range arr {
@@ -332,7 +331,7 @@ func (channel *Channel) GetOtherInfo() map[string]interface{} {
 }
 
 func (channel *Channel) SetOtherInfo(otherInfo map[string]interface{}) {
-	otherInfoBytes, err := json.Marshal(otherInfo)
+	otherInfoBytes, err := common.Marshal(otherInfo)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to marshal other info: channel_id=%d, tag=%s, name=%s, error=%v", channel.Id, channel.GetTag(), channel.Name, err))
 		return
@@ -410,10 +409,9 @@ func ApplyChannelSearchFilters(query *gorm.DB, keyword string, group string, mod
 	if keyword != "" {
 		keywordLikePattern := "%" + escapeChannelLikeLiteral(keyword) + "%"
 		query = query.Where(
-			"(id = ? OR name LIKE ? ESCAPE '!' OR "+commonKeyCol+" = ? OR "+baseURLCol+" LIKE ? ESCAPE '!')",
+			"(id = ? OR name LIKE ? ESCAPE '!' OR "+baseURLCol+" LIKE ? ESCAPE '!')",
 			common.String2Int(keyword),
 			keywordLikePattern,
-			keyword,
 			keywordLikePattern,
 		)
 	}
@@ -606,7 +604,7 @@ func (channel *Channel) Update() error {
 		if keyStr != "" {
 			trimmed := strings.TrimSpace(keyStr)
 			if strings.HasPrefix(trimmed, "[") {
-				var arr []json.RawMessage
+				var arr []common.RawMessage
 				if err := common.Unmarshal([]byte(trimmed), &arr); err == nil {
 					keys = make([]string, len(arr))
 					for i, v := range arr {
@@ -782,18 +780,19 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 		channelStatusLock.Lock()
 		defer channelStatusLock.Unlock()
 	}
+
 	shouldUpdateAbilities := false
 	channel, err := GetChannelById(channelId, true)
 	if err != nil {
 		return false
 	}
 	if channel.ChannelInfo.IsMultiKey {
-		beforeStatus := channel.Status
-		// Protect map writes with the same per-channel lock used by readers
 		pollingLock := GetChannelPollingLock(channelId)
 		pollingLock.Lock()
+		defer pollingLock.Unlock()
+
+		beforeStatus := channel.Status
 		changed := handlerMultiKeyUpdate(channel, usingKey, status, reason)
-		pollingLock.Unlock()
 		if !changed {
 			return false
 		}

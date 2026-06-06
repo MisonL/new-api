@@ -445,16 +445,16 @@ export function isResponsesCompactAutoFallbackActiveFromSettings(
   const fallbackAt = Number(settings.responses_compact_auto_fallback_at)
   if (Number.isFinite(fallbackAt) && fallbackAt > 0) {
     const elapsedSeconds = Math.floor(now.getTime() / 1000) - fallbackAt
-    // Future fallbackAt values can appear after clock drift; defer to the legacy date marker in that case.
-    if (elapsedSeconds >= 0) {
-      const intervalSeconds =
-        normalizeResponsesCompactAutoFallbackRetryIntervalHours(
-          settings.responses_compact_auto_fallback_retry_interval_hours
-        ) *
-        60 *
-        60
-      return elapsedSeconds < intervalSeconds
+    if (elapsedSeconds < 0) {
+      return false
     }
+    const intervalSeconds =
+      normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+        settings.responses_compact_auto_fallback_retry_interval_hours
+      ) *
+      60 *
+      60
+    return elapsedSeconds < intervalSeconds
   }
   return isResponsesCompactAutoFallbackDateActive(settings, now)
 }

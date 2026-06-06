@@ -87,5 +87,5 @@ func TestApplyMidjourneyRuntimeHeadersAdvancesHeaderProfileRoundRobin(t *testing
 	second, err := http.NewRequest(http.MethodPost, "https://origin.example.com/mj/submit", nil)
 	require.NoError(t, err)
 	require.NoError(t, applyMidjourneyRuntimeHeaders(ctx, second, "sk-test"))
-	require.Equal(t, "claude-cli/2.1.153 (external, sdk-cli)", second.Header.Get("User-Agent"))
+	require.Equal(t, dto.BuiltinClaudeCodeUserAgent, second.Header.Get("User-Agent"))
 }

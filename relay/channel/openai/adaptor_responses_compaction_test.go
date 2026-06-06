@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -66,15 +67,16 @@ func TestConvertOpenAIResponsesRequestStripsCodexEncryptedContextWhenEnabled(t *
 
 	var items []map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 3)
+	require.Len(t, items, 4)
 
 	require.Equal(t, "developer", responseItemRole(t, items[0]))
 	require.Equal(t, "assistant", responseItemRole(t, items[1]))
 	require.Equal(t, "old answer", responseItemText(t, items[1]))
-	require.Equal(t, "user", responseItemRole(t, items[2]))
+	require.Equal(t, "compaction", responseItemType(t, items[2]))
+	require.Equal(t, "user", responseItemRole(t, items[3]))
 }
 
-func TestConvertOpenAIResponsesRequestRejectsCompactionOnlyInputWhenStripEnabled(t *testing.T) {
+func TestConvertOpenAIResponsesRequestPreservesCompactionOnlyInputWhenStripEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
@@ -90,9 +92,11 @@ func TestConvertOpenAIResponsesRequestRejectsCompactionOnlyInputWhenStripEnabled
 		Input: json.RawMessage(`[{"type":"compaction","encrypted_content":"opaque"}]`),
 	}
 
-	_, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "compaction input")
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
 }
 
 func TestConvertOpenAIResponsesRequestPreservesNonObjectArrayItemsWhenStripEnabled(t *testing.T) {
@@ -122,10 +126,11 @@ func TestConvertOpenAIResponsesRequestPreservesNonObjectArrayItemsWhenStripEnabl
 
 	var items []json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 2)
+	require.Len(t, items, 3)
 	var first string
 	require.NoError(t, common.Unmarshal(items[0], &first))
 	require.Equal(t, "plain input item", first)
+	require.Contains(t, string(items[1]), `"type":"compaction"`)
 }
 
 func TestConvertOpenAIResponsesRequestPreservesAssistantAfterEncryptedReasoningWhenStripEnabled(t *testing.T) {
@@ -427,9 +432,13 @@ func TestConvertOpenAIResponsesCompactRequestBuildsSyntheticSummaryRequest(t *te
 
 func TestConvertOpenAIResponsesCompactNativeModeRestoresSyntheticState(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
+	scope := service.SyntheticCompactStateScope{UserID: 10, TokenID: 20, Group: "default"}
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
 		OriginModelName: "gpt-5.5-openai-compact",
+		UserId:          scope.UserID,
+		TokenId:         scope.TokenID,
+		UsingGroup:      scope.Group,
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType: constant.ChannelTypeOpenAI,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
@@ -437,7 +446,7 @@ func TestConvertOpenAIResponsesCompactNativeModeRestoresSyntheticState(t *testin
 			},
 		},
 	}
-	compactResp, _, err := service.BuildSyntheticCompactResponse(context.Background(), service.SyntheticCompactStateScope{}, "gpt-5.5", dto.OpenAIResponsesResponse{
+	compactResp, _, err := service.BuildSyntheticCompactResponse(context.Background(), scope, "gpt-5.5", dto.OpenAIResponsesResponse{
 		CreatedAt: 1710000000,
 		Model:     "gpt-5.5",
 		Output: []dto.ResponsesOutput{
@@ -468,9 +477,13 @@ func TestConvertOpenAIResponsesCompactNativeModeRestoresSyntheticState(t *testin
 
 func TestConvertOpenAIResponsesRequestRestoresSyntheticStateBeforeStrip(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
+	scope := service.SyntheticCompactStateScope{UserID: 10, TokenID: 20, Group: "default"}
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
 		OriginModelName: "gpt-5.5",
+		UserId:          scope.UserID,
+		TokenId:         scope.TokenID,
+		UsingGroup:      scope.Group,
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType: constant.ChannelTypeOpenAI,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
@@ -479,7 +492,7 @@ func TestConvertOpenAIResponsesRequestRestoresSyntheticStateBeforeStrip(t *testi
 			},
 		},
 	}
-	compactResp, _, err := service.BuildSyntheticCompactResponse(context.Background(), service.SyntheticCompactStateScope{}, "gpt-5.5", dto.OpenAIResponsesResponse{
+	compactResp, _, err := service.BuildSyntheticCompactResponse(context.Background(), scope, "gpt-5.5", dto.OpenAIResponsesResponse{
 		CreatedAt: 1710000000,
 		Model:     "gpt-5.5",
 		Output: []dto.ResponsesOutput{
@@ -522,7 +535,7 @@ func TestConvertOpenAIResponsesRequestRestoresSyntheticStateBeforeStrip(t *testi
 	require.NotContains(t, string(convertedReq.Input), "opaque")
 }
 
-func TestConvertOpenAIResponsesCompactRequestStripsNativeCompactWhenEncryptedContextStripEnabled(t *testing.T) {
+func TestConvertOpenAIResponsesCompactRequestPreservesNativeCompactWhenEncryptedContextStripEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
@@ -554,12 +567,13 @@ func TestConvertOpenAIResponsesCompactRequestStripsNativeCompactWhenEncryptedCon
 
 	var items []map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 2)
+	require.Len(t, items, 3)
 	require.Equal(t, "assistant", responseItemRole(t, items[0]))
 	require.Equal(t, "old answer", responseItemText(t, items[0]))
-	require.Equal(t, "user", responseItemRole(t, items[1]))
+	require.Equal(t, "compaction", responseItemType(t, items[1]))
+	require.Equal(t, "user", responseItemRole(t, items[2]))
 	require.NotContains(t, string(convertedReq.Input), "opaque")
-	require.NotContains(t, string(convertedReq.Input), "compact")
+	require.Contains(t, string(convertedReq.Input), "compact")
 }
 
 func TestConvertOpenAIResponsesCompactRequestConvertsAndStripsEncryptedContextWhenEnabled(t *testing.T) {
@@ -665,6 +679,25 @@ func TestOpenAIResponsesCompactRequestURLUsesCompactEndpointByDefault(t *testing
 	requestURL, err := (&Adaptor{}).GetRequestURL(info)
 	require.NoError(t, err)
 	require.Equal(t, "https://api.example.test/v1/responses/compact", requestURL)
+}
+
+func TestOpenAIResponsesCompactAutoUsesResponsesEndpointDuringActiveFallbackWindow(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode:      relayconstant.RelayModeResponsesCompact,
+		RequestURLPath: "/v1/responses/compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeOpenAI,
+			ChannelBaseUrl: "https://api.example.test",
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:           dto.ResponsesCompactModeAuto,
+				ResponsesCompactAutoFallbackAt: time.Now().Unix(),
+			},
+		},
+	}
+
+	requestURL, err := (&Adaptor{}).GetRequestURL(info)
+	require.NoError(t, err)
+	require.Equal(t, "https://api.example.test/v1/responses", requestURL)
 }
 
 func TestOpenAIResponsesCompactRequestURLUsesResponsesEndpointForSyntheticSummaryMode(t *testing.T) {

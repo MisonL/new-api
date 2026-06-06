@@ -122,6 +122,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             APP_VERSION=${{ env.TAG }}
+            EFFECTIVE_APP_VERSION=${{ env.TAG }}
             VCS_REF=${{ steps.version.outputs.source_sha }}
             BUILD_DATE=${{ steps.version.outputs.created }}
             SOURCE_URL=${{ steps.version.outputs.source }}

@@ -486,6 +486,25 @@ func TestBuildChannelRuntimeRequestHeadersAppliesChannelAuxiliaryPolicy(t *testi
 	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers.Get("Originator"))
 }
 
+func TestBuildChannelRuntimeRequestHeadersTreatsEmptyHeaderProfileModeAsFixed(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "true"
+
+	channel := &model.Channel{Id: 18}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AuxiliaryRequestHeaderPolicyEnabled: common.GetPointer(true),
+		HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+			Enabled:            true,
+			SelectedProfileIDs: []string{"codex-cli"},
+		},
+	})
+
+	headers, err := BuildChannelRuntimeRequestHeaders(channel, "sk-test", http.Header{})
+	require.NoError(t, err)
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers.Get("User-Agent"))
+	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers.Get("Originator"))
+}
+
 func TestBuildChannelRuntimeRequestHeadersAdvancesHeaderProfileRoundRobin(t *testing.T) {
 	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
 	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "true"
@@ -509,9 +528,64 @@ func TestBuildChannelRuntimeRequestHeadersAdvancesHeaderProfileRoundRobin(t *tes
 	require.Equal(t, "claude-cli/2.1.153 (external, sdk-cli)", second.Get("User-Agent"))
 
 	state := model.RequestHeaderStrategyState{}
-	require.NoError(t, model.DB.Where("scope_type = ? AND scope_key = ?", runtimeHeaderProfileScopeType, "channel:19").First(&state).Error)
+	scopeKey := fmt.Sprintf(
+		"channel:%d:%s",
+		channel.Id,
+		runtimeRoundRobinValuesFingerprint([]string{"codex-cli", "claude-code"}),
+	)
+	require.NoError(t, model.DB.Where("scope_type = ? AND scope_key = ?", runtimeHeaderProfileScopeType, scopeKey).First(&state).Error)
 	require.Equal(t, int64(2), state.RoundRobinCursor)
 	require.Equal(t, int64(2), state.Version)
+}
+
+func TestBuildChannelRuntimeRequestHeadersResetsHeaderProfileRoundRobinWhenSelectionChanges(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "true"
+
+	channel := &model.Channel{Id: 20}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AuxiliaryRequestHeaderPolicyEnabled: common.GetPointer(true),
+		HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+			Enabled:            true,
+			Mode:               dto.HeaderProfileModeRoundRobin,
+			SelectedProfileIDs: []string{"codex-cli", "claude-code"},
+		},
+	})
+
+	_, err := BuildChannelRuntimeRequestHeaders(channel, "sk-test", http.Header{})
+	require.NoError(t, err)
+	_, err = BuildChannelRuntimeRequestHeaders(channel, "sk-test", http.Header{})
+	require.NoError(t, err)
+
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AuxiliaryRequestHeaderPolicyEnabled: common.GetPointer(true),
+		HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+			Enabled:            true,
+			Mode:               dto.HeaderProfileModeRoundRobin,
+			SelectedProfileIDs: []string{"qwen-code", "claude-code"},
+		},
+	})
+
+	next, err := BuildChannelRuntimeRequestHeaders(channel, "sk-test", http.Header{})
+	require.NoError(t, err)
+	require.Equal(t, dto.BuiltinQwenCodeUserAgent, next.Get("User-Agent"))
+
+	oldScopeKey := fmt.Sprintf(
+		"channel:%d:%s",
+		channel.Id,
+		runtimeRoundRobinValuesFingerprint([]string{"codex-cli", "claude-code"}),
+	)
+	newScopeKey := fmt.Sprintf(
+		"channel:%d:%s",
+		channel.Id,
+		runtimeRoundRobinValuesFingerprint([]string{"qwen-code", "claude-code"}),
+	)
+	oldState := model.RequestHeaderStrategyState{}
+	require.NoError(t, model.DB.Where("scope_type = ? AND scope_key = ?", runtimeHeaderProfileScopeType, oldScopeKey).First(&oldState).Error)
+	require.Equal(t, int64(2), oldState.RoundRobinCursor)
+	newState := model.RequestHeaderStrategyState{}
+	require.NoError(t, model.DB.Where("scope_type = ? AND scope_key = ?", runtimeHeaderProfileScopeType, newScopeKey).First(&newState).Error)
+	require.Equal(t, int64(1), newState.RoundRobinCursor)
 }
 
 func TestBuildChannelRuntimeRequestHeadersAppliesOverrideWhenProfileDisabled(t *testing.T) {

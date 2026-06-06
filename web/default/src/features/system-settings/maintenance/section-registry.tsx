@@ -7,11 +7,54 @@ import {
   serializeSidebarModulesAdmin,
 } from './config'
 import { HeaderNavigationSection } from './header-navigation-section'
+import {
+  LogRetentionSection,
+  type LogRetentionFormValues,
+} from './log-retention-section'
 import { LogSettingsSection } from './log-settings-section'
 import { NoticeSection } from './notice-section'
 import { PerformanceSection } from './performance-section'
 import { SidebarModulesSection } from './sidebar-modules-section'
 import { UpdateCheckerSection } from './update-checker-section'
+
+const getLogRetentionDefaults = (
+  settings: MaintenanceSettings
+): LogRetentionFormValues => ({
+  'log_retention_setting.enabled':
+    settings['log_retention_setting.enabled'] ?? false,
+  'log_retention_setting.run_interval_hours':
+    settings['log_retention_setting.run_interval_hours'] ?? 24,
+  'log_retention_setting.batch_size':
+    settings['log_retention_setting.batch_size'] ?? 500,
+  'log_retention_setting.max_batches':
+    settings['log_retention_setting.max_batches'] ?? 200,
+  'log_retention_setting.consume_retention_days':
+    settings['log_retention_setting.consume_retention_days'] ?? 0,
+  'log_retention_setting.error_retention_days':
+    settings['log_retention_setting.error_retention_days'] ?? 0,
+  'log_retention_setting.system_retention_days':
+    settings['log_retention_setting.system_retention_days'] ?? 0,
+  'log_retention_setting.manage_retention_days':
+    settings['log_retention_setting.manage_retention_days'] ?? 0,
+  'log_retention_setting.topup_retention_days':
+    settings['log_retention_setting.topup_retention_days'] ?? 0,
+  'log_retention_setting.refund_retention_days':
+    settings['log_retention_setting.refund_retention_days'] ?? 0,
+  'log_retention_setting.unknown_retention_days':
+    settings['log_retention_setting.unknown_retention_days'] ?? 0,
+  'log_retention_setting.request_payload_retention_days':
+    settings['log_retention_setting.request_payload_retention_days'] ?? 0,
+  'log_retention_setting.response_payload_retention_days':
+    settings['log_retention_setting.response_payload_retention_days'] ?? 0,
+  'log_retention_setting.server_log_cleanup_enabled':
+    settings['log_retention_setting.server_log_cleanup_enabled'] ?? false,
+  'log_retention_setting.server_log_keep_files':
+    settings['log_retention_setting.server_log_keep_files'] ?? 30,
+  'log_retention_setting.server_log_keep_days':
+    settings['log_retention_setting.server_log_keep_days'] ?? 30,
+  'log_retention_setting.server_log_max_total_size_mb':
+    settings['log_retention_setting.server_log_max_total_size_mb'] ?? 0,
+})
 
 const MAINTENANCE_SECTIONS = [
   {
@@ -42,9 +85,14 @@ const MAINTENANCE_SECTIONS = [
     titleKey: 'Log Maintenance',
     descriptionKey: 'Configure log consumption settings',
     build: (settings: MaintenanceSettings) => (
-      <LogSettingsSection
-        defaultEnabled={Boolean(settings.LogConsumeEnabled)}
-      />
+      <>
+        <LogSettingsSection
+          defaultEnabled={Boolean(settings.LogConsumeEnabled)}
+        />
+        <LogRetentionSection
+          defaultValues={getLogRetentionDefaults(settings)}
+        />
+      </>
     ),
   },
   {

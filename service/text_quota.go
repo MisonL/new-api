@@ -371,6 +371,9 @@ func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 		summaryModelRetry = ctx.GetBool("responses_compact_summary_model_fallback_attempted")
 		summaryModel = common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactSummaryModel)
 	}
+	if contextFallback || summaryModelRetry {
+		effective = dto.ResponsesCompactModeSynthetic
+	}
 	summaryModels := []string(nil)
 	if ctx != nil {
 		summaryModels = common.GetContextKeyStringSlice(ctx, constant.ContextKeyResponsesCompactSummaryModels)

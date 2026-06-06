@@ -2,6 +2,7 @@ import { api } from '@/lib/api'
 import type {
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
+  LogRetentionExecutionResponse,
   SystemOptionsResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
@@ -23,6 +24,14 @@ export async function deleteLogsBefore(targetTimestamp: number) {
   const res = await api.delete<DeleteLogsResponse>('/api/log/', {
     params: { target_timestamp: targetTimestamp },
   })
+  return res.data
+}
+
+export async function executeLogRetention(preview: boolean) {
+  const res = await api.post<LogRetentionExecutionResponse>(
+    '/api/log/retention/execute',
+    { preview }
+  )
   return res.data
 }
 
