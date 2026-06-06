@@ -20,6 +20,7 @@ export const RESPONSES_COMPACT_MODE_AUTO = 'auto' as const
 export const RESPONSES_COMPACT_MODE_NATIVE = 'native' as const
 export const RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY =
   'synthetic_summary' as const
+export const RESPONSES_COMPACT_MODE_DISABLED = 'disabled' as const
 export const RESPONSES_COMPACT_MODE_DEFAULT = RESPONSES_COMPACT_MODE_AUTO
 
 export const RESPONSES_COMPACT_BADGE_LABELS: Record<
@@ -29,6 +30,7 @@ export const RESPONSES_COMPACT_BADGE_LABELS: Record<
   auto: 'Compact Auto',
   native: 'Compact Native',
   synthetic_summary: 'Compact Synthetic',
+  disabled: 'Compact Disabled',
 } as const
 
 export const RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL =
@@ -42,6 +44,8 @@ export const RESPONSES_COMPACT_AUTO_TOOLTIP =
   'Auto mode tries native compact first, falls back to synthetic summary after an upstream compatibility failure, and retries native after the configured interval.'
 export const RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP =
   'Auto mode is using synthetic summary fallback. Native compact will be retried automatically after the configured interval.'
+export const RESPONSES_COMPACT_DISABLED_TOOLTIP =
+  'This channel will not receive /v1/responses/compact requests.'
 export const RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT = true
 export const RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT = true
 export const RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT = ['gpt-5.4']
@@ -55,6 +59,7 @@ export const RESPONSES_COMPACT_BADGE_KEYS = [
   RESPONSES_COMPACT_AUTO_TOOLTIP,
   RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL,
   RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP,
+  RESPONSES_COMPACT_DISABLED_TOOLTIP,
 ]
 
 export function normalizeResponsesCompactMode(
@@ -69,10 +74,13 @@ export function normalizeResponsesCompactMode(
   if (mode === RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY) {
     return RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
   }
+  if (mode === RESPONSES_COMPACT_MODE_DISABLED) {
+    return RESPONSES_COMPACT_MODE_DISABLED
+  }
   if (mode === 'convert') {
     return RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
   }
-  if (mode === 'disabled' || mode === 'unsupported') {
+  if (mode === 'unsupported') {
     return RESPONSES_COMPACT_MODE_NATIVE
   }
   return RESPONSES_COMPACT_MODE_DEFAULT

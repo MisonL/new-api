@@ -70,7 +70,11 @@ export interface ChannelSettings {
   system_prompt_override?: boolean
 }
 
-export type ResponsesCompactMode = 'auto' | 'native' | 'synthetic_summary'
+export type ResponsesCompactMode =
+  | 'auto'
+  | 'native'
+  | 'synthetic_summary'
+  | 'disabled'
 
 export interface ChannelOtherSettings {
   azure_responses_version?: string

@@ -63,7 +63,7 @@ export const channelFormSchema = z.object({
   allow_include_obfuscation: z.boolean().optional(), // OpenAI: include usage obfuscation
   strip_codex_encrypted_context: z.boolean().optional(), // OpenAI: strip Codex encrypted context
   responses_compact_mode: z
-    .enum(['auto', 'native', 'synthetic_summary'])
+    .enum(['auto', 'native', 'synthetic_summary', 'disabled'])
     .optional(),
   responses_compact_auto_fallback_retry_interval_hours: z.number().optional(),
   responses_compact_context_fallback: z.boolean().optional(),

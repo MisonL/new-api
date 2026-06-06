@@ -9,6 +9,7 @@ import {
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
   RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
   RESPONSES_COMPACT_MODE_AUTO,
+  RESPONSES_COMPACT_MODE_DISABLED,
   RESPONSES_COMPACT_MODE_NATIVE,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
@@ -121,13 +122,17 @@ describe('channel responses compact settings', () => {
       getResponsesCompactMode(JSON.stringify({ responses_compact_mode: 'auto' }))
     ).toBe(RESPONSES_COMPACT_MODE_AUTO)
 
-    for (const mode of ['disabled', 'unsupported']) {
-      expect(
-        getResponsesCompactMode(
-          JSON.stringify({ responses_compact_mode: mode })
-        )
-      ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
-    }
+    expect(
+      getResponsesCompactMode(
+        JSON.stringify({ responses_compact_mode: 'disabled' })
+      )
+    ).toBe(RESPONSES_COMPACT_MODE_DISABLED)
+
+    expect(
+      getResponsesCompactMode(
+        JSON.stringify({ responses_compact_mode: 'unsupported' })
+      )
+    ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
     expect(
       getResponsesCompactMode(
         JSON.stringify({ responses_compact_mode: 'unexpected' })
@@ -211,15 +216,21 @@ describe('channel responses compact settings', () => {
       ).responses_compact_mode
     ).toBe(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY)
 
-    for (const mode of ['disabled', 'unsupported']) {
-      expect(
-        transformChannelToFormDefaults(
-          makeChannel({
-            settings: JSON.stringify({ responses_compact_mode: mode }),
-          })
-        ).responses_compact_mode
-      ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
-    }
+    expect(
+      transformChannelToFormDefaults(
+        makeChannel({
+          settings: JSON.stringify({ responses_compact_mode: 'disabled' }),
+        })
+      ).responses_compact_mode
+    ).toBe(RESPONSES_COMPACT_MODE_DISABLED)
+
+    expect(
+      transformChannelToFormDefaults(
+        makeChannel({
+          settings: JSON.stringify({ responses_compact_mode: 'unsupported' }),
+        })
+      ).responses_compact_mode
+    ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
     expect(
       transformChannelToFormDefaults(
         makeChannel({
@@ -521,6 +532,29 @@ describe('channel responses compact settings', () => {
     expect(stored.responses_compact_mode).toBe(
       RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
     )
+  })
+
+  test('loads and stores disabled compact mode for OpenAI channels', () => {
+    const defaults = transformChannelToFormDefaults(
+      makeChannel({
+        settings: JSON.stringify({
+          responses_compact_mode: RESPONSES_COMPACT_MODE_DISABLED,
+        }),
+      })
+    )
+
+    expect(defaults.responses_compact_mode).toBe(
+      RESPONSES_COMPACT_MODE_DISABLED
+    )
+
+    const payload = transformFormDataToCreatePayload({
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      type: 1,
+      responses_compact_mode: RESPONSES_COMPACT_MODE_DISABLED,
+    })
+    const stored = JSON.parse(String(payload.channel.settings))
+
+    expect(stored.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_DISABLED)
   })
 
   test('has translations for dynamic compact badge labels and tooltips', () => {

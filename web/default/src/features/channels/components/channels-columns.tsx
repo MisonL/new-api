@@ -57,7 +57,9 @@ import {
   RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP,
   RESPONSES_COMPACT_AUTO_TOOLTIP,
   RESPONSES_COMPACT_BADGE_LABELS,
+  RESPONSES_COMPACT_DISABLED_TOOLTIP,
   RESPONSES_COMPACT_MODE_AUTO,
+  RESPONSES_COMPACT_MODE_DISABLED,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   handleUpdateChannelField,
   handleUpdateTagField,
@@ -564,7 +566,7 @@ export function useChannelsColumns({
         const compactBadge: {
           label: string
           tooltip: string
-          variant: 'amber' | 'blue' | 'purple' | 'success'
+          variant: 'amber' | 'blue' | 'neutral' | 'purple' | 'success'
           detail?: string
         } | null =
           channel.type === 1
@@ -583,18 +585,22 @@ export function useChannelsColumns({
                     variant: 'blue',
                   }
                 : compactMode === RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
-              ? {
-                  label:
-                    RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
-                  tooltip:
-                    RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
-                  variant: 'purple',
-                }
-              : {
-                  label: RESPONSES_COMPACT_BADGE_LABELS.native,
-                  tooltip: RESPONSES_COMPACT_BADGE_LABELS.native,
-                  variant: 'success',
-                }
+                  ? {
+                      label: RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
+                      tooltip: RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
+                      variant: 'purple',
+                    }
+                  : compactMode === RESPONSES_COMPACT_MODE_DISABLED
+                    ? {
+                        label: RESPONSES_COMPACT_BADGE_LABELS.disabled,
+                        tooltip: RESPONSES_COMPACT_DISABLED_TOOLTIP,
+                        variant: 'neutral',
+                      }
+                    : {
+                        label: RESPONSES_COMPACT_BADGE_LABELS.native,
+                        tooltip: RESPONSES_COMPACT_BADGE_LABELS.native,
+                        variant: 'success',
+                      }
             : null
 
         return (
@@ -748,10 +754,10 @@ export function useChannelsColumns({
                       onClick={(e) => {
                         e.stopPropagation()
                         if (!deploymentId) return
-                          const targetUrl = `/models/deployments?dFilter=${encodeURIComponent(String(deploymentId))}`
-                          window.open(targetUrl, '_blank', 'noopener')
-                        }}
-                      >
+                        const targetUrl = `/models/deployments?dFilter=${encodeURIComponent(String(deploymentId))}`
+                        window.open(targetUrl, '_blank', 'noopener')
+                      }}
+                    >
                       <span className='text-muted-foreground/30'>·</span>
                       <span className={cn(textColorMap.purple)}>IO.NET</span>
                     </span>

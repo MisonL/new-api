@@ -131,6 +131,8 @@ import {
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX,
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN,
+  RESPONSES_COMPACT_DISABLED_TOOLTIP,
+  RESPONSES_COMPACT_MODE_DISABLED,
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
@@ -423,6 +425,7 @@ export function ChannelMutateDrawer({
   const currentBaseUrl = form.watch('base_url')
   const currentModels = form.watch('models')
   const currentModelMapping = form.watch('model_mapping')
+  const currentResponsesCompactMode = form.watch('responses_compact_mode')
   const awsKeyType = form.watch('aws_key_type')
   const upstreamModelUpdateCheckEnabled = form.watch(
     'upstream_model_update_check_enabled'
@@ -2999,6 +3002,15 @@ export function ChannelMutateDrawer({
                                             </SelectItem>
                                             <SelectItem
                                               value={
+                                                RESPONSES_COMPACT_MODE_DISABLED
+                                              }
+                                            >
+                                              {t(
+                                                'Disabled: do not route compact requests'
+                                              )}
+                                            </SelectItem>
+                                            <SelectItem
+                                              value={
                                                 RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
                                               }
                                             >
@@ -3035,6 +3047,14 @@ export function ChannelMutateDrawer({
                                           </p>
                                         )}
                                         {field.value ===
+                                          RESPONSES_COMPACT_MODE_DISABLED && (
+                                          <p className='text-muted-foreground text-xs'>
+                                            {t(
+                                              RESPONSES_COMPACT_DISABLED_TOOLTIP
+                                            )}
+                                          </p>
+                                        )}
+                                        {field.value ===
                                           RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY && (
                                           <p className='text-muted-foreground text-xs'>
                                             {t(
@@ -3047,138 +3067,143 @@ export function ChannelMutateDrawer({
                                     )}
                                   />
 
-                                  <FormField
-                                    control={form.control}
-                                    name='responses_compact_context_fallback'
-                                    render={({ field }) => (
-                                      <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
-                                        <div className='space-y-0.5'>
-                                          <FormLabel className='text-sm'>
-                                            {t(
-                                              'Fallback native compact on context limit'
-                                            )}
-                                          </FormLabel>
-                                          <FormDescription>
-                                            {t(
-                                              'When native compact fails because the context is too large, retry through synthetic summary'
-                                            )}
-                                          </FormDescription>
-                                        </div>
-                                        <FormControl>
-                                          <Switch
-                                            checked={field.value !== false}
-                                            onCheckedChange={field.onChange}
-                                          />
-                                        </FormControl>
-                                      </FormItem>
-                                    )}
-                                  />
+                                  {currentResponsesCompactMode !==
+                                    RESPONSES_COMPACT_MODE_DISABLED && (
+                                    <>
+                                      <FormField
+                                        control={form.control}
+                                        name='responses_compact_context_fallback'
+                                        render={({ field }) => (
+                                          <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                                            <div className='space-y-0.5'>
+                                              <FormLabel className='text-sm'>
+                                                {t(
+                                                  'Fallback native compact on context limit'
+                                                )}
+                                              </FormLabel>
+                                              <FormDescription>
+                                                {t(
+                                                  'When native compact fails because the context is too large, retry through synthetic summary'
+                                                )}
+                                              </FormDescription>
+                                            </div>
+                                            <FormControl>
+                                              <Switch
+                                                checked={field.value !== false}
+                                                onCheckedChange={field.onChange}
+                                              />
+                                            </FormControl>
+                                          </FormItem>
+                                        )}
+                                      />
 
-                                  <FormField
-                                    control={form.control}
-                                    name='responses_compact_auto_fallback_retry_interval_hours'
-                                    render={({ field }) => (
-                                      <FormItem className='space-y-2 px-4 py-3'>
-                                        <div className='space-y-0.5'>
-                                          <FormLabel className='text-sm'>
-                                            {t(
-                                              'Auto fallback retry interval (hours)'
-                                            )}
-                                          </FormLabel>
-                                          <FormDescription>
-                                            {t(
-                                              'After native compact fails, synthetic summary is used during this interval; default is 3 hours.'
-                                            )}
-                                          </FormDescription>
-                                        </div>
-                                        <FormControl>
-                                          <Input
-                                            type='number'
-                                            min={
-                                              RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN
-                                            }
-                                            max={
-                                              RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX
-                                            }
-                                            step={1}
-                                            value={
-                                              field.value ??
-                                              RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT
-                                            }
-                                            onChange={(event) =>
-                                              field.onChange(
-                                                normalizeResponsesCompactAutoFallbackRetryIntervalHours(
-                                                  event.target.value
-                                                )
-                                              )
-                                            }
-                                          />
-                                        </FormControl>
-                                        <FormMessage />
-                                      </FormItem>
-                                    )}
-                                  />
+                                      <FormField
+                                        control={form.control}
+                                        name='responses_compact_auto_fallback_retry_interval_hours'
+                                        render={({ field }) => (
+                                          <FormItem className='space-y-2 px-4 py-3'>
+                                            <div className='space-y-0.5'>
+                                              <FormLabel className='text-sm'>
+                                                {t(
+                                                  'Auto fallback retry interval (hours)'
+                                                )}
+                                              </FormLabel>
+                                              <FormDescription>
+                                                {t(
+                                                  'After native compact fails, synthetic summary is used during this interval; default is 3 hours.'
+                                                )}
+                                              </FormDescription>
+                                            </div>
+                                            <FormControl>
+                                              <Input
+                                                type='number'
+                                                min={
+                                                  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN
+                                                }
+                                                max={
+                                                  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX
+                                                }
+                                                step={1}
+                                                value={
+                                                  field.value ??
+                                                  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT
+                                                }
+                                                onChange={(event) =>
+                                                  field.onChange(
+                                                    normalizeResponsesCompactAutoFallbackRetryIntervalHours(
+                                                      event.target.value
+                                                    )
+                                                  )
+                                                }
+                                              />
+                                            </FormControl>
+                                            <FormMessage />
+                                          </FormItem>
+                                        )}
+                                      />
 
-                                  <FormField
-                                    control={form.control}
-                                    name='responses_compact_summary_model_fallback'
-                                    render={({ field }) => (
-                                      <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
-                                        <div className='space-y-0.5'>
-                                          <FormLabel className='text-sm'>
-                                            {t(
-                                              'Fallback synthetic summary model'
-                                            )}
-                                          </FormLabel>
-                                          <FormDescription>
-                                            {t(
-                                              'When synthetic summary exceeds the current model context, retry with the configured fallback model'
-                                            )}
-                                          </FormDescription>
-                                        </div>
-                                        <FormControl>
-                                          <Switch
-                                            checked={field.value !== false}
-                                            onCheckedChange={field.onChange}
-                                          />
-                                        </FormControl>
-                                      </FormItem>
-                                    )}
-                                  />
+                                      <FormField
+                                        control={form.control}
+                                        name='responses_compact_summary_model_fallback'
+                                        render={({ field }) => (
+                                          <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                                            <div className='space-y-0.5'>
+                                              <FormLabel className='text-sm'>
+                                                {t(
+                                                  'Fallback synthetic summary model'
+                                                )}
+                                              </FormLabel>
+                                              <FormDescription>
+                                                {t(
+                                                  'When synthetic summary exceeds the current model context, retry with the configured fallback model'
+                                                )}
+                                              </FormDescription>
+                                            </div>
+                                            <FormControl>
+                                              <Switch
+                                                checked={field.value !== false}
+                                                onCheckedChange={field.onChange}
+                                              />
+                                            </FormControl>
+                                          </FormItem>
+                                        )}
+                                      />
 
-                                  <FormField
-                                    control={form.control}
-                                    name='responses_compact_summary_fallback_models'
-                                    render={({ field }) => (
-                                      <FormItem className='space-y-2 px-4 py-3'>
-                                        <div className='space-y-0.5'>
-                                          <FormLabel className='text-sm'>
-                                            {t(
-                                              'Synthetic summary fallback models'
-                                            )}
-                                          </FormLabel>
-                                          <FormDescription>
-                                            {t(
-                                              'Comma-separated model names used in order, for example gpt-5.4'
-                                            )}
-                                          </FormDescription>
-                                        </div>
-                                        <FormControl>
-                                          <Input
-                                            value={field.value || ''}
-                                            onChange={field.onChange}
-                                            placeholder='gpt-5.4'
-                                            disabled={
-                                              form.watch(
-                                                'responses_compact_summary_model_fallback'
-                                              ) === false
-                                            }
-                                          />
-                                        </FormControl>
-                                        <FormMessage />
-                                      </FormItem>
-                                    )}
-                                  />
+                                      <FormField
+                                        control={form.control}
+                                        name='responses_compact_summary_fallback_models'
+                                        render={({ field }) => (
+                                          <FormItem className='space-y-2 px-4 py-3'>
+                                            <div className='space-y-0.5'>
+                                              <FormLabel className='text-sm'>
+                                                {t(
+                                                  'Synthetic summary fallback models'
+                                                )}
+                                              </FormLabel>
+                                              <FormDescription>
+                                                {t(
+                                                  'Comma-separated model names used in order, for example gpt-5.4'
+                                                )}
+                                              </FormDescription>
+                                            </div>
+                                            <FormControl>
+                                              <Input
+                                                value={field.value || ''}
+                                                onChange={field.onChange}
+                                                placeholder='gpt-5.4'
+                                                disabled={
+                                                  form.watch(
+                                                    'responses_compact_summary_model_fallback'
+                                                  ) === false
+                                                }
+                                              />
+                                            </FormControl>
+                                            <FormMessage />
+                                          </FormItem>
+                                        )}
+                                      />
+                                    </>
+                                  )}
 
                                   <FormField
                                     control={form.control}
