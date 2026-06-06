@@ -175,6 +175,23 @@ func TestChannelOtherSettingsResponsesCompactSyntheticRoundTrip(t *testing.T) {
 	require.False(t, settings.HasNativeResponsesCompact())
 }
 
+func TestChannelOtherSettingsResponsesCompactDisabledRoundTrip(t *testing.T) {
+	channel := &Channel{}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeDisabled,
+	})
+
+	settings := channel.GetOtherSettings()
+
+	require.Equal(t, dto.ResponsesCompactModeDisabled, settings.ResponsesCompactMode)
+	require.True(t, settings.HasDisabledResponsesCompact())
+	require.Equal(t, dto.ResponsesCompactModeDisabled, settings.NormalizedResponsesCompactModeSetting())
+	require.Equal(t, dto.ResponsesCompactModeDisabled, settings.ResponsesCompactModeOrDefault())
+	require.False(t, settings.IsAutoResponsesCompact())
+	require.False(t, settings.HasNativeResponsesCompact())
+	require.False(t, settings.HasSyntheticResponsesCompact())
+}
+
 func TestChannelOtherSettingsResponsesCompactLegacyModesNormalizeSafely(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -192,9 +209,9 @@ func TestChannelOtherSettingsResponsesCompactLegacyModesNormalizeSafely(t *testi
 			expected: dto.ResponsesCompactModeNative,
 		},
 		{
-			name:     "legacy disabled",
+			name:     "disabled",
 			rawMode:  dto.ResponsesCompactMode("disabled"),
-			expected: dto.ResponsesCompactModeNative,
+			expected: dto.ResponsesCompactModeDisabled,
 		},
 		{
 			name:     "legacy unsupported",
@@ -217,6 +234,7 @@ func TestChannelOtherSettingsResponsesCompactLegacyModesNormalizeSafely(t *testi
 			require.Equal(t, tt.expected, settings.ResponsesCompactModeOrDefault())
 			require.Equal(t, tt.expected == dto.ResponsesCompactModeNative, settings.HasNativeResponsesCompact())
 			require.Equal(t, tt.expected == dto.ResponsesCompactModeSynthetic, settings.HasSyntheticResponsesCompact())
+			require.Equal(t, tt.expected == dto.ResponsesCompactModeDisabled, settings.HasDisabledResponsesCompact())
 		})
 	}
 }

@@ -36,6 +36,7 @@ const (
 	ResponsesCompactModeAuto      ResponsesCompactMode = "auto"
 	ResponsesCompactModeNative    ResponsesCompactMode = "native"
 	ResponsesCompactModeSynthetic ResponsesCompactMode = "synthetic_summary"
+	ResponsesCompactModeDisabled  ResponsesCompactMode = "disabled"
 )
 
 const DefaultResponsesCompactSyntheticFallbackModel = "gpt-5.4"
@@ -93,6 +94,10 @@ func (s *ChannelOtherSettings) HasNativeResponsesCompact() bool {
 
 func (s *ChannelOtherSettings) HasSyntheticResponsesCompact() bool {
 	return s != nil && s.ResponsesCompactModeOrDefault() == ResponsesCompactModeSynthetic
+}
+
+func (s *ChannelOtherSettings) HasDisabledResponsesCompact() bool {
+	return s != nil && s.NormalizedResponsesCompactModeSetting() == ResponsesCompactModeDisabled
 }
 
 func (s *ChannelOtherSettings) IsAutoResponsesCompact() bool {
@@ -155,9 +160,11 @@ func (s *ChannelOtherSettings) NormalizedResponsesCompactModeSetting() Responses
 		return ResponsesCompactModeNative
 	case ResponsesCompactModeSynthetic:
 		return ResponsesCompactModeSynthetic
+	case ResponsesCompactModeDisabled:
+		return ResponsesCompactModeDisabled
 	case ResponsesCompactMode("convert"):
 		return ResponsesCompactModeSynthetic
-	case ResponsesCompactMode("disabled"), ResponsesCompactMode("unsupported"):
+	case ResponsesCompactMode("unsupported"):
 		return ResponsesCompactModeNative
 	default:
 		return ResponsesCompactModeAuto
@@ -182,6 +189,8 @@ func (s *ChannelOtherSettings) ResponsesCompactModeOrDefaultAt(now time.Time) Re
 		return ResponsesCompactModeNative
 	case ResponsesCompactModeSynthetic:
 		return ResponsesCompactModeSynthetic
+	case ResponsesCompactModeDisabled:
+		return ResponsesCompactModeDisabled
 	case ResponsesCompactMode("convert"):
 		return ResponsesCompactModeSynthetic
 	default:

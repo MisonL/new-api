@@ -82,6 +82,9 @@ func channelSupportsCompactRouteCandidate(channel *Channel, candidate routeModel
 		if !ok {
 			return false
 		}
+		if settings.HasDisabledResponsesCompact() {
+			return false
+		}
 		baseModelName := candidate.model
 		if compactBaseModelName, isCompact := ratio_setting.CompactBaseModelName(candidate.model); isCompact {
 			baseModelName = compactBaseModelName
