@@ -123,6 +123,57 @@ function renderLimitedItems(
   )
 }
 
+type ResponsesCompactBadge = {
+  label: string
+  tooltip: string
+  variant: 'amber' | 'blue' | 'neutral' | 'purple' | 'success'
+  detail?: string
+}
+
+function getResponsesCompactBadge(
+  compactMode: string,
+  compactAutoFallbackActive: boolean,
+  compactAutoFallbackReason: string
+): ResponsesCompactBadge {
+  if (
+    compactMode === RESPONSES_COMPACT_MODE_AUTO &&
+    compactAutoFallbackActive
+  ) {
+    return {
+      label: RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL,
+      tooltip: RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP,
+      variant: 'amber',
+      detail: compactAutoFallbackReason || undefined,
+    }
+  }
+  if (compactMode === RESPONSES_COMPACT_MODE_AUTO) {
+    return {
+      label: RESPONSES_COMPACT_BADGE_LABELS.auto,
+      tooltip: RESPONSES_COMPACT_AUTO_TOOLTIP,
+      variant: 'blue',
+    }
+  }
+  if (compactMode === RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY) {
+    return {
+      label: RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
+      tooltip: RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
+      variant: 'purple',
+    }
+  }
+  if (compactMode === RESPONSES_COMPACT_MODE_DISABLED) {
+    return {
+      label: RESPONSES_COMPACT_BADGE_LABELS.disabled,
+      tooltip: RESPONSES_COMPACT_DISABLED_TOOLTIP,
+      variant: 'neutral',
+    }
+  }
+  return {
+    label: RESPONSES_COMPACT_BADGE_LABELS.native,
+    tooltip: RESPONSES_COMPACT_BADGE_LABELS.native,
+    variant: 'success',
+  }
+}
+
 /**
  * Upstream update tags (+N / -N) shown on channel name for model-fetchable channels
  */
@@ -563,44 +614,13 @@ export function useChannelsColumns({
         const compactAutoFallbackReason = compactAutoFallbackActive
           ? getResponsesCompactAutoFallbackReasonFromSettings(compactSettings)
           : ''
-        const compactBadge: {
-          label: string
-          tooltip: string
-          variant: 'amber' | 'blue' | 'neutral' | 'purple' | 'success'
-          detail?: string
-        } | null =
+        const compactBadge =
           channel.type === 1
-            ? compactMode === RESPONSES_COMPACT_MODE_AUTO &&
-              compactAutoFallbackActive
-              ? {
-                  label: RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL,
-                  tooltip: RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP,
-                  variant: 'amber',
-                  detail: compactAutoFallbackReason || undefined,
-                }
-              : compactMode === RESPONSES_COMPACT_MODE_AUTO
-                ? {
-                    label: RESPONSES_COMPACT_BADGE_LABELS.auto,
-                    tooltip: RESPONSES_COMPACT_AUTO_TOOLTIP,
-                    variant: 'blue',
-                  }
-                : compactMode === RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
-                  ? {
-                      label: RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
-                      tooltip: RESPONSES_COMPACT_BADGE_LABELS.synthetic_summary,
-                      variant: 'purple',
-                    }
-                  : compactMode === RESPONSES_COMPACT_MODE_DISABLED
-                    ? {
-                        label: RESPONSES_COMPACT_BADGE_LABELS.disabled,
-                        tooltip: RESPONSES_COMPACT_DISABLED_TOOLTIP,
-                        variant: 'neutral',
-                      }
-                    : {
-                        label: RESPONSES_COMPACT_BADGE_LABELS.native,
-                        tooltip: RESPONSES_COMPACT_BADGE_LABELS.native,
-                        variant: 'success',
-                      }
+            ? getResponsesCompactBadge(
+                compactMode,
+                compactAutoFallbackActive,
+                compactAutoFallbackReason
+              )
             : null
 
         return (

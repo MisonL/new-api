@@ -57,9 +57,13 @@ func TestOaiSyntheticResponsesCompactionHandlerReturnsSyntheticCompactionOutput(
 	var compactResp dto.OpenAIResponsesCompactionResponse
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &compactResp))
 	require.NotEmpty(t, compactResp.ID)
-	require.JSONEq(t, `[
-		{"type":"compaction","encrypted_content":"newapi.synthetic.compact:`+compactResp.ID+`"}
-	]`, string(compactResp.Output))
+	output := []map[string]interface{}{}
+	require.NoError(t, common.Unmarshal(compactResp.Output, &output))
+	require.Len(t, output, 1)
+	require.Equal(t, "compaction", output[0]["type"])
+	encryptedContent, ok := output[0]["encrypted_content"].(string)
+	require.True(t, ok)
+	require.True(t, strings.HasPrefix(encryptedContent, "newapi.synthetic.compact:v2:"))
 
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5",

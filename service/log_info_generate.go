@@ -78,12 +78,34 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)
 	appendFinalRequestFormat(relayInfo, other)
+	appendResponsesRelayInfo(ctx, relayInfo, other)
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
 	AppendRequestHeaderPolicyInfo(ctx, other)
 	appendStreamStatus(relayInfo, other)
 	appendUpstreamMetadata(relayInfo, other)
 	return other
+}
+
+func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if other == nil {
+		return
+	}
+	settings := dto.ChannelOtherSettings{}
+	if relayInfo != nil && relayInfo.ChannelMeta != nil {
+		settings = relayInfo.ChannelOtherSettings
+	}
+	if ctx != nil {
+		if ctxSettings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](ctx, constant.ContextKeyChannelOtherSetting); ok {
+			settings = ctxSettings
+		}
+		if action := common.GetContextKeyString(ctx, constant.ContextKeyResponsesPreviousIDAction); action != "" {
+			other["responses_previous_id_action"] = action
+		}
+	}
+	if profile := settings.NormalizedResponsesUpstreamProfile(); profile != "" {
+		other["responses_upstream_profile"] = string(profile)
+	}
 }
 
 func appendUpstreamMetadata(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
@@ -279,6 +301,8 @@ func appendRequestConversionChain(relayInfo *relaycommon.RelayInfo, other map[st
 			chain = append(chain, "Google Gemini")
 		case types.RelayFormatOpenAIResponses:
 			chain = append(chain, "OpenAI Responses")
+		case types.RelayFormatOpenAIResponsesCompaction:
+			chain = append(chain, "OpenAI Responses Compact")
 		default:
 			chain = append(chain, string(f))
 		}

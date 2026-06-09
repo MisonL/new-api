@@ -323,6 +323,7 @@ func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) 
 type responsesCompactLogDetails struct {
 	Mode              string
 	Setting           string
+	UpstreamProfile   string
 	UpstreamPath      string
 	AutoFallback      bool
 	ContextFallback   bool
@@ -356,9 +357,12 @@ func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	}
 
 	setting := settings.NormalizedResponsesCompactModeSetting()
-	effective := settings.ResponsesCompactModeOrDefaultAt(now)
-	autoFallback := setting == dto.ResponsesCompactModeAuto && settings.HasActiveResponsesCompactAutoFallback(now)
-	if ctx != nil && ctx.GetBool("responses_compact_auto_fallback_attempted") {
+	upstreamProfile := string(settings.NormalizedResponsesUpstreamProfile())
+	effective := settings.EffectiveResponsesCompactModeOrDefaultAt(now)
+	disabled := settings.HasDisabledResponsesCompact()
+	proxyCompatibilityProfile := settings.HasResponsesProxyCompatibilityProfile()
+	autoFallback := !proxyCompatibilityProfile && setting == dto.ResponsesCompactModeAuto && settings.HasActiveResponsesCompactAutoFallback(now)
+	if ctx != nil && ctx.GetBool("responses_compact_auto_fallback_attempted") && !disabled && !proxyCompatibilityProfile {
 		setting = dto.ResponsesCompactModeAuto
 		effective = dto.ResponsesCompactModeSynthetic
 		autoFallback = true
@@ -371,7 +375,7 @@ func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 		summaryModelRetry = ctx.GetBool("responses_compact_summary_model_fallback_attempted")
 		summaryModel = common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactSummaryModel)
 	}
-	if contextFallback || summaryModelRetry {
+	if (contextFallback || summaryModelRetry) && !disabled {
 		effective = dto.ResponsesCompactModeSynthetic
 	}
 	summaryModels := []string(nil)
@@ -381,7 +385,9 @@ func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 
 	mode := string(dto.ResponsesCompactModeNative)
 	upstreamPath := "/v1/responses/compact"
-	if channelType == constant.ChannelTypeOpenAI && effective == dto.ResponsesCompactModeSynthetic {
+	if effective == dto.ResponsesCompactModeDisabled {
+		mode = string(dto.ResponsesCompactModeDisabled)
+	} else if channelType == constant.ChannelTypeOpenAI && effective == dto.ResponsesCompactModeSynthetic {
 		mode = string(dto.ResponsesCompactModeSynthetic)
 		upstreamPath = "/v1/responses"
 	}
@@ -389,6 +395,7 @@ func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	return responsesCompactLogDetails{
 		Mode:              mode,
 		Setting:           string(setting),
+		UpstreamProfile:   upstreamProfile,
 		UpstreamPath:      upstreamPath,
 		AutoFallback:      autoFallback,
 		ContextFallback:   contextFallback,
@@ -408,6 +415,9 @@ func appendResponsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.Rela
 	}
 	other["responses_compact_mode"] = logInfo.Mode
 	other["responses_compact_setting"] = logInfo.Setting
+	if logInfo.UpstreamProfile != "" {
+		other["responses_upstream_profile"] = logInfo.UpstreamProfile
+	}
 	other["responses_compact_upstream_path"] = logInfo.UpstreamPath
 	if logInfo.AutoFallback {
 		other["responses_compact_auto_fallback"] = true
@@ -425,6 +435,9 @@ func appendResponsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.Rela
 		other["responses_compact_summary_models"] = logInfo.SummaryModels
 	}
 	content := fmt.Sprintf("Responses Compact mode=%s setting=%s path=%s", logInfo.Mode, logInfo.Setting, logInfo.UpstreamPath)
+	if logInfo.UpstreamProfile != "" {
+		content += fmt.Sprintf(" upstream_profile=%s", logInfo.UpstreamProfile)
+	}
 	if logInfo.AutoFallback {
 		content += " auto_fallback=true"
 	}

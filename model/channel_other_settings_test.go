@@ -37,6 +37,74 @@ func TestChannelOtherSettingsResponsesCompactAutoRoundTrip(t *testing.T) {
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactModeOrDefault())
 }
 
+func TestChannelOtherSettingsResponsesProxyProfileForcesSyntheticCompact(t *testing.T) {
+	for _, profile := range []dto.ResponsesUpstreamProfile{
+		dto.ResponsesUpstreamProfileGenericProxy,
+		dto.ResponsesUpstreamProfileChatOnlyProxy,
+		dto.ResponsesUpstreamProfileSub2APIHTTP,
+	} {
+		settings := dto.ChannelOtherSettings{
+			ResponsesCompactMode:     dto.ResponsesCompactModeNative,
+			ResponsesUpstreamProfile: profile,
+		}
+
+		require.Equal(t, profile, settings.NormalizedResponsesUpstreamProfile())
+		require.True(t, settings.HasResponsesProxyCompatibilityProfile())
+		require.True(t, settings.ShouldStripResponsesEncryptedReasoning())
+		require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactModeOrDefault())
+		require.Equal(t, dto.ResponsesCompactModeSynthetic, settings.EffectiveResponsesCompactModeOrDefault())
+		require.True(t, settings.HasSyntheticResponsesCompact())
+		require.False(t, settings.HasNativeResponsesCompact())
+	}
+}
+
+func TestChannelOtherSettingsDisabledResponsesCompactOverridesProxyProfile(t *testing.T) {
+	settings := dto.ChannelOtherSettings{
+		ResponsesCompactMode:     dto.ResponsesCompactModeDisabled,
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+	}
+
+	require.True(t, settings.HasDisabledResponsesCompact())
+	require.True(t, settings.HasResponsesProxyCompatibilityProfile())
+	require.Equal(t, dto.ResponsesCompactModeDisabled, settings.ResponsesCompactModeOrDefault())
+	require.Equal(t, dto.ResponsesCompactModeDisabled, settings.EffectiveResponsesCompactModeOrDefault())
+	require.False(t, settings.HasNativeResponsesCompact())
+	require.False(t, settings.HasSyntheticResponsesCompact())
+}
+
+func TestChannelOtherSettingsTrustedResponsesProfilesDoNotChangeDefaults(t *testing.T) {
+	for _, profile := range []dto.ResponsesUpstreamProfile{
+		dto.ResponsesUpstreamProfileOfficialOpenAI,
+		dto.ResponsesUpstreamProfileOfficialNewAPI,
+		dto.ResponsesUpstreamProfileSameClusterNewAPI,
+		dto.ResponsesUpstreamProfileTrustedNewAPI,
+		dto.ResponsesUpstreamProfileSub2APIWSV2,
+		dto.ResponsesUpstreamProfile("unknown"),
+	} {
+		settings := dto.ChannelOtherSettings{
+			ResponsesUpstreamProfile: profile,
+		}
+
+		require.False(t, settings.HasResponsesProxyCompatibilityProfile())
+		require.False(t, settings.ShouldStripResponsesEncryptedReasoning())
+		require.Equal(t, dto.ResponsesCompactModeNative, settings.EffectiveResponsesCompactModeOrDefault())
+		require.True(t, settings.HasNativeResponsesCompact())
+	}
+}
+
+func TestChannelOtherSettingsSub2APIHTTPDisallowsRESTPreviousResponseID(t *testing.T) {
+	settings := dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+	}
+
+	require.True(t, settings.HasResponsesProxyCompatibilityProfile())
+	require.True(t, settings.DisallowsResponsesRESTPreviousResponseID())
+	wsSettings := dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIWSV2,
+	}
+	require.False(t, wsSettings.DisallowsResponsesRESTPreviousResponseID())
+}
+
 func TestChannelOtherSettingsResponsesCompactAutoFallbackUsesDefaultThreeHourInterval(t *testing.T) {
 	now := time.Date(2026, 5, 26, 23, 30, 0, 0, time.UTC)
 	settings := dto.ChannelOtherSettings{

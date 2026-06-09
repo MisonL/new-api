@@ -132,10 +132,18 @@ import {
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX,
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN,
   RESPONSES_COMPACT_DISABLED_TOOLTIP,
-  RESPONSES_COMPACT_MODE_DISABLED,
   RESPONSES_COMPACT_MODE_DEFAULT,
+  RESPONSES_COMPACT_MODE_DISABLED,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY,
+  RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY,
+  RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI,
+  RESPONSES_UPSTREAM_PROFILE_OFFICIAL_OPENAI,
+  RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI,
+  RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP,
+  RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2,
+  RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI,
   normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactFallbackModels,
   validateModelMappingJson,
@@ -221,6 +229,7 @@ const MODEL_MAPPING_PREVIEW_FALLBACK: Array<{
 
 const ADVANCED_SETTINGS_EXPANDED_KEY = 'channel-advanced-settings-expanded'
 const UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT = 8
+const RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT = '__default__'
 
 function readAdvancedSettingsPreference(): boolean {
   if (typeof window === 'undefined') return false
@@ -245,6 +254,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
     values.strip_codex_encrypted_context ||
+    (values.type === 1 && values.responses_upstream_profile) ||
     (values.responses_compact_mode &&
       values.responses_compact_mode !== RESPONSES_COMPACT_MODE_DEFAULT) ||
     values.responses_compact_context_fallback === false ||
@@ -425,12 +435,14 @@ export function ChannelMutateDrawer({
   const currentBaseUrl = form.watch('base_url')
   const currentModels = form.watch('models')
   const currentModelMapping = form.watch('model_mapping')
-  const currentResponsesCompactMode = form.watch('responses_compact_mode')
   const awsKeyType = form.watch('aws_key_type')
   const upstreamModelUpdateCheckEnabled = form.watch(
     'upstream_model_update_check_enabled'
   )
   const currentSettings = form.watch('settings')
+  const currentResponsesCompactMode = form.watch('responses_compact_mode')
+  const responsesCompactDisabled =
+    currentResponsesCompactMode === RESPONSES_COMPACT_MODE_DISABLED
   const headerProfileStrategy = useMemo(
     () => getHeaderProfileStrategyFromSettings(currentSettings),
     [currentSettings]
@@ -1172,9 +1184,7 @@ export function ChannelMutateDrawer({
         )
       } catch (error) {
         toast.error(
-          error instanceof Error
-            ? error.message
-            : t('Invalid channel settings')
+          error instanceof Error ? error.message : t('Invalid channel settings')
         )
         return
       }
@@ -2933,6 +2943,127 @@ export function ChannelMutateDrawer({
                             />
                           )}
 
+                          {currentType === 1 && (
+                            <>
+                              <FormField
+                                control={form.control}
+                                name='responses_upstream_profile'
+                                render={({ field }) => (
+                                  <FormItem className='space-y-2 px-4 py-3'>
+                                    <div className='space-y-0.5'>
+                                      <FormLabel className='text-sm'>
+                                        {t('Responses upstream profile')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'Select a Responses compatibility profile for upstream relay behavior'
+                                        )}
+                                      </FormDescription>
+                                    </div>
+                                    <Select
+                                      value={
+                                        field.value ||
+                                        RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT
+                                      }
+                                      onValueChange={(value) =>
+                                        field.onChange(
+                                          value ===
+                                            RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT
+                                            ? ''
+                                            : value
+                                        )
+                                      }
+                                    >
+                                      <FormControl>
+                                        <SelectTrigger className='w-full'>
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                      </FormControl>
+                                      <SelectContent>
+                                        <SelectItem
+                                          value={
+                                            RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT
+                                          }
+                                        >
+                                          {t('Default behavior')}
+                                        </SelectItem>
+                                        <SelectItem
+                                          value={
+                                            RESPONSES_UPSTREAM_PROFILE_OFFICIAL_OPENAI
+                                          }
+                                        >
+                                          {t('Official OpenAI')}
+                                        </SelectItem>
+                                        <SelectItem
+                                          value={
+                                            RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI
+                                          }
+                                        >
+                                          {t('Trusted New API')}
+                                        </SelectItem>
+                                        <SelectItem
+                                          value={
+                                            RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI
+                                          }
+                                        >
+                                          {t('Official New API')}
+                                        </SelectItem>
+                                        <SelectItem
+                                          value={
+                                            RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI
+                                          }
+                                        >
+                                          {t('Same-cluster New API')}
+                                        </SelectItem>
+                                        <SelectItem
+                                          value={
+                                            RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP
+                                          }
+                                        >
+                                          {t('Sub2API HTTP')}
+                                        </SelectItem>
+                                        <SelectItem
+                                          value={
+                                            RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2
+                                          }
+                                        >
+                                          {t('Sub2API WSv2')}
+                                        </SelectItem>
+                                        <SelectItem
+                                          value={
+                                            RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY
+                                          }
+                                        >
+                                          {t('Generic proxy')}
+                                        </SelectItem>
+                                        <SelectItem
+                                          value={
+                                            RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY
+                                          }
+                                        >
+                                          {t('Chat-only proxy')}
+                                        </SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                    {(field.value ===
+                                      RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY ||
+                                      field.value ===
+                                        RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP ||
+                                      field.value ===
+                                        RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY) && (
+                                      <p className='text-muted-foreground text-xs'>
+                                        {t(
+                                          'Proxy profiles strip encrypted reasoning and route Responses Compact through synthetic summary.'
+                                        )}
+                                      </p>
+                                    )}
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                            </>
+                          )}
+
                           {(currentType === 1 || currentType === 3) && (
                             <>
                               <FormField
@@ -3002,20 +3133,20 @@ export function ChannelMutateDrawer({
                                             </SelectItem>
                                             <SelectItem
                                               value={
-                                                RESPONSES_COMPACT_MODE_DISABLED
-                                              }
-                                            >
-                                              {t(
-                                                'Disabled: do not route compact requests'
-                                              )}
-                                            </SelectItem>
-                                            <SelectItem
-                                              value={
                                                 RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
                                               }
                                             >
                                               {t(
                                                 'Synthetic summary via /v1/responses'
+                                              )}
+                                            </SelectItem>
+                                            <SelectItem
+                                              value={
+                                                RESPONSES_COMPACT_MODE_DISABLED
+                                              }
+                                            >
+                                              {t(
+                                                'Disabled: do not route compact requests'
                                               )}
                                             </SelectItem>
                                           </SelectContent>
@@ -3067,8 +3198,7 @@ export function ChannelMutateDrawer({
                                     )}
                                   />
 
-                                  {currentResponsesCompactMode !==
-                                    RESPONSES_COMPACT_MODE_DISABLED && (
+                                  {!responsesCompactDisabled && (
                                     <>
                                       <FormField
                                         control={form.control}
@@ -3141,7 +3271,6 @@ export function ChannelMutateDrawer({
                                           </FormItem>
                                         )}
                                       />
-
                                       <FormField
                                         control={form.control}
                                         name='responses_compact_summary_model_fallback'

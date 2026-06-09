@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
@@ -75,7 +76,7 @@ func validateResponsesCompactionOutput(output common.RawMessage) error {
 		if err := common.Unmarshal(rawItem, &item); err != nil {
 			continue
 		}
-		if responsesCompactionOutputItemType(item) != "compaction" {
+		if !relaycommon.IsResponsesCompactionItemType(responsesCompactionOutputItemType(item)) {
 			continue
 		}
 		hasCompaction = true

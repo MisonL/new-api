@@ -76,6 +76,17 @@ export type ResponsesCompactMode =
   | 'synthetic_summary'
   | 'disabled'
 
+export type ResponsesUpstreamProfile =
+  | ''
+  | 'official_openai'
+  | 'official_newapi'
+  | 'same_cluster_newapi'
+  | 'trusted_newapi'
+  | 'sub2api_http'
+  | 'sub2api_wsv2'
+  | 'generic_proxy'
+  | 'chat_only_proxy'
+
 export interface ChannelOtherSettings {
   azure_responses_version?: string
   responses_compact_mode?: ResponsesCompactMode
@@ -86,6 +97,7 @@ export interface ChannelOtherSettings {
   responses_compact_context_fallback?: boolean
   responses_compact_summary_model_fallback?: boolean
   responses_compact_summary_fallback_models?: string[]
+  responses_upstream_profile?: ResponsesUpstreamProfile
   vertex_key_type?: 'json' | 'api_key'
   openrouter_enterprise?: boolean
   aws_key_type?: 'ak_sk' | 'api_key'

@@ -64,6 +64,35 @@ func TestOaiResponsesCompactionHandlerPassesValidCompactionOutput(t *testing.T) 
 	require.JSONEq(t, body, recorder.Body.String())
 }
 
+func TestOaiResponsesCompactionHandlerPassesValidCompactionSummaryOutput(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	body := `{
+		"id":"resp_compact",
+		"object":"response",
+		"created_at":1710000000,
+		"output":[
+			{"type":"message","content":[{"type":"input_text","text":"summary"}]},
+			{"type":"compaction_summary","encrypted_content":"opaque"}
+		],
+		"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}
+	}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	usage, err := OaiResponsesCompactionHandler(c, resp)
+
+	require.Nil(t, err)
+	require.Equal(t, 12, usage.PromptTokens)
+	require.Equal(t, 3, usage.CompletionTokens)
+	require.Equal(t, 15, usage.TotalTokens)
+	require.JSONEq(t, body, recorder.Body.String())
+}
+
 func TestOaiResponsesCompactionHandlerRejectsMalformedCompactionOutput(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -130,6 +159,76 @@ func TestOaiResponsesCompactionHandlerRejectsNonStringEncryptedContent(t *testin
 	require.Equal(t, types.ErrorCodeBadResponseBody, err.GetErrorCode())
 	require.Contains(t, err.Error(), "compaction output has no encrypted content")
 	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesCompactionHandlerRejectsEmptyCompactionSummaryEncryptedContent(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{
+			"id":"resp_bad_compact",
+			"object":"response",
+			"output":[{"type":"compaction_summary","encrypted_content":""}]
+		}`)),
+	}
+
+	usage, err := OaiResponsesCompactionHandler(c, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadGateway, err.StatusCode)
+	require.Equal(t, types.ErrorCodeBadResponseBody, err.GetErrorCode())
+	require.Contains(t, err.Error(), "compaction output has no encrypted content")
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesCompactionHandlerRejectsMalformedCompactionSummaryEncryptedContent(t *testing.T) {
+	cases := []struct {
+		name string
+		item string
+	}{
+		{
+			name: "missing",
+			item: `{"type":"compaction_summary"}`,
+		},
+		{
+			name: "null",
+			item: `{"type":"compaction_summary","encrypted_content":null}`,
+		},
+		{
+			name: "non_string",
+			item: `{"type":"compaction_summary","encrypted_content":{"opaque":true}}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{
+					"id":"resp_bad_compact",
+					"object":"response",
+					"output":[` + tc.item + `]
+				}`)),
+			}
+
+			usage, err := OaiResponsesCompactionHandler(c, resp)
+
+			require.Nil(t, usage)
+			require.NotNil(t, err)
+			require.Equal(t, http.StatusBadGateway, err.StatusCode)
+			require.Equal(t, types.ErrorCodeBadResponseBody, err.GetErrorCode())
+			require.Contains(t, err.Error(), "compaction output has no encrypted content")
+			require.Empty(t, recorder.Body.String())
+		})
+	}
 }
 
 func TestResponsesCompactOpenAIErrorStatus(t *testing.T) {

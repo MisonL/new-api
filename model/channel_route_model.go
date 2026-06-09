@@ -2,6 +2,7 @@ package model
 
 import (
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -89,19 +90,31 @@ func channelSupportsCompactRouteCandidate(channel *Channel, candidate routeModel
 		if compactBaseModelName, isCompact := ratio_setting.CompactBaseModelName(candidate.model); isCompact {
 			baseModelName = compactBaseModelName
 		}
-		if settings.IsAutoResponsesCompact() {
-			return channelAllowsNativeCompactFallback(channel, settings, baseModelName) ||
-				channelAllowsSyntheticCompactFallback(channel, baseModelName)
+		if settings.HasDisabledResponsesCompact() {
+			return false
 		}
-		if settings.HasNativeResponsesCompact() {
+		now := time.Now()
+		switch settings.EffectiveResponsesCompactModeOrDefaultAt(now) {
+		case dto.ResponsesCompactModeNative:
 			return channelAllowsNativeCompactFallback(channel, settings, baseModelName)
-		}
-		if settings.HasSyntheticResponsesCompact() {
+		case dto.ResponsesCompactModeSynthetic:
+			if settings.IsAutoResponsesCompact() && settings.HasActiveResponsesCompactAutoFallback(now) {
+				return channelAllowsSyntheticCompactBaseFallback(channel, baseModelName)
+			}
 			return channelAllowsSyntheticCompactFallback(channel, baseModelName)
+		case dto.ResponsesCompactModeDisabled:
+			return false
+		default:
+			return false
 		}
-		return false
 	case constant.ChannelTypeCodex:
 		return true
+	case constant.ChannelTypeAzure:
+		baseModelName := candidate.model
+		if compactBaseModelName, isCompact := ratio_setting.CompactBaseModelName(candidate.model); isCompact {
+			baseModelName = compactBaseModelName
+		}
+		return channelAllowsAzureCompactRoute(channel, baseModelName)
 	default:
 		return false
 	}
@@ -152,6 +165,42 @@ func channelAllowsSyntheticCompactFallback(channel *Channel, baseModelName strin
 	}
 	compactModelName := ratio_setting.WithCompactModelSuffix(baseModelName)
 	if modelListContains(channel.GetModels(), compactModelName) || modelListContains(channel.GetModels(), baseModelName) {
+		return true
+	}
+	for _, mappedBaseModelName := range compactMappedBaseModelCandidates(channel, baseModelName, compactModelName) {
+		if modelListContains(channel.GetModels(), mappedBaseModelName) ||
+			modelListContains(channel.GetModels(), ratio_setting.WithCompactModelSuffix(mappedBaseModelName)) {
+			return true
+		}
+	}
+	return false
+}
+
+func channelAllowsSyntheticCompactBaseFallback(channel *Channel, baseModelName string) bool {
+	baseModelName = strings.TrimSpace(baseModelName)
+	if baseModelName == "" {
+		return false
+	}
+	compactModelName := ratio_setting.WithCompactModelSuffix(baseModelName)
+	if modelListContains(channel.GetModels(), baseModelName) {
+		return true
+	}
+	for _, mappedBaseModelName := range compactMappedBaseModelCandidates(channel, baseModelName, compactModelName) {
+		if modelListContains(channel.GetModels(), mappedBaseModelName) {
+			return true
+		}
+	}
+	return false
+}
+
+func channelAllowsAzureCompactRoute(channel *Channel, baseModelName string) bool {
+	baseModelName = strings.TrimSpace(baseModelName)
+	if baseModelName == "" {
+		return false
+	}
+	compactModelName := ratio_setting.WithCompactModelSuffix(baseModelName)
+	if modelListContains(channel.GetModels(), compactModelName) ||
+		modelListContains(channel.GetModels(), baseModelName) {
 		return true
 	}
 	for _, mappedBaseModelName := range compactMappedBaseModelCandidates(channel, baseModelName, compactModelName) {

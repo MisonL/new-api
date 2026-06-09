@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -82,4 +83,5 @@ func TestConvertOpenAIResponsesRequestPropagatesSyntheticCompactErrors(t *testin
 
 	require.Nil(t, converted)
 	require.ErrorIs(t, err, service.ErrSyntheticCompactStateNotFound)
+	require.Equal(t, "missing_local_synthetic_state", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
 }

@@ -41,9 +41,30 @@ func buildSyntheticCompactSummaryUserText(visibleParts []string, state *Syntheti
 		sections = append(sections, "Previous synthetic summary:\n"+strings.TrimSpace(state.Summary))
 	}
 	if len(visibleParts) > 0 {
-		sections = append(sections, "Visible conversation to compact:\n"+strings.Join(visibleParts, "\n"))
+		sections = append(sections, "Visible conversation to compact:\n"+limitSyntheticCompactVisibleParts(visibleParts, syntheticCompactVisibleTextMax))
 	}
 	return strings.Join(sections, "\n\n")
+}
+
+func limitSyntheticCompactVisibleParts(visibleParts []string, maxBytes int) string {
+	visibleText := strings.TrimSpace(strings.Join(visibleParts, "\n"))
+	if visibleText == "" {
+		return ""
+	}
+	if maxBytes <= 0 || len(visibleText) <= maxBytes {
+		return visibleText
+	}
+	tail := visibleText[len(visibleText)-maxBytes:]
+	tail = trimToRuneBoundary(tail)
+	return "[truncated earlier visible input]\n" + strings.TrimSpace(tail)
+}
+
+func limitSyntheticCompactPreviousVisibleParts(visibleParts []string) []string {
+	visibleText := limitSyntheticCompactVisibleParts(visibleParts, syntheticCompactPreviousVisibleTextMax)
+	if visibleText == "" {
+		return nil
+	}
+	return []string{visibleText}
 }
 
 func syntheticCompactPromptInput(systemText string, userText string) (common.RawMessage, error) {
@@ -105,4 +126,11 @@ func splitSyntheticCompactTextParts(text string) []string {
 		start = end
 	}
 	return parts
+}
+
+func trimToRuneBoundary(text string) string {
+	for len(text) > 0 && !utf8.RuneStart(text[0]) {
+		text = text[1:]
+	}
+	return text
 }

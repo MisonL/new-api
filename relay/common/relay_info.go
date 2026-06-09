@@ -208,6 +208,7 @@ func (info *RelayInfo) SyntheticCompactScope() types.SyntheticCompactStateScope 
 		UserID:  info.UserId,
 		TokenID: info.TokenId,
 		Group:   group,
+		Model:   strings.TrimSpace(info.OriginModelName),
 	}
 	if info.ChannelMeta != nil {
 		scope.ChannelID = info.ChannelId
@@ -217,7 +218,7 @@ func (info *RelayInfo) SyntheticCompactScope() types.SyntheticCompactStateScope 
 }
 
 func ShouldStripCodexEncryptedContext(info *RelayInfo) bool {
-	if info == nil || info.ChannelMeta == nil || !info.ChannelOtherSettings.StripCodexEncryptedContext {
+	if info == nil || info.ChannelMeta == nil || !info.ChannelOtherSettings.ShouldStripResponsesEncryptedReasoning() {
 		return false
 	}
 	if info.RelayMode == relayconstant.RelayModeResponses {
@@ -682,7 +683,8 @@ func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Req
 		err = errors.New("request is not a OpenAIResponsesRequest")
 	case types.RelayFormatOpenAIResponsesCompaction:
 		if request, ok := request.(*dto.OpenAIResponsesCompactionRequest); ok {
-			return GenRelayInfoResponsesCompaction(c, request), nil
+			info = GenRelayInfoResponsesCompaction(c, request)
+			break
 		}
 		return nil, errors.New("request is not a OpenAIResponsesCompactionRequest")
 	case types.RelayFormatTask:

@@ -11,10 +11,12 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -151,6 +153,91 @@ func newDistributorBootstrapRouter(handler gin.HandlerFunc) *gin.Engine {
 	})
 	router.POST("/v1/responses", Distribute(), handler)
 	return router
+}
+
+func newDistributorSpecificChannelRouter(channelID int, handler gin.HandlerFunc) *gin.Engine {
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("id", 1)
+		c.Set(common.RequestIdKey, "req-specific-channel-test")
+		common.SetContextKey(c, constant.ContextKeyTokenSpecificChannelId, fmt.Sprint(channelID))
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+		common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+		c.Next()
+	})
+	router.POST("/v1/responses/compact", Distribute(), handler)
+	return router
+}
+
+func TestDistributeSpecificChannelRejectsDisabledResponsesCompactMode(t *testing.T) {
+	db := setupDistributorBootstrapTestDB(t)
+
+	channel := &model.Channel{
+		Id:     1101,
+		Type:   constant.ChannelTypeOpenAI,
+		Key:    "test-key",
+		Status: common.ChannelStatusEnabled,
+		Name:   "compact-disabled-specific",
+		Models: "gpt-5.5",
+		Group:  "default",
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeDisabled,
+	})
+	require.NoError(t, db.Create(channel).Error)
+	require.NoError(t, channel.AddAbilities(nil))
+	model.InitChannelCache()
+
+	var handlerCalled atomic.Bool
+	router := newDistributorSpecificChannelRouter(channel.Id, func(c *gin.Context) {
+		handlerCalled.Store(true)
+		require.NoError(t, helper.StringData(c, `{"status":"unexpected"}`))
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"model":"gpt-5.5"}`))
+	request.Header.Set("Content-Type", gin.MIMEJSON)
+
+	router.ServeHTTP(recorder, request)
+
+	require.False(t, handlerCalled.Load())
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "gpt-5.5-openai-compact")
+}
+
+func TestDistributeSpecificChannelAllowsAzureResponsesCompact(t *testing.T) {
+	db := setupDistributorBootstrapTestDB(t)
+
+	channel := &model.Channel{
+		Id:     1102,
+		Type:   constant.ChannelTypeAzure,
+		Key:    "test-key",
+		Status: common.ChannelStatusEnabled,
+		Name:   "azure-compact-specific",
+		Models: "gpt-5.5",
+		Group:  "default",
+	}
+	require.NoError(t, db.Create(channel).Error)
+	require.NoError(t, channel.AddAbilities(nil))
+	model.InitChannelCache()
+
+	var handlerCalled atomic.Bool
+	router := newDistributorSpecificChannelRouter(channel.Id, func(c *gin.Context) {
+		handlerCalled.Store(true)
+		require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+		require.Equal(t, ratio_setting.WithCompactModelSuffix("gpt-5.5"), c.GetString("original_model"))
+		require.NoError(t, helper.StringData(c, `{"status":"ok"}`))
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"model":"gpt-5.5"}`))
+	request.Header.Set("Content-Type", gin.MIMEJSON)
+
+	router.ServeHTTP(recorder, request)
+
+	require.True(t, handlerCalled.Load())
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `{"status":"ok"}`)
 }
 
 func TestDistributeResponsesBootstrapRecoversBeforeGraceDeadline(t *testing.T) {

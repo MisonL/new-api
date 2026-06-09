@@ -97,6 +97,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		originModelName := info.OriginModelName
 		originPriceData := info.PriceData
+		normalizeResponsesCompactUsage(info, usageDto)
 
 		_, err := helper.ModelPriceHelper(c, info, info.GetEstimatePromptTokens(), &types.TokenCountMeta{})
 		if err != nil {
@@ -119,6 +120,36 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	return nil
 }
 
+func normalizeResponsesCompactUsage(info *relaycommon.RelayInfo, usage *dto.Usage) {
+	if info == nil || usage == nil {
+		return
+	}
+	estimatePromptTokens := info.GetEstimatePromptTokens()
+	if estimatePromptTokens <= 0 {
+		return
+	}
+	if usage.PromptTokens == 0 {
+		usage.PromptTokens = usage.InputTokens
+	}
+	if usage.InputTokens == 0 {
+		usage.InputTokens = usage.PromptTokens
+	}
+	if usage.PromptTokens == 0 {
+		usage.PromptTokens = estimatePromptTokens
+		usage.InputTokens = estimatePromptTokens
+	}
+	if usage.CompletionTokens == 0 {
+		usage.CompletionTokens = usage.OutputTokens
+	}
+	if usage.OutputTokens == 0 {
+		usage.OutputTokens = usage.CompletionTokens
+	}
+	totalTokens := usage.PromptTokens + usage.CompletionTokens
+	if usage.TotalTokens == 0 || usage.TotalTokens < totalTokens {
+		usage.TotalTokens = totalTokens
+	}
+}
+
 func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, request *dto.OpenAIResponsesRequest, passThroughGlobal bool) (*dto.Usage, *types.NewAPIError) {
 	if request == nil {
 		return nil, types.NewErrorWithStatusCode(
@@ -129,8 +160,14 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		)
 	}
 	var requestBody io.Reader
-	syntheticCompactReference := relaycommon.IsOpenAICompatibleResponses(info) &&
-		service.HasSyntheticCompactReference(*request)
+	syntheticCompactReference := false
+	if relaycommon.IsOpenAICompatibleResponses(info) {
+		var err error
+		syntheticCompactReference, err = service.HasLocalSyntheticCompactReferenceWithContext(c.Request.Context(), *request)
+		if err != nil {
+			return nil, newResponsesConvertRequestError(err)
+		}
+	}
 	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) &&
 		!relaycommon.ShouldConvertResponsesRequest(info) &&
 		!syntheticCompactReference
@@ -206,7 +243,8 @@ func newResponsesConvertRequestError(err error) *types.NewAPIError {
 	if errors.Is(err, service.ErrSyntheticCompactStateNotFound) ||
 		errors.Is(err, service.ErrSyntheticCompactRequiresVisibleInput) ||
 		errors.Is(err, service.ErrSyntheticCompactStateScopeMismatch) ||
-		errors.Is(err, service.ErrSyntheticCompactMultipleMarkers) {
+		errors.Is(err, service.ErrSyntheticCompactMultipleMarkers) ||
+		errors.Is(err, service.ErrResponsesRESTPreviousIDUnsupported) {
 		options = append(options, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 	}
 	return types.NewError(err, types.ErrorCodeConvertRequestFailed, options...)

@@ -1243,6 +1243,7 @@ func clearResponsesCompactSettingsForNonOpenAI(channelType int, settings *dto.Ch
 	settings.ResponsesCompactContextFallback = nil
 	settings.ResponsesCompactSummaryModelFallback = nil
 	settings.ResponsesCompactSummaryFallbackModels = nil
+	settings.ResponsesUpstreamProfile = ""
 	return true
 }
 
@@ -1257,7 +1258,8 @@ func hasResponsesCompactSettings(settings *dto.ChannelOtherSettings) bool {
 		settings.ResponsesCompactAutoFallbackRetryIntervalHours != 0 ||
 		settings.ResponsesCompactContextFallback != nil ||
 		settings.ResponsesCompactSummaryModelFallback != nil ||
-		len(settings.ResponsesCompactSummaryFallbackModels) > 0
+		len(settings.ResponsesCompactSummaryFallbackModels) > 0 ||
+		settings.ResponsesUpstreamProfile != ""
 }
 
 func FetchModels(c *gin.Context) {

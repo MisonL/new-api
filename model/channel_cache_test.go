@@ -560,6 +560,51 @@ func TestGetRandomSatisfiedChannelFallsBackFromCompactSuffixToBaseModel(t *testi
 	require.Equal(t, channel.Id, got.Id)
 }
 
+func TestGetRandomSatisfiedChannelFallsBackFromCompactSuffixToAzureBaseModel(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	channel := &Channel{
+		Id:     130,
+		Type:   constant.ChannelTypeAzure,
+		Name:   "azure-compact-base-model",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-5.5",
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-5.5",
+		ChannelId: channel.Id,
+		Enabled:   true,
+	}).Error)
+
+	InitChannelCache()
+
+	compactModel := ratio_setting.WithCompactModelSuffix("gpt-5.5")
+	require.True(t, IsChannelEnabledForGroupModel("default", compactModel, channel.Id))
+	got, err := GetRandomSatisfiedChannel("default", compactModel, 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+
+	common.MemoryCacheEnabled = false
+	require.True(t, IsChannelEnabledForGroupModel("default", compactModel, channel.Id))
+	got, err = GetRandomSatisfiedChannel("default", compactModel, 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, channel.Id, got.Id)
+}
+
 func TestGetRandomSatisfiedChannelDisabledCompactModeKeepsBaseModelRouting(t *testing.T) {
 	prepareChannelCacheTest(t)
 
@@ -581,7 +626,8 @@ func TestGetRandomSatisfiedChannelDisabledCompactModeKeepsBaseModelRouting(t *te
 		Models: "gpt-5.5",
 	}
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
-		ResponsesCompactMode: dto.ResponsesCompactModeDisabled,
+		ResponsesCompactMode:     dto.ResponsesCompactModeDisabled,
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
 	})
 	require.NoError(t, DB.Create(channel).Error)
 	require.NoError(t, DB.Create(&Ability{

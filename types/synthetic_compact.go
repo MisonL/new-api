@@ -6,6 +6,7 @@ type SyntheticCompactStateScope struct {
 	UserID      int
 	TokenID     int
 	Group       string
+	Model       string
 	ChannelID   int
 	ChannelType int
 }

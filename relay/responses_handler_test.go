@@ -60,6 +60,60 @@ func TestShouldRouteResponsesViaChatSkipsResponsesCompact(t *testing.T) {
 	require.False(t, shouldRouteResponsesViaChat(compactInfo, false))
 }
 
+func TestNormalizeResponsesCompactUsageFillsPromptEstimate(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+	info.SetEstimatePromptTokens(23)
+	usage := &dto.Usage{
+		CompletionTokens: 5,
+		TotalTokens:      5,
+		OutputTokens:     5,
+	}
+
+	normalizeResponsesCompactUsage(info, usage)
+
+	require.Equal(t, 23, usage.PromptTokens)
+	require.Equal(t, 23, usage.InputTokens)
+	require.Equal(t, 28, usage.TotalTokens)
+	require.Equal(t, 5, usage.CompletionTokens)
+	require.Equal(t, 5, usage.OutputTokens)
+}
+
+func TestNormalizeResponsesCompactUsageKeepsUpstreamPromptTokens(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+	info.SetEstimatePromptTokens(23)
+	usage := &dto.Usage{
+		PromptTokens:     11,
+		CompletionTokens: 5,
+		TotalTokens:      16,
+		InputTokens:      11,
+		OutputTokens:     5,
+	}
+
+	normalizeResponsesCompactUsage(info, usage)
+
+	require.Equal(t, 11, usage.PromptTokens)
+	require.Equal(t, 11, usage.InputTokens)
+	require.Equal(t, 16, usage.TotalTokens)
+}
+
+func TestNormalizeResponsesCompactUsageKeepsUpstreamTotalTokens(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+	info.SetEstimatePromptTokens(23)
+	usage := &dto.Usage{
+		PromptTokens:     11,
+		CompletionTokens: 5,
+		TotalTokens:      20,
+		InputTokens:      11,
+		OutputTokens:     5,
+	}
+
+	normalizeResponsesCompactUsage(info, usage)
+
+	require.Equal(t, 11, usage.PromptTokens)
+	require.Equal(t, 5, usage.CompletionTokens)
+	require.Equal(t, 20, usage.TotalTokens)
+}
+
 func TestFindResponsesViaChatRuleCarriesCustomToolBridgeOption(t *testing.T) {
 	settings := model_setting.GetGlobalSettings()
 	oldPolicy := settings.ChatCompletionsToResponsesPolicy
@@ -139,6 +193,52 @@ func TestShouldConvertResponsesRequestForCodexEncryptedContextStrip(t *testing.T
 	require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
 }
 
+func TestShouldConvertResponsesRequestForResponsesProxyProfileCompact(t *testing.T) {
+	for _, profile := range []dto.ResponsesUpstreamProfile{
+		dto.ResponsesUpstreamProfileGenericProxy,
+		dto.ResponsesUpstreamProfileChatOnlyProxy,
+		dto.ResponsesUpstreamProfileSub2APIHTTP,
+	} {
+		info := &relaycommon.RelayInfo{
+			RelayMode: relayconstant.RelayModeResponsesCompact,
+			ChannelMeta: &relaycommon.ChannelMeta{
+				ChannelType: constant.ChannelTypeOpenAI,
+				ChannelOtherSettings: dto.ChannelOtherSettings{
+					ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+					ResponsesUpstreamProfile: profile,
+				},
+			},
+		}
+
+		require.True(t, relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info))
+		require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
+	}
+}
+
+func TestShouldConvertResponsesRequestForStatefulProfiles(t *testing.T) {
+	for _, profile := range []dto.ResponsesUpstreamProfile{
+		dto.ResponsesUpstreamProfileOfficialOpenAI,
+		dto.ResponsesUpstreamProfileOfficialNewAPI,
+		dto.ResponsesUpstreamProfileSameClusterNewAPI,
+		dto.ResponsesUpstreamProfileTrustedNewAPI,
+		dto.ResponsesUpstreamProfileSub2APIWSV2,
+	} {
+		info := &relaycommon.RelayInfo{
+			RelayMode: relayconstant.RelayModeResponsesCompact,
+			ChannelMeta: &relaycommon.ChannelMeta{
+				ChannelType: constant.ChannelTypeOpenAI,
+				ChannelOtherSettings: dto.ChannelOtherSettings{
+					ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+					ResponsesUpstreamProfile: profile,
+				},
+			},
+		}
+
+		require.False(t, relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info))
+		require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
+	}
+}
+
 func TestShouldHandleSyntheticResponsesForSyntheticCompactMode(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeResponses,
@@ -161,6 +261,7 @@ func TestNewResponsesConvertRequestErrorMapsSyntheticClientErrorsToBadRequest(t 
 		service.ErrSyntheticCompactStateNotFound,
 		service.ErrSyntheticCompactRequiresVisibleInput,
 		service.ErrSyntheticCompactStateScopeMismatch,
+		service.ErrResponsesRESTPreviousIDUnsupported,
 	} {
 		err := newResponsesConvertRequestError(err)
 

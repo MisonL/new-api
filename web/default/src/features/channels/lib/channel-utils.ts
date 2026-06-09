@@ -14,6 +14,7 @@ import type {
   ChannelSettings,
   ChannelOtherSettings,
   ResponsesCompactMode,
+  ResponsesUpstreamProfile,
 } from '../types'
 
 export const RESPONSES_COMPACT_MODE_AUTO = 'auto' as const
@@ -22,6 +23,21 @@ export const RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY =
   'synthetic_summary' as const
 export const RESPONSES_COMPACT_MODE_DISABLED = 'disabled' as const
 export const RESPONSES_COMPACT_MODE_DEFAULT = RESPONSES_COMPACT_MODE_AUTO
+
+export const RESPONSES_UPSTREAM_PROFILE_DEFAULT = '' as const
+export const RESPONSES_UPSTREAM_PROFILE_OFFICIAL_OPENAI =
+  'official_openai' as const
+export const RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI =
+  'official_newapi' as const
+export const RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI =
+  'same_cluster_newapi' as const
+export const RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI =
+  'trusted_newapi' as const
+export const RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP = 'sub2api_http' as const
+export const RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2 = 'sub2api_wsv2' as const
+export const RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY = 'generic_proxy' as const
+export const RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY =
+  'chat_only_proxy' as const
 
 export const RESPONSES_COMPACT_BADGE_LABELS: Record<
   ResponsesCompactMode,
@@ -60,6 +76,18 @@ export const RESPONSES_COMPACT_BADGE_KEYS = [
   RESPONSES_COMPACT_AUTO_FALLBACK_BADGE_LABEL,
   RESPONSES_COMPACT_AUTO_FALLBACK_TOOLTIP,
   RESPONSES_COMPACT_DISABLED_TOOLTIP,
+  'Responses upstream profile',
+  'Select a Responses compatibility profile for upstream relay behavior',
+  'Default behavior',
+  'Official OpenAI',
+  'Trusted New API',
+  'Official New API',
+  'Same-cluster New API',
+  'Sub2API HTTP',
+  'Sub2API WSv2',
+  'Generic proxy',
+  'Chat-only proxy',
+  'Proxy profiles strip encrypted reasoning and route Responses Compact through synthetic summary.',
 ]
 
 export function normalizeResponsesCompactMode(
@@ -84,6 +112,36 @@ export function normalizeResponsesCompactMode(
     return RESPONSES_COMPACT_MODE_NATIVE
   }
   return RESPONSES_COMPACT_MODE_DEFAULT
+}
+
+export function normalizeResponsesUpstreamProfile(
+  profile: unknown
+): ResponsesUpstreamProfile {
+  if (profile === RESPONSES_UPSTREAM_PROFILE_OFFICIAL_OPENAI) {
+    return RESPONSES_UPSTREAM_PROFILE_OFFICIAL_OPENAI
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI) {
+    return RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI) {
+    return RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI) {
+    return RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP) {
+    return RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2) {
+    return RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY) {
+    return RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY) {
+    return RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY
+  }
+  return RESPONSES_UPSTREAM_PROFILE_DEFAULT
 }
 
 // ============================================================================
@@ -346,6 +404,9 @@ export function parseChannelOtherSettings(
       responses_compact_mode: normalizeResponsesCompactMode(
         settings.responses_compact_mode
       ),
+      responses_upstream_profile: normalizeResponsesUpstreamProfile(
+        settings.responses_upstream_profile
+      ),
       responses_compact_auto_fallback_retry_interval_hours:
         normalizeResponsesCompactAutoFallbackRetryIntervalHours(
           settings.responses_compact_auto_fallback_retry_interval_hours
@@ -413,6 +474,7 @@ function defaultResponsesCompactOtherSettings(): ChannelOtherSettings {
     responses_compact_summary_fallback_models: [
       ...RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
     ],
+    responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_DEFAULT,
   }
 }
 
@@ -427,7 +489,21 @@ export function getResponsesCompactMode(
 export function getResponsesCompactModeFromSettings(
   settings: ChannelOtherSettings
 ): ResponsesCompactMode {
-  return normalizeResponsesCompactMode(settings.responses_compact_mode)
+  const mode = normalizeResponsesCompactMode(settings.responses_compact_mode)
+  if (mode === RESPONSES_COMPACT_MODE_DISABLED) {
+    return RESPONSES_COMPACT_MODE_DISABLED
+  }
+  const profile = normalizeResponsesUpstreamProfile(
+    settings.responses_upstream_profile
+  )
+  if (
+    profile === RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY ||
+    profile === RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP ||
+    profile === RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY
+  ) {
+    return RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
+  }
+  return mode
 }
 
 export function isResponsesCompactAutoFallbackActive(

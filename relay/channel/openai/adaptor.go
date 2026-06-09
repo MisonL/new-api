@@ -2,7 +2,6 @@ package openai
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -602,18 +601,33 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
 	stripCodexContext := relaycommon.ShouldStripCodexEncryptedContext(info)
-	syntheticContinuation := relaycommon.IsOpenAICompatibleResponses(info) &&
-		!relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) &&
-		service.HasSyntheticCompactReference(request)
-	if syntheticContinuation {
-		convertedRequest, _, err := service.ApplySyntheticCompactState(ginRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+	syntheticContinuation := false
+	if relaycommon.IsOpenAICompatibleResponses(info) &&
+		!relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
+		var err error
+		syntheticContinuation, err = service.HasLocalSyntheticCompactReferenceWithContext(relaycommon.GinRequestContext(c), request)
 		if err != nil {
 			return nil, err
 		}
+	}
+	if syntheticContinuation {
+		convertedRequest, _, err := service.ApplySyntheticCompactState(relaycommon.GinRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+		if err != nil {
+			setResponsesPreviousIDActionForError(c, err)
+			return nil, err
+		}
+		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_synthetic_restore")
 		if stripCodexContext && !relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
 			return stripUnsupportedResponsesInputForRequest(info, convertedRequest, stripCodexContext)
 		}
 		return convertedRequest, nil
+	}
+	if shouldRejectResponsesRESTPreviousResponseID(info, request) {
+		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "rejected_by_upstream_profile")
+		return nil, fmt.Errorf("%w: previous_response_id is not supported by upstream profile %s over REST; use Responses WebSocket v2 or a native Responses-capable upstream", service.ErrResponsesRESTPreviousIDUnsupported, info.ChannelOtherSettings.NormalizedResponsesUpstreamProfile())
+	}
+	if strings.TrimSpace(request.PreviousResponseID) != "" {
+		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "forwarded_upstream")
 	}
 	if info != nil && stripCodexContext && !relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
 		var err error
@@ -626,13 +640,38 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		return request, nil
 	}
 	if relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
-		return service.BuildSyntheticCompactSummaryRequest(ginRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+		convertedRequest, err := service.BuildSyntheticCompactSummaryRequest(relaycommon.GinRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+		if err != nil {
+			setResponsesPreviousIDActionForError(c, err)
+			return nil, err
+		}
+		return convertedRequest, nil
 	}
 	if relaycommon.ShouldHandleSyntheticOpenAICompatibleResponses(info) {
-		convertedRequest, _, err := service.ApplySyntheticCompactState(ginRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+		convertedRequest, _, err := service.ApplySyntheticCompactState(relaycommon.GinRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+		if err != nil {
+			setResponsesPreviousIDActionForError(c, err)
+		}
 		return convertedRequest, err
 	}
 	return request, nil
+}
+
+func setResponsesPreviousIDActionForError(c *gin.Context, err error) {
+	if c != nil && errors.Is(err, service.ErrSyntheticCompactStateNotFound) {
+		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "missing_local_synthetic_state")
+	}
+}
+
+func shouldRejectResponsesRESTPreviousResponseID(info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	if !relaycommon.IsOpenAICompatibleResponses(info) ||
+		!info.ChannelOtherSettings.DisallowsResponsesRESTPreviousResponseID() {
+		return false
+	}
+	return strings.TrimSpace(request.PreviousResponseID) != ""
 }
 
 func syntheticCompactScopeFromRelayInfo(info *relaycommon.RelayInfo) service.SyntheticCompactStateScope {
@@ -667,13 +706,6 @@ func stripUnsupportedResponsesInputForRequest(info *relaycommon.RelayInfo, reque
 		result.remainingCount,
 	))
 	return request, nil
-}
-
-func ginRequestContext(c *gin.Context) context.Context {
-	if c == nil || c.Request == nil {
-		return context.Background()
-	}
-	return c.Request.Context()
 }
 
 type responsesInputStripResult struct {

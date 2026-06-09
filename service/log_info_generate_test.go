@@ -202,3 +202,41 @@ func TestGenerateTextOtherInfoKeepsSelectedAndAppliedUserAgentSeparate(t *testin
 	require.Equal(t, "selected-ua", info["selected_user_agent"])
 	require.Equal(t, "applied-ua", info["applied_user_agent"])
 }
+
+func TestGenerateTextOtherInfoIncludesResponsesProfileAndPreviousIDAction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesPreviousIDAction, "rejected_by_upstream_profile")
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+		},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "sub2api_http", other["responses_upstream_profile"])
+	require.Equal(t, "rejected_by_upstream_profile", other["responses_previous_id_action"])
+}
+
+func TestGenerateTextOtherInfoIncludesMissingLocalSyntheticStateAction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesPreviousIDAction, "missing_local_synthetic_state")
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "official_openai", other["responses_upstream_profile"])
+	require.Equal(t, "missing_local_synthetic_state", other["responses_previous_id_action"])
+}

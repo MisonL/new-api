@@ -40,7 +40,7 @@ func OaiSyntheticResponsesCompactionHandler(c *gin.Context, info *relaycommon.Re
 	if model == "" {
 		return nil, types.NewOpenAIError(errors.New("model name is required"), types.ErrorCodeInvalidRequest, http.StatusBadRequest)
 	}
-	compactResp, usage, err := service.BuildSyntheticCompactResponse(ginRequestContext(c), syntheticCompactScopeFromRelayInfo(info), model, responsesResp)
+	compactResp, usage, err := service.BuildSyntheticCompactResponse(relaycommon.GinRequestContext(c), syntheticCompactScopeFromRelayInfo(info), model, responsesResp)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
+  channelFormSchema,
   transformChannelToFormDefaults,
   transformFormDataToCreatePayload,
 } from '../src/features/channels/lib/channel-form'
@@ -14,6 +15,12 @@ import {
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
   RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
+  RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY,
+  RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI,
+  RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI,
+  RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP,
+  RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2,
+  RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI,
   getResponsesCompactAutoFallbackReason,
   getResponsesCompactMode,
   isResponsesCompactAutoFallbackActive,
@@ -125,6 +132,14 @@ describe('channel responses compact settings', () => {
     expect(
       getResponsesCompactMode(
         JSON.stringify({ responses_compact_mode: 'disabled' })
+      )
+    ).toBe(RESPONSES_COMPACT_MODE_DISABLED)
+    expect(
+      getResponsesCompactMode(
+        JSON.stringify({
+          responses_compact_mode: 'disabled',
+          responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY,
+        })
       )
     ).toBe(RESPONSES_COMPACT_MODE_DISABLED)
 
@@ -309,6 +324,126 @@ describe('channel responses compact settings', () => {
       stored.responses_compact_auto_fallback_retry_interval_hours
     ).toBe(6)
     expect(stored.responses_compact_auto_fallback_date).toBeUndefined()
+  })
+
+  test('loads and stores responses upstream profile for OpenAI channels', () => {
+    const defaults = transformChannelToFormDefaults(
+      makeChannel({
+        settings: JSON.stringify({
+          responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY,
+          responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
+        }),
+      })
+    )
+
+    expect(defaults.responses_upstream_profile).toBe(
+      RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY
+    )
+    expect(defaults.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    expect(
+      getResponsesCompactMode(
+        JSON.stringify({
+          responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY,
+          responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
+        })
+      )
+    ).toBe(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY)
+    expect(
+      getResponsesCompactMode(
+        JSON.stringify({
+          responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP,
+          responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
+        })
+      )
+    ).toBe(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY)
+
+    const payload = transformFormDataToCreatePayload({
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      type: 1,
+      responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY,
+    })
+    const stored = JSON.parse(String(payload.channel.settings))
+
+    expect(stored.responses_upstream_profile).toBe(
+      RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY
+    )
+
+    for (const profile of [
+      RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI,
+      RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI,
+      RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI,
+      RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP,
+      RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2,
+    ]) {
+      const result = channelFormSchema.safeParse({
+        ...CHANNEL_FORM_DEFAULT_VALUES,
+        name: 'openai',
+        models: 'gpt-5.5',
+        type: 1,
+        responses_upstream_profile: profile,
+      })
+      expect(result.success).toBe(true)
+      const payload = transformFormDataToCreatePayload({
+        ...CHANNEL_FORM_DEFAULT_VALUES,
+        name: 'openai',
+        models: 'gpt-5.5',
+        type: 1,
+        responses_upstream_profile: profile,
+      })
+      const storedProfile = JSON.parse(String(payload.channel.settings))
+      expect(storedProfile.responses_upstream_profile).toBe(profile)
+    }
+  })
+
+  test('drops empty, invalid, Azure, or non OpenAI responses upstream profile safely', () => {
+    expect(
+      transformChannelToFormDefaults(
+        makeChannel({
+          settings: JSON.stringify({
+            responses_upstream_profile: 'unknown',
+          }),
+        })
+      ).responses_upstream_profile
+    ).toBe('')
+
+    const empty = JSON.parse(
+      String(
+        transformFormDataToCreatePayload({
+          ...CHANNEL_FORM_DEFAULT_VALUES,
+          type: 1,
+          responses_upstream_profile: '',
+        }).channel.settings
+      )
+    )
+    expect(empty.responses_upstream_profile).toBeUndefined()
+
+    const azure = JSON.parse(
+      String(
+        transformFormDataToCreatePayload({
+          ...CHANNEL_FORM_DEFAULT_VALUES,
+          type: 3,
+          responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY,
+          settings: JSON.stringify({
+            responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY,
+          }),
+        }).channel.settings
+      )
+    )
+    expect(azure.responses_upstream_profile).toBeUndefined()
+
+    const nonOpenAI = JSON.parse(
+      String(
+        transformFormDataToCreatePayload({
+          ...CHANNEL_FORM_DEFAULT_VALUES,
+          type: 14,
+          responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI,
+          settings: JSON.stringify({
+            responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI,
+          }),
+        }).channel.settings
+      )
+    )
+    expect(nonOpenAI.responses_upstream_profile).toBeUndefined()
   })
 
   test('preserves auto fallback state unless compact mode changes', () => {
@@ -534,7 +669,7 @@ describe('channel responses compact settings', () => {
     )
   })
 
-  test('loads and stores disabled compact mode for OpenAI channels', () => {
+  test('loads, validates, and stores disabled compact mode for OpenAI channels', () => {
     const defaults = transformChannelToFormDefaults(
       makeChannel({
         settings: JSON.stringify({
@@ -547,11 +682,17 @@ describe('channel responses compact settings', () => {
       RESPONSES_COMPACT_MODE_DISABLED
     )
 
-    const payload = transformFormDataToCreatePayload({
+    const formData = {
       ...CHANNEL_FORM_DEFAULT_VALUES,
+      name: 'openai',
+      models: 'gpt-5.5',
       type: 1,
       responses_compact_mode: RESPONSES_COMPACT_MODE_DISABLED,
-    })
+    }
+
+    expect(channelFormSchema.safeParse(formData).success).toBe(true)
+
+    const payload = transformFormDataToCreatePayload(formData)
     const stored = JSON.parse(String(payload.channel.settings))
 
     expect(stored.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_DISABLED)

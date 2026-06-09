@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
@@ -55,15 +56,22 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
 	isCompact := info != nil && info.RelayMode == relayconstant.RelayModeResponsesCompact
-	if !isCompact && service.HasSyntheticCompactReference(request) {
-		convertedRequest, ok, err := service.ApplySyntheticCompactState(c.Request.Context(), service.SyntheticCompactScopeFromSource(info), request)
+	hasSyntheticReference, err := service.HasLocalSyntheticCompactReferenceWithContext(relaycommon.GinRequestContext(c), request)
+	if err != nil {
+		return nil, err
+	}
+	if !isCompact && hasSyntheticReference {
+		convertedRequest, ok, err := service.ApplySyntheticCompactState(relaycommon.GinRequestContext(c), service.SyntheticCompactScopeFromSource(info), request)
 		if err != nil {
+			setResponsesPreviousIDActionForError(c, err)
 			return nil, err
 		}
 		if !ok {
+			common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "missing_local_synthetic_state")
 			return nil, service.ErrSyntheticCompactStateNotFound
 		}
 		request = convertedRequest
+		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_synthetic_restore")
 	}
 
 	if info != nil && info.ChannelSetting.SystemPrompt != "" {
@@ -154,6 +162,12 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		path = "/backend-api/codex/responses/compact"
 	}
 	return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, path, info.ChannelType), nil
+}
+
+func setResponsesPreviousIDActionForError(c *gin.Context, err error) {
+	if c != nil && errors.Is(err, service.ErrSyntheticCompactStateNotFound) {
+		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "missing_local_synthetic_state")
+	}
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {

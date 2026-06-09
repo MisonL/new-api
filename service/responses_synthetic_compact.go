@@ -16,10 +16,13 @@ import (
 const (
 	syntheticCompactIDPrefix               = "resp_newapi_synthcmp_"
 	syntheticCompactMarkerPrefix           = "newapi.synthetic.compact:"
+	syntheticCompactMarkerVersion          = "v2"
 	syntheticCompactRedisPrefix            = "new-api:responses:synthetic-compact:"
 	syntheticCompactTTL                    = 24 * time.Hour
 	syntheticCompactStoreTimeout           = 10 * time.Second
 	syntheticCompactTextPartMax            = 8 * 1024 * 1024
+	syntheticCompactVisibleTextMax         = 96 * 1024
+	syntheticCompactPreviousVisibleTextMax = 32 * 1024
 	syntheticCompactSummaryMax             = 512 * 1024
 	syntheticCompactVisibleContentPartsMax = 100
 	syntheticCompactMemoryEntriesMax       = 256
@@ -49,31 +52,106 @@ var (
 	ErrSyntheticCompactStateScopeMismatch   = errors.New("synthetic compact state scope mismatch")
 	ErrSyntheticCompactMultipleMarkers      = errors.New("synthetic compact request contains multiple markers")
 	ErrSyntheticCompactStateScopeRequired   = errors.New("synthetic compact state scope is required")
+	ErrResponsesRESTPreviousIDUnsupported   = errors.New("responses REST previous_response_id is unsupported by upstream profile")
 )
 
-func syntheticCompactMarker(id string) string {
-	return syntheticCompactMarkerPrefix + strings.TrimSpace(id)
+func newSyntheticCompactID(ctx context.Context) (string, error) {
+	instanceID, err := syntheticCompactLocalInstanceID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("resolve synthetic compact instance id: %w", err)
+	}
+	return syntheticCompactIDPrefix + instanceID + "_" + common.GetUUID(), nil
 }
 
-func syntheticCompactIDFromMarker(marker string) (string, bool) {
+func syntheticCompactMarker(ctx context.Context, id string) (string, error) {
+	id = strings.TrimSpace(id)
+	instanceID := syntheticCompactIDInstance(id)
+	if instanceID == "" {
+		var err error
+		instanceID, err = syntheticCompactLocalInstanceID(ctx)
+		if err != nil {
+			return "", fmt.Errorf("resolve synthetic compact instance id: %w", err)
+		}
+	}
+	return syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + instanceID + ":" + id, nil
+}
+
+func syntheticCompactIDInstance(id string) string {
+	id = strings.TrimSpace(id)
+	if !strings.HasPrefix(id, syntheticCompactIDPrefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(id, syntheticCompactIDPrefix)
+	instanceID, _, ok := strings.Cut(rest, "_")
+	if !ok || !syntheticCompactInstanceIDValid(instanceID) {
+		return ""
+	}
+	return instanceID
+}
+
+func syntheticCompactIDFromReference(ctx context.Context, id string) (string, bool, error) {
+	id = strings.TrimSpace(id)
+	if !strings.HasPrefix(id, syntheticCompactIDPrefix) {
+		return "", false, nil
+	}
+	instanceID := syntheticCompactIDInstance(id)
+	if instanceID == "" {
+		return id, true, nil
+	}
+	matches, err := syntheticCompactMarkerInstanceMatches(ctx, instanceID)
+	if err != nil {
+		return "", false, err
+	}
+	if !matches {
+		return "", false, nil
+	}
+	return id, true, nil
+}
+
+func syntheticCompactIDFromMarker(ctx context.Context, marker string) (string, bool, error) {
 	marker = strings.TrimSpace(marker)
 	if !strings.HasPrefix(marker, syntheticCompactMarkerPrefix) {
-		return "", false
+		return "", false, nil
 	}
-	id := strings.TrimSpace(strings.TrimPrefix(marker, syntheticCompactMarkerPrefix))
-	return id, strings.HasPrefix(id, syntheticCompactIDPrefix)
+	payload := strings.TrimSpace(strings.TrimPrefix(marker, syntheticCompactMarkerPrefix))
+	version, rest, ok := strings.Cut(payload, ":")
+	if ok && version == syntheticCompactMarkerVersion {
+		instanceID, id, ok := strings.Cut(rest, ":")
+		instanceID = strings.TrimSpace(instanceID)
+		id = strings.TrimSpace(id)
+		if !ok || !syntheticCompactInstanceIDValid(instanceID) || !strings.HasPrefix(id, syntheticCompactIDPrefix) {
+			return "", false, nil
+		}
+		if idInstance := syntheticCompactIDInstance(id); idInstance == "" || idInstance != instanceID {
+			return "", false, nil
+		}
+		matches, err := syntheticCompactMarkerInstanceMatches(ctx, instanceID)
+		if err != nil {
+			return "", false, err
+		}
+		if !matches {
+			return "", false, nil
+		}
+		return id, true, nil
+	}
+	return syntheticCompactIDFromReference(ctx, payload)
 }
 
 func findSyntheticCompactState(ctx context.Context, req dto.OpenAIResponsesRequest) (*SyntheticCompactState, bool, error) {
 	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
-	if strings.HasPrefix(previousResponseID, syntheticCompactIDPrefix) {
-		if state, ok, err := loadSyntheticCompactState(ctx, previousResponseID); err != nil || ok {
+	if id, local, err := syntheticCompactIDFromReference(ctx, previousResponseID); err != nil {
+		return nil, false, err
+	} else if local {
+		if state, ok, err := loadSyntheticCompactState(ctx, id); err != nil || ok {
 			return state, ok, err
 		}
 	}
 	markerIDs := make([]string, 0, 1)
 	for _, marker := range syntheticCompactMarkers(req.Input) {
-		id, ok := syntheticCompactIDFromMarker(marker)
+		id, ok, err := syntheticCompactIDFromMarker(ctx, marker)
+		if err != nil {
+			return nil, false, err
+		}
 		if !ok {
 			continue
 		}
@@ -88,16 +166,28 @@ func findSyntheticCompactState(ctx context.Context, req dto.OpenAIResponsesReque
 	return nil, false, nil
 }
 
-func HasSyntheticCompactReference(req dto.OpenAIResponsesRequest) bool {
-	if strings.HasPrefix(strings.TrimSpace(req.PreviousResponseID), syntheticCompactIDPrefix) {
-		return true
+func HasSyntheticCompactReference(req dto.OpenAIResponsesRequest) (bool, error) {
+	return HasLocalSyntheticCompactReferenceWithContext(context.Background(), req)
+}
+
+func HasLocalSyntheticCompactReference(req dto.OpenAIResponsesRequest) (bool, error) {
+	return HasLocalSyntheticCompactReferenceWithContext(context.Background(), req)
+}
+
+func HasLocalSyntheticCompactReferenceWithContext(ctx context.Context, req dto.OpenAIResponsesRequest) (bool, error) {
+	if _, ok, err := syntheticCompactIDFromReference(ctx, req.PreviousResponseID); err != nil {
+		return false, err
+	} else if ok {
+		return true, nil
 	}
 	for _, marker := range syntheticCompactMarkers(req.Input) {
-		if _, ok := syntheticCompactIDFromMarker(marker); ok {
-			return true
+		if _, ok, err := syntheticCompactIDFromMarker(ctx, marker); err != nil {
+			return false, err
+		} else if ok {
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func SyntheticCompactScopeFromSource(source SyntheticCompactScopeSource) SyntheticCompactStateScope {
@@ -117,19 +207,23 @@ func BuildSyntheticCompactSummaryRequest(ctx context.Context, scope SyntheticCom
 			return dto.OpenAIResponsesRequest{}, err
 		}
 	}
-	if !found && HasSyntheticCompactReference(req) {
+	hasReference, err := HasLocalSyntheticCompactReferenceWithContext(ctx, req)
+	if err != nil {
+		return dto.OpenAIResponsesRequest{}, err
+	}
+	if !found && hasReference {
 		return dto.OpenAIResponsesRequest{}, ErrSyntheticCompactStateNotFound
 	}
-	if !found {
-		if previousResponseID := strings.TrimSpace(req.PreviousResponseID); previousResponseID != "" {
-			return buildSyntheticCompactPreviousResponseRequest(req.Model, previousResponseID)
-		}
-	}
-	cleanInput, err := removeSyntheticCompactMarkers(req.Input)
+	cleanInput, err := removeSyntheticCompactMarkers(ctx, req.Input)
 	if err != nil {
 		return dto.OpenAIResponsesRequest{}, err
 	}
 	visibleParts := visibleResponsesInputParts(cleanInput)
+	if !found {
+		if previousResponseID := strings.TrimSpace(req.PreviousResponseID); previousResponseID != "" {
+			return buildSyntheticCompactPreviousResponseRequest(req.Model, previousResponseID, visibleParts)
+		}
+	}
 	if len(visibleParts) == 0 && (!found || strings.TrimSpace(state.Summary) == "") {
 		return dto.OpenAIResponsesRequest{}, ErrSyntheticCompactRequiresVisibleInput
 	}
@@ -140,37 +234,68 @@ func BuildSyntheticCompactSummaryRequest(ctx context.Context, scope SyntheticCom
 		return dto.OpenAIResponsesRequest{}, err
 	}
 
+	model := syntheticCompactSummaryModel(req.Model)
+	logSyntheticCompactSummaryRequest(req.Model, model, input, len(visibleParts), strings.TrimSpace(req.PreviousResponseID) != "")
 	out := dto.OpenAIResponsesRequest{
-		Model: req.Model,
+		Model: model,
 		Input: input,
 	}
 	return out, nil
 }
 
-func buildSyntheticCompactPreviousResponseRequest(model string, previousResponseID string) (dto.OpenAIResponsesRequest, error) {
-	input, err := syntheticCompactPromptInput(syntheticCompactSummaryPrompt, syntheticCompactPreviousResponsePrompt)
+func buildSyntheticCompactPreviousResponseRequest(model string, previousResponseID string, visibleParts []string) (dto.OpenAIResponsesRequest, error) {
+	userText := syntheticCompactPreviousResponsePrompt
+	if len(visibleParts) > 0 {
+		userText += "\n\n" + buildSyntheticCompactSummaryUserText(limitSyntheticCompactPreviousVisibleParts(visibleParts), nil)
+	}
+	input, err := syntheticCompactPromptInput(syntheticCompactSummaryPrompt, userText)
 	if err != nil {
 		return dto.OpenAIResponsesRequest{}, err
 	}
+	summaryModel := syntheticCompactSummaryModel(model)
+	logSyntheticCompactSummaryRequest(model, summaryModel, input, len(visibleParts), true)
 	return dto.OpenAIResponsesRequest{
-		Model:              model,
+		Model:              summaryModel,
 		PreviousResponseID: previousResponseID,
 		Input:              input,
 	}, nil
 }
 
+func syntheticCompactSummaryModel(model string) string {
+	baseModel, isCompact := ratio_setting.CompactBaseModelName(strings.TrimSpace(model))
+	if isCompact && strings.TrimSpace(baseModel) != "" {
+		return baseModel
+	}
+	return strings.TrimSpace(model)
+}
+
+func logSyntheticCompactSummaryRequest(originalModel string, summaryModel string, input common.RawMessage, visiblePartCount int, hasUpstreamPreviousID bool) {
+	common.SysLog(fmt.Sprintf(
+		"responses synthetic compact summary request prepared: original_model=%s summary_model=%s input_bytes=%d visible_parts=%d upstream_previous_response_id=%t",
+		strings.TrimSpace(originalModel),
+		strings.TrimSpace(summaryModel),
+		len(input),
+		visiblePartCount,
+		hasUpstreamPreviousID,
+	))
+}
+
 func ApplySyntheticCompactState(ctx context.Context, scope SyntheticCompactStateScope, req dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool, error) {
 	state, found, err := findSyntheticCompactState(ctx, req)
 	if err != nil || !found {
-		if err == nil && !found && HasSyntheticCompactReference(req) {
-			err = ErrSyntheticCompactStateNotFound
+		if err == nil && !found {
+			var hasReference bool
+			hasReference, err = HasLocalSyntheticCompactReferenceWithContext(ctx, req)
+			if err == nil && hasReference {
+				err = ErrSyntheticCompactStateNotFound
+			}
 		}
 		return req, found, err
 	}
 	if err := validateSyntheticCompactState(scope, req.Model, state); err != nil {
 		return dto.OpenAIResponsesRequest{}, true, err
 	}
-	cleanInput, err := removeSyntheticCompactMarkers(req.Input)
+	cleanInput, err := removeSyntheticCompactMarkers(ctx, req.Input)
 	if err != nil {
 		return dto.OpenAIResponsesRequest{}, true, err
 	}
@@ -198,7 +323,10 @@ func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactSt
 	if summary == "" {
 		return nil, nil, fmt.Errorf("synthetic compact upstream response has no summary text")
 	}
-	id := syntheticCompactIDPrefix + common.GetUUID()
+	id, err := newSyntheticCompactID(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	createdAt := int64(upstream.CreatedAt)
 	if createdAt == 0 {
 		createdAt = time.Now().Unix()
@@ -217,16 +345,20 @@ func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactSt
 	if err := storeSyntheticCompactState(ctx, state); err != nil {
 		return nil, nil, err
 	}
+	marker, err := syntheticCompactMarker(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
 	output, err := common.Marshal([]map[string]string{
 		{
 			"type":              "compaction",
-			"encrypted_content": syntheticCompactMarker(id),
+			"encrypted_content": marker,
 		},
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	usage := syntheticCompactUsage(upstream.Usage)
+	usage := syntheticCompactUsage(upstream.Usage, model, summary)
 	return &dto.OpenAIResponsesCompactionResponse{
 		ID:        id,
 		Object:    "response",
@@ -236,7 +368,7 @@ func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactSt
 	}, usage, nil
 }
 
-func validateSyntheticCompactState(scope SyntheticCompactStateScope, model string, state *SyntheticCompactState) error {
+func validateSyntheticCompactState(scope SyntheticCompactStateScope, _ string, state *SyntheticCompactState) error {
 	if state == nil {
 		return nil
 	}
@@ -250,9 +382,6 @@ func validateSyntheticCompactState(scope SyntheticCompactStateScope, model strin
 	}
 	if state.Group != "" && state.Group != strings.TrimSpace(scope.Group) {
 		return fmt.Errorf("%w: synthetic compact state belongs to a different group", ErrSyntheticCompactStateScopeMismatch)
-	}
-	if !syntheticCompactModelCompatible(state.Model, model) {
-		return fmt.Errorf("%w: synthetic compact state belongs to a different model", ErrSyntheticCompactStateScopeMismatch)
 	}
 	return nil
 }
@@ -270,23 +399,9 @@ func validateSyntheticCompactScopeForStore(scope SyntheticCompactStateScope) err
 	return nil
 }
 
-func syntheticCompactModelCompatible(storedModel string, requestModel string) bool {
-	storedModel = strings.TrimSpace(storedModel)
-	requestModel = strings.TrimSpace(requestModel)
-	if storedModel == "" || requestModel == "" || storedModel == requestModel {
-		return true
-	}
-	return syntheticCompactBaseModel(storedModel) == syntheticCompactBaseModel(requestModel)
-}
-
-func syntheticCompactBaseModel(model string) string {
-	baseModel, _ := ratio_setting.CompactBaseModelName(strings.TrimSpace(model))
-	return baseModel
-}
-
-func syntheticCompactUsage(usage *dto.Usage) *dto.Usage {
+func syntheticCompactUsage(usage *dto.Usage, model string, summary string) *dto.Usage {
 	if usage == nil {
-		return &dto.Usage{}
+		return estimatedSyntheticCompactUsage(model, summary)
 	}
 	copied := *usage
 	if copied.PromptTokens == 0 {
@@ -294,6 +409,9 @@ func syntheticCompactUsage(usage *dto.Usage) *dto.Usage {
 	}
 	if copied.CompletionTokens == 0 {
 		copied.CompletionTokens = copied.OutputTokens
+	}
+	if copied.PromptTokens == 0 && copied.CompletionTokens == 0 && copied.TotalTokens > 0 {
+		copied.CompletionTokens = copied.TotalTokens
 	}
 	if copied.TotalTokens == 0 {
 		copied.TotalTokens = copied.PromptTokens + copied.CompletionTokens
@@ -304,5 +422,20 @@ func syntheticCompactUsage(usage *dto.Usage) *dto.Usage {
 	if copied.OutputTokens == 0 {
 		copied.OutputTokens = copied.CompletionTokens
 	}
+	if copied.TotalTokens == 0 && strings.TrimSpace(summary) != "" {
+		return estimatedSyntheticCompactUsage(model, summary)
+	}
 	return &copied
+}
+
+func estimatedSyntheticCompactUsage(model string, summary string) *dto.Usage {
+	completionTokens := EstimateTokenByModel(model, summary)
+	if completionTokens == 0 && strings.TrimSpace(summary) != "" {
+		completionTokens = 1
+	}
+	return &dto.Usage{
+		CompletionTokens: completionTokens,
+		TotalTokens:      completionTokens,
+		OutputTokens:     completionTokens,
+	}
 }

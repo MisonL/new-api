@@ -172,6 +172,7 @@ func TestResetResponsesCompactAutoFallbackClearsNonOpenAISettings(t *testing.T) 
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
 		AzureResponsesVersion:                          "preview",
 		ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
+		ResponsesUpstreamProfile:                       dto.ResponsesUpstreamProfileGenericProxy,
 		ResponsesCompactAutoFallbackDate:               20260526,
 		ResponsesCompactAutoFallbackAt:                 1780000000,
 		ResponsesCompactAutoFallbackReason:             "status_code=404",
@@ -184,6 +185,7 @@ func TestResetResponsesCompactAutoFallbackClearsNonOpenAISettings(t *testing.T) 
 	settings := channel.GetOtherSettings()
 	require.Equal(t, "preview", settings.AzureResponsesVersion)
 	require.Empty(t, settings.ResponsesCompactMode)
+	require.Empty(t, settings.ResponsesUpstreamProfile)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackAt)
 	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
@@ -194,12 +196,13 @@ func TestValidateChannelOtherSettingsClearsCompactMetadataForNonOpenAI(t *testin
 	channel := &model.Channel{
 		Type: constant.ChannelTypeAnthropic,
 		OtherSettings: `{
-			"azure_responses_version":"preview",
-			"responses_compact_mode":"auto",
-			"responses_compact_auto_fallback_date":20260526,
-			"responses_compact_auto_fallback_at":1780000000,
-			"responses_compact_auto_fallback_reason":"status_code=404",
-			"responses_compact_auto_fallback_retry_interval_hours":6
+				"azure_responses_version":"preview",
+				"responses_compact_mode":"auto",
+				"responses_upstream_profile":"generic_proxy",
+				"responses_compact_auto_fallback_date":20260526,
+				"responses_compact_auto_fallback_at":1780000000,
+				"responses_compact_auto_fallback_reason":"status_code=404",
+				"responses_compact_auto_fallback_retry_interval_hours":6
 		}`,
 	}
 
@@ -208,10 +211,27 @@ func TestValidateChannelOtherSettingsClearsCompactMetadataForNonOpenAI(t *testin
 	settings := channel.GetOtherSettings()
 	require.Equal(t, "preview", settings.AzureResponsesVersion)
 	require.Empty(t, settings.ResponsesCompactMode)
+	require.Empty(t, settings.ResponsesUpstreamProfile)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackAt)
 	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackRetryIntervalHours)
+}
+
+func TestValidateChannelOtherSettingsPreservesDisabledProxyProfileForOpenAI(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI,
+		OtherSettings: `{
+			"responses_compact_mode":"disabled",
+			"responses_upstream_profile":"generic_proxy"
+		}`,
+	}
+
+	require.NoError(t, validateChannelOtherSettings(channel, map[string]struct{}{}))
+
+	settings := channel.GetOtherSettings()
+	require.Equal(t, dto.ResponsesCompactModeDisabled, settings.ResponsesCompactMode)
+	require.Equal(t, dto.ResponsesUpstreamProfileGenericProxy, settings.ResponsesUpstreamProfile)
 }
 
 func TestValidateChannelOtherSettingsRejectsInvalidCompactRetryInterval(t *testing.T) {

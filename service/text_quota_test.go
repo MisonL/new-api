@@ -225,6 +225,93 @@ func TestResponsesCompactLogInfoRecordsSyntheticDuringActiveAutoFallbackWindow(t
 	require.True(t, logInfo.AutoFallback)
 }
 
+func TestResponsesCompactLogInfoRecordsSyntheticForResponsesProxyProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+			},
+		},
+	}
+
+	logInfo, ok := responsesCompactLogInfo(ctx, info, now)
+
+	require.True(t, ok)
+	require.Equal(t, "synthetic_summary", logInfo.Mode)
+	require.Equal(t, "auto", logInfo.Setting)
+	require.Equal(t, "generic_proxy", logInfo.UpstreamProfile)
+	require.Equal(t, "/v1/responses", logInfo.UpstreamPath)
+	require.False(t, logInfo.AutoFallback)
+}
+
+func TestResponsesCompactLogInfoDoesNotMarkAutoFallbackForProxyProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+	ctx.Set("responses_compact_auto_fallback_attempted", true)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:           dto.ResponsesCompactModeAuto,
+				ResponsesUpstreamProfile:       dto.ResponsesUpstreamProfileGenericProxy,
+				ResponsesCompactAutoFallbackAt: now.Unix(),
+			},
+		},
+	}
+
+	logInfo, ok := responsesCompactLogInfo(ctx, info, now)
+
+	require.True(t, ok)
+	require.Equal(t, "synthetic_summary", logInfo.Mode)
+	require.Equal(t, "auto", logInfo.Setting)
+	require.Equal(t, "/v1/responses", logInfo.UpstreamPath)
+	require.False(t, logInfo.AutoFallback)
+}
+
+func TestResponsesCompactLogInfoRecordsDisabledBeforeProxyProfileFallbacks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+	ctx.Set("responses_compact_auto_fallback_attempted", true)
+	ctx.Set("responses_compact_context_fallback_attempted", true)
+	ctx.Set("responses_compact_summary_model_fallback_attempted", true)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeDisabled,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+			},
+		},
+	}
+
+	logInfo, ok := responsesCompactLogInfo(ctx, info, now)
+
+	require.True(t, ok)
+	require.Equal(t, "disabled", logInfo.Mode)
+	require.Equal(t, "disabled", logInfo.Setting)
+	require.Equal(t, "/v1/responses/compact", logInfo.UpstreamPath)
+	require.False(t, logInfo.AutoFallback)
+	// These flags record attempted request paths; disabled only prevents them from changing the effective compact mode.
+	require.True(t, logInfo.ContextFallback)
+	require.True(t, logInfo.SummaryModelRetry)
+}
+
 func TestAppendResponsesCompactLogInfoWritesContentAndOther(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
@@ -252,6 +339,30 @@ func TestAppendResponsesCompactLogInfoWritesContentAndOther(t *testing.T) {
 	require.Equal(t, "synthetic_summary", annotatedOther["responses_compact_setting"])
 	require.Equal(t, "/v1/responses", annotatedOther["responses_compact_upstream_path"])
 	require.Equal(t, true, annotatedOther["existing"])
+}
+
+func TestAppendResponsesCompactLogInfoWritesUpstreamProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+		},
+	}
+
+	content, other := appendResponsesCompactLogInfo(ctx, info, nil, nil, now)
+
+	require.Len(t, content, 1)
+	require.Contains(t, content[0], "upstream_profile=sub2api_http")
+	require.Equal(t, "sub2api_http", other["responses_upstream_profile"])
+	require.Equal(t, "synthetic_summary", other["responses_compact_mode"])
 }
 
 func TestAppendResponsesCompactLogInfoRecordsContextAndSummaryModelFallback(t *testing.T) {

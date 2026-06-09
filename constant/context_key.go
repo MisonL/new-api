@@ -12,6 +12,7 @@ const (
 	ContextKeyResponsesBootstrapRecoveryState ContextKey = "responses_bootstrap_recovery_state"
 	ContextKeyResponsesCompactSummaryModel    ContextKey = "responses_compact_summary_model"
 	ContextKeyResponsesCompactSummaryModels   ContextKey = "responses_compact_summary_models"
+	ContextKeyResponsesPreviousIDAction       ContextKey = "responses_previous_id_action"
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"

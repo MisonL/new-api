@@ -1,13 +1,19 @@
 import { z } from 'zod'
 import { CHANNEL_STATUS, MODEL_FETCHABLE_TYPES } from '../constants'
-import type { Channel, ResponsesCompactMode } from '../types'
+import type {
+  Channel,
+  ResponsesCompactMode,
+  ResponsesUpstreamProfile,
+} from '../types'
 import {
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  RESPONSES_UPSTREAM_PROFILE_DEFAULT,
   normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactMode,
   normalizeResponsesCompactFallbackModels,
+  normalizeResponsesUpstreamProfile,
 } from './channel-utils'
 
 // ============================================================================
@@ -62,6 +68,19 @@ export const channelFormSchema = z.object({
   allow_safety_identifier: z.boolean().optional(), // OpenAI only
   allow_include_obfuscation: z.boolean().optional(), // OpenAI: include usage obfuscation
   strip_codex_encrypted_context: z.boolean().optional(), // OpenAI: strip Codex encrypted context
+  responses_upstream_profile: z
+    .enum([
+      '',
+      'official_openai',
+      'official_newapi',
+      'same_cluster_newapi',
+      'trusted_newapi',
+      'sub2api_http',
+      'sub2api_wsv2',
+      'generic_proxy',
+      'chat_only_proxy',
+    ])
+    .optional(),
   responses_compact_mode: z
     .enum(['auto', 'native', 'synthetic_summary', 'disabled'])
     .optional(),
@@ -128,6 +147,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_safety_identifier: false,
   allow_include_obfuscation: false,
   strip_codex_encrypted_context: false,
+  responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_DEFAULT,
   responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
   responses_compact_auto_fallback_retry_interval_hours:
     RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
@@ -190,6 +210,8 @@ export function transformChannelToFormDefaults(
   let allowSafetyIdentifier = false
   let allowIncludeObfuscation = false
   let stripCodexEncryptedContext = false
+  let responsesUpstreamProfile: ResponsesUpstreamProfile =
+    RESPONSES_UPSTREAM_PROFILE_DEFAULT
   let responsesCompactMode: ResponsesCompactMode =
     RESPONSES_COMPACT_MODE_DEFAULT
   let responsesCompactAutoFallbackRetryIntervalHours =
@@ -216,6 +238,9 @@ export function transformChannelToFormDefaults(
       disableStore = parsed.disable_store === true
       allowSafetyIdentifier = parsed.allow_safety_identifier === true
       allowIncludeObfuscation = parsed.allow_include_obfuscation === true
+      responsesUpstreamProfile = normalizeResponsesUpstreamProfile(
+        parsed.responses_upstream_profile
+      )
       stripCodexEncryptedContext = parsed.strip_codex_encrypted_context === true
       responsesCompactMode = normalizeResponsesCompactMode(
         parsed.responses_compact_mode
@@ -291,6 +316,7 @@ export function transformChannelToFormDefaults(
     claude_beta_query: claudeBetaQuery,
     allow_safety_identifier: allowSafetyIdentifier,
     strip_codex_encrypted_context: stripCodexEncryptedContext,
+    responses_upstream_profile: responsesUpstreamProfile,
     responses_compact_mode: responsesCompactMode,
     responses_compact_auto_fallback_retry_interval_hours:
       responsesCompactAutoFallbackRetryIntervalHours,
@@ -379,6 +405,19 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       formData.strip_codex_encrypted_context === true
   } else if ('strip_codex_encrypted_context' in settingsObj) {
     delete settingsObj.strip_codex_encrypted_context
+  }
+
+  if (formData.type === 1) {
+    const upstreamProfile = normalizeResponsesUpstreamProfile(
+      formData.responses_upstream_profile
+    )
+    if (upstreamProfile) {
+      settingsObj.responses_upstream_profile = upstreamProfile
+    } else {
+      delete settingsObj.responses_upstream_profile
+    }
+  } else if ('responses_upstream_profile' in settingsObj) {
+    delete settingsObj.responses_upstream_profile
   }
 
   if (formData.type === 1) {

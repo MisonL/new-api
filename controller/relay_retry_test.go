@@ -419,6 +419,13 @@ func TestResponsesCompactRequestHasContextPayload(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "compaction summary item",
+			req: &dto.OpenAIResponsesCompactionRequest{
+				Input: []byte(`[{"type":"compaction_summary","encrypted_content":"opaque"}]`),
+			},
+			want: true,
+		},
+		{
 			name: "encrypted reasoning item",
 			req: &dto.OpenAIResponsesCompactionRequest{
 				Input: []byte(`[{"type":"reasoning","encrypted_content":"opaque"}]`),

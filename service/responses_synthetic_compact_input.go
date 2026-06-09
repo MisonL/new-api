@@ -1,10 +1,12 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
 func syntheticCompactMarkers(input common.RawMessage) []string {
@@ -21,7 +23,7 @@ func syntheticCompactMarkers(input common.RawMessage) []string {
 		if !ok {
 			continue
 		}
-		if rawStringField(item["type"]) != "compaction" {
+		if !relaycommon.IsResponsesCompactionItemType(rawStringField(item["type"])) {
 			continue
 		}
 		if marker := rawStringField(item["encrypted_content"]); marker != "" {
@@ -31,7 +33,7 @@ func syntheticCompactMarkers(input common.RawMessage) []string {
 	return markers
 }
 
-func removeSyntheticCompactMarkers(input common.RawMessage) (common.RawMessage, error) {
+func removeSyntheticCompactMarkers(ctx context.Context, input common.RawMessage) (common.RawMessage, error) {
 	if common.GetJsonType(input) != "array" {
 		return input, nil
 	}
@@ -47,9 +49,11 @@ func removeSyntheticCompactMarkers(input common.RawMessage) (common.RawMessage, 
 			cleaned = append(cleaned, rawItem)
 			continue
 		}
-		if rawStringField(item["type"]) == "compaction" {
+		if relaycommon.IsResponsesCompactionItemType(rawStringField(item["type"])) {
 			if marker := rawStringField(item["encrypted_content"]); marker != "" {
-				if _, ok := syntheticCompactIDFromMarker(marker); ok {
+				if _, ok, err := syntheticCompactIDFromMarker(ctx, marker); err != nil {
+					return nil, err
+				} else if ok {
 					continue
 				}
 			}
@@ -143,7 +147,7 @@ func rawVisibleResponsesInputItem(rawItem common.RawMessage) string {
 		return "[input] " + text
 	case "object":
 		item, ok := responsesInputObject(rawItem)
-		if !ok || rawStringField(item["type"]) == "compaction" {
+		if !ok || relaycommon.IsResponsesCompactionItemType(rawStringField(item["type"])) {
 			return ""
 		}
 		text := visibleResponsesItemText(item)

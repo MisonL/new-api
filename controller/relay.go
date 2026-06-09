@@ -521,7 +521,8 @@ func shouldFallbackResponsesCompactAuto(c *gin.Context, info *relaycommon.RelayI
 	}
 	if info.RelayMode != relayconstant.RelayModeResponsesCompact ||
 		info.ChannelType != constant.ChannelTypeOpenAI ||
-		!info.ChannelOtherSettings.IsAutoResponsesCompact() {
+		!info.ChannelOtherSettings.IsAutoResponsesCompact() ||
+		info.ChannelOtherSettings.HasResponsesProxyCompatibilityProfile() {
 		return false
 	}
 	if info.ChannelOtherSettings.HasActiveResponsesCompactAutoFallback(time.Now()) {
@@ -861,9 +862,11 @@ func responsesRequestHasContextPayload(previousResponseID string, input common.R
 		if err := common.Unmarshal(rawItem, &item); err != nil {
 			continue
 		}
-		switch responsesCompactInputItemType(item) {
-		case "compaction":
+		itemType := responsesCompactInputItemType(item)
+		if relaycommon.IsResponsesCompactionItemType(itemType) {
 			return true
+		}
+		switch itemType {
 		case "reasoning":
 			if responsesCompactInputHasEncryptedContent(item) {
 				return true

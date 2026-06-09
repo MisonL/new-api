@@ -53,6 +53,12 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
 				return
 			}
+			if _, isCompactRequest := ratio_setting.CompactBaseModelName(modelRequest.Model); isCompactRequest &&
+				!isSpecificChannelEnabledForCompactRequest(c, modelRequest.Model, channel.Id) {
+				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				return
+			}
 		} else {
 			// Select a channel for the user
 			// check token model mapping
@@ -164,6 +170,15 @@ func Distribute() func(c *gin.Context) {
 			service.RecordChannelAffinity(c, channel.Id)
 		}
 	}
+}
+
+func isSpecificChannelEnabledForCompactRequest(c *gin.Context, modelName string, channelID int) bool {
+	usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+	if usingGroup == "auto" {
+		userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+		return model.IsChannelEnabledForAnyGroupModel(service.GetUserAutoGroup(userGroup), modelName, channelID)
+	}
+	return model.IsChannelEnabledForGroupModel(usingGroup, modelName, channelID)
 }
 
 // getModelFromRequest 从请求中读取模型信息

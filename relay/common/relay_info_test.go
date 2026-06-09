@@ -1,10 +1,15 @@
 package common
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -147,4 +152,44 @@ func TestRelayInfoGetFinalRequestRelayFormatFallsBackToRelayFormat(t *testing.T)
 func TestRelayInfoGetFinalRequestRelayFormatNilReceiver(t *testing.T) {
 	var info *RelayInfo
 	require.Equal(t, types.RelayFormat(""), info.GetFinalRequestRelayFormat())
+}
+
+func TestRelayInfoSyntheticCompactScopeUsesOriginModel(t *testing.T) {
+	info := &RelayInfo{
+		UserId:          10,
+		TokenId:         20,
+		UsingGroup:      "default",
+		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &ChannelMeta{
+			ChannelId:   163,
+			ChannelType: 1,
+		},
+	}
+
+	scope := info.SyntheticCompactScope()
+
+	require.Equal(t, "gpt-5.5-openai-compact", scope.Model)
+	require.Equal(t, "default", scope.Group)
+	require.Equal(t, 163, scope.ChannelID)
+}
+
+func TestGenRelayInfoResponsesCompactionInitializesConversionChain(t *testing.T) {
+	prevMode := gin.Mode()
+	t.Cleanup(func() {
+		gin.SetMode(prevMode)
+	})
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	request := &dto.OpenAIResponsesCompactionRequest{
+		Model: "gpt-5.4-mini",
+		Input: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"compact"}]}]`),
+	}
+
+	info, err := GenRelayInfo(ctx, types.RelayFormatOpenAIResponsesCompaction, request, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponsesCompaction}, info.RequestConversionChain)
+	require.Equal(t, types.RelayFormat(types.RelayFormatOpenAIResponsesCompaction), info.GetFinalRequestRelayFormat())
 }
