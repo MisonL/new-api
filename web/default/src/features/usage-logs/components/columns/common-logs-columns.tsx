@@ -64,6 +64,14 @@ interface ResponsesCompactTooltipRow {
   className?: string
 }
 
+interface ReasoningEffortInfo {
+  value: string
+  badgeLabel: string
+  className: string
+}
+
+const KNOWN_REASONING_EFFORTS = new Set(['minimal', 'low', 'medium', 'high'])
+
 function formatRatioCompact(ratio: number | undefined): string {
   if (ratio == null || !Number.isFinite(ratio)) return '-'
   return ratio % 1 === 0
@@ -125,6 +133,37 @@ function getResponsesCompactBadgeClassName(mode: string | undefined): string {
       return 'border border-violet-200/50 bg-violet-50/45 text-violet-700/85 dark:border-violet-900/40 dark:bg-violet-950/20 dark:text-violet-300/85'
     default:
       return 'border-border/60 bg-muted/40 text-muted-foreground'
+  }
+}
+
+function getReasoningEffortBadgeClassName(effort: string): string {
+  switch (effort) {
+    case 'minimal':
+    case 'low':
+      return 'border border-sky-200/50 bg-sky-50/45 text-sky-700/85 dark:border-sky-900/40 dark:bg-sky-950/20 dark:text-sky-300/85'
+    case 'medium':
+      return 'border border-amber-200/50 bg-amber-50/45 text-amber-700/85 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300/85'
+    case 'high':
+      return 'border border-orange-200/50 bg-orange-50/45 text-orange-700/85 dark:border-orange-900/40 dark:bg-orange-950/20 dark:text-orange-300/85'
+    default:
+      return 'border-border/60 bg-muted/40 text-muted-foreground'
+  }
+}
+
+function buildReasoningEffortInfo(
+  effort: string | undefined,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): ReasoningEffortInfo | null {
+  const trimmed = effort?.trim()
+  if (!trimmed) return null
+
+  const normalized = trimmed.toLowerCase()
+  const value = KNOWN_REASONING_EFFORTS.has(normalized) ? normalized : trimmed
+
+  return {
+    value,
+    badgeLabel: `${t('Reasoning')} ${value}`,
+    className: getReasoningEffortBadgeClassName(normalized),
   }
 }
 
@@ -600,13 +639,41 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         if (!isDisplayableLogType(log.type)) return null
 
         const modelInfo = formatModelName(log)
+        const other = parseLogOther(log.other)
+        const reasoningEffort = buildReasoningEffortInfo(
+          other?.reasoning_effort,
+          t
+        )
 
         return (
           <div className='flex max-w-[220px] flex-col gap-0.5'>
-            <ModelBadge
-              modelName={modelInfo.name}
-              actualModel={modelInfo.actualModel}
-            />
+            <div className='flex flex-wrap items-center gap-1'>
+              <ModelBadge
+                modelName={modelInfo.name}
+                actualModel={modelInfo.actualModel}
+              />
+              {reasoningEffort && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className={cn(
+                          'inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] leading-4 font-medium whitespace-nowrap',
+                          reasoningEffort.className
+                        )}
+                      >
+                        {reasoningEffort.badgeLabel}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>
+                        {t('Reasoning Effort')}: {reasoningEffort.value}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
           </div>
         )
       },
