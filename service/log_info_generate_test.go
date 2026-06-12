@@ -240,3 +240,85 @@ func TestGenerateTextOtherInfoIncludesMissingLocalSyntheticStateAction(t *testin
 	require.Equal(t, "official_openai", other["responses_upstream_profile"])
 	require.Equal(t, "missing_local_synthetic_state", other["responses_previous_id_action"])
 }
+
+func TestGenerateTextOtherInfoMarksCodexLocalCompactionFromHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	ctx.Request.Header.Set("x-codex-turn-metadata", `{
+		"request_kind":"compaction",
+		"compaction":{
+			"trigger":"auto",
+			"reason":"context_limit",
+			"implementation":"responses",
+			"phase":"background",
+			"strategy":"local"
+		}
+	}`)
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "codex", other["responses_compact_client"])
+	require.Equal(t, "responses", other["responses_compact_client_implementation"])
+	require.Equal(t, "codex_local", other["responses_compact_mode"])
+	require.Equal(t, "/v1/responses", other["responses_compact_upstream_path"])
+	require.Equal(t, "auto", other["responses_compact_trigger"])
+	require.Equal(t, "context_limit", other["responses_compact_reason"])
+	require.Equal(t, "background", other["responses_compact_phase"])
+	require.Equal(t, "local", other["responses_compact_strategy"])
+}
+
+func TestGenerateTextOtherInfoMarksCodexRemoteV2CompactionFromHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	ctx.Request.Header.Set("x-codex-turn-metadata", `{
+		"request_kind":"compaction",
+		"compaction":{
+			"trigger":"manual",
+			"implementation":"responses_compaction_v2"
+		}
+	}`)
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.5",
+			Input: common.RawMessage(`[
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"compact"}]},
+				{"type":"compaction_trigger"}
+			]`),
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "codex", other["responses_compact_client"])
+	require.Equal(t, "responses_compaction_v2", other["responses_compact_client_implementation"])
+	require.Equal(t, "remote_v2", other["responses_compact_mode"])
+	require.Equal(t, "/v1/responses", other["responses_compact_upstream_path"])
+	require.Equal(t, "manual", other["responses_compact_trigger"])
+}
+
+func TestGenerateTextOtherInfoMarksRemoteV2CompactionFromTriggerWithoutHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.5",
+			Input: common.RawMessage(`[
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"compact"}]},
+				{"type":"compaction_trigger"}
+			]`),
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "remote_v2", other["responses_compact_mode"])
+	require.Equal(t, "/v1/responses", other["responses_compact_upstream_path"])
+}

@@ -321,15 +321,136 @@ func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) 
 }
 
 type responsesCompactLogDetails struct {
-	Mode              string
-	Setting           string
-	UpstreamProfile   string
-	UpstreamPath      string
-	AutoFallback      bool
-	ContextFallback   bool
-	SummaryModel      string
-	SummaryModels     []string
-	SummaryModelRetry bool
+	Mode                string
+	Setting             string
+	UpstreamProfile     string
+	UpstreamPath        string
+	AutoFallback        bool
+	AutoFallbackWindow  bool
+	ContextFallback     bool
+	PreviousIDFallback  bool
+	VisibleOnlyFallback bool
+	SummaryModel        string
+	SummaryModels       []string
+	SummaryModelRetry   bool
+	NativeFallback      *ResponsesCompactNativeFallbackLog
+	FallbackReason      string
+	RetryUntilUnix      int64
+	RetryIntervalHrs    int
+}
+
+type ResponsesCompactNativeFallbackLog struct {
+	Attempted        bool
+	ChannelID        int
+	UpstreamPath     string
+	StatusCode       int
+	Reason           string
+	RetryUntilUnix   int64
+	RetryIntervalHrs int
+}
+
+type ResponsesCompactFallbackAttemptKind string
+
+const (
+	ResponsesCompactFallbackAttemptAuto         ResponsesCompactFallbackAttemptKind = "auto"
+	ResponsesCompactFallbackAttemptContext      ResponsesCompactFallbackAttemptKind = "context"
+	ResponsesCompactFallbackAttemptPreviousID   ResponsesCompactFallbackAttemptKind = "previous_id"
+	ResponsesCompactFallbackAttemptVisibleOnly  ResponsesCompactFallbackAttemptKind = "visible_only"
+	ResponsesCompactFallbackAttemptSummaryModel ResponsesCompactFallbackAttemptKind = "summary_model"
+)
+
+type ResponsesCompactFallbackAttemptLog struct {
+	ChannelID           int
+	AutoFallback        bool
+	ContextFallback     bool
+	PreviousIDFallback  bool
+	VisibleOnlyFallback bool
+	SummaryModelRetry   bool
+	SummaryModels       []string
+}
+
+const (
+	responsesCompactErrorLogKey           = "responses_compact_error_log"
+	responsesCompactFallbackAttemptLogKey = "responses_compact_fallback_attempt_log"
+)
+
+func MarkResponsesCompactErrorLog(ctx *gin.Context, enabled bool) {
+	if ctx == nil {
+		return
+	}
+	if enabled {
+		ctx.Set(responsesCompactErrorLogKey, true)
+		return
+	}
+	if ctx.Keys != nil {
+		delete(ctx.Keys, responsesCompactErrorLogKey)
+	}
+}
+
+func MarkResponsesCompactNativeFallback(
+	ctx *gin.Context,
+	relayInfo *relaycommon.RelayInfo,
+	statusCode int,
+	reason string,
+	now time.Time,
+) {
+	if ctx == nil {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	reason = sanitizeResponsesCompactLogValue(reason, 240)
+	retryInterval := dto.DefaultResponsesCompactAutoFallbackRetryIntervalHours
+	channelID := 0
+	if relayInfo != nil && relayInfo.ChannelMeta != nil {
+		retryInterval = relayInfo.ChannelOtherSettings.ResponsesCompactAutoFallbackRetryIntervalHoursOrDefault()
+		channelID = relayInfo.ChannelMeta.ChannelId
+	}
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactNativeFallback, ResponsesCompactNativeFallbackLog{
+		Attempted:        true,
+		ChannelID:        channelID,
+		UpstreamPath:     "/v1/responses/compact",
+		StatusCode:       statusCode,
+		Reason:           reason,
+		RetryUntilUnix:   now.UTC().Add(time.Duration(retryInterval) * time.Hour).Unix(),
+		RetryIntervalHrs: retryInterval,
+	})
+}
+
+func MarkResponsesCompactFallbackAttempt(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, kind ResponsesCompactFallbackAttemptKind, summaryModels []string) {
+	if ctx == nil || relayInfo == nil || relayInfo.ChannelMeta == nil {
+		return
+	}
+	channelID := relayInfo.ChannelMeta.ChannelId
+	attemptLog := ResponsesCompactFallbackAttemptLog{ChannelID: channelID}
+	if value, ok := ctx.Get(responsesCompactFallbackAttemptLogKey); ok {
+		if existing, ok := value.(ResponsesCompactFallbackAttemptLog); ok && existing.ChannelID == channelID {
+			attemptLog = existing
+		}
+	}
+	switch kind {
+	case ResponsesCompactFallbackAttemptAuto:
+		attemptLog.AutoFallback = true
+	case ResponsesCompactFallbackAttemptContext:
+		attemptLog.ContextFallback = true
+	case ResponsesCompactFallbackAttemptPreviousID:
+		attemptLog.PreviousIDFallback = true
+	case ResponsesCompactFallbackAttemptVisibleOnly:
+		attemptLog.VisibleOnlyFallback = true
+	case ResponsesCompactFallbackAttemptSummaryModel:
+		attemptLog.SummaryModelRetry = true
+		attemptLog.SummaryModels = append([]string(nil), summaryModels...)
+	}
+	ctx.Set(responsesCompactFallbackAttemptLogKey, attemptLog)
+}
+
+func sanitizeResponsesCompactLogValue(value string, limit int) string {
+	value = strings.TrimSpace(strings.Join(strings.Fields(value), " "))
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
 }
 
 func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, now time.Time) (responsesCompactLogDetails, bool) {
@@ -361,26 +482,50 @@ func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	effective := settings.EffectiveResponsesCompactModeOrDefaultAt(now)
 	disabled := settings.HasDisabledResponsesCompact()
 	proxyCompatibilityProfile := settings.HasResponsesProxyCompatibilityProfile()
-	autoFallback := !proxyCompatibilityProfile && setting == dto.ResponsesCompactModeAuto && settings.HasActiveResponsesCompactAutoFallback(now)
+	autoFallbackWindow := !proxyCompatibilityProfile && setting == dto.ResponsesCompactModeAuto && settings.HasActiveResponsesCompactAutoFallback(now)
+	autoFallback := autoFallbackWindow
 	if ctx != nil && ctx.GetBool("responses_compact_auto_fallback_attempted") && !disabled && !proxyCompatibilityProfile {
 		setting = dto.ResponsesCompactModeAuto
 		effective = dto.ResponsesCompactModeSynthetic
 		autoFallback = true
+		autoFallbackWindow = false
 	}
 	contextFallback := false
+	previousIDFallback := false
+	visibleOnlyFallback := false
 	summaryModelRetry := false
 	summaryModel := ""
 	if ctx != nil {
 		contextFallback = ctx.GetBool("responses_compact_context_fallback_attempted")
+		previousIDFallback = ctx.GetBool("responses_compact_previous_response_id_fallback_attempted")
+		visibleOnlyFallback = ctx.GetBool("responses_compact_visible_only_fallback_attempted")
 		summaryModelRetry = ctx.GetBool("responses_compact_summary_model_fallback_attempted")
 		summaryModel = common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactSummaryModel)
-	}
-	if (contextFallback || summaryModelRetry) && !disabled {
-		effective = dto.ResponsesCompactModeSynthetic
 	}
 	summaryModels := []string(nil)
 	if ctx != nil {
 		summaryModels = common.GetContextKeyStringSlice(ctx, constant.ContextKeyResponsesCompactSummaryModels)
+	}
+	if ctx != nil && ctx.GetBool(responsesCompactErrorLogKey) {
+		if value, ok := ctx.Get(responsesCompactFallbackAttemptLogKey); ok {
+			if attemptLog, ok := value.(ResponsesCompactFallbackAttemptLog); ok && fallbackAttemptMatchesRelayInfo(attemptLog, relayInfo) {
+				if attemptLog.AutoFallback && !disabled && !proxyCompatibilityProfile {
+					setting = dto.ResponsesCompactModeAuto
+					autoFallback = true
+					autoFallbackWindow = false
+				}
+				contextFallback = contextFallback || attemptLog.ContextFallback
+				previousIDFallback = previousIDFallback || attemptLog.PreviousIDFallback
+				visibleOnlyFallback = visibleOnlyFallback || attemptLog.VisibleOnlyFallback
+				summaryModelRetry = summaryModelRetry || attemptLog.SummaryModelRetry
+				if len(summaryModels) == 0 && len(attemptLog.SummaryModels) > 0 {
+					summaryModels = append([]string(nil), attemptLog.SummaryModels...)
+				}
+			}
+		}
+	}
+	if (autoFallback || contextFallback || previousIDFallback || visibleOnlyFallback || summaryModelRetry) && !disabled {
+		effective = dto.ResponsesCompactModeSynthetic
 	}
 
 	mode := string(dto.ResponsesCompactModeNative)
@@ -393,16 +538,60 @@ func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	}
 
 	return responsesCompactLogDetails{
-		Mode:              mode,
-		Setting:           string(setting),
-		UpstreamProfile:   upstreamProfile,
-		UpstreamPath:      upstreamPath,
-		AutoFallback:      autoFallback,
-		ContextFallback:   contextFallback,
-		SummaryModel:      summaryModel,
-		SummaryModels:     summaryModels,
-		SummaryModelRetry: summaryModelRetry,
+		Mode:                mode,
+		Setting:             string(setting),
+		UpstreamProfile:     upstreamProfile,
+		UpstreamPath:        upstreamPath,
+		AutoFallback:        autoFallback,
+		AutoFallbackWindow:  autoFallbackWindow,
+		ContextFallback:     contextFallback,
+		PreviousIDFallback:  previousIDFallback,
+		VisibleOnlyFallback: visibleOnlyFallback,
+		SummaryModel:        summaryModel,
+		SummaryModels:       summaryModels,
+		SummaryModelRetry:   summaryModelRetry,
+		FallbackReason:      sanitizeResponsesCompactLogValue(settings.ResponsesCompactAutoFallbackReason, 240),
+		RetryUntilUnix:      responsesCompactAutoFallbackRetryUntil(settings, now),
+		RetryIntervalHrs:    settings.ResponsesCompactAutoFallbackRetryIntervalHoursOrDefault(),
 	}, true
+}
+
+func responsesCompactAutoFallbackRetryUntil(settings dto.ChannelOtherSettings, now time.Time) int64 {
+	if settings.ResponsesCompactAutoFallbackAt > 0 {
+		interval := time.Duration(settings.ResponsesCompactAutoFallbackRetryIntervalHoursOrDefault()) * time.Hour
+		return time.Unix(settings.ResponsesCompactAutoFallbackAt, 0).UTC().Add(interval).Unix()
+	}
+	if settings.ResponsesCompactAutoFallbackDate > 0 {
+		year := settings.ResponsesCompactAutoFallbackDate / 10000
+		month := time.Month((settings.ResponsesCompactAutoFallbackDate / 100) % 100)
+		day := settings.ResponsesCompactAutoFallbackDate % 100
+		if year > 0 && month >= time.January && month <= time.December && day > 0 && day <= 31 {
+			fallbackDate := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+			if fallbackDate.Year() == year && fallbackDate.Month() == month && fallbackDate.Day() == day {
+				return fallbackDate.AddDate(0, 0, 1).Unix()
+			}
+		}
+	}
+	return 0
+}
+
+func shouldAppendResponsesCompactNativeFallback(ctx *gin.Context) bool {
+	return ctx != nil &&
+		(ctx.GetBool("responses_compact_auto_fallback_attempted") || ctx.GetBool(responsesCompactErrorLogKey))
+}
+
+func nativeFallbackMatchesRelayInfo(nativeFallback ResponsesCompactNativeFallbackLog, relayInfo *relaycommon.RelayInfo) bool {
+	if nativeFallback.ChannelID == 0 || relayInfo == nil || relayInfo.ChannelMeta == nil {
+		return true
+	}
+	return nativeFallback.ChannelID == relayInfo.ChannelMeta.ChannelId
+}
+
+func fallbackAttemptMatchesRelayInfo(attemptLog ResponsesCompactFallbackAttemptLog, relayInfo *relaycommon.RelayInfo) bool {
+	if attemptLog.ChannelID == 0 || relayInfo == nil || relayInfo.ChannelMeta == nil {
+		return true
+	}
+	return attemptLog.ChannelID == relayInfo.ChannelMeta.ChannelId
 }
 
 func appendResponsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, extraContent []string, other map[string]interface{}, now time.Time) ([]string, map[string]interface{}) {
@@ -419,11 +608,30 @@ func appendResponsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.Rela
 		other["responses_upstream_profile"] = logInfo.UpstreamProfile
 	}
 	other["responses_compact_upstream_path"] = logInfo.UpstreamPath
+	other["responses_compact_final_upstream_path"] = logInfo.UpstreamPath
 	if logInfo.AutoFallback {
 		other["responses_compact_auto_fallback"] = true
 	}
+	if logInfo.AutoFallbackWindow {
+		other["responses_compact_auto_fallback_window"] = true
+		if logInfo.FallbackReason != "" {
+			other["responses_compact_auto_fallback_reason"] = logInfo.FallbackReason
+		}
+		if logInfo.RetryUntilUnix > 0 {
+			other["responses_compact_auto_fallback_retry_until"] = logInfo.RetryUntilUnix
+		}
+		if logInfo.RetryIntervalHrs > 0 {
+			other["responses_compact_auto_fallback_retry_interval_hours"] = logInfo.RetryIntervalHrs
+		}
+	}
 	if logInfo.ContextFallback {
 		other["responses_compact_context_fallback"] = true
+	}
+	if logInfo.PreviousIDFallback {
+		other["responses_compact_previous_response_id_fallback"] = true
+	}
+	if logInfo.VisibleOnlyFallback {
+		other["responses_compact_visible_only_fallback"] = true
 	}
 	if logInfo.SummaryModelRetry {
 		other["responses_compact_summary_model_fallback"] = true
@@ -434,6 +642,31 @@ func appendResponsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.Rela
 	if len(logInfo.SummaryModels) > 0 {
 		other["responses_compact_summary_models"] = logInfo.SummaryModels
 	}
+	if shouldAppendResponsesCompactNativeFallback(ctx) {
+		if nativeFallback, ok := common.GetContextKeyType[ResponsesCompactNativeFallbackLog](ctx, constant.ContextKeyResponsesCompactNativeFallback); ok && nativeFallback.Attempted && nativeFallbackMatchesRelayInfo(nativeFallback, relayInfo) {
+			nativeFallback.Reason = sanitizeResponsesCompactLogValue(nativeFallback.Reason, 240)
+			logInfo.NativeFallback = &nativeFallback
+			other["responses_compact_native_attempted"] = true
+			if nativeFallback.ChannelID > 0 {
+				other["responses_compact_native_channel_id"] = nativeFallback.ChannelID
+			}
+			if nativeFallback.UpstreamPath != "" {
+				other["responses_compact_native_upstream_path"] = nativeFallback.UpstreamPath
+			}
+			if nativeFallback.StatusCode > 0 {
+				other["responses_compact_native_status_code"] = nativeFallback.StatusCode
+			}
+			if nativeFallback.Reason != "" {
+				other["responses_compact_auto_fallback_reason"] = nativeFallback.Reason
+			}
+			if nativeFallback.RetryUntilUnix > 0 {
+				other["responses_compact_auto_fallback_retry_until"] = nativeFallback.RetryUntilUnix
+			}
+			if nativeFallback.RetryIntervalHrs > 0 {
+				other["responses_compact_auto_fallback_retry_interval_hours"] = nativeFallback.RetryIntervalHrs
+			}
+		}
+	}
 	content := fmt.Sprintf("Responses Compact mode=%s setting=%s path=%s", logInfo.Mode, logInfo.Setting, logInfo.UpstreamPath)
 	if logInfo.UpstreamProfile != "" {
 		content += fmt.Sprintf(" upstream_profile=%s", logInfo.UpstreamProfile)
@@ -441,8 +674,31 @@ func appendResponsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.Rela
 	if logInfo.AutoFallback {
 		content += " auto_fallback=true"
 	}
+	if logInfo.AutoFallbackWindow {
+		content += " auto_fallback_window=true"
+		if logInfo.FallbackReason != "" {
+			content += fmt.Sprintf(" fallback_reason=%s", logInfo.FallbackReason)
+		}
+	}
+	if logInfo.NativeFallback != nil {
+		if logInfo.NativeFallback.UpstreamPath != "" {
+			content += fmt.Sprintf(" native_path=%s", logInfo.NativeFallback.UpstreamPath)
+		}
+		if logInfo.NativeFallback.StatusCode > 0 {
+			content += fmt.Sprintf(" native_status=%d", logInfo.NativeFallback.StatusCode)
+		}
+		if logInfo.NativeFallback.Reason != "" {
+			content += fmt.Sprintf(" fallback_reason=%s", logInfo.NativeFallback.Reason)
+		}
+	}
 	if logInfo.ContextFallback {
 		content += " context_fallback=true"
+	}
+	if logInfo.PreviousIDFallback {
+		content += " previous_response_id_fallback=true"
+	}
+	if logInfo.VisibleOnlyFallback {
+		content += " visible_only_fallback=true"
 	}
 	if logInfo.SummaryModelRetry {
 		content += " summary_model_fallback=true"

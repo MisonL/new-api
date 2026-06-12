@@ -148,6 +148,14 @@ export interface LogOtherData {
   responses_compact_setting?: string
   responses_compact_upstream_path?: string
   responses_compact_auto_fallback?: boolean
+  responses_compact_auto_fallback_window?: boolean
+  responses_compact_native_attempted?: boolean
+  responses_compact_native_upstream_path?: string
+  responses_compact_native_status_code?: number
+  responses_compact_auto_fallback_reason?: string
+  responses_compact_auto_fallback_retry_until?: number
+  responses_compact_auto_fallback_retry_interval_hours?: number
+  responses_compact_final_upstream_path?: string
   group?: string
   stream_status?: {
     status?: string

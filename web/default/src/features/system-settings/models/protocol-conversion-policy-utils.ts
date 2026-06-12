@@ -49,10 +49,57 @@ export const TEMPLATE_CHAT_TO_RESPONSES = 'chat_to_responses'
 export const TEMPLATE_RESPONSES_TO_CHAT = 'responses_to_chat'
 export const TEMPLATE_BIDIRECTIONAL = 'bidirectional'
 
+export const PROTOCOL_FILTER_ALL = 'all'
+export const PROTOCOL_RULE_STATE_ENABLED = 'enabled'
+export const PROTOCOL_RULE_STATE_DISABLED = 'disabled'
+export const PROTOCOL_RULE_STATE_ATTENTION = 'attention'
+export const PROTOCOL_RULE_SCOPE_GLOBAL = 'global'
+export const PROTOCOL_RULE_SCOPE_LIMITED = 'limited'
+export const PROTOCOL_RULE_SCOPE_EMPTY = 'empty'
+
 export type ProtocolRuleTemplate =
   | typeof TEMPLATE_CHAT_TO_RESPONSES
   | typeof TEMPLATE_RESPONSES_TO_CHAT
   | typeof TEMPLATE_BIDIRECTIONAL
+
+export type ProtocolRuleDirection =
+  | typeof TEMPLATE_CHAT_TO_RESPONSES
+  | typeof TEMPLATE_RESPONSES_TO_CHAT
+
+export type ProtocolDirectionFilter =
+  | typeof PROTOCOL_FILTER_ALL
+  | ProtocolRuleDirection
+
+export type ProtocolRuleStateFilter =
+  | typeof PROTOCOL_FILTER_ALL
+  | typeof PROTOCOL_RULE_STATE_ENABLED
+  | typeof PROTOCOL_RULE_STATE_DISABLED
+  | typeof PROTOCOL_RULE_STATE_ATTENTION
+
+export type ProtocolRuleScopeFilter =
+  | typeof PROTOCOL_FILTER_ALL
+  | typeof PROTOCOL_RULE_SCOPE_GLOBAL
+  | typeof PROTOCOL_RULE_SCOPE_LIMITED
+  | typeof PROTOCOL_RULE_SCOPE_EMPTY
+
+export type ProtocolRuleFilters = {
+  direction: ProtocolDirectionFilter
+  state: ProtocolRuleStateFilter
+  scope: ProtocolRuleScopeFilter
+  query: string
+}
+
+export type ProtocolPolicyStats = {
+  total: number
+  enabled: number
+  disabled: number
+  chatToResponses: number
+  responsesToChat: number
+  allChannels: number
+  limitedScope: number
+  emptyScope: number
+  attention: number
+}
 
 const POLICY_FIELDS = new Set([
   'enabled',
@@ -187,6 +234,21 @@ export function isResponsesToChatRule(rule: ProtocolRule) {
   )
 }
 
+export function isChatToResponsesRule(rule: ProtocolRule) {
+  return (
+    rule.source_endpoint === ENDPOINT_CHAT &&
+    rule.target_endpoint === ENDPOINT_RESPONSES
+  )
+}
+
+export function getProtocolRuleDirection(
+  rule: ProtocolRule
+): ProtocolRuleDirection {
+  return isResponsesToChatRule(rule)
+    ? TEMPLATE_RESPONSES_TO_CHAT
+    : TEMPLATE_CHAT_TO_RESPONSES
+}
+
 export function getProtocolRuleWarningKeys(rule: ProtocolRule) {
   const warnings: string[] = []
   if (!rule.enabled) warnings.push('Rule is disabled.')
@@ -198,6 +260,131 @@ export function getProtocolRuleWarningKeys(rule: ProtocolRule) {
     warnings.push('Channel scope is empty. This rule will not match.')
   }
   return warnings
+}
+
+export function getProtocolRuleAttentionKeys(
+  rule: ProtocolRule,
+  passThroughEnabled: boolean
+) {
+  const warnings = getProtocolRuleWarningKeys(rule)
+  if (passThroughEnabled) {
+    warnings.push(
+      'Global request passthrough is enabled. Conversion will be skipped at runtime.'
+    )
+  }
+  return warnings
+}
+
+export function getProtocolPolicyStats(
+  rules: ProtocolRule[],
+  passThroughEnabled: boolean
+): ProtocolPolicyStats {
+  return rules.reduce<ProtocolPolicyStats>(
+    (stats, rule) => {
+      stats.total += 1
+      if (rule.enabled) stats.enabled += 1
+      else stats.disabled += 1
+
+      if (isResponsesToChatRule(rule)) stats.responsesToChat += 1
+      else stats.chatToResponses += 1
+
+      if (rule.all_channels) stats.allChannels += 1
+      else if (rule.channel_ids.length === 0 && rule.channel_types.length === 0) {
+        stats.emptyScope += 1
+      } else {
+        stats.limitedScope += 1
+      }
+
+      if (getProtocolRuleAttentionKeys(rule, passThroughEnabled).length > 0) {
+        stats.attention += 1
+      }
+
+      return stats
+    },
+    {
+      total: 0,
+      enabled: 0,
+      disabled: 0,
+      chatToResponses: 0,
+      responsesToChat: 0,
+      allChannels: 0,
+      limitedScope: 0,
+      emptyScope: 0,
+      attention: 0,
+    }
+  )
+}
+
+export function filterProtocolRules(
+  rules: ProtocolRule[],
+  filters: ProtocolRuleFilters,
+  passThroughEnabled: boolean
+) {
+  const query = filters.query.trim().toLowerCase()
+  return rules
+    .map((rule, index) => ({ rule, index }))
+    .filter(({ rule }) => {
+      if (
+        filters.direction !== PROTOCOL_FILTER_ALL &&
+        getProtocolRuleDirection(rule) !== filters.direction
+      ) {
+        return false
+      }
+
+      if (
+        filters.state === PROTOCOL_RULE_STATE_ENABLED &&
+        !rule.enabled
+      ) {
+        return false
+      }
+      if (
+        filters.state === PROTOCOL_RULE_STATE_DISABLED &&
+        rule.enabled
+      ) {
+        return false
+      }
+      if (
+        filters.state === PROTOCOL_RULE_STATE_ATTENTION &&
+        getProtocolRuleAttentionKeys(rule, passThroughEnabled).length === 0
+      ) {
+        return false
+      }
+
+      if (filters.scope === PROTOCOL_RULE_SCOPE_GLOBAL && !rule.all_channels) {
+        return false
+      }
+      if (
+        filters.scope === PROTOCOL_RULE_SCOPE_LIMITED &&
+        (rule.all_channels ||
+          (rule.channel_ids.length === 0 && rule.channel_types.length === 0))
+      ) {
+        return false
+      }
+      if (
+        filters.scope === PROTOCOL_RULE_SCOPE_EMPTY &&
+        (rule.all_channels ||
+          rule.channel_ids.length > 0 ||
+          rule.channel_types.length > 0)
+      ) {
+        return false
+      }
+
+      if (!query) return true
+      return protocolRuleSearchText(rule).includes(query)
+    })
+}
+
+function protocolRuleSearchText(rule: ProtocolRule) {
+  return [
+    rule.name,
+    rule.source_endpoint,
+    rule.target_endpoint,
+    rule.channel_ids.join(' '),
+    rule.channel_types.join(' '),
+    rule.model_patterns.join(' '),
+  ]
+    .join(' ')
+    .toLowerCase()
 }
 
 export function getProtocolPreviewResult(

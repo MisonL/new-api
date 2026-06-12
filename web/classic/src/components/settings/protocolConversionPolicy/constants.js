@@ -24,6 +24,13 @@ export const ENDPOINT_RESPONSES = 'responses';
 export const TEMPLATE_TYPE_CHAT_TO_RESPONSES = 'chat_to_responses';
 export const TEMPLATE_TYPE_RESPONSES_TO_CHAT = 'responses_to_chat';
 export const TEMPLATE_TYPE_BIDIRECTIONAL = 'bidirectional';
+export const PROTOCOL_FILTER_ALL = 'all';
+export const PROTOCOL_RULE_STATE_ENABLED = 'enabled';
+export const PROTOCOL_RULE_STATE_DISABLED = 'disabled';
+export const PROTOCOL_RULE_STATE_ATTENTION = 'attention';
+export const PROTOCOL_RULE_SCOPE_GLOBAL = 'global';
+export const PROTOCOL_RULE_SCOPE_LIMITED = 'limited';
+export const PROTOCOL_RULE_SCOPE_EMPTY = 'empty';
 
 export const ENDPOINT_OPTIONS = [
   {

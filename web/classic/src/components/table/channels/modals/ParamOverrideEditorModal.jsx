@@ -511,17 +511,17 @@ const TEMPLATE_GROUP_OPTIONS = [
 const TEMPLATE_PRESET_CONFIG = {
   codex_cli_headers_passthrough: {
     group: 'recommended',
-    label: 'Codex CLI 真实请求头透传',
+    label: 'Codex CLI 动态请求头透传',
     description:
-      '透传 Codex 会话、窗口、turn metadata 和客户端请求 ID；缺少 Session_id 时用 X-Client-Request-Id 补齐。',
+      '透传 Codex 会话、窗口、turn metadata 和客户端请求 ID；不包含 User-Agent，UA 请使用客户端模板。',
     kind: 'operations',
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   codex_desktop_headers_passthrough: {
     group: 'recommended',
-    label: 'Codex Desktop 真实请求头透传',
+    label: 'Codex Desktop 动态请求头透传',
     description:
-      '透传 Codex Desktop 会话、窗口、turn metadata 和客户端请求 ID；缺少 Session_id 时用 X-Client-Request-Id 补齐。',
+      '透传 Codex Desktop 会话、窗口、turn metadata 和客户端请求 ID；不包含 User-Agent，UA 请使用客户端模板。',
     kind: 'operations',
     payload: CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE,
   },
@@ -2720,6 +2720,8 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                 <Button
                   size='small'
                   type={editMode === 'visual' ? 'primary' : 'tertiary'}
+                  theme={editMode === 'visual' ? 'solid' : 'light'}
+                  aria-pressed={editMode === 'visual'}
                   onClick={switchToVisualMode}
                 >
                   {t('可视化')}
@@ -2727,6 +2729,8 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                 <Button
                   size='small'
                   type={editMode === 'json' ? 'primary' : 'tertiary'}
+                  theme={editMode === 'json' ? 'solid' : 'light'}
+                  aria-pressed={editMode === 'json'}
                   onClick={switchToJsonMode}
                 >
                   {t('JSON 文本')}
@@ -3311,12 +3315,21 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                               ? 'primary'
                                               : 'tertiary'
                                           }
-                                          onClick={() =>
+                                          theme={
+                                            returnErrorDraft.simpleMode
+                                              ? 'solid'
+                                              : 'light'
+                                          }
+                                          aria-pressed={
+                                            returnErrorDraft.simpleMode
+                                          }
+                                          onClick={(event) => {
+                                            event.stopPropagation();
                                             updateReturnErrorDraft(
                                               selectedOperation.id,
                                               { simpleMode: true },
-                                            )
-                                          }
+                                            );
+                                          }}
                                         >
                                           {t('简洁')}
                                         </Button>
@@ -3327,12 +3340,21 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                               ? 'tertiary'
                                               : 'primary'
                                           }
-                                          onClick={() =>
+                                          theme={
+                                            returnErrorDraft.simpleMode
+                                              ? 'light'
+                                              : 'solid'
+                                          }
+                                          aria-pressed={
+                                            !returnErrorDraft.simpleMode
+                                          }
+                                          onClick={(event) => {
+                                            event.stopPropagation();
                                             updateReturnErrorDraft(
                                               selectedOperation.id,
                                               { simpleMode: false },
-                                            )
-                                          }
+                                            );
+                                          }}
                                         >
                                           {t('高级')}
                                         </Button>
@@ -3545,12 +3567,21 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                               ? 'primary'
                                               : 'tertiary'
                                           }
-                                          onClick={() =>
+                                          theme={
+                                            pruneObjectsDraft.simpleMode
+                                              ? 'solid'
+                                              : 'light'
+                                          }
+                                          aria-pressed={
+                                            pruneObjectsDraft.simpleMode
+                                          }
+                                          onClick={(event) => {
+                                            event.stopPropagation();
                                             updatePruneObjectsDraft(
                                               selectedOperation.id,
                                               { simpleMode: true },
-                                            )
-                                          }
+                                            );
+                                          }}
                                         >
                                           {t('简洁')}
                                         </Button>
@@ -3561,12 +3592,21 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                               ? 'tertiary'
                                               : 'primary'
                                           }
-                                          onClick={() =>
+                                          theme={
+                                            pruneObjectsDraft.simpleMode
+                                              ? 'light'
+                                              : 'solid'
+                                          }
+                                          aria-pressed={
+                                            !pruneObjectsDraft.simpleMode
+                                          }
+                                          onClick={(event) => {
+                                            event.stopPropagation();
                                             updatePruneObjectsDraft(
                                               selectedOperation.id,
                                               { simpleMode: false },
-                                            )
-                                          }
+                                            );
+                                          }}
                                         >
                                           {t('高级')}
                                         </Button>

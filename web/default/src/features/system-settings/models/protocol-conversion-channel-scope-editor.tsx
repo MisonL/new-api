@@ -62,6 +62,19 @@ export function ProtocolConversionChannelScopeEditor({
     : channelsError
       ? t('Failed to load channels for selector.')
       : null
+  const scopeSummary = rule.all_channels
+    ? t('All channels')
+    : rule.channel_ids.length === 0 && rule.channel_types.length === 0
+      ? t('Empty scope')
+      : t('{{channelCount}} channel IDs, {{typeCount}} channel types', {
+          channelCount: rule.channel_ids.length,
+          typeCount: rule.channel_types.length,
+        })
+  const scopeHint = rule.all_channels
+    ? t('Manual channel IDs and types are preserved but ignored.')
+    : rule.channel_ids.length === 0 && rule.channel_types.length === 0
+      ? t('Add at least one channel ID or channel type to make this rule live.')
+      : t('The rule matches when either channel ID or channel type matches.')
 
   const commitChannelIdsDraft = () => {
     const nextChannelIds = parseIntegerText(channelIdsInput)
@@ -93,14 +106,22 @@ export function ProtocolConversionChannelScopeEditor({
 
   return (
     <div className='space-y-3 rounded-md border p-3'>
-      <div className='flex h-9 items-center gap-2'>
-        <Switch
-          checked={rule.all_channels}
-          onCheckedChange={(checked) => onUpdate({ all_channels: checked })}
-        />
-        <span className='text-sm'>
-          {rule.all_channels ? t('All channels') : t('Limited scope')}
-        </span>
+      <div className='flex flex-wrap items-start justify-between gap-3'>
+        <div className='flex items-center gap-2'>
+          <Switch
+            checked={rule.all_channels}
+            onCheckedChange={(checked) => onUpdate({ all_channels: checked })}
+          />
+          <span className='text-sm font-medium'>
+            {rule.all_channels ? t('All channels') : t('Limited scope')}
+          </span>
+        </div>
+        <Badge variant={rule.all_channels ? 'secondary' : 'outline'}>
+          {scopeSummary}
+        </Badge>
+        <div className='text-muted-foreground w-full text-sm'>
+          {scopeHint}
+        </div>
       </div>
       <div className='grid gap-4 md:grid-cols-2'>
         <ScopeField label={t('Channel selector')}>

@@ -14,7 +14,12 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
+import {
+  formatLogQuota,
+  formatTimestampToDate,
+  formatTokens,
+  formatUseTime,
+} from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { Button } from '@/components/ui/button'
@@ -115,6 +120,111 @@ function DetailSection(props: {
 function formatRatio(ratio: number | undefined): string {
   if (ratio == null) return '-'
   return ratio.toFixed(4)
+}
+
+function getResponsesCompactModeLabel(
+  mode: string | undefined,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): string {
+  switch (mode) {
+    case 'native':
+      return t('Compact Native')
+    case 'synthetic_summary':
+      return t('Compact Synthetic')
+    default:
+      return mode ? String(mode) : '-'
+  }
+}
+
+function ResponsesCompactDetails(props: {
+  other: LogOtherData
+  isAdmin: boolean
+}) {
+  const { t } = useTranslation()
+  const { other, isAdmin } = props
+  if (!other.responses_compact_mode) return null
+
+  const isAutoFallback = other.responses_compact_auto_fallback === true
+  const isAutoFallbackWindow =
+    other.responses_compact_auto_fallback_window === true
+  const retryUntil = other.responses_compact_auto_fallback_retry_until
+    ? formatTimestampToDate(other.responses_compact_auto_fallback_retry_until)
+    : ''
+  const finalPath =
+    other.responses_compact_final_upstream_path ||
+    other.responses_compact_upstream_path
+
+  return (
+    <DetailSection label={t('Responses Compact capability')}>
+      <DetailRow
+        label={t('Mode')}
+        value={getResponsesCompactModeLabel(other.responses_compact_mode, t)}
+      />
+      {other.responses_compact_setting && (
+        <DetailRow
+          label={t('Configuration')}
+          value={other.responses_compact_setting}
+          mono
+        />
+      )}
+      {isAutoFallback && (
+        <DetailRow
+          label={t('Auto Fallback')}
+          value={
+            <StatusBadge
+              label={t('Compact Auto Switched Compatible Mode')}
+              variant='yellow'
+              size='sm'
+              copyable={false}
+            />
+          }
+        />
+      )}
+      {finalPath && (
+        <DetailRow label={t('Final Path')} value={finalPath} mono />
+      )}
+      {isAdmin && isAutoFallbackWindow && (
+        <DetailRow
+          label={t('Auto Fallback')}
+          value={t('Compact Auto Fallback Window Active')}
+        />
+      )}
+      {isAdmin && (other.responses_compact_native_attempted || isAutoFallbackWindow) && (
+        <>
+          {other.responses_compact_native_upstream_path && (
+            <DetailRow
+              label={t('Native Path')}
+              value={other.responses_compact_native_upstream_path}
+              mono
+            />
+          )}
+          {other.responses_compact_native_status_code != null && (
+            <DetailRow
+              label={t('Native Status')}
+              value={String(other.responses_compact_native_status_code)}
+              mono
+            />
+          )}
+          {other.responses_compact_auto_fallback_reason && (
+            <DetailRow
+              label={t('Fallback Reason')}
+              value={other.responses_compact_auto_fallback_reason}
+            />
+          )}
+          {other.responses_compact_auto_fallback_retry_interval_hours != null && (
+            <DetailRow
+              label={t('Retry Interval')}
+              value={`${other.responses_compact_auto_fallback_retry_interval_hours} ${t('Hours')}`}
+              mono
+            />
+          )}
+          {retryUntil && (
+            <DetailRow label={t('Retry After')} value={retryUntil} mono />
+          )}
+        </>
+      )}
+    </DetailSection>
+  )
 }
 
 function BillingBreakdown(props: {
@@ -649,6 +759,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   </div>
                 </div>
               </DetailSection>
+            )}
+
+            {other?.responses_compact_mode && (
+              <ResponsesCompactDetails other={other} isAdmin={props.isAdmin} />
             )}
 
             {/* Reject reason (admin only) */}

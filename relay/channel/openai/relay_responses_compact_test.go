@@ -64,13 +64,13 @@ func TestOaiResponsesCompactionHandlerPassesValidCompactionOutput(t *testing.T) 
 	require.JSONEq(t, body, recorder.Body.String())
 }
 
-func TestOaiResponsesCompactionHandlerPassesValidCompactionSummaryOutput(t *testing.T) {
+func TestOaiResponsesCompactionHandlerNormalizesValidCompactionSummaryOutput(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
 	body := `{
 		"id":"resp_compact",
-		"object":"response",
+		"object":"response.compaction",
 		"created_at":1710000000,
 		"output":[
 			{"type":"message","content":[{"type":"input_text","text":"summary"}]},
@@ -90,7 +90,16 @@ func TestOaiResponsesCompactionHandlerPassesValidCompactionSummaryOutput(t *test
 	require.Equal(t, 12, usage.PromptTokens)
 	require.Equal(t, 3, usage.CompletionTokens)
 	require.Equal(t, 15, usage.TotalTokens)
-	require.JSONEq(t, body, recorder.Body.String())
+	require.JSONEq(t, `{
+		"id":"resp_compact",
+		"object":"response",
+		"created_at":1710000000,
+		"output":[
+			{"type":"message","content":[{"type":"input_text","text":"summary"}]},
+			{"type":"compaction","encrypted_content":"opaque"}
+		],
+		"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}
+	}`, recorder.Body.String())
 }
 
 func TestOaiResponsesCompactionHandlerRejectsMalformedCompactionOutput(t *testing.T) {

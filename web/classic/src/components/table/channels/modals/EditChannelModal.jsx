@@ -88,17 +88,24 @@ import {
   RESPONSES_COMPACT_MODE_OPTIONS,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
   RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
+  RESPONSES_UPSTREAM_PROFILE_DEFAULT,
+  RESPONSES_UPSTREAM_PROFILE_OPTIONS,
+  RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT,
   buildResponsesCompactSettings,
   clearResponsesCompactSettings,
+  getResponsesCompactModeFromSettings,
+  hasResponsesProxyCompatibilityProfile,
   normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactMode,
   normalizeResponsesCompactSummaryFallbackModels,
+  normalizeResponsesUpstreamProfile,
   resetResponsesCompactAutoFallbackOnModeChange,
 } from '../../../../helpers/responsesCompactSettings.js';
 import {
   applyHeaderProfileStrategyToChannelInputs,
   buildProfileItems,
   buildSelectedProfileItems,
+  clearParamOverridePreservingUserAgentPassHeaders,
   createLegacyHeaderProfileDraft,
   disableEmptyHeaderProfileStrategy,
   getHeaderProfileStrategyFromSettings,
@@ -269,6 +276,7 @@ const EditChannelModal = (props) => {
     allow_inference_geo: false,
     allow_speed: false,
     claude_beta_query: false,
+    responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_DEFAULT,
     responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
     responses_compact_auto_fallback_retry_interval_hours:
       RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
@@ -879,6 +887,46 @@ const EditChannelModal = (props) => {
     handleInputChange('settings', settingsJson);
   };
 
+  const handleResponsesUpstreamProfileChange = (value) => {
+    const nextProfile = normalizeResponsesUpstreamProfile(
+      value === RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT ? '' : value,
+    );
+    const nextMode = getResponsesCompactModeFromSettings({
+      responses_compact_mode: inputs.responses_compact_mode,
+      responses_upstream_profile: nextProfile,
+    });
+    setChannelSettings((prev) => ({
+      ...prev,
+      responses_upstream_profile: nextProfile,
+      responses_compact_mode: nextMode,
+    }));
+    if (formApiRef.current) {
+      formApiRef.current.setValue('responses_upstream_profile', nextProfile);
+      formApiRef.current.setValue('responses_compact_mode', nextMode);
+    }
+    setInputs((prev) => ({
+      ...prev,
+      responses_upstream_profile: nextProfile,
+      responses_compact_mode: nextMode,
+    }));
+
+    let settings = {};
+    if (inputs.settings) {
+      try {
+        settings = JSON.parse(inputs.settings);
+      } catch (error) {
+        console.error('解析设置失败:', error);
+      }
+    }
+    if (nextProfile) {
+      settings.responses_upstream_profile = nextProfile;
+    } else {
+      delete settings.responses_upstream_profile;
+    }
+    settings.responses_compact_mode = nextMode;
+    handleInputChange('settings', JSON.stringify(settings));
+  };
+
   const applyHeaderProfileStrategy = (strategy) => {
     const nextValues = applyHeaderProfileStrategyToChannelInputs({
       inputs,
@@ -1322,7 +1370,10 @@ const EditChannelModal = (props) => {
   };
 
   const clearParamOverride = () => {
-    handleInputChange('param_override', '');
+    handleInputChange(
+      'param_override',
+      clearParamOverridePreservingUserAgentPassHeaders(inputs.param_override),
+    );
   };
 
   const loadChannel = async () => {
@@ -1417,9 +1468,13 @@ const EditChannelModal = (props) => {
             parsedSettings.allow_inference_geo || false;
           data.allow_speed = parsedSettings.allow_speed || false;
           data.claude_beta_query = parsedSettings.claude_beta_query || false;
-          data.responses_compact_mode = normalizeResponsesCompactMode(
-            parsedSettings.responses_compact_mode,
+          data.responses_upstream_profile = normalizeResponsesUpstreamProfile(
+            parsedSettings.responses_upstream_profile,
           );
+          data.responses_compact_mode = getResponsesCompactModeFromSettings({
+            responses_compact_mode: parsedSettings.responses_compact_mode,
+            responses_upstream_profile: data.responses_upstream_profile,
+          });
           data.responses_compact_auto_fallback_retry_interval_hours =
             normalizeResponsesCompactAutoFallbackRetryIntervalHours(
               parsedSettings.responses_compact_auto_fallback_retry_interval_hours,
@@ -1466,6 +1521,7 @@ const EditChannelModal = (props) => {
           data.allow_inference_geo = false;
           data.allow_speed = false;
           data.claude_beta_query = false;
+          data.responses_upstream_profile = RESPONSES_UPSTREAM_PROFILE_DEFAULT;
           data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
           data.responses_compact_auto_fallback_retry_interval_hours =
             RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT;
@@ -1495,6 +1551,7 @@ const EditChannelModal = (props) => {
         data.allow_inference_geo = false;
         data.allow_speed = false;
         data.claude_beta_query = false;
+        data.responses_upstream_profile = RESPONSES_UPSTREAM_PROFILE_DEFAULT;
         data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
         data.responses_compact_auto_fallback_retry_interval_hours =
           RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT;
@@ -2412,6 +2469,7 @@ const EditChannelModal = (props) => {
             localInputs.responses_compact_summary_model_fallback,
             localInputs.responses_compact_summary_fallback_models,
             localInputs.responses_compact_auto_fallback_retry_interval_hours,
+            localInputs.responses_upstream_profile,
           ),
         );
         settings.disable_store = localInputs.disable_store === true;
@@ -2482,6 +2540,7 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_inference_geo;
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
+    delete localInputs.responses_upstream_profile;
     delete localInputs.responses_compact_mode;
     delete localInputs.responses_compact_auto_fallback_retry_interval_hours;
     delete localInputs.responses_compact_context_fallback;
@@ -2941,6 +3000,34 @@ const EditChannelModal = (props) => {
               <div className='space-y-4'>
                 {inputs.type === 1 && (
                   <div className='pb-3 border-b border-gray-100'>
+                    <Form.Select
+                      field='responses_upstream_profile'
+                      label={t('Responses 上游兼容档案')}
+                      placeholder={t('请选择上游兼容档案')}
+                      optionList={RESPONSES_UPSTREAM_PROFILE_OPTIONS.map(
+                        (option) => ({
+                          ...option,
+                          label: t(option.label),
+                        }),
+                      )}
+                      style={{ width: '100%' }}
+                      value={
+                        inputs.responses_upstream_profile ||
+                        RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT
+                      }
+                      onChange={handleResponsesUpstreamProfileChange}
+                      extraText={
+                        hasResponsesProxyCompatibilityProfile(
+                          inputs.responses_upstream_profile,
+                        )
+                          ? t(
+                              '代理兼容档案会移除加密推理并将 Responses Compact 走模拟摘要。',
+                            )
+                          : t(
+                              '选择原版 OpenAI、new-api、sub2api 或代理中转站的兼容处理方式。',
+                            )
+                      }
+                    />
                     <Form.Select
                       field='responses_compact_mode'
                       label={t('Responses Compact 能力')}
@@ -3448,7 +3535,7 @@ const EditChannelModal = (props) => {
                                     type='tertiary'
                                     onClick={clearParamOverride}
                                   >
-                                    {t('清空')}
+                                    {t('清空非 UA 规则')}
                                   </Button>
                                 ) : null}
                               </Space>

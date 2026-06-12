@@ -27,6 +27,17 @@ export const RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT = ['gpt-5.4'];
 export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT = 3;
 export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN = 1;
 export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX = 168;
+export const RESPONSES_UPSTREAM_PROFILE_DEFAULT = '';
+export const RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT = '__default__';
+export const RESPONSES_UPSTREAM_PROFILE_OFFICIAL_OPENAI = 'official_openai';
+export const RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI = 'official_newapi';
+export const RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI =
+  'same_cluster_newapi';
+export const RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI = 'trusted_newapi';
+export const RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP = 'sub2api_http';
+export const RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2 = 'sub2api_wsv2';
+export const RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY = 'generic_proxy';
+export const RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY = 'chat_only_proxy';
 
 export const RESPONSES_COMPACT_MODE_OPTIONS = [
   {
@@ -40,6 +51,45 @@ export const RESPONSES_COMPACT_MODE_OPTIONS = [
   {
     label: '模拟摘要兼容',
     value: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
+  },
+];
+
+export const RESPONSES_UPSTREAM_PROFILE_OPTIONS = [
+  {
+    label: '默认行为',
+    value: RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT,
+  },
+  {
+    label: '官方 OpenAI',
+    value: RESPONSES_UPSTREAM_PROFILE_OFFICIAL_OPENAI,
+  },
+  {
+    label: '可信 New API',
+    value: RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI,
+  },
+  {
+    label: '官方 New API',
+    value: RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI,
+  },
+  {
+    label: '同集群 New API',
+    value: RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI,
+  },
+  {
+    label: 'Sub2API HTTP',
+    value: RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP,
+  },
+  {
+    label: 'Sub2API WSv2',
+    value: RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2,
+  },
+  {
+    label: '通用代理',
+    value: RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY,
+  },
+  {
+    label: '仅 Chat 代理',
+    value: RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY,
   },
 ];
 
@@ -61,6 +111,52 @@ export function normalizeResponsesCompactMode(mode) {
     return RESPONSES_COMPACT_MODE_NATIVE;
   }
   return RESPONSES_COMPACT_MODE_DEFAULT;
+}
+
+export function normalizeResponsesUpstreamProfile(profile) {
+  if (profile === RESPONSES_UPSTREAM_PROFILE_OFFICIAL_OPENAI) {
+    return RESPONSES_UPSTREAM_PROFILE_OFFICIAL_OPENAI;
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI) {
+    return RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI;
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI) {
+    return RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI;
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI) {
+    return RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI;
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP) {
+    return RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP;
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2) {
+    return RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2;
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY) {
+    return RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY;
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY) {
+    return RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY;
+  }
+  return RESPONSES_UPSTREAM_PROFILE_DEFAULT;
+}
+
+export function hasResponsesProxyCompatibilityProfile(profile) {
+  const normalized = normalizeResponsesUpstreamProfile(profile);
+  return (
+    normalized === RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY ||
+    normalized === RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY
+  );
+}
+
+export function getResponsesCompactModeFromSettings(settings = {}) {
+  const mode = normalizeResponsesCompactMode(settings.responses_compact_mode);
+  if (
+    hasResponsesProxyCompatibilityProfile(settings.responses_upstream_profile)
+  ) {
+    return RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY;
+  }
+  return mode;
 }
 
 export function normalizeResponsesCompactSummaryFallbackModels(models) {
@@ -104,11 +200,12 @@ export function buildResponsesCompactSettings(
   summaryModelFallback = RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
   summaryFallbackModels = RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
   autoFallbackRetryIntervalHours = RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
+  upstreamProfile = RESPONSES_UPSTREAM_PROFILE_DEFAULT,
 ) {
   if (channelType !== 1) {
     return {};
   }
-  return {
+  const settings = {
     responses_compact_mode: normalizeResponsesCompactMode(mode),
     responses_compact_auto_fallback_retry_interval_hours:
       normalizeResponsesCompactAutoFallbackRetryIntervalHours(
@@ -119,6 +216,11 @@ export function buildResponsesCompactSettings(
     responses_compact_summary_fallback_models:
       normalizeResponsesCompactSummaryFallbackModels(summaryFallbackModels),
   };
+  const normalizedProfile = normalizeResponsesUpstreamProfile(upstreamProfile);
+  if (normalizedProfile) {
+    settings.responses_upstream_profile = normalizedProfile;
+  }
+  return settings;
 }
 
 export function clearResponsesCompactSettings(settings) {
@@ -133,6 +235,7 @@ export function clearResponsesCompactSettings(settings) {
   delete settings.responses_compact_context_fallback;
   delete settings.responses_compact_summary_model_fallback;
   delete settings.responses_compact_summary_fallback_models;
+  delete settings.responses_upstream_profile;
 }
 
 export function resetResponsesCompactAutoFallbackOnModeChange(

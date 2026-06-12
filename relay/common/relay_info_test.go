@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	rootcommon "github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -171,6 +173,25 @@ func TestRelayInfoSyntheticCompactScopeUsesOriginModel(t *testing.T) {
 	require.Equal(t, "gpt-5.5-openai-compact", scope.Model)
 	require.Equal(t, "default", scope.Group)
 	require.Equal(t, 163, scope.ChannelID)
+}
+
+func TestInitChannelMetaDoesNotEnableStreamOptionsForAgnes(t *testing.T) {
+	prevMode := gin.Mode()
+	t.Cleanup(func() {
+		gin.SetMode(prevMode)
+	})
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	rootcommon.SetContextKey(ctx, constant.ContextKeyChannelType, constant.ChannelTypeAgnes)
+
+	info := &RelayInfo{}
+	info.InitChannelMeta(ctx)
+
+	require.NotNil(t, info.ChannelMeta)
+	require.Equal(t, constant.ChannelTypeAgnes, info.ChannelType)
+	require.False(t, info.SupportStreamOptions)
 }
 
 func TestGenRelayInfoResponsesCompactionInitializesConversionChain(t *testing.T) {

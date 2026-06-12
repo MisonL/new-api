@@ -10,6 +10,9 @@ import (
 
 const (
 	ResponsesOutputTypeImageGenerationCall = "image_generation_call"
+	ResponsesOutputTypeCompaction          = "compaction"
+	ResponsesOutputTypeCompactionSummary   = "compaction_summary"
+	ResponsesOutputTypeContextCompaction   = "context_compaction"
 )
 
 type SimpleResponse struct {
@@ -310,6 +313,18 @@ func (o *OpenAIResponsesResponse) HasImageGenerationCall() bool {
 	return false
 }
 
+func (o *OpenAIResponsesResponse) HasCompactionOutput() bool {
+	if o == nil || len(o.Output) == 0 {
+		return false
+	}
+	for _, output := range o.Output {
+		if output.Type == ResponsesOutputTypeCompaction || output.Type == ResponsesOutputTypeCompactionSummary || output.Type == ResponsesOutputTypeContextCompaction {
+			return true
+		}
+	}
+	return false
+}
+
 func (o *OpenAIResponsesResponse) GetQuality() string {
 	if len(o.Output) == 0 {
 		return ""
@@ -339,17 +354,18 @@ type IncompleteDetails struct {
 }
 
 type ResponsesOutput struct {
-	Type      string                   `json:"type"`
-	ID        string                   `json:"id"`
-	Status    string                   `json:"status"`
-	Role      string                   `json:"role"`
-	Content   []ResponsesOutputContent `json:"content"`
-	Quality   string                   `json:"quality"`
-	Size      string                   `json:"size"`
-	CallId    string                   `json:"call_id,omitempty"`
-	Name      string                   `json:"name,omitempty"`
-	Arguments json.RawMessage          `json:"arguments,omitempty"`
-	Input     string                   `json:"input,omitempty"`
+	Type             string                   `json:"type"`
+	ID               string                   `json:"id"`
+	Status           string                   `json:"status"`
+	Role             string                   `json:"role"`
+	Content          []ResponsesOutputContent `json:"content"`
+	Quality          string                   `json:"quality"`
+	Size             string                   `json:"size"`
+	CallId           string                   `json:"call_id,omitempty"`
+	Name             string                   `json:"name,omitempty"`
+	Arguments        json.RawMessage          `json:"arguments,omitempty"`
+	Input            string                   `json:"input,omitempty"`
+	EncryptedContent json.RawMessage          `json:"encrypted_content,omitempty"`
 }
 
 // ArgumentsString returns function call arguments in the string form expected by Chat Completions.

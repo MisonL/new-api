@@ -46,7 +46,6 @@ const buildCodexHeaderPassthroughTemplate = (headers) => ({
 });
 
 export const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'User-Agent',
   'Originator',
   'Session_id',
   'Session-Id',
@@ -148,11 +147,11 @@ const PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE = {
 
 export const PARAM_OVERRIDE_TEMPLATES = {
   codexCliHeaders: {
-    label: 'Codex CLI Header Passthrough',
+    label: 'Codex CLI Dynamic Headers Passthrough',
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   codexHeaders: {
-    label: 'Codex Desktop Header Passthrough',
+    label: 'Codex Desktop Dynamic Headers Passthrough',
     payload: CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE,
   },
   codexWithoutImageTool: {

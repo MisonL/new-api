@@ -28,6 +28,7 @@ export default function ProtocolPolicyRuleCard(props) {
     channelTypeOptions,
     index,
     isExpanded,
+    passThroughEnabled,
     removeRule,
     rule,
     ruleKey,
@@ -52,6 +53,7 @@ export default function ProtocolPolicyRuleCard(props) {
         isExpanded={isExpanded}
         rule={rule}
         ruleKey={ruleKey}
+        passThroughEnabled={passThroughEnabled}
         t={t}
         toggleRuleExpanded={toggleRuleExpanded}
         updateRule={updateRule}
@@ -63,6 +65,7 @@ export default function ProtocolPolicyRuleCard(props) {
           index={index}
           removeRule={removeRule}
           rule={rule}
+          passThroughEnabled={passThroughEnabled}
           t={t}
           updateRule={updateRule}
         />

@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMigrateResponsesCompactModeAutoUpdatesOpenAIChannelsOnce(t *testing.T) {
+func TestMigrateResponsesCompactModeAutoUpdatesAllChannels(t *testing.T) {
 	previousDB := DB
 	previousLogDB := LOG_DB
 	db := openTestDB(t, &Channel{}, &Option{})
@@ -53,7 +53,8 @@ func TestMigrateResponsesCompactModeAutoUpdatesOpenAIChannelsOnce(t *testing.T) 
 
 	var untouchedAnthropic Channel
 	require.NoError(t, db.First(&untouchedAnthropic, anthropicChannel.Id).Error)
-	require.JSONEq(t, anthropicChannel.OtherSettings, untouchedAnthropic.OtherSettings)
+	anthropicSettings := untouchedAnthropic.GetOtherSettings()
+	require.Equal(t, dto.ResponsesCompactModeAuto, anthropicSettings.ResponsesCompactMode)
 
 	openAISettings.ResponsesCompactMode = dto.ResponsesCompactModeSynthetic
 	migratedOpenAI.SetOtherSettings(openAISettings)
@@ -65,9 +66,14 @@ func TestMigrateResponsesCompactModeAutoUpdatesOpenAIChannelsOnce(t *testing.T) 
 	require.NoError(t, db.First(&afterSecondRun, openAIChannel.Id).Error)
 	require.Equal(t, dto.ResponsesCompactModeSynthetic, afterSecondRun.GetOtherSettings().ResponsesCompactMode)
 
-	var marker Option
-	require.NoError(t, db.First(&marker, "key = ?", responsesCompactModeAutoMigrationOptionKey).Error)
-	require.Equal(t, "done", marker.Value)
+	for _, markerKey := range []string{
+		responsesCompactModeAutoMigrationOptionKey,
+		responsesCompactModeAutoAllChannelsMigrationOptionKey,
+	} {
+		var marker Option
+		require.NoError(t, db.First(&marker, "key = ?", markerKey).Error)
+		require.Equal(t, "done", marker.Value)
+	}
 }
 
 func TestMigrateResponsesCompactModeAutoResetsInvalidSettings(t *testing.T) {
@@ -112,12 +118,17 @@ func TestMigrateResponsesCompactModeAutoResetsInvalidSettings(t *testing.T) {
 	require.NoError(t, db.First(&migrated, validChannel.Id).Error)
 	require.Equal(t, dto.ResponsesCompactModeAuto, migrated.GetOtherSettings().ResponsesCompactMode)
 
-	var marker Option
-	require.NoError(t, db.First(&marker, "key = ?", responsesCompactModeAutoMigrationOptionKey).Error)
-	require.Equal(t, "done", marker.Value)
+	for _, markerKey := range []string{
+		responsesCompactModeAutoMigrationOptionKey,
+		responsesCompactModeAutoAllChannelsMigrationOptionKey,
+	} {
+		var marker Option
+		require.NoError(t, db.First(&marker, "key = ?", markerKey).Error)
+		require.Equal(t, "done", marker.Value)
+	}
 }
 
-func TestMigrateResponsesCompactModeAutoSkipsWhenMarkerExists(t *testing.T) {
+func TestMigrateResponsesCompactModeAutoAllChannelsRunsWhenLegacyMarkerExists(t *testing.T) {
 	previousDB := DB
 	previousLogDB := LOG_DB
 	db := openTestDB(t, &Channel{}, &Option{})
@@ -131,8 +142,57 @@ func TestMigrateResponsesCompactModeAutoSkipsWhenMarkerExists(t *testing.T) {
 		Key:   responsesCompactModeAutoMigrationOptionKey,
 		Value: "done",
 	}).Error)
+	channels := []Channel{
+		{
+			Id:            9504,
+			Type:          constant.ChannelTypeOpenAI,
+			Name:          "openai-upgraded",
+			Key:           "test-key",
+			Models:        "gpt-5",
+			Group:         "default",
+			OtherSettings: `{"responses_compact_mode":"native"}`,
+		},
+		{
+			Id:            9506,
+			Type:          constant.ChannelTypeAnthropic,
+			Name:          "anthropic-upgraded",
+			Key:           "test-key",
+			Models:        "claude-sonnet-4-20250514",
+			Group:         "default",
+			OtherSettings: `{}`,
+		},
+	}
+	require.NoError(t, db.Create(&channels).Error)
+
+	require.NoError(t, migrateResponsesCompactModeAuto())
+
+	for _, id := range []int{9504, 9506} {
+		var got Channel
+		require.NoError(t, db.First(&got, id).Error)
+		require.Equal(t, dto.ResponsesCompactModeAuto, got.GetOtherSettings().ResponsesCompactMode)
+	}
+
+	var marker Option
+	require.NoError(t, db.First(&marker, "key = ?", responsesCompactModeAutoAllChannelsMigrationOptionKey).Error)
+	require.Equal(t, "done", marker.Value)
+}
+
+func TestMigrateResponsesCompactModeAutoSkipsWhenAllChannelsMarkerExists(t *testing.T) {
+	previousDB := DB
+	previousLogDB := LOG_DB
+	db := openTestDB(t, &Channel{}, &Option{})
+	DB = db
+	LOG_DB = db
+	t.Cleanup(func() {
+		DB = previousDB
+		LOG_DB = previousLogDB
+	})
+	require.NoError(t, db.Create(&Option{
+		Key:   responsesCompactModeAutoAllChannelsMigrationOptionKey,
+		Value: "done",
+	}).Error)
 	channel := Channel{
-		Id:            9504,
+		Id:            9507,
 		Type:          constant.ChannelTypeOpenAI,
 		Name:          "openai-skipped",
 		Key:           "test-key",

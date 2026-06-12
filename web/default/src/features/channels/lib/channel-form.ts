@@ -10,6 +10,7 @@ import {
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
   RESPONSES_UPSTREAM_PROFILE_DEFAULT,
+  getResponsesCompactModeFromSettings,
   normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactMode,
   normalizeResponsesCompactFallbackModels,
@@ -163,6 +164,58 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_model_update_ignored_models: '',
 }
 
+type ChannelSubmitDirtyFields = Partial<
+  Record<keyof ChannelFormValues, unknown>
+>
+
+const HIDDEN_SUBMIT_STATE_FIELDS = [
+  'settings',
+  'param_override',
+  'header_override',
+  'status_code_mapping',
+] as const satisfies ReadonlyArray<keyof ChannelFormValues>
+
+function isEmptyHiddenSubmitValue(value: unknown): boolean {
+  if (value == null) return true
+  if (typeof value !== 'string') return false
+
+  const trimmed = value.trim()
+  return trimmed === '' || trimmed === '{}'
+}
+
+function isSubmitFieldDirty(
+  dirtyFields: ChannelSubmitDirtyFields | undefined,
+  field: keyof ChannelFormValues
+): boolean {
+  return dirtyFields?.[field] === true
+}
+
+export function mergeChannelSubmitFormValues(
+  formValues: ChannelFormValues,
+  persistedValues: Partial<ChannelFormValues> | undefined,
+  dirtyFields?: ChannelSubmitDirtyFields
+): ChannelFormValues {
+  if (!persistedValues) return formValues
+
+  const merged = { ...persistedValues, ...formValues } as ChannelFormValues
+  const mutableMerged = merged as Record<keyof ChannelFormValues, unknown>
+
+  for (const field of HIDDEN_SUBMIT_STATE_FIELDS) {
+    const persistedValue = persistedValues[field]
+    if (
+      persistedValue == null ||
+      isSubmitFieldDirty(dirtyFields, field) ||
+      !isEmptyHiddenSubmitValue(formValues[field])
+    ) {
+      continue
+    }
+
+    mutableMerged[field] = persistedValue
+  }
+
+  return merged
+}
+
 // ============================================================================
 // Transform Functions
 // ============================================================================
@@ -242,9 +295,12 @@ export function transformChannelToFormDefaults(
         parsed.responses_upstream_profile
       )
       stripCodexEncryptedContext = parsed.strip_codex_encrypted_context === true
-      responsesCompactMode = normalizeResponsesCompactMode(
-        parsed.responses_compact_mode
-      )
+      responsesCompactMode = getResponsesCompactModeFromSettings({
+        responses_compact_mode: normalizeResponsesCompactMode(
+          parsed.responses_compact_mode
+        ),
+        responses_upstream_profile: responsesUpstreamProfile,
+      })
       responsesCompactAutoFallbackRetryIntervalHours =
         normalizeResponsesCompactAutoFallbackRetryIntervalHours(
           parsed.responses_compact_auto_fallback_retry_interval_hours
@@ -449,7 +505,7 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       delete settingsObj.responses_compact_auto_fallback_reason
     }
   } else {
-    delete settingsObj.responses_compact_mode
+    settingsObj.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT
     delete settingsObj.responses_compact_auto_fallback_date
     delete settingsObj.responses_compact_auto_fallback_at
     delete settingsObj.responses_compact_auto_fallback_reason

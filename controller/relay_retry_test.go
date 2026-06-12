@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -68,6 +69,42 @@ func TestShouldRetryResponsesCompactTimeoutStillHonorsRetryBudget(t *testing.T) 
 	err := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, 524)
 
 	require.False(t, shouldRetry(c, err, 0))
+}
+
+func TestShouldRetryResponsesCompactUpstream413DespiteChannelAffinitySkip(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	c.Set("relay_mode", relayconstant.RelayModeResponsesCompact)
+	c.Set("channel_affinity_skip_retry_on_failure", true)
+	err := types.InitOpenAIError(types.ErrorCodeUpstreamRequestTooLarge, http.StatusRequestEntityTooLarge)
+
+	require.True(t, shouldRetry(c, err, 1))
+}
+
+func TestShouldRetryResponsesCompactUpstream413KeepsScope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("normal responses keep affinity skip", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(nil)
+		c.Set("relay_mode", relayconstant.RelayModeResponses)
+		c.Set("channel_affinity_skip_retry_on_failure", true)
+		err := types.InitOpenAIError(types.ErrorCodeUpstreamRequestTooLarge, http.StatusRequestEntityTooLarge)
+
+		require.False(t, shouldRetry(c, err, 1))
+	})
+
+	t.Run("local oversized body still skips retry", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(nil)
+		c.Set("relay_mode", relayconstant.RelayModeResponsesCompact)
+		err := types.NewErrorWithStatusCode(
+			errors.New("request body too large"),
+			types.ErrorCodeReadRequestBodyFailed,
+			http.StatusRequestEntityTooLarge,
+			types.ErrOptionWithSkipRetry(),
+		)
+
+		require.False(t, shouldRetry(c, err, 1))
+	})
 }
 
 func TestShouldRetryAllowsRateLimitDespiteChannelAffinitySkip(t *testing.T) {
@@ -267,6 +304,30 @@ func TestShouldFallbackResponsesCompactAutoRequiresCompatibilityError(t *testing
 			want:       true,
 		},
 		{
+			name:       "native compact upstream 500 falls back",
+			statusCode: http.StatusInternalServerError,
+			message:    "do_request_failed",
+			want:       true,
+		},
+		{
+			name:       "native compact upstream 502 falls back",
+			statusCode: http.StatusBadGateway,
+			message:    "bad response status code 502",
+			want:       true,
+		},
+		{
+			name:       "native compact upstream 503 falls back",
+			statusCode: http.StatusServiceUnavailable,
+			message:    "Service temporarily unavailable",
+			want:       true,
+		},
+		{
+			name:       "native compact rate limit does not fallback",
+			statusCode: http.StatusTooManyRequests,
+			message:    "Concurrency limit exceeded for account, please retry later",
+			want:       false,
+		},
+		{
 			name:       "ordinary bad request does not fallback",
 			statusCode: http.StatusBadRequest,
 			message:    "unsupported parameter: temperature",
@@ -461,6 +522,24 @@ func TestShouldFallbackResponsesCompactAutoHonorsAttemptedFlag(t *testing.T) {
 	require.False(t, shouldFallbackResponsesCompactAuto(c, compactAutoFallbackRelayInfo(), err))
 }
 
+func TestShouldFallbackResponsesCompactAutoSkipsSyntheticAttemptedSameChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	info := compactAutoFallbackRelayInfo()
+	markResponsesCompactSyntheticFallbackAttempted(c, info)
+	err := types.NewOpenAIError(
+		errors.New("provider returned malformed compact output: no compaction output"),
+		types.ErrorCodeBadResponseBody,
+		http.StatusBadGateway,
+	)
+
+	require.False(t, shouldFallbackResponsesCompactAuto(c, info, err))
+
+	nextChannel := compactAutoFallbackRelayInfo()
+	nextChannel.ChannelMeta.ChannelId = info.ChannelMeta.ChannelId + 1
+	require.True(t, shouldFallbackResponsesCompactAuto(c, nextChannel, err))
+}
+
 func TestShouldFallbackResponsesCompactAutoHandlesMalformedNativeOutput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)
@@ -529,23 +608,97 @@ func TestRetryResponsesCompactSyntheticSummaryRestoresModeOnFailure(t *testing.T
 func TestResponsesCompactFallbackContextSnapshotRestoresFailedAttemptMarkers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
 	c.Set("responses_compact_context_fallback_attempted", true)
 	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModel, "gpt-5.4")
 
 	snapshot := snapshotResponsesCompactFallbackContext(c)
 	c.Set("responses_compact_auto_fallback_attempted", true)
+	c.Set("responses_compact_previous_response_id_fallback_attempted", true)
 	c.Set("responses_compact_summary_model_fallback_attempted", true)
 	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModel, "gpt-5.3")
 	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModels, []string{"gpt-5.3"})
+	service.MarkResponsesCompactNativeFallback(c, compactAutoFallbackRelayInfo(), http.StatusBadGateway, "status_code=502", time.Now())
+	setResponsesCompactVisibleOnly(c, true)
 
 	restoreResponsesCompactFallbackContext(c, snapshot)
 
 	require.False(t, c.GetBool("responses_compact_auto_fallback_attempted"))
 	require.True(t, c.GetBool("responses_compact_context_fallback_attempted"))
+	require.False(t, c.GetBool("responses_compact_previous_response_id_fallback_attempted"))
 	require.False(t, c.GetBool("responses_compact_summary_model_fallback_attempted"))
 	require.Equal(t, "gpt-5.4", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactSummaryModel))
 	_, exists := common.GetContextKey(c, constant.ContextKeyResponsesCompactSummaryModels)
 	require.False(t, exists)
+	_, exists = common.GetContextKey(c, constant.ContextKeyResponsesCompactVisibleOnly)
+	require.False(t, exists)
+	nativeFallback, exists := common.GetContextKeyType[service.ResponsesCompactNativeFallbackLog](c, constant.ContextKeyResponsesCompactNativeFallback)
+	require.True(t, exists)
+	require.True(t, nativeFallback.Attempted)
+	require.Equal(t, http.StatusBadGateway, nativeFallback.StatusCode)
+	require.Equal(t, false, c.Request.Context().Value(constant.ContextKeyResponsesCompactVisibleOnly))
+}
+
+func TestShouldFallbackResponsesCompactVisibleOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	info := compactAutoFallbackRelayInfo()
+	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeSynthetic
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "input too large for context window",
+		Code:    "context_length_exceeded",
+	}, http.StatusRequestEntityTooLarge)
+
+	require.True(t, shouldFallbackResponsesCompactVisibleOnly(c, info, err))
+
+	c.Set("responses_compact_visible_only_fallback_attempted", true)
+	require.False(t, shouldFallbackResponsesCompactVisibleOnly(c, info, err))
+}
+
+func TestShouldFallbackResponsesCompactVisibleOnlySkipsAlreadyVisibleOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	info := compactAutoFallbackRelayInfo()
+	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeSynthetic
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "input too large for context window",
+		Code:    "context_length_exceeded",
+	}, http.StatusRequestEntityTooLarge)
+
+	setResponsesCompactVisibleOnly(c, true)
+
+	require.False(t, shouldFallbackResponsesCompactVisibleOnly(c, info, err))
+}
+
+func TestShouldFallbackResponsesCompactPreviousResponseID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	info := compactAutoFallbackRelayInfo()
+	err := types.NewErrorWithStatusCode(service.ErrResponsesRESTPreviousIDUnsupported, types.ErrorCodeConvertRequestFailed, http.StatusBadRequest)
+
+	require.True(t, shouldFallbackResponsesCompactPreviousResponseID(c, info, err))
+
+	c.Set("responses_compact_previous_response_id_fallback_attempted", true)
+	require.False(t, shouldFallbackResponsesCompactPreviousResponseID(c, info, err))
+}
+
+func TestResponsesCompactPreviousResponseIDUnsupportedErrorMatchesSub2APIMessage(t *testing.T) {
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "previous_response_id is only supported on Responses WebSocket v2",
+		Code:    "invalid_request_error",
+	}, http.StatusBadRequest)
+
+	require.True(t, isResponsesCompactPreviousResponseIDUnsupportedError(err))
+}
+
+func TestResponsesCompactPreviousResponseIDUnsupportedErrorIgnoresGenericWebSocketV2Message(t *testing.T) {
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "Responses WebSocket v2 session expired",
+		Code:    "invalid_request_error",
+	}, http.StatusBadRequest)
+
+	require.False(t, isResponsesCompactPreviousResponseIDUnsupportedError(err))
 }
 
 func TestShouldFallbackResponsesCompactSummaryModel(t *testing.T) {

@@ -2,19 +2,28 @@ import { describe, expect, test } from 'bun:test'
 import {
   ENDPOINT_CHAT,
   ENDPOINT_RESPONSES,
+  PROTOCOL_FILTER_ALL,
+  PROTOCOL_RULE_SCOPE_EMPTY,
+  PROTOCOL_RULE_SCOPE_LIMITED,
+  PROTOCOL_RULE_STATE_ATTENTION,
   TEMPLATE_BIDIRECTIONAL,
   TEMPLATE_CHAT_TO_RESPONSES,
   TEMPLATE_RESPONSES_TO_CHAT,
   createCommittedDraftText,
   createDraftTextChange,
   createProtocolRuleFromTemplate,
+  filterProtocolRules,
   getDraftTextValue,
   getProtocolPreviewResult,
+  getProtocolPolicyStats,
+  getProtocolRuleAttentionKeys,
+  getProtocolRuleDirection,
   getProtocolRuleWarningKeys,
   parseIntegerText,
   parseLines,
   parseProtocolPolicy,
   serializeProtocolPolicy,
+  type ProtocolRuleFilters,
 } from '../src/features/system-settings/models/protocol-conversion-policy-utils'
 
 describe('protocol conversion policy utils', () => {
@@ -142,6 +151,143 @@ describe('protocol conversion policy utils', () => {
       ENDPOINT_RESPONSES,
       ENDPOINT_CHAT,
     ])
+  })
+
+  test('summarizes policy rules for control dashboard', () => {
+    const parsed = parseProtocolPolicy(
+      JSON.stringify({
+        rules: [
+          {
+            name: 'channel-145-chat-to-responses',
+            enabled: true,
+            source_endpoint: ENDPOINT_CHAT,
+            target_endpoint: ENDPOINT_RESPONSES,
+            all_channels: false,
+            channel_ids: [145],
+            model_patterns: ['^deepseek-v4.*$'],
+          },
+          {
+            name: 'global-responses-to-chat',
+            enabled: false,
+            source_endpoint: ENDPOINT_RESPONSES,
+            target_endpoint: ENDPOINT_CHAT,
+            all_channels: true,
+            model_patterns: [],
+          },
+          {
+            name: 'empty-scope',
+            enabled: true,
+            source_endpoint: ENDPOINT_CHAT,
+            target_endpoint: ENDPOINT_RESPONSES,
+            all_channels: false,
+            channel_ids: [],
+            channel_types: [],
+            model_patterns: [],
+          },
+        ],
+      })
+    )
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    expect(getProtocolPolicyStats(parsed.rules, false)).toEqual({
+      total: 3,
+      enabled: 2,
+      disabled: 1,
+      chatToResponses: 2,
+      responsesToChat: 1,
+      allChannels: 1,
+      limitedScope: 1,
+      emptyScope: 1,
+      attention: 2,
+    })
+    expect(getProtocolPolicyStats(parsed.rules, true).attention).toBe(3)
+    expect(getProtocolRuleDirection(parsed.rules[0])).toBe(
+      TEMPLATE_CHAT_TO_RESPONSES
+    )
+    expect(getProtocolRuleAttentionKeys(parsed.rules[0], true)).toContain(
+      'Global request passthrough is enabled. Conversion will be skipped at runtime.'
+    )
+  })
+
+  test('filters policy rules by direction, state, scope, and query', () => {
+    const parsed = parseProtocolPolicy(
+      JSON.stringify({
+        rules: [
+          {
+            name: 'channel-145-chat-to-responses',
+            enabled: true,
+            source_endpoint: ENDPOINT_CHAT,
+            target_endpoint: ENDPOINT_RESPONSES,
+            all_channels: false,
+            channel_ids: [145],
+            model_patterns: ['^deepseek-v4.*$'],
+          },
+          {
+            name: 'global-responses-to-chat',
+            enabled: false,
+            source_endpoint: ENDPOINT_RESPONSES,
+            target_endpoint: ENDPOINT_CHAT,
+            all_channels: true,
+            model_patterns: [],
+          },
+          {
+            name: 'empty-scope',
+            enabled: true,
+            source_endpoint: ENDPOINT_CHAT,
+            target_endpoint: ENDPOINT_RESPONSES,
+            all_channels: false,
+            channel_ids: [],
+            channel_types: [],
+            model_patterns: [],
+          },
+        ],
+      })
+    )
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    const baseFilters: ProtocolRuleFilters = {
+      direction: PROTOCOL_FILTER_ALL,
+      state: PROTOCOL_FILTER_ALL,
+      scope: PROTOCOL_FILTER_ALL,
+      query: '',
+    }
+    expect(
+      filterProtocolRules(
+        parsed.rules,
+        { ...baseFilters, direction: TEMPLATE_CHAT_TO_RESPONSES },
+        false
+      ).map((item) => item.index)
+    ).toEqual([0, 2])
+    expect(
+      filterProtocolRules(
+        parsed.rules,
+        { ...baseFilters, state: PROTOCOL_RULE_STATE_ATTENTION },
+        false
+      ).map((item) => item.index)
+    ).toEqual([1, 2])
+    expect(
+      filterProtocolRules(
+        parsed.rules,
+        { ...baseFilters, scope: PROTOCOL_RULE_SCOPE_LIMITED },
+        false
+      ).map((item) => item.index)
+    ).toEqual([0])
+    expect(
+      filterProtocolRules(
+        parsed.rules,
+        { ...baseFilters, scope: PROTOCOL_RULE_SCOPE_EMPTY },
+        false
+      ).map((item) => item.index)
+    ).toEqual([2])
+    expect(
+      filterProtocolRules(
+        parsed.rules,
+        { ...baseFilters, query: '145' },
+        false
+      ).map((item) => item.index)
+    ).toEqual([0])
   })
 
   test('reports required endpoint fields before alias validation', () => {

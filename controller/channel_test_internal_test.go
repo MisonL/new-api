@@ -165,7 +165,7 @@ func TestApplyChannelTestProtocolStrategyUsesGlobalResponsesToChatRuleByDefault(
 	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponses, types.RelayFormatOpenAI}, info.RequestConversionChain)
 }
 
-func TestResetResponsesCompactAutoFallbackClearsNonOpenAISettings(t *testing.T) {
+func TestResetResponsesCompactAutoFallbackNormalizesNonOpenAISettings(t *testing.T) {
 	channel := &model.Channel{
 		Type: constant.ChannelTypeAnthropic,
 	}
@@ -184,7 +184,7 @@ func TestResetResponsesCompactAutoFallbackClearsNonOpenAISettings(t *testing.T) 
 
 	settings := channel.GetOtherSettings()
 	require.Equal(t, "preview", settings.AzureResponsesVersion)
-	require.Empty(t, settings.ResponsesCompactMode)
+	require.Equal(t, dto.ResponsesCompactModeAuto, settings.ResponsesCompactMode)
 	require.Empty(t, settings.ResponsesUpstreamProfile)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackAt)
@@ -192,7 +192,7 @@ func TestResetResponsesCompactAutoFallbackClearsNonOpenAISettings(t *testing.T) 
 	require.Zero(t, settings.ResponsesCompactAutoFallbackRetryIntervalHours)
 }
 
-func TestValidateChannelOtherSettingsClearsCompactMetadataForNonOpenAI(t *testing.T) {
+func TestValidateChannelOtherSettingsNormalizesCompactMetadataForNonOpenAI(t *testing.T) {
 	channel := &model.Channel{
 		Type: constant.ChannelTypeAnthropic,
 		OtherSettings: `{
@@ -210,12 +210,23 @@ func TestValidateChannelOtherSettingsClearsCompactMetadataForNonOpenAI(t *testin
 
 	settings := channel.GetOtherSettings()
 	require.Equal(t, "preview", settings.AzureResponsesVersion)
-	require.Empty(t, settings.ResponsesCompactMode)
+	require.Equal(t, dto.ResponsesCompactModeAuto, settings.ResponsesCompactMode)
 	require.Empty(t, settings.ResponsesUpstreamProfile)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackDate)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackAt)
 	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackRetryIntervalHours)
+}
+
+func TestValidateChannelOtherSettingsDefaultsCompactModeForEmptySettings(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI,
+	}
+
+	require.NoError(t, validateChannelOtherSettings(channel, map[string]struct{}{}))
+
+	settings := channel.GetOtherSettings()
+	require.Equal(t, dto.ResponsesCompactModeAuto, settings.ResponsesCompactMode)
 }
 
 func TestValidateChannelOtherSettingsPreservesDisabledProxyProfileForOpenAI(t *testing.T) {

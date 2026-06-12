@@ -362,7 +362,8 @@ func TestAppendResponsesCompactLogInfoWritesUpstreamProfile(t *testing.T) {
 	require.Len(t, content, 1)
 	require.Contains(t, content[0], "upstream_profile=sub2api_http")
 	require.Equal(t, "sub2api_http", other["responses_upstream_profile"])
-	require.Equal(t, "synthetic_summary", other["responses_compact_mode"])
+	require.Equal(t, "native", other["responses_compact_mode"])
+	require.Equal(t, "/v1/responses/compact", other["responses_compact_upstream_path"])
 }
 
 func TestAppendResponsesCompactLogInfoRecordsContextAndSummaryModelFallback(t *testing.T) {
@@ -393,6 +394,33 @@ func TestAppendResponsesCompactLogInfoRecordsContextAndSummaryModelFallback(t *t
 	require.Equal(t, true, annotatedOther["responses_compact_summary_model_fallback"])
 	require.Equal(t, "gpt-5.4", annotatedOther["responses_compact_summary_model"])
 	require.Equal(t, []string{"gpt-5.4"}, annotatedOther["responses_compact_summary_models"])
+}
+
+func TestAppendResponsesCompactLogInfoRecordsPreviousResponseIDFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+	ctx.Set("responses_compact_previous_response_id_fallback_attempted", true)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+		},
+	}
+
+	content, annotatedOther := appendResponsesCompactLogInfo(ctx, info, nil, nil, now)
+
+	require.Equal(t, []string{
+		"Responses Compact mode=synthetic_summary setting=auto path=/v1/responses upstream_profile=sub2api_http previous_response_id_fallback=true",
+	}, content)
+	require.Equal(t, "synthetic_summary", annotatedOther["responses_compact_mode"])
+	require.Equal(t, "/v1/responses", annotatedOther["responses_compact_upstream_path"])
+	require.Equal(t, true, annotatedOther["responses_compact_previous_response_id_fallback"])
 }
 
 func TestAppendResponsesCompactLogInfoRecordsContextFallbackAfterModeRestored(t *testing.T) {
@@ -468,6 +496,218 @@ func TestResponsesCompactLogInfoCanUseContextForErrorLogs(t *testing.T) {
 	require.Equal(t, "auto", logInfo.Setting)
 	require.Equal(t, "/v1/responses", logInfo.UpstreamPath)
 	require.True(t, logInfo.AutoFallback)
+}
+
+func TestAppendResponsesCompactLogInfoRecordsAutoFallbackNativeAttempt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 8, 0, 0, 0, time.UTC)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
+				ResponsesCompactAutoFallbackRetryIntervalHours: 6,
+			},
+		},
+	}
+	ctx.Set("responses_compact_auto_fallback_attempted", true)
+	MarkResponsesCompactNativeFallback(
+		ctx,
+		info,
+		502,
+		"status_code=502, Upstream service temporarily unavailable\nextra whitespace",
+		now,
+	)
+
+	content, annotatedOther := AppendResponsesCompactLogInfo(ctx, info, nil, nil, now)
+
+	require.Equal(t, []string{
+		"Responses Compact mode=synthetic_summary setting=auto path=/v1/responses auto_fallback=true native_path=/v1/responses/compact native_status=502 fallback_reason=status_code=502, Upstream service temporarily unavailable extra whitespace",
+	}, content)
+	require.Equal(t, "synthetic_summary", annotatedOther["responses_compact_mode"])
+	require.Equal(t, "/v1/responses", annotatedOther["responses_compact_final_upstream_path"])
+	require.Equal(t, true, annotatedOther["responses_compact_auto_fallback"])
+	require.Equal(t, true, annotatedOther["responses_compact_native_attempted"])
+	require.Equal(t, "/v1/responses/compact", annotatedOther["responses_compact_native_upstream_path"])
+	require.Equal(t, 502, annotatedOther["responses_compact_native_status_code"])
+	require.Equal(t, "status_code=502, Upstream service temporarily unavailable extra whitespace", annotatedOther["responses_compact_auto_fallback_reason"])
+	require.Equal(t, int64(1779804000), annotatedOther["responses_compact_auto_fallback_retry_until"])
+	require.Equal(t, 6, annotatedOther["responses_compact_auto_fallback_retry_interval_hours"])
+}
+
+func TestAppendResponsesCompactLogInfoSkipsStaleNativeAttemptOnLaterSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 8, 0, 0, 0, time.UTC)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeAuto,
+			},
+		},
+	}
+	MarkResponsesCompactNativeFallback(ctx, info, 503, "status_code=503, first channel unavailable", now)
+
+	content, annotatedOther := AppendResponsesCompactLogInfo(ctx, info, nil, nil, now)
+
+	require.Equal(t, []string{
+		"Responses Compact mode=native setting=auto path=/v1/responses/compact",
+	}, content)
+	_, hasNativeAttempt := annotatedOther["responses_compact_native_attempted"]
+	require.False(t, hasNativeAttempt)
+	_, hasFallbackReason := annotatedOther["responses_compact_auto_fallback_reason"]
+	require.False(t, hasFallbackReason)
+}
+
+func TestAppendResponsesCompactLogInfoRecordsNativeAttemptForErrorLog(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 8, 0, 0, 0, time.UTC)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
+				ResponsesCompactAutoFallbackRetryIntervalHours: 4,
+			},
+		},
+	}
+	MarkResponsesCompactNativeFallback(ctx, info, 503, "status_code=503, first channel unavailable", now)
+	MarkResponsesCompactErrorLog(ctx, true)
+
+	content, annotatedOther := AppendResponsesCompactLogInfo(ctx, info, nil, nil, now)
+
+	require.Equal(t, []string{
+		"Responses Compact mode=native setting=auto path=/v1/responses/compact native_path=/v1/responses/compact native_status=503 fallback_reason=status_code=503, first channel unavailable",
+	}, content)
+	require.Equal(t, true, annotatedOther["responses_compact_native_attempted"])
+	require.Equal(t, "/v1/responses/compact", annotatedOther["responses_compact_native_upstream_path"])
+	require.Equal(t, 503, annotatedOther["responses_compact_native_status_code"])
+	require.Equal(t, "status_code=503, first channel unavailable", annotatedOther["responses_compact_auto_fallback_reason"])
+	require.Equal(t, int64(1779796800), annotatedOther["responses_compact_auto_fallback_retry_until"])
+	require.Equal(t, 4, annotatedOther["responses_compact_auto_fallback_retry_interval_hours"])
+
+	MarkResponsesCompactErrorLog(ctx, false)
+	content, annotatedOther = AppendResponsesCompactLogInfo(ctx, info, nil, nil, now)
+	require.Equal(t, []string{
+		"Responses Compact mode=native setting=auto path=/v1/responses/compact",
+	}, content)
+	_, hasNativeAttempt := annotatedOther["responses_compact_native_attempted"]
+	require.False(t, hasNativeAttempt)
+}
+
+func TestAppendResponsesCompactLogInfoSkipsNativeAttemptFromDifferentChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 8, 0, 0, 0, time.UTC)
+	firstChannel := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelId:   183,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeAuto,
+			},
+		},
+	}
+	nextChannel := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelId:   199,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeAuto,
+			},
+		},
+	}
+	MarkResponsesCompactNativeFallback(ctx, firstChannel, 503, "status_code=503, first channel unavailable", now)
+	MarkResponsesCompactErrorLog(ctx, true)
+
+	content, annotatedOther := AppendResponsesCompactLogInfo(ctx, nextChannel, nil, nil, now)
+
+	require.Equal(t, []string{
+		"Responses Compact mode=native setting=auto path=/v1/responses/compact",
+	}, content)
+	_, hasNativeAttempt := annotatedOther["responses_compact_native_attempted"]
+	require.False(t, hasNativeAttempt)
+	_, hasNativeChannel := annotatedOther["responses_compact_native_channel_id"]
+	require.False(t, hasNativeChannel)
+}
+
+func TestAppendResponsesCompactLogInfoRecordsAutoFallbackWindow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 8, 0, 0, 0, time.UTC)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
+				ResponsesCompactAutoFallbackAt:                 now.Add(-time.Hour).Unix(),
+				ResponsesCompactAutoFallbackReason:             "status_code=503, upstream unavailable\nwith whitespace",
+				ResponsesCompactAutoFallbackRetryIntervalHours: 3,
+			},
+		},
+	}
+
+	content, annotatedOther := AppendResponsesCompactLogInfo(ctx, info, nil, nil, now)
+
+	require.Equal(t, []string{
+		"Responses Compact mode=synthetic_summary setting=auto path=/v1/responses auto_fallback=true auto_fallback_window=true fallback_reason=status_code=503, upstream unavailable with whitespace",
+	}, content)
+	require.Equal(t, "synthetic_summary", annotatedOther["responses_compact_mode"])
+	require.Equal(t, "auto", annotatedOther["responses_compact_setting"])
+	require.Equal(t, "/v1/responses", annotatedOther["responses_compact_final_upstream_path"])
+	require.Equal(t, true, annotatedOther["responses_compact_auto_fallback"])
+	require.Equal(t, true, annotatedOther["responses_compact_auto_fallback_window"])
+	require.Equal(t, "status_code=503, upstream unavailable with whitespace", annotatedOther["responses_compact_auto_fallback_reason"])
+	require.Equal(t, now.Add(2*time.Hour).Unix(), annotatedOther["responses_compact_auto_fallback_retry_until"])
+	require.Equal(t, 3, annotatedOther["responses_compact_auto_fallback_retry_interval_hours"])
+	_, hasNativeAttempt := annotatedOther["responses_compact_native_attempted"]
+	require.False(t, hasNativeAttempt)
+}
+
+func TestAppendResponsesCompactLogInfoRecordsLegacyAutoFallbackDateWindow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 8, 0, 0, 0, time.UTC)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:             dto.ResponsesCompactModeAuto,
+				ResponsesCompactAutoFallbackDate: dto.ResponsesCompactAutoFallbackDate(now),
+			},
+		},
+	}
+
+	_, annotatedOther := AppendResponsesCompactLogInfo(ctx, info, nil, nil, now)
+
+	require.Equal(t, true, annotatedOther["responses_compact_auto_fallback_window"])
+	require.Equal(t, time.Date(2026, time.May, 27, 0, 0, 0, 0, time.UTC).Unix(), annotatedOther["responses_compact_auto_fallback_retry_until"])
+	require.Equal(t, 3, annotatedOther["responses_compact_auto_fallback_retry_interval_hours"])
+}
+
+func TestResponsesCompactAutoFallbackRetryUntilRejectsInvalidLegacyDate(t *testing.T) {
+	now := time.Date(2026, time.February, 1, 8, 0, 0, 0, time.UTC)
+	settings := dto.ChannelOtherSettings{
+		ResponsesCompactAutoFallbackDate: 20260230,
+	}
+
+	require.Zero(t, responsesCompactAutoFallbackRetryUntil(settings, now))
 }
 
 func TestCalculateTextQuotaSummaryHandlesLegacyClaudeDerivedOpenAIUsage(t *testing.T) {

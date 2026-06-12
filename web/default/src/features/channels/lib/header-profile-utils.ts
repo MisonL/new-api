@@ -346,6 +346,73 @@ export function normalizeSelectedProfileIds(ids: unknown): string[] {
   )
 }
 
+function normalizePassHeaderValue(value: unknown): string[] {
+  if (value == null) return []
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean)
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return []
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        return normalizePassHeaderValue(JSON.parse(trimmed))
+      } catch {
+        return []
+      }
+    }
+    return trimmed
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+  if (isRecord(value)) {
+    if (value.headers !== undefined)
+      return normalizePassHeaderValue(value.headers)
+    if (value.names !== undefined) return normalizePassHeaderValue(value.names)
+    if (value.header !== undefined)
+      return normalizePassHeaderValue([value.header])
+  }
+  return []
+}
+
+function isUserAgentHeaderName(header: string): boolean {
+  return (
+    String(header || '')
+      .trim()
+      .toLowerCase() === 'user-agent'
+  )
+}
+
+export function clearParamOverridePreservingUserAgentPassHeaders(
+  paramOverrideText: unknown
+): string {
+  const rawText =
+    typeof paramOverrideText === 'string' ? paramOverrideText.trim() : ''
+  if (!rawText) return ''
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawText)
+  } catch {
+    return ''
+  }
+  if (!isRecord(parsed)) return ''
+  const operations = Array.isArray(parsed.operations) ? parsed.operations : []
+  const userAgentOperations: Array<Record<string, unknown>> = []
+  operations.forEach((operation) => {
+    if (!isRecord(operation) || operation.mode !== 'pass_headers') return
+    const headers = normalizePassHeaderValue(operation.value)
+    if (!headers.some(isUserAgentHeaderName)) return
+    userAgentOperations.push({
+      ...operation,
+      value: ['User-Agent'],
+      keep_origin: operation.keep_origin !== false,
+    })
+  })
+  if (userAgentOperations.length === 0) return ''
+  return JSON.stringify({ operations: userAgentOperations })
+}
+
 export function normalizeNpmCliVersionOptions(
   options: unknown
 ): NpmCliVersionOption[] {

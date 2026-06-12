@@ -20,12 +20,19 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Button, Switch, Tag, Typography } from '@douyinfe/semi-ui';
 import {
+  getProtocolRuleAttentionKeys,
+  getProtocolRuleDirection,
   getEndpointLabel,
   getRuleModelSummary,
   getRuleScopeSummary,
+  isChatToResponsesRule,
   isResponsesToChatRule,
   isRuleScopeValid,
 } from './utils';
+import {
+  ENDPOINT_RESPONSES,
+  TEMPLATE_TYPE_CHAT_TO_RESPONSES,
+} from './constants';
 
 const { Text } = Typography;
 
@@ -33,6 +40,7 @@ export default function ProtocolPolicyRuleSummary({
   directionInvalid,
   index,
   isExpanded,
+  passThroughEnabled,
   rule,
   ruleKey,
   t,
@@ -42,6 +50,30 @@ export default function ProtocolPolicyRuleSummary({
   const scopeInvalid = !isRuleScopeValid(rule);
   const customToolBridgeEnabled =
     isResponsesToChatRule(rule) && rule.enable_custom_tool_bridge === true;
+  const attentionKeys = getProtocolRuleAttentionKeys(rule, passThroughEnabled);
+  const direction = getProtocolRuleDirection(rule);
+  const sourceTitle = isChatToResponsesRule(rule)
+    ? t('Chat Completions')
+    : t('Responses');
+  const targetTitle =
+    rule.target_endpoint === ENDPOINT_RESPONSES
+      ? t('Responses')
+      : t('Chat Completions');
+  const scopeTitle = rule.all_channels
+    ? t('全部渠道')
+    : scopeInvalid
+      ? t('空范围')
+      : t('限定范围');
+  const scopeDetail = rule.all_channels
+    ? t('此规则可匹配任意渠道。')
+    : t('{{channelCount}} 个渠道 ID，{{typeCount}} 个渠道类型', {
+        channelCount: rule.channel_ids.length,
+        typeCount: rule.channel_types.length,
+      });
+  const modelTitle =
+    rule.model_patterns.length === 0
+      ? t('匹配全部非空模型')
+      : t('{{count}} 条模型正则', { count: rule.model_patterns.length });
 
   return (
     <div
@@ -83,6 +115,11 @@ export default function ProtocolPolicyRuleSummary({
           Object.keys(rule.__options_extra || {}).length > 0 ? (
             <Tag color='orange'>{t('包含高级字段')}</Tag>
           ) : null}
+          {attentionKeys.length > 0 ? (
+            <Tag color='orange'>
+              {t('{{count}} 个需关注项', { count: attentionKeys.length })}
+            </Tag>
+          ) : null}
         </div>
         <div
           style={{
@@ -97,6 +134,56 @@ export default function ProtocolPolicyRuleSummary({
           <Text type='tertiary' size='small'>
             {t('模型条件')}: {getRuleModelSummary(rule, t)}
           </Text>
+        </div>
+        <div
+          style={{
+            marginTop: 10,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+            gap: 8,
+          }}
+        >
+          <RulePanel
+            label={t('入口协议')}
+            title={sourceTitle}
+            detail={
+              direction === TEMPLATE_TYPE_CHAT_TO_RESPONSES
+                ? t('客户端使用 Chat Completions。')
+                : t('客户端使用 Responses。')
+            }
+          />
+          <RulePanel
+            label={t('上游协议')}
+            title={targetTitle}
+            detail={
+              rule.target_endpoint === ENDPOINT_RESPONSES
+                ? t('转为 Responses 后访问上游。')
+                : t('转为 Chat Completions 后访问上游。')
+            }
+          />
+          <RulePanel
+            label={t('运行范围')}
+            title={scopeTitle}
+            detail={scopeDetail}
+          />
+          <RulePanel
+            label={t('模型边界')}
+            title={modelTitle}
+            detail={
+              rule.model_patterns.length > 0
+                ? rule.model_patterns.slice(0, 2).join(', ')
+                : t('模型名仍必须为非空。')
+            }
+          />
+          <RulePanel
+            label={t('执行提示')}
+            title={attentionKeys.length > 0 ? t('需要关注') : t('可参与匹配')}
+            detail={
+              attentionKeys[0]
+                ? t(attentionKeys[0])
+                : t('请求方向、渠道和模型全部命中后会执行转换。')
+            }
+          />
         </div>
       </div>
       <div
@@ -140,6 +227,27 @@ export default function ProtocolPolicyRuleSummary({
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+function RulePanel({ detail, label, title }) {
+  return (
+    <div
+      style={{
+        border: '1px solid var(--semi-color-border)',
+        borderRadius: 10,
+        padding: 10,
+        background: 'var(--semi-color-fill-0)',
+      }}
+    >
+      <Text type='tertiary' size='small'>
+        {label}
+      </Text>
+      <div style={{ fontWeight: 600, marginTop: 2 }}>{title}</div>
+      <Text type='tertiary' size='small'>
+        {detail}
+      </Text>
     </div>
   );
 }

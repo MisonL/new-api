@@ -39,6 +39,14 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 	if err := validateResponsesCompactionOutput(compactResp.Output); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
 	}
+	responseBody, err = normalizeResponsesCompactionResponseBody(&compactResp, responseBody)
+	if err != nil {
+		return nil, types.NewOpenAIError(
+			fmt.Errorf("provider returned malformed compact output: normalize response body: %w", err),
+			types.ErrorCodeBadResponseBody,
+			http.StatusBadGateway,
+		)
+	}
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
@@ -53,6 +61,76 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 	}
 
 	return &usage, nil
+}
+
+func normalizeResponsesCompactionResponseBody(compactResp *dto.OpenAIResponsesCompactionResponse, responseBody []byte) ([]byte, error) {
+	var root map[string]common.RawMessage
+	if err := common.Unmarshal(responseBody, &root); err != nil {
+		return nil, err
+	}
+
+	changed := false
+	if compactResp != nil && compactResp.Object == "response.compaction" {
+		object, err := common.Marshal("response")
+		if err != nil {
+			return nil, err
+		}
+		root["object"] = object
+		compactResp.Object = "response"
+		changed = true
+	}
+
+	normalizedOutput, outputChanged, err := normalizeResponsesCompactionOutput(compactResp.Output)
+	if err != nil {
+		return nil, err
+	}
+	if outputChanged {
+		root["output"] = normalizedOutput
+		if compactResp != nil {
+			compactResp.Output = normalizedOutput
+		}
+		changed = true
+	}
+	if !changed {
+		return responseBody, nil
+	}
+	return common.Marshal(root)
+}
+
+func normalizeResponsesCompactionOutput(output common.RawMessage) (common.RawMessage, bool, error) {
+	var items []common.RawMessage
+	if err := common.Unmarshal(output, &items); err != nil {
+		return nil, false, err
+	}
+	changed := false
+	for i, rawItem := range items {
+		var item map[string]common.RawMessage
+		if err := common.Unmarshal(rawItem, &item); err != nil {
+			continue
+		}
+		if responsesCompactionOutputItemType(item) != "compaction_summary" {
+			continue
+		}
+		itemType, err := common.Marshal("compaction")
+		if err != nil {
+			return nil, false, err
+		}
+		item["type"] = itemType
+		normalizedItem, err := common.Marshal(item)
+		if err != nil {
+			return nil, false, err
+		}
+		items[i] = normalizedItem
+		changed = true
+	}
+	if !changed {
+		return output, false, nil
+	}
+	normalizedOutput, err := common.Marshal(items)
+	if err != nil {
+		return nil, false, err
+	}
+	return normalizedOutput, true, nil
 }
 
 func validateResponsesCompactionOutput(output common.RawMessage) error {

@@ -96,7 +96,7 @@ func channelSupportsCompactRouteCandidate(channel *Channel, candidate routeModel
 		now := time.Now()
 		switch settings.EffectiveResponsesCompactModeOrDefaultAt(now) {
 		case dto.ResponsesCompactModeNative:
-			return channelAllowsNativeCompactFallback(channel, settings, baseModelName)
+			return channelAllowsNativeCompactFallback(channel, settings, baseModelName, now)
 		case dto.ResponsesCompactModeSynthetic:
 			if settings.IsAutoResponsesCompact() && settings.HasActiveResponsesCompactAutoFallback(now) {
 				return channelAllowsSyntheticCompactBaseFallback(channel, baseModelName)
@@ -134,7 +134,7 @@ func channelResponsesCompactSettings(channel *Channel) (dto.ChannelOtherSettings
 	return settings, true
 }
 
-func channelAllowsNativeCompactFallback(channel *Channel, settings dto.ChannelOtherSettings, baseModelName string) bool {
+func channelAllowsNativeCompactFallback(channel *Channel, settings dto.ChannelOtherSettings, baseModelName string, now time.Time) bool {
 	baseModelName = strings.TrimSpace(baseModelName)
 	if baseModelName == "" {
 		return false
@@ -152,6 +152,9 @@ func channelAllowsNativeCompactFallback(channel *Channel, settings dto.ChannelOt
 	}
 	// Without compactSignals, allow base-model fallback only before upstream model checks start.
 	if len(compactSignals) == 0 {
+		if settings.AllowAutoNativeCompactBaseFallbackAt(now) && modelListContains(channel.GetModels(), baseModelName) {
+			return true
+		}
 		return !settings.UpstreamModelUpdateCheckEnabled || settings.UpstreamModelUpdateLastCheckTime == 0
 	}
 	_, ok := compactSignals[compactModelName]
@@ -222,7 +225,8 @@ func compactRouteTargetAllowed(channel *Channel, compactSignals map[string]struc
 		_, ok := compactSignals[compactModelName]
 		return ok
 	}
-	return modelListContains(channel.GetModels(), baseModelName) || modelListContains(channel.GetModels(), compactModelName)
+	return modelListContains(channel.GetModels(), compactModelName) ||
+		modelListContains(channel.GetModels(), baseModelName)
 }
 
 func compactMappedBaseModelCandidates(channel *Channel, baseModelName string, compactModelName string) []string {

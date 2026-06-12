@@ -116,6 +116,27 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       baseUrl: 'Default: https://api.replicate.com',
     },
   },
+  58: {
+    id: 58,
+    name: CHANNEL_TYPES[58],
+    icon: 'openai',
+    defaultBaseUrl: 'https://apihub.agnes-ai.com',
+    supportedModels: [
+      'agnes-1.5-flash',
+      'agnes-2.0-flash',
+      'agnes-image-2.0-flash',
+      'agnes-image-2.1-flash',
+      'agnes-video-v2.0',
+    ],
+    hints: {
+      baseUrl: 'Default: https://apihub.agnes-ai.com',
+      key: 'Agnes API Key',
+      models:
+        'agnes-1.5-flash,agnes-2.0-flash,agnes-image-2.0-flash,agnes-image-2.1-flash,agnes-video-v2.0',
+      other:
+        'Images and videos use Agnes-specific protocol details handled by this channel type.',
+    },
+  },
 }
 
 /**

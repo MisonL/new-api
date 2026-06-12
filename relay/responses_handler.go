@@ -42,12 +42,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	case *dto.OpenAIResponsesRequest:
 		responsesReq = req
 	case *dto.OpenAIResponsesCompactionRequest:
-		responsesReq = &dto.OpenAIResponsesRequest{
-			Model:              req.Model,
-			Input:              req.Input,
-			Instructions:       req.Instructions,
-			PreviousResponseID: req.PreviousResponseID,
-		}
+		responsesReq = req.ToResponsesRequest()
 	default:
 		return types.NewErrorWithStatusCode(
 			fmt.Errorf("invalid request type, expected dto.OpenAIResponsesRequest or dto.OpenAIResponsesCompactionRequest, got %T", info.Request),
@@ -74,7 +69,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	adaptor.Init(info)
 	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
-	conversionRule := findResponsesViaChatRule(info, passThroughGlobal)
+	conversionRule := findResponsesViaChatRule(info, passThroughGlobal, request)
 	if conversionRule != nil {
 		usage, newApiErr := responsesViaChat(c, info, adaptor, request, responsesViaChatOptionsFromRule(conversionRule))
 		if newApiErr != nil {
@@ -125,16 +120,13 @@ func normalizeResponsesCompactUsage(info *relaycommon.RelayInfo, usage *dto.Usag
 		return
 	}
 	estimatePromptTokens := info.GetEstimatePromptTokens()
-	if estimatePromptTokens <= 0 {
-		return
-	}
 	if usage.PromptTokens == 0 {
 		usage.PromptTokens = usage.InputTokens
 	}
 	if usage.InputTokens == 0 {
 		usage.InputTokens = usage.PromptTokens
 	}
-	if usage.PromptTokens == 0 {
+	if usage.PromptTokens == 0 && estimatePromptTokens > 0 {
 		usage.PromptTokens = estimatePromptTokens
 		usage.InputTokens = estimatePromptTokens
 	}
@@ -263,14 +255,15 @@ func applyResponsesCompactSummaryModelOverride(c *gin.Context, info *relaycommon
 }
 
 func shouldRouteResponsesViaChat(info *relaycommon.RelayInfo, passThroughGlobal bool) bool {
-	return findResponsesViaChatRule(info, passThroughGlobal) != nil
+	return findResponsesViaChatRule(info, passThroughGlobal, nil) != nil
 }
 
-func findResponsesViaChatRule(info *relaycommon.RelayInfo, passThroughGlobal bool) *model_setting.ProtocolConversionRule {
+func findResponsesViaChatRule(info *relaycommon.RelayInfo, passThroughGlobal bool, request *dto.OpenAIResponsesRequest) *model_setting.ProtocolConversionRule {
 	if info == nil ||
 		info.RelayMode != relayconstant.RelayModeResponses ||
 		passThroughGlobal ||
-		info.ChannelSetting.PassThroughBodyEnabled {
+		info.ChannelSetting.PassThroughBodyEnabled ||
+		request.HasCompactionTrigger() {
 		return nil
 	}
 	return service.FindProtocolConversionRuleGlobal(

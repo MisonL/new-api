@@ -15,6 +15,7 @@ func TestChannelOtherSettingsDefaultsResponsesCompactAuto(t *testing.T) {
 
 	require.Empty(t, settings.ResponsesCompactMode)
 	require.True(t, settings.IsAutoResponsesCompact())
+	require.True(t, settings.AllowAutoNativeCompactBaseFallbackAt(time.Now()))
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactModeOrDefault())
 	require.True(t, settings.HasNativeResponsesCompact())
 	require.True(t, settings.ResponsesCompactContextFallbackEnabled())
@@ -41,7 +42,6 @@ func TestChannelOtherSettingsResponsesProxyProfileForcesSyntheticCompact(t *test
 	for _, profile := range []dto.ResponsesUpstreamProfile{
 		dto.ResponsesUpstreamProfileGenericProxy,
 		dto.ResponsesUpstreamProfileChatOnlyProxy,
-		dto.ResponsesUpstreamProfileSub2APIHTTP,
 	} {
 		settings := dto.ChannelOtherSettings{
 			ResponsesCompactMode:     dto.ResponsesCompactModeNative,
@@ -56,6 +56,23 @@ func TestChannelOtherSettingsResponsesProxyProfileForcesSyntheticCompact(t *test
 		require.True(t, settings.HasSyntheticResponsesCompact())
 		require.False(t, settings.HasNativeResponsesCompact())
 	}
+}
+
+func TestChannelOtherSettingsSub2APIHTTPLimitedNativeCompact(t *testing.T) {
+	settings := dto.ChannelOtherSettings{
+		ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+	}
+
+	require.Equal(t, dto.ResponsesUpstreamProfileSub2APIHTTP, settings.NormalizedResponsesUpstreamProfile())
+	require.False(t, settings.HasResponsesProxyCompatibilityProfile())
+	require.True(t, settings.HasResponsesEncryptedReasoningUnsupportedProfile())
+	require.True(t, settings.ShouldStripResponsesEncryptedReasoning())
+	require.True(t, settings.DisallowsResponsesRESTPreviousResponseID())
+	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactModeOrDefault())
+	require.Equal(t, dto.ResponsesCompactModeNative, settings.EffectiveResponsesCompactModeOrDefault())
+	require.True(t, settings.HasNativeResponsesCompact())
+	require.False(t, settings.HasSyntheticResponsesCompact())
 }
 
 func TestChannelOtherSettingsDisabledResponsesCompactOverridesProxyProfile(t *testing.T) {
@@ -97,7 +114,7 @@ func TestChannelOtherSettingsSub2APIHTTPDisallowsRESTPreviousResponseID(t *testi
 		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
 	}
 
-	require.True(t, settings.HasResponsesProxyCompatibilityProfile())
+	require.False(t, settings.HasResponsesProxyCompatibilityProfile())
 	require.True(t, settings.DisallowsResponsesRESTPreviousResponseID())
 	wsSettings := dto.ChannelOtherSettings{
 		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIWSV2,

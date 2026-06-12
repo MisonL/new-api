@@ -26,6 +26,7 @@ import {
   buildHeaderProfileStrategySettings,
   buildProfileItems,
   buildSelectedProfileItems,
+  clearParamOverridePreservingUserAgentPassHeaders,
   createLegacyHeaderProfileDraft,
   disableEmptyHeaderProfileStrategy,
   getHeaderProfileStrategyFromSettings,
@@ -470,7 +471,6 @@ test('param override template payloads can replace rule template JSON', () => {
       {
         mode: 'pass_headers',
         value: [
-          'User-Agent',
           'Originator',
           'Session_id',
           'Session-Id',
@@ -490,6 +490,18 @@ test('param override template payloads can replace rule template JSON', () => {
       },
     ],
   });
+});
+
+test('param override Codex dynamic header presets do not include User-Agent', () => {
+  for (const key of ['codexCliHeaders', 'codexHeaders']) {
+    const operations = PARAM_OVERRIDE_TEMPLATES[key].payload.operations;
+    const passHeaders = operations.find(
+      (operation) => operation.mode === 'pass_headers',
+    );
+    assert.ok(passHeaders, key);
+    assert.ok(!passHeaders.value.includes('User-Agent'), key);
+    assert.ok(passHeaders.value.includes('X-Codex-Turn-Metadata'), key);
+  }
 });
 
 test('legacy combined param override preset is absent', () => {
@@ -1931,6 +1943,50 @@ test('applyHeaderProfileStrategyToChannelInputs clears header profile without ch
 
   assert.deepEqual(JSON.parse(result.settings), {});
   assert.equal(result.param_override, paramOverride);
+});
+
+test('clearParamOverridePreservingUserAgentPassHeaders keeps only User-Agent passthrough', () => {
+  const cleared = clearParamOverridePreservingUserAgentPassHeaders(
+    JSON.stringify({
+      operations: [
+        {
+          mode: 'pass_headers',
+          value: ['User-Agent', 'Originator', 'X-Codex-Turn-Metadata'],
+          keep_origin: true,
+        },
+        {
+          mode: 'copy_header',
+          from: 'X-Client-Request-Id',
+          to: 'Session_id',
+          keep_origin: true,
+        },
+        {
+          mode: 'delete',
+          path: 'tools.*.custom.input_examples',
+        },
+      ],
+    }),
+  );
+
+  assert.deepEqual(JSON.parse(cleared), {
+    operations: [
+      {
+        mode: 'pass_headers',
+        value: ['User-Agent'],
+        keep_origin: true,
+      },
+    ],
+  });
+});
+
+test('clearParamOverridePreservingUserAgentPassHeaders clears non-UA rules', () => {
+  assert.equal(
+    clearParamOverridePreservingUserAgentPassHeaders(
+      '{"operations":[{"mode":"pass_headers","value":["Originator"]}]}',
+    ),
+    '',
+  );
+  assert.equal(clearParamOverridePreservingUserAgentPassHeaders('{'), '');
 });
 
 test('applyHeaderProfileStrategyToChannelInputs falls back to headers on custom passthrough-required profiles', () => {

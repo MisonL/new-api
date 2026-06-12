@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/alicebob/miniredis/v2"
@@ -168,10 +169,16 @@ func TestBuildSyntheticCompactSummaryRequestUsesStoredSummaryAndClearsSyntheticP
 
 	require.NoError(t, err)
 	require.Empty(t, got.PreviousResponseID)
-	require.JSONEq(t, `[
-		{"type":"message","role":"developer","content":[{"type":"input_text","text":"You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.\nInclude:\n- Current progress and key decisions made\n- Important context, constraints, or user preferences\n- What remains to be done (clear next steps)\n- Any critical data, examples, or references needed to continue\nBe concise, structured, and focused on helping the next LLM seamlessly continue the work.\nDo not invent facts. Return only the compact summary text."}]},
-		{"type":"message","role":"user","content":[{"type":"input_text","text":"Previous synthetic summary:\nPrior synthetic summary.\n\nVisible conversation to compact:\n[user] Continue the task."}]}
-	]`, string(got.Input))
+	items := decodeSyntheticCompactTestMessages(t, got.Input)
+	require.Len(t, items, 2)
+	require.Equal(t, "developer", items[0].Role)
+	require.Equal(t, "user", items[1].Role)
+	require.Contains(t, items[0].Content[0].Text, "CONTEXT CHECKPOINT COMPACTION")
+	require.Contains(t, items[0].Content[0].Text, "Current task:")
+	require.Contains(t, items[0].Content[0].Text, "Remaining work:")
+	require.Contains(t, items[0].Content[0].Text, "Do not output an acknowledgement")
+	require.Contains(t, items[1].Content[0].Text, "Previous synthetic summary:\nPrior synthetic summary.")
+	require.Contains(t, items[1].Content[0].Text, "Visible conversation to compact:\n[user] Continue the task.")
 }
 
 func TestBuildSyntheticCompactSummaryRequestPreservesUpstreamPreviousID(t *testing.T) {
@@ -196,7 +203,7 @@ func TestBuildSyntheticCompactSummaryRequestPreservesUpstreamPreviousID(t *testi
 	require.Contains(t, body, "/tmp/result.txt")
 	require.Contains(t, body, "Continue the task.")
 	require.Contains(t, body, "CONTEXT CHECKPOINT COMPACTION")
-	require.Contains(t, body, "What remains to be done")
+	require.Contains(t, body, "Remaining work")
 }
 
 func TestBuildSyntheticCompactSummaryRequestLimitsLongInputWithUpstreamPreviousID(t *testing.T) {
@@ -353,6 +360,14 @@ func TestVisibleResponsesInputPartsIncludesCustomToolCallOutputContent(t *testin
 func TestVisibleResponsesInputPartsSkipsCompactionSummary(t *testing.T) {
 	parts := visibleResponsesInputParts(common.RawMessage(`[
 		{"type":"compaction_summary","encrypted_content":"opaque","content":[{"type":"input_text","text":"must stay hidden"}]}
+	]`))
+
+	require.Empty(t, parts)
+}
+
+func TestVisibleResponsesInputPartsSkipsContextCompaction(t *testing.T) {
+	parts := visibleResponsesInputParts(common.RawMessage(`[
+		{"type":"context_compaction","encrypted_content":"opaque","content":[{"type":"input_text","text":"must stay hidden"}]}
 	]`))
 
 	require.Empty(t, parts)
@@ -545,7 +560,7 @@ func TestApplySyntheticCompactStateUsesHandoffPromptAfterRepeatedSetup(t *testin
 	require.Contains(t, body, "Another language model started to solve this problem")
 	require.Contains(t, body, "avoid duplicating work")
 	require.Contains(t, body, "Current pending user request: diagnose why synthetic compact caused memory loss.")
-	require.Contains(t, body, "If post-compact input is only repeated setup or repository instructions from the client")
+	require.Contains(t, body, "If post-compact input is only repeated setup, repository instructions, AGENTS.md content")
 	require.Contains(t, body, "continue the latest pending task from the summary")
 	require.Contains(t, body, "AGENTS.md instructions")
 	require.Less(t, strings.Index(body, "If post-compact input is only repeated setup"), strings.Index(body, "AGENTS.md instructions"))
@@ -654,6 +669,34 @@ func TestBuildSyntheticCompactSummaryRequestIgnoresDatabaseErrorForUpstreamPrevi
 	require.NoError(t, err)
 	require.Equal(t, "resp_upstream_previous", got.PreviousResponseID)
 	require.Contains(t, string(got.Input), "existing previous_response_id context")
+}
+
+func TestBuildSyntheticCompactSummaryRequestVisibleOnlyDropsUpstreamPreviousID(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+	require.NoError(t, model.DB.Migrator().DropTable(&model.SyntheticCompactStateRecord{}))
+
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5",
+		PreviousResponseID: "resp_upstream_previous",
+		Input: common.RawMessage(`[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue after overflow"}]}
+		]`),
+	}
+	ctx := context.WithValue(context.Background(), constant.ContextKeyResponsesCompactVisibleOnly, true)
+
+	got, err := BuildSyntheticCompactSummaryRequest(ctx, SyntheticCompactStateScope{}, req)
+
+	require.NoError(t, err)
+	require.Empty(t, got.PreviousResponseID)
+	require.Contains(t, string(got.Input), "Visible conversation to compact")
+	require.Contains(t, string(got.Input), "[user] continue after overflow")
+	require.NotContains(t, string(got.Input), "existing previous_response_id context")
+	require.NotContains(t, string(got.Input), "resp_upstream_previous")
 }
 
 func TestBuildSyntheticCompactSummaryRequestIgnoresNonSyntheticMarkerID(t *testing.T) {
@@ -1445,8 +1488,8 @@ func TestApplySyntheticCompactStateScopeRejectsDifferentToken(t *testing.T) {
 
 	_, applied, err := ApplySyntheticCompactState(context.Background(), scope, req)
 
-	require.Error(t, err)
 	require.True(t, applied)
+	require.Error(t, err)
 	require.Contains(t, err.Error(), "different token")
 }
 
@@ -1497,19 +1540,6 @@ func TestApplySyntheticCompactStateScopeRejectsMissingScopeBinding(t *testing.T)
 			},
 			scope:   SyntheticCompactStateScope{TokenID: 20, Group: "default"},
 			wantErr: "different user",
-		},
-		{
-			name: "missing token",
-			state: SyntheticCompactState{
-				ID:      "resp_newapi_synthcmp_missing_token",
-				Model:   "gpt-5",
-				Summary: "Scoped compact state.",
-				UserID:  10,
-				TokenID: 20,
-				Group:   "default",
-			},
-			scope:   SyntheticCompactStateScope{UserID: 10, Group: "default"},
-			wantErr: "different token",
 		},
 		{
 			name: "missing group",
@@ -1683,6 +1713,124 @@ func TestBuildSyntheticCompactResponseStoresSummaryAndReturnsMarker(t *testing.T
 	require.Equal(t, "default", state.Group)
 	require.Equal(t, 163, state.ChannelID)
 	require.Equal(t, 1, state.ChannelType)
+}
+
+func TestBuildSyntheticCompactResponseRejectsLostTaskSummaryForLargeInput(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutSyntheticCompactTestDB(t)
+
+	resp := dto.OpenAIResponsesResponse{
+		ID:        "resp_upstream",
+		Object:    "response",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5",
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "output_text", Text: "Repository instructions received. There is no explicit task to continue."},
+				},
+			},
+		},
+		Usage: &dto.Usage{InputTokens: 31246, OutputTokens: 29, TotalTokens: 31275},
+	}
+
+	scope := SyntheticCompactStateScope{
+		UserID:  10,
+		TokenID: 20,
+		Group:   "default",
+	}
+	compactResp, usage, err := BuildSyntheticCompactResponse(context.Background(), scope, "gpt-5.5-openai-compact", resp)
+
+	require.Nil(t, compactResp)
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not a recoverable handoff summary")
+}
+
+func TestBuildSyntheticCompactResponseRejectsTooShortSummaryForLargeInput(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutSyntheticCompactTestDB(t)
+
+	resp := dto.OpenAIResponsesResponse{
+		ID:        "resp_upstream",
+		Object:    "response",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5",
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "output_text", Text: "Current task: continue. Remaining work: inspect and fix."},
+				},
+			},
+		},
+		Usage: &dto.Usage{InputTokens: 8192, OutputTokens: 32, TotalTokens: 8224},
+	}
+
+	scope := SyntheticCompactStateScope{
+		UserID:  10,
+		TokenID: 20,
+		Group:   "default",
+	}
+	compactResp, usage, err := BuildSyntheticCompactResponse(context.Background(), scope, "gpt-5.5-openai-compact", resp)
+
+	require.Nil(t, compactResp)
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "too short for large input")
+}
+
+func TestBuildSyntheticCompactResponseAcceptsStructuredSummaryForLargeInput(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutSyntheticCompactTestDB(t)
+
+	summary := strings.Repeat(strings.Join([]string{
+		"Current task:",
+		"- Fix the synthetic compact resume path.",
+		"Progress and decisions:",
+		"- The issue is a compact summary quality failure, not a routing failure.",
+		"Important context and constraints:",
+		"- Preserve AGENTS.md constraints and existing worktree changes.",
+		"Remaining work:",
+		"- Patch service tests and run focused Go tests.",
+		"Files, commands, and evidence:",
+		"- service/responses_synthetic_compact.go and service/responses_synthetic_compact_test.go.",
+		"",
+	}, "\n"), 2)
+	resp := dto.OpenAIResponsesResponse{
+		ID:        "resp_upstream",
+		Object:    "response",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5",
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "output_text", Text: summary},
+				},
+			},
+		},
+		Usage: &dto.Usage{InputTokens: 8192, OutputTokens: 180, TotalTokens: 8372},
+	}
+
+	scope := SyntheticCompactStateScope{
+		UserID:  10,
+		TokenID: 20,
+		Group:   "default",
+	}
+	compactResp, usage, err := BuildSyntheticCompactResponse(context.Background(), scope, "gpt-5.5-openai-compact", resp)
+
+	require.NoError(t, err)
+	require.NotNil(t, compactResp)
+	require.NotNil(t, usage)
+	state, found, err := loadSyntheticCompactState(context.Background(), compactResp.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, strings.TrimSpace(summary), state.Summary)
 }
 
 func TestBuildSyntheticCompactResponseEstimatesUsageWhenUpstreamUsageMissing(t *testing.T) {

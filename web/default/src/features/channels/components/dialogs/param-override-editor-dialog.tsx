@@ -353,7 +353,6 @@ const GEMINI_IMAGE_4K_TEMPLATE = {
 }
 
 const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'User-Agent',
   'Originator',
   'Session_id',
   'Session-Id',
@@ -527,18 +526,18 @@ const TEMPLATE_GROUPS = [
 
 const TEMPLATE_PRESET_CONFIG: Record<string, TemplatePresetConfig> = {
   codex_cli_headers_passthrough: {
-    label: 'Codex CLI Header Passthrough',
+    label: 'Codex CLI Dynamic Headers Passthrough',
     group: 'recommended',
     description:
-      'Pass through Codex CLI session, window, turn metadata and request id headers.',
+      'Pass through Codex CLI session, window, turn metadata and request id headers. User-Agent is managed by Header Profile.',
     kind: 'operations',
     payload: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
   },
   codex_desktop_headers_passthrough: {
-    label: 'Codex Desktop Header Passthrough',
+    label: 'Codex Desktop Dynamic Headers Passthrough',
     group: 'recommended',
     description:
-      'Pass through Codex Desktop session, window, turn metadata and request id headers.',
+      'Pass through Codex Desktop session, window, turn metadata and request id headers. User-Agent is managed by Header Profile.',
     kind: 'operations',
     payload: CODEX_DESKTOP_HEADER_PASSTHROUGH_TEMPLATE,
   },
@@ -2588,16 +2587,20 @@ export function ParamOverrideEditorDialog(
                 </span>
                 <Button
                   type='button'
-                  variant={editMode === 'visual' ? 'default' : 'outline'}
+                  variant={editMode === 'visual' ? 'default' : 'secondary'}
                   size='sm'
+                  aria-pressed={editMode === 'visual'}
+                  className='h-8 rounded-full px-4 text-sm font-semibold'
                   onClick={switchToVisualMode}
                 >
                   {t('Visual')}
                 </Button>
                 <Button
                   type='button'
-                  variant={editMode === 'json' ? 'default' : 'outline'}
+                  variant={editMode === 'json' ? 'default' : 'secondary'}
                   size='sm'
+                  aria-pressed={editMode === 'json'}
+                  className='h-8 rounded-full px-4 text-sm font-semibold'
                   onClick={switchToJsonMode}
                 >
                   {t('JSON Text')}
@@ -3578,7 +3581,9 @@ function ConditionEditor(conditionEditorProps: ConditionEditorProps) {
                   {t('Match Value')}
                 </label>
                 <StructuredValueNodeEditor
-                  node={parseStructuredValueNodeForDisplay(condition.value_text)}
+                  node={parseStructuredValueNodeForDisplay(
+                    condition.value_text
+                  )}
                   sourceKey={condition.value_text}
                   placeholder='gpt'
                   onChange={(node) =>
@@ -3649,33 +3654,42 @@ function ReturnErrorEditor(returnErrorEditorProps: ReturnErrorEditorProps) {
         <span className='text-sm font-medium'>
           {t('Custom Error Response')}
         </span>
-        <div className='flex items-center gap-1'>
+        <div
+          className='bg-muted/60 flex items-center gap-0.5 rounded-md p-0.5'
+          role='group'
+          aria-label={t('Mode')}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
           <span className='text-muted-foreground text-xs'>{t('Mode')}</span>
           <Button
             type='button'
-            variant={draft.simpleMode ? 'default' : 'outline'}
+            variant={draft.simpleMode ? 'default' : 'ghost'}
             size='sm'
-            className='h-7 text-xs'
-            onClick={() =>
+            aria-pressed={draft.simpleMode}
+            className='h-7 rounded-sm px-2 text-xs'
+            onClick={(event) => {
+              event.stopPropagation()
               returnErrorEditorProps.updateDraft(
                 returnErrorEditorProps.operationId,
                 { simpleMode: true }
               )
-            }
+            }}
           >
             {t('Simple')}
           </Button>
           <Button
             type='button'
-            variant={draft.simpleMode ? 'outline' : 'default'}
+            variant={draft.simpleMode ? 'ghost' : 'default'}
             size='sm'
-            className='h-7 text-xs'
-            onClick={() =>
+            aria-pressed={!draft.simpleMode}
+            className='h-7 rounded-sm px-2 text-xs'
+            onClick={(event) => {
+              event.stopPropagation()
               returnErrorEditorProps.updateDraft(
                 returnErrorEditorProps.operationId,
                 { simpleMode: false }
               )
-            }
+            }}
           >
             {t('Condition Mode')}
           </Button>
@@ -3884,33 +3898,42 @@ function PruneObjectsEditor(pruneObjectsEditorProps: PruneObjectsEditorProps) {
                   .join(' / ')}
           </p>
         </div>
-        <div className='flex items-center gap-1'>
+        <div
+          className='bg-muted/60 flex items-center gap-0.5 rounded-md p-0.5'
+          role='group'
+          aria-label={t('Mode')}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
           <span className='text-muted-foreground text-xs'>{t('Mode')}</span>
           <Button
             type='button'
-            variant={draft.simpleMode ? 'default' : 'outline'}
+            variant={draft.simpleMode ? 'default' : 'ghost'}
             size='sm'
-            className='h-7 text-xs'
-            onClick={() =>
+            aria-pressed={draft.simpleMode}
+            className='h-7 rounded-sm px-2 text-xs'
+            onClick={(event) => {
+              event.stopPropagation()
               pruneObjectsEditorProps.updateDraft(
                 pruneObjectsEditorProps.operationId,
                 { simpleMode: true }
               )
-            }
+            }}
           >
             {t('Simple')}
           </Button>
           <Button
             type='button'
-            variant={draft.simpleMode ? 'outline' : 'default'}
+            variant={draft.simpleMode ? 'ghost' : 'default'}
             size='sm'
-            className='h-7 text-xs'
-            onClick={() =>
+            aria-pressed={!draft.simpleMode}
+            className='h-7 rounded-sm px-2 text-xs'
+            onClick={(event) => {
+              event.stopPropagation()
               pruneObjectsEditorProps.updateDraft(
                 pruneObjectsEditorProps.operationId,
                 { simpleMode: false }
               )
-            }
+            }}
           >
             {t('Advanced')}
           </Button>
@@ -4119,7 +4142,9 @@ function PruneObjectsEditor(pruneObjectsEditorProps: PruneObjectsEditorProps) {
                           {t('Match Value (optional)')}
                         </label>
                         <StructuredValueNodeEditor
-                          node={parseStructuredValueNodeForDisplay(rule.value_text)}
+                          node={parseStructuredValueNodeForDisplay(
+                            rule.value_text
+                          )}
                           sourceKey={rule.value_text}
                           placeholder='redacted_thinking'
                           onChange={(node) =>

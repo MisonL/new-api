@@ -1,17 +1,141 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  CHANNEL_FORM_DEFAULT_VALUES,
+  mergeChannelSubmitFormValues,
+  transformFormDataToUpdatePayload,
+} from '../src/features/channels/lib/channel-form'
+import {
   BUILTIN_HEADER_PROFILES,
   NPM_VERSION_LATEST_ALIAS,
   buildHeaderProfileStrategySettings,
   buildSelectedProfileItems,
   buildVersionedAiCodingCliProfile,
+  clearParamOverridePreservingUserAgentPassHeaders,
   disableEmptyHeaderProfileStrategy,
   getHeaderProfileStrategyFromSettings,
   normalizeHeaderProfileMode,
   normalizeNpmCliVersionOptions,
 } from '../src/features/channels/lib/header-profile-utils'
+import { PARAM_OVERRIDE_TEMPLATES } from '../src/features/system-settings/general/channel-affinity/constants'
 
 describe('channel header profile strategy settings', () => {
+  test('channel edit keeps untouched User-Agent related submit state', () => {
+    const savedSettings = JSON.stringify({
+      responses_compact_mode: 'auto',
+      header_profile_strategy: {
+        enabled: true,
+        mode: 'fixed',
+        selected_profile_ids: ['claude-code@latest'],
+        profiles: [
+          {
+            id: 'claude-code@latest',
+            name: 'Claude Code',
+            category: 'coding_cli',
+            scope: 'builtin',
+            headers: {
+              'User-Agent': 'claude-cli/1.0',
+              'X-Client-Name': 'claude-code',
+            },
+          },
+        ],
+      },
+    })
+    const savedParamOverride = JSON.stringify({
+      operations: [
+        {
+          mode: 'pass_headers',
+          value: ['User-Agent'],
+          keep_origin: true,
+        },
+      ],
+    })
+    const savedHeaderOverride = JSON.stringify({
+      'User-Agent': 'claude-cli/1.0',
+    })
+    const formValues = {
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      name: 'prod-channel',
+      type: 14,
+      models: 'claude-sonnet-4',
+      group: ['default'],
+      settings: '{}',
+      param_override: '',
+      header_override: '',
+      status_code_mapping: '',
+      remark: 'changed by admin',
+    }
+
+    const merged = mergeChannelSubmitFormValues(formValues, {
+      settings: savedSettings,
+      param_override: savedParamOverride,
+      header_override: savedHeaderOverride,
+      status_code_mapping: '{"403":1}',
+    })
+    const payload = transformFormDataToUpdatePayload(merged, 209)
+
+    expect(merged.settings).toBe(savedSettings)
+    expect(merged.param_override).toBe(savedParamOverride)
+    expect(merged.header_override).toBe(savedHeaderOverride)
+    expect(merged.status_code_mapping).toBe('{"403":1}')
+    expect(payload.param_override).toBe(savedParamOverride)
+    expect(payload.header_override).toBe(savedHeaderOverride)
+    expect(payload.status_code_mapping).toBe('{"403":1}')
+    expect(JSON.parse(String(payload.settings)).header_profile_strategy).toEqual(
+      JSON.parse(savedSettings).header_profile_strategy
+    )
+  })
+
+  test('channel edit keeps explicit clearing of advanced submit state', () => {
+    const savedParamOverride = JSON.stringify({
+      operations: [
+        {
+          mode: 'pass_headers',
+          value: ['User-Agent'],
+          keep_origin: true,
+        },
+      ],
+    })
+    const formValues = {
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      name: 'prod-channel',
+      type: 14,
+      models: 'claude-sonnet-4',
+      group: ['default'],
+      settings: '{}',
+      param_override: '',
+      header_override: '',
+      status_code_mapping: '',
+    }
+
+    const merged = mergeChannelSubmitFormValues(
+      formValues,
+      {
+        settings: JSON.stringify({
+          header_profile_strategy: {
+            enabled: true,
+            mode: 'fixed',
+            selected_profile_ids: ['claude-code@latest'],
+            profiles: [],
+          },
+        }),
+        param_override: savedParamOverride,
+        header_override: '{"User-Agent":"claude-cli/1.0"}',
+        status_code_mapping: '{"403":1}',
+      },
+      {
+        settings: true,
+        param_override: true,
+        header_override: true,
+        status_code_mapping: true,
+      }
+    )
+
+    expect(merged.settings).toBe('{}')
+    expect(merged.param_override).toBe('')
+    expect(merged.header_override).toBe('')
+    expect(merged.status_code_mapping).toBe('')
+  })
+
   test('reads and normalizes saved multi-template strategy', () => {
     const strategy = getHeaderProfileStrategyFromSettings(
       JSON.stringify({
@@ -278,5 +402,62 @@ describe('channel header profile strategy settings', () => {
       '0.203.0',
       '0.202.0',
     ])
+  })
+
+  test('Codex dynamic header passthrough templates do not include User-Agent', () => {
+    for (const key of ['codexCliHeaders', 'codexHeaders'] as const) {
+      const payload = PARAM_OVERRIDE_TEMPLATES[key].payload as {
+        operations: Array<Record<string, unknown>>
+      }
+      const operations = payload.operations
+      expect(Array.isArray(operations)).toBe(true)
+      const passHeaders = operations.find(
+        (operation) => operation.mode === 'pass_headers'
+      )
+      expect(passHeaders).toBeDefined()
+      const headers = passHeaders?.value as string[]
+      expect(headers).toContain('X-Codex-Turn-Metadata')
+      expect(headers).not.toContain('User-Agent')
+    }
+  })
+
+  test('clearParamOverridePreservingUserAgentPassHeaders keeps only User-Agent passthrough', () => {
+    const cleared = clearParamOverridePreservingUserAgentPassHeaders(
+      JSON.stringify({
+        operations: [
+          {
+            mode: 'pass_headers',
+            value: ['User-Agent', 'Originator', 'X-Codex-Turn-Metadata'],
+            keep_origin: true,
+          },
+          {
+            mode: 'copy_header',
+            from: 'X-Client-Request-Id',
+            to: 'Session_id',
+            keep_origin: true,
+          },
+          {
+            mode: 'delete',
+            path: 'tools.*.custom.input_examples',
+          },
+        ],
+      })
+    )
+
+    expect(JSON.parse(cleared)).toEqual({
+      operations: [
+        {
+          mode: 'pass_headers',
+          value: ['User-Agent'],
+          keep_origin: true,
+        },
+      ],
+    })
+    expect(
+      clearParamOverridePreservingUserAgentPassHeaders(
+        '{"operations":[{"mode":"pass_headers","value":["Originator"]}]}'
+      )
+    ).toBe('')
+    expect(clearParamOverridePreservingUserAgentPassHeaders('{')).toBe('')
   })
 })

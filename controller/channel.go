@@ -545,13 +545,15 @@ func validateHeaderProfileStrategySnapshots(strategy *dto.HeaderProfileStrategy)
 }
 
 func validateChannelOtherSettings(channel *model.Channel, passedHeaders map[string]struct{}) error {
-	if channel == nil || channel.OtherSettings == "" {
+	if channel == nil {
 		return nil
 	}
 
 	settings := dto.ChannelOtherSettings{}
-	if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
-		return fmt.Errorf("渠道其他设置[settings] 格式错误：%s", err.Error())
+	if strings.TrimSpace(channel.OtherSettings) != "" {
+		if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+			return fmt.Errorf("渠道其他设置[settings] 格式错误：%s", err.Error())
+		}
 	}
 
 	if err := validateHeaderProfileStrategy(settings.HeaderProfileStrategy); err != nil {
@@ -572,7 +574,7 @@ func validateChannelOtherSettings(channel *model.Channel, passedHeaders map[stri
 		return err
 	}
 	settings.UserAgentStrategy = strategy
-	clearResponsesCompactSettingsForNonOpenAI(channel.Type, &settings)
+	normalizeResponsesCompactSettingsForChannel(channel.Type, &settings)
 	if channel.Type == constant.ChannelTypeOpenAI {
 		if err := validateResponsesCompactAutoFallbackRetryInterval(&settings); err != nil {
 			return err
@@ -1170,7 +1172,7 @@ func resetResponsesCompactAutoFallbackOnModeChange(channel *model.Channel, origi
 		return
 	}
 	if channel.Type != constant.ChannelTypeOpenAI {
-		clearResponsesCompactSettings(channel)
+		normalizeResponsesCompactSettings(channel)
 		return
 	}
 	nextSettings := channel.GetOtherSettings()
@@ -1221,21 +1223,32 @@ func responsesCompactAutoFallbackMetadataExplicitlySet(rawSettings string) bool 
 	return hasDate || hasAt || hasReason
 }
 
-func clearResponsesCompactSettings(channel *model.Channel) {
+func normalizeResponsesCompactSettings(channel *model.Channel) {
 	settings := channel.GetOtherSettings()
-	if clearResponsesCompactSettingsForNonOpenAI(channel.Type, &settings) {
+	if normalizeResponsesCompactSettingsForChannel(channel.Type, &settings) {
 		channel.SetOtherSettings(settings)
 	}
 }
 
-func clearResponsesCompactSettingsForNonOpenAI(channelType int, settings *dto.ChannelOtherSettings) bool {
-	if channelType == constant.ChannelTypeOpenAI || settings == nil {
+func normalizeResponsesCompactSettingsForChannel(channelType int, settings *dto.ChannelOtherSettings) bool {
+	if settings == nil {
 		return false
 	}
-	if !hasResponsesCompactSettings(settings) {
-		return false
+	if channelType == constant.ChannelTypeOpenAI {
+		if settings.ResponsesCompactMode != "" {
+			return false
+		}
+		settings.ResponsesCompactMode = dto.ResponsesCompactModeAuto
+		return true
 	}
-	settings.ResponsesCompactMode = ""
+	changed := false
+	if settings.ResponsesCompactMode != dto.ResponsesCompactModeAuto {
+		settings.ResponsesCompactMode = dto.ResponsesCompactModeAuto
+		changed = true
+	}
+	if !hasResponsesCompactAuxiliarySettings(settings) {
+		return changed
+	}
 	settings.ResponsesCompactAutoFallbackDate = 0
 	settings.ResponsesCompactAutoFallbackAt = 0
 	settings.ResponsesCompactAutoFallbackReason = ""
@@ -1247,12 +1260,11 @@ func clearResponsesCompactSettingsForNonOpenAI(channelType int, settings *dto.Ch
 	return true
 }
 
-func hasResponsesCompactSettings(settings *dto.ChannelOtherSettings) bool {
+func hasResponsesCompactAuxiliarySettings(settings *dto.ChannelOtherSettings) bool {
 	if settings == nil {
 		return false
 	}
-	return settings.ResponsesCompactMode != "" ||
-		settings.ResponsesCompactAutoFallbackDate != 0 ||
+	return settings.ResponsesCompactAutoFallbackDate != 0 ||
 		settings.ResponsesCompactAutoFallbackAt != 0 ||
 		settings.ResponsesCompactAutoFallbackReason != "" ||
 		settings.ResponsesCompactAutoFallbackRetryIntervalHours != 0 ||

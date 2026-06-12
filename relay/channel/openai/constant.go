@@ -74,3 +74,13 @@ var ModelList = []string{
 }
 
 var ChannelName = "openai"
+
+var AgnesModelList = []string{
+	"agnes-1.5-flash",
+	"agnes-2.0-flash",
+	"agnes-image-2.0-flash",
+	"agnes-image-2.1-flash",
+	"agnes-video-v2.0",
+}
+
+var AgnesChannelName = "Agnes"

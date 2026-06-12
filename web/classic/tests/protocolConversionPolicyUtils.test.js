@@ -21,12 +21,20 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   CHAT_TO_RESPONSES_TEMPLATE,
+  PROTOCOL_FILTER_ALL,
+  PROTOCOL_RULE_SCOPE_EMPTY,
+  PROTOCOL_RULE_STATE_ATTENTION,
   RESPONSES_TO_CHAT_TEMPLATE,
+  TEMPLATE_TYPE_CHAT_TO_RESPONSES,
+  TEMPLATE_TYPE_RESPONSES_TO_CHAT,
 } from '../src/components/settings/protocolConversionPolicy/constants.js';
 import {
   buildTemplateRule,
   deserializePolicy,
+  filterProtocolRules,
   getEndpointLabel,
+  getProtocolPolicyStats,
+  getProtocolPreviewResult,
   getRuleModelSummary,
   parseIntegerList,
   serializeRules,
@@ -175,7 +183,93 @@ describe('classic protocol conversion policy utils', () => {
 
   test('summarizes empty model patterns as all models', () => {
     expect(getRuleModelSummary({ model_patterns: [] }, (value) => value)).toBe(
-      '全部模型',
+      '全部非空模型',
     );
+  });
+
+  test('computes stats and filters rules by direction state scope and query', () => {
+    const rules = [
+      buildTemplateRule(CHAT_TO_RESPONSES_TEMPLATE, []),
+      {
+        ...buildTemplateRule(RESPONSES_TO_CHAT_TEMPLATE, []),
+        enabled: false,
+        all_channels: false,
+        channel_ids: [],
+        channel_types: [],
+        model_patterns: ['^deepseek.*$'],
+      },
+    ];
+
+    const stats = getProtocolPolicyStats(rules, true);
+    expect(stats).toMatchObject({
+      total: 2,
+      enabled: 1,
+      disabled: 1,
+      chatToResponses: 1,
+      responsesToChat: 1,
+      limitedScope: 1,
+      emptyScope: 1,
+      attention: 2,
+    });
+
+    expect(
+      filterProtocolRules(
+        rules,
+        {
+          direction: TEMPLATE_TYPE_RESPONSES_TO_CHAT,
+          state: PROTOCOL_RULE_STATE_ATTENTION,
+          scope: PROTOCOL_RULE_SCOPE_EMPTY,
+          query: 'deepseek',
+        },
+        false,
+      ).map((item) => item.index),
+    ).toEqual([1]);
+
+    expect(
+      filterProtocolRules(
+        rules,
+        {
+          direction: TEMPLATE_TYPE_CHAT_TO_RESPONSES,
+          state: PROTOCOL_FILTER_ALL,
+          scope: PROTOCOL_FILTER_ALL,
+          query: '',
+        },
+        false,
+      ).map((item) => item.index),
+    ).toEqual([0]);
+  });
+
+  test('previews rule hits with empty model patterns matching non-empty models', () => {
+    const rule = {
+      ...buildTemplateRule(CHAT_TO_RESPONSES_TEMPLATE, []),
+      all_channels: false,
+      channel_ids: [145],
+      channel_types: [],
+      model_patterns: [],
+    };
+
+    expect(
+      getProtocolPreviewResult(
+        rule,
+        { channelId: '145', channelType: '', model: 'gpt-5' },
+        false,
+      ),
+    ).toEqual({ matched: true, reason: '示例请求命中这条规则。' });
+
+    expect(
+      getProtocolPreviewResult(
+        rule,
+        { channelId: '146', channelType: '', model: 'gpt-5' },
+        false,
+      ),
+    ).toEqual({ matched: false, reason: '渠道范围不匹配。' });
+
+    expect(
+      getProtocolPreviewResult(
+        { ...rule, enabled: false },
+        { channelId: '145', channelType: '', model: 'gpt-5' },
+        false,
+      ),
+    ).toEqual({ matched: false, reason: '规则已停用。' });
   });
 });

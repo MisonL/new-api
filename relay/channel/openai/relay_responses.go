@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -38,6 +39,9 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		c.Set("image_generation_call", true)
 		c.Set("image_generation_call_quality", responsesResponse.GetQuality())
 		c.Set("image_generation_call_size", responsesResponse.GetSize())
+	}
+	if responsesResponse.HasCompactionOutput() {
+		common.SetContextKey(c, constant.ContextKeyResponsesCompactionOutput, true)
 	}
 
 	// 写入新的 response body
@@ -111,6 +115,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					c.Set("image_generation_call_quality", streamResponse.Response.GetQuality())
 					c.Set("image_generation_call_size", streamResponse.Response.GetSize())
 				}
+				if streamResponse.Response.HasCompactionOutput() {
+					common.SetContextKey(c, constant.ContextKeyResponsesCompactionOutput, true)
+				}
 			}
 		case "response.output_text.delta":
 			// 处理输出文本
@@ -119,6 +126,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			// 函数调用处理
 			if streamResponse.Item != nil {
 				switch streamResponse.Item.Type {
+				case dto.ResponsesOutputTypeCompaction, dto.ResponsesOutputTypeCompactionSummary, dto.ResponsesOutputTypeContextCompaction:
+					common.SetContextKey(c, constant.ContextKeyResponsesCompactionOutput, true)
 				case dto.BuildInCallWebSearchCall:
 					if info != nil && info.ResponsesUsageInfo != nil && info.ResponsesUsageInfo.BuiltInTools != nil {
 						if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]; exists && webSearchTool != nil {

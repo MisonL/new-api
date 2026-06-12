@@ -21,7 +21,16 @@ import {
   ENDPOINT_CHAT,
   ENDPOINT_OPTIONS,
   ENDPOINT_RESPONSES,
+  PROTOCOL_FILTER_ALL,
+  PROTOCOL_RULE_SCOPE_EMPTY,
+  PROTOCOL_RULE_SCOPE_GLOBAL,
+  PROTOCOL_RULE_SCOPE_LIMITED,
+  PROTOCOL_RULE_STATE_ATTENTION,
+  PROTOCOL_RULE_STATE_DISABLED,
+  PROTOCOL_RULE_STATE_ENABLED,
   SUPPORTED_ENDPOINT_VALUES,
+  TEMPLATE_TYPE_CHAT_TO_RESPONSES,
+  TEMPLATE_TYPE_RESPONSES_TO_CHAT,
 } from './constants';
 
 const RULE_CLIENT_KEY_FIELD = '__client_key';
@@ -426,7 +435,7 @@ export const getRuleScopeSummary = (rule, t) => {
 
 export const getRuleModelSummary = (rule, t) => {
   if (!Array.isArray(rule.model_patterns) || rule.model_patterns.length === 0) {
-    return t('全部模型');
+    return t('全部非空模型');
   }
   if (rule.model_patterns.length === 1) {
     return rule.model_patterns[0];
@@ -442,3 +451,205 @@ export const isRuleDirectionValid = (rule) =>
 export const isResponsesToChatRule = (rule) =>
   normalizeEndpoint(rule?.source_endpoint) === ENDPOINT_RESPONSES &&
   normalizeEndpoint(rule?.target_endpoint) === ENDPOINT_CHAT;
+
+export const isChatToResponsesRule = (rule) =>
+  normalizeEndpoint(rule?.source_endpoint) === ENDPOINT_CHAT &&
+  normalizeEndpoint(rule?.target_endpoint) === ENDPOINT_RESPONSES;
+
+export const getProtocolRuleDirection = (rule) =>
+  isResponsesToChatRule(rule)
+    ? TEMPLATE_TYPE_RESPONSES_TO_CHAT
+    : TEMPLATE_TYPE_CHAT_TO_RESPONSES;
+
+export const getProtocolRuleWarningKeys = (rule) => {
+  const warnings = [];
+  if (!rule.enabled) {
+    warnings.push('规则已停用。');
+  }
+  if (!isRuleScopeValid(rule)) {
+    warnings.push('渠道范围为空，这条规则不会命中。');
+  }
+  return warnings;
+};
+
+export const getProtocolRuleAttentionKeys = (rule, passThroughEnabled) => {
+  const warnings = getProtocolRuleWarningKeys(rule);
+  if (passThroughEnabled) {
+    warnings.push('已启用全局请求透传，运行时会跳过协议转换。');
+  }
+  return warnings;
+};
+
+export const getProtocolPolicyStats = (rules, passThroughEnabled = false) =>
+  (rules || []).reduce(
+    (stats, rule) => {
+      stats.total += 1;
+      if (rule.enabled) {
+        stats.enabled += 1;
+      } else {
+        stats.disabled += 1;
+      }
+
+      if (isResponsesToChatRule(rule)) {
+        stats.responsesToChat += 1;
+      } else {
+        stats.chatToResponses += 1;
+      }
+
+      if (rule.all_channels) {
+        stats.allChannels += 1;
+      } else if (!isRuleScopeValid(rule)) {
+        stats.emptyScope += 1;
+      } else {
+        stats.limitedScope += 1;
+      }
+
+      if (getProtocolRuleAttentionKeys(rule, passThroughEnabled).length > 0) {
+        stats.attention += 1;
+      }
+
+      return stats;
+    },
+    {
+      total: 0,
+      enabled: 0,
+      disabled: 0,
+      chatToResponses: 0,
+      responsesToChat: 0,
+      allChannels: 0,
+      limitedScope: 0,
+      emptyScope: 0,
+      attention: 0,
+    },
+  );
+
+const protocolRuleSearchText = (rule) =>
+  [
+    rule?.name,
+    rule?.source_endpoint,
+    rule?.target_endpoint,
+    (rule?.channel_ids || []).join(' '),
+    (rule?.channel_types || []).join(' '),
+    (rule?.model_patterns || []).join(' '),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+export const filterProtocolRules = (
+  rules,
+  filters,
+  passThroughEnabled = false,
+) => {
+  const currentFilters = filters || {};
+  const query = String(currentFilters.query || '')
+    .trim()
+    .toLowerCase();
+
+  return (rules || [])
+    .map((rule, index) => ({ rule, index }))
+    .filter(({ rule }) => {
+      if (
+        currentFilters.direction &&
+        currentFilters.direction !== PROTOCOL_FILTER_ALL &&
+        getProtocolRuleDirection(rule) !== currentFilters.direction
+      ) {
+        return false;
+      }
+      if (
+        currentFilters.state === PROTOCOL_RULE_STATE_ENABLED &&
+        !rule.enabled
+      ) {
+        return false;
+      }
+      if (
+        currentFilters.state === PROTOCOL_RULE_STATE_DISABLED &&
+        rule.enabled
+      ) {
+        return false;
+      }
+      if (
+        currentFilters.state === PROTOCOL_RULE_STATE_ATTENTION &&
+        getProtocolRuleAttentionKeys(rule, passThroughEnabled).length === 0
+      ) {
+        return false;
+      }
+      if (
+        currentFilters.scope === PROTOCOL_RULE_SCOPE_GLOBAL &&
+        !rule.all_channels
+      ) {
+        return false;
+      }
+      if (
+        currentFilters.scope === PROTOCOL_RULE_SCOPE_LIMITED &&
+        (rule.all_channels || !isRuleScopeValid(rule))
+      ) {
+        return false;
+      }
+      if (
+        currentFilters.scope === PROTOCOL_RULE_SCOPE_EMPTY &&
+        (rule.all_channels || isRuleScopeValid(rule))
+      ) {
+        return false;
+      }
+      return !query || protocolRuleSearchText(rule).includes(query);
+    });
+};
+
+const parseStrictPositiveInteger = (value) => {
+  const text = String(value || '').trim();
+  if (!text) {
+    return null;
+  }
+  const number = Number(text);
+  return Number.isInteger(number) && number > 0 ? number : null;
+};
+
+export const getProtocolPreviewResult = (
+  rule,
+  preview,
+  passThroughEnabled = false,
+) => {
+  if (!rule.enabled) {
+    return { matched: false, reason: '规则已停用。' };
+  }
+  if (!isRuleScopeValid(rule)) {
+    return { matched: false, reason: '渠道范围为空，这条规则不会命中。' };
+  }
+
+  const channelId = parseStrictPositiveInteger(preview?.channelId);
+  const channelType = parseStrictPositiveInteger(preview?.channelType);
+  if (!rule.all_channels) {
+    const idMatched = channelId != null && rule.channel_ids.includes(channelId);
+    const typeMatched =
+      channelType != null && rule.channel_types.includes(channelType);
+    if (!idMatched && !typeMatched) {
+      return { matched: false, reason: '渠道范围不匹配。' };
+    }
+  }
+
+  const model = String(preview?.model || '').trim();
+  if (!model) {
+    return { matched: false, reason: '预览需要填写模型名称。' };
+  }
+
+  const modelMatched =
+    rule.model_patterns.length === 0 ||
+    rule.model_patterns.some((pattern) => {
+      try {
+        return new RegExp(pattern).test(model);
+      } catch {
+        return false;
+      }
+    });
+  if (!modelMatched) {
+    return { matched: false, reason: '模型正则不匹配。' };
+  }
+
+  if (passThroughEnabled) {
+    return {
+      matched: true,
+      reason: '示例请求命中规则，但全局透传会跳过协议转换。',
+    };
+  }
+  return { matched: true, reason: '示例请求命中这条规则。' };
+};

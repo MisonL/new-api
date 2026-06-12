@@ -39,6 +39,21 @@ export function ProtocolConversionHitPreview({
     preview,
     passThroughEnabled || channelPassThroughEnabled
   )
+  const updateChannelId = (value: string) => {
+    const trimmedValue = value.trim()
+    const nextChannelId = /^\d+$/.test(trimmedValue)
+      ? Number.parseInt(trimmedValue, 10)
+      : null
+    const nextChannel =
+      nextChannelId == null
+        ? undefined
+        : channels.find((channel) => channel.id === nextChannelId)
+    onPreviewChange({
+      ...preview,
+      channelId: value,
+      channelType: nextChannel ? String(nextChannel.type) : '',
+    })
+  }
 
   return (
     <div className='space-y-3 rounded-md border p-3'>
@@ -57,9 +72,7 @@ export function ProtocolConversionHitPreview({
         <PreviewField label={t('Channel ID')}>
           <Input
             value={preview.channelId}
-            onChange={(event) =>
-              onPreviewChange({ ...preview, channelId: event.target.value })
-            }
+            onChange={(event) => updateChannelId(event.target.value)}
             placeholder='117'
           />
         </PreviewField>
@@ -82,6 +95,22 @@ export function ProtocolConversionHitPreview({
           />
         </PreviewField>
       </div>
+      {previewChannel ? (
+        <div className='rounded-md bg-muted/40 p-3 text-sm'>
+          <div className='font-medium'>
+            {t('Loaded channel')}: #{previewChannel.id} {previewChannel.name}
+          </div>
+          <div className='text-muted-foreground mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs'>
+            <span>
+              {t('Channel type')}: {previewChannel.type}
+            </span>
+            <span>
+              {t('Channel passthrough')}:{' '}
+              {channelPassThroughEnabled ? t('Enabled') : t('Disabled')}
+            </span>
+          </div>
+        </div>
+      ) : null}
       <div className='text-muted-foreground text-sm'>{t(result.reason)}</div>
     </div>
   )

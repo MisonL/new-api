@@ -439,13 +439,27 @@ func migrateLOGDB() error {
 }
 
 const (
-	responsesCompactModeAutoMigrationOptionKey = "migration.responses_compact_mode_auto.20260526"
-	responsesCompactModeAutoMigrationBatchSize = 100
+	responsesCompactModeAutoMigrationOptionKey            = "migration.responses_compact_mode_auto.20260526"
+	responsesCompactModeAutoAllChannelsMigrationOptionKey = "migration.responses_compact_mode_auto_all_channels.20260610"
+	responsesCompactModeAutoMigrationBatchSize            = 100
 )
 
 func migrateResponsesCompactModeAuto() error {
+	var allChannelsMarker Option
+	if err := DB.First(&allChannelsMarker, "key = ?", responsesCompactModeAutoAllChannelsMigrationOptionKey).Error; err == nil {
+		return nil
+	} else if err != nil && err != gorm.ErrRecordNotFound {
+		return err
+	}
+	if err := migrateResponsesCompactModeAutoWithMarker(responsesCompactModeAutoMigrationOptionKey, true); err != nil {
+		return err
+	}
+	return migrateResponsesCompactModeAutoWithMarker(responsesCompactModeAutoAllChannelsMigrationOptionKey, false)
+}
+
+func migrateResponsesCompactModeAutoWithMarker(markerKey string, openAIOnly bool) error {
 	var marker Option
-	if err := DB.First(&marker, "key = ?", responsesCompactModeAutoMigrationOptionKey).Error; err == nil {
+	if err := DB.First(&marker, "key = ?", markerKey).Error; err == nil {
 		return nil
 	} else if err != nil && err != gorm.ErrRecordNotFound {
 		return err
@@ -455,7 +469,11 @@ func migrateResponsesCompactModeAuto() error {
 		var channels []Channel
 		updated := 0
 		resetInvalid := 0
-		if err := tx.Where("type = ?", constant.ChannelTypeOpenAI).FindInBatches(&channels, responsesCompactModeAutoMigrationBatchSize, func(_ *gorm.DB, _ int) error {
+		query := tx.Model(&Channel{})
+		if openAIOnly {
+			query = query.Where("type = ?", constant.ChannelTypeOpenAI)
+		}
+		if err := query.FindInBatches(&channels, responsesCompactModeAutoMigrationBatchSize, func(_ *gorm.DB, _ int) error {
 			for i := range channels {
 				channel := &channels[i]
 				settings := dto.ChannelOtherSettings{}
@@ -488,13 +506,13 @@ func migrateResponsesCompactModeAuto() error {
 			return err
 		}
 		marker = Option{
-			Key:   responsesCompactModeAutoMigrationOptionKey,
+			Key:   markerKey,
 			Value: "done",
 		}
 		if err := tx.Save(&marker).Error; err != nil {
 			return err
 		}
-		common.SysLog(fmt.Sprintf("responses compact auto migration finished: updated_channels=%d reset_invalid_settings=%d", updated, resetInvalid))
+		common.SysLog(fmt.Sprintf("responses compact auto migration finished: marker=%s updated_channels=%d reset_invalid_settings=%d", markerKey, updated, resetInvalid))
 		return nil
 	})
 }

@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,6 +11,10 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	ResponsesInputTypeCompactionTrigger = "compaction_trigger"
 )
 
 type ResponseFormat struct {
@@ -966,6 +971,38 @@ func (r *OpenAIResponsesRequest) GetToolsMap() []map[string]any {
 		_ = common.Unmarshal(r.Tools, &toolsMap)
 	}
 	return toolsMap
+}
+
+func (r *OpenAIResponsesRequest) HasCompactionTrigger() bool {
+	if r == nil {
+		return false
+	}
+	return ResponsesInputHasCompactionTrigger(r.Input)
+}
+
+func ResponsesInputHasCompactionTrigger(input json.RawMessage) bool {
+	if len(bytes.TrimSpace(input)) == 0 || common.GetJsonType(input) != "array" {
+		return false
+	}
+
+	var items []map[string]json.RawMessage
+	if err := common.Unmarshal(input, &items); err != nil {
+		return false
+	}
+	for _, item := range items {
+		rawType, ok := item["type"]
+		if !ok {
+			continue
+		}
+		var itemType string
+		if err := common.Unmarshal(rawType, &itemType); err != nil {
+			continue
+		}
+		if itemType == ResponsesInputTypeCompactionTrigger {
+			return true
+		}
+	}
+	return false
 }
 
 type Reasoning struct {

@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -106,6 +107,126 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 	if profile := settings.NormalizedResponsesUpstreamProfile(); profile != "" {
 		other["responses_upstream_profile"] = string(profile)
 	}
+	appendCodexCompactionInfo(ctx, relayInfo, other)
+}
+
+type codexTurnMetadataHeader struct {
+	RequestKind string                         `json:"request_kind"`
+	Compaction  *codexCompactionMetadataHeader `json:"compaction"`
+}
+
+type codexCompactionMetadataHeader struct {
+	Trigger        string `json:"trigger"`
+	Reason         string `json:"reason"`
+	Implementation string `json:"implementation"`
+	Phase          string `json:"phase"`
+	Strategy       string `json:"strategy"`
+}
+
+func appendCodexCompactionInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if other == nil {
+		return
+	}
+
+	headerInfo, ok := parseCodexCompactionHeader(ctx)
+	hasTrigger := relayInfoHasCompactionTrigger(relayInfo)
+	hasOutput := ctx != nil && common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCompactionOutput)
+	if !ok && !hasTrigger && !hasOutput {
+		return
+	}
+
+	if ok {
+		other["responses_compact_client"] = "codex"
+		if headerInfo.Implementation != "" {
+			other["responses_compact_client_implementation"] = headerInfo.Implementation
+		}
+		if headerInfo.Trigger != "" {
+			other["responses_compact_trigger"] = headerInfo.Trigger
+		}
+		if headerInfo.Reason != "" {
+			other["responses_compact_reason"] = headerInfo.Reason
+		}
+		if headerInfo.Phase != "" {
+			other["responses_compact_phase"] = headerInfo.Phase
+		}
+		if headerInfo.Strategy != "" {
+			other["responses_compact_strategy"] = headerInfo.Strategy
+		}
+	}
+
+	if _, exists := other["responses_compact_mode"]; !exists && !isLegacyResponsesCompactRelay(relayInfo, ctx) {
+		other["responses_compact_mode"] = codexCompactionMode(headerInfo.Implementation, hasTrigger, hasOutput)
+		other["responses_compact_upstream_path"] = requestPathForLog(ctx, relayInfo)
+	}
+}
+
+func parseCodexCompactionHeader(ctx *gin.Context) (codexCompactionMetadataHeader, bool) {
+	if ctx == nil || ctx.Request == nil {
+		return codexCompactionMetadataHeader{}, false
+	}
+	rawHeader := strings.TrimSpace(ctx.Request.Header.Get("x-codex-turn-metadata"))
+	if rawHeader == "" {
+		return codexCompactionMetadataHeader{}, false
+	}
+
+	var metadata codexTurnMetadataHeader
+	if err := common.Unmarshal([]byte(rawHeader), &metadata); err != nil {
+		return codexCompactionMetadataHeader{}, false
+	}
+	if metadata.RequestKind != "compaction" || metadata.Compaction == nil {
+		return codexCompactionMetadataHeader{}, false
+	}
+	return *metadata.Compaction, true
+}
+
+func relayInfoHasCompactionTrigger(relayInfo *relaycommon.RelayInfo) bool {
+	if relayInfo == nil {
+		return false
+	}
+	request, ok := relayInfo.Request.(*dto.OpenAIResponsesRequest)
+	return ok && request.HasCompactionTrigger()
+}
+
+func isLegacyResponsesCompactRelay(relayInfo *relaycommon.RelayInfo, ctx *gin.Context) bool {
+	if relayInfo != nil && relayInfo.RelayMode == relayconstant.RelayModeResponsesCompact {
+		return true
+	}
+	return ctx != nil && ctx.GetInt("relay_mode") == relayconstant.RelayModeResponsesCompact
+}
+
+func codexCompactionMode(implementation string, hasTrigger bool, hasOutput bool) string {
+	switch implementation {
+	case "responses_compaction_v2":
+		return "remote_v2"
+	case "responses_compact":
+		return "native"
+	case "responses":
+		return "codex_local"
+	}
+	if hasTrigger {
+		return "remote_v2"
+	}
+	if hasOutput {
+		return "remote_v2"
+	}
+	return "codex_local"
+}
+
+func requestPathForLog(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) string {
+	if ctx != nil && ctx.Request != nil && ctx.Request.URL != nil && ctx.Request.URL.Path != "" {
+		return ctx.Request.URL.Path
+	}
+	if relayInfo == nil || relayInfo.RequestURLPath == "" {
+		return "/v1/responses"
+	}
+	path := relayInfo.RequestURLPath
+	if idx := strings.Index(path, "?"); idx != -1 {
+		path = path[:idx]
+	}
+	if path == "" {
+		return "/v1/responses"
+	}
+	return path
 }
 
 func appendUpstreamMetadata(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {

@@ -1,7 +1,6 @@
 import type { AffinityRule } from './types'
 
 const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
-  'User-Agent',
   'Originator',
   'Session_id',
   'Session-Id',
@@ -121,13 +120,13 @@ export type ParamOverrideTemplate = {
 
 export const PARAM_OVERRIDE_TEMPLATES: Record<string, ParamOverrideTemplate> = {
   codexCliHeaders: {
-    label: 'Codex CLI Header Passthrough',
+    label: 'Codex CLI Dynamic Headers Passthrough',
     payload: buildCodexHeaderPassthroughTemplate(
       CODEX_CLI_HEADER_PASSTHROUGH_HEADERS
     ),
   },
   codexHeaders: {
-    label: 'Codex Desktop Header Passthrough',
+    label: 'Codex Desktop Dynamic Headers Passthrough',
     payload: buildCodexHeaderPassthroughTemplate(
       CODEX_DESKTOP_HEADER_PASSTHROUGH_HEADERS
     ),

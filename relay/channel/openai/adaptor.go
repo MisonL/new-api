@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -94,6 +95,117 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 	}
 }
 
+func isAgnesImageModelName(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "agnes-image-")
+}
+
+func usesAgnesProtocol(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	if info.ChannelMeta != nil && info.ChannelMeta.ChannelType == constant.ChannelTypeAgnes {
+		return true
+	}
+	return isAgnesImageModelName(relayInfoUpstreamModelName(info))
+}
+
+func relayInfoUpstreamModelName(info *relaycommon.RelayInfo) string {
+	if info == nil || info.ChannelMeta == nil {
+		return ""
+	}
+	return info.ChannelMeta.UpstreamModelName
+}
+
+func agnesImageInputPayload(request dto.ImageRequest) (json.RawMessage, bool, error) {
+	candidates := []json.RawMessage{request.Images, request.Image}
+	for _, raw := range candidates {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+			continue
+		}
+		switch common.GetJsonType(trimmed) {
+		case "array":
+			return trimmed, true, nil
+		case "string":
+			var single string
+			if err := common.Unmarshal(trimmed, &single); err != nil {
+				return nil, false, fmt.Errorf("decode Agnes image input failed: %w", err)
+			}
+			payload, err := common.Marshal([]string{single})
+			if err != nil {
+				return nil, false, fmt.Errorf("marshal Agnes image input failed: %w", err)
+			}
+			return payload, true, nil
+		default:
+			return nil, false, fmt.Errorf("unsupported Agnes image input type: %s", common.GetJsonType(trimmed))
+		}
+	}
+	return nil, false, nil
+}
+
+func normalizeAgnesImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (dto.ImageRequest, error) {
+	modelName := strings.TrimSpace(request.Model)
+	if upstreamModelName := strings.TrimSpace(relayInfoUpstreamModelName(info)); upstreamModelName != "" {
+		modelName = upstreamModelName
+	}
+	if !usesAgnesProtocol(info) && !isAgnesImageModelName(modelName) {
+		return request, nil
+	}
+
+	if info != nil && info.RelayMode == relayconstant.RelayModeImagesEdits && !isJSONRequest(c) {
+		return request, errors.New("Agnes image models require JSON image edit requests with public image URLs or data URI base64 inputs")
+	}
+
+	extraBody := make(map[string]json.RawMessage)
+	if trimmed := bytes.TrimSpace(request.ExtraBody); len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) {
+		if err := common.Unmarshal(trimmed, &extraBody); err != nil {
+			return request, fmt.Errorf("decode Agnes image extra_body failed: %w", err)
+		}
+	}
+
+	inputPayload, hasInputPayload, err := agnesImageInputPayload(request)
+	if err != nil {
+		return request, err
+	}
+	if hasInputPayload {
+		extraBody["image"] = inputPayload
+		request.Image = nil
+		request.Images = nil
+	}
+
+	switch strings.ToLower(strings.TrimSpace(request.ResponseFormat)) {
+	case "url":
+		rawURL, err := common.Marshal("url")
+		if err != nil {
+			return request, fmt.Errorf("marshal Agnes image url response_format failed: %w", err)
+		}
+		extraBody["response_format"] = rawURL
+		request.ResponseFormat = ""
+		request.ReturnBase64 = nil
+	case "b64_json":
+		request.ResponseFormat = ""
+		if hasInputPayload || (info != nil && info.RelayMode == relayconstant.RelayModeImagesEdits) {
+			rawB64, err := common.Marshal("b64_json")
+			if err != nil {
+				return request, fmt.Errorf("marshal Agnes image b64_json response_format failed: %w", err)
+			}
+			extraBody["response_format"] = rawB64
+			request.ReturnBase64 = nil
+		} else {
+			request.ReturnBase64 = lo.ToPtr(true)
+		}
+	}
+
+	if len(extraBody) > 0 {
+		rawExtraBody, err := common.Marshal(extraBody)
+		if err != nil {
+			return request, fmt.Errorf("marshal Agnes image extra_body failed: %w", err)
+		}
+		request.ExtraBody = rawExtraBody
+	}
+	return request, nil
+}
+
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	if info.RelayMode == relayconstant.RelayModeRealtime {
 		if strings.HasPrefix(info.ChannelBaseUrl, "https://") {
@@ -163,6 +275,10 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		url = strings.Replace(url, "{model}", info.UpstreamModelName, -1)
 		return url, nil
 	default:
+		if (info.RelayMode == relayconstant.RelayModeImagesGenerations || info.RelayMode == relayconstant.RelayModeImagesEdits) &&
+			usesAgnesProtocol(info) {
+			return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, "/v1/images/generations", info.ChannelType), nil
+		}
 		if relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
 			return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, "/v1/responses", info.ChannelType), nil
 		}
@@ -427,6 +543,12 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	normalizedRequest, err := normalizeAgnesImageRequest(c, info, request)
+	if err != nil {
+		return nil, err
+	}
+	request = normalizedRequest
+
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
 		if isJSONRequest(c) {
@@ -622,6 +744,18 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		}
 		return convertedRequest, nil
 	}
+	if relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
+		requestContext := relaycommon.GinRequestContext(c)
+		if shouldRejectResponsesRESTPreviousResponseID(info, request) {
+			requestContext = markResponsesCompactVisibleOnlyForUpstreamProfile(c, requestContext)
+		}
+		convertedRequest, err := service.BuildSyntheticCompactSummaryRequest(requestContext, syntheticCompactScopeFromRelayInfo(info), request)
+		if err != nil {
+			setResponsesPreviousIDActionForError(c, err)
+			return nil, err
+		}
+		return convertedRequest, nil
+	}
 	if shouldRejectResponsesRESTPreviousResponseID(info, request) {
 		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "rejected_by_upstream_profile")
 		return nil, fmt.Errorf("%w: previous_response_id is not supported by upstream profile %s over REST; use Responses WebSocket v2 or a native Responses-capable upstream", service.ErrResponsesRESTPreviousIDUnsupported, info.ChannelOtherSettings.NormalizedResponsesUpstreamProfile())
@@ -639,14 +773,6 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if relaycommon.IsNativeOpenAICompatibleResponsesCompact(info) {
 		return request, nil
 	}
-	if relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
-		convertedRequest, err := service.BuildSyntheticCompactSummaryRequest(relaycommon.GinRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
-		if err != nil {
-			setResponsesPreviousIDActionForError(c, err)
-			return nil, err
-		}
-		return convertedRequest, nil
-	}
 	if relaycommon.ShouldHandleSyntheticOpenAICompatibleResponses(info) {
 		convertedRequest, _, err := service.ApplySyntheticCompactState(relaycommon.GinRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
 		if err != nil {
@@ -655,6 +781,21 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		return convertedRequest, err
 	}
 	return request, nil
+}
+
+func markResponsesCompactVisibleOnlyForUpstreamProfile(c *gin.Context, requestContext context.Context) context.Context {
+	if requestContext == nil {
+		requestContext = context.Background()
+	}
+	requestContext = context.WithValue(requestContext, constant.ContextKeyResponsesCompactVisibleOnly, true)
+	if c != nil {
+		common.SetContextKey(c, constant.ContextKeyResponsesCompactVisibleOnly, true)
+		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_upstream_profile")
+		if c.Request != nil {
+			c.Request = c.Request.WithContext(requestContext)
+		}
+	}
+	return requestContext
 }
 
 func setResponsesPreviousIDActionForError(c *gin.Context, err error) {
@@ -834,6 +975,8 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 
 func (a *Adaptor) GetModelList() []string {
 	switch a.ChannelType {
+	case constant.ChannelTypeAgnes:
+		return AgnesModelList
 	case constant.ChannelType360:
 		return ai360.ModelList
 	case constant.ChannelTypeLingYiWanWu:
@@ -851,6 +994,8 @@ func (a *Adaptor) GetModelList() []string {
 
 func (a *Adaptor) GetChannelName() string {
 	switch a.ChannelType {
+	case constant.ChannelTypeAgnes:
+		return AgnesChannelName
 	case constant.ChannelType360:
 		return ai360.ChannelName
 	case constant.ChannelTypeLingYiWanWu:

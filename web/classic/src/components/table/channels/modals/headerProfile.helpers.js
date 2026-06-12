@@ -693,6 +693,47 @@ export function buildParamOverrideWithRequiredPassHeaders(
   return stringifyJson(nextParamOverride);
 }
 
+function isUserAgentHeaderName(header) {
+  return normalizeHeaderNameKey(header) === 'user-agent';
+}
+
+function buildUserAgentOnlyPassHeaderOperation(operation) {
+  if (operation?.mode !== 'pass_headers') {
+    return null;
+  }
+  const headers = normalizePassHeaderValue(operation.value);
+  if (!headers.some(isUserAgentHeaderName)) {
+    return null;
+  }
+  return {
+    ...operation,
+    value: ['User-Agent'],
+    keep_origin: operation.keep_origin !== false,
+  };
+}
+
+export function clearParamOverridePreservingUserAgentPassHeaders(
+  paramOverrideText,
+) {
+  const rawText =
+    typeof paramOverrideText === 'string' ? paramOverrideText.trim() : '';
+  if (!rawText) {
+    return '';
+  }
+  const parsed = safeParseJson(rawText);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return '';
+  }
+  const operations = Array.isArray(parsed.operations) ? parsed.operations : [];
+  const userAgentOperations = operations
+    .map(buildUserAgentOnlyPassHeaderOperation)
+    .filter(Boolean);
+  if (userAgentOperations.length === 0) {
+    return '';
+  }
+  return stringifyJson({ operations: userAgentOperations });
+}
+
 export function applyHeaderProfileStrategyToChannelInputs({
   inputs = {},
   strategy,

@@ -30,8 +30,16 @@ import {
   TextArea,
   Typography,
 } from '@douyinfe/semi-ui';
-import { ENDPOINT_OPTIONS, panelStyle } from './constants';
 import {
+  ENDPOINT_CHAT,
+  ENDPOINT_RESPONSES,
+  TEMPLATE_TYPE_CHAT_TO_RESPONSES,
+  TEMPLATE_TYPE_RESPONSES_TO_CHAT,
+  panelStyle,
+} from './constants';
+import {
+  getProtocolPreviewResult,
+  getProtocolRuleDirection,
   isResponsesToChatRule,
   isRuleScopeValid,
   parseIntegerList,
@@ -91,14 +99,80 @@ function IntegerListInput({ disabled, name, onChange, placeholder, value }) {
   );
 }
 
+function DirectionOption({
+  active,
+  description,
+  onClick,
+  source,
+  t,
+  target,
+  title,
+}) {
+  return (
+    <button
+      type='button'
+      onClick={onClick}
+      style={{
+        width: '100%',
+        textAlign: 'left',
+        border: active
+          ? '1px solid var(--semi-color-primary)'
+          : '1px solid var(--semi-color-border)',
+        borderRadius: 10,
+        padding: 12,
+        background: active
+          ? 'var(--semi-color-primary-light-default)'
+          : 'var(--semi-color-bg-1)',
+        cursor: 'pointer',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+        <Text strong>{title}</Text>
+        <Text type={active ? 'primary' : 'tertiary'} size='small'>
+          {active ? t('当前方向') : t('选择')}
+        </Text>
+      </div>
+      <div style={{ marginTop: 6 }}>
+        <Text size='small'>{source}</Text>
+        <Text type='tertiary' size='small'>
+          {' -> '}
+        </Text>
+        <Text size='small'>{target}</Text>
+      </div>
+      <div style={{ marginTop: 6 }}>
+        <Text type='tertiary' size='small'>
+          {description}
+        </Text>
+      </div>
+    </button>
+  );
+}
+
 function BasicPanel({ directionInvalid, index, rule, t, updateRule }) {
+  const direction = getProtocolRuleDirection(rule);
+  const setDirection = (nextDirection) => {
+    const nextIsResponsesToChat =
+      nextDirection === TEMPLATE_TYPE_RESPONSES_TO_CHAT;
+    updateRule(index, {
+      source_endpoint: nextIsResponsesToChat
+        ? ENDPOINT_RESPONSES
+        : ENDPOINT_CHAT,
+      target_endpoint: nextIsResponsesToChat
+        ? ENDPOINT_CHAT
+        : ENDPOINT_RESPONSES,
+      enable_custom_tool_bridge: nextIsResponsesToChat
+        ? rule.enable_custom_tool_bridge
+        : false,
+    });
+  };
+
   return (
     <div style={panelStyle}>
       <div style={{ marginBottom: 12 }}>
-        <Text strong>{t('基础配置')}</Text>
+        <Text strong>{t('基础配置与协议方向')}</Text>
       </div>
       <Row gutter={16}>
-        <Col xs={24} md={8}>
+        <Col xs={24} md={24}>
           <div style={{ marginBottom: 12 }}>
             <Text strong>{t('规则名称')}</Text>
             <Input
@@ -109,33 +183,31 @@ function BasicPanel({ directionInvalid, index, rule, t, updateRule }) {
             />
           </div>
         </Col>
-        <Col xs={24} md={8}>
-          <div style={{ marginBottom: 12 }}>
-            <Text strong>{t('源协议')}</Text>
-            <Select
-              name={`protocol-rule-source-endpoint-${index}`}
-              allowClear={false}
-              optionList={ENDPOINT_OPTIONS}
-              value={rule.source_endpoint}
-              onChange={(nextValue) =>
-                updateRule(index, { source_endpoint: nextValue })
-              }
-            />
-          </div>
+        <Col xs={24} md={12}>
+          <DirectionOption
+            active={direction === TEMPLATE_TYPE_CHAT_TO_RESPONSES}
+            title={t('Chat -> Responses')}
+            source={t('客户端 Chat Completions')}
+            target={t('上游 Responses')}
+            description={t(
+              '客户端发起 Chat Completions 请求，上游按 Responses 接口接收。',
+            )}
+            t={t}
+            onClick={() => setDirection(TEMPLATE_TYPE_CHAT_TO_RESPONSES)}
+          />
         </Col>
-        <Col xs={24} md={8}>
-          <div style={{ marginBottom: 12 }}>
-            <Text strong>{t('目标协议')}</Text>
-            <Select
-              name={`protocol-rule-target-endpoint-${index}`}
-              allowClear={false}
-              optionList={ENDPOINT_OPTIONS}
-              value={rule.target_endpoint}
-              onChange={(nextValue) =>
-                updateRule(index, { target_endpoint: nextValue })
-              }
-            />
-          </div>
+        <Col xs={24} md={12}>
+          <DirectionOption
+            active={direction === TEMPLATE_TYPE_RESPONSES_TO_CHAT}
+            title={t('Responses -> Chat')}
+            source={t('客户端 Responses')}
+            target={t('上游 Chat Completions')}
+            description={t(
+              '客户端发起 Responses 请求，上游按 Chat Completions 接口接收。',
+            )}
+            t={t}
+            onClick={() => setDirection(TEMPLATE_TYPE_RESPONSES_TO_CHAT)}
+          />
         </Col>
       </Row>
       {directionInvalid ? (
@@ -223,7 +295,7 @@ function ScopePanel({ channelTypeOptions, index, rule, t, updateRule }) {
         <Text strong>{t('模型正则')}</Text>
         <div>
           <Text type='tertiary' size='small'>
-            {t('每行一个正则；留空表示不命中。')}
+            {t('每行一个正则；留空表示匹配全部非空模型。')}
           </Text>
         </div>
         <TextArea
@@ -291,10 +363,74 @@ function AdvancedPanel({ index, rule, t, updateRule }) {
   );
 }
 
+function HitPreviewPanel({ passThroughEnabled, rule, t }) {
+  const [preview, setPreview] = React.useState({
+    channelId: '',
+    channelType: '',
+    model: '',
+  });
+  const result = getProtocolPreviewResult(rule, preview, passThroughEnabled);
+  const updatePreview = (patch) =>
+    setPreview((current) => ({ ...current, ...patch }));
+
+  return (
+    <div style={panelStyle}>
+      <div style={{ marginBottom: 12 }}>
+        <Text strong>{t('命中预览')}</Text>
+        <div>
+          <Text type='tertiary' size='small'>
+            {t('用一个样例渠道和模型验证当前规则是否会参与协议转换。')}
+          </Text>
+        </div>
+      </div>
+      <Row gutter={16}>
+        <Col xs={24} md={8}>
+          <div style={{ marginBottom: 12 }}>
+            <Text strong>{t('样例渠道 ID')}</Text>
+            <Input
+              name='protocol-preview-channel-id'
+              value={preview.channelId}
+              placeholder='145'
+              onChange={(value) => updatePreview({ channelId: value })}
+            />
+          </div>
+        </Col>
+        <Col xs={24} md={8}>
+          <div style={{ marginBottom: 12 }}>
+            <Text strong>{t('样例渠道类型')}</Text>
+            <Input
+              name='protocol-preview-channel-type'
+              value={preview.channelType}
+              placeholder='1'
+              onChange={(value) => updatePreview({ channelType: value })}
+            />
+          </div>
+        </Col>
+        <Col xs={24} md={8}>
+          <div style={{ marginBottom: 12 }}>
+            <Text strong>{t('样例模型')}</Text>
+            <Input
+              name='protocol-preview-model'
+              value={preview.model}
+              placeholder='gpt-5'
+              onChange={(value) => updatePreview({ model: value })}
+            />
+          </div>
+        </Col>
+      </Row>
+      <Banner
+        type={result.matched ? 'success' : 'warning'}
+        description={t(result.reason)}
+      />
+    </div>
+  );
+}
+
 export default function ProtocolPolicyRuleBody({
   channelTypeOptions,
   directionInvalid,
   index,
+  passThroughEnabled,
   removeRule,
   rule,
   t,
@@ -317,6 +453,11 @@ export default function ProtocolPolicyRuleBody({
         updateRule={updateRule}
       />
       <AdvancedPanel index={index} rule={rule} t={t} updateRule={updateRule} />
+      <HitPreviewPanel
+        passThroughEnabled={passThroughEnabled}
+        rule={rule}
+        t={t}
+      />
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Popconfirm
           content={t('删除后需要重新保存配置才会生效，确定删除这条规则吗？')}

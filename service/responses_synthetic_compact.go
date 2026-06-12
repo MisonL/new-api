@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -26,6 +27,9 @@ const (
 	syntheticCompactSummaryMax             = 512 * 1024
 	syntheticCompactVisibleContentPartsMax = 100
 	syntheticCompactMemoryEntriesMax       = 256
+	syntheticCompactLargeInputMinTokens    = 4096
+	syntheticCompactLargeSummaryMinBytes   = 256
+	syntheticCompactLargeSummaryMinTokens  = 48
 )
 
 type SyntheticCompactState struct {
@@ -197,6 +201,14 @@ func SyntheticCompactScopeFromSource(source SyntheticCompactScopeSource) Synthet
 	return source.SyntheticCompactScope()
 }
 
+func forceResponsesCompactVisibleOnly(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	value, ok := ctx.Value(constant.ContextKeyResponsesCompactVisibleOnly).(bool)
+	return ok && value
+}
+
 func BuildSyntheticCompactSummaryRequest(ctx context.Context, scope SyntheticCompactStateScope, req dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, error) {
 	state, found, err := findSyntheticCompactState(ctx, req)
 	if err != nil {
@@ -219,7 +231,8 @@ func BuildSyntheticCompactSummaryRequest(ctx context.Context, scope SyntheticCom
 		return dto.OpenAIResponsesRequest{}, err
 	}
 	visibleParts := visibleResponsesInputParts(cleanInput)
-	if !found {
+	forceVisibleOnly := forceResponsesCompactVisibleOnly(ctx)
+	if !found && !forceVisibleOnly {
 		if previousResponseID := strings.TrimSpace(req.PreviousResponseID); previousResponseID != "" {
 			return buildSyntheticCompactPreviousResponseRequest(req.Model, previousResponseID, visibleParts)
 		}
@@ -235,7 +248,7 @@ func BuildSyntheticCompactSummaryRequest(ctx context.Context, scope SyntheticCom
 	}
 
 	model := syntheticCompactSummaryModel(req.Model)
-	logSyntheticCompactSummaryRequest(req.Model, model, input, len(visibleParts), strings.TrimSpace(req.PreviousResponseID) != "")
+	logSyntheticCompactSummaryRequest(req.Model, model, input, len(visibleParts), false)
 	out := dto.OpenAIResponsesRequest{
 		Model: model,
 		Input: input,
@@ -323,6 +336,9 @@ func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactSt
 	if summary == "" {
 		return nil, nil, fmt.Errorf("synthetic compact upstream response has no summary text")
 	}
+	if err := validateSyntheticCompactSummaryUsable(summary, upstream.Usage); err != nil {
+		return nil, nil, err
+	}
 	id, err := newSyntheticCompactID(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -384,6 +400,83 @@ func validateSyntheticCompactState(scope SyntheticCompactStateScope, _ string, s
 		return fmt.Errorf("%w: synthetic compact state belongs to a different group", ErrSyntheticCompactStateScopeMismatch)
 	}
 	return nil
+}
+
+func validateSyntheticCompactSummaryUsable(summary string, usage *dto.Usage) error {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return fmt.Errorf("synthetic compact upstream response has no summary text")
+	}
+	inputTokens := syntheticCompactInputTokens(usage)
+	outputTokens := syntheticCompactOutputTokens(usage, inputTokens)
+	if syntheticCompactSummaryLooksLikeLostTask(summary) &&
+		(inputTokens >= syntheticCompactLargeInputMinTokens || len(summary) < syntheticCompactLargeSummaryMinBytes) {
+		return fmt.Errorf("synthetic compact upstream response is not a recoverable handoff summary: appears to have lost the active task")
+	}
+	if inputTokens < syntheticCompactLargeInputMinTokens {
+		return nil
+	}
+	if len(summary) < syntheticCompactLargeSummaryMinBytes {
+		return fmt.Errorf("synthetic compact upstream response is too short for large input: summary_bytes=%d input_tokens=%d", len(summary), inputTokens)
+	}
+	if outputTokens > 0 && outputTokens < syntheticCompactLargeSummaryMinTokens {
+		return fmt.Errorf("synthetic compact upstream response output is too short for large input: output_tokens=%d input_tokens=%d", outputTokens, inputTokens)
+	}
+	return nil
+}
+
+func syntheticCompactInputTokens(usage *dto.Usage) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.InputTokens > 0 {
+		return usage.InputTokens
+	}
+	if usage.PromptTokens > 0 {
+		return usage.PromptTokens
+	}
+	outputTokens := syntheticCompactOutputTokens(usage, 0)
+	if usage.TotalTokens > outputTokens {
+		return usage.TotalTokens - outputTokens
+	}
+	return 0
+}
+
+func syntheticCompactOutputTokens(usage *dto.Usage, inputTokens int) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.OutputTokens > 0 {
+		return usage.OutputTokens
+	}
+	if usage.CompletionTokens > 0 {
+		return usage.CompletionTokens
+	}
+	if inputTokens > 0 && usage.TotalTokens > inputTokens {
+		return usage.TotalTokens - inputTokens
+	}
+	return 0
+}
+
+func syntheticCompactSummaryLooksLikeLostTask(summary string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(summary))
+	for _, pattern := range []string{
+		"no explicit task",
+		"no clear task",
+		"no actionable task",
+		"no pending task",
+		"no task to",
+		"当前没有明确",
+		"没有明确任务",
+		"没有明确的开发",
+		"没有可执行任务",
+		"无明确任务",
+	} {
+		if strings.Contains(normalized, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateSyntheticCompactScopeForStore(scope SyntheticCompactStateScope) error {

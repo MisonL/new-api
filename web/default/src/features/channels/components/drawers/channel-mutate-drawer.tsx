@@ -113,6 +113,7 @@ import {
   CHANNEL_FORM_DEFAULT_VALUES,
   channelFormSchema,
   channelsQueryKeys,
+  mergeChannelSubmitFormValues,
   transformChannelToFormDefaults,
   transformFormDataToCreatePayload,
   transformFormDataToUpdatePayload,
@@ -127,6 +128,7 @@ import {
   hasModelConfigChanged,
   findMissingModelsInMapping,
   isResponsesCompactAutoFallbackActive,
+  getResponsesCompactModeFromSettings,
   getResponsesCompactAutoFallbackReason,
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX,
@@ -146,10 +148,12 @@ import {
   RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI,
   normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactFallbackModels,
+  normalizeResponsesUpstreamProfile,
   validateModelMappingJson,
 } from '../../lib'
 import {
   buildHeaderProfileStrategySettings,
+  clearParamOverridePreservingUserAgentPassHeaders,
   disableEmptyHeaderProfileStrategy,
   getHeaderProfileStrategyFromSettings,
   normalizeProfile,
@@ -221,6 +225,16 @@ const createEmptyModelMappingGuardrail = (): ModelMappingGuardrail => ({
 
 const formatModelNames = (models: string[]): string =>
   models.map((model) => `"${model}"`).join(', ')
+
+const AGNES_DEFAULT_BASE_URL = 'https://apihub.agnes-ai.com'
+const AGNES_DEFAULT_MODELS = [
+  'agnes-1.5-flash',
+  'agnes-2.0-flash',
+  'agnes-image-2.0-flash',
+  'agnes-image-2.1-flash',
+  'agnes-video-v2.0',
+]
+const AGNES_DEFAULT_TEST_MODEL = 'agnes-1.5-flash'
 
 const MODEL_MAPPING_PREVIEW_FALLBACK: Array<{
   source: string
@@ -693,6 +707,22 @@ export function ChannelMutateDrawer({
       }
     }
 
+    // Type 58 (Agnes) - set official base_url, models, and test model
+    if (currentType === 58) {
+      const currentBaseUrlValue = form.getValues('base_url')
+      if (!currentBaseUrlValue || currentBaseUrlValue === '') {
+        form.setValue('base_url', AGNES_DEFAULT_BASE_URL)
+      }
+      const currentModelsValue = form.getValues('models')
+      if (!currentModelsValue || currentModelsValue === '') {
+        form.setValue('models', AGNES_DEFAULT_MODELS.join(','))
+      }
+      const currentTestModelValue = form.getValues('test_model')
+      if (!currentTestModelValue || currentTestModelValue === '') {
+        form.setValue('test_model', AGNES_DEFAULT_TEST_MODEL)
+      }
+    }
+
     // Type 18 (Xunfei) - set default other (version)
     if (currentType === 18) {
       const currentOther = form.getValues('other')
@@ -1090,7 +1120,22 @@ export function ChannelMutateDrawer({
       try {
         let submitData: ChannelFormValues
         try {
-          submitData = normalizeHeaderProfileStrategyForSubmit(data)
+          const persistedSubmitData =
+            isEditing && channelData?.data
+              ? transformChannelToFormDefaults(channelData.data)
+              : isEditing && currentRow
+                ? transformChannelToFormDefaults(currentRow)
+                : undefined
+          const mergedData = isEditing
+            ? mergeChannelSubmitFormValues(
+                data,
+                persistedSubmitData,
+                form.formState.dirtyFields as Partial<
+                  Record<keyof ChannelFormValues, unknown>
+                >
+              )
+            : data
+          submitData = normalizeHeaderProfileStrategyForSubmit(mergedData)
         } catch (error) {
           const message =
             error instanceof Error
@@ -1143,6 +1188,7 @@ export function ChannelMutateDrawer({
     [
       isEditing,
       currentRow,
+      channelData?.data,
       isMultiKeyChannel,
       form,
       handleSuccess,
@@ -2764,9 +2810,15 @@ export function ChannelMutateDrawer({
                                   type='button'
                                   variant='ghost'
                                   size='sm'
-                                  onClick={() => field.onChange('')}
+                                  onClick={() =>
+                                    field.onChange(
+                                      clearParamOverridePreservingUserAgentPassHeaders(
+                                        field.value
+                                      )
+                                    )
+                                  }
                                 >
-                                  {t('Clear')}
+                                  {t('Clear Non-UA Rules')}
                                 </Button>
                               </div>
                             </div>
@@ -2965,14 +3017,30 @@ export function ChannelMutateDrawer({
                                         field.value ||
                                         RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT
                                       }
-                                      onValueChange={(value) =>
-                                        field.onChange(
-                                          value ===
-                                            RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT
-                                            ? ''
-                                            : value
+                                      onValueChange={(value) => {
+                                        const nextProfile =
+                                          normalizeResponsesUpstreamProfile(
+                                            value ===
+                                              RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT
+                                              ? ''
+                                              : value
+                                          )
+                                        field.onChange(nextProfile)
+                                        const nextMode =
+                                          getResponsesCompactModeFromSettings({
+                                            responses_compact_mode:
+                                              form.getValues(
+                                                'responses_compact_mode'
+                                              ),
+                                            responses_upstream_profile:
+                                              nextProfile,
+                                          })
+                                        form.setValue(
+                                          'responses_compact_mode',
+                                          nextMode,
+                                          { shouldDirty: true }
                                         )
-                                      }
+                                      }}
                                     >
                                       <FormControl>
                                         <SelectTrigger className='w-full'>
@@ -3047,8 +3115,6 @@ export function ChannelMutateDrawer({
                                     </Select>
                                     {(field.value ===
                                       RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY ||
-                                      field.value ===
-                                        RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP ||
                                       field.value ===
                                         RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY) && (
                                       <p className='text-muted-foreground text-xs'>

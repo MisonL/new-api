@@ -257,6 +257,9 @@ export default function SettingGlobalModel(props) {
                 <Col span={24}>
                   <ProtocolConversionPolicyEditor
                     value={inputs[chatCompletionsToResponsesPolicyKey]}
+                    passThroughEnabled={
+                      inputs['global.pass_through_request_enabled'] === true
+                    }
                     onChange={setChatCompletionsToResponsesPolicyValue}
                   />
                 </Col>

@@ -1,0 +1,20 @@
+{
+  "Add at least one channel ID or channel type to make this rule live.": "Add at least one channel ID or channel type to make this rule live.",
+  "Chat to Responses": "Chat to Responses",
+  "Choose which client endpoint is converted before the upstream call.": "Choose which client endpoint is converted before the upstream call.",
+  "Disabled, empty scope, or passthrough": "Disabled, empty scope, or passthrough",
+  "Leave empty to match all non-empty model names, or add one regular expression per line.": "Leave empty to match all non-empty model names, or add one regular expression per line.",
+  "Limit the rule by channel ID or channel type before model checks run.": "Limit the rule by channel ID or channel type before model checks run.",
+  "Manual channel IDs and types are preserved but ignored.": "Manual channel IDs and types are preserved but ignored.",
+  "Name the rule so audits can identify ownership.": "Name the rule so audits can identify ownership.",
+  "No rules match the current filters.": "No rules match the current filters.",
+  "Options are evaluated only after direction, channel, and model match.": "Options are evaluated only after direction, channel, and model match.",
+  "Probe one sample channel and model without changing saved policy.": "Probe one sample channel and model without changing saved policy.",
+  "Ready to evaluate": "Ready to evaluate",
+  "Responses to Chat": "Responses to Chat",
+  "Rule name, channel, or model": "Rule name, channel, or model",
+  "Rule will be evaluated when request direction and scope match.": "Rule will be evaluated when request direction and scope match.",
+  "The rule matches when either channel ID or channel type matches.": "The rule matches when either channel ID or channel type matches.",
+  "Use when a client sends Chat Completions but the upstream should receive Responses.": "Use when a client sends Chat Completions but the upstream should receive Responses.",
+  "Use when a client sends Responses but the upstream only accepts Chat Completions.": "Use when a client sends Responses but the upstream only accepts Chat Completions."
+}

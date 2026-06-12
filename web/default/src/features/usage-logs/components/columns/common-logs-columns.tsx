@@ -54,6 +54,11 @@ interface ResponsesCompactInfo {
   setting?: string
   upstreamPath?: string
   autoFallback?: boolean
+  autoFallbackWindow?: boolean
+  nativeAttempted?: boolean
+  nativePath?: string
+  nativeStatusCode?: number
+  fallbackReason?: string
   className: string
 }
 
@@ -113,19 +118,27 @@ function getResponsesCompactModeLabel(
 
 function getResponsesCompactBadgeLabel(
   mode: string | undefined,
+  autoFallback: boolean | undefined,
   t: (key: string, opts?: Record<string, unknown>) => string
 ): string {
+  if (autoFallback === true) return t('Compact Fallback Badge')
   switch (mode) {
     case 'native':
       return t('Compact Native Badge')
     case 'synthetic_summary':
       return t('Compact Synthetic Badge')
     default:
-      return t('Compact')
+      return t('Responses Compact Badge')
   }
 }
 
-function getResponsesCompactBadgeClassName(mode: string | undefined): string {
+function getResponsesCompactBadgeClassName(
+  mode: string | undefined,
+  autoFallback: boolean | undefined
+): string {
+  if (autoFallback === true) {
+    return 'border border-amber-200/55 bg-amber-50/45 text-amber-700/90 dark:border-amber-900/45 dark:bg-amber-950/20 dark:text-amber-300/90'
+  }
   switch (mode) {
     case 'native':
       return 'border border-cyan-200/50 bg-cyan-50/45 text-cyan-700/85 dark:border-cyan-900/40 dark:bg-cyan-950/20 dark:text-cyan-300/85'
@@ -173,15 +186,21 @@ function buildResponsesCompactInfo(
 ): ResponsesCompactInfo | null {
   const mode = other?.responses_compact_mode
   if (!mode) return null
+  const autoFallback = other.responses_compact_auto_fallback
 
   return {
     mode,
     modeLabel: getResponsesCompactModeLabel(mode, t),
-    badgeLabel: getResponsesCompactBadgeLabel(mode, t),
+    badgeLabel: getResponsesCompactBadgeLabel(mode, autoFallback, t),
     setting: other.responses_compact_setting,
     upstreamPath: other.responses_compact_upstream_path,
-    autoFallback: other.responses_compact_auto_fallback,
-    className: getResponsesCompactBadgeClassName(mode),
+    autoFallback,
+    autoFallbackWindow: other.responses_compact_auto_fallback_window,
+    nativeAttempted: other.responses_compact_native_attempted,
+    nativePath: other.responses_compact_native_upstream_path,
+    nativeStatusCode: other.responses_compact_native_status_code,
+    fallbackReason: other.responses_compact_auto_fallback_reason,
+    className: getResponsesCompactBadgeClassName(mode, autoFallback),
   }
 }
 
@@ -219,9 +238,39 @@ function buildResponsesCompactTooltipRows(
   if (compactInfo.autoFallback === true) {
     rows.push({
       key: 'fallback',
-      label: t('Compact Auto Recent Fallback'),
-      value: t('Yes'),
-      className: 'text-secondary-foreground font-semibold',
+      label:
+        compactInfo.autoFallbackWindow === true
+          ? t('Compact Auto Fallback Window')
+          : t('Compact Auto Native Fallback'),
+      value: t('Active'),
+      className: 'text-amber-700 font-semibold dark:text-amber-300',
+    })
+  }
+
+  if (compactInfo.nativePath) {
+    rows.push({
+      key: 'native-path',
+      label: t('Native Path'),
+      value: compactInfo.nativePath,
+      className: 'font-mono text-foreground/80',
+    })
+  }
+
+  if (compactInfo.nativeStatusCode != null) {
+    rows.push({
+      key: 'native-status',
+      label: t('Native Status'),
+      value: String(compactInfo.nativeStatusCode),
+      className: 'font-mono text-amber-700 dark:text-amber-300',
+    })
+  }
+
+  if (compactInfo.fallbackReason) {
+    rows.push({
+      key: 'fallback-reason',
+      label: t('Fallback Reason'),
+      value: compactInfo.fallbackReason,
+      className: 'text-muted-foreground',
     })
   }
 
@@ -404,11 +453,19 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const log = row.original
         const timestamp = row.getValue('created_at') as number
         const config = getLogTypeConfig(log.type)
+        const timestampParts = formatTimestampToDate(timestamp).split(/\s+/)
+        const datePart = timestampParts[0] ?? ''
+        const timePart = timestampParts.slice(1).join(' ')
 
         return (
           <div className='flex flex-col gap-0.5'>
-            <span className='font-mono text-xs tabular-nums'>
-              {formatTimestampToDate(timestamp)}
+            <span className='flex flex-col font-mono leading-tight tabular-nums'>
+              <span className='text-xs whitespace-nowrap'>{datePart}</span>
+              {timePart ? (
+                <span className='text-muted-foreground/70 text-[11px] whitespace-nowrap'>
+                  {timePart}
+                </span>
+              ) : null}
             </span>
             <StatusBadge
               label={t(config.label)}

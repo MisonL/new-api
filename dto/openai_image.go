@@ -18,6 +18,8 @@ type ImageRequest struct {
 	Size              string          `json:"size,omitempty"`
 	Quality           string          `json:"quality,omitempty"`
 	ResponseFormat    string          `json:"response_format,omitempty"`
+	ReturnBase64      *bool           `json:"return_base64,omitempty"`
+	ExtraBody         json.RawMessage `json:"extra_body,omitempty"`
 	Style             json.RawMessage `json:"style,omitempty"`
 	User              json.RawMessage `json:"user,omitempty"`
 	ExtraFields       json.RawMessage `json:"extra_fields,omitempty"`

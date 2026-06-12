@@ -7,9 +7,10 @@ import {
 } from '../src/features/channels/lib/channel-form'
 import {
   RESPONSES_COMPACT_BADGE_KEYS,
-  RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
-  RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
-  RESPONSES_COMPACT_MODE_AUTO,
+	RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
+	RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
+	RESPONSES_COMPACT_MODE_DEFAULT,
+	RESPONSES_COMPACT_MODE_AUTO,
   RESPONSES_COMPACT_MODE_DISABLED,
   RESPONSES_COMPACT_MODE_NATIVE,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
@@ -339,7 +340,9 @@ describe('channel responses compact settings', () => {
     expect(defaults.responses_upstream_profile).toBe(
       RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY
     )
-    expect(defaults.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_NATIVE)
+    expect(defaults.responses_compact_mode).toBe(
+      RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY
+    )
     expect(
       getResponsesCompactMode(
         JSON.stringify({
@@ -355,7 +358,7 @@ describe('channel responses compact settings', () => {
           responses_compact_mode: RESPONSES_COMPACT_MODE_NATIVE,
         })
       )
-    ).toBe(RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY)
+    ).toBe(RESPONSES_COMPACT_MODE_NATIVE)
 
     const payload = transformFormDataToCreatePayload({
       ...CHANNEL_FORM_DEFAULT_VALUES,
@@ -503,7 +506,7 @@ describe('channel responses compact settings', () => {
     )
   })
 
-  test('drops compact metadata from non OpenAI channel settings', () => {
+  test('resets non OpenAI compact mode to auto and drops compact metadata', () => {
     const payload = transformFormDataToCreatePayload({
       ...CHANNEL_FORM_DEFAULT_VALUES,
       type: 14,
@@ -520,7 +523,7 @@ describe('channel responses compact settings', () => {
     })
     const stored = JSON.parse(String(payload.channel.settings))
 
-    expect(stored.responses_compact_mode).toBeUndefined()
+    expect(stored.responses_compact_mode).toBe(RESPONSES_COMPACT_MODE_DEFAULT)
     expect(stored.responses_compact_auto_fallback_date).toBeUndefined()
     expect(stored.responses_compact_auto_fallback_at).toBeUndefined()
     expect(stored.responses_compact_auto_fallback_reason).toBeUndefined()

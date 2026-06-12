@@ -104,6 +104,20 @@ func processTokens(relayMode int, streamItems []string, responseTextBuilder *str
 	return nil
 }
 
+func streamTokenRelayMode(info *relaycommon.RelayInfo) int {
+	if info == nil {
+		return relayconstant.RelayModeUnknown
+	}
+	switch info.RelayMode {
+	case relayconstant.RelayModeChatCompletions, relayconstant.RelayModeCompletions:
+		return info.RelayMode
+	}
+	if info.GetFinalRequestRelayFormat() == types.RelayFormatOpenAI {
+		return relayconstant.RelayModeChatCompletions
+	}
+	return info.RelayMode
+}
+
 func processChatCompletions(streamResp string, streamItems []string, responseTextBuilder *strings.Builder, toolCount *int) error {
 	var streamResponses []dto.ChatCompletionsStreamResponse
 	if err := json.Unmarshal(common.StringToByteSlice(streamResp), &streamResponses); err != nil {

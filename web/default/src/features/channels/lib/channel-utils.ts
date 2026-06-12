@@ -166,6 +166,7 @@ export function getChannelTypeIcon(type: number): string {
     6: 'OpenAI', // OpenAIMax
     7: 'OpenAI', // OhMyGPT
     8: 'OpenAI', // Custom
+    58: 'OpenAI', // Agnes
     3: 'Azure', // Azure
 
     // Anthropic
@@ -498,7 +499,6 @@ export function getResponsesCompactModeFromSettings(
   )
   if (
     profile === RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY ||
-    profile === RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP ||
     profile === RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY
   ) {
     return RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY

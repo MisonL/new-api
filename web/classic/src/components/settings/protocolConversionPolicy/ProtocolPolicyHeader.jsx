@@ -18,7 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Button, Radio, RadioGroup, Tag, Typography } from '@douyinfe/semi-ui';
+import {
+  Button,
+  Input,
+  Radio,
+  RadioGroup,
+  Select,
+  Tag,
+  Typography,
+} from '@douyinfe/semi-ui';
 import { EDIT_MODE_JSON, EDIT_MODE_VISUAL, panelStyle } from './constants';
 
 const { Text } = Typography;
@@ -35,6 +43,7 @@ function RuleStats({
   enabledRuleCount,
   invalidDirectionRuleCount,
   invalidScopeRuleCount,
+  passThroughEnabled,
   rules,
   t,
 }) {
@@ -56,6 +65,165 @@ function RuleStats({
           {t('范围未命中 {{count}} 条', { count: invalidScopeRuleCount })}
         </Tag>
       ) : null}
+      {passThroughEnabled ? (
+        <Tag color='orange'>{t('全局透传已启用')}</Tag>
+      ) : null}
+    </div>
+  );
+}
+
+function ProtocolMetric({ detail, intent = 'default', label, value }) {
+  const warningStyle =
+    intent === 'warning'
+      ? {
+          borderColor: 'var(--semi-color-warning)',
+          background: 'var(--semi-color-warning-light-default)',
+        }
+      : {};
+  return (
+    <div
+      style={{
+        border: '1px solid var(--semi-color-border)',
+        borderRadius: 10,
+        padding: 12,
+        background: 'var(--semi-color-bg-1)',
+        ...warningStyle,
+      }}
+    >
+      <Text type='tertiary' size='small'>
+        {label}
+      </Text>
+      <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.2 }}>
+        {value}
+      </div>
+      <Text type='tertiary' size='small'>
+        {detail}
+      </Text>
+    </div>
+  );
+}
+
+function FilterSelect({ label, onChange, optionList, value }) {
+  return (
+    <div style={selectionFieldStyle}>
+      <Text type='tertiary' size='small'>
+        {label}
+      </Text>
+      <Select
+        allowClear={false}
+        optionList={optionList}
+        size='small'
+        value={value}
+        onChange={onChange}
+      />
+    </div>
+  );
+}
+
+function RuleFilterControls({
+  filterOptions,
+  filteredRuleCount,
+  hasActiveFilters,
+  resetRuleFilters,
+  ruleFilters,
+  setRuleFilters,
+  stats,
+  t,
+}) {
+  return (
+    <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+          gap: 10,
+        }}
+      >
+        <ProtocolMetric
+          label={t('规则库存')}
+          value={`${stats.enabled}/${stats.total}`}
+          detail={t('{{count}} 条已停用', { count: stats.disabled })}
+        />
+        <ProtocolMetric
+          label={t('Chat 到 Responses')}
+          value={stats.chatToResponses}
+          detail={t('客户端 Chat 请求')}
+        />
+        <ProtocolMetric
+          label={t('Responses 到 Chat')}
+          value={stats.responsesToChat}
+          detail={t('仅支持 Chat 的上游')}
+        />
+        <ProtocolMetric
+          label={t('需关注')}
+          value={stats.attention}
+          detail={t('停用、空范围或全局透传')}
+          intent={stats.attention > 0 ? 'warning' : 'default'}
+        />
+      </div>
+
+      <div
+        style={{
+          marginTop: 12,
+          display: 'flex',
+          gap: 10,
+          flexWrap: 'wrap',
+          alignItems: 'flex-end',
+        }}
+      >
+        <FilterSelect
+          label={t('方向')}
+          optionList={filterOptions.direction}
+          value={ruleFilters.direction}
+          onChange={(value) => setRuleFilters({ direction: value })}
+        />
+        <FilterSelect
+          label={t('状态')}
+          optionList={filterOptions.state}
+          value={ruleFilters.state}
+          onChange={(value) => setRuleFilters({ state: value })}
+        />
+        <FilterSelect
+          label={t('范围')}
+          optionList={filterOptions.scope}
+          value={ruleFilters.scope}
+          onChange={(value) => setRuleFilters({ scope: value })}
+        />
+        <div style={{ ...selectionFieldStyle, flex: '1 1 260px' }}>
+          <Text type='tertiary' size='small'>
+            {t('搜索')}
+          </Text>
+          <Input
+            size='small'
+            value={ruleFilters.query}
+            placeholder={t('规则名、渠道或模型')}
+            onChange={(value) => setRuleFilters({ query: value })}
+          />
+        </div>
+        <Tag color='light-blue' style={{ height: 28, lineHeight: '28px' }}>
+          {t('{{count}} 条可见', { count: filteredRuleCount })}
+        </Tag>
+        <Button
+          size='small'
+          type='tertiary'
+          disabled={!hasActiveFilters}
+          onClick={resetRuleFilters}
+        >
+          {t('重置筛选')}
+        </Button>
+      </div>
+
+      <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <Text type='tertiary' size='small'>
+          {t('{{count}} 条全部渠道规则', { count: stats.allChannels })}
+        </Text>
+        <Text type='tertiary' size='small'>
+          {t('{{count}} 条限定范围规则', { count: stats.limitedScope })}
+        </Text>
+        <Text type='tertiary' size='small'>
+          {t('{{count}} 条空范围规则', { count: stats.emptyScope })}
+        </Text>
+      </div>
     </div>
   );
 }
@@ -193,6 +361,7 @@ export default function ProtocolPolicyHeader(props) {
             enabledRuleCount={enabledRuleCount}
             invalidDirectionRuleCount={invalidDirectionRuleCount}
             invalidScopeRuleCount={invalidScopeRuleCount}
+            passThroughEnabled={props.passThroughEnabled}
             rules={rules}
             t={t}
           />
@@ -213,6 +382,7 @@ export default function ProtocolPolicyHeader(props) {
           <ModeTip editMode={editMode} t={t} />
         </div>
       </div>
+      {editMode === EDIT_MODE_VISUAL ? <RuleFilterControls {...props} /> : null}
     </div>
   );
 }

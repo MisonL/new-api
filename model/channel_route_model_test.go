@@ -91,3 +91,54 @@ func TestChannelSupportsCompactRouteCandidateAutoWithoutFallbackAllowsNative(t *
 		compactRequest: true,
 	}))
 }
+
+func TestChannelSupportsCompactRouteCandidateAutoAllowsBaseModelAfterExpiredFallback(t *testing.T) {
+	compactModel := ratio_setting.WithCompactModelSuffix("gpt-5.5")
+	channel := &Channel{
+		Type:   constant.ChannelTypeOpenAI,
+		Models: "gpt-5.5",
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
+		ResponsesCompactAutoFallbackAt:                 time.Now().Add(-4 * time.Hour).Unix(),
+		ResponsesCompactAutoFallbackRetryIntervalHours: 3,
+		UpstreamModelUpdateCheckEnabled:                true,
+		UpstreamModelUpdateLastCheckTime:               time.Now().Add(-time.Hour).Unix(),
+	})
+
+	require.True(t, channelSupportsCompactRouteCandidate(channel, routeModelCandidate{
+		model:          compactModel,
+		compactRequest: true,
+	}))
+	require.True(t, channelSupportsCompactRouteCandidate(channel, routeModelCandidate{
+		model:           "gpt-5.5",
+		compactRequest:  true,
+		compactFallback: true,
+	}))
+}
+
+func TestChannelSupportsCompactRouteCandidateAutoBaseFallbackHonorsCompactSignals(t *testing.T) {
+	compactModel := ratio_setting.WithCompactModelSuffix("gpt-5.5")
+	channel := &Channel{
+		Type:   constant.ChannelTypeOpenAI,
+		Models: "gpt-5.5",
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode:             dto.ResponsesCompactModeAuto,
+		UpstreamModelUpdateCheckEnabled:  true,
+		UpstreamModelUpdateLastCheckTime: time.Now().Unix(),
+		UpstreamModelUpdateLastDetectedModels: []string{
+			ratio_setting.WithCompactModelSuffix("gpt-5.4"),
+		},
+	})
+
+	require.False(t, channelSupportsCompactRouteCandidate(channel, routeModelCandidate{
+		model:          compactModel,
+		compactRequest: true,
+	}))
+	require.False(t, channelSupportsCompactRouteCandidate(channel, routeModelCandidate{
+		model:           "gpt-5.5",
+		compactRequest:  true,
+		compactFallback: true,
+	}))
+}

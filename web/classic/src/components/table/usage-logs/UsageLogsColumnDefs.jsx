@@ -878,11 +878,11 @@ function getResponsesCompactModeLabel(mode, t) {
 function getResponsesCompactBadgeLabel(mode, t) {
   switch (mode) {
     case 'native':
-      return t('原生');
+      return t('Compact 原生标签');
     case 'synthetic_summary':
-      return t('模拟');
+      return t('Compact 模拟标签');
     default:
-      return t('Compact');
+      return t('Responses Compact 标签');
   }
 }
 

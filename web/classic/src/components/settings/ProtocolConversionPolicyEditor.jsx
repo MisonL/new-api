@@ -29,6 +29,13 @@ import {
   EDIT_MODE_JSON,
   EDIT_MODE_VISUAL,
   POLICY_JSON_EXAMPLE,
+  PROTOCOL_FILTER_ALL,
+  PROTOCOL_RULE_SCOPE_EMPTY,
+  PROTOCOL_RULE_SCOPE_GLOBAL,
+  PROTOCOL_RULE_SCOPE_LIMITED,
+  PROTOCOL_RULE_STATE_ATTENTION,
+  PROTOCOL_RULE_STATE_DISABLED,
+  PROTOCOL_RULE_STATE_ENABLED,
   RESPONSES_TO_CHAT_TEMPLATE,
   TEMPLATE_TYPE_BIDIRECTIONAL,
   TEMPLATE_TYPE_CHAT_TO_RESPONSES,
@@ -37,6 +44,8 @@ import {
 import {
   buildTemplateRule,
   deserializePolicy,
+  filterProtocolRules,
+  getProtocolPolicyStats,
   getRuleKey,
   isResponsesToChatRule,
   isRuleScopeValid,
@@ -44,6 +53,13 @@ import {
   serializeRules,
   validateRulesForVisualMode,
 } from './protocolConversionPolicy/utils';
+
+const DEFAULT_RULE_FILTERS = {
+  direction: PROTOCOL_FILTER_ALL,
+  state: PROTOCOL_FILTER_ALL,
+  scope: PROTOCOL_FILTER_ALL,
+  query: '',
+};
 
 function buildEditModeOptions(t) {
   return [
@@ -71,7 +87,11 @@ function appendRulesByTemplates(rules, templates) {
   return { nextRules, nextRuleKeys };
 }
 
-export default function ProtocolConversionPolicyEditor({ value, onChange }) {
+export default function ProtocolConversionPolicyEditor({
+  value,
+  onChange,
+  passThroughEnabled = false,
+}) {
   const { t } = useTranslation();
   const [editMode, setEditMode] = useState(EDIT_MODE_VISUAL);
   const [rules, setRules] = useState([]);
@@ -80,6 +100,7 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
   const [newRuleTemplateType, setNewRuleTemplateType] = useState(
     TEMPLATE_TYPE_CHAT_TO_RESPONSES,
   );
+  const [ruleFilters, setRuleFilters] = useState(DEFAULT_RULE_FILTERS);
 
   useEffect(() => {
     const parsedPolicy = deserializePolicy(value);
@@ -137,6 +158,19 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
     () => ruleKeys.length > 0 && expandedRuleKeys.length === ruleKeys.length,
     [expandedRuleKeys.length, ruleKeys.length],
   );
+  const stats = useMemo(
+    () => getProtocolPolicyStats(rules, passThroughEnabled),
+    [rules, passThroughEnabled],
+  );
+  const filteredRules = useMemo(
+    () => filterProtocolRules(rules, ruleFilters, passThroughEnabled),
+    [rules, ruleFilters, passThroughEnabled],
+  );
+  const hasActiveFilters =
+    ruleFilters.direction !== PROTOCOL_FILTER_ALL ||
+    ruleFilters.state !== PROTOCOL_FILTER_ALL ||
+    ruleFilters.scope !== PROTOCOL_FILTER_ALL ||
+    ruleFilters.query.trim() !== '';
 
   const applyRules = (nextRules, nextPolicyExtra = policyExtra) => {
     setRules(nextRules);
@@ -213,9 +247,42 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
     isAllRulesExpanded,
     newRuleTemplateOptions,
     newRuleTemplateType,
+    ruleFilters,
     rules,
+    stats,
+    filteredRuleCount: filteredRules.length,
+    hasActiveFilters,
+    passThroughEnabled,
+    resetRuleFilters: () => setRuleFilters(DEFAULT_RULE_FILTERS),
+    setRuleFilters: (patch) =>
+      setRuleFilters((current) => ({ ...current, ...patch })),
     setNewRuleTemplateType,
     t,
+    filterOptions: {
+      direction: [
+        { label: t('全部方向'), value: PROTOCOL_FILTER_ALL },
+        {
+          label: t('Chat -> Responses'),
+          value: TEMPLATE_TYPE_CHAT_TO_RESPONSES,
+        },
+        {
+          label: t('Responses -> Chat'),
+          value: TEMPLATE_TYPE_RESPONSES_TO_CHAT,
+        },
+      ],
+      state: [
+        { label: t('全部状态'), value: PROTOCOL_FILTER_ALL },
+        { label: t('启用中'), value: PROTOCOL_RULE_STATE_ENABLED },
+        { label: t('已停用'), value: PROTOCOL_RULE_STATE_DISABLED },
+        { label: t('需关注'), value: PROTOCOL_RULE_STATE_ATTENTION },
+      ],
+      scope: [
+        { label: t('全部范围'), value: PROTOCOL_FILTER_ALL },
+        { label: t('全部渠道'), value: PROTOCOL_RULE_SCOPE_GLOBAL },
+        { label: t('限定范围'), value: PROTOCOL_RULE_SCOPE_LIMITED },
+        { label: t('空范围'), value: PROTOCOL_RULE_SCOPE_EMPTY },
+      ],
+    },
     toggleExpandStateForAllRules: () =>
       setExpandedRuleKeys(isAllRulesExpanded ? [] : ruleKeys),
   };
@@ -265,12 +332,21 @@ export default function ProtocolConversionPolicyEditor({ value, onChange }) {
               />
             </Card>
           ) : null}
-          {rules.map((rule, index) => (
+          {rules.length > 0 && filteredRules.length === 0 ? (
+            <Card>
+              <Empty
+                description={t('当前筛选条件下没有匹配规则')}
+                style={{ padding: 24 }}
+              />
+            </Card>
+          ) : null}
+          {filteredRules.map(({ rule, index }) => (
             <ProtocolPolicyRuleCard
               key={getRuleKey(rule, index)}
               channelTypeOptions={channelTypeOptions}
               index={index}
               isExpanded={expandedRuleKeys.includes(getRuleKey(rule, index))}
+              passThroughEnabled={passThroughEnabled}
               removeRule={removeRule}
               rule={rule}
               ruleKey={getRuleKey(rule, index)}

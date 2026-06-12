@@ -638,6 +638,43 @@ func TestConvertOpenAIResponsesCompactRequestConvertsAndStripsEncryptedContextWh
 	require.Equal(t, "user", responseItemRole(t, items[1]))
 }
 
+func TestConvertOpenAIResponsesCompactRequestSub2APIHTTPPreservesNativeWithoutPreviousID(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[
+			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"compact"}]},
+			{"type":"compaction","encrypted_content":"compact"}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.Empty(t, convertedReq.PreviousResponseID)
+	require.NotContains(t, string(convertedReq.Input), "opaque")
+	require.Contains(t, string(convertedReq.Input), "compact")
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 2)
+	require.Equal(t, "user", responseItemRole(t, items[0]))
+	require.Equal(t, "compaction", responseItemType(t, items[1]))
+}
+
 func TestConvertAzureResponsesCompactRequestStripsEncryptedReasoningWhenEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
@@ -699,6 +736,67 @@ func TestConvertOpenAIResponsesRequestRejectsSub2APIHTTPPreviousResponseID(t *te
 	require.Equal(t, "rejected_by_upstream_profile", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
 }
 
+func TestConvertOpenAIResponsesCompactRequestRejectsSub2APIHTTPPreviousResponseIDInNativeMode(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_upstream_previous",
+		Input:              json.RawMessage(`"compact"`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.ErrorContains(t, err, "previous_response_id is not supported by upstream profile sub2api_http over REST")
+	require.Nil(t, converted)
+	require.Equal(t, "rejected_by_upstream_profile", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
+}
+
+func TestConvertOpenAIResponsesCompactRequestForcesVisibleOnlyForSub2APIHTTPSyntheticMode(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeSynthetic,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_upstream_previous",
+		Input: json.RawMessage(`[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"compact visible history"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.Empty(t, convertedReq.PreviousResponseID)
+	require.Contains(t, string(convertedReq.Input), "Visible conversation to compact")
+	require.Contains(t, string(convertedReq.Input), "compact visible history")
+	require.NotContains(t, string(convertedReq.Input), "existing previous_response_id context")
+	require.NotContains(t, string(convertedReq.Input), "resp_upstream_previous")
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactVisibleOnly))
+	require.Equal(t, "cleared_by_upstream_profile", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
+}
+
 func TestConvertOpenAIResponsesRequestMarksForwardedPreviousResponseID(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
@@ -751,6 +849,25 @@ func TestOpenAIResponsesCompactRequestURLUsesCompactEndpointByDefault(t *testing
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType:    constant.ChannelTypeOpenAI,
 			ChannelBaseUrl: "https://api.example.test",
+		},
+	}
+
+	requestURL, err := (&Adaptor{}).GetRequestURL(info)
+	require.NoError(t, err)
+	require.Equal(t, "https://api.example.test/v1/responses/compact", requestURL)
+}
+
+func TestOpenAIResponsesCompactRequestURLUsesCompactEndpointForSub2APIHTTPProfile(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode:      relayconstant.RelayModeResponsesCompact,
+		RequestURLPath: "/v1/responses/compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeOpenAI,
+			ChannelBaseUrl: "https://api.example.test",
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
 		},
 	}
 

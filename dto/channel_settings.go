@@ -124,12 +124,17 @@ func (s *ChannelOtherSettings) NormalizedResponsesUpstreamProfile() ResponsesUps
 func (s *ChannelOtherSettings) HasResponsesProxyCompatibilityProfile() bool {
 	profile := s.NormalizedResponsesUpstreamProfile()
 	return profile == ResponsesUpstreamProfileGenericProxy ||
-		profile == ResponsesUpstreamProfileChatOnlyProxy ||
+		profile == ResponsesUpstreamProfileChatOnlyProxy
+}
+
+func (s *ChannelOtherSettings) HasResponsesEncryptedReasoningUnsupportedProfile() bool {
+	profile := s.NormalizedResponsesUpstreamProfile()
+	return s.HasResponsesProxyCompatibilityProfile() ||
 		profile == ResponsesUpstreamProfileSub2APIHTTP
 }
 
 func (s *ChannelOtherSettings) ShouldStripResponsesEncryptedReasoning() bool {
-	return s != nil && (s.StripCodexEncryptedContext || s.HasResponsesProxyCompatibilityProfile())
+	return s != nil && (s.StripCodexEncryptedContext || s.HasResponsesEncryptedReasoningUnsupportedProfile())
 }
 
 func (s *ChannelOtherSettings) DisallowsResponsesRESTPreviousResponseID() bool {
@@ -150,6 +155,13 @@ func (s *ChannelOtherSettings) HasDisabledResponsesCompact() bool {
 
 func (s *ChannelOtherSettings) IsAutoResponsesCompact() bool {
 	return s == nil || s.ResponsesCompactMode == "" || s.ResponsesCompactMode == ResponsesCompactModeAuto
+}
+
+func (s *ChannelOtherSettings) AllowAutoNativeCompactBaseFallbackAt(now time.Time) bool {
+	if s != nil && !s.IsAutoResponsesCompact() {
+		return false
+	}
+	return !s.HasActiveResponsesCompactAutoFallback(now)
 }
 
 func (s *ChannelOtherSettings) ResponsesCompactContextFallbackEnabled() bool {

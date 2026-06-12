@@ -78,6 +78,23 @@ func TestNormalizeResponsesCompactUsageFillsPromptEstimate(t *testing.T) {
 	require.Equal(t, 5, usage.OutputTokens)
 }
 
+func TestNormalizeResponsesCompactUsageMirrorsCanonicalTokensWithoutEstimate(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+	usage := &dto.Usage{
+		PromptTokens:     11,
+		CompletionTokens: 5,
+		TotalTokens:      16,
+	}
+
+	normalizeResponsesCompactUsage(info, usage)
+
+	require.Equal(t, 11, usage.PromptTokens)
+	require.Equal(t, 11, usage.InputTokens)
+	require.Equal(t, 5, usage.CompletionTokens)
+	require.Equal(t, 5, usage.OutputTokens)
+	require.Equal(t, 16, usage.TotalTokens)
+}
+
 func TestNormalizeResponsesCompactUsageKeepsUpstreamPromptTokens(t *testing.T) {
 	info := &relaycommon.RelayInfo{}
 	info.SetEstimatePromptTokens(23)
@@ -149,10 +166,53 @@ func TestFindResponsesViaChatRuleCarriesCustomToolBridgeOption(t *testing.T) {
 		},
 	}
 
-	rule := findResponsesViaChatRule(info, false)
+	rule := findResponsesViaChatRule(info, false, nil)
 	require.NotNil(t, rule)
 	require.True(t, responsesViaChatOptionsFromRule(rule).EnableCustomToolBridge)
 	require.False(t, responsesViaChatOptionsFromRule(nil).EnableCustomToolBridge)
+}
+
+func TestFindResponsesViaChatRuleSkipsCodexRemoteCompactionV2Trigger(t *testing.T) {
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+
+	settings.PassThroughRequestEnabled = false
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Rules: []model_setting.ProtocolConversionRule{
+			{
+				Name:           "responses-to-chat",
+				Enabled:        true,
+				SourceEndpoint: model_setting.ProtocolEndpointResponses,
+				TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+				AllChannels:    true,
+				ModelPatterns:  []string{`^gpt-5(\..+)?$`},
+			},
+		},
+	}
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   157,
+			ChannelType: 1,
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: common.RawMessage(`[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"summarize"}]},
+			{"type":"compaction_trigger"}
+		]`),
+	}
+
+	require.True(t, request.HasCompactionTrigger())
+	require.Nil(t, findResponsesViaChatRule(info, false, request))
 }
 
 func TestShouldConvertResponsesRequestForCodexEncryptedContextStrip(t *testing.T) {
@@ -197,7 +257,6 @@ func TestShouldConvertResponsesRequestForResponsesProxyProfileCompact(t *testing
 	for _, profile := range []dto.ResponsesUpstreamProfile{
 		dto.ResponsesUpstreamProfileGenericProxy,
 		dto.ResponsesUpstreamProfileChatOnlyProxy,
-		dto.ResponsesUpstreamProfileSub2APIHTTP,
 	} {
 		info := &relaycommon.RelayInfo{
 			RelayMode: relayconstant.RelayModeResponsesCompact,
@@ -213,6 +272,23 @@ func TestShouldConvertResponsesRequestForResponsesProxyProfileCompact(t *testing
 		require.True(t, relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info))
 		require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
 	}
+}
+
+func TestShouldConvertResponsesRequestForSub2APIHTTPLimitedNativeCompact(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+		},
+	}
+
+	require.True(t, relaycommon.IsNativeOpenAICompatibleResponsesCompact(info))
+	require.False(t, relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info))
+	require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
 }
 
 func TestShouldConvertResponsesRequestForStatefulProfiles(t *testing.T) {
