@@ -78,6 +78,7 @@ export const channelFormSchema = z.object({
       'trusted_newapi',
       'sub2api_http',
       'sub2api_wsv2',
+      'generic_openai',
       'generic_proxy',
       'chat_only_proxy',
     ])

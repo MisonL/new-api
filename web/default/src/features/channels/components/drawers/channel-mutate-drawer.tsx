@@ -146,6 +146,7 @@ import {
   RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP,
   RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2,
   RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI,
+  RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI,
   normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactFallbackModels,
   normalizeResponsesUpstreamProfile,
@@ -378,11 +379,23 @@ export function ChannelMutateDrawer({
   const channelId = currentRow?.id ?? null
 
   // Fetch channel details if editing
-  const { data: channelData } = useQuery({
+  const {
+    data: channelData,
+    isLoading: isChannelDetailLoading,
+    isFetching: isChannelDetailFetching,
+    error: channelDetailError,
+    refetch: refetchChannelDetail,
+  } = useQuery({
     queryKey: channelsQueryKeys.detail(currentRow?.id || 0),
     queryFn: () => getChannel(currentRow!.id),
     enabled: isEditing && Boolean(currentRow?.id),
   })
+  const isChannelDetailPending =
+    isEditing && (isChannelDetailLoading || isChannelDetailFetching)
+  const isChannelDetailBusy =
+    isChannelDetailPending || isChannelDetailLoading || isChannelDetailFetching
+  const isChannelDetailUnavailable =
+    isEditing && !channelData?.data && !isChannelDetailPending
 
   // Fetch available groups
   const { data: groupsData, isLoading: isLoadingGroups } = useQuery({
@@ -1036,6 +1049,20 @@ export function ChannelMutateDrawer({
   // Submit handler
   const onSubmit = useCallback(
     async (data: ChannelFormValues) => {
+      if (isChannelDetailPending) {
+        toast.error(
+          t('Channel details are still loading. Please retry after loading completes.')
+        )
+        return
+      }
+      if (isChannelDetailUnavailable) {
+        toast.error(
+          getErrorMessage(channelDetailError) ||
+            t('Channel details failed to load. Please retry before saving.')
+        )
+        return
+      }
+
       // Validate key is required when creating
       if (!isEditing && !data.key?.trim()) {
         form.setError('key', {
@@ -1123,9 +1150,7 @@ export function ChannelMutateDrawer({
           const persistedSubmitData =
             isEditing && channelData?.data
               ? transformChannelToFormDefaults(channelData.data)
-              : isEditing && currentRow
-                ? transformChannelToFormDefaults(currentRow)
-                : undefined
+              : undefined
           const mergedData = isEditing
             ? mergeChannelSubmitFormValues(
                 data,
@@ -1189,6 +1214,9 @@ export function ChannelMutateDrawer({
       isEditing,
       currentRow,
       channelData?.data,
+      channelDetailError,
+      isChannelDetailUnavailable,
+      isChannelDetailPending,
       isMultiKeyChannel,
       form,
       handleSuccess,
@@ -1275,6 +1303,44 @@ export function ChannelMutateDrawer({
               onSubmit={form.handleSubmit(onSubmit)}
               className='flex-1 space-y-4 overflow-y-auto px-3 py-3 pb-4 sm:space-y-5 sm:px-4'
             >
+              {isChannelDetailPending && (
+                <div className='bg-card space-y-3 rounded-xl border p-3 sm:p-5'>
+                  <div className='text-muted-foreground flex items-center gap-2 text-sm'>
+                    <Loader2 className='h-4 w-4 animate-spin' />
+                    {t('Loading channel details...')}
+                  </div>
+                  <div className='grid gap-4 sm:grid-cols-2'>
+                    <Skeleton className='h-10 w-full' />
+                    <Skeleton className='h-10 w-full' />
+                  </div>
+                </div>
+              )}
+              {isChannelDetailUnavailable && (
+                <Alert variant='destructive'>
+                  <AlertDescription className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+                    <span>
+                      {getErrorMessage(channelDetailError) ||
+                        t('Channel details failed to load. Please retry before saving.')}
+                    </span>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() => refetchChannelDetail()}
+                    >
+                      <RefreshCw className='mr-2 h-4 w-4' />
+                      {t('Retry')}
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
+              <fieldset
+                disabled={isChannelDetailPending}
+                className={cn(
+                  'contents',
+                  isChannelDetailPending && 'pointer-events-none opacity-50'
+                )}
+              >
               {/* ── Basic Information ── */}
               <div className='bg-card space-y-4 rounded-xl border p-3 sm:p-5'>
                 <CardHeading
@@ -3099,6 +3165,13 @@ export function ChannelMutateDrawer({
                                         </SelectItem>
                                         <SelectItem
                                           value={
+                                            RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI
+                                          }
+                                        >
+                                          {t('Generic OpenAI')}
+                                        </SelectItem>
+                                        <SelectItem
+                                          value={
                                             RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY
                                           }
                                         >
@@ -3854,6 +3927,7 @@ export function ChannelMutateDrawer({
                   </div>
                 </CollapsibleContent>
               </Collapsible>
+              </fieldset>
             </form>
           </Form>
 
@@ -3863,8 +3937,14 @@ export function ChannelMutateDrawer({
                 {t('Cancel')}
               </Button>
             </SheetClose>
-            <Button form='channel-form' type='submit' disabled={isSubmitting}>
-              {isSubmitting && (
+            <Button
+              form='channel-form'
+              type='submit'
+              disabled={
+                isSubmitting || isChannelDetailBusy || isChannelDetailUnavailable
+              }
+            >
+              {(isSubmitting || isChannelDetailBusy) && (
                 <Loader2 className='mr-2 h-4 w-4 animate-spin' />
               )}
               {isEditing ? t('Update Channel') : t('Save changes')}

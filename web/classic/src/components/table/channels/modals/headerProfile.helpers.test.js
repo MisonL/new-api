@@ -2098,6 +2098,48 @@ test('mergeChannelSubmitFormValues preserves request policy state when form valu
   assert.equal(merged.status_code_mapping, '{"524":502}');
 });
 
+test('mergeChannelSubmitFormValues preserves UA profile state when editing basic channel fields', () => {
+  const settings = buildHeaderProfileStrategySettings('{}', {
+    enabled: true,
+    mode: 'fixed',
+    selectedProfileIds: ['claude-code'],
+    profiles: [HEADER_PROFILE_PRESETS['claude-code']],
+  });
+  const paramOverride =
+    '{"operations":[{"mode":"pass_headers","value":["User-Agent"]}]}';
+  const headerOverride = '{"X-Test":"1"}';
+
+  const merged = mergeChannelSubmitFormValues(
+    {
+      name: 'channel-renamed',
+      key: 'new-key',
+      models: ['gpt-5.5', 'gpt-5.4'],
+      settings: '{}',
+      param_override: '',
+      header_override: '{}',
+    },
+    {
+      name: 'channel-a',
+      key: '',
+      models: ['gpt-5.5'],
+      settings,
+      param_override: paramOverride,
+      header_override: headerOverride,
+    },
+  );
+  const parsedSettings = JSON.parse(merged.settings);
+
+  assert.equal(merged.name, 'channel-renamed');
+  assert.equal(merged.key, 'new-key');
+  assert.deepEqual(merged.models, ['gpt-5.5', 'gpt-5.4']);
+  assert.equal(
+    parsedSettings.header_profile_strategy.profiles[0].headers['User-Agent'],
+    HEADER_PROFILE_PRESETS['claude-code'].headers['User-Agent'],
+  );
+  assert.equal(merged.param_override, paramOverride);
+  assert.equal(merged.header_override, headerOverride);
+});
+
 test('mergeChannelSubmitFormValues treats empty hidden json fields as missing form state', () => {
   const settings = buildHeaderProfileStrategySettings('{}', {
     enabled: true,

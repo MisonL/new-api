@@ -84,6 +84,7 @@ export type ResponsesUpstreamProfile =
   | 'trusted_newapi'
   | 'sub2api_http'
   | 'sub2api_wsv2'
+  | 'generic_openai'
   | 'generic_proxy'
   | 'chat_only_proxy'
 
@@ -152,10 +153,50 @@ export interface ChannelTestResponse {
   success: boolean
   message?: string
   error_code?: string
+  time?: number
+  runtime_config?: ChannelTestRuntimeConfig
+  diagnosis?: ChannelTestErrorDiagnosis
   data?: {
     response_time?: number
     error?: string
   }
+}
+
+export interface ChannelCapabilitySnapshot {
+  source?: string
+  profile?: ResponsesUpstreamProfile | string
+  compact_mode_setting?: ResponsesCompactMode | string
+  compact_mode_effective?: ResponsesCompactMode | string
+  supports_responses?: boolean
+  supports_responses_compact?: boolean
+  supports_chat?: boolean
+  supports_rest_previous_response_id?: boolean
+  supports_compaction_item_passthrough?: boolean
+  supports_namespace_tools?: boolean
+  observed?: ResponsesCapabilityObservation
+  probe?: ResponsesCapabilityObservation
+}
+
+export interface ResponsesCapabilityObservation {
+  observed_at?: number
+  status_code?: number
+  error_code?: string
+  reason?: string
+}
+
+export interface ChannelTestErrorDiagnosis {
+  category?: string
+  summary?: string
+  suggestion?: string
+}
+
+export interface ChannelTestRuntimeConfig {
+  channel_capability_snapshot?: ChannelCapabilitySnapshot
+  error_diagnosis?: ChannelTestErrorDiagnosis
+  final_request_path?: string
+  final_relay_format?: string
+  protocol_strategy?: string
+  request_conversion_chain?: string[]
 }
 
 export interface ChannelBalanceResponse {

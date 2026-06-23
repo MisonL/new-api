@@ -510,6 +510,20 @@ const CODEX_REMOVE_IMAGE_GENERATION_TOOL_TEMPLATE = {
   ],
 }
 
+const CODEX_REMOVE_RESPONSES_IMAGE_INPUT_TEMPLATE = {
+  operations: [
+    {
+      description: 'Remove Responses image input items before upstream relay.',
+      path: 'input.*.content',
+      mode: 'prune_objects',
+      value: {
+        type: 'input_image',
+        recursive: true,
+      },
+    },
+  ],
+}
+
 type TemplatePresetConfig = {
   label: string
   group: 'recommended' | 'advanced' | 'examples'
@@ -572,6 +586,14 @@ const TEMPLATE_PRESET_CONFIG: Record<string, TemplatePresetConfig> = {
       'Remove image_generation tool objects when an upstream rejects that tool type.',
     kind: 'operations',
     payload: CODEX_REMOVE_IMAGE_GENERATION_TOOL_TEMPLATE,
+  },
+  remove_responses_image_input: {
+    label: 'Upstream Compat: Remove Responses Image Input',
+    group: 'recommended',
+    description:
+      'Remove Responses input_image content items when an upstream rejects image input.',
+    kind: 'operations',
+    payload: CODEX_REMOVE_RESPONSES_IMAGE_INPUT_TEMPLATE,
   },
   aws_bedrock_remove_input_examples: {
     label: 'AWS Bedrock Remove Input Examples',

@@ -73,11 +73,11 @@ function DetailRow(props: {
         {props.label}
       </span>
       <span
-        className={cn(
-          'max-w-full min-w-0 text-xs break-all sm:break-words',
-          props.mono && 'font-mono',
-          props.muted && 'text-muted-foreground'
-        )}
+	        className={cn(
+	          'max-w-full min-w-0 text-xs break-all whitespace-pre-wrap sm:break-words',
+	          props.mono && 'font-mono',
+	          props.muted && 'text-muted-foreground'
+	        )}
       >
         {props.value}
       </span>
@@ -136,13 +136,122 @@ function getResponsesCompactModeLabel(
   }
 }
 
+function formatRequestHeaderPolicyMode(
+  mode: string | undefined,
+  t: (key: string) => string
+): string {
+  switch (mode) {
+    case 'prefer_channel':
+      return t('Channel preferred')
+    case 'prefer_tag':
+      return t('Tag preferred')
+    case 'merge':
+      return t('Merge')
+    default:
+      return mode ? String(mode) : '-'
+  }
+}
+
+function isUserAgentHeaderKey(key: string | undefined): boolean {
+  return String(key || '').trim().toLowerCase() === 'user-agent'
+}
+
+function getAppliedUserAgent(other: LogOtherData): string {
+  const policy = other.request_header_policy
+  return String(
+    policy?.applied_user_agent || policy?.selected_user_agent || ''
+  ).trim()
+}
+
+function getAppliedHeaderLines(other: LogOtherData): string[] {
+  const policy = other.request_header_policy
+  if (!policy) return []
+  const entries = Array.isArray(policy.applied_headers)
+    ? policy.applied_headers
+        .map((entry) => ({
+          key: String(entry?.key || '').trim(),
+          value: String(entry?.value || '').trim(),
+        }))
+        .filter((entry) => entry.key && !isUserAgentHeaderKey(entry.key))
+    : []
+  if (entries.length > 0) {
+    return entries.map((entry) =>
+      entry.value ? `${entry.key}: ${entry.value}` : entry.key
+    )
+  }
+  if (!Array.isArray(policy.applied_header_keys)) return []
+  return policy.applied_header_keys
+    .map((key) => String(key || '').trim())
+    .filter((key) => key && !isUserAgentHeaderKey(key))
+}
+
+function RequestHeaderPolicyDetails(props: { other: LogOtherData }) {
+  const { t } = useTranslation()
+  const { other } = props
+  const policy = other.request_header_policy
+  if (!policy) return null
+
+  const userAgent = getAppliedUserAgent(other)
+  const headerLines = getAppliedHeaderLines(other)
+
+  return (
+    <DetailSection
+      icon={<Settings2 className='size-3.5' aria-hidden='true' />}
+      label={t('Request Header Policy')}
+    >
+      <DetailRow
+        label={t('Mode')}
+        value={formatRequestHeaderPolicyMode(policy.mode, t)}
+        mono
+      />
+      {policy.header_profile_id && (
+        <DetailRow
+          label={t('Header Profile')}
+          value={policy.header_profile_id}
+          mono
+        />
+      )}
+      {policy.header_profile_mode && (
+        <DetailRow
+          label={t('Profile Mode')}
+          value={policy.header_profile_mode}
+          mono
+        />
+      )}
+      {userAgent && (
+        <DetailRow label={t('Applied User-Agent')} value={userAgent} mono />
+      )}
+      <DetailRow
+        label={t('User-Agent Applied')}
+        value={policy.user_agent_applied ? t('Yes') : t('No')}
+        mono
+      />
+      {policy.override_static_user_agent && (
+        <DetailRow label={t('Override Static User-Agent')} value={t('Yes')} mono />
+      )}
+      {headerLines.length > 0 && (
+        <DetailRow
+          label={t('Applied Headers')}
+          value={headerLines.join('\n')}
+          mono
+        />
+      )}
+    </DetailSection>
+  )
+}
+
 function ResponsesCompactDetails(props: {
   other: LogOtherData
   isAdmin: boolean
 }) {
   const { t } = useTranslation()
   const { other, isAdmin } = props
-  if (!other.responses_compact_mode) return null
+  const capability = other.channel_capability_snapshot
+  const shouldShow =
+    Boolean(other.responses_compact_mode) ||
+    other.responses_encrypted_context_retry === true ||
+    Boolean(capability)
+  if (!shouldShow) return null
 
   const isAutoFallback = other.responses_compact_auto_fallback === true
   const isAutoFallbackWindow =
@@ -153,13 +262,24 @@ function ResponsesCompactDetails(props: {
   const finalPath =
     other.responses_compact_final_upstream_path ||
     other.responses_compact_upstream_path
+  const observedReason =
+    other.admin_info?.responses_channel_capability_observed?.reason
+  const probeReason =
+    other.admin_info?.responses_channel_capability_probe?.reason
+  const formatCapability = (value: boolean | undefined) => {
+    if (value === true) return t('Supported')
+    if (value === false) return t('Unsupported')
+    return '-'
+  }
 
   return (
     <DetailSection label={t('Responses Compact capability')}>
-      <DetailRow
-        label={t('Mode')}
-        value={getResponsesCompactModeLabel(other.responses_compact_mode, t)}
-      />
+      {other.responses_compact_mode && (
+        <DetailRow
+          label={t('Mode')}
+          value={getResponsesCompactModeLabel(other.responses_compact_mode, t)}
+        />
+      )}
       {other.responses_compact_setting && (
         <DetailRow
           label={t('Configuration')}
@@ -180,8 +300,64 @@ function ResponsesCompactDetails(props: {
           }
         />
       )}
+      {other.responses_compact_fallback_reason && (
+        <DetailRow
+          label={t('Fallback Reason')}
+          value={other.responses_compact_fallback_reason}
+          mono
+        />
+      )}
+      {other.responses_compact_visible_only_fallback && (
+        <DetailRow label={t('Visible-only Fallback')} value={t('Yes')} mono />
+      )}
+      {other.responses_encrypted_context_retry && (
+        <DetailRow label={t('Encrypted Context Retry')} value={t('Yes')} mono />
+      )}
       {finalPath && (
         <DetailRow label={t('Final Path')} value={finalPath} mono />
+      )}
+      {capability?.source && (
+        <DetailRow label={t('Capability Source')} value={capability.source} mono />
+      )}
+      {capability?.profile && (
+        <DetailRow label={t('Upstream Profile')} value={capability.profile} mono />
+      )}
+      {capability?.compact_mode_effective && (
+        <DetailRow
+          label={t('Effective Compact Mode')}
+          value={capability.compact_mode_effective}
+          mono
+        />
+      )}
+      {capability && (
+        <>
+          <DetailRow
+            label={t('Responses')}
+            value={formatCapability(capability.supports_responses)}
+          />
+          <DetailRow
+            label={t('Responses Compact')}
+            value={formatCapability(capability.supports_responses_compact)}
+          />
+          <DetailRow
+            label={t('REST Previous ID')}
+            value={formatCapability(capability.supports_rest_previous_response_id)}
+          />
+          <DetailRow
+            label={t('Compaction Item Passthrough')}
+            value={formatCapability(capability.supports_compaction_item_passthrough)}
+          />
+          <DetailRow
+            label={t('Namespace Tools')}
+            value={formatCapability(capability.supports_namespace_tools)}
+          />
+          {isAdmin && observedReason && (
+            <DetailRow label={t('Last Observed Failure')} value={observedReason} mono />
+          )}
+          {isAdmin && probeReason && (
+            <DetailRow label={t('Last Probe Result')} value={probeReason} mono />
+          )}
+        </>
       )}
       {isAdmin && isAutoFallbackWindow && (
         <DetailRow
@@ -761,7 +937,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
               </DetailSection>
             )}
 
-            {other?.responses_compact_mode && (
+            {props.isAdmin && other?.request_header_policy && (
+              <RequestHeaderPolicyDetails other={other} />
+            )}
+
+            {(other?.responses_compact_mode ||
+              other?.responses_encrypted_context_retry ||
+              other?.channel_capability_snapshot) && (
               <ResponsesCompactDetails other={other} isAdmin={props.isAdmin} />
             )}
 

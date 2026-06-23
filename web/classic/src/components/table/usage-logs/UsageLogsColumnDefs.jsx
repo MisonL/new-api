@@ -899,18 +899,16 @@ function getResponsesCompactTagColor(mode) {
 
 function buildResponsesCompactTooltipRows(other, t) {
   const mode = other?.responses_compact_mode;
-  if (!mode) {
-    return [];
-  }
+  const rows = [];
 
-  const rows = [
-    {
+  if (mode) {
+    rows.push({
       key: 'mode',
       label: t('模式'),
       value: getResponsesCompactModeLabel(mode, t),
       className: 'usage-log-info-popover-value-mode',
-    },
-  ];
+    });
+  }
   if (other?.responses_compact_setting) {
     rows.push({
       key: 'setting',
@@ -935,6 +933,39 @@ function buildResponsesCompactTooltipRows(other, t) {
       className: 'usage-log-info-popover-value-fallback',
     });
   }
+  if (other?.responses_encrypted_context_retry === true) {
+    rows.push({
+      key: 'encrypted_context_retry',
+      label: t('加密上下文重试'),
+      value: t('是'),
+      className: 'usage-log-info-popover-value-encrypted-retry',
+    });
+  }
+  const capability = other?.channel_capability_snapshot;
+  if (capability?.source) {
+    rows.push({
+      key: 'capability_source',
+      label: t('能力来源'),
+      value: capability.source,
+      className: 'usage-log-info-popover-value-capability-source is-code',
+    });
+  }
+  if (capability?.profile) {
+    rows.push({
+      key: 'upstream_profile',
+      label: t('上游配置'),
+      value: capability.profile,
+      className: 'usage-log-info-popover-value-upstream-profile is-code',
+    });
+  }
+  if (capability?.compact_mode_effective) {
+    rows.push({
+      key: 'effective_compact_mode',
+      label: t('生效 Compact 模式'),
+      value: capability.compact_mode_effective,
+      className: 'usage-log-info-popover-value-effective-mode is-code',
+    });
+  }
 
   return rows;
 }
@@ -942,16 +973,26 @@ function buildResponsesCompactTooltipRows(other, t) {
 function buildResponsesCompactTooltip(other, t) {
   const rows = buildResponsesCompactTooltipRows(other, t);
 
-  return renderUsageLogInfoPopover(t('Responses Compact'), rows, {
+  const title = other?.responses_compact_mode
+    ? t('Responses Compact')
+    : t('Responses');
+
+  return renderUsageLogInfoPopover(title, rows, {
     tagClassName: 'usage-log-compact-popover-label-tag',
   });
 }
 
 function renderResponsesCompactTag(other, t) {
   const mode = other?.responses_compact_mode;
-  if (!mode) {
+  const hasResponsesDiagnostics =
+    other?.responses_encrypted_context_retry === true ||
+    Boolean(other?.channel_capability_snapshot);
+  if (!mode && !hasResponsesDiagnostics) {
     return null;
   }
+
+  const label = mode ? getResponsesCompactBadgeLabel(mode, t) : t('Responses');
+  const color = mode ? getResponsesCompactTagColor(mode) : 'blue';
 
   return (
     <span style={{ position: 'relative', display: 'inline-block' }}>
@@ -962,8 +1003,8 @@ function renderResponsesCompactTag(other, t) {
         showArrow
       >
         <span>
-          <Tag color={getResponsesCompactTagColor(mode)} shape='circle'>
-            {getResponsesCompactBadgeLabel(mode, t)}
+          <Tag color={color} shape='circle'>
+            {label}
           </Tag>
         </span>
       </Tooltip>

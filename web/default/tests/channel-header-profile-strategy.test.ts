@@ -421,6 +421,24 @@ describe('channel header profile strategy settings', () => {
     }
   })
 
+  test('Responses image input removal template prunes only message content images', () => {
+    const payload = PARAM_OVERRIDE_TEMPLATES.codexWithoutResponsesImageInput
+      .payload as {
+      operations: Array<Record<string, unknown>>
+    }
+
+    expect(payload.operations).toEqual([
+      {
+        path: 'input.*.content',
+        mode: 'prune_objects',
+        value: {
+          type: 'input_image',
+          recursive: true,
+        },
+      },
+    ])
+  })
+
   test('clearParamOverridePreservingUserAgentPassHeaders keeps only User-Agent passthrough', () => {
     const cleared = clearParamOverridePreservingUserAgentPassHeaders(
       JSON.stringify({

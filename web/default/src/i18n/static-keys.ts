@@ -205,6 +205,7 @@ export const STATIC_I18N_KEYS = [
   'Select a common template',
   'Trace Headers Passthrough',
   'Upstream Compat: Remove Image Generation Tool',
+  'Upstream Compat: Remove Responses Image Input',
 
   // Models constants
   'Exact Match',

@@ -47,6 +47,7 @@ import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-ta
 import { DataTablePagination } from '@/components/data-table/pagination'
 import { StatusBadge } from '@/components/status-badge'
 import { formatResponseTime, handleTestChannel } from '../../lib'
+import type { ChannelTestRuntimeConfig } from '../../types'
 import { useChannels } from '../channels-provider'
 
 type ChannelTestDialogProps = {
@@ -65,6 +66,7 @@ type TestResult = {
   responseTime?: number
   error?: string
   errorCode?: string
+  runtimeConfig?: ChannelTestRuntimeConfig
 }
 
 const endpointTypeOptions: Array<{ value: string; label: string }> = [
@@ -200,12 +202,13 @@ export function ChannelTestDialog({
             endpointType: endpointType === 'auto' ? undefined : endpointType,
             stream: isStreamTest || undefined,
           },
-          (success, responseTime, error, errorCode) => {
+          (success, responseTime, error, errorCode, runtimeConfig) => {
             updateTestResult(model, {
               status: success ? 'success' : 'error',
               responseTime,
               error,
               errorCode,
+              runtimeConfig,
             })
           }
         )
@@ -333,6 +336,7 @@ export function ChannelTestDialog({
                     {formatResponseTime(result.responseTime, t)}
                   </span>
                 )}
+                <TestRuntimeDetails result={result} />
               </div>
             )
           }
@@ -358,6 +362,7 @@ export function ChannelTestDialog({
                   {t('Go to Settings')}
                 </Button>
               )}
+              <TestRuntimeDetails result={result} />
             </div>
           )
         },
@@ -607,4 +612,96 @@ function TestModelsBulkActions({
       </Tooltip>
     </BulkActionsToolbar>
   )
+}
+
+function TestRuntimeDetails({ result }: { result: TestResult }) {
+  const { t } = useTranslation()
+  const runtimeConfig = result.runtimeConfig
+  const capability = runtimeConfig?.channel_capability_snapshot
+  const diagnosis = runtimeConfig?.error_diagnosis
+  if (!capability && !diagnosis && !runtimeConfig?.final_request_path) {
+    return null
+  }
+
+  const compactMode = capability?.compact_mode_effective
+  const profile = capability?.profile
+  const source = capability?.source
+  const observedLabel = formatCapabilityObservation(
+    capability?.observed?.status_code &&
+      capability.observed.status_code >= 400
+      ? t('last fail')
+      : t('last observed'),
+    capability?.observed
+  )
+  const probeLabel = formatCapabilityObservation(t('last probe'), capability?.probe)
+  const chips = [
+    capability?.supports_responses_compact === true
+      ? t('compact: yes')
+      : capability?.supports_responses_compact === false
+        ? t('compact: no')
+        : '',
+    capability?.supports_rest_previous_response_id === true
+      ? t('previous_id: yes')
+      : capability?.supports_rest_previous_response_id === false
+        ? t('previous_id: no')
+        : '',
+    capability?.supports_compaction_item_passthrough === true
+      ? t('compaction: pass')
+      : capability?.supports_compaction_item_passthrough === false
+        ? t('compaction: block')
+        : '',
+  ].filter(Boolean)
+
+  return (
+    <div className='text-muted-foreground mt-1 flex flex-col gap-1 break-all text-[11px] leading-relaxed'>
+      {(source || profile || compactMode) && (
+        <span>
+          {source ? `${t('source')}: ${source}` : ''}
+          {source && (profile || compactMode) ? ' / ' : ''}
+          {profile ? `${t('profile')}: ${profile}` : ''}
+          {profile && compactMode ? ' / ' : ''}
+          {compactMode ? `${t('compact mode')}: ${compactMode}` : ''}
+        </span>
+      )}
+      {chips.length > 0 && <span>{chips.join(' / ')}</span>}
+      {runtimeConfig?.final_request_path && (
+        <span>{t('path')}: {runtimeConfig.final_request_path}</span>
+      )}
+      {observedLabel && <span>{observedLabel}</span>}
+      {probeLabel && <span>{probeLabel}</span>}
+      {diagnosis?.summary && <span>{t('diagnosis')}: {diagnosis.summary}</span>}
+    </div>
+  )
+}
+
+function formatCapabilityObservation(
+  label: string,
+  observation?: {
+    observed_at?: number
+    status_code?: number
+    error_code?: string
+    reason?: string
+  }
+) {
+  if (!observation) return ''
+  const parts = []
+  if (typeof observation.status_code === 'number') {
+    parts.push(`status=${observation.status_code}`)
+  }
+  if (observation.error_code) {
+    parts.push(`code=${observation.error_code}`)
+  }
+  if (observation.reason) {
+    parts.push(`reason=${observation.reason}`)
+  }
+  if (typeof observation.observed_at === 'number' && observation.observed_at > 0) {
+    parts.push(`at=${formatObservationTime(observation.observed_at)}`)
+  }
+  return parts.length > 0 ? `${label}: ${parts.join(' / ')}` : ''
+}
+
+function formatObservationTime(timestampSeconds: number) {
+  const date = new Date(timestampSeconds * 1000)
+  if (Number.isNaN(date.getTime())) return String(timestampSeconds)
+  return date.toLocaleString()
 }

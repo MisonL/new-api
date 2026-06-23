@@ -19,7 +19,7 @@ import {
   updateChannelBalance,
 } from '../api'
 import { CHANNEL_STATUS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
-import type { CopyChannelParams } from '../types'
+import type { ChannelTestRuntimeConfig, CopyChannelParams } from '../types'
 
 // ============================================================================
 // Query Keys
@@ -198,7 +198,8 @@ export async function handleTestChannel(
     success: boolean,
     responseTime?: number,
     error?: string,
-    errorCode?: string
+    errorCode?: string,
+    runtimeConfig?: ChannelTestRuntimeConfig
   ) => void
 ): Promise<void> {
   const payload =
@@ -214,12 +215,25 @@ export async function handleTestChannel(
 
   try {
     const response = await testChannel(id, payload)
+    const responseTime = normalizeChannelTestResponseTime(response)
     if (response.success) {
       toast.success(i18next.t(SUCCESS_MESSAGES.TESTED))
-      onTestComplete?.(true, response.data?.response_time)
+      onTestComplete?.(
+        true,
+        responseTime,
+        undefined,
+        undefined,
+        response.runtime_config
+      )
     } else {
       toast.error(response.message || i18next.t(ERROR_MESSAGES.TEST_FAILED))
-      onTestComplete?.(false, undefined, response.message, response.error_code)
+      onTestComplete?.(
+        false,
+        responseTime,
+        response.message,
+        response.error_code,
+        response.runtime_config
+      )
     }
   } catch (_error: unknown) {
     const err = _error as { response?: { data?: { message?: string } } }
@@ -228,6 +242,19 @@ export async function handleTestChannel(
     toast.error(errorMsg)
     onTestComplete?.(false, undefined, errorMsg)
   }
+}
+
+function normalizeChannelTestResponseTime(response: {
+  time?: number
+  data?: { response_time?: number }
+}): number | undefined {
+  if (typeof response.data?.response_time === 'number') {
+    return response.data.response_time
+  }
+  if (typeof response.time === 'number') {
+    return Math.round(response.time * 1000)
+  }
+  return undefined
 }
 
 /**

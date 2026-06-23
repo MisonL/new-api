@@ -1380,6 +1380,7 @@ const EditChannelModal = (props) => {
     setLoading(true);
     let res = await API.get(`/api/channel/${channelId}`);
     if (res === undefined) {
+      setLoading(false);
       return;
     }
     const { success, message, data } = res.data;
@@ -2164,6 +2165,11 @@ const EditChannelModal = (props) => {
   };
 
   const submit = async () => {
+    if (loading || headerProfilesLoading) {
+      showInfo(t('渠道详情仍在加载，请稍后再提交'));
+      return;
+    }
+
     const formValues = formApiRef.current ? formApiRef.current.getValues() : {};
     let localInputs = mergeChannelSubmitFormValues(formValues, inputs);
 
@@ -2956,6 +2962,8 @@ const EditChannelModal = (props) => {
               theme='solid'
               onClick={() => formApiRef.current?.submitForm()}
               icon={<IconSave />}
+              loading={loading || headerProfilesLoading}
+              disabled={loading || headerProfilesLoading}
             >
               {t('提交')}
             </Button>
