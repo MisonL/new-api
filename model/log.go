@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -19,9 +20,9 @@ import (
 )
 
 type Log struct {
-	Id                int               `json:"id" gorm:"index:idx_created_at_id,priority:1;index:idx_user_id_id,priority:2;index:idx_logs_username_token_type_created_id,priority:5;index:idx_logs_username_model_type_created_id,priority:5;index:idx_logs_username_group_type_created_id,priority:5;index:idx_logs_model_group_type_created_id,priority:5;index:idx_logs_token_model_type_created_id,priority:5;index:idx_logs_channel_model_type_created_id,priority:5;index:idx_logs_token_group_type_created_id,priority:5;index:idx_logs_channel_group_type_created_id,priority:5;index:idx_logs_username_token_group_type_created_id,priority:6"`
+	Id                int               `json:"id" gorm:"index:idx_logs_created_at_id,priority:2;index:idx_logs_upstream_request_created_at_id,priority:3;index:idx_user_id_id,priority:2;index:idx_logs_username_token_type_created_id,priority:5;index:idx_logs_username_model_type_created_id,priority:5;index:idx_logs_username_group_type_created_id,priority:5;index:idx_logs_model_group_type_created_id,priority:5;index:idx_logs_token_model_type_created_id,priority:5;index:idx_logs_channel_model_type_created_id,priority:5;index:idx_logs_token_group_type_created_id,priority:5;index:idx_logs_channel_group_type_created_id,priority:5;index:idx_logs_username_token_group_type_created_id,priority:6"`
 	UserId            int               `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1;index:idx_logs_user_created_at,priority:1;index:idx_logs_user_type_created_at,priority:1"`
-	CreatedAt         int64             `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:2;index:idx_created_at_type;index:idx_logs_type_created_at,priority:2;index:idx_logs_user_created_at,priority:2;index:idx_logs_username_created_at,priority:2;index:idx_logs_token_created_at,priority:2;index:idx_logs_model_created_at,priority:2;index:idx_logs_channel_created_at,priority:2;index:idx_logs_group_created_at,priority:2;index:idx_logs_request_id_created_at,priority:2;index:idx_logs_user_type_created_at,priority:3;index:idx_logs_username_type_created_at,priority:3;index:idx_logs_token_type_created_at,priority:3;index:idx_logs_model_type_created_at,priority:3;index:idx_logs_channel_type_created_at,priority:3;index:idx_logs_group_type_created_at,priority:3;index:idx_logs_username_token_type_created_id,priority:4;index:idx_logs_username_model_type_created_id,priority:4;index:idx_logs_username_group_type_created_id,priority:4;index:idx_logs_model_group_type_created_id,priority:4;index:idx_logs_token_model_type_created_id,priority:4;index:idx_logs_channel_model_type_created_id,priority:4;index:idx_logs_token_group_type_created_id,priority:4;index:idx_logs_channel_group_type_created_id,priority:4;index:idx_logs_username_token_group_type_created_id,priority:5"`
+	CreatedAt         int64             `json:"created_at" gorm:"bigint;index:idx_logs_created_at_id,priority:1;index:idx_created_at_type;index:idx_logs_type_created_at,priority:2;index:idx_logs_user_created_at,priority:2;index:idx_logs_username_created_at,priority:2;index:idx_logs_token_created_at,priority:2;index:idx_logs_model_created_at,priority:2;index:idx_logs_channel_created_at,priority:2;index:idx_logs_group_created_at,priority:2;index:idx_logs_request_id_created_at,priority:2;index:idx_logs_upstream_request_created_at_id,priority:2;index:idx_logs_user_type_created_at,priority:3;index:idx_logs_username_type_created_at,priority:3;index:idx_logs_token_type_created_at,priority:3;index:idx_logs_model_type_created_at,priority:3;index:idx_logs_channel_type_created_at,priority:3;index:idx_logs_group_type_created_at,priority:3;index:idx_logs_username_token_type_created_id,priority:4;index:idx_logs_username_model_type_created_id,priority:4;index:idx_logs_username_group_type_created_id,priority:4;index:idx_logs_model_group_type_created_id,priority:4;index:idx_logs_token_model_type_created_id,priority:4;index:idx_logs_channel_model_type_created_id,priority:4;index:idx_logs_token_group_type_created_id,priority:4;index:idx_logs_channel_group_type_created_id,priority:4;index:idx_logs_username_token_group_type_created_id,priority:5"`
 	Type              int               `json:"type" gorm:"index:idx_created_at_type;index:idx_logs_type_created_at,priority:1;index:idx_logs_user_type_created_at,priority:2;index:idx_logs_username_type_created_at,priority:2;index:idx_logs_token_type_created_at,priority:2;index:idx_logs_model_type_created_at,priority:2;index:idx_logs_channel_type_created_at,priority:2;index:idx_logs_group_type_created_at,priority:2;index:idx_logs_username_token_type_created_id,priority:3;index:idx_logs_username_model_type_created_id,priority:3;index:idx_logs_username_group_type_created_id,priority:3;index:idx_logs_model_group_type_created_id,priority:3;index:idx_logs_token_model_type_created_id,priority:3;index:idx_logs_channel_model_type_created_id,priority:3;index:idx_logs_token_group_type_created_id,priority:3;index:idx_logs_channel_group_type_created_id,priority:3;index:idx_logs_username_token_group_type_created_id,priority:4"`
 	Content           string            `json:"content"`
 	Username          string            `json:"username" gorm:"index;index:index_username_model_name,priority:2;index:idx_logs_username_created_at,priority:1;index:idx_logs_username_type_created_at,priority:1;index:idx_logs_username_token_type_created_id,priority:1;index:idx_logs_username_model_type_created_id,priority:1;index:idx_logs_username_group_type_created_id,priority:1;index:idx_logs_username_token_group_type_created_id,priority:1;default:''"`
@@ -39,7 +40,7 @@ type Log struct {
 	Group             string            `json:"group" gorm:"index;index:idx_logs_group_created_at,priority:1;index:idx_logs_group_type_created_at,priority:1;index:idx_logs_username_group_type_created_id,priority:2;index:idx_logs_model_group_type_created_id,priority:2;index:idx_logs_token_group_type_created_id,priority:2;index:idx_logs_channel_group_type_created_id,priority:2;index:idx_logs_username_token_group_type_created_id,priority:3"`
 	Ip                string            `json:"ip" gorm:"index;default:''"`
 	RequestId         string            `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;index:idx_logs_request_id_created_at,priority:1;default:''"`
-	UpstreamRequestId string            `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;index:idx_logs_upstream_request_id_created_at,priority:1;default:''"`
+	UpstreamRequestId string            `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;index:idx_logs_upstream_request_created_at_id,priority:1;default:''"`
 	Other             string            `json:"other"`
 }
 
@@ -238,6 +239,22 @@ func upstreamRequestIdFromLogContext(c *gin.Context, other map[string]interface{
 	return ""
 }
 
+func shouldRecordLogIP(c *gin.Context, userId int) bool {
+	if c != nil {
+		userSetting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
+		if ok {
+			return userSetting.RecordIpLog
+		}
+	}
+	settingMap, err := GetUserSetting(userId, false)
+	if err != nil {
+		// Privacy-safe fallback: when the setting cannot be loaded, do not store the client IP.
+		common.SysError(fmt.Sprintf("failed to get user setting for IP log decision: user_id=%d err=%v", userId, err))
+		return false
+	}
+	return settingMap.RecordIpLog
+}
+
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
 	isStream bool, group string, other map[string]interface{}) {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
@@ -246,13 +263,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	other = common.AppendPayloadAuditFields(c, other)
 	upstreamRequestId := upstreamRequestIdFromLogContext(c, other)
 	otherStr := common.MapToJsonStr(other)
-	// 判断是否需要记录 IP
-	needRecordIp := false
-	if settingMap, err := GetUserSetting(userId, false); err == nil {
-		if settingMap.RecordIpLog {
-			needRecordIp = true
-		}
-	}
+	needRecordIp := shouldRecordLogIP(c, userId)
 	log := &Log{
 		UserId:           userId,
 		Username:         username,
@@ -312,13 +323,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	params.Other = common.AppendPayloadAuditFields(c, params.Other)
 	upstreamRequestId := upstreamRequestIdFromLogContext(c, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
-	// 判断是否需要记录 IP
-	needRecordIp := false
-	if settingMap, err := GetUserSetting(userId, false); err == nil {
-		if settingMap.RecordIpLog {
-			needRecordIp = true
-		}
-	}
+	needRecordIp := shouldRecordLogIP(c, userId)
 	log := &Log{
 		UserId:           userId,
 		Username:         username,

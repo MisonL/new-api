@@ -35,6 +35,10 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
+	if info != nil && info.ChannelMeta != nil && !common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry) {
+		service.RecordResponsesEncryptedContentAffinityWithStatus(c, responseBody, info.ChannelMeta.ChannelId, resp.StatusCode)
+	}
+
 	if responsesResponse.HasImageGenerationCall() {
 		c.Set("image_generation_call", true)
 		c.Set("image_generation_call_quality", responsesResponse.GetQuality())
@@ -118,7 +122,14 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				if streamResponse.Response.HasCompactionOutput() {
 					common.SetContextKey(c, constant.ContextKeyResponsesCompactionOutput, true)
 				}
+				if info != nil && info.ChannelMeta != nil && !common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry) {
+					responseBody, err := common.Marshal(streamResponse.Response)
+					if err == nil {
+						service.RecordResponsesEncryptedContentAffinityWithStatus(c, responseBody, info.ChannelMeta.ChannelId, resp.StatusCode)
+					}
+				}
 			}
+			sr.Done()
 		case "response.output_text.delta":
 			// 处理输出文本
 			responseTextBuilder.WriteString(streamResponse.Delta)
@@ -138,6 +149,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
+
+	if newAPIError := retryableUpstreamStreamInterruptedError(c, info); newAPIError != nil {
+		return nil, newAPIError
+	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量

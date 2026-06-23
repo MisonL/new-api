@@ -12,6 +12,12 @@ type ResponsesChatCompatibilityOptions struct {
 	EnableCustomToolBridge bool
 }
 
+const responsesToolTypeNamespace = "namespace"
+
+type responsesNamespaceToolSelection struct {
+	name string
+}
+
 func isResponsesIncludeIgnoredInChatCompatibility(includeValue string) bool {
 	switch includeValue {
 	case "reasoning.encrypted_content":
@@ -134,41 +140,51 @@ func convertResponsesTextToChatResponseFormat(raw []byte) (*dto.ResponseFormat, 
 	return responseFormat, nil
 }
 
-func convertResponsesToolChoiceToChat(raw []byte, options ResponsesChatCompatibilityOptions) (any, error) {
+func convertResponsesToolChoiceToChat(raw []byte, options ResponsesChatCompatibilityOptions) (any, *responsesNamespaceToolSelection, error) {
 	if !rawMessageEnabled(raw) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	switch common.GetJsonType(raw) {
 	case "string":
 		var mode string
 		if err := common.Unmarshal(raw, &mode); err != nil {
-			return nil, fmt.Errorf("failed to parse tool_choice: %w", err)
+			return nil, nil, fmt.Errorf("failed to parse tool_choice: %w", err)
 		}
-		return mode, nil
+		return mode, nil, nil
 	case "object":
 		var toolChoice map[string]any
 		if err := common.Unmarshal(raw, &toolChoice); err != nil {
-			return nil, fmt.Errorf("failed to parse tool_choice: %w", err)
+			return nil, nil, fmt.Errorf("failed to parse tool_choice: %w", err)
 		}
 		toolType := strings.TrimSpace(common.Interface2String(toolChoice["type"]))
 		if toolType == dto.CustomType {
 			if !options.EnableCustomToolBridge {
-				return nil, fmt.Errorf("custom tool bridge is not enabled in chat compatibility mode")
+				return nil, nil, fmt.Errorf("custom tool bridge is not enabled in chat compatibility mode")
 			}
 			name := extractResponsesToolName(toolChoice)
 			if name == "" {
-				return nil, fmt.Errorf("tool_choice custom name is required")
+				return nil, nil, fmt.Errorf("tool_choice custom name is required")
 			}
 			return map[string]any{
 				"type": dto.CustomType,
 				"custom": map[string]any{
 					"name": name,
 				},
-			}, nil
+			}, nil, nil
+		}
+		if toolType == responsesToolTypeNamespace {
+			if !options.EnableCustomToolBridge {
+				return nil, nil, fmt.Errorf("custom tool bridge is not enabled in chat compatibility mode")
+			}
+			name := extractResponsesToolName(toolChoice)
+			if name == "" {
+				return nil, nil, fmt.Errorf("tool_choice namespace name is required")
+			}
+			return "required", &responsesNamespaceToolSelection{name: name}, nil
 		}
 		if toolType != "function" {
-			return nil, fmt.Errorf("tool_choice type %q is not supported in chat compatibility mode", toolType)
+			return nil, nil, fmt.Errorf("tool_choice type %q is not supported in chat compatibility mode", toolType)
 		}
 
 		name := strings.TrimSpace(common.Interface2String(toolChoice["name"]))
@@ -178,16 +194,16 @@ func convertResponsesToolChoiceToChat(raw []byte, options ResponsesChatCompatibi
 			}
 		}
 		if name == "" {
-			return nil, fmt.Errorf("tool_choice function name is required")
+			return nil, nil, fmt.Errorf("tool_choice function name is required")
 		}
 		return map[string]any{
 			"type": "function",
 			"function": map[string]any{
 				"name": name,
 			},
-		}, nil
+		}, nil, nil
 	default:
-		return nil, fmt.Errorf("tool_choice type %q is not supported", common.GetJsonType(raw))
+		return nil, nil, fmt.Errorf("tool_choice type %q is not supported", common.GetJsonType(raw))
 	}
 }
 
@@ -204,6 +220,9 @@ func extractResponsesToolName(tool map[string]any) string {
 	}
 	if customMap, ok := tool["custom"].(map[string]any); ok {
 		return strings.TrimSpace(common.Interface2String(customMap["name"]))
+	}
+	if namespace := strings.TrimSpace(common.Interface2String(tool[responsesToolTypeNamespace])); namespace != "" {
+		return namespace
 	}
 	return ""
 }
@@ -226,15 +245,91 @@ func buildChatCustomToolPayload(tool map[string]any, name string) (common.RawMes
 
 func isResponsesToolIgnoredInChatCompatibility(toolType string) bool {
 	switch toolType {
-	case "web_search", dto.BuildInToolWebSearchPreview, dto.BuildInToolFileSearch:
+	case "web_search", "tool_search", dto.BuildInToolWebSearchPreview, dto.BuildInToolFileSearch:
 		return true
 	default:
 		return false
 	}
 }
 
-func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityOptions) ([]dto.ToolCallRequest, error) {
+func isResponsesInputItemIgnoredInChatCompatibility(itemType string) bool {
+	return isResponsesToolIgnoredInChatCompatibility(itemType)
+}
+
+func parseResponsesNamespaceTools(tool map[string]any) ([]map[string]any, error) {
+	nestedToolsAny, ok := tool["tools"]
+	if !ok || nestedToolsAny == nil {
+		return nil, fmt.Errorf("namespace tool tools is required")
+	}
+	nestedToolsRaw, err := common.Marshal(nestedToolsAny)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode namespace tools: %w", err)
+	}
+	var nestedTools []map[string]any
+	if err := common.Unmarshal(nestedToolsRaw, &nestedTools); err != nil {
+		return nil, fmt.Errorf("failed to parse namespace tools: %w", err)
+	}
+	if len(nestedTools) == 0 {
+		return nil, fmt.Errorf("namespace tool tools must not be empty")
+	}
+	return nestedTools, nil
+}
+
+func convertResponsesFunctionToolToChat(tool map[string]any) (dto.ToolCallRequest, error) {
+	name := strings.TrimSpace(common.Interface2String(tool["name"]))
+	if name == "" {
+		return dto.ToolCallRequest{}, fmt.Errorf("tool name is required")
+	}
+	parameters := tool["parameters"]
+	if parameters == nil {
+		parameters = tool["input_schema"]
+	}
+	return dto.ToolCallRequest{
+		Type: "function",
+		Function: dto.FunctionRequest{
+			Name:        name,
+			Description: common.Interface2String(tool["description"]),
+			Parameters:  parameters,
+		},
+	}, nil
+}
+
+func convertResponsesNamespaceToolToChat(tool map[string]any) ([]dto.ToolCallRequest, error) {
+	nestedTools, err := parseResponsesNamespaceTools(tool)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.ToolCallRequest, 0, len(nestedTools))
+	seenNames := make(map[string]struct{}, len(nestedTools))
+	for _, nestedTool := range nestedTools {
+		nestedType := strings.TrimSpace(common.Interface2String(nestedTool["type"]))
+		if isResponsesToolIgnoredInChatCompatibility(nestedType) {
+			continue
+		}
+		if nestedType != "function" {
+			return nil, fmt.Errorf("namespace tool type %q is not supported in chat compatibility mode", nestedType)
+		}
+		chatTool, err := convertResponsesFunctionToolToChat(nestedTool)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seenNames[chatTool.Function.Name]; exists {
+			return nil, fmt.Errorf("namespace tool function name %q is duplicated", chatTool.Function.Name)
+		}
+		seenNames[chatTool.Function.Name] = struct{}{}
+		out = append(out, chatTool)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("namespace tool has no compatible entries")
+	}
+	return out, nil
+}
+
+func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityOptions, namespaceSelection *responsesNamespaceToolSelection) ([]dto.ToolCallRequest, error) {
 	if !rawMessageEnabled(raw) {
+		if namespaceSelection != nil {
+			return nil, fmt.Errorf("tool_choice namespace %q requires matching namespace tools", namespaceSelection.name)
+		}
 		return nil, nil
 	}
 	if common.GetJsonType(raw) != "array" {
@@ -247,9 +342,29 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 	}
 
 	tools := make([]dto.ToolCallRequest, 0, len(rawTools))
+	functionNames := make(map[string]struct{}, len(rawTools))
 	for _, tool := range rawTools {
 		toolType := strings.TrimSpace(common.Interface2String(tool["type"]))
 		if isResponsesToolIgnoredInChatCompatibility(toolType) {
+			continue
+		}
+		if toolType == responsesToolTypeNamespace {
+			if namespaceSelection != nil && extractResponsesToolName(tool) != namespaceSelection.name {
+				continue
+			}
+			if !options.EnableCustomToolBridge {
+				return nil, fmt.Errorf("custom tool bridge is not enabled in chat compatibility mode")
+			}
+			namespaceTools, err := convertResponsesNamespaceToolToChat(tool)
+			if err != nil {
+				return nil, err
+			}
+			if err := appendUniqueFunctionTools(&tools, functionNames, namespaceTools); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if namespaceSelection != nil {
 			continue
 		}
 		if toolType == dto.CustomType {
@@ -274,21 +389,35 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 			return nil, fmt.Errorf("tool type %q is not supported in chat compatibility mode", toolType)
 		}
 
-		name := strings.TrimSpace(common.Interface2String(tool["name"]))
-		if name == "" {
-			return nil, fmt.Errorf("tool name is required")
+		chatTool, err := convertResponsesFunctionToolToChat(tool)
+		if err != nil {
+			return nil, err
 		}
-
-		tools = append(tools, dto.ToolCallRequest{
-			Type: "function",
-			Function: dto.FunctionRequest{
-				Name:        name,
-				Description: common.Interface2String(tool["description"]),
-				Parameters:  tool["parameters"],
-			},
-		})
+		if err := appendUniqueFunctionTools(&tools, functionNames, []dto.ToolCallRequest{chatTool}); err != nil {
+			return nil, err
+		}
+	}
+	if namespaceSelection != nil && len(tools) == 0 {
+		return nil, fmt.Errorf("tool_choice namespace %q has no compatible tools in chat compatibility mode", namespaceSelection.name)
 	}
 	return tools, nil
+}
+
+func appendUniqueFunctionTools(tools *[]dto.ToolCallRequest, seen map[string]struct{}, candidates []dto.ToolCallRequest) error {
+	for _, candidate := range candidates {
+		if candidate.Type == "function" {
+			name := strings.TrimSpace(candidate.Function.Name)
+			if name == "" {
+				return fmt.Errorf("tool name is required")
+			}
+			if _, exists := seen[name]; exists {
+				return fmt.Errorf("tool function name %q is duplicated", name)
+			}
+			seen[name] = struct{}{}
+		}
+		*tools = append(*tools, candidate)
+	}
+	return nil
 }
 
 func stringifyResponsesOutput(value any) (string, error) {
@@ -548,6 +677,9 @@ func convertResponsesInputToChatMessages(raw []byte, options ResponsesChatCompat
 			}
 			pendingUserParts = append(pendingUserParts, part)
 		default:
+			if isResponsesInputItemIgnoredInChatCompatibility(itemType) {
+				continue
+			}
 			return nil, fmt.Errorf("input item type %q is not supported in chat compatibility mode", itemType)
 		}
 	}
@@ -635,13 +767,13 @@ func ResponsesRequestToChatCompletionsRequestWithOptions(req *dto.OpenAIResponse
 	}
 	out.ParallelTooCalls = parallelToolCalls
 
-	toolChoice, err := convertResponsesToolChoiceToChat(req.ToolChoice, options)
+	toolChoice, namespaceSelection, err := convertResponsesToolChoiceToChat(req.ToolChoice, options)
 	if err != nil {
 		return nil, err
 	}
 	out.ToolChoice = toolChoice
 
-	tools, err := convertResponsesToolsToChat(req.Tools, options)
+	tools, err := convertResponsesToolsToChat(req.Tools, options, namespaceSelection)
 	if err != nil {
 		return nil, err
 	}

@@ -30,6 +30,10 @@ type chatToolCallState struct {
 }
 
 func marshalResponsesCompatArguments(arguments string) (common.RawMessage, error) {
+	raw := common.RawMessage(arguments)
+	if common.ValidJson(raw) {
+		return raw, nil
+	}
 	return common.Marshal(arguments)
 }
 

@@ -425,12 +425,15 @@ func testChannelWithOptionsForUser(channel *model.Channel, testUserID int, testM
 		// Response compaction request - convert to OpenAIResponsesRequest before adapting
 		switch req := request.(type) {
 		case *dto.OpenAIResponsesCompactionRequest:
-			convertedRequest, err = adaptor.ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
-				Model:              req.Model,
-				Input:              req.Input,
-				Instructions:       req.Instructions,
-				PreviousResponseID: req.PreviousResponseID,
-			})
+			responsesReq := req.ToResponsesRequest()
+			if responsesReq == nil {
+				return testResult{
+					context:     c,
+					localErr:    errors.New("invalid response compaction request type"),
+					newAPIError: types.NewError(errors.New("invalid response compaction request type"), types.ErrorCodeConvertRequestFailed),
+				}
+			}
+			convertedRequest, err = adaptor.ConvertOpenAIResponsesRequest(c, info, *responsesReq)
 		case *dto.OpenAIResponsesRequest:
 			convertedRequest, err = adaptor.ConvertOpenAIResponsesRequest(c, info, *req)
 		default:
@@ -469,14 +472,14 @@ func testChannelWithOptionsForUser(channel *model.Channel, testUserID int, testM
 		}
 	}
 
-	//jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings)
-	//if err != nil {
-	//	return testResult{
-	//		context:     c,
-	//		localErr:    err,
-	//		newAPIError: types.NewError(err, types.ErrorCodeConvertRequestFailed),
-	//	}
-	//}
+	jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, false)
+	if err != nil {
+		return testResult{
+			context:     c,
+			localErr:    err,
+			newAPIError: types.NewError(err, types.ErrorCodeConvertRequestFailed),
+		}
+	}
 
 	if len(info.ParamOverride) > 0 {
 		jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
@@ -782,6 +785,22 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 	if explicitChatProtocol && info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
 		return request, fmt.Errorf("response protocol %q only supports responses endpoints", options.ResponseProtocol)
 	}
+	if !explicitChatProtocol && info.RelayMode == relayconstant.RelayModeResponsesCompact {
+		responsesReq, ok := request.(*dto.OpenAIResponsesCompactionRequest)
+		if !ok || responsesReq == nil {
+			return request, fmt.Errorf("invalid response compaction request type: %T", request)
+		}
+		convertedResponsesReq := responsesReq.ToResponsesRequest()
+		converted, applied, visibleOnly, applyInfo, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(relaycommon.GinRequestContext(c), service.SyntheticCompactScopeFromSource(info), *convertedResponsesReq)
+		service.SetSyntheticCompactApplyInfo(c, applyInfo)
+		if err != nil {
+			return request, err
+		}
+		if applied || visibleOnly {
+			request = &converted
+		}
+		explicitChatProtocol = true
+	}
 	if !explicitChatProtocol && info.RelayMode != relayconstant.RelayModeResponses {
 		return request, nil
 	}
@@ -791,12 +810,7 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 	case *dto.OpenAIResponsesRequest:
 		responsesReq = req
 	case *dto.OpenAIResponsesCompactionRequest:
-		responsesReq = &dto.OpenAIResponsesRequest{
-			Model:              req.Model,
-			Input:              req.Input,
-			Instructions:       req.Instructions,
-			PreviousResponseID: req.PreviousResponseID,
-		}
+		responsesReq = req.ToResponsesRequest()
 	default:
 		return request, fmt.Errorf("invalid response request type: %T", request)
 	}

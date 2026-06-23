@@ -47,6 +47,7 @@ type channelTestRuntimeSummary struct {
 	MaxTokens               uint                       `json:"max_tokens,omitempty"`
 	Stream                  bool                       `json:"stream"`
 	ConfigWarnings          []string                   `json:"config_warnings,omitempty"`
+	ChannelCapability       map[string]interface{}     `json:"channel_capability_snapshot,omitempty"`
 	ErrorDiagnosis          *channelTestErrorDiagnosis `json:"error_diagnosis,omitempty"`
 }
 
@@ -128,6 +129,9 @@ func finalizeChannelTestRuntimeSummary(summary *channelTestRuntimeSummary, c *gi
 		if len(info.ParamOverrideAudit) > 0 {
 			summary.ParamOverrideApplied = true
 			summary.ParamOverrideAudit = append([]string{}, info.ParamOverrideAudit...)
+		}
+		if info.ChannelMeta != nil {
+			summary.ChannelCapability = service.ResponsesChannelCapabilitySnapshot(info, info.ChannelOtherSettings)
 		}
 		if info.UseRuntimeHeadersOverride && len(info.RuntimeHeadersOverride) > 0 && summary.ParamOverrideConfigured {
 			summary.ParamOverrideApplied = true

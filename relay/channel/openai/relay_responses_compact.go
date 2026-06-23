@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
@@ -17,7 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+func OaiResponsesCompactionHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
 	responseBody, err := io.ReadAll(resp.Body)
@@ -39,6 +41,7 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 	if err := validateResponsesCompactionOutput(compactResp.Output); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
 	}
+	opaqueContent := responsesCompactionOutputEncryptedContent(compactResp.Output)
 	responseBody, err = normalizeResponsesCompactionResponseBody(&compactResp, responseBody)
 	if err != nil {
 		return nil, types.NewOpenAIError(
@@ -46,6 +49,9 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 			types.ErrorCodeBadResponseBody,
 			http.StatusBadGateway,
 		)
+	}
+	if err := recordNativeOpaqueCompactionState(c, info, compactResp, opaqueContent); err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError)
 	}
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)
@@ -61,6 +67,41 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 	}
 
 	return &usage, nil
+}
+
+func recordNativeOpaqueCompactionState(c *gin.Context, info *relaycommon.RelayInfo, compactResp dto.OpenAIResponsesCompactionResponse, opaqueContent string) error {
+	opaqueContent = strings.TrimSpace(opaqueContent)
+	if opaqueContent == "" {
+		return nil
+	}
+	scope := service.SyntheticCompactScopeFromSource(info)
+	if scope.UserID == 0 || scope.TokenID == 0 || strings.TrimSpace(scope.Group) == "" {
+		return nil
+	}
+	modelName := ""
+	if info != nil {
+		modelName = info.OriginModelName
+	}
+	state, err := service.StoreNativeOpaqueCompactState(
+		relaycommon.GinRequestContext(c),
+		scope,
+		modelName,
+		compactResp.ID,
+		opaqueContent,
+		int64(compactResp.CreatedAt),
+	)
+	if err != nil {
+		return fmt.Errorf("store native opaque compact state: %w", err)
+	}
+	service.SetSyntheticCompactApplyInfo(c, service.SyntheticCompactApplyInfo{
+		StateLookup:   "recorded",
+		MarkerKind:    model.SyntheticCompactStateKindNativeOpaque,
+		ScopeResult:   "strict",
+		RouteDecision: "native_opaque_recorded",
+		StateHash:     strings.TrimSpace(state.StateHash),
+	})
+	common.SetContextKey(c, constant.ContextKeyResponsesCompactionOutput, true)
+	return nil
 }
 
 func normalizeResponsesCompactionResponseBody(compactResp *dto.OpenAIResponsesCompactionResponse, responseBody []byte) ([]byte, error) {
@@ -166,6 +207,34 @@ func validateResponsesCompactionOutput(output common.RawMessage) error {
 		return errors.New("provider returned malformed compact output: compaction output has no encrypted content")
 	}
 	return errors.New("provider returned malformed compact output: no compaction output")
+}
+
+func responsesCompactionOutputEncryptedContent(output common.RawMessage) string {
+	var items []common.RawMessage
+	if err := common.Unmarshal(bytes.TrimSpace(output), &items); err != nil {
+		return ""
+	}
+	for _, rawItem := range items {
+		var item map[string]common.RawMessage
+		if err := common.Unmarshal(rawItem, &item); err != nil {
+			continue
+		}
+		if !relaycommon.IsResponsesCompactionItemType(responsesCompactionOutputItemType(item)) {
+			continue
+		}
+		raw := bytes.TrimSpace(item["encrypted_content"])
+		if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+			continue
+		}
+		var encryptedContent string
+		if err := common.Unmarshal(raw, &encryptedContent); err == nil {
+			encryptedContent = strings.TrimSpace(encryptedContent)
+			if encryptedContent != "" {
+				return encryptedContent
+			}
+		}
+	}
+	return ""
 }
 
 func responsesCompactionOutputItemType(item map[string]common.RawMessage) string {

@@ -227,10 +227,17 @@ func TestGenerateTextOtherInfoIncludesMissingLocalSyntheticStateAction(t *testin
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
-	common.SetContextKey(ctx, constant.ContextKeyResponsesPreviousIDAction, "missing_local_synthetic_state")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesPreviousIDAction, "stale_local_synthetic_state_visible_only")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactStateLookup, "miss")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactStateScopeResult, "not_found")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactMarkerKind, "synthetic_summary")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactRouteDecision, "visible_only_fallback")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactFallbackReason, "state_not_found_visible_input")
 
 	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
 			},
@@ -238,7 +245,276 @@ func TestGenerateTextOtherInfoIncludesMissingLocalSyntheticStateAction(t *testin
 	}, 1, 1, 1, 0, 0, -1, -1)
 
 	require.Equal(t, "official_openai", other["responses_upstream_profile"])
-	require.Equal(t, "missing_local_synthetic_state", other["responses_previous_id_action"])
+	require.Equal(t, "stale_local_synthetic_state_visible_only", other["responses_previous_id_action"])
+	require.Equal(t, true, other["responses_compact_visible_only_fallback"])
+	require.Equal(t, "miss", other["responses_compact_state_lookup"])
+	require.Equal(t, "not_found", other["responses_compact_state_scope_result"])
+	require.Equal(t, "synthetic_summary", other["responses_compact_marker_kind"])
+	require.Equal(t, "visible_only_fallback", other["responses_compact_route_decision"])
+	require.Equal(t, "state_not_found_visible_input", other["responses_compact_fallback_reason"])
+	require.NotContains(t, other, "responses_compact_state_restored")
+	require.NotContains(t, other, "responses_compact_model_changed")
+	require.NotContains(t, other, "responses_compact_state_hash")
+	snapshot, ok := other["channel_capability_snapshot"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "explicit_settings", snapshot["source"])
+	require.Equal(t, "official_openai", snapshot["profile"])
+	require.Equal(t, "auto", snapshot["compact_mode_setting"])
+	require.Equal(t, "native", snapshot["compact_mode_effective"])
+	require.Equal(t, true, snapshot["supports_responses"])
+	require.Equal(t, true, snapshot["supports_responses_compact"])
+	require.Equal(t, true, snapshot["supports_chat"])
+	require.Equal(t, true, snapshot["supports_rest_previous_response_id"])
+	require.Equal(t, true, snapshot["supports_compaction_item_passthrough"])
+	require.Equal(t, true, snapshot["supports_namespace_tools"])
+}
+
+func TestGenerateTextOtherInfoIncludesNativeOpaqueRecordedState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses/compact", nil)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactStateLookup, "recorded")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactStateScopeResult, "strict")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactMarkerKind, "native_opaque")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactRouteDecision, "native_opaque_recorded")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactStateHash, "opaque-hash-for-log")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactionOutput, true)
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "official_openai", other["responses_upstream_profile"])
+	require.Equal(t, "recorded", other["responses_compact_state_lookup"])
+	require.Equal(t, "strict", other["responses_compact_state_scope_result"])
+	require.Equal(t, "native_opaque", other["responses_compact_marker_kind"])
+	require.Equal(t, "native_opaque_recorded", other["responses_compact_route_decision"])
+	require.Equal(t, "opaque-hash-for-log", other["responses_compact_state_hash"])
+	require.Equal(t, "remote_v2", other["responses_compact_mode"])
+	require.Equal(t, "/v1/responses/compact", other["responses_compact_upstream_path"])
+}
+
+func TestGenerateTextOtherInfoIncludesResponsesCompactChannelSkip(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+		},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "channel_skipped_unsupported_compaction", other["responses_compact_channel_skip"])
+}
+
+func TestResponsesChannelCapabilitySnapshotTreatsSub2APIHTTPAsNoRESTPreviousID(t *testing.T) {
+	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}, dto.ChannelOtherSettings{
+		ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+	})
+
+	require.Equal(t, "sub2api_http", snapshot["profile"])
+	require.Equal(t, "auto", snapshot["compact_mode_setting"])
+	require.Equal(t, "native", snapshot["compact_mode_effective"])
+	require.Equal(t, true, snapshot["supports_responses"])
+	require.Equal(t, true, snapshot["supports_responses_compact"])
+	require.Equal(t, false, snapshot["supports_rest_previous_response_id"])
+	require.Equal(t, false, snapshot["supports_compaction_item_passthrough"])
+	require.Equal(t, false, snapshot["supports_namespace_tools"])
+}
+
+func TestResponsesChannelCapabilitySnapshotMarksSafeDefaultSource(t *testing.T) {
+	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}, dto.ChannelOtherSettings{})
+
+	require.Equal(t, "safe_default", snapshot["source"])
+	require.Empty(t, snapshot["profile"])
+	require.Equal(t, true, snapshot["supports_compaction_item_passthrough"])
+}
+
+func TestResponsesChannelCapabilitySnapshotKeepsObservationOutOfPublicSnapshot(t *testing.T) {
+	observedAt := time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC).Unix()
+	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}, dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			Observed: &dto.ResponsesCapabilityObservation{
+				ObservedAt: observedAt,
+				StatusCode: 413,
+				ErrorCode:  string("upstream_request_too_large"),
+				Reason:     "payload too large",
+			},
+		},
+	})
+
+	require.Equal(t, "observed_calls", snapshot["source"])
+	require.NotContains(t, snapshot, "observed")
+	require.NotContains(t, snapshot, "probe")
+}
+
+func TestGenerateTextOtherInfoPutsCapabilityObservationInAdminInfo(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+
+	observedAt := time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC).Unix()
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					Observed: &dto.ResponsesCapabilityObservation{
+						ObservedAt: observedAt,
+						StatusCode: 413,
+						ErrorCode:  string("upstream_request_too_large"),
+						Reason:     "payload too large",
+					},
+				},
+			},
+		},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	snapshot, ok := other["channel_capability_snapshot"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "observed_calls", snapshot["source"])
+	require.NotContains(t, snapshot, "observed")
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	observed, ok := adminInfo["responses_channel_capability_observed"].(*dto.ResponsesCapabilityObservation)
+	require.True(t, ok)
+	require.Equal(t, 413, observed.StatusCode)
+	require.Equal(t, observedAt, observed.ObservedAt)
+}
+
+func TestResponsesChannelCapabilitySnapshotTreatsProxyProfileAsSyntheticOnly(t *testing.T) {
+	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}, dto.ChannelOtherSettings{
+		ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+	})
+
+	require.Equal(t, "generic_proxy", snapshot["profile"])
+	require.Equal(t, "auto", snapshot["compact_mode_setting"])
+	require.Equal(t, "synthetic_summary", snapshot["compact_mode_effective"])
+	require.Equal(t, true, snapshot["supports_responses"])
+	require.Equal(t, false, snapshot["supports_responses_compact"])
+	require.Equal(t, true, snapshot["supports_chat"])
+	require.Equal(t, false, snapshot["supports_rest_previous_response_id"])
+	require.Equal(t, false, snapshot["supports_compaction_item_passthrough"])
+	require.Equal(t, false, snapshot["supports_namespace_tools"])
+}
+
+func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
+	testCases := []struct {
+		name                                  string
+		profile                               dto.ResponsesUpstreamProfile
+		wantCompactMode                       string
+		wantSupportsResponsesCompact          bool
+		wantSupportsRESTPreviousResponseID    bool
+		wantSupportsCompactionItemPassthrough bool
+		wantSupportsNamespaceTools            bool
+	}{
+		{
+			name:                                  "official newapi",
+			profile:                               dto.ResponsesUpstreamProfileOfficialNewAPI,
+			wantCompactMode:                       "native",
+			wantSupportsResponsesCompact:          true,
+			wantSupportsRESTPreviousResponseID:    true,
+			wantSupportsCompactionItemPassthrough: true,
+			wantSupportsNamespaceTools:            true,
+		},
+		{
+			name:                                  "sub2api http",
+			profile:                               dto.ResponsesUpstreamProfileSub2APIHTTP,
+			wantCompactMode:                       "native",
+			wantSupportsResponsesCompact:          true,
+			wantSupportsRESTPreviousResponseID:    false,
+			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsNamespaceTools:            false,
+		},
+		{
+			name:                                  "sub2api websocket v2",
+			profile:                               dto.ResponsesUpstreamProfileSub2APIWSV2,
+			wantCompactMode:                       "native",
+			wantSupportsResponsesCompact:          true,
+			wantSupportsRESTPreviousResponseID:    true,
+			wantSupportsCompactionItemPassthrough: true,
+			wantSupportsNamespaceTools:            true,
+		},
+		{
+			name:                                  "generic openai",
+			profile:                               dto.ResponsesUpstreamProfileGenericOpenAI,
+			wantCompactMode:                       "native",
+			wantSupportsResponsesCompact:          true,
+			wantSupportsRESTPreviousResponseID:    false,
+			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsNamespaceTools:            false,
+		},
+		{
+			name:                                  "generic proxy",
+			profile:                               dto.ResponsesUpstreamProfileGenericProxy,
+			wantCompactMode:                       "synthetic_summary",
+			wantSupportsResponsesCompact:          false,
+			wantSupportsRESTPreviousResponseID:    false,
+			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsNamespaceTools:            false,
+		},
+		{
+			name:                                  "chat only proxy",
+			profile:                               dto.ResponsesUpstreamProfileChatOnlyProxy,
+			wantCompactMode:                       "synthetic_summary",
+			wantSupportsResponsesCompact:          false,
+			wantSupportsRESTPreviousResponseID:    false,
+			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsNamespaceTools:            false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType: constant.ChannelTypeOpenAI,
+				},
+			}, dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+				ResponsesUpstreamProfile: tc.profile,
+			})
+
+			require.Equal(t, string(tc.profile), snapshot["profile"])
+			require.Equal(t, tc.wantCompactMode, snapshot["compact_mode_effective"])
+			require.Equal(t, true, snapshot["supports_responses"])
+			require.Equal(t, tc.wantSupportsResponsesCompact, snapshot["supports_responses_compact"])
+			require.Equal(t, tc.wantSupportsRESTPreviousResponseID, snapshot["supports_rest_previous_response_id"])
+			require.Equal(t, tc.wantSupportsCompactionItemPassthrough, snapshot["supports_compaction_item_passthrough"])
+			require.Equal(t, tc.wantSupportsNamespaceTools, snapshot["supports_namespace_tools"])
+		})
+	}
 }
 
 func TestGenerateTextOtherInfoMarksCodexLocalCompactionFromHeader(t *testing.T) {

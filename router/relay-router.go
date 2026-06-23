@@ -165,6 +165,18 @@ func SetRelayRouter(router *gin.Engine) {
 		httpRouter.DELETE("/models/:model", controller.RelayNotImplemented)
 	}
 
+	responsesCompatRouter := router.Group("/responses")
+	responsesCompatRouter.Use(middleware.RouteTag("relay"))
+	responsesCompatRouter.Use(middleware.SystemPerformanceCheck())
+	responsesCompatRouter.Use(middleware.TokenAuth())
+	responsesCompatRouter.Use(middleware.ModelRequestRateLimit())
+	responsesCompatRouter.Use(middleware.Distribute())
+	{
+		responsesCompatRouter.POST("/compact", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIResponsesCompaction)
+		})
+	}
+
 	relayMjRouter := router.Group("/mj")
 	relayMjRouter.Use(middleware.RouteTag("relay"))
 	relayMjRouter.Use(middleware.SystemPerformanceCheck())

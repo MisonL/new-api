@@ -483,8 +483,9 @@ func TestStreamScannerHandler_StreamStatus_EOFWithoutDone(t *testing.T) {
 	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {})
 
 	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
-	assert.True(t, info.StreamStatus.IsNormalEnd())
+	assert.Equal(t, relaycommon.StreamEndReasonUpstreamInterrupted, info.StreamStatus.EndReason)
+	assert.Contains(t, info.StreamStatus.EndError.Error(), "stream disconnected before completion")
+	assert.False(t, info.StreamStatus.IsNormalEnd())
 }
 
 func TestStreamScannerHandler_StreamStatus_UpstreamInterrupted(t *testing.T) {

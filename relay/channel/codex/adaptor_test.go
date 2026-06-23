@@ -76,7 +76,7 @@ func TestConvertOpenAIResponsesRequestPropagatesSyntheticCompactErrors(t *testin
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5.5",
 		PreviousResponseID: "resp_newapi_synthcmp_missing",
-		Input:              common.RawMessage(`"continue"`),
+		Input:              common.RawMessage(`[]`),
 	}
 
 	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
@@ -84,4 +84,94 @@ func TestConvertOpenAIResponsesRequestPropagatesSyntheticCompactErrors(t *testin
 	require.Nil(t, converted)
 	require.ErrorIs(t, err, service.ErrSyntheticCompactStateNotFound)
 	require.Equal(t, "missing_local_synthetic_state", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
+}
+
+func TestConvertOpenAIResponsesRequestContinuesMissingSyntheticStateWithVisibleInput(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:   relayconstant.RelayModeResponses,
+		UserId:      10,
+		TokenId:     20,
+		UsingGroup:  "default",
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_newapi_synthcmp_missing",
+		Input: common.RawMessage(`[
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_missing"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue with visible context"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.Empty(t, convertedReq.PreviousResponseID)
+	require.Contains(t, string(convertedReq.Input), "continue with visible context")
+	require.NotContains(t, string(convertedReq.Input), "newapi.synthetic.compact")
+	require.JSONEq(t, `false`, string(convertedReq.Store))
+	require.Equal(t, "stale_local_synthetic_state_visible_only", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted))
+}
+
+func TestConvertOpenAIResponsesRequestPrependsSystemPromptToStringInstructions(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{
+				SystemPrompt:         "configured system",
+				SystemPromptOverride: true,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model:        "gpt-5.5",
+		Input:        common.RawMessage(`"continue"`),
+		Instructions: common.RawMessage(`"original task"`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.JSONEq(t, `"configured system\noriginal task"`, string(convertedReq.Instructions))
+}
+
+func TestConvertOpenAIResponsesRequestKeepsStructuredInstructionsOnSystemPromptOverride(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{
+				SystemPrompt:         "configured system",
+				SystemPromptOverride: true,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: common.RawMessage(`"continue"`),
+		Instructions: common.RawMessage(`{
+			"role":"developer",
+			"content":[{"type":"input_text","text":"preserve structured task"}]
+		}`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.JSONEq(t, string(req.Instructions), string(convertedReq.Instructions))
 }

@@ -103,11 +103,98 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if action := common.GetContextKeyString(ctx, constant.ContextKeyResponsesPreviousIDAction); action != "" {
 			other["responses_previous_id_action"] = action
 		}
+		if lookup := common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactStateLookup); lookup != "" {
+			other["responses_compact_state_lookup"] = lookup
+		}
+		if scopeResult := common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactStateScopeResult); scopeResult != "" {
+			other["responses_compact_state_scope_result"] = scopeResult
+		}
+		if markerKind := common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactMarkerKind); markerKind != "" {
+			other["responses_compact_marker_kind"] = markerKind
+		}
+		if routeDecision := common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactRouteDecision); routeDecision != "" {
+			other["responses_compact_route_decision"] = routeDecision
+		}
+		if fallbackReason := common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactFallbackReason); fallbackReason != "" {
+			other["responses_compact_fallback_reason"] = fallbackReason
+		}
+		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesEncryptedContextRetry) {
+			other["responses_encrypted_context_retry"] = true
+		}
+		if channelSkip := common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip); channelSkip != "" {
+			other["responses_compact_channel_skip"] = channelSkip
+		}
+		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCompactStateRestored) {
+			other["responses_compact_state_restored"] = true
+		}
+		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCompactModelChanged) {
+			other["responses_compact_model_changed"] = true
+		}
+		if stateHash := common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactStateHash); stateHash != "" {
+			other["responses_compact_state_hash"] = stateHash
+		}
+		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted) {
+			other["responses_compact_visible_only_fallback"] = true
+		}
 	}
+	if snapshot := ResponsesChannelCapabilitySnapshot(relayInfo, settings); len(snapshot) > 0 {
+		other["channel_capability_snapshot"] = snapshot
+	}
+	appendResponsesChannelCapabilityAdminInfo(relayInfo, settings, other)
 	if profile := settings.NormalizedResponsesUpstreamProfile(); profile != "" {
 		other["responses_upstream_profile"] = string(profile)
 	}
 	appendCodexCompactionInfo(ctx, relayInfo, other)
+}
+
+func AppendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	appendResponsesRelayInfo(ctx, relayInfo, other)
+}
+
+func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settings dto.ChannelOtherSettings) map[string]interface{} {
+	if relayInfo == nil || relayInfo.ChannelMeta == nil {
+		return nil
+	}
+	snapshotInfo := settings.ResolveResponsesChannelCapability(relayInfo.ChannelType)
+	snapshot := map[string]interface{}{
+		"source":                               snapshotInfo.Source,
+		"compact_mode_setting":                 string(snapshotInfo.CompactModeSetting),
+		"compact_mode_effective":               string(snapshotInfo.CompactModeEffective),
+		"supports_responses":                   snapshotInfo.SupportsResponses,
+		"supports_responses_compact":           snapshotInfo.SupportsResponsesCompact,
+		"supports_chat":                        snapshotInfo.SupportsChat,
+		"supports_rest_previous_response_id":   snapshotInfo.SupportsRestPreviousResponseID,
+		"supports_compaction_item_passthrough": snapshotInfo.SupportsCompactionItemPassthrough,
+		"supports_namespace_tools":             snapshotInfo.SupportsNamespaceTools,
+	}
+	if snapshotInfo.Profile != "" {
+		snapshot["profile"] = string(snapshotInfo.Profile)
+	}
+	return snapshot
+}
+
+func appendResponsesChannelCapabilityAdminInfo(relayInfo *relaycommon.RelayInfo, settings dto.ChannelOtherSettings, other map[string]interface{}) {
+	if relayInfo == nil || relayInfo.ChannelMeta == nil || other == nil {
+		return
+	}
+	snapshotInfo := settings.ResolveResponsesChannelCapability(relayInfo.ChannelType)
+	if snapshotInfo.Observed != nil {
+		adminInfo := getOrCreateAdminInfo(other)
+		adminInfo["responses_channel_capability_observed"] = snapshotInfo.Observed
+	}
+	if snapshotInfo.Probe != nil {
+		adminInfo := getOrCreateAdminInfo(other)
+		adminInfo["responses_channel_capability_probe"] = snapshotInfo.Probe
+	}
+}
+
+func getOrCreateAdminInfo(other map[string]interface{}) map[string]interface{} {
+	adminInfo, _ := other["admin_info"].(map[string]interface{})
+	if adminInfo == nil {
+		adminInfo = map[string]interface{}{}
+		other["admin_info"] = adminInfo
+	}
+	return adminInfo
 }
 
 type codexTurnMetadataHeader struct {

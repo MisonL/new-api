@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 )
@@ -361,10 +363,10 @@ func CacheGetChannel(id int) (*Channel, error) {
 	defer channelSyncLock.RUnlock()
 
 	c, ok := channelsIDM[id]
-	if !ok {
+	if !ok || c == nil {
 		return nil, fmt.Errorf("渠道# %d，已不存在", id)
 	}
-	return c, nil
+	return c.CloneForCache(), nil
 }
 
 // CacheGetChannelInfo returns cached channel info when available.
@@ -380,35 +382,27 @@ func CacheGetChannelInfo(id int) (*ChannelInfo, error) {
 	defer channelSyncLock.RUnlock()
 
 	c, ok := channelsIDM[id]
-	if !ok {
+	if !ok || c == nil {
 		return nil, fmt.Errorf("渠道# %d，已不存在", id)
 	}
-	return &c.ChannelInfo, nil
+	cloned := c.CloneForCache()
+	return &cloned.ChannelInfo, nil
 }
 
-// CacheUpdateChannelStatus mutates a cached channel status in place.
+// CacheUpdateChannelStatus updates cached channel status with a new snapshot.
 func CacheUpdateChannelStatus(id int, status int) {
 	if !common.MemoryCacheEnabled {
 		return
 	}
 	channelSyncLock.Lock()
 	defer channelSyncLock.Unlock()
-	if channel, ok := channelsIDM[id]; ok {
-		channel.Status = status
+	if channel, ok := channelsIDM[id]; ok && channel != nil {
+		updated := channel.CloneForCache()
+		updated.Status = status
+		channelsIDM[id] = updated
 	}
 	if status != common.ChannelStatusEnabled {
-		// delete the channel from group2model2channels
-		for group, model2channels := range group2model2channels {
-			for model, channels := range model2channels {
-				for i, channelId := range channels {
-					if channelId == id {
-						// remove the channel from the slice
-						group2model2channels[group][model] = append(channels[:i], channels[i+1:]...)
-						break
-					}
-				}
-			}
-		}
+		removeChannelIDFromRouteCacheLocked(id)
 	}
 }
 
@@ -422,5 +416,64 @@ func CacheUpdateChannel(channel *Channel) {
 	if channel == nil {
 		return
 	}
-	channelsIDM[channel.Id] = channel
+	channelsIDM[channel.Id] = channel.CloneForCache()
+}
+
+func CacheReloadChannel(id int) {
+	if !common.MemoryCacheEnabled || id <= 0 {
+		return
+	}
+	channel := &Channel{}
+	if err := DB.First(channel, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			channelSyncLock.Lock()
+			defer channelSyncLock.Unlock()
+			delete(channelsIDM, id)
+			removeChannelIDFromRouteCacheLocked(id)
+			return
+		}
+		common.SysLog(fmt.Sprintf("failed to reload channel cache: channel_id=%d, error=%v", id, err))
+		return
+	}
+	CacheUpdateChannel(channel)
+}
+
+func CacheUpdateChannelOtherSettings(id int, settings string) {
+	if !common.MemoryCacheEnabled || id <= 0 {
+		return
+	}
+	channelSyncLock.Lock()
+	defer channelSyncLock.Unlock()
+	if channel, ok := channelsIDM[id]; ok && channel != nil {
+		updated := channel.CloneForCache()
+		updated.OtherSettings = settings
+		channelsIDM[id] = updated
+	}
+}
+
+func removeChannelIDFromRouteCacheLocked(id int) {
+	for group, model2channels := range group2model2channels {
+		for model, channelIDs := range model2channels {
+			filtered := make([]int, 0, len(channelIDs))
+			removed := false
+			for _, channelID := range channelIDs {
+				if channelID == id {
+					removed = true
+					continue
+				}
+				filtered = append(filtered, channelID)
+			}
+			if !removed {
+				continue
+			}
+			if len(filtered) == 0 {
+				delete(model2channels, model)
+			} else {
+				model2channels[model] = filtered
+			}
+		}
+		if len(model2channels) == 0 {
+			delete(group2model2channels, group)
+		}
+	}
 }

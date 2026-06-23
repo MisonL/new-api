@@ -10,6 +10,7 @@ import (
 	rootcommon "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -192,6 +193,30 @@ func TestInitChannelMetaDoesNotEnableStreamOptionsForAgnes(t *testing.T) {
 	require.NotNil(t, info.ChannelMeta)
 	require.Equal(t, constant.ChannelTypeAgnes, info.ChannelType)
 	require.False(t, info.SupportStreamOptions)
+}
+
+func TestInitChannelMetaSynchronizesChannelOtherSettings(t *testing.T) {
+	prevMode := gin.Mode()
+	t.Cleanup(func() {
+		gin.SetMode(prevMode)
+	})
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	rootcommon.SetContextKey(ctx, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	rootcommon.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeSynthetic,
+	})
+
+	info := &RelayInfo{}
+	info.RelayMode = relayconstant.RelayModeResponsesCompact
+	info.InitChannelMeta(ctx)
+
+	require.NotNil(t, info.ChannelMeta)
+	require.Equal(t, dto.ResponsesCompactModeSynthetic, info.ChannelMeta.ChannelOtherSettings.ResponsesCompactMode)
+	require.Equal(t, dto.ResponsesCompactModeSynthetic, info.ChannelOtherSettings.ResponsesCompactMode)
+	require.True(t, IsSyntheticOpenAICompatibleResponsesCompact(info))
 }
 
 func TestGenRelayInfoResponsesCompactionInitializesConversionChain(t *testing.T) {

@@ -61,6 +61,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		writeMutex            sync.Mutex // Mutex to protect concurrent writes
 		wg                    sync.WaitGroup
 		receivedResponseCount atomic.Int64
+		receivedDone          atomic.Bool
 	)
 	notifyStop := func() {
 		select {
@@ -120,6 +121,15 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			logger.LogError(c, "timeout waiting for goroutines to exit")
 		}
 		info.ReceivedResponseCount = int(receivedResponseCount.Load())
+		if info.StreamStatus.EndReason == relaycommon.StreamEndReasonNone {
+			if receivedDone.Load() {
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
+			} else {
+				err := fmt.Errorf("stream disconnected before completion")
+				logger.LogError(c, "upstream stream ended before completion")
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonUpstreamInterrupted, err)
+			}
+		}
 		if (info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors()) || info.StreamStatus.IsCanceled() {
 			logger.LogInfo(c, fmt.Sprintf("stream ended: %s", info.StreamStatus.Summary()))
 		} else {
@@ -279,6 +289,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 					return
 				}
 			} else {
+				receivedDone.Store(true)
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
 				if common.DebugEnabled {
 					println("received [DONE], stopping scanner")
@@ -304,7 +315,6 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				}
 			}
 		}
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
 	})
 
 	// 主循环等待完成或超时

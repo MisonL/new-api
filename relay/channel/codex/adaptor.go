@@ -61,17 +61,21 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		return nil, err
 	}
 	if !isCompact && hasSyntheticReference {
-		convertedRequest, ok, err := service.ApplySyntheticCompactState(relaycommon.GinRequestContext(c), service.SyntheticCompactScopeFromSource(info), request)
+		convertedRequest, ok, visibleOnly, applyInfo, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(relaycommon.GinRequestContext(c), service.SyntheticCompactScopeFromSource(info), request)
+		service.SetSyntheticCompactApplyInfo(c, applyInfo)
 		if err != nil {
 			setResponsesPreviousIDActionForError(c, err)
 			return nil, err
 		}
-		if !ok {
+		if visibleOnly {
+			service.MarkResponsesCompactVisibleOnlyFallback(c, info, "stale_local_synthetic_state_visible_only")
+		} else if ok {
+			common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_synthetic_restore")
+		} else {
 			common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "missing_local_synthetic_state")
 			return nil, service.ErrSyntheticCompactStateNotFound
 		}
 		request = convertedRequest
-		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_synthetic_restore")
 	}
 
 	if info != nil && info.ChannelSetting.SystemPrompt != "" {
@@ -99,12 +103,6 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 					} else {
 						return nil, err
 					}
-				}
-			} else {
-				if b, err := common.Marshal(systemPrompt); err == nil {
-					request.Instructions = b
-				} else {
-					return nil, err
 				}
 			}
 		}
@@ -136,7 +134,7 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	}
 
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
-		return openai.OaiResponsesCompactionHandler(c, resp)
+		return openai.OaiResponsesCompactionHandler(c, info, resp)
 	}
 
 	if info.IsStream {

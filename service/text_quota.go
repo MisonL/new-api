@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -445,6 +446,25 @@ func MarkResponsesCompactFallbackAttempt(ctx *gin.Context, relayInfo *relaycommo
 	ctx.Set(responsesCompactFallbackAttemptLogKey, attemptLog)
 }
 
+func MarkResponsesCompactVisibleOnlyFallback(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, previousIDAction string) {
+	if ctx == nil {
+		return
+	}
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactVisibleOnly, true)
+	if ctx.Request != nil {
+		requestCtx := ctx.Request.Context()
+		if requestCtx == nil {
+			requestCtx = context.Background()
+		}
+		ctx.Request = ctx.Request.WithContext(context.WithValue(requestCtx, constant.ContextKeyResponsesCompactVisibleOnly, true))
+	}
+	if strings.TrimSpace(previousIDAction) != "" {
+		common.SetContextKey(ctx, constant.ContextKeyResponsesPreviousIDAction, previousIDAction)
+	}
+	MarkResponsesCompactFallbackAttempt(ctx, relayInfo, ResponsesCompactFallbackAttemptVisibleOnly, nil)
+}
+
 func sanitizeResponsesCompactLogValue(value string, limit int) string {
 	value = strings.TrimSpace(strings.Join(strings.Fields(value), " "))
 	if limit <= 0 || len(value) <= limit {
@@ -498,7 +518,7 @@ func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	if ctx != nil {
 		contextFallback = ctx.GetBool("responses_compact_context_fallback_attempted")
 		previousIDFallback = ctx.GetBool("responses_compact_previous_response_id_fallback_attempted")
-		visibleOnlyFallback = ctx.GetBool("responses_compact_visible_only_fallback_attempted")
+		visibleOnlyFallback = common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted)
 		summaryModelRetry = ctx.GetBool("responses_compact_summary_model_fallback_attempted")
 		summaryModel = common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactSummaryModel)
 	}

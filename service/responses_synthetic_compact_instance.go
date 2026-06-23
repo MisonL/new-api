@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
 
@@ -18,6 +19,7 @@ const (
 
 var (
 	syntheticCompactInstanceMu       sync.Mutex
+	syntheticCompactInstanceGroup    singleflight.Group
 	syntheticCompactCachedInstanceID string
 	syntheticCompactProcessInstance  = syntheticCompactInstanceIDPrefix + common.GetUUID()
 )
@@ -26,21 +28,47 @@ func syntheticCompactLocalInstanceID(ctx context.Context) (string, error) {
 	if model.DB == nil {
 		return syntheticCompactProcessInstance, nil
 	}
-
 	syntheticCompactInstanceMu.Lock()
-	defer syntheticCompactInstanceMu.Unlock()
 	if syntheticCompactCachedInstanceID != "" {
-		return syntheticCompactCachedInstanceID, nil
+		cachedID := syntheticCompactCachedInstanceID
+		syntheticCompactInstanceMu.Unlock()
+		return cachedID, nil
 	}
+	syntheticCompactInstanceMu.Unlock()
 
+	value, err, _ := syntheticCompactInstanceGroup.Do("local-instance-id", func() (any, error) {
+		syntheticCompactInstanceMu.Lock()
+		if syntheticCompactCachedInstanceID != "" {
+			cachedID := syntheticCompactCachedInstanceID
+			syntheticCompactInstanceMu.Unlock()
+			return cachedID, nil
+		}
+		syntheticCompactInstanceMu.Unlock()
+
+		instanceID, err := loadOrCreateSyntheticCompactLocalInstanceID(ctx)
+		if err != nil {
+			return "", err
+		}
+		syntheticCompactInstanceMu.Lock()
+		syntheticCompactCachedInstanceID = instanceID
+		syntheticCompactInstanceMu.Unlock()
+		return instanceID, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	instanceID, _ := value.(string)
+	return instanceID, nil
+}
+
+func loadOrCreateSyntheticCompactLocalInstanceID(ctx context.Context) (string, error) {
 	storeCtx, cancel := syntheticCompactStoreContext(ctx)
 	defer cancel()
 
 	option := model.Option{}
 	err := model.DB.WithContext(storeCtx).First(&option, "key = ?", syntheticCompactInstanceOptionKey).Error
 	if err == nil && syntheticCompactInstanceIDValid(option.Value) {
-		syntheticCompactCachedInstanceID = strings.TrimSpace(option.Value)
-		return syntheticCompactCachedInstanceID, nil
+		return strings.TrimSpace(option.Value), nil
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", err
@@ -48,21 +76,24 @@ func syntheticCompactLocalInstanceID(ctx context.Context) (string, error) {
 
 	instanceID := syntheticCompactInstanceIDPrefix + common.GetUUID()
 	if err == nil {
-		option.Value = instanceID
-		if saveErr := model.DB.WithContext(storeCtx).Save(&option).Error; saveErr != nil {
+		if saveErr := model.DB.WithContext(storeCtx).
+			Model(&model.Option{}).
+			Where("key = ?", syntheticCompactInstanceOptionKey).
+			Update("value", instanceID).Error; saveErr != nil {
 			return "", saveErr
 		}
-	} else if createErr := model.DB.WithContext(storeCtx).Create(&model.Option{Key: syntheticCompactInstanceOptionKey, Value: instanceID}).Error; createErr != nil {
+		return instanceID, nil
+	}
+
+	if createErr := model.DB.WithContext(storeCtx).Create(&model.Option{Key: syntheticCompactInstanceOptionKey, Value: instanceID}).Error; createErr != nil {
 		var reloaded model.Option
 		if reloadErr := model.DB.WithContext(storeCtx).First(&reloaded, "key = ?", syntheticCompactInstanceOptionKey).Error; reloadErr == nil && syntheticCompactInstanceIDValid(reloaded.Value) {
-			syntheticCompactCachedInstanceID = strings.TrimSpace(reloaded.Value)
-			return syntheticCompactCachedInstanceID, nil
+			return strings.TrimSpace(reloaded.Value), nil
 		}
 		return "", createErr
 	}
 
-	syntheticCompactCachedInstanceID = instanceID
-	return syntheticCompactCachedInstanceID, nil
+	return instanceID, nil
 }
 
 func syntheticCompactInstanceIDValid(instanceID string) bool {
@@ -81,6 +112,7 @@ func syntheticCompactInstanceIDValid(instanceID string) bool {
 func resetSyntheticCompactInstanceForTest() {
 	syntheticCompactInstanceMu.Lock()
 	defer syntheticCompactInstanceMu.Unlock()
+	syntheticCompactInstanceGroup = singleflight.Group{}
 	syntheticCompactCachedInstanceID = ""
 }
 

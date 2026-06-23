@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
@@ -31,6 +32,35 @@ func syntheticCompactMarkers(input common.RawMessage) []string {
 		}
 	}
 	return markers
+}
+
+func HasRemoteResponsesCompactionInput(ctx context.Context, req dto.OpenAIResponsesRequest) (bool, error) {
+	if common.GetJsonType(req.Input) != "array" {
+		return false, nil
+	}
+	var items []common.RawMessage
+	if err := common.Unmarshal(req.Input, &items); err != nil {
+		return false, nil
+	}
+	for _, rawItem := range items {
+		item, ok := responsesInputObject(rawItem)
+		if !ok {
+			continue
+		}
+		if !relaycommon.IsResponsesCompactionItemType(rawStringField(item["type"])) {
+			continue
+		}
+		marker := rawStringField(item["encrypted_content"])
+		if marker == "" {
+			return false, ErrResponsesCompactionContentRequired
+		}
+		if _, ok, err := syntheticCompactIDFromMarker(ctx, marker); err != nil {
+			return false, err
+		} else if !ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func removeSyntheticCompactMarkers(ctx context.Context, input common.RawMessage) (common.RawMessage, error) {

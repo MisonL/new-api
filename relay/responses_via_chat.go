@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	openaichannel "github.com/QuantumNous/new-api/relay/channel/openai"
@@ -38,6 +39,23 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 	var overriddenResponsesReq dto.OpenAIResponsesRequest
 	if err := common.Unmarshal(responsesJSON, &overriddenResponsesReq); err != nil {
 		return nil, types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+	}
+
+	convertedResponsesReq, appliedSyntheticCompact, visibleOnlySyntheticCompact, applyInfo, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(
+		relaycommon.GinRequestContext(c),
+		service.SyntheticCompactScopeFromSource(info),
+		overriddenResponsesReq,
+	)
+	service.SetSyntheticCompactApplyInfo(c, applyInfo)
+	if err != nil {
+		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	if visibleOnlySyntheticCompact {
+		overriddenResponsesReq = convertedResponsesReq
+		service.MarkResponsesCompactVisibleOnlyFallback(c, info, "stale_local_synthetic_state_visible_only")
+	} else if appliedSyntheticCompact {
+		overriddenResponsesReq = convertedResponsesReq
+		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_synthetic_restore")
 	}
 
 	chatReq, err := service.ResponsesRequestToChatCompletionsRequestWithOptions(&overriddenResponsesReq, options)

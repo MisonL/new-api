@@ -202,8 +202,9 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 	var passthroughRegex []*regexp.Regexp
 	if !info.IsChannelTest {
 		for k := range headerOverrideSource {
-			key := strings.TrimSpace(strings.ToLower(k))
-			if key == "" {
+			rawKey := strings.TrimSpace(k)
+			key := strings.ToLower(rawKey)
+			if rawKey == "" {
 				continue
 			}
 			if key == headerPassthroughAllKey {
@@ -214,9 +215,9 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 			var pattern string
 			switch {
 			case strings.HasPrefix(key, headerPassthroughRegexPrefix):
-				pattern = strings.TrimSpace(key[len(headerPassthroughRegexPrefix):])
+				pattern = strings.TrimSpace(rawKey[len(headerPassthroughRegexPrefix):])
 			case strings.HasPrefix(key, headerPassthroughRegexPrefixV2):
-				pattern = strings.TrimSpace(key[len(headerPassthroughRegexPrefixV2):])
+				pattern = strings.TrimSpace(rawKey[len(headerPassthroughRegexPrefixV2):])
 			default:
 				continue
 			}
@@ -242,8 +243,9 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 			}
 			if !passAll {
 				matched := false
+				normalizedName := strings.ToLower(strings.TrimSpace(name))
 				for _, re := range passthroughRegex {
-					if re.MatchString(name) {
+					if re.MatchString(name) || re.MatchString(normalizedName) {
 						matched = true
 						break
 					}
@@ -314,6 +316,32 @@ func mergeFinalHeaderOverrideAudit(c *gin.Context, headers map[string]string, ap
 		audit.AppliedUserAgent = appliedUserAgent
 	}
 	common2.SetContextKey(c, rootconstant.ContextKeyChannelHeaderPolicyAudit, audit)
+}
+
+func mergeDefaultUserAgentAudit(c *gin.Context, req *http.Request, resp *http.Response) {
+	if c == nil || req == nil || resp == nil {
+		return
+	}
+	if _, exists := req.Header["User-Agent"]; exists {
+		return
+	}
+	defaultUA := defaultTransportUserAgent(resp)
+	if defaultUA == "" {
+		return
+	}
+	audit, _ := common2.GetContextKeyType[service.RuntimeHeaderPolicyAudit](c, rootconstant.ContextKeyChannelHeaderPolicyAudit)
+	if strings.TrimSpace(audit.AppliedUserAgent) != "" {
+		return
+	}
+	audit.AppliedUserAgent = defaultUA
+	common2.SetContextKey(c, rootconstant.ContextKeyChannelHeaderPolicyAudit, audit)
+}
+
+func defaultTransportUserAgent(resp *http.Response) string {
+	if resp != nil && resp.ProtoMajor == 2 {
+		return "Go-http-client/2.0"
+	}
+	return "Go-http-client/1.1"
 }
 
 func getHeaderOverrideUserAgent(headers map[string]string) string {
@@ -678,6 +706,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	if resp == nil {
 		return nil, errors.New("resp is nil")
 	}
+	mergeDefaultUserAgentAudit(c, req, resp)
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)

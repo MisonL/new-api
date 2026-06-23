@@ -122,6 +122,74 @@ func TestApplyChannelTestProtocolStrategyConvertsResponsesCompactToChat(t *testi
 	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponsesCompaction, types.RelayFormatOpenAI}, info.RequestConversionChain)
 }
 
+func TestResponsesCompactionRequestToResponsesRequestPreservesSub2APIFields(t *testing.T) {
+	req := &dto.OpenAIResponsesCompactionRequest{
+		Model:              "gpt-5.5-openai-compact",
+		Input:              json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]`),
+		Instructions:       json.RawMessage(`"keep context"`),
+		Tools:              json.RawMessage(`[{"type":"namespace","name":"codex_app","tools":[]}]`),
+		ParallelToolCalls:  json.RawMessage(`false`),
+		Reasoning:          &dto.Reasoning{Effort: "high"},
+		ServiceTier:        "default",
+		Text:               json.RawMessage(`{"format":{"type":"text"}}`),
+		PromptCacheKey:     json.RawMessage(`"cache-key"`),
+		PreviousResponseID: "resp_previous",
+	}
+
+	responsesReq := req.ToResponsesRequest()
+
+	require.NotNil(t, responsesReq)
+	require.Equal(t, req.Model, responsesReq.Model)
+	require.JSONEq(t, string(req.Input), string(responsesReq.Input))
+	require.JSONEq(t, string(req.Instructions), string(responsesReq.Instructions))
+	require.JSONEq(t, string(req.Tools), string(responsesReq.Tools))
+	require.JSONEq(t, string(req.ParallelToolCalls), string(responsesReq.ParallelToolCalls))
+	require.Equal(t, req.Reasoning, responsesReq.Reasoning)
+	require.Equal(t, req.ServiceTier, responsesReq.ServiceTier)
+	require.JSONEq(t, string(req.Text), string(responsesReq.Text))
+	require.JSONEq(t, string(req.PromptCacheKey), string(responsesReq.PromptCacheKey))
+	require.Equal(t, req.PreviousResponseID, responsesReq.PreviousResponseID)
+}
+
+func TestResponsesCompactionRequestToResponsesRequestKeepsNilOptionalFields(t *testing.T) {
+	req := &dto.OpenAIResponsesCompactionRequest{
+		Model: "gpt-5.5-openai-compact",
+		Input: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]`),
+	}
+
+	responsesReq := req.ToResponsesRequest()
+
+	require.NotNil(t, responsesReq)
+	require.Equal(t, req.Model, responsesReq.Model)
+	require.JSONEq(t, string(req.Input), string(responsesReq.Input))
+	require.Nil(t, responsesReq.Reasoning)
+	require.Empty(t, responsesReq.PreviousResponseID)
+	require.Empty(t, responsesReq.Text)
+	require.Empty(t, responsesReq.Tools)
+}
+
+func TestResponsesCompactionRequestToResponsesRequestPreservesRawNullFields(t *testing.T) {
+	req := &dto.OpenAIResponsesCompactionRequest{
+		Model:             "gpt-5.5-openai-compact",
+		Input:             json.RawMessage(`null`),
+		Instructions:      json.RawMessage(`null`),
+		Tools:             json.RawMessage(`null`),
+		ParallelToolCalls: json.RawMessage(`null`),
+		Text:              json.RawMessage(`null`),
+		PromptCacheKey:    json.RawMessage(`null`),
+	}
+
+	responsesReq := req.ToResponsesRequest()
+
+	require.NotNil(t, responsesReq)
+	require.JSONEq(t, "null", string(responsesReq.Input))
+	require.JSONEq(t, "null", string(responsesReq.Instructions))
+	require.JSONEq(t, "null", string(responsesReq.Tools))
+	require.JSONEq(t, "null", string(responsesReq.ParallelToolCalls))
+	require.JSONEq(t, "null", string(responsesReq.Text))
+	require.JSONEq(t, "null", string(responsesReq.PromptCacheKey))
+}
+
 func TestApplyChannelTestProtocolStrategyUsesGlobalResponsesToChatRuleByDefault(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -544,6 +612,71 @@ func TestFinalizeChannelTestRuntimeSummaryMarksRuntimeHeaderParamOverrideApplied
 	finalizeChannelTestRuntimeSummary(summary, nil, info)
 
 	require.True(t, summary.ParamOverrideApplied)
+}
+
+func TestFinalizeChannelTestRuntimeSummaryIncludesCompactCapabilitySnapshot(t *testing.T) {
+	summary := &channelTestRuntimeSummary{}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeNative,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+		},
+	}
+
+	finalizeChannelTestRuntimeSummary(summary, nil, info)
+
+	require.NotNil(t, summary.ChannelCapability)
+	require.Equal(t, "sub2api_http", summary.ChannelCapability["profile"])
+	require.Equal(t, "native", summary.ChannelCapability["compact_mode_effective"])
+	require.Equal(t, true, summary.ChannelCapability["supports_responses_compact"])
+	require.Equal(t, false, summary.ChannelCapability["supports_rest_previous_response_id"])
+	require.Equal(t, false, summary.ChannelCapability["supports_compaction_item_passthrough"])
+}
+
+func TestFinalizeChannelTestRuntimeSummaryHandlesNilInfo(t *testing.T) {
+	summary := &channelTestRuntimeSummary{FinalRequestPath: "/v1/responses"}
+
+	finalizeChannelTestRuntimeSummary(summary, nil, nil)
+
+	require.Equal(t, "/v1/responses", summary.FinalRequestPath)
+	require.Nil(t, summary.ChannelCapability)
+}
+
+func TestFinalizeChannelTestRuntimeSummaryHandlesNilChannelMeta(t *testing.T) {
+	summary := &channelTestRuntimeSummary{}
+	info := &relaycommon.RelayInfo{
+		RequestURLPath: "/v1/chat/completions",
+	}
+
+	finalizeChannelTestRuntimeSummary(summary, nil, info)
+
+	require.Equal(t, "/v1/chat/completions", summary.FinalRequestPath)
+	require.Nil(t, summary.ChannelCapability)
+}
+
+func TestFinalizeChannelTestRuntimeSummaryShowsProxyCompactAsSyntheticOnly(t *testing.T) {
+	summary := &channelTestRuntimeSummary{}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+			},
+		},
+	}
+
+	finalizeChannelTestRuntimeSummary(summary, nil, info)
+
+	require.NotNil(t, summary.ChannelCapability)
+	require.Equal(t, "generic_proxy", summary.ChannelCapability["profile"])
+	require.Equal(t, "synthetic_summary", summary.ChannelCapability["compact_mode_effective"])
+	require.Equal(t, false, summary.ChannelCapability["supports_responses_compact"])
+	require.Equal(t, false, summary.ChannelCapability["supports_rest_previous_response_id"])
+	require.Equal(t, false, summary.ChannelCapability["supports_compaction_item_passthrough"])
 }
 
 func TestSettleTestQuotaUsesTieredBilling(t *testing.T) {

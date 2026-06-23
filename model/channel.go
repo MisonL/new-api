@@ -68,6 +68,51 @@ type ChannelInfo struct {
 	MultiKeyMode           constant.MultiKeyMode `json:"multi_key_mode"`
 }
 
+func (channel *Channel) CloneForCache() *Channel {
+	if channel == nil {
+		return nil
+	}
+	cloned := *channel
+	cloned.Keys = append([]string(nil), channel.Keys...)
+	cloned.ChannelInfo.MultiKeyStatusList = cloneIntMap(channel.ChannelInfo.MultiKeyStatusList)
+	cloned.ChannelInfo.MultiKeyDisabledReason = cloneIntStringMap(channel.ChannelInfo.MultiKeyDisabledReason)
+	cloned.ChannelInfo.MultiKeyDisabledTime = cloneInt64Map(channel.ChannelInfo.MultiKeyDisabledTime)
+	return &cloned
+}
+
+func cloneIntMap(source map[int]int) map[int]int {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[int]int, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneIntStringMap(source map[int]string) map[int]string {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[int]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneInt64Map(source map[int]int64) map[int]int64 {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[int]int64, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
 type ChannelSortOptions struct {
 	SortBy    string
 	SortOrder string
@@ -1073,6 +1118,93 @@ func MarkResponsesCompactAutoFallback(channelId int, reason string) error {
 		CacheUpdateChannel(updatedChannel)
 	}
 	return nil
+}
+
+const responsesCapabilityObservationMinUpdateIntervalSeconds int64 = 300
+
+func MarkResponsesCapabilityObservation(channelId int, observation dto.ResponsesCapabilityObservation) (dto.ChannelOtherSettings, error) {
+	if channelId <= 0 || observation.ObservedAt == 0 {
+		return dto.ChannelOtherSettings{}, nil
+	}
+	if settings, ok, err := cachedResponsesCapabilityObservationSettings(channelId, observation); err != nil {
+		return dto.ChannelOtherSettings{}, err
+	} else if ok {
+		return settings, nil
+	}
+	var updatedSettings dto.ChannelOtherSettings
+	shouldReloadCache := false
+	updatedOtherSettings := ""
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		channel := &Channel{}
+		query := tx
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(channel, channelId).Error; err != nil {
+			return err
+		}
+		settings := dto.ChannelOtherSettings{}
+		if channel.OtherSettings != "" {
+			if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+				return err
+			}
+		}
+		if settings.ResponsesCapabilityRegistry == nil {
+			settings.ResponsesCapabilityRegistry = &dto.ResponsesChannelCapabilityRegistry{}
+		}
+		if !shouldUpdateResponsesCapabilityObservation(settings.ResponsesCapabilityRegistry.Observed, observation) {
+			updatedSettings = settings
+			return nil
+		}
+		settings.ResponsesCapabilityRegistry.Observed = &observation
+		settings.ResponsesCapabilityRegistry.Source = "observed_calls"
+		channel.SetOtherSettings(settings)
+		if err := tx.Model(&Channel{}).Where("id = ?", channelId).Update("settings", channel.OtherSettings).Error; err != nil {
+			return err
+		}
+		updatedSettings = settings
+		updatedOtherSettings = channel.OtherSettings
+		shouldReloadCache = true
+		return nil
+	}); err != nil {
+		return dto.ChannelOtherSettings{}, err
+	}
+	if shouldReloadCache {
+		CacheUpdateChannelOtherSettings(channelId, updatedOtherSettings)
+	}
+	return updatedSettings, nil
+}
+
+func cachedResponsesCapabilityObservationSettings(channelId int, observation dto.ResponsesCapabilityObservation) (dto.ChannelOtherSettings, bool, error) {
+	if !common.MemoryCacheEnabled {
+		return dto.ChannelOtherSettings{}, false, nil
+	}
+	channel, err := CacheGetChannel(channelId)
+	if err != nil || channel == nil || channel.OtherSettings == "" {
+		return dto.ChannelOtherSettings{}, false, nil
+	}
+	settings := dto.ChannelOtherSettings{}
+	if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+		return dto.ChannelOtherSettings{}, false, err
+	}
+	if settings.ResponsesCapabilityRegistry == nil ||
+		shouldUpdateResponsesCapabilityObservation(settings.ResponsesCapabilityRegistry.Observed, observation) {
+		return dto.ChannelOtherSettings{}, false, nil
+	}
+	return settings, true, nil
+}
+
+func shouldUpdateResponsesCapabilityObservation(existing *dto.ResponsesCapabilityObservation, next dto.ResponsesCapabilityObservation) bool {
+	if existing == nil || existing.ObservedAt <= 0 {
+		return true
+	}
+	if existing.StatusCode != next.StatusCode || existing.ErrorCode != next.ErrorCode {
+		return true
+	}
+	if next.ObservedAt <= existing.ObservedAt {
+		return false
+	}
+	return next.ObservedAt-existing.ObservedAt >= responsesCapabilityObservationMinUpdateIntervalSeconds
 }
 
 func (channel *Channel) GetParamOverride() map[string]interface{} {

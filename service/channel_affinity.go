@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"hash/fnv"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -28,6 +30,7 @@ const (
 
 	channelAffinityCacheNamespace           = "new-api:channel_affinity:v1"
 	channelAffinityUsageCacheStatsNamespace = "new-api:channel_affinity_usage_cache_stats:v1"
+	channelAffinityDefaultUsingGroup        = "default"
 )
 
 var (
@@ -324,9 +327,22 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 		default:
 			return strings.TrimSpace(res.Raw)
 		}
+	case "responses_encrypted_content":
+		return firstRequestEncryptedReasoningContentFingerprint(c)
 	default:
 		return ""
 	}
+}
+
+func extractChannelAffinityValues(c *gin.Context, src operation_setting.ChannelAffinityKeySource) []string {
+	if strings.TrimSpace(src.Type) == "responses_encrypted_content" {
+		return requestEncryptedReasoningContentFingerprints(c)
+	}
+	value := extractChannelAffinityValue(c, src)
+	if value == "" {
+		return nil
+	}
+	return []string{value}
 }
 
 func buildChannelAffinityCacheKeySuffix(rule operation_setting.ChannelAffinityRule, modelName string, usingGroup string, affinityValue string) string {
@@ -342,6 +358,15 @@ func buildChannelAffinityCacheKeySuffix(rule operation_setting.ChannelAffinityRu
 	}
 	parts = append(parts, affinityValue)
 	return strings.Join(parts, ":")
+}
+
+func buildResponsesEncryptedContentAffinityCacheKeySuffix(rule operation_setting.ChannelAffinityRule, modelName string, usingGroup string, affinityValue string) string {
+	return buildChannelAffinityCacheKeySuffix(operation_setting.ChannelAffinityRule{
+		Name:              rule.Name,
+		IncludeRuleName:   rule.IncludeRuleName,
+		IncludeModelName:  true,
+		IncludeUsingGroup: true,
+	}, modelName, usingGroup, affinityValue)
 }
 
 func setChannelAffinityContext(c *gin.Context, meta channelAffinityMeta) {
@@ -414,6 +439,50 @@ func affinityFingerprint(s string) string {
 		return hex[:8]
 	}
 	return hex
+}
+
+func firstRequestEncryptedReasoningContentFingerprint(c *gin.Context) string {
+	values := requestEncryptedReasoningContentFingerprints(c)
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func requestEncryptedReasoningContentFingerprints(c *gin.Context) []string {
+	if c == nil {
+		return nil
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil
+	}
+	body, err := storage.Bytes()
+	if err != nil || len(body) == 0 {
+		return nil
+	}
+	input := gjson.GetBytes(body, "input")
+	if !input.IsArray() {
+		return nil
+	}
+	values := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, item := range input.Array() {
+		if item.Get("type").String() != "reasoning" {
+			continue
+		}
+		value := strings.TrimSpace(item.Get("encrypted_content").String())
+		if value == "" {
+			continue
+		}
+		fp := affinityFingerprint(value)
+		if _, ok := seen[fp]; ok {
+			continue
+		}
+		seen[fp] = struct{}{}
+		values = append(values, fp)
+	}
+	return values
 }
 
 func buildChannelAffinityKeyHint(s string) string {
@@ -566,56 +635,89 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		if len(rule.UserAgentInclude) > 0 && !matchAnyIncludeFold(rule.UserAgentInclude, userAgent) {
 			continue
 		}
-		var affinityValue string
+		var affinityValues []string
 		var usedSource operation_setting.ChannelAffinityKeySource
 		for _, src := range rule.KeySources {
-			affinityValue = extractChannelAffinityValue(c, src)
-			if affinityValue != "" {
+			affinityValues = extractChannelAffinityValues(c, src)
+			if len(affinityValues) > 0 {
 				usedSource = src
 				break
 			}
 		}
-		if affinityValue == "" {
+		if len(affinityValues) == 0 {
 			continue
 		}
-		if rule.ValueRegex != "" && !matchAnyRegexCached([]string{rule.ValueRegex}, affinityValue) {
+		for _, affinityValue := range affinityValues {
+			channelID, found := getPreferredChannelByAffinityValue(c, rule, usedSource, modelName, usingGroup, path, affinityValue)
+			if found {
+				return channelID, true
+			}
+		}
+		if strings.TrimSpace(usedSource.Type) == "responses_encrypted_content" {
 			continue
-		}
-
-		ttlSeconds := rule.TTLSeconds
-		if ttlSeconds <= 0 {
-			ttlSeconds = setting.DefaultTTLSeconds
-		}
-		cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
-		cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
-		setChannelAffinityContext(c, channelAffinityMeta{
-			CacheKey:       cacheKeyFull,
-			TTLSeconds:     ttlSeconds,
-			RuleName:       rule.Name,
-			SkipRetry:      rule.SkipRetryOnFailure,
-			ParamTemplate:  cloneStringAnyMap(rule.ParamOverrideTemplate),
-			KeySourceType:  strings.TrimSpace(usedSource.Type),
-			KeySourceKey:   strings.TrimSpace(usedSource.Key),
-			KeySourcePath:  strings.TrimSpace(usedSource.Path),
-			KeyHint:        buildChannelAffinityKeyHint(affinityValue),
-			KeyFingerprint: affinityFingerprint(affinityValue),
-			UsingGroup:     usingGroup,
-			ModelName:      modelName,
-			RequestPath:    path,
-		})
-
-		cache := getChannelAffinityCache()
-		channelID, found, err := cache.Get(cacheKeySuffix)
-		if err != nil {
-			common.SysError(fmt.Sprintf("channel affinity cache get failed: key=%s, err=%v", cacheKeyFull, err))
-			return 0, false
-		}
-		if found {
-			return channelID, true
 		}
 		return 0, false
 	}
 	return 0, false
+}
+
+func getPreferredChannelByAffinityValue(c *gin.Context, rule operation_setting.ChannelAffinityRule, usedSource operation_setting.ChannelAffinityKeySource, modelName string, usingGroup string, path string, affinityValue string) (int, bool) {
+	if affinityValue == "" {
+		return 0, false
+	}
+	if rule.ValueRegex != "" && !matchAnyRegexCached([]string{rule.ValueRegex}, affinityValue) {
+		return 0, false
+	}
+	sourceType := strings.TrimSpace(usedSource.Type)
+	setting := operation_setting.GetChannelAffinitySetting()
+	ttlSeconds := rule.TTLSeconds
+	if setting != nil && ttlSeconds <= 0 {
+		ttlSeconds = setting.DefaultTTLSeconds
+	}
+	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
+	if sourceType == "responses_encrypted_content" {
+		cacheKeySuffix = buildResponsesEncryptedContentAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
+	}
+	cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
+	meta := buildChannelAffinityMeta(rule, usedSource, modelName, usingGroup, path, affinityValue, cacheKeyFull, ttlSeconds)
+	if sourceType != "responses_encrypted_content" {
+		setChannelAffinityContext(c, meta)
+	}
+	cache := getChannelAffinityCache()
+	channelID, found, err := cache.Get(cacheKeySuffix)
+	if err != nil {
+		common.SysError(fmt.Sprintf("channel affinity cache get failed: key=%s, err=%v", cacheKeyFull, err))
+		return 0, false
+	}
+	if !found {
+		return 0, false
+	}
+	if sourceType == "responses_encrypted_content" {
+		setChannelAffinityContext(c, meta)
+	}
+	return channelID, true
+}
+
+func buildChannelAffinityMeta(rule operation_setting.ChannelAffinityRule, usedSource operation_setting.ChannelAffinityKeySource, modelName string, usingGroup string, path string, affinityValue string, cacheKeyFull string, ttlSeconds int) channelAffinityMeta {
+	keyFingerprint := affinityFingerprint(affinityValue)
+	if strings.TrimSpace(usedSource.Type) == "responses_encrypted_content" {
+		keyFingerprint = affinityValue
+	}
+	return channelAffinityMeta{
+		CacheKey:       cacheKeyFull,
+		TTLSeconds:     ttlSeconds,
+		RuleName:       rule.Name,
+		SkipRetry:      rule.SkipRetryOnFailure,
+		ParamTemplate:  cloneStringAnyMap(rule.ParamOverrideTemplate),
+		KeySourceType:  strings.TrimSpace(usedSource.Type),
+		KeySourceKey:   strings.TrimSpace(usedSource.Key),
+		KeySourcePath:  strings.TrimSpace(usedSource.Path),
+		KeyHint:        buildChannelAffinityKeyHint(affinityValue),
+		KeyFingerprint: keyFingerprint,
+		UsingGroup:     usingGroup,
+		ModelName:      modelName,
+		RequestPath:    path,
+	}
 }
 
 func ShouldSkipRetryAfterChannelAffinityFailure(c *gin.Context) bool {
@@ -699,6 +801,122 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 	cache := getChannelAffinityCache()
 	if err := cache.SetWithTTL(cacheKey, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
 		common.SysError(fmt.Sprintf("channel affinity cache set failed: key=%s, err=%v", cacheKey, err))
+	}
+}
+
+func RecordResponsesEncryptedContentAffinity(c *gin.Context, responseBody []byte, channelID int) {
+	RecordResponsesEncryptedContentAffinityWithStatus(c, responseBody, channelID, http.StatusOK)
+}
+
+func RecordResponsesEncryptedContentAffinityWithStatus(c *gin.Context, responseBody []byte, channelID int, statusCode int) {
+	if c == nil || channelID <= 0 || len(responseBody) == 0 {
+		return
+	}
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return
+	}
+	setting := operation_setting.GetChannelAffinitySetting()
+	if setting == nil || !setting.Enabled {
+		return
+	}
+	path := ""
+	if c.Request != nil && c.Request.URL != nil {
+		path = c.Request.URL.Path
+	}
+	if path != "/v1/responses" {
+		return
+	}
+	// statusCode is the upstream response status; c.Writer.Status() is the downstream status after relay handling.
+	if c.Writer != nil {
+		status := c.Writer.Status()
+		if status >= http.StatusBadRequest {
+			return
+		}
+	}
+	modelName := strings.TrimSpace(gjson.GetBytes(responseBody, "model").String())
+	if modelName == "" {
+		modelName = strings.TrimSpace(c.GetString("original_model"))
+	}
+	if modelName == "" {
+		return
+	}
+	usingGroup := responsesEncryptedContentAffinityUsingGroup(c)
+	values := responseEncryptedContentAffinityValues(responseBody)
+	if len(values) == 0 {
+		return
+	}
+	for _, value := range values {
+		recordResponsesEncryptedContentAffinityValue(setting, modelName, usingGroup, affinityFingerprint(value), channelID)
+	}
+}
+
+func responsesEncryptedContentAffinityUsingGroup(c *gin.Context) string {
+	usingGroup := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyUsingGroup))
+	if usingGroup == "" {
+		return channelAffinityDefaultUsingGroup
+	}
+	if usingGroup != "auto" {
+		return usingGroup
+	}
+	selectedGroup := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyAutoGroup))
+	if selectedGroup != "" {
+		return selectedGroup
+	}
+	return channelAffinityDefaultUsingGroup
+}
+
+func responseEncryptedContentAffinityValues(responseBody []byte) []string {
+	root := gjson.ParseBytes(responseBody)
+	output := root.Get("output")
+	if !output.IsArray() {
+		return nil
+	}
+	values := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, item := range output.Array() {
+		if item.Get("type").String() != "reasoning" {
+			continue
+		}
+		value := strings.TrimSpace(item.Get("encrypted_content").String())
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
+}
+
+func recordResponsesEncryptedContentAffinityValue(setting *operation_setting.ChannelAffinitySetting, modelName string, usingGroup string, valueFingerprint string, channelID int) {
+	if valueFingerprint == "" {
+		return
+	}
+	for _, rule := range setting.Rules {
+		if strings.TrimSpace(rule.Name) != operation_setting.ResponsesEncryptedContentAffinityRuleName {
+			continue
+		}
+		if !matchAnyRegexCached(rule.ModelRegex, modelName) {
+			continue
+		}
+		if rule.ValueRegex != "" && !matchAnyRegexCached([]string{rule.ValueRegex}, valueFingerprint) {
+			continue
+		}
+		ttlSeconds := rule.TTLSeconds
+		if ttlSeconds <= 0 {
+			ttlSeconds = setting.DefaultTTLSeconds
+		}
+		if ttlSeconds <= 0 {
+			ttlSeconds = 3600
+		}
+		cacheKeySuffix := buildResponsesEncryptedContentAffinityCacheKeySuffix(rule, modelName, usingGroup, valueFingerprint)
+		cache := getChannelAffinityCache()
+		if err := cache.SetWithTTL(cacheKeySuffix, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
+			common.SysError(fmt.Sprintf("responses encrypted content affinity cache set failed: rule=%s, key_fp=%s, err=%v", rule.Name, valueFingerprint, err))
+		}
+		return
 	}
 }
 

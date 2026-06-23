@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -69,7 +70,10 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	adaptor.Init(info)
 	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
-	conversionRule := findResponsesViaChatRule(info, passThroughGlobal, request)
+	conversionRule, err := findResponsesViaChatRule(relaycommon.GinRequestContext(c), info, passThroughGlobal, request)
+	if err != nil {
+		return newResponsesConvertRequestError(err)
+	}
 	if conversionRule != nil {
 		usage, newApiErr := responsesViaChat(c, info, adaptor, request, responsesViaChatOptionsFromRule(conversionRule))
 		if newApiErr != nil {
@@ -151,46 +155,133 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 			types.ErrOptionWithSkipRetry(),
 		)
 	}
+	requestBody, convertedRequest, err := buildOpenAIResponsesRequestBody(c, info, adaptor, request, passThroughGlobal)
+	if err != nil {
+		return nil, err
+	}
+
+	usage, newAPIError := doOpenAIResponsesRequest(c, info, adaptor, requestBody)
+	if newAPIError == nil {
+		return usage, nil
+	}
+
+	if !shouldRetryResponsesWithoutEncryptedReasoning(info, newAPIError) {
+		return nil, newAPIError
+	}
+	strippedRequest, result, stripErr := relaycommon.StripEncryptedReasoningFromResponsesRequest(convertedRequest)
+	if stripErr != nil {
+		return nil, newAPIError
+	}
+	if result.RemovedCount() == 0 {
+		return nil, newAPIError
+	}
+	common.SetContextKey(c, appconstant.ContextKeyResponsesEncryptedContextRetry, true)
+	common.SysLog(fmt.Sprintf(
+		"responses encrypted reasoning retry: channel_id=%d model=%s encrypted_reasoning_items=%d remaining_items=%d original_error=%s",
+		info.ChannelId,
+		info.OriginModelName,
+		result.EncryptedReasoningCount,
+		result.RemainingCount,
+		newAPIError.MaskSensitiveError(),
+	))
+	retryBody, _, retryBuildErr := buildOpenAIResponsesRequestBody(c, info, adaptor, &strippedRequest, false, buildResponsesRequestBodyOptions{
+		ForceConvertedBody: true,
+	})
+	if retryBuildErr != nil {
+		return nil, retryBuildErr
+	}
+	return doOpenAIResponsesRequest(c, info, adaptor, retryBody)
+}
+
+type buildResponsesRequestBodyOptions struct {
+	ForceConvertedBody bool
+}
+
+func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, request *dto.OpenAIResponsesRequest, passThroughGlobal bool, options ...buildResponsesRequestBodyOptions) (io.Reader, dto.OpenAIResponsesRequest, *types.NewAPIError) {
 	var requestBody io.Reader
+	convertedResponsesRequest := *request
 	syntheticCompactReference := false
+	nativeOpaqueReference := service.IsNativeOpaqueCompactReference(request.PreviousResponseID)
 	if relaycommon.IsOpenAICompatibleResponses(info) {
 		var err error
 		syntheticCompactReference, err = service.HasLocalSyntheticCompactReferenceWithContext(c.Request.Context(), *request)
 		if err != nil {
-			return nil, newResponsesConvertRequestError(err)
+			return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
 		}
 	}
 	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) &&
 		!relaycommon.ShouldConvertResponsesRequest(info) &&
-		!syntheticCompactReference
+		(!syntheticCompactReference || nativeOpaqueReference)
+	if len(options) > 0 && options[0].ForceConvertedBody {
+		actualPassThroughBody = false
+	}
 	if actualPassThroughBody {
-		storage, err := common.GetBodyStorage(c)
-		if err != nil {
-			return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		if nativeOpaqueReference {
+			restoredRequest, restored, applyInfo, err := service.RestoreNativeOpaquePreviousResponseID(
+				c.Request.Context(),
+				service.SyntheticCompactScopeFromSource(info),
+				*request,
+			)
+			service.SetSyntheticCompactApplyInfo(c, applyInfo)
+			if err != nil {
+				return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
+			}
+			if restored {
+				convertedResponsesRequest = restoredRequest
+				body, err := common.Marshal(restoredRequest)
+				if err != nil {
+					return nil, convertedResponsesRequest, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+				}
+				requestBody = bytes.NewReader(body)
+			}
 		}
-		requestBody = common.ReaderOnly(storage)
+		if requestBody == nil {
+			storage, err := common.GetBodyStorage(c)
+			if err != nil {
+				return nil, convertedResponsesRequest, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+			}
+			requestBody = common.ReaderOnly(storage)
+		}
 	} else {
+		if nativeOpaqueReference {
+			restoredRequest, restored, applyInfo, err := service.RestoreNativeOpaquePreviousResponseID(
+				c.Request.Context(),
+				service.SyntheticCompactScopeFromSource(info),
+				*request,
+			)
+			service.SetSyntheticCompactApplyInfo(c, applyInfo)
+			if err != nil {
+				return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
+			}
+			if restored {
+				request = &restoredRequest
+				convertedResponsesRequest = restoredRequest
+			}
+		}
 		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
 		if err != nil {
-			return nil, newResponsesConvertRequestError(err)
+			return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
+		}
+		if converted, ok := convertedRequest.(dto.OpenAIResponsesRequest); ok {
+			convertedResponsesRequest = converted
 		}
 		relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
 		jsonData, err := common.Marshal(convertedRequest)
 		if err != nil {
-			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			return nil, convertedResponsesRequest, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 
 		// Converted requests always use filtering; raw pass-through is the only path that preserves user-controlled fields.
 		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, actualPassThroughBody)
 		if err != nil {
-			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			return nil, convertedResponsesRequest, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 
 		// apply param override
 		if len(info.ParamOverride) > 0 {
 			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
 			if err != nil {
-				return nil, newAPIErrorFromParamOverride(err)
+				return nil, convertedResponsesRequest, newAPIErrorFromParamOverride(err)
 			}
 		}
 
@@ -199,7 +290,10 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		}
 		requestBody = bytes.NewBuffer(jsonData)
 	}
+	return requestBody, convertedResponsesRequest, nil
+}
 
+func doOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, requestBody io.Reader) (*dto.Usage, *types.NewAPIError) {
 	var httpResp *http.Response
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
@@ -230,13 +324,34 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 	return usageDto, nil
 }
 
+func shouldRetryResponsesWithoutEncryptedReasoning(info *relaycommon.RelayInfo, err *types.NewAPIError) bool {
+	if info == nil || err == nil || !relaycommon.IsOpenAICompatibleResponses(info) {
+		return false
+	}
+	if err.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	errorCode := strings.ToLower(string(err.GetErrorCode()))
+	if errorCode == "invalid_encrypted_content" || errorCode == "thinking_signature_invalid" {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "encrypted content") &&
+		(strings.Contains(message, "could not be verified") ||
+			strings.Contains(message, "could not be decrypted or parsed"))
+}
+
 func newResponsesConvertRequestError(err error) *types.NewAPIError {
 	options := []types.NewAPIErrorOptions{types.ErrOptionWithSkipRetry()}
 	if errors.Is(err, service.ErrSyntheticCompactStateNotFound) ||
 		errors.Is(err, service.ErrSyntheticCompactRequiresVisibleInput) ||
 		errors.Is(err, service.ErrSyntheticCompactStateScopeMismatch) ||
 		errors.Is(err, service.ErrSyntheticCompactMultipleMarkers) ||
-		errors.Is(err, service.ErrResponsesRESTPreviousIDUnsupported) {
+		errors.Is(err, service.ErrResponsesRESTPreviousIDUnsupported) ||
+		errors.Is(err, service.ErrResponsesNativeOpaqueStateNotRestorable) {
+		options = append(options, types.ErrOptionWithStatusCode(http.StatusBadRequest))
+	}
+	if errors.Is(err, service.ErrResponsesCompactionContentRequired) {
 		options = append(options, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 	}
 	return types.NewError(err, types.ErrorCodeConvertRequestFailed, options...)
@@ -255,31 +370,26 @@ func applyResponsesCompactSummaryModelOverride(c *gin.Context, info *relaycommon
 }
 
 func shouldRouteResponsesViaChat(info *relaycommon.RelayInfo, passThroughGlobal bool) bool {
-	return findResponsesViaChatRule(info, passThroughGlobal, nil) != nil
+	rule, err := findResponsesViaChatRule(context.Background(), info, passThroughGlobal, nil)
+	return err == nil && rule != nil
 }
 
-func findResponsesViaChatRule(info *relaycommon.RelayInfo, passThroughGlobal bool, request *dto.OpenAIResponsesRequest) *model_setting.ProtocolConversionRule {
-	if info == nil ||
-		info.RelayMode != relayconstant.RelayModeResponses ||
-		passThroughGlobal ||
-		info.ChannelSetting.PassThroughBodyEnabled ||
-		request.HasCompactionTrigger() {
-		return nil
+func findResponsesViaChatRule(ctx context.Context, info *relaycommon.RelayInfo, passThroughGlobal bool, request *dto.OpenAIResponsesRequest) (*model_setting.ProtocolConversionRule, error) {
+	if info == nil {
+		return nil, nil
 	}
-	return service.FindProtocolConversionRuleGlobal(
-		model_setting.ProtocolEndpointResponses,
-		model_setting.ProtocolEndpointChatCompletions,
+	return service.FindResponsesViaChatRule(
+		ctx,
+		info.RelayMode,
+		passThroughGlobal,
+		info.ChannelSetting,
 		info.ChannelId,
 		info.ChannelType,
 		info.OriginModelName,
+		request,
 	)
 }
 
 func responsesViaChatOptionsFromRule(rule *model_setting.ProtocolConversionRule) service.ResponsesChatCompatibilityOptions {
-	if rule == nil || rule.Options == nil {
-		return service.ResponsesChatCompatibilityOptions{}
-	}
-	return service.ResponsesChatCompatibilityOptions{
-		EnableCustomToolBridge: rule.Options.EnableCustomToolBridge,
-	}
+	return service.ResponsesViaChatRuleOptions(rule)
 }

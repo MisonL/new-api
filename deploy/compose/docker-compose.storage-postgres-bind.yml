@@ -1,0 +1,151 @@
+# Optional PostgreSQL storage overlay.
+#
+# Usage:
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f deploy/compose/docker-compose.storage-postgres-bind.yml \
+#     --env-file deploy/env/storage-postgres.env \
+#     up -d
+#
+# This overlay intentionally fails fast when the storage marker does not match.
+# It must not fall back to the default named volume.
+#
+# Entrypoint exit codes:
+#   64 marker missing
+#   65 marker mismatch
+#   66 marker path is inside PGDATA
+#   67 PGDATA is not writable
+#   68 path is not normalized
+#   69 marker mount is a directory
+#   70 PostgreSQL tuning argument is not an allowed -c option
+#   71 marker value is empty
+
+services:
+  postgres:
+    environment:
+      NEW_API_POSTGRES_DATA_DIR: ${NEW_API_POSTGRES_DATA_DIR:?set NEW_API_POSTGRES_DATA_DIR}
+      NEW_API_POSTGRES_MARKER: ${NEW_API_POSTGRES_MARKER:?set NEW_API_POSTGRES_MARKER}
+      NEW_API_POSTGRES_MARKER_VALUE: ${NEW_API_POSTGRES_MARKER_VALUE:?set NEW_API_POSTGRES_MARKER_VALUE}
+      NEW_API_POSTGRES_TUNING_ARGS: ${NEW_API_POSTGRES_TUNING_ARGS:-}
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command:
+      - |
+        marker=/run/new-api/postgres-storage.marker
+        host_pgdata="$${NEW_API_POSTGRES_DATA_DIR:?set NEW_API_POSTGRES_DATA_DIR}"
+        host_marker="$${NEW_API_POSTGRES_MARKER:?set NEW_API_POSTGRES_MARKER}"
+        expected="$${NEW_API_POSTGRES_MARKER_VALUE:?set NEW_API_POSTGRES_MARKER_VALUE}"
+        if [ -z "$$expected" ]; then
+          echo "postgres storage marker value is empty" >&2
+          exit 71
+        fi
+        case "$$host_pgdata" in
+          *"/../"*|*"/./"*|*"/.."|*"/."|../*|./*|".."|".")
+            echo "postgres data directory path must be normalized: $$host_pgdata" >&2
+            exit 68
+            ;;
+        esac
+        case "$$host_pgdata" in
+          /*|[A-Za-z]:/*) ;;
+          *)
+            echo "postgres data directory path must be absolute: $$host_pgdata" >&2
+            exit 68
+            ;;
+        esac
+        case "$$host_marker" in
+          *"/../"*|*"/./"*|*"/.."|*"/."|../*|./*|".."|".")
+            echo "postgres storage marker path must be normalized: $$host_marker" >&2
+            exit 68
+            ;;
+        esac
+        case "$$host_marker" in
+          /*|[A-Za-z]:/*) ;;
+          *)
+            echo "postgres storage marker path must be absolute: $$host_marker" >&2
+            exit 68
+            ;;
+        esac
+        while [ "$$host_pgdata" != "/" ] && [ "$${host_pgdata%/}" != "$$host_pgdata" ]; do
+          host_pgdata="$${host_pgdata%/}"
+        done
+        while [ "$$host_marker" != "/" ] && [ "$${host_marker%/}" != "$$host_marker" ]; do
+          host_marker="$${host_marker%/}"
+        done
+        case "$$host_marker" in
+          "$$host_pgdata"/*) marker_inside_pgdata=true ;;
+          *) marker_inside_pgdata=false ;;
+        esac
+        if [ "$$host_marker" = "$$host_pgdata" ] || [ "$$marker_inside_pgdata" = true ]; then
+          echo "postgres storage marker must be outside PGDATA" >&2
+          echo "pgdata=$$host_pgdata" >&2
+          echo "marker=$$host_marker" >&2
+          exit 66
+        fi
+        if [ -d "$$marker" ]; then
+          echo "postgres storage marker path is a directory, not a file: $$marker" >&2
+          echo "Docker may have created a directory because the host marker file was missing." >&2
+          exit 69
+        fi
+        if [ ! -f "$$marker" ]; then
+          echo "postgres storage marker is missing: $$marker" >&2
+          exit 64
+        fi
+        if ! printf '%s' "$$expected" | cmp -s "$$marker" -; then
+          echo "postgres storage marker mismatch" >&2
+          echo "expected=$$expected" >&2
+          actual="$$(cat "$$marker" 2>/dev/null || true)"
+          echo "actual=$$actual" >&2
+          exit 65
+        fi
+        if [ ! -w /var/lib/postgresql/data ]; then
+          echo "postgres data directory is not writable: /var/lib/postgresql/data" >&2
+          exit 67
+        fi
+        validate_postgres_tuning_arg() {
+          opt="$$1"
+          [ -n "$$opt" ] || return 0
+          case "$$opt" in
+            shared_buffers=*|effective_cache_size=*|maintenance_work_mem=*|work_mem=*|checkpoint_timeout=*|max_wal_size=*|min_wal_size=*|checkpoint_completion_target=*|wal_compression=*|effective_io_concurrency=*|random_page_cost=*|log_min_duration_statement=*)
+              return 0
+              ;;
+            *)
+              echo "unsupported postgres tuning argument: $$opt" >&2
+              echo "Use key=value entries from the documented allowlist only." >&2
+              exit 70
+              ;;
+          esac
+        }
+        set -- postgres
+        if [ -n "$${NEW_API_POSTGRES_TUNING_ARGS:-}" ]; then
+          case "$$NEW_API_POSTGRES_TUNING_ARGS" in
+            *'|'*)
+              old_ifs="$$IFS"
+              newline_ifs="$$(printf '\n_')"
+              newline_ifs="$${newline_ifs%_}"
+              IFS="$$newline_ifs"
+              for opt in $$(printf '%s' "$$NEW_API_POSTGRES_TUNING_ARGS" | tr '|' '\n'); do
+                IFS="$$old_ifs"
+                validate_postgres_tuning_arg "$$opt"
+                [ -n "$$opt" ] && set -- "$$@" -c "$$opt"
+                IFS="$$newline_ifs"
+              done
+              IFS="$$old_ifs"
+              ;;
+            *)
+              for opt in $$NEW_API_POSTGRES_TUNING_ARGS; do
+                validate_postgres_tuning_arg "$$opt"
+                set -- "$$@" -c "$$opt"
+              done
+              ;;
+          esac
+        fi
+        exec docker-entrypoint.sh "$$@"
+    volumes:
+      - type: bind
+        source: ${NEW_API_POSTGRES_DATA_DIR:?set NEW_API_POSTGRES_DATA_DIR}
+        target: /var/lib/postgresql/data
+      - type: bind
+        source: ${NEW_API_POSTGRES_MARKER:?set NEW_API_POSTGRES_MARKER}
+        target: /run/new-api/postgres-storage.marker
+        read_only: true

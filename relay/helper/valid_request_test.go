@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -102,6 +104,9 @@ func TestGetAndValidateResponsesCompactionRequestPreservesSub2APICompatibleField
 	require.JSONEq(t, `{"verbosity":"low"}`, string(request.Text))
 	require.JSONEq(t, `"codex-cache-key"`, string(request.PromptCacheKey))
 	require.Equal(t, "resp_previous", request.PreviousResponseID)
+	require.JSONEq(t, `false`, string(request.Store))
+	require.NotNil(t, request.Stream)
+	require.True(t, *request.Stream)
 
 	responsesRequest := request.ToResponsesRequest()
 	require.JSONEq(t, string(request.Input), string(responsesRequest.Input))
@@ -113,13 +118,51 @@ func TestGetAndValidateResponsesCompactionRequestPreservesSub2APICompatibleField
 	require.JSONEq(t, string(request.Text), string(responsesRequest.Text))
 	require.JSONEq(t, string(request.PromptCacheKey), string(responsesRequest.PromptCacheKey))
 	require.Equal(t, "resp_previous", responsesRequest.PreviousResponseID)
+	require.JSONEq(t, `false`, string(responsesRequest.Store))
+	require.NotNil(t, responsesRequest.Stream)
+	require.True(t, *responsesRequest.Stream)
 
 	raw, err := common.Marshal(responsesRequest)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"service_tier":"flex"`)
 	require.Contains(t, string(raw), `"prompt_cache_key":"codex-cache-key"`)
-	require.NotContains(t, string(raw), `"store"`)
-	require.NotContains(t, string(raw), `"stream"`)
+	require.Contains(t, string(raw), `"store":false`)
+	require.Contains(t, string(raw), `"stream":true`)
+}
+
+func TestResponsesCompactionRequestKeepsKnownFieldsFilterableAfterConversion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := `{
+		"model":"gpt-5.5",
+		"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"compact"}]}],
+		"service_tier":"flex",
+		"store":true,
+		"safety_identifier":"user-123",
+		"stream_options":{"include_obfuscation":false},
+		"sub2api_session_id":"session-compact"
+	}`
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	request, err := GetAndValidateResponsesCompactionRequest(ctx)
+	require.NoError(t, err)
+	responsesRequest := request.ToResponsesRequest()
+	require.NotNil(t, responsesRequest)
+	require.Contains(t, responsesRequest.Extra, "sub2api_session_id")
+
+	raw, err := common.Marshal(responsesRequest)
+	require.NoError(t, err)
+	filtered, err := relaycommon.RemoveDisabledFields(raw, dto.ChannelOtherSettings{DisableStore: true}, false)
+	require.NoError(t, err)
+
+	require.NotContains(t, string(filtered), `"service_tier"`)
+	require.NotContains(t, string(filtered), `"store"`)
+	require.NotContains(t, string(filtered), `"safety_identifier"`)
+	require.NotContains(t, string(filtered), `"include_obfuscation"`)
+	require.Contains(t, string(filtered), `"sub2api_session_id":"session-compact"`)
 }
 
 func TestResponsesCompactionTokenMetaExcludesPromptCacheKey(t *testing.T) {

@@ -2,6 +2,11 @@ package operation_setting
 
 import "github.com/QuantumNous/new-api/setting/config"
 
+const (
+	ResponsesEncryptedContentAffinityRuleName       = "responses encrypted content"
+	ResponsesEncryptedContentAffinityTTLSeconds int = 300
+)
+
 type ChannelAffinityKeySource struct {
 	Type string `json:"type"` // context_int, context_string, gjson
 	Key  string `json:"key,omitempty"`
@@ -138,6 +143,20 @@ var channelAffinitySetting = ChannelAffinitySetting{
 	MaxEntries:        100_000,
 	DefaultTTLSeconds: 3600,
 	Rules: []ChannelAffinityRule{
+		{
+			Name:       ResponsesEncryptedContentAffinityRuleName,
+			ModelRegex: []string{"^gpt-.*$"},
+			PathRegex:  []string{"/v1/responses"},
+			KeySources: []ChannelAffinityKeySource{
+				{Type: "responses_encrypted_content"},
+			},
+			ValueRegex:         "",
+			TTLSeconds:         ResponsesEncryptedContentAffinityTTLSeconds,
+			SkipRetryOnFailure: true,
+			IncludeUsingGroup:  true,
+			IncludeRuleName:    true,
+			UserAgentInclude:   nil,
+		},
 		{
 			Name:       "codex cli trace",
 			ModelRegex: []string{"^gpt-.*$"},

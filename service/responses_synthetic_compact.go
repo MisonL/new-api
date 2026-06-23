@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,16 +12,20 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 )
 
 const (
 	syntheticCompactIDPrefix               = "resp_newapi_synthcmp_"
+	nativeOpaqueCompactIDPrefix            = "resp_newapi_nativecmp_"
 	syntheticCompactMarkerPrefix           = "newapi.synthetic.compact:"
 	syntheticCompactMarkerVersion          = "v2"
 	syntheticCompactRedisPrefix            = "new-api:responses:synthetic-compact:"
-	syntheticCompactTTL                    = 24 * time.Hour
+	syntheticCompactTTLDays                = 30
+	syntheticCompactTTL                    = syntheticCompactTTLDays * 24 * time.Hour
 	syntheticCompactStoreTimeout           = 10 * time.Second
 	syntheticCompactTextPartMax            = 8 * 1024 * 1024
 	syntheticCompactVisibleTextMax         = 96 * 1024
@@ -33,15 +39,26 @@ const (
 )
 
 type SyntheticCompactState struct {
-	ID          string `json:"id"`
-	Model       string `json:"model"`
-	Summary     string `json:"summary"`
-	UserID      int    `json:"user_id,omitempty"`
-	TokenID     int    `json:"token_id,omitempty"`
-	Group       string `json:"group,omitempty"`
-	ChannelID   int    `json:"channel_id,omitempty"`
-	ChannelType int    `json:"channel_type,omitempty"`
-	CreatedAt   int64  `json:"created_at"`
+	ID              string `json:"id"`
+	Kind            string `json:"kind,omitempty"`
+	Model           string `json:"model"`
+	ModelAtCreation string `json:"model_at_creation,omitempty"`
+	// Native opaque states store upstream encrypted_content here; they are only restorable through previous_response_id.
+	Summary            string `json:"summary"`
+	UserID             int    `json:"user_id,omitempty"`
+	TokenID            int    `json:"token_id,omitempty"`
+	Group              string `json:"group,omitempty"`
+	OwnerScope         string `json:"owner_scope,omitempty"`
+	ScopePolicy        string `json:"scope_policy,omitempty"`
+	UpstreamResponseID string `json:"upstream_response_id,omitempty"`
+	ChannelID          int    `json:"channel_id,omitempty"`
+	ChannelType        int    `json:"channel_type,omitempty"`
+	SourceInstance     string `json:"source_instance,omitempty"`
+	StateHash          string `json:"state_hash,omitempty"`
+	CreatedAt          int64  `json:"created_at"`
+	LastAccessAt       int64  `json:"last_access_at,omitempty"`
+	ExpiresAt          int64  `json:"expires_at,omitempty"`
+	ModelChanged       bool   `json:"model_changed,omitempty"`
 }
 
 type SyntheticCompactStateScope = types.SyntheticCompactStateScope
@@ -50,13 +67,49 @@ type SyntheticCompactScopeSource interface {
 	SyntheticCompactScope() SyntheticCompactStateScope
 }
 
+type SyntheticCompactApplyInfo struct {
+	StateLookup    string
+	MarkerKind     string
+	ScopeResult    string
+	RouteDecision  string
+	FallbackReason string
+	StateRestored  bool
+	ModelChanged   bool
+	StateHash      string
+}
+
+func SetSyntheticCompactApplyInfo(ctx *gin.Context, info SyntheticCompactApplyInfo) {
+	if ctx == nil {
+		return
+	}
+	setSyntheticCompactApplyContextValue(ctx, constant.ContextKeyResponsesCompactStateLookup, info.StateLookup)
+	setSyntheticCompactApplyContextValue(ctx, constant.ContextKeyResponsesCompactMarkerKind, info.MarkerKind)
+	setSyntheticCompactApplyContextValue(ctx, constant.ContextKeyResponsesCompactStateScopeResult, info.ScopeResult)
+	setSyntheticCompactApplyContextValue(ctx, constant.ContextKeyResponsesCompactRouteDecision, info.RouteDecision)
+	setSyntheticCompactApplyContextValue(ctx, constant.ContextKeyResponsesCompactFallbackReason, info.FallbackReason)
+	setSyntheticCompactApplyContextValue(ctx, constant.ContextKeyResponsesCompactStateRestored, info.StateRestored)
+	setSyntheticCompactApplyContextValue(ctx, constant.ContextKeyResponsesCompactModelChanged, info.ModelChanged)
+	setSyntheticCompactApplyContextValue(ctx, constant.ContextKeyResponsesCompactStateHash, info.StateHash)
+}
+
+func setSyntheticCompactApplyContextValue(ctx *gin.Context, key constant.ContextKey, value any) {
+	common.SetContextKey(ctx, key, value)
+	if ctx.Request == nil {
+		return
+	}
+	requestCtx := context.WithValue(ctx.Request.Context(), key, value)
+	ctx.Request = ctx.Request.WithContext(requestCtx)
+}
+
 var (
-	ErrSyntheticCompactStateNotFound        = errors.New("synthetic compact state not found or expired")
-	ErrSyntheticCompactRequiresVisibleInput = errors.New("synthetic compact requires visible input or a stored synthetic summary")
-	ErrSyntheticCompactStateScopeMismatch   = errors.New("synthetic compact state scope mismatch")
-	ErrSyntheticCompactMultipleMarkers      = errors.New("synthetic compact request contains multiple markers")
-	ErrSyntheticCompactStateScopeRequired   = errors.New("synthetic compact state scope is required")
-	ErrResponsesRESTPreviousIDUnsupported   = errors.New("responses REST previous_response_id is unsupported by upstream profile")
+	ErrSyntheticCompactStateNotFound           = errors.New("synthetic compact state not found or expired")
+	ErrSyntheticCompactRequiresVisibleInput    = errors.New("synthetic compact requires visible input or a stored synthetic summary")
+	ErrSyntheticCompactStateScopeMismatch      = errors.New("synthetic compact state scope mismatch")
+	ErrSyntheticCompactMultipleMarkers         = errors.New("synthetic compact request contains multiple markers")
+	ErrSyntheticCompactStateScopeRequired      = errors.New("synthetic compact state scope is required")
+	ErrResponsesRESTPreviousIDUnsupported      = errors.New("responses REST previous_response_id is unsupported by upstream profile")
+	ErrResponsesCompactionContentRequired      = errors.New("responses compaction item missing encrypted_content")
+	ErrResponsesNativeOpaqueStateNotRestorable = errors.New("native opaque compact state cannot be restored locally")
 )
 
 func newSyntheticCompactID(ctx context.Context) (string, error) {
@@ -93,20 +146,25 @@ func syntheticCompactIDInstance(id string) string {
 	return instanceID
 }
 
+func nativeOpaqueCompactIDInstance(id string) string {
+	id = strings.TrimSpace(id)
+	if !strings.HasPrefix(id, nativeOpaqueCompactIDPrefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(id, nativeOpaqueCompactIDPrefix)
+	instanceID, _, ok := strings.Cut(rest, "_")
+	if !ok || !syntheticCompactInstanceIDValid(instanceID) {
+		return ""
+	}
+	return instanceID
+}
+
 func syntheticCompactIDFromReference(ctx context.Context, id string) (string, bool, error) {
 	id = strings.TrimSpace(id)
-	if !strings.HasPrefix(id, syntheticCompactIDPrefix) {
+	if !strings.HasPrefix(id, syntheticCompactIDPrefix) && !strings.HasPrefix(id, nativeOpaqueCompactIDPrefix) {
 		return "", false, nil
 	}
-	instanceID := syntheticCompactIDInstance(id)
-	if instanceID == "" {
-		return id, true, nil
-	}
-	matches, err := syntheticCompactMarkerInstanceMatches(ctx, instanceID)
-	if err != nil {
-		return "", false, err
-	}
-	if !matches {
+	if strings.HasPrefix(id, nativeOpaqueCompactIDPrefix) && nativeOpaqueCompactIDInstance(id) == "" {
 		return "", false, nil
 	}
 	return id, true, nil
@@ -127,13 +185,6 @@ func syntheticCompactIDFromMarker(ctx context.Context, marker string) (string, b
 			return "", false, nil
 		}
 		if idInstance := syntheticCompactIDInstance(id); idInstance == "" || idInstance != instanceID {
-			return "", false, nil
-		}
-		matches, err := syntheticCompactMarkerInstanceMatches(ctx, instanceID)
-		if err != nil {
-			return "", false, err
-		}
-		if !matches {
 			return "", false, nil
 		}
 		return id, true, nil
@@ -199,6 +250,10 @@ func SyntheticCompactScopeFromSource(source SyntheticCompactScopeSource) Synthet
 		return SyntheticCompactStateScope{}
 	}
 	return source.SyntheticCompactScope()
+}
+
+func IsNativeOpaqueCompactReference(id string) bool {
+	return strings.HasPrefix(strings.TrimSpace(id), nativeOpaqueCompactIDPrefix)
 }
 
 func forceResponsesCompactVisibleOnly(ctx context.Context) bool {
@@ -294,6 +349,15 @@ func logSyntheticCompactSummaryRequest(originalModel string, summaryModel string
 }
 
 func ApplySyntheticCompactState(ctx context.Context, scope SyntheticCompactStateScope, req dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool, error) {
+	converted, applied, _, err := ApplySyntheticCompactStateWithInfo(ctx, scope, req)
+	return converted, applied, err
+}
+
+func ApplySyntheticCompactStateWithInfo(ctx context.Context, scope SyntheticCompactStateScope, req dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool, SyntheticCompactApplyInfo, error) {
+	info := SyntheticCompactApplyInfo{
+		StateLookup:   "not_requested",
+		RouteDecision: "unchanged",
+	}
 	state, found, err := findSyntheticCompactState(ctx, req)
 	if err != nil || !found {
 		if err == nil && !found {
@@ -301,34 +365,158 @@ func ApplySyntheticCompactState(ctx context.Context, scope SyntheticCompactState
 			hasReference, err = HasLocalSyntheticCompactReferenceWithContext(ctx, req)
 			if err == nil && hasReference {
 				err = ErrSyntheticCompactStateNotFound
+				info.StateLookup = "miss"
+				info.MarkerKind = "synthetic_summary"
+				info.ScopeResult = "not_found"
+				info.FallbackReason = "state_not_found"
 			}
+		} else if err != nil {
+			info.StateLookup = "error"
 		}
-		return req, found, err
+		return req, found, info, err
 	}
 	if err := validateSyntheticCompactState(scope, req.Model, state); err != nil {
-		return dto.OpenAIResponsesRequest{}, true, err
+		info.StateLookup = "hit"
+		info.MarkerKind = model.NormalizeSyntheticCompactStateKind(state.Kind)
+		info.ScopeResult = "mismatch"
+		info.FallbackReason = "scope_mismatch"
+		return dto.OpenAIResponsesRequest{}, true, info, err
 	}
+	if model.NormalizeSyntheticCompactStateKind(state.Kind) == model.SyntheticCompactStateKindNativeOpaque {
+		info.StateLookup = "hit"
+		info.MarkerKind = model.SyntheticCompactStateKindNativeOpaque
+		info.ScopeResult = "strict"
+		info.RouteDecision = "native_opaque_not_restorable"
+		info.FallbackReason = "native_opaque_requires_upstream"
+		info.StateHash = strings.TrimSpace(state.StateHash)
+		return req, false, info, ErrResponsesNativeOpaqueStateNotRestorable
+	}
+	markSyntheticCompactModelChanged(state, req.Model)
 	cleanInput, err := removeSyntheticCompactMarkers(ctx, req.Input)
 	if err != nil {
-		return dto.OpenAIResponsesRequest{}, true, err
+		info.StateLookup = "hit"
+		info.MarkerKind = model.NormalizeSyntheticCompactStateKind(state.Kind)
+		info.ScopeResult = "matched"
+		info.FallbackReason = "marker_cleanup_failed"
+		return dto.OpenAIResponsesRequest{}, true, info, err
 	}
 	contextText := syntheticCompactRecoveredContextText(state.Summary)
 	contextItem, err := responseMessageInput("developer", contextText)
 	if err != nil {
-		return dto.OpenAIResponsesRequest{}, false, err
+		info.StateLookup = "hit"
+		info.MarkerKind = model.NormalizeSyntheticCompactStateKind(state.Kind)
+		info.ScopeResult = "matched"
+		info.FallbackReason = "context_message_build_failed"
+		return dto.OpenAIResponsesRequest{}, false, info, err
 	}
 	items := []common.RawMessage{contextItem}
 	items = append(items, normalizeResponsesInputItems(cleanInput)...)
 	input, err := common.Marshal(items)
 	if err != nil {
-		return dto.OpenAIResponsesRequest{}, false, err
+		return dto.OpenAIResponsesRequest{}, false, info, err
 	}
 	req.Input = input
 	req.PreviousResponseID = ""
+	info.StateLookup = "hit"
+	info.MarkerKind = model.NormalizeSyntheticCompactStateKind(state.Kind)
+	info.ScopeResult = "matched"
+	info.RouteDecision = "state_restored"
+	info.StateRestored = true
+	info.ModelChanged = state.ModelChanged
+	info.StateHash = strings.TrimSpace(state.StateHash)
+	return req, true, info, nil
+}
+
+func ApplySyntheticCompactStateOrVisibleOnly(ctx context.Context, scope SyntheticCompactStateScope, req dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool, bool, error) {
+	converted, applied, visibleOnly, _, err := ApplySyntheticCompactStateOrVisibleOnlyWithInfo(ctx, scope, req)
+	return converted, applied, visibleOnly, err
+}
+
+func RestoreNativeOpaquePreviousResponseID(ctx context.Context, scope SyntheticCompactStateScope, req dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool, SyntheticCompactApplyInfo, error) {
+	info := SyntheticCompactApplyInfo{
+		StateLookup:   "not_requested",
+		RouteDecision: "unchanged",
+	}
+	id := strings.TrimSpace(req.PreviousResponseID)
+	if !strings.HasPrefix(id, nativeOpaqueCompactIDPrefix) {
+		return req, false, info, nil
+	}
+	state, found, err := loadSyntheticCompactState(ctx, id)
+	if err != nil {
+		info.StateLookup = "error"
+		return req, false, info, err
+	}
+	if !found || state == nil {
+		info.StateLookup = "miss"
+		info.MarkerKind = model.SyntheticCompactStateKindNativeOpaque
+		info.ScopeResult = "not_found"
+		info.FallbackReason = "state_not_found"
+		return req, false, info, ErrSyntheticCompactStateNotFound
+	}
+	if err := validateSyntheticCompactState(scope, req.Model, state); err != nil {
+		info.StateLookup = "hit"
+		info.MarkerKind = model.SyntheticCompactStateKindNativeOpaque
+		info.ScopeResult = "mismatch"
+		info.FallbackReason = "scope_mismatch"
+		return req, false, info, err
+	}
+	upstreamResponseID := strings.TrimSpace(state.UpstreamResponseID)
+	if upstreamResponseID == "" {
+		info.StateLookup = "hit"
+		info.MarkerKind = model.SyntheticCompactStateKindNativeOpaque
+		info.ScopeResult = "strict"
+		info.FallbackReason = "upstream_response_id_missing"
+		return req, false, info, ErrResponsesNativeOpaqueStateNotRestorable
+	}
+	req.PreviousResponseID = upstreamResponseID
+	info.StateLookup = "hit"
+	info.MarkerKind = model.SyntheticCompactStateKindNativeOpaque
+	info.ScopeResult = "strict"
+	info.RouteDecision = "native_opaque_previous_response_id_restored"
+	info.StateHash = strings.TrimSpace(state.StateHash)
+	return req, true, info, nil
+}
+
+func ApplySyntheticCompactStateOrVisibleOnlyWithInfo(ctx context.Context, scope SyntheticCompactStateScope, req dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool, bool, SyntheticCompactApplyInfo, error) {
+	converted, applied, info, err := ApplySyntheticCompactStateWithInfo(ctx, scope, req)
+	if !errors.Is(err, ErrSyntheticCompactStateNotFound) {
+		return converted, applied, false, info, err
+	}
+	cleaned, ok, cleanErr := removeMissingSyntheticCompactStateForVisibleOnly(ctx, req)
+	if cleanErr != nil {
+		info.FallbackReason = "visible_only_cleanup_failed"
+		return req, false, false, info, cleanErr
+	}
+	if !ok {
+		return req, false, false, info, err
+	}
+	info.RouteDecision = "visible_only_fallback"
+	info.FallbackReason = "state_not_found_visible_input"
+	return cleaned, false, true, info, nil
+}
+
+func removeMissingSyntheticCompactStateForVisibleOnly(ctx context.Context, req dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool, error) {
+	hasReference, err := HasLocalSyntheticCompactReferenceWithContext(ctx, req)
+	if err != nil || !hasReference {
+		return req, false, err
+	}
+	cleanInput, err := removeSyntheticCompactMarkers(ctx, req.Input)
+	if err != nil {
+		return req, false, err
+	}
+	if len(visibleResponsesInputParts(cleanInput)) == 0 {
+		return req, false, nil
+	}
+	if _, local, err := syntheticCompactIDFromReference(ctx, req.PreviousResponseID); err != nil {
+		return req, false, err
+	} else if local {
+		req.PreviousResponseID = ""
+	}
+	req.Input = cleanInput
 	return req, true, nil
 }
 
-func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactStateScope, model string, upstream dto.OpenAIResponsesResponse) (*dto.OpenAIResponsesCompactionResponse, *dto.Usage, error) {
+func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactStateScope, summaryModel string, upstream dto.OpenAIResponsesResponse) (*dto.OpenAIResponsesCompactionResponse, *dto.Usage, error) {
 	if err := validateSyntheticCompactScopeForStore(scope); err != nil {
 		return nil, nil, err
 	}
@@ -348,15 +536,21 @@ func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactSt
 		createdAt = time.Now().Unix()
 	}
 	state := SyntheticCompactState{
-		ID:          id,
-		Model:       model,
-		Summary:     summary,
-		UserID:      scope.UserID,
-		TokenID:     scope.TokenID,
-		Group:       strings.TrimSpace(scope.Group),
-		ChannelID:   scope.ChannelID,
-		ChannelType: scope.ChannelType,
-		CreatedAt:   createdAt,
+		ID:              id,
+		Kind:            model.SyntheticCompactStateKindSyntheticSummary,
+		Model:           summaryModel,
+		ModelAtCreation: summaryModel,
+		Summary:         summary,
+		UserID:          scope.UserID,
+		TokenID:         scope.TokenID,
+		Group:           strings.TrimSpace(scope.Group),
+		OwnerScope:      model.SyntheticCompactOwnerScope(scope.UserID, scope.TokenID, scope.Group),
+		ScopePolicy:     model.SyntheticCompactScopePolicyModelFlexible,
+		ChannelID:       scope.ChannelID,
+		ChannelType:     scope.ChannelType,
+		SourceInstance:  "",
+		StateHash:       "",
+		CreatedAt:       createdAt,
 	}
 	if err := storeSyntheticCompactState(ctx, state); err != nil {
 		return nil, nil, err
@@ -374,7 +568,7 @@ func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactSt
 	if err != nil {
 		return nil, nil, err
 	}
-	usage := syntheticCompactUsage(upstream.Usage, model, summary)
+	usage := syntheticCompactUsage(upstream.Usage, summaryModel, summary)
 	return &dto.OpenAIResponsesCompactionResponse{
 		ID:        id,
 		Object:    "response",
@@ -384,7 +578,72 @@ func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactSt
 	}, usage, nil
 }
 
-func validateSyntheticCompactState(scope SyntheticCompactStateScope, _ string, state *SyntheticCompactState) error {
+func StoreNativeOpaqueCompactState(ctx context.Context, scope SyntheticCompactStateScope, modelName string, responseID string, encryptedContent string, createdAt int64) (*SyntheticCompactState, error) {
+	if err := validateSyntheticCompactScopeForStore(scope); err != nil {
+		return nil, err
+	}
+	responseID = strings.TrimSpace(responseID)
+	if responseID == "" {
+		return nil, fmt.Errorf("native opaque compact response id is required")
+	}
+	encryptedContent = strings.TrimSpace(encryptedContent)
+	if encryptedContent == "" {
+		return nil, fmt.Errorf("native opaque compact encrypted_content is required")
+	}
+	id, err := newNativeOpaqueCompactID(ctx, responseID, encryptedContent)
+	if err != nil {
+		return nil, err
+	}
+	if createdAt == 0 {
+		createdAt = time.Now().Unix()
+	}
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		modelName = strings.TrimSpace(scope.Model)
+	}
+	state := SyntheticCompactState{
+		ID:                 id,
+		Kind:               model.SyntheticCompactStateKindNativeOpaque,
+		Model:              modelName,
+		ModelAtCreation:    modelName,
+		Summary:            encryptedContent,
+		UserID:             scope.UserID,
+		TokenID:            scope.TokenID,
+		Group:              strings.TrimSpace(scope.Group),
+		OwnerScope:         model.SyntheticCompactOwnerScope(scope.UserID, scope.TokenID, scope.Group),
+		ScopePolicy:        model.SyntheticCompactScopePolicyStrict,
+		UpstreamResponseID: responseID,
+		ChannelID:          scope.ChannelID,
+		ChannelType:        scope.ChannelType,
+		CreatedAt:          createdAt,
+	}
+	if err := storeSyntheticCompactState(ctx, state); err != nil {
+		return nil, err
+	}
+	stored, found, err := loadSyntheticCompactState(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if found && stored != nil {
+		return stored, nil
+	}
+	return nil, fmt.Errorf("native opaque compact state stored but not found on reload: id=%s", id)
+}
+
+func newNativeOpaqueCompactID(ctx context.Context, responseID string, encryptedContent string) (string, error) {
+	instanceID, err := syntheticCompactLocalInstanceID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("resolve native opaque compact instance id: %w", err)
+	}
+	h := sha256.New()
+	for _, part := range []string{strings.TrimSpace(responseID), strings.TrimSpace(encryptedContent)} {
+		h.Write([]byte{0})
+		h.Write([]byte(part))
+	}
+	return nativeOpaqueCompactIDPrefix + instanceID + "_" + hex.EncodeToString(h.Sum(nil))[:24], nil
+}
+
+func validateSyntheticCompactState(scope SyntheticCompactStateScope, requestModel string, state *SyntheticCompactState) error {
 	if state == nil {
 		return nil
 	}
@@ -399,7 +658,29 @@ func validateSyntheticCompactState(scope SyntheticCompactStateScope, _ string, s
 	if state.Group != "" && state.Group != strings.TrimSpace(scope.Group) {
 		return fmt.Errorf("%w: synthetic compact state belongs to a different group", ErrSyntheticCompactStateScopeMismatch)
 	}
+	if model.NormalizeSyntheticCompactScopePolicy(state.ScopePolicy, state.Kind) == model.SyntheticCompactScopePolicyStrict {
+		stateModel := strings.TrimSpace(state.ModelAtCreation)
+		if stateModel == "" {
+			stateModel = strings.TrimSpace(state.Model)
+		}
+		requestModel = strings.TrimSpace(requestModel)
+		if stateModel != "" && requestModel != "" && stateModel != requestModel {
+			return fmt.Errorf("%w: synthetic compact state belongs to a different model", ErrSyntheticCompactStateScopeMismatch)
+		}
+	}
 	return nil
+}
+
+func markSyntheticCompactModelChanged(state *SyntheticCompactState, requestModel string) {
+	if state == nil {
+		return
+	}
+	stateModel := strings.TrimSpace(state.ModelAtCreation)
+	if stateModel == "" {
+		stateModel = strings.TrimSpace(state.Model)
+	}
+	requestModel = strings.TrimSpace(requestModel)
+	state.ModelChanged = stateModel != "" && requestModel != "" && stateModel != requestModel
 }
 
 func validateSyntheticCompactSummaryUsable(summary string, usage *dto.Usage) error {

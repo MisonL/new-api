@@ -65,7 +65,11 @@ func decryptSyntheticCompactSummaryForRecord(record model.SyntheticCompactStateR
 	payload := sealed[gcm.NonceSize():]
 	plain, err := gcm.Open(nil, nonce, payload, syntheticCompactSummaryAAD(record))
 	if err != nil {
-		return "", err
+		legacyPlain, legacyErr := gcm.Open(nil, nonce, payload, syntheticCompactSummaryLegacyAAD(record))
+		if legacyErr != nil {
+			return "", err
+		}
+		plain = legacyPlain
 	}
 	return string(plain), nil
 }
@@ -77,7 +81,23 @@ func syntheticCompactSummaryAAD(record model.SyntheticCompactStateRecord) []byte
 		fmt.Sprintf("%d", record.UserID),
 		fmt.Sprintf("%d", record.TokenID),
 		strings.TrimSpace(record.Group),
+		strings.TrimSpace(record.UpstreamResponseID),
 	}
+	return syntheticCompactSummaryAADFromParts(parts)
+}
+
+func syntheticCompactSummaryLegacyAAD(record model.SyntheticCompactStateRecord) []byte {
+	parts := []string{
+		strings.TrimSpace(record.ID),
+		strings.TrimSpace(record.Model),
+		fmt.Sprintf("%d", record.UserID),
+		fmt.Sprintf("%d", record.TokenID),
+		strings.TrimSpace(record.Group),
+	}
+	return syntheticCompactSummaryAADFromParts(parts)
+}
+
+func syntheticCompactSummaryAADFromParts(parts []string) []byte {
 	buf := bytes.NewBuffer(nil)
 	for _, part := range parts {
 		n := uint32(len(part))

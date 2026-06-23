@@ -144,6 +144,55 @@ func TestProcessHeaderOverride_NonTestKeepsClientHeaderPlaceholder(t *testing.T)
 	require.Equal(t, "trace-123", headers["x-upstream-trace"])
 }
 
+func TestProcessHeaderOverride_RegexPassthroughMatchesHeaderNamesCaseInsensitively(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Request.Header.Set("X-Client-Request-Id", "request-123")
+	ctx.Request.Header.Set("Thread-Id", "thread-123")
+
+	info := &relaycommon.RelayInfo{
+		IsChannelTest: false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			HeadersOverride: map[string]any{
+				"re:^x-client-request-id$": "",
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "request-123", headers["x-client-request-id"])
+	_, exists := headers["thread-id"]
+	require.False(t, exists)
+}
+
+func TestProcessHeaderOverride_RegexPassthroughMatchesLowercaseInputWithUppercasePattern(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Request.Header.Set("x-client-request-id", "request-456")
+
+	info := &relaycommon.RelayInfo{
+		IsChannelTest: false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			HeadersOverride: map[string]any{
+				"re:^X-CLIENT-REQUEST-ID$": "",
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "request-456", headers["x-client-request-id"])
+}
+
 func TestProcessHeaderOverride_RuntimeOverrideIsFinalHeaderMap(t *testing.T) {
 	t.Parallel()
 
@@ -291,6 +340,113 @@ func TestProcessHeaderOverride_AppliesUserHeaderProfileAndLegacyOverrideWins(t *
 	require.NoError(t, err)
 	require.Equal(t, "CustomUA/1.0", headers["user-agent"])
 	require.Equal(t, "from-legacy", headers["x-custom"])
+}
+
+func TestMergeDefaultUserAgentAuditRecordsHTTP2DefaultWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode: "prefer_channel",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	resp := &http.Response{ProtoMajor: 2}
+	mergeDefaultUserAgentAudit(ctx, req, resp)
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, "Go-http-client/2.0", audit.AppliedUserAgent)
+	require.False(t, audit.UserAgentApplied)
+	require.Empty(t, audit.AppliedHeaderKeys)
+}
+
+func TestMergeDefaultUserAgentAuditRecordsHTTP1DefaultWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode: "prefer_channel",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	resp := &http.Response{ProtoMajor: 1, ProtoMinor: 1}
+	mergeDefaultUserAgentAudit(ctx, req, resp)
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, "Go-http-client/1.1", audit.AppliedUserAgent)
+}
+
+func TestMergeDefaultUserAgentAuditSkipsExplicitEmptyUserAgent(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode: "prefer_channel",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	req.Header["User-Agent"] = []string{""}
+	resp := &http.Response{ProtoMajor: 2}
+	mergeDefaultUserAgentAudit(ctx, req, resp)
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Empty(t, audit.AppliedUserAgent)
+}
+
+func TestMergeDefaultUserAgentAuditDoesNotOverrideExplicitUserAgent(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode: "prefer_channel",
+		AppliedUserAgent: "CustomUA/1.0",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	req.Header.Set("User-Agent", "CustomUA/1.0")
+	resp := &http.Response{ProtoMajor: 2}
+	mergeDefaultUserAgentAudit(ctx, req, resp)
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, "CustomUA/1.0", audit.AppliedUserAgent)
+}
+
+func TestMergeDefaultUserAgentAuditPreservesExistingDifferentAuditUserAgent(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode: "prefer_channel",
+		AppliedUserAgent: "ProfileUA/1.0",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	req.Header.Set("User-Agent", "ClientUA/2.0")
+	resp := &http.Response{ProtoMajor: 2}
+	mergeDefaultUserAgentAudit(ctx, req, resp)
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, "ProfileUA/1.0", audit.AppliedUserAgent)
 }
 
 func TestProcessHeaderOverride_HeaderProfileRoundRobinAdvancesRuntimeState(t *testing.T) {

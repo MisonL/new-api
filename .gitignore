@@ -28,6 +28,9 @@ plans
 .claude
 backups/
 .deploy-backups/
+.storage-migration/
+*.dump
+*-globals.sql
 .worktrees/
 .cursor
 .antigravitycli/
@@ -43,4 +46,5 @@ skills-lock.json
 .dev-docker/runtime/
 deploy/env/*.env
 !deploy/env/*.env.example
+!deploy/env/*.example.env
 docs/reviews/artifacts/

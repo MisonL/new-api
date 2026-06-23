@@ -144,6 +144,10 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		}
 	})
 
+	if newAPIError := retryableUpstreamStreamInterruptedError(c, info); newAPIError != nil {
+		return nil, newAPIError
+	}
+
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
 		var streamResp struct {
@@ -190,6 +194,23 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
 
 	return usage, nil
+}
+
+func retryableUpstreamStreamInterruptedError(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
+	if info == nil || info.StreamStatus == nil {
+		return nil
+	}
+	if info.StreamStatus.EndReason != relaycommon.StreamEndReasonUpstreamInterrupted {
+		return nil
+	}
+	if info.ReceivedResponseCount > 0 {
+		return nil
+	}
+	err := info.StreamStatus.EndError
+	if err == nil {
+		err = io.ErrUnexpectedEOF
+	}
+	return types.NewOpenAIError(err, types.ErrorCodeUpstreamTransportInterrupted, http.StatusBadGateway)
 }
 
 func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {

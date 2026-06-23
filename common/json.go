@@ -43,6 +43,10 @@ func Marshal(v any) ([]byte, error) {
 	return json.Marshal(v)
 }
 
+func ValidJson(data []byte) bool {
+	return json.Valid(data)
+}
+
 func UnmarshalWithNumber(data []byte, v any) error {
 	return DecodeJsonUseNumber(bytes.NewReader(data), v)
 }
