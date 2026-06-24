@@ -114,7 +114,6 @@ func marshalResponsesStreamChunk(t *testing.T, chunk dto.ResponsesStreamResponse
 }
 
 func TestChatCompletionsViaResponsesNonStream(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
 
 	completedStatus, err := common.Marshal("completed")
@@ -194,7 +193,6 @@ func TestChatCompletionsViaResponsesNonStream(t *testing.T) {
 }
 
 func TestChatCompletionsViaResponsesStream(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
 
 	oldTimeout := constant.StreamingTimeout

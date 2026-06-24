@@ -104,8 +104,6 @@ func TestStreamScannerHandler_EmptyBody(t *testing.T) {
 }
 
 func TestStreamScannerHandler_ZeroStreamingTimeoutFallsBack(t *testing.T) {
-	t.Parallel()
-
 	oldTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 0
 	t.Cleanup(func() {

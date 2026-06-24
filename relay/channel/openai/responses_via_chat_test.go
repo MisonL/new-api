@@ -106,8 +106,6 @@ func TestMarshalResponsesCompatArgumentsBoundaryInputs(t *testing.T) {
 }
 
 func TestOaiChatToResponsesStreamHandler(t *testing.T) {
-	t.Parallel()
-
 	oldTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30
 	t.Cleanup(func() {

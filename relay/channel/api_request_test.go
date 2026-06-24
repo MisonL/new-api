@@ -22,6 +22,10 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
 func setupApiRequestHeaderRuntimeTestDB(t *testing.T, tables ...interface{}) *gorm.DB {
 	t.Helper()
 
@@ -77,7 +81,6 @@ func setupApiRequestHeaderRuntimeTestDB(t *testing.T, tables ...interface{}) *go
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -100,7 +103,6 @@ func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 func TestProcessHeaderOverride_ChannelTestSkipsClientHeaderPlaceholder(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -124,7 +126,6 @@ func TestProcessHeaderOverride_ChannelTestSkipsClientHeaderPlaceholder(t *testin
 func TestProcessHeaderOverride_NonTestKeepsClientHeaderPlaceholder(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -147,7 +148,6 @@ func TestProcessHeaderOverride_NonTestKeepsClientHeaderPlaceholder(t *testing.T)
 func TestProcessHeaderOverride_RegexPassthroughMatchesHeaderNamesCaseInsensitively(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -173,7 +173,6 @@ func TestProcessHeaderOverride_RegexPassthroughMatchesHeaderNamesCaseInsensitive
 func TestProcessHeaderOverride_RegexPassthroughMatchesLowercaseInputWithUppercasePattern(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -196,7 +195,6 @@ func TestProcessHeaderOverride_RegexPassthroughMatchesLowercaseInputWithUppercas
 func TestProcessHeaderOverride_RuntimeOverrideIsFinalHeaderMap(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -227,7 +225,6 @@ func TestProcessHeaderOverride_RuntimeOverrideIsFinalHeaderMap(t *testing.T) {
 func TestProcessHeaderOverride_AppliesBuiltinHeaderProfile(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -266,7 +263,6 @@ func TestProcessHeaderOverride_AppliesBuiltinHeaderProfile(t *testing.T) {
 func TestProcessHeaderOverride_LegacyOverrideCreatesAuditWhenMissing(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -310,7 +306,6 @@ func TestProcessHeaderOverride_LegacyOverrideCreatesAuditWhenMissing(t *testing.
 func TestProcessHeaderOverride_AppliesUserHeaderProfileAndLegacyOverrideWins(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -345,7 +340,6 @@ func TestProcessHeaderOverride_AppliesUserHeaderProfileAndLegacyOverrideWins(t *
 func TestMergeDefaultUserAgentAuditRecordsHTTP2DefaultWhenUnset(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -367,7 +361,6 @@ func TestMergeDefaultUserAgentAuditRecordsHTTP2DefaultWhenUnset(t *testing.T) {
 func TestMergeDefaultUserAgentAuditRecordsHTTP1DefaultWhenUnset(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -387,7 +380,6 @@ func TestMergeDefaultUserAgentAuditRecordsHTTP1DefaultWhenUnset(t *testing.T) {
 func TestMergeDefaultUserAgentAuditSkipsExplicitEmptyUserAgent(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -408,7 +400,6 @@ func TestMergeDefaultUserAgentAuditSkipsExplicitEmptyUserAgent(t *testing.T) {
 func TestMergeDefaultUserAgentAuditDoesNotOverrideExplicitUserAgent(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -430,7 +421,6 @@ func TestMergeDefaultUserAgentAuditDoesNotOverrideExplicitUserAgent(t *testing.T
 func TestMergeDefaultUserAgentAuditPreservesExistingDifferentAuditUserAgent(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -452,7 +442,6 @@ func TestMergeDefaultUserAgentAuditPreservesExistingDifferentAuditUserAgent(t *t
 func TestProcessHeaderOverride_HeaderProfileRoundRobinAdvancesRuntimeState(t *testing.T) {
 	db := setupApiRequestHeaderRuntimeTestDB(t, &model.RequestHeaderStrategyState{})
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -498,7 +487,6 @@ func TestDoTaskApiRequestAppliesHeaderOverride(t *testing.T) {
 	defer server.Close()
 	service.InitHttpClient()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/generations", nil)
@@ -542,7 +530,6 @@ func TestDoTaskApiRequestLetsSignedAdaptorApplyOverrideBeforeSigning(t *testing.
 	defer server.Close()
 	service.InitHttpClient()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/generations", nil)
@@ -645,7 +632,6 @@ func (a *signedHeaderTaskAdaptor) BuildRequestHeaderWithRuntimeHeaderOverride(_ 
 func TestProcessHeaderOverride_HeaderProfileMissingFails(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -670,7 +656,6 @@ func TestProcessHeaderOverride_HeaderProfileMissingFails(t *testing.T) {
 func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -697,7 +682,6 @@ func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)

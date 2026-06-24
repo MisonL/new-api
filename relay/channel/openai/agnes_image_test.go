@@ -81,7 +81,6 @@ func TestGetRequestURLForAgnesChannelImageGenerationUsesGenerationsEndpoint(t *t
 
 func TestConvertAgnesImageGenerationMovesURLResponseFormatIntoExtraBody(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{}`))
@@ -118,7 +117,6 @@ func TestConvertAgnesImageGenerationMovesURLResponseFormatIntoExtraBody(t *testi
 
 func TestConvertAgnesImageGenerationMapsB64ToReturnBase64(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{}`))
@@ -155,7 +153,6 @@ func TestConvertAgnesImageGenerationMapsB64ToReturnBase64(t *testing.T) {
 
 func TestConvertAgnesImageEditJSONMovesImagesAndResponseFormatIntoExtraBody(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", strings.NewReader(`{}`))
@@ -196,7 +193,6 @@ func TestConvertAgnesImageEditJSONMovesImagesAndResponseFormatIntoExtraBody(t *t
 
 func TestConvertAgnesImageEditMultipartReturnsError(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", strings.NewReader(""))

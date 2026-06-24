@@ -125,7 +125,6 @@ func marshalChatStreamChunk(t *testing.T, chunk dto.ChatCompletionsStreamRespons
 }
 
 func TestResponsesViaChatNonStream(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
 
 	chatResp := dto.OpenAITextResponse{
@@ -424,7 +423,6 @@ func TestResponsesViaChatIgnoresToolSearchInputItems(t *testing.T) {
 }
 
 func TestResponsesViaChatStream(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
 
 	oldTimeout := constant.StreamingTimeout
