@@ -155,13 +155,9 @@ func ChatCompletionsResponseToResponsesResponseWithOptions(resp *dto.OpenAITextR
 		if name == "" {
 			return nil, nil, fmt.Errorf("tool call name is required")
 		}
-		argumentsRaw := common.RawMessage(toolCall.Function.Arguments)
-		if !common.ValidJson(argumentsRaw) {
-			var err error
-			argumentsRaw, err = common.Marshal(toolCall.Function.Arguments)
-			if err != nil {
-				return nil, nil, fmt.Errorf("tool call arguments marshal failed: %w", err)
-			}
+		argumentsRaw, err := common.Marshal(toolCall.Function.Arguments)
+		if err != nil {
+			return nil, nil, fmt.Errorf("tool call arguments marshal failed: %w", err)
 		}
 		output = append(output, dto.ResponsesOutput{
 			Type:      "function_call",

@@ -359,7 +359,7 @@ func TestResponsesViaChatContinuesMissingSyntheticStateWithVisibleInput(t *testi
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted))
 }
 
-func TestResponsesViaChatIgnoresToolSearchInputItems(t *testing.T) {
+func TestResponsesViaChatRejectsToolSearchInputItems(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	chatResp := dto.OpenAITextResponse{
@@ -413,13 +413,12 @@ func TestResponsesViaChatIgnoresToolSearchInputItems(t *testing.T) {
 
 	usage, newAPIErr := responsesViaChat(c, info, adaptor, req, service.ResponsesChatCompatibilityOptions{})
 
-	require.Nil(t, newAPIErr)
-	require.NotNil(t, usage)
-	require.Equal(t, 10, usage.TotalTokens)
-	require.NotNil(t, adaptor.convertedReq)
-	require.Len(t, adaptor.convertedReq.Messages, 1)
-	require.Equal(t, "continue", adaptor.convertedReq.Messages[0].StringContent())
-	require.NotContains(t, string(adaptor.requestBody), "tool_search")
+	require.Nil(t, usage)
+	require.NotNil(t, newAPIErr)
+	require.Equal(t, http.StatusBadRequest, newAPIErr.StatusCode)
+	require.Contains(t, newAPIErr.Error(), `input item type "tool_search" is not supported`)
+	require.Nil(t, adaptor.convertedReq)
+	require.Empty(t, adaptor.requestBody)
 }
 
 func TestResponsesViaChatStream(t *testing.T) {

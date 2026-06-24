@@ -41,10 +41,10 @@ func indexAfter(t *testing.T, text string, marker string, after int) int {
 	return after + index
 }
 
-func TestMarshalResponsesCompatArgumentsKeepsValidJSON(t *testing.T) {
+func TestMarshalResponsesCompatArgumentsWrapsValidJSONAsString(t *testing.T) {
 	raw, err := marshalResponsesCompatArguments(`{"q":"hello"}`)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"q":"hello"}`, string(raw))
+	require.JSONEq(t, `"{\"q\":\"hello\"}"`, string(raw))
 }
 
 func TestMarshalResponsesCompatArgumentsEscapesInvalidJSON(t *testing.T) {
@@ -72,7 +72,7 @@ func TestMarshalResponsesCompatArgumentsBoundaryInputs(t *testing.T) {
 		{
 			name: "json string stays json",
 			in:   `"already escaped"`,
-			want: `"already escaped"`,
+			want: `"\"already escaped\""`,
 		},
 		{
 			name: "special characters escaped",
@@ -80,9 +80,9 @@ func TestMarshalResponsesCompatArgumentsBoundaryInputs(t *testing.T) {
 			want: "\"line\\n中文\"",
 		},
 		{
-			name: "formatted json stays object",
+			name: "formatted json stays string",
 			in:   "{\n  \"q\": \"hello\"\n}",
-			want: `{"q":"hello"}`,
+			want: "\"{\\n  \\\"q\\\": \\\"hello\\\"\\n}\"",
 		},
 		{
 			name: "json trailing comma escaped as string",

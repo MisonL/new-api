@@ -252,10 +252,6 @@ func isResponsesToolIgnoredInChatCompatibility(toolType string) bool {
 	}
 }
 
-func isResponsesInputItemIgnoredInChatCompatibility(itemType string) bool {
-	return isResponsesToolIgnoredInChatCompatibility(itemType)
-}
-
 func parseResponsesNamespaceTools(tool map[string]any) ([]map[string]any, error) {
 	nestedToolsAny, ok := tool["tools"]
 	if !ok || nestedToolsAny == nil {
@@ -677,9 +673,6 @@ func convertResponsesInputToChatMessages(raw []byte, options ResponsesChatCompat
 			}
 			pendingUserParts = append(pendingUserParts, part)
 		default:
-			if isResponsesInputItemIgnoredInChatCompatibility(itemType) {
-				continue
-			}
 			return nil, fmt.Errorf("input item type %q is not supported in chat compatibility mode", itemType)
 		}
 	}

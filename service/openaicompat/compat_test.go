@@ -421,8 +421,8 @@ func TestResponsesRequestToChatCompletionsRequestNamespaceToolFiltersIgnoredType
 	require.Equal(t, "read_thread", chatReq.Tools[0].Function.Name)
 }
 
-func TestResponsesRequestToChatCompletionsRequestIgnoresUnsupportedInputToolSearchItems(t *testing.T) {
-	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+func TestResponsesRequestToChatCompletionsRequestRejectsUnsupportedInputToolSearchItems(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
 		Model: "gpt-5",
 		Input: mustMarshalJSON(t, []map[string]any{
 			{
@@ -436,9 +436,8 @@ func TestResponsesRequestToChatCompletionsRequestIgnoresUnsupportedInputToolSear
 		}),
 	}, ResponsesChatCompatibilityOptions{})
 
-	require.NoError(t, err)
-	require.Len(t, chatReq.Messages, 1)
-	require.Equal(t, "continue", chatReq.Messages[0].StringContent())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `input item type "tool_search" is not supported`)
 }
 
 func TestResponsesRequestToChatCompletionsRequestNamespaceToolRequiresCompatibleNestedTool(t *testing.T) {
@@ -519,7 +518,9 @@ func TestChatCompletionsResponseToResponsesResponse(t *testing.T) {
 	require.Equal(t, "done", responsesResp.Output[0].Content[0].Text)
 	require.Equal(t, "function_call", responsesResp.Output[1].Type)
 	require.Equal(t, "lookup", responsesResp.Output[1].Name)
-	require.JSONEq(t, `{"q":"hello"}`, string(responsesResp.Output[1].Arguments))
+	var arguments string
+	require.NoError(t, common.Unmarshal(responsesResp.Output[1].Arguments, &arguments))
+	require.Equal(t, `{"q":"hello"}`, arguments)
 	require.NotNil(t, usage)
 	require.Equal(t, 10, usage.InputTokens)
 	require.Equal(t, 5, usage.OutputTokens)

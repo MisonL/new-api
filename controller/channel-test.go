@@ -791,6 +791,9 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 			return request, fmt.Errorf("invalid response compaction request type: %T", request)
 		}
 		convertedResponsesReq := responsesReq.ToResponsesRequest()
+		if convertedResponsesReq == nil {
+			return request, fmt.Errorf("invalid response compaction request type: %T", request)
+		}
 		converted, applied, visibleOnly, applyInfo, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(relaycommon.GinRequestContext(c), service.SyntheticCompactScopeFromSource(info), *convertedResponsesReq)
 		service.SetSyntheticCompactApplyInfo(c, applyInfo)
 		if err != nil {

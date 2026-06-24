@@ -705,6 +705,9 @@ func responsesLocalCompactionTriggerRuleRequiresChannelSkip(c *gin.Context, info
 	if settings.HasResponsesProxyCompatibilityProfile() {
 		return true
 	}
+	if rule.AllChannels {
+		return !settings.ResolveResponsesChannelCapability(channel.Type).SupportsCompactionItemPassthrough
+	}
 	if len(rule.ChannelIDs) > 0 {
 		for _, channelID := range rule.ChannelIDs {
 			if channelID == channel.Id {
@@ -1093,6 +1096,7 @@ var responsesCompactFallbackContextKeys = []string{
 	"responses_compact_auto_fallback_attempted",
 	"responses_compact_context_fallback_attempted",
 	"responses_compact_previous_response_id_fallback_attempted",
+	"responses_compact_synthetic_fallback_channel_id",
 	"responses_compact_summary_model_fallback_attempted",
 	string(constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted),
 	string(constant.ContextKeyResponsesCompactStateLookup),

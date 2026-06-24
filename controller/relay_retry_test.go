@@ -827,6 +827,28 @@ func TestDefaultProfileAllowsCompactionTriggerPassthroughForLegacyChannels(t *te
 	require.True(t, otherSettings.ResolveResponsesChannelCapability(channel.Type).SupportsCompactionItemPassthrough)
 }
 
+func TestResponsesLocalCompactionTriggerAllChannelsSkipsOnlyUnsupportedPassthrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := compactionTriggerRelayInfo()
+	rule := &model_setting.ProtocolConversionRule{AllChannels: true}
+	legacyOpenAI := &model.Channel{
+		Id:   178,
+		Type: constant.ChannelTypeOpenAI,
+	}
+	genericProxy := &model.Channel{
+		Id:   168,
+		Type: constant.ChannelTypeOpenAI,
+	}
+	genericProxy.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+	})
+
+	require.False(t, responsesLocalCompactionTriggerRuleRequiresChannelSkip(ctx, info, rule, legacyOpenAI))
+	require.True(t, responsesLocalCompactionTriggerRuleRequiresChannelSkip(ctx, info, rule, genericProxy))
+}
+
 func TestDefaultProfileAllowsRemoteCompactionPassthroughForLegacyChannels(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -2194,6 +2216,9 @@ func TestResponsesCompactFallbackContextSnapshotRestoresFailedAttemptMarkers(t *
 	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModels, []string{"gpt-5.3"})
 	service.MarkResponsesCompactNativeFallback(c, compactAutoFallbackRelayInfo(), http.StatusBadGateway, "status_code=502", time.Now())
 	setResponsesCompactVisibleOnly(c, true)
+	attemptInfo := compactAutoFallbackRelayInfo()
+	markResponsesCompactSyntheticFallbackAttempted(c, attemptInfo)
+	require.True(t, responsesCompactSyntheticFallbackAttemptedForChannel(c, attemptInfo.ChannelMeta.ChannelId))
 
 	info := compactAutoFallbackRelayInfo()
 	info.ChannelMeta.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeSynthetic
@@ -2204,6 +2229,7 @@ func TestResponsesCompactFallbackContextSnapshotRestoresFailedAttemptMarkers(t *
 	require.False(t, c.GetBool("responses_compact_auto_fallback_attempted"))
 	require.True(t, c.GetBool("responses_compact_context_fallback_attempted"))
 	require.False(t, c.GetBool("responses_compact_previous_response_id_fallback_attempted"))
+	require.False(t, responsesCompactSyntheticFallbackAttemptedForChannel(c, info.ChannelMeta.ChannelId))
 	require.False(t, c.GetBool("responses_compact_summary_model_fallback_attempted"))
 	require.Equal(t, "gpt-5.4", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactSummaryModel))
 	require.Equal(t, "original_hit", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactStateLookup))
