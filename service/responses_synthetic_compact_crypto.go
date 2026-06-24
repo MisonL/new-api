@@ -17,8 +17,7 @@ import (
 )
 
 func encryptSyntheticCompactSummaryForRecord(record model.SyntheticCompactStateRecord, summary string) (string, error) {
-	summary = strings.TrimSpace(summary)
-	if summary == "" {
+	if strings.TrimSpace(summary) == "" {
 		return "", errors.New("synthetic compact state summary is empty")
 	}
 	if len(summary) > syntheticCompactSummaryMax {

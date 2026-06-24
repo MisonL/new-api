@@ -288,14 +288,17 @@ func TestMarkResponsesCompactAutoFallbackPersistsState(t *testing.T) {
 func TestMarkResponsesCapabilityObservationPersistsObservedRegistry(t *testing.T) {
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 	originalChannelsIDM := channelsIDM
+	originalGroup2Model2Channels := group2model2channels
 	common.MemoryCacheEnabled = true
 	channelSyncLock.Lock()
 	channelsIDM = make(map[int]*Channel)
+	group2model2channels = nil
 	channelSyncLock.Unlock()
 	t.Cleanup(func() {
 		common.MemoryCacheEnabled = originalMemoryCacheEnabled
 		channelSyncLock.Lock()
 		channelsIDM = originalChannelsIDM
+		group2model2channels = originalGroup2Model2Channels
 		channelSyncLock.Unlock()
 	})
 
@@ -396,6 +399,16 @@ func TestMarkResponsesCapabilityObservationDebouncesSameError(t *testing.T) {
 	require.Equal(t, "bad_request", settings.ResponsesCapabilityRegistry.Observed.ErrorCode)
 
 	settings, err = MarkResponsesCapabilityObservation(channel.Id, dto.ResponsesCapabilityObservation{
+		ObservedAt: 110,
+		StatusCode: 413,
+		ErrorCode:  "upstream_request_too_large",
+		Reason:     "older different error",
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(121), settings.ResponsesCapabilityRegistry.Observed.ObservedAt)
+	require.Equal(t, "bad_request", settings.ResponsesCapabilityRegistry.Observed.ErrorCode)
+
+	settings, err = MarkResponsesCapabilityObservation(channel.Id, dto.ResponsesCapabilityObservation{
 		ObservedAt: 430,
 		StatusCode: 400,
 		ErrorCode:  "bad_request",
@@ -409,14 +422,17 @@ func TestMarkResponsesCapabilityObservationDebouncesSameError(t *testing.T) {
 func TestMarkResponsesCapabilityObservationDebouncesFromCacheBeforeTransaction(t *testing.T) {
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 	originalChannelsIDM := channelsIDM
+	originalGroup2Model2Channels := group2model2channels
 	common.MemoryCacheEnabled = true
 	channelSyncLock.Lock()
 	channelsIDM = make(map[int]*Channel)
+	group2model2channels = nil
 	channelSyncLock.Unlock()
 	t.Cleanup(func() {
 		common.MemoryCacheEnabled = originalMemoryCacheEnabled
 		channelSyncLock.Lock()
 		channelsIDM = originalChannelsIDM
+		group2model2channels = originalGroup2Model2Channels
 		channelSyncLock.Unlock()
 	})
 

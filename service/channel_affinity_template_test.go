@@ -398,6 +398,116 @@ func TestResponsesEncryptedContentAffinityRecordsAndHits(t *testing.T) {
 	require.Equal(t, affinityFingerprint(encryptedContent), statsCtx.KeyFingerprint)
 }
 
+func TestResponsesEncryptedContentAffinityRecordsByOriginalModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	setting := operation_setting.GetChannelAffinitySetting()
+	originalRules := append([]operation_setting.ChannelAffinityRule(nil), setting.Rules...)
+	t.Cleanup(func() {
+		setting.Rules = originalRules
+	})
+	setting.Rules = []operation_setting.ChannelAffinityRule{
+		{
+			Name:              "responses encrypted content",
+			ModelRegex:        []string{"^gpt-5\\.5$"},
+			PathRegex:         []string{"/v1/responses"},
+			KeySources:        []operation_setting.ChannelAffinityKeySource{{Type: "responses_encrypted_content"}},
+			IncludeUsingGroup: true,
+			IncludeModelName:  true,
+			IncludeRuleName:   true,
+		},
+	}
+
+	encryptedContent := fmt.Sprintf("gAAAA-original-model-%d", time.Now().UnixNano())
+	originalModel := "gpt-5.5"
+	responseModel := "upstream-deployment"
+	usingGroup := "default"
+	channelID := 203
+	rule := setting.Rules[0]
+	originalModelKey := buildResponsesEncryptedContentAffinityCacheKeySuffix(rule, originalModel, usingGroup, affinityFingerprint(encryptedContent))
+	responseModelKey := buildResponsesEncryptedContentAffinityCacheKeySuffix(rule, responseModel, usingGroup, affinityFingerprint(encryptedContent))
+	t.Cleanup(func() {
+		_, _ = getChannelAffinityCache().DeleteMany([]string{originalModelKey, responseModelKey})
+	})
+
+	recordCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	recordCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	recordCtx.Set("original_model", originalModel)
+	common.SetContextKey(recordCtx, constant.ContextKeyUsingGroup, usingGroup)
+	RecordResponsesEncryptedContentAffinity(recordCtx, []byte(fmt.Sprintf(`{
+		"model":"%s",
+		"output":[{"type":"reasoning","encrypted_content":"%s"}]
+	}`, responseModel, encryptedContent)), channelID)
+
+	recordedChannelID, found, err := getChannelAffinityCache().Get(originalModelKey)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, channelID, recordedChannelID)
+	_, found, err = getChannelAffinityCache().Get(responseModelKey)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
+func TestResponsesEncryptedContentAffinityHonorsPathAndUserAgentOnRecord(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	setting := operation_setting.GetChannelAffinitySetting()
+	originalRules := append([]operation_setting.ChannelAffinityRule(nil), setting.Rules...)
+	t.Cleanup(func() {
+		setting.Rules = originalRules
+	})
+	setting.Rules = []operation_setting.ChannelAffinityRule{
+		{
+			Name:              "responses encrypted content",
+			ModelRegex:        []string{"^gpt-5\\.5$"},
+			PathRegex:         []string{"^/v1/responses$"},
+			UserAgentInclude:  []string{"codex-tui/"},
+			KeySources:        []operation_setting.ChannelAffinityKeySource{{Type: "responses_encrypted_content"}},
+			IncludeUsingGroup: true,
+			IncludeRuleName:   true,
+		},
+	}
+
+	modelName := "gpt-5.5"
+	usingGroup := "default"
+	channelID := 203
+	rule := setting.Rules[0]
+	missEncryptedContent := fmt.Sprintf("gAAAA-ua-miss-%d", time.Now().UnixNano())
+	hitEncryptedContent := fmt.Sprintf("gAAAA-ua-hit-%d", time.Now().UnixNano())
+	missKey := buildResponsesEncryptedContentAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityFingerprint(missEncryptedContent))
+	hitKey := buildResponsesEncryptedContentAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityFingerprint(hitEncryptedContent))
+	t.Cleanup(func() {
+		_, _ = getChannelAffinityCache().DeleteMany([]string{missKey, hitKey})
+	})
+
+	missCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	missCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	missCtx.Set("original_model", modelName)
+	common.SetContextKey(missCtx, constant.ContextKeyUsingGroup, usingGroup)
+	RecordResponsesEncryptedContentAffinity(missCtx, []byte(fmt.Sprintf(`{
+		"model":"%s",
+		"output":[{"type":"reasoning","encrypted_content":"%s"}]
+	}`, modelName, missEncryptedContent)), channelID)
+	_, found, err := getChannelAffinityCache().Get(missKey)
+	require.NoError(t, err)
+	require.False(t, found)
+
+	hitCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	hitCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	hitCtx.Request.Header.Set("User-Agent", "codex-tui/0.139.0")
+	hitCtx.Set("original_model", modelName)
+	common.SetContextKey(hitCtx, constant.ContextKeyUsingGroup, usingGroup)
+	RecordResponsesEncryptedContentAffinity(hitCtx, []byte(fmt.Sprintf(`{
+		"model":"%s",
+		"output":[{"type":"reasoning","encrypted_content":"%s"}]
+	}`, modelName, hitEncryptedContent)), channelID)
+
+	recordedChannelID, found, err := getChannelAffinityCache().Get(hitKey)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, channelID, recordedChannelID)
+}
+
 func TestResponsesEncryptedContentAffinityDefaultTTLIsShortLived(t *testing.T) {
 	setting := operation_setting.GetChannelAffinitySetting()
 	require.NotNil(t, setting)

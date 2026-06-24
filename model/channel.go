@@ -1198,11 +1198,11 @@ func shouldUpdateResponsesCapabilityObservation(existing *dto.ResponsesCapabilit
 	if existing == nil || existing.ObservedAt <= 0 {
 		return true
 	}
-	if existing.StatusCode != next.StatusCode || existing.ErrorCode != next.ErrorCode {
-		return true
-	}
 	if next.ObservedAt <= existing.ObservedAt {
 		return false
+	}
+	if existing.StatusCode != next.StatusCode || existing.ErrorCode != next.ErrorCode {
+		return true
 	}
 	return next.ObservedAt-existing.ObservedAt >= responsesCapabilityObservationMinUpdateIntervalSeconds
 }

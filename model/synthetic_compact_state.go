@@ -229,7 +229,7 @@ func syntheticCompactStateRecordHash(record SyntheticCompactStateRecord) string 
 		fmt.Sprintf("%d", record.CreatedAt),
 		fmt.Sprintf("%d", record.ExpiresAt),
 	} {
-		h.Write([]byte{0})
+		h.Write([]byte(fmt.Sprintf("%d:", len(part))))
 		h.Write([]byte(part))
 	}
 	return hex.EncodeToString(h.Sum(nil))

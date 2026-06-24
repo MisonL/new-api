@@ -70,8 +70,7 @@ func OaiResponsesCompactionHandler(c *gin.Context, info *relaycommon.RelayInfo, 
 }
 
 func recordNativeOpaqueCompactionState(c *gin.Context, info *relaycommon.RelayInfo, compactResp dto.OpenAIResponsesCompactionResponse, opaqueContent string) error {
-	opaqueContent = strings.TrimSpace(opaqueContent)
-	if opaqueContent == "" {
+	if strings.TrimSpace(opaqueContent) == "" {
 		return nil
 	}
 	scope := service.SyntheticCompactScopeFromSource(info)
@@ -228,8 +227,7 @@ func responsesCompactionOutputEncryptedContent(output common.RawMessage) string 
 		}
 		var encryptedContent string
 		if err := common.Unmarshal(raw, &encryptedContent); err == nil {
-			encryptedContent = strings.TrimSpace(encryptedContent)
-			if encryptedContent != "" {
+			if strings.TrimSpace(encryptedContent) != "" {
 				return encryptedContent
 			}
 		}

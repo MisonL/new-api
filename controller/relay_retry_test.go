@@ -261,6 +261,37 @@ func TestShouldSkipChannelForResponsesNativeCompactionUnsupportedCapability(t *t
 	require.Equal(t, "channel_skipped_unsupported_compaction", common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
 }
 
+func TestShouldSkipChannelForResponsesProxyCompactionTriggerWithoutRule(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	settings := model_setting.GetGlobalSettings()
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+	settings.PassThroughRequestEnabled = false
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := compactionTriggerRelayInfo()
+	channel := &model.Channel{
+		Id:   168,
+		Type: constant.ChannelTypeOpenAI,
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileChatOnlyProxy,
+	})
+	channelOtherSettings := channel.GetOtherSettings()
+	require.True(t, info.Request.(*dto.OpenAIResponsesRequest).HasCompactionTrigger())
+	require.True(t, channelOtherSettings.HasResponsesProxyCompatibilityProfile())
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.True(t, skip)
+	require.NotNil(t, info.LastError)
+	require.Equal(t, "channel_skipped_unsupported_compaction", common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+}
+
 func TestShouldRetryModelCapacityHonorsRetryBudget(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)

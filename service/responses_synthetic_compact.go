@@ -364,11 +364,19 @@ func ApplySyntheticCompactStateWithInfo(ctx context.Context, scope SyntheticComp
 			var hasReference bool
 			hasReference, err = HasLocalSyntheticCompactReferenceWithContext(ctx, req)
 			if err == nil && hasReference {
-				err = ErrSyntheticCompactStateNotFound
 				info.StateLookup = "miss"
-				info.MarkerKind = "synthetic_summary"
 				info.ScopeResult = "not_found"
-				info.FallbackReason = "state_not_found"
+				if hasNativeOpaque, nativeErr := hasLocalNativeOpaqueCompactReference(ctx, req); nativeErr != nil {
+					err = nativeErr
+				} else if hasNativeOpaque {
+					err = ErrResponsesNativeOpaqueStateNotRestorable
+					info.MarkerKind = model.SyntheticCompactStateKindNativeOpaque
+					info.FallbackReason = "native_opaque_state_not_found"
+				} else {
+					err = ErrSyntheticCompactStateNotFound
+					info.MarkerKind = model.SyntheticCompactStateKindSyntheticSummary
+					info.FallbackReason = "state_not_found"
+				}
 			}
 		} else if err != nil {
 			info.StateLookup = "error"
@@ -500,6 +508,13 @@ func removeMissingSyntheticCompactStateForVisibleOnly(ctx context.Context, req d
 	if err != nil || !hasReference {
 		return req, false, err
 	}
+	hasNativeOpaque, err := hasLocalNativeOpaqueCompactReference(ctx, req)
+	if err != nil || hasNativeOpaque {
+		if err != nil {
+			return req, false, err
+		}
+		return req, false, ErrResponsesNativeOpaqueStateNotRestorable
+	}
 	cleanInput, err := removeSyntheticCompactMarkers(ctx, req.Input)
 	if err != nil {
 		return req, false, err
@@ -514,6 +529,24 @@ func removeMissingSyntheticCompactStateForVisibleOnly(ctx context.Context, req d
 	}
 	req.Input = cleanInput
 	return req, true, nil
+}
+
+func hasLocalNativeOpaqueCompactReference(ctx context.Context, req dto.OpenAIResponsesRequest) (bool, error) {
+	if id, local, err := syntheticCompactIDFromReference(ctx, req.PreviousResponseID); err != nil {
+		return false, err
+	} else if local && IsNativeOpaqueCompactReference(id) {
+		return true, nil
+	}
+	for _, marker := range syntheticCompactMarkers(req.Input) {
+		id, ok, err := syntheticCompactIDFromMarker(ctx, marker)
+		if err != nil {
+			return false, err
+		}
+		if ok && IsNativeOpaqueCompactReference(id) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func BuildSyntheticCompactResponse(ctx context.Context, scope SyntheticCompactStateScope, summaryModel string, upstream dto.OpenAIResponsesResponse) (*dto.OpenAIResponsesCompactionResponse, *dto.Usage, error) {
@@ -586,8 +619,7 @@ func StoreNativeOpaqueCompactState(ctx context.Context, scope SyntheticCompactSt
 	if responseID == "" {
 		return nil, fmt.Errorf("native opaque compact response id is required")
 	}
-	encryptedContent = strings.TrimSpace(encryptedContent)
-	if encryptedContent == "" {
+	if strings.TrimSpace(encryptedContent) == "" {
 		return nil, fmt.Errorf("native opaque compact encrypted_content is required")
 	}
 	id, err := newNativeOpaqueCompactID(ctx, responseID, encryptedContent)
@@ -636,8 +668,8 @@ func newNativeOpaqueCompactID(ctx context.Context, responseID string, encryptedC
 		return "", fmt.Errorf("resolve native opaque compact instance id: %w", err)
 	}
 	h := sha256.New()
-	for _, part := range []string{strings.TrimSpace(responseID), strings.TrimSpace(encryptedContent)} {
-		h.Write([]byte{0})
+	for _, part := range []string{strings.TrimSpace(responseID), encryptedContent} {
+		h.Write([]byte(fmt.Sprintf("%d:", len(part))))
 		h.Write([]byte(part))
 	}
 	return nativeOpaqueCompactIDPrefix + instanceID + "_" + hex.EncodeToString(h.Sum(nil))[:24], nil

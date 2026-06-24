@@ -622,6 +622,12 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 		return false, nil
 	}
 	if hasLocalCompactionTrigger {
+		channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
+		if channelOtherSettings.HasResponsesProxyCompatibilityProfile() {
+			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
+			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			return true, nil
+		}
 		rule := service.FindProtocolConversionRuleGlobal(
 			model_setting.ProtocolEndpointResponses,
 			model_setting.ProtocolEndpointChatCompletions,

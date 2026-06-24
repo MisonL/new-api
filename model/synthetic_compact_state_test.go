@@ -156,6 +156,31 @@ func TestSaveSyntheticCompactStateRecordPopulatesControlFields(t *testing.T) {
 	require.NotZero(t, record.LastAccessAt)
 }
 
+func TestSyntheticCompactStateRecordHashUsesLengthPrefixes(t *testing.T) {
+	left := SyntheticCompactStateRecord{
+		ID:                "a",
+		Kind:              SyntheticCompactStateKindSyntheticSummary,
+		ModelAtCreation:   "b\x00c",
+		OwnerScope:        "scope",
+		ScopePolicy:       SyntheticCompactScopePolicyModelFlexible,
+		SummaryCiphertext: "encrypted",
+		CreatedAt:         1,
+		ExpiresAt:         2,
+	}
+	right := SyntheticCompactStateRecord{
+		ID:                "a\x00b",
+		Kind:              SyntheticCompactStateKindSyntheticSummary,
+		ModelAtCreation:   "c",
+		OwnerScope:        "scope",
+		ScopePolicy:       SyntheticCompactScopePolicyModelFlexible,
+		SummaryCiphertext: "encrypted",
+		CreatedAt:         1,
+		ExpiresAt:         2,
+	}
+
+	require.NotEqual(t, syntheticCompactStateRecordHash(left), syntheticCompactStateRecordHash(right))
+}
+
 func TestGetSyntheticCompactStateRecordUpdatesLastAccessAt(t *testing.T) {
 	originDB := DB
 	t.Cleanup(func() {

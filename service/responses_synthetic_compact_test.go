@@ -1129,6 +1129,28 @@ func TestSyntheticCompactForeignPreviousResponseIDIsLocalSyntheticReference(t *t
 	require.Contains(t, string(got.Input), "continue")
 }
 
+func TestApplySyntheticCompactStateOrVisibleOnlyRejectsMissingNativeOpaquePreviousResponseID(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutSyntheticCompactTestDB(t)
+
+	localID, err := syntheticCompactLocalInstanceID(context.Background())
+	require.NoError(t, err)
+	stateID := nativeOpaqueCompactIDPrefix + localID + "_missing"
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5",
+		PreviousResponseID: stateID,
+		Input:              common.RawMessage(`"continue"`),
+	}
+
+	got, applied, visibleOnly, err := ApplySyntheticCompactStateOrVisibleOnly(context.Background(), SyntheticCompactStateScope{}, req)
+
+	require.ErrorIs(t, err, ErrResponsesNativeOpaqueStateNotRestorable)
+	require.False(t, applied)
+	require.False(t, visibleOnly)
+	require.Equal(t, stateID, got.PreviousResponseID)
+	require.Equal(t, req.Input, got.Input)
+}
+
 func TestApplySyntheticCompactStateVisibleOnlyFallbackInfoDoesNotClaimRestore(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	withoutSyntheticCompactTestDB(t)
@@ -1627,7 +1649,7 @@ func TestLoadSyntheticCompactStateFallsBackToRedisWhenDatabaseMisses(t *testing.
 	})
 }
 
-func TestLoadSyntheticCompactStateBackfillsRedisRecordWithoutChangingStateHash(t *testing.T) {
+func TestLoadSyntheticCompactStatePreservesRedisRecordExpiresAtAndHash(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	originDB := model.DB
 	t.Cleanup(func() {
@@ -1654,10 +1676,138 @@ func TestLoadSyntheticCompactStateBackfillsRedisRecordWithoutChangingStateHash(t
 
 		require.NoError(t, err)
 		require.True(t, found)
+		require.Equal(t, record.ExpiresAt, got.ExpiresAt)
 		require.Equal(t, record.StateHash, got.StateHash)
 		persisted := requireEventuallySyntheticCompactRecord(t, state.ID)
 		require.Equal(t, record.ExpiresAt, persisted.ExpiresAt)
-		require.Equal(t, record.StateHash, persisted.StateHash)
+		require.Equal(t, persisted.StateHash, got.StateHash)
+
+		require.NoError(t, model.DB.Delete(&model.SyntheticCompactStateRecord{}, "id = ?", state.ID).Error)
+		require.NoError(t, common.RDB.Expire(context.Background(), syntheticCompactRedisKey(state.ID), 30*time.Second).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+
+		got, found, err = loadSyntheticCompactState(context.Background(), state.ID)
+
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, record.ExpiresAt, got.ExpiresAt)
+		require.Equal(t, record.StateHash, got.StateHash)
+	})
+}
+
+func TestLoadSyntheticCompactStateUsesRedisTtlWhenExpiresAtMissing(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		state := SyntheticCompactState{
+			ID:      "resp_newapi_synthcmp_redis_backfill_legacy_ttl",
+			Model:   "gpt-5",
+			Summary: "Legacy redis payload without expires_at should still use remaining TTL.",
+		}
+		record, err := syntheticCompactStateRecord(context.Background(), state, time.Now())
+		require.NoError(t, err)
+		record.ExpiresAt = 0
+		record.StateHash = ""
+		data, err := common.Marshal(record)
+		require.NoError(t, err)
+		require.NoError(t, common.RDB.Set(context.Background(), syntheticCompactRedisKey(state.ID), string(data), time.Minute).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+
+		got, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+
+		require.NoError(t, err)
+		require.True(t, found)
+		require.NotZero(t, got.ExpiresAt)
+		require.Greater(t, got.ExpiresAt, time.Now().Unix())
+		require.LessOrEqual(t, got.ExpiresAt, time.Now().Add(2*time.Minute).Unix())
+		require.NotEmpty(t, got.StateHash)
+		persisted := requireEventuallySyntheticCompactRecord(t, state.ID)
+		require.Equal(t, got.ExpiresAt, persisted.ExpiresAt)
+		require.Equal(t, got.StateHash, persisted.StateHash)
+	})
+}
+
+func TestSyntheticCompactStateRecordPreservesExplicitExpiresAt(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutRedisForSyntheticCompactTest(t)
+
+	now := time.Unix(1710000000, 0)
+	expiresAt := now.Add(2 * time.Minute).Unix()
+	record, err := syntheticCompactStateRecord(context.Background(), SyntheticCompactState{
+		ID:             "resp_newapi_synthcmp_explicit_expiry",
+		Model:          "gpt-5",
+		Summary:        "summary",
+		SourceInstance: "test-instance",
+		ExpiresAt:      expiresAt,
+	}, now)
+
+	require.NoError(t, err)
+	require.Equal(t, expiresAt, record.ExpiresAt)
+}
+
+func TestStoreSyntheticCompactStateUsesExplicitExpiresAtForRedisTTL(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		expiresAt := time.Now().Add(90 * time.Second).Unix()
+		state := SyntheticCompactState{
+			ID:        "resp_newapi_synthcmp_explicit_redis_ttl",
+			Model:     "gpt-5",
+			Summary:   "summary",
+			ExpiresAt: expiresAt,
+		}
+		require.NoError(t, storeSyntheticCompactState(context.Background(), state))
+
+		ttl, err := common.RDB.TTL(context.Background(), syntheticCompactRedisKey(state.ID)).Result()
+		require.NoError(t, err)
+		require.Greater(t, ttl, 30*time.Second)
+		require.LessOrEqual(t, ttl, 2*time.Minute)
+	})
+}
+
+func TestLoadSyntheticCompactStateIgnoresExpiredRedisRecord(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		state := SyntheticCompactState{
+			ID:        "resp_newapi_synthcmp_expired_redis_record",
+			Model:     "gpt-5",
+			Summary:   "summary",
+			ExpiresAt: time.Now().Add(-time.Minute).Unix(),
+		}
+		record, err := syntheticCompactStateRecord(context.Background(), state, time.Now().Add(-2*time.Hour))
+		require.NoError(t, err)
+		data, err := common.Marshal(record)
+		require.NoError(t, err)
+		require.NoError(t, common.RDB.Set(context.Background(), syntheticCompactRedisKey(state.ID), string(data), time.Hour).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+
+		got, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Nil(t, got)
+		exists, err := common.RDB.Exists(context.Background(), syntheticCompactRedisKey(state.ID)).Result()
+		require.NoError(t, err)
+		require.Zero(t, exists)
 	})
 }
 
@@ -1687,8 +1837,8 @@ func TestLoadSyntheticCompactStateBackfillCanRunAgainAfterCompletion(t *testing.
 		got, found, err := loadSyntheticCompactState(context.Background(), state.ID)
 		require.NoError(t, err)
 		require.True(t, found)
-		require.Equal(t, record.StateHash, got.StateHash)
-		requireEventuallySyntheticCompactRecord(t, state.ID)
+		persisted := requireEventuallySyntheticCompactRecord(t, state.ID)
+		require.Equal(t, persisted.StateHash, got.StateHash)
 
 		require.NoError(t, model.DB.Delete(&model.SyntheticCompactStateRecord{}, "id = ?", state.ID).Error)
 		resetSyntheticCompactMemoryStoreForTest()
@@ -1696,8 +1846,8 @@ func TestLoadSyntheticCompactStateBackfillCanRunAgainAfterCompletion(t *testing.
 		got, found, err = loadSyntheticCompactState(context.Background(), state.ID)
 		require.NoError(t, err)
 		require.True(t, found)
-		require.Equal(t, record.StateHash, got.StateHash)
-		requireEventuallySyntheticCompactRecord(t, state.ID)
+		persisted = requireEventuallySyntheticCompactRecord(t, state.ID)
+		require.Equal(t, persisted.StateHash, got.StateHash)
 	})
 }
 
@@ -2420,6 +2570,42 @@ func TestStoreNativeOpaqueCompactStateStoresStrictOpaqueRecord(t *testing.T) {
 	require.NotEmpty(t, record.StateHash)
 	require.NotEmpty(t, record.SummaryCiphertext)
 	require.NotEqual(t, "opaque-token", string(record.SummaryCiphertext))
+}
+
+func TestStoreNativeOpaqueCompactStatePreservesOpaqueContentWhitespace(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+	withoutRedisForSyntheticCompactTest(t)
+
+	scope := SyntheticCompactStateScope{
+		UserID:      7,
+		TokenID:     8,
+		Group:       "default",
+		Model:       "gpt-5.5",
+		ChannelID:   206,
+		ChannelType: 1,
+	}
+	opaqueContent := "  opaque-token  "
+	state, err := StoreNativeOpaqueCompactState(context.Background(), scope, "gpt-5.5", "resp_native", opaqueContent, 1710000000)
+	require.NoError(t, err)
+	require.Equal(t, opaqueContent, state.Summary)
+
+	var record model.SyntheticCompactStateRecord
+	require.NoError(t, model.DB.Where("id = ?", state.ID).First(&record).Error)
+	summary, err := decryptSyntheticCompactSummaryForRecord(record)
+	require.NoError(t, err)
+	require.Equal(t, opaqueContent, summary)
+
+	resetSyntheticCompactMemoryStoreForTest()
+	reloaded, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, opaqueContent, reloaded.Summary)
 }
 
 func TestStoreNativeOpaqueCompactStateRejectsEmptyResponseID(t *testing.T) {

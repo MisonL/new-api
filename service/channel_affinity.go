@@ -833,12 +833,16 @@ func RecordResponsesEncryptedContentAffinityWithStatus(c *gin.Context, responseB
 			return
 		}
 	}
-	modelName := strings.TrimSpace(gjson.GetBytes(responseBody, "model").String())
+	modelName := strings.TrimSpace(c.GetString("original_model"))
 	if modelName == "" {
-		modelName = strings.TrimSpace(c.GetString("original_model"))
+		modelName = strings.TrimSpace(gjson.GetBytes(responseBody, "model").String())
 	}
 	if modelName == "" {
 		return
+	}
+	userAgent := ""
+	if c.Request != nil {
+		userAgent = c.Request.UserAgent()
 	}
 	usingGroup := responsesEncryptedContentAffinityUsingGroup(c)
 	values := responseEncryptedContentAffinityValues(responseBody)
@@ -846,7 +850,7 @@ func RecordResponsesEncryptedContentAffinityWithStatus(c *gin.Context, responseB
 		return
 	}
 	for _, value := range values {
-		recordResponsesEncryptedContentAffinityValue(setting, modelName, usingGroup, affinityFingerprint(value), channelID)
+		recordResponsesEncryptedContentAffinityValue(setting, modelName, usingGroup, path, userAgent, affinityFingerprint(value), channelID)
 	}
 }
 
@@ -890,7 +894,7 @@ func responseEncryptedContentAffinityValues(responseBody []byte) []string {
 	return values
 }
 
-func recordResponsesEncryptedContentAffinityValue(setting *operation_setting.ChannelAffinitySetting, modelName string, usingGroup string, valueFingerprint string, channelID int) {
+func recordResponsesEncryptedContentAffinityValue(setting *operation_setting.ChannelAffinitySetting, modelName string, usingGroup string, path string, userAgent string, valueFingerprint string, channelID int) {
 	if valueFingerprint == "" {
 		return
 	}
@@ -899,6 +903,12 @@ func recordResponsesEncryptedContentAffinityValue(setting *operation_setting.Cha
 			continue
 		}
 		if !matchAnyRegexCached(rule.ModelRegex, modelName) {
+			continue
+		}
+		if len(rule.PathRegex) > 0 && !matchAnyRegexCached(rule.PathRegex, path) {
+			continue
+		}
+		if len(rule.UserAgentInclude) > 0 && !matchAnyIncludeFold(rule.UserAgentInclude, userAgent) {
 			continue
 		}
 		if rule.ValueRegex != "" && !matchAnyRegexCached([]string{rule.ValueRegex}, valueFingerprint) {

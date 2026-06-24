@@ -331,6 +331,14 @@ func TestResponsesCompactionOutputEncryptedContentSkipsEmptyItem(t *testing.T) {
 	require.Equal(t, "opaque-valid-token", responsesCompactionOutputEncryptedContent(output))
 }
 
+func TestResponsesCompactionOutputEncryptedContentPreservesOpaqueWhitespace(t *testing.T) {
+	output := common.RawMessage(`[
+		{"type":"compaction","encrypted_content":"  opaque-valid-token  "}
+	]`)
+
+	require.Equal(t, "  opaque-valid-token  ", responsesCompactionOutputEncryptedContent(output))
+}
+
 func TestResponsesCompactOpenAIErrorStatus(t *testing.T) {
 	t.Parallel()
 

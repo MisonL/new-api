@@ -160,19 +160,24 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		return nil, err
 	}
 
-	usage, newAPIError := doOpenAIResponsesRequest(c, info, adaptor, requestBody)
+	usage, newAPIError := doOpenAIResponsesRequest(c, info, adaptor, requestBody, doOpenAIResponsesRequestOptions{
+		SkipStatusCodeMapping: true,
+	})
 	if newAPIError == nil {
 		return usage, nil
 	}
 
 	if !shouldRetryResponsesWithoutEncryptedReasoning(info, newAPIError) {
+		resetResponsesStatusCode(c, newAPIError)
 		return nil, newAPIError
 	}
 	strippedRequest, result, stripErr := relaycommon.StripEncryptedReasoningFromResponsesRequest(convertedRequest)
 	if stripErr != nil {
+		resetResponsesStatusCode(c, newAPIError)
 		return nil, newAPIError
 	}
 	if result.RemovedCount() == 0 {
+		resetResponsesStatusCode(c, newAPIError)
 		return nil, newAPIError
 	}
 	common.SetContextKey(c, appconstant.ContextKeyResponsesEncryptedContextRetry, true)
@@ -191,6 +196,10 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		return nil, retryBuildErr
 	}
 	return doOpenAIResponsesRequest(c, info, adaptor, retryBody)
+}
+
+type doOpenAIResponsesRequestOptions struct {
+	SkipStatusCodeMapping bool
 }
 
 type buildResponsesRequestBodyOptions struct {
@@ -293,35 +302,44 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 	return requestBody, convertedResponsesRequest, nil
 }
 
-func doOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, requestBody io.Reader) (*dto.Usage, *types.NewAPIError) {
+func doOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, requestBody io.Reader, options ...doOpenAIResponsesRequestOptions) (*dto.Usage, *types.NewAPIError) {
 	var httpResp *http.Response
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 	}
 
-	statusCodeMappingStr := c.GetString("status_code_mapping")
+	skipStatusCodeMapping := len(options) > 0 && options[0].SkipStatusCodeMapping
 
 	if resp != nil {
 		httpResp = resp.(*http.Response)
 
 		if httpResp.StatusCode != http.StatusOK {
 			newAPIError := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
-			// reset status code 重置状态码
-			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
+			if !skipStatusCodeMapping {
+				resetResponsesStatusCode(c, newAPIError)
+			}
 			return nil, newAPIError
 		}
 	}
 
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
 	if newAPIError != nil {
-		// reset status code 重置状态码
-		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
+		if !skipStatusCodeMapping {
+			resetResponsesStatusCode(c, newAPIError)
+		}
 		return nil, newAPIError
 	}
 
 	usageDto := usage.(*dto.Usage)
 	return usageDto, nil
+}
+
+func resetResponsesStatusCode(c *gin.Context, newAPIError *types.NewAPIError) {
+	if c == nil || newAPIError == nil {
+		return
+	}
+	service.ResetStatusCode(newAPIError, c.GetString("status_code_mapping"))
 }
 
 func shouldRetryResponsesWithoutEncryptedReasoning(info *relaycommon.RelayInfo, err *types.NewAPIError) bool {
