@@ -17,7 +17,8 @@ BACKUP_DIR="${COMPACT_PROD_BACKUP_DIR:-$ROOT_DIR/backups}"
 BACKUP_FILE="${COMPACT_PROD_BACKUP_FILE:-}"
 CONFIRM_PHRASE="授权升级正式环境，按 CR-COMPACT-CONTROL-PLANE-V2-PROD-UPGRADE-2026-06-18 执行。"
 CONFIRM_PROD_UPGRADE="${CONFIRM_PROD_UPGRADE:-}"
-LOG_ERROR_PATTERN='panic|fatal|synthetic compact state.*(failed|error|expired|not found)|input item type|chat compatibility mode.*(failed|error|not implemented)|not implemented|No available channel|Service Unavailable|Invalid token|status_code=503| 503 |previous_response_id.*(failed|error|expired|not found)'
+LOG_ERROR_PATTERN='panic|fatal|synthetic compact state.*(failed|error|expired|not found)|input item type|chat compatibility mode.*(failed|error|not implemented)|not implemented|No available channel|Service Unavailable|Invalid token|status_code=503|status=503|"status"[[:space:]]*:[[:space:]]*503|HTTP[ /]+503|previous_response_id.*(failed|error|expired|not found)'
+VERIFY_SINCE=""
 
 usage() {
   cat <<'USAGE'
@@ -98,7 +99,11 @@ diagnose_runtime_state() {
   docker ps --filter "name=^/${APP_CONTAINER}$" --format 'diagnostic_app={{.Names}} image={{.Image}} status={{.Status}}' || true
   docker inspect "$APP_CONTAINER" --format 'diagnostic_app_image={{.Config.Image}} diagnostic_app_state={{.State.Status}} diagnostic_app_health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' || true
   docker exec "$APP_CONTAINER" /new-api --build-info || true
-  curl -fsS "$STATUS_URL" >/dev/null && log "diagnostic_status_url=ok" || log "diagnostic_status_url=failed"
+  if curl -fsS "$STATUS_URL" >/dev/null; then
+    log "diagnostic_status_url=ok"
+  else
+    log "diagnostic_status_url=failed"
+  fi
   docker exec "$POSTGRES_CONTAINER" pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" || true
   docker logs --tail 120 "$APP_CONTAINER" 2>&1 || true
 }
@@ -144,8 +149,8 @@ compose_recreate_app() {
 
 wait_status() {
   local timeout="${1:-60}"
-  local i
-  for i in $(seq 1 "$timeout"); do
+  local _
+  for _ in $(seq 1 "$timeout"); do
     if curl -fsS "$STATUS_URL" >/dev/null 2>&1; then
       return 0
     fi
@@ -176,13 +181,20 @@ backup_database() {
   if [ "$MODE" = "execute" ]; then
     mkdir -p "$BACKUP_DIR"
     local tmp_file
+    local old_umask
     tmp_file="${BACKUP_FILE}.tmp.$$"
     log "run: docker exec $POSTGRES_CONTAINER pg_dump -U $POSTGRES_USER -d $POSTGRES_DB > $tmp_file"
+    old_umask="$(umask)"
+    umask 077
     if ! docker exec "$POSTGRES_CONTAINER" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "$tmp_file"; then
+      umask "$old_umask"
       rm -f "$tmp_file"
       die "pg_dump failed"
     fi
+    umask "$old_umask"
+    chmod 600 "$tmp_file"
     mv "$tmp_file" "$BACKUP_FILE"
+    chmod 600 "$BACKUP_FILE"
     [ -s "$BACKUP_FILE" ] || die "backup file is empty: $BACKUP_FILE"
   else
     log "would_run: docker exec $POSTGRES_CONTAINER pg_dump -U $POSTGRES_USER -d $POSTGRES_DB > $BACKUP_FILE"
@@ -195,14 +207,23 @@ verify_app() {
     log "verify_error=build_info_failed"
     return 1
   fi
+  local expected_image_id actual_image_id
+  expected_image_id="$(docker_image_id "$CANDIDATE_IMAGE")"
+  actual_image_id="$(docker inspect "$APP_CONTAINER" --format '{{.Image}}')"
+  if [ "$expected_image_id" != "$actual_image_id" ]; then
+    log "verify_error=image_id_mismatch expected=$expected_image_id actual=$actual_image_id"
+    return 1
+  fi
   log "verify: status"
   if ! curl -fsS "$STATUS_URL" >/dev/null; then
     log "verify_error=status_url_failed"
     return 1
   fi
   log "verify: recent error scan"
-  if docker logs --tail 300 "$APP_CONTAINER" 2>&1 | grep -Eiq "$LOG_ERROR_PATTERN"; then
-    docker logs --tail 300 "$APP_CONTAINER" 2>&1 | grep -Ei "$LOG_ERROR_PATTERN" >&2 || true
+  local logs_since
+  logs_since="${VERIFY_SINCE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  if docker logs --since "$logs_since" "$APP_CONTAINER" 2>&1 | grep -Eiq "$LOG_ERROR_PATTERN"; then
+    docker logs --since "$logs_since" "$APP_CONTAINER" 2>&1 | grep -Ei "$LOG_ERROR_PATTERN" >&2 || true
     return 1
   fi
   return 0
@@ -244,6 +265,7 @@ rollback_or_die() {
 }
 
 execute_upgrade() {
+  VERIFY_SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   backup_database
   log "deploy_candidate=$CANDIDATE_IMAGE"
   if ! compose_recreate_app "$CANDIDATE_IMAGE"; then
@@ -257,6 +279,7 @@ execute_upgrade() {
   fi
   log "upgrade_status=deployed"
   log "manual_required=run real Codex fresh and resume requests through production, then inspect usage logs for no 503/not implemented/state expired false errors"
+  log "verify_since=$VERIFY_SINCE"
 }
 
 main() {
@@ -269,7 +292,7 @@ main() {
     log "would_run: NEW_API_IMAGE=$CANDIDATE_IMAGE docker compose -f $COMPOSE_FILE_PATH up -d --no-deps --force-recreate $APP_SERVICE"
     log "would_verify: docker exec $APP_CONTAINER /new-api --build-info"
     log "would_verify: curl -fsS $STATUS_URL"
-    log "would_verify: docker logs --tail 300 $APP_CONTAINER | grep -Ei '$LOG_ERROR_PATTERN'"
+    log "would_verify: docker logs --since <verify_since> $APP_CONTAINER | grep -Ei '$LOG_ERROR_PATTERN'"
     return 0
   fi
   execute_upgrade

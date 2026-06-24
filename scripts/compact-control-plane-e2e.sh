@@ -12,6 +12,9 @@ APP_CONTAINER="${COMPACT_E2E_APP_CONTAINER:-new-api-dev-isolated-new-api-1}"
 COMPOSE_FILE="${COMPACT_E2E_COMPOSE_FILE:-deploy/compose/dev-isolated.yml}"
 ENV_FILE="${COMPACT_E2E_ENV_FILE:-deploy/env/dev-isolated.env}"
 APP_SERVICE="${COMPACT_E2E_APP_SERVICE:-new-api}"
+CURL_CONNECT_TIMEOUT="${COMPACT_E2E_CURL_CONNECT_TIMEOUT:-5}"
+CURL_MAX_TIME="${COMPACT_E2E_CURL_MAX_TIME:-60}"
+UPSTREAM_CURL_MAX_TIME="${COMPACT_E2E_UPSTREAM_CURL_MAX_TIME:-30}"
 TOKEN_ID="${COMPACT_E2E_TOKEN_ID:-910001}"
 CHANNEL_NATIVE_NEWAPI="${COMPACT_E2E_CHANNEL_NATIVE_NEWAPI:-910101}"
 CHANNEL_SUB2API_HTTP="${COMPACT_E2E_CHANNEL_SUB2API_HTTP:-910102}"
@@ -55,7 +58,7 @@ cleanup() {
   local rc=0
   local cleanup_log="$TMP_DIR/cleanup.log"
   set +e
-  psql_exec \
+  if psql_exec \
     -v test_group="$TEST_GROUP" \
     -v token_id="$TOKEN_ID" \
     -v channel_native_newapi="$CHANNEL_NATIVE_NEWAPI" \
@@ -63,9 +66,16 @@ cleanup() {
     -v channel_synthetic_newapi="$CHANNEL_SYNTHETIC_NEWAPI" \
     -v channel_generic_openai="$CHANNEL_GENERIC_OPENAI" \
     >"$cleanup_log" 2>&1 <<SQL
-create table if not exists ${BACKUP_ABILITIES} as select * from abilities where false;
-create table if not exists ${BACKUP_CHANNELS} as select * from channels where false;
-create table if not exists ${BACKUP_TOKENS} as select * from tokens where false;
+begin;
+do \$\$
+begin
+  if to_regclass('${BACKUP_ABILITIES}') is null
+    or to_regclass('${BACKUP_CHANNELS}') is null
+    or to_regclass('${BACKUP_TOKENS}') is null then
+    raise exception 'compact e2e backup tables are missing';
+  end if;
+end
+\$\$;
 delete from abilities where "group" = :'test_group';
 insert into abilities select * from ${BACKUP_ABILITIES};
 delete from channels where id in (:channel_native_newapi, :channel_sub2api_http, :channel_synthetic_newapi, :channel_generic_openai);
@@ -75,13 +85,14 @@ insert into tokens select * from ${BACKUP_TOKENS};
 drop table if exists ${BACKUP_CHANNELS};
 drop table if exists ${BACKUP_ABILITIES};
 drop table if exists ${BACKUP_TOKENS};
+commit;
 SQL
-  if [[ "$?" -ne 0 ]]; then
+  then
+    echo "cleanup: database state restored" >&2
+  else
     echo "cleanup: database restoration failed" >&2
     cat "$cleanup_log" >&2
     rc=1
-  else
-    echo "cleanup: database state restored" >&2
   fi
   if [[ -n "$FAKE_PID" ]]; then
     kill "$FAKE_PID" >/dev/null 2>&1 || true
@@ -108,7 +119,7 @@ SQL
 restart_dev() {
   docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate "$APP_SERVICE" >/dev/null
   for _ in {1..45}; do
-    if curl -fsS "$BASE_URL/api/status" >/dev/null 2>&1; then
+    if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -fsS "$BASE_URL/api/status" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -118,11 +129,11 @@ restart_dev() {
 }
 
 ensure_fake_upstream() {
-  if curl -fsS "$UPSTREAM_HOST_URL/_captures/summary" >/dev/null 2>&1; then
-    curl -fsS "$UPSTREAM_HOST_URL/_reset" >/dev/null
+  if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_captures/summary" >/dev/null 2>&1; then
+    curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_reset" >/dev/null
     return
   fi
-  if curl -fsS "$UPSTREAM_HOST_URL/_reset" >/dev/null 2>&1; then
+  if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_reset" >/dev/null 2>&1; then
     echo "existing fake upstream lacks /_captures/summary: $UPSTREAM_HOST_URL" >&2
     echo "stop the old process or set COMPACT_E2E_UPSTREAM_HOST_URL and COMPACT_E2E_UPSTREAM_CONTAINER_URL" >&2
     exit 1
@@ -130,7 +141,7 @@ ensure_fake_upstream() {
   node "$ROOT_DIR/scripts/compact-control-plane-fake-upstream.mjs" >"$TMP_DIR/fake-upstream.log" 2>&1 &
   FAKE_PID="$!"
   for _ in {1..20}; do
-    if curl -fsS "$UPSTREAM_HOST_URL/_reset" >/dev/null 2>&1; then
+    if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_reset" >/dev/null 2>&1; then
       return
     fi
     sleep 0.2
@@ -160,15 +171,15 @@ post_json() {
   local path="$1"
   local payload="$2"
   local out="$3"
-  curl -sS -o "$out" -w '%{http_code}' -K "$CURL_CONFIG" --data "$payload" "$BASE_URL${path}"
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -o "$out" -w '%{http_code}' -K "$CURL_CONFIG" --data "$payload" "$BASE_URL${path}"
 }
 
 reset_upstream() {
-  curl -fsS "$UPSTREAM_HOST_URL/_reset" >/dev/null
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_reset" >/dev/null
 }
 
 capture_summary() {
-  curl -fsS "$UPSTREAM_HOST_URL/_captures/summary"
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_captures/summary"
 }
 
 assert_contains() { local file="$1" needle="$2"
@@ -214,9 +225,10 @@ run_case_stale_visible_only() {
   set_single_channel "$CHANNEL_SYNTHETIC_NEWAPI" 'gpt-5.5'
   reset_upstream
   local instance stale payload out code
-  instance="$(psql_query <<< "select split_part(split_part(id, 'resp_newapi_synthcmp_', 2), '_', 1) from synthetic_compact_state_records where id like 'resp_newapi_synthcmp_%' limit 1")"
+  : "${SYNTH_MARKER:?run_case_stale_visible_only requires run_case_synthetic_continue first}"
+  instance="$(node -e 'const marker = process.argv[1]; const match = marker.match(/^newapi\.synthetic\.compact:v2:([^:]+):resp_newapi_synthcmp_\1_/); if (!match) process.exit(2); console.log(match[1]);' "$SYNTH_MARKER")"
   if [[ -z "$instance" ]]; then
-    echo "no synthetic_compact_state_records found for stale marker case" >&2
+    echo "cannot parse synthetic compact instance from current marker" >&2
     echo "run_case_stale_visible_only depends on run_case_synthetic_continue running first and creating synthetic_compact_state_records" >&2
     return 1
   fi

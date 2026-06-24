@@ -330,17 +330,16 @@ verify_log_list() {
   fi
   validate_header_value "NEW_API_AUTH_COOKIE" "$NEW_API_AUTH_COOKIE" || return
   validate_header_value "NEW_API_USER_ID" "$NEW_API_USER_ID" || return
-  local output rc
-  if output="$(curl -fsS --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" \
+  local rc
+  if curl -fsS --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" \
     --header "Cookie: $NEW_API_AUTH_COOKIE" \
     --header "New-Api-User: $NEW_API_USER_ID" \
-    "$NEW_API_BASE_URL/api/log/?p=0&page_size=1" 2>&1)"; then
-    printf '%s' "$output"
-    printf '\n'
+    "$NEW_API_BASE_URL/api/log/?p=0&page_size=1" >/dev/null 2>&1; then
+    printf 'ok: protected log list endpoint reachable\n'
     return 0
   fi
   rc=$?
-  printf 'failed: verify_log_list url=%s/api/log/?p=0&page_size=1 rc=%s %s\n' "$NEW_API_BASE_URL" "$rc" "$output" >&2
+  printf 'failed: verify_log_list url=%s/api/log/?p=0&page_size=1 rc=%s\n' "$NEW_API_BASE_URL" "$rc" >&2
   return 1
 }
 

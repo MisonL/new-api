@@ -8,6 +8,7 @@ POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-}"
 NEW_API_CONTAINER="${NEW_API_CONTAINER:-}"
 POSTGRES_USER="${POSTGRES_USER:-root}"
 POSTGRES_DB="${POSTGRES_DB:-}"
+POSTGRES_HOST="${POSTGRES_HOST:-}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:15}"
 BACKUP_DIR="${BACKUP_DIR:-$ROOT_DIR/.storage-migration/backups}"
 DUMP_FILE="${DUMP_FILE:-}"
@@ -45,6 +46,10 @@ POSTGRES_REPLACED="false"
 LOCK_ACQUIRED="false"
 DUMP_INCOMPLETE_FILE=""
 GLOBALS_INCOMPLETE_FILE=""
+postgres_client_host_args=()
+if [ -n "$POSTGRES_HOST" ]; then
+  postgres_client_host_args=("-h" "$POSTGRES_HOST")
+fi
 
 usage() {
   cat <<'USAGE'
@@ -63,6 +68,8 @@ Environment:
   POSTGRES_CONTAINER              Required.
   NEW_API_CONTAINER               Required.
   POSTGRES_USER                   Default: root.
+  POSTGRES_HOST                   Optional host passed to postgres client tools.
+                                  Defaults to local socket inside the container.
   POSTGRES_DB                     Required.
   POSTGRES_IMAGE                  Default: postgres:15.
   COMPOSE_FILES                   Colon-separated compose files.
@@ -202,12 +209,12 @@ on_exit() {
 
 psql_query() {
   local sql="$1"
-  docker exec -e PGCONNECT_TIMEOUT="$PGCONNECT_TIMEOUT" "$POSTGRES_CONTAINER" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -Atc "$sql" | tr -d '\r'
+  docker exec -e PGCONNECT_TIMEOUT="$PGCONNECT_TIMEOUT" "$POSTGRES_CONTAINER" psql "${postgres_client_host_args[@]}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -Atc "$sql" | tr -d '\r'
 }
 
 psql_postgres() {
   local sql="$1"
-  docker exec -e PGCONNECT_TIMEOUT="$PGCONNECT_TIMEOUT" "$POSTGRES_CONTAINER" psql -h 127.0.0.1 -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -Atc "$sql" | tr -d '\r'
+  docker exec -e PGCONNECT_TIMEOUT="$PGCONNECT_TIMEOUT" "$POSTGRES_CONTAINER" psql "${postgres_client_host_args[@]}" -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -Atc "$sql" | tr -d '\r'
 }
 
 require_tools() {
@@ -565,9 +572,15 @@ ensure_marker() {
 stream_pg_dump_to_file() {
   local output_file="$1"
   if is_windows_shell; then
-    docker exec "$POSTGRES_CONTAINER" sh -ec 'pg_dump -U "$1" -d "$2" -Fc | base64' sh "$POSTGRES_USER" "$POSTGRES_DB" | base64 -d > "$output_file"
+    docker exec "$POSTGRES_CONTAINER" sh -ec '
+      if [ -n "$3" ]; then
+        pg_dump -h "$3" -U "$1" -d "$2" -Fc | base64
+      else
+        pg_dump -U "$1" -d "$2" -Fc | base64
+      fi
+    ' sh "$POSTGRES_USER" "$POSTGRES_DB" "$POSTGRES_HOST" | base64 -d > "$output_file"
   else
-    docker exec "$POSTGRES_CONTAINER" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc > "$output_file"
+    docker exec "$POSTGRES_CONTAINER" pg_dump "${postgres_client_host_args[@]}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc > "$output_file"
   fi
 }
 
@@ -577,7 +590,7 @@ restore_pg_dump_file() {
   if [ "$PG_RESTORE_EXIT_ON_ERROR" != "false" ]; then
     restore_args+=("--exit-on-error")
   fi
-  restore_args+=("-h" "127.0.0.1" "-U" "$POSTGRES_USER" "-d" "$POSTGRES_DB")
+  restore_args+=("${postgres_client_host_args[@]}" "-U" "$POSTGRES_USER" "-d" "$POSTGRES_DB")
   if is_windows_shell; then
     base64 "$abs_dump_file" | docker exec -i "$POSTGRES_CONTAINER" sh -ec 'base64 -d | pg_restore "$@"' sh "${restore_args[@]}"
   else
@@ -609,7 +622,7 @@ create_dump() {
     rm -f "$tmp_dump"
     rm -f "$tmp_globals"
     log "run: docker exec $POSTGRES_CONTAINER pg_dumpall -U $POSTGRES_USER --globals-only --no-role-passwords > $GLOBALS_FILE"
-    if ! docker exec "$POSTGRES_CONTAINER" pg_dumpall -U "$POSTGRES_USER" --globals-only --no-role-passwords > "$tmp_globals"; then
+    if ! docker exec "$POSTGRES_CONTAINER" pg_dumpall "${postgres_client_host_args[@]}" -U "$POSTGRES_USER" --globals-only --no-role-passwords > "$tmp_globals"; then
       rm -f "$tmp_globals"
       GLOBALS_INCOMPLETE_FILE=""
       return 1
@@ -698,7 +711,7 @@ wait_for_postgres() {
   local start now
   start="$(date +%s)"
   while true; do
-    if docker exec "$POSTGRES_CONTAINER" pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d postgres >/dev/null 2>&1; then
+    if docker exec "$POSTGRES_CONTAINER" pg_isready "${postgres_client_host_args[@]}" -U "$POSTGRES_USER" -d postgres >/dev/null 2>&1; then
       return
     fi
     now="$(date +%s)"
@@ -731,10 +744,10 @@ restore_dump() {
       die "target PostgreSQL major version does not support ICU locale provider flags: target=$TARGET_POSTGRES_MAJOR"
     fi
     ensure_database_owner_exists
-    if ! docker exec "$POSTGRES_CONTAINER" dropdb -h 127.0.0.1 -U "$POSTGRES_USER" --if-exists "$POSTGRES_DB"; then
+    if ! docker exec "$POSTGRES_CONTAINER" dropdb "${postgres_client_host_args[@]}" -U "$POSTGRES_USER" --if-exists "$POSTGRES_DB"; then
       return 1
     fi
-    if ! docker exec "$POSTGRES_CONTAINER" createdb -h 127.0.0.1 -U "$POSTGRES_USER" \
+    if ! docker exec "$POSTGRES_CONTAINER" createdb "${postgres_client_host_args[@]}" -U "$POSTGRES_USER" \
       --template=template0 \
       --encoding="$ORIGINAL_ENCODING" \
       --lc-collate="$ORIGINAL_LC_COLLATE" \
