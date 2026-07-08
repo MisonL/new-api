@@ -203,12 +203,22 @@ run_case_native_newapi_compact() {
   set_single_channel "$CHANNEL_NATIVE_NEWAPI" 'gpt-5.5-openai-compact'
   reset_upstream
   local out="$TMP_DIR/native_compact.json"
-  local code
+  local code response_id payload summary
   code="$(post_json /v1/responses/compact '{"model":"gpt-5.5-openai-compact","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"compact this codex context"}]}]}' "$out")"
   echo "status=${code}"
   [[ "$code" == "200" ]]
   node -e 'const fs=require("fs"); const o=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(!JSON.stringify(o).includes("compaction")) process.exit(2); console.log("has_compaction=true")' "$out"
   capture_summary
+  response_id="$(node -e 'const fs=require("fs"); const o=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(!o.id) process.exit(2); console.log(o.id);' "$out")"
+  reset_upstream
+  payload="$(node -e 'const id=process.argv[1]; console.log(JSON.stringify({model:"gpt-5.5",previous_response_id:id,input:[{type:"message",role:"user",content:[{type:"input_text",text:"continue after native compact"}]}]}))' "$response_id")"
+  out="$TMP_DIR/native_continue.json"
+  code="$(post_json /v1/responses "$payload" "$out")"
+  echo "continue_status=${code}"
+  [[ "$code" == "200" ]]
+  summary="$(capture_summary)"
+  echo "$summary"
+  [[ "$summary" == *"\"previous_response_id\":\"${response_id}\""* ]]
 }
 
 run_case_synthetic_continue() {
@@ -261,7 +271,7 @@ run_case_generic_rejects_remote_opaque() {
   local code
   code="$(post_json /v1/responses '{"model":"gpt-5.5","input":[{"type":"compaction","encrypted_content":"remote-native-opaque"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}' "$out")"
   echo "status=${code}"
-  [[ "$code" != "200" ]]
+  [[ "$code" == "503" ]]
   assert_contains "$out" 'compaction'
   capture_summary
 }
@@ -274,7 +284,7 @@ run_case_sub2api_previous_response_id() {
   local code
   code="$(post_json /v1/responses/compact '{"model":"gpt-5.5-openai-compact","previous_response_id":"resp_remote_prev","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"compact with previous id"}]}]}' "$out")"
   echo "status=${code}"
-  [[ "$code" != "200" ]]
+  [[ "$code" == "400" ]]
   assert_contains "$out" 'previous_response_id'
   capture_summary
 }

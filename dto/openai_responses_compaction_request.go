@@ -128,8 +128,6 @@ func (r *OpenAIResponsesCompactionRequest) ToResponsesRequest() *OpenAIResponses
 		PromptCacheKey:       r.PromptCacheKey,
 		PromptCacheRetention: r.PromptCacheRetention,
 		SafetyIdentifier:     r.SafetyIdentifier,
-		Stream:               clonePtr(r.Stream),
-		StreamOptions:        clonePtr(r.StreamOptions),
 		Temperature:          clonePtr(r.Temperature),
 		Text:                 r.Text,
 		ToolChoice:           r.ToolChoice,
