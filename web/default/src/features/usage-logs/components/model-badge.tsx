@@ -1,7 +1,10 @@
-import { Route } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { Copy, Route, Check } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { Button } from '@/components/ui/button'
 import {
   Popover,
   PopoverContent,
@@ -9,10 +12,20 @@ import {
 } from '@/components/ui/popover'
 import { StatusBadge } from '@/components/status-badge'
 
+export interface ModelBadgeInfoRow {
+  key: string
+  label: string
+  value: ReactNode
+  mono?: boolean
+  muted?: boolean
+}
+
 interface ModelBadgeProps {
   modelName: string
   actualModel?: string
   className?: string
+  infoRows?: ModelBadgeInfoRow[]
+  copyable?: boolean
 }
 
 interface ModelProvider {
@@ -79,6 +92,7 @@ function ModelBadgeContent(props: ModelBadgeProps) {
   return (
     <StatusBadge
       copyText={props.modelName}
+      copyable={props.copyable ?? true}
       size='sm'
       showDot={!provider}
       autoColor={provider ? undefined : props.modelName}
@@ -98,7 +112,7 @@ function ModelBadgeContent(props: ModelBadgeProps) {
             {getLobeIcon(provider.icon, 14)}
           </span>
         )}
-        <span>{props.modelName}</span>
+        <span className='min-w-0 truncate'>{props.modelName}</span>
       </span>
     </StatusBadge>
   )
@@ -106,36 +120,96 @@ function ModelBadgeContent(props: ModelBadgeProps) {
 
 export function ModelBadge(props: ModelBadgeProps) {
   const { t } = useTranslation()
+  const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
+  const infoRows = props.infoRows ?? []
+  const canCopy = props.copyable ?? true
+  const rows: ModelBadgeInfoRow[] = [
+    {
+      key: 'request-model',
+      label: t('Request Model'),
+      value: props.modelName,
+      mono: true,
+    },
+    ...(props.actualModel
+      ? [
+          {
+            key: 'actual-model',
+            label: t('Actual Model'),
+            value: props.actualModel,
+            mono: true,
+          },
+        ]
+      : []),
+    ...infoRows,
+  ]
 
-  if (!props.actualModel) {
+  if (!props.actualModel && infoRows.length === 0) {
     return <ModelBadgeContent {...props} />
   }
 
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button type='button' className='inline-flex items-center gap-1'>
-          <ModelBadgeContent {...props} />
+        <button
+          type='button'
+          className='inline-flex min-w-0 items-center gap-1'
+          aria-label={`${t('Model')} ${t('Details')}`}
+        >
+          <ModelBadgeContent {...props} copyable={false} />
           <Route className='text-muted-foreground size-3 shrink-0' />
         </button>
       </PopoverTrigger>
-      <PopoverContent className='w-72'>
-        <div className='space-y-2'>
-          <div className='flex items-start justify-between gap-3'>
-            <span className='text-muted-foreground text-xs'>
-              {t('Request Model:')}
-            </span>
-            <span className='truncate font-mono text-xs font-medium'>
-              {props.modelName}
-            </span>
-          </div>
-          <div className='flex items-start justify-between gap-3'>
-            <span className='text-muted-foreground text-xs'>
-              {t('Actual Model:')}
-            </span>
-            <span className='truncate font-mono text-xs font-medium'>
-              {props.actualModel}
-            </span>
+      <PopoverContent
+        align='start'
+        className='w-[min(32rem,calc(100vw-2rem))] p-0'
+      >
+        <div className='max-h-[min(22rem,calc(100vh-6rem))] overflow-y-auto p-3'>
+          <div className='space-y-2'>
+            {rows.map((row) => {
+              const copyValue =
+                canCopy && typeof row.value === 'string' && row.value
+                  ? row.value
+                  : ''
+
+              return (
+                <div
+                  key={row.key}
+                  className='grid min-w-0 grid-cols-[minmax(7rem,9rem)_minmax(0,1fr)_auto] items-start gap-2 text-xs'
+                >
+                  <span className='text-muted-foreground min-w-0'>
+                    {row.label}
+                  </span>
+                  <div
+                    className={cn(
+                      'min-w-0 font-medium break-words',
+                      row.mono && 'font-mono',
+                      row.muted && 'text-muted-foreground font-normal'
+                    )}
+                  >
+                    {row.value}
+                  </div>
+                  {copyValue ? (
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      className='text-muted-foreground size-6 shrink-0'
+                      onClick={() => copyToClipboard(copyValue)}
+                      title={`${t('Copy to clipboard')}: ${row.label}`}
+                      aria-label={`${t('Copy to clipboard')}: ${row.label}`}
+                    >
+                      {copiedText === copyValue ? (
+                        <Check className='size-3.5 text-emerald-600' />
+                      ) : (
+                        <Copy className='size-3.5' />
+                      )}
+                    </Button>
+                  ) : (
+                    <div aria-hidden='true' />
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       </PopoverContent>

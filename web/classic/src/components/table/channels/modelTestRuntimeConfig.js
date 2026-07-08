@@ -315,7 +315,10 @@ export const formatRuntimeResult = (runtimeConfig, t) => {
       runtimeConfig.request_path !== runtimeConfig.final_request_path
         ? `${runtimeConfig.request_path} -> ${runtimeConfig.final_request_path}`
         : runtimeConfig.final_request_path;
-    parts.push(`${t('路径')}: ${pathText}`);
+    parts.push(`${t('客户端路径')}: ${pathText}`);
+  }
+  if (runtimeConfig.upstream_request_path) {
+    parts.push(`${t('上游路径')}: ${runtimeConfig.upstream_request_path}`);
   }
   if (
     Array.isArray(runtimeConfig.request_conversion_chain) &&
@@ -346,6 +349,11 @@ export const formatRuntimeResult = (runtimeConfig, t) => {
       formatCapabilityBoolean(
         'compaction_pass',
         capability.supports_compaction_item_passthrough,
+        t,
+      ),
+      formatCapabilityBoolean(
+        'strip_reasoning',
+        capability.strips_responses_encrypted_reasoning,
         t,
       ),
     ].filter(Boolean);

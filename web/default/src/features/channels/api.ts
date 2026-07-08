@@ -1,6 +1,7 @@
 import type { AxiosRequestConfig } from 'axios'
 import { api } from '@/lib/api'
 import { getGroups as getUserGroups } from '@/features/users/api'
+import type { HeaderProfile } from './lib/header-profile-utils'
 import type {
   AddChannelRequest,
   BatchDeleteParams,
@@ -20,7 +21,6 @@ import type {
   SearchChannelsResponse,
   TagOperationParams,
 } from './types'
-import type { HeaderProfile } from './lib/header-profile-utils'
 
 // Extended API config types
 export interface ExtendedApiConfig extends AxiosRequestConfig {
@@ -116,6 +116,15 @@ export async function getChannel(id: number): Promise<GetChannelResponse> {
   return res.data
 }
 
+export async function getTopChannelPriorities(): Promise<{
+  success: boolean
+  message?: string
+  data?: Array<Pick<Channel, 'id' | 'priority'>>
+}> {
+  const res = await api.get('/api/channel/priorities')
+  return res.data
+}
+
 export async function getUserHeaderProfiles(): Promise<UserHeaderProfilesResponse> {
   const res = await api.get('/api/user/header_profiles')
   return res.data
@@ -142,6 +151,17 @@ export async function updateChannel(
   const res = await api.put(
     '/api/channel/',
     { id, ...data },
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export async function updateChannelPriorities(
+  updates: Array<{ id: number; priority: number }>
+): Promise<{ success: boolean; message?: string; data?: number }> {
+  const res = await api.put(
+    '/api/channel/priorities',
+    updates,
     channelActionConfig()
   )
   return res.data

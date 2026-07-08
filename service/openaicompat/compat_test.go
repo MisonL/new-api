@@ -26,6 +26,7 @@ func TestProtocolConversionPolicySupportsLegacyAndRules(t *testing.T) {
 	require.False(t, ShouldResponsesUseChatCompletionsPolicy(legacyPolicy, 1, 1, "gpt-5"))
 
 	rulePolicy := model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat",
@@ -41,8 +42,30 @@ func TestProtocolConversionPolicySupportsLegacyAndRules(t *testing.T) {
 	require.False(t, ShouldChatCompletionsUseResponsesPolicy(rulePolicy, 1, 1, "gpt-5"))
 }
 
+func TestProtocolConversionPolicyTopLevelEnabledGatesRules(t *testing.T) {
+	policy := model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: false,
+		Rules: []model_setting.ProtocolConversionRule{
+			{
+				Name:           "responses-to-chat",
+				Enabled:        true,
+				SourceEndpoint: model_setting.ProtocolEndpointResponses,
+				TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+				AllChannels:    true,
+				ModelPatterns:  []string{"^gpt-5$"},
+			},
+		},
+	}
+
+	require.False(t, ShouldResponsesUseChatCompletionsPolicy(policy, 1, 1, "gpt-5"))
+
+	policy.Enabled = true
+	require.True(t, ShouldResponsesUseChatCompletionsPolicy(policy, 1, 1, "gpt-5"))
+}
+
 func TestProtocolConversionPolicyEmptyModelPatternsMatchAllNonEmptyModels(t *testing.T) {
 	policy := model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat-all-models",
@@ -140,6 +163,129 @@ func TestResponsesRequestToChatCompletionsRequestRejectsInvalidIncludeShape(t *t
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "include must be an array")
+}
+
+func TestResponsesResponseToChatCompletionsResponseMapsReasoningSummary(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_reasoning",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.4-mini",
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "reasoning",
+				Summary: []dto.ResponsesReasoningSummaryPart{
+					{Type: "summary_text", Text: "checked constraints"},
+					{Type: "summary_text", Text: "selected final answer"},
+				},
+				EncryptedContent: common.RawMessage(`"opaque"`),
+			},
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "output_text", Text: "done"},
+				},
+			},
+		},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_reasoning")
+
+	require.NoError(t, err)
+	require.Len(t, chatResp.Choices, 1)
+	require.Equal(t, "done", chatResp.Choices[0].Message.Content)
+	require.Equal(t, "checked constraints\n\nselected final answer", chatResp.Choices[0].Message.GetReasoningContent())
+}
+
+func TestResponsesResponseToChatCompletionsResponseMapsOutputTokenDetails(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_usage_details",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.4-mini",
+		Usage: &dto.Usage{
+			InputTokens:  10,
+			OutputTokens: 20,
+			TotalTokens:  30,
+			OutputTokensDetails: &dto.OutputTokenDetails{
+				ReasoningTokens: 6,
+				ImageTokens:     7,
+				AudioTokens:     8,
+			},
+		},
+	}
+
+	_, usage, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_usage_details")
+
+	require.NoError(t, err)
+	require.Equal(t, 10, usage.PromptTokens)
+	require.Equal(t, 20, usage.CompletionTokens)
+	require.Equal(t, 30, usage.TotalTokens)
+	require.Equal(t, 6, usage.CompletionTokenDetails.ReasoningTokens)
+	require.Equal(t, 7, usage.CompletionTokenDetails.ImageTokens)
+	require.Equal(t, 8, usage.CompletionTokenDetails.AudioTokens)
+}
+
+func TestResponsesResponseToChatCompletionsResponseMapsSummaryOnlyReasoning(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_reasoning_only",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.4-mini",
+		Reasoning: &dto.Reasoning{Summary: "inspected state and selected the safe route"},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_reasoning_only")
+
+	require.NoError(t, err)
+	require.Len(t, chatResp.Choices, 1)
+	require.Equal(t, "", chatResp.Choices[0].Message.Content)
+	require.Equal(t, "inspected state and selected the safe route", chatResp.Choices[0].Message.GetReasoningContent())
+}
+
+func TestResponsesResponseToChatCompletionsResponseMapsReasoningContentSummaryText(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_reasoning_content_summary",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.4-mini",
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "reasoning",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "summary_text", Text: "content summary"},
+				},
+				EncryptedContent: common.RawMessage(`"opaque"`),
+			},
+		},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_reasoning_content_summary")
+
+	require.NoError(t, err)
+	require.Len(t, chatResp.Choices, 1)
+	require.Equal(t, "", chatResp.Choices[0].Message.Content)
+	require.Equal(t, "content summary", chatResp.Choices[0].Message.GetReasoningContent())
+}
+
+func TestResponsesResponseToChatCompletionsResponseIgnoresReasoningSummaryConfigValues(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_reasoning_config",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.4-mini",
+		Reasoning: &dto.Reasoning{Summary: "auto"},
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "output_text", Text: "done"},
+				},
+			},
+		},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_reasoning_config")
+
+	require.NoError(t, err)
+	require.Empty(t, chatResp.Choices[0].Message.GetReasoningContent())
 }
 
 func TestResponsesRequestToChatCompletionsRequestRejectsCustomToolsByDefault(t *testing.T) {

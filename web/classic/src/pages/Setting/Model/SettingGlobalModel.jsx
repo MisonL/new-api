@@ -36,10 +36,17 @@ const thinkingExample = JSON.stringify(
   2,
 );
 
+const requestBodyLimitPolicyExample = JSON.stringify(
+  { enabled: true, ttl_hours: 0 },
+  null,
+  2,
+);
+
 const defaultGlobalSettingInputs = {
   'global.pass_through_request_enabled': false,
   'global.thinking_model_blacklist': '[]',
   'global.chat_completions_to_responses_policy': '{}',
+  'global.request_body_limit_policy': '{}',
   'general_setting.ping_interval_enabled': false,
   'general_setting.ping_interval_seconds': 60,
 };
@@ -53,6 +60,7 @@ export default function SettingGlobalModel(props) {
   const [inputsRow, setInputsRow] = useState(defaultGlobalSettingInputs);
   const chatCompletionsToResponsesPolicyKey =
     'global.chat_completions_to_responses_policy';
+  const requestBodyLimitPolicyKey = 'global.request_body_limit_policy';
 
   const setChatCompletionsToResponsesPolicyValue = (value) => {
     setInputs((prev) => ({
@@ -69,7 +77,10 @@ export default function SettingGlobalModel(props) {
       const text = typeof value === 'string' ? value.trim() : '';
       return text === '' ? '[]' : value;
     }
-    if (key === 'global.chat_completions_to_responses_policy') {
+    if (
+      key === 'global.chat_completions_to_responses_policy' ||
+      key === 'global.request_body_limit_policy'
+    ) {
       const text = typeof value === 'string' ? value.trim() : '';
       return text === '' ? '{}' : value;
     }
@@ -79,7 +90,8 @@ export default function SettingGlobalModel(props) {
   const validateJSONBeforeSave = (key, value) => {
     if (
       key !== 'global.thinking_model_blacklist' &&
-      key !== 'global.chat_completions_to_responses_policy'
+      key !== 'global.chat_completions_to_responses_policy' &&
+      key !== 'global.request_body_limit_policy'
     ) {
       return true;
     }
@@ -156,7 +168,10 @@ export default function SettingGlobalModel(props) {
             value = defaultGlobalSettingInputs[key];
           }
         }
-        if (key === 'global.chat_completions_to_responses_policy') {
+        if (
+          key === 'global.chat_completions_to_responses_policy' ||
+          key === 'global.request_body_limit_policy'
+        ) {
           try {
             value =
               value && String(value).trim() !== ''
@@ -233,6 +248,55 @@ export default function SettingGlobalModel(props) {
                 />
               </Col>
             </Row>
+
+            <Form.Section
+              text={
+                <span style={{ fontSize: 14, fontWeight: 600 }}>
+                  {t('请求体 413 选路保护')}
+                </span>
+              }
+            >
+              <Row style={{ marginTop: 10 }}>
+                <Col span={24}>
+                  <Banner
+                    type='info'
+                    description={t(
+                      '开启后，上游返回 413 时会把当前请求体大小记录到所选渠道；后续更大的请求会跳过该渠道，ttl_hours 为 0 表示永久保留。',
+                    )}
+                  />
+                </Col>
+              </Row>
+              <Row>
+                <Col span={24}>
+                  <Form.TextArea
+                    label={t('策略 JSON')}
+                    field={requestBodyLimitPolicyKey}
+                    placeholder={
+                      t('例如：') + '\n' + requestBodyLimitPolicyExample
+                    }
+                    rows={4}
+                    rules={[
+                      {
+                        validator: (rule, value) => {
+                          if (!value || value.trim() === '') return true;
+                          return verifyJSON(value);
+                        },
+                        message: t('不是合法的 JSON 字符串'),
+                      },
+                    ]}
+                    extraText={t(
+                      'enabled=true 表示启用记录和过滤；ttl_hours=0 表示记录永久有效。',
+                    )}
+                    onChange={(value) =>
+                      setInputs({
+                        ...inputs,
+                        [requestBodyLimitPolicyKey]: value,
+                      })
+                    }
+                  />
+                </Col>
+              </Row>
+            </Form.Section>
 
             <Form.Section
               text={

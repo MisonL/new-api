@@ -33,6 +33,13 @@ import {
 } from '../../../../common/ui/RenderUtils';
 import { useIsMobile } from '../../../../../hooks/common/useIsMobile';
 
+function activateRatioHelp(openRatioHelp, e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  e.preventDefault();
+  e.stopPropagation();
+  openRatioHelp();
+}
+
 function renderQuotaType(type, t) {
   switch (type) {
     case 1:
@@ -196,13 +203,23 @@ export const getPricingTableColumns = ({
       <div className='flex items-center space-x-1'>
         <span>{t('倍率')}</span>
         <Tooltip content={t('倍率是为了方便换算不同价格的模型')}>
-          <IconHelpCircle
-            className='text-blue-500 cursor-pointer'
+          <span
+            className='inline-flex h-4 w-4 shrink-0 items-center justify-center text-blue-500'
+            role='button'
+            tabIndex={0}
             onClick={() => {
               setModalImageUrl('/ratio.png');
               setIsModalOpenurl(true);
             }}
-          />
+            onKeyDown={(e) =>
+              activateRatioHelp(() => {
+                setModalImageUrl('/ratio.png');
+                setIsModalOpenurl(true);
+              }, e)
+            }
+          >
+            <IconHelpCircle />
+          </span>
         </Tooltip>
       </div>
     ),

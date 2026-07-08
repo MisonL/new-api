@@ -94,23 +94,27 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
   })
 
   useEffect(() => {
+    let nextFaqList: typeof faqList = []
     try {
       const parsed = JSON.parse(data || '[]')
       if (Array.isArray(parsed)) {
-        setFaqList(
-          parsed.map((item, idx) => ({
-            ...item,
-            id: item.id || idx + 1,
-          }))
-        )
+        nextFaqList = parsed.map((item, idx) => ({
+          ...item,
+          id: item.id || idx + 1,
+        }))
       }
     } catch {
-      setFaqList([])
+      nextFaqList = []
     }
+    queueMicrotask(() => {
+      setFaqList(nextFaqList)
+    })
   }, [data])
 
   useEffect(() => {
-    setIsEnabled(enabled)
+    queueMicrotask(() => {
+      setIsEnabled(enabled)
+    })
   }, [enabled])
 
   const handleToggleEnabled = async (checked: boolean) => {

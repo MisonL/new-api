@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -56,7 +57,26 @@ type textQuotaSummary struct {
 	FileSearchCallCount      int
 	AudioInputPrice          float64
 	ImageGenerationCallPrice float64
+	ImageGenerationTotal     float64
+	ImageGenerationCallCount int
+	ImageGenerationDetails   []imageGenerationCallDetail
 	ToolCallSurchargeQuota   decimal.Decimal
+}
+
+type imageGenerationCallDetail struct {
+	Quality string  `json:"quality"`
+	Size    string  `json:"size"`
+	Count   int     `json:"count"`
+	Price   float64 `json:"price"`
+}
+
+func (summary textQuotaSummary) hasObservedNonTokenUsage() bool {
+	return summary.WebSearchCallCount > 0 ||
+		summary.ClaudeWebSearchCallCount > 0 ||
+		summary.FileSearchCallCount > 0 ||
+		summary.ImageGenerationCallCount > 0 ||
+		summary.AudioTokens > 0 ||
+		!summary.ToolCallSurchargeQuota.IsZero()
 }
 
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
@@ -130,14 +150,121 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 		}
 	}
 
-	if ctx.GetBool("image_generation_call") {
-		summary.ImageGenerationCallPrice = operation_setting.GetGPTImage1PriceOnceCall(ctx.GetString("image_generation_call_quality"), ctx.GetString("image_generation_call_size"))
-		surcharge = surcharge.Add(decimal.NewFromFloat(summary.ImageGenerationCallPrice).
+	if relayInfo.ResponsesUsageInfo != nil {
+		if imageGenerationTool, exists := relayInfo.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration]; exists && imageGenerationTool.CallCount > 0 {
+			recordImageGenerationSurcharge(summary, imageGenerationTool)
+			surcharge = surcharge.Add(decimal.NewFromFloat(summary.ImageGenerationTotal).
+				Mul(dGroupRatio).
+				Mul(dQuotaPerUnit))
+		}
+	}
+
+	if summary.ImageGenerationCallCount == 0 && ctx.GetBool("image_generation_call") {
+		detail := newImageGenerationCallDetail(ctx.GetString("image_generation_call_quality"), ctx.GetString("image_generation_call_size"), 1)
+		summary.ImageGenerationDetails = []imageGenerationCallDetail{detail}
+		summary.ImageGenerationCallCount = 1
+		summary.ImageGenerationCallPrice = detail.Price
+		summary.ImageGenerationTotal = detail.Price
+		surcharge = surcharge.Add(decimal.NewFromFloat(detail.Price).
 			Mul(dGroupRatio).
 			Mul(dQuotaPerUnit))
 	}
 
 	return surcharge
+}
+
+func recordImageGenerationSurcharge(summary *textQuotaSummary, tool *relaycommon.BuildInToolInfo) {
+	if summary == nil || tool == nil || tool.CallCount <= 0 {
+		return
+	}
+	if summary.ImageGenerationCallPrice == 0 && (tool.Quality != "" || tool.Size != "") {
+		summary.ImageGenerationCallPrice = operation_setting.GetGPTImage1PriceOnceCall(tool.Quality, tool.Size)
+	}
+	details := imageGenerationCallDetails(tool)
+	for _, detail := range details {
+		if detail.Count <= 0 {
+			continue
+		}
+		summary.ImageGenerationDetails = append(summary.ImageGenerationDetails, detail)
+		summary.ImageGenerationCallCount += detail.Count
+		summary.ImageGenerationTotal += detail.Price * float64(detail.Count)
+		if summary.ImageGenerationCallPrice == 0 {
+			summary.ImageGenerationCallPrice = detail.Price
+		}
+	}
+}
+
+func imageGenerationCallDetails(tool *relaycommon.BuildInToolInfo) []imageGenerationCallDetail {
+	if tool == nil || tool.CallCount <= 0 {
+		return nil
+	}
+	if len(tool.ImageCalls) == 0 {
+		return fallbackImageGenerationCallDetails(tool)
+	}
+	details := make([]imageGenerationCallDetail, 0, len(tool.ImageCalls))
+	totalCount := 0
+	for key, count := range tool.ImageCalls {
+		if count <= 0 {
+			return fallbackImageGenerationCallDetails(tool)
+		}
+		quality, size := relaycommon.SplitImageGenerationCallKey(key)
+		details = appendImageGenerationCallDetail(details, newImageGenerationCallDetail(quality, size, count))
+		totalCount += count
+	}
+	if totalCount != tool.CallCount {
+		return fallbackImageGenerationCallDetails(tool)
+	}
+	sort.Slice(details, func(i int, j int) bool {
+		if details[i].Quality != details[j].Quality {
+			return details[i].Quality < details[j].Quality
+		}
+		return details[i].Size < details[j].Size
+	})
+	return details
+}
+
+func fallbackImageGenerationCallDetails(tool *relaycommon.BuildInToolInfo) []imageGenerationCallDetail {
+	if tool == nil || tool.CallCount <= 0 {
+		return nil
+	}
+	return []imageGenerationCallDetail{
+		newImageGenerationCallDetail(tool.Quality, tool.Size, tool.CallCount),
+	}
+}
+
+func appendImageGenerationCallDetail(details []imageGenerationCallDetail, detail imageGenerationCallDetail) []imageGenerationCallDetail {
+	if detail.Count <= 0 {
+		return details
+	}
+	for index := range details {
+		if details[index].Quality == detail.Quality && details[index].Size == detail.Size {
+			details[index].Count += detail.Count
+			return details
+		}
+	}
+	return append(details, detail)
+}
+
+func newImageGenerationCallDetail(quality string, size string, count int) imageGenerationCallDetail {
+	return imageGenerationCallDetail{
+		Quality: quality,
+		Size:    size,
+		Count:   count,
+		Price:   operation_setting.GetGPTImage1PriceOnceCall(quality, size),
+	}
+}
+
+func appendImageGenerationCallOtherInfo(other map[string]interface{}, summary textQuotaSummary) {
+	if summary.ImageGenerationCallCount <= 0 {
+		return
+	}
+	other["image_generation_call"] = true
+	other["image_generation_call_count"] = summary.ImageGenerationCallCount
+	other["image_generation_call_price"] = summary.ImageGenerationCallPrice
+	other["image_generation_call_total_price"] = summary.ImageGenerationTotal
+	if len(summary.ImageGenerationDetails) > 0 {
+		other["image_generation_call_details"] = summary.ImageGenerationDetails
+	}
 }
 
 func composeTieredTextQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaSummary, tieredQuota int, tieredResult *billingexpr.TieredResult) int {
@@ -302,7 +429,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		summary.Quota = int(quotaCalculateDecimal.Round(0).IntPart())
 	}
 
-	if summary.TotalTokens == 0 {
+	if summary.TotalTokens == 0 && summary.ToolCallSurchargeQuota.IsZero() && audioInputQuota.IsZero() {
 		summary.Quota = 0
 	} else if !ratio.IsZero() && summary.Quota == 0 {
 		summary.Quota = 1
@@ -516,10 +643,11 @@ func responsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	summaryModelRetry := false
 	summaryModel := ""
 	if ctx != nil {
-		contextFallback = ctx.GetBool("responses_compact_context_fallback_attempted")
+		contextFallback = ctx.GetBool("responses_compact_context_fallback_attempted") ||
+			common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCompactCodexContextPruned)
 		previousIDFallback = ctx.GetBool("responses_compact_previous_response_id_fallback_attempted")
 		visibleOnlyFallback = common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted)
-		summaryModelRetry = ctx.GetBool("responses_compact_summary_model_fallback_attempted")
+		summaryModelRetry = ctx.GetBool(string(constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted))
 		summaryModel = common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactSummaryModel)
 	}
 	summaryModels := []string(nil)
@@ -739,6 +867,13 @@ func AppendResponsesCompactLogInfo(ctx *gin.Context, relayInfo *relaycommon.Rela
 	return appendResponsesCompactLogInfo(ctx, relayInfo, extraContent, other, now)
 }
 
+func isBenignCanceledTextStream(relayInfo *relaycommon.RelayInfo) bool {
+	return relayInfo != nil &&
+		relayInfo.IsStream &&
+		relayInfo.StreamStatus != nil &&
+		relayInfo.StreamStatus.IsCanceled()
+}
+
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) {
 	originUsage := usage
 	if usage == nil {
@@ -778,13 +913,18 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if summary.AudioInputPrice > 0 && summary.AudioTokens > 0 {
 		extraContent = append(extraContent, fmt.Sprintf("Audio Input 花费 %s", decimal.NewFromFloat(summary.AudioInputPrice).Div(decimal.NewFromInt(1000000)).Mul(decimal.NewFromInt(int64(summary.AudioTokens))).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
 	}
-	if summary.ImageGenerationCallPrice > 0 {
-		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 花费 %s", decimal.NewFromFloat(summary.ImageGenerationCallPrice).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
+	if summary.ImageGenerationCallCount > 0 {
+		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 调用 %d 次，调用花费 %s", summary.ImageGenerationCallCount, decimal.NewFromFloat(summary.ImageGenerationTotal).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
 	}
 
-	if summary.TotalTokens == 0 {
-		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
-		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
+	if summary.TotalTokens == 0 && !summary.hasObservedNonTokenUsage() {
+		if isBenignCanceledTextStream(relayInfo) {
+			extraContent = append(extraContent, "客户端已断开，未收到完整计费信息，无法扣费")
+			logger.LogInfo(ctx, fmt.Sprintf("stream client disconnected before usage, userId %d, channelId %d, tokenId %d, model %s, pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
+		} else {
+			extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
+			logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
+		}
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
@@ -844,10 +984,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		other["audio_input_token_count"] = summary.AudioTokens
 		other["audio_input_price"] = summary.AudioInputPrice
 	}
-	if summary.ImageGenerationCallPrice > 0 {
-		other["image_generation_call"] = true
-		other["image_generation_call_price"] = summary.ImageGenerationCallPrice
-	}
+	appendImageGenerationCallOtherInfo(other, summary)
 	if summary.CacheCreationTokens > 0 {
 		other["cache_creation_tokens"] = summary.CacheCreationTokens
 		other["cache_creation_ratio"] = summary.CacheCreationRatio

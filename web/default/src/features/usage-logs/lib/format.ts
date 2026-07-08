@@ -93,6 +93,7 @@ export function parseLogOther(other: string): LogOtherData | null {
 export function getTimeColor(
   seconds: number
 ): 'success' | 'warning' | 'danger' {
+  if (!Number.isFinite(seconds) || seconds < 0) return 'danger'
   if (seconds < 10) return 'success'
   if (seconds < 30) return 'warning'
   return 'danger'
@@ -104,6 +105,7 @@ export function getTimeColor(
 export function getFirstResponseTimeColor(
   seconds: number
 ): 'success' | 'warning' | 'danger' {
+  if (!Number.isFinite(seconds) || seconds < 0) return 'danger'
   if (seconds < 5) return 'success'
   if (seconds < 10) return 'warning'
   return 'danger'
@@ -279,4 +281,86 @@ export function formatDuration(
       : finishTime - submitTime
 
   return { durationSec, variant: durationSec > 60 ? 'red' : 'green' }
+}
+
+/**
+ * Format a duration in milliseconds with sub-second precision.
+ */
+export function formatDurationFromMs(milliseconds: number): string {
+  if (!isDisplayableDurationMs(milliseconds)) return '-'
+  if (milliseconds === 0) return '0s'
+  return `${trimTrailingZeros((milliseconds / 1000).toFixed(3))}s`
+}
+
+export function isDisplayableDurationMs(milliseconds: unknown): milliseconds is number {
+  return (
+    typeof milliseconds === 'number' &&
+    Number.isFinite(milliseconds) &&
+    milliseconds >= 0
+  )
+}
+
+function trimTrailingZeros(value: string): string {
+  return value.replace(/\.?0+$/, '')
+}
+
+/**
+ * Format a ratio value for display while preserving tiny non-zero values.
+ */
+export function formatRatioDisplay(ratio: number | undefined): string {
+  if (ratio == null || !Number.isFinite(ratio)) return '-'
+  if (ratio === 0) return '0'
+  if (ratio % 1 === 0) return String(ratio)
+
+  const fixed = trimTrailingZeros(ratio.toFixed(4))
+  if (fixed === '0' || fixed === '-0') {
+    return ratio.toExponential()
+  }
+  return fixed
+}
+
+export interface StreamStatusDisplayInfo {
+  label: string
+  variant: StatusBadgeProps['variant']
+  valueClassName: string
+  iconClassName: string
+}
+
+export function getStreamStatusDisplayInfo(
+  status: LogOtherData['stream_status'] | undefined,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): StreamStatusDisplayInfo {
+  if (status?.status === 'ok') {
+    return {
+      label: t('OK'),
+      variant: 'success',
+      valueClassName: 'text-emerald-700 font-semibold dark:text-emerald-300',
+      iconClassName: 'text-emerald-500',
+    }
+  }
+  if (status?.status === 'partial') {
+    return {
+      label: t('Partial'),
+      variant: 'warning',
+      valueClassName: 'text-amber-700 font-semibold dark:text-amber-300',
+      iconClassName: 'text-amber-500',
+    }
+  }
+  if (
+    status?.status === 'canceled' ||
+    (!status?.status && status?.end_reason === 'client_gone')
+  ) {
+    return {
+      label: t('Canceled'),
+      variant: 'disabled',
+      valueClassName: 'text-muted-foreground font-semibold',
+      iconClassName: 'text-muted-foreground',
+    }
+  }
+  return {
+    label: status?.status || t('Error'),
+    variant: 'red',
+    valueClassName: 'text-red-700 font-semibold dark:text-red-300',
+    iconClassName: 'text-red-500',
+  }
 }

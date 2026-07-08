@@ -19,6 +19,12 @@ type channelListResponse struct {
 	Message string `json:"message"`
 }
 
+type channelPriorityListResponse struct {
+	Success bool                    `json:"success"`
+	Data    []model.ChannelPriority `json:"data"`
+	Message string                  `json:"message"`
+}
+
 func TestGetAllChannelsAppliesServerSideSortQuery(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channels := []*model.Channel{
@@ -61,6 +67,30 @@ func TestSearchChannelsAppliesServerSideSortQuery(t *testing.T) {
 	require.True(t, response.Success, response.Message)
 	require.Len(t, response.Data.Items, 3)
 	require.Equal(t, []int{2, 3, 1}, []int{response.Data.Items[0].Id, response.Data.Items[1].Id, response.Data.Items[2].Id})
+}
+
+func TestGetTopChannelPrioritiesReturnsPinnedOrder(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channels := []*model.Channel{
+		{Id: 1, Name: "zero", Key: "sk-zero", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](0)},
+		{Id: 2, Name: "low", Key: "sk-low", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](10)},
+		{Id: 3, Name: "high", Key: "sk-high", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](20)},
+	}
+	for _, channel := range channels {
+		require.NoError(t, model.DB.Create(channel).Error)
+	}
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodGet, "/api/channel/priorities", nil)
+
+	GetTopChannelPriorities(ctx)
+
+	var response channelPriorityListResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success, response.Message)
+	require.Equal(t, []model.ChannelPriority{
+		{Id: 3, Priority: common.GetPointer[int64](20)},
+		{Id: 2, Priority: common.GetPointer[int64](10)},
+	}, response.Data)
 }
 
 func TestGetAllChannelsAppliesGroupFilterQuery(t *testing.T) {

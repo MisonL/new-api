@@ -31,7 +31,7 @@ var webStaticRootPaths = map[string]struct{}{
 	"/robots.txt":           {},
 }
 
-var inMemoryRateLimiter common.InMemoryRateLimiter
+var inMemoryRateLimiter = &common.InMemoryRateLimiter{}
 
 var defNext = func(c *gin.Context) {
 	c.Next()

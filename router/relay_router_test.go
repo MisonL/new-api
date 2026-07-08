@@ -27,3 +27,17 @@ func TestResponsesCompactIngressAliasesReachRelayAuth(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeCountTokensRouteReachesRelayAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	SetRelayRouter(engine)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens?beta=true", nil)
+
+	engine.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "token.invalid")
+}

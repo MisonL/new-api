@@ -36,6 +36,10 @@ func isRuleMatch(rule model_setting.ProtocolConversionRule, sourceEndpoint strin
 }
 
 func FindProtocolConversionRulePolicy(policy model_setting.ChatCompletionsToResponsesPolicy, sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string) *model_setting.ProtocolConversionRule {
+	if !policy.Enabled {
+		return nil
+	}
+
 	for i := range policy.Rules {
 		rule := policy.Rules[i]
 		if isRuleMatch(rule, sourceEndpoint, targetEndpoint, channelID, channelType, model) {

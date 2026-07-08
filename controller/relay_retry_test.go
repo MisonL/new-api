@@ -535,6 +535,7 @@ func TestGetChannelAllResponsesViaChatRemoteCompactionInputReturnsUnsupported(t 
 	})
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			remoteCompactionChatOnlyPolicy(chatOnly.Id).Rules[0],
 			remoteCompactionChatOnlyPolicy(native.Id).Rules[0],
@@ -668,6 +669,7 @@ func TestGetChannelSpecificProxyProfileRejectsRemoteCompactionInput(t *testing.T
 	})
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "global-responses-to-chat",
@@ -715,6 +717,7 @@ func TestGetChannelReturnsNativeCompactionSkipErrorWithoutChannelWrap(t *testing
 	})
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat",
@@ -763,6 +766,7 @@ func TestRemoteCompactionSkipKeepsGlobalCompatibilityRuleCandidate(t *testing.T)
 	})
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "global-responses-to-chat",
@@ -805,6 +809,7 @@ func TestDefaultProfileAllowsCompactionTriggerPassthroughForLegacyChannels(t *te
 	})
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "global-responses-to-chat",
@@ -870,6 +875,7 @@ func TestDefaultProfileAllowsRemoteCompactionPassthroughForLegacyChannels(t *tes
 	})
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "global-responses-to-chat",
@@ -983,6 +989,68 @@ func TestResponsesToChatPrecheckSkipsNativeOpaqueLocalState(t *testing.T) {
 	require.Equal(t, "channel_skipped_unsupported_compaction", common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
 }
 
+func TestResponsesToChatPrecheckKeepsRestorableNativeOpaqueLocalState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	db := setupChannelControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.SyntheticCompactStateRecord{}))
+
+	scope := service.SyntheticCompactStateScope{
+		UserID:      7,
+		TokenID:     8,
+		Group:       "default",
+		Model:       "gpt-5.5",
+		ChannelID:   206,
+		ChannelType: constant.ChannelTypeOpenAI,
+	}
+	state, err := service.StoreNativeOpaqueCompactState(context.Background(), scope, "gpt-5.5", "resp_native_upstream", "opaque-token", 1710000000)
+	require.NoError(t, err)
+	require.NotNil(t, state)
+
+	info := remoteCompactionRelayInfo()
+	info.UserId = scope.UserID
+	info.TokenId = scope.TokenID
+	info.ChannelMeta = &relaycommon.ChannelMeta{
+		ChannelId:   206,
+		ChannelType: constant.ChannelTypeOpenAI,
+	}
+	info.Request = &dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: state.ID,
+		Input:              common.RawMessage(`"continue"`),
+	}
+	channel := &model.Channel{
+		Id:   206,
+		Type: constant.ChannelTypeOpenAI,
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialNewAPI,
+	})
+	require.NoError(t, db.Create(channel).Error)
+	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, channel, "gpt-5.5"))
+	info.InitChannelMeta(ctx)
+
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+	settings.PassThroughRequestEnabled = false
+	settings.ChatCompletionsToResponsesPolicy = remoteCompactionChatOnlyPolicy(channel.Id)
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.False(t, skip)
+	require.Nil(t, info.LastError)
+	require.Empty(t, common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+}
+
 func TestGetChannelSkipsGlobalResponsesViaChatForRemoteCompactionInput(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
 	chatOnly, native := seedRemoteCompactionRouteChannels(t, db)
@@ -1006,6 +1074,7 @@ func TestGetChannelSkipsGlobalResponsesViaChatForRemoteCompactionInput(t *testin
 	})
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "global-responses-to-chat",
@@ -1351,6 +1420,7 @@ func TestGetChannelSkipsGlobalResponsesViaChatForUnsupportedNamespaceTool(t *tes
 	})
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "global-responses-to-chat",
@@ -1533,6 +1603,7 @@ func setChannelPriorityForTest(t *testing.T, gormDB *gorm.DB, channel *model.Cha
 
 func remoteCompactionChatOnlyPolicy(channelID int) model_setting.ChatCompletionsToResponsesPolicy {
 	return model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat",
@@ -2193,6 +2264,7 @@ func TestResponsesCompactFallbackContextSnapshotRestoresFailedAttemptMarkers(t *
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
 	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
 	c.Set("responses_compact_context_fallback_attempted", true)
+	common.SetContextKey(c, constant.ContextKeyResponsesCompactCodexContextPruned, true)
 	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModel, "gpt-5.4")
 	common.SetContextKey(c, constant.ContextKeyResponsesCompactStateLookup, "original_hit")
 	common.SetContextKey(c, constant.ContextKeyResponsesCompactRouteDecision, "original_route")
@@ -2228,6 +2300,7 @@ func TestResponsesCompactFallbackContextSnapshotRestoresFailedAttemptMarkers(t *
 
 	require.False(t, c.GetBool("responses_compact_auto_fallback_attempted"))
 	require.True(t, c.GetBool("responses_compact_context_fallback_attempted"))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactCodexContextPruned))
 	require.False(t, c.GetBool("responses_compact_previous_response_id_fallback_attempted"))
 	require.False(t, responsesCompactSyntheticFallbackAttemptedForChannel(c, info.ChannelMeta.ChannelId))
 	require.False(t, c.GetBool("responses_compact_summary_model_fallback_attempted"))
@@ -2415,6 +2488,21 @@ func TestShouldFallbackResponsesCompactSummaryModel(t *testing.T) {
 
 	c.Set("responses_compact_summary_model_fallback_attempted", true)
 	require.False(t, shouldFallbackResponsesCompactSummaryModel(c, info, err))
+}
+
+func TestShouldFallbackResponsesCompactSummaryModelSupportsCodex(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	info := compactAutoFallbackRelayInfo()
+	info.ChannelMeta.ChannelType = constant.ChannelTypeCodex
+	info.UpstreamModelName = "gpt-5.5"
+	info.Request = compactVisiblePayloadRequest()
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "context window exceeded",
+		Code:    "context_length_exceeded",
+	}, http.StatusBadRequest)
+
+	require.True(t, shouldFallbackResponsesCompactSummaryModel(c, info, err))
 }
 
 func TestShouldFallbackResponsesCompactSummaryModelSkipsRemoteOpaqueCompaction(t *testing.T) {

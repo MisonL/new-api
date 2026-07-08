@@ -619,7 +619,17 @@ function TestRuntimeDetails({ result }: { result: TestResult }) {
   const runtimeConfig = result.runtimeConfig
   const capability = runtimeConfig?.channel_capability_snapshot
   const diagnosis = runtimeConfig?.error_diagnosis
-  if (!capability && !diagnosis && !runtimeConfig?.final_request_path) {
+  const hasConversionChain =
+    Array.isArray(runtimeConfig?.request_conversion_chain) &&
+    runtimeConfig.request_conversion_chain.length > 1
+  if (
+    !capability &&
+    !diagnosis &&
+    !runtimeConfig?.request_path &&
+    !runtimeConfig?.final_request_path &&
+    !runtimeConfig?.upstream_request_path &&
+    !hasConversionChain
+  ) {
     return null
   }
 
@@ -627,13 +637,21 @@ function TestRuntimeDetails({ result }: { result: TestResult }) {
   const profile = capability?.profile
   const source = capability?.source
   const observedLabel = formatCapabilityObservation(
-    capability?.observed?.status_code &&
-      capability.observed.status_code >= 400
+    capability?.observed?.status_code && capability.observed.status_code >= 400
       ? t('last fail')
       : t('last observed'),
     capability?.observed
   )
-  const probeLabel = formatCapabilityObservation(t('last probe'), capability?.probe)
+  const probeLabel = formatCapabilityObservation(
+    t('last probe'),
+    capability?.probe
+  )
+  let encryptedReasoningLabel = ''
+  if (capability?.strips_responses_encrypted_reasoning === true) {
+    encryptedReasoningLabel = t('encrypted reasoning: strip')
+  } else if (capability?.strips_responses_encrypted_reasoning === false) {
+    encryptedReasoningLabel = t('encrypted reasoning: keep')
+  }
   const chips = [
     capability?.supports_responses_compact === true
       ? t('compact: yes')
@@ -650,10 +668,11 @@ function TestRuntimeDetails({ result }: { result: TestResult }) {
       : capability?.supports_compaction_item_passthrough === false
         ? t('compaction: block')
         : '',
+    encryptedReasoningLabel,
   ].filter(Boolean)
 
   return (
-    <div className='text-muted-foreground mt-1 flex flex-col gap-1 break-all text-[11px] leading-relaxed'>
+    <div className='text-muted-foreground mt-1 flex flex-col gap-1 text-[11px] leading-relaxed break-all'>
       {(source || profile || compactMode) && (
         <span>
           {source ? `${t('source')}: ${source}` : ''}
@@ -664,12 +683,35 @@ function TestRuntimeDetails({ result }: { result: TestResult }) {
         </span>
       )}
       {chips.length > 0 && <span>{chips.join(' / ')}</span>}
-      {runtimeConfig?.final_request_path && (
-        <span>{t('path')}: {runtimeConfig.final_request_path}</span>
+      {runtimeConfig?.request_path && (
+        <span>
+          {t('client path')}: {runtimeConfig.request_path}
+        </span>
+      )}
+      {runtimeConfig?.final_request_path &&
+        runtimeConfig.final_request_path !== runtimeConfig.request_path && (
+          <span>
+            {t('relay path')}: {runtimeConfig.final_request_path}
+          </span>
+        )}
+      {runtimeConfig?.upstream_request_path && (
+        <span>
+          {t('upstream path')}: {runtimeConfig.upstream_request_path}
+        </span>
+      )}
+      {hasConversionChain && (
+        <span>
+          {t('protocol')}:{' '}
+          {runtimeConfig?.request_conversion_chain?.join(' -> ')}
+        </span>
       )}
       {observedLabel && <span>{observedLabel}</span>}
       {probeLabel && <span>{probeLabel}</span>}
-      {diagnosis?.summary && <span>{t('diagnosis')}: {diagnosis.summary}</span>}
+      {diagnosis?.summary && (
+        <span>
+          {t('diagnosis')}: {diagnosis.summary}
+        </span>
+      )}
     </div>
   )
 }
@@ -694,7 +736,10 @@ function formatCapabilityObservation(
   if (observation.reason) {
     parts.push(`reason=${observation.reason}`)
   }
-  if (typeof observation.observed_at === 'number' && observation.observed_at > 0) {
+  if (
+    typeof observation.observed_at === 'number' &&
+    observation.observed_at > 0
+  ) {
     parts.push(`at=${formatObservationTime(observation.observed_at)}`)
   }
   return parts.length > 0 ? `${label}: ${parts.join(' / ')}` : ''

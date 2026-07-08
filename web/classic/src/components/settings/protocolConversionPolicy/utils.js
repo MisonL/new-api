@@ -359,7 +359,7 @@ export const serializeRules = (rules, policyExtra = {}) => {
     return JSON.stringify(policyExtra || {}, null, 2);
   }
   return JSON.stringify(
-    { ...(policyExtra || {}), rules: cleanedRules },
+    { ...(policyExtra || {}), enabled: true, rules: cleanedRules },
     null,
     2,
   );

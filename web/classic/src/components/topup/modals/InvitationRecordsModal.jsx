@@ -369,7 +369,7 @@ const InvitationRecordsModal = ({ visible, onCancel, t, renderQuota }) => {
   );
 
   const renderPagination = () => (
-    <div className='flex justify-center pt-2'>
+    <div className='new-api-inline-pagination-footer'>
       <Pagination
         currentPage={page}
         pageSize={pageSize}

@@ -134,6 +134,7 @@ export function ModelMutateDrawer({
       'global.pass_through_request_enabled': false,
       'global.thinking_model_blacklist': '[]',
       'global.chat_completions_to_responses_policy': '{}',
+      'global.request_body_limit_policy': '{}',
       'general_setting.ping_interval_enabled': false,
       'general_setting.ping_interval_seconds': 60,
       'gemini.safety_settings': '',
@@ -229,6 +230,7 @@ export function ModelMutateDrawer({
   useEffect(() => {
     if (open && isEditing && modelData?.data) {
       const model = modelData.data
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOldModelName(model.model_name)
 
       // Base model data reset

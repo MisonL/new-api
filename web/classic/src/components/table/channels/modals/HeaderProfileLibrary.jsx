@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
@@ -27,32 +27,48 @@ import {
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { IconDelete, IconEdit, IconPlus } from '@douyinfe/semi-icons';
+import {
+  IconDelete,
+  IconEdit,
+  IconPlus,
+  IconRefresh,
+} from '@douyinfe/semi-icons';
 
 import { API } from '../../../../helpers';
 import { getHeaderProfileCategoryLabel } from './headerProfile.helpers.js';
 import {
   AI_CODING_CLI_DEFAULT_PLATFORM,
   AI_CODING_CLI_PLATFORM_OPTIONS,
+  areAiCodingCliProfileSnapshotsEqual,
+  buildRefreshedAiCodingCliProfileSnapshot,
+  buildNpmCliFallbackVersionOptions,
   buildVersionedAiCodingCliProfile,
-  fetchNpmCliVersionOptions,
+  fetchNpmCliVersionOptionsResult,
   getAiCodingCliVersionSource,
+  getNpmCliVersionOptionSource,
+  NPM_VERSION_AUTH_ERROR_CODE,
+  NPM_VERSION_EMPTY_ERROR_CODE,
+  NPM_VERSION_FORBIDDEN_CODE,
   NPM_VERSION_LATEST_ALIAS,
+  NPM_VERSION_LOAD_ERROR_CODE,
+  NPM_VERSION_NOT_RECORDED_CODE,
+  NPM_VERSION_RATE_LIMITED_CODE,
   normalizeAiCodingCliPlatform,
+  normalizeNpmCliVersionPayloadErrorCode,
 } from './headerProfile.constants.js';
 
 const { Text } = Typography;
 const EMPTY_VERSION_OPTIONS = [];
-const latestFallbackOption = (fallbackVersion) => ({
-  value: NPM_VERSION_LATEST_ALIAS,
-  label: fallbackVersion
-    ? `${NPM_VERSION_LATEST_ALIAS} (${fallbackVersion})`
-    : NPM_VERSION_LATEST_ALIAS,
-  isLatest: true,
-  resolvedVersion: fallbackVersion || '',
-});
 const CLI_VERSION_OPTIONS_CACHE_TTL_MS = 10 * 60 * 1000;
-const NPM_VERSION_LOAD_ERROR_CODE = 'npm_version_load_failed';
+const CLI_VERSION_REFRESH_TIMEOUT_MS = 10_000;
+const NPM_VERSION_KNOWN_ERROR_CODES = new Set([
+  NPM_VERSION_AUTH_ERROR_CODE,
+  NPM_VERSION_EMPTY_ERROR_CODE,
+  NPM_VERSION_FORBIDDEN_CODE,
+  NPM_VERSION_LOAD_ERROR_CODE,
+  NPM_VERSION_NOT_RECORDED_CODE,
+  NPM_VERSION_RATE_LIMITED_CODE,
+]);
 const cliVersionOptionsRequestCache = new Map();
 
 function ensureSelectedVersionOption(options, selectedVersion) {
@@ -71,31 +87,139 @@ function ensureSelectedVersionOption(options, selectedVersion) {
       label: normalizedVersion,
       isLatest: false,
       resolvedVersion: normalizedVersion,
+      source: 'retained',
     },
   ];
 }
 
-function loadCliVersionOptions(packageName) {
-  const cached = cliVersionOptionsRequestCache.get(packageName);
+function loadCliVersionOptions(packageName, options = {}) {
+  const cacheKey = String(packageName || '').trim();
+  const cached = cliVersionOptionsRequestCache.get(cacheKey);
   const now = Date.now();
-  if (cached && cached.expiresAt > now) {
+  if (!options.force && !options.refresh && cached && cached.expiresAt > now) {
     return cached.request;
   }
   if (cached) {
-    cliVersionOptionsRequestCache.delete(packageName);
+    cliVersionOptionsRequestCache.delete(cacheKey);
   }
-  const request = fetchNpmCliVersionOptions(
-    packageName,
-    API.get.bind(API),
-  ).catch((error) => {
-    cliVersionOptionsRequestCache.delete(packageName);
+  const requestImpl = options.refresh
+    ? (url, requestOptions) => API.post(url, null, requestOptions)
+    : API.get.bind(API);
+  const request = fetchNpmCliVersionOptionsResult(cacheKey, requestImpl, {
+    refresh: options.refresh === true,
+  }).catch((error) => {
+    if (cliVersionOptionsRequestCache.get(cacheKey)?.request === request) {
+      cliVersionOptionsRequestCache.delete(cacheKey);
+    }
     throw error;
   });
-  cliVersionOptionsRequestCache.set(packageName, {
+  cliVersionOptionsRequestCache.set(cacheKey, {
     expiresAt: now + CLI_VERSION_OPTIONS_CACHE_TTL_MS,
     request,
   });
   return request;
+}
+
+function invalidateCliVersionOptions(packageName) {
+  cliVersionOptionsRequestCache.delete(String(packageName || '').trim());
+}
+
+function getNpmVersionLoadErrorText(t, code) {
+  if (code === NPM_VERSION_AUTH_ERROR_CODE) {
+    return t('会话已过期，请重新登录后再加载 npm 版本');
+  }
+  if (code === NPM_VERSION_FORBIDDEN_CODE) {
+    return t('需要管理员权限才能加载 npm 版本');
+  }
+  if (code === NPM_VERSION_RATE_LIMITED_CODE) {
+    return t('npm 版本请求过于频繁，请稍后重试');
+  }
+  if (code === NPM_VERSION_EMPTY_ERROR_CODE) {
+    return t('后台暂无 npm 版本记录，已使用内置版本列表');
+  }
+  if (code === NPM_VERSION_NOT_RECORDED_CODE) {
+    return t('后台暂无 npm 版本记录，已使用内置版本列表');
+  }
+  return t('npm 版本加载失败，已使用内置版本列表');
+}
+
+function normalizeKnownNpmVersionErrorCode(code) {
+  const normalized = String(code || '').trim();
+  return NPM_VERSION_KNOWN_ERROR_CODES.has(normalized)
+    ? normalized
+    : NPM_VERSION_LOAD_ERROR_CODE;
+}
+
+function getNpmVersionSourceText(t, source) {
+  switch (source) {
+    case 'recorded':
+      return t('后台缓存');
+    case 'npm':
+      return t('npm 刷新');
+    case 'retained':
+      return t('保留选择');
+    case 'fallback':
+      return t('内置兜底');
+    case 'missing':
+      return t('未记录');
+    default:
+      return t('未知来源');
+  }
+}
+
+function formatNpmVersionRefreshedAt(value) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return date.toLocaleString();
+}
+
+function getLastErrorScopeText(t, scope) {
+  if (scope === 'process') return t('当前进程');
+  if (scope === 'recorded') return t('持久化记录');
+  return '';
+}
+
+function formatNpmVersionCacheAge(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return '';
+  }
+  if (numericValue < 1000) return `${Math.round(numericValue)} ms`;
+  const seconds = Math.round(numericValue / 1000);
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.round(minutes / 60)} h`;
+}
+
+function formatNpmVersionDiagnosticLastError(t, item) {
+  const lastError = item?.last_error;
+  if (!lastError) {
+    return '';
+  }
+  return [
+    lastError.code,
+    lastError.source,
+    getLastErrorScopeText(t, item.last_error_scope),
+    formatNpmVersionRefreshedAt(lastError.updated_at),
+    lastError.message,
+  ]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(' / ');
+}
+
+function normalizeNpmVersionDiagnostics(payload) {
+  return Array.isArray(payload?.packages)
+    ? payload.packages.filter(
+        (item) => item && typeof item === 'object' && !Array.isArray(item),
+      )
+    : [];
 }
 
 function buildGroupItems(profiles) {
@@ -119,7 +243,8 @@ function getProfileUsageHint(t, profile) {
     profile.id === 'claude-code' ||
     profile.id === 'gemini-cli' ||
     profile.id === 'qwen-code' ||
-    profile.id === 'droid'
+    profile.id === 'droid' ||
+    profile.id === 'agy'
   ) {
     return t(
       '固定客户端标识；默认不自动补透传，严格复刻上游链路时再按需补 pass_headers',
@@ -150,8 +275,15 @@ const HeaderProfileLibrary = ({
   onDelete,
 }) => {
   const { t } = useTranslation();
+  const versionRequestSeqRef = useRef({});
+  const diagnosticsRequestSeqRef = useRef(0);
+  const mountedRef = useRef(true);
   const [previewProfileId, setPreviewProfileId] = useState('');
   const [cliVersionState, setCliVersionState] = useState({});
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [diagnosticsError, setDiagnosticsError] = useState('');
+  const [diagnostics, setDiagnostics] = useState([]);
   const multiTemplateMode =
     strategyMode === 'round_robin' || strategyMode === 'random';
   const groups = useMemo(() => buildGroupItems(profiles), [profiles]);
@@ -218,6 +350,81 @@ const HeaderProfileLibrary = ({
         .join('|'),
     [versionedProfileDescriptors],
   );
+  const startVersionRequest = (profileId) => {
+    const nextSeq = (versionRequestSeqRef.current[profileId] || 0) + 1;
+    versionRequestSeqRef.current[profileId] = nextSeq;
+    return nextSeq;
+  };
+  const isLatestVersionRequest = (profileId, requestSeq) =>
+    versionRequestSeqRef.current[profileId] === requestSeq;
+
+  const loadNpmVersionDiagnostics = () => {
+    const requestSeq = diagnosticsRequestSeqRef.current + 1;
+    diagnosticsRequestSeqRef.current = requestSeq;
+    setDiagnosticsOpen(true);
+    setDiagnosticsLoading(true);
+    setDiagnosticsError('');
+    API.get('/api/channel/npm_version_options/diagnostics', {
+      timeout: CLI_VERSION_REFRESH_TIMEOUT_MS,
+      skipErrorHandler: true,
+      disableDuplicate: true,
+    })
+      .then((response) => {
+        const payload = response?.data || {};
+        const status = Number(response?.status);
+        const errorCode = normalizeNpmCliVersionPayloadErrorCode(
+          payload,
+          status,
+        );
+        if (payload.success !== true) {
+          const error = new Error(
+            payload.message || 'failed to load npm version diagnostics',
+          );
+          error.code = errorCode;
+          throw error;
+        }
+        if (
+          !mountedRef.current ||
+          diagnosticsRequestSeqRef.current !== requestSeq
+        ) {
+          return;
+        }
+        setDiagnostics(normalizeNpmVersionDiagnostics(payload.data));
+      })
+      .catch((error) => {
+        if (
+          !mountedRef.current ||
+          diagnosticsRequestSeqRef.current !== requestSeq
+        ) {
+          return;
+        }
+        const responseErrorCode = normalizeNpmCliVersionPayloadErrorCode(
+          error?.response?.data || {},
+          Number(error?.response?.status ?? error?.status),
+        );
+        setDiagnosticsError(
+          responseErrorCode === NPM_VERSION_LOAD_ERROR_CODE && error?.code
+            ? normalizeKnownNpmVersionErrorCode(error.code)
+            : responseErrorCode,
+        );
+      })
+      .finally(() => {
+        if (
+          !mountedRef.current ||
+          diagnosticsRequestSeqRef.current !== requestSeq
+        ) {
+          return;
+        }
+        setDiagnosticsLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const previewProfile = useMemo(() => {
     return (
       profiles.find((profile) => profile.id === previewProfileId) ||
@@ -243,8 +450,27 @@ const HeaderProfileLibrary = ({
           (nextState[profileId]?.selectedVersion !== selectedVersion ||
             nextState[profileId]?.selectedPlatform !== selectedPlatform)
         ) {
+          const profile = profiles.find((item) => item.id === profileId);
+          const versionSource = profile
+            ? getAiCodingCliVersionSource(profile)
+            : null;
+          const currentState = nextState[profileId] || {};
+          const currentOptions =
+            versionSource?.packageName &&
+            currentState.packageName === versionSource.packageName
+              ? currentState.options || []
+              : [];
+          const baseOptions =
+            currentOptions.length > 0
+              ? currentOptions
+              : versionSource
+                ? buildNpmCliFallbackVersionOptions(
+                    versionSource.fallbackVersion,
+                  )
+                : currentOptions;
           nextState[profileId] = {
             ...(nextState[profileId] || {}),
+            options: ensureSelectedVersionOption(baseOptions, selectedVersion),
             selectedVersion,
             selectedPlatform,
           };
@@ -253,7 +479,7 @@ const HeaderProfileLibrary = ({
       });
       return changed ? nextState : current;
     });
-  }, [selectedVersionByBaseId, selectedVersionDescriptorKey]);
+  }, [profiles, selectedVersionByBaseId, selectedVersionDescriptorKey]);
 
   useEffect(() => {
     if (versionedProfileDescriptors.length === 0) {
@@ -270,10 +496,21 @@ const HeaderProfileLibrary = ({
       setCliVersionState((current) => {
         const currentState = current[profile.id] || {};
         const fallbackVersion = versionSource.fallbackVersion;
-        const fallbackOptions =
-          Array.isArray(currentState.options) && currentState.options.length > 0
-            ? currentState.options
-            : [latestFallbackOption(fallbackVersion)];
+        const selectedVersionInfo = selectedVersionByBaseId.get(profile.id);
+        const selectedVersion =
+          selectedVersionInfo?.version ||
+          currentState.selectedVersion ||
+          NPM_VERSION_LATEST_ALIAS;
+        const canReuseCurrentOptions =
+          currentState.packageName === versionSource.packageName &&
+          Array.isArray(currentState.options) &&
+          currentState.options.length > 1;
+        const fallbackOptions = canReuseCurrentOptions
+          ? currentState.options
+          : ensureSelectedVersionOption(
+              buildNpmCliFallbackVersionOptions(fallbackVersion),
+              selectedVersion,
+            );
         return {
           ...current,
           [profile.id]: {
@@ -282,31 +519,46 @@ const HeaderProfileLibrary = ({
             error: '',
             options: fallbackOptions,
             packageName: versionSource.packageName,
-            selectedVersion:
-              currentState.selectedVersion || NPM_VERSION_LATEST_ALIAS,
+            selectedVersion,
             selectedPlatform:
+              selectedVersionInfo?.platform ||
               currentState.selectedPlatform ||
-              selectedVersionByBaseId.get(profile.id)?.platform ||
               AI_CODING_CLI_DEFAULT_PLATFORM,
+            source: canReuseCurrentOptions ? currentState.source : 'fallback',
+            refreshedAt: canReuseCurrentOptions
+              ? currentState.refreshedAt
+              : undefined,
+            latestVersion: canReuseCurrentOptions
+              ? currentState.latestVersion
+              : fallbackVersion,
           },
         };
       });
 
+      const requestSeq = startVersionRequest(profile.id);
       loadCliVersionOptions(versionSource.packageName)
-        .then((options) => {
-          if (!active) {
+        .then((result) => {
+          if (!active || !isLatestVersionRequest(profile.id, requestSeq)) {
             return;
           }
           setCliVersionState((current) => {
             const currentState = current[profile.id] || {};
+            const options = result.options;
+            const selectedVersionInfo = selectedVersionByBaseId.get(profile.id);
             const selectedVersion =
+              selectedVersionInfo?.version ||
               currentState.selectedVersion ||
               options[0]?.value ||
               NPM_VERSION_LATEST_ALIAS;
             const fallbackOptions =
               options.length > 0
                 ? ensureSelectedVersionOption(options, selectedVersion)
-                : [latestFallbackOption(versionSource.fallbackVersion)];
+                : ensureSelectedVersionOption(
+                    buildNpmCliFallbackVersionOptions(
+                      versionSource.fallbackVersion,
+                    ),
+                    selectedVersion,
+                  );
             return {
               ...current,
               [profile.id]: {
@@ -317,34 +569,60 @@ const HeaderProfileLibrary = ({
                 packageName: versionSource.packageName,
                 selectedVersion,
                 selectedPlatform:
+                  selectedVersionInfo?.platform ||
                   currentState.selectedPlatform ||
-                  selectedVersionByBaseId.get(profile.id)?.platform ||
                   AI_CODING_CLI_DEFAULT_PLATFORM,
+                source: result.source,
+                refreshedAt: result.refreshedAt,
+                latestVersion: result.latestVersion,
               },
             };
           });
         })
-        .catch(() => {
-          if (!active) {
+        .catch((error) => {
+          if (!active || !isLatestVersionRequest(profile.id, requestSeq)) {
             return;
           }
           setCliVersionState((current) => {
             const currentState = current[profile.id] || {};
             const fallbackVersion = versionSource.fallbackVersion;
+            const selectedVersionInfo = selectedVersionByBaseId.get(profile.id);
+            const selectedVersion =
+              selectedVersionInfo?.version ||
+              currentState.selectedVersion ||
+              NPM_VERSION_LATEST_ALIAS;
+            const canReuseCurrentOptions =
+              currentState.packageName === versionSource.packageName &&
+              Array.isArray(currentState.options) &&
+              currentState.options.length > 1;
+            const fallbackOptions = canReuseCurrentOptions
+              ? currentState.options
+              : buildNpmCliFallbackVersionOptions(fallbackVersion);
             return {
               ...current,
               [profile.id]: {
                 ...currentState,
                 loading: false,
-                error: NPM_VERSION_LOAD_ERROR_CODE,
-                options: [latestFallbackOption(fallbackVersion)],
+                error: error?.code || NPM_VERSION_LOAD_ERROR_CODE,
+                options: ensureSelectedVersionOption(
+                  fallbackOptions,
+                  selectedVersion,
+                ),
                 packageName: versionSource.packageName,
-                selectedVersion:
-                  currentState.selectedVersion || NPM_VERSION_LATEST_ALIAS,
+                selectedVersion,
                 selectedPlatform:
+                  selectedVersionInfo?.platform ||
                   currentState.selectedPlatform ||
-                  selectedVersionByBaseId.get(profile.id)?.platform ||
                   AI_CODING_CLI_DEFAULT_PLATFORM,
+                source: canReuseCurrentOptions
+                  ? currentState.source
+                  : 'fallback',
+                refreshedAt: canReuseCurrentOptions
+                  ? currentState.refreshedAt
+                  : undefined,
+                latestVersion: canReuseCurrentOptions
+                  ? currentState.latestVersion
+                  : fallbackVersion,
               },
             };
           });
@@ -358,6 +636,64 @@ const HeaderProfileLibrary = ({
     selectedVersionByBaseId,
     selectedVersionDescriptorKey,
     versionedProfileDescriptorKey,
+  ]);
+
+  useEffect(() => {
+    if (selectedVersionByBaseId.size === 0) {
+      return;
+    }
+    const replacements = [];
+    for (const [profileId, versionInfo] of selectedVersionByBaseId.entries()) {
+      const profile = profiles.find((item) => item.id === profileId);
+      const versionSource = profile
+        ? getAiCodingCliVersionSource(profile)
+        : null;
+      const versionState = cliVersionState[profileId];
+      if (
+        !profile ||
+        !versionSource?.packageName ||
+        versionState?.packageName !== versionSource.packageName ||
+        versionState.loading ||
+        versionState.error ||
+        !Array.isArray(versionState.options) ||
+        versionState.options.length === 0
+      ) {
+        continue;
+      }
+      const selectedProfile =
+        selectedProfiles.find((item) => item.id === versionInfo.profileId) ||
+        selectedProfiles.find((item) => {
+          const meta = item?.versionMeta || item?.version_meta;
+          return (meta?.baseProfileId || meta?.base_profile_id) === profileId;
+        });
+      const refreshedProfile = buildRefreshedAiCodingCliProfileSnapshot({
+        profile,
+        selectedProfile,
+        selectedVersion: versionInfo.version || versionState.selectedVersion,
+        selectedPlatform: versionInfo.platform || versionState.selectedPlatform,
+        options: versionState.options,
+      });
+      if (
+        !refreshedProfile ||
+        areAiCodingCliProfileSnapshotsEqual(selectedProfile, refreshedProfile)
+      ) {
+        continue;
+      }
+      replacements.push(refreshedProfile);
+    }
+    if (replacements.length === 1) {
+      onToggleSelect(replacements[0].id, replacements[0], { replace: true });
+      return;
+    }
+    if (replacements.length > 1) {
+      onToggleSelect('', null, { replaceProfiles: replacements });
+    }
+  }, [
+    cliVersionState,
+    onToggleSelect,
+    profiles,
+    selectedProfiles,
+    selectedVersionByBaseId,
   ]);
 
   const getSelectedVersionForProfile = (profile) => {
@@ -398,11 +734,161 @@ const HeaderProfileLibrary = ({
     );
   };
 
-  const getVersionMetaSourceForProfile = (profile, version) => {
-    if (version === NPM_VERSION_LATEST_ALIAS) {
-      return 'npm';
+  const getVersionMetaSourceForProfile = (
+    profile,
+    version,
+    optionsOverride,
+  ) => {
+    const versionState = cliVersionState[profile.id];
+    const versionOptions = Array.isArray(optionsOverride)
+      ? optionsOverride
+      : versionState?.options || [];
+    const selectedOption = versionOptions.find(
+      (option) => option.value === version,
+    );
+    const selectedOptionSource = selectedOption
+      ? getNpmCliVersionOptionSource(selectedOption, 'npm')
+      : '';
+    if (selectedOptionSource === 'retained') {
+      return selectedOptionSource;
     }
-    return cliVersionState[profile.id]?.error ? 'fallback' : 'npm';
+    return versionState && !versionState.loading && !versionState.error
+      ? selectedOptionSource || 'fallback'
+      : 'fallback';
+  };
+
+  const reloadProfileVersions = (profile) => {
+    const versionSource = getAiCodingCliVersionSource(profile);
+    if (!versionSource?.packageName) {
+      return;
+    }
+    if (!mountedRef.current) {
+      return;
+    }
+    invalidateCliVersionOptions(versionSource.packageName);
+    const requestSeq = startVersionRequest(profile.id);
+    const fallbackOptions = buildNpmCliFallbackVersionOptions(
+      versionSource.fallbackVersion,
+    );
+    setCliVersionState((current) => {
+      const currentState = current[profile.id] || {};
+      const selectedVersion =
+        currentState.selectedVersion ||
+        selectedVersionByBaseId.get(profile.id)?.version ||
+        NPM_VERSION_LATEST_ALIAS;
+      const canReuseCurrentOptions =
+        currentState.packageName === versionSource.packageName &&
+        Array.isArray(currentState.options) &&
+        currentState.options.length > 1;
+      return {
+        ...current,
+        [profile.id]: {
+          ...currentState,
+          loading: true,
+          error: '',
+          options: ensureSelectedVersionOption(
+            canReuseCurrentOptions ? currentState.options : fallbackOptions,
+            selectedVersion,
+          ),
+          packageName: versionSource.packageName,
+          selectedVersion,
+          selectedPlatform:
+            currentState.selectedPlatform ||
+            selectedVersionByBaseId.get(profile.id)?.platform ||
+            AI_CODING_CLI_DEFAULT_PLATFORM,
+          source: canReuseCurrentOptions ? currentState.source : 'fallback',
+          refreshedAt: canReuseCurrentOptions
+            ? currentState.refreshedAt
+            : undefined,
+          latestVersion: canReuseCurrentOptions
+            ? currentState.latestVersion
+            : versionSource.fallbackVersion,
+        },
+      };
+    });
+    loadCliVersionOptions(versionSource.packageName, {
+      force: true,
+      refresh: true,
+    })
+      .then((result) => {
+        if (
+          !mountedRef.current ||
+          !isLatestVersionRequest(profile.id, requestSeq)
+        ) {
+          return;
+        }
+        setCliVersionState((current) => {
+          const currentState = current[profile.id] || {};
+          const options = result.options;
+          const selectedVersion =
+            currentState.selectedVersion ||
+            selectedVersionByBaseId.get(profile.id)?.version ||
+            options[0]?.value ||
+            NPM_VERSION_LATEST_ALIAS;
+          return {
+            ...current,
+            [profile.id]: {
+              ...currentState,
+              loading: false,
+              error: '',
+              options: ensureSelectedVersionOption(options, selectedVersion),
+              packageName: versionSource.packageName,
+              selectedVersion,
+              selectedPlatform:
+                currentState.selectedPlatform ||
+                selectedVersionByBaseId.get(profile.id)?.platform ||
+                AI_CODING_CLI_DEFAULT_PLATFORM,
+              source: result.source,
+              refreshedAt: result.refreshedAt,
+              latestVersion: result.latestVersion,
+            },
+          };
+        });
+      })
+      .catch((error) => {
+        if (
+          !mountedRef.current ||
+          !isLatestVersionRequest(profile.id, requestSeq)
+        ) {
+          return;
+        }
+        setCliVersionState((current) => {
+          const currentState = current[profile.id] || {};
+          const selectedVersion =
+            currentState.selectedVersion ||
+            selectedVersionByBaseId.get(profile.id)?.version ||
+            NPM_VERSION_LATEST_ALIAS;
+          const canReuseCurrentOptions =
+            currentState.packageName === versionSource.packageName &&
+            Array.isArray(currentState.options) &&
+            currentState.options.length > 1;
+          return {
+            ...current,
+            [profile.id]: {
+              ...currentState,
+              loading: false,
+              error: error?.code || NPM_VERSION_LOAD_ERROR_CODE,
+              options: ensureSelectedVersionOption(
+                canReuseCurrentOptions ? currentState.options : fallbackOptions,
+                selectedVersion,
+              ),
+              packageName: versionSource.packageName,
+              selectedVersion,
+              selectedPlatform:
+                currentState.selectedPlatform ||
+                selectedVersionByBaseId.get(profile.id)?.platform ||
+                AI_CODING_CLI_DEFAULT_PLATFORM,
+              source: canReuseCurrentOptions ? currentState.source : 'fallback',
+              refreshedAt: canReuseCurrentOptions
+                ? currentState.refreshedAt
+                : undefined,
+              latestVersion: canReuseCurrentOptions
+                ? currentState.latestVersion
+                : versionSource.fallbackVersion,
+            },
+          };
+        });
+      });
   };
 
   const buildProfileForSelection = (profile) => {
@@ -414,9 +900,9 @@ const HeaderProfileLibrary = ({
     return buildVersionedAiCodingCliProfile(
       profile,
       selectedVersion,
-      getVersionMetaSourceForProfile(profile, selectedVersion),
       getResolvedVersionForProfile(profile, selectedVersion),
       getSelectedPlatformForProfile(profile),
+      getVersionMetaSourceForProfile(profile, selectedVersion),
     );
   };
 
@@ -429,6 +915,14 @@ const HeaderProfileLibrary = ({
     const versionState = cliVersionState[profile.id] || {};
     const versionOptions = versionState.options || EMPTY_VERSION_OPTIONS;
     const selectedVersion = getSelectedVersionForProfile(profile);
+    const selectedOption = versionOptions.find(
+      (option) => option.value === selectedVersion,
+    );
+    const sourceForDisplay =
+      selectedOption?.source || versionState.source || 'fallback';
+    const refreshedAtText = formatNpmVersionRefreshedAt(
+      versionState.refreshedAt,
+    );
     const selectedPlatform = getSelectedPlatformForProfile(profile);
     const activateProfile = () => {
       setPreviewProfileId(profile.id);
@@ -450,9 +944,9 @@ const HeaderProfileLibrary = ({
       const nextProfile = buildVersionedAiCodingCliProfile(
         profile,
         version,
-        getVersionMetaSourceForProfile(profile, version),
         getResolvedVersionForProfile(profile, version, currentVersionOptions),
         getSelectedPlatformForProfile(profile),
+        getVersionMetaSourceForProfile(profile, version, currentVersionOptions),
       );
       onToggleSelect(nextProfile.id || profile.id, nextProfile, {
         replace: true,
@@ -473,9 +967,13 @@ const HeaderProfileLibrary = ({
       const nextProfile = buildVersionedAiCodingCliProfile(
         profile,
         selectedVersion,
-        getVersionMetaSourceForProfile(profile, selectedVersion),
         getResolvedVersionForProfile(profile, selectedVersion, versionOptions),
         nextPlatform,
+        getVersionMetaSourceForProfile(
+          profile,
+          selectedVersion,
+          versionOptions,
+        ),
       );
       onToggleSelect(nextProfile.id || profile.id, nextProfile, {
         replace: true,
@@ -566,17 +1064,32 @@ const HeaderProfileLibrary = ({
         <div className='flex items-start justify-between gap-2'>
           {versionSource && (
             <div className='w-40 py-1.5 pr-1.5'>
-              <Select
-                size='small'
-                value={selectedVersion}
-                loading={versionState.loading === true}
-                optionList={versionOptions}
-                placeholder={t('选择版本')}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => event.stopPropagation()}
-                onChange={updateProfileVersion}
-                style={{ width: '100%' }}
-              />
+              <div className='flex items-center gap-1.5'>
+                <Select
+                  size='small'
+                  value={selectedVersion}
+                  loading={versionState.loading === true}
+                  optionList={versionOptions}
+                  placeholder={t('选择版本')}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={updateProfileVersion}
+                  style={{ width: '100%' }}
+                />
+                <Button
+                  size='small'
+                  type='tertiary'
+                  theme='borderless'
+                  icon={<IconRefresh spin={versionState.loading === true} />}
+                  disabled={versionState.loading === true}
+                  aria-label={t('重新加载 npm 版本')}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    reloadProfileVersions(profile);
+                  }}
+                />
+              </div>
               <Select
                 size='small'
                 value={selectedPlatform}
@@ -592,9 +1105,17 @@ const HeaderProfileLibrary = ({
               />
               {versionState.error && (
                 <Text type='warning' size='small' className='block mt-1'>
-                  {t('npm 版本加载失败，已使用内置版本')}
+                  {getNpmVersionLoadErrorText(t, versionState.error)}
                 </Text>
               )}
+              <Text type='tertiary' size='small' className='block mt-1'>
+                {refreshedAtText
+                  ? t('{{source}}，刷新于 {{time}}', {
+                      source: getNpmVersionSourceText(t, sourceForDisplay),
+                      time: refreshedAtText,
+                    })
+                  : getNpmVersionSourceText(t, sourceForDisplay)}
+              </Text>
             </div>
           )}
           {!profile.readonly && (
@@ -730,6 +1251,92 @@ const HeaderProfileLibrary = ({
             '保持不选就是不修改请求。只有上游识别客户端身份时才需要选择模板。',
           )}
         </Text>
+      </div>
+
+      <div
+        className='rounded-lg px-3 py-2'
+        style={{
+          backgroundColor: 'var(--semi-color-fill-0)',
+          border: '1px solid var(--semi-color-fill-2)',
+        }}
+      >
+        <div className='flex items-center justify-between gap-2'>
+          <div className='min-w-0'>
+            <Text strong size='small'>
+              {t('npm 版本诊断')}
+            </Text>
+            <Text type='tertiary' size='small' className='block'>
+              {t('只读查看后台缓存状态，失败原因包含当前进程与持久化记录')}
+            </Text>
+          </div>
+          <Button
+            size='small'
+            type='tertiary'
+            loading={diagnosticsLoading}
+            onClick={loadNpmVersionDiagnostics}
+          >
+            {t('诊断')}
+          </Button>
+        </div>
+        {diagnosticsOpen && (
+          <div className='mt-2 max-h-32 overflow-auto'>
+            {diagnosticsError ? (
+              <Text type='warning' size='small'>
+                {getNpmVersionLoadErrorText(t, diagnosticsError)}
+              </Text>
+            ) : diagnostics.length === 0 ? (
+              <Text type='tertiary' size='small'>
+                {diagnosticsLoading ? t('加载中') : t('暂无诊断信息')}
+              </Text>
+            ) : (
+              <div className='flex flex-col gap-1'>
+                {diagnostics.map((item) => {
+                  const refreshedAt = formatNpmVersionRefreshedAt(
+                    item.refreshed_at,
+                  );
+                  const cacheAge = formatNpmVersionCacheAge(item.cache_age_ms);
+                  const lastErrorText = formatNpmVersionDiagnosticLastError(
+                    t,
+                    item,
+                  );
+                  return (
+                    <div
+                      key={item.package}
+                      className='grid gap-1'
+                      style={{
+                        gridTemplateColumns:
+                          'minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr)',
+                      }}
+                    >
+                      <Text size='small' ellipsis={{ showTooltip: true }}>
+                        {item.package}
+                      </Text>
+                      <Text
+                        type='tertiary'
+                        size='small'
+                        ellipsis={{ showTooltip: true }}
+                      >
+                        {getNpmVersionSourceText(t, item.source)} /{' '}
+                        {item.latest_version || '-'} / {item.option_count || 0}
+                        {cacheAge ? ` / ${cacheAge}` : ''}
+                      </Text>
+                      <Text
+                        type={item.last_error ? 'warning' : 'tertiary'}
+                        size='small'
+                        title={lastErrorText || refreshedAt || undefined}
+                        ellipsis={{ showTooltip: true }}
+                      >
+                        {item.last_error
+                          ? lastErrorText || '-'
+                          : refreshedAt || '-'}
+                      </Text>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className='flex flex-col gap-2.5 min-w-0'>

@@ -1,10 +1,7 @@
 export type HeaderProfileMode = 'fixed' | 'round_robin' | 'random'
 export type HeaderProfileScope = 'builtin' | 'user' | 'missing'
 export type HeaderProfileCategory =
-  | 'browser'
-  | 'ai_coding_cli'
-  | 'api_sdk'
-  | 'custom'
+  'browser' | 'ai_coding_cli' | 'api_sdk' | 'custom'
 
 export type HeaderProfileVersionMeta = {
   baseProfileId: string
@@ -39,16 +36,145 @@ export type HeaderProfileStrategy = {
   profiles: HeaderProfile[]
 }
 
+export type HeaderProfileVersionSelection = {
+  baseProfileId: string
+  packageName?: string
+  selectedVersion?: string
+  selectedPlatform?: string
+  options: NpmCliVersionOption[]
+}
+
 export type NpmCliVersionOption = {
   value: string
   label: string
   isLatest: boolean
   resolvedVersion: string
+  source?: string
+}
+
+export type NpmCliVersionOptionsResult = {
+  packageName?: string
+  source: string
+  refreshedAt?: string
+  latestVersion?: string
+  options: NpmCliVersionOption[]
 }
 
 const NPM_VERSION_OPTION_LIMIT = 5
+export const NPM_VERSION_LOAD_ERROR_CODE = 'npm_version_load_failed'
+export const NPM_VERSION_AUTH_ERROR_CODE = 'npm_version_auth_required'
+export const NPM_VERSION_FORBIDDEN_CODE = 'npm_version_forbidden'
+export const NPM_VERSION_RATE_LIMITED_CODE = 'npm_version_rate_limited'
+export const NPM_VERSION_EMPTY_ERROR_CODE = 'npm_version_empty'
+export const NPM_VERSION_NOT_RECORDED_CODE = 'npm_version_not_recorded'
 export const NPM_VERSION_LATEST_ALIAS = 'latest'
 export const AI_CODING_CLI_DEFAULT_PLATFORM = 'macos-x64'
+
+export class NpmVersionLoadError extends Error {
+  code: string
+
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = 'NpmVersionLoadError'
+    this.code = code
+  }
+}
+
+function statusFromNpmVersionError(error: unknown): number {
+  const record = error as {
+    response?: { status?: number | string }
+    status?: number | string
+  }
+  return Number(record?.response?.status ?? record?.status)
+}
+
+function isForbiddenNpmVersionMessage(message: unknown): boolean {
+  const normalized = String(message || '')
+    .trim()
+    .toLowerCase()
+  return (
+    normalized.includes('insufficient privilege') ||
+    normalized.includes('insufficient privileges') ||
+    normalized.includes('权限不足') ||
+    normalized.includes('權限不足')
+  )
+}
+
+export function normalizeNpmVersionPayloadErrorCode(
+  payload: { code?: string; message?: string } = {},
+  status?: number
+): string {
+  if (status === 401) return NPM_VERSION_AUTH_ERROR_CODE
+  if (status === 403) return NPM_VERSION_FORBIDDEN_CODE
+  if (status === 429) return NPM_VERSION_RATE_LIMITED_CODE
+  const code = String(payload.code || '').trim()
+  if (code) return code
+  if (isForbiddenNpmVersionMessage(payload.message)) {
+    return NPM_VERSION_FORBIDDEN_CODE
+  }
+  return NPM_VERSION_LOAD_ERROR_CODE
+}
+
+export function normalizeNpmVersionLoadError(error: unknown) {
+  if (error instanceof NpmVersionLoadError) return error
+  const record = error as {
+    message?: string
+    response?: { data?: { message?: string } }
+  }
+  const status = statusFromNpmVersionError(error)
+  return new NpmVersionLoadError(
+    normalizeNpmVersionPayloadErrorCode(
+      { message: record?.response?.data?.message || record?.message },
+      status
+    ),
+    record?.response?.data?.message ||
+      record?.message ||
+      'failed to load npm versions'
+  )
+}
+
+export function getNpmVersionLoadErrorCode(error: unknown) {
+  return error instanceof NpmVersionLoadError
+    ? error.code
+    : normalizeNpmVersionLoadError(error).code
+}
+
+export function getNpmVersionLoadErrorText(
+  t: (key: string) => string,
+  code?: string
+) {
+  if (code === NPM_VERSION_AUTH_ERROR_CODE) {
+    return t('Session expired, sign in again to load npm versions')
+  }
+  if (code === NPM_VERSION_FORBIDDEN_CODE) {
+    return t('Admin access required to load npm versions')
+  }
+  if (code === NPM_VERSION_RATE_LIMITED_CODE) {
+    return t('Too many npm version requests, try again later')
+  }
+  if (code === NPM_VERSION_EMPTY_ERROR_CODE) {
+    return t('No npm versions recorded yet, using built-in versions')
+  }
+  if (code === NPM_VERSION_NOT_RECORDED_CODE) {
+    return t('No npm versions recorded yet, using built-in versions')
+  }
+  return t('npm version load failed, using built-in versions')
+}
+
+export function buildNpmVersionRequestConfig(
+  packageName: string,
+  options: { timeout?: number } = {}
+) {
+  return {
+    params: { package: packageName.trim() },
+    skipBusinessError: true,
+    skipErrorHandler: true,
+    disableDuplicate: true,
+    ...(typeof options.timeout === 'number'
+      ? { timeout: options.timeout }
+      : {}),
+  } as Record<string, unknown>
+}
 
 export const AI_CODING_CLI_PLATFORM_OPTIONS = [
   {
@@ -114,20 +240,20 @@ export const AI_CODING_CLI_PLATFORM_OPTIONS = [
 ] as const
 
 const AI_CODING_CLI_VERSION_SOURCES = {
-  'codex-cli': { packageName: '@openai/codex', fallbackVersion: '0.134.0' },
+  'codex-cli': { packageName: '@openai/codex', fallbackVersion: '0.142.4' },
   'claude-code': {
     packageName: '@anthropic-ai/claude-code',
-    fallbackVersion: '2.1.153',
+    fallbackVersion: '2.1.197',
   },
   'gemini-cli': {
     packageName: '@google/gemini-cli',
-    fallbackVersion: '0.44.0',
+    fallbackVersion: '0.49.0',
   },
   'qwen-code': {
     packageName: '@qwen-code/qwen-code',
-    fallbackVersion: '0.16.2',
+    fallbackVersion: '0.19.3',
   },
-  droid: { packageName: 'droid', fallbackVersion: '0.135.0' },
+  droid: { packageName: 'droid', fallbackVersion: '0.161.0' },
 } as const
 
 const BASE_HEADER_PROFILES: HeaderProfile[] = [
@@ -141,11 +267,11 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
       'Sec-CH-UA':
-        '"Google Chrome";v="148", "Chromium";v="148", "Not.A/Brand";v="24"',
+        '"Google Chrome";v="150", "Chromium";v="150", "Not.A/Brand";v="24"',
       'Sec-CH-UA-Mobile': '?0',
       'Sec-CH-UA-Platform': '"macOS"',
       'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.47 Safari/537.36',
     },
     previewText: '',
   },
@@ -156,7 +282,7 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     scope: 'builtin',
     readonly: true,
     versionSource: AI_CODING_CLI_VERSION_SOURCES['codex-cli'],
-    headers: buildAiCodingCliHeaders('codex-cli', '0.134.0', 'macos-x64'),
+    headers: buildAiCodingCliHeaders('codex-cli', '0.142.4', 'macos-x64'),
     previewText: '',
   },
   {
@@ -167,7 +293,7 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     readonly: true,
     headers: {
       'User-Agent':
-        'Codex Desktop/0.133.0-alpha.1 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.519.41501)',
+        'Codex Desktop/0.142.4 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.623.70822)',
       Originator: 'Codex Desktop',
     },
     previewText: '',
@@ -179,7 +305,7 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     scope: 'builtin',
     readonly: true,
     versionSource: AI_CODING_CLI_VERSION_SOURCES['claude-code'],
-    headers: buildAiCodingCliHeaders('claude-code', '2.1.153', 'macos-x64'),
+    headers: buildAiCodingCliHeaders('claude-code', '2.1.197', 'macos-x64'),
     previewText: '',
   },
   {
@@ -189,7 +315,7 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     scope: 'builtin',
     readonly: true,
     versionSource: AI_CODING_CLI_VERSION_SOURCES['gemini-cli'],
-    headers: buildAiCodingCliHeaders('gemini-cli', '0.44.0', 'macos-x64'),
+    headers: buildAiCodingCliHeaders('gemini-cli', '0.49.0', 'macos-x64'),
     previewText: '',
   },
   {
@@ -199,7 +325,7 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     scope: 'builtin',
     readonly: true,
     versionSource: AI_CODING_CLI_VERSION_SOURCES['qwen-code'],
-    headers: buildAiCodingCliHeaders('qwen-code', '0.16.2', 'macos-x64'),
+    headers: buildAiCodingCliHeaders('qwen-code', '0.19.3', 'macos-x64'),
     previewText: '',
   },
   {
@@ -209,7 +335,21 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     scope: 'builtin',
     readonly: true,
     versionSource: AI_CODING_CLI_VERSION_SOURCES.droid,
-    headers: buildAiCodingCliHeaders('droid', '0.135.0', 'macos-x64'),
+    headers: buildAiCodingCliHeaders('droid', '0.161.0', 'macos-x64'),
+    previewText: '',
+  },
+  {
+    id: 'agy',
+    name: 'Antigravity CLI',
+    category: 'ai_coding_cli',
+    scope: 'builtin',
+    readonly: true,
+    description:
+      '固定请求头静态快照来自 Antigravity CLI 原始请求身份；此模板仅固定客户端身份。若后续确认需要动态头，应基于真实客户端抓包在高级参数覆盖中手动配置 pass_headers。',
+    headers: {
+      'User-Agent':
+        'antigravity/cli/1.0.14 (aidev_client; os_type=darwin; arch=amd64)',
+    },
     previewText: '',
   },
   {
@@ -416,36 +556,60 @@ export function clearParamOverridePreservingUserAgentPassHeaders(
 export function normalizeNpmCliVersionOptions(
   options: unknown
 ): NpmCliVersionOption[] {
-  if (!Array.isArray(options)) return []
-  const normalized = options
-    .map((option) => {
-      if (!isRecord(option)) return null
-      const value = String(option.value || '').trim()
-      const rawResolved = option.resolvedVersion || option.resolved_version
-      if (value === NPM_VERSION_LATEST_ALIAS) {
-        const resolvedVersion = normalizeVersionValue(rawResolved)
-        if (!resolvedVersion) return null
-        return {
-          value,
-          label:
-            String(option.label || '').trim() ||
-            `${NPM_VERSION_LATEST_ALIAS} (${resolvedVersion})`,
-          isLatest: true,
-          resolvedVersion,
-        }
-      }
-      const pinnedVersion = normalizeVersionValue(value)
-      if (!pinnedVersion) return null
-      return {
-        value: pinnedVersion,
-        label: String(option.label || pinnedVersion).trim(),
-        isLatest: false,
-        resolvedVersion: normalizeVersionValue(rawResolved) || pinnedVersion,
-      }
+  const responseSource =
+    Array.isArray(options) || !isRecord(options)
+      ? 'npm'
+      : normalizeNpmCliVersionOptionSource(options.source, 'npm')
+  const rawOptions =
+    Array.isArray(options) || !isRecord(options) ? options : options.options
+  if (!Array.isArray(rawOptions)) return []
+  const normalized: NpmCliVersionOption[] = []
+  for (const option of rawOptions) {
+    if (!isRecord(option)) continue
+    const value = String(option.value || '').trim()
+    const rawResolved = option.resolvedVersion || option.resolved_version
+    const source = normalizeNpmCliVersionOptionSource(
+      option.source,
+      responseSource
+    )
+    if (value === NPM_VERSION_LATEST_ALIAS) {
+      const resolvedVersion = normalizeVersionValue(rawResolved)
+      if (!resolvedVersion) continue
+      normalized.push({
+        value,
+        label:
+          String(option.label || '').trim() ||
+          `${NPM_VERSION_LATEST_ALIAS} (${resolvedVersion})`,
+        isLatest: true,
+        resolvedVersion,
+        source,
+      })
+      continue
+    }
+    const pinnedVersion = normalizeVersionValue(value)
+    if (!pinnedVersion) continue
+    if (option.isLatest === true || option.is_latest === true) {
+      normalized.push({
+        value: NPM_VERSION_LATEST_ALIAS,
+        label:
+          String(option.label || '').trim() ||
+          `${NPM_VERSION_LATEST_ALIAS} (${pinnedVersion})`,
+        isLatest: true,
+        resolvedVersion: pinnedVersion,
+        source,
+      })
+      continue
+    }
+    normalized.push({
+      value: pinnedVersion,
+      label: String(option.label || pinnedVersion).trim(),
+      isLatest: false,
+      resolvedVersion: normalizeVersionValue(rawResolved) || pinnedVersion,
+      source,
     })
-    .filter((option): option is NpmCliVersionOption => option !== null)
+  }
   const seen = new Set<string>()
-  return normalized
+  const deduped = normalized
     .filter((option) => {
       if (seen.has(option.value)) return false
       seen.add(option.value)
@@ -456,7 +620,36 @@ export function normalizeNpmCliVersionOptions(
       if (right.value === NPM_VERSION_LATEST_ALIAS) return 1
       return 0
     })
-    .slice(0, NPM_VERSION_OPTION_LIMIT)
+  const hasLatest = deduped.some(
+    (option) => option.value === NPM_VERSION_LATEST_ALIAS
+  )
+  return deduped.slice(
+    0,
+    hasLatest ? NPM_VERSION_OPTION_LIMIT + 1 : NPM_VERSION_OPTION_LIMIT
+  )
+}
+
+export function normalizeNpmCliVersionOptionsResult(
+  payload: unknown
+): NpmCliVersionOptionsResult {
+  const record = isRecord(payload) ? payload : null
+  const source = record
+    ? normalizeNpmCliVersionOptionSource(record.source, 'npm')
+    : 'npm'
+  return {
+    packageName: record
+      ? String(record.package || record.packageName || '').trim() || undefined
+      : undefined,
+    source,
+    refreshedAt: record
+      ? String(record.refreshed_at || record.refreshedAt || '').trim() ||
+        undefined
+      : undefined,
+    latestVersion: record
+      ? normalizeVersionValue(record.latest_version || record.latestVersion)
+      : undefined,
+    options: normalizeNpmCliVersionOptions(payload),
+  }
 }
 
 export function latestFallbackOption(
@@ -469,7 +662,48 @@ export function latestFallbackOption(
       : NPM_VERSION_LATEST_ALIAS,
     isLatest: true,
     resolvedVersion: fallbackVersion,
+    source: 'fallback',
   }
+}
+
+export function buildNpmCliFallbackVersionOptions(
+  fallbackVersion: string
+): NpmCliVersionOption[] {
+  const normalizedVersion = normalizeVersionValue(fallbackVersion)
+  if (!normalizedVersion) return [latestFallbackOption('')]
+  return [
+    latestFallbackOption(normalizedVersion),
+    {
+      value: normalizedVersion,
+      label: normalizedVersion,
+      isLatest: false,
+      resolvedVersion: normalizedVersion,
+      source: 'fallback',
+    },
+  ]
+}
+
+export function normalizeNpmCliVersionOptionSource(
+  source: unknown,
+  fallbackSource = 'fallback'
+): string {
+  const normalized = String(source || '').trim()
+  if (
+    normalized === 'npm' ||
+    normalized === 'recorded' ||
+    normalized === 'retained' ||
+    normalized === 'fallback'
+  ) {
+    return normalized
+  }
+  return fallbackSource
+}
+
+export function getNpmCliVersionOptionSource(
+  option: NpmCliVersionOption | undefined,
+  fallbackSource = 'fallback'
+): string {
+  return normalizeNpmCliVersionOptionSource(option?.source, fallbackSource)
 }
 
 export function normalizeProfile(profile: unknown): HeaderProfile {
@@ -692,6 +926,93 @@ function serializeProfile(profile: HeaderProfile): Record<string, unknown> {
     }
   }
   return snapshot
+}
+
+function profileSnapshotsEqual(
+  left: HeaderProfile | undefined,
+  right: HeaderProfile
+) {
+  return left
+    ? JSON.stringify(serializeProfile(left)) ===
+        JSON.stringify(serializeProfile(right))
+    : false
+}
+
+function findVersionedSnapshot(
+  strategy: HeaderProfileStrategy,
+  selectedId: string,
+  baseId: string
+) {
+  return (
+    strategy.profiles.find((profile) => profile.id === selectedId) ||
+    strategy.profiles.find(
+      (profile) => profile.versionMeta?.baseProfileId === baseId
+    )
+  )
+}
+
+export function refreshSelectedVersionedProfileSnapshots(
+  strategy: HeaderProfileStrategy,
+  profiles: HeaderProfile[],
+  selections: HeaderProfileVersionSelection[]
+): HeaderProfileStrategy {
+  if (strategy.selectedProfileIds.length === 0 || selections.length === 0) {
+    return strategy
+  }
+  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]))
+  const selectionMap = new Map(
+    selections.map((selection) => [selection.baseProfileId, selection])
+  )
+  const refreshedProfiles: HeaderProfile[] = []
+  let changed = false
+  const selectedProfileIds = strategy.selectedProfileIds.map((selectedId) => {
+    const baseId = getProfileBaseId(selectedId)
+    const profile = profileMap.get(baseId)
+    const selection = selectionMap.get(baseId)
+    if (!profile?.versionSource || !selection?.options.length) return selectedId
+    if (
+      selection.packageName &&
+      selection.packageName !== profile.versionSource.packageName
+    ) {
+      return selectedId
+    }
+    const currentSnapshot = findVersionedSnapshot(strategy, selectedId, baseId)
+    const selectedVersion =
+      currentSnapshot?.versionMeta?.version ||
+      selection.selectedVersion ||
+      NPM_VERSION_LATEST_ALIAS
+    const selectedOption = selection.options.find(
+      (option) => option.value === selectedVersion
+    )
+    if (!selectedOption) return selectedId
+    const refreshedProfile = buildVersionedAiCodingCliProfile(
+      profile,
+      selectedVersion,
+      selectedOption.resolvedVersion || profile.versionSource.fallbackVersion,
+      currentSnapshot?.versionMeta?.platform ||
+        selection.selectedPlatform ||
+        AI_CODING_CLI_DEFAULT_PLATFORM,
+      getNpmCliVersionOptionSource(selectedOption, 'npm')
+    )
+    if (!refreshedProfile.versionMeta) return selectedId
+    refreshedProfiles.push(refreshedProfile)
+    if (
+      refreshedProfile.id !== selectedId ||
+      !profileSnapshotsEqual(currentSnapshot, refreshedProfile)
+    ) {
+      changed = true
+    }
+    return refreshedProfile.id
+  })
+  if (!changed) return strategy
+  return {
+    ...strategy,
+    selectedProfileIds,
+    profiles: buildSelectedProfileItems(selectedProfileIds, profiles, [
+      ...strategy.profiles,
+      ...refreshedProfiles,
+    ]).filter((profile) => !profile.missing),
+  }
 }
 
 export function buildHeaderProfileStrategySettings(

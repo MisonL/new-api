@@ -19,6 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   applyHeaderProfileStrategyToChannelInputs,
@@ -40,19 +43,29 @@ import {
 } from './headerProfile.helpers.js';
 import {
   AI_CODING_CLI_DEFAULT_PLATFORM,
+  areAiCodingCliProfileSnapshotsEqual,
   buildAiCodingCliVersionMeta,
   buildAiCodingCliUserAgent,
+  buildNpmCliFallbackVersionOptions,
+  buildRefreshedAiCodingCliProfileSnapshot,
   buildNpmCliVersionOptions,
   buildVersionedAiCodingCliProfile,
   fetchNpmCliVersionOptions,
   HEADER_PROFILE_PRESETS,
+  NPM_VERSION_AUTH_ERROR_CODE,
+  NPM_VERSION_EMPTY_ERROR_CODE,
+  NPM_VERSION_FORBIDDEN_CODE,
+  NPM_VERSION_RATE_LIMITED_CODE,
   normalizeNpmCliVersionOptions,
+  normalizeNpmCliVersionOptionsResult,
 } from './headerProfile.constants.js';
 import {
   appendParamOverrideTemplatePayload,
   PARAM_OVERRIDE_TEMPLATES,
   stringifyParamOverrideTemplatePayload,
 } from '../../../../constants/channel-affinity-template.constants.js';
+
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
 test('builtin AI CLI profiles distinguish fixed headers from required passthrough', () => {
   assert.equal(HEADER_PROFILE_PRESETS['codex-cli'].passthroughRequired, false);
@@ -72,7 +85,7 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   );
   assert.equal(
     HEADER_PROFILE_PRESETS['codex-desktop'].headers['User-Agent'],
-    'Codex Desktop/0.133.0-alpha.1 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.519.41501)',
+    'Codex Desktop/0.142.4 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.623.70822)',
   );
   assert.equal(
     HEADER_PROFILE_PRESETS['codex-desktop'].headers.Originator,
@@ -88,7 +101,7 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   );
   assert.equal(
     HEADER_PROFILE_PRESETS['gemini-cli'].headers['User-Agent'],
-    'GeminiCLI/0.44.0/gemini-3.1-pro-preview (darwin; x64; terminal)',
+    'GeminiCLI/0.49.0/gemini-3.1-pro-preview (darwin; x64; terminal)',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['gemini-cli'].description,
@@ -97,7 +110,7 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   assert.equal(HEADER_PROFILE_PRESETS['qwen-code'].passthroughRequired, false);
   assert.equal(
     HEADER_PROFILE_PRESETS['qwen-code'].headers['User-Agent'],
-    'QwenCode/0.16.2 (darwin; x64)',
+    'QwenCode/0.19.3 (darwin; x64)',
   );
   assert.match(
     HEADER_PROFILE_PRESETS['qwen-code'].description,
@@ -106,7 +119,20 @@ test('builtin AI CLI profiles distinguish fixed headers from required passthroug
   assert.equal(HEADER_PROFILE_PRESETS['droid'].passthroughRequired, false);
   assert.equal(
     HEADER_PROFILE_PRESETS['droid'].headers['User-Agent'],
-    'factory-cli/0.135.0',
+    'factory-cli/0.161.0',
+  );
+  assert.equal(HEADER_PROFILE_PRESETS['agy'].passthroughRequired, false);
+  assert.equal(
+    HEADER_PROFILE_PRESETS['agy'].headers['User-Agent'],
+    'antigravity/cli/1.0.14 (aidev_client; os_type=darwin; arch=amd64)',
+  );
+  assert.match(
+    HEADER_PROFILE_PRESETS['agy'].description,
+    /手动配置 pass_headers/,
+  );
+  assert.doesNotMatch(
+    HEADER_PROFILE_PRESETS['agy'].description,
+    /Antigravity CLI 请求头透传模板/,
   );
   assert.match(
     HEADER_PROFILE_PRESETS['droid'].description,
@@ -200,6 +226,10 @@ test('builtin AI CLI profiles expose default latest version metadata', () => {
     ),
     null,
   );
+  assert.equal(
+    buildAiCodingCliVersionMeta(HEADER_PROFILE_PRESETS['agy'], 'latest'),
+    null,
+  );
 });
 
 test('Codex CLI builtin profile does not reuse codex exec request identity', () => {
@@ -223,7 +253,7 @@ test('Codex Desktop builtin profile uses desktop app identity', () => {
 
 test('npm cli version options use latest first and keep five stable choices', () => {
   const options = buildNpmCliVersionOptions({
-    'dist-tags': { latest: '0.134.0' },
+    'dist-tags': { latest: '0.142.4' },
     versions: {
       '1.0.0': {},
       '1.1.0': {},
@@ -237,10 +267,10 @@ test('npm cli version options use latest first and keep five stable choices', ()
 
   assert.deepEqual(
     options.map((option) => option.value),
-    ['latest', '0.134.0', '1.4.0', '1.3.0', '1.2.0', '1.1.0'],
+    ['latest', '0.142.4', '1.4.0', '1.3.0', '1.2.0', '1.1.0'],
   );
   assert.equal(options[0].isLatest, true);
-  assert.equal(options[0].resolvedVersion, '0.134.0');
+  assert.equal(options[0].resolvedVersion, '0.142.4');
 });
 
 test('npm cli version options use highest stable when latest tag is missing', () => {
@@ -298,12 +328,14 @@ test('normalizeNpmCliVersionOptions keeps backend option contract strict', () =>
         label: 'latest (1.0.0)',
         isLatest: true,
         resolvedVersion: '1.0.0',
+        source: 'npm',
       },
       {
         value: '0.9.0',
         label: '0.9.0',
         isLatest: false,
         resolvedVersion: '0.9.0',
+        source: 'npm',
       },
     ],
   );
@@ -322,18 +354,21 @@ test('normalizeNpmCliVersionOptions upgrades legacy latest options', () => {
         label: '1.0.0 (latest)',
         isLatest: true,
         resolvedVersion: '1.0.0',
+        source: 'npm',
       },
       {
         value: '1.0.0',
         label: '1.0.0',
         isLatest: false,
         resolvedVersion: '1.0.0',
+        source: 'npm',
       },
       {
         value: '0.9.0',
         label: '0.9.0',
         isLatest: false,
         resolvedVersion: '0.9.0',
+        source: 'npm',
       },
     ],
   );
@@ -357,21 +392,134 @@ test('normalizeNpmCliVersionOptions keeps latest alias first even if backend ord
         label: 'latest (1.0.0)',
         isLatest: true,
         resolvedVersion: '1.0.0',
+        source: 'npm',
       },
       {
         value: '0.9.0',
         label: '0.9.0',
         isLatest: false,
         resolvedVersion: '0.9.0',
+        source: 'npm',
       },
       {
         value: '1.0.0',
         label: '1.0.0',
         isLatest: false,
         resolvedVersion: '1.0.0',
+        source: 'npm',
       },
     ],
   );
+});
+
+test('normalizeNpmCliVersionOptions limits legacy arrays without latest to five pinned versions', () => {
+  const options = normalizeNpmCliVersionOptions([
+    { value: '1.5.0' },
+    { value: '1.4.0' },
+    { value: '1.3.0' },
+    { value: '1.2.0' },
+    { value: '1.1.0' },
+    { value: '1.0.0' },
+  ]);
+
+  assert.deepEqual(
+    options.map((option) => option.value),
+    ['1.5.0', '1.4.0', '1.3.0', '1.2.0', '1.1.0'],
+  );
+});
+
+test('fallback npm cli version options keep latest and pinned builtin version selectable', () => {
+  assert.deepEqual(buildNpmCliFallbackVersionOptions('0.142.4'), [
+    {
+      value: 'latest',
+      label: 'latest (0.142.4)',
+      isLatest: true,
+      resolvedVersion: '0.142.4',
+      source: 'fallback',
+    },
+    {
+      value: '0.142.4',
+      label: '0.142.4',
+      isLatest: false,
+      resolvedVersion: '0.142.4',
+      source: 'fallback',
+    },
+  ]);
+});
+
+test('normalizeNpmCliVersionOptions accepts structured backend response', () => {
+  const payload = {
+    package: '@openai/codex',
+    source: 'recorded',
+    refreshed_at: '2026-07-06T10:00:00Z',
+    latest_version: '1.0.0',
+    options: [
+      {
+        value: 'latest',
+        label: 'latest (1.0.0)',
+        is_latest: true,
+        resolved_version: '1.0.0',
+      },
+      {
+        value: '0.9.0',
+        label: '0.9.0',
+        is_latest: false,
+        resolved_version: '0.9.0',
+        source: 'npm',
+      },
+    ],
+  };
+  const options = normalizeNpmCliVersionOptions(payload);
+
+  assert.deepEqual(options, [
+    {
+      value: 'latest',
+      label: 'latest (1.0.0)',
+      isLatest: true,
+      resolvedVersion: '1.0.0',
+      source: 'recorded',
+    },
+    {
+      value: '0.9.0',
+      label: '0.9.0',
+      isLatest: false,
+      resolvedVersion: '0.9.0',
+      source: 'npm',
+    },
+  ]);
+  assert.deepEqual(normalizeNpmCliVersionOptionsResult(payload), {
+    packageName: '@openai/codex',
+    source: 'recorded',
+    refreshedAt: '2026-07-06T10:00:00Z',
+    latestVersion: '1.0.0',
+    options,
+  });
+});
+
+test('refreshed AI CLI snapshots preserve retained source', () => {
+  const refreshed = buildRefreshedAiCodingCliProfileSnapshot({
+    profile: HEADER_PROFILE_PRESETS['codex-cli'],
+    selectedProfile: buildVersionedAiCodingCliProfile(
+      HEADER_PROFILE_PRESETS['codex-cli'],
+      '0.120.0',
+      'retained',
+      '0.120.0',
+    ),
+    selectedVersion: '0.120.0',
+    selectedPlatform: AI_CODING_CLI_DEFAULT_PLATFORM,
+    options: [
+      {
+        value: '0.120.0',
+        label: '0.120.0',
+        isLatest: false,
+        resolvedVersion: '0.120.0',
+        source: 'retained',
+      },
+    ],
+  });
+
+  assert.equal(refreshed.versionMeta.source, 'retained');
+  assert.match(refreshed.headers['User-Agent'], /0\.120\.0/);
 });
 
 test('fetchNpmCliVersionOptions requests new-api backend instead of npm registry', async () => {
@@ -402,15 +550,106 @@ test('fetchNpmCliVersionOptions requests new-api backend instead of npm registry
   assert.deepEqual(requestedOptions.params, { package: '@openai/codex' });
   assert.equal(requestedOptions.skipErrorHandler, true);
   assert.equal(requestedOptions.disableDuplicate, true);
-  assert.equal(requestedOptions.timeout, 5000);
+  assert.equal(requestedOptions.timeout, 10000);
   assert.deepEqual(options, [
     {
       value: 'latest',
       label: 'latest (1.0.0)',
       isLatest: true,
       resolvedVersion: '1.0.0',
+      source: 'npm',
     },
   ]);
+});
+
+test('fetchNpmCliVersionOptions can request backend refresh endpoint', async () => {
+  let requestedUrl = '';
+  const options = await fetchNpmCliVersionOptions(
+    '@openai/codex',
+    async (url) => {
+      requestedUrl = url;
+      return {
+        data: {
+          success: true,
+          data: {
+            package: '@openai/codex',
+            source: 'npm',
+            options: [
+              {
+                value: 'latest',
+                label: 'latest (1.1.0)',
+                resolvedVersion: '1.1.0',
+              },
+            ],
+          },
+        },
+      };
+    },
+    { refresh: true },
+  );
+
+  assert.equal(requestedUrl, '/api/channel/npm_version_options/refresh');
+  assert.equal(options[0].resolvedVersion, '1.1.0');
+});
+
+test('header profile library uses POST for npm version refresh requests', () => {
+  const source = fs.readFileSync(
+    path.join(currentDir, 'HeaderProfileLibrary.jsx'),
+    'utf8',
+  );
+
+  assert.match(
+    source,
+    /options\.refresh\s*\?\s*\(url,\s*requestOptions\)\s*=>\s*API\.post\(url,\s*null,\s*requestOptions\)/,
+  );
+});
+
+test('header profile library shows diagnostic details and normalizes diagnostics http errors', () => {
+  const source = fs.readFileSync(
+    path.join(currentDir, 'HeaderProfileLibrary.jsx'),
+    'utf8',
+  );
+
+  assert.match(source, /formatNpmVersionDiagnosticLastError\(t,\s*item\)/);
+  assert.match(source, /formatNpmVersionCacheAge\(item\.cache_age_ms\)/);
+  assert.match(source, /lastError\.message/);
+  assert.match(source, /lastError\.updated_at/);
+  assert.match(
+    source,
+    /API\.get\('\/api\/channel\/npm_version_options\/diagnostics',\s*\{\s*timeout: CLI_VERSION_REFRESH_TIMEOUT_MS,\s*skipErrorHandler: true,\s*disableDuplicate: true,/s,
+  );
+  assert.match(
+    source,
+    /const responseErrorCode = normalizeNpmCliVersionPayloadErrorCode\(\s*error\?\.response\?\.data \|\| \{\},\s*Number\(error\?\.response\?\.status \?\? error\?\.status\),\s*\)/,
+  );
+  assert.match(
+    source,
+    /responseErrorCode === NPM_VERSION_LOAD_ERROR_CODE && error\?\.code\s*\?\s*normalizeKnownNpmVersionErrorCode\(error\.code\)\s*:\s*responseErrorCode/,
+  );
+  assert.match(
+    source,
+    /const reloadProfileVersions = \(profile\) => \{[\s\S]*?if \(!mountedRef\.current\) \{[\s\S]*?return;[\s\S]*?\}[\s\S]*?setCliVersionState\(/,
+  );
+});
+
+test('performance settings expose read-only npm version diagnostics', () => {
+  const source = fs.readFileSync(
+    path.join(
+      currentDir,
+      '../../../../pages/Setting/Performance/SettingsPerformance.jsx',
+    ),
+    'utf8',
+  );
+
+  assert.match(source, /function fetchNpmDiagnostics\(\)/);
+  assert.match(
+    source,
+    /API\.get\(\s*'\/api\/channel\/npm_version_options\/diagnostics',\s*\{\s*timeout: 10000,\s*skipErrorHandler: true,\s*disableDuplicate: true,/s,
+  );
+  assert.match(source, /npmDiagnostics\?\.metrics\?\.scheduled_runs/);
+  assert.match(source, /npmDiagnostics\?\.metrics\?\.last_manual_code/);
+  assert.match(source, /npmDiagnostics\?\.summary\?\.last_error_count/);
+  assert.doesNotMatch(source, /npm_version_options\/refresh/);
 });
 
 test('fetchNpmCliVersionOptions rejects failed backend responses', async () => {
@@ -425,33 +664,79 @@ test('fetchNpmCliVersionOptions rejects failed backend responses', async () => {
   );
 });
 
+test('fetchNpmCliVersionOptions rejects auth failures with a stable code', async () => {
+  await assert.rejects(
+    fetchNpmCliVersionOptions('@openai/codex', async () => {
+      const error = new Error('Unauthorized');
+      error.response = { status: 401 };
+      throw error;
+    }),
+    (error) => error.code === NPM_VERSION_AUTH_ERROR_CODE,
+  );
+});
+
+test('fetchNpmCliVersionOptions rejects rate limit failures with a stable code', async () => {
+  await assert.rejects(
+    fetchNpmCliVersionOptions('@openai/codex', async () => {
+      const error = new Error('Too many requests');
+      error.response = { status: 429 };
+      throw error;
+    }),
+    (error) => error.code === NPM_VERSION_RATE_LIMITED_CODE,
+  );
+});
+
+test('fetchNpmCliVersionOptions rejects insufficient privilege with a stable code', async () => {
+  await assert.rejects(
+    fetchNpmCliVersionOptions('@openai/codex', async () => ({
+      data: {
+        success: false,
+        message: '无权进行此操作，权限不足',
+      },
+    })),
+    (error) => error.code === NPM_VERSION_FORBIDDEN_CODE,
+  );
+});
+
+test('fetchNpmCliVersionOptions rejects empty backend options with a stable code', async () => {
+  await assert.rejects(
+    fetchNpmCliVersionOptions('@openai/codex', async () => ({
+      data: {
+        success: true,
+        data: [],
+      },
+    })),
+    (error) => error.code === NPM_VERSION_EMPTY_ERROR_CODE,
+  );
+});
+
 test('versioned AI CLI profiles generate pinned User-Agent snapshots', () => {
   const codexProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-cli'],
-    '0.134.0',
+    '0.142.4',
   );
   const claudeProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['claude-code'],
-    '2.1.153',
+    '2.1.197',
   );
 
-  assert.equal(codexProfile.id, 'codex-cli@0.134.0');
+  assert.equal(codexProfile.id, 'codex-cli@0.142.4');
   assert.equal(codexProfile.versionMeta.packageName, '@openai/codex');
   assert.equal(
     codexProfile.headers['User-Agent'],
-    buildAiCodingCliUserAgent('codex-cli', '0.134.0'),
+    buildAiCodingCliUserAgent('codex-cli', '0.142.4'),
   );
   assert.equal(codexProfile.headers.Originator, 'codex-tui');
   assert.equal(
     claudeProfile.headers['User-Agent'],
-    'claude-cli/2.1.153 (external, sdk-cli)',
+    'claude-cli/2.1.197 (external, sdk-cli)',
   );
 });
 
 test('Codex Desktop profile is not converted to codex-cli version ids', () => {
   const codexDesktopProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-desktop'],
-    '0.133.0-alpha.1',
+    '26.623.70822',
   );
 
   assert.equal(codexDesktopProfile.id, undefined);
@@ -459,6 +744,17 @@ test('Codex Desktop profile is not converted to codex-cli version ids', () => {
   assert.equal(codexDesktopProfile.versionMeta, undefined);
   assert.match(codexDesktopProfile.headers['User-Agent'], /^Codex Desktop\//);
   assert.equal(codexDesktopProfile.headers.Originator, 'Codex Desktop');
+});
+
+test('agy profile stays a fixed unversioned preset', () => {
+  const agyProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['agy'],
+    'latest',
+  );
+
+  assert.equal(agyProfile.id, undefined);
+  assert.equal(agyProfile.key, 'agy');
+  assert.equal(agyProfile.versionMeta, undefined);
 });
 
 test('param override template payloads can replace rule template JSON', () => {
@@ -604,8 +900,8 @@ test('toggleSelectedProfile replaces selection in fixed mode', () => {
 test('toggleSelectedProfile deselects current profile in fixed mode', () => {
   const result = toggleSelectedProfile({
     strategy: 'fixed',
-    selectedProfileIds: ['codex-cli@0.134.0'],
-    profileId: 'codex-cli@0.134.0',
+    selectedProfileIds: ['codex-cli@0.142.4'],
+    profileId: 'codex-cli@0.142.4',
   });
 
   assert.deepEqual(result, []);
@@ -632,13 +928,13 @@ test('round robin versioned profile selection appends different base templates',
     HEADER_PROFILE_PRESETS['codex-cli'],
     'latest',
     'npm',
-    '0.134.0',
+    '0.142.4',
   );
   const claudeProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['claude-code'],
     'latest',
     'npm',
-    '2.1.153',
+    '2.1.197',
   );
   const currentSelectedProfileIds = removeEquivalentVersionedProfileIds(
     [codexProfile.id],
@@ -663,13 +959,13 @@ test('fixed versioned profile selection replaces existing base templates', () =>
     HEADER_PROFILE_PRESETS['codex-cli'],
     'latest',
     'npm',
-    '0.134.0',
+    '0.142.4',
   );
   const claudeProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['claude-code'],
     'latest',
     'npm',
-    '2.1.153',
+    '2.1.197',
   );
   const currentSelectedProfileIds = removeEquivalentVersionedProfileIds(
     [codexProfile.id],
@@ -691,13 +987,13 @@ test('random versioned profile selection keeps existing template when adding ano
     HEADER_PROFILE_PRESETS['codex-cli'],
     'latest',
     'npm',
-    '0.134.0',
+    '0.142.4',
   );
   const qwenProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['qwen-code'],
     'latest',
     'npm',
-    '0.16.2',
+    '0.19.3',
   );
   const currentSelectedProfileIds = removeEquivalentVersionedProfileIds(
     [codexProfile.id],
@@ -722,13 +1018,13 @@ test('versioned profile replacement preserves round robin order', () => {
     HEADER_PROFILE_PRESETS['codex-cli'],
     'latest',
     'npm',
-    '0.134.0',
+    '0.142.4',
   );
   const claudeProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['claude-code'],
     'latest',
     'npm',
-    '2.1.153',
+    '2.1.197',
   );
   const codexPinnedProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-cli'],
@@ -753,13 +1049,13 @@ test('versioned profile replacement appends when base profile was not selected',
     HEADER_PROFILE_PRESETS['codex-cli'],
     'latest',
     'npm',
-    '0.134.0',
+    '0.142.4',
   );
   const qwenProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['qwen-code'],
     'latest',
     'npm',
-    '0.16.2',
+    '0.19.3',
   );
 
   const nextSelectedProfileIds = replaceSelectedProfilePreservingOrder({
@@ -784,7 +1080,7 @@ test('base profile replacement preserves versioned profile position', () => {
     HEADER_PROFILE_PRESETS['claude-code'],
     'latest',
     'npm',
-    '2.1.153',
+    '2.1.197',
   );
 
   const nextSelectedProfileIds = replaceSelectedProfilePreservingOrder({
@@ -825,7 +1121,7 @@ test('buildSelectedProfileItems resolves builtin latest ids without snapshots', 
   assert.equal(items[0].versionMeta.platform, AI_CODING_CLI_DEFAULT_PLATFORM);
   assert.equal(
     items[0].headers['User-Agent'],
-    buildAiCodingCliUserAgent('codex-cli', '0.134.0'),
+    buildAiCodingCliUserAgent('codex-cli', '0.142.4'),
   );
 });
 
@@ -857,7 +1153,7 @@ test('buildSelectedProfileItems completes partial latest metadata from profile i
         scope: 'builtin',
         readonly: true,
         headers: {
-          'User-Agent': buildAiCodingCliUserAgent('qwen-code', '0.16.2'),
+          'User-Agent': buildAiCodingCliUserAgent('qwen-code', '0.19.3'),
         },
         version_meta: {
           source: 'npm',
@@ -916,11 +1212,15 @@ test('buildProfileItems merges builtin and user profiles into a normalized list'
 
   const builtin = items.find((item) => item.id === 'codex-cli');
   const custom = items.find((item) => item.id === 'hp_custom');
+  const agy = items.find((item) => item.id === 'agy');
 
   assert.ok(builtin);
   assert.equal(builtin.scope, 'builtin');
   assert.equal(builtin.readonly, true);
   assert.doesNotMatch(builtin.previewText, /codex_exec/i);
+  assert.ok(agy);
+  assert.equal(agy.scope, 'builtin');
+  assert.equal(agy.readonly, true);
 
   assert.ok(custom);
   assert.equal(custom.scope, 'user');
@@ -933,8 +1233,10 @@ test('buildProfileItems does not expose implicit latest aliases in the library',
 
   assert.equal(ids.includes('codex-cli'), true);
   assert.equal(ids.includes('claude-code'), true);
+  assert.equal(ids.includes('agy'), true);
   assert.equal(ids.includes('codex-cli@latest'), false);
   assert.equal(ids.includes('claude-code@latest'), false);
+  assert.equal(ids.includes('agy@latest'), false);
 });
 
 test('buildSelectedProfileItems keeps unknown selected ids removable', () => {
@@ -1252,7 +1554,7 @@ test('applyHeaderProfileStrategyToChannelInputs persists selected CLI version sn
     HEADER_PROFILE_PRESETS['codex-cli'],
     'latest',
     'npm',
-    '0.134.0',
+    '0.142.4',
   );
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
@@ -1283,7 +1585,7 @@ test('applyHeaderProfileStrategyToChannelInputs persists selected CLI version sn
   });
   assert.equal(
     settings.header_profile_strategy.profiles[0].headers['User-Agent'],
-    buildAiCodingCliUserAgent('codex-cli', '0.134.0'),
+    buildAiCodingCliUserAgent('codex-cli', '0.142.4'),
   );
 });
 
@@ -1301,6 +1603,24 @@ test('buildVersionedAiCodingCliProfile keeps latest source dynamic with resolved
   assert.equal(
     versionedProfile.headers['User-Agent'],
     buildAiCodingCliUserAgent('claude-code', '2.2.0'),
+  );
+});
+
+test('buildVersionedAiCodingCliProfile accepts aligned default argument order', () => {
+  const versionedProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    'latest',
+    '0.200.0',
+    'linux-x64',
+    'retained',
+  );
+
+  assert.equal(versionedProfile.id, 'codex-cli@latest');
+  assert.equal(versionedProfile.versionMeta.source, 'retained');
+  assert.equal(versionedProfile.versionMeta.platform, 'linux-x64');
+  assert.equal(
+    versionedProfile.headers['User-Agent'],
+    buildAiCodingCliUserAgent('codex-cli', '0.200.0', 'linux-x64'),
   );
 });
 
@@ -1358,7 +1678,88 @@ test('buildVersionedAiCodingCliProfile uses fallback snapshot when latest is unr
   assert.equal(versionedProfile.versionMeta.version, 'latest');
   assert.equal(
     versionedProfile.headers['User-Agent'],
-    buildAiCodingCliUserAgent('qwen-code', '0.16.2'),
+    buildAiCodingCliUserAgent('qwen-code', '0.19.3'),
+  );
+});
+
+test('buildRefreshedAiCodingCliProfileSnapshot upgrades selected fallback snapshot after npm load', () => {
+  const fallbackProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    'latest',
+    'fallback',
+    '0.142.4',
+  );
+  const refreshedProfile = buildRefreshedAiCodingCliProfileSnapshot({
+    profile: HEADER_PROFILE_PRESETS['codex-cli'],
+    selectedProfile: fallbackProfile,
+    selectedVersion: 'latest',
+    selectedPlatform: AI_CODING_CLI_DEFAULT_PLATFORM,
+    options: [
+      {
+        value: 'latest',
+        label: 'latest (0.200.0)',
+        isLatest: true,
+        resolvedVersion: '0.200.0',
+      },
+    ],
+  });
+
+  assert.equal(refreshedProfile.id, 'codex-cli@latest');
+  assert.equal(refreshedProfile.versionMeta.source, 'npm');
+  assert.equal(refreshedProfile.versionMeta.version, 'latest');
+  assert.equal(
+    refreshedProfile.headers['User-Agent'],
+    buildAiCodingCliUserAgent('codex-cli', '0.200.0'),
+  );
+  assert.equal(
+    areAiCodingCliProfileSnapshotsEqual(fallbackProfile, refreshedProfile),
+    false,
+  );
+  assert.equal(
+    areAiCodingCliProfileSnapshotsEqual(refreshedProfile, {
+      ...refreshedProfile,
+      version_meta: refreshedProfile.versionMeta,
+    }),
+    true,
+  );
+});
+
+test('buildRefreshedAiCodingCliProfileSnapshot keeps current selected version over stale state', () => {
+  const pinnedProfile = buildVersionedAiCodingCliProfile(
+    HEADER_PROFILE_PRESETS['codex-cli'],
+    '0.142.4',
+    'fallback',
+    '0.142.4',
+    'linux-arm64',
+  );
+  const refreshedProfile = buildRefreshedAiCodingCliProfileSnapshot({
+    profile: HEADER_PROFILE_PRESETS['codex-cli'],
+    selectedProfile: pinnedProfile,
+    selectedVersion: 'latest',
+    selectedPlatform: 'macos-x64',
+    options: [
+      {
+        value: 'latest',
+        label: 'latest (0.200.0)',
+        isLatest: true,
+        resolvedVersion: '0.200.0',
+      },
+      {
+        value: '0.142.4',
+        label: '0.142.4',
+        isLatest: false,
+        resolvedVersion: '0.142.4',
+      },
+    ],
+  });
+
+  assert.equal(refreshedProfile.id, 'codex-cli@0.142.4');
+  assert.equal(refreshedProfile.versionMeta.source, 'npm');
+  assert.equal(refreshedProfile.versionMeta.version, '0.142.4');
+  assert.equal(refreshedProfile.versionMeta.platform, 'linux-arm64');
+  assert.equal(
+    refreshedProfile.headers['User-Agent'],
+    buildAiCodingCliUserAgent('codex-cli', '0.142.4', 'linux-arm64'),
   );
 });
 
@@ -1436,11 +1837,11 @@ test('applyHeaderProfileStrategyToChannelInputs persists multiple selected CLI v
     HEADER_PROFILE_PRESETS['codex-cli'],
     'latest',
     'npm',
-    '0.134.0',
+    '0.142.4',
   );
   const claudeProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['claude-code'],
-    '2.1.153',
+    '2.1.197',
   );
   const result = applyHeaderProfileStrategyToChannelInputs({
     inputs: {
@@ -1461,13 +1862,13 @@ test('applyHeaderProfileStrategyToChannelInputs persists multiple selected CLI v
 
   assert.deepEqual(settings.header_profile_strategy.selected_profile_ids, [
     'codex-cli@latest',
-    'claude-code@2.1.153',
+    'claude-code@2.1.197',
   ]);
   assert.deepEqual(
     settings.header_profile_strategy.profiles.map(
       (profile) => profile.version_meta.version,
     ),
-    ['latest', '2.1.153'],
+    ['latest', '2.1.197'],
   );
 });
 
@@ -1525,11 +1926,11 @@ test('applyHeaderProfileStrategyToChannelInputs preserves existing snapshots whe
 
 test('applyHeaderProfileStrategyToChannelInputs persists latest snapshots for all AI CLI presets', () => {
   const profileInputs = [
-    ['codex-cli', '0.134.0'],
-    ['claude-code', '2.1.153'],
-    ['gemini-cli', '0.44.0'],
-    ['qwen-code', '0.16.2'],
-    ['droid', '0.135.0'],
+    ['codex-cli', '0.142.4'],
+    ['claude-code', '2.1.197'],
+    ['gemini-cli', '0.49.0'],
+    ['qwen-code', '0.19.3'],
+    ['droid', '0.161.0'],
   ];
   const versionedProfiles = profileInputs.map(([profileId, resolvedVersion]) =>
     buildVersionedAiCodingCliProfile(
@@ -1599,6 +2000,7 @@ test('applyHeaderProfileStrategyToChannelInputs does not add built-in CLI passth
         'gemini-cli',
         'qwen-code',
         'droid',
+        'agy',
       ],
     },
     headerProfiles: [],
@@ -2217,7 +2619,7 @@ test('reorderSelectedProfileIds follows before and after drop positions', () => 
 test('removeEquivalentVersionedProfileIds replaces selected version variants', () => {
   const selectedCodexProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-cli'],
-    '0.134.0',
+    '0.142.4',
   );
   const nextCodexProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-cli'],
@@ -2226,25 +2628,25 @@ test('removeEquivalentVersionedProfileIds replaces selected version variants', (
 
   assert.deepEqual(
     removeEquivalentVersionedProfileIds(
-      ['codex-cli@0.134.0', 'claude-code@2.1.153'],
+      ['codex-cli@0.142.4', 'claude-code@2.1.197'],
       [
         selectedCodexProfile,
         buildVersionedAiCodingCliProfile(
           HEADER_PROFILE_PRESETS['claude-code'],
-          '2.1.153',
+          '2.1.197',
         ),
       ],
       nextCodexProfile.id,
       nextCodexProfile,
     ),
-    ['claude-code@2.1.153'],
+    ['claude-code@2.1.197'],
   );
 });
 
 test('removeEquivalentVersionedProfileIds replaces legacy base selection', () => {
   const nextCodexProfile = buildVersionedAiCodingCliProfile(
     HEADER_PROFILE_PRESETS['codex-cli'],
-    '0.134.0',
+    '0.142.4',
   );
 
   assert.deepEqual(
@@ -2269,15 +2671,15 @@ test('removeEquivalentVersionedProfileIds replaces missing versioned selection b
 
   assert.deepEqual(
     removeEquivalentVersionedProfileIds(
-      ['codex-cli@0.134.0', 'claude-code@2.1.153'],
+      ['codex-cli@0.142.4', 'claude-code@2.1.197'],
       [
-        { id: 'codex-cli@0.134.0', missing: true },
-        { id: 'claude-code@2.1.153', missing: true },
+        { id: 'codex-cli@0.142.4', missing: true },
+        { id: 'claude-code@2.1.197', missing: true },
       ],
       nextCodexProfile.id,
       nextCodexProfile,
     ),
-    ['claude-code@2.1.153'],
+    ['claude-code@2.1.197'],
   );
 });
 

@@ -3,7 +3,6 @@ package model
 import (
 	"errors"
 	"fmt"
-	"math/rand"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -158,14 +157,22 @@ func requestChannelCacheRefreshAsync() {
 }
 
 func getRandomSatisfiedChannelFromCache(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
+	return getRandomSatisfiedChannelFromCacheWithPriorityMode(group, model, retry, excluded, false)
+}
+
+func getRandomSatisfiedChannelFromCacheAfterExclusion(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
+	return getRandomSatisfiedChannelFromCacheWithPriorityMode(group, model, retry, excluded, true)
+}
+
+func getRandomSatisfiedChannelFromCacheWithPriorityMode(group string, model string, retry int, excluded map[int]struct{}, excludeBeforePriority bool) (*Channel, error, bool) {
 	cacheHit := false
 	var lastErr error
 	routeCandidates := getGroupModelRouteCandidateMeta(model)
 	if shouldPoolCompactRouteCandidates(routeCandidates) {
-		return getRandomSatisfiedPooledRouteModelsFromCache(group, routeCandidates, retry, excluded)
+		return getRandomSatisfiedPooledRouteModelsFromCache(group, routeCandidates, retry, excluded, excludeBeforePriority)
 	}
 	for _, routeCandidate := range routeCandidates {
-		channel, err, hit := getRandomSatisfiedRouteModelFromCache(group, routeCandidate, retry, excluded)
+		channel, err, hit := getRandomSatisfiedRouteModelFromCache(group, routeCandidate, retry, excluded, excludeBeforePriority)
 		if !hit {
 			continue
 		}
@@ -178,7 +185,7 @@ func getRandomSatisfiedChannelFromCache(group string, model string, retry int, e
 	return nil, lastErr, cacheHit
 }
 
-func getRandomSatisfiedPooledRouteModelsFromCache(group string, routeCandidates []routeModelCandidate, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
+func getRandomSatisfiedPooledRouteModelsFromCache(group string, routeCandidates []routeModelCandidate, retry int, excluded map[int]struct{}, excludeBeforePriority bool) (*Channel, error, bool) {
 	cacheHit := false
 	seen := make(map[int]struct{})
 	targetChannels := make([]*Channel, 0, len(routeCandidates))
@@ -206,11 +213,11 @@ func getRandomSatisfiedPooledRouteModelsFromCache(group string, routeCandidates 
 	if len(targetChannels) == 0 {
 		return nil, nil, cacheHit
 	}
-	channel, err := chooseCachedRouteChannel(targetChannels, retry, excluded)
+	channel, err := chooseCachedRouteChannelWithPriorityMode(targetChannels, retry, excluded, excludeBeforePriority, common.GetRandomInt)
 	return channel, err, true
 }
 
-func getRandomSatisfiedRouteModelFromCache(group string, routeCandidate routeModelCandidate, retry int, excluded map[int]struct{}) (*Channel, error, bool) {
+func getRandomSatisfiedRouteModelFromCache(group string, routeCandidate routeModelCandidate, retry int, excluded map[int]struct{}, excludeBeforePriority bool) (*Channel, error, bool) {
 	channels := group2model2channels[group][routeCandidate.model]
 	if len(channels) == 0 {
 		return nil, nil, false
@@ -245,13 +252,34 @@ func getRandomSatisfiedRouteModelFromCache(group string, routeCandidate routeMod
 		return nil, nil, true
 	}
 
-	channel, err := chooseCachedRouteChannel(targetChannels, retry, excluded)
+	channel, err := chooseCachedRouteChannelWithPriorityMode(targetChannels, retry, excluded, excludeBeforePriority, common.GetRandomInt)
 	return channel, err, true
 }
 
 func chooseCachedRouteChannel(targetChannels []*Channel, retry int, excluded map[int]struct{}) (*Channel, error) {
+	return chooseCachedRouteChannelWithRandom(targetChannels, retry, excluded, common.GetRandomInt)
+}
+
+func chooseCachedRouteChannelWithRandom(targetChannels []*Channel, retry int, excluded map[int]struct{}, randomInt func(int) int) (*Channel, error) {
+	return chooseCachedRouteChannelWithPriorityMode(targetChannels, retry, excluded, false, randomInt)
+}
+
+func chooseCachedRouteChannelWithPriorityMode(targetChannels []*Channel, retry int, excluded map[int]struct{}, excludeBeforePriority bool, randomInt func(int) int) (*Channel, error) {
 	if len(targetChannels) == 0 {
 		return nil, nil
+	}
+	if excludeBeforePriority && len(excluded) > 0 {
+		filteredChannels := make([]*Channel, 0, len(targetChannels))
+		for _, channel := range targetChannels {
+			if _, skip := excluded[channel.Id]; skip {
+				continue
+			}
+			filteredChannels = append(filteredChannels, channel)
+		}
+		targetChannels = filteredChannels
+		if len(targetChannels) == 0 {
+			return nil, nil
+		}
 	}
 	uniquePriorities := make(map[int]bool)
 	for _, channel := range targetChannels {
@@ -270,8 +298,10 @@ func chooseCachedRouteChannel(targetChannels []*Channel, retry int, excluded map
 
 	filteredChannels := make([]*Channel, 0, len(targetChannels))
 	for _, channel := range targetChannels {
-		if _, skip := excluded[channel.Id]; skip {
-			continue
+		if !excludeBeforePriority {
+			if _, skip := excluded[channel.Id]; skip {
+				continue
+			}
 		}
 		if channel.GetPriority() == targetPriority {
 			filteredChannels = append(filteredChannels, channel)
@@ -282,39 +312,11 @@ func chooseCachedRouteChannel(targetChannels []*Channel, retry int, excluded map
 		return nil, nil
 	}
 
-	sumWeight := 0
+	weights := make([]uint, 0, len(targetChannels))
 	for _, channel := range targetChannels {
-		sumWeight += channel.GetWeight()
+		weights = append(weights, uint(channel.GetWeight()))
 	}
-
-	// smoothing factor and adjustment
-	smoothingFactor := 1
-	smoothingAdjustment := 0
-
-	if sumWeight == 0 {
-		// when all channels have weight 0, set sumWeight to the number of channels and set smoothing adjustment to 100
-		// each channel's effective weight = 100
-		sumWeight = len(targetChannels) * 100
-		smoothingAdjustment = 100
-	} else if sumWeight/len(targetChannels) < 10 {
-		// when the average weight is less than 10, set smoothing factor to 100
-		smoothingFactor = 100
-	}
-
-	// Calculate the total weight of all channels up to endIdx
-	totalWeight := sumWeight * smoothingFactor
-
-	// Generate a random value in the range [0, totalWeight)
-	randomWeight := rand.Intn(totalWeight)
-
-	// Find a channel based on its weight
-	for _, channel := range targetChannels {
-		randomWeight -= channel.GetWeight()*smoothingFactor + smoothingAdjustment
-		if randomWeight < 0 {
-			return channel, nil
-		}
-	}
-	return nil, errors.New("channel not found")
+	return chooseWeightedChannelWithRandom(targetChannels, weights, randomInt), nil
 }
 
 // GetRandomSatisfiedChannel returns a channel for the requested group/model pair.
@@ -324,19 +326,65 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 
 // GetRandomSatisfiedChannelExcluding returns a channel while excluding channels already tried by the current request.
 func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error) {
+	return GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(group, model, retry, excluded, 0, 0, time.Time{})
+}
+
+func GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(
+	group string,
+	model string,
+	retry int,
+	excluded map[int]struct{},
+	requestBodySize int64,
+	ttlHours int,
+	now time.Time,
+) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
+		if requestBodySize > 0 {
+			bodyLimitExcluded, err := FindRequestBodyLimitExcludedChannels(group, model, requestBodySize, ttlHours, now)
+			if err != nil {
+				return nil, err
+			}
+			excluded = mergeExcludedChannels(excluded, bodyLimitExcluded)
+			return getChannelExcludingAfterExclusion(group, model, retry, excluded)
+		}
 		return getChannelExcluding(group, model, retry, excluded)
 	}
 
 	channelSyncLock.RLock()
-	channel, cacheErr, cacheHit := getRandomSatisfiedChannelFromCache(group, model, retry, excluded)
+	if requestBodySize > 0 {
+		excluded = mergeExcludedChannels(excluded, findRequestBodyLimitExcludedChannelsFromCacheLocked(group, model, requestBodySize, ttlHours, now))
+	}
+	var channel *Channel
+	var cacheErr error
+	var cacheHit bool
+	if requestBodySize > 0 {
+		channel, cacheErr, cacheHit = getRandomSatisfiedChannelFromCacheAfterExclusion(group, model, retry, excluded)
+	} else {
+		channel, cacheErr, cacheHit = getRandomSatisfiedChannelFromCache(group, model, retry, excluded)
+	}
 	channelSyncLock.RUnlock()
-	if channel != nil || (cacheHit && cacheErr == nil) {
+	if channel != nil || (cacheHit && cacheErr == nil && len(excluded) == 0) {
 		return channel, cacheErr
 	}
 
-	fallbackChannel, fallbackErr := getChannelExcluding(group, model, retry, excluded)
+	if requestBodySize > 0 {
+		bodyLimitExcluded, fallbackLimitErr := findRequestBodyLimitExcludedChannelsFromDatabase(group, model, requestBodySize, ttlHours, now)
+		if fallbackLimitErr != nil {
+			if cacheErr != nil {
+				return nil, cacheErr
+			}
+			return nil, fallbackLimitErr
+		}
+		excluded = mergeExcludedChannels(excluded, bodyLimitExcluded)
+	}
+	var fallbackChannel *Channel
+	var fallbackErr error
+	if requestBodySize > 0 {
+		fallbackChannel, fallbackErr = getChannelExcludingAfterExclusion(group, model, retry, excluded)
+	} else {
+		fallbackChannel, fallbackErr = getChannelExcluding(group, model, retry, excluded)
+	}
 	if fallbackErr != nil {
 		if cacheErr != nil {
 			return nil, cacheErr
@@ -416,7 +464,28 @@ func CacheUpdateChannel(channel *Channel) {
 	if channel == nil {
 		return
 	}
-	channelsIDM[channel.Id] = channel.CloneForCache()
+	updated := channel.CloneForCache()
+	if updated.ChannelInfo.IsMultiKey && updated.ChannelInfo.MultiKeyMode == constant.MultiKeyModePolling {
+		if oldChannel, ok := channelsIDM[channel.Id]; ok && oldChannel != nil &&
+			oldChannel.ChannelInfo.IsMultiKey &&
+			oldChannel.ChannelInfo.MultiKeyMode == constant.MultiKeyModePolling {
+			updated.ChannelInfo.MultiKeyPollingIndex = oldChannel.ChannelInfo.MultiKeyPollingIndex
+		}
+	}
+	channelsIDM[channel.Id] = updated
+}
+
+func CacheUpdateChannelPollingIndex(id int, pollingIndex int) {
+	if !common.MemoryCacheEnabled || id <= 0 {
+		return
+	}
+	channelSyncLock.Lock()
+	defer channelSyncLock.Unlock()
+	if channel, ok := channelsIDM[id]; ok && channel != nil {
+		updated := channel.CloneForCache()
+		updated.ChannelInfo.MultiKeyPollingIndex = pollingIndex
+		channelsIDM[id] = updated
+	}
 }
 
 func CacheReloadChannel(id int) {
@@ -435,7 +504,16 @@ func CacheReloadChannel(id int) {
 		common.SysLog(fmt.Sprintf("failed to reload channel cache: channel_id=%d, error=%v", id, err))
 		return
 	}
-	CacheUpdateChannel(channel)
+	channelSyncLock.Lock()
+	defer channelSyncLock.Unlock()
+	if oldChannel, ok := channelsIDM[id]; ok && oldChannel != nil &&
+		oldChannel.ChannelInfo.IsMultiKey &&
+		oldChannel.ChannelInfo.MultiKeyMode == constant.MultiKeyModePolling &&
+		channel.ChannelInfo.IsMultiKey &&
+		channel.ChannelInfo.MultiKeyMode == constant.MultiKeyModePolling {
+		channel.ChannelInfo.MultiKeyPollingIndex = oldChannel.ChannelInfo.MultiKeyPollingIndex
+	}
+	channelsIDM[channel.Id] = channel.CloneForCache()
 }
 
 func CacheUpdateChannelOtherSettings(id int, settings string) {

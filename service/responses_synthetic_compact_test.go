@@ -2788,6 +2788,7 @@ func TestRestoreNativeOpaquePreviousResponseIDRejectsDifferentModel(t *testing.T
 	require.Equal(t, model.SyntheticCompactStateKindNativeOpaque, info.MarkerKind)
 	require.Equal(t, "mismatch", info.ScopeResult)
 	require.Equal(t, "scope_mismatch", info.FallbackReason)
+	require.NotEmpty(t, info.StateHash)
 }
 
 func TestBuildSyntheticCompactResponseRejectsLostTaskSummaryForLargeInput(t *testing.T) {

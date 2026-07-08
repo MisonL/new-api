@@ -40,6 +40,7 @@ func GetRequestBody(c *gin.Context) (io.Seeker, error) {
 			if _, err := bs.Seek(0, io.SeekStart); err != nil {
 				return nil, fmt.Errorf("failed to seek body storage: %w", err)
 			}
+			setRequestBodySize(c, bs)
 			return bs, nil
 		}
 	}
@@ -53,6 +54,7 @@ func GetRequestBody(c *gin.Context) (io.Seeker, error) {
 				return nil, err
 			}
 			c.Set(KeyBodyStorage, bs)
+			setRequestBodySize(c, bs)
 			return bs, nil
 		}
 	}
@@ -78,8 +80,20 @@ func GetRequestBody(c *gin.Context) (io.Seeker, error) {
 
 	// 缓存存储对象
 	c.Set(KeyBodyStorage, storage)
+	setRequestBodySize(c, storage)
 
 	return storage, nil
+}
+
+func setRequestBodySize(c *gin.Context, storage BodyStorage) {
+	if c == nil || storage == nil {
+		return
+	}
+	commonSize := storage.Size()
+	if commonSize <= 0 {
+		return
+	}
+	SetContextKey(c, constant.ContextKeyRequestBodySize, commonSize)
 }
 
 // GetBodyStorage 获取请求体存储对象（用于需要多次读取的场景）
@@ -168,6 +182,10 @@ func GetContextKeyString(c *gin.Context, key constant.ContextKey) string {
 
 func GetContextKeyInt(c *gin.Context, key constant.ContextKey) int {
 	return c.GetInt(string(key))
+}
+
+func GetContextKeyInt64(c *gin.Context, key constant.ContextKey) int64 {
+	return c.GetInt64(string(key))
 }
 
 func GetContextKeyBool(c *gin.Context, key constant.ContextKey) bool {

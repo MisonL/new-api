@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -57,6 +58,7 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 		overriddenResponsesReq = convertedResponsesReq
 		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_synthetic_restore")
 	}
+	markResponsesChatCompatIgnoredEncryptedInclude(c, overriddenResponsesReq.Include)
 
 	chatReq, err := service.ResponsesRequestToChatCompletionsRequestWithOptions(&overriddenResponsesReq, options)
 	if err != nil {
@@ -123,4 +125,24 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 		return nil, newApiErr
 	}
 	return usage, nil
+}
+
+func markResponsesChatCompatIgnoredEncryptedInclude(c *gin.Context, raw []byte) {
+	if c == nil {
+		return
+	}
+	jsonType := common.GetJsonType(raw)
+	if jsonType != "array" {
+		return
+	}
+	var includeValues []string
+	if err := common.Unmarshal(raw, &includeValues); err != nil {
+		return
+	}
+	for _, includeValue := range includeValues {
+		if strings.TrimSpace(includeValue) == "reasoning.encrypted_content" {
+			common.SetContextKey(c, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude, true)
+			return
+		}
+	}
 }

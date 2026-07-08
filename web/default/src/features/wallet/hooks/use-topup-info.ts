@@ -196,7 +196,7 @@ export function useTopupInfo() {
   }
 
   useEffect(() => {
-    fetchTopupInfo()
+    void Promise.resolve().then(() => fetchTopupInfo())
   }, [])
 
   return {

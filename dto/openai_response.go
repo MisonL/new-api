@@ -232,11 +232,12 @@ type Usage struct {
 	UsageSemantic        string `json:"usage_semantic,omitempty"`
 	UsageSource          string `json:"usage_source,omitempty"`
 
-	PromptTokensDetails    InputTokenDetails  `json:"prompt_tokens_details"`
-	CompletionTokenDetails OutputTokenDetails `json:"completion_tokens_details"`
-	InputTokens            int                `json:"input_tokens"`
-	OutputTokens           int                `json:"output_tokens"`
-	InputTokensDetails     *InputTokenDetails `json:"input_tokens_details"`
+	PromptTokensDetails    InputTokenDetails   `json:"prompt_tokens_details"`
+	CompletionTokenDetails OutputTokenDetails  `json:"completion_tokens_details"`
+	InputTokens            int                 `json:"input_tokens"`
+	OutputTokens           int                 `json:"output_tokens"`
+	InputTokensDetails     *InputTokenDetails  `json:"input_tokens_details"`
+	OutputTokensDetails    *OutputTokenDetails `json:"output_tokens_details,omitempty"`
 
 	// claude cache 1h
 	ClaudeCacheCreation5mTokens int `json:"claude_cache_creation_5_m_tokens"`
@@ -271,6 +272,16 @@ type OutputTokenDetails struct {
 	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
+func (u *Usage) GetOutputTokenDetails() OutputTokenDetails {
+	if u == nil {
+		return OutputTokenDetails{}
+	}
+	if u.OutputTokensDetails != nil {
+		return *u.OutputTokensDetails
+	}
+	return u.CompletionTokenDetails
+}
+
 type OpenAIResponsesResponse struct {
 	ID                 string             `json:"id"`
 	Object             string             `json:"object"`
@@ -302,7 +313,7 @@ func (o *OpenAIResponsesResponse) GetOpenAIError() *types.OpenAIError {
 }
 
 func (o *OpenAIResponsesResponse) HasImageGenerationCall() bool {
-	if len(o.Output) == 0 {
+	if o == nil || len(o.Output) == 0 {
 		return false
 	}
 	for _, output := range o.Output {
@@ -326,7 +337,7 @@ func (o *OpenAIResponsesResponse) HasCompactionOutput() bool {
 }
 
 func (o *OpenAIResponsesResponse) GetQuality() string {
-	if len(o.Output) == 0 {
+	if o == nil || len(o.Output) == 0 {
 		return ""
 	}
 	for _, output := range o.Output {
@@ -338,7 +349,7 @@ func (o *OpenAIResponsesResponse) GetQuality() string {
 }
 
 func (o *OpenAIResponsesResponse) GetSize() string {
-	if len(o.Output) == 0 {
+	if o == nil || len(o.Output) == 0 {
 		return ""
 	}
 	for _, output := range o.Output {
@@ -354,18 +365,19 @@ type IncompleteDetails struct {
 }
 
 type ResponsesOutput struct {
-	Type             string                   `json:"type"`
-	ID               string                   `json:"id"`
-	Status           string                   `json:"status"`
-	Role             string                   `json:"role"`
-	Content          []ResponsesOutputContent `json:"content"`
-	Quality          string                   `json:"quality"`
-	Size             string                   `json:"size"`
-	CallId           string                   `json:"call_id,omitempty"`
-	Name             string                   `json:"name,omitempty"`
-	Arguments        json.RawMessage          `json:"arguments,omitempty"`
-	Input            string                   `json:"input,omitempty"`
-	EncryptedContent json.RawMessage          `json:"encrypted_content,omitempty"`
+	Type             string                          `json:"type"`
+	ID               string                          `json:"id"`
+	Status           string                          `json:"status"`
+	Role             string                          `json:"role"`
+	Content          []ResponsesOutputContent        `json:"content"`
+	Summary          []ResponsesReasoningSummaryPart `json:"summary,omitempty"`
+	Quality          string                          `json:"quality"`
+	Size             string                          `json:"size"`
+	CallId           string                          `json:"call_id,omitempty"`
+	Name             string                          `json:"name,omitempty"`
+	Arguments        json.RawMessage                 `json:"arguments,omitempty"`
+	Input            string                          `json:"input,omitempty"`
+	EncryptedContent json.RawMessage                 `json:"encrypted_content,omitempty"`
 }
 
 // ArgumentsString returns function call arguments in the string form expected by Chat Completions.
@@ -393,12 +405,16 @@ type ResponsesReasoningSummaryPart struct {
 }
 
 const (
-	BuildInToolWebSearchPreview = "web_search_preview"
-	BuildInToolFileSearch       = "file_search"
+	BuildInToolWebSearch                  = "web_search"
+	BuildInToolWebSearchPreview           = "web_search_preview"
+	BuildInToolWebSearchPreview2025_03_11 = "web_search_preview_2025_03_11"
+	BuildInToolFileSearch                 = "file_search"
+	BuildInToolImageGeneration            = "image_generation"
 )
 
 const (
-	BuildInCallWebSearchCall = "web_search_call"
+	BuildInCallWebSearchCall  = "web_search_call"
+	BuildInCallFileSearchCall = "file_search_call"
 )
 
 const (

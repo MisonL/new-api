@@ -120,23 +120,27 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
   })
 
   useEffect(() => {
+    let nextApiInfoList: typeof apiInfoList = []
     try {
       const parsed = JSON.parse(data || '[]')
       if (Array.isArray(parsed)) {
-        setApiInfoList(
-          parsed.map((item, idx) => ({
-            ...item,
-            id: item.id || idx + 1,
-          }))
-        )
+        nextApiInfoList = parsed.map((item, idx) => ({
+          ...item,
+          id: item.id || idx + 1,
+        }))
       }
     } catch {
-      setApiInfoList([])
+      nextApiInfoList = []
     }
+    queueMicrotask(() => {
+      setApiInfoList(nextApiInfoList)
+    })
   }, [data])
 
   useEffect(() => {
-    setIsEnabled(enabled)
+    queueMicrotask(() => {
+      setIsEnabled(enabled)
+    })
   }, [enabled])
 
   const handleToggleEnabled = async (checked: boolean) => {

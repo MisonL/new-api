@@ -122,7 +122,7 @@ export const CHANNEL_STATUS_CONFIG = {
     showDot: true,
   },
   [CHANNEL_STATUS.MANUAL_DISABLED]: {
-    variant: 'neutral' as const,
+    variant: 'disabled' as const,
     label: 'Disabled',
     showDot: true,
   },
@@ -155,7 +155,7 @@ export const MULTI_KEY_STATUS_CONFIG = {
     label: 'Enabled',
   },
   [MULTI_KEY_STATUS.MANUAL_DISABLED]: {
-    variant: 'neutral' as const,
+    variant: 'disabled' as const,
     label: 'Manual Disabled',
   },
   [MULTI_KEY_STATUS.AUTO_DISABLED]: {

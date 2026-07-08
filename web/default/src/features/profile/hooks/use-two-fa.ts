@@ -34,7 +34,7 @@ export function useTwoFA(enabled = true) {
   }, [enabled])
 
   useEffect(() => {
-    fetchStatus()
+    void Promise.resolve().then(() => fetchStatus())
   }, [fetchStatus])
 
   return {

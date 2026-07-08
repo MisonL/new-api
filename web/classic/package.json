@@ -42,9 +42,9 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node ../scripts/safari-compatibility.mjs dist && node ../scripts/check-browser-compatibility.mjs dist",
-    "build:fast": "VITE_FAST_BUILD=true vite build",
-    "build:profile": "DEBUG=vite:time vite build",
+    "build": "node ../scripts/run-with-node-options.mjs --optional-node-option=--no-experimental-webstorage -- vite build && node ../scripts/safari-compatibility.mjs dist && node ../scripts/check-browser-compatibility.mjs dist",
+    "build:fast": "node ../scripts/run-with-node-options.mjs --optional-node-option=--no-experimental-webstorage --env=VITE_FAST_BUILD=true -- vite build",
+    "build:profile": "node ../scripts/run-with-node-options.mjs --optional-node-option=--no-experimental-webstorage --env=DEBUG=vite:time -- vite build",
     "test:browser-compat": "node ../scripts/browser-cross-verify.mjs --url http://localhost:3000/console",
     "test:desktop-runtime": "node --test ../tests/desktopRuntime.test.mjs",
     "test:setup-validation": "node --test ../tests/setupValidation.test.mjs",

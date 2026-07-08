@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -495,6 +496,9 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 
 func getChannelWithBootstrapGrace(c *gin.Context, modelName string, usingGroup string, state *service.ResponsesBootstrapRecoveryState) (*model.Channel, string, error) {
 	if !service.ShouldWaitForResponsesBootstrapRecoverySelection(c, usingGroup, modelName, state) {
+		if state != nil && state.Enabled {
+			logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery skipped: group=%s model=%s reason=no_candidate_channel", usingGroup, modelName))
+		}
 		state = nil
 	}
 	for {
@@ -505,11 +509,22 @@ func getChannelWithBootstrapGrace(c *gin.Context, modelName string, usingGroup s
 			Retry:      common.GetPointer(0),
 		})
 		if channel != nil || err != nil || state == nil {
+			if state != nil && state.WaitAttempts > 0 {
+				if channel != nil {
+					service.MarkResponsesBootstrapRecoveryMetric(c)
+					logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery selected channel: group=%s model=%s channel_id=%d attempts=%d waited_ms=%d", selectGroup, modelName, channel.Id, state.WaitAttempts, state.WaitDuration.Milliseconds()))
+				} else if err != nil {
+					service.RecordResponsesBootstrapRecovery(modelName, usingGroup, false, state.WaitDuration.Milliseconds())
+					logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery stopped with error: group=%s model=%s attempts=%d waited_ms=%d error=%q", usingGroup, modelName, state.WaitAttempts, state.WaitDuration.Milliseconds(), err.Error()))
+				}
+			}
 			return channel, selectGroup, err
 		}
 
 		waitDuration, sendPing, ok := service.NextResponsesBootstrapWait(c, time.Now())
 		if !ok {
+			service.RecordResponsesBootstrapRecovery(modelName, usingGroup, false, state.WaitDuration.Milliseconds())
+			logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery deadline reached: group=%s model=%s attempts=%d waited_ms=%d", usingGroup, modelName, state.WaitAttempts, state.WaitDuration.Milliseconds()))
 			return nil, selectGroup, nil
 		}
 
@@ -521,12 +536,15 @@ func getChannelWithBootstrapGrace(c *gin.Context, modelName string, usingGroup s
 				return nil, selectGroup, err
 			}
 			service.MarkResponsesBootstrapPingSent(c, now)
+			logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery ping: group=%s model=%s attempts=%d waited_ms=%d", usingGroup, modelName, state.WaitAttempts, state.WaitDuration.Milliseconds()))
 		}
 
 		timer := time.NewTimer(waitDuration)
 		select {
 		case <-c.Request.Context().Done():
 			timer.Stop()
+			service.RecordResponsesBootstrapRecovery(modelName, usingGroup, false, state.WaitDuration.Milliseconds())
+			logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery client disconnected: group=%s model=%s attempts=%d waited_ms=%d error=%q", usingGroup, modelName, state.WaitAttempts, state.WaitDuration.Milliseconds(), c.Request.Context().Err().Error()))
 			return nil, selectGroup, c.Request.Context().Err()
 		case <-timer.C:
 		}

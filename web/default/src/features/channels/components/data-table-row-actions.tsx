@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { type Row } from '@tanstack/react-table'
 import {
+  ArrowDown,
+  ArrowUp,
   MoreHorizontal,
   Boxes,
   Pencil,
@@ -19,6 +21,7 @@ import {
   Pin,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -33,7 +36,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { toast } from 'sonner'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { LazyMount } from '@/components/lazy-mount'
 import { MODEL_FETCHABLE_TYPES } from '../constants'
@@ -43,7 +45,10 @@ import {
   handleTestChannel,
   handleToggleChannelStatus,
   handleUpdateChannelField,
+  handleUpdateChannelPriorityMovePlan,
   getNextTopChannelPriority,
+  getTopChannelPriorityMovePlan,
+  isTopChannel,
   isChannelEnabled,
   isMultiKeyChannel,
 } from '../lib'
@@ -54,11 +59,15 @@ import { useChannels } from './channels-provider'
 interface DataTableRowActionsProps {
   row: Row<Channel>
   getTopPriority: () => Promise<number>
+  getTopChannels: () => Promise<Pick<Channel, 'id' | 'priority'>[]>
+  topChannels?: Pick<Channel, 'id' | 'priority'>[]
 }
 
 export function DataTableRowActions({
   row,
   getTopPriority,
+  getTopChannels,
+  topChannels,
 }: DataTableRowActionsProps) {
   const { t } = useTranslation()
   const channel = row.original
@@ -68,9 +77,27 @@ export function DataTableRowActions({
   const [isTesting, setIsTesting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
   const [isPinning, setIsPinning] = useState(false)
+  const [movingPinnedDirection, setMovingPinnedDirection] = useState<
+    'up' | 'down' | null
+  >(null)
 
   const isEnabled = isChannelEnabled(channel)
   const isMultiKey = isMultiKeyChannel(channel)
+  const isPinned = isTopChannel(channel)
+  const pinnedOrder = topChannels ?? []
+  const hasPinnedOrder = pinnedOrder.length > 0
+  const pinnedIndex = pinnedOrder.findIndex((item) => item.id === channel.id)
+  const isPinnedFirst = isPinned && hasPinnedOrder && pinnedIndex === 0
+  const isPinnedLast =
+    isPinned &&
+    hasPinnedOrder &&
+    pinnedIndex >= 0 &&
+    pinnedIndex === pinnedOrder.length - 1
+  const isPriorityUpdating = isPinning || movingPinnedDirection !== null
+  const getPinnedBoundaryMessage = (direction: 'up' | 'down') =>
+    direction === 'up'
+      ? t('This pinned channel is already at the top')
+      : t('This pinned channel is already at the bottom')
 
   const handleEdit = () => {
     setCurrentRow(channel)
@@ -115,6 +142,11 @@ export function DataTableRowActions({
   }
 
   const handlePinToTop = async () => {
+    if (isPriorityUpdating) return
+    if (isPinnedFirst) {
+      toast.info(getPinnedBoundaryMessage('up'))
+      return
+    }
     setIsPinning(true)
     try {
       const topPriority = await getTopPriority()
@@ -136,6 +168,61 @@ export function DataTableRowActions({
     }
   }
 
+  const handleMovePinnedChannel = async (direction: 'up' | 'down') => {
+    if (isPriorityUpdating) return
+    if (!isPinned) {
+      toast.info(t('Only pinned channels can be moved'))
+      return
+    }
+    if (!hasPinnedOrder) {
+      toast.error(t('Failed to load pinned channels'))
+      return
+    }
+    if (
+      (direction === 'up' && isPinnedFirst) ||
+      (direction === 'down' && isPinnedLast)
+    ) {
+      toast.info(getPinnedBoundaryMessage(direction))
+      return
+    }
+
+    setMovingPinnedDirection(direction)
+    try {
+      const latestTopChannels = await getTopChannels()
+      const latestIndex = latestTopChannels.findIndex(
+        (item) => item.id === channel.id
+      )
+      if (latestIndex < 0) {
+        toast.error(t('Failed to load pinned channels'))
+        return
+      }
+      const latestIsFirst = latestIndex === 0
+      const latestIsLast = latestIndex === latestTopChannels.length - 1
+      if (
+        (direction === 'up' && latestIsFirst) ||
+        (direction === 'down' && latestIsLast)
+      ) {
+        toast.info(getPinnedBoundaryMessage(direction))
+        return
+      }
+
+      const plan = getTopChannelPriorityMovePlan(
+        channel,
+        latestTopChannels,
+        direction
+      )
+      await handleUpdateChannelPriorityMovePlan(plan, queryClient)
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to update pinned channel order')
+      )
+    } finally {
+      setMovingPinnedDirection(null)
+    }
+  }
+
   const handleManageKeys = () => {
     setCurrentRow(channel)
     setOpen('multi-key-manage')
@@ -154,12 +241,82 @@ export function DataTableRowActions({
   }
 
   return (
-    <div className='flex items-center justify-end gap-1'>
+    <div className='flex items-center justify-end gap-0.5'>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             variant='ghost'
-            size='icon-sm'
+            size='icon-lg'
+            onClick={handlePinToTop}
+            disabled={isPriorityUpdating || isPinnedFirst}
+            aria-label={t('Pin to Top')}
+            className={
+              isPinned
+                ? 'text-primary hover:text-primary'
+                : 'text-muted-foreground hover:text-foreground'
+            }
+          >
+            {isPinning ? (
+              <Loader2 className='size-4 animate-spin' />
+            ) : (
+              <Pin className='size-4' />
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {isPinning ? t('Pinning...') : t('Pin to Top')}
+        </TooltipContent>
+      </Tooltip>
+
+      {isPinned && (
+        <>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant='ghost'
+                size='icon-lg'
+                onClick={() => handleMovePinnedChannel('up')}
+                disabled={
+                  isPriorityUpdating || !hasPinnedOrder || isPinnedFirst
+                }
+                aria-label={t('Move pinned channel up')}
+              >
+                {movingPinnedDirection === 'up' ? (
+                  <Loader2 className='size-4 animate-spin' />
+                ) : (
+                  <ArrowUp className='size-4' />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('Move pinned channel up')}</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant='ghost'
+                size='icon-lg'
+                onClick={() => handleMovePinnedChannel('down')}
+                disabled={isPriorityUpdating || !hasPinnedOrder || isPinnedLast}
+                aria-label={t('Move pinned channel down')}
+              >
+                {movingPinnedDirection === 'down' ? (
+                  <Loader2 className='size-4 animate-spin' />
+                ) : (
+                  <ArrowDown className='size-4' />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('Move pinned channel down')}</TooltipContent>
+          </Tooltip>
+        </>
+      )}
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant='ghost'
+            size='icon-lg'
             onClick={handleDirectTest}
             disabled={isTesting}
             aria-label={t('Test Connection')}
@@ -178,7 +335,7 @@ export function DataTableRowActions({
         <TooltipTrigger asChild>
           <Button
             variant='ghost'
-            size='icon-sm'
+            size='icon-lg'
             onClick={handleToggleStatus}
             disabled={isTogglingStatus}
             aria-label={isEnabled ? t('Disable') : t('Enable')}
@@ -206,7 +363,8 @@ export function DataTableRowActions({
         <DropdownMenuTrigger asChild>
           <Button
             variant='ghost'
-            className='data-[state=open]:bg-muted flex h-8 w-8 p-0'
+            size='icon-lg'
+            className='data-[state=open]:bg-muted'
           >
             <MoreHorizontal className='h-4 w-4' />
             <span className='sr-only'>{t('Open menu')}</span>
@@ -214,7 +372,10 @@ export function DataTableRowActions({
         </DropdownMenuTrigger>
         <DropdownMenuContent align='end' className='w-48'>
           {/* Pin to top */}
-          <DropdownMenuItem onClick={handlePinToTop} disabled={isPinning}>
+          <DropdownMenuItem
+            onClick={handlePinToTop}
+            disabled={isPriorityUpdating || isPinnedFirst}
+          >
             {isPinning ? t('Pinning...') : t('Pin to Top')}
             <DropdownMenuShortcut>
               {isPinning ? (
@@ -224,6 +385,40 @@ export function DataTableRowActions({
               )}
             </DropdownMenuShortcut>
           </DropdownMenuItem>
+
+          {isPinned && (
+            <>
+              <DropdownMenuItem
+                onClick={() => handleMovePinnedChannel('up')}
+                disabled={
+                  isPriorityUpdating || !hasPinnedOrder || isPinnedFirst
+                }
+              >
+                {t('Move Up')}
+                <DropdownMenuShortcut>
+                  {movingPinnedDirection === 'up' ? (
+                    <Loader2 size={16} className='animate-spin' />
+                  ) : (
+                    <ArrowUp size={16} />
+                  )}
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                onClick={() => handleMovePinnedChannel('down')}
+                disabled={isPriorityUpdating || !hasPinnedOrder || isPinnedLast}
+              >
+                {t('Move Down')}
+                <DropdownMenuShortcut>
+                  {movingPinnedDirection === 'down' ? (
+                    <Loader2 size={16} className='animate-spin' />
+                  ) : (
+                    <ArrowDown size={16} />
+                  )}
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+            </>
+          )}
 
           <DropdownMenuSeparator />
 

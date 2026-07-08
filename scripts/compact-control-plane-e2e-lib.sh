@@ -9,11 +9,16 @@ backup_and_seed_db() {
     return 1
   }
   local token_key
+  local username
   token_key="compacte2e$(date +%s)$(openssl rand -hex 12)"
+  username="compact_e2e_user_${TOKEN_ID}"
   psql_exec \
     -v test_group="$TEST_GROUP" \
     -v token_id="$TOKEN_ID" \
+    -v user_id="$TOKEN_ID" \
     -v token_key="$token_key" \
+    -v username="$username" \
+    -v backup_options="$BACKUP_OPTIONS" \
     -v channel_native_newapi="$CHANNEL_NATIVE_NEWAPI" \
     -v channel_sub2api_http="$CHANNEL_SUB2API_HTTP" \
     -v channel_synthetic_newapi="$CHANNEL_SYNTHETIC_NEWAPI" \
@@ -24,19 +29,40 @@ begin;
 drop table if exists ${BACKUP_CHANNELS};
 drop table if exists ${BACKUP_ABILITIES};
 drop table if exists ${BACKUP_TOKENS};
+drop table if exists ${BACKUP_USERS};
+drop table if exists ${BACKUP_OPTIONS};
 create table ${BACKUP_CHANNELS} as
   select * from channels where id in (:channel_native_newapi, :channel_sub2api_http, :channel_synthetic_newapi, :channel_generic_openai);
 create table ${BACKUP_ABILITIES} as
   select * from abilities where "group" = :'test_group';
 create table ${BACKUP_TOKENS} as
   select * from tokens where id = :token_id;
+create table ${BACKUP_USERS} as
+  select * from users where id = :user_id;
+create table ${BACKUP_OPTIONS} as
+  select * from options where key in ('GroupRatio', 'UserUsableGroups');
 
 delete from abilities where "group" = :'test_group';
 delete from channels where id in (:channel_native_newapi, :channel_sub2api_http, :channel_synthetic_newapi, :channel_generic_openai);
 delete from tokens where id = :token_id;
+delete from users where id = :user_id;
+delete from options where key in ('GroupRatio', 'UserUsableGroups');
+insert into options (key, value)
+values
+  ('GroupRatio', (
+    coalesce((select value from ${BACKUP_OPTIONS} where key = 'GroupRatio'), '{}')::jsonb
+    || jsonb_build_object(:'test_group', 1.0)
+  )::text),
+  ('UserUsableGroups', (
+    coalesce((select value from ${BACKUP_OPTIONS} where key = 'UserUsableGroups'), '{}')::jsonb
+    || jsonb_build_object(:'test_group', 'compact e2e')
+  )::text);
+
+insert into users (id, username, password, display_name, role, status, email, quota, used_quota, request_count, "group", aff_count, aff_quota, aff_history, inviter_id, setting, remark, created_at, last_login_at)
+values (:user_id, :'username', 'compact-e2e-password', 'compact-e2e', 1, 1, :'username' || '@example.invalid', 1000000000, 0, 0, :'test_group', 0, 0, 0, 0, '', 'compact control plane e2e temp user', extract(epoch from now())::bigint, 0);
 
 insert into tokens (id, user_id, key, status, name, created_time, accessed_time, expired_time, remain_quota, unlimited_quota, model_limits_enabled, model_limits, allow_ips, used_quota, "group", cross_group_retry)
-select :token_id, coalesce((select min(id) from users), 1), :'token_key', 1, 'compact-control-plane-e2e', extract(epoch from now())::bigint, 0, -1, 0, true, false, '', '', 0, :'test_group', false;
+select :token_id, :user_id, :'token_key', 1, 'compact-control-plane-e2e', extract(epoch from now())::bigint, 0, -1, 0, true, false, '', '', 0, :'test_group', false;
 
 insert into channels (id, type, key, status, name, weight, created_time, base_url, models, "group", priority, auto_ban, settings)
 values

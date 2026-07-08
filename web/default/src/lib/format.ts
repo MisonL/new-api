@@ -162,6 +162,7 @@ export function formatTokens(tokens: number): string {
  * Format use time in seconds with appropriate unit
  */
 export function formatUseTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '-'
   if (seconds < 60) return `${seconds.toFixed(1)}s`
   const minutes = Math.floor(seconds / 60)
   const remainingSeconds = seconds % 60

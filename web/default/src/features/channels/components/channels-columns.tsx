@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  Infinity as InfinityIcon,
   ListOrdered,
   Shuffle,
 } from 'lucide-react'
@@ -42,6 +43,7 @@ import {
   formatRelativeTime,
   formatResponseTime,
   getBalanceVariant,
+  isUnlimitedChannelBalance,
   getChannelTypeIcon,
   getChannelTypeLabel,
   getResponseTimeConfig,
@@ -361,11 +363,23 @@ function BalanceCell({ channel }: { channel: Channel }) {
     useState<CodexUsageDialogData | null>(null)
   const currencyLabel = getCurrencyLabel()
   const tokenSuffix = currencyLabel === 'Tokens' ? ' Tokens' : ''
-  const withSuffix = (value: string) =>
-    tokenSuffix && value !== '-' ? `${value}${tokenSuffix}` : value
+  const withSuffix = (value: string, skipSuffix = false) =>
+    tokenSuffix && value !== '-' && !skipSuffix
+      ? `${value}${tokenSuffix}`
+      : value
 
   const usedDisplay = withSuffix(formatQuotaValue(usedQuota))
-  const remainingDisplay = withSuffix(formatBalance(balance))
+  const isUnlimitedBalance = isUnlimitedChannelBalance(
+    balance,
+    channel.balance_unlimited
+  )
+  const remainingDisplay = withSuffix(
+    formatBalance(balance, {
+      unlimited: isUnlimitedBalance,
+      unlimitedLabel: t('Unlimited'),
+    }),
+    isUnlimitedBalance
+  )
 
   // Tag row: only show cumulative used quota
   if (isTagRow) {
@@ -381,6 +395,14 @@ function BalanceCell({ channel }: { channel: Channel }) {
 
   // Regular channel row: show used and remaining with click to update
   const variant = getBalanceVariant(balance)
+  const remainingContent = isUnlimitedBalance ? (
+    <>
+      <InfinityIcon className='h-3.5 w-3.5' />
+      <span>{remainingDisplay}</span>
+    </>
+  ) : (
+    remainingDisplay
+  )
 
   const handleClickUpdate = async () => {
     if (isUpdating) return
@@ -435,7 +457,7 @@ function BalanceCell({ channel }: { channel: Channel }) {
           <TooltipTrigger asChild>
             <span
               className={cn(
-                'cursor-pointer transition-opacity hover:opacity-70',
+                'inline-flex cursor-pointer items-center gap-1 transition-opacity hover:opacity-70',
                 channel.type === 57
                   ? 'text-primary'
                   : textColorMap[isUpdating ? 'neutral' : variant]
@@ -446,7 +468,7 @@ function BalanceCell({ channel }: { channel: Channel }) {
                 ? 'Updating...'
                 : channel.type === 57
                   ? t('Account Info')
-                  : remainingDisplay}
+                  : remainingContent}
             </span>
           </TooltipTrigger>
           <TooltipContent>
@@ -498,8 +520,12 @@ function BalanceCell({ channel }: { channel: Channel }) {
  */
 export function useChannelsColumns({
   getTopPriority,
+  getTopChannels,
+  topChannels,
 }: {
   getTopPriority: () => Promise<number>
+  getTopChannels: () => Promise<Pick<Channel, 'id' | 'priority'>[]>
+  topChannels?: Pick<Channel, 'id' | 'priority'>[]
 }): ColumnDef<Channel>[] {
   const { t } = useTranslation()
   return [
@@ -840,7 +866,7 @@ export function useChannelsColumns({
             return (
               <StatusBadge
                 label={`Inactive (${childrenCount})`}
-                variant='neutral'
+                variant='disabled'
                 size='sm'
                 copyable={false}
               />
@@ -979,7 +1005,7 @@ export function useChannelsColumns({
           </TooltipProvider>
         )
       },
-      size: 200,
+      size: 260,
       enableSorting: false,
     },
 
@@ -1149,9 +1175,16 @@ export function useChannelsColumns({
           )
         }
 
-        return <DataTableRowActions row={row} getTopPriority={getTopPriority} />
+        return (
+          <DataTableRowActions
+            row={row}
+            getTopPriority={getTopPriority}
+            getTopChannels={getTopChannels}
+            topChannels={topChannels}
+          />
+        )
       },
-      size: 132,
+      size: 260,
       enableSorting: false,
       enableHiding: false,
     },

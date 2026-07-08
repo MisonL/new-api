@@ -117,6 +117,7 @@ func TestChannelOtherSettingsSub2APIHTTPLimitedNativeCompact(t *testing.T) {
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.EffectiveResponsesCompactModeOrDefault())
 	require.True(t, settings.HasNativeResponsesCompact())
 	require.False(t, settings.HasSyntheticResponsesCompact())
+	require.False(t, settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI).SupportsResponsesCompact)
 }
 
 func TestChannelOtherSettingsDisabledResponsesCompactOverridesProxyProfile(t *testing.T) {
@@ -159,6 +160,44 @@ func TestChannelOtherSettingsDefaultProfileAllowsCompactionItemPassthrough(t *te
 	require.Equal(t, dto.ResponsesUpstreamProfile(""), settings.NormalizedResponsesUpstreamProfile())
 	require.False(t, settings.HasResponsesProxyCompatibilityProfile())
 	require.True(t, settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI).SupportsCompactionItemPassthrough)
+}
+
+func TestChannelOtherSettingsRequestBodyLimitSkipsObservedFailingSize(t *testing.T) {
+	now := time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC)
+	settings := dto.ChannelOtherSettings{
+		RequestBodyLimit: &dto.ChannelRequestBodyLimit{
+			MaxBytes:   100,
+			ObservedAt: now.Unix(),
+		},
+	}
+
+	require.False(t, settings.ShouldSkipForRequestBodySize(99, now, 0))
+	require.True(t, settings.ShouldSkipForRequestBodySize(100, now, 0))
+	require.True(t, settings.ShouldSkipForRequestBodySize(101, now, 0))
+}
+
+func TestChannelOtherSettingsRequestBodyLimitHonorsTTL(t *testing.T) {
+	observedAt := time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC)
+	settings := dto.ChannelOtherSettings{
+		RequestBodyLimit: &dto.ChannelRequestBodyLimit{
+			MaxBytes:   100,
+			ObservedAt: observedAt.Unix(),
+		},
+	}
+
+	require.NotNil(t, settings.EffectiveRequestBodyLimit(observedAt.Add(time.Hour-time.Second), 1))
+	require.Nil(t, settings.EffectiveRequestBodyLimit(observedAt.Add(time.Hour+time.Second), 1))
+	require.NotNil(t, settings.EffectiveRequestBodyLimit(observedAt.Add(24*time.Hour), 0))
+}
+
+func TestMarkChannelRequestBodyLimitRejectsInvalidInput(t *testing.T) {
+	_, err := MarkChannelRequestBodyLimit(0, dto.ChannelRequestBodyLimit{MaxBytes: 128})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid channel id")
+
+	_, err = MarkChannelRequestBodyLimit(1, dto.ChannelRequestBodyLimit{MaxBytes: 0})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid request body limit max bytes")
 }
 
 func TestChannelOtherSettingsSub2APIHTTPDisallowsRESTPreviousResponseID(t *testing.T) {

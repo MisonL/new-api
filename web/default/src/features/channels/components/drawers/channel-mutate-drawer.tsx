@@ -268,6 +268,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
+    Boolean(values.request_body_limit_max_bytes && values.request_body_limit_max_bytes > 0) ||
     values.strip_codex_encrypted_context ||
     (values.type === 1 && values.responses_upstream_profile) ||
     (values.responses_compact_mode &&
@@ -676,6 +677,23 @@ export function ChannelMutateDrawer({
     }
   }, [currentSettings])
 
+  const requestBodyLimitMeta = useMemo(() => {
+    const settings = parseSettingsRecord(currentSettings)
+    const limit = settings.request_body_limit
+    if (!isRecord(limit)) return null
+    const maxBytes = Number(limit.max_bytes)
+    if (!Number.isFinite(maxBytes) || maxBytes <= 0) return null
+    const source = typeof limit.source === 'string' ? limit.source : ''
+    const reason = typeof limit.reason === 'string' ? limit.reason : ''
+
+    return {
+      maxBytes: Math.trunc(maxBytes),
+      observedAt: limit.observed_at,
+      source,
+      reason,
+    }
+  }, [currentSettings])
+
   const upstreamDetectedModelsPreview = upstreamUpdateMeta.detectedModels.slice(
     0,
     UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT
@@ -990,6 +1008,7 @@ export function ChannelMutateDrawer({
   // Handle successful submission
   const handleSuccess = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+    queryClient.invalidateQueries({ queryKey: channelsQueryKeys.top() })
     onOpenChange(false)
     setOpen(null)
   }, [queryClient, onOpenChange, setOpen])
@@ -3026,6 +3045,95 @@ export function ChannelMutateDrawer({
                       title={t('Channel Extra Settings')}
                       icon={<Settings className='h-4 w-4' />}
                     />
+                    <div className='space-y-3 rounded-lg border p-4'>
+                      <SubHeading
+                        title={t('Request body routing limit')}
+                        icon={<Route className='h-3.5 w-3.5' />}
+                      />
+                      <FormField
+                        control={form.control}
+                        name='request_body_limit_max_bytes'
+                        render={({ field }) => (
+                          <FormItem>
+                            <div className='flex flex-col gap-3 sm:flex-row sm:items-end'>
+                              <div className='flex-1 space-y-2'>
+                                <FormLabel>
+                                  {t('Accepted request body size (bytes)')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={0}
+                                    step={1}
+                                    value={field.value ?? 0}
+                                    onChange={(event) => {
+                                      const next = Number(event.target.value)
+                                      field.onChange(
+                                        Number.isFinite(next)
+                                          ? Math.max(0, Math.trunc(next))
+                                          : 0
+                                      )
+                                    }}
+                                    disabled={isSubmitting}
+                                  />
+                                </FormControl>
+                              </div>
+                              <Button
+                                type='button'
+                                variant='outline'
+                                onClick={() =>
+                                  form.setValue(
+                                    'request_body_limit_max_bytes',
+                                    0,
+                                    { shouldDirty: true }
+                                  )
+                                }
+                                disabled={isSubmitting}
+                              >
+                                <Trash2 className='mr-2 h-4 w-4' />
+                                {t('Clear limit')}
+                              </Button>
+                            </div>
+                            <FormDescription>
+                              {t(
+                                'Set 0 to delete this channel limit. When the global guard is enabled, upstream 413 responses can update this value automatically.'
+                              )}
+                            </FormDescription>
+                            {requestBodyLimitMeta && (
+                              <div className='text-muted-foreground grid gap-2 rounded-md border px-3 py-2 text-xs sm:grid-cols-2'>
+                                <div>
+                                  <span className='text-foreground font-medium'>
+                                    {t('Stored limit')}:
+                                  </span>{' '}
+                                  {requestBodyLimitMeta.maxBytes}
+                                </div>
+                                <div>
+                                  <span className='text-foreground font-medium'>
+                                    {t('Observed at')}:
+                                  </span>{' '}
+                                  {formatUnixTime(
+                                    requestBodyLimitMeta.observedAt
+                                  )}
+                                </div>
+                                <div>
+                                  <span className='text-foreground font-medium'>
+                                    {t('Source')}:
+                                  </span>{' '}
+                                  {requestBodyLimitMeta.source || '-'}
+                                </div>
+                                <div>
+                                  <span className='text-foreground font-medium'>
+                                    {t('Reason')}:
+                                  </span>{' '}
+                                  {requestBodyLimitMeta.reason || '-'}
+                                </div>
+                              </div>
+                            )}
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                     {(currentType === 1 ||
                       currentType === 3 ||
                       currentType === 14) && (

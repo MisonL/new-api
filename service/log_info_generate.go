@@ -19,6 +19,11 @@ func appendRequestPath(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other
 	if other == nil {
 		return
 	}
+	if relayInfo != nil {
+		if upstreamPath := strings.TrimSpace(relayInfo.UpstreamRequestPath); upstreamPath != "" {
+			other["upstream_request_path"] = upstreamPath
+		}
+	}
 	if ctx != nil && ctx.Request != nil && ctx.Request.URL != nil {
 		if path := ctx.Request.URL.Path; path != "" {
 			other["request_path"] = path
@@ -121,6 +126,12 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesEncryptedContextRetry) {
 			other["responses_encrypted_context_retry"] = true
 		}
+		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude) {
+			other["responses_chat_compat_ignored_encrypted_include"] = true
+		}
+		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesChatCompatReasoningSummaryMapped) {
+			other["responses_chat_compat_reasoning_summary_mapped"] = true
+		}
 		if channelSkip := common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip); channelSkip != "" {
 			other["responses_compact_channel_skip"] = channelSkip
 		}
@@ -166,6 +177,7 @@ func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settin
 		"supports_rest_previous_response_id":   snapshotInfo.SupportsRestPreviousResponseID,
 		"supports_compaction_item_passthrough": snapshotInfo.SupportsCompactionItemPassthrough,
 		"supports_namespace_tools":             snapshotInfo.SupportsNamespaceTools,
+		"strips_responses_encrypted_reasoning": snapshotInfo.StripsResponsesEncryptedReasoning,
 	}
 	if snapshotInfo.Profile != "" {
 		snapshot["profile"] = string(snapshotInfo.Profile)
@@ -326,6 +338,15 @@ func appendUpstreamMetadata(relayInfo *relaycommon.RelayInfo, other map[string]i
 	if relayInfo.UpstreamUsageMetadata != "" {
 		other["upstream_usage_metadata"] = relayInfo.UpstreamUsageMetadata
 	}
+	if headerMs, ok := relayInfo.UpstreamHeaderLatencyMs(); ok {
+		other["upstream_header_ms"] = float64(headerMs)
+	}
+	if ttfbMs, ok := relayInfo.UpstreamFirstByteLatencyMs(); ok {
+		other["upstream_ttfb_ms"] = float64(ttfbMs)
+	}
+	if totalMs, ok := relayInfo.UpstreamTotalLatencyMs(); ok {
+		other["upstream_total_ms"] = float64(totalMs)
+	}
 }
 
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
@@ -340,7 +361,7 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 		return
 	}
 	ss := relayInfo.StreamStatus
-	status := classifyStreamStatus(ss)
+	status := classifyStreamStatus(relayInfo, ss)
 	streamInfo := map[string]interface{}{
 		"status":     status,
 		"end_reason": string(ss.EndReason),
@@ -424,12 +445,18 @@ func sanitizeAppliedHeaderAuditEntries(entries []AppliedHeaderAuditEntry) []Appl
 	return sanitized
 }
 
-func classifyStreamStatus(ss *relaycommon.StreamStatus) string {
+func classifyStreamStatus(relayInfo *relaycommon.RelayInfo, ss *relaycommon.StreamStatus) string {
 	if ss == nil {
 		return "ok"
 	}
 	if ss.IsCanceled() {
 		return "canceled"
+	}
+	if ss.EndReason == relaycommon.StreamEndReasonUpstreamInterrupted &&
+		relayInfo != nil &&
+		!ss.HasErrors() &&
+		relayInfo.ReceivedResponseCount > 0 {
+		return "partial"
 	}
 	if !ss.IsNormalEnd() || ss.HasErrors() {
 		return "error"

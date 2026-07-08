@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -60,7 +59,7 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if err != nil {
 		return nil, err
 	}
-	if !isCompact && hasSyntheticReference {
+	if hasSyntheticReference {
 		convertedRequest, ok, visibleOnly, applyInfo, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(relaycommon.GinRequestContext(c), service.SyntheticCompactScopeFromSource(info), request)
 		service.SetSyntheticCompactApplyInfo(c, applyInfo)
 		if err != nil {
@@ -110,14 +109,14 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	// Codex backend requires the `instructions` field to be present.
 	// Keep it consistent with Codex CLI behavior by defaulting to an empty string.
 	if len(request.Instructions) == 0 {
-		request.Instructions = json.RawMessage(`""`)
+		request.Instructions = common.RawMessage(`""`)
 	}
 
 	if isCompact {
-		return request, nil
+		return applyCodexCompactV2ContextSafeguard(c, info, request)
 	}
 	// codex: store must be false
-	request.Store = json.RawMessage("false")
+	request.Store = common.RawMessage("false")
 	// rm max_output_tokens
 	request.MaxOutputTokens = nil
 	request.Temperature = nil

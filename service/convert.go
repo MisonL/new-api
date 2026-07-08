@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -90,6 +91,7 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 
 	// Convert messages
 	openAIMessages := make([]dto.Message, 0)
+	extractThinkTaggedHistory := shouldExtractThinkTaggedClaudeHistory(claudeRequest.Model, info)
 
 	// Add system message if present
 	if claudeRequest.System != nil {
@@ -137,7 +139,25 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 
 		//log.Printf("claudeMessage.Content: %v", claudeMessage.Content)
 		if claudeMessage.IsStringContent() {
-			openAIMessage.SetStringContent(claudeMessage.GetStringContent())
+			contentText := claudeMessage.GetStringContent()
+			if claudeMessage.Role == "assistant" && extractThinkTaggedHistory {
+				visibleText, reasoningTexts, hasTaggedReasoning := splitThinkTaggedText(contentText)
+				if hasTaggedReasoning {
+					var reasoningBuilder strings.Builder
+					for _, reasoningText := range reasoningTexts {
+						appendTrimmedReasoningText(&reasoningBuilder, reasoningText)
+					}
+					if reasoningBuilder.Len() > 0 {
+						thinking := reasoningBuilder.String()
+						openAIMessage.ReasoningContent = &thinking
+					}
+					openAIMessage.SetStringContent(visibleText)
+				} else {
+					openAIMessage.SetStringContent(contentText)
+				}
+			} else {
+				openAIMessage.SetStringContent(contentText)
+			}
 		} else {
 			content, err := claudeMessage.ParseContent()
 			if err != nil {
@@ -147,16 +167,43 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 			var toolCalls []dto.ToolCallRequest
 			var reasoningBuilder strings.Builder
 			mediaMessages := make([]dto.MediaContent, 0, len(contents))
+			previousText := ""
+			previousTextWasThinkStripped := false
 
 			for _, mediaMsg := range contents {
 				switch mediaMsg.Type {
 				case "text", "input_text":
+					text := mediaMsg.GetText()
+					textWasThinkStripped := false
+					if claudeMessage.Role == "assistant" && extractThinkTaggedHistory {
+						visibleText, reasoningTexts, hasTaggedReasoning := splitThinkTaggedText(text)
+						if hasTaggedReasoning {
+							for _, reasoningText := range reasoningTexts {
+								appendTrimmedReasoningText(&reasoningBuilder, reasoningText)
+							}
+							text = visibleText
+							textWasThinkStripped = true
+						}
+					}
+					if textWasThinkStripped && text == "" {
+						if previousText != "" {
+							previousTextWasThinkStripped = true
+						}
+						continue
+					}
+					if previousText != "" && (previousTextWasThinkStripped || textWasThinkStripped) {
+						if needsVisibleTextBoundarySpace(previousText, text) {
+							text = " " + text
+						}
+					}
 					message := dto.MediaContent{
 						Type:         "text",
-						Text:         mediaMsg.GetText(),
+						Text:         text,
 						CacheControl: mediaMsg.CacheControl,
 					}
 					mediaMessages = append(mediaMessages, message)
+					previousText = text
+					previousTextWasThinkStripped = textWasThinkStripped
 				case "thinking":
 					if claudeMessage.Role == "assistant" && mediaMsg.Thinking != nil && *mediaMsg.Thinking != "" {
 						appendReasoningText(&reasoningBuilder, *mediaMsg.Thinking)
@@ -243,12 +290,188 @@ func openAITextContentFromMediaMessages(messages []dto.MediaContent) string {
 	return builder.String()
 }
 
+func needsVisibleTextBoundarySpace(previous string, current string) bool {
+	if previous == "" || current == "" {
+		return false
+	}
+	if isTrailingWhitespace(previous) || isLeadingWhitespace(current) {
+		return false
+	}
+	previousRune, previousOK := lastRune(previous)
+	currentRune, currentOK := firstRune(current)
+	if !previousOK || !currentOK {
+		return false
+	}
+	return !isOpeningPunctuation(previousRune) && !isLeadingPunctuation(currentRune)
+}
+
+func isTrailingWhitespace(text string) bool {
+	last, ok := lastRune(text)
+	return ok && unicode.IsSpace(last)
+}
+
+func isLeadingWhitespace(text string) bool {
+	first, ok := firstRune(text)
+	return ok && unicode.IsSpace(first)
+}
+
+func firstRune(text string) (rune, bool) {
+	for _, r := range text {
+		return r, true
+	}
+	return 0, false
+}
+
+func lastRune(text string) (rune, bool) {
+	var last rune
+	ok := false
+	for _, r := range text {
+		last = r
+		ok = true
+	}
+	return last, ok
+}
+
+func isOpeningPunctuation(r rune) bool {
+	return strings.ContainsRune("([{", r)
+}
+
+func isLeadingPunctuation(r rune) bool {
+	return unicode.IsPunct(r) || unicode.IsSymbol(r)
+}
+
 func appendReasoningText(builder *strings.Builder, text string) {
 	if text == "" {
 		return
 	}
 	if builder.Len() > 0 {
 		builder.WriteString("\n")
+	}
+	builder.WriteString(text)
+}
+
+func appendTrimmedReasoningText(builder *strings.Builder, text string) {
+	appendReasoningText(builder, strings.TrimSpace(text))
+}
+
+func shouldExtractThinkTaggedClaudeHistory(model string, info *relaycommon.RelayInfo) bool {
+	return hasDeepSeekModelName(model, info)
+}
+
+func isDeepSeekModelName(model string) bool {
+	model = strings.TrimSpace(strings.ToLower(model))
+	if model == "deepseek" {
+		return true
+	}
+	if strings.HasPrefix(model, "deepseek-") {
+		return true
+	}
+	return strings.HasPrefix(model, "deepseek/")
+}
+
+func shouldExposeReasoningAsClaudeThinking(model string, info *relaycommon.RelayInfo) bool {
+	return hasDeepSeekModelName(model, info)
+}
+
+func hasDeepSeekModelName(model string, info *relaycommon.RelayInfo) bool {
+	models := []string{model}
+	if info != nil {
+		models = append(models, info.OriginModelName)
+		// UpstreamModelName is only meaningful after channel metadata is attached.
+		if info.ChannelMeta != nil {
+			models = append(models, info.UpstreamModelName)
+		}
+	}
+	for _, name := range models {
+		if isDeepSeekModelName(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func splitThinkTaggedText(text string) (string, []string, bool) {
+	const startTag = "<think>"
+	const endTag = "</think>"
+
+	var visibleBuilder strings.Builder
+	var reasoningTexts []string
+	cursor := 0
+	for {
+		startRel := indexASCIIFold(text[cursor:], startTag)
+		if startRel < 0 {
+			appendVisibleThinkText(&visibleBuilder, text[cursor:])
+			break
+		}
+
+		start := cursor + startRel
+		reasoningStart := start + len(startTag)
+		endRel := indexASCIIFold(text[reasoningStart:], endTag)
+		if endRel < 0 {
+			appendVisibleThinkText(&visibleBuilder, text[cursor:])
+			break
+		}
+
+		end := reasoningStart + endRel
+		appendVisibleThinkText(&visibleBuilder, text[cursor:start])
+		reasoningTexts = append(reasoningTexts, text[reasoningStart:end])
+		cursor = end + len(endTag)
+	}
+
+	if len(reasoningTexts) == 0 {
+		return text, nil, false
+	}
+	visibleText := strings.TrimSpace(visibleBuilder.String())
+	for _, reasoningText := range reasoningTexts {
+		if strings.TrimSpace(reasoningText) != "" {
+			return visibleText, reasoningTexts, true
+		}
+	}
+	if visibleText == "" {
+		return text, nil, false
+	}
+	return visibleText, reasoningTexts, true
+}
+
+func indexASCIIFold(text string, pattern string) int {
+	if pattern == "" {
+		return 0
+	}
+	patternLen := len(pattern)
+	for index := 0; index+patternLen <= len(text); index++ {
+		if equalASCIIFold(text[index:index+patternLen], pattern) {
+			return index
+		}
+	}
+	return -1
+}
+
+func equalASCIIFold(text string, pattern string) bool {
+	if len(text) != len(pattern) {
+		return false
+	}
+	for index := range pattern {
+		if toLowerASCII(text[index]) != toLowerASCII(pattern[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func toLowerASCII(value byte) byte {
+	if value >= 'A' && value <= 'Z' {
+		return value + ('a' - 'A')
+	}
+	return value
+}
+
+func appendVisibleThinkText(builder *strings.Builder, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if builder.Len() > 0 {
+		builder.WriteString(" ")
 	}
 	builder.WriteString(text)
 }
@@ -338,6 +561,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 	if info.ClaudeConvertInfo.Done {
 		return nil
 	}
+	allowClaudeThinking := shouldExposeReasoningAsClaudeThinking(openAIResponse.Model, info)
 
 	var claudeResponses []*dto.ClaudeResponse
 	// stopOpenBlocks emits the required content_block_stop event(s) for the currently open block(s)
@@ -382,6 +606,9 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 		info.ClaudeConvertInfo.LastMessagesType = relaycommon.LastMessageTypeNone
 	}
 	appendReasoningDelta := func(reasoning string) {
+		if !allowClaudeThinking {
+			return
+		}
 		if reasoning == "" {
 			return
 		}
@@ -623,6 +850,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relaycommon.RelayInfo) *dto.ClaudeResponse {
 	var stopReason string
 	contents := make([]dto.ClaudeMediaMessage, 0)
+	allowClaudeThinking := shouldExposeReasoningAsClaudeThinking(openAIResponse.Model, info)
 	claudeResponse := &dto.ClaudeResponse{
 		Id:    openAIResponse.Id,
 		Type:  "message",
@@ -631,11 +859,13 @@ func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relayco
 	}
 	for _, choice := range openAIResponse.Choices {
 		stopReason = stopReasonOpenAI2Claude(choice.FinishReason)
-		if reasoningContent := choice.GetReasoningContent(); reasoningContent != "" {
-			claudeContent := dto.ClaudeMediaMessage{}
-			claudeContent.Type = "thinking"
-			claudeContent.Thinking = common.GetPointer[string](reasoningContent)
-			contents = append(contents, claudeContent)
+		if allowClaudeThinking {
+			if reasoningContent := choice.GetReasoningContent(); reasoningContent != "" {
+				claudeContent := dto.ClaudeMediaMessage{}
+				claudeContent.Type = "thinking"
+				claudeContent.Thinking = common.GetPointer[string](reasoningContent)
+				contents = append(contents, claudeContent)
+			}
 		}
 		if textContent := choice.Message.StringContent(); textContent != "" || choice.FinishReason != "tool_calls" {
 			claudeContent := dto.ClaudeMediaMessage{}

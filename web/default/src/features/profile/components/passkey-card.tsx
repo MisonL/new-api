@@ -212,7 +212,7 @@ export function PasskeyCard({ loading: pageLoading }: PasskeyCardProps) {
                     <p className='font-medium'>{t('Passkey Authentication')}</p>
                     <StatusBadge
                       label={enabled ? t('Enabled') : t('Disabled')}
-                      variant={enabled ? 'success' : 'neutral'}
+                      variant={enabled ? 'success' : 'disabled'}
                       showDot
                       copyable={false}
                     />

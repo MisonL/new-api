@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"io"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -47,6 +48,42 @@ func TestGenerateTextOtherInfoIncludesValidFirstResponseLatency(t *testing.T) {
 
 	other := GenerateTextOtherInfo(ctx, relayInfo, 1, 1, 1, 0, 0, -1, -1)
 	require.Equal(t, 1500.0, other["frt"])
+}
+
+func TestGenerateTextOtherInfoIncludesUpstreamTiming(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+
+	base := time.Unix(1_700_000_000, 0)
+	relayInfo := &relaycommon.RelayInfo{
+		ChannelMeta:           &relaycommon.ChannelMeta{},
+		UpstreamRequestStart:  base,
+		UpstreamHeaderTime:    base.Add(120 * time.Millisecond),
+		UpstreamFirstByteTime: base.Add(250 * time.Millisecond),
+		UpstreamEndTime:       base.Add(900 * time.Millisecond),
+	}
+
+	other := GenerateTextOtherInfo(ctx, relayInfo, 1, 1, 1, 0, 0, -1, -1)
+	require.Equal(t, 120.0, other["upstream_header_ms"])
+	require.Equal(t, 250.0, other["upstream_ttfb_ms"])
+	require.Equal(t, 900.0, other["upstream_total_ms"])
+}
+
+func TestGenerateTextOtherInfoIncludesUpstreamRequestPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta:         &relaycommon.ChannelMeta{},
+		UpstreamRequestPath: "/v1/chat/completions",
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "/v1/messages", other["request_path"])
+	require.Equal(t, "/v1/chat/completions", other["upstream_request_path"])
 }
 
 func TestAppendStreamStatusCategorizesClientGoneAsCanceled(t *testing.T) {
@@ -100,6 +137,59 @@ func TestAppendStreamStatusKeepsBenignClientGoneAsCanceled(t *testing.T) {
 	require.Equal(t, "canceled", streamInfo["status"])
 	require.Equal(t, "client_gone", streamInfo["end_reason"])
 	require.Equal(t, 1, streamInfo["error_count"])
+}
+
+func TestAppendStreamStatusMarksInterruptedAfterChunksAsPartial(t *testing.T) {
+	ss := relaycommon.NewStreamStatus()
+	ss.SetEndReason(relaycommon.StreamEndReasonUpstreamInterrupted, io.ErrUnexpectedEOF)
+
+	other := make(map[string]interface{})
+	appendStreamStatus(&relaycommon.RelayInfo{
+		IsStream:              true,
+		ReceivedResponseCount: 3,
+		StreamStatus:          ss,
+	}, other)
+
+	streamInfo, ok := other["stream_status"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "partial", streamInfo["status"])
+	require.Equal(t, "upstream_transport_interrupted", streamInfo["end_reason"])
+	require.Equal(t, io.ErrUnexpectedEOF.Error(), streamInfo["end_error"])
+}
+
+func TestAppendStreamStatusKeepsInterruptedAfterChunksWithErrorsAsError(t *testing.T) {
+	ss := relaycommon.NewStreamStatus()
+	ss.RecordError("upstream reported an error")
+	ss.SetEndReason(relaycommon.StreamEndReasonUpstreamInterrupted, io.ErrUnexpectedEOF)
+
+	other := make(map[string]interface{})
+	appendStreamStatus(&relaycommon.RelayInfo{
+		IsStream:              true,
+		ReceivedResponseCount: 3,
+		StreamStatus:          ss,
+	}, other)
+
+	streamInfo, ok := other["stream_status"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "error", streamInfo["status"])
+	require.Equal(t, "upstream_transport_interrupted", streamInfo["end_reason"])
+	require.Equal(t, 1, streamInfo["error_count"])
+}
+
+func TestAppendStreamStatusKeepsInterruptedBeforeChunksAsError(t *testing.T) {
+	ss := relaycommon.NewStreamStatus()
+	ss.SetEndReason(relaycommon.StreamEndReasonUpstreamInterrupted, io.ErrUnexpectedEOF)
+
+	other := make(map[string]interface{})
+	appendStreamStatus(&relaycommon.RelayInfo{
+		IsStream:     true,
+		StreamStatus: ss,
+	}, other)
+
+	streamInfo, ok := other["stream_status"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "error", streamInfo["status"])
+	require.Equal(t, "upstream_transport_interrupted", streamInfo["end_reason"])
 }
 
 func TestGenerateTextOtherInfoIncludesRequestHeaderPolicyAudit(t *testing.T) {
@@ -222,6 +312,22 @@ func TestGenerateTextOtherInfoIncludesResponsesProfileAndPreviousIDAction(t *tes
 	require.Equal(t, "rejected_by_upstream_profile", other["responses_previous_id_action"])
 }
 
+func TestGenerateTextOtherInfoIncludesResponsesChatCompatMarkers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesChatCompatReasoningSummaryMapped, true)
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, true, other["responses_chat_compat_ignored_encrypted_include"])
+	require.Equal(t, true, other["responses_chat_compat_reasoning_summary_mapped"])
+}
+
 func TestGenerateTextOtherInfoIncludesMissingLocalSyntheticStateAction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -333,10 +439,11 @@ func TestResponsesChannelCapabilitySnapshotTreatsSub2APIHTTPAsNoRESTPreviousID(t
 	require.Equal(t, "auto", snapshot["compact_mode_setting"])
 	require.Equal(t, "native", snapshot["compact_mode_effective"])
 	require.Equal(t, true, snapshot["supports_responses"])
-	require.Equal(t, true, snapshot["supports_responses_compact"])
+	require.Equal(t, false, snapshot["supports_responses_compact"])
 	require.Equal(t, false, snapshot["supports_rest_previous_response_id"])
 	require.Equal(t, false, snapshot["supports_compaction_item_passthrough"])
 	require.Equal(t, false, snapshot["supports_namespace_tools"])
+	require.Equal(t, true, snapshot["strips_responses_encrypted_reasoning"])
 }
 
 func TestResponsesChannelCapabilitySnapshotMarksSafeDefaultSource(t *testing.T) {
@@ -438,6 +545,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 		wantSupportsRESTPreviousResponseID    bool
 		wantSupportsCompactionItemPassthrough bool
 		wantSupportsNamespaceTools            bool
+		wantStripsEncryptedReasoning          bool
 	}{
 		{
 			name:                                  "official newapi",
@@ -447,15 +555,17 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsRESTPreviousResponseID:    true,
 			wantSupportsCompactionItemPassthrough: true,
 			wantSupportsNamespaceTools:            true,
+			wantStripsEncryptedReasoning:          false,
 		},
 		{
 			name:                                  "sub2api http",
 			profile:                               dto.ResponsesUpstreamProfileSub2APIHTTP,
 			wantCompactMode:                       "native",
-			wantSupportsResponsesCompact:          true,
+			wantSupportsResponsesCompact:          false,
 			wantSupportsRESTPreviousResponseID:    false,
 			wantSupportsCompactionItemPassthrough: false,
 			wantSupportsNamespaceTools:            false,
+			wantStripsEncryptedReasoning:          true,
 		},
 		{
 			name:                                  "sub2api websocket v2",
@@ -465,6 +575,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsRESTPreviousResponseID:    true,
 			wantSupportsCompactionItemPassthrough: true,
 			wantSupportsNamespaceTools:            true,
+			wantStripsEncryptedReasoning:          false,
 		},
 		{
 			name:                                  "generic openai",
@@ -474,6 +585,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsRESTPreviousResponseID:    false,
 			wantSupportsCompactionItemPassthrough: false,
 			wantSupportsNamespaceTools:            false,
+			wantStripsEncryptedReasoning:          false,
 		},
 		{
 			name:                                  "generic proxy",
@@ -483,6 +595,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsRESTPreviousResponseID:    false,
 			wantSupportsCompactionItemPassthrough: false,
 			wantSupportsNamespaceTools:            false,
+			wantStripsEncryptedReasoning:          true,
 		},
 		{
 			name:                                  "chat only proxy",
@@ -492,6 +605,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsRESTPreviousResponseID:    false,
 			wantSupportsCompactionItemPassthrough: false,
 			wantSupportsNamespaceTools:            false,
+			wantStripsEncryptedReasoning:          true,
 		},
 	}
 
@@ -513,6 +627,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			require.Equal(t, tc.wantSupportsRESTPreviousResponseID, snapshot["supports_rest_previous_response_id"])
 			require.Equal(t, tc.wantSupportsCompactionItemPassthrough, snapshot["supports_compaction_item_passthrough"])
 			require.Equal(t, tc.wantSupportsNamespaceTools, snapshot["supports_namespace_tools"])
+			require.Equal(t, tc.wantStripsEncryptedReasoning, snapshot["strips_responses_encrypted_reasoning"])
 		})
 	}
 }

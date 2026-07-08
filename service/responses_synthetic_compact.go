@@ -256,6 +256,10 @@ func IsNativeOpaqueCompactReference(id string) bool {
 	return strings.HasPrefix(strings.TrimSpace(id), nativeOpaqueCompactIDPrefix)
 }
 
+func HasLocalNativeOpaqueCompactReference(ctx context.Context, req dto.OpenAIResponsesRequest) (bool, error) {
+	return hasLocalNativeOpaqueCompactReference(ctx, req)
+}
+
 func forceResponsesCompactVisibleOnly(ctx context.Context) bool {
 	if ctx == nil {
 		return false
@@ -388,6 +392,7 @@ func ApplySyntheticCompactStateWithInfo(ctx context.Context, scope SyntheticComp
 		info.MarkerKind = model.NormalizeSyntheticCompactStateKind(state.Kind)
 		info.ScopeResult = "mismatch"
 		info.FallbackReason = "scope_mismatch"
+		info.StateHash = strings.TrimSpace(state.StateHash)
 		return dto.OpenAIResponsesRequest{}, true, info, err
 	}
 	if model.NormalizeSyntheticCompactStateKind(state.Kind) == model.SyntheticCompactStateKindNativeOpaque {
@@ -406,6 +411,7 @@ func ApplySyntheticCompactStateWithInfo(ctx context.Context, scope SyntheticComp
 		info.MarkerKind = model.NormalizeSyntheticCompactStateKind(state.Kind)
 		info.ScopeResult = "matched"
 		info.FallbackReason = "marker_cleanup_failed"
+		info.StateHash = strings.TrimSpace(state.StateHash)
 		return dto.OpenAIResponsesRequest{}, true, info, err
 	}
 	contextText := syntheticCompactRecoveredContextText(state.Summary)
@@ -415,6 +421,7 @@ func ApplySyntheticCompactStateWithInfo(ctx context.Context, scope SyntheticComp
 		info.MarkerKind = model.NormalizeSyntheticCompactStateKind(state.Kind)
 		info.ScopeResult = "matched"
 		info.FallbackReason = "context_message_build_failed"
+		info.StateHash = strings.TrimSpace(state.StateHash)
 		return dto.OpenAIResponsesRequest{}, false, info, err
 	}
 	items := []common.RawMessage{contextItem}
@@ -466,6 +473,7 @@ func RestoreNativeOpaquePreviousResponseID(ctx context.Context, scope SyntheticC
 		info.MarkerKind = model.SyntheticCompactStateKindNativeOpaque
 		info.ScopeResult = "mismatch"
 		info.FallbackReason = "scope_mismatch"
+		info.StateHash = strings.TrimSpace(state.StateHash)
 		return req, false, info, err
 	}
 	upstreamResponseID := strings.TrimSpace(state.UpstreamResponseID)
@@ -474,6 +482,7 @@ func RestoreNativeOpaquePreviousResponseID(ctx context.Context, scope SyntheticC
 		info.MarkerKind = model.SyntheticCompactStateKindNativeOpaque
 		info.ScopeResult = "strict"
 		info.FallbackReason = "upstream_response_id_missing"
+		info.StateHash = strings.TrimSpace(state.StateHash)
 		return req, false, info, ErrResponsesNativeOpaqueStateNotRestorable
 	}
 	req.PreviousResponseID = upstreamResponseID

@@ -217,6 +217,7 @@ func GetStatus(c *gin.Context) {
 	serverAddress := resolveServerAddressForRequest(c.Request)
 	cs := console_setting.GetConsoleSetting()
 	customProviders := getCustomOAuthStatusPayload()
+	generalSettings := operation_setting.GetGeneralSettingSnapshot()
 	common.OptionMapRWMutex.RLock()
 	defer common.OptionMapRWMutex.RUnlock()
 
@@ -246,13 +247,13 @@ func GetStatus(c *gin.Context) {
 		"turnstile_check":             common.TurnstileCheckEnabled,
 		"turnstile_site_key":          common.TurnstileSiteKey,
 		"top_up_link":                 common.TopUpLink,
-		"docs_link":                   operation_setting.GetGeneralSetting().DocsLink,
+		"docs_link":                   generalSettings.DocsLink,
 		"quota_per_unit":              common.QuotaPerUnit,
 		// 兼容旧前端：保留 display_in_currency，同时提供新的 quota_display_type
-		"display_in_currency":           operation_setting.IsCurrencyDisplay(),
-		"quota_display_type":            operation_setting.GetQuotaDisplayType(),
-		"custom_currency_symbol":        operation_setting.GetGeneralSetting().CustomCurrencySymbol,
-		"custom_currency_exchange_rate": operation_setting.GetGeneralSetting().CustomCurrencyExchangeRate,
+		"display_in_currency":           generalSettings.QuotaDisplayType != operation_setting.QuotaDisplayTypeTokens,
+		"quota_display_type":            generalSettings.QuotaDisplayType,
+		"custom_currency_symbol":        generalSettings.CustomCurrencySymbol,
+		"custom_currency_exchange_rate": generalSettings.CustomCurrencyExchangeRate,
 		"enable_batch_update":           common.BatchUpdateEnabled,
 		"enable_drawing":                common.DrawingEnabled,
 		"enable_task":                   common.TaskEnabled,

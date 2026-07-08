@@ -18,7 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useState, useEffect } from 'react';
-import { API, showError, showSuccess, copy } from '../../helpers';
+import {
+  API,
+  showError,
+  showSuccess,
+  copy,
+  getDisabledRowProps,
+} from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import {
   REDEMPTION_ACTIONS,
@@ -215,11 +221,7 @@ export const useRedemptionsData = () => {
     };
 
     if (record.status !== REDEMPTION_STATUS.UNUSED || isExpired(record)) {
-      return {
-        style: {
-          background: 'var(--semi-color-disabled-border)',
-        },
-      };
+      return getDisabledRowProps();
     } else {
       return {};
     }

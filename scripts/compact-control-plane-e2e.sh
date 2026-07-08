@@ -25,6 +25,8 @@ RUN_ID="compact_e2e_$(date +%Y%m%d%H%M%S)_$$"
 BACKUP_CHANNELS="${RUN_ID}_channels"
 BACKUP_ABILITIES="${RUN_ID}_abilities"
 BACKUP_TOKENS="${RUN_ID}_tokens"
+BACKUP_USERS="${RUN_ID}_users"
+BACKUP_OPTIONS="${RUN_ID}_options"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/newapi-compact-e2e.XXXXXX")"
 FAKE_PID=""
 HISTORY_FIXTURE_PATH="${COMPACT_E2E_HISTORY_FIXTURE:-}"
@@ -61,17 +63,21 @@ cleanup() {
   if psql_exec \
     -v test_group="$TEST_GROUP" \
     -v token_id="$TOKEN_ID" \
+    -v user_id="$TOKEN_ID" \
     -v channel_native_newapi="$CHANNEL_NATIVE_NEWAPI" \
     -v channel_sub2api_http="$CHANNEL_SUB2API_HTTP" \
     -v channel_synthetic_newapi="$CHANNEL_SYNTHETIC_NEWAPI" \
     -v channel_generic_openai="$CHANNEL_GENERIC_OPENAI" \
+    -v backup_options="$BACKUP_OPTIONS" \
     >"$cleanup_log" 2>&1 <<SQL
 begin;
 do \$\$
 begin
   if to_regclass('${BACKUP_ABILITIES}') is null
     or to_regclass('${BACKUP_CHANNELS}') is null
-    or to_regclass('${BACKUP_TOKENS}') is null then
+    or to_regclass('${BACKUP_TOKENS}') is null
+    or to_regclass('${BACKUP_USERS}') is null
+    or to_regclass('${BACKUP_OPTIONS}') is null then
     raise exception 'compact e2e backup tables are missing';
   end if;
 end
@@ -82,9 +88,15 @@ delete from channels where id in (:channel_native_newapi, :channel_sub2api_http,
 insert into channels select * from ${BACKUP_CHANNELS};
 delete from tokens where id = :token_id;
 insert into tokens select * from ${BACKUP_TOKENS};
+delete from users where id = :user_id;
+insert into users select * from ${BACKUP_USERS};
+delete from options where key in ('GroupRatio', 'UserUsableGroups');
+insert into options select * from ${BACKUP_OPTIONS};
 drop table if exists ${BACKUP_CHANNELS};
 drop table if exists ${BACKUP_ABILITIES};
 drop table if exists ${BACKUP_TOKENS};
+drop table if exists ${BACKUP_USERS};
+drop table if exists ${BACKUP_OPTIONS};
 commit;
 SQL
   then

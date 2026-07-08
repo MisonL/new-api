@@ -63,22 +63,24 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
   useEffect(() => {
     if (profile?.setting) {
       const parsed = parseUserSettings(profile.setting)
-      setSettings({
-        notify_type: parsed.notify_type || 'email',
-        quota_warning_threshold:
-          parsed.quota_warning_threshold ?? DEFAULT_QUOTA_WARNING_THRESHOLD,
-        notification_email: parsed.notification_email ?? '',
-        webhook_url: parsed.webhook_url ?? '',
-        webhook_secret: parsed.webhook_secret ?? '',
-        bark_url: parsed.bark_url ?? '',
-        gotify_url: parsed.gotify_url ?? '',
-        gotify_token: parsed.gotify_token ?? '',
-        gotify_priority: parsed.gotify_priority ?? 5,
-        accept_unset_model_ratio_model:
-          parsed.accept_unset_model_ratio_model || false,
-        record_ip_log: parsed.record_ip_log || false,
-        upstream_model_update_notify_enabled:
-          parsed.upstream_model_update_notify_enabled || false,
+      queueMicrotask(() => {
+        setSettings({
+          notify_type: parsed.notify_type || 'email',
+          quota_warning_threshold:
+            parsed.quota_warning_threshold ?? DEFAULT_QUOTA_WARNING_THRESHOLD,
+          notification_email: parsed.notification_email ?? '',
+          webhook_url: parsed.webhook_url ?? '',
+          webhook_secret: parsed.webhook_secret ?? '',
+          bark_url: parsed.bark_url ?? '',
+          gotify_url: parsed.gotify_url ?? '',
+          gotify_token: parsed.gotify_token ?? '',
+          gotify_priority: parsed.gotify_priority ?? 5,
+          accept_unset_model_ratio_model:
+            parsed.accept_unset_model_ratio_model || false,
+          record_ip_log: parsed.record_ip_log || false,
+          upstream_model_update_notify_enabled:
+            parsed.upstream_model_update_notify_enabled || false,
+        })
       })
     }
   }, [profile])

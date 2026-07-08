@@ -1020,7 +1020,7 @@ export const createCardProPagination = ({
       {/* 桌面端左侧总数信息 */}
       {!isMobile && (
         <span
-          className='text-sm select-none'
+          className='card-pro-pagination-text text-sm select-none'
           style={{ color: 'var(--semi-color-text-2)' }}
         >
           {totalText}

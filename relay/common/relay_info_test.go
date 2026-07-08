@@ -125,6 +125,62 @@ func TestRelayInfoSetFirstResponseTimeAtIgnoresInvalidEarlyTimestamp(t *testing.
 	}
 }
 
+func TestRelayInfoUpstreamLatencyMs(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	info := &RelayInfo{}
+
+	info.SetUpstreamRequestStartTimeAt(base)
+	info.SetUpstreamHeaderTimeAt(base.Add(120 * time.Millisecond))
+	info.SetUpstreamFirstByteTimeAt(base.Add(250 * time.Millisecond))
+	info.SetUpstreamEndTimeAt(base.Add(900 * time.Millisecond))
+
+	headerMs, ok := info.UpstreamHeaderLatencyMs()
+	require.True(t, ok)
+	require.Equal(t, int64(120), headerMs)
+
+	ttfbMs, ok := info.UpstreamFirstByteLatencyMs()
+	require.True(t, ok)
+	require.Equal(t, int64(250), ttfbMs)
+
+	totalMs, ok := info.UpstreamTotalLatencyMs()
+	require.True(t, ok)
+	require.Equal(t, int64(900), totalMs)
+}
+
+func TestRelayInfoUpstreamLatencyMsIgnoresInvalidTimes(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	info := &RelayInfo{}
+
+	info.SetUpstreamHeaderTimeAt(base)
+	require.True(t, info.UpstreamHeaderTime.IsZero())
+
+	info.SetUpstreamRequestStartTimeAt(base)
+	info.SetUpstreamEndTimeAt(base.Add(-time.Second))
+	require.True(t, info.UpstreamEndTime.IsZero())
+
+	latency, ok := info.UpstreamTotalLatencyMs()
+	require.False(t, ok)
+	require.Zero(t, latency)
+}
+
+func TestRelayInfoUpstreamRequestStartResetsPreviousAttemptTiming(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	info := &RelayInfo{}
+
+	info.SetUpstreamRequestStartTimeAt(base)
+	info.SetUpstreamHeaderTimeAt(base.Add(120 * time.Millisecond))
+	info.SetUpstreamFirstByteTimeAt(base.Add(250 * time.Millisecond))
+	info.SetUpstreamEndTimeAt(base.Add(900 * time.Millisecond))
+
+	nextStart := base.Add(2 * time.Second)
+	info.SetUpstreamRequestStartTimeAt(nextStart)
+
+	require.True(t, info.UpstreamHeaderTime.IsZero())
+	require.True(t, info.UpstreamFirstByteTime.IsZero())
+	require.True(t, info.UpstreamEndTime.IsZero())
+	require.Equal(t, nextStart, info.UpstreamRequestStart)
+}
+
 func TestRelayInfoGetFinalRequestRelayFormatPrefersExplicitFinal(t *testing.T) {
 	info := &RelayInfo{
 		RelayFormat:             types.RelayFormatOpenAI,
@@ -238,4 +294,149 @@ func TestGenRelayInfoResponsesCompactionInitializesConversionChain(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponsesCompaction}, info.RequestConversionChain)
 	require.Equal(t, types.RelayFormat(types.RelayFormatOpenAIResponsesCompaction), info.GetFinalRequestRelayFormat())
+}
+
+func TestGenRelayInfoResponsesCapturesImageGenerationToolMetadata(t *testing.T) {
+	prevMode := gin.Mode()
+	t.Cleanup(func() {
+		gin.SetMode(prevMode)
+	})
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Tools: json.RawMessage(`[{"type":"image_generation","quality":"high","size":"1536x1024"}]`),
+	}
+
+	info := GenRelayInfoResponses(ctx, request)
+
+	require.NotNil(t, info.ResponsesUsageInfo)
+	require.NotNil(t, info.ResponsesUsageInfo.BuiltInTools)
+	require.Equal(t, "image_generation", info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].ToolName)
+	require.Equal(t, "high", info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].Quality)
+	require.Equal(t, "1536x1024", info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].Size)
+}
+
+func TestGenRelayInfoResponsesCapturesWebSearchPreviewToolMetadata(t *testing.T) {
+	prevMode := gin.Mode()
+	t.Cleanup(func() {
+		gin.SetMode(prevMode)
+	})
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Tools: json.RawMessage(`[{"type":"web_search_preview","search_context_size":"high"}]`),
+	}
+
+	info := GenRelayInfoResponses(ctx, request)
+
+	require.NotNil(t, info.ResponsesUsageInfo)
+	require.NotNil(t, info.ResponsesUsageInfo.BuiltInTools)
+	require.Equal(t, "web_search_preview", info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview].ToolName)
+	require.Equal(t, "high", info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview].SearchContextSize)
+}
+
+func TestGenRelayInfoResponsesDefaultsWebSearchPreviewContextSize(t *testing.T) {
+	prevMode := gin.Mode()
+	t.Cleanup(func() {
+		gin.SetMode(prevMode)
+	})
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Tools: json.RawMessage(`[{"type":"web_search_preview"}]`),
+	}
+
+	info := GenRelayInfoResponses(ctx, request)
+
+	require.NotNil(t, info.ResponsesUsageInfo)
+	require.NotNil(t, info.ResponsesUsageInfo.BuiltInTools)
+	require.Equal(t, "web_search_preview", info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview].ToolName)
+	require.Equal(t, "medium", info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview].SearchContextSize)
+	require.True(t, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview].DefaultSearchSize)
+}
+
+func TestGenRelayInfoResponsesCanonicalizesVersionedWebSearchPreviewTool(t *testing.T) {
+	prevMode := gin.Mode()
+	t.Cleanup(func() {
+		gin.SetMode(prevMode)
+	})
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Tools: json.RawMessage(`[{"type":"web_search_preview_2025_03_11","search_context_size":"high"}]`),
+	}
+
+	info := GenRelayInfoResponses(ctx, request)
+
+	require.NotNil(t, info.ResponsesUsageInfo)
+	require.Len(t, info.ResponsesUsageInfo.BuiltInTools, 1)
+	require.Equal(t, "web_search_preview", info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview].ToolName)
+	require.Equal(t, "high", info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview].SearchContextSize)
+	require.False(t, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview].DefaultSearchSize)
+}
+
+func TestGenRelayInfoResponsesIgnoresOrdinaryToolDefinitions(t *testing.T) {
+	prevMode := gin.Mode()
+	t.Cleanup(func() {
+		gin.SetMode(prevMode)
+	})
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Tools: json.RawMessage(`[
+			{"type":"function","name":"read_file"},
+			{"type":"custom","name":"shell"},
+			{"type":"tool_search"},
+			{"type":"namespace","name":"codex_app","tools":[{"type":"function","name":"read_thread"}]},
+			{"type":"web_search","search_context_size":"low"}
+		]`),
+	}
+
+	info := GenRelayInfoResponses(ctx, request)
+
+	require.NotNil(t, info.ResponsesUsageInfo)
+	require.Len(t, info.ResponsesUsageInfo.BuiltInTools, 1)
+	require.Contains(t, info.ResponsesUsageInfo.BuiltInTools, dto.BuildInToolWebSearchPreview)
+	require.NotContains(t, info.ResponsesUsageInfo.BuiltInTools, "function")
+	require.NotContains(t, info.ResponsesUsageInfo.BuiltInTools, "custom")
+	require.NotContains(t, info.ResponsesUsageInfo.BuiltInTools, "tool_search")
+	require.NotContains(t, info.ResponsesUsageInfo.BuiltInTools, "namespace")
+	require.Equal(t, "low", info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview].SearchContextSize)
+}
+
+func TestGenRelayInfoResponsesCapturesFileSearchDefinition(t *testing.T) {
+	prevMode := gin.Mode()
+	t.Cleanup(func() {
+		gin.SetMode(prevMode)
+	})
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Tools: json.RawMessage(`[{"type":"file_search"}]`),
+	}
+
+	info := GenRelayInfoResponses(ctx, request)
+
+	require.NotNil(t, info.ResponsesUsageInfo)
+	require.Len(t, info.ResponsesUsageInfo.BuiltInTools, 1)
+	require.Equal(t, dto.BuildInToolFileSearch, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolFileSearch].ToolName)
+	require.Equal(t, 0, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolFileSearch].CallCount)
 }

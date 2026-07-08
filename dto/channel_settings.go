@@ -87,6 +87,7 @@ type ResponsesChannelCapabilitySnapshot struct {
 	SupportsRestPreviousResponseID    bool
 	SupportsCompactionItemPassthrough bool
 	SupportsNamespaceTools            bool
+	StripsResponsesEncryptedReasoning bool
 	Observed                          *ResponsesCapabilityObservation
 	Probe                             *ResponsesCapabilityObservation
 }
@@ -99,6 +100,7 @@ const (
 
 type ChannelOtherSettings struct {
 	AzureResponsesVersion                          string                              `json:"azure_responses_version,omitempty"`
+	RequestBodyLimit                               *ChannelRequestBodyLimit            `json:"request_body_limit,omitempty"`
 	ResponsesCompactMode                           ResponsesCompactMode                `json:"responses_compact_mode,omitempty"`
 	ResponsesCompactAutoFallbackDate               int                                 `json:"responses_compact_auto_fallback_date,omitempty"`
 	ResponsesCompactAutoFallbackAt                 int64                               `json:"responses_compact_auto_fallback_at,omitempty"`
@@ -131,6 +133,34 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateLastRemovedModels           []string                            `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
 	UpstreamModelUpdateIgnoredModels               []string                            `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
 	HeaderProfileStrategy                          *HeaderProfileStrategy              `json:"header_profile_strategy,omitempty"`
+}
+
+type ChannelRequestBodyLimit struct {
+	MaxBytes   int64  `json:"max_bytes,omitempty"`
+	ObservedAt int64  `json:"observed_at,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+func (s *ChannelOtherSettings) EffectiveRequestBodyLimit(now time.Time, ttlHours int) *ChannelRequestBodyLimit {
+	if s == nil || s.RequestBodyLimit == nil || s.RequestBodyLimit.MaxBytes <= 0 {
+		return nil
+	}
+	limit := *s.RequestBodyLimit
+	if ttlHours > 0 && limit.ObservedAt > 0 {
+		expireAt := time.Unix(limit.ObservedAt, 0).Add(time.Duration(ttlHours) * time.Hour)
+		if now.After(expireAt) {
+			return nil
+		}
+	}
+	return &limit
+}
+
+// ShouldSkipForRequestBodySize returns true when the request body reaches an
+// observed failing size for this channel.
+func (s *ChannelOtherSettings) ShouldSkipForRequestBodySize(requestBodySize int64, now time.Time, ttlHours int) bool {
+	limit := s.EffectiveRequestBodyLimit(now, ttlHours)
+	return limit != nil && requestBodySize >= limit.MaxBytes
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
@@ -181,6 +211,7 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 		SupportsRestPreviousResponseID:    defaultSupportsRESTPreviousResponseIDCapability(s, profile),
 		SupportsCompactionItemPassthrough: defaultSupportsCompactionItemPassthroughCapability(profile),
 		SupportsNamespaceTools:            defaultSupportsNamespaceToolsCapability(profile),
+		StripsResponsesEncryptedReasoning: s.ShouldStripResponsesEncryptedReasoning(),
 	}
 	registry := s.responsesCapabilityRegistry()
 	if registry != nil {
@@ -249,7 +280,9 @@ func defaultSupportsResponsesCompactCapability(channelType int, settings *Channe
 		return false
 	}
 	switch profile {
-	case ResponsesUpstreamProfileGenericProxy, ResponsesUpstreamProfileChatOnlyProxy:
+	case ResponsesUpstreamProfileSub2APIHTTP,
+		ResponsesUpstreamProfileGenericProxy,
+		ResponsesUpstreamProfileChatOnlyProxy:
 		return false
 	default:
 		return channelType == constant.ChannelTypeOpenAI

@@ -140,6 +140,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 	service.EnsureResponsesBootstrapRecoveryState(c, relayInfo.IsStream)
+	service.ApplyResponsesBootstrapRecoveryMetric(c, relayInfo)
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
@@ -249,6 +250,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
 			relayInfo.LastError = newAPIError
 			recordResponsesCapabilityObservation(c, relayInfo, newAPIError)
+			recordChannelRequestBodyLimit(c, relayInfo, newAPIError)
 
 			if shouldFallbackResponsesCompactNativeContext(c, relayInfo, newAPIError) {
 				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
@@ -351,8 +353,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		releaseBootstrapRecoveryBilling(c, relayInfo)
-		waitErr, canceled := waitForResponsesBootstrapRecoveryProbe(c)
+		waitErr, canceled := waitForResponsesBootstrapRecoveryProbe(c, relayInfo)
 		if canceled {
+			if relayInfo != nil && relayInfo.ResponsesBootstrapRecoveryAttempted {
+				service.RecordResponsesBootstrapRecovery(
+					relayInfo.OriginModelName,
+					relayInfo.UsingGroup,
+					false,
+					relayInfo.ResponsesBootstrapRecoveryWaitMs,
+				)
+			}
 			return
 		}
 		if waitErr != nil {
@@ -383,10 +393,19 @@ func releaseBootstrapRecoveryBilling(c *gin.Context, relayInfo *relaycommon.Rela
 	relayInfo.ResetBillingMetadata(c)
 }
 
-func waitForResponsesBootstrapRecoveryProbe(c *gin.Context) (*types.NewAPIError, bool) {
+func waitForResponsesBootstrapRecoveryProbe(c *gin.Context, relayInfo *relaycommon.RelayInfo) (*types.NewAPIError, bool) {
 	waitDuration, sendPing, ok := service.NextResponsesBootstrapWait(c, time.Now())
+	state, _ := service.GetResponsesBootstrapRecoveryState(c)
 	if !ok {
+		if state != nil {
+			logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery probe deadline reached: attempts=%d waited_ms=%d", state.WaitAttempts, state.WaitDuration.Milliseconds()))
+		}
 		return nil, false
+	}
+	service.MarkResponsesBootstrapRecoveryMetric(c)
+	service.ApplyResponsesBootstrapRecoveryMetric(c, relayInfo)
+	if waitErr, canceled, done := responsesBootstrapProbeContextDone(c, state); done {
+		return waitErr, canceled
 	}
 	if sendPing {
 		helper.SetEventStreamHeaders(c)
@@ -396,18 +415,36 @@ func waitForResponsesBootstrapRecoveryProbe(c *gin.Context) (*types.NewAPIError,
 			return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry()), false
 		}
 		service.MarkResponsesBootstrapPingSent(c, now)
+		if state != nil {
+			logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery probe ping: attempts=%d waited_ms=%d", state.WaitAttempts, state.WaitDuration.Milliseconds()))
+		}
 	}
 	timer := time.NewTimer(waitDuration)
 	defer timer.Stop()
 	select {
 	case <-c.Request.Context().Done():
-		if errors.Is(c.Request.Context().Err(), context.Canceled) {
-			return nil, true
-		}
-		return types.NewOpenAIError(c.Request.Context().Err(), types.ErrorCodeDoRequestFailed, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry()), false
+		waitErr, canceled, _ := responsesBootstrapProbeContextDone(c, state)
+		return waitErr, canceled
 	case <-timer.C:
+		if waitErr, canceled, done := responsesBootstrapProbeContextDone(c, state); done {
+			return waitErr, canceled
+		}
 		return nil, false
 	}
+}
+
+func responsesBootstrapProbeContextDone(c *gin.Context, state *service.ResponsesBootstrapRecoveryState) (*types.NewAPIError, bool, bool) {
+	err := c.Request.Context().Err()
+	if err == nil {
+		return nil, false, false
+	}
+	if state != nil {
+		logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery probe request context done: attempts=%d waited_ms=%d error=%q", state.WaitAttempts, state.WaitDuration.Milliseconds(), err.Error()))
+	}
+	if errors.Is(err, context.Canceled) {
+		return nil, true, true
+	}
+	return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry()), false, true
 }
 
 func shouldSuppressBootstrapRecoveryAutoBan(c *gin.Context, newAPIError *types.NewAPIError) bool {
@@ -615,6 +652,19 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 			info.OriginModelName,
 		)
 		if rule != nil && responsesCompactionRuleRequiresChannelSkip(c, info, rule, channel) {
+			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
+			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			return true, nil
+		}
+		return false, nil
+	}
+	hasLocalNativeOpaque, err := service.HasLocalNativeOpaqueCompactReference(c.Request.Context(), *request)
+	if err != nil {
+		return false, err
+	}
+	if hasLocalNativeOpaque {
+		channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
+		if !channelOtherSettings.ResolveResponsesChannelCapability(channel.Type).SupportsRestPreviousResponseID {
 			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
 			info.LastError = unsupportedNativeCompactionChannelError(channel)
 			return true, nil
@@ -915,6 +965,37 @@ func recordResponsesCapabilityObservation(c *gin.Context, info *relaycommon.Rela
 	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, settings)
 }
 
+func recordChannelRequestBodyLimit(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) {
+	if c == nil || info == nil || info.ChannelMeta == nil || err == nil {
+		return
+	}
+	policy := model_setting.GetRequestBodyLimitPolicy()
+	if !policy.Enabled {
+		return
+	}
+	if err.StatusCode != http.StatusRequestEntityTooLarge {
+		return
+	}
+	requestBodySize := common.GetContextKeyInt64(c, constant.ContextKeyRequestBodySize)
+	if requestBodySize <= 0 {
+		return
+	}
+	limit := dto.ChannelRequestBodyLimit{
+		MaxBytes:   requestBodySize,
+		ObservedAt: time.Now().UTC().Unix(),
+		Source:     "upstream_413",
+		Reason:     common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode()),
+	}
+	settings, updateErr := model.MarkChannelRequestBodyLimit(info.ChannelMeta.ChannelId, limit)
+	if updateErr != nil {
+		logger.LogError(c, fmt.Sprintf("mark channel request body limit failed: %s", updateErr.Error()))
+		return
+	}
+	info.ChannelOtherSettings = settings
+	info.ChannelMeta.ChannelOtherSettings = settings
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, settings)
+}
+
 func shouldRecordResponsesCapabilityObservation(relayMode int, err *types.NewAPIError) bool {
 	if err == nil {
 		return false
@@ -1095,9 +1176,10 @@ var responsesCompactFallbackContextKeys = []string{
 	string(constant.ContextKeyChannelOtherSetting),
 	"responses_compact_auto_fallback_attempted",
 	"responses_compact_context_fallback_attempted",
+	string(constant.ContextKeyResponsesCompactCodexContextPruned),
 	"responses_compact_previous_response_id_fallback_attempted",
 	"responses_compact_synthetic_fallback_channel_id",
-	"responses_compact_summary_model_fallback_attempted",
+	string(constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted),
 	string(constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted),
 	string(constant.ContextKeyResponsesCompactStateLookup),
 	string(constant.ContextKeyResponsesCompactStateScopeResult),
@@ -1268,7 +1350,7 @@ func retryResponsesCompactSummaryFallbackModels(c *gin.Context, info *relaycommo
 		return triggerErr
 	}
 	lastErr := triggerErr
-	c.Set("responses_compact_summary_model_fallback_attempted", true)
+	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted, true)
 	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModels, models)
 	service.MarkResponsesCompactFallbackAttempt(c, info, service.ResponsesCompactFallbackAttemptSummaryModel, models)
 	for _, fallbackModel := range models {
@@ -1492,20 +1574,30 @@ func shouldFallbackResponsesCompactSummaryModel(c *gin.Context, info *relaycommo
 	if err == nil || info == nil || info.ChannelMeta == nil {
 		return false
 	}
-	if c.GetBool("responses_compact_summary_model_fallback_attempted") {
+	if common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted) {
 		return false
 	}
 	if info.RelayMode != relayconstant.RelayModeResponsesCompact ||
-		info.ChannelType != constant.ChannelTypeOpenAI ||
-		!info.ChannelOtherSettings.HasSyntheticResponsesCompact() ||
+		!responsesCompactSummaryModelFallbackSupported(info) ||
 		!info.ChannelOtherSettings.ResponsesCompactSummaryModelFallbackEnabled() ||
 		len(responsesCompactSummaryFallbackCandidates(c, info)) == 0 {
 		return false
 	}
-	if responsesCompactRequestHasUnsafeCompactionInput(c, info) {
+	if info.ChannelType != constant.ChannelTypeCodex && responsesCompactRequestHasUnsafeCompactionInput(c, info) {
 		return false
 	}
 	return isResponsesCompactContextLengthError(err)
+}
+
+func responsesCompactSummaryModelFallbackSupported(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	if info.ChannelType == constant.ChannelTypeCodex {
+		return true
+	}
+	return info.ChannelType == constant.ChannelTypeOpenAI &&
+		info.ChannelOtherSettings.HasSyntheticResponsesCompact()
 }
 
 func isResponsesCompactPreviousResponseIDUnsupportedError(err *types.NewAPIError) bool {

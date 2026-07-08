@@ -25,10 +25,14 @@ import {
   formatModelName,
   getFirstResponseTimeColor,
   getResponseTimeColor,
+  formatRatioDisplay,
+  getStreamStatusDisplayInfo,
   getTieredBillingSummary,
   hasAnyCacheTokens,
   parseLogOther,
   isViolationFeeLog,
+  formatDurationFromMs,
+  isDisplayableDurationMs,
 } from '../../lib/format'
 import {
   isDisplayableLogType,
@@ -69,6 +73,8 @@ interface ResponsesCompactTooltipRow {
   className?: string
 }
 
+type ResponseStreamInfoTooltipRow = ResponsesCompactTooltipRow
+
 interface ReasoningEffortInfo {
   value: string
   badgeLabel: string
@@ -78,10 +84,7 @@ interface ReasoningEffortInfo {
 const KNOWN_REASONING_EFFORTS = new Set(['minimal', 'low', 'medium', 'high'])
 
 function formatRatioCompact(ratio: number | undefined): string {
-  if (ratio == null || !Number.isFinite(ratio)) return '-'
-  return ratio % 1 === 0
-    ? String(ratio)
-    : ratio.toFixed(4).replace(/\.?0+$/, '')
+  return formatRatioDisplay(ratio)
 }
 
 function getGroupRatioText(other: LogOtherData | null): string | null {
@@ -147,6 +150,124 @@ function getResponsesCompactBadgeClassName(
     default:
       return 'border-border/60 bg-muted/40 text-muted-foreground'
   }
+}
+
+function appendStreamStatusTooltipRows(
+  rows: ResponseStreamInfoTooltipRow[],
+  status: LogOtherData['stream_status'] | undefined,
+  streamStatusDisplay: ReturnType<typeof getStreamStatusDisplayInfo> | null,
+  t: (key: string, opts?: Record<string, unknown>) => string
+) {
+  if (!status) return
+  const display = streamStatusDisplay ?? getStreamStatusDisplayInfo(status, t)
+
+  rows.push({
+    key: 'stream-status',
+    label: t('Stream Status'),
+    value: display.label,
+    className: display.valueClassName,
+  })
+  if (status.end_reason) {
+    rows.push({
+      key: 'stream-reason',
+      label: t('End reason'),
+      value: status.end_reason,
+      className: 'font-mono text-foreground/80',
+    })
+  }
+  if ((status.error_count ?? 0) > 0) {
+    rows.push({
+      key: 'stream-errors',
+      label: t('Soft Errors'),
+      value: String(status.error_count),
+      className: 'text-amber-700 font-semibold dark:text-amber-300',
+    })
+  }
+}
+
+function buildStreamTooltip(
+  log: UsageLog,
+  other: LogOtherData | null,
+  streamStatusDisplay: ReturnType<typeof getStreamStatusDisplayInfo> | null,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): ResponseStreamInfoTooltipRow[] {
+  const rows: ResponseStreamInfoTooltipRow[] = [
+    {
+      key: 'mode',
+      label: t('Status'),
+      value: log.is_stream ? t('Stream') : t('Non-stream'),
+      className: 'text-secondary-foreground font-semibold',
+    },
+  ]
+
+  if (other?.request_path) {
+    rows.push({
+      key: 'path',
+      label: t('Client Path'),
+      value: other.request_path,
+      className: 'font-mono text-foreground/80',
+    })
+  }
+
+  if (other?.upstream_request_path) {
+    rows.push({
+      key: 'upstream-path',
+      label: t('Upstream Path'),
+      value: other.upstream_request_path,
+      className: 'font-mono text-foreground/80',
+    })
+  }
+
+  const firstResponseMs = other?.frt
+  if (log.is_stream && isDisplayableDurationMs(firstResponseMs)) {
+    rows.push({
+      key: 'frt',
+      label: t('First response time'),
+      value: formatDurationFromMs(firstResponseMs),
+      className: 'text-primary font-semibold',
+    })
+  }
+
+  const upstreamHeaderMs = other?.upstream_header_ms
+  if (isDisplayableDurationMs(upstreamHeaderMs)) {
+    rows.push({
+      key: 'upstream-header',
+      label: t('Upstream header'),
+      value: formatDurationFromMs(upstreamHeaderMs),
+      className: 'text-muted-foreground font-semibold',
+    })
+  }
+
+  const upstreamTtfbMs = other?.upstream_ttfb_ms
+  if (isDisplayableDurationMs(upstreamTtfbMs)) {
+    rows.push({
+      key: 'upstream-ttfb',
+      label: t('Upstream first byte'),
+      value: formatDurationFromMs(upstreamTtfbMs),
+      className: 'text-muted-foreground font-semibold',
+    })
+  }
+
+  const upstreamTotalMs = other?.upstream_total_ms
+  if (isDisplayableDurationMs(upstreamTotalMs)) {
+    rows.push({
+      key: 'upstream-total',
+      label: t('Upstream total'),
+      value: formatDurationFromMs(upstreamTotalMs),
+      className: 'text-muted-foreground font-semibold',
+    })
+  }
+
+  if (log.is_stream) {
+    appendStreamStatusTooltipRows(
+      rows,
+      other?.stream_status,
+      streamStatusDisplay,
+      t
+    )
+  }
+
+  return rows
 }
 
 function getReasoningEffortBadgeClassName(effort: string): string {
@@ -268,7 +389,7 @@ function buildResponsesCompactTooltipRows(
   if (compactInfo.fallbackReason) {
     rows.push({
       key: 'fallback-reason',
-      label: t('Fallback Reason'),
+      label: t('Auto Fallback Reason'),
       value: compactInfo.fallbackReason,
       className: 'text-muted-foreground',
     })
@@ -504,7 +625,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           const useChannel = other?.admin_info?.use_channel
           const channelChain =
             useChannel && useChannel.length > 0
-              ? useChannel.join(' → ')
+              ? useChannel.join(' -> ')
               : undefined
           const channelDisplay = log.channel_name
             ? `${log.channel_name} #${log.channel}`
@@ -528,6 +649,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                       {affinity && (
                         <button
                           type='button'
+                          aria-label={t('Show channel affinity')}
                           className='absolute -top-1 -right-1 leading-none text-amber-500'
                           onClick={(e) => {
                             e.stopPropagation()
@@ -754,8 +876,12 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             ? log.completion_tokens / useTime
             : null
         const timeVariant = getResponseTimeColor(useTime, log.completion_tokens)
-        const frtVariant = frt ? getFirstResponseTimeColor(frt / 1000) : null
+        const frtVariant =
+          frt != null && frt > 0 ? getFirstResponseTimeColor(frt / 1000) : null
         const compactInfo = buildResponsesCompactInfo(other, t)
+        const streamStatusDisplay = other?.stream_status
+          ? getStreamStatusDisplayInfo(other.stream_status, t)
+          : null
 
         const pillBg: Record<string, string> = {
           success:
@@ -804,7 +930,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                       pillText[frtVariant!]
                     )}
                   >
-                    {formatUseTime(frt / 1000)}
+                    {formatDurationFromMs(frt)}
                   </span>
                 ) : (
                   <span className='border-border/60 text-muted-foreground/50 inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px]'>
@@ -827,18 +953,21 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     <TooltipContent
                       side='top'
                       sideOffset={4}
-                      className='border-border bg-popover text-popover-foreground z-[100] w-[min(20rem,calc(100vw-2rem))] p-0 shadow-lg'
+                      className='border-border bg-popover text-popover-foreground z-[100] w-[min(24rem,calc(100vw-2rem))] p-0 shadow-lg'
                       arrowClassName='bg-popover fill-popover'
                     >
-                      <div className='flex flex-col gap-2 p-3 text-xs leading-5'>
-                        <div className='flex min-w-0 items-center'>
-                          <span className='inline-flex rounded-md border border-violet-200/60 bg-violet-50 px-1.5 py-0.5 font-semibold text-violet-700 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-300'>
-                            {t('Responses Compact capability')}
-                          </span>
-                        </div>
-                        <div className='grid grid-cols-2 gap-x-3 gap-y-1.5'>
-                          {buildResponsesCompactTooltipRows(compactInfo, t).map(
-                            (row) => (
+                      <div className='max-h-[min(20rem,calc(100vh-6rem))] overflow-auto p-3 text-xs leading-5'>
+                        <div className='flex flex-col gap-2'>
+                          <div className='flex min-w-0 items-center'>
+                            <span className='inline-flex rounded-md border border-violet-200/60 bg-violet-50 px-1.5 py-0.5 font-semibold text-violet-700 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-300'>
+                              {t('Responses Compact capability')}
+                            </span>
+                          </div>
+                          <div className='grid grid-cols-2 gap-x-3 gap-y-1.5'>
+                            {buildResponsesCompactTooltipRows(
+                              compactInfo,
+                              t
+                            ).map((row) => (
                               <div
                                 key={row.key}
                                 className='flex min-w-0 flex-col gap-0.5'
@@ -855,8 +984,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                                   {row.value}
                                 </span>
                               </div>
-                            )
-                          )}
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </TooltipContent>
@@ -865,8 +994,60 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               )}
             </div>
             <div className='flex items-center gap-1 text-[11px]'>
-              <span className='text-muted-foreground/60'>
-                {log.is_stream ? t('Stream') : t('Non-stream')}
+              <span className='text-muted-foreground/60 inline-flex items-center gap-1'>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        tabIndex={0}
+                        className='focus-visible:ring-ring cursor-help rounded-sm focus-visible:ring-1 focus-visible:outline-none'
+                      >
+                        {log.is_stream ? t('Stream') : t('Non-stream')}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side='top'
+                      sideOffset={4}
+                      className='border-border bg-popover text-popover-foreground z-[100] w-[min(24rem,calc(100vw-2rem))] p-0 shadow-lg'
+                      arrowClassName='bg-popover fill-popover'
+                    >
+                      <div className='max-h-[min(20rem,calc(100vh-6rem))] overflow-auto p-3 text-xs leading-5'>
+                        <div className='flex flex-col gap-2'>
+                          <div className='flex min-w-0 items-center'>
+                            <span className='inline-flex rounded-md border border-sky-200/60 bg-sky-50 px-1.5 py-0.5 font-semibold text-sky-700 dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-300'>
+                              {t('Request Info')}
+                            </span>
+                          </div>
+                          <div className='grid grid-cols-2 gap-x-3 gap-y-1.5'>
+                            {buildStreamTooltip(
+                              log,
+                              other,
+                              streamStatusDisplay,
+                              t
+                            ).map((row) => (
+                              <div
+                                key={row.key}
+                                className='flex min-w-0 flex-col gap-0.5'
+                              >
+                                <span className='text-muted-foreground text-[11px] leading-4 whitespace-nowrap'>
+                                  {row.label}
+                                </span>
+                                <span
+                                  className={cn(
+                                    'min-w-0 break-words',
+                                    row.className
+                                  )}
+                                >
+                                  {row.value}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
                 {tokensPerSecond != null && (
                   <>
                     {' · '}
@@ -883,12 +1064,20 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <CircleAlert className='size-3 text-red-500' />
+                        <CircleAlert
+                          tabIndex={0}
+                          aria-label={streamStatusDisplay?.label || t('Error')}
+                          className={cn(
+                            'focus-visible:ring-ring size-3 rounded-sm focus-visible:ring-1 focus-visible:outline-none',
+                            streamStatusDisplay?.iconClassName || 'text-red-500'
+                          )}
+                        />
                       </TooltipTrigger>
                       <TooltipContent>
                         <div className='space-y-0.5 text-xs'>
                           <p>
-                            {t('Stream Status')}: {t('Error')}
+                            {t('Stream Status')}:{' '}
+                            {streamStatusDisplay?.label || t('Error')}
                           </p>
                           <p>{other.stream_status.end_reason || 'unknown'}</p>
                           {(other.stream_status.error_count ?? 0) > 0 && (

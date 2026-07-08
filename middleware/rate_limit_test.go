@@ -22,7 +22,7 @@ func TestSuggestionRateLimitUsesDedicatedSettings(t *testing.T) {
 	common.SuggestionRateLimitEnable = true
 	common.SuggestionRateLimitNum = 1
 	common.SuggestionRateLimitDuration = 60
-	inMemoryRateLimiter = common.InMemoryRateLimiter{}
+	inMemoryRateLimiter = &common.InMemoryRateLimiter{}
 
 	t.Cleanup(func() {
 		common.RedisEnabled = originalRedisEnabled
@@ -71,7 +71,7 @@ func TestGlobalWebRateLimitSkipsStaticAssets(t *testing.T) {
 	common.GlobalWebRateLimitEnable = true
 	common.GlobalWebRateLimitNum = 1
 	common.GlobalWebRateLimitDuration = 60
-	inMemoryRateLimiter = common.InMemoryRateLimiter{}
+	inMemoryRateLimiter = &common.InMemoryRateLimiter{}
 
 	t.Cleanup(func() {
 		common.RedisEnabled = originalRedisEnabled

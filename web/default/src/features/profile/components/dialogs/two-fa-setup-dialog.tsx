@@ -113,7 +113,7 @@ export function TwoFASetupDialog({
   // Initialize when dialog opens
   useEffect(() => {
     if (open && !setupData && !initializing) {
-      handleSetup()
+      void Promise.resolve().then(() => handleSetup())
     }
   }, [open, setupData, initializing, handleSetup])
 

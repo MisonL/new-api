@@ -70,8 +70,8 @@ export function ModelCardGrid(props: ModelCardGridProps) {
       </div>
 
       {totalPages > 1 && (
-        <div className='text-muted-foreground flex flex-col items-center justify-between gap-3 border-t px-4 py-3 text-sm sm:flex-row'>
-          <p className='text-muted-foreground'>
+        <div className='text-muted-foreground flex min-h-14 flex-col items-center justify-between gap-3 border-t px-4 py-3 text-sm sm:flex-row'>
+          <p className='text-muted-foreground leading-none'>
             {t('Page {{current}} of {{total}}', {
               current: safePage,
               total: totalPages,

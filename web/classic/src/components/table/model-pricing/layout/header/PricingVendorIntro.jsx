@@ -18,18 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
-import {
-  Card,
-  Tag,
-  Avatar,
-  Typography,
-  Tooltip,
-  Modal,
-} from '@douyinfe/semi-ui';
+import { Card, Tag, Avatar, Tooltip, Modal } from '@douyinfe/semi-ui';
 import { getLobeHubIcon } from '../../../../../helpers';
 import SearchActions from './SearchActions';
-
-const { Paragraph } = Typography;
 
 const CONFIG = {
   CAROUSEL_INTERVAL: 2000,
@@ -127,7 +118,7 @@ const renderVendorAvatar = (vendor, t, isAllVendors = false) => {
 
   return (
     <Tooltip content={displayName} position='top'>
-      <div className={COMPONENT_STYLES.avatarContainer}>{avatarContent}</div>
+      <span className={COMPONENT_STYLES.avatarContainer}>{avatarContent}</span>
     </Tooltip>
   );
 };
@@ -344,14 +335,14 @@ const PricingVendorIntro = memo(
                       {t('共 {{count}} 个模型', { count })}
                     </Tag>
                   </div>
-                  <Paragraph
-                    className='text-xs sm:text-sm leading-relaxed !mb-0 cursor-pointer'
+                  <button
+                    type='button'
+                    className='line-clamp-2 cursor-pointer border-0 bg-transparent p-0 text-left text-xs leading-relaxed sm:text-sm'
                     style={COMPONENT_STYLES.descriptionText}
-                    ellipsis={{ rows: 2 }}
                     onClick={() => handleOpenDescModal(description)}
                   >
                     {description}
-                  </Paragraph>
+                  </button>
                 </div>
 
                 <div className='flex-shrink-0'>{rightContent}</div>

@@ -825,8 +825,14 @@ export const useLogsData = () => {
     }
     if (other?.request_path) {
       expandDataLocal.push({
-        key: t('请求路径'),
+        key: t('客户端路径'),
         value: other.request_path,
+      });
+    }
+    if (other?.upstream_request_path) {
+      expandDataLocal.push({
+        key: t('上游路径'),
+        value: other.upstream_request_path,
       });
     }
     if (other?.billing_source === 'subscription') {

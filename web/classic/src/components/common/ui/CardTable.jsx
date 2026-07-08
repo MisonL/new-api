@@ -158,13 +158,30 @@ const CardTable = ({
     const [showDetails, setShowDetails] = useState(false);
     const [hasOpenedDetails, setHasOpenedDetails] = useState(false);
     const rowKeyVal = getRowKey(record, index);
+    const rowVisualProps =
+      typeof tableProps.onRow === 'function'
+        ? tableProps.onRow(record, index) || {}
+        : {};
+    const {
+      className: rowClassName,
+      style: rowStyle,
+      ...rowInteractiveProps
+    } = rowVisualProps;
+    const cardClassName = ['!rounded-2xl shadow-sm', rowClassName]
+      .filter(Boolean)
+      .join(' ');
 
     const hasDetails =
       tableProps.expandedRowRender &&
       (!tableProps.rowExpandable || tableProps.rowExpandable(record));
 
     return (
-      <Card key={rowKeyVal} className='!rounded-2xl shadow-sm'>
+      <Card
+        key={rowKeyVal}
+        {...rowInteractiveProps}
+        className={cardClassName}
+        style={rowStyle}
+      >
         {columns.map((col, colIdx) => {
           if (
             tableProps?.visibleColumns &&
@@ -251,7 +268,7 @@ const CardTable = ({
         />
       ))}
       {!hidePagination && pagination && dataSource.length > 0 && (
-        <div className='mt-2 flex justify-center'>
+        <div className='new-api-inline-pagination-footer mt-2'>
           <Pagination {...pagination} />
         </div>
       )}

@@ -3,12 +3,14 @@ package service
 import (
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -87,6 +89,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
 	usedChannels := getUsedChannelSet(param.Ctx)
+	requestBodySize, requestBodyLimitTTLHours, requestBodyLimitNow := getRequestBodyLimitSelectorParams(param.Ctx)
 
 	if param.TokenGroup == "auto" {
 		if len(setting.GetAutoGroups()) == 0 {
@@ -117,7 +120,16 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, err = model.GetRandomSatisfiedChannelExcluding(autoGroup, param.ModelName, priorityRetry, usedChannels)
+			excludedChannels := getUsedChannelSet(param.Ctx)
+			channel, err = model.GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(
+				autoGroup,
+				param.ModelName,
+				priorityRetry,
+				excludedChannels,
+				requestBodySize,
+				requestBodyLimitTTLHours,
+				requestBodyLimitNow,
+			)
 			if err != nil {
 				return nil, autoGroup, err
 			}
@@ -158,7 +170,15 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannelExcluding(param.TokenGroup, param.ModelName, param.GetRetry(), usedChannels)
+		channel, err = model.GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(
+			param.TokenGroup,
+			param.ModelName,
+			param.GetRetry(),
+			usedChannels,
+			requestBodySize,
+			requestBodyLimitTTLHours,
+			requestBodyLimitNow,
+		)
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}
@@ -183,4 +203,19 @@ func getUsedChannelSet(ctx *gin.Context) map[int]struct{} {
 		excluded[channelId] = struct{}{}
 	}
 	return excluded
+}
+
+func getRequestBodyLimitSelectorParams(ctx *gin.Context) (int64, int, time.Time) {
+	if ctx == nil {
+		return 0, 0, time.Time{}
+	}
+	policy := model_setting.GetRequestBodyLimitPolicy()
+	if !policy.Enabled {
+		return 0, 0, time.Time{}
+	}
+	requestBodySize := common.GetContextKeyInt64(ctx, constant.ContextKeyRequestBodySize)
+	if requestBodySize <= 0 {
+		return 0, 0, time.Time{}
+	}
+	return requestBodySize, policy.TTLHours, time.Now().UTC()
 }

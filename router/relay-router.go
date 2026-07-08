@@ -80,6 +80,11 @@ func SetRelayRouter(router *gin.Engine) {
 		})
 	}
 	{
+		// claude local utility routes
+		claudeUtilityRouter := relayV1Router.Group("")
+		claudeUtilityRouter.POST("/messages/count_tokens", controller.CountClaudeTokens)
+	}
+	{
 		//http router
 		httpRouter := relayV1Router.Group("")
 		httpRouter.Use(middleware.Distribute())

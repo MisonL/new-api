@@ -27,7 +27,7 @@ export const API_KEY_STATUSES: Record<
   },
   [API_KEY_STATUS.DISABLED]: {
     label: 'Disabled',
-    variant: 'neutral',
+    variant: 'disabled',
     value: API_KEY_STATUS.DISABLED,
     showDot: true,
   },

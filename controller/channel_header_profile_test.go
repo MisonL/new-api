@@ -24,6 +24,12 @@ type channelAPIResponse struct {
 	Message string `json:"message"`
 }
 
+type channelPriorityBatchResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    int    `json:"data"`
+}
+
 func setupChannelControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -86,6 +92,14 @@ func decodeChannelAPIResponse(t *testing.T, recorder *httptest.ResponseRecorder)
 	t.Helper()
 
 	var response channelAPIResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	return response
+}
+
+func decodeChannelPriorityBatchResponse(t *testing.T, recorder *httptest.ResponseRecorder) channelPriorityBatchResponse {
+	t.Helper()
+
+	var response channelPriorityBatchResponse
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	return response
 }
@@ -881,6 +895,211 @@ func TestUpdateChannelPriorityOnlyPreservesHeaderProfileStrategy(t *testing.T) {
 	require.NoError(t, model.DB.Where("channel_id = ?", channel.Id).First(&ability).Error)
 	require.NotNil(t, ability.Priority)
 	require.Equal(t, priority, *ability.Priority)
+}
+
+func TestUpdateChannelPrioritiesUpdatesChannelsAndAbilitiesAtomically(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	firstPriority := int64(30)
+	secondPriority := int64(20)
+	channels := []*model.Channel{
+		{
+			Id:       1,
+			Type:     constant.ChannelTypeOpenAI,
+			Key:      "sk-1",
+			Status:   common.ChannelStatusEnabled,
+			Name:     "channel-1",
+			Group:    "default",
+			Models:   "gpt-5",
+			Priority: &firstPriority,
+		},
+		{
+			Id:       2,
+			Type:     constant.ChannelTypeOpenAI,
+			Key:      "sk-2",
+			Status:   common.ChannelStatusEnabled,
+			Name:     "channel-2",
+			Group:    "default",
+			Models:   "gpt-5",
+			Priority: &secondPriority,
+		},
+	}
+	for _, channel := range channels {
+		require.NoError(t, model.DB.Create(channel).Error)
+		require.NoError(t, channel.AddAbilities(model.DB))
+	}
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, "/api/channel/priorities", []map[string]any{
+		{"id": 1, "priority": 2000},
+		{"id": 2, "priority": 1000},
+	})
+
+	UpdateChannelPriorities(ctx)
+
+	var response channelPriorityBatchResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success, response.Message)
+	require.Equal(t, 2, response.Data)
+
+	updatedOne, err := model.GetChannelById(1, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(2000), updatedOne.GetPriority())
+
+	updatedTwo, err := model.GetChannelById(2, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(1000), updatedTwo.GetPriority())
+
+	var abilities []model.Ability
+	require.NoError(t, model.DB.Where("channel_id in ?", []int{1, 2}).Order("channel_id asc").Find(&abilities).Error)
+	require.Len(t, abilities, 2)
+	require.Equal(t, int64(2000), *abilities[0].Priority)
+	require.Equal(t, int64(1000), *abilities[1].Priority)
+}
+
+func TestUpdateChannelPrioritiesAllowsNoopPriorityUpdate(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	priority := int64(30)
+	channel := &model.Channel{
+		Id:       1,
+		Type:     constant.ChannelTypeOpenAI,
+		Key:      "sk-1",
+		Status:   common.ChannelStatusEnabled,
+		Name:     "channel-1",
+		Group:    "default",
+		Models:   "gpt-5",
+		Priority: &priority,
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+	require.NoError(t, channel.AddAbilities(model.DB))
+	sentinelPriority := int64(77)
+	require.NoError(t, model.DB.Model(&model.Ability{}).Where("channel_id = ?", 1).Update("priority", sentinelPriority).Error)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, "/api/channel/priorities", []map[string]any{
+		{"id": 1, "priority": 30},
+	})
+
+	UpdateChannelPriorities(ctx)
+
+	response := decodeChannelPriorityBatchResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	require.Equal(t, 1, response.Data)
+
+	var ability model.Ability
+	require.NoError(t, model.DB.Where("channel_id = ?", 1).First(&ability).Error)
+	require.Equal(t, sentinelPriority, *ability.Priority)
+}
+
+func TestUpdateChannelPrioritiesRollsBackWhenChannelIsMissing(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	priority := int64(30)
+	channel := &model.Channel{
+		Id:       1,
+		Type:     constant.ChannelTypeOpenAI,
+		Key:      "sk-1",
+		Status:   common.ChannelStatusEnabled,
+		Name:     "channel-1",
+		Group:    "default",
+		Models:   "gpt-5",
+		Priority: &priority,
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+	require.NoError(t, channel.AddAbilities(model.DB))
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, "/api/channel/priorities", []map[string]any{
+		{"id": 1, "priority": 2000},
+		{"id": 999, "priority": 1000},
+	})
+
+	UpdateChannelPriorities(ctx)
+
+	response := decodeChannelPriorityBatchResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "渠道不存在")
+
+	updated, err := model.GetChannelById(1, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(30), updated.GetPriority())
+
+	var ability model.Ability
+	require.NoError(t, model.DB.Where("channel_id = ?", 1).First(&ability).Error)
+	require.Equal(t, int64(30), *ability.Priority)
+}
+
+func TestUpdateChannelPrioritiesRejectsDuplicateChannelID(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	priority := int64(30)
+	channel := &model.Channel{
+		Id:       1,
+		Type:     constant.ChannelTypeOpenAI,
+		Key:      "sk-1",
+		Status:   common.ChannelStatusEnabled,
+		Name:     "channel-1",
+		Group:    "default",
+		Models:   "gpt-5",
+		Priority: &priority,
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+	require.NoError(t, channel.AddAbilities(model.DB))
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, "/api/channel/priorities", []map[string]any{
+		{"id": 1, "priority": 2000},
+		{"id": 1, "priority": 1000},
+	})
+
+	UpdateChannelPriorities(ctx)
+
+	response := decodeChannelPriorityBatchResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Equal(t, "参数错误", response.Message)
+
+	updated, err := model.GetChannelById(1, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(30), updated.GetPriority())
+}
+
+func TestUpdateChannelPrioritiesRejectsNegativePriority(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	priority := int64(30)
+	channel := &model.Channel{
+		Id:       1,
+		Type:     constant.ChannelTypeOpenAI,
+		Key:      "sk-1",
+		Status:   common.ChannelStatusEnabled,
+		Name:     "channel-1",
+		Group:    "default",
+		Models:   "gpt-5",
+		Priority: &priority,
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+	require.NoError(t, channel.AddAbilities(model.DB))
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, "/api/channel/priorities", []map[string]any{
+		{"id": 1, "priority": -1},
+	})
+
+	UpdateChannelPriorities(ctx)
+
+	response := decodeChannelPriorityBatchResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Equal(t, "参数错误", response.Message)
+
+	updated, err := model.GetChannelById(1, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(30), updated.GetPriority())
+}
+
+func TestUpdateChannelPrioritiesRejectsOversizedBody(t *testing.T) {
+	setupChannelControllerTestDB(t)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/channel/priorities", bytes.NewReader(bytes.Repeat([]byte(" "), int(maxUpdateChannelBodyBytes)+1)))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	UpdateChannelPriorities(ctx)
+
+	response := decodeChannelPriorityBatchResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Equal(t, "请求体过大", response.Message)
 }
 
 func TestUpdateChannelWeightOnlyPreservesHeaderProfileStrategy(t *testing.T) {

@@ -1162,7 +1162,9 @@ const CreateDeploymentModal = ({ visible, onCancel, onSuccess, t }) => {
                     <Space>
                       {t('流量端口')}
                       <Tooltip content={t('容器对外服务的端口号，可选')}>
-                        <IconHelpCircle />
+                        <span className='inline-flex h-4 w-4 shrink-0 items-center justify-center'>
+                          <IconHelpCircle />
+                        </span>
                       </Tooltip>
                     </Space>
                   }

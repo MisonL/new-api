@@ -103,6 +103,7 @@ function isBuiltinAiCodingCliProfileId(profileId) {
     'gemini-cli',
     'qwen-code',
     'droid',
+    'agy',
   ].includes(baseProfileId);
 }
 

@@ -38,7 +38,10 @@ test('formatRuntimeResult includes compact capability observations', () => {
       param_override_enabled: true,
       param_override_applied: true,
       proxy_enabled: false,
+      request_path: '/v1/messages',
       final_request_path: '/v1/responses',
+      upstream_request_path: '/v1/responses',
+      request_conversion_chain: ['Claude Messages', 'OpenAI Responses'],
       channel_capability_snapshot: {
         source: 'observed_calls',
         profile: 'generic_openai',
@@ -46,6 +49,7 @@ test('formatRuntimeResult includes compact capability observations', () => {
         supports_responses_compact: true,
         supports_rest_previous_response_id: false,
         supports_compaction_item_passthrough: false,
+        strips_responses_encrypted_reasoning: true,
         observed: {
           observed_at: 1781660000,
           status_code: 400,
@@ -63,9 +67,13 @@ test('formatRuntimeResult includes compact capability observations', () => {
   );
 
   assert.match(result, /Capability: .*source=observed_calls/);
+  assert.ok(result.includes('客户端路径: /v1/messages -> /v1/responses'));
+  assert.ok(result.includes('上游路径: /v1/responses'));
+  assert.ok(result.includes('协议: Claude Messages -> OpenAI Responses'));
   assert.match(result, /profile=generic_openai/);
   assert.match(result, /compact: 是/);
   assert.match(result, /previous_id: 否/);
+  assert.match(result, /strip_reasoning: 是/);
   assert.match(result, /last fail: status=400/);
   assert.match(result, /code=invalid_request_error/);
   assert.match(result, /last probe: status=200/);

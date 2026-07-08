@@ -692,7 +692,7 @@ export function serializeProtocolPolicy(
 
   const policy =
     cleanedRules.length > 0
-      ? { ...policyExtra, rules: cleanedRules }
+      ? { ...policyExtra, enabled: true, rules: cleanedRules }
       : { ...policyExtra }
 
   return JSON.stringify(policy, null, 2)

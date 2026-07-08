@@ -33,22 +33,31 @@ func flushCompletedBuckets() {
 
 		bucket := value.(*atomicBucket)
 		drained := bucket.drain()
-		if drained.requestCount == 0 {
+		if countersEmpty(drained) {
 			deleteOldEmptyBucket(k, key)
 			return true
 		}
 
 		err := model.UpsertPerfMetric(&model.PerfMetric{
-			ModelName:      k.model,
-			Group:          k.group,
-			BucketTs:       k.bucketTs,
-			RequestCount:   drained.requestCount,
-			SuccessCount:   drained.successCount,
-			TotalLatencyMs: drained.totalLatencyMs,
-			TtftSumMs:      drained.ttftSumMs,
-			TtftCount:      drained.ttftCount,
-			OutputTokens:   drained.outputTokens,
-			GenerationMs:   drained.generationMs,
+			ModelName:                              k.model,
+			Group:                                  k.group,
+			BucketTs:                               k.bucketTs,
+			RequestCount:                           drained.requestCount,
+			SuccessCount:                           drained.successCount,
+			TotalLatencyMs:                         drained.totalLatencyMs,
+			TtftSumMs:                              drained.ttftSumMs,
+			TtftCount:                              drained.ttftCount,
+			OutputTokens:                           drained.outputTokens,
+			GenerationMs:                           drained.generationMs,
+			UpstreamHeaderMs:                       drained.upstreamHeaderMs,
+			UpstreamHeaderCount:                    drained.upstreamHeaderCount,
+			UpstreamTtfbMs:                         drained.upstreamTtfbMs,
+			UpstreamTtfbCount:                      drained.upstreamTtfbCount,
+			UpstreamTotalMs:                        drained.upstreamTotalMs,
+			UpstreamTotalCount:                     drained.upstreamTotalCount,
+			ResponsesBootstrapRecoveryCount:        drained.responsesBootstrapRecoveryCount,
+			ResponsesBootstrapRecoverySuccessCount: drained.responsesBootstrapRecoverySuccessCount,
+			ResponsesBootstrapRecoveryWaitMs:       drained.responsesBootstrapRecoveryWaitMs,
 		})
 		if err != nil {
 			bucket.addCounters(drained)
@@ -79,13 +88,22 @@ func cleanupExpiredMetrics(retentionDays int) {
 
 func redisCounters(values map[string]string) counters {
 	return counters{
-		requestCount:   parseRedisInt(values["req"]),
-		successCount:   parseRedisInt(values["ok"]),
-		totalLatencyMs: parseRedisInt(values["lat"]),
-		ttftSumMs:      parseRedisInt(values["ttft"]),
-		ttftCount:      parseRedisInt(values["ttft_n"]),
-		outputTokens:   parseRedisInt(values["out"]),
-		generationMs:   parseRedisInt(values["gen_ms"]),
+		requestCount:                           parseRedisInt(values["req"]),
+		successCount:                           parseRedisInt(values["ok"]),
+		totalLatencyMs:                         parseRedisInt(values["lat"]),
+		ttftSumMs:                              parseRedisInt(values["ttft"]),
+		ttftCount:                              parseRedisInt(values["ttft_n"]),
+		outputTokens:                           parseRedisInt(values["out"]),
+		generationMs:                           parseRedisInt(values["gen_ms"]),
+		upstreamHeaderMs:                       parseRedisInt(values["up_hdr"]),
+		upstreamHeaderCount:                    parseRedisInt(values["up_hdr_n"]),
+		upstreamTtfbMs:                         parseRedisInt(values["up_ttfb"]),
+		upstreamTtfbCount:                      parseRedisInt(values["up_ttfb_n"]),
+		upstreamTotalMs:                        parseRedisInt(values["up_total"]),
+		upstreamTotalCount:                     parseRedisInt(values["up_total_n"]),
+		responsesBootstrapRecoveryCount:        parseRedisInt(values["rb"]),
+		responsesBootstrapRecoverySuccessCount: parseRedisInt(values["rb_ok"]),
+		responsesBootstrapRecoveryWaitMs:       parseRedisInt(values["rb_wait"]),
 	}
 }
 

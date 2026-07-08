@@ -35,6 +35,10 @@ const MODELS_SECTIONS = [
               settings['global.chat_completions_to_responses_policy'],
               '{}'
             ),
+            request_body_limit_policy: formatJsonForEditor(
+              settings['global.request_body_limit_policy'],
+              '{}'
+            ),
           },
           general_setting: {
             ping_interval_enabled:

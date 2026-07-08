@@ -40,18 +40,25 @@ import {
   getParamOverrideActionLabel,
   parseAuditLine,
   decodeBillingExprB64,
+  formatRatioDisplay,
+  getStreamStatusDisplayInfo,
   getTieredBillingSummary,
   hasAnyCacheTokens,
   isViolationFeeLog,
   getFirstResponseTimeColor,
   getResponseTimeColor,
+  formatDurationFromMs,
+  isDisplayableDurationMs,
 } from '../../lib/format'
 import {
   getLogTypeConfig,
+  isDisplayableLogType,
   isPerCallBilling,
   isTimingLogType,
 } from '../../lib/utils'
+import { getRequestHeaderPolicy } from '../../lib/request-header-policy'
 import type { LogOtherData } from '../../types'
+import { ModelBadge, type ModelBadgeInfoRow } from '../model-badge'
 
 function timingTextColorClass(
   variant: 'success' | 'warning' | 'danger'
@@ -73,11 +80,11 @@ function DetailRow(props: {
         {props.label}
       </span>
       <span
-	        className={cn(
-	          'max-w-full min-w-0 text-xs break-all whitespace-pre-wrap sm:break-words',
-	          props.mono && 'font-mono',
-	          props.muted && 'text-muted-foreground'
-	        )}
+        className={cn(
+          'max-w-full min-w-0 text-xs break-all whitespace-pre-wrap sm:break-words',
+          props.mono && 'font-mono',
+          props.muted && 'text-muted-foreground'
+        )}
       >
         {props.value}
       </span>
@@ -117,11 +124,6 @@ function DetailSection(props: {
   )
 }
 
-function formatRatio(ratio: number | undefined): string {
-  if (ratio == null) return '-'
-  return ratio.toFixed(4)
-}
-
 function getResponsesCompactModeLabel(
   mode: string | undefined,
   t: (key: string, opts?: Record<string, unknown>) => string
@@ -153,18 +155,22 @@ function formatRequestHeaderPolicyMode(
 }
 
 function isUserAgentHeaderKey(key: string | undefined): boolean {
-  return String(key || '').trim().toLowerCase() === 'user-agent'
+  return (
+    String(key || '')
+      .trim()
+      .toLowerCase() === 'user-agent'
+  )
 }
 
 function getAppliedUserAgent(other: LogOtherData): string {
-  const policy = other.request_header_policy
+  const policy = getRequestHeaderPolicy(other)
   return String(
     policy?.applied_user_agent || policy?.selected_user_agent || ''
   ).trim()
 }
 
 function getAppliedHeaderLines(other: LogOtherData): string[] {
-  const policy = other.request_header_policy
+  const policy = getRequestHeaderPolicy(other)
   if (!policy) return []
   const entries = Array.isArray(policy.applied_headers)
     ? policy.applied_headers
@@ -188,7 +194,7 @@ function getAppliedHeaderLines(other: LogOtherData): string[] {
 function RequestHeaderPolicyDetails(props: { other: LogOtherData }) {
   const { t } = useTranslation()
   const { other } = props
-  const policy = other.request_header_policy
+  const policy = getRequestHeaderPolicy(other)
   if (!policy) return null
 
   const userAgent = getAppliedUserAgent(other)
@@ -218,16 +224,29 @@ function RequestHeaderPolicyDetails(props: { other: LogOtherData }) {
           mono
         />
       )}
+      {typeof policy.header_profile_applied === 'boolean' && (
+        <DetailRow
+          label={t('Header Profile Applied')}
+          value={policy.header_profile_applied ? t('Yes') : t('No')}
+          mono
+        />
+      )}
       {userAgent && (
         <DetailRow label={t('Applied User-Agent')} value={userAgent} mono />
       )}
-      <DetailRow
-        label={t('User-Agent Applied')}
-        value={policy.user_agent_applied ? t('Yes') : t('No')}
-        mono
-      />
-      {policy.override_static_user_agent && (
-        <DetailRow label={t('Override Static User-Agent')} value={t('Yes')} mono />
+      {typeof policy.user_agent_applied === 'boolean' && (
+        <DetailRow
+          label={t('User-Agent Applied')}
+          value={policy.user_agent_applied ? t('Yes') : t('No')}
+          mono
+        />
+      )}
+      {typeof policy.override_static_user_agent === 'boolean' && (
+        <DetailRow
+          label={t('Override Static User-Agent')}
+          value={policy.override_static_user_agent ? t('Yes') : t('No')}
+          mono
+        />
       )}
       {headerLines.length > 0 && (
         <DetailRow
@@ -302,7 +321,7 @@ function ResponsesCompactDetails(props: {
       )}
       {other.responses_compact_fallback_reason && (
         <DetailRow
-          label={t('Fallback Reason')}
+          label={t('Auto Fallback Reason')}
           value={other.responses_compact_fallback_reason}
           mono
         />
@@ -317,10 +336,18 @@ function ResponsesCompactDetails(props: {
         <DetailRow label={t('Final Path')} value={finalPath} mono />
       )}
       {capability?.source && (
-        <DetailRow label={t('Capability Source')} value={capability.source} mono />
+        <DetailRow
+          label={t('Capability Source')}
+          value={capability.source}
+          mono
+        />
       )}
       {capability?.profile && (
-        <DetailRow label={t('Upstream Profile')} value={capability.profile} mono />
+        <DetailRow
+          label={t('Upstream Profile')}
+          value={capability.profile}
+          mono
+        />
       )}
       {capability?.compact_mode_effective && (
         <DetailRow
@@ -341,21 +368,39 @@ function ResponsesCompactDetails(props: {
           />
           <DetailRow
             label={t('REST Previous ID')}
-            value={formatCapability(capability.supports_rest_previous_response_id)}
+            value={formatCapability(
+              capability.supports_rest_previous_response_id
+            )}
           />
           <DetailRow
             label={t('Compaction Item Passthrough')}
-            value={formatCapability(capability.supports_compaction_item_passthrough)}
+            value={formatCapability(
+              capability.supports_compaction_item_passthrough
+            )}
           />
           <DetailRow
             label={t('Namespace Tools')}
             value={formatCapability(capability.supports_namespace_tools)}
           />
+          <DetailRow
+            label={t('Strips Encrypted Reasoning')}
+            value={formatCapability(
+              capability.strips_responses_encrypted_reasoning
+            )}
+          />
           {isAdmin && observedReason && (
-            <DetailRow label={t('Last Observed Failure')} value={observedReason} mono />
+            <DetailRow
+              label={t('Last Observed Failure')}
+              value={observedReason}
+              mono
+            />
           )}
           {isAdmin && probeReason && (
-            <DetailRow label={t('Last Probe Result')} value={probeReason} mono />
+            <DetailRow
+              label={t('Last Probe Result')}
+              value={probeReason}
+              mono
+            />
           )}
         </>
       )}
@@ -365,42 +410,184 @@ function ResponsesCompactDetails(props: {
           value={t('Compact Auto Fallback Window Active')}
         />
       )}
-      {isAdmin && (other.responses_compact_native_attempted || isAutoFallbackWindow) && (
-        <>
-          {other.responses_compact_native_upstream_path && (
-            <DetailRow
-              label={t('Native Path')}
-              value={other.responses_compact_native_upstream_path}
-              mono
-            />
-          )}
-          {other.responses_compact_native_status_code != null && (
-            <DetailRow
-              label={t('Native Status')}
-              value={String(other.responses_compact_native_status_code)}
-              mono
-            />
-          )}
-          {other.responses_compact_auto_fallback_reason && (
-            <DetailRow
-              label={t('Fallback Reason')}
-              value={other.responses_compact_auto_fallback_reason}
-            />
-          )}
-          {other.responses_compact_auto_fallback_retry_interval_hours != null && (
-            <DetailRow
-              label={t('Retry Interval')}
-              value={`${other.responses_compact_auto_fallback_retry_interval_hours} ${t('Hours')}`}
-              mono
-            />
-          )}
-          {retryUntil && (
-            <DetailRow label={t('Retry After')} value={retryUntil} mono />
-          )}
-        </>
-      )}
+      {isAdmin &&
+        (other.responses_compact_native_attempted || isAutoFallbackWindow) && (
+          <>
+            {other.responses_compact_native_upstream_path && (
+              <DetailRow
+                label={t('Native Path')}
+                value={other.responses_compact_native_upstream_path}
+                mono
+              />
+            )}
+            {other.responses_compact_native_status_code != null && (
+              <DetailRow
+                label={t('Native Status')}
+                value={String(other.responses_compact_native_status_code)}
+                mono
+              />
+            )}
+            {other.responses_compact_auto_fallback_reason && (
+              <DetailRow
+                label={t('Auto Fallback Reason')}
+                value={other.responses_compact_auto_fallback_reason}
+              />
+            )}
+            {other.responses_compact_auto_fallback_retry_interval_hours !=
+              null && (
+              <DetailRow
+                label={t('Retry Interval')}
+                value={`${other.responses_compact_auto_fallback_retry_interval_hours} ${t('Hours')}`}
+                mono
+              />
+            )}
+            {retryUntil && (
+              <DetailRow label={t('Retry After')} value={retryUntil} mono />
+            )}
+          </>
+        )}
     </DetailSection>
   )
+}
+
+type TranslateFn = (key: string, opts?: Record<string, unknown>) => string
+
+function getMappedModelName(other: LogOtherData | null): string | undefined {
+  const upstreamModel = String(other?.upstream_model_name || '').trim()
+  if (!other?.is_model_mapped || !upstreamModel) return undefined
+  return upstreamModel
+}
+
+function getBaseInputPriceUSD(other: LogOtherData): number {
+  return other.model_ratio != null ? other.model_ratio * 2.0 : 0
+}
+
+function getEffectiveGroupRatio(other: LogOtherData): {
+  ratio?: number
+  isUserGroup: boolean
+} {
+  const userGroupRatio = other.user_group_ratio
+  const isUserGroup =
+    userGroupRatio != null &&
+    Number.isFinite(userGroupRatio) &&
+    userGroupRatio !== -1
+  return {
+    ratio: isUserGroup ? userGroupRatio : other.group_ratio,
+    isUserGroup,
+  }
+}
+
+function getModelPricingSummary(
+  other: LogOtherData | null,
+  t: TranslateFn
+): string | null {
+  if (!other) return null
+
+  if (other.billing_mode === 'tiered_expr') {
+    const tieredSummary = getTieredBillingSummary(other)
+    const tier = tieredSummary?.tier.label || other.matched_tier
+    return tier
+      ? `${t('Dynamic Pricing')} - ${tier}`
+      : `${t('Dynamic Pricing')} - ${t('No matching results')}`
+  }
+
+  const priceOpts = { digitsLarge: 4, digitsSmall: 6, abbreviate: false }
+  const fmtPrice = (usd: number) => formatBillingCurrencyFromUSD(usd, priceOpts)
+
+  if (isPerCallBilling(other.model_price) && other.model_price != null) {
+    return `${t('Per-call')} - ${fmtPrice(other.model_price)}`
+  }
+  if (other.model_ratio == null) return null
+
+  const inputPrice = getBaseInputPriceUSD(other)
+  const segments = [`${t('Input')} ${fmtPrice(inputPrice)}/M`]
+  if (other.completion_ratio != null) {
+    segments.push(
+      `${t('Output')} ${fmtPrice(inputPrice * other.completion_ratio)}/M`
+    )
+  }
+  return `${t('Per-token')} - ${segments.join(' - ')}`
+}
+
+function getModelGroupRatioRow(
+  other: LogOtherData | null,
+  t: TranslateFn
+): ModelBadgeInfoRow | null {
+  if (!other) return null
+  const { ratio, isUserGroup } = getEffectiveGroupRatio(other)
+  if (ratio == null || !Number.isFinite(ratio)) return null
+
+  return {
+    key: 'group-ratio',
+    label: isUserGroup ? t('User Exclusive Ratio') : t('Group Ratio'),
+    value: `${formatRatioDisplay(ratio)}x`,
+    mono: true,
+  }
+}
+
+function buildModelInfoRows(params: {
+  log: UsageLog
+  other: LogOtherData | null
+  conversionChain: string[]
+  conversionLabel: string
+  includeRouting: boolean
+  t: TranslateFn
+}): ModelBadgeInfoRow[] {
+  const { log, other, conversionChain, conversionLabel, includeRouting, t } =
+    params
+  const actualModel = getMappedModelName(other)
+  const rows: ModelBadgeInfoRow[] = [
+    {
+      key: 'model-mapping',
+      label: t('Model Mapping'),
+      value: actualModel ? t('Yes') : t('No'),
+      muted: !actualModel,
+    },
+  ]
+  const group = String(log.group || other?.group || '').trim()
+  if (group) {
+    rows.push({
+      key: 'group',
+      label: t('Group'),
+      value: group,
+      mono: true,
+    })
+  }
+  if (includeRouting && other?.request_path) {
+    rows.push({
+      key: 'client-path',
+      label: t('Client Path'),
+      value: other.request_path,
+      mono: true,
+    })
+  }
+  if (includeRouting && other?.upstream_request_path) {
+    rows.push({
+      key: 'upstream-path',
+      label: t('Upstream Path'),
+      value: other.upstream_request_path,
+      mono: true,
+    })
+  }
+  if (includeRouting && conversionChain.length > 0) {
+    rows.push({
+      key: 'request-conversion',
+      label: t('Request Conversion'),
+      value: conversionLabel,
+      mono: true,
+    })
+  }
+  const pricingSummary = getModelPricingSummary(other, t)
+  if (pricingSummary) {
+    rows.push({
+      key: 'billing-mode',
+      label: t('Billing Mode'),
+      value: pricingSummary,
+    })
+  }
+  const groupRatioRow = getModelGroupRatioRow(other, t)
+  if (groupRatioRow) rows.push(groupRatioRow)
+  return rows
 }
 
 function BillingBreakdown(props: {
@@ -418,7 +605,7 @@ function BillingBreakdown(props: {
   const rows: Array<{ label: string; value: string }> = []
   const priceOpts = { digitsLarge: 4, digitsSmall: 6, abbreviate: false }
   const fmtPrice = (usd: number) => formatBillingCurrencyFromUSD(usd, priceOpts)
-  const baseInputUSD = other.model_ratio != null ? other.model_ratio * 2.0 : 0
+  const baseInputUSD = getBaseInputPriceUSD(other)
 
   if (isTieredExpr) {
     rows.push({
@@ -468,13 +655,11 @@ function BillingBreakdown(props: {
     }
   }
 
-  const userGR = other.user_group_ratio
-  const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
-  const effectiveGR = isUserGR ? userGR : other.group_ratio
+  const { ratio: effectiveGR, isUserGroup } = getEffectiveGroupRatio(other)
   if (effectiveGR != null && Number.isFinite(effectiveGR)) {
     rows.push({
-      label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
-      value: `${formatRatio(effectiveGR)}x`,
+      label: isUserGroup ? t('User Exclusive Ratio') : t('Group Ratio'),
+      value: `${formatRatioDisplay(effectiveGR)}x`,
     })
   }
 
@@ -554,10 +739,13 @@ function BillingBreakdown(props: {
     })
   }
 
-  if (other.image_generation_call && other.image_generation_call_price) {
+  const imageGenerationPrice =
+    other.image_generation_call_total_price ?? other.image_generation_call_price
+  if (other.image_generation_call || imageGenerationPrice != null) {
     rows.push({
       label: t('Image Generation'),
-      value: fmtPrice(other.image_generation_call_price),
+      value:
+        imageGenerationPrice != null ? fmtPrice(imageGenerationPrice) : '-',
     })
   }
 
@@ -746,11 +934,51 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showConversion =
     props.isAdmin &&
     props.log.type !== 6 &&
-    (other?.request_path || conversionChain.length > 0)
+    Boolean(
+      other?.request_path ||
+      other?.upstream_request_path ||
+      conversionChain.length > 0
+    )
 
   const useChannel = other?.admin_info?.use_channel
   const channelChain =
-    useChannel && useChannel.length > 0 ? useChannel.join(' → ') : undefined
+    useChannel && useChannel.length > 0 ? useChannel.join(' -> ') : undefined
+  const streamStatusDisplay = other?.stream_status
+    ? getStreamStatusDisplayInfo(other.stream_status, t)
+    : null
+  const frtMs = isDisplayableDurationMs(other?.frt) ? other.frt : null
+  const upstreamHeaderMs = isDisplayableDurationMs(other?.upstream_header_ms)
+    ? other.upstream_header_ms
+    : null
+  const upstreamTTFBMs = isDisplayableDurationMs(other?.upstream_ttfb_ms)
+    ? other.upstream_ttfb_ms
+    : null
+  const upstreamTotalMs = isDisplayableDurationMs(other?.upstream_total_ms)
+    ? other.upstream_total_ms
+    : null
+  const hasFRT = props.log.is_stream && frtMs != null && frtMs > 0
+  const hasUpstreamTiming =
+    upstreamHeaderMs != null ||
+    upstreamTTFBMs != null ||
+    upstreamTotalMs != null
+  const actualModel = getMappedModelName(other)
+  const conversionCopyText = [
+    other?.request_path ? `${t('Client Path')}: ${other.request_path}` : '',
+    other?.upstream_request_path
+      ? `${t('Upstream Path')}: ${other.upstream_request_path}`
+      : '',
+    `${t('Request Conversion')}: ${conversionLabel}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+  const modelInfoRows = buildModelInfoRows({
+    log: props.log,
+    other,
+    conversionChain,
+    conversionLabel,
+    includeRouting: showConversion,
+    t,
+  })
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
@@ -860,41 +1088,65 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 />
               )}
 
-              {showTiming && props.log.use_time > 0 && (
-                <DetailRow
-                  label={t('Response Time')}
-                  value={
-                    <span
-                      className={cn(
-                        'font-medium',
-                        timingTextColorClass(
-                          getResponseTimeColor(
-                            props.log.use_time,
-                            props.log.completion_tokens
-                          )
-                        )
-                      )}
-                    >
-                      {formatUseTime(props.log.use_time)}
-                      {props.log.is_stream &&
-                        other?.frt != null &&
-                        other.frt > 0 && (
+              {showTiming &&
+                (props.log.use_time > 0 || hasUpstreamTiming || hasFRT) && (
+                  <DetailRow
+                    label={t('Response Time')}
+                    value={
+                      <span className='inline-flex flex-wrap items-center gap-x-2 gap-y-1'>
+                        {props.log.use_time > 0 && (
                           <span
                             className={cn(
-                              'font-normal',
+                              'font-medium',
                               timingTextColorClass(
-                                getFirstResponseTimeColor(other.frt / 1000)
+                                getResponseTimeColor(
+                                  props.log.use_time,
+                                  props.log.completion_tokens
+                                )
                               )
                             )}
                           >
-                            {' '}
-                            (FRT: {formatUseTime(other.frt / 1000)})
+                            {formatUseTime(props.log.use_time)}
                           </span>
                         )}
-                    </span>
-                  }
-                />
-              )}
+                        {hasFRT && (
+                          <span
+                            className={cn(
+                              'font-medium',
+                              timingTextColorClass(
+                                getFirstResponseTimeColor(frtMs / 1000)
+                              )
+                            )}
+                          >
+                            FRT: {formatDurationFromMs(frtMs)}
+                          </span>
+                        )}
+                        {hasUpstreamTiming && (
+                          <span className='text-muted-foreground text-xs'>
+                            {upstreamHeaderMs != null && (
+                              <span className='mr-2'>
+                                {t('Upstream header')}:{' '}
+                                {formatDurationFromMs(upstreamHeaderMs)}
+                              </span>
+                            )}
+                            {upstreamTTFBMs != null && (
+                              <span className='mr-2'>
+                                {t('Upstream first byte')}:{' '}
+                                {formatDurationFromMs(upstreamTTFBMs)}
+                              </span>
+                            )}
+                            {upstreamTotalMs != null && (
+                              <span>
+                                {t('Upstream total')}:{' '}
+                                {formatDurationFromMs(upstreamTotalMs)}
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </span>
+                    }
+                  />
+                )}
             </div>
 
             {/* Request conversion (admin only, not for refund) */}
@@ -905,11 +1157,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
                     variant='ghost'
                     size='sm'
                     className='absolute top-0 right-0 h-5 w-5 p-0'
-                    onClick={() => copyToClipboard(conversionLabel)}
+                    onClick={() => copyToClipboard(conversionCopyText)}
                     title={t('Copy to clipboard')}
                     aria-label={t('Copy to clipboard')}
                   >
-                    {copiedText === conversionLabel ? (
+                    {copiedText === conversionCopyText ? (
                       <Check className='size-3 text-green-600' />
                     ) : (
                       <Copy className='size-3' />
@@ -918,8 +1170,15 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   <div className='min-w-0 space-y-1 pr-6'>
                     {other?.request_path && (
                       <DetailRow
-                        label={t('Path')}
+                        label={t('Client Path')}
                         value={other.request_path}
+                        mono
+                      />
+                    )}
+                    {other?.upstream_request_path && (
+                      <DetailRow
+                        label={t('Upstream Path')}
+                        value={other.upstream_request_path}
                         mono
                       />
                     )}
@@ -937,7 +1196,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
               </DetailSection>
             )}
 
-            {props.isAdmin && other?.request_header_policy && (
+            {props.isAdmin && other && getRequestHeaderPolicy(other) && (
               <RequestHeaderPolicyDetails other={other} />
             )}
 
@@ -1118,24 +1377,22 @@ export function DetailsDialog(props: DetailsDialogProps) {
               />
             )}
 
-            {/* Model mapping */}
-            {other?.is_model_mapped && other?.upstream_model_name && (
-              <DetailSection label={t('Model Mapping')}>
-                <DetailRow
-                  label={t('Request Model')}
-                  value={props.log.model_name}
-                  mono
-                />
-                <DetailRow
-                  label={t('Actual Model')}
-                  value={other.upstream_model_name}
-                  mono
-                />
+            {/* Model */}
+            {isDisplayableLogType(props.log.type) && props.log.model_name && (
+              <DetailSection label={t('Model')}>
+                <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+                  <ModelBadge
+                    modelName={props.log.model_name}
+                    actualModel={actualModel}
+                    infoRows={modelInfoRows}
+                    className='max-w-full'
+                  />
+                </div>
               </DetailSection>
             )}
 
             {/* Token breakdown (for consume/error types with token data) */}
-            {isDisplayableType(props.log.type) && other && (
+            {isDisplayableLogType(props.log.type) && other && (
               <TokenBreakdown log={props.log} other={other} />
             )}
 
@@ -1192,8 +1449,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
                     label={t('Status')}
                     value={
                       <StatusBadge
-                        label={other.stream_status.status || t('Error')}
-                        variant='red'
+                        label={streamStatusDisplay?.label || t('Error')}
+                        variant={streamStatusDisplay?.variant || 'red'}
                         size='sm'
                         copyable={false}
                       />
@@ -1201,7 +1458,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   />
                   {other.stream_status.end_reason && (
                     <DetailRow
-                      label={t('End Reason')}
+                      label={t('End reason')}
                       value={other.stream_status.end_reason}
                     />
                   )}
@@ -1336,8 +1593,4 @@ export function DetailsDialog(props: DetailsDialogProps) {
       </DialogContent>
     </Dialog>
   )
-}
-
-function isDisplayableType(type: number): boolean {
-  return [0, 2, 5, 6].includes(type)
 }

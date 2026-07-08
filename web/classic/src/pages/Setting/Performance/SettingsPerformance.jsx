@@ -58,6 +58,64 @@ function formatBytes(bytes, decimals = 2) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
+function formatDurationMs(value) {
+  if (!value || value < 0) return '-';
+  if (value < 1000) return `${value} ms`;
+  const seconds = value / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)} s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.round(seconds % 60);
+  return `${minutes} m ${remainingSeconds} s`;
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString();
+}
+
+function npmDiagnosticsSourceColor(source) {
+  if (source === 'missing') return 'red';
+  if (source === 'npm') return 'green';
+  return 'grey';
+}
+
+function npmDiagnosticsLastState(item) {
+  if (item?.last_error) {
+    return `${item.last_error_scope || item.last_error.source || 'error'}: ${item.last_error.code}`;
+  }
+  if (item?.refreshed_at) return formatDateTime(item.refreshed_at);
+  return '-';
+}
+
+function npmDiagnosticsActionText(action, t) {
+  switch (action) {
+    case 'refresh_package':
+      return t('刷新包版本');
+    case 'check_npm_registry_connectivity':
+      return t('检查 npm registry 连通性');
+    case 'check_database_persistence':
+      return t('检查数据库持久化');
+    case 'inspect_registry_metadata':
+      return t('检查 registry 元数据');
+    case 'check_scheduler_or_master_node':
+      return t('检查后台刷新或 master 节点');
+    case 'none':
+      return t('无需操作');
+    default:
+      return action || '-';
+  }
+}
+
+function npmDiagnosticsRecentErrorsText(item) {
+  const recentErrors = item?.recent_errors || [];
+  if (!recentErrors.length) return '-';
+  return recentErrors
+    .map((error) => `${error.source || 'error'}:${error.code}`)
+    .join(', ');
+}
+
 export default function SettingsPerformance(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
@@ -79,6 +137,9 @@ export default function SettingsPerformance(props) {
   const [logCleanupMode, setLogCleanupMode] = useState('by_count');
   const [logCleanupValue, setLogCleanupValue] = useState(10);
   const [logCleanupLoading, setLogCleanupLoading] = useState(false);
+  const [npmDiagnostics, setNpmDiagnostics] = useState(null);
+  const [npmDiagnosticsLoading, setNpmDiagnosticsLoading] = useState(false);
+  const [npmDiagnosticsError, setNpmDiagnosticsError] = useState('');
 
   function handleFieldChange(fieldName) {
     return (value) => {
@@ -185,6 +246,33 @@ export default function SettingsPerformance(props) {
     }
   }
 
+  async function fetchNpmDiagnostics() {
+    setNpmDiagnosticsLoading(true);
+    try {
+      const res = await API.get(
+        '/api/channel/npm_version_options/diagnostics',
+        {
+          timeout: 10000,
+          skipErrorHandler: true,
+          disableDuplicate: true,
+        },
+      );
+      const payload = res.data || {};
+      if (payload.success) {
+        setNpmDiagnostics(payload.data || null);
+        setNpmDiagnosticsError('');
+      } else {
+        setNpmDiagnosticsError(
+          payload.message || t('npm CLI 版本诊断加载失败'),
+        );
+      }
+    } catch (error) {
+      setNpmDiagnosticsError(error?.message || t('npm CLI 版本诊断加载失败'));
+    } finally {
+      setNpmDiagnosticsLoading(false);
+    }
+  }
+
   async function cleanupLogFiles() {
     if (
       logCleanupValue == null ||
@@ -239,6 +327,7 @@ export default function SettingsPerformance(props) {
     }
     fetchStats();
     fetchLogInfo();
+    fetchNpmDiagnostics();
   }, [props.options]);
 
   const diskCacheUsagePercent =
@@ -507,6 +596,150 @@ export default function SettingsPerformance(props) {
             type='warning'
             description={t('服务器日志功能未启用（未配置日志目录）')}
           />
+        )}
+      </Form.Section>
+
+      <Form.Section text={t('npm CLI 版本诊断')}>
+        <Banner
+          type='info'
+          description={t(
+            '只读查看 CLI 包版本后台缓存、刷新指标和最近失败原因，用于区分未刷新、持久化失败、registry 失败或权限问题。',
+          )}
+          style={{ marginBottom: 16 }}
+        />
+        <Row gutter={16} style={{ marginBottom: 16 }}>
+          <Col span={24}>
+            <Button
+              onClick={fetchNpmDiagnostics}
+              loading={npmDiagnosticsLoading}
+            >
+              {t('刷新诊断')}
+            </Button>
+          </Col>
+        </Row>
+        {npmDiagnosticsError ? (
+          <Banner
+            type='warning'
+            description={npmDiagnosticsError}
+            style={{ marginBottom: 16 }}
+          />
+        ) : (
+          <>
+            <Descriptions
+              data={[
+                {
+                  key: t('缓存包数量'),
+                  value: `${npmDiagnostics?.summary?.recorded_count || 0} / ${npmDiagnostics?.summary?.package_count || 0}`,
+                },
+                {
+                  key: t('缺失包数量'),
+                  value: npmDiagnostics?.summary?.missing_count || 0,
+                },
+                {
+                  key: t('最近错误数'),
+                  value: npmDiagnostics?.summary?.last_error_count || 0,
+                },
+                {
+                  key: t('最长缓存年龄'),
+                  value: formatDurationMs(
+                    npmDiagnostics?.summary?.max_cache_age_ms,
+                  ),
+                },
+                {
+                  key: t('后台刷新次数'),
+                  value: npmDiagnostics?.metrics?.scheduled_runs || 0,
+                },
+                {
+                  key: t('后台刷新失败包'),
+                  value:
+                    npmDiagnostics?.metrics?.scheduled_failed_packages || 0,
+                },
+                {
+                  key: t('人工刷新次数'),
+                  value: npmDiagnostics?.metrics?.manual_runs || 0,
+                },
+                {
+                  key: t('最近人工刷新错误'),
+                  value: npmDiagnostics?.metrics?.last_manual_code || '-',
+                },
+                {
+                  key: t('生成时间'),
+                  value: formatDateTime(npmDiagnostics?.generated_at),
+                },
+                {
+                  key: t('刷新间隔'),
+                  value: formatDurationMs(npmDiagnostics?.refresh_interval_ms),
+                },
+              ]}
+              style={{ marginBottom: 16 }}
+            />
+            <div style={{ overflowX: 'auto' }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns:
+                    'minmax(180px, 1.2fr) minmax(110px, 0.7fr) minmax(130px, 0.7fr) minmax(180px, 1fr) minmax(240px, 1.4fr)',
+                  gap: 8,
+                  padding: '8px 12px',
+                  background: 'var(--semi-color-fill-0)',
+                  fontWeight: 600,
+                  minWidth: 980,
+                }}
+              >
+                <Text size='small'>{t('包名')}</Text>
+                <Text size='small'>{t('来源')}</Text>
+                <Text size='small'>{t('版本')}</Text>
+                <Text size='small'>{t('建议动作')}</Text>
+                <Text size='small'>{t('最近状态')}</Text>
+              </div>
+              {(npmDiagnostics?.packages || []).map((item) => (
+                <div
+                  key={item.package}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                      'minmax(180px, 1.2fr) minmax(110px, 0.7fr) minmax(130px, 0.7fr) minmax(180px, 1fr) minmax(240px, 1.4fr)',
+                    gap: 8,
+                    padding: '8px 12px',
+                    borderTop: '1px solid var(--semi-color-border)',
+                    minWidth: 980,
+                  }}
+                >
+                  <Text size='small' ellipsis={{ showTooltip: true }}>
+                    {item.package}
+                  </Text>
+                  <span>
+                    <Tag color={npmDiagnosticsSourceColor(item.source)}>
+                      {item.source || '-'}
+                    </Tag>
+                  </span>
+                  <Text size='small' type='tertiary'>
+                    {item.latest_version || '-'} / {item.option_count || 0}
+                  </Text>
+                  <Text
+                    size='small'
+                    type='tertiary'
+                    ellipsis={{ showTooltip: true }}
+                  >
+                    {npmDiagnosticsActionText(item.recommended_action, t)}
+                  </Text>
+                  <Text
+                    size='small'
+                    type={item.last_error ? 'warning' : 'tertiary'}
+                    ellipsis={{ showTooltip: true }}
+                  >
+                    {`${npmDiagnosticsLastState(item)} | ${npmDiagnosticsRecentErrorsText(item)}`}
+                  </Text>
+                </div>
+              ))}
+              {!npmDiagnosticsLoading &&
+                (npmDiagnostics?.packages || []).length === 0 && (
+                  <Text type='tertiary' size='small'>
+                    {t('暂无诊断信息')}
+                  </Text>
+                )}
+            </div>
+          </>
         )}
       </Form.Section>
 

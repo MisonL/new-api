@@ -113,6 +113,20 @@ func successResponsesHTTPResponse() *http.Response {
 	}
 }
 
+func TestMarkResponsesChatCompatIgnoredEncryptedInclude(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	markResponsesChatCompatIgnoredEncryptedInclude(c, common.RawMessage(`["message.output_text.logprobs"]`))
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude))
+
+	markResponsesChatCompatIgnoredEncryptedInclude(c, common.RawMessage(`"reasoning.encrypted_content"`))
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude))
+
+	markResponsesChatCompatIgnoredEncryptedInclude(c, common.RawMessage(`["reasoning.encrypted_content"]`))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude))
+}
+
 func TestExecuteOpenAIResponsesRequestRetriesEncryptedReasoningFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -420,6 +434,7 @@ func TestShouldRouteResponsesViaChatSkipsResponsesCompact(t *testing.T) {
 
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat",
@@ -535,6 +550,7 @@ func TestFindResponsesViaChatRuleCarriesCustomToolBridgeOption(t *testing.T) {
 
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat-codex",
@@ -577,6 +593,7 @@ func TestFindResponsesViaChatRuleSkipsCodexRemoteCompactionV2Trigger(t *testing.
 
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat",
@@ -622,6 +639,7 @@ func TestFindResponsesViaChatRuleAllowsLocalSyntheticCompactionForCleanup(t *tes
 
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat",
@@ -667,6 +685,7 @@ func TestFindResponsesViaChatRuleSkipsRemoteCompactionInput(t *testing.T) {
 
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat",
@@ -700,6 +719,178 @@ func TestFindResponsesViaChatRuleSkipsRemoteCompactionInput(t *testing.T) {
 	require.Nil(t, rule)
 }
 
+func TestFindResponsesViaChatRuleSkipsOrdinaryPreviousResponseID(t *testing.T) {
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+
+	settings.PassThroughRequestEnabled = false
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{
+			{
+				Name:           "responses-to-chat",
+				Enabled:        true,
+				SourceEndpoint: model_setting.ProtocolEndpointResponses,
+				TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+				AllChannels:    true,
+				ModelPatterns:  []string{`^gpt-5(\..+)?$`},
+			},
+		},
+	}
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   157,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_ordinary_previous",
+	}
+
+	rule, err := findResponsesViaChatRule(context.Background(), info, false, request)
+	require.NoError(t, err)
+	require.Nil(t, rule)
+}
+
+func TestFindResponsesViaChatRuleAllowsLocalSyntheticPreviousResponseID(t *testing.T) {
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+
+	settings.PassThroughRequestEnabled = false
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{
+			{
+				Name:           "responses-to-chat",
+				Enabled:        true,
+				SourceEndpoint: model_setting.ProtocolEndpointResponses,
+				TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+				AllChannels:    true,
+				ModelPatterns:  []string{`^gpt-5(\..+)?$`},
+			},
+		},
+	}
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   157,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_newapi_synthcmp_nffffffffffffffffffffffffffffffff_missing",
+	}
+
+	rule, err := findResponsesViaChatRule(context.Background(), info, false, request)
+	require.NoError(t, err)
+	require.NotNil(t, rule)
+}
+
+func TestFindResponsesViaChatRuleSkipsOrdinaryPreviousResponseIDEvenWithLocalMarker(t *testing.T) {
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+
+	settings.PassThroughRequestEnabled = false
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{
+			{
+				Name:           "responses-to-chat",
+				Enabled:        true,
+				SourceEndpoint: model_setting.ProtocolEndpointResponses,
+				TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+				AllChannels:    true,
+				ModelPatterns:  []string{`^gpt-5(\..+)?$`},
+			},
+		},
+	}
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   157,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_ordinary_previous",
+		Input: common.RawMessage(`[
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:nffffffffffffffffffffffffffffffff:resp_newapi_synthcmp_nffffffffffffffffffffffffffffffff_missing"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	rule, err := findResponsesViaChatRule(context.Background(), info, false, request)
+	require.NoError(t, err)
+	require.Nil(t, rule)
+}
+
+func TestFindResponsesViaChatRuleSkipsNativeOpaquePreviousResponseID(t *testing.T) {
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+
+	settings.PassThroughRequestEnabled = false
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{
+			{
+				Name:           "responses-to-chat",
+				Enabled:        true,
+				SourceEndpoint: model_setting.ProtocolEndpointResponses,
+				TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+				AllChannels:    true,
+				ModelPatterns:  []string{`^gpt-5(\..+)?$`},
+			},
+		},
+	}
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   157,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_newapi_nativecmp_opaque",
+	}
+
+	rule, err := findResponsesViaChatRule(context.Background(), info, false, request)
+	require.NoError(t, err)
+	require.Nil(t, rule)
+}
+
 func TestFindResponsesViaChatRuleMatchesExplicitChatOnlyChannel(t *testing.T) {
 	settings := model_setting.GetGlobalSettings()
 	oldPolicy := settings.ChatCompletionsToResponsesPolicy
@@ -711,6 +902,7 @@ func TestFindResponsesViaChatRuleMatchesExplicitChatOnlyChannel(t *testing.T) {
 
 	settings.PassThroughRequestEnabled = false
 	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat-channel-168",
@@ -900,4 +1092,20 @@ func TestApplyResponsesCompactSummaryModelOverride(t *testing.T) {
 	require.Equal(t, "gpt-5.4", request.Model)
 	require.Equal(t, "gpt-5.4", info.UpstreamModelName)
 	require.Equal(t, "gpt-5.5-openai-compact", info.OriginModelName)
+
+	codexInfo := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeCodex,
+			UpstreamModelName: "gpt-5.5",
+		},
+	}
+	codexRequest := &dto.OpenAIResponsesRequest{Model: "gpt-5.5"}
+
+	applyResponsesCompactSummaryModelOverride(c, codexInfo, codexRequest)
+
+	require.Equal(t, "gpt-5.4", codexRequest.Model)
+	require.Equal(t, "gpt-5.4", codexInfo.UpstreamModelName)
+	require.Equal(t, "gpt-5.5-openai-compact", codexInfo.OriginModelName)
 }

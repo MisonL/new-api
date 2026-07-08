@@ -20,6 +20,21 @@ interface UserInfoDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+function InfoItem({
+  label,
+  value,
+}: {
+  label: string
+  value: string | number
+}) {
+  return (
+    <div className='space-y-1.5'>
+      <Label className='text-muted-foreground text-xs'>{label}</Label>
+      <div className='text-sm font-semibold'>{value}</div>
+    </div>
+  )
+}
+
 export function UserInfoDialog({
   userId,
   open,
@@ -52,22 +67,9 @@ export function UserInfoDialog({
 
   useEffect(() => {
     if (open && userId) {
-      fetchUserInfo(userId)
+      void Promise.resolve().then(() => fetchUserInfo(userId))
     }
   }, [open, userId, fetchUserInfo])
-
-  const InfoItem = ({
-    label,
-    value,
-  }: {
-    label: string
-    value: string | number
-  }) => (
-    <div className='space-y-1.5'>
-      <Label className='text-muted-foreground text-xs'>{label}</Label>
-      <div className='text-sm font-semibold'>{value}</div>
-    </div>
-  )
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

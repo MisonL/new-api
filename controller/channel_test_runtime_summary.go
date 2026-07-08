@@ -39,6 +39,7 @@ type channelTestRuntimeSummary struct {
 	EndpointType            string                     `json:"endpoint_type,omitempty"`
 	RequestPath             string                     `json:"request_path,omitempty"`
 	FinalRequestPath        string                     `json:"final_request_path,omitempty"`
+	UpstreamRequestPath     string                     `json:"upstream_request_path,omitempty"`
 	ProtocolStrategy        string                     `json:"protocol_strategy,omitempty"`
 	RelayFormat             string                     `json:"relay_format,omitempty"`
 	FinalRelayFormat        string                     `json:"final_relay_format,omitempty"`
@@ -119,6 +120,7 @@ func finalizeChannelTestRuntimeSummary(summary *channelTestRuntimeSummary, c *gi
 		if requestPath := strings.TrimSpace(info.RequestURLPath); requestPath != "" {
 			summary.FinalRequestPath = requestPath
 		}
+		summary.UpstreamRequestPath = strings.TrimSpace(info.UpstreamRequestPath)
 		summary.RelayFormat = string(info.RelayFormat)
 		summary.FinalRelayFormat = string(info.GetFinalRequestRelayFormat())
 		summary.RequestConversionChain = relayFormatsToStrings(info.RequestConversionChain)

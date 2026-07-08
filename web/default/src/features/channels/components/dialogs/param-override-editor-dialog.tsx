@@ -1915,29 +1915,35 @@ export function ParamOverrideEditorDialog(
   useEffect(() => {
     if (!props.open) return
     const state = parseInitialState(props.value)
-    setEditMode(state.editMode)
-    setVisualMode(state.visualMode)
-    setLegacyEntries(state.legacyEntries)
-    setOperations(state.operations)
-    setJsonText(state.jsonText)
-    setJsonError(state.jsonError)
-    setOperationSearch('')
-    setSelectedOperationId(state.operations[0]?.id || '')
-    setExpandedConditions({})
-    setDraggedOperationId('')
-    setDragOverOperationId('')
-    setDragOverPosition('before')
-    setTemplatePresetKey('codex_cli_headers_passthrough')
+    queueMicrotask(() => {
+      setEditMode(state.editMode)
+      setVisualMode(state.visualMode)
+      setLegacyEntries(state.legacyEntries)
+      setOperations(state.operations)
+      setJsonText(state.jsonText)
+      setJsonError(state.jsonError)
+      setOperationSearch('')
+      setSelectedOperationId(state.operations[0]?.id || '')
+      setExpandedConditions({})
+      setDraggedOperationId('')
+      setDragOverOperationId('')
+      setDragOverPosition('before')
+      setTemplatePresetKey('codex_cli_headers_passthrough')
+    })
   }, [props.open, props.value])
 
   // Keep selectedOperationId valid
   useEffect(() => {
     if (operations.length === 0) {
-      setSelectedOperationId('')
+      queueMicrotask(() => {
+        setSelectedOperationId('')
+      })
       return
     }
     if (!operations.some((o) => o.id === selectedOperationId)) {
-      setSelectedOperationId(operations[0].id)
+      queueMicrotask(() => {
+        setSelectedOperationId(operations[0].id)
+      })
     }
   }, [operations, selectedOperationId])
 

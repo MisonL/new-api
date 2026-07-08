@@ -36,6 +36,15 @@ func TestParseChannelTestOptionsRuntimeOffDisablesSubOptions(t *testing.T) {
 	require.False(t, options.UseModelMapping)
 }
 
+func TestOpenAICompatibleUnlimitedBalanceDetection(t *testing.T) {
+	require.False(t, isOpenAICompatibleUnlimitedBalance(OpenAISubscriptionResponse{
+		HardLimitUSD: openAICompatibleUnlimitedBalanceThreshold - 1,
+	}))
+	require.True(t, isOpenAICompatibleUnlimitedBalance(OpenAISubscriptionResponse{
+		HardLimitUSD: openAICompatibleUnlimitedBalanceThreshold,
+	}))
+}
+
 func TestParseChannelTestOptionsParsesProtocolAndRequestParams(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -195,6 +204,7 @@ func TestApplyChannelTestProtocolStrategyUsesGlobalResponsesToChatRuleByDefault(
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	withGlobalProtocolPolicyForTest(t, model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "channel-146-all-models",
@@ -631,9 +641,10 @@ func TestFinalizeChannelTestRuntimeSummaryIncludesCompactCapabilitySnapshot(t *t
 	require.NotNil(t, summary.ChannelCapability)
 	require.Equal(t, "sub2api_http", summary.ChannelCapability["profile"])
 	require.Equal(t, "native", summary.ChannelCapability["compact_mode_effective"])
-	require.Equal(t, true, summary.ChannelCapability["supports_responses_compact"])
+	require.Equal(t, false, summary.ChannelCapability["supports_responses_compact"])
 	require.Equal(t, false, summary.ChannelCapability["supports_rest_previous_response_id"])
 	require.Equal(t, false, summary.ChannelCapability["supports_compaction_item_passthrough"])
+	require.Equal(t, true, summary.ChannelCapability["strips_responses_encrypted_reasoning"])
 }
 
 func TestFinalizeChannelTestRuntimeSummaryHandlesNilInfo(t *testing.T) {
@@ -764,4 +775,49 @@ func TestFilterActiveGroupsKeepsConfiguredGroupsAndAuto(t *testing.T) {
 		{Group: "default", RequestCount: 1},
 		{Group: "auto", RequestCount: 3},
 	}, filtered)
+}
+
+func TestAutomaticChannelBalanceUpdateTaskRunsOnlyOnMasterNode(t *testing.T) {
+	originalIsMasterNode := common.IsMasterNode
+	t.Cleanup(func() {
+		common.IsMasterNode = originalIsMasterNode
+	})
+
+	common.IsMasterNode = false
+	require.False(t, shouldRunAutomaticChannelBalanceUpdateTask())
+
+	common.IsMasterNode = true
+	require.True(t, shouldRunAutomaticChannelBalanceUpdateTask())
+}
+
+func TestValidateChannelOtherSettingsClearsZeroRequestBodyLimit(t *testing.T) {
+	channel := &model.Channel{
+		Type:          constant.ChannelTypeOpenAI,
+		Key:           "test-key",
+		Name:          "request-body-limit-clear",
+		Models:        "gpt-5",
+		Group:         "default",
+		OtherSettings: `{"request_body_limit":{"max_bytes":0,"observed_at":1781660000,"source":"manual","reason":"clear"}}`,
+	}
+
+	require.NoError(t, validateChannel(channel, false))
+
+	settings := channel.GetOtherSettings()
+	require.Nil(t, settings.RequestBodyLimit)
+}
+
+func TestValidateChannelOtherSettingsRejectsNegativeRequestBodyLimit(t *testing.T) {
+	channel := &model.Channel{
+		Type:          constant.ChannelTypeOpenAI,
+		Key:           "test-key",
+		Name:          "request-body-limit-negative",
+		Models:        "gpt-5",
+		Group:         "default",
+		OtherSettings: `{"request_body_limit":{"max_bytes":-1}}`,
+	}
+
+	err := validateChannel(channel, false)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "request_body_limit.max_bytes")
 }

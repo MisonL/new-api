@@ -32,6 +32,7 @@ func TestNormalizeChatCompletionsToResponsesPolicyJSON_ValidRule(t *testing.T) {
 
 	var policy ChatCompletionsToResponsesPolicy
 	require.NoError(t, common.UnmarshalJsonStr(normalized, &policy))
+	assert.True(t, policy.Enabled)
 	require.Len(t, policy.Rules, 1)
 
 	rule := policy.Rules[0]
@@ -42,6 +43,49 @@ func TestNormalizeChatCompletionsToResponsesPolicyJSON_ValidRule(t *testing.T) {
 	assert.Equal(t, []string{"^gpt-5.*$"}, rule.ModelPatterns)
 	require.NotNil(t, rule.Options)
 	assert.True(t, rule.Options.EnableCustomToolBridge)
+}
+
+func TestNormalizeChatCompletionsToResponsesPolicyJSON_PreservesExplicitTopLevelDisabled(t *testing.T) {
+	raw := `{
+		"enabled": false,
+		"rules": [
+			{
+				"name": "responses-to-chat",
+				"enabled": true,
+				"source_endpoint": "responses",
+				"target_endpoint": "chat_completions",
+				"all_channels": true
+			}
+		]
+	}`
+
+	normalized, err := NormalizeChatCompletionsToResponsesPolicyJSON(raw)
+	require.NoError(t, err)
+
+	var policy ChatCompletionsToResponsesPolicy
+	require.NoError(t, common.UnmarshalJsonStr(normalized, &policy))
+	assert.False(t, policy.Enabled)
+	assert.Len(t, policy.Rules, 1)
+}
+
+func TestChatCompletionsToResponsesPolicyUnmarshalEnablesLegacyRulesOnlyConfig(t *testing.T) {
+	raw := `{
+		"rules": [
+			{
+				"name": "responses-to-chat",
+				"enabled": true,
+				"source_endpoint": "responses",
+				"target_endpoint": "chat_completions",
+				"all_channels": true
+			}
+		]
+	}`
+
+	var policy ChatCompletionsToResponsesPolicy
+	require.NoError(t, common.UnmarshalJsonStr(raw, &policy))
+
+	assert.True(t, policy.Enabled)
+	assert.Len(t, policy.Rules, 1)
 }
 
 func TestNormalizeChatCompletionsToResponsesPolicyJSON_RejectSameEndpoint(t *testing.T) {
@@ -504,6 +548,7 @@ func TestChatCompletionsToResponsesPolicyWarnings(t *testing.T) {
 	}
 
 	warnings := ChatCompletionsToResponsesPolicyWarnings(policy, true)
+	assert.Contains(t, warnings, "协议转换总开关已关闭，所有规则不会参与匹配")
 	assert.Contains(t, warnings, "disabled-empty 已停用，不会参与匹配")
 	assert.Contains(t, warnings, "disabled-empty 渠道范围为空，不会命中")
 	assert.NotContains(t, warnings, "disabled-empty 模型正则为空，不会命中")

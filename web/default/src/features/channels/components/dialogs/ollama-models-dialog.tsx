@@ -85,25 +85,6 @@ export function OllamaModelsDialog({
     [currentRow?.models]
   )
 
-  useEffect(() => {
-    if (!open) {
-      setModels([])
-      setSelected([])
-      setSearch('')
-      setPullName('')
-      setIsPulling(false)
-      setPullProgress(null)
-      pullAbortRef.current?.abort()
-      pullAbortRef.current = null
-      return
-    }
-
-    if (open && isOllamaChannel && channelId) {
-      void fetchOllamaModels()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, isOllamaChannel, channelId])
-
   const fetchOllamaModels = useCallback(async () => {
     if (!channelId) return
     setIsFetching(true)
@@ -163,6 +144,26 @@ export function OllamaModelsDialog({
       setIsFetching(false)
     }
   }, [channelId, currentRow, isOllamaChannel, t])
+
+  useEffect(() => {
+    if (!open) {
+      queueMicrotask(() => {
+        setModels([])
+        setSelected([])
+        setSearch('')
+        setPullName('')
+        setIsPulling(false)
+        setPullProgress(null)
+        pullAbortRef.current?.abort()
+        pullAbortRef.current = null
+      })
+      return
+    }
+
+    if (open && isOllamaChannel && channelId) {
+      void Promise.resolve().then(() => fetchOllamaModels())
+    }
+  }, [open, isOllamaChannel, channelId, fetchOllamaModels])
 
   const toggleSelected = (modelId: string, checked: boolean) => {
     setSelected((prev) => {

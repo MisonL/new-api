@@ -19,7 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess } from '../../helpers';
+import {
+  API,
+  showError,
+  showSuccess,
+  getDisabledRowProps,
+} from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 
@@ -347,14 +352,7 @@ export const useModelsData = () => {
 
   // Handle row click and styling
   const handleRow = (record, index) => {
-    const rowStyle =
-      record.status !== 1
-        ? {
-            style: {
-              background: 'var(--semi-color-disabled-border)',
-            },
-          }
-        : {};
+    const rowStyle = record.status !== 1 ? getDisabledRowProps() : {};
 
     return {
       ...rowStyle,

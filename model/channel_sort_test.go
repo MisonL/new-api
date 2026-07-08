@@ -88,6 +88,110 @@ func TestGetAllChannelsRejectsUnknownSortAndFallsBackToDefault(t *testing.T) {
 	require.Equal(t, []int{1, 3, 2}, channelIDs(channels))
 }
 
+func TestGetAllChannelsDefaultSortBreaksPriorityTiesByIDDesc(t *testing.T) {
+	setupChannelSortTestDB(t)
+	channels := []*Channel{
+		{Id: 1, Name: "alpha", Key: "sk-alpha", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](20)},
+		{Id: 3, Name: "gamma", Key: "sk-gamma", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](20)},
+		{Id: 2, Name: "beta", Key: "sk-beta", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](20)},
+	}
+	for _, channel := range channels {
+		require.NoError(t, DB.Create(channel).Error)
+	}
+
+	matched, err := GetAllChannels(0, 10, false, false)
+	require.NoError(t, err)
+	require.Equal(t, []int{3, 2, 1}, channelIDs(matched))
+}
+
+func TestPrioritySortUsesCoalesceForNullPriority(t *testing.T) {
+	setupChannelSortTestDB(t)
+
+	query := DB.Session(&gorm.Session{DryRun: true})
+	query = NewChannelSortOptions("priority", "desc", false).Apply(query)
+	sql := query.Find(&[]Channel{}).Statement.SQL.String()
+
+	require.Contains(t, sql, "COALESCE(priority, 0)")
+	require.Contains(t, sql, "id DESC")
+}
+
+func TestPrioritySortTreatsNullAsZero(t *testing.T) {
+	setupChannelSortTestDB(t)
+
+	require.NoError(t, DB.Create(&Channel{
+		Id:       1,
+		Name:     "null-priority",
+		Key:      "sk-null",
+		Models:   "gpt-5",
+		Group:    "default",
+		Priority: nil,
+	}).Error)
+	require.NoError(t, DB.Create(&Channel{
+		Id:       2,
+		Name:     "zero-priority",
+		Key:      "sk-zero",
+		Models:   "gpt-5",
+		Group:    "default",
+		Priority: common.GetPointer[int64](0),
+	}).Error)
+	require.NoError(t, DB.Create(&Channel{
+		Id:       3,
+		Name:     "top-priority",
+		Key:      "sk-top",
+		Models:   "gpt-5",
+		Group:    "default",
+		Priority: common.GetPointer[int64](10),
+	}).Error)
+
+	channels, err := GetAllChannels(0, 10, false, false, NewChannelSortOptions("priority", "desc", false))
+	require.NoError(t, err)
+	require.Equal(t, []int{3, 2, 1}, channelIDs(channels))
+}
+
+func TestGetTopChannelPrioritiesReturnsOnlyPositivePriorities(t *testing.T) {
+	setupChannelSortTestDB(t)
+
+	require.NoError(t, DB.Create(&Channel{
+		Id:       1,
+		Name:     "null-priority",
+		Key:      "sk-null",
+		Models:   "gpt-5",
+		Group:    "default",
+		Priority: nil,
+	}).Error)
+	require.NoError(t, DB.Create(&Channel{
+		Id:       2,
+		Name:     "zero-priority",
+		Key:      "sk-zero",
+		Models:   "gpt-5",
+		Group:    "default",
+		Priority: common.GetPointer[int64](0),
+	}).Error)
+	require.NoError(t, DB.Create(&Channel{
+		Id:       3,
+		Name:     "top-low",
+		Key:      "sk-low",
+		Models:   "gpt-5",
+		Group:    "default",
+		Priority: common.GetPointer[int64](10),
+	}).Error)
+	require.NoError(t, DB.Create(&Channel{
+		Id:       4,
+		Name:     "top-high",
+		Key:      "sk-high",
+		Models:   "gpt-5",
+		Group:    "default",
+		Priority: common.GetPointer[int64](20),
+	}).Error)
+
+	channels, err := GetTopChannelPriorities()
+	require.NoError(t, err)
+	require.Equal(t, []ChannelPriority{
+		{Id: 4, Priority: common.GetPointer[int64](20)},
+		{Id: 3, Priority: common.GetPointer[int64](10)},
+	}, channels)
+}
+
 func TestSearchChannelsAppliesWhitelistedServerSideSort(t *testing.T) {
 	setupChannelSortTestDB(t)
 	createChannelSortFixtures(t)

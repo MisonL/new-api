@@ -376,7 +376,7 @@ func newResponsesConvertRequestError(err error) *types.NewAPIError {
 }
 
 func applyResponsesCompactSummaryModelOverride(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) {
-	if c == nil || request == nil || !relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
+	if c == nil || request == nil || !shouldApplyResponsesCompactSummaryModelOverride(info) {
 		return
 	}
 	model := strings.TrimSpace(common.GetContextKeyString(c, appconstant.ContextKeyResponsesCompactSummaryModel))
@@ -385,6 +385,16 @@ func applyResponsesCompactSummaryModelOverride(c *gin.Context, info *relaycommon
 	}
 	request.SetModelName(model)
 	info.UpstreamModelName = model
+}
+
+func shouldApplyResponsesCompactSummaryModelOverride(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil || info.RelayMode != relayconstant.RelayModeResponsesCompact {
+		return false
+	}
+	if relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
+		return true
+	}
+	return info.ChannelType == appconstant.ChannelTypeCodex
 }
 
 func shouldRouteResponsesViaChat(info *relaycommon.RelayInfo, passThroughGlobal bool) bool {

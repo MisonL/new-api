@@ -58,13 +58,14 @@ type HeaderProfileStrategy struct {
 }
 
 const (
-	BuiltinCodexCLIUserAgent      = "codex-tui/0.134.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.134.0)"
+	BuiltinCodexCLIUserAgent      = "codex-tui/0.142.4 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.142.4)"
 	BuiltinCodexCLIOriginator     = "codex-tui"
-	BuiltinCodexDesktopUserAgent  = "Codex Desktop/0.133.0-alpha.1 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.519.41501)"
+	BuiltinCodexDesktopUserAgent  = "Codex Desktop/0.142.4 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.623.70822)"
 	BuiltinCodexDesktopOriginator = "Codex Desktop"
-	BuiltinClaudeCodeUserAgent    = "claude-cli/2.1.153 (external, sdk-cli)"
-	BuiltinQwenCodeUserAgent      = "QwenCode/0.16.2 (darwin; x64)"
-	BuiltinDroidCLIUserAgent      = "factory-cli/0.135.0"
+	BuiltinClaudeCodeUserAgent    = "claude-cli/2.1.197 (external, sdk-cli)"
+	BuiltinQwenCodeUserAgent      = "QwenCode/0.19.3 (darwin; x64)"
+	BuiltinDroidCLIUserAgent      = "factory-cli/0.161.0"
+	BuiltinAgyUserAgent           = "antigravity/cli/1.0.14 (aidev_client; os_type=darwin; arch=amd64)"
 	HeaderProfileLatestVersion    = "latest"
 	HeaderProfilePlatformMacOSX64 = "macos-x64"
 )
@@ -89,10 +90,10 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		Headers: map[string]string{
 			"Accept":             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 			"Accept-Language":    "en-US,en;q=0.9",
-			"Sec-CH-UA":          "\"Google Chrome\";v=\"148\", \"Chromium\";v=\"148\", \"Not.A/Brand\";v=\"24\"",
+			"Sec-CH-UA":          "\"Google Chrome\";v=\"150\", \"Chromium\";v=\"150\", \"Not.A/Brand\";v=\"24\"",
 			"Sec-CH-UA-Mobile":   "?0",
 			"Sec-CH-UA-Platform": "\"macOS\"",
-			"User-Agent":         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+			"User-Agent":         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.47 Safari/537.36",
 		},
 	},
 	newBuiltinCodexCLIHeaderProfile(),
@@ -110,7 +111,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		"gemini-cli",
 		"Gemini CLI",
 		map[string]string{
-			"User-Agent": "GeminiCLI/0.44.0/gemini-3.1-pro-preview (darwin; x64; terminal)",
+			"User-Agent": "GeminiCLI/0.49.0/gemini-3.1-pro-preview (darwin; x64; terminal)",
 		},
 		"默认使用 Gemini CLI npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。",
 		false,
@@ -133,6 +134,17 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		"默认使用 Droid CLI npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。",
 		false,
 	),
+	{
+		ID:          "agy",
+		Name:        "Antigravity CLI",
+		Category:    HeaderProfileCategoryAICodingCLI,
+		Scope:       HeaderProfileScopeBuiltin,
+		ReadOnly:    true,
+		Description: "固定请求头静态快照来自 Antigravity CLI 原始请求身份；此模板仅固定客户端身份。若后续确认需要动态头，应基于真实客户端抓包在高级参数覆盖中手动配置 pass_headers。",
+		Headers: map[string]string{
+			"User-Agent": BuiltinAgyUserAgent,
+		},
+	},
 	{
 		ID:       "postman-runtime",
 		Name:     "Postman Runtime",
@@ -172,7 +184,7 @@ func newBuiltinCodexDesktopHeaderProfile() HeaderProfile {
 		Category:            HeaderProfileCategoryAICodingCLI,
 		Scope:               HeaderProfileScopeBuiltin,
 		ReadOnly:            true,
-		Description:         "固定请求头静态快照来自 Codex Desktop App 0.133.0-alpha.1 真实请求；此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。",
+		Description:         "固定请求头静态快照来自本机 Codex Desktop 原始请求抓包；UA 前缀 0.142.4 是内置 Codex core/app-server 客户端版本，括号尾部 26.623.70822 是 Codex Desktop App 版本。此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。",
 		PassthroughRequired: false,
 		Headers: map[string]string{
 			"User-Agent": BuiltinCodexDesktopUserAgent,

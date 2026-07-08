@@ -97,6 +97,7 @@ export const channelFormSchema = z.object({
   upstream_model_update_check_enabled: z.boolean().optional(),
   upstream_model_update_auto_sync_enabled: z.boolean().optional(),
   upstream_model_update_ignored_models: z.string().optional(),
+  request_body_limit_max_bytes: z.number().min(0).optional(),
 })
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
@@ -163,6 +164,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
+  request_body_limit_max_bytes: 0,
 }
 
 type ChannelSubmitDirtyFields = Partial<
@@ -280,6 +282,7 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
+  let requestBodyLimitMaxBytes = 0
 
   if (channel.settings) {
     try {
@@ -326,6 +329,13 @@ export function transformChannelToFormDefaults(
       )
         ? parsed.upstream_model_update_ignored_models.join(',')
         : ''
+      const requestBodyLimit = parsed.request_body_limit
+      requestBodyLimitMaxBytes =
+        requestBodyLimit &&
+        typeof requestBodyLimit === 'object' &&
+        Number.isFinite(Number(requestBodyLimit.max_bytes))
+          ? Math.max(0, Math.trunc(Number(requestBodyLimit.max_bytes)))
+          : 0
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Failed to parse channel settings:', error)
@@ -385,6 +395,7 @@ export function transformChannelToFormDefaults(
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
+    request_body_limit_max_bytes: requestBodyLimitMaxBytes,
   }
 }
 
@@ -567,6 +578,45 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     if (typeof settingsObj.upstream_model_update_last_check_time !== 'number') {
       settingsObj.upstream_model_update_last_check_time = 0
     }
+  }
+
+  const requestBodyLimitMaxBytes = Math.trunc(
+    Number(formData.request_body_limit_max_bytes || 0)
+  )
+  if (
+    Number.isFinite(requestBodyLimitMaxBytes) &&
+    requestBodyLimitMaxBytes > 0
+  ) {
+    const currentLimit =
+      settingsObj.request_body_limit &&
+      typeof settingsObj.request_body_limit === 'object' &&
+      !Array.isArray(settingsObj.request_body_limit)
+        ? (settingsObj.request_body_limit as Record<string, unknown>)
+        : {}
+    const valueChanged =
+      Number(currentLimit.max_bytes) !== requestBodyLimitMaxBytes
+    settingsObj.request_body_limit = {
+      ...currentLimit,
+      max_bytes: requestBodyLimitMaxBytes,
+      observed_at:
+        !valueChanged && typeof currentLimit.observed_at === 'number'
+          ? currentLimit.observed_at
+          : Math.floor(Date.now() / 1000),
+      source:
+        !valueChanged &&
+        typeof currentLimit.source === 'string' &&
+        currentLimit.source.trim()
+          ? currentLimit.source
+          : 'manual',
+      reason:
+        !valueChanged &&
+        typeof currentLimit.reason === 'string' &&
+        currentLimit.reason.trim()
+          ? currentLimit.reason
+          : 'manual override',
+    }
+  } else if ('request_body_limit' in settingsObj) {
+    delete settingsObj.request_body_limit
   }
 
   return JSON.stringify(settingsObj)

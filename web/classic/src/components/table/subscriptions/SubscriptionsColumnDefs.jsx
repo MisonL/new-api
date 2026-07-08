@@ -157,12 +157,7 @@ const renderEnabled = (text, record, t) => {
       {t('启用')}
     </Tag>
   ) : (
-    <Tag
-      color='white'
-      shape='circle'
-      type='light'
-      prefixIcon={<Badge dot type='danger' />}
-    >
+    <Tag color='red' shape='circle'>
       {t('禁用')}
     </Tag>
   );

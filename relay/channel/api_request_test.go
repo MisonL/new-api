@@ -22,8 +22,36 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type doerFunc func(*http.Request) (*http.Response, error)
+
+func (f doerFunc) Do(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func init() {
 	gin.SetMode(gin.TestMode)
+}
+
+func TestRecordUpstreamRequestPathStoresPathOnly(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+
+	recordUpstreamRequestPath(info, "https://example.com/v1/chat/completions?api-version=2024-10-01")
+
+	require.Equal(t, "/v1/chat/completions", info.UpstreamRequestPath)
+}
+
+func TestRecordUpstreamRequestPathFallsBackToPathFromMalformedURL(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+
+	recordUpstreamRequestPath(info, "https://api.example.com/%zz/v1/chat?key=secret")
+
+	require.Equal(t, "/%zz/v1/chat", info.UpstreamRequestPath)
 }
 
 func setupApiRequestHeaderRuntimeTestDB(t *testing.T, tables ...interface{}) *gorm.DB {
@@ -740,4 +768,155 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.Equal(t, "window-abc", upstreamReq.Header.Get("X-Codex-Window-Id"))
 	require.Equal(t, "request-def", upstreamReq.Header.Get("X-Client-Request-Id"))
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
+}
+
+func TestDoRequestRecordsUpstreamTimingOnBodyRead(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(common.RequestIdKey, "upstream-req-123")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("hello"))
+	}))
+	defer upstream.Close()
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+	req, err := http.NewRequest(http.MethodGet, upstream.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := doRequest(ctx, req, info)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "upstream-req-123", ctx.GetString(common.UpstreamRequestIdKey))
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(body))
+	require.NoError(t, resp.Body.Close())
+
+	headerMs, ok := info.UpstreamHeaderLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, headerMs, int64(0))
+
+	ttfbMs, ok := info.UpstreamFirstByteLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, ttfbMs, int64(0))
+
+	totalMs, ok := info.UpstreamTotalLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, totalMs, int64(0))
+	require.LessOrEqual(t, headerMs, ttfbMs)
+	require.LessOrEqual(t, ttfbMs, totalMs)
+}
+
+func TestDoRequestRecordsUpstreamEndOnCloseWithoutRead(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("hello"))
+	}))
+	defer upstream.Close()
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+	req, err := http.NewRequest(http.MethodGet, upstream.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := doRequest(ctx, req, info)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Body.Close())
+
+	_, ok := info.UpstreamFirstByteLatencyMs()
+	require.False(t, ok)
+
+	totalMs, ok := info.UpstreamTotalLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, totalMs, int64(0))
+}
+
+func TestDoRequestRecordsUpstreamEndOnTransportError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:1", nil)
+	require.NoError(t, err)
+
+	resp, err := doRequestWithClient(ctx, req, info, doerFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("transport failure")
+	}))
+	require.Error(t, err)
+	require.Nil(t, resp)
+
+	headerMs, ok := info.UpstreamHeaderLatencyMs()
+	require.False(t, ok)
+	require.Zero(t, headerMs)
+
+	ttfbMs, ok := info.UpstreamFirstByteLatencyMs()
+	require.False(t, ok)
+	require.Zero(t, ttfbMs)
+
+	totalMs, ok := info.UpstreamTotalLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, totalMs, int64(0))
+}
+
+func TestWrapUpstreamTimingBodyHandlesNilResponseBody(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+	info.SetUpstreamRequestStartTime()
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       nil,
+	}
+
+	wrapUpstreamTimingBody(resp, info)
+
+	require.Nil(t, resp.Body)
+	totalMs, ok := info.UpstreamTotalLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, totalMs, int64(0))
+}
+
+func TestDoRequestRecordsEndTimeForNilResponse(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+	req, err := http.NewRequest(http.MethodGet, "http://example.test", nil)
+	require.NoError(t, err)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+
+	resp, err := doRequestWithClient(ctx, req, info, doerFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, nil
+	}))
+	require.Error(t, err)
+	require.Nil(t, resp)
+
+	headerMs, ok := info.UpstreamHeaderLatencyMs()
+	require.False(t, ok)
+	require.Zero(t, headerMs)
+
+	ttfbMs, ok := info.UpstreamFirstByteLatencyMs()
+	require.False(t, ok)
+	require.Zero(t, ttfbMs)
+
+	totalMs, ok := info.UpstreamTotalLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, totalMs, int64(0))
 }

@@ -8,6 +8,8 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -18,6 +20,8 @@ const (
 	defaultResponsesBootstrapProbePeriod = 1 * time.Second
 	defaultResponsesBootstrapPingPeriod  = 10 * time.Second
 )
+
+const responsesBootstrapRecoveryMetricContextKey = "responses_bootstrap_recovery_metric"
 
 // ResponsesBootstrapRecoveryConfig contains the active bootstrap recovery settings.
 type ResponsesBootstrapRecoveryConfig struct {
@@ -41,6 +45,11 @@ type ResponsesBootstrapRecoveryState struct {
 	PayloadStarted       bool
 	WaitAttempts         int
 	WaitDuration         time.Duration
+}
+
+type ResponsesBootstrapRecoveryMetric struct {
+	Attempted bool
+	WaitMs    int64
 }
 
 // GetResponsesBootstrapRecoveryConfig loads the current bootstrap recovery settings.
@@ -89,6 +98,47 @@ func GetResponsesBootstrapRecoveryState(c *gin.Context) (*ResponsesBootstrapReco
 		return nil, false
 	}
 	return common.GetContextKeyType[*ResponsesBootstrapRecoveryState](c, constant.ContextKeyResponsesBootstrapRecoveryState)
+}
+
+func MarkResponsesBootstrapRecoveryMetric(c *gin.Context) {
+	state, ok := GetResponsesBootstrapRecoveryState(c)
+	if !ok || state == nil || state.WaitAttempts <= 0 {
+		return
+	}
+	common.SetContextKey(c, responsesBootstrapRecoveryMetricContextKey, ResponsesBootstrapRecoveryMetric{
+		Attempted: true,
+		WaitMs:    state.WaitDuration.Milliseconds(),
+	})
+}
+
+func GetResponsesBootstrapRecoveryMetric(c *gin.Context) (ResponsesBootstrapRecoveryMetric, bool) {
+	if c == nil {
+		return ResponsesBootstrapRecoveryMetric{}, false
+	}
+	return common.GetContextKeyType[ResponsesBootstrapRecoveryMetric](c, responsesBootstrapRecoveryMetricContextKey)
+}
+
+func ApplyResponsesBootstrapRecoveryMetric(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
+	if relayInfo == nil {
+		return
+	}
+	metric, ok := GetResponsesBootstrapRecoveryMetric(c)
+	if !ok || !metric.Attempted {
+		return
+	}
+	relayInfo.ResponsesBootstrapRecoveryAttempted = true
+	relayInfo.ResponsesBootstrapRecoveryWaitMs = metric.WaitMs
+}
+
+func RecordResponsesBootstrapRecovery(modelName string, group string, success bool, waitMs int64) {
+	perfmetrics.Record(perfmetrics.Sample{
+		Model:                               modelName,
+		Group:                               group,
+		Success:                             success,
+		BootstrapOnly:                       true,
+		ResponsesBootstrapRecoveryAttempted: true,
+		ResponsesBootstrapRecoveryWaitMs:    waitMs,
+	})
 }
 
 // EnsureResponsesBootstrapRecoveryState creates request-scoped recovery state for eligible streams.

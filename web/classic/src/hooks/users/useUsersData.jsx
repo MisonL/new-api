@@ -19,7 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess } from '../../helpers';
+import {
+  API,
+  showError,
+  showSuccess,
+  getDisabledRowProps,
+} from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 
@@ -214,11 +219,7 @@ export const useUsersData = () => {
   // Handle table row styling for disabled/deleted users
   const handleRow = (record, index) => {
     if (record.DeletedAt !== null || record.status !== 1) {
-      return {
-        style: {
-          background: 'var(--semi-color-disabled-border)',
-        },
-      };
+      return getDisabledRowProps();
     } else {
       return {};
     }

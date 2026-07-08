@@ -42,6 +42,12 @@ func TestBuiltinAICodingCLIHeaderProfilesDoNotRequireAutomaticPassthrough(t *tes
 		require.False(t, profile.PassthroughRequired, profileID)
 		require.Contains(t, profile.Description, "显式选择", profileID)
 	}
+
+	agy, exists := ResolveHeaderProfile("agy", nil)
+	require.True(t, exists)
+	require.False(t, agy.PassthroughRequired)
+	require.Contains(t, agy.Description, "手动配置 pass_headers")
+	require.NotContains(t, agy.Description, "Antigravity CLI 请求头透传模板")
 }
 
 func TestBuiltinClaudeCodeHeaderProfileDescriptionUsesClaudeCodeTemplateName(t *testing.T) {
@@ -87,6 +93,19 @@ func TestBuiltinAICodingCLIHeaderProfilesDefaultToLatestVersionMeta(t *testing.T
 	codexDesktop, exists := ResolveHeaderProfile("codex-desktop", nil)
 	require.True(t, exists)
 	require.Nil(t, codexDesktop.VersionMeta)
+
+	agy, exists := ResolveHeaderProfile("agy", nil)
+	require.True(t, exists)
+	require.Nil(t, agy.VersionMeta)
+}
+
+func TestBuiltinAgyHeaderProfileUsesFixedSnapshot(t *testing.T) {
+	profile, exists := ResolveHeaderProfile("agy", nil)
+	require.True(t, exists)
+	require.Equal(t, BuiltinAgyUserAgent, profile.Headers["User-Agent"])
+	require.True(t, strings.HasPrefix(profile.Headers["User-Agent"], "antigravity/cli/"))
+	require.False(t, profile.PassthroughRequired)
+	require.Nil(t, profile.VersionMeta)
 }
 
 func TestResolveHeaderProfileStrategyHeadersResolvesBuiltinLatestProfiles(t *testing.T) {
@@ -230,7 +249,7 @@ func TestResolveHeaderProfileStrategyHeadersResolvesLatestVersionMeta(t *testing
 			{
 				ID: "codex-cli@latest",
 				Headers: map[string]string{
-					"User-Agent": "codex-tui/0.134.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.134.0)",
+					"User-Agent": "codex-tui/0.142.4 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.142.4)",
 					"Originator": "codex-tui",
 				},
 				VersionMeta: &HeaderProfileVersionMeta{
@@ -267,7 +286,7 @@ func TestResolveHeaderProfileStrategyHeadersUsesVersionMetaPlatform(t *testing.T
 			{
 				ID: "gemini-cli@latest",
 				Headers: map[string]string{
-					"User-Agent": "GeminiCLI/0.44.0/gemini-3.1-pro-preview (darwin; x64; terminal)",
+					"User-Agent": "GeminiCLI/0.49.0/gemini-3.1-pro-preview (darwin; x64; terminal)",
 				},
 				VersionMeta: &HeaderProfileVersionMeta{
 					BaseProfileID: "gemini-cli",
@@ -341,7 +360,7 @@ func TestResolveHeaderProfileStrategyHeadersKeepsSnapshotWhenLatestUnavailable(t
 			{
 				ID: "claude-code@latest",
 				Headers: map[string]string{
-					"User-Agent": "claude-cli/2.1.153 (external, sdk-cli)",
+					"User-Agent": "claude-cli/2.1.197 (external, sdk-cli)",
 				},
 				VersionMeta: &HeaderProfileVersionMeta{
 					BaseProfileID: "claude-code",
@@ -353,7 +372,7 @@ func TestResolveHeaderProfileStrategyHeadersKeepsSnapshotWhenLatestUnavailable(t
 		},
 	}, 0)
 	require.NoError(t, err)
-	require.Equal(t, "claude-cli/2.1.153 (external, sdk-cli)", headers["User-Agent"])
+	require.Equal(t, "claude-cli/2.1.197 (external, sdk-cli)", headers["User-Agent"])
 }
 
 func TestResolveHeaderProfileStrategyHeadersKeepsSnapshotWhenLatestIsInvalid(t *testing.T) {
@@ -373,7 +392,7 @@ func TestResolveHeaderProfileStrategyHeadersKeepsSnapshotWhenLatestIsInvalid(t *
 			{
 				ID: "claude-code@latest",
 				Headers: map[string]string{
-					"User-Agent": "claude-cli/2.1.153 (external, sdk-cli)",
+					"User-Agent": "claude-cli/2.1.197 (external, sdk-cli)",
 				},
 				VersionMeta: &HeaderProfileVersionMeta{
 					BaseProfileID: "claude-code",
@@ -385,7 +404,7 @@ func TestResolveHeaderProfileStrategyHeadersKeepsSnapshotWhenLatestIsInvalid(t *
 		},
 	}, 0)
 	require.NoError(t, err)
-	require.Equal(t, "claude-cli/2.1.153 (external, sdk-cli)", headers["User-Agent"])
+	require.Equal(t, "claude-cli/2.1.197 (external, sdk-cli)", headers["User-Agent"])
 }
 
 func TestResolveHeaderProfileStrategyHeadersTreatsLegacyFallbackLatestAsDynamic(t *testing.T) {
@@ -406,7 +425,7 @@ func TestResolveHeaderProfileStrategyHeadersTreatsLegacyFallbackLatestAsDynamic(
 			{
 				ID: "claude-code@latest",
 				Headers: map[string]string{
-					"User-Agent": "claude-cli/2.1.153 (external, sdk-cli)",
+					"User-Agent": "claude-cli/2.1.197 (external, sdk-cli)",
 				},
 				VersionMeta: &HeaderProfileVersionMeta{
 					BaseProfileID: "claude-code",
@@ -439,7 +458,7 @@ func TestResolveHeaderProfileStrategyHeadersResolvesLatestWithoutPackageName(t *
 			{
 				ID: "gemini-cli@latest",
 				Headers: map[string]string{
-					"User-Agent": "GeminiCLI/0.44.0/gemini-3.1-pro-preview (darwin; x64; terminal)",
+					"User-Agent": "GeminiCLI/0.49.0/gemini-3.1-pro-preview (darwin; x64; terminal)",
 				},
 				VersionMeta: &HeaderProfileVersionMeta{
 					BaseProfileID: "gemini-cli",
@@ -471,7 +490,7 @@ func TestResolveHeaderProfileStrategyHeadersResolvesLatestWithOnlyVersionMeta(t 
 			{
 				ID: "qwen-code@latest",
 				Headers: map[string]string{
-					"User-Agent": "QwenCode/0.16.2 (darwin; x64)",
+					"User-Agent": "QwenCode/0.19.3 (darwin; x64)",
 				},
 				VersionMeta: &HeaderProfileVersionMeta{
 					Source:  "npm",
@@ -502,7 +521,7 @@ func TestResolveHeaderProfileStrategyHeadersResolvesLatestWithoutBaseProfileID(t
 			{
 				ID: "claude-code@latest",
 				Headers: map[string]string{
-					"User-Agent": "claude-cli/2.1.153 (external, sdk-cli)",
+					"User-Agent": "claude-cli/2.1.197 (external, sdk-cli)",
 				},
 				VersionMeta: &HeaderProfileVersionMeta{
 					PackageName: "@anthropic-ai/claude-code",

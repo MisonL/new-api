@@ -126,7 +126,7 @@ export function SidebarModulesCard() {
   }, [])
 
   useEffect(() => {
-    loadConfig()
+    void Promise.resolve().then(() => loadConfig())
   }, [loadConfig])
 
   const toggleSection = (sectionKey: string, val: boolean) => {

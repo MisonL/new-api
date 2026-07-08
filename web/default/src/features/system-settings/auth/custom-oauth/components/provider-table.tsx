@@ -83,7 +83,7 @@ export function ProviderTable(props: ProviderTableProps) {
                 <TableCell>
                   <StatusBadge
                     label={provider.enabled ? t('Enabled') : t('Disabled')}
-                    variant={provider.enabled ? 'success' : 'neutral'}
+                    variant={provider.enabled ? 'success' : 'disabled'}
                     copyable={false}
                   />
                 </TableCell>

@@ -42,6 +42,7 @@ const ModelSetting = () => {
     'global.pass_through_request_enabled': false,
     'global.thinking_model_blacklist': '[]',
     'global.chat_completions_to_responses_policy': '{}',
+    'global.request_body_limit_policy': '{}',
     'general_setting.ping_interval_enabled': false,
     'general_setting.ping_interval_seconds': 60,
     'gemini.thinking_adapter_enabled': false,
@@ -65,7 +66,8 @@ const ModelSetting = () => {
           item.key === 'claude.default_max_tokens' ||
           item.key === 'gemini.supported_imagine_models' ||
           item.key === 'global.thinking_model_blacklist' ||
-          item.key === 'global.chat_completions_to_responses_policy'
+          item.key === 'global.chat_completions_to_responses_policy' ||
+          item.key === 'global.request_body_limit_policy'
         ) {
           if (item.value !== '') {
             try {

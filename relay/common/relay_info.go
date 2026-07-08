@@ -62,11 +62,27 @@ type BuildInToolInfo struct {
 	ToolName          string
 	CallCount         int
 	SearchContextSize string
+	Quality           string
+	Size              string
+	ImageCalls        map[string]int
+	DefaultSearchSize bool `json:"-"`
 }
 
 // ResponsesUsageInfo aggregates built-in tool usage collected from Responses requests.
 type ResponsesUsageInfo struct {
 	BuiltInTools map[string]*BuildInToolInfo
+}
+
+func ImageGenerationCallKey(quality string, size string) string {
+	return strings.TrimSpace(quality) + ":" + strings.TrimSpace(size)
+}
+
+func SplitImageGenerationCallKey(key string) (string, string) {
+	quality, size, ok := strings.Cut(key, ":")
+	if !ok {
+		return key, ""
+	}
+	return quality, size
 }
 
 // ChannelMeta captures selected channel metadata copied from request context.
@@ -109,31 +125,33 @@ type RelayInfo struct {
 	FirstResponseTime time.Time
 	isFirstResponse   bool
 	//SendLastReasoningResponse bool
-	IsStream               bool
-	IsGeminiBatchEmbedding bool
-	IsPlayground           bool
-	UsePrice               bool
-	RelayMode              int
-	OriginModelName        string
-	RequestURLPath         string
-	RequestHeaders         map[string]string
-	ShouldIncludeUsage     bool
-	DisablePing            bool // 是否禁止向下游发送自定义 Ping
-	ClientWs               *websocket.Conn
-	TargetWs               *websocket.Conn
-	InputAudioFormat       string
-	OutputAudioFormat      string
-	RealtimeTools          []dto.RealTimeTool
-	IsFirstRequest         bool
-	AudioUsage             bool
-	ReasoningEffort        string
-	UserSetting            dto.UserSetting
-	UserEmail              string
-	UserQuota              int
-	RelayFormat            types.RelayFormat
-	SendResponseCount      int
-	ReceivedResponseCount  int
-	FinalPreConsumedQuota  int // 最终预消耗的配额
+	IsStream                            bool
+	ResponsesBootstrapRecoveryAttempted bool
+	ResponsesBootstrapRecoveryWaitMs    int64
+	IsGeminiBatchEmbedding              bool
+	IsPlayground                        bool
+	UsePrice                            bool
+	RelayMode                           int
+	OriginModelName                     string
+	RequestURLPath                      string
+	RequestHeaders                      map[string]string
+	ShouldIncludeUsage                  bool
+	DisablePing                         bool // 是否禁止向下游发送自定义 Ping
+	ClientWs                            *websocket.Conn
+	TargetWs                            *websocket.Conn
+	InputAudioFormat                    string
+	OutputAudioFormat                   string
+	RealtimeTools                       []dto.RealTimeTool
+	IsFirstRequest                      bool
+	AudioUsage                          bool
+	ReasoningEffort                     string
+	UserSetting                         dto.UserSetting
+	UserEmail                           string
+	UserQuota                           int
+	RelayFormat                         types.RelayFormat
+	SendResponseCount                   int
+	ReceivedResponseCount               int
+	FinalPreConsumedQuota               int // 最终预消耗的配额
 	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。
@@ -157,7 +175,12 @@ type RelayInfo struct {
 	RequestId string
 	// UpstreamRequestId is the request ID returned by the upstream provider.
 	UpstreamRequestId     string
+	UpstreamRequestPath   string
 	UpstreamUsageMetadata string
+	UpstreamRequestStart  time.Time
+	UpstreamHeaderTime    time.Time
+	UpstreamFirstByteTime time.Time
+	UpstreamEndTime       time.Time
 	// SubscriptionAmountTotal / SubscriptionAmountUsedAfterPreConsume are used to compute remaining in logs.
 	SubscriptionAmountTotal               int64
 	SubscriptionAmountUsedAfterPreConsume int64
@@ -357,6 +380,7 @@ func (info *RelayInfo) ToString() string {
 	fmt.Fprintf(b, "IsStream: %t, ", info.IsStream)
 	fmt.Fprintf(b, "IsPlayground: %t, ", info.IsPlayground)
 	fmt.Fprintf(b, "RequestURLPath: %q, ", info.RequestURLPath)
+	fmt.Fprintf(b, "UpstreamRequestPath: %q, ", info.UpstreamRequestPath)
 	fmt.Fprintf(b, "OriginModelName: %q, ", info.OriginModelName)
 	fmt.Fprintf(b, "EstimatePromptTokens: %d, ", info.estimatePromptTokens)
 	fmt.Fprintf(b, "ShouldIncludeUsage: %t, ", info.ShouldIncludeUsage)
@@ -507,21 +531,43 @@ func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) 
 	if len(request.Tools) > 0 {
 		for _, tool := range request.GetToolsMap() {
 			toolType := common.Interface2String(tool["type"])
-			info.ResponsesUsageInfo.BuiltInTools[toolType] = &BuildInToolInfo{
-				ToolName:  toolType,
+			canonicalToolType, ok := CanonicalResponsesBuiltInToolType(toolType)
+			if !ok {
+				continue
+			}
+			toolInfo := &BuildInToolInfo{
+				ToolName:  canonicalToolType,
 				CallCount: 0,
 			}
-			switch toolType {
+			info.ResponsesUsageInfo.BuiltInTools[canonicalToolType] = toolInfo
+			switch canonicalToolType {
 			case dto.BuildInToolWebSearchPreview:
 				searchContextSize := common.Interface2String(tool["search_context_size"])
 				if searchContextSize == "" {
 					searchContextSize = "medium"
+					toolInfo.DefaultSearchSize = true
 				}
-				info.ResponsesUsageInfo.BuiltInTools[toolType].SearchContextSize = searchContextSize
+				toolInfo.SearchContextSize = searchContextSize
+			case dto.BuildInToolImageGeneration:
+				toolInfo.Quality = common.Interface2String(tool["quality"])
+				toolInfo.Size = common.Interface2String(tool["size"])
 			}
 		}
 	}
 	return info
+}
+
+func CanonicalResponsesBuiltInToolType(toolType string) (string, bool) {
+	switch toolType {
+	case dto.BuildInToolImageGeneration:
+		return dto.BuildInToolImageGeneration, true
+	case dto.BuildInToolWebSearch, dto.BuildInToolWebSearchPreview, dto.BuildInToolWebSearchPreview2025_03_11:
+		return dto.BuildInToolWebSearchPreview, true
+	case dto.BuildInToolFileSearch:
+		return dto.BuildInToolFileSearch, true
+	default:
+		return "", false
+	}
 }
 
 // GenRelayInfoGemini builds RelayInfo for Gemini requests.
@@ -802,6 +848,89 @@ func (info *RelayInfo) FirstResponseLatencyMs() (int64, bool) {
 		return 0, false
 	}
 	latencyMs := info.FirstResponseTime.Sub(info.StartTime).Milliseconds()
+	if latencyMs < 0 {
+		return 0, false
+	}
+	return latencyMs, true
+}
+
+func (info *RelayInfo) SetUpstreamRequestStartTime() {
+	info.SetUpstreamRequestStartTimeAt(time.Now())
+}
+
+func (info *RelayInfo) SetUpstreamRequestStartTimeAt(ts time.Time) {
+	if info == nil || ts.IsZero() {
+		return
+	}
+	info.UpstreamRequestStart = ts
+	info.UpstreamHeaderTime = time.Time{}
+	info.UpstreamFirstByteTime = time.Time{}
+	info.UpstreamEndTime = time.Time{}
+}
+
+func (info *RelayInfo) SetUpstreamHeaderTime() {
+	info.SetUpstreamHeaderTimeAt(time.Now())
+}
+
+func (info *RelayInfo) SetUpstreamHeaderTimeAt(ts time.Time) {
+	if !info.validUpstreamEventTime(ts) || !info.UpstreamHeaderTime.IsZero() {
+		return
+	}
+	info.UpstreamHeaderTime = ts
+}
+
+func (info *RelayInfo) SetUpstreamFirstByteTime() {
+	info.SetUpstreamFirstByteTimeAt(time.Now())
+}
+
+func (info *RelayInfo) SetUpstreamFirstByteTimeAt(ts time.Time) {
+	if !info.validUpstreamEventTime(ts) || !info.UpstreamFirstByteTime.IsZero() {
+		return
+	}
+	info.UpstreamFirstByteTime = ts
+}
+
+func (info *RelayInfo) SetUpstreamEndTime() {
+	info.SetUpstreamEndTimeAt(time.Now())
+}
+
+func (info *RelayInfo) SetUpstreamEndTimeAt(ts time.Time) {
+	if !info.validUpstreamEventTime(ts) || !info.UpstreamEndTime.IsZero() {
+		return
+	}
+	info.UpstreamEndTime = ts
+}
+
+func (info *RelayInfo) validUpstreamEventTime(ts time.Time) bool {
+	return info != nil && !ts.IsZero() && !info.UpstreamRequestStart.IsZero() && !ts.Before(info.UpstreamRequestStart)
+}
+
+func (info *RelayInfo) UpstreamHeaderLatencyMs() (int64, bool) {
+	if info == nil {
+		return 0, false
+	}
+	return upstreamLatencyMs(info, info.UpstreamHeaderTime)
+}
+
+func (info *RelayInfo) UpstreamFirstByteLatencyMs() (int64, bool) {
+	if info == nil {
+		return 0, false
+	}
+	return upstreamLatencyMs(info, info.UpstreamFirstByteTime)
+}
+
+func (info *RelayInfo) UpstreamTotalLatencyMs() (int64, bool) {
+	if info == nil {
+		return 0, false
+	}
+	return upstreamLatencyMs(info, info.UpstreamEndTime)
+}
+
+func upstreamLatencyMs(info *RelayInfo, eventTime time.Time) (int64, bool) {
+	if info == nil || info.UpstreamRequestStart.IsZero() || eventTime.IsZero() {
+		return 0, false
+	}
+	latencyMs := eventTime.Sub(info.UpstreamRequestStart).Milliseconds()
 	if latencyMs < 0 {
 		return 0, false
 	}

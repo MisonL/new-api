@@ -56,6 +56,7 @@ describe('protocol conversion policy utils', () => {
       serializeProtocolPolicy(parsed.rules, parsed.policyExtra)
     )
 
+    expect(serialized.enabled).toBe(true)
     expect(serialized.vendor_policy_flag).toBe('keep')
     expect(serialized.rules[0].vendor_rule_flag).toBe(7)
     expect(serialized.rules[0].options.vendor_option_flag).toBe('keep')
@@ -78,6 +79,7 @@ describe('protocol conversion policy utils', () => {
     const serialized = JSON.parse(
       serializeProtocolPolicy(parsed.rules, parsed.policyExtra)
     )
+    expect(serialized.enabled).toBe(true)
     expect(serialized.rules).toHaveLength(1)
     expect(serialized.rules[0].source_endpoint).toBe('chat_completions')
     expect(serialized.rules[0].target_endpoint).toBe('responses')

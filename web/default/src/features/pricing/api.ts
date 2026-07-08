@@ -15,20 +15,32 @@ export type PerformanceSeriesPoint = {
   ts: number
   avg_ttft_ms: number
   avg_latency_ms: number
+  avg_upstream_header_ms: number
+  avg_upstream_ttfb_ms: number
+  avg_upstream_total_ms: number
   success_rate: number
   count: number
   success_count: number
   ttft_count: number
+  upstream_header_count: number
+  upstream_ttfb_count: number
+  upstream_total_count: number
 }
 
 export type PerformanceGroup = {
   group: string
   avg_ttft_ms: number
   avg_latency_ms: number
+  avg_upstream_header_ms: number
+  avg_upstream_ttfb_ms: number
+  avg_upstream_total_ms: number
   success_rate: number
   request_count: number
   success_count: number
   ttft_count: number
+  upstream_header_count: number
+  upstream_ttfb_count: number
+  upstream_total_count: number
   series: PerformanceSeriesPoint[]
 }
 
@@ -45,9 +57,15 @@ export type PerformanceMetricsData = {
 export type PerfModelSummary = {
   model_name: string
   avg_latency_ms: number
+  avg_upstream_header_ms: number
+  avg_upstream_ttfb_ms: number
+  avg_upstream_total_ms: number
   success_rate: number
   avg_tps: number
   request_count: number
+  upstream_header_count: number
+  upstream_ttfb_count: number
+  upstream_total_count: number
 }
 
 export type PerfSummaryAllData = {

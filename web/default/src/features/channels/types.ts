@@ -31,6 +31,7 @@ export const channelSchema = z.object({
   base_url: z.string().nullish(),
   other: z.string().default(''),
   balance: z.number().default(0), // in USD
+  balance_unlimited: z.boolean().optional(),
   balance_updated_time: z.number(),
   models: z.string().default(''),
   group: z.string().default('default'),
@@ -173,6 +174,7 @@ export interface ChannelCapabilitySnapshot {
   supports_rest_previous_response_id?: boolean
   supports_compaction_item_passthrough?: boolean
   supports_namespace_tools?: boolean
+  strips_responses_encrypted_reasoning?: boolean
   observed?: ResponsesCapabilityObservation
   probe?: ResponsesCapabilityObservation
 }
@@ -197,12 +199,15 @@ export interface ChannelTestRuntimeConfig {
   final_relay_format?: string
   protocol_strategy?: string
   request_conversion_chain?: string[]
+  request_path?: string
+  upstream_request_path?: string
 }
 
 export interface ChannelBalanceResponse {
   success: boolean
   message?: string
   balance?: number
+  balance_unlimited?: boolean
   currency?: string
 }
 

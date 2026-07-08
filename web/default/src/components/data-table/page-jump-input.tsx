@@ -25,6 +25,7 @@ export function PageJumpInput({
   const [pageInput, setPageInput] = useState(`${currentPage}`)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPageInput(`${currentPage}`)
   }, [currentPage])
 
@@ -41,17 +42,24 @@ export function PageJumpInput({
   }
 
   return (
-    <div className={cn('flex items-center gap-1 whitespace-nowrap', className)}>
+    <div
+      className={cn(
+        'flex h-8 items-center gap-1 whitespace-nowrap',
+        className
+      )}
+    >
       {showLabel ? (
-        <span className='text-muted-foreground hidden text-sm sm:inline'>
+        <span className='text-muted-foreground hidden text-sm leading-none sm:inline'>
           {t('Page')}
         </span>
       ) : null}
       <Input
         aria-label={t('Page')}
-        className='h-8 w-14 px-2 text-center text-sm'
+        autoComplete='off'
+        className='h-8 w-14 px-2 py-0 text-center text-sm leading-none tabular-nums'
         disabled={disabled}
         inputMode='numeric'
+        name='page'
         value={pageInput}
         onBlur={commitPageInput}
         onChange={(event) => setPageInput(event.target.value)}

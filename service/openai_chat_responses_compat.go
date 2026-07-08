@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -44,8 +45,21 @@ func FindResponsesViaChatRule(ctx context.Context, relayMode int, passThroughGlo
 		return nil, nil
 	}
 	if request != nil {
+		previousResponseID := strings.TrimSpace(request.PreviousResponseID)
 		if request.HasCompactionTrigger() {
 			return nil, nil
+		}
+		if previousResponseID != "" {
+			if IsNativeOpaqueCompactReference(previousResponseID) {
+				return nil, nil
+			}
+			_, ok, err := syntheticCompactIDFromReference(ctx, previousResponseID)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, nil
+			}
 		}
 		hasRemoteCompaction, err := HasRemoteResponsesCompactionInput(ctx, *request)
 		if err != nil {
@@ -78,4 +92,8 @@ func ChatCompletionsResponseToResponsesResponseWithOptions(resp *dto.OpenAITextR
 
 func ExtractOutputTextFromResponses(resp *dto.OpenAIResponsesResponse) string {
 	return openaicompat.ExtractOutputTextFromResponses(resp)
+}
+
+func ExtractReasoningSummaryFromResponses(resp *dto.OpenAIResponsesResponse) string {
+	return openaicompat.ExtractReasoningSummaryFromResponses(resp)
 }

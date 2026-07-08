@@ -601,11 +601,33 @@ export function validateChannelSettings(settings: string): boolean {
 // Balance Formatting
 // ============================================================================
 
+export const UNLIMITED_CHANNEL_BALANCE_THRESHOLD = 100000000
+
+export function isUnlimitedChannelBalance(
+  balance: number | null | undefined,
+  explicitUnlimited?: boolean
+): boolean {
+  if (explicitUnlimited === true) return true
+  if (balance == null || !Number.isFinite(balance)) return false
+  return balance >= UNLIMITED_CHANNEL_BALANCE_THRESHOLD
+}
+
+type FormatBalanceOptions = {
+  unlimited?: boolean
+  unlimitedLabel?: string
+}
+
 /**
  * Format balance with currency symbol
  */
-export function formatBalance(balance: number | null | undefined): string {
-  if (balance == null || Number.isNaN(balance)) return '-'
+export function formatBalance(
+  balance: number | null | undefined,
+  options: FormatBalanceOptions = {}
+): string {
+  if (isUnlimitedChannelBalance(balance, options.unlimited)) {
+    return options.unlimitedLabel ?? 'Unlimited'
+  }
+  if (balance == null || !Number.isFinite(balance)) return '-'
   return formatCurrencyFromUSD(balance, {
     digitsLarge: 2,
     digitsSmall: 4,

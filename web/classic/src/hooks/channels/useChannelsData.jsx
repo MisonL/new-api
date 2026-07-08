@@ -27,6 +27,8 @@ import {
   loadChannelModels,
   copy,
   toBoolean,
+  getDisabledRowProps,
+  isUnlimitedChannelBalance,
 } from '../../helpers';
 import { CHANNEL_OPTIONS, MODEL_TABLE_PAGE_SIZE } from '../../constants';
 import { useIsMobile } from '../common/useIsMobile';
@@ -732,11 +734,7 @@ export const useChannelsData = () => {
   // Row style
   const handleRow = (record, index) => {
     if (record.status !== 1) {
-      return {
-        style: {
-          background: 'var(--semi-color-disabled-border)',
-        },
-      };
+      return getDisabledRowProps();
     } else {
       return {};
     }
@@ -843,10 +841,17 @@ export const useChannelsData = () => {
     }
 
     const res = await API.get(`/api/channel/update_balance/${record.id}/`);
-    const { success, message, balance } = res.data;
+    const {
+      success,
+      message,
+      balance,
+      balance_unlimited: balanceUnlimited,
+    } = res.data;
     if (success) {
       updateChannelProperty(record.id, (channel) => {
         channel.balance = balance;
+        channel.balance_unlimited =
+          balanceUnlimited === true || isUnlimitedChannelBalance(balance);
         channel.balance_updated_time = Date.now() / 1000;
       });
       showInfo(

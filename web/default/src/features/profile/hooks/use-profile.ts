@@ -102,7 +102,7 @@ export function useProfile() {
 
   // Initial fetch
   useEffect(() => {
-    fetchProfile()
+    void Promise.resolve().then(() => fetchProfile())
   }, [fetchProfile])
 
   return {
