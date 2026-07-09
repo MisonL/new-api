@@ -35,7 +35,6 @@ const ChannelsTable = (channelsData) => {
     pageSize,
     channelCount,
     enableBatchDelete,
-    compactMode,
     visibleColumns,
     setSelectedChannels,
     handlePageChange,
@@ -125,17 +124,11 @@ const ChannelsTable = (channelsData) => {
     return getVisibleColumns();
   }, [visibleColumns, allColumns]);
 
-  const tableColumns = useMemo(() => {
-    return compactMode
-      ? visibleColumnsList.map(({ fixed, ...rest }) => rest)
-      : visibleColumnsList;
-  }, [compactMode, visibleColumnsList]);
-
   return (
     <CardTable
-      columns={tableColumns}
+      columns={visibleColumnsList}
       dataSource={channels}
-      scroll={compactMode ? undefined : { x: 'max-content' }}
+      scroll={{ x: 'max-content' }}
       pagination={{
         currentPage: activePage,
         pageSize: pageSize,
