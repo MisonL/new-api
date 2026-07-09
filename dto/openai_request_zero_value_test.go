@@ -123,7 +123,8 @@ func TestOpenAIResponsesCompactionRequestPreservesUnknownFieldsThroughResponsesR
 	responsesReq := compactReq.ToResponsesRequest()
 	require.NotNil(t, responsesReq)
 	require.JSONEq(t, `false`, string(responsesReq.Store))
-	require.Nil(t, responsesReq.Stream)
+	require.NotNil(t, responsesReq.Stream)
+	require.True(t, *responsesReq.Stream)
 	require.Nil(t, responsesReq.StreamOptions)
 	require.Contains(t, responsesReq.Extra, "background")
 	require.Contains(t, responsesReq.Extra, "sub2api_session_id")
@@ -133,7 +134,8 @@ func TestOpenAIResponsesCompactionRequestPreservesUnknownFieldsThroughResponsesR
 
 	require.True(t, gjson.GetBytes(encoded, "store").Exists())
 	require.False(t, gjson.GetBytes(encoded, "store").Bool())
-	require.False(t, gjson.GetBytes(encoded, "stream").Exists())
+	require.True(t, gjson.GetBytes(encoded, "stream").Exists())
+	require.True(t, gjson.GetBytes(encoded, "stream").Bool())
 	require.False(t, gjson.GetBytes(encoded, "stream_options").Exists())
 	require.True(t, gjson.GetBytes(encoded, "background").Exists())
 	require.False(t, gjson.GetBytes(encoded, "background").Bool())
@@ -171,11 +173,13 @@ func TestOpenAIResponsesCompactionRequestToResponsesRequestClonesPointerFields(t
 	*compactReq.TopP = 1
 	*compactReq.MaxToolCalls = 9
 
-	require.Nil(t, responsesReq.Stream)
+	require.NotNil(t, responsesReq.Stream)
+	require.True(t, *responsesReq.Stream)
 	require.Equal(t, uint(1024), *responsesReq.MaxOutputTokens)
 	require.Equal(t, 0, *responsesReq.TopLogProbs)
 	require.Equal(t, "medium", responsesReq.Reasoning.Effort)
-	require.Nil(t, responsesReq.StreamOptions)
+	require.NotNil(t, responsesReq.StreamOptions)
+	require.True(t, responsesReq.StreamOptions.IncludeUsage)
 	require.Equal(t, 0.2, *responsesReq.Temperature)
 	require.Equal(t, 0.9, *responsesReq.TopP)
 	require.Equal(t, uint(3), *responsesReq.MaxToolCalls)

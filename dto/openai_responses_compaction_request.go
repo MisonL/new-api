@@ -128,6 +128,8 @@ func (r *OpenAIResponsesCompactionRequest) ToResponsesRequest() *OpenAIResponses
 		PromptCacheKey:       r.PromptCacheKey,
 		PromptCacheRetention: r.PromptCacheRetention,
 		SafetyIdentifier:     r.SafetyIdentifier,
+		Stream:               clonePtr(r.Stream),
+		StreamOptions:        clonePtr(r.StreamOptions),
 		Temperature:          clonePtr(r.Temperature),
 		Text:                 r.Text,
 		ToolChoice:           r.ToolChoice,
@@ -152,7 +154,10 @@ func clonePtr[T any](value *T) *T {
 }
 
 func (r *OpenAIResponsesCompactionRequest) IsStream(c *gin.Context) bool {
-	return false
+	if r == nil || r.Stream == nil {
+		return false
+	}
+	return *r.Stream
 }
 
 func (r *OpenAIResponsesCompactionRequest) SetModelName(modelName string) {
