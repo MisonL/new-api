@@ -2519,9 +2519,10 @@ html.dark .with-pastel-balls::before {
 .card-table-scrollbar {
   position: relative;
   z-index: 5;
-  width: 100%;
+  width: auto;
   height: 14px;
-  margin-top: 4px;
+  margin: 4px var(--card-table-fixed-right-width, 0px) 0
+    var(--card-table-fixed-left-width, 0px);
   padding: 3px 4px;
   cursor: pointer;
   overflow-x: hidden;

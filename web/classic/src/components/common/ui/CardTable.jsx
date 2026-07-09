@@ -280,6 +280,52 @@ function getDesktopTableBody(container) {
   return container?.querySelector('.semi-table-body') || null;
 }
 
+function getFixedCellBounds(cells) {
+  const rects = Array.from(cells || [])
+    .map((cell) => cell.getBoundingClientRect())
+    .filter((rect) => rect.width > 0 && rect.height > 0);
+  if (rects.length === 0) return null;
+  const left = Math.min(...rects.map((rect) => rect.left));
+  const right = Math.max(...rects.map((rect) => rect.right));
+  return { left, right };
+}
+
+function measureFixedColumnOccupancy(container, side, cells) {
+  const bounds = getFixedCellBounds(cells);
+  if (!bounds) return 0;
+  const containerRect = container.getBoundingClientRect();
+  if (side === 'left') {
+    return Math.max(bounds.right - containerRect.left, 0);
+  }
+  return Math.max(containerRect.right - bounds.left, 0);
+}
+
+function measureFixedColumnWidth(container, side) {
+  if (!container) return 0;
+  const selector = `.semi-table-cell-fixed-${side}`;
+  const rowSelectors = [
+    '.semi-table-thead tr',
+    '.semi-table-tbody .semi-table-row',
+    '.semi-table-summary .semi-table-row',
+  ];
+
+  for (const rowSelector of rowSelectors) {
+    const row = container.querySelector(rowSelector);
+    const width = measureFixedColumnOccupancy(
+      container,
+      side,
+      row?.querySelectorAll(selector),
+    );
+    if (width > 0) return width;
+  }
+
+  return measureFixedColumnOccupancy(
+    container,
+    side,
+    container.querySelectorAll(selector),
+  );
+}
+
 function createTableScrollSync(tableBody, updateScrollLeft) {
   const syncFromTable = () => updateScrollLeft(tableBody.scrollLeft);
 
@@ -324,6 +370,17 @@ function useDesktopTableScrollMetrics(containerRef, syncKey) {
 
     const updateMetrics = () => {
       if (container && cardBody && track) {
+        const fixedLeftWidth = measureFixedColumnWidth(container, 'left');
+        const fixedRightWidth = measureFixedColumnWidth(container, 'right');
+        container.style.setProperty(
+          '--card-table-fixed-left-width',
+          `${Math.ceil(fixedLeftWidth)}px`,
+        );
+        container.style.setProperty(
+          '--card-table-fixed-right-width',
+          `${Math.ceil(fixedRightWidth)}px`,
+        );
+
         const cardBodyRect = cardBody.getBoundingClientRect();
         const containerRect = container.getBoundingClientRect();
         const trackStyle = getComputedStyle(track);
@@ -365,6 +422,8 @@ function useDesktopTableScrollMetrics(containerRef, syncKey) {
       cleanupObserver();
       cleanupSync();
       container?.style.removeProperty('--card-table-body-max-height');
+      container?.style.removeProperty('--card-table-fixed-left-width');
+      container?.style.removeProperty('--card-table-fixed-right-width');
     };
   }, [syncKey]);
 
