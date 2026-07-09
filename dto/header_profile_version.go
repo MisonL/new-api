@@ -108,7 +108,7 @@ func ValidateHeaderProfileVersionMeta(profile HeaderProfile) error {
 	if packageName != expectedPackageName {
 		return fmt.Errorf("version_meta.package_name does not match %s", baseProfileID)
 	}
-	if strings.TrimSpace(meta.Source) != "" && strings.TrimSpace(meta.Source) != "npm" && strings.TrimSpace(meta.Source) != "fallback" {
+	if source := strings.TrimSpace(meta.Source); source != "" && source != "npm" && source != "recorded" && source != "retained" && source != "fallback" {
 		return fmt.Errorf("version_meta.source invalid: %s", meta.Source)
 	}
 	if version == "" {

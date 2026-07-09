@@ -396,6 +396,57 @@ func TestUpdateChannelAllowsHeaderProfileVersionMetaPlatforms(t *testing.T) {
 	}
 }
 
+func TestUpdateChannelAllowsRecordedHeaderProfileVersionMetaSources(t *testing.T) {
+	for _, source := range []string{"recorded", "retained"} {
+		t.Run(source, func(t *testing.T) {
+			setupChannelControllerTestDB(t)
+			channel := seedChannelForHeaderProfileTest(t)
+
+			ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+				"id":     channel.Id,
+				"type":   channel.Type,
+				"key":    channel.Key,
+				"status": channel.Status,
+				"name":   channel.Name,
+				"group":  channel.Group,
+				"models": channel.Models,
+				"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+					HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+						Enabled:            true,
+						Mode:               dto.HeaderProfileModeFixed,
+						SelectedProfileIDs: []string{"codex-cli@latest"},
+						Profiles: []dto.HeaderProfile{
+							{
+								ID:      "codex-cli@latest",
+								Headers: map[string]string{"User-Agent": dto.BuiltinCodexCLIUserAgent},
+								VersionMeta: &dto.HeaderProfileVersionMeta{
+									BaseProfileID: "codex-cli",
+									PackageName:   "@openai/codex",
+									Source:        source,
+									Version:       dto.HeaderProfileLatestVersion,
+									Platform:      dto.HeaderProfilePlatformMacOSX64,
+								},
+							},
+						},
+					},
+				}),
+			})
+
+			UpdateChannel(ctx)
+
+			response := decodeChannelAPIResponse(t, recorder)
+			require.True(t, response.Success, response.Message)
+
+			loaded, err := model.GetChannelById(channel.Id, true)
+			require.NoError(t, err)
+			strategy := loaded.GetOtherSettings().HeaderProfileStrategy
+			require.NotNil(t, strategy)
+			require.Len(t, strategy.Profiles, 1)
+			require.Equal(t, source, strategy.Profiles[0].VersionMeta.Source)
+		})
+	}
+}
+
 func TestUpdateChannelRejectsInvalidHeaderProfileVersionMeta(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -450,6 +501,18 @@ func TestUpdateChannelRejectsInvalidHeaderProfileVersionMeta(t *testing.T) {
 				Platform:      dto.HeaderProfilePlatformLinuxArm64,
 			},
 			message: "version_meta.package_name",
+		},
+		{
+			name:      "invalid-source",
+			profileID: "codex-cli@latest",
+			versionMeta: &dto.HeaderProfileVersionMeta{
+				BaseProfileID: "codex-cli",
+				PackageName:   "@openai/codex",
+				Source:        "local-cache",
+				Version:       dto.HeaderProfileLatestVersion,
+				Platform:      dto.HeaderProfilePlatformMacOSX64,
+			},
+			message: "version_meta.source",
 		},
 	}
 

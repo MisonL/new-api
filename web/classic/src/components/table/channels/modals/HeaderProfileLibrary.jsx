@@ -1063,7 +1063,10 @@ const HeaderProfileLibrary = ({
         </button>
         <div className='flex items-start justify-between gap-2'>
           {versionSource && (
-            <div className='w-40 py-1.5 pr-1.5'>
+            <div
+              className='py-1.5 pr-1.5'
+              style={{ width: 208, flex: '0 0 208px' }}
+            >
               <div className='flex items-center gap-1.5'>
                 <Select
                   size='small'
@@ -1074,7 +1077,26 @@ const HeaderProfileLibrary = ({
                   onMouseDown={(event) => event.stopPropagation()}
                   onClick={(event) => event.stopPropagation()}
                   onChange={updateProfileVersion}
-                  style={{ width: '100%' }}
+                  renderSelectedItem={(optionNode) => {
+                    const label = String(
+                      optionNode?.label || optionNode?.value || '',
+                    );
+                    return (
+                      <span
+                        title={label}
+                        style={{
+                          display: 'block',
+                          maxWidth: '100%',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {label}
+                      </span>
+                    );
+                  }}
+                  style={{ minWidth: 0, flex: 1 }}
                 />
                 <Button
                   size='small'
@@ -1083,6 +1105,7 @@ const HeaderProfileLibrary = ({
                   icon={<IconRefresh spin={versionState.loading === true} />}
                   disabled={versionState.loading === true}
                   aria-label={t('重新加载 npm 版本')}
+                  style={{ flex: '0 0 28px' }}
                   onMouseDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.stopPropagation();
