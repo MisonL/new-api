@@ -42,7 +42,7 @@ body {
 
 .channel-table-card .semi-table-cell-fixed-right {
   box-shadow: -1px 0 0 var(--semi-color-border);
-  min-width: 170px;
+  min-width: 190px;
 }
 
 .new-api-disabled-row .semi-table-row-cell:first-child {
@@ -66,7 +66,7 @@ html.dark .channel-table-card .semi-table-cell-fixed-left {
 
 html.dark .channel-table-card .semi-table-cell-fixed-right {
   box-shadow: -1px 0 0 var(--semi-color-border);
-  min-width: 170px;
+  min-width: 190px;
 }
 
 html.dark .new-api-disabled-row .semi-table-row-cell:first-child {

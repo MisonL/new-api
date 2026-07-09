@@ -52,6 +52,8 @@ import {
 } from '@douyinfe/semi-icons';
 import { FaInfinity, FaRandom } from 'react-icons/fa';
 
+const CHANNEL_OPERATE_COLUMN_WIDTH = 190;
+
 // Render functions
 const renderType = (type, record = {}, t) => {
   const channelInfo = record?.channel_info;
@@ -715,9 +717,13 @@ export const getChannelsColumns = ({
       title: '',
       dataIndex: 'operate',
       fixed: 'right',
-      width: 170,
+      width: CHANNEL_OPERATE_COLUMN_WIDTH,
       render: (text, record, index) => {
         if (record.children === undefined) {
+          const openChannelSheet = () => {
+            setEditingChannel(record);
+            setShowEdit(true);
+          };
           const upstreamUpdateMeta = getUpstreamUpdateMeta(record);
           const moreMenuItems = [
             {
@@ -848,10 +854,15 @@ export const getChannelsColumns = ({
                   <Button
                     type='tertiary'
                     size='small'
-                    onClick={() => {
-                      setEditingChannel(record);
-                      setShowEdit(true);
-                    }}
+                    aria-label={t('查看渠道详情')}
+                    onClick={openChannelSheet}
+                  >
+                    {t('详情')}
+                  </Button>
+                  <Button
+                    type='tertiary'
+                    size='small'
+                    onClick={openChannelSheet}
                   >
                     {t('编辑')}
                   </Button>
@@ -880,14 +891,18 @@ export const getChannelsColumns = ({
                 <Button
                   type='tertiary'
                   size='small'
-                  onClick={() => {
-                    setEditingChannel(record);
-                    setShowEdit(true);
-                  }}
+                  aria-label={t('查看渠道详情')}
+                  onClick={openChannelSheet}
                 >
-                  {t('编辑')}
+                  {t('详情')}
                 </Button>
               )}
+
+              {!record.channel_info?.is_multi_key ? (
+                <Button type='tertiary' size='small' onClick={openChannelSheet}>
+                  {t('编辑')}
+                </Button>
+              ) : null}
 
               <Dropdown
                 trigger='click'
