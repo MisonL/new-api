@@ -31,25 +31,8 @@ body {
   background-color: var(--semi-color-bg-0);
 }
 
-.new-api-disabled-row,
 .new-api-disabled-row .semi-table-row-cell {
-  background: var(--semi-color-fill-0) !important;
   color: var(--semi-color-disabled-text);
-}
-
-.new-api-disabled-row:hover,
-.new-api-disabled-row:hover .semi-table-row-cell {
-  background: var(--semi-color-fill-1) !important;
-}
-
-.channel-table-card .new-api-disabled-row .semi-table-cell-fixed-right,
-.channel-table-card .new-api-disabled-row .semi-table-cell-fixed-left {
-  background: var(--semi-color-fill-0) !important;
-}
-
-.channel-table-card .new-api-disabled-row:hover .semi-table-cell-fixed-right,
-.channel-table-card .new-api-disabled-row:hover .semi-table-cell-fixed-left {
-  background: var(--semi-color-fill-1) !important;
 }
 
 .channel-table-card .semi-table-cell-fixed-right,
@@ -73,18 +56,7 @@ body {
 
 html.dark .new-api-disabled-row,
 html.dark .new-api-disabled-row .semi-table-row-cell {
-  background: var(--semi-color-fill-0) !important;
-}
-
-html.dark
-  .channel-table-card
-  .new-api-disabled-row
-  .semi-table-cell-fixed-right,
-html.dark
-  .channel-table-card
-  .new-api-disabled-row
-  .semi-table-cell-fixed-left {
-  background: var(--semi-color-fill-0) !important;
+  color: var(--semi-color-disabled-text);
 }
 
 html.dark .channel-table-card .semi-table-cell-fixed-right,
@@ -95,22 +67,6 @@ html.dark .channel-table-card .semi-table-cell-fixed-left {
 html.dark .channel-table-card .semi-table-cell-fixed-right {
   box-shadow: -1px 0 0 var(--semi-color-border);
   min-width: 170px;
-}
-
-html.dark .new-api-disabled-row:hover,
-html.dark .new-api-disabled-row:hover .semi-table-row-cell {
-  background: var(--semi-color-fill-1) !important;
-}
-
-html.dark
-  .channel-table-card
-  .new-api-disabled-row:hover
-  .semi-table-cell-fixed-right,
-html.dark
-  .channel-table-card
-  .new-api-disabled-row:hover
-  .semi-table-cell-fixed-left {
-  background: var(--semi-color-fill-1) !important;
 }
 
 html.dark .new-api-disabled-row .semi-table-row-cell:first-child {
