@@ -336,18 +336,47 @@ function createTableScrollSync(tableBody, updateScrollLeft) {
   };
 }
 
+function setStylePropertyIfChanged(element, property, value) {
+  if (element.style.getPropertyValue(property) === value) return;
+  element.style.setProperty(property, value);
+}
+
+function removeStylePropertyIfPresent(element, property) {
+  if (!element.style.getPropertyValue(property)) return;
+  element.style.removeProperty(property);
+}
+
+function isSameTableMetrics(current, next) {
+  return (
+    current.clientWidth === next.clientWidth &&
+    current.scrollWidth === next.scrollWidth &&
+    current.scrollLeft === next.scrollLeft &&
+    current.trackWidth === next.trackWidth
+  );
+}
+
 function createTableMetricObserver(elements, updateMetrics) {
-  const resizeObserver = new ResizeObserver(updateMetrics);
-  const mutationObserver = new MutationObserver(updateMetrics);
+  let animationFrame = null;
+  const scheduleUpdateMetrics = () => {
+    if (animationFrame !== null) return;
+    animationFrame = requestAnimationFrame(() => {
+      animationFrame = null;
+      updateMetrics();
+    });
+  };
+  const resizeObserver = new ResizeObserver(scheduleUpdateMetrics);
+  const mutationObserver = new MutationObserver(scheduleUpdateMetrics);
   elements.filter(Boolean).forEach((element) => {
     resizeObserver.observe(element);
   });
   const tableBody = elements[0];
   mutationObserver.observe(tableBody, { childList: true, subtree: true });
-  const animationFrame = requestAnimationFrame(updateMetrics);
+  scheduleUpdateMetrics();
 
   return () => {
-    cancelAnimationFrame(animationFrame);
+    if (animationFrame !== null) {
+      cancelAnimationFrame(animationFrame);
+    }
     resizeObserver.disconnect();
     mutationObserver.disconnect();
   };
@@ -372,11 +401,13 @@ function useDesktopTableScrollMetrics(containerRef, syncKey) {
       if (container && cardBody && track) {
         const fixedLeftWidth = measureFixedColumnWidth(container, 'left');
         const fixedRightWidth = measureFixedColumnWidth(container, 'right');
-        container.style.setProperty(
+        setStylePropertyIfChanged(
+          container,
           '--card-table-fixed-left-width',
           `${Math.ceil(fixedLeftWidth)}px`,
         );
-        container.style.setProperty(
+        setStylePropertyIfChanged(
+          container,
           '--card-table-fixed-right-width',
           `${Math.ceil(fixedRightWidth)}px`,
         );
@@ -391,15 +422,19 @@ function useDesktopTableScrollMetrics(containerRef, syncKey) {
           Math.max(containerRect.top - cardBodyRect.top, 0) -
           trackOuterHeight;
         if (availableHeight > 0) {
-          container.style.setProperty(
+          setStylePropertyIfChanged(
+            container,
             '--card-table-body-max-height',
             `${Math.floor(availableHeight)}px`,
           );
         } else {
-          container.style.removeProperty('--card-table-body-max-height');
+          removeStylePropertyIfPresent(
+            container,
+            '--card-table-body-max-height',
+          );
         }
       }
-      setMetrics({
+      const nextMetrics = {
         clientWidth: tableBody.clientWidth,
         scrollWidth: tableBody.scrollWidth,
         scrollLeft: tableBody.scrollLeft,
@@ -407,10 +442,17 @@ function useDesktopTableScrollMetrics(containerRef, syncKey) {
           (track?.clientWidth || tableBody.clientWidth) - 8,
           0,
         ),
-      });
+      };
+      setMetrics((current) =>
+        isSameTableMetrics(current, nextMetrics) ? current : nextMetrics,
+      );
     };
     const updateScrollLeft = (scrollLeft) => {
-      setMetrics((current) => ({ ...current, scrollLeft }));
+      setMetrics((current) =>
+        current.scrollLeft === scrollLeft
+          ? current
+          : { ...current, scrollLeft },
+      );
     };
     const cleanupSync = createTableScrollSync(tableBody, updateScrollLeft);
     const cleanupObserver = createTableMetricObserver(
