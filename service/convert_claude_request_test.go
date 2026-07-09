@@ -358,6 +358,30 @@ func TestClaudeToOpenAIRequestKeepsEmptyThinkTagsVisible(t *testing.T) {
 	require.Empty(t, openAIRequest.Messages[0].GetReasoningContent())
 }
 
+func TestClaudeToOpenAIRequestKeepsNonThinkAngleTagsVisibleForDeepSeek(t *testing.T) {
+	content := "<thinking>model-visible text</thinking>\nhello"
+	claudeRequest := dto.ClaudeRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.ClaudeMessage{
+			{
+				Role:    "assistant",
+				Content: content,
+			},
+		},
+	}
+
+	openAIRequest, err := ClaudeToOpenAIRequest(claudeRequest, &relaycommon.RelayInfo{
+		OriginModelName: "deepseek-v4-flash",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, openAIRequest.Messages, 1)
+	require.Equal(t, content, openAIRequest.Messages[0].StringContent())
+	require.Empty(t, openAIRequest.Messages[0].GetReasoningContent())
+}
+
 func TestClaudeToOpenAIRequestExtractsThinkTagsWithUnicodePrefix(t *testing.T) {
 	claudeRequest := dto.ClaudeRequest{
 		Model: "deepseek-v4-flash",

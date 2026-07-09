@@ -2608,6 +2608,32 @@ func TestStoreNativeOpaqueCompactStatePreservesOpaqueContentWhitespace(t *testin
 	require.Equal(t, opaqueContent, reloaded.Summary)
 }
 
+func TestStoreNativeOpaqueCompactStateRejectsOversizedOpaqueContent(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+	withoutRedisForSyntheticCompactTest(t)
+
+	scope := SyntheticCompactStateScope{
+		UserID:      7,
+		TokenID:     8,
+		Group:       "default",
+		Model:       "gpt-5.5",
+		ChannelID:   207,
+		ChannelType: 1,
+	}
+	opaqueContent := " " + strings.Repeat("x", syntheticCompactSummaryMax) + " "
+	state, err := StoreNativeOpaqueCompactState(context.Background(), scope, "gpt-5.5", "resp_native", opaqueContent, 1710000000)
+
+	require.Nil(t, state)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds max size")
+}
+
 func TestStoreNativeOpaqueCompactStateRejectsEmptyResponseID(t *testing.T) {
 	originDB := model.DB
 	t.Cleanup(func() {
