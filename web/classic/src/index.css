@@ -42,7 +42,17 @@ body {
 
 .channel-table-card .semi-table-cell-fixed-right {
   box-shadow: -1px 0 0 var(--semi-color-border);
-  min-width: 190px;
+  min-width: 250px;
+}
+
+.channel-operate-actions {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.channel-operate-actions .semi-button-split {
+  display: inline-flex;
+  flex-wrap: nowrap;
 }
 
 .new-api-disabled-row .semi-table-row-cell:first-child {
@@ -66,7 +76,7 @@ html.dark .channel-table-card .semi-table-cell-fixed-left {
 
 html.dark .channel-table-card .semi-table-cell-fixed-right {
   box-shadow: -1px 0 0 var(--semi-color-border);
-  min-width: 190px;
+  min-width: 250px;
 }
 
 html.dark .new-api-disabled-row .semi-table-row-cell:first-child {

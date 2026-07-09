@@ -52,7 +52,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { FaInfinity, FaRandom } from 'react-icons/fa';
 
-const CHANNEL_OPERATE_COLUMN_WIDTH = 190;
+const CHANNEL_OPERATE_COLUMN_WIDTH = 250;
 
 // Render functions
 const renderType = (type, record = {}, t) => {
@@ -720,7 +720,7 @@ export const getChannelsColumns = ({
       width: CHANNEL_OPERATE_COLUMN_WIDTH,
       render: (text, record, index) => {
         if (record.children === undefined) {
-          const openChannelSheet = () => {
+          const openEditSheet = () => {
             setEditingChannel(record);
             setShowEdit(true);
           };
@@ -809,7 +809,7 @@ export const getChannelsColumns = ({
           }
 
           return (
-            <Space wrap>
+            <Space className='channel-operate-actions' wrap={false}>
               <SplitButtonGroup
                 className='overflow-hidden'
                 aria-label={t('测试单个渠道操作项目组')}
@@ -854,15 +854,7 @@ export const getChannelsColumns = ({
                   <Button
                     type='tertiary'
                     size='small'
-                    aria-label={t('查看渠道详情')}
-                    onClick={openChannelSheet}
-                  >
-                    {t('详情')}
-                  </Button>
-                  <Button
-                    type='tertiary'
-                    size='small'
-                    onClick={openChannelSheet}
+                    onClick={openEditSheet}
                   >
                     {t('编辑')}
                   </Button>
@@ -888,21 +880,10 @@ export const getChannelsColumns = ({
                   </Dropdown>
                 </SplitButtonGroup>
               ) : (
-                <Button
-                  type='tertiary'
-                  size='small'
-                  aria-label={t('查看渠道详情')}
-                  onClick={openChannelSheet}
-                >
-                  {t('详情')}
-                </Button>
-              )}
-
-              {!record.channel_info?.is_multi_key ? (
-                <Button type='tertiary' size='small' onClick={openChannelSheet}>
+                <Button type='tertiary' size='small' onClick={openEditSheet}>
                   {t('编辑')}
                 </Button>
-              ) : null}
+              )}
 
               <Dropdown
                 trigger='click'
