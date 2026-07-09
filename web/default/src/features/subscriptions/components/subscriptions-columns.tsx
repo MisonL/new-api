@@ -118,7 +118,7 @@ export function useSubscriptionsColumns(): ColumnDef<PlanRecord>[] {
           ) : (
             <StatusBadge
               label={t('Disable')}
-              variant='neutral'
+              variant='disabled'
               copyable={false}
             />
           ),

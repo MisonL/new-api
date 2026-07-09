@@ -41,9 +41,11 @@ export function renderLimitedItems({ items, renderItem, maxDisplay = 3 }) {
           }
           position='top'
         >
-          <Tag size='small' shape='circle' color='grey'>
-            +{remainingItems.length}
-          </Tag>
+          <span className='inline-flex'>
+            <Tag size='small' shape='circle' color='grey'>
+              +{remainingItems.length}
+            </Tag>
+          </span>
         </Popover>
       )}
     </Space>

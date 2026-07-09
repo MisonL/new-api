@@ -46,6 +46,13 @@ import { useMinimumLoadingTime } from '../../../../../hooks/common/useMinimumLoa
 import { renderLimitedItems } from '../../../../common/ui/RenderUtils';
 import { useIsMobile } from '../../../../../hooks/common/useIsMobile';
 
+function activateRatioHelp(openRatioHelp, e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  e.preventDefault();
+  e.stopPropagation();
+  openRatioHelp();
+}
+
 const CARD_STYLES = {
   container:
     'w-12 h-12 rounded-2xl flex items-center justify-center relative shadow-md',
@@ -331,15 +338,25 @@ const PricingCardView = ({
                         <Tooltip
                           content={t('倍率是为了方便换算不同价格的模型')}
                         >
-                          <IconHelpCircle
-                            className='text-blue-500 cursor-pointer'
-                            size='small'
+                          <span
+                            className='inline-flex h-4 w-4 shrink-0 items-center justify-center text-blue-500'
+                            role='button'
+                            tabIndex={0}
+                            aria-label={t('倍率信息')}
                             onClick={(e) => {
                               e.stopPropagation();
                               setModalImageUrl('/ratio.png');
                               setIsModalOpenurl(true);
                             }}
-                          />
+                            onKeyDown={(e) =>
+                              activateRatioHelp(() => {
+                                setModalImageUrl('/ratio.png');
+                                setIsModalOpenurl(true);
+                              }, e)
+                            }
+                          >
+                            <IconHelpCircle size='small' />
+                          </span>
                         </Tooltip>
                       </div>
                       <div className='grid grid-cols-3 gap-2 text-xs text-gray-600'>
@@ -368,7 +385,7 @@ const PricingCardView = ({
 
       {/* 分页 */}
       {filteredModels.length > 0 && (
-        <div className='flex justify-center mt-6 py-4 border-t pricing-pagination-divider'>
+        <div className='new-api-inline-pagination-footer mt-6 border-t pricing-pagination-divider'>
           <Pagination
             currentPage={currentPage}
             pageSize={pageSize}

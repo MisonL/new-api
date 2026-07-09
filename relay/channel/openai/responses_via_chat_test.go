@@ -41,9 +41,71 @@ func indexAfter(t *testing.T, text string, marker string, after int) int {
 	return after + index
 }
 
-func TestOaiChatToResponsesStreamHandler(t *testing.T) {
-	t.Parallel()
+func TestMarshalResponsesCompatArgumentsWrapsValidJSONAsString(t *testing.T) {
+	raw, err := marshalResponsesCompatArguments(`{"q":"hello"}`)
+	require.NoError(t, err)
+	require.JSONEq(t, `"{\"q\":\"hello\"}"`, string(raw))
+}
 
+func TestMarshalResponsesCompatArgumentsEscapesInvalidJSON(t *testing.T) {
+	raw, err := marshalResponsesCompatArguments(`not-json`)
+	require.NoError(t, err)
+	require.JSONEq(t, `"not-json"`, string(raw))
+}
+
+func TestMarshalResponsesCompatArgumentsBoundaryInputs(t *testing.T) {
+	testCases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "empty",
+			in:   "",
+			want: `""`,
+		},
+		{
+			name: "embedded quotes",
+			in:   `not "json"`,
+			want: `"not \"json\""`,
+		},
+		{
+			name: "json string stays json",
+			in:   `"already escaped"`,
+			want: `"\"already escaped\""`,
+		},
+		{
+			name: "special characters escaped",
+			in:   "line\n中文",
+			want: "\"line\\n中文\"",
+		},
+		{
+			name: "formatted json stays string",
+			in:   "{\n  \"q\": \"hello\"\n}",
+			want: "\"{\\n  \\\"q\\\": \\\"hello\\\"\\n}\"",
+		},
+		{
+			name: "json trailing comma escaped as string",
+			in:   `{"q":"hello",}`,
+			want: `"{\"q\":\"hello\",}"`,
+		},
+		{
+			name: "unquoted key escaped as string",
+			in:   `{q:"hello"}`,
+			want: `"{q:\"hello\"}"`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := marshalResponsesCompatArguments(tc.in)
+			require.NoError(t, err)
+			require.JSONEq(t, tc.want, string(raw))
+		})
+	}
+}
+
+func TestOaiChatToResponsesStreamHandler(t *testing.T) {
 	oldTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30
 	t.Cleanup(func() {

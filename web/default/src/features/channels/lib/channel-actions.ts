@@ -1,12 +1,12 @@
 import type { QueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
-import { formatCurrencyFromUSD } from '@/lib/currency'
 import {
   copyChannel,
   deleteChannel,
   testChannel,
   updateChannel,
+  updateChannelPriorities,
   batchDeleteChannels,
   batchSetChannelTag,
   enableTagChannels,
@@ -19,7 +19,9 @@ import {
   updateChannelBalance,
 } from '../api'
 import { CHANNEL_STATUS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
-import type { CopyChannelParams } from '../types'
+import type { ChannelTestRuntimeConfig, CopyChannelParams } from '../types'
+import { formatBalance } from './channel-utils'
+import type { TopChannelPriorityMovePlan } from './channel-priority'
 
 // ============================================================================
 // Query Keys
@@ -28,6 +30,7 @@ import type { CopyChannelParams } from '../types'
 export const channelsQueryKeys = {
   all: ['channels'] as const,
   lists: () => [...channelsQueryKeys.all, 'list'] as const,
+  top: () => [...channelsQueryKeys.lists(), 'top'] as const,
   list: (params: Record<string, unknown>) =>
     [...channelsQueryKeys.lists(), params] as const,
   details: () => [...channelsQueryKeys.all, 'detail'] as const,
@@ -113,6 +116,7 @@ export async function handleDeleteChannel(
     if (response.success) {
       toast.success(i18next.t(SUCCESS_MESSAGES.DELETED))
       queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
       onSuccess?.()
     } else {
       toast.error(response.message || i18next.t(ERROR_MESSAGES.DELETE_FAILED))
@@ -145,12 +149,54 @@ export async function handleUpdateChannelField(
         })
       )
       queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      if (fieldName === 'priority') {
+        queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
+      }
       onSuccess?.()
     } else {
       toast.error(response.message || i18next.t(ERROR_MESSAGES.UPDATE_FAILED))
     }
   } catch (_error) {
     toast.error(i18next.t(ERROR_MESSAGES.UPDATE_FAILED))
+  }
+}
+
+export async function handleUpdateChannelPriorityMovePlan(
+  plan: TopChannelPriorityMovePlan,
+  queryClient?: QueryClient,
+  onSuccess?: () => void
+): Promise<boolean> {
+  if (plan.updates.length === 0) {
+    toast.info(i18next.t('No pinned channel to move'))
+    return false
+  }
+
+  try {
+    const response = await updateChannelPriorities(
+      plan.updates.map((update) => ({
+        id: update.id,
+        priority: update.priority,
+      }))
+    )
+    if (!response.success) {
+      throw new Error(
+        response.message || i18next.t(ERROR_MESSAGES.UPDATE_FAILED)
+      )
+    }
+    toast.success(i18next.t('Pinned channel order updated'))
+    queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+    queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
+    onSuccess?.()
+    return true
+  } catch (error) {
+    queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+    queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
+    const updateError =
+      error instanceof Error
+        ? error.message
+        : i18next.t(ERROR_MESSAGES.UPDATE_FAILED)
+    toast.error(updateError)
+    return false
   }
 }
 
@@ -179,6 +225,9 @@ export async function handleUpdateTagField(
         })
       )
       queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      if (fieldName === 'priority') {
+        queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
+      }
       onSuccess?.()
     } else {
       toast.error(response.message || i18next.t(ERROR_MESSAGES.UPDATE_FAILED))
@@ -198,7 +247,8 @@ export async function handleTestChannel(
     success: boolean,
     responseTime?: number,
     error?: string,
-    errorCode?: string
+    errorCode?: string,
+    runtimeConfig?: ChannelTestRuntimeConfig
   ) => void
 ): Promise<void> {
   const payload =
@@ -214,12 +264,25 @@ export async function handleTestChannel(
 
   try {
     const response = await testChannel(id, payload)
+    const responseTime = normalizeChannelTestResponseTime(response)
     if (response.success) {
       toast.success(i18next.t(SUCCESS_MESSAGES.TESTED))
-      onTestComplete?.(true, response.data?.response_time)
+      onTestComplete?.(
+        true,
+        responseTime,
+        undefined,
+        undefined,
+        response.runtime_config
+      )
     } else {
       toast.error(response.message || i18next.t(ERROR_MESSAGES.TEST_FAILED))
-      onTestComplete?.(false, undefined, response.message, response.error_code)
+      onTestComplete?.(
+        false,
+        responseTime,
+        response.message,
+        response.error_code,
+        response.runtime_config
+      )
     }
   } catch (_error: unknown) {
     const err = _error as { response?: { data?: { message?: string } } }
@@ -228,6 +291,19 @@ export async function handleTestChannel(
     toast.error(errorMsg)
     onTestComplete?.(false, undefined, errorMsg)
   }
+}
+
+function normalizeChannelTestResponseTime(response: {
+  time?: number
+  data?: { response_time?: number }
+}): number | undefined {
+  if (typeof response.data?.response_time === 'number') {
+    return response.data.response_time
+  }
+  if (typeof response.time === 'number') {
+    return Math.round(response.time * 1000)
+  }
+  return undefined
 }
 
 /**
@@ -244,6 +320,7 @@ export async function handleCopyChannel(
     if (response.success && response.data?.id) {
       toast.success(i18next.t(SUCCESS_MESSAGES.COPIED))
       queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
       onSuccess?.(response.data.id)
     } else {
       toast.error(response.message || i18next.t('Failed to copy channel'))
@@ -267,10 +344,9 @@ export async function handleUpdateChannelBalance(
       const balance = response.balance
       toast.success(
         i18next.t('Balance updated: {{balance}}', {
-          balance: formatCurrencyFromUSD(balance, {
-            digitsLarge: 2,
-            digitsSmall: 4,
-            abbreviate: false,
+          balance: formatBalance(balance, {
+            unlimited: response.balance_unlimited,
+            unlimitedLabel: i18next.t('Unlimited'),
           }),
         })
       )
@@ -314,6 +390,7 @@ export async function handleBatchDelete(
         })
       )
       queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
       onSuccess?.(response.data || ids.length)
     } else {
       toast.error(response.message || i18next.t(ERROR_MESSAGES.DELETE_FAILED))
@@ -515,6 +592,7 @@ export async function handleDeleteAllDisabled(
         })
       )
       queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
       onSuccess?.(response.data || 0)
     } else {
       toast.error(

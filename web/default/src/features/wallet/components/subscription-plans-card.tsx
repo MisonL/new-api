@@ -44,6 +44,8 @@ import {
 } from '../lib/subscription-display'
 import type { TopupInfo } from '../types'
 
+const getCurrentSeconds = () => Date.now() / 1000
+
 interface SubscriptionPlansCardProps {
   topupInfo: TopupInfo | null
   onAvailabilityChange?: (available: boolean) => void
@@ -66,6 +68,7 @@ export function SubscriptionPlansCard({
     useState('subscription_first')
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [nowSeconds, setNowSeconds] = useState(getCurrentSeconds)
 
   const [purchaseOpen, setPurchaseOpen] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<PlanRecord | null>(null)
@@ -87,6 +90,7 @@ export function SubscriptionPlansCard({
   }, [])
 
   const fetchSelfSubscription = useCallback(async () => {
+    setNowSeconds(getCurrentSeconds())
     try {
       const res = await getSelfSubscriptionFull()
       if (res.success && res.data) {
@@ -175,8 +179,7 @@ export function SubscriptionPlansCard({
   const getRemainingDays = (sub: UserSubscriptionRecord) => {
     const endTime = sub?.subscription?.end_time || 0
     if (!endTime) return 0
-    const now = Date.now() / 1000
-    return Math.max(0, Math.ceil((endTime - now) / 86400))
+    return Math.max(0, Math.ceil((endTime - nowSeconds) / 86400))
   }
 
   const getUsagePercent = (sub: UserSubscriptionRecord) => {
@@ -320,8 +323,7 @@ export function SubscriptionPlansCard({
                     planTitleMap.get(subscription?.plan_id) || ''
                   const remainDays = getRemainingDays(sub)
                   const usagePercent = getUsagePercent(sub)
-                  const now = Date.now() / 1000
-                  const isExpired = (subscription?.end_time || 0) < now
+                  const isExpired = (subscription?.end_time || 0) < nowSeconds
                   const isCancelled = subscription?.status === 'cancelled'
                   const isActive =
                     subscription?.status === 'active' && !isExpired
@@ -347,13 +349,13 @@ export function SubscriptionPlansCard({
                           ) : isCancelled ? (
                             <StatusBadge
                               label={t('Cancelled')}
-                              variant='neutral'
+                              variant='disabled'
                               copyable={false}
                             />
                           ) : (
                             <StatusBadge
                               label={t('Expired')}
-                              variant='neutral'
+                              variant='disabled'
                               copyable={false}
                             />
                           )}

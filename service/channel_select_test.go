@@ -6,11 +6,14 @@ import (
 	"log"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -179,6 +182,70 @@ func TestAutoGroupSelectionPropagatesChannelLookupError(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, channel)
 	require.Equal(t, "default", selectGroup)
+}
+
+func TestRequestBodyLimitExcludesOversizedChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testCases := []struct {
+		name               string
+		memoryCacheEnabled bool
+	}{
+		{
+			name:               "database fallback",
+			memoryCacheEnabled: false,
+		},
+		{
+			name:               "memory cache",
+			memoryCacheEnabled: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupChannelSelectTestDB(t)
+			common.MemoryCacheEnabled = tc.memoryCacheEnabled
+			previousPolicy := model_setting.GetGlobalSettings().RequestBodyLimitPolicy
+			model_setting.GetGlobalSettings().RequestBodyLimitPolicy = model_setting.RequestBodyLimitPolicy{Enabled: true}
+			t.Cleanup(func() {
+				model_setting.GetGlobalSettings().RequestBodyLimitPolicy = previousPolicy
+			})
+
+			seedAutoGroupRetryChannels(t, db)
+			limitedSettings := dto.ChannelOtherSettings{
+				RequestBodyLimit: &dto.ChannelRequestBodyLimit{
+					MaxBytes:   100_000,
+					ObservedAt: time.Now().UTC().Unix(),
+					Source:     "upstream_413",
+					Reason:     "request body too large",
+				},
+			}
+			rawSettings, err := common.Marshal(limitedSettings)
+			require.NoError(t, err)
+			require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", 206).Update("settings", string(rawSettings)).Error)
+
+			if tc.memoryCacheEnabled {
+				model.InitChannelCache()
+			}
+
+			ctx, _ := gin.CreateTestContext(nil)
+			common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+			common.SetContextKey(ctx, constant.ContextKeyRequestBodySize, int64(128_000))
+
+			channel, selectGroup, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+				Ctx:        ctx,
+				TokenGroup: "auto",
+				ModelName:  "gpt-5.5",
+				Retry:      common.GetPointer(0),
+			})
+
+			require.NoError(t, err)
+			require.Equal(t, "default", selectGroup)
+			require.NotNil(t, channel)
+			require.Equal(t, 207, channel.Id)
+		})
+	}
 }
 
 func seedAutoGroupRetryChannels(t *testing.T, db *gorm.DB) {

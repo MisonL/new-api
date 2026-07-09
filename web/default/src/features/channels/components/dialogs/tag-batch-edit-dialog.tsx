@@ -66,13 +66,6 @@ export function TagBatchEditDialog({
     }))
   }, [groupsData, groups])
 
-  useEffect(() => {
-    if (open && currentTag) {
-      loadTagData()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, currentTag])
-
   const loadTagData = async () => {
     if (!currentTag) return
 
@@ -100,6 +93,13 @@ export function TagBatchEditDialog({
       setIsLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (open && currentTag) {
+      void Promise.resolve().then(() => loadTagData())
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, currentTag])
 
   const handleSave = async () => {
     if (!currentTag) return

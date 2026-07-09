@@ -186,8 +186,8 @@ export function MissingModelsDialog({
                   ))}
                 </div>
 
-                <div className='bg-muted/40 flex items-center justify-between border-t px-3 py-2 text-sm'>
-                  <div className='text-muted-foreground text-sm'>
+                <div className='bg-muted/40 flex min-h-14 items-center justify-between gap-3 border-t px-3 py-3 text-sm'>
+                  <div className='text-muted-foreground text-sm leading-none'>
                     {t('Page {{current}} of {{total}}', {
                       current: currentPage,
                       total: totalPages,

@@ -3,10 +3,15 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -32,6 +37,68 @@ type syntheticCompactTestContent struct {
 type syntheticCompactTestMessage struct {
 	Role    string                        `json:"role"`
 	Content []syntheticCompactTestContent `json:"content"`
+}
+
+type redisCommandCountHook struct {
+	mu     sync.Mutex
+	counts map[string]int
+}
+
+func newRedisCommandCountHook() *redisCommandCountHook {
+	return &redisCommandCountHook{counts: make(map[string]int)}
+}
+
+func encryptSyntheticCompactSummaryForTestWithAAD(t *testing.T, summary string, aad []byte) string {
+	t.Helper()
+	block, err := aes.NewCipher(syntheticCompactSummaryKey())
+	require.NoError(t, err)
+	gcm, err := cipher.NewGCM(block)
+	require.NoError(t, err)
+	nonce := make([]byte, gcm.NonceSize())
+	_, err = io.ReadFull(rand.Reader, nonce)
+	require.NoError(t, err)
+	sealed := gcm.Seal(nonce, nonce, []byte(summary), aad)
+	return base64.RawURLEncoding.EncodeToString(sealed)
+}
+
+func (hook *redisCommandCountHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error) {
+	hook.mu.Lock()
+	hook.counts[strings.ToLower(cmd.Name())]++
+	hook.mu.Unlock()
+	return ctx, nil
+}
+
+func (hook *redisCommandCountHook) AfterProcess(context.Context, redis.Cmder) error {
+	return nil
+}
+
+func (hook *redisCommandCountHook) BeforeProcessPipeline(ctx context.Context, cmds []redis.Cmder) (context.Context, error) {
+	hook.mu.Lock()
+	for _, cmd := range cmds {
+		hook.counts[strings.ToLower(cmd.Name())]++
+	}
+	hook.mu.Unlock()
+	return ctx, nil
+}
+
+func (hook *redisCommandCountHook) AfterProcessPipeline(context.Context, []redis.Cmder) error {
+	return nil
+}
+
+func (hook *redisCommandCountHook) Count(name string) int {
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
+	return hook.counts[strings.ToLower(name)]
+}
+
+func requireEventuallySyntheticCompactRecord(t *testing.T, id string) model.SyntheticCompactStateRecord {
+	t.Helper()
+	var record model.SyntheticCompactStateRecord
+	require.Eventually(t, func() bool {
+		err := model.DB.Where("id = ?", id).First(&record).Error
+		return err == nil
+	}, time.Second, 10*time.Millisecond)
+	return record
 }
 
 func decodeSyntheticCompactTestMessages(t *testing.T, input common.RawMessage) []syntheticCompactTestMessage {
@@ -75,6 +142,18 @@ func withoutSyntheticCompactTestDB(t *testing.T) {
 		model.DB = originDB
 	})
 	model.DB = nil
+}
+
+func withoutRedisForSyntheticCompactTest(t *testing.T) {
+	t.Helper()
+	previousRedisEnabled := common.RedisEnabled
+	previousRDB := common.RDB
+	common.RedisEnabled = false
+	common.RDB = nil
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		common.RDB = previousRDB
+	})
 }
 
 func withSyntheticCompactTestRedis(t *testing.T, fn func()) {
@@ -649,6 +728,56 @@ func TestApplySyntheticCompactStateRejectsMissingReferencedState(t *testing.T) {
 	require.Contains(t, err.Error(), "not found")
 }
 
+func TestApplySyntheticCompactStateOrVisibleOnlyDropsMissingStateWhenVisibleInputExists(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutSyntheticCompactTestDB(t)
+
+	localID, err := syntheticCompactLocalInstanceID(context.Background())
+	require.NoError(t, err)
+	missingID := syntheticCompactIDPrefix + localID + "_missing_visible"
+	marker := syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + localID + ":" + missingID
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5",
+		PreviousResponseID: missingID,
+		Input: common.RawMessage(`[
+			{"type":"compaction","encrypted_content":"` + marker + `"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue with visible context"}]}
+		]`),
+	}
+
+	got, applied, visibleOnly, err := ApplySyntheticCompactStateOrVisibleOnly(context.Background(), SyntheticCompactStateScope{}, req)
+
+	require.NoError(t, err)
+	require.False(t, applied)
+	require.True(t, visibleOnly)
+	require.Empty(t, got.PreviousResponseID)
+	require.Contains(t, string(got.Input), "continue with visible context")
+	require.NotContains(t, string(got.Input), missingID)
+	require.NotContains(t, string(got.Input), "newapi.synthetic.compact")
+}
+
+func TestApplySyntheticCompactStateOrVisibleOnlyRejectsMissingStateWithoutVisibleInput(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutSyntheticCompactTestDB(t)
+
+	localID, err := syntheticCompactLocalInstanceID(context.Background())
+	require.NoError(t, err)
+	missingID := syntheticCompactIDPrefix + localID + "_missing_empty"
+	marker := syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + localID + ":" + missingID
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: common.RawMessage(`[
+			{"type":"compaction","encrypted_content":"` + marker + `"}
+		]`),
+	}
+
+	_, applied, visibleOnly, err := ApplySyntheticCompactStateOrVisibleOnly(context.Background(), SyntheticCompactStateScope{}, req)
+
+	require.ErrorIs(t, err, ErrSyntheticCompactStateNotFound)
+	require.False(t, applied)
+	require.False(t, visibleOnly)
+}
+
 func TestBuildSyntheticCompactSummaryRequestIgnoresDatabaseErrorForUpstreamPreviousID(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	originDB := model.DB
@@ -697,6 +826,48 @@ func TestBuildSyntheticCompactSummaryRequestVisibleOnlyDropsUpstreamPreviousID(t
 	require.Contains(t, string(got.Input), "[user] continue after overflow")
 	require.NotContains(t, string(got.Input), "existing previous_response_id context")
 	require.NotContains(t, string(got.Input), "resp_upstream_previous")
+}
+
+func TestSetSyntheticCompactApplyInfoClearsBooleanContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+
+	SetSyntheticCompactApplyInfo(c, SyntheticCompactApplyInfo{
+		StateLookup:    "hit",
+		MarkerKind:     "synthetic_summary",
+		ScopeResult:    "hit",
+		RouteDecision:  "state_restored",
+		FallbackReason: "none",
+		StateHash:      "hash",
+		StateRestored:  true,
+		ModelChanged:   true,
+	})
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactStateRestored))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactModelChanged))
+	require.Equal(t, "synthetic_summary", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactMarkerKind))
+	require.Equal(t, "hit", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactStateScopeResult))
+	require.Equal(t, "state_restored", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactRouteDecision))
+	require.Equal(t, "none", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactFallbackReason))
+	require.Equal(t, "hash", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactStateHash))
+	require.Equal(t, "state_restored", c.Request.Context().Value(constant.ContextKeyResponsesCompactRouteDecision))
+	require.Equal(t, "hash", c.Request.Context().Value(constant.ContextKeyResponsesCompactStateHash))
+
+	SetSyntheticCompactApplyInfo(c, SyntheticCompactApplyInfo{
+		StateLookup:   "",
+		StateRestored: false,
+		ModelChanged:  false,
+	})
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactStateRestored))
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactModelChanged))
+	require.Equal(t, "", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactStateLookup))
+	require.Equal(t, "", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactMarkerKind))
+	require.Equal(t, "", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactStateScopeResult))
+	require.Equal(t, "", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactRouteDecision))
+	require.Equal(t, "", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactFallbackReason))
+	require.Equal(t, "", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactStateHash))
+	require.Equal(t, "", c.Request.Context().Value(constant.ContextKeyResponsesCompactRouteDecision))
+	require.Equal(t, "", c.Request.Context().Value(constant.ContextKeyResponsesCompactStateHash))
 }
 
 func TestBuildSyntheticCompactSummaryRequestIgnoresNonSyntheticMarkerID(t *testing.T) {
@@ -755,7 +926,76 @@ func TestSyntheticCompactV2MarkerResolvesOnlyLocalInstance(t *testing.T) {
 	require.NotContains(t, string(got.Input), marker)
 }
 
-func TestSyntheticCompactForeignV2MarkerIsNotLocalReference(t *testing.T) {
+func TestHasRemoteResponsesCompactionInputClassifiesRemoteAndLocalMarkers(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutSyntheticCompactTestDB(t)
+
+	remoteReq := dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: common.RawMessage(`[
+			{"type":"compaction","encrypted_content":"opaque-native-compact"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+	hasRemote, err := HasRemoteResponsesCompactionInput(context.Background(), remoteReq)
+	require.NoError(t, err)
+	require.True(t, hasRemote)
+
+	localID, err := syntheticCompactLocalInstanceID(context.Background())
+	require.NoError(t, err)
+	state := SyntheticCompactState{
+		ID:      syntheticCompactIDPrefix + localID + "_local_for_remote_detection",
+		Model:   "gpt-5",
+		Summary: "Local compact state.",
+	}
+	require.NoError(t, storeSyntheticCompactState(context.Background(), state))
+	marker, err := syntheticCompactMarker(context.Background(), state.ID)
+	require.NoError(t, err)
+
+	localReq := dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: common.RawMessage(`[
+			{"type":"compaction","encrypted_content":"` + marker + `"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+	hasRemote, err = HasRemoteResponsesCompactionInput(context.Background(), localReq)
+	require.NoError(t, err)
+	require.False(t, hasRemote)
+
+	foreignID := "nffffffffffffffffffffffffffffffff"
+	if foreignID == localID {
+		foreignID = "neeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	}
+	foreignMarker := syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + foreignID + ":" + syntheticCompactIDPrefix + foreignID + "_stale_for_remote_detection"
+	foreignReq := dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: common.RawMessage(`[
+			{"type":"compaction","encrypted_content":"` + foreignMarker + `"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+	hasRemote, err = HasRemoteResponsesCompactionInput(context.Background(), foreignReq)
+	require.NoError(t, err)
+	require.False(t, hasRemote)
+}
+
+func TestHasRemoteResponsesCompactionInputRejectsMissingEncryptedContent(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: common.RawMessage(`[
+			{"type":"compaction"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	hasRemote, err := HasRemoteResponsesCompactionInput(context.Background(), req)
+
+	require.False(t, hasRemote)
+	require.ErrorIs(t, err, ErrResponsesCompactionContentRequired)
+}
+
+func TestSyntheticCompactForeignV2MarkerIsLocalReferenceWithVisibleOnlyFallback(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	withoutSyntheticCompactTestDB(t)
 
@@ -777,13 +1017,55 @@ func TestSyntheticCompactForeignV2MarkerIsNotLocalReference(t *testing.T) {
 
 	hasReference, err := HasLocalSyntheticCompactReference(req)
 	require.NoError(t, err)
-	require.False(t, hasReference)
+	require.True(t, hasReference)
 
-	got, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, req)
+	got, applied, visibleOnly, err := ApplySyntheticCompactStateOrVisibleOnly(context.Background(), SyntheticCompactStateScope{}, req)
 	require.NoError(t, err)
-	require.Contains(t, string(got.Input), "Visible conversation to compact")
-	require.Contains(t, string(got.Input), "[user] continue")
+	require.False(t, applied)
+	require.True(t, visibleOnly)
+	require.Contains(t, string(got.Input), "continue")
 	require.NotContains(t, string(got.Input), stateID)
+}
+
+func TestSyntheticCompactForeignV2MarkerRestoresFromDatabase(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	localID, err := syntheticCompactLocalInstanceID(context.Background())
+	require.NoError(t, err)
+	foreignID := "nffffffffffffffffffffffffffffffff"
+	if foreignID == localID {
+		foreignID = "neeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	}
+	state := SyntheticCompactState{
+		ID:             syntheticCompactIDPrefix + foreignID + "_foreign_db",
+		Model:          "gpt-5",
+		Summary:        "Cross-instance database compact state.",
+		SourceInstance: foreignID,
+	}
+	require.NoError(t, storeSyntheticCompactState(context.Background(), state))
+	resetSyntheticCompactMemoryStoreForTest()
+
+	marker := syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + foreignID + ":" + state.ID
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: common.RawMessage(`[
+			{"type":"compaction","encrypted_content":"` + marker + `"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, applied, err := ApplySyntheticCompactState(context.Background(), SyntheticCompactStateScope{}, req)
+
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.Contains(t, string(got.Input), "Cross-instance database compact state.")
+	require.NotContains(t, string(got.Input), marker)
 }
 
 func TestSyntheticCompactMalformedV2MarkerWithoutIDInstanceIsNotLocalReference(t *testing.T) {
@@ -818,7 +1100,7 @@ func TestSyntheticCompactMalformedV2MarkerWithoutIDInstanceIsNotLocalReference(t
 	require.NotContains(t, string(got.Input), "Legacy compact state.")
 }
 
-func TestSyntheticCompactForeignPreviousResponseIDStaysUpstreamReference(t *testing.T) {
+func TestSyntheticCompactForeignPreviousResponseIDIsLocalSyntheticReference(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	withoutSyntheticCompactTestDB(t)
 
@@ -837,16 +1119,74 @@ func TestSyntheticCompactForeignPreviousResponseIDStaysUpstreamReference(t *test
 
 	hasReference, err := HasLocalSyntheticCompactReference(req)
 	require.NoError(t, err)
-	require.False(t, hasReference)
+	require.True(t, hasReference)
 
-	got, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, req)
+	got, applied, visibleOnly, err := ApplySyntheticCompactStateOrVisibleOnly(context.Background(), SyntheticCompactStateScope{}, req)
 	require.NoError(t, err)
+	require.False(t, applied)
+	require.True(t, visibleOnly)
+	require.Empty(t, got.PreviousResponseID)
+	require.Contains(t, string(got.Input), "continue")
+}
+
+func TestApplySyntheticCompactStateOrVisibleOnlyRejectsMissingNativeOpaquePreviousResponseID(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutSyntheticCompactTestDB(t)
+
+	localID, err := syntheticCompactLocalInstanceID(context.Background())
+	require.NoError(t, err)
+	stateID := nativeOpaqueCompactIDPrefix + localID + "_missing"
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5",
+		PreviousResponseID: stateID,
+		Input:              common.RawMessage(`"continue"`),
+	}
+
+	got, applied, visibleOnly, err := ApplySyntheticCompactStateOrVisibleOnly(context.Background(), SyntheticCompactStateScope{}, req)
+
+	require.ErrorIs(t, err, ErrResponsesNativeOpaqueStateNotRestorable)
+	require.False(t, applied)
+	require.False(t, visibleOnly)
 	require.Equal(t, stateID, got.PreviousResponseID)
-	require.Contains(t, string(got.Input), "existing previous_response_id context")
+	require.Equal(t, req.Input, got.Input)
+}
+
+func TestApplySyntheticCompactStateVisibleOnlyFallbackInfoDoesNotClaimRestore(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutSyntheticCompactTestDB(t)
+
+	localID, err := syntheticCompactLocalInstanceID(context.Background())
+	require.NoError(t, err)
+	stateID := syntheticCompactIDPrefix + localID + "_missing_visible_only_info"
+	marker := syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + localID + ":" + stateID
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: common.RawMessage(`[
+			{"type":"compaction","encrypted_content":"` + marker + `"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, applied, visibleOnly, info, err := ApplySyntheticCompactStateOrVisibleOnlyWithInfo(context.Background(), SyntheticCompactStateScope{}, req)
+
+	require.NoError(t, err)
+	require.False(t, applied)
+	require.True(t, visibleOnly)
+	require.False(t, info.StateRestored)
+	require.False(t, info.ModelChanged)
+	require.Equal(t, "miss", info.StateLookup)
+	require.Equal(t, model.SyntheticCompactStateKindSyntheticSummary, info.MarkerKind)
+	require.Equal(t, "not_found", info.ScopeResult)
+	require.Equal(t, "visible_only_fallback", info.RouteDecision)
+	require.Equal(t, "state_not_found_visible_input", info.FallbackReason)
+	require.Empty(t, info.StateHash)
+	require.Contains(t, string(got.Input), "continue")
+	require.NotContains(t, string(got.Input), stateID)
 }
 
 func TestSyntheticCompactLocalInstanceIDUpdatesInvalidStoredOption(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
+	resetSyntheticCompactInstanceForTest()
 	originDB := model.DB
 	t.Cleanup(func() {
 		model.DB = originDB
@@ -865,6 +1205,53 @@ func TestSyntheticCompactLocalInstanceIDUpdatesInvalidStoredOption(t *testing.T)
 	var option model.Option
 	require.NoError(t, model.DB.First(&option, "key = ?", syntheticCompactInstanceOptionKey).Error)
 	require.Equal(t, id, option.Value)
+}
+
+func TestSyntheticCompactLocalInstanceIDConcurrentInitUsesOneID(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	resetSyntheticCompactInstanceForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactInstanceForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	const workers = 12
+	results := make(chan string, workers)
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id, err := syntheticCompactLocalInstanceID(context.Background())
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- id
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	seen := map[string]struct{}{}
+	for id := range results {
+		require.True(t, syntheticCompactInstanceIDValid(id))
+		seen[id] = struct{}{}
+	}
+	require.Len(t, seen, 1)
+	var options []model.Option
+	require.NoError(t, model.DB.Find(&options, "key = ?", syntheticCompactInstanceOptionKey).Error)
+	require.Len(t, options, 1)
+	for id := range seen {
+		require.Equal(t, id, options[0].Value)
+	}
 }
 
 func TestSyntheticCompactOldMarkerCompatibility(t *testing.T) {
@@ -938,14 +1325,14 @@ func TestApplySyntheticCompactStateRestoresFromDatabaseAfterMemoryMiss(t *testin
 	require.True(t, cached)
 
 	require.NoError(t, model.DB.Migrator().DropTable(&model.SyntheticCompactStateRecord{}))
-	got, applied, err = ApplySyntheticCompactState(context.Background(), SyntheticCompactStateScope{
+	_, applied, err = ApplySyntheticCompactState(context.Background(), SyntheticCompactStateScope{
 		UserID:  10,
 		TokenID: 20,
 		Group:   "default",
 	}, req)
-	require.NoError(t, err)
-	require.True(t, applied)
-	require.Contains(t, string(got.Input), "Database compact state.")
+	require.Error(t, err)
+	require.False(t, applied)
+	require.Contains(t, err.Error(), "synthetic_compact_state_records")
 }
 
 func TestStoreSyntheticCompactStatePopulatesMemoryWhenRedisEnabled(t *testing.T) {
@@ -967,6 +1354,32 @@ func TestStoreSyntheticCompactStatePopulatesMemoryWhenRedisEnabled(t *testing.T)
 
 		got, found := loadSyntheticCompactStateFromMemory(state.ID)
 
+		require.True(t, found)
+		require.Equal(t, state.Summary, got.Summary)
+	})
+}
+
+func TestLoadSyntheticCompactStateUsesPersistentMemoryBeforeDatabaseWhenRedisEnabled(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		state := SyntheticCompactState{
+			ID:      "resp_newapi_synthcmp_memory_before_db",
+			Model:   "gpt-5",
+			Summary: "Fresh memory should avoid database read amplification.",
+		}
+		require.NoError(t, storeSyntheticCompactState(context.Background(), state))
+		require.NoError(t, model.DB.Migrator().DropTable(&model.SyntheticCompactStateRecord{}))
+
+		got, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+
+		require.NoError(t, err)
 		require.True(t, found)
 		require.Equal(t, state.Summary, got.Summary)
 	})
@@ -1198,6 +1611,283 @@ func TestLoadSyntheticCompactStateUsesDatabaseFallbackWhenRedisFails(t *testing.
 	})
 }
 
+func TestLoadSyntheticCompactStateFallsBackToRedisWhenDatabaseMisses(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		state := SyntheticCompactState{
+			ID:      "resp_newapi_synthcmp_redis_after_db_miss",
+			Model:   "gpt-5",
+			Summary: "Redis state survives database miss.",
+		}
+		record, err := syntheticCompactStateRecord(context.Background(), state, time.Now())
+		require.NoError(t, err)
+		data, err := common.Marshal(record)
+		require.NoError(t, err)
+		require.NoError(t, common.RDB.Set(context.Background(), syntheticCompactRedisKey(state.ID), string(data), syntheticCompactTTL).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+
+		got, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, state.Summary, got.Summary)
+		requireEventuallySyntheticCompactRecord(t, state.ID)
+
+		require.NoError(t, common.RDB.Del(context.Background(), syntheticCompactRedisKey(state.ID)).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+		got, found, err = loadSyntheticCompactState(context.Background(), state.ID)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, state.Summary, got.Summary)
+	})
+}
+
+func TestLoadSyntheticCompactStatePreservesRedisRecordExpiresAtAndHash(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		state := SyntheticCompactState{
+			ID:        "resp_newapi_synthcmp_redis_backfill_hash",
+			Model:     "gpt-5",
+			Summary:   "Redis record hash should remain stable on database backfill.",
+			CreatedAt: time.Now().Add(-time.Minute).Unix(),
+		}
+		record, err := syntheticCompactStateRecord(context.Background(), state, time.Now())
+		require.NoError(t, err)
+		data, err := common.Marshal(record)
+		require.NoError(t, err)
+		require.NoError(t, common.RDB.Set(context.Background(), syntheticCompactRedisKey(state.ID), string(data), time.Minute).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+
+		got, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, record.ExpiresAt, got.ExpiresAt)
+		require.Equal(t, record.StateHash, got.StateHash)
+		persisted := requireEventuallySyntheticCompactRecord(t, state.ID)
+		require.Equal(t, record.ExpiresAt, persisted.ExpiresAt)
+		require.Equal(t, persisted.StateHash, got.StateHash)
+
+		require.NoError(t, model.DB.Delete(&model.SyntheticCompactStateRecord{}, "id = ?", state.ID).Error)
+		require.NoError(t, common.RDB.Expire(context.Background(), syntheticCompactRedisKey(state.ID), 30*time.Second).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+
+		got, found, err = loadSyntheticCompactState(context.Background(), state.ID)
+
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, record.ExpiresAt, got.ExpiresAt)
+		require.Equal(t, record.StateHash, got.StateHash)
+	})
+}
+
+func TestLoadSyntheticCompactStateUsesRedisTtlWhenExpiresAtMissing(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		state := SyntheticCompactState{
+			ID:      "resp_newapi_synthcmp_redis_backfill_legacy_ttl",
+			Model:   "gpt-5",
+			Summary: "Legacy redis payload without expires_at should still use remaining TTL.",
+		}
+		record, err := syntheticCompactStateRecord(context.Background(), state, time.Now())
+		require.NoError(t, err)
+		record.ExpiresAt = 0
+		record.StateHash = ""
+		data, err := common.Marshal(record)
+		require.NoError(t, err)
+		require.NoError(t, common.RDB.Set(context.Background(), syntheticCompactRedisKey(state.ID), string(data), time.Minute).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+
+		got, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+
+		require.NoError(t, err)
+		require.True(t, found)
+		require.NotZero(t, got.ExpiresAt)
+		require.Greater(t, got.ExpiresAt, time.Now().Unix())
+		require.LessOrEqual(t, got.ExpiresAt, time.Now().Add(2*time.Minute).Unix())
+		require.NotEmpty(t, got.StateHash)
+		persisted := requireEventuallySyntheticCompactRecord(t, state.ID)
+		require.Equal(t, got.ExpiresAt, persisted.ExpiresAt)
+		require.Equal(t, got.StateHash, persisted.StateHash)
+	})
+}
+
+func TestSyntheticCompactStateRecordPreservesExplicitExpiresAt(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutRedisForSyntheticCompactTest(t)
+
+	now := time.Unix(1710000000, 0)
+	expiresAt := now.Add(2 * time.Minute).Unix()
+	record, err := syntheticCompactStateRecord(context.Background(), SyntheticCompactState{
+		ID:             "resp_newapi_synthcmp_explicit_expiry",
+		Model:          "gpt-5",
+		Summary:        "summary",
+		SourceInstance: "test-instance",
+		ExpiresAt:      expiresAt,
+	}, now)
+
+	require.NoError(t, err)
+	require.Equal(t, expiresAt, record.ExpiresAt)
+}
+
+func TestStoreSyntheticCompactStateUsesExplicitExpiresAtForRedisTTL(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		expiresAt := time.Now().Add(90 * time.Second).Unix()
+		state := SyntheticCompactState{
+			ID:        "resp_newapi_synthcmp_explicit_redis_ttl",
+			Model:     "gpt-5",
+			Summary:   "summary",
+			ExpiresAt: expiresAt,
+		}
+		require.NoError(t, storeSyntheticCompactState(context.Background(), state))
+
+		ttl, err := common.RDB.TTL(context.Background(), syntheticCompactRedisKey(state.ID)).Result()
+		require.NoError(t, err)
+		require.Greater(t, ttl, 30*time.Second)
+		require.LessOrEqual(t, ttl, 2*time.Minute)
+	})
+}
+
+func TestLoadSyntheticCompactStateIgnoresExpiredRedisRecord(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		state := SyntheticCompactState{
+			ID:        "resp_newapi_synthcmp_expired_redis_record",
+			Model:     "gpt-5",
+			Summary:   "summary",
+			ExpiresAt: time.Now().Add(-time.Minute).Unix(),
+		}
+		record, err := syntheticCompactStateRecord(context.Background(), state, time.Now().Add(-2*time.Hour))
+		require.NoError(t, err)
+		data, err := common.Marshal(record)
+		require.NoError(t, err)
+		require.NoError(t, common.RDB.Set(context.Background(), syntheticCompactRedisKey(state.ID), string(data), time.Hour).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+
+		got, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Nil(t, got)
+		exists, err := common.RDB.Exists(context.Background(), syntheticCompactRedisKey(state.ID)).Result()
+		require.NoError(t, err)
+		require.Zero(t, exists)
+	})
+}
+
+func TestLoadSyntheticCompactStateBackfillCanRunAgainAfterCompletion(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		state := SyntheticCompactState{
+			ID:        "resp_newapi_synthcmp_redis_backfill_again",
+			Model:     "gpt-5",
+			Summary:   "Redis backfill can be scheduled again after completion.",
+			CreatedAt: time.Now().Add(-time.Minute).Unix(),
+		}
+		record, err := syntheticCompactStateRecord(context.Background(), state, time.Now())
+		require.NoError(t, err)
+		data, err := common.Marshal(record)
+		require.NoError(t, err)
+		require.NoError(t, common.RDB.Set(context.Background(), syntheticCompactRedisKey(state.ID), string(data), time.Minute).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+
+		got, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+		require.NoError(t, err)
+		require.True(t, found)
+		persisted := requireEventuallySyntheticCompactRecord(t, state.ID)
+		require.Equal(t, persisted.StateHash, got.StateHash)
+
+		require.NoError(t, model.DB.Delete(&model.SyntheticCompactStateRecord{}, "id = ?", state.ID).Error)
+		resetSyntheticCompactMemoryStoreForTest()
+
+		got, found, err = loadSyntheticCompactState(context.Background(), state.ID)
+		require.NoError(t, err)
+		require.True(t, found)
+		persisted = requireEventuallySyntheticCompactRecord(t, state.ID)
+		require.Equal(t, persisted.StateHash, got.StateHash)
+	})
+}
+
+func TestLoadSyntheticCompactStateFallsBackToLegacyRedisWhenDatabaseMisses(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		state := SyntheticCompactState{
+			ID:        "resp_newapi_synthcmp_legacy_redis_after_db_miss",
+			Model:     "gpt-5",
+			Summary:   "Legacy Redis state survives database miss.",
+			CreatedAt: time.Now().Unix(),
+		}
+		data, err := common.Marshal(state)
+		require.NoError(t, err)
+		require.NoError(t, common.RDB.Set(context.Background(), syntheticCompactRedisKey(state.ID), string(data), syntheticCompactTTL).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+
+		got, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, state.Summary, got.Summary)
+		requireEventuallySyntheticCompactRecord(t, state.ID)
+
+		require.NoError(t, common.RDB.Del(context.Background(), syntheticCompactRedisKey(state.ID)).Err())
+		resetSyntheticCompactMemoryStoreForTest()
+		got, found, err = loadSyntheticCompactState(context.Background(), state.ID)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, state.Summary, got.Summary)
+	})
+}
+
 func TestLoadSyntheticCompactStateReturnsNotFoundWhenRedisFailsAndDatabaseMisses(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	originDB := model.DB
@@ -1213,6 +1903,28 @@ func TestLoadSyntheticCompactStateReturnsNotFoundWhenRedisFailsAndDatabaseMisses
 		require.NoError(t, err)
 		require.False(t, found)
 		require.Nil(t, got)
+	})
+}
+
+func TestLoadSyntheticCompactStateChecksRedisOnceWhenMissing(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	withSyntheticCompactTestRedis(t, func() {
+		hook := newRedisCommandCountHook()
+		common.RDB.AddHook(hook)
+
+		got, found, err := loadSyntheticCompactState(context.Background(), "resp_newapi_synthcmp_missing_once")
+
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Nil(t, got)
+		require.Equal(t, 1, hook.Count("get"))
 	})
 }
 
@@ -1240,6 +1952,21 @@ func TestLoadSyntheticCompactStateUsesDatabaseFallbackWhenRedisPayloadIsCorrupt(
 		require.NoError(t, err)
 		require.True(t, found)
 		require.Equal(t, state.Summary, got.Summary)
+	})
+}
+
+func TestLoadSyntheticCompactStateFromRedisRejectsNullPayload(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withSyntheticCompactTestRedis(t, func() {
+		id := "resp_newapi_synthcmp_null_redis"
+		require.NoError(t, common.RDB.Set(context.Background(), syntheticCompactRedisKey(id), "null", syntheticCompactTTL).Err())
+
+		got, found, err := loadSyntheticCompactStateFromRedis(context.Background(), id)
+
+		require.Error(t, err)
+		require.False(t, found)
+		require.Nil(t, got)
+		require.Contains(t, err.Error(), "missing id")
 	})
 }
 
@@ -1290,6 +2017,65 @@ func TestSyntheticCompactDatabaseRecordUsesEncryptedSummary(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, state.Summary, got.Summary)
+}
+
+func TestSyntheticCompactDatabaseRecordStoresControlPlaneFields(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	createdAt := time.Now().Add(-time.Minute).Unix()
+	state := SyntheticCompactState{
+		ID:        "resp_newapi_synthcmp_control_plane",
+		Model:     "gpt-5.5",
+		Summary:   "Control plane fields are stored.",
+		UserID:    10,
+		TokenID:   20,
+		Group:     "default",
+		CreatedAt: createdAt,
+	}
+	require.NoError(t, storeSyntheticCompactState(context.Background(), state))
+
+	var record model.SyntheticCompactStateRecord
+	require.NoError(t, model.DB.Where("id = ?", state.ID).First(&record).Error)
+	require.Equal(t, model.SyntheticCompactStateKindSyntheticSummary, record.Kind)
+	require.Equal(t, "gpt-5.5", record.ModelAtCreation)
+	require.Equal(t, model.SyntheticCompactOwnerScope(10, 20, "default"), record.OwnerScope)
+	require.Equal(t, model.SyntheticCompactScopePolicyModelFlexible, record.ScopePolicy)
+	require.NotEmpty(t, record.SourceInstance)
+	require.NotEmpty(t, record.StateHash)
+	require.Equal(t, createdAt, record.LastAccessAt)
+}
+
+func TestLoadSyntheticCompactStateUsesDatabaseTruthOverStaleMemory(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+
+	state := SyntheticCompactState{
+		ID:      "resp_newapi_synthcmp_db_truth",
+		Model:   "gpt-5",
+		Summary: "Database truth summary.",
+	}
+	require.NoError(t, storeSyntheticCompactState(context.Background(), state))
+	syntheticCompactMemoryStore.Store(state.ID, syntheticCompactMemoryEntry{
+		state:     SyntheticCompactState{ID: state.ID, Model: "gpt-5", Summary: "Stale memory summary."},
+		expiresAt: time.Now().Add(time.Hour),
+	})
+
+	got, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "Database truth summary.", got.Summary)
 }
 
 func TestLoadSyntheticCompactStateKeepsDatabaseExpiryInMemory(t *testing.T) {
@@ -1635,6 +2421,42 @@ func TestApplySyntheticCompactStateAllowsModelSwitchWithinScope(t *testing.T) {
 	require.Contains(t, string(got.Input), "Scoped compact state.")
 }
 
+func TestApplySyntheticCompactStateWithInfoRecordsModelSwitch(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	withoutSyntheticCompactTestDB(t)
+
+	state := SyntheticCompactState{
+		ID:              "resp_newapi_synthcmp_apply_model_switch_info",
+		Model:           "gpt-5.5",
+		ModelAtCreation: "gpt-5.5",
+		Summary:         "Scoped compact state.",
+		UserID:          10,
+		TokenID:         20,
+		Group:           "default",
+		StateHash:       "hash-for-test",
+	}
+	require.NoError(t, storeSyntheticCompactState(context.Background(), state))
+
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.4",
+		PreviousResponseID: state.ID,
+		Input:              common.RawMessage(`"continue"`),
+	}
+	scope := SyntheticCompactStateScope{UserID: 10, TokenID: 20, Group: "default"}
+
+	_, applied, info, err := ApplySyntheticCompactStateWithInfo(context.Background(), scope, req)
+
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.True(t, info.StateRestored)
+	require.True(t, info.ModelChanged)
+	require.Equal(t, "hit", info.StateLookup)
+	require.Equal(t, "matched", info.ScopeResult)
+	require.Equal(t, "state_restored", info.RouteDecision)
+	require.Equal(t, model.SyntheticCompactStateKindSyntheticSummary, info.MarkerKind)
+	require.NotEmpty(t, info.StateHash)
+}
+
 func TestBuildSyntheticCompactSummaryRequestPreservesRequestModelAfterModelSwitch(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	withoutSyntheticCompactTestDB(t)
@@ -1713,6 +2535,286 @@ func TestBuildSyntheticCompactResponseStoresSummaryAndReturnsMarker(t *testing.T
 	require.Equal(t, "default", state.Group)
 	require.Equal(t, 163, state.ChannelID)
 	require.Equal(t, 1, state.ChannelType)
+}
+
+func TestStoreNativeOpaqueCompactStateStoresStrictOpaqueRecord(t *testing.T) {
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+	withoutRedisForSyntheticCompactTest(t)
+
+	scope := SyntheticCompactStateScope{
+		UserID:      7,
+		TokenID:     8,
+		Group:       "default",
+		Model:       "gpt-5.5",
+		ChannelID:   90,
+		ChannelType: 1,
+	}
+	state, err := StoreNativeOpaqueCompactState(context.Background(), scope, "gpt-5.5", "resp_native", "opaque-token", 1710000000)
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.Equal(t, model.SyntheticCompactStateKindNativeOpaque, state.Kind)
+	require.Equal(t, model.SyntheticCompactScopePolicyStrict, state.ScopePolicy)
+	require.Equal(t, "resp_native", state.UpstreamResponseID)
+	require.NotEmpty(t, state.StateHash)
+
+	var record model.SyntheticCompactStateRecord
+	require.NoError(t, model.DB.Where("id = ?", state.ID).First(&record).Error)
+	require.Equal(t, model.SyntheticCompactStateKindNativeOpaque, record.Kind)
+	require.Equal(t, model.SyntheticCompactScopePolicyStrict, record.ScopePolicy)
+	require.Equal(t, model.SyntheticCompactOwnerScope(7, 8, "default"), record.OwnerScope)
+	require.Equal(t, "resp_native", record.UpstreamResponseID)
+	require.NotEmpty(t, record.StateHash)
+	require.NotEmpty(t, record.SummaryCiphertext)
+	require.NotEqual(t, "opaque-token", string(record.SummaryCiphertext))
+}
+
+func TestStoreNativeOpaqueCompactStatePreservesOpaqueContentWhitespace(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+	withoutRedisForSyntheticCompactTest(t)
+
+	scope := SyntheticCompactStateScope{
+		UserID:      7,
+		TokenID:     8,
+		Group:       "default",
+		Model:       "gpt-5.5",
+		ChannelID:   206,
+		ChannelType: 1,
+	}
+	opaqueContent := "  opaque-token  "
+	state, err := StoreNativeOpaqueCompactState(context.Background(), scope, "gpt-5.5", "resp_native", opaqueContent, 1710000000)
+	require.NoError(t, err)
+	require.Equal(t, opaqueContent, state.Summary)
+
+	var record model.SyntheticCompactStateRecord
+	require.NoError(t, model.DB.Where("id = ?", state.ID).First(&record).Error)
+	summary, err := decryptSyntheticCompactSummaryForRecord(record)
+	require.NoError(t, err)
+	require.Equal(t, opaqueContent, summary)
+
+	resetSyntheticCompactMemoryStoreForTest()
+	reloaded, found, err := loadSyntheticCompactState(context.Background(), state.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, opaqueContent, reloaded.Summary)
+}
+
+func TestStoreNativeOpaqueCompactStateRejectsOversizedOpaqueContent(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+		resetSyntheticCompactMemoryStoreForTest()
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+	withoutRedisForSyntheticCompactTest(t)
+
+	scope := SyntheticCompactStateScope{
+		UserID:      7,
+		TokenID:     8,
+		Group:       "default",
+		Model:       "gpt-5.5",
+		ChannelID:   207,
+		ChannelType: 1,
+	}
+	opaqueContent := " " + strings.Repeat("x", syntheticCompactSummaryMax) + " "
+	state, err := StoreNativeOpaqueCompactState(context.Background(), scope, "gpt-5.5", "resp_native", opaqueContent, 1710000000)
+
+	require.Nil(t, state)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds max size")
+}
+
+func TestStoreNativeOpaqueCompactStateRejectsEmptyResponseID(t *testing.T) {
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+	withoutRedisForSyntheticCompactTest(t)
+
+	scope := SyntheticCompactStateScope{
+		UserID:      7,
+		TokenID:     8,
+		Group:       "default",
+		Model:       "gpt-5.5",
+		ChannelID:   90,
+		ChannelType: 1,
+	}
+	state, err := StoreNativeOpaqueCompactState(context.Background(), scope, "gpt-5.5", "   ", "opaque-token", 1710000000)
+
+	require.Nil(t, state)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "response id is required")
+}
+
+func TestSyntheticCompactStateFromRecordReadsLegacyAADWithUpstreamResponseID(t *testing.T) {
+	record := model.SyntheticCompactStateRecord{
+		ID:                 "resp_newapi_nativecmp_legacy",
+		Kind:               model.SyntheticCompactStateKindNativeOpaque,
+		Model:              "gpt-5.5",
+		ModelAtCreation:    "gpt-5.5",
+		UserID:             7,
+		TokenID:            8,
+		Group:              "default",
+		UpstreamResponseID: "resp_native_upstream",
+		CreatedAt:          1710000000,
+	}
+	model.PrepareSyntheticCompactStateRecord(&record, 1710000000)
+	legacyRecord := record
+	legacyRecord.UpstreamResponseID = ""
+	summaryCiphertext := encryptSyntheticCompactSummaryForTestWithAAD(t, "opaque-token", syntheticCompactSummaryLegacyAAD(legacyRecord))
+	record.SummaryCiphertext = model.SyntheticCompactSummaryCiphertext(summaryCiphertext)
+	model.PrepareSyntheticCompactStateRecord(&record, 1710000000)
+
+	state, err := syntheticCompactStateFromRecord(&record)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.Equal(t, model.SyntheticCompactStateKindNativeOpaque, state.Kind)
+	require.Equal(t, "opaque-token", state.Summary)
+	require.Equal(t, "resp_native_upstream", state.UpstreamResponseID)
+}
+
+func TestSyntheticCompactStateFromRecordReadsLegacyAADWithEmptyUpstreamResponseID(t *testing.T) {
+	record := model.SyntheticCompactStateRecord{
+		ID:              "resp_newapi_synthcmp_legacy_empty_upstream",
+		Kind:            model.SyntheticCompactStateKindSyntheticSummary,
+		Model:           "gpt-5.5",
+		ModelAtCreation: "gpt-5.5",
+		UserID:          7,
+		TokenID:         8,
+		Group:           "default",
+		CreatedAt:       1710000000,
+	}
+	model.PrepareSyntheticCompactStateRecord(&record, 1710000000)
+	summaryCiphertext := encryptSyntheticCompactSummaryForTestWithAAD(t, "summary-token", syntheticCompactSummaryLegacyAAD(record))
+	record.SummaryCiphertext = model.SyntheticCompactSummaryCiphertext(summaryCiphertext)
+	model.PrepareSyntheticCompactStateRecord(&record, 1710000000)
+
+	state, err := syntheticCompactStateFromRecord(&record)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.Equal(t, "summary-token", state.Summary)
+	require.Empty(t, state.UpstreamResponseID)
+}
+
+func TestApplySyntheticCompactStateRejectsNativeOpaqueState(t *testing.T) {
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+	withoutRedisForSyntheticCompactTest(t)
+
+	scope := SyntheticCompactStateScope{
+		UserID:      7,
+		TokenID:     8,
+		Group:       "default",
+		Model:       "gpt-5.5",
+		ChannelID:   90,
+		ChannelType: 1,
+	}
+	state, err := StoreNativeOpaqueCompactState(context.Background(), scope, "gpt-5.5", "resp_native", "opaque-token", 1710000000)
+	require.NoError(t, err)
+
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: state.ID,
+		Input:              common.RawMessage([]byte(`"continue"`)),
+	}
+	converted, applied, info, err := ApplySyntheticCompactStateWithInfo(context.Background(), scope, req)
+
+	require.ErrorIs(t, err, ErrResponsesNativeOpaqueStateNotRestorable)
+	require.False(t, applied)
+	require.Equal(t, req.PreviousResponseID, converted.PreviousResponseID)
+	require.Equal(t, "hit", info.StateLookup)
+	require.Equal(t, model.SyntheticCompactStateKindNativeOpaque, info.MarkerKind)
+	require.Equal(t, "strict", info.ScopeResult)
+	require.Equal(t, "native_opaque_not_restorable", info.RouteDecision)
+	require.Equal(t, "native_opaque_requires_upstream", info.FallbackReason)
+	require.NotEmpty(t, info.StateHash)
+}
+
+func TestRestoreNativeOpaquePreviousResponseID(t *testing.T) {
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+	withoutRedisForSyntheticCompactTest(t)
+
+	scope := SyntheticCompactStateScope{
+		UserID:      7,
+		TokenID:     8,
+		Group:       "default",
+		Model:       "gpt-5.5",
+		ChannelID:   90,
+		ChannelType: 1,
+	}
+	state, err := StoreNativeOpaqueCompactState(context.Background(), scope, "gpt-5.5", "resp_native_upstream", "opaque-token", 1710000000)
+	require.NoError(t, err)
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: state.ID,
+		Input:              common.RawMessage([]byte(`"continue"`)),
+	}
+
+	converted, restored, info, err := RestoreNativeOpaquePreviousResponseID(context.Background(), scope, req)
+
+	require.NoError(t, err)
+	require.True(t, restored)
+	require.Equal(t, "resp_native_upstream", converted.PreviousResponseID)
+	require.Equal(t, "hit", info.StateLookup)
+	require.Equal(t, model.SyntheticCompactStateKindNativeOpaque, info.MarkerKind)
+	require.Equal(t, "native_opaque_previous_response_id_restored", info.RouteDecision)
+	require.NotEmpty(t, info.StateHash)
+}
+
+func TestRestoreNativeOpaquePreviousResponseIDRejectsDifferentModel(t *testing.T) {
+	originDB := model.DB
+	t.Cleanup(func() {
+		model.DB = originDB
+	})
+	model.DB = openSyntheticCompactServiceTestDB(t)
+	withoutRedisForSyntheticCompactTest(t)
+
+	scope := SyntheticCompactStateScope{
+		UserID:      7,
+		TokenID:     8,
+		Group:       "default",
+		Model:       "gpt-5.5",
+		ChannelID:   90,
+		ChannelType: 1,
+	}
+	state, err := StoreNativeOpaqueCompactState(context.Background(), scope, "gpt-5.5", "resp_native_upstream", "opaque-token", 1710000000)
+	require.NoError(t, err)
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.4",
+		PreviousResponseID: state.ID,
+		Input:              common.RawMessage([]byte(`"continue"`)),
+	}
+
+	converted, restored, info, err := RestoreNativeOpaquePreviousResponseID(context.Background(), scope, req)
+
+	require.ErrorIs(t, err, ErrSyntheticCompactStateScopeMismatch)
+	require.False(t, restored)
+	require.Equal(t, state.ID, converted.PreviousResponseID)
+	require.Equal(t, "hit", info.StateLookup)
+	require.Equal(t, model.SyntheticCompactStateKindNativeOpaque, info.MarkerKind)
+	require.Equal(t, "mismatch", info.ScopeResult)
+	require.Equal(t, "scope_mismatch", info.FallbackReason)
+	require.NotEmpty(t, info.StateHash)
 }
 
 func TestBuildSyntheticCompactResponseRejectsLostTaskSummaryForLargeInput(t *testing.T) {

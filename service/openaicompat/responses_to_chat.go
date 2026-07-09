@@ -13,6 +13,7 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 	}
 
 	text := ExtractOutputTextFromResponses(resp)
+	reasoningSummary := ExtractReasoningSummaryFromResponses(resp)
 
 	usage := &dto.Usage{}
 	if resp.Usage != nil {
@@ -34,8 +35,15 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 			usage.PromptTokensDetails.ImageTokens = resp.Usage.InputTokensDetails.ImageTokens
 			usage.PromptTokensDetails.AudioTokens = resp.Usage.InputTokensDetails.AudioTokens
 		}
-		if resp.Usage.CompletionTokenDetails.ReasoningTokens != 0 {
-			usage.CompletionTokenDetails.ReasoningTokens = resp.Usage.CompletionTokenDetails.ReasoningTokens
+		outputDetails := resp.Usage.GetOutputTokenDetails()
+		if outputDetails.ReasoningTokens != 0 {
+			usage.CompletionTokenDetails.ReasoningTokens = outputDetails.ReasoningTokens
+		}
+		if outputDetails.ImageTokens != 0 {
+			usage.CompletionTokenDetails.ImageTokens = outputDetails.ImageTokens
+		}
+		if outputDetails.AudioTokens != 0 {
+			usage.CompletionTokenDetails.AudioTokens = outputDetails.AudioTokens
 		}
 	}
 
@@ -75,6 +83,9 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 		Role:    "assistant",
 		Content: text,
 	}
+	if reasoningSummary != "" {
+		msg.ReasoningContent = &reasoningSummary
+	}
 	if len(toolCalls) > 0 {
 		msg.SetToolCalls(toolCalls)
 		msg.Content = ""
@@ -96,6 +107,58 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 	}
 
 	return out, usage, nil
+}
+
+func ExtractReasoningSummaryFromResponses(resp *dto.OpenAIResponsesResponse) string {
+	if resp == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, out := range resp.Output {
+		if out.Type != "reasoning" {
+			continue
+		}
+		for _, part := range out.Summary {
+			if part.Type != "" && part.Type != "summary_text" {
+				continue
+			}
+			appendReasoningSummaryText(&sb, part.Text)
+		}
+		for _, c := range out.Content {
+			if c.Type != "" && c.Type != "summary_text" {
+				continue
+			}
+			appendReasoningSummaryText(&sb, c.Text)
+		}
+	}
+	if sb.Len() > 0 {
+		return sb.String()
+	}
+
+	if resp.Reasoning == nil || isReasoningSummaryConfigValue(resp.Reasoning.Summary) {
+		return ""
+	}
+	return strings.TrimSpace(resp.Reasoning.Summary)
+}
+
+func appendReasoningSummaryText(sb *strings.Builder, text string) {
+	if sb == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	if sb.Len() > 0 {
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString(text)
+}
+
+func isReasoningSummaryConfigValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "auto", "concise", "detailed", "none":
+		return true
+	default:
+		return false
+	}
 }
 
 func ExtractOutputTextFromResponses(resp *dto.OpenAIResponsesResponse) string {
@@ -123,6 +186,9 @@ func ExtractOutputTextFromResponses(resp *dto.OpenAIResponsesResponse) string {
 		return sb.String()
 	}
 	for _, out := range resp.Output {
+		if out.Type == "reasoning" {
+			continue
+		}
 		for _, c := range out.Content {
 			if c.Text != "" {
 				sb.WriteString(c.Text)

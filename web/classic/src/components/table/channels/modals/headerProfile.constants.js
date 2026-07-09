@@ -43,11 +43,11 @@ const browserProfiles = {
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
       'Sec-CH-UA':
-        '"Google Chrome";v="148", "Chromium";v="148", "Not.A/Brand";v="24"',
+        '"Google Chrome";v="150", "Chromium";v="150", "Not.A/Brand";v="24"',
       'Sec-CH-UA-Mobile': '?0',
       'Sec-CH-UA-Platform': '"macOS"',
       'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.47 Safari/537.36',
     },
   },
 };
@@ -74,29 +74,89 @@ const buildAiCodingCliProfile = (
 const AI_CODING_CLI_VERSION_SOURCES = {
   'codex-cli': {
     packageName: '@openai/codex',
-    fallbackVersion: '0.134.0',
+    fallbackVersion: '0.142.4',
   },
   'claude-code': {
     packageName: '@anthropic-ai/claude-code',
-    fallbackVersion: '2.1.153',
+    fallbackVersion: '2.1.197',
   },
   'gemini-cli': {
     packageName: '@google/gemini-cli',
-    fallbackVersion: '0.44.0',
+    fallbackVersion: '0.49.0',
   },
   'qwen-code': {
     packageName: '@qwen-code/qwen-code',
-    fallbackVersion: '0.16.2',
+    fallbackVersion: '0.19.3',
   },
   droid: {
     packageName: 'droid',
-    fallbackVersion: '0.135.0',
+    fallbackVersion: '0.161.0',
   },
 };
 
 export const NPM_VERSION_OPTION_LIMIT = 5;
 export const NPM_VERSION_LATEST_ALIAS = 'latest';
+export const NPM_VERSION_REFRESH_TIMEOUT_MS = 10000;
 export const AI_CODING_CLI_DEFAULT_PLATFORM = 'macos-x64';
+export const NPM_VERSION_LOAD_ERROR_CODE = 'npm_version_load_failed';
+export const NPM_VERSION_AUTH_ERROR_CODE = 'npm_version_auth_required';
+export const NPM_VERSION_FORBIDDEN_CODE = 'npm_version_forbidden';
+export const NPM_VERSION_RATE_LIMITED_CODE = 'npm_version_rate_limited';
+export const NPM_VERSION_EMPTY_ERROR_CODE = 'npm_version_empty';
+export const NPM_VERSION_NOT_RECORDED_CODE = 'npm_version_not_recorded';
+
+export class NpmCliVersionLoadError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'NpmCliVersionLoadError';
+    this.code = code;
+  }
+}
+
+function normalizeNpmCliVersionLoadError(error) {
+  if (error instanceof NpmCliVersionLoadError) {
+    return error;
+  }
+  const status = Number(error?.response?.status ?? error?.status);
+  const message = error?.response?.data?.message || error?.message;
+  return new NpmCliVersionLoadError(
+    normalizeNpmCliVersionPayloadErrorCode({ message }, status),
+    message || 'failed to load npm versions',
+  );
+}
+
+function isForbiddenNpmCliVersionMessage(message) {
+  const normalized = String(message || '')
+    .trim()
+    .toLowerCase();
+  return (
+    normalized.includes('insufficient privilege') ||
+    normalized.includes('insufficient privileges') ||
+    normalized.includes('权限不足') ||
+    normalized.includes('權限不足')
+  );
+}
+
+export function normalizeNpmCliVersionPayloadErrorCode(payload = {}, status) {
+  if (status === 401) {
+    return NPM_VERSION_AUTH_ERROR_CODE;
+  }
+  if (status === 403) {
+    return NPM_VERSION_FORBIDDEN_CODE;
+  }
+  if (status === 429) {
+    return NPM_VERSION_RATE_LIMITED_CODE;
+  }
+  const code = String(payload.code || '').trim();
+  if (code) {
+    return code;
+  }
+  if (isForbiddenNpmCliVersionMessage(payload.message)) {
+    return NPM_VERSION_FORBIDDEN_CODE;
+  }
+  return NPM_VERSION_LOAD_ERROR_CODE;
+}
+
 export const AI_CODING_CLI_PLATFORM_OPTIONS = [
   {
     value: 'macos-x64',
@@ -223,7 +283,7 @@ const aiCodingCliProfiles = {
     versionSource: AI_CODING_CLI_VERSION_SOURCES['codex-cli'],
     description:
       '默认使用 Codex CLI npm latest 版本套用交互式 TUI 请求头生成逻辑；清单暂不可用时保留内置快照。此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。',
-    headers: buildAiCodingCliHeaders('codex-cli', '0.134.0', {
+    headers: buildAiCodingCliHeaders('codex-cli', '0.142.4', {
       Originator: 'codex-tui',
     }),
   },
@@ -232,17 +292,17 @@ const aiCodingCliProfiles = {
     'Codex Desktop',
     {
       'User-Agent':
-        'Codex Desktop/0.133.0-alpha.1 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.519.41501)',
+        'Codex Desktop/0.142.4 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.623.70822)',
       Originator: 'Codex Desktop',
     },
-    '固定请求头静态快照来自 Codex Desktop App 0.133.0-alpha.1 真实请求；此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。',
+    '固定请求头静态快照来自本机 Codex Desktop 原始请求抓包；UA 前缀 0.142.4 是内置 Codex core/app-server 客户端版本，括号尾部 26.623.70822 是 Codex Desktop App 版本。此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。',
     null,
     false,
   ),
   'claude-code': buildAiCodingCliProfile(
     'claude-code',
     'Claude Code',
-    buildAiCodingCliHeaders('claude-code', '2.1.153'),
+    buildAiCodingCliHeaders('claude-code', '2.1.197'),
     '默认使用 Claude Code npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Claude-Code-Session-Id、Anthropic-Version、Anthropic-Beta、X-Stainless-* 等动态头需在高级参数覆盖中显式选择 Claude Code 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES['claude-code'],
     false,
@@ -250,7 +310,7 @@ const aiCodingCliProfiles = {
   'gemini-cli': buildAiCodingCliProfile(
     'gemini-cli',
     'Gemini CLI',
-    buildAiCodingCliHeaders('gemini-cli', '0.44.0'),
+    buildAiCodingCliHeaders('gemini-cli', '0.49.0'),
     '默认使用 Gemini CLI npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES['gemini-cli'],
     false,
@@ -258,7 +318,7 @@ const aiCodingCliProfiles = {
   'qwen-code': buildAiCodingCliProfile(
     'qwen-code',
     'Qwen Code',
-    buildAiCodingCliHeaders('qwen-code', '0.16.2'),
+    buildAiCodingCliHeaders('qwen-code', '0.19.3'),
     '默认使用 Qwen Code npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。x-stainless-* 动态头需在高级参数覆盖中显式选择 Qwen Code 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES['qwen-code'],
     false,
@@ -266,9 +326,20 @@ const aiCodingCliProfiles = {
   droid: buildAiCodingCliProfile(
     'droid',
     'Droid CLI',
-    buildAiCodingCliHeaders('droid', '0.135.0'),
+    buildAiCodingCliHeaders('droid', '0.161.0'),
     '默认使用 Droid CLI npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。',
     AI_CODING_CLI_VERSION_SOURCES.droid,
+    false,
+  ),
+  agy: buildAiCodingCliProfile(
+    'agy',
+    'Antigravity CLI',
+    {
+      'User-Agent':
+        'antigravity/cli/1.0.14 (aidev_client; os_type=darwin; arch=amd64)',
+    },
+    '固定请求头静态快照来自 Antigravity CLI 原始请求身份；此模板仅固定客户端身份。若后续确认需要动态头，应基于真实客户端抓包在高级参数覆盖中手动配置 pass_headers。',
+    null,
     false,
   ),
 };
@@ -344,6 +415,37 @@ function normalizeNpmCliVersionValue(version) {
   return normalizedVersion;
 }
 
+export function buildNpmCliFallbackVersionOptions(fallbackVersion) {
+  const normalizedVersion = normalizeNpmCliVersionValue(fallbackVersion);
+  if (!normalizedVersion) {
+    return [
+      {
+        value: NPM_VERSION_LATEST_ALIAS,
+        label: NPM_VERSION_LATEST_ALIAS,
+        isLatest: true,
+        resolvedVersion: '',
+        source: 'fallback',
+      },
+    ];
+  }
+  return [
+    {
+      value: NPM_VERSION_LATEST_ALIAS,
+      label: `${NPM_VERSION_LATEST_ALIAS} (${normalizedVersion})`,
+      isLatest: true,
+      resolvedVersion: normalizedVersion,
+      source: 'fallback',
+    },
+    {
+      value: normalizedVersion,
+      label: normalizedVersion,
+      isLatest: false,
+      resolvedVersion: normalizedVersion,
+      source: 'fallback',
+    },
+  ];
+}
+
 export function buildNpmCliVersionOptions(
   packageMetadata,
   limit = NPM_VERSION_OPTION_LIMIT,
@@ -370,6 +472,7 @@ export function buildNpmCliVersionOptions(
     label: version,
     isLatest: false,
     resolvedVersion: version,
+    source: 'npm',
   }));
   if (!latestVersion) {
     return pinnedOptions;
@@ -380,12 +483,40 @@ export function buildNpmCliVersionOptions(
       label: `${NPM_VERSION_LATEST_ALIAS} (${latestVersion})`,
       isLatest: true,
       resolvedVersion: latestVersion,
+      source: 'npm',
     },
     ...pinnedOptions,
   ];
 }
 
-function normalizeNpmCliVersionOption(option = {}, latestVersion = '') {
+function normalizeNpmCliVersionOptionSource(
+  source,
+  fallbackSource = 'fallback',
+) {
+  const normalizedSource = String(source || '').trim();
+  if (
+    normalizedSource === 'npm' ||
+    normalizedSource === 'recorded' ||
+    normalizedSource === 'retained' ||
+    normalizedSource === 'fallback'
+  ) {
+    return normalizedSource;
+  }
+  return fallbackSource;
+}
+
+export function getNpmCliVersionOptionSource(
+  option,
+  fallbackSource = 'fallback',
+) {
+  return normalizeNpmCliVersionOptionSource(option?.source, fallbackSource);
+}
+
+function normalizeNpmCliVersionOption(
+  option = {},
+  latestVersion = '',
+  fallbackSource = 'npm',
+) {
   if (!option || typeof option !== 'object' || Array.isArray(option)) {
     return null;
   }
@@ -393,6 +524,10 @@ function normalizeNpmCliVersionOption(option = {}, latestVersion = '') {
   if (!value) {
     return null;
   }
+  const source = normalizeNpmCliVersionOptionSource(
+    option.source,
+    fallbackSource,
+  );
   if (value === NPM_VERSION_LATEST_ALIAS) {
     const resolvedVersion = normalizeNpmCliVersionValue(
       option.resolvedVersion || option.resolved_version || latestVersion,
@@ -407,6 +542,7 @@ function normalizeNpmCliVersionOption(option = {}, latestVersion = '') {
         `${NPM_VERSION_LATEST_ALIAS} (${resolvedVersion})`,
       isLatest: true,
       resolvedVersion,
+      source,
     };
   }
   const normalizedValue = normalizeNpmCliVersionValue(value);
@@ -421,6 +557,7 @@ function normalizeNpmCliVersionOption(option = {}, latestVersion = '') {
         `${NPM_VERSION_LATEST_ALIAS} (${normalizedValue})`,
       isLatest: true,
       resolvedVersion: normalizedValue,
+      source,
     };
   }
   return {
@@ -431,20 +568,30 @@ function normalizeNpmCliVersionOption(option = {}, latestVersion = '') {
       normalizeNpmCliVersionValue(
         option.resolvedVersion || option.resolved_version || '',
       ) || normalizedValue,
+    source,
   };
 }
 
 export function normalizeNpmCliVersionOptions(options) {
-  if (!Array.isArray(options)) {
+  const responseSource =
+    options && typeof options === 'object' && !Array.isArray(options)
+      ? normalizeNpmCliVersionOptionSource(options.source, 'npm')
+      : 'npm';
+  const rawOptions =
+    options && typeof options === 'object' && !Array.isArray(options)
+      ? options.options
+      : options;
+  if (!Array.isArray(rawOptions)) {
     return [];
   }
   const normalizedOptions = [];
   const seenValues = new Set();
   let latestVersion = '';
-  options.forEach((option) => {
+  rawOptions.forEach((option) => {
     const normalizedOption = normalizeNpmCliVersionOption(
       option,
       latestVersion,
+      responseSource,
     );
     if (!normalizedOption || seenValues.has(normalizedOption.value)) {
       return;
@@ -461,9 +608,38 @@ export function normalizeNpmCliVersionOptions(options) {
   const pinnedOptions = normalizedOptions.filter(
     (option) => option.value !== NPM_VERSION_LATEST_ALIAS,
   );
-  return (
-    latestOption ? [latestOption, ...pinnedOptions] : pinnedOptions
-  ).slice(0, NPM_VERSION_OPTION_LIMIT + 1);
+  const orderedOptions = latestOption
+    ? [latestOption, ...pinnedOptions]
+    : pinnedOptions;
+  return orderedOptions.slice(
+    0,
+    latestOption ? NPM_VERSION_OPTION_LIMIT + 1 : NPM_VERSION_OPTION_LIMIT,
+  );
+}
+
+export function normalizeNpmCliVersionOptionsResult(payload) {
+  const record =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload
+      : null;
+  return {
+    packageName: record
+      ? String(record.package || record.packageName || '').trim() || undefined
+      : undefined,
+    source: record
+      ? normalizeNpmCliVersionOptionSource(record.source, 'npm')
+      : 'npm',
+    refreshedAt: record
+      ? String(record.refreshed_at || record.refreshedAt || '').trim() ||
+        undefined
+      : undefined,
+    latestVersion: record
+      ? normalizeNpmCliVersionValue(
+          record.latest_version || record.latestVersion,
+        ) || undefined
+      : undefined,
+    options: normalizeNpmCliVersionOptions(payload),
+  };
 }
 
 export function getAiCodingCliVersionSource(profile) {
@@ -498,10 +674,16 @@ export function buildAiCodingCliVersionMeta(
 export function buildVersionedAiCodingCliProfile(
   profile,
   version,
-  source = 'npm',
   resolvedVersion = '',
   platform = AI_CODING_CLI_DEFAULT_PLATFORM,
+  source = 'npm',
 ) {
+  const normalizedArgs = normalizeBuildVersionedAiCodingCliProfileArgs({
+    resolvedVersion,
+    platform,
+    source,
+    argCount: arguments.length,
+  });
   const baseProfileId = String(profile?.id || profile?.key || '').trim();
   const rawVersion = String(version || '').trim();
   const normalizedVersion =
@@ -510,7 +692,7 @@ export function buildVersionedAiCodingCliProfile(
       : normalizeNpmCliVersionValue(rawVersion);
   const versionSource = getAiCodingCliVersionSource(profile);
   const effectiveVersion = normalizeNpmCliVersionValue(
-    resolvedVersion ||
+    normalizedArgs.resolvedVersion ||
       (normalizedVersion === NPM_VERSION_LATEST_ALIAS
         ? versionSource?.fallbackVersion
         : normalizedVersion) ||
@@ -525,7 +707,9 @@ export function buildVersionedAiCodingCliProfile(
     return profile;
   }
   const baseName = String(profile.name || baseProfileId).trim();
-  const normalizedPlatform = normalizeAiCodingCliPlatform(platform);
+  const normalizedPlatform = normalizeAiCodingCliPlatform(
+    normalizedArgs.platform,
+  );
   const platformLabel = getAiCodingCliPlatformTokens(normalizedPlatform).label;
   const displayVersion =
     normalizedVersion === NPM_VERSION_LATEST_ALIAS
@@ -548,12 +732,94 @@ export function buildVersionedAiCodingCliProfile(
         normalizedVersion,
         normalizedPlatform,
       ),
-      source,
+      source: normalizedArgs.source,
     },
   };
 }
 
-export async function fetchNpmCliVersionOptions(
+function normalizeBuildVersionedAiCodingCliProfileArgs({
+  resolvedVersion,
+  platform,
+  source,
+  argCount,
+}) {
+  const normalizedResolvedVersion = String(resolvedVersion || '').trim();
+  const normalizedPlatform = String(platform || '').trim();
+  const normalizedSource = String(source || '').trim();
+  if (
+    normalizedResolvedVersion === 'npm' ||
+    normalizedResolvedVersion === 'recorded' ||
+    normalizedResolvedVersion === 'retained' ||
+    normalizedResolvedVersion === 'fallback'
+  ) {
+    return {
+      resolvedVersion: argCount >= 4 ? normalizedPlatform : '',
+      platform:
+        argCount >= 5
+          ? normalizedSource || AI_CODING_CLI_DEFAULT_PLATFORM
+          : AI_CODING_CLI_DEFAULT_PLATFORM,
+      source: normalizedResolvedVersion,
+    };
+  }
+  return {
+    resolvedVersion: normalizedResolvedVersion,
+    platform: normalizedPlatform || AI_CODING_CLI_DEFAULT_PLATFORM,
+    source: normalizedSource || 'npm',
+  };
+}
+
+function serializeAiCodingCliSnapshot(profile) {
+  if (!profile) {
+    return null;
+  }
+  return {
+    id: profile.id,
+    key: profile.key,
+    name: profile.name,
+    headers: profile.headers || {},
+    versionMeta: profile.versionMeta || profile.version_meta || null,
+  };
+}
+
+export function areAiCodingCliProfileSnapshotsEqual(left, right) {
+  return (
+    JSON.stringify(serializeAiCodingCliSnapshot(left)) ===
+    JSON.stringify(serializeAiCodingCliSnapshot(right))
+  );
+}
+
+export function buildRefreshedAiCodingCliProfileSnapshot({
+  profile,
+  selectedProfile,
+  selectedVersion,
+  selectedPlatform,
+  options = [],
+}) {
+  const versionSource = getAiCodingCliVersionSource(profile);
+  if (!versionSource?.packageName || !Array.isArray(options)) {
+    return null;
+  }
+  const currentMeta =
+    selectedProfile?.versionMeta || selectedProfile?.version_meta || {};
+  const normalizedVersion =
+    String(currentMeta.version || selectedVersion || '').trim() ||
+    NPM_VERSION_LATEST_ALIAS;
+  const selectedOption = options.find(
+    (option) => option.value === normalizedVersion,
+  );
+  if (!selectedOption) {
+    return null;
+  }
+  return buildVersionedAiCodingCliProfile(
+    profile,
+    normalizedVersion,
+    selectedOption.resolvedVersion || versionSource.fallbackVersion,
+    currentMeta.platform || selectedPlatform || AI_CODING_CLI_DEFAULT_PLATFORM,
+    getNpmCliVersionOptionSource(selectedOption, 'npm'),
+  );
+}
+
+export async function fetchNpmCliVersionOptionsResult(
   packageName,
   requestImpl,
   options = {},
@@ -563,22 +829,51 @@ export async function fetchNpmCliVersionOptions(
   }
   const timeoutMs = Number.isFinite(options.timeoutMs)
     ? options.timeoutMs
-    : 5000;
-  const response = await requestImpl('/api/channel/npm_version_options', {
-    params: {
-      package: String(packageName || '').trim(),
-    },
-    timeout: timeoutMs,
-    skipErrorHandler: true,
-    disableDuplicate: true,
-  });
+    : NPM_VERSION_REFRESH_TIMEOUT_MS;
+  let response;
+  try {
+    const requestPath = options.refresh
+      ? '/api/channel/npm_version_options/refresh'
+      : '/api/channel/npm_version_options';
+    response = await requestImpl(requestPath, {
+      params: {
+        package: String(packageName || '').trim(),
+      },
+      timeout: timeoutMs,
+      skipErrorHandler: true,
+      disableDuplicate: true,
+    });
+  } catch (error) {
+    throw normalizeNpmCliVersionLoadError(error);
+  }
   const payload = response?.data || {};
+  const status = Number(response?.status);
+  const errorCode = normalizeNpmCliVersionPayloadErrorCode(payload, status);
   if (payload.success !== true) {
-    throw new Error(payload.message || 'failed to load npm versions');
+    throw new NpmCliVersionLoadError(
+      errorCode,
+      payload.message || 'failed to load npm versions',
+    );
   }
-  const normalizedOptions = normalizeNpmCliVersionOptions(payload.data);
-  if (normalizedOptions.length === 0) {
-    throw new Error('empty npm version options');
+  const result = normalizeNpmCliVersionOptionsResult(payload.data);
+  if (result.options.length === 0) {
+    throw new NpmCliVersionLoadError(
+      NPM_VERSION_EMPTY_ERROR_CODE,
+      'empty npm version options',
+    );
   }
-  return normalizedOptions;
+  return result;
+}
+
+export async function fetchNpmCliVersionOptions(
+  packageName,
+  requestImpl,
+  options = {},
+) {
+  const result = await fetchNpmCliVersionOptionsResult(
+    packageName,
+    requestImpl,
+    options,
+  );
+  return result.options;
 }

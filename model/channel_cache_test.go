@@ -66,6 +66,73 @@ func TestGetRandomSatisfiedChannelFallsBackToDatabaseOnCacheMiss(t *testing.T) {
 	}, time.Second, 20*time.Millisecond)
 }
 
+func TestGetRandomSatisfiedChannelFallsBackToDatabaseWhenCacheExcluded(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	limitedChannel := &Channel{
+		Id:       201,
+		Name:     "limited-cache-channel",
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "gpt-5.4",
+		Priority: common.GetPointer[int64](10),
+		Weight:   common.GetPointer[uint](1),
+	}
+	require.NoError(t, DB.Create(limitedChannel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-5.4",
+		ChannelId: limitedChannel.Id,
+		Enabled:   true,
+		Priority:  limitedChannel.Priority,
+		Weight:    *limitedChannel.Weight,
+	}).Error)
+
+	InitChannelCache()
+
+	fallbackChannel := &Channel{
+		Id:       202,
+		Name:     "database-fallback-channel",
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "gpt-5.4",
+		Priority: common.GetPointer[int64](10),
+		Weight:   common.GetPointer[uint](1),
+	}
+	require.NoError(t, DB.Create(fallbackChannel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-5.4",
+		ChannelId: fallbackChannel.Id,
+		Enabled:   true,
+		Priority:  fallbackChannel.Priority,
+		Weight:    *fallbackChannel.Weight,
+	}).Error)
+
+	got, err := GetRandomSatisfiedChannelExcluding("default", "gpt-5.4", 0, map[int]struct{}{
+		limitedChannel.Id: {},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, fallbackChannel.Id, got.Id)
+
+	require.Eventually(t, func() bool {
+		channelSyncLock.RLock()
+		defer channelSyncLock.RUnlock()
+		return isChannelIDInList(group2model2channels["default"]["gpt-5.4"], fallbackChannel.Id)
+	}, time.Second, 20*time.Millisecond)
+}
+
 func TestUpdateChannelStatusRefreshesMemoryCacheAfterEnable(t *testing.T) {
 	prepareChannelCacheTest(t)
 
@@ -311,6 +378,168 @@ func TestGetRandomSatisfiedChannelExcludingSkipsUsedChannelsAtSamePriority(t *te
 	require.Equal(t, 203, got.Id)
 }
 
+func TestGetRandomSatisfiedChannelExcludingReturnsCacheHitWithoutDatabaseFallback(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	modelName := "gpt-cache-only"
+	priority := int64(10)
+	weight := uint(1)
+	channels := []*Channel{
+		{Id: 230, Name: "excluded-cache-channel", Status: common.ChannelStatusEnabled, Group: "default", Models: modelName, Priority: &priority, Weight: &weight},
+		{Id: 231, Name: "selected-cache-channel", Status: common.ChannelStatusEnabled, Group: "default", Models: modelName, Priority: &priority, Weight: &weight},
+	}
+	for _, channel := range channels {
+		require.NoError(t, DB.Create(channel).Error)
+		require.NoError(t, DB.Create(&Ability{
+			Group:     "default",
+			Model:     modelName,
+			ChannelId: channel.Id,
+			Enabled:   true,
+			Priority:  channel.Priority,
+			Weight:    *channel.Weight,
+		}).Error)
+	}
+	InitChannelCache()
+
+	require.NoError(t, DB.Exec("DELETE FROM abilities WHERE model = ?", modelName).Error)
+	require.NoError(t, DB.Exec("DELETE FROM channels WHERE id IN (?, ?)", 230, 231).Error)
+
+	got, err := GetRandomSatisfiedChannelExcluding("default", modelName, 0, map[int]struct{}{230: {}})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, 231, got.Id)
+}
+
+func TestGetRandomSatisfiedChannelFallbackHonorsDatabaseRequestBodyLimit(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	modelName := "gpt-body-limit-fallback"
+	InitChannelCache()
+
+	priority := int64(10)
+	weight := uint(1)
+	limitedSettings := dto.ChannelOtherSettings{
+		RequestBodyLimit: &dto.ChannelRequestBodyLimit{
+			MaxBytes:   100,
+			ObservedAt: time.Now().UTC().Unix(),
+			Source:     "upstream_413",
+			Reason:     "request body too large",
+		},
+	}
+	rawSettings, err := common.Marshal(limitedSettings)
+	require.NoError(t, err)
+
+	limitedChannel := &Channel{
+		Id:            232,
+		Name:          "database-limited-channel",
+		Status:        common.ChannelStatusEnabled,
+		Group:         "default",
+		Models:        modelName,
+		Priority:      &priority,
+		Weight:        &weight,
+		OtherSettings: string(rawSettings),
+	}
+	require.NoError(t, DB.Create(limitedChannel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     modelName,
+		ChannelId: limitedChannel.Id,
+		Enabled:   true,
+		Priority:  limitedChannel.Priority,
+		Weight:    *limitedChannel.Weight,
+	}).Error)
+
+	got, err := GetRandomSatisfiedChannelExcludingWithRequestBodyLimit("default", modelName, 0, nil, 128, 0, time.Now().UTC())
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+func TestGetRandomSatisfiedChannelRequestBodyLimitFallsBackToLowerPriority(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	modelName := "gpt-body-limit-lower-priority"
+	InitChannelCache()
+
+	highPriority := int64(20)
+	lowPriority := int64(10)
+	weight := uint(1)
+	limitedSettings := dto.ChannelOtherSettings{
+		RequestBodyLimit: &dto.ChannelRequestBodyLimit{
+			MaxBytes:   100,
+			ObservedAt: time.Now().UTC().Unix(),
+			Source:     "upstream_413",
+			Reason:     "request body too large",
+		},
+	}
+	rawSettings, err := common.Marshal(limitedSettings)
+	require.NoError(t, err)
+
+	channels := []*Channel{
+		{
+			Id:            233,
+			Name:          "limited-high-priority-channel",
+			Status:        common.ChannelStatusEnabled,
+			Group:         "default",
+			Models:        modelName,
+			Priority:      &highPriority,
+			Weight:        &weight,
+			OtherSettings: string(rawSettings),
+		},
+		{
+			Id:       234,
+			Name:     "allowed-low-priority-channel",
+			Status:   common.ChannelStatusEnabled,
+			Group:    "default",
+			Models:   modelName,
+			Priority: &lowPriority,
+			Weight:   &weight,
+		},
+	}
+	for _, channel := range channels {
+		require.NoError(t, DB.Create(channel).Error)
+		require.NoError(t, DB.Create(&Ability{
+			Group:     "default",
+			Model:     modelName,
+			ChannelId: channel.Id,
+			Enabled:   true,
+			Priority:  channel.Priority,
+			Weight:    *channel.Weight,
+		}).Error)
+	}
+
+	got, err := GetRandomSatisfiedChannelExcludingWithRequestBodyLimit("default", modelName, 0, nil, 128, 0, time.Now().UTC())
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, 234, got.Id)
+}
+
 func TestGetRandomSatisfiedChannelExcludingKeepsRetryPriorityStable(t *testing.T) {
 	prepareChannelCacheTest(t)
 
@@ -349,6 +578,363 @@ func TestGetRandomSatisfiedChannelExcludingKeepsRetryPriorityStable(t *testing.T
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, 211, got.Id)
+}
+
+func TestGetNextEnabledKeyUpdatesPollingIndexInMemoryCache(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+	})
+
+	channel := &Channel{
+		Id:     235,
+		Name:   "polling-cache-channel",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-polling-cache",
+		Key:    "sk-a\nsk-b",
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:         true,
+			MultiKeySize:       2,
+			MultiKeyMode:       constant.MultiKeyModePolling,
+			MultiKeyStatusList: map[int]int{0: common.ChannelStatusEnabled, 1: common.ChannelStatusEnabled},
+		},
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	InitChannelCache()
+
+	cached, err := CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	key, idx, apiErr := cached.GetNextEnabledKey()
+	require.Nil(t, apiErr)
+	require.Equal(t, "sk-a", key)
+	require.Equal(t, 0, idx)
+
+	updatedSettings, err := MarkChannelRequestBodyLimit(channel.Id, dto.ChannelRequestBodyLimit{
+		MaxBytes:   128,
+		ObservedAt: time.Now().UTC().Unix(),
+		Source:     "test",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, updatedSettings.RequestBodyLimit)
+
+	cached, err = CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	key, idx, apiErr = cached.GetNextEnabledKey()
+	require.Nil(t, apiErr)
+	require.Equal(t, "sk-b", key)
+	require.Equal(t, 1, idx)
+
+	cached, err = CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	settings := cached.GetOtherSettings()
+	require.NotNil(t, settings.RequestBodyLimit)
+	require.Equal(t, int64(128), settings.RequestBodyLimit.MaxBytes)
+}
+
+func TestUpdateBalanceRefreshesMemoryCache(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+	})
+
+	channel := &Channel{
+		Id:     236,
+		Name:   "balance-cache-channel",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-balance-cache",
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	InitChannelCache()
+
+	channel.UpdateBalance(12.34)
+
+	cached, err := CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	require.Equal(t, 12.34, cached.Balance)
+	require.NotZero(t, cached.BalanceUpdatedTime)
+}
+
+func TestUpdateBalanceKeepsPollingIndexInMemoryCache(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+	})
+
+	channel := &Channel{
+		Id:     237,
+		Name:   "balance-polling-cache-channel",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-balance-polling-cache",
+		Key:    "sk-a\nsk-b\nsk-c",
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:         true,
+			MultiKeySize:       3,
+			MultiKeyMode:       constant.MultiKeyModePolling,
+			MultiKeyStatusList: map[int]int{0: common.ChannelStatusEnabled, 1: common.ChannelStatusEnabled, 2: common.ChannelStatusEnabled},
+		},
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	InitChannelCache()
+
+	cached, err := CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	key, idx, apiErr := cached.GetNextEnabledKey()
+	require.Nil(t, apiErr)
+	require.Equal(t, "sk-a", key)
+	require.Equal(t, 0, idx)
+
+	channel.UpdateBalance(12.34)
+
+	cached, err = CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	key, idx, apiErr = cached.GetNextEnabledKey()
+	require.Nil(t, apiErr)
+	require.Equal(t, "sk-b", key)
+	require.Equal(t, 1, idx)
+}
+
+func TestCacheUpdateChannelKeepsPollingIndexInMemoryCache(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+	})
+
+	channel := &Channel{
+		Id:     238,
+		Name:   "update-polling-cache-channel",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-update-polling-cache",
+		Key:    "sk-a\nsk-b\nsk-c",
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:         true,
+			MultiKeySize:       3,
+			MultiKeyMode:       constant.MultiKeyModePolling,
+			MultiKeyStatusList: map[int]int{0: common.ChannelStatusEnabled, 1: common.ChannelStatusEnabled, 2: common.ChannelStatusEnabled},
+		},
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	InitChannelCache()
+
+	cached, err := CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	key, idx, apiErr := cached.GetNextEnabledKey()
+	require.Nil(t, apiErr)
+	require.Equal(t, "sk-a", key)
+	require.Equal(t, 0, idx)
+
+	updated := channel.CloneForCache()
+	updated.Name = "update-polling-cache-channel-renamed"
+	updated.ChannelInfo.MultiKeyPollingIndex = 0
+	CacheUpdateChannel(updated)
+
+	cached, err = CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	require.Equal(t, "update-polling-cache-channel-renamed", cached.Name)
+	key, idx, apiErr = cached.GetNextEnabledKey()
+	require.Nil(t, apiErr)
+	require.Equal(t, "sk-b", key)
+	require.Equal(t, 1, idx)
+}
+
+func TestCacheUpdateChannelDoesNotKeepPollingIndexWhenModeChanges(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+	})
+
+	channel := &Channel{
+		Id:     239,
+		Name:   "update-polling-mode-change-channel",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-update-polling-mode-change",
+		Key:    "sk-a\nsk-b\nsk-c",
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:         true,
+			MultiKeySize:       3,
+			MultiKeyMode:       constant.MultiKeyModePolling,
+			MultiKeyStatusList: map[int]int{0: common.ChannelStatusEnabled, 1: common.ChannelStatusEnabled, 2: common.ChannelStatusEnabled},
+		},
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	InitChannelCache()
+
+	cached, err := CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	_, _, apiErr := cached.GetNextEnabledKey()
+	require.Nil(t, apiErr)
+
+	updated := channel.CloneForCache()
+	updated.ChannelInfo.MultiKeyMode = constant.MultiKeyModeRandom
+	updated.ChannelInfo.MultiKeyPollingIndex = 0
+	CacheUpdateChannel(updated)
+
+	cached, err = CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	require.Equal(t, constant.MultiKeyModeRandom, cached.ChannelInfo.MultiKeyMode)
+	require.Equal(t, 0, cached.ChannelInfo.MultiKeyPollingIndex)
+}
+
+func TestCacheUpdateChannelDoesNotKeepPollingIndexWhenOldModeWasNotPolling(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+	})
+
+	channel := &Channel{
+		Id:     240,
+		Name:   "update-random-to-polling-channel",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-update-random-to-polling",
+		Key:    "sk-a\nsk-b\nsk-c",
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:           true,
+			MultiKeySize:         3,
+			MultiKeyMode:         constant.MultiKeyModeRandom,
+			MultiKeyPollingIndex: 2,
+			MultiKeyStatusList:   map[int]int{0: common.ChannelStatusEnabled, 1: common.ChannelStatusEnabled, 2: common.ChannelStatusEnabled},
+		},
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	InitChannelCache()
+
+	updated := channel.CloneForCache()
+	updated.ChannelInfo.MultiKeyMode = constant.MultiKeyModePolling
+	updated.ChannelInfo.MultiKeyPollingIndex = 0
+	CacheUpdateChannel(updated)
+
+	cached, err := CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	require.Equal(t, constant.MultiKeyModePolling, cached.ChannelInfo.MultiKeyMode)
+	require.Equal(t, 0, cached.ChannelInfo.MultiKeyPollingIndex)
+}
+
+func TestChooseCachedRouteChannelUsesDatabaseWeightSelection(t *testing.T) {
+	priority := int64(10)
+	zeroWeight := uint(0)
+	heavyWeight := uint(100)
+	channels := []*Channel{
+		{Id: 220, Name: "zero-weight", Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &zeroWeight},
+		{Id: 221, Name: "heavy-weight", Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &heavyWeight},
+	}
+
+	got, err := chooseCachedRouteChannelWithRandom(channels, 0, nil, func(max int) int {
+		require.Equal(t, 120, max)
+		return 6
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, 220, got.Id)
+}
+
+func TestChooseCachedRouteChannelUsesDatabaseWeightBoundaries(t *testing.T) {
+	priority := int64(10)
+	zeroWeight := uint(0)
+	heavyWeight := uint(100)
+	channels := []*Channel{
+		{Id: 222, Name: "zero-weight", Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &zeroWeight},
+		{Id: 223, Name: "heavy-weight", Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &heavyWeight},
+	}
+
+	testCases := []struct {
+		name       string
+		random     int
+		expectedID int
+	}{
+		{name: "zero weight keeps base share", random: 9, expectedID: 222},
+		{name: "heavy weight starts after base share", random: 10, expectedID: 223},
+		{name: "heavy weight owns weighted tail", random: 119, expectedID: 223},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := chooseCachedRouteChannelWithRandom(channels, 0, nil, func(max int) int {
+				require.Equal(t, 120, max)
+				return tc.random
+			})
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			require.Equal(t, tc.expectedID, got.Id)
+		})
+	}
+}
+
+func TestChooseCachedRouteChannelUsesDatabaseWeightForAllZeroWeights(t *testing.T) {
+	priority := int64(10)
+	zeroWeight := uint(0)
+	channels := []*Channel{
+		{Id: 224, Name: "zero-a", Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &zeroWeight},
+		{Id: 225, Name: "zero-b", Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &zeroWeight},
+	}
+
+	got, err := chooseCachedRouteChannelWithRandom(channels, 0, nil, func(max int) int {
+		require.Equal(t, 20, max)
+		return 10
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, 225, got.Id)
+}
+
+func TestChooseCachedRouteChannelWeightsOnlyTargetPriority(t *testing.T) {
+	highPriority := int64(10)
+	lowPriority := int64(1)
+	zeroWeight := uint(0)
+	heavyWeight := uint(100)
+	channels := []*Channel{
+		{Id: 226, Name: "high-a", Status: common.ChannelStatusEnabled, Priority: &highPriority, Weight: &zeroWeight},
+		{Id: 227, Name: "high-b", Status: common.ChannelStatusEnabled, Priority: &highPriority, Weight: &zeroWeight},
+		{Id: 228, Name: "low-heavy", Status: common.ChannelStatusEnabled, Priority: &lowPriority, Weight: &heavyWeight},
+	}
+
+	got, err := chooseCachedRouteChannelWithPriorityMode(channels, 0, nil, false, func(max int) int {
+		require.Equal(t, 20, max)
+		return 15
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, 227, got.Id)
+}
+
+func TestChooseCachedRouteChannelWeightsOnlyUnexcludedChannels(t *testing.T) {
+	priority := int64(10)
+	zeroWeight := uint(0)
+	heavyWeight := uint(100)
+	channels := []*Channel{
+		{Id: 229, Name: "excluded-heavy", Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &heavyWeight},
+		{Id: 232, Name: "selected-zero", Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &zeroWeight},
+	}
+
+	got, err := chooseCachedRouteChannelWithPriorityMode(channels, 0, map[int]struct{}{229: {}}, false, func(max int) int {
+		require.Equal(t, 10, max)
+		return 0
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, 232, got.Id)
 }
 
 func TestIsChannelEnabledForGroupModelFallsBackToDatabaseOnCacheMiss(t *testing.T) {
@@ -443,6 +1029,19 @@ func TestChannelInfoScanSupportsStringValue(t *testing.T) {
 	require.Equal(t, 0, info.MultiKeySize)
 	require.Equal(t, 0, info.MultiKeyPollingIndex)
 	require.Equal(t, "random", string(info.MultiKeyMode))
+}
+
+func TestChannelInfoValueReturnsStringJSON(t *testing.T) {
+	value, err := (ChannelInfo{
+		IsMultiKey:           true,
+		MultiKeySize:         1,
+		MultiKeyStatusList:   map[int]int{0: common.ChannelStatusEnabled},
+		MultiKeyPollingIndex: 0,
+		MultiKeyMode:         constant.MultiKeyModePolling,
+	}).Value()
+	require.NoError(t, err)
+	require.IsType(t, "", value)
+	require.JSONEq(t, `{"is_multi_key":true,"multi_key_size":1,"multi_key_status_list":{"0":1},"multi_key_polling_index":0,"multi_key_mode":"polling"}`, value.(string))
 }
 
 func TestGroupModelRouteHelperDisabledWhenExplicitlyTurnedOff(t *testing.T) {
@@ -1182,6 +1781,31 @@ func TestGetRandomSatisfiedChannelUsesChannelWeightForDatabaseFallback(t *testin
 	require.NoError(t, err)
 	require.Len(t, channels, 2)
 	require.Equal(t, []uint{zeroWeight, heavyWeight}, weights)
+}
+
+func TestLoadRouteCandidateChannelsReportsMissingChannel(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	priority := int64(10)
+	abilities := []Ability{
+		{
+			Group:     "default",
+			Model:     "gpt-5.5",
+			ChannelId: 999,
+			Enabled:   true,
+			Priority:  &priority,
+			Weight:    1,
+		},
+	}
+
+	channels, weights, err := loadRouteCandidateChannels(abilities, routeModelCandidate{
+		model: "gpt-5.5",
+	}, false)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "数据库一致性错误，渠道# 999 不存在")
+	require.Nil(t, channels)
+	require.Nil(t, weights)
 }
 
 func TestGetRandomSatisfiedChannelDatabaseFallbackSkipsExcludedCompactChannel(t *testing.T) {

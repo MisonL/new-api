@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -60,18 +59,22 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if err != nil {
 		return nil, err
 	}
-	if !isCompact && hasSyntheticReference {
-		convertedRequest, ok, err := service.ApplySyntheticCompactState(relaycommon.GinRequestContext(c), service.SyntheticCompactScopeFromSource(info), request)
+	if hasSyntheticReference {
+		convertedRequest, ok, visibleOnly, applyInfo, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(relaycommon.GinRequestContext(c), service.SyntheticCompactScopeFromSource(info), request)
+		service.SetSyntheticCompactApplyInfo(c, applyInfo)
 		if err != nil {
 			setResponsesPreviousIDActionForError(c, err)
 			return nil, err
 		}
-		if !ok {
+		if visibleOnly {
+			service.MarkResponsesCompactVisibleOnlyFallback(c, info, "stale_local_synthetic_state_visible_only")
+		} else if ok {
+			common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_synthetic_restore")
+		} else {
 			common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "missing_local_synthetic_state")
 			return nil, service.ErrSyntheticCompactStateNotFound
 		}
 		request = convertedRequest
-		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_synthetic_restore")
 	}
 
 	if info != nil && info.ChannelSetting.SystemPrompt != "" {
@@ -100,26 +103,20 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 						return nil, err
 					}
 				}
-			} else {
-				if b, err := common.Marshal(systemPrompt); err == nil {
-					request.Instructions = b
-				} else {
-					return nil, err
-				}
 			}
 		}
 	}
 	// Codex backend requires the `instructions` field to be present.
 	// Keep it consistent with Codex CLI behavior by defaulting to an empty string.
 	if len(request.Instructions) == 0 {
-		request.Instructions = json.RawMessage(`""`)
+		request.Instructions = common.RawMessage(`""`)
 	}
 
 	if isCompact {
-		return request, nil
+		return applyCodexCompactV2ContextSafeguard(c, info, request)
 	}
 	// codex: store must be false
-	request.Store = json.RawMessage("false")
+	request.Store = common.RawMessage("false")
 	// rm max_output_tokens
 	request.MaxOutputTokens = nil
 	request.Temperature = nil
@@ -136,7 +133,7 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	}
 
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
-		return openai.OaiResponsesCompactionHandler(c, resp)
+		return openai.OaiResponsesCompactionHandler(c, info, resp)
 	}
 
 	if info.IsStream {

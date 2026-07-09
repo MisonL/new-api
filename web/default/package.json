@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "rsbuild dev",
-    "build": "rsbuild build && node ../scripts/safari-compatibility.mjs dist && node ../scripts/check-browser-compatibility.mjs dist",
-    "build:check": "tsc -b && rsbuild build",
+    "build": "node ../scripts/run-with-node-options.mjs --optional-node-option=--disable-warning=DEP0205 -- rsbuild build && node ../scripts/safari-compatibility.mjs dist && node ../scripts/check-browser-compatibility.mjs dist",
+    "build:check": "tsc -b && node ../scripts/run-with-node-options.mjs --optional-node-option=--disable-warning=DEP0205 -- rsbuild build",
     "test:browser-compat": "node ../scripts/browser-cross-verify.mjs --url http://localhost:3000/console",
     "typecheck": "tsc -b",
     "lint": "eslint .",

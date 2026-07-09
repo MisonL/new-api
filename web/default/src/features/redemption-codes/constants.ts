@@ -31,7 +31,7 @@ export const REDEMPTION_STATUSES: Record<
   },
   [REDEMPTION_STATUS.DISABLED]: {
     labelKey: 'Disabled',
-    variant: 'neutral',
+    variant: 'disabled',
     value: REDEMPTION_STATUS.DISABLED,
     showDot: true,
   },

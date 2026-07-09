@@ -543,15 +543,15 @@ export function UpstreamConflictDialog({
                     </div>
                   </div>
 
-                  <div className='bg-muted/40 flex flex-col gap-2 border-t px-2 py-1.5 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-3 sm:py-2'>
-                    <div className='text-muted-foreground text-xs'>
+                  <div className='bg-muted/40 flex min-h-14 flex-col gap-2 border-t px-2 py-2 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-3'>
+                    <div className='text-muted-foreground text-xs leading-none'>
                       {t('Showing')} {displayStart}-{displayEnd} {t('of')}{' '}
                       {visibleFieldCount} {t('field')}
                       {visibleFieldCount === 1 ? '' : 's'}
                     </div>
                     <div className='flex items-center justify-between gap-2 sm:flex-wrap sm:gap-3'>
                       <div className='flex items-center gap-1.5 text-xs sm:gap-2'>
-                        <span className='hidden sm:inline'>
+                        <span className='hidden leading-none sm:inline'>
                           {t('Rows per page')}
                         </span>
                         <Select
@@ -586,7 +586,7 @@ export function UpstreamConflictDialog({
                         >
                           <ChevronLeft className='h-3.5 w-3.5 sm:h-4 sm:w-4' />
                         </Button>
-                        <span className='text-xs font-medium'>
+                        <span className='text-xs font-medium leading-none'>
                           {t('Page {{current}} of {{total}}', {
                             current: currentPageDisplay,
                             total: totalPagesDisplay,

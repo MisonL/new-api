@@ -1,0 +1,29 @@
+{
+  "name": "@mison/codex-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "从 new-api 生成 Codex App 模型目录和提供方配置。",
+  "type": "module",
+  "bin": {
+    "new-api-codex-bridge": "bin/new-api-codex-bridge.js",
+    "codex-bridge": "bin/new-api-codex-bridge.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md"
+  ],
+  "keywords": [
+    "codex",
+    "new-api",
+    "openai-compatible",
+    "model-catalog"
+  ],
+  "scripts": {
+    "test": "node --test tests/catalog.test.js tests/cli.test.js tests/config.test.js tests/doctor-refresh.test.js tests/models.test.js tests/paths.test.js tests/prompt.test.js tests/receipt.test.js tests/setup.test.js tests/toml.test.js tests/url.test.js"
+  },
+  "engines": {
+    "node": ">=18.19"
+  },
+  "license": "AGPL-3.0-or-later"
+}

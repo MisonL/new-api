@@ -36,6 +36,7 @@ export const RESPONSES_UPSTREAM_PROFILE_SAME_CLUSTER_NEWAPI =
 export const RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI = 'trusted_newapi';
 export const RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP = 'sub2api_http';
 export const RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2 = 'sub2api_wsv2';
+export const RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI = 'generic_openai';
 export const RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY = 'generic_proxy';
 export const RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY = 'chat_only_proxy';
 
@@ -82,6 +83,10 @@ export const RESPONSES_UPSTREAM_PROFILE_OPTIONS = [
   {
     label: 'Sub2API WSv2',
     value: RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2,
+  },
+  {
+    label: '通用 OpenAI',
+    value: RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI,
   },
   {
     label: '通用代理',
@@ -131,6 +136,9 @@ export function normalizeResponsesUpstreamProfile(profile) {
   }
   if (profile === RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2) {
     return RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2;
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI) {
+    return RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI;
   }
   if (profile === RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY) {
     return RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY;

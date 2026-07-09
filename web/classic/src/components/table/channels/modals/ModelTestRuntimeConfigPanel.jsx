@@ -52,6 +52,7 @@ const RuntimeSwitchItem = ({
     : effectiveChecked
       ? t('会参与')
       : t('已关闭');
+  const statusColor = !configured ? 'grey' : effectiveChecked ? 'green' : 'red';
 
   return (
     <div
@@ -72,7 +73,7 @@ const RuntimeSwitchItem = ({
           <Typography.Text strong size='small'>
             {label}
           </Typography.Text>
-          <Tag color={effectiveChecked ? 'green' : 'grey'} size='small'>
+          <Tag color={statusColor} size='small'>
             {statusText}
           </Tag>
         </div>
@@ -107,6 +108,7 @@ const RuntimeSummaryTag = ({
   t,
 }) => {
   const text = configured ? value || t('已配置') : t('未配置');
+  const color = !configured ? 'grey' : enabled ? 'green' : 'red';
   return (
     <button
       type='button'
@@ -114,7 +116,7 @@ const RuntimeSummaryTag = ({
       title={`${label}: ${text}。${t('点击打开渠道编辑')}`}
       onClick={onEdit}
     >
-      <Tag color={configured && enabled ? 'green' : 'grey'} size='small'>
+      <Tag color={color} size='small'>
         <span className='inline-flex max-w-[260px] items-center gap-1 truncate align-bottom'>
           <span className='shrink-0'>{label}:</span>
           <span className='truncate'>{text}</span>

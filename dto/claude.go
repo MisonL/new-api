@@ -26,6 +26,7 @@ type ClaudeMediaMessage struct {
 	Role         string               `json:"role,omitempty"`
 	Thinking     *string              `json:"thinking,omitempty"`
 	Signature    string               `json:"signature,omitempty"`
+	Data         string               `json:"data,omitempty"`
 	Delta        string               `json:"delta,omitempty"`
 	CacheControl json.RawMessage      `json:"cache_control,omitempty"`
 	// tool_calls
@@ -274,6 +275,13 @@ func (c *ClaudeRequest) GetTokenCountMeta() *types.TokenCountMeta {
 							Source:   source,
 						})
 					}
+				case "document":
+					if source := media.ToFileSource(); source != nil {
+						fileMeta = append(fileMeta, &types.FileMeta{
+							FileType: types.FileTypeFile,
+							Source:   source,
+						})
+					}
 				}
 			}
 		}
@@ -303,6 +311,13 @@ func (c *ClaudeRequest) GetTokenCountMeta() *types.TokenCountMeta {
 						Source:   source,
 					})
 				}
+			case "document":
+				if source := media.ToFileSource(); source != nil {
+					fileMeta = append(fileMeta, &types.FileMeta{
+						FileType: types.FileTypeFile,
+						Source:   source,
+					})
+				}
 			case "tool_use":
 				if media.Name != "" {
 					texts = append(texts, media.Name)
@@ -316,6 +331,8 @@ func (c *ClaudeRequest) GetTokenCountMeta() *types.TokenCountMeta {
 					b, _ := common.Marshal(media.Content)
 					texts = append(texts, string(b))
 				}
+			case "thinking", "redacted_thinking":
+				texts = appendClaudeThinkingBlockTokenText(texts, media)
 			}
 		}
 	}
@@ -356,6 +373,19 @@ func (c *ClaudeRequest) GetTokenCountMeta() *types.TokenCountMeta {
 	tokenCountMeta.CombineText = strings.Join(texts, "\n")
 	tokenCountMeta.Files = fileMeta
 	return &tokenCountMeta
+}
+
+func appendClaudeThinkingBlockTokenText(texts []string, media ClaudeMediaMessage) []string {
+	if media.Thinking != nil && *media.Thinking != "" {
+		texts = append(texts, *media.Thinking)
+	}
+	if media.Data != "" {
+		texts = append(texts, media.Data)
+	}
+	if media.Signature != "" {
+		texts = append(texts, media.Signature)
+	}
+	return texts
 }
 
 func (c *ClaudeRequest) IsStream(ctx *gin.Context) bool {
@@ -414,7 +444,7 @@ func (c *ClaudeRequest) GetTools() []any {
 
 func (c *ClaudeRequest) GetEfforts() string {
 	var OutputConfig OutputConfigForEffort
-	if err := json.Unmarshal(c.OutputConfig, &OutputConfig); err == nil {
+	if err := common.Unmarshal(c.OutputConfig, &OutputConfig); err == nil {
 		effort := OutputConfig.Effort
 		return effort
 	}
@@ -437,12 +467,44 @@ func ProcessTools(tools []any) ([]*Tool, []*ClaudeWebSearchTool) {
 		case ClaudeWebSearchTool:
 			webSearchTools = append(webSearchTools, &t)
 		default:
-			// 未知类型，跳过
-			continue
+			normalTool, webSearchTool := parseClaudeTool(tool)
+			if normalTool != nil {
+				normalTools = append(normalTools, normalTool)
+			}
+			if webSearchTool != nil {
+				webSearchTools = append(webSearchTools, webSearchTool)
+			}
 		}
 	}
 
 	return normalTools, webSearchTools
+}
+
+func parseClaudeTool(tool any) (*Tool, *ClaudeWebSearchTool) {
+	if tool == nil {
+		return nil, nil
+	}
+	if isClaudeWebSearchTool(tool) {
+		webSearchTool, err := common.Any2Type[ClaudeWebSearchTool](tool)
+		if err == nil && (webSearchTool.Type != "" || webSearchTool.Name != "") {
+			return nil, &webSearchTool
+		}
+		return nil, nil
+	}
+	normalTool, err := common.Any2Type[Tool](tool)
+	if err == nil && normalTool.Name != "" {
+		return &normalTool, nil
+	}
+	return nil, nil
+}
+
+func isClaudeWebSearchTool(tool any) bool {
+	toolMap, ok := tool.(map[string]any)
+	if !ok {
+		return false
+	}
+	toolType, ok := toolMap["type"].(string)
+	return ok && strings.HasPrefix(toolType, "web_search")
 }
 
 type Thinking struct {

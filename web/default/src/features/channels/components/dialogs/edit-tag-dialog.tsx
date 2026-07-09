@@ -82,18 +82,20 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
   // Initialize form when tag changes
   useEffect(() => {
     if (open && currentTag) {
-      setNewTag(currentTag)
-      setModelMapping('')
-      setSelectedGroups([])
-      setCustomModel('')
+      queueMicrotask(() => {
+        setNewTag(currentTag)
+        setModelMapping('')
+        setSelectedGroups([])
+        setCustomModel('')
 
-      // Load tag models
-      if (tagModelsData?.data) {
-        const models = tagModelsData.data.split(',').filter(Boolean)
-        setSelectedModels(models)
-      } else {
-        setSelectedModels([])
-      }
+        // Load tag models
+        if (tagModelsData?.data) {
+          const models = tagModelsData.data.split(',').filter(Boolean)
+          setSelectedModels(models)
+        } else {
+          setSelectedModels([])
+        }
+      })
     }
   }, [open, currentTag, tagModelsData])
 

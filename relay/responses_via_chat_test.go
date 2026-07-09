@@ -125,7 +125,6 @@ func marshalChatStreamChunk(t *testing.T, chunk dto.ChatCompletionsStreamRespons
 }
 
 func TestResponsesViaChatNonStream(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
 
 	chatResp := dto.OpenAITextResponse{
@@ -194,8 +193,235 @@ func TestResponsesViaChatNonStream(t *testing.T) {
 	require.Equal(t, "/v1/responses", info.RequestURLPath)
 }
 
+func TestResponsesViaChatRestoresSyntheticCompactionInput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	scope := service.SyntheticCompactStateScope{UserID: 10, TokenID: 20, Group: "default"}
+	compactResp, _, err := service.BuildSyntheticCompactResponse(nil, scope, "gpt-5.5", dto.OpenAIResponsesResponse{
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.5",
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "output_text", Text: "Stored post-compact handoff summary."},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	var compactOutput []map[string]string
+	require.NoError(t, common.Unmarshal(compactResp.Output, &compactOutput))
+	require.Len(t, compactOutput, 1)
+	marker := compactOutput[0]["encrypted_content"]
+	require.NotEmpty(t, marker)
+
+	chatResp := dto.OpenAITextResponse{
+		Id:      "chatcmpl_synthetic_compact",
+		Object:  "chat.completion",
+		Created: int64(1710000001),
+		Model:   "gpt-5.5",
+		Choices: []dto.OpenAITextResponseChoice{
+			{
+				Index: 0,
+				Message: dto.Message{
+					Role:    "assistant",
+					Content: "continued",
+				},
+				FinishReason: "stop",
+			},
+		},
+		Usage: dto.Usage{PromptTokens: 11, CompletionTokens: 2, TotalTokens: 13},
+	}
+	chatRespBytes, err := common.Marshal(chatResp)
+	require.NoError(t, err)
+
+	adaptor := &mockResponsesViaChatAdaptor{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(chatRespBytes)),
+		},
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte("{}")))
+
+	req := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: marshalRawJSON(t, []map[string]any{
+			{
+				"type":              "compaction",
+				"encrypted_content": marker,
+			},
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "continue after compact"},
+				},
+			},
+		}),
+	}
+	info := newResponsesViaChatInfo()
+	info.UserId = scope.UserID
+	info.TokenId = scope.TokenID
+	info.UsingGroup = scope.Group
+	info.OriginModelName = "gpt-5.5"
+	info.ChannelId = 168
+
+	usage, newAPIErr := responsesViaChat(c, info, adaptor, req, service.ResponsesChatCompatibilityOptions{})
+	require.Nil(t, newAPIErr)
+	require.NotNil(t, usage)
+	require.Equal(t, 13, usage.TotalTokens)
+
+	require.NotNil(t, adaptor.convertedReq)
+	require.Len(t, adaptor.convertedReq.Messages, 2)
+	require.Equal(t, "developer", adaptor.convertedReq.Messages[0].Role)
+	require.Contains(t, adaptor.convertedReq.Messages[0].StringContent(), "Stored post-compact handoff summary.")
+	require.Equal(t, "user", adaptor.convertedReq.Messages[1].Role)
+	require.Equal(t, "continue after compact", adaptor.convertedReq.Messages[1].StringContent())
+	require.NotContains(t, string(adaptor.requestBody), marker)
+	require.NotContains(t, string(adaptor.requestBody), "encrypted_content")
+	require.Equal(t, "cleared_by_synthetic_restore", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
+}
+
+func TestResponsesViaChatContinuesMissingSyntheticStateWithVisibleInput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	chatResp := dto.OpenAITextResponse{
+		Id:      "chatcmpl_stale_synthetic",
+		Object:  "chat.completion",
+		Created: int64(1710000002),
+		Model:   "gpt-5.5",
+		Choices: []dto.OpenAITextResponseChoice{
+			{
+				Index: 0,
+				Message: dto.Message{
+					Role:    "assistant",
+					Content: "visible fallback ok",
+				},
+				FinishReason: "stop",
+			},
+		},
+		Usage: dto.Usage{
+			PromptTokens:     11,
+			CompletionTokens: 4,
+			TotalTokens:      15,
+		},
+	}
+	chatRespBytes, err := common.Marshal(chatResp)
+	require.NoError(t, err)
+	adaptor := &mockResponsesViaChatAdaptor{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(chatRespBytes)),
+		},
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte("{}")))
+	req := &dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_newapi_synthcmp_missing",
+		Input: marshalRawJSON(t, []map[string]any{
+			{
+				"type":              "compaction",
+				"encrypted_content": "newapi.synthetic.compact:resp_newapi_synthcmp_missing",
+			},
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "continue with visible context"},
+				},
+			},
+		}),
+	}
+	info := newResponsesViaChatInfo()
+
+	usage, newAPIErr := responsesViaChat(c, info, adaptor, req, service.ResponsesChatCompatibilityOptions{})
+
+	require.Nil(t, newAPIErr)
+	require.NotNil(t, usage)
+	require.Equal(t, 15, usage.TotalTokens)
+	require.NotNil(t, adaptor.convertedReq)
+	require.Len(t, adaptor.convertedReq.Messages, 1)
+	require.Equal(t, "user", adaptor.convertedReq.Messages[0].Role)
+	require.Equal(t, "continue with visible context", adaptor.convertedReq.Messages[0].StringContent())
+	require.NotContains(t, string(adaptor.requestBody), "newapi.synthetic.compact")
+	require.NotContains(t, string(adaptor.requestBody), "previous_response_id")
+	require.Equal(t, "stale_local_synthetic_state_visible_only", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted))
+}
+
+func TestResponsesViaChatRejectsToolSearchInputItems(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	chatResp := dto.OpenAITextResponse{
+		Id:      "chatcmpl_tool_search",
+		Object:  "chat.completion",
+		Created: int64(1710000003),
+		Model:   "gpt-5.5",
+		Choices: []dto.OpenAITextResponseChoice{
+			{
+				Index: 0,
+				Message: dto.Message{
+					Role:    "assistant",
+					Content: "tool search ignored",
+				},
+				FinishReason: "stop",
+			},
+		},
+		Usage: dto.Usage{PromptTokens: 9, CompletionTokens: 1, TotalTokens: 10},
+	}
+	chatRespBytes, err := common.Marshal(chatResp)
+	require.NoError(t, err)
+
+	adaptor := &mockResponsesViaChatAdaptor{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(chatRespBytes)),
+		},
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte("{}")))
+
+	req := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: marshalRawJSON(t, []map[string]any{
+			{
+				"type": "tool_search",
+			},
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "continue"},
+				},
+			},
+		}),
+	}
+	info := newResponsesViaChatInfo()
+
+	usage, newAPIErr := responsesViaChat(c, info, adaptor, req, service.ResponsesChatCompatibilityOptions{})
+
+	require.Nil(t, usage)
+	require.NotNil(t, newAPIErr)
+	require.Equal(t, http.StatusBadRequest, newAPIErr.StatusCode)
+	require.Contains(t, newAPIErr.Error(), `input item type "tool_search" is not supported`)
+	require.Nil(t, adaptor.convertedReq)
+	require.Empty(t, adaptor.requestBody)
+}
+
 func TestResponsesViaChatStream(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
 
 	oldTimeout := constant.StreamingTimeout

@@ -491,7 +491,7 @@ func TestConvertOpenAIResponsesRequestMarksMissingSyntheticState(t *testing.T) {
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5.5",
 		PreviousResponseID: "resp_newapi_synthcmp_missing",
-		Input:              json.RawMessage(`"continue"`),
+		Input:              json.RawMessage(`[]`),
 	}
 
 	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
@@ -499,6 +499,37 @@ func TestConvertOpenAIResponsesRequestMarksMissingSyntheticState(t *testing.T) {
 	require.Nil(t, converted)
 	require.ErrorIs(t, err, service.ErrSyntheticCompactStateNotFound)
 	require.Equal(t, "missing_local_synthetic_state", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
+}
+
+func TestConvertOpenAIResponsesRequestContinuesMissingSyntheticStateWithVisibleInput(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeNative,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model:              "gpt-5.5",
+		PreviousResponseID: "resp_newapi_synthcmp_missing",
+		Input: json.RawMessage(`[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue after stale local compact"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.Empty(t, convertedReq.PreviousResponseID)
+	require.Contains(t, string(convertedReq.Input), "continue after stale local compact")
+	require.Equal(t, "stale_local_synthetic_state_visible_only", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted))
 }
 
 func TestConvertOpenAIResponsesRequestRestoresSyntheticStateBeforeStrip(t *testing.T) {

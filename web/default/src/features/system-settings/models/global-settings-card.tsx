@@ -30,6 +30,12 @@ const thinkingBlacklistExample = JSON.stringify(
   2
 )
 
+const requestBodyLimitPolicyExample = JSON.stringify(
+  { enabled: true, ttl_hours: 0 },
+  null,
+  2
+)
+
 const jsonString = z.string().refine((value) => {
   const trimmed = value.trim()
   if (!trimmed) return true
@@ -46,6 +52,7 @@ const schema = z.object({
     pass_through_request_enabled: z.boolean(),
     thinking_model_blacklist: jsonString,
     chat_completions_to_responses_policy: jsonString,
+    request_body_limit_policy: jsonString,
   }),
   general_setting: z.object({
     ping_interval_enabled: z.boolean(),
@@ -60,6 +67,7 @@ type FlatGlobalModelSettings = {
   'global.pass_through_request_enabled': boolean
   'global.thinking_model_blacklist': string
   'global.chat_completions_to_responses_policy': string
+  'global.request_body_limit_policy': string
   'general_setting.ping_interval_enabled': boolean
   'general_setting.ping_interval_seconds': number
 }
@@ -75,6 +83,10 @@ const flattenGlobalValues = (
   ),
   'global.chat_completions_to_responses_policy': normalizeJsonText(
     values.global.chat_completions_to_responses_policy,
+    '{}'
+  ),
+  'global.request_body_limit_policy': normalizeJsonText(
+    values.global.request_body_limit_policy,
     '{}'
   ),
   'general_setting.ping_interval_enabled':
@@ -117,6 +129,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
     field:
       | 'global.thinking_model_blacklist'
       | 'global.chat_completions_to_responses_policy'
+      | 'global.request_body_limit_policy'
   ) => {
     const raw = form.getValues(field)
     if (!raw || !raw.trim()) return
@@ -220,6 +233,61 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
               </FormItem>
             )}
           />
+
+          <Separator />
+
+          <div className='space-y-4'>
+            <div className='flex items-center gap-2'>
+              <h3 className='text-base font-semibold'>
+                {t('Request Body 413 Routing Guard')}
+              </h3>
+            </div>
+
+            <Alert>
+              <AlertTitle>{t('Routing guard')}</AlertTitle>
+              <AlertDescription>
+                {t(
+                  'When enabled, upstream 413 responses record the request body size on the selected channel. Later requests with a larger body skip that channel until the record expires.'
+                )}
+              </AlertDescription>
+            </Alert>
+
+            <FormField
+              control={form.control}
+              name='global.request_body_limit_policy'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Policy JSON')}</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      rows={4}
+                      placeholder={`${t('Example:')}\n${requestBodyLimitPolicyExample}`}
+                      {...field}
+                      onChange={(event) => field.onChange(event.target.value)}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Set enabled to true to record and enforce channel request body limits. ttl_hours=0 keeps records permanently.'
+                    )}
+                  </FormDescription>
+                  <div className='flex flex-wrap gap-2'>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() =>
+                        formatJsonField('global.request_body_limit_policy')
+                      }
+                    >
+                      {t('Format JSON')}
+                    </Button>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
 
           <Separator />
 

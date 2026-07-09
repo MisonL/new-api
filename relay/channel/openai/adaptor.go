@@ -733,12 +733,17 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		}
 	}
 	if syntheticContinuation {
-		convertedRequest, _, err := service.ApplySyntheticCompactState(relaycommon.GinRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+		convertedRequest, applied, visibleOnly, applyInfo, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(relaycommon.GinRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+		service.SetSyntheticCompactApplyInfo(c, applyInfo)
 		if err != nil {
 			setResponsesPreviousIDActionForError(c, err)
 			return nil, err
 		}
-		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_synthetic_restore")
+		if visibleOnly {
+			service.MarkResponsesCompactVisibleOnlyFallback(c, info, "stale_local_synthetic_state_visible_only")
+		} else if applied {
+			common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_synthetic_restore")
+		}
 		if stripCodexContext && !relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
 			return stripUnsupportedResponsesInputForRequest(info, convertedRequest, stripCodexContext)
 		}
@@ -774,7 +779,8 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		return request, nil
 	}
 	if relaycommon.ShouldHandleSyntheticOpenAICompatibleResponses(info) {
-		convertedRequest, _, err := service.ApplySyntheticCompactState(relaycommon.GinRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+		convertedRequest, _, applyInfo, err := service.ApplySyntheticCompactStateWithInfo(relaycommon.GinRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+		service.SetSyntheticCompactApplyInfo(c, applyInfo)
 		if err != nil {
 			setResponsesPreviousIDActionForError(c, err)
 		}
@@ -820,17 +826,16 @@ func syntheticCompactScopeFromRelayInfo(info *relaycommon.RelayInfo) service.Syn
 }
 
 func stripUnsupportedResponsesInputForRequest(info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest, stripEncryptedReasoning bool) (dto.OpenAIResponsesRequest, error) {
-	result, err := stripUnsupportedResponsesInput(request.Input, stripEncryptedReasoning)
+	if !stripEncryptedReasoning {
+		return request, nil
+	}
+	request, result, err := relaycommon.StripEncryptedReasoningFromResponsesRequest(request)
 	if err != nil {
 		return dto.OpenAIResponsesRequest{}, err
 	}
-	if result.removedCount() == 0 {
+	if result.RemovedCount() == 0 {
 		return request, nil
 	}
-	if result.remainingCount == 0 {
-		return dto.OpenAIResponsesRequest{}, errors.New("responses encrypted reasoning context is unsupported by this OpenAI-compatible channel and no other input items remain")
-	}
-	request.Input = result.input
 	channelID := 0
 	originModelName := ""
 	if info != nil {
@@ -843,86 +848,10 @@ func stripUnsupportedResponsesInputForRequest(info *relaycommon.RelayInfo, reque
 		"responses encrypted reasoning context removed for OpenAI-compatible channel: channel_id=%d model=%s encrypted_reasoning_items=%d remaining_items=%d",
 		channelID,
 		originModelName,
-		result.encryptedReasoningCount,
-		result.remainingCount,
+		result.EncryptedReasoningCount,
+		result.RemainingCount,
 	))
 	return request, nil
-}
-
-type responsesInputStripResult struct {
-	input                   json.RawMessage
-	encryptedReasoningCount int
-	remainingCount          int
-}
-
-func (r responsesInputStripResult) removedCount() int {
-	return r.encryptedReasoningCount
-}
-
-func stripUnsupportedResponsesInput(input json.RawMessage, stripEncryptedReasoning bool) (responsesInputStripResult, error) {
-	result := responsesInputStripResult{
-		input: input,
-	}
-	trimmedInput := bytes.TrimSpace(input)
-	if len(trimmedInput) == 0 || trimmedInput[0] != '[' {
-		return result, nil
-	}
-
-	var items []json.RawMessage
-	if err := common.Unmarshal(input, &items); err != nil {
-		return result, err
-	}
-
-	filtered := make([]json.RawMessage, 0, len(items))
-	for _, rawItem := range items {
-		var item map[string]json.RawMessage
-		if err := common.Unmarshal(rawItem, &item); err != nil {
-			filtered = append(filtered, rawItem)
-			continue
-		}
-		itemType := responsesItemType(item)
-		if stripEncryptedReasoning && itemType == "reasoning" && responsesItemHasEncryptedContent(item) {
-			result.encryptedReasoningCount++
-			continue
-		}
-		filtered = append(filtered, rawItem)
-	}
-	if result.removedCount() == 0 {
-		result.remainingCount = len(items)
-		return result, nil
-	}
-
-	raw, err := common.Marshal(filtered)
-	if err != nil {
-		return result, err
-	}
-	result.input = json.RawMessage(raw)
-	result.remainingCount = len(filtered)
-	return result, nil
-}
-
-func responsesItemType(item map[string]json.RawMessage) string {
-	rawType := item["type"]
-	if len(rawType) == 0 {
-		return ""
-	}
-	var itemType string
-	if err := common.Unmarshal(rawType, &itemType); err != nil {
-		return ""
-	}
-	return itemType
-}
-
-func responsesItemHasEncryptedContent(item map[string]json.RawMessage) bool {
-	raw := bytes.TrimSpace(item["encrypted_content"])
-	if len(raw) == 0 || string(raw) == "null" {
-		return false
-	}
-	var encryptedContent string
-	if err := common.Unmarshal(raw, &encryptedContent); err == nil {
-		return encryptedContent != ""
-	}
-	return true
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
@@ -961,7 +890,7 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		if relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
 			usage, err = OaiSyntheticResponsesCompactionHandler(c, info, resp)
 		} else {
-			usage, err = OaiResponsesCompactionHandler(c, resp)
+			usage, err = OaiResponsesCompactionHandler(c, info, resp)
 		}
 	default:
 		if info.IsStream {

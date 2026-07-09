@@ -91,8 +91,11 @@ export interface LogOtherData {
     // Manage audit fields (type=3, admin only)
     admin_username?: string
     admin_id?: number | string
+    responses_channel_capability_observed?: ResponsesCapabilityObservation
+    responses_channel_capability_probe?: ResponsesCapabilityObservation
   }
   request_path?: string
+  upstream_request_path?: string
   upstream_request_id?: string
   request_conversion?: string[]
   ws?: boolean
@@ -120,6 +123,9 @@ export interface LogOtherData {
   audio_ratio?: number
   audio_completion_ratio?: number
   frt?: number
+  upstream_header_ms?: number
+  upstream_ttfb_ms?: number
+  upstream_total_ms?: number
   // Tiered (expression-based) billing fields, set by backend when
   // billing_mode === 'tiered_expr'. expr_b64 is the base64-encoded billing
   // expression and matched_tier is the label of the tier that fired.
@@ -141,6 +147,7 @@ export interface LogOtherData {
   audio_input_price?: number
   image_generation_call?: boolean
   image_generation_call_price?: number
+  image_generation_call_total_price?: number
   is_system_prompt_overwritten?: boolean
   po?: string[]
   billing_source?: string
@@ -156,6 +163,24 @@ export interface LogOtherData {
   responses_compact_auto_fallback_retry_until?: number
   responses_compact_auto_fallback_retry_interval_hours?: number
   responses_compact_final_upstream_path?: string
+  channel_capability_snapshot?: ChannelCapabilitySnapshot
+  responses_compact_fallback_reason?: string
+  responses_compact_visible_only_fallback?: boolean
+  responses_encrypted_context_retry?: boolean
+  request_header_policy?: RequestHeaderPolicyInfo
+  request_header_policy_mode?: string
+  header_policy_mode?: string
+  header_profile_id?: string
+  header_profile_mode?: string
+  header_profile_applied?: boolean
+  ua_strategy_mode?: string
+  ua_strategy_scope?: string
+  selected_user_agent?: string
+  applied_user_agent?: string
+  override_static_user_agent?: boolean
+  user_agent_applied?: boolean
+  applied_header_keys?: string[]
+  applied_headers?: Array<{ key?: string; value?: string }>
   group?: string
   stream_status?: {
     status?: string
@@ -184,6 +209,42 @@ export interface LogOtherData {
   subscription_consumed?: number
   subscription_remain?: number
   subscription_total?: number
+}
+
+export interface RequestHeaderPolicyInfo {
+  mode?: string
+  applied_header_keys?: string[]
+  applied_headers?: Array<{ key?: string; value?: string }>
+  header_profile_id?: string
+  header_profile_mode?: string
+  header_profile_applied?: boolean
+  ua_strategy_mode?: string
+  ua_strategy_scope?: string
+  selected_user_agent?: string
+  applied_user_agent?: string
+  override_static_user_agent?: boolean
+  user_agent_applied?: boolean
+}
+
+export interface ChannelCapabilitySnapshot {
+  source?: string
+  profile?: string
+  compact_mode_setting?: string
+  compact_mode_effective?: string
+  supports_responses?: boolean
+  supports_responses_compact?: boolean
+  supports_chat?: boolean
+  supports_rest_previous_response_id?: boolean
+  supports_compaction_item_passthrough?: boolean
+  supports_namespace_tools?: boolean
+  strips_responses_encrypted_reasoning?: boolean
+}
+
+export interface ResponsesCapabilityObservation {
+  observed_at?: number
+  status_code?: number
+  error_code?: string
+  reason?: string
 }
 
 /**

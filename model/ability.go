@@ -119,9 +119,17 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 }
 
 func getChannelExcluding(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error) {
+	return getChannelExcludingInternal(group, model, retry, excluded, false)
+}
+
+func getChannelExcludingAfterExclusion(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error) {
+	return getChannelExcludingInternal(group, model, retry, excluded, true)
+}
+
+func getChannelExcludingInternal(group string, model string, retry int, excluded map[int]struct{}, deferPriorityFiltering bool) (*Channel, error) {
 	routeCandidates := getGroupModelRouteCandidateMeta(model)
 	if shouldPoolCompactRouteCandidates(routeCandidates) {
-		channel, found, err := getChannelByRouteModels(group, routeCandidates, retry, excluded)
+		channel, found, err := getChannelByRouteModels(group, routeCandidates, retry, excluded, deferPriorityFiltering)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +139,7 @@ func getChannelExcluding(group string, model string, retry int, excluded map[int
 		return nil, nil
 	}
 	for _, routeCandidate := range routeCandidates {
-		channel, found, err := getChannelByRouteModel(group, routeCandidate, retry, excluded)
+		channel, found, err := getChannelByRouteModel(group, routeCandidate, retry, excluded, deferPriorityFiltering)
 		if err != nil {
 			return nil, err
 		}
@@ -142,15 +150,16 @@ func getChannelExcluding(group string, model string, retry int, excluded map[int
 	return nil, nil
 }
 
-func getRouteCandidateAbilityQuery(group string, routeCandidate routeModelCandidate, retry int) (*gorm.DB, error) {
-	if routeCandidate.compactRequest {
+func getRouteCandidateAbilityQuery(group string, routeCandidate routeModelCandidate, retry int, deferPriorityFiltering bool) (*gorm.DB, error) {
+	ensureAbilityColumnsInitialized()
+	if routeCandidate.compactRequest || deferPriorityFiltering {
 		return DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, routeCandidate.model, true), nil
 	}
 	return getChannelQuery(group, routeCandidate.model, retry)
 }
 
-func getChannelByRouteModel(group string, routeCandidate routeModelCandidate, retry int, excluded map[int]struct{}) (*Channel, bool, error) {
-	channelQuery, err := getRouteCandidateAbilityQuery(group, routeCandidate, retry)
+func getChannelByRouteModel(group string, routeCandidate routeModelCandidate, retry int, excluded map[int]struct{}, deferPriorityFiltering bool) (*Channel, bool, error) {
+	channelQuery, err := getRouteCandidateAbilityQuery(group, routeCandidate, retry, deferPriorityFiltering)
 	if err != nil {
 		if errors.Is(err, errNoMatchingAbilities) {
 			return nil, false, nil
@@ -177,19 +186,19 @@ func getChannelByRouteModel(group string, routeCandidate routeModelCandidate, re
 	if len(channels) == 0 {
 		return nil, false, nil
 	}
-	channels, channelWeights = filterChannelsByRetryPriority(channels, channelWeights, retry, excluded)
+	channels, channelWeights = filterChannelsByRetryPriority(channels, channelWeights, retry, excluded, deferPriorityFiltering)
 	if len(channels) == 0 {
 		return nil, true, nil
 	}
 	return chooseWeightedChannel(channels, channelWeights), true, nil
 }
 
-func getChannelByRouteModels(group string, routeCandidates []routeModelCandidate, retry int, excluded map[int]struct{}) (*Channel, bool, error) {
+func getChannelByRouteModels(group string, routeCandidates []routeModelCandidate, retry int, excluded map[int]struct{}, deferPriorityFiltering bool) (*Channel, bool, error) {
 	channels := make([]*Channel, 0, len(routeCandidates))
 	channelWeights := make([]uint, 0, len(routeCandidates))
 	seen := make(map[int]struct{})
 	for _, routeCandidate := range routeCandidates {
-		channelQuery, err := getRouteCandidateAbilityQuery(group, routeCandidate, retry)
+		channelQuery, err := getRouteCandidateAbilityQuery(group, routeCandidate, retry, deferPriorityFiltering)
 		if err != nil {
 			if errors.Is(err, errNoMatchingAbilities) {
 				continue
@@ -216,7 +225,7 @@ func getChannelByRouteModels(group string, routeCandidates []routeModelCandidate
 	if len(channels) == 0 {
 		return nil, false, nil
 	}
-	channels, channelWeights = filterChannelsByRetryPriority(channels, channelWeights, retry, excluded)
+	channels, channelWeights = filterChannelsByRetryPriority(channels, channelWeights, retry, excluded, deferPriorityFiltering)
 	if len(channels) == 0 {
 		return nil, true, nil
 	}
@@ -224,17 +233,33 @@ func getChannelByRouteModels(group string, routeCandidates []routeModelCandidate
 }
 
 func loadRouteCandidateChannels(abilities []Ability, routeCandidate routeModelCandidate, useChannelWeights bool) ([]*Channel, []uint, error) {
+	if len(abilities) == 0 {
+		return nil, nil, nil
+	}
+	channelIds := make([]int, 0, len(abilities))
+	for _, ability := range abilities {
+		channelIds = append(channelIds, ability.ChannelId)
+	}
+	var dbChannels []Channel
+	if err := DB.Where("id IN ?", channelIds).Find(&dbChannels).Error; err != nil {
+		return nil, nil, err
+	}
+	channelByID := make(map[int]*Channel, len(dbChannels))
+	for i := range dbChannels {
+		channelByID[dbChannels[i].Id] = &dbChannels[i]
+	}
+
 	channels := make([]*Channel, 0, len(abilities))
 	weights := make([]uint, 0, len(abilities))
 	for _, ability := range abilities {
-		channel := Channel{}
-		if err := DB.First(&channel, "id = ?", ability.ChannelId).Error; err != nil {
-			return nil, nil, err
+		channel, ok := channelByID[ability.ChannelId]
+		if !ok {
+			return nil, nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", ability.ChannelId)
 		}
-		if !channelSupportsCompactRouteCandidate(&channel, routeCandidate) {
+		if !channelSupportsCompactRouteCandidate(channel, routeCandidate) {
 			continue
 		}
-		channels = append(channels, &channel)
+		channels = append(channels, channel)
 		weight := ability.Weight
 		if useChannelWeights {
 			weight = uint(channel.GetWeight())
@@ -244,7 +269,20 @@ func loadRouteCandidateChannels(abilities []Ability, routeCandidate routeModelCa
 	return channels, weights, nil
 }
 
-func filterChannelsByRetryPriority(channels []*Channel, weights []uint, retry int, excluded map[int]struct{}) ([]*Channel, []uint) {
+func filterChannelsByRetryPriority(channels []*Channel, weights []uint, retry int, excluded map[int]struct{}, excludeBeforePriority bool) ([]*Channel, []uint) {
+	if excludeBeforePriority && len(excluded) > 0 {
+		filteredChannels := make([]*Channel, 0, len(channels))
+		filteredWeights := make([]uint, 0, len(weights))
+		for i, channel := range channels {
+			if _, skip := excluded[channel.Id]; skip {
+				continue
+			}
+			filteredChannels = append(filteredChannels, channel)
+			filteredWeights = append(filteredWeights, weights[i])
+		}
+		channels = filteredChannels
+		weights = filteredWeights
+	}
 	priorities := make([]int64, 0, len(channels))
 	seen := make(map[int64]struct{}, len(channels))
 	for _, channel := range channels {
@@ -271,8 +309,10 @@ func filterChannelsByRetryPriority(channels []*Channel, weights []uint, retry in
 		if channel.GetPriority() != targetPriority {
 			continue
 		}
-		if _, skip := excluded[channel.Id]; skip {
-			continue
+		if !excludeBeforePriority {
+			if _, skip := excluded[channel.Id]; skip {
+				continue
+			}
 		}
 		filteredChannels = append(filteredChannels, channel)
 		filteredWeights = append(filteredWeights, weights[i])
@@ -281,14 +321,21 @@ func filterChannelsByRetryPriority(channels []*Channel, weights []uint, retry in
 }
 
 func chooseWeightedChannel(channels []*Channel, weights []uint) *Channel {
+	return chooseWeightedChannelWithRandom(channels, weights, common.GetRandomInt)
+}
+
+func chooseWeightedChannelWithRandom(channels []*Channel, weights []uint, randomInt func(int) int) *Channel {
 	weightSum := uint(0)
 	for _, weight := range weights {
 		weightSum += weight + 10
 	}
-	weight := common.GetRandomInt(int(weightSum))
+	return chooseWeightedChannelAt(channels, weights, randomInt(int(weightSum)))
+}
+
+func chooseWeightedChannelAt(channels []*Channel, weights []uint, weight int) *Channel {
 	for i, channel := range channels {
 		weight -= int(weights[i]) + 10
-		if weight <= 0 {
+		if weight < 0 {
 			return channel
 		}
 	}

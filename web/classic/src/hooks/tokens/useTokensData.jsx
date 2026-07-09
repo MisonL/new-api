@@ -26,6 +26,7 @@ import {
   showError,
   showSuccess,
   encodeToBase64,
+  getDisabledRowProps,
 } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
@@ -355,11 +356,7 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
   // Handle row styling
   const handleRow = (record, index) => {
     if (record.status !== 1) {
-      return {
-        style: {
-          background: 'var(--semi-color-disabled-border)',
-        },
-      };
+      return getDisabledRowProps();
     } else {
       return {};
     }

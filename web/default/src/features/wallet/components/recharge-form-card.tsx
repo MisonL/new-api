@@ -95,7 +95,9 @@ export function RechargeFormCard({
   const [localAmount, setLocalAmount] = useState(topupAmount.toString())
 
   useEffect(() => {
-    setLocalAmount(topupAmount.toString())
+    queueMicrotask(() => {
+      setLocalAmount(topupAmount.toString())
+    })
   }, [topupAmount])
 
   const handleAmountChange = (value: string) => {

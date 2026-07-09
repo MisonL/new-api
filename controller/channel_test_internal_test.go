@@ -36,6 +36,15 @@ func TestParseChannelTestOptionsRuntimeOffDisablesSubOptions(t *testing.T) {
 	require.False(t, options.UseModelMapping)
 }
 
+func TestOpenAICompatibleUnlimitedBalanceDetection(t *testing.T) {
+	require.False(t, isOpenAICompatibleUnlimitedBalance(OpenAISubscriptionResponse{
+		HardLimitUSD: openAICompatibleUnlimitedBalanceThreshold - 1,
+	}))
+	require.True(t, isOpenAICompatibleUnlimitedBalance(OpenAISubscriptionResponse{
+		HardLimitUSD: openAICompatibleUnlimitedBalanceThreshold,
+	}))
+}
+
 func TestParseChannelTestOptionsParsesProtocolAndRequestParams(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -122,11 +131,80 @@ func TestApplyChannelTestProtocolStrategyConvertsResponsesCompactToChat(t *testi
 	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponsesCompaction, types.RelayFormatOpenAI}, info.RequestConversionChain)
 }
 
+func TestResponsesCompactionRequestToResponsesRequestPreservesSub2APIFields(t *testing.T) {
+	req := &dto.OpenAIResponsesCompactionRequest{
+		Model:              "gpt-5.5-openai-compact",
+		Input:              json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]`),
+		Instructions:       json.RawMessage(`"keep context"`),
+		Tools:              json.RawMessage(`[{"type":"namespace","name":"codex_app","tools":[]}]`),
+		ParallelToolCalls:  json.RawMessage(`false`),
+		Reasoning:          &dto.Reasoning{Effort: "high"},
+		ServiceTier:        "default",
+		Text:               json.RawMessage(`{"format":{"type":"text"}}`),
+		PromptCacheKey:     json.RawMessage(`"cache-key"`),
+		PreviousResponseID: "resp_previous",
+	}
+
+	responsesReq := req.ToResponsesRequest()
+
+	require.NotNil(t, responsesReq)
+	require.Equal(t, req.Model, responsesReq.Model)
+	require.JSONEq(t, string(req.Input), string(responsesReq.Input))
+	require.JSONEq(t, string(req.Instructions), string(responsesReq.Instructions))
+	require.JSONEq(t, string(req.Tools), string(responsesReq.Tools))
+	require.JSONEq(t, string(req.ParallelToolCalls), string(responsesReq.ParallelToolCalls))
+	require.Equal(t, req.Reasoning, responsesReq.Reasoning)
+	require.Equal(t, req.ServiceTier, responsesReq.ServiceTier)
+	require.JSONEq(t, string(req.Text), string(responsesReq.Text))
+	require.JSONEq(t, string(req.PromptCacheKey), string(responsesReq.PromptCacheKey))
+	require.Equal(t, req.PreviousResponseID, responsesReq.PreviousResponseID)
+}
+
+func TestResponsesCompactionRequestToResponsesRequestKeepsNilOptionalFields(t *testing.T) {
+	req := &dto.OpenAIResponsesCompactionRequest{
+		Model: "gpt-5.5-openai-compact",
+		Input: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]`),
+	}
+
+	responsesReq := req.ToResponsesRequest()
+
+	require.NotNil(t, responsesReq)
+	require.Equal(t, req.Model, responsesReq.Model)
+	require.JSONEq(t, string(req.Input), string(responsesReq.Input))
+	require.Nil(t, responsesReq.Reasoning)
+	require.Empty(t, responsesReq.PreviousResponseID)
+	require.Empty(t, responsesReq.Text)
+	require.Empty(t, responsesReq.Tools)
+}
+
+func TestResponsesCompactionRequestToResponsesRequestPreservesRawNullFields(t *testing.T) {
+	req := &dto.OpenAIResponsesCompactionRequest{
+		Model:             "gpt-5.5-openai-compact",
+		Input:             json.RawMessage(`null`),
+		Instructions:      json.RawMessage(`null`),
+		Tools:             json.RawMessage(`null`),
+		ParallelToolCalls: json.RawMessage(`null`),
+		Text:              json.RawMessage(`null`),
+		PromptCacheKey:    json.RawMessage(`null`),
+	}
+
+	responsesReq := req.ToResponsesRequest()
+
+	require.NotNil(t, responsesReq)
+	require.JSONEq(t, "null", string(responsesReq.Input))
+	require.JSONEq(t, "null", string(responsesReq.Instructions))
+	require.JSONEq(t, "null", string(responsesReq.Tools))
+	require.JSONEq(t, "null", string(responsesReq.ParallelToolCalls))
+	require.JSONEq(t, "null", string(responsesReq.Text))
+	require.JSONEq(t, "null", string(responsesReq.PromptCacheKey))
+}
+
 func TestApplyChannelTestProtocolStrategyUsesGlobalResponsesToChatRuleByDefault(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	withGlobalProtocolPolicyForTest(t, model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "channel-146-all-models",
@@ -546,6 +624,72 @@ func TestFinalizeChannelTestRuntimeSummaryMarksRuntimeHeaderParamOverrideApplied
 	require.True(t, summary.ParamOverrideApplied)
 }
 
+func TestFinalizeChannelTestRuntimeSummaryIncludesCompactCapabilitySnapshot(t *testing.T) {
+	summary := &channelTestRuntimeSummary{}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeNative,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+		},
+	}
+
+	finalizeChannelTestRuntimeSummary(summary, nil, info)
+
+	require.NotNil(t, summary.ChannelCapability)
+	require.Equal(t, "sub2api_http", summary.ChannelCapability["profile"])
+	require.Equal(t, "native", summary.ChannelCapability["compact_mode_effective"])
+	require.Equal(t, false, summary.ChannelCapability["supports_responses_compact"])
+	require.Equal(t, false, summary.ChannelCapability["supports_rest_previous_response_id"])
+	require.Equal(t, false, summary.ChannelCapability["supports_compaction_item_passthrough"])
+	require.Equal(t, true, summary.ChannelCapability["strips_responses_encrypted_reasoning"])
+}
+
+func TestFinalizeChannelTestRuntimeSummaryHandlesNilInfo(t *testing.T) {
+	summary := &channelTestRuntimeSummary{FinalRequestPath: "/v1/responses"}
+
+	finalizeChannelTestRuntimeSummary(summary, nil, nil)
+
+	require.Equal(t, "/v1/responses", summary.FinalRequestPath)
+	require.Nil(t, summary.ChannelCapability)
+}
+
+func TestFinalizeChannelTestRuntimeSummaryHandlesNilChannelMeta(t *testing.T) {
+	summary := &channelTestRuntimeSummary{}
+	info := &relaycommon.RelayInfo{
+		RequestURLPath: "/v1/chat/completions",
+	}
+
+	finalizeChannelTestRuntimeSummary(summary, nil, info)
+
+	require.Equal(t, "/v1/chat/completions", summary.FinalRequestPath)
+	require.Nil(t, summary.ChannelCapability)
+}
+
+func TestFinalizeChannelTestRuntimeSummaryShowsProxyCompactAsSyntheticOnly(t *testing.T) {
+	summary := &channelTestRuntimeSummary{}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+			},
+		},
+	}
+
+	finalizeChannelTestRuntimeSummary(summary, nil, info)
+
+	require.NotNil(t, summary.ChannelCapability)
+	require.Equal(t, "generic_proxy", summary.ChannelCapability["profile"])
+	require.Equal(t, "synthetic_summary", summary.ChannelCapability["compact_mode_effective"])
+	require.Equal(t, false, summary.ChannelCapability["supports_responses_compact"])
+	require.Equal(t, false, summary.ChannelCapability["supports_rest_previous_response_id"])
+	require.Equal(t, false, summary.ChannelCapability["supports_compaction_item_passthrough"])
+}
+
 func TestSettleTestQuotaUsesTieredBilling(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
@@ -631,4 +775,49 @@ func TestFilterActiveGroupsKeepsConfiguredGroupsAndAuto(t *testing.T) {
 		{Group: "default", RequestCount: 1},
 		{Group: "auto", RequestCount: 3},
 	}, filtered)
+}
+
+func TestAutomaticChannelBalanceUpdateTaskRunsOnlyOnMasterNode(t *testing.T) {
+	originalIsMasterNode := common.IsMasterNode
+	t.Cleanup(func() {
+		common.IsMasterNode = originalIsMasterNode
+	})
+
+	common.IsMasterNode = false
+	require.False(t, shouldRunAutomaticChannelBalanceUpdateTask())
+
+	common.IsMasterNode = true
+	require.True(t, shouldRunAutomaticChannelBalanceUpdateTask())
+}
+
+func TestValidateChannelOtherSettingsClearsZeroRequestBodyLimit(t *testing.T) {
+	channel := &model.Channel{
+		Type:          constant.ChannelTypeOpenAI,
+		Key:           "test-key",
+		Name:          "request-body-limit-clear",
+		Models:        "gpt-5",
+		Group:         "default",
+		OtherSettings: `{"request_body_limit":{"max_bytes":0,"observed_at":1781660000,"source":"manual","reason":"clear"}}`,
+	}
+
+	require.NoError(t, validateChannel(channel, false))
+
+	settings := channel.GetOtherSettings()
+	require.Nil(t, settings.RequestBodyLimit)
+}
+
+func TestValidateChannelOtherSettingsRejectsNegativeRequestBodyLimit(t *testing.T) {
+	channel := &model.Channel{
+		Type:          constant.ChannelTypeOpenAI,
+		Key:           "test-key",
+		Name:          "request-body-limit-negative",
+		Models:        "gpt-5",
+		Group:         "default",
+		OtherSettings: `{"request_body_limit":{"max_bytes":-1}}`,
+	}
+
+	err := validateChannel(channel, false)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "request_body_limit.max_bytes")
 }

@@ -2,7 +2,9 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -181,6 +183,15 @@ func GetAllChannels(c *gin.Context) {
 		"type_counts": typeCounts,
 	})
 	return
+}
+
+func GetTopChannelPriorities(c *gin.Context) {
+	channels, err := model.GetTopChannelPriorities()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, channels)
 }
 
 func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, error) {
@@ -574,6 +585,9 @@ func validateChannelOtherSettings(channel *model.Channel, passedHeaders map[stri
 		return err
 	}
 	settings.UserAgentStrategy = strategy
+	if err := normalizeRequestBodyLimitForChannelSettings(&settings); err != nil {
+		return err
+	}
 	normalizeResponsesCompactSettingsForChannel(channel.Type, &settings)
 	if channel.Type == constant.ChannelTypeOpenAI {
 		if err := validateResponsesCompactAutoFallbackRetryInterval(&settings); err != nil {
@@ -587,6 +601,22 @@ func validateChannelOtherSettings(channel *model.Channel, passedHeaders map[stri
 	}
 	channel.OtherSettings = string(raw)
 
+	return nil
+}
+
+func normalizeRequestBodyLimitForChannelSettings(settings *dto.ChannelOtherSettings) error {
+	if settings == nil || settings.RequestBodyLimit == nil {
+		return nil
+	}
+	if settings.RequestBodyLimit.MaxBytes < 0 {
+		return fmt.Errorf("request_body_limit.max_bytes 不能小于 0")
+	}
+	if settings.RequestBodyLimit.MaxBytes == 0 {
+		settings.RequestBodyLimit = nil
+		return nil
+	}
+	settings.RequestBodyLimit.Source = strings.TrimSpace(settings.RequestBodyLimit.Source)
+	settings.RequestBodyLimit.Reason = strings.TrimSpace(settings.RequestBodyLimit.Reason)
 	return nil
 }
 
@@ -1033,11 +1063,190 @@ type PatchChannel struct {
 	KeyMode      *string `json:"key_mode"` // 多key模式下密钥覆盖或者追加
 }
 
+type ChannelPriorityUpdate struct {
+	Id       int    `json:"id"`
+	Priority *int64 `json:"priority"`
+}
+
+const maxUpdateChannelBodyBytes = int64(16 << 20)
+
+func isOnlyChannelUpdate(fields map[string]common.RawMessage, names ...string) bool {
+	if len(fields) != len(names)+1 {
+		return false
+	}
+	_, hasID := fields["id"]
+	if !hasID {
+		return false
+	}
+	for _, name := range names {
+		if _, ok := fields[name]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeChannelInfoUpdate(original model.ChannelInfo, update model.ChannelInfo, raw common.RawMessage) (model.ChannelInfo, error) {
+	var fields map[string]common.RawMessage
+	if err := common.Unmarshal(raw, &fields); err != nil {
+		return original, err
+	}
+	merged := original
+	if _, ok := fields["is_multi_key"]; ok {
+		merged.IsMultiKey = update.IsMultiKey
+	}
+	if _, ok := fields["multi_key_size"]; ok {
+		merged.MultiKeySize = update.MultiKeySize
+	}
+	if _, ok := fields["multi_key_status_list"]; ok {
+		merged.MultiKeyStatusList = update.MultiKeyStatusList
+	}
+	if _, ok := fields["multi_key_disabled_reason"]; ok {
+		merged.MultiKeyDisabledReason = update.MultiKeyDisabledReason
+	}
+	if _, ok := fields["multi_key_disabled_time"]; ok {
+		merged.MultiKeyDisabledTime = update.MultiKeyDisabledTime
+	}
+	if _, ok := fields["multi_key_polling_index"]; ok {
+		merged.MultiKeyPollingIndex = update.MultiKeyPollingIndex
+	}
+	if _, ok := fields["multi_key_mode"]; ok {
+		merged.MultiKeyMode = update.MultiKeyMode
+	}
+	return merged, nil
+}
+
+func updateChannelScalarFields(channel PatchChannel, fields map[string]common.RawMessage) (bool, error) {
+	switch {
+	case isOnlyChannelUpdate(fields, "priority"):
+		return true, model.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.Channel{}).
+				Where("id = ?", channel.Id).
+				Select("priority").
+				Update("priority", channel.Priority).Error; err != nil {
+				return err
+			}
+			return tx.Model(&model.Ability{}).
+				Where("channel_id = ?", channel.Id).
+				Select("priority").
+				Update("priority", channel.Priority).Error
+		})
+	case isOnlyChannelUpdate(fields, "weight"):
+		return true, model.DB.Transaction(func(tx *gorm.DB) error {
+			weight := uint(0)
+			if channel.Weight != nil {
+				weight = *channel.Weight
+			}
+			if err := tx.Model(&model.Channel{}).
+				Where("id = ?", channel.Id).
+				Select("weight").
+				Update("weight", weight).Error; err != nil {
+				return err
+			}
+			return tx.Model(&model.Ability{}).
+				Where("channel_id = ?", channel.Id).
+				Select("weight").
+				Update("weight", weight).Error
+		})
+	case isOnlyChannelUpdate(fields, "channel_info"):
+		origin, err := model.GetChannelById(channel.Id, true)
+		if err != nil {
+			return true, err
+		}
+		merged, err := mergeChannelInfoUpdate(origin.ChannelInfo, channel.ChannelInfo, fields["channel_info"])
+		if err != nil {
+			return true, err
+		}
+		return true, model.DB.Model(&model.Channel{}).
+			Where("id = ?", channel.Id).
+			Select("channel_info").
+			Update("channel_info", merged).Error
+	default:
+		return false, nil
+	}
+}
+
 func UpdateChannel(c *gin.Context) {
-	channel := PatchChannel{}
-	err := c.ShouldBindJSON(&channel)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdateChannelBodyBytes)
+	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "请求体过大",
+			})
+			return
+		}
 		common.ApiError(c, err)
+		return
+	}
+	var fields map[string]common.RawMessage
+	if err := common.Unmarshal(body, &fields); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	channel := PatchChannel{}
+	if err := common.Unmarshal(body, &channel); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if isOnlyChannelUpdate(fields, "status") {
+		originChannel, err := model.GetChannelById(channel.Id, true)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		if originChannel.Status != channel.Status {
+			if ok := model.UpdateChannelStatus(channel.Id, "", channel.Status, ""); !ok {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "更新渠道状态失败",
+				})
+				return
+			}
+		}
+		updatedChannel, err := model.GetChannelById(channel.Id, false)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		service.ResetProxyClientCache()
+		clearChannelInfo(updatedChannel)
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    updatedChannel,
+		})
+		return
+	}
+	if handled, err := updateChannelScalarFields(channel, fields); handled {
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		model.InitChannelCache()
+		service.ResetProxyClientCache()
+		updatedChannel, err := model.GetChannelById(channel.Id, false)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		clearChannelInfo(updatedChannel)
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    updatedChannel,
+		})
 		return
 	}
 	rawOtherSettings := channel.OtherSettings
@@ -1165,6 +1374,95 @@ func UpdateChannel(c *gin.Context) {
 		"data":    channel,
 	})
 	return
+}
+
+func UpdateChannelPriorities(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdateChannelBodyBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "请求体过大",
+			})
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+
+	var updates []ChannelPriorityUpdate
+	if err := common.Unmarshal(body, &updates); err != nil || len(updates) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "参数错误",
+		})
+		return
+	}
+	seenIDs := make(map[int]struct{}, len(updates))
+	for _, update := range updates {
+		if update.Id <= 0 || update.Priority == nil || *update.Priority < 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "参数错误",
+			})
+			return
+		}
+		if _, exists := seenIDs[update.Id]; exists {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "参数错误",
+			})
+			return
+		}
+		seenIDs[update.Id] = struct{}{}
+	}
+
+	changed := false
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		for _, update := range updates {
+			var channel model.Channel
+			if err := tx.Select("id", "priority").Where("id = ?", update.Id).First(&channel).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return fmt.Errorf("渠道不存在: %d", update.Id)
+				}
+				return err
+			}
+			if channel.GetPriority() == *update.Priority {
+				continue
+			}
+			changed = true
+			result := tx.Model(&model.Channel{}).
+				Where("id = ?", update.Id).
+				Select("priority").
+				Update("priority", *update.Priority)
+			if result.Error != nil {
+				return result.Error
+			}
+			if err := tx.Model(&model.Ability{}).
+				Where("channel_id = ?", update.Id).
+				Select("priority").
+				Update("priority", *update.Priority).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	if changed {
+		model.InitChannelCache()
+		service.ResetProxyClientCache()
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    len(updates),
+	})
 }
 
 func resetResponsesCompactAutoFallbackOnModeChange(channel *model.Channel, originChannel *model.Channel, fallbackMetadataExplicitlySet bool) {

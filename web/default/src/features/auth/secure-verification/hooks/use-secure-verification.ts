@@ -51,7 +51,7 @@ export function useSecureVerification(
   }, [])
 
   useEffect(() => {
-    fetchVerificationMethods()
+    void Promise.resolve().then(() => fetchVerificationMethods())
   }, [fetchVerificationMethods])
 
   const reset = useCallback(() => {

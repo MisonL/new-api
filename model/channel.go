@@ -68,10 +68,60 @@ type ChannelInfo struct {
 	MultiKeyMode           constant.MultiKeyMode `json:"multi_key_mode"`
 }
 
+func (channel *Channel) CloneForCache() *Channel {
+	if channel == nil {
+		return nil
+	}
+	cloned := *channel
+	cloned.Keys = append([]string(nil), channel.Keys...)
+	cloned.ChannelInfo.MultiKeyStatusList = cloneIntMap(channel.ChannelInfo.MultiKeyStatusList)
+	cloned.ChannelInfo.MultiKeyDisabledReason = cloneIntStringMap(channel.ChannelInfo.MultiKeyDisabledReason)
+	cloned.ChannelInfo.MultiKeyDisabledTime = cloneInt64Map(channel.ChannelInfo.MultiKeyDisabledTime)
+	return &cloned
+}
+
+func cloneIntMap(source map[int]int) map[int]int {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[int]int, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneIntStringMap(source map[int]string) map[int]string {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[int]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneInt64Map(source map[int]int64) map[int]int64 {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[int]int64, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
 type ChannelSortOptions struct {
 	SortBy    string
 	SortOrder string
 	IDSort    bool
+}
+
+type ChannelPriority struct {
+	Id       int    `json:"id"`
+	Priority *int64 `json:"priority"`
 }
 
 var channelSortColumns = map[string]string{
@@ -100,12 +150,24 @@ func NewChannelSortOptions(sortBy string, sortOrder string, idSort bool) Channel
 	}
 }
 
+func channelPrioritySortClause(sortOrder string) string {
+	sortDirection := "DESC"
+	if strings.EqualFold(strings.TrimSpace(sortOrder), "asc") {
+		sortDirection = "ASC"
+	}
+	return "COALESCE(priority, 0) " + sortDirection + ", id DESC"
+}
+
 func (options ChannelSortOptions) Apply(query *gorm.DB) *gorm.DB {
 	if columnName, ok := channelSortColumns[options.SortBy]; ok {
-		return query.Order(clause.OrderByColumn{
+		if columnName == "priority" {
+			return query.Order(channelPrioritySortClause(options.SortOrder))
+		}
+		query = query.Order(clause.OrderByColumn{
 			Column: clause.Column{Name: columnName},
 			Desc:   options.SortOrder != "asc",
 		})
+		return query
 	}
 	if options.IDSort {
 		return query.Order(clause.OrderByColumn{
@@ -113,10 +175,7 @@ func (options ChannelSortOptions) Apply(query *gorm.DB) *gorm.DB {
 			Desc:   true,
 		})
 	}
-	return query.Order(clause.OrderByColumn{
-		Column: clause.Column{Name: "priority"},
-		Desc:   true,
-	})
+	return query.Order(channelPrioritySortClause("desc"))
 }
 
 func resolveChannelSortOptions(idSort bool, sortOptions []ChannelSortOptions) ChannelSortOptions {
@@ -160,7 +219,11 @@ func ApplyChannelGroupFilter(query *gorm.DB, group string) *gorm.DB {
 
 // Value implements driver.Valuer interface
 func (c ChannelInfo) Value() (driver.Value, error) {
-	return common.Marshal(&c)
+	bytes, err := common.Marshal(&c)
+	if err != nil {
+		return nil, err
+	}
+	return string(bytes), nil
 }
 
 // Scan implements sql.Scanner interface
@@ -273,7 +336,7 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 			if !common.MemoryCacheEnabled {
 				_ = channel.SaveChannelInfo()
 			} else {
-				// CacheUpdateChannel(channel)
+				CacheUpdateChannelPollingIndex(channel.Id, channel.ChannelInfo.MultiKeyPollingIndex)
 			}
 		}()
 		// Start from the saved polling index and look for the next enabled key
@@ -391,6 +454,16 @@ func GetChannelsByTag(tag string, idSort bool, selectAll bool, sortOptions ...Ch
 	return channels, err
 }
 
+func GetTopChannelPriorities() ([]ChannelPriority, error) {
+	var channels []ChannelPriority
+	err := DB.Model(&Channel{}).
+		Select("id, priority").
+		Where("COALESCE(priority, 0) > ?", 0).
+		Order(channelPrioritySortClause("desc")).
+		Find(&channels).Error
+	return channels, err
+}
+
 func ApplyChannelSearchFilters(query *gorm.DB, keyword string, group string, model string) *gorm.DB {
 	if commonGroupCol == "" || commonKeyCol == "" {
 		initCol()
@@ -477,7 +550,15 @@ func BatchInsertChannels(channels []Channel) (err error) {
 	}()
 
 	for _, chunk := range lo.Chunk(channels, 50) {
+		if err := syncPostgresChannelIDSequence(tx); err != nil {
+			tx.Rollback()
+			return err
+		}
 		if err := tx.Create(&chunk).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := syncPostgresChannelIDSequence(tx); err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -489,6 +570,41 @@ func BatchInsertChannels(channels []Channel) (err error) {
 		}
 	}
 	return tx.Commit().Error
+}
+
+const syncChannelIDSequenceSQL = `
+WITH channel_max AS (
+	SELECT COALESCE(MAX(id), 0) AS max_id FROM channels
+),
+channel_sequence AS (
+	SELECT pg_get_serial_sequence('channels', 'id')::regclass AS sequence_regclass
+),
+sequence_state AS (
+	SELECT s.last_value
+	FROM channel_sequence cs
+	JOIN pg_class c ON c.oid = cs.sequence_regclass
+	JOIN pg_namespace n ON n.oid = c.relnamespace
+	JOIN pg_sequences s
+		ON s.schemaname = n.nspname
+		AND s.sequencename = c.relname
+)
+SELECT setval(cs.sequence_regclass, cm.max_id, true)
+FROM channel_max cm
+CROSS JOIN channel_sequence cs
+LEFT JOIN sequence_state ss ON true
+WHERE cs.sequence_regclass IS NOT NULL
+	AND cm.max_id > 0
+	AND COALESCE(ss.last_value, 0) < cm.max_id
+`
+
+func syncPostgresChannelIDSequence(tx *gorm.DB) error {
+	if !common.UsingPostgreSQL {
+		return nil
+	}
+	if err := tx.Exec("LOCK TABLE channels IN SHARE ROW EXCLUSIVE MODE").Error; err != nil {
+		return err
+	}
+	return tx.Exec(syncChannelIDSequenceSQL).Error
 }
 
 func InsertChannel(channel *Channel) (err error) {
@@ -506,7 +622,15 @@ func InsertChannel(channel *Channel) (err error) {
 		}
 	}()
 
+	if err := syncPostgresChannelIDSequence(tx); err != nil {
+		tx.Rollback()
+		return err
+	}
 	if err := tx.Create(channel).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := syncPostgresChannelIDSequence(tx); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -579,13 +703,7 @@ func (channel *Channel) GetStatusCodeMapping() string {
 }
 
 func (channel *Channel) Insert() error {
-	var err error
-	err = DB.Create(channel).Error
-	if err != nil {
-		return err
-	}
-	err = channel.AddAbilities(nil)
-	return err
+	return InsertChannel(channel)
 }
 
 func (channel *Channel) Update() error {
@@ -648,13 +766,18 @@ func (channel *Channel) UpdateResponseTime(responseTime int64) {
 }
 
 func (channel *Channel) UpdateBalance(balance float64) {
+	now := common.GetTimestamp()
 	err := DB.Model(channel).Select("balance_updated_time", "balance").Updates(Channel{
-		BalanceUpdatedTime: common.GetTimestamp(),
+		BalanceUpdatedTime: now,
 		Balance:            balance,
 	}).Error
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to update balance: channel_id=%d, error=%v", channel.Id, err))
+		return
 	}
+	channel.BalanceUpdatedTime = now
+	channel.Balance = balance
+	CacheReloadChannel(channel.Id)
 }
 
 func (channel *Channel) Delete() error {
@@ -957,7 +1080,7 @@ func GetPaginatedChannelTags(query *gorm.DB, offset int, limit int) ([]*string, 
 
 func SearchTags(keyword string, group string, model string, idSort bool) ([]*string, error) {
 	var tags []*string
-	order := "priority desc"
+	order := channelPrioritySortClause("desc")
 	if idSort {
 		order = "id desc"
 	}
@@ -1036,6 +1159,108 @@ func (channel *Channel) SetOtherSettings(setting dto.ChannelOtherSettings) {
 	channel.OtherSettings = string(settingBytes)
 }
 
+func (channel *Channel) ShouldSkipForRequestBodySize(requestBodySize int64, now time.Time, ttlHours int) bool {
+	if channel == nil || requestBodySize <= 0 {
+		return false
+	}
+	settings := channel.GetOtherSettings()
+	return settings.ShouldSkipForRequestBodySize(requestBodySize, now, ttlHours)
+}
+
+func GetChannelsByGroupAndModels(group string, routeModels []string) ([]*Channel, error) {
+	if strings.TrimSpace(group) == "" || len(routeModels) == 0 {
+		return nil, nil
+	}
+	var channels []*Channel
+	if err := DB.Where("status = ?", common.ChannelStatusEnabled).Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	filtered := make([]*Channel, 0, len(channels))
+	for _, channel := range channels {
+		if !channelMatchesAnyGroup(channel, []string{group}) {
+			continue
+		}
+		if !channelSupportsAnyModel(channel, routeModels) {
+			continue
+		}
+		filtered = append(filtered, channel)
+	}
+	return filtered, nil
+}
+
+func FindRequestBodyLimitExcludedChannels(group string, modelName string, requestBodySize int64, ttlHours int, now time.Time) (map[int]struct{}, error) {
+	if requestBodySize <= 0 {
+		return nil, nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if common.MemoryCacheEnabled {
+		channelSyncLock.RLock()
+		defer channelSyncLock.RUnlock()
+		return findRequestBodyLimitExcludedChannelsFromCacheLocked(group, modelName, requestBodySize, ttlHours, now), nil
+	}
+	return findRequestBodyLimitExcludedChannelsFromDatabase(group, modelName, requestBodySize, ttlHours, now)
+}
+
+func findRequestBodyLimitExcludedChannelsFromDatabase(group string, modelName string, requestBodySize int64, ttlHours int, now time.Time) (map[int]struct{}, error) {
+	if requestBodySize <= 0 {
+		return nil, nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	excluded := make(map[int]struct{})
+	routeModels := getGroupModelRouteCandidates(modelName)
+	channels, err := GetChannelsByGroupAndModels(group, routeModels)
+	if err != nil {
+		return nil, err
+	}
+	for _, channel := range channels {
+		if channel.ShouldSkipForRequestBodySize(requestBodySize, now, ttlHours) {
+			excluded[channel.Id] = struct{}{}
+		}
+	}
+	return excluded, nil
+}
+
+func findRequestBodyLimitExcludedChannelsFromCacheLocked(group string, modelName string, requestBodySize int64, ttlHours int, now time.Time) map[int]struct{} {
+	if requestBodySize <= 0 {
+		return nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	excluded := make(map[int]struct{})
+	routeModels := getGroupModelRouteCandidates(modelName)
+	for _, channel := range channelsIDM {
+		if channel == nil || channel.Status != common.ChannelStatusEnabled {
+			continue
+		}
+		if !channelMatchesAnyGroup(channel, []string{group}) || !channelSupportsAnyModel(channel, routeModels) {
+			continue
+		}
+		if channel.ShouldSkipForRequestBodySize(requestBodySize, now, ttlHours) {
+			excluded[channel.Id] = struct{}{}
+		}
+	}
+	return excluded
+}
+
+func mergeExcludedChannels(base map[int]struct{}, extra map[int]struct{}) map[int]struct{} {
+	if len(extra) == 0 {
+		return base
+	}
+	merged := make(map[int]struct{}, len(base)+len(extra))
+	for channelID := range base {
+		merged[channelID] = struct{}{}
+	}
+	for channelID := range extra {
+		merged[channelID] = struct{}{}
+	}
+	return merged
+}
+
 func MarkResponsesCompactAutoFallback(channelId int, reason string) error {
 	if channelId <= 0 {
 		return nil
@@ -1073,6 +1298,136 @@ func MarkResponsesCompactAutoFallback(channelId int, reason string) error {
 		CacheUpdateChannel(updatedChannel)
 	}
 	return nil
+}
+
+func MarkChannelRequestBodyLimit(channelId int, limit dto.ChannelRequestBodyLimit) (dto.ChannelOtherSettings, error) {
+	if channelId <= 0 {
+		return dto.ChannelOtherSettings{}, fmt.Errorf("invalid channel id: %d", channelId)
+	}
+	if limit.MaxBytes <= 0 {
+		return dto.ChannelOtherSettings{}, fmt.Errorf("invalid request body limit max bytes: %d", limit.MaxBytes)
+	}
+	var updatedSettings dto.ChannelOtherSettings
+	updatedOtherSettings := ""
+	shouldReloadCache := false
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		channel := &Channel{}
+		query := tx
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(channel, channelId).Error; err != nil {
+			return err
+		}
+		settings := dto.ChannelOtherSettings{}
+		if channel.OtherSettings != "" {
+			if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+				return err
+			}
+		}
+		settings.RequestBodyLimit = &limit
+		channel.SetOtherSettings(settings)
+		if err := tx.Model(&Channel{}).Where("id = ?", channelId).Update("settings", channel.OtherSettings).Error; err != nil {
+			return err
+		}
+		updatedSettings = settings
+		updatedOtherSettings = channel.OtherSettings
+		shouldReloadCache = true
+		return nil
+	}); err != nil {
+		return dto.ChannelOtherSettings{}, err
+	}
+	if shouldReloadCache {
+		CacheUpdateChannelOtherSettings(channelId, updatedOtherSettings)
+	}
+	return updatedSettings, nil
+}
+
+const responsesCapabilityObservationMinUpdateIntervalSeconds int64 = 300
+
+func MarkResponsesCapabilityObservation(channelId int, observation dto.ResponsesCapabilityObservation) (dto.ChannelOtherSettings, error) {
+	if channelId <= 0 || observation.ObservedAt == 0 {
+		return dto.ChannelOtherSettings{}, nil
+	}
+	if settings, ok, err := cachedResponsesCapabilityObservationSettings(channelId, observation); err != nil {
+		return dto.ChannelOtherSettings{}, err
+	} else if ok {
+		return settings, nil
+	}
+	var updatedSettings dto.ChannelOtherSettings
+	shouldReloadCache := false
+	updatedOtherSettings := ""
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		channel := &Channel{}
+		query := tx
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(channel, channelId).Error; err != nil {
+			return err
+		}
+		settings := dto.ChannelOtherSettings{}
+		if channel.OtherSettings != "" {
+			if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+				return err
+			}
+		}
+		if settings.ResponsesCapabilityRegistry == nil {
+			settings.ResponsesCapabilityRegistry = &dto.ResponsesChannelCapabilityRegistry{}
+		}
+		if !shouldUpdateResponsesCapabilityObservation(settings.ResponsesCapabilityRegistry.Observed, observation) {
+			updatedSettings = settings
+			return nil
+		}
+		settings.ResponsesCapabilityRegistry.Observed = &observation
+		settings.ResponsesCapabilityRegistry.Source = "observed_calls"
+		channel.SetOtherSettings(settings)
+		if err := tx.Model(&Channel{}).Where("id = ?", channelId).Update("settings", channel.OtherSettings).Error; err != nil {
+			return err
+		}
+		updatedSettings = settings
+		updatedOtherSettings = channel.OtherSettings
+		shouldReloadCache = true
+		return nil
+	}); err != nil {
+		return dto.ChannelOtherSettings{}, err
+	}
+	if shouldReloadCache {
+		CacheUpdateChannelOtherSettings(channelId, updatedOtherSettings)
+	}
+	return updatedSettings, nil
+}
+
+func cachedResponsesCapabilityObservationSettings(channelId int, observation dto.ResponsesCapabilityObservation) (dto.ChannelOtherSettings, bool, error) {
+	if !common.MemoryCacheEnabled {
+		return dto.ChannelOtherSettings{}, false, nil
+	}
+	channel, err := CacheGetChannel(channelId)
+	if err != nil || channel == nil || channel.OtherSettings == "" {
+		return dto.ChannelOtherSettings{}, false, nil
+	}
+	settings := dto.ChannelOtherSettings{}
+	if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+		return dto.ChannelOtherSettings{}, false, err
+	}
+	if settings.ResponsesCapabilityRegistry == nil ||
+		shouldUpdateResponsesCapabilityObservation(settings.ResponsesCapabilityRegistry.Observed, observation) {
+		return dto.ChannelOtherSettings{}, false, nil
+	}
+	return settings, true, nil
+}
+
+func shouldUpdateResponsesCapabilityObservation(existing *dto.ResponsesCapabilityObservation, next dto.ResponsesCapabilityObservation) bool {
+	if existing == nil || existing.ObservedAt <= 0 {
+		return true
+	}
+	if next.ObservedAt <= existing.ObservedAt {
+		return false
+	}
+	if existing.StatusCode != next.StatusCode || existing.ErrorCode != next.ErrorCode {
+		return true
+	}
+	return next.ObservedAt-existing.ObservedAt >= responsesCapabilityObservationMinUpdateIntervalSeconds
 }
 
 func (channel *Channel) GetParamOverride() map[string]interface{} {
@@ -1157,7 +1512,7 @@ func CountChannelTags(query *gorm.DB) (int64, error) {
 // Get channels of specified type with pagination
 func GetChannelsByType(startIdx int, num int, idSort bool, channelType int) ([]*Channel, error) {
 	var channels []*Channel
-	order := "priority desc"
+	order := channelPrioritySortClause("desc")
 	if idSort {
 		order = "id desc"
 	}

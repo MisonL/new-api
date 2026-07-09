@@ -64,7 +64,7 @@ export function useAffiliate() {
   }, [])
 
   useEffect(() => {
-    fetchAffiliateCode()
+    void Promise.resolve().then(() => fetchAffiliateCode())
   }, [fetchAffiliateCode])
 
   return {

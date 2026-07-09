@@ -37,6 +37,11 @@ func TestIsUpstreamTransportInterruptedError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "http2 response body closed",
+			err:  errors.New("http2: response body closed"),
+			want: true,
+		},
+		{
 			name: "dial timeout",
 			err:  errors.New("dial tcp timeout"),
 			want: false,

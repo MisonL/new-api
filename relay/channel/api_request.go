@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -202,8 +203,9 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 	var passthroughRegex []*regexp.Regexp
 	if !info.IsChannelTest {
 		for k := range headerOverrideSource {
-			key := strings.TrimSpace(strings.ToLower(k))
-			if key == "" {
+			rawKey := strings.TrimSpace(k)
+			key := strings.ToLower(rawKey)
+			if rawKey == "" {
 				continue
 			}
 			if key == headerPassthroughAllKey {
@@ -214,9 +216,9 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 			var pattern string
 			switch {
 			case strings.HasPrefix(key, headerPassthroughRegexPrefix):
-				pattern = strings.TrimSpace(key[len(headerPassthroughRegexPrefix):])
+				pattern = strings.TrimSpace(rawKey[len(headerPassthroughRegexPrefix):])
 			case strings.HasPrefix(key, headerPassthroughRegexPrefixV2):
-				pattern = strings.TrimSpace(key[len(headerPassthroughRegexPrefixV2):])
+				pattern = strings.TrimSpace(rawKey[len(headerPassthroughRegexPrefixV2):])
 			default:
 				continue
 			}
@@ -242,8 +244,9 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 			}
 			if !passAll {
 				matched := false
+				normalizedName := strings.ToLower(strings.TrimSpace(name))
 				for _, re := range passthroughRegex {
-					if re.MatchString(name) {
+					if re.MatchString(name) || re.MatchString(normalizedName) {
 						matched = true
 						break
 					}
@@ -314,6 +317,32 @@ func mergeFinalHeaderOverrideAudit(c *gin.Context, headers map[string]string, ap
 		audit.AppliedUserAgent = appliedUserAgent
 	}
 	common2.SetContextKey(c, rootconstant.ContextKeyChannelHeaderPolicyAudit, audit)
+}
+
+func mergeDefaultUserAgentAudit(c *gin.Context, req *http.Request, resp *http.Response) {
+	if c == nil || req == nil || resp == nil {
+		return
+	}
+	if _, exists := req.Header["User-Agent"]; exists {
+		return
+	}
+	defaultUA := defaultTransportUserAgent(resp)
+	if defaultUA == "" {
+		return
+	}
+	audit, _ := common2.GetContextKeyType[service.RuntimeHeaderPolicyAudit](c, rootconstant.ContextKeyChannelHeaderPolicyAudit)
+	if strings.TrimSpace(audit.AppliedUserAgent) != "" {
+		return
+	}
+	audit.AppliedUserAgent = defaultUA
+	common2.SetContextKey(c, rootconstant.ContextKeyChannelHeaderPolicyAudit, audit)
+}
+
+func defaultTransportUserAgent(resp *http.Response) string {
+	if resp != nil && resp.ProtoMajor == 2 {
+		return "Go-http-client/2.0"
+	}
+	return "Go-http-client/1.1"
 }
 
 func getHeaderOverrideUserAgent(headers map[string]string) string {
@@ -431,11 +460,39 @@ type taskRuntimeHeaderOverrideBuilder interface {
 	BuildRequestHeaderWithRuntimeHeaderOverride(c *gin.Context, req *http.Request, info *common.RelayInfo, headerOverride map[string]string) error
 }
 
+func recordUpstreamRequestPath(info *common.RelayInfo, fullRequestURL string) {
+	if info == nil {
+		return
+	}
+	path := strings.TrimSpace(fullRequestURL)
+	if path == "" {
+		return
+	}
+	if parsed, err := url.Parse(path); err == nil && parsed.Path != "" {
+		path = parsed.Path
+	}
+	if strings.Contains(path, "://") {
+		if schemeIndex := strings.Index(path, "://"); schemeIndex >= 0 {
+			afterScheme := path[schemeIndex+3:]
+			if slashIndex := strings.Index(afterScheme, "/"); slashIndex >= 0 {
+				path = afterScheme[slashIndex:]
+			}
+		}
+	}
+	if idx := strings.Index(path, "?"); idx != -1 {
+		path = path[:idx]
+	}
+	if path != "" {
+		info.UpstreamRequestPath = path
+	}
+}
+
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
+	recordUpstreamRequestPath(info, fullRequestURL)
 	if common2.DebugEnabled {
 		println("fullRequestURL:", fullRequestURL)
 	}
@@ -467,6 +524,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
+	recordUpstreamRequestPath(info, fullRequestURL)
 	if common2.DebugEnabled {
 		println("fullRequestURL:", fullRequestURL)
 	}
@@ -500,6 +558,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
+	recordUpstreamRequestPath(info, fullRequestURL)
 	targetHeader := http.Header{}
 	err = a.SetupRequestHeader(c, &targetHeader, info)
 	if err != nil {
@@ -627,6 +686,55 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	return doRequest(c, req, info)
 }
+
+type upstreamTimingReadCloser struct {
+	io.ReadCloser
+	info          *common.RelayInfo
+	firstByteOnce sync.Once
+	endOnce       sync.Once
+}
+
+func (rc *upstreamTimingReadCloser) Read(p []byte) (int, error) {
+	n, err := rc.ReadCloser.Read(p)
+	if n > 0 {
+		rc.firstByteOnce.Do(func() {
+			if rc.info != nil {
+				rc.info.SetUpstreamFirstByteTime()
+			}
+		})
+	}
+	if err != nil {
+		rc.markEnd()
+	}
+	return n, err
+}
+
+func (rc *upstreamTimingReadCloser) Close() error {
+	rc.markEnd()
+	return rc.ReadCloser.Close()
+}
+
+func (rc *upstreamTimingReadCloser) markEnd() {
+	rc.endOnce.Do(func() {
+		if rc.info != nil {
+			rc.info.SetUpstreamEndTime()
+		}
+	})
+}
+
+func wrapUpstreamTimingBody(resp *http.Response, info *common.RelayInfo) {
+	if resp == nil || resp.Body == nil || info == nil {
+		if info != nil {
+			info.SetUpstreamEndTime()
+		}
+		return
+	}
+	resp.Body = &upstreamTimingReadCloser{
+		ReadCloser: resp.Body,
+		info:       info,
+	}
+}
+
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	c.Set(common2.UpstreamRequestIdKey, "")
 
@@ -640,12 +748,19 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	} else {
 		client = service.GetHttpClient()
 	}
+	return doRequestWithClient(c, req, info, client)
+}
 
+type httpDoer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
+func doRequestWithClient(c *gin.Context, req *http.Request, info *common.RelayInfo, client httpDoer) (*http.Response, error) {
 	var stopPinger context.CancelFunc
 	if info.IsStream {
 		helper.SetEventStreamHeaders(c)
 		// 处理流式请求的 ping 保活
-		generalSettings := operation_setting.GetGeneralSetting()
+		generalSettings := operation_setting.GetGeneralSettingSnapshot()
 		if generalSettings.PingIntervalEnabled && !info.DisablePing {
 			pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
 			stopPinger = startPingKeepAlive(c, pingInterval)
@@ -661,8 +776,14 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	if info != nil {
+		info.SetUpstreamRequestStartTime()
+	}
 	resp, err := client.Do(req)
 	if err != nil {
+		if info != nil {
+			info.SetUpstreamEndTime()
+		}
 		if types.IsUpstreamTransportInterruptedError(err) {
 			logger.LogError(c, "upstream transport interrupted: "+err.Error())
 			return nil, types.NewErrorWithStatusCode(
@@ -676,15 +797,27 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
+		if info != nil {
+			info.SetUpstreamEndTime()
+		}
 		return nil, errors.New("resp is nil")
 	}
+	if info != nil {
+		info.SetUpstreamHeaderTime()
+		wrapUpstreamTimingBody(resp, info)
+	}
+	mergeDefaultUserAgentAudit(c, req, resp)
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 
-	_ = req.Body.Close()
-	_ = c.Request.Body.Close()
+	if req.Body != nil {
+		_ = req.Body.Close()
+	}
+	if c != nil && c.Request != nil && c.Request.Body != nil {
+		_ = c.Request.Body.Close()
+	}
 	return resp, nil
 }
 
@@ -693,6 +826,7 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 	if err != nil {
 		return nil, err
 	}
+	recordUpstreamRequestPath(info, fullRequestURL)
 	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)

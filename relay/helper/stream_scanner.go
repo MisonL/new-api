@@ -37,6 +37,33 @@ func getScannerBufferSize() int {
 	return DefaultMaxScannerBufferSize
 }
 
+func handleScannerError(c *gin.Context, info *relaycommon.RelayInfo, err error) {
+	if err == nil || err == io.EOF {
+		return
+	}
+	if info.StreamStatus.IsNormalEnd() {
+		logger.LogInfo(c, "scanner closed after normal stream end: "+err.Error())
+		return
+	}
+	if info.StreamStatus.IsCanceled() {
+		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, err)
+		logger.LogInfo(c, "scanner closed after client disconnect: "+err.Error())
+		return
+	}
+	if types.IsUpstreamTransportInterruptedError(err) {
+		logger.LogError(c, "upstream stream interrupted: "+err.Error())
+		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonUpstreamInterrupted, err)
+		return
+	}
+	if relaycommon.IsBenignDisconnectErrorMessage(err.Error()) {
+		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, err)
+		logger.LogInfo(c, "scanner closed after client disconnect: "+err.Error())
+		return
+	}
+	logger.LogError(c, "scanner error: "+err.Error())
+	info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
+}
+
 func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult)) {
 
 	if resp == nil || dataHandler == nil {
@@ -61,6 +88,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		writeMutex            sync.Mutex // Mutex to protect concurrent writes
 		wg                    sync.WaitGroup
 		receivedResponseCount atomic.Int64
+		receivedDone          atomic.Bool
 	)
 	notifyStop := func() {
 		select {
@@ -69,7 +97,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		}
 	}
 
-	generalSettings := operation_setting.GetGeneralSetting()
+	generalSettings := operation_setting.GetGeneralSettingSnapshot()
 	pingEnabled := generalSettings.PingIntervalEnabled && !info.DisablePing
 	pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
 	if pingInterval <= 0 {
@@ -120,6 +148,15 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			logger.LogError(c, "timeout waiting for goroutines to exit")
 		}
 		info.ReceivedResponseCount = int(receivedResponseCount.Load())
+		if info.StreamStatus.EndReason == relaycommon.StreamEndReasonNone {
+			if receivedDone.Load() {
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
+			} else {
+				err := fmt.Errorf("stream disconnected before completion")
+				logger.LogError(c, "upstream stream ended before completion")
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonUpstreamInterrupted, err)
+			}
+		}
 		if (info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors()) || info.StreamStatus.IsCanceled() {
 			logger.LogInfo(c, fmt.Sprintf("stream ended: %s", info.StreamStatus.Summary()))
 		} else {
@@ -279,6 +316,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 					return
 				}
 			} else {
+				receivedDone.Store(true)
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
 				if common.DebugEnabled {
 					println("received [DONE], stopping scanner")
@@ -287,24 +325,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			}
 		}
 
-		if err := scanner.Err(); err != nil {
-			if err != io.EOF {
-				if info.StreamStatus.IsCanceled() {
-					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, err)
-					logger.LogInfo(c, "scanner closed after client disconnect: "+err.Error())
-				} else if types.IsUpstreamTransportInterruptedError(err) {
-					logger.LogError(c, "upstream stream interrupted: "+err.Error())
-					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonUpstreamInterrupted, err)
-				} else if relaycommon.IsBenignDisconnectErrorMessage(err.Error()) {
-					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, err)
-					logger.LogInfo(c, "scanner closed after client disconnect: "+err.Error())
-				} else {
-					logger.LogError(c, "scanner error: "+err.Error())
-					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
-				}
-			}
-		}
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
+		handleScannerError(c, info, scanner.Err())
 	})
 
 	// 主循环等待完成或超时

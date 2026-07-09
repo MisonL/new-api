@@ -510,6 +510,20 @@ const CODEX_REMOVE_IMAGE_GENERATION_TOOL_TEMPLATE = {
   ],
 }
 
+const CODEX_REMOVE_RESPONSES_IMAGE_INPUT_TEMPLATE = {
+  operations: [
+    {
+      description: 'Remove Responses image input items before upstream relay.',
+      path: 'input.*.content',
+      mode: 'prune_objects',
+      value: {
+        type: 'input_image',
+        recursive: true,
+      },
+    },
+  ],
+}
+
 type TemplatePresetConfig = {
   label: string
   group: 'recommended' | 'advanced' | 'examples'
@@ -572,6 +586,14 @@ const TEMPLATE_PRESET_CONFIG: Record<string, TemplatePresetConfig> = {
       'Remove image_generation tool objects when an upstream rejects that tool type.',
     kind: 'operations',
     payload: CODEX_REMOVE_IMAGE_GENERATION_TOOL_TEMPLATE,
+  },
+  remove_responses_image_input: {
+    label: 'Upstream Compat: Remove Responses Image Input',
+    group: 'recommended',
+    description:
+      'Remove Responses input_image content items when an upstream rejects image input.',
+    kind: 'operations',
+    payload: CODEX_REMOVE_RESPONSES_IMAGE_INPUT_TEMPLATE,
   },
   aws_bedrock_remove_input_examples: {
     label: 'AWS Bedrock Remove Input Examples',
@@ -1893,29 +1915,35 @@ export function ParamOverrideEditorDialog(
   useEffect(() => {
     if (!props.open) return
     const state = parseInitialState(props.value)
-    setEditMode(state.editMode)
-    setVisualMode(state.visualMode)
-    setLegacyEntries(state.legacyEntries)
-    setOperations(state.operations)
-    setJsonText(state.jsonText)
-    setJsonError(state.jsonError)
-    setOperationSearch('')
-    setSelectedOperationId(state.operations[0]?.id || '')
-    setExpandedConditions({})
-    setDraggedOperationId('')
-    setDragOverOperationId('')
-    setDragOverPosition('before')
-    setTemplatePresetKey('codex_cli_headers_passthrough')
+    queueMicrotask(() => {
+      setEditMode(state.editMode)
+      setVisualMode(state.visualMode)
+      setLegacyEntries(state.legacyEntries)
+      setOperations(state.operations)
+      setJsonText(state.jsonText)
+      setJsonError(state.jsonError)
+      setOperationSearch('')
+      setSelectedOperationId(state.operations[0]?.id || '')
+      setExpandedConditions({})
+      setDraggedOperationId('')
+      setDragOverOperationId('')
+      setDragOverPosition('before')
+      setTemplatePresetKey('codex_cli_headers_passthrough')
+    })
   }, [props.open, props.value])
 
   // Keep selectedOperationId valid
   useEffect(() => {
     if (operations.length === 0) {
-      setSelectedOperationId('')
+      queueMicrotask(() => {
+        setSelectedOperationId('')
+      })
       return
     }
     if (!operations.some((o) => o.id === selectedOperationId)) {
-      setSelectedOperationId(operations[0].id)
+      queueMicrotask(() => {
+        setSelectedOperationId(operations[0].id)
+      })
     }
   }, [operations, selectedOperationId])
 

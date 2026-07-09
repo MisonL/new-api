@@ -64,14 +64,14 @@ function SubscriptionStatusBadge(props: {
     return (
       <StatusBadge
         label={props.t('Invalidated')}
-        variant='neutral'
+        variant='disabled'
         copyable={false}
       />
     )
   return (
     <StatusBadge
       label={props.t('Expired')}
-      variant='neutral'
+      variant='disabled'
       copyable={false}
     />
   )
@@ -79,6 +79,8 @@ function SubscriptionStatusBadge(props: {
 
 export function UserSubscriptionsDialog(props: Props) {
   const { t } = useTranslation()
+  const userId = props.user?.id
+  const [nowSeconds] = useState(() => Date.now() / 1000)
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [plans, setPlans] = useState<PlanRecord[]>([])
@@ -98,12 +100,12 @@ export function UserSubscriptionsDialog(props: Props) {
   }, [plans])
 
   const loadData = useCallback(async () => {
-    if (!props.user?.id) return
+    if (!userId) return
     setLoading(true)
     try {
       const [plansRes, subsRes] = await Promise.all([
         getAdminPlans(),
-        getUserSubscriptions(props.user.id),
+        getUserSubscriptions(userId),
       ])
       if (plansRes.success) setPlans(plansRes.data || [])
       if (subsRes.success) setSubs(subsRes.data || [])
@@ -112,23 +114,24 @@ export function UserSubscriptionsDialog(props: Props) {
     } finally {
       setLoading(false)
     }
-  }, [props.user?.id, t])
+  }, [userId, t])
 
   useEffect(() => {
-    if (props.open && props.user?.id) {
+    if (props.open && userId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedPlanId('')
       loadData()
     }
-  }, [props.open, props.user?.id, loadData])
+  }, [props.open, userId, loadData])
 
   const handleCreate = async () => {
-    if (!props.user?.id || !selectedPlanId) {
+    if (!userId || !selectedPlanId) {
       toast.error(t('Please select a subscription plan'))
       return
     }
     setCreating(true)
     try {
-      const res = await createUserSubscription(props.user.id, {
+      const res = await createUserSubscription(userId, {
         plan_id: Number(selectedPlanId),
       })
       if (res.success) {
@@ -235,9 +238,8 @@ export function UserSubscriptionsDialog(props: Props) {
                   ) : (
                     subs.map((record) => {
                       const sub = record.subscription
-                      const now = Date.now() / 1000
                       const isExpired =
-                        (sub.end_time || 0) > 0 && sub.end_time < now
+                        (sub.end_time || 0) > 0 && sub.end_time < nowSeconds
                       const isActive = sub.status === 'active' && !isExpired
                       const total = Number(sub.amount_total || 0)
                       const used = Number(sub.amount_used || 0)

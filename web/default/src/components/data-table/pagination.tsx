@@ -32,13 +32,12 @@ export function DataTablePagination<TData>({
   return (
     <div
       className={cn(
-        'flex items-center justify-between overflow-clip',
+        'flex min-h-14 items-center justify-between gap-3 px-1 py-3 sm:px-2',
         '@max-2xl/content:flex-col-reverse @max-2xl/content:gap-2 sm:@max-2xl/content:gap-4'
       )}
-      style={{ overflowClipMargin: 1 }}
     >
       <div className='flex w-full items-center justify-between gap-2'>
-        <div className='flex min-w-0 items-center text-xs font-medium whitespace-nowrap sm:min-w-[130px] sm:text-sm @2xl/content:hidden'>
+        <div className='flex min-w-0 items-center text-xs font-medium leading-none whitespace-nowrap sm:min-w-[130px] sm:text-sm @2xl/content:hidden'>
           {t('Page {{current}} of {{total}}', {
             current: currentPage,
             total: totalPages,
@@ -72,7 +71,7 @@ export function DataTablePagination<TData>({
       </div>
 
       <div className='flex items-center sm:space-x-6 lg:space-x-8'>
-        <div className='flex min-w-[130px] items-center text-sm font-medium whitespace-nowrap @max-3xl/content:hidden'>
+        <div className='hidden min-w-[130px] items-center text-sm font-medium leading-none whitespace-nowrap @2xl/content:flex'>
           {t('Page {{current}} of {{total}}', {
             current: currentPage,
             total: totalPages,

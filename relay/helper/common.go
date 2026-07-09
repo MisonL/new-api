@@ -109,8 +109,8 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 		common.SysError("error marshalling stream response: " + err.Error())
 	} else {
 		service.MarkResponsesBootstrapPayloadStarted(c)
-		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
+		c.Render(-1, &common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
+		c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonData)})
 	}
 	_ = FlushWriter(c)
 	return nil
@@ -119,16 +119,16 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 // ClaudeChunkData writes a Claude SSE event with a raw data payload.
 func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 	service.MarkResponsesBootstrapPayloadStarted(c)
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s\n", data)})
+	c.Render(-1, &common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
+	c.Render(-1, &common.CustomEvent{Data: fmt.Sprintf("data: %s\n", data)})
 	_ = FlushWriter(c)
 }
 
 // ResponseChunkData writes a responses-stream SSE event with a raw payload.
 func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) {
 	service.MarkResponsesBootstrapPayloadStarted(c)
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
+	c.Render(-1, &common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
+	c.Render(-1, &common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
 	_ = FlushWriter(c)
 }
 
@@ -143,7 +143,7 @@ func StringData(c *gin.Context, str string) error {
 	}
 
 	service.MarkResponsesBootstrapPayloadStarted(c)
-	c.Render(-1, common.CustomEvent{Data: "data: " + str})
+	c.Render(-1, &common.CustomEvent{Data: "data: " + str})
 	return FlushWriter(c)
 }
 
@@ -186,8 +186,8 @@ func OpenAIErrorEvent(c *gin.Context, openAIError types.OpenAIError) error {
 	if err != nil {
 		return fmt.Errorf("error marshalling openai error event: %w", err)
 	}
-	c.Render(-1, common.CustomEvent{Data: "event: error\n"})
-	c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
+	c.Render(-1, &common.CustomEvent{Data: "event: error\n"})
+	c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonData)})
 	return FlushWriter(c)
 }
 

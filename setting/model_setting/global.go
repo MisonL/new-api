@@ -24,6 +24,23 @@ type ChatCompletionsToResponsesPolicy struct {
 	Rules         []ProtocolConversionRule `json:"rules,omitempty"`
 }
 
+func (p *ChatCompletionsToResponsesPolicy) UnmarshalJSON(data []byte) error {
+	type alias ChatCompletionsToResponsesPolicy
+	var fields map[string]common.RawMessage
+	if err := common.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	var decoded alias
+	if err := common.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if _, ok := fields["enabled"]; !ok && len(decoded.Rules) > 0 {
+		decoded.Enabled = true
+	}
+	*p = ChatCompletionsToResponsesPolicy(decoded)
+	return nil
+}
+
 func (p ChatCompletionsToResponsesPolicy) IsChannelEnabled(channelID int, channelType int) bool {
 	if !p.Enabled {
 		return false
@@ -55,6 +72,18 @@ type ProtocolConversionRule struct {
 
 type ProtocolConversionOptions struct {
 	EnableCustomToolBridge bool `json:"enable_custom_tool_bridge,omitempty"`
+}
+
+type RequestBodyLimitPolicy struct {
+	Enabled  bool `json:"enabled"`
+	TTLHours int  `json:"ttl_hours"`
+}
+
+func (p RequestBodyLimitPolicy) Normalize() RequestBodyLimitPolicy {
+	if p.TTLHours < 0 {
+		p.TTLHours = 0
+	}
+	return p
 }
 
 func (r ProtocolConversionRule) IsChannelEnabled(channelID int, channelType int) bool {
@@ -95,6 +124,7 @@ type GlobalSettings struct {
 	PassThroughRequestEnabled        bool                             `json:"pass_through_request_enabled"`
 	ThinkingModelBlacklist           []string                         `json:"thinking_model_blacklist"`
 	ChatCompletionsToResponsesPolicy ChatCompletionsToResponsesPolicy `json:"chat_completions_to_responses_policy"`
+	RequestBodyLimitPolicy           RequestBodyLimitPolicy           `json:"request_body_limit_policy"`
 }
 
 // 默认配置
@@ -108,6 +138,10 @@ var defaultOpenaiSettings = GlobalSettings{
 		Enabled:     false,
 		AllChannels: true,
 	},
+	RequestBodyLimitPolicy: RequestBodyLimitPolicy{
+		Enabled:  false,
+		TTLHours: 0,
+	},
 }
 
 // 全局实例
@@ -120,6 +154,41 @@ func init() {
 
 func GetGlobalSettings() *GlobalSettings {
 	return &globalSettings
+}
+
+func GetRequestBodyLimitPolicy() RequestBodyLimitPolicy {
+	return globalSettings.RequestBodyLimitPolicy.Normalize()
+}
+
+func ValidateAndNormalizeRequestBodyLimitPolicy(policy *RequestBodyLimitPolicy) error {
+	if policy == nil {
+		return nil
+	}
+	if policy.TTLHours < 0 {
+		return fmt.Errorf("请求体限制记录有效期不能小于 0")
+	}
+	return nil
+}
+
+func NormalizeRequestBodyLimitPolicyJSON(raw string) (string, error) {
+	policyRaw := strings.TrimSpace(raw)
+	if policyRaw == "" {
+		policyRaw = "{}"
+	}
+
+	var policy RequestBodyLimitPolicy
+	if err := common.UnmarshalJsonStr(policyRaw, &policy); err != nil {
+		return "", fmt.Errorf("请求体限制策略 JSON 解析失败: %w", err)
+	}
+	if err := ValidateAndNormalizeRequestBodyLimitPolicy(&policy); err != nil {
+		return "", err
+	}
+
+	bytes, err := common.Marshal(policy.Normalize())
+	if err != nil {
+		return "", fmt.Errorf("请求体限制策略 JSON 序列化失败: %w", err)
+	}
+	return string(bytes), nil
 }
 
 // ShouldPreserveThinkingSuffix 判断模型是否配置为保留 thinking/-nothinking/-low/-high/-medium 后缀
@@ -273,6 +342,9 @@ func ChatCompletionsToResponsesPolicyWarnings(policy ChatCompletionsToResponsesP
 		rules = []ProtocolConversionRule{policy.LegacyRule()}
 	}
 
+	if !policy.Enabled && len(rules) > 0 {
+		warnings = append(warnings, "协议转换总开关已关闭，所有规则不会参与匹配")
+	}
 	for i, rule := range rules {
 		label := fmt.Sprintf("规则 #%d", i+1)
 		if strings.TrimSpace(rule.Name) != "" {

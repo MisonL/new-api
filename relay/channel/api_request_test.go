@@ -22,6 +22,38 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type doerFunc func(*http.Request) (*http.Response, error)
+
+func (f doerFunc) Do(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
+func TestRecordUpstreamRequestPathStoresPathOnly(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+
+	recordUpstreamRequestPath(info, "https://example.com/v1/chat/completions?api-version=2024-10-01")
+
+	require.Equal(t, "/v1/chat/completions", info.UpstreamRequestPath)
+}
+
+func TestRecordUpstreamRequestPathFallsBackToPathFromMalformedURL(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+
+	recordUpstreamRequestPath(info, "https://api.example.com/%zz/v1/chat?key=secret")
+
+	require.Equal(t, "/%zz/v1/chat", info.UpstreamRequestPath)
+}
+
 func setupApiRequestHeaderRuntimeTestDB(t *testing.T, tables ...interface{}) *gorm.DB {
 	t.Helper()
 
@@ -77,7 +109,6 @@ func setupApiRequestHeaderRuntimeTestDB(t *testing.T, tables ...interface{}) *go
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -100,7 +131,6 @@ func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 func TestProcessHeaderOverride_ChannelTestSkipsClientHeaderPlaceholder(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -124,7 +154,6 @@ func TestProcessHeaderOverride_ChannelTestSkipsClientHeaderPlaceholder(t *testin
 func TestProcessHeaderOverride_NonTestKeepsClientHeaderPlaceholder(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -144,10 +173,56 @@ func TestProcessHeaderOverride_NonTestKeepsClientHeaderPlaceholder(t *testing.T)
 	require.Equal(t, "trace-123", headers["x-upstream-trace"])
 }
 
+func TestProcessHeaderOverride_RegexPassthroughMatchesHeaderNamesCaseInsensitively(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Request.Header.Set("X-Client-Request-Id", "request-123")
+	ctx.Request.Header.Set("Thread-Id", "thread-123")
+
+	info := &relaycommon.RelayInfo{
+		IsChannelTest: false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			HeadersOverride: map[string]any{
+				"re:^x-client-request-id$": "",
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "request-123", headers["x-client-request-id"])
+	_, exists := headers["thread-id"]
+	require.False(t, exists)
+}
+
+func TestProcessHeaderOverride_RegexPassthroughMatchesLowercaseInputWithUppercasePattern(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Request.Header.Set("x-client-request-id", "request-456")
+
+	info := &relaycommon.RelayInfo{
+		IsChannelTest: false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			HeadersOverride: map[string]any{
+				"re:^X-CLIENT-REQUEST-ID$": "",
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "request-456", headers["x-client-request-id"])
+}
+
 func TestProcessHeaderOverride_RuntimeOverrideIsFinalHeaderMap(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -178,7 +253,6 @@ func TestProcessHeaderOverride_RuntimeOverrideIsFinalHeaderMap(t *testing.T) {
 func TestProcessHeaderOverride_AppliesBuiltinHeaderProfile(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -217,7 +291,6 @@ func TestProcessHeaderOverride_AppliesBuiltinHeaderProfile(t *testing.T) {
 func TestProcessHeaderOverride_LegacyOverrideCreatesAuditWhenMissing(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -261,7 +334,6 @@ func TestProcessHeaderOverride_LegacyOverrideCreatesAuditWhenMissing(t *testing.
 func TestProcessHeaderOverride_AppliesUserHeaderProfileAndLegacyOverrideWins(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -293,10 +365,111 @@ func TestProcessHeaderOverride_AppliesUserHeaderProfileAndLegacyOverrideWins(t *
 	require.Equal(t, "from-legacy", headers["x-custom"])
 }
 
+func TestMergeDefaultUserAgentAuditRecordsHTTP2DefaultWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode: "prefer_channel",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	resp := &http.Response{ProtoMajor: 2}
+	mergeDefaultUserAgentAudit(ctx, req, resp)
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, "Go-http-client/2.0", audit.AppliedUserAgent)
+	require.False(t, audit.UserAgentApplied)
+	require.Empty(t, audit.AppliedHeaderKeys)
+}
+
+func TestMergeDefaultUserAgentAuditRecordsHTTP1DefaultWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode: "prefer_channel",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	resp := &http.Response{ProtoMajor: 1, ProtoMinor: 1}
+	mergeDefaultUserAgentAudit(ctx, req, resp)
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, "Go-http-client/1.1", audit.AppliedUserAgent)
+}
+
+func TestMergeDefaultUserAgentAuditSkipsExplicitEmptyUserAgent(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode: "prefer_channel",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	req.Header["User-Agent"] = []string{""}
+	resp := &http.Response{ProtoMajor: 2}
+	mergeDefaultUserAgentAudit(ctx, req, resp)
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Empty(t, audit.AppliedUserAgent)
+}
+
+func TestMergeDefaultUserAgentAuditDoesNotOverrideExplicitUserAgent(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode: "prefer_channel",
+		AppliedUserAgent: "CustomUA/1.0",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	req.Header.Set("User-Agent", "CustomUA/1.0")
+	resp := &http.Response{ProtoMajor: 2}
+	mergeDefaultUserAgentAudit(ctx, req, resp)
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, "CustomUA/1.0", audit.AppliedUserAgent)
+}
+
+func TestMergeDefaultUserAgentAuditPreservesExistingDifferentAuditUserAgent(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode: "prefer_channel",
+		AppliedUserAgent: "ProfileUA/1.0",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	req.Header.Set("User-Agent", "ClientUA/2.0")
+	resp := &http.Response{ProtoMajor: 2}
+	mergeDefaultUserAgentAudit(ctx, req, resp)
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, "ProfileUA/1.0", audit.AppliedUserAgent)
+}
+
 func TestProcessHeaderOverride_HeaderProfileRoundRobinAdvancesRuntimeState(t *testing.T) {
 	db := setupApiRequestHeaderRuntimeTestDB(t, &model.RequestHeaderStrategyState{})
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -342,7 +515,6 @@ func TestDoTaskApiRequestAppliesHeaderOverride(t *testing.T) {
 	defer server.Close()
 	service.InitHttpClient()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/generations", nil)
@@ -386,7 +558,6 @@ func TestDoTaskApiRequestLetsSignedAdaptorApplyOverrideBeforeSigning(t *testing.
 	defer server.Close()
 	service.InitHttpClient()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/generations", nil)
@@ -489,7 +660,6 @@ func (a *signedHeaderTaskAdaptor) BuildRequestHeaderWithRuntimeHeaderOverride(_ 
 func TestProcessHeaderOverride_HeaderProfileMissingFails(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -514,7 +684,6 @@ func TestProcessHeaderOverride_HeaderProfileMissingFails(t *testing.T) {
 func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -541,7 +710,6 @@ func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -600,4 +768,155 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.Equal(t, "window-abc", upstreamReq.Header.Get("X-Codex-Window-Id"))
 	require.Equal(t, "request-def", upstreamReq.Header.Get("X-Client-Request-Id"))
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
+}
+
+func TestDoRequestRecordsUpstreamTimingOnBodyRead(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(common.RequestIdKey, "upstream-req-123")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("hello"))
+	}))
+	defer upstream.Close()
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+	req, err := http.NewRequest(http.MethodGet, upstream.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := doRequest(ctx, req, info)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "upstream-req-123", ctx.GetString(common.UpstreamRequestIdKey))
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(body))
+	require.NoError(t, resp.Body.Close())
+
+	headerMs, ok := info.UpstreamHeaderLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, headerMs, int64(0))
+
+	ttfbMs, ok := info.UpstreamFirstByteLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, ttfbMs, int64(0))
+
+	totalMs, ok := info.UpstreamTotalLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, totalMs, int64(0))
+	require.LessOrEqual(t, headerMs, ttfbMs)
+	require.LessOrEqual(t, ttfbMs, totalMs)
+}
+
+func TestDoRequestRecordsUpstreamEndOnCloseWithoutRead(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("hello"))
+	}))
+	defer upstream.Close()
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+	req, err := http.NewRequest(http.MethodGet, upstream.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := doRequest(ctx, req, info)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Body.Close())
+
+	_, ok := info.UpstreamFirstByteLatencyMs()
+	require.False(t, ok)
+
+	totalMs, ok := info.UpstreamTotalLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, totalMs, int64(0))
+}
+
+func TestDoRequestRecordsUpstreamEndOnTransportError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:1", nil)
+	require.NoError(t, err)
+
+	resp, err := doRequestWithClient(ctx, req, info, doerFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("transport failure")
+	}))
+	require.Error(t, err)
+	require.Nil(t, resp)
+
+	headerMs, ok := info.UpstreamHeaderLatencyMs()
+	require.False(t, ok)
+	require.Zero(t, headerMs)
+
+	ttfbMs, ok := info.UpstreamFirstByteLatencyMs()
+	require.False(t, ok)
+	require.Zero(t, ttfbMs)
+
+	totalMs, ok := info.UpstreamTotalLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, totalMs, int64(0))
+}
+
+func TestWrapUpstreamTimingBodyHandlesNilResponseBody(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+	info.SetUpstreamRequestStartTime()
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       nil,
+	}
+
+	wrapUpstreamTimingBody(resp, info)
+
+	require.Nil(t, resp.Body)
+	totalMs, ok := info.UpstreamTotalLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, totalMs, int64(0))
+}
+
+func TestDoRequestRecordsEndTimeForNilResponse(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+	req, err := http.NewRequest(http.MethodGet, "http://example.test", nil)
+	require.NoError(t, err)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+
+	resp, err := doRequestWithClient(ctx, req, info, doerFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, nil
+	}))
+	require.Error(t, err)
+	require.Nil(t, resp)
+
+	headerMs, ok := info.UpstreamHeaderLatencyMs()
+	require.False(t, ok)
+	require.Zero(t, headerMs)
+
+	ttfbMs, ok := info.UpstreamFirstByteLatencyMs()
+	require.False(t, ok)
+	require.Zero(t, ttfbMs)
+
+	totalMs, ok := info.UpstreamTotalLatencyMs()
+	require.True(t, ok)
+	require.GreaterOrEqual(t, totalMs, int64(0))
 }

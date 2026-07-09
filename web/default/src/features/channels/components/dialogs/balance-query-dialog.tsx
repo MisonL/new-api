@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Loader2, RefreshCw, DollarSign } from 'lucide-react'
+import {
+  Loader2,
+  RefreshCw,
+  DollarSign,
+  Infinity as InfinityIcon,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { formatCurrencyFromUSD } from '@/lib/currency'
 import { formatTimestampToDate } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,7 +19,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { getCodexUsage, updateChannelBalance } from '../../api'
-import { channelsQueryKeys } from '../../lib'
+import {
+  channelsQueryKeys,
+  formatBalance,
+  isUnlimitedChannelBalance,
+} from '../../lib'
 import { useChannels } from '../channels-provider'
 import {
   CodexUsageDialog,
@@ -36,6 +44,7 @@ export function BalanceQueryDialog({
   const queryClient = useQueryClient()
   const [isQuerying, setIsQuerying] = useState(false)
   const [balance, setBalance] = useState<number | null>(null)
+  const [balanceUnlimited, setBalanceUnlimited] = useState(false)
   const [balanceUpdatedTime, setBalanceUpdatedTime] = useState<number | null>(
     null
   )
@@ -66,7 +75,7 @@ export function BalanceQueryDialog({
   useEffect(() => {
     if (!isCodex) return
     if (!open) return
-    handleQueryCodexUsage()
+    void Promise.resolve().then(() => handleQueryCodexUsage())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, isCodex])
 
@@ -78,9 +87,11 @@ export function BalanceQueryDialog({
       const response = await updateChannelBalance(currentRow.id)
       if (response.success && response.balance !== undefined) {
         const newBalance = response.balance
+        const newBalanceUnlimited = response.balance_unlimited === true
         const now = Math.floor(Date.now() / 1000)
 
         setBalance(newBalance)
+        setBalanceUnlimited(newBalanceUnlimited)
         setBalanceUpdatedTime(now)
         toast.success(t('Balance updated successfully'))
 
@@ -88,6 +99,7 @@ export function BalanceQueryDialog({
         setCurrentRow({
           ...currentRow,
           balance: newBalance,
+          balance_unlimited: newBalanceUnlimited,
           balance_updated_time: now,
         })
 
@@ -109,17 +121,21 @@ export function BalanceQueryDialog({
 
   const handleClose = () => {
     setBalance(null)
+    setBalanceUnlimited(false)
     setBalanceUpdatedTime(null)
     setCodexUsageResponse(null)
     onOpenChange(false)
   }
 
-  const formatBalance = (bal: number) =>
-    formatCurrencyFromUSD(bal, {
-      digitsLarge: 2,
-      digitsSmall: 4,
-      abbreviate: false,
-    })
+  const displayedBalance = balance ?? currentRow.balance
+  const displayedBalanceUnlimited = isUnlimitedChannelBalance(
+    displayedBalance,
+    balance !== null ? balanceUnlimited : currentRow.balance_unlimited
+  )
+  const displayedBalanceText = formatBalance(displayedBalance, {
+    unlimited: displayedBalanceUnlimited,
+    unlimitedLabel: t('Unlimited'),
+  })
 
   const formatDate = (timestamp: number) => {
     if (!timestamp) return 'Never'
@@ -159,10 +175,11 @@ export function BalanceQueryDialog({
               <DollarSign className='h-4 w-4' />
               <span>{t('Current Balance')}</span>
             </div>
-            <div className='text-2xl font-bold'>
-              {balance !== null
-                ? formatBalance(balance)
-                : formatBalance(currentRow.balance)}
+            <div className='flex items-center gap-2 text-2xl font-bold'>
+              {displayedBalanceUnlimited && (
+                <InfinityIcon className='h-6 w-6' />
+              )}
+              <span>{displayedBalanceText}</span>
             </div>
             <div className='text-muted-foreground mt-2 text-xs'>
               {t('Last updated:')}{' '}

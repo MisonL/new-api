@@ -226,7 +226,6 @@ export default defineConfig(({ command }) => {
               '@visactor/vchart',
               '@visactor/vchart-semi-theme',
             ],
-            cytoscape: ['cytoscape'],
             toast: ['react-toastify'],
             'auth-widgets': ['react-telegram-login', 'react-turnstile'],
             'file-upload': ['react-dropzone'],

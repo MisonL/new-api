@@ -82,16 +82,6 @@ export function MultiKeyManageDialog({
     useState<MultiKeyConfirmAction | null>(null)
   const [isPerformingAction, setIsPerformingAction] = useState(false)
 
-  // Reset and load data when dialog opens
-  useEffect(() => {
-    if (open && currentRow) {
-      setCurrentPage(1)
-      setStatusFilter(null)
-      loadKeyStatus(1, pageSize, null)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, currentRow?.id])
-
   const loadKeyStatus = async (
     page: number = currentPage,
     size: number = pageSize,
@@ -128,6 +118,18 @@ export function MultiKeyManageDialog({
       setIsLoading(false)
     }
   }
+
+  // Reset and load data when dialog opens
+  useEffect(() => {
+    if (open && currentRow) {
+      /* eslint-disable react-hooks/set-state-in-effect */
+      setCurrentPage(1)
+      setStatusFilter(null)
+      /* eslint-enable react-hooks/set-state-in-effect */
+      loadKeyStatus(1, pageSize, null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, currentRow?.id])
 
   const handleStatusFilterChange = (value: string) => {
     const newFilter = value === 'all' ? null : parseInt(value)
@@ -380,14 +382,14 @@ export function MultiKeyManageDialog({
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className='flex shrink-0 items-center justify-between'>
-                <div className='text-muted-foreground text-sm'>
+              <div className='flex min-h-14 shrink-0 items-center justify-between gap-3 px-1 py-3 sm:px-2'>
+                <div className='text-muted-foreground text-sm leading-none'>
                   {t('Page {{current}} of {{total}}', {
                     current: currentPage,
                     total: totalPages,
                   })}
                 </div>
-                <div className='flex gap-2'>
+                <div className='flex items-center gap-2'>
                   <Button
                     variant='outline'
                     size='sm'

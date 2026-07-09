@@ -68,6 +68,7 @@ describe('classic protocol conversion policy utils', () => {
     const serialized = JSON.parse(
       serializeRules(parsed.rules, parsed.policyExtra),
     );
+    expect(serialized.enabled).toBe(true);
     expect(serialized.future_policy).toEqual({ keep: true });
     expect(serialized.rules[0].future_rule).toBe('rule-extra');
     expect(serialized.rules[0].options.enable_custom_tool_bridge).toBe(true);

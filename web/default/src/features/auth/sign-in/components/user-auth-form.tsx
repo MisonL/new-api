@@ -82,11 +82,9 @@ export function UserAuthForm({
   const hasWeChatLogin = Boolean(status?.wechat_login)
 
   useEffect(() => {
-    if (requiresLegalConsent) {
-      setAgreedToLegal(false)
-    } else {
-      setAgreedToLegal(true)
-    }
+    queueMicrotask(() => {
+      setAgreedToLegal(!requiresLegalConsent)
+    })
   }, [requiresLegalConsent])
 
   useEffect(() => {

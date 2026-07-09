@@ -465,13 +465,14 @@ const JSONEditor = ({
                           : t('重复的键名，此值将被后面的同名键覆盖')
                       }
                     >
-                      <IconAlertTriangle
-                        className='absolute right-2 top-1/2 transform -translate-y-1/2'
-                        style={{
-                          color: isLastDuplicate ? '#ff7d00' : '#faad14',
-                          fontSize: '14px',
-                        }}
-                      />
+                      <span className='absolute right-2 top-1/2 inline-flex -translate-y-1/2 items-center justify-center'>
+                        <IconAlertTriangle
+                          style={{
+                            color: isLastDuplicate ? '#ff7d00' : '#faad14',
+                            fontSize: '14px',
+                          }}
+                        />
+                      </span>
                     </Tooltip>
                   )}
                 </div>
@@ -574,10 +575,11 @@ const JSONEditor = ({
                       />
                       {isDuplicate && (
                         <Tooltip content={t('重复的键名')}>
-                          <IconAlertTriangle
-                            className='absolute right-2 top-1/2 transform -translate-y-1/2'
-                            style={{ color: '#faad14', fontSize: '14px' }}
-                          />
+                          <span className='absolute right-2 top-1/2 inline-flex -translate-y-1/2 items-center justify-center'>
+                            <IconAlertTriangle
+                              style={{ color: '#faad14', fontSize: '14px' }}
+                            />
+                          </span>
                         </Tooltip>
                       )}
                     </div>

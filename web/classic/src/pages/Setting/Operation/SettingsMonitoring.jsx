@@ -153,6 +153,11 @@ export default function SettingsMonitoring(props) {
                     })
                   }
                 />
+                <div
+                  style={{ marginTop: 8, color: 'var(--semi-color-text-2)' }}
+                >
+                  {t('定时测试会触发自动启用已自动禁用的通道。')}
+                </div>
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
@@ -226,6 +231,11 @@ export default function SettingsMonitoring(props) {
                     });
                   }}
                 />
+                <div
+                  style={{ marginTop: 8, color: 'var(--semi-color-text-2)' }}
+                >
+                  {t('该开关对定时测试、手动测试和真实请求失败都生效。')}
+                </div>
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Switch
@@ -241,6 +251,13 @@ export default function SettingsMonitoring(props) {
                     })
                   }
                 />
+                <div
+                  style={{ marginTop: 8, color: 'var(--semi-color-text-2)' }}
+                >
+                  {t(
+                    '该开关只在定时测试和手动测试中生效，真实请求不会自动启用。',
+                  )}
+                </div>
               </Col>
             </Row>
             <Row gutter={16}>

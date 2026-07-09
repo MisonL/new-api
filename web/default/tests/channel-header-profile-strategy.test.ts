@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   mergeChannelSubmitFormValues,
@@ -6,8 +7,13 @@ import {
 } from '../src/features/channels/lib/channel-form'
 import {
   BUILTIN_HEADER_PROFILES,
+  NPM_VERSION_FORBIDDEN_CODE,
   NPM_VERSION_LATEST_ALIAS,
+  NPM_VERSION_LOAD_ERROR_CODE,
+  NPM_VERSION_RATE_LIMITED_CODE,
   buildHeaderProfileStrategySettings,
+  buildNpmCliFallbackVersionOptions,
+  buildNpmVersionRequestConfig,
   buildSelectedProfileItems,
   buildVersionedAiCodingCliProfile,
   clearParamOverridePreservingUserAgentPassHeaders,
@@ -15,10 +21,30 @@ import {
   getHeaderProfileStrategyFromSettings,
   normalizeHeaderProfileMode,
   normalizeNpmCliVersionOptions,
+  normalizeNpmCliVersionOptionsResult,
+  normalizeNpmVersionLoadError,
+  normalizeNpmVersionPayloadErrorCode,
+  refreshSelectedVersionedProfileSnapshots,
 } from '../src/features/channels/lib/header-profile-utils'
 import { PARAM_OVERRIDE_TEMPLATES } from '../src/features/system-settings/general/channel-affinity/constants'
 
 describe('channel header profile strategy settings', () => {
+  test('builtin Antigravity CLI profile is fixed snapshot only', () => {
+    const agy = BUILTIN_HEADER_PROFILES.find(
+      (profile) => profile.id === 'agy'
+    )
+
+    expect(agy).toBeDefined()
+    expect(agy?.scope).toBe('builtin')
+    expect(agy?.readonly).toBe(true)
+    expect(agy?.versionSource).toBeNull()
+    expect(agy?.headers['User-Agent']).toBe(
+      'antigravity/cli/1.0.14 (aidev_client; os_type=darwin; arch=amd64)'
+    )
+    expect(agy?.description).toContain('手动配置 pass_headers')
+    expect(agy?.description).not.toContain('Antigravity CLI 请求头透传模板')
+  })
+
   test('channel edit keeps untouched User-Agent related submit state', () => {
     const savedSettings = JSON.stringify({
       responses_compact_mode: 'auto',
@@ -215,6 +241,236 @@ describe('channel header profile strategy settings', () => {
     ).toContain('0.200.0')
   })
 
+  test('writes fallback source for pinned built-in npm snapshot', () => {
+    const codex = BUILTIN_HEADER_PROFILES.find(
+      (profile) => profile.id === 'codex-cli'
+    )
+    expect(codex).toBeDefined()
+
+    const selectedProfile = buildVersionedAiCodingCliProfile(
+      codex!,
+      '0.142.4',
+      '0.142.4',
+      'macos-x64',
+      'fallback'
+    )
+    const nextSettings = buildHeaderProfileStrategySettings('{}', {
+      enabled: true,
+      mode: 'fixed',
+      selectedProfileIds: [selectedProfile.id],
+      profiles: [selectedProfile],
+    })
+    const parsed = JSON.parse(nextSettings)
+
+    expect(parsed.header_profile_strategy.profiles[0].version_meta).toEqual({
+      base_profile_id: 'codex-cli',
+      package_name: '@openai/codex',
+      source: 'fallback',
+      version: '0.142.4',
+      platform: 'macos-x64',
+    })
+  })
+
+  test('refreshes selected fallback snapshot after npm versions load', () => {
+    const codex = BUILTIN_HEADER_PROFILES.find(
+      (profile) => profile.id === 'codex-cli'
+    )
+    expect(codex).toBeDefined()
+
+    const fallbackProfile = buildVersionedAiCodingCliProfile(
+      codex!,
+      NPM_VERSION_LATEST_ALIAS,
+      '0.142.4',
+      'macos-x64',
+      'fallback'
+    )
+    const refreshed = refreshSelectedVersionedProfileSnapshots(
+      {
+        enabled: true,
+        mode: 'fixed',
+        selectedProfileIds: [fallbackProfile.id],
+        profiles: [fallbackProfile],
+      },
+      BUILTIN_HEADER_PROFILES,
+      [
+        {
+          baseProfileId: 'codex-cli',
+          selectedVersion: NPM_VERSION_LATEST_ALIAS,
+          selectedPlatform: 'macos-x64',
+          options: [
+            {
+              value: NPM_VERSION_LATEST_ALIAS,
+              label: 'latest (0.200.0)',
+              isLatest: true,
+              resolvedVersion: '0.200.0',
+            },
+          ],
+        },
+      ]
+    )
+
+    expect(refreshed.profiles[0].versionMeta).toEqual({
+      baseProfileId: 'codex-cli',
+      packageName: '@openai/codex',
+      source: 'npm',
+      version: NPM_VERSION_LATEST_ALIAS,
+      platform: 'macos-x64',
+    })
+    expect(refreshed.profiles[0].headers['User-Agent']).toContain('0.200.0')
+  })
+
+  test('refresh keeps current selected version over stale loaded state', () => {
+    const codex = BUILTIN_HEADER_PROFILES.find(
+      (profile) => profile.id === 'codex-cli'
+    )
+    expect(codex).toBeDefined()
+
+    const pinnedProfile = buildVersionedAiCodingCliProfile(
+      codex!,
+      '0.142.4',
+      '0.142.4',
+      'linux-arm64',
+      'fallback'
+    )
+    const refreshed = refreshSelectedVersionedProfileSnapshots(
+      {
+        enabled: true,
+        mode: 'fixed',
+        selectedProfileIds: [pinnedProfile.id],
+        profiles: [pinnedProfile],
+      },
+      BUILTIN_HEADER_PROFILES,
+      [
+        {
+          baseProfileId: 'codex-cli',
+          selectedVersion: NPM_VERSION_LATEST_ALIAS,
+          selectedPlatform: 'macos-x64',
+          options: [
+            {
+              value: NPM_VERSION_LATEST_ALIAS,
+              label: 'latest (0.200.0)',
+              isLatest: true,
+              resolvedVersion: '0.200.0',
+            },
+            {
+              value: '0.142.4',
+              label: '0.142.4',
+              isLatest: false,
+              resolvedVersion: '0.142.4',
+            },
+          ],
+        },
+      ]
+    )
+
+    expect(refreshed.selectedProfileIds).toEqual(['codex-cli@0.142.4'])
+    expect(refreshed.profiles[0].versionMeta).toMatchObject({
+      source: 'npm',
+      version: '0.142.4',
+      platform: 'linux-arm64',
+    })
+    expect(refreshed.profiles[0].headers['User-Agent']).toContain('0.142.4')
+  })
+
+  test('refresh preserves retained source for selected versions outside backend list', () => {
+    const codex = BUILTIN_HEADER_PROFILES.find(
+      (profile) => profile.id === 'codex-cli'
+    )
+    expect(codex).toBeDefined()
+
+    const retainedProfile = buildVersionedAiCodingCliProfile(
+      codex!,
+      '0.120.0',
+      '0.120.0',
+      'macos-x64',
+      'retained'
+    )
+    const refreshed = refreshSelectedVersionedProfileSnapshots(
+      {
+        enabled: true,
+        mode: 'fixed',
+        selectedProfileIds: [retainedProfile.id],
+        profiles: [retainedProfile],
+      },
+      BUILTIN_HEADER_PROFILES,
+      [
+        {
+          baseProfileId: 'codex-cli',
+          packageName: '@openai/codex',
+          selectedVersion: '0.120.0',
+          selectedPlatform: 'macos-x64',
+          options: [
+            {
+              value: NPM_VERSION_LATEST_ALIAS,
+              label: 'latest (0.200.0)',
+              isLatest: true,
+              resolvedVersion: '0.200.0',
+              source: 'npm',
+            },
+            {
+              value: '0.120.0',
+              label: '0.120.0',
+              isLatest: false,
+              resolvedVersion: '0.120.0',
+              source: 'retained',
+            },
+          ],
+        },
+      ]
+    )
+
+    expect(refreshed.profiles[0].versionMeta).toMatchObject({
+      source: 'retained',
+      version: '0.120.0',
+    })
+    expect(refreshed.profiles[0].headers['User-Agent']).toContain('0.120.0')
+  })
+
+  test('refresh ignores version options from another npm package', () => {
+    const codex = BUILTIN_HEADER_PROFILES.find(
+      (profile) => profile.id === 'codex-cli'
+    )
+    expect(codex).toBeDefined()
+
+    const fallbackProfile = buildVersionedAiCodingCliProfile(
+      codex!,
+      NPM_VERSION_LATEST_ALIAS,
+      '0.142.4',
+      'macos-x64',
+      'fallback'
+    )
+    const strategy = {
+      enabled: true,
+      mode: 'fixed' as const,
+      selectedProfileIds: [fallbackProfile.id],
+      profiles: [fallbackProfile],
+    }
+    const refreshed = refreshSelectedVersionedProfileSnapshots(
+      strategy,
+      BUILTIN_HEADER_PROFILES,
+      [
+        {
+          baseProfileId: 'codex-cli',
+          packageName: '@anthropic-ai/claude-code',
+          selectedVersion: NPM_VERSION_LATEST_ALIAS,
+          selectedPlatform: 'macos-x64',
+          options: [
+            {
+              value: NPM_VERSION_LATEST_ALIAS,
+              label: 'latest (9.9.9)',
+              isLatest: true,
+              resolvedVersion: '9.9.9',
+            },
+          ],
+        },
+      ]
+    )
+
+    expect(refreshed).toBe(strategy)
+    expect(refreshed.profiles[0].versionMeta?.source).toBe('fallback')
+    expect(refreshed.profiles[0].headers['User-Agent']).toContain('0.142.4')
+  })
+
   test('fixed mode keeps one selected profile and empty enabled strategy is disabled', () => {
     expect(normalizeHeaderProfileMode('bad')).toBe('fixed')
     const empty = disableEmptyHeaderProfileStrategy({
@@ -361,8 +617,8 @@ describe('channel header profile strategy settings', () => {
     expect(getHeaderProfileStrategyFromSettings('{bad json')).toBeNull()
   })
 
-  test('limits npm version options to latest plus four pinned versions', () => {
-    const options = normalizeNpmCliVersionOptions([
+	  test('limits npm version options to latest plus five pinned versions', () => {
+	    const options = normalizeNpmCliVersionOptions([
       {
         value: '0.205.0',
         label: '0.205.0',
@@ -401,7 +657,240 @@ describe('channel header profile strategy settings', () => {
       '0.204.0',
       '0.203.0',
       '0.202.0',
+      '0.201.0',
+	    ])
+	  })
+
+	  test('limits legacy npm option arrays without latest to five pinned versions', () => {
+	    const options = normalizeNpmCliVersionOptions([
+	      { value: '0.206.0', label: '0.206.0' },
+	      { value: '0.205.0', label: '0.205.0' },
+	      { value: '0.204.0', label: '0.204.0' },
+	      { value: '0.203.0', label: '0.203.0' },
+	      { value: '0.202.0', label: '0.202.0' },
+	      { value: '0.201.0', label: '0.201.0' },
+	    ])
+
+	    expect(options.map((option) => option.value)).toEqual([
+	      '0.206.0',
+	      '0.205.0',
+	      '0.204.0',
+	      '0.203.0',
+	      '0.202.0',
+	    ])
+	  })
+
+	  test('normalizes legacy latest npm option flags', () => {
+	    const options = normalizeNpmCliVersionOptions([
+      {
+        value: '0.206.0',
+        label: '0.206.0',
+        is_latest: true,
+      },
+      {
+        value: '0.205.0',
+        label: '0.205.0',
+      },
     ])
+
+    expect(options).toEqual([
+      {
+        value: 'latest',
+        label: '0.206.0',
+        isLatest: true,
+        resolvedVersion: '0.206.0',
+        source: 'npm',
+      },
+      {
+        value: '0.205.0',
+        label: '0.205.0',
+        isLatest: false,
+        resolvedVersion: '0.205.0',
+        source: 'npm',
+      },
+    ])
+  })
+
+  test('fallback npm version options keep pinned builtin version selectable', () => {
+    expect(buildNpmCliFallbackVersionOptions('0.142.4')).toEqual([
+      {
+        value: 'latest',
+        label: 'latest (0.142.4)',
+        isLatest: true,
+        resolvedVersion: '0.142.4',
+        source: 'fallback',
+      },
+      {
+        value: '0.142.4',
+        label: '0.142.4',
+        isLatest: false,
+        resolvedVersion: '0.142.4',
+        source: 'fallback',
+      },
+    ])
+  })
+
+  test('normalizes structured backend npm version response', () => {
+    const payload = {
+      package: '@openai/codex',
+      source: 'recorded',
+      refreshed_at: '2026-07-06T10:00:00Z',
+      latest_version: '0.200.0',
+      options: [
+        {
+          value: 'latest',
+          label: 'latest (0.200.0)',
+          isLatest: true,
+          resolvedVersion: '0.200.0',
+        },
+        {
+          value: '0.199.0',
+          label: '0.199.0',
+          isLatest: false,
+          resolvedVersion: '0.199.0',
+          source: 'npm',
+        },
+      ],
+    }
+    const options = normalizeNpmCliVersionOptions(payload)
+
+    expect(options).toEqual([
+      {
+        value: 'latest',
+        label: 'latest (0.200.0)',
+        isLatest: true,
+        resolvedVersion: '0.200.0',
+        source: 'recorded',
+      },
+      {
+        value: '0.199.0',
+        label: '0.199.0',
+        isLatest: false,
+        resolvedVersion: '0.199.0',
+        source: 'npm',
+      },
+    ])
+
+    expect(normalizeNpmCliVersionOptionsResult(payload)).toEqual({
+      packageName: '@openai/codex',
+      source: 'recorded',
+      refreshedAt: '2026-07-06T10:00:00Z',
+      latestVersion: '0.200.0',
+      options,
+    })
+  })
+
+  test('normalizes npm version rate limit and permission errors', () => {
+    expect(
+      normalizeNpmVersionLoadError({
+        response: { status: 429, data: { message: 'too many requests' } },
+      }).code
+    ).toBe(NPM_VERSION_RATE_LIMITED_CODE)
+    expect(
+      normalizeNpmVersionPayloadErrorCode({
+        message: '无权进行此操作，权限不足',
+      })
+    ).toBe(NPM_VERSION_FORBIDDEN_CODE)
+    expect(
+      normalizeNpmVersionPayloadErrorCode({
+        message: 'Unauthorized, insufficient privileges',
+      })
+    ).toBe(NPM_VERSION_FORBIDDEN_CODE)
+    expect(
+      normalizeNpmVersionPayloadErrorCode({
+        message: 'package is not allowed',
+      })
+    ).toBe(NPM_VERSION_LOAD_ERROR_CODE)
+  })
+
+  test('npm version request config suppresses duplicate business toasts', () => {
+    expect(buildNpmVersionRequestConfig('  @openai/codex  ')).toEqual({
+      params: { package: '@openai/codex' },
+      skipBusinessError: true,
+      skipErrorHandler: true,
+      disableDuplicate: true,
+    })
+
+    expect(
+      buildNpmVersionRequestConfig('@openai/codex', { timeout: 5000 })
+    ).toEqual({
+      params: { package: '@openai/codex' },
+      skipBusinessError: true,
+      skipErrorHandler: true,
+      disableDuplicate: true,
+      timeout: 5000,
+    })
+
+    expect(
+      buildNpmVersionRequestConfig('@openai/codex', { timeout: 10000 })
+    ).toMatchObject({
+      timeout: 10000,
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    })
+  })
+
+  test('npm version diagnostics request uses bounded timeout', () => {
+    const source = readFileSync(
+      new URL(
+        '../src/features/channels/components/header-profile-strategy-editor.tsx',
+        import.meta.url
+      ),
+      'utf8'
+    )
+
+    expect(source).toMatch(
+      /\.get\('\/api\/channel\/npm_version_options\/diagnostics',\s*\{\s*timeout: CLI_VERSION_REFRESH_TIMEOUT_MS,\s*skipBusinessError: true,\s*skipErrorHandler: true,\s*disableDuplicate: true,/s
+    )
+  })
+
+  test('performance settings expose read-only npm version diagnostics', () => {
+    const performanceSource = readFileSync(
+      new URL(
+        '../src/features/system-settings/maintenance/performance-section.tsx',
+        import.meta.url
+      ),
+      'utf8'
+    )
+    const diagnosticsSource = readFileSync(
+      new URL(
+        '../src/features/system-settings/maintenance/npm-cli-version-diagnostics.tsx',
+        import.meta.url
+      ),
+      'utf8'
+    )
+
+    expect(performanceSource).toContain(
+      "const NPM_CLI_VERSION_DIAGNOSTICS_TIMEOUT_MS = 10000"
+    )
+    expect(performanceSource).toMatch(
+      /const diagnosticsRequestConfig: DiagnosticsRequestConfig = \{[\s\S]*?timeout: NPM_CLI_VERSION_DIAGNOSTICS_TIMEOUT_MS,[\s\S]*?skipBusinessError: true,[\s\S]*?skipErrorHandler: true,[\s\S]*?disableDuplicate: true,/s
+    )
+    expect(performanceSource).toMatch(
+      /\.get\(\s*'\/api\/channel\/npm_version_options\/diagnostics',\s*diagnosticsRequestConfig\s*\)/s
+    )
+    expect(performanceSource).toContain('<NpmCLIVersionDiagnostics')
+    expect(performanceSource).not.toContain(
+      "'/api/channel/npm_version_options/refresh'"
+    )
+    expect(diagnosticsSource).toContain('scheduled_runs')
+    expect(diagnosticsSource).toContain('last_manual_code')
+    expect(diagnosticsSource).toContain('recommended_action')
+    expect(diagnosticsSource).toContain('recent_errors')
+  })
+
+  test('npm version manual reload is guarded after unmount', () => {
+    const source = readFileSync(
+      new URL(
+        '../src/features/channels/components/header-profile-strategy-editor.tsx',
+        import.meta.url
+      ),
+      'utf8'
+    )
+
+    expect(source).toMatch(
+      /function reloadVersionOptions\(profile: HeaderProfile\)[\s\S]*?if \(!mountedRef\.current\) return[\s\S]*?setVersionStates\(/s
+    )
   })
 
   test('Codex dynamic header passthrough templates do not include User-Agent', () => {
@@ -419,6 +908,24 @@ describe('channel header profile strategy settings', () => {
       expect(headers).toContain('X-Codex-Turn-Metadata')
       expect(headers).not.toContain('User-Agent')
     }
+  })
+
+  test('Responses image input removal template prunes only message content images', () => {
+    const payload = PARAM_OVERRIDE_TEMPLATES.codexWithoutResponsesImageInput
+      .payload as {
+      operations: Array<Record<string, unknown>>
+    }
+
+    expect(payload.operations).toEqual([
+      {
+        path: 'input.*.content',
+        mode: 'prune_objects',
+        value: {
+          type: 'input_image',
+          recursive: true,
+        },
+      },
+    ])
   })
 
   test('clearParamOverridePreservingUserAgentPassHeaders keeps only User-Agent passthrough', () => {

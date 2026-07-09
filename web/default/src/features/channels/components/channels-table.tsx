@@ -14,6 +14,7 @@ import {
 } from '@tanstack/react-table'
 import { useDebounce, useMediaQuery } from '@/hooks'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
@@ -36,7 +37,12 @@ import {
 } from '@/components/data-table'
 import { DataTablePagination } from '@/components/data-table/pagination'
 import { PageFooterPortal } from '@/components/layout'
-import { getChannels, searchChannels, getGroups } from '../api'
+import {
+  getChannels,
+  searchChannels,
+  getGroups,
+  getTopChannelPriorities,
+} from '../api'
 import {
   DEFAULT_PAGE_SIZE,
   CHANNEL_STATUS,
@@ -269,25 +275,48 @@ export function ChannelsTable() {
   const typeCounts = data?.data?.type_counts
 
   const getTopPriority = useCallback(async () => {
-    const response = await getChannels({
-      sort_by: 'priority' as const,
-      sort_order: 'desc' as const,
-      p: 1,
-      page_size: 1,
-    })
+    const response = await getTopChannelPriorities()
 
     if (!response.success) {
       throw new Error(response.message || t('Failed to pin channel'))
     }
 
-    const priority = response.data?.items?.[0]?.priority
+    const priority = response.data?.[0]?.priority
     return typeof priority === 'number' && Number.isFinite(priority)
       ? priority
       : 0
   }, [t])
 
+  const getTopChannels = useCallback(async () => {
+    const response = await getTopChannelPriorities()
+    if (!response.success) {
+      throw new Error(response.message || t('Failed to load pinned channels'))
+    }
+    return response.data || []
+  }, [t])
+
+  const { data: topChannels, error: topChannelsError } = useQuery({
+    queryKey: channelsQueryKeys.top(),
+    queryFn: getTopChannels,
+    staleTime: 30_000,
+  })
+
+  useEffect(() => {
+    if (topChannelsError) {
+      toast.error(
+        topChannelsError instanceof Error
+          ? topChannelsError.message
+          : t('Failed to load pinned channels')
+      )
+    }
+  }, [t, topChannelsError])
+
   // Columns configuration
-  const columns = useChannelsColumns({ getTopPriority })
+  const columns = useChannelsColumns({
+    getTopPriority,
+    getTopChannels,
+    topChannels,
+  })
 
   // React Table instance
   const table = useReactTable({

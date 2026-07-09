@@ -78,7 +78,7 @@ export function TwoFACard({ loading: pageLoading }: TwoFACardProps) {
                     ) : (
                       <StatusBadge
                         label={t('Disabled')}
-                        variant='neutral'
+                        variant='disabled'
                         showDot
                         copyable={false}
                       />

@@ -1,0 +1,14 @@
+export const PROVIDER_ID = 'new-api';
+export const PROVIDER_NAME = 'new-api';
+export const TOOL_ID = '@mison/codex-bridge';
+export const CATALOG_FILE = 'new-api-model-catalog.json';
+export const RECEIPT_FILE = 'new-api-codex-bridge-receipt.json';
+export const BACKUP_ROOT = 'backups/new-api-codex-bridge';
+export const CONFIG_FILE = 'config.toml';
+export const AUTH_FILE = 'auth.json';
+export const ENV_KEY = 'OPENAI_API_KEY';
+export const MODEL_DISCOVERY_TIMEOUT_MS = 10000;
+export const SETTINGS_MARKER_START = '# BEGIN new-api-codex-bridge settings';
+export const SETTINGS_MARKER_END = '# END new-api-codex-bridge settings';
+export const PROVIDER_MARKER_START = '# BEGIN new-api-codex-bridge provider';
+export const PROVIDER_MARKER_END = '# END new-api-codex-bridge provider';

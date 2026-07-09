@@ -45,6 +45,19 @@ export const STATIC_I18N_KEYS = [
   'All Tags',
   'More...',
   'Less',
+  'Auto Fallback Reason',
+  'Client Path',
+  'End reason',
+  'First response time',
+  'Request Info',
+  'Request path',
+  'Soft Errors',
+  'Show channel affinity',
+  'Stream Status',
+  'Upstream header',
+  'Upstream first byte',
+  'Upstream timing',
+  'Upstream total',
 
   // Roles
   'Super Admin',
@@ -204,7 +217,9 @@ export const STATIC_I18N_KEYS = [
   'Replace Current Rules',
   'Select a common template',
   'Trace Headers Passthrough',
+  'Upstream Path',
   'Upstream Compat: Remove Image Generation Tool',
+  'Upstream Compat: Remove Responses Image Input',
 
   // Models constants
   'Exact Match',
@@ -394,6 +409,18 @@ export const STATIC_I18N_KEYS = [
   'Pin to Top',
   'Pinning...',
   'Failed to pin channel',
+  'Failed to load pinned channels',
+  'Failed to update pinned channel order',
+  'Pinned channel rollback failed. Please refresh and verify order.',
+  'Move Up',
+  'Move Down',
+  'Move pinned channel up',
+  'Move pinned channel down',
+  'This pinned channel is already at the top',
+  'This pinned channel is already at the bottom',
+  'No pinned channel to move',
+  'Only pinned channels can be moved',
+  'Pinned channel order updated',
 
   // User subscription management
   'User Subscription Management',
@@ -487,6 +514,7 @@ export const STATIC_I18N_KEYS = [
   // Misc
   'Cancel',
   'Status',
+  'Partial',
   'Upgrade Group',
   'Regenerate',
   'Untitled',

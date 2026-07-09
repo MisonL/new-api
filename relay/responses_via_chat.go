@@ -3,8 +3,10 @@ package relay
 import (
 	"bytes"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	openaichannel "github.com/QuantumNous/new-api/relay/channel/openai"
@@ -39,6 +41,24 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 	if err := common.Unmarshal(responsesJSON, &overriddenResponsesReq); err != nil {
 		return nil, types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
 	}
+
+	convertedResponsesReq, appliedSyntheticCompact, visibleOnlySyntheticCompact, applyInfo, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(
+		relaycommon.GinRequestContext(c),
+		service.SyntheticCompactScopeFromSource(info),
+		overriddenResponsesReq,
+	)
+	service.SetSyntheticCompactApplyInfo(c, applyInfo)
+	if err != nil {
+		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	if visibleOnlySyntheticCompact {
+		overriddenResponsesReq = convertedResponsesReq
+		service.MarkResponsesCompactVisibleOnlyFallback(c, info, "stale_local_synthetic_state_visible_only")
+	} else if appliedSyntheticCompact {
+		overriddenResponsesReq = convertedResponsesReq
+		common.SetContextKey(c, constant.ContextKeyResponsesPreviousIDAction, "cleared_by_synthetic_restore")
+	}
+	markResponsesChatCompatIgnoredEncryptedInclude(c, overriddenResponsesReq.Include)
 
 	chatReq, err := service.ResponsesRequestToChatCompletionsRequestWithOptions(&overriddenResponsesReq, options)
 	if err != nil {
@@ -105,4 +125,24 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 		return nil, newApiErr
 	}
 	return usage, nil
+}
+
+func markResponsesChatCompatIgnoredEncryptedInclude(c *gin.Context, raw []byte) {
+	if c == nil {
+		return
+	}
+	jsonType := common.GetJsonType(raw)
+	if jsonType != "array" {
+		return
+	}
+	var includeValues []string
+	if err := common.Unmarshal(raw, &includeValues); err != nil {
+		return
+	}
+	for _, includeValue := range includeValues {
+		if strings.TrimSpace(includeValue) == "reasoning.encrypted_content" {
+			common.SetContextKey(c, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude, true)
+			return
+		}
+	}
 }

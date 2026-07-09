@@ -9,7 +9,10 @@ import {
   getTopupAuditEntryDescriptors,
   shouldShowLogIp,
 } from "../classic/src/hooks/usage-logs/logAuditInfo.js";
-import { buildRequestHeaderAuditLines } from "../classic/src/hooks/usage-logs/headerAuditInfo.js";
+import {
+  buildRequestHeaderAuditLines,
+  normalizeRequestHeaderPolicyFromLogOther,
+} from "../classic/src/hooks/usage-logs/headerAuditInfo.js";
 
 const t = (value) => value;
 const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -138,7 +141,7 @@ test("请求头审计气泡按列范围展示不同内容", () => {
   const policy = {
     mode: "merge",
     header_profile_id: "codex-cli",
-    applied_user_agent: "codex-tui/0.134.0",
+    applied_user_agent: "codex-tui/0.142.4",
     applied_header_keys: ["User-Agent", "originator", "x-codex-window-id"],
   };
 
@@ -149,7 +152,7 @@ test("请求头审计气泡按列范围展示不同内容", () => {
     [
       ["mode", "合并"],
       ["profile", "codex-cli"],
-      ["user-agent", "codex-tui/0.134.0"],
+      ["user-agent", "codex-tui/0.142.4"],
     ],
   );
 
@@ -163,6 +166,79 @@ test("请求头审计气泡按列范围展示不同内容", () => {
       ["profile", "codex-cli"],
       ["headers", "originator, x-codex-window-id"],
     ],
+  );
+});
+
+test("请求头审计兼容旧日志顶层 UA 策略字段", () => {
+  const policy = normalizeRequestHeaderPolicyFromLogOther({
+    header_policy_mode: "merge",
+    ua_strategy_mode: "round_robin",
+    selected_user_agent: "codex-cli",
+    applied_user_agent: "codex-cli",
+  });
+
+  assert.deepEqual(
+    buildRequestHeaderAuditLines(policy, "user-agent", t).map(
+      ({ key, value }) => [key, value],
+    ),
+    [
+      ["mode", "合并"],
+      ["user-agent", "codex-cli"],
+    ],
+  );
+});
+
+test("请求头审计安全处理缺失的日志扩展字段", () => {
+  assert.equal(normalizeRequestHeaderPolicyFromLogOther(null), null);
+  assert.equal(normalizeRequestHeaderPolicyFromLogOther(undefined), null);
+});
+
+test("请求头审计保留旧日志显式 false 布尔审计字段", () => {
+  assert.deepEqual(
+    normalizeRequestHeaderPolicyFromLogOther({
+      header_profile_applied: false,
+      override_static_user_agent: false,
+      user_agent_applied: false,
+    }),
+    {
+      header_profile_applied: false,
+      override_static_user_agent: false,
+      user_agent_applied: false,
+    },
+  );
+});
+
+test("请求头审计在结构化策略为空时回退旧日志顶层字段", () => {
+  assert.deepEqual(
+    normalizeRequestHeaderPolicyFromLogOther({
+      request_header_policy: {},
+      header_policy_mode: "merge",
+      header_profile_applied: false,
+      override_static_user_agent: false,
+      user_agent_applied: false,
+    }),
+    {
+      mode: "merge",
+      header_profile_applied: false,
+      override_static_user_agent: false,
+      user_agent_applied: false,
+    },
+  );
+
+  assert.deepEqual(
+    normalizeRequestHeaderPolicyFromLogOther({
+      request_header_policy: null,
+      header_policy_mode: "merge",
+      header_profile_applied: false,
+      override_static_user_agent: false,
+      user_agent_applied: false,
+    }),
+    {
+      mode: "merge",
+      header_profile_applied: false,
+      override_static_user_agent: false,
+      user_agent_applied: false,
+    },
   );
 });
 

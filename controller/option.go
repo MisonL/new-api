@@ -325,6 +325,16 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 		option.Value = normalizedPolicyJSON
+	case "global.request_body_limit_policy":
+		normalizedPolicyJSON, normalizeErr := model_setting.NormalizeRequestBodyLimitPolicyJSON(option.Value.(string))
+		if normalizeErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": normalizeErr.Error(),
+			})
+			return
+		}
+		option.Value = normalizedPolicyJSON
 	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {

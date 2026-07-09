@@ -102,13 +102,6 @@ export function FetchModelsDialog({
     })
   }, [fetchedModelSet, redirectSourceKeysSet, searchKeyword, selectedModels])
 
-  useEffect(() => {
-    if (open && currentRow) {
-      handleFetchModels()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, currentRow?.id])
-
   const handleFetchModels = async () => {
     if (!currentRow) return
 
@@ -133,6 +126,13 @@ export function FetchModelsDialog({
       setIsFetching(false)
     }
   }
+
+  useEffect(() => {
+    if (open && currentRow) {
+      void Promise.resolve().then(() => handleFetchModels())
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, currentRow?.id])
 
   const handleSave = async () => {
     if (!currentRow) return

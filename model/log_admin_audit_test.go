@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -289,6 +290,238 @@ func TestRecordConsumeLogCopiesUpstreamRequestIdFromOther(t *testing.T) {
 	require.NoError(t, LOG_DB.Last(&stored).Error)
 	require.Equal(t, "local-req", stored.RequestId)
 	require.Equal(t, "upstream-from-other", stored.UpstreamRequestId)
+}
+
+func TestRecordConsumeLogUsesContextSettingForIP(t *testing.T) {
+	truncateTables(t)
+
+	user := &User{
+		Id:          101,
+		Username:    "target-user",
+		Password:    "password123",
+		DisplayName: "target-user",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+	}
+	user.SetSetting(dto.UserSetting{RecordIpLog: false})
+	require.NoError(t, DB.Create(user).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Request.RemoteAddr = "203.0.113.10:1234"
+	c.Set("username", "target-user")
+	common.SetContextKey(c, constant.ContextKeyUserSetting, dto.UserSetting{RecordIpLog: true})
+
+	RecordConsumeLog(c, 101, RecordConsumeLogParams{
+		ChannelId:        24,
+		PromptTokens:     1,
+		CompletionTokens: 2,
+		ModelName:        "gpt-5.5",
+		TokenName:        "token-a",
+		Quota:            100,
+		Content:          "ok",
+		TokenId:          7,
+		Group:            "default",
+	})
+
+	var stored Log
+	require.NoError(t, LOG_DB.Last(&stored).Error)
+	require.Equal(t, "203.0.113.10", stored.Ip)
+}
+
+func TestRecordConsumeLogContextSettingCanDisableStoredIP(t *testing.T) {
+	truncateTables(t)
+
+	user := &User{
+		Id:          103,
+		Username:    "target-user-disabled",
+		Password:    "password123",
+		DisplayName: "target-user-disabled",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+	}
+	user.SetSetting(dto.UserSetting{RecordIpLog: true})
+	require.NoError(t, DB.Create(user).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Request.RemoteAddr = "203.0.113.12:1234"
+	c.Set("username", "target-user-disabled")
+	common.SetContextKey(c, constant.ContextKeyUserSetting, dto.UserSetting{RecordIpLog: false})
+
+	RecordConsumeLog(c, 103, RecordConsumeLogParams{
+		ChannelId:        24,
+		PromptTokens:     1,
+		CompletionTokens: 2,
+		ModelName:        "gpt-5.5",
+		TokenName:        "token-a",
+		Quota:            100,
+		Content:          "ok",
+		TokenId:          7,
+		Group:            "default",
+	})
+
+	var stored Log
+	require.NoError(t, LOG_DB.Last(&stored).Error)
+	require.Empty(t, stored.Ip)
+}
+
+func TestRecordConsumeLogFallsBackToStoredSettingForIP(t *testing.T) {
+	truncateTables(t)
+
+	user := &User{
+		Id:          102,
+		Username:    "fallback-user",
+		Password:    "password123",
+		DisplayName: "fallback-user",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+	}
+	user.SetSetting(dto.UserSetting{RecordIpLog: true})
+	require.NoError(t, DB.Create(user).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Request.RemoteAddr = "203.0.113.11:1234"
+	c.Set("username", "fallback-user")
+
+	RecordConsumeLog(c, 102, RecordConsumeLogParams{
+		ChannelId:        24,
+		PromptTokens:     1,
+		CompletionTokens: 2,
+		ModelName:        "gpt-5.5",
+		TokenName:        "token-a",
+		Quota:            100,
+		Content:          "ok",
+		TokenId:          7,
+		Group:            "default",
+	})
+
+	var stored Log
+	require.NoError(t, LOG_DB.Last(&stored).Error)
+	require.Equal(t, "203.0.113.11", stored.Ip)
+}
+
+func TestRecordConsumeLogDoesNotRecordIPWhenUserSettingMissing(t *testing.T) {
+	truncateTables(t)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Request.RemoteAddr = "203.0.113.13:1234"
+	c.Set("username", "missing-user")
+
+	RecordConsumeLog(c, 999991, RecordConsumeLogParams{
+		ChannelId:        24,
+		PromptTokens:     1,
+		CompletionTokens: 2,
+		ModelName:        "gpt-5.5",
+		TokenName:        "token-a",
+		Quota:            100,
+		Content:          "ok",
+		TokenId:          7,
+		Group:            "default",
+	})
+
+	var stored Log
+	require.NoError(t, LOG_DB.Last(&stored).Error)
+	require.Equal(t, 999991, stored.UserId)
+	require.Empty(t, stored.Ip)
+}
+
+func TestRecordErrorLogUsesContextSettingForIP(t *testing.T) {
+	truncateTables(t)
+
+	user := &User{
+		Id:          104,
+		Username:    "error-user",
+		Password:    "password123",
+		DisplayName: "error-user",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+	}
+	user.SetSetting(dto.UserSetting{RecordIpLog: false})
+	require.NoError(t, DB.Create(user).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.RemoteAddr = "203.0.113.20:1234"
+	c.Set("username", "error-user")
+	common.SetContextKey(c, constant.ContextKeyUserSetting, dto.UserSetting{RecordIpLog: true})
+
+	RecordErrorLog(c, 104, 24, "gpt-5.5", "token-a", "upstream failed", 7, 1, true, "default", nil)
+
+	var stored Log
+	require.NoError(t, LOG_DB.Last(&stored).Error)
+	require.Equal(t, LogTypeError, stored.Type)
+	require.Equal(t, "203.0.113.20", stored.Ip)
+}
+
+func TestRecordErrorLogContextSettingCanDisableStoredIP(t *testing.T) {
+	truncateTables(t)
+
+	user := &User{
+		Id:          105,
+		Username:    "error-user-disabled",
+		Password:    "password123",
+		DisplayName: "error-user-disabled",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+	}
+	user.SetSetting(dto.UserSetting{RecordIpLog: true})
+	require.NoError(t, DB.Create(user).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.RemoteAddr = "203.0.113.21:1234"
+	c.Set("username", "error-user-disabled")
+	common.SetContextKey(c, constant.ContextKeyUserSetting, dto.UserSetting{RecordIpLog: false})
+
+	RecordErrorLog(c, 105, 24, "gpt-5.5", "token-a", "upstream failed", 7, 1, true, "default", nil)
+
+	var stored Log
+	require.NoError(t, LOG_DB.Last(&stored).Error)
+	require.Equal(t, LogTypeError, stored.Type)
+	require.Empty(t, stored.Ip)
+}
+
+func TestRecordErrorLogFallsBackToStoredSettingForIP(t *testing.T) {
+	truncateTables(t)
+
+	user := &User{
+		Id:          106,
+		Username:    "error-fallback-user",
+		Password:    "password123",
+		DisplayName: "error-fallback-user",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+	}
+	user.SetSetting(dto.UserSetting{RecordIpLog: true})
+	require.NoError(t, DB.Create(user).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.RemoteAddr = "203.0.113.22:1234"
+	c.Set("username", "error-fallback-user")
+
+	RecordErrorLog(c, 106, 24, "gpt-5.5", "token-a", "upstream failed", 7, 1, true, "default", nil)
+
+	var stored Log
+	require.NoError(t, LOG_DB.Last(&stored).Error)
+	require.Equal(t, LogTypeError, stored.Type)
+	require.Equal(t, "203.0.113.22", stored.Ip)
 }
 
 func seedExplicitWildcardLogFilters(t *testing.T) {

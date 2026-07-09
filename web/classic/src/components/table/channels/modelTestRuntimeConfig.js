@@ -197,6 +197,38 @@ const formatHeaderPolicyMode = (mode, t) => {
   return normalized || t('已配置');
 };
 
+const formatCapabilityBoolean = (label, value, t) => {
+  if (value === true) {
+    return `${label}: ${t('Yes')}`;
+  }
+  if (value === false) {
+    return `${label}: ${t('No')}`;
+  }
+  return '';
+};
+
+const formatCapabilityObservation = (label, observation) => {
+  if (!observation || typeof observation !== 'object') {
+    return '';
+  }
+  const parts = [];
+  if (Number.isFinite(Number(observation.status_code))) {
+    parts.push(`status=${Number(observation.status_code)}`);
+  }
+  if (observation.error_code) {
+    parts.push(`code=${observation.error_code}`);
+  }
+  if (observation.reason) {
+    parts.push(`reason=${observation.reason}`);
+  }
+  if (Number.isFinite(Number(observation.observed_at))) {
+    parts.push(
+      `at=${new Date(Number(observation.observed_at) * 1000).toLocaleString()}`,
+    );
+  }
+  return parts.length > 0 ? `${label}: ${parts.join(' / ')}` : '';
+};
+
 export const getModelTestRuntimeSnapshot = (channel, t) => {
   const channelSetting = safeParseJsonObject(channel?.setting);
   const channelSettings = safeParseJsonObject(channel?.settings);
@@ -283,7 +315,10 @@ export const formatRuntimeResult = (runtimeConfig, t) => {
       runtimeConfig.request_path !== runtimeConfig.final_request_path
         ? `${runtimeConfig.request_path} -> ${runtimeConfig.final_request_path}`
         : runtimeConfig.final_request_path;
-    parts.push(`${t('路径')}: ${pathText}`);
+    parts.push(`${t('客户端路径')}: ${pathText}`);
+  }
+  if (runtimeConfig.upstream_request_path) {
+    parts.push(`${t('上游路径')}: ${runtimeConfig.upstream_request_path}`);
   }
   if (
     Array.isArray(runtimeConfig.request_conversion_chain) &&
@@ -292,6 +327,53 @@ export const formatRuntimeResult = (runtimeConfig, t) => {
     parts.push(
       `${t('协议')}: ${runtimeConfig.request_conversion_chain.join(' -> ')}`,
     );
+  }
+  const capability = runtimeConfig.channel_capability_snapshot;
+  if (capability && typeof capability === 'object') {
+    const capabilityParts = [
+      capability.source ? `source=${capability.source}` : '',
+      capability.profile ? `profile=${capability.profile}` : '',
+      capability.compact_mode_effective
+        ? `mode=${capability.compact_mode_effective}`
+        : '',
+      formatCapabilityBoolean(
+        'compact',
+        capability.supports_responses_compact,
+        t,
+      ),
+      formatCapabilityBoolean(
+        'previous_id',
+        capability.supports_rest_previous_response_id,
+        t,
+      ),
+      formatCapabilityBoolean(
+        'compaction_pass',
+        capability.supports_compaction_item_passthrough,
+        t,
+      ),
+      formatCapabilityBoolean(
+        'strip_reasoning',
+        capability.strips_responses_encrypted_reasoning,
+        t,
+      ),
+    ].filter(Boolean);
+    if (capabilityParts.length > 0) {
+      parts.push(`Capability: ${capabilityParts.join(' / ')}`);
+    }
+    const observedLabel = formatCapabilityObservation(
+      capability.observed?.status_code >= 400 ? 'last fail' : 'last observed',
+      capability.observed,
+    );
+    if (observedLabel) {
+      parts.push(observedLabel);
+    }
+    const probeLabel = formatCapabilityObservation(
+      'last probe',
+      capability.probe,
+    );
+    if (probeLabel) {
+      parts.push(probeLabel);
+    }
   }
   return parts.join(' | ');
 };

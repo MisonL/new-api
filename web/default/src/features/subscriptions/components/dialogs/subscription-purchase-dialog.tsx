@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Crown, CalendarClock, Package } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -50,25 +50,26 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const [paying, setPaying] = useState(false)
   const [selectedEpayMethod, setSelectedEpayMethod] = useState('')
 
-  useEffect(() => {
-    if (props.open && props.epayMethods && props.epayMethods.length > 0) {
-      setSelectedEpayMethod(props.epayMethods[0].type)
-    } else if (!props.open) {
-      setSelectedEpayMethod('')
-    }
-  }, [props.open, props.epayMethods])
-
   const plan = props.plan?.plan
   if (!plan) return null
 
+  const epayMethods = props.epayMethods || []
   const hasStripe = props.enableStripe && !!plan.stripe_price_id
   const hasCreem = props.enableCreem && !!plan.creem_product_id
-  const hasEpay =
-    props.enableOnlineTopUp && (props.epayMethods || []).length > 0
+  const hasEpay = props.enableOnlineTopUp && epayMethods.length > 0
   const hasAnyPayment = hasStripe || hasCreem || hasEpay
+  const selectedEpayMethodIsAvailable = epayMethods.some(
+    (method) => method.type === selectedEpayMethod
+  )
+  const effectiveSelectedEpayMethod =
+    hasEpay && selectedEpayMethodIsAvailable
+      ? selectedEpayMethod
+      : hasEpay
+        ? epayMethods[0]?.type || ''
+        : ''
   const selectedEpayMethodLabel = getSelectedPaymentMethodLabel(
-    selectedEpayMethod,
-    props.epayMethods || [],
+    effectiveSelectedEpayMethod,
+    epayMethods,
     t
   )
   const totalAmount = Number(plan.total_amount || 0)
@@ -126,7 +127,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
     /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 
   const handlePayEpay = async () => {
-    if (!selectedEpayMethod) {
+    if (!effectiveSelectedEpayMethod) {
       toast.error(t('Please select a payment method'))
       return
     }
@@ -134,7 +135,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
     try {
       const res = await paySubscriptionEpay({
         plan_id: plan.id,
-        payment_method: selectedEpayMethod,
+        payment_method: effectiveSelectedEpayMethod,
       })
       if (res.message === 'success' && res.url) {
         const form = document.createElement('form')
@@ -271,7 +272,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
               {hasEpay && (
                 <div className='grid grid-cols-[minmax(0,1fr)_auto] gap-2'>
                   <Select
-                    value={selectedEpayMethod}
+                    value={effectiveSelectedEpayMethod}
                     onValueChange={setSelectedEpayMethod}
                     disabled={limitReached}
                   >
@@ -279,7 +280,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
                       <SelectValue>{selectedEpayMethodLabel}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {(props.epayMethods || []).map((m) => (
+                      {epayMethods.map((m) => (
                         <SelectItem key={m.type} value={m.type}>
                           {m.name || m.type}
                         </SelectItem>
@@ -288,7 +289,9 @@ export function SubscriptionPurchaseDialog(props: Props) {
                   </Select>
                   <Button
                     onClick={handlePayEpay}
-                    disabled={paying || !selectedEpayMethod || limitReached}
+                    disabled={
+                      paying || !effectiveSelectedEpayMethod || limitReached
+                    }
                   >
                     {t('Pay')}
                   </Button>

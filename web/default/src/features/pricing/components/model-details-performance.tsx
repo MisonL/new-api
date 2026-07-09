@@ -17,6 +17,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { GroupBadge } from '@/components/group-badge'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { getPerfMetrics, type PerformanceGroup } from '../api'
 import type { PricingModel } from '../types'
 import { AvailabilityBarChart, LatencyTrendChart } from './model-details-charts'
@@ -36,6 +38,12 @@ type PerformanceRow = {
   group: string
   avg_ttft_ms: number
   avg_latency_ms: number
+  avg_upstream_header_ms: number
+  avg_upstream_ttfb_ms: number
+  avg_upstream_total_ms: number
+  upstream_header_count: number
+  upstream_ttfb_count: number
+  upstream_total_count: number
   success_rate: number
   request_count: number
 }
@@ -85,6 +93,67 @@ function weightedLatency(rows: PerformanceRow[]): number {
   return count > 0 ? Math.round(total / count) : 0
 }
 
+function bestPositiveLatency(values: number[]): number | null {
+  const positiveValues = values.filter((value) => value > 0)
+  return positiveValues.length > 0 ? Math.min(...positiveValues) : null
+}
+
+function PerformanceDetailsSkeleton() {
+  return (
+    <div className='flex flex-col gap-4'>
+      <div className='grid grid-cols-2 gap-2 lg:grid-cols-4'>
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Skeleton key={index} className='h-24 rounded-lg' />
+        ))}
+      </div>
+      <Skeleton className='h-48 rounded-lg' />
+      <Skeleton className='h-56 rounded-lg' />
+      <Skeleton className='h-56 rounded-lg' />
+    </div>
+  )
+}
+
+function UpstreamTimingCell(props: { row: PerformanceRow }) {
+  const { t } = useTranslation()
+  const items = [
+    {
+      label: t('Upstream header'),
+      value: props.row.avg_upstream_header_ms,
+      count: props.row.upstream_header_count,
+    },
+    {
+      label: t('Upstream first byte'),
+      value: props.row.avg_upstream_ttfb_ms,
+      count: props.row.upstream_ttfb_count,
+    },
+    {
+      label: t('Upstream total'),
+      value: props.row.avg_upstream_total_ms,
+      count: props.row.upstream_total_count,
+    },
+  ].filter((item) => item.count > 0)
+
+  if (items.length === 0) {
+    return <span className='text-muted-foreground/50'>-</span>
+  }
+
+  return (
+    <div className='flex flex-col items-end gap-0.5'>
+      {items.map((item) => (
+        <span
+          key={item.label}
+          className='text-muted-foreground inline-flex gap-1 font-mono text-xs tabular-nums'
+        >
+          <span className='text-muted-foreground/60 font-sans'>
+            {item.label}
+          </span>
+          {formatLatency(item.value)}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function SectionHeader(props: {
   icon: React.ComponentType<{ className?: string }>
   title: string
@@ -131,6 +200,12 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
         group: group.group,
         avg_ttft_ms: group.avg_ttft_ms,
         avg_latency_ms: group.avg_latency_ms,
+        avg_upstream_header_ms: group.avg_upstream_header_ms,
+        avg_upstream_ttfb_ms: group.avg_upstream_ttfb_ms,
+        avg_upstream_total_ms: group.avg_upstream_total_ms,
+        upstream_header_count: group.upstream_header_count,
+        upstream_ttfb_count: group.upstream_ttfb_count,
+        upstream_total_count: group.upstream_total_count,
         success_rate: group.success_rate,
         request_count: group.request_count,
       })),
@@ -142,7 +217,27 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
     [groups]
   )
 
-  if (metricsQuery.isLoading || rows.length === 0) {
+  if (metricsQuery.isLoading) {
+    return <PerformanceDetailsSkeleton />
+  }
+
+  if (metricsQuery.isError) {
+    return (
+      <div className='text-muted-foreground flex flex-col items-center gap-3 rounded-lg border p-6 text-center text-sm'>
+        <span>{t('Failed to load')}</span>
+        <Button
+          type='button'
+          variant='outline'
+          size='sm'
+          onClick={() => void metricsQuery.refetch()}
+        >
+          {t('Retry')}
+        </Button>
+      </div>
+    )
+  }
+
+  if (rows.length === 0) {
     return (
       <div className='text-muted-foreground rounded-lg border p-6 text-center text-sm'>
         {t('Performance data is not yet available for this model.')}
@@ -150,9 +245,7 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
     )
   }
 
-  const bestTtft = Math.min(
-    ...rows.map((row) => row.avg_ttft_ms).filter((value) => value > 0)
-  )
+  const bestTtft = bestPositiveLatency(rows.map((row) => row.avg_ttft_ms))
   const totalRequests = rows.reduce((sum, row) => sum + row.request_count, 0)
   const totalSuccess = groups.reduce(
     (sum, group) => sum + group.success_count,
@@ -163,6 +256,12 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
   const incidentCount = availabilitySeries.reduce(
     (sum, point) => sum + point.incidents,
     0
+  )
+  const hasUpstreamTiming = rows.some(
+    (row) =>
+      row.upstream_header_count > 0 ||
+      row.upstream_ttfb_count > 0 ||
+      row.upstream_total_count > 0
   )
   const intent =
     successRate >= 99.9 ? 'success' : successRate >= 99 ? 'default' : 'warning'
@@ -175,7 +274,7 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
         <ModelDetailsStatCard
           icon={Timer}
           label={t('Best TTFT')}
-          value={formatLatency(Number.isFinite(bestTtft) ? bestTtft : 0)}
+          value={bestTtft == null ? '-' : formatLatency(bestTtft)}
           hint={t('Lowest average first-token latency')}
         />
         <ModelDetailsStatCard
@@ -209,7 +308,9 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
         <SectionHeader
           icon={Activity}
           title={t('Per-group performance')}
-          description={t('Average latency, TTFT, and success rate by group')}
+          description={t(
+            'Average latency, TTFT, upstream timing, and success rate by group'
+          )}
         />
         <div className='overflow-x-auto rounded-lg border'>
           <Table className='text-sm'>
@@ -222,6 +323,11 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
                 <TableHead className={`${headerCellClass} text-right`}>
                   {t('Average latency')}
                 </TableHead>
+                {hasUpstreamTiming && (
+                  <TableHead className={`${headerCellClass} text-right`}>
+                    {t('Upstream timing')}
+                  </TableHead>
+                )}
                 <TableHead className={`${headerCellClass} text-right`}>
                   {t('Success rate')}
                 </TableHead>
@@ -242,6 +348,11 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
                   <TableCell className='text-muted-foreground py-2.5 text-right font-mono'>
                     {formatLatency(row.avg_latency_ms)}
                   </TableCell>
+                  {hasUpstreamTiming && (
+                    <TableCell className='py-2.5 text-right'>
+                      <UpstreamTimingCell row={row} />
+                    </TableCell>
+                  )}
                   <TableCell className='text-muted-foreground py-2.5 text-right font-mono'>
                     {formatPercent(row.success_rate)}
                   </TableCell>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { AxiosRequestConfig } from 'axios'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useTranslation } from 'react-i18next'
@@ -12,6 +13,11 @@ import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { DiskCacheFields } from './disk-cache-fields'
 import { ModelPerformanceMetricsFields } from './model-performance-metrics-fields'
+import {
+  NpmCLIVersionDiagnostics,
+  type NpmCLIVersionDiagnosticsApiResponse,
+  type NpmCLIVersionDiagnosticsData,
+} from './npm-cli-version-diagnostics'
 import { PerformanceStatsDashboard } from './performance-stats-dashboard'
 import {
   formatBytes,
@@ -27,6 +33,14 @@ interface Props {
   defaultValues: PerfFormValues
 }
 
+const NPM_CLI_VERSION_DIAGNOSTICS_TIMEOUT_MS = 10000
+
+type DiagnosticsRequestConfig = AxiosRequestConfig & {
+  skipBusinessError?: boolean
+  skipErrorHandler?: boolean
+  disableDuplicate?: boolean
+}
+
 export function PerformanceSection(props: Props) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -35,6 +49,10 @@ export function PerformanceSection(props: Props) {
   const [logCleanupMode, setLogCleanupMode] = useState('by_count')
   const [logCleanupValue, setLogCleanupValue] = useState(10)
   const [logCleanupLoading, setLogCleanupLoading] = useState(false)
+  const [npmDiagnostics, setNpmDiagnostics] =
+    useState<NpmCLIVersionDiagnosticsData | null>(null)
+  const [npmDiagnosticsLoading, setNpmDiagnosticsLoading] = useState(false)
+  const [npmDiagnosticsError, setNpmDiagnosticsError] = useState('')
 
   const form = useForm<PerfFormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -63,10 +81,44 @@ export function PerformanceSection(props: Props) {
     }
   }, [])
 
+  const fetchNpmDiagnostics = useCallback(async () => {
+    setNpmDiagnosticsLoading(true)
+    try {
+      const diagnosticsRequestConfig: DiagnosticsRequestConfig = {
+        timeout: NPM_CLI_VERSION_DIAGNOSTICS_TIMEOUT_MS,
+        skipBusinessError: true,
+        skipErrorHandler: true,
+        disableDuplicate: true,
+      }
+      const res = await api.get(
+        '/api/channel/npm_version_options/diagnostics',
+        diagnosticsRequestConfig
+      )
+      const payload = res.data as NpmCLIVersionDiagnosticsApiResponse
+      if (payload?.success === true) {
+        setNpmDiagnostics(payload.data ?? null)
+        setNpmDiagnosticsError('')
+      } else {
+        setNpmDiagnosticsError(
+          payload?.message || t('Failed to load npm CLI version diagnostics')
+        )
+      }
+    } catch (error) {
+      setNpmDiagnosticsError(
+        error instanceof Error
+          ? error.message
+          : t('Failed to load npm CLI version diagnostics')
+      )
+    } finally {
+      setNpmDiagnosticsLoading(false)
+    }
+  }, [t])
+
   useEffect(() => {
     fetchStats()
     fetchLogInfo()
-  }, [fetchStats, fetchLogInfo])
+    fetchNpmDiagnostics()
+  }, [fetchStats, fetchLogInfo, fetchNpmDiagnostics])
 
   const onSubmit = async (data: PerfFormValues) => {
     const entries = Object.entries(data) as [string, unknown][]
@@ -215,6 +267,15 @@ export function PerformanceSection(props: Props) {
         onModeChange={setLogCleanupMode}
         onValueChange={setLogCleanupValue}
         onCleanup={cleanupLogFiles}
+      />
+
+      <Separator />
+
+      <NpmCLIVersionDiagnostics
+        diagnostics={npmDiagnostics}
+        loading={npmDiagnosticsLoading}
+        error={npmDiagnosticsError}
+        onRefresh={fetchNpmDiagnostics}
       />
 
       <Separator />

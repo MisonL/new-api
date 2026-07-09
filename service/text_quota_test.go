@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -11,11 +12,37 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestIsBenignCanceledTextStream(t *testing.T) {
+	status := relaycommon.NewStreamStatus()
+	status.SetEndReason(relaycommon.StreamEndReasonClientGone, context.Canceled)
+
+	require.True(t, isBenignCanceledTextStream(&relaycommon.RelayInfo{
+		IsStream:     true,
+		StreamStatus: status,
+	}))
+	require.False(t, isBenignCanceledTextStream(&relaycommon.RelayInfo{
+		IsStream:     false,
+		StreamStatus: status,
+	}))
+}
+
+func TestIsBenignCanceledTextStreamRejectsSoftErroredClientGone(t *testing.T) {
+	status := relaycommon.NewStreamStatus()
+	status.RecordError("upstream warning")
+	status.SetEndReason(relaycommon.StreamEndReasonClientGone, context.Canceled)
+
+	require.False(t, isBenignCanceledTextStream(&relaycommon.RelayInfo{
+		IsStream:     true,
+		StreamStatus: status,
+	}))
+}
 
 func TestCalculateTextQuotaSummaryUnifiedForClaudeSemantic(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -287,7 +314,7 @@ func TestResponsesCompactLogInfoRecordsDisabledBeforeProxyProfileFallbacks(t *te
 	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
 	ctx.Set("responses_compact_auto_fallback_attempted", true)
 	ctx.Set("responses_compact_context_fallback_attempted", true)
-	ctx.Set("responses_compact_summary_model_fallback_attempted", true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted, true)
 
 	info := &relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeResponsesCompact,
@@ -372,7 +399,7 @@ func TestAppendResponsesCompactLogInfoRecordsContextAndSummaryModelFallback(t *t
 	ctx, _ := gin.CreateTestContext(w)
 	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
 	ctx.Set("responses_compact_context_fallback_attempted", true)
-	ctx.Set("responses_compact_summary_model_fallback_attempted", true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted, true)
 	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactSummaryModel, "gpt-5.4")
 	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactSummaryModels, []string{"gpt-5.4"})
 	info := &relaycommon.RelayInfo{
@@ -447,6 +474,30 @@ func TestAppendResponsesCompactLogInfoRecordsContextFallbackAfterModeRestored(t 
 	require.Equal(t, "synthetic_summary", annotatedOther["responses_compact_mode"])
 	require.Equal(t, "native", annotatedOther["responses_compact_setting"])
 	require.Equal(t, "/v1/responses", annotatedOther["responses_compact_upstream_path"])
+	require.Equal(t, true, annotatedOther["responses_compact_context_fallback"])
+}
+
+func TestAppendResponsesCompactLogInfoRecordsCodexContextPrunedAsContextFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	now := time.Date(2026, time.May, 26, 0, 0, 0, 0, time.UTC)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactCodexContextPruned, true)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodex,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeNative,
+			},
+		},
+	}
+
+	content, annotatedOther := appendResponsesCompactLogInfo(ctx, info, nil, nil, now)
+
+	require.Equal(t, []string{
+		"Responses Compact mode=native setting=native path=/v1/responses/compact context_fallback=true",
+	}, content)
 	require.Equal(t, true, annotatedOther["responses_compact_context_fallback"])
 }
 
@@ -903,6 +954,269 @@ func TestComposeTieredTextQuotaKeepsToolCallSurcharges(t *testing.T) {
 
 	require.Equal(t, int64(13000), summary.ToolCallSurchargeQuota.Round(0).IntPart())
 	require.Equal(t, 14000, quota)
+}
+
+func TestCalculateTextQuotaSummaryUsesResponsesImageGenerationCallCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Set("image_generation_call", true)
+	ctx.Set("image_generation_call_quality", "low")
+	ctx.Set("image_generation_call_size", "1024x1024")
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "o1",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
+			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+				dto.BuildInToolImageGeneration: {
+					CallCount: 2,
+					Quality:   "low",
+					Size:      "1024x1024",
+				},
+			},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 2, summary.ImageGenerationCallCount)
+	require.Equal(t, operation_setting.GetGPTImage1PriceOnceCall("low", "1024x1024"), summary.ImageGenerationCallPrice)
+	require.Equal(t, operation_setting.GetGPTImage1PriceOnceCall("low", "1024x1024")*2, summary.ImageGenerationTotal)
+	require.Equal(t, int64(11000), summary.ToolCallSurchargeQuota.Round(0).IntPart())
+}
+
+func TestCalculateTextQuotaSummaryKeepsToolSurchargeWhenTotalTokensZero(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "o1",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
+			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+				dto.BuildInToolImageGeneration: {
+					CallCount: 1,
+					Quality:   "low",
+					Size:      "1024x1024",
+				},
+			},
+		},
+		StartTime: time.Now(),
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, &dto.Usage{})
+
+	require.Zero(t, summary.TotalTokens)
+	require.Equal(t, 1, summary.ImageGenerationCallCount)
+	require.True(t, summary.hasObservedNonTokenUsage())
+	require.Greater(t, summary.ToolCallSurchargeQuota.Round(0).IntPart(), int64(0))
+	require.Greater(t, summary.Quota, 0)
+}
+
+func TestAppendImageGenerationCallOtherInfoKeepsZeroPriceCalls(t *testing.T) {
+	other := map[string]interface{}{}
+
+	appendImageGenerationCallOtherInfo(other, textQuotaSummary{
+		ImageGenerationCallCount: 1,
+	})
+
+	require.Equal(t, true, other["image_generation_call"])
+	require.Equal(t, 1, other["image_generation_call_count"])
+	require.Equal(t, float64(0), other["image_generation_call_price"])
+	require.Equal(t, float64(0), other["image_generation_call_total_price"])
+}
+
+func TestCalculateTextQuotaSummaryChargesMixedResponsesImageGenerationSpecs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "o1",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
+			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+				dto.BuildInToolImageGeneration: {
+					CallCount: 2,
+					Quality:   "low",
+					Size:      "1024x1024",
+					ImageCalls: map[string]int{
+						relaycommon.ImageGenerationCallKey("low", "1024x1024"):  1,
+						relaycommon.ImageGenerationCallKey("high", "1536x1024"): 1,
+					},
+				},
+			},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	lowPrice := operation_setting.GetGPTImage1PriceOnceCall("low", "1024x1024")
+	highPrice := operation_setting.GetGPTImage1PriceOnceCall("high", "1536x1024")
+
+	require.Equal(t, 2, summary.ImageGenerationCallCount)
+	require.Equal(t, lowPrice, summary.ImageGenerationCallPrice)
+	require.Equal(t, lowPrice+highPrice, summary.ImageGenerationTotal)
+	require.Equal(t, []imageGenerationCallDetail{
+		{Quality: "high", Size: "1536x1024", Count: 1, Price: highPrice},
+		{Quality: "low", Size: "1024x1024", Count: 1, Price: lowPrice},
+	}, summary.ImageGenerationDetails)
+	require.Equal(t, int64(130500), summary.ToolCallSurchargeQuota.Round(0).IntPart())
+}
+
+func TestCalculateTextQuotaSummaryBackfillsMissingResponsesImageGenerationDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "o1",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
+			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+				dto.BuildInToolImageGeneration: {
+					CallCount: 2,
+					Quality:   "low",
+					Size:      "1024x1024",
+					ImageCalls: map[string]int{
+						relaycommon.ImageGenerationCallKey("high", "1536x1024"): 1,
+					},
+				},
+			},
+		},
+		StartTime: time.Now(),
+	}
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	lowPrice := operation_setting.GetGPTImage1PriceOnceCall("low", "1024x1024")
+
+	require.Equal(t, 2, summary.ImageGenerationCallCount)
+	require.Equal(t, lowPrice*2, summary.ImageGenerationTotal)
+	require.Equal(t, []imageGenerationCallDetail{
+		{Quality: "low", Size: "1024x1024", Count: 2, Price: lowPrice},
+	}, summary.ImageGenerationDetails)
+}
+
+func TestCalculateTextQuotaSummaryCapsExcessResponsesImageGenerationDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "o1",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
+			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+				dto.BuildInToolImageGeneration: {
+					CallCount: 1,
+					Quality:   "low",
+					Size:      "1024x1024",
+					ImageCalls: map[string]int{
+						relaycommon.ImageGenerationCallKey("high", "1536x1024"): 1,
+						relaycommon.ImageGenerationCallKey("low", "1024x1024"):  1,
+					},
+				},
+			},
+		},
+		StartTime: time.Now(),
+	}
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	lowPrice := operation_setting.GetGPTImage1PriceOnceCall("low", "1024x1024")
+
+	require.Equal(t, 1, summary.ImageGenerationCallCount)
+	require.Equal(t, lowPrice, summary.ImageGenerationTotal)
+	require.Equal(t, []imageGenerationCallDetail{
+		{Quality: "low", Size: "1024x1024", Count: 1, Price: lowPrice},
+	}, summary.ImageGenerationDetails)
+}
+
+func TestCalculateTextQuotaSummaryFallsBackForInvalidResponsesImageGenerationDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "o1",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
+			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+				dto.BuildInToolImageGeneration: {
+					CallCount: 1,
+					Quality:   "low",
+					Size:      "1024x1024",
+					ImageCalls: map[string]int{
+						relaycommon.ImageGenerationCallKey("high", "1536x1024"): 2,
+						relaycommon.ImageGenerationCallKey("low", "1024x1024"):  -1,
+					},
+				},
+			},
+		},
+		StartTime: time.Now(),
+	}
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	lowPrice := operation_setting.GetGPTImage1PriceOnceCall("low", "1024x1024")
+
+	require.Equal(t, 1, summary.ImageGenerationCallCount)
+	require.Equal(t, lowPrice, summary.ImageGenerationTotal)
+	require.Equal(t, []imageGenerationCallDetail{
+		{Quality: "low", Size: "1024x1024", Count: 1, Price: lowPrice},
+	}, summary.ImageGenerationDetails)
 }
 
 func TestComposeTieredTextQuotaFallbackKeepsToolCallSurcharges(t *testing.T) {

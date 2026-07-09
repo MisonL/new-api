@@ -245,6 +245,10 @@ export function MonitoringSettingsSection({
                     </FormLabel>
                     <FormDescription>
                       {t('Automatically probe all channels in the background')}
+                      {'. '}
+                      {t(
+                        'This schedule is the trigger for re-enabling channels that were auto-disabled on failure.'
+                      )}
                     </FormDescription>
                   </div>
                   <FormControl>
@@ -353,6 +357,10 @@ export function MonitoringSettingsSection({
                     </FormLabel>
                     <FormDescription>
                       {t('Automatically disable channels when tests fail')}
+                      {'. '}
+                      {t(
+                        'This applies to both scheduled tests and manual channel tests, and also to real request failures when the channel allows auto-ban.'
+                      )}
                     </FormDescription>
                   </div>
                   <FormControl>
@@ -376,6 +384,10 @@ export function MonitoringSettingsSection({
                     </FormLabel>
                     <FormDescription>
                       {t('Bring channels back online after successful checks')}
+                      {'. '}
+                      {t(
+                        'This only takes effect during scheduled or manual tests; real upstream requests do not auto-re-enable channels.'
+                      )}
                     </FormDescription>
                   </div>
                   <FormControl>

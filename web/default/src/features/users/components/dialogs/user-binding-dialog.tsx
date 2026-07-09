@@ -191,6 +191,7 @@ export function UserBindingDialog(props: Props) {
 
   useEffect(() => {
     if (props.open && props.userId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowBoundOnly(true)
       fetchData()
     } else {
@@ -379,7 +380,7 @@ export function UserBindingDialog(props: Props) {
                               </span>
                               {!binding.isEnabled && (
                                 <StatusBadge
-                                  variant='neutral'
+                                  variant='disabled'
                                   label={t('Disabled')}
                                   copyable={false}
                                   size='sm'

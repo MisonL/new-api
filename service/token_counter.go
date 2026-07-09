@@ -184,6 +184,12 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 		return 0, nil
 	}
 
+	return EstimateRequestTokenForAPI(c, meta, info)
+}
+
+// EstimateRequestTokenForAPI computes request tokens without honoring the global CountToken switch.
+// Use it only for explicit count_tokens-style API endpoints that must always return a count.
+func EstimateRequestTokenForAPI(c *gin.Context, meta *types.TokenCountMeta, info *relaycommon.RelayInfo) (int, error) {
 	if meta == nil {
 		return 0, errors.New("token count meta is nil")
 	}

@@ -8,6 +8,8 @@ export {
   getTimeColor,
   formatModelName,
   formatDuration,
+  formatDurationFromMs,
+  getStreamStatusDisplayInfo,
   getParamOverrideActionLabel,
   parseAuditLine,
   isViolationFeeLog,

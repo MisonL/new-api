@@ -61,13 +61,13 @@ function renderStatusTag(sub, t) {
   }
   if (status === 'cancelled') {
     return (
-      <Tag color='grey' shape='circle' size='small'>
+      <Tag color='red' shape='circle' size='small'>
         {t('已作废')}
       </Tag>
     );
   }
   return (
-    <Tag color='grey' shape='circle' size='small'>
+    <Tag color='orange' shape='circle' size='small'>
       {t('已过期')}
     </Tag>
   );

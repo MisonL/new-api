@@ -417,11 +417,11 @@ const SubscriptionPlansCard = ({
                                 {t('生效')}
                               </Tag>
                             ) : isCancelled ? (
-                              <Tag color='white' size='small' shape='circle'>
+                              <Tag color='red' size='small' shape='circle'>
                                 {t('已作废')}
                               </Tag>
                             ) : (
-                              <Tag color='white' size='small' shape='circle'>
+                              <Tag color='orange' size='small' shape='circle'>
                                 {t('已过期')}
                               </Tag>
                             )}

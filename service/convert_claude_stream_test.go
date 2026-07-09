@@ -164,6 +164,76 @@ func TestStreamResponseOpenAI2ClaudeEmitsThinkingTextAndToolBlocksFromOneChunk(t
 	requireClaudeStreamBlocksWellFormed(t, responses)
 }
 
+func TestStreamResponseOpenAI2ClaudeEmitsThinkingAcrossMultipleChunks(t *testing.T) {
+	info := newClaudeStreamInfo(1)
+	reasoning := "Need to inspect current weather."
+	content := "Let me check."
+
+	first := StreamResponseOpenAI2Claude(&dto.ChatCompletionsStreamResponse{
+		Id:    "chatcmpl-test",
+		Model: "deepseek-v4-flash",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+				Content: &content,
+			},
+		}},
+	}, info)
+	require.Equal(t, []string{"message_start", "content_block_start", "content_block_delta"}, claudeResponseTypes(first))
+	require.Equal(t, "text", first[1].ContentBlock.Type)
+	require.Equal(t, "text_delta", first[2].Delta.Type)
+	require.Equal(t, content, *first[2].Delta.Text)
+	require.Nil(t, first[2].Delta.Thinking)
+
+	info.SendResponseCount = 2
+	second := StreamResponseOpenAI2Claude(&dto.ChatCompletionsStreamResponse{
+		Id:    "chatcmpl-test",
+		Model: "deepseek-v4-flash",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+				ReasoningContent: &reasoning,
+			},
+		}},
+	}, info)
+
+	require.Equal(t, []string{"content_block_stop", "content_block_start", "content_block_delta"}, claudeResponseTypes(second))
+	require.Equal(t, "thinking", second[1].ContentBlock.Type)
+	require.Equal(t, "thinking_delta", second[2].Delta.Type)
+	require.Equal(t, reasoning, *second[2].Delta.Thinking)
+	require.Nil(t, second[2].Delta.Text)
+	requireClaudeStreamBlocksWellFormed(t, append(first, second...))
+}
+
+func TestStreamResponseOpenAI2ClaudeDoesNotExposeReasoningForNonDeepSeekModel(t *testing.T) {
+	info := newClaudeStreamInfo(1)
+	reasoning := "internal reasoning"
+	content := "Visible answer."
+
+	responses := StreamResponseOpenAI2Claude(&dto.ChatCompletionsStreamResponse{
+		Id:    "chatcmpl-test",
+		Model: "gpt-5.5",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+				ReasoningContent: &reasoning,
+				Content:          &content,
+			},
+		}},
+	}, &relaycommon.RelayInfo{
+		SendResponseCount: 1,
+		OriginModelName:   "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.5",
+		},
+		ClaudeConvertInfo: info.ClaudeConvertInfo,
+	})
+
+	require.Equal(t, []string{"message_start", "content_block_start", "content_block_delta"}, claudeResponseTypes(responses))
+	require.Equal(t, "text", responses[1].ContentBlock.Type)
+	require.Equal(t, "text_delta", responses[2].Delta.Type)
+	require.Equal(t, content, *responses[2].Delta.Text)
+	require.Nil(t, responses[2].Delta.Thinking)
+	requireClaudeStreamBlocksWellFormed(t, responses)
+}
+
 func TestStreamResponseOpenAI2ClaudePreservesDoneChunkTextBeforeUsage(t *testing.T) {
 	info := newClaudeStreamInfo(1)
 	firstText := "Hello "

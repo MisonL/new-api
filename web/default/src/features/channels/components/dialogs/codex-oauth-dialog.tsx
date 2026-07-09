@@ -40,11 +40,13 @@ export function CodexOAuthDialog({
 
   useEffect(() => {
     if (!open) {
-      setState({
-        authorizeUrl: '',
-        callbackUrl: '',
-        isStarting: false,
-        isCompleting: false,
+      queueMicrotask(() => {
+        setState({
+          authorizeUrl: '',
+          callbackUrl: '',
+          isStarting: false,
+          isCompleting: false,
+        })
       })
     }
   }, [open])

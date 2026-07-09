@@ -38,7 +38,6 @@ import {
   Tag,
   Avatar,
   Form,
-  Dropdown,
 } from '@douyinfe/semi-ui';
 import {
   IconSave,
@@ -47,19 +46,10 @@ import {
   IconUser,
   IconCode,
   IconSetting,
-  IconChevronDown,
 } from '@douyinfe/semi-icons';
 import { getChannelModels } from '../../../../helpers';
-import {
-  applyUserAgentPresetToHeaderOverride,
-  buildHeaderOverrideUserAgentPresetMenu,
-  buildUserAgentStrategyPayload,
-  normalizeHeaderTemplateContent,
-  normalizeUserAgentStrategy,
-  normalizeUserAgentValues,
-} from '../../../../helpers/headerOverrideUserAgent';
+import { normalizeHeaderTemplateContent } from '../../../../helpers/headerOverrideUserAgent';
 import { useTranslation } from 'react-i18next';
-import HeaderOverrideUserAgentPresets from './HeaderOverrideUserAgentPresets';
 import UserHeaderTemplateManager from './UserHeaderTemplateManager';
 
 const { Text, Title } = Typography;
@@ -73,11 +63,6 @@ const HEADER_POLICY_MODE_OPTIONS = [
   { label: '渠道优先', value: 'prefer_channel' },
   { label: '标签优先', value: 'prefer_tag' },
   { label: '合并', value: 'merge' },
-];
-
-const USER_AGENT_STRATEGY_MODE_OPTIONS = [
-  { label: '轮询', value: 'round_robin' },
-  { label: '随机', value: 'random' },
 ];
 
 const EditTagModal = (props) => {
@@ -99,10 +84,6 @@ const EditTagModal = (props) => {
     header_override: '',
     header_policy_mode: 'system_default',
     override_header_user_agent: false,
-    user_agent_strategy_configured: false,
-    user_agent_strategy_enabled: false,
-    user_agent_strategy_mode: 'round_robin',
-    user_agent_strategy_user_agents: [],
   };
   const [inputs, setInputs] = useState(originInputs);
   const [tagPolicyExists, setTagPolicyExists] = useState(false);
@@ -196,52 +177,10 @@ const EditTagModal = (props) => {
     }
   };
 
-  const applyHeaderOverrideUserAgentPreset = (preset) => {
-    const result = applyUserAgentPresetToHeaderOverride(
-      inputs.header_override,
-      preset.ua,
-    );
-
-    if (!result.ok) {
-      showInfo(t(result.message));
-      return;
-    }
-
-    handleInputChange('header_override', result.value);
-  };
-
-  const handleUserAgentStrategyListChange = (value) => {
-    const normalized = normalizeUserAgentValues(value);
-    handleInputChange('user_agent_strategy_user_agents', normalized);
-    if (normalized.length > 0 || inputs.user_agent_strategy_enabled) {
-      handleInputChange('user_agent_strategy_configured', true);
-    }
-  };
-
-  const appendUserAgentStrategyPreset = (preset) => {
-    const normalized = normalizeUserAgentValues([
-      ...(inputs.user_agent_strategy_user_agents || []),
-      preset.ua,
-    ]);
-    handleInputChange('user_agent_strategy_user_agents', normalized);
-    handleInputChange('user_agent_strategy_enabled', true);
-    handleInputChange('user_agent_strategy_configured', true);
-  };
-
-  const headerOverrideUserAgentPresetMenu =
-    buildHeaderOverrideUserAgentPresetMenu(
-      t,
-      applyHeaderOverrideUserAgentPreset,
-    );
-
   const clearTagHeaderPolicyDraft = () => {
     handleInputChange('header_override', '');
     handleInputChange('header_policy_mode', 'system_default');
     handleInputChange('override_header_user_agent', false);
-    handleInputChange('user_agent_strategy_configured', false);
-    handleInputChange('user_agent_strategy_enabled', false);
-    handleInputChange('user_agent_strategy_mode', 'round_robin');
-    handleInputChange('user_agent_strategy_user_agents', []);
   };
 
   const fetchModels = async () => {
@@ -282,31 +221,12 @@ const EditTagModal = (props) => {
       `/api/channel/tag-policy?tag=${encodeURIComponent(tag)}`,
     );
     const policy = res?.data?.data || {};
-    const rawUserAgentStrategy =
-      policy.ua_strategy &&
-      typeof policy.ua_strategy === 'object' &&
-      !Array.isArray(policy.ua_strategy)
-        ? policy.ua_strategy
-        : null;
-    const normalizedUserAgentStrategy =
-      normalizeUserAgentStrategy(rawUserAgentStrategy);
     setTagPolicyExists(policy.exists === true);
     setInputs((prev) => ({
       ...prev,
       header_override: policy.header_override || '',
       header_policy_mode: policy.header_policy_mode || 'system_default',
       override_header_user_agent: policy.override_header_user_agent === true,
-      user_agent_strategy_configured: rawUserAgentStrategy !== null,
-      user_agent_strategy_enabled: rawUserAgentStrategy?.enabled === true,
-      user_agent_strategy_mode:
-        normalizedUserAgentStrategy?.mode ||
-        String(rawUserAgentStrategy?.mode || '').trim() ||
-        'round_robin',
-      user_agent_strategy_user_agents: normalizeUserAgentValues(
-        rawUserAgentStrategy?.user_agents ||
-          rawUserAgentStrategy?.userAgents ||
-          [],
-      ),
     }));
   };
 
@@ -363,26 +283,13 @@ const EditTagModal = (props) => {
       return;
     }
 
-    const userAgentStrategyPayload = buildUserAgentStrategyPayload({
-      configured: formVals.user_agent_strategy_configured,
-      enabled: formVals.user_agent_strategy_enabled,
-      mode: formVals.user_agent_strategy_mode,
-      userAgents: formVals.user_agent_strategy_user_agents,
-    });
-    if (!userAgentStrategyPayload.ok) {
-      showInfo(t(userAgentStrategyPayload.message));
-      setLoading(false);
-      return;
-    }
-
     const headerPolicyMode = formVals.header_policy_mode || 'system_default';
     const overrideHeaderUserAgent =
       formVals.override_header_user_agent === true;
     const shouldPersistPolicy =
       normalizedHeaderOverride.value !== '' ||
       headerPolicyMode !== 'system_default' ||
-      overrideHeaderUserAgent ||
-      userAgentStrategyPayload.value !== null;
+      overrideHeaderUserAgent;
     if (nextTag === '' && shouldPersistPolicy) {
       showInfo(t('清空标签前请先清空标签级请求头策略'));
       setLoading(false);
@@ -422,7 +329,6 @@ const EditTagModal = (props) => {
           header_override: normalizedHeaderOverride.value,
           header_policy_mode: headerPolicyMode,
           override_header_user_agent: overrideHeaderUserAgent,
-          ua_strategy: userAgentStrategyPayload.value,
         });
         if (!policyRes?.data?.success) {
           throw new Error(
@@ -883,16 +789,6 @@ const EditTagModal = (props) => {
                           >
                             {t('不更改')}
                           </Text>
-                          <Dropdown
-                            trigger='click'
-                            position='bottomLeft'
-                            menu={headerOverrideUserAgentPresetMenu}
-                          >
-                            <Text className='!text-semi-color-primary cursor-pointer inline-flex items-center gap-1'>
-                              <span>{t('UA 预置模板')}</span>
-                              <IconChevronDown size={12} />
-                            </Text>
-                          </Dropdown>
                           <Text
                             className='!text-semi-color-primary cursor-pointer'
                             onClick={() =>
@@ -924,12 +820,10 @@ const EditTagModal = (props) => {
                   >
                     <div className='flex items-start justify-between gap-3 mb-3'>
                       <div>
-                        <Text strong>{t('UA 池覆盖')}</Text>
+                        <Text strong>{t('标签请求头策略')}</Text>
                         <div className='mt-1'>
                           <Text type='tertiary' size='small'>
-                            {t(
-                              '标签策略会在运行时参与与渠道策略的优先级决策，并影响最终发往上游的 User-Agent',
-                            )}
+                            {t('标签策略会参与与渠道请求头策略的优先级决策')}
                           </Text>
                         </div>
                       </div>
@@ -941,29 +835,6 @@ const EditTagModal = (props) => {
                       </Text>
                     </div>
                     <div className='grid gap-3 md:grid-cols-2'>
-                      <Form.Switch
-                        field='user_agent_strategy_enabled'
-                        label={t('启用 UA 池')}
-                        checkedText={t('开')}
-                        uncheckedText={t('关')}
-                        initValue={false}
-                        onChange={(checked) => {
-                          handleInputChange(
-                            'user_agent_strategy_enabled',
-                            checked,
-                          );
-                          if (
-                            checked ||
-                            (inputs.user_agent_strategy_user_agents || [])
-                              .length > 0
-                          ) {
-                            handleInputChange(
-                              'user_agent_strategy_configured',
-                              true,
-                            );
-                          }
-                        }}
-                      />
                       <Form.Switch
                         field='override_header_user_agent'
                         label={t('覆盖模板 User-Agent')}
@@ -988,43 +859,6 @@ const EditTagModal = (props) => {
                         onChange={(value) =>
                           handleInputChange('header_policy_mode', value)
                         }
-                      />
-                      <Form.Select
-                        field='user_agent_strategy_mode'
-                        label={t('UA 策略模式')}
-                        optionList={USER_AGENT_STRATEGY_MODE_OPTIONS.map(
-                          (item) => ({
-                            ...item,
-                            label: t(item.label),
-                          }),
-                        )}
-                        initValue='round_robin'
-                        disabled={!inputs.user_agent_strategy_enabled}
-                        onChange={(value) => {
-                          handleInputChange('user_agent_strategy_mode', value);
-                          handleInputChange(
-                            'user_agent_strategy_configured',
-                            true,
-                          );
-                        }}
-                      />
-                    </div>
-                    <div className='mt-3'>
-                      <Form.TagInput
-                        field='user_agent_strategy_user_agents'
-                        label={t('UA 池列表')}
-                        placeholder={t('输入 UA，按回车或逗号可追加多个')}
-                        addOnBlur
-                        showClear
-                        disabled={!inputs.user_agent_strategy_enabled}
-                        onChange={handleUserAgentStrategyListChange}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                    <div className='mt-3'>
-                      <HeaderOverrideUserAgentPresets
-                        t={t}
-                        onSelect={appendUserAgentStrategyPreset}
                       />
                     </div>
                   </div>

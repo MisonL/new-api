@@ -1676,6 +1676,7 @@ export function renderModelPrice(opts) {
     audio_input_price: audioInputPrice = 0,
     image_generation_call: imageGenerationCall = false,
     image_generation_call_price: imageGenerationCallPrice = 0,
+    image_generation_call_total_price: imageGenerationCallTotalPrice = 0,
     displayMode = 'price',
   } = opts;
   const { ratio: effectiveGroupRatio, label: ratioLabel } = getEffectiveRatio(
@@ -1694,6 +1695,10 @@ export function renderModelPrice(opts) {
   });
 
   const { symbol, rate } = getCurrencyConfig();
+  const imageGenerationBillingPrice =
+    imageGenerationCallTotalPrice > 0
+      ? imageGenerationCallTotalPrice
+      : imageGenerationCallPrice;
 
   if (!shouldUseRatioBillingProcess(modelPrice)) {
     if (modelPrice !== -1) {
@@ -1763,7 +1768,7 @@ export function renderModelPrice(opts) {
       (completionTokens / 1000000) * completionRatioPrice * groupRatio +
       (webSearchCallCount / 1000) * webSearchPrice * groupRatio +
       (fileSearchCallCount / 1000) * fileSearchPrice * groupRatio +
-      imageGenerationCallPrice * groupRatio;
+      imageGenerationBillingPrice * groupRatio;
 
     let inputDesc = '';
     if (image && imageOutputTokens > 0) {
@@ -1849,12 +1854,12 @@ export function renderModelPrice(opts) {
             },
           )
         : '',
-      imageGenerationCall && imageGenerationCallPrice > 0
+      imageGenerationCall && imageGenerationBillingPrice > 0
         ? buildBillingPriceText(
-            ' + 图片生成调用 {{symbol}}{{price}} / 1次 * {{ratioType}} {{ratio}}',
+            ' + 图片生成调用 {{symbol}}{{price}} * {{ratioType}} {{ratio}}',
             {
               symbol,
-              usdAmount: imageGenerationCallPrice,
+              usdAmount: imageGenerationBillingPrice,
               rate,
               ratio: groupRatio,
               ratioType: ratioLabel,
@@ -1917,10 +1922,10 @@ export function renderModelPrice(opts) {
             rate,
           })
         : null,
-      imageGenerationCall && imageGenerationCallPrice > 0
-        ? buildBillingPriceText('图片生成调用：{{symbol}}{{price}} / 1次', {
+      imageGenerationCall && imageGenerationBillingPrice > 0
+        ? buildBillingPriceText('图片生成调用：{{symbol}}{{price}}', {
             symbol,
-            usdAmount: imageGenerationCallPrice,
+            usdAmount: imageGenerationBillingPrice,
             rate,
           })
         : null,
@@ -2013,7 +2018,7 @@ export function renderModelPrice(opts) {
     (webSearchCallCount / 1000) * webSearchPrice * groupRatio;
   const fileSearchAmount =
     (fileSearchCallCount / 1000) * fileSearchPrice * groupRatio;
-  const imageGenerationAmount = imageGenerationCallPrice * groupRatio;
+  const imageGenerationAmount = imageGenerationBillingPrice * groupRatio;
 
   const totalAmount =
     textInputAmount +
@@ -2141,11 +2146,11 @@ export function renderModelPrice(opts) {
           },
         )
       : null,
-    imageGenerationCall && imageGenerationCallPrice > 0
+    imageGenerationCall && imageGenerationBillingPrice > 0
       ? buildBillingText(
-          '图片生成：1 次 * 单价 {{price}} * {{ratioType}} {{ratio}} = {{amount}}',
+          '图片生成：单价合计 {{price}} * {{ratioType}} {{ratio}} = {{amount}}',
           {
-            price: renderDisplayAmountFromUsd(imageGenerationCallPrice),
+            price: renderDisplayAmountFromUsd(imageGenerationBillingPrice),
             ratioType: ratioLabel,
             ratio: groupRatio,
             amount: renderDisplayAmountFromUsd(imageGenerationAmount),

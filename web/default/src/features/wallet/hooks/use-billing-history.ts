@@ -123,7 +123,7 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
 
   // Fetch data when dependencies change
   useEffect(() => {
-    fetchBillingHistory()
+    void Promise.resolve().then(() => fetchBillingHistory())
   }, [fetchBillingHistory])
 
   return {

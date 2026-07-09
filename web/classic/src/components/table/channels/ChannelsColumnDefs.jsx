@@ -35,6 +35,7 @@ import {
   renderQuota,
   getChannelIcon,
   renderQuotaWithAmount,
+  isUnlimitedChannelBalance,
   showSuccess,
   showError,
   showInfo,
@@ -49,7 +50,7 @@ import {
   IconMore,
   IconAlertTriangle,
 } from '@douyinfe/semi-icons';
-import { FaRandom } from 'react-icons/fa';
+import { FaInfinity, FaRandom } from 'react-icons/fa';
 
 // Render functions
 const renderType = (type, record = {}, t) => {
@@ -251,6 +252,26 @@ const renderResponseTime = (responseTime, t) => {
       </Tag>
     );
   }
+};
+
+const getChannelBalanceText = (record, t) => {
+  if (isUnlimitedChannelBalance(record.balance, record.balance_unlimited)) {
+    return t('无限制');
+  }
+  return renderQuotaWithAmount(record.balance);
+};
+
+const renderChannelBalance = (record, t) => {
+  const balanceText = getChannelBalanceText(record, t);
+  if (!isUnlimitedChannelBalance(record.balance, record.balance_unlimited)) {
+    return balanceText;
+  }
+  return (
+    <span className='inline-flex items-center gap-1'>
+      <FaInfinity className='text-emerald-500' aria-hidden='true' />
+      <span>{balanceText}</span>
+    </span>
+  );
 };
 
 const isRequestPassThroughEnabled = (record) => {
@@ -526,6 +547,7 @@ export const getChannelsColumns = ({
       key: COLUMN_KEYS.BALANCE,
       title: t('已用/剩余'),
       dataIndex: 'expired_time',
+      width: 190,
       render: (text, record, index) => {
         if (record.children === undefined) {
           return (
@@ -542,7 +564,7 @@ export const getChannelsColumns = ({
                       ? t('查看 Codex 帐号信息与用量')
                       : t('剩余额度') +
                         ': ' +
-                        renderQuotaWithAmount(record.balance) +
+                        getChannelBalanceText(record, t) +
                         t('，点击更新')
                   }
                 >
@@ -555,7 +577,7 @@ export const getChannelsColumns = ({
                   >
                     {record.type === 57
                       ? t('帐号信息')
-                      : renderQuotaWithAmount(record.balance)}
+                      : renderChannelBalance(record, t)}
                   </Tag>
                 </Tooltip>
               </Space>
@@ -576,6 +598,7 @@ export const getChannelsColumns = ({
       key: COLUMN_KEYS.PRIORITY,
       title: t('优先级'),
       dataIndex: 'priority',
+      width: 95,
       render: (text, record, index) => {
         if (record.children === undefined) {
           return (
@@ -633,6 +656,7 @@ export const getChannelsColumns = ({
       key: COLUMN_KEYS.WEIGHT,
       title: t('权重'),
       dataIndex: 'weight',
+      width: 95,
       render: (text, record, index) => {
         if (record.children === undefined) {
           return (
@@ -691,6 +715,7 @@ export const getChannelsColumns = ({
       title: '',
       dataIndex: 'operate',
       fixed: 'right',
+      width: 170,
       render: (text, record, index) => {
         if (record.children === undefined) {
           const upstreamUpdateMeta = getUpstreamUpdateMeta(record);

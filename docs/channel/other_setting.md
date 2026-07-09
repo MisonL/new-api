@@ -19,6 +19,16 @@
 
 如果显式设置为 `false`，渠道选路只按精确模型名匹配。该模式适合需要严格隔离模型名称、避免通配归一化扩大匹配范围的部署。
 
+## 渠道权重选路
+
+同一优先级内的渠道按权重随机选择。当前数据库路径和内存缓存路径统一使用 `weight + 10` 作为有效票数：
+
+- `weight=0` 仍保留 10 票基础份额，不会完全失去被选中的机会。
+- 同一优先级内，`weight=100` 与 `weight=0` 的有效票数分别是 110 和 10。
+- 不同优先级之间仍按重试层级选择，权重只在同一优先级内生效。
+
+历史内存缓存路径曾使用独立平滑逻辑。升级后缓存路径会与数据库回退路径保持一致，依赖旧缓存分布的部署应在低流量时段观察渠道命中比例。
+
 ## 常用基础字段
 
 ```json
@@ -42,6 +52,29 @@
 | `pass_through_body_enabled` | `bool`   | 允许更原始地透传请求体，是否可用取决于具体渠道   |
 | `system_prompt`             | `string` | 渠道级系统提示词                                 |
 | `system_prompt_override`    | `bool`   | 是否强制覆盖请求中的系统提示词                   |
+
+## Responses 流启动恢复
+
+`responses_stream_bootstrap_recovery_enabled` 控制该渠道是否参与 `/v1/responses` 流式请求首包前的启动恢复窗口。
+
+启用条件：
+
+- 全局设置 `general_setting.responses_stream_bootstrap_recovery_enabled=true`。
+- 渠道 `settings.responses_stream_bootstrap_recovery_enabled=true`。
+- 请求路径为 `/v1/responses`，请求体 `stream=true`。
+- 请求还没有向客户端写出真实 `response.*` payload。
+
+行为边界：
+
+- 无可用渠道时，如果存在匹配分组和模型且开启该开关的候选渠道，服务端会保持当前 SSE 连接，在等待窗口内发送 `: PING` 并持续探测可用渠道。
+- 已选渠道在首包前失败时，如果错误属于可恢复范围，服务端可以继续等待或切换到其他符合条件的渠道。
+- 首包发出后不会跨渠道续传。此时继续切换会破坏 Responses SSE 事件序列和模型输出连续性。
+- 如果经过反向代理，需确保代理不会缓冲 SSE，否则客户端可能无法及时收到 `: PING` 保活注释。
+
+配置注意：
+
+- 全局设置必须保存为 `general_setting.responses_stream_bootstrap_*` 分层 key。
+- 不要只写整段 `general_setting` JSON；该写法只会进入普通 OptionMap，不会更新运行时 `GeneralSetting` 快照。
 
 ## 请求头策略字段
 
@@ -105,14 +138,15 @@
 | ----------------- | --------------- | -------------------------------------------------------------- | ------------------------- |
 | `chrome-macos`    | Chrome macOS    | 浏览器常见导航请求头                                           | 否                        |
 | `codex-cli`       | Codex CLI       | `latest` 解析为 `codex-tui/<npm latest> ...`，并保留 `Originator: codex-tui`，平台由 `version_meta.platform` 决定 | 否 |
-| `codex-desktop`   | Codex Desktop   | `User-Agent: Codex Desktop/0.133.0-alpha.1 ...`、`Originator: Codex Desktop` | 否 |
+| `codex-desktop`   | Codex Desktop   | `User-Agent: Codex Desktop/0.142.4 ... (Codex Desktop; 26.623.70822)`、`Originator: Codex Desktop` | 否 |
 | `claude-code`     | Claude Code     | `latest` 解析为 `claude-cli/<npm latest> (external, sdk-cli)`  | 否                        |
 | `gemini-cli`      | Gemini CLI      | `latest` 解析为 `GeminiCLI/<npm latest>/gemini-3.1-pro-preview ...`，平台由 `version_meta.platform` 决定 | 否 |
 | `qwen-code`       | Qwen Code       | `latest` 解析为 `QwenCode/<npm latest> (...)`，平台由 `version_meta.platform` 决定 | 否 |
 | `droid`           | Droid CLI       | `latest` 解析为 `factory-cli/<npm latest>`                     | 否                        |
+| `agy`             | Antigravity CLI | `User-Agent: antigravity/cli/1.0.14 (aidev_client; os_type=darwin; arch=amd64)` | 否                        |
 | `postman-runtime` | Postman Runtime | Postman Runtime 调试请求头                                     | 否                        |
 
-`codex-cli` 的请求头默认按 `latest` 解析，清单不可用时回落到保存时快照，代表交互式 TUI 场景。`codex-desktop` 的固定快照代表 Codex App / Codex Desktop 产品身份，两者不能互相替代。`codex exec` 的 non-interactive 请求会使用 `codex_exec`，不能作为 `Codex CLI` 内置 Profile 模板。
+`codex-cli` 的请求头默认按 `latest` 解析，清单不可用时回落到保存时快照，代表交互式 TUI 场景。`codex-desktop` 的固定快照代表 Codex App / Codex Desktop 产品身份，两者不能互相替代；其中 UA 前缀版本来自内置 Codex core/app-server 客户端，括号尾部版本来自桌面 App。`codex exec` 的 non-interactive 请求会使用 `codex_exec`，不能作为 `Codex CLI` 内置 Profile 模板。Antigravity CLI 预置 `agy` 只固定客户端身份，不自动补 `pass_headers`。
 
 ## 请求头模板与透传规则
 

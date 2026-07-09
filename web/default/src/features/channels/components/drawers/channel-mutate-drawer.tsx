@@ -146,6 +146,7 @@ import {
   RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP,
   RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2,
   RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI,
+  RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI,
   normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactFallbackModels,
   normalizeResponsesUpstreamProfile,
@@ -267,6 +268,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
+    Boolean(values.request_body_limit_max_bytes && values.request_body_limit_max_bytes > 0) ||
     values.strip_codex_encrypted_context ||
     (values.type === 1 && values.responses_upstream_profile) ||
     (values.responses_compact_mode &&
@@ -378,11 +380,23 @@ export function ChannelMutateDrawer({
   const channelId = currentRow?.id ?? null
 
   // Fetch channel details if editing
-  const { data: channelData } = useQuery({
+  const {
+    data: channelData,
+    isLoading: isChannelDetailLoading,
+    isFetching: isChannelDetailFetching,
+    error: channelDetailError,
+    refetch: refetchChannelDetail,
+  } = useQuery({
     queryKey: channelsQueryKeys.detail(currentRow?.id || 0),
     queryFn: () => getChannel(currentRow!.id),
     enabled: isEditing && Boolean(currentRow?.id),
   })
+  const isChannelDetailPending =
+    isEditing && (isChannelDetailLoading || isChannelDetailFetching)
+  const isChannelDetailBusy =
+    isChannelDetailPending || isChannelDetailLoading || isChannelDetailFetching
+  const isChannelDetailUnavailable =
+    isEditing && !channelData?.data && !isChannelDetailPending
 
   // Fetch available groups
   const { data: groupsData, isLoading: isLoadingGroups } = useQuery({
@@ -660,6 +674,23 @@ export function ChannelMutateDrawer({
     return {
       lastCheckTime: settings.upstream_model_update_last_check_time,
       detectedModels: Array.from(new Set(detectedModels)),
+    }
+  }, [currentSettings])
+
+  const requestBodyLimitMeta = useMemo(() => {
+    const settings = parseSettingsRecord(currentSettings)
+    const limit = settings.request_body_limit
+    if (!isRecord(limit)) return null
+    const maxBytes = Number(limit.max_bytes)
+    if (!Number.isFinite(maxBytes) || maxBytes <= 0) return null
+    const source = typeof limit.source === 'string' ? limit.source : ''
+    const reason = typeof limit.reason === 'string' ? limit.reason : ''
+
+    return {
+      maxBytes: Math.trunc(maxBytes),
+      observedAt: limit.observed_at,
+      source,
+      reason,
     }
   }, [currentSettings])
 
@@ -977,6 +1008,7 @@ export function ChannelMutateDrawer({
   // Handle successful submission
   const handleSuccess = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+    queryClient.invalidateQueries({ queryKey: channelsQueryKeys.top() })
     onOpenChange(false)
     setOpen(null)
   }, [queryClient, onOpenChange, setOpen])
@@ -1036,6 +1068,20 @@ export function ChannelMutateDrawer({
   // Submit handler
   const onSubmit = useCallback(
     async (data: ChannelFormValues) => {
+      if (isChannelDetailPending) {
+        toast.error(
+          t('Channel details are still loading. Please retry after loading completes.')
+        )
+        return
+      }
+      if (isChannelDetailUnavailable) {
+        toast.error(
+          getErrorMessage(channelDetailError) ||
+            t('Channel details failed to load. Please retry before saving.')
+        )
+        return
+      }
+
       // Validate key is required when creating
       if (!isEditing && !data.key?.trim()) {
         form.setError('key', {
@@ -1123,9 +1169,7 @@ export function ChannelMutateDrawer({
           const persistedSubmitData =
             isEditing && channelData?.data
               ? transformChannelToFormDefaults(channelData.data)
-              : isEditing && currentRow
-                ? transformChannelToFormDefaults(currentRow)
-                : undefined
+              : undefined
           const mergedData = isEditing
             ? mergeChannelSubmitFormValues(
                 data,
@@ -1189,6 +1233,9 @@ export function ChannelMutateDrawer({
       isEditing,
       currentRow,
       channelData?.data,
+      channelDetailError,
+      isChannelDetailUnavailable,
+      isChannelDetailPending,
       isMultiKeyChannel,
       form,
       handleSuccess,
@@ -1275,6 +1322,44 @@ export function ChannelMutateDrawer({
               onSubmit={form.handleSubmit(onSubmit)}
               className='flex-1 space-y-4 overflow-y-auto px-3 py-3 pb-4 sm:space-y-5 sm:px-4'
             >
+              {isChannelDetailPending && (
+                <div className='bg-card space-y-3 rounded-xl border p-3 sm:p-5'>
+                  <div className='text-muted-foreground flex items-center gap-2 text-sm'>
+                    <Loader2 className='h-4 w-4 animate-spin' />
+                    {t('Loading channel details...')}
+                  </div>
+                  <div className='grid gap-4 sm:grid-cols-2'>
+                    <Skeleton className='h-10 w-full' />
+                    <Skeleton className='h-10 w-full' />
+                  </div>
+                </div>
+              )}
+              {isChannelDetailUnavailable && (
+                <Alert variant='destructive'>
+                  <AlertDescription className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+                    <span>
+                      {getErrorMessage(channelDetailError) ||
+                        t('Channel details failed to load. Please retry before saving.')}
+                    </span>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() => refetchChannelDetail()}
+                    >
+                      <RefreshCw className='mr-2 h-4 w-4' />
+                      {t('Retry')}
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
+              <fieldset
+                disabled={isChannelDetailPending}
+                className={cn(
+                  'contents',
+                  isChannelDetailPending && 'pointer-events-none opacity-50'
+                )}
+              >
               {/* ── Basic Information ── */}
               <div className='bg-card space-y-4 rounded-xl border p-3 sm:p-5'>
                 <CardHeading
@@ -2960,6 +3045,95 @@ export function ChannelMutateDrawer({
                       title={t('Channel Extra Settings')}
                       icon={<Settings className='h-4 w-4' />}
                     />
+                    <div className='space-y-3 rounded-lg border p-4'>
+                      <SubHeading
+                        title={t('Request body routing limit')}
+                        icon={<Route className='h-3.5 w-3.5' />}
+                      />
+                      <FormField
+                        control={form.control}
+                        name='request_body_limit_max_bytes'
+                        render={({ field }) => (
+                          <FormItem>
+                            <div className='flex flex-col gap-3 sm:flex-row sm:items-end'>
+                              <div className='flex-1 space-y-2'>
+                                <FormLabel>
+                                  {t('Accepted request body size (bytes)')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={0}
+                                    step={1}
+                                    value={field.value ?? 0}
+                                    onChange={(event) => {
+                                      const next = Number(event.target.value)
+                                      field.onChange(
+                                        Number.isFinite(next)
+                                          ? Math.max(0, Math.trunc(next))
+                                          : 0
+                                      )
+                                    }}
+                                    disabled={isSubmitting}
+                                  />
+                                </FormControl>
+                              </div>
+                              <Button
+                                type='button'
+                                variant='outline'
+                                onClick={() =>
+                                  form.setValue(
+                                    'request_body_limit_max_bytes',
+                                    0,
+                                    { shouldDirty: true }
+                                  )
+                                }
+                                disabled={isSubmitting}
+                              >
+                                <Trash2 className='mr-2 h-4 w-4' />
+                                {t('Clear limit')}
+                              </Button>
+                            </div>
+                            <FormDescription>
+                              {t(
+                                'Set 0 to delete this channel limit. When the global guard is enabled, upstream 413 responses can update this value automatically.'
+                              )}
+                            </FormDescription>
+                            {requestBodyLimitMeta && (
+                              <div className='text-muted-foreground grid gap-2 rounded-md border px-3 py-2 text-xs sm:grid-cols-2'>
+                                <div>
+                                  <span className='text-foreground font-medium'>
+                                    {t('Stored limit')}:
+                                  </span>{' '}
+                                  {requestBodyLimitMeta.maxBytes}
+                                </div>
+                                <div>
+                                  <span className='text-foreground font-medium'>
+                                    {t('Observed at')}:
+                                  </span>{' '}
+                                  {formatUnixTime(
+                                    requestBodyLimitMeta.observedAt
+                                  )}
+                                </div>
+                                <div>
+                                  <span className='text-foreground font-medium'>
+                                    {t('Source')}:
+                                  </span>{' '}
+                                  {requestBodyLimitMeta.source || '-'}
+                                </div>
+                                <div>
+                                  <span className='text-foreground font-medium'>
+                                    {t('Reason')}:
+                                  </span>{' '}
+                                  {requestBodyLimitMeta.reason || '-'}
+                                </div>
+                              </div>
+                            )}
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                     {(currentType === 1 ||
                       currentType === 3 ||
                       currentType === 14) && (
@@ -3096,6 +3270,13 @@ export function ChannelMutateDrawer({
                                           }
                                         >
                                           {t('Sub2API WSv2')}
+                                        </SelectItem>
+                                        <SelectItem
+                                          value={
+                                            RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI
+                                          }
+                                        >
+                                          {t('Generic OpenAI')}
                                         </SelectItem>
                                         <SelectItem
                                           value={
@@ -3854,6 +4035,7 @@ export function ChannelMutateDrawer({
                   </div>
                 </CollapsibleContent>
               </Collapsible>
+              </fieldset>
             </form>
           </Form>
 
@@ -3863,8 +4045,14 @@ export function ChannelMutateDrawer({
                 {t('Cancel')}
               </Button>
             </SheetClose>
-            <Button form='channel-form' type='submit' disabled={isSubmitting}>
-              {isSubmitting && (
+            <Button
+              form='channel-form'
+              type='submit'
+              disabled={
+                isSubmitting || isChannelDetailBusy || isChannelDetailUnavailable
+              }
+            >
+              {(isSubmitting || isChannelDetailBusy) && (
                 <Loader2 className='mr-2 h-4 w-4 animate-spin' />
               )}
               {isEditing ? t('Update Channel') : t('Save changes')}

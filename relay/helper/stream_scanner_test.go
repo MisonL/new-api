@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -104,8 +106,6 @@ func TestStreamScannerHandler_EmptyBody(t *testing.T) {
 }
 
 func TestStreamScannerHandler_ZeroStreamingTimeoutFallsBack(t *testing.T) {
-	t.Parallel()
-
 	oldTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 0
 	t.Cleanup(func() {
@@ -483,8 +483,9 @@ func TestStreamScannerHandler_StreamStatus_EOFWithoutDone(t *testing.T) {
 	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {})
 
 	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
-	assert.True(t, info.StreamStatus.IsNormalEnd())
+	assert.Equal(t, relaycommon.StreamEndReasonUpstreamInterrupted, info.StreamStatus.EndReason)
+	assert.Contains(t, info.StreamStatus.EndError.Error(), "stream disconnected before completion")
+	assert.False(t, info.StreamStatus.IsNormalEnd())
 }
 
 func TestStreamScannerHandler_StreamStatus_UpstreamInterrupted(t *testing.T) {
@@ -678,6 +679,51 @@ func TestStreamScannerHandler_StreamStatus_PreInitialized(t *testing.T) {
 
 	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
 	assert.Equal(t, 1, info.StreamStatus.TotalErrorCount())
+}
+
+func TestHandleScannerErrorAfterNormalEndLogsInfo(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{StreamStatus: relaycommon.NewStreamStatus()}
+	info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	common.LogWriterMu.Lock()
+	oldOut := gin.DefaultWriter
+	oldErr := gin.DefaultErrorWriter
+	gin.DefaultWriter = &stdout
+	gin.DefaultErrorWriter = &stderr
+	common.LogWriterMu.Unlock()
+	t.Cleanup(func() {
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = oldOut
+		gin.DefaultErrorWriter = oldErr
+		common.LogWriterMu.Unlock()
+	})
+
+	handleScannerError(c, info, errors.New("http2: response body closed"))
+
+	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+	assert.Nil(t, info.StreamStatus.EndError)
+	assert.Contains(t, stdout.String(), "scanner closed after normal stream end")
+	assert.Empty(t, stderr.String())
+}
+
+func TestHandleScannerErrorBeforeDoneKeepsUpstreamInterrupted(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{StreamStatus: relaycommon.NewStreamStatus()}
+
+	handleScannerError(c, info, errors.New("http2: response body closed"))
+
+	assert.Equal(t, relaycommon.StreamEndReasonUpstreamInterrupted, info.StreamStatus.EndReason)
+	assert.ErrorContains(t, info.StreamStatus.EndError, "response body closed")
 }
 
 func TestStreamScannerHandler_PingInterleavesWithSlowUpstream(t *testing.T) {

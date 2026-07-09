@@ -35,6 +35,8 @@ export const RESPONSES_UPSTREAM_PROFILE_TRUSTED_NEWAPI =
   'trusted_newapi' as const
 export const RESPONSES_UPSTREAM_PROFILE_SUB2API_HTTP = 'sub2api_http' as const
 export const RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2 = 'sub2api_wsv2' as const
+export const RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI =
+  'generic_openai' as const
 export const RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY = 'generic_proxy' as const
 export const RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY =
   'chat_only_proxy' as const
@@ -85,6 +87,7 @@ export const RESPONSES_COMPACT_BADGE_KEYS = [
   'Same-cluster New API',
   'Sub2API HTTP',
   'Sub2API WSv2',
+  'Generic OpenAI',
   'Generic proxy',
   'Chat-only proxy',
   'Proxy profiles strip encrypted reasoning and route Responses Compact through synthetic summary.',
@@ -134,6 +137,9 @@ export function normalizeResponsesUpstreamProfile(
   }
   if (profile === RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2) {
     return RESPONSES_UPSTREAM_PROFILE_SUB2API_WSV2
+  }
+  if (profile === RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI) {
+    return RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI
   }
   if (profile === RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY) {
     return RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY
@@ -595,11 +601,33 @@ export function validateChannelSettings(settings: string): boolean {
 // Balance Formatting
 // ============================================================================
 
+export const UNLIMITED_CHANNEL_BALANCE_THRESHOLD = 100000000
+
+export function isUnlimitedChannelBalance(
+  balance: number | null | undefined,
+  explicitUnlimited?: boolean
+): boolean {
+  if (explicitUnlimited === true) return true
+  if (balance == null || !Number.isFinite(balance)) return false
+  return balance >= UNLIMITED_CHANNEL_BALANCE_THRESHOLD
+}
+
+type FormatBalanceOptions = {
+  unlimited?: boolean
+  unlimitedLabel?: string
+}
+
 /**
  * Format balance with currency symbol
  */
-export function formatBalance(balance: number | null | undefined): string {
-  if (balance == null || Number.isNaN(balance)) return '-'
+export function formatBalance(
+  balance: number | null | undefined,
+  options: FormatBalanceOptions = {}
+): string {
+  if (isUnlimitedChannelBalance(balance, options.unlimited)) {
+    return options.unlimitedLabel ?? 'Unlimited'
+  }
+  if (balance == null || !Number.isFinite(balance)) return '-'
   return formatCurrencyFromUSD(balance, {
     digitsLarge: 2,
     digitsSmall: 4,

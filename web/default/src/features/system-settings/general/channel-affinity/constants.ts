@@ -111,6 +111,19 @@ const PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE = {
   ],
 }
 
+const PRUNE_RESPONSES_IMAGE_INPUT_TEMPLATE = {
+  operations: [
+    {
+      path: 'input.*.content',
+      mode: 'prune_objects',
+      value: {
+        type: 'input_image',
+        recursive: true,
+      },
+    },
+  ],
+}
+
 export type RuleTemplate = Omit<AffinityRule, 'id'>
 
 export type ParamOverrideTemplate = {
@@ -134,6 +147,10 @@ export const PARAM_OVERRIDE_TEMPLATES: Record<string, ParamOverrideTemplate> = {
   codexWithoutImageTool: {
     label: 'Upstream Compat: Remove Image Generation Tool',
     payload: PRUNE_IMAGE_GENERATION_TOOL_TEMPLATE,
+  },
+  codexWithoutResponsesImageInput: {
+    label: 'Upstream Compat: Remove Responses Image Input',
+    payload: PRUNE_RESPONSES_IMAGE_INPUT_TEMPLATE,
   },
   claudeHeaders: {
     label: 'Claude Code Header Passthrough',

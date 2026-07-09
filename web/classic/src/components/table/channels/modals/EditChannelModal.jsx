@@ -979,6 +979,49 @@ const EditChannelModal = (props) => {
   };
 
   const handleToggleHeaderProfile = (profileId, profile, options = {}) => {
+    if (Array.isArray(options?.replaceProfiles)) {
+      const replacements = options.replaceProfiles.filter((item) => item?.id);
+      if (replacements.length === 0) {
+        return;
+      }
+      const replacementByBaseId = new Map(
+        replacements.map((item) => {
+          const meta = item.versionMeta || item.version_meta || {};
+          return [meta.baseProfileId || meta.base_profile_id || item.id, item];
+        }),
+      );
+      const nextSelectedProfileIds =
+        headerProfileStrategy.selectedProfileIds.map((id) => {
+          const currentProfile = selectedHeaderProfileItems.find(
+            (item) => item.id === id,
+          );
+          const currentMeta =
+            currentProfile?.versionMeta || currentProfile?.version_meta || {};
+          const baseId =
+            currentMeta.baseProfileId ||
+            currentMeta.base_profile_id ||
+            String(id || '').split('@')[0];
+          return replacementByBaseId.get(baseId)?.id || id;
+        });
+      const selectedProfileSnapshotMap = new Map(
+        selectedHeaderProfileItems
+          .filter((item) => item && !item.missing)
+          .map((item) => [item.id, item]),
+      );
+      replacements.forEach((item) => {
+        selectedProfileSnapshotMap.set(item.id, item);
+      });
+      const selectedProfiles = nextSelectedProfileIds
+        .map((id) => selectedProfileSnapshotMap.get(id))
+        .filter(Boolean);
+      applyHeaderProfileStrategy({
+        enabled: true,
+        mode: headerProfileStrategy.mode,
+        selectedProfileIds: nextSelectedProfileIds,
+        profiles: selectedProfiles,
+      });
+      return;
+    }
     const shouldReplace = options?.replace === true;
     const currentSelectedProfileIds = shouldReplace
       ? headerProfileStrategy.selectedProfileIds
@@ -1380,6 +1423,7 @@ const EditChannelModal = (props) => {
     setLoading(true);
     let res = await API.get(`/api/channel/${channelId}`);
     if (res === undefined) {
+      setLoading(false);
       return;
     }
     const { success, message, data } = res.data;
@@ -2164,6 +2208,11 @@ const EditChannelModal = (props) => {
   };
 
   const submit = async () => {
+    if (loading || headerProfilesLoading) {
+      showInfo(t('渠道详情仍在加载，请稍后再提交'));
+      return;
+    }
+
     const formValues = formApiRef.current ? formApiRef.current.getValues() : {};
     let localInputs = mergeChannelSubmitFormValues(formValues, inputs);
 
@@ -2956,6 +3005,8 @@ const EditChannelModal = (props) => {
               theme='solid'
               onClick={() => formApiRef.current?.submitForm()}
               icon={<IconSave />}
+              loading={loading || headerProfilesLoading}
+              disabled={loading || headerProfilesLoading}
             >
               {t('提交')}
             </Button>

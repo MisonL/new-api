@@ -26,6 +26,7 @@ func TestProtocolConversionPolicySupportsLegacyAndRules(t *testing.T) {
 	require.False(t, ShouldResponsesUseChatCompletionsPolicy(legacyPolicy, 1, 1, "gpt-5"))
 
 	rulePolicy := model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat",
@@ -41,8 +42,30 @@ func TestProtocolConversionPolicySupportsLegacyAndRules(t *testing.T) {
 	require.False(t, ShouldChatCompletionsUseResponsesPolicy(rulePolicy, 1, 1, "gpt-5"))
 }
 
+func TestProtocolConversionPolicyTopLevelEnabledGatesRules(t *testing.T) {
+	policy := model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: false,
+		Rules: []model_setting.ProtocolConversionRule{
+			{
+				Name:           "responses-to-chat",
+				Enabled:        true,
+				SourceEndpoint: model_setting.ProtocolEndpointResponses,
+				TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+				AllChannels:    true,
+				ModelPatterns:  []string{"^gpt-5$"},
+			},
+		},
+	}
+
+	require.False(t, ShouldResponsesUseChatCompletionsPolicy(policy, 1, 1, "gpt-5"))
+
+	policy.Enabled = true
+	require.True(t, ShouldResponsesUseChatCompletionsPolicy(policy, 1, 1, "gpt-5"))
+}
+
 func TestProtocolConversionPolicyEmptyModelPatternsMatchAllNonEmptyModels(t *testing.T) {
 	policy := model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
 		Rules: []model_setting.ProtocolConversionRule{
 			{
 				Name:           "responses-to-chat-all-models",
@@ -142,6 +165,129 @@ func TestResponsesRequestToChatCompletionsRequestRejectsInvalidIncludeShape(t *t
 	require.Contains(t, err.Error(), "include must be an array")
 }
 
+func TestResponsesResponseToChatCompletionsResponseMapsReasoningSummary(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_reasoning",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.4-mini",
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "reasoning",
+				Summary: []dto.ResponsesReasoningSummaryPart{
+					{Type: "summary_text", Text: "checked constraints"},
+					{Type: "summary_text", Text: "selected final answer"},
+				},
+				EncryptedContent: common.RawMessage(`"opaque"`),
+			},
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "output_text", Text: "done"},
+				},
+			},
+		},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_reasoning")
+
+	require.NoError(t, err)
+	require.Len(t, chatResp.Choices, 1)
+	require.Equal(t, "done", chatResp.Choices[0].Message.Content)
+	require.Equal(t, "checked constraints\n\nselected final answer", chatResp.Choices[0].Message.GetReasoningContent())
+}
+
+func TestResponsesResponseToChatCompletionsResponseMapsOutputTokenDetails(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_usage_details",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.4-mini",
+		Usage: &dto.Usage{
+			InputTokens:  10,
+			OutputTokens: 20,
+			TotalTokens:  30,
+			OutputTokensDetails: &dto.OutputTokenDetails{
+				ReasoningTokens: 6,
+				ImageTokens:     7,
+				AudioTokens:     8,
+			},
+		},
+	}
+
+	_, usage, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_usage_details")
+
+	require.NoError(t, err)
+	require.Equal(t, 10, usage.PromptTokens)
+	require.Equal(t, 20, usage.CompletionTokens)
+	require.Equal(t, 30, usage.TotalTokens)
+	require.Equal(t, 6, usage.CompletionTokenDetails.ReasoningTokens)
+	require.Equal(t, 7, usage.CompletionTokenDetails.ImageTokens)
+	require.Equal(t, 8, usage.CompletionTokenDetails.AudioTokens)
+}
+
+func TestResponsesResponseToChatCompletionsResponseMapsSummaryOnlyReasoning(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_reasoning_only",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.4-mini",
+		Reasoning: &dto.Reasoning{Summary: "inspected state and selected the safe route"},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_reasoning_only")
+
+	require.NoError(t, err)
+	require.Len(t, chatResp.Choices, 1)
+	require.Equal(t, "", chatResp.Choices[0].Message.Content)
+	require.Equal(t, "inspected state and selected the safe route", chatResp.Choices[0].Message.GetReasoningContent())
+}
+
+func TestResponsesResponseToChatCompletionsResponseMapsReasoningContentSummaryText(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_reasoning_content_summary",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.4-mini",
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "reasoning",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "summary_text", Text: "content summary"},
+				},
+				EncryptedContent: common.RawMessage(`"opaque"`),
+			},
+		},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_reasoning_content_summary")
+
+	require.NoError(t, err)
+	require.Len(t, chatResp.Choices, 1)
+	require.Equal(t, "", chatResp.Choices[0].Message.Content)
+	require.Equal(t, "content summary", chatResp.Choices[0].Message.GetReasoningContent())
+}
+
+func TestResponsesResponseToChatCompletionsResponseIgnoresReasoningSummaryConfigValues(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_reasoning_config",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.4-mini",
+		Reasoning: &dto.Reasoning{Summary: "auto"},
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "output_text", Text: "done"},
+				},
+			},
+		},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_reasoning_config")
+
+	require.NoError(t, err)
+	require.Empty(t, chatResp.Choices[0].Message.GetReasoningContent())
+}
+
 func TestResponsesRequestToChatCompletionsRequestRejectsCustomToolsByDefault(t *testing.T) {
 	_, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
 		Model: "gpt-5",
@@ -184,6 +330,9 @@ func TestResponsesRequestToChatCompletionsRequestBridgesCustomToolsWhenEnabled(t
 				"type": "web_search",
 			},
 			{
+				"type": "tool_search",
+			},
+			{
 				"type":        "custom",
 				"name":        "shell",
 				"description": "Run a shell command.",
@@ -215,6 +364,262 @@ func TestResponsesRequestToChatCompletionsRequestBridgesCustomToolsWhenEnabled(t
 	require.Equal(t, "tool", chatReq.Messages[2].Role)
 	require.Equal(t, "call_custom_1", chatReq.Messages[2].ToolCallId)
 	require.Equal(t, "/tmp/work", chatReq.Messages[2].StringContent())
+}
+
+func TestResponsesRequestToChatCompletionsRequestBridgesNamespaceToolsWhenEnabled(t *testing.T) {
+	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+		Model:      "gpt-5",
+		Input:      mustMarshalJSON(t, "read thread status"),
+		ToolChoice: mustMarshalJSON(t, map[string]any{"type": "namespace", "name": "codex_app"}),
+		Tools: mustMarshalJSON(t, []map[string]any{
+			{
+				"type":        "namespace",
+				"name":        "codex_app",
+				"description": "Tools in the codex_app namespace.",
+				"tools": []map[string]any{
+					{
+						"type":        "function",
+						"name":        "read_thread",
+						"description": "Read recent status and turn summaries for one Codex thread.",
+						"parameters": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"threadId": map[string]any{"type": "string"},
+							},
+							"required": []string{"threadId"},
+						},
+					},
+					{
+						"type":        "function",
+						"name":        "list_threads",
+						"description": "List recent Codex threads.",
+						"input_schema": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"limit": map[string]any{"type": "number"},
+							},
+						},
+					},
+				},
+			},
+			{
+				"type":        "namespace",
+				"name":        "unused_app",
+				"description": "Tools outside the selected namespace.",
+				"tools": []map[string]any{
+					{
+						"type":        "function",
+						"name":        "delete_thread",
+						"description": "Delete a thread.",
+						"parameters": map[string]any{
+							"type": "object",
+						},
+					},
+				},
+			},
+		}),
+	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.NoError(t, err)
+	require.Len(t, chatReq.Tools, 2)
+	require.Equal(t, "function", chatReq.Tools[0].Type)
+	require.Equal(t, "read_thread", chatReq.Tools[0].Function.Name)
+	require.Equal(t, "Read recent status and turn summaries for one Codex thread.", chatReq.Tools[0].Function.Description)
+	readThreadParams, err := common.Marshal(chatReq.Tools[0].Function.Parameters)
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"type": "object",
+		"properties": {
+			"threadId": {"type": "string"}
+		},
+		"required": ["threadId"]
+	}`, string(readThreadParams))
+	require.Equal(t, "function", chatReq.Tools[1].Type)
+	require.Equal(t, "list_threads", chatReq.Tools[1].Function.Name)
+	require.Equal(t, "List recent Codex threads.", chatReq.Tools[1].Function.Description)
+	listThreadsParams, err := common.Marshal(chatReq.Tools[1].Function.Parameters)
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"type": "object",
+		"properties": {
+			"limit": {"type": "number"}
+		}
+	}`, string(listThreadsParams))
+	require.Equal(t, "required", chatReq.ToolChoice)
+}
+
+func TestResponsesRequestToChatCompletionsRequestRejectsMissingNamespaceToolChoiceTarget(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+		Model:      "gpt-5",
+		Input:      mustMarshalJSON(t, "read thread status"),
+		ToolChoice: mustMarshalJSON(t, map[string]any{"type": "namespace", "name": "missing_app"}),
+		Tools: mustMarshalJSON(t, []map[string]any{
+			{
+				"type": "namespace",
+				"name": "codex_app",
+				"tools": []map[string]any{{
+					"type": "function",
+					"name": "read_thread",
+				}},
+			},
+		}),
+	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tool_choice namespace")
+	require.Contains(t, err.Error(), "missing_app")
+}
+
+func TestResponsesRequestToChatCompletionsRequestRejectsDuplicateNamespaceToolNames(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+		Model:      "gpt-5",
+		Input:      mustMarshalJSON(t, "read thread status"),
+		ToolChoice: mustMarshalJSON(t, map[string]any{"type": "namespace", "name": "codex_app"}),
+		Tools: mustMarshalJSON(t, []map[string]any{
+			{
+				"type":        "namespace",
+				"name":        "codex_app",
+				"description": "Tools in the codex_app namespace.",
+				"tools": []map[string]any{
+					{
+						"type":        "function",
+						"name":        "lookup",
+						"description": "Read recent status.",
+						"parameters": map[string]any{
+							"type": "object",
+						},
+					},
+					{
+						"type":        "function",
+						"name":        "lookup",
+						"description": "Read thread summary.",
+						"parameters": map[string]any{
+							"type": "object",
+						},
+					},
+				},
+			},
+		}),
+	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicated")
+}
+
+func TestResponsesRequestToChatCompletionsRequestIgnoresDuplicateFunctionToolNamesOutsideSelectedNamespace(t *testing.T) {
+	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+		Model:      "gpt-5",
+		Input:      mustMarshalJSON(t, "read thread status"),
+		ToolChoice: mustMarshalJSON(t, map[string]any{"type": "namespace", "name": "codex_app"}),
+		Tools: mustMarshalJSON(t, []map[string]any{
+			{
+				"type": "namespace",
+				"name": "codex_app",
+				"tools": []map[string]any{{
+					"type": "function",
+					"name": "lookup",
+				}},
+			},
+			{
+				"type": "namespace",
+				"name": "ns2",
+				"tools": []map[string]any{{
+					"type": "function",
+					"name": "lookup",
+				}},
+			},
+		}),
+	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.NoError(t, err)
+	require.Len(t, chatReq.Tools, 1)
+	require.Equal(t, "lookup", chatReq.Tools[0].Function.Name)
+}
+
+func TestResponsesRequestToChatCompletionsRequestNamespaceToolFiltersIgnoredTypes(t *testing.T) {
+	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: mustMarshalJSON(t, "read thread status"),
+		Tools: mustMarshalJSON(t, []map[string]any{
+			{
+				"type": "namespace",
+				"name": "codex_app",
+				"tools": []map[string]any{
+					{
+						"type": "tool_search",
+					},
+					{
+						"type":        "function",
+						"name":        "read_thread",
+						"description": "Read recent status.",
+						"parameters": map[string]any{
+							"type": "object",
+						},
+					},
+				},
+			},
+		}),
+	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.NoError(t, err)
+	require.Len(t, chatReq.Tools, 1)
+	require.Equal(t, "function", chatReq.Tools[0].Type)
+	require.Equal(t, "read_thread", chatReq.Tools[0].Function.Name)
+}
+
+func TestResponsesRequestToChatCompletionsRequestRejectsUnsupportedInputToolSearchItems(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: mustMarshalJSON(t, []map[string]any{
+			{
+				"type": "tool_search",
+			},
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "continue"}},
+			},
+		}),
+	}, ResponsesChatCompatibilityOptions{})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `input item type "tool_search" is not supported`)
+}
+
+func TestResponsesRequestToChatCompletionsRequestNamespaceToolRequiresCompatibleNestedTool(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: mustMarshalJSON(t, "read thread status"),
+		Tools: mustMarshalJSON(t, []map[string]any{
+			{
+				"type": "namespace",
+				"name": "codex_app",
+				"tools": []map[string]any{
+					{
+						"type": "tool_search",
+					},
+				},
+			},
+		}),
+	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no compatible entries")
+}
+
+func TestResponsesRequestToChatCompletionsRequestRejectsNamespaceToolsByDefault(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: mustMarshalJSON(t, "read thread status"),
+		Tools: mustMarshalJSON(t, []map[string]any{
+			{
+				"type": "namespace",
+				"name": "codex_app",
+			},
+		}),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "custom tool bridge is not enabled")
 }
 
 func TestChatCompletionsResponseToResponsesResponse(t *testing.T) {
@@ -259,10 +664,45 @@ func TestChatCompletionsResponseToResponsesResponse(t *testing.T) {
 	require.Equal(t, "done", responsesResp.Output[0].Content[0].Text)
 	require.Equal(t, "function_call", responsesResp.Output[1].Type)
 	require.Equal(t, "lookup", responsesResp.Output[1].Name)
+	var arguments string
+	require.NoError(t, common.Unmarshal(responsesResp.Output[1].Arguments, &arguments))
+	require.Equal(t, `{"q":"hello"}`, arguments)
 	require.NotNil(t, usage)
 	require.Equal(t, 10, usage.InputTokens)
 	require.Equal(t, 5, usage.OutputTokens)
 	require.Equal(t, 15, usage.TotalTokens)
+}
+
+func TestChatCompletionsResponseToResponsesResponseEscapesInvalidToolArguments(t *testing.T) {
+	chatResp := &dto.OpenAITextResponse{
+		Id:      "chatcmpl_invalid_args",
+		Model:   "gpt-5",
+		Object:  "chat.completion",
+		Created: int64(12345),
+		Choices: []dto.OpenAITextResponseChoice{
+			{
+				Index:        0,
+				Message:      dto.Message{Role: "assistant", Content: ""},
+				FinishReason: "tool_calls",
+			},
+		},
+	}
+	chatResp.Choices[0].Message.SetToolCalls([]dto.ToolCallRequest{
+		{
+			ID:   "call_invalid",
+			Type: "function",
+			Function: dto.FunctionRequest{
+				Name:      "lookup",
+				Arguments: `not-json`,
+			},
+		},
+	})
+
+	responsesResp, _, err := ChatCompletionsResponseToResponsesResponse(chatResp, "resp_invalid_args")
+
+	require.NoError(t, err)
+	require.Len(t, responsesResp.Output, 1)
+	require.JSONEq(t, `"not-json"`, string(responsesResp.Output[0].Arguments))
 }
 
 func TestChatCompletionsResponseToResponsesResponseRejectsCustomToolCallByDefault(t *testing.T) {

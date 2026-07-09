@@ -525,7 +525,7 @@ func TestBuildChannelRuntimeRequestHeadersAdvancesHeaderProfileRoundRobin(t *tes
 
 	second, err := BuildChannelRuntimeRequestHeaders(channel, "sk-test", http.Header{})
 	require.NoError(t, err)
-	require.Equal(t, "claude-cli/2.1.153 (external, sdk-cli)", second.Get("User-Agent"))
+	require.Equal(t, dto.BuiltinClaudeCodeUserAgent, second.Get("User-Agent"))
 
 	state := model.RequestHeaderStrategyState{}
 	scopeKey := fmt.Sprintf(

@@ -23,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -139,6 +140,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 	service.EnsureResponsesBootstrapRecoveryState(c, relayInfo.IsStream)
+	service.ApplyResponsesBootstrapRecoveryMetric(c, relayInfo)
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
@@ -247,6 +249,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
 			relayInfo.LastError = newAPIError
+			recordResponsesCapabilityObservation(c, relayInfo, newAPIError)
+			recordChannelRequestBodyLimit(c, relayInfo, newAPIError)
 
 			if shouldFallbackResponsesCompactNativeContext(c, relayInfo, newAPIError) {
 				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
@@ -263,7 +267,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					relayInfo.LastError = nil
 					return
 				}
-				restoreResponsesCompactFallbackContext(c, fallbackSnapshot)
+				restoreResponsesCompactFallbackContext(c, relayInfo, fallbackSnapshot)
 				relayInfo.LastError = newAPIError
 			}
 
@@ -283,7 +287,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					relayInfo.LastError = nil
 					return
 				}
-				restoreResponsesCompactFallbackContext(c, fallbackSnapshot)
+				restoreResponsesCompactFallbackContext(c, relayInfo, fallbackSnapshot)
 				relayInfo.LastError = newAPIError
 			}
 
@@ -308,7 +312,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					relayInfo.LastError = nil
 					return
 				}
-				restoreResponsesCompactFallbackContext(c, fallbackSnapshot)
+				restoreResponsesCompactFallbackContext(c, relayInfo, fallbackSnapshot)
 				relayInfo.LastError = newAPIError
 			}
 
@@ -319,7 +323,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					relayInfo.LastError = nil
 					return
 				}
-				restoreResponsesCompactFallbackContext(c, fallbackSnapshot)
+				restoreResponsesCompactFallbackContext(c, relayInfo, fallbackSnapshot)
 				relayInfo.LastError = newAPIError
 			}
 
@@ -330,7 +334,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					relayInfo.LastError = nil
 					return
 				}
-				restoreResponsesCompactFallbackContext(c, fallbackSnapshot)
+				restoreResponsesCompactFallbackContext(c, relayInfo, fallbackSnapshot)
 				relayInfo.LastError = newAPIError
 			}
 
@@ -349,8 +353,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		releaseBootstrapRecoveryBilling(c, relayInfo)
-		waitErr, canceled := waitForResponsesBootstrapRecoveryProbe(c)
+		waitErr, canceled := waitForResponsesBootstrapRecoveryProbe(c, relayInfo)
 		if canceled {
+			if relayInfo != nil && relayInfo.ResponsesBootstrapRecoveryAttempted {
+				service.RecordResponsesBootstrapRecovery(
+					relayInfo.OriginModelName,
+					relayInfo.UsingGroup,
+					false,
+					relayInfo.ResponsesBootstrapRecoveryWaitMs,
+				)
+			}
 			return
 		}
 		if waitErr != nil {
@@ -381,10 +393,19 @@ func releaseBootstrapRecoveryBilling(c *gin.Context, relayInfo *relaycommon.Rela
 	relayInfo.ResetBillingMetadata(c)
 }
 
-func waitForResponsesBootstrapRecoveryProbe(c *gin.Context) (*types.NewAPIError, bool) {
+func waitForResponsesBootstrapRecoveryProbe(c *gin.Context, relayInfo *relaycommon.RelayInfo) (*types.NewAPIError, bool) {
 	waitDuration, sendPing, ok := service.NextResponsesBootstrapWait(c, time.Now())
+	state, _ := service.GetResponsesBootstrapRecoveryState(c)
 	if !ok {
+		if state != nil {
+			logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery probe deadline reached: attempts=%d waited_ms=%d", state.WaitAttempts, state.WaitDuration.Milliseconds()))
+		}
 		return nil, false
+	}
+	service.MarkResponsesBootstrapRecoveryMetric(c)
+	service.ApplyResponsesBootstrapRecoveryMetric(c, relayInfo)
+	if waitErr, canceled, done := responsesBootstrapProbeContextDone(c, state); done {
+		return waitErr, canceled
 	}
 	if sendPing {
 		helper.SetEventStreamHeaders(c)
@@ -394,18 +415,36 @@ func waitForResponsesBootstrapRecoveryProbe(c *gin.Context) (*types.NewAPIError,
 			return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry()), false
 		}
 		service.MarkResponsesBootstrapPingSent(c, now)
+		if state != nil {
+			logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery probe ping: attempts=%d waited_ms=%d", state.WaitAttempts, state.WaitDuration.Milliseconds()))
+		}
 	}
 	timer := time.NewTimer(waitDuration)
 	defer timer.Stop()
 	select {
 	case <-c.Request.Context().Done():
-		if errors.Is(c.Request.Context().Err(), context.Canceled) {
-			return nil, true
-		}
-		return types.NewOpenAIError(c.Request.Context().Err(), types.ErrorCodeDoRequestFailed, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry()), false
+		waitErr, canceled, _ := responsesBootstrapProbeContextDone(c, state)
+		return waitErr, canceled
 	case <-timer.C:
+		if waitErr, canceled, done := responsesBootstrapProbeContextDone(c, state); done {
+			return waitErr, canceled
+		}
 		return nil, false
 	}
+}
+
+func responsesBootstrapProbeContextDone(c *gin.Context, state *service.ResponsesBootstrapRecoveryState) (*types.NewAPIError, bool, bool) {
+	err := c.Request.Context().Err()
+	if err == nil {
+		return nil, false, false
+	}
+	if state != nil {
+		logger.LogInfo(c, fmt.Sprintf("responses bootstrap recovery probe request context done: attempts=%d waited_ms=%d error=%q", state.WaitAttempts, state.WaitDuration.Milliseconds(), err.Error()))
+	}
+	if errors.Is(err, context.Canceled) {
+		return nil, true, true
+	}
+	return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry()), false, true
 }
 
 func shouldSuppressBootstrapRecoveryAutoBan(c *gin.Context, newAPIError *types.NewAPIError) bool {
@@ -424,6 +463,9 @@ var upgrader = websocket.Upgrader{
 		return true // 允许跨域
 	},
 }
+
+const relayInitialChannelConsumedKey = "relay_initial_channel_consumed"
+const responsesCompactUnsafeCompactionInputKey = "responses_compact_unsafe_compaction_input"
 
 func addUsedChannel(c *gin.Context, channelId int) {
 	useChannel := c.GetStringSlice("use_channel")
@@ -461,36 +503,382 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
-	if info.ChannelMeta == nil && retryParam.GetRetry() == 0 {
+	originalRetry := retryParam.GetRetry()
+	skippedNativeCompactionChannels := 0
+	nativeCompactionPriorityAdvances := 0
+	skippedUnsupportedCompactionInThisCall := false
+	restoreRetryAfterNativeCompactionSkip := func() {
+		if nativeCompactionPriorityAdvances > 0 {
+			retryParam.SetRetry(originalRetry)
+			info.RetryIndex = originalRetry
+		}
+	}
+	if shouldUseInitialSelectedChannel(c, info, retryParam) {
+		c.Set(relayInitialChannelConsumedKey, true)
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
 		if !autoBan {
 			autoBanInt = 0
 		}
-		return &model.Channel{
+		channel := &model.Channel{
 			Id:      c.GetInt("channel_id"),
 			Type:    c.GetInt("channel_type"),
 			Name:    c.GetString("channel_name"),
 			AutoBan: &autoBanInt,
-		}, nil
+		}
+		skipChannel, skipErr := shouldSkipChannelForResponsesToChatCompatibility(c, info, channel)
+		if skipErr != nil {
+			return nil, newResponsesCompactionInputError(skipErr)
+		}
+		if skipChannel {
+			if _, ok := c.Get("specific_channel_id"); ok {
+				return nil, unsupportedResponsesToChatChannelError(channel, info.LastError)
+			}
+			addUsedChannel(c, channel.Id)
+			skippedNativeCompactionChannels++
+			if isUnsupportedCompactionSkip(info.LastError) {
+				skippedUnsupportedCompactionInThisCall = true
+			}
+		} else {
+			restoreRetryAfterNativeCompactionSkip()
+			return channel, nil
+		}
 	}
-	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
+	for {
+		info.RetryIndex = retryParam.GetRetry()
+		channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 
-	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
+		info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
+		if err != nil {
+			restoreRetryAfterNativeCompactionSkip()
+			return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		if channel == nil {
+			if nativeCompactionPriorityAdvances < skippedNativeCompactionChannels {
+				resetAutoGroupSelectionProgress(c)
+				retryParam.IncreaseRetry()
+				nativeCompactionPriorityAdvances++
+				continue
+			}
+			if skippedUnsupportedCompactionInThisCall && info.LastError != nil {
+				restoreRetryAfterNativeCompactionSkip()
+				return nil, info.LastError
+			}
+			restoreRetryAfterNativeCompactionSkip()
+			return nil, types.NewError(errors.New(formatNoAvailableChannelErrorMessage(selectGroup, info.OriginModelName, info.LastError)), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		skipChannel, skipErr := shouldSkipChannelForResponsesToChatCompatibility(c, info, channel)
+		if skipErr != nil {
+			restoreRetryAfterNativeCompactionSkip()
+			return nil, newResponsesCompactionInputError(skipErr)
+		}
+		if skipChannel {
+			addUsedChannel(c, channel.Id)
+			skippedNativeCompactionChannels++
+			if isUnsupportedCompactionSkip(info.LastError) {
+				skippedUnsupportedCompactionInThisCall = true
+			}
+			continue
+		}
+
+		newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
+		if newAPIError != nil {
+			restoreRetryAfterNativeCompactionSkip()
+			return nil, newAPIError
+		}
+		info.InitChannelMeta(c)
+		restoreRetryAfterNativeCompactionSkip()
+		return channel, nil
+	}
+}
+
+func resetAutoGroupSelectionProgress(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	delete(c.Keys, string(constant.ContextKeyAutoGroupIndex))
+	delete(c.Keys, string(constant.ContextKeyAutoGroupRetryIndex))
+}
+
+func shouldUseInitialSelectedChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) bool {
+	if c == nil || info == nil || retryParam == nil {
+		return false
+	}
+	return info.ChannelMeta == nil &&
+		retryParam.GetRetry() == 0 &&
+		!c.GetBool(relayInitialChannelConsumedKey) &&
+		common.GetContextKeyInt(c, constant.ContextKeyChannelId) > 0
+}
+
+func isUnsupportedCompactionSkip(err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	return err.GetErrorCode() == types.ErrorCodeChannelModelMappedError &&
+		err.StatusCode == http.StatusServiceUnavailable &&
+		strings.Contains(err.Error(), "cannot handle native compaction input")
+}
+
+func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) (bool, error) {
+	if c == nil || c.Request == nil || info == nil || channel == nil || info.RelayMode != relayconstant.RelayModeResponses {
+		return false, nil
+	}
+	request, ok := info.Request.(*dto.OpenAIResponsesRequest)
+	if !ok || request == nil {
+		return false, nil
+	}
+	if model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
+		nativeCompactionChannelSetting(c, info, channel).PassThroughBodyEnabled {
+		return false, nil
+	}
+	hasLocalCompactionTrigger := request.HasCompactionTrigger()
+	hasRemoteCompaction, err := service.HasRemoteResponsesCompactionInput(c.Request.Context(), *request)
 	if err != nil {
-		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		return false, err
 	}
-	if channel == nil {
-		return nil, types.NewError(errors.New(formatNoAvailableChannelErrorMessage(selectGroup, info.OriginModelName, info.LastError)), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	if hasRemoteCompaction {
+		channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
+		if responsesCompactionChannelCannotPassthroughItems(channelOtherSettings, channel.Type) {
+			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
+			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			return true, nil
+		}
+		rule := service.FindProtocolConversionRuleGlobal(
+			model_setting.ProtocolEndpointResponses,
+			model_setting.ProtocolEndpointChatCompletions,
+			channel.Id,
+			channel.Type,
+			info.OriginModelName,
+		)
+		if rule != nil && responsesCompactionRuleRequiresChannelSkip(c, info, rule, channel) {
+			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
+			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			return true, nil
+		}
+		return false, nil
 	}
+	hasLocalNativeOpaque, err := service.HasLocalNativeOpaqueCompactReference(c.Request.Context(), *request)
+	if err != nil {
+		return false, err
+	}
+	if hasLocalNativeOpaque {
+		channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
+		if !channelOtherSettings.ResolveResponsesChannelCapability(channel.Type).SupportsRestPreviousResponseID {
+			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
+			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			return true, nil
+		}
+		return false, nil
+	}
+	if hasLocalCompactionTrigger {
+		channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
+		if channelOtherSettings.HasResponsesProxyCompatibilityProfile() {
+			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
+			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			return true, nil
+		}
+		rule := service.FindProtocolConversionRuleGlobal(
+			model_setting.ProtocolEndpointResponses,
+			model_setting.ProtocolEndpointChatCompletions,
+			channel.Id,
+			channel.Type,
+			info.OriginModelName,
+		)
+		if rule != nil && responsesLocalCompactionTriggerRuleRequiresChannelSkip(c, info, rule, channel) {
+			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
+			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			return true, nil
+		}
+		return false, nil
+	}
+	rule, err := service.FindResponsesViaChatRule(
+		c.Request.Context(),
+		info.RelayMode,
+		model_setting.GetGlobalSettings().PassThroughRequestEnabled,
+		nativeCompactionChannelSetting(c, info, channel),
+		channel.Id,
+		channel.Type,
+		info.OriginModelName,
+		request,
+	)
+	if err != nil {
+		return false, err
+	}
+	if rule == nil {
+		return false, nil
+	}
+	options := service.ResponsesViaChatRuleOptions(rule)
+	compatibilityRequest, err := responsesToChatCompatibilityRequestForPrecheck(c, info, request)
+	if err != nil {
+		if errors.Is(err, service.ErrResponsesNativeOpaqueStateNotRestorable) {
+			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
+			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			return true, nil
+		}
+		return false, err
+	}
+	if err := service.ValidateResponsesRequestToChatCompatibility(compatibilityRequest, options); err != nil {
+		info.LastError = unsupportedResponsesToChatConversionError(channel, err)
+		return true, nil
+	}
+	return false, nil
+}
 
-	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
-	if newAPIError != nil {
-		return nil, newAPIError
+func responsesToChatCompatibilityRequestForPrecheck(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) (*dto.OpenAIResponsesRequest, error) {
+	if c == nil || request == nil {
+		return request, nil
 	}
-	info.InitChannelMeta(c)
-	return channel, nil
+	hasLocalReference, err := service.HasLocalSyntheticCompactReferenceWithContext(c.Request.Context(), *request)
+	if err != nil || !hasLocalReference {
+		return request, err
+	}
+	converted, applied, visibleOnly, _, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(
+		c.Request.Context(),
+		service.SyntheticCompactScopeFromSource(info),
+		*request,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if !applied && !visibleOnly {
+		return request, nil
+	}
+	return &converted, nil
+}
+
+func responsesLocalCompactionTriggerRuleRequiresChannelSkip(c *gin.Context, info *relaycommon.RelayInfo, rule *model_setting.ProtocolConversionRule, channel *model.Channel) bool {
+	if rule == nil || channel == nil {
+		return false
+	}
+	settings := responsesCompactionChannelOtherSettings(c, info, channel)
+	if settings.HasResponsesProxyCompatibilityProfile() {
+		return true
+	}
+	if rule.AllChannels {
+		return !settings.ResolveResponsesChannelCapability(channel.Type).SupportsCompactionItemPassthrough
+	}
+	if len(rule.ChannelIDs) > 0 {
+		for _, channelID := range rule.ChannelIDs {
+			if channelID == channel.Id {
+				return true
+			}
+		}
+	}
+	if !rule.AllChannels && len(rule.ChannelTypes) > 0 {
+		for _, channelType := range rule.ChannelTypes {
+			if channelType == channel.Type {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func nativeCompactionChannelSetting(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) dto.ChannelSettings {
+	if channel == nil {
+		return dto.ChannelSettings{}
+	}
+	if info != nil && info.ChannelMeta != nil && info.ChannelId == channel.Id {
+		return info.ChannelSetting
+	}
+	if c != nil {
+		if settings, ok := common.GetContextKeyType[dto.ChannelSettings](c, constant.ContextKeyChannelSetting); ok {
+			if common.GetContextKeyInt(c, constant.ContextKeyChannelId) == channel.Id {
+				return settings
+			}
+		}
+	}
+	return channel.GetSetting()
+}
+
+func unsupportedNativeCompactionChannelError(channel *model.Channel) *types.NewAPIError {
+	channelID := 0
+	if channel != nil {
+		channelID = channel.Id
+	}
+	return types.NewErrorWithStatusCode(
+		fmt.Errorf("channel #%d uses responses-to-chat compatibility and cannot handle native compaction input; choose a native Responses-capable channel", channelID),
+		types.ErrorCodeChannelModelMappedError,
+		http.StatusServiceUnavailable,
+	)
+}
+
+func unsupportedResponsesToChatChannelError(channel *model.Channel, lastErr *types.NewAPIError) *types.NewAPIError {
+	if lastErr != nil {
+		return lastErr
+	}
+	return unsupportedResponsesToChatConversionError(channel, errors.New("request is not compatible with responses-to-chat compatibility mode"))
+}
+
+func unsupportedResponsesToChatConversionError(channel *model.Channel, err error) *types.NewAPIError {
+	channelID := 0
+	if channel != nil {
+		channelID = channel.Id
+	}
+	return types.NewErrorWithStatusCode(
+		fmt.Errorf("channel #%d uses responses-to-chat compatibility and cannot safely convert this Responses request: %w", channelID, err),
+		types.ErrorCodeChannelModelMappedError,
+		http.StatusServiceUnavailable,
+	)
+}
+
+func responsesCompactionRuleRequiresChannelSkip(c *gin.Context, info *relaycommon.RelayInfo, rule *model_setting.ProtocolConversionRule, channel *model.Channel) bool {
+	if rule == nil || channel == nil {
+		return false
+	}
+	settings := responsesCompactionChannelOtherSettings(c, info, channel)
+	if settings.HasResponsesProxyCompatibilityProfile() {
+		return true
+	}
+	if rule.AllChannels {
+		return !settings.ResolveResponsesChannelCapability(channel.Type).SupportsCompactionItemPassthrough
+	}
+	if len(rule.ChannelIDs) > 0 {
+		for _, channelID := range rule.ChannelIDs {
+			if channelID == channel.Id {
+				return true
+			}
+		}
+	}
+	if !rule.AllChannels && len(rule.ChannelTypes) > 0 {
+		for _, channelType := range rule.ChannelTypes {
+			if channelType == channel.Type {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func responsesCompactionChannelCannotPassthroughItems(settings dto.ChannelOtherSettings, channelType int) bool {
+	if settings.HasResponsesProxyCompatibilityProfile() {
+		return true
+	}
+	return !settings.ResolveResponsesChannelCapability(channelType).SupportsCompactionItemPassthrough
+}
+
+func responsesCompactionChannelOtherSettings(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) dto.ChannelOtherSettings {
+	if info != nil && info.ChannelMeta != nil && info.ChannelId == channel.Id {
+		return info.ChannelOtherSettings
+	}
+	if c != nil {
+		if settings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting); ok {
+			if common.GetContextKeyInt(c, constant.ContextKeyChannelId) == channel.Id {
+				return settings
+			}
+		}
+	}
+	return channel.GetOtherSettings()
+}
+
+func newResponsesCompactionInputError(err error) *types.NewAPIError {
+	return types.NewErrorWithStatusCode(
+		err,
+		types.ErrorCodeInvalidRequest,
+		http.StatusBadRequest,
+		types.ErrOptionWithSkipRetry(),
+	)
 }
 
 func formatNoAvailableChannelErrorMessage(group string, model string, lastErr *types.NewAPIError) string {
@@ -503,6 +891,9 @@ func formatNoAvailableChannelErrorMessage(group string, model string, lastErr *t
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
 	if openaiErr == nil {
+		return false
+	}
+	if isPermanentUpstreamUnavailableError(openaiErr) {
 		return false
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) && !shouldRetryDespiteChannelAffinity(c, openaiErr) {
@@ -527,16 +918,106 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if code < 100 || code > 599 {
 		return true
 	}
-	if shouldRetryTimeoutForResponsesCompact(c, code) {
-		return true
-	}
-	if shouldRetryUpstreamRequestTooLargeForResponsesCompact(c, openaiErr) {
-		return true
+	if operation_setting.IsAlwaysSkipRetryStatusCode(code) {
+		return false
 	}
 	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
 		return false
 	}
+	if shouldRetryUpstreamRequestTooLargeForResponsesCompact(c, openaiErr) {
+		return true
+	}
+	if isRetryableUpstreamTemporaryError(openaiErr) {
+		return true
+	}
+	if isUpstreamTransportInterruptedRelayError(openaiErr) {
+		return true
+	}
+	if isUpstreamGatewayTimeoutError(openaiErr.StatusCode) {
+		return true
+	}
 	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
+func recordResponsesCapabilityObservation(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) {
+	if c == nil || info == nil || info.ChannelMeta == nil || err == nil {
+		return
+	}
+	if !shouldRecordResponsesCapabilityObservation(info.RelayMode, err) {
+		return
+	}
+	observation := dto.ResponsesCapabilityObservation{
+		ObservedAt: time.Now().UTC().Unix(),
+		StatusCode: err.StatusCode,
+		ErrorCode:  string(err.GetErrorCode()),
+		Reason:     common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode()),
+	}
+	settings, updateErr := model.MarkResponsesCapabilityObservation(info.ChannelMeta.ChannelId, observation)
+	if updateErr != nil {
+		logger.LogError(c, fmt.Sprintf("mark responses capability observation failed: %s", updateErr.Error()))
+		return
+	}
+	if settings.ResponsesCapabilityRegistry == nil {
+		return
+	}
+	info.ChannelOtherSettings = settings
+	info.ChannelMeta.ChannelOtherSettings = settings
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, settings)
+}
+
+func recordChannelRequestBodyLimit(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) {
+	if c == nil || info == nil || info.ChannelMeta == nil || err == nil {
+		return
+	}
+	policy := model_setting.GetRequestBodyLimitPolicy()
+	if !policy.Enabled {
+		return
+	}
+	if err.StatusCode != http.StatusRequestEntityTooLarge {
+		return
+	}
+	requestBodySize := common.GetContextKeyInt64(c, constant.ContextKeyRequestBodySize)
+	if requestBodySize <= 0 {
+		return
+	}
+	limit := dto.ChannelRequestBodyLimit{
+		MaxBytes:   requestBodySize,
+		ObservedAt: time.Now().UTC().Unix(),
+		Source:     "upstream_413",
+		Reason:     common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode()),
+	}
+	settings, updateErr := model.MarkChannelRequestBodyLimit(info.ChannelMeta.ChannelId, limit)
+	if updateErr != nil {
+		logger.LogError(c, fmt.Sprintf("mark channel request body limit failed: %s", updateErr.Error()))
+		return
+	}
+	info.ChannelOtherSettings = settings
+	info.ChannelMeta.ChannelOtherSettings = settings
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, settings)
+}
+
+func shouldRecordResponsesCapabilityObservation(relayMode int, err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	if relayMode == relayconstant.RelayModeResponsesCompact {
+		return err.StatusCode == http.StatusBadRequest || err.StatusCode == http.StatusRequestEntityTooLarge
+	}
+	if relayMode != relayconstant.RelayModeResponses {
+		return false
+	}
+	if err.StatusCode == http.StatusRequestEntityTooLarge {
+		return true
+	}
+	if err.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "compaction") ||
+		strings.Contains(message, "responses/compact") ||
+		strings.Contains(message, "chat compatibility mode") ||
+		strings.Contains(message, "previous_response_id") ||
+		strings.Contains(message, "previous response id")
 }
 
 func shouldRetryDespiteChannelAffinity(c *gin.Context, openaiErr *types.NewAPIError) bool {
@@ -544,6 +1025,9 @@ func shouldRetryDespiteChannelAffinity(c *gin.Context, openaiErr *types.NewAPIEr
 		return false
 	}
 	return isUpstreamRateLimitError(openaiErr.StatusCode) ||
+		isRetryableUpstreamTemporaryError(openaiErr) ||
+		isUpstreamTransportInterruptedRelayError(openaiErr) ||
+		isUpstreamGatewayTimeoutError(openaiErr.StatusCode) ||
 		shouldRetryUpstreamRequestTooLargeForResponsesCompact(c, openaiErr)
 }
 
@@ -551,11 +1035,56 @@ func isUpstreamRateLimitError(statusCode int) bool {
 	return statusCode == http.StatusTooManyRequests
 }
 
-func shouldRetryTimeoutForResponsesCompact(c *gin.Context, statusCode int) bool {
-	if statusCode != http.StatusGatewayTimeout && statusCode != 524 {
+func isUpstreamGatewayTimeoutError(statusCode int) bool {
+	return statusCode == http.StatusGatewayTimeout || statusCode == 524
+}
+
+func isPermanentUpstreamUnavailableError(openaiErr *types.NewAPIError) bool {
+	if openaiErr == nil {
 		return false
 	}
-	return c.GetInt("relay_mode") == relayconstant.RelayModeResponsesCompact
+	message := strings.ToLower(strings.Join(strings.Fields(openaiErr.Error()), " "))
+	return strings.Contains(message, "permanently unavailable") ||
+		strings.Contains(message, "permanent unavailable")
+}
+
+func isRetryableUpstreamTemporaryError(openaiErr *types.NewAPIError) bool {
+	if openaiErr == nil {
+		return false
+	}
+	message := strings.ToLower(strings.Join(strings.Fields(openaiErr.Error()), " "))
+	if strings.Contains(message, "selected model is at capacity") {
+		return true
+	}
+	if strings.Contains(message, "model is at capacity") &&
+		strings.Contains(message, "try a different model") {
+		return true
+	}
+	if strings.Contains(message, "auth_not_found") &&
+		strings.Contains(message, "no auth available") {
+		return true
+	}
+	if strings.Contains(message, "upstream service temporarily unavailable") {
+		return true
+	}
+	if !isPermanentUpstreamUnavailableError(openaiErr) &&
+		strings.Contains(message, "service temporarily unavailable") {
+		return true
+	}
+	if strings.Contains(message, "subscription temporarily unavailable") {
+		return true
+	}
+	return strings.Contains(message, "订阅额度不足或暂不可用")
+}
+
+func isUpstreamTransportInterruptedRelayError(openaiErr *types.NewAPIError) bool {
+	if openaiErr == nil {
+		return false
+	}
+	if openaiErr.GetErrorCode() == types.ErrorCodeUpstreamTransportInterrupted {
+		return true
+	}
+	return types.IsUpstreamTransportInterruptedError(openaiErr)
 }
 
 func shouldRetryUpstreamRequestTooLargeForResponsesCompact(c *gin.Context, err *types.NewAPIError) bool {
@@ -590,6 +1119,9 @@ func shouldFallbackResponsesCompactAuto(c *gin.Context, info *relaycommon.RelayI
 	if info.ChannelOtherSettings.HasActiveResponsesCompactAutoFallback(time.Now()) {
 		return false
 	}
+	if responsesCompactRequestHasUnsafeCompactionInput(c, info) {
+		return false
+	}
 	switch err.StatusCode {
 	case http.StatusBadRequest,
 		http.StatusNotFound,
@@ -620,6 +1152,7 @@ func setResponsesCompactSyntheticMode(c *gin.Context, info *relaycommon.RelayInf
 	settings := info.ChannelMeta.ChannelOtherSettings
 	settings.ResponsesCompactMode = dto.ResponsesCompactModeSynthetic
 	info.ChannelMeta.ChannelOtherSettings = settings
+	info.ChannelOtherSettings = settings
 	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, settings)
 }
 
@@ -628,6 +1161,7 @@ func restoreResponsesCompactMode(c *gin.Context, info *relaycommon.RelayInfo, se
 		return
 	}
 	info.ChannelMeta.ChannelOtherSettings = settings
+	info.ChannelOtherSettings = settings
 	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, settings)
 }
 
@@ -636,12 +1170,27 @@ type responsesCompactFallbackContextValue struct {
 	value  any
 }
 
+const responsesCompactFallbackChannelIDKey = "responses_compact_fallback_snapshot_channel_id"
+
 var responsesCompactFallbackContextKeys = []string{
+	string(constant.ContextKeyChannelOtherSetting),
 	"responses_compact_auto_fallback_attempted",
 	"responses_compact_context_fallback_attempted",
+	string(constant.ContextKeyResponsesCompactCodexContextPruned),
 	"responses_compact_previous_response_id_fallback_attempted",
-	"responses_compact_summary_model_fallback_attempted",
-	"responses_compact_visible_only_fallback_attempted",
+	"responses_compact_synthetic_fallback_channel_id",
+	string(constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted),
+	string(constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted),
+	string(constant.ContextKeyResponsesCompactStateLookup),
+	string(constant.ContextKeyResponsesCompactStateScopeResult),
+	string(constant.ContextKeyResponsesCompactMarkerKind),
+	string(constant.ContextKeyResponsesCompactRouteDecision),
+	string(constant.ContextKeyResponsesCompactFallbackReason),
+	string(constant.ContextKeyResponsesCompactChannelSkip),
+	string(constant.ContextKeyResponsesCompactStateRestored),
+	string(constant.ContextKeyResponsesCompactModelChanged),
+	string(constant.ContextKeyResponsesCompactStateHash),
+	string(constant.ContextKeyResponsesPreviousIDAction),
 	string(constant.ContextKeyResponsesCompactSummaryModel),
 	string(constant.ContextKeyResponsesCompactSummaryModels),
 	string(constant.ContextKeyResponsesCompactVisibleOnly),
@@ -649,9 +1198,16 @@ var responsesCompactFallbackContextKeys = []string{
 }
 
 func snapshotResponsesCompactFallbackContext(c *gin.Context) map[string]responsesCompactFallbackContextValue {
-	snapshot := make(map[string]responsesCompactFallbackContextValue, len(responsesCompactFallbackContextKeys))
+	snapshot := make(map[string]responsesCompactFallbackContextValue, len(responsesCompactFallbackContextKeys)+1)
 	if c == nil {
 		return snapshot
+	}
+	channelID := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	if channelID != 0 {
+		snapshot[responsesCompactFallbackChannelIDKey] = responsesCompactFallbackContextValue{
+			exists: true,
+			value:  channelID,
+		}
 	}
 	for _, key := range responsesCompactFallbackContextKeys {
 		value, exists := c.Get(key)
@@ -663,7 +1219,7 @@ func snapshotResponsesCompactFallbackContext(c *gin.Context) map[string]response
 	return snapshot
 }
 
-func restoreResponsesCompactFallbackContext(c *gin.Context, snapshot map[string]responsesCompactFallbackContextValue) {
+func restoreResponsesCompactFallbackContext(c *gin.Context, info *relaycommon.RelayInfo, snapshot map[string]responsesCompactFallbackContextValue) {
 	if c == nil {
 		return
 	}
@@ -674,6 +1230,10 @@ func restoreResponsesCompactFallbackContext(c *gin.Context, snapshot map[string]
 				continue
 			}
 		}
+		if key == string(constant.ContextKeyChannelOtherSetting) &&
+			!responsesCompactFallbackSnapshotMatchesContextChannel(c, snapshot) {
+			continue
+		}
 		if exists && entry.exists {
 			c.Set(key, entry.value)
 			continue
@@ -682,7 +1242,55 @@ func restoreResponsesCompactFallbackContext(c *gin.Context, snapshot map[string]
 			delete(c.Keys, key)
 		}
 	}
+	restoreResponsesCompactFallbackRelayInfo(info, snapshot)
 	restoreResponsesCompactVisibleOnlyRequestContext(c, snapshot)
+}
+
+func restoreResponsesCompactFallbackRelayInfo(info *relaycommon.RelayInfo, snapshot map[string]responsesCompactFallbackContextValue) {
+	if info == nil || info.ChannelMeta == nil {
+		return
+	}
+	entry, exists := snapshot[string(constant.ContextKeyChannelOtherSetting)]
+	if !exists || !entry.exists {
+		return
+	}
+	settings, ok := entry.value.(dto.ChannelOtherSettings)
+	if !ok {
+		return
+	}
+	if !responsesCompactFallbackSnapshotMatchesChannel(info, snapshot) {
+		return
+	}
+	info.ChannelMeta.ChannelOtherSettings = settings
+	info.ChannelOtherSettings = settings
+}
+
+func responsesCompactFallbackSnapshotMatchesChannel(info *relaycommon.RelayInfo, snapshot map[string]responsesCompactFallbackContextValue) bool {
+	channelID, ok := responsesCompactFallbackSnapshotChannelID(snapshot)
+	if !ok {
+		return true
+	}
+	return channelID == info.ChannelMeta.ChannelId
+}
+
+func responsesCompactFallbackSnapshotMatchesContextChannel(c *gin.Context, snapshot map[string]responsesCompactFallbackContextValue) bool {
+	channelID, ok := responsesCompactFallbackSnapshotChannelID(snapshot)
+	if !ok {
+		return true
+	}
+	if c == nil {
+		return false
+	}
+	return channelID == common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+}
+
+func responsesCompactFallbackSnapshotChannelID(snapshot map[string]responsesCompactFallbackContextValue) (int, bool) {
+	entry, exists := snapshot[responsesCompactFallbackChannelIDKey]
+	if !exists || !entry.exists {
+		return 0, false
+	}
+	channelID, ok := entry.value.(int)
+	return channelID, ok
 }
 
 func restoreResponsesCompactVisibleOnlyRequestContext(c *gin.Context, snapshot map[string]responsesCompactFallbackContextValue) {
@@ -742,7 +1350,7 @@ func retryResponsesCompactSummaryFallbackModels(c *gin.Context, info *relaycommo
 		return triggerErr
 	}
 	lastErr := triggerErr
-	c.Set("responses_compact_summary_model_fallback_attempted", true)
+	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted, true)
 	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModels, models)
 	service.MarkResponsesCompactFallbackAttempt(c, info, service.ResponsesCompactFallbackAttemptSummaryModel, models)
 	for _, fallbackModel := range models {
@@ -791,7 +1399,7 @@ func retryResponsesCompactVisibleOnlySummary(c *gin.Context, info *relaycommon.R
 	if info == nil || info.ChannelMeta == nil {
 		return triggerErr
 	}
-	c.Set("responses_compact_visible_only_fallback_attempted", true)
+	common.SetContextKey(c, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted, true)
 	service.MarkResponsesCompactFallbackAttempt(c, info, service.ResponsesCompactFallbackAttemptVisibleOnly, nil)
 	setResponsesCompactVisibleOnly(c, true)
 	logger.LogWarn(c, fmt.Sprintf(
@@ -832,7 +1440,7 @@ func shouldFallbackResponsesCompactVisibleOnly(c *gin.Context, info *relaycommon
 	if err == nil || info == nil || info.ChannelMeta == nil {
 		return false
 	}
-	if c.GetBool("responses_compact_visible_only_fallback_attempted") {
+	if common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted) {
 		return false
 	}
 	if responsesCompactVisibleOnlyEnabled(c) {
@@ -841,6 +1449,9 @@ func shouldFallbackResponsesCompactVisibleOnly(c *gin.Context, info *relaycommon
 	if info.RelayMode != relayconstant.RelayModeResponsesCompact ||
 		info.ChannelType != constant.ChannelTypeOpenAI ||
 		!info.ChannelOtherSettings.HasSyntheticResponsesCompact() {
+		return false
+	}
+	if responsesCompactRequestHasUnsafeCompactionInput(c, info) {
 		return false
 	}
 	return isResponsesCompactContextLengthError(err)
@@ -873,6 +1484,9 @@ func shouldFallbackResponsesCompactNativeContext(c *gin.Context, info *relaycomm
 		!info.ChannelOtherSettings.ResponsesCompactContextFallbackEnabled() {
 		return false
 	}
+	if responsesCompactRequestHasUnsafeCompactionInput(c, info) {
+		return false
+	}
 	return isResponsesCompactContextLengthError(err)
 }
 
@@ -887,24 +1501,103 @@ func shouldFallbackResponsesCompactPreviousResponseID(c *gin.Context, info *rela
 		info.ChannelType != constant.ChannelTypeOpenAI {
 		return false
 	}
+	if !responsesCompactRequestHasLocalSyntheticReference(c, info) {
+		return false
+	}
+	if responsesCompactRequestHasUnsafeCompactionInput(c, info) {
+		return false
+	}
 	return isResponsesCompactPreviousResponseIDUnsupportedError(err)
+}
+
+func responsesCompactRequestHasLocalSyntheticReference(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	var req dto.OpenAIResponsesRequest
+	switch request := info.Request.(type) {
+	case *dto.OpenAIResponsesCompactionRequest:
+		if request == nil {
+			return false
+		}
+		req = *request.ToResponsesRequest()
+	case *dto.OpenAIResponsesRequest:
+		if request == nil {
+			return false
+		}
+		req = *request
+	default:
+		return false
+	}
+	hasReference, err := service.HasLocalSyntheticCompactReferenceWithContext(relaycommon.GinRequestContext(c), req)
+	return err == nil && hasReference
+}
+
+func responsesCompactRequestHasUnsafeCompactionInput(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	if c != nil {
+		if cached, exists := c.Get(responsesCompactUnsafeCompactionInputKey); exists {
+			if unsafe, ok := cached.(bool); ok {
+				return unsafe
+			}
+		}
+	}
+	var req dto.OpenAIResponsesRequest
+	switch request := info.Request.(type) {
+	case *dto.OpenAIResponsesCompactionRequest:
+		if request == nil {
+			return false
+		}
+		req = *request.ToResponsesRequest()
+	case *dto.OpenAIResponsesRequest:
+		if request == nil {
+			return false
+		}
+		req = *request
+	default:
+		return false
+	}
+	hasRemote, err := service.HasRemoteResponsesCompactionInput(relaycommon.GinRequestContext(c), req)
+	if err != nil {
+		logger.LogError(c, fmt.Sprintf("detect remote responses compaction input failed: %s", err.Error()))
+	}
+	unsafe := err != nil || hasRemote
+	if c != nil {
+		c.Set(responsesCompactUnsafeCompactionInputKey, unsafe)
+	}
+	return unsafe
 }
 
 func shouldFallbackResponsesCompactSummaryModel(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) bool {
 	if err == nil || info == nil || info.ChannelMeta == nil {
 		return false
 	}
-	if c.GetBool("responses_compact_summary_model_fallback_attempted") {
+	if common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted) {
 		return false
 	}
 	if info.RelayMode != relayconstant.RelayModeResponsesCompact ||
-		info.ChannelType != constant.ChannelTypeOpenAI ||
-		!info.ChannelOtherSettings.HasSyntheticResponsesCompact() ||
+		!responsesCompactSummaryModelFallbackSupported(info) ||
 		!info.ChannelOtherSettings.ResponsesCompactSummaryModelFallbackEnabled() ||
 		len(responsesCompactSummaryFallbackCandidates(c, info)) == 0 {
 		return false
 	}
+	if info.ChannelType != constant.ChannelTypeCodex && responsesCompactRequestHasUnsafeCompactionInput(c, info) {
+		return false
+	}
 	return isResponsesCompactContextLengthError(err)
+}
+
+func responsesCompactSummaryModelFallbackSupported(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	if info.ChannelType == constant.ChannelTypeCodex {
+		return true
+	}
+	return info.ChannelType == constant.ChannelTypeOpenAI &&
+		info.ChannelOtherSettings.HasSyntheticResponsesCompact()
 }
 
 func isResponsesCompactPreviousResponseIDUnsupportedError(err *types.NewAPIError) bool {
@@ -1213,6 +1906,7 @@ func processChannelError(c *gin.Context, relayInfo *relaycommon.RelayInfo, chann
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
 		other["admin_info"] = adminInfo
 		service.AppendRequestHeaderPolicyInfo(c, other)
+		service.AppendResponsesRelayInfo(c, relayInfo, other)
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
 			startTime = time.Now()

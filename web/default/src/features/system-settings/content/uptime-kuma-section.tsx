@@ -103,23 +103,27 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
   })
 
   useEffect(() => {
+    let nextGroups: typeof groups = []
     try {
       const parsed = JSON.parse(data || '[]')
       if (Array.isArray(parsed)) {
-        setGroups(
-          parsed.map((item, idx) => ({
-            ...item,
-            id: item.id || idx + 1,
-          }))
-        )
+        nextGroups = parsed.map((item, idx) => ({
+          ...item,
+          id: item.id || idx + 1,
+        }))
       }
     } catch {
-      setGroups([])
+      nextGroups = []
     }
+    queueMicrotask(() => {
+      setGroups(nextGroups)
+    })
   }, [data])
 
   useEffect(() => {
-    setIsEnabled(enabled)
+    queueMicrotask(() => {
+      setIsEnabled(enabled)
+    })
   }, [enabled])
 
   const handleToggleEnabled = async (checked: boolean) => {

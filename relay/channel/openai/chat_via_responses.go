@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -67,6 +68,16 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	if usage == nil || usage.TotalTokens == 0 {
 		text := service.ExtractOutputTextFromResponses(&responsesResp)
+		reasoningSummary := service.ExtractReasoningSummaryFromResponses(&responsesResp)
+		if reasoningSummary != "" {
+			// Fallback token estimation counts the returned assistant content, including
+			// reasoning summary text that is mapped into the chat-compatible payload.
+			if text != "" {
+				text += "\n\n" + reasoningSummary
+			} else {
+				text = reasoningSummary
+			}
+		}
 		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		chatResp.Usage = *usage
 	}
@@ -84,6 +95,19 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	}
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
+	}
+
+	recordResponsesBuiltInToolUsage(c, info, &responsesResp, responsesOutputToolCallCounts{})
+	if responsesResp.HasImageGenerationCall() {
+		c.Set("image_generation_call", true)
+		c.Set("image_generation_call_quality", responsesResp.GetQuality())
+		c.Set("image_generation_call_size", responsesResp.GetSize())
+	}
+	if responsesResp.HasCompactionOutput() {
+		common.SetContextKey(c, constant.ContextKeyResponsesCompactionOutput, true)
+	}
+	if len(chatResp.Choices) > 0 && chatResp.Choices[0].Message.GetReasoningContent() != "" {
+		common.SetContextKey(c, constant.ContextKeyResponsesChatCompatReasoningSummaryMapped, true)
 	}
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)
@@ -118,7 +142,8 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	toolCallCanonicalIDByItemID := make(map[string]string)
 	hasSentReasoningSummary := false
 	needsReasoningSummarySeparator := false
-	//reasoningSummaryTextByKey := make(map[string]string)
+	reasoningSummaryTextByKey := make(map[string]string)
+	reasoningSummarySource := ""
 
 	if info.RelayFormat == types.RelayFormatClaude && info.ClaudeConvertInfo == nil {
 		info.ClaudeConvertInfo = &relaycommon.ClaudeConvertInfo{LastMessagesType: relaycommon.LastMessageTypeNone}
@@ -159,36 +184,6 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return true
 	}
 
-	//sendReasoningDelta := func(delta string) bool {
-	//	if delta == "" {
-	//		return true
-	//	}
-	//	if !sendStartIfNeeded() {
-	//		return false
-	//	}
-	//
-	//	usageText.WriteString(delta)
-	//	chunk := &dto.ChatCompletionsStreamResponse{
-	//		Id:      responseId,
-	//		Object:  "chat.completion.chunk",
-	//		Created: createAt,
-	//		Model:   model,
-	//		Choices: []dto.ChatCompletionsStreamResponseChoice{
-	//			{
-	//				Index: 0,
-	//				Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
-	//					ReasoningContent: &delta,
-	//				},
-	//			},
-	//		},
-	//	}
-	//	if err := helper.ObjectData(c, chunk); err != nil {
-	//		streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
-	//		return false
-	//	}
-	//	return true
-	//}
-
 	sendReasoningSummaryDelta := func(delta string) bool {
 		if delta == "" {
 			return true
@@ -227,6 +222,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			return false
 		}
 		hasSentReasoningSummary = true
+		common.SetContextKey(c, constant.ContextKeyResponsesChatCompatReasoningSummaryMapped, true)
 		return true
 	}
 
@@ -320,15 +316,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				}
 			}
 
-		//case "response.reasoning_text.delta":
-		//if !sendReasoningDelta(streamResp.Delta) {
-		//	sr.Stop(streamErr)
-		//	return
-		//}
-
-		//case "response.reasoning_text.done":
-
 		case "response.reasoning_summary_text.delta":
+			if reasoningSummarySource == "part" {
+				break
+			}
+			reasoningSummarySource = "text_delta"
 			if !sendReasoningSummaryDelta(streamResp.Delta) {
 				sr.Stop(streamErr)
 				return
@@ -339,23 +331,38 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				needsReasoningSummarySeparator = true
 			}
 
-		//case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
-		//	key := responsesStreamIndexKey(strings.TrimSpace(streamResp.ItemID), streamResp.SummaryIndex)
-		//	if key == "" || streamResp.Part == nil {
-		//		break
-		//	}
-		//	// Only handle summary text parts, ignore other part types.
-		//	if streamResp.Part.Type != "" && streamResp.Part.Type != "summary_text" {
-		//		break
-		//	}
-		//	prev := reasoningSummaryTextByKey[key]
-		//	next := streamResp.Part.Text
-		//	delta := stringDeltaFromPrefix(prev, next)
-		//	reasoningSummaryTextByKey[key] = next
-		//	if !sendReasoningSummaryDelta(delta) {
-		//		sr.Stop(streamErr)
-		//		return
-		//	}
+		case "response.reasoning_summary_part.added":
+			key := responsesStreamIndexKey(strings.TrimSpace(streamResp.ItemID), streamResp.SummaryIndex)
+			if key == "" || streamResp.Part == nil {
+				break
+			}
+			if streamResp.Part.Type != "" && streamResp.Part.Type != "summary_text" {
+				break
+			}
+
+		case "response.reasoning_summary_part.done":
+			if reasoningSummarySource == "text_delta" {
+				break
+			}
+			key := responsesStreamIndexKey(strings.TrimSpace(streamResp.ItemID), streamResp.SummaryIndex)
+			if key == "" || streamResp.Part == nil {
+				break
+			}
+			if streamResp.Part.Type != "" && streamResp.Part.Type != "summary_text" {
+				break
+			}
+			reasoningSummarySource = "part"
+			prev := reasoningSummaryTextByKey[key]
+			next := streamResp.Part.Text
+			reasoningSummaryTextByKey[key] = next
+			delta := stringDeltaFromPrefix(prev, next)
+			if prev == "" && hasSentReasoningSummary && delta != "" {
+				needsReasoningSummarySeparator = true
+			}
+			if !sendReasoningSummaryDelta(delta) {
+				sr.Stop(streamErr)
+				return
+			}
 
 		case "response.output_text.delta":
 			if !sendStartIfNeeded() {
@@ -390,6 +397,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		case "response.output_item.added", "response.output_item.done":
 			if streamResp.Item == nil {
 				break
+			}
+			if streamResp.Type == "response.output_item.done" {
+				if !markResponsesCompactionOutputContext(c, streamResp.Item) {
+					countResponsesOutputItemDone(c, info, streamResp.Item)
+				}
 			}
 			if streamResp.Item.Type != "function_call" {
 				break
@@ -469,9 +481,27 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 						usage.PromptTokensDetails.ImageTokens = streamResp.Response.Usage.InputTokensDetails.ImageTokens
 						usage.PromptTokensDetails.AudioTokens = streamResp.Response.Usage.InputTokensDetails.AudioTokens
 					}
-					if streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens != 0 {
-						usage.CompletionTokenDetails.ReasoningTokens = streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens
+					outputDetails := streamResp.Response.Usage.GetOutputTokenDetails()
+					if outputDetails.ReasoningTokens != 0 {
+						usage.CompletionTokenDetails.ReasoningTokens = outputDetails.ReasoningTokens
 					}
+					if outputDetails.ImageTokens != 0 {
+						usage.CompletionTokenDetails.ImageTokens = outputDetails.ImageTokens
+					}
+					if outputDetails.AudioTokens != 0 {
+						usage.CompletionTokenDetails.AudioTokens = outputDetails.AudioTokens
+					}
+				}
+				recordResponsesBuiltInToolUsage(c, info, streamResp.Response, observedResponsesOutputToolCallCounts(c))
+				if streamResp.Response.HasImageGenerationCall() {
+					if !c.GetBool("image_generation_call") {
+						c.Set("image_generation_call", true)
+						c.Set("image_generation_call_quality", streamResp.Response.GetQuality())
+						c.Set("image_generation_call_size", streamResp.Response.GetSize())
+					}
+				}
+				if streamResp.Response.HasCompactionOutput() {
+					common.SetContextKey(c, constant.ContextKeyResponsesCompactionOutput, true)
 				}
 			}
 

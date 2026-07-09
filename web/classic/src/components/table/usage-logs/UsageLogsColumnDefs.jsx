@@ -45,8 +45,10 @@ import {
   getAppliedHeaderKeys,
   getAppliedUserAgent,
   isUserAgentHeaderKey,
+  normalizeRequestHeaderPolicyFromLogOther,
 } from '../../../hooks/usage-logs/headerAuditInfo';
 import { copy, showError, showSuccess } from '../../../helpers/utils';
+import { shouldRenderResponsesCompactTag } from '../../../helpers/usageLogsResponsesCompact';
 
 const colors = [
   'amber',
@@ -242,7 +244,10 @@ function renderChannelInfoTooltip(record, options, t) {
   addChannelInfoRow(routeRows, t('本次路由'), routeText, {
     isCode: true,
   });
-  addChannelInfoRow(routeRows, t('请求路径'), other?.request_path, {
+  addChannelInfoRow(routeRows, t('客户端路径'), other?.request_path, {
+    isCode: true,
+  });
+  addChannelInfoRow(routeRows, t('上游路径'), other?.upstream_request_path, {
     isCode: true,
   });
   addChannelInfoRow(
@@ -366,7 +371,7 @@ function buildStreamStatusTooltip(ss, t) {
   if (!ss) return null;
   const isCanceled =
     ss.status === 'canceled' || (!ss.status && ss.end_reason === 'client_gone');
-  const statusLabel = isCanceled ? t('已取消') : t('异常');
+  const statusLabel = getStreamStatusLabel(ss, t);
   const reasonLabel = isCanceled
     ? t('客户端已断开')
     : ss.end_reason || 'unknown';
@@ -394,24 +399,136 @@ function buildStreamStatusTooltip(ss, t) {
   );
 }
 
-function renderIsStream(bool, t, streamStatus) {
+function formatDurationFromMs(milliseconds) {
+  return `${(Number(milliseconds) / 1000).toFixed(3).replace(/\.?0+$/, '')}s`;
+}
+
+function getStreamStatusLabel(ss, t) {
+  if (ss?.status === 'ok') {
+    return t('正常');
+  }
+  if (ss?.status === 'partial') {
+    return t('部分完成');
+  }
+  if (
+    ss?.status === 'canceled' ||
+    (!ss?.status && ss?.end_reason === 'client_gone')
+  ) {
+    return t('已取消');
+  }
+  return t('异常');
+}
+
+function appendStreamStatusRows(rows, ss, t) {
+  if (!ss) {
+    return;
+  }
+
+  rows.push({
+    key: 'stream_status',
+    label: t('流状态'),
+    value: getStreamStatusLabel(ss, t),
+    className: 'usage-log-info-popover-value-fallback',
+  });
+  if (ss.end_reason) {
+    rows.push({
+      key: 'stream_reason',
+      label: t('结束原因'),
+      value: ss.end_reason,
+    });
+  }
+  if ((ss.error_count ?? 0) > 0) {
+    rows.push({
+      key: 'stream_errors',
+      label: t('软错误'),
+      value: String(ss.error_count),
+      className: 'usage-log-info-popover-value-setting',
+    });
+  }
+}
+
+function buildStreamTagTooltip(other, isStream, t) {
+  const rows = [
+    {
+      key: 'mode',
+      label: t('状态'),
+      value: isStream ? t('流') : t('非流'),
+      className: 'usage-log-info-popover-value-mode',
+    },
+  ];
+
+  if (other?.request_path) {
+    rows.push({
+      key: 'path',
+      label: t('客户端路径'),
+      value: other.request_path,
+      className: 'usage-log-info-popover-value-path is-code',
+    });
+  }
+
+  if (other?.upstream_request_path) {
+    rows.push({
+      key: 'upstream_path',
+      label: t('上游路径'),
+      value: other.upstream_request_path,
+      className: 'usage-log-info-popover-value-path is-code',
+    });
+  }
+
+  if (isStream && other?.frt != null && Number.isFinite(Number(other.frt))) {
+    rows.push({
+      key: 'frt',
+      label: t('首字节时间'),
+      value: formatDurationFromMs(other.frt),
+      className: 'usage-log-info-popover-value-setting',
+    });
+  }
+
+  if (isStream) {
+    appendStreamStatusRows(rows, other?.stream_status, t);
+  }
+
+  return renderUsageLogInfoPopover(t('请求信息'), rows, {
+    rootClassName: 'usage-log-info-popover usage-log-stream-popover',
+    tagClassName:
+      'usage-log-info-popover-label-tag usage-log-stream-popover-label-tag',
+  });
+}
+
+function renderIsStream(bool, t, streamStatus, other) {
   const indicatorKind = !streamStatus
     ? 'ok'
-    : streamStatus.status === 'canceled' ||
-        (!streamStatus.status && streamStatus.end_reason === 'client_gone')
-      ? 'ok'
-      : streamStatus.status !== 'ok'
-        ? 'error'
-        : 'ok';
+    : streamStatus.status === 'partial'
+      ? 'partial'
+      : streamStatus.status === 'canceled' ||
+          (!streamStatus.status && streamStatus.end_reason === 'client_gone')
+        ? 'canceled'
+        : streamStatus.status !== 'ok'
+          ? 'error'
+          : 'ok';
   const shouldShowIndicator = indicatorKind !== 'ok';
-  const indicatorColor = indicatorKind === 'error' ? '#ef4444' : '#f59e0b';
+  const indicatorColor =
+    indicatorKind === 'error'
+      ? '#ef4444'
+      : indicatorKind === 'canceled'
+        ? '#94a3b8'
+        : '#f59e0b';
 
   if (bool) {
     return (
       <span style={{ position: 'relative', display: 'inline-block' }}>
-        <Tag color='blue' shape='circle'>
-          {t('流')}
-        </Tag>
+        <Tooltip
+          className='usage-log-info-popover-layer'
+          content={buildStreamTagTooltip(other, true, t)}
+          position='top'
+          showArrow
+        >
+          <span>
+            <Tag color='blue' shape='circle'>
+              {t('流')}
+            </Tag>
+          </span>
+        </Tooltip>
         {shouldShowIndicator && (
           <Tooltip content={buildStreamStatusTooltip(streamStatus, t)}>
             <span
@@ -433,9 +550,18 @@ function renderIsStream(bool, t, streamStatus) {
     );
   } else {
     return (
-      <Tag color='purple' shape='circle'>
-        {t('非流')}
-      </Tag>
+      <Tooltip
+        className='usage-log-info-popover-layer'
+        content={buildStreamTagTooltip(other, false, t)}
+        position='top'
+        showArrow
+      >
+        <span>
+          <Tag color='purple' shape='circle'>
+            {t('非流')}
+          </Tag>
+        </span>
+      </Tooltip>
     );
   }
 }
@@ -632,11 +758,7 @@ function getUsageLogGroupSummary(groupRatio, userGroupRatio, t) {
 
 function getRequestHeaderPolicy(record) {
   const other = getLogOther(record?.other);
-  const policy = other?.request_header_policy;
-  if (!policy || typeof policy !== 'object') {
-    return null;
-  }
-  return policy;
+  return normalizeRequestHeaderPolicyFromLogOther(other);
 }
 
 async function copyHeaderAuditValue(event, value, successMessage, t) {
@@ -899,18 +1021,16 @@ function getResponsesCompactTagColor(mode) {
 
 function buildResponsesCompactTooltipRows(other, t) {
   const mode = other?.responses_compact_mode;
-  if (!mode) {
-    return [];
-  }
+  const rows = [];
 
-  const rows = [
-    {
+  if (mode) {
+    rows.push({
       key: 'mode',
       label: t('模式'),
       value: getResponsesCompactModeLabel(mode, t),
       className: 'usage-log-info-popover-value-mode',
-    },
-  ];
+    });
+  }
   if (other?.responses_compact_setting) {
     rows.push({
       key: 'setting',
@@ -935,6 +1055,39 @@ function buildResponsesCompactTooltipRows(other, t) {
       className: 'usage-log-info-popover-value-fallback',
     });
   }
+  if (other?.responses_encrypted_context_retry === true) {
+    rows.push({
+      key: 'encrypted_context_retry',
+      label: t('加密上下文重试'),
+      value: t('是'),
+      className: 'usage-log-info-popover-value-encrypted-retry',
+    });
+  }
+  const capability = other?.channel_capability_snapshot;
+  if (capability?.source) {
+    rows.push({
+      key: 'capability_source',
+      label: t('能力来源'),
+      value: capability.source,
+      className: 'usage-log-info-popover-value-capability-source is-code',
+    });
+  }
+  if (capability?.profile) {
+    rows.push({
+      key: 'upstream_profile',
+      label: t('上游配置'),
+      value: capability.profile,
+      className: 'usage-log-info-popover-value-upstream-profile is-code',
+    });
+  }
+  if (capability?.compact_mode_effective) {
+    rows.push({
+      key: 'effective_compact_mode',
+      label: t('生效 Compact 模式'),
+      value: capability.compact_mode_effective,
+      className: 'usage-log-info-popover-value-effective-mode is-code',
+    });
+  }
 
   return rows;
 }
@@ -942,16 +1095,23 @@ function buildResponsesCompactTooltipRows(other, t) {
 function buildResponsesCompactTooltip(other, t) {
   const rows = buildResponsesCompactTooltipRows(other, t);
 
-  return renderUsageLogInfoPopover(t('Responses Compact'), rows, {
+  const title = other?.responses_compact_mode
+    ? t('Responses Compact')
+    : t('Responses');
+
+  return renderUsageLogInfoPopover(title, rows, {
     tagClassName: 'usage-log-compact-popover-label-tag',
   });
 }
 
 function renderResponsesCompactTag(other, t) {
   const mode = other?.responses_compact_mode;
-  if (!mode) {
+  if (!shouldRenderResponsesCompactTag(other)) {
     return null;
   }
+
+  const label = mode ? getResponsesCompactBadgeLabel(mode, t) : t('Responses');
+  const color = mode ? getResponsesCompactTagColor(mode) : 'blue';
 
   return (
     <span style={{ position: 'relative', display: 'inline-block' }}>
@@ -962,8 +1122,8 @@ function renderResponsesCompactTag(other, t) {
         showArrow
       >
         <span>
-          <Tag color={getResponsesCompactTagColor(mode)} shape='circle'>
-            {getResponsesCompactBadgeLabel(mode, t)}
+          <Tag color={color} shape='circle'>
+            {label}
           </Tag>
         </span>
       </Tooltip>
@@ -1291,7 +1451,12 @@ export const getLogsColumns = ({
               <Space>
                 {renderUseTime(text, t)}
                 {renderFirstUseTime(other?.frt, t)}
-                {renderIsStream(record.is_stream, t, other?.stream_status)}
+                {renderIsStream(
+                  record.is_stream,
+                  t,
+                  other?.stream_status,
+                  other,
+                )}
                 {renderResponsesCompactTag(other, t)}
               </Space>
             </>
@@ -1302,7 +1467,7 @@ export const getLogsColumns = ({
             <>
               <Space>
                 {renderUseTime(text, t)}
-                {renderIsStream(record.is_stream, t)}
+                {renderIsStream(record.is_stream, t, null, other)}
                 {renderResponsesCompactTag(other, t)}
               </Space>
             </>
@@ -1522,19 +1687,18 @@ export const getLogsColumns = ({
         );
 
         if (!detailSummary) {
+          const detailContent = text || '-';
+
           return (
-            <Typography.Paragraph
-              ellipsis={{
-                rows: 2,
-                showTooltip: {
-                  type: 'popover',
-                  opts: { style: { width: 240 } },
-                },
-              }}
-              style={{ maxWidth: 240, marginBottom: 0 }}
-            >
-              {text}
-            </Typography.Paragraph>
+            <Tooltip content={detailContent} position='top' trigger='hover'>
+              <div
+                tabIndex={0}
+                className='line-clamp-2 break-words'
+                style={{ maxWidth: 240, marginBottom: 0 }}
+              >
+                {detailContent}
+              </div>
+            </Tooltip>
           );
         }
 

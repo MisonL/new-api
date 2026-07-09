@@ -71,8 +71,10 @@ export function JsonEditor({
   // Parse JSON to rows when value changes externally
   useEffect(() => {
     if (value !== jsonValue) {
-      setJsonValue(value)
-      parseJsonToRows(value)
+      queueMicrotask(() => {
+        setJsonValue(value)
+        parseJsonToRows(value)
+      })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value])

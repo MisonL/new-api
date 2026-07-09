@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import * as z from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQueryClient } from '@tanstack/react-query'
@@ -507,6 +507,9 @@ export function LogRetentionSection({
     setResult(null)
     toast.success(t('Saved successfully'))
   }
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    void form.handleSubmit(onSubmit)(event)
+  }
 
   const runRetention = async (preview: boolean) => {
     if (hasUnsavedLogRetentionChanges(form, baselineRef.current)) {
@@ -553,7 +556,7 @@ export function LogRetentionSection({
       )}
     >
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-6'>
+        <form onSubmit={handleSubmit} className='space-y-6'>
           <FormField
             control={form.control}
             name='log_retention_setting.enabled'

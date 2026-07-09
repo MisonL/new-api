@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
@@ -893,7 +895,39 @@ type OpenAIResponsesRequest struct {
 	// qwen
 	EnableThinking json.RawMessage `json:"enable_thinking,omitempty"`
 	// perplexity
-	Preset json.RawMessage `json:"preset,omitempty"`
+	Preset json.RawMessage            `json:"preset,omitempty"`
+	Extra  map[string]json.RawMessage `json:"-"`
+}
+
+var openAIResponsesRequestKnownFields = sync.OnceValue(func() map[string]struct{} {
+	return GetJSONFieldNames(reflect.TypeOf(OpenAIResponsesRequest{}))
+})
+
+func (r *OpenAIResponsesRequest) UnmarshalJSON(data []byte) error {
+	var rawMap map[string]json.RawMessage
+	if err := common.Unmarshal(data, &rawMap); err != nil {
+		return err
+	}
+
+	type Alias OpenAIResponsesRequest
+	var known Alias
+	if err := common.Unmarshal(data, &known); err != nil {
+		return err
+	}
+	*r = OpenAIResponsesRequest(known)
+
+	r.Extra = collectUnknownJSONFields(rawMap, openAIResponsesRequestKnownFields())
+	return nil
+}
+
+func (r OpenAIResponsesRequest) MarshalJSON() ([]byte, error) {
+	type Alias OpenAIResponsesRequest
+	alias := Alias(r)
+	base, err := common.Marshal(alias)
+	if err != nil {
+		return nil, err
+	}
+	return marshalWithExtraJSONFields(base, r.Extra)
 }
 
 func (r *OpenAIResponsesRequest) GetTokenCountMeta() *types.TokenCountMeta {
@@ -1063,12 +1097,6 @@ func (r *OpenAIResponsesRequest) ParseInput() []MediaInput {
 				var array []any
 				_ = common.Unmarshal(input.Content, &array)
 				for _, itemAny := range array {
-					// Already parsed MediaContent
-					if media, ok := itemAny.(MediaInput); ok {
-						mediaInputs = append(mediaInputs, media)
-						continue
-					}
-
 					// Generic map
 					item, ok := itemAny.(map[string]any)
 					if !ok {

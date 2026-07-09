@@ -52,7 +52,7 @@ export function usePasskeyManagement(
   }, [onStatusChange])
 
   useEffect(() => {
-    fetchStatus()
+    void Promise.resolve().then(() => fetchStatus())
   }, [fetchStatus])
 
   useEffect(() => {

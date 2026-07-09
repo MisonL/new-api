@@ -14,9 +14,9 @@ import (
 	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
 )
 
-var hotBuckets sync.Map
+var hotBuckets = &sync.Map{}
 
-const seriesSchema = "dbcd0a3c01b55203"
+const seriesSchema = "b4f2a691c7d03e58"
 
 func Init() {
 	go flushLoop()
@@ -30,7 +30,7 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 	hasTtft := info.IsStream && info.HasSendResponse()
 	ttftMs := int64(0)
 	if hasTtft {
-		ttftMs = info.FirstResponseTime.Sub(info.StartTime).Milliseconds()
+		ttftMs, hasTtft = info.FirstResponseLatencyMs()
 	}
 	latencyMs := now.Sub(info.StartTime).Milliseconds()
 	generationMs := latencyMs
@@ -40,15 +40,26 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 	if generationMs <= 0 {
 		generationMs = latencyMs
 	}
+	upstreamHeaderMs, hasUpstreamHeader := info.UpstreamHeaderLatencyMs()
+	upstreamTtfbMs, hasUpstreamTtfb := info.UpstreamFirstByteLatencyMs()
+	upstreamTotalMs, hasUpstreamTotal := info.UpstreamTotalLatencyMs()
 	Record(Sample{
-		Model:        info.OriginModelName,
-		Group:        info.UsingGroup,
-		LatencyMs:    latencyMs,
-		TtftMs:       ttftMs,
-		HasTtft:      hasTtft,
-		Success:      success,
-		OutputTokens: outputTokens,
-		GenerationMs: generationMs,
+		Model:                               info.OriginModelName,
+		Group:                               info.UsingGroup,
+		LatencyMs:                           latencyMs,
+		TtftMs:                              ttftMs,
+		HasTtft:                             hasTtft,
+		Success:                             success,
+		OutputTokens:                        outputTokens,
+		GenerationMs:                        generationMs,
+		UpstreamHeaderMs:                    upstreamHeaderMs,
+		HasUpstreamHeader:                   hasUpstreamHeader,
+		UpstreamTtfbMs:                      upstreamTtfbMs,
+		HasUpstreamTtfb:                     hasUpstreamTtfb,
+		UpstreamTotalMs:                     upstreamTotalMs,
+		HasUpstreamTotal:                    hasUpstreamTotal,
+		ResponsesBootstrapRecoveryAttempted: info.ResponsesBootstrapRecoveryAttempted,
+		ResponsesBootstrapRecoveryWaitMs:    info.ResponsesBootstrapRecoveryWaitMs,
 	})
 }
 
@@ -95,13 +106,22 @@ func Query(params QueryParams) (QueryResult, error) {
 			group:    row.Group,
 			bucketTs: row.BucketTs,
 		}, counters{
-			requestCount:   row.RequestCount,
-			successCount:   row.SuccessCount,
-			totalLatencyMs: row.TotalLatencyMs,
-			ttftSumMs:      row.TtftSumMs,
-			ttftCount:      row.TtftCount,
-			outputTokens:   row.OutputTokens,
-			generationMs:   row.GenerationMs,
+			requestCount:                           row.RequestCount,
+			successCount:                           row.SuccessCount,
+			totalLatencyMs:                         row.TotalLatencyMs,
+			ttftSumMs:                              row.TtftSumMs,
+			ttftCount:                              row.TtftCount,
+			outputTokens:                           row.OutputTokens,
+			generationMs:                           row.GenerationMs,
+			upstreamHeaderMs:                       row.UpstreamHeaderMs,
+			upstreamHeaderCount:                    row.UpstreamHeaderCount,
+			upstreamTtfbMs:                         row.UpstreamTtfbMs,
+			upstreamTtfbCount:                      row.UpstreamTtfbCount,
+			upstreamTotalMs:                        row.UpstreamTotalMs,
+			upstreamTotalCount:                     row.UpstreamTotalCount,
+			responsesBootstrapRecoveryCount:        row.ResponsesBootstrapRecoveryCount,
+			responsesBootstrapRecoverySuccessCount: row.ResponsesBootstrapRecoverySuccessCount,
+			responsesBootstrapRecoveryWaitMs:       row.ResponsesBootstrapRecoveryWaitMs,
 		})
 	}
 
@@ -139,11 +159,20 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 	totals := map[string]counters{}
 	for _, row := range rows {
 		totals[row.ModelName] = counters{
-			requestCount:   row.RequestCount,
-			successCount:   row.SuccessCount,
-			totalLatencyMs: row.TotalLatencyMs,
-			outputTokens:   row.OutputTokens,
-			generationMs:   row.GenerationMs,
+			requestCount:                           row.RequestCount,
+			successCount:                           row.SuccessCount,
+			totalLatencyMs:                         row.TotalLatencyMs,
+			outputTokens:                           row.OutputTokens,
+			generationMs:                           row.GenerationMs,
+			upstreamHeaderMs:                       row.UpstreamHeaderMs,
+			upstreamHeaderCount:                    row.UpstreamHeaderCount,
+			upstreamTtfbMs:                         row.UpstreamTtfbMs,
+			upstreamTtfbCount:                      row.UpstreamTtfbCount,
+			upstreamTotalMs:                        row.UpstreamTotalMs,
+			upstreamTotalCount:                     row.UpstreamTotalCount,
+			responsesBootstrapRecoveryCount:        row.ResponsesBootstrapRecoveryCount,
+			responsesBootstrapRecoverySuccessCount: row.ResponsesBootstrapRecoverySuccessCount,
+			responsesBootstrapRecoveryWaitMs:       row.ResponsesBootstrapRecoveryWaitMs,
 		}
 	}
 
@@ -151,15 +180,25 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 
 	models := make([]ModelSummary, 0, len(totals))
 	for name, total := range totals {
-		if total.requestCount == 0 {
+		if countersEmpty(total) {
 			continue
 		}
 		models = append(models, ModelSummary{
-			ModelName:    name,
-			AvgLatencyMs: avg(total.totalLatencyMs, total.requestCount),
-			SuccessRate:  math.Round(successRate(total)*100) / 100,
-			AvgTps:       math.Round(avgTps(total)*100) / 100,
-			RequestCount: total.requestCount,
+			ModelName:                              name,
+			AvgLatencyMs:                           avg(total.totalLatencyMs, total.requestCount),
+			AvgUpstreamHeaderMs:                    avg(total.upstreamHeaderMs, total.upstreamHeaderCount),
+			AvgUpstreamTtfbMs:                      avg(total.upstreamTtfbMs, total.upstreamTtfbCount),
+			AvgUpstreamTotalMs:                     avg(total.upstreamTotalMs, total.upstreamTotalCount),
+			AvgResponsesBootstrapRecoveryWaitMs:    avg(total.responsesBootstrapRecoveryWaitMs, total.responsesBootstrapRecoveryCount),
+			SuccessRate:                            math.Round(successRate(total)*100) / 100,
+			ResponsesBootstrapRecoverySuccessRate:  math.Round(responsesBootstrapRecoverySuccessRate(total)*100) / 100,
+			AvgTps:                                 math.Round(avgTps(total)*100) / 100,
+			RequestCount:                           total.requestCount,
+			UpstreamHeaderCount:                    total.upstreamHeaderCount,
+			UpstreamTtfbCount:                      total.upstreamTtfbCount,
+			UpstreamTotalCount:                     total.upstreamTotalCount,
+			ResponsesBootstrapRecoveryCount:        total.responsesBootstrapRecoveryCount,
+			ResponsesBootstrapRecoverySuccessCount: total.responsesBootstrapRecoverySuccessCount,
 		})
 	}
 	sort.Slice(models, func(i, j int) bool {
@@ -181,7 +220,7 @@ func mergeHotBucketSummaries(totals map[string]counters, startTs int64, endTs in
 			}
 		}
 		snap := value.(*atomicBucket).snapshot()
-		if snap.requestCount == 0 {
+		if countersEmpty(snap) {
 			return true
 		}
 		cur := totals[k.model]
@@ -190,6 +229,15 @@ func mergeHotBucketSummaries(totals map[string]counters, startTs int64, endTs in
 		cur.totalLatencyMs += snap.totalLatencyMs
 		cur.outputTokens += snap.outputTokens
 		cur.generationMs += snap.generationMs
+		cur.upstreamHeaderMs += snap.upstreamHeaderMs
+		cur.upstreamHeaderCount += snap.upstreamHeaderCount
+		cur.upstreamTtfbMs += snap.upstreamTtfbMs
+		cur.upstreamTtfbCount += snap.upstreamTtfbCount
+		cur.upstreamTotalMs += snap.upstreamTotalMs
+		cur.upstreamTotalCount += snap.upstreamTotalCount
+		cur.responsesBootstrapRecoveryCount += snap.responsesBootstrapRecoveryCount
+		cur.responsesBootstrapRecoverySuccessCount += snap.responsesBootstrapRecoverySuccessCount
+		cur.responsesBootstrapRecoveryWaitMs += snap.responsesBootstrapRecoveryWaitMs
 		totals[k.model] = cur
 		return true
 	})
@@ -215,7 +263,7 @@ func bucketStart(ts int64) int64 {
 }
 
 func mergeCounters(merged map[bucketKey]counters, key bucketKey, value counters) {
-	if value.requestCount == 0 {
+	if countersEmpty(value) {
 		return
 	}
 	current := merged[key]
@@ -226,13 +274,22 @@ func mergeCounters(merged map[bucketKey]counters, key bucketKey, value counters)
 	current.ttftCount += value.ttftCount
 	current.outputTokens += value.outputTokens
 	current.generationMs += value.generationMs
+	current.upstreamHeaderMs += value.upstreamHeaderMs
+	current.upstreamHeaderCount += value.upstreamHeaderCount
+	current.upstreamTtfbMs += value.upstreamTtfbMs
+	current.upstreamTtfbCount += value.upstreamTtfbCount
+	current.upstreamTotalMs += value.upstreamTotalMs
+	current.upstreamTotalCount += value.upstreamTotalCount
+	current.responsesBootstrapRecoveryCount += value.responsesBootstrapRecoveryCount
+	current.responsesBootstrapRecoverySuccessCount += value.responsesBootstrapRecoverySuccessCount
+	current.responsesBootstrapRecoveryWaitMs += value.responsesBootstrapRecoveryWaitMs
 	merged[key] = current
 }
 
 func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResult {
 	groupBuckets := map[string]map[int64]counters{}
 	for key, value := range merged {
-		if value.requestCount == 0 {
+		if countersEmpty(value) {
 			continue
 		}
 		if _, ok := groupBuckets[key.group]; !ok {
@@ -269,18 +326,37 @@ func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResu
 			total.ttftCount += value.ttftCount
 			total.outputTokens += value.outputTokens
 			total.generationMs += value.generationMs
+			total.upstreamHeaderMs += value.upstreamHeaderMs
+			total.upstreamHeaderCount += value.upstreamHeaderCount
+			total.upstreamTtfbMs += value.upstreamTtfbMs
+			total.upstreamTtfbCount += value.upstreamTtfbCount
+			total.upstreamTotalMs += value.upstreamTotalMs
+			total.upstreamTotalCount += value.upstreamTotalCount
+			total.responsesBootstrapRecoveryCount += value.responsesBootstrapRecoveryCount
+			total.responsesBootstrapRecoverySuccessCount += value.responsesBootstrapRecoverySuccessCount
+			total.responsesBootstrapRecoveryWaitMs += value.responsesBootstrapRecoveryWaitMs
 			series = append(series, bucketPoint(ts, value))
 		}
 
 		results = append(results, GroupResult{
-			Group:        group,
-			AvgTtftMs:    avg(total.ttftSumMs, total.ttftCount),
-			AvgLatencyMs: avg(total.totalLatencyMs, total.requestCount),
-			SuccessRate:  successRate(total),
-			RequestCount: total.requestCount,
-			SuccessCount: total.successCount,
-			TtftCount:    total.ttftCount,
-			Series:       series,
+			Group:                                  group,
+			AvgTtftMs:                              avg(total.ttftSumMs, total.ttftCount),
+			AvgLatencyMs:                           avg(total.totalLatencyMs, total.requestCount),
+			AvgUpstreamHeaderMs:                    avg(total.upstreamHeaderMs, total.upstreamHeaderCount),
+			AvgUpstreamTtfbMs:                      avg(total.upstreamTtfbMs, total.upstreamTtfbCount),
+			AvgUpstreamTotalMs:                     avg(total.upstreamTotalMs, total.upstreamTotalCount),
+			AvgResponsesBootstrapRecoveryWaitMs:    avg(total.responsesBootstrapRecoveryWaitMs, total.responsesBootstrapRecoveryCount),
+			SuccessRate:                            successRate(total),
+			ResponsesBootstrapRecoverySuccessRate:  responsesBootstrapRecoverySuccessRate(total),
+			RequestCount:                           total.requestCount,
+			SuccessCount:                           total.successCount,
+			TtftCount:                              total.ttftCount,
+			UpstreamHeaderCount:                    total.upstreamHeaderCount,
+			UpstreamTtfbCount:                      total.upstreamTtfbCount,
+			UpstreamTotalCount:                     total.upstreamTotalCount,
+			ResponsesBootstrapRecoveryCount:        total.responsesBootstrapRecoveryCount,
+			ResponsesBootstrapRecoverySuccessCount: total.responsesBootstrapRecoverySuccessCount,
+			Series:                                 series,
 		})
 	}
 
@@ -293,13 +369,23 @@ func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResu
 
 func bucketPoint(ts int64, value counters) BucketPoint {
 	return BucketPoint{
-		Ts:           ts,
-		AvgTtftMs:    avg(value.ttftSumMs, value.ttftCount),
-		AvgLatencyMs: avg(value.totalLatencyMs, value.requestCount),
-		SuccessRate:  successRate(value),
-		Count:        value.requestCount,
-		SuccessCount: value.successCount,
-		TtftCount:    value.ttftCount,
+		Ts:                                     ts,
+		AvgTtftMs:                              avg(value.ttftSumMs, value.ttftCount),
+		AvgLatencyMs:                           avg(value.totalLatencyMs, value.requestCount),
+		AvgUpstreamHeaderMs:                    avg(value.upstreamHeaderMs, value.upstreamHeaderCount),
+		AvgUpstreamTtfbMs:                      avg(value.upstreamTtfbMs, value.upstreamTtfbCount),
+		AvgUpstreamTotalMs:                     avg(value.upstreamTotalMs, value.upstreamTotalCount),
+		AvgResponsesBootstrapRecoveryWaitMs:    avg(value.responsesBootstrapRecoveryWaitMs, value.responsesBootstrapRecoveryCount),
+		SuccessRate:                            successRate(value),
+		ResponsesBootstrapRecoverySuccessRate:  responsesBootstrapRecoverySuccessRate(value),
+		Count:                                  value.requestCount,
+		SuccessCount:                           value.successCount,
+		TtftCount:                              value.ttftCount,
+		UpstreamHeaderCount:                    value.upstreamHeaderCount,
+		UpstreamTtfbCount:                      value.upstreamTtfbCount,
+		UpstreamTotalCount:                     value.upstreamTotalCount,
+		ResponsesBootstrapRecoveryCount:        value.responsesBootstrapRecoveryCount,
+		ResponsesBootstrapRecoverySuccessCount: value.responsesBootstrapRecoverySuccessCount,
 	}
 }
 
@@ -315,6 +401,17 @@ func successRate(value counters) float64 {
 		return 0
 	}
 	return float64(value.successCount) / float64(value.requestCount) * 100
+}
+
+func responsesBootstrapRecoverySuccessRate(value counters) float64 {
+	if value.responsesBootstrapRecoveryCount <= 0 {
+		return 0
+	}
+	return float64(value.responsesBootstrapRecoverySuccessCount) / float64(value.responsesBootstrapRecoveryCount) * 100
+}
+
+func countersEmpty(value counters) bool {
+	return value == counters{}
 }
 
 func avgTps(value counters) float64 {
@@ -333,20 +430,43 @@ func recordRedis(key bucketKey, sample Sample) {
 
 	redisKey := redisBucketKey(key)
 	pipe := common.RDB.TxPipeline()
-	pipe.HIncrBy(ctx, redisKey, "req", 1)
-	if sample.Success {
-		pipe.HIncrBy(ctx, redisKey, "ok", 1)
+	if !sample.BootstrapOnly {
+		pipe.HIncrBy(ctx, redisKey, "req", 1)
+		if sample.Success {
+			pipe.HIncrBy(ctx, redisKey, "ok", 1)
+		}
+		if sample.LatencyMs > 0 {
+			pipe.HIncrBy(ctx, redisKey, "lat", sample.LatencyMs)
+		}
+		if sample.HasTtft && sample.TtftMs >= 0 {
+			pipe.HIncrBy(ctx, redisKey, "ttft", sample.TtftMs)
+			pipe.HIncrBy(ctx, redisKey, "ttft_n", 1)
+		}
+		if sample.OutputTokens > 0 && sample.GenerationMs > 0 {
+			pipe.HIncrBy(ctx, redisKey, "out", sample.OutputTokens)
+			pipe.HIncrBy(ctx, redisKey, "gen_ms", sample.GenerationMs)
+		}
+		if sample.HasUpstreamHeader && sample.UpstreamHeaderMs >= 0 {
+			pipe.HIncrBy(ctx, redisKey, "up_hdr", sample.UpstreamHeaderMs)
+			pipe.HIncrBy(ctx, redisKey, "up_hdr_n", 1)
+		}
+		if sample.HasUpstreamTtfb && sample.UpstreamTtfbMs >= 0 {
+			pipe.HIncrBy(ctx, redisKey, "up_ttfb", sample.UpstreamTtfbMs)
+			pipe.HIncrBy(ctx, redisKey, "up_ttfb_n", 1)
+		}
+		if sample.HasUpstreamTotal && sample.UpstreamTotalMs >= 0 {
+			pipe.HIncrBy(ctx, redisKey, "up_total", sample.UpstreamTotalMs)
+			pipe.HIncrBy(ctx, redisKey, "up_total_n", 1)
+		}
 	}
-	if sample.LatencyMs > 0 {
-		pipe.HIncrBy(ctx, redisKey, "lat", sample.LatencyMs)
-	}
-	if sample.HasTtft && sample.TtftMs >= 0 {
-		pipe.HIncrBy(ctx, redisKey, "ttft", sample.TtftMs)
-		pipe.HIncrBy(ctx, redisKey, "ttft_n", 1)
-	}
-	if sample.OutputTokens > 0 && sample.GenerationMs > 0 {
-		pipe.HIncrBy(ctx, redisKey, "out", sample.OutputTokens)
-		pipe.HIncrBy(ctx, redisKey, "gen_ms", sample.GenerationMs)
+	if sample.ResponsesBootstrapRecoveryAttempted {
+		pipe.HIncrBy(ctx, redisKey, "rb", 1)
+		if sample.Success {
+			pipe.HIncrBy(ctx, redisKey, "rb_ok", 1)
+		}
+		if sample.ResponsesBootstrapRecoveryWaitMs > 0 {
+			pipe.HIncrBy(ctx, redisKey, "rb_wait", sample.ResponsesBootstrapRecoveryWaitMs)
+		}
 	}
 	pipe.Expire(ctx, redisKey, time.Hour)
 	_, _ = pipe.Exec(ctx)

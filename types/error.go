@@ -120,6 +120,7 @@ func IsUpstreamTransportInterruptedError(err error) bool {
 		"unexpected eof",
 		"server sent goaway",
 		"http2: server sent goaway",
+		"response body closed",
 		"connection reset by peer",
 	} {
 		if strings.Contains(message, indicator) {
