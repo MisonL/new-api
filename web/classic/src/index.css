@@ -31,8 +31,12 @@ body {
   background-color: var(--semi-color-bg-0);
 }
 
+.new-api-disabled-row {
+  --new-api-disabled-row-text: var(--semi-color-text-2);
+}
+
 .new-api-disabled-row .semi-table-row-cell {
-  color: var(--semi-color-disabled-text);
+  color: var(--new-api-disabled-row-text);
 }
 
 .channel-table-card .semi-table-cell-fixed-right,
@@ -61,12 +65,16 @@ body {
 
 .new-api-disabled-row.semi-card {
   border-left: 4px solid var(--semi-color-text-2);
-  color: var(--semi-color-disabled-text);
+  color: var(--new-api-disabled-row-text);
+}
+
+html.dark .new-api-disabled-row {
+  --new-api-disabled-row-text: var(--semi-color-text-1);
 }
 
 html.dark .new-api-disabled-row,
 html.dark .new-api-disabled-row .semi-table-row-cell {
-  color: var(--semi-color-disabled-text);
+  color: var(--new-api-disabled-row-text);
 }
 
 html.dark .channel-table-card .semi-table-cell-fixed-right,
