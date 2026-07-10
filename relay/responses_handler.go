@@ -167,10 +167,17 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		return usage, nil
 	}
 
-	if !shouldRetryResponsesWithoutEncryptedReasoning(info, newAPIError) {
-		resetResponsesStatusCode(c, newAPIError)
-		return nil, newAPIError
+	if shouldRetryResponsesWithoutEncryptedReasoning(info, newAPIError) {
+		return retryResponsesWithoutEncryptedReasoning(c, info, adaptor, convertedRequest, newAPIError)
 	}
+	if shouldRetryResponsesWithoutNamespaceHistory(info, newAPIError) {
+		return retryResponsesWithoutNamespaceHistory(c, info, adaptor, convertedRequest, newAPIError)
+	}
+	resetResponsesStatusCode(c, newAPIError)
+	return nil, newAPIError
+}
+
+func retryResponsesWithoutEncryptedReasoning(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (*dto.Usage, *types.NewAPIError) {
 	strippedRequest, result, stripErr := relaycommon.StripEncryptedReasoningFromResponsesRequest(convertedRequest)
 	if stripErr != nil {
 		resetResponsesStatusCode(c, newAPIError)
@@ -187,6 +194,39 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		info.OriginModelName,
 		result.EncryptedReasoningCount,
 		result.RemainingCount,
+		newAPIError.MaskSensitiveError(),
+	))
+	retryBody, _, retryBuildErr := buildOpenAIResponsesRequestBody(c, info, adaptor, &strippedRequest, false, buildResponsesRequestBodyOptions{
+		ForceConvertedBody: true,
+	})
+	if retryBuildErr != nil {
+		return nil, retryBuildErr
+	}
+	return doOpenAIResponsesRequest(c, info, adaptor, retryBody)
+}
+
+func shouldRetryResponsesWithoutNamespaceHistory(info *relaycommon.RelayInfo, err *types.NewAPIError) bool {
+	if info == nil || err == nil || !relaycommon.IsOpenAICompatibleResponses(info) || err.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	if strings.ToLower(string(err.GetErrorCode())) != "unknown_parameter" {
+		return false
+	}
+	return relaycommon.IsResponsesNamespaceHistoryParameter(err.ToOpenAIError().Param)
+}
+
+func retryResponsesWithoutNamespaceHistory(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (*dto.Usage, *types.NewAPIError) {
+	strippedRequest, removedCount, stripErr := relaycommon.StripNamespaceFromResponsesInputHistory(convertedRequest)
+	if stripErr != nil || removedCount == 0 {
+		resetResponsesStatusCode(c, newAPIError)
+		return nil, newAPIError
+	}
+	common.SetContextKey(c, appconstant.ContextKeyResponsesNamespaceHistoryRetry, true)
+	common.SysLog(fmt.Sprintf(
+		"responses namespace history retry: channel_id=%d model=%s removed_items=%d original_error=%s",
+		info.ChannelId,
+		info.OriginModelName,
+		removedCount,
 		newAPIError.MaskSensitiveError(),
 	))
 	retryBody, _, retryBuildErr := buildOpenAIResponsesRequestBody(c, info, adaptor, &strippedRequest, false, buildResponsesRequestBodyOptions{

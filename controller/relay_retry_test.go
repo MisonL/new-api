@@ -1373,6 +1373,39 @@ func TestGetChannelKeepsPassThroughResponsesViaChatForCompactionTrigger(t *testi
 	require.Nil(t, info.ChannelMeta)
 }
 
+func TestShouldSkipChannelForResponsesNamespaceTools(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.6",
+			Input: common.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]`),
+			Tools: common.RawMessage(`[{"type":"namespace","name":"codex_app","tools":[{"type":"function","name":"read_thread","parameters":{"type":"object"}}]}]`),
+		},
+	}
+	unsupported := &model.Channel{Id: 99, Type: constant.ChannelTypeOpenAI}
+	unsupported.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericOpenAI,
+	})
+	supported := &model.Channel{Id: 100, Type: constant.ChannelTypeOpenAI}
+	supported.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+	})
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, unsupported)
+
+	require.NoError(t, err)
+	require.True(t, skip)
+	require.NotNil(t, info.LastError)
+	require.Contains(t, info.LastError.Error(), "namespace tool history")
+
+	skip, err = shouldSkipChannelForResponsesToChatCompatibility(ctx, info, supported)
+
+	require.NoError(t, err)
+	require.False(t, skip)
+}
+
 func TestGetChannelSkipsResponsesViaChatForUnsupportedNamespaceTool(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
 	chatOnly, native := seedRemoteCompactionRouteChannels(t, db)
@@ -1447,7 +1480,7 @@ func TestGetChannelSkipsGlobalResponsesViaChatForUnsupportedNamespaceTool(t *tes
 
 	require.Nil(t, channel)
 	require.NotNil(t, err)
-	require.Equal(t, types.ErrorCodeGetChannelFailed, err.GetErrorCode())
+	require.Equal(t, types.ErrorCodeChannelModelMappedError, err.GetErrorCode())
 	require.Contains(t, err.Error(), "cannot safely convert this Responses request")
 	require.Equal(t, []string{"168", "206"}, ctx.GetStringSlice("use_channel"))
 }
@@ -1482,8 +1515,7 @@ func TestGetChannelSpecificResponsesViaChatRejectsUnsupportedNamespaceTool(t *te
 	require.Nil(t, channel)
 	require.NotNil(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
-	require.Contains(t, err.Error(), "cannot safely convert this Responses request")
-	require.Contains(t, err.Error(), "custom tool bridge is not enabled")
+	require.Contains(t, err.Error(), "does not support namespace tool history")
 }
 
 func TestGetChannelKeepsResponsesViaChatForBridgeableNamespaceTool(t *testing.T) {
@@ -1514,8 +1546,8 @@ func TestGetChannelKeepsResponsesViaChatForBridgeableNamespaceTool(t *testing.T)
 
 	require.Nil(t, err)
 	require.NotNil(t, channel)
-	require.Equal(t, chatOnly.Id, channel.Id)
-	require.Empty(t, ctx.GetStringSlice("use_channel"))
+	require.Equal(t, 206, channel.Id)
+	require.Equal(t, []string{"168"}, ctx.GetStringSlice("use_channel"))
 }
 
 func TestGetChannelRejectsMalformedRemoteCompactionInput(t *testing.T) {

@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -981,6 +982,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 		sendResponsesStreamData(c, streamResponse, data)
 		switch streamResponse.Type {
+		case "response.error", "error":
+			if streamResponse.Error == nil || strings.TrimSpace(streamResponse.Error.Message) == "" {
+				sr.Stop(fmt.Errorf("upstream responses stream returned an invalid error event"))
+				return
+			}
+			sr.Stop(types.WithOpenAIError(*streamResponse.Error, http.StatusBadRequest))
 		case "response.completed":
 			if streamResponse.Response != nil {
 				if streamResponse.Response.Usage != nil {
@@ -1025,6 +1032,15 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 	})
 
+	if info != nil && info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonHandlerStop {
+		var upstreamErr *types.NewAPIError
+		if errors.As(info.StreamStatus.EndError, &upstreamErr) {
+			return nil, upstreamErr
+		}
+		if info.StreamStatus.EndError != nil {
+			return nil, types.NewOpenAIError(info.StreamStatus.EndError, types.ErrorCodeBadResponse, http.StatusBadGateway)
+		}
+	}
 	if newAPIError := retryableUpstreamStreamInterruptedError(c, info); newAPIError != nil {
 		return nil, newAPIError
 	}

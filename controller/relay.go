@@ -504,11 +504,11 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
 	originalRetry := retryParam.GetRetry()
-	skippedNativeCompactionChannels := 0
-	nativeCompactionPriorityAdvances := 0
-	skippedUnsupportedCompactionInThisCall := false
-	restoreRetryAfterNativeCompactionSkip := func() {
-		if nativeCompactionPriorityAdvances > 0 {
+	skippedProtocolIncompatibleChannels := 0
+	protocolIncompatiblePriorityAdvances := 0
+	skippedProtocolIncompatibleInThisCall := false
+	restoreRetryAfterProtocolIncompatibleSkip := func() {
+		if protocolIncompatiblePriorityAdvances > 0 {
 			retryParam.SetRetry(originalRetry)
 			info.RetryIndex = originalRetry
 		}
@@ -535,12 +535,12 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 				return nil, unsupportedResponsesToChatChannelError(channel, info.LastError)
 			}
 			addUsedChannel(c, channel.Id)
-			skippedNativeCompactionChannels++
-			if isUnsupportedCompactionSkip(info.LastError) {
-				skippedUnsupportedCompactionInThisCall = true
+			skippedProtocolIncompatibleChannels++
+			if isProtocolIncompatibleSkip(info.LastError) {
+				skippedProtocolIncompatibleInThisCall = true
 			}
 		} else {
-			restoreRetryAfterNativeCompactionSkip()
+			restoreRetryAfterProtocolIncompatibleSkip()
 			return channel, nil
 		}
 	}
@@ -551,44 +551,44 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
 		if err != nil {
-			restoreRetryAfterNativeCompactionSkip()
+			restoreRetryAfterProtocolIncompatibleSkip()
 			return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 		}
 		if channel == nil {
-			if nativeCompactionPriorityAdvances < skippedNativeCompactionChannels {
+			if protocolIncompatiblePriorityAdvances < skippedProtocolIncompatibleChannels {
 				resetAutoGroupSelectionProgress(c)
 				retryParam.IncreaseRetry()
-				nativeCompactionPriorityAdvances++
+				protocolIncompatiblePriorityAdvances++
 				continue
 			}
-			if skippedUnsupportedCompactionInThisCall && info.LastError != nil {
-				restoreRetryAfterNativeCompactionSkip()
+			if skippedProtocolIncompatibleInThisCall && info.LastError != nil {
+				restoreRetryAfterProtocolIncompatibleSkip()
 				return nil, info.LastError
 			}
-			restoreRetryAfterNativeCompactionSkip()
+			restoreRetryAfterProtocolIncompatibleSkip()
 			return nil, types.NewError(errors.New(formatNoAvailableChannelErrorMessage(selectGroup, info.OriginModelName, info.LastError)), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 		}
 		skipChannel, skipErr := shouldSkipChannelForResponsesToChatCompatibility(c, info, channel)
 		if skipErr != nil {
-			restoreRetryAfterNativeCompactionSkip()
+			restoreRetryAfterProtocolIncompatibleSkip()
 			return nil, newResponsesCompactionInputError(skipErr)
 		}
 		if skipChannel {
 			addUsedChannel(c, channel.Id)
-			skippedNativeCompactionChannels++
-			if isUnsupportedCompactionSkip(info.LastError) {
-				skippedUnsupportedCompactionInThisCall = true
+			skippedProtocolIncompatibleChannels++
+			if isProtocolIncompatibleSkip(info.LastError) {
+				skippedProtocolIncompatibleInThisCall = true
 			}
 			continue
 		}
 
 		newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
 		if newAPIError != nil {
-			restoreRetryAfterNativeCompactionSkip()
+			restoreRetryAfterProtocolIncompatibleSkip()
 			return nil, newAPIError
 		}
 		info.InitChannelMeta(c)
-		restoreRetryAfterNativeCompactionSkip()
+		restoreRetryAfterProtocolIncompatibleSkip()
 		return channel, nil
 	}
 }
@@ -611,13 +611,14 @@ func shouldUseInitialSelectedChannel(c *gin.Context, info *relaycommon.RelayInfo
 		common.GetContextKeyInt(c, constant.ContextKeyChannelId) > 0
 }
 
-func isUnsupportedCompactionSkip(err *types.NewAPIError) bool {
+func isProtocolIncompatibleSkip(err *types.NewAPIError) bool {
 	if err == nil {
 		return false
 	}
 	return err.GetErrorCode() == types.ErrorCodeChannelModelMappedError &&
 		err.StatusCode == http.StatusServiceUnavailable &&
-		strings.Contains(err.Error(), "cannot handle native compaction input")
+		(strings.Contains(err.Error(), "cannot handle native compaction input") ||
+			strings.Contains(err.Error(), "does not support namespace tool history"))
 }
 
 func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) (bool, error) {
@@ -627,6 +628,18 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	request, ok := info.Request.(*dto.OpenAIResponsesRequest)
 	if !ok || request == nil {
 		return false, nil
+	}
+	hasNamespaceTools, err := relaycommon.ResponsesRequestHasNamespaceTools(request)
+	if err != nil {
+		return false, err
+	}
+	if hasNamespaceTools {
+		channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
+		capability := channelOtherSettings.ResolveResponsesChannelCapability(channel.Type)
+		if !capability.SupportsNamespaceTools {
+			info.LastError = unsupportedResponsesNamespaceHistoryChannelError(channel)
+			return true, nil
+		}
 	}
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
 		nativeCompactionChannelSetting(c, info, channel).PassThroughBodyEnabled {
@@ -818,6 +831,18 @@ func unsupportedResponsesToChatConversionError(channel *model.Channel, err error
 	}
 	return types.NewErrorWithStatusCode(
 		fmt.Errorf("channel #%d uses responses-to-chat compatibility and cannot safely convert this Responses request: %w", channelID, err),
+		types.ErrorCodeChannelModelMappedError,
+		http.StatusServiceUnavailable,
+	)
+}
+
+func unsupportedResponsesNamespaceHistoryChannelError(channel *model.Channel) *types.NewAPIError {
+	channelID := 0
+	if channel != nil {
+		channelID = channel.Id
+	}
+	return types.NewErrorWithStatusCode(
+		fmt.Errorf("channel #%d does not support namespace tool history in Responses input; choose a namespace-capable Responses channel", channelID),
 		types.ErrorCodeChannelModelMappedError,
 		http.StatusServiceUnavailable,
 	)

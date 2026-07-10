@@ -28,6 +28,7 @@ const (
 	ContextKeyResponsesCompactVisibleOnlyFallbackAttempted  ContextKey = "responses_compact_visible_only_fallback_attempted"
 	ContextKeyResponsesPreviousIDAction                     ContextKey = "responses_previous_id_action"
 	ContextKeyResponsesEncryptedContextRetry                ContextKey = "responses_encrypted_context_retry"
+	ContextKeyResponsesNamespaceHistoryRetry                ContextKey = "responses_namespace_history_retry"
 	ContextKeyResponsesChatCompatIgnoredEncryptedInclude    ContextKey = "responses_chat_compat_ignored_encrypted_include"
 	ContextKeyResponsesChatCompatReasoningSummaryMapped     ContextKey = "responses_chat_compat_reasoning_summary_mapped"
 	ContextKeyResponsesCompactionOutput                     ContextKey = "responses_compaction_output"

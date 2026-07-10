@@ -105,6 +105,15 @@ func encryptedContextRetryResponse(status int) *http.Response {
 	}
 }
 
+func namespaceHistoryRetryResponse() *http.Response {
+	body := `{"error":{"message":"Unknown parameter: 'input[42].namespace'.","type":"invalid_request_error","param":"input[42].namespace","code":"unknown_parameter"}}`
+	return &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+}
+
 func successResponsesHTTPResponse() *http.Response {
 	return &http.Response{
 		StatusCode: http.StatusOK,
@@ -164,6 +173,44 @@ func TestExecuteOpenAIResponsesRequestRetriesEncryptedReasoningFailure(t *testin
 	require.Contains(t, string(adaptor.requestBodies[0]), `"encrypted_content":"opaque"`)
 	require.NotContains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"opaque"`)
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesRejectedNamespaceHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6","input":[{"type":"custom_tool_call","call_id":"call_1","name":"read_thread","namespace":"codex_app","input":"{}"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   179,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			namespaceHistoryRetryResponse(),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: common.RawMessage(`[
+			{"type":"custom_tool_call","call_id":"call_1","name":"read_thread","namespace":"codex_app","input":"{}"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 2)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"namespace":"codex_app"`)
+	require.NotContains(t, string(adaptor.requestBodies[1]), `"namespace":"codex_app"`)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"call_id":"call_1"`)
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesNamespaceHistoryRetry))
 }
 
 func TestExecuteOpenAIResponsesRequestRetriesEncryptedReasoningBeforeStatusMapping(t *testing.T) {
