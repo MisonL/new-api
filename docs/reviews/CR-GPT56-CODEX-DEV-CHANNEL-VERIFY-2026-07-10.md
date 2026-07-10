@@ -82,6 +82,26 @@
    - 开发日志中 `Unknown parameter` 命中 `0`，`expected an object` 命中 `0`。
    - 开发日志中 `namespace` 字符串命中来自 `other` 字段里的 `channel_capability_snapshot.compact_mode_effective` 等 compact 能力快照，不是上游 `input[index].namespace` 参数错误。
 
+8. 高上下文、高缓存读、自动 compact 场景：
+   - 临时工作区：`/tmp/newapi-gpt56-compactv2-real-task`
+   - 模型：`gpt-5.6-sol`
+   - 渠道：`180`
+   - 任务内容：在接近 `353K` 上下文窗口时让 Codex 继续真实 coding 任务，先修复空行和注释行报表测试，再多轮 resume 运行测试，等待自动 compact。
+   - token `45` 结果：
+     - 高输入请求：`318233`、`322332`、`333238`、`334509` prompt tokens。
+     - 高缓存读请求：`317184`、`321280`、`332544` cache tokens。
+     - 自动 compact 请求：`prompt_tokens=331289`、`cache_tokens=6912`、`responses_compact_mode=codex_local`、`responses_compact_trigger=auto`、`responses_compact_phase=mid_turn`、`responses_compact_strategy=memento`、`stream_status.status=ok`。
+     - compact 后请求降到约 `53K-56K` prompt tokens。
+   - token `46` 结果：
+     - warm-up 后固定大前缀缓存生效，高缓存读请求包括 `prompt_tokens=297561/cache_tokens=296704`、`300031/298752`、`303815/302848`。
+     - 多轮真实测试 resume 后，高缓存读持续增长到 `328K` 级别仍稳定返回 `ok`。
+     - 手动补充少量上下文压力后，请求 `856080` 达到 `prompt_tokens=341193`、`cache_tokens=328448`，随后 `856081` 自动 compact。
+     - 自动 compact 请求 `856081` 为 `prompt_tokens=337808`、`cache_tokens=6912`、`responses_compact_mode=codex_local`、`responses_compact_trigger=auto`、`responses_compact_phase=mid_turn`、`responses_compact_strategy=memento`、`stream_status.status=ok`。
+     - compact 后请求 `856082` 降到 `prompt_tokens=55535`、`cache_tokens=11008`。
+   - 结论：已验证高缓存读请求之后自动 compact 能成功完成；当前观察到的 compact 请求本身仍是低缓存读，不是高缓存读。
+   - 失败边界：过大 prompt 会返回上游 `400 input exceeds context window`，这属于上下文越界，不是 `arguments` 或 `namespace` 参数适配错误。
+   - 最终本地验证：`npm test` 退出码 `0`，`10` 个测试全部通过。
+
 ## 统计
 
 临时开发 token `id=39` 下测试日志统计：
@@ -104,10 +124,19 @@
 - `id in (40,41,42)` 的 `Unknown parameter` 计数为 `0`。
 - `id in (40,41,42)` 的 `expected an object` 计数为 `0`。
 
+高上下文追加测试临时 token 日志统计：
+
+- `id=45`：验证 10% 上下文余量附近真实 coding 任务、自动 compact 和 compact 后降上下文。
+- `id=46`：验证高缓存读请求序列、自动 compact 和 compact 后降上下文。
+- `id in (45,46)` 的 `Unknown parameter` 计数为 `0`。
+- `id in (45,46)` 的 `expected an object` 计数为 `0`。
+- `id=46` 中有 1 条 `canceled`，来自测试过程中手动中断批量 follow-up 循环，不是上游参数错误。
+
 ## 清理
 
 - 临时开发 token `id=39` 已删除。
 - 临时开发 token `id=40`、`id=41`、`id=42` 已删除。
+- 临时开发 token `id=43`、`id=44`、`id=45`、`id=46` 已删除。
 - 对应 Redis token 缓存已删除。
 - 临时 Codex 工作区保留在 `/tmp/newapi-gpt56-compactv2-real-task`，用于复核 evidence。
 - 临时 `CODEX_HOME` 中的 `config.toml` 仅引用 `env_key = "NEWAPI_CODEX_TOKEN"`，不包含 token 明文。
