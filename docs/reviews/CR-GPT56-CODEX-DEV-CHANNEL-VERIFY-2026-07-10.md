@@ -64,6 +64,24 @@
    - 结果包含非空 encrypted content。
    - 日志：`request_path=/v1/responses/compact`，`responses_compact_mode=native`，`responses_compact_route_decision=native_opaque_recorded`。
 
+7. Codex 多轮真实 coding 任务与 compactV2 续跑：
+   - 临时工作区：`/tmp/newapi-gpt56-compactv2-real-task`
+   - 模型：`gpt-5.6-sol`
+   - 任务内容：让 Codex 修复订单 CSV、折扣、税费汇总测试；第二轮追加分类报表功能测试，要求续跑并完成 `renderCategoryReport`。
+   - 第一轮：原始 `npm test` 为 `7` 个测试中 `3` 过 `4` 失败；Codex 修改 `src/orders.js` 后 `7` 个测试全部通过。
+   - 第二轮：追加 `test/report.test.js` 后进入 resume，多次触发 long thread / compact 提示；中途一次因子 Codex 沙箱只读导致写入被拒，随后使用同一开发环境重新以可写权限 resume。
+   - 最终结果：`node --test test/report.test.js` 退出码 `0`，`1` 个测试通过；`npm test` 退出码 `0`，`8` 个测试全部通过。
+   - evidence 文件：
+     - `/tmp/newapi-gpt56-compactv2-real-task/evidence/turn1.jsonl`
+     - `/tmp/newapi-gpt56-compactv2-real-task/evidence/turn2.jsonl`
+     - `/tmp/newapi-gpt56-compactv2-real-task/evidence/turn2-continue.jsonl`
+     - `/tmp/newapi-gpt56-compactv2-real-task/evidence/turn2-continue-write.jsonl`
+   - `turn2-continue-write.jsonl` 末尾包含 `TURN2_DONE`。
+   - `rg -c 'Long threads and multiple compactions|compaction|compact'` 命中统计：`turn1=25`、`turn2=21`、`turn2-continue=2`、`turn2-continue-write=2`。
+   - 开发日志中 token `40`、`41`、`42` 均为 `gpt-5.6-sol`，均命中渠道 `180`，请求数分别为 `40`、`37`、`9`。
+   - 开发日志中 `Unknown parameter` 命中 `0`，`expected an object` 命中 `0`。
+   - 开发日志中 `namespace` 字符串命中来自 `other` 字段里的 `channel_capability_snapshot.compact_mode_effective` 等 compact 能力快照，不是上游 `input[index].namespace` 参数错误。
+
 ## 统计
 
 临时开发 token `id=39` 下测试日志统计：
@@ -78,11 +96,21 @@
 
 错误 5 条均来自手写 namespace 输入触发的上游 `502`，不是本次生产截图中的 `Unknown parameter` 或 `Invalid type`。
 
+追加多轮任务临时 token 日志统计：
+
+- `id=40`：`40` 条请求，模型 `gpt-5.6-sol`，渠道 `180`。
+- `id=41`：`37` 条请求，模型 `gpt-5.6-sol`，渠道 `180`。
+- `id=42`：`9` 条请求，模型 `gpt-5.6-sol`，渠道 `180`。
+- `id in (40,41,42)` 的 `Unknown parameter` 计数为 `0`。
+- `id in (40,41,42)` 的 `expected an object` 计数为 `0`。
+
 ## 清理
 
 - 临时开发 token `id=39` 已删除。
+- 临时开发 token `id=40`、`id=41`、`id=42` 已删除。
 - 对应 Redis token 缓存已删除。
-- 临时 Codex 工作区与临时 `CODEX_HOME` 已删除。
+- 临时 Codex 工作区保留在 `/tmp/newapi-gpt56-compactv2-real-task`，用于复核 evidence。
+- 临时 `CODEX_HOME` 中的 `config.toml` 仅引用 `env_key = "NEWAPI_CODEX_TOKEN"`，不包含 token 明文。
 
 ## 边界
 
