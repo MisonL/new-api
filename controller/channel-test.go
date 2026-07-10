@@ -636,9 +636,9 @@ func settleTestQuota(info *relaycommon.RelayInfo, priceData types.PriceData, usa
 
 	quota := 0
 	if !priceData.UsePrice {
-		quota = usage.PromptTokens + int(math.Round(float64(usage.CompletionTokens)*priceData.CompletionRatio))
-		quota = int(math.Round(float64(quota) * priceData.ModelRatio))
-		if priceData.ModelRatio != 0 && quota <= 0 {
+		quota = calculateChannelTestStandardQuota(info, priceData, usage)
+		if usage != nil && usage.PromptTokens+usage.CompletionTokens != 0 &&
+			priceData.ModelRatio*priceData.GroupRatioInfo.GroupRatio != 0 && quota <= 0 {
 			quota = 1
 		}
 		return quota, nil
@@ -647,13 +647,89 @@ func settleTestQuota(info *relaycommon.RelayInfo, priceData types.PriceData, usa
 	return int(priceData.ModelPrice * common.QuotaPerUnit), nil
 }
 
+func calculateChannelTestStandardQuota(info *relaycommon.RelayInfo, priceData types.PriceData, usage *dto.Usage) int {
+	if usage == nil {
+		return 0
+	}
+	isClaudeUsageSemantic := usage.UsageSemantic == "anthropic"
+	if info != nil && info.GetFinalRequestRelayFormat() == types.RelayFormatClaude {
+		isClaudeUsageSemantic = true
+	}
+
+	baseTokens := float64(usage.PromptTokens)
+	cacheTokens := float64(usage.PromptTokensDetails.CachedTokens)
+	cacheCreationTokens := float64(usage.PromptTokensDetails.CachedCreationTokens)
+
+	cachedTokensWithRatio := cacheTokens * priceData.CacheRatio
+	cacheCreationWithRatio := 0.0
+	if !isClaudeUsageSemantic {
+		baseTokens -= cacheTokens
+		baseTokens -= cacheCreationTokens
+		cacheCreationWithRatio = cacheCreationTokens * priceData.CacheCreationRatio
+	} else {
+		remaining := usage.PromptTokensDetails.CachedCreationTokens - usage.ClaudeCacheCreation5mTokens - usage.ClaudeCacheCreation1hTokens
+		if remaining < 0 {
+			remaining = 0
+		}
+		cacheCreationWithRatio = float64(remaining)*priceData.CacheCreationRatio +
+			float64(usage.ClaudeCacheCreation5mTokens)*priceData.CacheCreation5mRatio +
+			float64(usage.ClaudeCacheCreation1hTokens)*priceData.CacheCreation1hRatio
+	}
+
+	quota := baseTokens + cachedTokensWithRatio + cacheCreationWithRatio +
+		float64(usage.CompletionTokens)*priceData.CompletionRatio
+	quota *= priceData.ModelRatio * priceData.GroupRatioInfo.GroupRatio
+	for _, ratio := range priceData.OtherRatios {
+		quota *= ratio
+	}
+	if usage.PromptTokens+usage.CompletionTokens == 0 {
+		return 0
+	}
+	return int(math.Round(quota))
+}
+
 func buildTestLogOther(c *gin.Context, info *relaycommon.RelayInfo, priceData types.PriceData, usage *dto.Usage, tieredResult *billingexpr.TieredResult) map[string]interface{} {
 	other := service.GenerateTextOtherInfo(c, info, priceData.ModelRatio, priceData.GroupRatioInfo.GroupRatio, priceData.CompletionRatio,
 		usage.PromptTokensDetails.CachedTokens, priceData.CacheRatio, priceData.ModelPrice, priceData.GroupRatioInfo.GroupSpecialRatio)
+	appendChannelTestCacheCreationLogInfo(other, priceData, usage)
 	if tieredResult != nil {
 		service.InjectTieredBillingInfo(other, info, tieredResult)
 	}
 	return other
+}
+
+func appendChannelTestCacheCreationLogInfo(other map[string]interface{}, priceData types.PriceData, usage *dto.Usage) {
+	if other == nil || usage == nil {
+		return
+	}
+	if usage.PromptTokensDetails.CachedCreationTokens > 0 {
+		other["cache_creation_tokens"] = usage.PromptTokensDetails.CachedCreationTokens
+		other["cache_creation_ratio"] = priceData.CacheCreationRatio
+	}
+	if usage.ClaudeCacheCreation5mTokens > 0 {
+		other["cache_creation_tokens_5m"] = usage.ClaudeCacheCreation5mTokens
+		other["cache_creation_ratio_5m"] = priceData.CacheCreation5mRatio
+	}
+	if usage.ClaudeCacheCreation1hTokens > 0 {
+		other["cache_creation_tokens_1h"] = usage.ClaudeCacheCreation1hTokens
+		other["cache_creation_ratio_1h"] = priceData.CacheCreation1hRatio
+	}
+	cacheWriteTokens := channelTestCacheWriteTokensTotal(usage)
+	if cacheWriteTokens > 0 {
+		other["cache_write_tokens"] = cacheWriteTokens
+	}
+}
+
+func channelTestCacheWriteTokensTotal(usage *dto.Usage) int {
+	if usage == nil {
+		return 0
+	}
+	total := usage.PromptTokensDetails.CachedCreationTokens
+	splitTotal := usage.ClaudeCacheCreation5mTokens + usage.ClaudeCacheCreation1hTokens
+	if splitTotal > total {
+		return splitTotal
+	}
+	return total
 }
 
 func coerceTestUsage(usageAny any, isStream bool, estimatePromptTokens int) (*dto.Usage, error) {

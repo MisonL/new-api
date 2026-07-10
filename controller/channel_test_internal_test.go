@@ -98,6 +98,60 @@ func TestBuildTestRequestAppliesImageGenerationPrompt(t *testing.T) {
 	require.Equal(t, uint(1), *imageReq.N)
 }
 
+func TestSettleTestQuotaAppliesCacheReadAndWriteRatios(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     1000,
+		CompletionTokens: 10,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         300,
+			CachedCreationTokens: 200,
+		},
+	}
+	priceData := types.PriceData{
+		ModelRatio:         2.5,
+		CompletionRatio:    6,
+		CacheRatio:         0.1,
+		CacheCreationRatio: 1.25,
+		GroupRatioInfo: types.GroupRatioInfo{
+			GroupRatio: 1,
+		},
+	}
+
+	quota, tieredResult := settleTestQuota(&relaycommon.RelayInfo{}, priceData, usage)
+
+	require.Nil(t, tieredResult)
+	require.Equal(t, 2100, quota)
+}
+
+func TestBuildTestLogOtherIncludesCacheWriteSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	usage := &dto.Usage{
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         300,
+			CachedCreationTokens: 200,
+		},
+	}
+	priceData := types.PriceData{
+		ModelRatio:         2.5,
+		CompletionRatio:    6,
+		CacheRatio:         0.1,
+		CacheCreationRatio: 1.25,
+		ModelPrice:         -1,
+		GroupRatioInfo: types.GroupRatioInfo{
+			GroupRatio: 1,
+		},
+	}
+
+	other := buildTestLogOther(ctx, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}, priceData, usage, nil)
+
+	require.Equal(t, 300, other["cache_tokens"])
+	require.Equal(t, 0.1, other["cache_ratio"])
+	require.Equal(t, 200, other["cache_creation_tokens"])
+	require.Equal(t, 1.25, other["cache_creation_ratio"])
+	require.Equal(t, 200, other["cache_write_tokens"])
+}
+
 func TestApplyChannelTestProtocolStrategyConvertsResponsesCompactToChat(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())

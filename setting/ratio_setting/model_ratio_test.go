@@ -58,11 +58,54 @@ func TestGetConfiguredModelRatioMissingModel(t *testing.T) {
 	require.Equal(t, "missing-model-for-pricing-test", matchName)
 }
 
-func TestGetCompletionRatioInfoGPT55UsesOfficialOutputMultiplier(t *testing.T) {
-	info := GetCompletionRatioInfo("gpt-5.5")
+func TestGetCompletionRatioInfoGPT55AndLaterUsesUnlockedOutputMultiplier(t *testing.T) {
+	tests := []string{
+		"gpt-5.5",
+		"gpt-5.6",
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
+	}
 
-	require.InDelta(t, 6.0, info.Ratio, 1e-9)
-	require.True(t, info.Locked)
+	for _, name := range tests {
+		t.Run(name, func(t *testing.T) {
+			info := GetCompletionRatioInfo(name)
+
+			require.InDelta(t, 6.0, info.Ratio, 1e-9)
+			require.False(t, info.Locked)
+		})
+	}
+}
+
+func TestGPT56OfficialPricingRatios(t *testing.T) {
+	InitRatioSettings()
+	tests := []struct {
+		name       string
+		modelRatio float64
+	}{
+		{name: "gpt-5.6", modelRatio: 2.5},
+		{name: "gpt-5.6-sol", modelRatio: 2.5},
+		{name: "gpt-5.6-terra", modelRatio: 1.25},
+		{name: "gpt-5.6-luna", modelRatio: 0.5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			modelRatio, ok, matchName := GetConfiguredModelRatio(tt.name)
+			require.True(t, ok)
+			require.Equal(t, tt.name, matchName)
+			require.InDelta(t, tt.modelRatio, modelRatio, 1e-9)
+			require.InDelta(t, 6.0, GetCompletionRatio(tt.name), 1e-9)
+
+			cacheRatio, hasCacheRatio := GetCacheRatio(tt.name)
+			require.True(t, hasCacheRatio)
+			require.InDelta(t, 0.1, cacheRatio, 1e-9)
+
+			createCacheRatio, hasCreateCacheRatio := GetCreateCacheRatio(tt.name)
+			require.True(t, hasCreateCacheRatio)
+			require.InDelta(t, 1.25, createCacheRatio, 1e-9)
+		})
+	}
 }
 
 func TestGetCompletionRatioGPT55DatedVariant(t *testing.T) {
