@@ -89,3 +89,120 @@ func TestStripEncryptedReasoningFromResponsesRequestKeepsMixedInput(t *testing.T
 	require.Equal(t, 1, result.RemainingCount)
 	require.NotContains(t, string(got.Input), "opaque")
 }
+
+func TestResponsesNamespaceHistoryIndex(t *testing.T) {
+	tests := []struct {
+		name      string
+		param     string
+		wantIndex int
+		wantOK    bool
+	}{
+		{
+			name:      "valid parameter",
+			param:     "input[42].namespace",
+			wantIndex: 42,
+			wantOK:    true,
+		},
+		{
+			name:      "valid parameter with whitespace",
+			param:     " input[1].namespace ",
+			wantIndex: 1,
+			wantOK:    true,
+		},
+		{
+			name:   "missing index",
+			param:  "input[].namespace",
+			wantOK: false,
+		},
+		{
+			name:   "different field",
+			param:  "input[1].name",
+			wantOK: false,
+		},
+		{
+			name:   "nested namespace field",
+			param:  "input[1].tool.namespace",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotIndex, gotOK := ResponsesNamespaceHistoryIndex(tt.param)
+
+			require.Equal(t, tt.wantOK, gotOK)
+			if tt.wantOK {
+				require.Equal(t, tt.wantIndex, gotIndex)
+			}
+		})
+	}
+}
+
+func TestStripNamespaceFromResponsesInputHistory(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: rootcommon.RawMessage(`[
+			{"type":"custom_tool_call","call_id":"call_keep","namespace":"keep_namespace","input":"{}"},
+			{"type":"custom_tool_call","call_id":"call_rejected","namespace":"rejected_namespace","input":"{}"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, removed, err := StripNamespaceFromResponsesInputHistory(req, 1)
+
+	require.NoError(t, err)
+	require.True(t, removed)
+	require.Contains(t, string(got.Input), `"namespace":"keep_namespace"`)
+	require.NotContains(t, string(got.Input), `"namespace":"rejected_namespace"`)
+	require.Contains(t, string(got.Input), `"call_id":"call_rejected"`)
+}
+
+func TestStripNamespaceFromResponsesInputHistoryKeepsOriginalWhenNothingRemoved(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     rootcommon.RawMessage
+		itemIndex int
+	}{
+		{
+			name:      "plain input",
+			input:     rootcommon.RawMessage(`"hello"`),
+			itemIndex: 0,
+		},
+		{
+			name: "negative index",
+			input: rootcommon.RawMessage(`[
+				{"type":"custom_tool_call","namespace":"keep_namespace"}
+			]`),
+			itemIndex: -1,
+		},
+		{
+			name: "index out of range",
+			input: rootcommon.RawMessage(`[
+				{"type":"custom_tool_call","namespace":"keep_namespace"}
+			]`),
+			itemIndex: 1,
+		},
+		{
+			name: "target item has no namespace",
+			input: rootcommon.RawMessage(`[
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+			]`),
+			itemIndex: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := dto.OpenAIResponsesRequest{
+				Model: "gpt-5.6",
+				Input: tt.input,
+			}
+
+			got, removed, err := StripNamespaceFromResponsesInputHistory(req, tt.itemIndex)
+
+			require.NoError(t, err)
+			require.False(t, removed)
+			require.Equal(t, req.Input, got.Input)
+		})
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
+	"strings"
 
 	basecommon "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -13,7 +15,7 @@ import (
 
 var ErrResponsesEncryptedReasoningOnlyInput = errors.New("responses encrypted reasoning context is unsupported by this OpenAI-compatible channel and no other input items remain")
 
-var responsesNamespaceParameterPattern = regexp.MustCompile(`^input\[\d+\]\.namespace$`)
+var responsesNamespaceParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.namespace$`)
 
 type ResponsesInputStripResult struct {
 	Input                   json.RawMessage
@@ -129,44 +131,45 @@ func ResponsesRequestHasNamespaceTools(request *dto.OpenAIResponsesRequest) (boo
 	return false, nil
 }
 
-func StripNamespaceFromResponsesInputHistory(request dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, int, error) {
+func StripNamespaceFromResponsesInputHistory(request dto.OpenAIResponsesRequest, itemIndex int) (dto.OpenAIResponsesRequest, bool, error) {
 	trimmedInput := bytes.TrimSpace(request.Input)
-	if len(trimmedInput) == 0 || trimmedInput[0] != '[' {
-		return request, 0, nil
+	if itemIndex < 0 || len(trimmedInput) == 0 || trimmedInput[0] != '[' {
+		return request, false, nil
 	}
 
 	var items []json.RawMessage
 	if err := basecommon.Unmarshal(request.Input, &items); err != nil {
-		return request, 0, err
+		return request, false, err
 	}
-	removedCount := 0
-	for index, rawItem := range items {
-		var item map[string]json.RawMessage
-		if err := basecommon.Unmarshal(rawItem, &item); err != nil {
-			continue
-		}
-		if _, exists := item["namespace"]; !exists {
-			continue
-		}
-		delete(item, "namespace")
-		encodedItem, err := basecommon.Marshal(item)
-		if err != nil {
-			return request, removedCount, fmt.Errorf("marshal responses input item %d without namespace: %w", index, err)
-		}
-		items[index] = encodedItem
-		removedCount++
+	if itemIndex >= len(items) {
+		return request, false, nil
 	}
-	if removedCount == 0 {
-		return request, 0, nil
+	var item map[string]json.RawMessage
+	if err := basecommon.Unmarshal(items[itemIndex], &item); err != nil {
+		return request, false, err
 	}
+	if _, exists := item["namespace"]; !exists {
+		return request, false, nil
+	}
+	delete(item, "namespace")
+	encodedItem, err := basecommon.Marshal(item)
+	if err != nil {
+		return request, false, fmt.Errorf("marshal responses input item %d without namespace: %w", itemIndex, err)
+	}
+	items[itemIndex] = encodedItem
 	encodedInput, err := basecommon.Marshal(items)
 	if err != nil {
-		return request, removedCount, fmt.Errorf("marshal responses input without namespace history: %w", err)
+		return request, false, fmt.Errorf("marshal responses input without namespace history: %w", err)
 	}
 	request.Input = encodedInput
-	return request, removedCount, nil
+	return request, true, nil
 }
 
-func IsResponsesNamespaceHistoryParameter(param string) bool {
-	return responsesNamespaceParameterPattern.MatchString(string(bytes.TrimSpace([]byte(param))))
+func ResponsesNamespaceHistoryIndex(param string) (int, bool) {
+	matches := responsesNamespaceParameterPattern.FindStringSubmatch(strings.TrimSpace(param))
+	if len(matches) != 2 {
+		return 0, false
+	}
+	index, err := strconv.Atoi(matches[1])
+	return index, err == nil
 }

@@ -491,6 +491,7 @@ func TestOaiResponsesStreamHandlerPreservesUpstreamParameterError(t *testing.T) 
 			openAIError := err.ToOpenAIError()
 			require.Equal(t, "input[42].namespace", openAIError.Param)
 			require.Contains(t, openAIError.Message, "Unknown parameter")
+			require.NotContains(t, recorder.Body.String(), "Unknown parameter")
 		})
 	}
 }

@@ -212,21 +212,27 @@ func shouldRetryResponsesWithoutNamespaceHistory(info *relaycommon.RelayInfo, er
 	if strings.ToLower(string(err.GetErrorCode())) != "unknown_parameter" {
 		return false
 	}
-	return relaycommon.IsResponsesNamespaceHistoryParameter(err.ToOpenAIError().Param)
+	_, ok := relaycommon.ResponsesNamespaceHistoryIndex(err.ToOpenAIError().Param)
+	return ok
 }
 
 func retryResponsesWithoutNamespaceHistory(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (*dto.Usage, *types.NewAPIError) {
-	strippedRequest, removedCount, stripErr := relaycommon.StripNamespaceFromResponsesInputHistory(convertedRequest)
-	if stripErr != nil || removedCount == 0 {
+	itemIndex, ok := relaycommon.ResponsesNamespaceHistoryIndex(newAPIError.ToOpenAIError().Param)
+	if !ok {
+		resetResponsesStatusCode(c, newAPIError)
+		return nil, newAPIError
+	}
+	strippedRequest, removed, stripErr := relaycommon.StripNamespaceFromResponsesInputHistory(convertedRequest, itemIndex)
+	if stripErr != nil || !removed {
 		resetResponsesStatusCode(c, newAPIError)
 		return nil, newAPIError
 	}
 	common.SetContextKey(c, appconstant.ContextKeyResponsesNamespaceHistoryRetry, true)
 	common.SysLog(fmt.Sprintf(
-		"responses namespace history retry: channel_id=%d model=%s removed_items=%d original_error=%s",
+		"responses namespace history retry: channel_id=%d model=%s input_index=%d original_error=%s",
 		info.ChannelId,
 		info.OriginModelName,
-		removedCount,
+		itemIndex,
 		newAPIError.MaskSensitiveError(),
 	))
 	retryBody, _, retryBuildErr := buildOpenAIResponsesRequestBody(c, info, adaptor, &strippedRequest, false, buildResponsesRequestBodyOptions{

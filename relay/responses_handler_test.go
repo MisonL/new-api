@@ -106,7 +106,7 @@ func encryptedContextRetryResponse(status int) *http.Response {
 }
 
 func namespaceHistoryRetryResponse() *http.Response {
-	body := `{"error":{"message":"Unknown parameter: 'input[42].namespace'.","type":"invalid_request_error","param":"input[42].namespace","code":"unknown_parameter"}}`
+	body := `{"error":{"message":"Unknown parameter: 'input[1].namespace'.","type":"invalid_request_error","param":"input[1].namespace","code":"unknown_parameter"}}`
 	return &http.Response{
 		StatusCode: http.StatusBadRequest,
 		Body:       io.NopCloser(bytes.NewBufferString(body)),
@@ -178,7 +178,7 @@ func TestExecuteOpenAIResponsesRequestRetriesEncryptedReasoningFailure(t *testin
 func TestExecuteOpenAIResponsesRequestRetriesRejectedNamespaceHistory(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6","input":[{"type":"custom_tool_call","call_id":"call_1","name":"read_thread","namespace":"codex_app","input":"{}"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6","input":[{"type":"custom_tool_call","call_id":"call_keep","name":"read_thread","namespace":"keep_namespace","input":"{}"},{"type":"custom_tool_call","call_id":"call_rejected","name":"read_thread","namespace":"rejected_namespace","input":"{}"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	info := &relaycommon.RelayInfo{
@@ -199,7 +199,8 @@ func TestExecuteOpenAIResponsesRequestRetriesRejectedNamespaceHistory(t *testing
 	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6",
 		Input: common.RawMessage(`[
-			{"type":"custom_tool_call","call_id":"call_1","name":"read_thread","namespace":"codex_app","input":"{}"},
+			{"type":"custom_tool_call","call_id":"call_keep","name":"read_thread","namespace":"keep_namespace","input":"{}"},
+			{"type":"custom_tool_call","call_id":"call_rejected","name":"read_thread","namespace":"rejected_namespace","input":"{}"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
 	}, false)
@@ -207,9 +208,11 @@ func TestExecuteOpenAIResponsesRequestRetriesRejectedNamespaceHistory(t *testing
 	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Len(t, adaptor.requestBodies, 2)
-	require.Contains(t, string(adaptor.requestBodies[0]), `"namespace":"codex_app"`)
-	require.NotContains(t, string(adaptor.requestBodies[1]), `"namespace":"codex_app"`)
-	require.Contains(t, string(adaptor.requestBodies[1]), `"call_id":"call_1"`)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"namespace":"keep_namespace"`)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"namespace":"rejected_namespace"`)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"namespace":"keep_namespace"`)
+	require.NotContains(t, string(adaptor.requestBodies[1]), `"namespace":"rejected_namespace"`)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"call_id":"call_rejected"`)
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesNamespaceHistoryRetry))
 }
 
