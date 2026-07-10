@@ -17,6 +17,8 @@ var ErrResponsesEncryptedReasoningOnlyInput = errors.New("responses encrypted re
 
 var responsesNamespaceParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.namespace$`)
 var responsesArgumentsParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.arguments$`)
+var responsesNamespaceTextPattern = regexp.MustCompile(`input\[(\d+)\]\.namespace`)
+var responsesArgumentsTextPattern = regexp.MustCompile(`input\[(\d+)\]\.arguments`)
 
 type ResponsesInputStripResult struct {
 	Input                   json.RawMessage
@@ -180,8 +182,31 @@ func ResponsesNamespaceHistoryIndex(param string) (int, bool) {
 	return index, err == nil
 }
 
+func ResponsesNamespaceHistoryIndexFromError(param string, message string) (int, bool) {
+	if index, ok := ResponsesNamespaceHistoryIndex(param); ok {
+		return index, true
+	}
+	return responsesHistoryIndexFromText(responsesNamespaceTextPattern, message)
+}
+
 func ResponsesArgumentsHistoryIndex(param string) (int, bool) {
 	matches := responsesArgumentsParameterPattern.FindStringSubmatch(strings.TrimSpace(param))
+	if len(matches) != 2 {
+		return 0, false
+	}
+	index, err := strconv.Atoi(matches[1])
+	return index, err == nil
+}
+
+func ResponsesArgumentsHistoryIndexFromError(param string, message string) (int, bool) {
+	if index, ok := ResponsesArgumentsHistoryIndex(param); ok {
+		return index, true
+	}
+	return responsesHistoryIndexFromText(responsesArgumentsTextPattern, message)
+}
+
+func responsesHistoryIndexFromText(pattern *regexp.Regexp, text string) (int, bool) {
+	matches := pattern.FindStringSubmatch(text)
 	if len(matches) != 2 {
 		return 0, false
 	}

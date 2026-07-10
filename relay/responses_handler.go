@@ -212,15 +212,21 @@ func shouldRetryResponsesWithoutNamespaceHistory(info *relaycommon.RelayInfo, er
 	if info == nil || err == nil || !relaycommon.IsOpenAICompatibleResponses(info) || err.StatusCode != http.StatusBadRequest {
 		return false
 	}
-	if strings.ToLower(string(err.GetErrorCode())) != "unknown_parameter" {
+	openAIError := err.ToOpenAIError()
+	if _, ok := relaycommon.ResponsesNamespaceHistoryIndexFromError(openAIError.Param, openAIError.Message); !ok {
 		return false
 	}
-	_, ok := relaycommon.ResponsesNamespaceHistoryIndex(err.ToOpenAIError().Param)
-	return ok
+	errorCode := strings.ToLower(fmt.Sprintf("%v", openAIError.Code))
+	if errorCode == "unknown_parameter" {
+		return true
+	}
+	errorMessage := strings.ToLower(openAIError.Message)
+	return strings.Contains(errorMessage, "unknown parameter")
 }
 
 func retryResponsesWithoutNamespaceHistory(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (*dto.Usage, *types.NewAPIError) {
-	itemIndex, ok := relaycommon.ResponsesNamespaceHistoryIndex(newAPIError.ToOpenAIError().Param)
+	openAIError := newAPIError.ToOpenAIError()
+	itemIndex, ok := relaycommon.ResponsesNamespaceHistoryIndexFromError(openAIError.Param, openAIError.Message)
 	if !ok {
 		resetResponsesStatusCode(c, newAPIError)
 		return nil, newAPIError
@@ -252,7 +258,7 @@ func shouldRetryResponsesWithObjectArguments(info *relaycommon.RelayInfo, err *t
 		return false
 	}
 	openAIError := err.ToOpenAIError()
-	if _, ok := relaycommon.ResponsesArgumentsHistoryIndex(openAIError.Param); !ok {
+	if _, ok := relaycommon.ResponsesArgumentsHistoryIndexFromError(openAIError.Param, openAIError.Message); !ok {
 		return false
 	}
 	errorCode := strings.ToLower(fmt.Sprintf("%v", openAIError.Code))
@@ -264,7 +270,8 @@ func shouldRetryResponsesWithObjectArguments(info *relaycommon.RelayInfo, err *t
 }
 
 func retryResponsesWithObjectArguments(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (*dto.Usage, *types.NewAPIError) {
-	itemIndex, ok := relaycommon.ResponsesArgumentsHistoryIndex(newAPIError.ToOpenAIError().Param)
+	openAIError := newAPIError.ToOpenAIError()
+	itemIndex, ok := relaycommon.ResponsesArgumentsHistoryIndexFromError(openAIError.Param, openAIError.Message)
 	if !ok {
 		resetResponsesStatusCode(c, newAPIError)
 		return nil, newAPIError

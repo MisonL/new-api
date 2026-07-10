@@ -138,6 +138,46 @@ func TestResponsesNamespaceHistoryIndex(t *testing.T) {
 	}
 }
 
+func TestResponsesNamespaceHistoryIndexFromError(t *testing.T) {
+	tests := []struct {
+		name      string
+		param     string
+		message   string
+		wantIndex int
+		wantOK    bool
+	}{
+		{
+			name:      "uses param first",
+			param:     "input[245].namespace",
+			message:   "Unknown parameter: 'input[538].namespace'.",
+			wantIndex: 245,
+			wantOK:    true,
+		},
+		{
+			name:      "extracts from message when param is empty",
+			message:   "Unknown parameter: 'input[538].namespace'.",
+			wantIndex: 538,
+			wantOK:    true,
+		},
+		{
+			name:    "ignores unrelated message",
+			message: "Unknown parameter: 'input[538].name'.",
+			wantOK:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotIndex, gotOK := ResponsesNamespaceHistoryIndexFromError(tt.param, tt.message)
+
+			require.Equal(t, tt.wantOK, gotOK)
+			if tt.wantOK {
+				require.Equal(t, tt.wantIndex, gotIndex)
+			}
+		})
+	}
+}
+
 func TestResponsesArgumentsHistoryIndex(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -172,6 +212,46 @@ func TestResponsesArgumentsHistoryIndex(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotIndex, gotOK := ResponsesArgumentsHistoryIndex(tt.param)
+
+			require.Equal(t, tt.wantOK, gotOK)
+			if tt.wantOK {
+				require.Equal(t, tt.wantIndex, gotIndex)
+			}
+		})
+	}
+}
+
+func TestResponsesArgumentsHistoryIndexFromError(t *testing.T) {
+	tests := []struct {
+		name      string
+		param     string
+		message   string
+		wantIndex int
+		wantOK    bool
+	}{
+		{
+			name:      "uses param first",
+			param:     "input[333].arguments",
+			message:   "Invalid type for 'input[334].arguments': expected an object, but got a string instead.",
+			wantIndex: 333,
+			wantOK:    true,
+		},
+		{
+			name:      "extracts from message when param is empty",
+			message:   "Invalid type for 'input[333].arguments': expected an object, but got a string instead.",
+			wantIndex: 333,
+			wantOK:    true,
+		},
+		{
+			name:    "ignores unrelated message",
+			message: "Invalid type for 'input[333].name'.",
+			wantOK:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotIndex, gotOK := ResponsesArgumentsHistoryIndexFromError(tt.param, tt.message)
 
 			require.Equal(t, tt.wantOK, gotOK)
 			if tt.wantOK {
