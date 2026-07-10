@@ -988,6 +988,18 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 			sr.Stop(types.WithOpenAIError(*streamResponse.Error, http.StatusBadRequest))
 			return
+		case "response.failed":
+			if streamResponse.Response == nil {
+				sr.Stop(fmt.Errorf("upstream responses stream returned an invalid failed event"))
+				return
+			}
+			openAIError := streamResponse.Response.GetOpenAIError()
+			if openAIError == nil || strings.TrimSpace(openAIError.Message) == "" {
+				sr.Stop(fmt.Errorf("upstream responses stream returned an invalid failed event"))
+				return
+			}
+			sr.Stop(types.WithOpenAIError(*openAIError, http.StatusBadRequest))
+			return
 		case "response.completed":
 			if streamResponse.Response != nil {
 				if streamResponse.Response.Usage != nil {

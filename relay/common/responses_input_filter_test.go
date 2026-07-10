@@ -90,6 +90,71 @@ func TestStripEncryptedReasoningFromResponsesRequestKeepsMixedInput(t *testing.T
 	require.NotContains(t, string(got.Input), "opaque")
 }
 
+func TestResponsesRequestHasNamespaceTools(t *testing.T) {
+	tests := []struct {
+		name    string
+		request *dto.OpenAIResponsesRequest
+		want    bool
+		wantErr bool
+	}{
+		{
+			name: "nil request",
+		},
+		{
+			name: "empty tools",
+			request: &dto.OpenAIResponsesRequest{
+				Tools: rootcommon.RawMessage(``),
+			},
+		},
+		{
+			name: "non array tools",
+			request: &dto.OpenAIResponsesRequest{
+				Tools: rootcommon.RawMessage(`{"type":"namespace"}`),
+			},
+		},
+		{
+			name: "namespace tool",
+			request: &dto.OpenAIResponsesRequest{
+				Tools: rootcommon.RawMessage(`[{"type":"namespace","name":"codex_app","tools":[]}]`),
+			},
+			want: true,
+		},
+		{
+			name: "ordinary function tool",
+			request: &dto.OpenAIResponsesRequest{
+				Tools: rootcommon.RawMessage(`[{"type":"function","name":"read_file","parameters":{"type":"object"}}]`),
+			},
+		},
+		{
+			name: "invalid item before namespace tool",
+			request: &dto.OpenAIResponsesRequest{
+				Tools: rootcommon.RawMessage(`[1,{"type":"namespace","name":"codex_app","tools":[]}]`),
+			},
+			want: true,
+		},
+		{
+			name: "malformed tools array",
+			request: &dto.OpenAIResponsesRequest{
+				Tools: rootcommon.RawMessage(`[{"type":"namespace"`),
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResponsesRequestHasNamespaceTools(tt.request)
+
+			require.Equal(t, tt.want, got)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestResponsesNamespaceHistoryIndex(t *testing.T) {
 	tests := []struct {
 		name      string

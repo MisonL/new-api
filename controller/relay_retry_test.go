@@ -1518,7 +1518,7 @@ func TestGetChannelSpecificResponsesViaChatRejectsUnsupportedNamespaceTool(t *te
 	require.Contains(t, err.Error(), "does not support namespace tool history")
 }
 
-func TestGetChannelKeepsResponsesViaChatForBridgeableNamespaceTool(t *testing.T) {
+func TestGetChannelRoutesBridgeableNamespaceToolToNativeChannel(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
 	chatOnly, _ := seedRemoteCompactionRouteChannels(t, db)
 

@@ -123,6 +123,36 @@ func TestSettleTestQuotaAppliesCacheReadAndWriteRatios(t *testing.T) {
 	require.Equal(t, 2100, quota)
 }
 
+func TestSettleTestQuotaAppliesAnthropicCacheReadAndWriteRatios(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 10,
+		UsageSemantic:    "anthropic",
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         30,
+			CachedCreationTokens: 50,
+		},
+		ClaudeCacheCreation5mTokens: 10,
+		ClaudeCacheCreation1hTokens: 20,
+	}
+	priceData := types.PriceData{
+		ModelRatio:           2,
+		CompletionRatio:      3,
+		CacheRatio:           0.1,
+		CacheCreationRatio:   1.25,
+		CacheCreation5mRatio: 1.25,
+		CacheCreation1hRatio: 2,
+		GroupRatioInfo: types.GroupRatioInfo{
+			GroupRatio: 1,
+		},
+	}
+
+	quota, tieredResult := settleTestQuota(&relaycommon.RelayInfo{}, priceData, usage)
+
+	require.Nil(t, tieredResult)
+	require.Equal(t, 421, quota)
+}
+
 func TestBuildTestLogOtherIncludesCacheWriteSnapshot(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())

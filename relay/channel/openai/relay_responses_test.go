@@ -496,6 +496,79 @@ func TestOaiResponsesStreamHandlerPreservesUpstreamParameterError(t *testing.T) 
 	}
 }
 
+func TestOaiResponsesStreamHandlerRejectsInvalidErrorEvent(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "missing error object",
+			body: `data: {"type":"response.error"}`,
+		},
+		{
+			name: "blank error message",
+			body: `data: {"type":"error","error":{"message":"   ","type":"invalid_request_error"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(tt.body + "\n\n")),
+			}
+			info := &relaycommon.RelayInfo{
+				ChannelMeta:  &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.6"},
+				StreamStatus: relaycommon.NewStreamStatus(),
+				DisablePing:  true,
+			}
+
+			usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+			require.Nil(t, usage)
+			require.NotNil(t, err)
+			require.Equal(t, http.StatusBadGateway, err.StatusCode)
+			require.Contains(t, err.Error(), "invalid error event")
+			require.Empty(t, recorder.Body.String())
+		})
+	}
+}
+
+func TestOaiResponsesStreamHandlerPreservesFailedResponseError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.failed","response":{"error":{"message":"Unknown parameter: 'input[42].namespace'.","type":"invalid_request_error","param":"input[42].namespace","code":"unknown_parameter"}}}`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:  &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.6"},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("unknown_parameter"), err.GetErrorCode())
+	openAIError := err.ToOpenAIError()
+	require.Equal(t, "input[42].namespace", openAIError.Param)
+	require.Contains(t, openAIError.Message, "Unknown parameter")
+	require.NotContains(t, recorder.Body.String(), "Unknown parameter")
+}
+
 func TestOaiResponsesToChatHandlerCountsBuiltInToolsFromResponse(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

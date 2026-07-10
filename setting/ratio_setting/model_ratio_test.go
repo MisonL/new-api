@@ -59,6 +59,8 @@ func TestGetConfiguredModelRatioMissingModel(t *testing.T) {
 }
 
 func TestGetCompletionRatioInfoGPT55AndLaterUsesUnlockedOutputMultiplier(t *testing.T) {
+	InitRatioSettings()
+
 	tests := []string{
 		"gpt-5.5",
 		"gpt-5.6",

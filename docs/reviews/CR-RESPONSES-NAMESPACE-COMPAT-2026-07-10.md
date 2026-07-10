@@ -18,6 +18,8 @@
 
 采样时间：`2026-07-10 13:42 Asia/Shanghai`。
 
+该记录对应当时隔离环境采样，运行镜像为 `new-api-local:dev`，容器报告提交为 `51074ac3736288ee664966e0a2109e9580d86fcf-dirty`。后续基于 `919500d696501142c93e9480efeb68ec53e7bec7` 及更高提交的真实 Codex 复测记录见 `CR-GPT56-CODEX-DEV-CHANNEL-VERIFY-2026-07-10.md`。
+
 ```text
 命令：go test ./controller ./relay/common ./relay/channel/openai ./relay ./service ./setting/ratio_setting -count=1
 退出码：0
