@@ -114,6 +114,15 @@ func namespaceHistoryRetryResponse() *http.Response {
 	}
 }
 
+func argumentsHistoryRetryResponse() *http.Response {
+	body := `{"error":{"message":"Invalid type for 'input[1].arguments': expected an object, but got a string instead.","type":"invalid_request_error","param":"input[1].arguments","code":"invalid_type"}}`
+	return &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+}
+
 func successResponsesHTTPResponse() *http.Response {
 	return &http.Response{
 		StatusCode: http.StatusOK,
@@ -214,6 +223,46 @@ func TestExecuteOpenAIResponsesRequestRetriesRejectedNamespaceHistory(t *testing
 	require.NotContains(t, string(adaptor.requestBodies[1]), `"namespace":"rejected_namespace"`)
 	require.Contains(t, string(adaptor.requestBodies[1]), `"call_id":"call_rejected"`)
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesNamespaceHistoryRetry))
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesRejectedStringArgumentsHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6","input":[{"type":"function_call","call_id":"call_keep","name":"read_file","arguments":"{\"path\":\"keep.txt\"}"},{"type":"function_call","call_id":"call_rejected","name":"edit_file","arguments":"{\"path\":\"target.txt\",\"ok\":true}"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   179,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			argumentsHistoryRetryResponse(),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: common.RawMessage(`[
+			{"type":"function_call","call_id":"call_keep","name":"read_file","arguments":"{\"path\":\"keep.txt\"}"},
+			{"type":"function_call","call_id":"call_rejected","name":"edit_file","arguments":"{\"path\":\"target.txt\",\"ok\":true}"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 2)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"arguments":"{\"path\":\"keep.txt\"}"`)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"arguments":"{\"path\":\"target.txt\",\"ok\":true}"`)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"arguments":{"path":"keep.txt"}`)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"arguments":{"ok":true,"path":"target.txt"}`)
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesArgumentsHistoryRetry))
 }
 
 func TestExecuteOpenAIResponsesRequestRetriesEncryptedReasoningBeforeStatusMapping(t *testing.T) {

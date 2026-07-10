@@ -129,6 +129,9 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesNamespaceHistoryRetry) {
 			other["responses_namespace_history_retry"] = true
 		}
+		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesArgumentsHistoryRetry) {
+			other["responses_arguments_history_retry"] = true
+		}
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude) {
 			other["responses_chat_compat_ignored_encrypted_include"] = true
 		}

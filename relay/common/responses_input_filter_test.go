@@ -138,6 +138,49 @@ func TestResponsesNamespaceHistoryIndex(t *testing.T) {
 	}
 }
 
+func TestResponsesArgumentsHistoryIndex(t *testing.T) {
+	tests := []struct {
+		name      string
+		param     string
+		wantIndex int
+		wantOK    bool
+	}{
+		{
+			name:      "valid parameter",
+			param:     "input[333].arguments",
+			wantIndex: 333,
+			wantOK:    true,
+		},
+		{
+			name:      "valid parameter with whitespace",
+			param:     " input[2].arguments ",
+			wantIndex: 2,
+			wantOK:    true,
+		},
+		{
+			name:   "different field",
+			param:  "input[2].namespace",
+			wantOK: false,
+		},
+		{
+			name:   "nested arguments field",
+			param:  "input[2].function.arguments",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotIndex, gotOK := ResponsesArgumentsHistoryIndex(tt.param)
+
+			require.Equal(t, tt.wantOK, gotOK)
+			if tt.wantOK {
+				require.Equal(t, tt.wantIndex, gotIndex)
+			}
+		})
+	}
+}
+
 func TestStripNamespaceFromResponsesInputHistory(t *testing.T) {
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6",
@@ -202,6 +245,76 @@ func TestStripNamespaceFromResponsesInputHistoryKeepsOriginalWhenNothingRemoved(
 
 			require.NoError(t, err)
 			require.False(t, removed)
+			require.Equal(t, req.Input, got.Input)
+		})
+	}
+}
+
+func TestNormalizeStringObjectArgumentsFromResponsesInputHistory(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: rootcommon.RawMessage(`[
+			{"type":"function_call","call_id":"call_keep","name":"read_file","arguments":"{\"path\":\"keep.txt\"}"},
+			{"type":"function_call","call_id":"call_rejected","name":"edit_file","arguments":"{\"path\":\"target.txt\",\"ok\":true}"},
+			{"type":"function_call","call_id":"call_invalid","name":"shell","arguments":"not json"}
+		]`),
+	}
+
+	got, result, err := NormalizeStringObjectArgumentsFromResponsesInputHistory(req, 1)
+
+	require.NoError(t, err)
+	require.Equal(t, 2, result.NormalizedCount)
+	require.True(t, result.TargetNormalized)
+	require.Contains(t, string(got.Input), `"arguments":{"path":"keep.txt"}`)
+	require.Contains(t, string(got.Input), `"arguments":{"ok":true,"path":"target.txt"}`)
+	require.Contains(t, string(got.Input), `"arguments":"not json"`)
+}
+
+func TestNormalizeStringObjectArgumentsFromResponsesInputHistoryKeepsOriginalWhenTargetNotNormalized(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     rootcommon.RawMessage
+		itemIndex int
+	}{
+		{
+			name:      "plain input",
+			input:     rootcommon.RawMessage(`"hello"`),
+			itemIndex: 0,
+		},
+		{
+			name: "index out of range",
+			input: rootcommon.RawMessage(`[
+				{"type":"function_call","arguments":"{\"path\":\"keep.txt\"}"}
+			]`),
+			itemIndex: 2,
+		},
+		{
+			name: "target arguments is array",
+			input: rootcommon.RawMessage(`[
+				{"type":"function_call","arguments":"[1,2]"}
+			]`),
+			itemIndex: 0,
+		},
+		{
+			name: "target arguments is already object",
+			input: rootcommon.RawMessage(`[
+				{"type":"function_call","arguments":{"path":"keep.txt"}}
+			]`),
+			itemIndex: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := dto.OpenAIResponsesRequest{
+				Model: "gpt-5.6",
+				Input: tt.input,
+			}
+
+			got, result, err := NormalizeStringObjectArgumentsFromResponsesInputHistory(req, tt.itemIndex)
+
+			require.NoError(t, err)
+			require.False(t, result.TargetNormalized)
 			require.Equal(t, req.Input, got.Input)
 		})
 	}
