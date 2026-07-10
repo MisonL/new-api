@@ -30,6 +30,10 @@ go test ./controller ./relay/common ./relay/channel/openai ./relay ./service ./s
 go test ./...
 go vet ./...
 go test -race ./relay/common ./relay ./relay/channel/openai ./relay/helper
+scripts/build-docker-local.sh new-api-local:dev
+docker compose -f deploy/compose/dev-isolated.yml --env-file deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api
+docker exec new-api-dev-isolated-new-api-1 /new-api --build-info
+curl -fsS http://127.0.0.1:3001/api/status
 ```
 
 ## 验证结果
@@ -41,6 +45,11 @@ go test -race ./relay/common ./relay ./relay/channel/openai ./relay/helper
 - `go test ./...`：通过。
 - `go vet ./...`：通过。
 - `go test -race ./relay/common ./relay ./relay/channel/openai ./relay/helper`：通过。
+- `scripts/build-docker-local.sh new-api-local:dev`：通过，镜像 build commit 为 `919500d696501142c93e9480efeb68ec53e7bec7`。
+- 隔离开发容器 `new-api-dev-isolated-new-api-1`：已重建，`0.0.0.0:3001->3000/tcp`，状态 `healthy`。
+- `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info`：`commit=919500d696501142c93e9480efeb68ec53e7bec7`。
+- `curl -fsS http://127.0.0.1:3001/api/status`：返回 `success:true`。
+- 正式容器未升级：`new-api` 仍为 `commit=51074ac3736288ee664966e0a2109e9580d86fcf`，镜像 `new-api-local:prod-20260710-disabled-row-contrast-51074ac37`，状态 `healthy`。
 
 ## 边界
 
