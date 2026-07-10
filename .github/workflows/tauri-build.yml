@@ -3,6 +3,8 @@ name: Build Tauri Desktop
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
   NODE_OPTIONS: '--max_old_space_size=6144'
+  # Let Tauri use its CI-safe DMG mode instead of running Finder AppleScript.
+  TAURI_BUNDLER_DMG_IGNORE_CI: 'false'
 
 on:
   pull_request:
