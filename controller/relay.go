@@ -629,18 +629,6 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	if !ok || request == nil {
 		return false, nil
 	}
-	hasNamespaceTools, err := relaycommon.ResponsesRequestHasNamespaceTools(request)
-	if err != nil {
-		return false, err
-	}
-	if hasNamespaceTools {
-		channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
-		capability := channelOtherSettings.ResolveResponsesChannelCapability(channel.Type)
-		if !capability.SupportsNamespaceTools {
-			info.LastError = unsupportedResponsesNamespaceHistoryChannelError(channel)
-			return true, nil
-		}
-	}
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
 		nativeCompactionChannelSetting(c, info, channel).PassThroughBodyEnabled {
 		return false, nil
