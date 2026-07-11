@@ -958,6 +958,29 @@ func countResponsesOutputItemDone(c *gin.Context, info *relaycommon.RelayInfo, i
 	}
 }
 
+type pendingResponsesStreamEvent struct {
+	response dto.ResponsesStreamResponse
+	data     string
+}
+
+const maxPendingResponsesStreamPreludeEvents = 8
+
+func isResponsesStreamPreludeEvent(eventType string) bool {
+	switch eventType {
+	case "response.created", "response.in_progress", "response.queued":
+		return true
+	default:
+		return false
+	}
+}
+
+func flushResponsesStreamPrelude(c *gin.Context, pending *[]pendingResponsesStreamEvent) {
+	for _, event := range *pending {
+		sendResponsesStreamData(c, event.response, event.data)
+	}
+	*pending = nil
+}
+
 func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
@@ -965,11 +988,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	}
 
 	defer service.CloseResponseBodyGracefully(resp)
+	common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, true)
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
 	var fallbackTextTruncated bool
 	hasCompletedUsage := false
+	pendingPrelude := make([]pendingResponsesStreamEvent, 0, 3)
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -986,7 +1011,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				sr.Stop(fmt.Errorf("upstream responses stream returned an invalid error event"))
 				return
 			}
-			sr.Stop(types.WithOpenAIError(*streamResponse.Error, http.StatusBadRequest))
+			sr.Stop(types.WithOpenAIError(*streamResponse.Error, responsesStreamOpenAIErrorStatus(streamResponse.Error)))
 			return
 		case "response.failed":
 			if streamResponse.Response == nil {
@@ -998,7 +1023,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				sr.Stop(fmt.Errorf("upstream responses stream returned an invalid failed event"))
 				return
 			}
-			sr.Stop(types.WithOpenAIError(*openAIError, http.StatusBadRequest))
+			sr.Stop(types.WithOpenAIError(*openAIError, responsesStreamOpenAIErrorStatus(openAIError)))
 			return
 		case "response.completed":
 			if streamResponse.Response != nil {
@@ -1042,6 +1067,16 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				}
 			}
 		}
+		if isResponsesStreamPreludeEvent(streamResponse.Type) {
+			if len(pendingPrelude) >= maxPendingResponsesStreamPreludeEvents {
+				flushResponsesStreamPrelude(c, &pendingPrelude)
+				sendResponsesStreamData(c, streamResponse, data)
+				return
+			}
+			pendingPrelude = append(pendingPrelude, pendingResponsesStreamEvent{response: streamResponse, data: data})
+			return
+		}
+		flushResponsesStreamPrelude(c, &pendingPrelude)
 		sendResponsesStreamData(c, streamResponse, data)
 	})
 
@@ -1080,6 +1115,32 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 
 	return usage, nil
+}
+
+func responsesStreamOpenAIErrorStatus(openAIError *types.OpenAIError) int {
+	if openAIError == nil {
+		return http.StatusBadGateway
+	}
+	errorType := strings.ToLower(strings.TrimSpace(openAIError.Type))
+	errorCode := strings.ToLower(strings.TrimSpace(fmt.Sprint(openAIError.Code)))
+	errorMessage := strings.ToLower(strings.TrimSpace(openAIError.Message))
+	switch {
+	case strings.Contains(errorType, "rate_limit") || strings.Contains(errorCode, "rate_limit"):
+		return http.StatusTooManyRequests
+	case strings.Contains(errorType, "authentication") || strings.Contains(errorCode, "invalid_api_key"):
+		return http.StatusUnauthorized
+	case strings.Contains(errorType, "permission") || strings.Contains(errorCode, "permission"):
+		return http.StatusForbidden
+	case strings.Contains(errorType, "invalid_request") ||
+		strings.Contains(errorType, "validation") ||
+		errorCode == "unknown_parameter" ||
+		errorCode == "invalid_type" ||
+		strings.Contains(errorMessage, "unknown parameter") ||
+		strings.Contains(errorMessage, "invalid type for"):
+		return http.StatusBadRequest
+	default:
+		return http.StatusBadGateway
+	}
 }
 
 func newBuiltInToolInfo(toolType string, tool map[string]any) *relaycommon.BuildInToolInfo {

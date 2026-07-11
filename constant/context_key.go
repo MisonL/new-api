@@ -30,6 +30,7 @@ const (
 	ContextKeyResponsesEncryptedContextRetry                ContextKey = "responses_encrypted_context_retry"
 	ContextKeyResponsesNamespaceHistoryRetry                ContextKey = "responses_namespace_history_retry"
 	ContextKeyResponsesArgumentsHistoryRetry                ContextKey = "responses_arguments_history_retry"
+	ContextKeyResponsesStreamPreludeRetrySafe               ContextKey = "responses_stream_prelude_retry_safe"
 	ContextKeyResponsesChatCompatIgnoredEncryptedInclude    ContextKey = "responses_chat_compat_ignored_encrypted_include"
 	ContextKeyResponsesChatCompatReasoningSummaryMapped     ContextKey = "responses_chat_compat_reasoning_summary_mapped"
 	ContextKeyResponsesCompactionOutput                     ContextKey = "responses_compaction_output"

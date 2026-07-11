@@ -23,6 +23,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const maxResponsesCompatibilityRetries = 8
+
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
@@ -159,36 +161,71 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 	if err != nil {
 		return nil, err
 	}
+	retryState := responsesCompatibilityRetryState{}
+	for {
+		usage, newAPIError := doOpenAIResponsesRequest(c, info, adaptor, requestBody, doOpenAIResponsesRequestOptions{
+			SkipStatusCodeMapping: true,
+		})
+		if newAPIError == nil {
+			return usage, nil
+		}
+		if c.Writer.Written() && !common.GetContextKeyBool(c, appconstant.ContextKeyResponsesStreamPreludeRetrySafe) {
+			resetResponsesStatusCode(c, newAPIError)
+			return nil, newAPIError
+		}
+		if retryState.attempts >= maxResponsesCompatibilityRetries {
+			resetResponsesStatusCode(c, newAPIError)
+			return nil, newAPIError
+		}
 
-	usage, newAPIError := doOpenAIResponsesRequest(c, info, adaptor, requestBody, doOpenAIResponsesRequestOptions{
-		SkipStatusCodeMapping: true,
-	})
-	if newAPIError == nil {
-		return usage, nil
+		retryBody, retryRequest, retried, retryErr := buildOpenAIResponsesCompatibilityRetry(c, info, adaptor, convertedRequest, newAPIError, &retryState)
+		if retryErr != nil {
+			return nil, retryErr
+		}
+		if !retried {
+			resetResponsesStatusCode(c, newAPIError)
+			return nil, newAPIError
+		}
+		requestBody = retryBody
+		convertedRequest = retryRequest
+		retryState.attempts++
+		if info.StreamStatus != nil {
+			info.StreamStatus = relaycommon.NewStreamStatus()
+		}
 	}
-
-	if shouldRetryResponsesWithoutEncryptedReasoning(info, newAPIError) {
-		return retryResponsesWithoutEncryptedReasoning(c, info, adaptor, convertedRequest, newAPIError)
-	}
-	if shouldRetryResponsesWithoutNamespaceHistory(info, newAPIError) {
-		return retryResponsesWithoutNamespaceHistory(c, info, adaptor, convertedRequest, newAPIError)
-	}
-	if shouldRetryResponsesWithObjectArguments(info, newAPIError) {
-		return retryResponsesWithObjectArguments(c, info, adaptor, convertedRequest, newAPIError)
-	}
-	resetResponsesStatusCode(c, newAPIError)
-	return nil, newAPIError
 }
 
-func retryResponsesWithoutEncryptedReasoning(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (*dto.Usage, *types.NewAPIError) {
+type responsesCompatibilityRetryState struct {
+	attempts                 int
+	argumentsObjectAttempted bool
+	argumentsStringAttempted bool
+}
+
+func buildOpenAIResponsesCompatibilityRetry(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError, retryState *responsesCompatibilityRetryState) (io.Reader, dto.OpenAIResponsesRequest, bool, *types.NewAPIError) {
+	if shouldRetryResponsesWithoutEncryptedReasoning(info, newAPIError) {
+		return buildResponsesWithoutEncryptedReasoningRetry(c, info, adaptor, convertedRequest, newAPIError)
+	}
+	if shouldRetryResponsesWithoutNamespaceHistory(info, newAPIError) {
+		return buildResponsesWithoutNamespaceHistoryRetry(c, info, adaptor, convertedRequest, newAPIError)
+	}
+	if shouldRetryResponsesWithObjectArguments(info, newAPIError) && !retryState.argumentsObjectAttempted {
+		retryState.argumentsObjectAttempted = true
+		return buildResponsesWithObjectArgumentsRetry(c, info, adaptor, convertedRequest, newAPIError)
+	}
+	if shouldRetryResponsesWithStringArguments(info, newAPIError) && !retryState.argumentsStringAttempted {
+		retryState.argumentsStringAttempted = true
+		return buildResponsesWithStringArgumentsRetry(c, info, adaptor, convertedRequest, newAPIError)
+	}
+	return nil, convertedRequest, false, nil
+}
+
+func buildResponsesWithoutEncryptedReasoningRetry(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (io.Reader, dto.OpenAIResponsesRequest, bool, *types.NewAPIError) {
 	strippedRequest, result, stripErr := relaycommon.StripEncryptedReasoningFromResponsesRequest(convertedRequest)
 	if stripErr != nil {
-		resetResponsesStatusCode(c, newAPIError)
-		return nil, newAPIError
+		return nil, convertedRequest, false, nil
 	}
 	if result.RemovedCount() == 0 {
-		resetResponsesStatusCode(c, newAPIError)
-		return nil, newAPIError
+		return nil, convertedRequest, false, nil
 	}
 	common.SetContextKey(c, appconstant.ContextKeyResponsesEncryptedContextRetry, true)
 	common.SysLog(fmt.Sprintf(
@@ -203,9 +240,9 @@ func retryResponsesWithoutEncryptedReasoning(c *gin.Context, info *relaycommon.R
 		ForceConvertedBody: true,
 	})
 	if retryBuildErr != nil {
-		return nil, retryBuildErr
+		return nil, convertedRequest, false, retryBuildErr
 	}
-	return doOpenAIResponsesRequest(c, info, adaptor, retryBody)
+	return retryBody, strippedRequest, true, nil
 }
 
 func shouldRetryResponsesWithoutNamespaceHistory(info *relaycommon.RelayInfo, err *types.NewAPIError) bool {
@@ -224,17 +261,15 @@ func shouldRetryResponsesWithoutNamespaceHistory(info *relaycommon.RelayInfo, er
 	return strings.Contains(errorMessage, "unknown parameter")
 }
 
-func retryResponsesWithoutNamespaceHistory(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (*dto.Usage, *types.NewAPIError) {
+func buildResponsesWithoutNamespaceHistoryRetry(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (io.Reader, dto.OpenAIResponsesRequest, bool, *types.NewAPIError) {
 	openAIError := newAPIError.ToOpenAIError()
 	itemIndex, ok := relaycommon.ResponsesNamespaceHistoryIndexFromError(openAIError.Param, openAIError.Message)
 	if !ok {
-		resetResponsesStatusCode(c, newAPIError)
-		return nil, newAPIError
+		return nil, convertedRequest, false, nil
 	}
 	strippedRequest, removed, stripErr := relaycommon.StripNamespaceFromResponsesInputHistory(convertedRequest, itemIndex)
 	if stripErr != nil || !removed {
-		resetResponsesStatusCode(c, newAPIError)
-		return nil, newAPIError
+		return nil, convertedRequest, false, nil
 	}
 	common.SetContextKey(c, appconstant.ContextKeyResponsesNamespaceHistoryRetry, true)
 	common.SysLog(fmt.Sprintf(
@@ -248,9 +283,9 @@ func retryResponsesWithoutNamespaceHistory(c *gin.Context, info *relaycommon.Rel
 		ForceConvertedBody: true,
 	})
 	if retryBuildErr != nil {
-		return nil, retryBuildErr
+		return nil, convertedRequest, false, retryBuildErr
 	}
-	return doOpenAIResponsesRequest(c, info, adaptor, retryBody)
+	return retryBody, strippedRequest, true, nil
 }
 
 func shouldRetryResponsesWithObjectArguments(info *relaycommon.RelayInfo, err *types.NewAPIError) bool {
@@ -261,25 +296,31 @@ func shouldRetryResponsesWithObjectArguments(info *relaycommon.RelayInfo, err *t
 	if _, ok := relaycommon.ResponsesArgumentsHistoryIndexFromError(openAIError.Param, openAIError.Message); !ok {
 		return false
 	}
-	errorCode := strings.ToLower(fmt.Sprintf("%v", openAIError.Code))
-	if errorCode == "invalid_type" {
-		return true
-	}
 	errorMessage := strings.ToLower(openAIError.Message)
 	return strings.Contains(errorMessage, "expected an object") && strings.Contains(errorMessage, "got a string")
 }
 
-func retryResponsesWithObjectArguments(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (*dto.Usage, *types.NewAPIError) {
+func shouldRetryResponsesWithStringArguments(info *relaycommon.RelayInfo, err *types.NewAPIError) bool {
+	if info == nil || err == nil || !relaycommon.IsOpenAICompatibleResponses(info) || err.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	openAIError := err.ToOpenAIError()
+	if _, ok := relaycommon.ResponsesArgumentsHistoryIndexFromError(openAIError.Param, openAIError.Message); !ok {
+		return false
+	}
+	errorMessage := strings.ToLower(openAIError.Message)
+	return strings.Contains(errorMessage, "expected a string") && strings.Contains(errorMessage, "got an object")
+}
+
+func buildResponsesWithObjectArgumentsRetry(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (io.Reader, dto.OpenAIResponsesRequest, bool, *types.NewAPIError) {
 	openAIError := newAPIError.ToOpenAIError()
 	itemIndex, ok := relaycommon.ResponsesArgumentsHistoryIndexFromError(openAIError.Param, openAIError.Message)
 	if !ok {
-		resetResponsesStatusCode(c, newAPIError)
-		return nil, newAPIError
+		return nil, convertedRequest, false, nil
 	}
 	normalizedRequest, result, normalizeErr := relaycommon.NormalizeStringObjectArgumentsFromResponsesInputHistory(convertedRequest, itemIndex)
 	if normalizeErr != nil || !result.TargetNormalized {
-		resetResponsesStatusCode(c, newAPIError)
-		return nil, newAPIError
+		return nil, convertedRequest, false, nil
 	}
 	common.SetContextKey(c, appconstant.ContextKeyResponsesArgumentsHistoryRetry, true)
 	common.SysLog(fmt.Sprintf(
@@ -294,9 +335,37 @@ func retryResponsesWithObjectArguments(c *gin.Context, info *relaycommon.RelayIn
 		ForceConvertedBody: true,
 	})
 	if retryBuildErr != nil {
-		return nil, retryBuildErr
+		return nil, convertedRequest, false, retryBuildErr
 	}
-	return doOpenAIResponsesRequest(c, info, adaptor, retryBody)
+	return retryBody, normalizedRequest, true, nil
+}
+
+func buildResponsesWithStringArgumentsRetry(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (io.Reader, dto.OpenAIResponsesRequest, bool, *types.NewAPIError) {
+	openAIError := newAPIError.ToOpenAIError()
+	itemIndex, ok := relaycommon.ResponsesArgumentsHistoryIndexFromError(openAIError.Param, openAIError.Message)
+	if !ok {
+		return nil, convertedRequest, false, nil
+	}
+	stringifiedRequest, result, stringifyErr := relaycommon.StringifyObjectArgumentsFromResponsesInputHistory(convertedRequest, itemIndex)
+	if stringifyErr != nil || !result.TargetNormalized {
+		return nil, convertedRequest, false, nil
+	}
+	common.SetContextKey(c, appconstant.ContextKeyResponsesArgumentsHistoryRetry, true)
+	common.SysLog(fmt.Sprintf(
+		"responses arguments history string retry: channel_id=%d model=%s input_index=%d stringified_items=%d original_error=%s",
+		info.ChannelId,
+		info.OriginModelName,
+		itemIndex,
+		result.NormalizedCount,
+		newAPIError.MaskSensitiveError(),
+	))
+	retryBody, _, retryBuildErr := buildOpenAIResponsesRequestBody(c, info, adaptor, &stringifiedRequest, false, buildResponsesRequestBodyOptions{
+		ForceConvertedBody: true,
+	})
+	if retryBuildErr != nil {
+		return nil, convertedRequest, false, retryBuildErr
+	}
+	return retryBody, stringifiedRequest, true, nil
 }
 
 type doOpenAIResponsesRequestOptions struct {

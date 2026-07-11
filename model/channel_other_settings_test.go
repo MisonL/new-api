@@ -1,6 +1,7 @@
 package model
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -100,6 +101,53 @@ func TestChannelOtherSettingsCapabilitySourcePriority(t *testing.T) {
 	settings.ResponsesCapabilityRegistry = nil
 	snapshot = settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI)
 	require.Equal(t, "explicit_settings", snapshot.Source)
+}
+
+func TestChannelOtherSettingsExplicitNamespaceToolsCapability(t *testing.T) {
+	unsupported := false
+	supported := true
+
+	tests := []struct {
+		name     string
+		settings dto.ChannelOtherSettings
+		disabled bool
+	}{
+		{name: "unknown capability"},
+		{
+			name: "unrelated observation",
+			settings: dto.ChannelOtherSettings{ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+				Observed: &dto.ResponsesCapabilityObservation{StatusCode: http.StatusRequestEntityTooLarge},
+			}},
+		},
+		{
+			name: "explicit unsupported registry",
+			settings: dto.ChannelOtherSettings{ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+				SupportsNamespaceTools: &unsupported,
+			}},
+			disabled: true,
+		},
+		{
+			name: "explicit supported registry",
+			settings: dto.ChannelOtherSettings{ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+				SupportsNamespaceTools: &supported,
+			}},
+		},
+		{
+			name:     "explicit generic profile",
+			settings: dto.ChannelOtherSettings{ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericOpenAI},
+			disabled: true,
+		},
+		{
+			name:     "explicit official profile",
+			settings: dto.ChannelOtherSettings{ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.disabled, tt.settings.ExplicitlyDisablesResponsesNamespaceTools())
+		})
+	}
 }
 
 func TestChannelOtherSettingsSub2APIHTTPLimitedNativeCompact(t *testing.T) {

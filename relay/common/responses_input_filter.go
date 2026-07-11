@@ -215,6 +215,14 @@ func responsesHistoryIndexFromText(pattern *regexp.Regexp, text string) (int, bo
 }
 
 func NormalizeStringObjectArgumentsFromResponsesInputHistory(request dto.OpenAIResponsesRequest, targetIndex int) (dto.OpenAIResponsesRequest, ResponsesArgumentsNormalizeResult, error) {
+	return transformResponsesInputHistoryArguments(request, targetIndex, "normalized", normalizeResponsesStringObjectArguments)
+}
+
+func StringifyObjectArgumentsFromResponsesInputHistory(request dto.OpenAIResponsesRequest, targetIndex int) (dto.OpenAIResponsesRequest, ResponsesArgumentsNormalizeResult, error) {
+	return transformResponsesInputHistoryArguments(request, targetIndex, "stringified", stringifyResponsesObjectArguments)
+}
+
+func transformResponsesInputHistoryArguments(request dto.OpenAIResponsesRequest, targetIndex int, action string, transform func(json.RawMessage) (json.RawMessage, bool)) (dto.OpenAIResponsesRequest, ResponsesArgumentsNormalizeResult, error) {
 	result := ResponsesArgumentsNormalizeResult{}
 	trimmedInput := bytes.TrimSpace(request.Input)
 	if targetIndex < 0 || len(trimmedInput) == 0 || trimmedInput[0] != '[' {
@@ -238,14 +246,14 @@ func NormalizeStringObjectArgumentsFromResponsesInputHistory(request dto.OpenAIR
 		if !exists {
 			continue
 		}
-		normalizedArguments, ok := normalizeResponsesStringObjectArguments(rawArguments)
+		transformedArguments, ok := transform(rawArguments)
 		if !ok {
 			continue
 		}
-		item["arguments"] = normalizedArguments
+		item["arguments"] = transformedArguments
 		encodedItem, err := basecommon.Marshal(item)
 		if err != nil {
-			return request, result, fmt.Errorf("marshal responses input item %d with normalized arguments: %w", index, err)
+			return request, result, fmt.Errorf("marshal responses input item %d with %s arguments: %w", index, action, err)
 		}
 		items[index] = encodedItem
 		result.NormalizedCount++
@@ -258,7 +266,7 @@ func NormalizeStringObjectArgumentsFromResponsesInputHistory(request dto.OpenAIR
 	}
 	encodedInput, err := basecommon.Marshal(items)
 	if err != nil {
-		return request, result, fmt.Errorf("marshal responses input with normalized arguments: %w", err)
+		return request, result, fmt.Errorf("marshal responses input with %s arguments: %w", action, err)
 	}
 	request.Input = encodedInput
 	return request, result, nil
@@ -288,4 +296,24 @@ func normalizeResponsesStringObjectArguments(raw json.RawMessage) (json.RawMessa
 		return nil, false
 	}
 	return encoded, true
+}
+
+func stringifyResponsesObjectArguments(raw json.RawMessage) (json.RawMessage, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, false
+	}
+	var object map[string]json.RawMessage
+	if err := basecommon.Unmarshal(trimmed, &object); err != nil {
+		return nil, false
+	}
+	encodedObject, err := basecommon.Marshal(object)
+	if err != nil {
+		return nil, false
+	}
+	encodedString, err := basecommon.Marshal(string(encodedObject))
+	if err != nil {
+		return nil, false
+	}
+	return encodedString, true
 }

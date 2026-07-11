@@ -569,6 +569,82 @@ func TestOaiResponsesStreamHandlerPreservesFailedResponseError(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), "Unknown parameter")
 }
 
+func TestOaiResponsesStreamHandlerMapsErrorEventStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "rate limit error",
+			body:       `data: {"type":"response.error","error":{"message":"rate limited","type":"rate_limit_error","code":"rate_limit_exceeded"}}`,
+			wantStatus: http.StatusTooManyRequests,
+		},
+		{
+			name:       "failed server response",
+			body:       `data: {"type":"response.failed","response":{"error":{"message":"upstream unavailable","type":"server_error","code":"server_error"}}}`,
+			wantStatus: http.StatusBadGateway,
+		},
+		{
+			name:       "authentication error",
+			body:       `data: {"type":"response.error","error":{"message":"invalid credentials","type":"authentication_error","code":"invalid_api_key"}}`,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "permission error",
+			body:       `data: {"type":"response.error","error":{"message":"access denied","type":"permission_error","code":"permission_denied"}}`,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "message only unknown parameter",
+			body:       `data: {"type":"response.error","error":{"message":"[ObjectParam] [input[311].namespace] [unknown_parameter] Unknown parameter: 'input[311].namespace'."}}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "message only invalid type",
+			body:       `data: {"type":"response.error","error":{"message":"Invalid type for 'input[71].arguments': expected a string, but got an object instead."}}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		variants := []struct {
+			name string
+			body string
+		}{{name: "standard", body: tt.body}}
+		if strings.Contains(tt.body, `"type":"response.error"`) {
+			variants = append(variants, struct {
+				name string
+				body string
+			}{name: "bare error event", body: strings.Replace(tt.body, `"type":"response.error"`, `"type":"error"`, 1)})
+		}
+		for _, variant := range variants {
+			t.Run(tt.name+"/"+variant.name, func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+				resp := &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader(variant.body + "\n\n")),
+				}
+				info := &relaycommon.RelayInfo{
+					ChannelMeta:  &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.6"},
+					StreamStatus: relaycommon.NewStreamStatus(),
+					DisablePing:  true,
+				}
+
+				usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+				require.Nil(t, usage)
+				require.NotNil(t, err)
+				require.Equal(t, tt.wantStatus, err.StatusCode)
+				require.Empty(t, recorder.Body.String())
+			})
+		}
+	}
+}
+
 func TestOaiResponsesToChatHandlerCountsBuiltInToolsFromResponse(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

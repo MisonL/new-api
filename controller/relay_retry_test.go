@@ -1384,16 +1384,74 @@ func TestShouldNotSkipNativeResponsesChannelForNamespaceTools(t *testing.T) {
 			Tools: common.RawMessage(`[{"type":"namespace","name":"codex_app","tools":[{"type":"function","name":"read_thread","parameters":{"type":"object"}}]}]`),
 		},
 	}
-	unsupported := &model.Channel{Id: 99, Type: constant.ChannelTypeOpenAI}
+	unknown := &model.Channel{Id: 99, Type: constant.ChannelTypeOpenAI}
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, unknown)
+
+	require.NoError(t, err)
+	require.False(t, skip)
+	require.Nil(t, info.LastError)
+}
+
+func TestShouldSkipNativeResponsesChannelWhenNamespaceToolsExplicitlyUnsupported(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.6",
+			Input: common.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]`),
+			Tools: common.RawMessage(`[{"type":"namespace","name":"codex_app","tools":[{"type":"function","name":"read_thread","parameters":{"type":"object"}}]}]`),
+		},
+	}
+	supportsNamespaceTools := false
+	unsupported := &model.Channel{Id: 150, Type: constant.ChannelTypeOpenAI}
 	unsupported.SetOtherSettings(dto.ChannelOtherSettings{
-		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericOpenAI,
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsNamespaceTools: &supportsNamespaceTools,
+		},
 	})
 
 	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, unsupported)
 
 	require.NoError(t, err)
-	require.False(t, skip)
-	require.Nil(t, info.LastError)
+	require.True(t, skip)
+	require.NotNil(t, info.LastError)
+	require.True(t, errors.Is(info.LastError, errResponsesNamespaceToolsUnsupported))
+}
+
+func TestGetChannelSkipsExplicitlyUnsupportedNativeNamespaceChannel(t *testing.T) {
+	db := setupChannelControllerTestDB(t)
+	unsupported, supported := seedRemoteCompactionRouteChannels(t, db)
+
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{}
+	settings.PassThroughRequestEnabled = false
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, unsupported, "gpt-5.5"))
+	info := namespaceToolRelayInfo(false)
+
+	channel, err := getChannel(ctx, info, &service.RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-5.5",
+		Retry:      common.GetPointer(0),
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, supported.Id, channel.Id)
+	require.Equal(t, []string{"168"}, ctx.GetStringSlice("use_channel"))
+	require.NotNil(t, info.ChannelMeta)
+	require.Equal(t, supported.Id, info.ChannelMeta.ChannelId)
 }
 
 func TestGetChannelSkipsResponsesViaChatForUnsupportedNamespaceTool(t *testing.T) {

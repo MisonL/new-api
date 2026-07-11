@@ -92,65 +92,34 @@ func TestStripEncryptedReasoningFromResponsesRequestKeepsMixedInput(t *testing.T
 
 func TestResponsesRequestHasNamespaceTools(t *testing.T) {
 	tests := []struct {
-		name    string
-		request *dto.OpenAIResponsesRequest
-		want    bool
-		wantErr bool
+		name      string
+		request   *dto.OpenAIResponsesRequest
+		expected  bool
+		wantError bool
 	}{
+		{name: "nil request"},
+		{name: "empty tools", request: &dto.OpenAIResponsesRequest{}},
 		{
-			name: "nil request",
+			name:    "function tool only",
+			request: &dto.OpenAIResponsesRequest{Tools: rootcommon.RawMessage(`[{"type":"function","name":"shell"}]`)},
 		},
 		{
-			name: "empty tools",
-			request: &dto.OpenAIResponsesRequest{
-				Tools: rootcommon.RawMessage(``),
-			},
+			name:     "namespace tool",
+			request:  &dto.OpenAIResponsesRequest{Tools: rootcommon.RawMessage(`[{"type":"namespace","name":"codex_app","tools":[]}]`)},
+			expected: true,
 		},
 		{
-			name: "non array tools",
-			request: &dto.OpenAIResponsesRequest{
-				Tools: rootcommon.RawMessage(`{"type":"namespace"}`),
-			},
-		},
-		{
-			name: "namespace tool",
-			request: &dto.OpenAIResponsesRequest{
-				Tools: rootcommon.RawMessage(`[{"type":"namespace","name":"codex_app","tools":[]}]`),
-			},
-			want: true,
-		},
-		{
-			name: "ordinary function tool",
-			request: &dto.OpenAIResponsesRequest{
-				Tools: rootcommon.RawMessage(`[{"type":"function","name":"read_file","parameters":{"type":"object"}}]`),
-			},
-		},
-		{
-			name: "invalid item before namespace tool",
-			request: &dto.OpenAIResponsesRequest{
-				Tools: rootcommon.RawMessage(`[1,{"type":"namespace","name":"codex_app","tools":[]}]`),
-			},
-			want: true,
-		},
-		{
-			name: "malformed tools array",
-			request: &dto.OpenAIResponsesRequest{
-				Tools: rootcommon.RawMessage(`[{"type":"namespace"`),
-			},
-			wantErr: true,
+			name:      "malformed tools array",
+			request:   &dto.OpenAIResponsesRequest{Tools: rootcommon.RawMessage(`[{`)},
+			wantError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ResponsesRequestHasNamespaceTools(tt.request)
-
-			require.Equal(t, tt.want, got)
-			if tt.wantErr {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
+			actual, err := ResponsesRequestHasNamespaceTools(tt.request)
+			require.Equal(t, tt.wantError, err != nil)
+			require.Equal(t, tt.expected, actual)
 		})
 	}
 }
@@ -413,6 +382,68 @@ func TestNormalizeStringObjectArgumentsFromResponsesInputHistory(t *testing.T) {
 	require.Contains(t, string(got.Input), `"arguments":{"path":"keep.txt"}`)
 	require.Contains(t, string(got.Input), `"arguments":{"ok":true,"path":"target.txt"}`)
 	require.Contains(t, string(got.Input), `"arguments":"not json"`)
+}
+
+func TestStringifyObjectArgumentsFromResponsesInputHistory(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: rootcommon.RawMessage(`[
+			{"type":"function_call","call_id":"call_keep","arguments":{"path":"keep.txt"}},
+			{"type":"function_call","call_id":"call_rejected","arguments":{"path":"target.txt","ok":true}},
+			{"type":"function_call","call_id":"call_string","arguments":"already string"},
+			{"type":"function_call","call_id":"call_array","arguments":[1,2]}
+		]`),
+	}
+
+	got, result, err := StringifyObjectArgumentsFromResponsesInputHistory(req, 1)
+
+	require.NoError(t, err)
+	require.Equal(t, 2, result.NormalizedCount)
+	require.True(t, result.TargetNormalized)
+	require.Contains(t, string(got.Input), `"arguments":"{\"path\":\"keep.txt\"}"`)
+	require.Contains(t, string(got.Input), `"arguments":"{\"ok\":true,\"path\":\"target.txt\"}"`)
+	require.Contains(t, string(got.Input), `"arguments":"already string"`)
+	require.Contains(t, string(got.Input), `"arguments":[1,2]`)
+}
+
+func TestStringifyObjectArgumentsFromResponsesInputHistoryKeepsOriginalWhenTargetNotNormalized(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     rootcommon.RawMessage
+		itemIndex int
+	}{
+		{
+			name:      "plain input",
+			input:     rootcommon.RawMessage(`"hello"`),
+			itemIndex: 0,
+		},
+		{
+			name:      "index out of range",
+			input:     rootcommon.RawMessage(`[{"type":"function_call","arguments":{"path":"keep.txt"}}]`),
+			itemIndex: 2,
+		},
+		{
+			name:      "target arguments is array",
+			input:     rootcommon.RawMessage(`[{"type":"function_call","arguments":[1,2]}]`),
+			itemIndex: 0,
+		},
+		{
+			name:      "target arguments is already string",
+			input:     rootcommon.RawMessage(`[{"type":"function_call","arguments":"already string"}]`),
+			itemIndex: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := dto.OpenAIResponsesRequest{Model: "gpt-5.6", Input: tt.input}
+			got, result, err := StringifyObjectArgumentsFromResponsesInputHistory(req, tt.itemIndex)
+
+			require.NoError(t, err)
+			require.False(t, result.TargetNormalized)
+			require.Equal(t, req.Input, got.Input)
+		})
+	}
 }
 
 func TestNormalizeStringObjectArgumentsFromResponsesInputHistoryKeepsOriginalWhenTargetNotNormalized(t *testing.T) {

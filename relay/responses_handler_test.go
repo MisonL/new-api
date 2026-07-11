@@ -3,15 +3,18 @@ package relay
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	openairelay "github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
@@ -26,6 +29,14 @@ import (
 type retryEncryptedContextAdaptor struct {
 	responses     []*http.Response
 	requestBodies [][]byte
+}
+
+type streamingCompatibilityRetryAdaptor struct {
+	retryEncryptedContextAdaptor
+}
+
+func (m *streamingCompatibilityRetryAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (any, *types.NewAPIError) {
+	return openairelay.OaiResponsesStreamHandler(c, info, resp)
 }
 
 func (m *retryEncryptedContextAdaptor) Init(info *relaycommon.RelayInfo) {}
@@ -106,7 +117,12 @@ func encryptedContextRetryResponse(status int) *http.Response {
 }
 
 func namespaceHistoryRetryResponse() *http.Response {
-	body := `{"error":{"message":"Unknown parameter: 'input[1].namespace'.","type":"invalid_request_error","param":"input[1].namespace","code":"unknown_parameter"}}`
+	return namespaceHistoryRetryResponseAt(1)
+}
+
+func namespaceHistoryRetryResponseAt(index int) *http.Response {
+	param := fmt.Sprintf("input[%d].namespace", index)
+	body := fmt.Sprintf(`{"error":{"message":"Unknown parameter: '%s'.","type":"invalid_request_error","param":"%s","code":"unknown_parameter"}}`, param, param)
 	return &http.Response{
 		StatusCode: http.StatusBadRequest,
 		Body:       io.NopCloser(bytes.NewBufferString(body)),
@@ -132,6 +148,15 @@ func argumentsHistoryRetryResponse() *http.Response {
 	}
 }
 
+func argumentsHistoryStringRetryResponse() *http.Response {
+	body := `{"error":{"message":"Invalid type for 'input[1].arguments': expected a string, but got an object instead.","type":"invalid_request_error","param":"input[1].arguments","code":"invalid_type"}}`
+	return &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+}
+
 func argumentsHistoryRetryResponseWithMessageOnly() *http.Response {
 	body := `{"error":{"message":"Invalid type for 'input[1].arguments': expected an object, but got a string instead.","type":"upstream_error","param":"","code":null}}`
 	return &http.Response{
@@ -146,6 +171,47 @@ func successResponsesHTTPResponse() *http.Response {
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(bytes.NewBufferString(`{"id":"resp_ok","object":"response"}`)),
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+}
+
+func namespaceHistoryErrorAfterStreamPrelude() *http.Response {
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_partial","object":"response"}}`,
+		`data: {"type":"response.in_progress","response":{"id":"resp_partial","object":"response"}}`,
+		`data: {"type":"response.error","error":{"message":"Unknown parameter: 'input[0].namespace'.","type":"invalid_request_error","param":"input[0].namespace","code":"unknown_parameter"}}`,
+		``,
+	}, "\n")
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+	}
+}
+
+func namespaceHistoryErrorAfterStreamOutput() *http.Response {
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_partial","object":"response"}}`,
+		`data: {"type":"response.output_text.delta","delta":"partial output"}`,
+		`data: {"type":"response.error","error":{"message":"Unknown parameter: 'input[0].namespace'.","type":"invalid_request_error","param":"input[0].namespace","code":"unknown_parameter"}}`,
+		``,
+	}, "\n")
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+	}
+}
+
+func successStreamingResponsesHTTPResponse() *http.Response {
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_ok","object":"response"}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_ok","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		``,
+	}, "\n")
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}
 }
 
@@ -243,6 +309,197 @@ func TestExecuteOpenAIResponsesRequestRetriesRejectedNamespaceHistory(t *testing
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesNamespaceHistoryRetry))
 }
 
+func TestExecuteOpenAIResponsesRequestRetriesEachRejectedNamespaceHistoryItem(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   179,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			namespaceHistoryRetryResponse(),
+			namespaceHistoryRetryResponseAt(0),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: common.RawMessage(`[
+			{"type":"custom_tool_call","call_id":"call_keep","name":"read_thread","namespace":"first_namespace","input":"{}"},
+			{"type":"custom_tool_call","call_id":"call_rejected","name":"read_thread","namespace":"second_namespace","input":"{}"}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 3)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"namespace":"first_namespace"`)
+	require.NotContains(t, string(adaptor.requestBodies[1]), `"namespace":"second_namespace"`)
+	require.NotContains(t, string(adaptor.requestBodies[2]), `"namespace"`)
+}
+
+func TestExecuteOpenAIResponsesRequestLimitsCompatibilityRetries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	responses := make([]*http.Response, maxResponsesCompatibilityRetries+1)
+	inputItems := make([]string, maxResponsesCompatibilityRetries+1)
+	for index := range responses {
+		responses[index] = namespaceHistoryRetryResponseAt(index)
+		inputItems[index] = fmt.Sprintf(`{"type":"custom_tool_call","call_id":"call_%d","namespace":"namespace_%d","input":"{}"}`, index, index)
+	}
+	adaptor := &retryEncryptedContextAdaptor{responses: responses}
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   178,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: common.RawMessage("[" + strings.Join(inputItems, ",") + "]"),
+	}, false)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Len(t, adaptor.requestBodies, maxResponsesCompatibilityRetries+1)
+	require.Contains(t, err.Error(), fmt.Sprintf("input[%d].namespace", maxResponsesCompatibilityRetries))
+}
+
+func TestExecuteOpenAIResponsesRequestDoesNotRetryAfterStreamingOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   179,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+	adaptor := &streamingCompatibilityRetryAdaptor{
+		retryEncryptedContextAdaptor: retryEncryptedContextAdaptor{
+			responses: []*http.Response{
+				namespaceHistoryErrorAfterStreamOutput(),
+				successResponsesHTTPResponse(),
+			},
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: common.RawMessage(`[
+			{"type":"custom_tool_call","call_id":"call_rejected","name":"read_thread","namespace":"rejected_namespace","input":"{}"}
+		]`),
+	}, false)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Len(t, adaptor.requestBodies, 1)
+	require.Contains(t, recorder.Body.String(), "response.created")
+	require.Contains(t, recorder.Body.String(), "partial output")
+	require.NotContains(t, recorder.Body.String(), "Unknown parameter")
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesAfterOnlyStreamingPrelude(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   150,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+	adaptor := &streamingCompatibilityRetryAdaptor{
+		retryEncryptedContextAdaptor: retryEncryptedContextAdaptor{
+			responses: []*http.Response{
+				namespaceHistoryErrorAfterStreamPrelude(),
+				successStreamingResponsesHTTPResponse(),
+			},
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: common.RawMessage(`[
+			{"type":"custom_tool_call","call_id":"call_rejected","name":"read_thread","namespace":"rejected_namespace","input":"{}"}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 2)
+	require.NotContains(t, recorder.Body.String(), "resp_partial")
+	require.Contains(t, recorder.Body.String(), "resp_ok")
+	require.NotContains(t, recorder.Body.String(), "Unknown parameter")
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesAfterPingOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	_, writeErr := c.Writer.Write([]byte(": ping\n\n"))
+	require.NoError(t, writeErr)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   150,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+	adaptor := &streamingCompatibilityRetryAdaptor{
+		retryEncryptedContextAdaptor: retryEncryptedContextAdaptor{
+			responses: []*http.Response{
+				namespaceHistoryErrorAfterStreamPrelude(),
+				successStreamingResponsesHTTPResponse(),
+			},
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: common.RawMessage(`[
+			{"type":"custom_tool_call","call_id":"call_rejected","name":"read_thread","namespace":"rejected_namespace","input":"{}"}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 2)
+	require.Contains(t, recorder.Body.String(), ": ping")
+	require.NotContains(t, recorder.Body.String(), "resp_partial")
+	require.Contains(t, recorder.Body.String(), "resp_ok")
+}
+
 func TestExecuteOpenAIResponsesRequestRetriesRejectedNamespaceHistoryFromMessageOnlyError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -318,6 +575,80 @@ func TestExecuteOpenAIResponsesRequestRetriesRejectedStringArgumentsHistory(t *t
 	require.Contains(t, string(adaptor.requestBodies[1]), `"arguments":{"path":"keep.txt"}`)
 	require.Contains(t, string(adaptor.requestBodies[1]), `"arguments":{"ok":true,"path":"target.txt"}`)
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesArgumentsHistoryRetry))
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesArgumentsInBothDirections(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   178,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			argumentsHistoryRetryResponse(),
+			argumentsHistoryStringRetryResponse(),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: common.RawMessage(`[
+			{"type":"function_call","call_id":"call_keep","name":"read_file","arguments":"{\"path\":\"keep.txt\"}"},
+			{"type":"function_call","call_id":"call_rejected","name":"edit_file","arguments":"{\"path\":\"target.txt\",\"ok\":true}"}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 3)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"arguments":"{\"path\":\"keep.txt\"}"`)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"arguments":{"path":"keep.txt"}`)
+	require.Contains(t, string(adaptor.requestBodies[2]), `"arguments":"{\"path\":\"keep.txt\"}"`)
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesArgumentsInReverseDirection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   178,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			argumentsHistoryStringRetryResponse(),
+			argumentsHistoryRetryResponse(),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: common.RawMessage(`[
+			{"type":"function_call","call_id":"call_keep","name":"read_file","arguments":{"path":"keep.txt"}},
+			{"type":"function_call","call_id":"call_rejected","name":"edit_file","arguments":{"path":"target.txt","ok":true}}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 3)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"arguments":{"path":"keep.txt"}`)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"arguments":"{\"path\":\"keep.txt\"}"`)
+	require.Contains(t, string(adaptor.requestBodies[2]), `"arguments":{"path":"keep.txt"}`)
 }
 
 func TestExecuteOpenAIResponsesRequestRetriesRejectedStringArgumentsHistoryFromMessageOnlyError(t *testing.T) {

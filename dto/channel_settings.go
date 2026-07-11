@@ -238,6 +238,18 @@ func (s *ChannelOtherSettings) responsesCapabilityRegistry() *ResponsesChannelCa
 	return s.ResponsesCapabilityRegistry
 }
 
+func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesNamespaceTools() bool {
+	if s == nil {
+		return false
+	}
+	registry := s.responsesCapabilityRegistry()
+	if registry != nil && registry.SupportsNamespaceTools != nil {
+		return !*registry.SupportsNamespaceTools
+	}
+	profile := s.NormalizedResponsesUpstreamProfile()
+	return profile != "" && !defaultSupportsNamespaceToolsCapability(profile)
+}
+
 func (s *ChannelOtherSettings) explicitResponsesCapabilityConfigured() bool {
 	return s != nil && (s.ResponsesCompactMode != "" || s.ResponsesUpstreamProfile != "")
 }
