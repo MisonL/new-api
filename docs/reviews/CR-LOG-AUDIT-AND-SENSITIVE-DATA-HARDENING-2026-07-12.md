@@ -50,6 +50,18 @@ GET /api/channel/search?group=REDACTED&keyword=REDACTED&p=REDACTED
 
 ## 边界
 
-- 本次代码修复只影响后续日志，不会自动改写既有日志文件。
-- 正式服务尚未部署本次敏感日志加固代码，正式服务当前仍运行提交 `56db36536a493af242a95fc80d476b89c79952b9`。
-- 渠道 `205` 的禁用属于正式配置变更，未在本次代码修复中静默执行。
+- `previous_response_id` 工具回填测试因上游响应使用 `store=false` 而返回“找不到工具调用”；显式携带完整工具历史的真实请求已成功返回 `MULTI_TURN_OK`。
+- 对象类型 `arguments` 的真实请求未出现协议 400，而是在渠道连续 502 后耗尽重试。该结果证明类型兼容层已执行，但不能把上游可用性表述为已通过。
+- `gpt-5.6-sol` 仍存在少量上游 502、524、并发限制和流中断，属于渠道可用性问题，不属于本次日志加固或 Responses 类型转换回归。
+
+## 正式部署与历史清理
+
+- 正式部署时间：2026-07-12 17:11，时区为 Asia/Shanghai。
+- 正式镜像：`new-api-local:prod-20260712-log-redaction-884791965`。
+- 正式构建提交：`884791965535bc55e634eba833279e22eb701d1c`。
+- 升级前数据库备份：`backups/new-api-before-compact-control-plane-v2-20260712T091055Z.sql`。
+- 备份 SHA-256：`a51eed729a57deb4c75b5eb932e34313bd8d0d1c6eee6c51a32235e377c95eb8`。
+- 正式升级脚本完成构建信息、状态端点和近期错误扫描，升级结果为 `deployed`。
+- 渠道 `205` 在正式重启前后持续 502、524 且成功为 0，已通过管理 API 手动禁用；数据库状态为 `2`，启用能力数为 0。
+- 历史日志中 106 行长 `sk-` 值已替换为固定占位符，557 行完整 Responses JSON 已替换为审计标记。
+- 清理后重新扫描：长 `sk-` 值 0 行、完整 Responses JSON 0 行、Bearer token 0 行、access token 0 行、session cookie 0 行、PostgreSQL DSN 0 行、Redis DSN 0 行。
