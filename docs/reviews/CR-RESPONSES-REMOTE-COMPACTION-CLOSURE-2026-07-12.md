@@ -32,3 +32,15 @@ git diff --check
 ```
 
 验证覆盖显式空最终快照、缺失 completed、completed 缺少 response、混合输出、非法 `encrypted_content`、重复 compaction 和缓存上限。真实上游对 malformed 流的触发仍依赖上游返回对应畸形事件，因此本轮以离线语义测试和现有隔离环境成功请求共同作为证据，不将上游不可用误报为已覆盖。
+
+## 2026-07-13 隔离环境复测
+
+在提交 `82aa179003b88861ff7970ff5165d54e5a548b9d` 的 `3001` 容器上，使用安全 token 对渠道 180 连续发送 3 次相同 remote v2 请求，另用完整 `x-codex-turn-metadata` 请求头复测 1 次。4 次均到达渠道并返回：
+
+```text
+HTTP 502
+error_type=bad_response_body
+message=provider returned malformed remote compaction output: expected exactly one compaction output, got 0
+```
+
+容器日志记录了渠道 180、请求路径 `/v1/responses`、`responses_compact_mode=remote_v2` 和同一错误；没有出现本地 503、兼容重试循环或伪成功计费。该结果确认当前上游持续返回空 compaction 输出，属于本地已正确暴露的上游畸形响应，不能表述为真实成功链路已恢复。
