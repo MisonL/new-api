@@ -22,6 +22,8 @@ import (
 
 const responsesFallbackTextMaxBytes = 1 << 20
 
+const maxRemoteCompactionStreamBytes = 8 << 20
+
 const (
 	responsesCompletedImageGenerationCallsKey = "responses_completed_image_generation_calls"
 	responsesCompletedWebSearchCallCountKey   = "responses_completed_web_search_call_count"
@@ -756,6 +758,32 @@ func isResponsesCompactionOutputType(itemType string) bool {
 	}
 }
 
+func isRemoteResponsesCompactionRequest(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	request, ok := info.Request.(*dto.OpenAIResponsesRequest)
+	return ok && request.HasCompactionTrigger()
+}
+
+func validateRemoteResponsesCompactionOutput(output []dto.ResponsesOutput) error {
+	compactionCount := 0
+	for _, item := range output {
+		if !isResponsesCompactionOutputType(item.Type) {
+			continue
+		}
+		compactionCount++
+		var encryptedContent string
+		if err := common.Unmarshal(item.EncryptedContent, &encryptedContent); err != nil || strings.TrimSpace(encryptedContent) == "" {
+			return errors.New("provider returned malformed remote compaction output: compaction output has no encrypted content")
+		}
+	}
+	if compactionCount != 1 {
+		return fmt.Errorf("provider returned malformed remote compaction output: expected exactly one compaction output, got %d", compactionCount)
+	}
+	return nil
+}
+
 func markResponsesCompactionOutputContext(c *gin.Context, item *dto.ResponsesOutput) bool {
 	if item == nil || !isResponsesCompactionOutputType(item.Type) {
 		return false
@@ -779,6 +807,11 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	}
+	if isRemoteResponsesCompactionRequest(info) {
+		if err := validateRemoteResponsesCompactionOutput(responsesResponse.Output); err != nil {
+			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
 	}
 
 	if info != nil && info.ChannelMeta != nil && !common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry) {
@@ -963,6 +996,30 @@ type pendingResponsesStreamEvent struct {
 	data     string
 }
 
+type remoteCompactionStreamState struct {
+	events      []pendingResponsesStreamEvent
+	outputItems []dto.ResponsesOutput
+	bytes       int
+}
+
+func (s *remoteCompactionStreamState) observe(response dto.ResponsesStreamResponse) {
+	if response.Type == dto.ResponsesOutputTypeItemDone && response.Item != nil {
+		s.outputItems = append(s.outputItems, *response.Item)
+	}
+	if response.Type == "response.completed" && response.Response != nil && response.Response.Output != nil {
+		s.outputItems = append(s.outputItems[:0], response.Response.Output...)
+	}
+}
+
+func (s *remoteCompactionStreamState) appendEvent(response dto.ResponsesStreamResponse, data string) error {
+	s.bytes += len(data)
+	if s.bytes > maxRemoteCompactionStreamBytes {
+		return fmt.Errorf("remote compaction stream exceeded %d bytes before validation", maxRemoteCompactionStreamBytes)
+	}
+	s.events = append(s.events, pendingResponsesStreamEvent{response: response, data: data})
+	return nil
+}
+
 const maxPendingResponsesStreamPreludeEvents = 8
 
 func isResponsesStreamPreludeEvent(eventType string) bool {
@@ -995,6 +1052,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var fallbackTextTruncated bool
 	hasCompletedUsage := false
 	pendingPrelude := make([]pendingResponsesStreamEvent, 0, 3)
+	remoteCompaction := isRemoteResponsesCompactionRequest(info)
+	remoteState := remoteCompactionStreamState{}
+	var streamFatalError *types.NewAPIError
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -1005,25 +1065,36 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
+		if remoteCompaction {
+			remoteState.observe(streamResponse)
+		}
 		switch streamResponse.Type {
 		case "response.error", "error":
 			if streamResponse.Error == nil || strings.TrimSpace(streamResponse.Error.Message) == "" {
-				sr.Stop(fmt.Errorf("upstream responses stream returned an invalid error event"))
+				err := fmt.Errorf("upstream responses stream returned an invalid error event")
+				streamFatalError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
+				sr.Stop(err)
 				return
 			}
-			sr.Stop(types.WithOpenAIError(*streamResponse.Error, responsesStreamOpenAIErrorStatus(streamResponse.Error)))
+			streamFatalError = types.WithOpenAIError(*streamResponse.Error, responsesStreamOpenAIErrorStatus(streamResponse.Error))
+			sr.Stop(streamFatalError)
 			return
 		case "response.failed":
 			if streamResponse.Response == nil {
-				sr.Stop(fmt.Errorf("upstream responses stream returned an invalid failed event"))
+				err := fmt.Errorf("upstream responses stream returned an invalid failed event")
+				streamFatalError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
+				sr.Stop(err)
 				return
 			}
 			openAIError := streamResponse.Response.GetOpenAIError()
 			if openAIError == nil || strings.TrimSpace(openAIError.Message) == "" {
-				sr.Stop(fmt.Errorf("upstream responses stream returned an invalid failed event"))
+				err := fmt.Errorf("upstream responses stream returned an invalid failed event")
+				streamFatalError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
+				sr.Stop(err)
 				return
 			}
-			sr.Stop(types.WithOpenAIError(*openAIError, responsesStreamOpenAIErrorStatus(openAIError)))
+			streamFatalError = types.WithOpenAIError(*openAIError, responsesStreamOpenAIErrorStatus(openAIError))
+			sr.Stop(streamFatalError)
 			return
 		case "response.completed":
 			if streamResponse.Response != nil {
@@ -1049,6 +1120,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					}
 				}
 			}
+			if remoteCompaction {
+				if err := validateRemoteResponsesCompactionOutput(remoteState.outputItems); err != nil {
+					streamFatalError = types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+					sr.Stop(err)
+					return
+				}
+			}
 			sr.Done()
 		case "response.output_text.delta":
 			// 处理输出文本
@@ -1067,6 +1145,19 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				}
 			}
 		}
+		if remoteCompaction {
+			if err := remoteState.appendEvent(streamResponse, data); err != nil {
+				streamFatalError = types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+				sr.Stop(err)
+				return
+			}
+			if streamResponse.Type == "response.completed" {
+				for _, event := range remoteState.events {
+					sendResponsesStreamData(c, event.response, event.data)
+				}
+			}
+			return
+		}
 		if isResponsesStreamPreludeEvent(streamResponse.Type) {
 			if len(pendingPrelude) >= maxPendingResponsesStreamPreludeEvents {
 				flushResponsesStreamPrelude(c, &pendingPrelude)
@@ -1079,6 +1170,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		flushResponsesStreamPrelude(c, &pendingPrelude)
 		sendResponsesStreamData(c, streamResponse, data)
 	})
+	if streamFatalError != nil {
+		return nil, streamFatalError
+	}
 
 	if info != nil && info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonHandlerStop {
 		var upstreamErr *types.NewAPIError

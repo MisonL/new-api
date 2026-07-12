@@ -179,6 +179,7 @@ func namespaceHistoryErrorAfterStreamPrelude() *http.Response {
 		`data: {"type":"response.created","response":{"id":"resp_partial","object":"response"}}`,
 		`data: {"type":"response.in_progress","response":{"id":"resp_partial","object":"response"}}`,
 		`data: {"type":"response.error","error":{"message":"Unknown parameter: 'input[0].namespace'.","type":"invalid_request_error","param":"input[0].namespace","code":"unknown_parameter"}}`,
+		`data: [DONE]`,
 		``,
 	}, "\n")
 	return &http.Response{
