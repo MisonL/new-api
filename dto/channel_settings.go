@@ -64,6 +64,13 @@ type ResponsesCapabilityObservation struct {
 	Reason     string `json:"reason,omitempty"`
 }
 
+type ResponsesArgumentsFormat string
+
+const (
+	ResponsesArgumentsFormatObject ResponsesArgumentsFormat = "object"
+	ResponsesArgumentsFormatString ResponsesArgumentsFormat = "string"
+)
+
 type ResponsesChannelCapabilityRegistry struct {
 	Source                            string                          `json:"source,omitempty"`
 	Observed                          *ResponsesCapabilityObservation `json:"observed,omitempty"`
@@ -74,6 +81,7 @@ type ResponsesChannelCapabilityRegistry struct {
 	SupportsRestPreviousResponseID    *bool                           `json:"supports_rest_previous_response_id,omitempty"`
 	SupportsCompactionItemPassthrough *bool                           `json:"supports_compaction_item_passthrough,omitempty"`
 	SupportsNamespaceTools            *bool                           `json:"supports_namespace_tools,omitempty"`
+	ArgumentsFormat                   ResponsesArgumentsFormat        `json:"arguments_format,omitempty"`
 }
 
 type ResponsesChannelCapabilitySnapshot struct {
@@ -248,6 +256,19 @@ func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesNamespaceTools() bool 
 	}
 	profile := s.NormalizedResponsesUpstreamProfile()
 	return profile != "" && !defaultSupportsNamespaceToolsCapability(profile)
+}
+
+func (s *ChannelOtherSettings) ExplicitResponsesArgumentsFormat() ResponsesArgumentsFormat {
+	registry := s.responsesCapabilityRegistry()
+	if registry == nil {
+		return ""
+	}
+	switch registry.ArgumentsFormat {
+	case ResponsesArgumentsFormatObject, ResponsesArgumentsFormatString:
+		return registry.ArgumentsFormat
+	default:
+		return ""
+	}
 }
 
 func (s *ChannelOtherSettings) explicitResponsesCapabilityConfigured() bool {

@@ -979,6 +979,44 @@ func TestBuildOpenAIResponsesRequestBodyRestoresNativeOpaquePreviousResponseIDFo
 	require.Equal(t, "native_opaque_previous_response_id_restored", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactRouteDecision))
 }
 
+func TestBuildOpenAIResponsesRequestBodyPreNormalizesArgumentsBeforePassThrough(t *testing.T) {
+	rawBody := []byte(`{"model":"gpt-5.6","input":[{"type":"message","role":"user","content":[]},{"type":"function_call","call_id":"call_1","arguments":"{\"path\":\"target.txt\"}"}]}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   150,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					ArgumentsFormat: dto.ResponsesArgumentsFormatObject,
+				},
+			},
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: common.RawMessage(`[{"type":"message","role":"user","content":[]},{"type":"function_call","call_id":"call_1","arguments":"{\"path\":\"target.txt\"}"}]`),
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &retryEncryptedContextAdaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.Contains(t, string(bodyBytes), `"arguments":{"path":"target.txt"}`)
+	require.Contains(t, string(converted.Input), `"arguments":{"path":"target.txt"}`)
+}
+
 func TestShouldRouteResponsesViaChatSkipsResponsesCompact(t *testing.T) {
 	settings := model_setting.GetGlobalSettings()
 	oldPolicy := settings.ChatCompletionsToResponsesPolicy
