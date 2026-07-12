@@ -84,6 +84,18 @@ func TestValidateRemoteResponsesCompactionOutputRejectsMalformedEncryptedContent
 	}
 }
 
+func TestValidateRemoteResponsesCompactionOutputRequiresExactlyOneCompactionItem(t *testing.T) {
+	output := []dto.ResponsesOutput{
+		{Type: dto.ResponsesOutputTypeCompaction, EncryptedContent: []byte(`"first"`)},
+		{Type: dto.ResponsesOutputTypeCompactionSummary, EncryptedContent: []byte(`"second"`)},
+	}
+
+	err := validateRemoteResponsesCompactionOutput(output)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expected exactly one compaction output, got 2")
+}
+
 func TestAppendResponsesFallbackTextCapsMemory(t *testing.T) {
 	var builder strings.Builder
 
@@ -615,6 +627,88 @@ func TestOaiResponsesStreamHandlerRejectsExplicitEmptyCompletedOutputSnapshot(t 
 	require.Equal(t, http.StatusBadGateway, err.StatusCode)
 	require.Contains(t, err.Error(), "expected exactly one compaction output")
 	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesStreamHandlerRejectsRemoteCompactionWithoutCompletedEvent(t *testing.T) {
+	tests := []struct {
+		name   string
+		suffix string
+	}{
+		{name: "done", suffix: "data: [DONE]"},
+		{name: "eof"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			body := strings.Join([]string{
+				`data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"opaque"}}`,
+				tt.suffix,
+				``,
+			}, "\n")
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}
+			info := &relaycommon.RelayInfo{
+				Request:      &dto.OpenAIResponsesRequest{Input: []byte(`[{"type":"compaction_trigger"}]`)},
+				StreamStatus: relaycommon.NewStreamStatus(),
+				DisablePing:  true,
+			}
+
+			usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+			require.Nil(t, usage)
+			require.NotNil(t, err)
+			require.Equal(t, http.StatusBadGateway, err.StatusCode)
+			require.Contains(t, err.Error(), "ended before response.completed")
+			require.Empty(t, recorder.Body.String())
+		})
+	}
+}
+
+func TestOaiResponsesStreamHandlerRejectsRemoteCompactionCompletedWithoutResponse(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"opaque"}}`,
+		`data: {"type":"response.completed"}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		Request:      &dto.OpenAIResponsesRequest{Input: []byte(`[{"type":"compaction_trigger"}]`)},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadGateway, err.StatusCode)
+	require.Contains(t, err.Error(), "response.completed without a response object")
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestRemoteCompactionStreamStateEnforcesBufferLimit(t *testing.T) {
+	state := remoteCompactionStreamState{bytes: maxRemoteCompactionStreamBytes - 1}
+	response := dto.ResponsesStreamResponse{Type: "response.in_progress"}
+
+	require.NoError(t, state.appendEvent(response, "x"))
+	err := state.appendEvent(response, "x")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "remote compaction stream exceeded")
+	require.Len(t, state.events, 1)
 }
 
 func TestOaiResponsesStreamHandlerPreservesUpstreamParameterError(t *testing.T) {

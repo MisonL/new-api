@@ -1000,11 +1000,15 @@ type remoteCompactionStreamState struct {
 	events      []pendingResponsesStreamEvent
 	outputItems []dto.ResponsesOutput
 	bytes       int
+	completed   bool
 }
 
 func (s *remoteCompactionStreamState) observe(response dto.ResponsesStreamResponse) {
 	if response.Type == dto.ResponsesOutputTypeItemDone && response.Item != nil {
 		s.outputItems = append(s.outputItems, *response.Item)
+	}
+	if response.Type == "response.completed" && response.Response != nil {
+		s.completed = true
 	}
 	if response.Type == "response.completed" && response.Response != nil && response.Response.Output != nil {
 		s.outputItems = append(s.outputItems[:0], response.Response.Output...)
@@ -1097,6 +1101,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Stop(streamFatalError)
 			return
 		case "response.completed":
+			if remoteCompaction && streamResponse.Response == nil {
+				err := fmt.Errorf("upstream responses stream returned response.completed without a response object")
+				streamFatalError = types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+				sr.Stop(err)
+				return
+			}
 			if streamResponse.Response != nil {
 				if streamResponse.Response.Usage != nil {
 					hasCompletedUsage = true
@@ -1170,6 +1180,11 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		flushResponsesStreamPrelude(c, &pendingPrelude)
 		sendResponsesStreamData(c, streamResponse, data)
 	})
+	if remoteCompaction && !remoteState.completed && streamFatalError == nil &&
+		(info == nil || info.StreamStatus == nil || info.StreamStatus.EndReason != relaycommon.StreamEndReasonClientGone) {
+		err := fmt.Errorf("upstream responses stream ended before response.completed")
+		streamFatalError = types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	}
 	if streamFatalError != nil {
 		return nil, streamFatalError
 	}
