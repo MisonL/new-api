@@ -384,42 +384,6 @@ func TestNormalizeStringObjectArgumentsFromResponsesInputHistory(t *testing.T) {
 	require.Contains(t, string(got.Input), `"arguments":"not json"`)
 }
 
-func TestNormalizeResponsesInputHistoryArgumentsForExplicitFormat(t *testing.T) {
-	req := dto.OpenAIResponsesRequest{
-		Model: "gpt-5.6",
-		Input: rootcommon.RawMessage(`[
-			{"type":"message","role":"user","content":[]},
-			{"type":"function_call","call_id":"call_string","arguments":"{\"path\":\"target.txt\"}"},
-			{"type":"function_call","call_id":"call_object","arguments":{"path":"keep.txt"}},
-			{"type":"function_call","call_id":"call_invalid","arguments":"not json"}
-		]`),
-	}
-
-	objectRequest, objectResult, err := NormalizeResponsesInputHistoryArguments(req, dto.ResponsesArgumentsFormatObject)
-	require.NoError(t, err)
-	require.Equal(t, 1, objectResult.NormalizedCount)
-	require.Contains(t, string(objectRequest.Input), `"arguments":{"path":"target.txt"}`)
-	require.Contains(t, string(objectRequest.Input), `"arguments":"not json"`)
-
-	stringRequest, stringResult, err := NormalizeResponsesInputHistoryArguments(req, dto.ResponsesArgumentsFormatString)
-	require.NoError(t, err)
-	require.Equal(t, 1, stringResult.NormalizedCount)
-	require.Contains(t, string(stringRequest.Input), `"arguments":"{\"path\":\"keep.txt\"}"`)
-	require.Contains(t, string(stringRequest.Input), `"arguments":"not json"`)
-}
-
-func TestNormalizeResponsesInputHistoryArgumentsKeepsUnknownFormat(t *testing.T) {
-	req := dto.OpenAIResponsesRequest{
-		Input: rootcommon.RawMessage(`[{"type":"function_call","arguments":"{\"ok\":true}"}]`),
-	}
-
-	got, result, err := NormalizeResponsesInputHistoryArguments(req, dto.ResponsesArgumentsFormat("unknown"))
-
-	require.NoError(t, err)
-	require.Zero(t, result.NormalizedCount)
-	require.Equal(t, req.Input, got.Input)
-}
-
 func TestStringifyObjectArgumentsFromResponsesInputHistory(t *testing.T) {
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6",

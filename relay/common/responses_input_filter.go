@@ -222,17 +222,6 @@ func StringifyObjectArgumentsFromResponsesInputHistory(request dto.OpenAIRespons
 	return transformResponsesInputHistoryArguments(request, targetIndex, "stringified", stringifyResponsesObjectArguments)
 }
 
-func NormalizeResponsesInputHistoryArguments(request dto.OpenAIResponsesRequest, format dto.ResponsesArgumentsFormat) (dto.OpenAIResponsesRequest, ResponsesArgumentsNormalizeResult, error) {
-	switch format {
-	case dto.ResponsesArgumentsFormatObject:
-		return transformResponsesInputHistoryArguments(request, 0, "normalized", normalizeResponsesStringObjectArguments)
-	case dto.ResponsesArgumentsFormatString:
-		return transformResponsesInputHistoryArguments(request, 0, "stringified", stringifyResponsesObjectArguments)
-	default:
-		return request, ResponsesArgumentsNormalizeResult{}, nil
-	}
-}
-
 func transformResponsesInputHistoryArguments(request dto.OpenAIResponsesRequest, targetIndex int, action string, transform func(json.RawMessage) (json.RawMessage, bool)) (dto.OpenAIResponsesRequest, ResponsesArgumentsNormalizeResult, error) {
 	result := ResponsesArgumentsNormalizeResult{}
 	trimmedInput := bytes.TrimSpace(request.Input)

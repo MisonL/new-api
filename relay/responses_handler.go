@@ -379,22 +379,6 @@ type buildResponsesRequestBodyOptions struct {
 func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, request *dto.OpenAIResponsesRequest, passThroughGlobal bool, options ...buildResponsesRequestBodyOptions) (io.Reader, dto.OpenAIResponsesRequest, *types.NewAPIError) {
 	var requestBody io.Reader
 	convertedResponsesRequest := *request
-	argumentsFormat := info.ChannelOtherSettings.ExplicitResponsesArgumentsFormat()
-	preparedRequest, argumentsResult, prepareErr := relaycommon.NormalizeResponsesInputHistoryArguments(*request, argumentsFormat)
-	if prepareErr != nil {
-		return nil, convertedResponsesRequest, newResponsesConvertRequestError(prepareErr)
-	}
-	if argumentsResult.NormalizedCount > 0 {
-		request = &preparedRequest
-		convertedResponsesRequest = preparedRequest
-		common.SysLog(fmt.Sprintf(
-			"responses arguments pre-normalized: channel_id=%d model=%s format=%s normalized_items=%d",
-			info.ChannelId,
-			info.OriginModelName,
-			argumentsFormat,
-			argumentsResult.NormalizedCount,
-		))
-	}
 	syntheticCompactReference := false
 	nativeOpaqueReference := service.IsNativeOpaqueCompactReference(request.PreviousResponseID)
 	if relaycommon.IsOpenAICompatibleResponses(info) {
@@ -406,8 +390,7 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 	}
 	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) &&
 		!relaycommon.ShouldConvertResponsesRequest(info) &&
-		(!syntheticCompactReference || nativeOpaqueReference) &&
-		argumentsResult.NormalizedCount == 0
+		(!syntheticCompactReference || nativeOpaqueReference)
 	if len(options) > 0 && options[0].ForceConvertedBody {
 		actualPassThroughBody = false
 	}
