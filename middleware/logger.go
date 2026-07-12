@@ -2,12 +2,38 @@ package middleware
 
 import (
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
 )
 
 const RouteTagKey = "route_tag"
+
+const accessLogRedactedValue = "REDACTED"
+
+func sanitizeAccessLogPath(path string) string {
+	queryIndex := strings.IndexByte(path, '?')
+	if queryIndex < 0 {
+		return path
+	}
+	basePath := path[:queryIndex]
+	values, err := url.ParseQuery(path[queryIndex+1:])
+	if err != nil {
+		return basePath + "?" + accessLogRedactedValue
+	}
+	for key, items := range values {
+		for i := range items {
+			items[i] = accessLogRedactedValue
+		}
+		values[key] = items
+	}
+	if len(values) == 0 {
+		return basePath
+	}
+	return basePath + "?" + values.Encode()
+}
 
 func RouteTag(tag string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -34,7 +60,7 @@ func SetUpLogger(server *gin.Engine) {
 			param.Latency,
 			param.ClientIP,
 			param.Method,
-			param.Path,
+			sanitizeAccessLogPath(param.Path),
 		)
 	}))
 }

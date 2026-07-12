@@ -587,7 +587,7 @@ func testChannelWithOptionsForUser(channel *model.Channel, testUserID int, testM
 		Group:            info.UsingGroup,
 		Other:            other,
 	})
-	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
+	common.SysLog(formatChannelTestResponseLog(channel.Id, httpResult.StatusCode, len(respBody)))
 	return testResult{
 		context:     c,
 		localErr:    nil,
