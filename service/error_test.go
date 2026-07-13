@@ -54,6 +54,62 @@ func TestRelayErrorHandlerClassifiesJSON413WithoutDroppingUpstreamMessage(t *tes
 	require.Equal(t, "context_length_exceeded", err.ToOpenAIError().Code)
 }
 
+func TestRelayErrorHandlerNormalizesGatewayWrappedRequestParameterErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "structured missing encrypted content",
+			body: `{"error":{"message":"Missing required parameter: 'input[278].encrypted_content'.","type":"invalid_request_error","param":"input[278].encrypted_content","code":"missing_required_parameter"}}`,
+		},
+		{
+			name: "message only missing encrypted content",
+			body: `{"error":{"message":"[ObjectParam] [input[278].encrypted_content] [missing_required_parameter] Missing required parameter: 'input[278].encrypted_content'."}}`,
+		},
+		{
+			name: "nested missing encrypted content",
+			body: `{"error":{"message":"Missing required parameter: 'input[10].content[1].encrypted_content'.","type":"invalid_request_error","param":"input[10].content[1].encrypted_content","code":"missing_required_parameter"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			resp := &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Body:       io.NopCloser(strings.NewReader(tt.body)),
+			}
+
+			err := RelayErrorHandler(context.Background(), resp, false)
+
+			require.NotNil(t, err)
+			require.Equal(t, http.StatusBadRequest, err.StatusCode)
+			require.True(t, types.IsSkipRetryError(err))
+			require.Contains(t, strings.ToLower(err.Error()), "encrypted_content")
+		})
+	}
+}
+
+func TestRelayErrorHandlerKeepsActualGatewayErrorsRetryable(t *testing.T) {
+	t.Parallel()
+
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"upstream temporarily unavailable","type":"server_error","code":"server_error"}}`)),
+	}
+
+	err := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadGateway, err.StatusCode)
+	require.False(t, types.IsSkipRetryError(err))
+}
+
 func TestResetStatusCode(t *testing.T) {
 	t.Parallel()
 

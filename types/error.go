@@ -19,6 +19,38 @@ type OpenAIError struct {
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
+func IsOpenAIRequestParameterError(openAIError *OpenAIError) bool {
+	if openAIError == nil {
+		return false
+	}
+	errorCode := strings.ToLower(strings.TrimSpace(fmt.Sprint(openAIError.Code)))
+	switch errorCode {
+	case "missing_required_parameter", "unknown_parameter", "unsupported_parameter", "invalid_type":
+		return true
+	}
+
+	message := strings.ToLower(strings.Join([]string{
+		openAIError.Message,
+		openAIError.Param,
+		errorCode,
+	}, " "))
+	for _, indicator := range []string{
+		"missing required parameter",
+		"missing_required_parameter",
+		"unknown parameter",
+		"unknown_parameter",
+		"unsupported parameter",
+		"unsupported_parameter",
+		"invalid type for",
+		"[invalid_type]",
+	} {
+		if strings.Contains(message, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
 type ClaudeError struct {
 	Type    string `json:"type,omitempty"`
 	Message string `json:"message,omitempty"`

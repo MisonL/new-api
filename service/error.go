@@ -121,9 +121,12 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		oaiError := errResponse.TryToOpenAIError()
 		if oaiError != nil {
-			options := make([]types.NewAPIErrorOptions, 0, 1)
+			options := make([]types.NewAPIErrorOptions, 0, 3)
 			if statusErrorCode != types.ErrorCodeBadResponseStatusCode {
 				options = append(options, types.ErrOptionWithErrorCode(statusErrorCode))
+			}
+			if resp.StatusCode >= http.StatusInternalServerError && types.IsOpenAIRequestParameterError(oaiError) {
+				options = append(options, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
 			}
 			newApiErr = types.WithOpenAIError(*oaiError, resp.StatusCode, options...)
 			if showBodyWhenFail {

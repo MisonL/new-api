@@ -1268,6 +1268,9 @@ func responsesStreamOpenAIErrorStatus(openAIError *types.OpenAIError) int {
 	if openAIError == nil {
 		return http.StatusBadGateway
 	}
+	if types.IsOpenAIRequestParameterError(openAIError) {
+		return http.StatusBadRequest
+	}
 	errorType := strings.ToLower(strings.TrimSpace(openAIError.Type))
 	errorCode := strings.ToLower(strings.TrimSpace(fmt.Sprint(openAIError.Code)))
 	errorMessage := strings.ToLower(strings.TrimSpace(openAIError.Message))

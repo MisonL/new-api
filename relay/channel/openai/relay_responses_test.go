@@ -883,6 +883,16 @@ func TestOaiResponsesStreamHandlerMapsErrorEventStatus(t *testing.T) {
 			body:       `data: {"type":"response.error","error":{"message":"Invalid type for 'input[71].arguments': expected a string, but got an object instead."}}`,
 			wantStatus: http.StatusBadRequest,
 		},
+		{
+			name:       "missing encrypted content",
+			body:       `data: {"type":"response.error","error":{"message":"Missing required parameter: 'input[278].encrypted_content'.","type":"invalid_request_error","param":"input[278].encrypted_content","code":"missing_required_parameter"}}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "message only missing encrypted content",
+			body:       `data: {"type":"response.error","error":{"message":"[ObjectParam] [input[10].content[1].encrypted_content] [missing_required_parameter] Missing required parameter: 'input[10].content[1].encrypted_content'."}}`,
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, tt := range tests {
