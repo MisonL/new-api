@@ -20,7 +20,7 @@ var responsesArgumentsParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.ar
 var responsesEncryptedContentParameterPattern = regexp.MustCompile(`^input\[(\d+)\](?:\.(content|output)\[(\d+)\])?\.encrypted_content$`)
 var responsesNamespaceTextPattern = regexp.MustCompile(`input\[(\d+)\]\.namespace`)
 var responsesArgumentsTextPattern = regexp.MustCompile(`input\[(\d+)\]\.arguments`)
-var responsesEncryptedContentTextPattern = regexp.MustCompile(`input\[(\d+)\](?:\.(content|output)\[(\d+)\])?\.encrypted_content`)
+var responsesEncryptedContentObjectParamTextPattern = regexp.MustCompile(`(?i)\[ObjectParam\]\s*\[\s*input\[(\d+)\](?:\.(content|output)\[(\d+)\])?\.encrypted_content\s*\]\s*\[(?:missing_required_parameter|unsupported_parameter|invalid_type)\]`)
 
 type ResponsesInputStripResult struct {
 	Input                   json.RawMessage
@@ -210,7 +210,7 @@ func responsesEncryptedContentInputPathFromError(param string, message string) (
 	trimmedParam := strings.TrimSpace(param)
 	matches := responsesEncryptedContentParameterPattern.FindStringSubmatch(trimmedParam)
 	if len(matches) == 0 && trimmedParam == "" {
-		matches = responsesEncryptedContentTextPattern.FindStringSubmatch(message)
+		matches = responsesEncryptedContentObjectParamTextPattern.FindStringSubmatch(message)
 	}
 	if len(matches) != 4 {
 		return responsesEncryptedContentInputPath{}, false

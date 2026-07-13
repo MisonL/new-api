@@ -165,6 +165,72 @@ func TestStripResponsesInputEncryptedContentItemDoesNotUseMessagePathWhenParamPr
 	require.Equal(t, req.Input, got.Input)
 }
 
+func TestStripResponsesInputEncryptedContentItemUsesStructuredObjectParamFallback(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: rootcommon.RawMessage(`[
+			{"type":"reasoning","encrypted_content":"opaque"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, removed, err := StripResponsesInputEncryptedContentItem(
+		req,
+		"",
+		"[ObjectParam] [input[0].encrypted_content] [missing_required_parameter] Missing required parameter: 'input[0].encrypted_content'.",
+	)
+
+	require.NoError(t, err)
+	require.True(t, removed)
+	require.NotContains(t, string(got.Input), "opaque")
+	require.Contains(t, string(got.Input), `"type":"message"`)
+}
+
+func TestStripResponsesInputEncryptedContentItemUsesStructuredObjectParamFallbackForAgentMessage(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: rootcommon.RawMessage(`[
+			{"type":"agent_message","content":[
+				{"type":"output_text","text":"keep this agent result"},
+				{"type":"encrypted_content","encrypted_content":"opaque"}
+			]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, removed, err := StripResponsesInputEncryptedContentItem(
+		req,
+		"",
+		"[ObjectParam] [input[0].content[1].encrypted_content] [unsupported_parameter] Unsupported parameter: 'input[0].content[1].encrypted_content'.",
+	)
+
+	require.NoError(t, err)
+	require.True(t, removed)
+	require.Contains(t, string(got.Input), "keep this agent result")
+	require.NotContains(t, string(got.Input), `"encrypted_content":"opaque"`)
+}
+
+func TestStripResponsesInputEncryptedContentItemDoesNotUseUnstructuredMessageFallback(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: rootcommon.RawMessage(`[
+			{"type":"reasoning","encrypted_content":"opaque"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, removed, err := StripResponsesInputEncryptedContentItem(
+		req,
+		"",
+		"The user text quoted input[0].encrypted_content with missing_required_parameter, but this is not an ObjectParam field error.",
+	)
+
+	require.NoError(t, err)
+	require.False(t, removed)
+	require.Equal(t, req.Input, got.Input)
+	require.False(t, HasResponsesInputEncryptedContentPath("", "The user text quoted input[0].encrypted_content with missing_required_parameter, but this is not an ObjectParam field error."))
+}
+
 func TestResponsesRequestHasNamespaceTools(t *testing.T) {
 	tests := []struct {
 		name      string
