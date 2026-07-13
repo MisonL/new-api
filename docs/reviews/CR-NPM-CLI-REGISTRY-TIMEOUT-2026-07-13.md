@@ -18,3 +18,13 @@
 ## 验证边界
 
 代码测试需要覆盖 npm CLI version service、controller 和诊断接口。隔离环境重建后，应等待或触发一次后台刷新，并确认至少能成功刷新当前包记录；若 registry 实际耗时再次超过 8 秒，仍应显式记录 `npm_registry_timeout`，不得静默使用过期结果冒充刷新成功。
+
+## 隔离环境验证
+
+提交 `649425cbaaf4ee936cd97b347337afc4f1d29f54` 的镜像完成重建后，`3001` 容器启动时首轮后台刷新结果为：
+
+```text
+packages=5 refreshed=5 failed=0 duration_ms=6669
+```
+
+容器 build-info 与提交一致，健康状态为 `healthy`，`GET /api/status` 返回 `success=true`。该结果证明 8 秒后端超时覆盖了当前 registry 实际延迟，同时保留显式失败和大小门禁。
