@@ -693,6 +693,30 @@ func TestGenerateTextOtherInfoMarksCodexRemoteV2CompactionFromHeader(t *testing.
 	require.Equal(t, "manual", other["responses_compact_trigger"])
 }
 
+func TestGenerateTextOtherInfoMarksRemoteV2SyntheticFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesRemoteCompactSyntheticFallback, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactRouteDecision, "remote_v2_synthetic_recovery")
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"compact"}]},
+				{"type":"compaction_trigger"}
+			]`),
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, true, other["responses_remote_compact_synthetic_fallback"])
+	require.Equal(t, "remote_v2_synthetic_recovery", other["responses_compact_route_decision"])
+	require.Equal(t, "remote_v2", other["responses_compact_mode"])
+}
+
 func TestGenerateTextOtherInfoMarksRemoteV2CompactionFromTriggerWithoutHeader(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

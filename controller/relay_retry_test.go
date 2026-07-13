@@ -2221,6 +2221,73 @@ func TestShouldFallbackResponsesCompactAutoHandlesMalformedNativeOutput(t *testi
 	require.True(t, shouldFallbackResponsesCompactAuto(c, compactAutoFallbackRelayInfo(), err))
 }
 
+func TestShouldFallbackRemoteResponsesCompaction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	newInfo := func(input string) *relaycommon.RelayInfo {
+		return &relaycommon.RelayInfo{
+			RelayMode:       relayconstant.RelayModeResponses,
+			IsStream:        true,
+			OriginModelName: "gpt-5.6-sol",
+			Request: &dto.OpenAIResponsesRequest{
+				Model: "gpt-5.6-sol",
+				Input: common.RawMessage(input),
+			},
+			ChannelMeta: &relaycommon.ChannelMeta{
+				ChannelId:   169,
+				ChannelType: constant.ChannelTypeOpenAI,
+				ChannelOtherSettings: dto.ChannelOtherSettings{
+					ResponsesCompactMode: dto.ResponsesCompactModeNative,
+				},
+			},
+		}
+	}
+	visibleInput := `[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"compact this conversation"}]},
+		{"type":"compaction_trigger"}
+	]`
+	opaqueInput := `[
+		{"type":"compaction","encrypted_content":"opaque-native-compact"},
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]},
+		{"type":"compaction_trigger"}
+	]`
+
+	testCases := []struct {
+		name       string
+		statusCode int
+		input      string
+		want       bool
+	}{
+		{name: "bad gateway recovers", statusCode: http.StatusBadGateway, input: visibleInput, want: true},
+		{name: "service unavailable recovers", statusCode: http.StatusServiceUnavailable, input: visibleInput, want: true},
+		{name: "rate limit keeps cross channel retry", statusCode: http.StatusTooManyRequests, input: visibleInput, want: false},
+		{name: "opaque compaction cannot recover locally", statusCode: http.StatusBadGateway, input: opaqueInput, want: false},
+		{name: "ordinary responses do not recover", statusCode: http.StatusBadGateway, input: `[{"type":"message","role":"user","content":"hello"}]`, want: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(nil)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Request.Header.Set("X-Codex-Beta-Features", "remote_compaction_v2")
+			err := types.NewOpenAIError(
+				errors.New("upstream service temporarily unavailable"),
+				types.ErrorCodeBadResponseStatusCode,
+				tc.statusCode,
+			)
+
+			require.Equal(t, tc.want, shouldFallbackRemoteResponsesCompaction(c, newInfo(tc.input), err))
+		})
+	}
+
+	t.Run("missing protocol header does not recover", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(nil)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		err := types.NewOpenAIError(errors.New("bad gateway"), types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway)
+		require.False(t, shouldFallbackRemoteResponsesCompaction(c, newInfo(visibleInput), err))
+	})
+}
+
 func TestShouldFallbackResponsesCompactPreviousResponseIDSkipsRemoteOpaqueCompaction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)

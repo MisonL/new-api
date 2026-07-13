@@ -3,6 +3,8 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -428,6 +430,76 @@ func TestConvertOpenAIResponsesCompactRequestBuildsSyntheticSummaryRequest(t *te
 	require.Contains(t, string(convertedReq.Input), "Visible conversation to compact")
 	require.Contains(t, string(convertedReq.Input), "[user] continue")
 	require.Contains(t, string(convertedReq.Input), "Use the existing previous_response_id context as the source of truth for the compaction.")
+}
+
+func TestConvertOpenAIResponsesRequestBuildsRemoteCompactionFallbackSummary(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(c, constant.ContextKeyResponsesRemoteCompactSyntheticFallback, true)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeSynthetic,
+			},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: json.RawMessage(`[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"Preserve the current task and decisions."}]},
+			{"type":"compaction_trigger"}
+		]`),
+		Stream: common.GetPointer(true),
+	}
+	info.Request = &req
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.Nil(t, convertedReq.Stream)
+	require.Contains(t, string(convertedReq.Input), "Preserve the current task and decisions.")
+	require.Contains(t, string(convertedReq.Input), "self-contained handoff summary")
+	require.NotContains(t, string(convertedReq.Input), "compaction_trigger")
+}
+
+func TestSetupRequestHeaderForwardsRemoteCompactionV2Feature(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("Accept", "text/event-stream")
+	c.Request.Header.Set("X-Codex-Beta-Features", "memories,remote_compaction_v2")
+	request := &dto.OpenAIResponsesRequest{
+		Input: json.RawMessage(`[{"type":"compaction_trigger"}]`),
+	}
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		IsStream:  true,
+		Request:   request,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	header := http.Header{}
+
+	require.NoError(t, (&Adaptor{}).SetupRequestHeader(c, &header, info))
+	require.Equal(t, "memories,remote_compaction_v2", header.Get("X-Codex-Beta-Features"))
+
+	c.Request.Header.Del("X-Codex-Beta-Features")
+	c.Request.Header.Add("X-Codex-Beta-Features", "memories")
+	c.Request.Header.Add("X-Codex-Beta-Features", "REMOTE_COMPACTION_V2,network_proxy")
+	header = http.Header{}
+	require.NoError(t, (&Adaptor{}).SetupRequestHeader(c, &header, info))
+	require.Equal(t, []string{"memories", "REMOTE_COMPACTION_V2,network_proxy"}, header.Values("X-Codex-Beta-Features"))
+
+	request.Input = json.RawMessage(`[{"type":"message","role":"user","content":"hello"}]`)
+	header = http.Header{}
+	require.NoError(t, (&Adaptor{}).SetupRequestHeader(c, &header, info))
+	require.Empty(t, header.Get("X-Codex-Beta-Features"))
 }
 
 func TestConvertOpenAIResponsesCompactNativeModeRestoresSyntheticState(t *testing.T) {

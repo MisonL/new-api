@@ -293,6 +293,10 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, header)
+	forwardRemoteCompactionBetaFeatures(c, header, info)
+	if isSyntheticRemoteResponsesCompactionFallback(c, info) {
+		header.Set("Accept", "application/json")
+	}
 	if info.ChannelType == constant.ChannelTypeAzure {
 		header.Set("api-key", info.ApiKey)
 		return nil
@@ -343,6 +347,50 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *
 		}
 	}
 	return nil
+}
+
+func forwardRemoteCompactionBetaFeatures(c *gin.Context, header *http.Header, info *relaycommon.RelayInfo) {
+	if c == nil || c.Request == nil || header == nil || info == nil ||
+		info.RelayMode != relayconstant.RelayModeResponses || !info.IsStream {
+		return
+	}
+	request, ok := info.Request.(*dto.OpenAIResponsesRequest)
+	if !ok || request == nil || !request.HasCompactionTrigger() {
+		return
+	}
+	values := c.Request.Header.Values("X-Codex-Beta-Features")
+	if !codexBetaFeatureValuesContain(values, "remote_compaction_v2") {
+		return
+	}
+	header.Del("X-Codex-Beta-Features")
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			header.Add("X-Codex-Beta-Features", value)
+		}
+	}
+}
+
+func codexBetaFeatureValuesContain(values []string, target string) bool {
+	for _, value := range values {
+		for _, feature := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(feature), target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isSyntheticRemoteResponsesCompactionFallback(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	if c == nil || info == nil || info.ChannelMeta == nil ||
+		info.RelayMode != relayconstant.RelayModeResponses ||
+		info.ChannelType != constant.ChannelTypeOpenAI ||
+		!info.ChannelOtherSettings.HasSyntheticResponsesCompact() ||
+		!common.GetContextKeyBool(c, constant.ContextKeyResponsesRemoteCompactSyntheticFallback) {
+		return false
+	}
+	request, ok := info.Request.(*dto.OpenAIResponsesRequest)
+	return ok && request != nil && request.HasCompactionTrigger()
 }
 
 func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) (any, error) {
@@ -749,6 +797,14 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		}
 		return convertedRequest, nil
 	}
+	if isSyntheticRemoteResponsesCompactionFallback(c, info) {
+		convertedRequest, err := service.BuildSyntheticCompactSummaryRequest(relaycommon.GinRequestContext(c), syntheticCompactScopeFromRelayInfo(info), request)
+		if err != nil {
+			setResponsesPreviousIDActionForError(c, err)
+			return nil, err
+		}
+		return convertedRequest, nil
+	}
 	if relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info) {
 		requestContext := relaycommon.GinRequestContext(c)
 		if shouldRejectResponsesRESTPreviousResponseID(info, request) {
@@ -881,7 +937,9 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	case relayconstant.RelayModeRerank:
 		usage, err = common_handler.RerankHandler(c, info, resp)
 	case relayconstant.RelayModeResponses:
-		if info.IsStream {
+		if isSyntheticRemoteResponsesCompactionFallback(c, info) {
+			usage, err = OaiSyntheticRemoteResponsesCompactionHandler(c, info, resp)
+		} else if info.IsStream {
 			usage, err = OaiResponsesStreamHandler(c, info, resp)
 		} else {
 			usage, err = OaiResponsesHandler(c, info, resp)

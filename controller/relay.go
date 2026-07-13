@@ -316,6 +316,28 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				relayInfo.LastError = newAPIError
 			}
 
+			if shouldFallbackRemoteResponsesCompaction(c, relayInfo, newAPIError) {
+				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
+				common.SetContextKey(c, constant.ContextKeyResponsesRemoteCompactSyntheticFallback, true)
+				fallbackReason := newAPIError.MaskSensitiveErrorWithStatusCode()
+				service.MarkResponsesCompactNativeFallback(c, relayInfo, newAPIError.StatusCode, fallbackReason, time.Now())
+				common.SetContextKey(c, constant.ContextKeyResponsesCompactRouteDecision, "remote_v2_synthetic_recovery")
+				common.SetContextKey(c, constant.ContextKeyResponsesCompactFallbackReason, fallbackReason)
+				logger.LogWarn(c, fmt.Sprintf(
+					"remote responses compaction fallback to synthetic summary: channel_id=%d status_code=%d error=%s",
+					relayInfo.ChannelMeta.ChannelId,
+					newAPIError.StatusCode,
+					newAPIError.MaskSensitiveError(),
+				))
+				newAPIError = retryResponsesCompactSyntheticSummary(c, relayInfo, bodyStorage, newAPIError)
+				if newAPIError == nil {
+					relayInfo.LastError = nil
+					return
+				}
+				restoreResponsesCompactFallbackContext(c, relayInfo, fallbackSnapshot)
+				relayInfo.LastError = newAPIError
+			}
+
 			if shouldFallbackResponsesCompactVisibleOnly(c, relayInfo, newAPIError) {
 				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				newAPIError = retryResponsesCompactVisibleOnlySummary(c, relayInfo, bodyStorage, newAPIError)
@@ -1182,6 +1204,57 @@ func shouldFallbackResponsesCompactAuto(c *gin.Context, info *relaycommon.RelayI
 	}
 }
 
+func shouldFallbackRemoteResponsesCompaction(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) bool {
+	if c == nil || err == nil || info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	if c.Writer != nil && c.Writer.Written() &&
+		!common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamPreludeRetrySafe) {
+		return false
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyResponsesRemoteCompactSyntheticFallback) ||
+		responsesCompactSyntheticFallbackAttemptedForChannel(c, info.ChannelMeta.ChannelId) {
+		return false
+	}
+	if info.RelayMode != relayconstant.RelayModeResponses ||
+		info.ChannelType != constant.ChannelTypeOpenAI ||
+		info.ChannelOtherSettings.HasDisabledResponsesCompact() {
+		return false
+	}
+	request, ok := info.Request.(*dto.OpenAIResponsesRequest)
+	if !ok || request == nil || !request.HasCompactionTrigger() || !info.IsStream ||
+		!requestHeaderHasFeature(c.Request, "X-Codex-Beta-Features", "remote_compaction_v2") {
+		return false
+	}
+	if responsesCompactRequestHasUnsafeCompactionInput(c, info) {
+		return false
+	}
+	switch err.StatusCode {
+	case http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+		524:
+		return true
+	default:
+		return false
+	}
+}
+
+func requestHeaderHasFeature(request *http.Request, headerName string, target string) bool {
+	if request == nil {
+		return false
+	}
+	for _, value := range request.Header.Values(headerName) {
+		for _, feature := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(feature), target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type requestBodyReadSeeker interface {
 	io.Reader
 	io.Seeker
@@ -1237,6 +1310,7 @@ var responsesCompactFallbackContextKeys = []string{
 	string(constant.ContextKeyResponsesCompactSummaryModels),
 	string(constant.ContextKeyResponsesCompactVisibleOnly),
 	string(constant.ContextKeyResponsesCompactNativeFallback),
+	string(constant.ContextKeyResponsesRemoteCompactSyntheticFallback),
 }
 
 func snapshotResponsesCompactFallbackContext(c *gin.Context) map[string]responsesCompactFallbackContextValue {

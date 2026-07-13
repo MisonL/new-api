@@ -34,6 +34,7 @@ const (
 	ContextKeyResponsesChatCompatIgnoredEncryptedInclude    ContextKey = "responses_chat_compat_ignored_encrypted_include"
 	ContextKeyResponsesChatCompatReasoningSummaryMapped     ContextKey = "responses_chat_compat_reasoning_summary_mapped"
 	ContextKeyResponsesCompactionOutput                     ContextKey = "responses_compaction_output"
+	ContextKeyResponsesRemoteCompactSyntheticFallback       ContextKey = "responses_remote_compact_synthetic_fallback"
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"

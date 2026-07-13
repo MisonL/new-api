@@ -842,6 +842,55 @@ func TestExecuteOpenAIResponsesRequestRetryForcesConvertedBodyWhenPassThroughEna
 	require.Contains(t, string(adaptor.requestBodies[1]), `"text":"hello"`)
 }
 
+func TestBuildOpenAIResponsesRequestBodyForcesRemoteCompactionFallbackConversion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{"model":"gpt-5.6-sol","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Preserve the active task."}]},{"type":"compaction_trigger"}]}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = storage.Close()
+	})
+	c.Set(common.KeyBodyStorage, storage)
+	common.SetContextKey(c, constant.ContextKeyResponsesRemoteCompactSyntheticFallback, true)
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"Preserve the active task."}]},
+			{"type":"compaction_trigger"}
+		]`),
+		Stream: common.GetPointer(true),
+	}
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		Request:         request,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   169,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCompactMode: dto.ResponsesCompactModeSynthetic,
+			},
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	require.Nil(t, converted.Stream)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.NotEqual(t, string(rawBody), string(bodyBytes))
+	require.Contains(t, string(bodyBytes), "Preserve the active task.")
+	require.Contains(t, string(bodyBytes), "self-contained handoff summary")
+	require.NotContains(t, string(bodyBytes), "compaction_trigger")
+}
+
 func TestExecuteOpenAIResponsesRequestDoesNotRetryPlainBadRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
