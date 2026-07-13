@@ -90,6 +90,81 @@ func TestStripEncryptedReasoningFromResponsesRequestKeepsMixedInput(t *testing.T
 	require.NotContains(t, string(got.Input), "opaque")
 }
 
+func TestStripResponsesInputEncryptedContentItemRemovesToolOutputCarrier(t *testing.T) {
+	for _, itemType := range []string{"function_call_output", "custom_tool_call_output"} {
+		t.Run(itemType, func(t *testing.T) {
+			req := dto.OpenAIResponsesRequest{
+				Model: "gpt-5.6",
+				Input: rootcommon.RawMessage(`[
+					{"type":"` + itemType + `","call_id":"call_1","output":[
+						{"type":"input_text","text":"keep this tool result"},
+						{"type":"encrypted_content","encrypted_content":"opaque"}
+					]},
+					{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+				]`),
+			}
+
+			got, removed, err := StripResponsesInputEncryptedContentItem(req, "input[0].output[1].encrypted_content", "")
+
+			require.NoError(t, err)
+			require.True(t, removed)
+			require.Contains(t, string(got.Input), "keep this tool result")
+			require.NotContains(t, string(got.Input), `"encrypted_content":"opaque"`)
+		})
+	}
+}
+
+func TestStripResponsesInputEncryptedContentItemKeepsUnpopulatedReasoning(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: rootcommon.RawMessage(`[
+			{"type":"reasoning","encrypted_content":""},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, removed, err := StripResponsesInputEncryptedContentItem(req, "input[0].encrypted_content", "")
+
+	require.NoError(t, err)
+	require.False(t, removed)
+	require.Equal(t, req.Input, got.Input)
+}
+
+func TestStripResponsesInputEncryptedContentItemRequiresEncryptedContentItemType(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: rootcommon.RawMessage(`[
+			{"type":"function_call_output","call_id":"call_1","output":[
+				{"type":"input_text","text":"keep this tool result","encrypted_content":"opaque"},
+				{"type":"input_text","text":"another tool result"}
+			]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, removed, err := StripResponsesInputEncryptedContentItem(req, "input[0].output[0].encrypted_content", "")
+
+	require.NoError(t, err)
+	require.False(t, removed)
+	require.Equal(t, req.Input, got.Input)
+}
+
+func TestStripResponsesInputEncryptedContentItemDoesNotUseMessagePathWhenParamProvided(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: rootcommon.RawMessage(`[
+			{"type":"reasoning","encrypted_content":"opaque"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, removed, err := StripResponsesInputEncryptedContentItem(req, "input[0].unsupported", "Missing required parameter: 'input[0].encrypted_content'.")
+
+	require.NoError(t, err)
+	require.False(t, removed)
+	require.Equal(t, req.Input, got.Input)
+}
+
 func TestResponsesRequestHasNamespaceTools(t *testing.T) {
 	tests := []struct {
 		name      string

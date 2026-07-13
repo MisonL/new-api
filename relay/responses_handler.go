@@ -202,13 +202,20 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 }
 
 type responsesCompatibilityRetryState struct {
-	attempts                 int
-	argumentsObjectAttempted bool
-	argumentsStringAttempted bool
+	attempts                           int
+	encryptedContentParameterAttempted bool
+	argumentsObjectAttempted           bool
+	argumentsStringAttempted           bool
 }
 
 func buildOpenAIResponsesCompatibilityRetry(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError, retryState *responsesCompatibilityRetryState) (io.Reader, dto.OpenAIResponsesRequest, bool, *types.NewAPIError) {
 	if shouldRetryResponsesWithoutEncryptedReasoning(info, newAPIError) {
+		if isResponsesEncryptedContentParameterError(newAPIError.ToOpenAIError()) {
+			if retryState.encryptedContentParameterAttempted {
+				return nil, convertedRequest, false, nil
+			}
+			retryState.encryptedContentParameterAttempted = true
+		}
 		return buildResponsesWithoutEncryptedReasoningRetry(c, info, adaptor, convertedRequest, newAPIError)
 	}
 	if shouldRetryResponsesWithoutNamespaceHistory(info, newAPIError) {
@@ -226,20 +233,34 @@ func buildOpenAIResponsesCompatibilityRetry(c *gin.Context, info *relaycommon.Re
 }
 
 func buildResponsesWithoutEncryptedReasoningRetry(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError) (io.Reader, dto.OpenAIResponsesRequest, bool, *types.NewAPIError) {
-	strippedRequest, result, stripErr := relaycommon.StripEncryptedReasoningFromResponsesRequest(convertedRequest)
-	if stripErr != nil {
-		return nil, convertedRequest, false, nil
-	}
-	if result.RemovedCount() == 0 {
-		return nil, convertedRequest, false, nil
+	openAIError := newAPIError.ToOpenAIError()
+	removedEncryptedReasoning := 0
+	remainingItems := 0
+	removedTarget := false
+	var strippedRequest dto.OpenAIResponsesRequest
+	var stripErr error
+	if isResponsesEncryptedContentParameterError(openAIError) {
+		strippedRequest, removedTarget, stripErr = relaycommon.StripResponsesInputEncryptedContentItem(convertedRequest, openAIError.Param, openAIError.Message)
+		if stripErr != nil || !removedTarget {
+			return nil, convertedRequest, false, nil
+		}
+	} else {
+		var result relaycommon.ResponsesInputStripResult
+		strippedRequest, result, stripErr = relaycommon.StripEncryptedReasoningFromResponsesRequest(convertedRequest)
+		if stripErr != nil || result.RemovedCount() == 0 {
+			return nil, convertedRequest, false, nil
+		}
+		removedEncryptedReasoning = result.EncryptedReasoningCount
+		remainingItems = result.RemainingCount
 	}
 	common.SetContextKey(c, appconstant.ContextKeyResponsesEncryptedContextRetry, true)
 	common.SysLog(fmt.Sprintf(
-		"responses encrypted reasoning retry: channel_id=%d model=%s encrypted_reasoning_items=%d remaining_items=%d original_error=%s",
+		"responses encrypted context retry: channel_id=%d model=%s targeted_item=%t encrypted_reasoning_items=%d remaining_items=%d original_error=%s",
 		info.ChannelId,
 		info.OriginModelName,
-		result.EncryptedReasoningCount,
-		result.RemainingCount,
+		removedTarget,
+		removedEncryptedReasoning,
+		remainingItems,
 		newAPIError.MaskSensitiveError(),
 	))
 	retryBody, _, retryBuildErr := buildOpenAIResponsesRequestBody(c, info, adaptor, &strippedRequest, false, buildResponsesRequestBodyOptions{
@@ -523,6 +544,12 @@ func shouldRetryResponsesWithoutEncryptedReasoning(info *relaycommon.RelayInfo, 
 	if info == nil || err == nil || !relaycommon.IsOpenAICompatibleResponses(info) {
 		return false
 	}
+	openAIError := err.ToOpenAIError()
+	if isResponsesEncryptedContentParameterError(openAIError) &&
+		relaycommon.HasResponsesInputEncryptedContentPath(openAIError.Param, openAIError.Message) &&
+		(err.StatusCode == http.StatusBadRequest || err.StatusCode == http.StatusBadGateway) {
+		return true
+	}
 	if err.StatusCode != http.StatusBadRequest {
 		return false
 	}
@@ -534,6 +561,18 @@ func shouldRetryResponsesWithoutEncryptedReasoning(info *relaycommon.RelayInfo, 
 	return strings.Contains(message, "encrypted content") &&
 		(strings.Contains(message, "could not be verified") ||
 			strings.Contains(message, "could not be decrypted or parsed"))
+}
+
+func isResponsesEncryptedContentParameterError(openAIError types.OpenAIError) bool {
+	if !types.IsOpenAIRequestParameterError(&openAIError) {
+		return false
+	}
+	value := strings.ToLower(strings.Join([]string{
+		openAIError.Message,
+		openAIError.Param,
+		fmt.Sprint(openAIError.Code),
+	}, " "))
+	return strings.Contains(value, "encrypted_content") || strings.Contains(value, "encrypted content")
 }
 
 func newResponsesConvertRequestError(err error) *types.NewAPIError {

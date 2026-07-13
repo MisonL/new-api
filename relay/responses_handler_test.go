@@ -116,6 +116,24 @@ func encryptedContextRetryResponse(status int) *http.Response {
 	}
 }
 
+func missingEncryptedContentRetryResponse(status int) *http.Response {
+	body := `{"error":{"message":"[ObjectParam] [input[0].encrypted_content] [missing_required_parameter] Missing required parameter: 'input[0].encrypted_content'.","type":"invalid_request_error","code":"missing_required_parameter"}}`
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+}
+
+func nestedMissingEncryptedContentRetryResponse(status int) *http.Response {
+	body := `{"error":{"message":"[ObjectParam] [input[0].content[1].encrypted_content] [missing_required_parameter] Missing required parameter: 'input[0].content[1].encrypted_content'.","type":"invalid_request_error","code":"missing_required_parameter"}}`
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+}
+
 func namespaceHistoryRetryResponse() *http.Response {
 	return namespaceHistoryRetryResponseAt(1)
 }
@@ -267,6 +285,203 @@ func TestExecuteOpenAIResponsesRequestRetriesEncryptedReasoningFailure(t *testin
 	require.Contains(t, string(adaptor.requestBodies[0]), `"encrypted_content":"opaque"`)
 	require.NotContains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"opaque"`)
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesWrappedMissingEncryptedContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6-sol","input":[{"type":"reasoning","encrypted_content":"opaque"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   205,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			missingEncryptedContentRetryResponse(http.StatusBadGateway),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"reasoning","encrypted_content":"opaque"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 2)
+	require.NotContains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"opaque"`)
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+}
+
+func TestExecuteOpenAIResponsesRequestDoesNotRetryMessageContentMissingEncryptedContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6-sol","input":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"previous answer"},{"type":"encrypted_content","encrypted_content":"opaque"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   205,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			nestedMissingEncryptedContentRetryResponse(http.StatusBadGateway),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"previous answer"},{"type":"encrypted_content","encrypted_content":"opaque"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}, false)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Len(t, adaptor.requestBodies, 1)
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesAgentMessageMissingEncryptedContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6-sol","input":[{"type":"agent_message","role":"assistant","content":[{"type":"output_text","text":"previous answer"},{"type":"encrypted_content","encrypted_content":"opaque"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   205,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			nestedMissingEncryptedContentRetryResponse(http.StatusBadGateway),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"agent_message","role":"assistant","content":[{"type":"output_text","text":"previous answer"},{"type":"encrypted_content","encrypted_content":"opaque"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 2)
+	require.Contains(t, string(adaptor.requestBodies[1]), "previous answer")
+	require.NotContains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"opaque"`)
+}
+
+func TestExecuteOpenAIResponsesRequestDoesNotDropCompactionForMissingEncryptedContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6-sol","input":[{"type":"compaction","encrypted_content":"opaque"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   205,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			missingEncryptedContentRetryResponse(http.StatusBadGateway),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"compaction","encrypted_content":"opaque"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}, false)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Len(t, adaptor.requestBodies, 1)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"type":"compaction"`)
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesMissingEncryptedContentOnlyOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6-sol","input":[{"type":"reasoning","encrypted_content":"first"},{"type":"reasoning","encrypted_content":"second"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   205,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			missingEncryptedContentRetryResponse(http.StatusBadGateway),
+			missingEncryptedContentRetryResponse(http.StatusBadGateway),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"reasoning","encrypted_content":"first"},
+			{"type":"reasoning","encrypted_content":"second"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}, false)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Len(t, adaptor.requestBodies, 2)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"second"`)
+}
+
+func TestShouldRetryResponsesWithoutEncryptedReasoningRequiresEncryptedContentPath(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "missing_required_parameter encrypted_content",
+		Type:    "invalid_request_error",
+		Code:    "missing_required_parameter",
+	}, http.StatusBadRequest)
+
+	require.False(t, shouldRetryResponsesWithoutEncryptedReasoning(info, err))
 }
 
 func TestExecuteOpenAIResponsesRequestRetriesRejectedNamespaceHistory(t *testing.T) {

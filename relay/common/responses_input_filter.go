@@ -17,8 +17,10 @@ var ErrResponsesEncryptedReasoningOnlyInput = errors.New("responses encrypted re
 
 var responsesNamespaceParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.namespace$`)
 var responsesArgumentsParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.arguments$`)
+var responsesEncryptedContentParameterPattern = regexp.MustCompile(`^input\[(\d+)\](?:\.(content|output)\[(\d+)\])?\.encrypted_content$`)
 var responsesNamespaceTextPattern = regexp.MustCompile(`input\[(\d+)\]\.namespace`)
 var responsesArgumentsTextPattern = regexp.MustCompile(`input\[(\d+)\]\.arguments`)
+var responsesEncryptedContentTextPattern = regexp.MustCompile(`input\[(\d+)\](?:\.(content|output)\[(\d+)\])?\.encrypted_content`)
 
 type ResponsesInputStripResult struct {
 	Input                   json.RawMessage
@@ -29,6 +31,12 @@ type ResponsesInputStripResult struct {
 type ResponsesArgumentsNormalizeResult struct {
 	NormalizedCount  int
 	TargetNormalized bool
+}
+
+type responsesEncryptedContentInputPath struct {
+	inputIndex  int
+	nestedField string
+	nestedIndex int
 }
 
 func (r ResponsesInputStripResult) RemovedCount() int {
@@ -91,6 +99,140 @@ func StripEncryptedReasoningFromResponsesInput(input json.RawMessage) (Responses
 	return result, nil
 }
 
+func StripResponsesInputEncryptedContentItem(request dto.OpenAIResponsesRequest, param string, message string) (dto.OpenAIResponsesRequest, bool, error) {
+	path, ok := responsesEncryptedContentInputPathFromError(param, message)
+	if !ok {
+		return request, false, nil
+	}
+
+	trimmedInput := bytes.TrimSpace(request.Input)
+	if len(trimmedInput) == 0 || trimmedInput[0] != '[' {
+		return request, false, nil
+	}
+	var items []json.RawMessage
+	if err := basecommon.Unmarshal(request.Input, &items); err != nil {
+		return request, false, err
+	}
+	if path.inputIndex < 0 || path.inputIndex >= len(items) {
+		return request, false, nil
+	}
+
+	if path.nestedField == "" {
+		strippedItems, removed, err := stripTopLevelResponsesEncryptedReasoning(items, path.inputIndex)
+		if err != nil {
+			return request, false, err
+		}
+		if !removed {
+			return request, false, nil
+		}
+		return withResponsesInput(request, strippedItems)
+	}
+
+	strippedItem, removed, err := stripNestedResponsesEncryptedContent(items[path.inputIndex], path)
+	if err != nil {
+		return request, false, err
+	}
+	if !removed {
+		return request, false, nil
+	}
+	items[path.inputIndex] = strippedItem
+	return withResponsesInput(request, items)
+}
+
+func withResponsesInput(request dto.OpenAIResponsesRequest, items []json.RawMessage) (dto.OpenAIResponsesRequest, bool, error) {
+	encodedInput, err := basecommon.Marshal(items)
+	if err != nil {
+		return request, false, fmt.Errorf("marshal responses input without encrypted context content: %w", err)
+	}
+	request.Input = encodedInput
+	return request, true, nil
+}
+
+func stripTopLevelResponsesEncryptedReasoning(items []json.RawMessage, inputIndex int) ([]json.RawMessage, bool, error) {
+	if len(items) == 1 {
+		return items, false, nil
+	}
+	var item map[string]json.RawMessage
+	if err := basecommon.Unmarshal(items[inputIndex], &item); err != nil {
+		return items, false, err
+	}
+	if !responsesItemIsEncryptedReasoning(item) || !responsesItemHasEncryptedContent(item) {
+		return items, false, nil
+	}
+	return append(items[:inputIndex], items[inputIndex+1:]...), true, nil
+}
+
+func stripNestedResponsesEncryptedContent(rawItem json.RawMessage, path responsesEncryptedContentInputPath) (json.RawMessage, bool, error) {
+	var item map[string]json.RawMessage
+	if err := basecommon.Unmarshal(rawItem, &item); err != nil {
+		return rawItem, false, err
+	}
+	if !responsesItemSupportsEncryptedContent(item, path.nestedField) {
+		return rawItem, false, nil
+	}
+	contentRaw, exists := item[path.nestedField]
+	if !exists {
+		return rawItem, false, nil
+	}
+	var content []json.RawMessage
+	if err := basecommon.Unmarshal(contentRaw, &content); err != nil {
+		return rawItem, false, err
+	}
+	if path.nestedIndex < 0 || path.nestedIndex >= len(content) || len(content) == 1 {
+		return rawItem, false, nil
+	}
+	var contentItem map[string]json.RawMessage
+	if err := basecommon.Unmarshal(content[path.nestedIndex], &contentItem); err != nil {
+		return rawItem, false, err
+	}
+	if responsesItemType(contentItem) != "encrypted_content" || !responsesItemHasEncryptedContent(contentItem) {
+		return rawItem, false, nil
+	}
+	content = append(content[:path.nestedIndex], content[path.nestedIndex+1:]...)
+	encodedContent, err := basecommon.Marshal(content)
+	if err != nil {
+		return rawItem, false, fmt.Errorf("marshal responses nested content without encrypted context item: %w", err)
+	}
+	item[path.nestedField] = encodedContent
+	encodedItem, err := basecommon.Marshal(item)
+	if err != nil {
+		return rawItem, false, fmt.Errorf("marshal responses input item without encrypted context content: %w", err)
+	}
+	return encodedItem, true, nil
+}
+
+func HasResponsesInputEncryptedContentPath(param string, message string) bool {
+	_, ok := responsesEncryptedContentInputPathFromError(param, message)
+	return ok
+}
+
+func responsesEncryptedContentInputPathFromError(param string, message string) (responsesEncryptedContentInputPath, bool) {
+	trimmedParam := strings.TrimSpace(param)
+	matches := responsesEncryptedContentParameterPattern.FindStringSubmatch(trimmedParam)
+	if len(matches) == 0 && trimmedParam == "" {
+		matches = responsesEncryptedContentTextPattern.FindStringSubmatch(message)
+	}
+	if len(matches) != 4 {
+		return responsesEncryptedContentInputPath{}, false
+	}
+	inputIndex, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return responsesEncryptedContentInputPath{}, false
+	}
+	if matches[2] == "" {
+		return responsesEncryptedContentInputPath{inputIndex: inputIndex}, true
+	}
+	nestedIndex, err := strconv.Atoi(matches[3])
+	if err != nil {
+		return responsesEncryptedContentInputPath{}, false
+	}
+	return responsesEncryptedContentInputPath{
+		inputIndex:  inputIndex,
+		nestedField: matches[2],
+		nestedIndex: nestedIndex,
+	}, true
+}
+
 func responsesItemType(item map[string]json.RawMessage) string {
 	rawType := item["type"]
 	if len(rawType) == 0 {
@@ -111,6 +253,23 @@ func responsesItemHasEncryptedContent(item map[string]json.RawMessage) bool {
 	var encryptedContent string
 	if err := basecommon.Unmarshal(raw, &encryptedContent); err == nil {
 		return encryptedContent != ""
+	}
+	return false
+}
+
+func responsesItemIsEncryptedReasoning(item map[string]json.RawMessage) bool {
+	return responsesItemType(item) == "reasoning"
+}
+
+func responsesItemSupportsEncryptedContent(item map[string]json.RawMessage, nestedField string) bool {
+	switch nestedField {
+	case "content":
+		return responsesItemType(item) == "agent_message"
+	case "output":
+		switch responsesItemType(item) {
+		case "function_call_output", "custom_tool_call_output":
+			return true
+		}
 	}
 	return false
 }
