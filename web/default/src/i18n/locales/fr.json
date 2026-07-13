@@ -4360,6 +4360,8 @@
     "Upstream Chat Completions": "Chat Completions amont",
     "Upstream Responses": "Responses amont",
     "Upstream protocol": "Protocole amont",
+    "Upstream 429 retry limit": "Limite de nouvelles tentatives 429 en amont",
+    "Maximum extra channel attempts after an upstream 429 (0-10)": "Nombre maximal de tentatives de canal supplementaires apres un 429 en amont (0-10)",
     "Use when a client sends Chat Completions but the upstream should receive Responses.": "À utiliser lorsqu'un client envoie Chat Completions mais que l'amont doit recevoir Responses.",
     "Use when a client sends Responses but the upstream only accepts Chat Completions.": "À utiliser lorsqu'un client envoie Responses mais que l'amont accepte uniquement Chat Completions.",
     "{{channelCount}} channel IDs, {{typeCount}} channel types": "{{channelCount}} ID de canal, {{typeCount}} types de canal",

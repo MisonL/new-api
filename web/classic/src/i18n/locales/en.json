@@ -435,6 +435,7 @@
     "上一步": "Previous",
     "上次保存: ": "Last saved: ",
     "上游倍率同步": "Upstream ratio synchronization",
+    "上游429额外重试上限": "Upstream 429 extra retry limit",
     "上游返回": "Upstream response",
     "下一个表单块": "Next form block",
     "下一步": "Next",

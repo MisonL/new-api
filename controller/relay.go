@@ -230,7 +230,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					break
 				}
 			}
-
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				newAPIError = relay.WssHelper(c, relayInfo)
@@ -248,6 +247,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
+			observeUpstreamRateLimitRetry(c, channel.Id, newAPIError)
 			relayInfo.LastError = newAPIError
 			recordResponsesCapabilityObservation(c, relayInfo, newAPIError)
 			recordChannelRequestBodyLimit(c, relayInfo, newAPIError)
@@ -959,6 +959,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if openaiErr == nil {
 		return false
 	}
+	if service.IsUpstreamRateLimitRetryTerminal(c) {
+		return false
+	}
 	if isPermanentUpstreamUnavailableError(openaiErr) {
 		return false
 	}
@@ -1003,6 +1006,23 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return true
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
+func observeUpstreamRateLimitRetry(c *gin.Context, channelID int, openaiErr *types.NewAPIError) {
+	if openaiErr == nil {
+		return
+	}
+	statusCode := openaiErr.StatusCode
+	if openaiErr.OriginalStatusCode != 0 {
+		statusCode = openaiErr.OriginalStatusCode
+	}
+	if !isUpstreamRateLimitError(statusCode) {
+		return
+	}
+	if openaiErr.GetErrorType() == types.ErrorTypeNewAPIError || types.IsChannelError(openaiErr) {
+		return
+	}
+	service.ObserveUpstreamRateLimitRetry(c, channelID)
 }
 
 func recordResponsesCapabilityObservation(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) {
@@ -2015,13 +2035,7 @@ func processChannelError(c *gin.Context, relayInfo *relaycommon.RelayInfo, chann
 		other["channel_name"] = c.GetString("channel_name")
 		other["channel_type"] = c.GetInt("channel_type")
 		adminInfo := make(map[string]interface{})
-		adminInfo["use_channel"] = c.GetStringSlice("use_channel")
-		isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
-		if isMultiKey {
-			adminInfo["is_multi_key"] = true
-			adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
-		}
-		service.AppendChannelAffinityAdminInfo(c, adminInfo)
+		appendChannelErrorAdminInfo(c, adminInfo)
 		other["admin_info"] = adminInfo
 		service.AppendRequestHeaderPolicyInfo(c, other)
 		service.AppendResponsesRelayInfo(c, relayInfo, other)
@@ -2048,6 +2062,19 @@ func processChannelError(c *gin.Context, relayInfo *relaycommon.RelayInfo, chann
 		)
 	}
 
+}
+
+func appendChannelErrorAdminInfo(c *gin.Context, adminInfo map[string]interface{}) {
+	if c == nil || adminInfo == nil {
+		return
+	}
+	adminInfo["use_channel"] = c.GetStringSlice("use_channel")
+	if common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey) {
+		adminInfo["is_multi_key"] = true
+		adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
+	}
+	service.AppendChannelAffinityAdminInfo(c, adminInfo)
+	service.AppendUpstreamRateLimitRetryAdminInfo(c, adminInfo)
 }
 
 // RelayMidjourney handles Midjourney proxy relay requests.
@@ -2212,12 +2239,22 @@ func RelayTask(c *gin.Context) {
 			break
 		}
 
+		lockedRateLimit := shouldStopLockedTaskUpstreamRateLimitRetry(relayInfo, taskErr)
 		if !taskErr.LocalError {
+			if isUpstreamRateLimitError(taskErr.StatusCode) {
+				service.ObserveUpstreamRateLimitRetry(c, channel.Id)
+			}
+			if lockedRateLimit {
+				service.TerminateUpstreamRateLimitRetry(c)
+			}
 			processChannelError(c,
 				relayInfo,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
 				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))
+		}
+		if lockedRateLimit {
+			break
 		}
 
 		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {
@@ -2264,6 +2301,14 @@ func RelayTask(c *gin.Context) {
 	}
 }
 
+func shouldStopLockedTaskUpstreamRateLimitRetry(info *relaycommon.RelayInfo, taskErr *dto.TaskError) bool {
+	if info == nil || info.TaskRelayInfo == nil || taskErr == nil || taskErr.LocalError || !isUpstreamRateLimitError(taskErr.StatusCode) {
+		return false
+	}
+	lockedChannel, ok := info.LockedChannel.(*model.Channel)
+	return ok && lockedChannel != nil
+}
+
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
 func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
 	if taskErr.StatusCode == http.StatusTooManyRequests {
@@ -2274,6 +2319,12 @@ func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
 
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError, retryTimes int) bool {
 	if taskErr == nil {
+		return false
+	}
+	if service.IsUpstreamRateLimitRetryTerminal(c) {
+		return false
+	}
+	if taskErr.LocalError {
 		return false
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) && !isUpstreamRateLimitError(taskErr.StatusCode) {
@@ -2303,9 +2354,6 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 	}
 	if taskErr.StatusCode == 408 {
 		// azure处理超时不重试
-		return false
-	}
-	if taskErr.LocalError {
 		return false
 	}
 	if taskErr.StatusCode/100 == 2 {

@@ -4360,6 +4360,8 @@
     "Upstream Chat Completions": "Chat Completions upstream",
     "Upstream Responses": "Responses upstream",
     "Upstream protocol": "Giao thức upstream",
+    "Upstream 429 retry limit": "Gioi han thu lai 429 tu upstream",
+    "Maximum extra channel attempts after an upstream 429 (0-10)": "So lan thu kenh bo sung toi da sau loi 429 tu upstream (0-10)",
     "Use when a client sends Chat Completions but the upstream should receive Responses.": "Dùng khi client gửi Chat Completions nhưng upstream cần nhận Responses.",
     "Use when a client sends Responses but the upstream only accepts Chat Completions.": "Dùng khi client gửi Responses nhưng upstream chỉ chấp nhận Chat Completions.",
     "{{channelCount}} channel IDs, {{typeCount}} channel types": "{{channelCount}} ID kênh, {{typeCount}} loại kênh",

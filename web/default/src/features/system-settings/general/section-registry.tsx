@@ -103,6 +103,7 @@ const GENERAL_SECTIONS = [
       <SystemBehaviorSection
         defaultValues={{
           RetryTimes: settings.RetryTimes,
+          UpstreamRateLimitRetryLimit: settings.UpstreamRateLimitRetryLimit,
           DefaultCollapseSidebar: settings.DefaultCollapseSidebar,
           DemoSiteEnabled: settings.DemoSiteEnabled,
           SelfUseModeEnabled: settings.SelfUseModeEnabled,

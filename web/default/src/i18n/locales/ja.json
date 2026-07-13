@@ -4360,6 +4360,8 @@
     "Upstream Chat Completions": "上流 Chat Completions",
     "Upstream Responses": "上流 Responses",
     "Upstream protocol": "上流プロトコル",
+    "Upstream 429 retry limit": "上流 429 の追加再試行上限",
+    "Maximum extra channel attempts after an upstream 429 (0-10)": "上流の 429 後に許可する追加チャネル試行回数 (0-10)",
     "Use when a client sends Chat Completions but the upstream should receive Responses.": "クライアントが Chat Completions を送信し、上流には Responses を受け取らせる場合に使用します。",
     "Use when a client sends Responses but the upstream only accepts Chat Completions.": "クライアントが Responses を送信し、上流が Chat Completions のみ受け付ける場合に使用します。",
     "{{channelCount}} channel IDs, {{typeCount}} channel types": "チャネルID {{channelCount}} 件、チャネルタイプ {{typeCount}} 件",

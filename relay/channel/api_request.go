@@ -574,8 +574,21 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		targetHeader.Set(key, value)
 	}
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
-	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
+	if !service.StartUpstreamRateLimitRetryFollowup(c) {
+		return nil, service.NewUpstreamRateLimitRetryExhaustedError()
+	}
+	targetConn, resp, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
 	if err != nil {
+		if resp != nil {
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			return nil, types.NewOpenAIError(
+				fmt.Errorf("dial failed to %s: %w, status: %d", fullRequestURL, err, resp.StatusCode),
+				types.ErrorCodeDoRequestFailed,
+				resp.StatusCode,
+			)
+		}
 		return nil, fmt.Errorf("dial failed to %s: %w", fullRequestURL, err)
 	}
 	// send request body
@@ -756,6 +769,10 @@ type httpDoer interface {
 }
 
 func doRequestWithClient(c *gin.Context, req *http.Request, info *common.RelayInfo, client httpDoer) (*http.Response, error) {
+	if !service.StartUpstreamRateLimitRetryFollowup(c) {
+		return nil, service.NewUpstreamRateLimitRetryExhaustedError()
+	}
+
 	var stopPinger context.CancelFunc
 	if info.IsStream {
 		helper.SetEventStreamHeaders(c)

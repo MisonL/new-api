@@ -35,6 +35,7 @@ const (
 	ContextKeyResponsesChatCompatReasoningSummaryMapped     ContextKey = "responses_chat_compat_reasoning_summary_mapped"
 	ContextKeyResponsesCompactionOutput                     ContextKey = "responses_compaction_output"
 	ContextKeyResponsesRemoteCompactSyntheticFallback       ContextKey = "responses_remote_compact_synthetic_fallback"
+	ContextKeyUpstreamRateLimitRetryState                   ContextKey = "upstream_rate_limit_retry_state"
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"

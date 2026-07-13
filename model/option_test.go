@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/require"
 )
 
@@ -76,4 +77,29 @@ func TestUpdateOptionRejectsInvalidRequestHeaderPolicyAuxiliarySwitchBeforePersi
 	require.NoError(t, DB.Where("key = ?", "RequestHeaderPolicyAuxiliaryRequestsEnabled").First(&option).Error)
 	require.Equal(t, "true", option.Value)
 	require.Equal(t, "true", common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"])
+}
+
+func TestUpdateOptionValidatesUpstreamRateLimitRetryLimitBeforePersist(t *testing.T) {
+	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
+	previousOptionMap := common.OptionMap
+	common.OptionMap = map[string]string{}
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM options")
+		operation_setting.SetUpstreamRateLimitRetryLimit(previousLimit)
+		common.OptionMap = previousOptionMap
+	})
+
+	require.Error(t, UpdateOption("UpstreamRateLimitRetryLimit", "-1"))
+	require.Error(t, UpdateOption("UpstreamRateLimitRetryLimit", "11"))
+	require.Error(t, UpdateOption("UpstreamRateLimitRetryLimit", "invalid"))
+
+	var count int64
+	require.NoError(t, DB.Model(&Option{}).Where("key = ?", "UpstreamRateLimitRetryLimit").Count(&count).Error)
+	require.Zero(t, count)
+
+	require.NoError(t, UpdateOption("UpstreamRateLimitRetryLimit", " 1 "))
+	var option Option
+	require.NoError(t, DB.Where("key = ?", "UpstreamRateLimitRetryLimit").First(&option).Error)
+	require.Equal(t, "1", option.Value)
+	require.Equal(t, 1, operation_setting.GetUpstreamRateLimitRetryLimit())
 }

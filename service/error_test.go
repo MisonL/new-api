@@ -118,30 +118,35 @@ func TestResetStatusCode(t *testing.T) {
 		statusCode       int
 		statusCodeConfig string
 		expectedCode     int
+		expectedOriginal int
 	}{
 		{
 			name:             "map string value",
 			statusCode:       429,
 			statusCodeConfig: `{"429":"503"}`,
 			expectedCode:     503,
+			expectedOriginal: 429,
 		},
 		{
 			name:             "map int value",
 			statusCode:       429,
 			statusCodeConfig: `{"429":503}`,
 			expectedCode:     503,
+			expectedOriginal: 429,
 		},
 		{
 			name:             "skip invalid string value",
 			statusCode:       429,
 			statusCodeConfig: `{"429":"bad-code"}`,
 			expectedCode:     429,
+			expectedOriginal: 0,
 		},
 		{
 			name:             "skip status code 200",
 			statusCode:       200,
 			statusCodeConfig: `{"200":503}`,
 			expectedCode:     200,
+			expectedOriginal: 0,
 		},
 	}
 
@@ -155,6 +160,7 @@ func TestResetStatusCode(t *testing.T) {
 			}
 			ResetStatusCode(newAPIError, tc.statusCodeConfig)
 			require.Equal(t, tc.expectedCode, newAPIError.StatusCode)
+			require.Equal(t, tc.expectedOriginal, newAPIError.OriginalStatusCode)
 		})
 	}
 }

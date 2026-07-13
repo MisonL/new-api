@@ -55,6 +55,7 @@ const DEFAULT_GENERAL_INPUTS = {
   'general_setting.custom_currency_exchange_rate': '',
   QuotaPerUnit: '',
   RetryTimes: '',
+  UpstreamRateLimitRetryLimit: 1,
   USDExchangeRate: '',
   DisplayTokenStatEnabled: false,
   DefaultCollapseSidebar: false,
@@ -274,6 +275,19 @@ export default function GeneralSettings(props) {
                   initValue={''}
                   placeholder={t('失败重试次数')}
                   onChange={handleFieldChange('RetryTimes')}
+                  showClear
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
+                  field={'UpstreamRateLimitRetryLimit'}
+                  label={t('上游429额外重试上限')}
+                  initValue={1}
+                  placeholder={t('上游429额外重试上限')}
+                  onChange={handleFieldChange('UpstreamRateLimitRetryLimit')}
+                  type='number'
+                  min={0}
+                  max={10}
                   showClear
                 />
               </Col>

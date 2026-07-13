@@ -135,6 +135,31 @@ func TestCanContinueResponsesBootstrapRecovery(t *testing.T) {
 	require.False(t, CanContinueResponsesBootstrapRecovery(ctx, retryableErr))
 }
 
+func TestCanContinueResponsesBootstrapRecoveryStopsAfterRateLimitFollowup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withResponsesBootstrapRecoverySetting(t)
+	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
+	operation_setting.SetUpstreamRateLimitRetryLimit(1)
+	t.Cleanup(func() {
+		operation_setting.SetUpstreamRateLimitRetryLimit(previousLimit)
+	})
+
+	ctx := newResponsesBootstrapTestContext("/v1/responses", `{"model":"gpt-5","stream":true}`)
+	state, err := EnsureResponsesBootstrapRecoveryStateFromRequest(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	enableResponsesBootstrapChannelOptIn(ctx)
+
+	ObserveUpstreamRateLimitRetry(ctx, 206)
+	StartUpstreamRateLimitRetryFollowup(ctx)
+	retryableErr := types.NewOpenAIError(
+		errors.New("upstream failure"),
+		types.ErrorCodeDoRequestFailed,
+		http.StatusBadGateway,
+	)
+	require.False(t, CanContinueResponsesBootstrapRecovery(ctx, retryableErr))
+}
+
 func TestCanContinueResponsesBootstrapRecoveryRequiresChannelOptIn(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	withResponsesBootstrapRecoverySetting(t)

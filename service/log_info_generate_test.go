@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -69,6 +70,29 @@ func TestGenerateTextOtherInfoIncludesUpstreamTiming(t *testing.T) {
 	require.Equal(t, 120.0, other["upstream_header_ms"])
 	require.Equal(t, 250.0, other["upstream_ttfb_ms"])
 	require.Equal(t, 900.0, other["upstream_total_ms"])
+}
+
+func TestGenerateTextOtherInfoIncludesUpstreamRateLimitRetryState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
+	operation_setting.SetUpstreamRateLimitRetryLimit(1)
+	t.Cleanup(func() {
+		operation_setting.SetUpstreamRateLimitRetryLimit(previousLimit)
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	ObserveUpstreamRateLimitRetry(ctx, 206)
+	StartUpstreamRateLimitRetryFollowup(ctx)
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}, 1, 1, 1, 0, 0, -1, -1)
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, 1, adminInfo["upstream_rate_limit_retry_limit"])
+	require.Equal(t, 1, adminInfo["upstream_rate_limit_retry_used"])
+	require.Equal(t, true, adminInfo["upstream_rate_limit_retry_terminal"])
+	require.Equal(t, 206, adminInfo["upstream_rate_limit_trigger_channel_id"])
 }
 
 func TestGenerateTextOtherInfoIncludesUpstreamRequestPath(t *testing.T) {

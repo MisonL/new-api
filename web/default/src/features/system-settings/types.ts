@@ -92,6 +92,7 @@ export type GeneralSettings = {
   'general_setting.custom_currency_symbol': string
   'general_setting.custom_currency_exchange_rate': number
   RetryTimes: number
+  UpstreamRateLimitRetryLimit: number
   DisplayInCurrencyEnabled: boolean
   DisplayTokenStatEnabled: boolean
   DefaultCollapseSidebar: boolean

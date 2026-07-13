@@ -23,6 +23,7 @@ import (
 
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	bedrockruntimeTypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
@@ -45,6 +46,22 @@ func newAwsInvokeContext() (context.Context, context.CancelFunc) {
 		return context.Background(), func() {}
 	}
 	return context.WithTimeout(context.Background(), time.Duration(common.RelayTimeout)*time.Second)
+}
+
+type awsRateLimitAwareRetryer struct {
+	aws.Retryer
+}
+
+func (r awsRateLimitAwareRetryer) IsErrorRetryable(err error) bool {
+	var httpErr interface{ HTTPStatusCode() int }
+	if errors.As(err, &httpErr) && httpErr.HTTPStatusCode() == http.StatusTooManyRequests {
+		return false
+	}
+	return r.Retryer.IsErrorRetryable(err)
+}
+
+func newAwsRateLimitAwareRetryer() aws.Retryer {
+	return awsRateLimitAwareRetryer{Retryer: retry.NewStandard()}
 }
 
 func newAwsClient(c *gin.Context, info *relaycommon.RelayInfo) (*bedrockruntime.Client, error) {
@@ -71,6 +88,7 @@ func newAwsClient(c *gin.Context, info *relaycommon.RelayInfo) (*bedrockruntime.
 			Region:                  region,
 			BearerAuthTokenProvider: bearer.StaticTokenProvider{Token: bearer.Token{Value: apiKey}},
 			HTTPClient:              httpClient,
+			Retryer:                 newAwsRateLimitAwareRetryer(),
 		})
 	case 3:
 		ak := awsSecret[0]
@@ -80,6 +98,7 @@ func newAwsClient(c *gin.Context, info *relaycommon.RelayInfo) (*bedrockruntime.
 			Region:      region,
 			Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(ak, sk, "")),
 			HTTPClient:  httpClient,
+			Retryer:     newAwsRateLimitAwareRetryer(),
 		})
 	default:
 		return nil, errors.New("invalid aws secret key")
@@ -226,6 +245,9 @@ func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types
 	ctx, cancel := newAwsInvokeContext()
 	defer cancel()
 
+	if !service.StartUpstreamRateLimitRetryFollowup(c) {
+		return service.NewUpstreamRateLimitRetryExhaustedError(), nil
+	}
 	awsResp, err := a.AwsClient.InvokeModel(ctx, a.AwsReq.(*bedrockruntime.InvokeModelInput))
 	if err != nil {
 		statusCode := getAwsErrorStatusCode(err)
@@ -256,6 +278,9 @@ func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (
 	ctx, cancel := newAwsInvokeContext()
 	defer cancel()
 
+	if !service.StartUpstreamRateLimitRetryFollowup(c) {
+		return service.NewUpstreamRateLimitRetryExhaustedError(), nil
+	}
 	awsResp, err := a.AwsClient.InvokeModelWithResponseStream(ctx, a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput))
 	if err != nil {
 		statusCode := getAwsErrorStatusCode(err)
@@ -299,6 +324,9 @@ func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) 
 	ctx, cancel := newAwsInvokeContext()
 	defer cancel()
 
+	if !service.StartUpstreamRateLimitRetryFollowup(c) {
+		return service.NewUpstreamRateLimitRetryExhaustedError(), nil
+	}
 	awsResp, err := a.AwsClient.InvokeModel(ctx, a.AwsReq.(*bedrockruntime.InvokeModelInput))
 	if err != nil {
 		statusCode := getAwsErrorStatusCode(err)

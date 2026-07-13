@@ -32,6 +32,7 @@ const defaultGeneralSettings: GeneralSettings = {
   'general_setting.custom_currency_symbol': '¤',
   'general_setting.custom_currency_exchange_rate': 1,
   RetryTimes: 0,
+  UpstreamRateLimitRetryLimit: 1,
   DisplayInCurrencyEnabled: true,
   DisplayTokenStatEnabled: true,
   DefaultCollapseSidebar: false,

@@ -210,6 +210,9 @@ func MarkResponsesBootstrapPayloadStarted(c *gin.Context) {
 
 // CanContinueResponsesBootstrapRecovery reports whether the request may remain in bootstrap recovery.
 func CanContinueResponsesBootstrapRecovery(c *gin.Context, newAPIError *types.NewAPIError) bool {
+	if IsUpstreamRateLimitRetryTerminal(c) {
+		return false
+	}
 	state, ok := GetResponsesBootstrapRecoveryState(c)
 	if !ok || state == nil || !state.Enabled || state.PayloadStarted {
 		return false

@@ -4360,6 +4360,8 @@
     "Upstream Chat Completions": "Upstream Chat Completions",
     "Upstream Responses": "Upstream Responses",
     "Upstream protocol": "Upstream protocol",
+    "Upstream 429 retry limit": "Upstream 429 retry limit",
+    "Maximum extra channel attempts after an upstream 429 (0-10)": "Maximum extra channel attempts after an upstream 429 (0-10)",
     "Use when a client sends Chat Completions but the upstream should receive Responses.": "Use when a client sends Chat Completions but the upstream should receive Responses.",
     "Use when a client sends Responses but the upstream only accepts Chat Completions.": "Use when a client sends Responses but the upstream only accepts Chat Completions.",
     "{{channelCount}} channel IDs, {{typeCount}} channel types": "{{channelCount}} channel IDs, {{typeCount}} channel types",

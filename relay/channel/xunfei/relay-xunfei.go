@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/samber/lo"
 
@@ -130,9 +132,9 @@ func buildXunfeiAuthUrl(hostUrl string, apiKey, apiSecret string) string {
 
 func xunfeiStreamHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, appId string, apiSecret string, apiKey string) (*dto.Usage, *types.NewAPIError) {
 	domain, authUrl := getXunfeiAuthUrl(c, apiKey, apiSecret, textRequest.Model)
-	dataChan, stopChan, err := xunfeiMakeRequest(textRequest, domain, authUrl, appId)
-	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed)
+	dataChan, stopChan, requestErr := xunfeiMakeRequest(c, textRequest, domain, authUrl, appId)
+	if requestErr != nil {
+		return nil, requestErr
 	}
 	helper.SetEventStreamHeaders(c)
 	var usage dto.Usage
@@ -160,9 +162,9 @@ func xunfeiStreamHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, a
 
 func xunfeiHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, appId string, apiSecret string, apiKey string) (*dto.Usage, *types.NewAPIError) {
 	domain, authUrl := getXunfeiAuthUrl(c, apiKey, apiSecret, textRequest.Model)
-	dataChan, stopChan, err := xunfeiMakeRequest(textRequest, domain, authUrl, appId)
-	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed)
+	dataChan, stopChan, requestErr := xunfeiMakeRequest(c, textRequest, domain, authUrl, appId)
+	if requestErr != nil {
+		return nil, requestErr
 	}
 	var usage dto.Usage
 	var content string
@@ -200,19 +202,45 @@ func xunfeiHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, appId s
 	return &usage, nil
 }
 
-func xunfeiMakeRequest(textRequest dto.GeneralOpenAIRequest, domain, authUrl, appId string) (chan XunfeiChatResponse, chan bool, error) {
+func xunfeiMakeRequest(c *gin.Context, textRequest dto.GeneralOpenAIRequest, domain, authUrl, appId string) (chan XunfeiChatResponse, chan bool, *types.NewAPIError) {
 	d := websocket.Dialer{
 		HandshakeTimeout: 5 * time.Second,
 	}
+	if !service.StartUpstreamRateLimitRetryFollowup(c) {
+		return nil, nil, service.NewUpstreamRateLimitRetryExhaustedError()
+	}
 	conn, resp, err := d.Dial(authUrl, nil)
-	if err != nil || resp.StatusCode != 101 {
-		return nil, nil, err
+	if err != nil {
+		if resp != nil {
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			return nil, nil, types.NewOpenAIError(
+				fmt.Errorf("xunfei websocket handshake failed: %w, status: %d", err, resp.StatusCode),
+				types.ErrorCodeDoRequestFailed,
+				resp.StatusCode,
+			)
+		}
+		return nil, nil, types.NewError(err, types.ErrorCodeDoRequestFailed)
+	}
+	if resp == nil {
+		return nil, nil, types.NewError(fmt.Errorf("xunfei websocket handshake returned no response"), types.ErrorCodeDoRequestFailed)
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		return nil, nil, types.NewOpenAIError(
+			fmt.Errorf("xunfei websocket handshake returned status: %d", resp.StatusCode),
+			types.ErrorCodeDoRequestFailed,
+			resp.StatusCode,
+		)
 	}
 
 	data := requestOpenAI2Xunfei(textRequest, appId, domain)
 	err = conn.WriteJSON(data)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, types.NewError(err, types.ErrorCodeDoRequestFailed)
 	}
 
 	dataChan := make(chan XunfeiChatResponse)

@@ -4360,6 +4360,8 @@
     "Upstream Chat Completions": "上游 Chat Completions",
     "Upstream Responses": "上游 Responses",
     "Upstream protocol": "上游协议",
+    "Upstream 429 retry limit": "上游 429 额外重试上限",
+    "Maximum extra channel attempts after an upstream 429 (0-10)": "上游返回 429 后允许的额外渠道尝试次数 (0-10)",
     "Use when a client sends Chat Completions but the upstream should receive Responses.": "客户端发送 Chat Completions，但上游应接收 Responses 时使用。",
     "Use when a client sends Responses but the upstream only accepts Chat Completions.": "客户端发送 Responses，但上游仅接受 Chat Completions 时使用。",
     "{{channelCount}} channel IDs, {{typeCount}} channel types": "{{channelCount}} 个渠道 ID，{{typeCount}} 个渠道类型",

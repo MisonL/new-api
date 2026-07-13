@@ -163,14 +163,15 @@ func IsUpstreamTransportInterruptedError(err error) bool {
 }
 
 type NewAPIError struct {
-	Err            error
-	RelayError     any
-	skipRetry      bool
-	recordErrorLog *bool
-	errorType      ErrorType
-	errorCode      ErrorCode
-	StatusCode     int
-	Metadata       json.RawMessage
+	Err                error
+	RelayError         any
+	skipRetry          bool
+	recordErrorLog     *bool
+	errorType          ErrorType
+	errorCode          ErrorCode
+	StatusCode         int
+	OriginalStatusCode int
+	Metadata           json.RawMessage
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.

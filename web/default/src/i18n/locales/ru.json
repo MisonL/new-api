@@ -4360,6 +4360,8 @@
     "Upstream Chat Completions": "Вышестоящий Chat Completions",
     "Upstream Responses": "Вышестоящий Responses",
     "Upstream protocol": "Вышестоящий протокол",
+    "Upstream 429 retry limit": "Лимит дополнительных повторов при 429 upstream",
+    "Maximum extra channel attempts after an upstream 429 (0-10)": "Максимальное число дополнительных попыток канала после 429 от upstream (0-10)",
     "Use when a client sends Chat Completions but the upstream should receive Responses.": "Используйте, когда клиент отправляет Chat Completions, а вышестоящий сервис должен получать Responses.",
     "Use when a client sends Responses but the upstream only accepts Chat Completions.": "Используйте, когда клиент отправляет Responses, а вышестоящий сервис принимает только Chat Completions.",
     "{{channelCount}} channel IDs, {{typeCount}} channel types": "{{channelCount}} ID каналов, {{typeCount}} типов каналов",

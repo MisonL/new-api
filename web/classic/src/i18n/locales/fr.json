@@ -324,6 +324,7 @@
     "上一步": "Précédent",
     "上次保存: ": "Dernier enregistrement : ",
     "上游倍率同步": "Synchronisation du ratio en amont",
+    "上游429额外重试上限": "Limite de nouvelles tentatives 429 upstream",
     "上游模型管理": "Gestion des modèles amont",
     "上游返回": "Réponse amont",
     "下一个表单块": "Bloc de formulaire suivant",

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -15,6 +16,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -52,6 +55,51 @@ func TestRecordUpstreamRequestPathFallsBackToPathFromMalformedURL(t *testing.T) 
 	recordUpstreamRequestPath(info, "https://api.example.com/%zz/v1/chat?key=secret")
 
 	require.Equal(t, "/%zz/v1/chat", info.UpstreamRequestPath)
+}
+
+func TestDoWssRequestPreservesRateLimitHandshakeAndConsumesFollowup(t *testing.T) {
+	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
+	operation_setting.SetUpstreamRateLimitRetryLimit(1)
+	t.Cleanup(func() {
+		operation_setting.SetUpstreamRateLimitRetryLimit(previousLimit)
+	})
+
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer upstream.Close()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/realtime", nil)
+	service.ObserveUpstreamRateLimitRetry(ctx, 206)
+	_, err := DoWssRequest(
+		&testWssAdaptor{url: "ws" + strings.TrimPrefix(upstream.URL, "http")},
+		ctx,
+		&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}},
+		nil,
+	)
+
+	var upstreamErr *types.NewAPIError
+	require.ErrorAs(t, err, &upstreamErr)
+	require.Equal(t, types.ErrorTypeOpenAIError, upstreamErr.GetErrorType())
+	require.Equal(t, http.StatusTooManyRequests, upstreamErr.StatusCode)
+	state, ok := service.GetUpstreamRateLimitRetryState(ctx)
+	require.True(t, ok)
+	require.Equal(t, 1, state.Used)
+	require.True(t, state.Terminal)
+
+	_, err = DoWssRequest(
+		&testWssAdaptor{url: "ws" + strings.TrimPrefix(upstream.URL, "http")},
+		ctx,
+		&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}},
+		nil,
+	)
+	require.ErrorAs(t, err, &upstreamErr)
+	require.Equal(t, http.StatusTooManyRequests, upstreamErr.StatusCode)
+	require.Equal(t, int32(1), calls.Load())
 }
 
 func setupApiRequestHeaderRuntimeTestDB(t *testing.T, tables ...interface{}) *gorm.DB {
@@ -646,6 +694,68 @@ type signedHeaderTaskAdaptor struct {
 	testTaskAdaptor
 }
 
+type testWssAdaptor struct {
+	url string
+}
+
+func (a *testWssAdaptor) Init(_ *relaycommon.RelayInfo) {}
+
+func (a *testWssAdaptor) GetRequestURL(_ *relaycommon.RelayInfo) (string, error) {
+	return a.url, nil
+}
+
+func (a *testWssAdaptor) SetupRequestHeader(_ *gin.Context, _ *http.Header, _ *relaycommon.RelayInfo) error {
+	return nil
+}
+
+func (a *testWssAdaptor) ConvertOpenAIRequest(_ *gin.Context, _ *relaycommon.RelayInfo, _ *dto.GeneralOpenAIRequest) (any, error) {
+	return nil, nil
+}
+
+func (a *testWssAdaptor) ConvertRerankRequest(_ *gin.Context, _ int, _ dto.RerankRequest) (any, error) {
+	return nil, nil
+}
+
+func (a *testWssAdaptor) ConvertEmbeddingRequest(_ *gin.Context, _ *relaycommon.RelayInfo, _ dto.EmbeddingRequest) (any, error) {
+	return nil, nil
+}
+
+func (a *testWssAdaptor) ConvertAudioRequest(_ *gin.Context, _ *relaycommon.RelayInfo, _ dto.AudioRequest) (io.Reader, error) {
+	return nil, nil
+}
+
+func (a *testWssAdaptor) ConvertImageRequest(_ *gin.Context, _ *relaycommon.RelayInfo, _ dto.ImageRequest) (any, error) {
+	return nil, nil
+}
+
+func (a *testWssAdaptor) ConvertOpenAIResponsesRequest(_ *gin.Context, _ *relaycommon.RelayInfo, _ dto.OpenAIResponsesRequest) (any, error) {
+	return nil, nil
+}
+
+func (a *testWssAdaptor) DoRequest(_ *gin.Context, _ *relaycommon.RelayInfo, _ io.Reader) (any, error) {
+	return nil, nil
+}
+
+func (a *testWssAdaptor) DoResponse(_ *gin.Context, _ *http.Response, _ *relaycommon.RelayInfo) (any, *types.NewAPIError) {
+	return nil, nil
+}
+
+func (a *testWssAdaptor) GetModelList() []string {
+	return nil
+}
+
+func (a *testWssAdaptor) GetChannelName() string {
+	return "test-wss"
+}
+
+func (a *testWssAdaptor) ConvertClaudeRequest(_ *gin.Context, _ *relaycommon.RelayInfo, _ *dto.ClaudeRequest) (any, error) {
+	return nil, nil
+}
+
+func (a *testWssAdaptor) ConvertGeminiRequest(_ *gin.Context, _ *relaycommon.RelayInfo, _ *dto.GeminiChatRequest) (any, error) {
+	return nil, nil
+}
+
 func (a *signedHeaderTaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
 	return a.url, nil
 }
@@ -871,6 +981,66 @@ func TestDoRequestRecordsUpstreamEndOnTransportError(t *testing.T) {
 	totalMs, ok := info.UpstreamTotalLatencyMs()
 	require.True(t, ok)
 	require.GreaterOrEqual(t, totalMs, int64(0))
+}
+
+func TestDoRequestWithClientConsumesRateLimitFollowupAtTransportBoundary(t *testing.T) {
+	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
+	operation_setting.SetUpstreamRateLimitRetryLimit(1)
+	t.Cleanup(func() {
+		operation_setting.SetUpstreamRateLimitRetryLimit(previousLimit)
+	})
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	service.ObserveUpstreamRateLimitRetry(ctx, 206)
+
+	state, ok := service.GetUpstreamRateLimitRetryState(ctx)
+	require.True(t, ok)
+	require.Zero(t, state.Used)
+
+	req, err := http.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	resp, err := doRequestWithClient(ctx, req, info, doerFunc(func(*http.Request) (*http.Response, error) {
+		require.Equal(t, 1, state.Used)
+		require.True(t, state.Terminal)
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("upstream failure")),
+		}, nil
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Body.Close())
+}
+
+func TestDoRequestWithClientRejectsRateLimitFollowupAfterBudgetExhausted(t *testing.T) {
+	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
+	operation_setting.SetUpstreamRateLimitRetryLimit(1)
+	t.Cleanup(func() {
+		operation_setting.SetUpstreamRateLimitRetryLimit(previousLimit)
+	})
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	service.ObserveUpstreamRateLimitRetry(ctx, 206)
+	require.True(t, service.StartUpstreamRateLimitRetryFollowup(ctx))
+
+	req, err := http.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	require.NoError(t, err)
+	var calls atomic.Int32
+	resp, err := doRequestWithClient(ctx, req, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}, doerFunc(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return nil, nil
+	}))
+
+	var retryErr *types.NewAPIError
+	require.ErrorAs(t, err, &retryErr)
+	require.Nil(t, resp)
+	require.Equal(t, http.StatusTooManyRequests, retryErr.StatusCode)
+	require.True(t, types.IsSkipRetryError(retryErr))
+	require.Zero(t, calls.Load())
 }
 
 func TestWrapUpstreamTimingBodyHandlesNilResponseBody(t *testing.T) {

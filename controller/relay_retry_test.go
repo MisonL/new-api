@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -176,6 +179,119 @@ func TestShouldRetryAllowsRateLimitDespiteChannelAffinitySkip(t *testing.T) {
 			require.Equal(t, tc.want, shouldRetry(c, err, 1))
 		})
 	}
+}
+
+func TestShouldRetryStopsAfterOneUpstreamRateLimitFollowup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
+	operation_setting.SetUpstreamRateLimitRetryLimit(1)
+	t.Cleanup(func() {
+		operation_setting.SetUpstreamRateLimitRetryLimit(previousLimit)
+	})
+
+	ctx, _ := gin.CreateTestContext(nil)
+	firstRateLimit := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests)
+	service.ObserveUpstreamRateLimitRetry(ctx, 206)
+	require.True(t, shouldRetry(ctx, firstRateLimit, 3))
+
+	service.StartUpstreamRateLimitRetryFollowup(ctx)
+	followupFailure := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway)
+	require.False(t, shouldRetry(ctx, followupFailure, 2))
+}
+
+func TestShouldRetryStopsImmediatelyWhenUpstreamRateLimitFollowupLimitIsZero(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
+	operation_setting.SetUpstreamRateLimitRetryLimit(0)
+	t.Cleanup(func() {
+		operation_setting.SetUpstreamRateLimitRetryLimit(previousLimit)
+	})
+
+	ctx, _ := gin.CreateTestContext(nil)
+	service.ObserveUpstreamRateLimitRetry(ctx, 206)
+	rateLimit := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests)
+	require.False(t, shouldRetry(ctx, rateLimit, 3))
+}
+
+func TestShouldRetryTaskStopsAfterOneUpstreamRateLimitFollowup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
+	operation_setting.SetUpstreamRateLimitRetryLimit(1)
+	t.Cleanup(func() {
+		operation_setting.SetUpstreamRateLimitRetryLimit(previousLimit)
+	})
+
+	ctx, _ := gin.CreateTestContext(nil)
+	firstRateLimit := &dto.TaskError{StatusCode: http.StatusTooManyRequests}
+	service.ObserveUpstreamRateLimitRetry(ctx, 206)
+	require.True(t, shouldRetryTaskRelay(ctx, 206, firstRateLimit, 3))
+
+	service.StartUpstreamRateLimitRetryFollowup(ctx)
+	followupFailure := &dto.TaskError{StatusCode: http.StatusBadGateway}
+	require.False(t, shouldRetryTaskRelay(ctx, 207, followupFailure, 2))
+}
+
+func TestShouldRetryTaskRelayDoesNotSwitchForLocalRateLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+	taskErr := &dto.TaskError{
+		StatusCode: http.StatusTooManyRequests,
+		LocalError: true,
+	}
+	require.False(t, shouldRetryTaskRelay(ctx, 206, taskErr, 3))
+}
+
+func TestObserveUpstreamRateLimitRetryIgnoresLocalRelayError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+	localErr := types.NewErrorWithStatusCode(
+		errors.New("local rate limit"),
+		types.ErrorCodePreConsumeTokenQuotaFailed,
+		http.StatusTooManyRequests,
+	)
+
+	observeUpstreamRateLimitRetry(ctx, 206, localErr)
+	_, ok := service.GetUpstreamRateLimitRetryState(ctx)
+	require.False(t, ok)
+}
+
+func TestObserveUpstreamRateLimitRetryUsesOriginalMappedStatusCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+	upstreamErr := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests)
+	service.ResetStatusCode(upstreamErr, `{"429":503}`)
+
+	observeUpstreamRateLimitRetry(ctx, 206, upstreamErr)
+	state, ok := service.GetUpstreamRateLimitRetryState(ctx)
+	require.True(t, ok)
+	require.Equal(t, 206, state.TriggerChannelID)
+}
+
+func TestShouldStopLockedTaskUpstreamRateLimitRetry(t *testing.T) {
+	lockedInfo := &relaycommon.RelayInfo{
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{LockedChannel: &model.Channel{Id: 206}},
+	}
+	unlockedInfo := &relaycommon.RelayInfo{}
+	upstreamRateLimit := &dto.TaskError{StatusCode: http.StatusTooManyRequests}
+	localRateLimit := &dto.TaskError{StatusCode: http.StatusTooManyRequests, LocalError: true}
+
+	require.True(t, shouldStopLockedTaskUpstreamRateLimitRetry(lockedInfo, upstreamRateLimit))
+	require.False(t, shouldStopLockedTaskUpstreamRateLimitRetry(lockedInfo, localRateLimit))
+	require.False(t, shouldStopLockedTaskUpstreamRateLimitRetry(unlockedInfo, upstreamRateLimit))
+}
+
+func TestAppendChannelErrorAdminInfoIncludesUpstreamRateLimitRetryState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+	service.ObserveUpstreamRateLimitRetry(ctx, 206)
+	service.StartUpstreamRateLimitRetryFollowup(ctx)
+
+	adminInfo := make(map[string]interface{})
+	appendChannelErrorAdminInfo(ctx, adminInfo)
+	require.Equal(t, 1, adminInfo["upstream_rate_limit_retry_limit"])
+	require.Equal(t, 1, adminInfo["upstream_rate_limit_retry_used"])
+	require.Equal(t, true, adminInfo["upstream_rate_limit_retry_terminal"])
+	require.Equal(t, 206, adminInfo["upstream_rate_limit_trigger_channel_id"])
 }
 
 func TestShouldRetryAllowsModelCapacityDespiteChannelAffinitySkip(t *testing.T) {
@@ -562,6 +678,144 @@ func TestGetChannelRateLimitRetrySwitchesChannelAndRefreshesMeta(t *testing.T) {
 	require.NotNil(t, info.ChannelMeta)
 	require.Equal(t, fallback.Id, info.ChannelMeta.ChannelId)
 	require.Equal(t, fallback.Name, common.GetContextKeyString(ctx, constant.ContextKeyChannelName))
+}
+
+func TestRelayStopsAfterOneOutboundUpstreamRateLimitFollowup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupChannelControllerTestDB(t)
+
+	var firstCalls atomic.Int32
+	var secondCalls atomic.Int32
+	var thirdCalls atomic.Int32
+	firstUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit_error","code":"rate_limit_exceeded"}}`))
+	}))
+	defer firstUpstream.Close()
+	secondUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":{"message":"gateway failure","type":"server_error","code":"server_error"}}`))
+	}))
+	defer secondUpstream.Close()
+	thirdUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		thirdCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":{"message":"gateway failure","type":"server_error","code":"server_error"}}`))
+	}))
+	defer thirdUpstream.Close()
+
+	modelName := "relay-429-limit-test"
+	initialQuota := 1_000_000
+	priority := int64(10)
+	weight := uint(1)
+	autoBan := 0
+	channels := []*model.Channel{
+		{
+			Id:       206,
+			Name:     "rate-limited-upstream",
+			Key:      "test-key-206",
+			Type:     constant.ChannelTypeOpenAI,
+			Status:   common.ChannelStatusEnabled,
+			Group:    "default",
+			Models:   modelName,
+			BaseURL:  &firstUpstream.URL,
+			Priority: &priority,
+			Weight:   &weight,
+			AutoBan:  &autoBan,
+		},
+		{
+			Id:       207,
+			Name:     "followup-upstream-a",
+			Key:      "test-key-207",
+			Type:     constant.ChannelTypeOpenAI,
+			Status:   common.ChannelStatusEnabled,
+			Group:    "default",
+			Models:   modelName,
+			BaseURL:  &secondUpstream.URL,
+			Priority: &priority,
+			Weight:   &weight,
+			AutoBan:  &autoBan,
+		},
+		{
+			Id:       208,
+			Name:     "followup-upstream-b",
+			Key:      "test-key-208",
+			Type:     constant.ChannelTypeOpenAI,
+			Status:   common.ChannelStatusEnabled,
+			Group:    "default",
+			Models:   modelName,
+			BaseURL:  &thirdUpstream.URL,
+			Priority: &priority,
+			Weight:   &weight,
+			AutoBan:  &autoBan,
+		},
+	}
+	for _, channel := range channels {
+		require.NoError(t, db.Create(channel).Error)
+		require.NoError(t, db.Create(&model.Ability{
+			Group:     "default",
+			Model:     modelName,
+			ChannelId: channel.Id,
+			Enabled:   true,
+			Priority:  channel.Priority,
+			Weight:    *channel.Weight,
+		}).Error)
+	}
+	require.NoError(t, db.Create(&model.User{
+		Id:       1,
+		Username: "relay-429-limit-user",
+		Password: "test-password",
+		Quota:    initialQuota,
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	previousRetryTimes := common.RetryTimes
+	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
+	previousErrorLogEnabled := constant.ErrorLogEnabled
+	previousCountToken := constant.CountToken
+	common.RetryTimes = 3
+	operation_setting.SetUpstreamRateLimitRetryLimit(1)
+	constant.ErrorLogEnabled = false
+	constant.CountToken = false
+	service.InitHttpClient()
+	t.Cleanup(func() {
+		common.RetryTimes = previousRetryTimes
+		operation_setting.SetUpstreamRateLimitRetryLimit(previousLimit)
+		constant.ErrorLogEnabled = previousErrorLogEnabled
+		constant.CountToken = previousCountToken
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/pg/v1/chat/completions",
+		strings.NewReader(`{"model":"relay-429-limit-test","messages":[{"role":"user","content":"ping"}]}`),
+	)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("relay_mode", relayconstant.RelayModeChatCompletions)
+	common.SetContextKey(ctx, constant.ContextKeyUserId, 1)
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyUserSetting, dto.UserSetting{
+		AcceptUnsetRatioModel: true,
+		BillingPreference:     "wallet_only",
+	})
+	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, channels[0], modelName))
+
+	Relay(ctx, types.RelayFormatOpenAI)
+
+	require.Equal(t, http.StatusBadGateway, recorder.Code)
+	require.Equal(t, int32(1), firstCalls.Load())
+	require.Equal(t, int32(1), secondCalls.Load()+thirdCalls.Load())
+	require.Len(t, ctx.GetStringSlice("use_channel"), 2)
+	require.Equal(t, "206", ctx.GetStringSlice("use_channel")[0])
 }
 
 func TestGetChannelSkipsResponsesViaChatForRemoteCompactionInput(t *testing.T) {

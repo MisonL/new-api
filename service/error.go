@@ -163,6 +163,9 @@ func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) 
 		if !ok {
 			return
 		}
+		if newApiErr.OriginalStatusCode == 0 {
+			newApiErr.OriginalStatusCode = newApiErr.StatusCode
+		}
 		newApiErr.StatusCode = intCode
 	}
 }
