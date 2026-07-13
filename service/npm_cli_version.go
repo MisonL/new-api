@@ -23,7 +23,7 @@ const (
 	npmCliVersionOptionLimit       = 5
 	npmCliVersionRecentErrorLimit  = 5
 	npmCliVersionRefreshInterval   = 10 * time.Minute
-	npmRegistryRequestTimeout      = 5 * time.Second
+	npmRegistryRequestTimeout      = 8 * time.Second
 	npmRegistryMetadataMaxBytes    = 4 << 20
 	defaultNpmRegistryMetadataURL  = "https://registry.npmjs.org"
 	NpmCLIVersionLatestAlias       = "latest"

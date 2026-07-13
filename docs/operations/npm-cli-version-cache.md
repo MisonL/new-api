@@ -8,6 +8,7 @@
 - `GET /api/channel/npm_version_options` 只读取已记录缓存，不实时访问 npm registry。
 - `POST /api/channel/npm_version_options/refresh` 触发一次手动刷新，成功后先写入数据库，再更新进程内缓存。同一进程内相同包名的并发手动刷新会通过 singleflight 合并，只执行一次 registry 读取和持久化；不同进程仍依赖数据库 CAS 合并保证一致性。
 - 后台定时任务每 10 分钟执行一次，只在 master 节点访问 npm registry。
+- 单个 npm registry 请求的总超时为 8 秒。该值覆盖当前 abbreviated metadata 的实际传输时间，并保持低于前端 10 秒请求超时；响应解码仍受 4 MiB 上限保护。
 - 多节点或并发刷新时，持久化逻辑会先读取数据库中的现值，再和本次结果合并，并用 CAS 更新，避免旧内存快照覆盖数据库里更新的包记录。
 - CAS 写入冲突会短退避加轻量 jitter 后重试，降低多个实例同时刷新时一起耗尽重试次数的概率。
 - MySQL 下 CAS 使用 `BINARY value = BINARY ?` 做值比较，避免默认 collation 影响整段 JSON 文本比较；SQLite/PostgreSQL 使用普通 `value = ?`。
