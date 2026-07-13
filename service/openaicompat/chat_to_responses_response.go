@@ -57,11 +57,35 @@ func parseChatCustomToolPayload(raw []byte) (string, string, error) {
 	if name == "" {
 		return "", "", fmt.Errorf("custom tool name is required")
 	}
-	input, err := stringifyResponsesOutput(custom["input"])
-	if err != nil {
-		return "", "", fmt.Errorf("failed to encode custom tool input: %w", err)
+	rawInput, exists := custom["input"]
+	if !exists {
+		return "", "", fmt.Errorf("custom tool input is required")
+	}
+	input, ok := rawInput.(string)
+	if !ok {
+		return "", "", fmt.Errorf("custom tool input must be a string")
 	}
 	return name, input, nil
+}
+
+func ParseChatCustomToolFunctionArguments(arguments string) (string, error) {
+	trimmed := strings.TrimSpace(arguments)
+	if trimmed == "" {
+		return "", fmt.Errorf("custom tool function arguments are required")
+	}
+	var payload map[string]any
+	if err := common.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return "", fmt.Errorf("failed to parse custom tool function arguments: %w", err)
+	}
+	input, ok := payload["input"]
+	if !ok {
+		return "", fmt.Errorf("custom tool function arguments require input")
+	}
+	result, ok := input.(string)
+	if !ok {
+		return "", fmt.Errorf("custom tool function input must be a string")
+	}
+	return result, nil
 }
 
 func ChatCompletionsResponseToResponsesResponse(resp *dto.OpenAITextResponse, id string) (*dto.OpenAIResponsesResponse, *dto.Usage, error) {
@@ -69,6 +93,10 @@ func ChatCompletionsResponseToResponsesResponse(resp *dto.OpenAITextResponse, id
 }
 
 func ChatCompletionsResponseToResponsesResponseWithOptions(resp *dto.OpenAITextResponse, id string, options ResponsesChatCompatibilityOptions) (*dto.OpenAIResponsesResponse, *dto.Usage, error) {
+	return ChatCompletionsResponseToResponsesResponseWithOptionsAndState(resp, id, options, nil)
+}
+
+func ChatCompletionsResponseToResponsesResponseWithOptionsAndState(resp *dto.OpenAITextResponse, id string, options ResponsesChatCompatibilityOptions, toolState *ResponsesChatCompatibilityToolState) (*dto.OpenAIResponsesResponse, *dto.Usage, error) {
 	if resp == nil {
 		return nil, nil, fmt.Errorf("response is nil")
 	}
@@ -131,6 +159,26 @@ func ChatCompletionsResponseToResponsesResponseWithOptions(resp *dto.OpenAITextR
 		if callID == "" {
 			callID = fmt.Sprintf("call_%d", index)
 		}
+		identity, hasIdentity := toolState.Resolve(name)
+		if hasIdentity && identity.Type == dto.CustomType {
+			if toolType != "" && toolType != "function" {
+				return nil, nil, fmt.Errorf("custom tool bridge received unsupported chat tool type %q", toolType)
+			}
+			input, err := ParseChatCustomToolFunctionArguments(toolCall.Function.Arguments)
+			if err != nil {
+				return nil, nil, err
+			}
+			output = append(output, dto.ResponsesOutput{
+				Type:      "custom_tool_call",
+				ID:        fmt.Sprintf("ctc_%d", index),
+				Status:    "completed",
+				CallId:    callID,
+				Name:      identity.Name,
+				Namespace: identity.Namespace,
+				Input:     input,
+			})
+			continue
+		}
 		if toolType == dto.CustomType {
 			if !options.EnableCustomToolBridge {
 				return nil, nil, fmt.Errorf("custom tool bridge is not enabled in responses compatibility mode")
@@ -139,13 +187,19 @@ func ChatCompletionsResponseToResponsesResponseWithOptions(resp *dto.OpenAITextR
 			if err != nil {
 				return nil, nil, err
 			}
+			namespace := ""
+			if identity, ok := toolState.Resolve(name); ok {
+				name = identity.Name
+				namespace = identity.Namespace
+			}
 			output = append(output, dto.ResponsesOutput{
-				Type:   "custom_tool_call",
-				ID:     fmt.Sprintf("ctc_%d", index),
-				Status: "completed",
-				CallId: callID,
-				Name:   name,
-				Input:  input,
+				Type:      "custom_tool_call",
+				ID:        fmt.Sprintf("ctc_%d", index),
+				Status:    "completed",
+				CallId:    callID,
+				Name:      name,
+				Namespace: namespace,
+				Input:     input,
 			})
 			continue
 		}
@@ -154,6 +208,26 @@ func ChatCompletionsResponseToResponsesResponseWithOptions(resp *dto.OpenAITextR
 		}
 		if name == "" {
 			return nil, nil, fmt.Errorf("tool call name is required")
+		}
+		if identity, ok := toolState.Resolve(name); ok && identity.Type == responsesToolTypeToolSearch {
+			argumentsRaw, err := responsesToolSearchArguments(toolCall.Function.Arguments)
+			if err != nil {
+				return nil, nil, err
+			}
+			output = append(output, dto.ResponsesOutput{
+				Type:      "tool_search_call",
+				ID:        fmt.Sprintf("tsc_%d", index),
+				Status:    "completed",
+				CallId:    callID,
+				Execution: "client",
+				Arguments: argumentsRaw,
+			})
+			continue
+		}
+		namespace := ""
+		if identity, ok := toolState.Resolve(name); ok {
+			name = identity.Name
+			namespace = identity.Namespace
 		}
 		argumentsRaw, err := common.Marshal(toolCall.Function.Arguments)
 		if err != nil {
@@ -165,6 +239,7 @@ func ChatCompletionsResponseToResponsesResponseWithOptions(resp *dto.OpenAITextR
 			Status:    "completed",
 			CallId:    callID,
 			Name:      name,
+			Namespace: namespace,
 			Arguments: argumentsRaw,
 		})
 	}
@@ -191,4 +266,23 @@ func ChatCompletionsResponseToResponsesResponseWithOptions(resp *dto.OpenAITextR
 	}
 
 	return out, usage, nil
+}
+
+func responsesToolSearchArguments(arguments string) (common.RawMessage, error) {
+	trimmed := strings.TrimSpace(arguments)
+	if trimmed == "" {
+		return nil, fmt.Errorf("tool_search arguments are required")
+	}
+	raw := common.RawMessage(trimmed)
+	if !common.ValidJson(raw) || common.GetJsonType(raw) != "object" {
+		return nil, fmt.Errorf("tool_search arguments must be a JSON object")
+	}
+	var payload map[string]any
+	if err := common.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("failed to parse tool_search arguments: %w", err)
+	}
+	if strings.TrimSpace(common.Interface2String(payload["query"])) == "" {
+		return nil, fmt.Errorf("tool_search arguments require query")
+	}
+	return raw, nil
 }

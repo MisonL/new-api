@@ -18,46 +18,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type chatToolCallState struct {
-	outputIndex int
-	itemID      string
-	callID      string
-	toolType    string
-	name        string
-	arguments   strings.Builder
-	input       strings.Builder
-	sentAdded   bool
-}
-
-func marshalResponsesCompatArguments(arguments string) (common.RawMessage, error) {
-	return common.Marshal(arguments)
-}
-
-func parseChatCustomStreamDelta(raw []byte) (string, string, error) {
-	if len(raw) == 0 {
-		return "", "", nil
-	}
-	var custom map[string]any
-	if err := common.Unmarshal(raw, &custom); err != nil {
-		return "", "", err
-	}
-	name := strings.TrimSpace(common.Interface2String(custom["name"]))
-	input := ""
-	if value, ok := custom["input"]; ok {
-		switch v := value.(type) {
-		case string:
-			input = v
-		default:
-			rawInput, err := common.Marshal(v)
-			if err != nil {
-				return "", "", err
-			}
-			input = string(rawInput)
-		}
-	}
-	return name, input, nil
-}
-
 func getResponsesCompatID(c *gin.Context) string {
 	logID := c.GetString(common.RequestIdKey)
 	if logID == "" {
@@ -114,6 +74,10 @@ func OaiChatToResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 }
 
 func OaiChatToResponsesHandlerWithOptions(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, options service.ResponsesChatCompatibilityOptions) (*dto.Usage, *types.NewAPIError) {
+	return OaiChatToResponsesHandlerWithOptionsAndState(c, info, resp, options, nil)
+}
+
+func OaiChatToResponsesHandlerWithOptionsAndState(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, options service.ResponsesChatCompatibilityOptions, toolState *service.ResponsesChatCompatibilityToolState) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
@@ -133,7 +97,7 @@ func OaiChatToResponsesHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 	}
 
 	responsesID := getResponsesCompatID(c)
-	responsesResp, usage, err := service.ChatCompletionsResponseToResponsesResponseWithOptions(&chatResp, responsesID, options)
+	responsesResp, usage, err := service.ChatCompletionsResponseToResponsesResponseWithOptionsAndState(&chatResp, responsesID, options, toolState)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
@@ -159,6 +123,10 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 }
 
 func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, options service.ResponsesChatCompatibilityOptions) (*dto.Usage, *types.NewAPIError) {
+	return OaiChatToResponsesStreamHandlerWithOptionsAndState(c, info, resp, options, nil)
+}
+
+func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, options service.ResponsesChatCompatibilityOptions, toolState *service.ResponsesChatCompatibilityToolState) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
@@ -174,21 +142,21 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 
 	usage := &dto.Usage{}
 	textItemID := "msg_0"
-	textOutputIndex := 0
+	textOutputIndex := -1
 	textAdded := false
 	var textBuilder strings.Builder
 	var usageBuilder strings.Builder
-	var completedOutput []dto.ResponsesOutput
+	completedOutput := make(map[int]dto.ResponsesOutput)
+	nextOutputIndex := 0
 	toolCalls := make(map[int]*chatToolCallState)
 	var streamErr *types.NewAPIError
 	responseCreatedSent := false
 	responseInProgressSent := false
 	textContentPartAdded := false
-	getToolOutputIndex := func(index int) int {
-		if textAdded || textBuilder.Len() > 0 {
-			return index + 1
-		}
-		return index
+	allocateOutputIndex := func() int {
+		outputIndex := nextOutputIndex
+		nextOutputIndex++
+		return outputIndex
 	}
 
 	sendResponseCreated := func() bool {
@@ -243,6 +211,9 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 		if !sendResponseInProgress() {
 			return false
 		}
+		if textOutputIndex < 0 {
+			textOutputIndex = allocateOutputIndex()
+		}
 		err := sendResponsesCompatEvent(c, dto.ResponsesOutputTypeItemAdded, dto.ResponsesStreamResponse{
 			Item: &dto.ResponsesOutput{
 				Type:   "message",
@@ -283,18 +254,25 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 		if state == nil || state.sentAdded {
 			return true
 		}
+		if strings.TrimSpace(state.name) == "" {
+			return true
+		}
 		if !sendResponseInProgress() {
 			return false
+		}
+		if state.outputIndex < 0 {
+			state.outputIndex = allocateOutputIndex()
 		}
 		if state.toolType == dto.CustomType {
 			err := sendResponsesCompatEvent(c, dto.ResponsesOutputTypeItemAdded, dto.ResponsesStreamResponse{
 				Item: &dto.ResponsesOutput{
-					Type:   "custom_tool_call",
-					ID:     state.itemID,
-					Status: "in_progress",
-					CallId: state.callID,
-					Name:   state.name,
-					Input:  state.input.String(),
+					Type:      "custom_tool_call",
+					ID:        state.itemID,
+					Status:    "in_progress",
+					CallId:    state.callID,
+					Name:      state.name,
+					Namespace: state.namespace,
+					Input:     "",
 				},
 				OutputIndex: common.GetPointer(state.outputIndex),
 			})
@@ -305,7 +283,25 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 			state.sentAdded = true
 			return true
 		}
-		argumentsRaw, err := marshalResponsesCompatArguments(state.arguments.String())
+		if state.toolType == "tool_search" {
+			err := sendResponsesCompatEvent(c, dto.ResponsesOutputTypeItemAdded, dto.ResponsesStreamResponse{
+				Item: &dto.ResponsesOutput{
+					Type:      "tool_search_call",
+					ID:        state.itemID,
+					Status:    "in_progress",
+					CallId:    state.callID,
+					Execution: "client",
+				},
+				OutputIndex: common.GetPointer(state.outputIndex),
+			})
+			if err != nil {
+				streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+				return false
+			}
+			state.sentAdded = true
+			return true
+		}
+		argumentsRaw, err := marshalResponsesCompatArguments("")
 		if err != nil {
 			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 			return false
@@ -317,6 +313,7 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 				Status:    "in_progress",
 				CallId:    state.callID,
 				Name:      state.name,
+				Namespace: state.namespace,
 				Arguments: argumentsRaw,
 			},
 			OutputIndex: common.GetPointer(state.outputIndex),
@@ -329,24 +326,89 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 		return true
 	}
 
+	sendPendingFunctionArguments := func(state *chatToolCallState) bool {
+		if state == nil || state.toolType != "function" || !state.sentAdded {
+			return true
+		}
+		arguments := state.arguments.String()
+		if state.argumentsPublished >= len(arguments) {
+			return true
+		}
+		delta := arguments[state.argumentsPublished:]
+		err := sendResponsesCompatEvent(c, "response.function_call_arguments.delta", dto.ResponsesStreamResponse{
+			Delta:       delta,
+			ItemID:      state.itemID,
+			OutputIndex: common.GetPointer(state.outputIndex),
+		})
+		if err != nil {
+			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return false
+		}
+		state.argumentsPublished = len(arguments)
+		return true
+	}
+
+	sendCustomToolInputEvents := func(state *chatToolCallState) bool {
+		input := state.input.String()
+		err := sendResponsesCompatRawEvent(c, "response.custom_tool_call_input.delta", map[string]any{
+			"type":         "response.custom_tool_call_input.delta",
+			"item_id":      state.itemID,
+			"output_index": state.outputIndex,
+			"delta":        input,
+		})
+		if err != nil {
+			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return false
+		}
+		err = sendResponsesCompatRawEvent(c, "response.custom_tool_call_input.done", map[string]any{
+			"type":         "response.custom_tool_call_input.done",
+			"item_id":      state.itemID,
+			"output_index": state.outputIndex,
+			"call_id":      state.callID,
+			"name":         state.name,
+			"input":        input,
+		})
+		if err != nil {
+			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return false
+		}
+		return true
+	}
+
 	finalizeToolCalls := func() bool {
-		for index := 0; index < len(toolCalls); index++ {
-			state := toolCalls[index]
-			if state == nil {
-				continue
+		for _, state := range orderedChatToolCallStates(toolCalls) {
+			if strings.TrimSpace(state.name) == "" {
+				streamErr = types.NewOpenAIError(fmt.Errorf("chat tool call name is required"), types.ErrorCodeBadResponse, http.StatusBadGateway)
+				return false
 			}
 			if !sendToolItemAdded(state) {
 				return false
 			}
 			if state.toolType == dto.CustomType {
+				if state.chatToolType != dto.CustomType {
+					input, err := service.ParseResponsesCustomToolFunctionArguments(state.arguments.String())
+					if err != nil {
+						streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
+						return false
+					}
+					state.input.Reset()
+					state.input.WriteString(input)
+				} else if !state.customInputSeen {
+					streamErr = types.NewOpenAIError(fmt.Errorf("custom tool input is required"), types.ErrorCodeBadResponse, http.StatusBadGateway)
+					return false
+				}
+				if !sendCustomToolInputEvents(state) {
+					return false
+				}
 				err := sendResponsesCompatEvent(c, dto.ResponsesOutputTypeItemDone, dto.ResponsesStreamResponse{
 					Item: &dto.ResponsesOutput{
-						Type:   "custom_tool_call",
-						ID:     state.itemID,
-						Status: "completed",
-						CallId: state.callID,
-						Name:   state.name,
-						Input:  state.input.String(),
+						Type:      "custom_tool_call",
+						ID:        state.itemID,
+						Status:    "completed",
+						CallId:    state.callID,
+						Name:      state.name,
+						Namespace: state.namespace,
+						Input:     state.input.String(),
 					},
 					OutputIndex: common.GetPointer(state.outputIndex),
 				})
@@ -354,15 +416,50 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 					streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 					return false
 				}
-				completedOutput = append(completedOutput, dto.ResponsesOutput{
-					Type:   "custom_tool_call",
-					ID:     state.itemID,
-					Status: "completed",
-					CallId: state.callID,
-					Name:   state.name,
-					Input:  state.input.String(),
-				})
+				completedOutput[state.outputIndex] = dto.ResponsesOutput{
+					Type:      "custom_tool_call",
+					ID:        state.itemID,
+					Status:    "completed",
+					CallId:    state.callID,
+					Name:      state.name,
+					Namespace: state.namespace,
+					Input:     state.input.String(),
+				}
 				continue
+			}
+			if state.toolType == "tool_search" {
+				argumentsRaw, err := responsesToolSearchArgumentsRaw(state.arguments.String())
+				if err != nil {
+					streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
+					return false
+				}
+				err = sendResponsesCompatEvent(c, dto.ResponsesOutputTypeItemDone, dto.ResponsesStreamResponse{
+					Item: &dto.ResponsesOutput{
+						Type:      "tool_search_call",
+						ID:        state.itemID,
+						Status:    "completed",
+						CallId:    state.callID,
+						Execution: "client",
+						Arguments: argumentsRaw,
+					},
+					OutputIndex: common.GetPointer(state.outputIndex),
+				})
+				if err != nil {
+					streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+					return false
+				}
+				completedOutput[state.outputIndex] = dto.ResponsesOutput{
+					Type:      "tool_search_call",
+					ID:        state.itemID,
+					Status:    "completed",
+					CallId:    state.callID,
+					Execution: "client",
+					Arguments: argumentsRaw,
+				}
+				continue
+			}
+			if !sendPendingFunctionArguments(state) {
+				return false
 			}
 			argumentsRaw, err := marshalResponsesCompatArguments(state.arguments.String())
 			if err != nil {
@@ -386,6 +483,7 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 					Status:    "completed",
 					CallId:    state.callID,
 					Name:      state.name,
+					Namespace: state.namespace,
 					Arguments: argumentsRaw,
 				},
 				OutputIndex: common.GetPointer(state.outputIndex),
@@ -394,14 +492,15 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 				streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 				return false
 			}
-			completedOutput = append(completedOutput, dto.ResponsesOutput{
+			completedOutput[state.outputIndex] = dto.ResponsesOutput{
 				Type:      "function_call",
 				ID:        state.itemID,
 				Status:    "completed",
 				CallId:    state.callID,
 				Name:      state.name,
+				Namespace: state.namespace,
 				Arguments: argumentsRaw,
-			})
+			}
 		}
 		return true
 	}
@@ -457,20 +556,18 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 			return false
 		}
-		completedOutput = append([]dto.ResponsesOutput{
-			{
-				Type:   "message",
-				ID:     textItemID,
-				Status: "completed",
-				Role:   "assistant",
-				Content: []dto.ResponsesOutputContent{
-					{
-						Type: "output_text",
-						Text: textBuilder.String(),
-					},
+		completedOutput[textOutputIndex] = dto.ResponsesOutput{
+			Type:   "message",
+			ID:     textItemID,
+			Status: "completed",
+			Role:   "assistant",
+			Content: []dto.ResponsesOutputContent{
+				{
+					Type: "output_text",
+					Text: textBuilder.String(),
 				},
 			},
-		}, completedOutput...)
+		}
 		return true
 	}
 
@@ -537,7 +634,8 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 			if toolCall.Index != nil {
 				index = *toolCall.Index
 			}
-			toolType := strings.TrimSpace(common.Interface2String(toolCall.Type))
+			declaredToolType := strings.TrimSpace(common.Interface2String(toolCall.Type))
+			toolType := declaredToolType
 			if toolType == "" {
 				toolType = "function"
 			}
@@ -552,21 +650,24 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 					itemPrefix = "ctc"
 				}
 				state = &chatToolCallState{
-					outputIndex: getToolOutputIndex(index),
-					itemID:      fmt.Sprintf("%s_%d", itemPrefix, index),
-					callID:      callID,
-					toolType:    toolType,
+					outputIndex:  -1,
+					itemID:       fmt.Sprintf("%s_%d", itemPrefix, index),
+					callID:       callID,
+					toolType:     toolType,
+					chatToolType: toolType,
 				}
 				toolCalls[index] = state
 			}
-			if toolType != "" {
-				state.toolType = toolType
+			if declaredToolType != "" {
+				state.chatToolType = declaredToolType
+				if state.toolType != dto.CustomType && state.toolType != "tool_search" {
+					state.toolType = declaredToolType
+				}
 			}
-			state.outputIndex = getToolOutputIndex(index)
 			if strings.TrimSpace(toolCall.ID) != "" {
 				state.callID = strings.TrimSpace(toolCall.ID)
 			}
-			if state.toolType == dto.CustomType {
+			if state.toolType == dto.CustomType && state.chatToolType == dto.CustomType {
 				if !options.EnableCustomToolBridge {
 					streamErr = types.NewOpenAIError(
 						fmt.Errorf("custom tool bridge is not enabled in responses compatibility mode"),
@@ -576,7 +677,7 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 					sr.Stop(streamErr)
 					return
 				}
-				name, inputDelta, err := parseChatCustomStreamDelta(toolCall.Custom)
+				name, inputDelta, inputSeen, err := parseChatCustomStreamDelta(toolCall.Custom)
 				if err != nil {
 					streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 					sr.Stop(streamErr)
@@ -584,37 +685,39 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 				}
 				if name != "" {
 					state.name = name
+					applyResponsesChatToolIdentity(state, toolState)
 				}
-				if !sendToolItemAdded(state) {
+				if inputSeen {
+					state.customInputSeen = true
+					state.input.WriteString(inputDelta)
+					if inputDelta != "" {
+						usageBuilder.WriteString(inputDelta)
+					}
+				}
+				if strings.TrimSpace(state.name) != "" && !sendToolItemAdded(state) {
 					sr.Stop(streamErr)
 					return
-				}
-				if inputDelta != "" {
-					state.input.WriteString(inputDelta)
-					usageBuilder.WriteString(inputDelta)
 				}
 				continue
 			}
 			if strings.TrimSpace(toolCall.Function.Name) != "" {
 				state.name = strings.TrimSpace(toolCall.Function.Name)
+				applyResponsesChatToolIdentity(state, toolState)
+			}
+			if toolCall.Function.Arguments != "" {
+				state.arguments.WriteString(toolCall.Function.Arguments)
+				usageBuilder.WriteString(toolCall.Function.Arguments)
+			}
+			if strings.TrimSpace(state.name) == "" && service.ResponsesChatCompatibilityHasCustomTool(toolState) {
+				continue
 			}
 			if !sendToolItemAdded(state) {
 				sr.Stop(streamErr)
 				return
 			}
-			if toolCall.Function.Arguments != "" {
-				state.arguments.WriteString(toolCall.Function.Arguments)
-				usageBuilder.WriteString(toolCall.Function.Arguments)
-				err := sendResponsesCompatEvent(c, "response.function_call_arguments.delta", dto.ResponsesStreamResponse{
-					Delta:       toolCall.Function.Arguments,
-					ItemID:      state.itemID,
-					OutputIndex: common.GetPointer(state.outputIndex),
-				})
-				if err != nil {
-					streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
-					sr.Stop(streamErr)
-					return
-				}
+			if !sendPendingFunctionArguments(state) {
+				sr.Stop(streamErr)
+				return
 			}
 		}
 
@@ -643,6 +746,18 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 	if !finalizeToolCalls() {
 		return nil, streamErr
 	}
+	orderedOutput := make([]dto.ResponsesOutput, 0, len(completedOutput))
+	for outputIndex := 0; outputIndex < nextOutputIndex; outputIndex++ {
+		output, ok := completedOutput[outputIndex]
+		if !ok {
+			return nil, types.NewOpenAIError(
+				fmt.Errorf("missing completed response output at index %d", outputIndex),
+				types.ErrorCodeBadResponse,
+				http.StatusInternalServerError,
+			)
+		}
+		orderedOutput = append(orderedOutput, output)
+	}
 
 	err := sendResponsesCompatEvent(c, "response.completed", dto.ResponsesStreamResponse{
 		Response: &dto.OpenAIResponsesResponse{
@@ -651,7 +766,7 @@ func OaiChatToResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommo
 			CreatedAt: createdAt,
 			Status:    statusCompleted,
 			Model:     model,
-			Output:    completedOutput,
+			Output:    orderedOutput,
 			Usage:     buildResponsesCompatUsage(usage),
 		},
 	})

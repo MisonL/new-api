@@ -193,6 +193,168 @@ func TestResponsesViaChatNonStream(t *testing.T) {
 	require.Equal(t, "/v1/responses", info.RequestURLPath)
 }
 
+func TestResponsesViaChatRestoresAdditionalNamespaceToolCall(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	chatResp := dto.OpenAITextResponse{
+		Id:      "chatcmpl_namespace",
+		Object:  "chat.completion",
+		Created: int64(1710000000),
+		Model:   "gpt-5.6-sol",
+		Choices: []dto.OpenAITextResponseChoice{{
+			Index:        0,
+			Message:      dto.Message{Role: "assistant", Content: ""},
+			FinishReason: "tool_calls",
+		}},
+		Usage: dto.Usage{PromptTokens: 7, CompletionTokens: 3, TotalTokens: 10},
+	}
+	chatResp.Choices[0].Message.SetToolCalls([]dto.ToolCallRequest{{
+		ID:   "call_namespace_1",
+		Type: "function",
+		Function: dto.FunctionRequest{
+			Name:      "collaboration__send_message",
+			Arguments: `{"message":"done"}`,
+		},
+	}})
+	chatRespBytes, err := common.Marshal(chatResp)
+	require.NoError(t, err)
+
+	adaptor := &mockResponsesViaChatAdaptor{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(chatRespBytes)),
+	}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte("{}")))
+	req := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: marshalRawJSON(t, []any{
+			map[string]any{
+				"type": "additional_tools",
+				"role": "developer",
+				"tools": []map[string]any{{
+					"type": "namespace",
+					"name": "collaboration",
+					"tools": []map[string]any{{
+						"type":       "function",
+						"name":       "send_message",
+						"parameters": map[string]any{"type": "object"},
+					}},
+				}},
+			},
+			map[string]any{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "send status"}},
+			},
+		}),
+	}
+	info := newResponsesViaChatInfo()
+	info.OriginModelName = "gpt-5.6-sol"
+	info.ChannelMeta.UpstreamModelName = "gpt-5.6-sol"
+
+	usage, newAPIErr := responsesViaChat(c, info, adaptor, req, service.ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.Nil(t, newAPIErr)
+	require.NotNil(t, usage)
+	require.NotNil(t, adaptor.convertedReq)
+	require.Len(t, adaptor.convertedReq.Tools, 1)
+	require.Equal(t, "collaboration__send_message", adaptor.convertedReq.Tools[0].Function.Name)
+
+	var responsesResp dto.OpenAIResponsesResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &responsesResp))
+	require.Len(t, responsesResp.Output, 1)
+	require.Equal(t, "function_call", responsesResp.Output[0].Type)
+	require.Equal(t, "collaboration", responsesResp.Output[0].Namespace)
+	require.Equal(t, "send_message", responsesResp.Output[0].Name)
+	require.Equal(t, "call_namespace_1", responsesResp.Output[0].CallId)
+}
+
+func TestResponsesViaChatLoadsToolSearchDefinitions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const namespace = "mcp__codex_apps__calendar"
+	const toolName = "calendar_create_event"
+	chatResp := dto.OpenAITextResponse{
+		Id:      "chatcmpl_tool_search",
+		Object:  "chat.completion",
+		Created: 1710000000,
+		Model:   "gpt-5.6-sol",
+		Choices: []dto.OpenAITextResponseChoice{{
+			Index:        0,
+			Message:      dto.Message{Role: "assistant", Content: ""},
+			FinishReason: "tool_calls",
+		}},
+		Usage: dto.Usage{PromptTokens: 7, CompletionTokens: 3, TotalTokens: 10},
+	}
+	chatResp.Choices[0].Message.SetToolCalls([]dto.ToolCallRequest{{
+		ID:   "call_calendar_1",
+		Type: "function",
+		Function: dto.FunctionRequest{
+			Name:      namespace + "__" + toolName,
+			Arguments: `{"title":"Planning"}`,
+		},
+	}})
+	chatRespBytes, err := common.Marshal(chatResp)
+	require.NoError(t, err)
+
+	adaptor := &mockResponsesViaChatAdaptor{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(chatRespBytes)),
+	}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte("{}")))
+	req := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: marshalRawJSON(t, []any{
+			map[string]any{"type": "additional_tools", "role": "developer", "tools": []map[string]any{{"type": "tool_search"}}},
+			map[string]any{"type": "tool_search_call", "call_id": "call_search", "arguments": `{"query":"calendar"}`},
+			map[string]any{
+				"type":      "tool_search_output",
+				"call_id":   "call_search",
+				"status":    "completed",
+				"execution": "client",
+				"tools": []map[string]any{{
+					"type": "namespace",
+					"name": namespace,
+					"tools": []map[string]any{{
+						"type":       "function",
+						"name":       toolName,
+						"strict":     false,
+						"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
+					}},
+				}},
+			},
+			map[string]any{"type": "message", "role": "user", "content": []map[string]any{{"type": "input_text", "text": "Create an event."}}},
+		}),
+	}
+	info := newResponsesViaChatInfo()
+	info.OriginModelName = "gpt-5.6-sol"
+	info.ChannelMeta.UpstreamModelName = "gpt-5.6-sol"
+
+	usage, newAPIErr := responsesViaChat(c, info, adaptor, req, service.ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.Nil(t, newAPIErr)
+	require.NotNil(t, usage)
+	require.NotNil(t, adaptor.convertedReq)
+	require.Len(t, adaptor.convertedReq.Tools, 2)
+	require.Equal(t, "tool_search", adaptor.convertedReq.Tools[0].Function.Name)
+	require.Equal(t, namespace+"__"+toolName, adaptor.convertedReq.Tools[1].Function.Name)
+	require.NotNil(t, adaptor.convertedReq.Tools[1].Function.Strict)
+	require.False(t, *adaptor.convertedReq.Tools[1].Function.Strict)
+
+	var responsesResp dto.OpenAIResponsesResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &responsesResp))
+	require.Len(t, responsesResp.Output, 1)
+	require.Equal(t, "function_call", responsesResp.Output[0].Type)
+	require.Equal(t, namespace, responsesResp.Output[0].Namespace)
+	require.Equal(t, toolName, responsesResp.Output[0].Name)
+	require.Equal(t, "call_calendar_1", responsesResp.Output[0].CallId)
+}
+
 func TestResponsesViaChatRestoresSyntheticCompactionInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

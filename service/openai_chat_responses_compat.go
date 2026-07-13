@@ -11,6 +11,7 @@ import (
 )
 
 type ResponsesChatCompatibilityOptions = openaicompat.ResponsesChatCompatibilityOptions
+type ResponsesChatCompatibilityToolState = openaicompat.ResponsesChatCompatibilityToolState
 
 func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.OpenAIResponsesRequest, error) {
 	return openaicompat.ChatCompletionsRequestToResponsesRequest(req)
@@ -22,6 +23,10 @@ func ResponsesRequestToChatCompletionsRequest(req *dto.OpenAIResponsesRequest) (
 
 func ResponsesRequestToChatCompletionsRequestWithOptions(req *dto.OpenAIResponsesRequest, options ResponsesChatCompatibilityOptions) (*dto.GeneralOpenAIRequest, error) {
 	return openaicompat.ResponsesRequestToChatCompletionsRequestWithOptions(req, options)
+}
+
+func ResponsesRequestToChatCompletionsRequestWithState(req *dto.OpenAIResponsesRequest, options ResponsesChatCompatibilityOptions) (*dto.GeneralOpenAIRequest, *ResponsesChatCompatibilityToolState, error) {
+	return openaicompat.ResponsesRequestToChatCompletionsRequestWithState(req, options)
 }
 
 func ValidateResponsesRequestToChatCompatibility(req *dto.OpenAIResponsesRequest, options ResponsesChatCompatibilityOptions) error {
@@ -88,6 +93,18 @@ func ChatCompletionsResponseToResponsesResponse(resp *dto.OpenAITextResponse, id
 
 func ChatCompletionsResponseToResponsesResponseWithOptions(resp *dto.OpenAITextResponse, id string, options ResponsesChatCompatibilityOptions) (*dto.OpenAIResponsesResponse, *dto.Usage, error) {
 	return openaicompat.ChatCompletionsResponseToResponsesResponseWithOptions(resp, id, options)
+}
+
+func ChatCompletionsResponseToResponsesResponseWithOptionsAndState(resp *dto.OpenAITextResponse, id string, options ResponsesChatCompatibilityOptions, toolState *ResponsesChatCompatibilityToolState) (*dto.OpenAIResponsesResponse, *dto.Usage, error) {
+	return openaicompat.ChatCompletionsResponseToResponsesResponseWithOptionsAndState(resp, id, options, toolState)
+}
+
+func ParseResponsesCustomToolFunctionArguments(arguments string) (string, error) {
+	return openaicompat.ParseChatCustomToolFunctionArguments(arguments)
+}
+
+func ResponsesChatCompatibilityHasCustomTool(toolState *ResponsesChatCompatibilityToolState) bool {
+	return toolState.HasCustomTool()
 }
 
 func ExtractOutputTextFromResponses(resp *dto.OpenAIResponsesResponse) string {

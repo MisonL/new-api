@@ -1759,7 +1759,7 @@ func namespaceToolRelayInfo(bridgeable bool) *relaycommon.RelayInfo {
 				{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 			]`),
 			Tools: common.RawMessage(`[
-				{"type":"namespace","tools":[{"type":"` + nestedToolType + `","name":"repo_status","description":"inspect repo","parameters":{"type":"object","properties":{}}}]}
+				{"type":"namespace","name":"codex","tools":[{"type":"` + nestedToolType + `","name":"repo_status","description":"inspect repo","parameters":{"type":"object","properties":{}}}]}
 			]`),
 		},
 	}

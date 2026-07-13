@@ -288,106 +288,76 @@ func TestResponsesResponseToChatCompletionsResponseIgnoresReasoningSummaryConfig
 	require.Empty(t, chatResp.Choices[0].Message.GetReasoningContent())
 }
 
-func TestResponsesRequestToChatCompletionsRequestRejectsCustomToolsByDefault(t *testing.T) {
-	_, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
-		Model: "gpt-5",
-		Input: mustMarshalJSON(t, []map[string]any{
-			{
-				"type":    "custom_tool_call",
-				"call_id": "call_custom_1",
-				"name":    "shell",
-				"input":   "pwd",
-			},
-		}),
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "custom tool bridge is not enabled")
-}
-
-func TestResponsesRequestToChatCompletionsRequestBridgesCustomToolsWhenEnabled(t *testing.T) {
+func TestResponsesRequestToChatCompletionsRequestDeduplicatesIdenticalEffectiveTools(t *testing.T) {
+	tool := map[string]any{
+		"type":       "function",
+		"name":       "lookup",
+		"parameters": map[string]any{"type": "object"},
+	}
 	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
-		Model: "gpt-5",
-		Input: mustMarshalJSON(t, []map[string]any{
-			{
-				"role":    "user",
-				"content": "run the command",
-			},
-			{
-				"type":    "custom_tool_call",
-				"call_id": "call_custom_1",
-				"name":    "shell",
-				"input":   "pwd",
-			},
-			{
-				"type":    "custom_tool_call_output",
-				"call_id": "call_custom_1",
-				"output":  "/tmp/work",
-			},
-		}),
-		ToolChoice: mustMarshalJSON(t, map[string]any{"type": "custom", "name": "shell"}),
-		Tools: mustMarshalJSON(t, []map[string]any{
-			{
-				"type": "web_search",
-			},
-			{
-				"type": "tool_search",
-			},
-			{
-				"type":        "custom",
-				"name":        "shell",
-				"description": "Run a shell command.",
-				"format": map[string]any{
-					"type": "text",
-				},
-			},
+		Model: "gpt-5.6-sol",
+		Tools: mustMarshalJSON(t, []map[string]any{tool}),
+		Input: mustMarshalJSON(t, []any{
+			map[string]any{"type": "additional_tools", "role": "developer", "tools": []map[string]any{tool}},
+			map[string]any{"type": "message", "role": "user", "content": []map[string]any{{"type": "input_text", "text": "continue"}}},
 		}),
 	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
 	require.NoError(t, err)
 	require.Len(t, chatReq.Tools, 1)
-	require.Equal(t, dto.CustomType, chatReq.Tools[0].Type)
-	require.JSONEq(t, `{"name":"shell","description":"Run a shell command.","format":{"type":"text"}}`, string(chatReq.Tools[0].Custom))
-	require.Equal(t, map[string]any{
-		"type": "custom",
-		"custom": map[string]any{
-			"name": "shell",
-		},
-	}, chatReq.ToolChoice)
-
-	require.Len(t, chatReq.Messages, 3)
-	require.Equal(t, "user", chatReq.Messages[0].Role)
-	require.Equal(t, "assistant", chatReq.Messages[1].Role)
-	toolCalls := chatReq.Messages[1].ParseToolCalls()
-	require.Len(t, toolCalls, 1)
-	require.Equal(t, "call_custom_1", toolCalls[0].ID)
-	require.Equal(t, dto.CustomType, toolCalls[0].Type)
-	require.JSONEq(t, `{"name":"shell","input":"pwd"}`, string(toolCalls[0].Custom))
-	require.Equal(t, "tool", chatReq.Messages[2].Role)
-	require.Equal(t, "call_custom_1", chatReq.Messages[2].ToolCallId)
-	require.Equal(t, "/tmp/work", chatReq.Messages[2].StringContent())
+	require.Equal(t, "lookup", chatReq.Tools[0].Function.Name)
 }
 
-func TestResponsesRequestToChatCompletionsRequestBridgesAdditionalToolsWhenEnabled(t *testing.T) {
-	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
-		Model: "gpt-5",
+func TestResponsesRequestToChatCompletionsRequestRejectsEffectiveToolNameCollisions(t *testing.T) {
+	tests := []struct {
+		name       string
+		topTool    map[string]any
+		additional map[string]any
+	}{
+		{
+			name:       "function and tool search",
+			topTool:    map[string]any{"type": "function", "name": "tool_search", "parameters": map[string]any{"type": "object"}},
+			additional: map[string]any{"type": "tool_search"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+				Model: "gpt-5.6-sol",
+				Tools: mustMarshalJSON(t, []map[string]any{tt.topTool}),
+				Input: mustMarshalJSON(t, []any{
+					map[string]any{"type": "additional_tools", "role": "developer", "tools": []map[string]any{tt.additional}},
+					map[string]any{"type": "message", "role": "user", "content": []map[string]any{{"type": "input_text", "text": "continue"}}},
+				}),
+			}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "duplicated")
+		})
+	}
+}
+
+func TestResponsesChatCompatibilityRestoresAdditionalNamespaceToolCall(t *testing.T) {
+	chatReq, toolState, err := ResponsesRequestToChatCompletionsRequestWithState(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
 		Input: mustMarshalJSON(t, []any{
 			map[string]any{
 				"type": "additional_tools",
 				"role": "developer",
 				"tools": []map[string]any{
 					{
-						"type":        "custom",
-						"name":        "exec",
-						"description": "Run a shell command.",
-						"format":      map[string]any{"type": "text"},
-					},
-					{
-						"type":       "function",
-						"name":       "wait",
-						"parameters": map[string]any{"type": "object"},
+						"type": "namespace",
+						"name": "collaboration",
+						"tools": []map[string]any{{
+							"type":       "function",
+							"name":       "send_message",
+							"parameters": map[string]any{"type": "object"},
+						}},
 					},
 					{
 						"type": "namespace",
-						"name": "collaboration",
+						"name": "codex",
 						"tools": []map[string]any{{
 							"type":       "function",
 							"name":       "send_message",
@@ -399,27 +369,166 @@ func TestResponsesRequestToChatCompletionsRequestBridgesAdditionalToolsWhenEnabl
 			map[string]any{
 				"type":    "message",
 				"role":    "user",
-				"content": []map[string]any{{"type": "input_text", "text": "run the task"}},
+				"content": []map[string]any{{"type": "input_text", "text": "send status"}},
 			},
 		}),
-		Tools: mustMarshalJSON(t, []map[string]any{{
-			"type":       "function",
-			"name":       "lookup",
-			"parameters": map[string]any{"type": "object"},
-		}}),
 	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
 
 	require.NoError(t, err)
-	require.Len(t, chatReq.Tools, 4)
-	require.Equal(t, "lookup", chatReq.Tools[0].Function.Name)
-	require.Equal(t, dto.CustomType, chatReq.Tools[1].Type)
-	require.JSONEq(t, `{"name":"exec","description":"Run a shell command.","format":{"type":"text"}}`, string(chatReq.Tools[1].Custom))
-	require.Equal(t, "wait", chatReq.Tools[2].Function.Name)
-	require.Equal(t, "send_message", chatReq.Tools[3].Function.Name)
+	require.Len(t, chatReq.Tools, 2)
+	require.Equal(t, "collaboration__send_message", chatReq.Tools[0].Function.Name)
+	require.Equal(t, "codex__send_message", chatReq.Tools[1].Function.Name)
 
-	require.Len(t, chatReq.Messages, 1)
-	require.Equal(t, "user", chatReq.Messages[0].Role)
-	require.Equal(t, "run the task", chatReq.Messages[0].StringContent())
+	chatResp := &dto.OpenAITextResponse{
+		Model: "gpt-5.6-sol",
+		Choices: []dto.OpenAITextResponseChoice{{
+			Message: dto.Message{Role: "assistant", Content: ""},
+		}},
+	}
+	chatResp.Choices[0].Message.SetToolCalls([]dto.ToolCallRequest{{
+		ID:   "call_namespace_1",
+		Type: "function",
+		Function: dto.FunctionRequest{
+			Name:      "collaboration__send_message",
+			Arguments: `{"message":"done"}`,
+		},
+	}})
+
+	responsesResp, _, err := ChatCompletionsResponseToResponsesResponseWithOptionsAndState(
+		chatResp,
+		"resp_namespace",
+		ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true},
+		toolState,
+	)
+	require.NoError(t, err)
+	require.Len(t, responsesResp.Output, 1)
+	require.Equal(t, "function_call", responsesResp.Output[0].Type)
+	require.Equal(t, "collaboration", responsesResp.Output[0].Namespace)
+	require.Equal(t, "send_message", responsesResp.Output[0].Name)
+	require.Equal(t, "call_namespace_1", responsesResp.Output[0].CallId)
+}
+
+func TestResponsesChatCompatibilityRestoresToolSearchCall(t *testing.T) {
+	chatReq, toolState, err := ResponsesRequestToChatCompletionsRequestWithState(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: mustMarshalJSON(t, []any{
+			map[string]any{
+				"type":  "additional_tools",
+				"role":  "developer",
+				"tools": []map[string]any{{"type": "tool_search"}},
+			},
+			map[string]any{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "find the mail tool"}},
+			},
+		}),
+	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.NoError(t, err)
+	require.Len(t, chatReq.Tools, 1)
+	require.Equal(t, "function", chatReq.Tools[0].Type)
+	require.Equal(t, "tool_search", chatReq.Tools[0].Function.Name)
+
+	chatResp := &dto.OpenAITextResponse{
+		Model:   "gpt-5.6-sol",
+		Choices: []dto.OpenAITextResponseChoice{{Message: dto.Message{Role: "assistant", Content: ""}}},
+	}
+	chatResp.Choices[0].Message.SetToolCalls([]dto.ToolCallRequest{{
+		ID:   "call_search_1",
+		Type: "function",
+		Function: dto.FunctionRequest{
+			Name:      "tool_search",
+			Arguments: `{"query":"gmail search"}`,
+		},
+	}})
+
+	responsesResp, _, err := ChatCompletionsResponseToResponsesResponseWithOptionsAndState(
+		chatResp,
+		"resp_tool_search",
+		ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true},
+		toolState,
+	)
+	require.NoError(t, err)
+	require.Len(t, responsesResp.Output, 1)
+	require.Equal(t, "tool_search_call", responsesResp.Output[0].Type)
+	require.Equal(t, "client", responsesResp.Output[0].Execution)
+	require.JSONEq(t, `{"query":"gmail search"}`, string(responsesResp.Output[0].Arguments))
+	require.Equal(t, "call_search_1", responsesResp.Output[0].CallId)
+}
+
+func TestResponsesRequestToChatCompletionsRequestRejectsEncryptedToolOutput(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: mustMarshalJSON(t, []map[string]any{{
+			"type":    "function_call_output",
+			"call_id": "call_opaque_1",
+			"output": []map[string]any{{
+				"type":              "encrypted_content",
+				"encrypted_content": "opaque",
+			}},
+		}}),
+	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `content type "encrypted_content" is not supported`)
+}
+
+func TestResponsesRequestToChatCompletionsRequestPreservesNamespaceAndToolSearchHistory(t *testing.T) {
+	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: mustMarshalJSON(t, []map[string]any{
+			{
+				"type":      "function_call",
+				"call_id":   "call_namespace_1",
+				"namespace": "collaboration",
+				"name":      "send_message",
+				"arguments": `{"message":"working"}`,
+			},
+			{
+				"type":    "function_call_output",
+				"call_id": "call_namespace_1",
+				"output":  "ok",
+			},
+			{
+				"type":      "tool_search_call",
+				"call_id":   "call_search_1",
+				"execution": "client",
+				"arguments": map[string]any{"query": "mail"},
+			},
+			{
+				"type":      "tool_search_output",
+				"call_id":   "call_search_1",
+				"execution": "client",
+				"status":    "completed",
+				"tools": []map[string]any{{
+					"type": "namespace",
+					"name": "mail",
+					"tools": []map[string]any{{
+						"type":       "function",
+						"name":       "search",
+						"parameters": map[string]any{"type": "object"},
+					}},
+				}},
+			},
+		}),
+	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.NoError(t, err)
+	require.Len(t, chatReq.Messages, 4)
+	firstCalls := chatReq.Messages[0].ParseToolCalls()
+	require.Len(t, firstCalls, 1)
+	require.Equal(t, "collaboration__send_message", firstCalls[0].Function.Name)
+	require.Equal(t, "call_namespace_1", firstCalls[0].ID)
+	require.Equal(t, "tool", chatReq.Messages[1].Role)
+	searchCalls := chatReq.Messages[2].ParseToolCalls()
+	require.Len(t, searchCalls, 1)
+	require.Equal(t, "tool_search", searchCalls[0].Function.Name)
+	require.JSONEq(t, `{"query":"mail"}`, searchCalls[0].Function.Arguments)
+	require.Equal(t, "tool", chatReq.Messages[3].Role)
+	require.JSONEq(t, `[{"type":"namespace","name":"mail","tools":[{"type":"function","name":"search","parameters":{"type":"object"}}]}]`, chatReq.Messages[3].StringContent())
+	require.Len(t, chatReq.Tools, 1)
+	require.Equal(t, "mail__search", chatReq.Tools[0].Function.Name)
 }
 
 func TestResponsesRequestToChatCompletionsRequestBridgesNamespaceToolsWhenEnabled(t *testing.T) {
@@ -479,8 +588,8 @@ func TestResponsesRequestToChatCompletionsRequestBridgesNamespaceToolsWhenEnable
 	require.NoError(t, err)
 	require.Len(t, chatReq.Tools, 2)
 	require.Equal(t, "function", chatReq.Tools[0].Type)
-	require.Equal(t, "read_thread", chatReq.Tools[0].Function.Name)
-	require.Equal(t, "Read recent status and turn summaries for one Codex thread.", chatReq.Tools[0].Function.Description)
+	require.Equal(t, "codex_app__read_thread", chatReq.Tools[0].Function.Name)
+	require.Equal(t, "Tools in the codex_app namespace. Read recent status and turn summaries for one Codex thread.", chatReq.Tools[0].Function.Description)
 	readThreadParams, err := common.Marshal(chatReq.Tools[0].Function.Parameters)
 	require.NoError(t, err)
 	require.JSONEq(t, `{
@@ -491,8 +600,8 @@ func TestResponsesRequestToChatCompletionsRequestBridgesNamespaceToolsWhenEnable
 		"required": ["threadId"]
 	}`, string(readThreadParams))
 	require.Equal(t, "function", chatReq.Tools[1].Type)
-	require.Equal(t, "list_threads", chatReq.Tools[1].Function.Name)
-	require.Equal(t, "List recent Codex threads.", chatReq.Tools[1].Function.Description)
+	require.Equal(t, "codex_app__list_threads", chatReq.Tools[1].Function.Name)
+	require.Equal(t, "Tools in the codex_app namespace. List recent Codex threads.", chatReq.Tools[1].Function.Description)
 	listThreadsParams, err := common.Marshal(chatReq.Tools[1].Function.Parameters)
 	require.NoError(t, err)
 	require.JSONEq(t, `{
@@ -589,11 +698,11 @@ func TestResponsesRequestToChatCompletionsRequestIgnoresDuplicateFunctionToolNam
 
 	require.NoError(t, err)
 	require.Len(t, chatReq.Tools, 1)
-	require.Equal(t, "lookup", chatReq.Tools[0].Function.Name)
+	require.Equal(t, "codex_app__lookup", chatReq.Tools[0].Function.Name)
 }
 
-func TestResponsesRequestToChatCompletionsRequestNamespaceToolFiltersIgnoredTypes(t *testing.T) {
-	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+func TestResponsesRequestToChatCompletionsRequestRejectsNestedToolSearch(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
 		Model: "gpt-5",
 		Input: mustMarshalJSON(t, "read thread status"),
 		Tools: mustMarshalJSON(t, []map[string]any{
@@ -617,10 +726,8 @@ func TestResponsesRequestToChatCompletionsRequestNamespaceToolFiltersIgnoredType
 		}),
 	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
 
-	require.NoError(t, err)
-	require.Len(t, chatReq.Tools, 1)
-	require.Equal(t, "function", chatReq.Tools[0].Type)
-	require.Equal(t, "read_thread", chatReq.Tools[0].Function.Name)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `namespace tool type "tool_search" is not supported`)
 }
 
 func TestResponsesRequestToChatCompletionsRequestRejectsUnsupportedInputToolSearchItems(t *testing.T) {
@@ -660,7 +767,7 @@ func TestResponsesRequestToChatCompletionsRequestNamespaceToolRequiresCompatible
 	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "no compatible entries")
+	require.Contains(t, err.Error(), `namespace tool type "tool_search" is not supported`)
 }
 
 func TestResponsesRequestToChatCompletionsRequestRejectsNamespaceToolsByDefault(t *testing.T) {

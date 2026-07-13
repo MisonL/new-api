@@ -60,7 +60,7 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 	}
 	markResponsesChatCompatIgnoredEncryptedInclude(c, overriddenResponsesReq.Include)
 
-	chatReq, err := service.ResponsesRequestToChatCompletionsRequestWithOptions(&overriddenResponsesReq, options)
+	chatReq, toolState, err := service.ResponsesRequestToChatCompletionsRequestWithState(&overriddenResponsesReq, options)
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
@@ -111,7 +111,7 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 	}
 
 	if info.IsStream {
-		usage, newApiErr := openaichannel.OaiChatToResponsesStreamHandlerWithOptions(c, info, httpResp, options)
+		usage, newApiErr := openaichannel.OaiChatToResponsesStreamHandlerWithOptionsAndState(c, info, httpResp, options, toolState)
 		if newApiErr != nil {
 			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 			return nil, newApiErr
@@ -119,7 +119,7 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 		return usage, nil
 	}
 
-	usage, newApiErr := openaichannel.OaiChatToResponsesHandlerWithOptions(c, info, httpResp, options)
+	usage, newApiErr := openaichannel.OaiChatToResponsesHandlerWithOptionsAndState(c, info, httpResp, options, toolState)
 	if newApiErr != nil {
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 		return nil, newApiErr
