@@ -101,15 +101,16 @@ test("frontend release metadata script keeps full JSON string escaping", () => {
   assert.match(releaseMetadataScript, /gsub\(\/\\n\/, "\\\\n", value\)/);
 });
 
-test("Compose health checks bound wget before Docker can orphan pipeline children", () => {
+test("Compose health checks use a direct lightweight liveness probe", () => {
   for (const composeFile of composeFiles) {
     const compose = readRepoFile(composeFile);
     assert.match(compose, /\n\s+init: true\n/);
     assert.match(
       compose,
-      /wget -q -T 5 -O \/tmp\/new-api-healthcheck\.json http:\/\/127\.0\.0\.1:3000\/api\/status/
+      /test: \["CMD", "wget", "-q", "-T", "3", "-O", "\/dev\/null", "http:\/\/127\.0\.0\.1:3000\/api\/healthz"\]/
     );
     assert.match(compose, /timeout: 8s/);
+    assert.doesNotMatch(compose, /CMD-SHELL.*api\/status/);
     assert.doesNotMatch(compose, /wget[^\n]*\|\s*grep/);
   }
 });
