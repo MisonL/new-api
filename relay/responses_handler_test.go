@@ -891,6 +891,37 @@ func TestBuildOpenAIResponsesRequestBodyForcesRemoteCompactionFallbackConversion
 	require.NotContains(t, string(bodyBytes), "compaction_trigger")
 }
 
+func TestExecuteOpenAIResponsesRequestRejectsCompactionWithoutEncryptedContentBeforeUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   205,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"compaction"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}, true)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.True(t, types.IsSkipRetryError(err))
+	require.ErrorIs(t, err, service.ErrResponsesCompactionContentRequired)
+	require.Empty(t, adaptor.requestBodies)
+}
+
 func TestExecuteOpenAIResponsesRequestDoesNotRetryPlainBadRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

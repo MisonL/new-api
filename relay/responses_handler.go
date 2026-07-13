@@ -157,6 +157,9 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 			types.ErrOptionWithSkipRetry(),
 		)
 	}
+	if _, err := service.HasRemoteResponsesCompactionInput(c.Request.Context(), *request); err != nil {
+		return nil, newResponsesConvertRequestError(err)
+	}
 	requestBody, convertedRequest, err := buildOpenAIResponsesRequestBody(c, info, adaptor, request, passThroughGlobal)
 	if err != nil {
 		return nil, err
