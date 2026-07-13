@@ -19,6 +19,7 @@ services:
   new-api:
     image: ${NEW_API_IMAGE:-new-api-local:prod-main}
     container_name: new-api
+    init: true
     restart: always
     command: --log-dir /app/logs
     ports:
@@ -54,9 +55,9 @@ services:
     networks:
       - new-api-network
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' || exit 1"]
+      test: ["CMD-SHELL", "wget -q -T 5 -O /tmp/new-api-healthcheck.json http://127.0.0.1:3000/api/status && grep -q '\"success\"[[:space:]]*:[[:space:]]*true' /tmp/new-api-healthcheck.json"]
       interval: 30s
-      timeout: 10s
+      timeout: 8s
       retries: 3
 
   redis:

@@ -11,6 +11,7 @@ const dockerfile = readFileSync(resolve(repoRoot, "Dockerfile"), "utf8");
 const releaseMetadataScript = readRepoFile(
   "scripts/write-frontend-release-metadata.sh"
 );
+const composeFiles = ["docker-compose.yml", "deploy/compose/dev-isolated.yml"];
 
 function readRepoFile(path) {
   return readFileSync(resolve(repoRoot, path), "utf8");
@@ -98,4 +99,17 @@ test("frontend release metadata script keeps full JSON string escaping", () => {
   assert.match(releaseMetadataScript, /gsub\(\/\\r\/, "\\\\r", value\)/);
   assert.match(releaseMetadataScript, /gsub\(\/\\t\/, "\\\\t", value\)/);
   assert.match(releaseMetadataScript, /gsub\(\/\\n\/, "\\\\n", value\)/);
+});
+
+test("Compose health checks bound wget before Docker can orphan pipeline children", () => {
+  for (const composeFile of composeFiles) {
+    const compose = readRepoFile(composeFile);
+    assert.match(compose, /\n\s+init: true\n/);
+    assert.match(
+      compose,
+      /wget -q -T 5 -O \/tmp\/new-api-healthcheck\.json http:\/\/127\.0\.0\.1:3000\/api\/status/
+    );
+    assert.match(compose, /timeout: 8s/);
+    assert.doesNotMatch(compose, /wget[^\n]*\|\s*grep/);
+  }
 });
