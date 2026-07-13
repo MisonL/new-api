@@ -60,6 +60,20 @@ func TestNewGormLoggerWithSlowThresholdKeepsRecordNotFoundFiltering(t *testing.T
 	require.NotContains(t, output.String(), "record not found")
 }
 
+func TestNewGormLoggerWithSlowThresholdRedactsBoundValues(t *testing.T) {
+	const sensitiveValue = "sensitive-access-token-value"
+
+	var output bytes.Buffer
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: newGormLoggerWithSlowThreshold(&output, time.Nanosecond),
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, db.Exec("SELECT ? AS access_token", sensitiveValue).Error)
+	require.NotContains(t, output.String(), sensitiveValue)
+}
+
 func TestBackgroundDBUsesMaintenanceSlowThreshold(t *testing.T) {
 	var output bytes.Buffer
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))

@@ -133,6 +133,7 @@ func newGormLoggerWithSlowThreshold(writer io.Writer, slowThreshold time.Duratio
 		SlowThreshold:             slowThreshold,
 		LogLevel:                  gormlogger.Warn,
 		IgnoreRecordNotFoundError: true,
+		ParameterizedQueries:      true,
 		Colorful:                  false,
 	})
 }
