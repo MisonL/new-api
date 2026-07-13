@@ -75,6 +75,36 @@ describe('classic protocol conversion policy utils', () => {
     expect(serialized.rules[0].options.future_option).toBe('option-extra');
   });
 
+  test('normalizes legacy top-level bridge fields into options', () => {
+    const parsed = deserializePolicy(
+      JSON.stringify({
+        rules: [
+          {
+            name: 'legacy-tool-bridge',
+            source_endpoint: 'responses',
+            target_endpoint: 'chat_completions',
+            all_channels: true,
+            enable_custom_tool_bridge: true,
+            only_when_tool_bridge_required: true,
+          },
+        ],
+      }),
+    );
+    expect(parsed).not.toBeNull();
+
+    const serialized = JSON.parse(
+      serializeRules(parsed.rules, parsed.policyExtra),
+    );
+    expect(serialized.rules[0]).not.toHaveProperty('enable_custom_tool_bridge');
+    expect(serialized.rules[0]).not.toHaveProperty(
+      'only_when_tool_bridge_required',
+    );
+    expect(serialized.rules[0].options).toEqual({
+      enable_custom_tool_bridge: true,
+      only_when_tool_bridge_required: true,
+    });
+  });
+
   test('rejects custom tool bridge when visual direction is not responses to chat', () => {
     const raw = JSON.stringify({
       rules: [
@@ -94,6 +124,73 @@ describe('classic protocol conversion policy utils', () => {
 
     const parsed = deserializePolicy(raw);
     expect(parsed).toBeNull();
+  });
+
+  test('rejects a non-boolean conditional tool bridge option', () => {
+    const parsed = deserializePolicy(
+      JSON.stringify({
+        rules: [
+          {
+            name: 'invalid-conditional-tool-bridge',
+            source_endpoint: 'responses',
+            target_endpoint: 'chat_completions',
+            all_channels: true,
+            options: {
+              enable_custom_tool_bridge: true,
+              only_when_tool_bridge_required: 'true',
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(parsed).toBeNull();
+  });
+
+  test('validates the legacy conditional bridge field even when options enables it', () => {
+    const parsed = deserializePolicy(
+      JSON.stringify({
+        rules: [
+          {
+            name: 'invalid-legacy-conditional-tool-bridge',
+            source_endpoint: 'responses',
+            target_endpoint: 'chat_completions',
+            all_channels: true,
+            only_when_tool_bridge_required: 'true',
+            options: {
+              enable_custom_tool_bridge: true,
+              only_when_tool_bridge_required: true,
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(parsed).toBeNull();
+  });
+
+  test('does not serialize conditional bridge fields after bridge support is removed', () => {
+    const disabledBridgeRule = {
+      ...buildTemplateRule(RESPONSES_TO_CHAT_TEMPLATE, []),
+      enable_custom_tool_bridge: false,
+      only_when_tool_bridge_required: true,
+      __options_extra: { only_when_tool_bridge_required: true },
+    };
+    const unsupportedDirectionRule = {
+      ...buildTemplateRule(CHAT_TO_RESPONSES_TEMPLATE, []),
+      enable_custom_tool_bridge: true,
+      only_when_tool_bridge_required: true,
+      __options_extra: {
+        enable_custom_tool_bridge: true,
+        only_when_tool_bridge_required: true,
+      },
+    };
+
+    const serialized = JSON.parse(
+      serializeRules([disabledBridgeRule, unsupportedDirectionRule]),
+    );
+    expect(serialized.rules[0].options).toBeUndefined();
+    expect(serialized.rules[1].options).toBeUndefined();
   });
 
   test('keeps explicit empty rules from falling back to legacy fields', () => {
@@ -272,5 +369,26 @@ describe('classic protocol conversion policy utils', () => {
         false,
       ),
     ).toEqual({ matched: false, reason: '规则已停用。' });
+  });
+
+  test('describes conditional rules as request-dependent in preview', () => {
+    const rule = {
+      ...buildTemplateRule(RESPONSES_TO_CHAT_TEMPLATE, []),
+      all_channels: true,
+      enable_custom_tool_bridge: true,
+      only_when_tool_bridge_required: true,
+    };
+
+    expect(
+      getProtocolPreviewResult(
+        rule,
+        { channelId: '205', channelType: '1', model: 'gpt-5.5' },
+        false,
+      ),
+    ).toEqual({
+      matched: true,
+      reason:
+        '示例渠道和模型命中这条条件规则；只有需要自定义工具桥接的请求才会转换。',
+    });
   });
 });

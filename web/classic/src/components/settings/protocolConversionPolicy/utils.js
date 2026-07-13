@@ -56,12 +56,17 @@ const RULE_KNOWN_FIELDS = new Set([
   'channel_types',
   'model_patterns',
   'options',
+  'enable_custom_tool_bridge',
+  'only_when_tool_bridge_required',
   RULE_CLIENT_KEY_FIELD,
   RULE_EXTRA_FIELD,
   RULE_OPTIONS_EXTRA_FIELD,
 ]);
 
-const OPTION_KNOWN_FIELDS = new Set(['enable_custom_tool_bridge']);
+const OPTION_KNOWN_FIELDS = new Set([
+  'enable_custom_tool_bridge',
+  'only_when_tool_bridge_required',
+]);
 
 let ruleClientKeyCounter = 0;
 
@@ -80,6 +85,18 @@ const createParseError = (message) => new Error(message);
 
 const ruleFieldPath = (fieldName, ruleIndex) =>
   ruleIndex == null ? fieldName : `rules[${ruleIndex}].${fieldName}`;
+
+const toOptionalBoolean = (value, fieldName, ruleIndex) => {
+  if (value === undefined) {
+    return false;
+  }
+  if (typeof value !== 'boolean') {
+    throw createParseError(
+      `${ruleFieldPath(fieldName, ruleIndex)} must be a boolean`,
+    );
+  }
+  return value;
+};
 
 const normalizeEndpointStrict = (value, fieldName, ruleIndex) => {
   const endpoint = normalizeEndpoint(value);
@@ -238,12 +255,29 @@ export const sanitizeRule = (rule, fallbackName, ruleIndex) => {
   const enableCustomToolBridge =
     rule?.options?.enable_custom_tool_bridge === true ||
     rule?.enable_custom_tool_bridge === true;
+  const optionsOnlyWhenToolBridgeRequired = toOptionalBoolean(
+    rule?.options?.only_when_tool_bridge_required,
+    'options.only_when_tool_bridge_required',
+    ruleIndex,
+  );
+  const legacyOnlyWhenToolBridgeRequired = toOptionalBoolean(
+    rule?.only_when_tool_bridge_required,
+    'only_when_tool_bridge_required',
+    ruleIndex,
+  );
+  const onlyWhenToolBridgeRequired =
+    optionsOnlyWhenToolBridgeRequired || legacyOnlyWhenToolBridgeRequired;
   if (
     enableCustomToolBridge &&
     (sourceEndpoint !== ENDPOINT_RESPONSES || targetEndpoint !== ENDPOINT_CHAT)
   ) {
     throw createParseError(
       `rules[${ruleIndex}].enable_custom_tool_bridge only supports Responses to Chat Completions`,
+    );
+  }
+  if (onlyWhenToolBridgeRequired && !enableCustomToolBridge) {
+    throw createParseError(
+      `rules[${ruleIndex}].only_when_tool_bridge_required requires enable_custom_tool_bridge`,
     );
   }
 
@@ -266,6 +300,7 @@ export const sanitizeRule = (rule, fallbackName, ruleIndex) => {
     ),
     model_patterns: toModelPatternArray(rule?.model_patterns, ruleIndex),
     enable_custom_tool_bridge: enableCustomToolBridge,
+    only_when_tool_bridge_required: onlyWhenToolBridgeRequired,
     [RULE_EXTRA_FIELD]: {
       ...pickExtraFields(rule?.[RULE_EXTRA_FIELD], new Set()),
       ...pickExtraFields(rule, RULE_KNOWN_FIELDS),
@@ -329,6 +364,8 @@ export const serializeRules = (rules, policyExtra = {}) => {
       target_endpoint: normalizeEndpoint(rule.target_endpoint),
       all_channels: rule.all_channels !== false,
     };
+    delete payload.enable_custom_tool_bridge;
+    delete payload.only_when_tool_bridge_required;
     if (Array.isArray(rule.channel_ids) && rule.channel_ids.length > 0) {
       payload.channel_ids = rule.channel_ids;
     }
@@ -348,6 +385,15 @@ export const serializeRules = (rules, policyExtra = {}) => {
       options.enable_custom_tool_bridge = true;
     } else {
       delete options.enable_custom_tool_bridge;
+    }
+    if (
+      rule.only_when_tool_bridge_required === true &&
+      rule.enable_custom_tool_bridge === true &&
+      isResponsesToChatRule(rule)
+    ) {
+      options.only_when_tool_bridge_required = true;
+    } else {
+      delete options.only_when_tool_bridge_required;
     }
     if (Object.keys(options).length > 0) {
       payload.options = options;
@@ -649,6 +695,13 @@ export const getProtocolPreviewResult = (
     return {
       matched: true,
       reason: '示例请求命中规则，但全局透传会跳过协议转换。',
+    };
+  }
+  if (rule.only_when_tool_bridge_required) {
+    return {
+      matched: true,
+      reason:
+        '示例渠道和模型命中这条条件规则；只有需要自定义工具桥接的请求才会转换。',
     };
   }
   return { matched: true, reason: '示例请求命中这条规则。' };

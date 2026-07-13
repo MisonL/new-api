@@ -52,6 +52,8 @@ export function ProtocolConversionRuleCard({
     Object.keys(rule.extra).length + Object.keys(rule.optionsExtra).length
   const bridgeEnabled =
     isResponsesToChatRule(rule) && rule.enable_custom_tool_bridge
+  const conditionalToolBridge =
+    bridgeEnabled && rule.only_when_tool_bridge_required
   const attentionKeys = getProtocolRuleAttentionKeys(rule, passThroughEnabled)
   const direction = getProtocolRuleDirection(rule)
   const sourceLabel = getEndpointLabel(rule.source_endpoint, t)
@@ -87,6 +89,9 @@ export function ProtocolConversionRuleCard({
             </Badge>
             {bridgeEnabled ? (
               <Badge variant='secondary'>{t('Custom tool bridge')}</Badge>
+            ) : null}
+            {conditionalToolBridge ? (
+              <Badge variant='outline'>{t('Custom tool requests only')}</Badge>
             ) : null}
             {extraCount > 0 ? (
               <Badge variant='outline'>{t('Advanced fields preserved')}</Badge>

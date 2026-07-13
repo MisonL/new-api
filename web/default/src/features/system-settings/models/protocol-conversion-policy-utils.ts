@@ -14,6 +14,7 @@ export type ProtocolRule = {
   channel_types: number[]
   model_patterns: string[]
   enable_custom_tool_bridge: boolean
+  only_when_tool_bridge_required: boolean
   extra: Record<string, unknown>
   optionsExtra: Record<string, unknown>
 }
@@ -120,9 +121,14 @@ const RULE_FIELDS = new Set([
   'channel_types',
   'model_patterns',
   'options',
+  'enable_custom_tool_bridge',
+  'only_when_tool_bridge_required',
 ])
 
-const OPTION_FIELDS = new Set(['enable_custom_tool_bridge'])
+const OPTION_FIELDS = new Set([
+  'enable_custom_tool_bridge',
+  'only_when_tool_bridge_required',
+])
 
 let keyCounter = 0
 
@@ -151,6 +157,20 @@ function pickExtra(
 
 function ruleFieldPath(fieldName: string, ruleIndex?: number): string {
   return ruleIndex == null ? fieldName : `rules[${ruleIndex}].${fieldName}`
+}
+
+function toOptionalBoolean(
+  value: unknown,
+  fieldName: string,
+  ruleIndex: number
+): boolean {
+  if (value === undefined) return false
+  if (typeof value !== 'boolean') {
+    throw createParseError(
+      `${ruleFieldPath(fieldName, ruleIndex)} must be a boolean`
+    )
+  }
+  return value
 }
 
 function toPositiveIntegers(
@@ -442,6 +462,14 @@ export function getProtocolPreviewResult(
     }
   }
 
+  if (rule.only_when_tool_bridge_required) {
+    return {
+      matched: true,
+      reason:
+        'Sample channel and model match this conditional rule. Conversion requires a custom tool bridge request.',
+    }
+  }
+
   return { matched: true, reason: 'Sample request matches this rule.' }
 }
 
@@ -477,6 +505,7 @@ export function createProtocolRule(
     channel_types: [],
     model_patterns: [],
     enable_custom_tool_bridge: false,
+    only_when_tool_bridge_required: false,
     extra: {},
     optionsExtra: {},
     ...overrides,
@@ -559,12 +588,29 @@ function ruleFromRecord(
   const enableCustomToolBridge =
     options.enable_custom_tool_bridge === true ||
     value.enable_custom_tool_bridge === true
+  const optionsOnlyWhenToolBridgeRequired = toOptionalBoolean(
+    options.only_when_tool_bridge_required,
+    'options.only_when_tool_bridge_required',
+    ruleIndex
+  )
+  const legacyOnlyWhenToolBridgeRequired = toOptionalBoolean(
+    value.only_when_tool_bridge_required,
+    'only_when_tool_bridge_required',
+    ruleIndex
+  )
+  const onlyWhenToolBridgeRequired =
+    optionsOnlyWhenToolBridgeRequired || legacyOnlyWhenToolBridgeRequired
   if (
     enableCustomToolBridge &&
     (source !== ENDPOINT_RESPONSES || target !== ENDPOINT_CHAT)
   ) {
     throw createParseError(
       `rules[${ruleIndex}].enable_custom_tool_bridge only supports Responses to Chat Completions`
+    )
+  }
+  if (onlyWhenToolBridgeRequired && !enableCustomToolBridge) {
+    throw createParseError(
+      `rules[${ruleIndex}].only_when_tool_bridge_required requires enable_custom_tool_bridge`
     )
   }
 
@@ -586,6 +632,7 @@ function ruleFromRecord(
     ),
     model_patterns: toModelPatterns(value.model_patterns, ruleIndex),
     enable_custom_tool_bridge: enableCustomToolBridge,
+    only_when_tool_bridge_required: onlyWhenToolBridgeRequired,
     extra: pickExtra(value, RULE_FIELDS),
     optionsExtra: pickExtra(options, OPTION_FIELDS),
   })
@@ -666,6 +713,8 @@ export function serializeProtocolPolicy(
       target_endpoint: rule.target_endpoint,
       all_channels: rule.all_channels,
     }
+    delete payload.enable_custom_tool_bridge
+    delete payload.only_when_tool_bridge_required
 
     if (!rule.all_channels && rule.channel_ids.length > 0) {
       payload.channel_ids = rule.channel_ids
@@ -682,6 +731,15 @@ export function serializeProtocolPolicy(
       options.enable_custom_tool_bridge = true
     } else {
       delete options.enable_custom_tool_bridge
+    }
+    if (
+      rule.only_when_tool_bridge_required &&
+      rule.enable_custom_tool_bridge &&
+      isResponsesToChatRule(rule)
+    ) {
+      options.only_when_tool_bridge_required = true
+    } else {
+      delete options.only_when_tool_bridge_required
     }
     if (Object.keys(options).length > 0) {
       payload.options = options

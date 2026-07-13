@@ -676,13 +676,14 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 			info.LastError = unsupportedNativeCompactionChannelError(channel)
 			return true, nil
 		}
-		rule := service.FindProtocolConversionRuleGlobal(
-			model_setting.ProtocolEndpointResponses,
-			model_setting.ProtocolEndpointChatCompletions,
+		rule, err := service.FindUnconditionalResponsesViaChatRule(
 			channel.Id,
 			channel.Type,
 			info.OriginModelName,
 		)
+		if err != nil {
+			return false, err
+		}
 		if rule != nil && responsesCompactionRuleRequiresChannelSkip(c, info, rule, channel) {
 			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
 			info.LastError = unsupportedNativeCompactionChannelError(channel)
@@ -716,13 +717,14 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 			info.LastError = unsupportedNativeCompactionChannelError(channel)
 			return true, nil
 		}
-		rule := service.FindProtocolConversionRuleGlobal(
-			model_setting.ProtocolEndpointResponses,
-			model_setting.ProtocolEndpointChatCompletions,
+		rule, err := service.FindUnconditionalResponsesViaChatRule(
 			channel.Id,
 			channel.Type,
 			info.OriginModelName,
 		)
+		if err != nil {
+			return false, err
+		}
 		if rule != nil && responsesLocalCompactionTriggerRuleRequiresChannelSkip(c, info, rule, channel) {
 			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
 			info.LastError = unsupportedNativeCompactionChannelError(channel)

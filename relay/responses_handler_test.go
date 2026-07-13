@@ -1699,12 +1699,38 @@ func TestNewResponsesConvertRequestErrorMapsSyntheticClientErrorsToBadRequest(t 
 		service.ErrSyntheticCompactRequiresVisibleInput,
 		service.ErrSyntheticCompactStateScopeMismatch,
 		service.ErrResponsesRESTPreviousIDUnsupported,
+		service.ErrResponsesChatCompatibilityPreviousIDUnsupported,
+		service.ErrResponsesChatCompatibilityToolBridgeRequestInvalid,
 	} {
 		err := newResponsesConvertRequestError(err)
 
 		require.Equal(t, http.StatusBadRequest, err.StatusCode)
 		require.Equal(t, types.ErrorCodeConvertRequestFailed, err.GetErrorCode())
 	}
+}
+
+func TestResponsesHelperRejectsLocalChatCompatibilityPreviousIDForCompactRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 205)
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt-5.5")
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		Request: &dto.OpenAIResponsesCompactionRequest{
+			Model:              "gpt-5.5",
+			PreviousResponseID: "resp_newapi_chatcmp_test",
+			Input:              common.RawMessage(`[{"type":"compaction_trigger"}]`),
+		},
+	}
+
+	err := ResponsesHelper(c, info)
+
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCodeConvertRequestFailed, err.GetErrorCode())
+	require.ErrorIs(t, err, service.ErrResponsesChatCompatibilityPreviousIDUnsupported)
 }
 
 func TestApplyResponsesCompactSummaryModelOverride(t *testing.T) {

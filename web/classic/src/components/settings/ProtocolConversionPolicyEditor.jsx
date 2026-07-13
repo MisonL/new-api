@@ -220,6 +220,10 @@ export default function ProtocolConversionPolicyEditor({
         const nextRule = { ...rule, ...patch };
         if (!isResponsesToChatRule(nextRule)) {
           nextRule.enable_custom_tool_bridge = false;
+          nextRule.only_when_tool_bridge_required = false;
+        }
+        if (!nextRule.enable_custom_tool_bridge) {
+          nextRule.only_when_tool_bridge_required = false;
         }
         return nextRule;
       }),

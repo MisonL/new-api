@@ -20,10 +20,7 @@ import (
 
 func getResponsesCompatID(c *gin.Context) string {
 	logID := c.GetString(common.RequestIdKey)
-	if logID == "" {
-		return "resp_" + common.GetUUID()
-	}
-	return "resp_" + logID
+	return service.NewResponsesChatCompatibilityID(logID)
 }
 
 func sendResponsesCompatEvent(c *gin.Context, eventType string, event dto.ResponsesStreamResponse) error {

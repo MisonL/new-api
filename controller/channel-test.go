@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -849,7 +850,10 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 	explicitChatProtocol := options.ResponseProtocol == channelTestResponseProtocolChatCompletions
 	var conversionOptions service.ResponsesChatCompatibilityOptions
 	if !explicitChatProtocol {
-		conversionRule := findChannelTestResponsesViaChatRule(info)
+		conversionRule, err := findChannelTestResponsesViaChatRule(info, request)
+		if err != nil {
+			return request, err
+		}
 		if conversionRule == nil {
 			return request, nil
 		}
@@ -912,21 +916,32 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 	return chatReq, nil
 }
 
-func findChannelTestResponsesViaChatRule(info *relaycommon.RelayInfo) *model_setting.ProtocolConversionRule {
+func findChannelTestResponsesViaChatRule(info *relaycommon.RelayInfo, request dto.Request) (*model_setting.ProtocolConversionRule, error) {
 	settings := model_setting.GetGlobalSettings()
 	if info == nil ||
 		info.ChannelMeta == nil ||
 		info.RelayMode != relayconstant.RelayModeResponses ||
 		settings.PassThroughRequestEnabled ||
 		info.ChannelSetting.PassThroughBodyEnabled {
-		return nil
+		return nil, nil
 	}
-	return service.FindProtocolConversionRuleGlobal(
-		model_setting.ProtocolEndpointResponses,
-		model_setting.ProtocolEndpointChatCompletions,
+	responsesRequest, ok := request.(*dto.OpenAIResponsesRequest)
+	if !ok {
+		return service.FindUnconditionalResponsesViaChatRule(
+			info.ChannelId,
+			info.ChannelType,
+			info.OriginModelName,
+		)
+	}
+	return service.FindResponsesViaChatRule(
+		context.Background(),
+		info.RelayMode,
+		settings.PassThroughRequestEnabled,
+		info.ChannelSetting,
 		info.ChannelId,
 		info.ChannelType,
 		info.OriginModelName,
+		responsesRequest,
 	)
 }
 

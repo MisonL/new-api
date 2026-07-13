@@ -20,6 +20,15 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
+func TestGetResponsesCompatIDUsesRecognizablePrefix(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	c.Set(common.RequestIdKey, "test-request-id")
+
+	responseID := getResponsesCompatID(c)
+
+	require.Equal(t, "resp_newapi_chatcmp_test-request-id", responseID)
+}
+
 func marshalStreamChunk(t *testing.T, chunk dto.ChatCompletionsStreamResponse) string {
 	t.Helper()
 	raw, err := common.Marshal(chunk)

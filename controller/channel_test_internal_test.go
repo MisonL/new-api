@@ -327,6 +327,92 @@ func TestApplyChannelTestProtocolStrategyUsesGlobalResponsesToChatRuleByDefault(
 	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponses, types.RelayFormatOpenAI}, info.RequestConversionChain)
 }
 
+func TestApplyChannelTestProtocolStrategySkipsConditionalToolBridgeForOrdinaryRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	withGlobalProtocolPolicyForTest(t, model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{{
+			Name:           "channel-205-custom-tools-only",
+			Enabled:        true,
+			SourceEndpoint: model_setting.ProtocolEndpointResponses,
+			TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+			ChannelIDs:     []int{205},
+			Options: &model_setting.ProtocolConversionOptions{
+				EnableCustomToolBridge:     true,
+				OnlyWhenToolBridgeRequired: true,
+			},
+		}},
+	}, false)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		RequestURLPath:  "/v1/responses",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   205,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[{"role":"user","content":"ping"}]`),
+	}
+
+	converted, err := applyChannelTestProtocolStrategy(ctx, info, request, defaultChannelTestOptions())
+
+	require.NoError(t, err)
+	require.Same(t, request, converted)
+	require.Equal(t, relayconstant.RelayModeResponses, info.RelayMode)
+	require.Equal(t, "/v1/responses", info.RequestURLPath)
+}
+
+func TestApplyChannelTestProtocolStrategyUsesConditionalToolBridgeForCustomAdditionalTools(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	withGlobalProtocolPolicyForTest(t, model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{{
+			Name:           "channel-205-custom-tools-only",
+			Enabled:        true,
+			SourceEndpoint: model_setting.ProtocolEndpointResponses,
+			TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+			ChannelIDs:     []int{205},
+			Options: &model_setting.ProtocolConversionOptions{
+				EnableCustomToolBridge:     true,
+				OnlyWhenToolBridgeRequired: true,
+			},
+		}},
+	}, false)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		RequestURLPath:  "/v1/responses",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   205,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[
+			{"type":"additional_tools","tools":[{"type":"custom","name":"exec"}]},
+			{"type":"message","role":"user","content":"run pwd"}
+		]`),
+	}
+
+	converted, err := applyChannelTestProtocolStrategy(ctx, info, request, defaultChannelTestOptions())
+
+	require.NoError(t, err)
+	chatReq, ok := converted.(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+	require.NotEmpty(t, chatReq.Tools)
+	require.Equal(t, relayconstant.RelayModeChatCompletions, info.RelayMode)
+	require.Equal(t, "/v1/chat/completions", info.RequestURLPath)
+	require.Equal(t, "/v1/chat/completions", ctx.Request.URL.Path)
+}
+
 func TestResetResponsesCompactAutoFallbackNormalizesNonOpenAISettings(t *testing.T) {
 	channel := &model.Channel{
 		Type: constant.ChannelTypeAnthropic,

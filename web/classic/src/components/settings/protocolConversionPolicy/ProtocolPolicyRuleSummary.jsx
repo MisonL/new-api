@@ -50,6 +50,8 @@ export default function ProtocolPolicyRuleSummary({
   const scopeInvalid = !isRuleScopeValid(rule);
   const customToolBridgeEnabled =
     isResponsesToChatRule(rule) && rule.enable_custom_tool_bridge === true;
+  const conditionalToolBridge =
+    customToolBridgeEnabled && rule.only_when_tool_bridge_required === true;
   const attentionKeys = getProtocolRuleAttentionKeys(rule, passThroughEnabled);
   const direction = getProtocolRuleDirection(rule);
   const sourceTitle = isChatToResponsesRule(rule)
@@ -110,6 +112,9 @@ export default function ProtocolPolicyRuleSummary({
           {scopeInvalid ? <Tag color='red'>{t('范围未命中')}</Tag> : null}
           {customToolBridgeEnabled ? (
             <Tag color='purple'>{t('自定义工具桥接')}</Tag>
+          ) : null}
+          {conditionalToolBridge ? (
+            <Tag color='cyan'>{t('仅工具请求')}</Tag>
           ) : null}
           {Object.keys(rule.__extra || {}).length > 0 ||
           Object.keys(rule.__options_extra || {}).length > 0 ? (

@@ -54,6 +54,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			types.ErrOptionWithSkipRetry(),
 		)
 	}
+	if service.IsResponsesChatCompatibilityReference(responsesReq.PreviousResponseID) {
+		return newResponsesConvertRequestError(service.ErrResponsesChatCompatibilityPreviousIDUnsupported)
+	}
 
 	request, err := common.DeepCopy(responsesReq)
 	if err != nil {
@@ -540,7 +543,9 @@ func newResponsesConvertRequestError(err error) *types.NewAPIError {
 		errors.Is(err, service.ErrSyntheticCompactStateScopeMismatch) ||
 		errors.Is(err, service.ErrSyntheticCompactMultipleMarkers) ||
 		errors.Is(err, service.ErrResponsesRESTPreviousIDUnsupported) ||
-		errors.Is(err, service.ErrResponsesNativeOpaqueStateNotRestorable) {
+		errors.Is(err, service.ErrResponsesNativeOpaqueStateNotRestorable) ||
+		errors.Is(err, service.ErrResponsesChatCompatibilityPreviousIDUnsupported) ||
+		errors.Is(err, service.ErrResponsesChatCompatibilityToolBridgeRequestInvalid) {
 		options = append(options, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 	}
 	if errors.Is(err, service.ErrResponsesCompactionContentRequired) {

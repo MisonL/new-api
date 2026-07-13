@@ -35,27 +35,53 @@ func isRuleMatch(rule model_setting.ProtocolConversionRule, sourceEndpoint strin
 	return matchAnyRegex(rule.ModelPatterns, model)
 }
 
-func FindProtocolConversionRulePolicy(policy model_setting.ChatCompletionsToResponsesPolicy, sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string) *model_setting.ProtocolConversionRule {
+type ProtocolConversionRuleFilter func(rule *model_setting.ProtocolConversionRule) (bool, error)
+
+func FindProtocolConversionRulePolicyWithFilter(policy model_setting.ChatCompletionsToResponsesPolicy, sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string, filter ProtocolConversionRuleFilter) (*model_setting.ProtocolConversionRule, error) {
 	if !policy.Enabled {
-		return nil
+		return nil, nil
 	}
 
 	for i := range policy.Rules {
-		rule := policy.Rules[i]
-		if isRuleMatch(rule, sourceEndpoint, targetEndpoint, channelID, channelType, model) {
-			return &policy.Rules[i]
+		rule := &policy.Rules[i]
+		if !isRuleMatch(*rule, sourceEndpoint, targetEndpoint, channelID, channelType, model) {
+			continue
 		}
+		if filter != nil {
+			allowed, err := filter(rule)
+			if err != nil {
+				return nil, err
+			}
+			if !allowed {
+				continue
+			}
+		}
+		return rule, nil
 	}
 
 	if policy.HasRules() {
-		return nil
+		return nil, nil
 	}
 
 	legacyRule := policy.LegacyRule()
 	if isRuleMatch(legacyRule, sourceEndpoint, targetEndpoint, channelID, channelType, model) {
-		return &legacyRule
+		if filter == nil {
+			return &legacyRule, nil
+		}
+		allowed, err := filter(&legacyRule)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
+			return &legacyRule, nil
+		}
 	}
-	return nil
+	return nil, nil
+}
+
+func FindProtocolConversionRulePolicy(policy model_setting.ChatCompletionsToResponsesPolicy, sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string) *model_setting.ProtocolConversionRule {
+	rule, _ := FindProtocolConversionRulePolicyWithFilter(policy, sourceEndpoint, targetEndpoint, channelID, channelType, model, nil)
+	return rule
 }
 
 func FindProtocolConversionRuleGlobal(sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string) *model_setting.ProtocolConversionRule {

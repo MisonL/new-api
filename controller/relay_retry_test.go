@@ -292,6 +292,84 @@ func TestShouldSkipChannelForResponsesProxyCompactionTriggerWithoutRule(t *testi
 	require.Equal(t, "channel_skipped_unsupported_compaction", common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
 }
 
+func TestShouldSkipChannelForResponsesCompactionTriggerIgnoresConditionalToolBridgeRule(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+	settings.PassThroughRequestEnabled = false
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{{
+			Name:           "conditional-tool-bridge",
+			Enabled:        true,
+			SourceEndpoint: model_setting.ProtocolEndpointResponses,
+			TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+			ChannelIDs:     []int{205},
+			ModelPatterns:  []string{`^gpt-5(\..+)?$`},
+			Options: &model_setting.ProtocolConversionOptions{
+				EnableCustomToolBridge:     true,
+				OnlyWhenToolBridgeRequired: true,
+			},
+		}},
+	}
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := compactionTriggerRelayInfo()
+	channel := &model.Channel{Id: 205, Type: constant.ChannelTypeOpenAI}
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.False(t, skip)
+	require.Nil(t, info.LastError)
+	require.Empty(t, common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+}
+
+func TestShouldSkipChannelForResponsesRemoteCompactionIgnoresConditionalToolBridgeRule(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+	settings.PassThroughRequestEnabled = false
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{{
+			Name:           "conditional-tool-bridge",
+			Enabled:        true,
+			SourceEndpoint: model_setting.ProtocolEndpointResponses,
+			TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+			ChannelIDs:     []int{205},
+			ModelPatterns:  []string{`^gpt-5(\..+)?$`},
+			Options: &model_setting.ProtocolConversionOptions{
+				EnableCustomToolBridge:     true,
+				OnlyWhenToolBridgeRequired: true,
+			},
+		}},
+	}
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := remoteCompactionRelayInfo()
+	channel := &model.Channel{Id: 205, Type: constant.ChannelTypeOpenAI}
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.False(t, skip)
+	require.Nil(t, info.LastError)
+	require.Empty(t, common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+}
+
 func TestShouldRetryModelCapacityHonorsRetryBudget(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)

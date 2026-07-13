@@ -88,6 +88,9 @@ export function ProtocolConversionRuleEditorSheet({
       enable_custom_tool_bridge: isResponsesToChat
         ? savedEnableCustomToolBridge
         : false,
+      only_when_tool_bridge_required: isResponsesToChat
+        ? rule.only_when_tool_bridge_required
+        : false,
     })
   }
 
@@ -239,8 +242,36 @@ export function ProtocolConversionRuleEditorSheet({
                 checked={bridgeSupported && rule.enable_custom_tool_bridge}
                 onCheckedChange={(checked) => {
                   setSavedEnableCustomToolBridge(checked)
-                  onUpdate({ enable_custom_tool_bridge: checked })
+                  onUpdate({
+                    enable_custom_tool_bridge: checked,
+                    only_when_tool_bridge_required: checked
+                      ? rule.only_when_tool_bridge_required
+                      : false,
+                  })
                 }}
+              />
+            </div>
+            <div className='flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3'>
+              <div>
+                <div className='text-sm font-medium'>
+                  {t('Bridge custom tool requests only')}
+                </div>
+                <div className='text-muted-foreground text-sm'>
+                  {t(
+                    'Keep ordinary Responses requests on the native upstream path.'
+                  )}
+                </div>
+              </div>
+              <Switch
+                disabled={!bridgeSupported || !rule.enable_custom_tool_bridge}
+                checked={
+                  bridgeSupported &&
+                  rule.enable_custom_tool_bridge &&
+                  rule.only_when_tool_bridge_required
+                }
+                onCheckedChange={(checked) =>
+                  onUpdate({ only_when_tool_bridge_required: checked })
+                }
               />
             </div>
           </EditorSection>

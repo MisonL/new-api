@@ -71,7 +71,8 @@ type ProtocolConversionRule struct {
 }
 
 type ProtocolConversionOptions struct {
-	EnableCustomToolBridge bool `json:"enable_custom_tool_bridge,omitempty"`
+	EnableCustomToolBridge     bool `json:"enable_custom_tool_bridge,omitempty"`
+	OnlyWhenToolBridgeRequired bool `json:"only_when_tool_bridge_required,omitempty"`
 }
 
 type RequestBodyLimitPolicy struct {
@@ -330,6 +331,14 @@ func ValidateAndNormalizeChatCompletionsToResponsesPolicy(policy *ChatCompletion
 			(rule.SourceEndpoint != ProtocolEndpointResponses || rule.TargetEndpoint != ProtocolEndpointChatCompletions) {
 			return fmt.Errorf("规则 #%d enable_custom_tool_bridge 仅支持 responses 到 chat_completions", i+1)
 		}
+		if rule.Options != nil && rule.Options.OnlyWhenToolBridgeRequired {
+			if !rule.Options.EnableCustomToolBridge {
+				return fmt.Errorf("规则 #%d only_when_tool_bridge_required 需要 enable_custom_tool_bridge", i+1)
+			}
+			if rule.SourceEndpoint != ProtocolEndpointResponses || rule.TargetEndpoint != ProtocolEndpointChatCompletions {
+				return fmt.Errorf("规则 #%d only_when_tool_bridge_required 仅支持 responses 到 chat_completions", i+1)
+			}
+		}
 	}
 
 	return nil
@@ -384,6 +393,7 @@ var protocolRuleKnownFields = []string{
 
 var protocolOptionsKnownFields = []string{
 	"enable_custom_tool_bridge",
+	"only_when_tool_bridge_required",
 }
 
 func replaceKnownRawFields(dst map[string]common.RawMessage, src map[string]common.RawMessage, keys []string) {

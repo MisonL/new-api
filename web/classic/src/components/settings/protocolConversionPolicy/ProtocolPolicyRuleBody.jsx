@@ -163,6 +163,9 @@ function BasicPanel({ directionInvalid, index, rule, t, updateRule }) {
       enable_custom_tool_bridge: nextIsResponsesToChat
         ? rule.enable_custom_tool_bridge
         : false,
+      only_when_tool_bridge_required: nextIsResponsesToChat
+        ? rule.only_when_tool_bridge_required
+        : false,
     });
   };
 
@@ -354,10 +357,49 @@ function AdvancedPanel({ index, rule, t, updateRule }) {
             disabled={!bridgeSupported}
             uncheckedText={t('关')}
             onChange={(checked) =>
-              updateRule(index, { enable_custom_tool_bridge: checked })
+              updateRule(index, {
+                enable_custom_tool_bridge: checked,
+                only_when_tool_bridge_required: checked
+                  ? rule.only_when_tool_bridge_required
+                  : false,
+              })
             }
           />
         </div>
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          marginTop: 12,
+        }}
+      >
+        <div>
+          <Text strong>{t('仅工具请求桥接')}</Text>
+          <div>
+            <Text type='tertiary' size='small'>
+              {t('普通 Responses 请求保持原生上游路径。')}
+            </Text>
+          </div>
+        </div>
+        <Switch
+          id={`protocol-rule-conditional-tool-bridge-${index}`}
+          name={`protocol-rule-conditional-tool-bridge-${index}`}
+          checked={Boolean(
+            bridgeSupported &&
+              rule.enable_custom_tool_bridge &&
+              rule.only_when_tool_bridge_required,
+          )}
+          checkedText={t('开')}
+          disabled={!bridgeSupported || !rule.enable_custom_tool_bridge}
+          uncheckedText={t('关')}
+          onChange={(checked) =>
+            updateRule(index, { only_when_tool_bridge_required: checked })
+          }
+        />
       </div>
     </div>
   );

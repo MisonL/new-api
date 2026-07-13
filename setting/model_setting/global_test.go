@@ -45,6 +45,70 @@ func TestNormalizeChatCompletionsToResponsesPolicyJSON_ValidRule(t *testing.T) {
 	assert.True(t, rule.Options.EnableCustomToolBridge)
 }
 
+func TestNormalizeChatCompletionsToResponsesPolicyJSON_PreservesConditionalToolBridge(t *testing.T) {
+	normalized, err := NormalizeChatCompletionsToResponsesPolicyJSON(`{
+		"rules": [{
+			"name": "conditional-custom-tools",
+			"enabled": true,
+			"source_endpoint": "responses",
+			"target_endpoint": "chat_completions",
+			"all_channels": true,
+			"options": {
+				"enable_custom_tool_bridge": true,
+				"only_when_tool_bridge_required": true
+			}
+		}]
+	}`)
+	require.NoError(t, err)
+
+	var policy ChatCompletionsToResponsesPolicy
+	require.NoError(t, common.UnmarshalJsonStr(normalized, &policy))
+	require.Len(t, policy.Rules, 1)
+	require.NotNil(t, policy.Rules[0].Options)
+	assert.True(t, policy.Rules[0].Options.EnableCustomToolBridge)
+	assert.True(t, policy.Rules[0].Options.OnlyWhenToolBridgeRequired)
+	assert.Contains(t, normalized, "only_when_tool_bridge_required")
+}
+
+func TestNormalizeChatCompletionsToResponsesPolicyJSON_RejectsInvalidConditionalToolBridge(t *testing.T) {
+	testCases := []struct {
+		raw         string
+		expectedKey string
+	}{
+		{
+			raw: `{
+			"rules": [{
+				"source_endpoint": "responses",
+				"target_endpoint": "chat_completions",
+				"all_channels": true,
+				"options": {"only_when_tool_bridge_required": true}
+			}]
+		}`,
+			expectedKey: "only_when_tool_bridge_required",
+		},
+		{
+			raw: `{
+			"rules": [{
+				"source_endpoint": "chat_completions",
+				"target_endpoint": "responses",
+				"all_channels": true,
+				"options": {
+					"enable_custom_tool_bridge": true,
+					"only_when_tool_bridge_required": true
+				}
+			}]
+		}`,
+			expectedKey: "enable_custom_tool_bridge",
+		},
+	}
+
+	for _, testCase := range testCases {
+		_, err := NormalizeChatCompletionsToResponsesPolicyJSON(testCase.raw)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), testCase.expectedKey)
+	}
+}
+
 func TestNormalizeChatCompletionsToResponsesPolicyJSON_PreservesExplicitTopLevelDisabled(t *testing.T) {
 	raw := `{
 		"enabled": false,

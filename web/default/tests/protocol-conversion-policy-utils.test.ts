@@ -11,6 +11,7 @@ import {
   TEMPLATE_RESPONSES_TO_CHAT,
   createCommittedDraftText,
   createDraftTextChange,
+  createProtocolRule,
   createProtocolRuleFromTemplate,
   filterProtocolRules,
   getDraftTextValue,
@@ -61,6 +62,37 @@ describe('protocol conversion policy utils', () => {
     expect(serialized.rules[0].vendor_rule_flag).toBe(7)
     expect(serialized.rules[0].options.vendor_option_flag).toBe('keep')
     expect(serialized.rules[0].options.enable_custom_tool_bridge).toBe(true)
+  })
+
+  test('normalizes legacy top-level bridge fields into options', () => {
+    const parsed = parseProtocolPolicy(
+      JSON.stringify({
+        rules: [
+          {
+            name: 'legacy-tool-bridge',
+            source_endpoint: ENDPOINT_RESPONSES,
+            target_endpoint: ENDPOINT_CHAT,
+            all_channels: true,
+            enable_custom_tool_bridge: true,
+            only_when_tool_bridge_required: true,
+          },
+        ],
+      })
+    )
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    const serialized = JSON.parse(
+      serializeProtocolPolicy(parsed.rules, parsed.policyExtra)
+    )
+    expect(serialized.rules[0]).not.toHaveProperty('enable_custom_tool_bridge')
+    expect(serialized.rules[0]).not.toHaveProperty(
+      'only_when_tool_bridge_required'
+    )
+    expect(serialized.rules[0].options).toEqual({
+      enable_custom_tool_bridge: true,
+      only_when_tool_bridge_required: true,
+    })
   })
 
   test('upgrades legacy policy to rules shape', () => {
@@ -435,6 +467,125 @@ describe('protocol conversion policy utils', () => {
     expect(parsed.ok).toBe(false)
     if (parsed.ok) return
     expect(parsed.error).toContain('enable_custom_tool_bridge')
+  })
+
+  test('rejects conditional tool bridge without custom tool bridge', () => {
+    const parsed = parseProtocolPolicy(
+      JSON.stringify({
+        rules: [
+          {
+            name: 'conditional-tools',
+            source_endpoint: 'responses',
+            target_endpoint: 'chat_completions',
+            all_channels: true,
+            options: {
+              only_when_tool_bridge_required: true,
+            },
+          },
+        ],
+      })
+    )
+
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) return
+    expect(parsed.error).toContain('only_when_tool_bridge_required')
+  })
+
+  test('rejects a non-boolean conditional tool bridge option', () => {
+    const parsed = parseProtocolPolicy(
+      JSON.stringify({
+        rules: [
+          {
+            name: 'invalid-conditional-tool-bridge',
+            source_endpoint: ENDPOINT_RESPONSES,
+            target_endpoint: ENDPOINT_CHAT,
+            all_channels: true,
+            options: {
+              enable_custom_tool_bridge: true,
+              only_when_tool_bridge_required: 'true',
+            },
+          },
+        ],
+      })
+    )
+
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) return
+    expect(parsed.error).toContain('only_when_tool_bridge_required')
+  })
+
+  test('validates the legacy conditional bridge field even when options enables it', () => {
+    const parsed = parseProtocolPolicy(
+      JSON.stringify({
+        rules: [
+          {
+            name: 'invalid-legacy-conditional-tool-bridge',
+            source_endpoint: ENDPOINT_RESPONSES,
+            target_endpoint: ENDPOINT_CHAT,
+            all_channels: true,
+            only_when_tool_bridge_required: 'true',
+            options: {
+              enable_custom_tool_bridge: true,
+              only_when_tool_bridge_required: true,
+            },
+          },
+        ],
+      })
+    )
+
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) return
+    expect(parsed.error).toContain('only_when_tool_bridge_required')
+  })
+
+  test('does not serialize conditional bridge fields after bridge support is removed', () => {
+    const disabledBridgeRule = createProtocolRule({
+      source_endpoint: ENDPOINT_RESPONSES,
+      target_endpoint: ENDPOINT_CHAT,
+      all_channels: true,
+      enable_custom_tool_bridge: false,
+      only_when_tool_bridge_required: true,
+      optionsExtra: { only_when_tool_bridge_required: true },
+    })
+    const unsupportedDirectionRule = createProtocolRule({
+      source_endpoint: ENDPOINT_CHAT,
+      target_endpoint: ENDPOINT_RESPONSES,
+      all_channels: true,
+      enable_custom_tool_bridge: true,
+      only_when_tool_bridge_required: true,
+      optionsExtra: {
+        enable_custom_tool_bridge: true,
+        only_when_tool_bridge_required: true,
+      },
+    })
+
+    const serialized = JSON.parse(
+      serializeProtocolPolicy([disabledBridgeRule, unsupportedDirectionRule])
+    )
+    expect(serialized.rules[0].options).toBeUndefined()
+    expect(serialized.rules[1].options).toBeUndefined()
+  })
+
+  test('describes conditional rules as request-dependent in preview', () => {
+    const rule = createProtocolRule({
+      source_endpoint: ENDPOINT_RESPONSES,
+      target_endpoint: ENDPOINT_CHAT,
+      all_channels: true,
+      enable_custom_tool_bridge: true,
+      only_when_tool_bridge_required: true,
+    })
+
+    expect(
+      getProtocolPreviewResult(
+        rule,
+        { channelId: '205', channelType: '1', model: 'gpt-5.5' },
+        false
+      )
+    ).toEqual({
+      matched: true,
+      reason:
+        'Sample channel and model match this conditional rule. Conversion requires a custom tool bridge request.',
+    })
   })
 
   test('preview matches all non-empty models when model patterns are empty', () => {
