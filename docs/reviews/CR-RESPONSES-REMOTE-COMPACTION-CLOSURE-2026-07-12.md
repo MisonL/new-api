@@ -44,3 +44,9 @@ message=provider returned malformed remote compaction output: expected exactly o
 ```
 
 容器日志记录了渠道 180、请求路径 `/v1/responses`、`responses_compact_mode=remote_v2` 和同一错误；没有出现本地 503、兼容重试循环或伪成功计费。该结果确认当前上游持续返回空 compaction 输出，属于本地已正确暴露的上游畸形响应，不能表述为真实成功链路已恢复。
+
+## 后续更正（2026-07-13）
+
+后续对照 `Wei-Shaw/sub2api` 的 remote compaction v2 修复并复核本地状态机后，发现上述“终态 `output: []` 必须覆盖此前事件流 item”的结论不完整：部分上游会先通过 `response.output_item.done` 发送合法 compaction，再在 `response.completed` 使用空 output 或仅 message 的终态快照。此前实现会丢弃已观察的 compaction，错误返回 `got 0`。
+
+该边界已在提交 `0326a30ac` 修复：仅当终态已有 compaction 时以终态为权威；终态缺 compaction 时保留事件流中已观察到的 compaction。若两处都没有合法 compaction，仍严格返回 502。最新隔离环境连续 3 次真实 remote v2 请求均返回 200，详见 `CR-RESPONSES-COMPACTION-502-ANALYSIS-2026-07-13.md`。
