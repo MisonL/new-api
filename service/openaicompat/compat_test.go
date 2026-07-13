@@ -366,6 +366,62 @@ func TestResponsesRequestToChatCompletionsRequestBridgesCustomToolsWhenEnabled(t
 	require.Equal(t, "/tmp/work", chatReq.Messages[2].StringContent())
 }
 
+func TestResponsesRequestToChatCompletionsRequestBridgesAdditionalToolsWhenEnabled(t *testing.T) {
+	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: mustMarshalJSON(t, []any{
+			map[string]any{
+				"type": "additional_tools",
+				"role": "developer",
+				"tools": []map[string]any{
+					{
+						"type":        "custom",
+						"name":        "exec",
+						"description": "Run a shell command.",
+						"format":      map[string]any{"type": "text"},
+					},
+					{
+						"type":       "function",
+						"name":       "wait",
+						"parameters": map[string]any{"type": "object"},
+					},
+					{
+						"type": "namespace",
+						"name": "collaboration",
+						"tools": []map[string]any{{
+							"type":       "function",
+							"name":       "send_message",
+							"parameters": map[string]any{"type": "object"},
+						}},
+					},
+				},
+			},
+			map[string]any{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "run the task"}},
+			},
+		}),
+		Tools: mustMarshalJSON(t, []map[string]any{{
+			"type":       "function",
+			"name":       "lookup",
+			"parameters": map[string]any{"type": "object"},
+		}}),
+	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+	require.NoError(t, err)
+	require.Len(t, chatReq.Tools, 4)
+	require.Equal(t, "lookup", chatReq.Tools[0].Function.Name)
+	require.Equal(t, dto.CustomType, chatReq.Tools[1].Type)
+	require.JSONEq(t, `{"name":"exec","description":"Run a shell command.","format":{"type":"text"}}`, string(chatReq.Tools[1].Custom))
+	require.Equal(t, "wait", chatReq.Tools[2].Function.Name)
+	require.Equal(t, "send_message", chatReq.Tools[3].Function.Name)
+
+	require.Len(t, chatReq.Messages, 1)
+	require.Equal(t, "user", chatReq.Messages[0].Role)
+	require.Equal(t, "run the task", chatReq.Messages[0].StringContent())
+}
+
 func TestResponsesRequestToChatCompletionsRequestBridgesNamespaceToolsWhenEnabled(t *testing.T) {
 	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
 		Model:      "gpt-5",

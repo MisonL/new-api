@@ -109,6 +109,14 @@ func TestResponsesRequestHasNamespaceTools(t *testing.T) {
 			expected: true,
 		},
 		{
+			name: "namespace tool from additional tools",
+			request: &dto.OpenAIResponsesRequest{Input: rootcommon.RawMessage(`[
+				{"type":"additional_tools","tools":[{"type":"namespace","name":"collaboration","tools":[]}]},
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+			]`)},
+			expected: true,
+		},
+		{
 			name:      "malformed tools array",
 			request:   &dto.OpenAIResponsesRequest{Tools: rootcommon.RawMessage(`[{`)},
 			wantError: true,

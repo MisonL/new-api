@@ -119,12 +119,8 @@ func ResponsesRequestHasNamespaceTools(request *dto.OpenAIResponsesRequest) (boo
 	if request == nil {
 		return false, nil
 	}
-	trimmedTools := bytes.TrimSpace(request.Tools)
-	if len(trimmedTools) == 0 || trimmedTools[0] != '[' {
-		return false, nil
-	}
-	var tools []json.RawMessage
-	if err := basecommon.Unmarshal(request.Tools, &tools); err != nil {
+	tools, err := request.EffectiveTools()
+	if err != nil {
 		return false, err
 	}
 	for _, rawTool := range tools {

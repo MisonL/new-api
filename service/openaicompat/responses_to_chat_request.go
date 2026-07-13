@@ -399,6 +399,25 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 	return tools, nil
 }
 
+func effectiveResponsesTools(req *dto.OpenAIResponsesRequest) (common.RawMessage, error) {
+	tools, err := req.EffectiveTools()
+	if err != nil {
+		return nil, err
+	}
+	return marshalResponsesTools(tools)
+}
+
+func marshalResponsesTools(tools []common.RawMessage) (common.RawMessage, error) {
+	if len(tools) == 0 {
+		return nil, nil
+	}
+	raw, err := common.Marshal(tools)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode effective tools: %w", err)
+	}
+	return raw, nil
+}
+
 func appendUniqueFunctionTools(tools *[]dto.ToolCallRequest, seen map[string]struct{}, candidates []dto.ToolCallRequest) error {
 	for _, candidate := range candidates {
 		if candidate.Type == "function" {
@@ -533,6 +552,9 @@ func convertResponsesInputToChatMessages(raw []byte, options ResponsesChatCompat
 	for _, item := range items {
 		role := strings.TrimSpace(common.Interface2String(item["role"]))
 		itemType := strings.TrimSpace(common.Interface2String(item["type"]))
+		if itemType == "additional_tools" {
+			continue
+		}
 
 		if role != "" || itemType == "message" {
 			pendingUserParts = flushPendingUserMessage(&messages, pendingUserParts)
@@ -766,7 +788,11 @@ func ResponsesRequestToChatCompletionsRequestWithOptions(req *dto.OpenAIResponse
 	}
 	out.ToolChoice = toolChoice
 
-	tools, err := convertResponsesToolsToChat(req.Tools, options, namespaceSelection)
+	effectiveTools, err := effectiveResponsesTools(req)
+	if err != nil {
+		return nil, err
+	}
+	tools, err := convertResponsesToolsToChat(effectiveTools, options, namespaceSelection)
 	if err != nil {
 		return nil, err
 	}
