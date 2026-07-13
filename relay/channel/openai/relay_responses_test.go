@@ -622,11 +622,39 @@ func TestOaiResponsesStreamHandlerRejectsExplicitEmptyCompletedOutputSnapshot(t 
 
 	usage, err := OaiResponsesStreamHandler(c, info, resp)
 
-	require.Nil(t, usage)
-	require.NotNil(t, err)
-	require.Equal(t, http.StatusBadGateway, err.StatusCode)
-	require.Contains(t, err.Error(), "expected exactly one compaction output")
-	require.Empty(t, recorder.Body.String())
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 12, usage.PromptTokens)
+	require.Contains(t, recorder.Body.String(), "response.output_item.done")
+	require.Contains(t, recorder.Body.String(), "response.completed")
+}
+
+func TestOaiResponsesStreamHandlerSupplementsCompactionWhenCompletedOutputOmitsIt(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"id":"cmp_from_event","type":"compaction","encrypted_content":"opaque"}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_remote_compact_message","object":"response","output":[{"id":"msg_1","type":"message","role":"assistant","content":[]}],"usage":{"input_tokens":12,"output_tokens":0,"total_tokens":12}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		Request:      &dto.OpenAIResponsesRequest{Input: []byte(`[{"type":"compaction_trigger"}]`)},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Contains(t, recorder.Body.String(), "response.completed")
 }
 
 func TestOaiResponsesStreamHandlerRejectsRemoteCompactionWithoutCompletedEvent(t *testing.T) {

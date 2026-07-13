@@ -1009,10 +1009,48 @@ func (s *remoteCompactionStreamState) observe(response dto.ResponsesStreamRespon
 	}
 	if response.Type == "response.completed" && response.Response != nil {
 		s.completed = true
+		s.outputItems = mergeRemoteCompactionOutput(s.outputItems, response.Response.Output)
 	}
-	if response.Type == "response.completed" && response.Response != nil && response.Response.Output != nil {
-		s.outputItems = append(s.outputItems[:0], response.Response.Output...)
+}
+
+func mergeRemoteCompactionOutput(observed, completed []dto.ResponsesOutput) []dto.ResponsesOutput {
+	if len(completed) == 0 {
+		return observed
 	}
+	if remoteCompactionOutputHasCompaction(completed) {
+		return completed
+	}
+	merged := append([]dto.ResponsesOutput(nil), completed...)
+	for _, item := range observed {
+		if !isResponsesCompactionOutputType(item.Type) || remoteCompactionOutputContainsItem(merged, item) {
+			continue
+		}
+		merged = append(merged, item)
+	}
+	return merged
+}
+
+func remoteCompactionOutputHasCompaction(output []dto.ResponsesOutput) bool {
+	for _, item := range output {
+		if isResponsesCompactionOutputType(item.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+func remoteCompactionOutputContainsItem(output []dto.ResponsesOutput, candidate dto.ResponsesOutput) bool {
+	for _, item := range output {
+		if candidate.ID != "" && item.ID == candidate.ID {
+			return true
+		}
+		if candidate.Type == item.Type &&
+			string(candidate.EncryptedContent) != "" &&
+			string(candidate.EncryptedContent) == string(item.EncryptedContent) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *remoteCompactionStreamState) appendEvent(response dto.ResponsesStreamResponse, data string) error {
