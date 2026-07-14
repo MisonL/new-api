@@ -90,6 +90,67 @@ func TestStripEncryptedReasoningFromResponsesRequestKeepsMixedInput(t *testing.T
 	require.NotContains(t, string(got.Input), "opaque")
 }
 
+func TestNormalizeContextCompactionForResponsesRequestConvertsEncryptedAndDropsEmptyMarkers(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: rootcommon.RawMessage(`[
+			{"type":"context_compaction","encrypted_content":"context-summary"},
+			{"type":"context_compaction"},
+			{"type":"compaction","encrypted_content":"native-summary"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, result, err := NormalizeContextCompactionForResponsesRequest(req)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.ConvertedCount)
+	require.Equal(t, 1, result.DroppedCount)
+	require.Equal(t, 3, result.RemainingCount)
+	require.NotContains(t, string(got.Input), `"type":"context_compaction"`)
+	require.JSONEq(t, `[
+		{"type":"compaction","encrypted_content":"context-summary"},
+		{"type":"compaction","encrypted_content":"native-summary"},
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+	]`, string(got.Input))
+}
+
+func TestNormalizeContextCompactionForResponsesRequestRejectsOnlyEmptyMarkers(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: rootcommon.RawMessage(`[
+			{"type":"context_compaction"},
+			{"type":"context_compaction","encrypted_content":""}
+		]`),
+	}
+
+	got, result, err := NormalizeContextCompactionForResponsesRequest(req)
+
+	require.ErrorIs(t, err, ErrResponsesContextCompactionOnlyInput)
+	require.Equal(t, req.Input, got.Input)
+	require.Zero(t, result.ConvertedCount)
+	require.Equal(t, 2, result.DroppedCount)
+	require.Zero(t, result.RemainingCount)
+}
+
+func TestNormalizeContextCompactionForResponsesRequestRejectsInvalidEncryptedContentType(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: rootcommon.RawMessage(`[
+			{"type":"context_compaction","encrypted_content":{"unexpected":true}},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, result, err := NormalizeContextCompactionForResponsesRequest(req)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "context_compaction encrypted_content must be a string")
+	require.Equal(t, req.Input, got.Input)
+	require.Zero(t, result.ConvertedCount)
+	require.Zero(t, result.DroppedCount)
+}
+
 func TestStripResponsesInputEncryptedContentItemRemovesToolOutputCarrier(t *testing.T) {
 	for _, itemType := range []string{"function_call_output", "custom_tool_call_output"} {
 		t.Run(itemType, func(t *testing.T) {

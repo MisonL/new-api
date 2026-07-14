@@ -14,6 +14,8 @@ import (
 )
 
 var ErrResponsesEncryptedReasoningOnlyInput = errors.New("responses encrypted reasoning context is unsupported by this OpenAI-compatible channel and no other input items remain")
+var ErrResponsesContextCompactionOnlyInput = errors.New("responses context compaction markers contain no encrypted summary and no other input items remain")
+var ErrResponsesContextCompactionInvalid = errors.New("invalid responses context compaction input")
 
 var responsesNamespaceParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.namespace$`)
 var responsesArgumentsParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.arguments$`)
@@ -31,6 +33,16 @@ type ResponsesInputStripResult struct {
 type ResponsesArgumentsNormalizeResult struct {
 	NormalizedCount  int
 	TargetNormalized bool
+}
+
+type ResponsesContextCompactionNormalizeResult struct {
+	ConvertedCount int
+	DroppedCount   int
+	RemainingCount int
+}
+
+func (r ResponsesContextCompactionNormalizeResult) ChangedCount() int {
+	return r.ConvertedCount + r.DroppedCount
 }
 
 type responsesEncryptedContentInputPath struct {
@@ -97,6 +109,64 @@ func StripEncryptedReasoningFromResponsesInput(input json.RawMessage) (Responses
 	result.Input = json.RawMessage(raw)
 	result.RemainingCount = len(filtered)
 	return result, nil
+}
+
+func NormalizeContextCompactionForResponsesRequest(request dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, ResponsesContextCompactionNormalizeResult, error) {
+	result := ResponsesContextCompactionNormalizeResult{}
+	trimmedInput := bytes.TrimSpace(request.Input)
+	if len(trimmedInput) == 0 || trimmedInput[0] != '[' {
+		return request, result, nil
+	}
+
+	var items []json.RawMessage
+	if err := basecommon.Unmarshal(request.Input, &items); err != nil {
+		return request, result, err
+	}
+
+	normalized := make([]json.RawMessage, 0, len(items))
+	for _, rawItem := range items {
+		var item map[string]json.RawMessage
+		if err := basecommon.Unmarshal(rawItem, &item); err != nil || responsesItemType(item) != "context_compaction" {
+			normalized = append(normalized, rawItem)
+			continue
+		}
+
+		rawEncryptedContent := bytes.TrimSpace(item["encrypted_content"])
+		if len(rawEncryptedContent) == 0 || bytes.Equal(rawEncryptedContent, []byte("null")) {
+			result.DroppedCount++
+			continue
+		}
+		var encryptedContent string
+		if err := basecommon.Unmarshal(rawEncryptedContent, &encryptedContent); err != nil {
+			return request, ResponsesContextCompactionNormalizeResult{}, fmt.Errorf("%w: context_compaction encrypted_content must be a string: %v", ErrResponsesContextCompactionInvalid, err)
+		}
+		if strings.TrimSpace(encryptedContent) == "" {
+			result.DroppedCount++
+			continue
+		}
+
+		item["type"] = json.RawMessage(`"compaction"`)
+		encodedItem, err := basecommon.Marshal(item)
+		if err != nil {
+			return request, ResponsesContextCompactionNormalizeResult{}, fmt.Errorf("marshal normalized context_compaction item: %w", err)
+		}
+		normalized = append(normalized, encodedItem)
+		result.ConvertedCount++
+	}
+
+	result.RemainingCount = len(normalized)
+	if result.ChangedCount() == 0 {
+		return request, result, nil
+	}
+	if result.RemainingCount == 0 {
+		return request, result, ErrResponsesContextCompactionOnlyInput
+	}
+	encodedInput, err := basecommon.Marshal(normalized)
+	if err != nil {
+		return request, result, fmt.Errorf("marshal responses input with normalized context compaction: %w", err)
+	}
+	request.Input = encodedInput
+	return request, result, nil
 }
 
 func StripResponsesInputEncryptedContentItem(request dto.OpenAIResponsesRequest, param string, message string) (dto.OpenAIResponsesRequest, bool, error) {

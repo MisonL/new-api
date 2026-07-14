@@ -1231,6 +1231,55 @@ func TestExecuteOpenAIResponsesRequestRejectsCompactionWithoutEncryptedContentBe
 	require.Empty(t, adaptor.requestBodies)
 }
 
+func TestExecuteOpenAIResponsesRequestNormalizesEmptyContextCompactionBeforeValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{
+		"model":"gpt-5.6-sol",
+		"input":[
+			{"type":"context_compaction"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]
+	}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = storage.Close()
+	})
+	c.Set(common.KeyBodyStorage, storage)
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"context_compaction"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   208,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{successResponsesHTTPResponse()},
+	}
+
+	usage, apiErr := executeOpenAIResponsesRequest(c, info, adaptor, request, true)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 1)
+	require.NotContains(t, string(adaptor.requestBodies[0]), `"type":"context_compaction"`)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"type":"message"`)
+}
+
 func TestExecuteOpenAIResponsesRequestDoesNotRetryPlainBadRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -1367,6 +1416,58 @@ func TestBuildOpenAIResponsesRequestBodyRestoresNativeOpaquePreviousResponseIDFo
 	require.Contains(t, string(bodyBytes), `"previous_response_id":"resp_upstream_native"`)
 	require.NotContains(t, string(bodyBytes), stateID)
 	require.Equal(t, "native_opaque_previous_response_id_restored", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactRouteDecision))
+}
+
+func TestBuildOpenAIResponsesRequestBodyNormalizesContextCompactionBeforePassThrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{
+		"model":"gpt-5.6-sol",
+		"input":[
+			{"type":"context_compaction","encrypted_content":"context-summary"},
+			{"type":"context_compaction"},
+			{"type":"compaction","encrypted_content":"native-summary"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]
+	}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = storage.Close()
+	})
+	c.Set(common.KeyBodyStorage, storage)
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"context_compaction","encrypted_content":"context-summary"},
+			{"type":"context_compaction"},
+			{"type":"compaction","encrypted_content":"native-summary"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   208,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.NotContains(t, string(bodyBytes), `"type":"context_compaction"`)
+	require.NotContains(t, string(converted.Input), `"type":"context_compaction"`)
+	require.Contains(t, string(bodyBytes), `"encrypted_content":"context-summary"`)
+	require.Contains(t, string(bodyBytes), `"encrypted_content":"native-summary"`)
 }
 
 func TestShouldRouteResponsesViaChatSkipsResponsesCompact(t *testing.T) {

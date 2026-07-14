@@ -160,7 +160,15 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 			types.ErrOptionWithSkipRetry(),
 		)
 	}
-	if _, err := service.HasRemoteResponsesCompactionInput(c.Request.Context(), *request); err != nil {
+	validationRequest := *request
+	if relaycommon.IsOpenAICompatibleResponses(info) {
+		normalizedRequest, _, err := relaycommon.NormalizeContextCompactionForResponsesRequest(validationRequest)
+		if err != nil {
+			return nil, newResponsesConvertRequestError(err)
+		}
+		validationRequest = normalizedRequest
+	}
+	if _, err := service.HasRemoteResponsesCompactionInput(c.Request.Context(), validationRequest); err != nil {
 		return nil, newResponsesConvertRequestError(err)
 	}
 	requestBody, convertedRequest, err := buildOpenAIResponsesRequestBody(c, info, adaptor, request, passThroughGlobal)
@@ -406,6 +414,26 @@ type buildResponsesRequestBodyOptions struct {
 func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, request *dto.OpenAIResponsesRequest, passThroughGlobal bool, options ...buildResponsesRequestBodyOptions) (io.Reader, dto.OpenAIResponsesRequest, *types.NewAPIError) {
 	var requestBody io.Reader
 	convertedResponsesRequest := *request
+	contextCompactionNormalized := false
+	if relaycommon.IsOpenAICompatibleResponses(info) {
+		normalizedRequest, result, err := relaycommon.NormalizeContextCompactionForResponsesRequest(*request)
+		if err != nil {
+			return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
+		}
+		if result.ChangedCount() > 0 {
+			request = &normalizedRequest
+			convertedResponsesRequest = normalizedRequest
+			contextCompactionNormalized = true
+			common.SysLog(fmt.Sprintf(
+				"responses context compaction normalized for upstream API: channel_id=%d model=%s converted_items=%d dropped_markers=%d remaining_items=%d",
+				info.ChannelId,
+				info.OriginModelName,
+				result.ConvertedCount,
+				result.DroppedCount,
+				result.RemainingCount,
+			))
+		}
+	}
 	syntheticCompactReference := false
 	nativeOpaqueReference := service.IsNativeOpaqueCompactReference(request.PreviousResponseID)
 	if relaycommon.IsOpenAICompatibleResponses(info) {
@@ -417,6 +445,7 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 	}
 	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) &&
 		!relaycommon.ShouldConvertResponsesRequest(info) &&
+		!contextCompactionNormalized &&
 		!common.GetContextKeyBool(c, appconstant.ContextKeyResponsesRemoteCompactSyntheticFallback) &&
 		(!syntheticCompactReference || nativeOpaqueReference)
 	if len(options) > 0 && options[0].ForceConvertedBody {
@@ -584,7 +613,9 @@ func newResponsesConvertRequestError(err error) *types.NewAPIError {
 		errors.Is(err, service.ErrResponsesRESTPreviousIDUnsupported) ||
 		errors.Is(err, service.ErrResponsesNativeOpaqueStateNotRestorable) ||
 		errors.Is(err, service.ErrResponsesChatCompatibilityPreviousIDUnsupported) ||
-		errors.Is(err, service.ErrResponsesChatCompatibilityToolBridgeRequestInvalid) {
+		errors.Is(err, service.ErrResponsesChatCompatibilityToolBridgeRequestInvalid) ||
+		errors.Is(err, relaycommon.ErrResponsesContextCompactionOnlyInput) ||
+		errors.Is(err, relaycommon.ErrResponsesContextCompactionInvalid) {
 		options = append(options, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 	}
 	if errors.Is(err, service.ErrResponsesCompactionContentRequired) {

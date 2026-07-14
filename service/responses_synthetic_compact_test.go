@@ -995,6 +995,36 @@ func TestHasRemoteResponsesCompactionInputRejectsMissingEncryptedContent(t *test
 	require.ErrorIs(t, err, ErrResponsesCompactionContentRequired)
 }
 
+func TestHasRemoteResponsesCompactionInputIgnoresEmptyContextCompactionMarker(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: common.RawMessage(`[
+			{"type":"context_compaction"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	hasRemote, err := HasRemoteResponsesCompactionInput(context.Background(), req)
+
+	require.NoError(t, err)
+	require.False(t, hasRemote)
+}
+
+func TestHasRemoteResponsesCompactionInputClassifiesEncryptedContextCompactionAsRemote(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: common.RawMessage(`[
+			{"type":"context_compaction","encrypted_content":"opaque-native-compact"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	hasRemote, err := HasRemoteResponsesCompactionInput(context.Background(), req)
+
+	require.NoError(t, err)
+	require.True(t, hasRemote)
+}
+
 func TestSyntheticCompactForeignV2MarkerIsLocalReferenceWithVisibleOnlyFallback(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	withoutSyntheticCompactTestDB(t)

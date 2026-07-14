@@ -47,11 +47,15 @@ func HasRemoteResponsesCompactionInput(ctx context.Context, req dto.OpenAIRespon
 		if !ok {
 			continue
 		}
-		if !relaycommon.IsResponsesCompactionItemType(rawStringField(item["type"])) {
+		itemType := rawStringField(item["type"])
+		if !relaycommon.IsResponsesCompactionItemType(itemType) {
 			continue
 		}
 		marker := rawStringField(item["encrypted_content"])
 		if marker == "" {
+			if itemType == dto.ResponsesOutputTypeContextCompaction {
+				continue
+			}
 			return false, ErrResponsesCompactionContentRequired
 		}
 		if _, ok, err := syntheticCompactIDFromMarker(ctx, marker); err != nil {
