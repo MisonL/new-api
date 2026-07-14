@@ -780,20 +780,28 @@ func responsesToChatCompatibilityRequestForPrecheck(c *gin.Context, info *relayc
 	if c == nil || request == nil {
 		return request, nil
 	}
-	hasLocalReference, err := service.HasLocalSyntheticCompactReferenceWithContext(c.Request.Context(), *request)
+	preparedRequest := request
+	normalizedRequest, normalizationResult, err := relaycommon.NormalizeContextCompactionForResponsesRequest(*request)
+	if err != nil {
+		return nil, err
+	}
+	if normalizationResult.ChangedCount() > 0 {
+		preparedRequest = &normalizedRequest
+	}
+	hasLocalReference, err := service.HasLocalSyntheticCompactReferenceWithContext(c.Request.Context(), *preparedRequest)
 	if err != nil || !hasLocalReference {
-		return request, err
+		return preparedRequest, err
 	}
 	converted, applied, visibleOnly, _, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(
 		c.Request.Context(),
 		service.SyntheticCompactScopeFromSource(info),
-		*request,
+		*preparedRequest,
 	)
 	if err != nil {
 		return nil, err
 	}
 	if !applied && !visibleOnly {
-		return request, nil
+		return preparedRequest, nil
 	}
 	return &converted, nil
 }

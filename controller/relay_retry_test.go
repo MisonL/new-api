@@ -1905,6 +1905,26 @@ func TestGetChannelSpecificResponsesViaChatRejectsUnsupportedNamespaceTool(t *te
 	require.Contains(t, err.Error(), "cannot safely convert this Responses request")
 }
 
+func TestResponsesToChatCompatibilityRequestForPrecheckDropsEmptyContextCompaction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: common.RawMessage(`[
+			{"type":"context_compaction"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	prepared, err := responsesToChatCompatibilityRequestForPrecheck(ctx, &relaycommon.RelayInfo{}, request)
+
+	require.NoError(t, err)
+	require.NotSame(t, request, prepared)
+	require.NotContains(t, string(prepared.Input), `"type":"context_compaction"`)
+	require.Contains(t, string(prepared.Input), `"type":"message"`)
+}
+
 func TestGetChannelRoutesBridgeableNamespaceToolViaChatWhenBridgeEnabled(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
 	chatOnly, _ := seedRemoteCompactionRouteChannels(t, db)
