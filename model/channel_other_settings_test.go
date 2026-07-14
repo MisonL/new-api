@@ -150,6 +150,25 @@ func TestChannelOtherSettingsExplicitNamespaceToolsCapability(t *testing.T) {
 	}
 }
 
+func TestChannelOtherSettingsExplicitToolSearchCapability(t *testing.T) {
+	unsupported := false
+	supported := true
+
+	require.True(t, (&dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{SupportsToolSearch: &unsupported},
+	}).ExplicitlyDisablesResponsesToolSearch())
+	require.False(t, (&dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{SupportsToolSearch: &supported},
+	}).ExplicitlyDisablesResponsesToolSearch())
+	require.False(t, (&dto.ChannelOtherSettings{}).ExplicitlyDisablesResponsesToolSearch())
+	require.True(t, (&dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericOpenAI,
+	}).ExplicitlyDisablesResponsesToolSearch())
+	require.False(t, (&dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+	}).ExplicitlyDisablesResponsesToolSearch())
+}
+
 func TestChannelOtherSettingsSub2APIHTTPLimitedNativeCompact(t *testing.T) {
 	settings := dto.ChannelOtherSettings{
 		ResponsesCompactMode:     dto.ResponsesCompactModeAuto,

@@ -1759,6 +1759,74 @@ func TestShouldSkipNativeResponsesChannelWhenNamespaceToolsExplicitlyUnsupported
 	require.True(t, errors.Is(info.LastError, errResponsesNamespaceToolsUnsupported))
 }
 
+func TestShouldSkipNativeResponsesChannelWhenToolSearchExplicitlyUnsupported(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.5",
+			Input: common.RawMessage(`[
+				{"type":"additional_tools","tools":[{"type":"tool_search"}]},
+				{"type":"message","role":"user","content":"find a tool"}
+			]`),
+		},
+	}
+	supportsToolSearch := false
+	unsupported := &model.Channel{Id: 208, Type: constant.ChannelTypeOpenAI}
+	unsupported.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsToolSearch: &supportsToolSearch,
+		},
+	})
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, unsupported)
+
+	require.NoError(t, err)
+	require.True(t, skip)
+	require.NotNil(t, info.LastError)
+	require.True(t, errors.Is(info.LastError, errResponsesToolSearchUnsupported))
+}
+
+func TestGetChannelSkipsExplicitlyUnsupportedToolSearchChannel(t *testing.T) {
+	db := setupChannelControllerTestDB(t)
+	unsupported, supported := seedRemoteCompactionRouteChannels(t, db)
+	supportsToolSearch := false
+	unsupported.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsToolSearch: &supportsToolSearch,
+		},
+	})
+	require.NoError(t, db.Save(unsupported).Error)
+
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{}
+	settings.PassThroughRequestEnabled = false
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, unsupported, "gpt-5.5"))
+	info := toolSearchRelayInfo()
+
+	channel, err := getChannel(ctx, info, &service.RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-5.5",
+		Retry:      common.GetPointer(0),
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, supported.Id, channel.Id)
+	require.Equal(t, []string{"168"}, ctx.GetStringSlice("use_channel"))
+}
+
 func TestGetChannelSkipsExplicitlyUnsupportedNativeNamespaceChannel(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
 	unsupported, supported := seedRemoteCompactionRouteChannels(t, db)
@@ -2119,6 +2187,23 @@ func namespaceToolRelayInfo(bridgeable bool) *relaycommon.RelayInfo {
 			]`),
 			Tools: common.RawMessage(`[
 				{"type":"namespace","name":"codex","tools":[{"type":"` + nestedToolType + `","name":"repo_status","description":"inspect repo","parameters":{"type":"object","properties":{}}}]}
+			]`),
+		},
+	}
+}
+
+func toolSearchRelayInfo() *relaycommon.RelayInfo {
+	return &relaycommon.RelayInfo{
+		TokenGroup:      "default",
+		UsingGroup:      "default",
+		UserGroup:       "default",
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.5",
+			Input: common.RawMessage(`[
+				{"type":"additional_tools","tools":[{"type":"tool_search"}]},
+				{"type":"message","role":"user","content":"find a tool"}
 			]`),
 		},
 	}

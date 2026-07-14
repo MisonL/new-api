@@ -391,6 +391,10 @@ function ResponsesCompactDetails(props: {
             value={formatCapability(capability.supports_namespace_tools)}
           />
           <DetailRow
+            label={t('Tool Search')}
+            value={formatCapability(capability.supports_tool_search)}
+          />
+          <DetailRow
             label={t('Strips Encrypted Reasoning')}
             value={formatCapability(
               capability.strips_responses_encrypted_reasoning

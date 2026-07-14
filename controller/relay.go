@@ -640,7 +640,8 @@ func isProtocolIncompatibleSkip(err *types.NewAPIError) bool {
 	return err.GetErrorCode() == types.ErrorCodeChannelModelMappedError &&
 		err.StatusCode == http.StatusServiceUnavailable &&
 		(errors.Is(err, errResponsesNativeCompactionUnsupported) ||
-			errors.Is(err, errResponsesNamespaceToolsUnsupported))
+			errors.Is(err, errResponsesNamespaceToolsUnsupported) ||
+			errors.Is(err, errResponsesToolSearchUnsupported))
 }
 
 func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) (bool, error) {
@@ -655,12 +656,20 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	if err != nil {
 		return false, err
 	}
+	hasToolSearch, err := relaycommon.ResponsesRequestHasToolSearch(request)
+	if err != nil {
+		return false, err
+	}
 	channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
 	namespaceToolsUnsupported := hasNamespaceTools && channelOtherSettings.ExplicitlyDisablesResponsesNamespaceTools()
+	toolSearchUnsupported := hasToolSearch && channelOtherSettings.ExplicitlyDisablesResponsesToolSearch()
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
 		nativeCompactionChannelSetting(c, info, channel).PassThroughBodyEnabled {
 		if namespaceToolsUnsupported {
 			return skipUnsupportedResponsesNamespaceTools(info, channel), nil
+		}
+		if toolSearchUnsupported {
+			return skipUnsupportedResponsesToolSearch(info, channel), nil
 		}
 		return false, nil
 	}
@@ -692,6 +701,9 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 		if namespaceToolsUnsupported {
 			return skipUnsupportedResponsesNamespaceTools(info, channel), nil
 		}
+		if toolSearchUnsupported {
+			return skipUnsupportedResponsesToolSearch(info, channel), nil
+		}
 		return false, nil
 	}
 	hasLocalNativeOpaque, err := service.HasLocalNativeOpaqueCompactReference(c.Request.Context(), *request)
@@ -707,6 +719,9 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 		}
 		if namespaceToolsUnsupported {
 			return skipUnsupportedResponsesNamespaceTools(info, channel), nil
+		}
+		if toolSearchUnsupported {
+			return skipUnsupportedResponsesToolSearch(info, channel), nil
 		}
 		return false, nil
 	}
@@ -733,6 +748,9 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 		if namespaceToolsUnsupported {
 			return skipUnsupportedResponsesNamespaceTools(info, channel), nil
 		}
+		if toolSearchUnsupported {
+			return skipUnsupportedResponsesToolSearch(info, channel), nil
+		}
 		return false, nil
 	}
 	rule, err := service.FindResponsesViaChatRule(
@@ -751,6 +769,9 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	if rule == nil {
 		if namespaceToolsUnsupported {
 			return skipUnsupportedResponsesNamespaceTools(info, channel), nil
+		}
+		if toolSearchUnsupported {
+			return skipUnsupportedResponsesToolSearch(info, channel), nil
 		}
 		return false, nil
 	}
@@ -773,6 +794,11 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 
 func skipUnsupportedResponsesNamespaceTools(info *relaycommon.RelayInfo, channel *model.Channel) bool {
 	info.LastError = unsupportedResponsesNamespaceToolsChannelError(channel)
+	return true
+}
+
+func skipUnsupportedResponsesToolSearch(info *relaycommon.RelayInfo, channel *model.Channel) bool {
+	info.LastError = unsupportedResponsesToolSearchChannelError(channel)
 	return true
 }
 
@@ -853,6 +879,7 @@ func nativeCompactionChannelSetting(c *gin.Context, info *relaycommon.RelayInfo,
 
 var errResponsesNativeCompactionUnsupported = errors.New("responses native compaction unsupported")
 var errResponsesNamespaceToolsUnsupported = errors.New("responses namespace tools unsupported")
+var errResponsesToolSearchUnsupported = errors.New("responses tool search unsupported")
 
 func unsupportedNativeCompactionChannelError(channel *model.Channel) *types.NewAPIError {
 	channelID := 0
@@ -873,6 +900,18 @@ func unsupportedResponsesNamespaceToolsChannelError(channel *model.Channel) *typ
 	}
 	return types.NewErrorWithStatusCode(
 		fmt.Errorf("%w: channel #%d explicitly does not support namespace tools in Responses requests", errResponsesNamespaceToolsUnsupported, channelID),
+		types.ErrorCodeChannelModelMappedError,
+		http.StatusServiceUnavailable,
+	)
+}
+
+func unsupportedResponsesToolSearchChannelError(channel *model.Channel) *types.NewAPIError {
+	channelID := 0
+	if channel != nil {
+		channelID = channel.Id
+	}
+	return types.NewErrorWithStatusCode(
+		fmt.Errorf("%w: channel #%d explicitly does not support tool search in Responses requests", errResponsesToolSearchUnsupported, channelID),
 		types.ErrorCodeChannelModelMappedError,
 		http.StatusServiceUnavailable,
 	)

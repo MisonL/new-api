@@ -541,6 +541,46 @@ func TestStripNamespaceFromResponsesInputHistory(t *testing.T) {
 	require.Contains(t, string(got.Input), `"call_id":"call_rejected"`)
 }
 
+func TestResponsesRequestHasToolSearch(t *testing.T) {
+	tests := []struct {
+		name    string
+		request *dto.OpenAIResponsesRequest
+		want    bool
+	}{
+		{
+			name: "additional tools declaration",
+			request: &dto.OpenAIResponsesRequest{Input: rootcommon.RawMessage(`[
+				{"type":"additional_tools","tools":[{"type":"tool_search"}]},
+				{"type":"message","role":"user","content":"find a tool"}
+			]`)},
+			want: true,
+		},
+		{
+			name:    "tool search history",
+			request: &dto.OpenAIResponsesRequest{Input: rootcommon.RawMessage(`[{"type":"tool_search_output","call_id":"call_1","status":"completed","tools":[]}]`)},
+			want:    true,
+		},
+		{
+			name:    "tool search choice",
+			request: &dto.OpenAIResponsesRequest{Input: rootcommon.RawMessage(`"find a tool"`), ToolChoice: rootcommon.RawMessage(`{"type":"tool_search"}`)},
+			want:    true,
+		},
+		{
+			name:    "ordinary function tool",
+			request: &dto.OpenAIResponsesRequest{Tools: rootcommon.RawMessage(`[{"type":"function","name":"lookup"}]`)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hasToolSearch, err := ResponsesRequestHasToolSearch(tt.request)
+
+			require.NoError(t, err)
+			require.Equal(t, tt.want, hasToolSearch)
+		})
+	}
+}
+
 func TestStripNamespaceFromResponsesInputHistoryKeepsOriginalWhenNothingRemoved(t *testing.T) {
 	tests := []struct {
 		name      string

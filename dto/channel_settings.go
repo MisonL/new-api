@@ -74,6 +74,7 @@ type ResponsesChannelCapabilityRegistry struct {
 	SupportsRestPreviousResponseID    *bool                           `json:"supports_rest_previous_response_id,omitempty"`
 	SupportsCompactionItemPassthrough *bool                           `json:"supports_compaction_item_passthrough,omitempty"`
 	SupportsNamespaceTools            *bool                           `json:"supports_namespace_tools,omitempty"`
+	SupportsToolSearch                *bool                           `json:"supports_tool_search,omitempty"`
 }
 
 type ResponsesChannelCapabilitySnapshot struct {
@@ -87,6 +88,7 @@ type ResponsesChannelCapabilitySnapshot struct {
 	SupportsRestPreviousResponseID    bool
 	SupportsCompactionItemPassthrough bool
 	SupportsNamespaceTools            bool
+	SupportsToolSearch                bool
 	StripsResponsesEncryptedReasoning bool
 	Observed                          *ResponsesCapabilityObservation
 	Probe                             *ResponsesCapabilityObservation
@@ -227,6 +229,7 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 		SupportsRestPreviousResponseID:    defaultSupportsRESTPreviousResponseIDCapability(s, profile),
 		SupportsCompactionItemPassthrough: defaultSupportsCompactionItemPassthroughCapability(profile),
 		SupportsNamespaceTools:            defaultSupportsNamespaceToolsCapability(profile),
+		SupportsToolSearch:                defaultSupportsToolSearchCapability(profile),
 		StripsResponsesEncryptedReasoning: s.ShouldStripResponsesEncryptedReasoning(),
 	}
 	registry := s.responsesCapabilityRegistry()
@@ -266,6 +269,18 @@ func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesNamespaceTools() bool 
 	return profile != "" && !defaultSupportsNamespaceToolsCapability(profile)
 }
 
+func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesToolSearch() bool {
+	if s == nil {
+		return false
+	}
+	registry := s.responsesCapabilityRegistry()
+	if registry != nil && registry.SupportsToolSearch != nil {
+		return !*registry.SupportsToolSearch
+	}
+	profile := s.NormalizedResponsesUpstreamProfile()
+	return profile != "" && !defaultSupportsToolSearchCapability(profile)
+}
+
 func (s *ChannelOtherSettings) explicitResponsesCapabilityConfigured() bool {
 	return s != nil && (s.ResponsesCompactMode != "" || s.ResponsesUpstreamProfile != "")
 }
@@ -291,6 +306,9 @@ func applyCapabilityOverrides(snapshot *ResponsesChannelCapabilitySnapshot, regi
 	}
 	if registry.SupportsNamespaceTools != nil {
 		snapshot.SupportsNamespaceTools = *registry.SupportsNamespaceTools
+	}
+	if registry.SupportsToolSearch != nil {
+		snapshot.SupportsToolSearch = *registry.SupportsToolSearch
 	}
 }
 
@@ -368,6 +386,10 @@ func defaultSupportsNamespaceToolsCapability(profile ResponsesUpstreamProfile) b
 	default:
 		return false
 	}
+}
+
+func defaultSupportsToolSearchCapability(profile ResponsesUpstreamProfile) bool {
+	return defaultSupportsNamespaceToolsCapability(profile)
 }
 
 func (s *ChannelOtherSettings) HasResponsesEncryptedReasoningUnsupportedProfile() bool {

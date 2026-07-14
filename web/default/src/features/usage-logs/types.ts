@@ -238,6 +238,7 @@ export interface ChannelCapabilitySnapshot {
   supports_rest_previous_response_id?: boolean
   supports_compaction_item_passthrough?: boolean
   supports_namespace_tools?: boolean
+  supports_tool_search?: boolean
   strips_responses_encrypted_reasoning?: boolean
 }
 

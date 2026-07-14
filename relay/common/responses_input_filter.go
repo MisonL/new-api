@@ -364,6 +364,51 @@ func ResponsesRequestHasNamespaceTools(request *dto.OpenAIResponsesRequest) (boo
 	return false, nil
 }
 
+func ResponsesRequestHasToolSearch(request *dto.OpenAIResponsesRequest) (bool, error) {
+	if request == nil {
+		return false, nil
+	}
+	tools, err := request.EffectiveTools()
+	if err != nil {
+		return false, err
+	}
+	for _, rawTool := range tools {
+		var tool map[string]json.RawMessage
+		if err := basecommon.Unmarshal(rawTool, &tool); err != nil {
+			continue
+		}
+		if responsesItemType(tool) == "tool_search" {
+			return true, nil
+		}
+	}
+	if basecommon.GetJsonType(request.Input) == "array" {
+		var inputItems []json.RawMessage
+		if err := basecommon.Unmarshal(request.Input, &inputItems); err != nil {
+			return false, err
+		}
+		for _, rawItem := range inputItems {
+			var item map[string]json.RawMessage
+			if err := basecommon.Unmarshal(rawItem, &item); err != nil {
+				continue
+			}
+			switch responsesItemType(item) {
+			case "tool_search_call", "tool_search_output":
+				return true, nil
+			}
+		}
+	}
+	if basecommon.GetJsonType(request.ToolChoice) == "object" {
+		var toolChoice map[string]json.RawMessage
+		if err := basecommon.Unmarshal(request.ToolChoice, &toolChoice); err != nil {
+			return false, err
+		}
+		if responsesItemType(toolChoice) == "tool_search" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func StripNamespaceFromResponsesInputHistory(request dto.OpenAIResponsesRequest, itemIndex int) (dto.OpenAIResponsesRequest, bool, error) {
 	trimmedInput := bytes.TrimSpace(request.Input)
 	if itemIndex < 0 || len(trimmedInput) == 0 || trimmedInput[0] != '[' {

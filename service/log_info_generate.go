@@ -190,6 +190,7 @@ func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settin
 		"supports_rest_previous_response_id":   snapshotInfo.SupportsRestPreviousResponseID,
 		"supports_compaction_item_passthrough": snapshotInfo.SupportsCompactionItemPassthrough,
 		"supports_namespace_tools":             snapshotInfo.SupportsNamespaceTools,
+		"supports_tool_search":                 snapshotInfo.SupportsToolSearch,
 		"strips_responses_encrypted_reasoning": snapshotInfo.StripsResponsesEncryptedReasoning,
 	}
 	if snapshotInfo.Profile != "" {
