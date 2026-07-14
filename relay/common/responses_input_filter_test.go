@@ -25,7 +25,7 @@ func TestNormalizeResponsesInputItemIDsRemovesOnlyInvalidConstrainedIDs(t *testi
 		{"type":"function_call","id":"fc_valid","call_id":"call_2","name":"exec","arguments":"{}"},
 		{"type":"message","id":"msg_valid","role":"assistant","content":[]},
 		{"type":"reasoning","id":"rs_valid","summary":[]},
-		{"type":"function_call_output","id":"item_output","call_id":"call_1","output":"ok"},
+		{"type":"function_call_output","id":"fco_output","call_id":"call_1","output":"ok"},
 		{"type":"web_search_call","id":"ws_valid"}
 	]`)
 
@@ -44,8 +44,65 @@ func TestNormalizeResponsesInputItemIDsRemovesOnlyInvalidConstrainedIDs(t *testi
 	require.Equal(t, "fc_valid", items[3]["id"])
 	require.Equal(t, "msg_valid", items[4]["id"])
 	require.Equal(t, "rs_valid", items[5]["id"])
-	require.Equal(t, "item_output", items[6]["id"])
+	require.Equal(t, "fco_output", items[6]["id"])
 	require.Equal(t, "ws_valid", items[7]["id"])
+}
+
+func TestNormalizeResponsesInputItemIDsUsesCodexItemTypePrefixes(t *testing.T) {
+	tests := []struct {
+		itemType string
+		id       string
+		keep     bool
+	}{
+		{itemType: "additional_tools", id: "at_1", keep: true},
+		{itemType: "message", id: "msg_1", keep: true},
+		{itemType: "agent_message", id: "amsg_1", keep: true},
+		{itemType: "reasoning", id: "rs_1", keep: true},
+		{itemType: "local_shell_call", id: "lsh_1", keep: true},
+		{itemType: "function_call", id: "fc_1", keep: true},
+		{itemType: "tool_search_call", id: "tsc_1", keep: true},
+		{itemType: "function_call_output", id: "fco_1", keep: true},
+		{itemType: "custom_tool_call", id: "ctc_1", keep: true},
+		{itemType: "custom_tool_call_output", id: "ctco_1", keep: true},
+		{itemType: "tool_search_output", id: "tso_1", keep: true},
+		{itemType: "web_search_call", id: "ws_1", keep: true},
+		{itemType: "image_generation_call", id: "ig_1", keep: true},
+		{itemType: "compaction", id: "cmp_1", keep: true},
+		{itemType: "context_compaction", id: "cmp_2", keep: true},
+		{itemType: "compaction_summary", id: "cmp_3", keep: true},
+		{itemType: "function_call", id: "", keep: false},
+		{itemType: "function_call", id: "fc_", keep: false},
+		{itemType: "function_call", id: "fc1", keep: false},
+		{itemType: "tool_search_call", id: "fc_wrong", keep: false},
+		{itemType: "custom_tool_call_output", id: "ctc_wrong", keep: false},
+		{itemType: "unknown_item", id: "legacy_id", keep: true},
+	}
+
+	inputItems := make([]map[string]any, 0, len(tests))
+	for _, tc := range tests {
+		item := map[string]any{"type": tc.itemType, "id": tc.id}
+		if tc.itemType == "function_call" {
+			item["call_id"] = "call_stable"
+		}
+		inputItems = append(inputItems, item)
+	}
+	rawInput, err := rootcommon.Marshal(inputItems)
+	require.NoError(t, err)
+
+	got, result, err := NormalizeResponsesInputItemIDs(rawInput)
+	require.NoError(t, err)
+	require.Equal(t, 5, result.RemovedCount)
+
+	var gotItems []map[string]any
+	require.NoError(t, rootcommon.Unmarshal(got, &gotItems))
+	require.Len(t, gotItems, len(tests))
+	for index, tc := range tests {
+		_, hasID := gotItems[index]["id"]
+		require.Equal(t, tc.keep, hasID, "%s/%s", tc.itemType, tc.id)
+		if tc.itemType == "function_call" {
+			require.Equal(t, "call_stable", gotItems[index]["call_id"])
+		}
+	}
 }
 
 func TestNormalizeResponsesInputItemIDsKeepsUnchangedInput(t *testing.T) {

@@ -77,8 +77,13 @@ func NormalizeResponsesInputItemIDs(input json.RawMessage) (json.RawMessage, Res
 			normalized = append(normalized, rawItem)
 			continue
 		}
+		rawID, hasID := item["id"]
+		if !hasID {
+			normalized = append(normalized, rawItem)
+			continue
+		}
 		var id string
-		if rawID, ok := item["id"]; !ok || basecommon.Unmarshal(rawID, &id) != nil || id == "" || strings.HasPrefix(id, prefix) {
+		if basecommon.Unmarshal(rawID, &id) == nil && responsesInputItemIDHasPrefix(id, prefix) {
 			normalized = append(normalized, rawItem)
 			continue
 		}
@@ -109,15 +114,42 @@ func NormalizeResponsesInputItemIDs(input json.RawMessage) (json.RawMessage, Res
 
 func responsesInputItemIDPrefix(itemType string) string {
 	switch itemType {
-	case "function_call", "tool_call", "local_shell_call", "tool_search_call", "custom_tool_call", "mcp_tool_call":
-		return "fc"
+	case "additional_tools":
+		return "at"
 	case "message":
 		return "msg"
+	case "agent_message":
+		return "amsg"
 	case "reasoning":
 		return "rs"
+	case "local_shell_call":
+		return "lsh"
+	case "function_call":
+		return "fc"
+	case "tool_search_call":
+		return "tsc"
+	case "function_call_output":
+		return "fco"
+	case "custom_tool_call":
+		return "ctc"
+	case "custom_tool_call_output":
+		return "ctco"
+	case "tool_search_output":
+		return "tso"
+	case "web_search_call":
+		return "ws"
+	case "image_generation_call":
+		return "ig"
+	case "compaction", "context_compaction", "compaction_summary":
+		return "cmp"
 	default:
 		return ""
 	}
+}
+
+func responsesInputItemIDHasPrefix(id string, prefix string) bool {
+	requiredPrefix := prefix + "_"
+	return len(id) > len(requiredPrefix) && strings.HasPrefix(id, requiredPrefix)
 }
 
 type responsesEncryptedContentInputPath struct {
