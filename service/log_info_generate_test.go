@@ -723,6 +723,7 @@ func TestGenerateTextOtherInfoMarksRemoteV2SyntheticFallback(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
 	common.SetContextKey(ctx, constant.ContextKeyResponsesRemoteCompactSyntheticFallback, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesRemoteCompactFirstDataTimeout, true)
 	common.SetContextKey(ctx, constant.ContextKeyResponsesCompactRouteDecision, "remote_v2_synthetic_recovery")
 
 	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
@@ -737,6 +738,7 @@ func TestGenerateTextOtherInfoMarksRemoteV2SyntheticFallback(t *testing.T) {
 	}, 1, 1, 1, 0, 0, -1, -1)
 
 	require.Equal(t, true, other["responses_remote_compact_synthetic_fallback"])
+	require.Equal(t, true, other["responses_remote_compact_first_data_timeout"])
 	require.Equal(t, "remote_v2_synthetic_recovery", other["responses_compact_route_decision"])
 	require.Equal(t, "remote_v2", other["responses_compact_mode"])
 }

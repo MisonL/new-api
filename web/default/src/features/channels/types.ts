@@ -99,6 +99,7 @@ export interface ChannelOtherSettings {
   responses_compact_context_fallback?: boolean
   responses_compact_summary_model_fallback?: boolean
   responses_compact_summary_fallback_models?: string[]
+  responses_remote_compaction_first_data_timeout_seconds?: number
   responses_upstream_profile?: ResponsesUpstreamProfile
   vertex_key_type?: 'json' | 'api_key'
   openrouter_enterprise?: boolean

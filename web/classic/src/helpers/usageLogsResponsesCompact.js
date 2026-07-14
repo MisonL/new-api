@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 export function shouldRenderResponsesCompactTag(other) {
   return (
     Boolean(other?.responses_compact_mode) ||
-    other?.responses_encrypted_context_retry === true
+    other?.responses_encrypted_context_retry === true ||
+    other?.responses_remote_compact_first_data_timeout === true
   );
 }

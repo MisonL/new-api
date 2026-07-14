@@ -41,6 +41,9 @@ func handleScannerError(c *gin.Context, info *relaycommon.RelayInfo, err error) 
 	if err == nil || err == io.EOF {
 		return
 	}
+	if info.StreamStatus.EndReason == relaycommon.StreamEndReasonFirstDataTimeout {
+		return
+	}
 	if info.StreamStatus.IsNormalEnd() {
 		logger.LogInfo(c, "scanner closed after normal stream end: "+err.Error())
 		return
@@ -64,7 +67,15 @@ func handleScannerError(c *gin.Context, info *relaycommon.RelayInfo, err error) 
 	info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
 }
 
+type StreamScannerOptions struct {
+	FirstDataEventTimeout time.Duration
+}
+
 func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult)) {
+	StreamScannerHandlerWithOptions(c, resp, info, dataHandler, StreamScannerOptions{})
+}
+
+func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult), options StreamScannerOptions) {
 
 	if resp == nil || dataHandler == nil {
 		return
@@ -79,6 +90,13 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	if streamingTimeout <= 0 {
 		streamingTimeout = DefaultStreamingTimeout
 	}
+	firstDataEventTimeout := options.FirstDataEventTimeout
+	var firstDataTimer *time.Timer
+	var firstDataTimeout <-chan time.Time
+	if firstDataEventTimeout > 0 {
+		firstDataTimer = time.NewTimer(firstDataEventTimeout)
+		firstDataTimeout = firstDataTimer.C
+	}
 
 	var (
 		stopChan              = make(chan bool, 3) // 增加缓冲区避免阻塞
@@ -89,6 +107,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		wg                    sync.WaitGroup
 		receivedResponseCount atomic.Int64
 		receivedDone          atomic.Bool
+		firstDataReceived     atomic.Bool
 	)
 	notifyStop := func() {
 		select {
@@ -133,6 +152,9 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		ticker.Stop()
 		if pingTicker != nil {
 			pingTicker.Stop()
+		}
+		if firstDataTimer != nil {
+			firstDataTimer.Stop()
 		}
 
 		// 等待所有 goroutine 退出，最多等待5秒
@@ -305,6 +327,10 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				continue
 			}
 			if !strings.HasPrefix(data, "[DONE]") {
+				firstDataReceived.Store(true)
+				if firstDataTimer != nil {
+					firstDataTimer.Stop()
+				}
 				info.SetFirstResponseTime()
 				receivedResponseCount.Add(1)
 
@@ -329,12 +355,26 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	})
 
 	// 主循环等待完成或超时
-	select {
-	case <-ticker.C:
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
-	case <-stopChan:
-		// EndReason already set by the goroutine that triggered stopChan
-	case <-c.Request.Context().Done():
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+	for {
+		select {
+		case <-firstDataTimeout:
+			if !firstDataReceived.Load() {
+				info.StreamStatus.SetEndReason(
+					relaycommon.StreamEndReasonFirstDataTimeout,
+					fmt.Errorf("stream did not receive a data event within %s", firstDataEventTimeout),
+				)
+				return
+			}
+			firstDataTimeout = nil
+		case <-ticker.C:
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
+			return
+		case <-stopChan:
+			// EndReason already set by the goroutine that triggered stopChan
+			return
+		case <-c.Request.Context().Done():
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+			return
+		}
 	}
 }

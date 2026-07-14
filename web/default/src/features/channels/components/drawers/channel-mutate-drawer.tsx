@@ -138,6 +138,8 @@ import {
   RESPONSES_COMPACT_MODE_DISABLED,
   RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT,
+  RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MAX,
   RESPONSES_UPSTREAM_PROFILE_CHAT_ONLY_PROXY,
   RESPONSES_UPSTREAM_PROFILE_GENERIC_PROXY,
   RESPONSES_UPSTREAM_PROFILE_OFFICIAL_NEWAPI,
@@ -149,6 +151,7 @@ import {
   RESPONSES_UPSTREAM_PROFILE_GENERIC_OPENAI,
   normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactFallbackModels,
+  normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds,
   normalizeResponsesUpstreamProfile,
   validateModelMappingJson,
 } from '../../lib'
@@ -279,6 +282,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
       values.responses_compact_summary_fallback_models
     ).join(',') !==
       RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',') ||
+    (values.responses_remote_compaction_first_data_timeout_seconds ?? 0) > 0 ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
@@ -3514,6 +3518,55 @@ export function ChannelMutateDrawer({
                                                 }
                                               />
                                             </FormControl>
+                                            <FormMessage />
+                                          </FormItem>
+                                        )}
+                                      />
+                                      <FormField
+                                        control={form.control}
+                                        name='responses_remote_compaction_first_data_timeout_seconds'
+                                        render={({ field }) => (
+                                          <FormItem className='space-y-2 px-4 py-3'>
+                                            <div className='space-y-0.5'>
+                                              <FormLabel className='text-sm'>
+                                                {t(
+                                                  'Remote compaction first data event timeout (seconds)'
+                                                )}
+                                              </FormLabel>
+                                              <FormDescription>
+                                                {t(
+                                                  'For remote_compaction_v2, retry through synthetic summary when upstream sends no SSE data before this timeout. Set 0 to disable.'
+                                                )}
+                                              </FormDescription>
+                                            </div>
+                                            <FormControl>
+                                              <Input
+                                                type='number'
+                                                min={
+                                                  RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT
+                                                }
+                                                max={
+                                                  RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MAX
+                                                }
+                                                step={1}
+                                                value={
+                                                  field.value ??
+                                                  RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT
+                                                }
+                                                onChange={(event) =>
+                                                  field.onChange(
+                                                    normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
+                                                      event.target.value
+                                                    )
+                                                  )
+                                                }
+                                              />
+                                            </FormControl>
+                                            <p className='text-muted-foreground text-xs'>
+                                              {t(
+                                                'Use 1 to 300 seconds when enabled.'
+                                              )}
+                                            </p>
                                             <FormMessage />
                                           </FormItem>
                                         )}

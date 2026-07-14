@@ -157,6 +157,9 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesRemoteCompactSyntheticFallback) {
 			other["responses_remote_compact_synthetic_fallback"] = true
 		}
+		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesRemoteCompactFirstDataTimeout) {
+			other["responses_remote_compact_first_data_timeout"] = true
+		}
 	}
 	if snapshot := ResponsesChannelCapabilitySnapshot(relayInfo, settings); len(snapshot) > 0 {
 		other["channel_capability_snapshot"] = snapshot

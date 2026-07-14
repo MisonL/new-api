@@ -418,13 +418,14 @@ func TestResetResponsesCompactAutoFallbackNormalizesNonOpenAISettings(t *testing
 		Type: constant.ChannelTypeAnthropic,
 	}
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
-		AzureResponsesVersion:                          "preview",
-		ResponsesCompactMode:                           dto.ResponsesCompactModeAuto,
-		ResponsesUpstreamProfile:                       dto.ResponsesUpstreamProfileGenericProxy,
-		ResponsesCompactAutoFallbackDate:               20260526,
-		ResponsesCompactAutoFallbackAt:                 1780000000,
-		ResponsesCompactAutoFallbackReason:             "status_code=404",
-		ResponsesCompactAutoFallbackRetryIntervalHours: 6,
+		AzureResponsesVersion:                            "preview",
+		ResponsesCompactMode:                             dto.ResponsesCompactModeAuto,
+		ResponsesUpstreamProfile:                         dto.ResponsesUpstreamProfileGenericProxy,
+		ResponsesCompactAutoFallbackDate:                 20260526,
+		ResponsesCompactAutoFallbackAt:                   1780000000,
+		ResponsesCompactAutoFallbackReason:               "status_code=404",
+		ResponsesCompactAutoFallbackRetryIntervalHours:   6,
+		ResponsesRemoteCompactionFirstDataTimeoutSeconds: 30,
 	})
 	originChannel := &model.Channel{Type: constant.ChannelTypeOpenAI}
 
@@ -438,6 +439,7 @@ func TestResetResponsesCompactAutoFallbackNormalizesNonOpenAISettings(t *testing
 	require.Zero(t, settings.ResponsesCompactAutoFallbackAt)
 	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackRetryIntervalHours)
+	require.Zero(t, settings.ResponsesRemoteCompactionFirstDataTimeoutSeconds)
 }
 
 func TestValidateChannelOtherSettingsNormalizesCompactMetadataForNonOpenAI(t *testing.T) {
@@ -450,7 +452,8 @@ func TestValidateChannelOtherSettingsNormalizesCompactMetadataForNonOpenAI(t *te
 				"responses_compact_auto_fallback_date":20260526,
 				"responses_compact_auto_fallback_at":1780000000,
 				"responses_compact_auto_fallback_reason":"status_code=404",
-				"responses_compact_auto_fallback_retry_interval_hours":6
+				"responses_compact_auto_fallback_retry_interval_hours":6,
+				"responses_remote_compaction_first_data_timeout_seconds":30
 		}`,
 	}
 
@@ -464,6 +467,7 @@ func TestValidateChannelOtherSettingsNormalizesCompactMetadataForNonOpenAI(t *te
 	require.Zero(t, settings.ResponsesCompactAutoFallbackAt)
 	require.Empty(t, settings.ResponsesCompactAutoFallbackReason)
 	require.Zero(t, settings.ResponsesCompactAutoFallbackRetryIntervalHours)
+	require.Zero(t, settings.ResponsesRemoteCompactionFirstDataTimeoutSeconds)
 }
 
 func TestValidateChannelOtherSettingsDefaultsCompactModeForEmptySettings(t *testing.T) {
@@ -508,6 +512,31 @@ func TestValidateChannelOtherSettingsRejectsInvalidCompactRetryInterval(t *testi
 		"responses_compact_auto_fallback_retry_interval_hours":169
 	}`
 	require.ErrorContains(t, validateChannelOtherSettings(channel, map[string]struct{}{}), "responses compact 自动回退重试间隔必须在 1 到 168 小时之间")
+}
+
+func TestValidateChannelOtherSettingsValidatesRemoteCompactionFirstDataTimeout(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI,
+		OtherSettings: `{
+			"responses_remote_compaction_first_data_timeout_seconds":0
+		}`,
+	}
+	require.NoError(t, validateChannelOtherSettings(channel, map[string]struct{}{}))
+
+	channel.OtherSettings = `{
+		"responses_remote_compaction_first_data_timeout_seconds":1
+	}`
+	require.NoError(t, validateChannelOtherSettings(channel, map[string]struct{}{}))
+
+	channel.OtherSettings = `{
+		"responses_remote_compaction_first_data_timeout_seconds":301
+	}`
+	require.ErrorContains(t, validateChannelOtherSettings(channel, map[string]struct{}{}), "remote compaction 首个 data 事件超时必须在 1 到 300 秒之间")
+
+	channel.OtherSettings = `{
+		"responses_remote_compaction_first_data_timeout_seconds":1.5
+	}`
+	require.ErrorContains(t, validateChannelOtherSettings(channel, map[string]struct{}{}), "渠道其他设置[settings] 格式错误")
 }
 
 func TestResetResponsesCompactAutoFallbackClearsWhenModeChanges(t *testing.T) {

@@ -163,6 +163,7 @@ export interface LogOtherData {
   responses_compact_auto_fallback_retry_until?: number
   responses_compact_auto_fallback_retry_interval_hours?: number
   responses_compact_final_upstream_path?: string
+  responses_remote_compact_first_data_timeout?: boolean
   channel_capability_snapshot?: ChannelCapabilitySnapshot
   responses_compact_fallback_reason?: string
   responses_compact_visible_only_fallback?: boolean

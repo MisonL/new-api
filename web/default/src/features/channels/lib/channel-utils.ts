@@ -70,6 +70,9 @@ export const RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT = ['gpt-5.4']
 export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT = 3
 export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN = 1
 export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX = 168
+export const RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT = 0
+export const RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MIN = 1
+export const RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MAX = 300
 
 export const RESPONSES_COMPACT_BADGE_KEYS = [
   ...Object.values(RESPONSES_COMPACT_BADGE_LABELS),
@@ -469,6 +472,23 @@ export function normalizeResponsesCompactAutoFallbackRetryIntervalHours(
   return rounded
 }
 
+export function normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
+  seconds: unknown
+): number {
+  const parsed = Number(seconds)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT
+  }
+  const rounded = Math.trunc(parsed)
+  if (rounded < RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MIN) {
+    return RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MIN
+  }
+  if (rounded > RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MAX) {
+    return RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MAX
+  }
+  return rounded
+}
+
 function defaultResponsesCompactOtherSettings(): ChannelOtherSettings {
   return {
     responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
@@ -481,6 +501,8 @@ function defaultResponsesCompactOtherSettings(): ChannelOtherSettings {
     responses_compact_summary_fallback_models: [
       ...RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
     ],
+    responses_remote_compaction_first_data_timeout_seconds:
+      RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT,
     responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_DEFAULT,
   }
 }

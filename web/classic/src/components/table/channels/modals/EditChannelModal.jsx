@@ -88,6 +88,8 @@ import {
   RESPONSES_COMPACT_MODE_OPTIONS,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
   RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT,
+  RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT,
+  RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MAX,
   RESPONSES_UPSTREAM_PROFILE_DEFAULT,
   RESPONSES_UPSTREAM_PROFILE_OPTIONS,
   RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT,
@@ -98,6 +100,7 @@ import {
   normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactMode,
   normalizeResponsesCompactSummaryFallbackModels,
+  normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds,
   normalizeResponsesUpstreamProfile,
   resetResponsesCompactAutoFallbackOnModeChange,
 } from '../../../../helpers/responsesCompactSettings.js';
@@ -280,6 +283,8 @@ const EditChannelModal = (props) => {
     responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
     responses_compact_auto_fallback_retry_interval_hours:
       RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
+    responses_remote_compaction_first_data_timeout_seconds:
+      RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT,
     responses_compact_context_fallback:
       RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
     responses_compact_summary_model_fallback:
@@ -1523,6 +1528,10 @@ const EditChannelModal = (props) => {
             normalizeResponsesCompactAutoFallbackRetryIntervalHours(
               parsedSettings.responses_compact_auto_fallback_retry_interval_hours,
             );
+          data.responses_remote_compaction_first_data_timeout_seconds =
+            normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
+              parsedSettings.responses_remote_compaction_first_data_timeout_seconds,
+            );
           data.responses_compact_context_fallback =
             parsedSettings.responses_compact_context_fallback !== false;
           data.responses_compact_summary_model_fallback =
@@ -1569,6 +1578,8 @@ const EditChannelModal = (props) => {
           data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
           data.responses_compact_auto_fallback_retry_interval_hours =
             RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT;
+          data.responses_remote_compaction_first_data_timeout_seconds =
+            RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT;
           data.responses_compact_context_fallback =
             RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT;
           data.responses_compact_summary_model_fallback =
@@ -1599,6 +1610,8 @@ const EditChannelModal = (props) => {
         data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
         data.responses_compact_auto_fallback_retry_interval_hours =
           RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT;
+        data.responses_remote_compaction_first_data_timeout_seconds =
+          RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT;
         data.responses_compact_context_fallback =
           RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT;
         data.responses_compact_summary_model_fallback =
@@ -2519,6 +2532,7 @@ const EditChannelModal = (props) => {
             localInputs.responses_compact_summary_fallback_models,
             localInputs.responses_compact_auto_fallback_retry_interval_hours,
             localInputs.responses_upstream_profile,
+            localInputs.responses_remote_compaction_first_data_timeout_seconds,
           ),
         );
         settings.disable_store = localInputs.disable_store === true;
@@ -2592,6 +2606,7 @@ const EditChannelModal = (props) => {
     delete localInputs.responses_upstream_profile;
     delete localInputs.responses_compact_mode;
     delete localInputs.responses_compact_auto_fallback_retry_interval_hours;
+    delete localInputs.responses_remote_compaction_first_data_timeout_seconds;
     delete localInputs.responses_compact_context_fallback;
     delete localInputs.responses_compact_summary_model_fallback;
     delete localInputs.responses_compact_summary_fallback_models;
@@ -3145,6 +3160,31 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t(
                         '原生 compact 失败后，在该间隔内使用模拟摘要；默认 3 小时。',
+                      )}
+                    />
+                    <Form.InputNumber
+                      field='responses_remote_compaction_first_data_timeout_seconds'
+                      label={t('远程压缩首个 data 事件超时（秒）')}
+                      min={
+                        RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT
+                      }
+                      max={
+                        RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MAX
+                      }
+                      precision={0}
+                      value={normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
+                        inputs.responses_remote_compaction_first_data_timeout_seconds,
+                      )}
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'responses_remote_compaction_first_data_timeout_seconds',
+                          normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
+                            value,
+                          ),
+                        )
+                      }
+                      extraText={t(
+                        'remote_compaction_v2 上游在此时间内未发送 SSE data 时，自动改用模拟摘要重试；设为 0 关闭。',
                       )}
                     />
                     <Form.Switch

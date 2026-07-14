@@ -597,6 +597,70 @@ func TestStreamScannerHandler_StreamStatus_Timeout(t *testing.T) {
 	assert.False(t, info.StreamStatus.IsNormalEnd())
 }
 
+func TestStreamScannerHandlerWithOptions_FirstDataEventTimeoutIgnoresHeartbeat(t *testing.T) {
+	reader, writer := io.Pipe()
+	releaseWriter := make(chan struct{})
+	t.Cleanup(func() {
+		close(releaseWriter)
+	})
+	go func() {
+		defer writer.Close()
+		_, _ = io.WriteString(writer, "data:\n\n")
+		_, _ = io.WriteString(writer, ": upstream heartbeat\n\n")
+		<-releaseWriter
+	}()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{Body: reader}
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	done := make(chan struct{})
+	go func() {
+		StreamScannerHandlerWithOptions(c, resp, info, func(data string, sr *StreamResult) {}, StreamScannerOptions{
+			FirstDataEventTimeout: 50 * time.Millisecond,
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("first data event timeout did not stop the stream")
+	}
+	require.NotNil(t, info.StreamStatus)
+	require.Equal(t, relaycommon.StreamEndReasonFirstDataTimeout, info.StreamStatus.EndReason)
+	require.Zero(t, info.ReceivedResponseCount)
+}
+
+func TestStreamScannerHandlerWithOptions_DisablesFirstDataEventTimeoutAfterData(t *testing.T) {
+	reader, writer := io.Pipe()
+	go func() {
+		defer writer.Close()
+		_, _ = io.WriteString(writer, "data: {\"id\":1}\n\n")
+		time.Sleep(150 * time.Millisecond)
+		_, _ = io.WriteString(writer, "data: [DONE]\n\n")
+	}()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{Body: reader}
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	var received atomic.Int64
+	StreamScannerHandlerWithOptions(c, resp, info, func(data string, sr *StreamResult) {
+		received.Add(1)
+	}, StreamScannerOptions{
+		FirstDataEventTimeout: 50 * time.Millisecond,
+	})
+
+	require.Equal(t, int64(1), received.Load())
+	require.NotNil(t, info.StreamStatus)
+	require.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+}
+
 func TestStreamScannerHandler_StreamStatus_SoftErrors(t *testing.T) {
 	t.Parallel()
 

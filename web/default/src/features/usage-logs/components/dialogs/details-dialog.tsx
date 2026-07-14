@@ -50,13 +50,13 @@ import {
   formatDurationFromMs,
   isDisplayableDurationMs,
 } from '../../lib/format'
+import { getRequestHeaderPolicy } from '../../lib/request-header-policy'
 import {
   getLogTypeConfig,
   isDisplayableLogType,
   isPerCallBilling,
   isTimingLogType,
 } from '../../lib/utils'
-import { getRequestHeaderPolicy } from '../../lib/request-header-policy'
 import type { LogOtherData } from '../../types'
 import { ModelBadge, type ModelBadgeInfoRow } from '../model-badge'
 
@@ -268,6 +268,7 @@ function ResponsesCompactDetails(props: {
   const capability = other.channel_capability_snapshot
   const shouldShow =
     Boolean(other.responses_compact_mode) ||
+    other.responses_remote_compact_first_data_timeout === true ||
     other.responses_encrypted_context_retry === true ||
     Boolean(capability)
   if (!shouldShow) return null
@@ -328,6 +329,13 @@ function ResponsesCompactDetails(props: {
       )}
       {other.responses_compact_visible_only_fallback && (
         <DetailRow label={t('Visible-only Fallback')} value={t('Yes')} mono />
+      )}
+      {other.responses_remote_compact_first_data_timeout && (
+        <DetailRow
+          label={t('Remote Compaction First Data Event Timeout')}
+          value={t('Yes')}
+          mono
+        />
       )}
       {other.responses_encrypted_context_retry && (
         <DetailRow label={t('Encrypted Context Retry')} value={t('Yes')} mono />
@@ -1201,6 +1209,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
             )}
 
             {(other?.responses_compact_mode ||
+              other?.responses_remote_compact_first_data_timeout ||
               other?.responses_encrypted_context_retry ||
               other?.channel_capability_snapshot) && (
               <ResponsesCompactDetails other={other} isAdmin={props.isAdmin} />

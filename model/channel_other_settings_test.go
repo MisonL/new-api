@@ -210,6 +210,15 @@ func TestChannelOtherSettingsDefaultProfileAllowsCompactionItemPassthrough(t *te
 	require.True(t, settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI).SupportsCompactionItemPassthrough)
 }
 
+func TestChannelOtherSettingsRemoteCompactionTimeoutDoesNotChangeCapabilitySource(t *testing.T) {
+	settings := dto.ChannelOtherSettings{
+		ResponsesRemoteCompactionFirstDataTimeoutSeconds: 30,
+	}
+
+	require.Equal(t, 30*time.Second, settings.ResponsesRemoteCompactionFirstDataTimeout())
+	require.Equal(t, "safe_default", settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI).Source)
+}
+
 func TestChannelOtherSettingsRequestBodyLimitSkipsObservedFailingSize(t *testing.T) {
 	now := time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC)
 	settings := dto.ChannelOtherSettings{

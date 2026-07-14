@@ -27,6 +27,9 @@ export const RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT = ['gpt-5.4'];
 export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT = 3;
 export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN = 1;
 export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX = 168;
+export const RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT = 0;
+export const RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MIN = 1;
+export const RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MAX = 300;
 export const RESPONSES_UPSTREAM_PROFILE_DEFAULT = '';
 export const RESPONSES_UPSTREAM_PROFILE_SELECT_DEFAULT = '__default__';
 export const RESPONSES_UPSTREAM_PROFILE_OFFICIAL_OPENAI = 'official_openai';
@@ -201,6 +204,23 @@ export function normalizeResponsesCompactAutoFallbackRetryIntervalHours(hours) {
   return rounded;
 }
 
+export function normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
+  seconds,
+) {
+  const parsed = Number(seconds);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT;
+  }
+  const rounded = Math.trunc(parsed);
+  if (rounded < RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MIN) {
+    return RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MIN;
+  }
+  if (rounded > RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MAX) {
+    return RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_MAX;
+  }
+  return rounded;
+}
+
 export function buildResponsesCompactSettings(
   channelType,
   mode,
@@ -209,6 +229,7 @@ export function buildResponsesCompactSettings(
   summaryFallbackModels = RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
   autoFallbackRetryIntervalHours = RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
   upstreamProfile = RESPONSES_UPSTREAM_PROFILE_DEFAULT,
+  remoteCompactionFirstDataTimeoutSeconds = RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT,
 ) {
   if (channelType !== 1) {
     return {};
@@ -218,6 +239,10 @@ export function buildResponsesCompactSettings(
     responses_compact_auto_fallback_retry_interval_hours:
       normalizeResponsesCompactAutoFallbackRetryIntervalHours(
         autoFallbackRetryIntervalHours,
+      ),
+    responses_remote_compaction_first_data_timeout_seconds:
+      normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
+        remoteCompactionFirstDataTimeoutSeconds,
       ),
     responses_compact_context_fallback: contextFallback !== false,
     responses_compact_summary_model_fallback: summaryModelFallback !== false,
@@ -240,6 +265,7 @@ export function clearResponsesCompactSettings(settings) {
   delete settings.responses_compact_auto_fallback_at;
   delete settings.responses_compact_auto_fallback_reason;
   delete settings.responses_compact_auto_fallback_retry_interval_hours;
+  delete settings.responses_remote_compaction_first_data_timeout_seconds;
   delete settings.responses_compact_context_fallback;
   delete settings.responses_compact_summary_model_fallback;
   delete settings.responses_compact_summary_fallback_models;

@@ -816,6 +816,13 @@ func TestRelayStopsAfterOneOutboundUpstreamRateLimitFollowup(t *testing.T) {
 	require.Equal(t, int32(1), secondCalls.Load()+thirdCalls.Load())
 	require.Len(t, ctx.GetStringSlice("use_channel"), 2)
 	require.Equal(t, "206", ctx.GetStringSlice("use_channel")[0])
+	require.Eventually(t, func() bool {
+		var quota int
+		if err := db.Model(&model.User{}).Where("id = ?", 1).Select("quota").Scan(&quota).Error; err != nil {
+			return false
+		}
+		return quota == initialQuota
+	}, time.Second, 10*time.Millisecond, "asynchronous billing refund did not finish before test cleanup")
 }
 
 func TestGetChannelSkipsResponsesViaChatForRemoteCompactionInput(t *testing.T) {
@@ -2587,10 +2594,12 @@ func TestShouldFallbackRemoteResponsesCompaction(t *testing.T) {
 	testCases := []struct {
 		name       string
 		statusCode int
+		errorCode  types.ErrorCode
 		input      string
 		want       bool
 	}{
 		{name: "bad gateway recovers", statusCode: http.StatusBadGateway, input: visibleInput, want: true},
+		{name: "first data timeout recovers", statusCode: http.StatusBadGateway, errorCode: types.ErrorCodeUpstreamTransportInterrupted, input: visibleInput, want: true},
 		{name: "service unavailable recovers", statusCode: http.StatusServiceUnavailable, input: visibleInput, want: true},
 		{name: "rate limit keeps cross channel retry", statusCode: http.StatusTooManyRequests, input: visibleInput, want: false},
 		{name: "opaque compaction cannot recover locally", statusCode: http.StatusBadGateway, input: opaqueInput, want: false},
@@ -2602,9 +2611,13 @@ func TestShouldFallbackRemoteResponsesCompaction(t *testing.T) {
 			c, _ := gin.CreateTestContext(nil)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 			c.Request.Header.Set("X-Codex-Beta-Features", "remote_compaction_v2")
+			errorCode := tc.errorCode
+			if errorCode == "" {
+				errorCode = types.ErrorCodeBadResponseStatusCode
+			}
 			err := types.NewOpenAIError(
 				errors.New("upstream service temporarily unavailable"),
-				types.ErrorCodeBadResponseStatusCode,
+				errorCode,
 				tc.statusCode,
 			)
 
@@ -2970,6 +2983,31 @@ func TestShouldFallbackResponsesCompactSummaryModel(t *testing.T) {
 
 	c.Set("responses_compact_summary_model_fallback_attempted", true)
 	require.False(t, shouldFallbackResponsesCompactSummaryModel(c, info, err))
+}
+
+func TestShouldFallbackResponsesCompactSummaryModelRecoversSyntheticServerError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	info := compactAutoFallbackRelayInfo()
+	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeSynthetic
+	info.Request = compactVisiblePayloadRequest()
+
+	retryable := types.NewErrorWithStatusCode(errors.New("bad response status code 502"), types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway)
+	require.True(t, shouldFallbackResponsesCompactSummaryModel(c, info, retryable))
+
+	rateLimited := types.NewErrorWithStatusCode(errors.New("rate limited"), types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests)
+	require.False(t, shouldFallbackResponsesCompactSummaryModel(c, info, rateLimited))
+
+	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeNative
+	require.False(t, shouldFallbackResponsesCompactSummaryModel(c, info, retryable))
+
+	info.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeAuto
+	info.RelayMode = relayconstant.RelayModeResponses
+	common.SetContextKey(c, constant.ContextKeyResponsesRemoteCompactSyntheticFallback, true)
+	require.True(t, shouldFallbackResponsesCompactSummaryModel(c, info, retryable))
+
+	common.SetContextKey(c, constant.ContextKeyResponsesRemoteCompactSyntheticFallback, false)
+	require.False(t, shouldFallbackResponsesCompactSummaryModel(c, info, retryable))
 }
 
 func TestShouldFallbackResponsesCompactSummaryModelSupportsCodex(t *testing.T) {

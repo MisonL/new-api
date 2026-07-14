@@ -1715,8 +1715,10 @@ func shouldFallbackResponsesCompactSummaryModel(c *gin.Context, info *relaycommo
 	if common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted) {
 		return false
 	}
-	if info.RelayMode != relayconstant.RelayModeResponsesCompact ||
-		!responsesCompactSummaryModelFallbackSupported(info) ||
+	remoteSyntheticRecovery := info.RelayMode == relayconstant.RelayModeResponses &&
+		common.GetContextKeyBool(c, constant.ContextKeyResponsesRemoteCompactSyntheticFallback)
+	if (info.RelayMode != relayconstant.RelayModeResponsesCompact && !remoteSyntheticRecovery) ||
+		!responsesCompactSummaryModelFallbackSupported(c, info) ||
 		!info.ChannelOtherSettings.ResponsesCompactSummaryModelFallbackEnabled() ||
 		len(responsesCompactSummaryFallbackCandidates(c, info)) == 0 {
 		return false
@@ -1724,18 +1726,38 @@ func shouldFallbackResponsesCompactSummaryModel(c *gin.Context, info *relaycommo
 	if info.ChannelType != constant.ChannelTypeCodex && responsesCompactRequestHasUnsafeCompactionInput(c, info) {
 		return false
 	}
-	return isResponsesCompactContextLengthError(err)
+	return isResponsesCompactContextLengthError(err) || isResponsesCompactSyntheticServerError(c, info, err)
 }
 
-func responsesCompactSummaryModelFallbackSupported(info *relaycommon.RelayInfo) bool {
+func isResponsesCompactSyntheticServerError(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) bool {
+	if info == nil || err == nil || !responsesCompactSyntheticRecoveryActive(c, info) {
+		return false
+	}
+	switch err.StatusCode {
+	case http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+		524:
+		return true
+	default:
+		return false
+	}
+}
+
+func responsesCompactSyntheticRecoveryActive(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	return info != nil && (info.ChannelOtherSettings.HasSyntheticResponsesCompact() ||
+		common.GetContextKeyBool(c, constant.ContextKeyResponsesRemoteCompactSyntheticFallback))
+}
+
+func responsesCompactSummaryModelFallbackSupported(c *gin.Context, info *relaycommon.RelayInfo) bool {
 	if info == nil || info.ChannelMeta == nil {
 		return false
 	}
 	if info.ChannelType == constant.ChannelTypeCodex {
 		return true
 	}
-	return info.ChannelType == constant.ChannelTypeOpenAI &&
-		info.ChannelOtherSettings.HasSyntheticResponsesCompact()
+	return info.ChannelType == constant.ChannelTypeOpenAI && responsesCompactSyntheticRecoveryActive(c, info)
 }
 
 func isResponsesCompactPreviousResponseIDUnsupportedError(err *types.NewAPIError) bool {

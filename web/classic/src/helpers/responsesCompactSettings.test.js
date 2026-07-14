@@ -21,7 +21,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildResponsesCompactSettings,
+  clearResponsesCompactSettings,
   getResponsesCompactModeFromSettings,
+  normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds,
   normalizeResponsesUpstreamProfile,
   RESPONSES_COMPACT_MODE_AUTO,
   RESPONSES_COMPACT_MODE_NATIVE,
@@ -105,5 +108,53 @@ test('undefined settings use auto compact mode', () => {
   assert.equal(
     getResponsesCompactModeFromSettings(),
     RESPONSES_COMPACT_MODE_AUTO,
+  );
+});
+
+test('remote compaction first data timeout is bounded and removable', () => {
+  assert.equal(normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(0), 0);
+  assert.equal(
+    normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(0.5),
+    1,
+  );
+  assert.equal(
+    normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(301),
+    300,
+  );
+
+  const settings = buildResponsesCompactSettings(
+    1,
+    RESPONSES_COMPACT_MODE_AUTO,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    301,
+  );
+  assert.equal(
+    settings.responses_remote_compaction_first_data_timeout_seconds,
+    300,
+  );
+
+  const disabledSettings = buildResponsesCompactSettings(
+    1,
+    RESPONSES_COMPACT_MODE_AUTO,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    0,
+  );
+  assert.equal(
+    disabledSettings.responses_remote_compaction_first_data_timeout_seconds,
+    0,
+  );
+
+  clearResponsesCompactSettings(settings);
+  assert.equal(
+    'responses_remote_compaction_first_data_timeout_seconds' in settings,
+    false,
   );
 });

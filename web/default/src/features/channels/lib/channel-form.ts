@@ -9,11 +9,13 @@ import {
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
+  RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT,
   RESPONSES_UPSTREAM_PROFILE_DEFAULT,
   getResponsesCompactModeFromSettings,
   normalizeResponsesCompactAutoFallbackRetryIntervalHours,
   normalizeResponsesCompactMode,
   normalizeResponsesCompactFallbackModels,
+  normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds,
   normalizeResponsesUpstreamProfile,
 } from './channel-utils'
 
@@ -90,6 +92,7 @@ export const channelFormSchema = z.object({
   responses_compact_context_fallback: z.boolean().optional(),
   responses_compact_summary_model_fallback: z.boolean().optional(),
   responses_compact_summary_fallback_models: z.string().optional(),
+  responses_remote_compaction_first_data_timeout_seconds: z.number().optional(),
   allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
   allow_speed: z.boolean().optional(), // Anthropic: speed mode control
   claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
@@ -158,6 +161,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   responses_compact_summary_model_fallback: true,
   responses_compact_summary_fallback_models:
     RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(','),
+  responses_remote_compaction_first_data_timeout_seconds:
+    RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT,
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
@@ -276,6 +281,8 @@ export function transformChannelToFormDefaults(
   let responsesCompactSummaryModelFallback = true
   let responsesCompactSummaryFallbackModels =
     RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',')
+  let responsesRemoteCompactionFirstDataTimeoutSeconds =
+    RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
@@ -317,6 +324,10 @@ export function transformChannelToFormDefaults(
         normalizeResponsesCompactFallbackModels(
           parsed.responses_compact_summary_fallback_models
         ).join(',')
+      responsesRemoteCompactionFirstDataTimeoutSeconds =
+        normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
+          parsed.responses_remote_compaction_first_data_timeout_seconds
+        )
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
@@ -392,6 +403,8 @@ export function transformChannelToFormDefaults(
       responsesCompactSummaryModelFallback,
     responses_compact_summary_fallback_models:
       responsesCompactSummaryFallbackModels,
+    responses_remote_compaction_first_data_timeout_seconds:
+      responsesRemoteCompactionFirstDataTimeoutSeconds,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
@@ -511,6 +524,10 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
           .map((model) => model.trim())
           .filter(Boolean)
       )
+    settingsObj.responses_remote_compaction_first_data_timeout_seconds =
+      normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
+        formData.responses_remote_compaction_first_data_timeout_seconds
+      )
     if (previousResponsesCompactMode !== nextResponsesCompactMode) {
       delete settingsObj.responses_compact_auto_fallback_date
       delete settingsObj.responses_compact_auto_fallback_at
@@ -525,6 +542,7 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     delete settingsObj.responses_compact_context_fallback
     delete settingsObj.responses_compact_summary_model_fallback
     delete settingsObj.responses_compact_summary_fallback_models
+    delete settingsObj.responses_remote_compaction_first_data_timeout_seconds
   }
 
   if (formData.type === 1) {

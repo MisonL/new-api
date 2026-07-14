@@ -2750,6 +2750,100 @@ func TestOaiResponsesStreamHandlerReturnsRetryableErrorBeforeFirstWrite(t *testi
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestRemoteCompactionFirstDataEventTimeoutOnlyAppliesToRemoteCompaction(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("X-Codex-Beta-Features", "remote_compaction_v2")
+	configured := &relaycommon.RelayInfo{
+		Request: &dto.OpenAIResponsesRequest{
+			Input: []byte(`[{"type":"compaction_trigger"}]`),
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesRemoteCompactionFirstDataTimeoutSeconds: 30,
+			},
+		},
+	}
+	require.Equal(t, 30*time.Second, remoteCompactionFirstDataEventTimeout(c, configured))
+
+	c.Request.Header.Del("X-Codex-Beta-Features")
+	require.Zero(t, remoteCompactionFirstDataEventTimeout(c, configured))
+	c.Request.Header.Set("X-Codex-Beta-Features", "remote_compaction_v2")
+
+	configured.Request = &dto.OpenAIResponsesRequest{
+		Input: []byte(`[
+			{"type":"compaction","encrypted_content":"opaque-native-compact"},
+			{"type":"compaction_trigger"}
+		]`),
+	}
+	require.Zero(t, remoteCompactionFirstDataEventTimeout(c, configured))
+
+	configured.Request = &dto.OpenAIResponsesRequest{
+		Input: []byte(`[{"type":"compaction_trigger"}]`),
+	}
+	configured.ChannelMeta.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeDisabled
+	require.Zero(t, remoteCompactionFirstDataEventTimeout(c, configured))
+	configured.ChannelMeta.ChannelOtherSettings.ResponsesCompactMode = dto.ResponsesCompactModeAuto
+
+	configured.Request = &dto.OpenAIResponsesRequest{
+		Input: []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]`),
+	}
+	require.Zero(t, remoteCompactionFirstDataEventTimeout(c, configured))
+
+	configured.ChannelMeta.ChannelType = constant.ChannelTypeAnthropic
+	configured.Request = &dto.OpenAIResponsesRequest{
+		Input: []byte(`[{"type":"compaction_trigger"}]`),
+	}
+	require.Zero(t, remoteCompactionFirstDataEventTimeout(c, configured))
+}
+
+func TestOaiResponsesStreamHandlerRemoteCompactionFirstDataTimeoutIsRetryable(t *testing.T) {
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = writer.Close()
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("X-Codex-Beta-Features", "remote_compaction_v2")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       reader,
+	}
+	info := &relaycommon.RelayInfo{
+		IsStream:    true,
+		DisablePing: true,
+		Request: &dto.OpenAIResponsesRequest{
+			Input: []byte(`[{"type":"compaction_trigger"}]`),
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesRemoteCompactionFirstDataTimeoutSeconds: 1,
+			},
+		},
+	}
+
+	startedAt := time.Now()
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Less(t, time.Since(startedAt), 3*time.Second)
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, types.ErrorCodeUpstreamTransportInterrupted, err.GetErrorCode())
+	require.Equal(t, http.StatusBadGateway, err.StatusCode)
+	require.Contains(t, err.Error(), "did not receive an upstream data event")
+	require.Equal(t, relaycommon.StreamEndReasonFirstDataTimeout, info.StreamStatus.EndReason)
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesRemoteCompactFirstDataTimeout))
+	require.Zero(t, info.ReceivedResponseCount)
+	require.False(t, c.Writer.Written())
+	require.Empty(t, recorder.Body.String())
+}
+
 func TestRetryableUpstreamStreamInterruptedAllowsRetryAfterKeepaliveOnly(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

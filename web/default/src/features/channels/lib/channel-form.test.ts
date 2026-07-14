@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import type { Channel } from '../types'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   mergeChannelSubmitFormValues,
+  transformChannelToFormDefaults,
   transformFormDataToUpdatePayload,
   type ChannelFormValues,
 } from './channel-form'
@@ -249,4 +251,68 @@ test('channel settings transform removes request body limit when max bytes is ze
   const settings = JSON.parse(String(payload.settings))
 
   assert.equal(settings.request_body_limit, undefined)
+})
+
+test('remote compaction first data timeout is bounded for OpenAI and removed elsewhere', () => {
+  const openAIValues = makeChannelFormValues({
+    type: 1,
+    settings: JSON.stringify({ preserved_setting: 'keep' }),
+    responses_remote_compaction_first_data_timeout_seconds: 301,
+  })
+  const openAIPayload = transformFormDataToUpdatePayload(openAIValues, 123)
+  const openAISettings = JSON.parse(String(openAIPayload.settings))
+
+  assert.equal(
+    openAISettings.responses_remote_compaction_first_data_timeout_seconds,
+    300
+  )
+  assert.equal(openAISettings.preserved_setting, 'keep')
+
+  const disabledValues = makeChannelFormValues({
+    type: 1,
+    settings: JSON.stringify({
+      responses_remote_compaction_first_data_timeout_seconds: 0,
+    }),
+    responses_remote_compaction_first_data_timeout_seconds: 0,
+  })
+  const disabledPayload = transformFormDataToUpdatePayload(disabledValues, 123)
+  const disabledSettings = JSON.parse(String(disabledPayload.settings))
+  assert.equal(
+    disabledSettings.responses_remote_compaction_first_data_timeout_seconds,
+    0
+  )
+  assert.equal(
+    transformChannelToFormDefaults({
+      type: 1,
+      name: 'channel-a',
+      settings: JSON.stringify({
+        responses_remote_compaction_first_data_timeout_seconds: 0,
+      }),
+      channel_info: {
+        is_multi_key: false,
+        multi_key_size: 0,
+        multi_key_polling_index: 0,
+        multi_key_mode: 'random',
+      },
+    } as Channel).responses_remote_compaction_first_data_timeout_seconds,
+    0
+  )
+
+  const nonOpenAIValues = makeChannelFormValues({
+    type: 14,
+    settings: JSON.stringify({
+      responses_remote_compaction_first_data_timeout_seconds: 30,
+    }),
+    responses_remote_compaction_first_data_timeout_seconds: 30,
+  })
+  const nonOpenAIPayload = transformFormDataToUpdatePayload(
+    nonOpenAIValues,
+    123
+  )
+  const nonOpenAISettings = JSON.parse(String(nonOpenAIPayload.settings))
+
+  assert.equal(
+    nonOpenAISettings.responses_remote_compaction_first_data_timeout_seconds,
+    undefined
+  )
 })

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
@@ -766,6 +767,26 @@ func isRemoteResponsesCompactionRequest(info *relaycommon.RelayInfo) bool {
 	return ok && request.HasCompactionTrigger()
 }
 
+func remoteCompactionFirstDataEventTimeout(c *gin.Context, info *relaycommon.RelayInfo) time.Duration {
+	if c == nil || c.Request == nil || info == nil || info.ChannelMeta == nil ||
+		info.ChannelType != constant.ChannelTypeOpenAI ||
+		info.ChannelOtherSettings.HasDisabledResponsesCompact() ||
+		!isRemoteResponsesCompactionRequest(info) ||
+		!codexBetaFeatureValuesContain(c.Request.Header.Values("X-Codex-Beta-Features"), "remote_compaction_v2") {
+		return 0
+	}
+	request, ok := info.Request.(*dto.OpenAIResponsesRequest)
+	if !ok {
+		return 0
+	}
+	hasRemoteCompactionInput, err := service.HasRemoteResponsesCompactionInput(relaycommon.GinRequestContext(c), *request)
+	if err != nil || hasRemoteCompactionInput {
+		// Opaque upstream state cannot be recovered by the local synthetic path.
+		return 0
+	}
+	return info.ChannelOtherSettings.ResponsesRemoteCompactionFirstDataTimeout()
+}
+
 func validateRemoteResponsesCompactionOutput(output []dto.ResponsesOutput) error {
 	compactionCount := 0
 	for _, item := range output {
@@ -1095,10 +1116,11 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	hasCompletedUsage := false
 	pendingPrelude := make([]pendingResponsesStreamEvent, 0, 3)
 	remoteCompaction := isRemoteResponsesCompactionRequest(info)
+	firstDataEventTimeout := remoteCompactionFirstDataEventTimeout(c, info)
 	remoteState := remoteCompactionStreamState{}
 	var streamFatalError *types.NewAPIError
 
-	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+	helper.StreamScannerHandlerWithOptions(c, resp, info, func(data string, sr *helper.StreamResult) {
 
 		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
@@ -1217,7 +1239,14 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 		flushResponsesStreamPrelude(c, &pendingPrelude)
 		sendResponsesStreamData(c, streamResponse, data)
-	})
+	}, helper.StreamScannerOptions{FirstDataEventTimeout: firstDataEventTimeout})
+	if remoteCompaction && info != nil && info.StreamStatus != nil &&
+		info.StreamStatus.EndReason == relaycommon.StreamEndReasonFirstDataTimeout &&
+		info.ReceivedResponseCount == 0 {
+		common.SetContextKey(c, constant.ContextKeyResponsesRemoteCompactFirstDataTimeout, true)
+		err := fmt.Errorf("remote responses compaction did not receive an upstream data event before configured timeout")
+		return nil, types.NewOpenAIError(err, types.ErrorCodeUpstreamTransportInterrupted, http.StatusBadGateway)
+	}
 	if remoteCompaction && !remoteState.completed && streamFatalError == nil &&
 		(info == nil || info.StreamStatus == nil || info.StreamStatus.EndReason != relaycommon.StreamEndReasonClientGone) {
 		err := fmt.Errorf("upstream responses stream ended before response.completed")

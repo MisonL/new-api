@@ -1063,6 +1063,14 @@ function buildResponsesCompactTooltipRows(other, t) {
       className: 'usage-log-info-popover-value-encrypted-retry',
     });
   }
+  if (other?.responses_remote_compact_first_data_timeout === true) {
+    rows.push({
+      key: 'remote_compaction_first_data_timeout',
+      label: t('远程压缩首个事件超时'),
+      value: t('是'),
+      className: 'usage-log-info-popover-value-remote-compact-timeout',
+    });
+  }
   const capability = other?.channel_capability_snapshot;
   if (capability?.source) {
     rows.push({

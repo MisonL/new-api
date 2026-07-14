@@ -125,6 +125,21 @@ func missingEncryptedContentRetryResponse(status int) *http.Response {
 	}
 }
 
+func missingEncryptedContentErrorAfterStreamPrelude() *http.Response {
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_partial","object":"response"}}`,
+		`data: {"type":"response.in_progress","response":{"id":"resp_partial","object":"response"}}`,
+		`data: {"type":"response.error","error":{"message":"[ObjectParam] [input[0].encrypted_content] [missing_required_parameter] Missing required parameter: 'input[0].encrypted_content'.","type":"invalid_request_error","code":"missing_required_parameter"}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+	}
+}
+
 func nestedMissingEncryptedContentRetryResponse(status int) *http.Response {
 	body := `{"error":{"message":"[ObjectParam] [input[0].content[1].encrypted_content] [missing_required_parameter] Missing required parameter: 'input[0].content[1].encrypted_content'.","type":"invalid_request_error","code":"missing_required_parameter"}}`
 	return &http.Response{
@@ -320,6 +335,43 @@ func TestExecuteOpenAIResponsesRequestRetriesWrappedMissingEncryptedContent(t *t
 	require.NotNil(t, usage)
 	require.Len(t, adaptor.requestBodies, 2)
 	require.NotContains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"opaque"`)
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesUnpopulatedReasoningForMissingEncryptedContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   205,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			missingEncryptedContentRetryResponse(http.StatusBadGateway),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"reasoning","encrypted_content":""},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 2)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"type":"reasoning"`)
+	require.NotContains(t, string(adaptor.requestBodies[1]), `"type":"reasoning"`)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"type":"message"`)
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
@@ -672,6 +724,48 @@ func TestExecuteOpenAIResponsesRequestRetriesAfterOnlyStreamingPrelude(t *testin
 	require.NotContains(t, recorder.Body.String(), "resp_partial")
 	require.Contains(t, recorder.Body.String(), "resp_ok")
 	require.NotContains(t, recorder.Body.String(), "Unknown parameter")
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesUnpopulatedReasoningAfterStreamingPrelude(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   205,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+	adaptor := &streamingCompatibilityRetryAdaptor{
+		retryEncryptedContextAdaptor: retryEncryptedContextAdaptor{
+			responses: []*http.Response{
+				missingEncryptedContentErrorAfterStreamPrelude(),
+				successStreamingResponsesHTTPResponse(),
+			},
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"reasoning","encrypted_content":""},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 2)
+	require.NotContains(t, string(adaptor.requestBodies[1]), `"type":"reasoning"`)
+	require.Contains(t, recorder.Body.String(), "resp_ok")
+	require.NotContains(t, recorder.Body.String(), "resp_partial")
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
 func TestExecuteOpenAIResponsesRequestRetriesAfterPingOnly(t *testing.T) {

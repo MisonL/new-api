@@ -593,6 +593,9 @@ func validateChannelOtherSettings(channel *model.Channel, passedHeaders map[stri
 		if err := validateResponsesCompactAutoFallbackRetryInterval(&settings); err != nil {
 			return err
 		}
+		if err := validateResponsesRemoteCompactionFirstDataTimeout(&settings); err != nil {
+			return err
+		}
 	}
 
 	raw, err := common.Marshal(settings)
@@ -631,6 +634,22 @@ func validateResponsesCompactAutoFallbackRetryInterval(settings *dto.ChannelOthe
 			"responses compact 自动回退重试间隔必须在 %d 到 %d 小时之间",
 			dto.MinResponsesCompactAutoFallbackRetryIntervalHours,
 			dto.MaxResponsesCompactAutoFallbackRetryIntervalHours,
+		)
+	}
+	return nil
+}
+
+func validateResponsesRemoteCompactionFirstDataTimeout(settings *dto.ChannelOtherSettings) error {
+	if settings == nil || settings.ResponsesRemoteCompactionFirstDataTimeoutSeconds == 0 {
+		return nil
+	}
+	seconds := settings.ResponsesRemoteCompactionFirstDataTimeoutSeconds
+	if seconds < dto.MinResponsesRemoteCompactionFirstDataTimeoutSeconds ||
+		seconds > dto.MaxResponsesRemoteCompactionFirstDataTimeoutSeconds {
+		return fmt.Errorf(
+			"remote compaction 首个 data 事件超时必须在 %d 到 %d 秒之间",
+			dto.MinResponsesRemoteCompactionFirstDataTimeoutSeconds,
+			dto.MaxResponsesRemoteCompactionFirstDataTimeoutSeconds,
 		)
 	}
 	return nil
@@ -1554,6 +1573,7 @@ func normalizeResponsesCompactSettingsForChannel(channelType int, settings *dto.
 	settings.ResponsesCompactContextFallback = nil
 	settings.ResponsesCompactSummaryModelFallback = nil
 	settings.ResponsesCompactSummaryFallbackModels = nil
+	settings.ResponsesRemoteCompactionFirstDataTimeoutSeconds = 0
 	settings.ResponsesUpstreamProfile = ""
 	return true
 }
@@ -1569,6 +1589,7 @@ func hasResponsesCompactAuxiliarySettings(settings *dto.ChannelOtherSettings) bo
 		settings.ResponsesCompactContextFallback != nil ||
 		settings.ResponsesCompactSummaryModelFallback != nil ||
 		len(settings.ResponsesCompactSummaryFallbackModels) > 0 ||
+		settings.ResponsesRemoteCompactionFirstDataTimeoutSeconds != 0 ||
 		settings.ResponsesUpstreamProfile != ""
 }
 

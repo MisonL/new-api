@@ -114,11 +114,28 @@ func TestStripResponsesInputEncryptedContentItemRemovesToolOutputCarrier(t *test
 	}
 }
 
-func TestStripResponsesInputEncryptedContentItemKeepsUnpopulatedReasoning(t *testing.T) {
+func TestStripResponsesInputEncryptedContentItemRemovesUnpopulatedReasoning(t *testing.T) {
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6",
 		Input: rootcommon.RawMessage(`[
 			{"type":"reasoning","encrypted_content":""},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, removed, err := StripResponsesInputEncryptedContentItem(req, "input[0].encrypted_content", "")
+
+	require.NoError(t, err)
+	require.True(t, removed)
+	require.NotContains(t, string(got.Input), `"type":"reasoning"`)
+	require.Contains(t, string(got.Input), `"type":"message"`)
+}
+
+func TestStripResponsesInputEncryptedContentItemDoesNotRemoveNonReasoningTopLevelItem(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: rootcommon.RawMessage(`[
+			{"type":"message","role":"assistant","encrypted_content":""},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
 	}

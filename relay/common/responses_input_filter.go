@@ -118,7 +118,7 @@ func StripResponsesInputEncryptedContentItem(request dto.OpenAIResponsesRequest,
 	}
 
 	if path.nestedField == "" {
-		strippedItems, removed, err := stripTopLevelResponsesEncryptedReasoning(items, path.inputIndex)
+		strippedItems, removed, err := stripTopLevelResponsesReasoningItem(items, path.inputIndex)
 		if err != nil {
 			return request, false, err
 		}
@@ -148,7 +148,7 @@ func withResponsesInput(request dto.OpenAIResponsesRequest, items []json.RawMess
 	return request, true, nil
 }
 
-func stripTopLevelResponsesEncryptedReasoning(items []json.RawMessage, inputIndex int) ([]json.RawMessage, bool, error) {
+func stripTopLevelResponsesReasoningItem(items []json.RawMessage, inputIndex int) ([]json.RawMessage, bool, error) {
 	if len(items) == 1 {
 		return items, false, nil
 	}
@@ -156,7 +156,7 @@ func stripTopLevelResponsesEncryptedReasoning(items []json.RawMessage, inputInde
 	if err := basecommon.Unmarshal(items[inputIndex], &item); err != nil {
 		return items, false, err
 	}
-	if !responsesItemIsEncryptedReasoning(item) || !responsesItemHasEncryptedContent(item) {
+	if !responsesItemIsReasoning(item) {
 		return items, false, nil
 	}
 	return append(items[:inputIndex], items[inputIndex+1:]...), true, nil
@@ -257,7 +257,7 @@ func responsesItemHasEncryptedContent(item map[string]json.RawMessage) bool {
 	return false
 }
 
-func responsesItemIsEncryptedReasoning(item map[string]json.RawMessage) bool {
+func responsesItemIsReasoning(item map[string]json.RawMessage) bool {
 	return responsesItemType(item) == "reasoning"
 }
 
