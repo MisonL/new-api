@@ -75,12 +75,26 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	adaptor.Init(info)
 	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
-	conversionRule, err := findResponsesViaChatRule(relaycommon.GinRequestContext(c), info, passThroughGlobal, request)
+	compatibilityRequest, contextCompactionResult, err := prepareResponsesRequestForChatCompatibility(info, request)
+	if err != nil {
+		return newResponsesConvertRequestError(err)
+	}
+	conversionRule, err := findResponsesViaChatRule(relaycommon.GinRequestContext(c), info, passThroughGlobal, compatibilityRequest)
 	if err != nil {
 		return newResponsesConvertRequestError(err)
 	}
 	if conversionRule != nil {
-		usage, newApiErr := responsesViaChat(c, info, adaptor, request, responsesViaChatOptionsFromRule(conversionRule))
+		if contextCompactionResult.ChangedCount() > 0 {
+			common.SysLog(fmt.Sprintf(
+				"responses context compaction normalized before chat compatibility: channel_id=%d model=%s converted_items=%d dropped_markers=%d remaining_items=%d",
+				info.ChannelId,
+				info.OriginModelName,
+				contextCompactionResult.ConvertedCount,
+				contextCompactionResult.DroppedCount,
+				contextCompactionResult.RemainingCount,
+			))
+		}
+		usage, newApiErr := responsesViaChat(c, info, adaptor, compatibilityRequest, responsesViaChatOptionsFromRule(conversionRule))
 		if newApiErr != nil {
 			return newApiErr
 		}
@@ -122,6 +136,18 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		service.PostTextConsumeQuota(c, info, usageDto, nil)
 	}
 	return nil
+}
+
+func prepareResponsesRequestForChatCompatibility(info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) (*dto.OpenAIResponsesRequest, relaycommon.ResponsesContextCompactionNormalizeResult, error) {
+	result := relaycommon.ResponsesContextCompactionNormalizeResult{}
+	if request == nil || !relaycommon.IsOpenAICompatibleResponses(info) {
+		return request, result, nil
+	}
+	normalizedRequest, result, err := relaycommon.NormalizeContextCompactionForResponsesRequest(*request)
+	if err != nil || result.ChangedCount() == 0 {
+		return request, result, err
+	}
+	return &normalizedRequest, result, nil
 }
 
 func normalizeResponsesCompactUsage(info *relaycommon.RelayInfo, usage *dto.Usage) {

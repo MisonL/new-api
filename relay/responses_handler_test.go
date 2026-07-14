@@ -1280,6 +1280,32 @@ func TestExecuteOpenAIResponsesRequestNormalizesEmptyContextCompactionBeforeVali
 	require.Contains(t, string(adaptor.requestBodies[0]), `"type":"message"`)
 }
 
+func TestPrepareResponsesRequestForChatCompatibilityDropsEmptyContextCompaction(t *testing.T) {
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.5",
+		Input: common.RawMessage(`[
+			{"type":"context_compaction"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   117,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+
+	prepared, result, err := prepareResponsesRequestForChatCompatibility(info, request)
+
+	require.NoError(t, err)
+	require.NotSame(t, request, prepared)
+	require.Equal(t, 1, result.DroppedCount)
+	require.NotContains(t, string(prepared.Input), `"type":"context_compaction"`)
+	require.Contains(t, string(prepared.Input), `"type":"message"`)
+}
+
 func TestExecuteOpenAIResponsesRequestDoesNotRetryPlainBadRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
