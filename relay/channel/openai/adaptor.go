@@ -755,6 +755,15 @@ func isJSONRequest(c *gin.Context) bool {
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
+	normalizedInput, normalizeResult, err := relaycommon.NormalizeResponsesInputItemIDs(request.Input)
+	if err != nil {
+		return nil, err
+	}
+	request.Input = normalizedInput
+	if normalizeResult.RemovedCount > 0 {
+		logger.LogInfo(c, fmt.Sprintf("responses invalid input item ids removed: count=%d model=%s", normalizeResult.RemovedCount, request.Model))
+	}
+
 	//  转换模型推理力度后缀
 	effort, originModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
 	if effort != "" {

@@ -41,8 +41,83 @@ type ResponsesContextCompactionNormalizeResult struct {
 	RemainingCount int
 }
 
+type ResponsesInputItemIDNormalizeResult struct {
+	RemovedCount int
+}
+
 func (r ResponsesContextCompactionNormalizeResult) ChangedCount() int {
 	return r.ConvertedCount + r.DroppedCount
+}
+
+// NormalizeResponsesInputItemIDs removes client-generated item IDs whose prefixes
+// do not match the upstream Responses item type contract. The call_id pairing is
+// intentionally left unchanged because it is the stable tool continuation key.
+func NormalizeResponsesInputItemIDs(input json.RawMessage) (json.RawMessage, ResponsesInputItemIDNormalizeResult, error) {
+	result := ResponsesInputItemIDNormalizeResult{}
+	trimmedInput := bytes.TrimSpace(input)
+	if len(trimmedInput) == 0 || trimmedInput[0] != '[' {
+		return input, result, nil
+	}
+
+	var items []json.RawMessage
+	if err := basecommon.Unmarshal(input, &items); err != nil {
+		return input, result, err
+	}
+
+	normalized := make([]json.RawMessage, 0, len(items))
+	changed := false
+	for _, rawItem := range items {
+		var item map[string]json.RawMessage
+		if err := basecommon.Unmarshal(rawItem, &item); err != nil {
+			normalized = append(normalized, rawItem)
+			continue
+		}
+		prefix := responsesInputItemIDPrefix(responsesItemType(item))
+		if prefix == "" {
+			normalized = append(normalized, rawItem)
+			continue
+		}
+		var id string
+		if rawID, ok := item["id"]; !ok || basecommon.Unmarshal(rawID, &id) != nil || id == "" || strings.HasPrefix(id, prefix) {
+			normalized = append(normalized, rawItem)
+			continue
+		}
+
+		copyItem := make(map[string]json.RawMessage, len(item))
+		for key, value := range item {
+			copyItem[key] = value
+		}
+		delete(copyItem, "id")
+		normalizedItem, err := basecommon.Marshal(copyItem)
+		if err != nil {
+			return input, result, err
+		}
+		normalized = append(normalized, normalizedItem)
+		result.RemovedCount++
+		changed = true
+	}
+	if !changed {
+		return input, result, nil
+	}
+
+	normalizedInput, err := basecommon.Marshal(normalized)
+	if err != nil {
+		return input, result, err
+	}
+	return json.RawMessage(normalizedInput), result, nil
+}
+
+func responsesInputItemIDPrefix(itemType string) string {
+	switch itemType {
+	case "function_call", "tool_call", "local_shell_call", "tool_search_call", "custom_tool_call", "mcp_tool_call":
+		return "fc"
+	case "message":
+		return "msg"
+	case "reasoning":
+		return "rs"
+	default:
+		return ""
+	}
 }
 
 type responsesEncryptedContentInputPath struct {

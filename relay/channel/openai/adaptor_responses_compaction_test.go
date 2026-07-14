@@ -40,6 +40,41 @@ func TestConvertOpenAIResponsesRequestPreservesCompactionInputByDefault(t *testi
 	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
 }
 
+func TestConvertOpenAIResponsesRequestDropsInvalidFunctionCallItemID(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: json.RawMessage(`[
+			{"type":"function_call","id":"item_invalid_prefix","call_id":"call_probe","name":"get_probe_status","arguments":"{}"},
+			{"type":"function_call_output","call_id":"call_probe","output":"probe-ok"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 3)
+	_, hasID := items[0]["id"]
+	require.False(t, hasID)
+	require.JSONEq(t, `{"type":"function_call","call_id":"call_probe","name":"get_probe_status","arguments":"{}"}`, string(mustMarshalRawMap(t, items[0])))
+}
+
+func mustMarshalRawMap(t *testing.T, item map[string]json.RawMessage) []byte {
+	t.Helper()
+	raw, err := common.Marshal(item)
+	require.NoError(t, err)
+	return raw
+}
+
 func TestConvertOpenAIResponsesRequestStripsCodexEncryptedContextWhenEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{

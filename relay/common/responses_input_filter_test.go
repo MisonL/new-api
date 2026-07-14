@@ -17,6 +17,52 @@ func TestStripEncryptedReasoningFromResponsesInputKeepsPlainInput(t *testing.T) 
 	require.Zero(t, result.RemainingCount)
 }
 
+func TestNormalizeResponsesInputItemIDsRemovesOnlyInvalidConstrainedIDs(t *testing.T) {
+	input := rootcommon.RawMessage(`[
+		{"type":"function_call","id":"item_function","call_id":"call_1","name":"exec","arguments":"{}"},
+		{"type":"message","id":"item_message","role":"assistant","content":[]},
+		{"type":"reasoning","id":"item_reasoning","summary":[]},
+		{"type":"function_call","id":"fc_valid","call_id":"call_2","name":"exec","arguments":"{}"},
+		{"type":"message","id":"msg_valid","role":"assistant","content":[]},
+		{"type":"reasoning","id":"rs_valid","summary":[]},
+		{"type":"function_call_output","id":"item_output","call_id":"call_1","output":"ok"},
+		{"type":"web_search_call","id":"ws_valid"}
+	]`)
+
+	got, result, err := NormalizeResponsesInputItemIDs(input)
+	require.NoError(t, err)
+	require.Equal(t, 3, result.RemovedCount)
+
+	var items []map[string]any
+	require.NoError(t, rootcommon.Unmarshal(got, &items))
+	require.Len(t, items, 8)
+	for _, index := range []int{0, 1, 2} {
+		_, hasID := items[index]["id"]
+		require.False(t, hasID)
+	}
+	require.Equal(t, "call_1", items[0]["call_id"])
+	require.Equal(t, "fc_valid", items[3]["id"])
+	require.Equal(t, "msg_valid", items[4]["id"])
+	require.Equal(t, "rs_valid", items[5]["id"])
+	require.Equal(t, "item_output", items[6]["id"])
+	require.Equal(t, "ws_valid", items[7]["id"])
+}
+
+func TestNormalizeResponsesInputItemIDsKeepsUnchangedInput(t *testing.T) {
+	inputs := []rootcommon.RawMessage{
+		rootcommon.RawMessage(`"plain input"`),
+		rootcommon.RawMessage(`[{"type":"function_call","call_id":"call_1","name":"exec","arguments":"{}"}]`),
+		rootcommon.RawMessage(`[{"type":"function_call","id":"fc_valid","call_id":"call_1","name":"exec","arguments":"{}"}]`),
+	}
+
+	for _, input := range inputs {
+		got, result, err := NormalizeResponsesInputItemIDs(input)
+		require.NoError(t, err)
+		require.Zero(t, result.RemovedCount)
+		require.Equal(t, json.RawMessage(input), got)
+	}
+}
+
 func TestStripEncryptedReasoningFromResponsesInputRemovesEncryptedReasoning(t *testing.T) {
 	input := json.RawMessage(`[
 		{"type":"reasoning","encrypted_content":"opaque"},
