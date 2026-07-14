@@ -98,6 +98,44 @@ func TestOpenAIResponsesRequestPreservesUnknownFields(t *testing.T) {
 	require.Equal(t, int64(1), gjson.GetBytes(encoded, "custom_payload.nested").Int())
 }
 
+func TestOpenAIResponsesRequestPreservesCodexNestedFields(t *testing.T) {
+	raw := []byte(`{
+		"model":"gpt-5.6-sol",
+		"input":"continue",
+		"reasoning":{
+			"effort":"low",
+			"summary":"none",
+			"context":"all_turns",
+			"mode":"auto",
+			"future_reasoning_option":{"enabled":true}
+		},
+		"stream_options":{
+			"include_usage":true,
+			"include_obfuscation":false,
+			"reasoning_summary_delivery":"sequential_cutoff",
+			"future_stream_option":{"enabled":true}
+		}
+	}`)
+
+	var req OpenAIResponsesRequest
+	require.NoError(t, common.Unmarshal(raw, &req))
+	require.NotNil(t, req.Reasoning)
+	require.JSONEq(t, `"all_turns"`, string(req.Reasoning.Context))
+	require.JSONEq(t, `"auto"`, string(req.Reasoning.Mode))
+	require.JSONEq(t, `{"enabled":true}`, string(req.Reasoning.Extra["future_reasoning_option"]))
+	require.NotNil(t, req.StreamOptions)
+	require.JSONEq(t, `"sequential_cutoff"`, string(req.StreamOptions.Extra["reasoning_summary_delivery"]))
+	require.JSONEq(t, `{"enabled":true}`, string(req.StreamOptions.Extra["future_stream_option"]))
+
+	encoded, err := common.Marshal(req)
+	require.NoError(t, err)
+	require.JSONEq(t, `"all_turns"`, gjson.GetBytes(encoded, "reasoning.context").Raw)
+	require.JSONEq(t, `"auto"`, gjson.GetBytes(encoded, "reasoning.mode").Raw)
+	require.JSONEq(t, `{"enabled":true}`, gjson.GetBytes(encoded, "reasoning.future_reasoning_option").Raw)
+	require.JSONEq(t, `"sequential_cutoff"`, gjson.GetBytes(encoded, "stream_options.reasoning_summary_delivery").Raw)
+	require.JSONEq(t, `{"enabled":true}`, gjson.GetBytes(encoded, "stream_options.future_stream_option").Raw)
+}
+
 func TestOpenAIResponsesCompactionRequestPreservesUnknownFieldsThroughResponsesRequest(t *testing.T) {
 	raw := []byte(`{
 		"model":"gpt-5.5-openai-compact",
@@ -140,6 +178,42 @@ func TestOpenAIResponsesCompactionRequestPreservesUnknownFieldsThroughResponsesR
 	require.True(t, gjson.GetBytes(encoded, "background").Exists())
 	require.False(t, gjson.GetBytes(encoded, "background").Bool())
 	require.Equal(t, "session-compact", gjson.GetBytes(encoded, "sub2api_session_id").String())
+}
+
+func TestOpenAIResponsesCompactionRequestPreservesCodexNestedFieldsThroughConversion(t *testing.T) {
+	raw := []byte(`{
+		"model":"gpt-5.6-sol",
+		"input":"compact",
+		"reasoning":{
+			"effort":"max",
+			"context":"all_turns",
+			"mode":"auto",
+			"future_reasoning_option":{"enabled":true}
+		},
+		"stream_options":{
+			"reasoning_summary_delivery":"sequential_cutoff",
+			"future_stream_option":{"enabled":true}
+		}
+	}`)
+
+	var compactReq OpenAIResponsesCompactionRequest
+	require.NoError(t, common.Unmarshal(raw, &compactReq))
+	responsesReq := compactReq.ToResponsesRequest()
+	require.NotNil(t, responsesReq)
+	require.NotNil(t, responsesReq.Reasoning)
+	require.NotNil(t, responsesReq.StreamOptions)
+
+	compactReq.Reasoning.Context[1] = 'x'
+	compactReq.Reasoning.Extra["future_reasoning_option"][2] = 'x'
+	compactReq.StreamOptions.Extra["reasoning_summary_delivery"][1] = 'x'
+	compactReq.StreamOptions.Extra["future_stream_option"][2] = 'x'
+
+	encoded, err := common.Marshal(responsesReq)
+	require.NoError(t, err)
+	require.JSONEq(t, `"all_turns"`, gjson.GetBytes(encoded, "reasoning.context").Raw)
+	require.JSONEq(t, `{"enabled":true}`, gjson.GetBytes(encoded, "reasoning.future_reasoning_option").Raw)
+	require.JSONEq(t, `"sequential_cutoff"`, gjson.GetBytes(encoded, "stream_options.reasoning_summary_delivery").Raw)
+	require.JSONEq(t, `{"enabled":true}`, gjson.GetBytes(encoded, "stream_options.future_stream_option").Raw)
 }
 
 func TestOpenAIResponsesCompactionRequestToResponsesRequestClonesPointerFields(t *testing.T) {

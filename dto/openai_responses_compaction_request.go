@@ -122,14 +122,14 @@ func (r *OpenAIResponsesCompactionRequest) ToResponsesRequest() *OpenAIResponses
 		Metadata:             r.Metadata,
 		ParallelToolCalls:    r.ParallelToolCalls,
 		PreviousResponseID:   r.PreviousResponseID,
-		Reasoning:            clonePtr(r.Reasoning),
+		Reasoning:            cloneReasoning(r.Reasoning),
 		ServiceTier:          r.ServiceTier,
 		Store:                r.Store,
 		PromptCacheKey:       r.PromptCacheKey,
 		PromptCacheRetention: r.PromptCacheRetention,
 		SafetyIdentifier:     r.SafetyIdentifier,
 		Stream:               clonePtr(r.Stream),
-		StreamOptions:        clonePtr(r.StreamOptions),
+		StreamOptions:        cloneStreamOptions(r.StreamOptions),
 		Temperature:          clonePtr(r.Temperature),
 		Text:                 r.Text,
 		ToolChoice:           r.ToolChoice,
@@ -143,6 +143,26 @@ func (r *OpenAIResponsesCompactionRequest) ToResponsesRequest() *OpenAIResponses
 		Preset:               r.Preset,
 		Extra:                cloneRawMessageMap(r.Extra),
 	}
+}
+
+func cloneReasoning(value *Reasoning) *Reasoning {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	cloned.Mode = cloneRawMessage(value.Mode)
+	cloned.Context = cloneRawMessage(value.Context)
+	cloned.Extra = cloneRawMessageMap(value.Extra)
+	return &cloned
+}
+
+func cloneStreamOptions(value *StreamOptions) *StreamOptions {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	cloned.Extra = cloneRawMessageMap(value.Extra)
+	return &cloned
 }
 
 func clonePtr[T any](value *T) *T {

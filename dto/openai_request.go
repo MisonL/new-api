@@ -252,7 +252,37 @@ type StreamOptions struct {
 	IncludeUsage bool `json:"include_usage,omitempty"`
 	// IncludeObfuscation is only for /v1/responses stream payload.
 	// This field is filtered by default and can be enabled via channel setting allow_include_obfuscation.
-	IncludeObfuscation bool `json:"include_obfuscation,omitempty"`
+	IncludeObfuscation bool                       `json:"include_obfuscation,omitempty"`
+	Extra              map[string]json.RawMessage `json:"-"`
+}
+
+var streamOptionsKnownFields = sync.OnceValue(func() map[string]struct{} {
+	return GetJSONFieldNames(reflect.TypeOf(StreamOptions{}))
+})
+
+func (s *StreamOptions) UnmarshalJSON(data []byte) error {
+	var rawMap map[string]json.RawMessage
+	if err := common.Unmarshal(data, &rawMap); err != nil {
+		return err
+	}
+
+	type Alias StreamOptions
+	var known Alias
+	if err := common.Unmarshal(data, &known); err != nil {
+		return err
+	}
+	*s = StreamOptions(known)
+	s.Extra = collectUnknownJSONFields(rawMap, streamOptionsKnownFields())
+	return nil
+}
+
+func (s StreamOptions) MarshalJSON() ([]byte, error) {
+	type Alias StreamOptions
+	base, err := common.Marshal(Alias(s))
+	if err != nil {
+		return nil, err
+	}
+	return marshalWithExtraJSONFields(base, s.Extra)
 }
 
 func (r *GeneralOpenAIRequest) GetMaxTokens() uint {
@@ -1041,8 +1071,40 @@ func ResponsesInputHasCompactionTrigger(input json.RawMessage) bool {
 }
 
 type Reasoning struct {
-	Effort  string `json:"effort,omitempty"`
-	Summary string `json:"summary,omitempty"`
+	Effort  string                     `json:"effort,omitempty"`
+	Summary string                     `json:"summary,omitempty"`
+	Mode    json.RawMessage            `json:"mode,omitempty"`
+	Context json.RawMessage            `json:"context,omitempty"`
+	Extra   map[string]json.RawMessage `json:"-"`
+}
+
+var reasoningKnownFields = sync.OnceValue(func() map[string]struct{} {
+	return GetJSONFieldNames(reflect.TypeOf(Reasoning{}))
+})
+
+func (r *Reasoning) UnmarshalJSON(data []byte) error {
+	var rawMap map[string]json.RawMessage
+	if err := common.Unmarshal(data, &rawMap); err != nil {
+		return err
+	}
+
+	type Alias Reasoning
+	var known Alias
+	if err := common.Unmarshal(data, &known); err != nil {
+		return err
+	}
+	*r = Reasoning(known)
+	r.Extra = collectUnknownJSONFields(rawMap, reasoningKnownFields())
+	return nil
+}
+
+func (r Reasoning) MarshalJSON() ([]byte, error) {
+	type Alias Reasoning
+	base, err := common.Marshal(Alias(r))
+	if err != nil {
+		return nil, err
+	}
+	return marshalWithExtraJSONFields(base, r.Extra)
 }
 
 type Input struct {
