@@ -90,21 +90,41 @@ date=2026-07-14T12:35:47Z
 
 正式库过去 24 小时采样到 1086 条 429，涉及 756 个请求，其中 327 个经跨渠道重试最终成功。错误正文明确来自上游并发限制、RPM、日限额、pending request 限制或余额耗尽。当前重试链路有效，但上游容量不足仍是真实外部约束；本轮未通过禁用渠道或吞错来掩盖 429。
 
+### Responses 历史 item ID 前缀
+
+正式日志发现 Codex 完整历史回放携带 `id=item_*`，严格上游按 item 类型分别要求 `fc`、`msg`、`rs` 前缀并返回 502。30 天日志中共有：
+
+- function/tool call 期望 `fc`：32 条，涉及 18 个请求。
+- message 期望 `msg`：15 条，涉及 5 个请求。
+- reasoning 期望 `rs`：9 条，涉及 4 个请求。
+
+原版 QuantumNous/new-api 最新主分支提交 `a63364d156cf2a64f1c3d1ee4923d73d5f3222a1` 尚未处理该问题。Wei-Shaw/sub2api 已分别在 `fd64d07e61b4ae57830ede458069a002f824de60` 和 `4d4ba64bf7ba110241e0850bee2dd4180a6b3f49` 修复 function-call 与 message 的非法 `item_*` ID，策略是删除非法 `id`，不伪造新的服务端 ID。
+
+本仓库提交 `f1fe96d3efb570eb654f36fefbfece4c22d14d61` 吸纳并扩展该策略：
+
+- function/tool call 输入仅保留 `fc` 前缀 ID。
+- message 仅保留 `msg` 前缀 ID。
+- reasoning 仅保留 `rs` 前缀 ID。
+- `call_id`、output item ID、合法 ID 和无约束 item 保持不变。
+- 清理数量写入应用日志，不记录具体 ID 或用户内容。
+
+隔离环境固定严格渠道 2，function-call、message、reasoning 三类 `item_*` 输入均从必现 502 变为 `200 completed`。正式发布后相同三类探针全部通过；真实长上下文每次清理 7 到 196 个非法 ID 后继续完成，未再出现 `invalid_id_prefix`。
+
 ## 正式发布状态
 
-已于 2026-07-14 发布正式镜像：
+当前正式镜像：
 
 ```text
-image=new-api-local:prod-20260714-responses-recovery-fee879352
-image_id=sha256:ce79e7c996d86ef151cf526491864b831d1ba1b616a0d0478dbd4317e7afd51d
-commit=fee8793528288d90584408bff753269abdbb1d43
+image=new-api-local:prod-20260714-item-id-f1fe96d3e
+image_id=sha256:ca6c5e05609195a00ff21159de49739abf0d47d5b3e2ea04952759b7f30ec83f
+commit=f1fe96d3efb570eb654f36fefbfece4c22d14d61
 ```
 
 发布前完整 PostgreSQL 备份：
 
 ```text
-.dev-docker/backups/new-api-prod-pre-fee879352-20260714-221226.dump
-sha256=1fac5b72d7ac258f5fa8ad8296a7a000b8bab3d2b9e86ad323506ed61a0e46fe
+.dev-docker/backups/new-api-prod-pre-f1fe96d3e-20260714-234502.dump
+sha256=9bdd926e9c61d409b5ac367c3d083f570da464b37115b4d51b1f8f4a9547c21c
 ```
 
 备份权限为 600，`pg_restore --list` 校验通过。仅重建 `new-api` 服务，PostgreSQL 和 Redis 未重建。
@@ -115,4 +135,6 @@ sha256=1fac5b72d7ac258f5fa8ad8296a7a000b8bab3d2b9e86ad323506ed61a0e46fe
 - 普通自动 Responses、117 空 `context_compaction`、205 自定义工具和 namespace 工具均通过。
 - 自动 tool search 修正配置前定位到 2、150 原生不支持；隔离验证并补齐规则后，正式连续 5 轮两阶段调用全部通过，日志实际覆盖 2、150、204、205。
 - 204 对 220 KB 输入生成真实 `compaction`，随后 `context_compaction` 与标准 `compaction` 回放均 `200 completed`。
+- `item_*` 前缀修复发布后，正式 function-call、message、reasoning 三类探针全部通过。
+- 5 分钟滚动观察期间新增 101 条真实日志，`invalid_id_prefix`、500、429 均为 0；502 保持为部署初期同一请求的 3 次跨渠道通用上游错误，没有新增。
 - 发布后日志未发现 panic、fatal、schema、deadlock 或 migration 失败。
