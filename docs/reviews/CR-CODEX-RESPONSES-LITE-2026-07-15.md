@@ -4,7 +4,7 @@
 
 ## 范围
 
-本次只检查正式环境当前启用且声明 `gpt-5.6-sol` 的渠道。复核时有效渠道为 `1、117、169、178、199`。`150、205、208` 已处于禁用状态，因此不纳入上线门禁：150 由用户确认暂不可用，205 的正式日志和开发副本均为上游余额不足，208 的正式日志主要为上游 429。
+本次只检查正式环境当前启用且声明 `gpt-5.6-sol` 的渠道。渠道状态在排查期间发生过变化；第二次生产发布前于 2026-07-15 重新读取正式数据库，当前范围只有 `1、117、155、204`。`150` 由用户确认暂不可用；`205、169、178、199、208` 当前均未启用，因此不纳入本轮门禁。
 
 ## 外部源码取证
 
@@ -32,8 +32,10 @@
 
 | 渠道 | 结果 |
 | --- | --- |
-| 1（开发副本 219） | basic 通过；grammar 为 HTTP 200 completed 但 `output=[]`；namespace 只返回 `codex.rate_limits`/`codex.response.metadata` 后断流；controls 未按 JSON Schema 返回；tool-search `output=[]`；compact 23.74 秒通过。全程原生 Responses。 |
-| 117 | basic、namespace、controls、compact 通过；grammar 被 bridge 明确拒绝并返回 503；tool-search 第一阶段可生成协议项，加载阶段上游返回 502。 |
+| 1（最终开发副本 99201） | basic 13.22 秒通过；compact 4.45 秒并成功续写；grammar 为 HTTP 200 completed 但 `output=[]`，脚本因此判为上游未执行强制工具。此前 namespace 只返回 `codex.rate_limits`/`codex.response.metadata` 后断流，controls 未按 JSON Schema 返回，tool-search `output=[]`。全程原生 Responses。 |
+| 117 | 最终 SHA 上 basic 12.20 秒、compact 16.35 秒并成功续写；grammar 被 Chat bridge 能力预检明确拒绝并快速返回 503。此前 namespace、controls 通过，tool-search 第一阶段可生成协议项，加载阶段上游返回 502。 |
+| 155 | 最终 SHA 上 basic 13.03 秒、grammar 2.97 秒、controls 3.10 秒、compact 4.66 秒并成功续写，均通过。grammar 返回 `function_call apply_patch`。 |
+| 204 | 最终 SHA 上 basic 23.15 秒、compact 4.80 秒并成功续写；grammar 首次上游瞬时 503，复测 6.43 秒成功并返回 `function_call apply_patch`。 |
 | 169 | basic、grammar、namespace、controls、compact 通过；tool-search 返回普通 message，没有 `tool_search_call`。 |
 | 178 | basic、grammar、controls、compact 通过；namespace 连续两次上游 Cloudflare 502，非网关转换错误。 |
 | 199 | grammar、namespace、controls、compact 通过；tool-search 返回普通 message。最近新镜像 core 首请求连续遇到上游 503，未形成新的全量 core 通过记录。 |
@@ -42,12 +44,25 @@
 
 ## 正式错误取证
 
-最近采样窗口内 429 主要来自已禁用 208（10 次，上游 rate limit）及非 Codex DeepSeek 渠道配额；当前启用 Codex 渠道仅观察到 199 两次、178 一次上游并发限制。没有证据表明这些 429 由网关内部限流产生。
+最近采样窗口内 429 主要来自已禁用 208（10 次，上游 rate limit）及非 Codex DeepSeek 渠道配额；该窗口当时启用的 Codex 渠道中仅观察到 199 两次、178 一次上游并发限制。没有证据表明这些 429 由网关内部限流产生。
+
+## 第一次生产发布与回滚
+
+- 发布前备份：`backups/new-api-pre-codex-lite-d08a7de8-20260715-192054.dump`，87,931,907 bytes，SHA-256 `a5a56b0cc4b6cef8b938fc232d354aff3ef072417588ed48d9fe130bbb9eafcf`，`pg_restore -l` 可读取 405 个条目。
+- 第一次发布镜像为 `new-api-local:prod-codex-lite-d08a7de8`，应用 build commit `d08a7de8ca9...`。固定 155 的 basic、grammar、controls、compact 均通过。
+- 真实流量暴露出选择器缺陷：高优先级 199 或 169 返回上游 503 后，`retry=1` 直接切换到低优先级 117。117 的 Chat bridge 随后因 grammar 或 compact 能力不兼容被安全跳过，最终请求未继续尝试仍可用的同优先级原生 Responses 渠道。
+- 发现后立即只回滚应用容器至 `new-api-local:prod-20260714-item-id-f1fe96d3e`，build commit `f1fe96d3efb570eb654f36fefbfece4c22d14d61`。数据库和渠道配置未变更，正式容器当前健康。
+
+## 重试路由修复
+
+- 提交 `803211365` 修正重试语义：每次重试先排除已使用渠道并检查当前分组最高优先级的剩余候选；只有同级候选穷尽后才按原有 retry 索引进入低优先级。总重试次数和显式协议能力错误保持不变。
+- 单元与集成测试覆盖普通分组、auto 分组、数据库查询、内存缓存、同级继续和同级穷尽后降级。
+- 隔离 3001 的真实路由试验使用三个临时渠道：99215 为不可达高优先级，99216 为健康同优先级，99217 为不可达低优先级。一次请求真实记录 99215 上游失败后由 99216 完成，99217 未被选择。试验结束后临时渠道、abilities 和 logs 均删除，残留计数为 0。
 
 ## 验证命令
 
 ```text
-go test -timeout 120s ./controller ./model ./relay/common ./relay/helper ./service
+go test -count=1 -timeout 120s ./controller ./model ./relay/common ./relay/helper ./service
 node --check scripts/codex-responses-lite-smoke.mjs
 git diff --check
 scripts/build-docker-local.sh new-api-local:dev
@@ -56,10 +71,10 @@ docker exec new-api-dev-isolated-new-api-1 /new-api --build-info
 curl -fsS http://127.0.0.1:3001/api/status
 ```
 
-后端回归在本轮 exit 0；镜像重建阶段默认和 classic 前端均构建成功，构建时镜像 commit 为 `309ae2664`。在生产升级前必须在最终提交（包含本审计文档和 smoke 门禁）上再次重建并核对 build-info，不能复用该旧 SHA 镜像。
+后端回归在本轮 exit 0；默认和 classic 前端、Safari 兼容检查、Go 二进制均构建成功。路由修复开发镜像 build commit 为 `803211365d9b1ab12f1785b76693dead1bbb69d3`，隔离容器状态为 healthy，`/api/status` 返回 success。提交本审计记录后仍必须从新的最终 HEAD 重建并再次核对 build-info。
 
 ## 尚未宣称完成的门禁
 
-- 等上游 169/199 从 503 恢复后，在最终 SHA 镜像上重跑至少一次 basic 和 compact。
-- 复核正式配置的渠道能力快照，只有有重复证据的明确不支持能力才写入 `responses_capability_registry`；不得通过禁用渠道代替能力路由。
-- 生产升级前完成数据库备份、镜像 SHA 核对和应用容器替换；升级后观察 502、429、compact、tool call、reasoning header、item ID 日志。
+- 第二次生产发布前创建新备份并核对 `pg_restore -l`、文件大小和 SHA-256；镜像必须从包含本审计记录的最终 HEAD 重新构建，不能复用第一次发布镜像。
+- 发布后固定验证当前启用的 `1、117、155、204`，并用自动路由请求确认高优先级上游失败时不会提前结束在低优先级协议不兼容渠道。
+- 发布后持续观察 502、503、429、compact、tool call、reasoning header、item ID 和 retry channel chain。出现新网关回归时立即回滚应用容器；不得通过禁用渠道代替协议修复。
