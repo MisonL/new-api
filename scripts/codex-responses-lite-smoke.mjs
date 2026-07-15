@@ -39,11 +39,12 @@ if (!supportedScenarios.has(scenario)) {
 if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 180000) {
   fail('timeout-ms must be an integer from 1000 to 180000');
 }
-if (!/^\d+$/.test(channel)) {
-  fail('channel must be a positive integer');
+if (channel !== 'auto' && !/^\d+$/.test(channel)) {
+  fail('channel must be "auto" or a positive integer');
 }
 
-const authorization = token.endsWith(`-${channel}`) ? token : `${token}-${channel}`;
+const authorization =
+  channel === 'auto' || token.endsWith(`-${channel}`) ? token : `${token}-${channel}`;
 const results = [];
 
 if (shouldRun('basic')) {
