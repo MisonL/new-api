@@ -24,8 +24,8 @@ const supportedScenarios = new Set([
 if (!supportedScenarios.has(scenario)) {
   fail(`unsupported scenario: ${scenario}`);
 }
-if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 28000) {
-  fail('timeout-ms must be an integer from 1000 to 28000');
+if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 180000) {
+  fail('timeout-ms must be an integer from 1000 to 180000');
 }
 if (!/^\d+$/.test(channel)) {
   fail('channel must be a positive integer');
