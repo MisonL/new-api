@@ -100,6 +100,69 @@ func TestFindResponsesViaChatRuleOnlyWhenToolBridgeRequiredSkipsOrdinaryRequest(
 	require.Nil(t, rule)
 }
 
+func TestFindResponsesViaChatRuleConditionalBridgeHonorsToolTypeAllowlist(t *testing.T) {
+	settings := model_setting.GetGlobalSettings()
+	previousPolicy := settings.ChatCompletionsToResponsesPolicy
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = previousPolicy
+	})
+
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{{
+			Name:           "selected-tool-types",
+			Enabled:        true,
+			SourceEndpoint: model_setting.ProtocolEndpointResponses,
+			TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+			ChannelIDs:     []int{1},
+			ModelPatterns:  []string{"^gpt-5\\.6-sol$"},
+			Options: &model_setting.ProtocolConversionOptions{
+				EnableCustomToolBridge:     true,
+				OnlyWhenToolBridgeRequired: true,
+				ToolBridgeTypes: []string{
+					model_setting.ProtocolToolBridgeTypeCustom,
+					model_setting.ProtocolToolBridgeTypeNamespace,
+				},
+			},
+		}},
+	}
+	unsupported := false
+	channelSettings := dto.ChannelOtherSettings{ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+		SupportsFunctionTools:  &unsupported,
+		SupportsCustomTools:    &unsupported,
+		SupportsNamespaceTools: &unsupported,
+		SupportsToolSearch:     &unsupported,
+	}}
+	tests := []struct {
+		name      string
+		request   *dto.OpenAIResponsesRequest
+		wantMatch bool
+	}{
+		{name: "custom", request: &dto.OpenAIResponsesRequest{Tools: common.RawMessage(`[{"type":"custom","name":"apply_patch"}]`)}, wantMatch: true},
+		{name: "namespace", request: &dto.OpenAIResponsesRequest{Tools: common.RawMessage(`[{"type":"namespace","name":"workspace","tools":[]}]`)}, wantMatch: true},
+		{name: "function", request: &dto.OpenAIResponsesRequest{Tools: common.RawMessage(`[{"type":"function","name":"lookup"}]`)}},
+		{name: "tool search", request: &dto.OpenAIResponsesRequest{Tools: common.RawMessage(`[{"type":"tool_search"}]`)}},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			rule, err := FindResponsesViaChatRule(
+				context.Background(),
+				relayconstant.RelayModeResponses,
+				false,
+				dto.ChannelSettings{},
+				1,
+				1,
+				"gpt-5.6-sol",
+				testCase.request,
+				channelSettings,
+			)
+			require.NoError(t, err)
+			require.Equal(t, testCase.wantMatch, rule != nil)
+		})
+	}
+}
+
 func TestFindResponsesViaChatRuleOnlyWhenToolBridgeRequiredSkipsFunctionOnlyAdditionalTools(t *testing.T) {
 	settings := model_setting.GetGlobalSettings()
 	previousPolicy := settings.ChatCompletionsToResponsesPolicy

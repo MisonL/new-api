@@ -258,7 +258,13 @@ async function runToolSearch() {
   assertCompletedResponse('tool-search-loaded', loaded);
   const loadedCalls = loaded.output.filter((item) => isToolCall(item));
   if (!loadedCalls.some((item) => item.name === 'deferred_lookup')) {
-    fail('tool-search: deferred_lookup was not callable after tool_search_output');
+    const observed = (loaded.output ?? []).map((item) => ({
+      type: item?.type,
+      name: item?.name,
+      namespace: item?.namespace,
+      call_id_present: Boolean(item?.call_id),
+    }));
+    fail(`tool-search: deferred_lookup was not callable after tool_search_output; observed=${JSON.stringify(observed)}`);
   }
   return summarize('tool-search', loaded, {
     discovery_output_types: uniqueTypes(discovered.output),

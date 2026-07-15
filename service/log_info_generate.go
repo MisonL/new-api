@@ -201,6 +201,9 @@ func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settin
 	if snapshotInfo.SupportsCustomTools != nil {
 		snapshot["supports_custom_tools"] = *snapshotInfo.SupportsCustomTools
 	}
+	if snapshotInfo.SupportsFunctionTools != nil {
+		snapshot["supports_function_tools"] = *snapshotInfo.SupportsFunctionTools
+	}
 	if snapshotInfo.SupportsReasoningContext != nil {
 		snapshot["supports_reasoning_context"] = *snapshotInfo.SupportsReasoningContext
 	}

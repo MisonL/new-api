@@ -396,6 +396,7 @@ func TestGenerateTextOtherInfoIncludesMissingLocalSyntheticStateAction(t *testin
 	require.Equal(t, true, snapshot["supports_chat"])
 	require.Equal(t, true, snapshot["supports_rest_previous_response_id"])
 	require.Equal(t, true, snapshot["supports_compaction_item_passthrough"])
+	require.Equal(t, true, snapshot["supports_function_tools"])
 	require.Equal(t, true, snapshot["supports_custom_tools"])
 	require.Equal(t, true, snapshot["supports_namespace_tools"])
 	require.Equal(t, true, snapshot["supports_tool_search"])
@@ -468,6 +469,7 @@ func TestResponsesChannelCapabilitySnapshotTreatsSub2APIHTTPAsNoRESTPreviousID(t
 	require.Equal(t, false, snapshot["supports_responses_compact"])
 	require.Equal(t, false, snapshot["supports_rest_previous_response_id"])
 	require.Equal(t, false, snapshot["supports_compaction_item_passthrough"])
+	require.Equal(t, true, snapshot["supports_function_tools"])
 	require.Equal(t, false, snapshot["supports_custom_tools"])
 	require.Equal(t, false, snapshot["supports_namespace_tools"])
 	require.Equal(t, false, snapshot["supports_tool_search"])
@@ -689,6 +691,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			require.Equal(t, tc.wantSupportsResponsesCompact, snapshot["supports_responses_compact"])
 			require.Equal(t, tc.wantSupportsRESTPreviousResponseID, snapshot["supports_rest_previous_response_id"])
 			require.Equal(t, tc.wantSupportsCompactionItemPassthrough, snapshot["supports_compaction_item_passthrough"])
+			require.Equal(t, true, snapshot["supports_function_tools"])
 			if tc.wantSupportsCustomTools == nil {
 				require.NotContains(t, snapshot, "supports_custom_tools")
 			} else {

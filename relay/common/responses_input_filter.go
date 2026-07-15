@@ -535,6 +535,57 @@ func ResponsesRequestHasCustomTools(request *dto.OpenAIResponsesRequest) (bool, 
 	return false, nil
 }
 
+func ResponsesRequestHasFunctionTools(request *dto.OpenAIResponsesRequest) (bool, error) {
+	if request == nil {
+		return false, nil
+	}
+	tools, err := request.EffectiveTools()
+	if err != nil {
+		return false, err
+	}
+	for _, rawTool := range tools {
+		if basecommon.GetJsonType(rawTool) != "object" {
+			continue
+		}
+		var tool map[string]json.RawMessage
+		if err := basecommon.Unmarshal(rawTool, &tool); err != nil {
+			continue
+		}
+		if responsesItemType(tool) == "function" {
+			return true, nil
+		}
+	}
+	if basecommon.GetJsonType(request.Input) == "array" {
+		var inputItems []json.RawMessage
+		if err := basecommon.Unmarshal(request.Input, &inputItems); err != nil {
+			return false, err
+		}
+		for _, rawItem := range inputItems {
+			if basecommon.GetJsonType(rawItem) != "object" {
+				continue
+			}
+			var item map[string]json.RawMessage
+			if err := basecommon.Unmarshal(rawItem, &item); err != nil {
+				continue
+			}
+			switch responsesItemType(item) {
+			case "function_call", "function_call_output":
+				return true, nil
+			}
+		}
+	}
+	if basecommon.GetJsonType(request.ToolChoice) == "object" {
+		var toolChoice map[string]json.RawMessage
+		if err := basecommon.Unmarshal(request.ToolChoice, &toolChoice); err != nil {
+			return false, err
+		}
+		if responsesItemType(toolChoice) == "function" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func ResponsesRequestHasToolSearch(request *dto.OpenAIResponsesRequest) (bool, error) {
 	if request == nil {
 		return false, nil

@@ -11,8 +11,12 @@ import (
 )
 
 const (
-	ProtocolEndpointChatCompletions = "chat_completions"
-	ProtocolEndpointResponses       = "responses"
+	ProtocolEndpointChatCompletions  = "chat_completions"
+	ProtocolEndpointResponses        = "responses"
+	ProtocolToolBridgeTypeFunction   = "function"
+	ProtocolToolBridgeTypeCustom     = "custom"
+	ProtocolToolBridgeTypeNamespace  = "namespace"
+	ProtocolToolBridgeTypeToolSearch = "tool_search"
 )
 
 type ChatCompletionsToResponsesPolicy struct {
@@ -71,8 +75,16 @@ type ProtocolConversionRule struct {
 }
 
 type ProtocolConversionOptions struct {
-	EnableCustomToolBridge     bool `json:"enable_custom_tool_bridge,omitempty"`
-	OnlyWhenToolBridgeRequired bool `json:"only_when_tool_bridge_required,omitempty"`
+	EnableCustomToolBridge     bool     `json:"enable_custom_tool_bridge,omitempty"`
+	OnlyWhenToolBridgeRequired bool     `json:"only_when_tool_bridge_required,omitempty"`
+	ToolBridgeTypes            []string `json:"tool_bridge_types,omitempty"`
+}
+
+func (o *ProtocolConversionOptions) AllowsToolBridgeType(toolType string) bool {
+	if o == nil || len(o.ToolBridgeTypes) == 0 {
+		return true
+	}
+	return slices.Contains(o.ToolBridgeTypes, toolType)
 }
 
 type RequestBodyLimitPolicy struct {
@@ -261,6 +273,23 @@ func normalizeStringList(values []string) []string {
 	return result
 }
 
+func normalizeUniqueStringList(values []string) []string {
+	normalized := normalizeStringList(values)
+	if len(normalized) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(normalized))
+	result := make([]string, 0, len(normalized))
+	for _, value := range normalized {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
 func validateRegexList(label string, values []string) error {
 	for _, value := range values {
 		trimmed := strings.TrimSpace(value)
@@ -339,6 +368,22 @@ func ValidateAndNormalizeChatCompletionsToResponsesPolicy(policy *ChatCompletion
 				return fmt.Errorf("规则 #%d only_when_tool_bridge_required 仅支持 responses 到 chat_completions", i+1)
 			}
 		}
+		if rule.Options != nil {
+			rule.Options.ToolBridgeTypes = normalizeUniqueStringList(rule.Options.ToolBridgeTypes)
+			if len(rule.Options.ToolBridgeTypes) > 0 && !rule.Options.OnlyWhenToolBridgeRequired {
+				return fmt.Errorf("规则 #%d tool_bridge_types 需要 only_when_tool_bridge_required", i+1)
+			}
+			for _, toolType := range rule.Options.ToolBridgeTypes {
+				switch toolType {
+				case ProtocolToolBridgeTypeFunction,
+					ProtocolToolBridgeTypeCustom,
+					ProtocolToolBridgeTypeNamespace,
+					ProtocolToolBridgeTypeToolSearch:
+				default:
+					return fmt.Errorf("规则 #%d tool_bridge_types 不支持: %s", i+1, toolType)
+				}
+			}
+		}
 	}
 
 	return nil
@@ -394,6 +439,7 @@ var protocolRuleKnownFields = []string{
 var protocolOptionsKnownFields = []string{
 	"enable_custom_tool_bridge",
 	"only_when_tool_bridge_required",
+	"tool_bridge_types",
 }
 
 func replaceKnownRawFields(dst map[string]common.RawMessage, src map[string]common.RawMessage, keys []string) {

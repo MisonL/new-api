@@ -55,7 +55,8 @@ func TestNormalizeChatCompletionsToResponsesPolicyJSON_PreservesConditionalToolB
 			"all_channels": true,
 			"options": {
 				"enable_custom_tool_bridge": true,
-				"only_when_tool_bridge_required": true
+				"only_when_tool_bridge_required": true,
+				"tool_bridge_types": [" namespace ", "custom", "namespace"]
 			}
 		}]
 	}`)
@@ -67,7 +68,28 @@ func TestNormalizeChatCompletionsToResponsesPolicyJSON_PreservesConditionalToolB
 	require.NotNil(t, policy.Rules[0].Options)
 	assert.True(t, policy.Rules[0].Options.EnableCustomToolBridge)
 	assert.True(t, policy.Rules[0].Options.OnlyWhenToolBridgeRequired)
+	assert.Equal(t, []string{"namespace", "custom"}, policy.Rules[0].Options.ToolBridgeTypes)
+	assert.True(t, policy.Rules[0].Options.AllowsToolBridgeType(ProtocolToolBridgeTypeCustom))
+	assert.False(t, policy.Rules[0].Options.AllowsToolBridgeType(ProtocolToolBridgeTypeToolSearch))
 	assert.Contains(t, normalized, "only_when_tool_bridge_required")
+}
+
+func TestNormalizeChatCompletionsToResponsesPolicyJSONRejectsUnknownToolBridgeType(t *testing.T) {
+	_, err := NormalizeChatCompletionsToResponsesPolicyJSON(`{
+		"rules": [{
+			"enabled": true,
+			"source_endpoint": "responses",
+			"target_endpoint": "chat_completions",
+			"all_channels": true,
+			"options": {
+				"enable_custom_tool_bridge": true,
+				"only_when_tool_bridge_required": true,
+				"tool_bridge_types": ["unknown"]
+			}
+		}]
+	}`)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tool_bridge_types")
 }
 
 func TestNormalizeChatCompletionsToResponsesPolicyJSON_RejectsInvalidConditionalToolBridge(t *testing.T) {

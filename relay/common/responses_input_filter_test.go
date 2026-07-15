@@ -548,6 +548,55 @@ func TestResponsesRequestHasCustomTools(t *testing.T) {
 	}
 }
 
+func TestResponsesRequestHasFunctionTools(t *testing.T) {
+	tests := []struct {
+		name    string
+		request *dto.OpenAIResponsesRequest
+		want    bool
+	}{
+		{
+			name:    "function tool declaration",
+			request: &dto.OpenAIResponsesRequest{Tools: rootcommon.RawMessage(`[{"type":"function","name":"lookup"}]`)},
+			want:    true,
+		},
+		{
+			name: "function tool in additional tools",
+			request: &dto.OpenAIResponsesRequest{Input: rootcommon.RawMessage(`[
+				{"type":"additional_tools","tools":[{"type":"function","name":"lookup"}]},
+				{"type":"message","role":"user","content":"continue"}
+			]`)},
+			want: true,
+		},
+		{
+			name:    "function tool history",
+			request: &dto.OpenAIResponsesRequest{Input: rootcommon.RawMessage(`[{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}]`)},
+			want:    true,
+		},
+		{
+			name:    "function tool output history",
+			request: &dto.OpenAIResponsesRequest{Input: rootcommon.RawMessage(`[{"type":"function_call_output","call_id":"call_1","output":"ok"}]`)},
+			want:    true,
+		},
+		{
+			name:    "function tool choice",
+			request: &dto.OpenAIResponsesRequest{ToolChoice: rootcommon.RawMessage(`{"type":"function","name":"lookup"}`)},
+			want:    true,
+		},
+		{
+			name:    "custom tool only",
+			request: &dto.OpenAIResponsesRequest{Tools: rootcommon.RawMessage(`[{"type":"custom","name":"apply_patch"}]`)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResponsesRequestHasFunctionTools(tt.request)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestResponsesNamespaceHistoryIndex(t *testing.T) {
 	tests := []struct {
 		name      string

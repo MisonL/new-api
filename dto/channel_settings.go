@@ -81,6 +81,7 @@ type ResponsesChannelCapabilityRegistry struct {
 	SupportsChat                      *bool                           `json:"supports_chat,omitempty"`
 	SupportsRestPreviousResponseID    *bool                           `json:"supports_rest_previous_response_id,omitempty"`
 	SupportsCompactionItemPassthrough *bool                           `json:"supports_compaction_item_passthrough,omitempty"`
+	SupportsFunctionTools             *bool                           `json:"supports_function_tools,omitempty"`
 	SupportsCustomTools               *bool                           `json:"supports_custom_tools,omitempty"`
 	SupportsNamespaceTools            *bool                           `json:"supports_namespace_tools,omitempty"`
 	SupportsToolSearch                *bool                           `json:"supports_tool_search,omitempty"`
@@ -97,6 +98,7 @@ type ResponsesChannelCapabilitySnapshot struct {
 	SupportsChat                      bool
 	SupportsRestPreviousResponseID    bool
 	SupportsCompactionItemPassthrough bool
+	SupportsFunctionTools             *bool
 	SupportsCustomTools               *bool
 	SupportsNamespaceTools            bool
 	SupportsToolSearch                bool
@@ -243,6 +245,7 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 		SupportsChat:                      defaultSupportsChatCapability(channelType, profile),
 		SupportsRestPreviousResponseID:    defaultSupportsRESTPreviousResponseIDCapability(s, profile),
 		SupportsCompactionItemPassthrough: defaultSupportsCompactionItemPassthroughCapability(profile),
+		SupportsFunctionTools:             defaultSupportsFunctionToolsCapability(profile),
 		SupportsCustomTools:               defaultSupportsCustomToolsCapability(profile),
 		SupportsNamespaceTools:            defaultSupportsNamespaceToolsCapability(profile),
 		SupportsToolSearch:                defaultSupportsToolSearchCapability(profile),
@@ -301,6 +304,19 @@ func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesCustomTools() bool {
 	return profile != "" && capability != nil && !*capability
 }
 
+func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesFunctionTools() bool {
+	if s == nil {
+		return false
+	}
+	registry := s.responsesCapabilityRegistry()
+	if registry != nil && registry.SupportsFunctionTools != nil {
+		return !*registry.SupportsFunctionTools
+	}
+	profile := s.NormalizedResponsesUpstreamProfile()
+	capability := defaultSupportsFunctionToolsCapability(profile)
+	return profile != "" && capability != nil && !*capability
+}
+
 func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesToolSearch() bool {
 	if s == nil {
 		return false
@@ -335,6 +351,9 @@ func applyCapabilityOverrides(snapshot *ResponsesChannelCapabilitySnapshot, regi
 	}
 	if registry.SupportsCompactionItemPassthrough != nil {
 		snapshot.SupportsCompactionItemPassthrough = *registry.SupportsCompactionItemPassthrough
+	}
+	if registry.SupportsFunctionTools != nil {
+		snapshot.SupportsFunctionTools = cloneBool(registry.SupportsFunctionTools)
 	}
 	if registry.SupportsCustomTools != nil {
 		snapshot.SupportsCustomTools = cloneBool(registry.SupportsCustomTools)
@@ -501,6 +520,14 @@ func defaultSupportsCustomToolsCapability(profile ResponsesUpstreamProfile) *boo
 	default:
 		return nil
 	}
+}
+
+func defaultSupportsFunctionToolsCapability(profile ResponsesUpstreamProfile) *bool {
+	if profile == "" {
+		return nil
+	}
+	value := true
+	return &value
 }
 
 func defaultSupportsToolSearchCapability(profile ResponsesUpstreamProfile) bool {

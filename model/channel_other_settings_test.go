@@ -169,6 +169,19 @@ func TestChannelOtherSettingsExplicitToolSearchCapability(t *testing.T) {
 	}).ExplicitlyDisablesResponsesToolSearch())
 }
 
+func TestChannelOtherSettingsExplicitFunctionToolsCapability(t *testing.T) {
+	unsupported := false
+	supported := true
+
+	require.True(t, (&dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{SupportsFunctionTools: &unsupported},
+	}).ExplicitlyDisablesResponsesFunctionTools())
+	require.False(t, (&dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{SupportsFunctionTools: &supported},
+	}).ExplicitlyDisablesResponsesFunctionTools())
+	require.False(t, (&dto.ChannelOtherSettings{}).ExplicitlyDisablesResponsesFunctionTools())
+}
+
 func TestChannelOtherSettingsResponsesReasoningContextCapability(t *testing.T) {
 	unsupported := false
 	supported := true

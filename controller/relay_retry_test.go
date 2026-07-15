@@ -1862,6 +1862,57 @@ func TestGetChannelSkipsExplicitlyUnsupportedCustomToolChannel(t *testing.T) {
 	require.Equal(t, []string{"168"}, ctx.GetStringSlice("use_channel"))
 }
 
+func TestGetChannelSkipsExplicitlyUnsupportedFunctionToolChannel(t *testing.T) {
+	db := setupChannelControllerTestDB(t)
+	unsupported, supported := seedRemoteCompactionRouteChannels(t, db)
+	supportsFunctionTools := false
+	unsupported.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsFunctionTools: &supportsFunctionTools,
+		},
+	})
+	require.NoError(t, db.Save(unsupported).Error)
+
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{}
+	settings.PassThroughRequestEnabled = false
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, unsupported, "gpt-5.5"))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.5",
+			Input: common.RawMessage(`[
+				{"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]},
+				{"type":"message","role":"user","content":"call lookup"}
+			]`),
+			ToolChoice: common.RawMessage(`{"type":"function","name":"lookup"}`),
+		},
+	}
+
+	channel, err := getChannel(ctx, info, &service.RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-5.5",
+		Retry:      common.GetPointer(0),
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, supported.Id, channel.Id)
+	require.Equal(t, []string{"168"}, ctx.GetStringSlice("use_channel"))
+	require.True(t, errors.Is(info.LastError, errResponsesFunctionToolsUnsupported))
+}
+
 func TestGetChannelSkipsExplicitlyUnsupportedToolSearchChannel(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
 	unsupported, supported := seedRemoteCompactionRouteChannels(t, db)
