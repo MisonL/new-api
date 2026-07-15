@@ -279,7 +279,12 @@ async function runGrammarTool() {
   assertCompletedResponse('grammar', response);
   const calls = response.output.filter((item) => isToolCall(item) && item?.name === 'apply_patch');
   if (calls.length === 0) {
-    fail('grammar: upstream completed without the forced apply_patch tool call');
+    const observed = response.output.map((item) => ({
+      type: item?.type,
+      name: item?.name,
+      call_id_present: Boolean(item?.call_id),
+    }));
+    fail(`grammar: upstream completed without the forced apply_patch tool call; observed=${JSON.stringify(observed)}`);
   }
   return summarize('grammar', response, {
     tool_names: calls.map((item) => item.name).filter(Boolean),
