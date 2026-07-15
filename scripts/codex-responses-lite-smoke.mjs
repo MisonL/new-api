@@ -500,8 +500,7 @@ async function runCompactAndContinue() {
 
   const continued = await postJson('/v1/responses', {
     model,
-    previous_response_id: compact.id,
-    input: [message('Continue and return exactly CODEX_LITE_CONTINUE_OK.')],
+    input: [...compact.output, message('Continue and return exactly CODEX_LITE_CONTINUE_OK.')],
     reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
     stream: false,
   });
