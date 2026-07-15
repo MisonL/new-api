@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -20,6 +21,24 @@ import (
 )
 
 func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.OpenAIResponsesRequest, options service.ResponsesChatCompatibilityOptions) (*dto.Usage, *types.NewAPIError) {
+	if request != nil {
+		strippedRequest, stripped := relaycommon.StripResponsesReasoningContext(*request)
+		if stripped {
+			request = &strippedRequest
+			common.SetContextKey(c, constant.ContextKeyResponsesReasoningContextAction, "stripped_by_chat_compatibility")
+			channelID := 0
+			model := strippedRequest.Model
+			if info != nil {
+				channelID = info.ChannelId
+				model = info.OriginModelName
+			}
+			common.SysLog(fmt.Sprintf(
+				"responses reasoning context stripped for Chat Completions compatibility: channel_id=%d model=%s",
+				channelID,
+				model,
+			))
+		}
+	}
 	responsesJSON, err := common.Marshal(request)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())

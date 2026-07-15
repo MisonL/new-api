@@ -176,6 +176,9 @@ export interface ChannelCapabilitySnapshot {
   supports_compaction_item_passthrough?: boolean
   supports_namespace_tools?: boolean
   supports_tool_search?: boolean
+  reasoning_context_capability?: 'supported' | 'unsupported' | 'unknown'
+  supports_reasoning_context?: boolean
+  strips_responses_reasoning_context?: boolean
   strips_responses_encrypted_reasoning?: boolean
   observed?: ResponsesCapabilityObservation
   probe?: ResponsesCapabilityObservation

@@ -45,6 +45,16 @@ type ResponsesInputItemIDNormalizeResult struct {
 	RemovedCount int
 }
 
+func StripResponsesReasoningContext(request dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool) {
+	if request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0 {
+		return request, false
+	}
+	clonedReasoning := *request.Reasoning
+	clonedReasoning.Context = nil
+	request.Reasoning = &clonedReasoning
+	return request, true
+}
+
 func (r ResponsesContextCompactionNormalizeResult) ChangedCount() int {
 	return r.ConvertedCount + r.DroppedCount
 }
@@ -124,7 +134,7 @@ func responsesInputItemIDPrefix(itemType string) string {
 		return "rs"
 	case "local_shell_call":
 		return "lsh"
-	case "function_call":
+	case "function_call", "tool_call", "mcp_tool_call":
 		return "fc"
 	case "tool_search_call":
 		return "tsc"

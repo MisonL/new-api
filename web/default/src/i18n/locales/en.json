@@ -4427,6 +4427,8 @@
     "Upstream first byte": "Upstream first byte",
     "Upstream timing": "Upstream timing",
     "Upstream total": "Upstream total",
-    "Client Path": "Client Path"
+    "Client Path": "Client Path",
+    "Reasoning Context": "Reasoning Context",
+    "Reasoning Context Action": "Reasoning Context Action"
   }
 }

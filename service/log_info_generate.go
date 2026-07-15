@@ -133,6 +133,9 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesArgumentsHistoryRetry) {
 			other["responses_arguments_history_retry"] = true
 		}
+		if action := common.GetContextKeyString(ctx, constant.ContextKeyResponsesReasoningContextAction); action != "" {
+			other["responses_reasoning_context_action"] = action
+		}
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude) {
 			other["responses_chat_compat_ignored_encrypted_include"] = true
 		}
@@ -191,7 +194,12 @@ func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settin
 		"supports_compaction_item_passthrough": snapshotInfo.SupportsCompactionItemPassthrough,
 		"supports_namespace_tools":             snapshotInfo.SupportsNamespaceTools,
 		"supports_tool_search":                 snapshotInfo.SupportsToolSearch,
+		"reasoning_context_capability":         string(snapshotInfo.ReasoningContextCapability),
+		"strips_responses_reasoning_context":   snapshotInfo.StripsResponsesReasoningContext,
 		"strips_responses_encrypted_reasoning": snapshotInfo.StripsResponsesEncryptedReasoning,
+	}
+	if snapshotInfo.SupportsReasoningContext != nil {
+		snapshot["supports_reasoning_context"] = *snapshotInfo.SupportsReasoningContext
 	}
 	if snapshotInfo.Profile != "" {
 		snapshot["profile"] = string(snapshotInfo.Profile)

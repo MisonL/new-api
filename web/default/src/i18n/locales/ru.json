@@ -4427,6 +4427,8 @@
     "Upstream first byte": "Первый байт upstream",
     "Upstream timing": "Тайминг upstream",
     "Upstream total": "Итого upstream",
-    "Client Path": "Путь клиента"
+    "Client Path": "Путь клиента",
+    "Reasoning Context": "Контекст рассуждений",
+    "Reasoning Context Action": "Действие с контекстом рассуждений"
   }
 }

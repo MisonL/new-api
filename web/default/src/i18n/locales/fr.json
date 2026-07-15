@@ -4427,6 +4427,8 @@
     "Upstream first byte": "Premier octet amont",
     "Upstream timing": "Temps amont",
     "Upstream total": "Total amont",
-    "Client Path": "Chemin client"
+    "Client Path": "Chemin client",
+    "Reasoning Context": "Contexte de raisonnement",
+    "Reasoning Context Action": "Action sur le contexte de raisonnement"
   }
 }

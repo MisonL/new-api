@@ -55,6 +55,14 @@ const (
 	ResponsesUpstreamProfileChatOnlyProxy     ResponsesUpstreamProfile = "chat_only_proxy"
 )
 
+type ResponsesReasoningContextCapability string
+
+const (
+	ResponsesReasoningContextCapabilityUnknown     ResponsesReasoningContextCapability = "unknown"
+	ResponsesReasoningContextCapabilitySupported   ResponsesReasoningContextCapability = "supported"
+	ResponsesReasoningContextCapabilityUnsupported ResponsesReasoningContextCapability = "unsupported"
+)
+
 const DefaultResponsesCompactSyntheticFallbackModel = "gpt-5.4"
 
 type ResponsesCapabilityObservation struct {
@@ -75,6 +83,7 @@ type ResponsesChannelCapabilityRegistry struct {
 	SupportsCompactionItemPassthrough *bool                           `json:"supports_compaction_item_passthrough,omitempty"`
 	SupportsNamespaceTools            *bool                           `json:"supports_namespace_tools,omitempty"`
 	SupportsToolSearch                *bool                           `json:"supports_tool_search,omitempty"`
+	SupportsReasoningContext          *bool                           `json:"supports_reasoning_context,omitempty"`
 }
 
 type ResponsesChannelCapabilitySnapshot struct {
@@ -89,7 +98,10 @@ type ResponsesChannelCapabilitySnapshot struct {
 	SupportsCompactionItemPassthrough bool
 	SupportsNamespaceTools            bool
 	SupportsToolSearch                bool
+	ReasoningContextCapability        ResponsesReasoningContextCapability
+	SupportsReasoningContext          *bool
 	StripsResponsesEncryptedReasoning bool
+	StripsResponsesReasoningContext   bool
 	Observed                          *ResponsesCapabilityObservation
 	Probe                             *ResponsesCapabilityObservation
 }
@@ -218,6 +230,7 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 	modeSetting := s.NormalizedResponsesCompactModeSetting()
 	effectiveMode := s.EffectiveResponsesCompactModeOrDefault()
 	profile := s.NormalizedResponsesUpstreamProfile()
+	reasoningContextCapability := s.ResolveResponsesReasoningContextCapability(channelType)
 	snapshot := ResponsesChannelCapabilitySnapshot{
 		Source:                            "safe_default",
 		Profile:                           profile,
@@ -230,7 +243,10 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 		SupportsCompactionItemPassthrough: defaultSupportsCompactionItemPassthroughCapability(profile),
 		SupportsNamespaceTools:            defaultSupportsNamespaceToolsCapability(profile),
 		SupportsToolSearch:                defaultSupportsToolSearchCapability(profile),
+		ReasoningContextCapability:        reasoningContextCapability,
+		SupportsReasoningContext:          responsesReasoningContextSupportPointer(reasoningContextCapability),
 		StripsResponsesEncryptedReasoning: s.ShouldStripResponsesEncryptedReasoning(),
+		StripsResponsesReasoningContext:   reasoningContextCapability == ResponsesReasoningContextCapabilityUnsupported,
 	}
 	registry := s.responsesCapabilityRegistry()
 	if registry != nil {
@@ -282,7 +298,7 @@ func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesToolSearch() bool {
 }
 
 func (s *ChannelOtherSettings) explicitResponsesCapabilityConfigured() bool {
-	return s != nil && (s.ResponsesCompactMode != "" || s.ResponsesUpstreamProfile != "")
+	return s != nil && (s.ResponsesCompactMode != "" || s.ResponsesUpstreamProfile != "" || s.ResponsesCapabilityRegistry != nil)
 }
 
 func applyCapabilityOverrides(snapshot *ResponsesChannelCapabilitySnapshot, registry *ResponsesChannelCapabilityRegistry) {
@@ -310,6 +326,66 @@ func applyCapabilityOverrides(snapshot *ResponsesChannelCapabilitySnapshot, regi
 	if registry.SupportsToolSearch != nil {
 		snapshot.SupportsToolSearch = *registry.SupportsToolSearch
 	}
+	if registry.SupportsReasoningContext != nil {
+		snapshot.SupportsReasoningContext = cloneBool(registry.SupportsReasoningContext)
+		if *registry.SupportsReasoningContext {
+			snapshot.ReasoningContextCapability = ResponsesReasoningContextCapabilitySupported
+			snapshot.StripsResponsesReasoningContext = false
+		} else {
+			snapshot.ReasoningContextCapability = ResponsesReasoningContextCapabilityUnsupported
+			snapshot.StripsResponsesReasoningContext = true
+		}
+	}
+}
+
+func cloneBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func responsesReasoningContextSupportPointer(capability ResponsesReasoningContextCapability) *bool {
+	if capability == ResponsesReasoningContextCapabilityUnknown {
+		return nil
+	}
+	supported := capability == ResponsesReasoningContextCapabilitySupported
+	return &supported
+}
+
+func (s *ChannelOtherSettings) ResolveResponsesReasoningContextCapability(channelType int) ResponsesReasoningContextCapability {
+	if s != nil {
+		if registry := s.responsesCapabilityRegistry(); registry != nil && registry.SupportsReasoningContext != nil {
+			if *registry.SupportsReasoningContext {
+				return ResponsesReasoningContextCapabilitySupported
+			}
+			return ResponsesReasoningContextCapabilityUnsupported
+		}
+	}
+
+	profile := s.NormalizedResponsesUpstreamProfile()
+	switch profile {
+	case ResponsesUpstreamProfileOfficialOpenAI,
+		ResponsesUpstreamProfileOfficialNewAPI,
+		ResponsesUpstreamProfileSameClusterNewAPI,
+		ResponsesUpstreamProfileTrustedNewAPI,
+		ResponsesUpstreamProfileSub2APIWSV2:
+		return ResponsesReasoningContextCapabilitySupported
+	case ResponsesUpstreamProfileSub2APIHTTP,
+		ResponsesUpstreamProfileGenericProxy,
+		ResponsesUpstreamProfileChatOnlyProxy:
+		return ResponsesReasoningContextCapabilityUnsupported
+	default:
+		if profile == "" && channelType == constant.ChannelTypeCodex {
+			return ResponsesReasoningContextCapabilitySupported
+		}
+		return ResponsesReasoningContextCapabilityUnknown
+	}
+}
+
+func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesReasoningContext(channelType int) bool {
+	return s.ResolveResponsesReasoningContextCapability(channelType) == ResponsesReasoningContextCapabilityUnsupported
 }
 
 func defaultSupportsResponsesCapability(channelType int) bool {

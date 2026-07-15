@@ -469,7 +469,24 @@ func TestResponsesChannelCapabilitySnapshotTreatsSub2APIHTTPAsNoRESTPreviousID(t
 	require.Equal(t, false, snapshot["supports_compaction_item_passthrough"])
 	require.Equal(t, false, snapshot["supports_namespace_tools"])
 	require.Equal(t, false, snapshot["supports_tool_search"])
+	require.Equal(t, "unsupported", snapshot["reasoning_context_capability"])
+	require.Equal(t, false, snapshot["supports_reasoning_context"])
+	require.Equal(t, true, snapshot["strips_responses_reasoning_context"])
 	require.Equal(t, true, snapshot["strips_responses_encrypted_reasoning"])
+}
+
+func TestGenerateTextOtherInfoIncludesResponsesReasoningContextAction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesReasoningContextAction, "forwarded_unverified_capability")
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "forwarded_unverified_capability", other["responses_reasoning_context_action"])
 }
 
 func TestResponsesChannelCapabilitySnapshotMarksSafeDefaultSource(t *testing.T) {
@@ -482,6 +499,9 @@ func TestResponsesChannelCapabilitySnapshotMarksSafeDefaultSource(t *testing.T) 
 	require.Equal(t, "safe_default", snapshot["source"])
 	require.Empty(t, snapshot["profile"])
 	require.Equal(t, true, snapshot["supports_compaction_item_passthrough"])
+	require.Equal(t, "unknown", snapshot["reasoning_context_capability"])
+	require.Equal(t, false, snapshot["strips_responses_reasoning_context"])
+	require.NotContains(t, snapshot, "supports_reasoning_context")
 }
 
 func TestResponsesChannelCapabilitySnapshotKeepsObservationOutOfPublicSnapshot(t *testing.T) {
@@ -572,6 +592,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 		wantSupportsCompactionItemPassthrough bool
 		wantSupportsNamespaceTools            bool
 		wantStripsEncryptedReasoning          bool
+		wantReasoningContextCapability        string
 	}{
 		{
 			name:                                  "official newapi",
@@ -582,6 +603,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsCompactionItemPassthrough: true,
 			wantSupportsNamespaceTools:            true,
 			wantStripsEncryptedReasoning:          false,
+			wantReasoningContextCapability:        "supported",
 		},
 		{
 			name:                                  "sub2api http",
@@ -592,6 +614,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsCompactionItemPassthrough: false,
 			wantSupportsNamespaceTools:            false,
 			wantStripsEncryptedReasoning:          true,
+			wantReasoningContextCapability:        "unsupported",
 		},
 		{
 			name:                                  "sub2api websocket v2",
@@ -602,6 +625,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsCompactionItemPassthrough: true,
 			wantSupportsNamespaceTools:            true,
 			wantStripsEncryptedReasoning:          false,
+			wantReasoningContextCapability:        "supported",
 		},
 		{
 			name:                                  "generic openai",
@@ -612,6 +636,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsCompactionItemPassthrough: false,
 			wantSupportsNamespaceTools:            false,
 			wantStripsEncryptedReasoning:          false,
+			wantReasoningContextCapability:        "unknown",
 		},
 		{
 			name:                                  "generic proxy",
@@ -622,6 +647,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsCompactionItemPassthrough: false,
 			wantSupportsNamespaceTools:            false,
 			wantStripsEncryptedReasoning:          true,
+			wantReasoningContextCapability:        "unsupported",
 		},
 		{
 			name:                                  "chat only proxy",
@@ -632,6 +658,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsCompactionItemPassthrough: false,
 			wantSupportsNamespaceTools:            false,
 			wantStripsEncryptedReasoning:          true,
+			wantReasoningContextCapability:        "unsupported",
 		},
 	}
 
@@ -654,6 +681,13 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			require.Equal(t, tc.wantSupportsCompactionItemPassthrough, snapshot["supports_compaction_item_passthrough"])
 			require.Equal(t, tc.wantSupportsNamespaceTools, snapshot["supports_namespace_tools"])
 			require.Equal(t, tc.wantStripsEncryptedReasoning, snapshot["strips_responses_encrypted_reasoning"])
+			require.Equal(t, tc.wantReasoningContextCapability, snapshot["reasoning_context_capability"])
+			require.Equal(t, tc.wantReasoningContextCapability == "unsupported", snapshot["strips_responses_reasoning_context"])
+			if tc.wantReasoningContextCapability == "unknown" {
+				require.NotContains(t, snapshot, "supports_reasoning_context")
+			} else {
+				require.Equal(t, tc.wantReasoningContextCapability == "supported", snapshot["supports_reasoning_context"])
+			}
 		})
 	}
 }

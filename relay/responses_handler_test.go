@@ -1151,6 +1151,77 @@ func TestExecuteOpenAIResponsesRequestRetryForcesConvertedBodyWhenPassThroughEna
 	require.Contains(t, string(adaptor.requestBodies[1]), `"text":"hello"`)
 }
 
+func TestBuildOpenAIResponsesRequestBodyAppliesReasoningContextPolicyWhenPassThroughEnabled(t *testing.T) {
+	unsupported := false
+	tests := []struct {
+		name        string
+		profile     dto.ResponsesUpstreamProfile
+		registry    *dto.ResponsesChannelCapabilityRegistry
+		wantContext bool
+		wantAction  string
+	}{
+		{
+			name:       "explicit unsupported strips context",
+			profile:    dto.ResponsesUpstreamProfileOfficialOpenAI,
+			registry:   &dto.ResponsesChannelCapabilityRegistry{SupportsReasoningContext: &unsupported},
+			wantAction: "stripped_unsupported_capability",
+		},
+		{
+			name:        "official profile forwards context",
+			profile:     dto.ResponsesUpstreamProfileOfficialOpenAI,
+			wantContext: true,
+			wantAction:  "forwarded_supported_capability",
+		},
+		{
+			name:        "generic profile forwards unverified context",
+			profile:     dto.ResponsesUpstreamProfileGenericOpenAI,
+			wantContext: true,
+			wantAction:  "forwarded_unverified_capability",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rawBody := []byte(`{"model":"gpt-5.6-sol","input":"continue","reasoning":{"effort":"high","summary":"auto","mode":"adaptive","context":"all_turns","future_reasoning_option":{"enabled":true}}}`)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+			c.Request.Header.Set("Content-Type", "application/json")
+			storage, err := common.CreateBodyStorage(rawBody)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = storage.Close() })
+			c.Set(common.KeyBodyStorage, storage)
+			request := &dto.OpenAIResponsesRequest{}
+			require.NoError(t, common.Unmarshal(rawBody, request))
+			info := &relaycommon.RelayInfo{
+				RelayMode:       relayconstant.RelayModeResponses,
+				OriginModelName: request.Model,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelId:   206,
+					ChannelType: constant.ChannelTypeOpenAI,
+					ChannelSetting: dto.ChannelSettings{
+						PassThroughBodyEnabled: true,
+					},
+					ChannelOtherSettings: dto.ChannelOtherSettings{
+						ResponsesUpstreamProfile:    tt.profile,
+						ResponsesCapabilityRegistry: tt.registry,
+					},
+				},
+			}
+
+			body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+			require.Nil(t, apiErr)
+			bodyBytes, err := io.ReadAll(body)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantContext, strings.Contains(string(bodyBytes), `"context":"all_turns"`))
+			require.Contains(t, string(bodyBytes), `"future_reasoning_option":{"enabled":true}`)
+			require.NotNil(t, converted.Reasoning)
+			require.Equal(t, tt.wantContext, len(converted.Reasoning.Context) > 0)
+			require.Equal(t, tt.wantAction, common.GetContextKeyString(c, constant.ContextKeyResponsesReasoningContextAction))
+		})
+	}
+}
+
 func TestBuildOpenAIResponsesRequestBodyForcesRemoteCompactionFallbackConversion(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rawBody := []byte(`{"model":"gpt-5.6-sol","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Preserve the active task."}]},{"type":"compaction_trigger"}]}`)

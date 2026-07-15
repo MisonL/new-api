@@ -68,6 +68,87 @@ func TestConvertOpenAIResponsesRequestDropsInvalidFunctionCallItemID(t *testing.
 	require.JSONEq(t, `{"type":"function_call","call_id":"call_probe","name":"get_probe_status","arguments":"{}"}`, string(mustMarshalRawMap(t, items[0])))
 }
 
+func TestConvertOpenAIResponsesRequestAppliesReasoningContextCapability(t *testing.T) {
+	tests := []struct {
+		name        string
+		relayMode   int
+		profile     dto.ResponsesUpstreamProfile
+		wantContext bool
+		wantAction  string
+	}{
+		{
+			name:       "sub2api http responses strips unsupported context",
+			relayMode:  relayconstant.RelayModeResponses,
+			profile:    dto.ResponsesUpstreamProfileSub2APIHTTP,
+			wantAction: "stripped_unsupported_capability",
+		},
+		{
+			name:       "sub2api http compact strips unsupported context",
+			relayMode:  relayconstant.RelayModeResponsesCompact,
+			profile:    dto.ResponsesUpstreamProfileSub2APIHTTP,
+			wantAction: "stripped_unsupported_capability",
+		},
+		{
+			name:        "sub2api websocket forwards supported context",
+			relayMode:   relayconstant.RelayModeResponses,
+			profile:     dto.ResponsesUpstreamProfileSub2APIWSV2,
+			wantContext: true,
+			wantAction:  "forwarded_supported_capability",
+		},
+		{
+			name:        "generic openai forwards unverified context",
+			relayMode:   relayconstant.RelayModeResponses,
+			profile:     dto.ResponsesUpstreamProfileGenericOpenAI,
+			wantContext: true,
+			wantAction:  "forwarded_unverified_capability",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(nil)
+			info := &relaycommon.RelayInfo{
+				RelayMode:       tt.relayMode,
+				OriginModelName: "gpt-5.6-sol",
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType: constant.ChannelTypeOpenAI,
+					ChannelOtherSettings: dto.ChannelOtherSettings{
+						ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
+						ResponsesUpstreamProfile: tt.profile,
+					},
+				},
+			}
+			request := dto.OpenAIResponsesRequest{
+				Model: "gpt-5.6-sol",
+				Input: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]`),
+				Reasoning: &dto.Reasoning{
+					Effort:  "high",
+					Summary: "auto",
+					Mode:    json.RawMessage(`"adaptive"`),
+					Context: json.RawMessage(`"all_turns"`),
+					Extra: map[string]json.RawMessage{
+						"future_reasoning_option": json.RawMessage(`{"enabled":true}`),
+					},
+				},
+			}
+
+			converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, request)
+
+			require.NoError(t, err)
+			convertedRequest, ok := converted.(dto.OpenAIResponsesRequest)
+			require.True(t, ok)
+			require.NotNil(t, convertedRequest.Reasoning)
+			require.Equal(t, tt.wantContext, len(convertedRequest.Reasoning.Context) > 0)
+			require.Equal(t, "high", convertedRequest.Reasoning.Effort)
+			require.Equal(t, "auto", convertedRequest.Reasoning.Summary)
+			require.JSONEq(t, `"adaptive"`, string(convertedRequest.Reasoning.Mode))
+			require.JSONEq(t, `{"enabled":true}`, string(convertedRequest.Reasoning.Extra["future_reasoning_option"]))
+			require.JSONEq(t, `"all_turns"`, string(request.Reasoning.Context))
+			require.Equal(t, tt.wantAction, common.GetContextKeyString(c, constant.ContextKeyResponsesReasoningContextAction))
+		})
+	}
+}
+
 func mustMarshalRawMap(t *testing.T, item map[string]json.RawMessage) []byte {
 	t.Helper()
 	raw, err := common.Marshal(item)

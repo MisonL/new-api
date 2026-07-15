@@ -60,6 +60,8 @@ func TestNormalizeResponsesInputItemIDsUsesCodexItemTypePrefixes(t *testing.T) {
 		{itemType: "reasoning", id: "rs_1", keep: true},
 		{itemType: "local_shell_call", id: "lsh_1", keep: true},
 		{itemType: "function_call", id: "fc_1", keep: true},
+		{itemType: "tool_call", id: "fc_legacy", keep: true},
+		{itemType: "mcp_tool_call", id: "fc_mcp_legacy", keep: true},
 		{itemType: "tool_search_call", id: "tsc_1", keep: true},
 		{itemType: "function_call_output", id: "fco_1", keep: true},
 		{itemType: "custom_tool_call", id: "ctc_1", keep: true},
@@ -118,6 +120,37 @@ func TestNormalizeResponsesInputItemIDsKeepsUnchangedInput(t *testing.T) {
 		require.Zero(t, result.RemovedCount)
 		require.Equal(t, json.RawMessage(input), got)
 	}
+}
+
+func TestStripResponsesReasoningContextPreservesOtherReasoningFields(t *testing.T) {
+	request := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Reasoning: &dto.Reasoning{
+			Effort:  "high",
+			Summary: "auto",
+			Mode:    rootcommon.RawMessage(`"adaptive"`),
+			Context: rootcommon.RawMessage(`"all_turns"`),
+			Extra: map[string]json.RawMessage{
+				"future_reasoning_option": rootcommon.RawMessage(`{"enabled":true}`),
+			},
+		},
+	}
+
+	got, stripped := StripResponsesReasoningContext(request)
+
+	require.True(t, stripped)
+	require.NotNil(t, got.Reasoning)
+	require.Empty(t, got.Reasoning.Context)
+	require.Equal(t, "high", got.Reasoning.Effort)
+	require.Equal(t, "auto", got.Reasoning.Summary)
+	require.JSONEq(t, `"adaptive"`, string(got.Reasoning.Mode))
+	require.JSONEq(t, `{"enabled":true}`, string(got.Reasoning.Extra["future_reasoning_option"]))
+	require.JSONEq(t, `"all_turns"`, string(request.Reasoning.Context))
+
+	encoded, err := rootcommon.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), `"context"`)
+	require.Contains(t, string(encoded), `"future_reasoning_option"`)
 }
 
 func TestStripEncryptedReasoningFromResponsesInputRemovesEncryptedReasoning(t *testing.T) {

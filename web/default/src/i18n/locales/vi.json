@@ -4427,6 +4427,8 @@
     "Upstream first byte": "Byte đầu tiên upstream",
     "Upstream timing": "Thời gian upstream",
     "Upstream total": "Tổng upstream",
-    "Client Path": "Đường dẫn client"
+    "Client Path": "Đường dẫn client",
+    "Reasoning Context": "Ngữ cảnh suy luận",
+    "Reasoning Context Action": "Thao tác ngữ cảnh suy luận"
   }
 }

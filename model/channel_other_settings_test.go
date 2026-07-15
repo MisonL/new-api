@@ -169,6 +169,78 @@ func TestChannelOtherSettingsExplicitToolSearchCapability(t *testing.T) {
 	}).ExplicitlyDisablesResponsesToolSearch())
 }
 
+func TestChannelOtherSettingsResponsesReasoningContextCapability(t *testing.T) {
+	unsupported := false
+	supported := true
+
+	tests := []struct {
+		name       string
+		settings   dto.ChannelOtherSettings
+		capability dto.ResponsesReasoningContextCapability
+		disabled   bool
+	}{
+		{
+			name:       "unknown profile",
+			capability: dto.ResponsesReasoningContextCapabilityUnknown,
+		},
+		{
+			name: "generic openai remains unverified",
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericOpenAI,
+			},
+			capability: dto.ResponsesReasoningContextCapabilityUnknown,
+		},
+		{
+			name: "official openai supports context",
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+			capability: dto.ResponsesReasoningContextCapabilitySupported,
+		},
+		{
+			name: "sub2api http does not support context",
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+			capability: dto.ResponsesReasoningContextCapabilityUnsupported,
+			disabled:   true,
+		},
+		{
+			name: "explicit registry disables official context",
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					SupportsReasoningContext: &unsupported,
+				},
+			},
+			capability: dto.ResponsesReasoningContextCapabilityUnsupported,
+			disabled:   true,
+		},
+		{
+			name: "explicit registry enables sub2api context",
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					SupportsReasoningContext: &supported,
+				},
+			},
+			capability: dto.ResponsesReasoningContextCapabilitySupported,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.capability, tt.settings.ResolveResponsesReasoningContextCapability(constant.ChannelTypeOpenAI))
+			require.Equal(t, tt.disabled, tt.settings.ExplicitlyDisablesResponsesReasoningContext(constant.ChannelTypeOpenAI))
+
+			channel := &Channel{}
+			channel.SetOtherSettings(tt.settings)
+			roundTripped := channel.GetOtherSettings()
+			require.Equal(t, tt.capability, roundTripped.ResolveResponsesReasoningContextCapability(constant.ChannelTypeOpenAI))
+		})
+	}
+}
+
 func TestChannelOtherSettingsSub2APIHTTPLimitedNativeCompact(t *testing.T) {
 	settings := dto.ChannelOtherSettings{
 		ResponsesCompactMode:     dto.ResponsesCompactModeAuto,

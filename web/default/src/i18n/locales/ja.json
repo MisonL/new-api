@@ -4427,6 +4427,8 @@
     "Upstream first byte": "上流の最初のバイト",
     "Upstream timing": "上流タイミング",
     "Upstream total": "上流合計",
-    "Client Path": "クライアントパス"
+    "Client Path": "クライアントパス",
+    "Reasoning Context": "推論コンテキスト",
+    "Reasoning Context Action": "推論コンテキストの処理"
   }
 }

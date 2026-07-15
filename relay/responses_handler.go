@@ -471,6 +471,7 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 	}
 	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) &&
 		!relaycommon.ShouldConvertResponsesRequest(info) &&
+		(request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0) &&
 		!contextCompactionNormalized &&
 		!common.GetContextKeyBool(c, appconstant.ContextKeyResponsesRemoteCompactSyntheticFallback) &&
 		(!syntheticCompactReference || nativeOpaqueReference)

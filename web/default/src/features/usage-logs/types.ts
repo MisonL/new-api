@@ -168,6 +168,7 @@ export interface LogOtherData {
   responses_compact_fallback_reason?: string
   responses_compact_visible_only_fallback?: boolean
   responses_encrypted_context_retry?: boolean
+  responses_reasoning_context_action?: string
   request_header_policy?: RequestHeaderPolicyInfo
   request_header_policy_mode?: string
   header_policy_mode?: string
@@ -239,6 +240,9 @@ export interface ChannelCapabilitySnapshot {
   supports_compaction_item_passthrough?: boolean
   supports_namespace_tools?: boolean
   supports_tool_search?: boolean
+  reasoning_context_capability?: 'supported' | 'unsupported' | 'unknown'
+  supports_reasoning_context?: boolean
+  strips_responses_reasoning_context?: boolean
   strips_responses_encrypted_reasoning?: boolean
 }
 

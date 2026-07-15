@@ -4427,6 +4427,8 @@
     "Upstream first byte": "上游首包耗时",
     "Upstream timing": "上游耗时",
     "Upstream total": "上游总耗时",
-    "Client Path": "客户端路径"
+    "Client Path": "客户端路径",
+    "Reasoning Context": "推理上下文",
+    "Reasoning Context Action": "推理上下文操作"
   }
 }

@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -191,6 +192,41 @@ func TestResponsesViaChatNonStream(t *testing.T) {
 
 	require.Equal(t, relayconstant.RelayModeResponses, info.RelayMode)
 	require.Equal(t, "/v1/responses", info.RequestURLPath)
+}
+
+func TestResponsesViaChatMarksReasoningContextAsStrippedByBridge(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	chatRespBytes, err := common.Marshal(dto.OpenAITextResponse{
+		Id:      "chatcmpl_reasoning_context",
+		Object:  "chat.completion",
+		Created: 1710000000,
+		Model:   "gpt-5",
+		Choices: []dto.OpenAITextResponseChoice{{
+			Index:        0,
+			Message:      dto.Message{Role: "assistant", Content: "compat ok"},
+			FinishReason: "stop",
+		}},
+	})
+	require.NoError(t, err)
+	adaptor := &mockResponsesViaChatAdaptor{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(chatRespBytes)),
+	}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte("{}")))
+	request := &dto.OpenAIResponsesRequest{
+		Model:     "gpt-5",
+		Input:     marshalRawJSON(t, "hello"),
+		Reasoning: &dto.Reasoning{Effort: "medium", Context: json.RawMessage(`"all_turns"`)},
+	}
+
+	_, newAPIErr := responsesViaChat(c, newResponsesViaChatInfo(), adaptor, request, service.ResponsesChatCompatibilityOptions{})
+
+	require.Nil(t, newAPIErr)
+	require.JSONEq(t, `"all_turns"`, string(request.Reasoning.Context))
+	require.Equal(t, "stripped_by_chat_compatibility", common.GetContextKeyString(c, constant.ContextKeyResponsesReasoningContextAction))
 }
 
 func TestResponsesViaChatRestoresAdditionalNamespaceToolCall(t *testing.T) {

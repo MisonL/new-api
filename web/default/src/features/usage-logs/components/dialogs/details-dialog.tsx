@@ -286,6 +286,14 @@ function ResponsesCompactDetails(props: {
     other.admin_info?.responses_channel_capability_observed?.reason
   const probeReason =
     other.admin_info?.responses_channel_capability_probe?.reason
+  const reasoningContextCapability =
+    capability?.reasoning_context_capability === 'supported'
+      ? t('Supported')
+      : capability?.reasoning_context_capability === 'unsupported'
+        ? t('Unsupported')
+        : capability?.reasoning_context_capability === 'unknown'
+          ? t('Unknown')
+          : ''
   const formatCapability = (value: boolean | undefined) => {
     if (value === true) return t('Supported')
     if (value === false) return t('Unsupported')
@@ -394,6 +402,19 @@ function ResponsesCompactDetails(props: {
             label={t('Tool Search')}
             value={formatCapability(capability.supports_tool_search)}
           />
+          {reasoningContextCapability && (
+            <DetailRow
+              label={t('Reasoning Context')}
+              value={reasoningContextCapability}
+            />
+          )}
+          {other.responses_reasoning_context_action && (
+            <DetailRow
+              label={t('Reasoning Context Action')}
+              value={other.responses_reasoning_context_action}
+              mono
+            />
+          )}
           <DetailRow
             label={t('Strips Encrypted Reasoning')}
             value={formatCapability(
