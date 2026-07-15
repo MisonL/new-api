@@ -92,6 +92,27 @@ func TestStreamScannerHandler_NilInputs(t *testing.T) {
 	StreamScannerHandler(c, &http.Response{Body: io.NopCloser(strings.NewReader(""))}, info, nil)
 }
 
+func TestStreamScannerHandler_CopiesCodexResponsesHeaders(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		Header: http.Header{
+			"X-Reasoning-Included": {"true"},
+			"X-Codex-Turn-State":   {"turn-state-1"},
+		},
+		Body: io.NopCloser(strings.NewReader("data: [DONE]\n")),
+	}
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {})
+
+	require.Equal(t, "true", recorder.Header().Get("X-Reasoning-Included"))
+	require.Equal(t, "turn-state-1", recorder.Header().Get("X-Codex-Turn-State"))
+}
+
 func TestStreamScannerHandler_EmptyBody(t *testing.T) {
 	t.Parallel()
 
