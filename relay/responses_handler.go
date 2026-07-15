@@ -691,6 +691,7 @@ func findResponsesViaChatRule(ctx context.Context, info *relaycommon.RelayInfo, 
 		info.ChannelType,
 		info.OriginModelName,
 		request,
+		info.ChannelOtherSettings,
 	)
 }
 

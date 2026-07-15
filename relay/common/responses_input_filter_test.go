@@ -487,6 +487,67 @@ func TestResponsesRequestHasNamespaceTools(t *testing.T) {
 	}
 }
 
+func TestResponsesRequestHasCustomTools(t *testing.T) {
+	tests := []struct {
+		name    string
+		request *dto.OpenAIResponsesRequest
+		want    bool
+	}{
+		{
+			name: "custom tool declaration",
+			request: &dto.OpenAIResponsesRequest{
+				Tools: rootcommon.RawMessage(`[{"type":"custom","name":"apply_patch","format":{"type":"grammar"}}]`),
+			},
+			want: true,
+		},
+		{
+			name: "string custom tool declaration",
+			request: &dto.OpenAIResponsesRequest{
+				Tools: rootcommon.RawMessage(`["apply_patch"]`),
+			},
+			want: true,
+		},
+		{
+			name: "custom tool in additional tools",
+			request: &dto.OpenAIResponsesRequest{
+				Input: rootcommon.RawMessage(`[
+					{"type":"additional_tools","tools":[{"type":"custom","name":"apply_patch"}]},
+					{"type":"message","role":"user","content":"continue"}
+				]`),
+			},
+			want: true,
+		},
+		{
+			name: "custom tool history",
+			request: &dto.OpenAIResponsesRequest{
+				Input: rootcommon.RawMessage(`[{"type":"custom_tool_call","call_id":"call_1","name":"apply_patch","input":"*** Begin Patch"}]`),
+			},
+			want: true,
+		},
+		{
+			name: "custom tool choice",
+			request: &dto.OpenAIResponsesRequest{
+				ToolChoice: rootcommon.RawMessage(`{"type":"custom","name":"apply_patch"}`),
+			},
+			want: true,
+		},
+		{
+			name: "ordinary function tool",
+			request: &dto.OpenAIResponsesRequest{
+				Tools: rootcommon.RawMessage(`[{"type":"function","name":"lookup"}]`),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResponsesRequestHasCustomTools(tt.request)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestResponsesNamespaceHistoryIndex(t *testing.T) {
 	tests := []struct {
 		name      string

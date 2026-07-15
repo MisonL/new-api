@@ -942,6 +942,7 @@ func findChannelTestResponsesViaChatRule(info *relaycommon.RelayInfo, request dt
 		info.ChannelType,
 		info.OriginModelName,
 		responsesRequest,
+		info.ChannelOtherSettings,
 	)
 }
 

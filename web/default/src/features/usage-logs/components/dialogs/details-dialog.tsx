@@ -395,6 +395,10 @@ function ResponsesCompactDetails(props: {
             )}
           />
           <DetailRow
+            label={t('Custom Tools')}
+            value={formatCapability(capability.supports_custom_tools)}
+          />
+          <DetailRow
             label={t('Namespace Tools')}
             value={formatCapability(capability.supports_namespace_tools)}
           />

@@ -385,6 +385,7 @@ func TestApplyChannelTestProtocolStrategyUsesConditionalToolBridgeForCustomAddit
 			},
 		}},
 	}, false)
+	supportsCustomTools := false
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
 		OriginModelName: "gpt-5.5",
@@ -392,6 +393,11 @@ func TestApplyChannelTestProtocolStrategyUsesConditionalToolBridgeForCustomAddit
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelId:   205,
 			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					SupportsCustomTools: &supportsCustomTools,
+				},
+			},
 		},
 	}
 	request := &dto.OpenAIResponsesRequest{

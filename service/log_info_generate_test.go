@@ -396,6 +396,7 @@ func TestGenerateTextOtherInfoIncludesMissingLocalSyntheticStateAction(t *testin
 	require.Equal(t, true, snapshot["supports_chat"])
 	require.Equal(t, true, snapshot["supports_rest_previous_response_id"])
 	require.Equal(t, true, snapshot["supports_compaction_item_passthrough"])
+	require.Equal(t, true, snapshot["supports_custom_tools"])
 	require.Equal(t, true, snapshot["supports_namespace_tools"])
 	require.Equal(t, true, snapshot["supports_tool_search"])
 }
@@ -467,6 +468,7 @@ func TestResponsesChannelCapabilitySnapshotTreatsSub2APIHTTPAsNoRESTPreviousID(t
 	require.Equal(t, false, snapshot["supports_responses_compact"])
 	require.Equal(t, false, snapshot["supports_rest_previous_response_id"])
 	require.Equal(t, false, snapshot["supports_compaction_item_passthrough"])
+	require.Equal(t, false, snapshot["supports_custom_tools"])
 	require.Equal(t, false, snapshot["supports_namespace_tools"])
 	require.Equal(t, false, snapshot["supports_tool_search"])
 	require.Equal(t, "unsupported", snapshot["reasoning_context_capability"])
@@ -499,6 +501,7 @@ func TestResponsesChannelCapabilitySnapshotMarksSafeDefaultSource(t *testing.T) 
 	require.Equal(t, "safe_default", snapshot["source"])
 	require.Empty(t, snapshot["profile"])
 	require.Equal(t, true, snapshot["supports_compaction_item_passthrough"])
+	require.NotContains(t, snapshot, "supports_custom_tools")
 	require.Equal(t, "unknown", snapshot["reasoning_context_capability"])
 	require.Equal(t, false, snapshot["strips_responses_reasoning_context"])
 	require.NotContains(t, snapshot, "supports_reasoning_context")
@@ -590,6 +593,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 		wantSupportsResponsesCompact          bool
 		wantSupportsRESTPreviousResponseID    bool
 		wantSupportsCompactionItemPassthrough bool
+		wantSupportsCustomTools               *bool
 		wantSupportsNamespaceTools            bool
 		wantStripsEncryptedReasoning          bool
 		wantReasoningContextCapability        string
@@ -601,6 +605,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsResponsesCompact:          true,
 			wantSupportsRESTPreviousResponseID:    true,
 			wantSupportsCompactionItemPassthrough: true,
+			wantSupportsCustomTools:               common.GetPointer(true),
 			wantSupportsNamespaceTools:            true,
 			wantStripsEncryptedReasoning:          false,
 			wantReasoningContextCapability:        "supported",
@@ -612,6 +617,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsResponsesCompact:          false,
 			wantSupportsRESTPreviousResponseID:    false,
 			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsCustomTools:               common.GetPointer(false),
 			wantSupportsNamespaceTools:            false,
 			wantStripsEncryptedReasoning:          true,
 			wantReasoningContextCapability:        "unsupported",
@@ -623,6 +629,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsResponsesCompact:          true,
 			wantSupportsRESTPreviousResponseID:    true,
 			wantSupportsCompactionItemPassthrough: true,
+			wantSupportsCustomTools:               common.GetPointer(true),
 			wantSupportsNamespaceTools:            true,
 			wantStripsEncryptedReasoning:          false,
 			wantReasoningContextCapability:        "supported",
@@ -634,6 +641,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsResponsesCompact:          true,
 			wantSupportsRESTPreviousResponseID:    false,
 			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsCustomTools:               common.GetPointer(true),
 			wantSupportsNamespaceTools:            false,
 			wantStripsEncryptedReasoning:          false,
 			wantReasoningContextCapability:        "unknown",
@@ -645,6 +653,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsResponsesCompact:          false,
 			wantSupportsRESTPreviousResponseID:    false,
 			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsCustomTools:               common.GetPointer(false),
 			wantSupportsNamespaceTools:            false,
 			wantStripsEncryptedReasoning:          true,
 			wantReasoningContextCapability:        "unsupported",
@@ -656,6 +665,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsResponsesCompact:          false,
 			wantSupportsRESTPreviousResponseID:    false,
 			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsCustomTools:               common.GetPointer(false),
 			wantSupportsNamespaceTools:            false,
 			wantStripsEncryptedReasoning:          true,
 			wantReasoningContextCapability:        "unsupported",
@@ -679,6 +689,11 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			require.Equal(t, tc.wantSupportsResponsesCompact, snapshot["supports_responses_compact"])
 			require.Equal(t, tc.wantSupportsRESTPreviousResponseID, snapshot["supports_rest_previous_response_id"])
 			require.Equal(t, tc.wantSupportsCompactionItemPassthrough, snapshot["supports_compaction_item_passthrough"])
+			if tc.wantSupportsCustomTools == nil {
+				require.NotContains(t, snapshot, "supports_custom_tools")
+			} else {
+				require.Equal(t, *tc.wantSupportsCustomTools, snapshot["supports_custom_tools"])
+			}
 			require.Equal(t, tc.wantSupportsNamespaceTools, snapshot["supports_namespace_tools"])
 			require.Equal(t, tc.wantStripsEncryptedReasoning, snapshot["strips_responses_encrypted_reasoning"])
 			require.Equal(t, tc.wantReasoningContextCapability, snapshot["reasoning_context_capability"])

@@ -65,7 +65,7 @@ func ResponsesViaChatRuleOptions(rule *model_setting.ProtocolConversionRule) Res
 	}
 }
 
-func FindResponsesViaChatRule(ctx context.Context, relayMode int, passThroughGlobal bool, channelSetting dto.ChannelSettings, channelID int, channelType int, model string, request *dto.OpenAIResponsesRequest) (*model_setting.ProtocolConversionRule, error) {
+func FindResponsesViaChatRule(ctx context.Context, relayMode int, passThroughGlobal bool, channelSetting dto.ChannelSettings, channelID int, channelType int, model string, request *dto.OpenAIResponsesRequest, otherSettings ...dto.ChannelOtherSettings) (*model_setting.ProtocolConversionRule, error) {
 	if relayMode != relayconstant.RelayModeResponses {
 		return nil, nil
 	}
@@ -111,9 +111,16 @@ func FindResponsesViaChatRule(ctx context.Context, relayMode int, passThroughGlo
 			if rule == nil || rule.Options == nil || !rule.Options.OnlyWhenToolBridgeRequired {
 				return true, nil
 			}
-			return responsesRequestRequiresToolBridge(request)
+			return responsesRequestRequiresToolBridge(request, firstChannelOtherSettings(otherSettings))
 		},
 	)
+}
+
+func firstChannelOtherSettings(settings []dto.ChannelOtherSettings) dto.ChannelOtherSettings {
+	if len(settings) == 0 {
+		return dto.ChannelOtherSettings{}
+	}
+	return settings[0]
 }
 
 func FindUnconditionalResponsesViaChatRule(channelID int, channelType int, model string) (*model_setting.ProtocolConversionRule, error) {
@@ -130,7 +137,7 @@ func FindUnconditionalResponsesViaChatRule(channelID int, channelType int, model
 	)
 }
 
-func responsesRequestRequiresToolBridge(request *dto.OpenAIResponsesRequest) (bool, error) {
+func responsesRequestRequiresToolBridge(request *dto.OpenAIResponsesRequest, settings dto.ChannelOtherSettings) (bool, error) {
 	if request == nil {
 		return false, nil
 	}
@@ -140,7 +147,7 @@ func responsesRequestRequiresToolBridge(request *dto.OpenAIResponsesRequest) (bo
 		return false, fmt.Errorf("%w: %v", ErrResponsesChatCompatibilityToolBridgeRequestInvalid, err)
 	}
 	for index, tool := range tools {
-		required, err := responsesToolRequiresBridge(tool)
+		required, err := responsesToolRequiresBridge(tool, settings)
 		if err != nil {
 			return false, fmt.Errorf("%w: tool[%d] %v", ErrResponsesChatCompatibilityToolBridgeRequestInvalid, index, err)
 		}
@@ -149,21 +156,21 @@ func responsesRequestRequiresToolBridge(request *dto.OpenAIResponsesRequest) (bo
 		}
 	}
 
-	required, err := responsesInputRequiresToolBridge(request.Input)
+	required, err := responsesInputRequiresToolBridge(request.Input, settings)
 	if err != nil {
 		return false, fmt.Errorf("%w: %v", ErrResponsesChatCompatibilityToolBridgeRequestInvalid, err)
 	}
 	if required {
 		return true, nil
 	}
-	required, err = responsesToolChoiceRequiresBridge(request.ToolChoice)
+	required, err = responsesToolChoiceRequiresBridge(request.ToolChoice, settings)
 	if err != nil {
 		return false, fmt.Errorf("%w: %v", ErrResponsesChatCompatibilityToolBridgeRequestInvalid, err)
 	}
 	return required, nil
 }
 
-func responsesToolRequiresBridge(raw common.RawMessage) (bool, error) {
+func responsesToolRequiresBridge(raw common.RawMessage, settings dto.ChannelOtherSettings) (bool, error) {
 	switch common.GetJsonType(raw) {
 	case "string":
 		var name string
@@ -173,7 +180,7 @@ func responsesToolRequiresBridge(raw common.RawMessage) (bool, error) {
 		if strings.TrimSpace(name) == "" {
 			return false, fmt.Errorf("custom tool name is required")
 		}
-		return true, nil
+		return settings.ExplicitlyDisablesResponsesCustomTools(), nil
 	case "object":
 	default:
 		return false, fmt.Errorf("must be an object or string")
@@ -183,14 +190,18 @@ func responsesToolRequiresBridge(raw common.RawMessage) (bool, error) {
 		return false, fmt.Errorf("failed to parse: %w", err)
 	}
 	switch strings.TrimSpace(common.Interface2String(tool["type"])) {
-	case "custom", "namespace", "tool_search":
-		return true, nil
+	case "custom":
+		return settings.ExplicitlyDisablesResponsesCustomTools(), nil
+	case "namespace":
+		return settings.ExplicitlyDisablesResponsesNamespaceTools(), nil
+	case "tool_search":
+		return settings.ExplicitlyDisablesResponsesToolSearch(), nil
 	default:
 		return false, nil
 	}
 }
 
-func responsesInputRequiresToolBridge(raw common.RawMessage) (bool, error) {
+func responsesInputRequiresToolBridge(raw common.RawMessage, settings dto.ChannelOtherSettings) (bool, error) {
 	if common.GetJsonType(raw) != "array" {
 		return false, nil
 	}
@@ -210,10 +221,16 @@ func responsesInputRequiresToolBridge(raw common.RawMessage) (bool, error) {
 			return false, fmt.Errorf("failed to parse input item: %w", err)
 		}
 		switch strings.TrimSpace(item.Type) {
-		case "custom_tool_call", "custom_tool_call_output", "tool_search_call", "tool_search_output":
-			return true, nil
+		case "custom_tool_call", "custom_tool_call_output":
+			if settings.ExplicitlyDisablesResponsesCustomTools() {
+				return true, nil
+			}
+		case "tool_search_call", "tool_search_output":
+			if settings.ExplicitlyDisablesResponsesToolSearch() {
+				return true, nil
+			}
 		case "function_call", "function_call_output":
-			if strings.TrimSpace(item.Namespace) != "" {
+			if strings.TrimSpace(item.Namespace) != "" && settings.ExplicitlyDisablesResponsesNamespaceTools() {
 				return true, nil
 			}
 		}
@@ -221,7 +238,7 @@ func responsesInputRequiresToolBridge(raw common.RawMessage) (bool, error) {
 	return false, nil
 }
 
-func responsesToolChoiceRequiresBridge(raw common.RawMessage) (bool, error) {
+func responsesToolChoiceRequiresBridge(raw common.RawMessage, settings dto.ChannelOtherSettings) (bool, error) {
 	if common.GetJsonType(raw) == "unknown" || common.GetJsonType(raw) == "null" || common.GetJsonType(raw) == "string" {
 		return false, nil
 	}
@@ -233,8 +250,12 @@ func responsesToolChoiceRequiresBridge(raw common.RawMessage) (bool, error) {
 		return false, fmt.Errorf("failed to parse tool_choice: %w", err)
 	}
 	switch strings.TrimSpace(common.Interface2String(choice["type"])) {
-	case "custom", "namespace", "tool_search":
-		return true, nil
+	case "custom":
+		return settings.ExplicitlyDisablesResponsesCustomTools(), nil
+	case "namespace":
+		return settings.ExplicitlyDisablesResponsesNamespaceTools(), nil
+	case "tool_search":
+		return settings.ExplicitlyDisablesResponsesToolSearch(), nil
 	case "":
 		return false, fmt.Errorf("tool_choice.type is required")
 	default:

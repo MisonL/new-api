@@ -198,6 +198,9 @@ func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settin
 		"strips_responses_reasoning_context":   snapshotInfo.StripsResponsesReasoningContext,
 		"strips_responses_encrypted_reasoning": snapshotInfo.StripsResponsesEncryptedReasoning,
 	}
+	if snapshotInfo.SupportsCustomTools != nil {
+		snapshot["supports_custom_tools"] = *snapshotInfo.SupportsCustomTools
+	}
 	if snapshotInfo.SupportsReasoningContext != nil {
 		snapshot["supports_reasoning_context"] = *snapshotInfo.SupportsReasoningContext
 	}

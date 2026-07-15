@@ -81,6 +81,7 @@ type ResponsesChannelCapabilityRegistry struct {
 	SupportsChat                      *bool                           `json:"supports_chat,omitempty"`
 	SupportsRestPreviousResponseID    *bool                           `json:"supports_rest_previous_response_id,omitempty"`
 	SupportsCompactionItemPassthrough *bool                           `json:"supports_compaction_item_passthrough,omitempty"`
+	SupportsCustomTools               *bool                           `json:"supports_custom_tools,omitempty"`
 	SupportsNamespaceTools            *bool                           `json:"supports_namespace_tools,omitempty"`
 	SupportsToolSearch                *bool                           `json:"supports_tool_search,omitempty"`
 	SupportsReasoningContext          *bool                           `json:"supports_reasoning_context,omitempty"`
@@ -96,6 +97,7 @@ type ResponsesChannelCapabilitySnapshot struct {
 	SupportsChat                      bool
 	SupportsRestPreviousResponseID    bool
 	SupportsCompactionItemPassthrough bool
+	SupportsCustomTools               *bool
 	SupportsNamespaceTools            bool
 	SupportsToolSearch                bool
 	ReasoningContextCapability        ResponsesReasoningContextCapability
@@ -241,6 +243,7 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 		SupportsChat:                      defaultSupportsChatCapability(channelType, profile),
 		SupportsRestPreviousResponseID:    defaultSupportsRESTPreviousResponseIDCapability(s, profile),
 		SupportsCompactionItemPassthrough: defaultSupportsCompactionItemPassthroughCapability(profile),
+		SupportsCustomTools:               defaultSupportsCustomToolsCapability(profile),
 		SupportsNamespaceTools:            defaultSupportsNamespaceToolsCapability(profile),
 		SupportsToolSearch:                defaultSupportsToolSearchCapability(profile),
 		ReasoningContextCapability:        reasoningContextCapability,
@@ -285,6 +288,19 @@ func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesNamespaceTools() bool 
 	return profile != "" && !defaultSupportsNamespaceToolsCapability(profile)
 }
 
+func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesCustomTools() bool {
+	if s == nil {
+		return false
+	}
+	registry := s.responsesCapabilityRegistry()
+	if registry != nil && registry.SupportsCustomTools != nil {
+		return !*registry.SupportsCustomTools
+	}
+	profile := s.NormalizedResponsesUpstreamProfile()
+	capability := defaultSupportsCustomToolsCapability(profile)
+	return profile != "" && capability != nil && !*capability
+}
+
 func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesToolSearch() bool {
 	if s == nil {
 		return false
@@ -319,6 +335,9 @@ func applyCapabilityOverrides(snapshot *ResponsesChannelCapabilitySnapshot, regi
 	}
 	if registry.SupportsCompactionItemPassthrough != nil {
 		snapshot.SupportsCompactionItemPassthrough = *registry.SupportsCompactionItemPassthrough
+	}
+	if registry.SupportsCustomTools != nil {
+		snapshot.SupportsCustomTools = cloneBool(registry.SupportsCustomTools)
 	}
 	if registry.SupportsNamespaceTools != nil {
 		snapshot.SupportsNamespaceTools = *registry.SupportsNamespaceTools
@@ -461,6 +480,26 @@ func defaultSupportsNamespaceToolsCapability(profile ResponsesUpstreamProfile) b
 		return true
 	default:
 		return false
+	}
+}
+
+func defaultSupportsCustomToolsCapability(profile ResponsesUpstreamProfile) *bool {
+	switch profile {
+	case ResponsesUpstreamProfileOfficialOpenAI,
+		ResponsesUpstreamProfileOfficialNewAPI,
+		ResponsesUpstreamProfileSameClusterNewAPI,
+		ResponsesUpstreamProfileTrustedNewAPI,
+		ResponsesUpstreamProfileSub2APIWSV2,
+		ResponsesUpstreamProfileGenericOpenAI:
+		value := true
+		return &value
+	case ResponsesUpstreamProfileSub2APIHTTP,
+		ResponsesUpstreamProfileGenericProxy,
+		ResponsesUpstreamProfileChatOnlyProxy:
+		value := false
+		return &value
+	default:
+		return nil
 	}
 }
 

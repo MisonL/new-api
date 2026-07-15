@@ -8,7 +8,7 @@ const model = requiredOption(options, 'model');
 const scenario = options.scenario ?? 'all';
 const timeoutMs = Number(options['timeout-ms'] ?? 24000);
 
-const supportedScenarios = new Set(['all', 'basic', 'tools', 'ids', 'compact']);
+const supportedScenarios = new Set(['all', 'basic', 'tools', 'grammar', 'ids', 'compact']);
 if (!supportedScenarios.has(scenario)) {
   fail(`unsupported scenario: ${scenario}`);
 }
@@ -27,6 +27,9 @@ if (scenario === 'all' || scenario === 'basic') {
 }
 if (scenario === 'all' || scenario === 'tools') {
   results.push(await runTools());
+}
+if (scenario === 'all' || scenario === 'grammar') {
+  results.push(await runGrammarTool());
 }
 if (scenario === 'all' || scenario === 'ids') {
   results.push(await runItemIds());
@@ -109,6 +112,43 @@ async function runTools() {
   });
 }
 
+async function runGrammarTool() {
+  const applyPatchTool = {
+    type: 'custom',
+    name: 'apply_patch',
+    description: 'A grammar-constrained Codex compatibility probe.',
+    format: {
+      type: 'grammar',
+      syntax: 'lark',
+      definition: 'start: SOURCE\nSOURCE: /[\\s\\S]+/',
+    },
+  };
+  const body = {
+    model,
+    input: [
+      {
+        type: 'additional_tools',
+        role: 'developer',
+        tools: [applyPatchTool],
+      },
+      message('Call apply_patch with the exact input CODEX_LITE_GRAMMAR_OK.'),
+    ],
+    tool_choice: { type: 'custom', name: 'apply_patch' },
+    reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
+    stream: true,
+  };
+  const response = await postJson('/v1/responses', body);
+  assertCompletedResponse('grammar', response);
+  const calls = response.output.filter((item) => isToolCall(item) && item?.name === 'apply_patch');
+  if (calls.length === 0) {
+    fail('grammar: upstream completed without the forced apply_patch tool call');
+  }
+  return summarize('grammar', response, {
+    tool_names: calls.map((item) => item.name).filter(Boolean),
+    tool_types: calls.map((item) => item.type).filter(Boolean),
+  });
+}
+
 async function runItemIds() {
   const callId = 'call_codex_lite_id_smoke';
   const body = {
@@ -170,7 +210,7 @@ async function runCompactAndContinue() {
     reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
     stream: false,
   });
-  assertCompletedResponse('compact', compact);
+  assertCompactResponse('compact', compact);
   if (!compact.output.some((item) => item?.type === 'compaction')) {
     fail('compact: completed response did not contain a compaction item');
   }
@@ -200,8 +240,8 @@ async function postJson(path, body) {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream, application/json',
         Originator: 'codex-tui',
-        'User-Agent': 'codex-tui/0.144.4 (compatibility-smoke)',
-        'X-Codex-Beta-Features': 'responses_lite',
+        'User-Agent': 'codex-tui/0.145.0-alpha.12 (compatibility-smoke)',
+        'X-OpenAI-Internal-Codex-Responses-Lite': 'true',
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
@@ -251,6 +291,14 @@ function assertCompletedResponse(name, response) {
   if (response.http_status !== 200) fail(`${name}: expected HTTP 200`);
   if (response.status !== 'completed') {
     fail(`${name}: expected completed response, got ${String(response.status ?? 'missing')}`);
+  }
+  if (!Array.isArray(response.output)) fail(`${name}: response.output is not an array`);
+}
+
+function assertCompactResponse(name, response) {
+  if (response.http_status !== 200) fail(`${name}: expected HTTP 200`);
+  if (response.status !== undefined && response.status !== 'completed') {
+    fail(`${name}: expected completed response when status is present, got ${String(response.status)}`);
   }
   if (!Array.isArray(response.output)) fail(`${name}: response.output is not an array`);
 }

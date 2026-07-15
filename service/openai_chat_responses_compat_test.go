@@ -11,6 +11,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func explicitlyUnsupportedAdvancedResponsesTools() dto.ChannelOtherSettings {
+	unsupported := false
+	return dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsCustomTools:    &unsupported,
+			SupportsNamespaceTools: &unsupported,
+			SupportsToolSearch:     &unsupported,
+		},
+	}
+}
+
 func TestFindResponsesViaChatRuleTrimsSyntheticPreviousResponseID(t *testing.T) {
 	settings := model_setting.GetGlobalSettings()
 	previousPolicy := settings.ChatCompletionsToResponsesPolicy
@@ -209,6 +220,134 @@ func TestFindResponsesViaChatRuleOnlyWhenToolBridgeRequiredMatchesStringCustomTo
 				{"type":"message","role":"user","content":"run command"}
 			]`),
 		},
+		explicitlyUnsupportedAdvancedResponsesTools(),
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, rule)
+}
+
+func TestFindResponsesViaChatRuleKeepsNativeResponsesGrammarToolOnResponses(t *testing.T) {
+	settings := model_setting.GetGlobalSettings()
+	previousPolicy := settings.ChatCompletionsToResponsesPolicy
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = previousPolicy
+	})
+
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{{
+			Name:           "conditional-tool-bridge",
+			Enabled:        true,
+			SourceEndpoint: model_setting.ProtocolEndpointResponses,
+			TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+			ChannelIDs:     []int{155},
+			ModelPatterns:  []string{"^gpt-5\\.6-sol$"},
+			Options: &model_setting.ProtocolConversionOptions{
+				EnableCustomToolBridge:     true,
+				OnlyWhenToolBridgeRequired: true,
+			},
+		}},
+	}
+
+	rule, err := FindResponsesViaChatRule(
+		context.Background(),
+		relayconstant.RelayModeResponses,
+		false,
+		dto.ChannelSettings{},
+		155,
+		1,
+		"gpt-5.6-sol",
+		&dto.OpenAIResponsesRequest{
+			Tools: common.RawMessage(`[{"type":"custom","name":"apply_patch","format":{"type":"grammar","syntax":"lark","definition":"start: SOURCE"}}]`),
+		},
+		dto.ChannelOtherSettings{},
+	)
+
+	require.NoError(t, err)
+	require.Nil(t, rule)
+}
+
+func TestFindResponsesViaChatRuleKeepsNativeResponsesNamespaceWhenCapabilityIsUnknown(t *testing.T) {
+	settings := model_setting.GetGlobalSettings()
+	previousPolicy := settings.ChatCompletionsToResponsesPolicy
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = previousPolicy
+	})
+
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{{
+			Name:           "conditional-tool-bridge",
+			Enabled:        true,
+			SourceEndpoint: model_setting.ProtocolEndpointResponses,
+			TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+			ChannelIDs:     []int{155},
+			ModelPatterns:  []string{"^gpt-5\\.6-sol$"},
+			Options: &model_setting.ProtocolConversionOptions{
+				EnableCustomToolBridge:     true,
+				OnlyWhenToolBridgeRequired: true,
+			},
+		}},
+	}
+
+	rule, err := FindResponsesViaChatRule(
+		context.Background(),
+		relayconstant.RelayModeResponses,
+		false,
+		dto.ChannelSettings{},
+		155,
+		1,
+		"gpt-5.6-sol",
+		&dto.OpenAIResponsesRequest{
+			Tools: common.RawMessage(`[{"type":"namespace","name":"workspace","tools":[]}]`),
+		},
+		dto.ChannelOtherSettings{},
+	)
+
+	require.NoError(t, err)
+	require.Nil(t, rule)
+}
+
+func TestFindResponsesViaChatRuleBridgesExplicitlyUnsupportedCustomTool(t *testing.T) {
+	settings := model_setting.GetGlobalSettings()
+	previousPolicy := settings.ChatCompletionsToResponsesPolicy
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = previousPolicy
+	})
+
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{{
+			Name:           "conditional-tool-bridge",
+			Enabled:        true,
+			SourceEndpoint: model_setting.ProtocolEndpointResponses,
+			TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+			ChannelIDs:     []int{205},
+			ModelPatterns:  []string{"^gpt-5\\.5$"},
+			Options: &model_setting.ProtocolConversionOptions{
+				EnableCustomToolBridge:     true,
+				OnlyWhenToolBridgeRequired: true,
+			},
+		}},
+	}
+	unsupported := false
+	channelSettings := dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsCustomTools: &unsupported,
+		},
+	}
+
+	rule, err := FindResponsesViaChatRule(
+		context.Background(),
+		relayconstant.RelayModeResponses,
+		false,
+		dto.ChannelSettings{},
+		205,
+		1,
+		"gpt-5.5",
+		&dto.OpenAIResponsesRequest{Tools: common.RawMessage(`[{"type":"custom","name":"exec"}]`)},
+		channelSettings,
 	)
 
 	require.NoError(t, err)
@@ -250,6 +389,7 @@ func TestFindResponsesViaChatRuleOnlyWhenToolBridgeRequiredMatchesNamespacedFunc
 			{"type":"function_call","call_id":"call_1","namespace":"workspace","name":"read_file","arguments":"{\"path\":\"README.md\"}"},
 			{"type":"function_call_output","call_id":"call_1","output":"contents"}
 		]`)},
+		explicitlyUnsupportedAdvancedResponsesTools(),
 	)
 
 	require.NoError(t, err)
@@ -379,6 +519,7 @@ func TestFindResponsesViaChatRuleOnlyWhenToolBridgeRequiredMatchesCustomToolsAnd
 				1,
 				"gpt-5.5",
 				testCase.request,
+				explicitlyUnsupportedAdvancedResponsesTools(),
 			)
 
 			require.NoError(t, err)
