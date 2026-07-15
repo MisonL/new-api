@@ -10,10 +10,22 @@ const timeoutMs = Number(options['timeout-ms'] ?? 24000);
 
 const supportedScenarios = new Set([
   'all',
+  'core',
   'basic',
   'tools',
   'namespace',
   'tool-search',
+  'grammar',
+  'controls',
+  'continuation',
+  'web-search',
+  'ids',
+  'compact',
+]);
+const coreScenarios = new Set([
+  'basic',
+  'tools',
+  'namespace',
   'grammar',
   'controls',
   'continuation',
@@ -34,39 +46,43 @@ if (!/^\d+$/.test(channel)) {
 const authorization = token.endsWith(`-${channel}`) ? token : `${token}-${channel}`;
 const results = [];
 
-if (scenario === 'all' || scenario === 'basic') {
+if (shouldRun('basic')) {
   results.push(await runBasic());
 }
-if (scenario === 'all' || scenario === 'tools') {
+if (shouldRun('tools')) {
   results.push(await runTools());
 }
-if (scenario === 'all' || scenario === 'namespace') {
+if (shouldRun('namespace')) {
   results.push(await runNamespaceTool());
 }
-if (scenario === 'all' || scenario === 'tool-search') {
+if (shouldRun('tool-search')) {
   results.push(await runToolSearch());
 }
-if (scenario === 'all' || scenario === 'grammar') {
+if (shouldRun('grammar')) {
   results.push(await runGrammarTool());
 }
-if (scenario === 'all' || scenario === 'controls') {
+if (shouldRun('controls')) {
   results.push(await runRequestControls());
 }
-if (scenario === 'all' || scenario === 'continuation') {
+if (shouldRun('continuation')) {
   results.push(await runToolContinuation());
 }
-if (scenario === 'all' || scenario === 'web-search') {
+if (shouldRun('web-search')) {
   results.push(await runWebSearchDeclaration());
 }
-if (scenario === 'all' || scenario === 'ids') {
+if (shouldRun('ids')) {
   results.push(await runItemIds());
 }
-if (scenario === 'all' || scenario === 'compact') {
+if (shouldRun('compact')) {
   results.push(await runCompactAndContinue());
 }
 
 for (const result of results) {
   process.stdout.write(`${JSON.stringify(result)}\n`);
+}
+
+function shouldRun(name) {
+  return scenario === 'all' || scenario === name || (scenario === 'core' && coreScenarios.has(name));
 }
 
 async function runBasic() {
