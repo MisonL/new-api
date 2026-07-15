@@ -329,6 +329,13 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 	return GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(group, model, retry, excluded, 0, 0, time.Time{})
 }
 
+type SatisfiedChannelSelectionOptions struct {
+	RequestBodySize       int64
+	BodyLimitTTLHours     int
+	Now                   time.Time
+	ExcludeBeforePriority bool
+}
+
 func GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(
 	group string,
 	model string,
@@ -338,27 +345,51 @@ func GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(
 	ttlHours int,
 	now time.Time,
 ) (*Channel, error) {
+	return GetRandomSatisfiedChannelWithOptions(
+		group,
+		model,
+		retry,
+		excluded,
+		SatisfiedChannelSelectionOptions{
+			RequestBodySize:       requestBodySize,
+			BodyLimitTTLHours:     ttlHours,
+			Now:                   now,
+			ExcludeBeforePriority: requestBodySize > 0,
+		},
+	)
+}
+
+// GetRandomSatisfiedChannelWithOptions selects a channel using explicit exclusion and body-limit semantics.
+func GetRandomSatisfiedChannelWithOptions(
+	group string,
+	model string,
+	retry int,
+	excluded map[int]struct{},
+	options SatisfiedChannelSelectionOptions,
+) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		if requestBodySize > 0 {
-			bodyLimitExcluded, err := FindRequestBodyLimitExcludedChannels(group, model, requestBodySize, ttlHours, now)
+		if options.RequestBodySize > 0 {
+			bodyLimitExcluded, err := FindRequestBodyLimitExcludedChannels(group, model, options.RequestBodySize, options.BodyLimitTTLHours, options.Now)
 			if err != nil {
 				return nil, err
 			}
 			excluded = mergeExcludedChannels(excluded, bodyLimitExcluded)
+		}
+		if options.ExcludeBeforePriority {
 			return getChannelExcludingAfterExclusion(group, model, retry, excluded)
 		}
 		return getChannelExcluding(group, model, retry, excluded)
 	}
 
 	channelSyncLock.RLock()
-	if requestBodySize > 0 {
-		excluded = mergeExcludedChannels(excluded, findRequestBodyLimitExcludedChannelsFromCacheLocked(group, model, requestBodySize, ttlHours, now))
+	if options.RequestBodySize > 0 {
+		excluded = mergeExcludedChannels(excluded, findRequestBodyLimitExcludedChannelsFromCacheLocked(group, model, options.RequestBodySize, options.BodyLimitTTLHours, options.Now))
 	}
 	var channel *Channel
 	var cacheErr error
 	var cacheHit bool
-	if requestBodySize > 0 {
+	if options.ExcludeBeforePriority {
 		channel, cacheErr, cacheHit = getRandomSatisfiedChannelFromCacheAfterExclusion(group, model, retry, excluded)
 	} else {
 		channel, cacheErr, cacheHit = getRandomSatisfiedChannelFromCache(group, model, retry, excluded)
@@ -368,8 +399,8 @@ func GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(
 		return channel, cacheErr
 	}
 
-	if requestBodySize > 0 {
-		bodyLimitExcluded, fallbackLimitErr := findRequestBodyLimitExcludedChannelsFromDatabase(group, model, requestBodySize, ttlHours, now)
+	if options.RequestBodySize > 0 {
+		bodyLimitExcluded, fallbackLimitErr := findRequestBodyLimitExcludedChannelsFromDatabase(group, model, options.RequestBodySize, options.BodyLimitTTLHours, options.Now)
 		if fallbackLimitErr != nil {
 			if cacheErr != nil {
 				return nil, cacheErr
@@ -380,7 +411,7 @@ func GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(
 	}
 	var fallbackChannel *Channel
 	var fallbackErr error
-	if requestBodySize > 0 {
+	if options.ExcludeBeforePriority {
 		fallbackChannel, fallbackErr = getChannelExcludingAfterExclusion(group, model, retry, excluded)
 	} else {
 		fallbackChannel, fallbackErr = getChannelExcluding(group, model, retry, excluded)

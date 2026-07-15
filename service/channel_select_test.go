@@ -212,6 +212,48 @@ func TestRetryExhaustsSamePriorityBeforeDescending(t *testing.T) {
 	}
 }
 
+func TestRetrySelectsHighestRemainingChannelAfterMultipleExcludedPriorities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testCases := []struct {
+		name               string
+		tokenGroup         string
+		memoryCacheEnabled bool
+	}{
+		{name: "database group", tokenGroup: "default", memoryCacheEnabled: false},
+		{name: "database auto group", tokenGroup: "auto", memoryCacheEnabled: false},
+		{name: "memory cache group", tokenGroup: "default", memoryCacheEnabled: true},
+		{name: "memory cache auto group", tokenGroup: "auto", memoryCacheEnabled: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupChannelSelectTestDB(t)
+			common.MemoryCacheEnabled = tc.memoryCacheEnabled
+			seedMultipleExcludedPriorityChannels(t, db)
+			if tc.memoryCacheEnabled {
+				model.InitChannelCache()
+			}
+
+			ctx, _ := gin.CreateTestContext(nil)
+			common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+			ctx.Set("use_channel", []string{"216", "217", "218"})
+
+			channel, selectGroup, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+				Ctx:        ctx,
+				TokenGroup: tc.tokenGroup,
+				ModelName:  "gpt-5.5",
+				Retry:      common.GetPointer(1),
+			})
+
+			require.NoError(t, err)
+			require.Equal(t, "default", selectGroup)
+			require.NotNil(t, channel)
+			require.Equal(t, 219, channel.Id)
+		})
+	}
+}
+
 func TestAutoGroupSelectionPropagatesChannelLookupError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -340,6 +382,38 @@ func seedPriorityRetryChannels(t *testing.T, db *gorm.DB) {
 			Enabled:   true,
 			Priority:  channel.Priority,
 			Weight:    *channel.Weight,
+		}).Error)
+	}
+}
+
+func seedMultipleExcludedPriorityChannels(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	priorities := map[int]int64{
+		216: 40,
+		217: 30,
+		218: 20,
+		219: 20,
+		220: 10,
+	}
+	weight := uint(1)
+	for id, priority := range priorities {
+		channel := &model.Channel{
+			Id:       id,
+			Name:     fmt.Sprintf("priority-%d", id),
+			Status:   common.ChannelStatusEnabled,
+			Group:    "default",
+			Models:   "gpt-5.5",
+			Priority: common.GetPointer(priority),
+			Weight:   &weight,
+		}
+		require.NoError(t, db.Create(channel).Error)
+		require.NoError(t, db.Create(&model.Ability{
+			Group:     "default",
+			Model:     "gpt-5.5",
+			ChannelId: channel.Id,
+			Enabled:   true,
+			Priority:  channel.Priority,
+			Weight:    weight,
 		}).Error)
 	}
 }
