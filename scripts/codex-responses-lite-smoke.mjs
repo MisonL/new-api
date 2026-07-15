@@ -570,7 +570,13 @@ function parseSse(raw) {
   const terminal = [...events].reverse().find((event) =>
     ['response.completed', 'response.failed', 'response.incomplete', 'response.error'].includes(event?.type),
   );
-  if (!terminal) fail('SSE response contained no terminal event');
+  if (!terminal) {
+    const observed = events.map((event) => ({
+      type: event?.type,
+      has_response: Boolean(event?.response),
+    }));
+    fail(`SSE response contained no terminal event; observed=${JSON.stringify(observed)}`);
+  }
   return terminal.response ?? terminal;
 }
 
