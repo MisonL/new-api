@@ -207,17 +207,61 @@ func TestResponsesRequestToChatCompletionsRequestSeparatesFunctionAndCustomToolN
 	require.Equal(t, "newapi_custom__exec", chatReq.Tools[1].Function.Name)
 }
 
-func TestResponsesRequestToChatCompletionsRequestRejectsUnsupportedCustomToolFormat(t *testing.T) {
-	_, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+func TestResponsesRequestToChatCompletionsRequestBridgesLarkGrammarCustomTool(t *testing.T) {
+	chatReq, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6-sol",
 		Tools: mustMarshalJSON(t, []map[string]any{
-			{"type": "custom", "name": "exec", "format": map[string]any{"type": "grammar", "syntax": "lark"}},
+			{
+				"type":        "custom",
+				"name":        "apply_patch",
+				"description": "Apply a patch.",
+				"format": map[string]any{
+					"type":       "grammar",
+					"syntax":     "lark",
+					"definition": "start: /.+/",
+				},
+			},
 		}),
 		Input: mustMarshalJSON(t, "continue"),
 	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), `format type "grammar" is not supported`)
+	require.NoError(t, err)
+	require.Len(t, chatReq.Tools, 1)
+	require.Equal(t, "newapi_custom__apply_patch", chatReq.Tools[0].Function.Name)
+	require.Contains(t, chatReq.Tools[0].Function.Description, "Lark grammar")
+	require.Contains(t, chatReq.Tools[0].Function.Description, "start: /.+/")
+	require.JSONEq(t, `{"type":"object","additionalProperties":false,"properties":{"input":{"type":"string","description":"Complete input for the custom tool."}},"required":["input"]}`, string(mustMarshalJSON(t, chatReq.Tools[0].Function.Parameters)))
+}
+
+func TestResponsesRequestToChatCompletionsRequestRejectsInvalidCustomToolFormat(t *testing.T) {
+	testCases := []struct {
+		name     string
+		format   map[string]any
+		expected string
+	}{
+		{name: "unsupported type", format: map[string]any{"type": "json_schema"}, expected: `format type "json_schema" is not supported`},
+		{name: "missing grammar syntax", format: map[string]any{"type": "grammar", "definition": "start: /.+/"}, expected: "grammar syntax is required"},
+		{name: "unsupported grammar syntax", format: map[string]any{"type": "grammar", "syntax": "regex", "definition": ".+"}, expected: `grammar syntax "regex" is not supported`},
+		{name: "missing grammar definition", format: map[string]any{"type": "grammar", "syntax": "lark"}, expected: "grammar definition is required"},
+		{name: "non-string grammar definition", format: map[string]any{"type": "grammar", "syntax": "lark", "definition": true}, expected: "grammar definition must be a string"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
+				Model: "gpt-5.6-sol",
+				Tools: mustMarshalJSON(t, []map[string]any{{
+					"type":   "custom",
+					"name":   "apply_patch",
+					"format": testCase.format,
+				}}),
+				Input: mustMarshalJSON(t, "continue"),
+			}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+
+			require.Error(t, err)
+			require.Contains(t, err.Error(), testCase.expected)
+		})
+	}
 }
 
 func TestResponsesRequestToChatCompletionsRequestBridgesStringCustomTool(t *testing.T) {

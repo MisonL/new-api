@@ -44,23 +44,58 @@ func convertResponsesFunctionToolToChat(tool map[string]any) (dto.ToolCallReques
 	}, nil
 }
 
-func validateResponsesCustomToolFormat(tool map[string]any) error {
+func responsesCustomToolFormatGuidance(tool map[string]any) (string, error) {
 	format, exists := tool["format"]
 	if !exists || format == nil {
-		return nil
+		return "", nil
 	}
 	formatMap, ok := format.(map[string]any)
 	if !ok {
-		return fmt.Errorf("custom tool format must be an object")
+		return "", fmt.Errorf("custom tool format must be an object")
 	}
 	formatType := strings.TrimSpace(common.Interface2String(formatMap["type"]))
 	if formatType == "" {
-		return fmt.Errorf("custom tool format type is required")
+		return "", fmt.Errorf("custom tool format type is required")
 	}
-	if formatType != "text" {
-		return fmt.Errorf("custom tool format type %q is not supported in chat compatibility mode", formatType)
+	switch formatType {
+	case "text":
+		return "", nil
+	case "grammar":
+		return responsesLarkGrammarGuidance(formatMap)
+	default:
+		return "", fmt.Errorf("custom tool format type %q is not supported in chat compatibility mode", formatType)
 	}
-	return nil
+}
+
+func responsesLarkGrammarGuidance(format map[string]any) (string, error) {
+	rawSyntax, exists := format["syntax"]
+	if !exists || rawSyntax == nil {
+		return "", fmt.Errorf("custom tool grammar syntax is required")
+	}
+	syntax, ok := rawSyntax.(string)
+	if !ok {
+		return "", fmt.Errorf("custom tool grammar syntax must be a string")
+	}
+	syntax = strings.TrimSpace(syntax)
+	if syntax == "" {
+		return "", fmt.Errorf("custom tool grammar syntax is required")
+	}
+	if syntax != "lark" {
+		return "", fmt.Errorf("custom tool grammar syntax %q is not supported in chat compatibility mode", syntax)
+	}
+	rawDefinition, exists := format["definition"]
+	if !exists || rawDefinition == nil {
+		return "", fmt.Errorf("custom tool grammar definition is required")
+	}
+	definition, ok := rawDefinition.(string)
+	if !ok {
+		return "", fmt.Errorf("custom tool grammar definition must be a string")
+	}
+	definition = strings.TrimSpace(definition)
+	if definition == "" {
+		return "", fmt.Errorf("custom tool grammar definition is required")
+	}
+	return " Complete input must satisfy the following Lark grammar:\n" + definition, nil
 }
 
 func withResponsesNamespaceDescription(description string, namespaceDescription string) string {

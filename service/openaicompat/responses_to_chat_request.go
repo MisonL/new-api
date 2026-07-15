@@ -248,7 +248,8 @@ func convertResponsesCustomToolToChat(tool map[string]any, namespace string) (dt
 	if name == "" {
 		return dto.ToolCallRequest{}, fmt.Errorf("custom tool name is required")
 	}
-	if err := validateResponsesCustomToolFormat(tool); err != nil {
+	formatGuidance, err := responsesCustomToolFormatGuidance(tool)
+	if err != nil {
 		return dto.ToolCallRequest{}, err
 	}
 	description := strings.TrimSpace(common.Interface2String(tool["description"]))
@@ -257,6 +258,7 @@ func convertResponsesCustomToolToChat(tool map[string]any, namespace string) (dt
 	} else {
 		description += " Provide the complete custom tool input in the input field."
 	}
+	description += formatGuidance
 	return dto.ToolCallRequest{
 		Type: "function",
 		Function: dto.FunctionRequest{
