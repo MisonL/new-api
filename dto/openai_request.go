@@ -964,6 +964,7 @@ func (r OpenAIResponsesRequest) MarshalJSON() ([]byte, error) {
 func (r *OpenAIResponsesRequest) GetTokenCountMeta() *types.TokenCountMeta {
 	var fileMeta = make([]*types.FileMeta, 0)
 	var texts = make([]string, 0)
+	toolsCount := 0
 
 	if r.Input != nil {
 		inputs := r.ParseInput()
@@ -1009,7 +1010,14 @@ func (r *OpenAIResponsesRequest) GetTokenCountMeta() *types.TokenCountMeta {
 		texts = append(texts, string(r.Prompt))
 	}
 
-	if len(r.Tools) > 0 {
+	if effectiveTools, err := r.EffectiveTools(); err == nil {
+		for _, tool := range effectiveTools {
+			texts = append(texts, string(tool))
+		}
+		toolsCount = len(effectiveTools)
+	} else if len(r.Tools) > 0 {
+		// Invalid additional_tools requests are rejected at the request boundary.
+		// Preserve the previous top-level tools estimate for direct callers.
 		texts = append(texts, string(r.Tools))
 	}
 
@@ -1017,6 +1025,7 @@ func (r *OpenAIResponsesRequest) GetTokenCountMeta() *types.TokenCountMeta {
 		CombineText: strings.Join(texts, "\n"),
 		Files:       fileMeta,
 		MaxTokens:   int(lo.FromPtrOr(r.MaxOutputTokens, uint(0))),
+		ToolsCount:  toolsCount,
 	}
 }
 

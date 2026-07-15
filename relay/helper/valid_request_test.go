@@ -70,6 +70,40 @@ func TestGetAndValidateResponsesCompactionRequestAcceptsNonEmptyInput(t *testing
 	require.NotEmpty(t, request.Input)
 }
 
+func TestGetAndValidateResponsesRequestRejectsMalformedAdditionalTools(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/responses",
+		strings.NewReader(`{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","tools":{"type":"function","name":"lookup"}}]}`),
+	)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	request, err := GetAndValidateResponsesRequest(ctx)
+
+	require.Nil(t, request)
+	require.ErrorContains(t, err, "additional_tools.tools must be an array")
+}
+
+func TestGetAndValidateResponsesCompactionRequestRejectsMalformedAdditionalTools(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/responses/compact",
+		strings.NewReader(`{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","tools":{"type":"function","name":"lookup"}}]}`),
+	)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	request, err := GetAndValidateResponsesCompactionRequest(ctx)
+
+	require.Nil(t, request)
+	require.ErrorContains(t, err, "additional_tools.tools must be an array")
+}
+
 func TestGetAndValidateResponsesCompactionRequestPreservesSub2APICompatibleFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -125,6 +125,9 @@ func GetAndValidateResponsesRequest(c *gin.Context) (*dto.OpenAIResponsesRequest
 	if request.Input == nil {
 		return nil, errors.New("input is required")
 	}
+	if _, err := request.EffectiveTools(); err != nil {
+		return nil, fmt.Errorf("invalid responses tools: %w", err)
+	}
 	return request, nil
 }
 
@@ -148,6 +151,9 @@ func GetAndValidateResponsesCompactionRequest(c *gin.Context) (*dto.OpenAIRespon
 		if len(items) == 0 {
 			return nil, errors.New("input must contain at least one item")
 		}
+	}
+	if _, err := request.ToResponsesRequest().EffectiveTools(); err != nil {
+		return nil, fmt.Errorf("invalid responses tools: %w", err)
 	}
 	return request, nil
 }
