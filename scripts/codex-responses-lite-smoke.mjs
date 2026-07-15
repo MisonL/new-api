@@ -535,9 +535,18 @@ async function postJson(path, body) {
 
   const contentType = response.headers.get('content-type') ?? '';
   const raw = await response.text();
-  const payload = contentType.includes('text/event-stream') || raw.trimStart().startsWith('data:')
-    ? parseSse(raw)
-    : parseJson(raw, path);
+  const trimmed = raw.trimStart();
+  const isJsonBody = trimmed.startsWith('{') || trimmed.startsWith('[');
+  const isSseBody =
+    trimmed.startsWith('data:') || trimmed.startsWith('event:') || trimmed.startsWith(':');
+  let payload;
+  if (isJsonBody) {
+    payload = parseJson(raw, path);
+  } else if (isSseBody || contentType.includes('text/event-stream')) {
+    payload = parseSse(raw);
+  } else {
+    payload = parseJson(raw, path);
+  }
   const normalized = normalizeResponsePayload(payload);
   normalized.http_status = response.status;
   normalized.duration_ms = Date.now() - startedAt;
