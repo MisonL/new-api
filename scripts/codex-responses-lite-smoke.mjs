@@ -76,7 +76,6 @@ async function runBasic() {
     reasoning: {
       effort: 'low',
       summary: 'auto',
-      mode: 'adaptive',
       context: 'all_turns',
     },
     stream: false,
