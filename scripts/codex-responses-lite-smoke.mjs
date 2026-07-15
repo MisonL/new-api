@@ -8,7 +8,19 @@ const model = requiredOption(options, 'model');
 const scenario = options.scenario ?? 'all';
 const timeoutMs = Number(options['timeout-ms'] ?? 24000);
 
-const supportedScenarios = new Set(['all', 'basic', 'tools', 'grammar', 'ids', 'compact']);
+const supportedScenarios = new Set([
+  'all',
+  'basic',
+  'tools',
+  'namespace',
+  'tool-search',
+  'grammar',
+  'controls',
+  'continuation',
+  'web-search',
+  'ids',
+  'compact',
+]);
 if (!supportedScenarios.has(scenario)) {
   fail(`unsupported scenario: ${scenario}`);
 }
@@ -28,8 +40,23 @@ if (scenario === 'all' || scenario === 'basic') {
 if (scenario === 'all' || scenario === 'tools') {
   results.push(await runTools());
 }
+if (scenario === 'all' || scenario === 'namespace') {
+  results.push(await runNamespaceTool());
+}
+if (scenario === 'all' || scenario === 'tool-search') {
+  results.push(await runToolSearch());
+}
 if (scenario === 'all' || scenario === 'grammar') {
   results.push(await runGrammarTool());
+}
+if (scenario === 'all' || scenario === 'controls') {
+  results.push(await runRequestControls());
+}
+if (scenario === 'all' || scenario === 'continuation') {
+  results.push(await runToolContinuation());
+}
+if (scenario === 'all' || scenario === 'web-search') {
+  results.push(await runWebSearchDeclaration());
 }
 if (scenario === 'all' || scenario === 'ids') {
   results.push(await runItemIds());
@@ -112,6 +139,118 @@ async function runTools() {
   });
 }
 
+async function runNamespaceTool() {
+  const body = {
+    model,
+    input: [
+      additionalTools([
+        {
+          type: 'namespace',
+          name: 'smoke_namespace',
+          description: 'Codex namespace compatibility probes.',
+          tools: [
+            {
+              type: 'function',
+              name: 'namespace_lookup',
+              description: 'Return a requested namespace smoke-test value.',
+              parameters: strictStringParameter('value'),
+              strict: true,
+            },
+          ],
+        },
+      ]),
+      message('Call namespace_lookup with value CODEX_LITE_NAMESPACE_OK. Do not answer directly.'),
+    ],
+    tool_choice: { type: 'namespace', name: 'smoke_namespace' },
+    reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
+    stream: true,
+  };
+  const response = await postJson('/v1/responses', body);
+  assertCompletedResponse('namespace', response);
+  const calls = response.output.filter((item) => isToolCall(item));
+  if (!calls.some((item) => item.name === 'namespace_lookup')) {
+    fail('namespace: upstream completed without the namespace_lookup call');
+  }
+  return summarize('namespace', response, {
+    tool_names: calls.map((item) => item.name).filter(Boolean),
+    namespaces: calls.map((item) => item.namespace).filter(Boolean),
+  });
+}
+
+async function runToolSearch() {
+  const searchTool = {
+    type: 'tool_search',
+    execution: 'client',
+    description: 'Search deferred smoke-test tools.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query for deferred tools.' },
+        limit: { type: 'number', description: 'Maximum number of tools to return.' },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  };
+  const initialInput = [
+    additionalTools([searchTool]),
+    message('You must call tool_search with query deferred_lookup. Do not answer directly.'),
+  ];
+  const discovered = await postJson('/v1/responses', {
+    model,
+    input: initialInput,
+    tool_choice: 'auto',
+    reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
+    stream: true,
+  });
+  assertCompletedResponse('tool-search-discovery', discovered);
+  const searchCall = discovered.output.find((item) => item?.type === 'tool_search_call');
+  if (!searchCall?.call_id) {
+    const observed = (discovered.output ?? []).map((item) => ({
+      type: item?.type,
+      name: item?.name,
+      call_id_present: Boolean(item?.call_id),
+    }));
+    fail(`tool-search: upstream completed without a tool_search_call call_id; observed=${JSON.stringify(observed)}`);
+  }
+
+  const loaded = await postJson('/v1/responses', {
+    model,
+    input: [
+      ...initialInput,
+      searchCall,
+      {
+        type: 'tool_search_output',
+        call_id: searchCall.call_id,
+        status: 'completed',
+        execution: 'client',
+        tools: [
+          {
+            type: 'function',
+            name: 'deferred_lookup',
+            description: 'Return a requested deferred smoke-test value.',
+            defer_loading: true,
+            strict: true,
+            parameters: strictStringParameter('value'),
+          },
+        ],
+      },
+    ],
+    tool_choice: { type: 'function', name: 'deferred_lookup' },
+    reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
+    stream: true,
+  });
+  assertCompletedResponse('tool-search-loaded', loaded);
+  const loadedCalls = loaded.output.filter((item) => isToolCall(item));
+  if (!loadedCalls.some((item) => item.name === 'deferred_lookup')) {
+    fail('tool-search: deferred_lookup was not callable after tool_search_output');
+  }
+  return summarize('tool-search', loaded, {
+    discovery_output_types: uniqueTypes(discovered.output),
+    tool_names: loadedCalls.map((item) => item.name).filter(Boolean),
+  });
+}
+
 async function runGrammarTool() {
   const applyPatchTool = {
     type: 'custom',
@@ -147,6 +286,133 @@ async function runGrammarTool() {
     tool_names: calls.map((item) => item.name).filter(Boolean),
     tool_types: calls.map((item) => item.type).filter(Boolean),
   });
+}
+
+async function runRequestControls() {
+  const body = {
+    model,
+    input: [message('Return a JSON object with status set to CODEX_LITE_CONTROLS_OK.')],
+    tool_choice: 'auto',
+    parallel_tool_calls: true,
+    reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
+    store: false,
+    stream: true,
+    stream_options: { reasoning_summary_delivery: 'sequential_cutoff' },
+    include: ['reasoning.encrypted_content'],
+    prompt_cache_key: 'codex-lite-controls-cache-key',
+    text: {
+      verbosity: 'low',
+      format: {
+        type: 'json_schema',
+        strict: true,
+        name: 'codex_lite_controls',
+        schema: {
+          type: 'object',
+          properties: { status: { type: 'string' } },
+          required: ['status'],
+          additionalProperties: false,
+        },
+      },
+    },
+    client_metadata: {
+      session_id: 'codex-lite-controls-session',
+      thread_id: 'codex-lite-controls-thread',
+      turn_id: 'codex-lite-controls-turn',
+    },
+  };
+  const response = await postJson('/v1/responses', body);
+  assertCompletedResponse('controls', response);
+  const parsed = parseJson(responseOutputText(response), 'controls output text');
+  if (parsed?.status !== 'CODEX_LITE_CONTROLS_OK') {
+    fail('controls: JSON schema response did not contain the expected status');
+  }
+  return summarize('controls', response, { parsed_status: parsed.status });
+}
+
+async function runToolContinuation() {
+  const tool = {
+    type: 'function',
+    name: 'continuation_lookup',
+    description: 'Return a value used to validate tool output continuation.',
+    parameters: strictStringParameter('value'),
+    strict: true,
+  };
+  const initialInput = [
+    additionalTools([tool]),
+    message('Call continuation_lookup with value CODEX_LITE_CONTINUATION_INPUT.'),
+  ];
+  const called = await postJson('/v1/responses', {
+    model,
+    input: initialInput,
+    tool_choice: { type: 'function', name: 'continuation_lookup' },
+    reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
+    stream: true,
+  });
+  assertCompletedResponse('continuation-call', called);
+  const call = called.output.find(
+    (item) => isToolCall(item) && item?.name === 'continuation_lookup' && item?.call_id,
+  );
+  if (!call) fail('continuation: upstream completed without continuation_lookup');
+
+  const continued = await postJson('/v1/responses', {
+    model,
+    input: [
+      ...initialInput,
+      call,
+      {
+        type: 'function_call_output',
+        call_id: call.call_id,
+        output: 'CODEX_LITE_CONTINUATION_OK',
+      },
+      message('Return exactly the tool output and do not call another tool.'),
+    ],
+    tool_choice: 'none',
+    reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
+    stream: false,
+  });
+  assertCompletedResponse('continuation-result', continued);
+  if (!responseOutputText(continued).includes('CODEX_LITE_CONTINUATION_OK')) {
+    fail('continuation: final response did not preserve the function_call_output value');
+  }
+  return summarize('continuation', continued, {
+    call_type: call.type,
+    call_id_prefix: String(call.call_id).split('_')[0],
+  });
+}
+
+async function runWebSearchDeclaration() {
+  const body = {
+    model,
+    input: [
+      additionalTools([
+        {
+          type: 'web_search',
+          external_web_access: true,
+          indexed_web_access: true,
+          filters: { allowed_domains: ['example.com'] },
+          user_location: {
+            type: 'approximate',
+            country: 'US',
+            region: 'California',
+            city: 'San Francisco',
+            timezone: 'America/Los_Angeles',
+          },
+          search_context_size: 'low',
+          search_content_types: ['text'],
+        },
+      ]),
+      message('Return exactly CODEX_LITE_WEB_SEARCH_DECLARATION_OK without using a tool.'),
+    ],
+    tool_choice: 'none',
+    reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
+    stream: false,
+  };
+  const response = await postJson('/v1/responses', body);
+  assertCompletedResponse('web-search', response);
+  if (!responseOutputText(response).includes('CODEX_LITE_WEB_SEARCH_DECLARATION_OK')) {
+    fail('web-search: response did not preserve the declaration probe result');
+  }
+  return summarize('web-search', response);
 }
 
 async function runItemIds() {
@@ -206,9 +472,22 @@ async function runCompactAndContinue() {
   const compactModel = model.endsWith('-openai-compact') ? model : `${model}-openai-compact`;
   const compact = await postJson('/v1/responses/compact', {
     model: compactModel,
-    input: [message('Compact this state: CODEX_LITE_COMPACT_OK.')],
+    input: [
+      additionalTools([
+        {
+          type: 'function',
+          name: 'compact_lookup',
+          description: 'A compact request tool declaration.',
+          parameters: strictStringParameter('value'),
+          strict: true,
+        },
+      ]),
+      message('Compact this state: CODEX_LITE_COMPACT_OK.'),
+    ],
+    parallel_tool_calls: false,
     reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
-    stream: false,
+    prompt_cache_key: 'codex-lite-compact-cache-key',
+    text: { verbosity: 'low' },
   });
   assertCompactResponse('compact', compact);
   if (!compact.output.some((item) => item?.type === 'compaction')) {
@@ -328,6 +607,27 @@ function message(text) {
     role: 'user',
     content: [{ type: 'input_text', text }],
   };
+}
+
+function additionalTools(tools) {
+  return { type: 'additional_tools', role: 'developer', tools };
+}
+
+function strictStringParameter(name) {
+  return {
+    type: 'object',
+    properties: { [name]: { type: 'string' } },
+    required: [name],
+    additionalProperties: false,
+  };
+}
+
+function responseOutputText(response) {
+  return (response.output ?? [])
+    .flatMap((item) => (Array.isArray(item?.content) ? item.content : []))
+    .filter((item) => item?.type === 'output_text' && typeof item.text === 'string')
+    .map((item) => item.text)
+    .join('');
 }
 
 function parseJson(raw, label) {
