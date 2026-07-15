@@ -102,6 +102,14 @@
 
 提交：`803211365 fix: exhaust same-priority channels before retry fallback`。
 
+### 多优先级排除后的重试选择
+
+- 真实全量池暴露出进一步缺口：当多个较高优先级渠道已因 capability 跳过或上游错误被排除，重试仍按全量优先级索引，可能在仍有未尝试渠道时返回 `get_channel_failed`。
+- 选路器新增显式的“先应用排除集合，再选择最高剩余优先级”模式，只用于 retry 的 untried-channel 分支；普通首选和按优先级下降语义不变。
+- 回归覆盖 default/auto group、内存缓存/数据库四种组合，并保留原同优先级和 request-body-limit 测试。
+
+提交：`19d9f7c42 fix: select highest remaining channel on retry`。
+
 ## 验证
 
 | 命令 | 退出码 | 结果 |
@@ -161,6 +169,17 @@ smoke 脚本新增 `--channel auto`，不附加固定渠道后缀。开发自动
 | compact + continue | 200，compaction 和续接均成功 | 99201 Responses/Compact 路径 |
 
 使用日志的 `request_conversion`、`channel_capability_snapshot`、`request_path` 和 `upstream_request_path` 与上表一致。测试结束后删除 41 条临时日志、3 条 ability 和 4 个临时渠道，并验证临时渠道、ability、日志和规则计数均为 0。
+
+### 正式优先级全量池复现
+
+第二组临时池按正式 ability 顺序复现 1 -> 150 -> 201/206 -> 117：
+
+- 150 的 function 原生调用成功，但 tool_search 原生返回 reasoning 和 message，没有 `tool_search_call`，证明会静默丢失工具搜索语义。
+- 仅为 150 设置 `supports_tool_search=false` 后，请求能跳过 1 和 150；修复前在 201 的确定性 403 后提前返回 500，重试链为 `99301->99350->99311`，没有到达同优先级 206。
+- 应用 `19d9f7c42` 后，同一 tool_search 的发现和加载两个请求均继续尝试剩余渠道。两次都观察到 201 返回 403、206 返回 Cloudflare 502，随后 117 成功；最终 200 并调用 `deferred_lookup`。
+- 该结果证明 capability 跳过、同优先级剩余渠道、下一优先级和真实上游错误可在同一请求内正确组合。
+
+正式最小能力配置因此包括：渠道 1 的 function/custom/namespace/tool_search 均为 false，并只桥接 custom/namespace；渠道 150 只声明 tool_search=false；渠道 206 声明 function=true、custom/namespace/tool_search=false，并只桥接 custom/namespace/tool_search；渠道 117 保留既有 Responses 到 Chat 规则。
 
 ## 生产前基线
 
