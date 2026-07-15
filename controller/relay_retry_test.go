@@ -1969,6 +1969,78 @@ func TestGetChannelSkipsResponsesViaChatForUnsupportedNamespaceTool(t *testing.T
 	require.Equal(t, native.Id, info.ChannelMeta.ChannelId)
 }
 
+func TestGetChannelExhaustsSamePriorityBeforeProtocolIncompatibleLowerPriority(t *testing.T) {
+	db := setupChannelControllerTestDB(t)
+	chatOnly, native := seedRemoteCompactionRouteChannels(t, db)
+	setChannelPriorityForTest(t, db, chatOnly, 10)
+	setChannelPriorityForTest(t, db, native, 20)
+	failedPriority := int64(20)
+	weight := uint(1)
+	failed := &model.Channel{
+		Id:       199,
+		Name:     "failed-native-responses",
+		Key:      "sk-failed-native",
+		Type:     constant.ChannelTypeOpenAI,
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "gpt-5.5",
+		Priority: &failedPriority,
+		Weight:   &weight,
+	}
+	require.NoError(t, db.Create(failed).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group:     "default",
+		Model:     "gpt-5.5",
+		ChannelId: failed.Id,
+		Enabled:   true,
+		Priority:  failed.Priority,
+		Weight:    weight,
+	}).Error)
+
+	settings := model_setting.GetGlobalSettings()
+	oldPolicy := settings.ChatCompletionsToResponsesPolicy
+	oldPassThrough := settings.PassThroughRequestEnabled
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = oldPolicy
+		settings.PassThroughRequestEnabled = oldPassThrough
+	})
+	settings.PassThroughRequestEnabled = false
+	settings.ChatCompletionsToResponsesPolicy = remoteCompactionChatOnlyPolicy(chatOnly.Id)
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, failed, "gpt-5.5"))
+	ctx.Set(relayInitialChannelConsumedKey, true)
+	addUsedChannel(ctx, failed.Id)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.5",
+			Input: common.RawMessage(`[{"type":"message","role":"user","content":"apply the patch"}]`),
+			Tools: common.RawMessage(`[{"type":"custom","name":"apply_patch","format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}}]`),
+		},
+		LastError: types.NewOpenAIError(
+			errors.New("Service temporarily unavailable"),
+			types.ErrorCodeBadResponseStatusCode,
+			http.StatusServiceUnavailable,
+		),
+	}
+	info.InitChannelMeta(ctx)
+
+	channel, err := getChannel(ctx, info, &service.RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-5.5",
+		Retry:      common.GetPointer(1),
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, native.Id, channel.Id)
+	require.Equal(t, []string{"199"}, ctx.GetStringSlice("use_channel"))
+}
+
 func TestGetChannelSkipsGlobalResponsesViaChatForUnsupportedNamespaceTool(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
 	chatOnly, _ := seedRemoteCompactionRouteChannels(t, db)

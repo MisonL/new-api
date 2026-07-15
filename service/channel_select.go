@@ -121,6 +121,27 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
 			excludedChannels := getUsedChannelSet(param.Ctx)
+			if priorityRetry > 0 && len(excludedChannels) > 0 {
+				channel, err = model.GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(
+					autoGroup,
+					param.ModelName,
+					0,
+					excludedChannels,
+					requestBodySize,
+					requestBodyLimitTTLHours,
+					requestBodyLimitNow,
+				)
+				if err != nil {
+					return nil, autoGroup, err
+				}
+				if channel != nil {
+					common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroup, autoGroup)
+					selectGroup = autoGroup
+					logger.LogDebug(param.Ctx, "Auto selected untried channel at highest priority in group: %s", autoGroup)
+					common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i)
+					break
+				}
+			}
 			channel, err = model.GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(
 				autoGroup,
 				param.ModelName,
@@ -170,6 +191,23 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
+		if param.GetRetry() > 0 && len(usedChannels) > 0 {
+			channel, err = model.GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(
+				param.TokenGroup,
+				param.ModelName,
+				0,
+				usedChannels,
+				requestBodySize,
+				requestBodyLimitTTLHours,
+				requestBodyLimitNow,
+			)
+			if err != nil {
+				return nil, param.TokenGroup, err
+			}
+			if channel != nil {
+				return channel, param.TokenGroup, nil
+			}
+		}
 		channel, err = model.GetRandomSatisfiedChannelExcludingWithRequestBodyLimit(
 			param.TokenGroup,
 			param.ModelName,

@@ -162,6 +162,56 @@ func TestAutoGroupRetryExcludesUsedChannel(t *testing.T) {
 	}
 }
 
+func TestRetryExhaustsSamePriorityBeforeDescending(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testCases := []struct {
+		name               string
+		tokenGroup         string
+		memoryCacheEnabled bool
+	}{
+		{name: "database group", tokenGroup: "default", memoryCacheEnabled: false},
+		{name: "database auto group", tokenGroup: "auto", memoryCacheEnabled: false},
+		{name: "memory cache group", tokenGroup: "default", memoryCacheEnabled: true},
+		{name: "memory cache auto group", tokenGroup: "auto", memoryCacheEnabled: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupChannelSelectTestDB(t)
+			common.MemoryCacheEnabled = tc.memoryCacheEnabled
+			seedPriorityRetryChannels(t, db)
+			if tc.memoryCacheEnabled {
+				model.InitChannelCache()
+			}
+
+			selectChannel := func(usedChannels []string) (*model.Channel, string, error) {
+				ctx, _ := gin.CreateTestContext(nil)
+				common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+				ctx.Set("use_channel", usedChannels)
+				return CacheGetRandomSatisfiedChannel(&RetryParam{
+					Ctx:        ctx,
+					TokenGroup: tc.tokenGroup,
+					ModelName:  "gpt-5.5",
+					Retry:      common.GetPointer(1),
+				})
+			}
+
+			channel, selectGroup, err := selectChannel([]string{"206"})
+			require.NoError(t, err)
+			require.Equal(t, "default", selectGroup)
+			require.NotNil(t, channel)
+			require.Equal(t, 207, channel.Id)
+
+			channel, selectGroup, err = selectChannel([]string{"206", "207"})
+			require.NoError(t, err)
+			require.Equal(t, "default", selectGroup)
+			require.NotNil(t, channel)
+			require.Equal(t, 208, channel.Id)
+		})
+	}
+}
+
 func TestAutoGroupSelectionPropagatesChannelLookupError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -257,6 +307,29 @@ func seedAutoGroupRetryChannels(t *testing.T, db *gorm.DB) {
 	channels := []*model.Channel{
 		{Id: 206, Name: "rate-limited", Status: common.ChannelStatusEnabled, Group: "default", Models: "gpt-5.5", Priority: &rateLimitedPriority, Weight: &rateLimitedWeight},
 		{Id: 207, Name: "fallback", Status: common.ChannelStatusEnabled, Group: "default", Models: "gpt-5.5", Priority: &fallbackPriority, Weight: &fallbackWeight},
+	}
+	for _, channel := range channels {
+		require.NoError(t, db.Create(channel).Error)
+		require.NoError(t, db.Create(&model.Ability{
+			Group:     "default",
+			Model:     "gpt-5.5",
+			ChannelId: channel.Id,
+			Enabled:   true,
+			Priority:  channel.Priority,
+			Weight:    *channel.Weight,
+		}).Error)
+	}
+}
+
+func seedPriorityRetryChannels(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	highPriority := int64(20)
+	lowPriority := int64(10)
+	weight := uint(1)
+	channels := []*model.Channel{
+		{Id: 206, Name: "high-a", Status: common.ChannelStatusEnabled, Group: "default", Models: "gpt-5.5", Priority: &highPriority, Weight: &weight},
+		{Id: 207, Name: "high-b", Status: common.ChannelStatusEnabled, Group: "default", Models: "gpt-5.5", Priority: &highPriority, Weight: &weight},
+		{Id: 208, Name: "low", Status: common.ChannelStatusEnabled, Group: "default", Models: "gpt-5.5", Priority: &lowPriority, Weight: &weight},
 	}
 	for _, channel := range channels {
 		require.NoError(t, db.Create(channel).Error)
