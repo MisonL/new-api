@@ -86,6 +86,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendRequestConversionChain(relayInfo, other)
 	appendFinalRequestFormat(relayInfo, other)
 	appendResponsesRelayInfo(ctx, relayInfo, other)
+	appendResponsesRequestShape(ctx, relayInfo, other)
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
 	AppendRequestHeaderPolicyInfo(ctx, other)
