@@ -56,16 +56,19 @@ exit 0
 - 损坏 settings JSON 显式失败且不清空原数据。
 - 管理员 usage log 输出正向观测证据。
 
-### L2 待执行
+### L2 已执行
 
-- 使用当前提交重建 `new-api-local:dev`。
-- 强制重建 3001 隔离容器。
-- 核对 `git rev-parse HEAD`、`/new-api --build-info` 与 `/api/status`。
-- 使用隔离渠道执行原生 Responses custom/namespace/tool_search 请求，核对数据库观测结果。
-- 渠道 160 若继续返回 429，只记录真实环境 gate 未满足，不将 429 判为协议失败。
+- 使用提交 `e6e0c31fd4d6f06f71a13f44afc6bbfd9daf8a0d` 重建 `new-api-local:dev` 并强制重建 3001；HEAD、容器 build-info 与 `/api/status` 一致。
+- 开发渠道 205 的 custom grammar 请求在 forced 与 auto tool choice 下均成功，输出正确工具名。原始 SSE 的 `response.output_item.done` 明确为 `custom_tool_call`，因此 custom 正向观测有直接事件证据。
+- 同一上游的 `response.completed.output` 将该项写成 `function_call`。观测来源是中间 `custom_tool_call`，不是把普通终止 `function_call` 误记为 custom。
+- 本机 Codex CLI 0.144.5 经 3001 指定渠道 205 实际执行 shell 工具成功，并在下一轮携带 `custom_tool_call`、`custom_tool_call_output` 历史继续完成。两次服务端日志均为 HTTP 200、`stream_status=done`。
+- 渠道 205 的 registry 只记录 `custom_tool_call=true`，没有写入 namespace 或 tool_search 证据。namespace 请求在 metadata 后收到上游 `upstream_connection_error`，由新断流逻辑明确返回 HTTP 502。
+- 开发渠道 160 的错误 false 已移除，但当前上游持续返回 429 并发限制；429 未被用于推断能力。tool_search 也没有新的真实成功证据。
+- 测试结束后开发渠道 205 已恢复原始 `status=2`。正式数据库和正式容器未修改。
 
 ## 发布门禁
 
-- L2 未通过前不修改正式渠道 160 的能力配置，不升级正式容器。
+- custom 正向观测链路的 L2 已通过；namespace 与 tool_search 仍必须保持未知，不能因 custom 成功一并放开。
 - 正式变更前重新备份数据库，并再次确认转换策略保持关闭。
+- 正式渠道 160 只能移除缺乏依据的 custom false；namespace 与 tool_search 需继续等待各自真实成功证据。
 - 升级后观察 502、524、429、压缩、工具调用和 capability conflict 日志。
