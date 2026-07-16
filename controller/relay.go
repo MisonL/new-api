@@ -2171,6 +2171,7 @@ func processChannelError(c *gin.Context, relayInfo *relaycommon.RelayInfo, chann
 		other["admin_info"] = adminInfo
 		service.AppendRequestHeaderPolicyInfo(c, other)
 		service.AppendResponsesRelayInfo(c, relayInfo, other)
+		service.AppendResponsesRequestShape(c, relayInfo, other)
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
 			startTime = time.Now()

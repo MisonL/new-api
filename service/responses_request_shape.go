@@ -88,6 +88,10 @@ func appendResponsesRequestShape(ctx *gin.Context, relayInfo *relaycommon.RelayI
 	other["responses_request_shape"] = shape
 }
 
+func AppendResponsesRequestShape(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	appendResponsesRequestShape(ctx, relayInfo, other)
+}
+
 func responsesRequestForShape(request interface{}) *dto.OpenAIResponsesRequest {
 	switch value := request.(type) {
 	case *dto.OpenAIResponsesRequest:
