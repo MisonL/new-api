@@ -624,6 +624,7 @@ func recordResponsesBuiltInToolUsage(c *gin.Context, info *relaycommon.RelayInfo
 	if info == nil || response == nil {
 		return
 	}
+	observeResponsesToolCapabilityOutputs(c, response.Output)
 	for _, tool := range response.Tools {
 		toolType := common.Interface2String(tool["type"])
 		if !mergeResponsesBuiltInToolInfo(info, toolType, tool) {
@@ -959,6 +960,7 @@ func countResponsesOutputItemDone(c *gin.Context, info *relaycommon.RelayInfo, i
 	if item == nil {
 		return
 	}
+	observeResponsesToolCapabilityOutput(c, item)
 	switch item.Type {
 	case dto.ResponsesOutputTypeImageGenerationCall:
 		spec := imageGenerationCallSpecFromOutput(item)

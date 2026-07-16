@@ -72,20 +72,32 @@ type ResponsesCapabilityObservation struct {
 	Reason     string `json:"reason,omitempty"`
 }
 
+type ResponsesToolCapabilityObservation struct {
+	ObservedAt        int64 `json:"observed_at,omitempty"`
+	CustomToolCall    bool  `json:"custom_tool_call,omitempty"`
+	NamespaceToolCall bool  `json:"namespace_tool_call,omitempty"`
+	ToolSearchCall    bool  `json:"tool_search_call,omitempty"`
+}
+
+func (o ResponsesToolCapabilityObservation) HasEvidence() bool {
+	return o.CustomToolCall || o.NamespaceToolCall || o.ToolSearchCall
+}
+
 type ResponsesChannelCapabilityRegistry struct {
-	Source                            string                          `json:"source,omitempty"`
-	Observed                          *ResponsesCapabilityObservation `json:"observed,omitempty"`
-	Probe                             *ResponsesCapabilityObservation `json:"probe,omitempty"`
-	SupportsResponses                 *bool                           `json:"supports_responses,omitempty"`
-	SupportsResponsesCompact          *bool                           `json:"supports_responses_compact,omitempty"`
-	SupportsChat                      *bool                           `json:"supports_chat,omitempty"`
-	SupportsRestPreviousResponseID    *bool                           `json:"supports_rest_previous_response_id,omitempty"`
-	SupportsCompactionItemPassthrough *bool                           `json:"supports_compaction_item_passthrough,omitempty"`
-	SupportsFunctionTools             *bool                           `json:"supports_function_tools,omitempty"`
-	SupportsCustomTools               *bool                           `json:"supports_custom_tools,omitempty"`
-	SupportsNamespaceTools            *bool                           `json:"supports_namespace_tools,omitempty"`
-	SupportsToolSearch                *bool                           `json:"supports_tool_search,omitempty"`
-	SupportsReasoningContext          *bool                           `json:"supports_reasoning_context,omitempty"`
+	Source                            string                              `json:"source,omitempty"`
+	Observed                          *ResponsesCapabilityObservation     `json:"observed,omitempty"`
+	Probe                             *ResponsesCapabilityObservation     `json:"probe,omitempty"`
+	ObservedTools                     *ResponsesToolCapabilityObservation `json:"observed_tools,omitempty"`
+	SupportsResponses                 *bool                               `json:"supports_responses,omitempty"`
+	SupportsResponsesCompact          *bool                               `json:"supports_responses_compact,omitempty"`
+	SupportsChat                      *bool                               `json:"supports_chat,omitempty"`
+	SupportsRestPreviousResponseID    *bool                               `json:"supports_rest_previous_response_id,omitempty"`
+	SupportsCompactionItemPassthrough *bool                               `json:"supports_compaction_item_passthrough,omitempty"`
+	SupportsFunctionTools             *bool                               `json:"supports_function_tools,omitempty"`
+	SupportsCustomTools               *bool                               `json:"supports_custom_tools,omitempty"`
+	SupportsNamespaceTools            *bool                               `json:"supports_namespace_tools,omitempty"`
+	SupportsToolSearch                *bool                               `json:"supports_tool_search,omitempty"`
+	SupportsReasoningContext          *bool                               `json:"supports_reasoning_context,omitempty"`
 }
 
 type ResponsesChannelCapabilitySnapshot struct {
@@ -108,6 +120,7 @@ type ResponsesChannelCapabilitySnapshot struct {
 	StripsResponsesReasoningContext   bool
 	Observed                          *ResponsesCapabilityObservation
 	Probe                             *ResponsesCapabilityObservation
+	ObservedTools                     *ResponsesToolCapabilityObservation
 }
 
 const (
@@ -259,6 +272,10 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 		if registry.Observed != nil {
 			snapshot.Source = "observed_calls"
 			snapshot.Observed = registry.Observed
+		}
+		if registry.ObservedTools != nil {
+			snapshot.Source = "observed_calls"
+			snapshot.ObservedTools = registry.ObservedTools
 		}
 		if registry.Probe != nil {
 			snapshot.Source = "probe"

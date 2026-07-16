@@ -227,6 +227,10 @@ func appendResponsesChannelCapabilityAdminInfo(relayInfo *relaycommon.RelayInfo,
 		adminInfo := getOrCreateAdminInfo(other)
 		adminInfo["responses_channel_capability_probe"] = snapshotInfo.Probe
 	}
+	if snapshotInfo.ObservedTools != nil {
+		adminInfo := getOrCreateAdminInfo(other)
+		adminInfo["responses_channel_tool_capability_observed"] = snapshotInfo.ObservedTools
+	}
 }
 
 func getOrCreateAdminInfo(other map[string]interface{}) map[string]interface{} {

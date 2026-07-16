@@ -566,6 +566,35 @@ func TestGenerateTextOtherInfoPutsCapabilityObservationInAdminInfo(t *testing.T)
 	require.Equal(t, observedAt, observed.ObservedAt)
 }
 
+func TestGenerateTextOtherInfoPutsObservedToolCapabilitiesInAdminInfo(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+
+	observedAt := time.Date(2026, 7, 16, 9, 3, 15, 0, time.UTC).Unix()
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					ObservedTools: &dto.ResponsesToolCapabilityObservation{
+						ObservedAt:     observedAt,
+						CustomToolCall: true,
+					},
+				},
+			},
+		},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	observed, ok := adminInfo["responses_channel_tool_capability_observed"].(*dto.ResponsesToolCapabilityObservation)
+	require.True(t, ok)
+	require.Equal(t, observedAt, observed.ObservedAt)
+	require.True(t, observed.CustomToolCall)
+}
+
 func TestResponsesChannelCapabilitySnapshotTreatsProxyProfileAsSyntheticOnly(t *testing.T) {
 	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{

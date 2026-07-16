@@ -242,6 +242,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 
 			if newAPIError == nil {
+				recordResponsesToolCapabilityObservation(c, relayInfo)
 				relayInfo.LastError = nil
 				return
 			}
