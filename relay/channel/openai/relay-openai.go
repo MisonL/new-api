@@ -203,7 +203,8 @@ func retryableUpstreamStreamInterruptedError(c *gin.Context, info *relaycommon.R
 	if info.StreamStatus.EndReason != relaycommon.StreamEndReasonUpstreamInterrupted {
 		return nil
 	}
-	if info.ReceivedResponseCount > 0 {
+	if info.ReceivedResponseCount > 0 &&
+		(c == nil || !common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamPreludeRetrySafe)) {
 		return nil
 	}
 	err := info.StreamStatus.EndError

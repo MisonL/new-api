@@ -1089,7 +1089,11 @@ const maxPendingResponsesStreamPreludeEvents = 8
 
 func isResponsesStreamPreludeEvent(eventType string) bool {
 	switch eventType {
-	case "response.created", "response.in_progress", "response.queued":
+	case "response.created",
+		"response.in_progress",
+		"response.queued",
+		"codex.rate_limits",
+		"codex.response.metadata":
 		return true
 	default:
 		return false

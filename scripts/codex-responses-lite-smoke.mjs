@@ -274,9 +274,17 @@ async function runToolSearch() {
 }
 
 async function runGrammarTool() {
-  const applyPatchTool = {
+  const customToolName = options['custom-tool-name'] ?? 'apply_patch';
+  const toolChoiceMode = options['tool-choice-mode'] ?? 'forced';
+  if (!/^[A-Za-z0-9_-]+$/.test(customToolName)) {
+    fail('custom-tool-name must contain only letters, numbers, underscores, or hyphens');
+  }
+  if (!['auto', 'forced'].includes(toolChoiceMode)) {
+    fail('tool-choice-mode must be auto or forced');
+  }
+  const customTool = {
     type: 'custom',
-    name: 'apply_patch',
+    name: customToolName,
     description: 'A grammar-constrained Codex compatibility probe.',
     format: {
       type: 'grammar',
@@ -290,24 +298,28 @@ async function runGrammarTool() {
       {
         type: 'additional_tools',
         role: 'developer',
-        tools: [applyPatchTool],
+        tools: [customTool],
       },
-      message('Call apply_patch with the exact input CODEX_LITE_GRAMMAR_OK.'),
+      message(`Call ${customToolName} with the exact input CODEX_LITE_GRAMMAR_OK.`),
     ],
-    tool_choice: { type: 'custom', name: 'apply_patch' },
+    tool_choice: toolChoiceMode === 'auto' ? 'auto' : { type: 'custom', name: customToolName },
     reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
     stream: true,
   };
   const response = await postJson('/v1/responses', body);
   assertCompletedResponse('grammar', response);
-  const calls = response.output.filter((item) => isToolCall(item) && item?.name === 'apply_patch');
+  const calls = response.output.filter(
+    (item) => isToolCall(item) && item?.name === customToolName,
+  );
   if (calls.length === 0) {
     const observed = response.output.map((item) => ({
       type: item?.type,
       name: item?.name,
       call_id_present: Boolean(item?.call_id),
     }));
-    fail(`grammar: upstream completed without the forced apply_patch tool call; observed=${JSON.stringify(observed)}`);
+    fail(
+      `grammar: upstream completed without ${customToolName} tool call; tool_choice=${toolChoiceMode}; observed=${JSON.stringify(observed)}`,
+    );
   }
   return summarize('grammar', response, {
     tool_names: calls.map((item) => item.name).filter(Boolean),

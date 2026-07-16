@@ -2750,6 +2750,72 @@ func TestOaiResponsesStreamHandlerReturnsRetryableErrorBeforeFirstWrite(t *testi
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestOaiResponsesStreamHandlerKeepsCodexMetadataPreludeRetryable(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := strings.Join([]string{
+		`data: {"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":12}}}`,
+		``,
+		`data: {"type":"codex.response.metadata","request_id":"upstream-request"}`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.6-sol",
+		},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, types.ErrorCodeUpstreamTransportInterrupted, err.GetErrorCode())
+	require.False(t, c.Writer.Written())
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesStreamHandlerFlushesCodexMetadataPreludeOnCompleted(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := strings.Join([]string{
+		`data: {"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":12}}}`,
+		``,
+		`data: {"type":"codex.response.metadata","request_id":"upstream-request"}`,
+		``,
+		`data: {"type":"response.completed","response":{"id":"resp_ok","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.6-sol",
+		},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Contains(t, recorder.Body.String(), `"type":"codex.rate_limits"`)
+	require.Contains(t, recorder.Body.String(), `"type":"codex.response.metadata"`)
+	require.Contains(t, recorder.Body.String(), `"type":"response.completed"`)
+}
+
 func TestRemoteCompactionFirstDataEventTimeoutOnlyAppliesToRemoteCompaction(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
