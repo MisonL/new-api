@@ -82,6 +82,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	var (
 		newAPIError *types.NewAPIError
+		relayInfo   *relaycommon.RelayInfo
 		ws          *websocket.Conn
 	)
 
@@ -99,27 +100,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
-			switch relayFormat {
-			case types.RelayFormatOpenAIRealtime:
-				helper.WssError(c, ws, newAPIError.ToOpenAIError())
-			case types.RelayFormatClaude:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"type":  "error",
-					"error": newAPIError.ToClaudeError(),
-				})
-			default:
-				if service.ShouldWriteResponsesBootstrapStreamError(c) {
-					helper.SetEventStreamHeaders(c)
-					service.MarkResponsesBootstrapHeadersSent(c)
-					if err := helper.OpenAIErrorEvent(c, newAPIError.ToOpenAIError()); err != nil {
-						logger.LogError(c, fmt.Sprintf("write bootstrap stream error failed: %s", err.Error()))
-					}
-				} else {
-					c.JSON(newAPIError.StatusCode, gin.H{
-						"error": newAPIError.ToOpenAIError(),
-					})
-				}
-			}
+			writeRelayErrorResponse(c, relayFormat, relayInfo, ws, newAPIError)
 		}
 	}()
 
@@ -134,7 +115,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
+	relayInfo, err = relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
@@ -405,6 +386,42 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	if newAPIError != nil {
 		gopool.Go(func() {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
+		})
+	}
+}
+
+func writeRelayErrorResponse(c *gin.Context, relayFormat types.RelayFormat, relayInfo *relaycommon.RelayInfo, ws *websocket.Conn, newAPIError *types.NewAPIError) {
+	if c == nil || newAPIError == nil {
+		return
+	}
+	switch relayFormat {
+	case types.RelayFormatOpenAIRealtime:
+		helper.WssError(c, ws, newAPIError.ToOpenAIError())
+	case types.RelayFormatClaude:
+		c.JSON(newAPIError.StatusCode, gin.H{
+			"type":  "error",
+			"error": newAPIError.ToClaudeError(),
+		})
+	default:
+		if relayInfo != nil && relayInfo.IsStream &&
+			(relayInfo.RelayMode == relayconstant.RelayModeResponses || relayInfo.RelayMode == relayconstant.RelayModeResponsesCompact) &&
+			c.Writer.Written() {
+			helper.SetEventStreamHeaders(c)
+			if err := helper.OpenAIErrorEvent(c, newAPIError.ToOpenAIError()); err != nil {
+				logger.LogError(c, fmt.Sprintf("write responses stream error failed: %s", err.Error()))
+			}
+			return
+		}
+		if service.ShouldWriteResponsesBootstrapStreamError(c) {
+			helper.SetEventStreamHeaders(c)
+			service.MarkResponsesBootstrapHeadersSent(c)
+			if err := helper.OpenAIErrorEvent(c, newAPIError.ToOpenAIError()); err != nil {
+				logger.LogError(c, fmt.Sprintf("write bootstrap stream error failed: %s", err.Error()))
+			}
+			return
+		}
+		c.JSON(newAPIError.StatusCode, gin.H{
+			"error": newAPIError.ToOpenAIError(),
 		})
 	}
 }
