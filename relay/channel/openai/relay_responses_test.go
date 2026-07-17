@@ -2816,6 +2816,38 @@ func TestOaiResponsesStreamHandlerFlushesCodexMetadataPreludeOnCompleted(t *test
 	require.Contains(t, recorder.Body.String(), `"type":"response.completed"`)
 }
 
+func TestOaiResponsesStreamHandlerReturnsTerminalErrorAfterPayload(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"partial output"}`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.6-sol",
+		},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, types.ErrorCodeUpstreamTransportInterrupted, err.GetErrorCode())
+	require.Equal(t, http.StatusBadGateway, err.StatusCode)
+	require.True(t, types.IsSkipRetryError(err))
+	require.True(t, c.Writer.Written())
+	require.Contains(t, recorder.Body.String(), `"type":"response.output_text.delta"`)
+}
+
 func TestRemoteCompactionFirstDataEventTimeoutOnlyAppliesToRemoteCompaction(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -2977,8 +3009,10 @@ func TestOaiResponsesStreamHandlerDoesNotRecordAffinityBeforeCompleted(t *testin
 
 	usage, err := OaiResponsesStreamHandler(c, info, resp)
 
-	require.Nil(t, err)
-	require.NotNil(t, usage)
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, types.ErrorCodeUpstreamTransportInterrupted, err.GetErrorCode())
+	require.True(t, types.IsSkipRetryError(err))
 	require.Equal(t, relaycommon.StreamEndReasonUpstreamInterrupted, info.StreamStatus.EndReason)
 
 	hitCtx, _ := gin.CreateTestContext(httptest.NewRecorder())

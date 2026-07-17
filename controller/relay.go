@@ -1087,6 +1087,13 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if openaiErr == nil {
 		return false
 	}
+	if c != nil && c.Writer != nil && c.Writer.Written() {
+		if retrySafe, ok := common.GetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe); ok {
+			if safe, valid := retrySafe.(bool); valid && !safe {
+				return false
+			}
+		}
+	}
 	if service.IsUpstreamRateLimitRetryTerminal(c) {
 		return false
 	}

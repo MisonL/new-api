@@ -576,6 +576,40 @@ func TestShouldRetryAllowsUpstreamStreamInterruptedDespiteChannelAffinitySkip(t 
 	require.False(t, shouldRetry(c, err, 0))
 }
 
+func TestShouldRetryStopsAfterResponsesPayloadWasWritten(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	_, writeErr := c.Writer.Write([]byte("event: response.output_text.delta\n\n"))
+	require.NoError(t, writeErr)
+	common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, false)
+
+	err := types.NewOpenAIError(
+		errors.New("stream disconnected before completion"),
+		types.ErrorCodeUpstreamTransportInterrupted,
+		http.StatusBadGateway,
+	)
+
+	require.False(t, shouldRetry(c, err, 1))
+}
+
+func TestShouldRetryAllowsResponsesPreludeRecovery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	_, writeErr := c.Writer.Write([]byte(": PING\n\n"))
+	require.NoError(t, writeErr)
+	common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, true)
+
+	err := types.NewOpenAIError(
+		errors.New("stream disconnected before completion"),
+		types.ErrorCodeUpstreamTransportInterrupted,
+		http.StatusBadGateway,
+	)
+
+	require.True(t, shouldRetry(c, err, 1))
+}
+
 func TestShouldRetryAllowsNoAuthAvailableDespiteChannelAffinitySkip(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)

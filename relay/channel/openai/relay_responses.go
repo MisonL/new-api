@@ -1274,6 +1274,19 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if newAPIError := retryableUpstreamStreamInterruptedError(c, info); newAPIError != nil {
 		return nil, newAPIError
 	}
+	if info != nil && info.StreamStatus != nil &&
+		info.StreamStatus.EndReason == relaycommon.StreamEndReasonUpstreamInterrupted {
+		err := info.StreamStatus.EndError
+		if err == nil {
+			err = io.ErrUnexpectedEOF
+		}
+		return nil, types.NewOpenAIError(
+			err,
+			types.ErrorCodeUpstreamTransportInterrupted,
+			http.StatusBadGateway,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
 
 	shouldEstimateCompletionTokens := usage.CompletionTokens == 0 &&
 		(!hasCompletedUsage || responseTextBuilder.Len() > 0)
