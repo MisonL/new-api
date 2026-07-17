@@ -366,6 +366,18 @@ func TestValidResponsesToolOutputEncryptedContentTarget(t *testing.T) {
 	_, valid, err = ValidResponsesToolOutputEncryptedContentTarget(req, "input[1].encrypted_content", "")
 	require.NoError(t, err)
 	require.False(t, valid)
+
+	for _, invalidItem := range []string{
+		`{"type":"function_call_output","output":"done"}`,
+		`{"type":"function_call_output","call_id":"call_1","output":""}`,
+		`{"type":"function_call_output","call_id":"call_1","output":[]}`,
+		`{"type":"function_call_output","call_id":"call_1","output":{}}`,
+	} {
+		req.Input = rootcommon.RawMessage("[" + invalidItem + "]")
+		_, valid, err = ValidResponsesToolOutputEncryptedContentTarget(req, "input[0].encrypted_content", "")
+		require.NoError(t, err)
+		require.False(t, valid, invalidItem)
+	}
 }
 
 func TestStripResponsesInputEncryptedContentItemRequiresEncryptedContentItemType(t *testing.T) {

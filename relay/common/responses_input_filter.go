@@ -429,10 +429,23 @@ func ValidResponsesToolOutputEncryptedContentTarget(request dto.OpenAIResponsesR
 		return ResponsesEncryptedContentTarget{}, false, nil
 	}
 	output := bytes.TrimSpace(item["output"])
-	if len(output) == 0 || bytes.Equal(output, []byte("null")) {
+	if !validResponsesToolOutput(output) {
 		return ResponsesEncryptedContentTarget{}, false, nil
 	}
 	return ResponsesEncryptedContentTarget{InputIndex: path.inputIndex, ItemType: itemType}, true, nil
+}
+
+func validResponsesToolOutput(output json.RawMessage) bool {
+	switch basecommon.GetJsonType(output) {
+	case "string":
+		var text string
+		return basecommon.Unmarshal(output, &text) == nil && strings.TrimSpace(text) != ""
+	case "array":
+		var content []json.RawMessage
+		return basecommon.Unmarshal(output, &content) == nil && len(content) > 0
+	default:
+		return false
+	}
 }
 
 func responsesEncryptedContentInputPathFromError(param string, message string) (responsesEncryptedContentInputPath, bool) {
