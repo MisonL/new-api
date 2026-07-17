@@ -186,6 +186,13 @@ post_json() {
   curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -o "$out" -w '%{http_code}' -K "$CURL_CONFIG" --data "$payload" "$BASE_URL${path}"
 }
 
+post_json_remote_compaction() {
+  local path="$1"
+  local payload="$2"
+  local out="$3"
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -o "$out" -w '%{http_code}' -K "$CURL_CONFIG" -H 'X-Codex-Beta-Features: remote_compaction_v2' --data "$payload" "$BASE_URL${path}"
+}
+
 reset_upstream() {
   curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_reset" >/dev/null
 }
@@ -196,6 +203,10 @@ capture_summary() {
 
 assert_contains() { local file="$1" needle="$2"
   grep -q "$needle" "$file" || { echo "missing ${needle} in ${file}" >&2; cat "$file" >&2; exit 1; }
+}
+
+assert_not_contains() { local file="$1" needle="$2"
+  ! grep -q "$needle" "$file" || { echo "unexpected ${needle} in ${file}" >&2; cat "$file" >&2; exit 1; }
 }
 
 run_case_native_newapi_compact() {
@@ -219,6 +230,87 @@ run_case_native_newapi_compact() {
   summary="$(capture_summary)"
   echo "$summary"
   [[ "$summary" == *"\"previous_response_id\":\"${response_id}\""* ]]
+}
+
+run_case_stream_options_include_usage_recovery() {
+  echo "case=stream_options_include_usage_recovery"
+  set_single_channel "$CHANNEL_NATIVE_NEWAPI" 'gpt-5.5'
+  reset_upstream
+
+  local payload out code captures capability
+  payload='{"model":"gpt-5.5","stream":true,"stream_options":{"include_usage":true,"include_obfuscation":true},"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"STREAM_OPTIONS_INCLUDE_USAGE_E2E"}]}]}'
+  out="$TMP_DIR/stream_options_first.sse"
+  code="$(post_json /v1/responses "$payload" "$out")"
+  echo "first_status=${code}"
+  [[ "$code" == "200" ]]
+  assert_contains "$out" 'resp_stream_options_compat_ok'
+  assert_not_contains "$out" 'resp_stream_options_compat_error'
+  assert_not_contains "$out" 'Unknown parameter'
+
+  captures="$TMP_DIR/stream_options_first_captures.json"
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_captures" >"$captures"
+  node -e '
+    const fs = require("fs");
+    const captures = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    if (captures.length !== 2) process.exit(2);
+    const [first, second] = captures;
+    if (!first.hasStreamOptionsIncludeUsage || !first.hasStreamOptionsIncludeObfuscation) process.exit(3);
+    if (second.hasStreamOptionsIncludeUsage || !second.hasStreamOptionsIncludeObfuscation) process.exit(4);
+    console.log("first_attempt_retried=true");
+  ' "$captures"
+
+  capability="$(psql_query <<< "select settings::jsonb #>> '{responses_capability_registry,supports_stream_options_include_usage}' from channels where id = ${CHANNEL_NATIVE_NEWAPI}")"
+  [[ "$capability" == "false" ]]
+  echo "capability_persisted=false"
+
+  reset_upstream
+  out="$TMP_DIR/stream_options_second.sse"
+  code="$(post_json /v1/responses "$payload" "$out")"
+  echo "second_status=${code}"
+  [[ "$code" == "200" ]]
+  assert_contains "$out" 'resp_stream_options_compat_ok'
+  assert_not_contains "$out" 'Unknown parameter'
+
+  captures="$TMP_DIR/stream_options_second_captures.json"
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_captures" >"$captures"
+  node -e '
+    const fs = require("fs");
+    const captures = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    if (captures.length !== 1) process.exit(2);
+    const [attempt] = captures;
+    if (attempt.hasStreamOptionsIncludeUsage || !attempt.hasStreamOptionsIncludeObfuscation) process.exit(3);
+    console.log("learned_capability_pre_stripped=true");
+  ' "$captures"
+}
+
+run_case_remote_compaction_413_recovery() {
+  echo "case=remote_compaction_413_recovery"
+  set_single_channel "$CHANNEL_NATIVE_NEWAPI" 'gpt-5.5'
+  reset_upstream
+
+  local payload out code captures request_body_limit_present
+  payload='{"model":"gpt-5.5","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"REMOTE_COMPACTION_413_E2E"}]},{"type":"compaction_trigger"}]}'
+  out="$TMP_DIR/remote_compaction_413.sse"
+  code="$(post_json_remote_compaction /v1/responses "$payload" "$out")"
+  echo "status=${code}"
+  [[ "$code" == "200" ]]
+  assert_contains "$out" 'compaction'
+  assert_not_contains "$out" 'upstream request too large'
+
+  captures="$TMP_DIR/remote_compaction_413_captures.json"
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_captures" >"$captures"
+  node -e '
+    const fs = require("fs");
+    const captures = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    if (captures.length !== 2) process.exit(2);
+    const [first, second] = captures;
+    if (!first.hasCompactionTrigger || second.hasCompactionTrigger) process.exit(3);
+    console.log("upstream_413_recovered_with_synthetic_compact=true");
+  ' "$captures"
+
+  request_body_limit_present="$(psql_query <<< "select coalesce(settings::jsonb ? 'request_body_limit', false) from channels where id = ${CHANNEL_NATIVE_NEWAPI}")"
+  [[ "$request_body_limit_present" == "f" ]]
+  echo "recoverable_remote_413_did_not_set_request_body_limit=true"
 }
 
 run_case_synthetic_continue() {
@@ -345,6 +437,8 @@ main() {
   docker exec "$APP_CONTAINER" /new-api --build-info
   restart_dev
   run_case_native_newapi_compact
+  run_case_stream_options_include_usage_recovery
+  run_case_remote_compaction_413_recovery
   run_case_synthetic_continue
   run_case_stale_visible_only
   run_case_generic_rejects_remote_opaque

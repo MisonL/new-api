@@ -26,6 +26,15 @@ function sendJson(res, status, obj) {
   res.end(body);
 }
 
+function sendSse(res, events) {
+  const body = `${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')}data: [DONE]\n\n`;
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'content-length': Buffer.byteLength(body),
+  });
+  res.end(body);
+}
+
 function summarizeCapture(req, url, body) {
   let parsed = null;
   try {
@@ -34,6 +43,7 @@ function summarizeCapture(req, url, body) {
     parsed = null;
   }
   const input = Array.isArray(parsed?.input) ? parsed.input : [];
+  const streamOptions = parsed?.stream_options;
   return {
     method: req.method,
     url: url.pathname,
@@ -41,6 +51,9 @@ function summarizeCapture(req, url, body) {
     previous_response_id: parsed?.previous_response_id || '',
     inputTypes: input.map((item) => item?.type).filter(Boolean),
     hasCompaction: input.some((item) => item?.type === 'compaction'),
+    hasCompactionTrigger: input.some((item) => item?.type === 'compaction_trigger'),
+    hasStreamOptionsIncludeUsage: streamOptions?.include_usage === true,
+    hasStreamOptionsIncludeObfuscation: streamOptions?.include_obfuscation === true,
     bodyBytes: Buffer.byteLength(body),
   };
 }
@@ -91,6 +104,47 @@ function fakeCompactBody(parsed) {
   };
 }
 
+function hasInputMarker(parsed, marker) {
+  return JSON.stringify(parsed?.input ?? []).includes(marker);
+}
+
+function streamOptionsCompatErrorEvents() {
+  return [
+    { type: 'response.created', response: { id: 'resp_stream_options_compat_error', object: 'response' } },
+    { type: 'response.in_progress', response: { id: 'resp_stream_options_compat_error', object: 'response' } },
+    {
+      type: 'response.error',
+      error: {
+        message: "Unknown parameter: 'stream_options.include_usage'.",
+        type: 'invalid_request_error',
+        param: 'stream_options.include_usage',
+        code: 'unknown_parameter',
+      },
+    },
+  ];
+}
+
+function streamOptionsCompatSuccessEvents(parsed) {
+  const response = {
+    id: 'resp_stream_options_compat_ok',
+    object: 'response',
+    status: 'completed',
+    model: parsed?.model || 'gpt-5.5',
+    output: [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'stream options compatibility recovered' }],
+      },
+    ],
+    usage: { input_tokens: 12, output_tokens: 4, total_tokens: 16 },
+  };
+  return [
+    { type: 'response.created', response: { id: response.id, object: 'response' } },
+    { type: 'response.completed', response },
+  ];
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${host}:${port}`);
   if (url.pathname === '/_reset') {
@@ -110,6 +164,9 @@ const server = http.createServer(async (req, res) => {
         previous_response_id: item.previous_response_id,
         inputTypes: item.inputTypes,
         hasCompaction: item.hasCompaction,
+        hasCompactionTrigger: item.hasCompactionTrigger,
+        hasStreamOptionsIncludeUsage: item.hasStreamOptionsIncludeUsage,
+        hasStreamOptionsIncludeObfuscation: item.hasStreamOptionsIncludeObfuscation,
         bodyBytes: item.bodyBytes,
       })),
     );
@@ -143,6 +200,21 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, fakeCompactBody(parsed));
   }
   if (url.pathname === '/v1/responses') {
+    if (hasInputMarker(parsed, 'REMOTE_COMPACTION_413_E2E') && captures.at(-1)?.hasCompactionTrigger) {
+      return sendJson(res, 413, {
+        error: {
+          message: 'upstream request too large',
+          type: 'invalid_request_error',
+          code: 'upstream_request_too_large',
+        },
+      });
+    }
+    if (parsed?.stream === true && hasInputMarker(parsed, 'STREAM_OPTIONS_INCLUDE_USAGE_E2E')) {
+      if (parsed?.stream_options?.include_usage === true) {
+        return sendSse(res, streamOptionsCompatErrorEvents());
+      }
+      return sendSse(res, streamOptionsCompatSuccessEvents(parsed));
+    }
     return sendJson(res, 200, fakeResponsesBody(parsed));
   }
   if (url.pathname === '/v1/chat/completions') {

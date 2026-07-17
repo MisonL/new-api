@@ -254,6 +254,7 @@ type StreamOptions struct {
 	// This field is filtered by default and can be enabled via channel setting allow_include_obfuscation.
 	IncludeObfuscation bool                       `json:"include_obfuscation,omitempty"`
 	Extra              map[string]json.RawMessage `json:"-"`
+	includeUsageSet    bool                       `json:"-"`
 }
 
 var streamOptionsKnownFields = sync.OnceValue(func() map[string]struct{} {
@@ -273,7 +274,20 @@ func (s *StreamOptions) UnmarshalJSON(data []byte) error {
 	}
 	*s = StreamOptions(known)
 	s.Extra = collectUnknownJSONFields(rawMap, streamOptionsKnownFields())
+	_, s.includeUsageSet = rawMap["include_usage"]
 	return nil
+}
+
+func (s *StreamOptions) HasIncludeUsageField() bool {
+	return s != nil && (s.IncludeUsage || s.includeUsageSet)
+}
+
+func (s *StreamOptions) RemoveIncludeUsage() {
+	if s == nil {
+		return
+	}
+	s.IncludeUsage = false
+	s.includeUsageSet = false
 }
 
 func (s StreamOptions) MarshalJSON() ([]byte, error) {

@@ -479,6 +479,59 @@ func TestResponsesChannelCapabilitySnapshotTreatsSub2APIHTTPAsNoRESTPreviousID(t
 	require.Equal(t, true, snapshot["strips_responses_encrypted_reasoning"])
 }
 
+func TestResponsesChannelCapabilitySnapshotIncludesStreamOptionsIncludeUsageCapability(t *testing.T) {
+	unsupported := false
+	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}, dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsStreamOptionsIncludeUsage: &unsupported,
+		},
+	})
+
+	require.Equal(t, false, snapshot["supports_stream_options_include_usage"])
+}
+
+func TestGenerateTextOtherInfoIncludesStreamOptionsIncludeUsageRecoveryMarkers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetry, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetryChannelID, 72)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesStreamOptionsCapabilityStripped, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesStreamOptionsCapabilityStrippedChannelID, 72)
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 72},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, true, other["responses_stream_options_include_usage_retry"])
+	require.Equal(t, true, other["responses_stream_options_include_usage_capability_stripped"])
+}
+
+func TestGenerateTextOtherInfoOmitsStreamOptionsRecoveryMarkersFromAnotherChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetry, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetryChannelID, 72)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesStreamOptionsCapabilityStripped, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesStreamOptionsCapabilityStrippedChannelID, 72)
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 73},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	_, retried := other["responses_stream_options_include_usage_retry"]
+	_, stripped := other["responses_stream_options_include_usage_capability_stripped"]
+	require.False(t, retried)
+	require.False(t, stripped)
+}
+
 func TestGenerateTextOtherInfoIncludesResponsesReasoningContextAction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

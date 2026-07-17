@@ -134,6 +134,14 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesArgumentsHistoryRetry) {
 			other["responses_arguments_history_retry"] = true
 		}
+		if relayInfo.ChannelMeta != nil && common.GetContextKeyBool(ctx, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetry) &&
+			common.GetContextKeyInt(ctx, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetryChannelID) == relayInfo.ChannelMeta.ChannelId {
+			other["responses_stream_options_include_usage_retry"] = true
+		}
+		if relayInfo.ChannelMeta != nil && common.GetContextKeyBool(ctx, constant.ContextKeyResponsesStreamOptionsCapabilityStripped) &&
+			common.GetContextKeyInt(ctx, constant.ContextKeyResponsesStreamOptionsCapabilityStrippedChannelID) == relayInfo.ChannelMeta.ChannelId {
+			other["responses_stream_options_include_usage_capability_stripped"] = true
+		}
 		if action := common.GetContextKeyString(ctx, constant.ContextKeyResponsesReasoningContextAction); action != "" {
 			other["responses_reasoning_context_action"] = action
 		}
@@ -207,6 +215,9 @@ func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settin
 	}
 	if snapshotInfo.SupportsReasoningContext != nil {
 		snapshot["supports_reasoning_context"] = *snapshotInfo.SupportsReasoningContext
+	}
+	if snapshotInfo.SupportsStreamOptionsIncludeUsage != nil {
+		snapshot["supports_stream_options_include_usage"] = *snapshotInfo.SupportsStreamOptionsIncludeUsage
 	}
 	if snapshotInfo.Profile != "" {
 		snapshot["profile"] = string(snapshotInfo.Profile)

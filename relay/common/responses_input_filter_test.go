@@ -328,6 +328,21 @@ func TestStripResponsesInputEncryptedContentItemRemovesUnpopulatedReasoning(t *t
 	require.Contains(t, string(got.Input), `"type":"message"`)
 }
 
+func TestStripResponsesInputEncryptedContentItemKeepsSoleReasoningItem(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6",
+		Input: rootcommon.RawMessage(`[
+			{"type":"reasoning","encrypted_content":"opaque"}
+		]`),
+	}
+
+	got, removed, err := StripResponsesInputEncryptedContentItem(req, "input[0].encrypted_content", "")
+
+	require.NoError(t, err)
+	require.False(t, removed)
+	require.Equal(t, req.Input, got.Input)
+}
+
 func TestStripResponsesInputEncryptedContentItemDoesNotRemoveNonReasoningTopLevelItem(t *testing.T) {
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6",

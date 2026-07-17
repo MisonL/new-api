@@ -2937,6 +2937,8 @@ func TestShouldFallbackRemoteResponsesCompaction(t *testing.T) {
 		{name: "bad gateway recovers", statusCode: http.StatusBadGateway, input: visibleInput, want: true},
 		{name: "first data timeout recovers", statusCode: http.StatusBadGateway, errorCode: types.ErrorCodeUpstreamTransportInterrupted, input: visibleInput, want: true},
 		{name: "service unavailable recovers", statusCode: http.StatusServiceUnavailable, input: visibleInput, want: true},
+		{name: "upstream request too large recovers", statusCode: http.StatusRequestEntityTooLarge, errorCode: types.ErrorCodeUpstreamRequestTooLarge, input: visibleInput, want: true},
+		{name: "unclassified request too large does not recover", statusCode: http.StatusRequestEntityTooLarge, input: visibleInput, want: false},
 		{name: "rate limit keeps cross channel retry", statusCode: http.StatusTooManyRequests, input: visibleInput, want: false},
 		{name: "opaque compaction cannot recover locally", statusCode: http.StatusBadGateway, input: opaqueInput, want: false},
 		{name: "ordinary responses do not recover", statusCode: http.StatusBadGateway, input: `[{"type":"message","role":"user","content":"hello"}]`, want: false},

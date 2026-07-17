@@ -98,6 +98,7 @@ type ResponsesChannelCapabilityRegistry struct {
 	SupportsNamespaceTools            *bool                               `json:"supports_namespace_tools,omitempty"`
 	SupportsToolSearch                *bool                               `json:"supports_tool_search,omitempty"`
 	SupportsReasoningContext          *bool                               `json:"supports_reasoning_context,omitempty"`
+	SupportsStreamOptionsIncludeUsage *bool                               `json:"supports_stream_options_include_usage,omitempty"`
 }
 
 type ResponsesChannelCapabilitySnapshot struct {
@@ -116,6 +117,7 @@ type ResponsesChannelCapabilitySnapshot struct {
 	SupportsToolSearch                bool
 	ReasoningContextCapability        ResponsesReasoningContextCapability
 	SupportsReasoningContext          *bool
+	SupportsStreamOptionsIncludeUsage *bool
 	StripsResponsesEncryptedReasoning bool
 	StripsResponsesReasoningContext   bool
 	Observed                          *ResponsesCapabilityObservation
@@ -264,6 +266,7 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 		SupportsToolSearch:                defaultSupportsToolSearchCapability(profile),
 		ReasoningContextCapability:        reasoningContextCapability,
 		SupportsReasoningContext:          responsesReasoningContextSupportPointer(reasoningContextCapability),
+		SupportsStreamOptionsIncludeUsage: nil,
 		StripsResponsesEncryptedReasoning: s.ShouldStripResponsesEncryptedReasoning(),
 		StripsResponsesReasoningContext:   reasoningContextCapability == ResponsesReasoningContextCapabilityUnsupported,
 	}
@@ -346,6 +349,16 @@ func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesToolSearch() bool {
 	return profile != "" && !defaultSupportsToolSearchCapability(profile)
 }
 
+func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesStreamOptionsIncludeUsage() bool {
+	if s == nil {
+		return false
+	}
+	registry := s.responsesCapabilityRegistry()
+	return registry != nil &&
+		registry.SupportsStreamOptionsIncludeUsage != nil &&
+		!*registry.SupportsStreamOptionsIncludeUsage
+}
+
 func (s *ChannelOtherSettings) explicitResponsesCapabilityConfigured() bool {
 	return s != nil && (s.ResponsesCompactMode != "" || s.ResponsesUpstreamProfile != "" || s.ResponsesCapabilityRegistry != nil)
 }
@@ -390,6 +403,9 @@ func applyCapabilityOverrides(snapshot *ResponsesChannelCapabilitySnapshot, regi
 			snapshot.ReasoningContextCapability = ResponsesReasoningContextCapabilityUnsupported
 			snapshot.StripsResponsesReasoningContext = true
 		}
+	}
+	if registry.SupportsStreamOptionsIncludeUsage != nil {
+		snapshot.SupportsStreamOptionsIncludeUsage = cloneBool(registry.SupportsStreamOptionsIncludeUsage)
 	}
 }
 

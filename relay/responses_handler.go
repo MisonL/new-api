@@ -238,6 +238,7 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 type responsesCompatibilityRetryState struct {
 	attempts                           int
 	encryptedContentParameterAttempted bool
+	streamOptionsIncludeUsageAttempted bool
 	argumentsObjectAttempted           bool
 	argumentsStringAttempted           bool
 }
@@ -251,6 +252,11 @@ func buildOpenAIResponsesCompatibilityRetry(c *gin.Context, info *relaycommon.Re
 			retryState.encryptedContentParameterAttempted = true
 		}
 		return buildResponsesWithoutEncryptedReasoningRetry(c, info, adaptor, convertedRequest, newAPIError)
+	}
+	if shouldRetryResponsesWithoutStreamOptionsIncludeUsage(info, newAPIError) &&
+		!retryState.streamOptionsIncludeUsageAttempted {
+		retryState.streamOptionsIncludeUsageAttempted = true
+		return buildResponsesWithoutStreamOptionsIncludeUsageRetry(c, info, adaptor, convertedRequest, newAPIError)
 	}
 	if shouldRetryResponsesWithoutNamespaceHistory(info, newAPIError) {
 		return buildResponsesWithoutNamespaceHistoryRetry(c, info, adaptor, convertedRequest, newAPIError)
@@ -271,9 +277,11 @@ func buildResponsesWithoutEncryptedReasoningRetry(c *gin.Context, info *relaycom
 	removedEncryptedReasoning := 0
 	remainingItems := 0
 	removedTarget := false
+	retryMode := "generic_reasoning"
 	var strippedRequest dto.OpenAIResponsesRequest
 	var stripErr error
 	if isResponsesEncryptedContentParameterError(openAIError) {
+		retryMode = "targeted_item"
 		strippedRequest, removedTarget, stripErr = relaycommon.StripResponsesInputEncryptedContentItem(convertedRequest, openAIError.Param, openAIError.Message)
 		if stripErr != nil {
 			return nil, convertedRequest, false, nil
@@ -304,9 +312,10 @@ func buildResponsesWithoutEncryptedReasoningRetry(c *gin.Context, info *relaycom
 	}
 	common.SetContextKey(c, appconstant.ContextKeyResponsesEncryptedContextRetry, true)
 	common.SysLog(fmt.Sprintf(
-		"responses encrypted context retry: channel_id=%d model=%s targeted_item=%t encrypted_reasoning_items=%d remaining_items=%d original_error=%s",
+		"responses encrypted context retry: channel_id=%d model=%s mode=%s targeted_item=%t encrypted_reasoning_items=%d remaining_items=%d original_error=%s",
 		info.ChannelId,
 		info.OriginModelName,
+		retryMode,
 		removedTarget,
 		removedEncryptedReasoning,
 		remainingItems,
@@ -455,6 +464,18 @@ type buildResponsesRequestBodyOptions struct {
 func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, request *dto.OpenAIResponsesRequest, passThroughGlobal bool, options ...buildResponsesRequestBodyOptions) (io.Reader, dto.OpenAIResponsesRequest, *types.NewAPIError) {
 	var requestBody io.Reader
 	convertedResponsesRequest := *request
+	streamOptionsIncludeUsageCapabilityDisabled := relaycommon.IsOpenAICompatibleResponses(info) &&
+		info.ChannelOtherSettings.ExplicitlyDisablesResponsesStreamOptionsIncludeUsage()
+	streamOptionsIncludeUsageCapabilityStripped := false
+	if streamOptionsIncludeUsageCapabilityDisabled {
+		strippedRequest, stripped := stripResponsesStreamOptionsIncludeUsage(*request)
+		if stripped {
+			request = &strippedRequest
+			convertedResponsesRequest = strippedRequest
+			streamOptionsIncludeUsageCapabilityStripped = true
+			markResponsesStreamOptionsIncludeUsageCapabilityStripped(c, info)
+		}
+	}
 	contextCompactionNormalized := false
 	if relaycommon.IsOpenAICompatibleResponses(info) {
 		normalizedRequest, result, err := relaycommon.NormalizeContextCompactionForResponsesRequest(*request)
@@ -487,6 +508,7 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) &&
 		!relaycommon.ShouldConvertResponsesRequest(info) &&
 		(request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0) &&
+		!streamOptionsIncludeUsageCapabilityStripped &&
 		!contextCompactionNormalized &&
 		!common.GetContextKeyBool(c, appconstant.ContextKeyResponsesRemoteCompactSyntheticFallback) &&
 		(!syntheticCompactReference || nativeOpaqueReference)
@@ -560,6 +582,16 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
 			if err != nil {
 				return nil, convertedResponsesRequest, newAPIErrorFromParamOverride(err)
+			}
+		}
+		if streamOptionsIncludeUsageCapabilityDisabled {
+			var stripped bool
+			jsonData, stripped, err = stripResponsesStreamOptionsIncludeUsageFromJSON(jsonData)
+			if err != nil {
+				return nil, convertedResponsesRequest, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			if stripped {
+				markResponsesStreamOptionsIncludeUsageCapabilityStripped(c, info)
 			}
 		}
 

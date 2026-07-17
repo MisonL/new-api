@@ -226,6 +226,21 @@ func namespaceHistoryErrorAfterStreamPrelude() *http.Response {
 	}
 }
 
+func streamOptionsIncludeUsageErrorAfterStreamPrelude() *http.Response {
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_partial","object":"response"}}`,
+		`data: {"type":"response.in_progress","response":{"id":"resp_partial","object":"response"}}`,
+		`data: {"type":"response.error","error":{"message":"[ObjectParam] [stream_options.include_usage] [unknown_parameter] Unknown parameter: 'stream_options.include_usage'.","type":"invalid_request_error","param":"stream_options.include_usage","code":"unknown_parameter"}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+	}
+}
+
 func namespaceHistoryErrorAfterStreamOutput() *http.Response {
 	body := strings.Join([]string{
 		`data: {"type":"response.created","response":{"id":"resp_partial","object":"response"}}`,
@@ -448,6 +463,7 @@ func TestExecuteOpenAIResponsesRequestRetriesAgentMessageMissingEncryptedContent
 	require.Len(t, adaptor.requestBodies, 2)
 	require.Contains(t, string(adaptor.requestBodies[1]), "previous answer")
 	require.NotContains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"opaque"`)
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
 func TestExecuteOpenAIResponsesRequestDoesNotDropCompactionForMissingEncryptedContent(t *testing.T) {
@@ -579,6 +595,75 @@ func TestShouldRetryResponsesWithoutEncryptedReasoningRequiresEncryptedContentPa
 	}, http.StatusBadRequest)
 
 	require.False(t, shouldRetryResponsesWithoutEncryptedReasoning(info, err))
+}
+
+func TestShouldRetryResponsesWithoutStreamOptionsIncludeUsageRequiresExactParameter(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	testCases := []struct {
+		name string
+		err  *types.NewAPIError
+		want bool
+	}{
+		{
+			name: "exact parameter",
+			err: types.WithOpenAIError(types.OpenAIError{
+				Param: "stream_options.include_usage",
+				Code:  "unknown_parameter",
+			}, http.StatusBadRequest),
+			want: true,
+		},
+		{
+			name: "gateway wrapped exact parameter",
+			err: types.WithOpenAIError(types.OpenAIError{
+				Message: "[ObjectParam] [stream_options.include_usage] [unknown_parameter] Unknown parameter: 'stream_options.include_usage'.",
+				Code:    "invalid_request_error",
+			}, http.StatusBadRequest),
+			want: true,
+		},
+		{
+			name: "similarly named parameter is not retried",
+			err: types.WithOpenAIError(types.OpenAIError{
+				Param: "stream_options.include_usage_extra",
+				Code:  "unknown_parameter",
+			}, http.StatusBadRequest),
+			want: false,
+		},
+		{
+			name: "similarly named gateway message is not retried",
+			err: types.WithOpenAIError(types.OpenAIError{
+				Message: "Unknown parameter: 'stream_options.include_usage_extra'.",
+				Code:    "unknown_parameter",
+			}, http.StatusBadRequest),
+			want: false,
+		},
+		{
+			name: "unquoted exact message",
+			err: types.WithOpenAIError(types.OpenAIError{
+				Message: "Unknown parameter: stream_options.include_usage.",
+				Code:    "unknown_parameter",
+			}, http.StatusBadRequest),
+			want: true,
+		},
+		{
+			name: "unquoted similarly named gateway message is not retried",
+			err: types.WithOpenAIError(types.OpenAIError{
+				Message: "Unknown parameter: stream_options.include_usage_extra.",
+				Code:    "unknown_parameter",
+			}, http.StatusBadRequest),
+			want: false,
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, shouldRetryResponsesWithoutStreamOptionsIncludeUsage(info, tt.err))
+		})
+	}
 }
 
 func TestExecuteOpenAIResponsesRequestRetriesRejectedNamespaceHistory(t *testing.T) {
@@ -769,6 +854,57 @@ func TestExecuteOpenAIResponsesRequestRetriesAfterOnlyStreamingPrelude(t *testin
 	require.NotContains(t, recorder.Body.String(), "resp_partial")
 	require.Contains(t, recorder.Body.String(), "resp_ok")
 	require.NotContains(t, recorder.Body.String(), "Unknown parameter")
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesUnsupportedStreamOptionsIncludeUsageAfterStreamingPrelude(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   72,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				AllowIncludeObfuscation: true,
+			},
+		},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+	adaptor := &streamingCompatibilityRetryAdaptor{
+		retryEncryptedContextAdaptor: retryEncryptedContextAdaptor{
+			responses: []*http.Response{
+				streamOptionsIncludeUsageErrorAfterStreamPrelude(),
+				successStreamingResponsesHTTPResponse(),
+			},
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+		StreamOptions: &dto.StreamOptions{
+			IncludeUsage:       true,
+			IncludeObfuscation: true,
+		},
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 2)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"include_usage":true`)
+	require.NotContains(t, string(adaptor.requestBodies[1]), `"include_usage"`)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"include_obfuscation":true`)
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetry))
+	require.Zero(t, info.StreamStatus.TotalErrorCount())
+	require.NotContains(t, recorder.Body.String(), "resp_partial")
+	require.Contains(t, recorder.Body.String(), "resp_ok")
 }
 
 func TestExecuteOpenAIResponsesRequestRetriesUnpopulatedReasoningAfterStreamingPrelude(t *testing.T) {
@@ -1265,6 +1401,176 @@ func TestBuildOpenAIResponsesRequestBodyAppliesReasoningContextPolicyWhenPassThr
 			require.Equal(t, tt.wantAction, common.GetContextKeyString(c, constant.ContextKeyResponsesReasoningContextAction))
 		})
 	}
+}
+
+func TestBuildOpenAIResponsesRequestBodyAppliesStreamOptionsIncludeUsageCapabilityWhenPassThroughEnabled(t *testing.T) {
+	unsupported := false
+	supported := true
+	tests := []struct {
+		name         string
+		registry     *dto.ResponsesChannelCapabilityRegistry
+		wantUsage    bool
+		wantStripped bool
+	}{
+		{
+			name:      "unknown capability preserves raw request",
+			wantUsage: true,
+		},
+		{
+			name: "explicit unsupported strips only include usage",
+			registry: &dto.ResponsesChannelCapabilityRegistry{
+				SupportsStreamOptionsIncludeUsage: &unsupported,
+			},
+			wantStripped: true,
+		},
+		{
+			name: "explicit support preserves raw request",
+			registry: &dto.ResponsesChannelCapabilityRegistry{
+				SupportsStreamOptionsIncludeUsage: &supported,
+			},
+			wantUsage: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rawBody := []byte(`{"model":"gpt-5.6-sol","input":"continue","stream_options":{"include_usage":true,"include_obfuscation":true,"future_option":{"enabled":true}}}`)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+			c.Request.Header.Set("Content-Type", "application/json")
+			storage, err := common.CreateBodyStorage(rawBody)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = storage.Close() })
+			c.Set(common.KeyBodyStorage, storage)
+
+			request := &dto.OpenAIResponsesRequest{}
+			require.NoError(t, common.Unmarshal(rawBody, request))
+			info := &relaycommon.RelayInfo{
+				RelayMode:       relayconstant.RelayModeResponses,
+				OriginModelName: request.Model,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelId:   72,
+					ChannelType: constant.ChannelTypeOpenAI,
+					ChannelSetting: dto.ChannelSettings{
+						PassThroughBodyEnabled: true,
+					},
+					ChannelOtherSettings: dto.ChannelOtherSettings{
+						AllowIncludeObfuscation:     true,
+						ResponsesCapabilityRegistry: tt.registry,
+					},
+				},
+			}
+
+			body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+			require.Nil(t, apiErr)
+			bodyBytes, err := io.ReadAll(body)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantUsage, strings.Contains(string(bodyBytes), `"include_usage":true`))
+			require.Contains(t, string(bodyBytes), `"include_obfuscation":true`)
+			require.Contains(t, string(bodyBytes), `"future_option":{"enabled":true}`)
+			require.Equal(t, tt.wantStripped, common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamOptionsCapabilityStripped))
+			if tt.wantStripped {
+				require.NotNil(t, converted.StreamOptions)
+				require.False(t, converted.StreamOptions.IncludeUsage)
+			} else {
+				require.Equal(t, string(rawBody), string(bodyBytes))
+			}
+		})
+	}
+}
+
+func TestBuildOpenAIResponsesRequestBodyKeepsStreamOptionsCapabilityAfterParamOverride(t *testing.T) {
+	unsupported := false
+	rawBody := []byte(`{"model":"gpt-5.6-sol","input":"continue","stream_options":{"include_obfuscation":true}}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   72,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"path":  "stream_options.include_usage",
+						"mode":  "set",
+						"value": true,
+					},
+				},
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				AllowIncludeObfuscation: true,
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					SupportsStreamOptionsIncludeUsage: &unsupported,
+				},
+			},
+		},
+	}
+
+	body, _, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false, buildResponsesRequestBodyOptions{
+		ForceConvertedBody: true,
+	})
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.NotContains(t, string(bodyBytes), `"include_usage"`)
+	require.Contains(t, string(bodyBytes), `"include_obfuscation":true`)
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamOptionsCapabilityStripped))
+}
+
+func TestBuildOpenAIResponsesRequestBodyStripsExplicitFalseStreamOptionsIncludeUsage(t *testing.T) {
+	unsupported := false
+	rawBody := []byte(`{"model":"gpt-5.6-sol","input":"continue","stream_options":{"include_usage":false,"include_obfuscation":true,"future_option":{"enabled":true}}}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   72,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				AllowIncludeObfuscation: true,
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					SupportsStreamOptionsIncludeUsage: &unsupported,
+				},
+			},
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.NotContains(t, string(bodyBytes), `"include_usage"`)
+	require.Contains(t, string(bodyBytes), `"include_obfuscation":true`)
+	require.Contains(t, string(bodyBytes), `"future_option":{"enabled":true}`)
+	require.NotNil(t, converted.StreamOptions)
+	require.False(t, converted.StreamOptions.HasIncludeUsageField())
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamOptionsCapabilityStripped))
 }
 
 func TestBuildOpenAIResponsesRequestBodyForcesRemoteCompactionFallbackConversion(t *testing.T) {

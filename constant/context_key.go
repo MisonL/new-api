@@ -3,6 +3,13 @@ package constant
 type ContextKey string
 
 const (
+	ContextKeyResponsesStreamOptionsIncludeUsageRetry           ContextKey = "responses_stream_options_include_usage_retry"
+	ContextKeyResponsesStreamOptionsIncludeUsageRetryChannelID  ContextKey = "responses_stream_options_include_usage_retry_channel_id"
+	ContextKeyResponsesStreamOptionsCapabilityStripped          ContextKey = "responses_stream_options_include_usage_capability_stripped"
+	ContextKeyResponsesStreamOptionsCapabilityStrippedChannelID ContextKey = "responses_stream_options_include_usage_capability_stripped_channel_id"
+)
+
+const (
 	ContextKeyTokenCountMeta  ContextKey = "token_count_meta"
 	ContextKeyPromptTokens    ContextKey = "prompt_tokens"
 	ContextKeyEstimatedTokens ContextKey = "estimated_tokens"

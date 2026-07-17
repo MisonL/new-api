@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -34,6 +35,39 @@ func recordResponsesToolCapabilityObservation(c *gin.Context, info *relaycommon.
 	info.ChannelMeta.ChannelOtherSettings = settings
 	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, settings)
 	logResponsesToolCapabilityConflicts(c, info.ChannelMeta.ChannelId, settings, observation)
+}
+
+func recordResponsesStreamOptionsIncludeUsageCapabilityObservation(c *gin.Context, info *relaycommon.RelayInfo) {
+	if c == nil || info == nil || info.ChannelMeta == nil || info.RelayMode != relayconstant.RelayModeResponses ||
+		!common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetry) ||
+		common.GetContextKeyInt(c, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetryChannelID) != info.ChannelMeta.ChannelId {
+		return
+	}
+
+	observation := dto.ResponsesCapabilityObservation{
+		ObservedAt: time.Now().UTC().Unix(),
+		StatusCode: http.StatusBadRequest,
+		ErrorCode:  "unknown_parameter",
+		Reason:     "stream_options.include_usage",
+	}
+	settings, err := model.MarkResponsesStreamOptionsIncludeUsageUnsupported(info.ChannelMeta.ChannelId, observation)
+	if err != nil {
+		logger.LogError(c, fmt.Sprintf("mark responses stream options include_usage capability failed: %s", err.Error()))
+		return
+	}
+	if settings.ResponsesCapabilityRegistry == nil {
+		return
+	}
+	info.ChannelOtherSettings = settings
+	info.ChannelMeta.ChannelOtherSettings = settings
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, settings)
+	if settings.ResponsesCapabilityRegistry.SupportsStreamOptionsIncludeUsage != nil &&
+		*settings.ResponsesCapabilityRegistry.SupportsStreamOptionsIncludeUsage {
+		logger.LogWarn(c, fmt.Sprintf(
+			"responses stream options include_usage observation conflicts with explicit channel settings: channel_id=%d",
+			info.ChannelMeta.ChannelId,
+		))
+	}
 }
 
 func responsesToolCapabilityObservationFromContext(c *gin.Context, observedAt time.Time) (dto.ResponsesToolCapabilityObservation, bool) {

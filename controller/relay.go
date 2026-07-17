@@ -223,6 +223,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 
 			if newAPIError == nil {
+				recordResponsesStreamOptionsIncludeUsageCapabilityObservation(c, relayInfo)
 				recordResponsesToolCapabilityObservation(c, relayInfo)
 				relayInfo.LastError = nil
 				return
@@ -1197,6 +1198,9 @@ func recordChannelRequestBodyLimit(c *gin.Context, info *relaycommon.RelayInfo, 
 	if err.StatusCode != http.StatusRequestEntityTooLarge {
 		return
 	}
+	if shouldFallbackRemoteResponsesCompaction(c, info, err) {
+		return
+	}
 	requestBodySize := common.GetContextKeyInt64(c, constant.ContextKeyRequestBodySize)
 	if requestBodySize <= 0 {
 		return
@@ -1387,6 +1391,8 @@ func shouldFallbackRemoteResponsesCompaction(c *gin.Context, info *relaycommon.R
 		return false
 	}
 	switch err.StatusCode {
+	case http.StatusRequestEntityTooLarge:
+		return err.GetErrorCode() == types.ErrorCodeUpstreamRequestTooLarge
 	case http.StatusInternalServerError,
 		http.StatusBadGateway,
 		http.StatusServiceUnavailable,
