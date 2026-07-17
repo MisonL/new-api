@@ -344,6 +344,30 @@ func TestStripResponsesInputEncryptedContentItemDoesNotRemoveNonReasoningTopLeve
 	require.Equal(t, req.Input, got.Input)
 }
 
+func TestValidResponsesToolOutputEncryptedContentTarget(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Input: rootcommon.RawMessage(`[
+			{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_text","text":"done"}]},
+			{"type":"compaction","encrypted_content":"opaque"}
+		]`),
+	}
+
+	target, valid, err := ValidResponsesToolOutputEncryptedContentTarget(
+		req,
+		"",
+		"[ObjectParam] [input[0].encrypted_content] [missing_required_parameter] Missing required parameter: 'input[0].encrypted_content'.",
+	)
+
+	require.NoError(t, err)
+	require.True(t, valid)
+	require.Equal(t, 0, target.InputIndex)
+	require.Equal(t, "function_call_output", target.ItemType)
+
+	_, valid, err = ValidResponsesToolOutputEncryptedContentTarget(req, "input[1].encrypted_content", "")
+	require.NoError(t, err)
+	require.False(t, valid)
+}
+
 func TestStripResponsesInputEncryptedContentItemRequiresEncryptedContentItemType(t *testing.T) {
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6",

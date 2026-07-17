@@ -45,6 +45,11 @@ type ResponsesInputItemIDNormalizeResult struct {
 	RemovedCount int
 }
 
+type ResponsesEncryptedContentTarget struct {
+	InputIndex int
+	ItemType   string
+}
+
 func StripResponsesReasoningContext(request dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool) {
 	if request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0 {
 		return request, false
@@ -391,6 +396,43 @@ func stripNestedResponsesEncryptedContent(rawItem json.RawMessage, path response
 func HasResponsesInputEncryptedContentPath(param string, message string) bool {
 	_, ok := responsesEncryptedContentInputPathFromError(param, message)
 	return ok
+}
+
+func ValidResponsesToolOutputEncryptedContentTarget(request dto.OpenAIResponsesRequest, param string, message string) (ResponsesEncryptedContentTarget, bool, error) {
+	path, ok := responsesEncryptedContentInputPathFromError(param, message)
+	if !ok || path.nestedField != "" {
+		return ResponsesEncryptedContentTarget{}, false, nil
+	}
+	trimmedInput := bytes.TrimSpace(request.Input)
+	if len(trimmedInput) == 0 || trimmedInput[0] != '[' {
+		return ResponsesEncryptedContentTarget{}, false, nil
+	}
+	var items []json.RawMessage
+	if err := basecommon.Unmarshal(request.Input, &items); err != nil {
+		return ResponsesEncryptedContentTarget{}, false, err
+	}
+	if path.inputIndex < 0 || path.inputIndex >= len(items) {
+		return ResponsesEncryptedContentTarget{}, false, nil
+	}
+	var item map[string]json.RawMessage
+	if err := basecommon.Unmarshal(items[path.inputIndex], &item); err != nil {
+		return ResponsesEncryptedContentTarget{}, false, err
+	}
+	itemType := responsesItemType(item)
+	switch itemType {
+	case "function_call_output", "custom_tool_call_output", "tool_search_output", "mcp_tool_call_output":
+	default:
+		return ResponsesEncryptedContentTarget{}, false, nil
+	}
+	var callID string
+	if err := basecommon.Unmarshal(item["call_id"], &callID); err != nil || strings.TrimSpace(callID) == "" {
+		return ResponsesEncryptedContentTarget{}, false, nil
+	}
+	output := bytes.TrimSpace(item["output"])
+	if len(output) == 0 || bytes.Equal(output, []byte("null")) {
+		return ResponsesEncryptedContentTarget{}, false, nil
+	}
+	return ResponsesEncryptedContentTarget{InputIndex: path.inputIndex, ItemType: itemType}, true, nil
 }
 
 func responsesEncryptedContentInputPathFromError(param string, message string) (responsesEncryptedContentInputPath, bool) {

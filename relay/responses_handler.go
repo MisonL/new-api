@@ -275,8 +275,23 @@ func buildResponsesWithoutEncryptedReasoningRetry(c *gin.Context, info *relaycom
 	var stripErr error
 	if isResponsesEncryptedContentParameterError(openAIError) {
 		strippedRequest, removedTarget, stripErr = relaycommon.StripResponsesInputEncryptedContentItem(convertedRequest, openAIError.Param, openAIError.Message)
-		if stripErr != nil || !removedTarget {
+		if stripErr != nil {
 			return nil, convertedRequest, false, nil
+		}
+		if !removedTarget {
+			target, validToolOutput, targetErr := relaycommon.ValidResponsesToolOutputEncryptedContentTarget(convertedRequest, openAIError.Param, openAIError.Message)
+			if targetErr != nil || !validToolOutput {
+				return nil, convertedRequest, false, nil
+			}
+			strippedRequest = convertedRequest
+			common.SysLog(fmt.Sprintf(
+				"responses valid tool output replay: channel_id=%d model=%s input_index=%d item_type=%s original_error=%s",
+				info.ChannelId,
+				info.OriginModelName,
+				target.InputIndex,
+				target.ItemType,
+				newAPIError.MaskSensitiveError(),
+			))
 		}
 	} else {
 		var result relaycommon.ResponsesInputStripResult

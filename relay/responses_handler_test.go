@@ -117,7 +117,11 @@ func encryptedContextRetryResponse(status int) *http.Response {
 }
 
 func missingEncryptedContentRetryResponse(status int) *http.Response {
-	body := `{"error":{"message":"[ObjectParam] [input[0].encrypted_content] [missing_required_parameter] Missing required parameter: 'input[0].encrypted_content'.","type":"invalid_request_error","code":"missing_required_parameter"}}`
+	return missingEncryptedContentRetryResponseAt(status, 0)
+}
+
+func missingEncryptedContentRetryResponseAt(status int, inputIndex int) *http.Response {
+	body := fmt.Sprintf(`{"error":{"message":"[ObjectParam] [input[%d].encrypted_content] [missing_required_parameter] Missing required parameter: 'input[%d].encrypted_content'.","type":"invalid_request_error","code":"missing_required_parameter"}}`, inputIndex, inputIndex)
 	return &http.Response{
 		StatusCode: status,
 		Body:       io.NopCloser(bytes.NewBufferString(body)),
@@ -481,6 +485,47 @@ func TestExecuteOpenAIResponsesRequestDoesNotDropCompactionForMissingEncryptedCo
 	require.Len(t, adaptor.requestBodies, 1)
 	require.Contains(t, string(adaptor.requestBodies[0]), `"type":"compaction"`)
 	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+}
+
+func TestExecuteOpenAIResponsesRequestRetriesValidToolOutputForMissingEncryptedContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-terra",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   207,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{
+			missingEncryptedContentRetryResponseAt(http.StatusBadGateway, 1),
+			successResponsesHTTPResponse(),
+		},
+	}
+
+	usage, err := executeOpenAIResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-terra",
+		Input: common.RawMessage(`[
+			{"type":"function_call","id":"fc_1","call_id":"call_1","name":"wait","arguments":"{}"},
+			{"type":"function_call_output","call_id":"call_1","output":[
+				{"type":"input_text","text":"first"},
+				{"type":"input_text","text":"second"}
+			]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}, false)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requestBodies, 2)
+	require.JSONEq(t, string(adaptor.requestBodies[0]), string(adaptor.requestBodies[1]))
+	require.Contains(t, string(adaptor.requestBodies[1]), `"type":"function_call_output"`)
+	require.Contains(t, string(adaptor.requestBodies[1]), `"call_id":"call_1"`)
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
 func TestExecuteOpenAIResponsesRequestRetriesMissingEncryptedContentOnlyOnce(t *testing.T) {
