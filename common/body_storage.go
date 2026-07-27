@@ -2,6 +2,7 @@ package common
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -24,6 +25,184 @@ type BodyStorage interface {
 
 // ErrStorageClosed 存储已关闭错误
 var ErrStorageClosed = fmt.Errorf("body storage is closed")
+
+var ErrRequiredDiskBodyStorageCapacity = errors.New("required disk body storage capacity exhausted")
+var ErrRequiredDiskBodyStorageReserve = errors.New("required disk body storage reserve unavailable")
+var ErrRequiredDiskBodyStorageWrite = errors.New("required disk body storage write failed")
+
+// RequiredDiskBodyStorageOptions defines the hard limits for a body that must
+// stay on disk. It is intended for authenticated protocol paths where a
+// memory fallback would be unsafe.
+type RequiredDiskBodyStorageOptions struct {
+	MaxBytes     int64
+	MaxDiskBytes int64
+	MinFreeBytes int64
+}
+
+type requiredDiskBodyStorageReservation struct {
+	reserved int64
+}
+
+var requiredDiskBodyStorageReservationMu sync.Mutex
+var requiredDiskBodyStoragePendingBytes int64
+var requiredDiskBodyStorageStatsPath string
+
+func synchronizeRequiredDiskBodyStorageStats() {
+	cacheDir := GetDiskCacheDir()
+	requiredDiskBodyStorageReservationMu.Lock()
+	defer requiredDiskBodyStorageReservationMu.Unlock()
+	if requiredDiskBodyStoragePendingBytes != 0 || requiredDiskBodyStorageStatsPath == cacheDir {
+		return
+	}
+	SyncDiskCacheStats()
+	requiredDiskBodyStorageStatsPath = cacheDir
+}
+
+func (r *requiredDiskBodyStorageReservation) reserve(bytes int64, maxDiskBytes int64) error {
+	if bytes <= 0 {
+		return nil
+	}
+	requiredDiskBodyStorageReservationMu.Lock()
+	defer requiredDiskBodyStorageReservationMu.Unlock()
+	if maxDiskBytes <= 0 {
+		return ErrRequiredDiskBodyStorageCapacity
+	}
+	currentUsage := GetDiskCacheStats().CurrentDiskUsageBytes
+	if currentUsage > maxDiskBytes || bytes > maxDiskBytes-currentUsage-requiredDiskBodyStoragePendingBytes {
+		return ErrRequiredDiskBodyStorageCapacity
+	}
+	requiredDiskBodyStoragePendingBytes += bytes
+	r.reserved += bytes
+	return nil
+}
+
+func (r *requiredDiskBodyStorageReservation) release(bytes int64) {
+	if bytes <= 0 {
+		return
+	}
+	requiredDiskBodyStorageReservationMu.Lock()
+	defer requiredDiskBodyStorageReservationMu.Unlock()
+	if bytes > r.reserved {
+		bytes = r.reserved
+	}
+	r.reserved -= bytes
+	requiredDiskBodyStoragePendingBytes -= bytes
+	if requiredDiskBodyStoragePendingBytes < 0 {
+		requiredDiskBodyStoragePendingBytes = 0
+	}
+}
+
+func (r *requiredDiskBodyStorageReservation) releaseAll() {
+	r.release(r.reserved)
+}
+
+func validateRequiredDiskBodyStorageOptions(options RequiredDiskBodyStorageOptions) error {
+	if options.MaxBytes <= 0 || options.MaxDiskBytes <= 0 {
+		return ErrRequiredDiskBodyStorageCapacity
+	}
+	if options.MinFreeBytes < 0 {
+		return ErrRequiredDiskBodyStorageReserve
+	}
+	return nil
+}
+
+func ensureRequiredDiskBodyStorageReserve(options RequiredDiskBodyStorageOptions) error {
+	if err := EnsureDiskCacheDir(); err != nil {
+		return fmt.Errorf("%w: %v", ErrRequiredDiskBodyStorageReserve, err)
+	}
+	info := GetDiskSpaceInfo()
+	if info.Free == 0 || info.Free < uint64(options.MinFreeBytes) {
+		return fmt.Errorf("%w: free space is unavailable", ErrRequiredDiskBodyStorageReserve)
+	}
+	return nil
+}
+
+func ensureRequiredDiskBodyStorageWriteReserve(options RequiredDiskBodyStorageOptions, bytes int64) error {
+	if bytes <= 0 {
+		return nil
+	}
+	if uint64(bytes) > ^uint64(0)-uint64(options.MinFreeBytes) {
+		return ErrRequiredDiskBodyStorageReserve
+	}
+	info := GetDiskSpaceInfo()
+	requiredFreeBytes := uint64(options.MinFreeBytes) + uint64(bytes)
+	if info.Free < requiredFreeBytes {
+		return fmt.Errorf("%w: available=%d required=%d", ErrRequiredDiskBodyStorageReserve, info.Free, requiredFreeBytes)
+	}
+	return nil
+}
+
+// CreateRequiredDiskBodyStorageFromReader spools a body directly to a private
+// disk file. It never falls back to memory. Pending write reservations make the
+// configured aggregate limit deterministic for concurrent callers.
+func CreateRequiredDiskBodyStorageFromReader(reader io.Reader, options RequiredDiskBodyStorageOptions) (BodyStorage, error) {
+	if reader == nil {
+		return nil, fmt.Errorf("%w: reader is required", ErrRequiredDiskBodyStorageWrite)
+	}
+	if err := validateRequiredDiskBodyStorageOptions(options); err != nil {
+		return nil, err
+	}
+	if err := ensureRequiredDiskBodyStorageReserve(options); err != nil {
+		return nil, err
+	}
+	synchronizeRequiredDiskBodyStorageStats()
+
+	filePath, file, err := CreateDiskCacheFile(DiskCacheTypeBody)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRequiredDiskBodyStorageWrite, err)
+	}
+
+	reservation := &requiredDiskBodyStorageReservation{}
+	success := false
+	defer func() {
+		if success {
+			return
+		}
+		reservation.releaseAll()
+		_ = file.Close()
+		_ = os.Remove(filePath)
+	}()
+
+	buffer := make([]byte, 128*1024)
+	var written int64
+	for {
+		n, readErr := reader.Read(buffer)
+		if n > 0 {
+			if int64(n) > options.MaxBytes-written {
+				return nil, ErrRequestBodyTooLarge
+			}
+			if err := ensureRequiredDiskBodyStorageWriteReserve(options, int64(n)); err != nil {
+				return nil, err
+			}
+			if err := reservation.reserve(int64(n), options.MaxDiskBytes); err != nil {
+				return nil, err
+			}
+			writeN, writeErr := file.Write(buffer[:n])
+			if writeN != n || writeErr != nil {
+				return nil, fmt.Errorf("%w: %v", ErrRequiredDiskBodyStorageWrite, writeErr)
+			}
+			written += int64(writeN)
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("read required disk body storage: %w", readErr)
+		}
+	}
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("%w: seek temp file: %v", ErrRequiredDiskBodyStorageWrite, err)
+	}
+	IncrementDiskFiles(written)
+	reservation.releaseAll()
+	success = true
+	return &diskStorage{
+		file:     file,
+		filePath: filePath,
+		size:     written,
+	}, nil
+}
 
 // memoryStorage 内存存储实现
 type memoryStorage struct {

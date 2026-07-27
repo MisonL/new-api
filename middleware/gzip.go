@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/andybalholm/brotli"
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,12 @@ func (rc *readCloser) Close() error {
 func DecompressRequestMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Body == nil || c.Request.Method == http.MethodGet {
+			c.Next()
+			return
+		}
+		if common.IsCodexLocalResponsesCompactionRequest(c.Request) {
+			// This exact request shape is authenticated before its compressed body is
+			// decompressed and spooled by the relay ingress middleware.
 			c.Next()
 			return
 		}
