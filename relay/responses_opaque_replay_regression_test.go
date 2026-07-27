@@ -33,6 +33,15 @@ func (a *opaqueReplayRequestErrorAdaptor) DoRequest(_ *gin.Context, _ *relaycomm
 	return nil, a.err
 }
 
+type opaqueReplayResponseErrorAdaptor struct {
+	retryEncryptedContextAdaptor
+	err *types.NewAPIError
+}
+
+func (a *opaqueReplayResponseErrorAdaptor) DoResponse(_ *gin.Context, _ *http.Response, _ *relaycommon.RelayInfo) (any, *types.NewAPIError) {
+	return nil, a.err
+}
+
 func TestExecuteOpenAIResponsesRequestForwardsNonStringOpaqueCompactionUnchanged(t *testing.T) {
 	rawBody := []byte(`{
 		"model":"gpt-5.6-sol",
@@ -162,6 +171,74 @@ func TestExecuteOpenAIResponsesRequestRecordsUnverifiedOpaqueReplayLifecycle(t *
 			require.Equal(t, tt.wantAction, common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
 		})
 	}
+}
+
+func TestExecuteOpenAIResponsesRequestKeepsForwardedOpaqueReplayActionWhenResponseHandlingFails(t *testing.T) {
+	rawBody := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"reasoning","encrypted_content":"opaque"}]}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+	adaptor := &opaqueReplayResponseErrorAdaptor{
+		retryEncryptedContextAdaptor: retryEncryptedContextAdaptor{
+			responses: []*http.Response{successResponsesHTTPResponse()},
+		},
+		err: types.NewError(errors.New("upstream response handling failed"), types.ErrorCodeBadResponse),
+	}
+
+	usage, apiErr := executeOpenAIResponsesRequest(c, info, adaptor, request, false)
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.Len(t, adaptor.requestBodies, 1)
+	require.Equal(t, rawBody, adaptor.requestBodies[0])
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionForwardedNative, common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+}
+
+func TestResponsesHelperKeepsOpaqueReplaySelectedWhenModelMappingFails(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 206)
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt-5.6-sol")
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+	})
+	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, "{")
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[
+				{"type":"reasoning","encrypted_content":"opaque"},
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+			]`),
+		},
+	}
+
+	apiErr := ResponsesHelper(c, info)
+
+	require.NotNil(t, apiErr)
+	require.Equal(t, types.ErrorCodeChannelModelMappedError, apiErr.GetErrorCode())
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionSelectedNative, common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+	require.Equal(t, "supported", common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayCapability))
 }
 
 func TestBuildOpaqueOpenAIResponsesRequestBodyOnlyRewritesMappedModel(t *testing.T) {
