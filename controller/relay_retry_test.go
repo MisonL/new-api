@@ -83,6 +83,37 @@ func TestShouldRetryResponsesCompactTimeoutHonorsAlwaysSkip(t *testing.T) {
 	require.False(t, shouldRetry(c, err, 0))
 }
 
+func TestShouldRetrySuppressesOpaqueEncryptedReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name string
+		err  *types.NewAPIError
+	}{
+		{
+			name: "channel error",
+			err:  types.NewError(errors.New("channel unavailable"), types.ErrorCodeGetChannelFailed),
+		},
+		{
+			name: "temporary upstream error",
+			err:  types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway),
+		},
+		{
+			name: "rate limit",
+			err:  types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(nil)
+			relaycommon.MarkResponsesEncryptedReasoningReplayDecision(ctx, dto.ResponsesEncryptedReasoningReplayCapabilitySupported)
+
+			require.False(t, shouldRetry(ctx, tt.err, 3))
+			require.Equal(t, "suppressed_cross_channel", common.GetContextKeyString(ctx, constant.ContextKey("responses_encrypted_reasoning_replay_retry_action")))
+		})
+	}
+}
+
 func TestShouldRetryGatewayTimeoutHonorsAlwaysSkipDespiteChannelAffinitySkip(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -890,12 +921,18 @@ func TestGetChannelSkipsResponsesViaChatForRemoteCompactionInput(t *testing.T) {
 	require.NotNil(t, channel)
 	require.Equal(t, native.Id, channel.Id)
 	require.Equal(t, []string{"168"}, ctx.GetStringSlice("use_channel"))
-	require.Equal(t, "channel_skipped_unsupported_compaction", common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+	require.Empty(t, common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionSelectedNative, common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+	require.Equal(t, string(dto.ResponsesEncryptedReasoningReplayCapabilitySupported), common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayCapability))
+	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{{
+		ChannelID: chatOnly.Id,
+		Reason:    responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay,
+	}})
 	require.NotNil(t, info.ChannelMeta)
 	require.Equal(t, native.Id, info.ChannelMeta.ChannelId)
 }
 
-func TestGetChannelAllResponsesViaChatRemoteCompactionInputReturnsUnsupported(t *testing.T) {
+func TestGetChannelAllResponsesViaChatRemoteCompactionInputKeepsNativeRoute(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
 	chatOnly, native := seedRemoteCompactionRouteChannels(t, db)
 
@@ -927,12 +964,15 @@ func TestGetChannelAllResponsesViaChatRemoteCompactionInputReturnsUnsupported(t 
 		Retry:      common.GetPointer(0),
 	})
 
-	require.Nil(t, channel)
-	require.NotNil(t, err)
-	require.Equal(t, types.ErrorCodeChannelModelMappedError, err.GetErrorCode())
-	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
-	require.Contains(t, err.Error(), "cannot handle native compaction input")
-	require.ElementsMatch(t, []string{"168", "206"}, ctx.GetStringSlice("use_channel"))
+	require.Nil(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, native.Id, channel.Id)
+	require.Equal(t, []string{"168"}, ctx.GetStringSlice("use_channel"))
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionSelectedNative, common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{{
+		ChannelID: chatOnly.Id,
+		Reason:    responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay,
+	}})
 }
 
 func TestGetChannelDoesNotReusePreviousCompactionSkipForLaterCalls(t *testing.T) {
@@ -963,7 +1003,11 @@ func TestGetChannelDoesNotReusePreviousCompactionSkipForLaterCalls(t *testing.T)
 	require.Nil(t, firstErr)
 	require.NotNil(t, firstChannel)
 	require.Equal(t, native.Id, firstChannel.Id)
-	require.Equal(t, "channel_skipped_unsupported_compaction", common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionSelectedNative, common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{{
+		ChannelID: chatOnly.Id,
+		Reason:    responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay,
+	}})
 
 	ctx.Set("use_channel", []string{"168", "206"})
 	secondInfo := &relaycommon.RelayInfo{
@@ -1022,7 +1066,7 @@ func TestGetChannelSpecificResponsesViaChatRejectsRemoteCompactionInput(t *testi
 	require.Nil(t, channel)
 	require.NotNil(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
-	require.Contains(t, err.Error(), "cannot handle native compaction input")
+	require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
 }
 
 func TestGetChannelSpecificProxyProfileRejectsRemoteCompactionInput(t *testing.T) {
@@ -1071,7 +1115,7 @@ func TestGetChannelSpecificProxyProfileRejectsRemoteCompactionInput(t *testing.T
 	require.Nil(t, channel)
 	require.NotNil(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
-	require.Contains(t, err.Error(), "cannot handle native compaction input")
+	require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
 }
 
 func TestGetChannelReturnsNativeCompactionSkipErrorWithoutChannelWrap(t *testing.T) {
@@ -1118,7 +1162,7 @@ func TestGetChannelReturnsNativeCompactionSkipErrorWithoutChannelWrap(t *testing
 	require.Nil(t, channel)
 	require.NotNil(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
-	require.Contains(t, err.Error(), "cannot handle native compaction input")
+	require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
 	require.NotContains(t, err.Error(), "可用渠道不存在")
 }
 
@@ -1515,7 +1559,13 @@ func TestGetChannelSkipsProxyProfileRemoteCompactionWithoutConversionRule(t *tes
 	require.NotNil(t, channel)
 	require.Equal(t, native.Id, channel.Id)
 	require.Equal(t, []string{"168"}, ctx.GetStringSlice("use_channel"))
-	require.Equal(t, "channel_skipped_unsupported_compaction", common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+	require.Empty(t, common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionSelectedNative, common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+	require.Equal(t, string(dto.ResponsesEncryptedReasoningReplayCapabilitySupported), common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayCapability))
+	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{{
+		ChannelID: proxy.Id,
+		Reason:    responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay,
+	}})
 }
 
 func TestGetChannelSpecificChatOnlyProfileRejectsRemoteCompactionWithoutConversionRule(t *testing.T) {
@@ -1552,7 +1602,7 @@ func TestGetChannelSpecificChatOnlyProfileRejectsRemoteCompactionWithoutConversi
 	require.Nil(t, channel)
 	require.NotNil(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
-	require.Contains(t, err.Error(), "cannot handle native compaction input")
+	require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
 }
 
 func TestGetChannelRejectsGenericOpenAIRemoteCompactionWithoutPassthroughCapability(t *testing.T) {
@@ -2289,6 +2339,251 @@ func TestGetChannelRejectsMalformedRemoteCompactionInput(t *testing.T) {
 	require.Contains(t, err.Error(), "missing encrypted_content")
 }
 
+func requireResponsesRoutingChannelSkips(t *testing.T, c *gin.Context, want []dto.ResponsesRoutingChannelSkip) {
+	t.Helper()
+	got, ok := common.GetContextKeyType[[]dto.ResponsesRoutingChannelSkip](c, constant.ContextKeyResponsesRoutingChannelSkips)
+	require.True(t, ok)
+	require.Equal(t, want, got)
+}
+
+func TestShouldSkipResponsesChannelWithExplicitlyUnsupportedEncryptedReasoningReplay(t *testing.T) {
+	unsupported := false
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[
+				{"type":"reasoning","encrypted_content":"opaque-reasoning-state"},
+				{"type":"message","role":"user","content":"continue"}
+			]`),
+		},
+	}
+	channel := &model.Channel{Id: 168, Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsEncryptedReasoningReplay: &unsupported,
+		},
+	})
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.True(t, skip)
+	require.ErrorIs(t, info.LastError, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionRejectedUnsupported, common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+	require.Equal(t, string(dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported), common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayCapability))
+	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{{
+		ChannelID: channel.Id,
+		Reason:    responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay,
+	}})
+}
+
+func TestShouldAllowUnknownResponsesEncryptedReasoningReplayCapability(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+		},
+	}
+	channel := &model.Channel{Id: 160, Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+	})
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.False(t, skip)
+	require.Nil(t, info.LastError)
+}
+
+func TestShouldSkipOpaqueResponsesCompactChannelWithoutNativeCompact(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		Request: &dto.OpenAIResponsesCompactionRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+		},
+	}
+	channel := &model.Channel{Id: 208, Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode:     dto.ResponsesCompactModeSynthetic,
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+	})
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.True(t, skip)
+	require.ErrorIs(t, info.LastError, errResponsesNativeCompactionUnsupported)
+	require.Equal(t, "channel_skipped_unsupported_compaction", common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+	require.Equal(t, string(dto.ResponsesEncryptedReasoningReplayCapabilitySupported), common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayCapability))
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionRejectedUnsupported, common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{{
+		ChannelID: channel.Id,
+		Reason:    responsesRoutingChannelSkipReasonUnsupportedCompaction,
+	}})
+}
+
+func TestShouldSkipOpaqueRemoteCompactionWithoutPassthroughPreservesReplayCapability(t *testing.T) {
+	supported := true
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[{"type":"compaction","encrypted_content":"opaque-reasoning-state"}]`),
+		},
+	}
+	channel := &model.Channel{Id: 208, Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericOpenAI,
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsEncryptedReasoningReplay: &supported,
+		},
+	})
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.True(t, skip)
+	require.ErrorIs(t, info.LastError, errResponsesNativeCompactionUnsupported)
+	require.Equal(t, string(dto.ResponsesEncryptedReasoningReplayCapabilitySupported), common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayCapability))
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionRejectedUnsupported, common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{{
+		ChannelID: channel.Id,
+		Reason:    responsesRoutingChannelSkipReasonUnsupportedCompaction,
+	}})
+}
+
+func TestShouldAllowOpaqueResponsesCompactOnNativeCodexChannel(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+		Request: &dto.OpenAIResponsesCompactionRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+		},
+	}
+	channel := &model.Channel{Id: 206, Type: constant.ChannelTypeCodex}
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.False(t, skip)
+	require.Nil(t, info.LastError)
+}
+
+func TestGetChannelSkipsUnsupportedEncryptedReasoningReplayChannel(t *testing.T) {
+	db := setupChannelControllerTestDB(t)
+	unsupported, supported := seedRemoteCompactionRouteChannels(t, db)
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, unsupported, "gpt-5.5"))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.5",
+			Input: common.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+		},
+	}
+
+	channel, err := getChannel(ctx, info, &service.RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-5.5",
+		Retry:      common.GetPointer(0),
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, supported.Id, channel.Id)
+	require.Equal(t, []string{"168"}, ctx.GetStringSlice("use_channel"))
+	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{{
+		ChannelID: unsupported.Id,
+		Reason:    responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay,
+	}})
+}
+
+func TestGetChannelSpecificUnsupportedEncryptedReasoningReplayReturns503(t *testing.T) {
+	db := setupChannelControllerTestDB(t)
+	unsupported, _ := seedRemoteCompactionRouteChannels(t, db)
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Set("specific_channel_id", "168")
+	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, unsupported, "gpt-5.5"))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.5",
+			Input: common.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+		},
+	}
+
+	channel, err := getChannel(ctx, info, &service.RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-5.5",
+		Retry:      common.GetPointer(0),
+	})
+
+	require.Nil(t, channel)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+}
+
+func TestGetChannelAllUnsupportedEncryptedReasoningReplayReturns503(t *testing.T) {
+	db := setupChannelControllerTestDB(t)
+	first, second := seedRemoteCompactionRouteChannels(t, db)
+	second.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileChatOnlyProxy,
+	})
+	require.NoError(t, db.Save(second).Error)
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, first, "gpt-5.5"))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.5",
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.5",
+			Input: common.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+		},
+	}
+
+	channel, err := getChannel(ctx, info, &service.RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-5.5",
+		Retry:      common.GetPointer(0),
+	})
+
+	require.Nil(t, channel)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{
+		{ChannelID: first.Id, Reason: responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay},
+		{ChannelID: second.Id, Reason: responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay},
+	})
+}
+
 func seedRemoteCompactionRouteChannels(t *testing.T, gormDB *gorm.DB) (*model.Channel, *model.Channel) {
 	t.Helper()
 	priority := int64(10)
@@ -2393,7 +2688,7 @@ func staleLocalSyntheticCompactionRelayInfo() *relaycommon.RelayInfo {
 		Request: &dto.OpenAIResponsesRequest{
 			Model: "gpt-5.5",
 			Input: common.RawMessage(`[
-				{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:nffffffffffffffffffffffffffffffff:resp_newapi_synthcmp_nffffffffffffffffffffffffffffffff_missing"},
+				{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:nffffffffffffffffffffffffffffffff:resp_newapi_synthcmp_nffffffffffffffffffffffffffffffff_66666666666666666666666666666666"},
 				{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 			]`),
 		},
@@ -3465,7 +3760,7 @@ func compactVisiblePayloadRequest() *dto.OpenAIResponsesCompactionRequest {
 func compactLocalSyntheticPayloadRequest() *dto.OpenAIResponsesCompactionRequest {
 	return &dto.OpenAIResponsesCompactionRequest{
 		Model:              "gpt-5.5-openai-compact",
-		PreviousResponseID: "resp_newapi_synthcmp_missing",
+		PreviousResponseID: "resp_newapi_synthcmp_55555555555555555555555555555555",
 		Input:              []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]`),
 	}
 }

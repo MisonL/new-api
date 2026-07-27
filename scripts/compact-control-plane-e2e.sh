@@ -368,6 +368,48 @@ run_case_generic_rejects_remote_opaque() {
   capture_summary
 }
 
+run_case_native_opaque_replay_is_byte_preserving_and_not_retried() {
+  echo "case=native_opaque_replay_byte_preserving_no_retry"
+  set_single_channel "$CHANNEL_NATIVE_NEWAPI" 'gpt-5.5'
+  psql_exec -v channel="$CHANNEL_NATIVE_NEWAPI" >/dev/null <<'SQL'
+update channels
+set model_mapping = '{"gpt-5.5":"gpt-5.4"}'
+where id = :channel;
+SQL
+  restart_dev
+  reset_upstream
+  local payload expected_hash out code summary
+  payload='{
+  "model": "gpt-5.5",
+  "input": [
+    {"type":"reasoning","encrypted_content":"opaque-native-retry-guard"},
+    {"type":"message","role":"user","content":[{"type":"input_text","text":"opaque replay guard"}]}
+  ],
+  "future_top_level": { "keep": [1, 2, 3] }
+}'
+  expected_hash="$(node -e 'const crypto=require("crypto"); const body=process.argv[1].replace("\"gpt-5.5\"", "\"gpt-5.4\""); console.log(crypto.createHash("sha256").update(body).digest("hex"));' "$payload")"
+  out="$TMP_DIR/native_opaque_replay.json"
+  code="$(post_json /v1/responses "$payload" "$out")"
+  echo "status=${code}"
+  [[ "$code" == "400" ]]
+  assert_contains "$out" 'invalid_encrypted_content'
+  summary="$(capture_summary)"
+  node - "$summary" "$expected_hash" <<'NODE'
+const captures = JSON.parse(process.argv[2]);
+const expectedHash = process.argv[3];
+if (captures.length !== 1) {
+  throw new Error(`expected exactly one upstream attempt, got ${captures.length}`);
+}
+const capture = captures[0];
+if (capture.url !== '/v1/responses') throw new Error(`unexpected upstream path: ${capture.url}`);
+if (capture.model !== 'gpt-5.4') throw new Error(`mapped model was not forwarded: ${capture.model}`);
+if (!capture.hasEncryptedContent) throw new Error('upstream capture lost encrypted_content');
+if (capture.bodySha256 !== expectedHash) {
+  throw new Error('opaque request changed outside the mapped model');
+}
+NODE
+}
+
 run_case_sub2api_previous_response_id() {
   echo "case=sub2api_http_rejects_rest_previous_id"
   set_single_channel "$CHANNEL_SUB2API_HTTP" 'gpt-5.5-openai-compact'
@@ -442,6 +484,7 @@ main() {
   run_case_synthetic_continue
   run_case_stale_visible_only
   run_case_generic_rejects_remote_opaque
+  run_case_native_opaque_replay_is_byte_preserving_and_not_retried
   run_case_sub2api_previous_response_id
   run_case_model_switch_restore
   run_case_real_codex_history_fixture

@@ -17,6 +17,8 @@ var ErrResponsesEncryptedReasoningOnlyInput = errors.New("responses encrypted re
 var ErrResponsesContextCompactionOnlyInput = errors.New("responses context compaction markers contain no encrypted summary and no other input items remain")
 var ErrResponsesContextCompactionInvalid = errors.New("invalid responses context compaction input")
 
+type ResponsesEncryptedContentMarkerValidator func(marker string) (bool, error)
+
 var responsesNamespaceParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.namespace$`)
 var responsesArgumentsParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.arguments$`)
 var responsesEncryptedContentParameterPattern = regexp.MustCompile(`^input\[(\d+)\](?:\.(content|output)\[(\d+)\])?\.encrypted_content$`)
@@ -233,10 +235,108 @@ func StripEncryptedReasoningFromResponsesInput(input json.RawMessage) (Responses
 	return result, nil
 }
 
+func ResponsesInputHasOpaqueEncryptedContent(input json.RawMessage) (bool, error) {
+	return ResponsesInputHasOpaqueEncryptedContentWithMarkerValidator(input, nil)
+}
+
+func ResponsesInputHasOpaqueEncryptedContentWithMarkerValidator(input json.RawMessage, validator ResponsesEncryptedContentMarkerValidator) (bool, error) {
+	if len(bytes.TrimSpace(input)) == 0 {
+		return false, nil
+	}
+	var value any
+	if err := basecommon.Unmarshal(input, &value); err != nil {
+		return false, fmt.Errorf("parse responses input for encrypted content: %w", err)
+	}
+	return responsesValueHasOpaqueEncryptedContent(value, validator)
+}
+
+func responsesValueHasOpaqueEncryptedContent(value any, validator ResponsesEncryptedContentMarkerValidator) (bool, error) {
+	switch typedValue := value.(type) {
+	case map[string]any:
+		for key, child := range typedValue {
+			if key == "encrypted_content" {
+				opaque, err := responsesEncryptedContentValueIsOpaque(typedValue, child, validator)
+				if err != nil {
+					return false, err
+				}
+				if opaque {
+					return true, nil
+				}
+			}
+			opaque, err := responsesValueHasOpaqueEncryptedContent(child, validator)
+			if err != nil {
+				return false, err
+			}
+			if opaque {
+				return true, nil
+			}
+		}
+	case []any:
+		for _, child := range typedValue {
+			opaque, err := responsesValueHasOpaqueEncryptedContent(child, validator)
+			if err != nil {
+				return false, err
+			}
+			if opaque {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func responsesEncryptedContentValueIsOpaque(item map[string]any, value any, validator ResponsesEncryptedContentMarkerValidator) (bool, error) {
+	if validator != nil && responsesCompactionEncryptedContentMarker(item, value) {
+		marker, _ := value.(string)
+		local, err := validator(marker)
+		if err != nil {
+			return false, err
+		}
+		if local {
+			return false, nil
+		}
+	}
+	return ResponsesEncryptedContentValueIsOpaque(value), nil
+}
+
+func ResponsesEncryptedContentValueIsOpaque(value any) bool {
+	if value == nil {
+		return false
+	}
+	stringValue, ok := value.(string)
+	if !ok {
+		return true
+	}
+	if strings.TrimSpace(stringValue) == "" {
+		return false
+	}
+	return true
+}
+
+func responsesCompactionEncryptedContentMarker(item map[string]any, value any) bool {
+	itemType, _ := item["type"].(string)
+	if !IsResponsesCompactionItemType(itemType) {
+		return false
+	}
+	_, ok := value.(string)
+	return ok
+}
+
 func NormalizeContextCompactionForResponsesRequest(request dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, ResponsesContextCompactionNormalizeResult, error) {
+	return NormalizeContextCompactionForResponsesRequestWithMarkerValidator(request, nil)
+}
+
+func NormalizeContextCompactionForResponsesRequestWithMarkerValidator(request dto.OpenAIResponsesRequest, validator ResponsesEncryptedContentMarkerValidator) (dto.OpenAIResponsesRequest, ResponsesContextCompactionNormalizeResult, error) {
 	result := ResponsesContextCompactionNormalizeResult{}
 	trimmedInput := bytes.TrimSpace(request.Input)
 	if len(trimmedInput) == 0 || trimmedInput[0] != '[' {
+		return request, result, nil
+	}
+	hasOpaqueEncryptedContent, err := ResponsesInputHasOpaqueEncryptedContentWithMarkerValidator(request.Input, validator)
+	if err != nil {
+		return request, result, err
+	}
+	if hasOpaqueEncryptedContent {
 		return request, result, nil
 	}
 

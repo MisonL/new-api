@@ -51,7 +51,7 @@ func TestFindResponsesViaChatRuleTrimsSyntheticPreviousResponseID(t *testing.T) 
 		0,
 		"gpt-5.5",
 		&dto.OpenAIResponsesRequest{
-			PreviousResponseID: "  resp_newapi_synthcmp_nabc123_123  ",
+			PreviousResponseID: "  " + syntheticCompactLegacyTestID + "  ",
 		},
 	)
 
@@ -672,6 +672,43 @@ func TestFindResponsesViaChatRuleOnlyWhenToolBridgeRequiredSkipsRemoteCompaction
 		&dto.OpenAIResponsesRequest{Input: common.RawMessage(`[
 			{"type":"compaction","encrypted_content":"opaque-native-compact"},
 			{"type":"custom_tool_call","call_id":"call_1","name":"exec","input":"pwd"}
+		]`)},
+	)
+
+	require.NoError(t, err)
+	require.Nil(t, rule)
+}
+
+func TestFindResponsesViaChatRuleSkipsOpaqueEncryptedReasoningReplay(t *testing.T) {
+	settings := model_setting.GetGlobalSettings()
+	previousPolicy := settings.ChatCompletionsToResponsesPolicy
+	t.Cleanup(func() {
+		settings.ChatCompletionsToResponsesPolicy = previousPolicy
+	})
+
+	settings.ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{{
+			Name:           "force-responses-to-chat",
+			Enabled:        true,
+			SourceEndpoint: model_setting.ProtocolEndpointResponses,
+			TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+			AllChannels:    true,
+			ModelPatterns:  []string{"^gpt-5\\.6-sol$"},
+		}},
+	}
+
+	rule, err := FindResponsesViaChatRule(
+		context.Background(),
+		relayconstant.RelayModeResponses,
+		false,
+		dto.ChannelSettings{},
+		206,
+		1,
+		"gpt-5.6-sol",
+		&dto.OpenAIResponsesRequest{Input: common.RawMessage(`[
+			{"type":"reasoning","encrypted_content":"opaque-reasoning-state"},
+			{"type":"message","role":"user","content":"continue"}
 		]`)},
 	)
 

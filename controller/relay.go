@@ -659,6 +659,7 @@ func isProtocolIncompatibleSkip(err *types.NewAPIError) bool {
 	return err.GetErrorCode() == types.ErrorCodeChannelModelMappedError &&
 		err.StatusCode == http.StatusServiceUnavailable &&
 		(errors.Is(err, errResponsesNativeCompactionUnsupported) ||
+			errors.Is(err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported) ||
 			errors.Is(err, errResponsesFunctionToolsUnsupported) ||
 			errors.Is(err, errResponsesCustomToolsUnsupported) ||
 			errors.Is(err, errResponsesNamespaceToolsUnsupported) ||
@@ -666,11 +667,60 @@ func isProtocolIncompatibleSkip(err *types.NewAPIError) bool {
 }
 
 func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) (bool, error) {
-	if c == nil || c.Request == nil || info == nil || channel == nil || info.RelayMode != relayconstant.RelayModeResponses {
+	if c == nil || c.Request == nil || info == nil || channel == nil ||
+		(info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact) {
 		return false, nil
 	}
-	request, ok := info.Request.(*dto.OpenAIResponsesRequest)
-	if !ok || request == nil {
+	var request *dto.OpenAIResponsesRequest
+	switch typedRequest := info.Request.(type) {
+	case *dto.OpenAIResponsesRequest:
+		request = typedRequest
+	case *dto.OpenAIResponsesCompactionRequest:
+		if typedRequest != nil {
+			request = typedRequest.ToResponsesRequest()
+		}
+	}
+	if request == nil {
+		return false, nil
+	}
+	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(c.Request.Context(), request.Input)
+	if err != nil {
+		return false, err
+	}
+	channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
+	if hasOpaqueEncryptedContent {
+		capability := channelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(channel.Type)
+		relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
+		if capability == dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported {
+			markResponsesCompatibilityChannelSkip(
+				c,
+				info,
+				channel,
+				responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay,
+				relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(channel.Id),
+			)
+			return true, nil
+		}
+		if info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+			!relaycommon.SupportsNativeOpaqueResponsesCompact(channel.Type, channelOtherSettings) {
+			relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+			markResponsesCompactionChannelSkip(c, info, channel)
+			return true, nil
+		}
+		if info.RelayMode == relayconstant.RelayModeResponses {
+			hasRemoteCompaction, err := service.HasRemoteResponsesCompactionInput(c.Request.Context(), *request)
+			if err != nil {
+				return false, err
+			}
+			if hasRemoteCompaction && responsesCompactionChannelCannotPassthroughItems(channelOtherSettings, channel.Type) {
+				relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+				markResponsesCompactionChannelSkip(c, info, channel)
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		return false, nil
 	}
 	hasFunctionTools, err := relaycommon.ResponsesRequestHasFunctionTools(request)
@@ -689,7 +739,6 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	if err != nil {
 		return false, err
 	}
-	channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
 	functionToolsUnsupported := hasFunctionTools && channelOtherSettings.ExplicitlyDisablesResponsesFunctionTools()
 	customToolsUnsupported := hasCustomTools && channelOtherSettings.ExplicitlyDisablesResponsesCustomTools()
 	namespaceToolsUnsupported := hasNamespaceTools && channelOtherSettings.ExplicitlyDisablesResponsesNamespaceTools()
@@ -822,6 +871,46 @@ type responsesUnsupportedToolCapabilities struct {
 	toolSearch bool
 }
 
+const (
+	responsesRoutingChannelSkipReasonUnsupportedCompaction               = "unsupported_compaction"
+	responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay = "unsupported_encrypted_reasoning_replay"
+)
+
+func markResponsesCompactionChannelSkip(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) {
+	common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
+	markResponsesCompatibilityChannelSkip(c, info, channel, responsesRoutingChannelSkipReasonUnsupportedCompaction, unsupportedNativeCompactionChannelError(channel))
+}
+
+func markResponsesCompatibilityChannelSkip(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel, reason string, channelError *types.NewAPIError) {
+	recordResponsesRoutingChannelSkip(c, channel, reason)
+	if info != nil {
+		info.LastError = channelError
+	}
+}
+
+func recordResponsesRoutingChannelSkip(c *gin.Context, channel *model.Channel, reason string) {
+	if c == nil || channel == nil {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return
+	}
+	existing, _ := common.GetContextKeyType[[]dto.ResponsesRoutingChannelSkip](c, constant.ContextKeyResponsesRoutingChannelSkips)
+	for _, skip := range existing {
+		if skip.ChannelID == channel.Id && skip.Reason == reason {
+			return
+		}
+	}
+	skips := make([]dto.ResponsesRoutingChannelSkip, 0, len(existing)+1)
+	skips = append(skips, existing...)
+	skips = append(skips, dto.ResponsesRoutingChannelSkip{
+		ChannelID: channel.Id,
+		Reason:    reason,
+	})
+	common.SetContextKey(c, constant.ContextKeyResponsesRoutingChannelSkips, skips)
+}
+
 func skipExplicitlyUnsupportedResponsesTools(info *relaycommon.RelayInfo, channel *model.Channel, unsupported responsesUnsupportedToolCapabilities) bool {
 	if unsupported.function {
 		return skipUnsupportedResponsesFunctionTools(info, channel)
@@ -863,7 +952,7 @@ func responsesToChatCompatibilityRequestForPrecheck(c *gin.Context, info *relayc
 		return request, nil
 	}
 	preparedRequest := request
-	normalizedRequest, normalizationResult, err := relaycommon.NormalizeContextCompactionForResponsesRequest(*request)
+	normalizedRequest, normalizationResult, err := service.NormalizeContextCompactionForResponsesRequest(c.Request.Context(), *request)
 	if err != nil {
 		return nil, err
 	}
@@ -1086,6 +1175,10 @@ func formatNoAvailableChannelErrorMessage(group string, model string, lastErr *t
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
 	if openaiErr == nil {
+		return false
+	}
+	if relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
+		relaycommon.MarkResponsesEncryptedReasoningReplayRetrySuppressed(c)
 		return false
 	}
 	if c != nil && c.Writer != nil && c.Writer.Written() {
@@ -1838,11 +1931,15 @@ func responsesCompactRequestHasUnsafeCompactionInput(c *gin.Context, info *relay
 	default:
 		return false
 	}
-	hasRemote, err := service.HasRemoteResponsesCompactionInput(relaycommon.GinRequestContext(c), req)
-	if err != nil {
-		logger.LogError(c, fmt.Sprintf("detect remote responses compaction input failed: %s", err.Error()))
+	hasOpaqueEncryptedContent, opaqueErr := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), req.Input)
+	if opaqueErr != nil {
+		logger.LogError(c, fmt.Sprintf("detect opaque responses encrypted content failed: %s", opaqueErr.Error()))
 	}
-	unsafe := err != nil || hasRemote
+	hasRemote, remoteErr := service.HasRemoteResponsesCompactionInput(relaycommon.GinRequestContext(c), req)
+	if remoteErr != nil {
+		logger.LogError(c, fmt.Sprintf("detect remote responses compaction input failed: %s", remoteErr.Error()))
+	}
+	unsafe := opaqueErr != nil || hasOpaqueEncryptedContent || remoteErr != nil || hasRemote
 	if c != nil {
 		c.Set(responsesCompactUnsafeCompactionInputKey, unsafe)
 	}
@@ -1864,7 +1961,7 @@ func shouldFallbackResponsesCompactSummaryModel(c *gin.Context, info *relaycommo
 		len(responsesCompactSummaryFallbackCandidates(c, info)) == 0 {
 		return false
 	}
-	if info.ChannelType != constant.ChannelTypeCodex && responsesCompactRequestHasUnsafeCompactionInput(c, info) {
+	if responsesCompactRequestHasUnsafeCompactionInput(c, info) {
 		return false
 	}
 	return isResponsesCompactContextLengthError(err) || isResponsesCompactSyntheticServerError(c, info, err)

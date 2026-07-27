@@ -125,6 +125,31 @@ func marshalChatStreamChunk(t *testing.T, chunk dto.ChatCompletionsStreamRespons
 	return "data: " + string(raw) + "\n"
 }
 
+func TestResponsesViaChatRejectsOpaqueEncryptedReplayBeforeConversion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	adaptor := &mockResponsesViaChatAdaptor{}
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"reasoning","encrypted_content":"opaque-reasoning-state"},
+			{"type":"message","role":"user","content":"continue"}
+		]`),
+	}
+	info := newResponsesViaChatInfo()
+	info.ChannelId = 206
+
+	usage, requestErr := responsesViaChat(c, info, adaptor, request, service.ResponsesChatCompatibilityOptions{})
+
+	require.Nil(t, usage)
+	require.Error(t, requestErr)
+	require.ErrorIs(t, requestErr, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+	require.Equal(t, http.StatusServiceUnavailable, requestErr.StatusCode)
+	require.Nil(t, adaptor.convertedReq)
+	require.Empty(t, adaptor.requestBody)
+}
+
 func TestResponsesViaChatNonStream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -487,7 +512,7 @@ func TestResponsesViaChatRestoresSyntheticCompactionInput(t *testing.T) {
 	require.Equal(t, "cleared_by_synthetic_restore", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
 }
 
-func TestResponsesViaChatContinuesMissingSyntheticStateWithVisibleInput(t *testing.T) {
+func TestResponsesViaChatRejectsUnauthenticatedSyntheticMarker(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	chatResp := dto.OpenAITextResponse{
@@ -525,11 +550,11 @@ func TestResponsesViaChatContinuesMissingSyntheticStateWithVisibleInput(t *testi
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte("{}")))
 	req := &dto.OpenAIResponsesRequest{
 		Model:              "gpt-5.5",
-		PreviousResponseID: "resp_newapi_synthcmp_missing",
+		PreviousResponseID: "resp_newapi_synthcmp_44444444444444444444444444444444",
 		Input: marshalRawJSON(t, []map[string]any{
 			{
 				"type":              "compaction",
-				"encrypted_content": "newapi.synthetic.compact:resp_newapi_synthcmp_missing",
+				"encrypted_content": "newapi.synthetic.compact:resp_newapi_synthcmp_44444444444444444444444444444444",
 			},
 			{
 				"type": "message",
@@ -544,17 +569,11 @@ func TestResponsesViaChatContinuesMissingSyntheticStateWithVisibleInput(t *testi
 
 	usage, newAPIErr := responsesViaChat(c, info, adaptor, req, service.ResponsesChatCompatibilityOptions{})
 
-	require.Nil(t, newAPIErr)
-	require.NotNil(t, usage)
-	require.Equal(t, 15, usage.TotalTokens)
-	require.NotNil(t, adaptor.convertedReq)
-	require.Len(t, adaptor.convertedReq.Messages, 1)
-	require.Equal(t, "user", adaptor.convertedReq.Messages[0].Role)
-	require.Equal(t, "continue with visible context", adaptor.convertedReq.Messages[0].StringContent())
-	require.NotContains(t, string(adaptor.requestBody), "newapi.synthetic.compact")
-	require.NotContains(t, string(adaptor.requestBody), "previous_response_id")
-	require.Equal(t, "stale_local_synthetic_state_visible_only", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
-	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted))
+	require.Nil(t, usage)
+	require.NotNil(t, newAPIErr)
+	require.ErrorIs(t, newAPIErr, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+	require.Nil(t, adaptor.convertedReq)
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionRejectedUnsupported, common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
 }
 
 func TestResponsesViaChatRejectsToolSearchInputItems(t *testing.T) {

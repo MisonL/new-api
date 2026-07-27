@@ -213,6 +213,10 @@ func CanContinueResponsesBootstrapRecovery(c *gin.Context, newAPIError *types.Ne
 	if IsUpstreamRateLimitRetryTerminal(c) {
 		return false
 	}
+	if relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
+		relaycommon.MarkResponsesEncryptedReasoningReplayRetrySuppressed(c)
+		return false
+	}
 	state, ok := GetResponsesBootstrapRecoveryState(c)
 	if !ok || state == nil || !state.Enabled || state.PayloadStarted {
 		return false

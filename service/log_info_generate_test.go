@@ -452,6 +452,34 @@ func TestGenerateTextOtherInfoIncludesResponsesCompactChannelSkip(t *testing.T) 
 	require.Equal(t, "channel_skipped_unsupported_compaction", other["responses_compact_channel_skip"])
 }
 
+func TestGenerateTextOtherInfoIncludesOpaqueReplayRoutingAuditWithoutCiphertext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesRoutingChannelSkips, []dto.ResponsesRoutingChannelSkip{
+		{ChannelID: 168, Reason: "unsupported_encrypted_reasoning_replay"},
+	})
+	common.SetContextKey(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction, "attempted_native_unverified")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayCapability, "unknown")
+	common.SetContextKey(ctx, constant.ContextKey("responses_encrypted_reasoning_replay_retry_action"), "suppressed_cross_channel")
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "attempted_native_unverified", other["responses_encrypted_reasoning_replay_action"])
+	require.Equal(t, "unknown", other["responses_encrypted_reasoning_replay_capability"])
+	require.Equal(t, "suppressed_cross_channel", other["responses_encrypted_reasoning_replay_retry_action"])
+	require.Equal(t, []dto.ResponsesRoutingChannelSkip{{
+		ChannelID: 168,
+		Reason:    "unsupported_encrypted_reasoning_replay",
+	}}, other["responses_routing_channel_skips"])
+	raw, err := common.Marshal(other)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "opaque-reasoning-state")
+}
+
 func TestResponsesChannelCapabilitySnapshotTreatsSub2APIHTTPAsNoRESTPreviousID(t *testing.T) {
 	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
@@ -473,10 +501,10 @@ func TestResponsesChannelCapabilitySnapshotTreatsSub2APIHTTPAsNoRESTPreviousID(t
 	require.Equal(t, false, snapshot["supports_custom_tools"])
 	require.Equal(t, false, snapshot["supports_namespace_tools"])
 	require.Equal(t, false, snapshot["supports_tool_search"])
-	require.Equal(t, "unsupported", snapshot["reasoning_context_capability"])
-	require.Equal(t, false, snapshot["supports_reasoning_context"])
-	require.Equal(t, true, snapshot["strips_responses_reasoning_context"])
-	require.Equal(t, true, snapshot["strips_responses_encrypted_reasoning"])
+	require.Equal(t, "unknown", snapshot["reasoning_context_capability"])
+	require.NotContains(t, snapshot, "supports_reasoning_context")
+	require.Equal(t, false, snapshot["strips_responses_reasoning_context"])
+	require.Equal(t, false, snapshot["strips_responses_encrypted_reasoning"])
 }
 
 func TestResponsesChannelCapabilitySnapshotIncludesStreamOptionsIncludeUsageCapability(t *testing.T) {
@@ -492,6 +520,42 @@ func TestResponsesChannelCapabilitySnapshotIncludesStreamOptionsIncludeUsageCapa
 	})
 
 	require.Equal(t, false, snapshot["supports_stream_options_include_usage"])
+}
+
+func TestResponsesChannelCapabilitySnapshotKeepsStreamOptionsAndEncryptedReplayCapabilities(t *testing.T) {
+	unsupported := false
+	supported := true
+	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}, dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsStreamOptionsIncludeUsage: &unsupported,
+			SupportsEncryptedReasoningReplay:  &supported,
+		},
+	})
+
+	require.Equal(t, false, snapshot["supports_stream_options_include_usage"])
+	require.Equal(t, true, snapshot["supports_encrypted_reasoning_replay"])
+	require.Equal(t, "supported", snapshot["encrypted_reasoning_replay_capability"])
+}
+
+func TestResponsesChannelCapabilitySnapshotPreservesLegacyEncryptedReplaySafetyOverride(t *testing.T) {
+	supported := true
+	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}, dto.ChannelOtherSettings{
+		StripCodexEncryptedContext: true,
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsEncryptedReasoningReplay: &supported,
+		},
+	})
+
+	require.Equal(t, false, snapshot["supports_encrypted_reasoning_replay"])
+	require.Equal(t, "unsupported", snapshot["encrypted_reasoning_replay_capability"])
 }
 
 func TestGenerateTextOtherInfoIncludesStreamOptionsIncludeUsageRecoveryMarkers(t *testing.T) {
@@ -703,8 +767,8 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			wantSupportsCompactionItemPassthrough: false,
 			wantSupportsCustomTools:               common.GetPointer(false),
 			wantSupportsNamespaceTools:            false,
-			wantStripsEncryptedReasoning:          true,
-			wantReasoningContextCapability:        "unsupported",
+			wantStripsEncryptedReasoning:          false,
+			wantReasoningContextCapability:        "unknown",
 		},
 		{
 			name:                                  "sub2api websocket v2",

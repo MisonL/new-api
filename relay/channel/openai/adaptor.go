@@ -755,6 +755,13 @@ func isJSONRequest(c *gin.Context) bool {
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
+	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), request.Input)
+	if err != nil {
+		return nil, err
+	}
+	if hasOpaqueEncryptedContent {
+		return request, nil
+	}
 	normalizedInput, normalizeResult, err := relaycommon.NormalizeResponsesInputItemIDs(request.Input)
 	if err != nil {
 		return nil, err

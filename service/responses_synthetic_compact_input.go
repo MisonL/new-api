@@ -51,14 +51,19 @@ func HasRemoteResponsesCompactionInput(ctx context.Context, req dto.OpenAIRespon
 		if !relaycommon.IsResponsesCompactionItemType(itemType) {
 			continue
 		}
-		marker := rawStringField(item["encrypted_content"])
-		if marker == "" {
+		encryptedContent, present := item["encrypted_content"]
+		encryptedContentType := common.GetJsonType(encryptedContent)
+		if present && encryptedContentType != "null" && encryptedContentType != "string" {
+			return true, nil
+		}
+		marker := rawStringField(encryptedContent)
+		if !present || encryptedContentType == "null" || marker == "" {
 			if itemType == dto.ResponsesOutputTypeContextCompaction {
 				continue
 			}
 			return false, ErrResponsesCompactionContentRequired
 		}
-		if _, ok, err := syntheticCompactIDFromMarker(ctx, marker); err != nil {
+		if ok, err := syntheticCompactMarkerReferencesStoredState(ctx, marker); err != nil {
 			return false, err
 		} else if !ok {
 			return true, nil
@@ -85,7 +90,7 @@ func removeSyntheticCompactMarkers(ctx context.Context, input common.RawMessage)
 		}
 		if relaycommon.IsResponsesCompactionItemType(rawStringField(item["type"])) {
 			if marker := rawStringField(item["encrypted_content"]); marker != "" {
-				if _, ok, err := syntheticCompactIDFromMarker(ctx, marker); err != nil {
+				if ok, err := syntheticCompactMarkerReferencesStoredState(ctx, marker); err != nil {
 					return nil, err
 				} else if ok {
 					continue

@@ -11,6 +11,8 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -132,6 +134,25 @@ func TestCanContinueResponsesBootstrapRecovery(t *testing.T) {
 	require.True(t, CanContinueResponsesBootstrapRecovery(ctx, channelErr))
 
 	MarkResponsesBootstrapPayloadStarted(ctx)
+	require.False(t, CanContinueResponsesBootstrapRecovery(ctx, retryableErr))
+}
+
+func TestCanContinueResponsesBootstrapRecoveryRejectsOpaqueEncryptedReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withResponsesBootstrapRecoverySetting(t)
+
+	ctx := newResponsesBootstrapTestContext("/v1/responses", `{"model":"gpt-5","stream":true}`)
+	state, err := EnsureResponsesBootstrapRecoveryStateFromRequest(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	enableResponsesBootstrapChannelOptIn(ctx)
+	relaycommon.MarkResponsesEncryptedReasoningReplayDecision(ctx, dto.ResponsesEncryptedReasoningReplayCapabilitySupported)
+
+	retryableErr := types.NewOpenAIError(
+		errors.New("retryable"),
+		types.ErrorCodeDoRequestFailed,
+		http.StatusBadGateway,
+	)
 	require.False(t, CanContinueResponsesBootstrapRecovery(ctx, retryableErr))
 }
 

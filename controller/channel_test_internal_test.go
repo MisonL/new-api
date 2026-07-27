@@ -849,7 +849,7 @@ func TestFinalizeChannelTestRuntimeSummaryIncludesCompactCapabilitySnapshot(t *t
 	require.Equal(t, false, summary.ChannelCapability["supports_responses_compact"])
 	require.Equal(t, false, summary.ChannelCapability["supports_rest_previous_response_id"])
 	require.Equal(t, false, summary.ChannelCapability["supports_compaction_item_passthrough"])
-	require.Equal(t, true, summary.ChannelCapability["strips_responses_encrypted_reasoning"])
+	require.Equal(t, false, summary.ChannelCapability["strips_responses_encrypted_reasoning"])
 }
 
 func TestFinalizeChannelTestRuntimeSummaryHandlesNilInfo(t *testing.T) {
