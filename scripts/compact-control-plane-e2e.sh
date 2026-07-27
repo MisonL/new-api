@@ -12,6 +12,7 @@ APP_CONTAINER="${COMPACT_E2E_APP_CONTAINER:-new-api-dev-isolated-new-api-1}"
 COMPOSE_FILE="${COMPACT_E2E_COMPOSE_FILE:-deploy/compose/dev-isolated.yml}"
 ENV_FILE="${COMPACT_E2E_ENV_FILE:-deploy/env/dev-isolated.env}"
 APP_SERVICE="${COMPACT_E2E_APP_SERVICE:-new-api}"
+COMPOSE_PROJECT_NAME="${COMPACT_E2E_COMPOSE_PROJECT_NAME:-}"
 CURL_CONNECT_TIMEOUT="${COMPACT_E2E_CURL_CONNECT_TIMEOUT:-5}"
 CURL_MAX_TIME="${COMPACT_E2E_CURL_MAX_TIME:-60}"
 UPSTREAM_CURL_MAX_TIME="${COMPACT_E2E_UPSTREAM_CURL_MAX_TIME:-30}"
@@ -129,7 +130,11 @@ SQL
 }
 
 restart_dev() {
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate "$APP_SERVICE" >/dev/null
+  local compose_args=(-f "$COMPOSE_FILE" --env-file "$ENV_FILE")
+  if [[ -n "$COMPOSE_PROJECT_NAME" ]]; then
+    compose_args=(--project-name "$COMPOSE_PROJECT_NAME" "${compose_args[@]}")
+  fi
+  docker compose "${compose_args[@]}" up -d --no-deps --force-recreate "$APP_SERVICE" >/dev/null
   for _ in {1..45}; do
     if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -fsS "$BASE_URL/api/status" >/dev/null 2>&1; then
       return 0
