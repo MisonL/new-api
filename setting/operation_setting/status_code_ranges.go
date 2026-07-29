@@ -116,7 +116,9 @@ func shouldMatchStatusCodeRanges(ranges []StatusCodeRange, code int) bool {
 
 func ParseHTTPStatusCodeRanges(input string) ([]StatusCodeRange, error) {
 	input = strings.TrimSpace(input)
-	if input == "" {
+	// Older installations persisted an empty rule list as a JSON array.
+	// Treat only the exact empty form as no rules; non-empty JSON remains invalid.
+	if input == "" || input == "[]" {
 		return nil, nil
 	}
 
@@ -166,6 +168,14 @@ func ParseHTTPStatusCodeRanges(input string) ([]StatusCodeRange, error) {
 	}
 
 	return merged, nil
+}
+
+func NormalizeHTTPStatusCodeRanges(input string) (string, error) {
+	ranges, err := ParseHTTPStatusCodeRanges(input)
+	if err != nil {
+		return "", err
+	}
+	return statusCodeRangesToString(ranges), nil
 }
 
 func parseHTTPStatusCodeToken(token string) (StatusCodeRange, error) {
