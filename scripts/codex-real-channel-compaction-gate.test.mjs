@@ -29,6 +29,11 @@ test('pins the isolated image across stop and restart when no image override is 
   assert.match(gateSource, /gate_target=isolated_%s[\s\S]*image=%s/);
 });
 
+test('records only allowlisted transport cause codes', () => {
+  assert.match(gateSource, /transport_error_code=/);
+  assert.match(gateSource, /safe_observation_value "\$transport_error_code"/);
+});
+
 test('pins production candidate discovery and binary copies to one exported read-only snapshot', () => {
   assert.match(gateSource, /start_production_snapshot\(\)[\s\S]*pg_export_snapshot\(\)/);
   assert.match(

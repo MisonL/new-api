@@ -1006,7 +1006,7 @@ run_compaction_gate() {
   local request_shape="${5:-baseline}"
   local output_file="${TMP_DIR}/${phase}-${channel}.json"
   local error_file="${TMP_DIR}/${phase}-${channel}.stderr"
-  local before_log_id rc http_status terminal failure_class request_bytes tool_bytes
+  local before_log_id rc http_status terminal failure_class request_bytes tool_bytes transport_error transport_error_code
   local log_metadata="" log_type error_code logged_status ingress_reduced source
   local original_bytes reduced_bytes mode stream_status observed_log=false
 
@@ -1043,6 +1043,8 @@ run_compaction_gate() {
   failure_class="$(json_field '.failure_class' "$output_file")"
   request_bytes="$(json_field '.request_body_bytes' "$output_file")"
   tool_bytes="$(json_field '.tool_definition_bytes' "$output_file")"
+  transport_error="$(json_field '.transport_error' "$output_file")"
+  transport_error_code="$(json_field '.transport_error_code' "$output_file")"
 
   if log_metadata="$(wait_for_compaction_log_metadata "$channel" "$before_log_id")"; then
     observed_log=true
@@ -1050,7 +1052,7 @@ run_compaction_gate() {
   IFS='|' read -r log_type error_code logged_status ingress_reduced source original_bytes reduced_bytes mode stream_status <<< "$log_metadata"
 
   if (( rc != 0 )); then
-    record_result "phase=${phase} channel=${channel} request_shape=${request_shape} status=failed http=${http_status} terminal=${terminal} failure_class=${failure_class} request_bytes=${request_bytes} tool_bytes=${tool_bytes} observed_log=${observed_log} log_type=$(safe_observation_value "$log_type") log_status=$(safe_observation_value "$logged_status") log_error_code=$(safe_observation_value "$error_code") ingress_reduced=$(safe_observation_value "$ingress_reduced") ingress_original_bytes=$(safe_observation_value "$original_bytes") ingress_reduced_bytes=$(safe_observation_value "$reduced_bytes") compact_mode=$(safe_observation_value "$mode") stream_status=$(safe_observation_value "$stream_status")"
+    record_result "phase=${phase} channel=${channel} request_shape=${request_shape} status=failed http=${http_status} terminal=${terminal} failure_class=${failure_class} transport_error=$(safe_observation_value "$transport_error") transport_error_code=$(safe_observation_value "$transport_error_code") request_bytes=${request_bytes} tool_bytes=${tool_bytes} observed_log=${observed_log} log_type=$(safe_observation_value "$log_type") log_status=$(safe_observation_value "$logged_status") log_error_code=$(safe_observation_value "$error_code") ingress_reduced=$(safe_observation_value "$ingress_reduced") ingress_original_bytes=$(safe_observation_value "$original_bytes") ingress_reduced_bytes=$(safe_observation_value "$reduced_bytes") compact_mode=$(safe_observation_value "$mode") stream_status=$(safe_observation_value "$stream_status")"
     return 1
   fi
 
@@ -1064,7 +1066,7 @@ run_compaction_gate() {
     return 0
   fi
 
-  record_result "phase=${phase} channel=${channel} request_shape=${request_shape} status=failed http=${http_status} terminal=${terminal} failure_class=gateway_observability_mismatch request_bytes=${request_bytes} tool_bytes=${tool_bytes} observed_log=${observed_log} log_type=$(safe_observation_value "$log_type") log_status=$(safe_observation_value "$logged_status") log_error_code=$(safe_observation_value "$error_code") ingress_reduced=$(safe_observation_value "$ingress_reduced") ingress_original_bytes=$(safe_observation_value "$original_bytes") ingress_reduced_bytes=$(safe_observation_value "$reduced_bytes") compact_mode=$(safe_observation_value "$mode") stream_status=$(safe_observation_value "$stream_status")"
+  record_result "phase=${phase} channel=${channel} request_shape=${request_shape} status=failed http=${http_status} terminal=${terminal} failure_class=gateway_observability_mismatch transport_error=$(safe_observation_value "$transport_error") transport_error_code=$(safe_observation_value "$transport_error_code") request_bytes=${request_bytes} tool_bytes=${tool_bytes} observed_log=${observed_log} log_type=$(safe_observation_value "$log_type") log_status=$(safe_observation_value "$logged_status") log_error_code=$(safe_observation_value "$error_code") ingress_reduced=$(safe_observation_value "$ingress_reduced") ingress_original_bytes=$(safe_observation_value "$original_bytes") ingress_reduced_bytes=$(safe_observation_value "$reduced_bytes") compact_mode=$(safe_observation_value "$mode") stream_status=$(safe_observation_value "$stream_status")"
   return 1
 }
 
