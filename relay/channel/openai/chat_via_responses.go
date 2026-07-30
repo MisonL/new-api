@@ -234,6 +234,16 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			// Prefer streaming assistant text over tool calls to match non-stream behavior.
 			return true
 		}
+		if name != "" {
+			toolCallNameByID[callID] = name
+		}
+		if toolCallNameByID[callID] != "" {
+			name = toolCallNameByID[callID]
+		}
+		sendName := name != "" && !toolCallNameSent[callID]
+		if !sendName && argsDelta == "" {
+			return true
+		}
 		if !sendStartIfNeeded() {
 			return false
 		}
@@ -242,12 +252,6 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		if !ok {
 			idx = len(toolCallIndexByID)
 			toolCallIndexByID[callID] = idx
-		}
-		if name != "" {
-			toolCallNameByID[callID] = name
-		}
-		if toolCallNameByID[callID] != "" {
-			name = toolCallNameByID[callID]
 		}
 
 		tool := dto.ToolCallResponse{
@@ -258,7 +262,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			},
 		}
 		tool.SetIndex(idx)
-		if name != "" && !toolCallNameSent[callID] {
+		if sendName {
 			tool.Function.Name = name
 			toolCallNameSent[callID] = true
 		}
