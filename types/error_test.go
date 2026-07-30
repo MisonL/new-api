@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/http2"
 )
 
 func TestIsUpstreamTransportInterruptedError(t *testing.T) {
@@ -24,6 +25,16 @@ func TestIsUpstreamTransportInterruptedError(t *testing.T) {
 		{
 			name: "http2 goaway",
 			err:  errors.New("http2: server sent GOAWAY and closed the connection"),
+			want: true,
+		},
+		{
+			name: "typed http2 goaway",
+			err:  http2.GoAwayError{ErrCode: http2.ErrCodeInternal},
+			want: true,
+		},
+		{
+			name: "typed http2 stream error",
+			err:  http2.StreamError{StreamID: 1, Code: http2.ErrCodeInternal},
 			want: true,
 		},
 		{

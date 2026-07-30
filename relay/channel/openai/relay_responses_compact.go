@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -22,9 +21,9 @@ import (
 func OaiResponsesCompactionHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+	responseBody, readErr := readResponsesNonStreamingResponseBody(c, resp.Body)
+	if readErr != nil {
+		return nil, readErr
 	}
 
 	var compactResp dto.OpenAIResponsesCompactionResponse
@@ -47,7 +46,7 @@ func OaiResponsesCompactionHandler(c *gin.Context, info *relaycommon.RelayInfo, 
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
 	}
 	opaqueContent := responsesCompactionOutputEncryptedContent(compactResp.Output)
-	responseBody, err = normalizeResponsesCompactionResponseBody(&compactResp, responseBody)
+	responseBody, err := normalizeResponsesCompactionResponseBody(&compactResp, responseBody)
 	if err != nil {
 		return nil, types.NewOpenAIError(
 			fmt.Errorf("provider returned malformed compact output: normalize response body: %w", err),

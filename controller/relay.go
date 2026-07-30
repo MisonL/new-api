@@ -1384,12 +1384,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if isUnsafeReadResponseBodyRetry(c, openaiErr) {
 		return false
 	}
-	if c != nil && c.Writer != nil && c.Writer.Written() {
-		if retrySafe, ok := common.GetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe); ok {
-			if safe, valid := retrySafe.(bool); valid && !safe {
-				return false
-			}
-		}
+	if c != nil && c.Writer != nil && c.Writer.Written() &&
+		!common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamPreludeRetrySafe) {
+		return false
 	}
 	if service.IsUpstreamRateLimitRetryTerminal(c) {
 		return false
@@ -1440,9 +1437,8 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 
-// Read failures are replayable only before the gateway writes any downstream
-// bytes and while the client request is still active. Other errors preserve
-// the existing stream-prelude retry behavior.
+// Read failures must be classified at the relay boundary before a channel can
+// be retried. A generic read error cannot prove that replay is safe.
 func isUnsafeReadResponseBodyRetry(c *gin.Context, openaiErr *types.NewAPIError) bool {
 	if openaiErr == nil || openaiErr.GetErrorCode() != types.ErrorCodeReadResponseBodyFailed {
 		return false
@@ -1450,7 +1446,10 @@ func isUnsafeReadResponseBodyRetry(c *gin.Context, openaiErr *types.NewAPIError)
 	if c == nil || c.Request == nil || c.Request.Context().Err() != nil {
 		return true
 	}
-	return c.Writer != nil && c.Writer.Written()
+	if c.Writer != nil && c.Writer.Written() {
+		return true
+	}
+	return !types.IsUpstreamTransportInterruptedError(openaiErr)
 }
 
 func observeUpstreamRateLimitRetry(c *gin.Context, channelID int, openaiErr *types.NewAPIError) {

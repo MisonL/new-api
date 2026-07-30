@@ -821,11 +821,11 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 	// read response body
 	var responsesResponse dto.OpenAIResponsesResponse
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+	responseBody, readErr := readResponsesNonStreamingResponseBody(c, resp.Body)
+	if readErr != nil {
+		return nil, readErr
 	}
-	err = common.Unmarshal(responseBody, &responsesResponse)
+	err := common.Unmarshal(responseBody, &responsesResponse)
 	if err != nil {
 		if openAIError, found, sseErr := responsesSSETerminalError(responseBody); sseErr != nil {
 			return nil, types.NewOpenAIError(sseErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)

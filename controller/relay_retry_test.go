@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,9 +117,9 @@ func TestShouldRetrySuppressesOpaqueEncryptedReplay(t *testing.T) {
 
 func TestShouldRetryReadResponseBodyFailureRequiresSafeReplay(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	newReadFailure := func() *types.NewAPIError {
+	newReadFailure := func(readErr error) *types.NewAPIError {
 		return types.NewOpenAIError(
-			errors.New("unexpected EOF while reading upstream response"),
+			readErr,
 			types.ErrorCodeReadResponseBodyFailed,
 			http.StatusInternalServerError,
 		)
@@ -128,7 +129,14 @@ func TestShouldRetryReadResponseBodyFailureRequiresSafeReplay(t *testing.T) {
 		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 
-		require.True(t, shouldRetry(ctx, newReadFailure(), 1))
+		require.True(t, shouldRetry(ctx, newReadFailure(io.ErrUnexpectedEOF), 1))
+	})
+
+	t.Run("unknown pre write read failure does not retry", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+		require.False(t, shouldRetry(ctx, newReadFailure(errors.New("unexpected local reader failure")), 1))
 	})
 
 	t.Run("opaque replay never changes channel", func(t *testing.T) {
@@ -136,7 +144,7 @@ func TestShouldRetryReadResponseBodyFailureRequiresSafeReplay(t *testing.T) {
 		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 		relaycommon.MarkResponsesEncryptedReasoningReplayDecision(ctx, dto.ResponsesEncryptedReasoningReplayCapabilitySupported)
 
-		require.False(t, shouldRetry(ctx, newReadFailure(), 1))
+		require.False(t, shouldRetry(ctx, newReadFailure(io.ErrUnexpectedEOF), 1))
 	})
 
 	t.Run("cancelled client request does not retry", func(t *testing.T) {
@@ -145,7 +153,7 @@ func TestShouldRetryReadResponseBodyFailureRequiresSafeReplay(t *testing.T) {
 		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 		ctx.Request = httptest.NewRequestWithContext(requestContext, http.MethodPost, "/v1/responses", nil)
 
-		require.False(t, shouldRetry(ctx, newReadFailure(), 1))
+		require.False(t, shouldRetry(ctx, newReadFailure(io.ErrUnexpectedEOF), 1))
 	})
 
 	t.Run("written downstream response does not retry", func(t *testing.T) {
@@ -155,8 +163,25 @@ func TestShouldRetryReadResponseBodyFailureRequiresSafeReplay(t *testing.T) {
 		_, writeErr := ctx.Writer.Write([]byte("data: partial response\n\n"))
 		require.NoError(t, writeErr)
 
-		require.False(t, shouldRetry(ctx, newReadFailure(), 1))
+		require.False(t, shouldRetry(ctx, newReadFailure(io.ErrUnexpectedEOF), 1))
 	})
+}
+
+func TestShouldRetryRequiresExplicitResponsesPreludeSafetyAfterWrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	_, writeErr := ctx.Writer.Write([]byte(": PING\n\n"))
+	require.NoError(t, writeErr)
+
+	err := types.NewOpenAIError(
+		io.ErrUnexpectedEOF,
+		types.ErrorCodeUpstreamTransportInterrupted,
+		http.StatusBadGateway,
+	)
+
+	require.False(t, shouldRetry(ctx, err, 1))
 }
 
 func TestShouldRetryGatewayTimeoutHonorsAlwaysSkipDespiteChannelAffinitySkip(t *testing.T) {
