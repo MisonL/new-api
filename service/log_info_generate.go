@@ -145,6 +145,9 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if action := common.GetContextKeyString(ctx, constant.ContextKeyResponsesReasoningContextAction); action != "" {
 			other["responses_reasoning_context_action"] = action
 		}
+		if removedCount := common.GetContextKeyInt(ctx, constant.ContextKeyResponsesInputItemIDsRemoved); removedCount > 0 {
+			other["responses_input_item_ids_removed"] = removedCount
+		}
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude) {
 			other["responses_chat_compat_ignored_encrypted_include"] = true
 		}

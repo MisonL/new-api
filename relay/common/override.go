@@ -203,20 +203,34 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 	return result, nil
 }
 
-// ApplyHeaderOnlyParamOverrideWithRelayInfo applies only operations that mutate
-// the upstream request headers. It is used for opaque Responses replays, where
-// parsing or rewriting the encrypted request body would violate byte fidelity.
+// ApplyBytePreservingHeaderParamOverrideWithRelayInfo applies only operations
+// that mutate upstream request headers. It does not parse or rewrite the
+// request body, so callers can preserve the original body bytes.
+func ApplyBytePreservingHeaderParamOverrideWithRelayInfo(info *RelayInfo) error {
+	paramOverride := getParamOverrideMap(info)
+	if err := ValidateBytePreservingParamOverride(paramOverride); err != nil {
+		return err
+	}
+	return applyHeaderOnlyParamOverrideWithRelayInfo(info, paramOverride, "byte-preserving request body")
+}
+
+// ApplyHeaderOnlyParamOverrideWithRelayInfo retains opaque Responses replay
+// validation and error semantics for existing encrypted replay callers.
 func ApplyHeaderOnlyParamOverrideWithRelayInfo(info *RelayInfo) error {
 	paramOverride := getParamOverrideMap(info)
 	if err := ValidateOpaqueResponsesReplayParamOverride(paramOverride); err != nil {
 		return err
 	}
+	return applyHeaderOnlyParamOverrideWithRelayInfo(info, paramOverride, "opaque encrypted replay")
+}
+
+func applyHeaderOnlyParamOverrideWithRelayInfo(info *RelayInfo, paramOverride map[string]interface{}, subject string) error {
 	if len(paramOverride) == 0 {
 		return nil
 	}
 	operations, ok := tryParseOperations(paramOverride)
 	if !ok {
-		return errors.New("opaque encrypted replay requires header-only param override operations")
+		return fmt.Errorf("%s requires header-only param override operations", subject)
 	}
 
 	overrideCtx := BuildParamOverrideContext(info)
@@ -230,7 +244,7 @@ func ApplyHeaderOnlyParamOverrideWithRelayInfo(info *RelayInfo) error {
 		return err
 	}
 	if result != "{}" {
-		return errors.New("opaque encrypted replay param override attempted to modify request body")
+		return fmt.Errorf("%s param override attempted to modify request body", subject)
 	}
 	syncRuntimeHeaderOverrideFromContext(info, overrideCtx)
 	if info != nil {
@@ -243,22 +257,32 @@ func ApplyHeaderOnlyParamOverrideWithRelayInfo(info *RelayInfo) error {
 	return nil
 }
 
-// ValidateOpaqueResponsesReplayParamOverride verifies that an override can be
-// applied without parsing or rewriting an opaque Responses request body.
-func ValidateOpaqueResponsesReplayParamOverride(paramOverride map[string]interface{}) error {
+// ValidateBytePreservingParamOverride verifies that an override can be applied
+// without parsing or rewriting a request body.
+func ValidateBytePreservingParamOverride(paramOverride map[string]interface{}) error {
+	return validateBytePreservingParamOverride(paramOverride, "byte-preserving request body")
+}
+
+func validateBytePreservingParamOverride(paramOverride map[string]interface{}, subject string) error {
 	if len(paramOverride) == 0 {
 		return nil
 	}
 	operations, ok := tryParseOperations(paramOverride)
 	if !ok || len(buildLegacyParamOverride(paramOverride)) > 0 {
-		return errors.New("opaque encrypted replay requires header-only param override operations")
+		return fmt.Errorf("%s requires header-only param override operations", subject)
 	}
 	for _, operation := range operations {
 		if len(operation.Conditions) > 0 || !isHeaderOnlyParamOverrideOperation(operation.Mode) {
-			return fmt.Errorf("opaque encrypted replay does not permit param override mode %q", operation.Mode)
+			return fmt.Errorf("%s does not permit param override mode %q", subject, operation.Mode)
 		}
 	}
 	return nil
+}
+
+// ValidateOpaqueResponsesReplayParamOverride retains the historical opaque
+// replay contract while sharing the byte-preserving validation rules.
+func ValidateOpaqueResponsesReplayParamOverride(paramOverride map[string]interface{}) error {
+	return validateBytePreservingParamOverride(paramOverride, "opaque encrypted replay")
 }
 
 func isHeaderOnlyParamOverrideOperation(mode string) bool {

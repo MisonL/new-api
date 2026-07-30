@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -620,6 +621,24 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 	if hasOpaqueEncryptedContent {
 		return buildOpaqueOpenAIResponsesRequestBody(c, info, request)
 	}
+	normalizedInput, normalizeResult, err := relaycommon.NormalizeResponsesInputItemIDs(request.Input)
+	if err != nil {
+		return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
+	}
+	inputItemIDsNormalized := normalizeResult.RemovedCount > 0
+	if inputItemIDsNormalized {
+		normalizedRequest := *request
+		normalizedRequest.Input = normalizedInput
+		request = &normalizedRequest
+		convertedResponsesRequest = normalizedRequest
+		common.SetContextKey(c, appconstant.ContextKeyResponsesInputItemIDsRemoved, normalizeResult.RemovedCount)
+		common.SysLog(fmt.Sprintf(
+			"responses input item ids normalized before upstream forwarding: channel_id=%d model=%s removed_count=%d",
+			info.ChannelId,
+			info.OriginModelName,
+			normalizeResult.RemovedCount,
+		))
+	}
 	streamOptionsIncludeUsageCapabilityDisabled := relaycommon.IsOpenAICompatibleResponses(info) &&
 		info.ChannelOtherSettings.ExplicitlyDisablesResponsesStreamOptionsIncludeUsage()
 	streamOptionsIncludeUsageCapabilityStripped := false
@@ -661,9 +680,25 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 			return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
 		}
 	}
+	hadReasoningContext := request.Reasoning != nil && len(bytes.TrimSpace(request.Reasoning.Context)) > 0
+	reasoningEffortSuffix, _ := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
+	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
+		info.ReasoningEffort = request.Reasoning.Effort
+	}
+	reasoningContextStripped := false
+	if hadReasoningContext {
+		capabilityRequest := relaycommon.ApplyResponsesReasoningContextCapability(c, info, *request)
+		request = &capabilityRequest
+		convertedResponsesRequest = capabilityRequest
+		reasoningContextStripped = capabilityRequest.Reasoning == nil || len(bytes.TrimSpace(capabilityRequest.Reasoning.Context)) == 0
+	}
+	reasoningContextRequiresConvertedBody := reasoningContextStripped || reasoningEffortSuffix != ""
+	bodyPreservingParamOverride := relaycommon.ValidateBytePreservingParamOverride(info.ParamOverride) == nil
 	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) &&
 		!relaycommon.ShouldConvertResponsesRequest(info) &&
-		(request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0) &&
+		!inputItemIDsNormalized &&
+		!reasoningContextRequiresConvertedBody &&
+		bodyPreservingParamOverride &&
 		!streamOptionsIncludeUsageCapabilityStripped &&
 		!contextCompactionNormalized &&
 		!common.GetContextKeyBool(c, appconstant.ContextKeyResponsesRemoteCompactSyntheticFallback) &&
@@ -672,6 +707,11 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 		actualPassThroughBody = false
 	}
 	if actualPassThroughBody {
+		if len(info.ParamOverride) > 0 {
+			if err := relaycommon.ApplyBytePreservingHeaderParamOverrideWithRelayInfo(info); err != nil {
+				return nil, convertedResponsesRequest, newAPIErrorFromParamOverride(err)
+			}
+		}
 		if nativeOpaqueReference {
 			restoredRequest, restored, applyInfo, err := service.RestoreNativeOpaquePreviousResponseID(
 				c.Request.Context(),
@@ -692,11 +732,11 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 			}
 		}
 		if requestBody == nil {
-			storage, err := common.GetBodyStorage(c)
-			if err != nil {
-				return nil, convertedResponsesRequest, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+			passThroughBody, passThroughErr := buildOpenAIResponsesPassThroughBody(c, *request)
+			if passThroughErr != nil {
+				return nil, convertedResponsesRequest, passThroughErr
 			}
-			requestBody = common.ReaderOnly(storage)
+			requestBody = passThroughBody
 		}
 	} else {
 		if nativeOpaqueReference {
@@ -757,6 +797,31 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 		requestBody = bytes.NewBuffer(jsonData)
 	}
 	return requestBody, convertedResponsesRequest, nil
+}
+
+// buildOpenAIResponsesPassThroughBody preserves the client body while ensuring
+// the mapped upstream model is the only rewritten top-level JSON value.
+func buildOpenAIResponsesPassThroughBody(c *gin.Context, request dto.OpenAIResponsesRequest) (io.Reader, *types.NewAPIError) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+	}
+	modelLocation, err := common.LocateTopLevelJSONString(storage, "model")
+	if err != nil {
+		return nil, newResponsesConvertRequestError(fmt.Errorf("locate model for Responses pass-through: %w", err))
+	}
+	upstreamModel := strings.TrimSpace(request.Model)
+	if upstreamModel == "" {
+		return nil, newResponsesConvertRequestError(errors.New("responses pass-through model is required"))
+	}
+	if modelLocation.Value == upstreamModel {
+		return common.ReaderOnly(storage), nil
+	}
+	requestBody, err := common.NewTopLevelJSONStringReplacementReader(storage, storage.Size(), modelLocation, upstreamModel)
+	if err != nil {
+		return nil, newResponsesConvertRequestError(fmt.Errorf("replace model for Responses pass-through: %w", err))
+	}
+	return requestBody, nil
 }
 
 func buildOpaqueOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) (io.Reader, dto.OpenAIResponsesRequest, *types.NewAPIError) {

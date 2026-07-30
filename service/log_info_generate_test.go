@@ -611,6 +611,27 @@ func TestGenerateTextOtherInfoIncludesResponsesReasoningContextAction(t *testing
 	require.Equal(t, "forwarded_unverified_capability", other["responses_reasoning_context_action"])
 }
 
+func TestGenerateTextOtherInfoIncludesResponsesInputItemIDsRemoved(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesInputItemIDsRemoved, 2)
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, 2, other["responses_input_item_ids_removed"])
+
+	common.SetContextKey(ctx, constant.ContextKeyResponsesInputItemIDsRemoved, 0)
+	other = GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.NotContains(t, other, "responses_input_item_ids_removed")
+}
+
 func TestResponsesChannelCapabilitySnapshotMarksSafeDefaultSource(t *testing.T) {
 	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{

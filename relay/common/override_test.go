@@ -2499,7 +2499,7 @@ func TestShouldAuditParamPathUsesFieldBoundaryPrefixMatching(t *testing.T) {
 	}
 }
 
-func TestValidateOpaqueResponsesReplayParamOverride(t *testing.T) {
+func TestValidateBytePreservingParamOverride(t *testing.T) {
 	tests := []struct {
 		name     string
 		override map[string]interface{}
@@ -2602,11 +2602,26 @@ func TestValidateOpaqueResponsesReplayParamOverride(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateOpaqueResponsesReplayParamOverride(tt.override)
+			err := ValidateBytePreservingParamOverride(tt.override)
 			if (err != nil) != tt.wantErr {
-				t.Fatalf("ValidateOpaqueResponsesReplayParamOverride() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("ValidateBytePreservingParamOverride() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateOpaqueResponsesReplayParamOverridePreservesOpaqueErrors(t *testing.T) {
+	legacyOverride := map[string]interface{}{
+		"instructions": "must not rewrite opaque replay",
+	}
+
+	err := ValidateOpaqueResponsesReplayParamOverride(legacyOverride)
+
+	if err == nil {
+		t.Fatal("expected opaque replay param override to be rejected")
+	}
+	if got, want := err.Error(), "opaque encrypted replay requires header-only param override operations"; got != want {
+		t.Fatalf("unexpected opaque replay error: got %q, want %q", got, want)
 	}
 }
 

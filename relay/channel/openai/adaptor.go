@@ -786,7 +786,7 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
-	request = applyResponsesReasoningContextCapability(c, info, request)
+	request = relaycommon.ApplyResponsesReasoningContextCapability(c, info, request)
 	stripCodexContext := relaycommon.ShouldStripCodexEncryptedContext(info)
 	syntheticContinuation := false
 	if relaycommon.IsOpenAICompatibleResponses(info) &&
@@ -860,50 +860,6 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		return convertedRequest, err
 	}
 	return request, nil
-}
-
-func applyResponsesReasoningContextCapability(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) dto.OpenAIResponsesRequest {
-	if request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0 {
-		return request
-	}
-
-	channelType := 0
-	channelID := 0
-	model := request.Model
-	settings := dto.ChannelOtherSettings{}
-	if info != nil {
-		if info.OriginModelName != "" {
-			model = info.OriginModelName
-		}
-		if info.ChannelMeta != nil {
-			channelType = info.ChannelType
-			channelID = info.ChannelId
-			settings = info.ChannelOtherSettings
-		}
-	}
-
-	capability := settings.ResolveResponsesReasoningContextCapability(channelType)
-	action := "forwarded_unverified_capability"
-	switch capability {
-	case dto.ResponsesReasoningContextCapabilitySupported:
-		action = "forwarded_supported_capability"
-	case dto.ResponsesReasoningContextCapabilityUnsupported:
-		strippedRequest, stripped := relaycommon.StripResponsesReasoningContext(request)
-		if stripped {
-			request = strippedRequest
-			action = "stripped_unsupported_capability"
-			common.SysLog(fmt.Sprintf(
-				"responses reasoning context stripped by channel capability: channel_id=%d model=%s profile=%s",
-				channelID,
-				model,
-				settings.NormalizedResponsesUpstreamProfile(),
-			))
-		}
-	}
-	if c != nil {
-		common.SetContextKey(c, constant.ContextKeyResponsesReasoningContextAction, action)
-	}
-	return request
 }
 
 func markResponsesCompactVisibleOnlyForUpstreamProfile(c *gin.Context, requestContext context.Context) context.Context {

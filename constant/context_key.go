@@ -44,6 +44,7 @@ const (
 	ContextKeyResponsesNamespaceHistoryRetry                ContextKey = "responses_namespace_history_retry"
 	ContextKeyResponsesArgumentsHistoryRetry                ContextKey = "responses_arguments_history_retry"
 	ContextKeyResponsesReasoningContextAction               ContextKey = "responses_reasoning_context_action"
+	ContextKeyResponsesInputItemIDsRemoved                  ContextKey = "responses_input_item_ids_removed"
 	ContextKeyResponsesStreamPreludeRetrySafe               ContextKey = "responses_stream_prelude_retry_safe"
 	ContextKeyResponsesChatCompatIgnoredEncryptedInclude    ContextKey = "responses_chat_compat_ignored_encrypted_include"
 	ContextKeyResponsesChatCompatReasoningSummaryMapped     ContextKey = "responses_chat_compat_reasoning_summary_mapped"
