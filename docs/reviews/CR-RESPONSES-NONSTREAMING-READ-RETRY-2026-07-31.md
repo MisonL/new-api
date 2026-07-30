@@ -2,13 +2,13 @@
 
 ## Summary
 
-采样时间：2026-07-31T01:43:07+0800。
+采样时间：2026-07-31T03:06:00+0800。
 
 本记录覆盖一个 Responses 可靠性原子任务：非流式上游响应已返回头部、但读取 body 时中断的错误分类与跨渠道重试边界。
 
 修复前，Responses、native/synthetic compact 和两个 Responses/Chat 兼容桥会把全部 `io.ReadAll` 错误统一包装为 `500/read_response_body_failed`。全局 500 重试策略可能将未知读取失败跨渠道重放；而已写出下游字节时，缺少 prelude 安全标记也可能继续重试。
 
-修复后，只有可识别的上游传输中断才映射为 `502/upstream_transport_interrupted`，并且仅在下游尚未写出、请求仍存活时允许切换。客户端取消、deadline、响应体限制和未知 reader failure 均保留显式 `500/read_response_body_failed`，带 `skipRetry`，不会自动禁用渠道或跨渠道重放。
+修复后，只有可识别的上游传输中断才映射为 `502/upstream_transport_interrupted`，默认仅在下游尚未写出、请求仍存活时允许切换。下游已写出字节时，只有显式 `responses_stream_prelude_retry_safe=true` 的安全 prelude 才允许例外切换。客户端取消、deadline、响应体限制和未知 reader failure 均保留显式 `500/read_response_body_failed`，带 `skipRetry`，不会自动禁用渠道或跨渠道重放。
 
 ## Scope
 
@@ -21,7 +21,7 @@
 ## Contract
 
 - `io.ErrUnexpectedEOF`、HTTP/2 GOAWAY、HTTP/2 stream reset 和 connection reset 视为可识别上游传输中断。
-- 只有请求上下文仍存活且下游尚未写出时，传输中断可以进入现有 failover。
+- 默认只有请求上下文仍存活且下游尚未写出时，传输中断可以进入现有 failover；下游已写出时，必须显式设置 `responses_stream_prelude_retry_safe=true`。
 - opaque `encrypted_content` replay 仍绝对禁止跨渠道切换。
 - 一旦下游已写出，默认禁止重试；只有显式设置 `responses_stream_prelude_retry_safe=true` 的 prelude 可以例外。
 - 未知 body read 错误不能作为“上游暂时不可用”的证据，不重试、不自动禁用渠道，也不伪造成功。
@@ -79,6 +79,10 @@ go test ./controller \
 额外稳定性复核：上述三项 Relay E2E 以 `-count=3` 重复执行退出码 `0`；下列 race 检查退出码 `0`，未报告 data race：
 
 ```bash
+go test ./controller \
+  -run 'TestRelay(RetriesResponsesAfterUnreadableUpstreamBodyBeforeDownstreamWrite|DoesNotRetryOpaqueResponsesAfterUnreadableUpstreamBody|DoesNotRetryUnreadableUpstreamBodyAfterClientCancellation)$' \
+  -count=3 -timeout=120s
+
 go test -race ./controller ./relay/channel/openai \
   -run 'Test(ResponsesNonStreamingHandlersClassifyResponseBodyReadErrors|ShouldRetryReadResponseBodyFailureRequiresSafeReplay|ShouldRetryRequiresExplicitResponsesPreludeSafetyAfterWrite|ShouldRetryAllowsResponsesPreludeRecovery|RelayRetriesResponsesAfterUnreadableUpstreamBodyBeforeDownstreamWrite|RelayDoesNotRetryOpaqueResponsesAfterUnreadableUpstreamBody|RelayDoesNotRetryUnreadableUpstreamBodyAfterClientCancellation)$' \
   -count=1 -timeout=180s
@@ -86,27 +90,29 @@ go test -race ./controller ./relay/channel/openai \
 
 ## L2 Verification
 
-候选运行时代码提交 `6ede380c2e9a430508f88adc3cc755a7607de14f` 使用临时干净 worktree 构建，避免用户工作树中的 `.gate-tools/` 使镜像变为 `-dirty`：
+候选运行时代码提交 `188bd27ff2cf85356bd18dea098cb38c161bf3df` 使用临时干净 worktree 构建，避免用户工作树中的 `.gate-tools/` 使镜像变为 `-dirty`：
 
 ```bash
-git worktree add --detach /tmp/new-api-responses-read-retry-6ede380c2 6ede380c2
-scripts/build-docker-local.sh new-api-local:6ede380c2-clean
+git worktree add --detach /tmp/new-api-responses-read-retry-188bd27ff 188bd27ff
+scripts/build-docker-local.sh new-api-local:188bd27ff-clean
 
-DEV_NEW_API_IMAGE=new-api-local:6ede380c2-clean \
+DEV_NEW_API_IMAGE=new-api-local:188bd27ff-clean \
 docker compose --project-name new-api-dev-isolated \
   -f /Volumes/Work/code/new-api/deploy/compose/dev-isolated.yml \
   --env-file /Volumes/Work/code/new-api/deploy/env/dev-isolated.env \
   up -d --no-deps --force-recreate new-api
 ```
 
-Docker build 与隔离容器重建均退出码 `0`。OCI revision、`/new-api --build-info` 和候选提交均为 `6ede380c2e9a430508f88adc3cc755a7607de14f`；容器状态为 `running healthy`，`GET /api/status` 返回 `success:true`，未认证 `POST /v1/responses/compact` 返回预期 `401`，最近 180 行启动日志未匹配 panic、fatal、监听失败或迁移失败。
+Docker build 与隔离容器重建均退出码 `0`。OCI revision、`/new-api --build-info` 和候选提交均为 `188bd27ff2cf85356bd18dea098cb38c161bf3df`；容器状态为 `running healthy`，`GET /api/status` 返回 `success:true`，未认证 `POST /v1/responses` 返回预期 `401`，最近 120 行启动日志未匹配 panic、fatal、监听失败或迁移失败。
 
 控制面 E2E：
 
 ```bash
-DEV_NEW_API_IMAGE=new-api-local:6ede380c2-clean \
+DEV_NEW_API_IMAGE=new-api-local:188bd27ff-clean \
 COMPACT_E2E_ENV_FILE=/Volumes/Work/code/new-api/deploy/env/dev-isolated.env \
+COMPACT_E2E_COMPOSE_FILE=/Volumes/Work/code/new-api/deploy/compose/dev-isolated.yml \
 COMPACT_E2E_COMPOSE_PROJECT_NAME=new-api-dev-isolated \
+COMPACT_E2E_CURL_MAX_TIME=180 \
 scripts/compact-control-plane-e2e.sh
 ```
 
