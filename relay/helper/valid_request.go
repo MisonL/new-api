@@ -36,7 +36,7 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 	case types.RelayFormatOpenAIResponses:
 		request, err = GetAndValidateResponsesRequest(c)
 	case types.RelayFormatOpenAIResponsesCompaction:
-		request, err = GetAndValidateResponsesCompactionRequest(c)
+		request, err = getAndValidateResponsesCompactionRelayRequest(c)
 
 	case types.RelayFormatOpenAIImage:
 		request, err = GetAndValidOpenAIImageRequest(c, relayMode)
@@ -113,7 +113,10 @@ func GetAndValidateEmbeddingRequest(c *gin.Context, relayMode int) (*dto.Embeddi
 	return embeddingRequest, nil
 }
 
-func GetAndValidateResponsesRequest(c *gin.Context) (*dto.OpenAIResponsesRequest, error) {
+func GetAndValidateResponsesRequest(c *gin.Context) (dto.Request, error) {
+	if request, ok, err := opaqueResponsesRequestFromMetadata(c); ok || err != nil {
+		return request, err
+	}
 	request := &dto.OpenAIResponsesRequest{}
 	err := common.UnmarshalBodyReusable(c, request)
 	if err != nil {
@@ -129,6 +132,27 @@ func GetAndValidateResponsesRequest(c *gin.Context) (*dto.OpenAIResponsesRequest
 		return nil, fmt.Errorf("invalid responses tools: %w", err)
 	}
 	return request, nil
+}
+
+func getAndValidateResponsesCompactionRelayRequest(c *gin.Context) (dto.Request, error) {
+	if request, ok, err := opaqueResponsesRequestFromMetadata(c); ok || err != nil {
+		return request, err
+	}
+	return GetAndValidateResponsesCompactionRequest(c)
+}
+
+func opaqueResponsesRequestFromMetadata(c *gin.Context) (*dto.OpaqueOpenAIResponsesRequest, bool, error) {
+	metadata, ok := common.GetResponsesRequestMetadata(c)
+	if !ok || !metadata.HasOpaqueEncryptedContent {
+		return nil, false, nil
+	}
+	if !metadata.ModelPresent || metadata.Model == "" {
+		return nil, true, errors.New("model is required")
+	}
+	if !metadata.InputPresent || metadata.InputKind == common.ResponsesJSONValueKindNull {
+		return nil, true, errors.New("input is required")
+	}
+	return dto.NewOpaqueOpenAIResponsesRequest(metadata), true, nil
 }
 
 func GetAndValidateResponsesCompactionRequest(c *gin.Context) (*dto.OpenAIResponsesCompactionRequest, error) {

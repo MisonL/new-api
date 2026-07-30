@@ -238,6 +238,10 @@ export interface ChannelCapabilitySnapshot {
   supports_chat?: boolean
   supports_rest_previous_response_id?: boolean
   supports_compaction_item_passthrough?: boolean
+  compaction_item_passthrough_capability?:
+    | 'supported'
+    | 'unsupported'
+    | 'unknown'
   supports_custom_tools?: boolean
   supports_namespace_tools?: boolean
   supports_tool_search?: boolean

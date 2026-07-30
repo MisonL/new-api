@@ -2,6 +2,7 @@ package common
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -27,8 +28,11 @@ type BodyStorage interface {
 var ErrStorageClosed = fmt.Errorf("body storage is closed")
 
 var ErrRequiredDiskBodyStorageCapacity = errors.New("required disk body storage capacity exhausted")
+var ErrRequiredDiskBodyStorageAdmission = fmt.Errorf("%w: unknown-length spool admission wait exceeded", ErrRequiredDiskBodyStorageCapacity)
 var ErrRequiredDiskBodyStorageReserve = errors.New("required disk body storage reserve unavailable")
 var ErrRequiredDiskBodyStorageWrite = errors.New("required disk body storage write failed")
+
+var requiredDiskBodyStorageAdmissionWait = 30 * time.Second
 
 // RequiredDiskBodyStorageOptions defines the hard limits for a body that must
 // stay on disk. It is intended for authenticated protocol paths where a
@@ -37,6 +41,9 @@ type RequiredDiskBodyStorageOptions struct {
 	MaxBytes     int64
 	MaxDiskBytes int64
 	MinFreeBytes int64
+	// ExpectedBytes is a trusted positive body length when one is available.
+	// Non-positive values use the unknown-length admission path.
+	ExpectedBytes int64
 }
 
 type requiredDiskBodyStorageReservation struct {
@@ -46,6 +53,7 @@ type requiredDiskBodyStorageReservation struct {
 var requiredDiskBodyStorageReservationMu sync.Mutex
 var requiredDiskBodyStoragePendingBytes int64
 var requiredDiskBodyStorageStatsPath string
+var requiredDiskBodyStorageSpoolAdmission = make(chan struct{}, 1)
 
 func synchronizeRequiredDiskBodyStorageStats() {
 	cacheDir := GetDiskCacheDir()
@@ -103,6 +111,9 @@ func validateRequiredDiskBodyStorageOptions(options RequiredDiskBodyStorageOptio
 	if options.MinFreeBytes < 0 {
 		return ErrRequiredDiskBodyStorageReserve
 	}
+	if options.ExpectedBytes > options.MaxBytes {
+		return ErrRequestBodyTooLarge
+	}
 	return nil
 }
 
@@ -133,26 +144,70 @@ func ensureRequiredDiskBodyStorageWriteReserve(options RequiredDiskBodyStorageOp
 }
 
 // CreateRequiredDiskBodyStorageFromReader spools a body directly to a private
-// disk file. It never falls back to memory. Pending write reservations make the
-// configured aggregate limit deterministic for concurrent callers.
+// disk file. Unknown-length callers without a request context get a bounded
+// admission wait instead of waiting behind another spool indefinitely. Callers
+// that can propagate cancellation should use
+// CreateRequiredDiskBodyStorageFromReaderWithContext.
 func CreateRequiredDiskBodyStorageFromReader(reader io.Reader, options RequiredDiskBodyStorageOptions) (BodyStorage, error) {
+	return createRequiredDiskBodyStorageFromReaderWithContext(
+		context.Background(),
+		reader,
+		options,
+		requiredDiskBodyStorageAdmissionWait,
+	)
+}
+
+// CreateRequiredDiskBodyStorageFromReaderWithContext spools a body directly to
+// a private disk file. It never falls back to memory. A trusted positive
+// ExpectedBytes value reserves the entire body before writing, allowing bodies
+// within the aggregate capacity to spool concurrently. Unknown-length streams
+// hold a single admission through their write phase so concurrent requests
+// cannot each reserve a partial body, exhaust the same aggregate budget, and
+// all fail. Waiting callers have a bounded admission wait and can leave the
+// queue earlier when their context is cancelled.
+func CreateRequiredDiskBodyStorageFromReaderWithContext(ctx context.Context, reader io.Reader, options RequiredDiskBodyStorageOptions) (BodyStorage, error) {
+	return createRequiredDiskBodyStorageFromReaderWithContext(ctx, reader, options, requiredDiskBodyStorageAdmissionWait)
+}
+
+func createRequiredDiskBodyStorageFromReaderWithContext(ctx context.Context, reader io.Reader, options RequiredDiskBodyStorageOptions, unknownLengthAdmissionWait time.Duration) (BodyStorage, error) {
 	if reader == nil {
 		return nil, fmt.Errorf("%w: reader is required", ErrRequiredDiskBodyStorageWrite)
 	}
 	if err := validateRequiredDiskBodyStorageOptions(options); err != nil {
 		return nil, err
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if options.ExpectedBytes <= 0 {
+		if err := acquireRequiredDiskBodyStorageSpoolAdmission(ctx, unknownLengthAdmissionWait); err != nil {
+			return nil, err
+		}
+		defer func() { <-requiredDiskBodyStorageSpoolAdmission }()
+	}
+
 	if err := ensureRequiredDiskBodyStorageReserve(options); err != nil {
 		return nil, err
 	}
 	synchronizeRequiredDiskBodyStorageStats()
 
+	reservation := &requiredDiskBodyStorageReservation{}
+	if options.ExpectedBytes > 0 {
+		if err := ensureRequiredDiskBodyStorageWriteReserve(options, options.ExpectedBytes); err != nil {
+			return nil, err
+		}
+		if err := reservation.reserve(options.ExpectedBytes, options.MaxDiskBytes); err != nil {
+			return nil, err
+		}
+	}
+
 	filePath, file, err := CreateDiskCacheFile(DiskCacheTypeBody)
 	if err != nil {
+		reservation.releaseAll()
 		return nil, fmt.Errorf("%w: %v", ErrRequiredDiskBodyStorageWrite, err)
 	}
 
-	reservation := &requiredDiskBodyStorageReservation{}
 	success := false
 	defer func() {
 		if success {
@@ -166,6 +221,11 @@ func CreateRequiredDiskBodyStorageFromReader(reader io.Reader, options RequiredD
 	buffer := make([]byte, 128*1024)
 	var written int64
 	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 		n, readErr := reader.Read(buffer)
 		if n > 0 {
 			if int64(n) > options.MaxBytes-written {
@@ -174,8 +234,11 @@ func CreateRequiredDiskBodyStorageFromReader(reader io.Reader, options RequiredD
 			if err := ensureRequiredDiskBodyStorageWriteReserve(options, int64(n)); err != nil {
 				return nil, err
 			}
-			if err := reservation.reserve(int64(n), options.MaxDiskBytes); err != nil {
-				return nil, err
+			nextWritten := written + int64(n)
+			if additionalReservation := nextWritten - reservation.reserved; additionalReservation > 0 {
+				if err := reservation.reserve(additionalReservation, options.MaxDiskBytes); err != nil {
+					return nil, err
+				}
 			}
 			writeN, writeErr := file.Write(buffer[:n])
 			if writeN != n || writeErr != nil {
@@ -202,6 +265,28 @@ func CreateRequiredDiskBodyStorageFromReader(reader io.Reader, options RequiredD
 		filePath: filePath,
 		size:     written,
 	}, nil
+}
+
+func acquireRequiredDiskBodyStorageSpoolAdmission(ctx context.Context, wait time.Duration) error {
+	if wait <= 0 {
+		select {
+		case requiredDiskBodyStorageSpoolAdmission <- struct{}{}:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case requiredDiskBodyStorageSpoolAdmission <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return ErrRequiredDiskBodyStorageAdmission
+	}
 }
 
 // memoryStorage 内存存储实现

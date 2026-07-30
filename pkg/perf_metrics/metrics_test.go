@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/require"
 )
 
@@ -135,6 +137,45 @@ func TestRecordRelaySampleIncludesBootstrapRecoveryMetric(t *testing.T) {
 	require.Equal(t, int64(1), snapshot.responsesBootstrapRecoveryCount)
 	require.Equal(t, int64(0), snapshot.responsesBootstrapRecoverySuccessCount)
 	require.Equal(t, int64(750), snapshot.responsesBootstrapRecoveryWaitMs)
+}
+
+func TestCaptureRelaySampleSnapshotsRedisDependencies(t *testing.T) {
+	previousRedisEnabled := common.RedisEnabled
+	previousRedisClient := common.RDB
+	common.RedisEnabled = false
+	common.RDB = nil
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		common.RDB = previousRedisClient
+	})
+
+	sample, ok := captureRelaySample(&relaycommon.RelayInfo{
+		OriginModelName: "gpt-test",
+		UsingGroup:      "default",
+		StartTime:       time.Now().Add(-time.Second),
+	}, false, 0)
+	require.True(t, ok)
+	dependencies := captureRecordDependencies()
+
+	common.RedisEnabled = true
+	replacementClient := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
+	t.Cleanup(func() {
+		_ = replacementClient.Close()
+	})
+	common.RDB = replacementClient
+	require.False(t, dependencies.redisEnabled)
+	require.Nil(t, dependencies.redisClient)
+	require.NotSame(t, replacementClient, dependencies.redisClient)
+
+	hotBuckets = syncMapForTest(t)
+	recordWithDependencies(sample, dependencies)
+
+	var found bool
+	hotBuckets.Range(func(_, _ any) bool {
+		found = true
+		return false
+	})
+	require.True(t, found)
 }
 
 func TestMergeCountersPreservesBootstrapRecoveryFields(t *testing.T) {

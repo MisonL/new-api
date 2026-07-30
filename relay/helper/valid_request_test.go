@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,12 +10,64 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetAndValidateResponsesCompactionRequestRequiresInput(t *testing.T) {
+type opaqueValidationBodyStorage struct {
+	readCalls int
+}
+
+type opaqueValidationRequestBody struct {
+	readCalls int
+}
+
+func setValidRequestTestGinMode(t *testing.T) {
+	t.Helper()
+	previousGinMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() {
+		gin.SetMode(previousGinMode)
+	})
+}
+
+func (b *opaqueValidationRequestBody) Read(_ []byte) (int, error) {
+	b.readCalls++
+	return 0, errors.New("opaque request HTTP body must not be decoded during validation")
+}
+
+func (b *opaqueValidationRequestBody) Close() error {
+	return nil
+}
+
+func (s *opaqueValidationBodyStorage) Read(_ []byte) (int, error) {
+	s.readCalls++
+	return 0, errors.New("opaque request body must not be decoded during validation")
+}
+
+func (s *opaqueValidationBodyStorage) Seek(_ int64, _ int) (int64, error) {
+	return 0, nil
+}
+
+func (s *opaqueValidationBodyStorage) Close() error {
+	return nil
+}
+
+func (s *opaqueValidationBodyStorage) Bytes() ([]byte, error) {
+	return nil, errors.New("opaque request body must not be materialized during validation")
+}
+
+func (s *opaqueValidationBodyStorage) Size() int64 {
+	return 1024
+}
+
+func (s *opaqueValidationBodyStorage) IsDisk() bool {
+	return true
+}
+
+func TestGetAndValidateResponsesCompactionRequestRequiresInput(t *testing.T) {
+	setValidRequestTestGinMode(t)
 
 	tests := []struct {
 		name string
@@ -53,7 +106,7 @@ func TestGetAndValidateResponsesCompactionRequestRequiresInput(t *testing.T) {
 }
 
 func TestGetAndValidateResponsesCompactionRequestAcceptsNonEmptyInput(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setValidRequestTestGinMode(t)
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -71,7 +124,7 @@ func TestGetAndValidateResponsesCompactionRequestAcceptsNonEmptyInput(t *testing
 }
 
 func TestGetAndValidateResponsesRequestRejectsMalformedAdditionalTools(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setValidRequestTestGinMode(t)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(
@@ -87,8 +140,71 @@ func TestGetAndValidateResponsesRequestRejectsMalformedAdditionalTools(t *testin
 	require.ErrorContains(t, err, "additional_tools.tools must be an array")
 }
 
+func TestGetAndValidateRequestUsesOpaqueResponsesMetadataWithoutDecodingBody(t *testing.T) {
+	setValidRequestTestGinMode(t)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	requestBody := &opaqueValidationRequestBody{}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Body = requestBody
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	stream := true
+	storage := &opaqueValidationBodyStorage{}
+	ctx.Set(common.KeyBodyStorage, storage)
+	common.SetResponsesRequestMetadata(ctx, common.ResponsesRequestMetadata{
+		Model:                     "gpt-5.6-sol",
+		ModelPresent:              true,
+		InputPresent:              true,
+		InputKind:                 common.ResponsesJSONValueKindArray,
+		Stream:                    &stream,
+		HasOpaqueEncryptedContent: true,
+		BodySize:                  storage.Size(),
+	})
+
+	request, err := GetAndValidateRequest(ctx, types.RelayFormatOpenAIResponses)
+
+	require.NoError(t, err)
+	opaqueRequest, ok := request.(interface{ IsOpaqueResponsesRequest() bool })
+	require.True(t, ok)
+	require.True(t, opaqueRequest.IsOpaqueResponsesRequest())
+	require.Zero(t, storage.readCalls)
+	require.Zero(t, requestBody.readCalls)
+}
+
+func TestGetAndValidateRequestUsesOpaqueResponsesCompactMetadataWithoutDecodingBody(t *testing.T) {
+	setValidRequestTestGinMode(t)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	requestBody := &opaqueValidationRequestBody{}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	ctx.Request.Body = requestBody
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	storage := &opaqueValidationBodyStorage{}
+	ctx.Set(common.KeyBodyStorage, storage)
+	common.SetResponsesRequestMetadata(ctx, common.ResponsesRequestMetadata{
+		Model:                     "gpt-5.6-sol",
+		ModelPresent:              true,
+		InputPresent:              true,
+		InputKind:                 common.ResponsesJSONValueKindArray,
+		HasOpaqueEncryptedContent: true,
+		HasCompactionItem:         true,
+		BodySize:                  storage.Size(),
+	})
+
+	request, err := GetAndValidateRequest(ctx, types.RelayFormatOpenAIResponsesCompaction)
+
+	require.NoError(t, err)
+	opaqueRequest, ok := request.(interface{ IsOpaqueResponsesRequest() bool })
+	require.True(t, ok)
+	require.True(t, opaqueRequest.IsOpaqueResponsesRequest())
+	require.Zero(t, storage.readCalls)
+	require.Zero(t, requestBody.readCalls)
+}
+
 func TestGetAndValidateResponsesCompactionRequestRejectsMalformedAdditionalTools(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setValidRequestTestGinMode(t)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(
@@ -105,7 +221,7 @@ func TestGetAndValidateResponsesCompactionRequestRejectsMalformedAdditionalTools
 }
 
 func TestGetAndValidateResponsesCompactionRequestPreservesSub2APICompatibleFields(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setValidRequestTestGinMode(t)
 
 	body := `{
 		"model":"gpt-5.5",
@@ -165,7 +281,7 @@ func TestGetAndValidateResponsesCompactionRequestPreservesSub2APICompatibleField
 }
 
 func TestResponsesCompactionRequestKeepsKnownFieldsFilterableAfterConversion(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setValidRequestTestGinMode(t)
 
 	body := `{
 		"model":"gpt-5.5",
@@ -200,7 +316,7 @@ func TestResponsesCompactionRequestKeepsKnownFieldsFilterableAfterConversion(t *
 }
 
 func TestResponsesCompactionTokenMetaExcludesPromptCacheKey(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setValidRequestTestGinMode(t)
 
 	body := `{
 		"model":"gpt-5.5",

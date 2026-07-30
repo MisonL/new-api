@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -10,7 +11,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var ErrOpaqueResponsesTieredBillingUnsupported = errors.New("tiered expression billing is unsupported for opaque encrypted Responses replay")
+
 func ResolveIncomingBillingExprRequestInput(c *gin.Context, info *relaycommon.RelayInfo) (billingexpr.RequestInput, error) {
+	if info != nil && relaycommon.IsOpaqueResponsesReplayRequest(info.Request) {
+		return billingexpr.RequestInput{}, ErrOpaqueResponsesTieredBillingUnsupported
+	}
+	if metadata, ok := common.GetResponsesRequestMetadata(c); ok && metadata.HasOpaqueEncryptedContent {
+		return billingexpr.RequestInput{}, ErrOpaqueResponsesTieredBillingUnsupported
+	}
 	if info != nil && info.BillingRequestInput != nil {
 		input := cloneRequestInput(*info.BillingRequestInput)
 		merged := cloneStringMap(info.RequestHeaders)
@@ -40,6 +49,9 @@ func BuildBillingExprRequestInputFromRequest(request dto.Request, headers map[st
 	}
 	if request == nil {
 		return input, nil
+	}
+	if relaycommon.IsOpaqueResponsesReplayRequest(request) {
+		return billingexpr.RequestInput{}, ErrOpaqueResponsesTieredBillingUnsupported
 	}
 
 	bodyBytes, err := common.Marshal(request)

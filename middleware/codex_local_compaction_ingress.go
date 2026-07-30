@@ -33,11 +33,12 @@ var codexLocalResponsesCompactionIngressOptions = codexLocalResponsesCompactionI
 }
 
 // CodexLocalResponsesCompactionIngress authenticates first at the router level,
-// then decompresses and force-spools only the exact local Codex Responses
-// compaction shape. The body is never reduced or replaced with visible content.
+// then decompresses and force-spools direct Responses compact requests and
+// ordinary Codex Responses requests that can carry opaque encrypted state. The
+// body is never reduced or replaced with visible content.
 func CodexLocalResponsesCompactionIngress() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !common.IsCodexLocalResponsesCompactionRequest(c.Request) || c.Request.Body == nil {
+		if !common.IsResponsesOpaqueReplayIngressRequest(c.Request) || c.Request.Body == nil {
 			c.Next()
 			return
 		}
@@ -47,8 +48,15 @@ func CodexLocalResponsesCompactionIngress() gin.HandlerFunc {
 			abortCodexLocalResponsesCompactionIngress(c, err)
 			return
 		}
+		metadata, err := common.ScanResponsesRequestMetadata(storage, storage.Size())
+		if err != nil {
+			_ = storage.Close()
+			abortCodexLocalResponsesCompactionIngress(c, fmt.Errorf("invalid Responses compaction request: %w", err))
+			return
+		}
 
 		c.Set(common.KeyBodyStorage, storage)
+		common.SetResponsesRequestMetadata(c, metadata)
 		common.SetContextKey(c, constant.ContextKeyRequestBodySize, storage.Size())
 		c.Request.Body = io.NopCloser(storage)
 		c.Request.ContentLength = storage.Size()
@@ -65,7 +73,8 @@ func spoolCodexLocalResponsesCompactionBody(c *gin.Context) (common.BodyStorage,
 
 	body := c.Request.Body
 	defer body.Close()
-	decoded, closeDecoded, err := decodeCodexLocalResponsesCompactionBody(body, c.GetHeader("Content-Encoding"))
+	contentEncoding := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Encoding")))
+	decoded, closeDecoded, err := decodeCodexLocalResponsesCompactionBody(body, contentEncoding)
 	if err != nil {
 		return nil, err
 	}
@@ -75,10 +84,15 @@ func spoolCodexLocalResponsesCompactionBody(c *gin.Context) (common.BodyStorage,
 	if options.MaxDiskBytes <= 0 {
 		options.MaxDiskBytes = common.GetDiskCacheMaxSizeBytes()
 	}
-	return common.CreateRequiredDiskBodyStorageFromReader(decoded, common.RequiredDiskBodyStorageOptions{
-		MaxBytes:     options.MaxBodyBytes,
-		MaxDiskBytes: options.MaxDiskBytes,
-		MinFreeBytes: options.MinFreeBytes,
+	expectedBytes := int64(0)
+	if (contentEncoding == "" || contentEncoding == "identity") && c.Request.ContentLength > 0 {
+		expectedBytes = c.Request.ContentLength
+	}
+	return common.CreateRequiredDiskBodyStorageFromReaderWithContext(c.Request.Context(), decoded, common.RequiredDiskBodyStorageOptions{
+		MaxBytes:      options.MaxBodyBytes,
+		MaxDiskBytes:  options.MaxDiskBytes,
+		MinFreeBytes:  options.MinFreeBytes,
+		ExpectedBytes: expectedBytes,
 	})
 }
 

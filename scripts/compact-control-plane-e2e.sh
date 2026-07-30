@@ -15,6 +15,9 @@ APP_SERVICE="${COMPACT_E2E_APP_SERVICE:-new-api}"
 COMPOSE_PROJECT_NAME="${COMPACT_E2E_COMPOSE_PROJECT_NAME:-}"
 CURL_CONNECT_TIMEOUT="${COMPACT_E2E_CURL_CONNECT_TIMEOUT:-5}"
 CURL_MAX_TIME="${COMPACT_E2E_CURL_MAX_TIME:-60}"
+HEALTH_CURL_MAX_TIME="${COMPACT_E2E_HEALTH_CURL_MAX_TIME:-5}"
+READY_TIMEOUT_SECONDS="${COMPACT_E2E_READY_TIMEOUT_SECONDS:-180}"
+RESTART_TIMEOUT_SECONDS="${COMPACT_E2E_RESTART_TIMEOUT_SECONDS:-120}"
 UPSTREAM_CURL_MAX_TIME="${COMPACT_E2E_UPSTREAM_CURL_MAX_TIME:-30}"
 TOKEN_ID="${COMPACT_E2E_TOKEN_ID:-910001}"
 CHANNEL_NATIVE_NEWAPI="${COMPACT_E2E_CHANNEL_NATIVE_NEWAPI:-910101}"
@@ -38,7 +41,7 @@ cd "$ROOT_DIR"
 
 psql_exec() { docker exec -i "$POSTGRES_CONTAINER" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 "$@"; }
 
-psql_query() { psql_exec -At; }
+psql_query() { psql_exec -At "$@"; }
 
 guard_dev_target() {
   if [[ "${COMPACT_E2E_FORCE:-}" == "1" ]]; then
@@ -130,19 +133,59 @@ SQL
 }
 
 restart_dev() {
-  local compose_args=(-f "$COMPOSE_FILE" --env-file "$ENV_FILE")
-  if [[ -n "$COMPOSE_PROJECT_NAME" ]]; then
-    compose_args=(--project-name "$COMPOSE_PROJECT_NAME" "${compose_args[@]}")
+	local compose_args=(-f "$COMPOSE_FILE" --env-file "$ENV_FILE")
+	if [[ -n "$COMPOSE_PROJECT_NAME" ]]; then
+		compose_args=(--project-name "$COMPOSE_PROJECT_NAME" "${compose_args[@]}")
+	fi
+	docker compose "${compose_args[@]}" restart -t "$RESTART_TIMEOUT_SECONDS" "$APP_SERVICE" >/dev/null
+	local deadline=$((SECONDS + READY_TIMEOUT_SECONDS))
+	while (( SECONDS < deadline )); do
+		if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$HEALTH_CURL_MAX_TIME" -fsS "$BASE_URL/api/status" >/dev/null 2>&1; then
+			return 0
+		fi
+		sleep 1
+	done
+	echo "dev container did not become ready within ${READY_TIMEOUT_SECONDS}s" >&2
+	docker compose "${compose_args[@]}" ps >&2 || true
+	docker compose "${compose_args[@]}" logs --tail 120 "$APP_SERVICE" >&2 || true
+	return 1
+}
+
+snapshot_channel_model_mapping() {
+  local channel="$1"
+  local snapshot
+  snapshot="$(psql_query -v channel="$channel" <<'SQL'
+select json_build_object('is_null', model_mapping is null, 'value', model_mapping)::text
+from channels
+where id = :channel;
+SQL
+)"
+  if [[ -z "$snapshot" ]]; then
+    echo "cannot snapshot model mapping for channel ${channel}" >&2
+    return 1
   fi
-  docker compose "${compose_args[@]}" up -d --no-deps --force-recreate "$APP_SERVICE" >/dev/null
-  for _ in {1..45}; do
-    if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -fsS "$BASE_URL/api/status" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 1
-  done
-  echo "dev container did not become healthy" >&2
-  return 1
+  printf '%s\n' "$snapshot"
+}
+
+restore_channel_model_mapping() {
+  local channel="$1"
+  local snapshot="$2"
+  if [[ -z "$snapshot" ]]; then
+    echo "cannot restore an empty model mapping snapshot for channel ${channel}" >&2
+    return 1
+  fi
+  psql_exec -v channel="$channel" -v snapshot="$snapshot" >/dev/null <<'SQL'
+with saved as (
+  select :'snapshot'::jsonb as value
+)
+update channels
+set model_mapping = case
+  when (select (value ->> 'is_null')::boolean from saved) then null
+  else (select value ->> 'value' from saved)
+end
+where id = :channel;
+SQL
+  restart_dev
 }
 
 ensure_fake_upstream() {
@@ -189,6 +232,15 @@ post_json() {
   local payload="$2"
   local out="$3"
   curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -o "$out" -w '%{http_code}' -K "$CURL_CONFIG" --data "$payload" "$BASE_URL${path}"
+}
+
+post_json_local_codex_compaction() {
+  local path="$1"
+  local payload="$2"
+  local out="$3"
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -o "$out" -w '%{http_code}' -K "$CURL_CONFIG" \
+    -H 'X-Codex-Turn-Metadata: {"request_kind":"compaction","compaction":{"implementation":"responses"}}' \
+    --data "$payload" "$BASE_URL${path}"
 }
 
 post_json_remote_compaction() {
@@ -376,6 +428,8 @@ run_case_generic_rejects_remote_opaque() {
 run_case_native_opaque_replay_is_byte_preserving_and_not_retried() {
   echo "case=native_opaque_replay_byte_preserving_no_retry"
   set_single_channel "$CHANNEL_NATIVE_NEWAPI" 'gpt-5.5'
+  local original_model_mapping
+  original_model_mapping="$(snapshot_channel_model_mapping "$CHANNEL_NATIVE_NEWAPI")"
   psql_exec -v channel="$CHANNEL_NATIVE_NEWAPI" >/dev/null <<'SQL'
 update channels
 set model_mapping = '{"gpt-5.5":"gpt-5.4"}'
@@ -413,6 +467,52 @@ if (capture.bodySha256 !== expectedHash) {
   throw new Error('opaque request changed outside the mapped model');
 }
 NODE
+  restore_channel_model_mapping "$CHANNEL_NATIVE_NEWAPI" "$original_model_mapping"
+}
+
+run_case_local_codex_opaque_replay_is_byte_preserving_and_not_retried() {
+  echo "case=local_codex_opaque_replay_byte_preserving_no_retry"
+  set_single_channel "$CHANNEL_NATIVE_NEWAPI" 'gpt-5.5'
+  local original_model_mapping
+  original_model_mapping="$(snapshot_channel_model_mapping "$CHANNEL_NATIVE_NEWAPI")"
+  psql_exec -v channel="$CHANNEL_NATIVE_NEWAPI" >/dev/null <<'SQL'
+update channels
+set model_mapping = '{"gpt-5.5":"gpt-5.4"}'
+where id = :channel;
+SQL
+  restart_dev
+  reset_upstream
+  local payload expected_hash out code summary
+  payload='{
+  "model": "gpt-5.5",
+  "input": [
+    {"type":"reasoning","encrypted_content":"opaque-native-retry-guard"},
+    {"type":"message","role":"user","content":[{"type":"input_text","text":"opaque local Codex replay guard"}]}
+  ],
+  "future_top_level": { "keep": [4, 5, 6] }
+}'
+  expected_hash="$(node -e 'const crypto=require("crypto"); const body=process.argv[1].replace("\"gpt-5.5\"", "\"gpt-5.4\""); console.log(crypto.createHash("sha256").update(body).digest("hex"));' "$payload")"
+  out="$TMP_DIR/local_codex_opaque_replay.json"
+  code="$(post_json_local_codex_compaction /v1/responses "$payload" "$out")"
+  echo "status=${code}"
+  [[ "$code" == "400" ]]
+  assert_contains "$out" 'invalid_encrypted_content'
+  summary="$(capture_summary)"
+  node - "$summary" "$expected_hash" <<'NODE'
+const captures = JSON.parse(process.argv[2]);
+const expectedHash = process.argv[3];
+if (captures.length !== 1) {
+  throw new Error(`expected exactly one upstream attempt, got ${captures.length}`);
+}
+const capture = captures[0];
+if (capture.url !== '/v1/responses') throw new Error(`unexpected upstream path: ${capture.url}`);
+if (capture.model !== 'gpt-5.4') throw new Error(`mapped model was not forwarded: ${capture.model}`);
+if (!capture.hasEncryptedContent) throw new Error('upstream capture lost encrypted_content');
+if (capture.bodySha256 !== expectedHash) {
+  throw new Error('local Codex opaque request changed outside the mapped model');
+}
+NODE
+  restore_channel_model_mapping "$CHANNEL_NATIVE_NEWAPI" "$original_model_mapping"
 }
 
 run_case_sub2api_previous_response_id() {
@@ -490,6 +590,7 @@ main() {
   run_case_stale_visible_only
   run_case_generic_rejects_remote_opaque
   run_case_native_opaque_replay_is_byte_preserving_and_not_retried
+  run_case_local_codex_opaque_replay_is_byte_preserving_and_not_retried
   run_case_sub2api_previous_response_id
   run_case_model_switch_restore
   run_case_real_codex_history_fixture

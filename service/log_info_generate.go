@@ -205,23 +205,26 @@ func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settin
 	}
 	snapshotInfo := settings.ResolveResponsesChannelCapability(relayInfo.ChannelType)
 	snapshot := map[string]interface{}{
-		"source":                                snapshotInfo.Source,
-		"compact_mode_setting":                  string(snapshotInfo.CompactModeSetting),
-		"compact_mode_effective":                string(snapshotInfo.CompactModeEffective),
-		"supports_responses":                    snapshotInfo.SupportsResponses,
-		"supports_responses_compact":            snapshotInfo.SupportsResponsesCompact,
-		"supports_chat":                         snapshotInfo.SupportsChat,
-		"supports_rest_previous_response_id":    snapshotInfo.SupportsRestPreviousResponseID,
-		"supports_compaction_item_passthrough":  snapshotInfo.SupportsCompactionItemPassthrough,
-		"supports_namespace_tools":              snapshotInfo.SupportsNamespaceTools,
-		"supports_tool_search":                  snapshotInfo.SupportsToolSearch,
-		"reasoning_context_capability":          string(snapshotInfo.ReasoningContextCapability),
-		"encrypted_reasoning_replay_capability": string(snapshotInfo.EncryptedReasoningReplayCapability),
-		"strips_responses_reasoning_context":    snapshotInfo.StripsResponsesReasoningContext,
-		"strips_responses_encrypted_reasoning":  snapshotInfo.StripsResponsesEncryptedReasoning,
+		"source":                                 snapshotInfo.Source,
+		"compact_mode_setting":                   string(snapshotInfo.CompactModeSetting),
+		"compact_mode_effective":                 string(snapshotInfo.CompactModeEffective),
+		"supports_responses":                     snapshotInfo.SupportsResponses,
+		"supports_responses_compact":             snapshotInfo.SupportsResponsesCompact,
+		"supports_chat":                          snapshotInfo.SupportsChat,
+		"supports_rest_previous_response_id":     snapshotInfo.SupportsRestPreviousResponseID,
+		"compaction_item_passthrough_capability": string(snapshotInfo.CompactionItemPassthroughCapability),
+		"supports_namespace_tools":               snapshotInfo.SupportsNamespaceTools,
+		"supports_tool_search":                   snapshotInfo.SupportsToolSearch,
+		"reasoning_context_capability":           string(snapshotInfo.ReasoningContextCapability),
+		"encrypted_reasoning_replay_capability":  string(snapshotInfo.EncryptedReasoningReplayCapability),
+		"strips_responses_reasoning_context":     snapshotInfo.StripsResponsesReasoningContext,
+		"strips_responses_encrypted_reasoning":   snapshotInfo.StripsResponsesEncryptedReasoning,
 	}
 	if snapshotInfo.SupportsCustomTools != nil {
 		snapshot["supports_custom_tools"] = *snapshotInfo.SupportsCustomTools
+	}
+	if snapshotInfo.SupportsCompactionItemPassthrough != nil {
+		snapshot["supports_compaction_item_passthrough"] = *snapshotInfo.SupportsCompactionItemPassthrough
 	}
 	if snapshotInfo.SupportsFunctionTools != nil {
 		snapshot["supports_function_tools"] = *snapshotInfo.SupportsFunctionTools

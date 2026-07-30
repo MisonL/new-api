@@ -118,7 +118,6 @@ export function UserSubscriptionsDialog(props: Props) {
 
   useEffect(() => {
     if (props.open && userId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedPlanId('')
       loadData()
     }

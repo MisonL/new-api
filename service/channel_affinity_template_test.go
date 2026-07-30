@@ -201,6 +201,112 @@ func TestApplyChannelAffinityOverrideTemplate_MergeOperations(t *testing.T) {
 	require.Equal(t, "trim_prefix", secondOp["mode"])
 }
 
+func TestPreviewChannelAffinityOverrideTemplateDoesNotRecordSelection(t *testing.T) {
+	ctx := buildChannelAffinityTemplateContextForTest(channelAffinityMeta{
+		RuleName: "opaque-responses-rule",
+		ParamTemplate: map[string]interface{}{
+			"operations": []map[string]interface{}{
+				{
+					"mode":  "set",
+					"path":  "instructions",
+					"value": "must not rewrite opaque replay",
+				},
+			},
+		},
+	})
+	base := map[string]interface{}{
+		"operations": []map[string]interface{}{
+			{
+				"mode":  "pass_headers",
+				"value": []string{"Originator"},
+			},
+		},
+	}
+
+	preview, previewApplied := PreviewChannelAffinityOverrideTemplate(ctx, base)
+
+	require.True(t, previewApplied)
+	require.NotEqual(t, base, preview)
+	_, recorded := ctx.Get(ginKeyChannelAffinityLogInfo)
+	require.False(t, recorded)
+
+	applied, applyApplied := ApplyChannelAffinityOverrideTemplate(ctx, base)
+
+	require.True(t, applyApplied)
+	require.Equal(t, preview, applied)
+	_, recorded = ctx.Get(ginKeyChannelAffinityLogInfo)
+	require.True(t, recorded)
+}
+
+func TestPreviewChannelAffinityOverrideTemplateUsesOpaqueResponsesAffinityRule(t *testing.T) {
+	setting := operation_setting.GetChannelAffinitySetting()
+	require.NotNil(t, setting)
+
+	ruleIndex := -1
+	for i := range setting.Rules {
+		if setting.Rules[i].Name == operation_setting.ResponsesEncryptedContentAffinityRuleName {
+			ruleIndex = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, ruleIndex, 0)
+
+	oldTemplate := setting.Rules[ruleIndex].ParamOverrideTemplate
+	setting.Rules[ruleIndex].ParamOverrideTemplate = map[string]interface{}{
+		"operations": []map[string]interface{}{
+			{
+				"mode":  "set",
+				"path":  "instructions",
+				"value": "must not rewrite opaque replay",
+			},
+		},
+	}
+	t.Cleanup(func() {
+		setting.Rules[ruleIndex].ParamOverrideTemplate = oldTemplate
+	})
+
+	modelName := "gpt-5.6-sol"
+	usingGroup := "default"
+	fingerprint := "opaque-affinity-fingerprint"
+	rule := setting.Rules[ruleIndex]
+	cacheKey := buildResponsesEncryptedContentAffinityCacheKeySuffix(rule, modelName, usingGroup, fingerprint)
+	cache := getChannelAffinityCache()
+	require.NoError(t, cache.SetWithTTL(cacheKey, 206, time.Minute))
+	t.Cleanup(func() {
+		_, _ = cache.DeleteMany([]string{cacheKey})
+	})
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetResponsesRequestMetadata(ctx, common.ResponsesRequestMetadata{
+		Model:                     modelName,
+		ModelPresent:              true,
+		InputPresent:              true,
+		InputKind:                 common.ResponsesJSONValueKindArray,
+		HasOpaqueEncryptedContent: true,
+		EncryptedContentFingerprints: []string{
+			fingerprint,
+		},
+	})
+
+	channelID, found := GetPreferredChannelByAffinity(ctx, modelName, usingGroup)
+
+	require.True(t, found)
+	require.Equal(t, 206, channelID)
+	preview, applied := PreviewChannelAffinityOverrideTemplate(ctx, map[string]interface{}{})
+	require.True(t, applied)
+	operations, ok := preview["operations"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, operations, 1)
+	operation, ok := operations[0].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "set", operation["mode"])
+	require.Equal(t, "instructions", operation["path"])
+	require.Equal(t, "must not rewrite opaque replay", operation["value"])
+	_, recorded := ctx.Get(ginKeyChannelAffinityLogInfo)
+	require.False(t, recorded)
+}
+
 func TestShouldSkipRetryAfterChannelAffinityFailure(t *testing.T) {
 	tests := []struct {
 		name string

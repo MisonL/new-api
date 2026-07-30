@@ -203,6 +203,73 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 	return result, nil
 }
 
+// ApplyHeaderOnlyParamOverrideWithRelayInfo applies only operations that mutate
+// the upstream request headers. It is used for opaque Responses replays, where
+// parsing or rewriting the encrypted request body would violate byte fidelity.
+func ApplyHeaderOnlyParamOverrideWithRelayInfo(info *RelayInfo) error {
+	paramOverride := getParamOverrideMap(info)
+	if err := ValidateOpaqueResponsesReplayParamOverride(paramOverride); err != nil {
+		return err
+	}
+	if len(paramOverride) == 0 {
+		return nil
+	}
+	operations, ok := tryParseOperations(paramOverride)
+	if !ok {
+		return errors.New("opaque encrypted replay requires header-only param override operations")
+	}
+
+	overrideCtx := BuildParamOverrideContext(info)
+	var recorder *paramOverrideAuditRecorder
+	if shouldEnableParamOverrideAudit(paramOverride) {
+		recorder = &paramOverrideAuditRecorder{}
+		overrideCtx[paramOverrideContextAuditRecorder] = recorder
+	}
+	result, err := applyOperations("{}", operations, overrideCtx)
+	if err != nil {
+		return err
+	}
+	if result != "{}" {
+		return errors.New("opaque encrypted replay param override attempted to modify request body")
+	}
+	syncRuntimeHeaderOverrideFromContext(info, overrideCtx)
+	if info != nil {
+		if recorder != nil {
+			info.ParamOverrideAudit = recorder.lines
+		} else {
+			info.ParamOverrideAudit = nil
+		}
+	}
+	return nil
+}
+
+// ValidateOpaqueResponsesReplayParamOverride verifies that an override can be
+// applied without parsing or rewriting an opaque Responses request body.
+func ValidateOpaqueResponsesReplayParamOverride(paramOverride map[string]interface{}) error {
+	if len(paramOverride) == 0 {
+		return nil
+	}
+	operations, ok := tryParseOperations(paramOverride)
+	if !ok || len(buildLegacyParamOverride(paramOverride)) > 0 {
+		return errors.New("opaque encrypted replay requires header-only param override operations")
+	}
+	for _, operation := range operations {
+		if len(operation.Conditions) > 0 || !isHeaderOnlyParamOverrideOperation(operation.Mode) {
+			return fmt.Errorf("opaque encrypted replay does not permit param override mode %q", operation.Mode)
+		}
+	}
+	return nil
+}
+
+func isHeaderOnlyParamOverrideOperation(mode string) bool {
+	switch mode {
+	case "set_header", "delete_header", "copy_header", "move_header", "pass_headers":
+		return true
+	default:
+		return false
+	}
+}
+
 func shouldEnableParamOverrideAudit(paramOverride map[string]interface{}) bool {
 	if common.DebugEnabled {
 		return true

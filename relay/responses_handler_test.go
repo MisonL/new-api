@@ -19,6 +19,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -2067,6 +2068,48 @@ func TestNormalizeResponsesCompactUsageKeepsUpstreamTotalTokens(t *testing.T) {
 	require.Equal(t, 11, usage.PromptTokens)
 	require.Equal(t, 5, usage.CompletionTokens)
 	require.Equal(t, 20, usage.TotalTokens)
+}
+
+func TestSettleResponsesCompactUsageNormalizesBeforeConsumptionAndRestoresPricingState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ratio_setting.InitRatioSettings()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+
+	originalPriceData := types.PriceData{
+		ModelRatio:  999,
+		OtherRatios: map[string]float64{"preserve": 1},
+	}
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.6-sol-openai-compact",
+		UsingGroup:      "default",
+		PriceData:       originalPriceData,
+	}
+	info.SetEstimatePromptTokens(23)
+	usage := &dto.Usage{
+		CompletionTokens: 5,
+		OutputTokens:     5,
+		TotalTokens:      5,
+	}
+
+	consumed := false
+	var consumedPriceData types.PriceData
+	apiErr := settleResponsesCompactUsage(c, info, usage, func(consumedUsage *dto.Usage) {
+		consumed = true
+		consumedPriceData = info.PriceData
+		require.Equal(t, 23, consumedUsage.PromptTokens)
+		require.Equal(t, 23, consumedUsage.InputTokens)
+		require.Equal(t, 5, consumedUsage.CompletionTokens)
+		require.Equal(t, 5, consumedUsage.OutputTokens)
+		require.Equal(t, 28, consumedUsage.TotalTokens)
+	})
+
+	require.Nil(t, apiErr)
+	require.True(t, consumed)
+	require.NotEqual(t, originalPriceData, consumedPriceData)
+	require.Equal(t, "gpt-5.6-sol-openai-compact", info.OriginModelName)
+	require.Equal(t, originalPriceData, info.PriceData)
 }
 
 func TestFindResponsesViaChatRuleCarriesCustomToolBridgeOption(t *testing.T) {

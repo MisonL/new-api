@@ -4395,6 +4395,7 @@
     "compact mode": "compact mode",
     "compaction: pass": "compaction: pass",
     "compaction: block": "compaction: block",
+    "compaction: unknown": "compaction: unknown",
     "diagnosis": "diagnosis",
     "last fail": "last fail",
     "last observed": "last observed",

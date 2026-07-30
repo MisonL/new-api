@@ -310,7 +310,9 @@ func TestChannelOtherSettingsDefaultProfileAllowsCompactionItemPassthrough(t *te
 
 	require.Equal(t, dto.ResponsesUpstreamProfile(""), settings.NormalizedResponsesUpstreamProfile())
 	require.False(t, settings.HasResponsesProxyCompatibilityProfile())
-	require.True(t, settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI).SupportsCompactionItemPassthrough)
+	capability := settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI)
+	require.Equal(t, dto.ResponsesCompactionItemPassthroughCapabilityUnknown, capability.CompactionItemPassthroughCapability)
+	require.Nil(t, capability.SupportsCompactionItemPassthrough)
 }
 
 func TestChannelOtherSettingsRemoteCompactionTimeoutDoesNotChangeCapabilitySource(t *testing.T) {

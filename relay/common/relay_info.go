@@ -520,7 +520,7 @@ func GenRelayInfoEmbedding(c *gin.Context, request dto.Request) *RelayInfo {
 }
 
 // GenRelayInfoResponses builds RelayInfo for OpenAI Responses API requests.
-func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) *RelayInfo {
+func GenRelayInfoResponses(c *gin.Context, request dto.Request) (*RelayInfo, error) {
 	info := genBaseRelayInfo(c, request)
 	info.RelayMode = relayconstant.RelayModeResponses
 	info.RelayFormat = types.RelayFormatOpenAIResponses
@@ -528,8 +528,16 @@ func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) 
 	info.ResponsesUsageInfo = &ResponsesUsageInfo{
 		BuiltInTools: make(map[string]*BuildInToolInfo),
 	}
-	if len(request.Tools) > 0 {
-		for _, tool := range request.GetToolsMap() {
+	if responsesRequest, ok := request.(*dto.OpenAIResponsesRequest); ok && responsesRequest != nil {
+		effectiveTools, err := responsesRequest.EffectiveTools()
+		if err != nil {
+			return nil, fmt.Errorf("resolve effective Responses tools: %w", err)
+		}
+		for _, rawTool := range effectiveTools {
+			var tool map[string]any
+			if err := common.Unmarshal(rawTool, &tool); err != nil {
+				return nil, fmt.Errorf("parse effective Responses tool: %w", err)
+			}
 			toolType := common.Interface2String(tool["type"])
 			canonicalToolType, ok := CanonicalResponsesBuiltInToolType(toolType)
 			if !ok {
@@ -554,7 +562,7 @@ func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) 
 			}
 		}
 	}
-	return info
+	return info, nil
 }
 
 func CanonicalResponsesBuiltInToolType(toolType string) (string, bool) {
@@ -723,13 +731,21 @@ func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Req
 	case types.RelayFormatEmbedding:
 		info = GenRelayInfoEmbedding(c, request)
 	case types.RelayFormatOpenAIResponses:
-		if request, ok := request.(*dto.OpenAIResponsesRequest); ok {
-			info = GenRelayInfoResponses(c, request)
+		if _, ok := request.(*dto.OpenAIResponsesRequest); ok {
+			info, err = GenRelayInfoResponses(c, request)
+			break
+		}
+		if _, ok := request.(*dto.OpaqueOpenAIResponsesRequest); ok {
+			info, err = GenRelayInfoResponses(c, request)
 			break
 		}
 		err = errors.New("request is not a OpenAIResponsesRequest")
 	case types.RelayFormatOpenAIResponsesCompaction:
-		if request, ok := request.(*dto.OpenAIResponsesCompactionRequest); ok {
+		if _, ok := request.(*dto.OpenAIResponsesCompactionRequest); ok {
+			info = GenRelayInfoResponsesCompaction(c, request)
+			break
+		}
+		if _, ok := request.(*dto.OpaqueOpenAIResponsesRequest); ok {
 			info = GenRelayInfoResponsesCompaction(c, request)
 			break
 		}
@@ -800,7 +816,7 @@ func (info *RelayInfo) GetFinalRequestRelayFormat() types.RelayFormat {
 }
 
 // GenRelayInfoResponsesCompaction builds RelayInfo for responses compaction requests.
-func GenRelayInfoResponsesCompaction(c *gin.Context, request *dto.OpenAIResponsesCompactionRequest) *RelayInfo {
+func GenRelayInfoResponsesCompaction(c *gin.Context, request dto.Request) *RelayInfo {
 	info := genBaseRelayInfo(c, request)
 	if info.RelayMode == relayconstant.RelayModeUnknown {
 		info.RelayMode = relayconstant.RelayModeResponsesCompact

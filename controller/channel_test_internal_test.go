@@ -848,7 +848,8 @@ func TestFinalizeChannelTestRuntimeSummaryIncludesCompactCapabilitySnapshot(t *t
 	require.Equal(t, "native", summary.ChannelCapability["compact_mode_effective"])
 	require.Equal(t, false, summary.ChannelCapability["supports_responses_compact"])
 	require.Equal(t, false, summary.ChannelCapability["supports_rest_previous_response_id"])
-	require.Equal(t, false, summary.ChannelCapability["supports_compaction_item_passthrough"])
+	require.Equal(t, "unknown", summary.ChannelCapability["compaction_item_passthrough_capability"])
+	require.NotContains(t, summary.ChannelCapability, "supports_compaction_item_passthrough")
 	require.Equal(t, false, summary.ChannelCapability["strips_responses_encrypted_reasoning"])
 }
 
@@ -892,6 +893,7 @@ func TestFinalizeChannelTestRuntimeSummaryShowsProxyCompactAsSyntheticOnly(t *te
 	require.Equal(t, "synthetic_summary", summary.ChannelCapability["compact_mode_effective"])
 	require.Equal(t, false, summary.ChannelCapability["supports_responses_compact"])
 	require.Equal(t, false, summary.ChannelCapability["supports_rest_previous_response_id"])
+	require.Equal(t, "unsupported", summary.ChannelCapability["compaction_item_passthrough_capability"])
 	require.Equal(t, false, summary.ChannelCapability["supports_compaction_item_passthrough"])
 }
 

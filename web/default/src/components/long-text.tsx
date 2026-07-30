@@ -27,12 +27,11 @@ export function LongText({
   const [isOverflown, setIsOverflown] = useState(false)
 
   useEffect(() => {
-    if (checkOverflow(ref.current)) {
-      setIsOverflown(true)
-      return
-    }
+    const frame = requestAnimationFrame(() => {
+      setIsOverflown(checkOverflow(ref.current))
+    })
 
-    setIsOverflown(false)
+    return () => cancelAnimationFrame(frame)
   }, [])
 
   if (!isOverflown)

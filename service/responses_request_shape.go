@@ -60,6 +60,10 @@ func appendResponsesRequestShape(ctx *gin.Context, relayInfo *relaycommon.RelayI
 	if relayInfo == nil || other == nil {
 		return
 	}
+	if request, ok := relayInfo.Request.(*dto.OpaqueOpenAIResponsesRequest); ok {
+		appendOpaqueResponsesRequestShape(ctx, request, other)
+		return
+	}
 	request := responsesRequestForShape(relayInfo.Request)
 	if request == nil {
 		return
@@ -86,6 +90,116 @@ func appendResponsesRequestShape(ctx *gin.Context, relayInfo *relaycommon.RelayI
 	appendResponsesInputShape(request, shape)
 	appendResponsesToolsShape(request, shape)
 	other["responses_request_shape"] = shape
+}
+
+func appendOpaqueResponsesRequestShape(ctx *gin.Context, request *dto.OpaqueOpenAIResponsesRequest, other map[string]interface{}) {
+	if request == nil || other == nil {
+		return
+	}
+	metadata := request.OpaqueResponsesMetadata()
+	shape := map[string]interface{}{
+		"opaque_replay":            true,
+		"has_previous_response_id": strings.TrimSpace(metadata.PreviousResponseID) != "",
+		"has_include":              metadata.Shape.HasInclude,
+		"has_tool_choice":          metadata.Shape.HasToolChoice,
+		"has_parallel_tool_calls":  metadata.Shape.HasParallelToolCalls,
+		"has_store":                metadata.Shape.HasStore,
+		"has_reasoning":            metadata.Shape.HasReasoning,
+	}
+	if metadata.InputKind != common.ResponsesJSONValueKindMissing {
+		shape["input_json_type"] = string(metadata.InputKind)
+	}
+	if metadata.InputKind == common.ResponsesJSONValueKindArray {
+		shape["has_compaction_trigger"] = metadata.Shape.HasCompactionTrigger
+		shape["has_additional_tools"] = metadata.Shape.HasAdditionalTools
+	}
+	if metadata.Shape.InputItemCountKnown {
+		shape["input_item_count"] = metadata.Shape.InputItemCount
+	}
+	if len(metadata.Shape.InputItemTypes) > 0 {
+		shape["input_item_types"] = metadata.Shape.InputItemTypes
+	}
+	if metadata.Shape.ReasoningDetailsKnown {
+		shape["has_reasoning_context"] = metadata.Shape.HasReasoningContext
+		shape["has_reasoning_mode"] = metadata.Shape.HasReasoningMode
+	}
+	if metadata.Stream != nil {
+		shape["stream"] = *metadata.Stream
+	}
+	if bodyBytes := opaqueResponsesBodyBytes(ctx, metadata); bodyBytes > 0 {
+		shape["body_bytes"] = bodyBytes
+	}
+	appendOpaqueResponsesToolsShape(metadata, shape)
+	other["responses_request_shape"] = shape
+}
+
+func opaqueResponsesBodyBytes(ctx *gin.Context, metadata common.ResponsesRequestMetadata) int64 {
+	if ctx != nil {
+		if bodyBytes := common.GetContextKeyInt64(ctx, constant.ContextKeyRequestBodySize); bodyBytes > 0 {
+			return bodyBytes
+		}
+	}
+	return metadata.BodySize
+}
+
+func appendOpaqueResponsesToolsShape(metadata common.ResponsesRequestMetadata, shape map[string]interface{}) {
+	if shape == nil {
+		return
+	}
+	requestShape := metadata.Shape
+	markResponsesShapeFeaturesForCounts(requestShape.InputItemTypes, shape)
+	if requestShape.TopLevelToolCountKnown {
+		shape["top_level_tool_count"] = requestShape.TopLevelToolCount
+	}
+	if requestShape.HasAdditionalTools && requestShape.AdditionalToolCountKnown {
+		shape["additional_tool_count"] = requestShape.AdditionalToolCount
+	}
+
+	toolsKnown := (!metadata.ToolsPresent || requestShape.TopLevelToolCountKnown) &&
+		(!requestShape.HasAdditionalTools || requestShape.AdditionalToolCountKnown)
+	if !toolsKnown {
+		return
+	}
+	effectiveToolCount := requestShape.TopLevelToolCount
+	if requestShape.HasAdditionalTools {
+		effectiveToolCount += requestShape.AdditionalToolCount
+	}
+	shape["effective_tool_count"] = effectiveToolCount
+	toolTypes := mergeResponsesShapeMaps(requestShape.TopLevelToolTypes, requestShape.AdditionalToolTypes)
+	if len(toolTypes) > 0 {
+		shape["effective_tool_types"] = toolTypes
+		markResponsesShapeFeaturesForCounts(toolTypes, shape)
+	}
+	formatTypes := mergeResponsesShapeMaps(requestShape.TopLevelCustomFormatTypes, requestShape.AdditionalCustomFormatTypes)
+	if len(formatTypes) > 0 {
+		shape["custom_tool_format_types"] = formatTypes
+	}
+	grammarSyntaxes := mergeResponsesShapeMaps(requestShape.TopLevelCustomGrammarSyntaxes, requestShape.AdditionalCustomGrammarSyntaxes)
+	if len(grammarSyntaxes) > 0 {
+		shape["custom_tool_grammar_syntaxes"] = grammarSyntaxes
+	}
+}
+
+func mergeResponsesShapeMaps(first map[string]int, second map[string]int) map[string]int {
+	if len(first) == 0 && len(second) == 0 {
+		return nil
+	}
+	merged := make(map[string]int, len(first)+len(second))
+	for key, value := range first {
+		merged[key] += value
+	}
+	for key, value := range second {
+		merged[key] += value
+	}
+	return merged
+}
+
+func markResponsesShapeFeaturesForCounts(counts map[string]int, shape map[string]interface{}) {
+	for itemType, count := range counts {
+		if count > 0 {
+			markResponsesFeature(itemType, shape)
+		}
+	}
 }
 
 func AppendResponsesRequestShape(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {

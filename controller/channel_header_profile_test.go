@@ -55,7 +55,7 @@ func setupChannelControllerTestDB(t *testing.T) *gorm.DB {
 	model.DB = db
 	model.LOG_DB = db
 
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.User{}, &model.Log{}))
 
 	t.Cleanup(func() {
 		common.UsingSQLite = previousUsingSQLite

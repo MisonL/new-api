@@ -191,7 +191,6 @@ export function UserBindingDialog(props: Props) {
 
   useEffect(() => {
     if (props.open && props.userId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowBoundOnly(true)
       fetchData()
     } else {

@@ -30,6 +30,7 @@ const (
 	ContextKeyResponsesCompactFallbackReason                ContextKey = "responses_compact_fallback_reason"
 	ContextKeyResponsesCompactChannelSkip                   ContextKey = "responses_compact_channel_skip"
 	ContextKeyResponsesRoutingChannelSkips                  ContextKey = "responses_routing_channel_skips"
+	ContextKeyResponsesRequestMetadata                      ContextKey = "responses_request_metadata"
 	ContextKeyResponsesOpaqueEncryptedReplay                ContextKey = "responses_opaque_encrypted_replay"
 	ContextKeyResponsesEncryptedReasoningReplayAction       ContextKey = "responses_encrypted_reasoning_replay_action"
 	ContextKeyResponsesEncryptedReasoningReplayCapability   ContextKey = "responses_encrypted_reasoning_replay_capability"

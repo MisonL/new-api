@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -951,6 +952,77 @@ func TestDoRequestRecordsUpstreamEndOnCloseWithoutRead(t *testing.T) {
 	totalMs, ok := info.UpstreamTotalLatencyMs()
 	require.True(t, ok)
 	require.GreaterOrEqual(t, totalMs, int64(0))
+}
+
+func TestDoApiRequestNormalizesOpaqueResponsesReplayTransportHeaders(t *testing.T) {
+	// service.InitHttpClient mutates process-wide HTTP client state, keep this test serial.
+	service.InitHttpClient()
+
+	rawBody := []byte(`{
+  "future_before": {"model":"nested-ignored"},
+  "model": "client-gpt-5.6-sol",
+  "input": [{"type":"reasoning","encrypted_content":{"ciphertext":"opaque"}}],
+  "future_after": {"model":"also-ignored"}
+}`)
+	location, err := common.LocateTopLevelJSONString(bytes.NewReader(rawBody), "model")
+	require.NoError(t, err)
+	requestBody, err := common.NewTopLevelJSONStringReplacementReader(
+		bytes.NewReader(rawBody),
+		int64(len(rawBody)),
+		location,
+		"upstream-gpt-5.6-sol-with-a-longer-name",
+	)
+	require.NoError(t, err)
+	wantBody := bytes.Replace(
+		rawBody,
+		[]byte(`"client-gpt-5.6-sol"`),
+		[]byte(`"upstream-gpt-5.6-sol-with-a-longer-name"`),
+		1,
+	)
+
+	type upstreamRequest struct {
+		body             []byte
+		readErr          error
+		contentLength    int64
+		contentEncoding  string
+		transferEncoding []string
+	}
+	seen := make(chan upstreamRequest, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, readErr := io.ReadAll(r.Body)
+		seen <- upstreamRequest{
+			body:             body,
+			readErr:          readErr,
+			contentLength:    r.ContentLength,
+			contentEncoding:  r.Header.Get("Content-Encoding"),
+			transferEncoding: append([]string(nil), r.TransferEncoding...),
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	common.SetResponsesRequestMetadata(ctx, common.ResponsesRequestMetadata{HasOpaqueEncryptedContent: true})
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		HeadersOverride: map[string]interface{}{
+			"Content-Encoding": "gzip",
+			"Content-Length":   "1",
+		},
+	}}
+
+	resp, err := DoApiRequest(&testWssAdaptor{url: upstream.URL}, ctx, info, requestBody)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Body.Close())
+
+	got := <-seen
+	require.NoError(t, got.readErr)
+	require.Equal(t, wantBody, got.body)
+	require.Equal(t, int64(len(wantBody)), got.contentLength)
+	require.Empty(t, got.contentEncoding)
+	require.Empty(t, got.transferEncoding)
 }
 
 func TestDoRequestRecordsUpstreamEndOnTransportError(t *testing.T) {

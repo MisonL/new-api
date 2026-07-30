@@ -4395,6 +4395,7 @@
     "compact mode": "chế độ compact",
     "compaction: pass": "compaction: chuyển tiếp",
     "compaction: block": "compaction: chặn",
+    "compaction: unknown": "compaction: không rõ",
     "diagnosis": "chẩn đoán",
     "last fail": "lỗi gần nhất",
     "last observed": "quan sát gần nhất",

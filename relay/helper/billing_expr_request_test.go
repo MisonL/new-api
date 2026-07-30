@@ -61,3 +61,53 @@ func TestBuildBillingExprRequestInputFromRequest(t *testing.T) {
 	require.Equal(t, "user", gjson.GetBytes(input.Body, "messages.0.role").String())
 	require.Equal(t, float64(3000), gjson.GetBytes(input.Body, "max_tokens").Float())
 }
+
+func TestBillingExprRequestInputRejectsOpaqueResponsesReplay(t *testing.T) {
+	opaqueRequest := dto.NewOpaqueOpenAIResponsesRequest(common.ResponsesRequestMetadata{
+		Model:                     "gpt-5.6-sol",
+		ModelPresent:              true,
+		InputPresent:              true,
+		InputKind:                 common.ResponsesJSONValueKindArray,
+		HasOpaqueEncryptedContent: true,
+	})
+
+	_, err := BuildBillingExprRequestInputFromRequest(opaqueRequest, nil)
+
+	require.ErrorIs(t, err, ErrOpaqueResponsesTieredBillingUnsupported)
+}
+
+func TestResolveIncomingBillingExprRequestInputRejectsOpaqueResponsesReplay(t *testing.T) {
+	previousGinMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousGinMode) })
+
+	t.Run("opaque request metadata", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		info := &relaycommon.RelayInfo{
+			Request: dto.NewOpaqueOpenAIResponsesRequest(common.ResponsesRequestMetadata{
+				Model:                     "gpt-5.6-sol",
+				ModelPresent:              true,
+				InputPresent:              true,
+				InputKind:                 common.ResponsesJSONValueKindArray,
+				HasOpaqueEncryptedContent: true,
+			}),
+		}
+
+		_, err := ResolveIncomingBillingExprRequestInput(ctx, info)
+
+		require.ErrorIs(t, err, ErrOpaqueResponsesTieredBillingUnsupported)
+	})
+
+	t.Run("context metadata", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		common.SetResponsesRequestMetadata(ctx, common.ResponsesRequestMetadata{
+			HasOpaqueEncryptedContent: true,
+		})
+
+		_, err := ResolveIncomingBillingExprRequestInput(ctx, &relaycommon.RelayInfo{})
+
+		require.ErrorIs(t, err, ErrOpaqueResponsesTieredBillingUnsupported)
+	})
+}

@@ -63,6 +63,14 @@ const (
 	ResponsesReasoningContextCapabilityUnsupported ResponsesReasoningContextCapability = "unsupported"
 )
 
+type ResponsesCompactionItemPassthroughCapability string
+
+const (
+	ResponsesCompactionItemPassthroughCapabilityUnknown     ResponsesCompactionItemPassthroughCapability = "unknown"
+	ResponsesCompactionItemPassthroughCapabilitySupported   ResponsesCompactionItemPassthroughCapability = "supported"
+	ResponsesCompactionItemPassthroughCapabilityUnsupported ResponsesCompactionItemPassthroughCapability = "unsupported"
+)
+
 type ResponsesEncryptedReasoningReplayCapability string
 
 const (
@@ -118,29 +126,30 @@ type ResponsesChannelCapabilityRegistry struct {
 }
 
 type ResponsesChannelCapabilitySnapshot struct {
-	Source                             string
-	Profile                            ResponsesUpstreamProfile
-	CompactModeSetting                 ResponsesCompactMode
-	CompactModeEffective               ResponsesCompactMode
-	SupportsResponses                  bool
-	SupportsResponsesCompact           bool
-	SupportsChat                       bool
-	SupportsRestPreviousResponseID     bool
-	SupportsCompactionItemPassthrough  bool
-	SupportsFunctionTools              *bool
-	SupportsCustomTools                *bool
-	SupportsNamespaceTools             bool
-	SupportsToolSearch                 bool
-	ReasoningContextCapability         ResponsesReasoningContextCapability
-	SupportsReasoningContext           *bool
-	SupportsStreamOptionsIncludeUsage  *bool
-	EncryptedReasoningReplayCapability ResponsesEncryptedReasoningReplayCapability
-	SupportsEncryptedReasoningReplay   *bool
-	StripsResponsesEncryptedReasoning  bool
-	StripsResponsesReasoningContext    bool
-	Observed                           *ResponsesCapabilityObservation
-	Probe                              *ResponsesCapabilityObservation
-	ObservedTools                      *ResponsesToolCapabilityObservation
+	Source                              string
+	Profile                             ResponsesUpstreamProfile
+	CompactModeSetting                  ResponsesCompactMode
+	CompactModeEffective                ResponsesCompactMode
+	SupportsResponses                   bool
+	SupportsResponsesCompact            bool
+	SupportsChat                        bool
+	SupportsRestPreviousResponseID      bool
+	CompactionItemPassthroughCapability ResponsesCompactionItemPassthroughCapability
+	SupportsCompactionItemPassthrough   *bool
+	SupportsFunctionTools               *bool
+	SupportsCustomTools                 *bool
+	SupportsNamespaceTools              bool
+	SupportsToolSearch                  bool
+	ReasoningContextCapability          ResponsesReasoningContextCapability
+	SupportsReasoningContext            *bool
+	SupportsStreamOptionsIncludeUsage   *bool
+	EncryptedReasoningReplayCapability  ResponsesEncryptedReasoningReplayCapability
+	SupportsEncryptedReasoningReplay    *bool
+	StripsResponsesEncryptedReasoning   bool
+	StripsResponsesReasoningContext     bool
+	Observed                            *ResponsesCapabilityObservation
+	Probe                               *ResponsesCapabilityObservation
+	ObservedTools                       *ResponsesToolCapabilityObservation
 }
 
 const (
@@ -268,28 +277,24 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 	effectiveMode := s.EffectiveResponsesCompactModeOrDefault()
 	profile := s.NormalizedResponsesUpstreamProfile()
 	reasoningContextCapability := s.ResolveResponsesReasoningContextCapability(channelType)
-	encryptedReplayCapability := s.ResolveResponsesEncryptedReasoningReplayCapability(channelType)
 	snapshot := ResponsesChannelCapabilitySnapshot{
-		Source:                             "safe_default",
-		Profile:                            profile,
-		CompactModeSetting:                 modeSetting,
-		CompactModeEffective:               effectiveMode,
-		SupportsResponses:                  defaultSupportsResponsesCapability(channelType),
-		SupportsResponsesCompact:           defaultSupportsResponsesCompactCapability(channelType, s, effectiveMode, profile),
-		SupportsChat:                       defaultSupportsChatCapability(channelType, profile),
-		SupportsRestPreviousResponseID:     defaultSupportsRESTPreviousResponseIDCapability(s, profile),
-		SupportsCompactionItemPassthrough:  defaultSupportsCompactionItemPassthroughCapability(profile),
-		SupportsFunctionTools:              defaultSupportsFunctionToolsCapability(profile),
-		SupportsCustomTools:                defaultSupportsCustomToolsCapability(profile),
-		SupportsNamespaceTools:             defaultSupportsNamespaceToolsCapability(profile),
-		SupportsToolSearch:                 defaultSupportsToolSearchCapability(profile),
-		ReasoningContextCapability:         reasoningContextCapability,
-		SupportsReasoningContext:           responsesReasoningContextSupportPointer(reasoningContextCapability),
-		SupportsStreamOptionsIncludeUsage:  nil,
-		EncryptedReasoningReplayCapability: encryptedReplayCapability,
-		SupportsEncryptedReasoningReplay:   responsesEncryptedReasoningReplaySupportPointer(encryptedReplayCapability),
-		StripsResponsesEncryptedReasoning:  s.ShouldStripResponsesEncryptedReasoning(),
-		StripsResponsesReasoningContext:    reasoningContextCapability == ResponsesReasoningContextCapabilityUnsupported,
+		Source:                            "safe_default",
+		Profile:                           profile,
+		CompactModeSetting:                modeSetting,
+		CompactModeEffective:              effectiveMode,
+		SupportsResponses:                 defaultSupportsResponsesCapability(channelType),
+		SupportsResponsesCompact:          defaultSupportsResponsesCompactCapability(channelType, s, effectiveMode, profile),
+		SupportsChat:                      defaultSupportsChatCapability(channelType, profile),
+		SupportsRestPreviousResponseID:    defaultSupportsRESTPreviousResponseIDCapability(s, profile),
+		SupportsFunctionTools:             defaultSupportsFunctionToolsCapability(profile),
+		SupportsCustomTools:               defaultSupportsCustomToolsCapability(profile),
+		SupportsNamespaceTools:            defaultSupportsNamespaceToolsCapability(profile),
+		SupportsToolSearch:                defaultSupportsToolSearchCapability(profile),
+		ReasoningContextCapability:        reasoningContextCapability,
+		SupportsReasoningContext:          responsesReasoningContextSupportPointer(reasoningContextCapability),
+		SupportsStreamOptionsIncludeUsage: nil,
+		StripsResponsesEncryptedReasoning: s.ShouldStripResponsesEncryptedReasoning(),
+		StripsResponsesReasoningContext:   reasoningContextCapability == ResponsesReasoningContextCapabilityUnsupported,
 	}
 	registry := s.responsesCapabilityRegistry()
 	if registry != nil {
@@ -307,8 +312,10 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 		}
 		applyCapabilityOverrides(&snapshot, registry)
 	}
-	// The legacy strip setting is an explicit safety override. Recompute the
-	// replay fields after registry overrides so the snapshot matches routing.
+	// Recompute tri-state replay fields after registry overrides so the snapshot
+	// matches routing rather than a lossy boolean default.
+	snapshot.CompactionItemPassthroughCapability = s.ResolveResponsesCompactionItemPassthroughCapability(channelType)
+	snapshot.SupportsCompactionItemPassthrough = responsesCompactionItemPassthroughSupportPointer(snapshot.CompactionItemPassthroughCapability)
 	snapshot.EncryptedReasoningReplayCapability = s.ResolveResponsesEncryptedReasoningReplayCapability(channelType)
 	snapshot.SupportsEncryptedReasoningReplay = responsesEncryptedReasoningReplaySupportPointer(snapshot.EncryptedReasoningReplayCapability)
 	if snapshot.Source == "safe_default" && (profile != "" || s.explicitResponsesCapabilityConfigured()) {
@@ -404,9 +411,6 @@ func applyCapabilityOverrides(snapshot *ResponsesChannelCapabilitySnapshot, regi
 	if registry.SupportsRestPreviousResponseID != nil {
 		snapshot.SupportsRestPreviousResponseID = *registry.SupportsRestPreviousResponseID
 	}
-	if registry.SupportsCompactionItemPassthrough != nil {
-		snapshot.SupportsCompactionItemPassthrough = *registry.SupportsCompactionItemPassthrough
-	}
 	if registry.SupportsFunctionTools != nil {
 		snapshot.SupportsFunctionTools = cloneBool(registry.SupportsFunctionTools)
 	}
@@ -448,6 +452,27 @@ func responsesReasoningContextSupportPointer(capability ResponsesReasoningContex
 	}
 	supported := capability == ResponsesReasoningContextCapabilitySupported
 	return &supported
+}
+
+func responsesCompactionItemPassthroughSupportPointer(capability ResponsesCompactionItemPassthroughCapability) *bool {
+	if capability == ResponsesCompactionItemPassthroughCapabilityUnknown {
+		return nil
+	}
+	supported := capability == ResponsesCompactionItemPassthroughCapabilitySupported
+	return &supported
+}
+
+func (s *ChannelOtherSettings) ResolveResponsesCompactionItemPassthroughCapability(channelType int) ResponsesCompactionItemPassthroughCapability {
+	if s != nil {
+		if registry := s.responsesCapabilityRegistry(); registry != nil && registry.SupportsCompactionItemPassthrough != nil {
+			if *registry.SupportsCompactionItemPassthrough {
+				return ResponsesCompactionItemPassthroughCapabilitySupported
+			}
+			return ResponsesCompactionItemPassthroughCapabilityUnsupported
+		}
+	}
+
+	return defaultResponsesCompactionItemPassthroughCapability(channelType, s.NormalizedResponsesUpstreamProfile())
 }
 
 func (s *ChannelOtherSettings) ResolveResponsesReasoningContextCapability(channelType int) ResponsesReasoningContextCapability {
@@ -578,15 +603,22 @@ func defaultSupportsRESTPreviousResponseIDCapability(settings *ChannelOtherSetti
 	}
 }
 
-func defaultSupportsCompactionItemPassthroughCapability(profile ResponsesUpstreamProfile) bool {
+func defaultResponsesCompactionItemPassthroughCapability(channelType int, profile ResponsesUpstreamProfile) ResponsesCompactionItemPassthroughCapability {
 	switch profile {
-	case ResponsesUpstreamProfileGenericOpenAI,
-		ResponsesUpstreamProfileSub2APIHTTP,
-		ResponsesUpstreamProfileGenericProxy,
+	case ResponsesUpstreamProfileOfficialOpenAI,
+		ResponsesUpstreamProfileOfficialNewAPI,
+		ResponsesUpstreamProfileSameClusterNewAPI,
+		ResponsesUpstreamProfileTrustedNewAPI,
+		ResponsesUpstreamProfileSub2APIWSV2:
+		return ResponsesCompactionItemPassthroughCapabilitySupported
+	case ResponsesUpstreamProfileGenericProxy,
 		ResponsesUpstreamProfileChatOnlyProxy:
-		return false
+		return ResponsesCompactionItemPassthroughCapabilityUnsupported
 	default:
-		return true
+		if profile == "" && channelType == constant.ChannelTypeCodex {
+			return ResponsesCompactionItemPassthroughCapabilitySupported
+		}
+		return ResponsesCompactionItemPassthroughCapabilityUnknown
 	}
 }
 

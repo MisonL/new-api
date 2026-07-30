@@ -114,10 +114,15 @@ func buildSyntheticResponsesCompaction(c *gin.Context, info *relaycommon.RelayIn
 
 	var responsesResp dto.OpenAIResponsesResponse
 	if err := common.Unmarshal(responseBody, &responsesResp); err != nil {
+		if openAIError, found, sseErr := responsesSSETerminalError(responseBody); sseErr != nil {
+			return nil, nil, types.NewOpenAIError(sseErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		} else if found {
+			return nil, nil, newResponsesUpstreamOpenAIError(resp.StatusCode, openAIError)
+		}
 		return nil, nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	if oaiError := responsesResp.GetOpenAIError(); responsesCompactOpenAIErrorHasContent(oaiError) {
-		return nil, nil, types.WithOpenAIError(*oaiError, responsesCompactOpenAIErrorStatus(resp.StatusCode, oaiError))
+		return nil, nil, newResponsesUpstreamOpenAIError(resp.StatusCode, oaiError)
 	}
 
 	model := ""

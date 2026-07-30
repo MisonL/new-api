@@ -21,15 +21,18 @@ func TestDesktopOAuthPollRateLimitUsesHandoffTokenKey(t *testing.T) {
 	originalEnable := common.DesktopOAuthPollRateLimitEnable
 	originalNum := common.DesktopOAuthPollRateLimitNum
 	originalDuration := common.DesktopOAuthPollRateLimitDuration
+	originalLimiter := inMemoryRateLimiter
 	common.RedisEnabled = false
 	common.DesktopOAuthPollRateLimitEnable = true
 	common.DesktopOAuthPollRateLimitNum = 2
 	common.DesktopOAuthPollRateLimitDuration = 60
+	inMemoryRateLimiter = &common.InMemoryRateLimiter{}
 	t.Cleanup(func() {
 		common.RedisEnabled = originalRedisEnabled
 		common.DesktopOAuthPollRateLimitEnable = originalEnable
 		common.DesktopOAuthPollRateLimitNum = originalNum
 		common.DesktopOAuthPollRateLimitDuration = originalDuration
+		inMemoryRateLimiter = originalLimiter
 	})
 
 	router := gin.New()
@@ -65,15 +68,18 @@ func TestDesktopOAuthPollRateLimitRejectsExcessRequests(t *testing.T) {
 	originalEnable := common.DesktopOAuthPollRateLimitEnable
 	originalNum := common.DesktopOAuthPollRateLimitNum
 	originalDuration := common.DesktopOAuthPollRateLimitDuration
+	originalLimiter := inMemoryRateLimiter
 	common.RedisEnabled = false
 	common.DesktopOAuthPollRateLimitEnable = true
 	common.DesktopOAuthPollRateLimitNum = 2
 	common.DesktopOAuthPollRateLimitDuration = 60
+	inMemoryRateLimiter = &common.InMemoryRateLimiter{}
 	t.Cleanup(func() {
 		common.RedisEnabled = originalRedisEnabled
 		common.DesktopOAuthPollRateLimitEnable = originalEnable
 		common.DesktopOAuthPollRateLimitNum = originalNum
 		common.DesktopOAuthPollRateLimitDuration = originalDuration
+		inMemoryRateLimiter = originalLimiter
 	})
 
 	router := gin.New()

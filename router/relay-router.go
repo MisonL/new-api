@@ -175,6 +175,7 @@ func SetRelayRouter(router *gin.Engine) {
 	responsesCompatRouter.Use(middleware.RouteTag("relay"))
 	responsesCompatRouter.Use(middleware.SystemPerformanceCheck())
 	responsesCompatRouter.Use(middleware.TokenAuth())
+	responsesCompatRouter.Use(middleware.CodexLocalResponsesCompactionIngress())
 	responsesCompatRouter.Use(middleware.ModelRequestRateLimit())
 	responsesCompatRouter.Use(middleware.Distribute())
 	{

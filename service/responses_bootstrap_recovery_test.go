@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,37 @@ import (
 )
 
 var responsesBootstrapTestSettingsMu sync.Mutex
+
+type opaqueBootstrapBodyStorage struct {
+	readCalls int
+}
+
+func (s *opaqueBootstrapBodyStorage) Read(_ []byte) (int, error) {
+	s.readCalls++
+	return 0, errors.New("opaque request body must not be read for bootstrap state")
+}
+
+func (s *opaqueBootstrapBodyStorage) Seek(_ int64, _ int) (int64, error) {
+	return 0, nil
+}
+
+func (s *opaqueBootstrapBodyStorage) Close() error {
+	return nil
+}
+
+func (s *opaqueBootstrapBodyStorage) Bytes() ([]byte, error) {
+	return nil, errors.New("opaque request body must not be materialized for bootstrap state")
+}
+
+func (s *opaqueBootstrapBodyStorage) Size() int64 {
+	return 1024
+}
+
+func (s *opaqueBootstrapBodyStorage) IsDisk() bool {
+	return true
+}
+
+var _ io.ReadSeeker = (*opaqueBootstrapBodyStorage)(nil)
 
 func withResponsesBootstrapRecoverySetting(t *testing.T) {
 	t.Helper()
@@ -84,6 +116,52 @@ func TestEnsureResponsesBootstrapRecoveryStateFromRequestIgnoresNonStream(t *tes
 	state, err := EnsureResponsesBootstrapRecoveryStateFromRequest(ctx)
 	require.NoError(t, err)
 	require.Nil(t, state)
+}
+
+func TestEnsureResponsesBootstrapRecoveryStateFromOpaqueMetadataAvoidsBodyRead(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withResponsesBootstrapRecoverySetting(t)
+
+	ctx := newResponsesBootstrapTestContext("/v1/responses", `{"model":"gpt-5.6-sol","stream":true,"input":[]}`)
+	stream := true
+	storage := &opaqueBootstrapBodyStorage{}
+	ctx.Set(common.KeyBodyStorage, storage)
+	common.SetResponsesRequestMetadata(ctx, common.ResponsesRequestMetadata{
+		Model:                     "gpt-5.6-sol",
+		ModelPresent:              true,
+		InputPresent:              true,
+		InputKind:                 common.ResponsesJSONValueKindArray,
+		Stream:                    &stream,
+		HasOpaqueEncryptedContent: true,
+		BodySize:                  storage.Size(),
+	})
+
+	state, err := EnsureResponsesBootstrapRecoveryStateFromRequest(ctx)
+
+	require.NoError(t, err)
+	require.Nil(t, state)
+	require.Zero(t, storage.readCalls)
+}
+
+func TestEnsureResponsesBootstrapRecoveryStateFromNonOpaqueMetadataReadsStreamIntent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withResponsesBootstrapRecoverySetting(t)
+
+	ctx := newResponsesBootstrapTestContext("/v1/responses", `{"model":"gpt-5.6-sol","stream":true,"input":[]}`)
+	stream := true
+	common.SetResponsesRequestMetadata(ctx, common.ResponsesRequestMetadata{
+		Model:        "gpt-5.6-sol",
+		ModelPresent: true,
+		InputPresent: true,
+		InputKind:    common.ResponsesJSONValueKindArray,
+		Stream:       &stream,
+		BodySize:     int64(ctx.Request.ContentLength),
+	})
+
+	state, err := EnsureResponsesBootstrapRecoveryStateFromRequest(ctx)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
 }
 
 func TestEnsureResponsesBootstrapRecoveryStateFromRequestIgnoresCompact(t *testing.T) {

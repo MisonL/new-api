@@ -3,6 +3,8 @@ package constant
 import (
 	"net/http"
 	"strings"
+
+	"github.com/QuantumNous/new-api/common"
 )
 
 const (
@@ -72,7 +74,7 @@ func Path2RelayMode(path string) int {
 		relayMode = RelayModeImagesEdits
 	} else if strings.HasPrefix(path, "/v1/edits") {
 		relayMode = RelayModeEdits
-	} else if strings.HasPrefix(path, "/v1/responses/compact") {
+	} else if common.IsResponsesCompactPath(path) {
 		relayMode = RelayModeResponsesCompact
 	} else if strings.HasPrefix(path, "/v1/responses") {
 		relayMode = RelayModeResponses

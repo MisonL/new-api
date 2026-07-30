@@ -13,6 +13,7 @@ import (
 )
 
 var ErrResponsesEncryptedReasoningReplayUnsupported = errors.New("responses encrypted reasoning replay unsupported")
+var ErrResponsesOpaqueReplayParamOverrideUnsupported = errors.New("responses opaque replay param override unsupported")
 
 const (
 	ResponsesEncryptedReasoningReplayActionSelectedNative            = "selected_native"
@@ -24,6 +25,11 @@ const (
 	ResponsesEncryptedReasoningReplayActionRejectedUnsupported       = "rejected_unsupported"
 	ResponsesEncryptedReasoningReplayRetrySuppressedCrossChannel     = "suppressed_cross_channel"
 )
+
+func IsOpaqueResponsesReplayRequest(request dto.Request) bool {
+	_, ok := request.(*dto.OpaqueOpenAIResponsesRequest)
+	return ok
+}
 
 func MarkResponsesEncryptedReasoningReplayDecision(c *gin.Context, capability dto.ResponsesEncryptedReasoningReplayCapability) {
 	if c == nil {
@@ -42,7 +48,14 @@ func MarkResponsesEncryptedReasoningReplayDecision(c *gin.Context, capability dt
 }
 
 func IsResponsesOpaqueEncryptedReplay(c *gin.Context) bool {
-	return c != nil && basecommon.GetContextKeyBool(c, constant.ContextKeyResponsesOpaqueEncryptedReplay)
+	if c == nil {
+		return false
+	}
+	if basecommon.GetContextKeyBool(c, constant.ContextKeyResponsesOpaqueEncryptedReplay) {
+		return true
+	}
+	metadata, ok := basecommon.GetResponsesRequestMetadata(c)
+	return ok && metadata.HasOpaqueEncryptedContent
 }
 
 func MarkResponsesEncryptedReasoningReplayAttempt(c *gin.Context) {
@@ -101,6 +114,18 @@ func NewResponsesEncryptedReasoningReplayUnsupportedError(channelID int) *types.
 		fmt.Errorf(
 			"%w: channel #%d cannot safely replay opaque encrypted reasoning state over native Responses",
 			ErrResponsesEncryptedReasoningReplayUnsupported,
+			channelID,
+		),
+		types.ErrorCodeChannelModelMappedError,
+		http.StatusServiceUnavailable,
+	)
+}
+
+func NewResponsesOpaqueReplayParamOverrideUnsupportedError(channelID int) *types.NewAPIError {
+	return types.NewErrorWithStatusCode(
+		fmt.Errorf(
+			"%w: channel #%d configures a param override that cannot preserve opaque encrypted Responses request bytes",
+			ErrResponsesOpaqueReplayParamOverrideUnsupported,
 			channelID,
 		),
 		types.ErrorCodeChannelModelMappedError,

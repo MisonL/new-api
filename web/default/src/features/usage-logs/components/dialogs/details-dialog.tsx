@@ -294,6 +294,14 @@ function ResponsesCompactDetails(props: {
         : capability?.reasoning_context_capability === 'unknown'
           ? t('Unknown')
           : ''
+  const compactionItemPassthroughCapability =
+    capability?.compaction_item_passthrough_capability === 'supported'
+      ? t('Supported')
+      : capability?.compaction_item_passthrough_capability === 'unsupported'
+        ? t('Unsupported')
+        : capability?.compaction_item_passthrough_capability === 'unknown'
+          ? t('Unknown')
+          : ''
   const formatCapability = (value: boolean | undefined) => {
     if (value === true) return t('Supported')
     if (value === false) return t('Unsupported')
@@ -390,9 +398,10 @@ function ResponsesCompactDetails(props: {
           />
           <DetailRow
             label={t('Compaction Item Passthrough')}
-            value={formatCapability(
-              capability.supports_compaction_item_passthrough
-            )}
+            value={
+              compactionItemPassthroughCapability ||
+              formatCapability(capability.supports_compaction_item_passthrough)
+            }
           />
           <DetailRow
             label={t('Custom Tools')}

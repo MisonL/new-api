@@ -72,11 +72,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	requestId := c.GetString(common.RequestIdKey)
 	userSetting, _ := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
-	common.InitPayloadAudit(
-		c,
-		userSetting.RecordRequestContentLog,
-		userSetting.RecordResponseContentLog && relayFormat != types.RelayFormatOpenAIRealtime,
-	)
+	var opaqueResponsesReplay bool
 	//group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 	//originalModel := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 
@@ -114,6 +110,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		return
 	}
+	opaqueResponsesReplay, err = detectAndMarkOpaqueResponsesReplay(c, request)
+	if err != nil {
+		newAPIError = types.NewErrorWithStatusCode(
+			fmt.Errorf("detect opaque Responses encrypted replay: %w", err),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+		return
+	}
+	common.InitPayloadAudit(
+		c,
+		!opaqueResponsesReplay && userSetting.RecordRequestContentLog,
+		!opaqueResponsesReplay && userSetting.RecordResponseContentLog && relayFormat != types.RelayFormatOpenAIRealtime,
+	)
 
 	relayInfo, err = relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
@@ -123,7 +134,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	service.EnsureResponsesBootstrapRecoveryState(c, relayInfo.IsStream)
 	service.ApplyResponsesBootstrapRecoveryMetric(c, relayInfo)
 
-	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
+	needSensitiveCheck := !opaqueResponsesReplay && setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
 	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.
 	var meta *types.TokenCountMeta
@@ -223,19 +234,25 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 
 			if newAPIError == nil {
-				recordResponsesStreamOptionsIncludeUsageCapabilityObservation(c, relayInfo)
-				recordResponsesToolCapabilityObservation(c, relayInfo)
+				if !opaqueResponsesReplay {
+					recordResponsesStreamOptionsIncludeUsageCapabilityObservation(c, relayInfo)
+					recordResponsesToolCapabilityObservation(c, relayInfo)
+				}
 				relayInfo.LastError = nil
 				return
 			}
 
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
-			observeUpstreamRateLimitRetry(c, channel.Id, newAPIError)
+			if !opaqueResponsesReplay {
+				observeUpstreamRateLimitRetry(c, channel.Id, newAPIError)
+			}
 			relayInfo.LastError = newAPIError
-			recordResponsesCapabilityObservation(c, relayInfo, newAPIError)
-			recordChannelRequestBodyLimit(c, relayInfo, newAPIError)
+			if !opaqueResponsesReplay {
+				recordResponsesCapabilityObservation(c, relayInfo, newAPIError)
+				recordChannelRequestBodyLimit(c, relayInfo, newAPIError)
+			}
 
-			if shouldFallbackResponsesCompactNativeContext(c, relayInfo, newAPIError) {
+			if !opaqueResponsesReplay && shouldFallbackResponsesCompactNativeContext(c, relayInfo, newAPIError) {
 				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				c.Set("responses_compact_context_fallback_attempted", true)
 				service.MarkResponsesCompactFallbackAttempt(c, relayInfo, service.ResponsesCompactFallbackAttemptContext, nil)
@@ -254,7 +271,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				relayInfo.LastError = newAPIError
 			}
 
-			if shouldFallbackResponsesCompactPreviousResponseID(c, relayInfo, newAPIError) {
+			if !opaqueResponsesReplay && shouldFallbackResponsesCompactPreviousResponseID(c, relayInfo, newAPIError) {
 				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				c.Set("responses_compact_previous_response_id_fallback_attempted", true)
 				service.MarkResponsesCompactFallbackAttempt(c, relayInfo, service.ResponsesCompactFallbackAttemptPreviousID, nil)
@@ -274,7 +291,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				relayInfo.LastError = newAPIError
 			}
 
-			if shouldFallbackResponsesCompactAuto(c, relayInfo, newAPIError) {
+			if !opaqueResponsesReplay && shouldFallbackResponsesCompactAuto(c, relayInfo, newAPIError) {
 				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				c.Set("responses_compact_auto_fallback_attempted", true)
 				service.MarkResponsesCompactFallbackAttempt(c, relayInfo, service.ResponsesCompactFallbackAttemptAuto, nil)
@@ -299,7 +316,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				relayInfo.LastError = newAPIError
 			}
 
-			if shouldFallbackRemoteResponsesCompaction(c, relayInfo, newAPIError) {
+			if !opaqueResponsesReplay && shouldFallbackRemoteResponsesCompaction(c, relayInfo, newAPIError) {
 				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				common.SetContextKey(c, constant.ContextKeyResponsesRemoteCompactSyntheticFallback, true)
 				fallbackReason := newAPIError.MaskSensitiveErrorWithStatusCode()
@@ -321,7 +338,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				relayInfo.LastError = newAPIError
 			}
 
-			if shouldFallbackResponsesCompactVisibleOnly(c, relayInfo, newAPIError) {
+			if !opaqueResponsesReplay && shouldFallbackResponsesCompactVisibleOnly(c, relayInfo, newAPIError) {
 				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				newAPIError = retryResponsesCompactVisibleOnlySummary(c, relayInfo, bodyStorage, newAPIError)
 				if newAPIError == nil {
@@ -332,7 +349,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				relayInfo.LastError = newAPIError
 			}
 
-			if shouldFallbackResponsesCompactSummaryModel(c, relayInfo, newAPIError) {
+			if !opaqueResponsesReplay && shouldFallbackResponsesCompactSummaryModel(c, relayInfo, newAPIError) {
 				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				newAPIError = retryResponsesCompactSummaryFallbackModels(c, relayInfo, bodyStorage, newAPIError)
 				if newAPIError == nil {
@@ -344,7 +361,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 
 			channelError := *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan())
-			if shouldSuppressBootstrapRecoveryAutoBan(c, newAPIError) {
+			if opaqueResponsesReplay || shouldSuppressBootstrapRecoveryAutoBan(c, newAPIError) {
 				channelError.AutoBan = false
 			}
 			processChannelError(c, relayInfo, channelError, newAPIError)
@@ -385,10 +402,54 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		logger.LogInfo(c, retryLogStr)
 	}
 	if newAPIError != nil {
-		gopool.Go(func() {
-			perfmetrics.RecordRelaySample(relayInfo, false, 0)
-		})
+		if recordSample := perfmetrics.CaptureRelaySample(relayInfo, false, 0); recordSample != nil {
+			gopool.Go(recordSample)
+		}
 	}
+}
+
+// detectAndMarkOpaqueResponsesReplay records only the request-level replay fact.
+// Channel capability decisions are made after routing selects an upstream.
+func detectAndMarkOpaqueResponsesReplay(c *gin.Context, request dto.Request) (bool, error) {
+	if c == nil {
+		return false, nil
+	}
+
+	hasOpaqueReplay, err := requestHasOpaqueResponsesReplay(c, request)
+	if err != nil {
+		return false, err
+	}
+	if hasOpaqueReplay {
+		common.SetContextKey(c, constant.ContextKeyResponsesOpaqueEncryptedReplay, true)
+	}
+	return hasOpaqueReplay, nil
+}
+
+func requestHasOpaqueResponsesReplay(c *gin.Context, request dto.Request) (bool, error) {
+	switch typedRequest := request.(type) {
+	case *dto.OpaqueOpenAIResponsesRequest:
+		return typedRequest != nil && typedRequest.OpaqueResponsesMetadata().HasOpaqueEncryptedContent, nil
+	case *dto.OpenAIResponsesRequest:
+		return responsesInputHasOpaqueEncryptedContent(c, typedRequest)
+	case *dto.OpenAIResponsesCompactionRequest:
+		if typedRequest == nil {
+			return false, nil
+		}
+		return responsesInputHasOpaqueEncryptedContent(c, typedRequest.ToResponsesRequest())
+	default:
+		return false, nil
+	}
+}
+
+func responsesInputHasOpaqueEncryptedContent(c *gin.Context, request *dto.OpenAIResponsesRequest) (bool, error) {
+	if request == nil {
+		return false, nil
+	}
+	requestContext := context.Background()
+	if c != nil && c.Request != nil {
+		requestContext = c.Request.Context()
+	}
+	return service.ResponsesInputHasOpaqueEncryptedContent(requestContext, request.Input)
 }
 
 func writeRelayErrorResponse(c *gin.Context, relayFormat types.RelayFormat, relayInfo *relaycommon.RelayInfo, ws *websocket.Conn, newAPIError *types.NewAPIError) {
@@ -532,6 +593,10 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 		}
 	case *dto.OpenAIResponsesRequest:
 		meta.MaxTokens = int(lo.FromPtrOr(r.MaxOutputTokens, uint(0)))
+	case *dto.OpenAIResponsesCompactionRequest:
+		meta.MaxTokens = int(lo.FromPtrOr(r.MaxOutputTokens, uint(0)))
+	case *dto.OpaqueOpenAIResponsesRequest:
+		meta.MaxTokens = r.GetTokenCountMeta().MaxTokens
 	case *dto.ClaudeRequest:
 		meta.MaxTokens = int(lo.FromPtr(r.MaxTokens))
 	case *dto.ImageRequest:
@@ -659,7 +724,9 @@ func isProtocolIncompatibleSkip(err *types.NewAPIError) bool {
 	return err.GetErrorCode() == types.ErrorCodeChannelModelMappedError &&
 		err.StatusCode == http.StatusServiceUnavailable &&
 		(errors.Is(err, errResponsesNativeCompactionUnsupported) ||
+			errors.Is(err, errResponsesNativeToolIdentityUnsupported) ||
 			errors.Is(err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported) ||
+			errors.Is(err, relaycommon.ErrResponsesOpaqueReplayParamOverrideUnsupported) ||
 			errors.Is(err, errResponsesFunctionToolsUnsupported) ||
 			errors.Is(err, errResponsesCustomToolsUnsupported) ||
 			errors.Is(err, errResponsesNamespaceToolsUnsupported) ||
@@ -672,7 +739,14 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 		return false, nil
 	}
 	var request *dto.OpenAIResponsesRequest
+	var opaqueMetadata common.ResponsesRequestMetadata
+	isOpaqueReplayRequest := false
 	switch typedRequest := info.Request.(type) {
+	case *dto.OpaqueOpenAIResponsesRequest:
+		if typedRequest != nil {
+			opaqueMetadata = typedRequest.OpaqueResponsesMetadata()
+			isOpaqueReplayRequest = opaqueMetadata.HasOpaqueEncryptedContent
+		}
 	case *dto.OpenAIResponsesRequest:
 		request = typedRequest
 	case *dto.OpenAIResponsesCompactionRequest:
@@ -680,14 +754,66 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 			request = typedRequest.ToResponsesRequest()
 		}
 	}
-	if request == nil {
+	if request == nil && !isOpaqueReplayRequest {
+		return false, nil
+	}
+	channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
+	if isOpaqueReplayRequest {
+		capability := channelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(channel.Type)
+		relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
+		if capability == dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported {
+			markResponsesCompatibilityChannelSkip(
+				c,
+				info,
+				channel,
+				responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay,
+				relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(channel.Id),
+			)
+			return true, nil
+		}
+		if info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+			!relaycommon.SupportsNativeOpaqueResponsesCompact(channel.Type, channelOtherSettings) {
+			relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+			markResponsesCompactionChannelSkip(c, info, channel)
+			return true, nil
+		}
+		if opaqueMetadata.HasCompactionItem && responsesCompactionChannelCannotPassthroughItems(channelOtherSettings, channel.Type) {
+			relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+			markResponsesCompactionChannelSkip(c, info, channel)
+			return true, nil
+		}
+		if err := relaycommon.ValidateOpaqueResponsesReplayParamOverride(opaqueResponsesReplayParamOverride(c, channel)); err != nil {
+			relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+			markResponsesCompatibilityChannelSkip(
+				c,
+				info,
+				channel,
+				responsesRoutingChannelSkipReasonOpaqueReplayParamOverride,
+				relaycommon.NewResponsesOpaqueReplayParamOverrideUnsupportedError(channel.Id),
+			)
+			return true, nil
+		}
+		rule, err := service.FindUnconditionalResponsesViaChatRule(channel.Id, channel.Type, info.OriginModelName)
+		if err != nil {
+			return false, err
+		}
+		if rule != nil {
+			relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+			markResponsesCompatibilityChannelSkip(
+				c,
+				info,
+				channel,
+				responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay,
+				relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(channel.Id),
+			)
+			return true, nil
+		}
 		return false, nil
 	}
 	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(c.Request.Context(), request.Input)
 	if err != nil {
 		return false, err
 	}
-	channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
 	if hasOpaqueEncryptedContent {
 		capability := channelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(channel.Type)
 		relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
@@ -718,10 +844,52 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 				return true, nil
 			}
 		}
+		if err := relaycommon.ValidateOpaqueResponsesReplayParamOverride(opaqueResponsesReplayParamOverride(c, channel)); err != nil {
+			relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+			markResponsesCompatibilityChannelSkip(
+				c,
+				info,
+				channel,
+				responsesRoutingChannelSkipReasonOpaqueReplayParamOverride,
+				relaycommon.NewResponsesOpaqueReplayParamOverrideUnsupportedError(channel.Id),
+			)
+			return true, nil
+		}
 		return false, nil
 	}
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		return false, nil
+	}
+	if nativeToolIdentity := codexLiteNativeToolIdentityDecisionFor(c, request); nativeToolIdentity.required &&
+		!(model_setting.GetGlobalSettings().PassThroughRequestEnabled || nativeCompactionChannelSetting(c, info, channel).PassThroughBodyEnabled) {
+		rule, err := service.FindResponsesViaChatRule(
+			c.Request.Context(),
+			info.RelayMode,
+			model_setting.GetGlobalSettings().PassThroughRequestEnabled,
+			nativeCompactionChannelSetting(c, info, channel),
+			channel.Id,
+			channel.Type,
+			info.OriginModelName,
+			request,
+			responsesCompactionChannelOtherSettings(c, info, channel),
+		)
+		if err != nil {
+			return false, err
+		}
+		if rule != nil {
+			reason := responsesRoutingChannelSkipReasonRequiresNativeResponsesToolIdentity
+			if nativeToolIdentity.unparseable {
+				reason = responsesRoutingChannelSkipReasonUnparseableNativeResponsesToolIdentity
+			}
+			markResponsesCompatibilityChannelSkip(
+				c,
+				info,
+				channel,
+				reason,
+				unsupportedResponsesNativeToolIdentityChannelError(channel),
+			)
+			return true, nil
+		}
 	}
 	hasFunctionTools, err := relaycommon.ResponsesRequestHasFunctionTools(request)
 	if err != nil {
@@ -872,8 +1040,11 @@ type responsesUnsupportedToolCapabilities struct {
 }
 
 const (
-	responsesRoutingChannelSkipReasonUnsupportedCompaction               = "unsupported_compaction"
-	responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay = "unsupported_encrypted_reasoning_replay"
+	responsesRoutingChannelSkipReasonUnsupportedCompaction                  = "unsupported_compaction"
+	responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay    = "unsupported_encrypted_reasoning_replay"
+	responsesRoutingChannelSkipReasonOpaqueReplayParamOverride              = "incompatible_opaque_replay_param_override"
+	responsesRoutingChannelSkipReasonRequiresNativeResponsesToolIdentity    = "requires_native_responses_tool_identity"
+	responsesRoutingChannelSkipReasonUnparseableNativeResponsesToolIdentity = "requires_native_responses_tool_identity_unparseable"
 )
 
 func markResponsesCompactionChannelSkip(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) {
@@ -886,6 +1057,22 @@ func markResponsesCompatibilityChannelSkip(c *gin.Context, info *relaycommon.Rel
 	if info != nil {
 		info.LastError = channelError
 	}
+}
+
+func opaqueResponsesReplayParamOverride(c *gin.Context, channel *model.Channel) map[string]interface{} {
+	if channel == nil {
+		return nil
+	}
+	if c != nil && common.GetContextKeyInt(c, constant.ContextKeyChannelId) == channel.Id {
+		if paramOverride, ok := common.GetContextKeyType[map[string]interface{}](c, constant.ContextKeyChannelParamOverride); ok {
+			return paramOverride
+		}
+	}
+	paramOverride := channel.GetParamOverride()
+	if merged, applied := service.PreviewChannelAffinityOverrideTemplate(c, paramOverride); applied {
+		return merged
+	}
+	return paramOverride
 }
 
 func recordResponsesRoutingChannelSkip(c *gin.Context, channel *model.Channel, reason string) {
@@ -986,7 +1173,7 @@ func responsesLocalCompactionTriggerRuleRequiresChannelSkip(c *gin.Context, info
 		return true
 	}
 	if rule.AllChannels {
-		return !settings.ResolveResponsesChannelCapability(channel.Type).SupportsCompactionItemPassthrough
+		return settings.ResolveResponsesCompactionItemPassthroughCapability(channel.Type) == dto.ResponsesCompactionItemPassthroughCapabilityUnsupported
 	}
 	if len(rule.ChannelIDs) > 0 {
 		for _, channelID := range rule.ChannelIDs {
@@ -1023,6 +1210,7 @@ func nativeCompactionChannelSetting(c *gin.Context, info *relaycommon.RelayInfo,
 }
 
 var errResponsesNativeCompactionUnsupported = errors.New("responses native compaction unsupported")
+var errResponsesNativeToolIdentityUnsupported = errors.New("responses native tool identity unsupported")
 var errResponsesFunctionToolsUnsupported = errors.New("responses function tools unsupported")
 var errResponsesCustomToolsUnsupported = errors.New("responses custom tools unsupported")
 var errResponsesNamespaceToolsUnsupported = errors.New("responses namespace tools unsupported")
@@ -1035,6 +1223,18 @@ func unsupportedNativeCompactionChannelError(channel *model.Channel) *types.NewA
 	}
 	return types.NewErrorWithStatusCode(
 		fmt.Errorf("%w: channel #%d uses responses-to-chat compatibility and cannot handle native compaction input; choose a native Responses-capable channel", errResponsesNativeCompactionUnsupported, channelID),
+		types.ErrorCodeChannelModelMappedError,
+		http.StatusServiceUnavailable,
+	)
+}
+
+func unsupportedResponsesNativeToolIdentityChannelError(channel *model.Channel) *types.NewAPIError {
+	channelID := 0
+	if channel != nil {
+		channelID = channel.Id
+	}
+	return types.NewErrorWithStatusCode(
+		fmt.Errorf("%w: channel #%d uses responses-to-chat compatibility and cannot preserve Codex Lite native namespace tool identity; choose a native Responses-capable channel", errResponsesNativeToolIdentityUnsupported, channelID),
 		types.ErrorCodeChannelModelMappedError,
 		http.StatusServiceUnavailable,
 	)
@@ -1116,7 +1316,7 @@ func responsesCompactionRuleRequiresChannelSkip(c *gin.Context, info *relaycommo
 		return true
 	}
 	if rule.AllChannels {
-		return !settings.ResolveResponsesChannelCapability(channel.Type).SupportsCompactionItemPassthrough
+		return settings.ResolveResponsesCompactionItemPassthroughCapability(channel.Type) == dto.ResponsesCompactionItemPassthroughCapabilityUnsupported
 	}
 	if len(rule.ChannelIDs) > 0 {
 		for _, channelID := range rule.ChannelIDs {
@@ -1139,7 +1339,7 @@ func responsesCompactionChannelCannotPassthroughItems(settings dto.ChannelOtherS
 	if settings.HasResponsesProxyCompatibilityProfile() {
 		return true
 	}
-	return !settings.ResolveResponsesChannelCapability(channelType).SupportsCompactionItemPassthrough
+	return settings.ResolveResponsesCompactionItemPassthroughCapability(channelType) == dto.ResponsesCompactionItemPassthroughCapabilityUnsupported
 }
 
 func responsesCompactionChannelOtherSettings(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) dto.ChannelOtherSettings {
@@ -1179,6 +1379,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	}
 	if relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
 		relaycommon.MarkResponsesEncryptedReasoningReplayRetrySuppressed(c)
+		return false
+	}
+	if isUnsafeReadResponseBodyRetry(c, openaiErr) {
 		return false
 	}
 	if c != nil && c.Writer != nil && c.Writer.Written() {
@@ -1237,8 +1440,21 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 
+// Read failures are replayable only before the gateway writes any downstream
+// bytes and while the client request is still active. Other errors preserve
+// the existing stream-prelude retry behavior.
+func isUnsafeReadResponseBodyRetry(c *gin.Context, openaiErr *types.NewAPIError) bool {
+	if openaiErr == nil || openaiErr.GetErrorCode() != types.ErrorCodeReadResponseBodyFailed {
+		return false
+	}
+	if c == nil || c.Request == nil || c.Request.Context().Err() != nil {
+		return true
+	}
+	return c.Writer != nil && c.Writer.Written()
+}
+
 func observeUpstreamRateLimitRetry(c *gin.Context, channelID int, openaiErr *types.NewAPIError) {
-	if openaiErr == nil {
+	if openaiErr == nil || relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
 		return
 	}
 	statusCode := openaiErr.StatusCode
@@ -1255,7 +1471,7 @@ func observeUpstreamRateLimitRetry(c *gin.Context, channelID int, openaiErr *typ
 }
 
 func recordResponsesCapabilityObservation(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) {
-	if c == nil || info == nil || info.ChannelMeta == nil || err == nil {
+	if c == nil || info == nil || info.ChannelMeta == nil || err == nil || relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
 		return
 	}
 	if !shouldRecordResponsesCapabilityObservation(info.RelayMode, err) {
@@ -1281,7 +1497,7 @@ func recordResponsesCapabilityObservation(c *gin.Context, info *relaycommon.Rela
 }
 
 func recordChannelRequestBodyLimit(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) {
-	if c == nil || info == nil || info.ChannelMeta == nil || err == nil {
+	if c == nil || info == nil || info.ChannelMeta == nil || err == nil || relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
 		return
 	}
 	policy := model_setting.GetRequestBodyLimitPolicy()
@@ -2267,6 +2483,9 @@ func isModelLookupError(normalized string) bool {
 }
 
 func processChannelError(c *gin.Context, relayInfo *relaycommon.RelayInfo, channelError types.ChannelError, err *types.NewAPIError) {
+	if relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
+		channelError.AutoBan = false
+	}
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously

@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/hot"
@@ -309,6 +310,9 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 		if src.Path == "" {
 			return ""
 		}
+		if hasOpaqueResponsesReplayMetadata(c) {
+			return ""
+		}
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return ""
@@ -328,7 +332,7 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 			return strings.TrimSpace(res.Raw)
 		}
 	case "responses_encrypted_content":
-		return firstRequestEncryptedReasoningContentFingerprint(c)
+		return firstRequestEncryptedContentFingerprint(c)
 	default:
 		return ""
 	}
@@ -336,7 +340,7 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 
 func extractChannelAffinityValues(c *gin.Context, src operation_setting.ChannelAffinityKeySource) []string {
 	if strings.TrimSpace(src.Type) == "responses_encrypted_content" {
-		return requestEncryptedReasoningContentFingerprints(c)
+		return requestEncryptedContentFingerprints(c)
 	}
 	value := extractChannelAffinityValue(c, src)
 	if value == "" {
@@ -441,17 +445,20 @@ func affinityFingerprint(s string) string {
 	return hex
 }
 
-func firstRequestEncryptedReasoningContentFingerprint(c *gin.Context) string {
-	values := requestEncryptedReasoningContentFingerprints(c)
+func firstRequestEncryptedContentFingerprint(c *gin.Context) string {
+	values := requestEncryptedContentFingerprints(c)
 	if len(values) == 0 {
 		return ""
 	}
 	return values[0]
 }
 
-func requestEncryptedReasoningContentFingerprints(c *gin.Context) []string {
+func requestEncryptedContentFingerprints(c *gin.Context) []string {
 	if c == nil {
 		return nil
+	}
+	if metadata, ok := common.GetResponsesRequestMetadata(c); ok && metadata.HasOpaqueEncryptedContent {
+		return append([]string(nil), metadata.EncryptedContentFingerprints...)
 	}
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
@@ -461,28 +468,7 @@ func requestEncryptedReasoningContentFingerprints(c *gin.Context) []string {
 	if err != nil || len(body) == 0 {
 		return nil
 	}
-	input := gjson.GetBytes(body, "input")
-	if !input.IsArray() {
-		return nil
-	}
-	values := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, item := range input.Array() {
-		if item.Get("type").String() != "reasoning" {
-			continue
-		}
-		value := strings.TrimSpace(item.Get("encrypted_content").String())
-		if value == "" {
-			continue
-		}
-		fp := affinityFingerprint(value)
-		if _, ok := seen[fp]; ok {
-			continue
-		}
-		seen[fp] = struct{}{}
-		values = append(values, fp)
-	}
-	return values
+	return responsesEncryptedContentFingerprints(gjson.GetBytes(body, "input"))
 }
 
 func buildChannelAffinityKeyHint(s string) string {
@@ -593,8 +579,10 @@ func appendChannelAffinityTemplateAdminInfo(c *gin.Context, meta channelAffinity
 	})
 }
 
-// ApplyChannelAffinityOverrideTemplate merges per-rule channel override templates onto the selected channel override config.
-func ApplyChannelAffinityOverrideTemplate(c *gin.Context, paramOverride map[string]interface{}) (map[string]interface{}, bool) {
+// PreviewChannelAffinityOverrideTemplate merges a rule template without
+// recording selection-side effects. It is safe to call while evaluating a
+// candidate channel before that channel is selected.
+func PreviewChannelAffinityOverrideTemplate(c *gin.Context, paramOverride map[string]interface{}) (map[string]interface{}, bool) {
 	if c == nil {
 		return paramOverride, false
 	}
@@ -606,7 +594,19 @@ func ApplyChannelAffinityOverrideTemplate(c *gin.Context, paramOverride map[stri
 		return paramOverride, false
 	}
 
-	mergedParam := mergeChannelOverride(paramOverride, meta.ParamTemplate)
+	return mergeChannelOverride(paramOverride, meta.ParamTemplate), true
+}
+
+// ApplyChannelAffinityOverrideTemplate merges per-rule channel override templates onto the selected channel override config.
+func ApplyChannelAffinityOverrideTemplate(c *gin.Context, paramOverride map[string]interface{}) (map[string]interface{}, bool) {
+	mergedParam, applied := PreviewChannelAffinityOverrideTemplate(c, paramOverride)
+	if !applied {
+		return mergedParam, false
+	}
+	meta, ok := getChannelAffinityMeta(c)
+	if !ok {
+		return mergedParam, false
+	}
 	appendChannelAffinityTemplateAdminInfo(c, meta)
 	return mergedParam, true
 }
@@ -819,11 +819,12 @@ func RecordResponsesEncryptedContentAffinityWithStatus(c *gin.Context, responseB
 	if setting == nil || !setting.Enabled {
 		return
 	}
-	path := ""
+	requestPath := ""
 	if c.Request != nil && c.Request.URL != nil {
-		path = c.Request.URL.Path
+		requestPath = c.Request.URL.Path
 	}
-	if path != "/v1/responses" {
+	path, isDirectCompact := responsesEncryptedContentAffinityRecordPath(requestPath)
+	if path == "" {
 		return
 	}
 	// statusCode is the upstream response status; c.Writer.Status() is the downstream status after relay handling.
@@ -840,6 +841,11 @@ func RecordResponsesEncryptedContentAffinityWithStatus(c *gin.Context, responseB
 	if modelName == "" {
 		return
 	}
+	if isDirectCompact {
+		if baseModelName, ok := ratio_setting.CompactBaseModelName(modelName); ok {
+			modelName = baseModelName
+		}
+	}
 	userAgent := ""
 	if c.Request != nil {
 		userAgent = c.Request.UserAgent()
@@ -851,6 +857,21 @@ func RecordResponsesEncryptedContentAffinityWithStatus(c *gin.Context, responseB
 	}
 	for _, value := range values {
 		recordResponsesEncryptedContentAffinityValue(setting, modelName, usingGroup, path, userAgent, affinityFingerprint(value), channelID)
+	}
+}
+
+// responsesEncryptedContentAffinityRecordPath returns the affinity-rule path
+// for outputs that can later be replayed as native Responses requests. Direct
+// compact outputs are consumed through /v1/responses, so they intentionally
+// reuse that existing rule path instead of expanding operator-configured regexes.
+func responsesEncryptedContentAffinityRecordPath(requestPath string) (string, bool) {
+	switch requestPath {
+	case "/v1/responses":
+		return "/v1/responses", false
+	case "/v1/responses/compact", "/responses/compact":
+		return "/v1/responses", true
+	default:
+		return "", false
 	}
 }
 
@@ -871,26 +892,57 @@ func responsesEncryptedContentAffinityUsingGroup(c *gin.Context) string {
 
 func responseEncryptedContentAffinityValues(responseBody []byte) []string {
 	root := gjson.ParseBytes(responseBody)
-	output := root.Get("output")
-	if !output.IsArray() {
-		return nil
+	return responsesEncryptedContentValues(root.Get("output"))
+}
+
+func responsesEncryptedContentFingerprints(value gjson.Result) []string {
+	values := responsesEncryptedContentValues(value)
+	for index := range values {
+		values[index] = affinityFingerprint(values[index])
 	}
+	return values
+}
+
+const (
+	maxResponsesEncryptedContentAffinityNestingDepth = 64
+	maxResponsesEncryptedContentAffinityValues       = 32
+)
+
+func responsesEncryptedContentValues(value gjson.Result) []string {
 	values := make([]string, 0)
 	seen := make(map[string]struct{})
-	for _, item := range output.Array() {
-		if item.Get("type").String() != "reasoning" {
-			continue
+	var visit func(gjson.Result, int)
+	visit = func(candidate gjson.Result, depth int) {
+		if depth > maxResponsesEncryptedContentAffinityNestingDepth || len(values) >= maxResponsesEncryptedContentAffinityValues {
+			return
 		}
-		value := strings.TrimSpace(item.Get("encrypted_content").String())
-		if value == "" {
-			continue
+		switch {
+		case candidate.IsArray():
+			candidate.ForEach(func(_, child gjson.Result) bool {
+				if child.IsArray() || child.IsObject() {
+					visit(child, depth+1)
+				}
+				return len(values) < maxResponsesEncryptedContentAffinityValues
+			})
+		case candidate.IsObject():
+			candidate.ForEach(func(key, child gjson.Result) bool {
+				if key.String() == "encrypted_content" && child.Type == gjson.String {
+					encryptedContent := strings.TrimSpace(child.String())
+					if encryptedContent != "" {
+						if _, exists := seen[encryptedContent]; !exists {
+							seen[encryptedContent] = struct{}{}
+							values = append(values, encryptedContent)
+						}
+					}
+				}
+				if child.IsArray() || child.IsObject() {
+					visit(child, depth+1)
+				}
+				return len(values) < maxResponsesEncryptedContentAffinityValues
+			})
 		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		values = append(values, value)
 	}
+	visit(value, 0)
 	return values
 }
 

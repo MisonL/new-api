@@ -32,9 +32,9 @@ func DecompressRequestMiddleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		if common.IsCodexLocalResponsesCompactionRequest(c.Request) {
-			// This exact request shape is authenticated before its compressed body is
-			// decompressed and spooled by the relay ingress middleware.
+		if common.IsResponsesOpaqueReplayIngressRequest(c.Request) {
+			// Opaque Responses replay candidates are authenticated before their
+			// compressed body is decompressed and spooled by the relay ingress.
 			c.Next()
 			return
 		}

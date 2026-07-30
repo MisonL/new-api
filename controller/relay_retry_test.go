@@ -114,6 +114,51 @@ func TestShouldRetrySuppressesOpaqueEncryptedReplay(t *testing.T) {
 	}
 }
 
+func TestShouldRetryReadResponseBodyFailureRequiresSafeReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	newReadFailure := func() *types.NewAPIError {
+		return types.NewOpenAIError(
+			errors.New("unexpected EOF while reading upstream response"),
+			types.ErrorCodeReadResponseBodyFailed,
+			http.StatusInternalServerError,
+		)
+	}
+
+	t.Run("pre write active request remains retryable", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+		require.True(t, shouldRetry(ctx, newReadFailure(), 1))
+	})
+
+	t.Run("opaque replay never changes channel", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		relaycommon.MarkResponsesEncryptedReasoningReplayDecision(ctx, dto.ResponsesEncryptedReasoningReplayCapabilitySupported)
+
+		require.False(t, shouldRetry(ctx, newReadFailure(), 1))
+	})
+
+	t.Run("cancelled client request does not retry", func(t *testing.T) {
+		requestContext, cancel := context.WithCancel(context.Background())
+		cancel()
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Request = httptest.NewRequestWithContext(requestContext, http.MethodPost, "/v1/responses", nil)
+
+		require.False(t, shouldRetry(ctx, newReadFailure(), 1))
+	})
+
+	t.Run("written downstream response does not retry", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		_, writeErr := ctx.Writer.Write([]byte("data: partial response\n\n"))
+		require.NoError(t, writeErr)
+
+		require.False(t, shouldRetry(ctx, newReadFailure(), 1))
+	})
+}
+
 func TestShouldRetryGatewayTimeoutHonorsAlwaysSkipDespiteChannelAffinitySkip(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -293,6 +338,33 @@ func TestObserveUpstreamRateLimitRetryUsesOriginalMappedStatusCode(t *testing.T)
 	service.ResetStatusCode(upstreamErr, `{"429":503}`)
 
 	observeUpstreamRateLimitRetry(ctx, 206, upstreamErr)
+	state, ok := service.GetUpstreamRateLimitRetryState(ctx)
+	require.True(t, ok)
+	require.Equal(t, 206, state.TriggerChannelID)
+}
+
+func TestObserveUpstreamRateLimitRetrySkipsOpaqueResponsesReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetResponsesRequestMetadata(ctx, common.ResponsesRequestMetadata{HasOpaqueEncryptedContent: true})
+	upstreamErr := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests)
+
+	observeUpstreamRateLimitRetry(ctx, 206, upstreamErr)
+
+	_, ok := service.GetUpstreamRateLimitRetryState(ctx)
+	require.False(t, ok)
+}
+
+func TestObserveUpstreamRateLimitRetryRecordsNonOpaqueResponsesReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetResponsesRequestMetadata(ctx, common.ResponsesRequestMetadata{HasOpaqueEncryptedContent: false})
+	upstreamErr := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests)
+
+	observeUpstreamRateLimitRetry(ctx, 206, upstreamErr)
+
 	state, ok := service.GetUpstreamRateLimitRetryState(ctx)
 	require.True(t, ok)
 	require.Equal(t, 206, state.TriggerChannelID)
@@ -1246,7 +1318,9 @@ func TestDefaultProfileAllowsCompactionTriggerPassthroughForLegacyChannels(t *te
 	require.Nil(t, info.LastError)
 	require.Empty(t, common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
 	otherSettings := channel.GetOtherSettings()
-	require.True(t, otherSettings.ResolveResponsesChannelCapability(channel.Type).SupportsCompactionItemPassthrough)
+	capability := otherSettings.ResolveResponsesChannelCapability(channel.Type)
+	require.Equal(t, dto.ResponsesCompactionItemPassthroughCapabilityUnknown, capability.CompactionItemPassthroughCapability)
+	require.Nil(t, capability.SupportsCompactionItemPassthrough)
 }
 
 func TestResponsesLocalCompactionTriggerAllChannelsSkipsOnlyUnsupportedPassthrough(t *testing.T) {
@@ -1312,7 +1386,9 @@ func TestDefaultProfileAllowsRemoteCompactionPassthroughForLegacyChannels(t *tes
 	require.Nil(t, info.LastError)
 	require.Empty(t, common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
 	otherSettings := channel.GetOtherSettings()
-	require.True(t, otherSettings.ResolveResponsesChannelCapability(channel.Type).SupportsCompactionItemPassthrough)
+	capability := otherSettings.ResolveResponsesChannelCapability(channel.Type)
+	require.Equal(t, dto.ResponsesCompactionItemPassthroughCapabilityUnknown, capability.CompactionItemPassthroughCapability)
+	require.Nil(t, capability.SupportsCompactionItemPassthrough)
 }
 
 func TestResponsesToChatPrecheckAllowsStaleLocalSyntheticMarkerWithVisibleInput(t *testing.T) {
@@ -1605,7 +1681,7 @@ func TestGetChannelSpecificChatOnlyProfileRejectsRemoteCompactionWithoutConversi
 	require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
 }
 
-func TestGetChannelRejectsGenericOpenAIRemoteCompactionWithoutPassthroughCapability(t *testing.T) {
+func TestGetChannelAllowsUnverifiedGenericOpenAIRemoteCompactionPassthrough(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
 	channel, _ := seedRemoteCompactionRouteChannels(t, db)
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
@@ -1636,11 +1712,12 @@ func TestGetChannelRejectsGenericOpenAIRemoteCompactionWithoutPassthroughCapabil
 		Retry:      common.GetPointer(0),
 	})
 
-	require.Nil(t, selected)
-	require.NotNil(t, err)
-	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
-	require.Contains(t, err.Error(), "cannot handle native compaction input")
-	require.Equal(t, "channel_skipped_unsupported_compaction", common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+	require.Nil(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, channel.Id, selected.Id)
+	require.Empty(t, common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+	channelSettings := selected.GetOtherSettings()
+	require.Equal(t, dto.ResponsesCompactionItemPassthroughCapabilityUnknown, channelSettings.ResolveResponsesCompactionItemPassthroughCapability(selected.Type))
 }
 
 func TestGetChannelSkipsResponsesViaChatForCompactionTrigger(t *testing.T) {
@@ -2403,6 +2480,134 @@ func TestShouldAllowUnknownResponsesEncryptedReasoningReplayCapability(t *testin
 	require.Nil(t, info.LastError)
 }
 
+func TestShouldSkipOpaqueReplayRequestWithKnownIncompatibleChannel(t *testing.T) {
+	unsupported := false
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: dto.NewOpaqueOpenAIResponsesRequest(common.ResponsesRequestMetadata{
+			Model:                     "gpt-5.6-sol",
+			ModelPresent:              true,
+			InputPresent:              true,
+			InputKind:                 common.ResponsesJSONValueKindArray,
+			HasOpaqueEncryptedContent: true,
+		}),
+	}
+	channel := &model.Channel{Id: 168, Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsEncryptedReasoningReplay: &unsupported,
+		},
+	})
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.True(t, skip)
+	require.ErrorIs(t, info.LastError, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{{
+		ChannelID: channel.Id,
+		Reason:    responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay,
+	}})
+}
+
+func TestShouldAllowUnknownOpaqueReplayRequestOnce(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: dto.NewOpaqueOpenAIResponsesRequest(common.ResponsesRequestMetadata{
+			Model:                     "gpt-5.6-sol",
+			ModelPresent:              true,
+			InputPresent:              true,
+			InputKind:                 common.ResponsesJSONValueKindArray,
+			HasOpaqueEncryptedContent: true,
+		}),
+	}
+	channel := &model.Channel{Id: 160, Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+	})
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.False(t, skip)
+	require.Nil(t, info.LastError)
+	require.Equal(t, string(dto.ResponsesEncryptedReasoningReplayCapabilityUnknown), common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayCapability))
+}
+
+func TestShouldSkipOpaqueReplayCompactionWithoutPassthrough(t *testing.T) {
+	supported := true
+	unsupported := false
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: dto.NewOpaqueOpenAIResponsesRequest(common.ResponsesRequestMetadata{
+			Model:                     "gpt-5.6-sol",
+			ModelPresent:              true,
+			InputPresent:              true,
+			InputKind:                 common.ResponsesJSONValueKindArray,
+			HasOpaqueEncryptedContent: true,
+			HasCompactionItem:         true,
+		}),
+	}
+	channel := &model.Channel{Id: 208, Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericOpenAI,
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsEncryptedReasoningReplay:  &supported,
+			SupportsCompactionItemPassthrough: &unsupported,
+		},
+	})
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.True(t, skip)
+	require.ErrorIs(t, info.LastError, errResponsesNativeCompactionUnsupported)
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionRejectedUnsupported, common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{{
+		ChannelID: channel.Id,
+		Reason:    responsesRoutingChannelSkipReasonUnsupportedCompaction,
+	}})
+}
+
+func TestShouldAllowUnknownOpaqueReplayCompactionPassthroughOnce(t *testing.T) {
+	supported := true
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: dto.NewOpaqueOpenAIResponsesRequest(common.ResponsesRequestMetadata{
+			Model:                     "gpt-5.6-sol",
+			ModelPresent:              true,
+			InputPresent:              true,
+			InputKind:                 common.ResponsesJSONValueKindArray,
+			HasOpaqueEncryptedContent: true,
+			HasCompactionItem:         true,
+		}),
+	}
+	channel := &model.Channel{Id: 160, Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsEncryptedReasoningReplay: &supported,
+		},
+	})
+
+	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
+
+	require.NoError(t, err)
+	require.False(t, skip)
+	require.Nil(t, info.LastError)
+	channelSettings := channel.GetOtherSettings()
+	require.Equal(t, dto.ResponsesCompactionItemPassthroughCapabilityUnknown, channelSettings.ResolveResponsesCompactionItemPassthroughCapability(channel.Type))
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionSelectedNative, common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+}
+
 func TestShouldSkipOpaqueResponsesCompactChannelWithoutNativeCompact(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(nil)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
@@ -2433,7 +2638,7 @@ func TestShouldSkipOpaqueResponsesCompactChannelWithoutNativeCompact(t *testing.
 	}})
 }
 
-func TestShouldSkipOpaqueRemoteCompactionWithoutPassthroughPreservesReplayCapability(t *testing.T) {
+func TestShouldAllowUnverifiedOpaqueRemoteCompactionPassthroughPreservesReplayCapability(t *testing.T) {
 	supported := true
 	ctx, _ := gin.CreateTestContext(nil)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -2455,14 +2660,13 @@ func TestShouldSkipOpaqueRemoteCompactionWithoutPassthroughPreservesReplayCapabi
 	skip, err := shouldSkipChannelForResponsesToChatCompatibility(ctx, info, channel)
 
 	require.NoError(t, err)
-	require.True(t, skip)
-	require.ErrorIs(t, info.LastError, errResponsesNativeCompactionUnsupported)
+	require.False(t, skip)
+	require.Nil(t, info.LastError)
 	require.Equal(t, string(dto.ResponsesEncryptedReasoningReplayCapabilitySupported), common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayCapability))
-	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionRejectedUnsupported, common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
-	requireResponsesRoutingChannelSkips(t, ctx, []dto.ResponsesRoutingChannelSkip{{
-		ChannelID: channel.Id,
-		Reason:    responsesRoutingChannelSkipReasonUnsupportedCompaction,
-	}})
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionSelectedNative, common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+	require.Empty(t, common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip))
+	_, hasRoutingSkips := common.GetContextKeyType[[]dto.ResponsesRoutingChannelSkip](ctx, constant.ContextKeyResponsesRoutingChannelSkips)
+	require.False(t, hasRoutingSkips)
 }
 
 func TestShouldAllowOpaqueResponsesCompactOnNativeCodexChannel(t *testing.T) {

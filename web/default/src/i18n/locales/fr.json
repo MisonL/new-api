@@ -4395,6 +4395,7 @@
     "compact mode": "mode compact",
     "compaction: pass": "compaction : transfert",
     "compaction: block": "compaction : blocage",
+    "compaction: unknown": "compaction : inconnu",
     "diagnosis": "diagnostic",
     "last fail": "dernier echec",
     "last observed": "derniere observation",

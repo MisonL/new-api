@@ -158,3 +158,99 @@ func TestRecordChannelRequestBodyLimitSkipsRecoverableRemoteCompaction413(t *tes
 	require.NoError(t, db.First(&persisted, channel.Id).Error)
 	require.Nil(t, persisted.GetOtherSettings().RequestBodyLimit)
 }
+
+func TestRecordChannelRequestBodyLimitSkipsOpaqueResponsesReplay(t *testing.T) {
+	db := setupChannelControllerTestDB(t)
+	previousPolicy := model_setting.GetGlobalSettings().RequestBodyLimitPolicy
+	model_setting.GetGlobalSettings().RequestBodyLimitPolicy = model_setting.RequestBodyLimitPolicy{Enabled: true}
+	t.Cleanup(func() {
+		model_setting.GetGlobalSettings().RequestBodyLimitPolicy = previousPolicy
+	})
+	channel := &model.Channel{
+		Id:     8624,
+		Name:   "opaque-replay-413",
+		Key:    "test-key",
+		Status: 1,
+		Group:  "default",
+		Models: "gpt-5.6-sol",
+	}
+	require.NoError(t, db.Create(channel).Error)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetResponsesRequestMetadata(c, common.ResponsesRequestMetadata{
+		Model:                     "gpt-5.6-sol",
+		ModelPresent:              true,
+		InputPresent:              true,
+		InputKind:                 common.ResponsesJSONValueKindArray,
+		HasOpaqueEncryptedContent: true,
+	})
+	common.SetContextKey(c, constant.ContextKeyRequestBodySize, int64(12345))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   channel.Id,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	err := types.NewOpenAIError(
+		errors.New("upstream request too large"),
+		types.ErrorCodeUpstreamRequestTooLarge,
+		http.StatusRequestEntityTooLarge,
+	)
+
+	recordChannelRequestBodyLimit(c, info, err)
+
+	var persisted model.Channel
+	require.NoError(t, db.First(&persisted, channel.Id).Error)
+	require.Nil(t, persisted.GetOtherSettings().RequestBodyLimit)
+}
+
+func TestRecordChannelRequestBodyLimitRecordsNonOpaqueResponsesReplay(t *testing.T) {
+	db := setupChannelControllerTestDB(t)
+	previousPolicy := model_setting.GetGlobalSettings().RequestBodyLimitPolicy
+	model_setting.GetGlobalSettings().RequestBodyLimitPolicy = model_setting.RequestBodyLimitPolicy{Enabled: true}
+	t.Cleanup(func() {
+		model_setting.GetGlobalSettings().RequestBodyLimitPolicy = previousPolicy
+	})
+	channel := &model.Channel{
+		Id:     8625,
+		Name:   "non-opaque-replay-413",
+		Key:    "test-key",
+		Status: 1,
+		Group:  "default",
+		Models: "gpt-5.6-sol",
+	}
+	require.NoError(t, db.Create(channel).Error)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(c, constant.ContextKeyRequestBodySize, int64(12345))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[{"type":"message","role":"user","content":"continue"}]`),
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   channel.Id,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	err := types.NewOpenAIError(
+		errors.New("upstream request too large"),
+		types.ErrorCodeUpstreamRequestTooLarge,
+		http.StatusRequestEntityTooLarge,
+	)
+
+	recordChannelRequestBodyLimit(c, info, err)
+
+	var persisted model.Channel
+	require.NoError(t, db.First(&persisted, channel.Id).Error)
+	limit := persisted.GetOtherSettings().RequestBodyLimit
+	require.NotNil(t, limit)
+	require.EqualValues(t, 12345, limit.MaxBytes)
+	require.Equal(t, "upstream_413", limit.Source)
+}

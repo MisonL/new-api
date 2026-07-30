@@ -2,20 +2,22 @@ package openai
 
 import (
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/types"
 )
 
 func responsesCompactOpenAIErrorHasContent(oaiError *types.OpenAIError) bool {
-	return oaiError != nil &&
-		(oaiError.Type != "" || oaiError.Message != "" || oaiError.Param != "" || oaiError.Code != nil)
+	return responsesOpenAIErrorHasContent(oaiError)
 }
 
 func responsesCompactOpenAIErrorStatus(statusCode int, oaiError *types.OpenAIError) int {
-	if statusCode != http.StatusOK {
-		return statusCode
+	return responsesUpstreamOpenAIErrorStatus(statusCode, oaiError)
+}
+
+func isResponsesContextWindowError(oaiError *types.OpenAIError) bool {
+	if oaiError == nil {
+		return false
 	}
 	message := strings.ToLower(strings.Join([]string{
 		oaiError.Message,
@@ -39,8 +41,8 @@ func responsesCompactOpenAIErrorStatus(statusCode int, oaiError *types.OpenAIErr
 		"token limit",
 	} {
 		if strings.Contains(message, indicator) {
-			return http.StatusBadRequest
+			return true
 		}
 	}
-	return http.StatusBadGateway
+	return false
 }

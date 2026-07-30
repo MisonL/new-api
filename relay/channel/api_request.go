@@ -500,6 +500,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
+	applyKnownRequestBodyLength(req, requestBody)
 	headers := req.Header
 	err = a.SetupRequestHeader(c, &headers, info)
 	if err != nil {
@@ -512,11 +513,44 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
+	normalizeOpaqueResponsesReplayTransportHeaders(c, req, requestBody)
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
 	}
 	return resp, nil
+}
+
+func normalizeOpaqueResponsesReplayTransportHeaders(c *gin.Context, req *http.Request, requestBody io.Reader) {
+	if req == nil || !common.IsResponsesOpaqueEncryptedReplay(c) {
+		return
+	}
+	// The ingress has already decoded Content-Encoding. The replay reader owns
+	// the only valid body length, so static channel headers cannot override it.
+	req.Header.Del("Content-Encoding")
+	req.Header.Del("Content-Length")
+	req.Header.Del("Transfer-Encoding")
+	applyKnownRequestBodyLength(req, requestBody)
+}
+
+type requestBodyLengthProvider interface {
+	ContentLength() int64
+}
+
+func applyKnownRequestBodyLength(req *http.Request, requestBody io.Reader) {
+	if req == nil || requestBody == nil {
+		return
+	}
+	provider, ok := requestBody.(requestBodyLengthProvider)
+	if !ok {
+		return
+	}
+	contentLength := provider.ContentLength()
+	if contentLength < 0 {
+		return
+	}
+	req.ContentLength = contentLength
+	req.TransferEncoding = nil
 }
 
 func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {

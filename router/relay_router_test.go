@@ -45,6 +45,37 @@ func TestResponsesCompactIngressAliasesReachRelayAuth(t *testing.T) {
 	}
 }
 
+func TestResponsesCompactIngressAliasesRejectUnauthenticatedWithoutReadingBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var compressed bytes.Buffer
+	writer := gzip.NewWriter(&compressed)
+	_, err := writer.Write([]byte(`{"model":"gpt-5.6-sol","input":[{"type":"compaction","encrypted_content":"opaque-state"}]}`))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	for _, path := range []string{"/v1/responses/compact", "/responses/compact"} {
+		t.Run(path, func(t *testing.T) {
+			engine := gin.New()
+			SetRelayRouter(engine)
+
+			body := &countingRequestBody{reader: bytes.NewReader(compressed.Bytes())}
+			request := httptest.NewRequest(http.MethodPost, path, nil)
+			request.Body = body
+			request.ContentLength = -1
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Content-Encoding", "gzip")
+
+			recorder := httptest.NewRecorder()
+			engine.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusUnauthorized, recorder.Code)
+			require.Zero(t, body.reads)
+			require.Equal(t, "gzip", request.Header.Get("Content-Encoding"))
+		})
+	}
+}
+
 func TestClaudeCountTokensRouteReachesRelayAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()

@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
+	"github.com/go-redis/redis/v8"
 )
 
 var hotBuckets = &sync.Map{}
@@ -22,9 +23,23 @@ func Init() {
 	go flushLoop()
 }
 
-func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64) {
+type recordDependencies struct {
+	setting      perf_metrics_setting.PerfMetricsSetting
+	redisEnabled bool
+	redisClient  *redis.Client
+}
+
+func captureRecordDependencies() recordDependencies {
+	return recordDependencies{
+		setting:      perf_metrics_setting.GetSetting(),
+		redisEnabled: common.RedisEnabled,
+		redisClient:  common.RDB,
+	}
+}
+
+func captureRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64) (Sample, bool) {
 	if info == nil {
-		return
+		return Sample{}, false
 	}
 	now := time.Now()
 	hasTtft := info.IsStream && info.HasSendResponse()
@@ -43,7 +58,7 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 	upstreamHeaderMs, hasUpstreamHeader := info.UpstreamHeaderLatencyMs()
 	upstreamTtfbMs, hasUpstreamTtfb := info.UpstreamFirstByteLatencyMs()
 	upstreamTotalMs, hasUpstreamTotal := info.UpstreamTotalLatencyMs()
-	Record(Sample{
+	return Sample{
 		Model:                               info.OriginModelName,
 		Group:                               info.UsingGroup,
 		LatencyMs:                           latencyMs,
@@ -60,12 +75,35 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 		HasUpstreamTotal:                    hasUpstreamTotal,
 		ResponsesBootstrapRecoveryAttempted: info.ResponsesBootstrapRecoveryAttempted,
 		ResponsesBootstrapRecoveryWaitMs:    info.ResponsesBootstrapRecoveryWaitMs,
-	})
+	}, true
+}
+
+// CaptureRelaySample snapshots request-scoped metrics and Redis dependencies
+// before a caller schedules asynchronous recording. The returned function only
+// consumes immutable values, so it cannot observe a later Redis client swap.
+func CaptureRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64) func() {
+	sample, ok := captureRelaySample(info, success, outputTokens)
+	if !ok {
+		return nil
+	}
+	dependencies := captureRecordDependencies()
+	return func() {
+		recordWithDependencies(sample, dependencies)
+	}
+}
+
+func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64) {
+	if record := CaptureRelaySample(info, success, outputTokens); record != nil {
+		record()
+	}
 }
 
 func Record(sample Sample) {
-	setting := perf_metrics_setting.GetSetting()
-	if !setting.Enabled || sample.Model == "" {
+	recordWithDependencies(sample, captureRecordDependencies())
+}
+
+func recordWithDependencies(sample Sample, dependencies recordDependencies) {
+	if !dependencies.setting.Enabled || sample.Model == "" {
 		return
 	}
 	if sample.Group == "" {
@@ -82,7 +120,7 @@ func Record(sample Sample) {
 	}
 	actual, _ := hotBuckets.LoadOrStore(key, &atomicBucket{})
 	actual.(*atomicBucket).add(sample)
-	recordRedis(key, sample)
+	recordRedis(key, sample, dependencies.redisEnabled, dependencies.redisClient)
 }
 
 func Query(params QueryParams) (QueryResult, error) {
@@ -421,15 +459,15 @@ func avgTps(value counters) float64 {
 	return float64(value.outputTokens) / (float64(value.generationMs) / 1000)
 }
 
-func recordRedis(key bucketKey, sample Sample) {
-	if !common.RedisEnabled || common.RDB == nil {
+func recordRedis(key bucketKey, sample Sample, redisEnabled bool, redisClient *redis.Client) {
+	if !redisEnabled || redisClient == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	redisKey := redisBucketKey(key)
-	pipe := common.RDB.TxPipeline()
+	pipe := redisClient.TxPipeline()
 	if !sample.BootstrapOnly {
 		pipe.HIncrBy(ctx, redisKey, "req", 1)
 		if sample.Success {
