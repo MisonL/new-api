@@ -771,17 +771,28 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		logger.LogInfo(c, fmt.Sprintf("responses invalid input item ids removed: count=%d model=%s", normalizeResult.RemovedCount, request.Model))
 	}
 
-	//  转换模型推理力度后缀
-	effort, originModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
-	if effort != "" {
-		if request.Reasoning == nil {
-			request.Reasoning = &dto.Reasoning{
-				Effort: effort,
-			}
-		} else {
-			request.Reasoning.Effort = effort
+	// Preserve effort from the logical model after model mapping. A mapped
+	// upstream model remains authoritative, while unmapped suffix models keep
+	// the established base-model conversion behavior.
+	if requestWithLogicalEffort, applied := relaycommon.ApplyResponsesLogicalModelReasoningEffort(info, request); applied {
+		request = requestWithLogicalEffort
+		mappedModel := info != nil && info.ChannelMeta != nil && info.IsModelMapped
+		if !mappedModel {
+			_, baseModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
+			request.Model = baseModel
 		}
-		request.Model = originModel
+	} else {
+		effort, originModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
+		if effort != "" {
+			if request.Reasoning == nil {
+				request.Reasoning = &dto.Reasoning{
+					Effort: effort,
+				}
+			} else {
+				request.Reasoning.Effort = effort
+			}
+			request.Model = originModel
+		}
 	}
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort

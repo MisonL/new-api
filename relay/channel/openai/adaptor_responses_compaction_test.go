@@ -40,6 +40,57 @@ func TestConvertOpenAIResponsesRequestPreservesCompactionInputByDefault(t *testi
 	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
 }
 
+func TestConvertOpenAIResponsesRequestPreservesMappedLogicalReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name        string
+		relayMode   int
+		originModel string
+	}{
+		{
+			name:        "responses",
+			relayMode:   relayconstant.RelayModeResponses,
+			originModel: "gpt-5.6-sol-high",
+		},
+		{
+			name:        "compact",
+			relayMode:   relayconstant.RelayModeResponsesCompact,
+			originModel: "gpt-5.6-sol-low-openai-compact",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(nil)
+			info := &relaycommon.RelayInfo{
+				RelayMode:       tt.relayMode,
+				OriginModelName: tt.originModel,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType:       constant.ChannelTypeOpenAI,
+					IsModelMapped:     true,
+					UpstreamModelName: "provider/gpt-5.6-sol",
+				},
+			}
+			request := dto.OpenAIResponsesRequest{
+				Model: "provider/gpt-5.6-sol",
+				Input: json.RawMessage(`"continue"`),
+			}
+
+			converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, request)
+
+			require.NoError(t, err)
+			convertedRequest, ok := converted.(dto.OpenAIResponsesRequest)
+			require.True(t, ok)
+			require.Equal(t, "provider/gpt-5.6-sol", convertedRequest.Model)
+			require.NotNil(t, convertedRequest.Reasoning)
+			require.Equal(t, map[string]string{
+				"responses": "high",
+				"compact":   "low",
+			}[tt.name], convertedRequest.Reasoning.Effort)
+			require.Equal(t, convertedRequest.Reasoning.Effort, info.ReasoningEffort)
+		})
+	}
+}
+
 func TestConvertOpenAIResponsesRequestDropsInvalidFunctionCallItemID(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{

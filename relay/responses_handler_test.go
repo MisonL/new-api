@@ -18,6 +18,7 @@ import (
 	openairelay "github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -1459,6 +1460,60 @@ func TestBuildOpenAIResponsesRequestBodyPassThroughMapsModelWithoutRewritingSupp
 	require.Equal(t, expectedBody, bodyBytes)
 	require.Equal(t, "provider/gpt-5.6-sol", converted.Model)
 	require.Equal(t, "forwarded_supported_capability", common.GetContextKeyString(c, constant.ContextKeyResponsesReasoningContextAction))
+}
+
+func TestBuildOpenAIResponsesRequestBodyPreservesLogicalEffortAfterModelMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{
+  "model": "gpt-5.6-sol-high",
+  "input": "continue"
+}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol-high",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:     206,
+			ChannelType:   constant.ChannelTypeOpenAI,
+			IsModelMapped: true,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+	c.Set("model_mapping", `{"gpt-5.6-sol-high":"provider/gpt-5.6-sol"}`)
+	require.NoError(t, relayhelper.ModelMappedHelper(c, info, request))
+	require.Equal(t, "provider/gpt-5.6-sol", request.Model)
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	var bodyMap map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(bodyBytes, &bodyMap))
+	var upstreamModel string
+	require.NoError(t, common.Unmarshal(bodyMap["model"], &upstreamModel))
+	require.Equal(t, "provider/gpt-5.6-sol", upstreamModel)
+	var reasoning map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(bodyMap["reasoning"], &reasoning))
+	require.JSONEq(t, `"high"`, string(reasoning["effort"]))
+	require.Equal(t, "provider/gpt-5.6-sol", converted.Model)
+	require.NotNil(t, converted.Reasoning)
+	require.Equal(t, "high", converted.Reasoning.Effort)
+	require.Equal(t, "high", info.ReasoningEffort)
 }
 
 func TestBuildOpenAIResponsesRequestBodyConvertsReasoningContextModelEffortSuffix(t *testing.T) {

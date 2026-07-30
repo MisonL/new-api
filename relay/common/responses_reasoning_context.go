@@ -3,10 +3,14 @@ package common
 import (
 	"bytes"
 	"fmt"
+	"strings"
 
 	basecommon "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/setting/reasoning"
 
 	"github.com/gin-gonic/gin"
 )
@@ -57,4 +61,40 @@ func ApplyResponsesReasoningContextCapability(c *gin.Context, info *RelayInfo, r
 		basecommon.SetContextKey(c, constant.ContextKeyResponsesReasoningContextAction, action)
 	}
 	return request
+}
+
+// ApplyResponsesLogicalModelReasoningEffort carries an effort suffix from the
+// client-facing model through model mapping without changing the mapped model.
+func ApplyResponsesLogicalModelReasoningEffort(info *RelayInfo, request dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool) {
+	effort, found := ResponsesLogicalModelReasoningEffort(info)
+	if !found {
+		return request, false
+	}
+
+	updatedRequest := request
+	if request.Reasoning == nil {
+		updatedRequest.Reasoning = &dto.Reasoning{Effort: effort}
+		return updatedRequest, true
+	}
+	updatedReasoning := *request.Reasoning
+	updatedReasoning.Effort = effort
+	updatedRequest.Reasoning = &updatedReasoning
+	return updatedRequest, true
+}
+
+// ResponsesLogicalModelReasoningEffort resolves an OpenAI effort suffix from
+// the original routed model. Compact routing appends its own suffix after the
+// client model, so it must be removed before parsing the effort.
+func ResponsesLogicalModelReasoningEffort(info *RelayInfo) (string, bool) {
+	if info == nil {
+		return "", false
+	}
+	model := strings.TrimSpace(info.OriginModelName)
+	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+		if baseModel, ok := ratio_setting.CompactBaseModelName(model); ok {
+			model = baseModel
+		}
+	}
+	effort, _ := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(model)
+	return effort, effort != ""
 }

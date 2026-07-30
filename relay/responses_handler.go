@@ -87,6 +87,13 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
 	applyResponsesCompactSummaryModelOverride(c, info, request, hasOpaqueEncryptedContent)
+	if !hasOpaqueEncryptedContent {
+		requestWithLogicalEffort, applied := relaycommon.ApplyResponsesLogicalModelReasoningEffort(info, *request)
+		if applied {
+			request = &requestWithLogicalEffort
+			info.ReasoningEffort = request.Reasoning.Effort
+		}
+	}
 
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {
@@ -680,6 +687,11 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 			return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
 		}
 	}
+	requestWithLogicalEffort, logicalEffortApplied := relaycommon.ApplyResponsesLogicalModelReasoningEffort(info, *request)
+	if logicalEffortApplied {
+		request = &requestWithLogicalEffort
+		convertedResponsesRequest = requestWithLogicalEffort
+	}
 	hadReasoningContext := request.Reasoning != nil && len(bytes.TrimSpace(request.Reasoning.Context)) > 0
 	reasoningEffortSuffix, _ := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
@@ -692,7 +704,7 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 		convertedResponsesRequest = capabilityRequest
 		reasoningContextStripped = capabilityRequest.Reasoning == nil || len(bytes.TrimSpace(capabilityRequest.Reasoning.Context)) == 0
 	}
-	reasoningContextRequiresConvertedBody := reasoningContextStripped || reasoningEffortSuffix != ""
+	reasoningContextRequiresConvertedBody := reasoningContextStripped || logicalEffortApplied || reasoningEffortSuffix != ""
 	bodyPreservingParamOverride := relaycommon.ValidateBytePreservingParamOverride(info.ParamOverride) == nil
 	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) &&
 		!relaycommon.ShouldConvertResponsesRequest(info) &&
