@@ -2,7 +2,7 @@
 
 ## Summary
 
-采样时间：2026-07-30T11:13:00Z。
+采样时间：2026-07-30T12:17:35Z。
 
 本记录覆盖 Responses opaque replay 集成中的一个原子任务：统一 `/v1/responses/compact` 与 `/responses/compact` 的原生压缩入口、路由识别、选渠别名、认证顺序和结算路径。
 
@@ -12,13 +12,13 @@
 
 - 工作树：`/Volumes/Work/code/new-api/.worktrees/responses-opaque-replay-integration`
 - 分支：`integration/responses-opaque-replay-p0`
-- Git HEAD：`6989460f759c0b2bd5bf3edd0f885b4a86756ef0`（工作树仍有待提交改动）
+- Git HEAD：`74d83854586da22f40c6a818c74311f2c478df6c`
 - `origin/main`：`51074ac3736288ee664966e0a2109e9580d86fcf`
 - 构建镜像：`new-api-local:dev`
 - 隔离后端：`http://127.0.0.1:3001`
 - 隔离容器：`new-api-dev-isolated-new-api-1`
 
-工作树包含本轮之前已有的集成改动和未跟踪 gate 工具，因此本次镜像元数据为 `6989460f759c0b2bd5bf3edd0f885b4a86756ef0-dirty`。这表示容器运行的是当前工作树内容，不表示已提交或可升级生产。
+主工作树仅保留未跟踪的 `.gate-tools/` 生成物，未纳入提交。为避免将生成物误写入镜像元数据，最终镜像从临时干净 worktree 构建，build-info 为 `74d83854586da22f40c6a818c74311f2c478df6c`，不带 `-dirty`。这表示容器运行的是该提交，不表示已完成正式环境验收或可直接升级生产。
 
 ## Changes Under Test
 
@@ -73,7 +73,7 @@ curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3001/api/status
 
 - Docker build 退出码 `0`。
 - 容器重建后状态为 `running healthy`。
-- `/new-api --build-info` 的 commit 为 `6989460f759c0b2bd5bf3edd0f885b4a86756ef0-dirty`。
+- `/new-api --build-info` 的 commit 为 `74d83854586da22f40c6a818c74311f2c478df6c`，不带 `-dirty`。
 - `/api/status` 返回 `success:true`。
 - 容器最近 120 行启动日志未匹配 `panic`、`fatal`、监听失败或迁移失败。
 
@@ -116,6 +116,10 @@ scripts/compact-control-plane-e2e.sh
 该运行首次暴露 E2E 辅助脚本缺陷：`psql_query` 未转发调用方的 psql 参数，使新增的 model-mapping snapshot 无法替换 `:channel`。修复为转发 `"$@"` 后，从已恢复的隔离数据库完整重跑通过。运行结束后独立确认容器启动日志无 panic、fatal、监听或迁移失败，`/api/status` 返回 `200` 与 `success:true`。
 
 本轮还验证了完整控制面脚本在服务重启期间的生命周期处理。此前使用 Docker 默认 10 秒停止窗口时，慢 SQL 或计费请求尚未结束，Compose 出现 `tried to kill container, but did not receive an exit event`，容器最终以 `137` 结束；该失败发生在断言之后的重启阶段，不是业务断言失败。当前 `main.go` 使用 `http.Server.Shutdown`，默认优雅退出窗口为 120 秒，脚本使用 `docker compose restart -t 120` 并以 180 秒总时限等待健康检查。本轮所有重启均正常完成，未再出现 `137`。这只解决开发 E2E 的生命周期稳定性，不证明生产部署的停止窗口或外部编排已采用相同配置。
+
+并发复核首次运行 `go test -race ./controller ./middleware ./relay ./relay/channel/openai ./relay/common ./service -count=1 -timeout=180s` 时，发现 `PostTextConsumeQuota` 的异步指标记录在测试清理之后读取 `common.RedisEnabled`，与恢复全局状态发生 data race。修复后，文本和音频结算路径均在提交 gopool 任务前调用 `perfmetrics.CaptureRelaySample`，将 request-scoped sample 和 Redis 依赖快照为不可变闭包；后台任务不再读取可变全局依赖。定向三例 unreadable-body retry 的 race 测试与完整上述 race 命令均以退出码 `0` 重跑通过。
+
+最终提交后的门禁结果：`go test ./... -count=1 -timeout=180s`、`go vet ./...`、默认前端 `bun run lint`、`bun run typecheck`、`bun run build`、classic 两组定向测试、L0、L1、完整 E2E 和完整 race 回归均退出码 `0`。最终隔离容器使用 `74d83854586da22f40c6a818c74311f2c478df6c` 启动，状态为 `running healthy`，`/api/status` 返回 `success:true`。
 
 观察到一项与本 E2E 无因果关系、但需要后续单独审计的启动配置警告：`failed to update option map: invalid http status code rules: []`。本记录不将其视为已解决。
 
