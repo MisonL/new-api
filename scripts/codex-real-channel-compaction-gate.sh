@@ -5,7 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Docker Desktop can accept an IPv4 loopback connection while delaying the
 # response. Use the published IPv6 loopback endpoint for the host-side Codex
 # CLI probe; data-plane requests remain on the isolated Docker network.
-HOST_BASE_URL="http://[::1]:3001"
+DEV_PORT="${DEV_NEW_API_PORT:-3001}"
+HOST_BASE_URL="http://[::1]:${DEV_PORT}"
 NETWORK_BASE_URL="http://new-api:3000"
 ISOLATED_NETWORK="new-api-dev-isolated_dev-isolated-network"
 NETWORK_CLIENT_IMAGE="node:24-alpine"
@@ -76,6 +77,7 @@ STRUCTURE_PROBE=false
 LIST_PRODUCTION_CANDIDATES=false
 ISOLATED_APP_STOPPED=false
 ISOLATED_APP_RESTARTED=false
+ISOLATED_APP_IMAGE=""
 
 umask 077
 cd "$ROOT_DIR"
@@ -105,6 +107,14 @@ require_positive_integer() {
 validate_model() {
   if [[ ! "$MODEL" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]*$ ]]; then
     echo "invalid CODEX_REAL_GATE_MODEL" >&2
+    exit 2
+  fi
+}
+
+validate_dev_port() {
+  require_positive_integer "$DEV_PORT" "DEV_NEW_API_PORT"
+  if (( DEV_PORT > 65535 )); then
+    echo "DEV_NEW_API_PORT must be at most 65535" >&2
     exit 2
   fi
 }
@@ -590,7 +600,7 @@ SQL
 }
 
 guard_isolated_target() {
-  if [[ "$HOST_BASE_URL" != "http://[::1]:3001" || "$NETWORK_BASE_URL" != "http://new-api:3000" ]]; then
+  if [[ "$HOST_BASE_URL" != "http://[::1]:${DEV_PORT}" || "$NETWORK_BASE_URL" != "http://new-api:3000" ]]; then
     echo "refusing non-isolated base URL" >&2
     exit 2
   fi
@@ -608,6 +618,19 @@ guard_isolated_target() {
       exit 2
     fi
   done
+  if [[ -n "${DEV_NEW_API_IMAGE:-}" ]]; then
+    ISOLATED_APP_IMAGE="$DEV_NEW_API_IMAGE"
+    if ! docker image inspect "$ISOLATED_APP_IMAGE" >/dev/null 2>&1; then
+      echo "requested isolated image is unavailable: ${ISOLATED_APP_IMAGE}" >&2
+      exit 2
+    fi
+  else
+    ISOLATED_APP_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$APP_CONTAINER")"
+    if [[ -z "$ISOLATED_APP_IMAGE" || "$ISOLATED_APP_IMAGE" == "<no value>" ]]; then
+      echo "could not determine the current isolated app image" >&2
+      exit 2
+    fi
+  fi
   if ! guard_isolated_redis_is_ephemeral; then
     exit 2
   fi
@@ -619,6 +642,11 @@ guard_isolated_target() {
     echo "isolated API status check failed after healthz readiness" >&2
     exit 2
   fi
+}
+
+isolated_compose() {
+  DEV_NEW_API_IMAGE="$ISOLATED_APP_IMAGE" DEV_NEW_API_PORT="$DEV_PORT" \
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
 }
 
 reserve_gate_ids() {
@@ -1051,7 +1079,7 @@ run_structure_probe() {
 }
 
 stop_isolated_app() {
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop new-api >"${TMP_DIR}/stop-app.log" 2>&1
+  isolated_compose stop new-api >"${TMP_DIR}/stop-app.log" 2>&1
   ISOLATED_APP_STOPPED=true
   ISOLATED_APP_RESTARTED=false
 }
@@ -1165,8 +1193,7 @@ SQL
 }
 
 restart_isolated_services() {
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" \
-    up -d --force-recreate redis >"${TMP_DIR}/recreate-redis.log" 2>&1
+  isolated_compose up -d --force-recreate redis >"${TMP_DIR}/recreate-redis.log" 2>&1
   for _ in {1..45}; do
     if [[ "$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER")" == "healthy" ]]; then
       break
@@ -1176,8 +1203,7 @@ restart_isolated_services() {
   if [[ "$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER")" != "healthy" ]]; then
     return 1
   fi
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" \
-    up -d --no-deps --force-recreate new-api >"${TMP_DIR}/restart-app.log" 2>&1
+  isolated_compose up -d --no-deps --force-recreate new-api >"${TMP_DIR}/restart-app.log" 2>&1
   if ! wait_for_isolated_app_liveness || ! verify_isolated_app_status; then
     return 1
   fi
@@ -1276,6 +1302,7 @@ main() {
     esac
   fi
   validate_model
+  validate_dev_port
   validate_excluded_channel_ids
   if [[ "$LIST_PRODUCTION_CANDIDATES" == "true" ]]; then
     guard_production_postgres_source
@@ -1337,7 +1364,7 @@ main() {
     echo "failed to restart isolated services after channel snapshot" >&2
     return 1
   fi
-  printf 'gate_target=isolated_3001 model=%s tool_definition_bytes=%s channels=%s fake_upstream_mode=%s\n' "$MODEL" "$TOOL_BYTES" "${CHANNEL_IDS[*]}" "$FAKE_UPSTREAM_MODE"
+  printf 'gate_target=isolated_%s model=%s tool_definition_bytes=%s channels=%s fake_upstream_mode=%s image=%s\n' "$DEV_PORT" "$MODEL" "$TOOL_BYTES" "${CHANNEL_IDS[*]}" "$FAKE_UPSTREAM_MODE" "$ISOLATED_APP_IMAGE"
   if [[ "$PREPARE_ONLY" == "true" ]]; then
     printf 'gate_prepare_only=true\n'
     return 0

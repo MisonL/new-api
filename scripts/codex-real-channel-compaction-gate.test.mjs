@@ -12,12 +12,21 @@ const gateSource = readFileSync(gateScript, 'utf8');
 const cliSmokeSource = readFileSync(cliSmokeScript, 'utf8');
 
 test('uses the IPv6 loopback endpoint for host-side Codex probes while keeping data-plane traffic isolated', () => {
-  assert.match(gateSource, /HOST_BASE_URL="http:\/\/\[::1\]:3001"/);
+  assert.match(gateSource, /DEV_PORT="\$\{DEV_NEW_API_PORT:-3001\}"/);
+  assert.match(gateSource, /HOST_BASE_URL="http:\/\/\[::1\]:\$\{DEV_PORT\}"/);
   assert.match(gateSource, /NETWORK_BASE_URL="http:\/\/new-api:3000"/);
   assert.match(
     gateSource,
-    /if \[\[ "\$HOST_BASE_URL" != "http:\/\/\[::1\]:3001" \|\| "\$NETWORK_BASE_URL" != "http:\/\/new-api:3000" \]\]; then/,
+    /if \[\[ "\$HOST_BASE_URL" != "http:\/\/\[::1\]:\$\{DEV_PORT\}" \|\| "\$NETWORK_BASE_URL" != "http:\/\/new-api:3000" \]\]; then/,
   );
+});
+
+test('pins the isolated image across stop and restart when no image override is provided', () => {
+  assert.match(gateSource, /ISOLATED_APP_IMAGE=""/);
+  assert.match(gateSource, /docker inspect -f '\{\{\.Config\.Image\}\}' "\$APP_CONTAINER"/);
+  assert.match(gateSource, /isolated_compose\(\)/);
+  assert.match(gateSource, /DEV_NEW_API_IMAGE="\$ISOLATED_APP_IMAGE" DEV_NEW_API_PORT="\$DEV_PORT"/);
+  assert.match(gateSource, /gate_target=isolated_%s[\s\S]*image=%s/);
 });
 
 test('pins production candidate discovery and binary copies to one exported read-only snapshot', () => {
