@@ -123,6 +123,51 @@ scripts/compact-control-plane-e2e.sh
 
 观察到一项与本 E2E 无因果关系、但需要后续单独审计的启动配置警告：`failed to update option map: invalid http status code rules: []`。本记录不将其视为已解决。
 
+## State Isolation Follow-up
+
+复核时间：2026-07-30T23:59Z。本轮只修改 E2E 控制面脚本，不修改 relay 业务协议、数据库 schema、正式服务、正式数据库或正式 Redis。
+
+此前脚本会恢复固定渠道、能力、令牌、用户和 option，但不能证明请求日志、synthetic compact 状态、quota 聚合、性能指标、相关 sequence 和 Redis 测试键也回到运行前状态。本次补齐了以下保护：
+
+- 以固定测试资源为边界快照并恢复数据库状态，包括渠道、能力、令牌、用户、option、日志、synthetic compact 记录、quota 数据、性能指标及对应 sequence；比较使用 `to_jsonb(...)`，以兼容 PostgreSQL `json` 列。
+- 应用停止后才恢复数据库和 Redis；恢复后及重新启动隔离应用后各做一次数据库/Redis 等价断言。
+- Redis 只扫描 E2E 所属键。键值通过二进制安全的 `DUMP`/`RESTORE` 保存，保留绝对过期时间，并对非临期键比较二进制摘要。
+- Redis `RESTORE` 单独使用带 stdin 的 `docker exec -i`，并启用 Redis CLI 错误退出。该修正由隔离 Redis 临时键探针验证，恢复后的值和 TTL 均存在。
+- 增加固定资源互斥锁。并行第二实例在写库前以退出码 `1` 拒绝，并输出已持有锁的进程号。
+- 数据库与 Redis 恢复及双重断言成功后才删除备份表；`e2e_done=true` 和默认临时目录清理由正常完成路径决定，失败仍保留诊断目录，避免伪装为成功。
+
+本轮实际执行：
+
+```bash
+bash -n scripts/compact-control-plane-e2e.sh
+shellcheck -x -S warning \
+  scripts/compact-control-plane-e2e.sh \
+  scripts/compact-control-plane-e2e-lib.sh
+git diff --check
+
+COMPACT_E2E_ENV_FILE=/Volumes/Work/code/new-api/deploy/env/dev-isolated.env \
+COMPACT_E2E_CLEANUP_DELETE_LOGS=1 \
+scripts/compact-control-plane-e2e.sh
+```
+
+静态检查均退出码 `0`。完整 E2E 退出码 `0`，覆盖原生 compact、`stream_options.include_usage` 恢复、remote 413 synthetic compact 恢复、stale marker、generic OpenAI 显式拒绝、native/local-Codex opaque replay、sub2api `previous_response_id` 拒绝、模型切换和真实 Codex history fixture。结束日志包含两次：
+
+```text
+database_snapshot_match=true
+redis_snapshot_match=true
+```
+
+并最终输出：
+
+```text
+compact_e2e_lock_released=true
+e2e_done=true
+```
+
+非空 Redis 验证额外在 E2E 所属 keyspace 放置哨兵键，比较运行前后的存在性、绝对过期时间和 `DUMP` 摘要，结果为 `redis_sentinel_restore_match=true`。脚本自动解析隔离 Redis 凭据的独立完整运行同样退出码 `0`。运行后检查确认：`compact_e2e_*` 备份表为 `0`，无 E2E 锁或 fake upstream 进程，`new-api-dev-isolated-new-api-1` 为 `healthy`，`GET /api/status` 返回 `success:true`。
+
+固定测试资源在运行前已有快照，因此验收标准是恢复等价而非强制清零；本轮结束后渠道、能力、令牌、用户、synthetic compact 记录和日志数量均与运行前快照一致。
+
 ## Boundary
 
 - 本记录不包含真实渠道、用户密钥或正式环境请求。

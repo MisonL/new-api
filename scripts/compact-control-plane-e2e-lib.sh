@@ -31,6 +31,11 @@ drop table if exists ${BACKUP_ABILITIES};
 drop table if exists ${BACKUP_TOKENS};
 drop table if exists ${BACKUP_USERS};
 drop table if exists ${BACKUP_OPTIONS};
+drop table if exists ${BACKUP_LOGS};
+drop table if exists ${BACKUP_SYNTHETIC_STATES};
+drop table if exists ${BACKUP_QUOTA_DATA};
+drop table if exists ${BACKUP_PERF_METRICS};
+drop table if exists ${BACKUP_SEQUENCES};
 create table ${BACKUP_CHANNELS} as
   select * from channels where id in (:channel_native_newapi, :channel_sub2api_http, :channel_synthetic_newapi, :channel_generic_openai);
 create table ${BACKUP_ABILITIES} as
@@ -40,13 +45,36 @@ create table ${BACKUP_TOKENS} as
 create table ${BACKUP_USERS} as
   select * from users where id = :user_id;
 create table ${BACKUP_OPTIONS} as
-  select * from options where key in ('GroupRatio', 'UserUsableGroups');
+  select * from options where key in ('GroupRatio', 'UserUsableGroups', 'runtime.responses_synthetic_compact_instance_id');
+create table ${BACKUP_LOGS} as
+  select * from logs where token_id = :token_id or user_id = :user_id;
+create table ${BACKUP_SYNTHETIC_STATES} as
+  select * from synthetic_compact_state_records where token_id = :token_id or user_id = :user_id or group_name = :'test_group';
+create table ${BACKUP_QUOTA_DATA} as
+  select * from quota_data where user_id = :user_id;
+create table ${BACKUP_PERF_METRICS} as
+  select * from perf_metrics where "group" = :'test_group';
+create table ${BACKUP_SEQUENCES} (
+  sequence_name text primary key,
+  last_value bigint not null,
+  is_called boolean not null
+);
+insert into ${BACKUP_SEQUENCES} (sequence_name, last_value, is_called)
+select 'public.logs_id_seq', last_value, is_called from public.logs_id_seq
+union all
+select 'public.quota_data_id_seq', last_value, is_called from public.quota_data_id_seq
+union all
+select 'public.perf_metrics_id_seq', last_value, is_called from public.perf_metrics_id_seq;
 
+delete from logs where token_id = :token_id or user_id = :user_id;
+delete from synthetic_compact_state_records where token_id = :token_id or user_id = :user_id or group_name = :'test_group';
+delete from quota_data where user_id = :user_id;
+delete from perf_metrics where "group" = :'test_group';
 delete from abilities where "group" = :'test_group';
 delete from channels where id in (:channel_native_newapi, :channel_sub2api_http, :channel_synthetic_newapi, :channel_generic_openai);
 delete from tokens where id = :token_id;
 delete from users where id = :user_id;
-delete from options where key in ('GroupRatio', 'UserUsableGroups');
+delete from options where key in ('GroupRatio', 'UserUsableGroups', 'runtime.responses_synthetic_compact_instance_id');
 insert into options (key, value)
 values
   ('GroupRatio', (
