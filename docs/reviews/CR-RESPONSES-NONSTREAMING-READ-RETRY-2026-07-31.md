@@ -2,13 +2,13 @@
 
 ## Summary
 
-采样时间：2026-07-31T03:06:00+0800。
+采样时间：2026-07-31T08:42:00+0800。
 
 本记录覆盖一个 Responses 可靠性原子任务：非流式上游响应已返回头部、但读取 body 时中断的错误分类与跨渠道重试边界。
 
 修复前，Responses、native/synthetic compact 和两个 Responses/Chat 兼容桥会把全部 `io.ReadAll` 错误统一包装为 `500/read_response_body_failed`。全局 500 重试策略可能将未知读取失败跨渠道重放；而已写出下游字节时，缺少 prelude 安全标记也可能继续重试。
 
-修复后，只有可识别的上游传输中断才映射为 `502/upstream_transport_interrupted`，默认仅在下游尚未写出、请求仍存活时允许切换。下游已写出字节时，只有显式 `responses_stream_prelude_retry_safe=true` 的安全 prelude 才允许例外切换。客户端取消、deadline、响应体限制和未知 reader failure 均保留显式 `500/read_response_body_failed`，带 `skipRetry`，不会自动禁用渠道或跨渠道重放。
+修复后，只有可识别的上游传输中断才映射为 `502/upstream_transport_interrupted`，默认仅在下游尚未写出、请求仍存活时允许切换。下游已写出字节时，只有显式 `responses_stream_prelude_retry_safe=true` 的安全 prelude 才允许例外切换。客户端取消、deadline、响应体限制和未知 reader failure 均保留显式 `500/read_response_body_failed`，带 `skipRetry`，不会自动禁用渠道或跨渠道重放。即使管理员将自动禁用 HTTP 状态范围扩展为 `5xx`，显式分类的瞬时传输中断也不会自动禁用渠道。
 
 ## Scope
 
@@ -25,6 +25,7 @@
 - opaque `encrypted_content` replay 仍绝对禁止跨渠道切换。
 - 一旦下游已写出，默认禁止重试；只有显式设置 `responses_stream_prelude_retry_safe=true` 的 prelude 可以例外。
 - 未知 body read 错误不能作为“上游暂时不可用”的证据，不重试、不自动禁用渠道，也不伪造成功。
+- `upstream_transport_interrupted` 是用于请求级 failover 的瞬时错误分类，不是渠道失效证据；它优先于宽泛的 HTTP 自动禁用范围。普通持久性 `5xx` 仍按管理员配置保留自动禁用行为。
 
 ## Reproduction
 
@@ -58,6 +59,12 @@ git diff --check
 结果：全部退出码 `0`；`gofmt -d` 无输出。
 
 测试矩阵覆盖六个非流式入口：原生 Responses、native compact、synthetic compact、synthetic remote compact、Chat-to-Responses 和 Responses-to-Chat。每个入口验证 `unexpected EOF`、typed HTTP/2 stream reset、typed HTTP/2 GOAWAY、取消、deadline、`http.MaxBytesError` 和未知 reader failure 的错误码、HTTP 状态、`skipRetry` 和零下游输出。额外单测验证 nil Gin context 或缺失 `Request` 时，即使错误为 `unexpected EOF` 也必须保持 `skipRetry`。
+
+自动禁用边界补测：在 `AutomaticDisableChannelEnabled=true` 且管理员规则为 `500-599` 时，`502/upstream_transport_interrupted` 必须返回不禁用；同一状态码的普通 `bad_response_status_code` 仍返回禁用。命令如下，退出码 `0`：
+
+```bash
+go test ./service -run '^TestShouldDisableChannelDoesNotAutoDisableTransientTransportInterruption$' -count=1 -timeout=60s
+```
 
 ## L1 Verification
 
