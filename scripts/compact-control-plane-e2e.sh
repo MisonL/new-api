@@ -335,7 +335,7 @@ delete from tokens where id = :token_id;
 insert into tokens select * from ${BACKUP_TOKENS};
 delete from users where id = :user_id;
 insert into users select * from ${BACKUP_USERS};
-delete from options where key in ('GroupRatio', 'UserUsableGroups', 'runtime.responses_synthetic_compact_instance_id');
+delete from options where key in ('GroupRatio', 'UserUsableGroups', 'ModelRatio', 'CompletionRatio', 'CacheRatio', 'CreateCacheRatio', 'runtime.responses_synthetic_compact_instance_id');
 insert into options select * from ${BACKUP_OPTIONS};
 select setval(sequence_name::regclass, last_value, is_called) from ${BACKUP_SEQUENCES};
 commit;
@@ -362,8 +362,8 @@ select case when
   and not exists ((select to_jsonb(row) from (select * from ${BACKUP_TOKENS}) as row) except all (select to_jsonb(row) from (select * from tokens where id = :token_id) as row))
   and not exists ((select to_jsonb(row) from (select * from users where id = :user_id) as row) except all (select to_jsonb(row) from (select * from ${BACKUP_USERS}) as row))
   and not exists ((select to_jsonb(row) from (select * from ${BACKUP_USERS}) as row) except all (select to_jsonb(row) from (select * from users where id = :user_id) as row))
-  and not exists ((select to_jsonb(row) from (select * from options where key in ('GroupRatio', 'UserUsableGroups', 'runtime.responses_synthetic_compact_instance_id')) as row) except all (select to_jsonb(row) from (select * from ${BACKUP_OPTIONS}) as row))
-  and not exists ((select to_jsonb(row) from (select * from ${BACKUP_OPTIONS}) as row) except all (select to_jsonb(row) from (select * from options where key in ('GroupRatio', 'UserUsableGroups', 'runtime.responses_synthetic_compact_instance_id')) as row))
+  and not exists ((select to_jsonb(row) from (select * from options where key in ('GroupRatio', 'UserUsableGroups', 'ModelRatio', 'CompletionRatio', 'CacheRatio', 'CreateCacheRatio', 'runtime.responses_synthetic_compact_instance_id')) as row) except all (select to_jsonb(row) from (select * from ${BACKUP_OPTIONS}) as row))
+  and not exists ((select to_jsonb(row) from (select * from ${BACKUP_OPTIONS}) as row) except all (select to_jsonb(row) from (select * from options where key in ('GroupRatio', 'UserUsableGroups', 'ModelRatio', 'CompletionRatio', 'CacheRatio', 'CreateCacheRatio', 'runtime.responses_synthetic_compact_instance_id')) as row))
   and not exists ((select sequence_name, last_value, is_called from ${BACKUP_SEQUENCES}) except all (
     select 'public.logs_id_seq', last_value, is_called from public.logs_id_seq
     union all select 'public.quota_data_id_seq', last_value, is_called from public.quota_data_id_seq
@@ -729,6 +729,44 @@ post_json_remote_compaction() {
   curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -o "$out" -w '%{http_code}' -K "$CURL_CONFIG" -H 'X-Codex-Beta-Features: remote_compaction_v2' --data "$payload" "$BASE_URL${path}"
 }
 
+assert_equal() {
+  local actual="$1"
+  local expected="$2"
+  local description="$3"
+  if [[ "$actual" == "$expected" ]]; then
+    return 0
+  fi
+  echo "assertion failed: ${description}; expected=${expected}; actual=${actual}" >&2
+  exit 1
+}
+
+assert_text_contains() {
+  local text="$1"
+  local needle="$2"
+  local description="$3"
+  if [[ "$text" == *"$needle"* ]]; then
+    return 0
+  fi
+  echo "assertion failed: ${description}; missing=${needle}" >&2
+  echo "$text" >&2
+  exit 1
+}
+
+assert_http_status() {
+  local actual="$1"
+  local expected="$2"
+  local output_file="$3"
+  local description="$4"
+  if [[ "$actual" == "$expected" ]]; then
+    return 0
+  fi
+  echo "unexpected HTTP status for ${description}: expected=${expected}; actual=${actual}" >&2
+  if [[ -r "$output_file" ]]; then
+    cat "$output_file" >&2
+  fi
+  exit 1
+}
+
 reset_upstream() {
   curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_reset" >/dev/null
 }
@@ -753,7 +791,7 @@ run_case_native_newapi_compact() {
   local code response_id payload summary
   code="$(post_json /v1/responses/compact '{"model":"gpt-5.5-openai-compact","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"compact this codex context"}]}]}' "$out")"
   echo "status=${code}"
-  [[ "$code" == "200" ]]
+  assert_http_status "$code" "200" "$out" "native compact"
   node -e 'const fs=require("fs"); const o=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(!JSON.stringify(o).includes("compaction")) process.exit(2); console.log("has_compaction=true")' "$out"
   capture_summary
   response_id="$(node -e 'const fs=require("fs"); const o=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(!o.id) process.exit(2); console.log(o.id);' "$out")"
@@ -762,10 +800,10 @@ run_case_native_newapi_compact() {
   out="$TMP_DIR/native_continue.json"
   code="$(post_json /v1/responses "$payload" "$out")"
   echo "continue_status=${code}"
-  [[ "$code" == "200" ]]
+  assert_http_status "$code" "200" "$out" "native compact continuation"
   summary="$(capture_summary)"
   echo "$summary"
-  [[ "$summary" == *"\"previous_response_id\":\"${response_id}\""* ]]
+  assert_text_contains "$summary" "\"previous_response_id\":\"${response_id}\"" "native compact continuation previous_response_id"
 }
 
 run_case_stream_options_include_usage_recovery() {
@@ -778,7 +816,7 @@ run_case_stream_options_include_usage_recovery() {
   out="$TMP_DIR/stream_options_first.sse"
   code="$(post_json /v1/responses "$payload" "$out")"
   echo "first_status=${code}"
-  [[ "$code" == "200" ]]
+  assert_http_status "$code" "200" "$out" "stream options first attempt"
   assert_contains "$out" 'resp_stream_options_compat_ok'
   assert_not_contains "$out" 'resp_stream_options_compat_error'
   assert_not_contains "$out" 'Unknown parameter'
@@ -796,14 +834,14 @@ run_case_stream_options_include_usage_recovery() {
   ' "$captures"
 
   capability="$(psql_query <<< "select settings::jsonb #>> '{responses_capability_registry,supports_stream_options_include_usage}' from channels where id = ${CHANNEL_NATIVE_NEWAPI}")"
-  [[ "$capability" == "false" ]]
+  assert_equal "$capability" "false" "stream options capability persisted state"
   echo "capability_persisted=false"
 
   reset_upstream
   out="$TMP_DIR/stream_options_second.sse"
   code="$(post_json /v1/responses "$payload" "$out")"
   echo "second_status=${code}"
-  [[ "$code" == "200" ]]
+  assert_http_status "$code" "200" "$out" "stream options learned attempt"
   assert_contains "$out" 'resp_stream_options_compat_ok'
   assert_not_contains "$out" 'Unknown parameter'
 
@@ -829,7 +867,7 @@ run_case_remote_compaction_413_recovery() {
   out="$TMP_DIR/remote_compaction_413.sse"
   code="$(post_json_remote_compaction /v1/responses "$payload" "$out")"
   echo "status=${code}"
-  [[ "$code" == "200" ]]
+  assert_http_status "$code" "200" "$out" "remote compaction 413 recovery"
   assert_contains "$out" 'compaction'
   assert_not_contains "$out" 'upstream request too large'
 
@@ -845,7 +883,7 @@ run_case_remote_compaction_413_recovery() {
   ' "$captures"
 
   request_body_limit_present="$(psql_query <<< "select coalesce(settings::jsonb ? 'request_body_limit', false) from channels where id = ${CHANNEL_NATIVE_NEWAPI}")"
-  [[ "$request_body_limit_present" == "f" ]]
+  assert_equal "$request_body_limit_present" "f" "remote compaction 413 request body limit"
   echo "recoverable_remote_413_did_not_set_request_body_limit=true"
 }
 
@@ -857,7 +895,7 @@ run_case_synthetic_continue() {
   local code marker payload
   code="$(post_json /v1/responses/compact '{"model":"gpt-5.5-openai-compact","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"project state: keep branch and verification checklist"}]}]}' "$out")"
   echo "compact_status=${code}"
-  [[ "$code" == "200" ]]
+  assert_http_status "$code" "200" "$out" "synthetic compact"
   marker="$(node -e 'const fs=require("fs"); const o=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const m=JSON.stringify(o).match(/newapi\.synthetic\.compact:[^"\\]+/); if(!m) process.exit(2); console.log(m[0]);' "$out")"
   echo "marker_found=true"
   reset_upstream
@@ -865,7 +903,7 @@ run_case_synthetic_continue() {
   out="$TMP_DIR/synth_continue.json"
   code="$(post_json /v1/responses "$payload" "$out")"
   echo "continue_status=${code}"
-  [[ "$code" == "200" ]]
+  assert_http_status "$code" "200" "$out" "synthetic compact continuation"
   capture_summary
   SYNTH_MARKER="$marker"
 }
@@ -887,7 +925,7 @@ run_case_stale_visible_only() {
   out="$TMP_DIR/stale_visible.json"
   code="$(post_json /v1/responses "$payload" "$out")"
   echo "status=${code}"
-  [[ "$code" == "200" ]]
+  assert_http_status "$code" "200" "$out" "stale synthetic marker continuation"
   capture_summary
 }
 
@@ -899,7 +937,7 @@ run_case_generic_rejects_remote_opaque() {
   local code
   code="$(post_json /v1/responses '{"model":"gpt-5.5","input":[{"type":"compaction","encrypted_content":"remote-native-opaque"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}' "$out")"
   echo "status=${code}"
-  [[ "$code" == "503" ]]
+  assert_http_status "$code" "503" "$out" "generic upstream opaque compaction rejection"
   assert_contains "$out" 'compaction'
   capture_summary
 }
@@ -929,7 +967,7 @@ SQL
   out="$TMP_DIR/native_opaque_replay.json"
   code="$(post_json /v1/responses "$payload" "$out")"
   echo "status=${code}"
-  [[ "$code" == "400" ]]
+  assert_http_status "$code" "400" "$out" "native opaque replay rejection"
   assert_contains "$out" 'invalid_encrypted_content'
   summary="$(capture_summary)"
   node - "$summary" "$expected_hash" <<'NODE'
@@ -974,7 +1012,7 @@ SQL
   out="$TMP_DIR/local_codex_opaque_replay.json"
   code="$(post_json_local_codex_compaction /v1/responses "$payload" "$out")"
   echo "status=${code}"
-  [[ "$code" == "400" ]]
+  assert_http_status "$code" "400" "$out" "local Codex opaque replay rejection"
   assert_contains "$out" 'invalid_encrypted_content'
   summary="$(capture_summary)"
   node - "$summary" "$expected_hash" <<'NODE'
@@ -994,6 +1032,49 @@ NODE
   restore_channel_model_mapping "$CHANNEL_NATIVE_NEWAPI" "$original_model_mapping"
 }
 
+run_case_mapped_logical_reasoning_effort() {
+  echo "case=mapped_logical_reasoning_effort"
+  set_single_channel "$CHANNEL_NATIVE_NEWAPI" 'gpt-5.6-sol-high'
+  local original_model_mapping
+  original_model_mapping="$(snapshot_channel_model_mapping "$CHANNEL_NATIVE_NEWAPI")"
+  psql_exec -v channel="$CHANNEL_NATIVE_NEWAPI" >/dev/null <<'SQL'
+update channels
+set model_mapping = '{"gpt-5.6-sol-high":"provider/gpt-5.6-sol"}'
+where id = :channel;
+SQL
+  restart_dev
+  reset_upstream
+
+  local payload out code captures
+  payload='{"model":"gpt-5.6-sol-high","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"MAPPED_LOGICAL_REASONING_EFFORT_E2E"}]}]}'
+  out="$TMP_DIR/mapped_logical_reasoning_effort.json"
+  code="$(post_json /v1/responses "$payload" "$out")"
+  echo "status=${code}"
+  assert_http_status "$code" "200" "$out" "mapped logical reasoning effort"
+
+  captures="$TMP_DIR/mapped_logical_reasoning_effort_captures.json"
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$UPSTREAM_CURL_MAX_TIME" -fsS "$UPSTREAM_HOST_URL/_captures" >"$captures"
+  node - "$captures" <<'NODE'
+const fs = require("fs");
+const captures = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (captures.length !== 1) {
+  throw new Error(`expected exactly one upstream attempt, got ${captures.length}`);
+}
+const [capture] = captures;
+if (capture.url !== "/v1/responses") {
+  throw new Error(`unexpected upstream path: ${capture.url}`);
+}
+if (capture.model !== "provider/gpt-5.6-sol") {
+  throw new Error(`expected mapped upstream model, got ${capture.model}`);
+}
+if (capture.reasoningEffort !== "high") {
+  throw new Error(`expected reasoning.effort=high, got ${capture.reasoningEffort || "missing"}`);
+}
+console.log("mapped_model_and_logical_reasoning_effort_preserved=true");
+NODE
+  restore_channel_model_mapping "$CHANNEL_NATIVE_NEWAPI" "$original_model_mapping"
+}
+
 run_case_sub2api_previous_response_id() {
   echo "case=sub2api_http_rejects_rest_previous_id"
   set_single_channel "$CHANNEL_SUB2API_HTTP" 'gpt-5.5-openai-compact'
@@ -1002,7 +1083,7 @@ run_case_sub2api_previous_response_id() {
   local code
   code="$(post_json /v1/responses/compact '{"model":"gpt-5.5-openai-compact","previous_response_id":"resp_remote_prev","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"compact with previous id"}]}]}' "$out")"
   echo "status=${code}"
-  [[ "$code" == "400" ]]
+  assert_http_status "$code" "400" "$out" "sub2api REST previous_response_id rejection"
   assert_contains "$out" 'previous_response_id'
   capture_summary
 }
@@ -1016,7 +1097,7 @@ run_case_model_switch_restore() {
   out="$TMP_DIR/model_switch.json"
   code="$(post_json /v1/responses "$payload" "$out")"
   echo "status=${code}"
-  [[ "$code" == "200" ]]
+  assert_http_status "$code" "200" "$out" "model switch synthetic restore"
   capture_summary
 }
 
@@ -1034,14 +1115,14 @@ run_case_real_codex_history_fixture() {
   out="$TMP_DIR/history_compact.json"
   code="$(post_json /v1/responses/compact "$compact_payload" "$out")"
   echo "compact_status=${code}"
-  [[ "$code" == "200" ]]
+  assert_http_status "$code" "200" "$out" "real Codex history compact"
   marker="$(node -e 'const fs=require("fs"); const o=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const m=JSON.stringify(o).match(/newapi\.synthetic\.compact:[^"\\]+/); if(!m) process.exit(2); console.log(m[0]);' "$out")"
   reset_upstream
   continue_payload="$(node -e 'const fs=require("fs"); const f=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const marker=process.argv[2]; console.log(JSON.stringify({model:f.followup_model,input:[{type:"compaction",encrypted_content:marker},f.followup]}))' "$fixture" "$marker")"
   out="$TMP_DIR/history_continue.json"
   code="$(post_json /v1/responses "$continue_payload" "$out")"
   echo "continue_status=${code}"
-  [[ "$code" == "200" ]]
+  assert_http_status "$code" "200" "$out" "real Codex history continuation"
   capture_summary
 }
 
@@ -1077,6 +1158,7 @@ main() {
   run_case_generic_rejects_remote_opaque
   run_case_native_opaque_replay_is_byte_preserving_and_not_retried
   run_case_local_codex_opaque_replay_is_byte_preserving_and_not_retried
+  run_case_mapped_logical_reasoning_effort
   run_case_sub2api_previous_response_id
   run_case_model_switch_restore
   run_case_real_codex_history_fixture

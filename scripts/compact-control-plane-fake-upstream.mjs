@@ -45,6 +45,7 @@ function summarizeCapture(req, url, body) {
   }
   const input = Array.isArray(parsed?.input) ? parsed.input : [];
   const streamOptions = parsed?.stream_options;
+  const reasoning = parsed?.reasoning;
   return {
     method: req.method,
     url: url.pathname,
@@ -55,6 +56,7 @@ function summarizeCapture(req, url, body) {
     hasCompactionTrigger: input.some((item) => item?.type === 'compaction_trigger'),
     hasStreamOptionsIncludeUsage: streamOptions?.include_usage === true,
     hasStreamOptionsIncludeObfuscation: streamOptions?.include_obfuscation === true,
+    reasoningEffort: typeof reasoning?.effort === 'string' ? reasoning.effort : '',
     hasEncryptedContent: body.includes('encrypted_content'),
     bodySha256: crypto.createHash('sha256').update(body).digest('hex'),
     bodyBytes: Buffer.byteLength(body),
@@ -179,6 +181,7 @@ const server = http.createServer(async (req, res) => {
         hasCompactionTrigger: item.hasCompactionTrigger,
         hasStreamOptionsIncludeUsage: item.hasStreamOptionsIncludeUsage,
         hasStreamOptionsIncludeObfuscation: item.hasStreamOptionsIncludeObfuscation,
+        reasoningEffort: item.reasoningEffort,
         hasEncryptedContent: item.hasEncryptedContent,
         bodySha256: item.bodySha256,
         bodyBytes: item.bodyBytes,

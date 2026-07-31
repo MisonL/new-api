@@ -45,7 +45,7 @@ create table ${BACKUP_TOKENS} as
 create table ${BACKUP_USERS} as
   select * from users where id = :user_id;
 create table ${BACKUP_OPTIONS} as
-  select * from options where key in ('GroupRatio', 'UserUsableGroups', 'runtime.responses_synthetic_compact_instance_id');
+  select * from options where key in ('GroupRatio', 'UserUsableGroups', 'ModelRatio', 'CompletionRatio', 'CacheRatio', 'CreateCacheRatio', 'runtime.responses_synthetic_compact_instance_id');
 create table ${BACKUP_LOGS} as
   select * from logs where token_id = :token_id or user_id = :user_id;
 create table ${BACKUP_SYNTHETIC_STATES} as
@@ -74,7 +74,7 @@ delete from abilities where "group" = :'test_group';
 delete from channels where id in (:channel_native_newapi, :channel_sub2api_http, :channel_synthetic_newapi, :channel_generic_openai);
 delete from tokens where id = :token_id;
 delete from users where id = :user_id;
-delete from options where key in ('GroupRatio', 'UserUsableGroups', 'runtime.responses_synthetic_compact_instance_id');
+delete from options where key in ('GroupRatio', 'UserUsableGroups', 'ModelRatio', 'CompletionRatio', 'CacheRatio', 'CreateCacheRatio', 'runtime.responses_synthetic_compact_instance_id');
 insert into options (key, value)
 values
   ('GroupRatio', (
@@ -84,6 +84,42 @@ values
   ('UserUsableGroups', (
     coalesce((select value from ${BACKUP_OPTIONS} where key = 'UserUsableGroups'), '{}')::jsonb
     || jsonb_build_object(:'test_group', 'compact e2e')
+  )::text),
+  ('ModelRatio', (
+    coalesce((select value from ${BACKUP_OPTIONS} where key = 'ModelRatio'), '{}')::jsonb
+    || jsonb_build_object(
+      'gpt-5.4', 1.25,
+      'gpt-5.5', 2.5,
+      'gpt-5.6-sol', 2.5,
+      'gpt-5.6-sol-high', 2.5
+    )
+  )::text),
+  ('CompletionRatio', (
+    coalesce((select value from ${BACKUP_OPTIONS} where key = 'CompletionRatio'), '{}')::jsonb
+    || jsonb_build_object(
+      'gpt-5.4', 6,
+      'gpt-5.5', 6,
+      'gpt-5.6-sol', 6,
+      'gpt-5.6-sol-high', 6
+    )
+  )::text),
+  ('CacheRatio', (
+    coalesce((select value from ${BACKUP_OPTIONS} where key = 'CacheRatio'), '{}')::jsonb
+    || jsonb_build_object(
+      'gpt-5.4', 0.1,
+      'gpt-5.5', 0.1,
+      'gpt-5.6-sol', 0.1,
+      'gpt-5.6-sol-high', 0.1
+    )
+  )::text),
+  ('CreateCacheRatio', (
+    coalesce((select value from ${BACKUP_OPTIONS} where key = 'CreateCacheRatio'), '{}')::jsonb
+    || jsonb_build_object(
+      'gpt-5.4', 0.625,
+      'gpt-5.5', 1.25,
+      'gpt-5.6-sol', 1.25,
+      'gpt-5.6-sol-high', 1.25
+    )
   )::text);
 
 insert into users (id, username, password, display_name, role, status, email, quota, used_quota, request_count, "group", aff_count, aff_quota, aff_history, inviter_id, setting, remark, created_at, last_login_at)
@@ -94,7 +130,7 @@ select :token_id, :user_id, :'token_key', 1, 'compact-control-plane-e2e', extrac
 
 insert into channels (id, type, key, status, name, weight, created_time, base_url, models, "group", priority, auto_ban, settings)
 values
-  (:channel_native_newapi, 1, 'e2e-upstream-native', 2, 'codex-compact-e2e-native-newapi', 0, extract(epoch from now())::bigint, :'upstream_container_url', 'gpt-5.5,gpt-5.5-openai-compact,gpt-5.4,gpt-5.4-openai-compact', :'test_group', 0, 0, '{"responses_compact_mode":"auto","responses_upstream_profile":"official_newapi","allow_service_tier":true,"allow_include_obfuscation":true}'),
+  (:channel_native_newapi, 1, 'e2e-upstream-native', 2, 'codex-compact-e2e-native-newapi', 0, extract(epoch from now())::bigint, :'upstream_container_url', 'gpt-5.5,gpt-5.5-openai-compact,gpt-5.4,gpt-5.4-openai-compact,gpt-5.6-sol-high', :'test_group', 0, 0, '{"responses_compact_mode":"auto","responses_upstream_profile":"official_newapi","allow_service_tier":true,"allow_include_obfuscation":true}'),
   (:channel_sub2api_http, 1, 'e2e-upstream-sub2api', 2, 'codex-compact-e2e-sub2api-http', 0, extract(epoch from now())::bigint, :'upstream_container_url', 'gpt-5.5,gpt-5.5-openai-compact,gpt-5.4,gpt-5.4-openai-compact', :'test_group', 0, 0, '{"responses_compact_mode":"auto","responses_upstream_profile":"sub2api_http","allow_service_tier":true}'),
   (:channel_synthetic_newapi, 1, 'e2e-upstream-synthetic', 1, 'codex-compact-e2e-synthetic-newapi', 0, extract(epoch from now())::bigint, :'upstream_container_url', 'gpt-5.5,gpt-5.4', :'test_group', 0, 0, '{"allow_service_tier":true,"responses_compact_mode":"synthetic_summary","responses_upstream_profile":"trusted_newapi","responses_compact_summary_fallback_models":["gpt-5.4","gpt-5.5"]}'),
   (:channel_generic_openai, 1, 'e2e-upstream-generic', 2, 'codex-compact-e2e-generic-openai', 0, extract(epoch from now())::bigint, :'upstream_container_url', 'gpt-5.5,gpt-5.4', :'test_group', 0, 0, '{"responses_compact_mode":"auto","responses_upstream_profile":"generic_openai","responses_capability_registry":{"supports_compaction_item_passthrough":false},"allow_service_tier":true}');
