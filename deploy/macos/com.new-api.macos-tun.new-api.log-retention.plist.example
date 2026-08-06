@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>__LOG_RETENTION_LABEL__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__LOG_RETENTION_SCRIPT__</string>
+    <string>--apply</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NEW_API_LOG_RETENTION_DIR</key>
+    <string>__LOG_RETENTION_DIR__</string>
+    <key>NEW_API_LOG_RETENTION_STATE_FILE</key>
+    <string>__LOG_RETENTION_STATE__</string>
+    <key>NEW_API_LOG_RETENTION_DAYS</key>
+    <string>__LOG_RETENTION_DAYS__</string>
+    <key>NEW_API_LOG_RETENTION_KEEP_FILES</key>
+    <string>__LOG_RETENTION_KEEP_FILES__</string>
+    <key>NEW_API_LOG_RETENTION_MIN_INTERVAL_SECONDS</key>
+    <string>__LOG_RETENTION_MIN_INTERVAL__</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>86400</integer>
+  <key>ThrottleInterval</key>
+  <integer>300</integer>
+  <key>ExitTimeOut</key>
+  <integer>120</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>Nice</key>
+  <integer>10</integer>
+  <key>Umask</key>
+  <integer>63</integer>
+  <key>StandardOutPath</key>
+  <string>__LOG_RETENTION_LOG__</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_RETENTION_LOG__</string>
+</dict>
+</plist>
