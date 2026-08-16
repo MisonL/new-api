@@ -70,6 +70,7 @@ func SetRelayRouter(router *gin.Engine) {
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
+	relayV1Router.Use(middleware.CodexLocalResponsesCompactionIngress())
 	relayV1Router.Use(middleware.ModelRequestRateLimit())
 	{
 		// WebSocket 路由（统一到 Relay）
@@ -174,6 +175,7 @@ func SetRelayRouter(router *gin.Engine) {
 	responsesCompatRouter.Use(middleware.RouteTag("relay"))
 	responsesCompatRouter.Use(middleware.SystemPerformanceCheck())
 	responsesCompatRouter.Use(middleware.TokenAuth())
+	responsesCompatRouter.Use(middleware.CodexLocalResponsesCompactionIngress())
 	responsesCompatRouter.Use(middleware.ModelRequestRateLimit())
 	responsesCompatRouter.Use(middleware.Distribute())
 	{

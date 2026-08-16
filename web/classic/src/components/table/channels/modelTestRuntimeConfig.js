@@ -207,6 +207,23 @@ const formatCapabilityBoolean = (label, value, t) => {
   return '';
 };
 
+const formatCompactionItemPassthroughCapability = (
+  capability,
+  legacyValue,
+  t,
+) => {
+  if (capability === 'supported') {
+    return formatCapabilityBoolean('compaction_pass', true, t);
+  }
+  if (capability === 'unsupported') {
+    return formatCapabilityBoolean('compaction_pass', false, t);
+  }
+  if (capability === 'unknown') {
+    return `compaction_pass: ${t('未知')}`;
+  }
+  return formatCapabilityBoolean('compaction_pass', legacyValue, t);
+};
+
 const formatCapabilityObservation = (label, observation) => {
   if (!observation || typeof observation !== 'object') {
     return '';
@@ -346,8 +363,8 @@ export const formatRuntimeResult = (runtimeConfig, t) => {
         capability.supports_rest_previous_response_id,
         t,
       ),
-      formatCapabilityBoolean(
-        'compaction_pass',
+      formatCompactionItemPassthroughCapability(
+        capability.compaction_item_passthrough_capability,
         capability.supports_compaction_item_passthrough,
         t,
       ),

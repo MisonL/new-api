@@ -98,10 +98,21 @@ func loadOrCreateSyntheticCompactLocalInstanceID(ctx context.Context) (string, e
 
 func syntheticCompactInstanceIDValid(instanceID string) bool {
 	instanceID = strings.TrimSpace(instanceID)
-	if !strings.HasPrefix(instanceID, syntheticCompactInstanceIDPrefix) || len(instanceID) <= len(syntheticCompactInstanceIDPrefix) {
+	if !strings.HasPrefix(instanceID, syntheticCompactInstanceIDPrefix) ||
+		len(instanceID) != len(syntheticCompactInstanceIDPrefix)+syntheticCompactInstanceHexLen {
 		return false
 	}
-	for _, r := range instanceID[len(syntheticCompactInstanceIDPrefix):] {
+	return syntheticCompactLowerHexStringValid(
+		instanceID[len(syntheticCompactInstanceIDPrefix):],
+		syntheticCompactInstanceHexLen,
+	)
+}
+
+func syntheticCompactLowerHexStringValid(value string, expectedLen int) bool {
+	if len(value) != expectedLen {
+		return false
+	}
+	for _, r := range value {
 		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
 			return false
 		}

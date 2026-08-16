@@ -203,6 +203,97 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 	return result, nil
 }
 
+// ApplyBytePreservingHeaderParamOverrideWithRelayInfo applies only operations
+// that mutate upstream request headers. It does not parse or rewrite the
+// request body, so callers can preserve the original body bytes.
+func ApplyBytePreservingHeaderParamOverrideWithRelayInfo(info *RelayInfo) error {
+	paramOverride := getParamOverrideMap(info)
+	if err := ValidateBytePreservingParamOverride(paramOverride); err != nil {
+		return err
+	}
+	return applyHeaderOnlyParamOverrideWithRelayInfo(info, paramOverride, "byte-preserving request body")
+}
+
+// ApplyHeaderOnlyParamOverrideWithRelayInfo retains opaque Responses replay
+// validation and error semantics for existing encrypted replay callers.
+func ApplyHeaderOnlyParamOverrideWithRelayInfo(info *RelayInfo) error {
+	paramOverride := getParamOverrideMap(info)
+	if err := ValidateOpaqueResponsesReplayParamOverride(paramOverride); err != nil {
+		return err
+	}
+	return applyHeaderOnlyParamOverrideWithRelayInfo(info, paramOverride, "opaque encrypted replay")
+}
+
+func applyHeaderOnlyParamOverrideWithRelayInfo(info *RelayInfo, paramOverride map[string]interface{}, subject string) error {
+	if len(paramOverride) == 0 {
+		return nil
+	}
+	operations, ok := tryParseOperations(paramOverride)
+	if !ok {
+		return fmt.Errorf("%s requires header-only param override operations", subject)
+	}
+
+	overrideCtx := BuildParamOverrideContext(info)
+	var recorder *paramOverrideAuditRecorder
+	if shouldEnableParamOverrideAudit(paramOverride) {
+		recorder = &paramOverrideAuditRecorder{}
+		overrideCtx[paramOverrideContextAuditRecorder] = recorder
+	}
+	result, err := applyOperations("{}", operations, overrideCtx)
+	if err != nil {
+		return err
+	}
+	if result != "{}" {
+		return fmt.Errorf("%s param override attempted to modify request body", subject)
+	}
+	syncRuntimeHeaderOverrideFromContext(info, overrideCtx)
+	if info != nil {
+		if recorder != nil {
+			info.ParamOverrideAudit = recorder.lines
+		} else {
+			info.ParamOverrideAudit = nil
+		}
+	}
+	return nil
+}
+
+// ValidateBytePreservingParamOverride verifies that an override can be applied
+// without parsing or rewriting a request body.
+func ValidateBytePreservingParamOverride(paramOverride map[string]interface{}) error {
+	return validateBytePreservingParamOverride(paramOverride, "byte-preserving request body")
+}
+
+func validateBytePreservingParamOverride(paramOverride map[string]interface{}, subject string) error {
+	if len(paramOverride) == 0 {
+		return nil
+	}
+	operations, ok := tryParseOperations(paramOverride)
+	if !ok || len(buildLegacyParamOverride(paramOverride)) > 0 {
+		return fmt.Errorf("%s requires header-only param override operations", subject)
+	}
+	for _, operation := range operations {
+		if len(operation.Conditions) > 0 || !isHeaderOnlyParamOverrideOperation(operation.Mode) {
+			return fmt.Errorf("%s does not permit param override mode %q", subject, operation.Mode)
+		}
+	}
+	return nil
+}
+
+// ValidateOpaqueResponsesReplayParamOverride retains the historical opaque
+// replay contract while sharing the byte-preserving validation rules.
+func ValidateOpaqueResponsesReplayParamOverride(paramOverride map[string]interface{}) error {
+	return validateBytePreservingParamOverride(paramOverride, "opaque encrypted replay")
+}
+
+func isHeaderOnlyParamOverrideOperation(mode string) bool {
+	switch mode {
+	case "set_header", "delete_header", "copy_header", "move_header", "pass_headers":
+		return true
+	default:
+		return false
+	}
+}
+
 func shouldEnableParamOverrideAudit(paramOverride map[string]interface{}) bool {
 	if common.DebugEnabled {
 		return true

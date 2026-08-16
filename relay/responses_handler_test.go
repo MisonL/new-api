@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,8 +18,10 @@ import (
 	openairelay "github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -282,7 +285,7 @@ func TestMarkResponsesChatCompatIgnoredEncryptedInclude(t *testing.T) {
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude))
 }
 
-func TestExecuteOpenAIResponsesRequestRetriesEncryptedReasoningFailure(t *testing.T) {
+func TestExecuteOpenAIResponsesRequestDoesNotRetryOpaqueEncryptedReasoningFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":[{"type":"reasoning","encrypted_content":"opaque"},{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`))
@@ -310,18 +313,15 @@ func TestExecuteOpenAIResponsesRequestRetriesEncryptedReasoningFailure(t *testin
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}
 		]`),
 	}, false)
-	if err != nil {
-		t.Logf("retry error: status=%d code=%s msg=%q", err.StatusCode, err.GetErrorCode(), err.Error())
-	}
-	require.Nil(t, err)
-	require.NotNil(t, usage)
-	require.Len(t, adaptor.requestBodies, 2)
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Len(t, adaptor.requestBodies, 1)
 	require.Contains(t, string(adaptor.requestBodies[0]), `"encrypted_content":"opaque"`)
-	require.NotContains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"opaque"`)
-	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
-func TestExecuteOpenAIResponsesRequestRetriesWrappedMissingEncryptedContent(t *testing.T) {
+func TestExecuteOpenAIResponsesRequestDoesNotRetryWrappedOpaqueEncryptedContent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6-sol","input":[{"type":"reasoning","encrypted_content":"opaque"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
@@ -350,11 +350,11 @@ func TestExecuteOpenAIResponsesRequestRetriesWrappedMissingEncryptedContent(t *t
 		]`),
 	}, false)
 
-	require.Nil(t, err)
-	require.NotNil(t, usage)
-	require.Len(t, adaptor.requestBodies, 2)
-	require.NotContains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"opaque"`)
-	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Len(t, adaptor.requestBodies, 1)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"encrypted_content":"opaque"`)
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
 func TestExecuteOpenAIResponsesRequestRetriesUnpopulatedReasoningForMissingEncryptedContent(t *testing.T) {
@@ -429,7 +429,7 @@ func TestExecuteOpenAIResponsesRequestDoesNotRetryMessageContentMissingEncrypted
 	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
-func TestExecuteOpenAIResponsesRequestRetriesAgentMessageMissingEncryptedContent(t *testing.T) {
+func TestExecuteOpenAIResponsesRequestDoesNotRetryOpaqueAgentMessageEncryptedContent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6-sol","input":[{"type":"agent_message","role":"assistant","content":[{"type":"output_text","text":"previous answer"},{"type":"encrypted_content","encrypted_content":"opaque"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
@@ -458,12 +458,12 @@ func TestExecuteOpenAIResponsesRequestRetriesAgentMessageMissingEncryptedContent
 		]`),
 	}, false)
 
-	require.Nil(t, err)
-	require.NotNil(t, usage)
-	require.Len(t, adaptor.requestBodies, 2)
-	require.Contains(t, string(adaptor.requestBodies[1]), "previous answer")
-	require.NotContains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"opaque"`)
-	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Len(t, adaptor.requestBodies, 1)
+	require.Contains(t, string(adaptor.requestBodies[0]), "previous answer")
+	require.Contains(t, string(adaptor.requestBodies[0]), `"encrypted_content":"opaque"`)
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
 func TestExecuteOpenAIResponsesRequestDoesNotDropCompactionForMissingEncryptedContent(t *testing.T) {
@@ -544,7 +544,7 @@ func TestExecuteOpenAIResponsesRequestRetriesValidToolOutputForMissingEncryptedC
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
-func TestExecuteOpenAIResponsesRequestRetriesMissingEncryptedContentOnlyOnce(t *testing.T) {
+func TestExecuteOpenAIResponsesRequestDoesNotRetryOpaqueEncryptedContent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6-sol","input":[{"type":"reasoning","encrypted_content":"first"},{"type":"reasoning","encrypted_content":"second"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`))
@@ -577,8 +577,10 @@ func TestExecuteOpenAIResponsesRequestRetriesMissingEncryptedContentOnlyOnce(t *
 
 	require.Nil(t, usage)
 	require.Error(t, err)
-	require.Len(t, adaptor.requestBodies, 2)
-	require.Contains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"second"`)
+	require.Len(t, adaptor.requestBodies, 1)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"encrypted_content":"first"`)
+	require.Contains(t, string(adaptor.requestBodies[0]), `"encrypted_content":"second"`)
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
 func TestShouldRetryResponsesWithoutEncryptedReasoningRequiresEncryptedContentPath(t *testing.T) {
@@ -1213,7 +1215,7 @@ func TestExecuteOpenAIResponsesRequestDoesNotRetryUnnormalizableArgumentsHistory
 	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesArgumentsHistoryRetry))
 }
 
-func TestExecuteOpenAIResponsesRequestRetriesEncryptedReasoningBeforeStatusMapping(t *testing.T) {
+func TestExecuteOpenAIResponsesRequestMapsOpaqueEncryptedReasoningFailureWithoutRetry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":[{"type":"reasoning","encrypted_content":"opaque"},{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`))
@@ -1243,12 +1245,12 @@ func TestExecuteOpenAIResponsesRequestRetriesEncryptedReasoningBeforeStatusMappi
 		]`),
 	}, false)
 
-	require.Nil(t, err)
-	require.NotNil(t, usage)
-	require.Len(t, adaptor.requestBodies, 2)
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusTeapot, err.StatusCode)
+	require.Len(t, adaptor.requestBodies, 1)
 	require.Contains(t, string(adaptor.requestBodies[0]), `"encrypted_content":"opaque"`)
-	require.NotContains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"opaque"`)
-	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
 func TestExecuteOpenAIResponsesRequestMapsStatusWhenEncryptedRetryHasNoRemovableItems(t *testing.T) {
@@ -1286,7 +1288,7 @@ func TestExecuteOpenAIResponsesRequestMapsStatusWhenEncryptedRetryHasNoRemovable
 	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
-func TestExecuteOpenAIResponsesRequestRetryForcesConvertedBodyWhenPassThroughEnabled(t *testing.T) {
+func TestExecuteOpenAIResponsesRequestDoesNotRewriteOpaqueBodyWhenPassThroughEnabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rawBody := []byte(`{"model":"gpt-5.5","input":[{"type":"reasoning","encrypted_content":"opaque"},{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -1324,12 +1326,12 @@ func TestExecuteOpenAIResponsesRequestRetryForcesConvertedBodyWhenPassThroughEna
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}
 		]`),
 	}, false)
-	require.Nil(t, retryErr)
-	require.NotNil(t, usage)
-	require.Len(t, adaptor.requestBodies, 2)
+	require.Nil(t, usage)
+	require.Error(t, retryErr)
+	require.Equal(t, http.StatusBadRequest, retryErr.StatusCode)
+	require.Len(t, adaptor.requestBodies, 1)
 	require.Equal(t, string(rawBody), string(adaptor.requestBodies[0]))
-	require.NotContains(t, string(adaptor.requestBodies[1]), `"encrypted_content":"opaque"`)
-	require.Contains(t, string(adaptor.requestBodies[1]), `"text":"hello"`)
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
 }
 
 func TestBuildOpenAIResponsesRequestBodyAppliesReasoningContextPolicyWhenPassThroughEnabled(t *testing.T) {
@@ -1340,6 +1342,7 @@ func TestBuildOpenAIResponsesRequestBodyAppliesReasoningContextPolicyWhenPassThr
 		registry    *dto.ResponsesChannelCapabilityRegistry
 		wantContext bool
 		wantAction  string
+		wantRaw     bool
 	}{
 		{
 			name:       "explicit unsupported strips context",
@@ -1352,12 +1355,14 @@ func TestBuildOpenAIResponsesRequestBodyAppliesReasoningContextPolicyWhenPassThr
 			profile:     dto.ResponsesUpstreamProfileOfficialOpenAI,
 			wantContext: true,
 			wantAction:  "forwarded_supported_capability",
+			wantRaw:     true,
 		},
 		{
 			name:        "generic profile forwards unverified context",
 			profile:     dto.ResponsesUpstreamProfileGenericOpenAI,
 			wantContext: true,
 			wantAction:  "forwarded_unverified_capability",
+			wantRaw:     true,
 		},
 	}
 
@@ -1396,11 +1401,534 @@ func TestBuildOpenAIResponsesRequestBodyAppliesReasoningContextPolicyWhenPassThr
 			require.NoError(t, err)
 			require.Equal(t, tt.wantContext, strings.Contains(string(bodyBytes), `"context":"all_turns"`))
 			require.Contains(t, string(bodyBytes), `"future_reasoning_option":{"enabled":true}`)
+			if tt.wantRaw {
+				require.Equal(t, rawBody, bodyBytes)
+			}
 			require.NotNil(t, converted.Reasoning)
 			require.Equal(t, tt.wantContext, len(converted.Reasoning.Context) > 0)
 			require.Equal(t, tt.wantAction, common.GetContextKeyString(c, constant.ContextKeyResponsesReasoningContextAction))
+			require.Equal(t, "high", info.ReasoningEffort)
 		})
 	}
+}
+
+func TestBuildOpenAIResponsesRequestBodyPassThroughMapsModelWithoutRewritingSupportedReasoningContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{
+  "model": "gpt-5.6-sol",
+  "input": "continue",
+  "reasoning": {
+    "context": "all_turns",
+    "mode": "adaptive",
+    "future_reasoning_option": {"enabled": true}
+  },
+  "stream_options": {"reasoning_summary_delivery": "sequential_cutoff"},
+  "future_top_level_option": {"enabled": true}
+}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	request.Model = "provider/gpt-5.6-sol"
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	expectedBody := bytes.Replace(rawBody, []byte(`"gpt-5.6-sol"`), []byte(`"provider/gpt-5.6-sol"`), 1)
+	require.Equal(t, expectedBody, bodyBytes)
+	require.Equal(t, "provider/gpt-5.6-sol", converted.Model)
+	require.Equal(t, "forwarded_supported_capability", common.GetContextKeyString(c, constant.ContextKeyResponsesReasoningContextAction))
+}
+
+func TestBuildOpenAIResponsesRequestBodyPreservesLogicalEffortAfterModelMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{
+  "model": "gpt-5.6-sol-high",
+  "input": "continue"
+}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol-high",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:     206,
+			ChannelType:   constant.ChannelTypeOpenAI,
+			IsModelMapped: true,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+	c.Set("model_mapping", `{"gpt-5.6-sol-high":"provider/gpt-5.6-sol"}`)
+	require.NoError(t, relayhelper.ModelMappedHelper(c, info, request))
+	require.Equal(t, "provider/gpt-5.6-sol", request.Model)
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	var bodyMap map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(bodyBytes, &bodyMap))
+	var upstreamModel string
+	require.NoError(t, common.Unmarshal(bodyMap["model"], &upstreamModel))
+	require.Equal(t, "provider/gpt-5.6-sol", upstreamModel)
+	var reasoning map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(bodyMap["reasoning"], &reasoning))
+	require.JSONEq(t, `"high"`, string(reasoning["effort"]))
+	require.Equal(t, "provider/gpt-5.6-sol", converted.Model)
+	require.NotNil(t, converted.Reasoning)
+	require.Equal(t, "high", converted.Reasoning.Effort)
+	require.Equal(t, "high", info.ReasoningEffort)
+}
+
+func TestBuildOpenAIResponsesRequestBodyConvertsReasoningContextModelEffortSuffix(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{
+  "model": "gpt-5.6-sol-high",
+  "input": "continue",
+  "reasoning": {
+    "context": "all_turns",
+    "mode": "adaptive",
+    "future_reasoning_option": {"enabled": true}
+  }
+}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.NotEqual(t, rawBody, bodyBytes)
+	require.Equal(t, "gpt-5.6-sol", converted.Model)
+	require.NotNil(t, converted.Reasoning)
+	require.Equal(t, "high", converted.Reasoning.Effort)
+	require.JSONEq(t, `"all_turns"`, string(converted.Reasoning.Context))
+	require.JSONEq(t, `"adaptive"`, string(converted.Reasoning.Mode))
+	require.JSONEq(t, `{"enabled":true}`, string(converted.Reasoning.Extra["future_reasoning_option"]))
+	require.Equal(t, "high", info.ReasoningEffort)
+	require.Contains(t, string(bodyBytes), `"model":"gpt-5.6-sol"`)
+	require.Contains(t, string(bodyBytes), `"effort":"high"`)
+	require.Contains(t, string(bodyBytes), `"context":"all_turns"`)
+}
+
+func TestBuildOpenAIResponsesRequestBodyConvertsModelEffortSuffixWithoutReasoningContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{
+  "model": "gpt-5.6-sol-high",
+  "input": "continue"
+}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.NotEqual(t, rawBody, bodyBytes)
+	require.Equal(t, "gpt-5.6-sol", converted.Model)
+	require.NotNil(t, converted.Reasoning)
+	require.Equal(t, "high", converted.Reasoning.Effort)
+	require.Equal(t, "high", info.ReasoningEffort)
+	require.Contains(t, string(bodyBytes), `"model":"gpt-5.6-sol"`)
+	require.Contains(t, string(bodyBytes), `"effort":"high"`)
+}
+
+func TestBuildOpenAIResponsesRequestBodyPassThroughRecordsExplicitReasoningEffort(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{
+  "model": "gpt-5.6-sol",
+  "input": "continue",
+  "reasoning": {"effort": "medium", "mode": "adaptive"}
+}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.Equal(t, rawBody, bodyBytes)
+	require.Equal(t, "medium", converted.Reasoning.Effort)
+	require.Equal(t, "medium", info.ReasoningEffort)
+}
+
+func TestBuildOpenAIResponsesRequestBodyPassThroughKeepsValidCodexItemIDsBytePreserving(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{
+  "model":"gpt-5.6-sol",
+  "input":[
+    {"type":"additional_tools","id":"at_1"},
+    {"type":"message","id":"msg_1","role":"user","content":[{"type":"input_text","text":"continue"}]},
+    {"type":"agent_message","id":"amsg_1"},
+    {"type":"reasoning","id":"rs_1","summary":[]},
+    {"type":"local_shell_call","id":"lsh_1"},
+    {"type":"function_call","id":"fc_1","call_id":"call_1","name":"exec","arguments":"{}"},
+    {"type":"tool_call","id":"fc_2"},
+    {"type":"mcp_tool_call","id":"fc_3"},
+    {"type":"tool_search_call","id":"tsc_1"},
+    {"type":"function_call_output","id":"fco_1","call_id":"call_1","output":"ok"},
+    {"type":"custom_tool_call","id":"ctc_1"},
+    {"type":"custom_tool_call_output","id":"ctco_1"},
+    {"type":"tool_search_output","id":"tso_1"},
+    {"type":"web_search_call","id":"ws_1"},
+    {"type":"image_generation_call","id":"ig_1"},
+    {"type":"compaction","id":"cmp_1"},
+    {"type":"compaction_summary","id":"cmp_3"}
+  ],
+  "reasoning":{"context":"all_turns","mode":"adaptive","future_reasoning_option":{"enabled":true}},
+  "stream_options":{"reasoning_summary_delivery":"sequential_cutoff"},
+  "future_top_level_option":{"enabled":true}
+}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.Equal(t, rawBody, bodyBytes)
+	require.Equal(t, request.Input, converted.Input)
+	require.Zero(t, common.GetContextKeyInt(c, constant.ContextKeyResponsesInputItemIDsRemoved))
+}
+
+func TestBuildOpenAIResponsesRequestBodyNormalizesEmptyContextCompactionInsteadOfBytePreserving(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{
+  "model": "gpt-5.6-sol",
+  "input": [
+    {"type":"context_compaction","id":"cmp_2"},
+    {"type":"message","id":"msg_1","role":"user","content":[{"type":"input_text","text":"continue"}]}
+  ]
+}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.NotEqual(t, rawBody, bodyBytes)
+	require.NotContains(t, string(bodyBytes), `"type":"context_compaction"`)
+	require.Contains(t, string(bodyBytes), `"type":"message"`)
+	require.NotContains(t, string(converted.Input), `"type":"context_compaction"`)
+	require.Zero(t, common.GetContextKeyInt(c, constant.ContextKeyResponsesInputItemIDsRemoved))
+}
+
+func TestBuildOpenAIResponsesRequestBodyPassThroughNormalizesInvalidItemIDsBeforeForwarding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{
+  "model": "gpt-5.6-sol",
+  "input": [
+    {"type":"function_call","id":"item_legacy","call_id":"call_keep","name":"exec","arguments":"{}"},
+    {"type":"message","id":"msg_valid","role":"user","content":[{"type":"input_text","text":"continue"}]}
+  ],
+  "reasoning": {
+    "context": "all_turns",
+    "future_reasoning_option": {"enabled": true}
+  },
+  "stream_options": {"reasoning_summary_delivery": "sequential_cutoff"},
+  "future_top_level_option": {"enabled": true}
+}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	request.Model = "provider/gpt-5.6-sol"
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.NotEqual(t, rawBody, bodyBytes)
+	var bodyMap map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(bodyBytes, &bodyMap))
+	require.JSONEq(t, `{"enabled":true}`, string(bodyMap["future_top_level_option"]))
+	var reasoning map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(bodyMap["reasoning"], &reasoning))
+	require.JSONEq(t, `{"enabled":true}`, string(reasoning["future_reasoning_option"]))
+	var streamOptions map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(bodyMap["stream_options"], &streamOptions))
+	require.JSONEq(t, `"sequential_cutoff"`, string(streamOptions["reasoning_summary_delivery"]))
+	var model string
+	require.NoError(t, common.Unmarshal(bodyMap["model"], &model))
+	require.Equal(t, "provider/gpt-5.6-sol", model)
+	var input []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(bodyMap["input"], &input))
+	require.Len(t, input, 2)
+	_, hasInvalidID := input[0]["id"]
+	require.False(t, hasInvalidID)
+	var callID string
+	require.NoError(t, common.Unmarshal(input[0]["call_id"], &callID))
+	require.Equal(t, "call_keep", callID)
+	var validID string
+	require.NoError(t, common.Unmarshal(input[1]["id"], &validID))
+	require.Equal(t, "msg_valid", validID)
+	require.Equal(t, "provider/gpt-5.6-sol", converted.Model)
+	require.Equal(t, 1, common.GetContextKeyInt(c, constant.ContextKeyResponsesInputItemIDsRemoved))
+}
+
+func TestBuildOpenAIResponsesRequestBodyPassThroughAppliesHeaderOnlyParamOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{"model":"gpt-5.6-sol","input":"continue","reasoning":{"context":"all_turns","future_reasoning_option":{"enabled":true}}}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		RequestHeaders: map[string]string{
+			"x-codex-session-id": "session_live",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{map[string]interface{}{
+					"mode":  "pass_headers",
+					"value": []interface{}{"x-codex-session-id"},
+				}},
+			},
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+
+	body, _, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.Equal(t, rawBody, bodyBytes)
+	require.True(t, info.UseRuntimeHeadersOverride)
+	require.Equal(t, "session_live", info.RuntimeHeadersOverride["x-codex-session-id"])
+}
+
+func TestBuildOpenAIResponsesRequestBodyPassThroughConvertsWhenParamOverrideMutatesBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawBody := []byte(`{"model":"gpt-5.6-sol","input":"continue","reasoning":{"context":"all_turns","future_reasoning_option":{"enabled":true}}}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{map[string]interface{}{
+					"mode":  "set",
+					"path":  "instructions",
+					"value": "preserve override semantics",
+				}},
+			},
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+		},
+	}
+
+	body, _, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.NotEqual(t, rawBody, bodyBytes)
+	require.Contains(t, string(bodyBytes), `"instructions":"preserve override semantics"`)
+	require.Contains(t, string(bodyBytes), `"context":"all_turns"`)
 }
 
 func TestBuildOpenAIResponsesRequestBodyAppliesStreamOptionsIncludeUsageCapabilityWhenPassThroughEnabled(t *testing.T) {
@@ -1719,7 +2247,7 @@ func TestPrepareResponsesRequestForChatCompatibilityDropsEmptyContextCompaction(
 		},
 	}
 
-	prepared, result, err := prepareResponsesRequestForChatCompatibility(info, request)
+	prepared, result, err := prepareResponsesRequestForChatCompatibility(context.Background(), info, request)
 
 	require.NoError(t, err)
 	require.NotSame(t, request, prepared)
@@ -1866,14 +2394,14 @@ func TestBuildOpenAIResponsesRequestBodyRestoresNativeOpaquePreviousResponseIDFo
 	require.Equal(t, "native_opaque_previous_response_id_restored", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactRouteDecision))
 }
 
-func TestBuildOpenAIResponsesRequestBodyNormalizesContextCompactionBeforePassThrough(t *testing.T) {
+func TestBuildOpenAIResponsesRequestBodyPreservesUnauthenticatedContextCompactionAsOpaque(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rawBody := []byte(`{
 		"model":"gpt-5.6-sol",
 		"input":[
-			{"type":"context_compaction","encrypted_content":"context-summary"},
+			{"type":"context_compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"context_compaction"},
-			{"type":"compaction","encrypted_content":"native-summary"},
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_22222222222222222222222222222222"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]
 	}`)
@@ -1889,9 +2417,9 @@ func TestBuildOpenAIResponsesRequestBodyNormalizesContextCompactionBeforePassThr
 	request := &dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6-sol",
 		Input: common.RawMessage(`[
-			{"type":"context_compaction","encrypted_content":"context-summary"},
+			{"type":"context_compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"context_compaction"},
-			{"type":"compaction","encrypted_content":"native-summary"},
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_22222222222222222222222222222222"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
 	}
@@ -1907,15 +2435,51 @@ func TestBuildOpenAIResponsesRequestBodyNormalizesContextCompactionBeforePassThr
 		},
 	}
 
-	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &retryEncryptedContextAdaptor{}, request, false)
 
 	require.Nil(t, apiErr)
 	bodyBytes, err := io.ReadAll(body)
 	require.NoError(t, err)
-	require.NotContains(t, string(bodyBytes), `"type":"context_compaction"`)
-	require.NotContains(t, string(converted.Input), `"type":"context_compaction"`)
-	require.Contains(t, string(bodyBytes), `"encrypted_content":"context-summary"`)
-	require.Contains(t, string(bodyBytes), `"encrypted_content":"native-summary"`)
+	require.Equal(t, rawBody, bodyBytes)
+	require.Equal(t, request.Input, converted.Input)
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionSelectedNativeUnverified, common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+}
+
+func TestBuildOpenAIResponsesRequestBodyPreservesOpaqueRequestWhenStreamOptionsCapabilityIsDisabled(t *testing.T) {
+	unsupported := false
+	rawBody := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"reasoning","encrypted_content":"opaque"}],"stream_options":{"include_usage":true,"include_obfuscation":true}}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: request.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   72,
+			ChannelType: constant.ChannelTypeOpenAI,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					SupportsStreamOptionsIncludeUsage: &unsupported,
+				},
+			},
+		},
+	}
+
+	body, _, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.Equal(t, rawBody, bodyBytes)
+	require.Contains(t, string(bodyBytes), `"include_usage":true`)
+	require.Contains(t, string(bodyBytes), `"encrypted_content":"opaque"`)
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamOptionsCapabilityStripped))
 }
 
 func TestShouldRouteResponsesViaChatSkipsResponsesCompact(t *testing.T) {
@@ -2034,6 +2598,48 @@ func TestNormalizeResponsesCompactUsageKeepsUpstreamTotalTokens(t *testing.T) {
 	require.Equal(t, 20, usage.TotalTokens)
 }
 
+func TestSettleResponsesCompactUsageNormalizesBeforeConsumptionAndRestoresPricingState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ratio_setting.InitRatioSettings()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+
+	originalPriceData := types.PriceData{
+		ModelRatio:  999,
+		OtherRatios: map[string]float64{"preserve": 1},
+	}
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.6-sol-openai-compact",
+		UsingGroup:      "default",
+		PriceData:       originalPriceData,
+	}
+	info.SetEstimatePromptTokens(23)
+	usage := &dto.Usage{
+		CompletionTokens: 5,
+		OutputTokens:     5,
+		TotalTokens:      5,
+	}
+
+	consumed := false
+	var consumedPriceData types.PriceData
+	apiErr := settleResponsesCompactUsage(c, info, usage, func(consumedUsage *dto.Usage) {
+		consumed = true
+		consumedPriceData = info.PriceData
+		require.Equal(t, 23, consumedUsage.PromptTokens)
+		require.Equal(t, 23, consumedUsage.InputTokens)
+		require.Equal(t, 5, consumedUsage.CompletionTokens)
+		require.Equal(t, 5, consumedUsage.OutputTokens)
+		require.Equal(t, 28, consumedUsage.TotalTokens)
+	})
+
+	require.Nil(t, apiErr)
+	require.True(t, consumed)
+	require.NotEqual(t, originalPriceData, consumedPriceData)
+	require.Equal(t, "gpt-5.6-sol-openai-compact", info.OriginModelName)
+	require.Equal(t, originalPriceData, info.PriceData)
+}
+
 func TestFindResponsesViaChatRuleCarriesCustomToolBridgeOption(t *testing.T) {
 	settings := model_setting.GetGlobalSettings()
 	oldPolicy := settings.ChatCompletionsToResponsesPolicy
@@ -2123,7 +2729,7 @@ func TestFindResponsesViaChatRuleSkipsCodexRemoteCompactionV2Trigger(t *testing.
 	require.Nil(t, rule)
 }
 
-func TestFindResponsesViaChatRuleAllowsLocalSyntheticCompactionForCleanup(t *testing.T) {
+func TestFindResponsesViaChatRuleSkipsUnauthenticatedSyntheticCompactionMarker(t *testing.T) {
 	settings := model_setting.GetGlobalSettings()
 	oldPolicy := settings.ChatCompletionsToResponsesPolicy
 	oldPassThrough := settings.PassThroughRequestEnabled
@@ -2158,7 +2764,7 @@ func TestFindResponsesViaChatRuleAllowsLocalSyntheticCompactionForCleanup(t *tes
 	request := &dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
 		Input: common.RawMessage(`[
-			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:nffffffffffffffffffffffffffffffff:resp_newapi_synthcmp_nffffffffffffffffffffffffffffffff_missing"},
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:nffffffffffffffffffffffffffffffff:resp_newapi_synthcmp_nffffffffffffffffffffffffffffffff_33333333333333333333333333333333"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
 	}
@@ -2166,7 +2772,7 @@ func TestFindResponsesViaChatRuleAllowsLocalSyntheticCompactionForCleanup(t *tes
 	require.False(t, request.HasCompactionTrigger())
 	rule, err := findResponsesViaChatRule(context.Background(), info, false, request)
 	require.NoError(t, err)
-	require.NotNil(t, rule)
+	require.Nil(t, rule)
 }
 
 func TestFindResponsesViaChatRuleSkipsRemoteCompactionInput(t *testing.T) {
@@ -2290,7 +2896,7 @@ func TestFindResponsesViaChatRuleAllowsLocalSyntheticPreviousResponseID(t *testi
 	}
 	request := &dto.OpenAIResponsesRequest{
 		Model:              "gpt-5.5",
-		PreviousResponseID: "resp_newapi_synthcmp_nffffffffffffffffffffffffffffffff_missing",
+		PreviousResponseID: "resp_newapi_synthcmp_nffffffffffffffffffffffffffffffff_44444444444444444444444444444444",
 	}
 
 	rule, err := findResponsesViaChatRule(context.Background(), info, false, request)
@@ -2334,7 +2940,7 @@ func TestFindResponsesViaChatRuleSkipsOrdinaryPreviousResponseIDEvenWithLocalMar
 		Model:              "gpt-5.5",
 		PreviousResponseID: "resp_ordinary_previous",
 		Input: common.RawMessage(`[
-			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:nffffffffffffffffffffffffffffffff:resp_newapi_synthcmp_nffffffffffffffffffffffffffffffff_missing"},
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:nffffffffffffffffffffffffffffffff:resp_newapi_synthcmp_nffffffffffffffffffffffffffffffff_44444444444444444444444444444444"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
 	}
@@ -2378,7 +2984,7 @@ func TestFindResponsesViaChatRuleSkipsNativeOpaquePreviousResponseID(t *testing.
 	}
 	request := &dto.OpenAIResponsesRequest{
 		Model:              "gpt-5.5",
-		PreviousResponseID: "resp_newapi_nativecmp_opaque",
+		PreviousResponseID: "resp_newapi_nativecmp_n0123456789abcdef0123456789abcdef_0123456789abcdef01234567",
 	}
 
 	rule, err := findResponsesViaChatRule(context.Background(), info, false, request)
@@ -2493,7 +3099,7 @@ func TestShouldConvertResponsesRequestForResponsesProxyProfileCompact(t *testing
 	}
 }
 
-func TestShouldConvertResponsesRequestForSub2APIHTTPLimitedNativeCompact(t *testing.T) {
+func TestShouldNotForceConvertResponsesRequestForSub2APIHTTPNativeCompact(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeResponsesCompact,
 		ChannelMeta: &relaycommon.ChannelMeta{
@@ -2507,7 +3113,7 @@ func TestShouldConvertResponsesRequestForSub2APIHTTPLimitedNativeCompact(t *test
 
 	require.True(t, relaycommon.IsNativeOpenAICompatibleResponsesCompact(info))
 	require.False(t, relaycommon.IsSyntheticOpenAICompatibleResponsesCompact(info))
-	require.True(t, relaycommon.ShouldConvertResponsesRequest(info))
+	require.False(t, relaycommon.ShouldConvertResponsesRequest(info))
 }
 
 func TestShouldConvertResponsesRequestForStatefulProfiles(t *testing.T) {
@@ -2608,7 +3214,7 @@ func TestApplyResponsesCompactSummaryModelOverride(t *testing.T) {
 	}
 	request := &dto.OpenAIResponsesRequest{Model: "gpt-5.5"}
 
-	applyResponsesCompactSummaryModelOverride(c, info, request)
+	applyResponsesCompactSummaryModelOverride(c, info, request, false)
 
 	require.Equal(t, "gpt-5.4", request.Model)
 	require.Equal(t, "gpt-5.4", info.UpstreamModelName)
@@ -2624,9 +3230,251 @@ func TestApplyResponsesCompactSummaryModelOverride(t *testing.T) {
 	}
 	codexRequest := &dto.OpenAIResponsesRequest{Model: "gpt-5.5"}
 
-	applyResponsesCompactSummaryModelOverride(c, codexInfo, codexRequest)
+	applyResponsesCompactSummaryModelOverride(c, codexInfo, codexRequest, false)
 
 	require.Equal(t, "gpt-5.4", codexRequest.Model)
 	require.Equal(t, "gpt-5.4", codexInfo.UpstreamModelName)
 	require.Equal(t, "gpt-5.5-openai-compact", codexInfo.OriginModelName)
+}
+
+func TestBuildOpenAIResponsesRequestBodyPreservesOpaqueEncryptedReplayExceptModelMapping(t *testing.T) {
+	rawBody := []byte(`{
+		"model":"gpt-5.6-sol",
+		"input":[
+			{"type":"context_compaction","id":"client_generated_id","encrypted_content":"opaque-reasoning-state","future_state":{"version":2}},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		],
+		"instructions":"keep-original-instructions",
+		"service_tier":"priority",
+		"stream_options":{"include_usage":true,"future_option":{"enabled":true}},
+		"future_top_level":{"enabled":true}
+	}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	request.Model = "mapped-gpt-5.6-sol"
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.Equal(t, request.Input, converted.Input)
+	require.Contains(t, string(bodyBytes), `"model":"mapped-gpt-5.6-sol"`)
+	restoredBody := bytes.Replace(bodyBytes, []byte(`"mapped-gpt-5.6-sol"`), []byte(`"gpt-5.6-sol"`), 1)
+	require.Equal(t, rawBody, restoredBody)
+}
+
+func TestBuildOpenAIResponsesCompactRequestBodyPreservesOpaqueReplayExceptModelMapping(t *testing.T) {
+	rawBody := []byte(`{
+		"model":"gpt-5.6-sol",
+		"input":[{"type":"compaction","encrypted_content":{"opaque":true},"future_state":[1,2,3]}],
+		"instructions":"keep-original-instructions",
+		"future_top_level":{"enabled":true}
+	}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.CreateBodyStorage(rawBody)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	c.Set(common.KeyBodyStorage, storage)
+
+	request := &dto.OpenAIResponsesRequest{}
+	require.NoError(t, common.Unmarshal(rawBody, request))
+	request.Model = "mapped-gpt-5.6-sol"
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   205,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+
+	body, converted, apiErr := buildOpenAIResponsesRequestBody(c, info, &openairelay.Adaptor{}, request, false)
+
+	require.Nil(t, apiErr)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.Equal(t, request.Input, converted.Input)
+	require.Contains(t, string(bodyBytes), `"model":"mapped-gpt-5.6-sol"`)
+	restoredBody := bytes.Replace(bodyBytes, []byte(`"mapped-gpt-5.6-sol"`), []byte(`"gpt-5.6-sol"`), 1)
+	require.Equal(t, rawBody, restoredBody)
+}
+
+func TestExecuteOpenAIResponsesRequestDoesNotMutateOpaqueReplayForCompatibilityRetry(t *testing.T) {
+	tests := []struct {
+		name     string
+		response func() *http.Response
+	}{
+		{name: "encrypted content verification error", response: func() *http.Response { return encryptedContextRetryResponse(http.StatusBadRequest) }},
+		{name: "namespace compatibility error", response: func() *http.Response { return namespaceHistoryRetryResponseAt(1) }},
+		{name: "arguments compatibility error", response: argumentsHistoryRetryResponse},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rawBody := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"},{"type":"function_call","call_id":"call_1","name":"read_file","namespace":"codex","arguments":"{\"path\":\"README.md\"}"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(rawBody))
+			storage, err := common.CreateBodyStorage(rawBody)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = storage.Close() })
+			c.Set(common.KeyBodyStorage, storage)
+
+			request := &dto.OpenAIResponsesRequest{}
+			require.NoError(t, common.Unmarshal(rawBody, request))
+			info := &relaycommon.RelayInfo{
+				RelayMode:       relayconstant.RelayModeResponses,
+				OriginModelName: request.Model,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelId:   206,
+					ChannelType: constant.ChannelTypeOpenAI,
+					ChannelOtherSettings: dto.ChannelOtherSettings{
+						ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+					},
+				},
+			}
+			adaptor := &retryEncryptedContextAdaptor{
+				responses: []*http.Response{tt.response(), successResponsesHTTPResponse()},
+			}
+
+			usage, requestErr := executeOpenAIResponsesRequest(c, info, adaptor, request, false)
+
+			require.Nil(t, usage)
+			require.Error(t, requestErr)
+			require.Len(t, adaptor.requestBodies, 1)
+			require.Equal(t, rawBody, adaptor.requestBodies[0])
+			require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry))
+			require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesNamespaceHistoryRetry))
+			require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesArgumentsHistoryRetry))
+		})
+	}
+}
+
+func TestDoOpenAIResponsesRequestMarksOpaqueReplayForwardedWhenUpstreamReturnsNonOK(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, dto.ResponsesEncryptedReasoningReplayCapabilitySupported)
+	adaptor := &retryEncryptedContextAdaptor{
+		responses: []*http.Response{encryptedContextRetryResponse(http.StatusBadRequest)},
+	}
+
+	usage, requestErr := doOpenAIResponsesRequest(
+		c,
+		&relaycommon.RelayInfo{},
+		adaptor,
+		bytes.NewReader([]byte(`{"model":"gpt-5.6-sol"}`)),
+	)
+
+	require.Nil(t, usage)
+	require.Error(t, requestErr)
+	require.Len(t, adaptor.requestBodies, 1)
+	require.Equal(
+		t,
+		relaycommon.ResponsesEncryptedReasoningReplayActionForwardedNative,
+		common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction),
+	)
+}
+
+func TestResponsesHelperRejectsUnsupportedOpaqueEncryptedReplayBeforeRelay(t *testing.T) {
+	unsupported := false
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 168)
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt-5.6-sol")
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsEncryptedReasoningReplay: &unsupported,
+		},
+	})
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[
+				{"type":"reasoning","encrypted_content":"opaque-reasoning-state"},
+				{"type":"message","role":"user","content":"continue"}
+			]`),
+		},
+	}
+
+	err := ResponsesHelper(c, info)
+
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+	require.Equal(t, "unsupported", common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayCapability))
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionRejectedUnsupported, common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+}
+
+func TestResponsesHelperRejectsOpaqueCompactWithoutNativeCompactBeforeRelay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 208)
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt-5.6-sol")
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+		ResponsesCompactMode:     dto.ResponsesCompactModeSynthetic,
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+	})
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.6-sol",
+		Request: &dto.OpenAIResponsesCompactionRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[
+				{"type":"reasoning","encrypted_content":"opaque-reasoning-state"},
+				{"type":"message","role":"user","content":"continue"}
+			]`),
+		},
+	}
+
+	err := ResponsesHelper(c, info)
+
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+	require.Equal(t, "supported", common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayCapability))
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionRejectedUnsupported, common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+}
+
+func TestApplyResponsesCompactSummaryModelOverrideSkipsOpaqueEncryptedReplay(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	common.SetContextKey(c, constant.ContextKeyResponsesCompactSummaryModel, "gpt-5.4")
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeCodex,
+			UpstreamModelName: "mapped-gpt-5.6-sol",
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{Model: "mapped-gpt-5.6-sol"}
+
+	applyResponsesCompactSummaryModelOverride(c, info, request, true)
+
+	require.Equal(t, "mapped-gpt-5.6-sol", request.Model)
+	require.Equal(t, "mapped-gpt-5.6-sol", info.UpstreamModelName)
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,9 @@ const (
 	syntheticCompactTTLDays                = 30
 	syntheticCompactTTL                    = syntheticCompactTTLDays * 24 * time.Hour
 	syntheticCompactStoreTimeout           = 10 * time.Second
+	syntheticCompactInstanceHexLen         = 32
+	syntheticCompactStateHexLen            = 32
+	nativeOpaqueCompactStateHexLen         = 24
 	syntheticCompactTextPartMax            = 8 * 1024 * 1024
 	syntheticCompactVisibleTextMax         = 96 * 1024
 	syntheticCompactPreviousVisibleTextMax = 32 * 1024
@@ -110,6 +114,7 @@ var (
 	ErrResponsesRESTPreviousIDUnsupported      = errors.New("responses REST previous_response_id is unsupported by upstream profile")
 	ErrResponsesCompactionContentRequired      = errors.New("responses compaction item missing encrypted_content")
 	ErrResponsesNativeOpaqueStateNotRestorable = errors.New("native opaque compact state cannot be restored locally")
+	ErrResponsesOpaqueReplayRequiresNative     = errors.New("responses opaque encrypted replay requires native forwarding")
 )
 
 func newSyntheticCompactID(ctx context.Context) (string, error) {
@@ -139,8 +144,10 @@ func syntheticCompactIDInstance(id string) string {
 		return ""
 	}
 	rest := strings.TrimPrefix(id, syntheticCompactIDPrefix)
-	instanceID, _, ok := strings.Cut(rest, "_")
-	if !ok || !syntheticCompactInstanceIDValid(instanceID) {
+	instanceID, stateID, ok := strings.Cut(rest, "_")
+	if !ok ||
+		!syntheticCompactInstanceIDValid(instanceID) ||
+		!syntheticCompactLowerHexStringValid(stateID, syntheticCompactStateHexLen) {
 		return ""
 	}
 	return instanceID
@@ -152,8 +159,10 @@ func nativeOpaqueCompactIDInstance(id string) string {
 		return ""
 	}
 	rest := strings.TrimPrefix(id, nativeOpaqueCompactIDPrefix)
-	instanceID, _, ok := strings.Cut(rest, "_")
-	if !ok || !syntheticCompactInstanceIDValid(instanceID) {
+	instanceID, stateID, ok := strings.Cut(rest, "_")
+	if !ok ||
+		!syntheticCompactInstanceIDValid(instanceID) ||
+		!syntheticCompactLowerHexStringValid(stateID, nativeOpaqueCompactStateHexLen) {
 		return ""
 	}
 	return instanceID
@@ -161,10 +170,16 @@ func nativeOpaqueCompactIDInstance(id string) string {
 
 func syntheticCompactIDFromReference(ctx context.Context, id string) (string, bool, error) {
 	id = strings.TrimSpace(id)
-	if !strings.HasPrefix(id, syntheticCompactIDPrefix) && !strings.HasPrefix(id, nativeOpaqueCompactIDPrefix) {
+	if strings.HasPrefix(id, syntheticCompactIDPrefix) {
+		if syntheticCompactLegacyStateIDValid(id) || syntheticCompactIDInstance(id) != "" {
+			return id, true, nil
+		}
 		return "", false, nil
 	}
-	if strings.HasPrefix(id, nativeOpaqueCompactIDPrefix) && nativeOpaqueCompactIDInstance(id) == "" {
+	if !strings.HasPrefix(id, nativeOpaqueCompactIDPrefix) {
+		return "", false, nil
+	}
+	if nativeOpaqueCompactIDInstance(id) == "" {
 		return "", false, nil
 	}
 	return id, true, nil
@@ -189,7 +204,51 @@ func syntheticCompactIDFromMarker(ctx context.Context, marker string) (string, b
 		}
 		return id, true, nil
 	}
-	return syntheticCompactIDFromReference(ctx, payload)
+	if syntheticCompactLegacyStateIDValid(payload) {
+		return payload, true, nil
+	}
+	if nativeOpaqueCompactIDInstance(payload) != "" {
+		return payload, true, nil
+	}
+	return "", false, nil
+}
+
+func syntheticCompactLegacyStateIDValid(id string) bool {
+	id = strings.TrimSpace(id)
+	if !strings.HasPrefix(id, syntheticCompactIDPrefix) {
+		return false
+	}
+	return syntheticCompactLowerHexStringValid(
+		strings.TrimPrefix(id, syntheticCompactIDPrefix),
+		syntheticCompactStateHexLen,
+	)
+}
+
+func ResponsesInputHasOpaqueEncryptedContent(ctx context.Context, input common.RawMessage) (bool, error) {
+	return relaycommon.ResponsesInputHasOpaqueEncryptedContentWithMarkerValidator(
+		input,
+		func(marker string) (bool, error) {
+			return syntheticCompactMarkerReferencesStoredState(ctx, marker)
+		},
+	)
+}
+
+func NormalizeContextCompactionForResponsesRequest(ctx context.Context, request dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, relaycommon.ResponsesContextCompactionNormalizeResult, error) {
+	return relaycommon.NormalizeContextCompactionForResponsesRequestWithMarkerValidator(
+		request,
+		func(marker string) (bool, error) {
+			return syntheticCompactMarkerReferencesStoredState(ctx, marker)
+		},
+	)
+}
+
+func syntheticCompactMarkerReferencesStoredState(ctx context.Context, marker string) (bool, error) {
+	id, ok, err := syntheticCompactIDFromMarker(ctx, marker)
+	if err != nil || !ok {
+		return false, err
+	}
+	_, found, err := loadSyntheticCompactState(ctx, id)
+	return found, err
 }
 
 func findSyntheticCompactState(ctx context.Context, req dto.OpenAIResponsesRequest) (*SyntheticCompactState, bool, error) {
@@ -236,7 +295,7 @@ func HasLocalSyntheticCompactReferenceWithContext(ctx context.Context, req dto.O
 		return true, nil
 	}
 	for _, marker := range syntheticCompactMarkers(req.Input) {
-		if _, ok, err := syntheticCompactIDFromMarker(ctx, marker); err != nil {
+		if ok, err := syntheticCompactMarkerReferencesStoredState(ctx, marker); err != nil {
 			return false, err
 		} else if ok {
 			return true, nil
@@ -253,7 +312,7 @@ func SyntheticCompactScopeFromSource(source SyntheticCompactScopeSource) Synthet
 }
 
 func IsNativeOpaqueCompactReference(id string) bool {
-	return strings.HasPrefix(strings.TrimSpace(id), nativeOpaqueCompactIDPrefix)
+	return nativeOpaqueCompactIDInstance(id) != ""
 }
 
 func HasLocalNativeOpaqueCompactReference(ctx context.Context, req dto.OpenAIResponsesRequest) (bool, error) {
@@ -269,6 +328,9 @@ func forceResponsesCompactVisibleOnly(ctx context.Context) bool {
 }
 
 func BuildSyntheticCompactSummaryRequest(ctx context.Context, scope SyntheticCompactStateScope, req dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, error) {
+	if err := rejectOpaqueReplayForSyntheticCompact(ctx, req); err != nil {
+		return dto.OpenAIResponsesRequest{}, err
+	}
 	state, found, err := findSyntheticCompactState(ctx, req)
 	if err != nil {
 		return dto.OpenAIResponsesRequest{}, err
@@ -362,6 +424,11 @@ func ApplySyntheticCompactStateWithInfo(ctx context.Context, scope SyntheticComp
 		StateLookup:   "not_requested",
 		RouteDecision: "unchanged",
 	}
+	if err := rejectOpaqueReplayForSyntheticCompact(ctx, req); err != nil {
+		info.RouteDecision = "opaque_encrypted_replay_rejected"
+		info.FallbackReason = "native_forwarding_required"
+		return req, false, info, err
+	}
 	state, found, err := findSyntheticCompactState(ctx, req)
 	if err != nil || !found {
 		if err == nil && !found {
@@ -442,6 +509,17 @@ func ApplySyntheticCompactStateWithInfo(ctx context.Context, scope SyntheticComp
 	return req, true, info, nil
 }
 
+func rejectOpaqueReplayForSyntheticCompact(ctx context.Context, req dto.OpenAIResponsesRequest) error {
+	hasOpaqueEncryptedContent, err := ResponsesInputHasOpaqueEncryptedContent(ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	if hasOpaqueEncryptedContent {
+		return ErrResponsesOpaqueReplayRequiresNative
+	}
+	return nil
+}
+
 func ApplySyntheticCompactStateOrVisibleOnly(ctx context.Context, scope SyntheticCompactStateScope, req dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, bool, bool, error) {
 	converted, applied, visibleOnly, _, err := ApplySyntheticCompactStateOrVisibleOnlyWithInfo(ctx, scope, req)
 	return converted, applied, visibleOnly, err
@@ -453,7 +531,7 @@ func RestoreNativeOpaquePreviousResponseID(ctx context.Context, scope SyntheticC
 		RouteDecision: "unchanged",
 	}
 	id := strings.TrimSpace(req.PreviousResponseID)
-	if !strings.HasPrefix(id, nativeOpaqueCompactIDPrefix) {
+	if !IsNativeOpaqueCompactReference(id) {
 		return req, false, info, nil
 	}
 	state, found, err := loadSyntheticCompactState(ctx, id)
@@ -551,7 +629,14 @@ func hasLocalNativeOpaqueCompactReference(ctx context.Context, req dto.OpenAIRes
 		if err != nil {
 			return false, err
 		}
-		if ok && IsNativeOpaqueCompactReference(id) {
+		if !ok || !IsNativeOpaqueCompactReference(id) {
+			continue
+		}
+		_, found, err := loadSyntheticCompactState(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		if found {
 			return true, nil
 		}
 	}

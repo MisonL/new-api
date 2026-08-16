@@ -188,6 +188,9 @@ func isSpecificChannelEnabledForCompactRequest(c *gin.Context, modelName string,
 // - application/x-www-form-urlencoded
 // - multipart/form-data
 func getModelFromRequest(c *gin.Context) (*ModelRequest, error) {
+	if modelRequest, ok := getOpaqueResponsesModelRequest(c); ok {
+		return modelRequest, nil
+	}
 	if strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json") {
 		modelRequest, err := getModelFromJSONBody(c)
 		if err != nil {
@@ -205,6 +208,9 @@ func getModelFromRequest(c *gin.Context) (*ModelRequest, error) {
 }
 
 func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
+	if modelRequest, ok := getOpaqueResponsesModelRequest(c); ok {
+		return modelRequest, nil
+	}
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
 		return nil, err
@@ -221,6 +227,17 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 	c.Request.Body = io.NopCloser(storage)
 
 	return modelRequest, nil
+}
+
+func getOpaqueResponsesModelRequest(c *gin.Context) (*ModelRequest, bool) {
+	metadata, ok := common.GetResponsesRequestMetadata(c)
+	if !ok || !metadata.HasOpaqueEncryptedContent {
+		return nil, false
+	}
+	return &ModelRequest{
+		Model: metadata.Model,
+		Group: metadata.Group,
+	}, true
 }
 
 func decodeModelRequestFields(reader io.Reader) (*ModelRequest, error) {
@@ -488,7 +505,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		common.SetContextKey(c, constant.ContextKeyTokenGroup, modelRequest.Group)
 	}
 
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/responses/compact") && modelRequest.Model != "" {
+	if common.IsResponsesCompactPath(c.Request.URL.Path) && modelRequest.Model != "" {
 		modelRequest.Model = ratio_setting.WithCompactModelSuffix(modelRequest.Model)
 	}
 	return &modelRequest, shouldSelectChannel, nil

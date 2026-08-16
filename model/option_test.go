@@ -79,6 +79,31 @@ func TestUpdateOptionRejectsInvalidRequestHeaderPolicyAuxiliarySwitchBeforePersi
 	require.Equal(t, "true", common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"])
 }
 
+func TestUpdateOptionNormalizesLegacyEmptyStatusCodeRules(t *testing.T) {
+	previousDisableRanges := operation_setting.AutomaticDisableStatusCodeRanges
+	previousRetryRanges := operation_setting.AutomaticRetryStatusCodeRanges
+	previousOptionMap := common.OptionMap
+	common.OptionMap = map[string]string{}
+	t.Cleanup(func() {
+		DB.Where("key IN ?", []string{"AutomaticDisableStatusCodes", "AutomaticRetryStatusCodes"}).Delete(&Option{})
+		operation_setting.AutomaticDisableStatusCodeRanges = previousDisableRanges
+		operation_setting.AutomaticRetryStatusCodeRanges = previousRetryRanges
+		common.OptionMap = previousOptionMap
+	})
+
+	for _, key := range []string{"AutomaticDisableStatusCodes", "AutomaticRetryStatusCodes"} {
+		require.NoError(t, UpdateOption(key, "[]"))
+
+		var option Option
+		require.NoError(t, DB.Where("key = ?", key).First(&option).Error)
+		require.Empty(t, option.Value)
+		require.Empty(t, common.OptionMap[key])
+	}
+
+	require.Empty(t, operation_setting.AutomaticDisableStatusCodeRanges)
+	require.Empty(t, operation_setting.AutomaticRetryStatusCodeRanges)
+}
+
 func TestUpdateOptionValidatesUpstreamRateLimitRetryLimitBeforePersist(t *testing.T) {
 	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
 	previousOptionMap := common.OptionMap

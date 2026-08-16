@@ -2,7 +2,6 @@ package openai
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -47,17 +46,22 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	defer service.CloseResponseBodyGracefully(resp)
 
 	var responsesResp dto.OpenAIResponsesResponse
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+	body, readErr := readResponsesNonStreamingResponseBody(c, resp.Body)
+	if readErr != nil {
+		return nil, readErr
 	}
 
 	if err := common.Unmarshal(body, &responsesResp); err != nil {
+		if openAIError, found, sseErr := responsesSSETerminalError(body); sseErr != nil {
+			return nil, types.NewOpenAIError(sseErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		} else if found {
+			return nil, newResponsesUpstreamOpenAIError(resp.StatusCode, openAIError)
+		}
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
-	if oaiError := responsesResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
-		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	if oaiError := responsesResp.GetOpenAIError(); responsesOpenAIErrorHasContent(oaiError) {
+		return nil, newResponsesUpstreamOpenAIError(resp.StatusCode, oaiError)
 	}
 
 	chatId := helper.GetResponseID(c)
@@ -234,6 +238,16 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			// Prefer streaming assistant text over tool calls to match non-stream behavior.
 			return true
 		}
+		if name != "" {
+			toolCallNameByID[callID] = name
+		}
+		if toolCallNameByID[callID] != "" {
+			name = toolCallNameByID[callID]
+		}
+		sendName := name != "" && !toolCallNameSent[callID]
+		if !sendName && argsDelta == "" {
+			return true
+		}
 		if !sendStartIfNeeded() {
 			return false
 		}
@@ -242,12 +256,6 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		if !ok {
 			idx = len(toolCallIndexByID)
 			toolCallIndexByID[callID] = idx
-		}
-		if name != "" {
-			toolCallNameByID[callID] = name
-		}
-		if toolCallNameByID[callID] != "" {
-			name = toolCallNameByID[callID]
 		}
 
 		tool := dto.ToolCallResponse{
@@ -258,7 +266,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			},
 		}
 		tool.SetIndex(idx)
-		if name != "" && !toolCallNameSent[callID] {
+		if sendName {
 			tool.Function.Name = name
 			toolCallNameSent[callID] = true
 		}
@@ -525,13 +533,21 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				sentStop = true
 			}
 
-		case "response.error", "response.failed":
-			if streamResp.Response != nil {
-				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
-					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
-					sr.Stop(streamErr)
-					return
-				}
+		case "response.error", "error":
+			if responsesOpenAIErrorHasMessage(streamResp.Error) {
+				streamErr = newResponsesUpstreamOpenAIError(resp.StatusCode, streamResp.Error)
+				sr.Stop(streamErr)
+				return
+			}
+			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusBadGateway)
+			sr.Stop(streamErr)
+			return
+
+		case "response.failed":
+			if oaiErr := responsesFailedEventOpenAIError(streamResp); oaiErr != nil {
+				streamErr = newResponsesUpstreamOpenAIError(resp.StatusCode, oaiErr)
+				sr.Stop(streamErr)
+				return
 			}
 			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
 			sr.Stop(streamErr)

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"golang.org/x/net/http2"
 )
 
 type OpenAIError struct {
@@ -147,11 +148,21 @@ func IsUpstreamTransportInterruptedError(err error) bool {
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
+	var goAwayError http2.GoAwayError
+	if errors.As(err, &goAwayError) {
+		return true
+	}
+	var streamError http2.StreamError
+	if errors.As(err, &streamError) {
+		return true
+	}
 	message := strings.ToLower(err.Error())
 	for _, indicator := range []string{
 		"unexpected eof",
 		"server sent goaway",
 		"http2: server sent goaway",
+		"http2: stream error",
+		"stream error: stream id",
 		"response body closed",
 		"connection reset by peer",
 	} {

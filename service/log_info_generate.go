@@ -145,6 +145,9 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if action := common.GetContextKeyString(ctx, constant.ContextKeyResponsesReasoningContextAction); action != "" {
 			other["responses_reasoning_context_action"] = action
 		}
+		if removedCount := common.GetContextKeyInt(ctx, constant.ContextKeyResponsesInputItemIDsRemoved); removedCount > 0 {
+			other["responses_input_item_ids_removed"] = removedCount
+		}
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude) {
 			other["responses_chat_compat_ignored_encrypted_include"] = true
 		}
@@ -153,6 +156,18 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		}
 		if channelSkip := common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactChannelSkip); channelSkip != "" {
 			other["responses_compact_channel_skip"] = channelSkip
+		}
+		if channelSkips, ok := common.GetContextKeyType[[]dto.ResponsesRoutingChannelSkip](ctx, constant.ContextKeyResponsesRoutingChannelSkips); ok && len(channelSkips) > 0 {
+			other["responses_routing_channel_skips"] = append([]dto.ResponsesRoutingChannelSkip(nil), channelSkips...)
+		}
+		if action := common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction); action != "" {
+			other["responses_encrypted_reasoning_replay_action"] = action
+		}
+		if capability := common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayCapability); capability != "" {
+			other["responses_encrypted_reasoning_replay_capability"] = capability
+		}
+		if retryAction := common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayRetryAction); retryAction != "" {
+			other["responses_encrypted_reasoning_replay_retry_action"] = retryAction
 		}
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCompactStateRestored) {
 			other["responses_compact_state_restored"] = true
@@ -193,22 +208,26 @@ func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settin
 	}
 	snapshotInfo := settings.ResolveResponsesChannelCapability(relayInfo.ChannelType)
 	snapshot := map[string]interface{}{
-		"source":                               snapshotInfo.Source,
-		"compact_mode_setting":                 string(snapshotInfo.CompactModeSetting),
-		"compact_mode_effective":               string(snapshotInfo.CompactModeEffective),
-		"supports_responses":                   snapshotInfo.SupportsResponses,
-		"supports_responses_compact":           snapshotInfo.SupportsResponsesCompact,
-		"supports_chat":                        snapshotInfo.SupportsChat,
-		"supports_rest_previous_response_id":   snapshotInfo.SupportsRestPreviousResponseID,
-		"supports_compaction_item_passthrough": snapshotInfo.SupportsCompactionItemPassthrough,
-		"supports_namespace_tools":             snapshotInfo.SupportsNamespaceTools,
-		"supports_tool_search":                 snapshotInfo.SupportsToolSearch,
-		"reasoning_context_capability":         string(snapshotInfo.ReasoningContextCapability),
-		"strips_responses_reasoning_context":   snapshotInfo.StripsResponsesReasoningContext,
-		"strips_responses_encrypted_reasoning": snapshotInfo.StripsResponsesEncryptedReasoning,
+		"source":                                 snapshotInfo.Source,
+		"compact_mode_setting":                   string(snapshotInfo.CompactModeSetting),
+		"compact_mode_effective":                 string(snapshotInfo.CompactModeEffective),
+		"supports_responses":                     snapshotInfo.SupportsResponses,
+		"supports_responses_compact":             snapshotInfo.SupportsResponsesCompact,
+		"supports_chat":                          snapshotInfo.SupportsChat,
+		"supports_rest_previous_response_id":     snapshotInfo.SupportsRestPreviousResponseID,
+		"compaction_item_passthrough_capability": string(snapshotInfo.CompactionItemPassthroughCapability),
+		"supports_namespace_tools":               snapshotInfo.SupportsNamespaceTools,
+		"supports_tool_search":                   snapshotInfo.SupportsToolSearch,
+		"reasoning_context_capability":           string(snapshotInfo.ReasoningContextCapability),
+		"encrypted_reasoning_replay_capability":  string(snapshotInfo.EncryptedReasoningReplayCapability),
+		"strips_responses_reasoning_context":     snapshotInfo.StripsResponsesReasoningContext,
+		"strips_responses_encrypted_reasoning":   snapshotInfo.StripsResponsesEncryptedReasoning,
 	}
 	if snapshotInfo.SupportsCustomTools != nil {
 		snapshot["supports_custom_tools"] = *snapshotInfo.SupportsCustomTools
+	}
+	if snapshotInfo.SupportsCompactionItemPassthrough != nil {
+		snapshot["supports_compaction_item_passthrough"] = *snapshotInfo.SupportsCompactionItemPassthrough
 	}
 	if snapshotInfo.SupportsFunctionTools != nil {
 		snapshot["supports_function_tools"] = *snapshotInfo.SupportsFunctionTools
@@ -218,6 +237,9 @@ func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settin
 	}
 	if snapshotInfo.SupportsStreamOptionsIncludeUsage != nil {
 		snapshot["supports_stream_options_include_usage"] = *snapshotInfo.SupportsStreamOptionsIncludeUsage
+	}
+	if snapshotInfo.SupportsEncryptedReasoningReplay != nil {
+		snapshot["supports_encrypted_reasoning_replay"] = *snapshotInfo.SupportsEncryptedReasoningReplay
 	}
 	if snapshotInfo.Profile != "" {
 		snapshot["profile"] = string(snapshotInfo.Profile)

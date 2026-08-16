@@ -22,6 +22,21 @@ import (
 
 func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.OpenAIResponsesRequest, options service.ResponsesChatCompatibilityOptions) (*dto.Usage, *types.NewAPIError) {
 	if request != nil {
+		hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), request.Input)
+		if err != nil {
+			return nil, newResponsesConvertRequestError(err)
+		}
+		if hasOpaqueEncryptedContent {
+			channelID := 0
+			capability := dto.ResponsesEncryptedReasoningReplayCapabilityUnknown
+			if info != nil {
+				channelID = info.ChannelId
+				capability = info.ChannelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(info.ChannelType)
+			}
+			relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
+			relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+			return nil, relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(channelID)
+		}
 		strippedRequest, stripped := relaycommon.StripResponsesReasoningContext(*request)
 		if stripped {
 			request = &strippedRequest

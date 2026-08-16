@@ -1,4 +1,5 @@
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { URL } from 'node:url';
 
 const host = process.env.COMPACT_E2E_FAKE_UPSTREAM_HOST || '127.0.0.1';
@@ -44,6 +45,7 @@ function summarizeCapture(req, url, body) {
   }
   const input = Array.isArray(parsed?.input) ? parsed.input : [];
   const streamOptions = parsed?.stream_options;
+  const reasoning = parsed?.reasoning;
   return {
     method: req.method,
     url: url.pathname,
@@ -54,8 +56,20 @@ function summarizeCapture(req, url, body) {
     hasCompactionTrigger: input.some((item) => item?.type === 'compaction_trigger'),
     hasStreamOptionsIncludeUsage: streamOptions?.include_usage === true,
     hasStreamOptionsIncludeObfuscation: streamOptions?.include_obfuscation === true,
+    reasoningEffort: typeof reasoning?.effort === 'string' ? reasoning.effort : '',
+    hasEncryptedContent: body.includes('encrypted_content'),
+    bodySha256: crypto.createHash('sha256').update(body).digest('hex'),
     bodyBytes: Buffer.byteLength(body),
   };
+}
+
+function containsValue(value, expected) {
+  if (value === expected) return true;
+  if (Array.isArray(value)) return value.some((item) => containsValue(item, expected));
+  if (value && typeof value === 'object') {
+    return Object.values(value).some((item) => containsValue(item, expected));
+  }
+  return false;
 }
 
 function fakeResponsesBody(parsed) {
@@ -167,6 +181,9 @@ const server = http.createServer(async (req, res) => {
         hasCompactionTrigger: item.hasCompactionTrigger,
         hasStreamOptionsIncludeUsage: item.hasStreamOptionsIncludeUsage,
         hasStreamOptionsIncludeObfuscation: item.hasStreamOptionsIncludeObfuscation,
+        reasoningEffort: item.reasoningEffort,
+        hasEncryptedContent: item.hasEncryptedContent,
+        bodySha256: item.bodySha256,
         bodyBytes: item.bodyBytes,
       })),
     );
@@ -185,6 +202,17 @@ const server = http.createServer(async (req, res) => {
     parsed = null;
   }
   captures.push(summarizeCapture(req, url, body));
+
+  if (containsValue(parsed, 'opaque-native-retry-guard')) {
+    return sendJson(res, 400, {
+      error: {
+        type: 'invalid_request_error',
+        code: 'invalid_encrypted_content',
+        param: 'input[0].encrypted_content',
+        message: 'invalid_encrypted_content',
+      },
+    });
+  }
 
   if (url.pathname === '/v1/models') {
     return sendJson(res, 200, {

@@ -47,7 +47,10 @@ import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-ta
 import { DataTablePagination } from '@/components/data-table/pagination'
 import { StatusBadge } from '@/components/status-badge'
 import { formatResponseTime, handleTestChannel } from '../../lib'
-import type { ChannelTestRuntimeConfig } from '../../types'
+import type {
+  ChannelCapabilitySnapshot,
+  ChannelTestRuntimeConfig,
+} from '../../types'
 import { useChannels } from '../channels-provider'
 
 type ChannelTestDialogProps = {
@@ -96,6 +99,17 @@ const STREAM_INCOMPATIBLE_ENDPOINTS = new Set([
   'jina-rerank',
   'openai-response-compact',
 ])
+
+const COMPACTION_PASSTHROUGH_LABEL_KEYS: Record<
+  NonNullable<
+    ChannelCapabilitySnapshot['compaction_item_passthrough_capability']
+  >,
+  string
+> = {
+  supported: 'compaction: pass',
+  unsupported: 'compaction: block',
+  unknown: 'compaction: unknown',
+}
 
 export function ChannelTestDialog({
   open,
@@ -652,6 +666,16 @@ function TestRuntimeDetails({ result }: { result: TestResult }) {
   } else if (capability?.strips_responses_encrypted_reasoning === false) {
     encryptedReasoningLabel = t('encrypted reasoning: keep')
   }
+  const compactionPassthroughCapability =
+    capability?.compaction_item_passthrough_capability ??
+    (capability?.supports_compaction_item_passthrough === true
+      ? 'supported'
+      : capability?.supports_compaction_item_passthrough === false
+        ? 'unsupported'
+        : undefined)
+  const compactionPassthroughLabel = compactionPassthroughCapability
+    ? t(COMPACTION_PASSTHROUGH_LABEL_KEYS[compactionPassthroughCapability])
+    : ''
   const chips = [
     capability?.supports_responses_compact === true
       ? t('compact: yes')
@@ -663,11 +687,7 @@ function TestRuntimeDetails({ result }: { result: TestResult }) {
       : capability?.supports_rest_previous_response_id === false
         ? t('previous_id: no')
         : '',
-    capability?.supports_compaction_item_passthrough === true
-      ? t('compaction: pass')
-      : capability?.supports_compaction_item_passthrough === false
-        ? t('compaction: block')
-        : '',
+    compactionPassthroughLabel,
     encryptedReasoningLabel,
   ].filter(Boolean)
 

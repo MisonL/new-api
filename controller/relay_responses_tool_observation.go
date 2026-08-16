@@ -16,7 +16,7 @@ import (
 )
 
 func recordResponsesToolCapabilityObservation(c *gin.Context, info *relaycommon.RelayInfo) {
-	if c == nil || info == nil || info.ChannelMeta == nil || info.RelayMode != relayconstant.RelayModeResponses {
+	if c == nil || info == nil || info.ChannelMeta == nil || info.RelayMode != relayconstant.RelayModeResponses || relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
 		return
 	}
 	observation, ok := responsesToolCapabilityObservationFromContext(c, time.Now().UTC())
@@ -39,6 +39,7 @@ func recordResponsesToolCapabilityObservation(c *gin.Context, info *relaycommon.
 
 func recordResponsesStreamOptionsIncludeUsageCapabilityObservation(c *gin.Context, info *relaycommon.RelayInfo) {
 	if c == nil || info == nil || info.ChannelMeta == nil || info.RelayMode != relayconstant.RelayModeResponses ||
+		relaycommon.IsResponsesOpaqueEncryptedReplay(c) ||
 		!common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetry) ||
 		common.GetContextKeyInt(c, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetryChannelID) != info.ChannelMeta.ChannelId {
 		return

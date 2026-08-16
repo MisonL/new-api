@@ -25,7 +25,6 @@ export function PageJumpInput({
   const [pageInput, setPageInput] = useState(`${currentPage}`)
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPageInput(`${currentPage}`)
   }, [currentPage])
 

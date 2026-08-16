@@ -72,6 +72,15 @@ func FindResponsesViaChatRule(ctx context.Context, relayMode int, passThroughGlo
 	if request != nil && IsResponsesChatCompatibilityReference(request.PreviousResponseID) {
 		return nil, ErrResponsesChatCompatibilityPreviousIDUnsupported
 	}
+	if request != nil {
+		hasOpaqueEncryptedContent, err := ResponsesInputHasOpaqueEncryptedContent(ctx, request.Input)
+		if err != nil {
+			return nil, err
+		}
+		if hasOpaqueEncryptedContent {
+			return nil, nil
+		}
+	}
 	if passThroughGlobal || channelSetting.PassThroughBodyEnabled {
 		return nil, nil
 	}

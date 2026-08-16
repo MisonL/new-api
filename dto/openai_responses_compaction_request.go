@@ -80,7 +80,12 @@ func (r OpenAIResponsesCompactionRequest) MarshalJSON() ([]byte, error) {
 }
 
 func (r *OpenAIResponsesCompactionRequest) GetTokenCountMeta() *types.TokenCountMeta {
+	if r == nil {
+		return &types.TokenCountMeta{}
+	}
+
 	var parts []string
+	toolsCount := 0
 	if len(r.Instructions) > 0 {
 		parts = append(parts, string(r.Instructions))
 	}
@@ -101,8 +106,17 @@ func (r *OpenAIResponsesCompactionRequest) GetTokenCountMeta() *types.TokenCount
 	if len(r.Text) > 0 {
 		parts = append(parts, string(r.Text))
 	}
+	if effectiveTools, err := r.ToResponsesRequest().EffectiveTools(); err == nil {
+		toolsCount = len(effectiveTools)
+	}
+	maxTokens := 0
+	if r.MaxOutputTokens != nil {
+		maxTokens = int(*r.MaxOutputTokens)
+	}
 	return &types.TokenCountMeta{
 		CombineText: strings.Join(parts, "\n"),
+		MaxTokens:   maxTokens,
+		ToolsCount:  toolsCount,
 	}
 }
 

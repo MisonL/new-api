@@ -2499,6 +2499,148 @@ func TestShouldAuditParamPathUsesFieldBoundaryPrefixMatching(t *testing.T) {
 	}
 }
 
+func TestValidateBytePreservingParamOverride(t *testing.T) {
+	tests := []struct {
+		name     string
+		override map[string]interface{}
+		wantErr  bool
+	}{
+		{
+			name: "no override",
+		},
+		{
+			name: "unconditional header operations",
+			override: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"mode":  "set_header",
+						"path":  "X-Upstream-Client",
+						"value": "codex",
+					},
+					map[string]interface{}{
+						"mode":  "pass_headers",
+						"value": []interface{}{"Originator"},
+					},
+				},
+			},
+		},
+		{
+			name: "legacy body override",
+			override: map[string]interface{}{
+				"instructions": "must not rewrite opaque replay",
+			},
+			wantErr: true,
+		},
+		{
+			name: "mixed header operation and legacy body override",
+			override: map[string]interface{}{
+				"operations": []interface{}{map[string]interface{}{
+					"mode":  "set_header",
+					"path":  "X-Upstream-Client",
+					"value": "codex",
+				}},
+				"instructions": "must not rewrite opaque replay",
+			},
+			wantErr: true,
+		},
+		{
+			name: "body operation",
+			override: map[string]interface{}{
+				"operations": []interface{}{map[string]interface{}{
+					"mode":  "set",
+					"path":  "instructions",
+					"value": "must not rewrite opaque replay",
+				}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "conditional header operation",
+			override: map[string]interface{}{
+				"operations": []interface{}{map[string]interface{}{
+					"mode": "set_header",
+					"path": "X-Upstream-Client",
+					"conditions": []interface{}{map[string]interface{}{
+						"path":  "model",
+						"mode":  "full",
+						"value": "gpt-5.6-sol",
+					}},
+				}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "non canonical uppercase header operation",
+			override: map[string]interface{}{
+				"operations": []interface{}{map[string]interface{}{
+					"mode":  "SET_HEADER",
+					"path":  "X-Upstream-Client",
+					"value": "codex",
+				}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "non canonical spaced header operation",
+			override: map[string]interface{}{
+				"operations": []interface{}{map[string]interface{}{
+					"mode":  " set_header ",
+					"path":  "X-Upstream-Client",
+					"value": "codex",
+				}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "malformed operations",
+			override: map[string]interface{}{
+				"operations": []interface{}{"not an operation"},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateBytePreservingParamOverride(tt.override)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateBytePreservingParamOverride() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateOpaqueResponsesReplayParamOverridePreservesOpaqueErrors(t *testing.T) {
+	legacyOverride := map[string]interface{}{
+		"instructions": "must not rewrite opaque replay",
+	}
+
+	err := ValidateOpaqueResponsesReplayParamOverride(legacyOverride)
+
+	if err == nil {
+		t.Fatal("expected opaque replay param override to be rejected")
+	}
+	if got, want := err.Error(), "opaque encrypted replay requires header-only param override operations"; got != want {
+		t.Fatalf("unexpected opaque replay error: got %q, want %q", got, want)
+	}
+}
+
+func TestApplyHeaderOnlyParamOverrideWithRelayInfoRejectsMalformedOperations(t *testing.T) {
+	info := &RelayInfo{
+		ChannelMeta: &ChannelMeta{
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{"not an operation"},
+			},
+		},
+	}
+
+	err := ApplyHeaderOnlyParamOverrideWithRelayInfo(info)
+
+	if err == nil {
+		t.Fatal("expected malformed opaque replay param override to be rejected")
+	}
+}
+
 func assertJSONEqual(t *testing.T, want, got string) {
 	t.Helper()
 

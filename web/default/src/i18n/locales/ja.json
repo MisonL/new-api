@@ -4395,6 +4395,7 @@
     "compact mode": "compact モード",
     "compaction: pass": "compaction: 通過",
     "compaction: block": "compaction: ブロック",
+    "compaction: unknown": "compaction: 不明",
     "diagnosis": "診断",
     "last fail": "直近の失敗",
     "last observed": "直近の観測",

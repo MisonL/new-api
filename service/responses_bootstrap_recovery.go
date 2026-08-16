@@ -146,6 +146,9 @@ func EnsureResponsesBootstrapRecoveryState(c *gin.Context, isStream bool) *Respo
 	if state, ok := GetResponsesBootstrapRecoveryState(c); ok {
 		return state
 	}
+	if hasOpaqueResponsesReplayMetadata(c) || relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
+		return nil
+	}
 	if c == nil || c.Request == nil || !isStream || !IsResponsesBootstrapRecoveryPath(c.Request.URL.Path) {
 		return nil
 	}
@@ -179,6 +182,9 @@ func EnsureResponsesBootstrapRecoveryStateFromRequest(c *gin.Context) (*Response
 	if c == nil || c.Request == nil || !IsResponsesBootstrapRecoveryPath(c.Request.URL.Path) {
 		return nil, nil
 	}
+	if hasOpaqueResponsesReplayMetadata(c) {
+		return nil, nil
+	}
 	req := &dto.OpenAIResponsesRequest{}
 	if err := common.UnmarshalBodyReusable(c, req); err != nil {
 		return nil, err
@@ -210,7 +216,14 @@ func MarkResponsesBootstrapPayloadStarted(c *gin.Context) {
 
 // CanContinueResponsesBootstrapRecovery reports whether the request may remain in bootstrap recovery.
 func CanContinueResponsesBootstrapRecovery(c *gin.Context, newAPIError *types.NewAPIError) bool {
+	if hasOpaqueResponsesReplayMetadata(c) {
+		return false
+	}
 	if IsUpstreamRateLimitRetryTerminal(c) {
+		return false
+	}
+	if relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
+		relaycommon.MarkResponsesEncryptedReasoningReplayRetrySuppressed(c)
 		return false
 	}
 	state, ok := GetResponsesBootstrapRecoveryState(c)
@@ -237,6 +250,11 @@ func CanContinueResponsesBootstrapRecovery(c *gin.Context, newAPIError *types.Ne
 	}
 	_, ok = state.RetryableStatusCodes[newAPIError.StatusCode]
 	return ok
+}
+
+func hasOpaqueResponsesReplayMetadata(c *gin.Context) bool {
+	metadata, ok := common.GetResponsesRequestMetadata(c)
+	return ok && metadata.HasOpaqueEncryptedContent
 }
 
 func ShouldWaitForResponsesBootstrapRecoverySelection(c *gin.Context, usingGroup string, modelName string, state *ResponsesBootstrapRecoveryState) bool {

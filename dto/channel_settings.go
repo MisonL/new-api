@@ -63,6 +63,22 @@ const (
 	ResponsesReasoningContextCapabilityUnsupported ResponsesReasoningContextCapability = "unsupported"
 )
 
+type ResponsesCompactionItemPassthroughCapability string
+
+const (
+	ResponsesCompactionItemPassthroughCapabilityUnknown     ResponsesCompactionItemPassthroughCapability = "unknown"
+	ResponsesCompactionItemPassthroughCapabilitySupported   ResponsesCompactionItemPassthroughCapability = "supported"
+	ResponsesCompactionItemPassthroughCapabilityUnsupported ResponsesCompactionItemPassthroughCapability = "unsupported"
+)
+
+type ResponsesEncryptedReasoningReplayCapability string
+
+const (
+	ResponsesEncryptedReasoningReplayCapabilityUnknown     ResponsesEncryptedReasoningReplayCapability = "unknown"
+	ResponsesEncryptedReasoningReplayCapabilitySupported   ResponsesEncryptedReasoningReplayCapability = "supported"
+	ResponsesEncryptedReasoningReplayCapabilityUnsupported ResponsesEncryptedReasoningReplayCapability = "unsupported"
+)
+
 const DefaultResponsesCompactSyntheticFallbackModel = "gpt-5.4"
 
 type ResponsesCapabilityObservation struct {
@@ -77,6 +93,13 @@ type ResponsesToolCapabilityObservation struct {
 	CustomToolCall    bool  `json:"custom_tool_call,omitempty"`
 	NamespaceToolCall bool  `json:"namespace_tool_call,omitempty"`
 	ToolSearchCall    bool  `json:"tool_search_call,omitempty"`
+}
+
+// ResponsesRoutingChannelSkip records a channel rejected before an upstream
+// request because it cannot safely handle the Responses request shape.
+type ResponsesRoutingChannelSkip struct {
+	ChannelID int    `json:"channel_id"`
+	Reason    string `json:"reason"`
 }
 
 func (o ResponsesToolCapabilityObservation) HasEvidence() bool {
@@ -99,30 +122,34 @@ type ResponsesChannelCapabilityRegistry struct {
 	SupportsToolSearch                *bool                               `json:"supports_tool_search,omitempty"`
 	SupportsReasoningContext          *bool                               `json:"supports_reasoning_context,omitempty"`
 	SupportsStreamOptionsIncludeUsage *bool                               `json:"supports_stream_options_include_usage,omitempty"`
+	SupportsEncryptedReasoningReplay  *bool                               `json:"supports_encrypted_reasoning_replay,omitempty"`
 }
 
 type ResponsesChannelCapabilitySnapshot struct {
-	Source                            string
-	Profile                           ResponsesUpstreamProfile
-	CompactModeSetting                ResponsesCompactMode
-	CompactModeEffective              ResponsesCompactMode
-	SupportsResponses                 bool
-	SupportsResponsesCompact          bool
-	SupportsChat                      bool
-	SupportsRestPreviousResponseID    bool
-	SupportsCompactionItemPassthrough bool
-	SupportsFunctionTools             *bool
-	SupportsCustomTools               *bool
-	SupportsNamespaceTools            bool
-	SupportsToolSearch                bool
-	ReasoningContextCapability        ResponsesReasoningContextCapability
-	SupportsReasoningContext          *bool
-	SupportsStreamOptionsIncludeUsage *bool
-	StripsResponsesEncryptedReasoning bool
-	StripsResponsesReasoningContext   bool
-	Observed                          *ResponsesCapabilityObservation
-	Probe                             *ResponsesCapabilityObservation
-	ObservedTools                     *ResponsesToolCapabilityObservation
+	Source                              string
+	Profile                             ResponsesUpstreamProfile
+	CompactModeSetting                  ResponsesCompactMode
+	CompactModeEffective                ResponsesCompactMode
+	SupportsResponses                   bool
+	SupportsResponsesCompact            bool
+	SupportsChat                        bool
+	SupportsRestPreviousResponseID      bool
+	CompactionItemPassthroughCapability ResponsesCompactionItemPassthroughCapability
+	SupportsCompactionItemPassthrough   *bool
+	SupportsFunctionTools               *bool
+	SupportsCustomTools                 *bool
+	SupportsNamespaceTools              bool
+	SupportsToolSearch                  bool
+	ReasoningContextCapability          ResponsesReasoningContextCapability
+	SupportsReasoningContext            *bool
+	SupportsStreamOptionsIncludeUsage   *bool
+	EncryptedReasoningReplayCapability  ResponsesEncryptedReasoningReplayCapability
+	SupportsEncryptedReasoningReplay    *bool
+	StripsResponsesEncryptedReasoning   bool
+	StripsResponsesReasoningContext     bool
+	Observed                            *ResponsesCapabilityObservation
+	Probe                               *ResponsesCapabilityObservation
+	ObservedTools                       *ResponsesToolCapabilityObservation
 }
 
 const (
@@ -259,7 +286,6 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 		SupportsResponsesCompact:          defaultSupportsResponsesCompactCapability(channelType, s, effectiveMode, profile),
 		SupportsChat:                      defaultSupportsChatCapability(channelType, profile),
 		SupportsRestPreviousResponseID:    defaultSupportsRESTPreviousResponseIDCapability(s, profile),
-		SupportsCompactionItemPassthrough: defaultSupportsCompactionItemPassthroughCapability(profile),
 		SupportsFunctionTools:             defaultSupportsFunctionToolsCapability(profile),
 		SupportsCustomTools:               defaultSupportsCustomToolsCapability(profile),
 		SupportsNamespaceTools:            defaultSupportsNamespaceToolsCapability(profile),
@@ -286,6 +312,12 @@ func (s *ChannelOtherSettings) ResolveResponsesChannelCapability(channelType int
 		}
 		applyCapabilityOverrides(&snapshot, registry)
 	}
+	// Recompute tri-state replay fields after registry overrides so the snapshot
+	// matches routing rather than a lossy boolean default.
+	snapshot.CompactionItemPassthroughCapability = s.ResolveResponsesCompactionItemPassthroughCapability(channelType)
+	snapshot.SupportsCompactionItemPassthrough = responsesCompactionItemPassthroughSupportPointer(snapshot.CompactionItemPassthroughCapability)
+	snapshot.EncryptedReasoningReplayCapability = s.ResolveResponsesEncryptedReasoningReplayCapability(channelType)
+	snapshot.SupportsEncryptedReasoningReplay = responsesEncryptedReasoningReplaySupportPointer(snapshot.EncryptedReasoningReplayCapability)
 	if snapshot.Source == "safe_default" && (profile != "" || s.explicitResponsesCapabilityConfigured()) {
 		snapshot.Source = "explicit_settings"
 	}
@@ -379,9 +411,6 @@ func applyCapabilityOverrides(snapshot *ResponsesChannelCapabilitySnapshot, regi
 	if registry.SupportsRestPreviousResponseID != nil {
 		snapshot.SupportsRestPreviousResponseID = *registry.SupportsRestPreviousResponseID
 	}
-	if registry.SupportsCompactionItemPassthrough != nil {
-		snapshot.SupportsCompactionItemPassthrough = *registry.SupportsCompactionItemPassthrough
-	}
 	if registry.SupportsFunctionTools != nil {
 		snapshot.SupportsFunctionTools = cloneBool(registry.SupportsFunctionTools)
 	}
@@ -425,6 +454,27 @@ func responsesReasoningContextSupportPointer(capability ResponsesReasoningContex
 	return &supported
 }
 
+func responsesCompactionItemPassthroughSupportPointer(capability ResponsesCompactionItemPassthroughCapability) *bool {
+	if capability == ResponsesCompactionItemPassthroughCapabilityUnknown {
+		return nil
+	}
+	supported := capability == ResponsesCompactionItemPassthroughCapabilitySupported
+	return &supported
+}
+
+func (s *ChannelOtherSettings) ResolveResponsesCompactionItemPassthroughCapability(channelType int) ResponsesCompactionItemPassthroughCapability {
+	if s != nil {
+		if registry := s.responsesCapabilityRegistry(); registry != nil && registry.SupportsCompactionItemPassthrough != nil {
+			if *registry.SupportsCompactionItemPassthrough {
+				return ResponsesCompactionItemPassthroughCapabilitySupported
+			}
+			return ResponsesCompactionItemPassthroughCapabilityUnsupported
+		}
+	}
+
+	return defaultResponsesCompactionItemPassthroughCapability(channelType, s.NormalizedResponsesUpstreamProfile())
+}
+
 func (s *ChannelOtherSettings) ResolveResponsesReasoningContextCapability(channelType int) ResponsesReasoningContextCapability {
 	if s != nil {
 		if registry := s.responsesCapabilityRegistry(); registry != nil && registry.SupportsReasoningContext != nil {
@@ -443,8 +493,7 @@ func (s *ChannelOtherSettings) ResolveResponsesReasoningContextCapability(channe
 		ResponsesUpstreamProfileTrustedNewAPI,
 		ResponsesUpstreamProfileSub2APIWSV2:
 		return ResponsesReasoningContextCapabilitySupported
-	case ResponsesUpstreamProfileSub2APIHTTP,
-		ResponsesUpstreamProfileGenericProxy,
+	case ResponsesUpstreamProfileGenericProxy,
 		ResponsesUpstreamProfileChatOnlyProxy:
 		return ResponsesReasoningContextCapabilityUnsupported
 	default:
@@ -457,6 +506,50 @@ func (s *ChannelOtherSettings) ResolveResponsesReasoningContextCapability(channe
 
 func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesReasoningContext(channelType int) bool {
 	return s.ResolveResponsesReasoningContextCapability(channelType) == ResponsesReasoningContextCapabilityUnsupported
+}
+
+func responsesEncryptedReasoningReplaySupportPointer(capability ResponsesEncryptedReasoningReplayCapability) *bool {
+	if capability == ResponsesEncryptedReasoningReplayCapabilityUnknown {
+		return nil
+	}
+	supported := capability == ResponsesEncryptedReasoningReplayCapabilitySupported
+	return &supported
+}
+
+func (s *ChannelOtherSettings) ResolveResponsesEncryptedReasoningReplayCapability(channelType int) ResponsesEncryptedReasoningReplayCapability {
+	if s != nil {
+		if s.StripCodexEncryptedContext {
+			return ResponsesEncryptedReasoningReplayCapabilityUnsupported
+		}
+		if registry := s.responsesCapabilityRegistry(); registry != nil && registry.SupportsEncryptedReasoningReplay != nil {
+			if *registry.SupportsEncryptedReasoningReplay {
+				return ResponsesEncryptedReasoningReplayCapabilitySupported
+			}
+			return ResponsesEncryptedReasoningReplayCapabilityUnsupported
+		}
+	}
+
+	profile := s.NormalizedResponsesUpstreamProfile()
+	switch profile {
+	case ResponsesUpstreamProfileOfficialOpenAI,
+		ResponsesUpstreamProfileOfficialNewAPI,
+		ResponsesUpstreamProfileSameClusterNewAPI,
+		ResponsesUpstreamProfileTrustedNewAPI,
+		ResponsesUpstreamProfileSub2APIWSV2:
+		return ResponsesEncryptedReasoningReplayCapabilitySupported
+	case ResponsesUpstreamProfileGenericProxy,
+		ResponsesUpstreamProfileChatOnlyProxy:
+		return ResponsesEncryptedReasoningReplayCapabilityUnsupported
+	default:
+		if profile == "" && channelType == constant.ChannelTypeCodex {
+			return ResponsesEncryptedReasoningReplayCapabilitySupported
+		}
+		return ResponsesEncryptedReasoningReplayCapabilityUnknown
+	}
+}
+
+func (s *ChannelOtherSettings) ExplicitlyDisablesResponsesEncryptedReasoningReplay(channelType int) bool {
+	return s.ResolveResponsesEncryptedReasoningReplayCapability(channelType) == ResponsesEncryptedReasoningReplayCapabilityUnsupported
 }
 
 func defaultSupportsResponsesCapability(channelType int) bool {
@@ -510,15 +603,22 @@ func defaultSupportsRESTPreviousResponseIDCapability(settings *ChannelOtherSetti
 	}
 }
 
-func defaultSupportsCompactionItemPassthroughCapability(profile ResponsesUpstreamProfile) bool {
+func defaultResponsesCompactionItemPassthroughCapability(channelType int, profile ResponsesUpstreamProfile) ResponsesCompactionItemPassthroughCapability {
 	switch profile {
-	case ResponsesUpstreamProfileGenericOpenAI,
-		ResponsesUpstreamProfileSub2APIHTTP,
-		ResponsesUpstreamProfileGenericProxy,
+	case ResponsesUpstreamProfileOfficialOpenAI,
+		ResponsesUpstreamProfileOfficialNewAPI,
+		ResponsesUpstreamProfileSameClusterNewAPI,
+		ResponsesUpstreamProfileTrustedNewAPI,
+		ResponsesUpstreamProfileSub2APIWSV2:
+		return ResponsesCompactionItemPassthroughCapabilitySupported
+	case ResponsesUpstreamProfileGenericProxy,
 		ResponsesUpstreamProfileChatOnlyProxy:
-		return false
+		return ResponsesCompactionItemPassthroughCapabilityUnsupported
 	default:
-		return true
+		if profile == "" && channelType == constant.ChannelTypeCodex {
+			return ResponsesCompactionItemPassthroughCapabilitySupported
+		}
+		return ResponsesCompactionItemPassthroughCapabilityUnknown
 	}
 }
 
@@ -568,9 +668,7 @@ func defaultSupportsToolSearchCapability(profile ResponsesUpstreamProfile) bool 
 }
 
 func (s *ChannelOtherSettings) HasResponsesEncryptedReasoningUnsupportedProfile() bool {
-	profile := s.NormalizedResponsesUpstreamProfile()
-	return s.HasResponsesProxyCompatibilityProfile() ||
-		profile == ResponsesUpstreamProfileSub2APIHTTP
+	return s.HasResponsesProxyCompatibilityProfile()
 }
 
 func (s *ChannelOtherSettings) ShouldStripResponsesEncryptedReasoning() bool {

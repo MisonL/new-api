@@ -54,6 +54,13 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
+	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), request.Input)
+	if err != nil {
+		return nil, err
+	}
+	if hasOpaqueEncryptedContent {
+		return request, nil
+	}
 	isCompact := info != nil && info.RelayMode == relayconstant.RelayModeResponsesCompact
 	hasSyntheticReference, err := service.HasLocalSyntheticCompactReferenceWithContext(relaycommon.GinRequestContext(c), request)
 	if err != nil {

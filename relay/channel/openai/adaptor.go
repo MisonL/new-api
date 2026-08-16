@@ -755,6 +755,13 @@ func isJSONRequest(c *gin.Context) bool {
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
+	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), request.Input)
+	if err != nil {
+		return nil, err
+	}
+	if hasOpaqueEncryptedContent {
+		return request, nil
+	}
 	normalizedInput, normalizeResult, err := relaycommon.NormalizeResponsesInputItemIDs(request.Input)
 	if err != nil {
 		return nil, err
@@ -764,22 +771,33 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		logger.LogInfo(c, fmt.Sprintf("responses invalid input item ids removed: count=%d model=%s", normalizeResult.RemovedCount, request.Model))
 	}
 
-	//  转换模型推理力度后缀
-	effort, originModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
-	if effort != "" {
-		if request.Reasoning == nil {
-			request.Reasoning = &dto.Reasoning{
-				Effort: effort,
-			}
-		} else {
-			request.Reasoning.Effort = effort
+	// Preserve effort from the logical model after model mapping. A mapped
+	// upstream model remains authoritative, while unmapped suffix models keep
+	// the established base-model conversion behavior.
+	if requestWithLogicalEffort, applied := relaycommon.ApplyResponsesLogicalModelReasoningEffort(info, request); applied {
+		request = requestWithLogicalEffort
+		mappedModel := info != nil && info.ChannelMeta != nil && info.IsModelMapped
+		if !mappedModel {
+			_, baseModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
+			request.Model = baseModel
 		}
-		request.Model = originModel
+	} else {
+		effort, originModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
+		if effort != "" {
+			if request.Reasoning == nil {
+				request.Reasoning = &dto.Reasoning{
+					Effort: effort,
+				}
+			} else {
+				request.Reasoning.Effort = effort
+			}
+			request.Model = originModel
+		}
 	}
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
-	request = applyResponsesReasoningContextCapability(c, info, request)
+	request = relaycommon.ApplyResponsesReasoningContextCapability(c, info, request)
 	stripCodexContext := relaycommon.ShouldStripCodexEncryptedContext(info)
 	syntheticContinuation := false
 	if relaycommon.IsOpenAICompatibleResponses(info) &&
@@ -853,50 +871,6 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		return convertedRequest, err
 	}
 	return request, nil
-}
-
-func applyResponsesReasoningContextCapability(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) dto.OpenAIResponsesRequest {
-	if request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0 {
-		return request
-	}
-
-	channelType := 0
-	channelID := 0
-	model := request.Model
-	settings := dto.ChannelOtherSettings{}
-	if info != nil {
-		if info.OriginModelName != "" {
-			model = info.OriginModelName
-		}
-		if info.ChannelMeta != nil {
-			channelType = info.ChannelType
-			channelID = info.ChannelId
-			settings = info.ChannelOtherSettings
-		}
-	}
-
-	capability := settings.ResolveResponsesReasoningContextCapability(channelType)
-	action := "forwarded_unverified_capability"
-	switch capability {
-	case dto.ResponsesReasoningContextCapabilitySupported:
-		action = "forwarded_supported_capability"
-	case dto.ResponsesReasoningContextCapabilityUnsupported:
-		strippedRequest, stripped := relaycommon.StripResponsesReasoningContext(request)
-		if stripped {
-			request = strippedRequest
-			action = "stripped_unsupported_capability"
-			common.SysLog(fmt.Sprintf(
-				"responses reasoning context stripped by channel capability: channel_id=%d model=%s profile=%s",
-				channelID,
-				model,
-				settings.NormalizedResponsesUpstreamProfile(),
-			))
-		}
-	}
-	if c != nil {
-		common.SetContextKey(c, constant.ContextKeyResponsesReasoningContextAction, action)
-	}
-	return request
 }
 
 func markResponsesCompactVisibleOnlyForUpstreamProfile(c *gin.Context, requestContext context.Context) context.Context {

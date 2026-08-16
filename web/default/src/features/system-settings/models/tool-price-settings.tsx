@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import { Code2, Copy, Eye, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -73,6 +73,16 @@ function parseInitialPrices(
   return { ...DEFAULT_PRICES }
 }
 
+function createInitialToolPriceState(defaultValue: string) {
+  const prices = parseInitialPrices(defaultValue)
+  const rows = objectToRows(prices)
+  return {
+    rows,
+    jsonText: JSON.stringify(prices, null, 2),
+    nextRowId: rows.length + 1,
+  }
+}
+
 type ToolPriceSettingsProps = {
   defaultValue: string
 }
@@ -83,19 +93,14 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
-  const [rows, setRows] = useState<ToolPriceRow[]>([])
-  const [jsonText, setJsonText] = useState('')
+  const initialState = useMemo(
+    () => createInitialToolPriceState(defaultValue),
+    [defaultValue]
+  )
+  const [rows, setRows] = useState<ToolPriceRow[]>(initialState.rows)
+  const [jsonText, setJsonText] = useState(initialState.jsonText)
   const [jsonError, setJsonError] = useState('')
-  const [nextRowId, setNextRowId] = useState(1)
-
-  useEffect(() => {
-    const prices = parseInitialPrices(defaultValue)
-    const initialRows = objectToRows(prices)
-    setRows(initialRows)
-    setJsonText(JSON.stringify(prices, null, 2))
-    setJsonError('')
-    setNextRowId(initialRows.length + 1)
-  }, [defaultValue])
+  const [nextRowId, setNextRowId] = useState(initialState.nextRowId)
 
   const currentPrices = useMemo(() => rowsToObject(rows), [rows])
 

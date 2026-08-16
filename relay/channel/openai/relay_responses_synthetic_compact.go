@@ -2,7 +2,6 @@ package openai
 
 import (
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
@@ -107,17 +106,22 @@ func OaiSyntheticRemoteResponsesCompactionHandler(c *gin.Context, info *relaycom
 
 func buildSyntheticResponsesCompaction(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.OpenAIResponsesCompactionResponse, *dto.Usage, *types.NewAPIError) {
 
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+	responseBody, readErr := readResponsesNonStreamingResponseBody(c, resp.Body)
+	if readErr != nil {
+		return nil, nil, readErr
 	}
 
 	var responsesResp dto.OpenAIResponsesResponse
 	if err := common.Unmarshal(responseBody, &responsesResp); err != nil {
+		if openAIError, found, sseErr := responsesSSETerminalError(responseBody); sseErr != nil {
+			return nil, nil, types.NewOpenAIError(sseErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		} else if found {
+			return nil, nil, newResponsesUpstreamOpenAIError(resp.StatusCode, openAIError)
+		}
 		return nil, nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	if oaiError := responsesResp.GetOpenAIError(); responsesCompactOpenAIErrorHasContent(oaiError) {
-		return nil, nil, types.WithOpenAIError(*oaiError, responsesCompactOpenAIErrorStatus(resp.StatusCode, oaiError))
+		return nil, nil, newResponsesUpstreamOpenAIError(resp.StatusCode, oaiError)
 	}
 
 	model := ""

@@ -258,6 +258,43 @@ func TestOaiSyntheticResponsesCompactionHandlerNormalizesHTTP200ErrorBody(t *tes
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestOaiSyntheticResponsesCompactionHandlersPreserveDirectFailedContextWindowErrorFromSSE(t *testing.T) {
+	handlers := []struct {
+		name    string
+		handler func(*gin.Context, *relaycommon.RelayInfo, *http.Response) (*dto.Usage, *types.NewAPIError)
+	}{
+		{name: "native synthetic compact", handler: OaiSyntheticResponsesCompactionHandler},
+		{name: "remote synthetic compact", handler: OaiSyntheticRemoteResponsesCompactionHandler},
+	}
+
+	for _, tt := range handlers {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+					`event: response.failed`,
+					`data: {"type":"response.failed","error":{"message":"Your input exceeds the context window of this model.","type":"upstream_error","code":"context_length_exceeded"}}`,
+					``,
+				}, "\n"))),
+			}
+
+			usage, err := tt.handler(c, nil, resp)
+
+			require.Nil(t, usage)
+			require.NotNil(t, err)
+			require.Equal(t, http.StatusBadRequest, err.StatusCode)
+			require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
+			require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
+			require.Contains(t, err.Error(), "context window")
+			require.Empty(t, recorder.Body.String())
+		})
+	}
+}
+
 func TestOaiSyntheticResponsesCompactionHandlerRejectsMalformedJSON(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

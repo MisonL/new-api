@@ -4395,6 +4395,7 @@
     "compact mode": "compact 模式",
     "compaction: pass": "compaction: 透传",
     "compaction: block": "compaction: 阻断",
+    "compaction: unknown": "compaction: 未知",
     "diagnosis": "诊断",
     "last fail": "最近失败",
     "last observed": "最近观测",

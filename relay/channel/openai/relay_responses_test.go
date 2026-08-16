@@ -70,6 +70,105 @@ func TestOaiResponsesHandlerRejectsRemoteCompactionWithoutOutput(t *testing.T) {
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestOaiResponsesHandlerPreservesContextWindowErrorFromNonStreamingSSE(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`event: response.failed`,
+			`data: {"type":"response.failed","response":{"id":"resp_context","error":{"message":"Input exceeds this model context window.","type":"upstream_error","code":"context_length_exceeded"}}}`,
+			``,
+		}, "\n"))),
+	}
+
+	usage, err := OaiResponsesHandler(c, nil, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
+	require.Contains(t, err.Error(), "context window")
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesHandlerPreservesDirectFailedContextWindowErrorFromNonStreamingSSE(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`event: response.failed`,
+			`data: {"type":"response.failed","error":{"message":"Your input exceeds the context window of this model.","type":"upstream_error","code":"context_length_exceeded"}}`,
+			``,
+		}, "\n"))),
+	}
+
+	usage, err := OaiResponsesHandler(c, nil, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
+	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
+	require.Contains(t, err.Error(), "context window")
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesHandlerNormalizesHTTP200ContextWindowError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{
+			"error": {
+				"message": "Your input exceeds the context window of this model.",
+				"type": "upstream_error",
+				"code": "context_length_exceeded"
+			}
+		}`)),
+	}
+
+	usage, err := OaiResponsesHandler(c, nil, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
+	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesHandlerPreservesParameterErrorFromNonStreamingSSE(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`data: {"type":"response.error","error":{"message":"Unknown parameter: 'input[0].namespace'.","type":"invalid_request_error","param":"input[0].namespace","code":"unknown_parameter"}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n"))),
+	}
+
+	usage, err := OaiResponsesHandler(c, nil, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("unknown_parameter"), err.GetErrorCode())
+	require.Contains(t, err.Error(), "Unknown parameter")
+	require.Empty(t, recorder.Body.String())
+}
+
 func TestValidateRemoteResponsesCompactionOutputRejectsMalformedEncryptedContent(t *testing.T) {
 	for _, encryptedContent := range []string{`null`, `"   "`, `{"opaque":true}`, `123`, `false`} {
 		t.Run(encryptedContent, func(t *testing.T) {
@@ -622,6 +721,36 @@ func TestOaiResponsesStreamHandlerRejectsExplicitEmptyCompletedOutputSnapshot(t 
 
 	usage, err := OaiResponsesStreamHandler(c, info, resp)
 
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadGateway, err.StatusCode)
+	require.Contains(t, err.Error(), "expected exactly one compaction output")
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesStreamHandlerUsesObservedCompactionWhenCompletedOutputIsAbsent(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"opaque"}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_remote_compact_without_output","object":"response","usage":{"input_tokens":12,"output_tokens":0,"total_tokens":12}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		Request:      &dto.OpenAIResponsesRequest{Input: []byte(`[{"type":"compaction_trigger"}]`)},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
 	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 12, usage.PromptTokens)
@@ -847,6 +976,36 @@ func TestOaiResponsesStreamHandlerPreservesFailedResponseError(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), "Unknown parameter")
 }
 
+func TestOaiResponsesStreamHandlerPreservesDirectFailedContextWindowError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.failed","error":{"message":"Your input exceeds the context window of this model.","type":"upstream_error","code":"context_length_exceeded"}}`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:  &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.6"},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
+	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
+	require.Contains(t, err.Error(), "context window")
+	require.Empty(t, recorder.Body.String())
+}
+
 func TestOaiResponsesStreamHandlerMapsErrorEventStatus(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -980,6 +1139,90 @@ func TestOaiResponsesToChatHandlerCountsBuiltInToolsFromResponse(t *testing.T) {
 	require.True(t, c.GetBool("image_generation_call"))
 	require.Equal(t, "low", c.GetString("image_generation_call_quality"))
 	require.Equal(t, "1024x1024", c.GetString("image_generation_call_size"))
+}
+
+func TestOaiResponsesToChatHandlerNormalizesHTTP200ContextWindowError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{
+			"error": {
+				"message": "Your input exceeds the context window of this model.",
+				"type": "upstream_error",
+				"code": "context_length_exceeded"
+			}
+		}`)),
+	}
+	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI}
+
+	usage, err := OaiResponsesToChatHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
+	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesToChatHandlerPreservesDirectFailedContextWindowErrorFromNonStreamingSSE(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`event: response.failed`,
+			`data: {"type":"response.failed","error":{"message":"Your input exceeds the context window of this model.","type":"upstream_error","code":"context_length_exceeded"}}`,
+			``,
+		}, "\n"))),
+	}
+	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI}
+
+	usage, err := OaiResponsesToChatHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
+	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
+	require.Contains(t, err.Error(), "context window")
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesToChatStreamHandlerPreservesDirectFailedContextWindowError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.failed","error":{"message":"Your input exceeds the context window of this model.","type":"upstream_error","code":"context_length_exceeded"}}`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		RelayFormat:  types.RelayFormatOpenAI,
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+		ChannelMeta:  &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.6"},
+	}
+
+	usage, err := OaiResponsesToChatStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
+	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
+	require.Contains(t, err.Error(), "context window")
+	require.Empty(t, recorder.Body.String())
 }
 
 func TestOaiResponsesToChatStreamHandlerMapsReasoningSummaryPart(t *testing.T) {

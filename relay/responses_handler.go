@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -42,6 +43,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 
 	var responsesReq *dto.OpenAIResponsesRequest
 	switch req := info.Request.(type) {
+	case *dto.OpaqueOpenAIResponsesRequest:
+		return relayOpaqueOpenAIResponsesRequest(c, info, req)
 	case *dto.OpenAIResponsesRequest:
 		responsesReq = req
 	case *dto.OpenAIResponsesCompactionRequest:
@@ -57,6 +60,22 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if service.IsResponsesChatCompatibilityReference(responsesReq.PreviousResponseID) {
 		return newResponsesConvertRequestError(service.ErrResponsesChatCompatibilityPreviousIDUnsupported)
 	}
+	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), responsesReq.Input)
+	if err != nil {
+		return newResponsesConvertRequestError(err)
+	}
+	if hasOpaqueEncryptedContent {
+		capability := info.ChannelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(info.ChannelType)
+		relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
+		if capability == dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported {
+			return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(info.ChannelId)
+		}
+		if info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+			!relaycommon.SupportsNativeOpaqueResponsesCompact(info.ChannelType, info.ChannelOtherSettings) {
+			relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+			return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(info.ChannelId)
+		}
+	}
 
 	request, err := common.DeepCopy(responsesReq)
 	if err != nil {
@@ -67,7 +86,14 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
-	applyResponsesCompactSummaryModelOverride(c, info, request)
+	applyResponsesCompactSummaryModelOverride(c, info, request, hasOpaqueEncryptedContent)
+	if !hasOpaqueEncryptedContent {
+		requestWithLogicalEffort, applied := relaycommon.ApplyResponsesLogicalModelReasoningEffort(info, *request)
+		if applied {
+			request = &requestWithLogicalEffort
+			info.ReasoningEffort = request.Reasoning.Effort
+		}
+	}
 
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {
@@ -75,7 +101,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	adaptor.Init(info)
 	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
-	compatibilityRequest, contextCompactionResult, err := prepareResponsesRequestForChatCompatibility(info, request)
+	compatibilityRequest, contextCompactionResult, err := prepareResponsesRequestForChatCompatibility(relaycommon.GinRequestContext(c), info, request)
 	if err != nil {
 		return newResponsesConvertRequestError(err)
 	}
@@ -98,11 +124,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if newApiErr != nil {
 			return newApiErr
 		}
-
-		if strings.HasPrefix(info.OriginModelName, "gpt-4o-audio") {
-			service.PostAudioConsumeQuota(c, info, usage, "")
-		} else {
-			service.PostTextConsumeQuota(c, info, usage, nil)
+		if settleErr := settleOpenAIResponsesUsage(c, info, usage); settleErr != nil {
+			return settleErr
 		}
 		return nil
 	}
@@ -111,39 +134,120 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if newAPIError != nil {
 		return newAPIError
 	}
-
-	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
-		originModelName := info.OriginModelName
-		originPriceData := info.PriceData
-		normalizeResponsesCompactUsage(info, usageDto)
-
-		_, err := helper.ModelPriceHelper(c, info, info.GetEstimatePromptTokens(), &types.TokenCountMeta{})
-		if err != nil {
-			info.OriginModelName = originModelName
-			info.PriceData = originPriceData
-			return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry(), types.ErrOptionWithStatusCode(http.StatusBadRequest))
-		}
-		service.PostTextConsumeQuota(c, info, usageDto, nil)
-
-		info.OriginModelName = originModelName
-		info.PriceData = originPriceData
-		return nil
-	}
-
-	if strings.HasPrefix(info.OriginModelName, "gpt-4o-audio") {
-		service.PostAudioConsumeQuota(c, info, usageDto, "")
-	} else {
-		service.PostTextConsumeQuota(c, info, usageDto, nil)
+	if settleErr := settleOpenAIResponsesUsage(c, info, usageDto); settleErr != nil {
+		return settleErr
 	}
 	return nil
 }
 
-func prepareResponsesRequestForChatCompatibility(info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) (*dto.OpenAIResponsesRequest, relaycommon.ResponsesContextCompactionNormalizeResult, error) {
+func relayOpaqueOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpaqueOpenAIResponsesRequest) *types.NewAPIError {
+	if err := validateOpaqueOpenAIResponsesReplay(c, info, request); err != nil {
+		return err
+	}
+	if err := helper.ModelMappedHelper(c, info, request); err != nil {
+		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
+	}
+
+	adaptor := GetAdaptor(info.ApiType)
+	if adaptor == nil {
+		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
+	}
+	adaptor.Init(info)
+
+	usage, newAPIError := executeOpaqueOpenAIResponsesRequest(c, info, adaptor, request)
+	if newAPIError != nil {
+		return newAPIError
+	}
+	if settleErr := settleOpenAIResponsesUsage(c, info, usage); settleErr != nil {
+		return settleErr
+	}
+	return nil
+}
+
+const opaqueOpenAIResponsesReplayValidationContextKey = "opaque_openai_responses_replay_validation"
+
+type opaqueOpenAIResponsesReplayValidation struct {
+	request *dto.OpaqueOpenAIResponsesRequest
+	info    *relaycommon.RelayInfo
+}
+
+func validateOpaqueOpenAIResponsesReplay(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpaqueOpenAIResponsesRequest) *types.NewAPIError {
+	if request == nil {
+		return types.NewErrorWithStatusCode(
+			errors.New("opaque Responses request is required"),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	metadata := request.OpaqueResponsesMetadata()
+	if !metadata.ModelPresent || strings.TrimSpace(metadata.Model) == "" {
+		return types.NewErrorWithStatusCode(
+			errors.New("model is required"),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	if !metadata.HasOpaqueEncryptedContent {
+		return types.NewErrorWithStatusCode(
+			errors.New("opaque Responses request is missing encrypted replay metadata"),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+
+	capability := dto.ResponsesEncryptedReasoningReplayCapabilityUnknown
+	if info != nil {
+		capability = info.ChannelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(info.ChannelType)
+	}
+	relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
+	if capability == dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported {
+		return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(info.ChannelId)
+	}
+	if info != nil && info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+		!relaycommon.SupportsNativeOpaqueResponsesCompact(info.ChannelType, info.ChannelOtherSettings) {
+		relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+		return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(info.ChannelId)
+	}
+	if metadata.HasCompactionItem && info != nil &&
+		info.ChannelOtherSettings.ResolveResponsesCompactionItemPassthroughCapability(info.ChannelType) == dto.ResponsesCompactionItemPassthroughCapabilityUnsupported {
+		relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+		return types.NewErrorWithStatusCode(
+			errors.New("opaque Responses compaction item cannot be replayed by the selected upstream"),
+			types.ErrorCodeChannelModelMappedError,
+			http.StatusServiceUnavailable,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	if c != nil {
+		c.Set(opaqueOpenAIResponsesReplayValidationContextKey, opaqueOpenAIResponsesReplayValidation{
+			request: request,
+			info:    info,
+		})
+	}
+	return nil
+}
+
+func hasValidatedOpaqueOpenAIResponsesReplay(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpaqueOpenAIResponsesRequest) bool {
+	if c == nil {
+		return false
+	}
+	value, exists := c.Get(opaqueOpenAIResponsesReplayValidationContextKey)
+	if !exists {
+		return false
+	}
+	validation, ok := value.(opaqueOpenAIResponsesReplayValidation)
+	return ok && validation.request == request && validation.info == info
+}
+
+func prepareResponsesRequestForChatCompatibility(ctx context.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) (*dto.OpenAIResponsesRequest, relaycommon.ResponsesContextCompactionNormalizeResult, error) {
 	result := relaycommon.ResponsesContextCompactionNormalizeResult{}
 	if request == nil || !relaycommon.IsOpenAICompatibleResponses(info) {
 		return request, result, nil
 	}
-	normalizedRequest, result, err := relaycommon.NormalizeContextCompactionForResponsesRequest(*request)
+	normalizedRequest, result, err := service.NormalizeContextCompactionForResponsesRequest(ctx, *request)
 	if err != nil || result.ChangedCount() == 0 {
 		return request, result, err
 	}
@@ -177,6 +281,37 @@ func normalizeResponsesCompactUsage(info *relaycommon.RelayInfo, usage *dto.Usag
 	}
 }
 
+func settleOpenAIResponsesUsage(c *gin.Context, info *relaycommon.RelayInfo, usage *dto.Usage) *types.NewAPIError {
+	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+		return settleResponsesCompactUsage(c, info, usage, func(consumedUsage *dto.Usage) {
+			service.PostTextConsumeQuota(c, info, consumedUsage, nil)
+		})
+	}
+
+	if strings.HasPrefix(info.OriginModelName, "gpt-4o-audio") {
+		service.PostAudioConsumeQuota(c, info, usage, "")
+	} else {
+		service.PostTextConsumeQuota(c, info, usage, nil)
+	}
+	return nil
+}
+
+func settleResponsesCompactUsage(c *gin.Context, info *relaycommon.RelayInfo, usage *dto.Usage, consume func(*dto.Usage)) *types.NewAPIError {
+	originModelName := info.OriginModelName
+	originPriceData := info.PriceData
+	defer func() {
+		info.OriginModelName = originModelName
+		info.PriceData = originPriceData
+	}()
+
+	normalizeResponsesCompactUsage(info, usage)
+	if _, err := helper.ModelPriceHelper(c, info, info.GetEstimatePromptTokens(), &types.TokenCountMeta{}); err != nil {
+		return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry(), types.ErrOptionWithStatusCode(http.StatusBadRequest))
+	}
+	consume(usage)
+	return nil
+}
+
 func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, request *dto.OpenAIResponsesRequest, passThroughGlobal bool) (*dto.Usage, *types.NewAPIError) {
 	if request == nil {
 		return nil, types.NewErrorWithStatusCode(
@@ -188,7 +323,7 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 	}
 	validationRequest := *request
 	if relaycommon.IsOpenAICompatibleResponses(info) {
-		normalizedRequest, _, err := relaycommon.NormalizeContextCompactionForResponsesRequest(validationRequest)
+		normalizedRequest, _, err := service.NormalizeContextCompactionForResponsesRequest(relaycommon.GinRequestContext(c), validationRequest)
 		if err != nil {
 			return nil, newResponsesConvertRequestError(err)
 		}
@@ -235,6 +370,21 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 	}
 }
 
+// executeOpaqueOpenAIResponsesRequest forwards an opaque disk-backed body once.
+// It intentionally does not enter compatibility conversion or retry handling.
+func executeOpaqueOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, request *dto.OpaqueOpenAIResponsesRequest) (*dto.Usage, *types.NewAPIError) {
+	if !hasValidatedOpaqueOpenAIResponsesReplay(c, info, request) {
+		if err := validateOpaqueOpenAIResponsesReplay(c, info, request); err != nil {
+			return nil, err
+		}
+	}
+	requestBody, err := buildOpaqueOpenAIResponsesReplayBody(c, info, request)
+	if err != nil {
+		return nil, err
+	}
+	return doOpenAIResponsesRequest(c, info, adaptor, requestBody)
+}
+
 type responsesCompatibilityRetryState struct {
 	attempts                           int
 	encryptedContentParameterAttempted bool
@@ -244,6 +394,13 @@ type responsesCompatibilityRetryState struct {
 }
 
 func buildOpenAIResponsesCompatibilityRetry(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError, retryState *responsesCompatibilityRetryState) (io.Reader, dto.OpenAIResponsesRequest, bool, *types.NewAPIError) {
+	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), convertedRequest.Input)
+	if err != nil {
+		return nil, convertedRequest, false, newResponsesConvertRequestError(err)
+	}
+	if hasOpaqueEncryptedContent {
+		return nil, convertedRequest, false, nil
+	}
 	if shouldRetryResponsesWithoutEncryptedReasoning(info, newAPIError) {
 		if isResponsesEncryptedContentParameterError(newAPIError.ToOpenAIError()) {
 			if retryState.encryptedContentParameterAttempted {
@@ -464,6 +621,31 @@ type buildResponsesRequestBodyOptions struct {
 func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, request *dto.OpenAIResponsesRequest, passThroughGlobal bool, options ...buildResponsesRequestBodyOptions) (io.Reader, dto.OpenAIResponsesRequest, *types.NewAPIError) {
 	var requestBody io.Reader
 	convertedResponsesRequest := *request
+	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), request.Input)
+	if err != nil {
+		return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
+	}
+	if hasOpaqueEncryptedContent {
+		return buildOpaqueOpenAIResponsesRequestBody(c, info, request)
+	}
+	normalizedInput, normalizeResult, err := relaycommon.NormalizeResponsesInputItemIDs(request.Input)
+	if err != nil {
+		return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
+	}
+	inputItemIDsNormalized := normalizeResult.RemovedCount > 0
+	if inputItemIDsNormalized {
+		normalizedRequest := *request
+		normalizedRequest.Input = normalizedInput
+		request = &normalizedRequest
+		convertedResponsesRequest = normalizedRequest
+		common.SetContextKey(c, appconstant.ContextKeyResponsesInputItemIDsRemoved, normalizeResult.RemovedCount)
+		common.SysLog(fmt.Sprintf(
+			"responses input item ids normalized before upstream forwarding: channel_id=%d model=%s removed_count=%d",
+			info.ChannelId,
+			info.OriginModelName,
+			normalizeResult.RemovedCount,
+		))
+	}
 	streamOptionsIncludeUsageCapabilityDisabled := relaycommon.IsOpenAICompatibleResponses(info) &&
 		info.ChannelOtherSettings.ExplicitlyDisablesResponsesStreamOptionsIncludeUsage()
 	streamOptionsIncludeUsageCapabilityStripped := false
@@ -478,7 +660,7 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 	}
 	contextCompactionNormalized := false
 	if relaycommon.IsOpenAICompatibleResponses(info) {
-		normalizedRequest, result, err := relaycommon.NormalizeContextCompactionForResponsesRequest(*request)
+		normalizedRequest, result, err := service.NormalizeContextCompactionForResponsesRequest(relaycommon.GinRequestContext(c), *request)
 		if err != nil {
 			return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
 		}
@@ -505,9 +687,30 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 			return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
 		}
 	}
+	requestWithLogicalEffort, logicalEffortApplied := relaycommon.ApplyResponsesLogicalModelReasoningEffort(info, *request)
+	if logicalEffortApplied {
+		request = &requestWithLogicalEffort
+		convertedResponsesRequest = requestWithLogicalEffort
+	}
+	hadReasoningContext := request.Reasoning != nil && len(bytes.TrimSpace(request.Reasoning.Context)) > 0
+	reasoningEffortSuffix, _ := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
+	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
+		info.ReasoningEffort = request.Reasoning.Effort
+	}
+	reasoningContextStripped := false
+	if hadReasoningContext {
+		capabilityRequest := relaycommon.ApplyResponsesReasoningContextCapability(c, info, *request)
+		request = &capabilityRequest
+		convertedResponsesRequest = capabilityRequest
+		reasoningContextStripped = capabilityRequest.Reasoning == nil || len(bytes.TrimSpace(capabilityRequest.Reasoning.Context)) == 0
+	}
+	reasoningContextRequiresConvertedBody := reasoningContextStripped || logicalEffortApplied || reasoningEffortSuffix != ""
+	bodyPreservingParamOverride := relaycommon.ValidateBytePreservingParamOverride(info.ParamOverride) == nil
 	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) &&
 		!relaycommon.ShouldConvertResponsesRequest(info) &&
-		(request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0) &&
+		!inputItemIDsNormalized &&
+		!reasoningContextRequiresConvertedBody &&
+		bodyPreservingParamOverride &&
 		!streamOptionsIncludeUsageCapabilityStripped &&
 		!contextCompactionNormalized &&
 		!common.GetContextKeyBool(c, appconstant.ContextKeyResponsesRemoteCompactSyntheticFallback) &&
@@ -516,6 +719,11 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 		actualPassThroughBody = false
 	}
 	if actualPassThroughBody {
+		if len(info.ParamOverride) > 0 {
+			if err := relaycommon.ApplyBytePreservingHeaderParamOverrideWithRelayInfo(info); err != nil {
+				return nil, convertedResponsesRequest, newAPIErrorFromParamOverride(err)
+			}
+		}
 		if nativeOpaqueReference {
 			restoredRequest, restored, applyInfo, err := service.RestoreNativeOpaquePreviousResponseID(
 				c.Request.Context(),
@@ -536,11 +744,11 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 			}
 		}
 		if requestBody == nil {
-			storage, err := common.GetBodyStorage(c)
-			if err != nil {
-				return nil, convertedResponsesRequest, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+			passThroughBody, passThroughErr := buildOpenAIResponsesPassThroughBody(c, *request)
+			if passThroughErr != nil {
+				return nil, convertedResponsesRequest, passThroughErr
 			}
-			requestBody = common.ReaderOnly(storage)
+			requestBody = passThroughBody
 		}
 	} else {
 		if nativeOpaqueReference {
@@ -603,8 +811,122 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 	return requestBody, convertedResponsesRequest, nil
 }
 
+// buildOpenAIResponsesPassThroughBody preserves the client body while ensuring
+// the mapped upstream model is the only rewritten top-level JSON value.
+func buildOpenAIResponsesPassThroughBody(c *gin.Context, request dto.OpenAIResponsesRequest) (io.Reader, *types.NewAPIError) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+	}
+	modelLocation, err := common.LocateTopLevelJSONString(storage, "model")
+	if err != nil {
+		return nil, newResponsesConvertRequestError(fmt.Errorf("locate model for Responses pass-through: %w", err))
+	}
+	upstreamModel := strings.TrimSpace(request.Model)
+	if upstreamModel == "" {
+		return nil, newResponsesConvertRequestError(errors.New("responses pass-through model is required"))
+	}
+	if modelLocation.Value == upstreamModel {
+		return common.ReaderOnly(storage), nil
+	}
+	requestBody, err := common.NewTopLevelJSONStringReplacementReader(storage, storage.Size(), modelLocation, upstreamModel)
+	if err != nil {
+		return nil, newResponsesConvertRequestError(fmt.Errorf("replace model for Responses pass-through: %w", err))
+	}
+	return requestBody, nil
+}
+
+func buildOpaqueOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) (io.Reader, dto.OpenAIResponsesRequest, *types.NewAPIError) {
+	convertedRequest := *request
+	capability := dto.ResponsesEncryptedReasoningReplayCapabilityUnknown
+	if info != nil {
+		capability = info.ChannelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(info.ChannelType)
+	}
+	relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, convertedRequest, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+	}
+	upstreamModel := strings.TrimSpace(request.Model)
+	if upstreamModel == "" {
+		return nil, convertedRequest, newResponsesConvertRequestError(errors.New("responses opaque encrypted replay model is required"))
+	}
+	if info != nil && len(info.ParamOverride) > 0 {
+		err := relaycommon.ApplyHeaderOnlyParamOverrideWithRelayInfo(info)
+		if err != nil {
+			return nil, convertedRequest, newAPIErrorFromParamOverride(err)
+		}
+	}
+	modelLocation, err := common.LocateTopLevelJSONString(storage, "model")
+	if err != nil {
+		return nil, convertedRequest, newResponsesConvertRequestError(fmt.Errorf("locate model for responses opaque encrypted replay: %w", err))
+	}
+	if modelLocation.Value == upstreamModel {
+		requestBody, err := common.NewSizedReader(storage, storage.Size())
+		if err != nil {
+			return nil, convertedRequest, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
+		return requestBody, convertedRequest, nil
+	}
+	requestBody, err := common.NewTopLevelJSONStringReplacementReader(storage, storage.Size(), modelLocation, upstreamModel)
+	if err != nil {
+		return nil, convertedRequest, newResponsesConvertRequestError(fmt.Errorf("replace model for responses opaque encrypted replay: %w", err))
+	}
+	return requestBody, convertedRequest, nil
+}
+
+func buildOpaqueOpenAIResponsesReplayBody(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpaqueOpenAIResponsesRequest) (io.Reader, *types.NewAPIError) {
+	if request == nil {
+		return nil, types.NewErrorWithStatusCode(
+			errors.New("opaque Responses request is required"),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+	}
+	metadata := request.OpaqueResponsesMetadata()
+	if metadata.BodySize != storage.Size() {
+		return nil, newResponsesConvertRequestError(fmt.Errorf(
+			"opaque Responses replay body size mismatch: metadata=%d storage=%d",
+			metadata.BodySize,
+			storage.Size(),
+		))
+	}
+	upstreamModel := strings.TrimSpace(request.Model)
+	if upstreamModel == "" {
+		return nil, newResponsesConvertRequestError(errors.New("responses opaque encrypted replay model is required"))
+	}
+	if info != nil && len(info.ParamOverride) > 0 {
+		if err := relaycommon.ApplyHeaderOnlyParamOverrideWithRelayInfo(info); err != nil {
+			return nil, newAPIErrorFromParamOverride(err)
+		}
+	}
+	if metadata.ModelLocation.Value == upstreamModel {
+		requestBody, err := common.NewSizedReader(storage, storage.Size())
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
+		return requestBody, nil
+	}
+	requestBody, err := common.NewTopLevelJSONStringReplacementReader(
+		storage,
+		storage.Size(),
+		metadata.ModelLocation,
+		upstreamModel,
+	)
+	if err != nil {
+		return nil, newResponsesConvertRequestError(fmt.Errorf("replace model for opaque Responses replay: %w", err))
+	}
+	return requestBody, nil
+}
+
 func doOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, requestBody io.Reader, options ...doOpenAIResponsesRequestOptions) (*dto.Usage, *types.NewAPIError) {
 	var httpResp *http.Response
+	relaycommon.MarkResponsesEncryptedReasoningReplayAttempt(c)
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
@@ -613,6 +935,7 @@ func doOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adapt
 	skipStatusCodeMapping := len(options) > 0 && options[0].SkipStatusCodeMapping
 
 	if resp != nil {
+		relaycommon.MarkResponsesEncryptedReasoningReplayForwarded(c)
 		httpResp = resp.(*http.Response)
 
 		if httpResp.StatusCode != http.StatusOK {
@@ -698,8 +1021,8 @@ func newResponsesConvertRequestError(err error) *types.NewAPIError {
 	return types.NewError(err, types.ErrorCodeConvertRequestFailed, options...)
 }
 
-func applyResponsesCompactSummaryModelOverride(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) {
-	if c == nil || request == nil || !shouldApplyResponsesCompactSummaryModelOverride(info) {
+func applyResponsesCompactSummaryModelOverride(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest, hasOpaqueEncryptedContent bool) {
+	if c == nil || request == nil || hasOpaqueEncryptedContent || !shouldApplyResponsesCompactSummaryModelOverride(info) {
 		return
 	}
 	model := strings.TrimSpace(common.GetContextKeyString(c, appconstant.ContextKeyResponsesCompactSummaryModel))

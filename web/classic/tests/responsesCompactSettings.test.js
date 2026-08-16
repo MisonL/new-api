@@ -75,6 +75,7 @@ describe('classic responses compact settings', () => {
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
       responses_compact_auto_fallback_retry_interval_hours:
         RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
+      responses_remote_compaction_first_data_timeout_seconds: 0,
       responses_compact_context_fallback:
         RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
       responses_compact_summary_model_fallback:
@@ -87,6 +88,7 @@ describe('classic responses compact settings', () => {
     ).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
       responses_compact_auto_fallback_retry_interval_hours: 3,
+      responses_remote_compaction_first_data_timeout_seconds: 0,
       responses_compact_context_fallback: true,
       responses_compact_summary_model_fallback: true,
       responses_compact_summary_fallback_models: ['gpt-5.4'],
@@ -99,6 +101,7 @@ describe('classic responses compact settings', () => {
     ).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
       responses_compact_auto_fallback_retry_interval_hours: 3,
+      responses_remote_compaction_first_data_timeout_seconds: 0,
       responses_compact_context_fallback: true,
       responses_compact_summary_model_fallback: true,
       responses_compact_summary_fallback_models: ['gpt-5.4'],
@@ -106,6 +109,7 @@ describe('classic responses compact settings', () => {
     expect(buildResponsesCompactSettings(1, 'convert')).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY,
       responses_compact_auto_fallback_retry_interval_hours: 3,
+      responses_remote_compaction_first_data_timeout_seconds: 0,
       responses_compact_context_fallback: true,
       responses_compact_summary_model_fallback: true,
       responses_compact_summary_fallback_models: ['gpt-5.4'],
@@ -128,6 +132,7 @@ describe('classic responses compact settings', () => {
     ).toEqual({
       responses_compact_mode: RESPONSES_COMPACT_MODE_AUTO,
       responses_compact_auto_fallback_retry_interval_hours: 6,
+      responses_remote_compaction_first_data_timeout_seconds: 0,
       responses_compact_context_fallback: false,
       responses_compact_summary_model_fallback: false,
       responses_compact_summary_fallback_models: ['gpt-5.4', 'gpt-5.4-mini'],

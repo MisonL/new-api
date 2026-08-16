@@ -2,7 +2,6 @@ package openai
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -82,9 +81,9 @@ func OaiChatToResponsesHandlerWithOptionsAndState(c *gin.Context, info *relaycom
 	defer service.CloseResponseBodyGracefully(resp)
 
 	var chatResp dto.OpenAITextResponse
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+	body, readErr := readResponsesNonStreamingResponseBody(c, resp.Body)
+	if readErr != nil {
+		return nil, readErr
 	}
 	if err := common.Unmarshal(body, &chatResp); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)

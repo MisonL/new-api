@@ -2,6 +2,7 @@ package common
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	rootcommon "github.com/QuantumNous/new-api/common"
@@ -226,18 +227,20 @@ func TestStripEncryptedReasoningFromResponsesRequestKeepsMixedInput(t *testing.T
 	require.NotContains(t, string(got.Input), "opaque")
 }
 
-func TestNormalizeContextCompactionForResponsesRequestConvertsEncryptedAndDropsEmptyMarkers(t *testing.T) {
+func TestNormalizeContextCompactionForResponsesRequestConvertsSyntheticAndDropsEmptyMarkers(t *testing.T) {
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6-sol",
 		Input: rootcommon.RawMessage(`[
-			{"type":"context_compaction","encrypted_content":"context-summary"},
+			{"type":"context_compaction","encrypted_content":"newapi.synthetic.compact:v2:n0123456789abcdef0123456789abcdef:resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_0123456789abcdef0123456789abcdef"},
 			{"type":"context_compaction"},
-			{"type":"compaction","encrypted_content":"native-summary"},
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:nfedcba9876543210fedcba9876543210:resp_newapi_synthcmp_nfedcba9876543210fedcba9876543210_fedcba9876543210fedcba9876543210"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
 	}
 
-	got, result, err := NormalizeContextCompactionForResponsesRequest(req)
+	got, result, err := NormalizeContextCompactionForResponsesRequestWithMarkerValidator(req, func(marker string) (bool, error) {
+		return strings.HasPrefix(marker, "newapi.synthetic.compact:"), nil
+	})
 
 	require.NoError(t, err)
 	require.Equal(t, 1, result.ConvertedCount)
@@ -245,10 +248,27 @@ func TestNormalizeContextCompactionForResponsesRequestConvertsEncryptedAndDropsE
 	require.Equal(t, 3, result.RemainingCount)
 	require.NotContains(t, string(got.Input), `"type":"context_compaction"`)
 	require.JSONEq(t, `[
-		{"type":"compaction","encrypted_content":"context-summary"},
-		{"type":"compaction","encrypted_content":"native-summary"},
+		{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:n0123456789abcdef0123456789abcdef:resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_0123456789abcdef0123456789abcdef"},
+		{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:nfedcba9876543210fedcba9876543210:resp_newapi_synthcmp_nfedcba9876543210fedcba9876543210_fedcba9876543210fedcba9876543210"},
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 	]`, string(got.Input))
+}
+
+func TestNormalizeContextCompactionForResponsesRequestPreservesOpaqueInput(t *testing.T) {
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: rootcommon.RawMessage(`[
+			{"type":"context_compaction","encrypted_content":"opaque-context-state"},
+			{"type":"context_compaction"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]`),
+	}
+
+	got, result, err := NormalizeContextCompactionForResponsesRequest(req)
+
+	require.NoError(t, err)
+	require.Equal(t, req.Input, got.Input)
+	require.Zero(t, result.ChangedCount())
 }
 
 func TestNormalizeContextCompactionForResponsesRequestRejectsOnlyEmptyMarkers(t *testing.T) {
@@ -269,7 +289,7 @@ func TestNormalizeContextCompactionForResponsesRequestRejectsOnlyEmptyMarkers(t 
 	require.Zero(t, result.RemainingCount)
 }
 
-func TestNormalizeContextCompactionForResponsesRequestRejectsInvalidEncryptedContentType(t *testing.T) {
+func TestNormalizeContextCompactionForResponsesRequestPreservesNonStringEncryptedContent(t *testing.T) {
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6-sol",
 		Input: rootcommon.RawMessage(`[
@@ -280,8 +300,7 @@ func TestNormalizeContextCompactionForResponsesRequestRejectsInvalidEncryptedCon
 
 	got, result, err := NormalizeContextCompactionForResponsesRequest(req)
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "context_compaction encrypted_content must be a string")
+	require.NoError(t, err)
 	require.Equal(t, req.Input, got.Input)
 	require.Zero(t, result.ConvertedCount)
 	require.Zero(t, result.DroppedCount)

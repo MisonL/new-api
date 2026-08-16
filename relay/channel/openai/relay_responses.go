@@ -1,6 +1,8 @@
 package openai
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -819,16 +821,21 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 	// read response body
 	var responsesResponse dto.OpenAIResponsesResponse
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+	responseBody, readErr := readResponsesNonStreamingResponseBody(c, resp.Body)
+	if readErr != nil {
+		return nil, readErr
 	}
-	err = common.Unmarshal(responseBody, &responsesResponse)
+	err := common.Unmarshal(responseBody, &responsesResponse)
 	if err != nil {
+		if openAIError, found, sseErr := responsesSSETerminalError(responseBody); sseErr != nil {
+			return nil, types.NewOpenAIError(sseErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		} else if found {
+			return nil, newResponsesUpstreamOpenAIError(resp.StatusCode, openAIError)
+		}
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
-		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	if oaiError := responsesResponse.GetOpenAIError(); responsesOpenAIErrorHasContent(oaiError) {
+		return nil, newResponsesUpstreamOpenAIError(resp.StatusCode, oaiError)
 	}
 	if isRemoteResponsesCompactionRequest(info) {
 		if err := validateRemoteResponsesCompactionOutput(responsesResponse.Output); err != nil {
@@ -862,6 +869,61 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 	recordResponsesBuiltInToolUsage(c, info, &responsesResponse, responsesOutputToolCallCounts{})
 	return &usage, nil
+}
+
+// responsesSSETerminalError extracts an upstream terminal error without writing
+// any SSE frame to the downstream response. It is only used when a non-stream
+// Responses request receives an actual SSE body instead of a JSON response.
+func responsesSSETerminalError(body []byte) (*types.OpenAIError, bool, error) {
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	if !bytes.HasPrefix(trimmed, []byte("data:")) &&
+		!bytes.HasPrefix(trimmed, []byte("event:")) &&
+		!bytes.HasPrefix(trimmed, []byte(":")) {
+		return nil, false, nil
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(trimmed))
+	scanner.Buffer(make([]byte, 64<<10), helper.DefaultMaxScannerBufferSize)
+	parseData := func(data string) (*types.OpenAIError, bool, error) {
+		if strings.TrimSpace(data) == "[DONE]" {
+			return nil, false, nil
+		}
+
+		var event dto.ResponsesStreamResponse
+		if err := common.Unmarshal([]byte(data), &event); err != nil {
+			return nil, false, err
+		}
+		switch event.Type {
+		case "response.error", "error":
+			if !responsesOpenAIErrorHasMessage(event.Error) {
+				return nil, false, errors.New("upstream responses SSE returned an invalid error event")
+			}
+			return event.Error, true, nil
+		case "response.failed":
+			openAIError := responsesFailedEventOpenAIError(event)
+			if openAIError == nil {
+				return nil, false, errors.New("upstream responses SSE returned an invalid failed event")
+			}
+			return openAIError, true, nil
+		default:
+			return nil, false, nil
+		}
+	}
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if openAIError, found, err := parseData(data); err != nil || found {
+			return openAIError, found, err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, false, err
+	}
+	return nil, false, nil
 }
 
 func applyResponsesUsageDetails(target *dto.Usage, source *dto.Usage, overwriteZero bool) {
@@ -1037,8 +1099,14 @@ func (s *remoteCompactionStreamState) observe(response dto.ResponsesStreamRespon
 }
 
 func mergeRemoteCompactionOutput(observed, completed []dto.ResponsesOutput) []dto.ResponsesOutput {
-	if len(completed) == 0 {
+	// A missing output field leaves the item.done events as the only available
+	// snapshot. An explicit empty array is authoritative and must not revive
+	// compaction output from earlier stream events.
+	if completed == nil {
 		return observed
+	}
+	if len(completed) == 0 {
+		return completed
 	}
 	if remoteCompactionOutputHasCompaction(completed) {
 		return completed
@@ -1140,30 +1208,24 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 		switch streamResponse.Type {
 		case "response.error", "error":
-			if streamResponse.Error == nil || strings.TrimSpace(streamResponse.Error.Message) == "" {
+			if !responsesOpenAIErrorHasMessage(streamResponse.Error) {
 				err := fmt.Errorf("upstream responses stream returned an invalid error event")
 				streamFatalError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
 				sr.Stop(err)
 				return
 			}
-			streamFatalError = types.WithOpenAIError(*streamResponse.Error, responsesStreamOpenAIErrorStatus(streamResponse.Error))
+			streamFatalError = newResponsesUpstreamOpenAIError(resp.StatusCode, streamResponse.Error)
 			sr.Stop(streamFatalError)
 			return
 		case "response.failed":
-			if streamResponse.Response == nil {
+			openAIError := responsesFailedEventOpenAIError(streamResponse)
+			if openAIError == nil {
 				err := fmt.Errorf("upstream responses stream returned an invalid failed event")
 				streamFatalError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
 				sr.Stop(err)
 				return
 			}
-			openAIError := streamResponse.Response.GetOpenAIError()
-			if openAIError == nil || strings.TrimSpace(openAIError.Message) == "" {
-				err := fmt.Errorf("upstream responses stream returned an invalid failed event")
-				streamFatalError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
-				sr.Stop(err)
-				return
-			}
-			streamFatalError = types.WithOpenAIError(*openAIError, responsesStreamOpenAIErrorStatus(openAIError))
+			streamFatalError = newResponsesUpstreamOpenAIError(resp.StatusCode, openAIError)
 			sr.Stop(streamFatalError)
 			return
 		case "response.completed":
@@ -1316,6 +1378,9 @@ func responsesStreamOpenAIErrorStatus(openAIError *types.OpenAIError) int {
 	if openAIError == nil {
 		return http.StatusBadGateway
 	}
+	if isResponsesContextWindowError(openAIError) {
+		return http.StatusBadRequest
+	}
 	if types.IsOpenAIRequestParameterError(openAIError) {
 		return http.StatusBadRequest
 	}
@@ -1339,6 +1404,13 @@ func responsesStreamOpenAIErrorStatus(openAIError *types.OpenAIError) int {
 	default:
 		return http.StatusBadGateway
 	}
+}
+
+func responsesUpstreamOpenAIErrorStatus(statusCode int, openAIError *types.OpenAIError) int {
+	if statusCode != http.StatusOK {
+		return statusCode
+	}
+	return responsesStreamOpenAIErrorStatus(openAIError)
 }
 
 func newBuiltInToolInfo(toolType string, tool map[string]any) *relaycommon.BuildInToolInfo {

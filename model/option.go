@@ -588,6 +588,8 @@ func updateOptionMap(key string, value string) (err error) {
 
 func normalizeOptionValueForInMemoryConfig(key string, value string) (string, error) {
 	switch key {
+	case "AutomaticDisableStatusCodes", "AutomaticRetryStatusCodes":
+		return operation_setting.NormalizeHTTPStatusCodeRanges(value)
 	case "global.chat_completions_to_responses_policy":
 		return model_setting.NormalizeChatCompletionsToResponsesPolicyJSON(value)
 	case "RequestHeaderPolicyAuxiliaryRequestsEnabled":

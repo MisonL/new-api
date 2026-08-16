@@ -211,12 +211,11 @@ func TestChannelOtherSettingsResponsesReasoningContextCapability(t *testing.T) {
 			capability: dto.ResponsesReasoningContextCapabilitySupported,
 		},
 		{
-			name: "sub2api http does not support context",
+			name: "sub2api http remains unverified",
 			settings: dto.ChannelOtherSettings{
 				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
 			},
-			capability: dto.ResponsesReasoningContextCapabilityUnsupported,
-			disabled:   true,
+			capability: dto.ResponsesReasoningContextCapabilityUnknown,
 		},
 		{
 			name: "explicit registry disables official context",
@@ -262,8 +261,8 @@ func TestChannelOtherSettingsSub2APIHTTPLimitedNativeCompact(t *testing.T) {
 
 	require.Equal(t, dto.ResponsesUpstreamProfileSub2APIHTTP, settings.NormalizedResponsesUpstreamProfile())
 	require.False(t, settings.HasResponsesProxyCompatibilityProfile())
-	require.True(t, settings.HasResponsesEncryptedReasoningUnsupportedProfile())
-	require.True(t, settings.ShouldStripResponsesEncryptedReasoning())
+	require.False(t, settings.HasResponsesEncryptedReasoningUnsupportedProfile())
+	require.False(t, settings.ShouldStripResponsesEncryptedReasoning())
 	require.True(t, settings.DisallowsResponsesRESTPreviousResponseID())
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactModeOrDefault())
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.EffectiveResponsesCompactModeOrDefault())
@@ -311,7 +310,9 @@ func TestChannelOtherSettingsDefaultProfileAllowsCompactionItemPassthrough(t *te
 
 	require.Equal(t, dto.ResponsesUpstreamProfile(""), settings.NormalizedResponsesUpstreamProfile())
 	require.False(t, settings.HasResponsesProxyCompatibilityProfile())
-	require.True(t, settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI).SupportsCompactionItemPassthrough)
+	capability := settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI)
+	require.Equal(t, dto.ResponsesCompactionItemPassthroughCapabilityUnknown, capability.CompactionItemPassthroughCapability)
+	require.Nil(t, capability.SupportsCompactionItemPassthrough)
 }
 
 func TestChannelOtherSettingsRemoteCompactionTimeoutDoesNotChangeCapabilitySource(t *testing.T) {

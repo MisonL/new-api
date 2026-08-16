@@ -4395,6 +4395,7 @@
     "compact mode": "режим compact",
     "compaction: pass": "compaction: передавать",
     "compaction: block": "compaction: блокировать",
+    "compaction: unknown": "compaction: неизвестно",
     "diagnosis": "диагностика",
     "last fail": "последний сбой",
     "last observed": "последнее наблюдение",
