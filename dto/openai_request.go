@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"sync"
@@ -252,9 +253,33 @@ type StreamOptions struct {
 	IncludeUsage bool `json:"include_usage,omitempty"`
 	// IncludeObfuscation is only for /v1/responses stream payload.
 	// This field is filtered by default and can be enabled via channel setting allow_include_obfuscation.
-	IncludeObfuscation bool                       `json:"include_obfuscation,omitempty"`
-	Extra              map[string]json.RawMessage `json:"-"`
-	includeUsageSet    bool                       `json:"-"`
+	IncludeObfuscation    bool                       `json:"include_obfuscation,omitempty"`
+	Extra                 map[string]json.RawMessage `json:"-"`
+	includeUsageSet       bool                       `json:"-"`
+	includeObfuscationSet bool                       `json:"-"`
+	includeUsageRaw       json.RawMessage            `json:"-"`
+	includeObfuscationRaw json.RawMessage            `json:"-"`
+}
+
+// Clone returns a detached copy while preserving explicit field presence.
+func (s *StreamOptions) Clone() *StreamOptions {
+	if s == nil {
+		return nil
+	}
+	cloned := *s
+	if s.includeUsageRaw != nil {
+		cloned.includeUsageRaw = append(json.RawMessage(nil), s.includeUsageRaw...)
+	}
+	if s.includeObfuscationRaw != nil {
+		cloned.includeObfuscationRaw = append(json.RawMessage(nil), s.includeObfuscationRaw...)
+	}
+	if s.Extra != nil {
+		cloned.Extra = make(map[string]json.RawMessage, len(s.Extra))
+		for key, value := range s.Extra {
+			cloned.Extra[key] = append(json.RawMessage(nil), value...)
+		}
+	}
+	return &cloned
 }
 
 var streamOptionsKnownFields = sync.OnceValue(func() map[string]struct{} {
@@ -274,12 +299,27 @@ func (s *StreamOptions) UnmarshalJSON(data []byte) error {
 	}
 	*s = StreamOptions(known)
 	s.Extra = collectUnknownJSONFields(rawMap, streamOptionsKnownFields())
-	_, s.includeUsageSet = rawMap["include_usage"]
+	if raw, ok := rawMap["include_usage"]; ok {
+		s.includeUsageSet = true
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			s.includeUsageRaw = append(json.RawMessage(nil), raw...)
+		}
+	}
+	if raw, ok := rawMap["include_obfuscation"]; ok {
+		s.includeObfuscationSet = true
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			s.includeObfuscationRaw = append(json.RawMessage(nil), raw...)
+		}
+	}
 	return nil
 }
 
 func (s *StreamOptions) HasIncludeUsageField() bool {
 	return s != nil && (s.IncludeUsage || s.includeUsageSet)
+}
+
+func (s *StreamOptions) HasIncludeObfuscationField() bool {
+	return s != nil && (s.IncludeObfuscation || s.includeObfuscationSet)
 }
 
 func (s *StreamOptions) RemoveIncludeUsage() {
@@ -288,11 +328,39 @@ func (s *StreamOptions) RemoveIncludeUsage() {
 	}
 	s.IncludeUsage = false
 	s.includeUsageSet = false
+	s.includeUsageRaw = nil
 }
 
 func (s StreamOptions) MarshalJSON() ([]byte, error) {
-	type Alias StreamOptions
-	base, err := common.Marshal(Alias(s))
+	var includeUsage json.RawMessage
+	if s.includeUsageRaw != nil {
+		includeUsage = append(json.RawMessage(nil), s.includeUsageRaw...)
+	} else if s.IncludeUsage || s.includeUsageSet {
+		value := s.IncludeUsage
+		var err error
+		includeUsage, err = common.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var includeObfuscation json.RawMessage
+	if s.includeObfuscationRaw != nil {
+		includeObfuscation = append(json.RawMessage(nil), s.includeObfuscationRaw...)
+	} else if s.IncludeObfuscation || s.includeObfuscationSet {
+		value := s.IncludeObfuscation
+		var err error
+		includeObfuscation, err = common.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+	}
+	base, err := common.Marshal(struct {
+		IncludeUsage       json.RawMessage `json:"include_usage,omitempty"`
+		IncludeObfuscation json.RawMessage `json:"include_obfuscation,omitempty"`
+	}{
+		IncludeUsage:       includeUsage,
+		IncludeObfuscation: includeObfuscation,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -981,27 +1049,9 @@ func (r *OpenAIResponsesRequest) GetTokenCountMeta() *types.TokenCountMeta {
 	toolsCount := 0
 
 	if r.Input != nil {
-		inputs := r.ParseInput()
-		for _, input := range inputs {
-			if input.Type == "input_image" {
-				if input.ImageUrl != "" {
-					fileMeta = append(fileMeta, &types.FileMeta{
-						FileType: types.FileTypeImage,
-						Source:   types.NewFileSourceFromData(input.ImageUrl, ""),
-						Detail:   input.Detail,
-					})
-				}
-			} else if input.Type == "input_file" {
-				if input.FileUrl != "" {
-					fileMeta = append(fileMeta, &types.FileMeta{
-						FileType: types.FileTypeFile,
-						Source:   types.NewFileSourceFromData(input.FileUrl, ""),
-					})
-				}
-			} else {
-				texts = append(texts, input.Text)
-			}
-		}
+		inputText, inputFiles := responsesInputTokenCountMeta(r.Input)
+		texts = append(texts, inputText...)
+		fileMeta = append(fileMeta, inputFiles...)
 	}
 
 	if len(r.Instructions) > 0 {
@@ -1073,32 +1123,73 @@ func ResponsesInputHasCompactionTrigger(input json.RawMessage) bool {
 		return false
 	}
 
-	var items []map[string]json.RawMessage
-	if err := common.Unmarshal(input, &items); err != nil {
+	decoder := common.NewJsonDecoderUseNumber(bytes.NewReader(input))
+	token, err := decoder.Token()
+	if err != nil {
 		return false
 	}
-	for _, item := range items {
-		rawType, ok := item["type"]
-		if !ok {
-			continue
-		}
-		var itemType string
-		if err := common.Unmarshal(rawType, &itemType); err != nil {
-			continue
-		}
-		if itemType == ResponsesInputTypeCompactionTrigger {
-			return true
-		}
+	delimiter, ok := token.(common.JsonDelim)
+	if !ok || delimiter != '[' {
+		return false
 	}
-	return false
+
+	found := false
+	for decoder.More() {
+		var item struct {
+			Type string `json:"type"`
+		}
+		if err := common.DecodeJsonFromDecoder(decoder, &item); err != nil {
+			return false
+		}
+		found = found || item.Type == ResponsesInputTypeCompactionTrigger
+	}
+	if _, err := decoder.Token(); err != nil {
+		return false
+	}
+	var extra any
+	if err := common.DecodeJsonFromDecoder(decoder, &extra); err != io.EOF {
+		return false
+	}
+	return found
 }
 
 type Reasoning struct {
-	Effort  string                     `json:"effort,omitempty"`
-	Summary string                     `json:"summary,omitempty"`
-	Mode    json.RawMessage            `json:"mode,omitempty"`
-	Context json.RawMessage            `json:"context,omitempty"`
-	Extra   map[string]json.RawMessage `json:"-"`
+	Effort     string                     `json:"effort,omitempty"`
+	Summary    string                     `json:"summary,omitempty"`
+	Mode       json.RawMessage            `json:"mode,omitempty"`
+	Context    json.RawMessage            `json:"context,omitempty"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	effortSet  bool                       `json:"-"`
+	summarySet bool                       `json:"-"`
+	effortRaw  json.RawMessage            `json:"-"`
+	summaryRaw json.RawMessage            `json:"-"`
+}
+
+// Clone returns a detached copy while preserving explicit field presence.
+func (r *Reasoning) Clone() *Reasoning {
+	if r == nil {
+		return nil
+	}
+	cloned := *r
+	if r.effortRaw != nil {
+		cloned.effortRaw = append(json.RawMessage(nil), r.effortRaw...)
+	}
+	if r.summaryRaw != nil {
+		cloned.summaryRaw = append(json.RawMessage(nil), r.summaryRaw...)
+	}
+	if r.Mode != nil {
+		cloned.Mode = append(json.RawMessage(nil), r.Mode...)
+	}
+	if r.Context != nil {
+		cloned.Context = append(json.RawMessage(nil), r.Context...)
+	}
+	if r.Extra != nil {
+		cloned.Extra = make(map[string]json.RawMessage, len(r.Extra))
+		for key, value := range r.Extra {
+			cloned.Extra[key] = append(json.RawMessage(nil), value...)
+		}
+	}
+	return &cloned
 }
 
 var reasoningKnownFields = sync.OnceValue(func() map[string]struct{} {
@@ -1118,12 +1209,55 @@ func (r *Reasoning) UnmarshalJSON(data []byte) error {
 	}
 	*r = Reasoning(known)
 	r.Extra = collectUnknownJSONFields(rawMap, reasoningKnownFields())
+	if raw, ok := rawMap["effort"]; ok {
+		r.effortSet = true
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			r.effortRaw = append(json.RawMessage(nil), raw...)
+		}
+	}
+	if raw, ok := rawMap["summary"]; ok {
+		r.summarySet = true
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			r.summaryRaw = append(json.RawMessage(nil), raw...)
+		}
+	}
 	return nil
 }
 
 func (r Reasoning) MarshalJSON() ([]byte, error) {
-	type Alias Reasoning
-	base, err := common.Marshal(Alias(r))
+	var effort json.RawMessage
+	if r.effortRaw != nil {
+		effort = append(json.RawMessage(nil), r.effortRaw...)
+	} else if r.effortSet || r.Effort != "" {
+		effortValue := r.Effort
+		var err error
+		effort, err = common.Marshal(effortValue)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var summary json.RawMessage
+	if r.summaryRaw != nil {
+		summary = append(json.RawMessage(nil), r.summaryRaw...)
+	} else if r.summarySet || r.Summary != "" {
+		summaryValue := r.Summary
+		var err error
+		summary, err = common.Marshal(summaryValue)
+		if err != nil {
+			return nil, err
+		}
+	}
+	base, err := common.Marshal(struct {
+		Effort  json.RawMessage `json:"effort,omitempty"`
+		Summary json.RawMessage `json:"summary,omitempty"`
+		Mode    json.RawMessage `json:"mode,omitempty"`
+		Context json.RawMessage `json:"context,omitempty"`
+	}{
+		Effort:  effort,
+		Summary: summary,
+		Mode:    r.Mode,
+		Context: r.Context,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1137,18 +1271,20 @@ type Input struct {
 }
 
 type MediaInput struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	FileUrl  string `json:"file_url,omitempty"`
-	ImageUrl string `json:"image_url,omitempty"`
-	Detail   string `json:"detail,omitempty"` // 仅 input_image 有效
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	FileUrl     string `json:"file_url,omitempty"`
+	ImageUrl    string `json:"image_url,omitempty"`
+	Detail      string `json:"detail,omitempty"` // 仅 input_image 有效
+	AudioData   string `json:"audio_data,omitempty"`
+	AudioFormat string `json:"audio_format,omitempty"`
 }
 
 // ParseInput parses the Responses API `input` field into a normalized slice of MediaInput.
 // Reference implementation mirrors Message.ParseContent:
 //   - input can be a string, treated as an input_text item
 //   - input can be an array of objects with a `type` field
-//     supported types: input_text, input_image, input_file
+//     supported types: input_text, input_image, input_audio, input_file
 func (r *OpenAIResponsesRequest) ParseInput() []MediaInput {
 	if r.Input == nil {
 		return nil
@@ -1168,64 +1304,87 @@ func (r *OpenAIResponsesRequest) ParseInput() []MediaInput {
 		return mediaInputs
 	}
 
-	// Try array of parts
-	if common.GetJsonType(r.Input) == "array" {
-		var inputs []Input
-		_ = common.Unmarshal(r.Input, &inputs)
-		for _, input := range inputs {
-			if common.GetJsonType(input.Content) == "string" {
-				var str string
-				_ = common.Unmarshal(input.Content, &str)
-				mediaInputs = append(mediaInputs, MediaInput{Type: "input_text", Text: str})
+	if common.GetJsonType(r.Input) != "array" {
+		return mediaInputs
+	}
+
+	var inputs []any
+	if err := common.Unmarshal(r.Input, &inputs); err != nil {
+		return mediaInputs
+	}
+	for _, inputAny := range inputs {
+		switch input := inputAny.(type) {
+		case string:
+			mediaInputs = append(mediaInputs, MediaInput{Type: "input_text", Text: input})
+		case map[string]any:
+			if content, exists := input["content"]; exists {
+				mediaInputs = appendResponsesInputContent(mediaInputs, content)
+				continue
 			}
-
-			if common.GetJsonType(input.Content) == "array" {
-				var array []any
-				_ = common.Unmarshal(input.Content, &array)
-				for _, itemAny := range array {
-					// Generic map
-					item, ok := itemAny.(map[string]any)
-					if !ok {
-						continue
-					}
-
-					typeVal, ok := item["type"].(string)
-					if !ok {
-						continue
-					}
-					switch typeVal {
-					case "input_text":
-						text, _ := item["text"].(string)
-						mediaInputs = append(mediaInputs, MediaInput{Type: "input_text", Text: text})
-					case "input_image":
-						// image_url may be string or object with url field
-						var imageUrl string
-						switch v := item["image_url"].(type) {
-						case string:
-							imageUrl = v
-						case map[string]any:
-							if url, ok := v["url"].(string); ok {
-								imageUrl = url
-							}
-						}
-						mediaInputs = append(mediaInputs, MediaInput{Type: "input_image", ImageUrl: imageUrl})
-					case "input_file":
-						// file_url may be string or object with url field
-						var fileUrl string
-						switch v := item["file_url"].(type) {
-						case string:
-							fileUrl = v
-						case map[string]any:
-							if url, ok := v["url"].(string); ok {
-								fileUrl = url
-							}
-						}
-						mediaInputs = append(mediaInputs, MediaInput{Type: "input_file", FileUrl: fileUrl})
-					}
-				}
+			if mediaInput, ok := parseResponsesMediaInput(input); ok {
+				mediaInputs = append(mediaInputs, mediaInput)
 			}
 		}
 	}
 
 	return mediaInputs
+}
+
+func appendResponsesInputContent(inputs []MediaInput, content any) []MediaInput {
+	switch value := content.(type) {
+	case string:
+		return append(inputs, MediaInput{Type: "input_text", Text: value})
+	case []any:
+		for _, itemAny := range value {
+			item, ok := itemAny.(map[string]any)
+			if !ok {
+				continue
+			}
+			if mediaInput, ok := parseResponsesMediaInput(item); ok {
+				inputs = append(inputs, mediaInput)
+			}
+		}
+	}
+	return inputs
+}
+
+func parseResponsesMediaInput(item map[string]any) (MediaInput, bool) {
+	itemType, ok := item["type"].(string)
+	if !ok {
+		return MediaInput{}, false
+	}
+
+	switch itemType {
+	case "input_text":
+		return MediaInput{Type: itemType, Text: common.Interface2String(item["text"])}, true
+	case "input_image":
+		imageURL, detail := responsesInputURLAndDetail(item["image_url"])
+		return MediaInput{Type: itemType, ImageUrl: imageURL, Detail: detail}, true
+	case "input_audio":
+		audio, ok := item["input_audio"].(map[string]any)
+		if !ok {
+			return MediaInput{}, false
+		}
+		return MediaInput{
+			Type:        itemType,
+			AudioData:   common.Interface2String(audio["data"]),
+			AudioFormat: common.Interface2String(audio["format"]),
+		}, true
+	case "input_file":
+		fileURL, _ := responsesInputURLAndDetail(item["file_url"])
+		return MediaInput{Type: itemType, FileUrl: fileURL}, true
+	default:
+		return MediaInput{}, false
+	}
+}
+
+func responsesInputURLAndDetail(value any) (string, string) {
+	switch typed := value.(type) {
+	case string:
+		return typed, ""
+	case map[string]any:
+		return common.Interface2String(typed["url"]), common.Interface2String(typed["detail"])
+	default:
+		return "", ""
+	}
 }
