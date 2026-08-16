@@ -15,6 +15,8 @@ COMPOSE_FILE="${COMPACT_E2E_COMPOSE_FILE:-deploy/compose/dev-isolated.yml}"
 ENV_FILE="${COMPACT_E2E_ENV_FILE:-deploy/env/dev-isolated.env}"
 APP_SERVICE="${COMPACT_E2E_APP_SERVICE:-new-api}"
 COMPOSE_PROJECT_NAME="${COMPACT_E2E_COMPOSE_PROJECT_NAME:-}"
+DEV_NEW_API_IMAGE="${COMPACT_E2E_DEV_NEW_API_IMAGE:-}"
+EXPECTED_COMMIT="${COMPACT_E2E_EXPECTED_COMMIT:-}"
 CURL_CONNECT_TIMEOUT="${COMPACT_E2E_CURL_CONNECT_TIMEOUT:-5}"
 CURL_MAX_TIME="${COMPACT_E2E_CURL_MAX_TIME:-60}"
 HEALTH_CURL_MAX_TIME="${COMPACT_E2E_HEALTH_CURL_MAX_TIME:-5}"
@@ -404,7 +406,36 @@ compose_dev() {
   if [[ -n "$COMPOSE_PROJECT_NAME" ]]; then
     compose_args=(--project-name "$COMPOSE_PROJECT_NAME" "${compose_args[@]}")
   fi
+  if [[ -n "$DEV_NEW_API_IMAGE" ]]; then
+    DEV_NEW_API_IMAGE="$DEV_NEW_API_IMAGE" docker compose "${compose_args[@]}" "$@"
+    return
+  fi
   docker compose "${compose_args[@]}" "$@"
+}
+
+assert_dev_artifact() {
+  local actual_image=""
+  local build_info=""
+  local actual_commit=""
+
+  if [[ -n "$DEV_NEW_API_IMAGE" ]]; then
+    actual_image="$(docker inspect --format '{{.Config.Image}}' "$APP_CONTAINER")"
+    if [[ "$actual_image" != "$DEV_NEW_API_IMAGE" ]]; then
+      echo "compact e2e image mismatch: expected=${DEV_NEW_API_IMAGE} actual=${actual_image}" >&2
+      return 1
+    fi
+    echo "compact_e2e_image_match=true"
+  fi
+
+  if [[ -n "$EXPECTED_COMMIT" ]]; then
+    build_info="$(docker exec "$APP_CONTAINER" /new-api --build-info)"
+    actual_commit="$(awk -F= '$1 == "commit" { print $2; exit }' <<<"$build_info")"
+    if [[ "$actual_commit" != "$EXPECTED_COMMIT" ]]; then
+      echo "compact e2e commit mismatch: expected=${EXPECTED_COMMIT} actual=${actual_commit}" >&2
+      return 1
+    fi
+    echo "compact_e2e_commit_match=true"
+  fi
 }
 
 wait_for_dev() {
@@ -422,8 +453,13 @@ wait_for_dev() {
 }
 
 start_dev() {
-  compose_dev up -d --no-deps "$APP_SERVICE" >/dev/null || return 1
-  wait_for_dev
+  if [[ -n "$DEV_NEW_API_IMAGE" ]]; then
+    compose_dev up -d --no-deps --force-recreate "$APP_SERVICE" >/dev/null || return 1
+  else
+    compose_dev up -d --no-deps "$APP_SERVICE" >/dev/null || return 1
+  fi
+  wait_for_dev || return 1
+  assert_dev_artifact || return 1
   APP_QUIESCED=0
 }
 
@@ -441,8 +477,13 @@ stop_dev() {
 }
 
 restart_dev() {
-  compose_dev restart -t "$RESTART_TIMEOUT_SECONDS" "$APP_SERVICE" >/dev/null || return 1
-  wait_for_dev
+  if [[ -n "$DEV_NEW_API_IMAGE" ]]; then
+    compose_dev up -d --no-deps --force-recreate "$APP_SERVICE" >/dev/null || return 1
+  else
+    compose_dev restart -t "$RESTART_TIMEOUT_SECONDS" "$APP_SERVICE" >/dev/null || return 1
+  fi
+  wait_for_dev || return 1
+  assert_dev_artifact || return 1
   APP_QUIESCED=0
 }
 
@@ -1149,7 +1190,6 @@ main() {
   fi
   prepare_curl_config "sk-${token}"
   start_dev
-  docker exec "$APP_CONTAINER" /new-api --build-info
   run_case_native_newapi_compact
   run_case_stream_options_include_usage_recovery
   run_case_remote_compaction_413_recovery
