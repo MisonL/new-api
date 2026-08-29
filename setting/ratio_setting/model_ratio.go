@@ -100,9 +100,126 @@ var defaultModelRatio = map[string]float64{
 	"gpt-5-nano-2025-08-07":            0.025,
 	"gpt-5.5":                          2.5, // $5 / 1M tokens
 	"gpt-5.6":                          2.5,
-	"gpt-5.6-sol":                      2.5,
-	"gpt-5.6-terra":                    1.25,
-	"gpt-5.6-luna":                     0.5,
+	"gpt-5.6-sol":                      2.5, // $5 / 1M tokens
+	"gpt-5.6-terra":                    1.0, // $2 / 1M tokens
+	"gpt-5.6-luna":                     0.1, // $0.2 / 1M tokens
+	"gpt-5-codex":                      0.625,
+	"gpt-5-codex-mini":                 0.125,
+	"gpt-5.1":                          0.625,
+	"gpt-5.1-codex":                    0.625,
+	"gpt-5.1-codex-max":                0.625,
+	"gpt-5.1-codex-mini":               0.125,
+	"gpt-5.2":                          0.875,
+	"gpt-5.2-codex":                    0.875,
+	"gpt-5.2-pro":                      10.5,
+	"gpt-5.3-codex":                    0.875,
+	"gpt-5.3-codex-spark":              0.875,
+	// Channel aliases use the published gpt-5.3-codex price.
+	"gpt-5.3":                       0.875,
+	"gpt-5.3-spark":                 0.875,
+	"gpt-5.4":                       1.25,
+	"gpt-5.4-mini":                  0.375,
+	"gpt-5.4-nano":                  0.1,
+	"gpt-5.4-pro":                   15.0,
+	"gpt-5.5-pro":                   15.0,
+	"gpt-5-pro":                     7.5,
+	"gpt-5.4-openai-compact":        0.625,
+	"gpt-5.5-openai-compact":        1.25,
+	"gpt-image-1-mini":              1.0, // $2 / 1M tokens
+	"gpt-image-1.5":                 2.5,
+	"gpt-image-2":                   2.5,
+	"kimi-k3":                       1.5,   // $3 / 1M tokens; https://platform.kimi.ai/docs/pricing/chat-k3
+	"kimi-k2.6":                     0.475, // $0.95 / 1M tokens
+	"kimi-k2.7-code":                0.475, // $0.95 / 1M tokens; https://platform.kimi.ai/docs/pricing/chat-k27-code.md
+	"kimi-k2.7-code-highspeed":      0.95,  // $1.90 / 1M tokens; https://platform.kimi.ai/docs/pricing/chat-k27-code.md
+	"claude-fable-5":                5.0,   // $10 / 1M tokens
+	"claude-opus-5":                 2.5,   // $5 / 1M tokens
+	"claude-opus-5-thinking":        2.5,
+	"claude-sonnet-5":               1.0, // $2 / 1M tokens; Anthropic now lists this as the standard price
+	"claude-sonnet-5-thinking":      1.0,
+	"claude-haiku-4-5":              0.5,
+	"claude-sonnet-4":               1.5,
+	"claude-sonnet-4-5":             1.5,
+	"claude-sonnet-4-6":             1.5,
+	"claude-opus-4-5":               2.5,
+	"claude-opus-4-8":               2.5,
+	"codex-auto-review":             2.5,
+	"deepseek-v4-flash":             0.07, // $0.14 / 1M tokens
+	"deepseek-ai/deepseek-v4-flash": 0.07,
+	// DeepSeek V4 Flash Vision Exp uses the same published token prices as
+	// V4 Flash; its peak/off-peak schedule is maintained by billing_setting.
+	"deepseek-v4-flash-vision-exp":             0.07,
+	"deepseek-ai/deepseek-v4-flash-vision-exp": 0.07,
+	"deepseek-v4-pro":                          0.2175, // $0.435 / 1M tokens
+	"deepseek-ai/deepseek-v4-pro":              0.2175,
+	// MiMo V2.5 overseas price: $0.14 / 1M input tokens.
+	"mimo-v2.5":              0.07,
+	"minimax-m3":             0.15, // $0.30 / 1M tokens
+	"minimaxai/minimax-m3":   0.15,
+	"minimax-m2":             0.15, // $0.30 / 1M tokens
+	"minimax-m2.1":           0.15, // $0.30 / 1M tokens
+	"minimax-m2.7":           0.15, // $0.30 / 1M tokens
+	"minimax-m2.1-highspeed": 0.3,  // $0.60 / 1M tokens
+	"minimax-m2p5-highspeed": 0.3,  // $0.60 / 1M tokens
+	"minimax-m2.7-highspeed": 0.3,  // $0.60 / 1M tokens
+	// Qwen3.8 official API prices are published in RMB per 1M tokens.
+	"qwen3.8-max":                            12 / 1000 * RMB,
+	"qwen3.8-flash":                          0.8 / 1000 * RMB,
+	"qwen-3.8-flash":                         0.8 / 1000 * RMB,
+	"agnes-1.5-flash":                        0.035, // $0.07 / 1M tokens
+	"agnes-2.0-flash":                        0.015, // $0.03 / 1M tokens
+	"agnes-2.5-flash":                        0.015, // $0.03 / 1M tokens
+	"agnes-2.5-pro":                          0.225, // $0.45 / 1M tokens
+	"agnes-2.5-pro-alpha":                    0.225, // $0.45 / 1M tokens
+	"gemini-3-flash":                         0.25,
+	"gemini-3-flash-preview":                 0.25,  // $0.50 / 1M tokens
+	"gemini-3.7-flash":                       0.75,  // $1.50 / 1M tokens standard price; do not use the 2026 promotion
+	"gemini-3.6-flash":                       0.75,  // $1.50 / 1M tokens standard price; do not use the 2026 promotion
+	"gemini-3.5-flash":                       0.75,  // $1.50 / 1M tokens
+	"gemini-3.5-flash-lite":                  0.15,  // $0.30 / 1M tokens
+	"gemini-3-pro":                           1.0,
+	"gemini-3-pro-preview":                   1.0,
+	"gemini-3.1-pro":                         1.0,
+	"gemini-3.1-pro-preview":                 1.0,
+	"gemini-3.1-flash-lite":                  0.125,             // $0.25 / 1M tokens
+	"gemini-3.1-flash-lite-preview":          0.125,             // $0.25 / 1M tokens
+	"gemini-3-pro-image-preview":             1.0,               // $2 / 1M input tokens
+	"gemini-3.1-flash-image-preview":         0.25,              // $0.50 / 1M input tokens
+	"gemini-3.1-flash-image":                 0.25,              // $0.50 / 1M input tokens
+	"gemini-3.1-flash-lite-image":            0.125,             // $0.25 / 1M input tokens
+	"gemini-3.1-flash-lite-image-preview":    0.125,             // $0.25 / 1M input tokens
+	"gemini-3-pro-image":                     1.0,               // $2 / 1M input tokens
+	"gemini-omni-flash-preview":              0.75,              // $1.50 / 1M input tokens
+	"gemini-omni-flash":                      0.75,              // official stable alias of the preview model
+	"gemini-robotics-er-1.6-preview":         0.5,               // $1.00 / 1M input tokens
+	"gemini-robotics-er-2-preview":           1.0,               // $2.00 / 1M input tokens
+	"gemini-robotics-er-2-streaming-preview": 1.0,               // $2.00 / 1M input tokens
+	"gemini-3.5-live-translate-preview":      1.75,              // $3.50 / 1M audio input tokens
+	"gemini-3.1-flash-live-preview":          0.375,             // $0.75 / 1M text input tokens
+	"gemini-3.1-flash-tts-preview":           0.5,               // $1.00 / 1M text input tokens
+	"gemini-embedding-2":                     0.1,               // $0.20 / 1M text input tokens
+	"gemini-embedding-2-preview":             0.1,               // compatibility alias of Embedding 2
+	"gemma-4-31b-it":                         0.0,               // Free tier only; paid tier is unavailable
+	"gemma-4-26b-a4b-it":                     0.0,               // Free tier only; paid tier is unavailable
+	"glm-5.1":                                0.7,               // $1.40 / 1M tokens; https://docs.z.ai/guides/overview/pricing
+	"glm-5.2":                                0.7,               // $1.40 / 1M tokens; https://docs.z.ai/guides/overview/pricing
+	"glm-5.3":                                0.7,               // $1.40 / 1M tokens; https://docs.z.ai/guides/overview/pricing.md
+	"glm-5.3-flash":                          0.15 / 2,          // $0.15 / 1M list price; ignore the limited-time promotion
+	"step-3.7-flash":                         1.35 / 1000 * RMB, // ¥1.35 / 1M tokens; https://platform.stepfun.com/docs/zh/guides/pricing/details
+	"grok-4.3":                               0.625,             // $1.25 / 1M tokens
+	"grok-4.5":                               1.0,               // $2 / 1M tokens
+	"grok-4.20":                              0.625,             // $1.25 / 1M tokens
+	"grok-4.20-0309-non-reasoning":           0.625,
+	"grok-4.20-0309-reasoning":               0.625,
+	"grok-4.20-multi-agent-0309":             0.625,
+	"grok-4.6":                               1.0, // $2 / 1M tokens
+	"grok-build-0.1":                         0.5, // $1 / 1M tokens
+	"grok-code-fast-1":                       0.5, // official alias of grok-build-0.1
+	"sensenova-6.7-flash-lite":               0.0,
+	"sensenova-6.8-flash-lite":               0.0,
+	// SenseNova Token Plan currently lists both models as free during the public beta.
+	// Source: https://www.sensenova.cn/token-plan
+	"sensenova-u1-fast": 0.0,
 	//"gpt-3.5-turbo-0301":           0.75, //deprecated
 	"gpt-3.5-turbo":          0.25,
 	"gpt-3.5-turbo-0613":     0.75,
@@ -145,7 +262,9 @@ var defaultModelRatio = map[string]float64{
 	"claude-3-7-sonnet-20250219-thinking":       1.5,
 	"claude-sonnet-4-20250514":                  1.5,
 	"claude-sonnet-4-5-20250929":                1.5,
+	"claude-sonnet-4-5-20250929-thinking":       1.5,
 	"claude-opus-4-5-20251101":                  2.5,
+	"claude-opus-4-5-20251101-thinking":         2.5,
 	"claude-opus-4-6":                           2.5,
 	"claude-opus-4-6-max":                       2.5,
 	"claude-opus-4-6-high":                      2.5,
@@ -290,12 +409,69 @@ var defaultModelRatio = map[string]float64{
 	"zai-org/GLM-4.5-FP8":                     0.8,
 	"openai/gpt-oss-120b":                     0.5,
 	"deepseek-ai/DeepSeek-R1-0528":            0.8,
-	"deepseek-ai/DeepSeek-R1":                 0.8,
+	"deepseek-ai/DeepSeek-R1":                 0.5 / 2,
 	"deepseek-ai/DeepSeek-V3-0324":            0.8,
 	"deepseek-ai/DeepSeek-V3.1":               0.8,
+
+	// SiliconFlow official serverless prices (USD per 1M tokens).
+	// Qualified keys stay separate from other providers' prices.
+	"deepseek-ai/DeepSeek-V3":              0.25 / 2,
+	"deepseek-ai/DeepSeek-V3.1-Terminus":   0.27 / 2,
+	"deepseek-ai/DeepSeek-V3.2":            0.27 / 2,
+	"Qwen/Qwen3.6-35B-A3B":                 0.20 / 2,
+	"Qwen/Qwen3.5-397B-A17B":               0.39 / 2,
+	"Qwen/Qwen3.5-122B-A10B":               0.26 / 2,
+	"Qwen/Qwen3.5-35B-A3B":                 0.24 / 2,
+	"Qwen/Qwen3.5-27B":                     0.25 / 2,
+	"Qwen/Qwen3.5-9B":                      0.10 / 2,
+	"Qwen/Qwen3-VL-32B-Instruct":           0.20 / 2,
+	"Qwen/Qwen3-VL-32B-Thinking":           0.20 / 2,
+	"Qwen/Qwen3-VL-8B-Instruct":            0.18 / 2,
+	"Qwen/Qwen3-VL-30B-A3B-Instruct":       0.29 / 2,
+	"Qwen/Qwen3-VL-30B-A3B-Thinking":       0.29 / 2,
+	"Qwen/Qwen3-Coder-30B-A3B-Instruct":    0.07 / 2,
+	"Qwen/Qwen3-Coder-480B-A35B-Instruct":  0.25 / 2,
+	"Qwen/Qwen3-30B-A3B-Instruct-2507":     0.09 / 2,
+	"Qwen/Qwen3-30B-A3B-Thinking-2507":     0.09 / 2,
+	"Qwen/Qwen3-32B":                       0.14 / 2,
+	"Qwen/Qwen3-14B":                       0.07 / 2,
+	"Qwen/Qwen3-8B":                        0.06 / 2,
+	"Qwen/Qwen2.5-72B-Instruct":            0.59 / 2,
+	"Qwen/Qwen2.5-72B-Instruct-128K":       0.59 / 2,
+	"Qwen/Qwen2.5-7B-Instruct":             0.05 / 2,
+	"Qwen/Qwen3-Embedding-8B":              0.04 / 2,
+	"Qwen/Qwen3-Embedding-4B":              0.02 / 2,
+	"Qwen/Qwen3-Embedding-0.6B":            0.01 / 2,
+	"Qwen/Qwen3-Reranker-8B":               0.04 / 2,
+	"Qwen/Qwen3-Reranker-4B":               0.02 / 2,
+	"Qwen/Qwen3-Reranker-0.6B":             0.01 / 2,
+	"baidu/ERNIE-4.5-300B-A47B":            0.28 / 2,
+	"tencent/Hunyuan-A13B-Instruct":        0.14 / 2,
+	"stepfun-ai/Step-3.5-Flash":            0.10 / 2,
+	"inclusionAI/Ling-flash-2.0":           0.14 / 2,
+	"ByteDance-Seed/Seed-OSS-36B-Instruct": 0.21 / 2,
 }
 
 var defaultModelPrice = map[string]float64{
+	"agnes-image-2.0-flash":               0.003,
+	"agnes-image-2.1-flash":               0.003,
+	"agnes-video-v2.0":                    0.005,
+	"grok-imagine-image":                  0.02,
+	"grok-imagine-image-2026-03-02":       0.02,
+	"grok-imagine-image-quality":          0.05,
+	"grok-imagine-image-quality-20260403": 0.05,
+	"grok-imagine-image-quality-latest":   0.05,
+	"grok-imagine-image-pro":              0.05,
+	"grok-imagine-image-2.0":              0.04,
+	"grok-imagine":                        0.02,
+	"grok-imagine-1":                      0.02,
+	"grok-imagine-edit":                   0.02,
+	// SiliconFlow image and video prices are per generated item.
+	"Qwen/Qwen-Image":                0.02,
+	"Qwen/Qwen-Image-Edit":           0.04,
+	"Qwen/Qwen-Image-Edit-2509":      0.04,
+	"Wan-AI/Wan2.2-I2V-A14B":         0.29,
+	"Wan-AI/Wan2.2-T2V-A14B":         0.29,
 	"suno_music":                     0.1,
 	"suno_lyrics":                    0.01,
 	"dall-e-3":                       0.04,
@@ -324,27 +500,39 @@ var defaultModelPrice = map[string]float64{
 	"sora-2-pro":                     0.5,
 	"gpt-4o-mini-tts":                0.3,
 	"veo-3.0-generate-001":           0.4,
-	"veo-3.0-fast-generate-001":      0.15,
+	"veo-3.0-fast-generate-001":      0.1,
 	"veo-3.1-generate-preview":       0.4,
-	"veo-3.1-fast-generate-preview":  0.15,
+	"veo-3.1-fast-generate-preview":  0.1,
+	"veo-3.1-lite-generate-preview":  0.05,
 }
 
 var defaultAudioRatio = map[string]float64{
-	"gpt-4o-audio-preview":         16,
-	"gpt-4o-mini-audio-preview":    66.67,
-	"gpt-4o-realtime-preview":      8,
-	"gpt-4o-mini-realtime-preview": 16.67,
-	"gpt-4o-mini-tts":              25,
+	"gpt-4o-audio-preview":                   16,
+	"gpt-4o-mini-audio-preview":              66.67,
+	"gpt-4o-realtime-preview":                8,
+	"gpt-4o-mini-realtime-preview":           16.67,
+	"gpt-4o-mini-tts":                        25,
+	"gemini-3.1-flash-lite":                  2,
+	"gemini-3.1-flash-lite-preview":          2,
+	"gemini-3.1-flash-live-preview":          4,
+	"gemini-3.5-live-translate-preview":      1,
+	"gemini-3.1-flash-tts-preview":           1,
+	"gemini-robotics-er-1.6-preview":         2,
+	"gemini-robotics-er-2-preview":           1,
+	"gemini-robotics-er-2-streaming-preview": 1,
 }
 
 var defaultAudioCompletionRatio = map[string]float64{
-	"gpt-4o-realtime":      2,
-	"gpt-4o-mini-realtime": 2,
-	"gpt-4o-mini-tts":      1,
-	"tts-1":                0,
-	"tts-1-hd":             0,
-	"tts-1-1106":           0,
-	"tts-1-hd-1106":        0,
+	"gpt-4o-realtime":                   2,
+	"gpt-4o-mini-realtime":              2,
+	"gpt-4o-mini-tts":                   1,
+	"gemini-3.1-flash-live-preview":     4,
+	"gemini-3.5-live-translate-preview": 6,
+	"gemini-3.1-flash-tts-preview":      20,
+	"tts-1":                             0,
+	"tts-1-hd":                          0,
+	"tts-1-1106":                        0,
+	"tts-1-hd-1106":                     0,
 }
 
 var modelPriceMap = types.NewRWMap[string, float64]()
@@ -352,23 +540,155 @@ var modelRatioMap = types.NewRWMap[string, float64]()
 var completionRatioMap = types.NewRWMap[string, float64]()
 
 var defaultCompletionRatio = map[string]float64{
-	"deepseek-v3p1":             3,
-	"deepseek-v3p2":             3,
-	"glm-4p7":                   11.0 / 3.0,
-	"glm-5":                     3.2,
-	"gpt-4-gizmo-*":             2,
-	"gpt-4o-gizmo-*":            3,
-	"gpt-4-all":                 2,
-	"gpt-image-1":               8,
-	"gpt-oss-20b":               30.0 / 7.0,
-	"gpt-oss-120b":              4,
-	"kimi-k2-thinking":          25.0 / 6.0,
-	"kimi-k2p5":                 5,
-	"llama-v3p3-70b-instruct":   1,
-	"minimax-m2p5":              4,
-	"qwen3-8b":                  1,
-	"qwen3-vl-30b-a3b-instruct": 4,
-	"qwen3-vl-30b-a3b-thinking": 4,
+	"agnes-1.5-flash":                          0.15 / 0.07,
+	"agnes-2.0-flash":                          5,
+	"agnes-2.5-flash":                          5,
+	"agnes-2.5-pro":                            2,
+	"agnes-2.5-pro-alpha":                      2,
+	"claude-fable-5":                           5,
+	"claude-opus-5":                            5,
+	"claude-opus-5-thinking":                   5,
+	"claude-sonnet-5":                          5,
+	"claude-sonnet-5-thinking":                 5,
+	"kimi-k3":                                  5,
+	"kimi-k2.6":                                4.0 / 0.95,
+	"kimi-k2.7-code":                           4.0 / 0.95,
+	"kimi-k2.7-code-highspeed":                 8.0 / 1.90,
+	"deepseek-v4-flash":                        2,
+	"deepseek-ai/deepseek-v4-flash":            2,
+	"deepseek-v4-flash-vision-exp":             2,
+	"deepseek-ai/deepseek-v4-flash-vision-exp": 2,
+	"deepseek-v4-pro":                          2,
+	"deepseek-ai/deepseek-v4-pro":              2,
+	"mimo-v2.5":                                0.28 / 0.14,
+	"qwen3.8-max":                              36.0 / 12.0,
+	"qwen3.8-flash":                            2.7 / 0.8,
+	"qwen-3.8-flash":                           2.7 / 0.8,
+	"step-3.7-flash":                           8.1 / 1.35,
+	"gemini-3-flash":                           6,
+	"gemini-3-flash-preview":                   6,
+	"gemini-3.7-flash":                         5,
+	"gemini-3.6-flash":                         5,
+	"gemini-3.5-flash":                         6,
+	"gemini-3.5-flash-lite":                    2.5 / 0.3,
+	"gemini-3-pro":                             6,
+	"gemini-3.1-flash-lite-preview":            6,
+	"gemini-3.1-pro":                           6,
+	"gemini-3.1-pro-preview":                   6,
+	"gemini-omni-flash-preview":                6,
+	"gemini-3.1-flash-live-preview":            6,
+	"gemini-3.5-live-translate-preview":        6,
+	"gemini-3.1-flash-image-preview":           6,
+	"gemini-3.1-flash-lite-image":              6,
+	"gemini-3.1-flash-lite-image-preview":      6,
+	"gemini-3-pro-image-preview":               6,
+	"gemini-3.1-flash-tts-preview":             20,
+	"gemini-robotics-er-1.6-preview":           5,
+	"gemini-robotics-er-2-preview":             5,
+	"gemini-robotics-er-2-streaming-preview":   5,
+	"gemma-4-31b-it":                           1,
+	"gemma-4-26b-a4b-it":                       1,
+	"grok-4.3":                                 2,
+	"grok-4.5":                                 3,
+	"grok-4.20":                                2,
+	"grok-4.20-0309-non-reasoning":             2,
+	"grok-4.20-0309-reasoning":                 2,
+	"grok-4.20-multi-agent-0309":               2,
+	"grok-4.6":                                 3,
+	"grok-build-0.1":                           2,
+	"grok-code-fast-1":                         2,
+	"sensenova-6.7-flash-lite":                 1,
+	"sensenova-6.8-flash-lite":                 1,
+	"gpt-5-codex":                              8,
+	"gpt-5-codex-mini":                         8,
+	"gpt-5.1":                                  8,
+	"gpt-5.1-codex":                            8,
+	"gpt-5.1-codex-max":                        8,
+	"gpt-5.1-codex-mini":                       8,
+	"gpt-5.2":                                  8,
+	"gpt-5.2-codex":                            8,
+	"gpt-5.2-pro":                              8,
+	"gpt-5.3-codex":                            8,
+	"gpt-5.3-codex-spark":                      8,
+	"gpt-5.3":                                  8,
+	"gpt-5.3-spark":                            8,
+	"gpt-5.4":                                  6,
+	"gpt-5.4-mini":                             6,
+	"gpt-5.4-nano":                             6.25,
+	"gpt-5.4-pro":                              6,
+	"gpt-5.5":                                  6,
+	"gpt-5.5-pro":                              6,
+	"gpt-5-pro":                                8,
+	"minimax-m3":                               4,
+	"minimaxai/minimax-m3":                     4,
+	"minimax-m2":                               4,
+	"minimax-m2.1":                             4,
+	"minimax-m2.7":                             4,
+	"minimax-m2.1-highspeed":                   4,
+	"minimax-m2p5":                             4,
+	"minimax-m2p5-highspeed":                   4,
+	"minimax-m2.7-highspeed":                   4,
+	"deepseek-v3p1":                            3,
+	"deepseek-v3p2":                            3,
+	"glm-4p7":                                  11.0 / 3.0,
+	"glm-5":                                    3.2,
+	"glm-5.1":                                  4.4 / 1.4,
+	"glm-5.2":                                  4.4 / 1.4,
+	"glm-5.3":                                  4.4 / 1.4,
+	"glm-5.3-flash":                            0.50 / 0.15,
+	"gpt-4-gizmo-*":                            2,
+	"gpt-4o-gizmo-*":                           3,
+	"gpt-4-all":                                2,
+	"gpt-image-1-mini":                         4,
+	"gpt-image-1":                              8,
+	"gpt-image-1.5":                            2,
+	"gpt-image-2":                              6,
+	"gpt-oss-20b":                              30.0 / 7.0,
+	"gpt-oss-120b":                             4,
+	"kimi-k2-thinking":                         25.0 / 6.0,
+	"kimi-k2p5":                                5,
+	"llama-v3p3-70b-instruct":                  1,
+	"qwen3-8b":                                 1,
+	"qwen3-vl-30b-a3b-instruct":                4,
+	"qwen3-vl-30b-a3b-thinking":                4,
+
+	// SiliconFlow official output prices for qualified model paths.
+	"deepseek-ai/DeepSeek-R1":              2.18 / 0.5,
+	"deepseek-ai/DeepSeek-V3":              1.0 / 0.25,
+	"deepseek-ai/DeepSeek-V3.1-Terminus":   1.0 / 0.27,
+	"deepseek-ai/DeepSeek-V3.2":            0.42 / 0.27,
+	"Qwen/Qwen3.6-35B-A3B":                 1.60 / 0.20,
+	"Qwen/Qwen3.5-397B-A17B":               2.34 / 0.39,
+	"Qwen/Qwen3.5-122B-A10B":               2.08 / 0.26,
+	"Qwen/Qwen3.5-35B-A3B":                 1.80 / 0.24,
+	"Qwen/Qwen3.5-27B":                     2.00 / 0.25,
+	"Qwen/Qwen3.5-9B":                      0.15 / 0.10,
+	"Qwen/Qwen3-VL-32B-Instruct":           0.60 / 0.20,
+	"Qwen/Qwen3-VL-32B-Thinking":           1.50 / 0.20,
+	"Qwen/Qwen3-VL-8B-Instruct":            0.68 / 0.18,
+	"Qwen/Qwen3-VL-30B-A3B-Instruct":       1.00 / 0.29,
+	"Qwen/Qwen3-VL-30B-A3B-Thinking":       1.00 / 0.29,
+	"Qwen/Qwen3-Coder-30B-A3B-Instruct":    0.28 / 0.07,
+	"Qwen/Qwen3-Coder-480B-A35B-Instruct":  1.00 / 0.25,
+	"Qwen/Qwen3-30B-A3B-Instruct-2507":     0.30 / 0.09,
+	"Qwen/Qwen3-30B-A3B-Thinking-2507":     0.30 / 0.09,
+	"Qwen/Qwen3-32B":                       0.57 / 0.14,
+	"Qwen/Qwen3-14B":                       0.28 / 0.07,
+	"Qwen/Qwen3-8B":                        0.06 / 0.06,
+	"Qwen/Qwen2.5-72B-Instruct":            0.59 / 0.59,
+	"Qwen/Qwen2.5-72B-Instruct-128K":       0.59 / 0.59,
+	"Qwen/Qwen2.5-7B-Instruct":             0.05 / 0.05,
+	"Qwen/Qwen3-Embedding-8B":              1,
+	"Qwen/Qwen3-Embedding-4B":              1,
+	"Qwen/Qwen3-Embedding-0.6B":            1,
+	"Qwen/Qwen3-Reranker-8B":               1,
+	"Qwen/Qwen3-Reranker-4B":               1,
+	"Qwen/Qwen3-Reranker-0.6B":             1,
+	"baidu/ERNIE-4.5-300B-A47B":            1.10 / 0.28,
+	"tencent/Hunyuan-A13B-Instruct":        0.57 / 0.14,
+	"stepfun-ai/Step-3.5-Flash":            0.30 / 0.10,
+	"inclusionAI/Ling-flash-2.0":           0.57 / 0.14,
+	"ByteDance-Seed/Seed-OSS-36B-Instruct": 0.57 / 0.21,
 }
 
 // InitRatioSettings initializes all model related settings maps
@@ -396,26 +716,40 @@ func UpdateModelPriceByJSONString(jsonStr string) error {
 }
 
 func getCompactAwareMapValue(source *types.RWMap[string, float64], name string) (float64, bool, string) {
-	if value, ok := source.Get(name); ok {
-		return value, true, name
+	for _, candidate := range modelNameCandidates(name) {
+		if value, matchName, ok := getModelMapValue(source, candidate); ok {
+			return value, true, matchName
+		}
+		baseName, isCompact := CompactBaseModelName(strings.ToLower(candidate))
+		if !isCompact {
+			continue
+		}
+		if value, matchName, ok := getModelMapValue(source, CompactWildcardModelKey); ok {
+			return value, true, matchName
+		}
+		if value, matchName, ok := getModelMapValue(source, baseName); ok {
+			return value, true, matchName
+		}
 	}
-	baseName, isCompact := CompactBaseModelName(name)
-	if !isCompact {
-		return 0, false, name
+	return 0, false, FormatMatchingModelName(name)
+}
+
+// getModelMapValue keeps exact configured keys preferred while allowing model
+// names from providers that differ only in casing to reuse the same pricing.
+func getModelMapValue(source *types.RWMap[string, float64], candidate string) (float64, string, bool) {
+	if value, ok := source.Get(candidate); ok {
+		return value, candidate, true
 	}
-	if value, ok := source.Get(CompactWildcardModelKey); ok {
-		return value, true, CompactWildcardModelKey
+	for configuredName, value := range source.ReadAll() {
+		if strings.EqualFold(configuredName, candidate) {
+			return value, configuredName, true
+		}
 	}
-	if value, ok := source.Get(baseName); ok {
-		return value, true, baseName
-	}
-	return 0, false, name
+	return 0, "", false
 }
 
 // GetModelPrice 返回模型的价格，如果模型不存在则返回-1，false
 func GetModelPrice(name string, printErr bool) (float64, bool) {
-	name = FormatMatchingModelName(name)
-
 	if price, ok, _ := getCompactAwareMapValue(modelPriceMap, name); ok {
 		return price, true
 	}
@@ -439,23 +773,19 @@ func handleThinkingBudgetModel(name, prefix, wildcard string) string {
 }
 
 func GetModelRatio(name string) (float64, bool, string) {
-	name = FormatMatchingModelName(name)
-
 	ratio, ok, matchName := getCompactAwareMapValue(modelRatioMap, name)
 	if !ok {
-		return 37.5, operation_setting.SelfUseModeEnabled, name
+		return 37.5, operation_setting.SelfUseModeEnabled, FormatMatchingModelName(name)
 	}
 	return ratio, true, matchName
 }
 
 func GetConfiguredModelRatio(name string) (float64, bool, string) {
-	name = FormatMatchingModelName(name)
-
 	if ratio, ok, matchName := getCompactAwareMapValue(modelRatioMap, name); ok {
 		return ratio, true, matchName
 	}
 
-	return 0, false, name
+	return 0, false, FormatMatchingModelName(name)
 }
 
 func DefaultModelRatio2JSONString() string {
@@ -483,33 +813,7 @@ func UpdateCompletionRatioByJSONString(jsonStr string) error {
 }
 
 func GetCompletionRatio(name string) float64 {
-	name = FormatMatchingModelName(name)
-
-	if strings.Contains(name, "/") {
-		if ratio, ok := completionRatioMap.Get(name); ok {
-			return ratio
-		}
-	}
-	hardCodedRatio, contain := getHardcodedCompletionModelRatio(name)
-	if contain {
-		return hardCodedRatio
-	}
-	if ratio, ok := completionRatioMap.Get(name); ok {
-		return ratio
-	}
-	if baseName, isCompact := CompactBaseModelName(name); isCompact {
-		if ratio, ok := completionRatioMap.Get(CompactWildcardModelKey); ok {
-			return ratio
-		}
-		if ratio, ok := completionRatioMap.Get(baseName); ok {
-			return ratio
-		}
-		baseHardCodedRatio, baseContain := getHardcodedCompletionModelRatio(baseName)
-		if baseContain {
-			return baseHardCodedRatio
-		}
-	}
-	return hardCodedRatio
+	return getCompletionRatioInfo(name).Ratio
 }
 
 type CompletionRatioInfo struct {
@@ -518,57 +822,38 @@ type CompletionRatioInfo struct {
 }
 
 func GetCompletionRatioInfo(name string) CompletionRatioInfo {
-	name = FormatMatchingModelName(name)
+	return getCompletionRatioInfo(name)
+}
 
-	if strings.Contains(name, "/") {
-		if ratio, ok := completionRatioMap.Get(name); ok {
-			return CompletionRatioInfo{
-				Ratio:  ratio,
-				Locked: false,
-			}
-		}
+func getCompletionRatioInfo(name string) CompletionRatioInfo {
+	// Keep the upstream behavior for explicitly qualified provider aliases: a
+	// configured path such as "provider/model" may intentionally override the
+	// generic model price. Unqualified official models still honor hard locks.
+	if ratio, ok := getQualifiedCompletionRatio(name); ok {
+		return CompletionRatioInfo{Ratio: ratio}
 	}
 
-	hardCodedRatio, locked := getHardcodedCompletionModelRatio(name)
+	hardcodedName := normalizeControlVariantModelName(name)
+	hardcodedRatio, locked := getHardcodedCompletionModelRatio(hardcodedName)
 	if locked {
-		return CompletionRatioInfo{
-			Ratio:  hardCodedRatio,
-			Locked: true,
-		}
+		return CompletionRatioInfo{Ratio: hardcodedRatio, Locked: true}
 	}
+	if ratio, ok, _ := getCompactAwareMapValue(completionRatioMap, name); ok {
+		return CompletionRatioInfo{Ratio: ratio}
+	}
+	return CompletionRatioInfo{Ratio: hardcodedRatio}
+}
 
-	if ratio, ok := completionRatioMap.Get(name); ok {
-		return CompletionRatioInfo{
-			Ratio:  ratio,
-			Locked: false,
+func getQualifiedCompletionRatio(name string) (float64, bool) {
+	for _, candidate := range modelNameCandidates(name) {
+		if !strings.Contains(candidate, "/") {
+			continue
+		}
+		if ratio, _, ok := getModelMapValue(completionRatioMap, candidate); ok {
+			return ratio, true
 		}
 	}
-	if baseName, isCompact := CompactBaseModelName(name); isCompact {
-		if ratio, ok := completionRatioMap.Get(CompactWildcardModelKey); ok {
-			return CompletionRatioInfo{
-				Ratio:  ratio,
-				Locked: false,
-			}
-		}
-		if ratio, ok := completionRatioMap.Get(baseName); ok {
-			return CompletionRatioInfo{
-				Ratio:  ratio,
-				Locked: false,
-			}
-		}
-		baseHardCodedRatio, baseLocked := getHardcodedCompletionModelRatio(baseName)
-		if baseLocked {
-			return CompletionRatioInfo{
-				Ratio:  baseHardCodedRatio,
-				Locked: true,
-			}
-		}
-	}
-
-	return CompletionRatioInfo{
-		Ratio:  hardCodedRatio,
-		Locked: false,
-	}
+	return 0, false
 }
 
 func getHardcodedCompletionModelRatio(name string) (float64, bool) {
@@ -703,30 +988,26 @@ func getHardcodedCompletionModelRatio(name string) (float64, bool) {
 }
 
 func GetAudioRatio(name string) float64 {
-	name = FormatMatchingModelName(name)
-	if ratio, ok := audioRatioMap.Get(name); ok {
+	if ratio, ok, _ := getCompactAwareMapValue(audioRatioMap, name); ok {
 		return ratio
 	}
 	return 1
 }
 
 func GetAudioCompletionRatio(name string) float64 {
-	name = FormatMatchingModelName(name)
-	if ratio, ok := audioCompletionRatioMap.Get(name); ok {
+	if ratio, ok, _ := getCompactAwareMapValue(audioCompletionRatioMap, name); ok {
 		return ratio
 	}
 	return 1
 }
 
 func ContainsAudioRatio(name string) bool {
-	name = FormatMatchingModelName(name)
-	_, ok := audioRatioMap.Get(name)
+	_, ok, _ := getCompactAwareMapValue(audioRatioMap, name)
 	return ok
 }
 
 func ContainsAudioCompletionRatio(name string) bool {
-	name = FormatMatchingModelName(name)
-	_, ok := audioCompletionRatioMap.Get(name)
+	_, ok, _ := getCompactAwareMapValue(audioCompletionRatioMap, name)
 	return ok
 }
 
@@ -735,7 +1016,10 @@ func ModelRatio2JSONString() string {
 }
 
 var defaultImageRatio = map[string]float64{
-	"gpt-image-1": 2,
+	"gpt-image-1-mini": 1.25, // $2.50 image input / $2 text input
+	"gpt-image-1":      2.0,  // $10 image input / $5 text input
+	"gpt-image-1.5":    1.6,  // $8 image input / $5 text input
+	"gpt-image-2":      1.6,  // $8 image input / $5 text input
 }
 var imageRatioMap = types.NewRWMap[string, float64]()
 var audioRatioMap = types.NewRWMap[string, float64]()
@@ -750,7 +1034,7 @@ func UpdateImageRatioByJSONString(jsonStr string) error {
 }
 
 func GetImageRatio(name string) (float64, bool) {
-	ratio, ok := imageRatioMap.Get(name)
+	ratio, ok, _ := getCompactAwareMapValue(imageRatioMap, name)
 	if !ok {
 		return 1, false // Default to 1 if not found
 	}
@@ -795,26 +1079,6 @@ func GetAudioRatioCopy() map[string]float64 {
 
 func GetAudioCompletionRatioCopy() map[string]float64 {
 	return audioCompletionRatioMap.ReadAll()
-}
-
-// 转换模型名，减少渠道必须配置各种带参数模型
-func FormatMatchingModelName(name string) string {
-
-	if strings.HasPrefix(name, "gemini-2.5-flash-lite") {
-		name = handleThinkingBudgetModel(name, "gemini-2.5-flash-lite", "gemini-2.5-flash-lite-thinking-*")
-	} else if strings.HasPrefix(name, "gemini-2.5-flash") {
-		name = handleThinkingBudgetModel(name, "gemini-2.5-flash", "gemini-2.5-flash-thinking-*")
-	} else if strings.HasPrefix(name, "gemini-2.5-pro") {
-		name = handleThinkingBudgetModel(name, "gemini-2.5-pro", "gemini-2.5-pro-thinking-*")
-	}
-
-	if strings.HasPrefix(name, "gpt-4-gizmo") {
-		name = "gpt-4-gizmo-*"
-	}
-	if strings.HasPrefix(name, "gpt-4o-gizmo") {
-		name = "gpt-4o-gizmo-*"
-	}
-	return name
 }
 
 // result: 倍率or价格， usePrice， exist
