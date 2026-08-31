@@ -254,6 +254,37 @@ func TestClaudeToOpenAIRequestIgnoresNonAssistantThinkingBlocks(t *testing.T) {
 	require.Equal(t, "hello", contents[0].Text)
 }
 
+func TestClaudeToOpenAIRequestIgnoresNonAssistantRedactedThinkingBlocks(t *testing.T) {
+	claudeRequest := dto.ClaudeRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.ClaudeMessage{{
+			Role: "user",
+			Content: []any{
+				map[string]any{
+					"type": "redacted_thinking",
+					"data": "invalid-user-side-opaque-state",
+				},
+				map[string]any{
+					"type": "text",
+					"text": "continue",
+				},
+			},
+		}},
+	}
+
+	openAIRequest, err := ClaudeToOpenAIRequest(claudeRequest, &relaycommon.RelayInfo{
+		OriginModelName: "deepseek-v4-flash",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, openAIRequest.Messages, 1)
+	require.Equal(t, "user", openAIRequest.Messages[0].Role)
+	require.Equal(t, "continue", openAIRequest.Messages[0].StringContent())
+	require.Empty(t, openAIRequest.Messages[0].GetReasoningContent())
+}
+
 func TestClaudeToOpenAIRequestConcatenatesMultipleThinkingBlocks(t *testing.T) {
 	claudeRequest := dto.ClaudeRequest{
 		Model: "deepseek-v4-flash",
@@ -310,6 +341,142 @@ func TestClaudeToOpenAIRequestPreservesThinkingBlockWhitespace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, openAIRequest.Messages, 1)
 	require.Equal(t, "  indented reasoning\n", openAIRequest.Messages[0].GetReasoningContent())
+}
+
+func TestClaudeToOpenAIRequestRejectsOmittedThinkingSignature(t *testing.T) {
+	claudeRequest := dto.ClaudeRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "Call the tool."},
+			{
+				Role: "assistant",
+				Content: []any{
+					map[string]any{
+						"type":      "thinking",
+						"thinking":  "",
+						"signature": "opaque-signature",
+					},
+					map[string]any{
+						"type": "tool_use",
+						"id":   "toolu_omitted",
+						"name": "read_file",
+						"input": map[string]any{
+							"path": "README.md",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := ClaudeToOpenAIRequest(claudeRequest, &relaycommon.RelayInfo{
+		OriginModelName: "deepseek-v4-flash",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "opaque thinking state")
+	require.ErrorContains(t, err, "messages[1].content[0]")
+	require.ErrorContains(t, err, `display="summarized"`)
+}
+
+func TestClaudeToOpenAIRequestPreservesVisibleThinkingWhenSignatureIsPresent(t *testing.T) {
+	claudeRequest := dto.ClaudeRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.ClaudeMessage{{
+			Role: "assistant",
+			Content: []any{
+				map[string]any{
+					"type":      "thinking",
+					"thinking":  "summarized reasoning",
+					"signature": "opaque-signature",
+				},
+				map[string]any{
+					"type": "text",
+					"text": "answer",
+				},
+			},
+		}},
+	}
+
+	openAIRequest, err := ClaudeToOpenAIRequest(claudeRequest, &relaycommon.RelayInfo{
+		OriginModelName: "deepseek-v4-flash",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, openAIRequest.Messages, 1)
+	require.Equal(t, "summarized reasoning", openAIRequest.Messages[0].GetReasoningContent())
+	require.Equal(t, "answer", openAIRequest.Messages[0].StringContent())
+}
+
+func TestClaudeToOpenAIRequestKeepsEmptyNonOpaqueThinkingFieldForDeepSeekToolCalls(t *testing.T) {
+	claudeRequest := dto.ClaudeRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.ClaudeMessage{{
+			Role: "assistant",
+			Content: []any{
+				map[string]any{
+					"type":     "thinking",
+					"thinking": "",
+				},
+				map[string]any{
+					"type": "tool_use",
+					"id":   "toolu_empty",
+					"name": "read_file",
+					"input": map[string]any{
+						"path": "README.md",
+					},
+				},
+			},
+		}},
+	}
+
+	openAIRequest, err := ClaudeToOpenAIRequest(claudeRequest, &relaycommon.RelayInfo{
+		OriginModelName: "deepseek-v4-flash",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, openAIRequest.Messages, 1)
+	require.NotNil(t, openAIRequest.Messages[0].ReasoningContent)
+	require.Empty(t, *openAIRequest.Messages[0].ReasoningContent)
+
+	body, err := common.Marshal(openAIRequest)
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"reasoning_content":""`)
+}
+
+func TestClaudeToOpenAIRequestRejectsRedactedThinkingBlock(t *testing.T) {
+	claudeRequest := dto.ClaudeRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.ClaudeMessage{{
+			Role: "assistant",
+			Content: []any{
+				map[string]any{
+					"type":      "redacted_thinking",
+					"data":      "opaque-thinking-payload",
+					"signature": "opaque-signature",
+				},
+				map[string]any{
+					"type": "text",
+					"text": "answer",
+				},
+			},
+		}},
+	}
+
+	_, err := ClaudeToOpenAIRequest(claudeRequest, &relaycommon.RelayInfo{
+		OriginModelName: "deepseek-v4-flash",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "redacted_thinking")
 }
 
 func TestClaudeToOpenAIRequestExtractsThinkTagsFromAssistantStringHistory(t *testing.T) {
@@ -713,6 +880,35 @@ func TestResponseOpenAI2ClaudePreservesReasoningContentWithToolCalls(t *testing.
 	require.Equal(t, "call_1", claudeResponse.Content[1].Id)
 	require.Equal(t, "get_weather", claudeResponse.Content[1].Name)
 	require.Equal(t, map[string]interface{}{"city": "Hangzhou"}, claudeResponse.Content[1].Input)
+}
+
+func TestResponseOpenAI2ClaudePreservesExplicitEmptyReasoningContentWithToolCalls(t *testing.T) {
+	reasoning := ""
+	message := dto.Message{Role: "assistant", ReasoningContent: &reasoning}
+	message.SetToolCalls([]dto.ToolCallRequest{{
+		ID:   "call_empty_reasoning",
+		Type: "function",
+		Function: dto.FunctionRequest{
+			Name:      "get_weather",
+			Arguments: `{"city":"Hangzhou"}`,
+		},
+	}})
+	response := &dto.OpenAITextResponse{
+		Id:    "chatcmpl-empty-reasoning",
+		Model: "deepseek-v4-flash",
+		Choices: []dto.OpenAITextResponseChoice{{
+			Message:      message,
+			FinishReason: "tool_calls",
+		}},
+	}
+
+	claudeResponse := ResponseOpenAI2Claude(response, &relaycommon.RelayInfo{})
+	require.Len(t, claudeResponse.Content, 2)
+	require.Equal(t, "thinking", claudeResponse.Content[0].Type)
+	require.NotNil(t, claudeResponse.Content[0].Thinking)
+	require.Empty(t, *claudeResponse.Content[0].Thinking)
+	require.Equal(t, "tool_use", claudeResponse.Content[1].Type)
+	require.Equal(t, "call_empty_reasoning", claudeResponse.Content[1].Id)
 }
 
 func TestResponseOpenAI2ClaudePreservesTextBeforeToolCalls(t *testing.T) {

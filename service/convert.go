@@ -132,7 +132,7 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 			}
 		}
 	}
-	for _, claudeMessage := range claudeRequest.Messages {
+	for messageIndex, claudeMessage := range claudeRequest.Messages {
 		openAIMessage := dto.Message{
 			Role: claudeMessage.Role,
 		}
@@ -170,7 +170,8 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 			previousText := ""
 			previousTextWasThinkStripped := false
 
-			for _, mediaMsg := range contents {
+			emptyThinkingBlock := false
+			for contentIndex, mediaMsg := range contents {
 				switch mediaMsg.Type {
 				case "text", "input_text":
 					text := mediaMsg.GetText()
@@ -205,9 +206,22 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					previousText = text
 					previousTextWasThinkStripped = textWasThinkStripped
 				case "thinking":
-					if claudeMessage.Role == "assistant" && mediaMsg.Thinking != nil && *mediaMsg.Thinking != "" {
-						appendReasoningText(&reasoningBuilder, *mediaMsg.Thinking)
+					if claudeMessage.Role != "assistant" {
+						break
 					}
+					if mediaMsg.Thinking != nil && *mediaMsg.Thinking != "" {
+						appendReasoningText(&reasoningBuilder, *mediaMsg.Thinking)
+						break
+					}
+					if strings.TrimSpace(mediaMsg.Signature) != "" {
+						return nil, claudeOpaqueThinkingConversionError(messageIndex, contentIndex, "thinking")
+					}
+					emptyThinkingBlock = true
+				case "redacted_thinking":
+					if claudeMessage.Role != "assistant" {
+						break
+					}
+					return nil, claudeOpaqueThinkingConversionError(messageIndex, contentIndex, "redacted_thinking")
 				case "image":
 					// Handle image conversion (base64 to URL or keep as is)
 					imageData := fmt.Sprintf("data:%s;base64,%s", mediaMsg.Source.MediaType, mediaMsg.Source.Data)
@@ -256,6 +270,14 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 			if reasoningBuilder.Len() > 0 {
 				thinking := reasoningBuilder.String()
 				openAIMessage.ReasoningContent = &thinking
+			} else if emptyThinkingBlock && (len(toolCalls) > 0 || len(openAIRequest.Tools) > 0) && hasDeepSeekModelName(claudeRequest.Model, info) {
+				// DeepSeek requires reasoning_content for prior assistant turns
+				// whenever the request carries tools. An empty, non-opaque block has
+				// no text to translate, but retaining the field avoids turning a
+				// valid empty block into a missing field. Opaque blocks are rejected
+				// above.
+				emptyThinking := ""
+				openAIMessage.ReasoningContent = &emptyThinking
 			}
 
 			if len(mediaMessages) > 0 {
@@ -278,6 +300,15 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	openAIRequest.Messages = openAIMessages
 
 	return &openAIRequest, nil
+}
+
+func claudeOpaqueThinkingConversionError(messageIndex int, contentIndex int, blockType string) error {
+	return fmt.Errorf(
+		"cannot convert Claude %s block at messages[%d].content[%d] to OpenAI-compatible reasoning_content: the block contains opaque thinking state that cannot be represented safely; route this request to a native Anthropic-compatible channel or request thinking display=\"summarized\"",
+		blockType,
+		messageIndex,
+		contentIndex,
+	)
 }
 
 func openAITextContentFromMediaMessages(messages []dto.MediaContent) string {
@@ -359,14 +390,36 @@ func shouldExtractThinkTaggedClaudeHistory(model string, info *relaycommon.Relay
 }
 
 func isDeepSeekModelName(model string) bool {
-	model = strings.TrimSpace(strings.ToLower(model))
-	if model == "deepseek" {
-		return true
+	return IsDeepSeekModelName(model)
+}
+
+// IsDeepSeekModelName reports whether a model name identifies a DeepSeek
+// model, including provider-prefixed aliases such as
+// deepseek-ai/DeepSeek-R1 and provider/deepseek-v4-flash.
+//
+// Model names are opaque strings at the routing boundary, so only provider- or
+// path-like segments are inspected. This covers slash- and dot-qualified
+// aliases emitted by gateways and model registries without treating embedded
+// substrings such as "notdeepseek-model" as DeepSeek models.
+func IsDeepSeekModelName(model string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(model))
+	if normalized == "" {
+		return false
 	}
-	if strings.HasPrefix(model, "deepseek-") {
-		return true
+	for _, segment := range strings.FieldsFunc(normalized, func(r rune) bool {
+		switch r {
+		case '/', ':', '@', '|', '.':
+			return true
+		default:
+			return false
+		}
+	}) {
+		segment = strings.TrimSpace(segment)
+		if segment == "deepseek" || strings.HasPrefix(segment, "deepseek-") || strings.HasPrefix(segment, "deepseek_") {
+			return true
+		}
 	}
-	return strings.HasPrefix(model, "deepseek/")
+	return false
 }
 
 func shouldExposeReasoningAsClaudeThinking(model string, info *relaycommon.RelayInfo) bool {
@@ -374,6 +427,13 @@ func shouldExposeReasoningAsClaudeThinking(model string, info *relaycommon.Relay
 }
 
 func hasDeepSeekModelName(model string, info *relaycommon.RelayInfo) bool {
+	return HasDeepSeekModelName(model, info)
+}
+
+// HasDeepSeekModelName checks the requested, origin, and resolved upstream
+// model names. Routing may rewrite the public model name, so all available
+// names must participate in the capability decision.
+func HasDeepSeekModelName(model string, info *relaycommon.RelayInfo) bool {
 	models := []string{model}
 	if info != nil {
 		models = append(models, info.OriginModelName)
@@ -383,7 +443,7 @@ func hasDeepSeekModelName(model string, info *relaycommon.RelayInfo) bool {
 		}
 	}
 	for _, name := range models {
-		if isDeepSeekModelName(name) {
+		if IsDeepSeekModelName(name) {
 			return true
 		}
 	}
@@ -860,7 +920,11 @@ func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relayco
 	for _, choice := range openAIResponse.Choices {
 		stopReason = stopReasonOpenAI2Claude(choice.FinishReason)
 		if allowClaudeThinking {
-			if reasoningContent := choice.GetReasoningContent(); reasoningContent != "" {
+			reasoningContent := choice.Message.GetReasoningContent()
+			preserveEmptyReasoning := reasoningContent == "" &&
+				(choice.Message.ReasoningContent != nil || choice.Message.Reasoning != nil) &&
+				len(choice.Message.ParseToolCalls()) > 0
+			if reasoningContent != "" || preserveEmptyReasoning {
 				claudeContent := dto.ClaudeMediaMessage{}
 				claudeContent.Type = "thinking"
 				claudeContent.Thinking = common.GetPointer[string](reasoningContent)
