@@ -755,6 +755,11 @@ func isJSONRequest(c *gin.Context) bool {
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
+	// Responses-Lite requires explicit serial tool calls. Ordinary Responses
+	// requests retain the client's parallel-tool preference.
+	if c != nil && c.Request != nil && strings.EqualFold(strings.TrimSpace(c.Request.Header.Get("X-OpenAI-Internal-Codex-Responses-Lite")), "true") {
+		request.ParallelToolCalls = common.RawMessage(`false`)
+	}
 	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), request.Input)
 	if err != nil {
 		return nil, err

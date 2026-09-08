@@ -706,8 +706,10 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 	}
 	reasoningContextRequiresConvertedBody := reasoningContextStripped || logicalEffortApplied || reasoningEffortSuffix != ""
 	bodyPreservingParamOverride := relaycommon.ValidateBytePreservingParamOverride(info.ParamOverride) == nil
+	responsesLiteRequest := c != nil && c.Request != nil && strings.EqualFold(strings.TrimSpace(c.Request.Header.Get("X-OpenAI-Internal-Codex-Responses-Lite")), "true")
 	actualPassThroughBody := (passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled) &&
 		!relaycommon.ShouldConvertResponsesRequest(info) &&
+		!responsesLiteRequest &&
 		!inputItemIDsNormalized &&
 		!reasoningContextRequiresConvertedBody &&
 		bodyPreservingParamOverride &&
