@@ -1,48 +1,47 @@
 # CR-PROD-UPGRADE-READINESS-2026-07-08
 
-## Scope
+## 范围
 
-- 检查时间：2026-07-08 16:04:34 CST
-- 复检补充时间：2026-07-08 16:12:15 CST
+- 检查时间和复检补充时间记录在私有审计中。
 - 目标：在不变更正式服务的前提下，确认升级前门禁、备份、回滚和 Compose 流程。
-- 边界：本报告只记录准备状态；未执行正式服务升级。最终候选镜像标签、备份路径和回滚标签以本机 `.dev-docker/backups/production-upgrade-*/upgrade-prep-summary.txt` 为准，避免在 Git 文档中硬编码每次重建都会变化的本机标签。
+- 边界：本报告只记录准备状态；未执行正式服务升级。公开版本不保存特定主机的镜像标签、绝对路径、容量或容器生命周期值；这些值应写入受保护的私有审计记录。
 
-## Current Production Runtime
+## 当前正式运行态
 
 正式容器：
 
-- container: `new-api`
-- image: `new-api-local:prod-20260628-232701-f19d343-dirty`
-- build-info commit: `f19d3437c80f8b64ec04d2fa453058f2a2a36530-dirty`
-- status endpoint: `http://127.0.0.1:13000/api/status` 可访问
-- published port: `127.0.0.1:13000 -> 3000/tcp`
-- restart policy: `always`
+- 容器：`new-api`
+- 镜像：`<production-image-reference>`
+- build-info 提交：`<production-revision>`
+- 状态接口：`http://127.0.0.1:13000/api/status` 可访问
+- 发布端口：`127.0.0.1:13000 -> 3000/tcp`
+- 重启策略：`always`
 
 Compose 标签：
 
-- project: `new-api`
-- config file: `/Volumes/Work/code/new-api/docker-compose.yml`
-- working dir: `/Volumes/Work/code/new-api`
-- services checked: `new-api`, `postgres`, `redis`
+- 项目：`new-api`
+- 配置文件：`<repository-root>/docker-compose.yml`
+- 工作目录：`<repository-root>`
+- 已检查服务：`new-api`、`postgres`、`redis`
 
 挂载：
 
-- `/Volumes/Work/code/new-api/logs -> /app/logs`
-- `/Volumes/Work/code/new-api/data -> /data`
+- `<production-log-dir> -> /app/logs`
+- `<production-data-dir> -> /data`
 
 数据库：
 
-- container: `postgres`
-- `pg_isready -U root -d new-api` 通过
-- `select current_database(), current_user` 返回 `new-api|root`
+- 容器：`postgres`
+- `pg_isready -U <db-user> -d <db-name>` 通过
+- `select current_database(), current_user` 返回预期的数据库和账号
 
 磁盘：
 
-- `/Volumes/Work` 可用空间约 `781Gi`
-- Docker images 总量约 `10.04GB`
-- Docker build cache 总量约 `25.02GB`
+- 受监控宿主卷可用空间：`<captured-free-space>`
+- Docker images 总量：`<captured-image-size>`
+- Docker build cache 总量：`<captured-cache-size>`
 
-## Upgrade Gate
+## 升级门禁
 
 升级候选必须满足：
 
@@ -57,14 +56,14 @@ Compose 标签：
 - 初始检查发现的 dirty 候选阻断已通过提交、重建干净镜像和 3001 复验解除。
 - 每次更新本报告后，如要把报告 commit 纳入最终发布点，必须重新构建候选镜像并复跑 3001 健康检查，确保 build-info revision 等于最终 Git commit。
 
-## Required Production Variables
+## 必需的正式环境变量
 
 升级命令必须显式传入或继承当前正式变量：
 
 - `NEW_API_IMAGE`
 - `NEW_API_PORT_MAPPING=127.0.0.1:13000:3000`
-- `NEW_API_DATA_DIR=/Volumes/Work/code/new-api/data`
-- `NEW_API_LOG_DIR=/Volumes/Work/code/new-api/logs`
+- `NEW_API_DATA_DIR=<production-data-dir>`
+- `NEW_API_LOG_DIR=<production-log-dir>`
 - `SESSION_SECRET`
 - `CRYPTO_SECRET`
 - `SQL_DSN`
@@ -86,16 +85,17 @@ for name in SESSION_SECRET CRYPTO_SECRET SQL_DSN REDIS_CONN_STRING; do
 done
 ```
 
-## Backup And Rollback Plan
+## 备份与回滚方案
 
 升级前必须完成：
 
 ```bash
-mkdir -p .dev-docker/backups/production-upgrade-<timestamp>
-docker exec postgres pg_dump -U root -d new-api --format=custom --file=/tmp/new-api-preupgrade.dump
-docker cp postgres:/tmp/new-api-preupgrade.dump .dev-docker/backups/production-upgrade-<timestamp>/new-api-preupgrade.dump
+BACKUP_DIR="${NEW_API_ARCHIVE_DIR:?set NEW_API_ARCHIVE_DIR}/production-upgrade-$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$BACKUP_DIR"
+docker exec postgres pg_dump -U <db-user> -d <db-name> --format=custom --file=/tmp/new-api-preupgrade.dump
+docker cp postgres:/tmp/new-api-preupgrade.dump "$BACKUP_DIR/new-api-preupgrade.dump"
 docker exec postgres rm -f /tmp/new-api-preupgrade.dump
-docker tag new-api-local:prod-20260628-232701-f19d343-dirty new-api-local:rollback-<timestamp>-f19d343-dirty
+docker tag "$NEW_API_IMAGE" "${NEW_API_ROLLBACK_IMAGE:?set NEW_API_ROLLBACK_IMAGE}"
 ```
 
 回滚入口：
@@ -109,16 +109,16 @@ for name in SESSION_SECRET CRYPTO_SECRET SQL_DSN REDIS_CONN_STRING; do
   fi
 done
 
-NEW_API_IMAGE=new-api-local:rollback-<timestamp>-f19d343-dirty \
+NEW_API_IMAGE="${NEW_API_ROLLBACK_IMAGE:?set NEW_API_ROLLBACK_IMAGE}" \
 NEW_API_PORT_MAPPING=127.0.0.1:13000:3000 \
-NEW_API_DATA_DIR=/Volumes/Work/code/new-api/data \
-NEW_API_LOG_DIR=/Volumes/Work/code/new-api/logs \
+NEW_API_DATA_DIR="${NEW_API_DATA_DIR:?set NEW_API_DATA_DIR}" \
+NEW_API_LOG_DIR="${NEW_API_LOG_DIR:?set NEW_API_LOG_DIR}" \
 docker compose -f docker-compose.yml up -d --no-deps --force-recreate new-api
 ```
 
 如数据库迁移已经生效且需要数据回滚，先停止写入，再恢复 `pg_dump` 备份。
 
-## Production Upgrade Command Shape
+## 正式升级命令形式
 
 正式升级应使用同一个 Compose project 和配置文件。执行前必须先加载受控正式环境变量文件，或确认当前 shell 已继承 `SESSION_SECRET`、`CRYPTO_SECRET`、`SQL_DSN`、`REDIS_CONN_STRING`。
 
@@ -133,8 +133,8 @@ done
 
 NEW_API_IMAGE=<candidate-image> \
 NEW_API_PORT_MAPPING=127.0.0.1:13000:3000 \
-NEW_API_DATA_DIR=/Volumes/Work/code/new-api/data \
-NEW_API_LOG_DIR=/Volumes/Work/code/new-api/logs \
+NEW_API_DATA_DIR="${NEW_API_DATA_DIR:?set NEW_API_DATA_DIR}" \
+NEW_API_LOG_DIR="${NEW_API_LOG_DIR:?set NEW_API_LOG_DIR}" \
 docker compose -f docker-compose.yml up -d --no-deps --force-recreate new-api
 ```
 
@@ -152,6 +152,6 @@ docker logs --tail=200 new-api
 
 - build-info revision 等于候选 commit。
 - `/api/status` 返回成功。
-- Compose 标签仍包含 project `new-api`、service `new-api`、config file `/Volumes/Work/code/new-api/docker-compose.yml`。
+- Compose 标签仍包含预期 project、service 和 `<repository-root>/docker-compose.yml` 配置来源。
 - 端口仍为 `127.0.0.1:13000 -> 3000/tcp`。
 - 最近日志无启动错误、迁移错误或 panic。

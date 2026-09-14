@@ -1,71 +1,116 @@
-# Frontend Development - Backend built from local source
+# Compatibility development Compose file - backend built from local source.
+#
+# Recommended development entry:
+#   deploy/compose/dev-isolated.yml
 #
 # Usage:
-#   1. docker compose -f docker-compose.dev.yml up -d
-#   2. cd web && bun install && bun run dev
-#   3. Open http://localhost:3001 (Rsbuild dev server, API auto-proxied to :3000)
+#   1. Copy deploy/env/dev-legacy.env.example to deploy/env/dev-legacy.env
+#      and fill in the required DEV_* values.
+#   2. docker compose -f docker-compose.dev.yml --env-file deploy/env/dev-legacy.env up -d
+#   3. Open http://127.0.0.1:3002
 #
 # Rebuild backend after Go code changes:
-#   docker compose -f docker-compose.dev.yml up -d --build new-api
+#   docker compose -f docker-compose.dev.yml --env-file deploy/env/dev-legacy.env up -d --build new-api
 #
 # Stop:
-#   docker compose -f docker-compose.dev.yml down
+#   docker compose -f docker-compose.dev.yml --env-file deploy/env/dev-legacy.env down
 #
 # Reset data:
-#   docker compose -f docker-compose.dev.yml down -v
+#   docker compose -f docker-compose.dev.yml --env-file deploy/env/dev-legacy.env down -v
+
+name: ${DEV_LEGACY_COMPOSE_PROJECT_NAME:-new-api-dev}
 
 services:
   new-api:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    image: new-api-dev:local
-    container_name: new-api-dev
+    image: ${DEV_NEW_API_IMAGE:-new-api-dev:local}
+    init: true
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command: --log-dir /app/logs
     ports:
-      - "3000:3000"
+      - "127.0.0.1:${DEV_LEGACY_NEW_API_PORT:-3002}:3000"
     volumes:
       - dev_data:/data
+      - dev_logs:/app/logs
     environment:
-      - SQL_DSN=postgresql://root:123456@postgres:5432/new-api
-      - REDIS_CONN_STRING=redis://redis
-      - TZ=Asia/Shanghai
-      - BATCH_UPDATE_ENABLED=true
+      SESSION_SECRET: ${DEV_SESSION_SECRET:?set DEV_SESSION_SECRET}
+      CRYPTO_SECRET: ${DEV_CRYPTO_SECRET:?set DEV_CRYPTO_SECRET}
+      SQL_DSN: ${DEV_SQL_DSN:?set DEV_SQL_DSN}
+      REDIS_CONN_STRING: ${DEV_REDIS_CONN_STRING:?set DEV_REDIS_CONN_STRING}
+      TZ: ${DEV_TZ:-Asia/Shanghai}
+      ERROR_LOG_ENABLED: ${DEV_ERROR_LOG_ENABLED:-true}
+      BATCH_UPDATE_ENABLED: ${DEV_BATCH_UPDATE_ENABLED:-true}
+      NODE_NAME: ${DEV_NODE_NAME:-dev-legacy-node}
     depends_on:
       redis:
-        condition: service_started
+        condition: service_healthy
       postgres:
         condition: service_healthy
     networks:
       - dev-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "10", "-O", "/dev/null", "http://127.0.0.1:3000/api/healthz"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
 
   redis:
-    image: redis:7-alpine
-    container_name: new-api-dev-redis
+    image: ${DEV_REDIS_IMAGE:-redis:7-alpine}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command: ["redis-server", "--requirepass", "${DEV_REDIS_PASSWORD:?set DEV_REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${DEV_REDIS_PASSWORD:?set DEV_REDIS_PASSWORD}
+    ports:
+      - "127.0.0.1:${DEV_LEGACY_REDIS_PORT:-6381}:6379"
     networks:
       - dev-network
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli --no-auth-warning ping | grep -Fxq PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   postgres:
-    image: postgres:15-alpine
-    container_name: new-api-dev-pg
+    image: ${DEV_POSTGRES_IMAGE:-postgres:15-alpine}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: 123456
-      POSTGRES_DB: new-api
+      POSTGRES_USER: ${DEV_POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD:?set DEV_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${DEV_POSTGRES_DB:-new-api-dev}
+    ports:
+      - "127.0.0.1:${DEV_LEGACY_POSTGRES_PORT:-5434}:5432"
     volumes:
       - dev_pg_data:/var/lib/postgresql/data
     networks:
       - dev-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U root -d new-api"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+      test: ["CMD-SHELL", "PGPASSWORD=\"$${POSTGRES_PASSWORD}\" psql -X -q -tA -v ON_ERROR_STOP=1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -c 'SELECT 1' | grep -Fxq 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 volumes:
   dev_data:
+  dev_logs:
   dev_pg_data:
 
 networks:

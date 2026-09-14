@@ -1,266 +1,254 @@
 # CR-NPM-CLI-VERSION-CACHE-2026-07-07
 
-## Scope
+## 范围
 
-- npm CLI version options cache and refresh contract.
-- Header Profile library version source, refresh time, cache age and last error display.
-- AdminAuth and rate limit protection for npm version option endpoints.
-- Request header policy fallback for usage log display.
-- Isolated development stack on port 3001.
+- npm CLI 版本选项缓存与刷新契约。
+- Header Profile 库的版本来源、刷新时间、缓存年龄和最近错误展示。
+- npm 版本选项接口的 AdminAuth 与限流保护。
+- 用量日志展示的请求头策略回退。
+- 3001 端口的隔离开发栈。
 
-## Code Review Summary
+## 代码审查摘要
 
-- OMP read-only review: no P0/P1/P2/P3 actionable issue remained. It confirmed GET version options is cache/DB only, POST persist failure does not pollute process cache, and request_header_policy `{}` fallback is covered.
-- Claude read-only review: no P0/P1 issue. It recommended adding `request_header_policy: null` coverage, which is now covered by `web/default/tests/request-header-policy.test.ts`.
-- Follow-up local review found one response contract gap: refresh failures had top-level `code` but not `data.code`. This is fixed in `controller/npm_cli_version.go` and covered by `controller/npm_cli_version_test.go`.
-- Second OMP read-only review found that diagnostics exposed raw backend error messages. This is fixed by returning code-based safe summaries in `last_error.message` and preserving raw details only in backend logs.
-- Second OMP read-only review also noted that MySQL text comparison can be collation-sensitive. The CAS update now uses `BINARY value = BINARY ?` when `common.UsingMySQL` is true; a real MySQL 8.4 smoke later confirmed the expected `RowsAffected` semantics and case-sensitive comparison behavior.
-- Third review used the real local CLI tools through the nvm environment. `claude` 2.1.179 found that diagnostics for missing packages serialized Go's zero `time.Time` as `0001-01-01T00:00:00Z`; this is fixed by making diagnostic `refreshed_at` optional and covered by service/controller tests. It also found that this document's companion operations note described insufficient privilege as a real HTTP 403; that note now reflects the existing `AdminAuth` convention of `HTTP 200 + success:false` for insufficient privileges.
-- Real `omp` 16.3.4 CLI was located at `/usr/local/bin/omp`; the default `newapi-responses/gpt-5.5` run failed with `400 Unsupported parameter: max_output_tokens`, and Google Antigravity model probes failed with provider errors. A later `newapi-chat-completions/deepseek-v4-flash` retry completed with no P0/P1 issue. It flagged the same zero-time risk on the normal GET options response; `NpmCLIVersionOptionsResponse.refreshed_at` is now optional too and covered by service/controller tests.
-- Final local sweep found one remaining frontend UX edge: diagnostics GET had no explicit timeout while version GET and refresh did. Default and classic diagnostics requests now use the same 10 second bounded timeout, with source-level tests locking the contract.
-- Final real CLI recheck used local `claude` 2.1.179 and `omp` 16.3.4 through the nvm environment. `omp` reported no P0/P1/P2/P3 findings. `claude` reported only non-blocking edge cases; the service now clamps diagnostic `cache_age_ms` at zero for future timestamps, and tests lock the helper contract. The `last_errors` merge behavior remains intentional: errors newer than a package refresh are preserved so diagnostics do not lose a later failure reason.
-- Follow-up frontend cleanup resolved the remaining non-blocking UI observations: default and classic manual version reload handlers now no-op after unmount, and classic diagnostics HTTP errors use the same response payload/status normalization before falling back to a generic thrown error code.
-- Final CLI cross-check used local `claude` 2.1.179 and `omp` 16.3.4 through the nvm environment. The only confirmed remaining cleanup was classic diagnostics passing Axios internal `error.code` into UI classification when no known backend code existed. Classic now only accepts known npm version error codes there; unknown transport codes fall back to `npm_version_load_failed`.
-- Final optimization pass added diagnostics `summary` and in-process refresh `metrics` to the backend response. The management performance settings pages in both default and classic now expose a read-only npm CLI version diagnostics entry, so operators can inspect recorded/missing packages, cache age, safe last error codes and scheduled/manual refresh state without opening the Header Profile template picker.
-- Final Claude CLI review later found additional context and auth-test hardening points. The claim that common-user diagnostics must return HTTP 401 was not adopted because `middleware.AdminAuth()` intentionally returns `HTTP 200 + success:false` for insufficient privileges. The actionable items are addressed: GET version options propagates the request context into the DB fallback read, refresh persist/CAS reads and writes propagate the caller context, last-error persist logging keeps the caller context, and the unauthenticated route test no longer sends a `New-Api-User` header. The remaining P3 note, successful manual refresh leaving `last_manual_code` empty, remains intentional because the field is omitted on success and the UI displays `-`; success/failure counters carry the success state. A final OMP 16.3.4 CLI recheck was invoked with `-p @prompt-file` through the same nvm environment, but it did not return output before the 180 second deadline, so it is not counted as a passing review.
-- 2026-07-08 follow-up closed the remaining observability gaps from the optimization list. Same-package manual refreshes are now coalesced with in-process singleflight, diagnostics return bounded `recent_errors` history and stable `recommended_action`, and both default/classic management diagnostics display those fields. `last_errors` remains the current blocking state; `recent_errors` is retained history and is not deleted by a later successful refresh.
-- 2026-07-08 final smoke found one response-contract edge: empty diagnostics `recent_errors` slices were omitted by `omitempty`, so operators could not rely on a stable array field. `NpmCLIVersionDiagnostic.recent_errors` now always serializes as an array, and the controller test checks the raw JSON contract.
-- 2026-07-08 final CLI cross-check used local `omp` 16.3.4 and `claude` 2.1.179 through the nvm Node v24.14.0 environment. A large OMP bundle was interrupted after no output; the smaller diff bundle returned usable results. Both tools reported no P0/P1/P2 blockers. Claude listed only non-blocking tradeoffs: background refresh uses `context.Background()`, per-package persistence writes are more granular than one batch write, and same-package `singleflight` uses the first caller context.
+- OMP 只读审查：没有剩余 P0/P1/P2/P3 可执行问题。审查确认 GET 版本选项只读取缓存或数据库，POST 持久化失败不会污染进程缓存，且已覆盖 `request_header_policy {}` 回退。
+- Claude 只读审查：没有 P0/P1 问题。建议补充 `request_header_policy: null` 覆盖，现已由 `web/default/tests/request-header-policy.test.ts` 覆盖。
+- 后续本地审查发现一个响应契约缺口：刷新失败只有顶层 `code`，没有 `data.code`。已在 `controller/npm_cli_version.go` 修复，并由 `controller/npm_cli_version_test.go` 覆盖。
+- 第二次 OMP 只读审查发现诊断接口暴露原始后端错误消息。现改为在 `last_error.message` 返回基于代码的安全摘要，原始细节只保留在后端日志中。
+- 第二次 OMP 只读审查还指出 MySQL 文本比较可能受排序规则影响。当 `common.UsingMySQL` 为 true 时，CAS 更新现在使用 `BINARY value = BINARY ?`；后续 MySQL 8.4 真实 smoke 确认了预期的 `RowsAffected` 语义和大小写敏感比较行为。
+- 第三次审查在受控验证环境使用 CLI 工具。`claude` 2.1.179 发现缺少 package 的诊断会将 Go 零值 `time.Time` 序列化为 `0001-01-01T00:00:00Z`；现通过将诊断 `refreshed_at` 改为可选字段修复，并由 service/controller 测试覆盖。该审查还发现配套运维说明把权限不足描述为真实 HTTP 403；说明已改为反映现有 `AdminAuth` 约定，即权限不足返回 `HTTP 200 + success:false`。
+- 受控 `omp` 16.3.4 审查发现默认 `newapi-responses/gpt-5.5` 请求因 `400 Unsupported parameter: max_output_tokens` 失败，Google Antigravity 模型探针也因 provider 错误失败。之后 `newapi-chat-completions/deepseek-v4-flash` 重试未发现 P0/P1 问题。审查指出普通 GET 选项响应存在同样的零时间风险；`NpmCLIVersionOptionsResponse.refreshed_at` 也已改为可选并由 service/controller 测试覆盖。
+- 最终扫描发现一个前端体验边界：诊断 GET 没有显式超时，而版本 GET 和刷新请求有。default 与 classic 诊断请求现在统一使用 10 秒有界超时，源码测试锁定该契约。
+- 最终 CLI 复核在受控验证环境使用 `claude` 2.1.179 和 `omp` 16.3.4。`omp` 未报告 P0/P1/P2/P3；`claude` 只报告非阻断边界。服务现在将未来时间戳的诊断 `cache_age_ms` 截断为 0，测试锁定 helper 契约。`last_errors` 合并行为是有意设计：保留晚于 package 刷新的错误，避免诊断丢失后续失败原因。
+- 后续前端清理解决了剩余非阻断观察项：default 和 classic 手动版本重载处理器在卸载后不再操作，classic 诊断 HTTP 错误在回退到通用抛出错误代码前使用相同的响应 payload/status 归一化。
+- 最终 CLI 交叉复核使用 `claude` 2.1.179 和 `omp` 16.3.4。唯一确认的清理项是 classic 诊断在没有已知后端代码时把 Axios 内部 `error.code` 传给 UI 分类；现仅接受已知 npm 版本错误代码，未知传输代码回退为 `npm_version_load_failed`。
+- 最终优化在后端响应加入诊断 `summary` 和进程内刷新 `metrics`。default 与 classic 的管理性能设置页现在提供只读 npm CLI 版本诊断入口，操作员无需打开 Header Profile 模板选择器即可查看已记录或缺失的 package、缓存年龄、安全的最近错误代码和计划/手动刷新状态。
+- 后续 Claude CLI 审查发现上下文与鉴权测试加固点。没有采用“普通用户诊断必须返回 HTTP 401”的建议，因为 `middleware.AdminAuth()` 有意对权限不足返回 `HTTP 200 + success:false`。可执行项均已处理：GET 版本选项将请求上下文传入数据库回退读取，刷新持久化/CAS 读写传递调用方上下文，最近错误持久化日志保留调用方上下文，未认证路由测试不再发送 `New-Api-User` 头。剩余 P3 说明是成功手动刷新时 `last_manual_code` 为空，这是有意设计，因为成功时省略该字段且 UI 显示 `-`；成功/失败计数器承载成功状态。最后一次 OMP 16.3.4 CLI 复核使用 `-p @prompt-file` 调用，但在 180 秒截止前没有返回输出，因此不计为通过审查。
+- 2026-07-08 后续工作关闭优化清单中的剩余可观测性缺口。同 package 手动刷新现在通过进程内 singleflight 合并，诊断返回有界的 `recent_errors` 历史和稳定的 `recommended_action`，default/classic 管理诊断均展示这些字段。`last_errors` 仍表示当前阻断状态；`recent_errors` 是保留历史，不会因后续刷新成功而删除。
+- 2026-07-08 最终 smoke 发现一个响应契约边界：空的诊断 `recent_errors` 切片因 `omitempty` 被省略，操作员无法依赖稳定数组字段。`NpmCLIVersionDiagnostic.recent_errors` 现在始终序列化为数组，controller 测试检查原始 JSON 契约。
+- 2026-07-08 最终 CLI 交叉复核使用带所需 Node 运行时的 `omp` 16.3.4 和 `claude` 2.1.179。大型 OMP bundle 因无输出被中断，小型 diff bundle 返回了可用结果。两项工具均未报告 P0/P1/P2 阻断；Claude 只列出非阻断权衡：后台刷新使用 `context.Background()`，每个 package 的持久化写入比单批写入更细粒度，同 package `singleflight` 使用第一个调用方上下文。
 
-## Verification
+## 验证
 
-Commands were run on 2026-07-07 and 2026-07-08 from `/Volumes/Work/code/new-api`.
+命令于 2026-07-07 和 2026-07-08 从 `<repository-root>` 执行。
 
 ### Go
 
 ```bash
-PATH=/usr/local/bin:$PATH /usr/local/bin/go test -count=1 -timeout=180s ./controller ./service -run 'NpmCLI|NpmVersion|npmVersion'
+go test -count=1 -timeout=180s ./controller ./service -run 'NpmCLI|NpmVersion|npmVersion'
 ```
 
-Result: passed.
+结果：通过。
 
-After the third CLI review follow-up, the same command was re-run and passed again for the optional diagnostics `refreshed_at` fix.
+第三次 CLI 审查跟进后，重新执行同一命令并再次通过，确认诊断可选 `refreshed_at` 修复。
 
-After the final real CLI recheck follow-up, the focused controller/service/router command was re-run and passed again for the `cache_age_ms` non-negative clamp.
+最终真实 CLI 复核跟进后，重新执行 controller/service/router 定向命令并再次通过，确认 `cache_age_ms` 非负截断。
 
-After the final diagnostics summary and refresh metrics pass:
+完成最终诊断摘要和刷新指标后：
 
 ```bash
-export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use --silent v24.14.0 >/dev/null
 go test -count=1 -timeout=180s ./service ./controller ./router -run 'NpmCLI|NpmVersion|npmVersion|TestChannelNpmVersionOptionRoutesUseAdminAuthAndCriticalRateLimit'
 ```
 
-Result: passed.
+结果：通过。
 
-After the final Claude CLI P2 follow-up for GET fallback request context, refresh persist context, and diagnostics auth coverage:
+完成 Claude CLI P2 跟进（GET 回退请求上下文、刷新持久化上下文和诊断鉴权覆盖）后：
 
 ```bash
-export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use --silent v24.14.0 >/dev/null
 go test -count=1 -timeout=180s ./service ./controller ./router -run 'NpmCLI|NpmVersion|npmVersion|TestChannelNpmVersionOptionRoutesUseAdminAuthAndCriticalRateLimit'
 ```
 
-Result: passed.
+结果：通过。
 
-After the 2026-07-08 singleflight and diagnostics-history follow-up:
+完成 2026-07-08 singleflight 和诊断历史跟进后：
 
 ```bash
-export PATH="/usr/local/go/bin:$PATH"
 gofmt -w service/npm_cli_version.go service/npm_cli_version_cache.go service/npm_cli_version_diagnostics.go service/npm_cli_version_test.go
 go test -count=1 -timeout=180s ./service -run 'NpmCLI|NpmVersion|npmVersion'
 ```
 
-Result: passed.
+结果：通过。
 
 ```bash
-PATH=/usr/local/bin:$PATH /usr/local/bin/go test -count=1 -timeout=180s ./router -run TestChannelNpmVersionOptionRoutesUseAdminAuthAndCriticalRateLimit
+go test -count=1 -timeout=180s ./router -run TestChannelNpmVersionOptionRoutesUseAdminAuthAndCriticalRateLimit
 ```
 
-Result: passed.
+结果：通过。
 
-After the third CLI review follow-up, the same command was re-run and passed again.
+第三次 CLI 审查跟进后，重新执行同一命令并再次通过。
 
-After the 2026-07-08 stable `recent_errors` response-contract fix:
+完成 2026-07-08 稳定 `recent_errors` 响应契约修复后：
 
 ```bash
-export PATH="/usr/local/go/bin:$PATH"
 go test -count=1 -timeout=180s ./controller ./service -run 'NpmCLI|NpmVersion'
 go test -count=1 -timeout=180s ./controller ./model ./relay/common ./relay/helper ./service
 ```
 
-Result: passed.
+结果：通过。
 
-### Frontend Unit Tests
+### 前端单元测试
 
 ```bash
-PATH=/usr/local/bin:/Users/mison/.bun/bin:$PATH /Users/mison/.bun/bin/bun test ./tests/channel-header-profile-strategy.test.ts ./tests/request-header-policy.test.ts
+bun test ./tests/channel-header-profile-strategy.test.ts ./tests/request-header-policy.test.ts
 ```
 
-Result: 35 passed, 0 failed.
+结果：通过 35，失败 0。
 
-After the final real CLI recheck follow-up, the same default frontend command was re-run and passed again.
+最终真实 CLI 复核跟进后，重新执行同一 default 前端命令并再次通过。
 
 ```bash
-PATH=/usr/local/bin:/Users/mison/.bun/bin:$PATH /Users/mison/.bun/bin/bun test src/components/table/channels/modals/headerProfile.helpers.test.js
+bun test src/components/table/channels/modals/headerProfile.helpers.test.js
 ```
 
-Result: 105 passed, 0 failed.
+结果：通过 105，失败 0。
 
-After the final real CLI recheck follow-up, the same classic frontend command was re-run and passed again.
+最终真实 CLI 复核跟进后，重新执行同一 classic 前端命令并再次通过。
 
-After the final CLI cross-check cleanup, the same classic frontend command was re-run and passed again for the diagnostics error-code normalization.
+最终 CLI 交叉复核清理后，重新执行同一 classic 前端命令并再次通过，确认诊断错误代码归一化。
 
-### Frontend Build
+### 前端构建
 
 ```bash
-PATH=/usr/local/bin:/Users/mison/.bun/bin:$PATH /Users/mison/.bun/bin/bun run lint
+bun run lint
 ```
 
-Directory: `web/classic`.
+目录：`web/classic`。
 
-Result: passed, all matched files use Prettier style.
+结果：通过，所有匹配文件均符合 Prettier 风格。
 
-Earlier local macOS `/Volumes` commands below were interrupted after they stopped producing output for more than 15 minutes:
-
-```bash
-cd web/default && PATH=/usr/local/bin:/Users/mison/.bun/bin:$PATH /Users/mison/.bun/bin/bun run typecheck
-cd web/default && PATH=/usr/local/bin:/Users/mison/.bun/bin:$PATH /Users/mison/.bun/bin/bun run build
-cd web/classic && PATH=/usr/local/bin:/Users/mison/.bun/bin:$PATH /Users/mison/.bun/bin/bun run build
-```
-
-Observed boundary:
-
-- `web/default` build printed `ready built in 4m 19.3s`, then the wrapper did not exit.
-- `web/default` typecheck and `web/classic` build remained in long-running filesystem wait.
-- Final build validation was completed through Docker, which built both frontends and Go successfully.
-
-After the final diagnostics-timeout follow-up, `web/default` typecheck was re-run with the nvm Node path loaded:
+以下较早的前端命令因超过 15 分钟没有继续输出而被中断：
 
 ```bash
-cd web/default && PATH=/usr/local/bin:/Users/mison/.bun/bin:$PATH /Users/mison/.bun/bin/bun run typecheck
-```
-
-Result: passed. The command completed after the TypeScript incremental cache was populated; no script or tsconfig coverage reduction was applied.
-
-After the final diagnostics summary and settings-page pass:
-
-```bash
-export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use --silent v24.14.0 >/dev/null
-cd web/default && bun test ./tests/channel-header-profile-strategy.test.ts ./tests/request-header-policy.test.ts
-```
-
-Result: 36 passed, 0 failed.
-
-```bash
-export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use --silent v24.14.0 >/dev/null
-cd web/classic && bun test src/components/table/channels/modals/headerProfile.helpers.test.js
-```
-
-Result: 106 passed, 0 failed.
-
-```bash
-export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use --silent v24.14.0 >/dev/null
-cd web/default && bun run lint
-```
-
-Result: passed.
-
-```bash
-export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use --silent v24.14.0 >/dev/null
+cd web/default && bun run typecheck
 cd web/default && bun run build
-```
-
-Result: passed. `rsbuild` completed in 1m 39.5s; Safari compatibility rewrite and compatibility check passed.
-
-```bash
-export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use --silent v24.14.0 >/dev/null
-cd web/classic && bun run lint
-```
-
-Result: passed, all matched files use Prettier style.
-
-```bash
-export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use --silent v24.14.0 >/dev/null
 cd web/classic && bun run build
 ```
 
-Result: passed. Vite completed in 4m 56s; Safari compatibility rewrite and compatibility check passed.
+观察到的边界：
 
-The same final pass attempted:
+- `web/default` 构建打印 `ready built in 4m 19.3s` 后，外层包装命令没有退出。
+- `web/default` typecheck 和 `web/classic` 构建停留在长时间文件系统等待。
+- 最终构建验证通过 Docker 完成，两个前端和 Go 均构建成功。
+
+完成最终诊断超时跟进后，在加载 nvm Node 路径的情况下重新执行 `web/default` typecheck：
 
 ```bash
-export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use --silent v24.14.0 >/dev/null
 cd web/default && bun run typecheck
 ```
 
-Boundary: interrupted after about 7 minutes with no TypeScript diagnostics. The actual `web/default` production build passed afterward and covered the new TSX files.
+结果：通过。TypeScript 增量缓存建立后命令完成；没有缩减脚本或 tsconfig 覆盖范围。
 
-### Docker Isolated Build
+完成最终诊断摘要和设置页验证后：
 
 ```bash
-PATH=/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:/Users/mison/.bun/bin:$PATH scripts/build-docker-local.sh new-api-local:dev
+cd web/default && bun test ./tests/channel-header-profile-strategy.test.ts ./tests/request-header-policy.test.ts
 ```
 
-Result: passed.
+结果：通过 36，失败 0。
 
-Build info:
+```bash
+cd web/classic && bun test src/components/table/channels/modals/headerProfile.helpers.test.js
+```
+
+结果：通过 106，失败 0。
+
+```bash
+cd web/default && bun run lint
+```
+
+结果：通过。
+
+```bash
+cd web/default && bun run build
+```
+
+结果：通过。`rsbuild` 用时 1 分 39.5 秒完成；Safari 兼容性重写和兼容性检查通过。
+
+```bash
+cd web/classic && bun run lint
+```
+
+结果：通过，所有匹配文件均符合 Prettier 风格。
+
+```bash
+cd web/classic && bun run build
+```
+
+结果：通过。Vite 用时 4 分 56 秒完成；Safari 兼容性重写和兼容性检查通过。
+
+同一轮最终验证还尝试执行：
+
+```bash
+cd web/default && bun run typecheck
+```
+
+边界：约 7 分钟没有 TypeScript 诊断输出后被中断。之后实际的 `web/default` 生产构建通过，并覆盖了新增 TSX 文件。
+
+### Docker 隔离构建
+
+```bash
+scripts/build-docker-local.sh new-api-local:dev
+```
+
+结果：通过。
+
+构建信息：
 
 ```text
 built image=new-api-local:dev version=v1.1.0 commit=f19d3437c80f8b64ec04d2fa453058f2a2a36530-dirty date=2026-07-07T12:57:13Z
 ```
 
-The Docker build completed:
+Docker 构建完成以下步骤：
 
-- `web/default` rsbuild build.
-- `web/default` Safari compatibility rewrite and compatibility check.
-- `web/classic` vite build.
-- `web/classic` Safari compatibility rewrite and compatibility check.
-- Go production binary build.
+- `web/default` rsbuild 构建。
+- `web/default` Safari 兼容性重写和兼容性检查。
+- `web/classic` vite 构建。
+- `web/classic` Safari 兼容性重写和兼容性检查。
+- Go 生产二进制构建。
 
-After the final diagnostics summary and settings-page pass, the isolated image was rebuilt again:
+完成最终诊断摘要和设置页验证后，重新构建隔离镜像：
 
 ```bash
-export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use --silent v24.14.0 >/dev/null
 scripts/build-docker-local.sh new-api-local:dev
 ```
 
-Result: passed.
+结果：通过。
 
-Build info:
+构建信息：
 
 ```text
 built image=new-api-local:dev version=v1.1.0 commit=f19d3437c80f8b64ec04d2fa453058f2a2a36530-dirty date=2026-07-07T15:47:36Z
 ```
 
-After the final context hardening pass, the isolated image was rebuilt again.
+完成最终上下文加固后，重新构建隔离镜像。
 
-Result: passed.
+结果：通过。
 
-Build info:
+构建信息：
 
 ```text
 built image=new-api-local:dev version=v1.1.0 commit=f19d3437c80f8b64ec04d2fa453058f2a2a36530-dirty date=2026-07-07T17:04:15Z
 ```
 
-After the 2026-07-08 stable `recent_errors` response-contract fix, the isolated image was rebuilt again.
+完成 2026-07-08 稳定 `recent_errors` 响应契约修复后，重新构建隔离镜像。
 
-Result: passed.
+结果：通过。
 
-Build info:
+构建信息：
 
 ```text
 built image=new-api-local:dev version=v1.1.0 commit=f19d3437c80f8b64ec04d2fa453058f2a2a36530-dirty date=2026-07-08T02:35:28Z
 ```
 
-### 3001 Isolated Runtime
+### 3001 隔离运行时
 
 ```bash
-PATH=/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH docker compose -f deploy/compose/dev-isolated.yml --env-file deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api
-PATH=/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' new-api-dev-isolated-new-api-1
-PATH=/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH docker exec new-api-dev-isolated-new-api-1 /new-api --build-info
+docker compose -f deploy/compose/dev-isolated.yml --env-file deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api
+docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' new-api-dev-isolated-new-api-1
+docker exec new-api-dev-isolated-new-api-1 /new-api --build-info
 curl -fsS http://127.0.0.1:3001/api/status
 ```
 
-Result:
+结果：
 
 ```text
 running healthy
@@ -271,9 +259,9 @@ source=https://github.com/MisonL/new-api
 /api/status success=true
 ```
 
-After the final diagnostics summary and settings-page pass, the isolated container was force-recreated again.
+完成最终诊断摘要和设置页验证后，重新强制创建隔离容器。
 
-Result:
+结果：
 
 ```text
 running healthy
@@ -284,9 +272,9 @@ source=https://github.com/MisonL/new-api
 /api/status success=true theme=classic
 ```
 
-After the final context hardening pass, the isolated container was force-recreated again.
+完成最终上下文加固后，重新强制创建隔离容器。
 
-Result:
+结果：
 
 ```text
 running healthy
@@ -297,9 +285,9 @@ source=https://github.com/MisonL/new-api
 /api/status success=true theme=classic
 ```
 
-After the 2026-07-08 stable `recent_errors` response-contract fix, the isolated container was force-recreated again.
+完成 2026-07-08 稳定 `recent_errors` 响应契约修复后，重新强制创建隔离容器。
 
-Result:
+结果：
 
 ```text
 running healthy
@@ -312,9 +300,9 @@ source=https://github.com/MisonL/new-api
 
 ### 3001 API Smoke
 
-Temporary admin and common users were inserted into the isolated PostgreSQL database with one-time `access_token` values, used for this smoke through the same `AdminAuth()` path, then deleted. Token values were not printed.
+临时管理员和普通用户被写入隔离 PostgreSQL 数据库，使用一次性的 `access_token` 通过同一 `AdminAuth()` 路径执行 smoke 后删除；token 值未打印。
 
-Result:
+结果：
 
 ```text
 unauth_get_http=401 success=false message=Unauthorized, not logged in and no access token provided
@@ -324,28 +312,9 @@ admin_diag_http=200 success=true packages=5 sources=recorded last_error_count=1 
 admin_post_unsupported_http=200 success=false top_code=npm_package_unsupported data_code=npm_package_unsupported source=npm message=unsupported npm package: @new-api/nonexistent-smoke-package
 ```
 
-After the final diagnostics summary and settings-page pass, a second isolated diagnostics smoke inserted a temporary admin access token, called `GET /api/channel/npm_version_options/diagnostics`, printed only aggregate fields, then deleted the user.
+完成最终诊断摘要和设置页验证后，第二次隔离诊断 smoke 写入临时管理员 access token，调用 `GET /api/channel/npm_version_options/diagnostics`，只打印聚合字段，然后删除用户。
 
-Result:
-
-```text
-success=true
-packages=5
-summary_package_count=5
-summary_recorded_count=5
-summary_missing_count=0
-summary_last_error_count=0
-metrics_scheduled_runs=1
-metrics_manual_runs=0
-has_generated_at=true
-refresh_interval_ms=600000
-registry_timeout_ms=5000
-has_negative_cache_age=false
-```
-
-After the final context hardening pass, the same diagnostics smoke was re-run against the `2026-07-07T17:04:15Z` isolated container.
-
-Result:
+结果：
 
 ```text
 success=true
@@ -362,9 +331,28 @@ registry_timeout_ms=5000
 has_negative_cache_age=false
 ```
 
-After the 2026-07-08 stable `recent_errors` response-contract fix, the same AdminAuth smoke was re-run against the `2026-07-08T02:35:28Z` isolated container.
+完成最终上下文加固后，针对隔离容器重新执行同一诊断 smoke。
 
-Result:
+结果：
+
+```text
+success=true
+packages=5
+summary_package_count=5
+summary_recorded_count=5
+summary_missing_count=0
+summary_last_error_count=0
+metrics_scheduled_runs=1
+metrics_manual_runs=0
+has_generated_at=true
+refresh_interval_ms=600000
+registry_timeout_ms=5000
+has_negative_cache_age=false
+```
+
+完成 2026-07-08 稳定 `recent_errors` 响应契约修复后，针对隔离容器重新执行同一 AdminAuth smoke。
+
+结果：
 
 ```text
 unauth_http=401 success=false message=Unauthorized, not logged in and no access token provided
@@ -373,27 +361,27 @@ admin_diag_http=200 success=true packages=5 summary_package_count=5 summary_reco
 admin_get_http=200 success=true source=recorded latest_version=0.143.0 options=6 has_refreshed_at=true
 ```
 
-Interpretation:
+解释：
 
-- Unauthenticated requests are rejected with HTTP 401.
-- Common users hit the existing middleware convention: HTTP 200 with `success=false` and insufficient privilege message.
-- Admin GET reads recorded backend cache.
-- Admin diagnostics returns package states.
-- Admin diagnostics may include the safe last error produced by the unsupported-package POST smoke; the value remains code-based and contains no raw backend error.
-- Admin POST refresh returns structured top-level and `data.code` failure for unsupported packages.
+- 未认证请求以 HTTP 401 拒绝。
+- 普通用户遵循现有中间件约定：HTTP 200，`success=false`，并返回权限不足消息。
+- 管理员 GET 读取后端已记录的缓存。
+- 管理员诊断返回 package 状态。
+- 管理员诊断可能包含不支持 package 的 POST smoke 产生的安全最近错误；该值仍基于错误代码，不含原始后端错误。
+- 管理员 POST 刷新对不支持 package 返回结构化的顶层和 `data.code` 失败信息。
 
-### Production Read-only Check
+### 正式只读检查
 
-The local production container was checked read-only on 2026-07-07. No production state was modified.
+2026-07-07 对本地正式容器执行了只读检查，未修改正式状态。
 
-Commands:
+命令：
 
 ```bash
 docker exec new-api /new-api --build-info
 curl -fsS http://127.0.0.1:13000/api/status
 ```
 
-Result:
+结果：
 
 ```text
 version=v1.1.0
@@ -403,13 +391,13 @@ source=https://github.com/MisonL/new-api
 /api/status success=true theme=classic version=v1.1.0
 ```
 
-Interpretation: production is still running the 2026-06-28 build, not the final isolated development build from 2026-07-07T17:04:15Z.
+解释：正式环境仍运行 2026-06-28 构建，不是最终隔离开发构建。
 
 ### PostgreSQL CAS Smoke
 
-Real PostgreSQL container: `new-api-dev-isolated-postgres-1`, database `new-api-dev`, table `options`.
+真实 PostgreSQL 容器：`new-api-dev-isolated-postgres-1`，数据库 `new-api-dev`，表 `options`。
 
-Checks:
+检查：
 
 ```text
 cas_first_rows=1
@@ -417,17 +405,17 @@ cas_stale_rows=0
 cas_large_rows=1
 ```
 
-Interpretation:
+解释：
 
-- Exact value compare-and-swap updates one row for current value.
-- Stale value compare-and-swap updates zero rows.
-- 200KB JSON text value comparison works on PostgreSQL.
+- 当前值的精确 compare-and-swap 更新一行。
+- 过期值的 compare-and-swap 更新零行。
+- PostgreSQL 支持 200KB JSON 文本值比较。
 
 ### MySQL CAS Smoke
 
-Real temporary MySQL container: `mysql:8.4`, table `options`, collation `utf8mb4_general_ci`. The first image pull failed with Docker registry EOF, then a retry succeeded. The container was deleted after the smoke.
+真实临时 MySQL 容器：`mysql:8.4`，表 `options`，排序规则 `utf8mb4_general_ci`。第一次拉取镜像因 Docker registry EOF 失败，重试后成功；smoke 完成后删除容器。
 
-Checks:
+检查：
 
 ```text
 cas_first_rows=1
@@ -438,23 +426,23 @@ cas_large_rows=1
 large_len=200015
 ```
 
-Interpretation:
+解释：
 
-- Exact value compare-and-swap updates one row for current value.
-- Stale value compare-and-swap updates zero rows.
-- `BINARY value = BINARY ?` stays case-sensitive even under `utf8mb4_general_ci`; `"CASE"` did not match `"case"`.
-- 200KB JSON text value comparison works on MySQL 8.4.
+- 当前值的精确 compare-and-swap 更新一行。
+- 过期值的 compare-and-swap 更新零行。
+- 即使使用 `utf8mb4_general_ci`，`BINARY value = BINARY ?` 仍保持大小写敏感；`"CASE"` 不匹配 `"case"`。
+- MySQL 8.4 支持 200KB JSON 文本值比较。
 
-## Conclusion
+## 结论
 
-The local code now covers the previously confusing npm version failure path:
+当前代码已覆盖之前容易混淆的 npm 版本失败路径：
 
-- GET uses backend cache or recorded DB data; it does not fetch npm registry. If no record exists, the backend returns a stable error code and the frontend uses built-in fallback options.
-- POST refresh is admin-protected, returns structured error codes, and does not pollute cache on persist failure.
-- Default and classic Header Profile dialogs expose source, refresh time, cache age and safe last error summaries.
-- Default and classic manual version reload handlers guard against post-unmount state updates.
-- Classic diagnostics no longer treats Axios internal `ERR_*` transport codes as npm version business codes.
-- Diagnostics `recent_errors` is a stable array field, even when the history is empty.
-- Diagnostics `cache_age_ms` is never negative, even if a future timestamp is loaded from a skewed clock or test fixture.
-- Permission/session failures are distinguishable from npm registry or backend cache failures.
-- The rebuilt isolated 3001 environment is running the latest dirty image from this worktree and passes the smoke checks above.
+- GET 使用后端缓存或已记录的数据库数据，不访问 npm registry。没有记录时，后端返回稳定错误代码，前端使用内置回退选项。
+- POST 刷新受管理员保护，返回结构化错误代码，持久化失败时不会污染缓存。
+- default 和 classic Header Profile 对话框展示来源、刷新时间、缓存年龄和安全的最近错误摘要。
+- default 和 classic 手动版本重载处理器防止组件卸载后的状态更新。
+- classic 诊断不再把 Axios 内部 `ERR_*` 传输代码当作 npm 版本业务代码。
+- 即使历史为空，诊断 `recent_errors` 也始终是稳定数组字段。
+- 即使从时钟偏移或测试夹具加载未来时间戳，诊断 `cache_age_ms` 也不会为负数。
+- 权限/会话失败可以与 npm registry 或后端缓存失败区分。
+- 隔离 3001 环境使用该工作区构建的 dirty 镜像，并通过上述 smoke 检查。

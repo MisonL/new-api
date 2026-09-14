@@ -1,13 +1,13 @@
 # CR-DEV-ISOLATED-VERIFY-2026-05-07
 
-## Summary
+## 摘要
 
 本轮检查目标是使用最新代码重新部署完全隔离开发环境，并对后端、前端和 `web/default` Web UI 做运行态验证。
 
 结论：
 
-- 初始重建时，完全隔离开发环境已重建到 `3db3b5366783454c260435e23ae6abb24fb1215e`。
-- 后续最终复核时，仓库 `main` / `origin/main` 已前进到 `4e1ace4c6d3e7781e64726a6a88051a0a3956a76`，但运行中的隔离开发容器仍为 `3db3b5366783454c260435e23ae6abb24fb1215e`。
+- 初始重建时，完全隔离开发环境已重建到已验证的候选提交。
+- 后续最终复核时，仓库 `main` / `origin/main` 已前进，但运行中的隔离开发容器仍停留在此前的候选提交。
 - 因此，截至最终复核，隔离开发环境健康，但不是当前 `main` 的最新版本。
 - `new-api-dev-isolated-new-api-1`、PostgreSQL、Redis 均为 `healthy`。
 - 后端 `/api/status` 返回 `success=true`。
@@ -15,21 +15,21 @@
 - `3001` 容器入口当前按系统配置加载 classic 主题；验证 `web/default` 页面时需要独立启动前端开发服务器代理到 `3001`。
 - 本轮 `web/default` 运行态验证使用 `http://127.0.0.1:5176/`，后端代理目标为 `http://127.0.0.1:3001`。
 
-## Environment
+## 环境
 
-- Repository: `/Volumes/Work/code/new-api`
-- Branch: `main`
-- Git state before cleanup: `main...origin/main`
-- Initial deployed commit: `3db3b5366783454c260435e23ae6abb24fb1215e`
-- Final repository commit: `4e1ace4c6d3e7781e64726a6a88051a0a3956a76`
-- Final running container commit: `3db3b5366783454c260435e23ae6abb24fb1215e`
-- Dev Compose file: `deploy/compose/dev-isolated.yml`
-- Dev env file: `deploy/env/dev-isolated.env`
-- Dev image: `new-api-local:dev`
-- Dev backend URL: `http://127.0.0.1:3001`
-- Temporary `web/default` dev URL: `http://127.0.0.1:5176`
+- 代码仓库：`<repository-root>`
+- 分支：`main`
+- 清理前 Git 状态：`main...origin/main`
+- 初始部署提交：`<initial-validated-revision>`
+- 最终仓库提交：`<final-repository-revision>`
+- 最终运行容器提交：`<running-container-revision>`
+- 开发 Compose 文件：`deploy/compose/dev-isolated.yml`
+- 开发环境变量文件：`deploy/env/dev-isolated.env`
+- 开发镜像：`new-api-local:dev`
+- 开发后端地址：`http://127.0.0.1:3001`
+- 临时 `web/default` 开发地址：`http://127.0.0.1:5176`
 
-## Deploy Commands
+## 部署命令
 
 ```bash
 scripts/build-docker-local.sh new-api-local:dev
@@ -42,12 +42,12 @@ docker compose -f deploy/compose/dev-isolated.yml --env-file deploy/env/dev-isol
 
 关键结果：
 
-- `docker inspect` 输出 `healthy 3db3b5366783454c260435e23ae6abb24fb1215e new-api-local:dev`。
-- `/new-api --build-info` 输出 `version=v1.1.0`、`commit=3db3b5366783454c260435e23ae6abb24fb1215e`。
+- `docker inspect` 输出 `healthy <validated-revision> new-api-local:dev`。
+- `/new-api --build-info` 输出 `version=v1.1.0`、`commit=<validated-revision>`。
 - `/api/status` 返回 `success=true`。
 - Compose 状态显示 `new-api`、`postgres`、`redis` 均为 `healthy`。
 
-## Verification Commands
+## 验证命令
 
 ```bash
 go test ./...
@@ -65,7 +65,7 @@ cd web/default && bun run typecheck
 - `bun run i18n:sync` 通过。
 - `bun run typecheck` 通过。
 
-## Web UI Runtime Checks
+## Web UI 运行态检查
 
 `3001` 容器入口当前仍由系统配置加载 classic 主题，因此不能用 `http://127.0.0.1:3001/rankings` 代表 `web/default` 的验证结果。
 
@@ -106,7 +106,7 @@ VITE_REACT_APP_SERVER_URL=http://127.0.0.1:3001 bun run dev --host 127.0.0.1 --p
 - 未发现业务错误。
 - 仅出现一条 reduced-motion 警告，属于本机系统动画偏好提示。
 
-## Cleanup
+## 清理
 
 已清理：
 
@@ -133,15 +133,15 @@ curl -fsS http://127.0.0.1:3001/api/status
 - 隔离 Docker 栈仍为 `healthy`。
 - `/api/status` 返回 `success=true`。
 
-## Residual Risks / Gate Boundary
+## 剩余风险与门禁边界
 
 - 本轮没有执行真实渠道写入、渠道批量测试或真实模型调用，避免对隔离数据面产生额外副作用。
 - 本轮没有把 `web/default` 构建产物切换成 `3001` 容器默认入口；`3001` 默认入口仍取决于系统配置。
 - 若后续验证目标是容器内嵌 `web/default` 产物，需要先调整系统主题配置或构建打包入口，再重新做容器内页面验证。
 
-## Final Current-State Check
+## 最终当前状态检查
 
-复核时间：2026-05-07。
+复核时间记录在私有审计中。
 
 复核命令：
 
@@ -156,13 +156,13 @@ docker image inspect new-api-local:dev --format 'id={{.Id}} created={{.Created}}
 
 关键结果：
 
-- Git 输出 `main...origin/main`，`HEAD` 与 `origin/main` 均为 `4e1ace4c6d3e7781e64726a6a88051a0a3956a76`。
-- 运行中开发容器 `/new-api --build-info` 输出 `commit=3db3b5366783454c260435e23ae6abb24fb1215e`。
+- Git 输出 `main...origin/main`，`HEAD` 与 `origin/main` 均指向已验证的最终提交。
+- 运行中开发容器 `/new-api --build-info` 输出的 `commit` 与已验证的隔离候选一致。
 - 运行中容器镜像为 `new-api-local:dev`，状态为 `running`，健康状态为 `healthy`。
-- `new-api-local:dev` 镜像创建时间为 `2026-05-07T07:33:46.984204313Z`。
+- 开发镜像创建时间属于历史运行快照，不在公开记录中保留。
 
 结论：
 
 - 当前隔离开发环境可用且健康。
 - 当前隔离开发环境不是当前 `main` / `origin/main` 的最新代码。
-- 需要重新执行 `scripts/build-docker-local.sh new-api-local:dev` 并重建 `new-api` 服务后，再用 `/new-api --build-info` 比对运行提交与 `git rev-parse HEAD`。
+- 需要重新执行 `scripts/build-docker-local.sh new-api-local:dev` 并重建隔离 `new-api` 服务后，再用 `/new-api --build-info` 比对运行提交与 `git rev-parse HEAD`。

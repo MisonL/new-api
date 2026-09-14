@@ -456,7 +456,7 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 
 验证对象：
 
-- intake worktree：`/Volumes/Work/code/new-api-upstream-intake-20260530`
+- intake worktree：`<intake-worktree>`
 - 分支：`codex/upstream-intake-20260530`
 - 验证应用提交：`8d904c357923c3acf924c34f58abb3fe0503a730`
 - 文档记录提交：`2bc136681915516ae1ea985ccf22b71009c68ad2`
@@ -466,7 +466,7 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 命令与结果：
 
 - `scripts/build-docker-local.sh new-api-local:dev`：退出码 0；镜像 build-info 为 `version=v1.1.0`、`commit=8d904c357923c3acf924c34f58abb3fe0503a730`、`date=2026-05-31T00:04:59Z`。
-- `docker compose -f deploy/compose/dev-isolated.yml --env-file /Volumes/Work/code/new-api/deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api`：退出码 0；仅重建 `new-api-dev-isolated-new-api-1`。
+- `docker compose -f deploy/compose/dev-isolated.yml --env-file <repository-root>/deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api`：退出码 0；仅重建隔离开发服务容器。
 - `docker ps --format ... | rg 'new-api-dev-isolated|new-api\s'`：`new-api-dev-isolated-new-api-1` 使用 `new-api-local:dev`，端口 `0.0.0.0:3001->3000/tcp`，compose project 为 `new-api-dev-isolated`；正式 `new-api` 使用 `new-api-local:prod-main`，端口 `127.0.0.1:13000->3000/tcp`，compose project 为 `new-api`。
 - `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info`：退出码 0；commit 为 `8d904c357923c3acf924c34f58abb3fe0503a730`。
 - `docker exec new-api /new-api --build-info`：退出码 0；正式容器仍为 `06f7fa5322c1ef469259e40380a786a5468c856a-dirty`，未被本轮重建。
@@ -688,7 +688,7 @@ classic 仍可能被系统配置加载。上游 classic 改动不能被忽略，
 | `git diff --check` | 通过 | 无空白错误 |
 | `cd web/default && bun run build` | 通过 | `rsbuild build` 退出码 0 |
 | `scripts/build-docker-local.sh new-api-local:dev` | 通过 | 预提交镜像 build-info: `commit=54342a7257528848f109c0d66b53d476710d9245-dirty`, `date=2026-05-31T05:12:33Z`；提交后已重建最终镜像，build-info: `commit=3775d927bbb0ef1d834282d67b6f7bb266da4723`, `date=2026-05-31T05:25:17Z` |
-| `docker compose -f deploy/compose/dev-isolated.yml --env-file /Volumes/Work/code/new-api/deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api` | 通过 | 使用最终镜像重建 `new-api-dev-isolated-new-api-1`，未操作 3000 production |
+| `docker compose -f deploy/compose/dev-isolated.yml --env-file <repository-root>/deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api` | 通过 | 使用候选镜像重建隔离开发服务，未操作生产入口 |
 | `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info` | 通过 | 返回 `version=v1.1.0`, `commit=3775d927bbb0ef1d834282d67b6f7bb266da4723`, `date=2026-05-31T05:25:17Z` |
 | `curl -fsS http://127.0.0.1:3001/api/status` | 通过 | 返回 `success:true` |
 

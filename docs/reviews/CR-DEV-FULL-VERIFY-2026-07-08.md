@@ -1,16 +1,15 @@
 # CR-DEV-FULL-VERIFY-2026-07-08
 
-## Scope
+## 范围
 
-- 验证时间：2026-07-08 14:52:24 CST
-- 复检补充时间：2026-07-08 15:31:38 CST
-- 正式环境基线：`f19d3437c80f8b64ec04d2fa453058f2a2a36530-dirty`
-- 初始验证源码：`2e986a65f32d7c75c064a9d01eed9a9ae3b47361-dirty`
-- 复检后提交：`f04b83cb82bb183796d9ede0ce2c2a92493df87e`
-- 差异范围：`git diff --stat f19d3437c80f8b64ec04d2fa453058f2a2a36530..HEAD`
+- 验证时间和复检补充时间记录在私有审计中。
+- 正式环境基线：`<production-revision>-dirty`
+- 初始验证源码：`<initial-validated-revision>-dirty`
+- 复检后提交：`<follow-up-revision>`
+- 差异范围：`git diff --stat <production-revision>..HEAD`
 - 边界：正式环境带 `-dirty`，Git 只能精确覆盖正式环境提交基线到当前 HEAD 的已提交差异，无法还原正式环境未提交改动。
 
-## Deployment Verification
+## 部署验证
 
 执行：
 
@@ -27,11 +26,11 @@ curl -fsS http://127.0.0.1:3001/api/status
 - 3001 隔离开发容器重建后达到 `running healthy`。
 - 容器内 build-info：
   - version: `v1.1.0`
-  - commit: `2e986a65f32d7c75c064a9d01eed9a9ae3b47361`
+  - commit: `<validated-revision>`
   - source: `https://github.com/MisonL/new-api`
 - `/api/status` 可访问。
 
-## Automated Tests
+## 自动化测试
 
 后端：
 
@@ -81,10 +80,10 @@ cd web/classic && bun run build
 结果：
 
 - default typecheck 通过。
-- default build 通过，Safari compatibility check passed。
-- classic build 通过，Safari compatibility check passed。
+- default build 通过，Safari 兼容性检查通过。
+- classic build 通过，Safari 兼容性检查通过。
 
-## Compact Control Plane E2E
+## Compact 控制面端到端验证
 
 执行：
 
@@ -110,9 +109,9 @@ scripts/compact-control-plane-e2e.sh
 - `generic_openai_rejects_remote_opaque_compaction` 从非 200 断言收紧为 exact HTTP 503。
 - `sub2api_http_rejects_rest_previous_id` 从非 200 断言收紧为 exact HTTP 400。
 - `native_newapi_compact` 补充 continue 闭环：先执行 `/v1/responses/compact`，再用返回的 native `id` 调 `/v1/responses`，断言 fake upstream 收到同一个 `previous_response_id`。
-- 在包含本轮未提交修正的 `2e986a65...-dirty` 镜像上重新执行完整 e2e，结果通过；新增 native continue、exact 503、exact 400 均在该轮通过。
+- 在包含本轮未提交修正的 dirty 候选镜像上重新执行完整 e2e，结果通过；新增 native continue、exact 503、exact 400 均在该轮通过。
 
-## Real Channel Verification
+## 真实渠道验证
 
 临时创建开发库用户和 API token，仅在 shell 变量和 0600 临时文件中使用，结束自动删除。
 
@@ -138,9 +137,9 @@ codex exec --json --model gpt-5.5 --cd <temp-work-dir> --skip-git-repo-check --d
 - 最终 `node test.js` 输出 `test passed`
 - Codex JSONL 事件 31 行，事件类型包括 `thread.started`、`turn.started`、`item.started`、`item.updated`、`item.completed`、`turn.completed`
 - 临时 token 在开发库中记录到真实调用日志和 quota 使用。
-- 清理后 `users.id=920001` 与 `tokens.id=920001` 均为 0。
+- 清理后临时用户和令牌记录均为 0。
 
-## Npm CLI Version Diagnostics
+## NPM CLI 版本诊断
 
 使用临时管理员用户 `role=10` 验证管理端接口，结束后清理用户。
 
@@ -155,13 +154,13 @@ GET /api/channel/npm_version_options?package=%40openai%2Fcodex
 - options: HTTP 200, success=true, source=recorded, latest_version=0.143.0, options=6。
 - `latest` 选项存在，`resolvedVersion=0.143.0`，可用于前端选择。
 
-## External Review Follow-up
+## 外部审查跟进
 
 按用户要求使用本机 CLI 做只读复检：
 
 ```bash
 claude -p --no-session-persistence --dangerously-skip-permissions --output-format text '<review prompt>'
-omp -p --no-session --auto-approve --cwd /Volumes/Work/code/new-api '<review prompt>'
+omp -p --no-session --auto-approve --cwd <repository-root> '<review prompt>'
 ```
 
 Claude 结论：
@@ -205,7 +204,7 @@ go test -count=1 -timeout=300s ./dto ./relay/channel/openai ./relay/channel/code
 
 结果：通过。
 
-- 重建 `new-api-local:dev` 镜像并替换 3001 开发容器，容器 build-info 为 `2e986a65f32d7c75c064a9d01eed9a9ae3b47361-dirty`。
+- 重建 `new-api-local:dev` 镜像并替换 3001 隔离开发容器，容器 build-info 与被验证的 dirty 候选提交一致。
 - 在新容器上重新执行：
 
 ```bash
@@ -214,15 +213,15 @@ COMPACT_E2E_CURL_MAX_TIME=180 scripts/compact-control-plane-e2e.sh
 
 结果：通过，结束后数据库状态恢复，开发容器重启。
 
-- 在 `2e986a65...-dirty` 新容器上重新创建临时 token 做真实渠道复测：
-  - `/v1/responses`: HTTP 200，返回真实 `resp_09c65ab0ff86aeb1016a4dfea36c90819888c87bb9eac63744`，包含 `dirty-real-channel-ok`。
-  - `/v1/responses/compact` 携带 `stream:true` 和 `stream_options.include_usage=true`: HTTP 200，返回真实 `resp_04af35b72f60f9b0016a4dfeab107081999d34d81e38996de7`，包含 compaction 输出。
+- 在新的 dirty 隔离候选上重新创建临时 token 做真实渠道复测：
+  - `/v1/responses`：HTTP 200，返回真实 Responses 响应并包含预期文本。
+  - `/v1/responses/compact` 携带 `stream:true` 和 `stream_options.include_usage=true`：HTTP 200，返回真实 compact 输出。
   - 临时 token 产生 2 条日志，结束后清理临时用户和 token。
 
-## Final State
+## 最终状态
 
 - 初始复检结束时 `git status --short --branch`：包含本报告、compact e2e 状态码断言和 compact stream 契约修正。
-- 初始复检结束时开发容器 build-info 为当前工作区镜像 `2e986a65f32d7c75c064a9d01eed9a9ae3b47361-dirty`。
-- 后续升级准备阶段已将上述修正提交为 `f04b83cb82bb183796d9ede0ce2c2a92493df87e`，并在该干净提交镜像上重跑关键 Go 测试和 `COMPACT_E2E_CURL_MAX_TIME=180 scripts/compact-control-plane-e2e.sh`，结果通过。
+- 初始复检结束时开发容器 build-info 与当前工作区 dirty 候选一致。
+- 后续升级准备阶段已将上述修正提交为最终候选，并在该干净候选镜像上重跑关键 Go 测试和 `COMPACT_E2E_CURL_MAX_TIME=180 scripts/compact-control-plane-e2e.sh`，结果通过。
 - 如本报告后续再次修改并提交，最终候选镜像仍必须按最新 commit 重新构建并验证 build-info。
 - 未发现本轮验证阻断问题。

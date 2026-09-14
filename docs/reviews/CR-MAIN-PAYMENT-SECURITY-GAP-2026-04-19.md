@@ -1,6 +1,6 @@
 # main 分支支付安全复核（2026-04-19）
 
-## Summary
+## 摘要
 
 本轮围绕充值与订阅支付链路做了同构安全审计，重点检查以下风险：
 
@@ -16,26 +16,26 @@
 - 旧的无支付方式约束订阅收口接口已移除
 - 支付链路已补最小回归测试与包级验证
 
-## Control Contract
+## 控制契约
 
-- Primary Setpoint
+- 主要目标
   - 所有支付回调只能修改本渠道创建的订单，不能只凭 `trade_no` 完成或过期其他渠道订单
-- Acceptance
+- 验收标准
   - Stripe / Creem / Epay / Waffo 对应入口均走带支付方式校验的收口路径
   - 空 webhook secret 不再形成 fail-open
   - `go test ./model -count=1` 通过
   - `go test ./controller -count=1` 通过
-- Guardrails
+- 防护条件
   - 不改变正常已支付订单的幂等行为
   - 不改变 Epay 家族支付方式的兼容语义
   - 不引入 schema 变更
-- Boundary
+- 范围边界
   - `controller/topup_*.go`
   - `controller/subscription_payment_*.go`
   - `model/subscription*.go`
   - `model/topup*.go`
 
-## Findings And Fixes
+## 发现与修复
 
 ### 1. Stripe 主链已具备关键防线
 
@@ -45,8 +45,8 @@
 
 位置：
 
-- [controller/topup_stripe.go](/Volumes/Work/code/new-api/controller/topup_stripe.go)
-- [model/topup.go](/Volumes/Work/code/new-api/model/topup.go)
+- [controller/topup_stripe.go](../../controller/topup_stripe.go)
+- [model/topup.go](../../model/topup.go)
 
 ### 2. 订阅支付存在同构串单风险，已收口
 
@@ -64,11 +64,11 @@
 
 位置：
 
-- [model/payment_method_guard.go](/Volumes/Work/code/new-api/model/payment_method_guard.go)
-- [model/subscription_payment_guard.go](/Volumes/Work/code/new-api/model/subscription_payment_guard.go)
-- [controller/topup_stripe.go](/Volumes/Work/code/new-api/controller/topup_stripe.go)
-- [controller/topup_creem.go](/Volumes/Work/code/new-api/controller/topup_creem.go)
-- [controller/subscription_payment_epay.go](/Volumes/Work/code/new-api/controller/subscription_payment_epay.go)
+- [model/payment_method_guard.go](../../model/payment_method_guard.go)
+- [model/subscription_payment_guard.go](../../model/subscription_payment_guard.go)
+- [controller/topup_stripe.go](../../controller/topup_stripe.go)
+- [controller/topup_creem.go](../../controller/topup_creem.go)
+- [controller/subscription_payment_epay.go](../../controller/subscription_payment_epay.go)
 
 ### 3. Waffo 失败回调存在跨渠道状态污染风险，已收口
 
@@ -79,13 +79,13 @@
 
 本轮修复：
 
-- 新增带支付方式约束的失败标记 helper
+- 新增带支付方式约束的失败标记辅助函数
 - Waffo 失败回调仅允许修改 `PaymentMethod == "waffo"` 的订单
 
 位置：
 
-- [model/topup_payment_guard.go](/Volumes/Work/code/new-api/model/topup_payment_guard.go)
-- [controller/topup_waffo.go](/Volumes/Work/code/new-api/controller/topup_waffo.go)
+- [model/topup_payment_guard.go](../../model/topup_payment_guard.go)
+- [controller/topup_waffo.go](../../controller/topup_waffo.go)
 
 ### 4. Stripe 过期回调存在跨渠道状态污染风险，已收口
 
@@ -96,12 +96,12 @@
 
 本轮修复：
 
-- Stripe 充值过期改为走带支付方式约束的 helper
+- Stripe 充值过期改为走带支付方式约束的辅助函数
 
 位置：
 
-- [controller/topup_stripe.go](/Volumes/Work/code/new-api/controller/topup_stripe.go)
-- [model/topup_payment_guard.go](/Volumes/Work/code/new-api/model/topup_payment_guard.go)
+- [controller/topup_stripe.go](../../controller/topup_stripe.go)
+- [model/topup_payment_guard.go](../../model/topup_payment_guard.go)
 
 ### 5. Creem 存在空 secret fail-open 风险，已收口
 
@@ -118,18 +118,18 @@
 
 位置：
 
-- [controller/topup_creem.go](/Volumes/Work/code/new-api/controller/topup_creem.go)
-- [controller/subscription_payment_creem.go](/Volumes/Work/code/new-api/controller/subscription_payment_creem.go)
+- [controller/topup_creem.go](../../controller/topup_creem.go)
+- [controller/subscription_payment_creem.go](../../controller/subscription_payment_creem.go)
 
-## Added Tests
+## 新增测试
 
-- [controller/topup_stripe_security_test.go](/Volumes/Work/code/new-api/controller/topup_stripe_security_test.go)
-- [controller/topup_creem_security_test.go](/Volumes/Work/code/new-api/controller/topup_creem_security_test.go)
-- [model/topup_payment_security_test.go](/Volumes/Work/code/new-api/model/topup_payment_security_test.go)
-- [model/topup_payment_guard_test.go](/Volumes/Work/code/new-api/model/topup_payment_guard_test.go)
-- [model/subscription_payment_guard_test.go](/Volumes/Work/code/new-api/model/subscription_payment_guard_test.go)
+- [controller/topup_stripe_security_test.go](../../controller/topup_stripe_security_test.go)
+- [controller/topup_creem_security_test.go](../../controller/topup_creem_security_test.go)
+- [model/topup_payment_security_test.go](../../model/topup_payment_security_test.go)
+- [model/topup_payment_guard_test.go](../../model/topup_payment_guard_test.go)
+- [model/subscription_payment_guard_test.go](../../model/subscription_payment_guard_test.go)
 
-## Verification
+## 验证
 
 已执行：
 
@@ -148,8 +148,8 @@ go test ./controller -count=1
 - `go test ./model -count=1` 通过
 - `go test ./controller -count=1` 通过
 
-## Residual Risks
+## 剩余风险
 
 - 本轮没有引入真实第三方支付沙箱联调，只做了代码级和包级回归
 - 因此剩余风险主要在第三方平台字段语义漂移，不在本地订单收口逻辑
-- 后续新增支付渠道时，必须继续复用带支付方式校验的收口 helper，不能重新引入“只按 `trade_no` 收口”的实现
+- 后续新增支付渠道时，必须继续复用带支付方式校验的收口辅助函数，不能重新引入“只按 `trade_no` 收口”的实现

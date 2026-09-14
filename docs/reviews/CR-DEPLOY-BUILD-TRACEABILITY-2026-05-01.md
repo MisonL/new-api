@@ -1,6 +1,6 @@
 # CR-DEPLOY-BUILD-TRACEABILITY-2026-05-01
 
-## Summary
+## 摘要
 
 本轮检查目标是确认正式 `new-api` 服务是否由当前本地最新源码构建，并收敛发现的部署与运行态异常。
 
@@ -8,22 +8,22 @@
 
 - 运行中的旧镜像包含当前 `HEAD` 才有的代码特征，但镜像和二进制缺少直接 commit 元数据。
 - `docker-compose.yml` 默认镜像仍指向旧本地标签，环境变量缺失时存在回退到旧镜像的风险。
-- `redis` 容器仍在 `new-api` Compose project 内，但 Compose 路径标签存在 `/volumes/...` 小写漂移，和当前 canonical `/Volumes/...` 不一致。
+- `redis` 容器仍在 `new-api` Compose project 内，但 Compose 路径标签存在大小写漂移，与规范部署根目录不一致。
 - 使用日志中的 500 为上游 `api.gettoken.dev` 请求 `unexpected EOF`，不是本机服务版本不一致导致。
 - `gpt-5.5 requires a newer version of Codex` 是上游返回的 400 客户端版本要求，与 500 不是同一类问题。
 
-## Control Contract
+## 控制契约
 
-- Primary Setpoint：正式服务的构建来源可追溯，Compose 默认值不指向旧镜像，运行态异常分类可复查。
-- Acceptance：二进制输出 `--build-info`，Docker 镜像带 OCI revision label，Compose config 默认镜像为 `new-api-local:prod-main`，全量 Go 测试通过。
-- Guardrail Metrics：不修改数据库 schema，不读取或输出密钥，不改变渠道配置，不在验证阶段覆盖正式镜像。
-- Sampling Plan：基于 Git、Docker inspect、Docker logs、PostgreSQL logs 表、Dockerfile 实构建、测试命令多点采样。
-- Recovery Target：若部署收敛失败，保留旧 `new-api-local:prod-main` 镜像可回退，Compose 仍能使用 `.env` 中的显式镜像。
-- Rollback Trigger：健康检查失败、`/api/status` 不返回 success、容器脱离 Compose project、二进制无法启动。
-- Boundary：允许修改构建元数据、Dockerfile、Compose 默认值、发布工作流、桌面 sidecar 构建脚本、审计文档；不改业务 API、DB schema、渠道密钥。
-- Coupling Notes：构建链路影响 Docker 镜像、Release 二进制、Tauri sidecar；Compose 改动影响正式容器收敛路径。
+- 主要目标：正式服务的构建来源可追溯，Compose 默认值不指向旧镜像，运行态异常分类可复查。
+- 验收标准：二进制输出 `--build-info`，Docker 镜像带 OCI revision label，Compose config 默认镜像为 `new-api-local:prod-main`，全量 Go 测试通过。
+- 防护指标：不修改数据库 schema，不读取或输出密钥，不改变渠道配置，不在验证阶段覆盖正式镜像。
+- 采样方案：基于 Git、Docker inspect、Docker logs、PostgreSQL logs 表、Dockerfile 实构建、测试命令进行多点采样。
+- 恢复目标：若部署收敛失败，保留旧 `new-api-local:prod-main` 镜像可回退，Compose 仍能使用 `.env` 中的显式镜像。
+- 回滚触发条件：健康检查失败、`/api/status` 不返回 success、容器脱离 Compose project、二进制无法启动。
+- 范围边界：允许修改构建元数据、Dockerfile、Compose 默认值、发布工作流、桌面 sidecar 构建脚本、审计文档；不改业务 API、DB schema、渠道密钥。
+- 关联说明：构建链路影响 Docker 镜像、Release 二进制、Tauri sidecar；Compose 改动影响正式容器收敛路径。
 
-## State Estimate / Root Cause
+## 状态估计与根因
 
 ### 构建溯源不足
 
@@ -42,7 +42,7 @@
 现象：
 
 - 正式容器运行 `new-api-local:prod-main`。
-- `docker-compose.yml` 默认值为 `new-api-local:prod-20260412-080601`。
+- `docker-compose.yml` 默认值曾指向历史生产镜像标签。
 
 根因：
 
@@ -52,8 +52,8 @@
 
 现象：
 
-- `new-api` 与 `postgres` 的 `com.docker.compose.project.working_dir` 为 `/Volumes/Work/code/new-api`。
-- `redis` 的同类标签为 `/volumes/work/code/new-api`。
+- `new-api` 与 `postgres` 的 `com.docker.compose.project.working_dir` 为 `<repository-root>`。
+- `redis` 的同类标签为历史路径值，公开记录不保留具体宿主路径。
 
 根因推断：
 
@@ -72,7 +72,7 @@
 - 上游返回 `The 'gpt-5.5' model requires a newer version of Codex`。
 - 这是客户端或上游协议版本要求，不是本地 Docker 构建问题。
 
-## Changes
+## 变更内容
 
 - 新增 `common.BuildCommit`、`common.BuildDate`、`common.BuildSource`。
 - 新增 `--build-info`，保持 `--version` 只输出版本号。
@@ -84,7 +84,7 @@
 - GitHub Docker 发布、Release 二进制、Tauri sidecar 构建都注入同一套构建元数据。
 - README 增加本地 Docker 构建与核验命令。
 
-## Verification
+## 验证
 
 已执行：
 
@@ -121,26 +121,26 @@ docker compose ps
 - 正式镜像已重建为 `new-api-local:prod-main`。
 - 运行中 `/new-api --build-info` 输出 version、commit、date、source，commit 应等于当前部署提交。
 - `/api/status` 返回 `success=true`。
-- `new-api`、`redis`、`postgres` 的 Compose project、service、working_dir、config_files 标签均已回到 `/Volumes/Work/code/new-api`。
+- `new-api`、`redis`、`postgres` 的 Compose project、service、working_dir、config_files 标签已统一到同一部署根目录；具体宿主路径不纳入公开记录。
 
-## Recovery Evidence
+## 恢复证据
 
 - 本轮最终通过 Compose 重建了 `new-api`，并强制重建了 `redis` 以修正 Compose 路径标签。
 - 若后续部署失败，可将 `.env` 中 `NEW_API_IMAGE` 改回上一标签后执行 `docker compose up -d`。
 - 回滚验证信号：容器 health、`/api/status`、Compose labels、`--build-info`。
 
-## Observability Evidence
+## 可观测性证据
 
 本轮可观测点：
 
-- Git：`HEAD=e4bfd11b08629ddb99e662d58ec86a996e86d400`，工作区基线来自 `main...origin/main`。
+- Git：`HEAD=<validated-revision>`，工作区基线来自 `main...origin/main`。
 - Docker：旧正式镜像无 labels，新临时镜像有 revision/version/source/created labels。
 - Compose：旧 Redis 标签存在 `/volumes/...` 漂移；新 Compose 渲染默认镜像为 `new-api-local:prod-main`。
-- Logs：500 来自上游 EOF；400 来自上游客户端版本要求。
-- Deploy：新启动日志包含 `New API v1.1.0 commit=<deployed commit> built=<build date> started`。
-- Deploy：启动后的上游模型巡检任务报告 `checked_channels=17 changed_channels=3 detected_remove_models=63 failed_channels=0`，这是现有控制面任务产生的检测状态写入风险。
+- 日志：500 来自上游 EOF；400 来自上游客户端版本要求。
+- 部署：新启动日志包含 `New API v1.1.0 commit=<deployed commit> built=<build date> started`。
+- 部署：启动后的上游模型巡检任务会报告检查、变更、移除模型和失败渠道数量；这些检测状态写入可能产生控制面副作用，具体采样值保存在私有审计中。
 
-## Residual Risks / Gate Boundary
+## 剩余风险与门禁边界
 
 - 上游 `api.gettoken.dev` EOF 需要由上游渠道稳定性、网络或认证链路继续排查；本轮只做分类和证据归档。
 - `gpt-5.5` 400 需要升级调用端 Codex 或调整路由到兼容渠道；本轮不改客户端。

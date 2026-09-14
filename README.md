@@ -32,7 +32,7 @@
 
 ## Quick Start
 
-最多三步启动本地 Docker 服务：
+使用根目录 Compose 启动本地服务前，需要显式填写数据库、Redis 和应用密钥。Compose 会拒绝缺失或为空的必填变量。
 
 ```bash
 git clone https://github.com/MisonL/new-api.git
@@ -40,12 +40,18 @@ cd new-api
 cp .env.example .env
 ```
 
-在 `.env` 中至少设置稳定密钥：
+在 `.env` 中设置以下变量。`SESSION_SECRET`、`CRYPTO_SECRET`、`POSTGRES_PASSWORD` 和 `REDIS_PASSWORD` 请使用随机值；`SQL_DSN` 和 `REDIS_CONN_STRING` 中的密码分别与对应变量保持一致：
 
-```bash
+```dotenv
 SESSION_SECRET=replace-with-stable-secret
 CRYPTO_SECRET=replace-with-stable-secret
+POSTGRES_PASSWORD=replace-with-a-local-postgres-password
+REDIS_PASSWORD=replace-with-a-local-redis-password
+SQL_DSN=postgresql://root:replace-with-a-local-postgres-password@postgres:5432/new-api
+REDIS_CONN_STRING=redis://:replace-with-a-local-redis-password@redis:6379/0
 ```
+
+不要将上述示例值用于正式环境。可以使用 `openssl rand -hex 32` 为四个 secret/password 生成随机值，再同步替换 DSN 中的对应密码。
 
 启动并验证：
 
@@ -89,10 +95,12 @@ export CRYPTO_SECRET='replace-with-stable-secret'
 | ---------------------- | ---------------- | ---------------------------------------------------------------- |
 | `SESSION_SECRET`       | 会话签名密钥     | 必填，必须稳定                                                   |
 | `CRYPTO_SECRET`        | 敏感数据加密密钥 | 必填，必须稳定                                                   |
-| `SQL_DSN`              | 数据库连接       | 未设置时使用 SQLite                                              |
-| `REDIS_CONN_STRING`    | Redis 连接       | 可选，用于缓存和共享状态                                         |
+| `SQL_DSN`              | 数据库连接       | 根目录 Docker Compose 必填；独立二进制未设置时使用 SQLite        |
+| `POSTGRES_PASSWORD`    | PostgreSQL 密码  | 根目录 Docker Compose 必填，必须与 `SQL_DSN` 中的密码一致         |
+| `REDIS_CONN_STRING`    | Redis 连接       | 根目录 Docker Compose 必填；独立二进制可选，用于缓存和共享状态    |
+| `REDIS_PASSWORD`       | Redis 服务密码   | 根目录 Docker Compose 必填，必须与 `REDIS_CONN_STRING` 中的密码一致 |
 | `NEW_API_IMAGE`        | Docker 镜像      | 正式部署建议固定版本                                             |
-| `NEW_API_PORT_MAPPING` | Docker 端口映射  | 默认 `3000:3000`，本机代理场景可设为 `127.0.0.1:13000:3000` |
+| `NEW_API_PORT_MAPPING` | Docker 端口映射  | 默认 `3000:3000`；本机代理或 TUN 模式可设为 `127.0.0.1:13000:3000` |
 | `NEW_API_DATA_DIR`     | 数据目录         | 建议显式设置                                                     |
 | `NEW_API_LOG_DIR`      | 日志目录         | 建议显式设置                                                     |
 
@@ -109,7 +117,19 @@ cd web/default && bun run lint
 cd web/default && bun run build
 ```
 
-完全隔离开发环境使用独立 `new-api`、PostgreSQL、Redis、数据目录、日志目录和端口：
+完全隔离开发环境使用独立 `new-api`、PostgreSQL、Redis、数据目录、日志目录和端口。模板中的空值是故意保留的 fail-closed 检查，复制后必须填写以下变量，不能直接启动：
+
+- `DEV_NEW_API_DATA_DIR`
+- `DEV_NEW_API_LOG_DIR`
+- `DEV_POSTGRES_DATA_DIR`
+- `DEV_SESSION_SECRET`
+- `DEV_CRYPTO_SECRET`
+- `DEV_POSTGRES_PASSWORD`
+- `DEV_SQL_DSN`
+- `DEV_REDIS_PASSWORD`
+- `DEV_REDIS_CONN_STRING`
+
+其中 `DEV_SQL_DSN` 中的 PostgreSQL 密码必须与 `DEV_POSTGRES_PASSWORD` 一致，`DEV_REDIS_CONN_STRING` 中的 Redis 密码必须与 `DEV_REDIS_PASSWORD` 一致；数据目录应使用当前主机上的绝对路径，并且不得指向正式环境目录。
 
 ```bash
 cp deploy/env/dev-isolated.env.example deploy/env/dev-isolated.env

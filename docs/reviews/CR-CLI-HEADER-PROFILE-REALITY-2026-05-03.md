@@ -2,13 +2,13 @@
 
 ## 范围
 
-- 仓库：`/Volumes/Work/code/new-api`
+- 仓库：`<repository-root>`
 - 目标：清理 `Header Profile` 内 AI Coding CLI 模板中的假值，改成有证据支撑的固定请求头快照，并补齐需要 `pass_headers` 的客户端
 - 修正补充：Codex CLI 模板必须代表交互式 TUI 真实使用场景，不能继续复用 `codex exec` 的 non-interactive 请求身份
 
 ## 证据来源
 
-### 1. 本机已安装 CLI 版本
+### 1. 受控验证环境中的 CLI 版本快照
 
 - `codex --version` -> `codex-cli 0.128.0`
 - `claude --version` -> `2.1.126 (Claude Code)`
@@ -16,7 +16,7 @@
 - `node -p "require('@qwen-code/qwen-code/package.json').version"` -> `0.15.6`
 - `droid --version` -> `0.115.0`
 
-### 2. 真实请求抓包 / 安装产物提取
+### 2. 受控请求捕获与安装产物提取
 
 - Codex CLI `codex exec` non-interactive 抓包：
   - 路径：`/v1/responses`
@@ -35,7 +35,7 @@
   - `codex-rs/app-server/src/message_processor.rs` 使用 `clientInfo.name` 作为默认 originator，并用 `<name>; <version>` 写入 User-Agent suffix
   - `codex-rs/login/src/auth/default_client.rs` 使用当前 originator 作为 User-Agent 前缀
   - 结论：内置 `Codex CLI` 固定快照使用 `Originator: codex-tui`，固定 UA 使用 `codex-tui/0.128.0 ... (codex-tui; 0.128.0)`；会话、窗口、turn metadata 仍必须通过 `pass_headers` 透传真实客户端动态头
-- Qwen Code 本机真实请求抓包：
+- Qwen Code 受控请求抓包：
   - 路径：`/chat/completions`
   - `User-Agent: QwenCode/0.15.6 (darwin; x64)`
   - 同时存在：
@@ -46,7 +46,7 @@
     - `X-Stainless-Runtime`
     - `X-Stainless-Runtime-Version`
     - `X-Stainless-Retry-Count`
-- Claude Code 本机真实请求抓包：
+- Claude Code 受控请求抓包：
   - 路径：`/v1/messages?beta=true`
   - `User-Agent: claude-cli/2.1.126 (external, sdk-cli)`
   - 同时存在：
@@ -63,25 +63,25 @@
     - `Anthropic-Dangerous-Direct-Browser-Access`
     - `Anthropic-Version: 2023-06-01`
     - `X-App: cli`
-- Gemini CLI 本机真实请求日志：
+- Gemini CLI 受控请求日志：
   - 路径：`/v1beta/models/gemini-3.1-pro-preview:streamGenerateContent?alt=sse`
   - `User-Agent: GeminiCLI/0.40.1/gemini-3.1-pro-preview (darwin; x64; terminal)`
   - 同时存在：
     - `x-goog-api-client: google-genai-sdk/1.30.0 gl-node/v24.14.0`
   - 结论：
-    - `GOOGLE_GEMINI_BASE_URL` 可指向本地 capture，并命中 Gemini API 风格的 `streamGenerateContent` 路径
+    - `GOOGLE_GEMINI_BASE_URL` 可指向受控捕获端点，并命中 Gemini API 风格的 `streamGenerateContent` 路径
     - 当前可实锤的固定头只有 `User-Agent`；`x-goog-api-client` 应作为运行时头透传
-- OpenCode 本机二进制提取：
+- OpenCode 受控二进制提取：
   - 默认参数中存在 `--user-agent=opencode/1.1.14`
-- OpenCode 本机 live capture：
-  - 使用隔离目录 `/tmp/opencode-capture-chat` 与 `/tmp/opencode-capture-responses`，只写临时 `opencode.json`，不修改仓库和 `~/.config/opencode`
+- OpenCode 受控 live capture：
+  - 使用 `<temporary-capture-dir>/opencode-chat` 与 `<temporary-capture-dir>/opencode-responses`，只写临时 `opencode.json`，不修改仓库和用户现有配置
   - `@ai-sdk/openai-compatible` provider 命中 `POST /v1/chat/completions`
   - 该请求 `User-Agent: ai-sdk/openai-compatible/1.0.29 ai-sdk/provider-utils/3.0.19 runtime/bun/1.3.5`
   - `@ai-sdk/openai` provider 命中 `POST /v1/responses`
   - 该请求 `User-Agent: ai-sdk/openai/2.0.71 ai-sdk/provider-utils/3.0.17 runtime/bun/1.3.5`
   - 两条可控 upstream 请求都未出现 `opencode/1.1.14` 或 `X-Session-Affinity`
-- Droid 本机 live capture：
-  - 使用临时 `~/.factory/settings.json` 配置 `customModels`，provider 为 `generic-chat-completion-api`
+- Droid 受控 live capture：
+  - 使用临时 `<user-config-dir>/settings.json` 配置 `customModels`，provider 为 `generic-chat-completion-api`
   - `droid exec --model custom:capture-test` 命中 `POST /v1/chat/completions`
   - `User-Agent: factory-cli/0.115.0`
   - 同时存在：
@@ -106,16 +106,16 @@
 ### 1. Claude Code
 
 - 当前结论：
-  - 通过 `--bare --settings /tmp/claude-capture-settings.json` 强制指向本地捕获端点后，已实锤真实上游请求
+  - 通过 `--bare --settings <temporary-capture-settings>` 强制指向受控捕获端点后，已实锤真实上游请求
   - 旧的 `claude-code/2.1.126` 只适合作为安装产物版本线索，不应继续当作固定 `User-Agent` 模板
   - 当前应以 live capture 的 `claude-cli/2.1.126 (external, sdk-cli)` 为固定快照，并把 `X-Claude-Code-Session-Id` 纳入透传白名单
 
 ### 2. Droid
 
 - 实测通过：
-  - 通过临时 `~/.factory/settings.json` 配置 `customModels`，provider 为 `generic-chat-completion-api`
+  - 通过临时 `<user-config-dir>/settings.json` 配置 `customModels`，provider 为 `generic-chat-completion-api`
   - `FACTORY_API_KEY` 与自定义模型 API key 均使用测试值，未读取真实配置
-  - `droid exec --model custom:capture-test` 成功命中本地 capture
+  - `droid exec --model custom:capture-test` 成功命中受控捕获端点
   - 请求路径为 `/v1/chat/completions`
   - 固定 UA 为 `factory-cli/0.115.0`
   - 同时携带 `X-Stainless-*` 运行时头
@@ -126,17 +126,17 @@
 
 ### 3. OpenCode
 
-- 官方配置与本机二进制中可确认：
+- 官方配置与受控二进制中可确认：
   - 自定义 provider 可通过 `@ai-sdk/openai-compatible` 和 `@ai-sdk/openai` 配置 `options.baseURL`
   - 存在 `--user-agent=opencode/1.1.14`
   - 代码路径显式识别：
     - `/v1/responses`
     - `/chat/completions`
-- 本机二进制中未检出：
+- 受控二进制中未检出：
   - `X-Session-Affinity`
   - `x-session-affinity`
   - `session affinity`
-- 本机 live capture 可确认：
+- 受控 live capture 可确认：
   - `@ai-sdk/openai-compatible` 命中 `/v1/chat/completions`
   - `@ai-sdk/openai` 命中 `/v1/responses`
   - 两种路径的 upstream `User-Agent` 均为 AI SDK provider 运行时 UA，不是 `opencode/1.1.14`

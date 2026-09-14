@@ -35,6 +35,7 @@ backups/
 .cursor
 .antigravitycli/
 .playwright-mcp
+scripts/__pycache__/
 
 data/
 .gomodcache/

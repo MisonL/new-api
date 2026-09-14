@@ -1,26 +1,32 @@
 # New-API Docker Compose Configuration
-# 
+#
 # Quick Start:
-#   1. docker-compose up -d
-#   2. Access at http://localhost:3000
+#   1. docker compose up -d
+#   2. Access at http://127.0.0.1:3000
 #
 # Optional macOS Docker Desktop + TUN proxy mode:
 #   see docs/operations/macos-docker-tun-lan.md
 #
 # Using MySQL instead of PostgreSQL:
-#   1. Comment out the postgres service and SQL_DSN line 15
-#   2. Uncomment the mysql service and SQL_DSN line 16
-#   3. Uncomment mysql in depends_on (line 28)
-#   4. Uncomment mysql_data in volumes section (line 64)
+#   1. Comment out the postgres service and active PostgreSQL SQL_DSN entry
+#   2. Uncomment the mysql service and replace SQL_DSN with a MySQL DSN
+#   3. Replace the postgres dependency with the mysql dependency
+#   4. Uncomment mysql_data in the volumes section
 #
-# IMPORTANT: Change all default passwords before deploying to production.
+# Production deployments must provide explicit database and Redis credentials.
+# Existing containers are not changed by this file-only hardening.
 
 services:
   new-api:
     image: ${NEW_API_IMAGE:-new-api-local:prod-main}
-    container_name: new-api
+    container_name: ${NEW_API_CONTAINER_NAME:-new-api}
     init: true
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: --log-dir /app/logs
     ports:
       - "${NEW_API_PORT_MAPPING:-3000:3000}"
@@ -32,15 +38,21 @@ services:
         source: ${NEW_API_LOG_DIR:-./logs}
         target: /app/logs
     environment:
-      - SESSION_SECRET=${SESSION_SECRET}
-      - CRYPTO_SECRET=${CRYPTO_SECRET}
-      - SQL_DSN=${SQL_DSN:-postgresql://root:123456@postgres:5432/new-api}
-#      - SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # Point to the mysql service, uncomment if using MySQL
-      - REDIS_CONN_STRING=${REDIS_CONN_STRING:-redis://:${REDIS_PASSWORD:-123456}@redis:6379/0}
+      - SESSION_SECRET=${SESSION_SECRET:?set SESSION_SECRET}
+      - CRYPTO_SECRET=${CRYPTO_SECRET:?set CRYPTO_SECRET}
+      - SQL_DSN=${SQL_DSN:?set SQL_DSN}
+#      - SQL_DSN=root:<explicit-password>@tcp(mysql:3306)/new-api  # Point to the mysql service, uncomment if using MySQL
+      - REDIS_CONN_STRING=${REDIS_CONN_STRING:?set REDIS_CONN_STRING}
       - TZ=${TZ:-Asia/Shanghai}
       - ERROR_LOG_ENABLED=${ERROR_LOG_ENABLED:-true} # 是否启用错误日志记录 (Whether to enable error log recording)
       - BATCH_UPDATE_ENABLED=${BATCH_UPDATE_ENABLED:-true}  # 是否启用批量更新 (Whether to enable batch update)
       - NODE_NAME=${NODE_NAME:-}  # 节点名称，用于审计日志中标识节点身份；多节点/容器部署时建议设置 (Node name used in audit logs; recommended when running multiple instances or in containers)
+      - CHANNEL_ROUTING_V2_ENABLED=${CHANNEL_ROUTING_V2_ENABLED:-false}
+      - CHANNEL_ROUTING_SHADOW_ENABLED=${CHANNEL_ROUTING_SHADOW_ENABLED:-false}
+      - CHANNEL_ROUTING_V2_STRICT_WRITES=${CHANNEL_ROUTING_V2_STRICT_WRITES:-}
+      - CHANNEL_CONCURRENCY_STRICT=${CHANNEL_CONCURRENCY_STRICT:-true}
+      - CHANNEL_CONCURRENCY_LEASE_TTL_SECONDS=${CHANNEL_CONCURRENCY_LEASE_TTL_SECONDS:-30}
+      - CHANNEL_CONCURRENCY_RESELECT_LIMIT=${CHANNEL_CONCURRENCY_RESELECT_LIMIT:-5}
 #      - STREAMING_TIMEOUT=300  # 流模式无响应超时时间，单位秒，默认120秒，如果出现空补全可以尝试改为更大值 （Streaming timeout in seconds, default is 120s. Increase if experiencing empty completions）
 #      - SESSION_SECRET=random_string  # 多机部署时设置，必须修改这个随机字符串！！ （multi-node deployment, set this to a random string!!!!!!!）
 #      - SYNC_FREQUENCY=60  # Uncomment if regular database syncing is needed
@@ -49,46 +61,73 @@ services:
 #      - UMAMI_SCRIPT_URL=https://analytics.umami.is/script.js  # Umami 脚本 URL，默认为官方地址 (Umami Script URL, defaults to official URL)
 
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 #      - mysql  # Uncomment if using MySQL
     networks:
       - new-api-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:3000/api/healthz"]
+      test: ["CMD", "wget", "-q", "-T", "10", "-O", "/dev/null", "http://127.0.0.1:3000/api/healthz"]
       interval: 30s
-      timeout: 8s
-      retries: 3
+      timeout: 15s
+      retries: 5
+      start_period: 60s
 
   redis:
     image: redis:latest
-    container_name: redis
+    container_name: ${REDIS_CONTAINER_NAME:-redis}
     restart: always
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-123456}"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
     networks:
       - new-api-network
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli --no-auth-warning ping | grep -Fxq PONG"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   postgres:
     image: postgres:15
-    container_name: postgres
+    container_name: ${POSTGRES_CONTAINER_NAME:-postgres}
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: 123456  # IMPORTANT: Change this password in production.
-      POSTGRES_DB: new-api
+      POSTGRES_USER: ${POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-new-api}
     volumes:
       - pg_data:/var/lib/postgresql/data
     networks:
       - new-api-network
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=\"$${POSTGRES_PASSWORD}\" psql -X -q -tA -v ON_ERROR_STOP=1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -c 'SELECT 1' | grep -Fxq 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 #    ports:
 #      - "5432:5432"  # Uncomment if you need to access PostgreSQL from outside Docker
 
 #  mysql:
 #    image: mysql:8.2
-#    container_name: mysql
+#    container_name: ${MYSQL_CONTAINER_NAME:-mysql}
 #    restart: always
 #    environment:
-#      MYSQL_ROOT_PASSWORD: 123456  # IMPORTANT: Change this password in production.
+#      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
 #      MYSQL_DATABASE: new-api
 #    volumes:
 #      - mysql_data:/var/lib/mysql

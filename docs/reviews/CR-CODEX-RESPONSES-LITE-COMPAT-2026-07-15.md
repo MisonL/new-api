@@ -125,65 +125,165 @@
 
 全局 `bun run typecheck` 仍被未修改的 `src/components/ui/markdown.tsx` 重复 React 类型问题阻断。全局 `bun run lint` 仍被未修改的 `src/components/long-text.tsx` 和 `src/features/system-settings/models/tool-price-settings.tsx` effect 内同步 setState 阻断。本轮修改文件的定向 ESLint 与生产构建均通过，未将既有问题表述为本轮通过。
 
+## 2026-08-04 原子修复复核
+
+本轮补齐普通 raw pass-through 路径的 Responses item ID 归一化缺口。此前该路径直接复用原始请求体，会绕过 adaptor 中已有的 `NormalizeResponsesInputItemIDs`；现在普通请求与 opaque encrypted replay 都只在 `input` item 层执行 ID 归一化，保留顶层未知字段、合法 ID、`call_id` 和 `encrypted_content`，并写入移除计数与系统日志。opaque replay 仍不解析或改写加密内容本身，也继续跳过 Codex 重写和 synthetic compact 分支。
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `go test -count=1 -run '^TestBuildOpenAIResponsesRequestBodyNormalizesItemIDsOnRawPassThrough$' ./relay`（修复前） | 1 | 失败测试确认 raw pass-through 保留非法 ID |
+| `go test -count=1 -run '^TestBuildOpenAIResponsesRequestBodyNormalizesItemIDsOnRawPassThrough$' ./relay`（修复后） | 0 | 非法 ID 移除、合法 ID/`call_id`/未知顶层字段保留 |
+| `go test -count=1 -timeout 120s ./relay/common ./relay/channel/codex ./relay/channel/openai ./relay` | 0 | item ID、Responses、Codex/OpenAI adaptor 与 handler 回归通过 |
+| `go test -count=1 -timeout 120s ./controller ./model ./relay/helper ./service` | 0 | AGENTS 指定 L1 回归通过 |
+| `git diff --check` | 0 | 无空白错误 |
+
+## 2026-08-06 opaque replay ID normalization
+
+- 官方 `openai/codex` `rust-v0.145.0` 的 `ResponseItem::id_prefix()` 仍只声明 `at`、`msg`、`amsg`、`rs`、`lsh`、`fc`、`tsc`、`fco`、`ctc`、`ctco`、`tso`、`ws`、`ig`、`cmp`；本仓库现有 18 类映射（包含历史别名）未凭未知 token fixture 臆造新前缀。
+- Codex 与 OpenAI adaptor 现在先执行 `NormalizeResponsesInputItemIDs`，再对 opaque replay 原样返回其余请求字段，避免非法客户端生成 ID 绕过过滤，同时不触发 Codex 字段重写或 synthetic compact。
+- 真实 opaque raw-body pass-through 现在只重写 `input`，保留 `encrypted_content`、未知 item 字段和顶层未知字段；模型映射、reasoning capability 处理仍沿用原路径。
+- Compact ingress 到 Responses request 的转换现在深拷贝所有顶层 `json.RawMessage`、reasoning/stream_options 的未知字段和显式 `null` raw 状态，避免调用方修改 compact DTO 后污染已转换请求。
+- Opaque raw replay 不再绕过 `stream_options.include_usage` 能力剥离；显式不支持的渠道只移除该字段，保留 `include_obfuscation`、未知 stream option 与加密 input。
+
+| `go test -count=1 -timeout 120s ./relay/common ./relay/channel/codex ./relay/channel/openai ./relay` | 0 | opaque replay、item ID、Responses handler 与 adaptor 回归通过 |
+| `gh api 'repos/openai/codex/contents/codex-rs/protocol/src/models.rs?ref=rust-v0.145.0'` | 0 | 官方 0.145 item ID 前缀矩阵核验完成 |
+| `go test -count=1 -timeout 120s ./dto` | 0 | DTO、compact nested round-trip 与深拷贝回归通过 |
+| `go test -count=1 -timeout 120s ./relay -run 'TestBuildOpenAIResponsesRequestBodyApplies(StreamOptionsCapabilityToOpaqueReplay\|ReasoningContextPolicyToOpaqueReplay)'` | 0 | opaque reasoning/context 与 stream options capability 回归通过 |
+
+本轮未执行正式环境重建、升级或渠道配置变更；隔离 Docker 镜像和完整 L2 协议 smoke 仍需在最终 HEAD 汇总门禁阶段重建验证。
+
 ## 隔离开发环境验证
 
 ### 版本与边界
 
-- `new-api-local:dev` 镜像提交：`50787348d1075ec3ba0b1413ae00be4263c622a7`。
-- 3001 隔离容器 build-info 与该提交一致，`/api/status` 成功。
-- 使用正式渠道配置的开发库临时副本完成测试，凭证只通过 PostgreSQL 管道复制，未输出到终端或文件。
-- 2026-07-16 正式库实时启用且包含 `gpt-5.6-sol` 的渠道为 1、150、201、206、117；按已知状态排除暂不可用的 150。204 和 155 已不在当前启用范围，本轮不再作为发布门禁。
+- 隔离候选镜像的 build-info 与候选源码一致，`/api/status` 成功。具体 image digest 和 revision 保存在私有验证记录。
+- 测试只使用隔离渠道夹具和受控测试凭证；凭证不输出到终端或文件，不复制生产数据库或渠道配置到公开工件。
+- 启用渠道集合和临时可用性属于运行环境数据，保存在私有验证记录，不作为公开发布门禁的输入。
 
-### 固定渠道矩阵
+### 固定渠道覆盖
 
-| 开发临时渠道 | 来源 | 场景 | 结果 |
-| ---: | ---: | --- | --- |
-| 99201 | 1 | basic | 200 completed，原生 `/v1/responses` |
-| 99201 | 1 | compact + continue | 200，生成 compaction 并成功续接 |
-| 99201 | 1 | grammar | 200，Chat bridge 回程为 `custom_tool_call apply_patch` |
-| 99201 | 1 | namespace | 200，回程保留 namespace |
-| 99201 | 1 | function/tool_search | capability 显式 503；日志分别记录 function/tool_search unsupported |
-| 99206 | 206 | basic/function | 200，保持原生 Responses；function 返回 `extra_lookup` |
-| 99206 | 206 | grammar 原生基线 | 200，但错误返回普通 `function_call`，证明 custom 语义丢失 |
-| 99206 | 206 | tool_search 原生基线 | 200，但仅返回 message，没有 `tool_search_call` |
-| 99206 | 206 | grammar 定向 bridge | 200，恢复 `custom_tool_call apply_patch` |
-| 99206 | 206 | namespace 定向 bridge | 200，保留 namespace |
-| 99206 | 206 | tool_search 定向 bridge | 连续 3 次通过发现、加载、调用两阶段流程，最终调用 `deferred_lookup` |
-| 99206 | 206 | compact + continue | 200，生成 compaction 并成功续接 |
-| 99206 | 206 | controls/continuation/ids/web-search | 全部 200；工具续接 call_id 保留，ID 场景完成 |
-| 99211 | 201 | basic | 上游 403 `API Key 所属分组已停用`，属于渠道运行状态，不作为协议通过证据 |
-| 99217 | 117 | basic | 200；后续 function 两次被上游 Cloudflare 502 打断，属于当前上游抖动 |
+| 场景 | 结果 |
+| --- | --- |
+| 原生 Responses basic、function、compact 和 continuation | 完成，保持原生路径和合法 `call_id`。 |
+| grammar、namespace 和 tool-search 的定向 Chat bridge | 完成，保留 `custom_tool_call`、namespace 和两阶段工具语义。 |
+| 明确不支持的工具能力 | 返回可分类错误并记录能力动作，不伪造成功。 |
+| 上游确定性 403、瞬时 502 或能力缺失 | 归类为上游或能力状态，不作为协议通过证据。 |
 
-206 的最小有效策略为：function 原生；custom、namespace、tool_search 仅在对应请求出现时转 Chat bridge；普通 Responses 和 Compact 不转换。
+最小有效策略是：function 保持原生；custom、namespace、tool_search 仅在对应请求出现时转 Chat bridge；普通 Responses 和 Compact 不转换。
 
-### 自动路由矩阵
+### 自动路由与优先级复现
 
-smoke 脚本新增 `--channel auto`，不附加固定渠道后缀。开发自动池只保留当前可用的 1、206、117 副本，201 因确定性 403 不参与自动路由验收。
+smoke 脚本的 `--channel auto` 覆盖 basic、grammar、function、tool_search 与 compact continuation。能力不兼容候选会被显式跳过，健康同优先级候选优先完成请求；只有同优先级穷尽后才进入下一优先级。相关的 `request_conversion`、`channel_capability_snapshot`、`request_path` 与 `upstream_request_path` 均与预期一致。
 
-| 场景 | 结果 | 实际路径 |
-| --- | --- | --- |
-| basic | 200 completed | 99201 原生 `/v1/responses` |
-| grammar | 200 `custom_tool_call apply_patch` | 99201 定向 `/v1/chat/completions` |
-| function | 200 `function_call extra_lookup` | 99201 capability 跳过，99206 原生 `/v1/responses` |
-| tool_search | 200，发现并调用 `deferred_lookup` | 99201 capability 跳过，99206 定向 Chat bridge，两阶段均成功 |
-| compact + continue | 200，compaction 和续接均成功 | 99201 Responses/Compact 路径 |
-
-使用日志的 `request_conversion`、`channel_capability_snapshot`、`request_path` 和 `upstream_request_path` 与上表一致。测试结束后删除 41 条临时日志、3 条 ability 和 4 个临时渠道，并验证临时渠道、ability、日志和规则计数均为 0。
-
-### 正式优先级全量池复现
-
-第二组临时池按正式 ability 顺序复现 1 -> 150 -> 201/206 -> 117：
-
-- 150 的 function 原生调用成功，但 tool_search 原生返回 reasoning 和 message，没有 `tool_search_call`，证明会静默丢失工具搜索语义。
-- 仅为 150 设置 `supports_tool_search=false` 后，请求能跳过 1 和 150；修复前在 201 的确定性 403 后提前返回 500，重试链为 `99301->99350->99311`，没有到达同优先级 206。
-- 应用 `19d9f7c42` 后，同一 tool_search 的发现和加载两个请求均继续尝试剩余渠道。两次都观察到 201 返回 403、206 返回 Cloudflare 502，随后 117 成功；最终 200 并调用 `deferred_lookup`。
-- 该结果证明 capability 跳过、同优先级剩余渠道、下一优先级和真实上游错误可在同一请求内正确组合。
-
-正式最小能力配置因此包括：渠道 1 的 function/custom/namespace/tool_search 均为 false，并只桥接 custom/namespace；渠道 150 只声明 tool_search=false；渠道 206 声明 function=true、custom/namespace/tool_search=false，并只桥接 custom/namespace/tool_search；渠道 117 保留既有 Responses 到 Chat 规则。
+测试结束后，临时渠道、ability、日志和路由规则均已清理，无残留。真实运行渠道的标识、优先级、流量计数和错误样本保存在私有验证记录中。
 
 ## 生产前基线
 
-2026-07-16 00:40 CST 前一小时，正式 `gpt-5.6-sol` 日志中渠道 1 为 1586 次成功、3 次错误；错误为 2 次 504 和 1 次上游流在 `response.completed` 前结束，429 为 0。此数据只作为升级前对照，不代表升级后结论。
+生产前只在私有运维审计中保留时间窗口、渠道成功/失败计数、上游状态码和流终止情况。公开报告只保留其用途：这些数据用于与升级后的同口径采样比较，不能替代升级后验证。
+
+## 2026-08-06 上游增量复核与本轮修复
+
+本轮通过 `gh` 复核了 QuantumNous/new-api `upstream/main`（`0ab02020603d22e5613bc4cf46bfab06f8567769`，2026-08-01）以及 Wei-Shaw/sub2api 当前主线和相关 PR。上游实现与本仓库 relay 架构已明显分叉，因此只吸收经过本地调用链验证的语义，不覆盖整文件。
+
+### 已吸收的语义
+
+- sub2api PR #5089 已合并（merge commit `d4cada3b6bd1098b11593102de0d1aab535aa016`）：Chat Completions 流在 HTTP 200 中携带 `rate_limit_exceeded` 时，首个语义输出前必须按 429 处理，才可进入渠道重试。本轮在 `responses_via_chat.go` 补齐该行为，并保留已提交输出后的 HTTP 状态不可逆约束。
+- sub2api PR #4595 已合并（merge commit `1b4029b05061706a1a32acff5ff6dfcbb590173e`）：HTTP 桥接在上游传输中断时不能伪造完成结果。本轮复用本地 Responses 断流分类，在 Chat 兼容流缺少 `[DONE]` 时返回 `upstream_transport_interrupted`/502。
+
+### 已核对但未直接移植的变更
+
+- sub2api PR #2800 的账号-模型维度 404 冷却，以及开放 PR #5019 的 400/404 `model_not_found` 失败后语义保持，依赖 Sub2API 账号池和模型限流持久化。本仓库目前只有渠道-模型 Redis 健康状态，不能直接复制其账号状态机；本轮不把模型错误静默改成渠道禁用。
+- sub2api PR #5181 仍开放，内容是向官方 Codex 上游发送 zstd 压缩请求。它不等同于本项目入口的请求体解压边界；本仓库继续在认证前使用有界解压、认证后对本地 Codex compact 使用更大但固定的上限，不在未验证上游支持时增加出站压缩。
+- QuantumNous/new-api 的 #6446、#6523、#6580、#6082 仍为开放 PR，分别涉及 SSE 429、流错误/渠道切换、自适应排除重试与限流冷却、缺少 `Content-Type` 的 SSE 探测。当前代码已有相应的 Responses 原生错误、断流和能力路由基础；未将其未合并的整套控制器改动混入本轮。
+
+### 本轮新增回归
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `go test -count=1 ./relay/channel/openai -run 'TestOaiChatToResponses(StreamHandlerReturnsRateLimitBeforeOutput\\|StreamHandlerKeepsCommittedRateLimitTerminal\\|HandlerMapsRateLimitErrorBody\\|StreamHandlerRejectsTruncatedUpstreamStream)'` | 0 | Chat bridge 错误帧、状态映射和断流语义通过 |
+| `go test -count=1 ./relay/channel/openai` | 0 | OpenAI Responses/Chat bridge 全包通过 |
+| `go test -timeout=60s ./controller ./model ./relay/common ./relay/helper ./service` | 0 | AGENTS 指定 L1 通过 |
+
+残余风险仍是正式环境和真实上游的时间窗口验证：本轮只修改开发代码和审计文档，未重建或升级正式服务。隔离 3001 的最终 HEAD 重建、build-info 对齐、真实协议 smoke 和多次观察仍是发布门禁。
+
+## 2026-08-07 最终隔离真实渠道 gate
+
+### 运行边界
+
+- 通过只读生产 PostgreSQL repeatable-read snapshot 读取当前启用且匹配 `gpt-5.6-sol` 的渠道，候选集合为 `114,115,116,117,119,120,130,141,160,168,180,205,207,208,223`。
+- gate 命令为 `CODEX_REAL_GATE_APPLY_CODEX_PASSTHROUGH=1 bash scripts/codex-real-channel-compaction-gate.sh`；该开关只在隔离数据库临时副本中写入 Codex 动态 `pass_headers` 测试策略，生产数据库保持只读。
+- 每个渠道执行 Codex CLI 0.146 coding smoke、1 KiB 基础 Compact 和 33 MiB 工具 schema Compact。压缩成功判定为 HTTP 200 且终态 `response.completed`；超大请求同时记录入口收敛后的字节数。
+- 两次 gate 的 cleanup 均为 `passed`，并重新创建隔离 Redis、验证隔离应用网络和 `/api/status`。隔离 PostgreSQL 中 `codex_real_gate_%` 临时表、测试用户、测试 token 和测试日志计数均为 0。
+
+### 结果分类
+
+| 渠道 | CLI coding smoke | 基础/超大 Compact | 结论 |
+| ---: | --- | --- | --- |
+| 114, 115, 116, 130, 168 | 通过 | 通过，HTTP 200 / `response.completed` | 本地协议和压缩路径通过 |
+| 160 | 通过 | 通过，HTTP 200 / `response.completed` | 本地协议和压缩路径通过 |
+| 205 | 通过 | 通过，HTTP 200 / `response.completed` | 本地协议和压缩路径通过；33 MiB 输入收敛为 1290 bytes |
+| 119, 120 | `server_is_overloaded` | 通过，HTTP 200 / `response.completed` | 上游过载，非网关协议失败 |
+| 141, 180 | `upstream_transport_interrupted` | 通过，HTTP 200 / `response.completed` | 上游传输中断，非压缩控制面失败 |
+| 117 | 503 `channel:model_mapped_error`，`unsupported_namespace_tools` | 通过，HTTP 200 / `response.completed` | 渠道能力明确不支持 namespace，路由应跳过或返回可解释能力错误 |
+| 208, 223 | 503 `channel:model_mapped_error`，`unsupported_encrypted_reasoning_replay` | 通过，HTTP 200 / `response.completed` | 渠道能力明确不支持 encrypted reasoning replay，不能伪造 CLI 成功 |
+| 207 | 403 `insufficient_user_quota` | 403，未进入压缩成功态 | 上游额度失败，不能归因于网关 413/502 |
+
+### 动态请求头缺口
+
+未注入测试 `pass_headers` 的首轮 gate 对所有候选在上游请求前返回 `channel:header_override_invalid`。更新前正式渠道只配置静态 `codex-cli@latest` 身份和 `prune_objects`，缺少 `Session_id`、`Session-Id`、`Thread-Id`、`X-Codex-*`、`X-Client-Request-Id` 等真实 Codex 运行时头的透传。隔离 gate 注入动态 `pass_headers` 后，160 以及其余可用渠道的协议请求可正常到达上游，证明这是正式配置门禁缺口，不是通过固定值伪造请求头即可解决的问题。
+
+因此在完成正式镜像发布前，119/120、141/180、207 的结果需要按上游过载、传输中断和额度分别告警；117/208/223 需要按能力快照参与自动路由，不能通过静默剔除或全局关闭 Responses Lite 规避。动态 `pass_headers` 已在当前仍启用的正式渠道配置并通过隔离复验，剩余阻断是 dirty worktree 无法获得正式镜像晋级资格。
+
+### 本轮证据
+
+| 命令/证据 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `CODEX_REAL_GATE_APPLY_CODEX_PASSTHROUGH=1 bash scripts/codex-real-channel-compaction-gate.sh`（首轮候选） | 0（cleanup） | 114/115/116/119/120/130/141/168/180/205/207/208/223 完成分类，压缩场景均按上表记录 |
+| 同一 gate 排除首轮已测渠道，仅测试 `117,160` | 0（cleanup） | 160 全部通过；117 仅 namespace 能力不支持，压缩全部通过 |
+| `bash -n scripts/codex-real-channel-compaction-gate.sh` | 0 | gate 脚本语法通过 |
+| `node --test scripts/codex-real-channel-compaction-gate.test.mjs` | 0 | gate 合同测试通过 |
+| `scripts/go-test-all.sh -count=1 -timeout=120s` | 0 | 排除前端生成目录和嵌套 worktree 后枚举 88 个 Go 包，全部通过 |
+| `docker exec new-api-dev-isolated-new-api-1 /new-api --build-info` | 0 | 当前隔离容器为 `5d12e728b8ff610136882973cac21fd382e7972d-dirty` |
+| `curl --connect-timeout 3 --max-time 10 http://127.0.0.1:3001/api/status` | 0 | 隔离应用 HTTP 200 |
+
+以上验证未修改、未重建、未升级正式服务；正式发布门禁仍要求在完成动态请求头配置后重新执行真实 gate，并保留正式镜像锚点、备份和升级后 413/429/502/工具调用观察证据。
+
+## 2026-08-07 正式配置门禁与发布阻断
+
+### 正式渠道配置
+
+- 在生产 PostgreSQL 原子事务中，仅对当时仍启用且匹配 `gpt-5.6-sol` 的 13 个渠道 `114,115,116,117,119,120,130,141,160,168,180,205,223` 追加无条件 `pass_headers` 和 `X-Client-Request-Id -> Session_id` `copy_header` 操作。
+- 原有 `prune_objects` 操作全部保留；180 原本没有参数覆盖，因此只新增上述两项。207、208 在配置前已为 `status=2, auto_ban=1`，本轮没有重新启用、没有写入参数覆盖。
+- 事务校验结果为 `updated_channels=13`、`pass_headers_ops=13`、`copy_header_ops=13`；失败的首次 15 渠道校验已回滚，所有目标行在重试前的参数覆盖哈希未改变。
+
+### 使用正式配置导入隔离 gate
+
+关闭隔离测试覆盖开关后，gate 从生产只读 snapshot 导入上述 13 个渠道，结果不再出现 `channel:header_override_invalid`：
+
+| 渠道 | CLI | Compact 结果 | 归类 |
+| ---: | --- | --- | --- |
+| 114, 115, 168 | 通过 | 基础和 33 MiB 超大请求均 HTTP 200 / `response.completed` | 动态头和压缩路径通过 |
+| 141, 205 | 通过 | 分别出现上游过载/传输中断的 502，其他压缩请求通过 | 上游瞬态失败，非网关头校验 |
+| 116, 119, 120, 130, 180 | 上游 `upstream_transport_interrupted` 或 `server_is_overloaded` | 压缩请求大多通过；120 基础请求一次 `server_is_overloaded` 502 | 上游状态需按错误码观察 |
+| 160 | 上游 `do_request_failed` 500 | 基础和超大请求均 HTTP 200 / `response.completed` | 上游 CLI 请求失败，压缩控制面通过 |
+| 117 | 503 `unsupported_namespace_tools` | 基础和超大请求均通过 | 渠道能力不支持 namespace，路由需解释/跳过 |
+| 223 | 503 `unsupported_encrypted_reasoning_replay` | 基础和超大请求均通过 | 渠道能力不支持 encrypted reasoning replay |
+
+隔离 cleanup 仍为 `passed`，Redis 重新创建、应用网络和 `/api/status` 均验证成功。上述 502/500/能力错误均有结构化观测，不作为压缩修复失败或静默成功。
+
+### 正式镜像发布状态
+
+- 正式服务当前仍运行 `new-api-local:prod-codex-lite-4527d7666`，build-info 为提交 `4527d7666a37f9151a57f08ca0bc5e8e08b8fb46`，容器 healthy、重启次数为 0，`127.0.0.1:13000/api/healthz` HTTP 200。
+- 最新隔离候选 `new-api-local:dev` 已从当前工作树重建，build-info 为 `5d12e728b8ff610136882973cac21fd382e7972d-dirty`，所有相关 Go 测试、前端 Docker 构建和真实渠道 gate 已完成。
+- 由于工作树仍包含既有大量未提交改动，生产发布规程的 dirty-worktree guard 不允许把该镜像标记或晋级为正式候选。本轮没有重建/替换正式应用容器，也没有修改 PostgreSQL 之外的生产依赖。
+
+因此当前状态是“正式动态请求头配置已生效，代码镜像尚未升级”。在工作树获得可审计的干净提交、正式镜像 digest 和独立备份前，不能宣称 Responses Lite 代码修复已在生产运行。
+
+### 回滚边界
+
+- 应用回滚无需动作：本轮没有替换正式容器，旧镜像 `prod-codex-lite-4527d7666` 仍在运行。
+- 渠道配置回滚只删除本轮追加的无条件 `pass_headers` 和精确的 `copy_header(X-Client-Request-Id -> Session_id)` 两项，保留每个渠道原有的其他 `operations`；必须在事务中校验目标渠道和操作计数后执行，不能整体覆盖 `param_override`。
+- 207、208 的 `status=2, auto_ban=1` 不属于本轮配置变更，回滚时不得自动恢复；重新启用需另行完成上游可用性和能力 gate。
 
 ## 发布边界
 

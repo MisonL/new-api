@@ -170,7 +170,7 @@ NEW_API_LAN_PROXY_PORT=3001 NEW_API_LOOPBACK_PORT=13001 \
 
 ```bash
 curl -fsS http://127.0.0.1:3001/api/status
-curl -fsS http://10.0.90.200:3001/api/status
+curl -fsS "http://${LAN_HOST}:3001/api/status"
 curl -fsS http://127.0.0.1:13001/api/status
 ```
 
@@ -180,11 +180,11 @@ curl -fsS http://127.0.0.1:13001/api/status
 
 ```text
 127.0.0.1:3001 -> 127.0.0.1
-10.0.90.200:3001 -> 10.0.90.200
-127.0.0.1:13001 -> 172.21.0.1
+${LAN_HOST}:3001 -> ${LAN_HOST}
+127.0.0.1:13001 -> <docker-bridge-ip>
 ```
 
-通过 Caddy 入口访问时未再出现异常公网 IP `171.80.0.108`。
+通过 Caddy 入口访问时未再出现配置的异常来源地址。
 
 ## 转发头复核
 
@@ -212,7 +212,7 @@ X-Real-IP: 127.0.0.1
 0.0.0.0:3001 -> container:3000
 ```
 
-恢复后 `http://127.0.0.1:3001/api/status` 正常返回 `success=true`。由于恢复为 Docker Desktop published port 直连模式，TUN 开启时日志仍可能再次出现 `171.80.0.108`，这与本次修复方案的预期一致。
+恢复后 `http://127.0.0.1:3001/api/status` 正常返回 `success=true`。由于恢复为 Docker Desktop published port 直连模式，TUN 开启时日志仍可能再次出现配置的异常来源地址，这与本次修复方案的预期一致。
 
 ## 实施结论
 

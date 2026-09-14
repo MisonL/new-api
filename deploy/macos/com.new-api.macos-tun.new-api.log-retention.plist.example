@@ -6,6 +6,16 @@
   <string>__LOG_RETENTION_LABEL__</string>
   <key>ProgramArguments</key>
   <array>
+    <string>__LOG_RETENTION_RUNNER__</string>
+    <string>--lock</string>
+    <string>__LOG_RETENTION_LOCK__</string>
+    <string>--log</string>
+    <string>__LOG_RETENTION_LOG__</string>
+    <string>--keep</string>
+    <string>__LOG_RETENTION_LOG_KEEP__</string>
+    <string>--timeout</string>
+    <string>__LOG_RETENTION_TIMEOUT__</string>
+    <string>--</string>
     <string>__LOG_RETENTION_SCRIPT__</string>
     <string>--apply</string>
   </array>
@@ -21,15 +31,26 @@
     <string>__LOG_RETENTION_KEEP_FILES__</string>
     <key>NEW_API_LOG_RETENTION_MIN_INTERVAL_SECONDS</key>
     <string>__LOG_RETENTION_MIN_INTERVAL__</string>
+    <key>NEW_API_LOG_RETENTION_OPEN_PATH_CHECKER</key>
+    <string>__LOG_RETENTION_OPEN_PATH_CHECKER__</string>
+    <key>NEW_API_LOG_RETENTION_VOLUME_PATH</key>
+    <string>__LOG_RETENTION_VOLUME_PATH__</string>
+    <key>NEW_API_LOG_RETENTION_VOLUME_UUID</key>
+    <string>__LOG_RETENTION_VOLUME_UUID__</string>
   </dict>
   <key>RunAtLoad</key>
-  <true/>
-  <key>StartInterval</key>
-  <integer>86400</integer>
+  <false/>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>8</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
   <key>ThrottleInterval</key>
   <integer>300</integer>
   <key>ExitTimeOut</key>
-  <integer>120</integer>
+  <integer>960</integer>
   <key>ProcessType</key>
   <string>Background</string>
   <key>LowPriorityIO</key>

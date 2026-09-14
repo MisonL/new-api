@@ -1,13 +1,18 @@
-name: new-api-dev-isolated
+name: ${DEV_COMPOSE_PROJECT_NAME:-new-api-dev-isolated}
 
 services:
   new-api:
     image: ${DEV_NEW_API_IMAGE:-new-api-local:dev}
     init: true
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: --log-dir /app/logs
     ports:
-      - "${DEV_NEW_API_PORT:-3001}:3000"
+      - "127.0.0.1:${DEV_NEW_API_PORT:-3001}:3000"
     volumes:
       - type: bind
         source: ${DEV_NEW_API_DATA_DIR:?set DEV_NEW_API_DATA_DIR}
@@ -18,13 +23,19 @@ services:
     environment:
       - SESSION_SECRET=${DEV_SESSION_SECRET:?set DEV_SESSION_SECRET}
       - CRYPTO_SECRET=${DEV_CRYPTO_SECRET:?set DEV_CRYPTO_SECRET}
-      - SQL_DSN=${DEV_SQL_DSN:-postgresql://root:123456@postgres:5432/new-api-dev}
-      - REDIS_CONN_STRING=${DEV_REDIS_CONN_STRING:-redis://:${DEV_REDIS_PASSWORD:-123456}@redis:6379/0}
+      - SQL_DSN=${DEV_SQL_DSN:?set DEV_SQL_DSN}
+      - REDIS_CONN_STRING=${DEV_REDIS_CONN_STRING:?set DEV_REDIS_CONN_STRING}
       - TZ=${DEV_TZ:-Asia/Shanghai}
       - ERROR_LOG_ENABLED=${DEV_ERROR_LOG_ENABLED:-true}
       - BATCH_UPDATE_ENABLED=${DEV_BATCH_UPDATE_ENABLED:-true}
       - CHANNEL_UPSTREAM_MODEL_UPDATE_TASK_ENABLED=${DEV_CHANNEL_UPSTREAM_MODEL_UPDATE_TASK_ENABLED:-false}
       - CHANNEL_CACHE_SYNC_ENABLED=${DEV_CHANNEL_CACHE_SYNC_ENABLED:-false}
+      # Exercise the route-scope selector in the isolated environment by
+      # default. Production keeps these flags explicit in its own env file.
+      - CHANNEL_ROUTING_V2_ENABLED=${DEV_CHANNEL_ROUTING_V2_ENABLED:-true}
+      - CHANNEL_ROUTING_SHADOW_ENABLED=${DEV_CHANNEL_ROUTING_SHADOW_ENABLED:-false}
+      - CHANNEL_ROUTING_V2_STRICT_WRITES=${DEV_CHANNEL_ROUTING_V2_STRICT_WRITES:-true}
+      - CHANNEL_CONCURRENCY_STRICT=${DEV_CHANNEL_CONCURRENCY_STRICT:-true}
       - UPDATE_TASK=${DEV_UPDATE_TASK:-false}
       - SUBSCRIPTION_QUOTA_RESET_TASK_ENABLED=${DEV_SUBSCRIPTION_QUOTA_RESET_TASK_ENABLED:-false}
       - NODE_NAME=${DEV_NODE_NAME:-dev-isolated-node-1}
@@ -36,21 +47,29 @@ services:
     networks:
       - dev-isolated-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:3000/api/healthz"]
+      test: ["CMD", "wget", "-q", "-T", "10", "-O", "/dev/null", "http://127.0.0.1:3000/api/healthz"]
       interval: 30s
-      timeout: 8s
-      retries: 3
+      timeout: 15s
+      retries: 5
+      start_period: 60s
 
   redis:
     image: redis:latest
     restart: always
-    command: ["redis-server", "--requirepass", "${DEV_REDIS_PASSWORD:-123456}"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command: ["redis-server", "--requirepass", "${DEV_REDIS_PASSWORD:?set DEV_REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${DEV_REDIS_PASSWORD:?set DEV_REDIS_PASSWORD}
     ports:
-      - "${DEV_REDIS_PORT:-6380}:6379"
+      - "127.0.0.1:${DEV_REDIS_PORT:-6380}:6379"
     networks:
       - dev-isolated-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli --no-auth-warning ping | grep -Fxq PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -58,12 +77,17 @@ services:
   postgres:
     image: postgres:15
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       POSTGRES_USER: ${DEV_POSTGRES_USER:-root}
-      POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD:-123456}
+      POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD:?set DEV_POSTGRES_PASSWORD}
       POSTGRES_DB: ${DEV_POSTGRES_DB:-new-api-dev}
     ports:
-      - "${DEV_POSTGRES_PORT:-5433}:5432"
+      - "127.0.0.1:${DEV_POSTGRES_PORT:-5433}:5432"
     volumes:
       - type: bind
         source: ${DEV_POSTGRES_DATA_DIR:?set DEV_POSTGRES_DATA_DIR}
@@ -71,7 +95,7 @@ services:
     networks:
       - dev-isolated-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DEV_POSTGRES_USER:-root} -d ${DEV_POSTGRES_DB:-new-api-dev}"]
+      test: ["CMD-SHELL", "PGPASSWORD=\"$${POSTGRES_PASSWORD}\" psql -X -q -tA -v ON_ERROR_STOP=1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -c 'SELECT 1' | grep -Fxq 1"]
       interval: 10s
       timeout: 5s
       retries: 10

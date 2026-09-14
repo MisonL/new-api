@@ -1,5 +1,11 @@
 {
 	admin off
+	log default {
+		format filter {
+			request>headers delete
+			request>uri regexp `\?.*$` ""
+		}
+	}
 }
 
 :{$NEW_API_LAN_PROXY_PORT:3000} {

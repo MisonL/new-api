@@ -55,7 +55,7 @@ sudo apt install -y \
 
 - `unzip` 是 Bun 官方安装脚本在 Linux 上的前置依赖
 - 桌面构建脚本使用 `bun install --backend=copyfile --frozen-lockfile` 安装 Web 依赖，避免 Docker bind mount、WSL、macOS 共享目录等环境下 hardlink / clonefile 语义不稳定导致安装失败，同时防止构建时改写锁文件
-- GitHub Actions 当前固定使用 `Bun 1.3.12`
+- 仓库通过根目录 `.bun-version` 统一固定使用 `Bun 1.4.0`，本地与 GitHub Actions 保持一致
 - 桌面端正式 Release 仅通过仓库根 GitHub Actions `tauri-release.yml` 手动触发发布
 
 ## 当前约束
