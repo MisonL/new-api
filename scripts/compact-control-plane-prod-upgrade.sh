@@ -118,6 +118,7 @@ runtime_value_is_usable() {
       return 1
       ;;
   esac
+  # shellcheck disable=SC2016
   case "$value" in
     *'${'*|*'$('*)
       die "$name in $source contains unresolved shell interpolation; export a resolved production value before running"
@@ -200,18 +201,21 @@ require_runtime_env() {
 
 require_compose_config_resolves() {
   local -a COMPOSE_ARGS
-  local config_stderr
   local config_json
+  local config_stderr_file
   compose_args_array
   config_json="$(mktemp)"
-  if ! config_stderr="$(NEW_API_IMAGE="$CANDIDATE_IMAGE" docker compose "${COMPOSE_ARGS[@]}" config --format json >"$config_json" 2>&1)"; then
-    printf '%s\n' "$config_stderr" >&2
+  config_stderr_file="$(mktemp)"
+  if ! NEW_API_IMAGE="$CANDIDATE_IMAGE" docker compose "${COMPOSE_ARGS[@]}" config --format json >"$config_json" 2>"$config_stderr_file"; then
+    cat "$config_stderr_file" >&2
     rm -f "$config_json"
+    rm -f "$config_stderr_file"
     die "docker compose config failed; fix production compose variables before upgrading"
   fi
-  if printf '%s\n' "$config_stderr" | grep -qi 'Defaulting to a blank string'; then
-    printf '%s\n' "$config_stderr" >&2
+  if grep -qi 'Defaulting to a blank string' "$config_stderr_file"; then
+    cat "$config_stderr_file" >&2
     rm -f "$config_json"
+    rm -f "$config_stderr_file"
     die "docker compose config resolved one or more variables to blank strings"
   fi
   if ! python3 - "$config_json" "$APP_SERVICE" "$STATUS_URL" <<'PY'
@@ -290,9 +294,11 @@ if missing_targets:
 PY
   then
     rm -f "$config_json"
+    rm -f "$config_stderr_file"
     die "docker compose config resolved to an unsafe production runtime shape"
   fi
   rm -f "$config_json"
+  rm -f "$config_stderr_file"
 }
 
 current_container_image() {

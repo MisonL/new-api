@@ -23,8 +23,16 @@ Environment overrides:
   NEW_API_ABNORMAL_TUN_IP_REGEX=
   NEW_API_ALLOW_ACTIVE_REQUESTS=0
   NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT=30
-  CADDY_LOG_FILE=/tmp/<COMPOSE_SERVICE>-macos-tun-caddy-<LAN_PORT>.log
+  NEW_API_ALLOW_IMAGE_CHANGE=0
+  NEW_API_RELEASE_APPROVAL_FILE=
+  NEW_API_EXPECTED_IMAGE=
+  NEW_API_EXPECTED_REVISION=
+  CADDY_LOG_FILE="$HOME/Library/Application Support/New API/caddy/<COMPOSE_SERVICE>-macos-tun-caddy-<LAN_PORT>.log"
+  CADDY_RUNTIME_CONFIG_FILE="$HOME/Library/Application Support/New API/caddy/<COMPOSE_SERVICE>-macos-tun.Caddyfile"
   CADDY_PID_FILE=/tmp/<COMPOSE_SERVICE>-macos-tun-caddy-<LAN_PORT>.pid
+  NEW_API_CADDY_EXIT_TIMEOUT_SECONDS=30
+  NEW_API_CADDY_THROTTLE_INTERVAL_SECONDS=10
+  NEW_API_LSOF_TIMEOUT_SECONDS=3
   CADDY_LAUNCHD_LABEL=com.new-api.macos-tun.<COMPOSE_SERVICE>.<LAN_PORT>
   CADDY_LAUNCHD_PLIST=~/Library/LaunchAgents/<LABEL>.plist
 EOF
@@ -43,6 +51,9 @@ case "$MODE" in
 esac
 ROLLBACK_NEEDED=0
 ROLLBACK_RUNNING=0
+VALIDATED_IMAGE_REF=""
+VALIDATED_IMAGE_ID=""
+BASELINE_CONTAINER_IMAGE_ID=""
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -110,6 +121,19 @@ expand_home_path() {
   esac
 }
 
+resolve_repo_path() {
+  local path="$1"
+
+  case "$path" in
+    /*) printf '%s' "$path" ;;
+    \~) printf '%s' "$HOME" ;;
+    \~/*) printf '%s/%s' "$HOME" "${path#~/}" ;;
+    *) printf '%s/%s' "$ROOT_DIR" "$path" ;;
+  esac
+}
+
+CADDYFILE="$(resolve_repo_path "$CADDYFILE")"
+
 COMPOSE_SERVICE="${COMPOSE_SERVICE:-$(tun_env_value COMPOSE_SERVICE new-api)}"
 LAN_PORT="${NEW_API_LAN_PROXY_PORT:-$(tun_env_value NEW_API_LAN_PROXY_PORT 3000)}"
 LOOPBACK_PORT="${NEW_API_LOOPBACK_PORT:-$(tun_env_value NEW_API_LOOPBACK_PORT 13000)}"
@@ -118,16 +142,28 @@ HEALTH_PATH="${NEW_API_HEALTH_PATH:-$(tun_env_value NEW_API_HEALTH_PATH /api/sta
 ABNORMAL_TUN_IP_REGEX="${NEW_API_ABNORMAL_TUN_IP_REGEX:-$(tun_env_value NEW_API_ABNORMAL_TUN_IP_REGEX '')}"
 ALLOW_ACTIVE_REQUESTS="${NEW_API_ALLOW_ACTIVE_REQUESTS:-$(tun_env_value NEW_API_ALLOW_ACTIVE_REQUESTS 0)}"
 ACTIVE_CONNECTION_DRAIN_TIMEOUT="${NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT:-$(tun_env_value NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT 30)}"
+ALLOW_IMAGE_CHANGE="${NEW_API_ALLOW_IMAGE_CHANGE:-$(tun_env_value NEW_API_ALLOW_IMAGE_CHANGE 0)}"
+RELEASE_APPROVAL_FILE="${NEW_API_RELEASE_APPROVAL_FILE:-$(tun_env_value NEW_API_RELEASE_APPROVAL_FILE '')}"
+EXPECTED_IMAGE="${NEW_API_EXPECTED_IMAGE:-$(tun_env_value NEW_API_EXPECTED_IMAGE '')}"
+EXPECTED_REVISION="${NEW_API_EXPECTED_REVISION:-$(tun_env_value NEW_API_EXPECTED_REVISION '')}"
 CONFIGURED_PORT_MAPPING="${NEW_API_PORT_MAPPING:-$(tun_env_value NEW_API_PORT_MAPPING '')}"
 PORT_MAPPING="127.0.0.1:${LOOPBACK_PORT}:${CONTAINER_PORT}"
 DEFAULT_PORT_MAPPING="${NEW_API_DEFAULT_PORT_MAPPING:-$(tun_env_value NEW_API_DEFAULT_PORT_MAPPING "${LAN_PORT}:${CONTAINER_PORT}")}"
 HEALTH_URL="http://127.0.0.1:${LAN_PORT}${HEALTH_PATH}"
 BACKEND_URL="http://127.0.0.1:${LOOPBACK_PORT}${HEALTH_PATH}"
-CADDY_LOG_FILE="${CADDY_LOG_FILE:-/tmp/${COMPOSE_SERVICE}-macos-tun-caddy-${LAN_PORT}.log}"
+CADDY_LOG_ROOT="${HOME}/Library/Application Support/New API/caddy"
+CADDY_LOG_FILE="${CADDY_LOG_FILE:-${CADDY_LOG_ROOT}/${COMPOSE_SERVICE}-macos-tun-caddy-${LAN_PORT}.log}"
+CADDY_RUNTIME_CONFIG_FILE="${CADDY_RUNTIME_CONFIG_FILE:-$(tun_env_value CADDY_RUNTIME_CONFIG_FILE "${CADDY_LOG_ROOT}/${COMPOSE_SERVICE}-macos-tun.Caddyfile")}"
 CADDY_PID_FILE="${CADDY_PID_FILE:-/tmp/${COMPOSE_SERVICE}-macos-tun-caddy-${LAN_PORT}.pid}"
+CADDY_EXIT_TIMEOUT_SECONDS="${NEW_API_CADDY_EXIT_TIMEOUT_SECONDS:-30}"
+CADDY_THROTTLE_INTERVAL_SECONDS="${NEW_API_CADDY_THROTTLE_INTERVAL_SECONDS:-10}"
+LSOF_TIMEOUT_SECONDS="${NEW_API_LSOF_TIMEOUT_SECONDS:-3}"
+LSOF_BIN=""
 CADDY_LAUNCHD_LABEL="${CADDY_LAUNCHD_LABEL:-$(tun_env_value CADDY_LAUNCHD_LABEL "com.new-api.macos-tun.${COMPOSE_SERVICE}.${LAN_PORT}")}"
 CADDY_LAUNCHD_PLIST="${CADDY_LAUNCHD_PLIST:-$(tun_env_value CADDY_LAUNCHD_PLIST "${HOME}/Library/LaunchAgents/${CADDY_LAUNCHD_LABEL}.plist")}"
 CADDY_LAUNCHD_PLIST="$(expand_home_path "$CADDY_LAUNCHD_PLIST")"
+CADDY_RUNTIME_CONFIG_FILE="$(expand_home_path "$CADDY_RUNTIME_CONFIG_FILE")"
+RELEASE_APPROVAL_FILE="$(expand_home_path "$RELEASE_APPROVAL_FILE")"
 LAUNCHD_DOMAIN="gui/$(id -u)"
 
 COMPOSE_ENV_ARGS=()
@@ -194,6 +230,244 @@ compose_service_container_id() {
   container_id="$(compose_tun ps -q "$COMPOSE_SERVICE" 2>/dev/null || true)"
   [[ -n "$container_id" ]] || fail "compose service ${COMPOSE_SERVICE} has no container id"
   printf '%s' "$container_id"
+}
+
+current_service_container_id() {
+  local container_id
+
+  container_id="$(compose_tun ps -a -q "$COMPOSE_SERVICE" 2>/dev/null | head -n 1 || true)"
+  [[ "$container_id" =~ ^[[:xdigit:]]{12,64}$ ]] || return 1
+  printf '%s' "$container_id"
+}
+
+compose_service_image_ref() {
+  local mode="$1"
+  local config_json
+
+  if [[ "$mode" == "default" ]]; then
+    config_json="$(compose_default config --format json)" || return 1
+  else
+    config_json="$(compose_tun config --format json)" || return 1
+  fi
+  printf '%s\n' "$config_json" \
+    | COMPOSE_SERVICE="$COMPOSE_SERVICE" python3 -c '
+import json
+import os
+import sys
+
+data = json.load(sys.stdin)
+service = data.get("services", {}).get(os.environ["COMPOSE_SERVICE"])
+if not service or not service.get("image"):
+    raise SystemExit(1)
+print(service["image"])
+'
+}
+
+container_image_metadata() {
+  local container_id="$1"
+
+  docker inspect "$container_id" --format '{{.Config.Image}}|{{.Image}}|{{index .Config.Labels "org.opencontainers.image.revision"}}'
+}
+
+image_release_approval_is_valid() {
+  local approval_file="$1"
+  local image_ref="$2"
+  local revision="$3"
+
+  [[ -f "$approval_file" ]] || return 1
+  [[ ! -L "$approval_file" ]] || return 1
+  [[ "$(stat -f '%Su' "$approval_file" 2>/dev/null || true)" == "$(id -un)" ]] || return 1
+  [[ "$(stat -f '%Lp' "$approval_file" 2>/dev/null || true)" == "600" ]] || return 1
+  python3 - "$approval_file" "$image_ref" "$revision" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+expected_image = sys.argv[2]
+expected_revision = sys.argv[3]
+fields = {}
+for raw_line in path.read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        continue
+    key, separator, value = line.partition("=")
+    if not separator or key not in {"status", "image", "revision", "worktree"}:
+        raise SystemExit(1)
+    if key in fields:
+        raise SystemExit(1)
+    fields[key] = value.strip()
+
+required = {
+    "status": "approved",
+    "image": expected_image,
+    "revision": expected_revision,
+    "worktree": "clean",
+}
+if any(fields.get(key) != value for key, value in required.items()):
+    raise SystemExit(1)
+PY
+}
+
+validate_release_image_guard() {
+  local container_id current_image current_image_id current_revision
+  local tun_image default_image rendered_image rendered_image_id rendered_revision
+  local worktree_status
+
+  container_id="$(current_service_container_id)" || fail "cannot establish the existing ${COMPOSE_SERVICE} container image baseline"
+  IFS='|' read -r current_image current_image_id current_revision \
+    <<<"$(container_image_metadata "$container_id")" \
+    || fail "cannot inspect the existing ${COMPOSE_SERVICE} image provenance"
+  [[ -n "$current_image" && "$current_image_id" == sha256:* ]] \
+    || fail "existing ${COMPOSE_SERVICE} container has no usable image reference or digest"
+  [[ "$current_revision" =~ ^[0-9a-f]{40}$ ]] \
+    || fail "existing ${COMPOSE_SERVICE} image revision is missing or not a clean commit"
+
+  tun_image="$(compose_service_image_ref tun)" \
+    || fail "cannot determine the TUN Compose image"
+  default_image="$(compose_service_image_ref default)" \
+    || fail "cannot determine the rollback Compose image"
+  [[ "$tun_image" == "$default_image" ]] \
+    || fail "TUN and rollback Compose configurations resolve different images"
+  rendered_image="$tun_image"
+
+  if [[ -n "$EXPECTED_IMAGE" && "$rendered_image" != "$EXPECTED_IMAGE" ]]; then
+    fail "rendered image ${rendered_image} does not match NEW_API_EXPECTED_IMAGE"
+  fi
+  if [[ -n "$EXPECTED_REVISION" && "$current_revision" != "$EXPECTED_REVISION" ]]; then
+    fail "current image revision does not match NEW_API_EXPECTED_REVISION"
+  fi
+
+  rendered_image_id="$(docker image inspect "$rendered_image" --format '{{.Id}}' 2>/dev/null || true)"
+  [[ "$rendered_image_id" == sha256:* ]] \
+    || fail "rendered image ${rendered_image} is not available locally with a digest"
+
+  VALIDATED_IMAGE_REF="$rendered_image"
+  VALIDATED_IMAGE_ID="$rendered_image_id"
+  BASELINE_CONTAINER_IMAGE_ID="$current_image_id"
+
+  worktree_status="$(git status --porcelain=v1 --untracked-files=all)"
+  if [[ -n "$worktree_status" ]]; then
+    if [[ "$APPLY" -eq 1 ]]; then
+      fail "refusing production apply with a dirty worktree; commit or stash all tracked and untracked changes before --apply"
+    fi
+    log "dirty worktree detected; check-only will not permit a production apply"
+  fi
+
+  if [[ "$rendered_image" == "$current_image" && "$rendered_image_id" == "$current_image_id" ]]; then
+    if [[ -z "$worktree_status" ]]; then
+      log "release image guard passed with clean worktree and unchanged image digest"
+    fi
+    return 0
+  fi
+
+  [[ "$ALLOW_IMAGE_CHANGE" == "1" ]] \
+    || fail "refusing image change from ${current_image}@${current_image_id} to ${rendered_image}@${rendered_image_id}; set NEW_API_ALLOW_IMAGE_CHANGE=1 only with release approval"
+  worktree_status="$(git status --porcelain=v1 --untracked-files=all)"
+  [[ -z "$worktree_status" ]] \
+    || fail "refusing image change while the worktree is dirty; release approval requires a clean worktree"
+  rendered_revision="$(docker image inspect "$rendered_image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true)"
+  [[ "$rendered_revision" =~ ^[0-9a-f]{40}$ ]] \
+    || fail "candidate image ${rendered_image} has no clean OCI revision label"
+  [[ -n "$RELEASE_APPROVAL_FILE" ]] \
+    || fail "NEW_API_RELEASE_APPROVAL_FILE is required when changing the production image"
+  image_release_approval_is_valid "$RELEASE_APPROVAL_FILE" "$rendered_image" "$rendered_revision" \
+    || fail "release approval file is invalid or does not match the candidate image"
+  log "release approval passed for image ${rendered_image} revision ${rendered_revision}"
+}
+
+assert_validated_image_before_apply() {
+  local container_id current_image_id rendered_image_id
+
+  [[ -n "$VALIDATED_IMAGE_REF" && -n "$VALIDATED_IMAGE_ID" && -n "$BASELINE_CONTAINER_IMAGE_ID" ]] \
+    || fail "production image guard did not establish an apply baseline"
+  rendered_image_id="$(docker image inspect "$VALIDATED_IMAGE_REF" --format '{{.Id}}' 2>/dev/null || true)"
+  [[ "$rendered_image_id" == "$VALIDATED_IMAGE_ID" ]] \
+    || fail "candidate image digest changed after provenance validation"
+  container_id="$(current_service_container_id)" \
+    || fail "existing ${COMPOSE_SERVICE} container disappeared before apply"
+  current_image_id="$(docker inspect "$container_id" --format '{{.Image}}' 2>/dev/null || true)"
+  [[ "$current_image_id" == "$BASELINE_CONTAINER_IMAGE_ID" ]] \
+    || fail "existing ${COMPOSE_SERVICE} container image changed after provenance validation"
+}
+
+env_file_key_has_value() {
+  local file="$1"
+  local key="$2"
+  local line value
+
+  [[ -f "$file" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ "$line" == export\ * ]] && line="${line#export }"
+    [[ "$line" == "$key="* ]] || continue
+    value="$(normalize_tun_env_value "${line#*=}")"
+    [[ -n "$value" ]] && return 0
+  done <"$file"
+  return 1
+}
+
+effective_compose_env_key_has_value() {
+  local key="$1"
+  local value
+
+  value="$(printenv "$key" 2>/dev/null || true)"
+  [[ -n "$value" ]] && return 0
+  env_file_key_has_value "$PROD_ENV_FILE" "$key" && return 0
+  env_file_key_has_value "$TUN_ENV_FILE" "$key"
+}
+
+compose_required_env_keys() {
+  python3 - "$COMPOSE_FILE_PATH" <<'PY'
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as compose_file:
+    text = compose_file.read()
+text = "\n".join(
+    line for line in text.splitlines() if not line.lstrip().startswith("#")
+)
+keys = sorted(
+    set(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\s*:\?", text))
+)
+print("\n".join(keys))
+PY
+}
+
+report_compose_config_error() {
+  local scope="$1"
+  local output="$2"
+  local missing_keys
+
+  printf '%s\n' "$output" >&2
+  missing_keys="$(
+    {
+      printf '%s\n' "$output" | python3 -c '
+import re
+import sys
+
+text = sys.stdin.read()
+patterns = (
+    r"required variable ([A-Za-z_][A-Za-z0-9_]*) is missing",
+    r"variable ([A-Za-z_][A-Za-z0-9_]*) is not set",
+)
+keys = set()
+for pattern in patterns:
+    keys.update(re.findall(pattern, text, flags=re.IGNORECASE))
+for key in sorted(keys):
+    print(key)
+' 2>/dev/null || true
+      while IFS= read -r key; do
+        [[ -n "$key" ]] || continue
+        if ! effective_compose_env_key_has_value "$key"; then
+          printf '%s\n' "$key"
+        fi
+      done < <(compose_required_env_keys 2>/dev/null || true)
+    } | sort -u | python3 -c 'import sys; print(", ".join(line.strip() for line in sys.stdin if line.strip()))'
+  )"
+  if [[ -n "$missing_keys" ]]; then
+    printf '[macos-tun] missing required environment keys for %s: %s\n' "$scope" "$missing_keys" >&2
+    printf '[macos-tun] set these keys in %s; credential values are intentionally not printed\n' "$PROD_ENV_FILE" >&2
+  fi
 }
 
 current_service_publishes_port() {
@@ -309,10 +583,12 @@ validate_tun_env_scope() {
         NEW_API_DEFAULT_PORT_MAPPING | \
         NEW_API_ALLOW_ACTIVE_REQUESTS | \
         NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT | \
+        NEW_API_LSOF_TIMEOUT_SECONDS | \
         NEW_API_ABNORMAL_TUN_IP_REGEX | \
         NEW_API_PORT_MAPPING | \
         CADDY_LAUNCHD_LABEL | \
-        CADDY_LAUNCHD_PLIST)
+        CADDY_LAUNCHD_PLIST | \
+        CADDY_RUNTIME_CONFIG_FILE)
         ;;
       *)
         fail "TUN env file must not define ${key}; put runtime settings in ${PROD_ENV_FILE}"
@@ -324,7 +600,10 @@ validate_tun_env_scope() {
 validate_default_port_mapping() {
   local config_json
 
-  config_json="$(compose_default config --format json)" || return 1
+  if ! config_json="$(compose_default config --format json 2>&1)"; then
+    report_compose_config_error "default rollback" "$config_json"
+    return 2
+  fi
   printf '%s\n' "$config_json" \
     | COMPOSE_SERVICE="$COMPOSE_SERVICE" EXPECTED_PORT="$LAN_PORT" EXPECTED_TARGET="$CONTAINER_PORT" python3 -c '
 import json
@@ -360,11 +639,81 @@ sys.exit(1)
   '
 }
 
+run_lsof() {
+  LSOF_BIN="$LSOF_BIN" LSOF_TIMEOUT_SECONDS="$LSOF_TIMEOUT_SECONDS" python3 - "$@" <<'PY'
+import os
+import subprocess
+import sys
+
+binary = os.environ.get("LSOF_BIN") or "/usr/sbin/lsof"
+timeout = float(os.environ.get("LSOF_TIMEOUT_SECONDS", "3"))
+try:
+    result = subprocess.run(
+        [binary, *sys.argv[1:]],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+except subprocess.TimeoutExpired:
+    print(f"lsof timed out after {timeout:g}s", file=sys.stderr)
+    raise SystemExit(124)
+
+sys.stdout.write(result.stdout)
+sys.stderr.write(result.stderr)
+raise SystemExit(result.returncode)
+PY
+}
+
+lsof_listener_pids() {
+  local port="$1"
+  local output status
+
+  if output="$(run_lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null)"; then
+    printf '%s\n' "$output" | sort -u
+    return 0
+  else
+    status=$?
+  fi
+  [[ "$status" -eq 1 ]] || return "$status"
+  return 0
+}
+
+lsof_established_output() {
+  local pid="$1"
+  local port="$2"
+  local output status
+
+  if output="$(run_lsof -nP -a -p "$pid" -iTCP:"$port" -sTCP:ESTABLISHED 2>/dev/null)"; then
+    printf '%s' "$output"
+    return 0
+  else
+    status=$?
+  fi
+  [[ "$status" -eq 1 ]] || return "$status"
+  return 0
+}
+
+lsof_has_listener() {
+  local port="$1"
+  local output status
+
+  if output="$(run_lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null)"; then
+    [[ -n "$output" ]]
+    return $?
+  else
+    status=$?
+  fi
+  [[ "$status" -eq 1 ]] && return 1
+  return "$status"
+}
+
 current_service_active_connections() {
-  local fd_count owner_pids pid total
+  local established_output owner_pids pid total
 
   total=0
-  owner_pids="$(lsof -nP -iTCP:"$LAN_PORT" -sTCP:LISTEN -t 2>/dev/null | sort -u || true)"
+  owner_pids="$(lsof_listener_pids "$LAN_PORT")" || return $?
   [[ -n "$owner_pids" ]] || {
     printf '0'
     return 0
@@ -372,24 +721,26 @@ current_service_active_connections() {
 
   while IFS= read -r pid; do
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
-    fd_count="$(lsof -nP -a -p "$pid" -iTCP:"$LAN_PORT" -sTCP:ESTABLISHED 2>/dev/null | tail -n +2 | wc -l | tr -d '[:space:]')"
-    [[ "$fd_count" =~ ^[0-9]+$ ]] || fd_count=0
-    total=$((total + fd_count))
+    established_output="$(lsof_established_output "$pid" "$LAN_PORT")" || return $?
+    if [[ -n "$established_output" ]]; then
+      total=$((total + $(printf '%s\n' "$established_output" | tail -n +2 | wc -l | tr -d '[:space:]')))
+    fi
   done <<<"$owner_pids"
 
   printf '%s' "$total"
 }
 
 print_active_connection_sample() {
-  local owner_pids pid
+  local established_output owner_pids pid
 
-  owner_pids="$(lsof -nP -iTCP:"$LAN_PORT" -sTCP:LISTEN -t 2>/dev/null | sort -u || true)"
+  owner_pids="$(lsof_listener_pids "$LAN_PORT")" || return $?
   [[ -n "$owner_pids" ]] || return 0
 
   while IFS= read -r pid; do
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
-    lsof -nP -a -p "$pid" -iTCP:"$LAN_PORT" -sTCP:ESTABLISHED 2>/dev/null \
-      | awk '
+    established_output="$(lsof_established_output "$pid" "$LAN_PORT")" || return $?
+    [[ -n "$established_output" ]] || continue
+    printf '%s\n' "$established_output" | awk '
           NR == 1 { next }
           shown >= 20 { skipped = 1; next }
           {
@@ -486,16 +837,25 @@ managed_caddy_command_matches() {
   local pid="$1"
   local command_line
   command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-  [[ "$command_line" == *caddy* && "$command_line" == *"$CADDYFILE"* ]]
+  [[ "$command_line" == *caddy* && "$command_line" == *"$CADDY_RUNTIME_CONFIG_FILE"* ]]
 }
 
 managed_caddy_owns_lan_port() {
   local pid="$1"
-  lsof -nP -a -p "$pid" -iTCP:"$LAN_PORT" -sTCP:LISTEN >/dev/null 2>&1
+  local output status
+
+  if output="$(run_lsof -nP -a -p "$pid" -iTCP:"$LAN_PORT" -sTCP:LISTEN 2>/dev/null)"; then
+    [[ -n "$output" ]]
+    return $?
+  else
+    status=$?
+  fi
+  [[ "$status" -eq 1 ]] && return 1
+  return "$status"
 }
 
 stop_managed_caddy() {
-  local pid
+  local ownership_status pid graceful_wait_ticks
 
   if launchctl print "${LAUNCHD_DOMAIN}/${CADDY_LAUNCHD_LABEL}" >/dev/null 2>&1; then
     log "unloading Caddy launch agent ${CADDY_LAUNCHD_LABEL}"
@@ -524,7 +884,14 @@ stop_managed_caddy() {
     rm -f "$CADDY_PID_FILE"
     return 0
   fi
-  if ! managed_caddy_owns_lan_port "$pid"; then
+  if managed_caddy_owns_lan_port "$pid"; then
+    :
+  else
+    ownership_status=$?
+    if [[ "$ownership_status" -gt 1 ]]; then
+      log "Caddy port ownership probe failed status=${ownership_status}"
+      return "$ownership_status"
+    fi
     log "not stopping pid ${pid}; it does not listen on LAN proxy port ${LAN_PORT}"
     rm -f "$CADDY_PID_FILE"
     return 0
@@ -532,7 +899,7 @@ stop_managed_caddy() {
 
   log "stopping managed Caddy pid ${pid}"
   kill "$pid" >/dev/null 2>&1 || true
-  for _ in {1..20}; do
+  for ((graceful_wait_ticks = 0; graceful_wait_ticks < CADDY_EXIT_TIMEOUT_SECONDS * 4; graceful_wait_ticks++)); do
     if ! kill -0 "$pid" >/dev/null 2>&1; then
       rm -f "$CADDY_PID_FILE"
       return 0
@@ -553,20 +920,22 @@ stop_managed_caddy() {
 }
 
 start_managed_caddy() {
-  local caddy_bin escaped_caddyfile escaped_label escaped_log_file escaped_loopback_port escaped_lan_port escaped_pid_file escaped_root_dir
+  local caddy_bin escaped_caddyfile escaped_label escaped_log_file escaped_loopback_port escaped_lan_port escaped_pid_file
 
   rm -f "$CADDY_PID_FILE"
+  mkdir -p "$CADDY_LOG_ROOT" "$(dirname "$CADDY_LOG_FILE")" "$(dirname "$CADDY_RUNTIME_CONFIG_FILE")" "$(dirname "$CADDY_LAUNCHD_PLIST")"
+  chmod 0700 "$CADDY_LOG_ROOT"
   : >"$CADDY_LOG_FILE"
+  chmod 0600 "$CADDY_LOG_FILE"
+  install -m 0600 "$CADDYFILE" "$CADDY_RUNTIME_CONFIG_FILE"
   caddy_bin="$(command -v caddy)"
-  mkdir -p "$(dirname "$CADDY_LAUNCHD_PLIST")"
 
   escaped_label="$(xml_escape "$CADDY_LAUNCHD_LABEL")"
-  escaped_caddyfile="$(xml_escape "$CADDYFILE")"
+  escaped_caddyfile="$(xml_escape "$CADDY_RUNTIME_CONFIG_FILE")"
   escaped_pid_file="$(xml_escape "$CADDY_PID_FILE")"
   escaped_log_file="$(xml_escape "$CADDY_LOG_FILE")"
   escaped_lan_port="$(xml_escape "$LAN_PORT")"
   escaped_loopback_port="$(xml_escape "$LOOPBACK_PORT")"
-  escaped_root_dir="$(xml_escape "$ROOT_DIR")"
   caddy_bin="$(xml_escape "$caddy_bin")"
 
   cat >"$CADDY_LAUNCHD_PLIST" <<EOF
@@ -596,12 +965,14 @@ start_managed_caddy() {
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ExitTimeOut</key>
+  <integer>${CADDY_EXIT_TIMEOUT_SECONDS}</integer>
+  <key>ThrottleInterval</key>
+  <integer>${CADDY_THROTTLE_INTERVAL_SECONDS}</integer>
   <key>StandardOutPath</key>
   <string>${escaped_log_file}</string>
   <key>StandardErrorPath</key>
   <string>${escaped_log_file}</string>
-  <key>WorkingDirectory</key>
-  <string>${escaped_root_dir}</string>
 </dict>
 </plist>
 EOF
@@ -732,14 +1103,28 @@ on_error() {
 trap 'on_error "$LINENO"' ERR
 
 preflight() {
-  local active_connections caddy_validate_output secret_requirement tun_config_json
+  local active_connections caddy_validate_output lan_listener_status loopback_listener_status secret_requirement tun_config_json rollback_mapping_status
 
   [[ "$(uname -s)" == "Darwin" ]] || fail "this script is intended for macOS hosts"
   [[ "$HEALTH_PATH" == /* ]] || fail "NEW_API_HEALTH_PATH must start with /"
   [[ "$ALLOW_ACTIVE_REQUESTS" =~ ^[01]$ ]] || fail "NEW_API_ALLOW_ACTIVE_REQUESTS must be 0 or 1"
   [[ "$ACTIVE_CONNECTION_DRAIN_TIMEOUT" =~ ^[0-9]+$ ]] || fail "NEW_API_ACTIVE_CONNECTION_DRAIN_TIMEOUT must be a non-negative integer"
+  [[ "$ALLOW_IMAGE_CHANGE" =~ ^[01]$ ]] || fail "NEW_API_ALLOW_IMAGE_CHANGE must be 0 or 1"
   [[ "$CADDY_LAUNCHD_LABEL" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fail "CADDY_LAUNCHD_LABEL contains unsupported characters"
   [[ "$CADDY_LAUNCHD_PLIST" == /* ]] || fail "CADDY_LAUNCHD_PLIST must be an absolute path"
+  [[ "$CADDY_RUNTIME_CONFIG_FILE" == /* ]] || fail "CADDY_RUNTIME_CONFIG_FILE must be an absolute path"
+  if [[ -n "$RELEASE_APPROVAL_FILE" && "$RELEASE_APPROVAL_FILE" != /* ]]; then
+    fail "NEW_API_RELEASE_APPROVAL_FILE must be an absolute path"
+  fi
+  if [[ -n "$EXPECTED_IMAGE" && "$EXPECTED_IMAGE" =~ [[:space:]] ]]; then
+    fail "NEW_API_EXPECTED_IMAGE must not contain whitespace"
+  fi
+  if [[ -n "$EXPECTED_REVISION" && ! "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+    fail "NEW_API_EXPECTED_REVISION must be a 40-character lowercase commit"
+  fi
+  [[ "$CADDY_EXIT_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "NEW_API_CADDY_EXIT_TIMEOUT_SECONDS must be a positive integer"
+  [[ "$CADDY_THROTTLE_INTERVAL_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "NEW_API_CADDY_THROTTLE_INTERVAL_SECONDS must be a positive integer"
+  [[ "$LSOF_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*(\.[0-9]+)?$ ]] || fail "NEW_API_LSOF_TIMEOUT_SECONDS must be positive"
   validate_port NEW_API_LAN_PROXY_PORT "$LAN_PORT"
   validate_port NEW_API_LOOPBACK_PORT "$LOOPBACK_PORT"
   validate_port NEW_API_CONTAINER_PORT "$CONTAINER_PORT"
@@ -751,8 +1136,9 @@ preflight() {
   command -v caddy >/dev/null || fail "caddy is required"
   command -v launchctl >/dev/null || fail "launchctl is required"
   command -v curl >/dev/null || fail "curl is required"
-  command -v lsof >/dev/null || fail "lsof is required"
+  LSOF_BIN="$(command -v lsof)" || fail "lsof is required"
   command -v python3 >/dev/null || fail "python3 is required"
+  command -v git >/dev/null || fail "git is required for the production image guard"
   [[ -f "$COMPOSE_FILE_PATH" ]] || fail "missing compose file: $COMPOSE_FILE_PATH"
   [[ -f "$CADDYFILE" ]] || fail "missing Caddyfile: $CADDYFILE"
   [[ -f "$TUN_ENV_FILE" ]] || fail "missing TUN env file: $TUN_ENV_FILE"
@@ -765,7 +1151,10 @@ preflight() {
   fi
 
   log "validating compose port mapping"
-  tun_config_json="$(compose_tun config --format json)" || fail "compose does not render expected port mapping ${PORT_MAPPING}"
+  if ! tun_config_json="$(compose_tun config --format json 2>&1)"; then
+    report_compose_config_error "TUN deployment" "$tun_config_json"
+    fail "TUN Compose configuration failed to render; resolve the reported Compose or environment error"
+  fi
   printf '%s\n' "$tun_config_json" \
     | COMPOSE_SERVICE="$COMPOSE_SERVICE" EXPECTED_PORT="$LOOPBACK_PORT" EXPECTED_TARGET="$CONTAINER_PORT" python3 -c '
 import json
@@ -794,7 +1183,15 @@ sys.exit(1)
 ' || fail "compose does not render expected port mapping ${PORT_MAPPING}"
 
   log "validating rollback compose port mapping"
-  validate_default_port_mapping || fail "compose does not render expected rollback port mapping ${DEFAULT_PORT_MAPPING}"
+  if validate_default_port_mapping; then
+    :
+  else
+    rollback_mapping_status=$?
+    if [[ "$rollback_mapping_status" -eq 2 ]]; then
+      fail "default Compose configuration failed to render; resolve the reported Compose or environment error"
+    fi
+    fail "compose does not render expected rollback port mapping ${DEFAULT_PORT_MAPPING}"
+  fi
 
   log "validating required service secrets"
   secret_requirement="be set"
@@ -804,16 +1201,28 @@ sys.exit(1)
   validate_required_service_env tun "$APPLY" || fail "SESSION_SECRET and CRYPTO_SECRET must ${secret_requirement} for TUN deployment"
   validate_required_service_env default "$APPLY" || fail "SESSION_SECRET and CRYPTO_SECRET must ${secret_requirement} for rollback deployment"
 
+  log "validating production image provenance and dirty-worktree boundary"
+  validate_release_image_guard
+
   log "checking current port ownership"
-  if lsof -nP -iTCP:"$LAN_PORT" -sTCP:LISTEN >/dev/null 2>&1 && ! lan_port_owner_is_expected; then
-    fail "LAN proxy port ${LAN_PORT} is already in use by an unmanaged process"
+  if lsof_has_listener "$LAN_PORT"; then
+    if ! lan_port_owner_is_expected; then
+      fail "LAN proxy port ${LAN_PORT} is already in use by an unmanaged process"
+    fi
+  else
+    lan_listener_status=$?
+    [[ "$lan_listener_status" -eq 1 ]] || fail "LAN port ownership probe failed status=${lan_listener_status}"
   fi
-  if lsof -nP -iTCP:"$LOOPBACK_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+
+  if lsof_has_listener "$LOOPBACK_PORT"; then
     if current_service_has_loopback_port; then
       log "loopback backend port ${LOOPBACK_PORT} is already used by ${COMPOSE_SERVICE}; continuing"
     else
       fail "loopback backend port ${LOOPBACK_PORT} is already in use"
     fi
+  else
+    loopback_listener_status=$?
+    [[ "$loopback_listener_status" -eq 1 ]] || fail "loopback port ownership probe failed status=${loopback_listener_status}"
   fi
 
   active_connections="$(current_service_active_connections)"
@@ -895,6 +1304,7 @@ if [[ "$APPLY" -eq 0 ]]; then
   exit 0
 fi
 
+assert_validated_image_before_apply
 ROLLBACK_NEEDED=1
 log "recreating ${COMPOSE_SERVICE} with ${PORT_MAPPING}"
 compose_tun up -d --no-deps --force-recreate "$COMPOSE_SERVICE"

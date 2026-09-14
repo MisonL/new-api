@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LAN_URL_FRAGMENT="${FAKE_LAN_URL_FRAGMENT:-10.0.90.200:3000}"
+LAN_URL_FRAGMENT="${FAKE_LAN_URL_FRAGMENT:-lan.example.test:3000}"
 
 printf '%s\n' "$*" >>"${FAKE_CURL_LOG:?FAKE_CURL_LOG is required}"
 has_write_format=0
@@ -17,7 +17,6 @@ for arg in "$@"; do
   fi
   previous_arg="$arg"
 done
-
 if [ "$has_write_format" -eq 1 ]; then
   latency_seconds="${FAKE_MONITOR_LATENCY_SECONDS:-0.010}"
   latency_status=200
@@ -55,7 +54,7 @@ if [ "$has_write_format" -eq 1 ]; then
   else
     printf '%s\n' "$latency_status"
   fi
-  if [ "$latency_status" -eq 200 ]; then
+  if [ "$latency_status" -ge 200 ] && [ "$latency_status" -lt 300 ]; then
     exit 0
   fi
   if [ "${FAKE_CURL_MODE:-fail}" = "timeout" ]; then
@@ -63,7 +62,6 @@ if [ "$has_write_format" -eq 1 ]; then
   fi
   exit 22
 fi
-
 case "${FAKE_CURL_MODE:-fail}" in
   ping)
     if [[ "$*" == *"--unix-socket"* ]]; then

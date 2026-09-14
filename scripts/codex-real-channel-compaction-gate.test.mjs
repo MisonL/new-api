@@ -11,14 +11,47 @@ const cliSmokeScript = resolve(repoRoot, 'scripts/codex-cli-isolated-smoke.sh');
 const gateSource = readFileSync(gateScript, 'utf8');
 const cliSmokeSource = readFileSync(cliSmokeScript, 'utf8');
 
-test('uses the IPv6 loopback endpoint for host-side Codex probes while keeping data-plane traffic isolated', () => {
+test('derives isolated Docker resource names from the configured Compose project', () => {
+  assert.match(gateSource, /resolve_isolated_compose_project\(\)/);
+  assert.match(gateSource, /DEV_COMPOSE_PROJECT_NAME/);
+  assert.match(gateSource, /ISOLATED_NETWORK="\$\{COMPOSE_PROJECT_NAME\}_dev-isolated-network"/);
+  assert.match(gateSource, /POSTGRES_CONTAINER="\$\{COMPOSE_PROJECT_NAME\}-postgres-1"/);
+  assert.match(gateSource, /REDIS_CONTAINER="\$\{COMPOSE_PROJECT_NAME\}-redis-1"/);
+  assert.match(gateSource, /APP_CONTAINER="\$\{COMPOSE_PROJECT_NAME\}-new-api-1"/);
+});
+
+test('uses the configured isolated PostgreSQL credentials and environment file', () => {
+  assert.match(gateSource, /CODEX_REAL_GATE_COMPOSE_FILE/);
+  assert.match(gateSource, /CODEX_REAL_GATE_ENV_FILE/);
+  assert.match(gateSource, /ISOLATED_POSTGRES_USER="\$\{CODEX_REAL_GATE_POSTGRES_USER:-\$\{DEV_POSTGRES_USER:-\}\}"/);
+  assert.match(gateSource, /ISOLATED_POSTGRES_DB="\$\{CODEX_REAL_GATE_POSTGRES_DB:-\$\{DEV_POSTGRES_DB:-\}\}"/);
+  assert.match(gateSource, /read_env_file_value DEV_POSTGRES_USER/);
+  assert.match(gateSource, /read_env_file_value DEV_POSTGRES_DB/);
+  assert.match(gateSource, /psql -X -q -v ON_ERROR_STOP=1 -U "\$ISOLATED_POSTGRES_USER" -d "\$ISOLATED_POSTGRES_DB"/);
+});
+
+test('selects a healthy loopback endpoint for host-side Codex probes while keeping data-plane traffic isolated', () => {
   assert.match(gateSource, /DEV_PORT="\$\{DEV_NEW_API_PORT:-3001\}"/);
-  assert.match(gateSource, /HOST_BASE_URL="http:\/\/\[::1\]:\$\{DEV_PORT\}"/);
+  assert.match(gateSource, /HOST_BASE_URL=""/);
+  assert.match(gateSource, /HOST_BASE_URL_OVERRIDE="\$\{CODEX_REAL_GATE_HOST_BASE_URL:-\}"/);
+  assert.match(gateSource, /select_host_base_url\(\)/);
+  assert.match(gateSource, /http:\/\/127\.0\.0\.1:\$\{DEV_PORT\}/);
+  assert.match(gateSource, /http:\/\/\[::1\]:\$\{DEV_PORT\}/);
+  assert.match(gateSource, /--connect-timeout 1 --max-time 3/);
   assert.match(gateSource, /NETWORK_BASE_URL="http:\/\/new-api:3000"/);
   assert.match(
     gateSource,
-    /if \[\[ "\$HOST_BASE_URL" != "http:\/\/\[::1\]:\$\{DEV_PORT\}" \|\| "\$NETWORK_BASE_URL" != "http:\/\/new-api:3000" \]\]; then/,
+    /if \[\[ "\$NETWORK_BASE_URL" != "http:\/\/new-api:3000" \]\]; then/,
   );
+  assert.match(gateSource, /refusing non-loopback host base URL/);
+});
+
+test('allows only a same-port loopback override and probes it before use', () => {
+  assert.match(gateSource, /validate_host_base_url_override\(\)/);
+  assert.match(gateSource, /CODEX_REAL_GATE_HOST_BASE_URL must be an http loopback URL using DEV_NEW_API_PORT/);
+  assert.match(gateSource, /"http:\/\/127\.0\.0\.1:\$\{DEV_PORT\}"\|"http:\/\/\[::1\]:\$\{DEV_PORT\}"/);
+  assert.match(gateSource, /CODEX_REAL_GATE_HOST_BASE_URL/);
+  assert.match(gateSource, /healthy isolated host endpoint/);
 });
 
 test('pins the isolated image across stop and restart when no image override is provided', () => {
@@ -27,6 +60,37 @@ test('pins the isolated image across stop and restart when no image override is 
   assert.match(gateSource, /isolated_compose\(\)/);
   assert.match(gateSource, /DEV_NEW_API_IMAGE="\$ISOLATED_APP_IMAGE" DEV_NEW_API_PORT="\$DEV_PORT"/);
   assert.match(gateSource, /gate_target=isolated_%s[\s\S]*image=%s/);
+});
+
+test('pins the current isolated Redis host port across Compose restarts', () => {
+  assert.match(gateSource, /ISOLATED_REDIS_PORT=""/);
+  assert.match(gateSource, /resolve_isolated_redis_port\(\)/);
+  assert.match(gateSource, /CODEX_REAL_GATE_REDIS_PORT/);
+  assert.match(gateSource, /6379\/tcp/);
+  assert.match(gateSource, /DEV_REDIS_PORT="\$ISOLATED_REDIS_PORT"/);
+  assert.match(gateSource, /isolated_redis_port=\$\{ISOLATED_REDIS_PORT\} source=\$\{source\}/);
+});
+
+test('classifies isolated Redis container readiness without dereferencing absent Health state', () => {
+  assert.match(gateSource, /isolated_redis_readiness_state\(\)/);
+  assert.match(gateSource, /\{\{if \.State\.Health\}\}\{\{\.State\.Health\.Status\}\}\{\{else\}\}none\{\{end\}\}/);
+  assert.match(gateSource, /container_missing error=/);
+  assert.match(gateSource, /not_running status=/);
+  assert.match(gateSource, /no_health status=/);
+  assert.match(gateSource, /printf 'healthy\\n'/);
+  assert.match(gateSource, /printf 'unhealthy\\n'/);
+  assert.doesNotMatch(gateSource, /docker inspect -f '\{\{\.State\.Health\.Status\}\}' "\$REDIS_CONTAINER"/);
+});
+
+test('requires explicit opt-in before changing copied channels for dynamic Codex header verification', () => {
+  assert.match(gateSource, /APPLY_TEST_CODEX_PASSTHROUGH="\$\{CODEX_REAL_GATE_APPLY_CODEX_PASSTHROUGH:-0\}"/);
+  assert.match(gateSource, /validate_test_codex_passthrough\(\)/);
+  assert.match(gateSource, /configure_test_codex_passthrough\(\)/);
+  assert.match(gateSource, /if \[\[ "\$APPLY_TEST_CODEX_PASSTHROUGH" != "1" \]\]; then/);
+  assert.match(gateSource, /update channels\s+set param_override = :'codex_param_override'/);
+  assert.match(gateSource, /gate_test_codex_passthrough=true/);
+  assert.match(gateSource, /CODEX_PASSTHROUGH_PARAM_OVERRIDE=.*pass_headers/);
+  assert.match(gateSource, /CODEX_PASSTHROUGH_PARAM_OVERRIDE=.*copy_header/);
 });
 
 test('records only allowlisted transport cause codes', () => {

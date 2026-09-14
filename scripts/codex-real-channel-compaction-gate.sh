@@ -2,22 +2,24 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Docker Desktop can accept an IPv4 loopback connection while delaying the
-# response. Use the published IPv6 loopback endpoint for the host-side Codex
-# CLI probe; data-plane requests remain on the isolated Docker network.
 DEV_PORT="${DEV_NEW_API_PORT:-3001}"
-HOST_BASE_URL="http://[::1]:${DEV_PORT}"
+HOST_BASE_URL=""
+HOST_BASE_URL_OVERRIDE="${CODEX_REAL_GATE_HOST_BASE_URL:-}"
 NETWORK_BASE_URL="http://new-api:3000"
-ISOLATED_NETWORK="new-api-dev-isolated_dev-isolated-network"
+COMPOSE_PROJECT_NAME=""
+ISOLATED_NETWORK=""
 NETWORK_CLIENT_IMAGE="node:24-alpine"
-POSTGRES_CONTAINER="new-api-dev-isolated-postgres-1"
-REDIS_CONTAINER="new-api-dev-isolated-redis-1"
-APP_CONTAINER="new-api-dev-isolated-new-api-1"
+POSTGRES_CONTAINER=""
+REDIS_CONTAINER=""
+APP_CONTAINER=""
+ISOLATED_REDIS_PORT=""
+ISOLATED_POSTGRES_USER="${CODEX_REAL_GATE_POSTGRES_USER:-${DEV_POSTGRES_USER:-}}"
+ISOLATED_POSTGRES_DB="${CODEX_REAL_GATE_POSTGRES_DB:-${DEV_POSTGRES_DB:-}}"
 PRODUCTION_POSTGRES_CONTAINER="${CODEX_REAL_GATE_PRODUCTION_POSTGRES_CONTAINER:-postgres}"
 PRODUCTION_POSTGRES_USER="${CODEX_REAL_GATE_PRODUCTION_POSTGRES_USER:-root}"
 PRODUCTION_POSTGRES_DB="${CODEX_REAL_GATE_PRODUCTION_POSTGRES_DB:-new-api}"
-COMPOSE_FILE="${ROOT_DIR}/deploy/compose/dev-isolated.yml"
-ENV_FILE="${ROOT_DIR}/deploy/env/dev-isolated.env"
+COMPOSE_FILE="${CODEX_REAL_GATE_COMPOSE_FILE:-${ROOT_DIR}/deploy/compose/dev-isolated.yml}"
+ENV_FILE="${CODEX_REAL_GATE_ENV_FILE:-${ROOT_DIR}/deploy/env/dev-isolated.env}"
 MODEL="${CODEX_REAL_GATE_MODEL:-gpt-5.6-sol}"
 EXCLUDED_CHANNEL_IDS="${CODEX_REAL_GATE_EXCLUDE_CHANNEL_IDS:-}"
 TOOL_BYTES="$((33 * 1024 * 1024))"
@@ -78,9 +80,41 @@ LIST_PRODUCTION_CANDIDATES=false
 ISOLATED_APP_STOPPED=false
 ISOLATED_APP_RESTARTED=false
 ISOLATED_APP_IMAGE=""
+APPLY_TEST_CODEX_PASSTHROUGH="${CODEX_REAL_GATE_APPLY_CODEX_PASSTHROUGH:-0}"
+
+CODEX_PASSTHROUGH_PARAM_OVERRIDE='{"operations":[{"mode":"pass_headers","value":["Originator","Session_id","Session-Id","Thread-Id","X-Codex-Beta-Features","X-Codex-Installation-Id","X-Codex-Parent-Thread-Id","X-Codex-Turn-Metadata","X-Codex-Turn-State","X-Codex-Window-Id","X-Client-Request-Id"],"keep_origin":true},{"mode":"copy_header","from":"X-Client-Request-Id","to":"Session_id","keep_origin":true}]}'
 
 umask 077
 cd "$ROOT_DIR"
+
+read_env_file_value() {
+  local key="$1"
+  local line value
+  if [[ ! -r "$ENV_FILE" ]]; then
+    return 1
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    if [[ "$line" == export\ * ]]; then
+      line="${line#export }"
+    fi
+    if [[ "$line" != "$key="* ]]; then
+      continue
+    fi
+    value="${line#*=}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ ${#value} -ge 2 && "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ ${#value} -ge 2 && "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    printf '%s' "$value"
+    return 0
+  done <"$ENV_FILE"
+  return 1
+}
 
 if [[ -n "$EXTERNAL_RESULTS_FILE" ]]; then
   case "$EXTERNAL_RESULTS_FILE" in
@@ -119,11 +153,101 @@ validate_dev_port() {
   fi
 }
 
+validate_host_base_url_override() {
+  HOST_BASE_URL_OVERRIDE="${HOST_BASE_URL_OVERRIDE%/}"
+  if [[ -z "$HOST_BASE_URL_OVERRIDE" ]]; then
+    return 0
+  fi
+  case "$HOST_BASE_URL_OVERRIDE" in
+    "http://127.0.0.1:${DEV_PORT}"|"http://[::1]:${DEV_PORT}")
+      ;;
+    *)
+      echo "CODEX_REAL_GATE_HOST_BASE_URL must be an http loopback URL using DEV_NEW_API_PORT" >&2
+      exit 2
+      ;;
+  esac
+}
+
+select_host_base_url() {
+  local candidate probe_error probe_index=0 source
+  local candidates=("http://127.0.0.1:${DEV_PORT}" "http://[::1]:${DEV_PORT}")
+
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl is required for the isolated host health probe" >&2
+    return 1
+  fi
+
+  if [[ -n "$HOST_BASE_URL_OVERRIDE" ]]; then
+    candidates=("$HOST_BASE_URL_OVERRIDE")
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    probe_error="${TMP_DIR}/host-probe-${probe_index}.error"
+    if curl --silent --show-error --fail --connect-timeout 1 --max-time 3 \
+      --output /dev/null "$candidate/api/healthz" 2>"$probe_error"; then
+      HOST_BASE_URL="$candidate"
+      if [[ "$candidate" == "http://127.0.0.1:${DEV_PORT}" ]]; then
+        source=ipv4
+      elif [[ "$candidate" == "http://[::1]:${DEV_PORT}" ]]; then
+        source=ipv6
+      else
+        source=override
+      fi
+      record_result "host_probe=passed source=${source} port=${DEV_PORT}"
+      return 0
+    fi
+    ((probe_index += 1))
+  done
+
+  if [[ -n "$HOST_BASE_URL_OVERRIDE" ]]; then
+    echo "isolated host healthz probe failed for CODEX_REAL_GATE_HOST_BASE_URL" >&2
+  else
+    echo "isolated host healthz probe failed for IPv4 and IPv6 loopback endpoints" >&2
+  fi
+  return 1
+}
+
 validate_excluded_channel_ids() {
   if [[ -n "$EXCLUDED_CHANNEL_IDS" && ! "$EXCLUDED_CHANNEL_IDS" =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]]; then
     echo "invalid CODEX_REAL_GATE_EXCLUDE_CHANNEL_IDS" >&2
     exit 2
   fi
+}
+
+validate_test_codex_passthrough() {
+  case "$APPLY_TEST_CODEX_PASSTHROUGH" in
+    0|1) ;;
+    *)
+      echo "CODEX_REAL_GATE_APPLY_CODEX_PASSTHROUGH must be 0 or 1" >&2
+      exit 2
+      ;;
+  esac
+}
+
+resolve_isolated_compose_project() {
+  local configured="${DEV_COMPOSE_PROJECT_NAME:-}"
+  local value
+  if [[ -z "$configured" && -f "$ENV_FILE" ]]; then
+    configured="$(read_env_file_value DEV_COMPOSE_PROJECT_NAME || true)"
+  fi
+  configured="${configured:-new-api-dev-isolated}"
+  if [[ ! "$configured" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    echo "invalid DEV_COMPOSE_PROJECT_NAME" >&2
+    exit 2
+  fi
+  COMPOSE_PROJECT_NAME="$configured"
+  if [[ -z "$ISOLATED_POSTGRES_USER" ]]; then
+    value="$(read_env_file_value DEV_POSTGRES_USER || true)"
+    ISOLATED_POSTGRES_USER="${value:-root}"
+  fi
+  if [[ -z "$ISOLATED_POSTGRES_DB" ]]; then
+    value="$(read_env_file_value DEV_POSTGRES_DB || true)"
+    ISOLATED_POSTGRES_DB="${value:-new-api-dev}"
+  fi
+  ISOLATED_NETWORK="${COMPOSE_PROJECT_NAME}_dev-isolated-network"
+  POSTGRES_CONTAINER="${COMPOSE_PROJECT_NAME}-postgres-1"
+  REDIS_CONTAINER="${COMPOSE_PROJECT_NAME}-redis-1"
+  APP_CONTAINER="${COMPOSE_PROJECT_NAME}-new-api-1"
 }
 
 channel_is_explicitly_excluded() {
@@ -239,7 +363,7 @@ stop_production_snapshot() {
 
 start_production_snapshot() {
   local snapshot_id=""
-  local attempt
+  local attempt=0
   if [[ "$PRODUCTION_SNAPSHOT_ACTIVE" == "true" ]]; then
     return 0
   fi
@@ -271,7 +395,8 @@ start_production_snapshot() {
     echo "failed to initialize production snapshot transaction" >&2
     return 1
   fi
-  for attempt in {1..60}; do
+  while (( attempt < 60 )); do
+    ((attempt += 1))
     if [[ -s "$PRODUCTION_SNAPSHOT_OUTPUT" ]]; then
       snapshot_id="$(tr -d '\r\n' <"$PRODUCTION_SNAPSHOT_OUTPUT")"
       if [[ "$snapshot_id" =~ ^[0-9A-Fa-f-]+$ ]]; then
@@ -398,7 +523,7 @@ configure_structure_probe_shapes() {
 
 psql_exec() {
   docker exec -i "$POSTGRES_CONTAINER" \
-    psql -X -q -v ON_ERROR_STOP=1 -U root -d new-api-dev "$@"
+    psql -X -q -v ON_ERROR_STOP=1 -U "$ISOLATED_POSTGRES_USER" -d "$ISOLATED_POSTGRES_DB" "$@"
 }
 
 guard_isolated_redis_is_ephemeral() {
@@ -408,6 +533,24 @@ guard_isolated_redis_is_ephemeral() {
     echo "isolated Redis must not use persistent mounts during the channel gate" >&2
     return 1
   fi
+}
+
+resolve_isolated_redis_port() {
+  local configured source
+  if [[ -n "${CODEX_REAL_GATE_REDIS_PORT:-}" ]]; then
+    configured="$CODEX_REAL_GATE_REDIS_PORT"
+    source=override
+  else
+    configured="$(docker inspect -f '{{range $p, $bindings := .HostConfig.PortBindings}}{{if eq $p "6379/tcp"}}{{(index $bindings 0).HostPort}}{{end}}{{end}}' "$REDIS_CONTAINER" 2>/dev/null || true)"
+    source=container
+  fi
+  require_positive_integer "$configured" "isolated Redis host port"
+  if (( configured > 65535 )); then
+    echo "isolated Redis host port must be at most 65535" >&2
+    return 1
+  fi
+  ISOLATED_REDIS_PORT="$configured"
+  record_result "isolated_redis_port=${ISOLATED_REDIS_PORT} source=${source}"
 }
 
 schema_signature() {
@@ -599,9 +742,28 @@ SQL
   fi
 }
 
+configure_test_codex_passthrough() {
+  local configured_count
+  if [[ "$APPLY_TEST_CODEX_PASSTHROUGH" != "1" ]]; then
+    return 0
+  fi
+
+  psql_exec -v codex_param_override="$CODEX_PASSTHROUGH_PARAM_OVERRIDE" <<SQL
+update channels
+set param_override = :'codex_param_override'
+where id in (${CHANNEL_IDS_SQL});
+SQL
+  configured_count="$(psql_exec -Atc "select count(*) from channels where id in (${CHANNEL_IDS_SQL}) and param_override = '${CODEX_PASSTHROUGH_PARAM_OVERRIDE}';")"
+  if [[ "$configured_count" != "${#CHANNEL_IDS[@]}" ]]; then
+    echo "isolated Codex pass_headers test configuration verification failed" >&2
+    return 1
+  fi
+  record_result "gate_test_codex_passthrough=true channels=${CHANNEL_IDS_SQL} header_names=codex_dynamic_template"
+}
+
 guard_isolated_target() {
-  if [[ "$HOST_BASE_URL" != "http://[::1]:${DEV_PORT}" || "$NETWORK_BASE_URL" != "http://new-api:3000" ]]; then
-    echo "refusing non-isolated base URL" >&2
+  if [[ "$NETWORK_BASE_URL" != "http://new-api:3000" ]]; then
+    echo "refusing non-isolated network base URL" >&2
     exit 2
   fi
   if ! docker network inspect "$ISOLATED_NETWORK" >/dev/null; then
@@ -618,6 +780,18 @@ guard_isolated_target() {
       exit 2
     fi
   done
+  if ! select_host_base_url; then
+    echo "refusing to run without a healthy isolated host endpoint" >&2
+    exit 2
+  fi
+  case "$HOST_BASE_URL" in
+    "http://127.0.0.1:${DEV_PORT}"|"http://[::1]:${DEV_PORT}")
+      ;;
+    *)
+      echo "refusing non-loopback host base URL" >&2
+      exit 2
+      ;;
+  esac
   if [[ -n "${DEV_NEW_API_IMAGE:-}" ]]; then
     ISOLATED_APP_IMAGE="$DEV_NEW_API_IMAGE"
     if ! docker image inspect "$ISOLATED_APP_IMAGE" >/dev/null 2>&1; then
@@ -634,6 +808,10 @@ guard_isolated_target() {
   if ! guard_isolated_redis_is_ephemeral; then
     exit 2
   fi
+  if ! resolve_isolated_redis_port; then
+    echo "refusing to run without a valid isolated Redis host port" >&2
+    exit 2
+  fi
   if ! wait_for_isolated_app_liveness; then
     echo "isolated API healthz check failed" >&2
     exit 2
@@ -645,8 +823,9 @@ guard_isolated_target() {
 }
 
 isolated_compose() {
-  DEV_NEW_API_IMAGE="$ISOLATED_APP_IMAGE" DEV_NEW_API_PORT="$DEV_PORT" \
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+  DEV_NEW_API_IMAGE="$ISOLATED_APP_IMAGE" DEV_NEW_API_PORT="$DEV_PORT" DEV_REDIS_PORT="$ISOLATED_REDIS_PORT" \
+    DEV_COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" \
+    docker compose --project-name "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
 }
 
 reserve_gate_ids() {
@@ -1086,6 +1265,40 @@ stop_isolated_app() {
   ISOLATED_APP_RESTARTED=false
 }
 
+isolated_redis_readiness_state() {
+  local inspection status running health state_error
+  if ! inspection="$(docker inspect -f '{{.State.Status}}|{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.State.Error}}' "$REDIS_CONTAINER" 2>&1)"; then
+    inspection="${inspection//$'\n'/ }"
+    printf 'container_missing error=%s\n' "$inspection"
+    return 10
+  fi
+
+  IFS='|' read -r status running health state_error <<<"$inspection"
+  case "$status:$running:$health" in
+    running:true:healthy)
+      printf 'healthy\n'
+      return 0
+      ;;
+    running:true:unhealthy)
+      printf 'unhealthy\n'
+      return 13
+      ;;
+    running:true:starting)
+      printf 'health_starting\n'
+      return 14
+      ;;
+    running:true:none)
+      printf 'no_health status=%s running=%s\n' "$status" "$running"
+      return 12
+      ;;
+    *)
+      state_error="${state_error//$'\n'/ }"
+      printf 'not_running status=%s running=%s health=%s error=%s\n' "$status" "$running" "$health" "$state_error"
+      return 11
+      ;;
+  esac
+}
+
 restore_gate_database() {
   psql_exec \
     -v gate_user_id="$GATE_USER_ID" \
@@ -1195,14 +1408,24 @@ SQL
 }
 
 restart_isolated_services() {
-  isolated_compose up -d --force-recreate redis >"${TMP_DIR}/recreate-redis.log" 2>&1
+  local readiness_rc=1
+  local readiness_state="not_checked"
+  if ! isolated_compose up -d --force-recreate redis >"${TMP_DIR}/recreate-redis.log" 2>&1; then
+    echo "failed to recreate isolated Redis" >&2
+    sed -n '1,120p' "${TMP_DIR}/recreate-redis.log" >&2
+    return 1
+  fi
   for _ in {1..45}; do
-    if [[ "$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER")" == "healthy" ]]; then
+    if readiness_state="$(isolated_redis_readiness_state)"; then
+      readiness_rc=0
       break
+    else
+      readiness_rc=$?
     fi
     sleep 1
   done
-  if [[ "$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER")" != "healthy" ]]; then
+  if (( readiness_rc != 0 )); then
+    echo "isolated Redis readiness failed: ${readiness_state}" >&2
     return 1
   fi
   isolated_compose up -d --no-deps --force-recreate new-api >"${TMP_DIR}/restart-app.log" 2>&1
@@ -1303,9 +1526,12 @@ main() {
       --list-production-candidates) LIST_PRODUCTION_CANDIDATES=true ;;
     esac
   fi
+  resolve_isolated_compose_project
   validate_model
   validate_dev_port
+  validate_host_base_url_override
   validate_excluded_channel_ids
+  validate_test_codex_passthrough
   if [[ "$LIST_PRODUCTION_CANDIDATES" == "true" ]]; then
     guard_production_postgres_source
     if ! start_production_snapshot; then
@@ -1357,6 +1583,9 @@ main() {
   if ! import_production_gate_channels; then
     return 1
   fi
+  if ! configure_test_codex_passthrough; then
+    return 1
+  fi
   stop_production_snapshot
   if ! configure_fake_upstream_for_gate_channels; then
     echo "failed to apply fake upstream observation config" >&2
@@ -1366,7 +1595,7 @@ main() {
     echo "failed to restart isolated services after channel snapshot" >&2
     return 1
   fi
-  printf 'gate_target=isolated_%s model=%s tool_definition_bytes=%s channels=%s fake_upstream_mode=%s image=%s\n' "$DEV_PORT" "$MODEL" "$TOOL_BYTES" "${CHANNEL_IDS[*]}" "$FAKE_UPSTREAM_MODE" "$ISOLATED_APP_IMAGE"
+  printf 'gate_target=isolated_%s model=%s tool_definition_bytes=%s channels=%s fake_upstream_mode=%s test_codex_passthrough=%s image=%s\n' "$DEV_PORT" "$MODEL" "$TOOL_BYTES" "${CHANNEL_IDS[*]}" "$FAKE_UPSTREAM_MODE" "$APPLY_TEST_CODEX_PASSTHROUGH" "$ISOLATED_APP_IMAGE"
   if [[ "$PREPARE_ONLY" == "true" ]]; then
     printf 'gate_prepare_only=true\n'
     return 0

@@ -107,9 +107,11 @@ test("Compose health checks use a direct lightweight liveness probe", () => {
     assert.match(compose, /\n\s+init: true\n/);
     assert.match(
       compose,
-      /test: \["CMD", "wget", "-q", "-T", "3", "-O", "\/dev\/null", "http:\/\/127\.0\.0\.1:3000\/api\/healthz"\]/
+      /test: \["CMD", "wget", "-q", "-T", "10", "-O", "\/dev\/null", "http:\/\/127\.0\.0\.1:3000\/api\/healthz"\]/
     );
-    assert.match(compose, /timeout: 8s/);
+    assert.match(compose, /timeout: 15s/);
+    assert.match(compose, /retries: 5/);
+    assert.match(compose, /start_period: 60s/);
     assert.doesNotMatch(compose, /CMD-SHELL.*api\/status/);
     assert.doesNotMatch(compose, /wget[^\n]*\|\s*grep/);
   }

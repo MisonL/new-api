@@ -14,6 +14,10 @@ run_case() {
   local state_dir="$1"
   local redis_password="${NEW_API_RECOVERY_REDIS_PASSWORD:-redis-secret-for-test}"
   local postgres_password="${NEW_API_RECOVERY_POSTGRES_PASSWORD:-postgres-secret-for-test}"
+  local caddy_plist="$state_dir/caddy.plist"
+  if [ "${NEW_API_RECOVERY_TEST_CADDY_PLIST_UNSET:-0}" = "1" ]; then
+    caddy_plist=""
+  fi
   local -a recovery_env=(
     "NEW_API_RECOVERY_DOCKER_BIN=$FAKE_DOCKER"
     "NEW_API_RECOVERY_CURL_BIN=$FAKE_CURL"
@@ -22,8 +26,8 @@ run_case() {
     "NEW_API_RECOVERY_HEALTH_SNAPSHOT_FILE=$state_dir/health.snapshot"
     "NEW_API_RECOVERY_DOCKER_SOCKET=$state_dir/docker.sock"
     "NEW_API_RECOVERY_DOCKER_APP_PATH=$state_dir/no-docker.app"
-    "NEW_API_RECOVERY_CADDY_PLIST=$state_dir/caddy.plist"
-    "NEW_API_RECOVERY_LAN_URL=http://10.0.90.200:3000/api/healthz"
+    "NEW_API_RECOVERY_CADDY_PLIST=$caddy_plist"
+    "NEW_API_RECOVERY_LAN_URL=http://lan.example.test:3000/api/healthz"
     "NEW_API_RECOVERY_CADDY_LOG_FILE=$state_dir/caddy.log"
     "NEW_API_RECOVERY_LOG_FILE=$state_dir/recovery.log"
     "NEW_API_RECOVERY_APP_FAILURE_COUNT_FILE=$state_dir/app-failures"
@@ -40,16 +44,16 @@ run_case() {
     "NEW_API_RECOVERY_CURL_MAX_TIME=1"
     "NEW_API_RECOVERY_ATTEMPTS=1"
     "NEW_API_RECOVERY_DELAY_SECONDS=0"
-    "NEW_API_RECOVERY_DOCKER_COMMAND_TIMEOUT_SECONDS=1"
+    "NEW_API_RECOVERY_DOCKER_COMMAND_TIMEOUT_SECONDS=5"
     "NEW_API_RECOVERY_APP_RESTART_FAILURE_THRESHOLD=1"
     "NEW_API_RECOVERY_APP_RESTART_TIMEOUT_SECONDS=1"
-    "NEW_API_RECOVERY_APP_RESTART_STATUS_COMMAND_TIMEOUT_SECONDS=1"
+    "NEW_API_RECOVERY_APP_RESTART_STATUS_COMMAND_TIMEOUT_SECONDS=5"
     "NEW_API_RECOVERY_DOCKER_DESKTOP_COMMAND_TIMEOUT_SECONDS=2"
     "NEW_API_RECOVERY_DOCKER_DESKTOP_COMMAND_GRACE_SECONDS=1"
     "NEW_API_RECOVERY_DOCKER_DESKTOP_STOP_TIMEOUT_SECONDS=1"
     "NEW_API_RECOVERY_DOCKER_DESKTOP_RECOVERY_ATTEMPTS=1"
     "NEW_API_RECOVERY_DOCKER_DESKTOP_RECOVERY_DELAY_SECONDS=0"
-    "NEW_API_RECOVERY_CADDY_LAUNCHCTL_COMMAND_TIMEOUT_SECONDS=1"
+    "NEW_API_RECOVERY_CADDY_LAUNCHCTL_COMMAND_TIMEOUT_SECONDS=5"
     "NEW_API_RECOVERY_CADDY_GRACEFUL_TIMEOUT_SECONDS=1"
     "NEW_API_RECOVERY_CADDY_GRACEFUL_POLL_INTERVAL_SECONDS=0"
     "NEW_API_RECOVERY_CURL_MODE=fail"
@@ -64,7 +68,12 @@ run_case() {
   )
   shift
   mkdir -p "$state_dir"
-  : >"$state_dir/caddy.plist"
+  if [ -n "$caddy_plist" ]; then
+    : >"$caddy_plist"
+  fi
+  if [ -n "${NEW_API_RECOVERY_TEST_ENV_FILE:-}" ]; then
+    recovery_env+=("NEW_API_RECOVERY_ENV_FILE=$NEW_API_RECOVERY_TEST_ENV_FILE")
+  fi
   if [ "${NEW_API_RECOVERY_TEST_NO_REDIS_PASSWORD:-0}" != "1" ]; then
     recovery_env+=("NEW_API_RECOVERY_REDIS_PASSWORD=$redis_password")
   fi
@@ -118,9 +127,11 @@ mkdir -p \
   "$TMP_DIR/postgres-query-failure" \
   "$TMP_DIR/lan-failure" \
   "$TMP_DIR/caddy-failure" \
+  "$TMP_DIR/caddy-threshold" \
   "$TMP_DIR/caddy-graceful" \
   "$TMP_DIR/caddy-fallback" \
   "$TMP_DIR/caddy-job-missing" \
+  "$TMP_DIR/caddy-literal-tilde" \
   "$TMP_DIR/caddy-restart-cooldown" \
   "$TMP_DIR/caddy-restart-circuit" \
   "$TMP_DIR/caddy-rotation" \
@@ -543,11 +554,21 @@ if [ -f "$TMP_DIR/lan-failure/docker.log" ] && rg -q '^restart ' "$TMP_DIR/lan-f
   exit 1
 fi
 
+mkdir -p "$TMP_DIR/lan-disabled"
+run_case "$TMP_DIR/lan-disabled" env \
+  NEW_API_RECOVERY_LAN_URL= \
+  FAKE_APP_CONTAINER_HEALTH=healthy \
+  FAKE_CURL_MODE=success >"$TMP_DIR/lan-disabled/stdout" 2>"$TMP_DIR/lan-disabled/stderr"
+assert_equals "healthy" "$(<"$TMP_DIR/lan-disabled/state")" "empty LAN URL disables the optional probe"
+assert_contains "lan=disabled" "$TMP_DIR/lan-disabled/health.snapshot" "health snapshot records disabled LAN probe"
+
 set +e
 run_case "$TMP_DIR/caddy-failure" env \
   FAKE_CURL_MODE=backend-success-public-fail \
   NEW_API_RECOVERY_DRY_RUN=1 \
-  NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 >"$TMP_DIR/caddy-failure/stdout" 2>"$TMP_DIR/caddy-failure/stderr"
+  NEW_API_RECOVERY_WRITE_DRY_RUN_SNAPSHOT=1 \
+  NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=0 >"$TMP_DIR/caddy-failure/stdout" 2>"$TMP_DIR/caddy-failure/stderr"
 caddy_status=$?
 set -e
 assert_equals 1 "$caddy_status" "Caddy public failure remains observable after dry-run restart planning"
@@ -558,10 +579,27 @@ if [ -f "$TMP_DIR/caddy-failure/docker.log" ] && rg -q '^restart ' "$TMP_DIR/cad
 fi
 
 set +e
+run_case "$TMP_DIR/caddy-threshold" env \
+  FAKE_CURL_MODE=backend-success-public-fail \
+  NEW_API_RECOVERY_DRY_RUN=1 \
+  NEW_API_RECOVERY_WRITE_DRY_RUN_SNAPSHOT=1 \
+  NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=2 >"$TMP_DIR/caddy-threshold/stdout" 2>"$TMP_DIR/caddy-threshold/stderr"
+caddy_threshold_status=$?
+set -e
+assert_equals 1 "$caddy_threshold_status" "Caddy threshold defers restart until its own threshold"
+if [ -f "$TMP_DIR/caddy-threshold/launchctl.log" ] && rg -q '^(kill|kickstart) ' "$TMP_DIR/caddy-threshold/launchctl.log"; then
+  printf 'assertion failed: Caddy restart must wait for CADDY_RESTART_FAILURE_THRESHOLD\n' >&2
+  exit 1
+fi
+assert_contains "failures=1" "$TMP_DIR/caddy-threshold/stdout" "Caddy threshold records the first public failure"
+
+set +e
 run_case "$TMP_DIR/caddy-graceful" env \
   FAKE_CURL_MODE=backend-success-public-fail \
   FAKE_LAUNCHCTL_CHANGE_PID=1 \
-  NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 >"$TMP_DIR/caddy-graceful/stdout" 2>"$TMP_DIR/caddy-graceful/stderr"
+  NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=0 >"$TMP_DIR/caddy-graceful/stdout" 2>"$TMP_DIR/caddy-graceful/stderr"
 caddy_graceful_status=$?
 set -e
 assert_equals 1 "$caddy_graceful_status" "Caddy graceful restart case keeps public failure visible"
@@ -579,6 +617,7 @@ run_case "$TMP_DIR/caddy-graceful" env \
   FAKE_CURL_MODE=backend-success-public-fail \
   FAKE_LAUNCHCTL_CHANGE_PID=1 \
   NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=0 \
   NEW_API_RECOVERY_CADDY_RESTART_MAX_FAILURES=1 >"$TMP_DIR/caddy-graceful/stdout-2" 2>"$TMP_DIR/caddy-graceful/stderr-2"
 caddy_graceful_circuit_status=$?
 set -e
@@ -590,7 +629,8 @@ set +e
 run_case "$TMP_DIR/caddy-fallback" env \
   FAKE_CURL_MODE=backend-success-public-fail \
   FAKE_LAUNCHCTL_CHANGE_PID=0 \
-  NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 >"$TMP_DIR/caddy-fallback/stdout" 2>"$TMP_DIR/caddy-fallback/stderr"
+  NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=0 >"$TMP_DIR/caddy-fallback/stdout" 2>"$TMP_DIR/caddy-fallback/stderr"
 caddy_fallback_status=$?
 set -e
 assert_equals 1 "$caddy_fallback_status" "Caddy fallback case keeps public failure visible"
@@ -604,7 +644,8 @@ run_case "$TMP_DIR/caddy-job-missing" env \
   FAKE_LAUNCHCTL_JOB_DISAPPEARS=1 \
   NEW_API_RECOVERY_CADDY_GRACEFUL_TIMEOUT_SECONDS=1 \
   NEW_API_RECOVERY_CADDY_GRACEFUL_POLL_INTERVAL_SECONDS=0 \
-  NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 >"$TMP_DIR/caddy-job-missing/stdout" 2>"$TMP_DIR/caddy-job-missing/stderr"
+  NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=0 >"$TMP_DIR/caddy-job-missing/stdout" 2>"$TMP_DIR/caddy-job-missing/stderr"
 caddy_job_missing_status=$?
 set -e
 assert_equals 1 "$caddy_job_missing_status" "Caddy missing job remains a public failure"
@@ -612,12 +653,54 @@ assert_contains "kill SIGTERM" "$TMP_DIR/caddy-job-missing/launchctl.log" "missi
 assert_contains "kickstart -k" "$TMP_DIR/caddy-job-missing/launchctl.log" "missing-job path uses kickstart fallback"
 assert_contains "using kickstart fallback" "$TMP_DIR/caddy-job-missing/stderr" "missing-job fallback is observable"
 
+custom_caddy_env="$TMP_DIR/custom-caddy.env"
+custom_caddy_plist="$TMP_DIR/custom-caddy.plist"
+mkdir -p "$TMP_DIR/caddy-custom-env"
+printf '%s\n' \
+  'CADDY_LAUNCHD_LABEL=com.example.custom-caddy' \
+  "CADDY_LAUNCHD_PLIST=$custom_caddy_plist" >"$custom_caddy_env"
+: >"$custom_caddy_plist"
+set +e
+NEW_API_RECOVERY_TEST_ENV_FILE="$custom_caddy_env" \
+NEW_API_RECOVERY_TEST_CADDY_PLIST_UNSET=1 \
+  run_case "$TMP_DIR/caddy-custom-env" env \
+  FAKE_CURL_MODE=backend-success-public-fail \
+  FAKE_LAUNCHCTL_PRINT_MODE=missing \
+  NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=0 >"$TMP_DIR/caddy-custom-env/stdout" 2>"$TMP_DIR/caddy-custom-env/stderr"
+caddy_custom_env_status=$?
+set -e
+assert_equals 1 "$caddy_custom_env_status" "custom Caddy env remains a public failure"
+assert_contains "print gui/$(id -u)/com.example.custom-caddy" "$TMP_DIR/caddy-custom-env/launchctl.log" "watchdog uses the env-file Caddy label"
+assert_contains "bootstrap gui/$(id -u) $custom_caddy_plist" "$TMP_DIR/caddy-custom-env/launchctl.log" "watchdog uses the env-file Caddy plist"
+
+literal_tilde_env="$TMP_DIR/literal-tilde.env"
+literal_tilde_home="$TMP_DIR/literal-tilde-home"
+printf '%s\n' 'CADDY_LAUNCHD_PLIST=~/Library/LaunchAgents/literal-caddy.plist' >"$literal_tilde_env"
+mkdir -p "$literal_tilde_home/Library/LaunchAgents"
+: >"$literal_tilde_home/Library/LaunchAgents/literal-caddy.plist"
+set +e
+HOME="$literal_tilde_home" \
+NEW_API_RECOVERY_TEST_ENV_FILE="$literal_tilde_env" \
+NEW_API_RECOVERY_TEST_CADDY_PLIST_UNSET=1 \
+  run_case "$TMP_DIR/caddy-literal-tilde" env \
+  FAKE_CURL_MODE=backend-success-public-fail \
+  FAKE_LAUNCHCTL_PRINT_MODE=missing \
+  NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=0 >"$TMP_DIR/caddy-literal-tilde/stdout" 2>"$TMP_DIR/caddy-literal-tilde/stderr"
+caddy_literal_tilde_status=$?
+set -e
+assert_equals 1 "$caddy_literal_tilde_status" "literal tilde Caddy env remains a public failure"
+assert_contains "print gui/$(id -u)/literal-caddy" "$TMP_DIR/caddy-literal-tilde/launchctl.log" "watchdog derives the literal tilde Caddy label"
+assert_contains "bootstrap gui/$(id -u) $literal_tilde_home/Library/LaunchAgents/literal-caddy.plist" "$TMP_DIR/caddy-literal-tilde/launchctl.log" "watchdog expands the literal tilde Caddy plist"
+
 set +e
 run_case "$TMP_DIR/caddy-restart-cooldown" env \
   FAKE_CURL_MODE=backend-success-public-fail \
   FAKE_LAUNCHCTL_PRINT_MODE=missing \
   NEW_API_RECOVERY_CADDY_PLIST="$TMP_DIR/caddy-restart-cooldown/missing.plist" \
   NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=0 \
   NEW_API_RECOVERY_CADDY_RESTART_MAX_FAILURES=3 >"$TMP_DIR/caddy-restart-cooldown/stdout" 2>"$TMP_DIR/caddy-restart-cooldown/stderr"
 caddy_restart_failure_status=$?
 set -e
@@ -632,6 +715,7 @@ run_case "$TMP_DIR/caddy-restart-cooldown" env \
   FAKE_LAUNCHCTL_PRINT_MODE=missing \
   NEW_API_RECOVERY_CADDY_PLIST="$TMP_DIR/caddy-restart-cooldown/missing.plist" \
   NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=0 \
   NEW_API_RECOVERY_CADDY_RESTART_MAX_FAILURES=3 >"$TMP_DIR/caddy-restart-cooldown/stdout-2" 2>"$TMP_DIR/caddy-restart-cooldown/stderr-2"
 caddy_restart_cooldown_status=$?
 set -e
@@ -646,6 +730,7 @@ run_case "$TMP_DIR/caddy-restart-circuit" env \
   FAKE_LAUNCHCTL_PRINT_MODE=missing \
   NEW_API_RECOVERY_CADDY_PLIST="$TMP_DIR/caddy-restart-circuit/missing.plist" \
   NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=0 \
   NEW_API_RECOVERY_CADDY_RESTART_MAX_FAILURES=1 >"$TMP_DIR/caddy-restart-circuit/stdout" 2>"$TMP_DIR/caddy-restart-circuit/stderr"
 caddy_restart_circuit_failure_status=$?
 set -e
@@ -657,6 +742,7 @@ run_case "$TMP_DIR/caddy-restart-circuit" env \
   FAKE_LAUNCHCTL_PRINT_MODE=missing \
   NEW_API_RECOVERY_CADDY_PLIST="$TMP_DIR/caddy-restart-circuit/missing.plist" \
   NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD=0 \
+  NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD=0 \
   NEW_API_RECOVERY_CADDY_RESTART_MAX_FAILURES=1 >"$TMP_DIR/caddy-restart-circuit/stdout-2" 2>"$TMP_DIR/caddy-restart-circuit/stderr-2"
 caddy_restart_circuit_status=$?
 set -e

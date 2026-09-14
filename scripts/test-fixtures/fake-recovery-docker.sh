@@ -31,8 +31,6 @@ case "${1:-}" in
     fi
     if [[ "$*" == *"{{.State.Status}}"* ]]; then
       printf '%s\n' "${FAKE_CONTAINER_STATE:-running}"
-    elif [[ "$*" == *"{{range .NetworkSettings.Networks}}"* ]]; then
-      printf '%s\n' "${FAKE_POSTGRES_HOST:-127.0.0.1}"
     else
       container_health="${FAKE_CONTAINER_HEALTH:-unhealthy}"
       if [[ "$*" == *"new-api"* ]] && [ -n "${FAKE_APP_CONTAINER_HEALTH:-}" ]; then
@@ -42,9 +40,6 @@ case "${1:-}" in
     fi
     ;;
   exec)
-    if [[ "$*" == *"pg_isready"* ]]; then
-      exit 0
-    fi
     if [[ "$*" == *"psql"* ]]; then
       if [ "${FAKE_EXPECT_POSTGRES_STDIN:-0}" = "1" ]; then
         if ! IFS= read -r password; then

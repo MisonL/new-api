@@ -44,7 +44,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 git -C "$work_dir" init -q
-export CODEX_HOME=$home_dir
+export CODEX_HOME="$home_dir"
 export NEWAPI_CHANNEL_TOKEN="${NEWAPI_SMOKE_TOKEN}-${channel_id}"
 
 stage=codex_exec

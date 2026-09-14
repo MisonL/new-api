@@ -16,15 +16,30 @@ REDIS_PASSWORD_FILE="${NEW_API_RECOVERY_REDIS_PASSWORD_FILE:-}"
 RECOVERY_ENV_FILE="${NEW_API_RECOVERY_ENV_FILE:-}"
 BACKEND_URL="${NEW_API_RECOVERY_BACKEND_URL:-http://127.0.0.1:13000/api/healthz}"
 PUBLIC_URL="${NEW_API_RECOVERY_PUBLIC_URL:-http://127.0.0.1:3000/api/healthz}"
-LAN_URL="${NEW_API_RECOVERY_LAN_URL:-http://10.0.90.200:3000/api/healthz}"
+LAN_URL="${NEW_API_RECOVERY_LAN_URL:-}"
 CADDY_LOG_FILE="${NEW_API_RECOVERY_CADDY_LOG_FILE:-${HOME}/Library/Application Support/New API/caddy/new-api-macos-tun-caddy-3000.log}"
 RECOVERY_LOG_FILE="${NEW_API_RECOVERY_LOG_FILE:-${HOME}/Library/Application Support/New API/recovery/recovery.log}"
 CURL_BIN="${NEW_API_RECOVERY_CURL_BIN:-}"
 PGREP_BIN="${NEW_API_RECOVERY_PGREP_BIN:-/usr/bin/pgrep}"
 OPEN_BIN="${NEW_API_RECOVERY_OPEN_BIN:-/usr/bin/open}"
 DOCKER_SOCKET="${NEW_API_RECOVERY_DOCKER_SOCKET:-}"
-CADDY_LABEL="${NEW_API_RECOVERY_CADDY_LABEL:-com.new-api.macos-tun.new-api.3000}"
-CADDY_PLIST="${NEW_API_RECOVERY_CADDY_PLIST:-${HOME}/Library/LaunchAgents/${CADDY_LABEL}.plist}"
+CADDY_LABEL="${NEW_API_RECOVERY_CADDY_LABEL:-${CADDY_LAUNCHD_LABEL:-}}"
+CADDY_LABEL_EXPLICIT=0
+if [ -n "${NEW_API_RECOVERY_CADDY_LABEL:-}" ] || [ -n "${CADDY_LAUNCHD_LABEL:-}" ]; then
+  CADDY_LABEL_EXPLICIT=1
+fi
+CADDY_PLIST="${NEW_API_RECOVERY_CADDY_PLIST:-}"
+CADDY_PLIST_EXPLICIT=0
+if [ -n "${NEW_API_RECOVERY_CADDY_PLIST:-}" ]; then
+  CADDY_PLIST_EXPLICIT=1
+fi
+if [ -z "$CADDY_LABEL" ] && [ -n "$CADDY_PLIST" ]; then
+  CADDY_LABEL="$(basename "$CADDY_PLIST" .plist)"
+fi
+CADDY_LABEL="${CADDY_LABEL:-com.new-api.macos-tun.new-api.3000}"
+if [ -z "$CADDY_PLIST" ]; then
+  CADDY_PLIST="${HOME}/Library/LaunchAgents/${CADDY_LABEL}.plist"
+fi
 DOCKER_APP_PATH="${NEW_API_RECOVERY_DOCKER_APP_PATH:-/Applications/Docker.app}"
 STATE_FILE="${NEW_API_RECOVERY_STATE_FILE:-${HOME}/Library/Application Support/New API/recovery/state}"
 STATE_DIR="$(dirname "$STATE_FILE")"
@@ -42,7 +57,7 @@ CADDY_FAILURE_COUNT_FILE="${NEW_API_RECOVERY_CADDY_FAILURE_COUNT_FILE:-${STATE_F
 CADDY_RESTART_FAILURE_COUNT_FILE="${NEW_API_RECOVERY_CADDY_RESTART_FAILURE_COUNT_FILE:-${STATE_FILE}.caddy-restart-failures}"
 CADDY_RESTART_STAMP_FILE="${NEW_API_RECOVERY_CADDY_RESTART_STAMP_FILE:-${STATE_FILE}.caddy-restart-at}"
 LAN_FAILURE_COUNT_FILE="${NEW_API_RECOVERY_LAN_FAILURE_COUNT_FILE:-${STATE_FILE}.lan-failures}"
-PUBLIC_FAILURE_THRESHOLD="${NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD:-2}"
+CADDY_RESTART_FAILURE_THRESHOLD="${NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD:-${NEW_API_RECOVERY_PUBLIC_FAILURE_THRESHOLD:-2}}"
 ATTEMPTS="${NEW_API_RECOVERY_ATTEMPTS:-3}"
 DELAY_SECONDS="${NEW_API_RECOVERY_DELAY_SECONDS:-2}"
 CURL_CONNECT_TIMEOUT="${NEW_API_RECOVERY_CURL_CONNECT_TIMEOUT:-1}"
@@ -56,7 +71,6 @@ RECOVERY_LOG_ROTATION_KEEP="${NEW_API_RECOVERY_LOG_ROTATION_KEEP:-3}"
 APP_RESTART_FAILURE_THRESHOLD="${NEW_API_RECOVERY_APP_RESTART_FAILURE_THRESHOLD:-3}"
 APP_RESTART_MAX_FAILURES="${NEW_API_RECOVERY_APP_RESTART_MAX_FAILURES:-3}"
 DOCKER_RESTART_FAILURE_THRESHOLD="${NEW_API_RECOVERY_DOCKER_RESTART_FAILURE_THRESHOLD:-3}"
-CADDY_RESTART_FAILURE_THRESHOLD="${NEW_API_RECOVERY_CADDY_RESTART_FAILURE_THRESHOLD:-2}"
 CADDY_RESTART_MAX_FAILURES="${NEW_API_RECOVERY_CADDY_RESTART_MAX_FAILURES:-3}"
 CADDY_LAUNCHCTL_COMMAND_TIMEOUT_SECONDS="${NEW_API_RECOVERY_CADDY_LAUNCHCTL_COMMAND_TIMEOUT_SECONDS:-5}"
 CADDY_GRACEFUL_TIMEOUT_SECONDS="${NEW_API_RECOVERY_CADDY_GRACEFUL_TIMEOUT_SECONDS:-30}"
@@ -122,7 +136,6 @@ normalize_positive_uint() {
   printf '%s' "$value"
 }
 
-PUBLIC_FAILURE_THRESHOLD="$(normalize_uint "$PUBLIC_FAILURE_THRESHOLD" 2)"
 ATTEMPTS="$(normalize_uint "$ATTEMPTS" 3)"
 DELAY_SECONDS="$(normalize_uint "$DELAY_SECONDS" 2)"
 CURL_CONNECT_TIMEOUT="$(normalize_positive_uint "$CURL_CONNECT_TIMEOUT" 1 curl-connect-timeout)"
@@ -600,6 +613,51 @@ read_env_value() {
   return 1
 }
 
+resolve_container_names_from_env() {
+  local value
+  if [ -z "${NEW_API_RECOVERY_APP_CONTAINER:-}" ] && [ "$APP_CONTAINER" = "new-api" ]; then
+    value="$(read_env_value NEW_API_CONTAINER_NAME || true)"
+    if [ -n "$value" ]; then
+      APP_CONTAINER="$value"
+    fi
+  fi
+  if [ -z "${NEW_API_RECOVERY_POSTGRES_CONTAINER:-}" ] && [ "$POSTGRES_CONTAINER" = "postgres" ]; then
+    value="$(read_env_value POSTGRES_CONTAINER_NAME || true)"
+    if [ -n "$value" ]; then
+      POSTGRES_CONTAINER="$value"
+    fi
+  fi
+  if [ -z "${NEW_API_RECOVERY_REDIS_CONTAINER:-}" ] && [ "$REDIS_CONTAINER" = "redis" ]; then
+    value="$(read_env_value REDIS_CONTAINER_NAME || true)"
+    if [ -n "$value" ]; then
+      REDIS_CONTAINER="$value"
+    fi
+  fi
+  return 0
+}
+
+resolve_caddy_config_from_env() {
+  local value env_label env_plist
+  if [ "$CADDY_LABEL_EXPLICIT" = "1" ] || [ "$CADDY_PLIST_EXPLICIT" = "1" ]; then
+    return 0
+  fi
+  env_label="$(read_env_value CADDY_LAUNCHD_LABEL || true)"
+  env_plist="$(read_env_value CADDY_LAUNCHD_PLIST || true)"
+  if [[ "$env_plist" == [~]/* ]]; then
+    env_plist="$HOME/${env_plist:2}"
+  fi
+  if [ -n "$env_label" ]; then
+    CADDY_LABEL="$env_label"
+  elif [ -n "$env_plist" ]; then
+    CADDY_LABEL="$(basename "$env_plist" .plist)"
+  fi
+  if [ -n "$env_plist" ]; then
+    CADDY_PLIST="$env_plist"
+  elif [ -n "$env_label" ]; then
+    CADDY_PLIST="${HOME}/Library/LaunchAgents/${CADDY_LABEL}.plist"
+  fi
+}
+
 url_percent_decode() {
   local encoded="$1"
   local decoded=""
@@ -1018,7 +1076,6 @@ start_container_if_needed() {
 
 wait_for_postgres() {
   local attempt
-  local postgres_host=""
   local password=""
   local response=""
   password="$(resolve_postgres_password || true)"
@@ -1027,21 +1084,17 @@ wait_for_postgres() {
     return 1
   fi
   for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do
-    postgres_host="$(run_docker inspect -f '{{range .NetworkSettings.Networks}}{{println .IPAddress}}{{end}}' "$POSTGRES_CONTAINER" 2>/dev/null | sed -n '1p' || true)"
-    if [ -n "$postgres_host" ] && \
-       run_docker exec "$POSTGRES_CONTAINER" pg_isready -h "$postgres_host" -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
-      # shellcheck disable=SC2016
-      response="$(
-        printf '%s\n' "$password" |
-          run_docker exec -i "$POSTGRES_CONTAINER" sh -c \
-            'IFS= read -r PGPASSWORD || exit 1; export PGPASSWORD; exec psql -h "$1" -X -q -tA -v ON_ERROR_STOP=1 -U "$2" -d "$3" -c "SELECT 1"' \
-            sh "$postgres_host" "$POSTGRES_USER" "$POSTGRES_DB" \
-            2>/dev/null || true
-      )"
-      response="${response//[[:space:]]/}"
-      if [ "$response" = "1" ]; then
-        return 0
-      fi
+    # shellcheck disable=SC2016
+    response="$(
+      printf '%s\n' "$password" |
+        run_docker exec -i "$POSTGRES_CONTAINER" sh -c \
+          'IFS= read -r PGPASSWORD || exit 1; export PGPASSWORD; exec psql -h 127.0.0.1 -X -q -tA -v ON_ERROR_STOP=1 -U "$1" -d "$2" -c "SELECT 1"' \
+          sh "$POSTGRES_USER" "$POSTGRES_DB" \
+          2>/dev/null || true
+    )"
+    response="${response//[[:space:]]/}"
+    if [ "$response" = "1" ]; then
+      return 0
     fi
     sleep "$DELAY_SECONDS"
   done
@@ -1479,6 +1532,8 @@ main() {
   local app_failure_count=0
   local public_failure_count=0
   local restart_failures=0
+  resolve_container_names_from_env
+  resolve_caddy_config_from_env
   acquire_lock || return 0
   if ! rotate_recovery_log_if_needed; then
     log "recovery log rotation failed; continuing health checks"
@@ -1621,7 +1676,7 @@ main() {
   SNAPSHOT_FAILURE_REASON="public-failed"
   public_failure_count="$(increment_counter "$CADDY_FAILURE_COUNT_FILE")"
   record_state "public-failed" "public health check failed url=$PUBLIC_URL; backend is healthy failures=$public_failure_count"
-  if [ "$public_failure_count" -lt "$PUBLIC_FAILURE_THRESHOLD" ]; then
+  if [ "$public_failure_count" -lt "$CADDY_RESTART_FAILURE_THRESHOLD" ]; then
     return 1
   fi
   restart_caddy "$public_failure_count" || return 1

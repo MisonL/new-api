@@ -2,7 +2,7 @@
 
 const options = parseArgs(process.argv.slice(2));
 const baseUrl = requiredOption(options, 'base-url').replace(/\/$/, '');
-const token = requiredOption(options, 'token');
+const token = resolveToken(options);
 const channel = requiredOption(options, 'channel');
 const model = requiredOption(options, 'model');
 const scenario = options.scenario ?? 'all';
@@ -233,8 +233,7 @@ async function runToolSearch() {
   const loaded = await postJson('/v1/responses', {
     model,
     input: [
-      ...initialInput,
-      searchCall,
+      ...discovered.output,
       {
         type: 'tool_search_output',
         call_id: searchCall.call_id,
@@ -242,17 +241,24 @@ async function runToolSearch() {
         execution: 'client',
         tools: [
           {
-            type: 'function',
-            name: 'deferred_lookup',
-            description: 'Return a requested deferred smoke-test value.',
-            defer_loading: true,
-            strict: true,
-            parameters: strictStringParameter('value'),
+            type: 'namespace',
+            name: 'smoke_deferred',
+            description: 'Deferred smoke-test tools.',
+            tools: [
+              {
+                type: 'function',
+                name: 'deferred_lookup',
+                description: 'Return a requested deferred smoke-test value.',
+                defer_loading: true,
+                strict: true,
+                parameters: strictStringParameter('value'),
+              },
+            ],
           },
         ],
       },
     ],
-    tool_choice: { type: 'function', name: 'deferred_lookup' },
+    tool_choice: 'auto',
     reasoning: { effort: 'low', summary: 'auto', context: 'all_turns' },
     stream: true,
   });
@@ -270,6 +276,8 @@ async function runToolSearch() {
   return summarize('tool-search', loaded, {
     discovery_output_types: uniqueTypes(discovered.output),
     tool_names: loadedCalls.map((item) => item.name).filter(Boolean),
+    namespaces: loadedCalls.map((item) => item.namespace).filter(Boolean),
+    loaded_dynamic_tool_called: loadedCalls.some((item) => item.name === 'deferred_lookup'),
   });
 }
 
@@ -577,7 +585,7 @@ async function postJson(path, body) {
   if (isJsonBody) {
     payload = parseJson(raw, path);
   } else if (isSseBody || contentType.includes('text/event-stream')) {
-    payload = parseSse(raw);
+    payload = parseSse(raw, path === '/v1/responses');
   } else {
     payload = parseJson(raw, path);
   }
@@ -592,7 +600,7 @@ async function postJson(path, body) {
   return normalized;
 }
 
-function parseSse(raw) {
+function parseSse(raw, rebuildOutputFromEvents = false) {
   const events = [];
   for (const line of raw.split(/\r?\n/)) {
     if (!line.startsWith('data:')) continue;
@@ -611,7 +619,25 @@ function parseSse(raw) {
     }));
     fail(`SSE response contained no terminal event; observed=${JSON.stringify(observed)}`);
   }
-  return terminal.response ?? terminal;
+  const response = terminal.response ?? terminal;
+  if (
+    rebuildOutputFromEvents &&
+    response &&
+    Array.isArray(response.output) &&
+    response.output.length === 0
+  ) {
+    const outputItems = events
+      .filter((event) => event?.type === 'response.output_item.done' && event.item)
+      .map((event) => event.item);
+    if (outputItems.length > 0) {
+      return {
+        ...response,
+        output: outputItems,
+        __smoke_output_reconstructed_from_events: true,
+      };
+    }
+  }
+  return response;
 }
 
 function normalizeResponsePayload(payload) {
@@ -642,6 +668,9 @@ function summarize(name, response, extra = {}) {
     status: response.status,
     duration_ms: response.duration_ms,
     output_types: uniqueTypes(response.output),
+    ...(response.__smoke_output_reconstructed_from_events
+      ? { output_reconstructed_from_events: true }
+      : {}),
     ...extra,
   };
 }
@@ -715,6 +744,22 @@ function requiredOption(parsed, name) {
   const value = parsed[name];
   if (!value) fail(`missing required option --${name}`);
   return value;
+}
+
+function resolveToken(parsed) {
+  const directToken = parsed.token;
+  const tokenEnv = parsed['token-env'];
+  if (directToken && tokenEnv) {
+    fail('use either --token or --token-env, not both');
+  }
+  if (directToken) return directToken;
+  if (!tokenEnv) fail('missing required option --token or --token-env');
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(tokenEnv)) {
+    fail('token environment variable name is invalid');
+  }
+  const token = process.env[tokenEnv];
+  if (!token) fail(`token environment variable ${tokenEnv} is empty`);
+  return token;
 }
 
 function fail(message) {
