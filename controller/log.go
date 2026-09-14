@@ -114,7 +114,7 @@ func GetLogsStat(c *gin.Context) {
 	group := c.Query("group")
 	requestId := c.Query("request_id")
 	upstreamRequestId := c.Query("upstream_request_id")
-	stat, err := model.SumUsedQuotaByFilter(model.LogFilter{
+	stat, err := model.SumUsedQuotaByFilterContext(c.Request.Context(), model.LogFilter{
 		LogType:           logType,
 		StartTimestamp:    startTimestamp,
 		EndTimestamp:      endTimestamp,
@@ -136,9 +136,14 @@ func GetLogsStat(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"quota": stat.Quota,
-			"rpm":   stat.Rpm,
-			"tpm":   stat.Tpm,
+			"quota":              stat.Quota,
+			"rpm":                stat.Rpm,
+			"tpm":                stat.Tpm,
+			"input_tokens":       stat.InputTokens,
+			"cache_read_tokens":  stat.CacheReadTokens,
+			"cache_write_tokens": stat.CacheWriteTokens,
+			"output_tokens":      stat.OutputTokens,
+			"cache_rate":         stat.CacheRate,
 		},
 	})
 	return
@@ -155,7 +160,7 @@ func GetLogsSelfStat(c *gin.Context) {
 	group := c.Query("group")
 	requestId := c.Query("request_id")
 	upstreamRequestId := c.Query("upstream_request_id")
-	quotaNum, err := model.SumUsedQuotaByFilter(model.LogFilter{
+	quotaNum, err := model.SumUsedQuotaByFilterContext(c.Request.Context(), model.LogFilter{
 		LogType:           logType,
 		StartTimestamp:    startTimestamp,
 		EndTimestamp:      endTimestamp,
@@ -176,9 +181,14 @@ func GetLogsSelfStat(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"quota": quotaNum.Quota,
-			"rpm":   quotaNum.Rpm,
-			"tpm":   quotaNum.Tpm,
+			"quota":              quotaNum.Quota,
+			"rpm":                quotaNum.Rpm,
+			"tpm":                quotaNum.Tpm,
+			"input_tokens":       quotaNum.InputTokens,
+			"cache_read_tokens":  quotaNum.CacheReadTokens,
+			"cache_write_tokens": quotaNum.CacheWriteTokens,
+			"output_tokens":      quotaNum.OutputTokens,
+			"cache_rate":         quotaNum.CacheRate,
 			//"token": tokenNum,
 		},
 	})

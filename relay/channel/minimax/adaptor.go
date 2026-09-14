@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
@@ -42,7 +43,7 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 	outputFormat := request.ResponseFormat
 
 	minimaxRequest := MiniMaxTTSRequest{
-		Model: info.OriginModelName,
+		Model: request.Model,
 		Text:  request.Input,
 		VoiceSetting: VoiceSetting{
 			VoiceID: voiceID,
@@ -59,6 +60,12 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 		if err := json.Unmarshal(request.Metadata, &minimaxRequest); err != nil {
 			return nil, fmt.Errorf("error unmarshalling metadata to minimax request: %w", err)
 		}
+	}
+	// The request copy has already been resolved by ModelMappedHelper. Metadata
+	// may contain provider extensions, but must not be allowed to replace the
+	// selected upstream model with the client-facing alias.
+	if strings.TrimSpace(request.Model) != "" {
+		minimaxRequest.Model = request.Model
 	}
 
 	jsonData, err := json.Marshal(minimaxRequest)

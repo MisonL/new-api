@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -224,13 +225,183 @@ func syntheticCompactLegacyStateIDValid(id string) bool {
 	)
 }
 
+// ResponsesInputHasOpaqueEncryptedContent keeps the request-level safety check
+// aware of local synthetic compact state. The common detector only handles
+// known Responses item shapes; this service-level check also treats an
+// encrypted_content field nested in a future item as opaque.
 func ResponsesInputHasOpaqueEncryptedContent(ctx context.Context, input common.RawMessage) (bool, error) {
-	return relaycommon.ResponsesInputHasOpaqueEncryptedContentWithMarkerValidator(
-		input,
-		func(marker string) (bool, error) {
-			return syntheticCompactMarkerReferencesStoredState(ctx, marker)
-		},
-	)
+	trimmed := bytes.TrimSpace(input)
+	if len(trimmed) == 0 {
+		return false, nil
+	}
+	// Walk the existing bounded JSON scanner instead of unmarshalling the whole
+	// input into interface values. Codex compaction retries can carry hundreds
+	// of megabytes of tool history; decoding that history a second time here
+	// would briefly hold both the raw body and a complete object graph in memory.
+	scanner := responsesJSONScanner{data: trimmed}
+	end, opaque, err := scanResponsesValueForOpaqueEncryptedContent(scanner, 0, 0, ctx)
+	if err != nil {
+		return false, fmt.Errorf("parse responses input for encrypted content: %w", err)
+	}
+	if end != len(scanner.data) {
+		return false, fmt.Errorf("parse responses input for encrypted content: trailing JSON data")
+	}
+	return opaque, nil
+}
+
+func scanResponsesValueForOpaqueEncryptedContent(scanner responsesJSONScanner, index, depth int, ctx context.Context) (int, bool, error) {
+	if depth > syntheticCompactJSONNestingDepthMax {
+		return 0, false, fmt.Errorf("JSON nesting exceeds %d", syntheticCompactJSONNestingDepthMax)
+	}
+	index = scanner.skipSpace(index)
+	if index >= len(scanner.data) {
+		return 0, false, fmt.Errorf("JSON value is missing")
+	}
+	switch scanner.data[index] {
+	case '{':
+		return scanResponsesObjectForOpaqueEncryptedContent(scanner, index, depth, ctx)
+	case '[':
+		return scanResponsesArrayForOpaqueEncryptedContent(scanner, index, depth, ctx)
+	case '"':
+		end, ok := scanner.scanString(index)
+		if !ok {
+			return 0, false, fmt.Errorf("invalid JSON string")
+		}
+		return end, false, nil
+	default:
+		end, ok := scanner.scanPrimitive(index)
+		if !ok {
+			return 0, false, fmt.Errorf("invalid JSON value")
+		}
+		return end, false, nil
+	}
+}
+
+func scanResponsesArrayForOpaqueEncryptedContent(scanner responsesJSONScanner, index, depth int, ctx context.Context) (int, bool, error) {
+	index = scanner.skipSpace(index + 1)
+	if index < len(scanner.data) && scanner.data[index] == ']' {
+		return index + 1, false, nil
+	}
+	opaque := false
+	for {
+		end, childOpaque, err := scanResponsesValueForOpaqueEncryptedContent(scanner, index, depth+1, ctx)
+		if err != nil {
+			return 0, false, err
+		}
+		opaque = opaque || childOpaque
+		index = scanner.skipSpace(end)
+		if index >= len(scanner.data) {
+			return 0, false, fmt.Errorf("JSON array is missing terminator")
+		}
+		switch scanner.data[index] {
+		case ',':
+			index = scanner.skipSpace(index + 1)
+			if index >= len(scanner.data) {
+				return 0, false, fmt.Errorf("JSON array has a missing value")
+			}
+		case ']':
+			return index + 1, opaque, nil
+		default:
+			return 0, false, fmt.Errorf("JSON array is missing comma")
+		}
+	}
+}
+
+func scanResponsesObjectForOpaqueEncryptedContent(scanner responsesJSONScanner, index, depth int, ctx context.Context) (int, bool, error) {
+	index = scanner.skipSpace(index + 1)
+	if index < len(scanner.data) && scanner.data[index] == '}' {
+		return index + 1, false, nil
+	}
+	itemType := ""
+	var encryptedContent common.RawMessage
+	opaque := false
+	for {
+		keyStart := index
+		keyEnd, ok := scanner.scanString(index)
+		if !ok {
+			return 0, false, fmt.Errorf("JSON object key is invalid")
+		}
+		key := rawStringField(scanner.data[keyStart:keyEnd])
+		index = scanner.skipSpace(keyEnd)
+		if index >= len(scanner.data) || scanner.data[index] != ':' {
+			return 0, false, fmt.Errorf("JSON object field is missing colon")
+		}
+		valueStart := scanner.skipSpace(index + 1)
+		valueEnd, childOpaque, err := scanResponsesValueForOpaqueEncryptedContent(scanner, valueStart, depth+1, ctx)
+		if err != nil {
+			return 0, false, err
+		}
+		opaque = opaque || childOpaque
+		value := scanner.data[valueStart:valueEnd]
+		switch key {
+		case "type":
+			if len(value) <= responsesOpaqueEncryptedContentCaptureMaxBytes {
+				itemType = strings.TrimSpace(rawStringField(value))
+			}
+		case "encrypted_content":
+			// Keep only a slice into the original body. The value is classified
+			// after the object is complete so field order matches JSON object
+			// semantics when type appears after encrypted_content.
+			encryptedContent = value
+		}
+		index = scanner.skipSpace(valueEnd)
+		if index >= len(scanner.data) {
+			return 0, false, fmt.Errorf("JSON object is missing terminator")
+		}
+		switch scanner.data[index] {
+		case ',':
+			index = scanner.skipSpace(index + 1)
+			if index >= len(scanner.data) {
+				return 0, false, fmt.Errorf("JSON object has a missing field")
+			}
+		case '}':
+			if len(encryptedContent) > 0 {
+				encryptedOpaque, err := responsesRawEncryptedContentIsOpaque(ctx, itemType, encryptedContent)
+				if err != nil {
+					return 0, false, err
+				}
+				opaque = opaque || encryptedOpaque
+			}
+			return index + 1, opaque, nil
+		default:
+			return 0, false, fmt.Errorf("JSON object is missing comma")
+		}
+	}
+}
+
+const responsesOpaqueEncryptedContentCaptureMaxBytes = 64 * 1024
+
+func responsesRawEncryptedContentIsOpaque(ctx context.Context, itemType string, raw common.RawMessage) (bool, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return false, nil
+	}
+	if trimmed[0] != '"' {
+		return true, nil
+	}
+	// A valid synthetic marker is tiny. Once a string exceeds the capture
+	// budget it cannot be a usable local marker, so classify it as opaque
+	// without allocating a second copy of the payload.
+	if len(trimmed) > responsesOpaqueEncryptedContentCaptureMaxBytes {
+		return true, nil
+	}
+	var marker string
+	if err := common.Unmarshal(trimmed, &marker); err != nil {
+		return true, err
+	}
+	if relaycommon.IsResponsesCompactionItemType(itemType) {
+		id, valid, err := syntheticCompactIDFromMarker(ctx, marker)
+		if err != nil {
+			return false, err
+		}
+		if valid {
+			return strings.HasPrefix(id, nativeOpaqueCompactIDPrefix), nil
+		}
+		if strings.HasPrefix(strings.TrimSpace(marker), syntheticCompactMarkerPrefix) {
+			return true, nil
+		}
+	}
+	return relaycommon.ResponsesEncryptedContentValueIsOpaque(marker), nil
 }
 
 func NormalizeContextCompactionForResponsesRequest(ctx context.Context, request dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, relaycommon.ResponsesContextCompactionNormalizeResult, error) {
@@ -295,13 +466,23 @@ func HasLocalSyntheticCompactReferenceWithContext(ctx context.Context, req dto.O
 		return true, nil
 	}
 	for _, marker := range syntheticCompactMarkers(req.Input) {
-		if ok, err := syntheticCompactMarkerReferencesStoredState(ctx, marker); err != nil {
+		if _, ok, err := syntheticCompactIDFromMarker(ctx, marker); err != nil {
 			return false, err
 		} else if ok {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// HasLocalSyntheticCompactPreviousResponseIDWithContext distinguishes a local
+// synthetic previous_response_id from a marker embedded in the input history.
+// The compact endpoint must preserve input compaction items unless the caller
+// is explicitly continuing a local synthetic state; marker-only input there is
+// still valid native compaction history.
+func HasLocalSyntheticCompactPreviousResponseIDWithContext(ctx context.Context, req dto.OpenAIResponsesRequest) (bool, error) {
+	req.Input = nil
+	return HasLocalSyntheticCompactReferenceWithContext(ctx, req)
 }
 
 func SyntheticCompactScopeFromSource(source SyntheticCompactScopeSource) SyntheticCompactStateScope {
@@ -312,7 +493,7 @@ func SyntheticCompactScopeFromSource(source SyntheticCompactScopeSource) Synthet
 }
 
 func IsNativeOpaqueCompactReference(id string) bool {
-	return nativeOpaqueCompactIDInstance(id) != ""
+	return strings.HasPrefix(strings.TrimSpace(id), nativeOpaqueCompactIDPrefix)
 }
 
 func HasLocalNativeOpaqueCompactReference(ctx context.Context, req dto.OpenAIResponsesRequest) (bool, error) {
@@ -531,7 +712,7 @@ func RestoreNativeOpaquePreviousResponseID(ctx context.Context, scope SyntheticC
 		RouteDecision: "unchanged",
 	}
 	id := strings.TrimSpace(req.PreviousResponseID)
-	if !IsNativeOpaqueCompactReference(id) {
+	if !strings.HasPrefix(id, nativeOpaqueCompactIDPrefix) {
 		return req, false, info, nil
 	}
 	state, found, err := loadSyntheticCompactState(ctx, id)
@@ -629,14 +810,7 @@ func hasLocalNativeOpaqueCompactReference(ctx context.Context, req dto.OpenAIRes
 		if err != nil {
 			return false, err
 		}
-		if !ok || !IsNativeOpaqueCompactReference(id) {
-			continue
-		}
-		_, found, err := loadSyntheticCompactState(ctx, id)
-		if err != nil {
-			return false, err
-		}
-		if found {
+		if ok && IsNativeOpaqueCompactReference(id) {
 			return true, nil
 		}
 	}

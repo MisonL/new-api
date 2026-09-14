@@ -1,6 +1,10 @@
 package operation_setting
 
-import "github.com/QuantumNous/new-api/setting/config"
+import (
+	"strings"
+
+	"github.com/QuantumNous/new-api/setting/config"
+)
 
 const (
 	ResponsesEncryptedContentAffinityRuleName       = "responses encrypted content"
@@ -41,18 +45,37 @@ type ChannelAffinitySetting struct {
 }
 
 var CodexCliPassThroughHeaders = []string{
-	"User-Agent",
 	"Originator",
 	"Session_id",
 	"Session-Id",
 	"Thread-Id",
 	"X-Codex-Beta-Features",
+	"X-Codex-Installation-Id",
+	"X-Codex-Parent-Thread-Id",
 	"X-Codex-Turn-Metadata",
+	"X-Codex-Turn-State",
 	"X-Codex-Window-Id",
 	"X-Client-Request-Id",
 }
 
 var CodexDesktopPassThroughHeaders = append([]string(nil), CodexCliPassThroughHeaders...)
+
+// IsCodexDynamicRequestHeader identifies request metadata that must be
+// forwarded from the real Codex client when a Codex header profile is used.
+// Originator is intentionally excluded: it is a static profile identity, while
+// session/thread/request identifiers and X-Codex-* values are per-request.
+func IsCodexDynamicRequestHeader(headerName string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(headerName))
+	if strings.HasPrefix(normalized, "x-codex-") {
+		return true
+	}
+	switch normalized {
+	case "session_id", "session-id", "thread-id", "x-client-request-id":
+		return true
+	default:
+		return false
+	}
+}
 
 var ClaudeCliPassThroughHeaders = []string{
 	"X-Claude-Code-Session-Id",

@@ -23,15 +23,6 @@ type opaqueValidationRequestBody struct {
 	readCalls int
 }
 
-func setValidRequestTestGinMode(t *testing.T) {
-	t.Helper()
-	previousGinMode := gin.Mode()
-	gin.SetMode(gin.TestMode)
-	t.Cleanup(func() {
-		gin.SetMode(previousGinMode)
-	})
-}
-
 func (b *opaqueValidationRequestBody) Read(_ []byte) (int, error) {
 	b.readCalls++
 	return 0, errors.New("opaque request HTTP body must not be decoded during validation")
@@ -67,7 +58,7 @@ func (s *opaqueValidationBodyStorage) IsDisk() bool {
 }
 
 func TestGetAndValidateResponsesCompactionRequestRequiresInput(t *testing.T) {
-	setValidRequestTestGinMode(t)
+	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name string
@@ -106,7 +97,7 @@ func TestGetAndValidateResponsesCompactionRequestRequiresInput(t *testing.T) {
 }
 
 func TestGetAndValidateResponsesCompactionRequestAcceptsNonEmptyInput(t *testing.T) {
-	setValidRequestTestGinMode(t)
+	gin.SetMode(gin.TestMode)
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -124,7 +115,7 @@ func TestGetAndValidateResponsesCompactionRequestAcceptsNonEmptyInput(t *testing
 }
 
 func TestGetAndValidateResponsesRequestRejectsMalformedAdditionalTools(t *testing.T) {
-	setValidRequestTestGinMode(t)
+	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(
@@ -141,7 +132,10 @@ func TestGetAndValidateResponsesRequestRejectsMalformedAdditionalTools(t *testin
 }
 
 func TestGetAndValidateRequestUsesOpaqueResponsesMetadataWithoutDecodingBody(t *testing.T) {
-	setValidRequestTestGinMode(t)
+	previousGinMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousGinMode) })
+
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	requestBody := &opaqueValidationRequestBody{}
@@ -173,7 +167,10 @@ func TestGetAndValidateRequestUsesOpaqueResponsesMetadataWithoutDecodingBody(t *
 }
 
 func TestGetAndValidateRequestUsesOpaqueResponsesCompactMetadataWithoutDecodingBody(t *testing.T) {
-	setValidRequestTestGinMode(t)
+	previousGinMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousGinMode) })
+
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	requestBody := &opaqueValidationRequestBody{}
@@ -203,8 +200,61 @@ func TestGetAndValidateRequestUsesOpaqueResponsesCompactMetadataWithoutDecodingB
 	require.Zero(t, requestBody.readCalls)
 }
 
+func TestGetAndValidateResponsesRequestAcceptsOfficialToolSearchContinuation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/responses",
+		strings.NewReader(`{
+			"model":"gpt-5.6-sol",
+			"input":[
+				{"type":"tool_search_call","id":"tsc_search","call_id":"call_search","execution":"client","arguments":"{\"query\":\"calendar\"}"},
+				{"type":"tool_search_output","id":"tso_search","call_id":"call_search","status":"completed","execution":"client","tools":[
+					{"type":"namespace","name":"mcp__calendar","tools":[{"type":"function","name":"create_event","defer_loading":true,"parameters":{"type":"object"}}]}
+				]}
+			]
+		}`),
+	)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	request, err := GetAndValidateResponsesRequest(ctx)
+
+	require.NoError(t, err)
+	effectiveTools, err := request.EffectiveTools()
+	require.NoError(t, err)
+	require.Len(t, effectiveTools, 1)
+	hasToolSearch, err := relaycommon.ResponsesRequestHasToolSearch(request)
+	require.NoError(t, err)
+	require.True(t, hasToolSearch)
+	hasNamespaceTools, err := relaycommon.ResponsesRequestHasNamespaceTools(request)
+	require.NoError(t, err)
+	require.True(t, hasNamespaceTools)
+}
+
+func TestGetAndValidateResponsesRequestRejectsMalformedToolSearchOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/responses",
+		strings.NewReader(`{
+			"model":"gpt-5.6-sol",
+			"input":[{"type":"tool_search_output","call_id":"call_search","status":"completed","execution":"client","tools":{"type":"function","name":"create_event"}}]
+		}`),
+	)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	request, err := GetAndValidateResponsesRequest(ctx)
+
+	require.Nil(t, request)
+	require.ErrorContains(t, err, "tool_search_output.tools must be an array")
+}
+
 func TestGetAndValidateResponsesCompactionRequestRejectsMalformedAdditionalTools(t *testing.T) {
-	setValidRequestTestGinMode(t)
+	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(
@@ -220,8 +270,59 @@ func TestGetAndValidateResponsesCompactionRequestRejectsMalformedAdditionalTools
 	require.ErrorContains(t, err, "additional_tools.tools must be an array")
 }
 
+func TestGetAndValidateResponsesCompactionRequestAcceptsOfficialToolSearchContinuation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/responses/compact",
+		strings.NewReader(`{
+			"model":"gpt-5.6-sol-openai-compact",
+			"input":[
+				{"type":"tool_search_call","id":"tsc_search","call_id":"call_search","execution":"client","arguments":"{\"query\":\"calendar\"}"},
+				{"type":"tool_search_output","id":"tso_search","call_id":"call_search","status":"completed","execution":"client","tools":[
+					{"type":"namespace","name":"mcp__calendar","tools":[{"type":"function","name":"create_event","defer_loading":true,"parameters":{"type":"object"}}]}
+				]}
+			]
+		}`),
+	)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	request, err := GetAndValidateResponsesCompactionRequest(ctx)
+
+	require.NoError(t, err)
+	converted := request.ToResponsesRequest()
+	effectiveTools, err := converted.EffectiveTools()
+	require.NoError(t, err)
+	require.Len(t, effectiveTools, 1)
+	hasNamespaceTools, err := relaycommon.ResponsesRequestHasNamespaceTools(converted)
+	require.NoError(t, err)
+	require.True(t, hasNamespaceTools)
+}
+
+func TestGetAndValidateResponsesCompactionRequestRejectsMalformedToolSearchOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/responses/compact",
+		strings.NewReader(`{
+			"model":"gpt-5.6-sol-openai-compact",
+			"input":[{"type":"tool_search_output","call_id":"call_search","status":"completed","execution":"client","tools":{"type":"function","name":"create_event"}}]
+		}`),
+	)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	request, err := GetAndValidateResponsesCompactionRequest(ctx)
+
+	require.Nil(t, request)
+	require.ErrorContains(t, err, "tool_search_output.tools must be an array")
+}
+
 func TestGetAndValidateResponsesCompactionRequestPreservesSub2APICompatibleFields(t *testing.T) {
-	setValidRequestTestGinMode(t)
+	gin.SetMode(gin.TestMode)
 
 	body := `{
 		"model":"gpt-5.5",
@@ -281,7 +382,7 @@ func TestGetAndValidateResponsesCompactionRequestPreservesSub2APICompatibleField
 }
 
 func TestResponsesCompactionRequestKeepsKnownFieldsFilterableAfterConversion(t *testing.T) {
-	setValidRequestTestGinMode(t)
+	gin.SetMode(gin.TestMode)
 
 	body := `{
 		"model":"gpt-5.5",
@@ -316,7 +417,7 @@ func TestResponsesCompactionRequestKeepsKnownFieldsFilterableAfterConversion(t *
 }
 
 func TestResponsesCompactionTokenMetaExcludesPromptCacheKey(t *testing.T) {
-	setValidRequestTestGinMode(t)
+	gin.SetMode(gin.TestMode)
 
 	body := `{
 		"model":"gpt-5.5",

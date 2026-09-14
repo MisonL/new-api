@@ -3,6 +3,7 @@ package dto
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
@@ -91,6 +92,7 @@ type ChatCompletionsStreamResponseChoice struct {
 type ChatCompletionsStreamResponseChoiceDelta struct {
 	Content          *string            `json:"content,omitempty"`
 	ReasoningContent *string            `json:"reasoning_content,omitempty"`
+	ThinkingContent  *string            `json:"thinking_content,omitempty"`
 	Reasoning        *string            `json:"reasoning,omitempty"`
 	Role             string             `json:"role,omitempty"`
 	ToolCalls        []ToolCallResponse `json:"tool_calls,omitempty"`
@@ -108,11 +110,14 @@ func (c *ChatCompletionsStreamResponseChoiceDelta) GetContentString() string {
 }
 
 func (c *ChatCompletionsStreamResponseChoiceDelta) GetReasoningContent() string {
-	if c.ReasoningContent == nil && c.Reasoning == nil {
+	if c.ReasoningContent == nil && c.ThinkingContent == nil && c.Reasoning == nil {
 		return ""
 	}
 	if c.ReasoningContent != nil {
 		return *c.ReasoningContent
+	}
+	if c.ThinkingContent != nil {
+		return *c.ThinkingContent
 	}
 	return *c.Reasoning
 }
@@ -361,7 +366,23 @@ func (o *OpenAIResponsesResponse) GetSize() string {
 }
 
 type IncompleteDetails struct {
-	Reasoning string `json:"reasoning"`
+	// Reason is the standard Responses API incomplete reason, for example
+	// max_output_tokens or content_filter. Reasoning remains for compatibility
+	// with legacy upstream payloads that used a non-standard field.
+	Reason    string `json:"reason,omitempty"`
+	Reasoning string `json:"reasoning,omitempty"`
+}
+
+// EffectiveReason returns the standard incomplete reason and falls back to
+// the legacy reasoning field used by older upstream Responses implementations.
+func (d *IncompleteDetails) EffectiveReason() string {
+	if d == nil {
+		return ""
+	}
+	if reason := strings.TrimSpace(d.Reason); reason != "" {
+		return reason
+	}
+	return strings.TrimSpace(d.Reasoning)
 }
 
 type ResponsesOutput struct {
@@ -398,6 +419,7 @@ func ResponsesArgumentsString(arguments json.RawMessage) string {
 type ResponsesOutputContent struct {
 	Type        string        `json:"type"`
 	Text        string        `json:"text"`
+	Refusal     string        `json:"refusal,omitempty"`
 	Annotations []interface{} `json:"annotations"`
 }
 
@@ -426,11 +448,15 @@ const (
 
 // ResponsesStreamResponse 用于处理 /v1/responses 流式响应
 type ResponsesStreamResponse struct {
-	Type     string                   `json:"type"`
-	Response *OpenAIResponsesResponse `json:"response,omitempty"`
-	Error    *types.OpenAIError       `json:"error,omitempty"`
-	Delta    string                   `json:"delta,omitempty"`
-	Item     *ResponsesOutput         `json:"item,omitempty"`
+	Type      string                   `json:"type"`
+	Response  *OpenAIResponsesResponse `json:"response,omitempty"`
+	Error     *types.OpenAIError       `json:"error,omitempty"`
+	Delta     string                   `json:"delta,omitempty"`
+	Text      string                   `json:"text,omitempty"`
+	Arguments string                   `json:"arguments,omitempty"`
+	CallId    string                   `json:"call_id,omitempty"`
+	Name      string                   `json:"name,omitempty"`
+	Item      *ResponsesOutput         `json:"item,omitempty"`
 	// - response.function_call_arguments.delta
 	// - response.function_call_arguments.done
 	OutputIndex  *int                           `json:"output_index,omitempty"`

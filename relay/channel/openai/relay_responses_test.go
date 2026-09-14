@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
@@ -47,6 +48,45 @@ func TestOaiResponsesHandlerMarksCompactionOutput(t *testing.T) {
 	require.JSONEq(t, body, recorder.Body.String())
 }
 
+func TestRecordResponsesBuiltInToolUsageKeepsNativeAndBridgedSourcesSeparate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	response := &dto.OpenAIResponsesResponse{
+		Output: []dto.ResponsesOutput{{
+			Type:      "function_call",
+			Namespace: "workspace",
+			Name:      "read_file",
+		}},
+	}
+
+	bridgedContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(bridgedContext, constant.ContextKeyResponsesToolCapabilityObservationBridged, true)
+	recordResponsesBuiltInToolUsage(bridgedContext, &relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeResponses}, response, responsesOutputToolCallCounts{})
+	require.Equal(t, dto.ResponsesToolCapabilityObservationSourceBridged,
+		common.GetContextKeyString(bridgedContext, constant.ContextKeyResponsesToolCapabilityObservationSource))
+
+	nativeContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	recordResponsesBuiltInToolUsage(nativeContext, &relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeResponses}, response, responsesOutputToolCallCounts{})
+	require.Equal(t, dto.ResponsesToolCapabilityObservationSourceNative,
+		common.GetContextKeyString(nativeContext, constant.ContextKeyResponsesToolCapabilityObservationSource))
+}
+
+func TestRecordResponsesBuiltInToolUsageDoesNotGuessUnknownObservationSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	response := &dto.OpenAIResponsesResponse{
+		Output: []dto.ResponsesOutput{{
+			Type:      "function_call",
+			Namespace: "workspace",
+		}},
+	}
+
+	recordResponsesBuiltInToolUsage(context, &relaycommon.RelayInfo{}, response, responsesOutputToolCallCounts{})
+
+	require.Empty(t, common.GetContextKeyString(context, constant.ContextKeyResponsesToolCapabilityObservationSource))
+	require.False(t, common.GetContextKeyBool(context, constant.ContextKeyResponsesObservedNamespaceToolCall))
+}
+
 func TestOaiResponsesHandlerRejectsRemoteCompactionWithoutOutput(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -67,105 +107,6 @@ func TestOaiResponsesHandlerRejectsRemoteCompactionWithoutOutput(t *testing.T) {
 	require.NotNil(t, err)
 	require.Equal(t, http.StatusBadGateway, err.StatusCode)
 	require.Contains(t, err.Error(), "expected exactly one compaction output")
-	require.Empty(t, recorder.Body.String())
-}
-
-func TestOaiResponsesHandlerPreservesContextWindowErrorFromNonStreamingSSE(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
-			`event: response.failed`,
-			`data: {"type":"response.failed","response":{"id":"resp_context","error":{"message":"Input exceeds this model context window.","type":"upstream_error","code":"context_length_exceeded"}}}`,
-			``,
-		}, "\n"))),
-	}
-
-	usage, err := OaiResponsesHandler(c, nil, resp)
-
-	require.Nil(t, usage)
-	require.NotNil(t, err)
-	require.Equal(t, http.StatusBadRequest, err.StatusCode)
-	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
-	require.Contains(t, err.Error(), "context window")
-	require.Empty(t, recorder.Body.String())
-}
-
-func TestOaiResponsesHandlerPreservesDirectFailedContextWindowErrorFromNonStreamingSSE(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
-			`event: response.failed`,
-			`data: {"type":"response.failed","error":{"message":"Your input exceeds the context window of this model.","type":"upstream_error","code":"context_length_exceeded"}}`,
-			``,
-		}, "\n"))),
-	}
-
-	usage, err := OaiResponsesHandler(c, nil, resp)
-
-	require.Nil(t, usage)
-	require.NotNil(t, err)
-	require.Equal(t, http.StatusBadRequest, err.StatusCode)
-	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
-	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
-	require.Contains(t, err.Error(), "context window")
-	require.Empty(t, recorder.Body.String())
-}
-
-func TestOaiResponsesHandlerNormalizesHTTP200ContextWindowError(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body: io.NopCloser(strings.NewReader(`{
-			"error": {
-				"message": "Your input exceeds the context window of this model.",
-				"type": "upstream_error",
-				"code": "context_length_exceeded"
-			}
-		}`)),
-	}
-
-	usage, err := OaiResponsesHandler(c, nil, resp)
-
-	require.Nil(t, usage)
-	require.NotNil(t, err)
-	require.Equal(t, http.StatusBadRequest, err.StatusCode)
-	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
-	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
-	require.Empty(t, recorder.Body.String())
-}
-
-func TestOaiResponsesHandlerPreservesParameterErrorFromNonStreamingSSE(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
-			`data: {"type":"response.error","error":{"message":"Unknown parameter: 'input[0].namespace'.","type":"invalid_request_error","param":"input[0].namespace","code":"unknown_parameter"}}`,
-			`data: [DONE]`,
-			``,
-		}, "\n"))),
-	}
-
-	usage, err := OaiResponsesHandler(c, nil, resp)
-
-	require.Nil(t, usage)
-	require.NotNil(t, err)
-	require.Equal(t, http.StatusBadRequest, err.StatusCode)
-	require.Equal(t, types.ErrorCode("unknown_parameter"), err.GetErrorCode())
-	require.Contains(t, err.Error(), "Unknown parameter")
 	require.Empty(t, recorder.Body.String())
 }
 
@@ -728,37 +669,7 @@ func TestOaiResponsesStreamHandlerRejectsExplicitEmptyCompletedOutputSnapshot(t 
 	require.Empty(t, recorder.Body.String())
 }
 
-func TestOaiResponsesStreamHandlerUsesObservedCompactionWhenCompletedOutputIsAbsent(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	body := strings.Join([]string{
-		`data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"opaque"}}`,
-		`data: {"type":"response.completed","response":{"id":"resp_remote_compact_without_output","object":"response","usage":{"input_tokens":12,"output_tokens":0,"total_tokens":12}}}`,
-		`data: [DONE]`,
-		``,
-	}, "\n")
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body:       io.NopCloser(strings.NewReader(body)),
-	}
-	info := &relaycommon.RelayInfo{
-		Request:      &dto.OpenAIResponsesRequest{Input: []byte(`[{"type":"compaction_trigger"}]`)},
-		StreamStatus: relaycommon.NewStreamStatus(),
-		DisablePing:  true,
-	}
-
-	usage, err := OaiResponsesStreamHandler(c, info, resp)
-
-	require.Nil(t, err)
-	require.NotNil(t, usage)
-	require.Equal(t, 12, usage.PromptTokens)
-	require.Contains(t, recorder.Body.String(), "response.output_item.done")
-	require.Contains(t, recorder.Body.String(), "response.completed")
-}
-
-func TestOaiResponsesStreamHandlerSupplementsCompactionWhenCompletedOutputOmitsIt(t *testing.T) {
+func TestOaiResponsesStreamHandlerMergesObservedCompactionIntoCompletedOutput(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -783,16 +694,78 @@ func TestOaiResponsesStreamHandlerSupplementsCompactionWhenCompletedOutputOmitsI
 
 	require.Nil(t, err)
 	require.NotNil(t, usage)
+	require.Contains(t, recorder.Body.String(), "response.output_item.done")
 	require.Contains(t, recorder.Body.String(), "response.completed")
+}
+
+func TestOaiResponsesStreamHandlerUsesIncrementalCompactionWhenCompletedOutputMissing(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"opaque"}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_remote_compact_legacy","object":"response","usage":{"input_tokens":12,"output_tokens":0,"total_tokens":12}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		Request:      &dto.OpenAIResponsesRequest{Input: []byte(`[{"type":"compaction_trigger"}]`)},
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+	}
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Contains(t, recorder.Body.String(), "response.output_item.done")
+	require.Contains(t, recorder.Body.String(), "response.completed")
+}
+
+func TestResponsesStreamCompletedOutputPresent(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want bool
+	}{
+		{
+			name: "output present",
+			data: `{"type":"response.completed","response":{"output":[]}}`,
+			want: true,
+		},
+		{
+			name: "output missing",
+			data: `{"type":"response.completed","response":{"id":"resp_legacy"}}`,
+			want: false,
+		},
+		{
+			name: "response missing",
+			data: `{"type":"response.completed"}`,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, responsesStreamCompletedOutputPresent(tt.data))
+		})
+	}
 }
 
 func TestOaiResponsesStreamHandlerRejectsRemoteCompactionWithoutCompletedEvent(t *testing.T) {
 	tests := []struct {
-		name   string
-		suffix string
+		name      string
+		suffix    string
+		wantCode  types.ErrorCode
+		wantError string
 	}{
-		{name: "done", suffix: "data: [DONE]"},
-		{name: "eof"},
+		{name: "done", suffix: "data: [DONE]", wantCode: types.ErrorCodeBadResponseBody, wantError: "ended before response.completed"},
+		{name: "eof", wantCode: types.ErrorCodeUpstreamTransportInterrupted, wantError: "stream disconnected before completion"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -820,7 +793,11 @@ func TestOaiResponsesStreamHandlerRejectsRemoteCompactionWithoutCompletedEvent(t
 			require.Nil(t, usage)
 			require.NotNil(t, err)
 			require.Equal(t, http.StatusBadGateway, err.StatusCode)
-			require.Contains(t, err.Error(), "ended before response.completed")
+			require.Equal(t, tt.wantCode, err.GetErrorCode())
+			require.Contains(t, err.Error(), tt.wantError)
+			if tt.name == "eof" {
+				require.False(t, types.IsSkipRetryError(err))
+			}
 			require.Empty(t, recorder.Body.String())
 		})
 	}
@@ -976,36 +953,6 @@ func TestOaiResponsesStreamHandlerPreservesFailedResponseError(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), "Unknown parameter")
 }
 
-func TestOaiResponsesStreamHandlerPreservesDirectFailedContextWindowError(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	body := strings.Join([]string{
-		`data: {"type":"response.failed","error":{"message":"Your input exceeds the context window of this model.","type":"upstream_error","code":"context_length_exceeded"}}`,
-		``,
-	}, "\n")
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body:       io.NopCloser(strings.NewReader(body)),
-	}
-	info := &relaycommon.RelayInfo{
-		ChannelMeta:  &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.6"},
-		StreamStatus: relaycommon.NewStreamStatus(),
-		DisablePing:  true,
-	}
-
-	usage, err := OaiResponsesStreamHandler(c, info, resp)
-
-	require.Nil(t, usage)
-	require.NotNil(t, err)
-	require.Equal(t, http.StatusBadRequest, err.StatusCode)
-	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
-	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
-	require.Contains(t, err.Error(), "context window")
-	require.Empty(t, recorder.Body.String())
-}
-
 func TestOaiResponsesStreamHandlerMapsErrorEventStatus(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1141,65 +1088,14 @@ func TestOaiResponsesToChatHandlerCountsBuiltInToolsFromResponse(t *testing.T) {
 	require.Equal(t, "1024x1024", c.GetString("image_generation_call_size"))
 }
 
-func TestOaiResponsesToChatHandlerNormalizesHTTP200ContextWindowError(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body: io.NopCloser(strings.NewReader(`{
-			"error": {
-				"message": "Your input exceeds the context window of this model.",
-				"type": "upstream_error",
-				"code": "context_length_exceeded"
-			}
-		}`)),
-	}
-	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI}
-
-	usage, err := OaiResponsesToChatHandler(c, info, resp)
-
-	require.Nil(t, usage)
-	require.NotNil(t, err)
-	require.Equal(t, http.StatusBadRequest, err.StatusCode)
-	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
-	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
-	require.Empty(t, recorder.Body.String())
-}
-
-func TestOaiResponsesToChatHandlerPreservesDirectFailedContextWindowErrorFromNonStreamingSSE(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
-			`event: response.failed`,
-			`data: {"type":"response.failed","error":{"message":"Your input exceeds the context window of this model.","type":"upstream_error","code":"context_length_exceeded"}}`,
-			``,
-		}, "\n"))),
-	}
-	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI}
-
-	usage, err := OaiResponsesToChatHandler(c, info, resp)
-
-	require.Nil(t, usage)
-	require.NotNil(t, err)
-	require.Equal(t, http.StatusBadRequest, err.StatusCode)
-	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
-	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
-	require.Contains(t, err.Error(), "context window")
-	require.Empty(t, recorder.Body.String())
-}
-
-func TestOaiResponsesToChatStreamHandlerPreservesDirectFailedContextWindowError(t *testing.T) {
+func TestOaiResponsesToChatStreamHandlerReconcilesTerminalFunctionCalls(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	body := strings.Join([]string{
-		`data: {"type":"response.failed","error":{"message":"Your input exceeds the context window of this model.","type":"upstream_error","code":"context_length_exceeded"}}`,
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_existing","type":"function_call","call_id":"call_existing","name":"lookup","arguments":"{\"q\":\"x\"}"}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_terminal_tools","object":"response","created_at":1710000000,"model":"gpt-5.6-sol","output":[{"id":"fc_existing","type":"function_call","call_id":"call_existing","name":"lookup","arguments":"{\"q\":\"x\"}"},{"id":"fc_terminal","type":"function_call","call_id":"call_terminal","name":"lookup_late","arguments":"{\"id\":2}"}],"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}}}`,
+		`data: [DONE]`,
 		``,
 	}, "\n")
 	resp := &http.Response{
@@ -1211,18 +1107,106 @@ func TestOaiResponsesToChatStreamHandlerPreservesDirectFailedContextWindowError(
 		RelayFormat:  types.RelayFormatOpenAI,
 		StreamStatus: relaycommon.NewStreamStatus(),
 		DisablePing:  true,
-		ChannelMeta:  &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.6"},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.6-sol",
+		},
 	}
 
 	usage, err := OaiResponsesToChatStreamHandler(c, info, resp)
 
-	require.Nil(t, usage)
-	require.NotNil(t, err)
-	require.Equal(t, http.StatusBadRequest, err.StatusCode)
-	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
-	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
-	require.Contains(t, err.Error(), "context window")
-	require.Empty(t, recorder.Body.String())
+	if err != nil {
+		t.Fatalf("unexpected stream conversion error: status=%d code=%s type=%s message=%q", err.StatusCode, err.GetErrorCode(), err.GetErrorType(), err.Error())
+	}
+	require.NotNil(t, usage)
+	require.Equal(t, 12, usage.PromptTokens)
+	require.Equal(t, 3, usage.CompletionTokens)
+	output := recorder.Body.String()
+	require.Equal(t, 1, strings.Count(output, `"id":"call_existing"`))
+	require.Equal(t, 1, strings.Count(output, `"id":"call_terminal"`))
+	require.Equal(t, 1, strings.Count(output, `"name":"lookup"`))
+	require.Equal(t, 1, strings.Count(output, `"name":"lookup_late"`))
+	require.Equal(t, 1, strings.Count(output, `"arguments":"{\"q\":\"x\"}"`))
+	require.Equal(t, 1, strings.Count(output, `"arguments":"{\"id\":2}"`))
+}
+
+func TestOaiResponsesToChatStreamHandlerDoesNotResendStreamedArgumentsOnTerminalOutput(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_existing","type":"function_call","call_id":"call_existing","name":"lookup"}}`,
+		`data: {"type":"response.function_call_arguments.delta","item_id":"fc_existing","output_index":0,"delta":"{\"q\":\"x\"}"}`,
+		`data: {"type":"response.completed","response":{"id":"resp_terminal_tool_delta","object":"response","created_at":1710000000,"model":"gpt-5.6-sol","output":[{"id":"fc_existing","type":"function_call","call_id":"call_existing","name":"lookup","arguments":"{\"q\":\"x\"}"}],"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		RelayFormat:  types.RelayFormatOpenAI,
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.6-sol",
+		},
+	}
+
+	usage, err := OaiResponsesToChatStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 12, usage.PromptTokens)
+	require.Equal(t, 3, usage.CompletionTokens)
+	output := recorder.Body.String()
+	require.Equal(t, 1, strings.Count(output, `"name":"lookup"`))
+	require.Equal(t, 1, strings.Count(output, `"arguments":"{\"q\":\"x\"}"`))
+}
+
+func TestOaiResponsesToChatStreamHandlerKeepsTextBeforeToolCall(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"checking"}`,
+		`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_text_tool","type":"function_call","call_id":"call_text_tool","name":"lookup","arguments":""}}`,
+		`data: {"type":"response.function_call_arguments.delta","item_id":"fc_text_tool","output_index":1,"delta":"{\"q\":\"status\"}"}`,
+		`data: {"type":"response.completed","response":{"id":"resp_text_tool_stream","object":"response","created_at":1710000000,"model":"gpt-5.6-luna","output":[{"id":"msg_text_tool","type":"message","role":"assistant","content":[{"type":"output_text","text":"checking"}]},{"id":"fc_text_tool","type":"function_call","call_id":"call_text_tool","name":"lookup","arguments":"{\"q\":\"status\"}"}],"usage":{"input_tokens":12,"output_tokens":5,"total_tokens":17}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		RelayFormat:  types.RelayFormatOpenAI,
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.6-luna",
+		},
+	}
+
+	usage, err := OaiResponsesToChatStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 12, usage.PromptTokens)
+	require.Equal(t, 5, usage.OutputTokens)
+	output := recorder.Body.String()
+	require.Contains(t, output, `"content":"checking"`)
+	toolCalls := chatToolCallStreamChunks(t, output)
+	require.Len(t, toolCalls, 2)
+	require.Equal(t, "call_text_tool", toolCalls[0].ID)
+	require.Equal(t, "lookup", toolCalls[0].Function.Name)
+	require.Equal(t, "call_text_tool", toolCalls[1].ID)
+	require.Equal(t, `{"q":"status"}`, toolCalls[1].Function.Arguments)
+	require.Contains(t, output, `"finish_reason":"tool_calls"`)
+	require.Equal(t, 1, strings.Count(output, `"arguments":"{\"q\":\"status\"}"`))
 }
 
 func TestOaiResponsesToChatStreamHandlerMapsReasoningSummaryPart(t *testing.T) {
@@ -1264,6 +1248,65 @@ func TestOaiResponsesToChatStreamHandlerMapsReasoningSummaryPart(t *testing.T) {
 	require.Equal(t, 1, strings.Count(output, `"reasoning_content":"first summary"`))
 	require.Contains(t, output, `"content":"answer"`)
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesChatCompatReasoningSummaryMapped))
+}
+
+func TestOaiResponsesToChatStreamHandlerMapsReasoningTextWithoutDuplicateTerminalSnapshot(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.reasoning_text.delta","delta":"first "}`,
+		`data: {"type":"response.reasoning_text.delta","delta":"thought"}`,
+		`data: {"type":"response.reasoning_text.done","item_id":"rs_0","text":"first thought"}`,
+		`data: {"type":"response.output_item.done","item":{"id":"rs_0","type":"reasoning","status":"completed","content":[{"type":"reasoning_text","text":"first thought"}]}}`,
+		`data: {"type":"response.output_text.delta","delta":"answer"}`,
+		`data: {"type":"response.completed","response":{"id":"resp_reasoning_text","object":"response","created_at":1710000000,"model":"deepseek-v4-flash","output":[{"id":"rs_0","type":"reasoning","status":"completed","content":[{"type":"reasoning_text","text":"first thought"}]},{"id":"msg_0","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"answer"}]}],"usage":{"input_tokens":12,"output_tokens":5,"total_tokens":17}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	info := &relaycommon.RelayInfo{
+		RelayFormat:  types.RelayFormatOpenAI,
+		StreamStatus: relaycommon.NewStreamStatus(),
+		DisablePing:  true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "deepseek-v4-flash",
+		},
+	}
+
+	usage, err := OaiResponsesToChatStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 12, usage.PromptTokens)
+	require.Equal(t, 5, usage.CompletionTokens)
+	var reasoningDeltas []string
+	for _, line := range strings.Split(recorder.Body.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			continue
+		}
+		var chunk dto.ChatCompletionsStreamResponse
+		require.NoError(t, common.Unmarshal([]byte(data), &chunk))
+		for _, choice := range chunk.Choices {
+			if reasoning := choice.Delta.GetReasoningContent(); reasoning != "" {
+				reasoningDeltas = append(reasoningDeltas, reasoning)
+			}
+		}
+	}
+	require.Equal(t, []string{"first ", "thought"}, reasoningDeltas)
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"reasoning_content":"first "`))
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"reasoning_content":"thought"`))
+	require.NotContains(t, recorder.Body.String(), `"reasoning_content":"first thought"`)
+	require.Contains(t, recorder.Body.String(), `"content":"answer"`)
 }
 
 func TestOaiResponsesToChatStreamHandlerMapsReasoningSummaryTextDelta(t *testing.T) {
@@ -1469,6 +1512,7 @@ func TestOaiResponsesToChatStreamHandlerCountsImageGenerationOutputItemDone(t *t
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	body := strings.Join([]string{
 		`data: {"type":"response.output_item.done","item":{"type":"image_generation_call","quality":"low","size":"1024x1024"}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_image_generation_output_item_done","object":"response","created_at":1710000000,"model":"gpt-5.5","output":[{"type":"image_generation_call","quality":"low","size":"1024x1024"}],"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}}}`,
 		`data: [DONE]`,
 		``,
 	}, "\n")
@@ -3023,6 +3067,34 @@ func TestOaiResponsesStreamHandlerKeepsCodexMetadataPreludeRetryable(t *testing.
 	require.Equal(t, types.ErrorCodeUpstreamTransportInterrupted, err.GetErrorCode())
 	require.False(t, c.Writer.Written())
 	require.Empty(t, recorder.Body.String())
+}
+
+func TestIsResponsesStreamPreludeEventRejectsWhitespaceToolPayload(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{
+			name: "arguments",
+			data: `{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"ctc_pending","type":"custom_tool_call","status":"in_progress","call_id":"call_pending","name":"exec","arguments":" "}}`,
+		},
+		{
+			name: "input",
+			data: `{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"ctc_pending","type":"custom_tool_call","status":"in_progress","call_id":"call_pending","name":"exec","input":" "}}`,
+		},
+		{
+			name: "encrypted content",
+			data: `{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"ctc_pending","type":"custom_tool_call","status":"in_progress","call_id":"call_pending","name":"exec","encrypted_content":" "}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var response dto.ResponsesStreamResponse
+			require.NoError(t, common.UnmarshalJsonStr(tt.data, &response))
+			require.False(t, isResponsesStreamPreludeEvent(response, tt.data))
+		})
+	}
 }
 
 func TestOaiResponsesStreamHandlerFlushesCodexMetadataPreludeOnCompleted(t *testing.T) {

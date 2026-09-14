@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -80,6 +81,7 @@ func main() {
 	maxID := flag.Int64("max-id", 0, "Only inspect logs with an ID less than or equal to this value")
 	beforeCreatedAt := flag.Int64("before-created-at", 0, "Only inspect logs created before this Unix timestamp")
 	apply := flag.Bool("apply", false, "Apply updates instead of dry-run")
+	planOutput := flag.String("plan-output", "", "Write the actual repair plan as CSV to this path")
 	redisDSN := flag.String("redis-dsn", os.Getenv("REDIS_CONN_STRING"), "Redis connection URL used to invalidate quota caches after apply")
 	redisDSNEnv := flag.String("redis-dsn-env", "", "Read Redis connection URL from the named environment variable")
 	skipCacheInvalidation := flag.Bool("skip-cache-invalidation", false, "Explicitly skip Redis quota cache invalidation after apply")
@@ -125,6 +127,11 @@ func main() {
 	}
 
 	printSummary(*channelID, plan)
+	if strings.TrimSpace(*planOutput) != "" {
+		if err := writePlanCSV(*planOutput, plan); err != nil {
+			log.Fatal(err)
+		}
+	}
 	if !*apply {
 		return
 	}
@@ -133,6 +140,48 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("apply completed: repaired_logs=%d", len(plan.Rows))
+}
+
+func writePlanCSV(path string, plan *plan) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create plan output: %w", err)
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	if err := writer.Write([]string{
+		"id", "user_id", "username", "token_id", "channel_id", "model_name",
+		"old_quota", "new_quota", "delta", "prompt_tokens", "completion_tokens",
+		"created_at", "old_other", "new_other",
+	}); err != nil {
+		return fmt.Errorf("write plan header: %w", err)
+	}
+	for _, row := range plan.Rows {
+		if err := writer.Write([]string{
+			strconv.FormatInt(row.Row.ID, 10),
+			strconv.FormatInt(row.Row.UserID, 10),
+			row.Row.Username,
+			strconv.FormatInt(row.Row.TokenID, 10),
+			strconv.FormatInt(row.Row.ChannelID, 10),
+			row.Row.ModelName,
+			strconv.FormatInt(row.Row.Quota, 10),
+			strconv.FormatInt(row.NewQuota, 10),
+			strconv.FormatInt(row.Delta, 10),
+			strconv.FormatInt(row.Row.PromptTokens, 10),
+			strconv.FormatInt(row.Row.CompletionTokens, 10),
+			strconv.FormatInt(row.Row.CreatedAt, 10),
+			row.Row.Other,
+			row.NewOther,
+		}); err != nil {
+			return fmt.Errorf("write plan row %d: %w", row.Row.ID, err)
+		}
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return fmt.Errorf("flush plan output: %w", err)
+	}
+	return nil
 }
 
 func loadLogs(db *sql.DB, channelID int64, models, excludedModels []string, minID, maxID, beforeCreatedAt int64) ([]logRow, error) {
@@ -174,6 +223,62 @@ where type = 2
 		args = append(args, beforeCreatedAt)
 		query += fmt.Sprintf("  and created_at < $%d\n", len(args))
 	}
+	// Avoid materializing millions of already-correct rows. Standard-ratio
+	// repairs require the historical sentinel model_price < 0; tiered repairs
+	// are limited to the explicitly supported model families because their
+	// expressions are selected from the request timestamp.
+	query += `  and (
+		other ~ '"model_price"[[:space:]]*:[[:space:]]*-1([.]0+)?([[:space:]]*[,}])'
+		or (
+			(lower(model_name) like '%deepseek-v4%' or lower(model_name) like '%deepseek-flash%')
+			and (
+				position('"expr_b64"' in other) = 0
+				or position('"expr_b64":"eWVhci' in other) > 0
+				or position('"expr_b64":"KG1vbnRo' in other) > 0
+				or position('"expr_b64":"dGllcigicGVha19sZWdhY3ki' in other) > 0
+				or position('"expr_b64":"dGllcigib2ZmX3BlYWtfbGVnYWN5' in other) > 0
+				or position('"expr_b64":"dGllcigicGVha' in other) > 0
+				or position('"expr_b64":"dGllcigib2ZmX3BlYW' in other) > 0
+				or position('"expr_b64":"dGllcigiY3VycmVudCI' in other) > 0
+			)
+		)
+		or (
+			lower(model_name) in ('gpt-6-astra', 'gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.6-cyber', 'gpt-5.5-cyber', 'gpt-daybreak-blue-latest', 'gpt-daybreak-red-latest', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-2026-03-05', 'gpt-5.5-pro', 'gpt-5.4-pro', 'gpt-5.4-pro-2026-03-05')
+			and (
+				position('"expr_b64"' in other) = 0
+				__OPENAI_EXPR_MARKERS__
+			)
+		)
+		or (
+			lower(model_name) = 'gpt-5.6-sol'
+			and position('"expr_b64":"bGVuIDw9IDI3MjAwMCA/IHRpZXIoInN0YW5kYXJkIiwgcCAqIDQg' in other) > 0
+		)
+		or lower(model_name) like 'gemini-2.5-pro%'
+		or lower(model_name) like 'gemini-3.1-pro%'
+		or lower(model_name) like 'gemini-3.5-flash%'
+		or lower(model_name) like 'gemini-3.6-flash%'
+		or lower(model_name) like 'gemini-3.7-flash%'
+	)
+`
+	knownExprMarkers := []string{
+		billing_setting.GPT6AstraBillingExpr,
+		billing_setting.GPT56SolBillingExpr,
+		billing_setting.GPT56SolPromotionBillingExpr,
+		billing_setting.GPT56TerraBillingExpr,
+		billing_setting.GPT56LunaBillingExpr,
+		billing_setting.GPT56CyberBillingExpr,
+		billing_setting.GPT55CyberBillingExpr,
+		billing_setting.GPT55BillingExpr,
+		billing_setting.GPT54BillingExpr,
+		billing_setting.GPT55ProBillingExpr,
+		billing_setting.GPT54ProBillingExpr,
+	}
+	markers := make([]string, 0, len(knownExprMarkers))
+	for _, exprString := range knownExprMarkers {
+		args = append(args, `"expr_b64":"`+base64.StdEncoding.EncodeToString([]byte(exprString)))
+		markers = append(markers, fmt.Sprintf("\n\t\t\t\tor position($%d in other) > 0", len(args)))
+	}
+	query = strings.Replace(query, "\t\t\t\t__OPENAI_EXPR_MARKERS__", strings.Join(markers, ""), 1)
 	query += "order by id"
 
 	rows, err := db.Query(query, args...)
@@ -242,7 +347,16 @@ func repairRow(row logRow) (repairedRow, bool, error) {
 	// Compare against a canonical representation so historical key ordering or
 	// insignificant JSON formatting does not turn a no-op into a database write.
 	originalOther := common.MapToJsonStr(other)
+	if repaired, ok, err := repairDeepSeekTieredFallback(row, other, originalOther); ok || err != nil {
+		return repaired, ok, err
+	}
 	if repaired, ok, err := repairGrok45TieredFallback(row, other, originalOther); ok || err != nil {
+		return repaired, ok, err
+	}
+	if repaired, ok, err := repairOpenAITieredFallback(row, other, originalOther); ok || err != nil {
+		return repaired, ok, err
+	}
+	if repaired, ok, err := repairGeminiTieredFallback(row, other, originalOther); ok || err != nil {
 		return repaired, ok, err
 	}
 	if !shouldRepairWalletLog(row, other) {
@@ -339,6 +453,164 @@ func repairRow(row logRow) (repairedRow, bool, error) {
 		Delta:    newQuota - row.Quota,
 		NewOther: newOther,
 	}, true, nil
+}
+
+// repairDeepSeekTieredFallback repairs DeepSeek token logs that were recorded
+// before the V4.1-Flash price rollout, or while the production service still
+// had a stale tiered expression. The effective expression is selected from the
+// log timestamp and is fixed to the historical UTC peak/off-peak tier before
+// evaluation; using the live wall clock here would silently misprice old rows.
+func repairDeepSeekTieredFallback(row logRow, other map[string]interface{}, originalOther string) (repairedRow, bool, error) {
+	if other == nil || !isDeepSeekTieredModel(row.ModelName) {
+		return repairedRow{}, false, nil
+	}
+	billingMode, hasBillingMode := other["billing_mode"].(string)
+	storedExpr, hasStoredExpr := decodeStoredBillingExpr(other)
+	if hasBillingMode && billingMode == billing_setting.BillingModeTieredExpr {
+		// Preserve administrator-authored expressions. Only expressions from the
+		// known DeepSeek price set are safe to replace with timestamp-aware ones.
+		if !hasStoredExpr || !isKnownDeepSeekTieredExpr(storedExpr) {
+			return repairedRow{}, false, nil
+		}
+	} else if !hasRepairablePriceSnapshot(other) {
+		return repairedRow{}, false, nil
+	}
+	if hasImageRequestMetadata(other) {
+		return repairedRow{}, false, nil
+	}
+	for _, key := range []string{
+		"web_search",
+		"file_search",
+		"image_generation_call",
+		"audio_input_seperate_price",
+		"image",
+	} {
+		if _, ok := other[key]; ok {
+			return repairedRow{}, false, nil
+		}
+	}
+
+	switch billingSource(other) {
+	case "wallet":
+	case "subscription":
+		return repairedRow{}, false, nil
+	case "":
+		if row.TokenID != 0 || hasSubscriptionMetadata(other) {
+			return repairedRow{}, false, nil
+		}
+	default:
+		return repairedRow{}, false, nil
+	}
+
+	exprString, ok := billing_setting.GetBillingExprAt(row.ModelName, row.CreatedAt)
+	if !ok || strings.TrimSpace(exprString) == "" {
+		return repairedRow{}, false, nil
+	}
+
+	cacheTokens, err := tokenCount(other, "cache_tokens")
+	if err != nil {
+		return repairedRow{}, false, fmt.Errorf("invalid cache_tokens: %w", err)
+	}
+	groupRatio := 1.0
+	if rawGroupRatio, exists := other["group_ratio"]; exists {
+		parsedGroupRatio, ok := numberValuePresent(rawGroupRatio)
+		if !ok || parsedGroupRatio < 0 {
+			return repairedRow{}, false, fmt.Errorf("invalid group_ratio")
+		}
+		groupRatio = parsedGroupRatio
+	}
+
+	usageSemantic := strings.ToLower(strings.TrimSpace(stringValue(other["usage_semantic"])))
+	claudeUsage := usageSemantic == "anthropic" || boolValue(other["claude"])
+	params := billingexpr.TokenParams{
+		P:   float64(row.PromptTokens),
+		C:   float64(row.CompletionTokens),
+		Len: float64(row.PromptTokens),
+		CR:  float64(cacheTokens),
+	}
+	if claudeUsage {
+		params.Len = float64(row.PromptTokens + cacheTokens)
+	} else if billingexpr.UsedVars(exprString)["cr"] {
+		// DeepSeek's OpenAI-compatible usage reports prompt_tokens including
+		// cache-hit tokens. Remove them only because the expression prices cr
+		// separately, matching the normal tiered settlement path.
+		params.P -= params.CR
+		if params.P < 0 {
+			params.P = 0
+		}
+	}
+	if params.C < 0 {
+		params.C = 0
+	}
+
+	rawCost, trace, err := billingexpr.RunExpr(exprString, params)
+	if err != nil {
+		return repairedRow{}, false, fmt.Errorf("run DeepSeek tiered billing expression: %w", err)
+	}
+	newQuota := int64(billingexpr.QuotaRound(rawCost / 1_000_000 * common.QuotaPerUnit * groupRatio))
+
+	other["billing_mode"] = billing_setting.BillingModeTieredExpr
+	other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(exprString))
+	other["matched_tier"] = trace.MatchedTier
+	other["model_price"] = 0
+	other["model_ratio"] = 0
+	other["completion_ratio"] = 0
+	other["cache_ratio"] = 0
+	for _, key := range []string{"cache_creation_ratio", "cache_creation_ratio_5m", "cache_creation_ratio_1h"} {
+		if _, exists := other[key]; exists {
+			other[key] = 0
+		}
+	}
+	newOther := common.MapToJsonStr(other)
+	if newQuota == row.Quota && newOther == originalOther {
+		return repairedRow{}, false, nil
+	}
+
+	return repairedRow{
+		Row:      row,
+		NewQuota: newQuota,
+		Delta:    newQuota - row.Quota,
+		NewOther: newOther,
+	}, true, nil
+}
+
+func isDeepSeekTieredModel(modelName string) bool {
+	raw := strings.ToLower(strings.TrimSpace(modelName))
+	// This is a channel-local free alias, not the paid DeepSeek Flash API
+	// model. It must never inherit the provider's paid tiered expression.
+	if strings.Contains(raw, "-search") || raw == "deepseek-v4-flash-free" {
+		return false
+	}
+	switch ratio_setting.FormatMatchingModelName(modelName) {
+	case "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro":
+		return true
+	default:
+		return false
+	}
+}
+
+func isKnownDeepSeekTieredExpr(expr string) bool {
+	switch expr {
+	case billing_setting.DeepSeekV4FlashBillingExpr,
+		billing_setting.DeepSeekV4FlashLegacyBillingExpr,
+		billing_setting.DeepSeekV4FlashLegacyMonthBillingExpr,
+		billing_setting.DeepSeekV4FlashLegacyMonthNoWeekdayExpr,
+		billing_setting.DeepSeekV4FlashCurrentBillingExpr,
+		billing_setting.DeepSeekV4FlashLegacyPeakExpr,
+		billing_setting.DeepSeekV4FlashLegacyOffPeakExpr,
+		billing_setting.DeepSeekV4FlashPeakExpr,
+		billing_setting.DeepSeekV4FlashOffPeakExpr,
+		billing_setting.DeepSeekV4ProBillingExpr,
+		billing_setting.DeepSeekV4ProLegacyBillingExpr,
+		billing_setting.DeepSeekV4ProLegacyMonthBillingExpr,
+		billing_setting.DeepSeekV4ProLegacyMonthNoWeekdayExpr,
+		billing_setting.DeepSeekV4ProCurrentBillingExpr,
+		billing_setting.DeepSeekV4ProLegacyPeakExpr,
+		billing_setting.DeepSeekV4ProLegacyOffPeakExpr:
+		return true
+	default:
+		return false
+	}
 }
 
 // repairGrok45TieredFallback repairs only the unambiguous Grok 4.5 aliases
@@ -452,6 +724,366 @@ func repairGrok45TieredFallback(row logRow, other map[string]interface{}, origin
 		Delta:    newQuota - row.Quota,
 		NewOther: newOther,
 	}, true, nil
+}
+
+// repairOpenAITieredFallback repairs historical OpenAI token logs that were
+// recorded with an old flat-ratio snapshot or a known, mismatched OpenAI tiered
+// expression. Only the GPT models with a static official API expression are
+// eligible here. Other tiered models may depend on request-body parameters,
+// wall-clock windows, tool calls, or non-token units that are not persisted in
+// a form this repairer can reproduce safely.
+func repairOpenAITieredFallback(row logRow, other map[string]interface{}, originalOther string) (repairedRow, bool, error) {
+	if other == nil {
+		return repairedRow{}, false, nil
+	}
+	if !isOpenAITieredModel(row.ModelName) {
+		return repairedRow{}, false, nil
+	}
+	billingMode, hasBillingMode := other["billing_mode"].(string)
+	storedExpr, hasStoredExpr := decodeStoredBillingExpr(other)
+	if hasBillingMode && billingMode == billing_setting.BillingModeTieredExpr {
+		// A custom expression is an administrator choice and cannot be safely
+		// replaced. Repair only expressions known to belong to this OpenAI family.
+		if !hasStoredExpr || !isKnownOpenAITieredExpr(storedExpr) {
+			return repairedRow{}, false, nil
+		}
+	} else if !hasRepairablePriceSnapshot(other) {
+		return repairedRow{}, false, nil
+	}
+	if hasImageRequestMetadata(other) {
+		return repairedRow{}, false, nil
+	}
+	for _, key := range []string{
+		"web_search",
+		"file_search",
+		"image_generation_call",
+		"audio_input_seperate_price",
+		"image",
+	} {
+		if _, ok := other[key]; ok {
+			return repairedRow{}, false, nil
+		}
+	}
+
+	switch billingSource(other) {
+	case "wallet":
+	case "subscription":
+		return repairedRow{}, false, nil
+	case "":
+		if row.TokenID != 0 || hasSubscriptionMetadata(other) {
+			return repairedRow{}, false, nil
+		}
+	default:
+		return repairedRow{}, false, nil
+	}
+
+	exprString, ok := billing_setting.GetBillingExprAt(row.ModelName, row.CreatedAt)
+	if !ok || strings.TrimSpace(exprString) == "" {
+		return repairedRow{}, false, nil
+	}
+	if hasBillingMode && billingMode == billing_setting.BillingModeTieredExpr && storedExpr == exprString {
+		return repairedRow{}, false, nil
+	}
+
+	cacheTokens, err := tokenCount(other, "cache_tokens")
+	if err != nil {
+		return repairedRow{}, false, fmt.Errorf("invalid cache_tokens: %w", err)
+	}
+	cacheCreationTokens, err := tokenCount(other, "cache_creation_tokens")
+	if err != nil {
+		return repairedRow{}, false, fmt.Errorf("invalid cache_creation_tokens: %w", err)
+	}
+	cacheCreationTokens5m, err := tokenCount(other, "cache_creation_tokens_5m")
+	if err != nil {
+		return repairedRow{}, false, fmt.Errorf("invalid cache_creation_tokens_5m: %w", err)
+	}
+	cacheCreationTokens1h, err := tokenCount(other, "cache_creation_tokens_1h")
+	if err != nil {
+		return repairedRow{}, false, fmt.Errorf("invalid cache_creation_tokens_1h: %w", err)
+	}
+
+	groupRatio := 1.0
+	if rawGroupRatio, exists := other["group_ratio"]; exists {
+		parsedGroupRatio, ok := numberValuePresent(rawGroupRatio)
+		if !ok || parsedGroupRatio < 0 {
+			return repairedRow{}, false, fmt.Errorf("invalid group_ratio")
+		}
+		groupRatio = parsedGroupRatio
+	}
+
+	usageSemantic := strings.ToLower(strings.TrimSpace(stringValue(other["usage_semantic"])))
+	claudeUsage := usageSemantic == "anthropic" || boolValue(other["claude"])
+	params := billingexpr.TokenParams{
+		P:    float64(row.PromptTokens),
+		C:    float64(row.CompletionTokens),
+		Len:  float64(row.PromptTokens),
+		CR:   float64(cacheTokens),
+		CC:   float64(cacheCreationTokens),
+		CC1h: float64(cacheCreationTokens1h),
+	}
+	if claudeUsage {
+		// Claude-format input_tokens is text-only. The tier condition must see
+		// the complete context, while the split cache-write fields map to the
+		// expression's dedicated cache variables.
+		params.Len = float64(row.PromptTokens + cacheTokens + cacheCreationTokens5m + cacheCreationTokens1h)
+		params.CC = float64(cacheCreationTokens5m)
+		params.CC1h = float64(cacheCreationTokens1h)
+	} else {
+		// OpenAI-format prompt_tokens includes cache categories. Match
+		// BuildTieredTokenParams and subtract only categories named by the
+		// expression so they are not charged twice.
+		usedVars := billingexpr.UsedVars(exprString)
+		if usedVars["cr"] {
+			params.P -= params.CR
+		}
+		if usedVars["cc"] {
+			params.P -= params.CC
+		}
+		if params.P < 0 {
+			params.P = 0
+		}
+	}
+	if params.C < 0 {
+		params.C = 0
+	}
+
+	rawCost, trace, err := billingexpr.RunExpr(exprString, params)
+	if err != nil {
+		return repairedRow{}, false, fmt.Errorf("run OpenAI tiered billing expression: %w", err)
+	}
+	newQuota := int64(billingexpr.QuotaRound(rawCost / 1_000_000 * common.QuotaPerUnit * groupRatio))
+
+	other["billing_mode"] = billing_setting.BillingModeTieredExpr
+	other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(exprString))
+	other["matched_tier"] = trace.MatchedTier
+	other["model_price"] = 0
+	other["model_ratio"] = 0
+	other["completion_ratio"] = 0
+	other["cache_ratio"] = 0
+	for _, key := range []string{"cache_creation_ratio", "cache_creation_ratio_5m", "cache_creation_ratio_1h"} {
+		if _, exists := other[key]; exists {
+			other[key] = 0
+		}
+	}
+	newOther := common.MapToJsonStr(other)
+	if newQuota == row.Quota && newOther == originalOther {
+		return repairedRow{}, false, nil
+	}
+
+	return repairedRow{
+		Row:      row,
+		NewQuota: newQuota,
+		Delta:    newQuota - row.Quota,
+		NewOther: newOther,
+	}, true, nil
+}
+
+func isKnownOpenAITieredExpr(expr string) bool {
+	switch expr {
+	case billing_setting.GPT6AstraBillingExpr,
+		billing_setting.GPT56SolBillingExpr,
+		billing_setting.GPT56SolPromotionBillingExpr,
+		billing_setting.GPT56TerraBillingExpr,
+		billing_setting.GPT56LunaBillingExpr,
+		billing_setting.GPT56CyberBillingExpr,
+		billing_setting.GPT55CyberBillingExpr,
+		billing_setting.GPT55BillingExpr,
+		billing_setting.GPT54BillingExpr,
+		billing_setting.GPT55ProBillingExpr:
+		return true
+	default:
+		return false
+	}
+}
+
+// repairGeminiTieredFallback repairs only Gemini token expressions whose
+// result is reproducible from the persisted token fields. Expressions that
+// depend on request parameters, time windows, or media/audio dimensions are
+// intentionally left on their historical snapshot.
+func repairGeminiTieredFallback(row logRow, other map[string]interface{}, originalOther string) (repairedRow, bool, error) {
+	if other == nil {
+		return repairedRow{}, false, nil
+	}
+	exprString, supported := geminiHistoricalTieredExpr(row.ModelName)
+	if !supported {
+		return repairedRow{}, false, nil
+	}
+	if billingMode, hasBillingMode := other["billing_mode"].(string); hasBillingMode && billingMode == billing_setting.BillingModeTieredExpr {
+		storedExpr, ok := decodeStoredBillingExpr(other)
+		if !ok || !isKnownGeminiTieredExpr(storedExpr) {
+			return repairedRow{}, false, nil
+		}
+	} else if !hasRepairablePriceSnapshot(other) {
+		return repairedRow{}, false, nil
+	}
+	if billing_setting.GetBillingMode(row.ModelName) != billing_setting.BillingModeTieredExpr || isNonTokenModel(row.ModelName) {
+		return repairedRow{}, false, nil
+	}
+	if hasImageRequestMetadata(other) {
+		return repairedRow{}, false, nil
+	}
+	for _, key := range []string{
+		"web_search",
+		"file_search",
+		"image_generation_call",
+		"audio_input_seperate_price",
+		"image",
+	} {
+		if _, ok := other[key]; ok {
+			return repairedRow{}, false, nil
+		}
+	}
+	if usedVars := billingexpr.UsedVars(exprString); usedVars["param"] || usedVars["header"] || usedVars["has"] || usedVars["hour"] || usedVars["minute"] || usedVars["weekday"] || usedVars["month"] || usedVars["day"] || usedVars["year"] || usedVars["img"] || usedVars["img_o"] || usedVars["ai"] || usedVars["ao"] || usedVars["cc"] || usedVars["cc1h"] {
+		return repairedRow{}, false, nil
+	}
+	switch billingSource(other) {
+	case "wallet":
+	case "subscription":
+		return repairedRow{}, false, nil
+	case "":
+		if row.TokenID != 0 || hasSubscriptionMetadata(other) {
+			return repairedRow{}, false, nil
+		}
+	default:
+		return repairedRow{}, false, nil
+	}
+	if billingMode, ok := other["billing_mode"].(string); ok && billingMode == billing_setting.BillingModeTieredExpr {
+		storedExpr, _ := decodeStoredBillingExpr(other)
+		if storedExpr == exprString {
+			return repairedRow{}, false, nil
+		}
+	}
+
+	cacheTokens, err := tokenCount(other, "cache_tokens")
+	if err != nil {
+		return repairedRow{}, false, fmt.Errorf("invalid cache_tokens: %w", err)
+	}
+	groupRatio := 1.0
+	if rawGroupRatio, exists := other["group_ratio"]; exists {
+		parsedGroupRatio, ok := numberValuePresent(rawGroupRatio)
+		if !ok || parsedGroupRatio < 0 {
+			return repairedRow{}, false, fmt.Errorf("invalid group_ratio")
+		}
+		groupRatio = parsedGroupRatio
+	}
+	usageSemantic := strings.ToLower(strings.TrimSpace(stringValue(other["usage_semantic"])))
+	claudeUsage := usageSemantic == "anthropic" || boolValue(other["claude"])
+	params := billingexpr.TokenParams{
+		P:   float64(row.PromptTokens),
+		C:   float64(row.CompletionTokens),
+		Len: float64(row.PromptTokens),
+		CR:  float64(cacheTokens),
+	}
+	if claudeUsage {
+		params.Len = float64(row.PromptTokens + cacheTokens)
+	} else if billingexpr.UsedVars(exprString)["cr"] {
+		params.P -= params.CR
+		if params.P < 0 {
+			params.P = 0
+		}
+	}
+	if params.C < 0 {
+		params.C = 0
+	}
+	rawCost, trace, err := billingexpr.RunExpr(exprString, params)
+	if err != nil {
+		return repairedRow{}, false, fmt.Errorf("run Gemini tiered billing expression: %w", err)
+	}
+	newQuota := int64(billingexpr.QuotaRound(rawCost / 1_000_000 * common.QuotaPerUnit * groupRatio))
+
+	other["billing_mode"] = billing_setting.BillingModeTieredExpr
+	other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(exprString))
+	other["matched_tier"] = trace.MatchedTier
+	other["model_price"] = 0
+	other["model_ratio"] = 0
+	other["completion_ratio"] = 0
+	other["cache_ratio"] = 0
+	for _, key := range []string{"cache_creation_ratio", "cache_creation_ratio_5m", "cache_creation_ratio_1h"} {
+		if _, exists := other[key]; exists {
+			other[key] = 0
+		}
+	}
+	newOther := common.MapToJsonStr(other)
+	if newQuota == row.Quota && newOther == originalOther {
+		return repairedRow{}, false, nil
+	}
+	return repairedRow{Row: row, NewQuota: newQuota, Delta: newQuota - row.Quota, NewOther: newOther}, true, nil
+}
+
+func geminiHistoricalTieredExpr(modelName string) (string, bool) {
+	switch ratio_setting.FormatMatchingModelName(modelName) {
+	case "gemini-2.5-pro":
+		return billing_setting.Gemini25ProBillingExpr, true
+	case "gemini-3.7-flash":
+		return billing_setting.Gemini37FlashBillingExpr, true
+	case "gemini-3.6-flash":
+		return billing_setting.Gemini36FlashBillingExpr, true
+	case "gemini-3.5-flash":
+		return billing_setting.Gemini35FlashBillingExpr, true
+	case "gemini-3.5-flash-lite":
+		return billing_setting.Gemini35FlashLiteBillingExpr, true
+	case "gemini-3.1-pro-preview":
+		return billing_setting.Gemini31ProPreviewBillingExpr, true
+	default:
+		return "", false
+	}
+}
+
+func isKnownGeminiTieredExpr(expr string) bool {
+	switch expr {
+	case billing_setting.Gemini25ProBillingExpr,
+		billing_setting.Gemini37FlashBillingExpr,
+		billing_setting.Gemini35FlashBillingExpr,
+		billing_setting.Gemini35FlashLiteBillingExpr,
+		billing_setting.Gemini31ProPreviewBillingExpr:
+		return true
+	default:
+		return false
+	}
+}
+
+func isOpenAITieredModel(modelName string) bool {
+	canonical := ratio_setting.FormatMatchingModelName(modelName)
+	// The OpenAI compact variants are a separate billing dimension. Their
+	// upstream compact pricing must not be rewritten with the parent model's
+	// context-length expression during historical repair.
+	if strings.HasSuffix(canonical, "-openai-compact") {
+		return false
+	}
+	for _, candidate := range []string{
+		"gpt-6-astra",
+		"gpt-5.6",
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
+		"gpt-5.6-cyber",
+		"gpt-5.5-cyber",
+		"gpt-daybreak-blue-latest",
+		"gpt-daybreak-red-latest",
+		"gpt-5.5",
+		"gpt-5.4",
+		"gpt-5.4-2026-03-05",
+		"gpt-5.5-pro",
+		"gpt-5.4-pro",
+		"gpt-5.4-pro-2026-03-05",
+	} {
+		if canonical == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeStoredBillingExpr(other map[string]interface{}) (string, bool) {
+	encoded, ok := other["expr_b64"].(string)
+	if !ok || strings.TrimSpace(encoded) == "" {
+		return "", false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", false
+	}
+	return string(decoded), true
 }
 
 func approxEqual(left, right float64) bool {

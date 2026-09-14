@@ -53,6 +53,10 @@ func setupDistributorBootstrapTestDB(t *testing.T) *gorm.DB {
 	model.InitChannelCache()
 
 	t.Cleanup(func() {
+		// Channel selection may schedule an asynchronous cache refresh. Wait for
+		// it while the test database is still installed so cleanup cannot race
+		// with a refresh reading model.DB before the database is closed.
+		model.InitChannelCache()
 		model.DB = oldDB
 		model.LOG_DB = oldLogDB
 		common.UsingSQLite = oldUsingSQLite

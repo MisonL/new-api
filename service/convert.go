@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -73,10 +74,18 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 		openAIRequest.Stop = claudeRequest.StopSequences
 	}
 
-	// Convert tools
-	tools, _ := common.Any2Type[[]dto.Tool](claudeRequest.Tools)
+	// Convert tools. Claude built-in server tools (for example
+	// web_search_20250305) do not have a faithful generic OpenAI function-tool
+	// representation, so reject them instead of disguising them as functions.
+	tools, err := parseClaudeToolsForOpenAI(claudeRequest.Tools)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Claude tools: %w", err)
+	}
 	openAITools := make([]dto.ToolCallRequest, 0)
-	for _, claudeTool := range tools {
+	for index, claudeTool := range tools {
+		if strings.TrimSpace(claudeTool.Name) == "" {
+			return nil, fmt.Errorf("Claude tool[%d] name is required", index)
+		}
 		openAITool := dto.ToolCallRequest{
 			Type: "function",
 			Function: dto.FunctionRequest{
@@ -102,7 +111,10 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 			openAIMessage.SetStringContent(claudeRequest.GetStringSystem())
 			openAIMessages = append(openAIMessages, openAIMessage)
 		} else {
-			systems := claudeRequest.ParseSystem()
+			systems, parseErr := common.Any2Type[[]dto.ClaudeMediaMessage](claudeRequest.System)
+			if parseErr != nil {
+				return nil, fmt.Errorf("failed to parse Claude system content: %w", parseErr)
+			}
 			if len(systems) > 0 {
 				openAIMessage := dto.Message{
 					Role: "system",
@@ -110,10 +122,16 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 				isOpenRouterClaude := isOpenRouter && strings.HasPrefix(info.UpstreamModelName, "anthropic/claude")
 				if isOpenRouterClaude {
 					systemMediaMessages := make([]dto.MediaContent, 0, len(systems))
-					for _, system := range systems {
+					for systemIndex, system := range systems {
+						if system.Type != "" && system.Type != "text" {
+							return nil, fmt.Errorf("Claude system block[%d] type %q cannot be represented by OpenRouter", systemIndex, system.Type)
+						}
+						if system.Text == nil {
+							return nil, fmt.Errorf("Claude system block[%d] text is required", systemIndex)
+						}
 						message := dto.MediaContent{
 							Type:         "text",
-							Text:         system.GetText(),
+							Text:         *system.Text,
 							CacheControl: system.CacheControl,
 						}
 						systemMediaMessages = append(systemMediaMessages, message)
@@ -121,10 +139,14 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					openAIMessage.SetMediaContent(systemMediaMessages)
 				} else {
 					systemStr := ""
-					for _, system := range systems {
-						if system.Text != nil {
-							systemStr += *system.Text
+					for systemIndex, system := range systems {
+						if system.Type != "" && system.Type != "text" {
+							return nil, fmt.Errorf("Claude system block[%d] type %q cannot be represented by OpenAI Chat Completions", systemIndex, system.Type)
 						}
+						if system.Text == nil {
+							return nil, fmt.Errorf("Claude system block[%d] text is required", systemIndex)
+						}
+						systemStr += *system.Text
 					}
 					openAIMessage.SetStringContent(systemStr)
 				}
@@ -133,6 +155,9 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 		}
 	}
 	for messageIndex, claudeMessage := range claudeRequest.Messages {
+		if claudeMessage.Role != "user" && claudeMessage.Role != "assistant" {
+			return nil, fmt.Errorf("Claude messages[%d] role %q is not supported", messageIndex, claudeMessage.Role)
+		}
 		openAIMessage := dto.Message{
 			Role: claudeMessage.Role,
 		}
@@ -223,29 +248,88 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					}
 					return nil, claudeOpaqueThinkingConversionError(messageIndex, contentIndex, "redacted_thinking")
 				case "image":
-					// Handle image conversion (base64 to URL or keep as is)
-					imageData := fmt.Sprintf("data:%s;base64,%s", mediaMsg.Source.MediaType, mediaMsg.Source.Data)
-					//textContent += fmt.Sprintf("[Image: %s]", imageData)
-					mediaMessage := dto.MediaContent{
-						Type:     "image_url",
-						ImageUrl: &dto.MessageImageUrl{Url: imageData},
+					if mediaMsg.Source == nil {
+						return nil, fmt.Errorf("Claude image block at messages[%d].content[%d] is missing source", messageIndex, contentIndex)
+					}
+					var mediaMessage dto.MediaContent
+					sourceType := strings.ToLower(strings.TrimSpace(mediaMsg.Source.Type))
+					switch sourceType {
+					case "base64":
+						data, ok := mediaMsg.Source.Data.(string)
+						if !ok {
+							return nil, fmt.Errorf("Claude image block at messages[%d].content[%d] data must be a string", messageIndex, contentIndex)
+						}
+						if strings.TrimSpace(mediaMsg.Source.MediaType) == "" || strings.TrimSpace(data) == "" {
+							return nil, fmt.Errorf("Claude image block at messages[%d].content[%d] requires media_type and data", messageIndex, contentIndex)
+						}
+						if !strings.HasPrefix(strings.ToLower(mediaMsg.Source.MediaType), "image/") {
+							return nil, fmt.Errorf("Claude image block at messages[%d].content[%d] has unsupported media_type %q", messageIndex, contentIndex, mediaMsg.Source.MediaType)
+						}
+						imageData := fmt.Sprintf("data:%s;base64,%s", mediaMsg.Source.MediaType, data)
+						mediaMessage = dto.MediaContent{
+							Type:     dto.ContentTypeImageURL,
+							ImageUrl: &dto.MessageImageUrl{Url: imageData, MimeType: mediaMsg.Source.MediaType},
+						}
+					case "url":
+						if strings.TrimSpace(mediaMsg.Source.Url) == "" {
+							return nil, fmt.Errorf("Claude image block at messages[%d].content[%d] requires url", messageIndex, contentIndex)
+						}
+						mediaMessage = dto.MediaContent{
+							Type:     dto.ContentTypeImageURL,
+							ImageUrl: &dto.MessageImageUrl{Url: mediaMsg.Source.Url, MimeType: mediaMsg.Source.MediaType},
+						}
+					default:
+						return nil, fmt.Errorf("Claude image block at messages[%d].content[%d] source type %q is not supported", messageIndex, contentIndex, mediaMsg.Source.Type)
 					}
 					mediaMessages = append(mediaMessages, mediaMessage)
 				case "tool_use":
+					if strings.TrimSpace(mediaMsg.Id) == "" || strings.TrimSpace(mediaMsg.Name) == "" {
+						return nil, fmt.Errorf("Claude tool_use at messages[%d].content[%d] requires id and name", messageIndex, contentIndex)
+					}
+					toolInput := mediaMsg.Input
+					if toolInput == nil {
+						toolInput = map[string]interface{}{}
+					}
+					arguments, err := toJSONString(toolInput)
+					if err != nil {
+						return nil, fmt.Errorf("failed to encode Claude tool %s arguments: %w", mediaMsg.Name, err)
+					}
+					if common.GetJsonType([]byte(arguments)) == "null" {
+						arguments = "{}"
+					}
 					toolCall := dto.ToolCallRequest{
 						ID:   mediaMsg.Id,
 						Type: "function",
 						Function: dto.FunctionRequest{
 							Name:      mediaMsg.Name,
-							Arguments: toJSONString(mediaMsg.Input),
+							Arguments: arguments,
 						},
 					}
 					toolCalls = append(toolCalls, toolCall)
 				case "tool_result":
+					if claudeMessage.Role != "user" {
+						return nil, fmt.Errorf("Claude tool_result at messages[%d].content[%d] must be in a user message", messageIndex, contentIndex)
+					}
+					if strings.TrimSpace(mediaMsg.ToolUseId) == "" {
+						return nil, fmt.Errorf("Claude tool_result at messages[%d].content[%d] requires tool_use_id", messageIndex, contentIndex)
+					}
+					// Preserve the order when a Claude user message interleaves text
+					// and tool_result blocks. OpenAI requires a tool message after the
+					// preceding assistant turn, so flush text seen before this result
+					// before appending the tool message.
+					if len(mediaMessages) > 0 {
+						openAIMessage.SetMediaContent(mediaMessages)
+						openAIMessages = append(openAIMessages, openAIMessage)
+						openAIMessage = dto.Message{Role: claudeMessage.Role}
+						mediaMessages = nil
+					}
 					// Add tool result as a separate message
 					toolName := mediaMsg.Name
 					if toolName == "" {
 						toolName = claudeRequest.SearchToolNameByToolCallId(mediaMsg.ToolUseId)
+					}
+					if strings.TrimSpace(toolName) == "" {
+						return nil, fmt.Errorf("Claude tool_result at messages[%d].content[%d] cannot resolve tool name for tool_use_id %q", messageIndex, contentIndex, mediaMsg.ToolUseId)
 					}
 					oaiToolMessage := dto.Message{
 						Role:       "tool",
@@ -256,11 +340,19 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					if mediaMsg.IsStringContent() {
 						oaiToolMessage.SetStringContent(mediaMsg.GetStringContent())
 					} else {
-						mediaContents := mediaMsg.ParseMediaContent()
-						encodeJson, _ := common.Marshal(mediaContents)
+						mediaContents, parseErr := common.Any2Type[[]dto.ClaudeMediaMessage](mediaMsg.Content)
+						if parseErr != nil {
+							return nil, fmt.Errorf("failed to parse Claude tool result at messages[%d].content[%d]: %w", messageIndex, contentIndex, parseErr)
+						}
+						encodeJson, err := common.Marshal(mediaContents)
+						if err != nil {
+							return nil, fmt.Errorf("failed to encode Claude tool result: %w", err)
+						}
 						oaiToolMessage.SetStringContent(string(encodeJson))
 					}
 					openAIMessages = append(openAIMessages, oaiToolMessage)
+				default:
+					return nil, fmt.Errorf("Claude content block type %q at messages[%d].content[%d] is not supported", mediaMsg.Type, messageIndex, contentIndex)
 				}
 			}
 
@@ -282,6 +374,11 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 
 			if len(mediaMessages) > 0 {
 				if len(toolCalls) > 0 {
+					for contentIndex, mediaMessage := range mediaMessages {
+						if mediaMessage.Type != dto.ContentTypeText {
+							return nil, fmt.Errorf("Claude assistant content[%d] type %q cannot be represented alongside tool_use in OpenAI Chat Completions", contentIndex, mediaMessage.Type)
+						}
+					}
 					if content := openAITextContentFromMediaMessages(mediaMessages); content != "" {
 						openAIMessage.SetStringContent(content)
 					}
@@ -292,7 +389,11 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 				openAIMessage.SetStringContent("")
 			}
 		}
-		if len(openAIMessage.ParseContent()) > 0 || len(openAIMessage.ToolCalls) > 0 || openAIMessage.GetReasoningContent() != "" {
+		parsedContent, parseErr := openAIMessage.ParseContentStrict()
+		if parseErr != nil {
+			return nil, fmt.Errorf("converted Claude messages[%d] content: %w", messageIndex, parseErr)
+		}
+		if len(parsedContent) > 0 || len(openAIMessage.ToolCalls) > 0 || openAIMessage.GetReasoningContent() != "" {
 			openAIMessages = append(openAIMessages, openAIMessage)
 		}
 	}
@@ -618,6 +719,30 @@ func appendClaudeToolDelta(responses *[]*dto.ClaudeResponse, blockIndex int, arg
 }
 
 func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamResponse, info *relaycommon.RelayInfo) []*dto.ClaudeResponse {
+	responses, _ := StreamResponseOpenAI2ClaudeWithError(openAIResponse, info)
+	return responses
+}
+
+// StreamResponseOpenAI2ClaudeWithError validates finish reasons before
+// emitting Anthropic SSE blocks. The legacy wrapper is kept for callers that
+// cannot return an error, while relay handlers use this variant to avoid
+// forwarding an invalid Claude stop_reason.
+func StreamResponseOpenAI2ClaudeWithError(openAIResponse *dto.ChatCompletionsStreamResponse, info *relaycommon.RelayInfo) ([]*dto.ClaudeResponse, error) {
+	if openAIResponse == nil {
+		return nil, fmt.Errorf("OpenAI stream response is nil")
+	}
+	for choiceIndex, choice := range openAIResponse.Choices {
+		if choice.FinishReason == nil {
+			continue
+		}
+		if _, err := stopReasonOpenAI2ClaudeStrict(*choice.FinishReason); err != nil {
+			return nil, fmt.Errorf("choice[%d]: %w", choiceIndex, err)
+		}
+	}
+	return streamResponseOpenAI2Claude(openAIResponse, info), nil
+}
+
+func streamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamResponse, info *relaycommon.RelayInfo) []*dto.ClaudeResponse {
 	if info.ClaudeConvertInfo.Done {
 		return nil
 	}
@@ -908,6 +1033,17 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 }
 
 func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relaycommon.RelayInfo) *dto.ClaudeResponse {
+	response, _ := ResponseOpenAI2ClaudeWithError(openAIResponse, info)
+	return response
+}
+
+func ResponseOpenAI2ClaudeWithError(openAIResponse *dto.OpenAITextResponse, info *relaycommon.RelayInfo) (*dto.ClaudeResponse, error) {
+	if openAIResponse == nil {
+		return nil, fmt.Errorf("OpenAI response is nil")
+	}
+	if len(openAIResponse.Choices) > 1 {
+		return nil, fmt.Errorf("multiple choices are not supported by Claude")
+	}
 	var stopReason string
 	contents := make([]dto.ClaudeMediaMessage, 0)
 	allowClaudeThinking := shouldExposeReasoningAsClaudeThinking(openAIResponse.Model, info)
@@ -918,12 +1054,31 @@ func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relayco
 		Model: openAIResponse.Model,
 	}
 	for _, choice := range openAIResponse.Choices {
-		stopReason = stopReasonOpenAI2Claude(choice.FinishReason)
+		mappedStopReason, stopErr := stopReasonOpenAI2ClaudeStrict(choice.FinishReason)
+		if stopErr != nil {
+			return nil, stopErr
+		}
+		stopReason = mappedStopReason
+		if choice.Message.Content != nil && !choice.Message.IsStringContent() {
+			parts, parseErr := choice.Message.ParseContentStrict()
+			if parseErr != nil {
+				return nil, fmt.Errorf("choice[%d]: %w", choice.Index, parseErr)
+			}
+			for contentIndex, part := range parts {
+				if part.Type != dto.ContentTypeText {
+					return nil, fmt.Errorf("choice[%d] content[%d] type %q is not supported by Claude", choice.Index, contentIndex, part.Type)
+				}
+			}
+		}
+		toolCalls, parseErr := choice.Message.ParseToolCallsStrict()
+		if parseErr != nil {
+			return nil, fmt.Errorf("choice[%d]: %w", choice.Index, parseErr)
+		}
 		if allowClaudeThinking {
 			reasoningContent := choice.Message.GetReasoningContent()
 			preserveEmptyReasoning := reasoningContent == "" &&
-				(choice.Message.ReasoningContent != nil || choice.Message.Reasoning != nil) &&
-				len(choice.Message.ParseToolCalls()) > 0
+				(choice.Message.ReasoningContent != nil || choice.Message.ThinkingContent != nil || choice.Message.Reasoning != nil) &&
+				len(toolCalls) > 0
 			if reasoningContent != "" || preserveEmptyReasoning {
 				claudeContent := dto.ClaudeMediaMessage{}
 				claudeContent.Type = "thinking"
@@ -937,17 +1092,22 @@ func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relayco
 			claudeContent.SetText(textContent)
 			contents = append(contents, claudeContent)
 		}
-		for _, toolUse := range choice.Message.ParseToolCalls() {
+		for _, toolUse := range toolCalls {
+			if strings.TrimSpace(toolUse.ID) == "" || strings.TrimSpace(toolUse.Function.Name) == "" {
+				return nil, fmt.Errorf("choice[%d] tool call requires id and function name", choice.Index)
+			}
 			claudeContent := dto.ClaudeMediaMessage{}
 			claudeContent.Type = "tool_use"
 			claudeContent.Id = toolUse.ID
 			claudeContent.Name = toolUse.Function.Name
-			var mapParams map[string]interface{}
-			if err := common.Unmarshal([]byte(toolUse.Function.Arguments), &mapParams); err == nil {
-				claudeContent.Input = mapParams
-			} else {
-				claudeContent.Input = toolUse.Function.Arguments
+			mapParams := make(map[string]interface{})
+			arguments := strings.TrimSpace(toolUse.Function.Arguments)
+			if arguments != "" {
+				if err := common.Unmarshal([]byte(arguments), &mapParams); err != nil {
+					return nil, fmt.Errorf("choice[%d] tool %q arguments must be a JSON object: %w", choice.Index, toolUse.Function.Name, err)
+				}
 			}
+			claudeContent.Input = mapParams
 			contents = append(contents, claudeContent)
 		}
 	}
@@ -955,102 +1115,358 @@ func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relayco
 	claudeResponse.StopReason = stopReason
 	claudeResponse.Usage = buildClaudeUsageFromOpenAIUsage(&openAIResponse.Usage)
 
-	return claudeResponse
+	return claudeResponse, nil
 }
 
 func stopReasonOpenAI2Claude(reason string) string {
 	return reasonmap.OpenAIFinishReasonToClaudeStopReason(reason)
 }
 
-func toJSONString(v interface{}) string {
+func stopReasonOpenAI2ClaudeStrict(reason string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(reason))
+	switch normalized {
+	case "":
+		return "end_turn", nil
+	case "stop", "stop_sequence", "length", "max_tokens", "content_filter", "tool_calls":
+		return reasonmap.OpenAIFinishReasonToClaudeStopReason(normalized), nil
+	case "function_call":
+		return "tool_use", nil
+	default:
+		return "", fmt.Errorf("OpenAI finish_reason %q is not supported by Claude Messages", reason)
+	}
+}
+
+func toJSONString(v interface{}) (string, error) {
 	b, err := common.Marshal(v)
 	if err != nil {
-		return "{}"
+		return "", err
 	}
-	return string(b)
+	return string(b), nil
+}
+
+func parseGeminiTools(raw common.RawMessage) ([]dto.GeminiChatTool, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || common.GetJsonType(raw) == "null" {
+		return nil, nil
+	}
+
+	switch common.GetJsonType(raw) {
+	case "array":
+		var tools []dto.GeminiChatTool
+		if err := common.Unmarshal(raw, &tools); err != nil {
+			return nil, fmt.Errorf("failed to parse Gemini tools: %w", err)
+		}
+		return tools, nil
+	case "object":
+		var tool dto.GeminiChatTool
+		if err := common.Unmarshal(raw, &tool); err != nil {
+			return nil, fmt.Errorf("failed to parse Gemini tool: %w", err)
+		}
+		return []dto.GeminiChatTool{tool}, nil
+	default:
+		return nil, fmt.Errorf("Gemini tools must be an object or array")
+	}
+}
+
+func parseClaudeToolsForOpenAI(raw any) ([]dto.Tool, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	rawJSON, err := common.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	if common.GetJsonType(rawJSON) == "null" {
+		return nil, nil
+	}
+	if common.GetJsonType(rawJSON) != "array" {
+		return nil, fmt.Errorf("Claude tools must be an array")
+	}
+	var rawTools []common.RawMessage
+	if err := common.Unmarshal(rawJSON, &rawTools); err != nil {
+		return nil, err
+	}
+	tools := make([]dto.Tool, 0, len(rawTools))
+	for index, rawTool := range rawTools {
+		if common.GetJsonType(rawTool) != "object" {
+			return nil, fmt.Errorf("Claude tools[%d] must be an object", index)
+		}
+		var toolMap map[string]any
+		if err := common.Unmarshal(rawTool, &toolMap); err != nil {
+			return nil, err
+		}
+		toolType := strings.TrimSpace(common.Interface2String(toolMap["type"]))
+		if toolType != "" && toolType != "custom" {
+			return nil, fmt.Errorf("Claude built-in tool type %q cannot be converted to an OpenAI function tool", toolType)
+		}
+		var tool dto.Tool
+		if err := common.Unmarshal(rawTool, &tool); err != nil {
+			return nil, err
+		}
+		tool.Name = strings.TrimSpace(tool.Name)
+		if tool.Name == "" {
+			return nil, fmt.Errorf("Claude tools[%d] name is required", index)
+		}
+		if tool.InputSchema == nil {
+			tool.InputSchema = map[string]interface{}{"type": "object"}
+		}
+		tools = append(tools, tool)
+	}
+	return tools, nil
+}
+
+func geminiFunctionArgumentsToObject(arguments string) map[string]interface{} {
+	args := make(map[string]interface{})
+	if strings.TrimSpace(arguments) == "" {
+		return args
+	}
+	if err := common.Unmarshal([]byte(arguments), &args); err != nil {
+		// Gemini functionCall.args must be an object. Keep malformed upstream
+		// arguments inside a valid object instead of emitting invalid JSON.
+		return map[string]interface{}{"arguments": arguments}
+	}
+	if args == nil {
+		return map[string]interface{}{}
+	}
+	return args
+}
+
+func geminiFunctionArgumentsToObjectStrict(arguments string) (map[string]interface{}, error) {
+	if strings.TrimSpace(arguments) == "" {
+		return map[string]interface{}{}, nil
+	}
+	var args map[string]interface{}
+	if err := common.Unmarshal([]byte(arguments), &args); err != nil {
+		return nil, fmt.Errorf("Gemini functionCall arguments must be a JSON object: %w", err)
+	}
+	if args == nil {
+		return map[string]interface{}{}, nil
+	}
+	return args, nil
 }
 
 func GeminiToOpenAIRequest(geminiRequest *dto.GeminiChatRequest, info *relaycommon.RelayInfo) (*dto.GeneralOpenAIRequest, error) {
+	if geminiRequest == nil {
+		return nil, fmt.Errorf("Gemini request is nil")
+	}
+	if info == nil {
+		return nil, fmt.Errorf("relay info is required for Gemini conversion")
+	}
 	openaiRequest := &dto.GeneralOpenAIRequest{
 		Model:  info.UpstreamModelName,
 		Stream: lo.ToPtr(info.IsStream),
 	}
+	if len(geminiRequest.GenerationConfig.ResponseModalities) > 0 {
+		for _, modality := range geminiRequest.GenerationConfig.ResponseModalities {
+			if strings.ToUpper(strings.TrimSpace(modality)) != "TEXT" {
+				return nil, fmt.Errorf("Gemini response modality %q cannot be represented by OpenAI Chat Completions", modality)
+			}
+		}
+	}
+	if geminiJSONFieldEnabled(geminiRequest.GenerationConfig.SpeechConfig) {
+		return nil, fmt.Errorf("Gemini speechConfig cannot be represented by OpenAI Chat Completions")
+	}
+	if geminiJSONFieldEnabled(geminiRequest.GenerationConfig.ImageConfig) {
+		return nil, fmt.Errorf("Gemini imageConfig cannot be represented by OpenAI Chat Completions")
+	}
+	if geminiRequest.GenerationConfig.ResponseMimeType != "" {
+		if geminiRequest.GenerationConfig.ResponseMimeType != "application/json" {
+			return nil, fmt.Errorf("Gemini responseMimeType %q cannot be represented by OpenAI Chat Completions", geminiRequest.GenerationConfig.ResponseMimeType)
+		}
+		openaiRequest.ResponseFormat = &dto.ResponseFormat{Type: "json_object"}
+	}
+	if geminiRequest.GenerationConfig.ResponseSchema != nil || geminiJSONFieldEnabled(geminiRequest.GenerationConfig.ResponseJsonSchema) {
+		var schema any = geminiRequest.GenerationConfig.ResponseSchema
+		if schema == nil {
+			var decoded any
+			if err := common.Unmarshal(geminiRequest.GenerationConfig.ResponseJsonSchema, &decoded); err != nil {
+				return nil, fmt.Errorf("failed to parse Gemini responseJsonSchema: %w", err)
+			}
+			schema = decoded
+		}
+		schemaBytes, schemaErr := common.Marshal(schema)
+		if schemaErr != nil {
+			return nil, fmt.Errorf("failed to encode Gemini response schema: %w", schemaErr)
+		}
+		if common.GetJsonType(schemaBytes) != "object" {
+			return nil, fmt.Errorf("Gemini response schema must be a JSON object")
+		}
+		schemaRaw, err := common.Marshal(map[string]any{
+			"name":   "response",
+			"schema": schema,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode Gemini response schema: %w", err)
+		}
+		openaiRequest.ResponseFormat = &dto.ResponseFormat{Type: "json_schema", JsonSchema: schemaRaw}
+	}
 
-	// 转换 messages
+	// 转换 messages。Gemini 的 functionCall/functionResponse 通过显式 id
+	// 关联；没有 id 的旧客户端则按同名调用的先后顺序关联。
 	var messages []dto.Message
-	for _, content := range geminiRequest.Contents {
+	pendingCallIDsByName := make(map[string][]string)
+	callNamesByID := make(map[string]string)
+	callCounter := 0
+	for contentIndex, content := range geminiRequest.Contents {
+		role, err := convertGeminiRoleToOpenAI(content.Role)
+		if err != nil {
+			return nil, fmt.Errorf("Gemini contents[%d]: %w", contentIndex, err)
+		}
 		message := dto.Message{
-			Role: convertGeminiRoleToOpenAI(content.Role),
+			Role: role,
 		}
 
-		// 处理 parts
 		var mediaContents []dto.MediaContent
 		var toolCalls []dto.ToolCallRequest
-		for _, part := range content.Parts {
-			if part.Text != "" {
-				mediaContent := dto.MediaContent{
-					Type: "text",
-					Text: part.Text,
+		var reasoningBuilder strings.Builder
+		reasoningSeen := false
+		flushMessage := func() {
+			if len(toolCalls) > 0 {
+				message.SetToolCalls(toolCalls)
+			}
+			if len(mediaContents) == 1 && mediaContents[0].Type == "text" {
+				message.Content = mediaContents[0].Text
+			} else if len(mediaContents) > 0 {
+				message.SetMediaContent(mediaContents)
+			}
+			if reasoningSeen {
+				reasoning := reasoningBuilder.String()
+				message.ReasoningContent = &reasoning
+			}
+			if len(mediaContents) > 0 || len(toolCalls) > 0 || reasoningSeen {
+				messages = append(messages, message)
+			}
+			message = dto.Message{Role: role}
+			mediaContents = nil
+			toolCalls = nil
+			reasoningBuilder.Reset()
+			reasoningSeen = false
+		}
+		for partIndex, part := range content.Parts {
+			if err := validateGeminiRequestPartForOpenAI(part, contentIndex, partIndex); err != nil {
+				return nil, err
+			}
+			switch {
+			case part.FunctionCall != nil:
+				callID := strings.TrimSpace(part.FunctionCall.ID)
+				if callID == "" {
+					for {
+						callCounter++
+						callID = fmt.Sprintf("call_%d", callCounter)
+						if _, exists := callNamesByID[callID]; !exists {
+							break
+						}
+					}
 				}
-				mediaContents = append(mediaContents, mediaContent)
-			} else if part.InlineData != nil {
-				mediaContent := dto.MediaContent{
-					Type: "image_url",
-					ImageUrl: &dto.MessageImageUrl{
-						Url:      fmt.Sprintf("data:%s;base64,%s", part.InlineData.MimeType, part.InlineData.Data),
-						Detail:   "auto",
-						MimeType: part.InlineData.MimeType,
-					},
+				if _, exists := callNamesByID[callID]; exists {
+					return nil, fmt.Errorf("gemini functionCall id %q is duplicated", callID)
 				}
-				mediaContents = append(mediaContents, mediaContent)
-			} else if part.FileData != nil {
-				mediaContent := dto.MediaContent{
-					Type: "image_url",
-					ImageUrl: &dto.MessageImageUrl{
-						Url:      part.FileData.FileUri,
-						Detail:   "auto",
-						MimeType: part.FileData.MimeType,
-					},
+				functionName := strings.TrimSpace(part.FunctionCall.FunctionName)
+				if functionName == "" {
+					return nil, fmt.Errorf("gemini functionCall name is required")
 				}
-				mediaContents = append(mediaContents, mediaContent)
-			} else if part.FunctionCall != nil {
-				// 处理 Gemini 的工具调用
-				toolCall := dto.ToolCallRequest{
-					ID:   fmt.Sprintf("call_%d", len(toolCalls)+1), // 生成唯一ID
+				arguments, err := geminiFunctionCallArgumentsToJSONString(part.FunctionCall.Arguments)
+				if err != nil {
+					return nil, fmt.Errorf("Gemini contents[%d].parts[%d] functionCall %s: %w", contentIndex, partIndex, functionName, err)
+				}
+				toolCalls = append(toolCalls, dto.ToolCallRequest{
+					ID:   callID,
 					Type: "function",
 					Function: dto.FunctionRequest{
-						Name:      part.FunctionCall.FunctionName,
-						Arguments: toJSONString(part.FunctionCall.Arguments),
+						Name:      functionName,
+						Arguments: arguments,
 					},
+				})
+				pendingCallIDsByName[functionName] = append(pendingCallIDsByName[functionName], callID)
+				callNamesByID[callID] = functionName
+			case part.FunctionResponse != nil:
+				// A Gemini content may legally mix functionResponse and text parts.
+				// OpenAI Chat Completions has no inline function-response part, so
+				// flush the content accumulated before this response and emit the
+				// tool message at this exact position instead of appending all tool
+				// messages after the content (which would reorder functionResponse,
+				// text into text, functionResponse).
+				flushMessage()
+				functionResponse := part.FunctionResponse
+				callID, err := geminiFunctionResponseID(functionResponse.ID)
+				if err != nil {
+					return nil, err
 				}
-				toolCalls = append(toolCalls, toolCall)
-			} else if part.FunctionResponse != nil {
-				// 处理 Gemini 的工具响应，创建单独的 tool 消息
-				toolMessage := dto.Message{
-					Role:       "tool",
-					ToolCallId: fmt.Sprintf("call_%d", len(toolCalls)), // 使用对应的调用ID
+				if callID != "" {
+					expectedName, knownCall := callNamesByID[callID]
+					if !knownCall {
+						return nil, fmt.Errorf("gemini functionResponse references unknown functionCall id %q", callID)
+					}
+					if strings.TrimSpace(functionResponse.Name) != "" && strings.TrimSpace(functionResponse.Name) != expectedName {
+						return nil, fmt.Errorf("gemini functionResponse name %q does not match functionCall %q for id %q", functionResponse.Name, expectedName, callID)
+					}
 				}
-				toolMessage.SetStringContent(toJSONString(part.FunctionResponse.Response))
+				functionName := strings.TrimSpace(functionResponse.Name)
+				if functionName == "" && callID != "" {
+					functionName = callNamesByID[callID]
+				}
+				if functionName == "" {
+					return nil, fmt.Errorf("gemini functionResponse name is required")
+				}
+				if callID == "" {
+					pending := pendingCallIDsByName[functionName]
+					if len(pending) == 0 {
+						return nil, fmt.Errorf("cannot match gemini functionResponse %q to a functionCall id", functionName)
+					}
+					callID = pending[0]
+					pendingCallIDsByName[functionName] = pending[1:]
+				} else {
+					pending := pendingCallIDsByName[functionName]
+					matched := false
+					for i, pendingID := range pending {
+						if pendingID == callID {
+							pendingCallIDsByName[functionName] = append(pending[:i], pending[i+1:]...)
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						return nil, fmt.Errorf("gemini functionResponse for id %q has no pending functionCall", callID)
+					}
+				}
+				result, err := toJSONString(functionResponse.Response)
+				if err != nil {
+					return nil, fmt.Errorf("failed to encode Gemini functionResponse %s: %w", functionName, err)
+				}
+				toolMessage := dto.Message{Role: "tool", ToolCallId: callID}
+				toolMessage.SetStringContent(result)
 				messages = append(messages, toolMessage)
+			case part.Thought:
+				reasoningSeen = true
+				if part.Text != "" {
+					if reasoningBuilder.Len() > 0 {
+						reasoningBuilder.WriteString("\n")
+					}
+					reasoningBuilder.WriteString(part.Text)
+				}
+			case part.Text != "":
+				mediaContents = append(mediaContents, dto.MediaContent{Type: "text", Text: part.Text})
+			case part.InlineData != nil:
+				media, err := geminiInlineDataToOpenAIMedia(part.InlineData)
+				if err != nil {
+					return nil, fmt.Errorf("Gemini contents[%d].parts[%d]: %w", contentIndex, partIndex, err)
+				}
+				mediaContents = append(mediaContents, media)
+			case part.FileData != nil:
+				media, err := geminiFileDataToOpenAIMedia(part.FileData)
+				if err != nil {
+					return nil, fmt.Errorf("Gemini contents[%d].parts[%d]: %w", contentIndex, partIndex, err)
+				}
+				mediaContents = append(mediaContents, media)
+			case part.ExecutableCode != nil, part.CodeExecutionResult != nil,
+				len(part.ThoughtSignature) > 0, len(part.MediaResolution) > 0, len(part.VideoMetadata) > 0:
+				return nil, fmt.Errorf("Gemini contents[%d].parts[%d] contains a field that cannot be represented by OpenAI Chat Completions", contentIndex, partIndex)
+			default:
+				return nil, fmt.Errorf("Gemini contents[%d].parts[%d] has no supported content", contentIndex, partIndex)
 			}
 		}
 
-		// 设置消息内容
-		if len(toolCalls) > 0 {
-			// 如果有工具调用，设置工具调用
-			message.SetToolCalls(toolCalls)
-		} else if len(mediaContents) == 1 && mediaContents[0].Type == "text" {
-			// 如果只有一个文本内容，直接设置字符串
-			message.Content = mediaContents[0].Text
-		} else if len(mediaContents) > 0 {
-			// 如果有多个内容或包含媒体，设置为数组
-			message.SetMediaContent(mediaContents)
-		}
-
-		// 只有当消息有内容或工具调用时才添加
-		if len(message.ParseContent()) > 0 || len(message.ToolCalls) > 0 {
-			messages = append(messages, message)
-		}
+		flushMessage()
 	}
 
 	openaiRequest.Messages = messages
@@ -1058,34 +1474,65 @@ func GeminiToOpenAIRequest(geminiRequest *dto.GeminiChatRequest, info *relaycomm
 	if geminiRequest.GenerationConfig.Temperature != nil {
 		openaiRequest.Temperature = geminiRequest.GenerationConfig.Temperature
 	}
-	if geminiRequest.GenerationConfig.TopP != nil && *geminiRequest.GenerationConfig.TopP > 0 {
+	if geminiRequest.GenerationConfig.TopP != nil {
 		openaiRequest.TopP = lo.ToPtr(*geminiRequest.GenerationConfig.TopP)
 	}
-	if geminiRequest.GenerationConfig.TopK != nil && *geminiRequest.GenerationConfig.TopK > 0 {
-		openaiRequest.TopK = lo.ToPtr(int(*geminiRequest.GenerationConfig.TopK))
+	if geminiRequest.GenerationConfig.TopK != nil {
+		topK := *geminiRequest.GenerationConfig.TopK
+		if topK < 0 || topK != float64(int(topK)) {
+			return nil, fmt.Errorf("Gemini topK must be a non-negative integer")
+		}
+		openaiRequest.TopK = lo.ToPtr(int(topK))
 	}
 	if geminiRequest.GenerationConfig.MaxOutputTokens != nil && *geminiRequest.GenerationConfig.MaxOutputTokens > 0 {
 		openaiRequest.MaxTokens = lo.ToPtr(*geminiRequest.GenerationConfig.MaxOutputTokens)
 	}
-	// gemini stop sequences 最多 5 个，openai stop 最多 4 个
+	// OpenAI Chat Completions accepts at most four stop sequences. Refuse a
+	// fifth sequence instead of silently truncating it.
 	if len(geminiRequest.GenerationConfig.StopSequences) > 0 {
-		openaiRequest.Stop = geminiRequest.GenerationConfig.StopSequences[:4]
+		if len(geminiRequest.GenerationConfig.StopSequences) > 4 {
+			return nil, fmt.Errorf("Gemini stopSequences has %d entries; OpenAI supports at most 4", len(geminiRequest.GenerationConfig.StopSequences))
+		}
+		for index, stop := range geminiRequest.GenerationConfig.StopSequences {
+			if strings.TrimSpace(stop) == "" {
+				return nil, fmt.Errorf("Gemini stopSequences[%d] must not be empty", index)
+			}
+		}
+		openaiRequest.Stop = append([]string(nil), geminiRequest.GenerationConfig.StopSequences...)
 	}
-	if geminiRequest.GenerationConfig.CandidateCount != nil && *geminiRequest.GenerationConfig.CandidateCount > 0 {
+	if geminiRequest.GenerationConfig.CandidateCount != nil {
+		if *geminiRequest.GenerationConfig.CandidateCount <= 0 {
+			return nil, fmt.Errorf("Gemini candidateCount must be a positive integer")
+		}
 		openaiRequest.N = lo.ToPtr(*geminiRequest.GenerationConfig.CandidateCount)
+	}
+	if geminiRequest.GenerationConfig.PresencePenalty != nil {
+		openaiRequest.PresencePenalty = lo.ToPtr(float64(*geminiRequest.GenerationConfig.PresencePenalty))
+	}
+	if geminiRequest.GenerationConfig.FrequencyPenalty != nil {
+		openaiRequest.FrequencyPenalty = lo.ToPtr(float64(*geminiRequest.GenerationConfig.FrequencyPenalty))
 	}
 
 	// 转换工具调用
-	if len(geminiRequest.GetTools()) > 0 {
+	geminiTools, err := parseGeminiTools(geminiRequest.Tools)
+	if err != nil {
+		return nil, err
+	}
+	if len(geminiTools) > 0 {
 		var tools []dto.ToolCallRequest
-		for _, tool := range geminiRequest.GetTools() {
+		for toolIndex, tool := range geminiTools {
+			if tool.GoogleSearch != nil || tool.GoogleSearchRetrieval != nil || tool.CodeExecution != nil || tool.URLContext != nil {
+				return nil, fmt.Errorf("Gemini tools[%d] contains a server-side tool that cannot be represented by OpenAI Chat Completions", toolIndex)
+			}
 			if tool.FunctionDeclarations != nil {
 				functionDeclarations, err := common.Any2Type[[]dto.FunctionRequest](tool.FunctionDeclarations)
 				if err != nil {
-					common.SysError(fmt.Sprintf("failed to parse gemini function declarations: %v (type=%T)", err, tool.FunctionDeclarations))
-					continue
+					return nil, fmt.Errorf("failed to parse Gemini tools[%d].functionDeclarations: %w", toolIndex, err)
 				}
-				for _, function := range functionDeclarations {
+				for functionIndex, function := range functionDeclarations {
+					if strings.TrimSpace(function.Name) == "" {
+						return nil, fmt.Errorf("Gemini tools[%d].functionDeclarations[%d].name is required", toolIndex, functionIndex)
+					}
 					openAITool := dto.ToolCallRequest{
 						Type: "function",
 						Function: dto.FunctionRequest{
@@ -1102,13 +1549,36 @@ func GeminiToOpenAIRequest(geminiRequest *dto.GeminiChatRequest, info *relaycomm
 			openaiRequest.Tools = tools
 		}
 	}
+	if geminiRequest.ToolConfig != nil {
+		toolChoice, err := geminiToolConfigToOpenAIToolChoice(geminiRequest.ToolConfig)
+		if err != nil {
+			return nil, err
+		}
+		openaiRequest.ToolChoice = toolChoice
+	}
 
 	// gemini system instructions
 	if geminiRequest.SystemInstructions != nil {
-		// 将系统指令作为第一条消息插入
-		systemMessage := dto.Message{
-			Role:    "system",
-			Content: extractTextFromGeminiParts(geminiRequest.SystemInstructions.Parts),
+		if geminiRequest.SystemInstructions.Role != "" && geminiRequest.SystemInstructions.Role != "system" {
+			return nil, fmt.Errorf("Gemini systemInstruction role %q is not supported", geminiRequest.SystemInstructions.Role)
+		}
+		systemParts := make([]dto.MediaContent, 0, len(geminiRequest.SystemInstructions.Parts))
+		for index, part := range geminiRequest.SystemInstructions.Parts {
+			if part.Thought || part.FunctionCall != nil || part.FunctionResponse != nil || part.ExecutableCode != nil || part.CodeExecutionResult != nil || part.InlineData != nil || part.FileData != nil {
+				return nil, fmt.Errorf("Gemini systemInstruction part[%d] is not supported by OpenAI Chat Completions", index)
+			}
+			switch {
+			case part.Text != "":
+				systemParts = append(systemParts, dto.MediaContent{Type: dto.ContentTypeText, Text: part.Text})
+			default:
+				return nil, fmt.Errorf("Gemini systemInstruction part[%d] has no supported content", index)
+			}
+		}
+		systemMessage := dto.Message{Role: "system"}
+		if len(systemParts) == 1 && systemParts[0].Type == dto.ContentTypeText {
+			systemMessage.SetStringContent(systemParts[0].Text)
+		} else {
+			systemMessage.SetMediaContent(systemParts)
 		}
 		openaiRequest.Messages = append([]dto.Message{systemMessage}, openaiRequest.Messages...)
 	}
@@ -1116,16 +1586,229 @@ func GeminiToOpenAIRequest(geminiRequest *dto.GeminiChatRequest, info *relaycomm
 	return openaiRequest, nil
 }
 
-func convertGeminiRoleToOpenAI(geminiRole string) string {
-	switch geminiRole {
+func geminiFunctionResponseID(raw common.RawMessage) (string, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || common.GetJsonType(raw) == "null" {
+		return "", nil
+	}
+	if common.GetJsonType(raw) != "string" {
+		return "", fmt.Errorf("gemini functionResponse id must be a string")
+	}
+	return common.JsonRawMessageToString(raw), nil
+}
+
+func validateGeminiRequestPartForOpenAI(part dto.GeminiPart, contentIndex int, partIndex int) error {
+	coreFields := 0
+	if part.Text != "" {
+		coreFields++
+	}
+	if part.InlineData != nil {
+		coreFields++
+	}
+	if part.FunctionCall != nil {
+		coreFields++
+	}
+	if part.FunctionResponse != nil {
+		coreFields++
+	}
+	if part.FileData != nil {
+		coreFields++
+	}
+	if part.ExecutableCode != nil {
+		coreFields++
+	}
+	if part.CodeExecutionResult != nil {
+		coreFields++
+	}
+	if coreFields > 1 {
+		return fmt.Errorf("Gemini contents[%d].parts[%d] contains multiple content fields", contentIndex, partIndex)
+	}
+	if part.Thought && (part.InlineData != nil || part.FunctionCall != nil || part.FunctionResponse != nil || part.FileData != nil || part.ExecutableCode != nil || part.CodeExecutionResult != nil) {
+		return fmt.Errorf("Gemini contents[%d].parts[%d] thought cannot be combined with non-text content", contentIndex, partIndex)
+	}
+	if len(part.ThoughtSignature) > 0 && common.GetJsonType(part.ThoughtSignature) != "null" {
+		return fmt.Errorf("Gemini contents[%d].parts[%d].thoughtSignature cannot be represented by OpenAI Chat Completions", contentIndex, partIndex)
+	}
+	if len(part.MediaResolution) > 0 && common.GetJsonType(part.MediaResolution) != "null" {
+		return fmt.Errorf("Gemini contents[%d].parts[%d].mediaResolution cannot be represented by OpenAI Chat Completions", contentIndex, partIndex)
+	}
+	if len(part.VideoMetadata) > 0 && common.GetJsonType(part.VideoMetadata) != "null" {
+		return fmt.Errorf("Gemini contents[%d].parts[%d].videoMetadata cannot be represented by OpenAI Chat Completions", contentIndex, partIndex)
+	}
+	if functionResponse := part.FunctionResponse; functionResponse != nil {
+		if len(functionResponse.WillContinue) > 0 && common.GetJsonType(functionResponse.WillContinue) != "null" {
+			return fmt.Errorf("Gemini contents[%d].parts[%d].functionResponse.willContinue cannot be represented by OpenAI Chat Completions", contentIndex, partIndex)
+		}
+		if len(functionResponse.Scheduling) > 0 && common.GetJsonType(functionResponse.Scheduling) != "null" {
+			return fmt.Errorf("Gemini contents[%d].parts[%d].functionResponse.scheduling cannot be represented by OpenAI Chat Completions", contentIndex, partIndex)
+		}
+		if len(functionResponse.Parts) > 0 && common.GetJsonType(functionResponse.Parts) != "null" {
+			return fmt.Errorf("Gemini contents[%d].parts[%d].functionResponse.parts cannot be represented by OpenAI Chat Completions", contentIndex, partIndex)
+		}
+	}
+	return nil
+}
+
+func convertGeminiRoleToOpenAI(geminiRole string) (string, error) {
+	switch strings.TrimSpace(geminiRole) {
 	case "user":
-		return "user"
+		return "user", nil
 	case "model":
-		return "assistant"
+		return "assistant", nil
 	case "function":
-		return "function"
+		return "function", nil
+	case "":
+		// Gemini omits role on some first-turn requests. Treat an omitted role
+		// as user, but never reinterpret an unknown role as user.
+		return "user", nil
 	default:
-		return "user"
+		return "", fmt.Errorf("role %q is not supported by OpenAI Chat Completions", geminiRole)
+	}
+}
+
+func geminiFunctionCallArgumentsToJSONString(arguments any) (string, error) {
+	if arguments == nil {
+		return "{}", nil
+	}
+	if raw, ok := arguments.(common.RawMessage); ok {
+		arguments = raw
+	}
+	if raw, ok := arguments.([]byte); ok {
+		arguments = common.RawMessage(raw)
+	}
+	if raw, ok := arguments.(common.RawMessage); ok {
+		if strings.TrimSpace(string(raw)) == "" || common.GetJsonType(raw) == "null" {
+			return "{}", nil
+		}
+		if common.GetJsonType(raw) != "object" {
+			return "", fmt.Errorf("arguments must be a JSON object")
+		}
+		return string(raw), nil
+	}
+	if text, ok := arguments.(string); ok {
+		trimmed := strings.TrimSpace(text)
+		if trimmed == "" {
+			return "{}", nil
+		}
+		var object map[string]interface{}
+		if err := common.Unmarshal([]byte(trimmed), &object); err != nil || object == nil {
+			return "", fmt.Errorf("arguments must be a JSON object")
+		}
+		return trimmed, nil
+	}
+	encoded, err := common.Marshal(arguments)
+	if err != nil {
+		return "", fmt.Errorf("arguments must be a JSON object: %w", err)
+	}
+	if common.GetJsonType(encoded) != "object" {
+		return "", fmt.Errorf("arguments must be a JSON object")
+	}
+	return string(encoded), nil
+}
+
+func geminiInlineDataToOpenAIMedia(data *dto.GeminiInlineData) (dto.MediaContent, error) {
+	if data == nil || strings.TrimSpace(data.MimeType) == "" || strings.TrimSpace(data.Data) == "" {
+		return dto.MediaContent{}, fmt.Errorf("inlineData requires mimeType and data")
+	}
+	mimeType := strings.ToLower(strings.TrimSpace(data.MimeType))
+	dataURL := fmt.Sprintf("data:%s;base64,%s", data.MimeType, data.Data)
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		return dto.MediaContent{Type: dto.ContentTypeImageURL, ImageUrl: &dto.MessageImageUrl{Url: dataURL, Detail: "auto", MimeType: data.MimeType}}, nil
+	case strings.HasPrefix(mimeType, "audio/"):
+		format := strings.TrimPrefix(mimeType, "audio/")
+		if format == "" {
+			return dto.MediaContent{}, fmt.Errorf("inlineData audio MIME type is invalid")
+		}
+		return dto.MediaContent{Type: dto.ContentTypeInputAudio, InputAudio: &dto.MessageInputAudio{Data: data.Data, Format: format}}, nil
+	case strings.HasPrefix(mimeType, "video/"):
+		return dto.MediaContent{Type: dto.ContentTypeVideoUrl, VideoUrl: &dto.MessageVideoUrl{Url: dataURL}}, nil
+	default:
+		return dto.MediaContent{Type: dto.ContentTypeFile, File: &dto.MessageFile{FileData: data.Data, MimeType: data.MimeType}}, nil
+	}
+}
+
+func geminiFileDataToOpenAIMedia(data *dto.GeminiFileData) (dto.MediaContent, error) {
+	if data == nil || strings.TrimSpace(data.FileUri) == "" {
+		return dto.MediaContent{}, fmt.Errorf("fileData requires fileUri")
+	}
+	mimeType := strings.ToLower(strings.TrimSpace(data.MimeType))
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		return dto.MediaContent{Type: dto.ContentTypeImageURL, ImageUrl: &dto.MessageImageUrl{Url: data.FileUri, Detail: "auto", MimeType: data.MimeType}}, nil
+	case strings.HasPrefix(mimeType, "video/"):
+		return dto.MediaContent{Type: dto.ContentTypeVideoUrl, VideoUrl: &dto.MessageVideoUrl{Url: data.FileUri}}, nil
+	default:
+		return dto.MediaContent{Type: dto.ContentTypeFile, File: &dto.MessageFile{FileUrl: data.FileUri, MimeType: data.MimeType}}, nil
+	}
+}
+
+func geminiToolConfigToOpenAIToolChoice(config *dto.ToolConfig) (any, error) {
+	if config == nil {
+		return nil, nil
+	}
+	if config.RetrievalConfig != nil {
+		return nil, fmt.Errorf("Gemini retrieval tool configuration cannot be represented by OpenAI Chat Completions")
+	}
+	if config.IncludeServerSideToolInvocations != nil {
+		return nil, fmt.Errorf("Gemini includeServerSideToolInvocations cannot be represented by OpenAI Chat Completions")
+	}
+	if config.FunctionCallingConfig == nil {
+		return nil, nil
+	}
+	functionConfig := config.FunctionCallingConfig
+	mode := strings.ToUpper(strings.TrimSpace(string(functionConfig.Mode)))
+	switch mode {
+	case "AUTO":
+		if len(functionConfig.AllowedFunctionNames) > 0 {
+			return nil, fmt.Errorf("Gemini functionCallingConfig.allowedFunctionNames is only supported with mode ANY")
+		}
+		return "auto", nil
+	case "NONE":
+		if len(functionConfig.AllowedFunctionNames) > 0 {
+			return nil, fmt.Errorf("Gemini functionCallingConfig.allowedFunctionNames is only supported with mode ANY")
+		}
+		return "none", nil
+	case "ANY":
+		if len(functionConfig.AllowedFunctionNames) == 0 {
+			return "required", nil
+		}
+		if len(functionConfig.AllowedFunctionNames) != 1 || strings.TrimSpace(functionConfig.AllowedFunctionNames[0]) == "" {
+			return nil, fmt.Errorf("Gemini functionCallingConfig.allowedFunctionNames must contain exactly one non-empty name for OpenAI Chat Completions")
+		}
+		return map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name": strings.TrimSpace(functionConfig.AllowedFunctionNames[0]),
+			},
+		}, nil
+	case "":
+		return nil, fmt.Errorf("Gemini functionCallingConfig.mode is required")
+	default:
+		return nil, fmt.Errorf("Gemini functionCallingConfig.mode %q is not supported by OpenAI Chat Completions", functionConfig.Mode)
+	}
+}
+
+func geminiJSONFieldEnabled(raw common.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return false
+	}
+	switch common.GetJsonType([]byte(trimmed)) {
+	case "object":
+		var object map[string]any
+		if err := common.Unmarshal([]byte(trimmed), &object); err != nil {
+			return true
+		}
+		return len(object) > 0
+	case "array":
+		var array []common.RawMessage
+		if err := common.Unmarshal([]byte(trimmed), &array); err != nil {
+			return true
+		}
+		return len(array) > 0
+	default:
+		return true
 	}
 }
 
@@ -1141,6 +1824,14 @@ func extractTextFromGeminiParts(parts []dto.GeminiPart) string {
 
 // ResponseOpenAI2Gemini 将 OpenAI 响应转换为 Gemini 格式
 func ResponseOpenAI2Gemini(openAIResponse *dto.OpenAITextResponse, info *relaycommon.RelayInfo) *dto.GeminiChatResponse {
+	response, _ := ResponseOpenAI2GeminiWithError(openAIResponse, info)
+	return response
+}
+
+func ResponseOpenAI2GeminiWithError(openAIResponse *dto.OpenAITextResponse, info *relaycommon.RelayInfo) (*dto.GeminiChatResponse, error) {
+	if openAIResponse == nil {
+		return nil, fmt.Errorf("OpenAI response is nil")
+	}
 	geminiResponse := &dto.GeminiChatResponse{
 		Candidates: make([]dto.GeminiChatCandidate, 0, len(openAIResponse.Choices)),
 		UsageMetadata: dto.GeminiUsageMetadata{
@@ -1155,20 +1846,14 @@ func ResponseOpenAI2Gemini(openAIResponse *dto.OpenAITextResponse, info *relayco
 			Index:         int64(choice.Index),
 			SafetyRatings: []dto.GeminiChatSafetyRating{},
 		}
+		toolCalls, parseErr := choice.Message.ParseToolCallsStrict()
+		if parseErr != nil {
+			return nil, fmt.Errorf("choice[%d]: %w", choice.Index, parseErr)
+		}
 
-		// 设置结束原因
-		var finishReason string
-		switch choice.FinishReason {
-		case "stop":
-			finishReason = "STOP"
-		case "length":
-			finishReason = "MAX_TOKENS"
-		case "content_filter":
-			finishReason = "SAFETY"
-		case "tool_calls":
-			finishReason = "STOP"
-		default:
-			finishReason = "STOP"
+		finishReason, err := openAIFinishReasonToGemini(choice.FinishReason)
+		if err != nil {
+			return nil, fmt.Errorf("choice[%d]: %w", choice.Index, err)
 		}
 		candidate.FinishReason = &finishReason
 
@@ -1178,71 +1863,272 @@ func ResponseOpenAI2Gemini(openAIResponse *dto.OpenAITextResponse, info *relayco
 			Parts: make([]dto.GeminiPart, 0),
 		}
 
-		// 处理工具调用
-		toolCalls := choice.Message.ParseToolCalls()
-		if len(toolCalls) > 0 {
-			for _, toolCall := range toolCalls {
-				// 解析参数
-				var args map[string]interface{}
-				if toolCall.Function.Arguments != "" {
-					if err := common.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-						args = map[string]interface{}{"arguments": toolCall.Function.Arguments}
-					}
-				} else {
-					args = make(map[string]interface{})
-				}
-
-				part := dto.GeminiPart{
-					FunctionCall: &dto.FunctionCall{
-						FunctionName: toolCall.Function.Name,
-						Arguments:    args,
-					},
-				}
-				content.Parts = append(content.Parts, part)
+		// OpenAI stores reasoning, visible text, and tool calls in separate
+		// fields. Gemini can represent all three parts in one candidate, so do
+		// not let tool calls suppress either form of text.
+		if choice.Message.ReasoningContent != nil || choice.Message.ThinkingContent != nil || choice.Message.Reasoning != nil {
+			content.Parts = append(content.Parts, dto.GeminiPart{
+				Thought: true,
+				Text:    choice.Message.GetReasoningContent(),
+			})
+		}
+		if choice.Message.Content != nil && !choice.Message.IsStringContent() {
+			parts, parseErr := choice.Message.ParseContentStrict()
+			if parseErr != nil {
+				return nil, fmt.Errorf("choice[%d] content: %w", choice.Index, parseErr)
 			}
-		} else {
-			// 处理文本内容
-			textContent := choice.Message.StringContent()
-			if textContent != "" {
-				part := dto.GeminiPart{
-					Text: textContent,
-				}
-				content.Parts = append(content.Parts, part)
+			mediaParts, err := openAIMediaContentToGemini(parts)
+			if err != nil {
+				return nil, fmt.Errorf("choice[%d] content: %w", choice.Index, err)
 			}
+			content.Parts = append(content.Parts, mediaParts...)
+		} else if textContent := choice.Message.StringContent(); textContent != "" {
+			content.Parts = append(content.Parts, dto.GeminiPart{Text: textContent})
+		}
+		for _, toolCall := range toolCalls {
+			if strings.TrimSpace(toolCall.ID) == "" || strings.TrimSpace(toolCall.Function.Name) == "" {
+				return nil, fmt.Errorf("choice[%d] tool call requires id and function name", choice.Index)
+			}
+			if toolCall.Type != "" && toolCall.Type != "function" {
+				return nil, fmt.Errorf("choice[%d] tool call type %q is not supported by Gemini", choice.Index, toolCall.Type)
+			}
+			args, err := geminiFunctionArgumentsToObjectStrict(toolCall.Function.Arguments)
+			if err != nil {
+				return nil, fmt.Errorf("choice[%d] tool %q arguments: %w", choice.Index, toolCall.Function.Name, err)
+			}
+			content.Parts = append(content.Parts, dto.GeminiPart{
+				FunctionCall: &dto.FunctionCall{
+					ID:           toolCall.ID,
+					FunctionName: toolCall.Function.Name,
+					Arguments:    args,
+				},
+			})
 		}
 
 		candidate.Content = content
 		geminiResponse.Candidates = append(geminiResponse.Candidates, candidate)
 	}
 
-	return geminiResponse
+	return geminiResponse, nil
 }
 
-// StreamResponseOpenAI2Gemini 将 OpenAI 流式响应转换为 Gemini 格式
+func openAIFinishReasonToGemini(reason string) (string, error) {
+	switch strings.TrimSpace(reason) {
+	case "", "stop", "tool_calls", "function_call":
+		return "STOP", nil
+	case "length":
+		return "MAX_TOKENS", nil
+	case "content_filter":
+		return "SAFETY", nil
+	default:
+		return "", fmt.Errorf("finish_reason %q is not supported by Gemini", reason)
+	}
+}
+
+func openAIMediaContentToGemini(messages []dto.MediaContent) ([]dto.GeminiPart, error) {
+	parts := make([]dto.GeminiPart, 0, len(messages))
+	for index, message := range messages {
+		switch message.Type {
+		case dto.ContentTypeText:
+			if message.Text != "" {
+				parts = append(parts, dto.GeminiPart{Text: message.Text})
+			}
+		case dto.ContentTypeImageURL:
+			image := message.GetImageMedia()
+			if image == nil || strings.TrimSpace(image.Url) == "" {
+				return nil, fmt.Errorf("content[%d] image_url.url is required", index)
+			}
+			part, err := openAIURLToGeminiMedia(image.Url, image.MimeType, "image")
+			if err != nil {
+				return nil, fmt.Errorf("content[%d]: %w", index, err)
+			}
+			parts = append(parts, part)
+		case dto.ContentTypeInputAudio:
+			audio := message.GetInputAudio()
+			if audio == nil || strings.TrimSpace(audio.Data) == "" || strings.TrimSpace(audio.Format) == "" {
+				return nil, fmt.Errorf("content[%d] input_audio.data and format are required", index)
+			}
+			parts = append(parts, dto.GeminiPart{InlineData: &dto.GeminiInlineData{
+				MimeType: "audio/" + strings.TrimPrefix(strings.ToLower(audio.Format), "audio/"),
+				Data:     audio.Data,
+			}})
+		case dto.ContentTypeFile:
+			file := message.GetFile()
+			if file == nil {
+				return nil, fmt.Errorf("content[%d] file is required", index)
+			}
+			if file.FileData != "" {
+				if strings.TrimSpace(file.MimeType) == "" {
+					return nil, fmt.Errorf("content[%d] file mime_type is required when file_data is used", index)
+				}
+				parts = append(parts, dto.GeminiPart{InlineData: &dto.GeminiInlineData{MimeType: file.MimeType, Data: file.FileData}})
+			} else if strings.TrimSpace(file.FileUrl) != "" {
+				parts = append(parts, dto.GeminiPart{FileData: &dto.GeminiFileData{MimeType: file.MimeType, FileUri: file.FileUrl}})
+			} else {
+				return nil, fmt.Errorf("content[%d] file requires file_data or file_url", index)
+			}
+		case dto.ContentTypeVideoUrl:
+			video := message.GetVideoUrl()
+			if video == nil || strings.TrimSpace(video.Url) == "" {
+				return nil, fmt.Errorf("content[%d] video_url.url is required", index)
+			}
+			parts = append(parts, dto.GeminiPart{FileData: &dto.GeminiFileData{FileUri: video.Url}})
+		default:
+			return nil, fmt.Errorf("content[%d] type %q is not supported by Gemini", index, message.Type)
+		}
+	}
+	return parts, nil
+}
+
+func openAIURLToGeminiMedia(url string, mimeType string, kind string) (dto.GeminiPart, error) {
+	if strings.HasPrefix(strings.ToLower(url), "data:") {
+		format, data, err := DecodeBase64FileData(url)
+		if err != nil {
+			return dto.GeminiPart{}, fmt.Errorf("invalid %s data URL: %w", kind, err)
+		}
+		return dto.GeminiPart{InlineData: &dto.GeminiInlineData{MimeType: format, Data: data}}, nil
+	}
+	return dto.GeminiPart{FileData: &dto.GeminiFileData{MimeType: mimeType, FileUri: url}}, nil
+}
+
+// StreamResponseOpenAI2Gemini 将 OpenAI 流式响应转换为 Gemini 格式。
+// 保留此无错误返回的包装函数以兼容旧调用方；新的中继路径应使用
+// StreamResponseOpenAI2GeminiWithError，以避免把不可表达的数据静默改写。
 func StreamResponseOpenAI2Gemini(openAIResponse *dto.ChatCompletionsStreamResponse, info *relaycommon.RelayInfo) *dto.GeminiChatResponse {
-	// 检查是否有实际内容或结束标志
+	response, _ := StreamResponseOpenAI2GeminiWithError(openAIResponse, info)
+	return response
+}
+
+func ensureGeminiConvertInfo(info *relaycommon.RelayInfo) *relaycommon.GeminiConvertInfo {
+	if info == nil {
+		return &relaycommon.GeminiConvertInfo{}
+	}
+	if info.GeminiConvertInfo == nil {
+		info.GeminiConvertInfo = &relaycommon.GeminiConvertInfo{}
+	}
+	if info.GeminiConvertInfo.ToolCalls == nil {
+		info.GeminiConvertInfo.ToolCalls = make(map[int]map[int]*relaycommon.GeminiToolCallState)
+	}
+	return info.GeminiConvertInfo
+}
+
+func geminiToolCallStateForChoice(convertInfo *relaycommon.GeminiConvertInfo, choiceIndex int, toolIndex int) *relaycommon.GeminiToolCallState {
+	if convertInfo.ToolCalls == nil {
+		convertInfo.ToolCalls = make(map[int]map[int]*relaycommon.GeminiToolCallState)
+	}
+	byIndex := convertInfo.ToolCalls[choiceIndex]
+	if byIndex == nil {
+		byIndex = make(map[int]*relaycommon.GeminiToolCallState)
+		convertInfo.ToolCalls[choiceIndex] = byIndex
+	}
+	state := byIndex[toolIndex]
+	if state == nil {
+		state = &relaycommon.GeminiToolCallState{}
+		byIndex[toolIndex] = state
+	}
+	return state
+}
+
+func geminiToolCallArguments(raw string) (map[string]interface{}, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, false
+	}
+	var args map[string]interface{}
+	if common.Unmarshal([]byte(trimmed), &args) != nil {
+		// A streamed OpenAI tool call may contain an incomplete JSON prefix.
+		// Defer the decision until the call is complete, where the caller can
+		// return a precise conversion error instead of corrupting the payload.
+		return nil, false
+	}
+	if args == nil {
+		return map[string]interface{}{}, true
+	}
+	return args, true
+}
+
+func flushGeminiToolCallState(
+	convertInfo *relaycommon.GeminiConvertInfo,
+	choiceIndex int,
+	parts *[]dto.GeminiPart,
+	final bool,
+) error {
+	byIndex := convertInfo.ToolCalls[choiceIndex]
+	if len(byIndex) == 0 {
+		return nil
+	}
+	indices := make([]int, 0, len(byIndex))
+	for index := range byIndex {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+	for _, toolIndex := range indices {
+		state := byIndex[toolIndex]
+		if state == nil {
+			return fmt.Errorf("choice[%d] tool call[%d] state is nil", choiceIndex, toolIndex)
+		}
+		if strings.TrimSpace(state.ID) == "" || strings.TrimSpace(state.Name) == "" {
+			if final {
+				return fmt.Errorf("choice[%d] tool call[%d] requires id and function name", choiceIndex, toolIndex)
+			}
+			continue
+		}
+		args, complete := geminiToolCallArguments(state.PendingArgs)
+		if !complete {
+			if final {
+				return fmt.Errorf("choice[%d] tool %q arguments must be a complete JSON object", choiceIndex, state.Name)
+			}
+			continue
+		}
+		if state.Emitted {
+			continue
+		}
+		*parts = append(*parts, dto.GeminiPart{
+			FunctionCall: &dto.FunctionCall{
+				ID:           state.ID,
+				FunctionName: state.Name,
+				Arguments:    args,
+			},
+		})
+		state.Emitted = true
+	}
+	if final {
+		delete(convertInfo.ToolCalls, choiceIndex)
+	}
+	return nil
+}
+
+func StreamResponseOpenAI2GeminiWithError(openAIResponse *dto.ChatCompletionsStreamResponse, info *relaycommon.RelayInfo) (*dto.GeminiChatResponse, error) {
+	if openAIResponse == nil {
+		return nil, fmt.Errorf("OpenAI stream response is nil")
+	}
+
+	// 检查是否有实际内容或结束标志。主要针对 OpenAI 流响应开头的空数据。
 	hasContent := false
 	hasFinishReason := false
 	for _, choice := range openAIResponse.Choices {
-		if len(choice.Delta.GetContentString()) > 0 || (choice.Delta.ToolCalls != nil && len(choice.Delta.ToolCalls) > 0) {
+		if len(choice.Delta.GetContentString()) > 0 || choice.Delta.GetReasoningContent() != "" ||
+			(choice.Delta.ToolCalls != nil && len(choice.Delta.ToolCalls) > 0) {
 			hasContent = true
 		}
 		if choice.FinishReason != nil {
 			hasFinishReason = true
 		}
 	}
-
-	// 如果没有实际内容且没有结束标志，跳过。主要针对 openai 流响应开头的空数据
-	if !hasContent && !hasFinishReason {
-		return nil
+	if !hasContent && !hasFinishReason && openAIResponse.Usage == nil {
+		return nil, nil
 	}
 
+	promptTokens := 0
+	if info != nil {
+		promptTokens = info.GetEstimatePromptTokens()
+	}
 	geminiResponse := &dto.GeminiChatResponse{
 		Candidates: make([]dto.GeminiChatCandidate, 0, len(openAIResponse.Choices)),
 		UsageMetadata: dto.GeminiUsageMetadata{
-			PromptTokenCount:     info.GetEstimatePromptTokens(),
-			CandidatesTokenCount: 0, // 流式响应中可能没有完整的 usage 信息
-			TotalTokenCount:      info.GetEstimatePromptTokens(),
+			PromptTokenCount:     promptTokens,
+			CandidatesTokenCount: 0,
+			TotalTokenCount:      promptTokens,
 		},
 	}
 
@@ -1252,71 +2138,92 @@ func StreamResponseOpenAI2Gemini(openAIResponse *dto.ChatCompletionsStreamRespon
 		geminiResponse.UsageMetadata.TotalTokenCount = openAIResponse.Usage.TotalTokens
 	}
 
+	convertInfo := ensureGeminiConvertInfo(info)
 	for _, choice := range openAIResponse.Choices {
 		candidate := dto.GeminiChatCandidate{
 			Index:         int64(choice.Index),
 			SafetyRatings: []dto.GeminiChatSafetyRating{},
 		}
 
-		// 设置结束原因
 		if choice.FinishReason != nil {
-			var finishReason string
-			switch *choice.FinishReason {
-			case "stop":
-				finishReason = "STOP"
-			case "length":
-				finishReason = "MAX_TOKENS"
-			case "content_filter":
-				finishReason = "SAFETY"
-			case "tool_calls":
-				finishReason = "STOP"
-			default:
-				finishReason = "STOP"
+			finishReason, err := openAIFinishReasonToGemini(*choice.FinishReason)
+			if err != nil {
+				return nil, fmt.Errorf("choice[%d]: %w", choice.Index, err)
 			}
 			candidate.FinishReason = &finishReason
 		}
 
-		// 转换消息内容
 		content := dto.GeminiChatContent{
 			Role:  "model",
 			Parts: make([]dto.GeminiPart, 0),
 		}
 
-		// 处理工具调用
-		if choice.Delta.ToolCalls != nil {
-			for _, toolCall := range choice.Delta.ToolCalls {
-				// 解析参数
-				var args map[string]interface{}
-				if toolCall.Function.Arguments != "" {
-					if err := common.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-						args = map[string]interface{}{"arguments": toolCall.Function.Arguments}
-					}
-				} else {
-					args = make(map[string]interface{})
+		if choice.Delta.ReasoningContent != nil || choice.Delta.ThinkingContent != nil || choice.Delta.Reasoning != nil {
+			content.Parts = append(content.Parts, dto.GeminiPart{
+				Thought: true,
+				Text:    choice.Delta.GetReasoningContent(),
+			})
+		}
+		if textContent := choice.Delta.GetContentString(); textContent != "" {
+			content.Parts = append(content.Parts, dto.GeminiPart{Text: textContent})
+		}
+		for callPosition, toolCall := range choice.Delta.ToolCalls {
+			if toolCall.Type != nil {
+				declaredType, ok := toolCall.Type.(string)
+				if !ok {
+					return nil, fmt.Errorf("choice[%d] tool call type must be a string, got %T", choice.Index, toolCall.Type)
 				}
+				declaredType = strings.TrimSpace(declaredType)
+				if declaredType != "" && declaredType != "function" {
+					return nil, fmt.Errorf("choice[%d] tool call type %q is not supported by Gemini", choice.Index, declaredType)
+				}
+			}
+			toolIndex := callPosition
+			if toolCall.Index != nil {
+				if *toolCall.Index < 0 {
+					return nil, fmt.Errorf("choice[%d] tool call index must not be negative", choice.Index)
+				}
+				toolIndex = *toolCall.Index
+			} else if len(choice.Delta.ToolCalls) > 1 {
+				return nil, fmt.Errorf("choice[%d] parallel tool calls require an index in every stream chunk", choice.Index)
+			}
 
-				part := dto.GeminiPart{
-					FunctionCall: &dto.FunctionCall{
-						FunctionName: toolCall.Function.Name,
-						Arguments:    args,
-					},
-				}
-				content.Parts = append(content.Parts, part)
+			byIndex := convertInfo.ToolCalls[choice.Index]
+			stateExists := byIndex != nil && byIndex[toolIndex] != nil
+			state := geminiToolCallStateForChoice(convertInfo, choice.Index, toolIndex)
+			if !stateExists && (strings.TrimSpace(toolCall.ID) == "" || strings.TrimSpace(toolCall.Function.Name) == "") {
+				return nil, fmt.Errorf("choice[%d] tool call requires id and function name in the first stream chunk", choice.Index)
 			}
-		} else {
-			// 处理文本内容
-			textContent := choice.Delta.GetContentString()
-			if textContent != "" {
-				part := dto.GeminiPart{
-					Text: textContent,
+			if toolCall.ID != "" {
+				if state.ID != "" && state.ID != toolCall.ID {
+					return nil, fmt.Errorf("choice[%d] tool call[%d] id changed during stream", choice.Index, toolIndex)
 				}
-				content.Parts = append(content.Parts, part)
+				state.ID = toolCall.ID
 			}
+			if toolCall.Function.Name != "" {
+				if state.Name != "" && state.Name != toolCall.Function.Name {
+					return nil, fmt.Errorf("choice[%d] tool call[%d] function name changed during stream", choice.Index, toolIndex)
+				}
+				state.Name = toolCall.Function.Name
+			}
+			if state.Emitted && strings.TrimSpace(toolCall.Function.Arguments) != "" {
+				return nil, fmt.Errorf("choice[%d] tool %q emitted before its argument stream completed", choice.Index, state.Name)
+			}
+			state.PendingArgs += toolCall.Function.Arguments
+		}
+		final := choice.FinishReason != nil
+		if err := flushGeminiToolCallState(convertInfo, choice.Index, &content.Parts, final); err != nil {
+			return nil, err
 		}
 
-		candidate.Content = content
-		geminiResponse.Candidates = append(geminiResponse.Candidates, candidate)
+		if len(content.Parts) > 0 || choice.FinishReason != nil {
+			candidate.Content = content
+			geminiResponse.Candidates = append(geminiResponse.Candidates, candidate)
+		}
+	}
+	if len(geminiResponse.Candidates) == 0 && openAIResponse.Usage == nil {
+		return nil, nil
 	}
 
-	return geminiResponse
+	return geminiResponse, nil
 }

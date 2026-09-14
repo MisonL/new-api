@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -150,6 +151,7 @@ func (a *TaskAdaptor) GetModelList() []string {
 		"veo-3.0-fast-generate-001",
 		"veo-3.1-generate-preview",
 		"veo-3.1-fast-generate-preview",
+		"veo-3.1-lite-generate-preview",
 	}
 }
 
@@ -180,6 +182,10 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 
 // FetchTask polls task status via the Gemini operations GET endpoint.
 func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
+	return a.FetchTaskWithContext(context.Background(), baseUrl, key, body, proxy, extraHeaders...)
+}
+
+func (a *TaskAdaptor) FetchTaskWithContext(ctx context.Context, baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
 	taskID, ok := body["task_id"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid task_id")
@@ -190,10 +196,24 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 		return nil, fmt.Errorf("decode task_id failed: %w", err)
 	}
 
-	version := model_setting.GetGeminiVersionSetting("default")
+	// The operation was submitted with the mapped upstream model. Reusing the
+	// default Gemini API version here can send a later poll to a different
+	// endpoint when the mapping targets a model with an explicit version
+	// override (for example v1 instead of v1beta).
+	modelName := "default"
+	if value, ok := body["model"].(string); ok && strings.TrimSpace(value) != "" {
+		modelName = strings.TrimSpace(value)
+	}
+	version := geminiVersionFromPollingPath(body["polling_path"])
+	if version == "" {
+		version = model_setting.GetGeminiVersionSetting(modelName)
+	}
 	url := fmt.Sprintf("%s/%s/%s", baseUrl, version, upstreamName)
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +227,18 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
 	}
 	return client.Do(req)
+}
+
+func geminiVersionFromPollingPath(value any) string {
+	path, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) >= 2 && (parts[0] == "v1" || parts[0] == "v1beta") && parts[1] == "operations" {
+		return parts[0]
+	}
+	return ""
 }
 
 func (a *TaskAdaptor) ParseTaskResult(respBody []byte, _ string, _ ...http.Header) (*relaycommon.TaskInfo, error) {

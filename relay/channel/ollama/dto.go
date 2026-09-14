@@ -5,12 +5,13 @@ import (
 )
 
 type OllamaChatMessage struct {
-	Role      string           `json:"role"`
-	Content   string           `json:"content,omitempty"`
-	Images    []string         `json:"images,omitempty"`
-	ToolCalls []OllamaToolCall `json:"tool_calls,omitempty"`
-	ToolName  string           `json:"tool_name,omitempty"`
-	Thinking  json.RawMessage  `json:"thinking,omitempty"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content,omitempty"`
+	Images     []string         `json:"images,omitempty"`
+	ToolCalls  []OllamaToolCall `json:"tool_calls,omitempty"`
+	ToolName   string           `json:"tool_name,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Thinking   json.RawMessage  `json:"thinking,omitempty"`
 }
 
 type OllamaToolFunction struct {
@@ -25,10 +26,14 @@ type OllamaTool struct {
 }
 
 type OllamaToolCall struct {
-	Function struct {
-		Name      string      `json:"name"`
-		Arguments interface{} `json:"arguments"`
-	} `json:"function"`
+	ID       string                 `json:"id,omitempty"`
+	Function OllamaToolCallFunction `json:"function"`
+}
+
+type OllamaToolCallFunction struct {
+	Index     *int        `json:"index,omitempty"`
+	Name      string      `json:"name"`
+	Arguments interface{} `json:"arguments"`
 }
 
 type OllamaChatRequest struct {

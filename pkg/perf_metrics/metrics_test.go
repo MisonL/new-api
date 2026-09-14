@@ -139,6 +139,33 @@ func TestRecordRelaySampleIncludesBootstrapRecoveryMetric(t *testing.T) {
 	require.Equal(t, int64(750), snapshot.responsesBootstrapRecoveryWaitMs)
 }
 
+func TestCaptureRelaySampleFreezesRelayInfoBeforeAsyncExecution(t *testing.T) {
+	hotBuckets = syncMapForTest(t)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-original",
+		UsingGroup:      "default",
+		StartTime:       time.Now().Add(-2 * time.Second),
+	}
+	recordSample := CaptureRelaySample(info, true, 3)
+	require.NotNil(t, recordSample)
+
+	info.OriginModelName = "gpt-mutated"
+	info.UsingGroup = "other"
+	recordSample()
+
+	var recordedKey bucketKey
+	var found bool
+	hotBuckets.Range(func(key, _ any) bool {
+		recordedKey = key.(bucketKey)
+		found = true
+		return false
+	})
+	require.True(t, found)
+	require.Equal(t, "gpt-original", recordedKey.model)
+	require.Equal(t, "default", recordedKey.group)
+}
+
 func TestCaptureRelaySampleSnapshotsRedisDependencies(t *testing.T) {
 	previousRedisEnabled := common.RedisEnabled
 	previousRedisClient := common.RDB

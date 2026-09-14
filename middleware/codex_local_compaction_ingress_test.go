@@ -2,900 +2,291 @@ package middleware
 
 import (
 	"bytes"
-	"compress/gzip"
-	"context"
-	"crypto/sha256"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"sync"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
-const codexLocalResponsesCompactionMetadata = `{"request_kind":"compaction","compaction":{"implementation":"responses"}}`
-const codexOrdinaryResponsesTurnMetadata = `{"installation_id":"install-test","session_id":"session-test","thread_id":"thread-test","turn_id":"turn-test","window_id":"thread-test:0","request_kind":"turn","sandbox":"danger-full-access","turn_started_at_unix_ms":1234567890}`
+const codexLocalCompactionMetadata = `{"request_kind":"compaction","compaction":{"implementation":"responses"}}`
 
-const codexLocalResponsesCompactionIngressConcurrentSpoolWait = 10 * time.Second
-
-func TestCodexLocalResponsesCompactionIngressSpoolsCompressedPayloadAfterAuth(t *testing.T) {
+func TestCodexLocalCompactionIngressReductionPreservesSmallAndNonLocalBodies(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 256, 512, 0)
+	original := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"ORIGINAL_BODY_MUST_SURVIVE"}]}],"tools":[{"type":"function","name":"keep"}]}`)
 
-	payload := []byte(`{"model":"gpt-5.6-sol","stream":true,"input":[{"type":"reasoning","encrypted_content":"opaque-state"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}],"tools":[{"type":"custom","name":"apply_patch","format":{"type":"grammar","syntax":"lark","definition":"start: WORD"}}]}`)
-	expectedDigest := sha256.Sum256(payload)
+	for _, testCase := range []struct {
+		name     string
+		path     string
+		metadata string
+	}{
+		{name: "small local compaction", path: "/v1/responses", metadata: codexLocalCompactionMetadata},
+		{name: "small local compaction compatibility alias", path: "/responses", metadata: codexLocalCompactionMetadata},
+		{name: "ordinary responses", path: "/v1/responses"},
+		{name: "remote compaction", path: "/v1/responses", metadata: `{"request_kind":"compaction","compaction":{"implementation":"responses_compaction_v2"}}`},
+		{name: "wrong endpoint", path: "/v1/responses/compact", metadata: codexLocalCompactionMetadata},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			router := gin.New()
+			router.Use(CodexLocalCompactionIngressReduction())
+			router.POST("/*path", func(c *gin.Context) {
+				body, err := io.ReadAll(c.Request.Body)
+				require.NoError(t, err)
+				require.Equal(t, original, body)
+				require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCodexLocalCompactionIngressReduced))
+				c.Status(http.StatusNoContent)
+			})
 
-	for _, tc := range []struct {
+			request := httptest.NewRequest(http.MethodPost, testCase.path, bytes.NewReader(original))
+			if testCase.metadata != "" {
+				request.Header.Set("X-Codex-Turn-Metadata", testCase.metadata)
+			}
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusNoContent, recorder.Code)
+		})
+	}
+}
+
+func TestCodexLocalCompactionIngressReductionRejectsAnOversizedInputItem(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	called := 0
+	router := gin.New()
+	router.Use(CodexLocalCompactionIngressReduction())
+	router.POST("/v1/responses", func(c *gin.Context) {
+		called++
+		c.Status(http.StatusNoContent)
+	})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/responses",
+		newOversizedCodexLocalCompactionInputItemReader(service.CodexLocalCompaction413RecoverySafeBodyMaxBytes+1),
+	)
+	request.Header.Set("X-Codex-Turn-Metadata", codexLocalCompactionMetadata)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
+	require.Zero(t, called)
+	require.Contains(t, recorder.Body.String(), "input item exceeds")
+}
+
+func TestCodexLocalCompactionIngressReductionRejectsOpaqueEncryptedReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	called := 0
+	router := gin.New()
+	router.Use(CodexLocalCompactionIngressReduction())
+	router.POST("/v1/responses", func(c *gin.Context) {
+		called++
+		c.Status(http.StatusNoContent)
+	})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/responses",
+		newOversizedCodexLocalCompactionOpaqueReplayReader(service.CodexLocalCompaction413RecoverySafeBodyMaxBytes+1),
+	)
+	request.Header.Set("X-Codex-Turn-Metadata", codexLocalCompactionMetadata)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
+	require.Zero(t, called)
+	require.Contains(t, recorder.Body.String(), "opaque encrypted_content")
+}
+
+func TestCodexResponsesOpaqueReplayIngressPreservesDirectAndOrdinaryRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousMaxRequestBodyMB := constant.MaxRequestBodyMB
+	constant.MaxRequestBodyMB = 1
+	t.Cleanup(func() {
+		constant.MaxRequestBodyMB = previousMaxRequestBodyMB
+	})
+	previousConfig := common.GetDiskCacheConfig()
+	cachePath := t.TempDir()
+	common.SetDiskCacheConfig(common.DiskCacheConfig{
+		Enabled:     true,
+		ThresholdMB: 1,
+		MaxSizeMB:   64,
+		Path:        cachePath,
+	})
+	common.ResetDiskCacheUsage()
+	t.Cleanup(func() {
+		common.SetDiskCacheConfig(previousConfig)
+		common.SyncDiskCacheStats()
+	})
+
+	payload := []byte(`{"model":"gpt-5.5","input":"` + strings.Repeat("x", 2<<20) + `"}`)
+	for _, testCase := range []struct {
+		name          string
+		path          string
+		metadata      string
+		wantStatus    int
+		expectHandler bool
+	}{
+		{name: "direct compact", path: "/v1/responses/compact", wantStatus: http.StatusNoContent, expectHandler: true},
+		{name: "compact compatibility alias", path: "/responses/compact", wantStatus: http.StatusNoContent, expectHandler: true},
+		{name: "ordinary Codex turn", path: "/v1/responses", metadata: `{"request_kind":"turn"}`, wantStatus: http.StatusRequestEntityTooLarge},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			called := 0
+			router := gin.New()
+			router.Use(DecompressRequestMiddleware())
+			router.Use(func(c *gin.Context) {
+				c.Set("token_id", 1)
+				c.Next()
+			})
+			router.Use(CodexResponsesOpaqueReplayIngress())
+			router.Use(BodyStorageCleanup())
+			router.POST("/*path", func(c *gin.Context) {
+				called++
+				storage, err := common.GetBodyStorage(c)
+				require.NoError(t, err)
+				require.True(t, storage.IsDisk())
+				body, err := io.ReadAll(storage)
+				require.NoError(t, err)
+				require.Equal(t, payload, body)
+				c.Status(http.StatusNoContent)
+			})
+
+			request := httptest.NewRequest(http.MethodPost, testCase.path, bytes.NewReader(payload))
+			request.Header.Set("Content-Type", gin.MIMEJSON)
+			if testCase.metadata != "" {
+				request.Header.Set("X-Codex-Turn-Metadata", testCase.metadata)
+			}
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, testCase.wantStatus, recorder.Code)
+			if testCase.expectHandler {
+				require.Equal(t, 1, called)
+			} else {
+				require.Zero(t, called)
+			}
+		})
+	}
+}
+
+func TestCodexResponsesOpaqueReplayIngressDecodesDeferredCompressedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousConfig := common.GetDiskCacheConfig()
+	common.SetDiskCacheConfig(common.DiskCacheConfig{
+		Enabled:     true,
+		ThresholdMB: 1,
+		MaxSizeMB:   64,
+		Path:        t.TempDir(),
+	})
+	common.ResetDiskCacheUsage()
+	t.Cleanup(func() {
+		common.SetDiskCacheConfig(previousConfig)
+		common.SyncDiskCacheStats()
+	})
+
+	payload := []byte(`{"model":"gpt-5.5","input":[{"type":"message","role":"user","content":"compressed"}]}`)
+	for _, testCase := range []struct {
 		name     string
 		encoding string
 		body     []byte
 	}{
-		{name: "identity", body: payload},
-		{name: "gzip", encoding: "gzip", body: gzipCodexLocalIngressPayload(t, payload)},
-		{name: "br", encoding: "br", body: compressBrotliForTest(t, payload)},
+		{name: "gzip", encoding: "gzip", body: compressGzipForTest(t, payload)},
+		{name: "brotli", encoding: "br", body: compressBrotliForTest(t, payload)},
 		{name: "zstd", encoding: "zstd", body: compressZstdForTest(t, payload)},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var gotStorageDisk bool
-			var gotDigest [sha256.Size]byte
-			var storagePathCountBeforeCleanup int
-
+		t.Run(testCase.name, func(t *testing.T) {
 			router := gin.New()
 			router.Use(DecompressRequestMiddleware())
 			router.Use(func(c *gin.Context) {
-				c.Set("authenticated", true)
+				c.Set("token_id", 1)
 				c.Next()
 			})
-			router.Use(CodexLocalResponsesCompactionIngress())
-			router.Use(commonBodyStorageCleanupForTest())
-			router.POST("/v1/responses", func(c *gin.Context) {
+			router.Use(CodexResponsesOpaqueReplayIngress())
+			router.Use(BodyStorageCleanup())
+			router.POST("/v1/responses/compact", func(c *gin.Context) {
 				storage, err := common.GetBodyStorage(c)
 				require.NoError(t, err)
-				gotStorageDisk = storage.IsDisk()
-				_, err = storage.Seek(0, io.SeekStart)
+				body, err := io.ReadAll(storage)
 				require.NoError(t, err)
-				gotDigest, err = digestReader(storage)
-				require.NoError(t, err)
-				entries, err := os.ReadDir(common.GetDiskCacheDir())
-				require.NoError(t, err)
-				storagePathCountBeforeCleanup = len(entries)
+				require.Equal(t, payload, body)
+				require.Empty(t, c.GetHeader("Content-Encoding"))
 				c.Status(http.StatusNoContent)
 			})
 
-			req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(tc.body))
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(testCase.body))
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Codex-Turn-Metadata", codexLocalResponsesCompactionMetadata)
-			if tc.encoding != "" {
-				req.Header.Set("Content-Encoding", tc.encoding)
-			}
+			req.Header.Set("Content-Encoding", testCase.encoding)
 			recorder := httptest.NewRecorder()
 			router.ServeHTTP(recorder, req)
 
 			require.Equal(t, http.StatusNoContent, recorder.Code)
-			require.True(t, gotStorageDisk)
-			require.Equal(t, expectedDigest, gotDigest)
-			require.Equal(t, 1, storagePathCountBeforeCleanup)
-			entries, err := os.ReadDir(common.GetDiskCacheDir())
-			require.NoError(t, err)
-			require.Empty(t, entries)
 		})
 	}
 }
 
-func TestSpoolCodexLocalResponsesCompactionBodyUsesUncompressedContentLengthAdmission(t *testing.T) {
+func TestCodexResponsesOpaqueReplayIngressRejectsUnsupportedDeferredEncoding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 64, 16, 0)
-
-	payload := []byte("12345678")
-	releaseReaders := make(chan struct{})
-	var releaseOnce sync.Once
-	release := func() {
-		releaseOnce.Do(func() { close(releaseReaders) })
-	}
-	bodies := []*blockingCodexLocalCompactionBody{
-		{started: make(chan struct{}), release: releaseReaders, payload: payload},
-		{started: make(chan struct{}), release: releaseReaders, payload: payload},
-	}
-
-	results := make(chan error, len(bodies))
-	storages := make([]common.BodyStorage, 0, len(bodies))
-	var storagesMu sync.Mutex
-	var waitGroup sync.WaitGroup
-	for _, body := range bodies {
-		waitGroup.Add(1)
-		go func(body *blockingCodexLocalCompactionBody) {
-			defer waitGroup.Done()
-			testContext, _ := gin.CreateTestContext(httptest.NewRecorder())
-			request := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			request.Body = body
-			request.ContentLength = int64(len(payload))
-			testContext.Request = request
-			storage, err := spoolCodexLocalResponsesCompactionBody(testContext)
-			if storage != nil {
-				storagesMu.Lock()
-				storages = append(storages, storage)
-				storagesMu.Unlock()
-			}
-			results <- err
-		}(body)
-	}
-	t.Cleanup(func() {
-		release()
-		waitGroup.Wait()
-		storagesMu.Lock()
-		defer storagesMu.Unlock()
-		for _, storage := range storages {
-			_ = storage.Close()
-		}
-	})
-
-	for _, body := range bodies {
-		select {
-		case <-body.started:
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for uncompressed local Codex compaction bodies to spool concurrently")
-		}
-	}
-
-	release()
-	waitGroup.Wait()
-	for range bodies {
-		require.NoError(t, <-results)
-	}
-	storagesMu.Lock()
-	defer storagesMu.Unlock()
-	require.Len(t, storages, len(bodies))
-	for _, storage := range storages {
-		require.Equal(t, int64(len(payload)), storage.Size())
-	}
-}
-
-func TestSpoolCodexLocalResponsesCompactionBodyTreatsGzipLengthAsUnknown(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 64, 64, 0)
-
-	releaseFirstBody := make(chan struct{})
-	var releaseOnce sync.Once
-	release := func() {
-		releaseOnce.Do(func() { close(releaseFirstBody) })
-	}
-	firstBody := &blockingCodexLocalCompactionBody{
-		started: make(chan struct{}),
-		release: releaseFirstBody,
-		payload: []byte("first"),
-	}
-	var firstStorage common.BodyStorage
-	var firstErr error
-	var waitGroup sync.WaitGroup
-	waitGroup.Add(1)
-	go func() {
-		defer waitGroup.Done()
-		firstStorage, firstErr = common.CreateRequiredDiskBodyStorageFromReaderWithContext(
-			context.Background(),
-			firstBody,
-			common.RequiredDiskBodyStorageOptions{
-				MaxBytes:     64 << 20,
-				MaxDiskBytes: 64 << 20,
-				MinFreeBytes: 0,
-			},
-		)
-	}()
-	t.Cleanup(func() {
-		release()
-		waitGroup.Wait()
-		if firstStorage != nil {
-			_ = firstStorage.Close()
-		}
-	})
-
-	select {
-	case <-firstBody.started:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for unknown-length body storage admission")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	payload := gzipCodexLocalIngressPayload(t, []byte(`{"model":"gpt-5.6-sol","input":"continue"}`))
-	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(payload)).WithContext(ctx)
-	request.Header.Set("Content-Encoding", "gzip")
-	testContext, _ := gin.CreateTestContext(httptest.NewRecorder())
-	testContext.Request = request
-
-	storage, err := spoolCodexLocalResponsesCompactionBody(testContext)
-
-	require.Nil(t, storage)
-	require.ErrorIs(t, err, context.Canceled)
-	release()
-	waitGroup.Wait()
-	require.NoError(t, firstErr)
-	require.NotNil(t, firstStorage)
-	require.NoError(t, firstStorage.Close())
-	firstStorage = nil
-	requireNoCodexLocalResponsesCompactionIngressFiles(t)
-}
-
-func TestCodexLocalResponsesCompactionIngressStoresOpaqueResponsesMetadata(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 64, 64, 0)
-
-	payload := []byte(`{"model":"gpt-5.6-sol","stream":true,"input":[{"type":"reasoning","encrypted_content":"opaque-state"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`)
-	var metadata common.ResponsesRequestMetadata
-	metadataFound := false
-	var replayedBody []byte
-
-	router := gin.New()
-	router.Use(DecompressRequestMiddleware())
-	router.Use(CodexLocalResponsesCompactionIngress())
-	router.Use(commonBodyStorageCleanupForTest())
-	router.POST("/v1/responses", func(c *gin.Context) {
-		value, ok := c.Get(string(constant.ContextKeyResponsesRequestMetadata))
-		metadata, metadataFound = value.(common.ResponsesRequestMetadata)
-		require.True(t, ok)
-		var err error
-		replayedBody, err = io.ReadAll(c.Request.Body)
-		require.NoError(t, err)
-		c.Status(http.StatusNoContent)
-	})
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Codex-Turn-Metadata", codexLocalResponsesCompactionMetadata)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusNoContent, recorder.Code)
-	require.True(t, metadataFound)
-	require.Equal(t, "gpt-5.6-sol", metadata.Model)
-	require.NotNil(t, metadata.Stream)
-	require.True(t, *metadata.Stream)
-	require.True(t, metadata.HasOpaqueEncryptedContent)
-	require.Len(t, metadata.EncryptedContentFingerprints, 1)
-	require.NotEqual(t, "opaque-state", metadata.EncryptedContentFingerprints[0])
-	require.Equal(t, payload, replayedBody)
-}
-
-func TestCodexLocalResponsesCompactionIngressSpoolsOrdinaryCodexOpaqueResponses(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 64, 64, 0)
-
-	payload := []byte(`{"model":"gpt-5.6-sol","stream":true,"input":[{"type":"reasoning","encrypted_content":"opaque-state"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}],"future_top_level":{"preserve":true}}`)
-	var metadata common.ResponsesRequestMetadata
-	var metadataFound bool
-	var storageIsDisk bool
-	var replayedBody []byte
-
+	called := 0
 	router := gin.New()
 	router.Use(DecompressRequestMiddleware())
 	router.Use(func(c *gin.Context) {
-		c.Set("authenticated", true)
+		c.Set("token_id", 1)
 		c.Next()
 	})
-	router.Use(CodexLocalResponsesCompactionIngress())
-	router.Use(commonBodyStorageCleanupForTest())
-	router.POST("/v1/responses", func(c *gin.Context) {
-		metadata, metadataFound = common.GetResponsesRequestMetadata(c)
-		storage, err := common.GetBodyStorage(c)
-		require.NoError(t, err)
-		storageIsDisk = storage.IsDisk()
-		replayedBody, err = io.ReadAll(c.Request.Body)
-		require.NoError(t, err)
-		c.Status(http.StatusNoContent)
-	})
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Codex-Turn-Metadata", codexOrdinaryResponsesTurnMetadata)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusNoContent, recorder.Code)
-	require.True(t, metadataFound)
-	require.True(t, storageIsDisk)
-	require.Equal(t, "gpt-5.6-sol", metadata.Model)
-	require.True(t, metadata.HasOpaqueEncryptedContent)
-	require.Equal(t, payload, replayedBody)
-	requireNoCodexLocalResponsesCompactionIngressFiles(t)
-}
-
-func TestCodexLocalResponsesCompactionIngressLeavesNonCodexResponsesUntouched(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	body := &countingCodexLocalIngressBody{payload: []byte(`{"model":"gpt-5.6-sol","input":[{"type":"reasoning","encrypted_content":"opaque-state"}]}`)}
-
-	router := gin.New()
-	router.Use(CodexLocalResponsesCompactionIngress())
-	router.POST("/v1/responses", func(c *gin.Context) {
-		_, bodyStorageExists := c.Get(common.KeyBodyStorage)
-		require.False(t, bodyStorageExists)
-		c.Status(http.StatusNoContent)
-	})
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", body)
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusNoContent, recorder.Code)
-	require.Zero(t, body.reads)
-}
-
-func TestCodexLocalResponsesCompactionIngressDefersCompressedOrdinaryCodexBodyUntilAfterAuth(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	payload := gzipCodexLocalIngressPayload(t, []byte(`{"model":"gpt-5.6-sol","input":[{"type":"reasoning","encrypted_content":"opaque-state"}]}`))
-	body := &countingCodexLocalIngressBody{payload: payload}
-
-	router := gin.New()
-	router.Use(DecompressRequestMiddleware())
-	router.Use(func(c *gin.Context) {
-		c.AbortWithStatus(http.StatusUnauthorized)
-	})
-	router.Use(CodexLocalResponsesCompactionIngress())
-	router.POST("/v1/responses", func(c *gin.Context) {
-		c.Status(http.StatusNoContent)
-	})
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("X-Codex-Turn-Metadata", codexOrdinaryResponsesTurnMetadata)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusUnauthorized, recorder.Code)
-	require.Zero(t, body.reads)
-}
-
-func TestCodexLocalResponsesCompactionIngressSpoolsCompressedOrdinaryCodexOpaqueResponsesAfterAuth(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 64, 64, 0)
-
-	payload := []byte(`{"model":"gpt-5.6-sol","stream":true,"input":[{"type":"reasoning","encrypted_content":"opaque-state"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}],"future_top_level":{"preserve":true}}`)
-	var metadata common.ResponsesRequestMetadata
-	var storageIsDisk bool
-	var replayedBody []byte
-
-	router := gin.New()
-	router.Use(DecompressRequestMiddleware())
-	router.Use(func(c *gin.Context) {
-		c.Set("authenticated", true)
-		c.Next()
-	})
-	router.Use(CodexLocalResponsesCompactionIngress())
-	router.Use(commonBodyStorageCleanupForTest())
-	router.POST("/v1/responses", func(c *gin.Context) {
-		metadata, _ = common.GetResponsesRequestMetadata(c)
-		storage, err := common.GetBodyStorage(c)
-		require.NoError(t, err)
-		storageIsDisk = storage.IsDisk()
-		replayedBody, err = io.ReadAll(c.Request.Body)
-		require.NoError(t, err)
-		c.Status(http.StatusNoContent)
-	})
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(gzipCodexLocalIngressPayload(t, payload)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("X-Codex-Turn-Metadata", codexOrdinaryResponsesTurnMetadata)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusNoContent, recorder.Code)
-	require.True(t, storageIsDisk)
-	require.True(t, metadata.HasOpaqueEncryptedContent)
-	require.Equal(t, payload, replayedBody)
-	require.Empty(t, req.Header.Get("Content-Encoding"))
-	require.Equal(t, int64(len(payload)), req.ContentLength)
-	requireNoCodexLocalResponsesCompactionIngressFiles(t)
-}
-
-func TestCodexLocalResponsesCompactionIngressSpoolsDirectResponsesCompactEndpoint(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 64, 64, 0)
-
-	payload := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"compaction","encrypted_content":{"version":2,"ciphertext":"opaque-state"},"future_state":{"preserve":true}}],"future_top_level":{"preserve":true}}`)
-	var metadata common.ResponsesRequestMetadata
-	var storageIsDisk bool
-
-	router := gin.New()
-	router.Use(DecompressRequestMiddleware())
-	router.Use(CodexLocalResponsesCompactionIngress())
-	router.Use(commonBodyStorageCleanupForTest())
+	router.Use(CodexResponsesOpaqueReplayIngress())
 	router.POST("/v1/responses/compact", func(c *gin.Context) {
-		var ok bool
-		metadata, ok = common.GetResponsesRequestMetadata(c)
-		require.True(t, ok)
-		storage, err := common.GetBodyStorage(c)
-		require.NoError(t, err)
-		storageIsDisk = storage.IsDisk()
+		called++
 		c.Status(http.StatusNoContent)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewBufferString(`{"model":"gpt-5.5"}`))
+	request.Header.Set("Content-Type", gin.MIMEJSON)
+	request.Header.Set("Content-Encoding", "compress")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusNoContent, recorder.Code)
-	require.True(t, storageIsDisk)
-	require.Equal(t, "gpt-5.6-sol", metadata.Model)
-	require.True(t, metadata.HasOpaqueEncryptedContent)
-	require.True(t, metadata.HasCompactionItem)
-	require.Equal(t, int64(len(payload)), metadata.BodySize)
-	requireNoCodexLocalResponsesCompactionIngressFiles(t)
-}
-
-func TestCodexLocalResponsesCompactionIngressPreservesDirectCompactAliases(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	payload := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"compaction","encrypted_content":{"version":2,"ciphertext":"opaque-state"},"future_state":{"preserve":true}}],"future_top_level":{"preserve":true}}`)
-
-	for _, path := range []string{"/v1/responses/compact", "/responses/compact"} {
-		for _, testCase := range []struct {
-			name     string
-			encoding string
-			body     []byte
-		}{
-			{name: "identity", body: payload},
-			{name: "gzip", encoding: "gzip", body: gzipCodexLocalIngressPayload(t, payload)},
-			{name: "brotli", encoding: "br", body: compressBrotliForTest(t, payload)},
-			{name: "zstd", encoding: "zstd", body: compressZstdForTest(t, payload)},
-		} {
-			t.Run(path+"/"+testCase.name, func(t *testing.T) {
-				cacheDir := t.TempDir()
-				configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 64, 64, 0)
-
-				var metadata common.ResponsesRequestMetadata
-				var storageIsDisk bool
-				var replayedBody []byte
-				router := gin.New()
-				router.Use(DecompressRequestMiddleware())
-				router.Use(CodexLocalResponsesCompactionIngress())
-				router.Use(commonBodyStorageCleanupForTest())
-				router.POST(path, func(c *gin.Context) {
-					var ok bool
-					metadata, ok = common.GetResponsesRequestMetadata(c)
-					require.True(t, ok)
-					storage, err := common.GetBodyStorage(c)
-					require.NoError(t, err)
-					storageIsDisk = storage.IsDisk()
-					replayedBody, err = io.ReadAll(c.Request.Body)
-					require.NoError(t, err)
-					c.Status(http.StatusNoContent)
-				})
-
-				req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(testCase.body))
-				req.Header.Set("Content-Type", "application/json")
-				if testCase.encoding != "" {
-					req.Header.Set("Content-Encoding", testCase.encoding)
-				}
-				recorder := httptest.NewRecorder()
-				router.ServeHTTP(recorder, req)
-
-				require.Equal(t, http.StatusNoContent, recorder.Code)
-				require.True(t, storageIsDisk)
-				require.Equal(t, payload, replayedBody)
-				require.Empty(t, req.Header.Get("Content-Encoding"))
-				require.Equal(t, int64(len(payload)), req.ContentLength)
-				require.Equal(t, "gpt-5.6-sol", metadata.Model)
-				require.True(t, metadata.HasOpaqueEncryptedContent)
-				require.True(t, metadata.HasCompactionItem)
-				require.Equal(t, int64(len(payload)), metadata.BodySize)
-				requireNoCodexLocalResponsesCompactionIngressFiles(t)
-			})
-		}
-	}
-}
-
-func TestCodexLocalResponsesCompactionIngressRejectsInvalidJSONAfterSpoolAndCleansStorage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 64, 64, 0)
-
-	called := 0
-	router := newCodexLocalResponsesCompactionIngressTestRouter(&called)
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6-sol","input":[}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Codex-Turn-Metadata", codexLocalResponsesCompactionMetadata)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
+	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.Zero(t, called)
-	requireNoCodexLocalResponsesCompactionIngressFiles(t)
+	require.Contains(t, recorder.Body.String(), "unsupported Content-Encoding")
 }
 
-func TestCodexLocalResponsesCompactionIngressRejectsCorruptCompressionBeforeHandler(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	for _, testCase := range []struct {
-		name     string
-		encoding string
-		body     string
-	}{
-		{name: "gzip", encoding: "gzip", body: "not-a-gzip-stream"},
-		{name: "brotli", encoding: "br", body: "not-a-brotli-stream"},
-		{name: "zstd", encoding: "zstd", body: "not-a-zstd-stream"},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			cacheDir := t.TempDir()
-			configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 256, 512, 0)
-
-			called := 0
-			router := newCodexLocalResponsesCompactionIngressTestRouter(&called)
-			req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(testCase.body))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Content-Encoding", testCase.encoding)
-			req.Header.Set("X-Codex-Turn-Metadata", codexLocalResponsesCompactionMetadata)
-			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, req)
-
-			require.Equal(t, http.StatusBadRequest, recorder.Code)
-			require.Zero(t, called)
-			requireNoCodexLocalResponsesCompactionIngressFiles(t)
-		})
-	}
+func newOversizedCodexLocalCompactionInputItemReader(mediaBytes int) io.Reader {
+	return io.MultiReader(
+		strings.NewReader(`{"model":"gpt-5.6-sol","stream":true,"input":[{"type":"custom_tool_call_output","call_id":"call_large_image","output":[{"type":"input_image","image_url":"data:image/png;base64,`),
+		&testRepeatedByteReader{remaining: int64(mediaBytes), value: 'A'},
+		strings.NewReader(`"}]}]}`),
+	)
 }
 
-func TestCodexLocalResponsesCompactionIngressRejectsUnsupportedCompressionBeforeHandler(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 256, 512, 0)
-
-	called := 0
-	router := newCodexLocalResponsesCompactionIngressTestRouter(&called)
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6-sol","input":"checkpoint"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "deflate")
-	req.Header.Set("X-Codex-Turn-Metadata", codexLocalResponsesCompactionMetadata)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	require.Zero(t, called)
-	requireNoCodexLocalResponsesCompactionIngressFiles(t)
+func newOversizedCodexLocalCompactionOpaqueReplayReader(prefixBytes int) io.Reader {
+	return io.MultiReader(
+		strings.NewReader(`{"model":"gpt-5.6-sol","stream":true,"tools":[{"type":"function","name":"large_schema","description":"`),
+		&testRepeatedByteReader{remaining: int64(prefixBytes), value: 'A'},
+		strings.NewReader(`"}],"input":[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"},{"type":"message","role":"user","content":"continue"}]}`),
+	)
 }
 
-func TestCodexLocalResponsesCompactionIngressRejectsCapacityExhaustionBeforeHandler(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 64, 8, 0)
-
-	called := 0
-	router := newCodexLocalResponsesCompactionIngressTestRouter(&called)
-
-	payload := append([]byte(`{"model":"gpt-5.6-sol","input":"`), bytes.Repeat([]byte("x"), 9<<20)...)
-	payload = append(payload, []byte(`"}`)...)
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Codex-Turn-Metadata", codexLocalResponsesCompactionMetadata)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusInsufficientStorage, recorder.Code)
-	require.Zero(t, called)
-	requireNoCodexLocalResponsesCompactionIngressFiles(t)
+type testRepeatedByteReader struct {
+	remaining int64
+	value     byte
 }
 
-func TestCodexLocalResponsesCompactionIngressRejectsSingleBodyLimitBeforeHandler(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 8, 64, 0)
-
-	called := 0
-	router := newCodexLocalResponsesCompactionIngressTestRouter(&called)
-	payload := append([]byte(`{"model":"gpt-5.6-sol","input":"`), bytes.Repeat([]byte("x"), 9<<20)...)
-	payload = append(payload, []byte(`"}`)...)
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Codex-Turn-Metadata", codexLocalResponsesCompactionMetadata)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
-	require.Zero(t, called)
-	requireNoCodexLocalResponsesCompactionIngressFiles(t)
-}
-
-func TestCodexLocalResponsesCompactionIngressRejectsUnwritableSpoolBeforeHandler(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cachePathFile, err := os.CreateTemp(t.TempDir(), "not-a-directory")
-	require.NoError(t, err)
-	require.NoError(t, cachePathFile.Close())
-	configureCodexLocalResponsesCompactionIngressForTest(t, cachePathFile.Name(), 64, 64, 0)
-
-	called := 0
-	router := newCodexLocalResponsesCompactionIngressTestRouter(&called)
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.6-sol","input":"continue"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Codex-Turn-Metadata", codexLocalResponsesCompactionMetadata)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusInsufficientStorage, recorder.Code)
-	require.Zero(t, called)
-}
-
-func TestCodexLocalResponsesCompactionIngressEnforcesAggregateCapacityConcurrently(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 64, 12, 0)
-
-	releaseHandler := make(chan struct{})
-	var releaseOnce sync.Once
-	release := func() {
-		releaseOnce.Do(func() { close(releaseHandler) })
-	}
-	enteredHandler := make(chan struct{}, 2)
-	router := gin.New()
-	router.Use(DecompressRequestMiddleware())
-	router.Use(func(c *gin.Context) {
-		c.Set("authenticated", true)
-		c.Next()
-	})
-	router.Use(CodexLocalResponsesCompactionIngress())
-	router.Use(commonBodyStorageCleanupForTest())
-	router.POST("/v1/responses", func(c *gin.Context) {
-		enteredHandler <- struct{}{}
-		<-releaseHandler
-		c.Status(http.StatusNoContent)
-	})
-
-	payload := append([]byte(`{"model":"gpt-5.6-sol","input":"`), bytes.Repeat([]byte("x"), 8<<20)...)
-	payload = append(payload, []byte(`"}`)...)
-
-	results := make(chan int, 2)
-	start := make(chan struct{})
-	var waitGroup sync.WaitGroup
-	t.Cleanup(func() {
-		release()
-		waitGroup.Wait()
-	})
-	for range 2 {
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
-			<-start
-			req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(payload))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Codex-Turn-Metadata", codexLocalResponsesCompactionMetadata)
-			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, req)
-			results <- recorder.Code
-		}()
-	}
-	close(start)
-
-	timer := time.NewTimer(codexLocalResponsesCompactionIngressConcurrentSpoolWait)
-	defer timer.Stop()
-	statusCodes := make([]int, 0, 2)
-	handlerEntered := false
-	for !handlerEntered && len(statusCodes) < 2 {
-		select {
-		case <-enteredHandler:
-			handlerEntered = true
-		case statusCode := <-results:
-			statusCodes = append(statusCodes, statusCode)
-		case <-timer.C:
-			release()
-			waitGroup.Wait()
-			t.Fatalf("timed out waiting for concurrent spool result with statuses %v and disk stats %+v", statusCodes, common.GetDiskCacheStats())
-		}
-	}
-	if !handlerEntered {
-		release()
-		waitGroup.Wait()
-		t.Fatalf("expected one concurrent spool to reach the handler, got statuses %v with disk stats %+v", statusCodes, common.GetDiskCacheStats())
-	}
-	if len(statusCodes) == 0 {
-		select {
-		case statusCode := <-results:
-			statusCodes = append(statusCodes, statusCode)
-		case <-timer.C:
-			release()
-			waitGroup.Wait()
-			t.Fatalf("timed out waiting for rejected concurrent spool result with disk stats %+v", common.GetDiskCacheStats())
-		}
-	}
-	require.Equal(t, http.StatusInsufficientStorage, statusCodes[0])
-	release()
-	waitGroup.Wait()
-	close(results)
-
-	for statusCode := range results {
-		statusCodes = append(statusCodes, statusCode)
-	}
-	require.ElementsMatch(t, []int{http.StatusNoContent, http.StatusInsufficientStorage}, statusCodes)
-}
-
-func TestCodexLocalResponsesCompactionIngressAllowsConcurrentBodiesWithinAggregateCapacity(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cacheDir := t.TempDir()
-	configureCodexLocalResponsesCompactionIngressForTest(t, cacheDir, 64, 16, 0)
-
-	releaseHandler := make(chan struct{})
-	var releaseOnce sync.Once
-	release := func() {
-		releaseOnce.Do(func() { close(releaseHandler) })
-	}
-	enteredHandler := make(chan struct{}, 2)
-	router := gin.New()
-	router.Use(DecompressRequestMiddleware())
-	router.Use(func(c *gin.Context) {
-		c.Set("authenticated", true)
-		c.Next()
-	})
-	router.Use(CodexLocalResponsesCompactionIngress())
-	router.Use(commonBodyStorageCleanupForTest())
-	router.POST("/v1/responses", func(c *gin.Context) {
-		enteredHandler <- struct{}{}
-		<-releaseHandler
-		c.Status(http.StatusNoContent)
-	})
-
-	payload := append([]byte(`{"model":"gpt-5.6-sol","input":"`), bytes.Repeat([]byte("x"), 6<<20)...)
-	payload = append(payload, []byte(`"}`)...)
-	results := make(chan int, 2)
-	start := make(chan struct{})
-	var waitGroup sync.WaitGroup
-	t.Cleanup(func() {
-		release()
-		waitGroup.Wait()
-	})
-	for range 2 {
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
-			<-start
-			req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(payload))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Codex-Turn-Metadata", codexLocalResponsesCompactionMetadata)
-			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, req)
-			results <- recorder.Code
-		}()
-	}
-	close(start)
-
-	for range 2 {
-		select {
-		case <-enteredHandler:
-		case <-time.After(codexLocalResponsesCompactionIngressConcurrentSpoolWait):
-			release()
-			waitGroup.Wait()
-			t.Fatalf("timed out waiting for concurrent spool within aggregate capacity with disk stats %+v", common.GetDiskCacheStats())
-		}
-	}
-	release()
-	waitGroup.Wait()
-	close(results)
-
-	statusCodes := make([]int, 0, 2)
-	for statusCode := range results {
-		statusCodes = append(statusCodes, statusCode)
-	}
-	require.ElementsMatch(t, []int{http.StatusNoContent, http.StatusNoContent}, statusCodes)
-}
-
-func configureCodexLocalResponsesCompactionIngressForTest(t *testing.T, cachePath string, maxBodyMB, maxDiskMB int64, minFreeBytes int64) {
-	t.Helper()
-	previous := codexLocalResponsesCompactionIngressOptions
-	previousDiskCacheConfig := common.GetDiskCacheConfig()
-	codexLocalResponsesCompactionIngressOptions = codexLocalResponsesCompactionIngressStorageOptions{
-		MaxBodyBytes: int64(maxBodyMB) << 20,
-		MaxDiskBytes: int64(maxDiskMB) << 20,
-		MinFreeBytes: minFreeBytes,
-	}
-	common.SetDiskCacheConfig(common.DiskCacheConfig{Path: cachePath})
-	common.SyncDiskCacheStats()
-	t.Cleanup(func() {
-		codexLocalResponsesCompactionIngressOptions = previous
-		common.SetDiskCacheConfig(previousDiskCacheConfig)
-		common.SyncDiskCacheStats()
-	})
-}
-
-func newCodexLocalResponsesCompactionIngressTestRouter(called *int) *gin.Engine {
-	router := gin.New()
-	router.Use(DecompressRequestMiddleware())
-	router.Use(func(c *gin.Context) {
-		c.Set("authenticated", true)
-		c.Next()
-	})
-	router.Use(CodexLocalResponsesCompactionIngress())
-	router.POST("/v1/responses", func(c *gin.Context) {
-		*called = *called + 1
-		c.Status(http.StatusNoContent)
-	})
-	return router
-}
-
-func requireNoCodexLocalResponsesCompactionIngressFiles(t *testing.T) {
-	t.Helper()
-	entries, err := os.ReadDir(common.GetDiskCacheDir())
-	if errors.Is(err, os.ErrNotExist) {
-		return
-	}
-	require.NoError(t, err)
-	require.Empty(t, entries)
-}
-
-func commonBodyStorageCleanupForTest() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Next()
-		common.CleanupBodyStorage(c)
-	}
-}
-
-type blockingCodexLocalCompactionBody struct {
-	started chan struct{}
-	release <-chan struct{}
-	payload []byte
-	offset  int
-}
-
-type countingCodexLocalIngressBody struct {
-	payload []byte
-	offset  int
-	reads   int
-}
-
-func (b *countingCodexLocalIngressBody) Read(target []byte) (int, error) {
-	b.reads++
-	if b.offset >= len(b.payload) {
+func (reader *testRepeatedByteReader) Read(data []byte) (int, error) {
+	if reader.remaining <= 0 {
 		return 0, io.EOF
 	}
-	n := copy(target, b.payload[b.offset:])
-	b.offset += n
-	return n, nil
-}
-
-func (b *countingCodexLocalIngressBody) Close() error {
-	return nil
-}
-
-func (b *blockingCodexLocalCompactionBody) Read(target []byte) (int, error) {
-	if b.offset >= len(b.payload) {
-		return 0, io.EOF
+	if int64(len(data)) > reader.remaining {
+		data = data[:reader.remaining]
 	}
-	if b.offset == 0 {
-		close(b.started)
-		<-b.release
+	for index := range data {
+		data[index] = reader.value
 	}
-	n := copy(target, b.payload[b.offset:])
-	b.offset += n
-	return n, nil
-}
-
-func (b *blockingCodexLocalCompactionBody) Close() error {
-	return nil
-}
-
-func digestReader(reader io.Reader) ([sha256.Size]byte, error) {
-	hash := sha256.New()
-	_, err := io.Copy(hash, reader)
-	var digest [sha256.Size]byte
-	copy(digest[:], hash.Sum(nil))
-	return digest, err
-}
-
-func gzipCodexLocalIngressPayload(t *testing.T, payload []byte) []byte {
-	t.Helper()
-	var buffer bytes.Buffer
-	writer := gzip.NewWriter(&buffer)
-	_, err := writer.Write(payload)
-	require.NoError(t, err)
-	require.NoError(t, writer.Close())
-	return buffer.Bytes()
+	reader.remaining -= int64(len(data))
+	return len(data), nil
 }

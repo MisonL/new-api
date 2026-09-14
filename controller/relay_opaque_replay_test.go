@@ -165,7 +165,7 @@ func TestDetectAndMarkOpaqueResponsesReplay(t *testing.T) {
 			wantOpaque: false,
 		},
 		{
-			name: "stored local synthetic compact marker",
+			name: "stored local native opaque compact marker",
 			request: &dto.OpenAIResponsesRequest{
 				Model: "gpt-5.6-sol",
 			},
@@ -186,7 +186,7 @@ func TestDetectAndMarkOpaqueResponsesReplay(t *testing.T) {
 					Input: common.RawMessage(`[{"type":"compaction","encrypted_content":"newapi.synthetic.compact:` + state.ID + `"}]`),
 				}
 			},
-			wantOpaque: false,
+			wantOpaque: true,
 		},
 		{
 			name: "malformed input",

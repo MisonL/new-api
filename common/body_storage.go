@@ -24,6 +24,31 @@ type BodyStorage interface {
 	IsDisk() bool
 }
 
+// IndependentBodyReader is an optional extension implemented by the built-in
+// body stores. Keeping it outside BodyStorage preserves compatibility with
+// existing test and integration stores.
+type IndependentBodyReader interface {
+	NewReader() (io.ReadCloser, error)
+}
+
+type nonClosingBodyStorageReader struct {
+	io.Reader
+}
+
+func (nonClosingBodyStorageReader) Close() error {
+	return nil
+}
+
+func NewBodyStorageReader(storage BodyStorage) (io.ReadCloser, error) {
+	if reader, ok := storage.(IndependentBodyReader); ok {
+		return reader.NewReader()
+	}
+	if _, err := storage.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return nonClosingBodyStorageReader{Reader: storage}, nil
+}
+
 // ErrStorageClosed 存储已关闭错误
 var ErrStorageClosed = fmt.Errorf("body storage is closed")
 
@@ -344,6 +369,15 @@ func (m *memoryStorage) Bytes() ([]byte, error) {
 	return m.data, nil
 }
 
+func (m *memoryStorage) NewReader() (io.ReadCloser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if atomic.LoadInt32(&m.closed) == 1 {
+		return nil, ErrStorageClosed
+	}
+	return io.NopCloser(bytes.NewReader(m.data)), nil
+}
+
 func (m *memoryStorage) Size() int64 {
 	return m.size
 }
@@ -491,6 +525,19 @@ func (d *diskStorage) Bytes() ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+func (d *diskStorage) NewReader() (io.ReadCloser, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if atomic.LoadInt32(&d.closed) == 1 {
+		return nil, ErrStorageClosed
+	}
+	file, err := os.Open(d.filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open body cache file for replay: %w", err)
+	}
+	return file, nil
 }
 
 func (d *diskStorage) Size() int64 {

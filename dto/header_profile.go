@@ -3,6 +3,7 @@ package dto
 import (
 	"fmt"
 	"math/rand"
+	"net/textproto"
 	"strings"
 )
 
@@ -58,12 +59,12 @@ type HeaderProfileStrategy struct {
 }
 
 const (
-	BuiltinCodexCLIUserAgent      = "codex-tui/0.142.4 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.142.4)"
+	BuiltinCodexCLIUserAgent      = "codex-tui/0.142.4 (Mac OS 15.7.3; aarch64) ghostty/1.3.1 (codex-tui; 0.142.4)"
 	BuiltinCodexCLIOriginator     = "codex-tui"
-	BuiltinCodexDesktopUserAgent  = "Codex Desktop/0.142.4 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.623.70822)"
+	BuiltinCodexDesktopUserAgent  = "Codex Desktop/0.142.4 (Mac OS 15.7.3; aarch64) unknown (Codex Desktop; 26.623.70822)"
 	BuiltinCodexDesktopOriginator = "Codex Desktop"
 	BuiltinClaudeCodeUserAgent    = "claude-cli/2.1.197 (external, sdk-cli)"
-	BuiltinQwenCodeUserAgent      = "QwenCode/0.19.3 (darwin; x64)"
+	BuiltinQwenCodeUserAgent      = "QwenCode/0.19.3 (darwin; arm64)"
 	BuiltinDroidCLIUserAgent      = "factory-cli/0.161.0"
 	BuiltinAgyUserAgent           = "antigravity/cli/1.0.14 (aidev_client; os_type=darwin; arch=amd64)"
 	HeaderProfileLatestVersion    = "latest"
@@ -90,10 +91,12 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		Headers: map[string]string{
 			"Accept":             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 			"Accept-Language":    "en-US,en;q=0.9",
-			"Sec-CH-UA":          "\"Google Chrome\";v=\"150\", \"Chromium\";v=\"150\", \"Not.A/Brand\";v=\"24\"",
+			"Sec-CH-UA":          "\"Google Chrome\";v=\"151\", \"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\"",
 			"Sec-CH-UA-Mobile":   "?0",
 			"Sec-CH-UA-Platform": "\"macOS\"",
-			"User-Agent":         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.47 Safari/537.36",
+			"Sec-CH-UA-Arch":     "\"arm\"",
+			"Sec-CH-UA-Bitness":  "\"64\"",
+			"User-Agent":         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.138 Safari/537.36",
 		},
 	},
 	newBuiltinCodexCLIHeaderProfile(),
@@ -111,7 +114,7 @@ var BuiltinHeaderProfiles = []HeaderProfile{
 		"gemini-cli",
 		"Gemini CLI",
 		map[string]string{
-			"User-Agent": "GeminiCLI/0.49.0/gemini-3.1-pro-preview (darwin; x64; terminal)",
+			"User-Agent": "GeminiCLI/0.49.0/gemini-3.1-pro-preview (darwin; arm64; terminal)",
 		},
 		"默认使用 Gemini CLI npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。x-goog-api-client 等动态头需在高级参数覆盖中显式选择 Gemini CLI 请求头透传模板。",
 		false,
@@ -167,8 +170,8 @@ func newBuiltinCodexCLIHeaderProfile() HeaderProfile {
 		Category:            HeaderProfileCategoryAICodingCLI,
 		Scope:               HeaderProfileScopeBuiltin,
 		ReadOnly:            true,
-		Description:         "默认使用 Codex CLI npm latest 版本套用交互式 TUI 请求头生成逻辑；清单暂不可用时保留内置快照。此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。",
-		PassthroughRequired: false,
+		Description:         "默认使用 Codex CLI npm latest 版本套用交互式 TUI 请求头生成逻辑；清单暂不可用时保留内置快照。模板只固定客户端身份，并自动预设从真实 Codex 请求透传会话、窗口、turn metadata 与 sticky routing 动态请求头的 pass_headers。",
+		PassthroughRequired: true,
 		Headers: map[string]string{
 			"User-Agent": BuiltinCodexCLIUserAgent,
 			"Originator": BuiltinCodexCLIOriginator,
@@ -184,8 +187,8 @@ func newBuiltinCodexDesktopHeaderProfile() HeaderProfile {
 		Category:            HeaderProfileCategoryAICodingCLI,
 		Scope:               HeaderProfileScopeBuiltin,
 		ReadOnly:            true,
-		Description:         "固定请求头静态快照来自本机 Codex Desktop 原始请求抓包；UA 前缀 0.142.4 是内置 Codex core/app-server 客户端版本，括号尾部 26.623.70822 是 Codex Desktop App 版本。此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。",
-		PassthroughRequired: false,
+		Description:         "固定请求头静态快照来自本机 Codex Desktop 原始请求抓包；UA 前缀 0.142.4 是内置 Codex core/app-server 客户端版本，括号尾部 26.623.70822 是 Codex Desktop App 版本。此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用，并自动预设从真实 Codex 请求透传会话、窗口、turn metadata 与 sticky routing 动态请求头的 pass_headers。",
+		PassthroughRequired: true,
 		Headers: map[string]string{
 			"User-Agent": BuiltinCodexDesktopUserAgent,
 			"Originator": BuiltinCodexDesktopOriginator,
@@ -217,7 +220,7 @@ func newBuiltinNpmHeaderProfileVersionMeta(baseProfileID string) *HeaderProfileV
 		PackageName:   packageName,
 		Source:        "npm",
 		Version:       HeaderProfileLatestVersion,
-		Platform:      HeaderProfilePlatformMacOSX64,
+		Platform:      HeaderProfilePlatformMacOSArm64,
 	}
 }
 
@@ -254,7 +257,11 @@ func ResolveHeaderProfile(profileID string, profiles []HeaderProfile) (HeaderPro
 			profile.VersionMeta.Platform = normalizeHeaderProfilePlatform(profile.VersionMeta.Platform)
 			if normalizedVersion != HeaderProfileLatestVersion {
 				if userAgent := buildAICodingCLIUserAgent(normalizedBaseProfileID, normalizedVersion, profile.VersionMeta.Platform); userAgent != "" {
-					profile.Headers = copyHeaderProfileHeaders(profile.Headers)
+					normalizedHeaders, err := copyHeaderProfileHeaders(profile.Headers)
+					if err != nil {
+						return HeaderProfile{}, false
+					}
+					profile.Headers = normalizedHeaders
 					profile.Headers["User-Agent"] = userAgent
 				}
 			}
@@ -279,7 +286,10 @@ func ResolveHeaderProfileStrategyHeaders(strategy *HeaderProfileStrategy, reques
 	if len(profile.Headers) == 0 {
 		return nil, "", fmt.Errorf("header_profile_strategy selected profile has empty headers: %s", profileID)
 	}
-	headers := copyHeaderProfileHeaders(profile.Headers)
+	headers, err := copyHeaderProfileHeaders(profile.Headers)
+	if err != nil {
+		return nil, "", fmt.Errorf("header_profile_strategy selected profile headers invalid: %w", err)
+	}
 	resolveLatestHeaderProfileHeaders(profile, headers)
 	return headers, profile.ID, nil
 }
@@ -327,17 +337,61 @@ func normalizeHeaderProfileIDs(profileIDs []string) []string {
 	return result
 }
 
-func copyHeaderProfileHeaders(headers map[string]string) map[string]string {
+// NormalizeHeaderProfileHeaders validates and canonicalizes a Header Profile's
+// concrete HTTP header map before it is persisted or applied at runtime.
+func NormalizeHeaderProfileHeaders(headers map[string]string) (map[string]string, error) {
 	if len(headers) == 0 {
-		return nil
+		return map[string]string{}, nil
 	}
-	copied := make(map[string]string, len(headers))
+
+	normalized := make(map[string]string, len(headers))
+	seen := make(map[string]string, len(headers))
 	for key, value := range headers {
 		trimmedKey := strings.TrimSpace(key)
 		if trimmedKey == "" {
-			continue
+			return nil, fmt.Errorf("请求头名称不能为空")
 		}
-		copied[trimmedKey] = value
+		if !IsValidHeaderFieldName(trimmedKey) {
+			return nil, fmt.Errorf("请求头名称不合法: %s", key)
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, fmt.Errorf("请求头值不能为空: %s", trimmedKey)
+		}
+		for _, ch := range value {
+			if ch < 0x20 || ch == 0x7f {
+				return nil, fmt.Errorf("请求头值包含控制字符: %s", trimmedKey)
+			}
+		}
+		canonicalKey := textproto.CanonicalMIMEHeaderKey(trimmedKey)
+		lookupKey := strings.ToLower(canonicalKey)
+		if previousKey, exists := seen[lookupKey]; exists {
+			return nil, fmt.Errorf("请求头名称重复（大小写不敏感）: %s / %s", previousKey, trimmedKey)
+		}
+		seen[lookupKey] = trimmedKey
+		normalized[canonicalKey] = value
 	}
-	return copied
+	return normalized, nil
+}
+
+// IsValidHeaderFieldName reports whether name is a valid HTTP field-name.
+func IsValidHeaderFieldName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		switch ch := name[i]; {
+		case ch >= 'a' && ch <= 'z':
+		case ch >= 'A' && ch <= 'Z':
+		case ch >= '0' && ch <= '9':
+		case strings.ContainsRune("!#$%&'*+-.^_`|~", rune(ch)):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func copyHeaderProfileHeaders(headers map[string]string) (map[string]string, error) {
+	return NormalizeHeaderProfileHeaders(headers)
 }

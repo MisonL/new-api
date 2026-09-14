@@ -42,6 +42,8 @@ type Channel struct {
 	//MaxInputTokens     *int    `json:"max_input_tokens" gorm:"default:0"`
 	StatusCodeMapping *string `json:"status_code_mapping" gorm:"type:varchar(1024);default:''"`
 	Priority          *int64  `json:"priority" gorm:"bigint;default:0"`
+	PinOrder          *int64  `json:"pin_order" gorm:"bigint;default:0;index"`
+	MaxConcurrency    int     `json:"max_concurrency" gorm:"not null;default:0;index"`
 	AutoBan           *int    `json:"auto_ban" gorm:"default:1"`
 	OtherInfo         string  `json:"other_info"`
 	Tag               *string `json:"tag" gorm:"index"`
@@ -73,10 +75,56 @@ func (channel *Channel) CloneForCache() *Channel {
 		return nil
 	}
 	cloned := *channel
+	cloned.OpenAIOrganization = cloneStringPointer(channel.OpenAIOrganization)
+	cloned.TestModel = cloneStringPointer(channel.TestModel)
+	cloned.Weight = cloneUintPointer(channel.Weight)
+	cloned.BaseURL = cloneStringPointer(channel.BaseURL)
+	cloned.ModelMapping = cloneStringPointer(channel.ModelMapping)
+	cloned.StatusCodeMapping = cloneStringPointer(channel.StatusCodeMapping)
+	cloned.Priority = cloneInt64Pointer(channel.Priority)
+	cloned.PinOrder = cloneInt64Pointer(channel.PinOrder)
+	cloned.AutoBan = cloneIntPointer(channel.AutoBan)
+	cloned.Tag = cloneStringPointer(channel.Tag)
+	cloned.Setting = cloneStringPointer(channel.Setting)
+	cloned.ParamOverride = cloneStringPointer(channel.ParamOverride)
+	cloned.HeaderOverride = cloneStringPointer(channel.HeaderOverride)
+	cloned.Remark = cloneStringPointer(channel.Remark)
 	cloned.Keys = append([]string(nil), channel.Keys...)
 	cloned.ChannelInfo.MultiKeyStatusList = cloneIntMap(channel.ChannelInfo.MultiKeyStatusList)
 	cloned.ChannelInfo.MultiKeyDisabledReason = cloneIntStringMap(channel.ChannelInfo.MultiKeyDisabledReason)
 	cloned.ChannelInfo.MultiKeyDisabledTime = cloneInt64Map(channel.ChannelInfo.MultiKeyDisabledTime)
+	return &cloned
+}
+
+func cloneStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneUintPointer(value *uint) *uint {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneIntPointer(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneInt64Pointer(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
 	return &cloned
 }
 
@@ -124,10 +172,19 @@ type ChannelPriority struct {
 	Priority *int64 `json:"priority"`
 }
 
+// ChannelPinOrder is the management-only ordering metadata used by the
+// channel list. It is deliberately separate from route priority so pinning a
+// channel cannot alter request selection semantics.
+type ChannelPinOrder struct {
+	Id       int    `json:"id"`
+	PinOrder *int64 `json:"pin_order"`
+}
+
 var channelSortColumns = map[string]string{
 	"id":            "id",
 	"name":          "name",
 	"priority":      "priority",
+	"pin_order":     "pin_order",
 	"balance":       "balance",
 	"response_time": "response_time",
 	"test_time":     "test_time",
@@ -158,10 +215,25 @@ func channelPrioritySortClause(sortOrder string) string {
 	return "COALESCE(priority, 0) " + sortDirection + ", id DESC"
 }
 
+func channelPinOrderSortClause(sortOrder string) string {
+	sortDirection := "DESC"
+	if strings.EqualFold(strings.TrimSpace(sortOrder), "asc") {
+		sortDirection = "ASC"
+	}
+	return "COALESCE(pin_order, 0) " + sortDirection + ", id DESC"
+}
+
+func channelDefaultSortClause() string {
+	return "COALESCE(pin_order, 0) DESC, COALESCE(priority, 0) DESC, id DESC"
+}
+
 func (options ChannelSortOptions) Apply(query *gorm.DB) *gorm.DB {
 	if columnName, ok := channelSortColumns[options.SortBy]; ok {
 		if columnName == "priority" {
 			return query.Order(channelPrioritySortClause(options.SortOrder))
+		}
+		if columnName == "pin_order" {
+			return query.Order(channelPinOrderSortClause(options.SortOrder))
 		}
 		query = query.Order(clause.OrderByColumn{
 			Column: clause.Column{Name: columnName},
@@ -175,7 +247,7 @@ func (options ChannelSortOptions) Apply(query *gorm.DB) *gorm.DB {
 			Desc:   true,
 		})
 	}
-	return query.Order(channelPrioritySortClause("desc"))
+	return query.Order(channelDefaultSortClause())
 }
 
 func resolveChannelSortOptions(idSort bool, sortOptions []ChannelSortOptions) ChannelSortOptions {
@@ -263,7 +335,11 @@ func (channel *Channel) GetKeys() []string {
 		if err := common.Unmarshal([]byte(trimmed), &arr); err == nil {
 			res := make([]string, len(arr))
 			for i, v := range arr {
-				res[i] = string(v)
+				// JSON string elements must be decoded before use. Returning the
+				// raw bytes would include quotes (for example, `"key"`) and make
+				// credential matching fail for multi-key channels. Objects and
+				// numbers intentionally remain their canonical raw JSON values.
+				res[i] = common.JsonRawMessageToString(v)
 			}
 			return res
 		}
@@ -274,6 +350,13 @@ func (channel *Channel) GetKeys() []string {
 }
 
 func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
+	return channel.GetNextEnabledKeyExcluding(nil)
+}
+
+// GetNextEnabledKeyExcluding selects an enabled key while skipping the
+// per-request credential indexes supplied by the caller. The exclusions are
+// intentionally ephemeral and never modify the persisted multi-key status.
+func (channel *Channel) GetNextEnabledKeyExcluding(excluded map[int]struct{}) (string, int, *types.NewAPIError) {
 	// If not in multi-key mode, return the original key string directly.
 	if !channel.ChannelInfo.IsMultiKey {
 		return channel.Key, 0, nil
@@ -306,6 +389,9 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 	enabledIdx := make([]int, 0, len(keys))
 	for i := range keys {
 		if getStatus(i) == common.ChannelStatusEnabled {
+			if _, skip := excluded[i]; skip {
+				continue
+			}
 			enabledIdx = append(enabledIdx, i)
 		}
 	}
@@ -347,6 +433,9 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 		for i := 0; i < len(keys); i++ {
 			idx := (start + i) % len(keys)
 			if getStatus(idx) == common.ChannelStatusEnabled {
+				if _, skip := excluded[idx]; skip {
+					continue
+				}
 				// update polling index for next call (point to the next position)
 				channel.ChannelInfo.MultiKeyPollingIndex = (idx + 1) % len(keys)
 				return keys[idx], idx, nil
@@ -421,14 +510,26 @@ func (channel *Channel) GetAutoBan() bool {
 }
 
 func (channel *Channel) Save() error {
-	return DB.Save(channel).Error
+	if err := DB.Save(channel).Error; err != nil {
+		return err
+	}
+	if channel.Id > 0 {
+		CacheReloadChannel(channel.Id)
+	} else {
+		refreshChannelCacheAfterWrite()
+	}
+	return nil
 }
 
 func (channel *Channel) SaveWithoutKey() error {
 	if channel.Id == 0 {
 		return errors.New("channel ID is 0")
 	}
-	return DB.Omit("key").Save(channel).Error
+	if err := DB.Omit("key").Save(channel).Error; err != nil {
+		return err
+	}
+	CacheReloadChannel(channel.Id)
+	return nil
 }
 
 func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {
@@ -462,6 +563,59 @@ func GetTopChannelPriorities() ([]ChannelPriority, error) {
 		Order(channelPrioritySortClause("desc")).
 		Find(&channels).Error
 	return channels, err
+}
+
+func GetTopChannelPinOrders() ([]ChannelPinOrder, error) {
+	var channels []ChannelPinOrder
+	err := DB.Model(&Channel{}).
+		Select("id, pin_order").
+		Where("COALESCE(pin_order, 0) > ?", 0).
+		Order(channelPinOrderSortClause("desc")).
+		Find(&channels).Error
+	return channels, err
+}
+
+// UpdateChannelPinOrders updates management-only pin ordering atomically. It
+// intentionally does not touch abilities or route priority fields.
+func UpdateChannelPinOrders(updates []ChannelPinOrder) error {
+	if len(updates) == 0 {
+		return errors.New("pin order updates cannot be empty")
+	}
+	seenIDs := make(map[int]struct{}, len(updates))
+	for _, update := range updates {
+		if update.Id <= 0 || update.PinOrder == nil || *update.PinOrder < 0 {
+			return fmt.Errorf("invalid pin order update for channel %d", update.Id)
+		}
+		if _, exists := seenIDs[update.Id]; exists {
+			return fmt.Errorf("duplicate pin order update for channel %d", update.Id)
+		}
+		seenIDs[update.Id] = struct{}{}
+	}
+
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		for _, update := range updates {
+			var channel Channel
+			if err := tx.Select("id").Where("id = ?", update.Id).First(&channel).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return fmt.Errorf("channel does not exist: %d", update.Id)
+				}
+				return err
+			}
+			if err := tx.Model(&Channel{}).
+				Where("id = ?", update.Id).
+				Select("pin_order").
+				Update("pin_order", *update.PinOrder).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, update := range updates {
+		CacheReloadChannel(update.Id)
+	}
+	return nil
 }
 
 func ApplyChannelSearchFilters(query *gorm.DB, keyword string, group string, model string) *gorm.DB {
@@ -569,7 +723,11 @@ func BatchInsertChannels(channels []Channel) (err error) {
 			}
 		}
 	}
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	refreshChannelCacheAfterWrite()
+	return nil
 }
 
 const syncChannelIDSequenceSQL = `
@@ -638,7 +796,11 @@ func InsertChannel(channel *Channel) (err error) {
 		tx.Rollback()
 		return err
 	}
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	refreshChannelCacheAfterWrite()
+	return nil
 }
 
 func BatchDeleteChannels(ids []int) error {
@@ -660,7 +822,11 @@ func BatchDeleteChannels(ids []int) error {
 			return err
 		}
 	}
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	refreshChannelCacheAfterWrite()
+	return nil
 }
 
 func (channel *Channel) GetPriority() int64 {
@@ -668,6 +834,13 @@ func (channel *Channel) GetPriority() int64 {
 		return 0
 	}
 	return *channel.Priority
+}
+
+func (channel *Channel) GetPinOrder() int64 {
+	if channel.PinOrder == nil {
+		return 0
+	}
+	return *channel.PinOrder
 }
 
 func (channel *Channel) GetWeight() int {
@@ -683,7 +856,7 @@ func (channel *Channel) GetBaseURL() string {
 	}
 	url := *channel.BaseURL
 	if url == "" {
-		url = constant.ChannelBaseURLs[channel.Type]
+		url, _ = constant.ChannelBaseURL(channel.Type)
 	}
 	return url
 }
@@ -707,6 +880,9 @@ func (channel *Channel) Insert() error {
 }
 
 func (channel *Channel) Update() error {
+	if channel == nil {
+		return errors.New("channel is nil")
+	}
 	// If this is a multi-key channel, recalculate MultiKeySize based on the current key list to avoid inconsistency after editing keys
 	if channel.ChannelInfo.IsMultiKey {
 		var keyStr string
@@ -745,14 +921,24 @@ func (channel *Channel) Update() error {
 			}
 		}
 	}
-	var err error
-	err = DB.Model(channel).Updates(channel).Error
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(channel).Updates(channel).Error; err != nil {
+			return err
+		}
+		if err := tx.First(channel, "id = ?", channel.Id).Error; err != nil {
+			return err
+		}
+		return channel.UpdateAbilities(tx)
+	})
 	if err != nil {
 		return err
 	}
-	DB.Model(channel).First(channel, "id = ?", channel.Id)
-	err = channel.UpdateAbilities(nil)
-	return err
+	if channel.Id > 0 {
+		CacheReloadChannel(channel.Id)
+	} else {
+		refreshChannelCacheAfterWrite()
+	}
+	return nil
 }
 
 func (channel *Channel) UpdateResponseTime(responseTime int64) {
@@ -787,7 +973,14 @@ func (channel *Channel) Delete() error {
 		return err
 	}
 	err = channel.DeleteAbilities()
+	refreshChannelCacheAfterWrite()
 	return err
+}
+
+func refreshChannelCacheAfterWrite() {
+	if common.MemoryCacheEnabled {
+		InitChannelCache()
+	}
 }
 
 var channelStatusLock sync.Mutex
@@ -969,6 +1162,7 @@ func EnableChannelByTag(tag string) error {
 		return err
 	}
 	err = UpdateAbilityStatusByTag(tag, true)
+	refreshChannelCacheAfterWrite()
 	return err
 }
 
@@ -978,10 +1172,14 @@ func DisableChannelByTag(tag string) error {
 		return err
 	}
 	err = UpdateAbilityStatusByTag(tag, false)
+	refreshChannelCacheAfterWrite()
 	return err
 }
 
 func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, paramOverride *string, headerOverride *string) error {
+	if IsChannelRoutingV2StrictWrites() && (priority != nil || weight != nil) {
+		return fmt.Errorf("%w: 请使用 /api/channel-route-scopes", ErrLegacyRouteFieldWriteBlocked)
+	}
 	updateData := Channel{}
 	shouldReCreateAbilities := false
 	updatedTag := tag
@@ -990,7 +1188,11 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 		updateData.Tag = newTag
 		updatedTag = *newTag
 	}
-	if modelMapping != nil && *modelMapping != "" {
+	// A non-nil pointer is an explicit caller decision, including an empty
+	// string. Empty model_mapping is the supported way to remove a previous
+	// mapping through the tag batch endpoint; checking the pointed-to value
+	// would silently leave stale routing rules in place.
+	if modelMapping != nil {
 		updateData.ModelMapping = modelMapping
 	}
 	if models != nil && *models != "" {
@@ -1020,20 +1222,26 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 	}
 	if shouldReCreateAbilities {
 		channels, err := GetChannelsByTag(updatedTag, false, false)
-		if err == nil {
-			for _, channel := range channels {
-				err = channel.UpdateAbilities(nil)
-				if err != nil {
-					common.SysLog(fmt.Sprintf("failed to update abilities: channel_id=%d, tag=%s, error=%v", channel.Id, channel.GetTag(), err))
-				}
+		if err != nil {
+			refreshChannelCacheAfterWrite()
+			return err
+		}
+		for _, channel := range channels {
+			err = channel.UpdateAbilities(nil)
+			if err != nil {
+				common.SysLog(fmt.Sprintf("failed to update abilities: channel_id=%d, tag=%s, error=%v", channel.Id, channel.GetTag(), err))
+				refreshChannelCacheAfterWrite()
+				return err
 			}
 		}
 	} else {
-		err := UpdateAbilityByTag(tag, newTag, priority, weight)
+		err = UpdateAbilityByTag(tag, newTag, priority, weight)
 		if err != nil {
+			refreshChannelCacheAfterWrite()
 			return err
 		}
 	}
+	refreshChannelCacheAfterWrite()
 	return nil
 }
 
@@ -1054,11 +1262,17 @@ func updateChannelUsedQuota(id int, quota int) {
 
 func DeleteChannelByStatus(status int64) (int64, error) {
 	result := DB.Where("status = ?", status).Delete(&Channel{})
+	if result.Error == nil && result.RowsAffected > 0 {
+		refreshChannelCacheAfterWrite()
+	}
 	return result.RowsAffected, result.Error
 }
 
 func DeleteDisabledChannel() (int64, error) {
 	result := DB.Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).Delete(&Channel{})
+	if result.Error == nil && result.RowsAffected > 0 {
+		refreshChannelCacheAfterWrite()
+	}
 	return result.RowsAffected, result.Error
 }
 
@@ -1120,9 +1334,7 @@ func (channel *Channel) GetSetting() dto.ChannelSettings {
 	if channel.Setting != nil && *channel.Setting != "" {
 		err := common.Unmarshal([]byte(*channel.Setting), &setting)
 		if err != nil {
-			common.SysLog(fmt.Sprintf("failed to unmarshal setting: channel_id=%d, error=%v", channel.Id, err))
-			channel.Setting = nil // 清空设置以避免后续错误
-			_ = channel.Save()    // 保存修改
+			common.SysLog(fmt.Sprintf("failed to unmarshal setting (read-only): channel_id=%d, error=%v", channel.Id, err))
 		}
 	}
 	return setting
@@ -1142,9 +1354,7 @@ func (channel *Channel) GetOtherSettings() dto.ChannelOtherSettings {
 	if channel.OtherSettings != "" {
 		err := common.UnmarshalJsonStr(channel.OtherSettings, &setting)
 		if err != nil {
-			common.SysLog(fmt.Sprintf("failed to unmarshal setting: channel_id=%d, error=%v", channel.Id, err))
-			channel.OtherSettings = "{}" // 清空设置以避免后续错误
-			_ = channel.Save()           // 保存修改
+			common.SysLog(fmt.Sprintf("failed to unmarshal other settings (read-only): channel_id=%d, error=%v", channel.Id, err))
 		}
 	}
 	return setting
@@ -1473,8 +1683,8 @@ func BatchSetChannelTag(ids []int, tag *string) error {
 	}
 
 	// update ability status
-	channels, err := GetChannelsByIds(ids)
-	if err != nil {
+	var channels []*Channel
+	if err := tx.Where("id in (?)", ids).Find(&channels).Error; err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -1488,7 +1698,11 @@ func BatchSetChannelTag(ids []int, tag *string) error {
 	}
 
 	// 提交事务
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	refreshChannelCacheAfterWrite()
+	return nil
 }
 
 // CountAllChannels returns total channels in DB

@@ -194,6 +194,15 @@ func GetTopChannelPriorities(c *gin.Context) {
 	common.ApiSuccess(c, channels)
 }
 
+func GetTopChannelPinOrders(c *gin.Context) {
+	channels, err := model.GetTopChannelPinOrders()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, channels)
+}
+
 func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, error) {
 	var headers http.Header
 	switch channel.Type {
@@ -519,17 +528,14 @@ func validateHeaderProfileStrategySnapshots(strategy *dto.HeaderProfileStrategy)
 		if _, selected := selectedIDs[profile.ID]; !selected {
 			continue
 		}
-		if len(profile.Headers) == 0 {
+		normalizedHeaders, err := dto.NormalizeHeaderProfileHeaders(profile.Headers)
+		if err != nil {
+			return fmt.Errorf("header_profile_strategy profile %s %w", profile.ID, err)
+		}
+		if len(normalizedHeaders) == 0 {
 			return fmt.Errorf("header_profile_strategy profile %s headers 不能为空", profile.ID)
 		}
-		for key, value := range profile.Headers {
-			if strings.TrimSpace(key) == "" {
-				return fmt.Errorf("header_profile_strategy profile %s 存在空请求头名称", profile.ID)
-			}
-			if strings.TrimSpace(value) == "" {
-				return fmt.Errorf("header_profile_strategy profile %s 存在空请求头值", profile.ID)
-			}
-		}
+		profile.Headers = normalizedHeaders
 		if err := dto.ValidateHeaderProfileVersionMeta(profile); err != nil {
 			return fmt.Errorf("header_profile_strategy profile %s %s", profile.ID, err.Error())
 		}
@@ -671,6 +677,28 @@ func normalizeOptionalHeaderPolicyModeForChannelSettings(raw dto.HeaderPolicyMod
 func validateChannel(channel *model.Channel, isAdd bool) error {
 	if channel == nil {
 		return fmt.Errorf("channel cannot be empty")
+	}
+	if !constant.IsValidChannelType(channel.Type) {
+		return fmt.Errorf("channel type is invalid: %d", channel.Type)
+	}
+	if channel.MaxConcurrency < 0 {
+		return fmt.Errorf("max_concurrency 不能为负数")
+	}
+	if err := model.ValidateChannelModelMapping(channel.GetModelMapping()); err != nil {
+		return fmt.Errorf("model_mapping 格式错误：%w", err)
+	}
+	if channel.HeaderOverride != nil {
+		headers, err := service.ValidateHeaderTemplate(*channel.HeaderOverride)
+		if err != nil {
+			return fmt.Errorf("header_override 格式错误：%w", err)
+		}
+		if headers == nil {
+			channel.HeaderOverride = common.GetPointer("")
+		} else if normalized, err := common.Marshal(headers); err != nil {
+			return fmt.Errorf("header_override 格式错误：%w", err)
+		} else {
+			channel.HeaderOverride = common.GetPointer(string(normalized))
+		}
 	}
 
 	// 校验 channel settings
@@ -823,6 +851,11 @@ func AddChannel(c *gin.Context) {
 			"success": false,
 			"message": err.Error(),
 		})
+		return
+	}
+	if model.IsChannelRoutingV2StrictWrites() &&
+		(addChannelRequest.Channel.Priority != nil || addChannelRequest.Channel.Weight != nil) {
+		common.ApiErrorMsg(c, "新路由模式下 priority/weight 已迁移到 route scope，请先创建渠道，再使用 /api/channel-route-scopes 配置")
 		return
 	}
 
@@ -1015,6 +1048,10 @@ func EditTagChannels(c *gin.Context) {
 		})
 		return
 	}
+	if model.IsChannelRoutingV2StrictWrites() && (channelTag.Priority != nil || channelTag.Weight != nil) {
+		common.ApiErrorMsg(c, "新路由模式下 priority/weight 已迁移到 route scope，请使用 /api/channel-route-scopes")
+		return
+	}
 	if channelTag.ParamOverride != nil {
 		trimmed := strings.TrimSpace(*channelTag.ParamOverride)
 		var payload any
@@ -1033,6 +1070,15 @@ func EditTagChannels(c *gin.Context) {
 			"message": "标签请求头策略已迁移到专用接口，请使用 /api/channel/tag-policy",
 		})
 		return
+	}
+	if channelTag.ModelMapping != nil {
+		if err := model.ValidateChannelModelMapping(*channelTag.ModelMapping); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": fmt.Sprintf("model_mapping 格式错误：%s", err.Error()),
+			})
+			return
+		}
 	}
 	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ParamOverride, nil)
 	if err != nil {
@@ -1136,6 +1182,9 @@ func mergeChannelInfoUpdate(original model.ChannelInfo, update model.ChannelInfo
 }
 
 func updateChannelScalarFields(channel PatchChannel, fields map[string]common.RawMessage) (bool, error) {
+	if model.IsChannelRoutingV2StrictWrites() && (isOnlyChannelUpdate(fields, "priority") || isOnlyChannelUpdate(fields, "weight")) {
+		return true, errors.New("新路由模式下 priority/weight 已迁移到 route scope，请使用 /api/channel-route-scopes")
+	}
 	switch {
 	case isOnlyChannelUpdate(fields, "priority"):
 		return true, model.DB.Transaction(func(tx *gorm.DB) error {
@@ -1209,6 +1258,16 @@ func UpdateChannel(c *gin.Context) {
 	if err := common.Unmarshal(body, &channel); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if model.IsChannelRoutingV2StrictWrites() {
+		if _, hasPriority := fields["priority"]; hasPriority {
+			common.ApiErrorMsg(c, "新路由模式下 priority 已迁移到 route scope，请使用 /api/channel-route-scopes")
+			return
+		}
+		if _, hasWeight := fields["weight"]; hasWeight {
+			common.ApiErrorMsg(c, "新路由模式下 weight 已迁移到 route scope，请使用 /api/channel-route-scopes")
+			return
+		}
 	}
 	if isOnlyChannelUpdate(fields, "status") {
 		originChannel, err := model.GetChannelById(channel.Id, true)
@@ -1396,6 +1455,10 @@ func UpdateChannel(c *gin.Context) {
 }
 
 func UpdateChannelPriorities(c *gin.Context) {
+	if model.IsChannelRoutingV2StrictWrites() {
+		common.ApiErrorMsg(c, "新路由模式下 priority 已迁移到 route scope，请使用 /api/channel-route-scopes")
+		return
+	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdateChannelBodyBytes)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -1476,6 +1539,41 @@ func UpdateChannelPriorities(c *gin.Context) {
 	if changed {
 		model.InitChannelCache()
 		service.ResetProxyClientCache()
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    len(updates),
+	})
+}
+
+func UpdateChannelPinOrders(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdateChannelBodyBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "请求体过大",
+			})
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+
+	var updates []model.ChannelPinOrder
+	if err := common.Unmarshal(body, &updates); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "参数错误",
+		})
+		return
+	}
+	if err := model.UpdateChannelPinOrders(updates); err != nil {
+		common.ApiError(c, err)
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -1574,6 +1672,7 @@ func normalizeResponsesCompactSettingsForChannel(channelType int, settings *dto.
 	settings.ResponsesCompactSummaryModelFallback = nil
 	settings.ResponsesCompactSummaryFallbackModels = nil
 	settings.ResponsesRemoteCompactionFirstDataTimeoutSeconds = 0
+	settings.PreferForResponsesCompactionWhenNamespaceUnsupported = nil
 	settings.ResponsesUpstreamProfile = ""
 	return true
 }
@@ -1590,6 +1689,7 @@ func hasResponsesCompactAuxiliarySettings(settings *dto.ChannelOtherSettings) bo
 		settings.ResponsesCompactSummaryModelFallback != nil ||
 		len(settings.ResponsesCompactSummaryFallbackModels) > 0 ||
 		settings.ResponsesRemoteCompactionFirstDataTimeoutSeconds != 0 ||
+		settings.PreferForResponsesCompactionWhenNamespaceUnsupported != nil ||
 		settings.ResponsesUpstreamProfile != ""
 }
 
@@ -1610,7 +1710,15 @@ func FetchModels(c *gin.Context) {
 
 	baseURL := req.BaseURL
 	if baseURL == "" {
-		baseURL = constant.ChannelBaseURLs[req.Type]
+		var ok bool
+		baseURL, ok = constant.ChannelBaseURL(req.Type)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Invalid channel type",
+			})
+			return
+		}
 	}
 
 	// remove line breaks and extra spaces.
@@ -1814,6 +1922,8 @@ func CopyChannel(c *gin.Context) {
 	clone.Name = origin.Name + suffix
 	clone.TestTime = 0
 	clone.ResponseTime = 0
+	// Pinning is management-only metadata; a cloned channel starts unpinned.
+	clone.PinOrder = common.GetPointer[int64](0)
 	if resetBalance {
 		clone.Balance = 0
 		clone.UsedQuota = 0
@@ -2363,7 +2473,11 @@ func OllamaPullModel(c *gin.Context) {
 		return
 	}
 
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	baseURL, ok := constant.ChannelBaseURL(channel.Type)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid channel type"})
+		return
+	}
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
 	}
@@ -2430,7 +2544,11 @@ func OllamaPullModelStream(c *gin.Context) {
 		return
 	}
 
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	baseURL, ok := constant.ChannelBaseURL(channel.Type)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid channel type"})
+		return
+	}
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
 	}
@@ -2516,7 +2634,11 @@ func OllamaDeleteModel(c *gin.Context) {
 		return
 	}
 
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	baseURL, ok := constant.ChannelBaseURL(channel.Type)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid channel type"})
+		return
+	}
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
 	}
@@ -2569,7 +2691,11 @@ func OllamaVersion(c *gin.Context) {
 		return
 	}
 
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	baseURL, ok := constant.ChannelBaseURL(channel.Type)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid channel type"})
+		return
+	}
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
 	}

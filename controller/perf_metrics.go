@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/QuantumNous/new-api/common"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
@@ -39,7 +40,7 @@ func filterActiveGroups(groups []perfmetrics.GroupResult) []perfmetrics.GroupRes
 	activeGroups := ratio_setting.GetGroupRatioCopy()
 	filtered := make([]perfmetrics.GroupResult, 0, len(groups))
 	for _, group := range groups {
-		if _, ok := activeGroups[group.Group]; ok || group.Group == "auto" {
+		if _, ok := activeGroups[group.Group]; ok || common.IsAutoGroup(group.Group) {
 			filtered = append(filtered, group)
 		}
 	}

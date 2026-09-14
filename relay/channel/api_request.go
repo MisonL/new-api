@@ -179,8 +179,18 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 		return headerOverride, nil
 	}
 
-	headerOverrideSource := common.GetEffectiveHeaderOverride(info)
-	profileHeaders, profileID, err := resolveHeaderProfileStrategyHeaders(info)
+	headerOverrideSource, err := common.GetEffectiveHeaderOverrideWithError(info)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
+	}
+	profileHeaders, profileID, err := resolveHeaderProfileStrategyHeaders(c, info)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
+	}
+	staticCodexDynamicHeaderKeys, err := validateCodexProfileStaticHeaders(profileID, profileHeaders)
+	if len(staticCodexDynamicHeaderKeys) > 0 {
+		recordCodexDynamicHeaderAudit(c, codexDynamicHeadersStatusRejected, staticCodexDynamicHeaderKeys)
+	}
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
 	}
@@ -290,8 +300,162 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 
 		headerOverride[key] = value
 	}
+	codexDynamicHeaderStatus, codexDynamicHeaderKeys, err := validateCodexProfileRuntimeHeaders(profileID, info, c, headerOverride)
+	recordCodexDynamicHeaderAudit(c, codexDynamicHeaderStatus, codexDynamicHeaderKeys)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
+	}
 	mergeFinalHeaderOverrideAudit(c, headerOverride, getHeaderOverrideUserAgent(headerOverride))
 	return headerOverride, nil
+}
+
+func isCodexHeaderProfileID(profileID string) bool {
+	baseProfileID, _, _ := strings.Cut(strings.TrimSpace(profileID), "@")
+	switch strings.TrimSpace(baseProfileID) {
+	case "codex-cli", "codex-desktop":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateCodexProfileStaticHeaders(profileID string, profileHeaders map[string]string) ([]string, error) {
+	if !isCodexHeaderProfileID(profileID) {
+		return nil, nil
+	}
+	dynamicHeaderNames := collectCodexDynamicHeaderNames(profileHeaders)
+	if len(dynamicHeaderNames) > 0 {
+		return dynamicHeaderNames, fmt.Errorf("header_profile_strategy Codex Profile 不能预设动态请求头，必须通过 param_override pass_headers 透传真实客户端值: %s", strings.Join(dynamicHeaderNames, ", "))
+	}
+	return nil, nil
+}
+
+const (
+	codexDynamicHeadersStatusAbsent   = "absent"
+	codexDynamicHeadersStatusPassed   = "passed"
+	codexDynamicHeadersStatusRejected = "rejected"
+)
+
+func validateCodexProfileRuntimeHeaders(profileID string, info *common.RelayInfo, c *gin.Context, headers map[string]string) (string, []string, error) {
+	if !isCodexHeaderProfileID(profileID) {
+		return "", nil, nil
+	}
+	if info == nil || c == nil || c.Request == nil {
+		return codexDynamicHeadersStatusRejected, nil, fmt.Errorf("header_profile_strategy Codex Profile 缺少请求上下文，无法验证 x-codex-* 请求头透传")
+	}
+
+	requestDynamicHeaders := collectCodexDynamicHTTPHeaders(c.Request.Header)
+	outboundDynamicHeaders := collectCodexDynamicRequestHeaders(headers)
+	dynamicHeaderNames := make([]string, 0, len(requestDynamicHeaders)+len(outboundDynamicHeaders))
+	seenHeaderNames := make(map[string]struct{}, len(requestDynamicHeaders)+len(outboundDynamicHeaders))
+	for headerName := range requestDynamicHeaders {
+		seenHeaderNames[headerName] = struct{}{}
+		dynamicHeaderNames = append(dynamicHeaderNames, headerName)
+	}
+	for headerName := range outboundDynamicHeaders {
+		if _, exists := seenHeaderNames[headerName]; exists {
+			continue
+		}
+		seenHeaderNames[headerName] = struct{}{}
+		dynamicHeaderNames = append(dynamicHeaderNames, headerName)
+	}
+	if len(dynamicHeaderNames) == 0 {
+		return codexDynamicHeadersStatusAbsent, nil, nil
+	}
+	sort.Strings(dynamicHeaderNames)
+	for _, headerName := range sortedHeaderNames(requestDynamicHeaders) {
+		requestValue, requested := requestDynamicHeaders[headerName]
+		passedValue, passed := getHeaderValueByNormalizedName(info.RuntimePassedRequestHeaders, headerName)
+		outboundValue, outbound := getHeaderValueByNormalizedName(headers, headerName)
+		if !requested || !passed || passedValue != requestValue || !outbound || outboundValue != requestValue {
+			return codexDynamicHeadersStatusRejected, dynamicHeaderNames, fmt.Errorf("header_profile_strategy Codex Profile 未透传真实客户端请求头: %s", headerName)
+		}
+	}
+	for _, headerName := range sortedHeaderNames(outboundDynamicHeaders) {
+		if _, requested := requestDynamicHeaders[headerName]; requested {
+			continue
+		}
+		derivedValue, derived := getHeaderValueByNormalizedName(info.RuntimePassedRequestHeaders, headerName)
+		outboundValue, outbound := getHeaderValueByNormalizedName(headers, headerName)
+		if !derived || !outbound || derivedValue != outboundValue {
+			return codexDynamicHeadersStatusRejected, dynamicHeaderNames, fmt.Errorf("header_profile_strategy Codex Profile 动态请求头不是客户端透传或受信任派生值: %s", headerName)
+		}
+	}
+	return codexDynamicHeadersStatusPassed, dynamicHeaderNames, nil
+}
+
+func collectCodexDynamicRequestHeaders(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	dynamicHeaders := make(map[string]string)
+	for headerName, value := range headers {
+		normalizedName := strings.ToLower(strings.TrimSpace(headerName))
+		normalizedValue := strings.TrimSpace(value)
+		if !operation_setting.IsCodexDynamicRequestHeader(normalizedName) || normalizedValue == "" {
+			continue
+		}
+		dynamicHeaders[normalizedName] = normalizedValue
+	}
+	if len(dynamicHeaders) == 0 {
+		return nil
+	}
+	return dynamicHeaders
+}
+
+func collectCodexDynamicHTTPHeaders(headers http.Header) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	requestHeaders := make(map[string]string, len(headers))
+	for headerName, values := range headers {
+		value := headers.Get(headerName)
+		if strings.TrimSpace(value) == "" && len(values) > 0 {
+			// http.Header normally canonicalizes keys, but middleware and test
+			// transports can construct maps with lower-case names directly.
+			value = values[0]
+		}
+		requestHeaders[headerName] = value
+	}
+	return collectCodexDynamicRequestHeaders(requestHeaders)
+}
+
+func collectCodexDynamicHeaderNames(headers map[string]string) []string {
+	dynamicHeaders := collectCodexDynamicRequestHeaders(headers)
+	if len(dynamicHeaders) == 0 {
+		return nil
+	}
+	return sortedHeaderNames(dynamicHeaders)
+}
+
+func sortedHeaderNames(headers map[string]string) []string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func recordCodexDynamicHeaderAudit(c *gin.Context, status string, headerNames []string) {
+	if c == nil || strings.TrimSpace(status) == "" {
+		return
+	}
+	audit, _ := common2.GetContextKeyType[service.RuntimeHeaderPolicyAudit](c, rootconstant.ContextKeyChannelHeaderPolicyAudit)
+	audit.CodexDynamicHeadersStatus = status
+	audit.CodexDynamicHeaderKeys = mergeHeaderKeys(audit.CodexDynamicHeaderKeys, headerNames)
+	common2.SetContextKey(c, rootconstant.ContextKeyChannelHeaderPolicyAudit, audit)
+}
+
+func getHeaderValueByNormalizedName(headers map[string]string, normalizedHeaderName string) (string, bool) {
+	for headerName, value := range headers {
+		if strings.ToLower(strings.TrimSpace(headerName)) != normalizedHeaderName {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		return value, value != ""
+	}
+	return "", false
 }
 
 func mergeHeaderProfileAudit(c *gin.Context, info *common.RelayInfo, profileID string, headerKeys []string) {
@@ -323,7 +487,7 @@ func mergeDefaultUserAgentAudit(c *gin.Context, req *http.Request, resp *http.Re
 	if c == nil || req == nil || resp == nil {
 		return
 	}
-	if _, exists := req.Header["User-Agent"]; exists {
+	if hasUserAgentHeader(req.Header) && !strings.EqualFold(strings.TrimSpace(req.Header.Get("User-Agent")), service.DefaultUserAgent) {
 		return
 	}
 	defaultUA := defaultTransportUserAgent(resp)
@@ -339,10 +503,16 @@ func mergeDefaultUserAgentAudit(c *gin.Context, req *http.Request, resp *http.Re
 }
 
 func defaultTransportUserAgent(resp *http.Response) string {
-	if resp != nil && resp.ProtoMajor == 2 {
-		return "Go-http-client/2.0"
+	return service.DefaultUserAgent
+}
+
+func hasUserAgentHeader(headers http.Header) bool {
+	for name := range headers {
+		if strings.EqualFold(name, "User-Agent") {
+			return true
+		}
 	}
-	return "Go-http-client/1.1"
+	return false
 }
 
 func getHeaderOverrideUserAgent(headers map[string]string) string {
@@ -427,12 +597,12 @@ func mergeHeaderAuditEntries(existing []service.AppliedHeaderAuditEntry, headers
 	return merged
 }
 
-func resolveHeaderProfileStrategyHeaders(info *common.RelayInfo) (map[string]string, string, error) {
-	if info == nil || info.ChannelMeta == nil {
+func resolveHeaderProfileStrategyHeaders(c *gin.Context, info *common.RelayInfo) (map[string]string, string, error) {
+	if c == nil || info == nil || info.ChannelMeta == nil {
 		return nil, "", nil
 	}
 	strategy := info.ChannelMeta.ChannelOtherSettings.HeaderProfileStrategy
-	return service.ResolveChannelRuntimeHeaderProfileHeaders(info.ChannelMeta.ChannelId, strategy)
+	return service.ResolveChannelRuntimeHeaderProfileHeadersForRequest(c, info.ChannelMeta.ChannelId, strategy, info.RetryIndex)
 }
 
 func ResolveHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]string, error) {
@@ -487,6 +657,27 @@ func recordUpstreamRequestPath(info *common.RelayInfo, fullRequestURL string) {
 	}
 }
 
+func applyUpstreamContentLength(req *http.Request, info *common.RelayInfo) {
+	if req == nil || info == nil || info.UpstreamRequestBodySize <= 0 || req.ContentLength > 0 {
+		return
+	}
+	req.ContentLength = info.UpstreamRequestBodySize
+}
+
+func applyUpstreamGetBody(req *http.Request, info *common.RelayInfo) {
+	if req == nil || info == nil || info.UpstreamRequestGetBody == nil || req.GetBody != nil {
+		return
+	}
+	req.GetBody = info.UpstreamRequestGetBody
+}
+
+// ApplyUpstreamBodyMetadata restores body metadata that net/http cannot infer
+// from a type-erased BodyStorage reader.
+func ApplyUpstreamBodyMetadata(req *http.Request, info *common.RelayInfo) {
+	applyUpstreamContentLength(req, info)
+	applyUpstreamGetBody(req, info)
+}
+
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
@@ -500,7 +691,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
-	applyKnownRequestBodyLength(req, requestBody)
+	ApplyUpstreamBodyMetadata(req, info)
 	headers := req.Header
 	err = a.SetupRequestHeader(c, &headers, info)
 	if err != nil {
@@ -513,7 +704,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
-	normalizeOpaqueResponsesReplayTransportHeaders(c, req, requestBody)
+	normalizeOpaqueResponsesReplayTransportHeaders(c, req)
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
@@ -521,35 +712,15 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	return resp, nil
 }
 
-func normalizeOpaqueResponsesReplayTransportHeaders(c *gin.Context, req *http.Request, requestBody io.Reader) {
+func normalizeOpaqueResponsesReplayTransportHeaders(c *gin.Context, req *http.Request) {
 	if req == nil || !common.IsResponsesOpaqueEncryptedReplay(c) {
 		return
 	}
-	// The ingress has already decoded Content-Encoding. The replay reader owns
-	// the only valid body length, so static channel headers cannot override it.
+	// The ingress has already decoded Content-Encoding. Static channel headers
+	// must not describe a different wire representation of the replay body.
 	req.Header.Del("Content-Encoding")
 	req.Header.Del("Content-Length")
 	req.Header.Del("Transfer-Encoding")
-	applyKnownRequestBodyLength(req, requestBody)
-}
-
-type requestBodyLengthProvider interface {
-	ContentLength() int64
-}
-
-func applyKnownRequestBodyLength(req *http.Request, requestBody io.Reader) {
-	if req == nil || requestBody == nil {
-		return
-	}
-	provider, ok := requestBody.(requestBodyLengthProvider)
-	if !ok {
-		return
-	}
-	contentLength := provider.ContentLength()
-	if contentLength < 0 {
-		return
-	}
-	req.ContentLength = contentLength
 	req.TransferEncoding = nil
 }
 
@@ -566,6 +737,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
+	ApplyUpstreamBodyMetadata(req, info)
 	// set form data
 	req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 	headers := req.Header
@@ -607,11 +779,12 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	for key, value := range headerOverride {
 		targetHeader.Set(key, value)
 	}
+	service.ApplyDefaultUserAgentHeader(targetHeader)
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 	if !service.StartUpstreamRateLimitRetryFollowup(c) {
 		return nil, service.NewUpstreamRateLimitRetryExhaustedError()
 	}
-	targetConn, resp, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
+	targetConn, resp, err := websocket.DefaultDialer.DialContext(common.GinRequestContext(c), fullRequestURL, targetHeader)
 	if err != nil {
 		if resp != nil {
 			if resp.Body != nil {
@@ -708,7 +881,7 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 
 		err := helper.PingData(c)
 		if err != nil {
-			logger.LogError(c, "SSE ping error: "+err.Error())
+			logger.LogError(c, "SSE ping error: "+common2.LocalLogPreview(common2.MaskSensitiveInfo(err.Error())))
 			done <- err
 			return
 		}
@@ -803,6 +976,7 @@ type httpDoer interface {
 }
 
 func doRequestWithClient(c *gin.Context, req *http.Request, info *common.RelayInfo, client httpDoer) (*http.Response, error) {
+	service.ApplyDefaultUserAgent(req)
 	if !service.StartUpstreamRateLimitRetryFollowup(c) {
 		return nil, service.NewUpstreamRateLimitRetryExhaustedError()
 	}
@@ -836,7 +1010,7 @@ func doRequestWithClient(c *gin.Context, req *http.Request, info *common.RelayIn
 			info.SetUpstreamEndTime()
 		}
 		if types.IsUpstreamTransportInterruptedError(err) {
-			logger.LogError(c, "upstream transport interrupted: "+err.Error())
+			logger.LogError(c, "upstream transport interrupted: "+common2.LocalLogPreview(common2.MaskSensitiveInfo(err.Error())))
 			return nil, types.NewErrorWithStatusCode(
 				err,
 				types.ErrorCodeUpstreamTransportInterrupted,
@@ -844,24 +1018,25 @@ func doRequestWithClient(c *gin.Context, req *http.Request, info *common.RelayIn
 				types.ErrOptionWithHideErrMsg("upstream transport interrupted: do request failed"),
 			)
 		}
-		logger.LogError(c, "do request failed: "+err.Error())
+		logger.LogError(c, "do request failed: "+common2.LocalLogPreview(common2.MaskSensitiveInfo(err.Error())))
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
 		if info != nil {
 			info.SetUpstreamEndTime()
 		}
-		return nil, errors.New("resp is nil")
+		return nil, types.NewErrorWithStatusCode(
+			errors.New("upstream response is nil"),
+			types.ErrorCodeUpstreamTransportInterrupted,
+			http.StatusBadGateway,
+		)
 	}
 	if info != nil {
 		info.SetUpstreamHeaderTime()
 		wrapUpstreamTimingBody(resp, info)
 	}
 	mergeDefaultUserAgentAudit(c, req, resp)
-
-	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
-		c.Set(common2.UpstreamRequestIdKey, upID)
-	}
+	service.CaptureUpstreamRequestID(c, resp.Header)
 
 	if req.Body != nil {
 		_ = req.Body.Close()
@@ -873,18 +1048,23 @@ func doRequestWithClient(c *gin.Context, req *http.Request, info *common.RelayIn
 }
 
 func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
-	fullRequestURL, err := a.BuildRequestURL(info)
-	if err != nil {
-		return nil, err
+	var fullRequestURL string
+	if info != nil && info.TaskRelayInfo != nil {
+		fullRequestURL = strings.TrimSpace(info.TaskRelayInfo.SubmitRequestURL)
+	}
+	if fullRequestURL == "" {
+		var err error
+		fullRequestURL, err = a.BuildRequestURL(info)
+		if err != nil {
+			return nil, err
+		}
 	}
 	recordUpstreamRequestPath(info, fullRequestURL)
 	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
-	req.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(requestBody), nil
-	}
+	ApplyUpstreamBodyMetadata(req, info)
 
 	headerOverride, err := processHeaderOverride(info, c)
 	if err != nil {

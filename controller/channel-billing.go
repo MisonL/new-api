@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -167,14 +168,11 @@ func GetResponseBody(method, url string, channel *model.Channel, headers http.He
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status code: %d", res.StatusCode)
 	}
 	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
-	err = res.Body.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -202,12 +200,18 @@ func updateChannelCloseAIBalance(channel *model.Channel) (float64, error) {
 }
 
 func updateChannelOpenAISBBalance(channel *model.Channel) (float64, error) {
-	url := fmt.Sprintf("https://api.openai-sb.com/sb-api/user/status?api_key=%s", channel.Key)
+	if channel == nil {
+		return 0, errors.New("channel is nil")
+	}
+	statusURL, err := buildOpenAISBBalanceURL(channel.Key)
+	if err != nil {
+		return 0, err
+	}
 	headers, err := service.BuildChannelRuntimeRequestHeaders(channel, channel.Key, GetAuthHeader(channel.Key))
 	if err != nil {
 		return 0, err
 	}
-	body, err := GetResponseBody("GET", url, channel, headers)
+	body, err := GetResponseBody("GET", statusURL, channel, headers)
 	if err != nil {
 		return 0, err
 	}
@@ -225,6 +229,17 @@ func updateChannelOpenAISBBalance(channel *model.Channel) (float64, error) {
 	}
 	channel.UpdateBalance(balance)
 	return balance, nil
+}
+
+func buildOpenAISBBalanceURL(apiKey string) (string, error) {
+	statusURL, err := url.Parse("https://api.openai-sb.com/sb-api/user/status")
+	if err != nil {
+		return "", err
+	}
+	query := statusURL.Query()
+	query.Set("api_key", apiKey)
+	statusURL.RawQuery = query.Encode()
+	return statusURL.String(), nil
 }
 
 func updateChannelAIProxyBalance(channel *model.Channel) (float64, error) {
@@ -408,7 +423,13 @@ func updateChannelMoonshotBalance(channel *model.Channel) (float64, error) {
 }
 
 func updateChannelBalance(channel *model.Channel) (channelBalanceResult, error) {
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	if channel == nil {
+		return channelBalanceResult{}, errors.New("channel is nil")
+	}
+	baseURL, ok := constant.ChannelBaseURL(channel.Type)
+	if !ok {
+		return channelBalanceResult{}, fmt.Errorf("渠道类型无效: %d", channel.Type)
+	}
 	if channel.GetBaseURL() == "" {
 		channel.BaseURL = &baseURL
 	}

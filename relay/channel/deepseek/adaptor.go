@@ -57,10 +57,22 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	if info == nil {
+		return "", errors.New("relay info is nil")
+	}
+	baseURL := strings.TrimRight(info.ChannelBaseUrl, "/")
+	// DeepSeek's Responses API is rooted at /responses (the official base URL
+	// is https://api.deepseek.com), unlike the legacy Chat Completions path.
+	// RelayFormat can still be Claude when a Claude request is converted to
+	// Responses, so RelayMode must take precedence here.
+	if info.RelayMode == constant.RelayModeResponses {
+		return fmt.Sprintf("%s/responses", baseURL), nil
+	}
+
 	fimBaseUrl := info.ChannelBaseUrl
 	switch info.RelayFormat {
 	case types.RelayFormatClaude:
-		return fmt.Sprintf("%s/anthropic/v1/messages", info.ChannelBaseUrl), nil
+		return fmt.Sprintf("%s/anthropic/v1/messages", baseURL), nil
 	default:
 		if !strings.HasSuffix(info.ChannelBaseUrl, "/beta") {
 			fimBaseUrl += "/beta"
@@ -69,7 +81,7 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		case constant.RelayModeCompletions:
 			return fmt.Sprintf("%s/completions", fimBaseUrl), nil
 		default:
-			return fmt.Sprintf("%s/v1/chat/completions", info.ChannelBaseUrl), nil
+			return fmt.Sprintf("%s/v1/chat/completions", baseURL), nil
 		}
 	}
 }
@@ -159,8 +171,79 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
-	// TODO implement me
-	return nil, errors.New("not implemented")
+	if err := normalizeDeepSeekResponsesRequest(&request); err != nil {
+		return nil, err
+	}
+	applyDeepSeekV4ResponsesThinkingSuffix(info, &request)
+	return request, nil
+}
+
+// normalizeDeepSeekResponsesRequest keeps the request honest about the
+// stateless DeepSeek Responses API.  State-bearing fields are rejected rather
+// than silently discarded; other unsupported optional fields are removed so
+// callers do not mistake a successful request for an upstream feature that
+// DeepSeek ignores.
+func normalizeDeepSeekResponsesRequest(request *dto.OpenAIResponsesRequest) error {
+	if request == nil {
+		return errors.New("request is nil")
+	}
+	if strings.TrimSpace(request.PreviousResponseID) != "" {
+		return fmt.Errorf("previous_response_id is not supported by DeepSeek Responses API (the API is stateless)")
+	}
+	if rawJSONEnabled(request.Conversation) {
+		return fmt.Errorf("conversation is not supported by DeepSeek Responses API (the API is stateless)")
+	}
+
+	// These fields are listed as unsupported by DeepSeek's official Responses
+	// compatibility table.  Clear them before marshalling instead of sending a
+	// misleading state or cache directive that the upstream will ignore.
+	request.ContextManagement = nil
+	request.Include = nil
+	request.Metadata = nil
+	request.Store = nil
+	request.PromptCacheKey = nil
+	request.PromptCacheRetention = nil
+	request.SafetyIdentifier = nil
+	request.ServiceTier = ""
+	request.StreamOptions = nil
+	request.Truncation = nil
+	request.MaxToolCalls = nil
+	request.Prompt = nil
+	request.Preset = nil
+	request.EnableThinking = nil
+	return nil
+}
+
+func rawJSONEnabled(raw []byte) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed != "" && trimmed != "null"
+}
+
+func applyDeepSeekV4ResponsesThinkingSuffix(info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) {
+	if request == nil {
+		return
+	}
+	modelName := request.Model
+	if info != nil && info.ChannelMeta != nil && info.UpstreamModelName != "" {
+		modelName = info.UpstreamModelName
+	}
+	baseModel, thinkingType, effort, ok := reasoning.ParseDeepSeekV4ThinkingSuffix(modelName)
+	if ok {
+		if thinkingType == "disabled" {
+			effort = "none"
+		}
+		request.Model = baseModel
+		if request.Reasoning == nil {
+			request.Reasoning = &dto.Reasoning{}
+		}
+		request.Reasoning.Effort = effort
+		if info != nil && info.ChannelMeta != nil {
+			info.UpstreamModelName = baseModel
+		}
+	}
+	if info != nil && request.Reasoning != nil {
+		info.ReasoningEffort = request.Reasoning.Effort
+	}
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {

@@ -148,6 +148,7 @@ func TestResponsesViaChatRejectsOpaqueEncryptedReplayBeforeConversion(t *testing
 	require.Equal(t, http.StatusServiceUnavailable, requestErr.StatusCode)
 	require.Nil(t, adaptor.convertedReq)
 	require.Empty(t, adaptor.requestBody)
+	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionRejectedUnsupported, common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
 }
 
 func TestResponsesViaChatNonStream(t *testing.T) {
@@ -254,31 +255,20 @@ func TestResponsesViaChatMarksReasoningContextAsStrippedByBridge(t *testing.T) {
 	require.Equal(t, "stripped_by_chat_compatibility", common.GetContextKeyString(c, constant.ContextKeyResponsesReasoningContextAction))
 }
 
-func TestResponsesViaChatBridgesNamespaceToolsWithoutForwardingHistoryItemIDs(t *testing.T) {
+func TestResponsesViaChatNormalizesInputItemIDsBeforeBridge(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	chatResp := dto.OpenAITextResponse{
-		Id:      "chatcmpl_namespace_with_history",
+	chatRespBytes, err := common.Marshal(dto.OpenAITextResponse{
+		Id:      "chatcmpl_item_id_normalization",
 		Object:  "chat.completion",
 		Created: 1710000000,
-		Model:   "gpt-5.6-sol",
+		Model:   "gpt-5",
 		Choices: []dto.OpenAITextResponseChoice{{
 			Index:        0,
-			Message:      dto.Message{Role: "assistant", Content: ""},
-			FinishReason: "tool_calls",
+			Message:      dto.Message{Role: "assistant", Content: "compat ok"},
+			FinishReason: "stop",
 		}},
-		Usage: dto.Usage{PromptTokens: 7, CompletionTokens: 3, TotalTokens: 10},
-	}
-	chatResp.Choices[0].Message.SetToolCalls([]dto.ToolCallRequest{{
-		ID:   "call_namespace_next",
-		Type: "function",
-		Function: dto.FunctionRequest{
-			Name:      "collaboration__send_message",
-			Arguments: `{"message":"done"}`,
-		},
-	}})
-	chatRespBytes, err := common.Marshal(chatResp)
+	})
 	require.NoError(t, err)
-
 	adaptor := &mockResponsesViaChatAdaptor{response: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -288,70 +278,21 @@ func TestResponsesViaChatBridgesNamespaceToolsWithoutForwardingHistoryItemIDs(t 
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte("{}")))
 	request := &dto.OpenAIResponsesRequest{
-		Model: "gpt-5.6-sol",
-		Input: marshalRawJSON(t, []any{
-			map[string]any{
-				"type": "additional_tools",
-				"id":   "legacy_additional_tools_id",
-				"role": "developer",
-				"tools": []map[string]any{{
-					"type": "namespace",
-					"name": "collaboration",
-					"tools": []map[string]any{{
-						"type":       "function",
-						"name":       "send_message",
-						"parameters": map[string]any{"type": "object"},
-					}},
-				}},
-			},
-			map[string]any{
-				"type":      "function_call",
-				"id":        "legacy_function_call_id",
-				"call_id":   "call_namespace_history",
-				"namespace": "collaboration",
-				"name":      "send_message",
-				"arguments": `{"message":"earlier"}`,
-			},
-			map[string]any{
-				"type":    "function_call_output",
-				"id":      "legacy_function_output_id",
-				"call_id": "call_namespace_history",
-				"output":  "ok",
-			},
-			map[string]any{
-				"type":    "message",
-				"id":      "legacy_message_id",
-				"role":    "user",
-				"content": []map[string]any{{"type": "input_text", "text": "continue"}},
-			},
-		}),
-		Reasoning: &dto.Reasoning{Context: json.RawMessage(`"all_turns"`)},
+		Model: "gpt-5",
+		Input: common.RawMessage(`[
+			{"type":"function_call","id":"legacy-id","call_id":"call_stable","name":"exec","arguments":"{}"},
+			{"type":"message","id":"msg_valid","role":"user","content":"continue"}
+		]`),
 	}
-	info := newResponsesViaChatInfo()
-	info.OriginModelName = request.Model
-	info.ChannelMeta.UpstreamModelName = request.Model
 
-	usage, newAPIErr := responsesViaChat(c, info, adaptor, request, service.ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+	_, newAPIErr := responsesViaChat(c, newResponsesViaChatInfo(), adaptor, request, service.ResponsesChatCompatibilityOptions{})
 
 	require.Nil(t, newAPIErr)
-	require.NotNil(t, usage)
+	require.Equal(t, 1, common.GetContextKeyInt(c, constant.ContextKeyResponsesInputItemIDNormalizationRemovedCount))
 	require.NotNil(t, adaptor.convertedReq)
-	require.Len(t, adaptor.convertedReq.Tools, 1)
-	require.Equal(t, "collaboration__send_message", adaptor.convertedReq.Tools[0].Function.Name)
-	require.Contains(t, string(adaptor.requestBody), `"call_namespace_history"`)
-	require.NotContains(t, string(adaptor.requestBody), "legacy_function_call_id")
-	require.NotContains(t, string(adaptor.requestBody), "legacy_function_output_id")
-	require.NotContains(t, string(adaptor.requestBody), "legacy_additional_tools_id")
-	require.NotContains(t, string(adaptor.requestBody), "legacy_message_id")
-	require.Equal(t, "stripped_by_chat_compatibility", common.GetContextKeyString(c, constant.ContextKeyResponsesReasoningContextAction))
-
-	var responsesResp dto.OpenAIResponsesResponse
-	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &responsesResp))
-	require.Len(t, responsesResp.Output, 1)
-	require.Equal(t, "collaboration", responsesResp.Output[0].Namespace)
-	require.Equal(t, "send_message", responsesResp.Output[0].Name)
-	require.Equal(t, "call_namespace_next", responsesResp.Output[0].CallId)
-	require.JSONEq(t, `"all_turns"`, string(request.Reasoning.Context))
+	toolCalls := adaptor.convertedReq.Messages[0].ParseToolCalls()
+	require.Len(t, toolCalls, 1)
+	require.Equal(t, "call_stable", toolCalls[0].ID)
 }
 
 func TestResponsesViaChatRestoresAdditionalNamespaceToolCall(t *testing.T) {
@@ -612,7 +553,7 @@ func TestResponsesViaChatRestoresSyntheticCompactionInput(t *testing.T) {
 	require.Equal(t, "cleared_by_synthetic_restore", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
 }
 
-func TestResponsesViaChatRejectsUnauthenticatedSyntheticMarker(t *testing.T) {
+func TestResponsesViaChatContinuesMissingSyntheticStateWithVisibleInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	chatResp := dto.OpenAITextResponse{
@@ -650,11 +591,11 @@ func TestResponsesViaChatRejectsUnauthenticatedSyntheticMarker(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte("{}")))
 	req := &dto.OpenAIResponsesRequest{
 		Model:              "gpt-5.5",
-		PreviousResponseID: "resp_newapi_synthcmp_44444444444444444444444444444444",
+		PreviousResponseID: "resp_newapi_synthcmp_22222222222222222222222222222222",
 		Input: marshalRawJSON(t, []map[string]any{
 			{
 				"type":              "compaction",
-				"encrypted_content": "newapi.synthetic.compact:resp_newapi_synthcmp_44444444444444444444444444444444",
+				"encrypted_content": "newapi.synthetic.compact:resp_newapi_synthcmp_22222222222222222222222222222222",
 			},
 			{
 				"type": "message",
@@ -669,11 +610,17 @@ func TestResponsesViaChatRejectsUnauthenticatedSyntheticMarker(t *testing.T) {
 
 	usage, newAPIErr := responsesViaChat(c, info, adaptor, req, service.ResponsesChatCompatibilityOptions{})
 
-	require.Nil(t, usage)
-	require.NotNil(t, newAPIErr)
-	require.ErrorIs(t, newAPIErr, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
-	require.Nil(t, adaptor.convertedReq)
-	require.Equal(t, relaycommon.ResponsesEncryptedReasoningReplayActionRejectedUnsupported, common.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
+	require.Nil(t, newAPIErr)
+	require.NotNil(t, usage)
+	require.Equal(t, 15, usage.TotalTokens)
+	require.NotNil(t, adaptor.convertedReq)
+	require.Len(t, adaptor.convertedReq.Messages, 1)
+	require.Equal(t, "user", adaptor.convertedReq.Messages[0].Role)
+	require.Equal(t, "continue with visible context", adaptor.convertedReq.Messages[0].StringContent())
+	require.NotContains(t, string(adaptor.requestBody), "newapi.synthetic.compact")
+	require.NotContains(t, string(adaptor.requestBody), "previous_response_id")
+	require.Equal(t, "stale_local_synthetic_state_visible_only", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted))
 }
 
 func TestResponsesViaChatRejectsToolSearchInputItems(t *testing.T) {

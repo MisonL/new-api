@@ -16,8 +16,6 @@ import (
 )
 
 func TestGetRequestURLForImageGeneration(t *testing.T) {
-	t.Parallel()
-
 	info := &relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeImagesGenerations,
 		ChannelMeta: &relaycommon.ChannelMeta{
@@ -37,8 +35,6 @@ func TestGetRequestURLForImageGeneration(t *testing.T) {
 }
 
 func TestConvertImageRequest(t *testing.T) {
-	t.Parallel()
-
 	adaptor := &Adaptor{}
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeImagesGenerations,
@@ -85,8 +81,6 @@ func TestConvertImageRequest(t *testing.T) {
 }
 
 func TestDoResponseForImageGeneration(t *testing.T) {
-	t.Parallel()
-
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

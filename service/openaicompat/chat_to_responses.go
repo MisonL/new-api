@@ -35,9 +35,9 @@ func normalizeChatImageURLToString(v any) any {
 	}
 }
 
-func convertChatResponseFormatToResponsesText(reqFormat *dto.ResponseFormat) json.RawMessage {
+func convertChatResponseFormatToResponsesText(reqFormat *dto.ResponseFormat) (json.RawMessage, error) {
 	if reqFormat == nil || strings.TrimSpace(reqFormat.Type) == "" {
-		return nil
+		return nil, nil
 	}
 
 	format := map[string]any{
@@ -63,17 +63,152 @@ func convertChatResponseFormatToResponsesText(reqFormat *dto.ResponseFormat) jso
 				delete(format, "json_schema")
 			}
 		} else {
-			format["json_schema"] = reqFormat.JsonSchema
+			return nil, fmt.Errorf("response_format json_schema must be a JSON object: %w", err)
 		}
 	}
 
-	textRaw, _ := common.Marshal(map[string]any{
+	textRaw, err := common.Marshal(map[string]any{
 		"format": format,
 	})
-	return textRaw
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode response_format: %w", err)
+	}
+	return textRaw, nil
+}
+
+// ChatCompletionsToResponsesOptions controls fields that are only valid for
+// specific Responses-compatible upstreams. In particular, DeepSeek accepts a
+// reasoning input item containing reasoning_text parts, while native OpenAI
+// Responses requires its own opaque reasoning context format.
+type ChatCompletionsToResponsesOptions struct {
+	PreserveReasoningContent bool
+	EnableCustomToolBridge   bool
+}
+
+func parseChatToolCallsStrict(msg dto.Message, messageIndex int) ([]dto.ToolCallRequest, error) {
+	if len(msg.ToolCalls) == 0 || string(msg.ToolCalls) == "null" {
+		return nil, nil
+	}
+	var toolCalls []dto.ToolCallRequest
+	if err := common.Unmarshal(msg.ToolCalls, &toolCalls); err != nil {
+		return nil, fmt.Errorf("messages[%d].tool_calls must be an array: %w", messageIndex, err)
+	}
+	return toolCalls, nil
+}
+
+func convertChatToolCallsToResponses(msg dto.Message, messageIndex int, options ChatCompletionsToResponsesOptions, aliases *toolNameAliasRegistry) ([]map[string]any, error) {
+	toolCalls, err := parseChatToolCallsStrict(msg, messageIndex)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]map[string]any, 0, len(toolCalls))
+	for callIndex, toolCall := range toolCalls {
+		callID := strings.TrimSpace(toolCall.ID)
+		if callID == "" {
+			return nil, fmt.Errorf("messages[%d].tool_calls[%d].id is required", messageIndex, callIndex)
+		}
+		toolType := strings.TrimSpace(toolCall.Type)
+		if toolType == "" {
+			toolType = "function"
+		}
+		switch toolType {
+		case "function":
+			name, err := aliases.normalizeReference(toolCall.Function.Name)
+			if err != nil {
+				return nil, fmt.Errorf("messages[%d].tool_calls[%d].function.name: %w", messageIndex, callIndex, err)
+			}
+			items = append(items, map[string]any{
+				"type":      "function_call",
+				"call_id":   callID,
+				"name":      name,
+				"arguments": toolCall.Function.Arguments,
+			})
+		case dto.CustomType:
+			if !options.EnableCustomToolBridge {
+				return nil, fmt.Errorf("custom tool bridge is not enabled for messages[%d].tool_calls[%d]", messageIndex, callIndex)
+			}
+			name, input, err := parseChatCustomToolPayload(toolCall.Custom)
+			if err != nil {
+				return nil, fmt.Errorf("messages[%d].tool_calls[%d]: %w", messageIndex, callIndex, err)
+			}
+			name, err = aliases.normalizeReference(name)
+			if err != nil {
+				return nil, fmt.Errorf("messages[%d].tool_calls[%d]: %w", messageIndex, callIndex, err)
+			}
+			items = append(items, map[string]any{
+				"type":    "custom_tool_call",
+				"call_id": callID,
+				"name":    name,
+				"input":   input,
+			})
+		default:
+			return nil, fmt.Errorf("messages[%d].tool_calls[%d].type %q is not supported in responses compatibility mode", messageIndex, callIndex, toolType)
+		}
+	}
+	return items, nil
+}
+
+func convertChatMediaPartToResponses(part dto.MediaContent, messageIndex int, contentIndex int) (map[string]any, error) {
+	partType := strings.TrimSpace(part.Type)
+	switch partType {
+	case dto.ContentTypeText:
+		return map[string]any{"type": "input_text", "text": part.Text}, nil
+	case dto.ContentTypeImageURL:
+		image := part.GetImageMedia()
+		if image == nil || strings.TrimSpace(image.Url) == "" {
+			return nil, fmt.Errorf("messages[%d].content[%d].image_url.url is required", messageIndex, contentIndex)
+		}
+		return map[string]any{"type": "input_image", "image_url": image.Url}, nil
+	case dto.ContentTypeInputAudio:
+		audio := part.GetInputAudio()
+		if audio == nil || strings.TrimSpace(audio.Data) == "" || strings.TrimSpace(audio.Format) == "" {
+			return nil, fmt.Errorf("messages[%d].content[%d].input_audio.data and format are required", messageIndex, contentIndex)
+		}
+		return map[string]any{
+			"type": "input_audio",
+			"input_audio": map[string]any{
+				"data":   audio.Data,
+				"format": audio.Format,
+			},
+		}, nil
+	case dto.ContentTypeFile:
+		file := part.GetFile()
+		if file == nil {
+			return nil, fmt.Errorf("messages[%d].content[%d].file is required", messageIndex, contentIndex)
+		}
+		fileObject := make(map[string]any)
+		if file.FileId != "" {
+			fileObject["file_id"] = file.FileId
+		}
+		if file.FileData != "" {
+			fileObject["file_data"] = file.FileData
+		}
+		if file.FileUrl != "" {
+			fileObject["file_url"] = file.FileUrl
+		}
+		if file.FileName != "" {
+			fileObject["filename"] = file.FileName
+		}
+		if len(fileObject) == 0 {
+			return nil, fmt.Errorf("messages[%d].content[%d].file requires file_id, file_data, or file_url", messageIndex, contentIndex)
+		}
+		return map[string]any{"type": "input_file", "file": fileObject}, nil
+	case dto.ContentTypeVideoUrl:
+		video := part.GetVideoUrl()
+		if video == nil || strings.TrimSpace(video.Url) == "" {
+			return nil, fmt.Errorf("messages[%d].content[%d].video_url.url is required", messageIndex, contentIndex)
+		}
+		return map[string]any{"type": "input_video", "video_url": video.Url}, nil
+	default:
+		return nil, fmt.Errorf("messages[%d].content[%d].type %q is not supported in responses compatibility mode", messageIndex, contentIndex, partType)
+	}
 }
 
 func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.OpenAIResponsesRequest, error) {
+	return ChatCompletionsRequestToResponsesRequestWithOptions(req, ChatCompletionsToResponsesOptions{})
+}
+
+func ChatCompletionsRequestToResponsesRequestWithOptions(req *dto.GeneralOpenAIRequest, options ChatCompletionsToResponsesOptions) (*dto.OpenAIResponsesRequest, error) {
 	if req == nil {
 		return nil, errors.New("request is nil")
 	}
@@ -86,11 +221,26 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 
 	var instructionsParts []string
 	inputItems := make([]map[string]any, 0, len(req.Messages))
+	aliases := newToolNameAliasRegistry()
+	// Register declarations before walking history so a generated alias can be
+	// checked against every tool reference deterministically.
+	for toolIndex, tool := range req.Tools {
+		toolType := strings.TrimSpace(tool.Type)
+		if toolType == "" {
+			toolType = "function"
+		}
+		if toolType != "function" || strings.TrimSpace(tool.Function.Name) == "" {
+			continue
+		}
+		if _, err := aliases.normalizeDeclaration(tool.Function.Name); err != nil {
+			return nil, fmt.Errorf("tools[%d].function.name: %w", toolIndex, err)
+		}
+	}
 
-	for _, msg := range req.Messages {
+	for messageIndex, msg := range req.Messages {
 		role := strings.TrimSpace(msg.Role)
 		if role == "" {
-			continue
+			return nil, fmt.Errorf("messages[%d].role is required", messageIndex)
 		}
 
 		if role == "tool" || role == "function" {
@@ -102,19 +252,15 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 			} else if msg.IsStringContent() {
 				output = msg.StringContent()
 			} else {
-				if b, err := common.Marshal(msg.Content); err == nil {
-					output = string(b)
-				} else {
-					output = fmt.Sprintf("%v", msg.Content)
+				b, err := common.Marshal(msg.Content)
+				if err != nil {
+					return nil, fmt.Errorf("messages[%d].content cannot be encoded as tool output: %w", messageIndex, err)
 				}
+				output = string(b)
 			}
 
 			if callID == "" {
-				inputItems = append(inputItems, map[string]any{
-					"role":    "user",
-					"content": fmt.Sprintf("[tool_output_missing_call_id] %v", output),
-				})
-				continue
+				return nil, fmt.Errorf("messages[%d].tool_call_id is required for tool output", messageIndex)
 			}
 
 			inputItems = append(inputItems, map[string]any{
@@ -136,14 +282,21 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 				}
 				continue
 			}
-			parts := msg.ParseContent()
+			parts, parseErr := msg.ParseContentStrict()
+			if parseErr != nil {
+				return nil, fmt.Errorf("messages[%d]: %w", messageIndex, parseErr)
+			}
 			var sb strings.Builder
-			for _, part := range parts {
+			for contentIndex, part := range parts {
 				if part.Type == dto.ContentTypeText && strings.TrimSpace(part.Text) != "" {
 					if sb.Len() > 0 {
 						sb.WriteString("\n")
 					}
 					sb.WriteString(part.Text)
+					continue
+				}
+				if part.Type != dto.ContentTypeText {
+					return nil, fmt.Errorf("messages[%d].content[%d].type %q cannot be represented in Responses instructions", messageIndex, contentIndex, part.Type)
 				}
 			}
 			if s := strings.TrimSpace(sb.String()); s != "" {
@@ -151,9 +304,23 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 			}
 			continue
 		}
+		if role != "user" && role != "assistant" {
+			return nil, fmt.Errorf("messages[%d].role %q is not supported in responses compatibility mode", messageIndex, role)
+		}
 
 		item := map[string]any{
 			"role": role,
+		}
+		if options.PreserveReasoningContent && role == "assistant" {
+			if reasoning, ok := chatMessageReasoningContent(msg); ok {
+				inputItems = append(inputItems, map[string]any{
+					"type": "reasoning",
+					"content": []map[string]any{{
+						"type": "reasoning_text",
+						"text": reasoning,
+					}},
+				})
+			}
 		}
 
 		if msg.Content == nil {
@@ -161,24 +328,11 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 			inputItems = append(inputItems, item)
 
 			if role == "assistant" {
-				for _, tc := range msg.ParseToolCalls() {
-					if strings.TrimSpace(tc.ID) == "" {
-						continue
-					}
-					if tc.Type != "" && tc.Type != "function" {
-						continue
-					}
-					name := strings.TrimSpace(tc.Function.Name)
-					if name == "" {
-						continue
-					}
-					inputItems = append(inputItems, map[string]any{
-						"type":      "function_call",
-						"call_id":   tc.ID,
-						"name":      name,
-						"arguments": tc.Function.Arguments,
-					})
+				calls, err := convertChatToolCallsToResponses(msg, messageIndex, options, aliases)
+				if err != nil {
+					return nil, err
 				}
+				inputItems = append(inputItems, calls...)
 			}
 			continue
 		}
@@ -188,89 +342,42 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 			inputItems = append(inputItems, item)
 
 			if role == "assistant" {
-				for _, tc := range msg.ParseToolCalls() {
-					if strings.TrimSpace(tc.ID) == "" {
-						continue
-					}
-					if tc.Type != "" && tc.Type != "function" {
-						continue
-					}
-					name := strings.TrimSpace(tc.Function.Name)
-					if name == "" {
-						continue
-					}
-					inputItems = append(inputItems, map[string]any{
-						"type":      "function_call",
-						"call_id":   tc.ID,
-						"name":      name,
-						"arguments": tc.Function.Arguments,
-					})
+				calls, err := convertChatToolCallsToResponses(msg, messageIndex, options, aliases)
+				if err != nil {
+					return nil, err
 				}
+				inputItems = append(inputItems, calls...)
 			}
 			continue
 		}
 
-		parts := msg.ParseContent()
+		parts, parseErr := msg.ParseContentStrict()
+		if parseErr != nil {
+			return nil, fmt.Errorf("messages[%d]: %w", messageIndex, parseErr)
+		}
 		contentParts := make([]map[string]any, 0, len(parts))
-		for _, part := range parts {
-			switch part.Type {
-			case dto.ContentTypeText:
-				textType := "input_text"
-				if role == "assistant" {
-					textType = "output_text"
-				}
-				contentParts = append(contentParts, map[string]any{
-					"type": textType,
-					"text": part.Text,
-				})
-			case dto.ContentTypeImageURL:
-				contentParts = append(contentParts, map[string]any{
-					"type":      "input_image",
-					"image_url": normalizeChatImageURLToString(part.ImageUrl),
-				})
-			case dto.ContentTypeInputAudio:
-				contentParts = append(contentParts, map[string]any{
-					"type":        "input_audio",
-					"input_audio": part.InputAudio,
-				})
-			case dto.ContentTypeFile:
-				contentParts = append(contentParts, map[string]any{
-					"type": "input_file",
-					"file": part.File,
-				})
-			case dto.ContentTypeVideoUrl:
-				contentParts = append(contentParts, map[string]any{
-					"type":      "input_video",
-					"video_url": part.VideoUrl,
-				})
-			default:
-				contentParts = append(contentParts, map[string]any{
-					"type": part.Type,
-				})
+		for contentIndex, part := range parts {
+			convertedPart, err := convertChatMediaPartToResponses(part, messageIndex, contentIndex)
+			if err != nil {
+				return nil, err
 			}
+			if role == "assistant" {
+				if convertedPart["type"] != "input_text" {
+					return nil, fmt.Errorf("messages[%d].content[%d].type %q is not supported for assistant history in Responses compatibility mode", messageIndex, contentIndex, convertedPart["type"])
+				}
+				convertedPart["type"] = "output_text"
+			}
+			contentParts = append(contentParts, convertedPart)
 		}
 		item["content"] = contentParts
 		inputItems = append(inputItems, item)
 
 		if role == "assistant" {
-			for _, tc := range msg.ParseToolCalls() {
-				if strings.TrimSpace(tc.ID) == "" {
-					continue
-				}
-				if tc.Type != "" && tc.Type != "function" {
-					continue
-				}
-				name := strings.TrimSpace(tc.Function.Name)
-				if name == "" {
-					continue
-				}
-				inputItems = append(inputItems, map[string]any{
-					"type":      "function_call",
-					"call_id":   tc.ID,
-					"name":      name,
-					"arguments": tc.Function.Arguments,
-				})
+			calls, err := convertChatToolCallsToResponses(msg, messageIndex, options, aliases)
+			if err != nil {
+				return nil, err
 			}
+			inputItems = append(inputItems, calls...)
 		}
 	}
 
@@ -282,80 +389,119 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	var instructionsRaw json.RawMessage
 	if len(instructionsParts) > 0 {
 		instructions := strings.Join(instructionsParts, "\n\n")
-		instructionsRaw, _ = common.Marshal(instructions)
+		instructionsRaw, err = common.Marshal(instructions)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode instructions: %w", err)
+		}
 	}
 
 	var toolsRaw json.RawMessage
 	if req.Tools != nil {
 		tools := make([]map[string]any, 0, len(req.Tools))
-		for _, tool := range req.Tools {
-			switch tool.Type {
-			case "function":
-				tools = append(tools, map[string]any{
-					"type":        "function",
-					"name":        tool.Function.Name,
-					"description": tool.Function.Description,
-					"parameters":  tool.Function.Parameters,
-				})
-			default:
-				// Best-effort: keep original tool shape for unknown types.
-				var m map[string]any
-				if b, err := common.Marshal(tool); err == nil {
-					_ = common.Unmarshal(b, &m)
-				}
-				if len(m) == 0 {
-					m = map[string]any{"type": tool.Type}
-				}
-				tools = append(tools, m)
+		for toolIndex, tool := range req.Tools {
+			toolType := strings.TrimSpace(tool.Type)
+			if toolType == "" {
+				toolType = "function"
 			}
+			if toolType != "function" {
+				return nil, fmt.Errorf("tools[%d].type %q is not supported in Responses compatibility mode", toolIndex, toolType)
+			}
+			name, nameErr := aliases.normalizeDeclaration(tool.Function.Name)
+			if nameErr != nil {
+				return nil, fmt.Errorf("tools[%d].function.name: %w", toolIndex, nameErr)
+			}
+			toolObject := map[string]any{
+				"type":        "function",
+				"name":        name,
+				"description": tool.Function.Description,
+				"parameters":  tool.Function.Parameters,
+			}
+			if tool.Function.Strict != nil {
+				toolObject["strict"] = *tool.Function.Strict
+			}
+			tools = append(tools, toolObject)
 		}
-		toolsRaw, _ = common.Marshal(tools)
+		toolsRaw, err = common.Marshal(tools)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode tools: %w", err)
+		}
 	}
 
 	var toolChoiceRaw json.RawMessage
 	if req.ToolChoice != nil {
 		switch v := req.ToolChoice.(type) {
 		case string:
-			toolChoiceRaw, _ = common.Marshal(v)
+			normalizedChoice := strings.TrimSpace(v)
+			switch normalizedChoice {
+			case "auto", "none", "required":
+			default:
+				return nil, fmt.Errorf("tool_choice %q is not supported in Responses compatibility mode", v)
+			}
+			toolChoiceRaw, err = common.Marshal(normalizedChoice)
+			if err != nil {
+				return nil, fmt.Errorf("failed to encode tool_choice: %w", err)
+			}
 		default:
 			var m map[string]any
-			if b, err := common.Marshal(v); err == nil {
-				_ = common.Unmarshal(b, &m)
+			b, marshalErr := common.Marshal(v)
+			if marshalErr != nil {
+				return nil, fmt.Errorf("failed to encode tool_choice: %w", marshalErr)
+			}
+			if unmarshalErr := common.Unmarshal(b, &m); unmarshalErr != nil {
+				return nil, fmt.Errorf("tool_choice must be a string or object: %w", unmarshalErr)
 			}
 			if m == nil {
-				toolChoiceRaw, _ = common.Marshal(v)
-			} else if t, _ := m["type"].(string); t == "function" {
+				return nil, fmt.Errorf("tool_choice must be a string or object")
+			}
+			if t, _ := m["type"].(string); t == "function" {
 				// Chat: {"type":"function","function":{"name":"..."}}
 				// Responses: {"type":"function","name":"..."}
 				if name, ok := m["name"].(string); ok && name != "" {
-					toolChoiceRaw, _ = common.Marshal(map[string]any{
+					name, err = aliases.normalizeReference(name)
+					if err != nil {
+						return nil, fmt.Errorf("tool_choice function name: %w", err)
+					}
+					toolChoiceRaw, err = common.Marshal(map[string]any{
 						"type": "function",
 						"name": name,
 					})
 				} else if fn, ok := m["function"].(map[string]any); ok {
 					if name, ok := fn["name"].(string); ok && name != "" {
-						toolChoiceRaw, _ = common.Marshal(map[string]any{
+						name, err = aliases.normalizeReference(name)
+						if err != nil {
+							return nil, fmt.Errorf("tool_choice function name: %w", err)
+						}
+						toolChoiceRaw, err = common.Marshal(map[string]any{
 							"type": "function",
 							"name": name,
 						})
 					} else {
-						toolChoiceRaw, _ = common.Marshal(v)
+						return nil, fmt.Errorf("tool_choice function name is required")
 					}
 				} else {
-					toolChoiceRaw, _ = common.Marshal(v)
+					return nil, fmt.Errorf("tool_choice function name is required")
 				}
 			} else {
-				toolChoiceRaw, _ = common.Marshal(v)
+				return nil, fmt.Errorf("tool_choice type %q is not supported in Responses compatibility mode", m["type"])
+			}
+			if err != nil {
+				return nil, fmt.Errorf("failed to encode tool_choice: %w", err)
 			}
 		}
 	}
 
 	var parallelToolCallsRaw json.RawMessage
 	if req.ParallelTooCalls != nil {
-		parallelToolCallsRaw, _ = common.Marshal(*req.ParallelTooCalls)
+		parallelToolCallsRaw, err = common.Marshal(*req.ParallelTooCalls)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode parallel_tool_calls: %w", err)
+		}
 	}
 
-	textRaw := convertChatResponseFormatToResponsesText(req.ResponseFormat)
+	textRaw, err := convertChatResponseFormatToResponsesText(req.ResponseFormat)
+	if err != nil {
+		return nil, err
+	}
 
 	maxOutputTokens := lo.FromPtrOr(req.MaxTokens, uint(0))
 	maxCompletionTokens := lo.FromPtrOr(req.MaxCompletionTokens, uint(0))
@@ -399,4 +545,17 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	}
 
 	return out, nil
+}
+
+func chatMessageReasoningContent(msg dto.Message) (string, bool) {
+	if msg.ReasoningContent != nil {
+		return *msg.ReasoningContent, true
+	}
+	if msg.ThinkingContent != nil {
+		return *msg.ThinkingContent, true
+	}
+	if msg.Reasoning != nil {
+		return *msg.Reasoning, true
+	}
+	return "", false
 }

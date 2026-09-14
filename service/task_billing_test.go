@@ -630,6 +630,9 @@ func (m *mockAdaptor) Init(_ *relaycommon.RelayInfo) {}
 func (m *mockAdaptor) FetchTask(string, string, map[string]any, string, ...http.Header) (*http.Response, error) {
 	return nil, nil
 }
+func (m *mockAdaptor) FetchTaskWithContext(context.Context, string, string, map[string]any, string, ...http.Header) (*http.Response, error) {
+	return nil, nil
+}
 func (m *mockAdaptor) ParseTaskResult([]byte, string, ...http.Header) (*relaycommon.TaskInfo, error) {
 	return nil, nil
 }

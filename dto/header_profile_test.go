@@ -7,12 +7,75 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNormalizeHeaderProfileHeadersCanonicalizesNames(t *testing.T) {
+	normalized, err := NormalizeHeaderProfileHeaders(map[string]string{
+		" user-agent ": "client/1.0",
+		"x-request-id": "request-1",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{
+		"User-Agent":   "client/1.0",
+		"X-Request-Id": "request-1",
+	}, normalized)
+}
+
+func TestNormalizeHeaderProfileHeadersRejectsInvalidEntries(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers map[string]string
+		message string
+	}{
+		{name: "empty name", headers: map[string]string{" ": "value"}, message: "请求头名称不能为空"},
+		{name: "invalid name", headers: map[string]string{"Bad Header": "value"}, message: "请求头名称不合法"},
+		{name: "empty value", headers: map[string]string{"X-Test": "  "}, message: "请求头值不能为空"},
+		{name: "case duplicate", headers: map[string]string{"X-Test": "one", "x-test": "two"}, message: "请求头名称重复"},
+		{name: "control value", headers: map[string]string{"X-Test": "value\r\nInjected: yes"}, message: "控制字符"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := NormalizeHeaderProfileHeaders(test.headers)
+			require.Error(t, err)
+			require.ErrorContains(t, err, test.message)
+		})
+	}
+}
+
+func TestNormalizeHeaderProfileHeadersReturnsWritableMapAndTrimsValues(t *testing.T) {
+	normalized, err := NormalizeHeaderProfileHeaders(nil)
+	require.NoError(t, err)
+	normalized["X-Test"] = "value"
+
+	normalized, err = NormalizeHeaderProfileHeaders(map[string]string{"X-Test": "  value  "})
+	require.NoError(t, err)
+	require.Equal(t, "value", normalized["X-Test"])
+}
+
+func TestResolveHeaderProfileStrategyHeadersCanonicalizesSnapshotNames(t *testing.T) {
+	headers, profileID, err := ResolveHeaderProfileStrategyHeaders(&HeaderProfileStrategy{
+		Enabled:            true,
+		Mode:               HeaderProfileModeFixed,
+		SelectedProfileIDs: []string{"custom"},
+		Profiles: []HeaderProfile{{
+			ID:      "custom",
+			Headers: map[string]string{"user-agent": "custom/1.0"},
+		}},
+	}, 0)
+
+	require.NoError(t, err)
+	require.Equal(t, "custom", profileID)
+	require.Equal(t, map[string]string{"User-Agent": "custom/1.0"}, headers)
+}
+
 func TestBuiltinCodexCLIHeaderProfileDoesNotUseExecIdentity(t *testing.T) {
 	profile, exists := ResolveHeaderProfile("codex-cli", nil)
 	require.True(t, exists)
-	require.Contains(t, profile.Description, "显式选择")
+	require.Contains(t, profile.Description, "自动预设")
+	require.True(t, profile.PassthroughRequired)
 	require.Equal(t, "codex-tui", profile.Headers["Originator"])
 	require.True(t, strings.HasPrefix(profile.Headers["User-Agent"], "codex-tui/"))
+	require.NotContains(t, profile.Headers, "X-Codex-Compatibility")
 
 	for key, value := range profile.Headers {
 		normalizedKey := strings.ToLower(key)
@@ -27,18 +90,25 @@ func TestBuiltinCodexDesktopHeaderProfileUsesDesktopAppIdentity(t *testing.T) {
 	profile, exists := ResolveHeaderProfile("codex-desktop", nil)
 	require.True(t, exists)
 	require.Contains(t, profile.Description, "Codex Desktop")
+	require.True(t, profile.PassthroughRequired)
 	require.Equal(t, BuiltinCodexDesktopUserAgent, profile.Headers["User-Agent"])
 	require.Equal(t, BuiltinCodexDesktopOriginator, profile.Headers["Originator"])
 	require.True(t, strings.HasPrefix(profile.Headers["User-Agent"], "Codex Desktop/"))
+	require.NotContains(t, profile.Headers, "X-Codex-Compatibility")
 	require.NotContains(t, profile.Headers["User-Agent"], "codex-cli@")
 	require.NotContains(t, strings.ToLower(profile.Headers["User-Agent"]), "codex_exec")
 	require.NotContains(t, strings.ToLower(profile.Headers["User-Agent"]), "codex-tui")
 }
 
-func TestBuiltinAICodingCLIHeaderProfilesDoNotRequireAutomaticPassthrough(t *testing.T) {
+func TestBuiltinAICodingCLIHeaderProfilesPassthroughRequirements(t *testing.T) {
 	for _, profileID := range []string{"codex-cli", "codex-desktop", "claude-code", "gemini-cli", "qwen-code", "droid"} {
 		profile, exists := ResolveHeaderProfile(profileID, nil)
 		require.True(t, exists, profileID)
+		if profileID == "codex-cli" || profileID == "codex-desktop" {
+			require.True(t, profile.PassthroughRequired, profileID)
+			require.Contains(t, profile.Description, "自动预设", profileID)
+			continue
+		}
 		require.False(t, profile.PassthroughRequired, profileID)
 		require.Contains(t, profile.Description, "显式选择", profileID)
 	}
@@ -86,7 +156,7 @@ func TestBuiltinAICodingCLIHeaderProfilesDefaultToLatestVersionMeta(t *testing.T
 			require.Equal(t, test.packageName, profile.VersionMeta.PackageName)
 			require.Equal(t, "npm", profile.VersionMeta.Source)
 			require.Equal(t, HeaderProfileLatestVersion, profile.VersionMeta.Version)
-			require.Equal(t, HeaderProfilePlatformMacOSX64, profile.VersionMeta.Platform)
+			require.Equal(t, HeaderProfilePlatformMacOSArm64, profile.VersionMeta.Platform)
 		})
 	}
 
@@ -106,6 +176,16 @@ func TestBuiltinAgyHeaderProfileUsesFixedSnapshot(t *testing.T) {
 	require.True(t, strings.HasPrefix(profile.Headers["User-Agent"], "antigravity/cli/"))
 	require.False(t, profile.PassthroughRequired)
 	require.Nil(t, profile.VersionMeta)
+}
+
+func TestBuiltinChromeMacOSProfileUsesAppleSiliconClientHints(t *testing.T) {
+	profile, exists := ResolveHeaderProfile("chrome-macos", nil)
+	require.True(t, exists)
+	require.Equal(t, `"Google Chrome";v="151", "Chromium";v="151", "Not.A/Brand";v="24"`, profile.Headers["Sec-CH-UA"])
+	require.Equal(t, `"macOS"`, profile.Headers["Sec-CH-UA-Platform"])
+	require.Equal(t, `"arm"`, profile.Headers["Sec-CH-UA-Arch"])
+	require.Equal(t, `"64"`, profile.Headers["Sec-CH-UA-Bitness"])
+	require.Equal(t, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.138 Safari/537.36", profile.Headers["User-Agent"])
 }
 
 func TestResolveHeaderProfileStrategyHeadersResolvesBuiltinLatestProfiles(t *testing.T) {
@@ -131,7 +211,7 @@ func TestResolveHeaderProfileStrategyHeadersResolvesBuiltinLatestProfiles(t *tes
 	}{
 		{
 			profileID:     "codex-cli",
-			expectedAgent: "codex-tui/0.200.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.200.0)",
+			expectedAgent: "codex-tui/0.200.0 (Mac OS 15.7.3; aarch64) ghostty/1.3.1 (codex-tui; 0.200.0)",
 		},
 		{
 			profileID:     "claude-code",
@@ -139,11 +219,11 @@ func TestResolveHeaderProfileStrategyHeadersResolvesBuiltinLatestProfiles(t *tes
 		},
 		{
 			profileID:     "gemini-cli",
-			expectedAgent: "GeminiCLI/0.50.0/gemini-3.1-pro-preview (darwin; x64; terminal)",
+			expectedAgent: "GeminiCLI/0.50.0/gemini-3.1-pro-preview (darwin; arm64; terminal)",
 		},
 		{
 			profileID:     "qwen-code",
-			expectedAgent: "QwenCode/0.20.0 (darwin; x64)",
+			expectedAgent: "QwenCode/0.20.0 (darwin; arm64)",
 		},
 		{
 			profileID:     "droid",
@@ -213,7 +293,7 @@ func TestBuildAICodingCLIUserAgentSupportsKnownPlatforms(t *testing.T) {
 			profileID:     "qwen-code",
 			version:       "0.20.0",
 			platform:      "linux-x64\nInjected",
-			expectedAgent: "QwenCode/0.20.0 (darwin; x64)",
+			expectedAgent: "QwenCode/0.20.0 (darwin; arm64)",
 		},
 		{
 			name:          "claude-platform-independent",
@@ -268,6 +348,48 @@ func TestResolveHeaderProfileStrategyHeadersResolvesLatestVersionMeta(t *testing
 	require.Equal(t, "codex-tui", headers["Originator"])
 }
 
+func TestResolveHeaderProfileStrategyHeadersDoesNotBackfillCodexCompatibilityMarkerForLegacySnapshot(t *testing.T) {
+	headers, profileID, err := ResolveHeaderProfileStrategyHeaders(&HeaderProfileStrategy{
+		Enabled:            true,
+		Mode:               HeaderProfileModeFixed,
+		SelectedProfileIDs: []string{"codex-cli@0.142.4"},
+		Profiles: []HeaderProfile{
+			{
+				ID: "codex-cli@0.142.4",
+				Headers: map[string]string{
+					"User-Agent": "codex-tui/0.142.4 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.142.4)",
+					"Originator": "codex-tui",
+				},
+			},
+		},
+	}, 0)
+
+	require.NoError(t, err)
+	require.Equal(t, "codex-cli@0.142.4", profileID)
+	require.NotContains(t, headers, "X-Codex-Compatibility")
+}
+
+func TestResolveHeaderProfileStrategyHeadersDoesNotBackfillCodexCompatibilityMarkerForLegacyDesktopSnapshot(t *testing.T) {
+	headers, profileID, err := ResolveHeaderProfileStrategyHeaders(&HeaderProfileStrategy{
+		Enabled:            true,
+		Mode:               HeaderProfileModeFixed,
+		SelectedProfileIDs: []string{"codex-desktop"},
+		Profiles: []HeaderProfile{
+			{
+				ID: "codex-desktop",
+				Headers: map[string]string{
+					"User-Agent": BuiltinCodexDesktopUserAgent,
+					"Originator": BuiltinCodexDesktopOriginator,
+				},
+			},
+		},
+	}, 0)
+
+	require.NoError(t, err)
+	require.Equal(t, "codex-desktop", profileID)
+	require.NotContains(t, headers, "X-Codex-Compatibility")
+}
+
 func TestResolveHeaderProfileStrategyHeadersUsesVersionMetaPlatform(t *testing.T) {
 	previousResolver := ResolveNpmCLILatestVersion
 	ResolveNpmCLILatestVersion = func(packageName string) (string, bool) {
@@ -320,7 +442,7 @@ func TestResolveHeaderProfileStrategyHeadersResolvesBuiltinLatestWithoutSnapshot
 	}, 0)
 	require.NoError(t, err)
 	require.Equal(t, "codex-cli@latest", profileID)
-	require.Equal(t, "codex-tui/0.200.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.200.0)", headers["User-Agent"])
+	require.Equal(t, "codex-tui/0.200.0 (Mac OS 15.7.3; aarch64) ghostty/1.3.1 (codex-tui; 0.200.0)", headers["User-Agent"])
 	require.Equal(t, BuiltinCodexCLIOriginator, headers["Originator"])
 }
 
@@ -469,7 +591,7 @@ func TestResolveHeaderProfileStrategyHeadersResolvesLatestWithoutPackageName(t *
 		},
 	}, 0)
 	require.NoError(t, err)
-	require.Equal(t, "GeminiCLI/0.50.0/gemini-3.1-pro-preview (darwin; x64; terminal)", headers["User-Agent"])
+	require.Equal(t, "GeminiCLI/0.50.0/gemini-3.1-pro-preview (darwin; arm64; terminal)", headers["User-Agent"])
 }
 
 func TestResolveHeaderProfileStrategyHeadersResolvesLatestWithOnlyVersionMeta(t *testing.T) {
@@ -500,7 +622,7 @@ func TestResolveHeaderProfileStrategyHeadersResolvesLatestWithOnlyVersionMeta(t 
 		},
 	}, 0)
 	require.NoError(t, err)
-	require.Equal(t, "QwenCode/0.20.0 (darwin; x64)", headers["User-Agent"])
+	require.Equal(t, "QwenCode/0.20.0 (darwin; arm64)", headers["User-Agent"])
 }
 
 func TestResolveHeaderProfileStrategyHeadersResolvesLatestWithoutBaseProfileID(t *testing.T) {

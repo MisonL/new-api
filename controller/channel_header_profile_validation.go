@@ -11,9 +11,17 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
+var codexHeaderProfileBaseIDs = map[string]struct{}{
+	"codex-cli":     {},
+	"codex-desktop": {},
+}
+
 func validateHeaderProfilePassthrough(strategy *dto.HeaderProfileStrategy, passedHeaders map[string]struct{}) error {
 	if strategy == nil || !strategy.Enabled {
 		return nil
+	}
+	if err := validateCodexHeaderProfilePassthrough(strategy, passedHeaders); err != nil {
+		return err
 	}
 	requiredHeaders := collectRequiredHeaderProfilePassthroughHeaders(strategy)
 	if len(requiredHeaders) == 0 {
@@ -23,6 +31,35 @@ func validateHeaderProfilePassthrough(strategy *dto.HeaderProfileStrategy, passe
 		passedHeaders = map[string]struct{}{}
 	}
 	return requireParamOverridePassHeaders(requiredHeaders, passedHeaders)
+}
+
+func validateCodexHeaderProfilePassthrough(strategy *dto.HeaderProfileStrategy, passedHeaders map[string]struct{}) error {
+	if !hasSelectedCodexHeaderProfile(strategy) {
+		return nil
+	}
+	for header := range passedHeaders {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(header)), "x-codex-") {
+			return nil
+		}
+	}
+	return fmt.Errorf("header_profile_strategy 选择了 Codex Profile，必须在 param_override.operations 配置无条件 pass_headers 并至少透传一个 x-codex-* 请求头")
+}
+
+func hasSelectedCodexHeaderProfile(strategy *dto.HeaderProfileStrategy) bool {
+	if strategy == nil {
+		return false
+	}
+	for _, profileID := range strategy.SelectedProfileIDs {
+		if isCodexHeaderProfileID(profileID) {
+			return true
+		}
+	}
+	return false
+}
+
+func headerProfileBaseID(profileID string) string {
+	baseProfileID, _, _ := strings.Cut(strings.TrimSpace(profileID), "@")
+	return strings.TrimSpace(baseProfileID)
 }
 
 func validateChannelParamOverride(channel *model.Channel) (map[string]struct{}, error) {
@@ -43,9 +80,21 @@ func collectRequiredHeaderProfilePassthroughHeaders(strategy *dto.HeaderProfileS
 		if !exists || !profile.PassthroughRequired {
 			continue
 		}
+		// Sub2API's Codex gate requires at least one non-empty x-codex-*
+		// request header. The remaining Codex signals are optional and are
+		// checked against the actual request at relay time, so a saved channel
+		// does not need to enumerate every possible signal here.
+		if isCodexHeaderProfileID(profile.ID) {
+			continue
+		}
 		headers.add(requiredPassthroughHeadersForProfile(profile)...)
 	}
 	return headers.values
+}
+
+func isCodexHeaderProfileID(profileID string) bool {
+	_, ok := codexHeaderProfileBaseIDs[headerProfileBaseID(profileID)]
+	return ok
 }
 
 func resolveHeaderProfileForPassthrough(profileID string, profiles []dto.HeaderProfile) (dto.HeaderProfile, bool) {
@@ -53,7 +102,8 @@ func resolveHeaderProfileForPassthrough(profileID string, profiles []dto.HeaderP
 	if trimmedID == "" {
 		return dto.HeaderProfile{}, false
 	}
-	if _, ok := operation_setting.HeaderProfilePassThroughHeaders[trimmedID]; ok {
+	baseProfileID := headerProfileBaseID(trimmedID)
+	if _, ok := operation_setting.HeaderProfilePassThroughHeaders[baseProfileID]; ok {
 		if builtinProfile, exists := dto.ResolveHeaderProfile(trimmedID, nil); exists {
 			return builtinProfile, true
 		}
@@ -62,7 +112,7 @@ func resolveHeaderProfileForPassthrough(profileID string, profiles []dto.HeaderP
 }
 
 func requiredPassthroughHeadersForProfile(profile dto.HeaderProfile) []string {
-	if headers, ok := operation_setting.HeaderProfilePassThroughHeaders[strings.TrimSpace(profile.ID)]; ok {
+	if headers, ok := operation_setting.HeaderProfilePassThroughHeaders[headerProfileBaseID(profile.ID)]; ok {
 		return headers
 	}
 	headers := make([]string, 0, len(profile.Headers))

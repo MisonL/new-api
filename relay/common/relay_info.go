@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +50,25 @@ type ClaudeConvertInfo struct {
 	ToolCallIDs            map[int]string
 	ToolCallNames          map[int]string
 	ToolCallPendingArgs    map[int]string
+}
+
+// GeminiConvertInfo stores incremental state while an OpenAI-compatible
+// upstream stream is converted to the Gemini GenerateContent stream format.
+// OpenAI tool-call arguments are commonly split across several chunks and the
+// Gemini functionCall.args field must be a complete JSON object, so conversion
+// needs request-scoped buffering rather than validating each chunk in isolation.
+type GeminiConvertInfo struct {
+	ToolCalls map[int]map[int]*GeminiToolCallState
+}
+
+// GeminiToolCallState is the accumulated identity and argument payload for one
+// streamed OpenAI tool call. The maps are keyed first by choice index and then
+// by the OpenAI tool-call index.
+type GeminiToolCallState struct {
+	ID          string
+	Name        string
+	PendingArgs string
+	Emitted     bool
 }
 
 // RerankerInfo stores rerank request details needed during downstream processing.
@@ -101,6 +121,11 @@ type ChannelMeta struct {
 	HeadersOverride      map[string]interface{}
 	ChannelSetting       dto.ChannelSettings
 	ChannelOtherSettings dto.ChannelOtherSettings
+	// ChannelOther and StatusCodeMapping are captured separately from the typed
+	// settings because provider adaptors use them as raw runtime parameters.
+	// They are frozen into asynchronous task route snapshots as well.
+	ChannelOther         string
+	StatusCodeMapping    string
 	UpstreamModelName    string
 	IsModelMapped        bool
 	SupportStreamOptions bool // 是否支持流式选项
@@ -189,8 +214,23 @@ type RelayInfo struct {
 	RetryIndex                            int
 	LastError                             *types.NewAPIError
 	RuntimeHeadersOverride                map[string]interface{}
-	UseRuntimeHeadersOverride             bool
-	ParamOverrideAudit                    []string
+	RuntimePassedRequestHeaders           map[string]string
+	// ChannelHealthRoute is immutable for one channel attempt. It is populated
+	// before dispatch and reused when recording a later upstream failure.
+	ChannelHealthRoute        *ChannelRouteIdentity
+	UseRuntimeHeadersOverride bool
+	ParamOverrideAudit        []string
+	// UpstreamRequestBodySize retains the marshaled upstream body size when a
+	// type-erased BodyStorage reader is used, so HTTP requests keep an explicit
+	// Content-Length instead of silently falling back to chunked transfer.
+	UpstreamRequestBodySize int64
+	// UpstreamRequestGetBody returns a fresh reader for transport-level replay
+	// when the current request body is backed by BodyStorage.
+	UpstreamRequestGetBody func() (io.ReadCloser, error)
+	// CodexFoldedBaseRequestBody is the exact JSON body sent by the first
+	// Codex Responses round when folded SSE is enabled. It is request-scoped
+	// and is used only to build continuation rounds without losing opaque fields.
+	CodexFoldedBaseRequestBody []byte
 
 	PriceData types.PriceData
 
@@ -208,11 +248,13 @@ type RelayInfo struct {
 	// 若为空，调用 GetFinalRequestRelayFormat 会回退到 RequestConversionChain 的最后一项或 RelayFormat。
 	FinalRequestRelayFormat types.RelayFormat
 
-	StreamStatus *StreamStatus
+	StreamStatus               *StreamStatus
+	ResponsesStreamObservation *ResponsesStreamObservation
 
 	ThinkingContentInfo
 	TokenCountMeta
 	*ClaudeConvertInfo
+	*GeminiConvertInfo
 	*RerankerInfo
 	*ResponsesUsageInfo
 	*ChannelMeta
@@ -314,6 +356,18 @@ func (info *RelayInfo) ResetBillingMetadata(c *gin.Context) {
 }
 
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
+	// RelayInfo is reused across channel attempts. Body metadata belongs to the
+	// current attempt and must not retain a closed reader or runtime override
+	// state from the prior channel.
+	info.RuntimeHeadersOverride = nil
+	info.RuntimePassedRequestHeaders = nil
+	info.ChannelHealthRoute = nil
+	info.UseRuntimeHeadersOverride = false
+	info.ParamOverrideAudit = nil
+	info.UpstreamRequestBodySize = 0
+	info.UpstreamRequestGetBody = nil
+	info.CodexFoldedBaseRequestBody = nil
+	info.ResponsesStreamObservation = NewResponsesStreamObservation()
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 	paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)
@@ -331,6 +385,8 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		ChannelCreateTime:    c.GetInt64("channel_create_time"),
 		ParamOverride:        paramOverride,
 		HeadersOverride:      headerOverride,
+		ChannelOther:         c.GetString("channel_other"),
+		StatusCodeMapping:    common.GetContextKeyString(c, constant.ContextKeyChannelStatusCodeMapping),
 		UpstreamModelName:    common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 		IsModelMapped:        false,
 		SupportStreamOptions: false,
@@ -452,7 +508,6 @@ var streamSupportedChannels = map[int]bool{
 	constant.ChannelCloudflare:      true,
 	constant.ChannelTypeAzure:       true,
 	constant.ChannelTypeVolcEngine:  true,
-	constant.ChannelTypeOllama:      true,
 	constant.ChannelTypeXai:         true,
 	constant.ChannelTypeDeepSeek:    true,
 	constant.ChannelTypeBaiduV2:     true,
@@ -520,7 +575,12 @@ func GenRelayInfoEmbedding(c *gin.Context, request dto.Request) *RelayInfo {
 }
 
 // GenRelayInfoResponses builds RelayInfo for OpenAI Responses API requests.
-func GenRelayInfoResponses(c *gin.Context, request dto.Request) (*RelayInfo, error) {
+func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) *RelayInfo {
+	info, _ := genRelayInfoResponses(c, request)
+	return info
+}
+
+func genRelayInfoResponses(c *gin.Context, request dto.Request) (*RelayInfo, error) {
 	info := genBaseRelayInfo(c, request)
 	info.RelayMode = relayconstant.RelayModeResponses
 	info.RelayFormat = types.RelayFormatOpenAIResponses
@@ -528,38 +588,43 @@ func GenRelayInfoResponses(c *gin.Context, request dto.Request) (*RelayInfo, err
 	info.ResponsesUsageInfo = &ResponsesUsageInfo{
 		BuiltInTools: make(map[string]*BuildInToolInfo),
 	}
-	if responsesRequest, ok := request.(*dto.OpenAIResponsesRequest); ok && responsesRequest != nil {
-		effectiveTools, err := responsesRequest.EffectiveTools()
-		if err != nil {
-			return nil, fmt.Errorf("resolve effective Responses tools: %w", err)
+	responsesRequest, ok := request.(*dto.OpenAIResponsesRequest)
+	if !ok || responsesRequest == nil {
+		if _, opaque := request.(*dto.OpaqueOpenAIResponsesRequest); opaque {
+			return info, nil
 		}
-		for _, rawTool := range effectiveTools {
-			var tool map[string]any
-			if err := common.Unmarshal(rawTool, &tool); err != nil {
-				return nil, fmt.Errorf("parse effective Responses tool: %w", err)
+		return info, errors.New("request is not a OpenAIResponsesRequest")
+	}
+	effectiveTools, err := responsesRequest.EffectiveTools()
+	if err != nil {
+		return info, fmt.Errorf("resolve effective Responses tools: %w", err)
+	}
+	for _, rawTool := range effectiveTools {
+		var tool map[string]any
+		if err := common.Unmarshal(rawTool, &tool); err != nil {
+			return info, fmt.Errorf("parse effective Responses tool: %w", err)
+		}
+		toolType := common.Interface2String(tool["type"])
+		canonicalToolType, ok := CanonicalResponsesBuiltInToolType(toolType)
+		if !ok {
+			continue
+		}
+		toolInfo := &BuildInToolInfo{
+			ToolName:  canonicalToolType,
+			CallCount: 0,
+		}
+		info.ResponsesUsageInfo.BuiltInTools[canonicalToolType] = toolInfo
+		switch canonicalToolType {
+		case dto.BuildInToolWebSearchPreview:
+			searchContextSize := common.Interface2String(tool["search_context_size"])
+			if searchContextSize == "" {
+				searchContextSize = "medium"
+				toolInfo.DefaultSearchSize = true
 			}
-			toolType := common.Interface2String(tool["type"])
-			canonicalToolType, ok := CanonicalResponsesBuiltInToolType(toolType)
-			if !ok {
-				continue
-			}
-			toolInfo := &BuildInToolInfo{
-				ToolName:  canonicalToolType,
-				CallCount: 0,
-			}
-			info.ResponsesUsageInfo.BuiltInTools[canonicalToolType] = toolInfo
-			switch canonicalToolType {
-			case dto.BuildInToolWebSearchPreview:
-				searchContextSize := common.Interface2String(tool["search_context_size"])
-				if searchContextSize == "" {
-					searchContextSize = "medium"
-					toolInfo.DefaultSearchSize = true
-				}
-				toolInfo.SearchContextSize = searchContextSize
-			case dto.BuildInToolImageGeneration:
-				toolInfo.Quality = common.Interface2String(tool["quality"])
-				toolInfo.Size = common.Interface2String(tool["size"])
-			}
+			toolInfo.SearchContextSize = searchContextSize
+		case dto.BuildInToolImageGeneration:
+			toolInfo.Quality = common.Interface2String(tool["quality"])
+			toolInfo.Size = common.Interface2String(tool["size"])
 		}
 	}
 	return info, nil
@@ -583,6 +648,7 @@ func GenRelayInfoGemini(c *gin.Context, request dto.Request) *RelayInfo {
 	info := genBaseRelayInfo(c, request)
 	info.RelayFormat = types.RelayFormatGemini
 	info.ShouldIncludeUsage = false
+	info.GeminiConvertInfo = &GeminiConvertInfo{}
 
 	return info
 }
@@ -731,25 +797,16 @@ func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Req
 	case types.RelayFormatEmbedding:
 		info = GenRelayInfoEmbedding(c, request)
 	case types.RelayFormatOpenAIResponses:
-		if _, ok := request.(*dto.OpenAIResponsesRequest); ok {
-			info, err = GenRelayInfoResponses(c, request)
-			break
-		}
-		if _, ok := request.(*dto.OpaqueOpenAIResponsesRequest); ok {
-			info, err = GenRelayInfoResponses(c, request)
-			break
-		}
-		err = errors.New("request is not a OpenAIResponsesRequest")
+		info, err = genRelayInfoResponses(c, request)
 	case types.RelayFormatOpenAIResponsesCompaction:
-		if _, ok := request.(*dto.OpenAIResponsesCompactionRequest); ok {
+		switch request := request.(type) {
+		case *dto.OpenAIResponsesCompactionRequest:
 			info = GenRelayInfoResponsesCompaction(c, request)
-			break
+		case *dto.OpaqueOpenAIResponsesRequest:
+			info = genRelayInfoResponsesCompaction(c, request)
+		default:
+			err = errors.New("request is not a OpenAIResponsesCompactionRequest")
 		}
-		if _, ok := request.(*dto.OpaqueOpenAIResponsesRequest); ok {
-			info = GenRelayInfoResponsesCompaction(c, request)
-			break
-		}
-		return nil, errors.New("request is not a OpenAIResponsesCompactionRequest")
 	case types.RelayFormatTask:
 		info = genBaseRelayInfo(c, nil)
 		info.TaskRelayInfo = &TaskRelayInfo{}
@@ -816,7 +873,11 @@ func (info *RelayInfo) GetFinalRequestRelayFormat() types.RelayFormat {
 }
 
 // GenRelayInfoResponsesCompaction builds RelayInfo for responses compaction requests.
-func GenRelayInfoResponsesCompaction(c *gin.Context, request dto.Request) *RelayInfo {
+func GenRelayInfoResponsesCompaction(c *gin.Context, request *dto.OpenAIResponsesCompactionRequest) *RelayInfo {
+	return genRelayInfoResponsesCompaction(c, request)
+}
+
+func genRelayInfoResponsesCompaction(c *gin.Context, request dto.Request) *RelayInfo {
 	info := genBaseRelayInfo(c, request)
 	if info.RelayMode == relayconstant.RelayModeUnknown {
 		info.RelayMode = relayconstant.RelayModeResponsesCompact
@@ -985,6 +1046,30 @@ type TaskRelayInfo struct {
 	// a specific channel (e.g., remix on origin task's channel). Stored as any
 	// to avoid an import cycle with model; callers type-assert to *model.Channel.
 	LockedChannel any
+	// OriginRouteSnapshot holds the complete route snapshot of the origin task
+	// for remix/continuation submits. Stored as any to avoid an import cycle with
+	// model; the relay package validates the concrete *model.TaskRouteSnapshot
+	// before the controller installs channel context.
+	OriginRouteSnapshot any
+	// OriginRouteRequestedModel and OriginRouteEffectiveModel preserve the
+	// immutable model identity of an origin task for remix/continuation submits.
+	// They are request-local only and never serialized to task rows.
+	OriginRouteRequestedModel string `json:"-"`
+	OriginRouteEffectiveModel string `json:"-"`
+	OriginRouteGroup          string `json:"-"`
+	OriginRouteChannelID      int    `json:"-"`
+	// OriginRouteMappingMissing marks a legacy origin row that never persisted
+	// its effective provider model. Such a continuation must fail closed rather
+	// than re-reading the mutable channel model_mapping and silently drifting.
+	OriginRouteMappingMissing bool `json:"-"`
+	// OriginRouteCredential is the concrete credential persisted with the
+	// origin task. It is request-local only and is never serialized; locked
+	// continuation setup must use it instead of selecting a live channel key.
+	OriginRouteCredential string `json:"-"`
+	// SubmitRequestURL is the request-scoped URL plan built immediately before
+	// an asynchronous task is submitted. It is never persisted; the route
+	// snapshot stores only its sanitized operation path.
+	SubmitRequestURL string `json:"-"`
 }
 
 // TaskSubmitReq describes the normalized task submission payload.
@@ -1013,6 +1098,7 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 	type Alias TaskSubmitReq
 	aux := &struct {
 		Metadata json.RawMessage `json:"metadata,omitempty"`
+		Action   json.RawMessage `json:"action,omitempty"`
 		Duration json.RawMessage `json:"duration,omitempty"`
 		*Alias
 	}{
@@ -1043,13 +1129,29 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 			var metadataObj map[string]interface{}
 			if err := common.Unmarshal([]byte(metadataStr), &metadataObj); err == nil {
 				t.Metadata = metadataObj
-				return nil
+				// Continue so a top-level action can be normalized when metadata
+				// was supplied as a JSON string.
 			}
 		}
 
 		var metadataObj map[string]interface{}
 		if err := common.Unmarshal(aux.Metadata, &metadataObj); err == nil {
 			t.Metadata = metadataObj
+		}
+	}
+	if len(aux.Action) > 0 {
+		var action string
+		if err := common.Unmarshal(aux.Action, &action); err == nil {
+			action = strings.TrimSpace(action)
+			if action != "" {
+				if t.Metadata == nil {
+					t.Metadata = make(map[string]interface{})
+				}
+				existing, exists := t.Metadata["action"]
+				if _, valid := taskRouteActionValue(existing); !exists || !valid {
+					t.Metadata["action"] = action
+				}
+			}
 		}
 	}
 
@@ -1083,6 +1185,19 @@ type TaskInfo struct {
 	TotalTokens      int    `json:"total_tokens,omitempty"`      // 用于按倍率计费
 }
 
+// ResolvedURL returns the normalized result location emitted by an adaptor.
+// Gemini historically used RemoteUrl while most adaptors used Url; callers
+// must treat both fields identically to avoid losing completed video results.
+func (t *TaskInfo) ResolvedURL() string {
+	if t == nil {
+		return ""
+	}
+	if url := strings.TrimSpace(t.Url); url != "" {
+		return url
+	}
+	return strings.TrimSpace(t.RemoteUrl)
+}
+
 // FailTaskInfo builds a failed TaskInfo with the provided reason.
 func FailTaskInfo(reason string) *TaskInfo {
 	return &TaskInfo{
@@ -1106,7 +1221,7 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 		return jsonData, nil
 	}
 
-	var data map[string]interface{}
+	var data map[string]common.RawMessage
 	if err := common.Unmarshal(jsonData, &data); err != nil {
 		common.SysError("RemoveDisabledFields Unmarshal error :" + err.Error())
 		return jsonData, nil
@@ -1149,15 +1264,21 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 
 	// 默认移除 stream_options.include_obfuscation，除非明确允许（避免关闭响应流混淆保护）
 	if !channelOtherSettings.AllowIncludeObfuscation {
-		if streamOptionsAny, exists := data["stream_options"]; exists {
-			if streamOptions, ok := streamOptionsAny.(map[string]interface{}); ok {
+		if streamOptionsRaw, exists := data["stream_options"]; exists {
+			var streamOptions map[string]common.RawMessage
+			if err := common.Unmarshal(streamOptionsRaw, &streamOptions); err == nil {
 				if _, includeExists := streamOptions["include_obfuscation"]; includeExists {
 					delete(streamOptions, "include_obfuscation")
 				}
 				if len(streamOptions) == 0 {
 					delete(data, "stream_options")
 				} else {
-					data["stream_options"] = streamOptions
+					encodedStreamOptions, err := common.Marshal(streamOptions)
+					if err != nil {
+						common.SysError("RemoveDisabledFields Marshal stream_options error :" + err.Error())
+						return jsonData, nil
+					}
+					data["stream_options"] = encodedStreamOptions
 				}
 			}
 		}

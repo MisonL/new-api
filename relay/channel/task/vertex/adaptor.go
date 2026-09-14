@@ -2,6 +2,7 @@ package vertex
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -221,11 +222,16 @@ func (a *TaskAdaptor) GetModelList() []string {
 		"veo-3.0-fast-generate-001",
 		"veo-3.1-generate-preview",
 		"veo-3.1-fast-generate-preview",
+		"veo-3.1-lite-generate-preview",
 	}
 }
 func (a *TaskAdaptor) GetChannelName() string { return "vertex" }
 
 func buildFetchOperationURL(baseURL, upstreamName string) (string, error) {
+	return buildFetchOperationURLWithVersion(baseURL, upstreamName, vertexcore.DefaultAPIVersion)
+}
+
+func buildFetchOperationURLWithVersion(baseURL, upstreamName, apiVersion string) (string, error) {
 	region := extractRegionFromOperationName(upstreamName)
 	if region == "" {
 		region = "us-central1"
@@ -238,11 +244,31 @@ func buildFetchOperationURL(baseURL, upstreamName string) (string, error) {
 	if strings.TrimSpace(project) == "" {
 		return "", fmt.Errorf("cannot extract project from operation name")
 	}
-	return vertexcore.BuildGoogleModelURL(baseURL, vertexcore.DefaultAPIVersion, project, region, modelName, "fetchPredictOperation"), nil
+	apiVersion = strings.Trim(strings.TrimSpace(apiVersion), "/")
+	if apiVersion == "" {
+		apiVersion = vertexcore.DefaultAPIVersion
+	}
+	return vertexcore.BuildGoogleModelURL(baseURL, apiVersion, project, region, modelName, "fetchPredictOperation"), nil
+}
+
+func vertexAPIVersionFromPollingPath(value any) string {
+	path, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) > 0 && strings.HasPrefix(parts[0], "v1") {
+		return parts[0]
+	}
+	return ""
 }
 
 // FetchTask fetch task status
 func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
+	return a.FetchTaskWithContext(context.Background(), baseUrl, key, body, proxy, extraHeaders...)
+}
+
+func (a *TaskAdaptor) FetchTaskWithContext(ctx context.Context, baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
 	taskID, ok := body["task_id"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid task_id")
@@ -251,7 +277,8 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	if err != nil {
 		return nil, fmt.Errorf("decode task_id failed: %w", err)
 	}
-	url, err := buildFetchOperationURL(baseUrl, upstreamName)
+	apiVersion := vertexAPIVersionFromPollingPath(body["polling_path"])
+	url, err := buildFetchOperationURLWithVersion(baseUrl, upstreamName, apiVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +295,10 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	if err != nil {
 		return nil, fmt.Errorf("failed to acquire access token: %w", err)
 	}
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}

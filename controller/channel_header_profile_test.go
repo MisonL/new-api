@@ -55,7 +55,7 @@ func setupChannelControllerTestDB(t *testing.T) *gorm.DB {
 	model.DB = db
 	model.LOG_DB = db
 
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.User{}, &model.Log{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.User{}))
 
 	t.Cleanup(func() {
 		common.UsingSQLite = previousUsingSQLite
@@ -205,6 +205,130 @@ func TestUpdateChannelPersistsHeaderProfileStrategy(t *testing.T) {
 	}, strategy.Profiles[0].VersionMeta)
 }
 
+func TestUpdateChannelRejectsCaseInsensitiveDuplicateHeaderProfileKeys(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":     channel.Id,
+		"type":   channel.Type,
+		"key":    channel.Key,
+		"status": channel.Status,
+		"name":   channel.Name,
+		"group":  channel.Group,
+		"models": channel.Models,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"duplicate-headers"},
+				Profiles: []dto.HeaderProfile{
+					{
+						ID: "duplicate-headers",
+						Headers: map[string]string{
+							"X-Test": "first",
+							"x-test": "second",
+						},
+					},
+				},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "请求头名称重复")
+}
+
+func TestUpdateChannelRejectsInvalidHeaderProfileSnapshotEntries(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers map[string]string
+		message string
+	}{
+		{name: "invalid name", headers: map[string]string{"Bad Header": "value"}, message: "请求头名称不合法"},
+		{name: "empty value", headers: map[string]string{"X-Test": "  "}, message: "请求头值不能为空"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setupChannelControllerTestDB(t)
+			channel := seedChannelForHeaderProfileTest(t)
+
+			ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+				"id":     channel.Id,
+				"type":   channel.Type,
+				"key":    channel.Key,
+				"status": channel.Status,
+				"name":   channel.Name,
+				"group":  channel.Group,
+				"models": channel.Models,
+				"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+					HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+						Enabled:            true,
+						Mode:               dto.HeaderProfileModeFixed,
+						SelectedProfileIDs: []string{"invalid-profile"},
+						Profiles: []dto.HeaderProfile{{
+							ID:      "invalid-profile",
+							Headers: test.headers,
+						}},
+					},
+				}),
+			})
+
+			UpdateChannel(ctx)
+
+			response := decodeChannelAPIResponse(t, recorder)
+			require.False(t, response.Success)
+			require.Contains(t, response.Message, test.message)
+		})
+	}
+}
+
+func TestUpdateChannelCanonicalizesHeaderProfileSnapshotNames(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	channel := seedChannelForHeaderProfileTest(t)
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
+		"id":     channel.Id,
+		"type":   channel.Type,
+		"key":    channel.Key,
+		"status": channel.Status,
+		"name":   channel.Name,
+		"group":  channel.Group,
+		"models": channel.Models,
+		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
+			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+				Enabled:            true,
+				Mode:               dto.HeaderProfileModeFixed,
+				SelectedProfileIDs: []string{"canonical-profile"},
+				Profiles: []dto.HeaderProfile{{
+					ID: "canonical-profile",
+					Headers: map[string]string{
+						" user-agent ": "client/1.0",
+						"x-request-id": "request-1",
+					},
+				}},
+			},
+		}),
+	})
+
+	UpdateChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	loaded, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	strategy := loaded.GetOtherSettings().HeaderProfileStrategy
+	require.NotNil(t, strategy)
+	require.Equal(t, map[string]string{
+		"User-Agent":   "client/1.0",
+		"X-Request-Id": "request-1",
+	}, strategy.Profiles[0].Headers)
+}
+
 func TestUpdateChannelAllowsBuiltinHeaderProfileWithPassthrough(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
@@ -240,7 +364,7 @@ func TestUpdateChannelAllowsBuiltinHeaderProfileWithPassthrough(t *testing.T) {
 	require.JSONEq(t, paramOverride, *loaded.ParamOverride)
 }
 
-func TestUpdateChannelAllowsBuiltinCLIHeaderProfileWithoutParamOverride(t *testing.T) {
+func TestUpdateChannelRejectsBuiltinCLIHeaderProfileWithoutParamOverride(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
 
@@ -264,7 +388,8 @@ func TestUpdateChannelAllowsBuiltinCLIHeaderProfileWithoutParamOverride(t *testi
 	UpdateChannel(ctx)
 
 	response := decodeChannelAPIResponse(t, recorder)
-	require.True(t, response.Success, response.Message)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "x-codex")
 }
 
 func TestUpdateChannelNormalizesEmptyHeaderProfileModeToFixed(t *testing.T) {
@@ -272,13 +397,14 @@ func TestUpdateChannelNormalizesEmptyHeaderProfileModeToFixed(t *testing.T) {
 	channel := seedChannelForHeaderProfileTest(t)
 
 	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
-		"id":     channel.Id,
-		"type":   channel.Type,
-		"key":    channel.Key,
-		"status": channel.Status,
-		"name":   channel.Name,
-		"group":  channel.Group,
-		"models": channel.Models,
+		"id":             channel.Id,
+		"type":           channel.Type,
+		"key":            channel.Key,
+		"status":         channel.Status,
+		"name":           channel.Name,
+		"group":          channel.Group,
+		"models":         channel.Models,
+		"param_override": `{"operations":[{"mode":"pass_headers","value":["X-Codex-Turn-Metadata"]}]}`,
 		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
 			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
 				Enabled:            true,
@@ -305,13 +431,14 @@ func TestUpdateChannelAllowsBuiltinLatestHeaderProfileWithoutSnapshot(t *testing
 	channel := seedChannelForHeaderProfileTest(t)
 
 	ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
-		"id":     channel.Id,
-		"type":   channel.Type,
-		"key":    channel.Key,
-		"status": channel.Status,
-		"name":   channel.Name,
-		"group":  channel.Group,
-		"models": channel.Models,
+		"id":             channel.Id,
+		"type":           channel.Type,
+		"key":            channel.Key,
+		"status":         channel.Status,
+		"name":           channel.Name,
+		"group":          channel.Group,
+		"models":         channel.Models,
+		"param_override": `{"operations":[{"mode":"pass_headers","value":["X-Codex-Turn-Metadata"]}]}`,
 		"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
 			HeaderProfileStrategy: &dto.HeaderProfileStrategy{
 				Enabled:            true,
@@ -403,13 +530,14 @@ func TestUpdateChannelAllowsRecordedHeaderProfileVersionMetaSources(t *testing.T
 			channel := seedChannelForHeaderProfileTest(t)
 
 			ctx, recorder := newChannelControllerContext(t, http.MethodPut, fmt.Sprintf("/api/channel/%d", channel.Id), map[string]any{
-				"id":     channel.Id,
-				"type":   channel.Type,
-				"key":    channel.Key,
-				"status": channel.Status,
-				"name":   channel.Name,
-				"group":  channel.Group,
-				"models": channel.Models,
+				"id":             channel.Id,
+				"type":           channel.Type,
+				"key":            channel.Key,
+				"status":         channel.Status,
+				"name":           channel.Name,
+				"group":          channel.Group,
+				"models":         channel.Models,
+				"param_override": `{"operations":[{"mode":"pass_headers","value":["X-Codex-Turn-Metadata"]}]}`,
 				"settings": marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
 					HeaderProfileStrategy: &dto.HeaderProfileStrategy{
 						Enabled:            true,
@@ -724,7 +852,7 @@ func TestUpdateChannelRejectsConditionalPassHeadersForPassthroughRequiredCustomH
 	require.Contains(t, response.Message, "User-Agent")
 }
 
-func TestUpdateChannelAllowsLegacyBuiltinSnapshotWithoutPassthroughMetadata(t *testing.T) {
+func TestUpdateChannelRejectsLegacyBuiltinSnapshotWithoutPassthroughMetadata(t *testing.T) {
 	setupChannelControllerTestDB(t)
 	channel := seedChannelForHeaderProfileTest(t)
 
@@ -759,7 +887,8 @@ func TestUpdateChannelAllowsLegacyBuiltinSnapshotWithoutPassthroughMetadata(t *t
 	UpdateChannel(ctx)
 
 	response := decodeChannelAPIResponse(t, recorder)
-	require.True(t, response.Success, response.Message)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "x-codex")
 }
 
 func TestUpdateChannelRejectsMissingCustomHeaderProfileSnapshot(t *testing.T) {
@@ -858,7 +987,36 @@ func TestAddChannelRejectsRandomModeWithoutProfiles(t *testing.T) {
 	require.EqualValues(t, 0, count)
 }
 
-func TestAddChannelAllowsBuiltinCLIHeaderProfileWithoutParamOverride(t *testing.T) {
+func TestAddChannelRejectsLegacyRouteFieldsWhenV2StrictWritesEnabled(t *testing.T) {
+	setupChannelControllerTestDB(t)
+	t.Setenv("CHANNEL_ROUTING_V2_ENABLED", "true")
+	t.Setenv("CHANNEL_ROUTING_V2_STRICT_WRITES", "true")
+
+	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel", map[string]any{
+		"mode": "single",
+		"channel": map[string]any{
+			"type":     constant.ChannelTypeOpenAI,
+			"key":      "sk-strict-route-write",
+			"status":   common.ChannelStatusEnabled,
+			"name":     "strict-route-write-channel",
+			"group":    "default",
+			"models":   "gpt-4o-mini",
+			"priority": 3,
+		},
+	})
+
+	AddChannel(ctx)
+
+	response := decodeChannelAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "route scope")
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Channel{}).Count(&count).Error)
+	require.EqualValues(t, 0, count)
+}
+
+func TestAddChannelRejectsBuiltinCLIHeaderProfileWithoutParamOverride(t *testing.T) {
 	setupChannelControllerTestDB(t)
 
 	ctx, recorder := newChannelControllerContext(t, http.MethodPost, "/api/channel", map[string]any{
@@ -883,11 +1041,12 @@ func TestAddChannelAllowsBuiltinCLIHeaderProfileWithoutParamOverride(t *testing.
 	AddChannel(ctx)
 
 	response := decodeChannelAPIResponse(t, recorder)
-	require.True(t, response.Success, response.Message)
+	require.False(t, response.Success)
+	require.Contains(t, response.Message, "x-codex")
 
 	var count int64
 	require.NoError(t, model.DB.Model(&model.Channel{}).Count(&count).Error)
-	require.EqualValues(t, 1, count)
+	require.EqualValues(t, 0, count)
 }
 
 func TestUpdateChannelStatusOnlyPreservesHeaderProfileStrategy(t *testing.T) {
@@ -1663,7 +1822,7 @@ func TestBuildFetchModelsHeadersResolvesLatestHeaderProfileVersion(t *testing.T)
 
 	headers, err := buildFetchModelsHeaders(channel, "sk-test")
 	require.NoError(t, err)
-	require.Equal(t, "codex-tui/0.200.0 (Mac OS 15.7.3; x86_64) ghostty/1.3.1 (codex-tui; 0.200.0)", headers.Get("User-Agent"))
+	require.Equal(t, "codex-tui/0.200.0 (Mac OS 15.7.3; aarch64) ghostty/1.3.1 (codex-tui; 0.200.0)", headers.Get("User-Agent"))
 	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers.Get("Originator"))
 	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
 }

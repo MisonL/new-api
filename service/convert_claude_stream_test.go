@@ -277,6 +277,16 @@ func TestStreamResponseOpenAI2ClaudePreservesDoneChunkTextBeforeUsage(t *testing
 	requireClaudeStreamBlocksWellFormed(t, append(append(first, finalTextChunk...), usageChunk...))
 }
 
+func TestStreamResponseOpenAI2ClaudeWithErrorRejectsUnknownFinishReason(t *testing.T) {
+	reason := "provider_specific_terminal_state"
+	responses, err := StreamResponseOpenAI2ClaudeWithError(&dto.ChatCompletionsStreamResponse{
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{FinishReason: &reason}},
+	}, newClaudeStreamInfo(1))
+	require.Error(t, err)
+	require.Nil(t, responses)
+	require.Contains(t, err.Error(), "finish_reason")
+}
+
 func newClaudeStreamInfo(sendResponseCount int) *relaycommon.RelayInfo {
 	return &relaycommon.RelayInfo{
 		SendResponseCount: sendResponseCount,

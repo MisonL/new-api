@@ -192,6 +192,90 @@ func TestGetTopChannelPrioritiesReturnsOnlyPositivePriorities(t *testing.T) {
 	}, channels)
 }
 
+func TestGetAllChannelsDefaultSortPrefersPinOrderWithoutChangingRoutePriority(t *testing.T) {
+	setupChannelSortTestDB(t)
+	channels := []*Channel{
+		{Id: 1, Name: "route-high-pinned-low", Key: "sk-1", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](100), PinOrder: common.GetPointer[int64](10)},
+		{Id: 2, Name: "route-low-pinned-high", Key: "sk-2", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](1), PinOrder: common.GetPointer[int64](20)},
+		{Id: 3, Name: "route-high-unpinned", Key: "sk-3", Models: "gpt-5", Group: "default", Priority: common.GetPointer[int64](200), PinOrder: common.GetPointer[int64](0)},
+	}
+	for _, channel := range channels {
+		require.NoError(t, DB.Create(channel).Error)
+	}
+
+	matched, err := GetAllChannels(0, 10, false, false)
+	require.NoError(t, err)
+	require.Equal(t, []int{2, 1, 3}, channelIDs(matched))
+}
+
+func TestGetTopChannelPinOrdersReturnsOnlyPositivePinOrders(t *testing.T) {
+	setupChannelSortTestDB(t)
+
+	require.NoError(t, DB.Create(&Channel{
+		Id:       1,
+		Name:     "null-pin-order",
+		Key:      "sk-null",
+		Models:   "gpt-5",
+		Group:    "default",
+		PinOrder: nil,
+	}).Error)
+	require.NoError(t, DB.Create(&Channel{
+		Id:       2,
+		Name:     "zero-pin-order",
+		Key:      "sk-zero",
+		Models:   "gpt-5",
+		Group:    "default",
+		PinOrder: common.GetPointer[int64](0),
+	}).Error)
+	require.NoError(t, DB.Create(&Channel{
+		Id:       3,
+		Name:     "top-low",
+		Key:      "sk-low",
+		Models:   "gpt-5",
+		Group:    "default",
+		PinOrder: common.GetPointer[int64](10),
+	}).Error)
+	require.NoError(t, DB.Create(&Channel{
+		Id:       4,
+		Name:     "top-high",
+		Key:      "sk-high",
+		Models:   "gpt-5",
+		Group:    "default",
+		PinOrder: common.GetPointer[int64](20),
+	}).Error)
+
+	channels, err := GetTopChannelPinOrders()
+	require.NoError(t, err)
+	require.Equal(t, []ChannelPinOrder{
+		{Id: 4, PinOrder: common.GetPointer[int64](20)},
+		{Id: 3, PinOrder: common.GetPointer[int64](10)},
+	}, channels)
+}
+
+func TestUpdateChannelPinOrdersRollsBackWhenAnyChannelIsMissing(t *testing.T) {
+	setupChannelSortTestDB(t)
+	require.NoError(t, DB.Create(&Channel{
+		Id:       1,
+		Name:     "existing",
+		Key:      "sk-existing",
+		Models:   "gpt-5",
+		Group:    "default",
+		PinOrder: common.GetPointer[int64](0),
+	}).Error)
+
+	firstOrder := int64(20)
+	missingOrder := int64(10)
+	err := UpdateChannelPinOrders([]ChannelPinOrder{
+		{Id: 1, PinOrder: &firstOrder},
+		{Id: 999, PinOrder: &missingOrder},
+	})
+	require.Error(t, err)
+
+	var channel Channel
+	require.NoError(t, DB.Select("id", "pin_order").First(&channel, 1).Error)
+	require.Equal(t, int64(0), channel.GetPinOrder())
+}
+
 func TestSearchChannelsAppliesWhitelistedServerSideSort(t *testing.T) {
 	setupChannelSortTestDB(t)
 	createChannelSortFixtures(t)

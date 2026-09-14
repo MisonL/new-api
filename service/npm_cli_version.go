@@ -561,6 +561,7 @@ func fetchNpmCLIVersionOptions(ctx context.Context, packageName string, client *
 		return nil, fmt.Errorf("build npm registry request: %w", err)
 	}
 	request.Header.Set("Accept", "application/vnd.npm.install-v1+json")
+	ApplyDefaultUserAgent(request)
 
 	response, err := client.Do(request)
 	if err != nil {

@@ -22,9 +22,161 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const maxResponsesCompatibilityRetries = 8
+
+const opaqueOpenAIResponsesReplayValidationContextKey = "opaque_openai_responses_replay_validation"
+
+type opaqueOpenAIResponsesReplayValidation struct {
+	request *dto.OpaqueOpenAIResponsesRequest
+	info    *relaycommon.RelayInfo
+}
+
+type managedResponsesRequestBody struct {
+	io.Reader
+	closer io.Closer
+}
+
+type responsesRequestBodyMetadata struct {
+	size    int64
+	getBody func() (io.ReadCloser, error)
+	folded  []byte
+}
+
+func snapshotResponsesRequestBodyMetadata(info *relaycommon.RelayInfo) responsesRequestBodyMetadata {
+	if info == nil {
+		return responsesRequestBodyMetadata{}
+	}
+	return responsesRequestBodyMetadata{
+		size:    info.UpstreamRequestBodySize,
+		getBody: info.UpstreamRequestGetBody,
+		folded:  append([]byte(nil), info.CodexFoldedBaseRequestBody...),
+	}
+}
+
+func restoreResponsesRequestBodyMetadata(info *relaycommon.RelayInfo, metadata responsesRequestBodyMetadata) {
+	if info == nil {
+		return
+	}
+	info.UpstreamRequestBodySize = metadata.size
+	info.UpstreamRequestGetBody = metadata.getBody
+	info.CodexFoldedBaseRequestBody = append(info.CodexFoldedBaseRequestBody[:0], metadata.folded...)
+}
+
+func (body *managedResponsesRequestBody) Close() error {
+	if body == nil || body.closer == nil {
+		return nil
+	}
+	err := body.closer.Close()
+	body.closer = nil
+	return err
+}
+
+func closeManagedResponsesRequestBody(body io.Reader) {
+	if managed, ok := body.(*managedResponsesRequestBody); ok {
+		_ = managed.Close()
+	}
+}
+
+func relayOpaqueOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpaqueOpenAIResponsesRequest) *types.NewAPIError {
+	if err := validateOpaqueOpenAIResponsesReplay(c, info, request); err != nil {
+		return err
+	}
+	if err := helper.ModelMappedHelper(c, info, request); err != nil {
+		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
+	}
+
+	adaptor := GetAdaptor(info.ApiType)
+	if adaptor == nil {
+		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
+	}
+	adaptor.Init(info)
+
+	usage, newAPIError := executeOpaqueOpenAIResponsesRequest(c, info, adaptor, request)
+	if newAPIError != nil {
+		return newAPIError
+	}
+	return settleOpenAIResponsesUsage(c, info, usage)
+}
+
+func validateOpaqueOpenAIResponsesReplay(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpaqueOpenAIResponsesRequest) *types.NewAPIError {
+	if request == nil {
+		return types.NewErrorWithStatusCode(
+			errors.New("opaque Responses request is required"),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	metadata := request.OpaqueResponsesMetadata()
+	if !metadata.ModelPresent || strings.TrimSpace(metadata.Model) == "" {
+		return types.NewErrorWithStatusCode(
+			errors.New("model is required"),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	if !metadata.HasOpaqueEncryptedContent {
+		return types.NewErrorWithStatusCode(
+			errors.New("opaque Responses request is missing encrypted replay metadata"),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+
+	capability := dto.ResponsesEncryptedReasoningReplayCapabilityUnknown
+	if info != nil {
+		capability = info.ChannelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(info.ChannelType)
+	}
+	markResponsesEncryptedReasoningReplayDecision(c, capability)
+	if capability == dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported {
+		channelID := 0
+		if info != nil {
+			channelID = info.ChannelId
+		}
+		return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(channelID)
+	}
+	if info != nil && info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+		!relaycommon.SupportsNativeOpaqueResponsesCompact(info.ChannelType, info.ChannelOtherSettings) {
+		relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+		return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(info.ChannelId)
+	}
+	if metadata.HasCompactionItem && info != nil &&
+		(info.ChannelOtherSettings.HasResponsesProxyCompatibilityProfile() ||
+			!info.ChannelOtherSettings.ResolveResponsesChannelCapability(info.ChannelType).SupportsCompactionItemPassthrough) {
+		relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+		return types.NewErrorWithStatusCode(
+			errors.New("opaque Responses compaction item cannot be replayed by the selected upstream"),
+			types.ErrorCodeChannelModelMappedError,
+			http.StatusServiceUnavailable,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	if c != nil {
+		c.Set(opaqueOpenAIResponsesReplayValidationContextKey, opaqueOpenAIResponsesReplayValidation{
+			request: request,
+			info:    info,
+		})
+	}
+	return nil
+}
+
+func hasValidatedOpaqueOpenAIResponsesReplay(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpaqueOpenAIResponsesRequest) bool {
+	if c == nil {
+		return false
+	}
+	value, exists := c.Get(opaqueOpenAIResponsesReplayValidationContextKey)
+	if !exists {
+		return false
+	}
+	validation, ok := value.(opaqueOpenAIResponsesReplayValidation)
+	return ok && validation.request == request && validation.info == info
+}
 
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
@@ -66,13 +218,13 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	if hasOpaqueEncryptedContent {
 		capability := info.ChannelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(info.ChannelType)
-		relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
+		markResponsesEncryptedReasoningReplayDecision(c, capability)
 		if capability == dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported {
 			return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(info.ChannelId)
 		}
 		if info.RelayMode == relayconstant.RelayModeResponsesCompact &&
 			!relaycommon.SupportsNativeOpaqueResponsesCompact(info.ChannelType, info.ChannelOtherSettings) {
-			relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+			markResponsesEncryptedReasoningReplayDecision(c, dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported)
 			return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(info.ChannelId)
 		}
 	}
@@ -101,7 +253,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	adaptor.Init(info)
 	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
-	compatibilityRequest, contextCompactionResult, err := prepareResponsesRequestForChatCompatibility(relaycommon.GinRequestContext(c), info, request)
+	compatibilityRequest, contextCompactionResult, err := prepareResponsesRequestForChatCompatibility(info, request, relaycommon.GinRequestContext(c))
 	if err != nil {
 		return newResponsesConvertRequestError(err)
 	}
@@ -124,6 +276,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if newApiErr != nil {
 			return newApiErr
 		}
+
 		if settleErr := settleOpenAIResponsesUsage(c, info, usage); settleErr != nil {
 			return settleErr
 		}
@@ -134,118 +287,25 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if newAPIError != nil {
 		return newAPIError
 	}
+
+	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+		return settleOpenAIResponsesUsage(c, info, usageDto)
+	}
+
 	if settleErr := settleOpenAIResponsesUsage(c, info, usageDto); settleErr != nil {
 		return settleErr
 	}
 	return nil
 }
 
-func relayOpaqueOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpaqueOpenAIResponsesRequest) *types.NewAPIError {
-	if err := validateOpaqueOpenAIResponsesReplay(c, info, request); err != nil {
-		return err
-	}
-	if err := helper.ModelMappedHelper(c, info, request); err != nil {
-		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
-	}
-
-	adaptor := GetAdaptor(info.ApiType)
-	if adaptor == nil {
-		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
-	}
-	adaptor.Init(info)
-
-	usage, newAPIError := executeOpaqueOpenAIResponsesRequest(c, info, adaptor, request)
-	if newAPIError != nil {
-		return newAPIError
-	}
-	if settleErr := settleOpenAIResponsesUsage(c, info, usage); settleErr != nil {
-		return settleErr
-	}
-	return nil
-}
-
-const opaqueOpenAIResponsesReplayValidationContextKey = "opaque_openai_responses_replay_validation"
-
-type opaqueOpenAIResponsesReplayValidation struct {
-	request *dto.OpaqueOpenAIResponsesRequest
-	info    *relaycommon.RelayInfo
-}
-
-func validateOpaqueOpenAIResponsesReplay(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpaqueOpenAIResponsesRequest) *types.NewAPIError {
-	if request == nil {
-		return types.NewErrorWithStatusCode(
-			errors.New("opaque Responses request is required"),
-			types.ErrorCodeInvalidRequest,
-			http.StatusBadRequest,
-			types.ErrOptionWithSkipRetry(),
-		)
-	}
-	metadata := request.OpaqueResponsesMetadata()
-	if !metadata.ModelPresent || strings.TrimSpace(metadata.Model) == "" {
-		return types.NewErrorWithStatusCode(
-			errors.New("model is required"),
-			types.ErrorCodeInvalidRequest,
-			http.StatusBadRequest,
-			types.ErrOptionWithSkipRetry(),
-		)
-	}
-	if !metadata.HasOpaqueEncryptedContent {
-		return types.NewErrorWithStatusCode(
-			errors.New("opaque Responses request is missing encrypted replay metadata"),
-			types.ErrorCodeInvalidRequest,
-			http.StatusBadRequest,
-			types.ErrOptionWithSkipRetry(),
-		)
-	}
-
-	capability := dto.ResponsesEncryptedReasoningReplayCapabilityUnknown
-	if info != nil {
-		capability = info.ChannelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(info.ChannelType)
-	}
-	relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
-	if capability == dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported {
-		return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(info.ChannelId)
-	}
-	if info != nil && info.RelayMode == relayconstant.RelayModeResponsesCompact &&
-		!relaycommon.SupportsNativeOpaqueResponsesCompact(info.ChannelType, info.ChannelOtherSettings) {
-		relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
-		return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(info.ChannelId)
-	}
-	if metadata.HasCompactionItem && info != nil &&
-		info.ChannelOtherSettings.ResolveResponsesCompactionItemPassthroughCapability(info.ChannelType) == dto.ResponsesCompactionItemPassthroughCapabilityUnsupported {
-		relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
-		return types.NewErrorWithStatusCode(
-			errors.New("opaque Responses compaction item cannot be replayed by the selected upstream"),
-			types.ErrorCodeChannelModelMappedError,
-			http.StatusServiceUnavailable,
-			types.ErrOptionWithSkipRetry(),
-		)
-	}
-	if c != nil {
-		c.Set(opaqueOpenAIResponsesReplayValidationContextKey, opaqueOpenAIResponsesReplayValidation{
-			request: request,
-			info:    info,
-		})
-	}
-	return nil
-}
-
-func hasValidatedOpaqueOpenAIResponsesReplay(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpaqueOpenAIResponsesRequest) bool {
-	if c == nil {
-		return false
-	}
-	value, exists := c.Get(opaqueOpenAIResponsesReplayValidationContextKey)
-	if !exists {
-		return false
-	}
-	validation, ok := value.(opaqueOpenAIResponsesReplayValidation)
-	return ok && validation.request == request && validation.info == info
-}
-
-func prepareResponsesRequestForChatCompatibility(ctx context.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) (*dto.OpenAIResponsesRequest, relaycommon.ResponsesContextCompactionNormalizeResult, error) {
+func prepareResponsesRequestForChatCompatibility(info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest, contexts ...context.Context) (*dto.OpenAIResponsesRequest, relaycommon.ResponsesContextCompactionNormalizeResult, error) {
 	result := relaycommon.ResponsesContextCompactionNormalizeResult{}
 	if request == nil || !relaycommon.IsOpenAICompatibleResponses(info) {
 		return request, result, nil
+	}
+	ctx := context.Background()
+	if len(contexts) > 0 && contexts[0] != nil {
+		ctx = contexts[0]
 	}
 	normalizedRequest, result, err := service.NormalizeContextCompactionForResponsesRequest(ctx, *request)
 	if err != nil || result.ChangedCount() == 0 {
@@ -332,11 +392,52 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 	if _, err := service.HasRemoteResponsesCompactionInput(c.Request.Context(), validationRequest); err != nil {
 		return nil, newResponsesConvertRequestError(err)
 	}
-	requestBody, convertedRequest, err := buildOpenAIResponsesRequestBody(c, info, adaptor, request, passThroughGlobal)
-	if err != nil {
-		return nil, err
-	}
 	retryState := responsesCompatibilityRetryState{}
+	var requestBody io.Reader
+	var convertedRequest dto.OpenAIResponsesRequest
+	if shouldPreemptivelyReduceCodexLocalCompactionInboundRequest(c, info, *request) {
+		originalRequest := *request
+		originalRequestBytes := common.GetContextKeyInt64(c, appconstant.ContextKeyRequestBodySize)
+		var preemptiveErr *types.NewAPIError
+		requestBody, convertedRequest, retryState, preemptiveErr = startCodexLocalCompactionPreemptiveBodyReduction(
+			c,
+			info,
+			adaptor,
+			originalRequest,
+			originalRequestBytes,
+		)
+		if preemptiveErr != nil {
+			return nil, preemptiveErr
+		}
+	} else {
+		var buildErr *types.NewAPIError
+		requestBody, convertedRequest, buildErr = buildOpenAIResponsesRequestBody(c, info, adaptor, request, passThroughGlobal)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		if shouldPreemptivelyReduceCodexLocalCompactionRequest(c, info, convertedRequest) {
+			originalRequest := convertedRequest
+			originalRequestBytes := info.UpstreamRequestBodySize
+			currentBodyMetadata := snapshotResponsesRequestBodyMetadata(info)
+			recoveryBody, recoveredRequest, recoveryState, preemptiveErr := startCodexLocalCompactionPreemptiveBodyReduction(
+				c,
+				info,
+				adaptor,
+				originalRequest,
+				originalRequestBytes,
+			)
+			if preemptiveErr != nil {
+				restoreResponsesRequestBodyMetadata(info, currentBodyMetadata)
+				closeManagedResponsesRequestBody(requestBody)
+				return nil, preemptiveErr
+			}
+			closeManagedResponsesRequestBody(requestBody)
+			requestBody = recoveryBody
+			convertedRequest = recoveredRequest
+			retryState = recoveryState
+		}
+	}
+	defer func() { closeManagedResponsesRequestBody(requestBody) }()
 	for {
 		usage, newAPIError := doOpenAIResponsesRequest(c, info, adaptor, requestBody, doOpenAIResponsesRequestOptions{
 			SkipStatusCodeMapping: true,
@@ -344,7 +445,92 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		if newAPIError == nil {
 			return usage, nil
 		}
+		if retryState.codexLocalCompaction413Attempted && isUpstreamRequestTooLargeError(newAPIError) {
+			if retryState.codexLocalCompaction413Stage == service.CodexLocalCompaction413RecoveryStageRichVisible {
+				if c != nil && c.Writer != nil && c.Writer.Written() {
+					resetResponsesStatusCode(c, newAPIError)
+					return nil, newAPIError
+				}
+				currentBodyMetadata := snapshotResponsesRequestBodyMetadata(info)
+				recoveryBody, recoveredRequest, recoveryInfo, recoveryErr := buildCodexLocalCompaction413RecoveryBody(
+					c,
+					info,
+					adaptor,
+					retryState.codexLocalCompaction413OriginalRequest,
+					service.CodexLocalCompaction413RecoveryStageBoundedVisible,
+				)
+				recoveryInfo.OriginalRequestBytes = retryState.codexLocalCompaction413Info.OriginalRequestBytes
+				if recoveryErr == nil {
+					if retryState.codexLocalCompaction413Preemptive {
+						markCodexLocalCompactionPreemptiveBodyReductionStarted(c, info, recoveryInfo)
+					} else {
+						markCodexLocalCompaction413RecoveryStarted(c, info, recoveryInfo)
+					}
+					closeManagedResponsesRequestBody(requestBody)
+					requestBody = recoveryBody
+					convertedRequest = recoveredRequest
+					retryState.codexLocalCompaction413Info = recoveryInfo
+					retryState.codexLocalCompaction413Stage = recoveryInfo.Stage
+					retryState.attempts++
+					if info.StreamStatus != nil {
+						info.StreamStatus = relaycommon.NewStreamStatus()
+					}
+					continue
+				}
+				restoreResponsesRequestBodyMetadata(info, currentBodyMetadata)
+				common.SysLog(fmt.Sprintf(
+					"codex local compaction 413 bounded recovery unavailable: channel_id=%d model=%s original_input_bytes=%d recovery_input_bytes=%d recovery_request_bytes=%d reason=%s",
+					info.ChannelId,
+					info.OriginModelName,
+					recoveryInfo.OriginalInputBytes,
+					recoveryInfo.RecoveredInputBytes,
+					recoveryInfo.RecoveredRequestBytes,
+					recoveryErr.Error(),
+				))
+			}
+			return nil, finishCodexLocalCompaction413Recovery(c, info, newAPIError, retryState.codexLocalCompaction413Info)
+		}
+		if shouldRecoverCodexLocalCompactionAfter413(c, info, convertedRequest, newAPIError) {
+			originalRequest := convertedRequest
+			originalRequestBytes := info.UpstreamRequestBodySize
+			currentBodyMetadata := snapshotResponsesRequestBodyMetadata(info)
+			markCodexLocalCompactionBodyReductionSource(c, codexLocalCompactionBodyReductionSourceUpstream413)
+			recoveryBody, recoveredRequest, recoveryInfo, recoveryErr := buildCodexLocalCompaction413RecoveryBody(
+				c,
+				info,
+				adaptor,
+				originalRequest,
+				service.CodexLocalCompaction413RecoveryStageRichVisible,
+			)
+			recoveryInfo.OriginalRequestBytes = originalRequestBytes
+			if recoveryErr != nil {
+				restoreResponsesRequestBodyMetadata(info, currentBodyMetadata)
+				common.SysLog(fmt.Sprintf(
+					"codex local compaction 413 recovery unavailable: channel_id=%d model=%s original_request_bytes=%d original_input_bytes=%d reason=%s",
+					info.ChannelId,
+					info.OriginModelName,
+					originalRequestBytes,
+					len(convertedRequest.Input),
+					recoveryErr.Error(),
+				))
+				return nil, finishCodexLocalCompaction413Recovery(c, info, newAPIError, recoveryInfo)
+			}
+			markCodexLocalCompaction413RecoveryStarted(c, info, recoveryInfo)
+			closeManagedResponsesRequestBody(requestBody)
+			requestBody = recoveryBody
+			convertedRequest = recoveredRequest
+			retryState.codexLocalCompaction413Attempted = true
+			retryState.codexLocalCompaction413Info = recoveryInfo
+			retryState.codexLocalCompaction413Stage = recoveryInfo.Stage
+			retryState.codexLocalCompaction413OriginalRequest = originalRequest
+			retryState.codexLocalCompaction413Preemptive = false
+			if info.StreamStatus != nil {
+				info.StreamStatus = relaycommon.NewStreamStatus()
+			}
+			continue
+		}
 		if c.Writer.Written() && !common.GetContextKeyBool(c, appconstant.ContextKeyResponsesStreamPreludeRetrySafe) {
+			markResponsesEncryptedContextRetryBlockedAfterStreamEvent(c, info, newAPIError)
 			resetResponsesStatusCode(c, newAPIError)
 			return nil, newAPIError
 		}
@@ -361,6 +547,7 @@ func executeOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 			resetResponsesStatusCode(c, newAPIError)
 			return nil, newAPIError
 		}
+		closeManagedResponsesRequestBody(requestBody)
 		requestBody = retryBody
 		convertedRequest = retryRequest
 		retryState.attempts++
@@ -382,15 +569,265 @@ func executeOpaqueOpenAIResponsesRequest(c *gin.Context, info *relaycommon.Relay
 	if err != nil {
 		return nil, err
 	}
+	defer closeManagedResponsesRequestBody(requestBody)
 	return doOpenAIResponsesRequest(c, info, adaptor, requestBody)
 }
 
+func buildCodexLocalCompaction413RecoveryBody(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, request dto.OpenAIResponsesRequest, stage service.CodexLocalCompaction413RecoveryStage) (io.Reader, dto.OpenAIResponsesRequest, service.CodexLocalCompaction413RecoveryInfo, error) {
+	recoveredRequest, recoveryInfo, err := service.BuildCodexLocalCompaction413RecoveryRequestForStage(request, stage)
+	if err != nil {
+		return nil, dto.OpenAIResponsesRequest{}, recoveryInfo, err
+	}
+	recoveryBody, convertedRequest, recoveryBuildErr := buildOpenAIResponsesRequestBody(c, info, adaptor, &recoveredRequest, false, buildResponsesRequestBodyOptions{
+		ForceConvertedBody: true,
+	})
+	if recoveryBuildErr != nil {
+		return nil, dto.OpenAIResponsesRequest{}, recoveryInfo, recoveryBuildErr
+	}
+
+	// A channel adaptor may add fields while converting the recovery request.
+	// Check the final serialized body, not only the pre-conversion request, so
+	// the rich stage cannot send another body that the upstream will reject.
+	if stage == service.CodexLocalCompaction413RecoveryStageRichVisible &&
+		info != nil && info.UpstreamRequestBodySize > int64(service.CodexLocalCompaction413RecoverySafeBodyMaxBytes) {
+		common.SysLog(fmt.Sprintf(
+			"codex local compaction 413 rich recovery body exceeded safe limit: channel_id=%d model=%s recovery_request_bytes=%d safe_body_bytes=%d; switching to bounded stage",
+			info.ChannelId,
+			info.OriginModelName,
+			info.UpstreamRequestBodySize,
+			service.CodexLocalCompaction413RecoverySafeBodyMaxBytes,
+		))
+		closeManagedResponsesRequestBody(recoveryBody)
+		return buildCodexLocalCompaction413RecoveryBody(
+			c,
+			info,
+			adaptor,
+			request,
+			service.CodexLocalCompaction413RecoveryStageBoundedVisible,
+		)
+	}
+	if info != nil {
+		recoveryInfo.RecoveredRequestBytes = int(info.UpstreamRequestBodySize)
+		if info.UpstreamRequestBodySize > int64(service.CodexLocalCompaction413RecoverySafeBodyMaxBytes) {
+			closeManagedResponsesRequestBody(recoveryBody)
+			return nil, dto.OpenAIResponsesRequest{}, recoveryInfo, fmt.Errorf(
+				"codex local compaction recovery body exceeds safe limit: request_bytes=%d safe_body_bytes=%d",
+				info.UpstreamRequestBodySize,
+				service.CodexLocalCompaction413RecoverySafeBodyMaxBytes,
+			)
+		}
+	}
+	return recoveryBody, convertedRequest, recoveryInfo, nil
+}
+
+func markCodexLocalCompaction413RecoveryStarted(c *gin.Context, info *relaycommon.RelayInfo, recoveryInfo service.CodexLocalCompaction413RecoveryInfo) {
+	common.SetContextKey(c, appconstant.ContextKeyResponsesCodexLocalCompaction413Recovery, true)
+	markCodexLocalCompactionBodyReductionMetrics(c, recoveryInfo)
+	common.SysLog(fmt.Sprintf(
+		"codex local compaction 413 recovery started: channel_id=%d model=%s stage=%s original_request_bytes=%d original_input_bytes=%d recovery_input_bytes=%d recovery_request_bytes=%d visible_parts=%d instructions_preserved=%t visible_input_truncated=%t embedded_media_omitted=%t tool_payload_omitted=%t",
+		info.ChannelId,
+		info.OriginModelName,
+		recoveryInfo.Stage,
+		recoveryInfo.OriginalRequestBytes,
+		recoveryInfo.OriginalInputBytes,
+		recoveryInfo.RecoveredInputBytes,
+		recoveryInfo.RecoveredRequestBytes,
+		recoveryInfo.VisiblePartCount,
+		recoveryInfo.InstructionsPreserved,
+		recoveryInfo.VisibleInputTruncated,
+		recoveryInfo.EmbeddedMediaOmitted,
+		recoveryInfo.ToolPayloadOmitted,
+	))
+}
+
+const (
+	codexLocalCompactionBodyReductionSourceUpstream413    = "upstream_413"
+	codexLocalCompactionBodyReductionSourcePreemptiveSize = "preemptive_size"
+)
+
+func shouldPreemptivelyReduceCodexLocalCompactionRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) bool {
+	if info == nil {
+		return false
+	}
+	return shouldPreemptivelyReduceCodexLocalCompactionForBodySize(c, info, request, info.UpstreamRequestBodySize)
+}
+
+func shouldPreemptivelyReduceCodexLocalCompactionInboundRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) bool {
+	return shouldPreemptivelyReduceCodexLocalCompactionForBodySize(
+		c,
+		info,
+		request,
+		common.GetContextKeyInt64(c, appconstant.ContextKeyRequestBodySize),
+	)
+}
+
+func shouldPreemptivelyReduceCodexLocalCompactionForBodySize(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest, bodySize int64) bool {
+	if c == nil || info == nil || info.ChannelMeta == nil ||
+		bodySize <= int64(service.CodexLocalCompaction413RecoverySafeBodyMaxBytes) ||
+		info.RelayMode != relayconstant.RelayModeResponses || !info.IsStream ||
+		!service.IsCodexLocalResponsesCompaction(c) || request.HasCompactionTrigger() ||
+		!request.IsStream(c) || c.Writer.Written() {
+		return false
+	}
+	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), request.Input)
+	if err != nil || hasOpaqueEncryptedContent {
+		return false
+	}
+	return relaycommon.IsOpenAICompatibleResponses(info) || info.ChannelType == appconstant.ChannelTypeCodex
+}
+
+func isUpstreamRequestTooLargeError(err *types.NewAPIError) bool {
+	return err != nil && err.StatusCode == http.StatusRequestEntityTooLarge &&
+		err.GetErrorCode() == types.ErrorCodeUpstreamRequestTooLarge
+}
+
+func markCodexLocalCompactionBodyReductionSource(c *gin.Context, source string) {
+	if source == "" {
+		return
+	}
+	common.SetContextKey(c, appconstant.ContextKeyResponsesCodexLocalCompactionBodyReductionSource, source)
+}
+
+func markCodexLocalCompactionPreemptiveBodyReductionStarted(c *gin.Context, info *relaycommon.RelayInfo, recoveryInfo service.CodexLocalCompaction413RecoveryInfo) {
+	markCodexLocalCompactionBodyReductionSource(c, codexLocalCompactionBodyReductionSourcePreemptiveSize)
+	markCodexLocalCompactionBodyReductionMetrics(c, recoveryInfo)
+	common.SysLog(fmt.Sprintf(
+		"codex local compaction preemptive body reduction started: channel_id=%d model=%s stage=%s original_request_bytes=%d original_input_bytes=%d recovery_input_bytes=%d recovery_request_bytes=%d visible_parts=%d instructions_preserved=%t visible_input_truncated=%t embedded_media_omitted=%t tool_payload_omitted=%t",
+		info.ChannelId,
+		info.OriginModelName,
+		recoveryInfo.Stage,
+		recoveryInfo.OriginalRequestBytes,
+		recoveryInfo.OriginalInputBytes,
+		recoveryInfo.RecoveredInputBytes,
+		recoveryInfo.RecoveredRequestBytes,
+		recoveryInfo.VisiblePartCount,
+		recoveryInfo.InstructionsPreserved,
+		recoveryInfo.VisibleInputTruncated,
+		recoveryInfo.EmbeddedMediaOmitted,
+		recoveryInfo.ToolPayloadOmitted,
+	))
+}
+
+func markCodexLocalCompactionBodyReductionMetrics(c *gin.Context, recoveryInfo service.CodexLocalCompaction413RecoveryInfo) {
+	if recoveryInfo.OriginalRequestBytes > 0 {
+		common.SetContextKey(c, appconstant.ContextKeyResponsesCodexLocalCompactionOriginalBodyBytes, recoveryInfo.OriginalRequestBytes)
+	}
+	if recoveryInfo.RecoveredRequestBytes > 0 {
+		common.SetContextKey(c, appconstant.ContextKeyResponsesCodexLocalCompactionReducedBodyBytes, int64(recoveryInfo.RecoveredRequestBytes))
+	}
+}
+
+func newCodexLocalCompactionPreemptiveBodyReductionError(originalRequestBytes int64, err error) *types.NewAPIError {
+	return types.NewErrorWithStatusCode(
+		fmt.Errorf(
+			"codex local compaction request body exceeds safe upstream limit (%d bytes) and could not be reduced: %w",
+			originalRequestBytes,
+			err,
+		),
+		types.ErrorCodeUpstreamRequestTooLarge,
+		http.StatusRequestEntityTooLarge,
+		types.ErrOptionWithSkipRetry(),
+	)
+}
+
+func markResponsesEncryptedContextRetryBlockedAfterStreamEvent(c *gin.Context, info *relaycommon.RelayInfo, newAPIError *types.NewAPIError) {
+	if !shouldRetryResponsesWithoutEncryptedReasoning(info, newAPIError) {
+		return
+	}
+	eventType := common.GetContextKeyString(c, appconstant.ContextKeyResponsesStreamFirstCommittedEvent)
+	if eventType == "" {
+		eventType = "unknown"
+	}
+	common.SetContextKey(c, appconstant.ContextKeyResponsesEncryptedContextRetryBlockedAfterEvent, eventType)
+	common.SysLog(fmt.Sprintf(
+		"responses encrypted context retry blocked after committed stream event: channel_id=%d model=%s event_type=%s original_error=%s",
+		info.ChannelId,
+		info.OriginModelName,
+		eventType,
+		newAPIError.MaskSensitiveError(),
+	))
+}
+
+func shouldRecoverCodexLocalCompactionAfter413(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest, err *types.NewAPIError) bool {
+	if c == nil || info == nil || info.ChannelMeta == nil || err == nil ||
+		info.RelayMode != relayconstant.RelayModeResponses || !info.IsStream ||
+		!service.IsCodexLocalResponsesCompaction(c) || request.HasCompactionTrigger() ||
+		!request.IsStream(c) || c.Writer.Written() {
+		return false
+	}
+	hasOpaqueEncryptedContent, parseErr := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), request.Input)
+	if parseErr != nil || hasOpaqueEncryptedContent {
+		return false
+	}
+	if !relaycommon.IsOpenAICompatibleResponses(info) && info.ChannelType != appconstant.ChannelTypeCodex {
+		return false
+	}
+	return isUpstreamRequestTooLargeError(err)
+}
+
+func finishCodexLocalCompaction413Recovery(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError, recoveryInfo service.CodexLocalCompaction413RecoveryInfo) *types.NewAPIError {
+	if err == nil {
+		return nil
+	}
+	common.SetContextKey(c, appconstant.ContextKeyResponsesCodexLocalCompaction413Recovery, true)
+	common.SetContextKey(c, appconstant.ContextKeyResponsesCodexLocalCompaction413RecoveryFailed, true)
+	common.SysLog(fmt.Sprintf(
+		"codex local compaction 413 recovery failed: channel_id=%d model=%s stage=%s original_request_bytes=%d original_input_bytes=%d recovery_input_bytes=%d recovery_request_bytes=%d status_code=%d error=%s",
+		info.ChannelId,
+		info.OriginModelName,
+		recoveryInfo.Stage,
+		recoveryInfo.OriginalRequestBytes,
+		recoveryInfo.OriginalInputBytes,
+		recoveryInfo.RecoveredInputBytes,
+		recoveryInfo.RecoveredRequestBytes,
+		err.StatusCode,
+		err.MaskSensitiveError(),
+	))
+	resetResponsesStatusCode(c, err)
+	return types.NewError(err, err.GetErrorCode(), types.ErrOptionWithSkipRetry())
+}
+
 type responsesCompatibilityRetryState struct {
-	attempts                           int
-	encryptedContentParameterAttempted bool
-	streamOptionsIncludeUsageAttempted bool
-	argumentsObjectAttempted           bool
-	argumentsStringAttempted           bool
+	attempts                               int
+	encryptedContentParameterAttempted     bool
+	streamOptionsIncludeUsageAttempted     bool
+	argumentsObjectAttempted               bool
+	argumentsStringAttempted               bool
+	codexLocalCompaction413Attempted       bool
+	codexLocalCompaction413Info            service.CodexLocalCompaction413RecoveryInfo
+	codexLocalCompaction413Stage           service.CodexLocalCompaction413RecoveryStage
+	codexLocalCompaction413OriginalRequest dto.OpenAIResponsesRequest
+	codexLocalCompaction413Preemptive      bool
+}
+
+func startCodexLocalCompactionPreemptiveBodyReduction(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, originalRequest dto.OpenAIResponsesRequest, originalRequestBytes int64) (io.Reader, dto.OpenAIResponsesRequest, responsesCompatibilityRetryState, *types.NewAPIError) {
+	recoveryBody, recoveredRequest, recoveryInfo, recoveryErr := buildCodexLocalCompaction413RecoveryBody(
+		c,
+		info,
+		adaptor,
+		originalRequest,
+		service.CodexLocalCompaction413RecoveryStageRichVisible,
+	)
+	if recoveryErr != nil {
+		common.SysLog(fmt.Sprintf(
+			"codex local compaction preemptive body reduction unavailable: channel_id=%d model=%s original_request_bytes=%d safe_body_bytes=%d reason=%s",
+			info.ChannelId,
+			info.OriginModelName,
+			originalRequestBytes,
+			service.CodexLocalCompaction413RecoverySafeBodyMaxBytes,
+			recoveryErr.Error(),
+		))
+		return nil, dto.OpenAIResponsesRequest{}, responsesCompatibilityRetryState{}, newCodexLocalCompactionPreemptiveBodyReductionError(originalRequestBytes, recoveryErr)
+	}
+	recoveryInfo.OriginalRequestBytes = originalRequestBytes
+	markCodexLocalCompactionPreemptiveBodyReductionStarted(c, info, recoveryInfo)
+	return recoveryBody, recoveredRequest, responsesCompatibilityRetryState{
+		codexLocalCompaction413Attempted:       true,
+		codexLocalCompaction413Info:            recoveryInfo,
+		codexLocalCompaction413Stage:           recoveryInfo.Stage,
+		codexLocalCompaction413OriginalRequest: originalRequest,
+		codexLocalCompaction413Preemptive:      true,
+	}, nil
 }
 
 func buildOpenAIResponsesCompatibilityRetry(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, convertedRequest dto.OpenAIResponsesRequest, newAPIError *types.NewAPIError, retryState *responsesCompatibilityRetryState) (io.Reader, dto.OpenAIResponsesRequest, bool, *types.NewAPIError) {
@@ -620,6 +1057,9 @@ type buildResponsesRequestBodyOptions struct {
 
 func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo, adaptor relaychannel.Adaptor, request *dto.OpenAIResponsesRequest, passThroughGlobal bool, options ...buildResponsesRequestBodyOptions) (io.Reader, dto.OpenAIResponsesRequest, *types.NewAPIError) {
 	var requestBody io.Reader
+	info.UpstreamRequestBodySize = 0
+	info.UpstreamRequestGetBody = nil
+	info.CodexFoldedBaseRequestBody = nil
 	convertedResponsesRequest := *request
 	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), request.Input)
 	if err != nil {
@@ -627,24 +1067,6 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 	}
 	if hasOpaqueEncryptedContent {
 		return buildOpaqueOpenAIResponsesRequestBody(c, info, request)
-	}
-	normalizedInput, normalizeResult, err := relaycommon.NormalizeResponsesInputItemIDs(request.Input)
-	if err != nil {
-		return nil, convertedResponsesRequest, newResponsesConvertRequestError(err)
-	}
-	inputItemIDsNormalized := normalizeResult.RemovedCount > 0
-	if inputItemIDsNormalized {
-		normalizedRequest := *request
-		normalizedRequest.Input = normalizedInput
-		request = &normalizedRequest
-		convertedResponsesRequest = normalizedRequest
-		common.SetContextKey(c, appconstant.ContextKeyResponsesInputItemIDsRemoved, normalizeResult.RemovedCount)
-		common.SysLog(fmt.Sprintf(
-			"responses input item ids normalized before upstream forwarding: channel_id=%d model=%s removed_count=%d",
-			info.ChannelId,
-			info.OriginModelName,
-			normalizeResult.RemovedCount,
-		))
 	}
 	streamOptionsIncludeUsageCapabilityDisabled := relaycommon.IsOpenAICompatibleResponses(info) &&
 		info.ChannelOtherSettings.ExplicitlyDisablesResponsesStreamOptionsIncludeUsage()
@@ -678,6 +1100,25 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 			))
 		}
 	}
+	normalizedInput, normalizeResult, normalizeErr := relaycommon.NormalizeResponsesInputItemIDs(request.Input)
+	if normalizeErr != nil {
+		return nil, convertedResponsesRequest, newResponsesConvertRequestError(normalizeErr)
+	}
+	inputItemIDsNormalized := normalizeResult.RemovedCount > 0
+	if inputItemIDsNormalized {
+		normalizedRequest := *request
+		normalizedRequest.Input = normalizedInput
+		request = &normalizedRequest
+		convertedResponsesRequest = normalizedRequest
+		common.SetContextKey(c, appconstant.ContextKeyResponsesInputItemIDNormalizationRemovedCount, normalizeResult.RemovedCount)
+		common.SysLog(fmt.Sprintf(
+			"responses input item ids normalized before upstream forwarding: channel_id=%d model=%s removed_count=%d",
+			info.ChannelId,
+			info.OriginModelName,
+			normalizeResult.RemovedCount,
+		))
+	}
+	reasoningContextRequiresConversion := responsesReasoningContextRequiresConversion(c, info, request)
 	syntheticCompactReference := false
 	nativeOpaqueReference := service.IsNativeOpaqueCompactReference(request.PreviousResponseID)
 	if relaycommon.IsOpenAICompatibleResponses(info) {
@@ -692,13 +1133,12 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 		request = &requestWithLogicalEffort
 		convertedResponsesRequest = requestWithLogicalEffort
 	}
-	hadReasoningContext := request.Reasoning != nil && len(bytes.TrimSpace(request.Reasoning.Context)) > 0
 	reasoningEffortSuffix, _ := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
 	reasoningContextStripped := false
-	if hadReasoningContext {
+	if request.Reasoning != nil && len(bytes.TrimSpace(request.Reasoning.Context)) > 0 {
 		capabilityRequest := relaycommon.ApplyResponsesReasoningContextCapability(c, info, *request)
 		request = &capabilityRequest
 		convertedResponsesRequest = capabilityRequest
@@ -711,6 +1151,7 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 		!relaycommon.ShouldConvertResponsesRequest(info) &&
 		!responsesLiteRequest &&
 		!inputItemIDsNormalized &&
+		!reasoningContextRequiresConversion &&
 		!reasoningContextRequiresConvertedBody &&
 		bodyPreservingParamOverride &&
 		!streamOptionsIncludeUsageCapabilityStripped &&
@@ -743,14 +1184,16 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 					return nil, convertedResponsesRequest, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 				}
 				requestBody = bytes.NewReader(body)
+				info.UpstreamRequestBodySize = int64(len(body))
+				captureCodexFoldedBaseRequestBody(info, body)
 			}
 		}
 		if requestBody == nil {
-			passThroughBody, passThroughErr := buildOpenAIResponsesPassThroughBody(c, *request)
+			var passThroughErr *types.NewAPIError
+			requestBody, passThroughErr = buildOpenAIResponsesPassThroughBody(c, info, *request)
 			if passThroughErr != nil {
 				return nil, convertedResponsesRequest, passThroughErr
 			}
-			requestBody = passThroughBody
 		}
 	} else {
 		if nativeOpaqueReference {
@@ -787,7 +1230,6 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 			return nil, convertedResponsesRequest, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 
-		// apply param override
 		if len(info.ParamOverride) > 0 {
 			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
 			if err != nil {
@@ -808,14 +1250,21 @@ func buildOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo
 		if common.DebugEnabled {
 			println("requestBody: ", string(jsonData))
 		}
-		requestBody = bytes.NewBuffer(jsonData)
+		body, size, getBody, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+		if err != nil {
+			return nil, convertedResponsesRequest, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		requestBody = &managedResponsesRequestBody{Reader: body, closer: closer}
+		info.UpstreamRequestBodySize = size
+		info.UpstreamRequestGetBody = getBody
+		captureCodexFoldedBaseRequestBody(info, jsonData)
 	}
 	return requestBody, convertedResponsesRequest, nil
 }
 
-// buildOpenAIResponsesPassThroughBody preserves the client body while ensuring
-// the mapped upstream model is the only rewritten top-level JSON value.
-func buildOpenAIResponsesPassThroughBody(c *gin.Context, request dto.OpenAIResponsesRequest) (io.Reader, *types.NewAPIError) {
+// buildOpenAIResponsesPassThroughBody preserves the client body while changing
+// only the top-level model token selected by channel mapping.
+func buildOpenAIResponsesPassThroughBody(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (io.Reader, *types.NewAPIError) {
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
@@ -829,13 +1278,103 @@ func buildOpenAIResponsesPassThroughBody(c *gin.Context, request dto.OpenAIRespo
 		return nil, newResponsesConvertRequestError(errors.New("responses pass-through model is required"))
 	}
 	if modelLocation.Value == upstreamModel {
+		if info != nil {
+			info.UpstreamRequestBodySize = storage.Size()
+			info.UpstreamRequestGetBody = func() (io.ReadCloser, error) {
+				return common.NewBodyStorageReader(storage)
+			}
+			if err := captureCodexFoldedBaseRequestBodyFromStorage(info, storage, info.UpstreamRequestGetBody); err != nil {
+				return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+			}
+		}
 		return common.ReaderOnly(storage), nil
 	}
 	requestBody, err := common.NewTopLevelJSONStringReplacementReader(storage, storage.Size(), modelLocation, upstreamModel)
 	if err != nil {
 		return nil, newResponsesConvertRequestError(fmt.Errorf("replace model for Responses pass-through: %w", err))
 	}
+	if info != nil {
+		info.UpstreamRequestBodySize = requestBody.ContentLength()
+		info.UpstreamRequestGetBody = func() (io.ReadCloser, error) {
+			reader, err := common.NewTopLevelJSONStringReplacementReader(storage, storage.Size(), modelLocation, upstreamModel)
+			if err != nil {
+				return nil, err
+			}
+			return io.NopCloser(reader), nil
+		}
+		if err := captureCodexFoldedBaseRequestBodyFromStorage(info, storage, info.UpstreamRequestGetBody); err != nil {
+			return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
+	}
 	return requestBody, nil
+}
+
+func captureCodexFoldedBaseRequestBody(info *relaycommon.RelayInfo, body []byte) {
+	if !codexFoldedBaseRequestBodyCaptureEnabled(info) || len(body) == 0 {
+		return
+	}
+	info.CodexFoldedBaseRequestBody = append(info.CodexFoldedBaseRequestBody[:0], body...)
+}
+
+func codexFoldedBaseRequestBodyCaptureEnabled(info *relaycommon.RelayInfo) bool {
+	return info != nil && info.IsStream &&
+		info.RelayMode == relayconstant.RelayModeResponses &&
+		info.ChannelType == appconstant.ChannelTypeCodex &&
+		info.ChannelOtherSettings.CodexFoldedSSEEnabled
+}
+
+func captureCodexFoldedBaseRequestBodyFromReader(info *relaycommon.RelayInfo, getBody func() (io.ReadCloser, error)) error {
+	if !codexFoldedBaseRequestBodyCaptureEnabled(info) {
+		return nil
+	}
+	if getBody == nil {
+		return errors.New("Codex folded SSE request body replay is unavailable")
+	}
+	reader, err := getBody()
+	if err != nil {
+		return err
+	}
+	if reader == nil {
+		return errors.New("Codex folded SSE request body replay returned a nil reader")
+	}
+	defer reader.Close()
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return err
+	}
+	captureCodexFoldedBaseRequestBody(info, body)
+	return nil
+}
+
+func captureCodexFoldedBaseRequestBodyFromStorage(info *relaycommon.RelayInfo, storage common.BodyStorage, getBody func() (io.ReadCloser, error)) error {
+	if !codexFoldedBaseRequestBodyCaptureEnabled(info) {
+		return nil
+	}
+	if storage == nil {
+		return errors.New("Codex folded SSE request body storage is unavailable")
+	}
+	if err := captureCodexFoldedBaseRequestBodyFromReader(info, getBody); err != nil {
+		return err
+	}
+	if _, err := storage.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("reset Codex folded SSE request body storage: %w", err)
+	}
+	return nil
+}
+
+func responsesReasoningContextRequiresConversion(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) bool {
+	if request == nil || request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0 {
+		return false
+	}
+
+	decision := relaycommon.ResolveResponsesReasoningContextCapabilityDecision(info, request.Model)
+	if c != nil {
+		common.SetContextKey(c, appconstant.ContextKeyResponsesReasoningContextAction, decision.Action)
+	}
+	if !relaycommon.IsOpenAICompatibleResponses(info) {
+		return true
+	}
+	return decision.Capability == dto.ResponsesReasoningContextCapabilityUnsupported
 }
 
 func buildOpaqueOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) (io.Reader, dto.OpenAIResponsesRequest, *types.NewAPIError) {
@@ -845,36 +1384,116 @@ func buildOpaqueOpenAIResponsesRequestBody(c *gin.Context, info *relaycommon.Rel
 		capability = info.ChannelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(info.ChannelType)
 	}
 	relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
+	if info != nil && len(info.ParamOverride) > 0 {
+		if err := relaycommon.ApplyHeaderOnlyParamOverrideWithRelayInfo(info); err != nil {
+			return nil, convertedRequest, newAPIErrorFromParamOverride(err)
+		}
+	}
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
 		return nil, convertedRequest, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+	}
+	normalizedInput, normalizeResult, normalizeErr := relaycommon.NormalizeResponsesInputItemIDs(request.Input)
+	if normalizeErr != nil {
+		return nil, convertedRequest, newResponsesConvertRequestError(normalizeErr)
+	}
+	streamOptionsIncludeUsageCapabilityDisabled := relaycommon.IsOpenAICompatibleResponses(info) &&
+		info.ChannelOtherSettings.ExplicitlyDisablesResponsesStreamOptionsIncludeUsage()
+	reasoningContextRequiresConversion := responsesReasoningContextRequiresConversion(c, info, request)
+	if normalizeResult.RemovedCount == 0 &&
+		!streamOptionsIncludeUsageCapabilityDisabled &&
+		!reasoningContextRequiresConversion {
+		requestBody, bodyErr := buildOpaqueResponsesStorageBody(c, info, request.Model, nil)
+		if bodyErr != nil {
+			return nil, convertedRequest, bodyErr
+		}
+		return requestBody, convertedRequest, nil
+	}
+	rawBody, err := storage.Bytes()
+	if err != nil {
+		return nil, convertedRequest, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+	}
+	if normalizeResult.RemovedCount > 0 {
+		rawBody, err = sjson.SetRawBytes(rawBody, "input", normalizedInput)
+		if err != nil {
+			return nil, convertedRequest, newResponsesConvertRequestError(fmt.Errorf("normalize responses input item ids in opaque replay body: %w", err))
+		}
+		convertedRequest.Input = normalizedInput
+		common.SetContextKey(c, appconstant.ContextKeyResponsesInputItemIDNormalizationRemovedCount, normalizeResult.RemovedCount)
+		common.SysLog(fmt.Sprintf(
+			"responses invalid input item ids removed on opaque replay: channel_id=%d model=%s count=%d",
+			info.ChannelId,
+			info.OriginModelName,
+			normalizeResult.RemovedCount,
+		))
+	}
+	if streamOptionsIncludeUsageCapabilityDisabled {
+		var stripped bool
+		rawBody, stripped, err = stripResponsesStreamOptionsIncludeUsageFromJSON(rawBody)
+		if err != nil {
+			return nil, convertedRequest, newResponsesConvertRequestError(fmt.Errorf("strip stream_options.include_usage from opaque replay: %w", err))
+		}
+		if stripped {
+			convertedRequest, _ = stripResponsesStreamOptionsIncludeUsage(convertedRequest)
+			markResponsesStreamOptionsIncludeUsageCapabilityStripped(c, info)
+		}
+	}
+	rawBody, convertedRequest, apiErr := applyOpaqueResponsesReasoningContextCapability(c, info, convertedRequest, rawBody)
+	if apiErr != nil {
+		return nil, convertedRequest, apiErr
 	}
 	upstreamModel := strings.TrimSpace(request.Model)
 	if upstreamModel == "" {
 		return nil, convertedRequest, newResponsesConvertRequestError(errors.New("responses opaque encrypted replay model is required"))
 	}
-	if info != nil && len(info.ParamOverride) > 0 {
-		err := relaycommon.ApplyHeaderOnlyParamOverrideWithRelayInfo(info)
+	rawModel := gjson.GetBytes(rawBody, "model")
+	if !rawModel.Exists() || rawModel.Type != gjson.String || rawModel.String() != upstreamModel {
+		rawBody, err = sjson.SetBytes(rawBody, "model", upstreamModel)
 		if err != nil {
-			return nil, convertedRequest, newAPIErrorFromParamOverride(err)
+			return nil, convertedRequest, newResponsesConvertRequestError(fmt.Errorf("set model for responses opaque encrypted replay: %w", err))
 		}
 	}
-	modelLocation, err := common.LocateTopLevelJSONString(storage, "model")
+	body, size, getBody, closer, err := relaycommon.NewOutboundJSONBody(rawBody)
 	if err != nil {
-		return nil, convertedRequest, newResponsesConvertRequestError(fmt.Errorf("locate model for responses opaque encrypted replay: %w", err))
+		return nil, convertedRequest, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
-	if modelLocation.Value == upstreamModel {
-		requestBody, err := common.NewSizedReader(storage, storage.Size())
-		if err != nil {
-			return nil, convertedRequest, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
-		}
-		return requestBody, convertedRequest, nil
+	info.UpstreamRequestBodySize = size
+	info.UpstreamRequestGetBody = getBody
+	captureCodexFoldedBaseRequestBody(info, rawBody)
+	return &managedResponsesRequestBody{Reader: body, closer: closer}, convertedRequest, nil
+}
+
+func applyOpaqueResponsesReasoningContextCapability(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest, rawBody []byte) ([]byte, dto.OpenAIResponsesRequest, *types.NewAPIError) {
+	if request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0 {
+		return rawBody, request, nil
 	}
-	requestBody, err := common.NewTopLevelJSONStringReplacementReader(storage, storage.Size(), modelLocation, upstreamModel)
+
+	decision := relaycommon.ResolveResponsesReasoningContextCapabilityDecision(info, request.Model)
+	if c != nil {
+		common.SetContextKey(c, appconstant.ContextKeyResponsesReasoningContextAction, decision.Action)
+	}
+	if decision.Capability != dto.ResponsesReasoningContextCapabilityUnsupported {
+		return rawBody, request, nil
+	}
+
+	strippedRequest, stripped := relaycommon.StripResponsesReasoningContext(request)
+	if !stripped {
+		return rawBody, request, nil
+	}
+	updatedBody, err := sjson.DeleteBytes(rawBody, "reasoning.context")
 	if err != nil {
-		return nil, convertedRequest, newResponsesConvertRequestError(fmt.Errorf("replace model for responses opaque encrypted replay: %w", err))
+		return rawBody, request, newResponsesConvertRequestError(fmt.Errorf("strip reasoning.context from opaque responses body: %w", err))
 	}
-	return requestBody, convertedRequest, nil
+	if bytes.Equal(rawBody, updatedBody) {
+		return rawBody, request, newResponsesConvertRequestError(errors.New("opaque responses body does not contain reasoning.context"))
+	}
+	common.SysLog(fmt.Sprintf(
+		"responses reasoning context stripped from opaque replay by channel capability: channel_id=%d model=%s profile=%s",
+		decision.ChannelID,
+		decision.Model,
+		decision.Profile,
+	))
+	return updatedBody, strippedRequest, nil
 }
 
 func buildOpaqueOpenAIResponsesReplayBody(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpaqueOpenAIResponsesRequest) (io.Reader, *types.NewAPIError) {
@@ -907,21 +1526,63 @@ func buildOpaqueOpenAIResponsesReplayBody(c *gin.Context, info *relaycommon.Rela
 			return nil, newAPIErrorFromParamOverride(err)
 		}
 	}
-	if metadata.ModelLocation.Value == upstreamModel {
+	return buildOpaqueResponsesStorageBody(c, info, upstreamModel, &metadata)
+}
+
+func buildOpaqueResponsesStorageBody(c *gin.Context, info *relaycommon.RelayInfo, upstreamModel string, metadata *common.ResponsesRequestMetadata) (io.Reader, *types.NewAPIError) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+	}
+	if metadata != nil && metadata.BodySize != storage.Size() {
+		return nil, newResponsesConvertRequestError(fmt.Errorf(
+			"opaque Responses replay body size mismatch: metadata=%d storage=%d",
+			metadata.BodySize,
+			storage.Size(),
+		))
+	}
+	location := common.TopLevelJSONStringLocation{}
+	if metadata != nil {
+		location = metadata.ModelLocation
+	}
+	if location.End <= location.Start {
+		location, err = common.LocateTopLevelJSONString(storage, "model")
+		if err != nil {
+			return nil, newResponsesConvertRequestError(fmt.Errorf("locate model for opaque Responses replay: %w", err))
+		}
+	}
+	if location.Value == strings.TrimSpace(upstreamModel) {
 		requestBody, err := common.NewSizedReader(storage, storage.Size())
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
+		if info != nil {
+			info.UpstreamRequestBodySize = storage.Size()
+			info.UpstreamRequestGetBody = func() (io.ReadCloser, error) {
+				return common.NewBodyStorageReader(storage)
+			}
+			if err := captureCodexFoldedBaseRequestBodyFromStorage(info, storage, info.UpstreamRequestGetBody); err != nil {
+				return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+			}
+		}
 		return requestBody, nil
 	}
-	requestBody, err := common.NewTopLevelJSONStringReplacementReader(
-		storage,
-		storage.Size(),
-		metadata.ModelLocation,
-		upstreamModel,
-	)
+	requestBody, err := common.NewTopLevelJSONStringReplacementReader(storage, storage.Size(), location, strings.TrimSpace(upstreamModel))
 	if err != nil {
 		return nil, newResponsesConvertRequestError(fmt.Errorf("replace model for opaque Responses replay: %w", err))
+	}
+	if info != nil {
+		info.UpstreamRequestBodySize = requestBody.ContentLength()
+		info.UpstreamRequestGetBody = func() (io.ReadCloser, error) {
+			reader, err := common.NewTopLevelJSONStringReplacementReader(storage, storage.Size(), location, strings.TrimSpace(upstreamModel))
+			if err != nil {
+				return nil, err
+			}
+			return io.NopCloser(reader), nil
+		}
+		if err := captureCodexFoldedBaseRequestBodyFromStorage(info, storage, info.UpstreamRequestGetBody); err != nil {
+			return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
 	}
 	return requestBody, nil
 }
@@ -940,7 +1601,7 @@ func doOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adapt
 		relaycommon.MarkResponsesEncryptedReasoningReplayForwarded(c)
 		httpResp = resp.(*http.Response)
 
-		if httpResp.StatusCode != http.StatusOK {
+		if httpResp.StatusCode != http.StatusOK && !shouldParseCodexFoldedSSEStatus(info, httpResp) {
 			newAPIError := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			if !skipStatusCodeMapping {
 				resetResponsesStatusCode(c, newAPIError)
@@ -959,6 +1620,14 @@ func doOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adapt
 
 	usageDto := usage.(*dto.Usage)
 	return usageDto, nil
+}
+
+func shouldParseCodexFoldedSSEStatus(info *relaycommon.RelayInfo, resp *http.Response) bool {
+	return info != nil && info.IsStream &&
+		info.RelayMode == relayconstant.RelayModeResponses &&
+		info.ChannelType == appconstant.ChannelTypeCodex &&
+		info.ChannelOtherSettings.CodexFoldedSSEEnabled &&
+		resp != nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type"))), "text/event-stream")
 }
 
 func resetResponsesStatusCode(c *gin.Context, newAPIError *types.NewAPIError) {
@@ -1020,7 +1689,14 @@ func newResponsesConvertRequestError(err error) *types.NewAPIError {
 	if errors.Is(err, service.ErrResponsesCompactionContentRequired) {
 		options = append(options, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 	}
+	if errors.Is(err, service.ErrProtocolConversionUnsupported) {
+		options = append(options, types.ErrOptionWithStatusCode(http.StatusBadRequest))
+	}
 	return types.NewError(err, types.ErrorCodeConvertRequestFailed, options...)
+}
+
+func markResponsesEncryptedReasoningReplayDecision(c *gin.Context, capability dto.ResponsesEncryptedReasoningReplayCapability) {
+	relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
 }
 
 func applyResponsesCompactSummaryModelOverride(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest, hasOpaqueEncryptedContent bool) {

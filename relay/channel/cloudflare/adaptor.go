@@ -26,8 +26,7 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(*gin.Context, *relaycommon.RelayInfo, *dto.ClaudeRequest) (any, error) {
-	//TODO implement me
-	panic("implement me")
+	return nil, errors.New("Claude Messages conversion is not supported by Cloudflare channel")
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
@@ -58,7 +57,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	}
 	switch info.RelayMode {
 	case constant.RelayModeCompletions:
-		return convertCf2CompletionsRequest(*request), nil
+		return convertCf2CompletionsRequest(*request)
 	default:
 		return request, nil
 	}

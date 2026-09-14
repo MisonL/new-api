@@ -3,6 +3,7 @@ package common
 import (
 	"bytes"
 	"errors"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -105,6 +106,10 @@ func (s *spyBodyStorage) Size() int64 {
 
 func (s *spyBodyStorage) IsDisk() bool {
 	return true
+}
+
+func (s *spyBodyStorage) NewReader() (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(s.data)), nil
 }
 
 func TestBuildPayloadAuditRecordFromStorageReadsPreviewOnly(t *testing.T) {

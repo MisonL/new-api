@@ -98,6 +98,26 @@ func TestBuildChannelRuntimeHeaderOverrideUsesTagPolicyWhenPreferred(t *testing.
 	require.Equal(t, "tag-ua", headers["User-Agent"])
 }
 
+func TestNormalizeRuntimeHeaderOverrideMapStrictRejectsCaseInsensitiveConflict(t *testing.T) {
+	_, err := normalizeRuntimeHeaderOverrideMapStrict(map[string]any{
+		"User-Agent": "one",
+		"user-agent": "two",
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicate names")
+}
+
+func TestNormalizeRuntimeHeaderOverrideMapUsesStableFirstSpellingForLegacyMap(t *testing.T) {
+	got := normalizeRuntimeHeaderOverrideMap(map[string]any{
+		"user-agent": "lower",
+		"User-Agent": "canonical",
+	})
+
+	require.Equal(t, "canonical", got["User-Agent"])
+	require.Len(t, got, 1)
+}
+
 func TestBuildChannelRuntimeHeaderOverrideRespectsSystemDefaultMode(t *testing.T) {
 	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
 	common.OptionMap["RequestHeaderPolicyDefaultMode"] = "prefer_tag"
@@ -442,6 +462,35 @@ func TestBuildChannelRuntimeRequestHeadersRespectsGlobalAuxiliarySwitch(t *testi
 	require.Empty(t, headers.Get("User-Agent"))
 }
 
+func TestBuildChannelRuntimeRequestHeadersForProfileRejectsGlobalPolicyDisable(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+
+	channel := &model.Channel{Id: 151}
+	strategy := &dto.HeaderProfileStrategy{
+		Enabled:            true,
+		Mode:               dto.HeaderProfileModeFixed,
+		SelectedProfileIDs: []string{"codex-cli"},
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		HeaderProfileStrategy: strategy,
+	})
+	profileHeaders, _, err := ResolveChannelRuntimeHeaderProfileHeaders(channel.Id, strategy)
+	require.NoError(t, err)
+	fingerprint := model.ComputeTaskRouteHeaderProfileFingerprint(profileHeaders)
+	require.NotEmpty(t, fingerprint)
+
+	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "false"
+	_, err = BuildChannelRuntimeRequestHeadersForProfileWithFingerprint(
+		channel,
+		"sk-test",
+		http.Header{},
+		"codex-cli",
+		fingerprint,
+	)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "header policy is disabled")
+}
+
 func TestBuildChannelRuntimeRequestHeadersRespectsChannelAuxiliarySwitch(t *testing.T) {
 	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
 	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "true"
@@ -457,6 +506,49 @@ func TestBuildChannelRuntimeRequestHeadersRespectsChannelAuxiliarySwitch(t *test
 	headers, err := BuildChannelRuntimeRequestHeaders(channel, "sk-test", http.Header{})
 	require.NoError(t, err)
 	require.Empty(t, headers.Get("X-Debug"))
+}
+
+func TestBuildChannelRuntimeRequestHeadersForProfileRejectsChannelPolicyDisable(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+
+	channel := &model.Channel{Id: 161}
+	strategy := &dto.HeaderProfileStrategy{
+		Enabled:            true,
+		Mode:               dto.HeaderProfileModeFixed,
+		SelectedProfileIDs: []string{"codex-cli"},
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AuxiliaryRequestHeaderPolicyEnabled: common.GetPointer(false),
+		HeaderProfileStrategy:               strategy,
+	})
+	profileHeaders, _, err := ResolveChannelRuntimeHeaderProfileHeaders(channel.Id, strategy)
+	require.NoError(t, err)
+	fingerprint := model.ComputeTaskRouteHeaderProfileFingerprint(profileHeaders)
+	require.NotEmpty(t, fingerprint)
+
+	_, err = BuildChannelRuntimeRequestHeadersForProfileWithFingerprint(
+		channel,
+		"sk-test",
+		http.Header{},
+		"codex-cli",
+		fingerprint,
+	)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "header policy is disabled")
+}
+
+func TestBuildChannelRuntimeRequestHeadersForProfileRejectsMissingChannel(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+
+	_, err := BuildChannelRuntimeRequestHeadersForProfileWithFingerprint(
+		nil,
+		"sk-test",
+		http.Header{},
+		"codex-cli",
+		"fingerprint",
+	)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "without a channel")
 }
 
 func TestBuildChannelRuntimeRequestHeadersAppliesChannelAuxiliaryPolicy(t *testing.T) {
@@ -484,6 +576,7 @@ func TestBuildChannelRuntimeRequestHeadersAppliesChannelAuxiliaryPolicy(t *testi
 	require.Equal(t, "enabled", headers.Get("X-Debug"))
 	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers.Get("User-Agent"))
 	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers.Get("Originator"))
+	require.Empty(t, headers.Get("X-Codex-Compatibility"))
 }
 
 func TestBuildChannelRuntimeRequestHeadersTreatsEmptyHeaderProfileModeAsFixed(t *testing.T) {
@@ -503,6 +596,56 @@ func TestBuildChannelRuntimeRequestHeadersTreatsEmptyHeaderProfileModeAsFixed(t 
 	require.NoError(t, err)
 	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers.Get("User-Agent"))
 	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers.Get("Originator"))
+}
+
+func TestBuildChannelRuntimeRequestHeadersForProfileRejectsUnselectedProfile(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+
+	channel := &model.Channel{Id: 181}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AuxiliaryRequestHeaderPolicyEnabled: common.GetPointer(true),
+		HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+			Enabled:            true,
+			Mode:               dto.HeaderProfileModeFixed,
+			SelectedProfileIDs: []string{"codex-cli"},
+		},
+	})
+
+	_, err := BuildChannelRuntimeRequestHeadersForProfile(channel, "sk-test", http.Header{}, "claude-code")
+	require.Error(t, err)
+	require.ErrorContains(t, err, "no longer selected")
+}
+
+func TestBuildChannelRuntimeRequestHeadersForProfileAcceptsCapturedVersionForBaseSelection(t *testing.T) {
+	setupChannelHeaderRuntimeTestDB(t, &model.TagRequestHeaderPolicy{}, &model.RequestHeaderStrategyState{})
+	common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"] = "true"
+
+	channel := &model.Channel{Id: 182}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AuxiliaryRequestHeaderPolicyEnabled: common.GetPointer(true),
+		HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+			Enabled:            true,
+			Mode:               dto.HeaderProfileModeFixed,
+			SelectedProfileIDs: []string{"codex-cli"},
+		},
+	})
+
+	headers, err := BuildChannelRuntimeRequestHeadersForProfile(channel, "sk-test", http.Header{}, "codex-cli@latest")
+	require.NoError(t, err)
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers.Get("User-Agent"))
+}
+
+func TestRuntimeHeaderProfileSelectionMatchesBaseAndLatestBidirectionally(t *testing.T) {
+	require.True(t, runtimeHeaderProfileSelectionMatches("codex-cli", "codex-cli"))
+	require.True(t, runtimeHeaderProfileSelectionMatches("codex-cli", "codex-cli@latest"))
+	require.True(t, runtimeHeaderProfileSelectionMatches("codex-cli@latest", "codex-cli"))
+	require.True(t, runtimeHeaderProfileSelectionMatches("codex-cli@latest", "codex-cli@latest"))
+	require.False(t, runtimeHeaderProfileSelectionMatches("codex-cli@2.0.0", "codex-cli"))
+	require.False(t, runtimeHeaderProfileSelectionMatches("codex-cli@2.0.0", "codex-cli@latest"))
+	require.True(t, runtimeHeaderProfileSelectionMatches("codex-cli@2.0.0", "codex-cli@2.0.0"))
+	require.False(t, runtimeHeaderProfileSelectionMatches("codex-cli@2.0.0", "codex-cli@2.1.0"))
+	require.False(t, runtimeHeaderProfileSelectionMatches("codex-cli", "codex-cli@2.1.0"))
+	require.False(t, runtimeHeaderProfileSelectionMatches("codex-cli", "claude-code@latest"))
 }
 
 func TestBuildChannelRuntimeRequestHeadersAdvancesHeaderProfileRoundRobin(t *testing.T) {

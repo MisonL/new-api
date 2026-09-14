@@ -59,11 +59,7 @@ func IsResponsesOpaqueEncryptedReplay(c *gin.Context) bool {
 }
 
 func MarkResponsesEncryptedReasoningReplayAttempt(c *gin.Context) {
-	markResponsesEncryptedReasoningReplayForwardingState(
-		c,
-		ResponsesEncryptedReasoningReplayActionAttemptedNative,
-		ResponsesEncryptedReasoningReplayActionAttemptedNativeUnverified,
-	)
+	markResponsesEncryptedReasoningReplayForwardingState(c, ResponsesEncryptedReasoningReplayActionAttemptedNative, ResponsesEncryptedReasoningReplayActionAttemptedNativeUnverified)
 }
 
 func MarkResponsesEncryptedReasoningReplayRejected(c *gin.Context) {
@@ -73,23 +69,15 @@ func MarkResponsesEncryptedReasoningReplayRejected(c *gin.Context) {
 	basecommon.SetContextKey(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction, ResponsesEncryptedReasoningReplayActionRejectedUnsupported)
 }
 
-// MarkResponsesEncryptedReasoningReplayForwarded records that the upstream
-// returned an HTTP response. It does not mean the response was successful.
 func MarkResponsesEncryptedReasoningReplayForwarded(c *gin.Context) {
-	markResponsesEncryptedReasoningReplayForwardingState(
-		c,
-		ResponsesEncryptedReasoningReplayActionForwardedNative,
-		ResponsesEncryptedReasoningReplayActionForwardedNativeUnverified,
-	)
+	markResponsesEncryptedReasoningReplayForwardingState(c, ResponsesEncryptedReasoningReplayActionForwardedNative, ResponsesEncryptedReasoningReplayActionForwardedNativeUnverified)
 }
 
 func markResponsesEncryptedReasoningReplayForwardingState(c *gin.Context, supportedAction string, unknownAction string) {
 	if !IsResponsesOpaqueEncryptedReplay(c) {
 		return
 	}
-	capability := dto.ResponsesEncryptedReasoningReplayCapability(
-		basecommon.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayCapability),
-	)
+	capability := dto.ResponsesEncryptedReasoningReplayCapability(basecommon.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayCapability))
 	switch capability {
 	case dto.ResponsesEncryptedReasoningReplayCapabilitySupported:
 		basecommon.SetContextKey(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction, supportedAction)
@@ -102,11 +90,7 @@ func MarkResponsesEncryptedReasoningReplayRetrySuppressed(c *gin.Context) {
 	if !IsResponsesOpaqueEncryptedReplay(c) {
 		return
 	}
-	basecommon.SetContextKey(
-		c,
-		constant.ContextKeyResponsesEncryptedReasoningReplayRetryAction,
-		ResponsesEncryptedReasoningReplayRetrySuppressedCrossChannel,
-	)
+	basecommon.SetContextKey(c, constant.ContextKeyResponsesEncryptedReasoningReplayRetryAction, ResponsesEncryptedReasoningReplayRetrySuppressedCrossChannel)
 }
 
 func NewResponsesEncryptedReasoningReplayUnsupportedError(channelID int) *types.NewAPIError {
@@ -123,11 +107,7 @@ func NewResponsesEncryptedReasoningReplayUnsupportedError(channelID int) *types.
 
 func NewResponsesOpaqueReplayParamOverrideUnsupportedError(channelID int) *types.NewAPIError {
 	return types.NewErrorWithStatusCode(
-		fmt.Errorf(
-			"%w: channel #%d configures a param override that cannot preserve opaque encrypted Responses request bytes",
-			ErrResponsesOpaqueReplayParamOverrideUnsupported,
-			channelID,
-		),
+		fmt.Errorf("%w: channel #%d configures a param override that cannot preserve opaque encrypted Responses request bytes", ErrResponsesOpaqueReplayParamOverrideUnsupported, channelID),
 		types.ErrorCodeChannelModelMappedError,
 		http.StatusServiceUnavailable,
 	)

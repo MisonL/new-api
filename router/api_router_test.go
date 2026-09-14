@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
@@ -29,6 +31,11 @@ type npmVersionRouteResponse struct {
 		LatestVersion string                        `json:"latest_version"`
 		Options       []service.NpmCLIVersionOption `json:"options"`
 	} `json:"data"`
+}
+
+type channelHealthRuntimeRouteResponse struct {
+	Success bool                           `json:"success"`
+	Data    dto.ChannelHealthRuntimeStatus `json:"data"`
 }
 
 func TestChannelNpmVersionOptionRoutesUseAdminAuthAndCriticalRateLimit(t *testing.T) {
@@ -127,6 +134,86 @@ func TestChannelNpmVersionOptionRoutesUseAdminAuthAndCriticalRateLimit(t *testin
 		"198.51.100.202:1001",
 	)
 	require.Equal(t, http.StatusTooManyRequests, secondPost.Code)
+}
+
+func TestChannelHealthRuntimeRouteRequiresAdminAuth(t *testing.T) {
+	engine, adminUser, commonUser := setupNpmVersionAPIRouterTest(t)
+	settings := operation_setting.GetGeneralSetting()
+	previousEnabled := settings.ChannelHealthEnabled
+	settings.ChannelHealthEnabled = false
+	t.Cleanup(func() {
+		settings.ChannelHealthEnabled = previousEnabled
+	})
+
+	rootUser := &model.User{
+		Username:    "channel-health-root",
+		DisplayName: "channel-health-root",
+		Role:        common.RoleRootUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+		AffCode:     "channel-health-root-aff",
+	}
+	require.NoError(t, model.DB.Create(rootUser).Error)
+
+	unauthenticated := performNpmVersionAPIRouterRequest(
+		engine,
+		http.MethodGet,
+		"/api/option/channel_health_status",
+		0,
+		nil,
+		"198.51.100.231:1000",
+	)
+	require.Equal(t, http.StatusUnauthorized, unauthenticated.Code)
+
+	adminCookies := loginNpmVersionAPIRouterTestUser(t, engine, adminUser.Id)
+	adminResponse := performNpmVersionAPIRouterRequest(
+		engine,
+		http.MethodGet,
+		"/api/option/channel_health_status",
+		adminUser.Id,
+		adminCookies,
+		"198.51.100.232:1000",
+	)
+	require.Equal(t, http.StatusOK, adminResponse.Code)
+	var adminBody channelHealthRuntimeRouteResponse
+	require.NoError(t, common.Unmarshal(adminResponse.Body.Bytes(), &adminBody))
+	require.True(t, adminBody.Success)
+	require.False(t, adminBody.Data.Enabled)
+	require.False(t, adminBody.Data.RedisAvailable)
+	require.Empty(t, adminBody.Data.Entries)
+
+	commonCookies := loginNpmVersionAPIRouterTestUser(t, engine, commonUser.Id)
+	commonResponse := performNpmVersionAPIRouterRequest(
+		engine,
+		http.MethodGet,
+		"/api/option/channel_health_status",
+		commonUser.Id,
+		commonCookies,
+		"198.51.100.232:1001",
+	)
+	require.Equal(t, http.StatusOK, commonResponse.Code)
+	var commonDenied struct {
+		Success bool `json:"success"`
+	}
+	require.NoError(t, common.Unmarshal(commonResponse.Body.Bytes(), &commonDenied))
+	require.False(t, commonDenied.Success)
+
+	rootCookies := loginNpmVersionAPIRouterTestUser(t, engine, rootUser.Id)
+	rootResponse := performNpmVersionAPIRouterRequest(
+		engine,
+		http.MethodGet,
+		"/api/option/channel_health_status",
+		rootUser.Id,
+		rootCookies,
+		"198.51.100.233:1000",
+	)
+	require.Equal(t, http.StatusOK, rootResponse.Code)
+	var body channelHealthRuntimeRouteResponse
+	require.NoError(t, common.Unmarshal(rootResponse.Body.Bytes(), &body))
+	require.True(t, body.Success)
+	require.False(t, body.Data.Enabled)
+	require.False(t, body.Data.RedisAvailable)
+	require.Empty(t, body.Data.Entries)
 }
 
 func setupNpmVersionAPIRouterTest(t *testing.T) (*gin.Engine, *model.User, *model.User) {

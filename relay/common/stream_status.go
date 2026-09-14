@@ -100,6 +100,23 @@ func (s *StreamStatus) IsNormalEnd() bool {
 		s.EndReason == StreamEndReasonHandlerStop
 }
 
+// IsSuccessfulEnd reports whether a stream reached a normal terminal reason
+// without recording a non-benign upstream or handler error. A handler stop is
+// successful only when it carries no fatal error; Codex folded SSE uses that
+// nil-error form for a protocol-level normal termination.
+func (s *StreamStatus) IsSuccessfulEnd() bool {
+	if s == nil || !s.IsNormalEnd() {
+		return false
+	}
+	if s.EndError != nil && !IsBenignDisconnectErrorMessage(s.EndError.Error()) {
+		return false
+	}
+	if !s.HasErrors() {
+		return true
+	}
+	return s.HasOnlyBenignDisconnectErrors()
+}
+
 func IsBenignDisconnectErrorMessage(msg string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(msg))
 	if normalized == "" {

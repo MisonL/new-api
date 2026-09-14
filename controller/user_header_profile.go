@@ -41,7 +41,8 @@ func CreateUserHeaderProfile(c *gin.Context) {
 	}
 
 	name := strings.TrimSpace(req.Name)
-	if err := validateUserHeaderProfileInput(user.GetSetting().HeaderProfiles, "", name, req.Headers); err != nil {
+	normalizedHeaders, err := validateUserHeaderProfileInput(user.GetSetting().HeaderProfiles, "", name, req.Headers)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -52,7 +53,7 @@ func CreateUserHeaderProfile(c *gin.Context) {
 		Name:        name,
 		Category:    req.Category,
 		Scope:       dto.HeaderProfileScopeUser,
-		Headers:     copyHeaderProfileHeaders(req.Headers),
+		Headers:     normalizedHeaders,
 		ReadOnly:    false,
 		Description: req.Description,
 	}
@@ -87,7 +88,8 @@ func UpdateUserHeaderProfile(c *gin.Context) {
 
 	settings := user.GetSetting()
 	name := strings.TrimSpace(req.Name)
-	if err := validateUserHeaderProfileInput(settings.HeaderProfiles, profileID, name, req.Headers); err != nil {
+	normalizedHeaders, err := validateUserHeaderProfileInput(settings.HeaderProfiles, profileID, name, req.Headers)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -106,7 +108,7 @@ func UpdateUserHeaderProfile(c *gin.Context) {
 	profile.Name = name
 	profile.Category = req.Category
 	profile.Scope = dto.HeaderProfileScopeUser
-	profile.Headers = copyHeaderProfileHeaders(req.Headers)
+	profile.Headers = normalizedHeaders
 	profile.ReadOnly = false
 	profile.Description = req.Description
 	settings.HeaderProfiles[index] = profile
@@ -156,22 +158,26 @@ func getCurrentUserForHeaderProfiles(c *gin.Context) (*model.User, error) {
 	return model.GetUserById(c.GetInt("id"), true)
 }
 
-func validateUserHeaderProfileInput(profiles []dto.HeaderProfile, currentID string, name string, headers map[string]string) error {
+func validateUserHeaderProfileInput(profiles []dto.HeaderProfile, currentID string, name string, headers map[string]string) (map[string]string, error) {
 	if name == "" {
-		return fmt.Errorf("name is required")
+		return nil, fmt.Errorf("name is required")
 	}
 	if len(headers) == 0 {
-		return fmt.Errorf("headers must be a non-empty object")
+		return nil, fmt.Errorf("headers must be a non-empty object")
+	}
+	normalizedHeaders, err := dto.NormalizeHeaderProfileHeaders(headers)
+	if err != nil {
+		return nil, fmt.Errorf("headers are invalid: %w", err)
 	}
 	for _, profile := range profiles {
 		if profile.ID == currentID {
 			continue
 		}
 		if strings.TrimSpace(profile.Name) == name {
-			return fmt.Errorf("header profile name already exists")
+			return nil, fmt.Errorf("header profile name already exists")
 		}
 	}
-	return nil
+	return normalizedHeaders, nil
 }
 
 func findHeaderProfileIndex(profiles []dto.HeaderProfile, profileID string) int {
@@ -190,14 +196,6 @@ func isProtectedHeaderProfile(profile dto.HeaderProfile) bool {
 func saveUserHeaderProfiles(user *model.User, settings dto.UserSetting) error {
 	user.SetSetting(settings)
 	return user.Update(false)
-}
-
-func copyHeaderProfileHeaders(headers map[string]string) map[string]string {
-	cloned := make(map[string]string, len(headers))
-	for key, value := range headers {
-		cloned[key] = value
-	}
-	return cloned
 }
 
 func generateUserHeaderProfileID() string {

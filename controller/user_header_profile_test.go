@@ -140,6 +140,47 @@ func TestCreateUserHeaderProfileRejectsInvalidHeaders(t *testing.T) {
 	require.Empty(t, reloaded.GetSetting().HeaderProfiles)
 }
 
+func TestCreateUserHeaderProfileValidatesAndCanonicalizesHeaders(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers map[string]string
+		valid   bool
+	}{
+		{name: "invalid name", headers: map[string]string{"Bad Header": "value"}},
+		{name: "empty value", headers: map[string]string{"X-Test": "  "}},
+		{name: "case duplicate", headers: map[string]string{"X-Test": "one", "x-test": "two"}},
+		{name: "canonicalized", headers: map[string]string{" user-agent ": "client/1.0", "x-request-id": "request-1"}, valid: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setupCustomOAuthJWTControllerTestDB(t)
+			user := seedUserHeaderProfileTestUser(t, "header-profile-create-"+strings.ReplaceAll(test.name, " ", "-"), nil)
+
+			ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/user/header_profiles", map[string]any{
+				"name":    "Profile",
+				"headers": test.headers,
+			}, user.Id)
+			CreateUserHeaderProfile(ctx)
+
+			response := decodeUserHeaderProfileAPIResponse(t, recorder.Body.Bytes())
+			require.Equal(t, test.valid, response.Success, response.Message)
+			reloaded, err := model.GetUserById(user.Id, false)
+			require.NoError(t, err)
+			profiles := reloaded.GetSetting().HeaderProfiles
+			if !test.valid {
+				require.Empty(t, profiles)
+				return
+			}
+			require.Len(t, profiles, 1)
+			require.Equal(t, map[string]string{
+				"User-Agent":   "client/1.0",
+				"X-Request-Id": "request-1",
+			}, profiles[0].Headers)
+		})
+	}
+}
+
 func TestUpdateUserHeaderProfileRejectsDuplicateName(t *testing.T) {
 	setupCustomOAuthJWTControllerTestDB(t)
 

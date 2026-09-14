@@ -34,7 +34,7 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 	case types.RelayFormatClaude:
 		request, err = GetAndValidateClaudeRequest(c)
 	case types.RelayFormatOpenAIResponses:
-		request, err = GetAndValidateResponsesRequest(c)
+		request, err = getAndValidateResponsesRelayRequest(c)
 	case types.RelayFormatOpenAIResponsesCompaction:
 		request, err = getAndValidateResponsesCompactionRelayRequest(c)
 
@@ -113,10 +113,7 @@ func GetAndValidateEmbeddingRequest(c *gin.Context, relayMode int) (*dto.Embeddi
 	return embeddingRequest, nil
 }
 
-func GetAndValidateResponsesRequest(c *gin.Context) (dto.Request, error) {
-	if request, ok, err := opaqueResponsesRequestFromMetadata(c); ok || err != nil {
-		return request, err
-	}
+func GetAndValidateResponsesRequest(c *gin.Context) (*dto.OpenAIResponsesRequest, error) {
 	request := &dto.OpenAIResponsesRequest{}
 	err := common.UnmarshalBodyReusable(c, request)
 	if err != nil {
@@ -132,6 +129,13 @@ func GetAndValidateResponsesRequest(c *gin.Context) (dto.Request, error) {
 		return nil, fmt.Errorf("invalid responses tools: %w", err)
 	}
 	return request, nil
+}
+
+func getAndValidateResponsesRelayRequest(c *gin.Context) (dto.Request, error) {
+	if request, ok, err := opaqueResponsesRequestFromMetadata(c); ok || err != nil {
+		return request, err
+	}
+	return GetAndValidateResponsesRequest(c)
 }
 
 func getAndValidateResponsesCompactionRelayRequest(c *gin.Context) (dto.Request, error) {

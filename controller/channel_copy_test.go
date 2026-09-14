@@ -54,6 +54,7 @@ func TestCopyChannelPreservesRuntimeConfiguration(t *testing.T) {
 	org := "org-test"
 	testModel := "gpt-5.5"
 	priority := int64(12)
+	pinOrder := int64(1000)
 	weight := uint(3)
 	autoBan := 0
 	settings := marshalChannelOtherSettingsForTest(t, dto.ChannelOtherSettings{
@@ -104,6 +105,7 @@ func TestCopyChannelPreservesRuntimeConfiguration(t *testing.T) {
 		ModelMapping:       &modelMapping,
 		StatusCodeMapping:  &statusCodeMapping,
 		Priority:           &priority,
+		PinOrder:           &pinOrder,
 		AutoBan:            &autoBan,
 		OtherInfo:          `{"upstream":"mynav"}`,
 		Tag:                &tag,
@@ -159,6 +161,7 @@ func TestCopyChannelPreservesRuntimeConfiguration(t *testing.T) {
 	require.Equal(t, origin.ModelMapping, clone.ModelMapping)
 	require.Equal(t, origin.StatusCodeMapping, clone.StatusCodeMapping)
 	require.Equal(t, origin.Priority, clone.Priority)
+	require.Equal(t, int64(0), clone.GetPinOrder())
 	require.Equal(t, origin.AutoBan, clone.AutoBan)
 	require.Equal(t, origin.OtherInfo, clone.OtherInfo)
 	require.Equal(t, origin.Tag, clone.Tag)

@@ -7,66 +7,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResponsesInputHasOpaqueEncryptedContent(t *testing.T) {
+func TestResponsesInputHasOpaqueEncryptedContentLegacyCases(t *testing.T) {
 	tests := []struct {
 		name  string
 		input json.RawMessage
 		want  bool
 	}{
 		{
-			name:  "top level string",
+			name:  "top level opaque reasoning",
 			input: json.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-state"}]`),
 			want:  true,
 		},
 		{
-			name:  "nested future object",
+			name:  "unknown nested field",
 			input: json.RawMessage(`[{"type":"future_item","state":{"items":[{"encrypted_content":{"version":2}}]}}]`),
-			want:  true,
+			want:  false,
 		},
 		{
-			name:  "synthetic marker",
+			name:  "synthetic marker is local state",
 			input: json.RawMessage(`[{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:n0123456789abcdef0123456789abcdef:resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_0123456789abcdef0123456789abcdef"}]`),
-			want:  true,
+			want:  false,
 		},
 		{
-			name:  "legacy synthetic marker",
-			input: json.RawMessage(`[{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_0123456789abcdef0123456789abcdef"}]`),
-			want:  true,
-		},
-		{
-			name:  "native opaque compact marker",
-			input: json.RawMessage(`[{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_nativecmp_n0123456789abcdef0123456789abcdef_0123456789abcdef01234567"}]`),
-			want:  true,
-		},
-		{
-			name:  "malformed synthetic marker is opaque",
-			input: json.RawMessage(`[{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:n1:resp_local"}]`),
-			want:  true,
-		},
-		{
-			name:  "short v2 instance is opaque",
-			input: json.RawMessage(`[{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:n0123456789abcdef:resp_newapi_synthcmp_n0123456789abcdef_0123456789abcdef0123456789abcdef"}]`),
-			want:  true,
-		},
-		{
-			name:  "malformed v2 state id is opaque",
-			input: json.RawMessage(`[{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:n0123456789abcdef0123456789abcdef:resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_state"}]`),
-			want:  true,
-		},
-		{
-			name:  "legacy prefix collision is opaque",
-			input: json.RawMessage(`[{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_legacy"}]`),
-			want:  true,
-		},
-		{
-			name:  "malformed native compact state id is opaque",
-			input: json.RawMessage(`[{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_nativecmp_n0123456789abcdef0123456789abcdef_state"}]`),
-			want:  true,
-		},
-		{
-			name:  "synthetic marker outside compaction item is opaque",
+			name:  "synthetic marker outside compaction item is local state",
 			input: json.RawMessage(`[{"type":"reasoning","encrypted_content":"newapi.synthetic.compact:v2:n0123456789abcdef0123456789abcdef:resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_0123456789abcdef0123456789abcdef"}]`),
-			want:  true,
+			want:  false,
 		},
 		{
 			name:  "empty and null",
@@ -87,7 +52,7 @@ func TestResponsesInputHasOpaqueEncryptedContent(t *testing.T) {
 	}
 }
 
-func TestResponsesInputHasOpaqueEncryptedContentWithMarkerValidator(t *testing.T) {
+func TestResponsesInputHasOpaqueEncryptedContentWithMarkerValidatorLegacy(t *testing.T) {
 	marker := "newapi.synthetic.compact:resp_newapi_synthcmp_0123456789abcdef0123456789abcdef"
 	input := json.RawMessage(`[{"type":"compaction","encrypted_content":"` + marker + `"}]`)
 
@@ -99,7 +64,7 @@ func TestResponsesInputHasOpaqueEncryptedContentWithMarkerValidator(t *testing.T
 	require.False(t, got)
 }
 
-func TestResponsesInputHasOpaqueEncryptedContentRejectsMalformedInput(t *testing.T) {
+func TestResponsesInputHasOpaqueEncryptedContentLegacyRejectsMalformedInput(t *testing.T) {
 	got, err := ResponsesInputHasOpaqueEncryptedContent(json.RawMessage(`[{"encrypted_content":"opaque"}`))
 
 	require.False(t, got)

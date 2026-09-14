@@ -49,9 +49,8 @@ func ShouldDisableChannel(err *types.NewAPIError) bool {
 	if err == nil {
 		return false
 	}
-	// A transport interruption is a transient upstream failure. It remains
-	// eligible for request-level failover, but must not auto-disable the channel
-	// even when an administrator configured a broad 5xx disable range.
+	// A transport interruption is transient and should remain eligible for
+	// request-level failover without auto-disabling the channel.
 	if err.GetErrorCode() == types.ErrorCodeUpstreamTransportInterrupted {
 		return false
 	}

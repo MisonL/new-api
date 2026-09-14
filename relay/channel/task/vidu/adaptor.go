@@ -2,9 +2,11 @@ package vidu
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -121,10 +123,30 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		return nil, err
 	}
 
-	if info.Action == constant.TaskActionReferenceGenerate {
-		if strings.Contains(body.Model, "viduq2") {
-			// 参考图生视频只能用 viduq2 模型, 不能带有pro或turbo后缀 https://platform.vidu.cn/docs/reference-to-video
-			body.Model = "viduq2"
+	// 参考图生视频只能用基础 viduq2 模型，不能把映射后的别名或
+	// metadata 中的模型名直接透传给上游。复用统一的任务 wire-model
+	// 规则，使选择、健康、快照和实际请求保持同一模型身份。
+	channelType := a.ChannelType
+	if channelType == 0 && info.ChannelMeta != nil {
+		channelType = info.ChannelMeta.ChannelType
+	}
+	// TaskAdaptor is Vidu-specific; direct unit callers may omit Init and the
+	// channel metadata, so retain the adaptor's provider identity as fallback.
+	if channelType == 0 {
+		channelType = constant.ChannelTypeVidu
+	}
+	body.Model = relaycommon.ResolveTaskWireModel(channelType, info.Action, body.Model)
+	// The reference-image endpoint accepts only the base viduq2 model. Keep
+	// relay metadata aligned with the model that will actually be sent so the
+	// request health route, task snapshot, billing diagnostics, and polling all
+	// use the same effective upstream identity.
+	if wireModel := strings.TrimSpace(body.Model); wireModel != "" {
+		info.UpstreamModelName = wireModel
+		mapped := strings.TrimSpace(info.OriginModelName) != "" && strings.TrimSpace(info.OriginModelName) != wireModel
+		info.IsModelMapped = mapped
+		if info.ChannelMeta != nil {
+			info.ChannelMeta.UpstreamModelName = wireModel
+			info.ChannelMeta.IsModelMapped = mapped
 		}
 	}
 
@@ -190,14 +212,22 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 }
 
 func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
+	return a.FetchTaskWithContext(context.Background(), baseUrl, key, body, proxy, extraHeaders...)
+}
+
+func (a *TaskAdaptor) FetchTaskWithContext(ctx context.Context, baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
 	taskID, ok := body["task_id"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid task_id")
 	}
 
-	url := fmt.Sprintf("%s/ent/v2/tasks/%s/creations", baseUrl, taskID)
+	path := taskcommon.CapturedTaskPollingPath(body, "/ent/v2/tasks")
+	requestURL := fmt.Sprintf("%s%s/%s/creations", strings.TrimRight(baseUrl, "/"), path, url.PathEscape(taskID))
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, err
 	}

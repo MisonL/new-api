@@ -77,13 +77,14 @@ Powered by [expr-lang/expr](https://github.com/expr-lang/expr). Expressions are 
 |----------|-----------|---------|
 | `tier` | `tier(name, value) -> float64` | Records which pricing tier matched; must wrap the cost expression |
 | `param` | `param(path) -> any` | Reads a JSON path from the request body (uses gjson) |
-| `header` | `header(key) -> string` | Reads a request header value |
+| `header` | `header(key) -> string` | Reads a non-sensitive request header value |
 | `has` | `has(source, substr) -> bool` | Substring check |
 | `hour` | `hour(tz) -> int` | Current hour in timezone (0-23) |
 | `minute` | `minute(tz) -> int` | Current minute (0-59) |
 | `weekday` | `weekday(tz) -> int` | Day of week (0=Sunday, 6=Saturday) |
 | `month` | `month(tz) -> int` | Month (1-12) |
 | `day` | `day(tz) -> int` | Day of month (1-31) |
+| `year` | `year(tz) -> int` | Calendar year |
 | `max` | `max(a, b) -> float64` | Math max |
 | `min` | `min(a, b) -> float64` | Math min |
 | `abs` | `abs(x) -> float64` | Absolute value |
@@ -117,6 +118,13 @@ tier("base", p * 5 + c * 25)|||when(header("anthropic-beta") has "fast-mode") * 
 ```
 
 These are parsed and applied separately by the request rule system.
+
+`header()` is evaluated at a security boundary. Header names are matched
+case-insensitively, and authentication or session material is intentionally
+hidden from expressions, including `Authorization`, `Cookie`, API-key/token,
+credential, secret, private-key, and signature headers. Provider capability
+headers such as `anthropic-beta` remain available for legitimate pricing
+rules. The original headers are unchanged for the upstream adapter.
 
 ---
 

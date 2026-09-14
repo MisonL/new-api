@@ -2,6 +2,7 @@ package codex
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -54,17 +56,40 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
+	// Codex Responses-Lite only accepts an explicit false value. Normalize
+	// client input before any early return so opaque replay requests follow the
+	// same upstream contract as ordinary Responses requests.
+	request.ParallelToolCalls = common.RawMessage(`false`)
 	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), request.Input)
 	if err != nil {
 		return nil, err
 	}
+	normalizedInput, normalizeResult, err := relaycommon.NormalizeResponsesInputItemIDs(request.Input)
+	if err != nil {
+		return nil, err
+	}
+	request.Input = normalizedInput
+	if normalizeResult.RemovedCount > 0 {
+		common.SetContextKey(c, constant.ContextKeyResponsesInputItemIDNormalizationRemovedCount, normalizeResult.RemovedCount)
+		logger.LogInfo(c, fmt.Sprintf("responses invalid input item ids removed: count=%d model=%s", normalizeResult.RemovedCount, request.Model))
+	}
 	if hasOpaqueEncryptedContent {
 		return request, nil
 	}
+	request = openai.ApplyResponsesReasoningContextCapability(c, info, request)
 	isCompact := info != nil && info.RelayMode == relayconstant.RelayModeResponsesCompact
 	hasSyntheticReference, err := service.HasLocalSyntheticCompactReferenceWithContext(relaycommon.GinRequestContext(c), request)
 	if err != nil {
 		return nil, err
+	}
+	if isCompact {
+		hasPreviousSynthetic, err := service.HasLocalSyntheticCompactPreviousResponseIDWithContext(relaycommon.GinRequestContext(c), request)
+		if err != nil {
+			return nil, err
+		}
+		if !hasPreviousSynthetic {
+			hasSyntheticReference = false
+		}
 	}
 	if hasSyntheticReference {
 		convertedRequest, ok, visibleOnly, applyInfo, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(relaycommon.GinRequestContext(c), service.SyntheticCompactScopeFromSource(info), request)
@@ -144,6 +169,9 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	}
 
 	if info.IsStream {
+		if codexFoldedEnabled(info) {
+			return runCodexFoldedSSE(c, info, resp, a)
+		}
 		return openai.OaiResponsesStreamHandler(c, info, resp)
 	}
 	return openai.OaiResponsesHandler(c, info, resp)

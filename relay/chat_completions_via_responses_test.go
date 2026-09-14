@@ -91,6 +91,29 @@ func (m *mockChatViaResponsesAdaptor) ConvertGeminiRequest(c *gin.Context, info 
 
 var _ channel.Adaptor = (*mockChatViaResponsesAdaptor)(nil)
 
+func TestApplySystemPromptIfNeededRejectsMalformedStructuredContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+
+	request := &dto.GeneralOpenAIRequest{
+		Messages: []dto.Message{{
+			Role:    "system",
+			Content: common.RawMessage(`[{"type":"text","text":"unterminated"}`),
+		}},
+	}
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ChannelSetting: dto.ChannelSettings{
+			SystemPrompt:         "configured system",
+			SystemPromptOverride: true,
+		},
+	}}
+
+	err := applySystemPromptIfNeeded(c, info, request)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot apply system prompt")
+}
+
 func newChatViaResponsesInfo() *relaycommon.RelayInfo {
 	return &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeChatCompletions,
@@ -190,6 +213,91 @@ func TestChatCompletionsViaResponsesNonStream(t *testing.T) {
 
 	require.Equal(t, relayconstant.RelayModeChatCompletions, info.RelayMode)
 	require.Equal(t, "/v1/chat/completions", info.RequestURLPath)
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesToolCapabilityObservationBridged))
+	require.Equal(t, dto.ResponsesToolCapabilityObservationSourceBridged,
+		common.GetContextKeyString(c, constant.ContextKeyResponsesToolCapabilityObservationSource))
+}
+
+func TestChatCompletionsViaResponsesPreservesDeepSeekReasoningContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	completedStatus, err := common.Marshal("completed")
+	require.NoError(t, err)
+	respBytes, err := common.Marshal(dto.OpenAIResponsesResponse{
+		ID:        "resp_deepseek_reasoning",
+		Object:    "response",
+		CreatedAt: 1710000002,
+		Status:    completedStatus,
+		Model:     "deepseek-v4-flash",
+		Output: []dto.ResponsesOutput{{
+			Type:   "message",
+			Role:   "assistant",
+			Status: "completed",
+			Content: []dto.ResponsesOutputContent{{
+				Type: "output_text",
+				Text: "compat ok",
+			}},
+		}},
+		Usage: &dto.Usage{InputTokens: 8, OutputTokens: 4, TotalTokens: 12},
+	})
+	require.NoError(t, err)
+
+	adaptor := &mockChatViaResponsesAdaptor{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(respBytes)),
+		},
+	}
+
+	reasoning := "  keep the complete history\n"
+	chatReq := &dto.GeneralOpenAIRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.Message{
+			{Role: "user", Content: "continue"},
+			{Role: "assistant", Content: "I will continue.", ReasoningContent: &reasoning},
+		},
+		Tools: []dto.ToolCallRequest{{
+			Type: "function",
+			Function: dto.FunctionRequest{
+				Name:       "lookup",
+				Parameters: map[string]any{"type": "object"},
+			},
+		}},
+	}
+	chatReq.Messages[1].SetToolCalls([]dto.ToolCallRequest{{
+		ID:   "call_lookup",
+		Type: "function",
+		Function: dto.FunctionRequest{
+			Name:      "lookup",
+			Arguments: `{"query":"status"}`,
+		},
+	}})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte("{}")))
+
+	info := newChatViaResponsesInfo()
+	info.OriginModelName = "deepseek-v4-flash"
+	info.UpstreamModelName = "deepseek-v4-flash"
+	info.ChannelMeta.UpstreamModelName = "deepseek-v4-flash"
+
+	usage, newAPIErr := chatCompletionsViaResponses(c, info, adaptor, chatReq)
+	require.Nil(t, newAPIErr)
+	require.NotNil(t, usage)
+
+	var outbound struct {
+		Input []map[string]any `json:"input"`
+	}
+	require.NoError(t, common.Unmarshal(adaptor.requestBody, &outbound))
+	require.Len(t, outbound.Input, 4)
+	require.Equal(t, "reasoning", outbound.Input[1]["type"])
+	require.Equal(t, []any{map[string]any{
+		"type": "reasoning_text",
+		"text": reasoning,
+	}}, outbound.Input[1]["content"])
+	require.Equal(t, "assistant", outbound.Input[2]["role"])
 }
 
 func TestChatCompletionsViaResponsesStream(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/stretchr/testify/require"
 )
@@ -275,7 +276,7 @@ func TestBuildOpenAIStyleUsageFromClaudeUsageDefaultsAggregateCacheCreationTo5m(
 	require.Equal(t, 0, openAIUsage.ClaudeCacheCreation1hTokens)
 }
 
-func TestRequestOpenAI2ClaudeMessage_IgnoresUnsupportedFileContent(t *testing.T) {
+func TestRequestOpenAI2ClaudeMessage_RejectsUnknownFileContent(t *testing.T) {
 	request := dto.GeneralOpenAIRequest{
 		Model: "claude-3-5-sonnet",
 		Messages: []dto.Message{
@@ -290,7 +291,7 @@ func TestRequestOpenAI2ClaudeMessage_IgnoresUnsupportedFileContent(t *testing.T)
 						Type: dto.ContentTypeFile,
 						File: &dto.MessageFile{
 							FileName: "blob.bin",
-							FileData: "JVBERi0xLjQK",
+							FileData: "AA==",
 						},
 					},
 				},
@@ -298,16 +299,33 @@ func TestRequestOpenAI2ClaudeMessage_IgnoresUnsupportedFileContent(t *testing.T)
 		},
 	}
 
+	_, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "cannot determine MIME type")
+}
+
+func TestRequestOpenAI2ClaudeMessageUsesExplicitFileMimeType(t *testing.T) {
+	request := dto.GeneralOpenAIRequest{
+		Model: "claude-3-5-sonnet",
+		Messages: []dto.Message{{
+			Role: "user",
+			Content: []any{dto.MediaContent{
+				Type: dto.ContentTypeFile,
+				File: &dto.MessageFile{
+					FileName: "opaque.bin",
+					FileData: "JVBERi0xLjQK",
+					MimeType: "application/pdf",
+				},
+			}},
+		}},
+	}
+
 	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
 	require.NoError(t, err)
-	require.Len(t, claudeRequest.Messages, 1)
-
 	content, ok := claudeRequest.Messages[0].Content.([]dto.ClaudeMediaMessage)
 	require.True(t, ok)
 	require.Len(t, content, 1)
-	require.Equal(t, "text", content[0].Type)
-	require.NotNil(t, content[0].Text)
-	require.Equal(t, "see attachment", *content[0].Text)
+	require.Equal(t, "document", content[0].Type)
 }
 
 func TestRequestOpenAI2ClaudeMessage_PreservesAssistantReasoningContentWithToolCalls(t *testing.T) {
@@ -565,4 +583,137 @@ func TestRequestOpenAI2ClaudeMessage_ConvertsTextFileContentToText(t *testing.T)
 	require.Equal(t, "text", content[0].Type)
 	require.NotNil(t, content[0].Text)
 	require.Equal(t, "alpha\nbeta", *content[0].Text)
+}
+
+func TestRequestOpenAI2ClaudeMessagePreservesRawToolSchema(t *testing.T) {
+	request := dto.GeneralOpenAIRequest{
+		Model: "claude-3-5-sonnet",
+		Tools: []dto.ToolCallRequest{{
+			Type: "function",
+			Function: dto.FunctionRequest{
+				Name:       "lookup",
+				Parameters: common.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}},"additionalProperties":false}`),
+			},
+		}},
+		Messages: []dto.Message{{Role: "user", Content: "check"}},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	tools, err := common.Any2Type[[]dto.Tool](claudeRequest.Tools)
+	require.NoError(t, err)
+	require.Len(t, tools, 1)
+	require.Equal(t, "object", tools[0].InputSchema["type"])
+	require.Equal(t, false, tools[0].InputSchema["additionalProperties"])
+}
+
+func TestRequestOpenAI2ClaudeMessageMapsDeveloperMessagesToSystem(t *testing.T) {
+	request := dto.GeneralOpenAIRequest{
+		Model: "claude-3-5-sonnet",
+		Messages: []dto.Message{
+			{Role: "developer", Content: "Follow the policy."},
+			{Role: "user", Content: "Hello"},
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.Len(t, claudeRequest.Messages, 1)
+	require.Equal(t, "Hello", claudeRequest.Messages[0].Content)
+	system, ok := claudeRequest.System.([]dto.ClaudeMediaMessage)
+	require.True(t, ok)
+	require.Len(t, system, 1)
+	require.Equal(t, "Follow the policy.", system[0].GetText())
+}
+
+func TestRequestOpenAI2ClaudeMessageRejectsMalformedStopSequence(t *testing.T) {
+	request := dto.GeneralOpenAIRequest{
+		Model: "claude-3-5-sonnet",
+		Stop:  []interface{}{"END", 42},
+		Messages: []dto.Message{{
+			Role:    "user",
+			Content: "Hello",
+		}},
+	}
+
+	require.NotPanics(t, func() {
+		_, err := RequestOpenAI2ClaudeMessage(nil, request)
+		require.Error(t, err)
+	})
+}
+
+func TestRequestOpenAI2ClaudeMessageRejectsMalformedToolArguments(t *testing.T) {
+	message := dto.Message{Role: "assistant", Content: "calling"}
+	message.SetToolCalls([]dto.ToolCallRequest{{
+		ID:   "call_1",
+		Type: "function",
+		Function: dto.FunctionRequest{
+			Name:      "lookup",
+			Arguments: "not-json",
+		},
+	}})
+
+	request := dto.GeneralOpenAIRequest{
+		Model:    "claude-3-5-sonnet",
+		Messages: []dto.Message{{Role: "user", Content: "check"}, message},
+	}
+
+	_, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid arguments")
+}
+
+func TestRequestOpenAI2ClaudeMessageRejectsUnknownToolChoice(t *testing.T) {
+	_, err := RequestOpenAI2ClaudeMessage(nil, dto.GeneralOpenAIRequest{
+		Model:      "claude-3-5-sonnet",
+		ToolChoice: "sometimes",
+		Messages:   []dto.Message{{Role: "user", Content: "check"}},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tool_choice")
+}
+
+func TestStreamResponseClaude2OpenAIIgnoresOpaqueSignatureDelta(t *testing.T) {
+	response := StreamResponseClaude2OpenAI(&dto.ClaudeResponse{
+		Type: "content_block_delta",
+		Delta: &dto.ClaudeMediaMessage{
+			Type:      "signature_delta",
+			Signature: "opaque-signature",
+		},
+	})
+
+	require.Nil(t, response)
+}
+
+func TestStreamResponseClaude2OpenAIRejectsUnknownEvent(t *testing.T) {
+	response, err := StreamResponseClaude2OpenAIWithError(&dto.ClaudeResponse{Type: "future_event"})
+
+	require.Nil(t, response)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "future_event")
+}
+
+func TestStreamResponseClaude2OpenAIRejectsIncompleteToolBlock(t *testing.T) {
+	response, err := StreamResponseClaude2OpenAIWithError(&dto.ClaudeResponse{
+		Type: "content_block_start",
+		ContentBlock: &dto.ClaudeMediaMessage{
+			Type: "tool_use",
+			Name: "lookup",
+		},
+	})
+
+	require.Nil(t, response)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires id and name")
+}
+
+func TestStreamResponseClaude2OpenAIHandlesMissingPartialJSON(t *testing.T) {
+	response := StreamResponseClaude2OpenAI(&dto.ClaudeResponse{
+		Type: "content_block_delta",
+		Delta: &dto.ClaudeMediaMessage{
+			Type: "input_json_delta",
+		},
+	})
+
+	require.Nil(t, response)
 }

@@ -45,6 +45,17 @@ func buildResponsesUsageFromChat(resp *dto.OpenAITextResponse) *dto.Usage {
 	return &usage
 }
 
+func responsesStatusFromChatFinishReason(finishReason string) (common.RawMessage, *dto.IncompleteDetails) {
+	switch strings.ToLower(strings.TrimSpace(finishReason)) {
+	case "length":
+		return common.RawMessage(`"incomplete"`), &dto.IncompleteDetails{Reason: "max_output_tokens"}
+	case "content_filter":
+		return common.RawMessage(`"incomplete"`), &dto.IncompleteDetails{Reason: "content_filter"}
+	default:
+		return common.RawMessage(`"completed"`), nil
+	}
+}
+
 func parseChatCustomToolPayload(raw []byte) (string, string, error) {
 	if len(raw) == 0 {
 		return "", "", fmt.Errorf("custom tool payload is required")
@@ -109,7 +120,20 @@ func ChatCompletionsResponseToResponsesResponseWithOptionsAndState(resp *dto.Ope
 
 	choice := resp.Choices[0]
 	message := choice.Message
-	output := make([]dto.ResponsesOutput, 0, 2)
+	output := make([]dto.ResponsesOutput, 0, 3)
+
+	if message.ReasoningContent != nil || message.ThinkingContent != nil || message.Reasoning != nil {
+		reasoning := message.GetReasoningContent()
+		output = append(output, dto.ResponsesOutput{
+			Type:   "reasoning",
+			ID:     "rs_0",
+			Status: "completed",
+			Content: []dto.ResponsesOutputContent{{
+				Type: "reasoning_text",
+				Text: reasoning,
+			}},
+		})
+	}
 
 	if message.Content != nil {
 		if message.IsStringContent() {
@@ -129,7 +153,10 @@ func ChatCompletionsResponseToResponsesResponseWithOptionsAndState(resp *dto.Ope
 				})
 			}
 		} else {
-			parts := message.ParseContent()
+			parts, parseErr := message.ParseContentStrict()
+			if parseErr != nil {
+				return nil, nil, fmt.Errorf("assistant content: %w", parseErr)
+			}
 			textParts := make([]dto.ResponsesOutputContent, 0, len(parts))
 			for _, part := range parts {
 				if part.Type != dto.ContentTypeText {
@@ -152,7 +179,11 @@ func ChatCompletionsResponseToResponsesResponseWithOptionsAndState(resp *dto.Ope
 		}
 	}
 
-	for index, toolCall := range message.ParseToolCalls() {
+	toolCalls, parseErr := message.ParseToolCallsStrict()
+	if parseErr != nil {
+		return nil, nil, fmt.Errorf("assistant tool_calls: %w", parseErr)
+	}
+	for index, toolCall := range toolCalls {
 		toolType := strings.TrimSpace(toolCall.Type)
 		name := strings.TrimSpace(toolCall.Function.Name)
 		callID := strings.TrimSpace(toolCall.ID)
@@ -252,17 +283,18 @@ func ChatCompletionsResponseToResponsesResponseWithOptionsAndState(resp *dto.Ope
 		responseID = "resp_" + common.GetUUID()
 	}
 
-	statusRaw, _ := common.Marshal("completed")
+	statusRaw, incompleteDetails := responsesStatusFromChatFinishReason(choice.FinishReason)
 	usage := buildResponsesUsageFromChat(resp)
 
 	out := &dto.OpenAIResponsesResponse{
-		ID:        responseID,
-		Object:    "response",
-		CreatedAt: chatResponseCreatedAt(resp.Created),
-		Status:    statusRaw,
-		Model:     resp.Model,
-		Output:    output,
-		Usage:     usage,
+		ID:                responseID,
+		Object:            "response",
+		CreatedAt:         chatResponseCreatedAt(resp.Created),
+		Status:            statusRaw,
+		IncompleteDetails: incompleteDetails,
+		Model:             resp.Model,
+		Output:            output,
+		Usage:             usage,
 	}
 
 	return out, usage, nil

@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
@@ -34,7 +35,7 @@ func TestResolveIncomingBillingExprRequestInput(t *testing.T) {
 	input, err := ResolveIncomingBillingExprRequestInput(ctx, info)
 	require.NoError(t, err)
 	require.Equal(t, body, input.Body)
-	require.Equal(t, "application/json", input.Headers["Content-Type"])
+	require.Equal(t, "application/json", input.Headers["content-type"])
 }
 
 func TestBuildBillingExprRequestInputFromRequest(t *testing.T) {
@@ -62,52 +63,36 @@ func TestBuildBillingExprRequestInputFromRequest(t *testing.T) {
 	require.Equal(t, float64(3000), gjson.GetBytes(input.Body, "max_tokens").Float())
 }
 
-func TestBillingExprRequestInputRejectsOpaqueResponsesReplay(t *testing.T) {
-	opaqueRequest := dto.NewOpaqueOpenAIResponsesRequest(common.ResponsesRequestMetadata{
-		Model:                     "gpt-5.6-sol",
-		ModelPresent:              true,
-		InputPresent:              true,
-		InputKind:                 common.ResponsesJSONValueKindArray,
-		HasOpaqueEncryptedContent: true,
+func TestResolveIncomingBillingExprRequestInputMergesHeadersCaseInsensitively(t *testing.T) {
+	input, err := ResolveIncomingBillingExprRequestInput(nil, &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{"X-Test": "base"},
+		BillingRequestInput: &billingexpr.RequestInput{
+			Headers: map[string]string{"x-test": "override"},
+		},
 	})
-
-	_, err := BuildBillingExprRequestInputFromRequest(opaqueRequest, nil)
-
-	require.ErrorIs(t, err, ErrOpaqueResponsesTieredBillingUnsupported)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"x-test": "override"}, input.Headers)
 }
 
 func TestResolveIncomingBillingExprRequestInputRejectsOpaqueResponsesReplay(t *testing.T) {
-	previousGinMode := gin.Mode()
-	gin.SetMode(gin.TestMode)
-	t.Cleanup(func() { gin.SetMode(previousGinMode) })
-
-	t.Run("opaque request metadata", func(t *testing.T) {
-		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-		info := &relaycommon.RelayInfo{
-			Request: dto.NewOpaqueOpenAIResponsesRequest(common.ResponsesRequestMetadata{
-				Model:                     "gpt-5.6-sol",
-				ModelPresent:              true,
-				InputPresent:              true,
-				InputKind:                 common.ResponsesJSONValueKindArray,
-				HasOpaqueEncryptedContent: true,
-			}),
-		}
-
-		_, err := ResolveIncomingBillingExprRequestInput(ctx, info)
-
-		require.ErrorIs(t, err, ErrOpaqueResponsesTieredBillingUnsupported)
+	metadata := common.ResponsesRequestMetadata{
+		Model:                     "gpt-5",
+		HasOpaqueEncryptedContent: true,
+	}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	input, err := ResolveIncomingBillingExprRequestInput(ctx, &relaycommon.RelayInfo{
+		Request: dto.NewOpaqueOpenAIResponsesRequest(metadata),
 	})
+	require.ErrorIs(t, err, ErrOpaqueResponsesTieredBillingUnsupported)
+	require.Empty(t, input.Body)
+}
 
-	t.Run("context metadata", func(t *testing.T) {
-		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-		common.SetResponsesRequestMetadata(ctx, common.ResponsesRequestMetadata{
-			HasOpaqueEncryptedContent: true,
-		})
-
-		_, err := ResolveIncomingBillingExprRequestInput(ctx, &relaycommon.RelayInfo{})
-
-		require.ErrorIs(t, err, ErrOpaqueResponsesTieredBillingUnsupported)
+func TestBuildBillingExprRequestInputFromRequestRejectsOpaqueResponsesReplay(t *testing.T) {
+	request := dto.NewOpaqueOpenAIResponsesRequest(common.ResponsesRequestMetadata{
+		Model:                     "gpt-5",
+		HasOpaqueEncryptedContent: true,
 	})
+	input, err := BuildBillingExprRequestInputFromRequest(request, nil)
+	require.ErrorIs(t, err, ErrOpaqueResponsesTieredBillingUnsupported)
+	require.Empty(t, input.Body)
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -43,6 +44,16 @@ func TestOpenAICompatibleUnlimitedBalanceDetection(t *testing.T) {
 	require.True(t, isOpenAICompatibleUnlimitedBalance(OpenAISubscriptionResponse{
 		HardLimitUSD: openAICompatibleUnlimitedBalanceThreshold,
 	}))
+}
+
+func TestBuildOpenAISBBalanceURLEncodesAPIKey(t *testing.T) {
+	statusURL, err := buildOpenAISBBalanceURL("key+a&b=c?d/汉字")
+	require.NoError(t, err)
+
+	parsed, err := url.Parse(statusURL)
+	require.NoError(t, err)
+	require.Equal(t, "key+a&b=c?d/汉字", parsed.Query().Get("api_key"))
+	require.Equal(t, "https://api.openai-sb.com/sb-api/user/status", parsed.Scheme+"://"+parsed.Host+parsed.Path)
 }
 
 func TestParseChannelTestOptionsParsesProtocolAndRequestParams(t *testing.T) {
@@ -213,6 +224,197 @@ func TestApplyChannelTestProtocolStrategyConvertsResponsesCompactToChat(t *testi
 	require.Equal(t, "/v1/chat/completions", info.RequestURLPath)
 	require.Equal(t, "/v1/chat/completions", ctx.Request.URL.Path)
 	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponsesCompaction, types.RelayFormatOpenAI}, info.RequestConversionChain)
+}
+
+func TestApplyChannelTestProtocolStrategyRejectsOpaqueReplayForExplicitChat(t *testing.T) {
+	tests := []struct {
+		name        string
+		relayMode   int
+		requestPath string
+		request     dto.Request
+	}{
+		{
+			name:        "responses",
+			relayMode:   relayconstant.RelayModeResponses,
+			requestPath: "/v1/responses",
+			request: &dto.OpenAIResponsesRequest{
+				Model: "gpt-5.6-sol",
+				Input: json.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+			},
+		},
+		{
+			name:        "responses compact",
+			relayMode:   relayconstant.RelayModeResponsesCompact,
+			requestPath: "/v1/responses/compact",
+			request: &dto.OpenAIResponsesCompactionRequest{
+				Model: "gpt-5.6-sol",
+				Input: json.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, tt.requestPath, nil)
+			options := defaultChannelTestOptions()
+			options.ResponseProtocol = channelTestResponseProtocolChatCompletions
+			info := &relaycommon.RelayInfo{
+				RelayMode:      tt.relayMode,
+				RequestURLPath: tt.requestPath,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelId:   206,
+					ChannelType: constant.ChannelTypeOpenAI,
+				},
+			}
+
+			converted, err := applyChannelTestProtocolStrategy(ctx, info, tt.request, options)
+
+			require.Error(t, err)
+			require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+			require.Same(t, tt.request, converted)
+			require.Equal(t, tt.relayMode, info.RelayMode)
+			require.Equal(t, tt.requestPath, info.RequestURLPath)
+		})
+	}
+}
+
+func TestApplyChannelTestProtocolStrategyRejectsOpaqueReplayBeforeImplicitChatConversion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	withGlobalProtocolPolicyForTest(t, model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled: true,
+		Rules: []model_setting.ProtocolConversionRule{{
+			Name:           "force-responses-to-chat",
+			Enabled:        true,
+			SourceEndpoint: model_setting.ProtocolEndpointResponses,
+			TargetEndpoint: model_setting.ProtocolEndpointChatCompletions,
+			AllChannels:    true,
+			ModelPatterns:  []string{"^gpt-5\\.6-sol$"},
+		}},
+	}, false)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		RequestURLPath:  "/v1/responses",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: json.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+	}
+
+	converted, err := applyChannelTestProtocolStrategy(ctx, info, request, defaultChannelTestOptions())
+
+	require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+	require.Same(t, request, converted)
+	require.Equal(t, relayconstant.RelayModeResponses, info.RelayMode)
+	require.Equal(t, "/v1/responses", info.RequestURLPath)
+}
+
+func TestApplyChannelTestProtocolStrategyPropagatesMalformedResponsesInput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	options := defaultChannelTestOptions()
+	options.ResponseProtocol = channelTestResponseProtocolChatCompletions
+	info := &relaycommon.RelayInfo{
+		RelayMode:      relayconstant.RelayModeResponses,
+		RequestURLPath: "/v1/responses",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   206,
+			ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	request := &dto.OpenAIResponsesRequest{
+		Input: json.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}`),
+	}
+
+	converted, err := applyChannelTestProtocolStrategy(ctx, info, request, options)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+	require.Same(t, request, converted)
+	require.Equal(t, relayconstant.RelayModeResponses, info.RelayMode)
+}
+
+func TestValidateChannelTestOpaqueReplayUsesNativeCapabilityGate(t *testing.T) {
+	tests := []struct {
+		name        string
+		relayMode   int
+		channelType int
+		settings    dto.ChannelOtherSettings
+		request     dto.Request
+		wantErr     bool
+	}{
+		{
+			name:        "native openai responses",
+			relayMode:   relayconstant.RelayModeResponses,
+			channelType: constant.ChannelTypeOpenAI,
+			request: &dto.OpenAIResponsesRequest{
+				Input: json.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+			},
+		},
+		{
+			name:        "unsupported sub2api responses",
+			relayMode:   relayconstant.RelayModeResponses,
+			channelType: constant.ChannelTypeOpenAI,
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+			},
+			request: &dto.OpenAIResponsesRequest{
+				Input: json.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+			},
+			wantErr: true,
+		},
+		{
+			name:        "synthetic compact",
+			relayMode:   relayconstant.RelayModeResponsesCompact,
+			channelType: constant.ChannelTypeOpenAI,
+			settings: dto.ChannelOtherSettings{
+				ResponsesCompactMode:     dto.ResponsesCompactModeSynthetic,
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+			},
+			request: &dto.OpenAIResponsesCompactionRequest{
+				Input: json.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+			},
+			wantErr: true,
+		},
+		{
+			name:        "native codex compact",
+			relayMode:   relayconstant.RelayModeResponsesCompact,
+			channelType: constant.ChannelTypeCodex,
+			request: &dto.OpenAIResponsesCompactionRequest{
+				Input: json.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{
+				RelayMode: tt.relayMode,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelId:            206,
+					ChannelType:          tt.channelType,
+					ChannelOtherSettings: tt.settings,
+				},
+			}
+
+			err := validateChannelTestOpaqueReplay(info, tt.request)
+
+			if tt.wantErr {
+				require.ErrorIs(t, err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestResponsesCompactionRequestToResponsesRequestPreservesSub2APIFields(t *testing.T) {
@@ -848,9 +1050,8 @@ func TestFinalizeChannelTestRuntimeSummaryIncludesCompactCapabilitySnapshot(t *t
 	require.Equal(t, "native", summary.ChannelCapability["compact_mode_effective"])
 	require.Equal(t, false, summary.ChannelCapability["supports_responses_compact"])
 	require.Equal(t, false, summary.ChannelCapability["supports_rest_previous_response_id"])
-	require.Equal(t, "unknown", summary.ChannelCapability["compaction_item_passthrough_capability"])
-	require.NotContains(t, summary.ChannelCapability, "supports_compaction_item_passthrough")
-	require.Equal(t, false, summary.ChannelCapability["strips_responses_encrypted_reasoning"])
+	require.Equal(t, false, summary.ChannelCapability["supports_compaction_item_passthrough"])
+	require.Equal(t, true, summary.ChannelCapability["strips_responses_encrypted_reasoning"])
 }
 
 func TestFinalizeChannelTestRuntimeSummaryHandlesNilInfo(t *testing.T) {
@@ -893,7 +1094,6 @@ func TestFinalizeChannelTestRuntimeSummaryShowsProxyCompactAsSyntheticOnly(t *te
 	require.Equal(t, "synthetic_summary", summary.ChannelCapability["compact_mode_effective"])
 	require.Equal(t, false, summary.ChannelCapability["supports_responses_compact"])
 	require.Equal(t, false, summary.ChannelCapability["supports_rest_previous_response_id"])
-	require.Equal(t, "unsupported", summary.ChannelCapability["compaction_item_passthrough_capability"])
 	require.Equal(t, false, summary.ChannelCapability["supports_compaction_item_passthrough"])
 }
 
@@ -1027,4 +1227,20 @@ func TestValidateChannelOtherSettingsRejectsNegativeRequestBodyLimit(t *testing.
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "request_body_limit.max_bytes")
+}
+
+func TestValidateChannelRejectsInvalidModelMapping(t *testing.T) {
+	invalidMapping := `{"model-a":""}`
+	channel := &model.Channel{
+		Type:         constant.ChannelTypeOpenAI,
+		Key:          "test-key",
+		Name:         "invalid-model-mapping",
+		Models:       "model-a",
+		Group:        "default",
+		ModelMapping: &invalidMapping,
+	}
+
+	err := validateChannel(channel, false)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "model_mapping_empty_target")
 }

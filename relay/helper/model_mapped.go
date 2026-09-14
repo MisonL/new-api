@@ -1,15 +1,16 @@
 package helper
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,76 +20,70 @@ func ModelMappedHelper(c *gin.Context, info *relaycommon.RelayInfo, request dto.
 	}
 
 	isResponsesCompact := info.RelayMode == relayconstant.RelayModeResponsesCompact
-	originModelName := info.OriginModelName
-	mappingModelName := originModelName
-	compactOriginModelName := originModelName
-	if isResponsesCompact && strings.HasSuffix(originModelName, ratio_setting.CompactModelSuffix) {
-		mappingModelName = strings.TrimSuffix(originModelName, ratio_setting.CompactModelSuffix)
-	} else if isResponsesCompact {
-		compactOriginModelName = ratio_setting.WithCompactModelSuffix(mappingModelName)
+	modelMapping := common.GetContextKeyString(c, constant.ContextKeyChannelModelMapping)
+	if modelMapping == "" {
+		// Keep compatibility with direct helper callers that still populate the
+		// legacy Gin string explicitly instead of the typed channel context key.
+		modelMapping = c.GetString("model_mapping")
 	}
-
-	// map model name
-	modelMapping := c.GetString("model_mapping")
-	if modelMapping != "" && modelMapping != "{}" {
-		modelMap := make(map[string]string)
-		err := common.Unmarshal([]byte(modelMapping), &modelMap)
+	channelID := info.ChannelMeta.ChannelId
+	finalUpstreamModelName := ""
+	mapped := false
+	// Selector diagnostics are the strongest request-scoped source of truth. Use
+	// them before consulting the channel table so a mapping edit made while an
+	// in-flight request is being retried cannot replace the route chosen at
+	// dispatch time.
+	if diagnostics, ok := common.GetContextKeyType[dto.ChannelRouteSelectionDiagnostics](c, constant.ContextKeyChannelRouteDiagnostics); ok &&
+		diagnostics.SelectedChannelID == channelID &&
+		strings.TrimSpace(diagnostics.RequestedModel) == strings.TrimSpace(info.OriginModelName) &&
+		strings.TrimSpace(diagnostics.EffectiveRouteModel) != "" {
+		finalUpstreamModelName = strings.TrimSpace(diagnostics.EffectiveRouteModel)
+		mapped = finalUpstreamModelName != strings.TrimSpace(info.OriginModelName)
+	}
+	if finalUpstreamModelName == "" && channelID > 0 {
+		// A selected channel must carry either selector diagnostics or an
+		// explicitly installed mapping snapshot. Re-reading channel.model_mapping
+		// here would reopen a dispatch-to-submit race in which an administrator's
+		// edit changes the provider model after health and billing were bound.
+		if strings.TrimSpace(modelMapping) == "" {
+			if _, present := common.GetContextKey(c, constant.ContextKeyChannelModelMapping); !present {
+				return fmt.Errorf("channel model mapping snapshot missing: channel_id=%d", channelID)
+			}
+		}
+	}
+	if finalUpstreamModelName == "" {
+		var err error
+		// Direct/specific-channel callers may not have selector diagnostics, but
+		// they still pass through SetupContextForSelectedChannel. Reuse the same
+		// request-scoped resolver with the installed context mapping instead of
+		// reparsing a mutable string independently in the relay helper.
+		channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
+		if channelType == 0 && info.ChannelMeta != nil {
+			channelType = info.ChannelMeta.ChannelType
+		}
+		mappingChannel := &model.Channel{Id: channelID, Type: channelType}
+		if strings.TrimSpace(modelMapping) != "" {
+			mappingChannel.ModelMapping = common.GetPointer(modelMapping)
+		}
+		finalUpstreamModelName, mapped, err = service.ResolveChannelModelMappingForContext(
+			c,
+			mappingChannel,
+			info.OriginModelName,
+			isResponsesCompact,
+		)
 		if err != nil {
-			return fmt.Errorf("unmarshal_model_mapping_failed")
-		}
-
-		// 支持链式模型重定向，最终使用链尾的模型。
-		// compact 模式先允许完整内部模型名命中映射，再回退到剥离 suffix 后的上游默认模型。
-		mappingCandidates := []string{mappingModelName}
-		if isResponsesCompact && originModelName != mappingModelName {
-			mappingCandidates = []string{originModelName, mappingModelName}
-		}
-
-		for _, candidate := range mappingCandidates {
-			currentModel := candidate
-			if isResponsesCompact && candidate == originModelName {
-				if mappedModel, exists := modelMap[currentModel]; exists && mappedModel != "" {
-					info.IsModelMapped = true
-					info.UpstreamModelName = mappedModel
-					break
-				}
-			}
-			visitedModels := map[string]bool{
-				currentModel: true,
-			}
-			candidateMapped := false
-			for {
-				if mappedModel, exists := modelMap[currentModel]; exists && mappedModel != "" {
-					// 模型重定向循环检测，避免无限循环
-					if visitedModels[mappedModel] {
-						if mappedModel == currentModel {
-							break
-						}
-						return errors.New("model_mapping_contains_cycle")
-					}
-					visitedModels[mappedModel] = true
-					currentModel = mappedModel
-					candidateMapped = true
-				} else {
-					break
-				}
-			}
-			if candidateMapped {
-				info.IsModelMapped = true
-				info.UpstreamModelName = currentModel
-				break
-			}
+			return fmt.Errorf("resolve channel model mapping: %w", err)
 		}
 	}
-
-	if isResponsesCompact {
-		finalUpstreamModelName := mappingModelName
-		if info.IsModelMapped && info.UpstreamModelName != "" {
-			finalUpstreamModelName = info.UpstreamModelName
-		}
-		info.UpstreamModelName = finalUpstreamModelName
-		info.OriginModelName = compactOriginModelName
+	if strings.TrimSpace(finalUpstreamModelName) == "" {
+		return fmt.Errorf("resolved channel model is empty: channel_id=%d model=%q", channelID, info.OriginModelName)
 	}
+	info.IsModelMapped = mapped
+	info.UpstreamModelName = finalUpstreamModelName
+	info.ChannelMeta.UpstreamModelName = finalUpstreamModelName
+	// OriginModelName is the client/routing model and is immutable for the
+	// whole request, including Responses compact retries.
+	service.BindChannelHealthRoute(c, info, finalUpstreamModelName)
 	if request != nil {
 		request.SetModelName(info.UpstreamModelName)
 	}

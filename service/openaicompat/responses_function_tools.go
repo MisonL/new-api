@@ -36,7 +36,7 @@ func convertResponsesFunctionToolToChat(tool map[string]any) (dto.ToolCallReques
 	return dto.ToolCallRequest{
 		Type: "function",
 		Function: dto.FunctionRequest{
-			Name:        name,
+			Name:        dto.NormalizeToolName(name),
 			Description: common.Interface2String(tool["description"]),
 			Parameters:  parameters,
 			Strict:      strict,

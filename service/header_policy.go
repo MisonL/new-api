@@ -12,12 +12,24 @@ import (
 )
 
 func ValidateHeaderTemplate(raw string) (map[string]string, error) {
+	return validateHeaderTemplate(raw, false)
+}
+
+// validateHeaderTemplateAllowNull is used only when reading legacy runtime
+// configuration. A null value means that the header is intentionally skipped
+// at request construction time; new configuration still goes through the
+// strict public validator above.
+func validateHeaderTemplateAllowNull(raw string) (map[string]string, error) {
+	return validateHeaderTemplate(raw, true)
+}
+
+func validateHeaderTemplate(raw string, allowNull bool) (map[string]string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil, nil
 	}
 
-	entries, err := parseHeaderTemplateEntries(trimmed)
+	entries, err := parseHeaderTemplateEntries(trimmed, allowNull)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +47,7 @@ type headerTemplateEntry struct {
 	value string
 }
 
-func parseHeaderTemplateEntries(raw string) ([]headerTemplateEntry, error) {
+func parseHeaderTemplateEntries(raw string, allowNull bool) ([]headerTemplateEntry, error) {
 	decoder := common.NewJsonDecoderUseNumber(strings.NewReader(raw))
 
 	token, err := decoder.Token()
@@ -74,7 +86,7 @@ func parseHeaderTemplateEntries(raw string) ([]headerTemplateEntry, error) {
 			return nil, fmt.Errorf("请求头名称规整后重复: %s", name)
 		}
 
-		value, err := decodeHeaderTemplateValue(decoder, name)
+		value, err := decodeHeaderTemplateValue(decoder, name, allowNull)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +143,7 @@ func normalizeHeaderTemplateEntryName(name string) (string, string, error) {
 		return normalized, normalized, nil
 	}
 
-	if !isValidHeaderFieldName(trimmed) {
+	if !dto.IsValidHeaderFieldName(trimmed) {
 		return "", "", fmt.Errorf("请求头名称不合法: %s", name)
 	}
 	normalized := textproto.CanonicalMIMEHeaderKey(trimmed)
@@ -149,21 +161,7 @@ func validateHeaderPassthroughRegexPattern(pattern string, name string) error {
 	return nil
 }
 
-func isValidHeaderFieldName(name string) bool {
-	for i := 0; i < len(name); i++ {
-		switch ch := name[i]; {
-		case ch >= 'a' && ch <= 'z':
-		case ch >= 'A' && ch <= 'Z':
-		case ch >= '0' && ch <= '9':
-		case strings.ContainsRune("!#$%&'*+-.^_`|~", rune(ch)):
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-func decodeHeaderTemplateValue(decoder *common.JsonDecoder, name string) (string, error) {
+func decodeHeaderTemplateValue(decoder *common.JsonDecoder, name string, allowNull bool) (string, error) {
 	var value interface{}
 	if err := common.DecodeJsonFromDecoder(decoder, &value); err != nil {
 		return "", fmt.Errorf("请求头覆盖必须是合法的 JSON 格式")
@@ -172,6 +170,14 @@ func decodeHeaderTemplateValue(decoder *common.JsonDecoder, name string) (string
 	switch v := value.(type) {
 	case string:
 		return v, nil
+	case nil:
+		if !allowNull {
+			return "", fmt.Errorf("请求头值类型不受支持: %s", name)
+		}
+		// A null value explicitly removes/skips the header when reading a
+		// legacy runtime configuration. Duplicate names are still rejected
+		// before this point.
+		return "", nil
 	case bool:
 		return fmt.Sprintf("%t", v), nil
 	case common.JsonNumber:

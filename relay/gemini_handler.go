@@ -52,6 +52,36 @@ func trimModelThinking(modelName string) string {
 	return modelName
 }
 
+// applyGeminiNoThinkingBillingModel selects the no-thinking billing variant
+// without replacing an upstream model that was already resolved by
+// model_mapping. An unmapped request keeps the historical behavior of sending
+// the no-thinking suffix through the Gemini adaptor, which strips it from the
+// provider request while preserving the billing model name.
+func applyGeminiNoThinkingBillingModel(info *relaycommon.RelayInfo, hasBillingConfig func(string) bool) {
+	if info == nil || hasBillingConfig == nil {
+		return
+	}
+
+	originModelName := strings.TrimSpace(info.OriginModelName)
+	if originModelName == "" || strings.HasSuffix(originModelName, "-nothinking") {
+		return
+	}
+
+	noThinkingModelName := originModelName + "-nothinking"
+	if !hasBillingConfig(noThinkingModelName) {
+		return
+	}
+
+	info.OriginModelName = noThinkingModelName
+	// ModelMappedHelper has already established the provider route. Do not
+	// replace that route with a client-facing billing alias. For an unmapped
+	// request, retain the historical suffix so the Gemini adaptor can configure
+	// an explicit zero thinking budget.
+	if !info.IsModelMapped && strings.TrimSpace(info.UpstreamModelName) == originModelName {
+		info.UpstreamModelName = noThinkingModelName
+	}
+}
+
 func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 
@@ -73,16 +103,7 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 	if model_setting.GetGeminiSettings().ThinkingAdapterEnabled {
 		if isNoThinkingRequest(request) {
-			// check is thinking
-			if !strings.Contains(info.OriginModelName, "-nothinking") {
-				// try to get no thinking model price
-				noThinkingModelName := info.OriginModelName + "-nothinking"
-				containPrice := helper.HasModelBillingConfig(noThinkingModelName)
-				if containPrice {
-					info.OriginModelName = noThinkingModelName
-					info.UpstreamModelName = noThinkingModelName
-				}
-			}
+			applyGeminiNoThinkingBillingModel(info, helper.HasModelBillingConfig)
 		}
 		if request.GenerationConfig.ThinkingConfig == nil {
 			gemini.ThinkingAdaptor(request, info)
@@ -142,6 +163,8 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
+		info.UpstreamRequestBodySize = storage.Size()
+		info.UpstreamRequestGetBody = func() (io.ReadCloser, error) { return common.NewBodyStorageReader(storage) }
 		requestBody = common.ReaderOnly(storage)
 	} else {
 		// 使用 ConvertGeminiRequest 转换请求格式
@@ -190,6 +213,7 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 	usage, openaiErr := adaptor.DoResponse(c, resp.(*http.Response), info)
 	if openaiErr != nil {
+		settleUsageAfterResponseError(c, info, usage)
 		service.ResetStatusCode(openaiErr, statusCodeMappingStr)
 		return openaiErr
 	}

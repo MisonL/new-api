@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -19,12 +20,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func applySystemPromptIfNeeded(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) {
+func applySystemPromptIfNeeded(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) error {
 	if info == nil || request == nil {
-		return
+		return nil
 	}
 	if info.ChannelSetting.SystemPrompt == "" {
-		return
+		return nil
 	}
 
 	systemRole := request.GetSystemRoleName()
@@ -42,11 +43,11 @@ func applySystemPromptIfNeeded(c *gin.Context, info *relaycommon.RelayInfo, requ
 			Content: info.ChannelSetting.SystemPrompt,
 		}
 		request.Messages = append([]dto.Message{systemMessage}, request.Messages...)
-		return
+		return nil
 	}
 
 	if !info.ChannelSetting.SystemPromptOverride {
-		return
+		return nil
 	}
 
 	common.SetContextKey(c, constant.ContextKeySystemPromptOverride, true)
@@ -56,9 +57,12 @@ func applySystemPromptIfNeeded(c *gin.Context, info *relaycommon.RelayInfo, requ
 		}
 		if message.IsStringContent() {
 			request.Messages[i].SetStringContent(info.ChannelSetting.SystemPrompt + "\n" + message.StringContent())
-			return
+			return nil
 		}
-		contents := message.ParseContent()
+		contents, err := message.ParseContentStrict()
+		if err != nil {
+			return fmt.Errorf("cannot apply system prompt to messages[%d]: %w", i, err)
+		}
 		contents = append([]dto.MediaContent{
 			{
 				Type: dto.ContentTypeText,
@@ -66,8 +70,9 @@ func applySystemPromptIfNeeded(c *gin.Context, info *relaycommon.RelayInfo, requ
 			},
 		}, contents...)
 		request.Messages[i].Content = contents
-		return
+		return nil
 	}
+	return nil
 }
 
 func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.GeneralOpenAIRequest) (*dto.Usage, *types.NewAPIError) {
@@ -93,7 +98,9 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		return nil, types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
 	}
 
-	responsesReq, err := service.ChatCompletionsRequestToResponsesRequest(&overriddenChatReq)
+	responsesReq, err := service.ChatCompletionsRequestToResponsesRequestWithOptions(&overriddenChatReq, service.ChatCompletionsToResponsesOptions{
+		PreserveReasoningContent: shouldPreservePlainTextReasoningForResponses(info, &overriddenChatReq),
+	})
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
@@ -101,11 +108,18 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 
 	savedRelayMode := info.RelayMode
 	savedRequestURLPath := info.RequestURLPath
+	previousBridgeMarker, hadBridgeMarker := common.GetContextKey(c, constant.ContextKeyResponsesToolCapabilityObservationBridged)
 	defer func() {
 		info.RelayMode = savedRelayMode
 		info.RequestURLPath = savedRequestURLPath
+		if hadBridgeMarker {
+			common.SetContextKey(c, constant.ContextKeyResponsesToolCapabilityObservationBridged, previousBridgeMarker)
+		} else {
+			common.SetContextKey(c, constant.ContextKeyResponsesToolCapabilityObservationBridged, false)
+		}
 	}()
 
+	common.SetContextKey(c, constant.ContextKeyResponsesToolCapabilityObservationBridged, true)
 	info.RelayMode = relayconstant.RelayModeResponses
 	info.RequestURLPath = "/v1/responses"
 
@@ -161,4 +175,37 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		return nil, newApiErr
 	}
 	return usage, nil
+}
+
+// shouldPreservePlainTextReasoningForResponses enables DeepSeek's documented
+// plain-text reasoning input item without sending that extension to native
+// OpenAI Responses endpoints, which use opaque reasoning context instead.
+func shouldPreservePlainTextReasoningForResponses(info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) bool {
+	if request == nil {
+		return false
+	}
+
+	channelType := 0
+	profile := dto.ResponsesUpstreamProfile("")
+	if info != nil && info.ChannelMeta != nil {
+		channelType = info.ChannelType
+		profile = info.ChannelOtherSettings.NormalizedResponsesUpstreamProfile()
+	}
+	if profile == dto.ResponsesUpstreamProfileOfficialOpenAI {
+		return false
+	}
+	if channelType == constant.ChannelTypeDeepSeek {
+		return true
+	}
+
+	models := []string{request.Model}
+	if info != nil {
+		models = append(models, info.UpstreamModelName, info.OriginModelName)
+	}
+	for _, model := range models {
+		if service.IsDeepSeekModelName(model) {
+			return true
+		}
+	}
+	return false
 }

@@ -81,7 +81,7 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 			ReqID:     generateRequestID(),
 			Text:      request.Input,
 			Operation: "submit",
-			Model:     info.OriginModelName,
+			Model:     request.Model,
 		},
 	}
 
@@ -89,6 +89,12 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 		if err = json.Unmarshal(request.Metadata, &volcRequest); err != nil {
 			return nil, fmt.Errorf("error unmarshalling metadata to volcengine request: %w", err)
 		}
+	}
+	// Keep the selected effective model authoritative even when metadata carries
+	// a provider request fragment. Sending the client alias here bypasses the
+	// channel model_mapping and makes mapped TTS calls fail at the provider.
+	if strings.TrimSpace(request.Model) != "" {
+		volcRequest.Request.Model = request.Model
 	}
 
 	c.Set(contextKeyTTSRequest, volcRequest)

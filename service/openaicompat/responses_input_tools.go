@@ -23,6 +23,74 @@ func stringifyResponsesOutput(value any) (string, error) {
 	}
 }
 
+// parseResponsesReasoningContent decodes DeepSeek's documented Responses
+// reasoning item shape. DeepSeek uses content[] with reasoning_text parts and
+// merges the item into the adjacent assistant message. The returned boolean
+// distinguishes an explicit empty reasoning item from an absent item so an
+// empty reasoning_content value is not silently dropped on a tool turn.
+func parseResponsesReasoningContent(item map[string]any) (string, bool, error) {
+	if item == nil {
+		return "", false, fmt.Errorf("reasoning item is required")
+	}
+	rawContent, ok := item["content"]
+	if !ok || rawContent == nil {
+		return "", false, fmt.Errorf("reasoning content is required")
+	}
+	parts, ok := rawContent.([]any)
+	if !ok {
+		return "", false, fmt.Errorf("reasoning content must be an array")
+	}
+
+	var builder strings.Builder
+	for index, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if !ok {
+			return "", false, fmt.Errorf("reasoning content[%d] must be an object", index)
+		}
+		partType := strings.TrimSpace(common.Interface2String(part["type"]))
+		if partType != "reasoning_text" {
+			return "", false, fmt.Errorf("reasoning content[%d] type %q is not supported in chat compatibility mode", index, partType)
+		}
+		text, ok := part["text"].(string)
+		if !ok {
+			return "", false, fmt.Errorf("reasoning content[%d].text must be a string", index)
+		}
+		builder.WriteString(text)
+	}
+	return builder.String(), true, nil
+}
+
+func appendMessageReasoningContent(message *dto.Message, text string) {
+	if message == nil {
+		return
+	}
+	if message.ReasoningContent != nil {
+		*message.ReasoningContent += text
+		message.ThinkingContent = nil
+		message.Reasoning = nil
+		return
+	}
+	if message.ThinkingContent != nil {
+		combined := *message.ThinkingContent + text
+		message.ReasoningContent = &combined
+		message.ThinkingContent = nil
+		message.Reasoning = nil
+		return
+	}
+	if message.Reasoning != nil {
+		combined := *message.Reasoning + text
+		message.ReasoningContent = &combined
+		message.Reasoning = nil
+		return
+	}
+	reasoning := text
+	message.ReasoningContent = &reasoning
+}
+
+func messageHasReasoningContent(message *dto.Message) bool {
+	return message != nil && (message.ReasoningContent != nil || message.ThinkingContent != nil || message.Reasoning != nil)
+}
+
 func responsesToolOutputToChatContent(itemType string, item map[string]any) (string, error) {
 	output, exists := item["output"]
 	if !exists {
@@ -63,7 +131,11 @@ func convertResponsesContentPartToChat(part map[string]any) (dto.MediaContent, e
 	partType := strings.TrimSpace(common.Interface2String(part["type"]))
 	switch partType {
 	case "input_text", "output_text", dto.ContentTypeText:
-		return dto.MediaContent{Type: dto.ContentTypeText, Text: common.Interface2String(part["text"])}, nil
+		text, ok := part["text"].(string)
+		if !ok {
+			return dto.MediaContent{}, fmt.Errorf("%s.text must be a string", partType)
+		}
+		return dto.MediaContent{Type: dto.ContentTypeText, Text: text}, nil
 	case "input_image":
 		image := part["image_url"]
 		if image == nil {
@@ -72,31 +144,87 @@ func convertResponsesContentPartToChat(part map[string]any) (dto.MediaContent, e
 		if image == nil {
 			return dto.MediaContent{}, fmt.Errorf("input_image.image_url is required")
 		}
-		return dto.MediaContent{Type: dto.ContentTypeImageURL, ImageUrl: image}, nil
+		imageObject := map[string]any{}
+		switch value := image.(type) {
+		case string:
+			imageObject["url"] = value
+		case map[string]any:
+			for key, item := range value {
+				imageObject[key] = item
+			}
+		default:
+			return dto.MediaContent{}, fmt.Errorf("input_image.image_url must be a string or object")
+		}
+		if strings.TrimSpace(common.Interface2String(imageObject["url"])) == "" {
+			return dto.MediaContent{}, fmt.Errorf("input_image.image_url.url is required")
+		}
+		return dto.MediaContent{Type: dto.ContentTypeImageURL, ImageUrl: imageObject}, nil
 	case "input_audio":
 		audio := part["input_audio"]
 		if audio == nil {
 			return dto.MediaContent{}, fmt.Errorf("input_audio.input_audio is required")
 		}
-		return dto.MediaContent{Type: dto.ContentTypeInputAudio, InputAudio: audio}, nil
+		audioObject, ok := audio.(map[string]any)
+		if !ok {
+			return dto.MediaContent{}, fmt.Errorf("input_audio.input_audio must be an object")
+		}
+		data, dataOK := audioObject["data"].(string)
+		format, formatOK := audioObject["format"].(string)
+		if !dataOK || strings.TrimSpace(data) == "" || !formatOK || strings.TrimSpace(format) == "" {
+			return dto.MediaContent{}, fmt.Errorf("input_audio.input_audio.data and format are required")
+		}
+		return dto.MediaContent{Type: dto.ContentTypeInputAudio, InputAudio: map[string]any{"data": data, "format": format}}, nil
 	case "input_file":
 		file := part["file"]
-		if file == nil {
-			file = part["file_url"]
+		fileObject := map[string]any{}
+		if file != nil {
+			var ok bool
+			fileObject, ok = file.(map[string]any)
+			if !ok {
+				return dto.MediaContent{}, fmt.Errorf("input_file.file must be an object")
+			}
+			fileObject = cloneStringAnyMap(fileObject)
 		}
-		if file == nil {
-			return dto.MediaContent{}, fmt.Errorf("input_file.file is required")
+		for _, key := range []string{"file_id", "file_data", "file_url", "filename"} {
+			if value, exists := part[key]; exists && value != nil {
+				fileObject[key] = value
+			}
 		}
-		return dto.MediaContent{Type: dto.ContentTypeFile, File: file}, nil
+		if strings.TrimSpace(common.Interface2String(fileObject["file_id"])) == "" &&
+			strings.TrimSpace(common.Interface2String(fileObject["file_data"])) == "" &&
+			strings.TrimSpace(common.Interface2String(fileObject["file_url"])) == "" {
+			return dto.MediaContent{}, fmt.Errorf("input_file requires file_id, file_data, or file_url")
+		}
+		return dto.MediaContent{Type: dto.ContentTypeFile, File: fileObject}, nil
 	case "input_video":
 		video := part["video_url"]
 		if video == nil {
 			return dto.MediaContent{}, fmt.Errorf("input_video.video_url is required")
 		}
-		return dto.MediaContent{Type: dto.ContentTypeVideoUrl, VideoUrl: video}, nil
+		videoURL := ""
+		switch value := video.(type) {
+		case string:
+			videoURL = value
+		case map[string]any:
+			videoURL = common.Interface2String(value["url"])
+		default:
+			return dto.MediaContent{}, fmt.Errorf("input_video.video_url must be a string or object")
+		}
+		if strings.TrimSpace(videoURL) == "" {
+			return dto.MediaContent{}, fmt.Errorf("input_video.video_url.url is required")
+		}
+		return dto.MediaContent{Type: dto.ContentTypeVideoUrl, VideoUrl: map[string]any{"url": videoURL}}, nil
 	default:
 		return dto.MediaContent{}, fmt.Errorf("input content type %q is not supported in chat compatibility mode", partType)
 	}
+}
+
+func cloneStringAnyMap(value map[string]any) map[string]any {
+	cloned := make(map[string]any, len(value))
+	for key, item := range value {
+		cloned[key] = item
+	}
+	return cloned
 }
 
 func flushPendingUserMessage(messages *[]dto.Message, pending []dto.MediaContent) []dto.MediaContent {
@@ -142,38 +270,12 @@ func parseResponsesToolSearchOutputTools(item map[string]any) ([]common.RawMessa
 	return parsedTools, nil
 }
 
-func collectResponsesToolSearchOutputTools(raw common.RawMessage) ([]common.RawMessage, error) {
-	if common.GetJsonType(raw) != "array" {
-		return nil, nil
-	}
-	var inputItems []map[string]any
-	if err := common.Unmarshal(raw, &inputItems); err != nil {
-		return nil, fmt.Errorf("failed to parse input for tool_search_output: %w", err)
-	}
-	var tools []common.RawMessage
-	for index, item := range inputItems {
-		if strings.TrimSpace(common.Interface2String(item["type"])) != "tool_search_output" {
-			continue
-		}
-		outputTools, err := parseResponsesToolSearchOutputTools(item)
-		if err != nil {
-			return nil, fmt.Errorf("input[%d] %w", index, err)
-		}
-		tools = append(tools, outputTools...)
-	}
-	return tools, nil
-}
-
 func effectiveResponsesTools(req *dto.OpenAIResponsesRequest) (common.RawMessage, error) {
 	tools, err := req.EffectiveTools()
 	if err != nil {
 		return nil, err
 	}
-	loadedTools, err := collectResponsesToolSearchOutputTools(req.Input)
-	if err != nil {
-		return nil, err
-	}
-	return marshalResponsesTools(append(tools, loadedTools...))
+	return marshalResponsesTools(tools)
 }
 
 func convertResponsesToolInputItem(itemType string, item map[string]any, options ResponsesChatCompatibilityOptions) (dto.Message, bool, error) {
@@ -186,6 +288,8 @@ func convertResponsesToolInputItem(itemType string, item map[string]any, options
 		}
 		if namespace := strings.TrimSpace(common.Interface2String(item["namespace"])); namespace != "" {
 			name = flattenResponsesNamespaceToolName(namespace, name)
+		} else {
+			name = dto.NormalizeToolName(name)
 		}
 		arguments, err := stringifyResponsesOutput(item["arguments"])
 		if err != nil {
@@ -303,6 +407,14 @@ func appendResponsesToolMessage(messages *[]dto.Message, message dto.Message) {
 	last := &(*messages)[len(*messages)-1]
 	if last.Role != "assistant" {
 		*messages = append(*messages, message)
+		return
+	}
+	if message.StringContent() == "" {
+		if messageHasReasoningContent(&message) {
+			appendMessageReasoningContent(last, message.GetReasoningContent())
+		}
+		lastCalls := last.ParseToolCalls()
+		last.SetToolCalls(append(lastCalls, calls...))
 		return
 	}
 	lastCalls := last.ParseToolCalls()

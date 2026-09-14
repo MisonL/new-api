@@ -10,7 +10,12 @@ type TaskError struct {
 	Data       any    `json:"data"`
 	StatusCode int    `json:"-"`
 	LocalError bool   `json:"-"`
-	Error      error  `json:"-"`
+	// NoRefund marks an upstream-accepted but locally ambiguous submission.
+	// The provider may already have started work, so refunding the local
+	// pre-consume would create a billing mismatch. This is process-local
+	// metadata and is never exposed in the task error response.
+	NoRefund bool  `json:"-"`
+	Error    error `json:"-"`
 }
 
 type TaskData interface {

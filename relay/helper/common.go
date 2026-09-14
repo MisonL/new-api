@@ -191,6 +191,19 @@ func OpenAIErrorEvent(c *gin.Context, openAIError types.OpenAIError) error {
 	return FlushWriter(c)
 }
 
+// OpenAIChatErrorEvent writes an OpenAI Chat Completions-compatible terminal
+// error for a stream that has already committed one or more chat chunks. Chat
+// clients expect the error object directly in a data event; the Responses
+// protocol's `event: error` envelope is not interchangeable here.
+func OpenAIChatErrorEvent(c *gin.Context, openAIError types.OpenAIError) error {
+	payload := map[string]any{"error": openAIError}
+	jsonData, err := common.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("error marshalling openai chat error event: %w", err)
+	}
+	return StringData(c, string(jsonData))
+}
+
 // Done writes the terminal [DONE] SSE marker.
 func Done(c *gin.Context) {
 	_ = StringData(c, "[DONE]")

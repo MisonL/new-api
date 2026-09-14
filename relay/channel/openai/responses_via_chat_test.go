@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -315,6 +316,345 @@ func TestOaiChatToResponsesStreamHandler(t *testing.T) {
 	require.Contains(t, output, "\"name\":\"lookup\"")
 	require.Contains(t, output, "\"arguments\":\"{\\\"q\\\":\\\"x\\\"}\"")
 	require.Contains(t, output, "\"total_tokens\":15")
+}
+
+func TestOaiChatToResponsesStreamHandlerMapsIncompleteFinishReasons(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		finish     string
+		wantReason string
+	}{
+		{name: "length", finish: "length", wantReason: "max_output_tokens"},
+		{name: "content filter", finish: "content_filter", wantReason: "content_filter"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			finishReason := testCase.finish
+			text := "partial answer"
+			body := marshalStreamChunk(t, dto.ChatCompletionsStreamResponse{
+				Choices: []dto.ChatCompletionsStreamResponseChoice{{
+					Index: 0,
+					Delta: dto.ChatCompletionsStreamResponseChoiceDelta{Content: &text},
+				}},
+			}) + marshalStreamChunk(t, dto.ChatCompletionsStreamResponse{
+				Choices: []dto.ChatCompletionsStreamResponseChoice{{
+					Index:        0,
+					FinishReason: &finishReason,
+				}},
+			}) + "data: [DONE]\n"
+
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			info := &relaycommon.RelayInfo{
+				DisablePing:  true,
+				StreamStatus: relaycommon.NewStreamStatus(),
+				ChannelMeta:  &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5"},
+			}
+
+			usage, apiErr := OaiChatToResponsesStreamHandler(c, info, &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(body)),
+			})
+
+			require.Nil(t, apiErr)
+			require.NotNil(t, usage)
+			require.Contains(t, recorder.Body.String(), "event: response.incomplete")
+			require.NotContains(t, recorder.Body.String(), "event: response.completed")
+			events := recordedResponsesSSEEvents(t, recorder.Body.String())
+			var terminal *dto.OpenAIResponsesResponse
+			for _, event := range events {
+				if event.eventType == "response.incomplete" {
+					terminal = event.payload.Response
+					break
+				}
+			}
+			require.NotNil(t, terminal)
+			require.JSONEq(t, `"incomplete"`, string(terminal.Status))
+			require.NotNil(t, terminal.IncompleteDetails)
+			require.Equal(t, testCase.wantReason, terminal.IncompleteDetails.Reason)
+		})
+	}
+}
+
+func TestOaiChatToResponsesStreamHandlerPreservesReasoningText(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+	})
+
+	reasoningOne := "first "
+	reasoningTwo := "thought"
+	answer := "answer"
+	finishReason := "stop"
+	usage := &dto.Usage{PromptTokens: 11, CompletionTokens: 7, TotalTokens: 18}
+	body := strings.Builder{}
+	body.WriteString(marshalStreamChunk(t, dto.ChatCompletionsStreamResponse{
+		Id:      "chatcmpl_reasoning",
+		Object:  "chat.completion.chunk",
+		Created: 1710000002,
+		Model:   "deepseek-v4-flash",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Index: 0,
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{Role: "assistant"},
+		}},
+	}))
+	body.WriteString(marshalStreamChunk(t, dto.ChatCompletionsStreamResponse{
+		Id:      "chatcmpl_reasoning",
+		Object:  "chat.completion.chunk",
+		Created: 1710000002,
+		Model:   "deepseek-v4-flash",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Index: 0,
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{ReasoningContent: &reasoningOne},
+		}},
+	}))
+	body.WriteString(marshalStreamChunk(t, dto.ChatCompletionsStreamResponse{
+		Id:      "chatcmpl_reasoning",
+		Object:  "chat.completion.chunk",
+		Created: 1710000002,
+		Model:   "deepseek-v4-flash",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Index: 0,
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{ReasoningContent: &reasoningTwo},
+		}},
+	}))
+	body.WriteString(marshalStreamChunk(t, dto.ChatCompletionsStreamResponse{
+		Id:      "chatcmpl_reasoning",
+		Object:  "chat.completion.chunk",
+		Created: 1710000002,
+		Model:   "deepseek-v4-flash",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Index: 0,
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{Content: &answer},
+		}},
+	}))
+	body.WriteString(marshalStreamChunk(t, dto.ChatCompletionsStreamResponse{
+		Id:      "chatcmpl_reasoning",
+		Object:  "chat.completion.chunk",
+		Created: 1710000002,
+		Model:   "deepseek-v4-flash",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Index:        0,
+			FinishReason: &finishReason,
+		}},
+		Usage: usage,
+	}))
+	body.WriteString("data: [DONE]\n")
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		DisablePing:  true,
+		StreamStatus: relaycommon.NewStreamStatus(),
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "deepseek-v4-flash",
+		},
+	}
+
+	convertedUsage, apiErr := OaiChatToResponsesStreamHandler(c, info, &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body.String())),
+	})
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, convertedUsage)
+	require.Equal(t, 18, convertedUsage.TotalTokens)
+	events := recordedResponsesSSEEvents(t, recorder.Body.String())
+	reasoningDeltaCount := 0
+	for _, event := range events {
+		if event.eventType == "response.reasoning_text.delta" {
+			reasoningDeltaCount++
+		}
+	}
+	require.Equal(t, 2, reasoningDeltaCount)
+
+	completed := completedResponseFromSSE(t, events)
+	require.Len(t, completed.Output, 2)
+	require.Equal(t, "reasoning", completed.Output[0].Type)
+	require.Equal(t, "reasoning_text", completed.Output[0].Content[0].Type)
+	require.Equal(t, "first thought", completed.Output[0].Content[0].Text)
+	require.Equal(t, "message", completed.Output[1].Type)
+	require.Equal(t, "answer", completed.Output[1].Content[0].Text)
+}
+
+func TestOaiChatToResponsesStreamHandlerReturnsRateLimitBeforeOutput(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"error\":{\"message\":\"rate limited\",\"code\":\"rate_limit_exceeded\"}}\n\n",
+		)),
+	}
+	info := &relaycommon.RelayInfo{
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5"},
+	}
+
+	usage, apiErr := OaiChatToResponsesStreamHandler(c, info, resp)
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.Equal(t, http.StatusTooManyRequests, apiErr.StatusCode)
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiChatToResponsesStreamHandlerKeepsCommittedRateLimitTerminal(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+	})
+
+	roleChunk := dto.ChatCompletionsStreamResponse{
+		Id:      "chatcmpl_test",
+		Object:  "chat.completion.chunk",
+		Created: 1710000001,
+		Model:   "gpt-5",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Index: 0,
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{Role: "assistant"},
+		}},
+	}
+	roleData := marshalStreamChunk(t, roleChunk)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			roleData + "data: {\"error\":{\"message\":\"rate limited\",\"type\":\"rate_limit_error\",\"code\":\"rate_limit_exceeded\"}}\n\n",
+		)),
+	}
+	info := &relaycommon.RelayInfo{
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5"},
+	}
+
+	usage, apiErr := OaiChatToResponsesStreamHandler(c, info, resp)
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.Equal(t, http.StatusOK, apiErr.StatusCode)
+	require.NotEmpty(t, recorder.Body.String())
+}
+
+func TestOaiChatToResponsesHandlerMapsRateLimitErrorBody(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"error":{"message":"rate limited","code":"rate_limit_exceeded"}}`,
+		)),
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5"},
+	}
+
+	usage, apiErr := OaiChatToResponsesHandler(c, info, resp)
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.Equal(t, http.StatusTooManyRequests, apiErr.StatusCode)
+}
+
+func TestOaiChatToResponsesHandlerMapsFailedSSEBody(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`event: response.failed`,
+			`data: {"type":"response.failed","error":{"message":"invalid input","type":"invalid_request_error","param":"input","code":"invalid_type"}}`,
+			``,
+		}, "\n"))),
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5"},
+	}
+
+	usage, apiErr := OaiChatToResponsesHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+	require.Equal(t, types.ErrorCode("invalid_type"), apiErr.GetErrorCode())
+	require.Equal(t, "response.failed", common.GetContextKeyString(c, constant.ContextKeyResponsesErrorEvent))
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiChatToResponsesHandlerClassifiesInterruptedBodyReadAsTransportFailure(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.6-sol"},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       responsesErrorReadCloser{err: io.ErrUnexpectedEOF},
+	}
+
+	usage, apiErr := OaiChatToResponsesHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
+	require.Equal(t, types.ErrorCodeUpstreamTransportInterrupted, apiErr.GetErrorCode())
+	require.False(t, types.IsSkipRetryError(apiErr))
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiChatToResponsesStreamHandlerRejectsTruncatedUpstreamStream(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+	})
+
+	roleChunk := dto.ChatCompletionsStreamResponse{
+		Id:      "chatcmpl_test",
+		Object:  "chat.completion.chunk",
+		Created: 1710000001,
+		Model:   "gpt-5",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Index: 0,
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{Role: "assistant"},
+		}},
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(marshalStreamChunk(t, roleChunk))),
+	}
+	info := &relaycommon.RelayInfo{
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5"},
+	}
+
+	usage, apiErr := OaiChatToResponsesStreamHandler(c, info, resp)
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
+	require.Equal(t, types.ErrorCodeUpstreamTransportInterrupted, apiErr.GetErrorCode())
+	require.NotContains(t, recorder.Body.String(), "event: response.completed")
 }
 
 func TestOaiChatToResponsesStreamHandlerRejectsCustomToolCallByDefault(t *testing.T) {

@@ -160,6 +160,62 @@ func TestStreamStatus_IsNormalEnd_NilSafe(t *testing.T) {
 	assert.True(t, s.IsNormalEnd())
 }
 
+func TestStreamStatus_IsSuccessfulEndRequiresNoNonBenignErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		configure func(*StreamStatus)
+		want      bool
+	}{
+		{
+			name: "done without errors",
+			configure: func(s *StreamStatus) {
+				s.SetEndReason(StreamEndReasonDone, nil)
+			},
+			want: true,
+		},
+		{
+			name: "folded protocol handler stop without error",
+			configure: func(s *StreamStatus) {
+				s.SetEndReason(StreamEndReasonHandlerStop, nil)
+			},
+			want: true,
+		},
+		{
+			name: "handler stop with fatal error",
+			configure: func(s *StreamStatus) {
+				s.SetEndReason(StreamEndReasonHandlerStop, fmt.Errorf("upstream failure"))
+			},
+			want: false,
+		},
+		{
+			name: "done with non benign soft error",
+			configure: func(s *StreamStatus) {
+				s.RecordError("malformed upstream event")
+				s.SetEndReason(StreamEndReasonDone, nil)
+			},
+			want: false,
+		},
+		{
+			name: "done with benign disconnect error",
+			configure: func(s *StreamStatus) {
+				s.RecordError("request context done: context canceled")
+				s.SetEndReason(StreamEndReasonDone, nil)
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewStreamStatus()
+			tt.configure(s)
+			assert.Equal(t, tt.want, s.IsSuccessfulEnd())
+		})
+	}
+}
+
 func TestIsBenignDisconnectErrorMessage(t *testing.T) {
 	t.Parallel()
 

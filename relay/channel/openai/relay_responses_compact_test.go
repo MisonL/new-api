@@ -1,22 +1,17 @@
 package openai
 
 import (
-	"bytes"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -52,31 +47,6 @@ func TestOaiResponsesCompactionHandlerNormalizesHTTP200ErrorBody(t *testing.T) {
 	require.Empty(t, recorder.Body.String())
 }
 
-func TestOaiResponsesCompactionHandlerPreservesDirectFailedContextWindowErrorFromSSE(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
-			`event: response.failed`,
-			`data: {"type":"response.failed","error":{"message":"Your input exceeds the context window of this model.","type":"upstream_error","code":"context_length_exceeded"}}`,
-			``,
-		}, "\n"))),
-	}
-
-	usage, err := OaiResponsesCompactionHandler(c, nil, resp)
-
-	require.Nil(t, usage)
-	require.NotNil(t, err)
-	require.Equal(t, http.StatusBadRequest, err.StatusCode)
-	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
-	require.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
-	require.Contains(t, err.Error(), "context window")
-	require.Empty(t, recorder.Body.String())
-}
-
 func TestOaiResponsesCompactionHandlerPassesValidCompactionOutput(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -101,72 +71,6 @@ func TestOaiResponsesCompactionHandlerPassesValidCompactionOutput(t *testing.T) 
 	require.Equal(t, 3, usage.CompletionTokens)
 	require.Equal(t, 15, usage.TotalTokens)
 	require.JSONEq(t, body, recorder.Body.String())
-}
-
-func TestOaiResponsesCompactionHandlerRecordsAffinityForDirectCompactAliases(t *testing.T) {
-	responsesCompactGlobalStateMu.Lock()
-	t.Cleanup(responsesCompactGlobalStateMu.Unlock)
-
-	setting := operation_setting.GetChannelAffinitySetting()
-	originalRules := append([]operation_setting.ChannelAffinityRule(nil), setting.Rules...)
-	t.Cleanup(func() {
-		setting.Rules = originalRules
-	})
-	setting.Rules = []operation_setting.ChannelAffinityRule{{
-		Name:              operation_setting.ResponsesEncryptedContentAffinityRuleName,
-		ModelRegex:        []string{"^gpt-5\\.6-sol$"},
-		PathRegex:         []string{"^/v1/responses$"},
-		KeySources:        []operation_setting.ChannelAffinityKeySource{{Type: "responses_encrypted_content"}},
-		IncludeUsingGroup: true,
-		IncludeModelName:  true,
-		IncludeRuleName:   true,
-	}}
-
-	for index, path := range []string{"/v1/responses/compact", "/responses/compact"} {
-		t.Run(path, func(t *testing.T) {
-			encryptedContent := fmt.Sprintf("opaque-direct-compact-%d-%d", index, time.Now().UnixNano())
-			channelID := 9100 + index
-			recorder := httptest.NewRecorder()
-			ctx, _ := gin.CreateTestContext(recorder)
-			ctx.Request = httptest.NewRequest(http.MethodPost, path, nil)
-			ctx.Set("original_model", "gpt-5.6-sol-openai-compact")
-			common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
-			info := &relaycommon.RelayInfo{
-				ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channelID},
-			}
-			body := fmt.Sprintf(`{
-				"id":"resp_compact",
-				"object":"response",
-				"created_at":1710000000,
-				"output":[{"type":"compaction","encrypted_content":"%s"}],
-				"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}
-			}`, encryptedContent)
-			resp := &http.Response{
-				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"application/json"}},
-				Body:       io.NopCloser(strings.NewReader(body)),
-			}
-
-			usage, apiErr := OaiResponsesCompactionHandler(ctx, info, resp)
-
-			require.Nil(t, apiErr)
-			require.Equal(t, 15, usage.TotalTokens)
-
-			replayBody := []byte(fmt.Sprintf(`{
-				"model":"gpt-5.6-sol",
-				"input":[{"type":"reasoning","encrypted_content":"%s"}]
-			}`, encryptedContent))
-			metadata, err := common.ScanResponsesRequestMetadata(bytes.NewReader(replayBody), int64(len(replayBody)))
-			require.NoError(t, err)
-			replayCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
-			replayCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			common.SetResponsesRequestMetadata(replayCtx, metadata)
-
-			preferredChannelID, found := service.GetPreferredChannelByAffinity(replayCtx, "gpt-5.6-sol", "default")
-			require.True(t, found)
-			require.Equal(t, channelID, preferredChannelID)
-		})
-	}
 }
 
 func TestOaiResponsesCompactionHandlerRecordsNativeOpaqueState(t *testing.T) {

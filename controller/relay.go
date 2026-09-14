@@ -67,12 +67,29 @@ func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewA
 	return err
 }
 
+func finalizeRelayChannelHealthProbe(c *gin.Context, info *relaycommon.RelayInfo, succeeded bool) {
+	if succeeded && relayRequestProducedNormalEnd(info) {
+		service.MarkChannelHealthProbeSuccess(c, info)
+		return
+	}
+	service.ReleaseChannelHealthProbe(c, info)
+}
+
+func relayRequestProducedNormalEnd(info *relaycommon.RelayInfo) bool {
+	if info == nil || !info.IsStream {
+		return true
+	}
+	if info.StreamStatus == nil {
+		return false
+	}
+	return info.StreamStatus.IsSuccessfulEnd()
+}
+
 // Relay handles OpenAI-compatible relay requests and applies channel retry logic.
 func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	requestId := c.GetString(common.RequestIdKey)
 	userSetting, _ := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
-	var opaqueResponsesReplay bool
 	//group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 	//originalModel := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 
@@ -94,7 +111,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
-			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
+			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.MaskSensitiveErrorWithStatusCode())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			writeRelayErrorResponse(c, relayFormat, relayInfo, ws, newAPIError)
 		}
@@ -110,7 +127,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		return
 	}
-	opaqueResponsesReplay, err = detectAndMarkOpaqueResponsesReplay(c, request)
+	opaqueResponsesReplay, err := detectAndMarkOpaqueResponsesReplay(c, request)
 	if err != nil {
 		newAPIError = types.NewErrorWithStatusCode(
 			fmt.Errorf("detect opaque Responses encrypted replay: %w", err),
@@ -131,6 +148,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	defer func() {
+		finalizeRelayChannelHealthProbe(c, relayInfo, newAPIError == nil)
+	}()
+	defer func() {
+		finalizeResponsesRoutingTrace(c, newAPIError)
+	}()
+	// The selected channel lease is attempt-scoped. The loop releases it before
+	// a retry; this final defer covers early returns and panics as well.
+	defer service.ReleaseChannelConcurrency(c)
 	service.EnsureResponsesBootstrapRecoveryState(c, relayInfo.IsStream)
 	service.ApplyResponsesBootstrapRecoveryMetric(c, relayInfo)
 
@@ -175,6 +201,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	defer func() {
 		// Only return quota if downstream failed and quota was actually pre-consumed
 		if newAPIError != nil {
+			service.ReleaseChannelConcurrency(c)
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
 			if relayInfo.Billing != nil {
 				relayInfo.Billing.Refund(c)
@@ -198,12 +225,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			relayInfo.RetryIndex = retryParam.GetRetry()
 			channel, channelErr := getChannel(c, relayInfo, retryParam)
 			if channelErr != nil {
-				logger.LogError(c, channelErr.Error())
+				logger.LogError(c, common.LocalLogPreview(channelErr.MaskSensitiveErrorWithStatusCode()))
 				newAPIError = channelErr
+				recordTerminalResponsesRoutingErrorLog(c, relayInfo, channelErr)
 				break
 			}
 
-			addUsedChannel(c, channel.Id)
+			attemptIndex := -1
+			if shouldTrackResponsesRouting(relayInfo) {
+				attemptIndex = beginResponsesRoutingAttempt(c, channel.Id)
+			}
 			bodyStorage, bodyErr := common.GetBodyStorage(c)
 			if bodyErr != nil {
 				// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
@@ -212,6 +243,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				} else {
 					newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 				}
+				completeResponsesRoutingAttempt(c, attemptIndex, newAPIError)
 				break
 			}
 			c.Request.Body = io.NopCloser(bodyStorage)
@@ -219,9 +251,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			if !priceData.FreeModel && relayInfo.Billing == nil {
 				newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
 				if newAPIError != nil {
+					completeResponsesRoutingAttempt(c, attemptIndex, newAPIError)
 					break
 				}
 			}
+			// Record an upstream attempt only after request-body preparation and
+			// billing pre-consumption have succeeded. A locally rejected request
+			// must not make this channel look as if it already received traffic.
+			addUsedChannel(c, channel.Id)
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				newAPIError = relay.WssHelper(c, relayInfo)
@@ -234,6 +271,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 
 			if newAPIError == nil {
+				completeResponsesRoutingAttempt(c, attemptIndex, nil)
 				if !opaqueResponsesReplay {
 					recordResponsesStreamOptionsIncludeUsageCapabilityObservation(c, relayInfo)
 					recordResponsesToolCapabilityObservation(c, relayInfo)
@@ -264,6 +302,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				))
 				newAPIError = retryResponsesCompactSyntheticSummary(c, relayInfo, bodyStorage, newAPIError)
 				if newAPIError == nil {
+					completeResponsesRoutingAttempt(c, attemptIndex, nil)
 					relayInfo.LastError = nil
 					return
 				}
@@ -284,6 +323,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				))
 				newAPIError = retryResponsesCompactSyntheticSummary(c, relayInfo, bodyStorage, newAPIError)
 				if newAPIError == nil {
+					completeResponsesRoutingAttempt(c, attemptIndex, nil)
 					relayInfo.LastError = nil
 					return
 				}
@@ -306,6 +346,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				))
 				newAPIError = retryResponsesCompactSyntheticSummary(c, relayInfo, bodyStorage, newAPIError)
 				if newAPIError == nil {
+					completeResponsesRoutingAttempt(c, attemptIndex, nil)
 					if err := model.MarkResponsesCompactAutoFallback(relayInfo.ChannelMeta.ChannelId, fallbackReason); err != nil {
 						logger.LogError(c, fmt.Sprintf("mark responses compact auto fallback failed: %s", err.Error()))
 					}
@@ -331,6 +372,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				))
 				newAPIError = retryResponsesCompactSyntheticSummary(c, relayInfo, bodyStorage, newAPIError)
 				if newAPIError == nil {
+					completeResponsesRoutingAttempt(c, attemptIndex, nil)
 					relayInfo.LastError = nil
 					return
 				}
@@ -342,6 +384,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				newAPIError = retryResponsesCompactVisibleOnlySummary(c, relayInfo, bodyStorage, newAPIError)
 				if newAPIError == nil {
+					completeResponsesRoutingAttempt(c, attemptIndex, nil)
 					relayInfo.LastError = nil
 					return
 				}
@@ -353,12 +396,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				fallbackSnapshot := snapshotResponsesCompactFallbackContext(c)
 				newAPIError = retryResponsesCompactSummaryFallbackModels(c, relayInfo, bodyStorage, newAPIError)
 				if newAPIError == nil {
+					completeResponsesRoutingAttempt(c, attemptIndex, nil)
 					relayInfo.LastError = nil
 					return
 				}
 				restoreResponsesCompactFallbackContext(c, relayInfo, fallbackSnapshot)
 				relayInfo.LastError = newAPIError
 			}
+
+			recordRelayErrorAttempt(c, newAPIError)
+			completeResponsesRoutingAttempt(c, attemptIndex, newAPIError)
 
 			channelError := *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan())
 			if opaqueResponsesReplay || shouldSuppressBootstrapRecoveryAutoBan(c, newAPIError) {
@@ -408,50 +455,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 }
 
-// detectAndMarkOpaqueResponsesReplay records only the request-level replay fact.
-// Channel capability decisions are made after routing selects an upstream.
-func detectAndMarkOpaqueResponsesReplay(c *gin.Context, request dto.Request) (bool, error) {
-	if c == nil {
-		return false, nil
-	}
-
-	hasOpaqueReplay, err := requestHasOpaqueResponsesReplay(c, request)
-	if err != nil {
-		return false, err
-	}
-	if hasOpaqueReplay {
-		common.SetContextKey(c, constant.ContextKeyResponsesOpaqueEncryptedReplay, true)
-	}
-	return hasOpaqueReplay, nil
-}
-
-func requestHasOpaqueResponsesReplay(c *gin.Context, request dto.Request) (bool, error) {
-	switch typedRequest := request.(type) {
-	case *dto.OpaqueOpenAIResponsesRequest:
-		return typedRequest != nil && typedRequest.OpaqueResponsesMetadata().HasOpaqueEncryptedContent, nil
-	case *dto.OpenAIResponsesRequest:
-		return responsesInputHasOpaqueEncryptedContent(c, typedRequest)
-	case *dto.OpenAIResponsesCompactionRequest:
-		if typedRequest == nil {
-			return false, nil
-		}
-		return responsesInputHasOpaqueEncryptedContent(c, typedRequest.ToResponsesRequest())
-	default:
-		return false, nil
-	}
-}
-
-func responsesInputHasOpaqueEncryptedContent(c *gin.Context, request *dto.OpenAIResponsesRequest) (bool, error) {
-	if request == nil {
-		return false, nil
-	}
-	requestContext := context.Background()
-	if c != nil && c.Request != nil {
-		requestContext = c.Request.Context()
-	}
-	return service.ResponsesInputHasOpaqueEncryptedContent(requestContext, request.Input)
-}
-
 func writeRelayErrorResponse(c *gin.Context, relayFormat types.RelayFormat, relayInfo *relaycommon.RelayInfo, ws *websocket.Conn, newAPIError *types.NewAPIError) {
 	if c == nil || newAPIError == nil {
 		return
@@ -474,6 +477,16 @@ func writeRelayErrorResponse(c *gin.Context, relayFormat types.RelayFormat, rela
 			}
 			return
 		}
+		if relayInfo != nil && relayInfo.IsStream &&
+			relayInfo.RelayMode == relayconstant.RelayModeChatCompletions &&
+			relayFormat == types.RelayFormatOpenAI && c.Writer.Written() {
+			helper.SetEventStreamHeaders(c)
+			if err := helper.OpenAIChatErrorEvent(c, newAPIError.ToOpenAIError()); err != nil {
+				logger.LogError(c, fmt.Sprintf("write chat completions stream error failed: %s", err.Error()))
+			}
+			helper.Done(c)
+			return
+		}
 		if service.ShouldWriteResponsesBootstrapStreamError(c) {
 			helper.SetEventStreamHeaders(c)
 			service.MarkResponsesBootstrapHeadersSent(c)
@@ -485,6 +498,39 @@ func writeRelayErrorResponse(c *gin.Context, relayFormat types.RelayFormat, rela
 		c.JSON(newAPIError.StatusCode, gin.H{
 			"error": newAPIError.ToOpenAIError(),
 		})
+	}
+}
+
+func detectAndMarkOpaqueResponsesReplay(c *gin.Context, request dto.Request) (bool, error) {
+	if c == nil {
+		return false, nil
+	}
+	hasOpaqueReplay, err := requestHasOpaqueResponsesReplay(c, request)
+	if err != nil {
+		return false, err
+	}
+	if hasOpaqueReplay {
+		common.SetContextKey(c, constant.ContextKeyResponsesOpaqueEncryptedReplay, true)
+	}
+	return hasOpaqueReplay, nil
+}
+
+func requestHasOpaqueResponsesReplay(c *gin.Context, request dto.Request) (bool, error) {
+	switch typedRequest := request.(type) {
+	case *dto.OpaqueOpenAIResponsesRequest:
+		return typedRequest != nil && typedRequest.OpaqueResponsesMetadata().HasOpaqueEncryptedContent, nil
+	case *dto.OpenAIResponsesRequest:
+		if typedRequest == nil {
+			return false, nil
+		}
+		return service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), typedRequest.Input)
+	case *dto.OpenAIResponsesCompactionRequest:
+		if typedRequest == nil {
+			return false, nil
+		}
+		return service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), typedRequest.Input)
+	default:
+		return false, nil
 	}
 }
 
@@ -568,11 +614,151 @@ var upgrader = websocket.Upgrader{
 
 const relayInitialChannelConsumedKey = "relay_initial_channel_consumed"
 const responsesCompactUnsafeCompactionInputKey = "responses_compact_unsafe_compaction_input"
+const relayUpstreamErrorStateKey constant.ContextKey = "relay_upstream_error_state"
+
+type relayUpstreamErrorState struct {
+	lastModelNotFoundError *types.NewAPIError
+	modelNotFoundAttempts  int
+	otherFailures          int
+}
+
+func isDeterministicModelNotFoundError(err *types.NewAPIError) bool {
+	if err == nil || (err.StatusCode != http.StatusBadRequest && err.StatusCode != http.StatusNotFound) {
+		return false
+	}
+	if err.GetErrorType() != types.ErrorTypeOpenAIError {
+		return false
+	}
+	if err.GetErrorCode() == types.ErrorCodeModelNotFound {
+		return true
+	}
+
+	openAIError := err.ToOpenAIError()
+	message := strings.Join(strings.Fields(strings.ToLower(strings.NewReplacer(
+		"_", " ",
+		"-", " ",
+	).Replace(strings.Join([]string{
+		err.Error(),
+		openAIError.Message,
+		fmt.Sprint(openAIError.Code),
+	}, " ")))), " ")
+	if !strings.Contains(message, "model") {
+		return false
+	}
+	for _, indicator := range []string{
+		"unknown model",
+		"unrecognized model",
+		"model does not exist",
+		"no such model",
+	} {
+		if strings.Contains(message, indicator) {
+			return true
+		}
+	}
+	if strings.Contains(message, "not found") {
+		for _, routeIndicator := range []string{"endpoint", "route", "url", "path", "method"} {
+			if strings.Contains(message, routeIndicator) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func recordRelayErrorAttempt(c *gin.Context, err *types.NewAPIError) {
+	if c == nil || err == nil {
+		return
+	}
+	state, ok := common.GetContextKeyType[*relayUpstreamErrorState](c, relayUpstreamErrorStateKey)
+	if !ok || state == nil {
+		state = &relayUpstreamErrorState{}
+		common.SetContextKey(c, relayUpstreamErrorStateKey, state)
+	}
+	if isDeterministicModelNotFoundError(err) {
+		state.modelNotFoundAttempts++
+		state.lastModelNotFoundError = err
+		return
+	}
+	state.otherFailures++
+}
+
+func terminalRelayErrorAfterChannelExhaustion(c *gin.Context, fallback *types.NewAPIError) *types.NewAPIError {
+	if c == nil {
+		return fallback
+	}
+	state, ok := common.GetContextKeyType[*relayUpstreamErrorState](c, relayUpstreamErrorStateKey)
+	if !ok || state == nil || state.modelNotFoundAttempts == 0 || state.otherFailures != 0 || state.lastModelNotFoundError == nil {
+		return fallback
+	}
+	logger.LogInfo(c, fmt.Sprintf(
+		"preserve deterministic upstream model_not_found after channel exhaustion: attempts=%d status_code=%d error=%s",
+		state.modelNotFoundAttempts,
+		state.lastModelNotFoundError.StatusCode,
+		state.lastModelNotFoundError.MaskSensitiveError(),
+	))
+	return state.lastModelNotFoundError
+}
 
 func addUsedChannel(c *gin.Context, channelId int) {
 	useChannel := c.GetStringSlice("use_channel")
 	useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
 	c.Set("use_channel", useChannel)
+}
+
+// acquireSelectedChannelConcurrency reserves the selected channel only after
+// all normal routing and compatibility filters have passed. It returns
+// (false, nil) when a non-strict route may reselect another channel because
+// this one is full. The excluded set is deliberately separate from
+// use_channel: no upstream request was sent yet.
+func acquireSelectedChannelConcurrency(c *gin.Context, channel *model.Channel, strict bool) (bool, *types.NewAPIError) {
+	if channel == nil {
+		return false, types.NewError(errors.New("channel is nil"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	if channel.MaxConcurrency == 0 {
+		if maxConcurrency := common.GetContextKeyInt(c, constant.ContextKeyChannelMaxConcurrency); maxConcurrency != 0 {
+			clone := *channel
+			clone.MaxConcurrency = maxConcurrency
+			channel = &clone
+		}
+	}
+	lease, err := service.AcquireChannelConcurrency(c, channel)
+	if err == nil {
+		service.SetChannelConcurrencyLease(c, lease)
+		return true, nil
+	}
+	if errors.Is(err, service.ErrChannelConcurrencyExceeded) && !strict {
+		service.RecordChannelConcurrencyReselect()
+		service.ExcludeChannelDueToConcurrency(c, channel.Id)
+		service.ReleaseChannelHealthProbeForChannel(c, channel.Id)
+		return false, nil
+	}
+	service.ReleaseChannelHealthProbeForChannel(c, channel.Id)
+	statusCode := http.StatusServiceUnavailable
+	errorCode := types.ErrorCodeChannelConcurrencyUnavailable
+	message := fmt.Sprintf("channel #%d concurrency coordinator unavailable", channel.Id)
+	if errors.Is(err, service.ErrChannelConcurrencyExceeded) {
+		if strict {
+			service.RecordChannelConcurrencyStrict429()
+		}
+		statusCode = http.StatusTooManyRequests
+		errorCode = types.ErrorCodeChannelConcurrencyExceeded
+		message = fmt.Sprintf("channel #%d concurrency limit reached", channel.Id)
+	} else if errors.Is(err, service.ErrChannelConcurrencyInvalid) {
+		statusCode = http.StatusInternalServerError
+		errorCode = types.ErrorCodeGetChannelFailed
+		message = fmt.Sprintf("channel #%d has an invalid concurrency limit", channel.Id)
+	}
+	return false, types.NewErrorWithStatusCode(errors.New(message), errorCode, statusCode, types.ErrOptionWithSkipRetry())
+}
+
+func channelConcurrencyExhaustedError(attempts int) *types.NewAPIError {
+	return types.NewErrorWithStatusCode(
+		fmt.Errorf("all eligible channels reached their concurrency limit after %d attempts", attempts),
+		types.ErrorCodeChannelConcurrencyExceeded,
+		http.StatusTooManyRequests,
+		types.ErrOptionWithSkipRetry(),
+	)
 }
 
 func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
@@ -609,10 +795,15 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
+	if c != nil && retryParam != nil {
+		common.SetContextKey(c, constant.ContextKeyChannelHeaderProfileAttempt, retryParam.GetRetry())
+	}
+	installChannelCandidatePreflight(c, info, retryParam)
 	originalRetry := retryParam.GetRetry()
 	skippedProtocolIncompatibleChannels := 0
 	protocolIncompatiblePriorityAdvances := 0
 	skippedProtocolIncompatibleInThisCall := false
+	concurrencySkips := 0
 	restoreRetryAfterProtocolIncompatibleSkip := func() {
 		if protocolIncompatiblePriorityAdvances > 0 {
 			retryParam.SetRetry(originalRetry)
@@ -621,32 +812,91 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	}
 	if shouldUseInitialSelectedChannel(c, info, retryParam) {
 		c.Set(relayInitialChannelConsumedKey, true)
-		autoBan := c.GetBool("auto_ban")
-		autoBanInt := 1
-		if !autoBan {
-			autoBanInt = 0
+		channel := initialSelectedChannelSnapshot(c)
+		if channel == nil {
+			return nil, types.NewError(errors.New("initial selected channel context is unavailable"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 		}
-		channel := &model.Channel{
-			Id:      c.GetInt("channel_id"),
-			Type:    c.GetInt("channel_type"),
-			Name:    c.GetString("channel_name"),
-			AutoBan: &autoBanInt,
+		if shouldTrackResponsesRouting(info) {
+			recordResponsesRoutingCandidate(c, channel.Id)
 		}
-		skipChannel, skipErr := shouldSkipChannelForResponsesToChatCompatibility(c, info, channel)
-		if skipErr != nil {
-			return nil, newResponsesCompactionInputError(skipErr)
-		}
-		if skipChannel {
-			if _, ok := c.Get("specific_channel_id"); ok {
-				return nil, unsupportedResponsesToChatChannelError(channel, info.LastError)
-			}
-			addUsedChannel(c, channel.Id)
-			skippedProtocolIncompatibleChannels++
-			if isProtocolIncompatibleSkip(info.LastError) {
-				skippedProtocolIncompatibleInThisCall = true
+		if _, specified := c.Get("specific_channel_id"); !specified {
+			decision := service.EvaluateChannelHealthSelectionForChannel(c, info.UsingGroup, info.OriginModelName, channel)
+			if !decision.Allow {
+				if !service.ExcludeChannelHealthSelectionForRoute(c, decision.Group, decision.ModelName, decision.Route) {
+					return nil, types.NewError(errors.New("channel health selection could not exclude unavailable initial channel"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+				}
+				service.MarkChannelHealthSelectionRetryableForRoute(c, decision.Group, decision.ModelName, decision.Route)
+			} else {
+				skipChannel, skipErr := evaluateChannelCandidatePreflight(c, info, retryParam, channel)
+				if skipErr != nil {
+					service.ReleaseChannelHealthProbeForChannel(c, channel.Id)
+					return nil, newResponsesCompactionInputError(skipErr)
+				}
+				if skipChannel {
+					service.ReleaseChannelHealthProbeForChannel(c, channel.Id)
+					addUsedChannel(c, channel.Id)
+					skippedProtocolIncompatibleChannels++
+					if isProtocolIncompatibleSkip(info.LastError) {
+						skippedProtocolIncompatibleInThisCall = true
+					}
+				} else {
+					// The distributor may have selected a concrete multi-key
+					// credential after its pre-dispatch health check. Re-check
+					// with the key index now present in the request context.
+					decision := service.EvaluateChannelHealthSelectionForChannel(c, info.UsingGroup, info.OriginModelName, channel)
+					if !decision.Allow {
+						service.ReleaseChannelHealthProbeForChannel(c, channel.Id)
+						if !service.ExcludeChannelHealthSelectionForRoute(c, decision.Group, decision.ModelName, decision.Route) {
+							return nil, types.NewError(errors.New("channel health selection could not exclude credential-specific initial channel"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+						}
+						service.MarkChannelHealthSelectionRetryableForRoute(c, decision.Group, decision.ModelName, decision.Route)
+						addUsedChannel(c, channel.Id)
+						// The initial channel is excluded for this route. Fall through
+						// to the normal retry selection loop below.
+					} else {
+						restoreRetryAfterProtocolIncompatibleSkip()
+						strict := false
+						if _, specified := c.Get("specific_channel_id"); specified {
+							strict = true
+						} else if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+							strict = true
+						}
+						acquired, concurrencyErr := acquireSelectedChannelConcurrency(c, channel, strict)
+						if concurrencyErr != nil {
+							return nil, concurrencyErr
+						}
+						if !acquired {
+							concurrencySkips++
+							if concurrencySkips >= service.ChannelConcurrencyReselectLimit() {
+								return nil, channelConcurrencyExhaustedError(concurrencySkips)
+							}
+							// The initial candidate is outside the selector loop; its
+							// capacity exclusion is carried into the loop below. It was
+							// never sent upstream, so it must not enter use_channel.
+						}
+						if acquired {
+							return channel, nil
+						}
+					}
+				}
 			}
 		} else {
+			skipChannel, skipErr := evaluateChannelCandidatePreflight(c, info, retryParam, channel)
+			if skipErr != nil {
+				service.ReleaseChannelHealthProbeForChannel(c, channel.Id)
+				return nil, newResponsesCompactionInputError(skipErr)
+			}
+			if skipChannel {
+				return nil, unsupportedResponsesToChatChannelError(channel, info.LastError)
+			}
 			restoreRetryAfterProtocolIncompatibleSkip()
+			acquired, concurrencyErr := acquireSelectedChannelConcurrency(c, channel, true)
+			if concurrencyErr != nil {
+				return nil, concurrencyErr
+			}
+			if !acquired {
+				return nil, channelConcurrencyExhaustedError(1)
+			}
 			return channel, nil
 		}
 	}
@@ -658,6 +908,10 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 
 		if err != nil {
 			restoreRetryAfterProtocolIncompatibleSkip()
+			var preflightErr *model.CandidatePreflightError
+			if errors.As(err, &preflightErr) {
+				return nil, newResponsesCompactionInputError(preflightErr)
+			}
 			return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 		}
 		if channel == nil {
@@ -667,19 +921,32 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 				protocolIncompatiblePriorityAdvances++
 				continue
 			}
-			if skippedProtocolIncompatibleInThisCall && info.LastError != nil {
+			if (skippedProtocolIncompatibleInThisCall || hasResponsesRoutingPreflightSkip(c)) && info.LastError != nil && isProtocolIncompatibleSkip(info.LastError) {
 				restoreRetryAfterProtocolIncompatibleSkip()
 				return nil, info.LastError
 			}
+			if concurrencySkips > 0 {
+				restoreRetryAfterProtocolIncompatibleSkip()
+				return nil, channelConcurrencyExhaustedError(concurrencySkips)
+			}
 			restoreRetryAfterProtocolIncompatibleSkip()
-			return nil, types.NewError(errors.New(formatNoAvailableChannelErrorMessage(selectGroup, info.OriginModelName, info.LastError)), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+			return nil, terminalRelayErrorAfterChannelExhaustion(c, types.NewError(
+				errors.New(formatNoAvailableChannelErrorMessage(selectGroup, info.OriginModelName, info.LastError)),
+				types.ErrorCodeGetChannelFailed,
+				types.ErrOptionWithSkipRetry(),
+			))
 		}
-		skipChannel, skipErr := shouldSkipChannelForResponsesToChatCompatibility(c, info, channel)
+		if shouldTrackResponsesRouting(info) {
+			recordResponsesRoutingCandidate(c, channel.Id)
+		}
+		skipChannel, skipErr := evaluateChannelCandidatePreflight(c, info, retryParam, channel)
 		if skipErr != nil {
+			service.ReleaseChannelHealthProbeForChannel(c, channel.Id)
 			restoreRetryAfterProtocolIncompatibleSkip()
 			return nil, newResponsesCompactionInputError(skipErr)
 		}
 		if skipChannel {
+			service.ReleaseChannelHealthProbeForChannel(c, channel.Id)
 			addUsedChannel(c, channel.Id)
 			skippedProtocolIncompatibleChannels++
 			if isProtocolIncompatibleSkip(info.LastError) {
@@ -690,13 +957,144 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 
 		newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
 		if newAPIError != nil {
+			service.ReleaseChannelHealthProbeForChannel(c, channel.Id)
+			if newAPIError.GetErrorCode() == types.ErrorCodeChannelNoAvailableKey {
+				service.ExcludeChannelHealthSelection(c, selectGroup, info.OriginModelName, channel.Id)
+				addUsedChannel(c, channel.Id)
+				continue
+			}
 			restoreRetryAfterProtocolIncompatibleSkip()
 			return nil, newAPIError
 		}
 		info.InitChannelMeta(c)
+		// SetupContextForSelectedChannel chooses the concrete credential for a
+		// multi-key channel. Re-evaluate the route with that key before allowing
+		// the relay to send upstream; a cooldown for one key must not be treated
+		// as a cooldown for the whole channel.
+		if _, specified := c.Get("specific_channel_id"); !specified {
+			decision := service.EvaluateChannelHealthSelectionForChannel(c, selectGroup, info.OriginModelName, channel)
+			if !decision.Allow {
+				service.ReleaseChannelHealthProbeForChannel(c, channel.Id)
+				if !service.ExcludeChannelHealthSelectionForRoute(c, decision.Group, decision.ModelName, decision.Route) {
+					restoreRetryAfterProtocolIncompatibleSkip()
+					return nil, types.NewError(errors.New("channel health selection could not exclude credential-specific channel"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+				}
+				service.MarkChannelHealthSelectionRetryableForRoute(c, decision.Group, decision.ModelName, decision.Route)
+				addUsedChannel(c, channel.Id)
+				continue
+			}
+		}
+		acquired, concurrencyErr := acquireSelectedChannelConcurrency(c, channel, false)
+		if concurrencyErr != nil {
+			restoreRetryAfterProtocolIncompatibleSkip()
+			return nil, concurrencyErr
+		}
+		if !acquired {
+			concurrencySkips++
+			if concurrencySkips >= service.ChannelConcurrencyReselectLimit() {
+				restoreRetryAfterProtocolIncompatibleSkip()
+				return nil, channelConcurrencyExhaustedError(concurrencySkips)
+			}
+			// Capacity exclusion is request-local and distinct from the
+			// upstream-attempt history in use_channel.
+			continue
+		}
 		restoreRetryAfterProtocolIncompatibleSkip()
 		return channel, nil
 	}
+}
+
+type responsesCandidatePreflightKey struct {
+	channelID    int
+	attemptIndex int
+}
+
+type responsesCandidatePreflightResult struct {
+	allowed bool
+	err     error
+}
+
+type responsesCandidatePreflightMemo struct {
+	base        func(*model.Channel) (bool, error)
+	initialized bool
+	results     map[responsesCandidatePreflightKey]responsesCandidatePreflightResult
+}
+
+// installChannelCandidatePreflight makes request-shape compatibility part of
+// channel eligibility. The selector invokes this before priority and weight.
+// Results are memoized per channel and retry attempt: a round-robin Header
+// Profile selection is attempt-scoped, so reusing a previous attempt's result
+// can approve or skip a channel whose actual profile has changed.
+func installChannelCandidatePreflight(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) {
+	if retryParam == nil || info == nil || !shouldTrackResponsesRouting(info) {
+		return
+	}
+	compatibilityPreflight := func(channel *model.Channel) (bool, error) {
+		skip, err := shouldSkipChannelForResponsesToChatCompatibility(c, info, channel)
+		return !skip, err
+	}
+	var memo *responsesCandidatePreflightMemo
+	if c != nil {
+		memo, _ = common.GetContextKeyType[*responsesCandidatePreflightMemo](c, constant.ContextKeyResponsesCandidatePreflightCache)
+		if memo == nil {
+			memo = &responsesCandidatePreflightMemo{results: make(map[responsesCandidatePreflightKey]responsesCandidatePreflightResult)}
+			common.SetContextKey(c, constant.ContextKeyResponsesCandidatePreflightCache, memo)
+		}
+	}
+	if memo == nil {
+		// A nil context is only used by low-level tests/callers. Preserve any
+		// caller-provided preflight without introducing request-local state.
+		previous := retryParam.CandidatePreflight
+		retryParam.CandidatePreflight = func(channel *model.Channel) (bool, error) {
+			if previous != nil {
+				allowed, err := previous(channel)
+				if err != nil || !allowed {
+					return allowed, err
+				}
+			}
+			return compatibilityPreflight(channel)
+		}
+		return
+	}
+	if !memo.initialized {
+		memo.base = retryParam.CandidatePreflight
+		memo.initialized = true
+	}
+	retryParam.CandidatePreflight = func(channel *model.Channel) (bool, error) {
+		if channel == nil {
+			return false, nil
+		}
+		key := responsesCandidatePreflightKey{channelID: channel.Id, attemptIndex: retryParam.GetRetry()}
+		if result, ok := memo.results[key]; ok {
+			return result.allowed, result.err
+		}
+		allowed := true
+		var err error
+		if memo.base != nil {
+			allowed, err = memo.base(channel)
+		}
+		if err == nil && allowed {
+			allowed, err = compatibilityPreflight(channel)
+		}
+		memo.results[key] = responsesCandidatePreflightResult{allowed: allowed, err: err}
+		return allowed, err
+	}
+}
+
+func evaluateChannelCandidatePreflight(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam, channel *model.Channel) (bool, error) {
+	if retryParam != nil && retryParam.CandidatePreflight != nil {
+		allowed, err := retryParam.CandidatePreflight(channel)
+		return !allowed, err
+	}
+	return shouldSkipChannelForResponsesToChatCompatibility(c, info, channel)
+}
+
+func hasResponsesRoutingPreflightSkip(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	skips, ok := common.GetContextKeyType[[]dto.ResponsesRoutingChannelSkip](c, constant.ContextKeyResponsesRoutingChannelSkips)
+	return ok && len(skips) > 0
 }
 
 func resetAutoGroupSelectionProgress(c *gin.Context) {
@@ -717,6 +1115,57 @@ func shouldUseInitialSelectedChannel(c *gin.Context, info *relaycommon.RelayInfo
 		common.GetContextKeyInt(c, constant.ContextKeyChannelId) > 0
 }
 
+// initialSelectedChannelSnapshot returns the exact channel selected by the
+// distributor/setup path. Older internal callers may only install primitive
+// context fields, so retain a cache/database compatibility lookup and a final
+// context projection. The projection is deliberately never passed to setup:
+// its key, model mapping, and settings have already been installed for this
+// request and must not be replaced by a second live credential selection.
+func initialSelectedChannelSnapshot(c *gin.Context) *model.Channel {
+	if c == nil {
+		return nil
+	}
+	if snapshot, ok := common.GetContextKeyType[*model.Channel](c, constant.ContextKeySelectedChannelSnapshot); ok && snapshot != nil && snapshot.Id > 0 {
+		return snapshot.CloneForCache()
+	}
+
+	channelID := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	if channelID <= 0 {
+		return nil
+	}
+	if channel, err := model.CacheGetChannel(channelID); err == nil && channel != nil {
+		return channel
+	}
+
+	// The channel may have been deleted after Distributor completed setup. The
+	// request still owns a valid, already-installed route context; preserve it
+	// for the in-flight request instead of selecting a different channel.
+	autoBan := 1
+	if !common.GetContextKeyBool(c, constant.ContextKeyChannelAutoBan) {
+		autoBan = 0
+	}
+	channel := &model.Channel{
+		Id:             channelID,
+		Type:           common.GetContextKeyInt(c, constant.ContextKeyChannelType),
+		Name:           common.GetContextKeyString(c, constant.ContextKeyChannelName),
+		Key:            common.GetContextKeyString(c, constant.ContextKeyChannelKey),
+		Status:         common.ChannelStatusEnabled,
+		AutoBan:        &autoBan,
+		MaxConcurrency: common.GetContextKeyInt(c, constant.ContextKeyChannelMaxConcurrency),
+	}
+	if mapping := common.GetContextKeyString(c, constant.ContextKeyChannelModelMapping); mapping != "" {
+		channel.ModelMapping = common.GetPointer(mapping)
+	}
+	if baseURL := common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl); baseURL != "" {
+		channel.BaseURL = common.GetPointer(baseURL)
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey) {
+		channel.ChannelInfo.IsMultiKey = true
+		channel.ChannelInfo.MultiKeyPollingIndex = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
+	}
+	return channel
+}
+
 func isProtocolIncompatibleSkip(err *types.NewAPIError) bool {
 	if err == nil {
 		return false
@@ -727,6 +1176,8 @@ func isProtocolIncompatibleSkip(err *types.NewAPIError) bool {
 			errors.Is(err, errResponsesNativeToolIdentityUnsupported) ||
 			errors.Is(err, relaycommon.ErrResponsesEncryptedReasoningReplayUnsupported) ||
 			errors.Is(err, relaycommon.ErrResponsesOpaqueReplayParamOverrideUnsupported) ||
+			errors.Is(err, errResponsesCodexDynamicHeadersUnsupported) ||
+			errors.Is(err, errResponsesToChatIncompatible) ||
 			errors.Is(err, errResponsesFunctionToolsUnsupported) ||
 			errors.Is(err, errResponsesCustomToolsUnsupported) ||
 			errors.Is(err, errResponsesNamespaceToolsUnsupported) ||
@@ -756,6 +1207,27 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	}
 	if request == nil && !isOpaqueReplayRequest {
 		return false, nil
+	}
+	if missingDynamicHeaders := missingResponsesCodexDynamicHeaders(c, info, channel); len(missingDynamicHeaders) > 0 {
+		markResponsesCompatibilityChannelSkip(
+			c,
+			info,
+			channel,
+			responsesRoutingChannelSkipReasonUnsupportedCodexDynamicHeaders,
+			unsupportedResponsesCodexDynamicHeadersChannelError(channel, missingDynamicHeaders),
+		)
+		return true, nil
+	}
+	hasOpaqueEncryptedContent := isOpaqueReplayRequest
+	if !isOpaqueReplayRequest {
+		if request == nil {
+			return false, nil
+		}
+		var opaqueErr error
+		hasOpaqueEncryptedContent, opaqueErr = service.ResponsesInputHasOpaqueEncryptedContent(c.Request.Context(), request.Input)
+		if opaqueErr != nil {
+			return false, opaqueErr
+		}
 	}
 	channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
 	if isOpaqueReplayRequest {
@@ -810,14 +1282,10 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 		}
 		return false, nil
 	}
-	hasOpaqueEncryptedContent, err := service.ResponsesInputHasOpaqueEncryptedContent(c.Request.Context(), request.Input)
-	if err != nil {
-		return false, err
-	}
 	if hasOpaqueEncryptedContent {
 		capability := channelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(channel.Type)
 		relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
-		if capability == dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported {
+		if channelOtherSettings.ExplicitlyDisablesResponsesEncryptedReasoningReplay(channel.Type) {
 			markResponsesCompatibilityChannelSkip(
 				c,
 				info,
@@ -829,7 +1297,6 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 		}
 		if info.RelayMode == relayconstant.RelayModeResponsesCompact &&
 			!relaycommon.SupportsNativeOpaqueResponsesCompact(channel.Type, channelOtherSettings) {
-			relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
 			markResponsesCompactionChannelSkip(c, info, channel)
 			return true, nil
 		}
@@ -839,7 +1306,6 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 				return false, err
 			}
 			if hasRemoteCompaction && responsesCompactionChannelCannotPassthroughItems(channelOtherSettings, channel.Type) {
-				relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
 				markResponsesCompactionChannelSkip(c, info, channel)
 				return true, nil
 			}
@@ -855,7 +1321,6 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 			)
 			return true, nil
 		}
-		return false, nil
 	}
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		return false, nil
@@ -909,8 +1374,15 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	}
 	functionToolsUnsupported := hasFunctionTools && channelOtherSettings.ExplicitlyDisablesResponsesFunctionTools()
 	customToolsUnsupported := hasCustomTools && channelOtherSettings.ExplicitlyDisablesResponsesCustomTools()
-	namespaceToolsUnsupported := hasNamespaceTools && channelOtherSettings.ExplicitlyDisablesResponsesNamespaceTools()
-	toolSearchUnsupported := hasToolSearch && channelOtherSettings.ExplicitlyDisablesResponsesToolSearch()
+	// Namespace and tool-search are not safely convertible through the generic
+	// Chat bridge. Only an explicit unsupported capability is a channel-level
+	// preflight skip. Unknown capability remains best-effort: the upstream may
+	// support the request, and a real upstream error can still trigger retry and
+	// automatic channel selection.
+	namespaceToolsUnsupported := hasNamespaceTools &&
+		channelOtherSettings.ResolveResponsesNamespaceToolsCapability(channel.Type) == dto.ResponsesToolCapabilityUnsupported
+	toolSearchUnsupported := hasToolSearch &&
+		channelOtherSettings.ResolveResponsesToolSearchCapability(channel.Type) == dto.ResponsesToolCapabilityUnsupported
 	unsupportedTools := responsesUnsupportedToolCapabilities{
 		function:   functionToolsUnsupported,
 		custom:     customToolsUnsupported,
@@ -919,7 +1391,18 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	}
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
 		nativeCompactionChannelSetting(c, info, channel).PassThroughBodyEnabled {
-		if skipExplicitlyUnsupportedResponsesTools(info, channel, unsupportedTools) {
+		if skipExplicitlyUnsupportedResponsesTools(c, info, channel, unsupportedTools) {
+			return true, nil
+		}
+		return false, nil
+	}
+	// Opaque encrypted state must stay on a native Responses path once the
+	// channel has passed the replay and compaction passthrough checks above.
+	// A Responses-to-Chat rule is not a reason to divert this request: the
+	// conversion cannot preserve the opaque item and would make a capable
+	// native channel look incompatible.
+	if hasOpaqueEncryptedContent {
+		if skipExplicitlyUnsupportedResponsesTools(c, info, channel, unsupportedTools) {
 			return true, nil
 		}
 		return false, nil
@@ -932,8 +1415,7 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	if hasRemoteCompaction {
 		channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
 		if responsesCompactionChannelCannotPassthroughItems(channelOtherSettings, channel.Type) {
-			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
-			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			markResponsesCompactionChannelSkip(c, info, channel)
 			return true, nil
 		}
 		rule, err := service.FindUnconditionalResponsesViaChatRule(
@@ -945,11 +1427,10 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 			return false, err
 		}
 		if rule != nil && responsesCompactionRuleRequiresChannelSkip(c, info, rule, channel) {
-			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
-			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			markResponsesCompactionChannelSkip(c, info, channel)
 			return true, nil
 		}
-		if skipExplicitlyUnsupportedResponsesTools(info, channel, unsupportedTools) {
+		if skipExplicitlyUnsupportedResponsesTools(c, info, channel, unsupportedTools) {
 			return true, nil
 		}
 		return false, nil
@@ -961,11 +1442,10 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	if hasLocalNativeOpaque {
 		channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
 		if !channelOtherSettings.ResolveResponsesChannelCapability(channel.Type).SupportsRestPreviousResponseID {
-			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
-			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			markResponsesCompactionChannelSkip(c, info, channel)
 			return true, nil
 		}
-		if skipExplicitlyUnsupportedResponsesTools(info, channel, unsupportedTools) {
+		if skipExplicitlyUnsupportedResponsesTools(c, info, channel, unsupportedTools) {
 			return true, nil
 		}
 		return false, nil
@@ -973,8 +1453,7 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	if hasLocalCompactionTrigger {
 		channelOtherSettings := responsesCompactionChannelOtherSettings(c, info, channel)
 		if channelOtherSettings.HasResponsesProxyCompatibilityProfile() {
-			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
-			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			markResponsesCompactionChannelSkip(c, info, channel)
 			return true, nil
 		}
 		rule, err := service.FindUnconditionalResponsesViaChatRule(
@@ -986,11 +1465,10 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 			return false, err
 		}
 		if rule != nil && responsesLocalCompactionTriggerRuleRequiresChannelSkip(c, info, rule, channel) {
-			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
-			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			markResponsesCompactionChannelSkip(c, info, channel)
 			return true, nil
 		}
-		if skipExplicitlyUnsupportedResponsesTools(info, channel, unsupportedTools) {
+		if skipExplicitlyUnsupportedResponsesTools(c, info, channel, unsupportedTools) {
 			return true, nil
 		}
 		return false, nil
@@ -1010,7 +1488,7 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 		return false, err
 	}
 	if rule == nil {
-		if skipExplicitlyUnsupportedResponsesTools(info, channel, unsupportedTools) {
+		if skipExplicitlyUnsupportedResponsesTools(c, info, channel, unsupportedTools) {
 			return true, nil
 		}
 		return false, nil
@@ -1019,14 +1497,44 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	compatibilityRequest, err := responsesToChatCompatibilityRequestForPrecheck(c, info, request)
 	if err != nil {
 		if errors.Is(err, service.ErrResponsesNativeOpaqueStateNotRestorable) {
-			common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
-			info.LastError = unsupportedNativeCompactionChannelError(channel)
+			markResponsesCompactionChannelSkip(c, info, channel)
 			return true, nil
 		}
 		return false, err
 	}
+	// A Responses-to-Chat bridge can represent function tools regardless of
+	// the native Responses capability snapshot. Namespace, custom, and
+	// tool-search declarations are bridgeable only when the explicit bridge
+	// option is enabled. Defer namespace classification to the structural
+	// helper below so malformed declarations still reach the normal validator.
+	bridgeUnsupportedTools := unsupportedTools
+	bridgeUnsupportedTools.function = false
+	bridgeUnsupportedTools.namespace = false
+	if options.EnableCustomToolBridge {
+		bridgeUnsupportedTools.custom = false
+		bridgeUnsupportedTools.toolSearch = false
+	}
+	if skipExplicitlyUnsupportedResponsesTools(c, info, channel, bridgeUnsupportedTools) {
+		return true, nil
+	}
+	if hasNamespaceTools {
+		unbridgeable, err := service.ResponsesRequestHasUnbridgeableNamespaceTools(compatibilityRequest, options)
+		if err != nil {
+			return false, err
+		}
+		if unbridgeable {
+			skipResponsesNamespaceToolsWithoutBridge(c, info, channel)
+			return true, nil
+		}
+	}
 	if err := service.ValidateResponsesRequestToChatCompatibility(compatibilityRequest, options); err != nil {
-		info.LastError = unsupportedResponsesToChatConversionError(channel, err)
+		markResponsesCompatibilityChannelSkip(
+			c,
+			info,
+			channel,
+			responsesRoutingChannelSkipReasonResponsesToChatIncompatible,
+			unsupportedResponsesToChatConversionError(channel, err),
+		)
 		return true, nil
 	}
 	return false, nil
@@ -1043,9 +1551,133 @@ const (
 	responsesRoutingChannelSkipReasonUnsupportedCompaction                  = "unsupported_compaction"
 	responsesRoutingChannelSkipReasonUnsupportedEncryptedReasoningReplay    = "unsupported_encrypted_reasoning_replay"
 	responsesRoutingChannelSkipReasonOpaqueReplayParamOverride              = "incompatible_opaque_replay_param_override"
+	responsesRoutingChannelSkipReasonUnsupportedCodexDynamicHeaders         = "unsupported_codex_dynamic_headers"
 	responsesRoutingChannelSkipReasonRequiresNativeResponsesToolIdentity    = "requires_native_responses_tool_identity"
 	responsesRoutingChannelSkipReasonUnparseableNativeResponsesToolIdentity = "requires_native_responses_tool_identity_unparseable"
+	responsesRoutingChannelSkipReasonUnsupportedFunctionTools               = "unsupported_function_tools"
+	responsesRoutingChannelSkipReasonUnsupportedCustomTools                 = "unsupported_custom_tools"
+	responsesRoutingChannelSkipReasonUnsupportedNamespaceTools              = "unsupported_namespace_tools"
+	responsesRoutingChannelSkipReasonUnsupportedToolSearch                  = "unsupported_tool_search"
+	responsesRoutingChannelSkipReasonResponsesToChatIncompatible            = "responses_to_chat_incompatible"
 )
+
+func skipExplicitlyUnsupportedResponsesTools(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel, unsupported responsesUnsupportedToolCapabilities) bool {
+	skipped := false
+	var firstError *types.NewAPIError
+	if unsupported.function {
+		if skipUnsupportedResponsesFunctionTools(c, info, channel) {
+			skipped = true
+			if firstError == nil && info != nil {
+				firstError = info.LastError
+			}
+		}
+	}
+	if unsupported.custom {
+		if skipUnsupportedResponsesCustomTools(c, info, channel) {
+			skipped = true
+			if firstError == nil && info != nil {
+				firstError = info.LastError
+			}
+		}
+	}
+	if unsupported.namespace {
+		if skipUnsupportedResponsesNamespaceTools(c, info, channel) {
+			skipped = true
+			if firstError == nil && info != nil {
+				firstError = info.LastError
+			}
+		}
+	}
+	if unsupported.toolSearch {
+		if skipUnsupportedResponsesToolSearch(c, info, channel) {
+			skipped = true
+			if firstError == nil && info != nil {
+				firstError = info.LastError
+			}
+		}
+	}
+	if firstError != nil && info != nil {
+		info.LastError = firstError
+	}
+	return skipped
+}
+
+func missingResponsesCodexDynamicHeaders(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) []string {
+	if c == nil || info == nil || channel == nil {
+		return nil
+	}
+	settings := responsesCompactionChannelOtherSettings(c, info, channel)
+	strategy := settings.HeaderProfileStrategy
+	if strategy == nil || !strategy.Enabled {
+		return nil
+	}
+	selection, err := service.PrepareChannelRuntimeHeaderProfileSelection(c, channel.Id, strategy, info.RetryIndex)
+	if err != nil {
+		return nil
+	}
+	profileID := selection.ProfileID
+	paramOverride := cachedResponsesChannelParamOverride(c, channel)
+	runtimeOverride := false
+	if info.ChannelMeta != nil && info.ChannelId == channel.Id {
+		paramOverride = info.ChannelMeta.ParamOverride
+		runtimeOverride = true
+	} else if common.GetContextKeyInt(c, constant.ContextKeyChannelId) == channel.Id {
+		paramOverride = common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
+		runtimeOverride = true
+	}
+	if !runtimeOverride {
+		// Candidate preflight runs before SetupContextForSelectedChannel applies
+		// the request-scoped affinity template to the candidate override.
+		if merged, applied := service.PreviewChannelAffinityOverrideTemplate(c, paramOverride); applied {
+			paramOverride = merged
+		}
+	}
+	return relaycommon.MissingCodexDynamicRequestHeaders(profileID, paramOverride, info.RequestHeaders)
+}
+
+func skipUnsupportedResponsesNamespaceTools(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) bool {
+	markResponsesCompatibilityChannelSkip(c, info, channel, responsesRoutingChannelSkipReasonUnsupportedNamespaceTools, unsupportedResponsesNamespaceToolsChannelError(channel))
+	return true
+}
+
+func skipResponsesNamespaceToolsWithoutBridge(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) {
+	channelID := 0
+	if channel != nil {
+		channelID = channel.Id
+	}
+	// Keep the terminal client error tied to the failed Responses-to-Chat
+	// conversion while retaining the more actionable namespace-specific reason
+	// in the routing trace. The selector uses info.LastError after all
+	// candidates are skipped; exposing only the diagnostic sentinel here made a
+	// global bridge rule look like a different channel capability contract.
+	conversionErr := fmt.Errorf(
+		"%w: channel #%d uses Responses-to-Chat compatibility without an enabled namespace tool bridge; enable the bridge or use a native Responses channel",
+		errResponsesNamespaceToolsUnsupported,
+		channelID,
+	)
+	markResponsesCompatibilityChannelSkip(
+		c,
+		info,
+		channel,
+		responsesRoutingChannelSkipReasonUnsupportedNamespaceTools,
+		unsupportedResponsesToChatConversionError(channel, conversionErr),
+	)
+}
+
+func skipUnsupportedResponsesFunctionTools(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) bool {
+	markResponsesCompatibilityChannelSkip(c, info, channel, responsesRoutingChannelSkipReasonUnsupportedFunctionTools, unsupportedResponsesFunctionToolsChannelError(channel))
+	return true
+}
+
+func skipUnsupportedResponsesCustomTools(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) bool {
+	markResponsesCompatibilityChannelSkip(c, info, channel, responsesRoutingChannelSkipReasonUnsupportedCustomTools, unsupportedResponsesCustomToolsChannelError(channel))
+	return true
+}
+
+func skipUnsupportedResponsesToolSearch(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) bool {
+	markResponsesCompatibilityChannelSkip(c, info, channel, responsesRoutingChannelSkipReasonUnsupportedToolSearch, unsupportedResponsesToolSearchChannelError(channel))
+	return true
+}
 
 func markResponsesCompactionChannelSkip(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) {
 	common.SetContextKey(c, constant.ContextKeyResponsesCompactChannelSkip, "channel_skipped_unsupported_compaction")
@@ -1095,43 +1727,11 @@ func recordResponsesRoutingChannelSkip(c *gin.Context, channel *model.Channel, r
 		ChannelID: channel.Id,
 		Reason:    reason,
 	})
+	recordResponsesRoutingPreflightSkip(c, dto.ResponsesRoutingChannelSkip{
+		ChannelID: channel.Id,
+		Reason:    reason,
+	})
 	common.SetContextKey(c, constant.ContextKeyResponsesRoutingChannelSkips, skips)
-}
-
-func skipExplicitlyUnsupportedResponsesTools(info *relaycommon.RelayInfo, channel *model.Channel, unsupported responsesUnsupportedToolCapabilities) bool {
-	if unsupported.function {
-		return skipUnsupportedResponsesFunctionTools(info, channel)
-	}
-	if unsupported.custom {
-		return skipUnsupportedResponsesCustomTools(info, channel)
-	}
-	if unsupported.namespace {
-		return skipUnsupportedResponsesNamespaceTools(info, channel)
-	}
-	if unsupported.toolSearch {
-		return skipUnsupportedResponsesToolSearch(info, channel)
-	}
-	return false
-}
-
-func skipUnsupportedResponsesNamespaceTools(info *relaycommon.RelayInfo, channel *model.Channel) bool {
-	info.LastError = unsupportedResponsesNamespaceToolsChannelError(channel)
-	return true
-}
-
-func skipUnsupportedResponsesFunctionTools(info *relaycommon.RelayInfo, channel *model.Channel) bool {
-	info.LastError = unsupportedResponsesFunctionToolsChannelError(channel)
-	return true
-}
-
-func skipUnsupportedResponsesCustomTools(info *relaycommon.RelayInfo, channel *model.Channel) bool {
-	info.LastError = unsupportedResponsesCustomToolsChannelError(channel)
-	return true
-}
-
-func skipUnsupportedResponsesToolSearch(info *relaycommon.RelayInfo, channel *model.Channel) bool {
-	info.LastError = unsupportedResponsesToolSearchChannelError(channel)
-	return true
 }
 
 func responsesToChatCompatibilityRequestForPrecheck(c *gin.Context, info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) (*dto.OpenAIResponsesRequest, error) {
@@ -1173,7 +1773,7 @@ func responsesLocalCompactionTriggerRuleRequiresChannelSkip(c *gin.Context, info
 		return true
 	}
 	if rule.AllChannels {
-		return settings.ResolveResponsesCompactionItemPassthroughCapability(channel.Type) == dto.ResponsesCompactionItemPassthroughCapabilityUnsupported
+		return !settings.ResolveResponsesChannelCapability(channel.Type).SupportsCompactionItemPassthrough
 	}
 	if len(rule.ChannelIDs) > 0 {
 		for _, channelID := range rule.ChannelIDs {
@@ -1206,27 +1806,17 @@ func nativeCompactionChannelSetting(c *gin.Context, info *relaycommon.RelayInfo,
 			}
 		}
 	}
-	return channel.GetSetting()
+	return cachedResponsesChannelSettings(c, channel)
 }
 
 var errResponsesNativeCompactionUnsupported = errors.New("responses native compaction unsupported")
 var errResponsesNativeToolIdentityUnsupported = errors.New("responses native tool identity unsupported")
+var errResponsesToChatIncompatible = errors.New("responses to chat conversion incompatible")
 var errResponsesFunctionToolsUnsupported = errors.New("responses function tools unsupported")
 var errResponsesCustomToolsUnsupported = errors.New("responses custom tools unsupported")
 var errResponsesNamespaceToolsUnsupported = errors.New("responses namespace tools unsupported")
 var errResponsesToolSearchUnsupported = errors.New("responses tool search unsupported")
-
-func unsupportedNativeCompactionChannelError(channel *model.Channel) *types.NewAPIError {
-	channelID := 0
-	if channel != nil {
-		channelID = channel.Id
-	}
-	return types.NewErrorWithStatusCode(
-		fmt.Errorf("%w: channel #%d uses responses-to-chat compatibility and cannot handle native compaction input; choose a native Responses-capable channel", errResponsesNativeCompactionUnsupported, channelID),
-		types.ErrorCodeChannelModelMappedError,
-		http.StatusServiceUnavailable,
-	)
-}
+var errResponsesCodexDynamicHeadersUnsupported = errors.New("responses Codex dynamic header passthrough unsupported")
 
 func unsupportedResponsesNativeToolIdentityChannelError(channel *model.Channel) *types.NewAPIError {
 	channelID := 0
@@ -1235,6 +1825,30 @@ func unsupportedResponsesNativeToolIdentityChannelError(channel *model.Channel) 
 	}
 	return types.NewErrorWithStatusCode(
 		fmt.Errorf("%w: channel #%d uses responses-to-chat compatibility and cannot preserve Codex Lite native namespace tool identity; choose a native Responses-capable channel", errResponsesNativeToolIdentityUnsupported, channelID),
+		types.ErrorCodeChannelModelMappedError,
+		http.StatusServiceUnavailable,
+	)
+}
+
+func unsupportedResponsesCodexDynamicHeadersChannelError(channel *model.Channel, missingHeaders []string) *types.NewAPIError {
+	channelID := 0
+	if channel != nil {
+		channelID = channel.Id
+	}
+	return types.NewErrorWithStatusCode(
+		fmt.Errorf("%w: channel #%d requires unconditional pass_headers for Codex dynamic request headers: %s", errResponsesCodexDynamicHeadersUnsupported, channelID, strings.Join(missingHeaders, ", ")),
+		types.ErrorCodeChannelModelMappedError,
+		http.StatusServiceUnavailable,
+	)
+}
+
+func unsupportedNativeCompactionChannelError(channel *model.Channel) *types.NewAPIError {
+	channelID := 0
+	if channel != nil {
+		channelID = channel.Id
+	}
+	return types.NewErrorWithStatusCode(
+		fmt.Errorf("%w: channel #%d uses responses-to-chat compatibility and cannot handle native compaction input; choose a native Responses-capable channel", errResponsesNativeCompactionUnsupported, channelID),
 		types.ErrorCodeChannelModelMappedError,
 		http.StatusServiceUnavailable,
 	)
@@ -1301,7 +1915,7 @@ func unsupportedResponsesToChatConversionError(channel *model.Channel, err error
 		channelID = channel.Id
 	}
 	return types.NewErrorWithStatusCode(
-		fmt.Errorf("channel #%d uses responses-to-chat compatibility and cannot safely convert this Responses request: %w", channelID, err),
+		fmt.Errorf("%w: channel #%d uses responses-to-chat compatibility and cannot safely convert this Responses request: %w", errResponsesToChatIncompatible, channelID, err),
 		types.ErrorCodeChannelModelMappedError,
 		http.StatusServiceUnavailable,
 	)
@@ -1316,7 +1930,7 @@ func responsesCompactionRuleRequiresChannelSkip(c *gin.Context, info *relaycommo
 		return true
 	}
 	if rule.AllChannels {
-		return settings.ResolveResponsesCompactionItemPassthroughCapability(channel.Type) == dto.ResponsesCompactionItemPassthroughCapabilityUnsupported
+		return !settings.ResolveResponsesChannelCapability(channel.Type).SupportsCompactionItemPassthrough
 	}
 	if len(rule.ChannelIDs) > 0 {
 		for _, channelID := range rule.ChannelIDs {
@@ -1339,7 +1953,7 @@ func responsesCompactionChannelCannotPassthroughItems(settings dto.ChannelOtherS
 	if settings.HasResponsesProxyCompatibilityProfile() {
 		return true
 	}
-	return settings.ResolveResponsesCompactionItemPassthroughCapability(channelType) == dto.ResponsesCompactionItemPassthroughCapabilityUnsupported
+	return !settings.ResolveResponsesChannelCapability(channelType).SupportsCompactionItemPassthrough
 }
 
 func responsesCompactionChannelOtherSettings(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel) dto.ChannelOtherSettings {
@@ -1353,7 +1967,7 @@ func responsesCompactionChannelOtherSettings(c *gin.Context, info *relaycommon.R
 			}
 		}
 	}
-	return channel.GetOtherSettings()
+	return cachedResponsesChannelOtherSettings(c, channel)
 }
 
 func newResponsesCompactionInputError(err error) *types.NewAPIError {
@@ -1377,6 +1991,14 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if openaiErr == nil {
 		return false
 	}
+	// Once the downstream request is canceled, retrying another upstream cannot
+	// produce a usable response and may create unnecessary upstream traffic.
+	if c == nil {
+		return false
+	}
+	if c.Request != nil && c.Request.Context().Err() != nil {
+		return false
+	}
 	if relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
 		relaycommon.MarkResponsesEncryptedReasoningReplayRetrySuppressed(c)
 		return false
@@ -1394,13 +2016,26 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if isPermanentUpstreamUnavailableError(openaiErr) {
 		return false
 	}
-	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) && !shouldRetryDespiteChannelAffinity(c, openaiErr) {
+	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) &&
+		!shouldRetryDespiteChannelAffinity(c, openaiErr) &&
+		!service.ShouldRetryAfterChannelHealthAuthenticationFailure(openaiErr) {
 		return false
 	}
 	if types.IsChannelError(openaiErr) {
 		return true
 	}
 	if types.IsSkipRetryError(openaiErr) {
+		return false
+	}
+	// Health classification may mark transport timeout/refusal or credential
+	// failures as unsafe for replay in the current request. The channel is
+	// cooled for subsequent requests independently.
+	// Excluding the failed channel is an instruction for the selector, not a
+	// ban on retrying the request through another eligible channel. Credential
+	// failures are deliberately retryable when affinity can be bypassed; keep
+	// the hard stop only for errors that are not safe to replay elsewhere.
+	if service.ShouldExcludeChannelForRetry(openaiErr) &&
+		!service.ShouldRetryAfterChannelHealthAuthenticationFailure(openaiErr) {
 		return false
 	}
 	if retryTimes <= 0 {
@@ -1429,9 +2064,6 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return true
 	}
 	if isUpstreamTransportInterruptedRelayError(openaiErr) {
-		return true
-	}
-	if isUpstreamGatewayTimeoutError(openaiErr.StatusCode) {
 		return true
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
@@ -1473,6 +2105,12 @@ func recordResponsesCapabilityObservation(c *gin.Context, info *relaycommon.Rela
 	if c == nil || info == nil || info.ChannelMeta == nil || err == nil || relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
 		return
 	}
+	if common.GetContextKeyBool(c, constant.ContextKeyResponsesCodexLocalCompaction413Recovery) {
+		return
+	}
+	if shouldFallbackRemoteResponsesCompaction(c, info, err) {
+		return
+	}
 	if !shouldRecordResponsesCapabilityObservation(info.RelayMode, err) {
 		return
 	}
@@ -1497,6 +2135,9 @@ func recordResponsesCapabilityObservation(c *gin.Context, info *relaycommon.Rela
 
 func recordChannelRequestBodyLimit(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) {
 	if c == nil || info == nil || info.ChannelMeta == nil || err == nil || relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
+		return
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyResponsesCodexLocalCompaction413Recovery) {
 		return
 	}
 	policy := model_setting.GetRequestBodyLimitPolicy()
@@ -1558,6 +2199,7 @@ func shouldRetryDespiteChannelAffinity(c *gin.Context, openaiErr *types.NewAPIEr
 		return false
 	}
 	return isUpstreamRateLimitError(openaiErr.StatusCode) ||
+		service.ShouldRetryAfterChannelHealthAuthenticationFailure(openaiErr) ||
 		isRetryableUpstreamTemporaryError(openaiErr) ||
 		isUpstreamTransportInterruptedRelayError(openaiErr) ||
 		isUpstreamGatewayTimeoutError(openaiErr.StatusCode) ||
@@ -1586,11 +2228,7 @@ func isRetryableUpstreamTemporaryError(openaiErr *types.NewAPIError) bool {
 		return false
 	}
 	message := strings.ToLower(strings.Join(strings.Fields(openaiErr.Error()), " "))
-	if strings.Contains(message, "selected model is at capacity") {
-		return true
-	}
-	if strings.Contains(message, "model is at capacity") &&
-		strings.Contains(message, "try a different model") {
+	if isRetryableModelCapacityMessage(message) {
 		return true
 	}
 	if strings.Contains(message, "auth_not_found") &&
@@ -1608,6 +2246,13 @@ func isRetryableUpstreamTemporaryError(openaiErr *types.NewAPIError) bool {
 		return true
 	}
 	return strings.Contains(message, "订阅额度不足或暂不可用")
+}
+
+func isRetryableModelCapacityMessage(message string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(message), " "))
+	return strings.Contains(normalized, "selected model is at capacity") ||
+		(strings.Contains(normalized, "model is at capacity") &&
+			strings.Contains(normalized, "try a different model"))
 }
 
 func isUpstreamTransportInterruptedRelayError(openaiErr *types.NewAPIError) bool {
@@ -1773,6 +2418,7 @@ var responsesCompactFallbackContextKeys = []string{
 	string(constant.ContextKeyResponsesCompactRouteDecision),
 	string(constant.ContextKeyResponsesCompactFallbackReason),
 	string(constant.ContextKeyResponsesCompactChannelSkip),
+	string(constant.ContextKeyResponsesRoutingChannelSkips),
 	string(constant.ContextKeyResponsesCompactStateRestored),
 	string(constant.ContextKeyResponsesCompactModelChanged),
 	string(constant.ContextKeyResponsesCompactStateHash),
@@ -2148,7 +2794,7 @@ func responsesCompactRequestHasUnsafeCompactionInput(c *gin.Context, info *relay
 	}
 	hasOpaqueEncryptedContent, opaqueErr := service.ResponsesInputHasOpaqueEncryptedContent(relaycommon.GinRequestContext(c), req.Input)
 	if opaqueErr != nil {
-		logger.LogError(c, fmt.Sprintf("detect opaque responses encrypted content failed: %s", opaqueErr.Error()))
+		logger.LogError(c, fmt.Sprintf("detect opaque responses encrypted reasoning replay failed: %s", opaqueErr.Error()))
 	}
 	hasRemote, remoteErr := service.HasRemoteResponsesCompactionInput(relaycommon.GinRequestContext(c), req)
 	if remoteErr != nil {
@@ -2485,7 +3131,43 @@ func processChannelError(c *gin.Context, relayInfo *relaycommon.RelayInfo, chann
 	if relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
 		channelError.AutoBan = false
 	}
-	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
+	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode())))
+	if service.ShouldExcludeChannelForRetry(err) {
+		group := ""
+		modelName := ""
+		if relayInfo != nil {
+			group = relayInfo.UsingGroup
+			modelName = relayInfo.OriginModelName
+		}
+		if c != nil {
+			if strings.TrimSpace(group) == "" {
+				group = common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+				if strings.TrimSpace(group) == "" {
+					group = c.GetString("group")
+				}
+			}
+			if strings.TrimSpace(modelName) == "" {
+				modelName = common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
+				if strings.TrimSpace(modelName) == "" {
+					modelName = c.GetString("original_model")
+				}
+			}
+		}
+		if relayInfo != nil && relayInfo.ChannelHealthRoute != nil {
+			service.ExcludeChannelHealthSelectionForRoute(c, group, modelName, *relayInfo.ChannelHealthRoute)
+		} else {
+			service.ExcludeChannelHealthSelection(c, group, modelName, channelError.ChannelId)
+		}
+	}
+	healthFailure := service.ShouldSuppressChannelAutoBanForHealth(c, relayInfo, err)
+	if healthFailure || isProtocolIncompatibleSkip(err) {
+		channelError.AutoBan = false
+	}
+	if healthFailure {
+		service.ObserveChannelHealthFailure(c, relayInfo, err)
+	} else {
+		service.ReleaseChannelHealthProbe(c, relayInfo)
+	}
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
 	if service.ShouldDisableChannel(err) && channelError.AutoBan {
@@ -2494,53 +3176,216 @@ func processChannelError(c *gin.Context, relayInfo *relaycommon.RelayInfo, chann
 		})
 	}
 
-	if constant.ErrorLogEnabled && types.IsRecordErrorLog(err) {
-		// 保存错误日志到mysql中
-		userId := c.GetInt("id")
-		tokenName := c.GetString("token_name")
-		modelName := c.GetString("original_model")
-		tokenId := c.GetInt("token_id")
-		userGroup := c.GetString("group")
-		channelId := c.GetInt("channel_id")
-		other := make(map[string]interface{})
-		if c.Request != nil && c.Request.URL != nil {
-			other["request_path"] = c.Request.URL.Path
-		}
-		other["error_type"] = err.GetErrorType()
-		other["error_code"] = err.GetErrorCode()
-		other["status_code"] = err.StatusCode
-		other["channel_id"] = channelId
-		other["channel_name"] = c.GetString("channel_name")
-		other["channel_type"] = c.GetInt("channel_type")
-		adminInfo := make(map[string]interface{})
-		appendChannelErrorAdminInfo(c, adminInfo)
-		other["admin_info"] = adminInfo
-		service.AppendRequestHeaderPolicyInfo(c, other)
-		service.AppendResponsesRelayInfo(c, relayInfo, other)
-		service.AppendResponsesRequestShape(c, relayInfo, other)
-		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
-		if startTime.IsZero() {
-			startTime = time.Now()
-		}
-		useTimeSeconds := int(relaycommon.SafeElapsedSeconds(startTime, time.Now()))
-		service.MarkResponsesCompactErrorLog(c, true)
-		contentParts, other := service.AppendResponsesCompactLogInfo(c, relayInfo, []string{err.MaskSensitiveErrorWithStatusCode()}, other, time.Now())
-		service.MarkResponsesCompactErrorLog(c, false)
-		model.RecordErrorLog(
-			c,
-			userId,
-			channelId,
-			modelName,
-			tokenName,
-			strings.Join(contentParts, ", "),
-			tokenId,
-			useTimeSeconds,
-			common.GetContextKeyBool(c, constant.ContextKeyIsStream),
-			userGroup,
-			other,
-		)
-	}
+	recordRelayErrorLog(c, relayInfo, err)
 
+}
+
+func recordTerminalResponsesRoutingErrorLog(c *gin.Context, relayInfo *relaycommon.RelayInfo, err *types.NewAPIError) {
+	if c == nil || relayInfo == nil || err == nil {
+		return
+	}
+	channelSkips, ok := common.GetContextKeyType[[]dto.ResponsesRoutingChannelSkip](c, constant.ContextKeyResponsesRoutingChannelSkips)
+	if (!ok || len(channelSkips) == 0) && !service.HasChannelHealthRoutingAudit(c) {
+		return
+	}
+	finalizeResponsesRoutingTrace(c, err)
+	recordRelayErrorLog(c, relayInfo, err)
+}
+
+func recordRelayErrorLog(c *gin.Context, relayInfo *relaycommon.RelayInfo, err *types.NewAPIError) {
+	if c == nil || err == nil || !constant.ErrorLogEnabled || !types.IsRecordErrorLog(err) {
+		return
+	}
+	userId := c.GetInt("id")
+	tokenName := c.GetString("token_name")
+	modelName := c.GetString("original_model")
+	tokenId := c.GetInt("token_id")
+	userGroup := c.GetString("group")
+	channelId := responsesRoutingAttributedChannelID(c, c.GetInt("channel_id"))
+	other := make(map[string]interface{})
+	if c.Request != nil && c.Request.URL != nil {
+		other["request_path"] = c.Request.URL.Path
+	}
+	other["error_type"] = err.GetErrorType()
+	other["error_code"] = err.GetErrorCode()
+	other["status_code"] = err.StatusCode
+	other["error_category"] = classifyRelayErrorCategory(c, relayInfo, err)
+	openAIError := err.ToOpenAIError()
+	if errorType := sanitizeRelayErrorField(openAIError.Type); errorType != "" {
+		other["upstream_error_type"] = errorType
+	}
+	if errorCode := sanitizeRelayErrorField(fmt.Sprint(openAIError.Code)); errorCode != "" && errorCode != "<nil>" {
+		other["upstream_error_code"] = errorCode
+	}
+	if errorParam := sanitizeRelayErrorField(openAIError.Param); errorParam != "" {
+		other["error_param"] = errorParam
+	}
+	if errorEvent := common.GetContextKeyString(c, constant.ContextKeyResponsesErrorEvent); errorEvent != "" {
+		other["error_event"] = normalizeRelayErrorEvent(errorEvent)
+	}
+	other["channel_id"] = channelId
+	other["channel_name"] = c.GetString("channel_name")
+	other["channel_type"] = c.GetInt("channel_type")
+	adminInfo := make(map[string]interface{})
+	appendChannelErrorAdminInfo(c, adminInfo)
+	service.AppendChannelHealthRoutingAdminInfo(c, adminInfo)
+	other["admin_info"] = adminInfo
+	service.AppendRequestHeaderPolicyInfo(c, other)
+	service.AppendResponsesRelayInfo(c, relayInfo, other)
+	service.AppendResponsesRequestShape(c, relayInfo, other)
+	service.AppendStreamStatusForLog(relayInfo, other)
+	startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
+	if startTime.IsZero() {
+		startTime = time.Now()
+	}
+	useTimeSeconds := int(relaycommon.SafeElapsedSeconds(startTime, time.Now()))
+	service.MarkResponsesCompactErrorLog(c, true)
+	contentParts, other := service.AppendResponsesCompactLogInfo(c, relayInfo, []string{err.MaskSensitiveErrorWithStatusCode()}, other, time.Now())
+	service.MarkResponsesCompactErrorLog(c, false)
+	model.RecordErrorLog(
+		c,
+		userId,
+		channelId,
+		modelName,
+		tokenName,
+		strings.Join(contentParts, ", "),
+		tokenId,
+		useTimeSeconds,
+		common.GetContextKeyBool(c, constant.ContextKeyIsStream),
+		userGroup,
+		other,
+	)
+}
+
+func sanitizeRelayErrorField(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	// error_param is populated from upstream-controlled protocol fields. Always
+	// pass it through the common masker: a credential can appear in an
+	// unschemed host/query value that has no obvious auth marker.
+	value = common.MaskSensitiveInfo(value)
+	if len([]rune(value)) > 128 {
+		value = string([]rune(value)[:128])
+	}
+	return strings.TrimSpace(value)
+}
+
+// normalizeRelayErrorEvent keeps the error-log event dimension bounded to
+// values produced by the relay itself. The context value is request-scoped but
+// can still be populated by an adapter or future integration; storing an
+// arbitrary event name would make logs high-cardinality and could expose
+// upstream payload fragments. Unknown values are intentionally collapsed.
+func normalizeRelayErrorEvent(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "json", "sse", "response.error", "error", "response.failed":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "unknown"
+	}
+}
+
+const relayCloudflareTimeoutStatusCode = 524
+
+func classifyRelayErrorCategory(c *gin.Context, relayInfo *relaycommon.RelayInfo, err *types.NewAPIError) string {
+	if err == nil {
+		return "local_error"
+	}
+	if c != nil && c.Request != nil {
+		if requestErr := c.Request.Context().Err(); errors.Is(requestErr, context.Canceled) {
+			return "client_canceled"
+		}
+	}
+	if errors.Is(err, context.Canceled) {
+		return "client_canceled"
+	}
+	if types.IsChannelError(err) {
+		if err.GetErrorCode() == types.ErrorCodeChannelModelMappedError {
+			return "local_capability"
+		}
+		return "local_channel"
+	}
+	if relayInfo != nil && relayInfo.StreamStatus != nil {
+		switch relayInfo.StreamStatus.EndReason {
+		case relaycommon.StreamEndReasonClientGone:
+			if relayInfo.StreamStatus.IsCanceled() {
+				return "client_canceled"
+			}
+		case relaycommon.StreamEndReasonTimeout, relaycommon.StreamEndReasonFirstDataTimeout:
+			return "upstream_timeout"
+		case relaycommon.StreamEndReasonUpstreamInterrupted:
+			return "upstream_transport"
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) || err.StatusCode == http.StatusRequestTimeout || err.StatusCode == http.StatusGatewayTimeout || err.StatusCode == relayCloudflareTimeoutStatusCode {
+		return "upstream_timeout"
+	}
+	if isUpstreamRelayErrorCode(err.GetErrorCode()) {
+		if err.StatusCode >= http.StatusBadRequest && err.StatusCode < http.StatusInternalServerError {
+			return "upstream_4xx"
+		}
+		if err.StatusCode >= http.StatusInternalServerError {
+			return "upstream_5xx"
+		}
+	}
+	if err.GetErrorCode() == types.ErrorCodeUpstreamTransportInterrupted {
+		return "upstream_transport"
+	}
+	if isLocalRelayErrorCode(err.GetErrorCode()) || err.GetErrorType() == types.ErrorTypeNewAPIError {
+		return "local_error"
+	}
+	if err.StatusCode >= http.StatusBadRequest && err.StatusCode < http.StatusInternalServerError {
+		return "upstream_4xx"
+	}
+	if err.StatusCode >= http.StatusInternalServerError {
+		return "upstream_5xx"
+	}
+	return "local_error"
+}
+
+func isUpstreamRelayErrorCode(code types.ErrorCode) bool {
+	switch code {
+	case types.ErrorCodeBadResponseStatusCode,
+		types.ErrorCodeReadResponseBodyFailed,
+		types.ErrorCodeBadResponse,
+		types.ErrorCodeBadResponseBody,
+		types.ErrorCodeEmptyResponse:
+		return true
+	default:
+		return false
+	}
+}
+
+func isLocalRelayErrorCode(code types.ErrorCode) bool {
+	switch code {
+	case types.ErrorCodeInvalidRequest,
+		types.ErrorCodeSensitiveWordsDetected,
+		types.ErrorCodeCountTokenFailed,
+		types.ErrorCodeModelPriceError,
+		types.ErrorCodeInvalidApiType,
+		types.ErrorCodeJsonMarshalFailed,
+		types.ErrorCodeDoRequestFailed,
+		types.ErrorCodeGetChannelFailed,
+		types.ErrorCodeGenRelayInfoFailed,
+		types.ErrorCodeReadRequestBodyFailed,
+		types.ErrorCodeConvertRequestFailed,
+		types.ErrorCodeAccessDenied,
+		types.ErrorCodeBadRequestBody,
+		types.ErrorCodeQueryDataError,
+		types.ErrorCodeUpdateDataError,
+		types.ErrorCodeInsufficientUserQuota,
+		types.ErrorCodePreConsumeTokenQuotaFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func appendChannelErrorAdminInfo(c *gin.Context, adminInfo map[string]interface{}) {
@@ -2558,25 +3403,42 @@ func appendChannelErrorAdminInfo(c *gin.Context, adminInfo map[string]interface{
 
 // RelayMidjourney handles Midjourney proxy relay requests.
 func RelayMidjourney(c *gin.Context) {
-	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatMjProxy, nil, nil)
+	var relayInfo *relaycommon.RelayInfo
+	var genRelayInfoErr error
+	var mjErr *dto.MidjourneyResponse
+	defer func() {
+		// Midjourney handlers own health success/failure finalization after they
+		// inspect the upstream HTTP and provider response. The controller only
+		// releases a probe that was reserved before a handler returned; it must
+		// never infer success from a nil handler error.
+		if relayInfo != nil && relayInfo.ChannelMeta != nil {
+			service.ReleaseChannelHealthProbe(c, relayInfo)
+		} else if genRelayInfoErr != nil || mjErr != nil {
+			// Distributor may reserve a probe before RelayInfo initialization.
+			// Release that attempt-scoped probe on local setup/validation failure.
+			service.ReleaseChannelHealthProbeForChannel(c, c.GetInt("channel_id"))
+		}
+		service.ReleaseChannelConcurrency(c)
+	}()
 
-	if err != nil {
+	relayInfo, genRelayInfoErr = relaycommon.GenRelayInfo(c, types.RelayFormatMjProxy, nil, nil)
+
+	if genRelayInfoErr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"description": fmt.Sprintf("failed to generate relay info: %s", err.Error()),
+			"description": fmt.Sprintf("failed to generate relay info: %s", common.MaskSensitiveInfo(genRelayInfoErr.Error())),
 			"type":        "upstream_error",
 			"code":        4,
 		})
 		return
 	}
 
-	var mjErr *dto.MidjourneyResponse
 	switch relayInfo.RelayMode {
 	case relayconstant.RelayModeMidjourneyNotify:
 		mjErr = relay.RelayMidjourneyNotify(c)
 	case relayconstant.RelayModeMidjourneyTaskFetch, relayconstant.RelayModeMidjourneyTaskFetchByCondition:
 		mjErr = relay.RelayMidjourneyTask(c, relayInfo.RelayMode)
 	case relayconstant.RelayModeMidjourneyTaskImageSeed:
-		mjErr = relay.RelayMidjourneyTaskImageSeed(c)
+		mjErr = relay.RelayMidjourneyTaskImageSeed(c, relayInfo)
 	case relayconstant.RelayModeSwapFace:
 		mjErr = relay.RelaySwapFace(c, relayInfo)
 	default:
@@ -2589,6 +3451,8 @@ func RelayMidjourney(c *gin.Context) {
 		if mjErr.Code == 30 {
 			mjErr.Result = "当前分组负载已饱和，请稍后再试，或升级账户以提升服务质量。"
 			statusCode = http.StatusTooManyRequests
+		} else if mjErr.Code == 31 {
+			statusCode = http.StatusServiceUnavailable
 		}
 		c.JSON(statusCode, gin.H{
 			"description": fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result),
@@ -2596,7 +3460,7 @@ func RelayMidjourney(c *gin.Context) {
 			"code":        mjErr.Code,
 		})
 		channelId := c.GetInt("channel_id")
-		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)))
+		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, common.MaskSensitiveInfo(fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result))))
 	}
 }
 
@@ -2630,11 +3494,7 @@ func RelayNotFound(c *gin.Context) {
 func RelayTaskFetch(c *gin.Context) {
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, &dto.TaskError{
-			Code:       "gen_relay_info_failed",
-			Message:    err.Error(),
-			StatusCode: http.StatusInternalServerError,
-		})
+		respondTaskError(c, service.TaskErrorWrapperLocal(err, "gen_relay_info_failed", http.StatusInternalServerError))
 		return
 	}
 	if taskErr := relay.RelayTaskFetch(c, relayInfo.RelayMode); taskErr != nil {
@@ -2652,11 +3512,7 @@ func RelayTask(c *gin.Context) {
 	)
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, &dto.TaskError{
-			Code:       "gen_relay_info_failed",
-			Message:    err.Error(),
-			StatusCode: http.StatusInternalServerError,
-		})
+		respondTaskError(c, service.TaskErrorWrapperLocal(err, "gen_relay_info_failed", http.StatusInternalServerError))
 		return
 	}
 
@@ -2664,14 +3520,32 @@ func RelayTask(c *gin.Context) {
 		respondTaskError(c, taskErr)
 		return
 	}
+	// Remix/continuation requests intentionally skip channel selection in the
+	// distributor because the origin task owns the route. Once ResolveOriginTask
+	// restores that immutable requested model, enforce the token allow-list before
+	// any provider request can be submitted. Query/content endpoints never enter
+	// this handler, so they remain model-less at the middleware boundary.
+	if accessErr := middleware.ValidateTokenModelAccess(c, relayInfo.OriginModelName); accessErr != nil {
+		code := "token_model_forbidden"
+		if errors.Is(accessErr, middleware.ErrTokenModelAccessMissing) {
+			code = "token_no_model_access"
+		}
+		respondTaskError(c, service.TaskErrorWrapperLocal(accessErr, code, http.StatusForbidden))
+		return
+	}
 
 	var result *relay.TaskSubmitResult
 	var taskErr *dto.TaskError
 	defer func() {
-		if taskErr != nil && relayInfo.Billing != nil {
+		finalizeRelayChannelHealthProbe(c, relayInfo, taskErr == nil)
+		if taskErr != nil && relayInfo.Billing != nil && !taskErr.NoRefund {
 			relayInfo.Billing.Refund(c)
 		}
 	}()
+	// Task submissions use a locked channel for remix/continuation requests and
+	// therefore bypass the normal selector. Keep the same attempt-scoped lease
+	// lifecycle as synchronous relay requests.
+	defer service.ReleaseChannelConcurrency(c)
 
 	retryParam := &service.RetryParam{
 		Ctx:        c,
@@ -2681,27 +3555,60 @@ func RelayTask(c *gin.Context) {
 	}
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		relayInfo.RetryIndex = retryParam.GetRetry()
+		common.SetContextKey(c, constant.ContextKeyChannelHeaderProfileAttempt, relayInfo.RetryIndex)
 		var channel *model.Channel
 
 		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
 			channel = lockedCh
-			if retryParam.GetRetry() > 0 {
-				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
-					taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
-					break
+			if relayInfo.TaskRelayInfo != nil && relayInfo.TaskRelayInfo.OriginRouteMappingMissing {
+				taskErr = service.TaskErrorWrapperLocal(
+					service.ErrTaskRouteMappingMissing,
+					"task_route_mapping_missing",
+					http.StatusBadGateway,
+				)
+				break
+			}
+			var setupErr *types.NewAPIError
+			originSnapshot, snapshotErr := relay.TaskRouteSnapshotForContinuation(relayInfo)
+			if snapshotErr != nil {
+				taskErr = service.TaskErrorWrapperLocal(snapshotErr, "task_route_snapshot_invalid", http.StatusInternalServerError)
+				break
+			}
+			if originSnapshot != nil && originSnapshot.SchemaVersion >= model.TaskRouteSnapshotHeaderPolicySchemaVersion {
+				persistedCredential := ""
+				if relayInfo.TaskRelayInfo != nil {
+					persistedCredential = relayInfo.TaskRelayInfo.OriginRouteCredential
 				}
+				setupErr = middleware.SetupContextForSelectedChannelWithRouteSnapshotAndCredential(c, channel, relayInfo.OriginModelName, originSnapshot, persistedCredential)
+			} else if effectiveModel := strings.TrimSpace(relayInfo.OriginRouteEffectiveModel); effectiveModel != "" {
+				setupErr = middleware.SetupContextForSelectedChannelWithEffectiveModel(c, channel, relayInfo.OriginModelName, effectiveModel)
+			} else {
+				setupErr = middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName)
+			}
+			if setupErr != nil {
+				taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
+				break
+			}
+			acquired, concurrencyErr := acquireSelectedChannelConcurrency(c, channel, true)
+			if concurrencyErr != nil {
+				taskErr = service.TaskErrorWrapperLocal(concurrencyErr.Err, "channel_concurrency_failed", concurrencyErr.StatusCode)
+				break
+			}
+			if !acquired {
+				taskErr = service.TaskErrorWrapperLocal(errors.New("locked channel concurrency limit reached"), "channel_concurrency_exceeded", http.StatusTooManyRequests)
+				break
 			}
 		} else {
 			var channelErr *types.NewAPIError
 			channel, channelErr = getChannel(c, relayInfo, retryParam)
 			if channelErr != nil {
-				logger.LogError(c, channelErr.Error())
-				taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", http.StatusInternalServerError)
+				logger.LogError(c, channelErr.MaskSensitiveErrorWithStatusCode())
+				taskErr = taskErrorFromChannelSelectionError(channelErr)
 				break
 			}
 		}
 
-		addUsedChannel(c, channel.Id)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
 			if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
@@ -2712,6 +3619,10 @@ func RelayTask(c *gin.Context) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		// The channel is now ready for the actual task submission. Local body
+		// failures above are not upstream attempts and must not pollute
+		// use_channel.
+		addUsedChannel(c, channel.Id)
 
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
 		if taskErr == nil {
@@ -2747,37 +3658,242 @@ func RelayTask(c *gin.Context) {
 		logger.LogInfo(c, retryLogStr)
 	}
 
-	// ── 成功：结算 + 日志 + 插入任务 ──
-	if taskErr == nil {
-		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
-			common.SysError("settle task billing error: " + settleErr.Error())
+	// A 2xx submission whose response does not expose a usable upstream task ID
+	// is intentionally non-retryable: the provider may already have accepted the
+	// job. Persist a terminal, zero-quota task using the same route snapshot so
+	// the public task ID remains queryable and operators can reconcile the
+	// ambiguous provider submission without creating a duplicate job.
+	if taskErr != nil && taskErr.NoRefund {
+		finalizeAmbiguousTaskBilling(c, relayInfo, result)
+		if persistErr := persistAmbiguousTaskSubmission(c, relayInfo, result, taskErr); persistErr != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("persist ambiguous task submission failed: %s", common.MaskSensitiveInfo(persistErr.Error())))
 		}
-		service.LogTaskConsumption(c, relayInfo)
+	}
 
-		task := model.InitTask(result.Platform, relayInfo)
-		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
-		task.PrivateData.BillingSource = relayInfo.BillingSource
-		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
-		task.PrivateData.TokenId = relayInfo.TokenId
-		task.PrivateData.BillingContext = &model.TaskBillingContext{
-			ModelPrice:      relayInfo.PriceData.ModelPrice,
-			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			ModelRatio:      relayInfo.PriceData.ModelRatio,
-			OtherRatios:     relayInfo.PriceData.OtherRatios,
-			OriginModelName: relayInfo.OriginModelName,
-			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+	// ── 成功：先持久化任务，再结算、记录并提交响应 ──
+	if taskErr == nil {
+		if result == nil || result.RouteSnapshot == nil {
+			taskErr = service.TaskErrorWrapperLocal(errors.New("task route snapshot is unavailable after submission"), "build_task_route_snapshot_failed", http.StatusInternalServerError)
 		}
-		task.Quota = result.Quota
-		task.Data = result.TaskData
-		task.Action = relayInfo.Action
-		if insertErr := task.Insert(); insertErr != nil {
-			common.SysError("insert task error: " + insertErr.Error())
+		if taskErr == nil {
+			task := model.InitTask(result.Platform, relayInfo)
+			task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
+			task.PrivateData.BillingSource = relayInfo.BillingSource
+			task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
+			task.PrivateData.TokenId = relayInfo.TokenId
+			task.PrivateData.BillingContext = &model.TaskBillingContext{
+				ModelPrice:      relayInfo.PriceData.ModelPrice,
+				GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+				ModelRatio:      relayInfo.PriceData.ModelRatio,
+				OtherRatios:     relayInfo.PriceData.OtherRatios,
+				OriginModelName: relayInfo.OriginModelName,
+				PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+			}
+			task.Quota = result.Quota
+			task.Data = result.TaskData
+			task.Action = relayInfo.Action
+			// RelayTaskSubmit built this snapshot before contacting the provider;
+			// persist exactly that immutable identity with the task.
+			task.PrivateData.RouteSnapshot = result.RouteSnapshot
+			// The task row is also used by asynchronous billing. Persist the same
+			// concrete group as the route snapshot instead of leaving "auto" in a
+			// field that later quota reconciliation interprets as a real group.
+			task.Group = strings.TrimSpace(result.RouteSnapshot.Group)
+			if insertErr := task.Insert(); insertErr != nil {
+				// The provider has already accepted the job. A local persistence
+				// failure must not trigger a second upstream submission or refund the
+				// pre-consumed quota. Keep the public response safe and correlate the
+				// failure with the generated task/channel/request identifiers in logs.
+				common.SysError(fmt.Sprintf("insert task error after upstream acceptance task_id=%s channel_id=%d request_id=%s: %s", task.TaskID, task.ChannelId, relayInfo.RequestId, insertErr.Error()))
+				taskErr = service.TaskErrorWrapperLocal(
+					fmt.Errorf("task persistence failed after upstream acceptance (public_task_id=%s)", task.TaskID),
+					"task_persist_failed",
+					http.StatusInternalServerError,
+				)
+				taskErr.NoRefund = true
+				finalizeAmbiguousTaskBilling(c, relayInfo, result)
+				// The first insert crossed the provider-acceptance boundary but
+				// failed locally. Make the same reconciliation attempt used for
+				// other ambiguous submissions so operators retain the public task
+				// ID, route snapshot and upstream correlation when the database
+				// failure is transient. A second failure is logged and never
+				// reopens retry or refund behavior.
+				if persistErr := persistAmbiguousTaskSubmission(c, relayInfo, result, taskErr); persistErr != nil {
+					logger.LogError(c.Request.Context(), fmt.Sprintf("persist task persistence failure reconciliation failed: %s", common.MaskSensitiveInfo(persistErr.Error())))
+				}
+			} else {
+				// The upstream task is now durable. A settlement failure must not
+				// turn this into a retryable submission error, otherwise clients may
+				// submit the same provider task twice. Keep the task queryable and
+				// leave an explicit operator-visible error in the log.
+				if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+					common.SysError("settle task billing error after durable insert: " + settleErr.Error())
+				}
+				service.LogTaskConsumption(c, relayInfo)
+				if result.Response != nil {
+					if flushErr := result.Response.FlushTo(c.Writer); flushErr != nil {
+						// The task and billing state are already durable; do not
+						// invoke the refund path merely because the client socket
+						// closed while the response was being written.
+						common.SysError("flush task submit response failed after durable insert: " + flushErr.Error())
+					}
+				}
+			}
 		}
 	}
 
 	if taskErr != nil {
 		respondTaskError(c, taskErr)
 	}
+}
+
+// finalizeAmbiguousTaskBilling closes the request-scoped billing session after
+// the provider acceptance boundary has been crossed. The task row deliberately
+// keeps Quota=0 so maintenance cannot auto-refund a job whose provider outcome
+// is unknown, while the normal settlement and consumption log retain the real
+// charge for reconciliation. Failures are operator-visible and never reopen a
+// retry/refund path.
+func finalizeAmbiguousTaskBilling(c *gin.Context, info *relaycommon.RelayInfo, result *relay.TaskSubmitResult) {
+	if c == nil || info == nil {
+		return
+	}
+	actualQuota := info.PriceData.Quota
+	if result != nil {
+		actualQuota = result.Quota
+	}
+	if actualQuota < 0 {
+		actualQuota = 0
+	}
+	info.PriceData.Quota = actualQuota
+	if info.Billing != nil {
+		if err := service.SettleBilling(c, info, actualQuota); err != nil {
+			common.SysError(fmt.Sprintf("settle ambiguous task billing failed task_id=%s channel_id=%d request_id=%s: %s", info.PublicTaskID, info.ChannelId, info.RequestId, err.Error()))
+		}
+	}
+	if c.Request != nil {
+		service.LogTaskConsumption(c, info)
+	}
+}
+
+// persistAmbiguousTaskSubmission records a provider submission that crossed
+// the upstream acceptance boundary but could not be associated with a provider
+// task ID locally. The row is terminal and has zero quota so the maintenance
+// poller cannot later interpret it as a normal task and issue an automatic
+// refund. The captured route snapshot and redacted response body are retained
+// only for operator reconciliation; no second upstream request is attempted.
+func persistAmbiguousTaskSubmission(c *gin.Context, info *relaycommon.RelayInfo, result *relay.TaskSubmitResult, taskErr *dto.TaskError) error {
+	if info == nil {
+		return errors.New("relay info is nil")
+	}
+	if result == nil {
+		return errors.New("partial task submission result is unavailable")
+	}
+	if result.RouteSnapshot == nil {
+		return errors.New("task route snapshot is unavailable")
+	}
+
+	task := model.InitTask(result.Platform, info)
+	task.PrivateData.UpstreamTaskID = strings.TrimSpace(result.UpstreamTaskID)
+	task.PrivateData.BillingSource = info.BillingSource
+	task.PrivateData.SubscriptionId = info.SubscriptionId
+	task.PrivateData.TokenId = info.TokenId
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		ModelPrice:      info.PriceData.ModelPrice,
+		GroupRatio:      info.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:      info.PriceData.ModelRatio,
+		OtherRatios:     info.PriceData.OtherRatios,
+		OriginModelName: info.OriginModelName,
+		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, info.OriginModelName) || info.PriceData.UsePrice,
+	}
+	task.PrivateData.RouteSnapshot = result.RouteSnapshot
+	task.Quota = 0
+	task.Data = redactAmbiguousTaskData(result.TaskData)
+	task.Action = info.Action
+	task.Group = strings.TrimSpace(result.RouteSnapshot.Group)
+	task.Status = model.TaskStatusFailure
+	task.Progress = "100%"
+	task.FinishTime = time.Now().Unix()
+	task.FailReason = ambiguousTaskFailureReason(taskErr)
+
+	if err := task.Insert(); err != nil {
+		return fmt.Errorf("insert ambiguous task %s: %w", task.TaskID, err)
+	}
+	logger.LogWarn(c.Request.Context(), fmt.Sprintf("ambiguous upstream task submission persisted: task_id=%s channel_id=%d upstream_task_id=%s", task.TaskID, task.ChannelId, task.PrivateData.UpstreamTaskID))
+	return nil
+}
+
+const maxAmbiguousTaskDataBytes = 1 << 20
+
+func redactAmbiguousTaskData(body []byte) []byte {
+	if len(body) == 0 {
+		return nil
+	}
+	if len(body) > maxAmbiguousTaskDataBytes {
+		return omittedAmbiguousTaskData(len(body))
+	}
+	redacted := service.RedactVideoResponseBody(body)
+	var payload any
+	if common.Unmarshal(redacted, &payload) != nil || len(redacted) > maxAmbiguousTaskDataBytes {
+		return omittedAmbiguousTaskData(len(body))
+	}
+	return redacted
+}
+
+func omittedAmbiguousTaskData(size int) []byte {
+	fallback, err := common.Marshal(map[string]any{
+		"response_body_omitted": true,
+		"response_body_bytes":   size,
+	})
+	if err == nil {
+		return fallback
+	}
+	return nil
+}
+
+func ambiguousTaskFailureReason(taskErr *dto.TaskError) string {
+	reason := "ambiguous_task_submission"
+	if taskErr != nil && strings.TrimSpace(taskErr.Message) != "" {
+		reason += ": " + strings.TrimSpace(taskErr.Message)
+	}
+	reason = common.MaskSensitiveInfo(reason)
+	reason = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, reason)
+	const maxReasonRunes = 512
+	runes := []rune(reason)
+	if len(runes) > maxReasonRunes {
+		runes = runes[:maxReasonRunes]
+	}
+	return strings.TrimSpace(string(runes))
+}
+
+// taskErrorFromChannelSelectionError keeps selector-level capacity semantics
+// visible to task clients. In particular, an ordinary task route that cannot
+// find a free channel must remain a 429 instead of being flattened into a 500.
+func taskErrorFromChannelSelectionError(channelErr *types.NewAPIError) *dto.TaskError {
+	if channelErr == nil {
+		return nil
+	}
+
+	statusCode := channelErr.StatusCode
+	if statusCode < http.StatusBadRequest || statusCode > 599 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	code := "get_channel_failed"
+	switch channelErr.GetErrorCode() {
+	case types.ErrorCodeChannelConcurrencyExceeded, types.ErrorCodeChannelConcurrencyUnavailable:
+		code = string(channelErr.GetErrorCode())
+	}
+
+	err := channelErr.Err
+	if err == nil {
+		err = channelErr
+	}
+	return service.TaskErrorWrapperLocal(err, code, statusCode)
 }
 
 func shouldStopLockedTaskUpstreamRateLimitRetry(info *relaycommon.RelayInfo, taskErr *dto.TaskError) bool {
@@ -2800,13 +3916,21 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 	if taskErr == nil {
 		return false
 	}
+	if taskErr.NoRefund {
+		// The upstream may already have accepted the asynchronous job. Retrying
+		// would risk creating a duplicate provider task even if a future adapter
+		// reports the ambiguity as a non-local error.
+		return false
+	}
 	if service.IsUpstreamRateLimitRetryTerminal(c) {
 		return false
 	}
 	if taskErr.LocalError {
 		return false
 	}
-	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) && !isUpstreamRateLimitError(taskErr.StatusCode) {
+	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) &&
+		!isUpstreamRateLimitError(taskErr.StatusCode) &&
+		!isRetryableModelCapacityMessage(taskErr.Message) {
 		return false
 	}
 	if retryTimes <= 0 {
@@ -2814,6 +3938,12 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 	}
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return false
+	}
+	if taskErr.StatusCode >= 200 && taskErr.StatusCode < 300 {
+		return false
+	}
+	if isRetryableModelCapacityMessage(taskErr.Message) {
+		return true
 	}
 	if taskErr.StatusCode == http.StatusTooManyRequests {
 		return true

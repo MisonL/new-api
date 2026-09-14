@@ -247,6 +247,18 @@ const (
 	Gemini25FlashNativeAudioInputAudioPrice = 3.00
 	Gemini20FlashInputAudioPrice            = 0.70
 	GeminiRoboticsER15InputAudioPrice       = 1.00
+	Gemini35FlashInputAudioPrice            = 1.50
+	Gemini35FlashLiteInputAudioPrice        = 0.30
+	Gemini36FlashInputAudioPrice            = 0.75
+	Gemini37FlashInputAudioPrice            = 0.75
+	Gemini31FlashLiteInputAudioPrice        = 0.50
+	GeminiOmniFlashInputAudioPrice          = 1.50
+	Gemini31FlashLiveInputAudioPrice        = 3.00
+	Gemini35LiveTranslateInputAudioPrice    = 3.50
+	Gemini3FlashInputAudioPrice             = 1.00
+	GeminiEmbedding2InputAudioPrice         = 6.50
+	GeminiRoboticsER16InputAudioPrice       = 2.00
+	GeminiRoboticsER2InputAudioPrice        = 2.00
 )
 
 func GetGeminiInputAudioPricePerMillionTokens(modelName string) float64 {
@@ -262,6 +274,30 @@ func GetGeminiInputAudioPricePerMillionTokens(modelName string) float64 {
 		return Gemini20FlashInputAudioPrice
 	} else if strings.HasPrefix(modelName, "gemini-robotics-er-1.5") {
 		return GeminiRoboticsER15InputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-3-flash") {
+		return Gemini3FlashInputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-3.5-flash-lite") {
+		return Gemini35FlashLiteInputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-3.5-flash") {
+		return Gemini35FlashInputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-3.6-flash") {
+		return Gemini36FlashInputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-3.7-flash") {
+		return Gemini37FlashInputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-3.1-flash-lite") {
+		return Gemini31FlashLiteInputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-omni-flash") {
+		return GeminiOmniFlashInputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-3.1-flash-live") {
+		return Gemini31FlashLiveInputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-3.5-live-translate") {
+		return Gemini35LiveTranslateInputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-embedding-2") {
+		return GeminiEmbedding2InputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-robotics-er-1.6") {
+		return GeminiRoboticsER16InputAudioPrice
+	} else if strings.HasPrefix(modelName, "gemini-robotics-er-2") {
+		return GeminiRoboticsER2InputAudioPrice
 	}
 	return 0
 }

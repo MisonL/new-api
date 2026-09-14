@@ -40,11 +40,11 @@ func syntheticCompactLegacyTestStateID(digit string) string {
 }
 
 func syntheticCompactV2TestStateID(instanceID string, digit string) string {
-	return syntheticCompactIDPrefix + instanceID + "_" + strings.Repeat(digit, 32)
+	return syntheticCompactIDPrefix + instanceID + "_" + strings.Repeat(digit, syntheticCompactStateHexLen)
 }
 
 func nativeOpaqueCompactTestStateID(instanceID string, digit string) string {
-	return nativeOpaqueCompactIDPrefix + instanceID + "_" + strings.Repeat(digit, 24)
+	return nativeOpaqueCompactIDPrefix + instanceID + "_" + strings.Repeat(digit, nativeOpaqueCompactStateHexLen)
 }
 
 type syntheticCompactTestContent struct {
@@ -54,6 +54,15 @@ type syntheticCompactTestContent struct {
 type syntheticCompactTestMessage struct {
 	Role    string                        `json:"role"`
 	Content []syntheticCompactTestContent `json:"content"`
+}
+
+func TestResponsesJSONScannerAcceptsEmptyObjectKey(t *testing.T) {
+	visited := false
+	require.True(t, visitResponsesJSONObject(common.RawMessage(`{"":"value"}`), func(key string, value common.RawMessage) bool {
+		visited = key == "" && string(value) == `"value"`
+		return true
+	}))
+	require.True(t, visited)
 }
 
 type redisCommandCountHook struct {
@@ -222,19 +231,6 @@ func withBrokenSyntheticCompactTestRedis(t *testing.T, fn func()) {
 	fn()
 }
 
-func TestBuildSyntheticCompactSummaryRequestRejectsOpaqueOnlyInput(t *testing.T) {
-	resetSyntheticCompactMemoryStoreForTest()
-
-	req := dto.OpenAIResponsesRequest{
-		Model: "gpt-5",
-		Input: common.RawMessage(`[{"type":"compaction","encrypted_content":"opaque"}]`),
-	}
-
-	_, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, req)
-
-	require.ErrorIs(t, err, ErrResponsesOpaqueReplayRequiresNative)
-}
-
 func TestBuildSyntheticCompactSummaryRequestRejectsOpaqueReplay(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -265,33 +261,10 @@ func TestBuildSyntheticCompactSummaryRequestRejectsOpaqueReplay(t *testing.T) {
 	}
 }
 
-func TestResponsesInputHasOpaqueEncryptedContentOnlyTrustsStoredSyntheticMarker(t *testing.T) {
-	resetSyntheticCompactMemoryStoreForTest()
-	withoutSyntheticCompactTestDB(t)
-
-	storedState := SyntheticCompactState{
-		ID:      syntheticCompactLegacyTestID,
-		Model:   "gpt-5.6-sol",
-		Summary: "Stored compact state.",
-	}
-	require.NoError(t, storeSyntheticCompactState(context.Background(), storedState))
-	storedInput := common.RawMessage(`[{"type":"compaction","encrypted_content":"` + syntheticCompactLegacyTestMarker + `"}]`)
-	missingMarker := "newapi.synthetic.compact:" + syntheticCompactLegacyTestStateID("f")
-	missingInput := common.RawMessage(`[{"type":"compaction","encrypted_content":"` + missingMarker + `"}]`)
-
-	storedOpaque, err := ResponsesInputHasOpaqueEncryptedContent(context.Background(), storedInput)
-	require.NoError(t, err)
-	require.False(t, storedOpaque)
-
-	missingOpaque, err := ResponsesInputHasOpaqueEncryptedContent(context.Background(), missingInput)
-	require.NoError(t, err)
-	require.True(t, missingOpaque)
-}
-
 func TestApplySyntheticCompactStateOrVisibleOnlyRejectsOpaqueReplay(t *testing.T) {
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5",
-		PreviousResponseID: "resp_newapi_synthcmp_missing",
+		PreviousResponseID: syntheticCompactLegacyTestStateID("f"),
 		Input: common.RawMessage(`[
 			{"type":"reasoning","encrypted_content":"opaque-reasoning-state"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
@@ -529,6 +502,191 @@ func TestVisibleResponsesInputPartsIncludesCustomToolCallOutputContent(t *testin
 	require.Equal(t, []string{"[assistant] call_id=call_custom\noutput=custom result"}, parts)
 }
 
+func TestBuildSyntheticCompactSummaryRequestOmitsEmbeddedMediaFromToolOutput(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+
+	base64Tail := strings.Repeat("A", syntheticCompactVisibleTextMax*2)
+	input, err := common.Marshal([]map[string]any{
+		{
+			"type":    "custom_tool_call_output",
+			"call_id": "call_image",
+			"output":  "data:image/png;base64," + base64Tail,
+		},
+		{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]string{
+				{"type": "input_text", "text": "Continue after the image tool result."},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	got, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: input,
+	})
+
+	require.NoError(t, err)
+	body := string(got.Input)
+	require.Contains(t, body, "call_id=call_image")
+	require.Contains(t, body, "[embedded media omitted from synthetic compact summary]")
+	require.Contains(t, body, "Continue after the image tool result.")
+	require.NotContains(t, body, "data:image/png;base64,")
+	require.NotContains(t, body, strings.Repeat("A", 4096))
+	require.Less(t, len(body), 16*1024)
+}
+
+func TestBuildSyntheticCompactSummaryRequestOmitsEmbeddedMediaFromCodexToolOutputArray(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+
+	base64Tail := strings.Repeat("A", syntheticCompactToolPayloadMaxBytes*2)
+	input, err := common.Marshal([]map[string]any{
+		{
+			"type":    "custom_tool_call_output",
+			"call_id": "call_image_array",
+			"output": []map[string]string{
+				{
+					"type":      "input_image",
+					"image_url": "data:image/png;base64," + base64Tail,
+				},
+			},
+		},
+		{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]string{
+				{"type": "input_text", "text": "Continue after the image tool result."},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	got, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: input,
+	})
+
+	require.NoError(t, err)
+	body := string(got.Input)
+	require.Contains(t, body, "call_id=call_image_array")
+	require.Contains(t, body, syntheticCompactEmbeddedMediaOmission)
+	require.NotContains(t, body, syntheticCompactLargeToolPayloadOmission)
+	require.Contains(t, body, "Continue after the image tool result.")
+	require.NotContains(t, body, "data:image/png;base64,")
+	require.NotContains(t, body, strings.Repeat("A", 4096))
+	require.Less(t, len(body), 16*1024)
+}
+
+func TestVisibleResponsesInputPartsRetainsOnlyLatestBoundedContext(t *testing.T) {
+	earlyText := "EARLY_CONTEXT_MUST_BE_DROPPED_" + strings.Repeat("A", syntheticCompactVisibleTextMax*2)
+	input, err := common.Marshal([]map[string]any{
+		{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]string{
+				{"type": "input_text", "text": earlyText},
+			},
+		},
+		{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]string{
+				{"type": "input_text", "text": "LATEST_CONTEXT_MUST_BE_KEPT"},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	parts := visibleResponsesInputParts(input)
+	visible := strings.Join(parts, "\n")
+
+	require.Contains(t, visible, "[truncated earlier visible input]")
+	require.NotContains(t, visible, "EARLY_CONTEXT_MUST_BE_DROPPED")
+	require.Contains(t, visible, "LATEST_CONTEXT_MUST_BE_KEPT")
+	require.LessOrEqual(t, len(visible), syntheticCompactVisibleTextMax+len("[truncated earlier visible input]\n")+1)
+}
+
+func TestBuildSyntheticCompactSummaryRequestOmitsEmbeddedMediaFromVisibleText(t *testing.T) {
+	resetSyntheticCompactMemoryStoreForTest()
+
+	base64Tail := strings.Repeat("B", syntheticCompactVisibleTextMax*2)
+	input, err := common.Marshal([]map[string]any{
+		{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]string{
+				{"type": "input_text", "text": "data:image/jpeg;base64," + base64Tail},
+				{"type": "input_text", "text": "Continue after the screenshot."},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	got, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: input,
+	})
+
+	require.NoError(t, err)
+	body := string(got.Input)
+	require.Contains(t, body, syntheticCompactEmbeddedMediaOmission)
+	require.Contains(t, body, "Continue after the screenshot.")
+	require.NotContains(t, body, "data:image/jpeg;base64,")
+	require.NotContains(t, body, strings.Repeat("B", 4096))
+	require.Less(t, len(body), 16*1024)
+}
+
+func TestVisibleResponsesInputPartsOmitsDataURIAfterInitialScanWindow(t *testing.T) {
+	media := strings.Repeat("C", syntheticCompactDataURIScanMaxBytes+128) + "data:image/png;base64," + strings.Repeat("D", 4096)
+	input, err := common.Marshal([]map[string]any{
+		{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]string{
+				{"type": "input_text", "text": media},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	visible := strings.Join(visibleResponsesInputParts(input), "\n")
+	require.Contains(t, visible, syntheticCompactLargeVisibleFieldOmission)
+	require.NotContains(t, visible, syntheticCompactEmbeddedMediaOmission)
+	require.NotContains(t, visible, "data:image/png;base64,")
+	require.NotContains(t, visible, strings.Repeat("D", 4096))
+}
+
+func TestHasEmbeddedMediaDataURIRecognizesPrefixCrossingScanBoundary(t *testing.T) {
+	raw := strings.Repeat("C", syntheticCompactDataURIScanMaxBytes-2) +
+		"data:image/png;base64," + strings.Repeat("D", 1024)
+
+	require.True(t, hasEmbeddedMediaDataURI([]byte(raw)))
+}
+
+func TestVisibleResponsesInputPartsRetainsTextAlongsideLargeImage(t *testing.T) {
+	largeMedia := strings.Repeat("A", syntheticCompactVisibleInputItemMaxBytes*2)
+	input, err := common.Marshal([]map[string]any{
+		{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]string{
+				{"type": "input_text", "text": "KEEP_THIS_USER_INSTRUCTION"},
+				{"type": "input_image", "image_url": "data:image/png;base64," + largeMedia},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	parts := visibleResponsesInputParts(input)
+	visible := strings.Join(parts, "\n")
+
+	require.Contains(t, visible, "KEEP_THIS_USER_INSTRUCTION")
+	require.Contains(t, visible, syntheticCompactEmbeddedMediaOmission)
+	require.NotContains(t, visible, "data:image/png;base64,")
+	require.NotContains(t, visible, strings.Repeat("A", 4096))
+}
+
 func TestVisibleResponsesInputPartsSkipsCompactionSummary(t *testing.T) {
 	parts := visibleResponsesInputParts(common.RawMessage(`[
 		{"type":"compaction_summary","encrypted_content":"opaque","content":[{"type":"input_text","text":"must stay hidden"}]}
@@ -719,7 +877,7 @@ func TestApplySyntheticCompactStateUsesHandoffPromptAfterRepeatedSetup(t *testin
 		Model:              "gpt-5",
 		PreviousResponseID: state.ID,
 		Input: common.RawMessage(`[
-			{"type":"message","role":"developer","content":[{"type":"input_text","text":"AGENTS.md instructions for /Volumes/Work/code/new-api"}]},
+			{"type":"message","role":"developer","content":[{"type":"input_text","text":"AGENTS.md instructions for <repository-root>"}]},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"收到。我会按 project-doc 中的 new-api 仓库规则执行。"}]}
 		]`),
 	}
@@ -811,7 +969,7 @@ func TestApplySyntheticCompactStateRejectsMissingReferencedState(t *testing.T) {
 
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5",
-		PreviousResponseID: "resp_newapi_synthcmp_55555555555555555555555555555555",
+		PreviousResponseID: syntheticCompactLegacyTestStateID("e"),
 		Input:              common.RawMessage(`"continue"`),
 	}
 
@@ -821,13 +979,13 @@ func TestApplySyntheticCompactStateRejectsMissingReferencedState(t *testing.T) {
 	require.Contains(t, err.Error(), "not found")
 }
 
-func TestApplySyntheticCompactStateOrVisibleOnlyTreatsMissingMarkerAsOpaque(t *testing.T) {
+func TestApplySyntheticCompactStateOrVisibleOnlyDropsMissingStateWhenVisibleInputExists(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	withoutSyntheticCompactTestDB(t)
 
 	localID, err := syntheticCompactLocalInstanceID(context.Background())
 	require.NoError(t, err)
-	missingID := syntheticCompactV2TestStateID(localID, "3")
+	missingID := syntheticCompactV2TestStateID(localID, "1")
 	marker := syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + localID + ":" + missingID
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5",
@@ -840,10 +998,13 @@ func TestApplySyntheticCompactStateOrVisibleOnlyTreatsMissingMarkerAsOpaque(t *t
 
 	got, applied, visibleOnly, err := ApplySyntheticCompactStateOrVisibleOnly(context.Background(), SyntheticCompactStateScope{}, req)
 
-	require.ErrorIs(t, err, ErrResponsesOpaqueReplayRequiresNative)
+	require.NoError(t, err)
 	require.False(t, applied)
-	require.False(t, visibleOnly)
-	require.Equal(t, req, got)
+	require.True(t, visibleOnly)
+	require.Empty(t, got.PreviousResponseID)
+	require.Contains(t, string(got.Input), "continue with visible context")
+	require.NotContains(t, string(got.Input), missingID)
+	require.NotContains(t, string(got.Input), "newapi.synthetic.compact")
 }
 
 func TestApplySyntheticCompactStateOrVisibleOnlyRejectsMissingStateWithoutVisibleInput(t *testing.T) {
@@ -852,7 +1013,7 @@ func TestApplySyntheticCompactStateOrVisibleOnlyRejectsMissingStateWithoutVisibl
 
 	localID, err := syntheticCompactLocalInstanceID(context.Background())
 	require.NoError(t, err)
-	missingID := syntheticCompactV2TestStateID(localID, "4")
+	missingID := syntheticCompactV2TestStateID(localID, "2")
 	marker := syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + localID + ":" + missingID
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5",
@@ -863,7 +1024,7 @@ func TestApplySyntheticCompactStateOrVisibleOnlyRejectsMissingStateWithoutVisibl
 
 	_, applied, visibleOnly, err := ApplySyntheticCompactStateOrVisibleOnly(context.Background(), SyntheticCompactStateScope{}, req)
 
-	require.ErrorIs(t, err, ErrResponsesOpaqueReplayRequiresNative)
+	require.ErrorIs(t, err, ErrSyntheticCompactStateNotFound)
 	require.False(t, applied)
 	require.False(t, visibleOnly)
 }
@@ -960,7 +1121,7 @@ func TestSetSyntheticCompactApplyInfoClearsBooleanContext(t *testing.T) {
 	require.Equal(t, "", c.Request.Context().Value(constant.ContextKeyResponsesCompactStateHash))
 }
 
-func TestBuildSyntheticCompactSummaryRequestRejectsNonSyntheticMarkerIDAsOpaqueReplay(t *testing.T) {
+func TestBuildSyntheticCompactSummaryRequestRejectsMalformedSyntheticMarker(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	originDB := model.DB
 	t.Cleanup(func() {
@@ -977,9 +1138,10 @@ func TestBuildSyntheticCompactSummaryRequestRejectsNonSyntheticMarkerIDAsOpaqueR
 		]`),
 	}
 
-	_, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, req)
+	got, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, req)
 
 	require.ErrorIs(t, err, ErrResponsesOpaqueReplayRequiresNative)
+	require.Empty(t, got)
 }
 
 func TestSyntheticCompactV2MarkerResolvesOnlyLocalInstance(t *testing.T) {
@@ -989,7 +1151,7 @@ func TestSyntheticCompactV2MarkerResolvesOnlyLocalInstance(t *testing.T) {
 	localID, err := syntheticCompactLocalInstanceID(context.Background())
 	require.NoError(t, err)
 	state := SyntheticCompactState{
-		ID:      syntheticCompactV2TestStateID(localID, "5"),
+		ID:      syntheticCompactV2TestStateID(localID, "3"),
 		Model:   "gpt-5",
 		Summary: "Local compact state.",
 	}
@@ -1031,7 +1193,7 @@ func TestHasRemoteResponsesCompactionInputClassifiesRemoteAndLocalMarkers(t *tes
 	localID, err := syntheticCompactLocalInstanceID(context.Background())
 	require.NoError(t, err)
 	state := SyntheticCompactState{
-		ID:      syntheticCompactV2TestStateID(localID, "6"),
+		ID:      syntheticCompactV2TestStateID(localID, "4"),
 		Model:   "gpt-5",
 		Summary: "Local compact state.",
 	}
@@ -1054,7 +1216,7 @@ func TestHasRemoteResponsesCompactionInputClassifiesRemoteAndLocalMarkers(t *tes
 	if foreignID == localID {
 		foreignID = "neeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	}
-	foreignMarker := syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + foreignID + ":" + syntheticCompactV2TestStateID(foreignID, "7")
+	foreignMarker := syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + foreignID + ":" + syntheticCompactV2TestStateID(foreignID, "5")
 	foreignReq := dto.OpenAIResponsesRequest{
 		Model: "gpt-5",
 		Input: common.RawMessage(`[
@@ -1063,6 +1225,29 @@ func TestHasRemoteResponsesCompactionInputClassifiesRemoteAndLocalMarkers(t *tes
 		]`),
 	}
 	hasRemote, err = HasRemoteResponsesCompactionInput(context.Background(), foreignReq)
+	require.NoError(t, err)
+	require.False(t, hasRemote)
+}
+
+func TestHasRemoteResponsesCompactionInputScansLargeMediaHistory(t *testing.T) {
+	largeMedia := strings.Repeat("A", 2*1024*1024)
+	input, err := common.Marshal([]map[string]any{
+		{
+			"type":    "custom_tool_call_output",
+			"call_id": "call_large_image",
+			"output": []map[string]string{
+				{"type": "input_image", "image_url": "data:image/png;base64," + largeMedia},
+			},
+		},
+		{
+			"type":              "compaction",
+			"encrypted_content": "remote-opaque-marker",
+		},
+	})
+	require.NoError(t, err)
+
+	hasRemote, err := HasRemoteResponsesCompactionInput(context.Background(), dto.OpenAIResponsesRequest{Input: input})
+
 	require.NoError(t, err)
 	require.True(t, hasRemote)
 }
@@ -1112,7 +1297,24 @@ func TestHasRemoteResponsesCompactionInputClassifiesEncryptedContextCompactionAs
 	require.True(t, hasRemote)
 }
 
-func TestSyntheticCompactForeignV2MarkerWithoutStoredStateIsOpaque(t *testing.T) {
+func TestHasRemoteResponsesCompactionInputClassifiesNonStringOpaqueContentAsRemote(t *testing.T) {
+	for _, encryptedContent := range []string{`{"opaque":true}`, `["opaque"]`, `123`, `false`} {
+		req := dto.OpenAIResponsesRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[
+				{"type":"compaction","encrypted_content":` + encryptedContent + `},
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+			]`),
+		}
+
+		hasRemote, err := HasRemoteResponsesCompactionInput(context.Background(), req)
+
+		require.NoError(t, err)
+		require.True(t, hasRemote)
+	}
+}
+
+func TestSyntheticCompactForeignV2MarkerIsLocalReferenceWithVisibleOnlyFallback(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	withoutSyntheticCompactTestDB(t)
 
@@ -1122,7 +1324,7 @@ func TestSyntheticCompactForeignV2MarkerWithoutStoredStateIsOpaque(t *testing.T)
 	if foreignID == localID {
 		foreignID = "neeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	}
-	stateID := syntheticCompactV2TestStateID(foreignID, "8")
+	stateID := syntheticCompactV2TestStateID(foreignID, "6")
 	marker := syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + foreignID + ":" + stateID
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5",
@@ -1134,13 +1336,14 @@ func TestSyntheticCompactForeignV2MarkerWithoutStoredStateIsOpaque(t *testing.T)
 
 	hasReference, err := HasLocalSyntheticCompactReference(req)
 	require.NoError(t, err)
-	require.False(t, hasReference)
+	require.True(t, hasReference)
 
 	got, applied, visibleOnly, err := ApplySyntheticCompactStateOrVisibleOnly(context.Background(), SyntheticCompactStateScope{}, req)
-	require.ErrorIs(t, err, ErrResponsesOpaqueReplayRequiresNative)
+	require.NoError(t, err)
 	require.False(t, applied)
-	require.False(t, visibleOnly)
-	require.Equal(t, req, got)
+	require.True(t, visibleOnly)
+	require.Contains(t, string(got.Input), "continue")
+	require.NotContains(t, string(got.Input), stateID)
 }
 
 func TestSyntheticCompactForeignV2MarkerRestoresFromDatabase(t *testing.T) {
@@ -1159,7 +1362,7 @@ func TestSyntheticCompactForeignV2MarkerRestoresFromDatabase(t *testing.T) {
 		foreignID = "neeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	}
 	state := SyntheticCompactState{
-		ID:             syntheticCompactV2TestStateID(foreignID, "9"),
+		ID:             syntheticCompactV2TestStateID(foreignID, "7"),
 		Model:          "gpt-5",
 		Summary:        "Cross-instance database compact state.",
 		SourceInstance: foreignID,
@@ -1184,14 +1387,14 @@ func TestSyntheticCompactForeignV2MarkerRestoresFromDatabase(t *testing.T) {
 	require.NotContains(t, string(got.Input), marker)
 }
 
-func TestSyntheticCompactMalformedV2MarkerWithoutIDInstanceIsNotLocalReference(t *testing.T) {
+func TestSyntheticCompactMalformedV2MarkerIsOpaqueReplay(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	withoutSyntheticCompactTestDB(t)
 
 	localID, err := syntheticCompactLocalInstanceID(context.Background())
 	require.NoError(t, err)
 	state := SyntheticCompactState{
-		ID:      "resp_newapi_synthcmp_legacy",
+		ID:      syntheticCompactLegacyTestID,
 		Model:   "gpt-5",
 		Summary: "Legacy compact state.",
 	}
@@ -1209,8 +1412,9 @@ func TestSyntheticCompactMalformedV2MarkerWithoutIDInstanceIsNotLocalReference(t
 	require.NoError(t, err)
 	require.False(t, hasReference)
 
-	_, err = BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, req)
+	got, err := BuildSyntheticCompactSummaryRequest(context.Background(), SyntheticCompactStateScope{}, req)
 	require.ErrorIs(t, err, ErrResponsesOpaqueReplayRequiresNative)
+	require.Empty(t, got)
 }
 
 func TestSyntheticCompactForeignPreviousResponseIDIsLocalSyntheticReference(t *testing.T) {
@@ -1223,7 +1427,7 @@ func TestSyntheticCompactForeignPreviousResponseIDIsLocalSyntheticReference(t *t
 	if foreignID == localID {
 		foreignID = "neeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	}
-	stateID := syntheticCompactV2TestStateID(foreignID, "a")
+	stateID := syntheticCompactV2TestStateID(foreignID, "8")
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5",
 		PreviousResponseID: stateID,
@@ -1248,7 +1452,7 @@ func TestApplySyntheticCompactStateOrVisibleOnlyRejectsMissingNativeOpaquePrevio
 
 	localID, err := syntheticCompactLocalInstanceID(context.Background())
 	require.NoError(t, err)
-	stateID := nativeOpaqueCompactTestStateID(localID, "b")
+	stateID := nativeOpaqueCompactTestStateID(localID, "9")
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5",
 		PreviousResponseID: stateID,
@@ -1270,7 +1474,7 @@ func TestApplySyntheticCompactStateVisibleOnlyFallbackInfoDoesNotClaimRestore(t 
 
 	localID, err := syntheticCompactLocalInstanceID(context.Background())
 	require.NoError(t, err)
-	stateID := syntheticCompactV2TestStateID(localID, "c")
+	stateID := syntheticCompactV2TestStateID(localID, "a")
 	marker := syntheticCompactMarkerPrefix + syntheticCompactMarkerVersion + ":" + localID + ":" + stateID
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5",
@@ -1282,18 +1486,19 @@ func TestApplySyntheticCompactStateVisibleOnlyFallbackInfoDoesNotClaimRestore(t 
 
 	got, applied, visibleOnly, info, err := ApplySyntheticCompactStateOrVisibleOnlyWithInfo(context.Background(), SyntheticCompactStateScope{}, req)
 
-	require.ErrorIs(t, err, ErrResponsesOpaqueReplayRequiresNative)
+	require.NoError(t, err)
 	require.False(t, applied)
-	require.False(t, visibleOnly)
+	require.True(t, visibleOnly)
 	require.False(t, info.StateRestored)
 	require.False(t, info.ModelChanged)
-	require.Equal(t, "not_requested", info.StateLookup)
-	require.Empty(t, info.MarkerKind)
-	require.Empty(t, info.ScopeResult)
-	require.Equal(t, "opaque_encrypted_replay_rejected", info.RouteDecision)
-	require.Equal(t, "native_forwarding_required", info.FallbackReason)
+	require.Equal(t, "miss", info.StateLookup)
+	require.Equal(t, model.SyntheticCompactStateKindSyntheticSummary, info.MarkerKind)
+	require.Equal(t, "not_found", info.ScopeResult)
+	require.Equal(t, "visible_only_fallback", info.RouteDecision)
+	require.Equal(t, "state_not_found_visible_input", info.FallbackReason)
 	require.Empty(t, info.StateHash)
-	require.Equal(t, req, got)
+	require.Contains(t, string(got.Input), "continue")
+	require.NotContains(t, string(got.Input), stateID)
 }
 
 func TestSyntheticCompactLocalInstanceIDUpdatesInvalidStoredOption(t *testing.T) {
@@ -1391,110 +1596,6 @@ func TestSyntheticCompactOldMarkerCompatibility(t *testing.T) {
 	require.Contains(t, string(got.Input), "Legacy compact state.")
 }
 
-func TestSyntheticCompactMarkerValidationRequiresGeneratedShapes(t *testing.T) {
-	tests := []struct {
-		name   string
-		marker string
-		wantID string
-		wantOK bool
-	}{
-		{
-			name:   "valid v2",
-			marker: "newapi.synthetic.compact:v2:n0123456789abcdef0123456789abcdef:resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_0123456789abcdef0123456789abcdef",
-			wantID: "resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_0123456789abcdef0123456789abcdef",
-			wantOK: true,
-		},
-		{
-			name:   "short v2 instance",
-			marker: "newapi.synthetic.compact:v2:n0123456789abcdef:resp_newapi_synthcmp_n0123456789abcdef_0123456789abcdef0123456789abcdef",
-		},
-		{
-			name:   "malformed v2 state id",
-			marker: "newapi.synthetic.compact:v2:n0123456789abcdef0123456789abcdef:resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_state",
-		},
-		{
-			name:   "valid legacy",
-			marker: syntheticCompactLegacyTestMarker,
-			wantID: syntheticCompactLegacyTestID,
-			wantOK: true,
-		},
-		{
-			name:   "legacy prefix collision",
-			marker: "newapi.synthetic.compact:resp_newapi_synthcmp_legacy",
-		},
-		{
-			name:   "valid native opaque",
-			marker: "newapi.synthetic.compact:resp_newapi_nativecmp_n0123456789abcdef0123456789abcdef_0123456789abcdef01234567",
-			wantID: "resp_newapi_nativecmp_n0123456789abcdef0123456789abcdef_0123456789abcdef01234567",
-			wantOK: true,
-		},
-		{
-			name:   "malformed native opaque state id",
-			marker: "newapi.synthetic.compact:resp_newapi_nativecmp_n0123456789abcdef0123456789abcdef_state",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotID, gotOK, err := syntheticCompactIDFromMarker(context.Background(), tt.marker)
-
-			require.NoError(t, err)
-			require.Equal(t, tt.wantOK, gotOK)
-			require.Equal(t, tt.wantID, gotID)
-		})
-	}
-}
-
-func TestSyntheticCompactInstanceIDValidRequiresGeneratedShape(t *testing.T) {
-	require.True(t, syntheticCompactInstanceIDValid("n0123456789abcdef0123456789abcdef"))
-	require.False(t, syntheticCompactInstanceIDValid("n0123456789abcdef"))
-	require.False(t, syntheticCompactInstanceIDValid("n0123456789abcdef0123456789abcdef0"))
-	require.False(t, syntheticCompactInstanceIDValid("n0123456789abcdef0123456789abcdeF"))
-}
-
-func TestSyntheticCompactReferenceValidationRequiresGeneratedShapes(t *testing.T) {
-	tests := []struct {
-		name   string
-		id     string
-		wantOK bool
-	}{
-		{name: "valid legacy", id: syntheticCompactLegacyTestID, wantOK: true},
-		{name: "legacy prefix collision", id: "resp_newapi_synthcmp_missing"},
-		{
-			name:   "valid v2",
-			id:     "resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_0123456789abcdef0123456789abcdef",
-			wantOK: true,
-		},
-		{
-			name: "malformed v2 state id",
-			id:   "resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_missing",
-		},
-		{
-			name:   "valid native opaque",
-			id:     "resp_newapi_nativecmp_n0123456789abcdef0123456789abcdef_0123456789abcdef01234567",
-			wantOK: true,
-		},
-		{
-			name: "malformed native opaque state id",
-			id:   "resp_newapi_nativecmp_n0123456789abcdef0123456789abcdef_missing",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotID, gotOK, err := syntheticCompactIDFromReference(context.Background(), tt.id)
-
-			require.NoError(t, err)
-			require.Equal(t, tt.wantOK, gotOK)
-			if tt.wantOK {
-				require.Equal(t, tt.id, gotID)
-			} else {
-				require.Empty(t, gotID)
-			}
-		})
-	}
-}
-
 func TestApplySyntheticCompactStateRestoresFromDatabaseAfterMemoryMiss(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	originDB := model.DB
@@ -1586,7 +1687,7 @@ func TestLoadSyntheticCompactStateUsesPersistentMemoryBeforeDatabaseWhenRedisEna
 
 	withSyntheticCompactTestRedis(t, func() {
 		state := SyntheticCompactState{
-			ID:      "resp_newapi_synthcmp_memory_before_db",
+			ID:      syntheticCompactLegacyTestStateID("3"),
 			Model:   "gpt-5",
 			Summary: "Fresh memory should avoid database read amplification.",
 		}
@@ -1692,7 +1793,7 @@ func TestStoreSyntheticCompactStateReturnsDatabaseErrorEvenWhenRedisAvailable(t 
 
 	withSyntheticCompactTestRedis(t, func() {
 		state := SyntheticCompactState{
-			ID:      "resp_newapi_synthcmp_db_required",
+			ID:      syntheticCompactLegacyTestStateID("4"),
 			Model:   "gpt-5",
 			Summary: "Database write must succeed.",
 		}
@@ -2078,7 +2179,7 @@ func TestLoadSyntheticCompactStateFallsBackToLegacyRedisWhenDatabaseMisses(t *te
 
 	withSyntheticCompactTestRedis(t, func() {
 		state := SyntheticCompactState{
-			ID:        "resp_newapi_synthcmp_legacy_redis_after_db_miss",
+			ID:        syntheticCompactLegacyTestStateID("5"),
 			Model:     "gpt-5",
 			Summary:   "Legacy Redis state survives database miss.",
 			CreatedAt: time.Now().Unix(),
@@ -2114,7 +2215,7 @@ func TestLoadSyntheticCompactStateReturnsNotFoundWhenRedisFailsAndDatabaseMisses
 	model.DB = openSyntheticCompactServiceTestDB(t)
 
 	withBrokenSyntheticCompactTestRedis(t, func() {
-		got, found, err := loadSyntheticCompactState(context.Background(), "resp_newapi_synthcmp_missing")
+		got, found, err := loadSyntheticCompactState(context.Background(), syntheticCompactLegacyTestStateID("6"))
 
 		require.NoError(t, err)
 		require.False(t, found)
@@ -2135,7 +2236,7 @@ func TestLoadSyntheticCompactStateChecksRedisOnceWhenMissing(t *testing.T) {
 		hook := newRedisCommandCountHook()
 		common.RDB.AddHook(hook)
 
-		got, found, err := loadSyntheticCompactState(context.Background(), "resp_newapi_synthcmp_missing_once")
+		got, found, err := loadSyntheticCompactState(context.Background(), syntheticCompactLegacyTestStateID("7"))
 
 		require.NoError(t, err)
 		require.False(t, found)
@@ -2197,7 +2298,7 @@ func TestApplySyntheticCompactStateReturnsDatabaseErrorForSyntheticPreviousID(t 
 
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5",
-		PreviousResponseID: syntheticCompactLegacyTestStateID("3"),
+		PreviousResponseID: syntheticCompactLegacyTestStateID("8"),
 		Input:              common.RawMessage(`"continue"`),
 	}
 
@@ -2277,7 +2378,7 @@ func TestLoadSyntheticCompactStateUsesDatabaseTruthOverStaleMemory(t *testing.T)
 	model.DB = openSyntheticCompactServiceTestDB(t)
 
 	state := SyntheticCompactState{
-		ID:      "resp_newapi_synthcmp_db_truth",
+		ID:      syntheticCompactLegacyTestStateID("9"),
 		Model:   "gpt-5",
 		Summary: "Database truth summary.",
 	}
@@ -2304,7 +2405,7 @@ func TestLoadSyntheticCompactStateKeepsDatabaseExpiryInMemory(t *testing.T) {
 	model.DB = openSyntheticCompactServiceTestDB(t)
 
 	state := SyntheticCompactState{
-		ID:      "resp_newapi_synthcmp_db_expiry",
+		ID:      syntheticCompactLegacyTestStateID("a"),
 		Model:   "gpt-5",
 		Summary: "Near expiry compact summary.",
 	}
@@ -2389,7 +2490,7 @@ func TestApplySyntheticCompactStateRejectsExpiredDatabaseFallback(t *testing.T) 
 	model.DB = openSyntheticCompactServiceTestDB(t)
 
 	state := SyntheticCompactState{
-		ID:        syntheticCompactLegacyTestStateID("4"),
+		ID:        syntheticCompactLegacyTestStateID("b"),
 		Model:     "gpt-5",
 		Summary:   "Expired database compact state.",
 		CreatedAt: time.Now().Add(-2 * syntheticCompactTTL).Unix(),
@@ -2415,21 +2516,11 @@ func TestApplySyntheticCompactStateRejectsExpiredDatabaseFallback(t *testing.T) 
 func TestApplySyntheticCompactStateRejectsMultipleMarkers(t *testing.T) {
 	resetSyntheticCompactMemoryStoreForTest()
 	withoutSyntheticCompactTestDB(t)
-	require.NoError(t, storeSyntheticCompactState(context.Background(), SyntheticCompactState{
-		ID:      syntheticCompactLegacyTestStateID("1"),
-		Model:   "gpt-5",
-		Summary: "First compact state.",
-	}))
-	require.NoError(t, storeSyntheticCompactState(context.Background(), SyntheticCompactState{
-		ID:      syntheticCompactLegacyTestStateID("2"),
-		Model:   "gpt-5",
-		Summary: "Second compact state.",
-	}))
 
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5",
 		Input: common.RawMessage(`[
-			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
+			{"type":"compaction","encrypted_content":"` + syntheticCompactLegacyTestMarker + `"},
 			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_22222222222222222222222222222222"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
@@ -2446,7 +2537,7 @@ func TestApplySyntheticCompactStateScopeAllowsDifferentChannel(t *testing.T) {
 	withoutSyntheticCompactTestDB(t)
 
 	state := SyntheticCompactState{
-		ID:          syntheticCompactLegacyTestStateID("5"),
+		ID:          syntheticCompactLegacyTestStateID("c"),
 		Model:       "gpt-5.5-openai-compact",
 		Summary:     "Scoped compact state.",
 		UserID:      10,
@@ -2483,7 +2574,7 @@ func TestApplySyntheticCompactStateScopeRejectsDifferentToken(t *testing.T) {
 	withoutSyntheticCompactTestDB(t)
 
 	state := SyntheticCompactState{
-		ID:      syntheticCompactLegacyTestStateID("6"),
+		ID:      syntheticCompactLegacyTestStateID("d"),
 		Model:   "gpt-5",
 		Summary: "Scoped compact state.",
 		UserID:  10,
@@ -2511,7 +2602,7 @@ func TestApplySyntheticCompactStateScopeRejectsDifferentGroup(t *testing.T) {
 	withoutSyntheticCompactTestDB(t)
 
 	state := SyntheticCompactState{
-		ID:      syntheticCompactLegacyTestStateID("7"),
+		ID:      syntheticCompactLegacyTestStateID("e"),
 		Model:   "gpt-5",
 		Summary: "Scoped compact state.",
 		UserID:  10,
@@ -2544,7 +2635,7 @@ func TestApplySyntheticCompactStateScopeRejectsMissingScopeBinding(t *testing.T)
 		{
 			name: "missing user",
 			state: SyntheticCompactState{
-				ID:      syntheticCompactLegacyTestStateID("8"),
+				ID:      syntheticCompactLegacyTestStateID("f"),
 				Model:   "gpt-5",
 				Summary: "Scoped compact state.",
 				UserID:  10,
@@ -2557,7 +2648,7 @@ func TestApplySyntheticCompactStateScopeRejectsMissingScopeBinding(t *testing.T)
 		{
 			name: "missing group",
 			state: SyntheticCompactState{
-				ID:      syntheticCompactLegacyTestStateID("9"),
+				ID:      "resp_newapi_synthcmp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				Model:   "gpt-5",
 				Summary: "Scoped compact state.",
 				UserID:  10,
@@ -2595,7 +2686,7 @@ func TestBuildSyntheticCompactSummaryRequestAllowsModelSwitchWithinScope(t *test
 	withoutSyntheticCompactTestDB(t)
 
 	state := SyntheticCompactState{
-		ID:      syntheticCompactLegacyTestStateID("a"),
+		ID:      syntheticCompactLegacyTestStateID("1"),
 		Model:   "gpt-5",
 		Summary: "Scoped compact state.",
 	}
@@ -2619,7 +2710,7 @@ func TestApplySyntheticCompactStateAllowsModelSwitchWithinScope(t *testing.T) {
 	withoutSyntheticCompactTestDB(t)
 
 	state := SyntheticCompactState{
-		ID:      syntheticCompactLegacyTestStateID("b"),
+		ID:      syntheticCompactLegacyTestStateID("2"),
 		Model:   "gpt-5.5",
 		Summary: "Scoped compact state.",
 		UserID:  10,
@@ -2653,7 +2744,7 @@ func TestApplySyntheticCompactStateWithInfoRecordsModelSwitch(t *testing.T) {
 	withoutSyntheticCompactTestDB(t)
 
 	state := SyntheticCompactState{
-		ID:              syntheticCompactLegacyTestStateID("c"),
+		ID:              syntheticCompactLegacyTestStateID("3"),
 		Model:           "gpt-5.5",
 		ModelAtCreation: "gpt-5.5",
 		Summary:         "Scoped compact state.",
@@ -2689,7 +2780,7 @@ func TestBuildSyntheticCompactSummaryRequestPreservesRequestModelAfterModelSwitc
 	withoutSyntheticCompactTestDB(t)
 
 	state := SyntheticCompactState{
-		ID:      syntheticCompactLegacyTestStateID("d"),
+		ID:      syntheticCompactLegacyTestStateID("4"),
 		Model:   "gpt-5.5-openai-compact",
 		Summary: "Scoped compact state.",
 	}
@@ -2914,7 +3005,7 @@ func TestSyntheticCompactStateFromRecordReadsLegacyAADWithUpstreamResponseID(t *
 
 func TestSyntheticCompactStateFromRecordReadsLegacyAADWithEmptyUpstreamResponseID(t *testing.T) {
 	record := model.SyntheticCompactStateRecord{
-		ID:              "resp_newapi_synthcmp_legacy_empty_upstream",
+		ID:              syntheticCompactLegacyTestStateID("5"),
 		Kind:            model.SyntheticCompactStateKindSyntheticSummary,
 		Model:           "gpt-5.5",
 		ModelAtCreation: "gpt-5.5",

@@ -3,6 +3,7 @@ package zhipu
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -77,13 +79,35 @@ func getZhipuToken(apikey string) string {
 	return tokenString
 }
 
-func requestOpenAI2Zhipu(request dto.GeneralOpenAIRequest) *ZhipuRequest {
+func requestOpenAI2Zhipu(request dto.GeneralOpenAIRequest) (*ZhipuRequest, error) {
+	if err := channel.RejectUnsupportedTextRequestFields(request, "智谱旧版 ChatGLM"); err != nil {
+		return nil, err
+	}
+	if request.MaxTokens != nil || request.MaxCompletionTokens != nil || request.Stop != nil || request.TopK != nil ||
+		request.FrequencyPenalty != nil || request.PresencePenalty != nil || request.N != nil || request.StreamOptions != nil ||
+		len(request.ExtraBody) > 0 || len(request.WebSearch) > 0 || len(request.EnableSearch) > 0 {
+		return nil, fmt.Errorf("request contains options that are not supported by 智谱旧版 ChatGLM")
+	}
 	messages := make([]ZhipuMessage, 0, len(request.Messages))
-	for _, message := range request.Messages {
-		if message.Role == "system" {
+	roles := map[string]string{
+		"system":    "system",
+		"developer": "system",
+		"user":      "user",
+		"assistant": "assistant",
+	}
+	seenConversation := false
+	for messageIndex, message := range request.Messages {
+		role, text, err := channel.OpenAIMessageRoleText(message, "智谱旧版 ChatGLM", roles)
+		if err != nil {
+			return nil, fmt.Errorf("messages[%d]: %w", messageIndex, err)
+		}
+		if role == "system" {
+			if seenConversation {
+				return nil, fmt.Errorf("messages[%d]: system/developer messages must be first for 智谱旧版 ChatGLM", messageIndex)
+			}
 			messages = append(messages, ZhipuMessage{
 				Role:    "system",
-				Content: message.StringContent(),
+				Content: text,
 			})
 			messages = append(messages, ZhipuMessage{
 				Role:    "user",
@@ -91,17 +115,21 @@ func requestOpenAI2Zhipu(request dto.GeneralOpenAIRequest) *ZhipuRequest {
 			})
 		} else {
 			messages = append(messages, ZhipuMessage{
-				Role:    message.Role,
-				Content: message.StringContent(),
+				Role:    role,
+				Content: text,
 			})
+			seenConversation = true
 		}
+	}
+	if !seenConversation {
+		return nil, fmt.Errorf("at least one user or assistant message is required by 智谱旧版 ChatGLM")
 	}
 	return &ZhipuRequest{
 		Prompt:      messages,
 		Temperature: request.Temperature,
 		TopP:        lo.FromPtrOr(request.TopP, 0),
 		Incremental: false,
-	}
+	}, nil
 }
 
 func responseZhipu2OpenAI(response *ZhipuResponse) *dto.OpenAITextResponse {

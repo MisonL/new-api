@@ -179,6 +179,58 @@ func TestHeaderProbeHelper(t *testing.T) {
 	}
 }
 
+func TestHeaderProbeDoesNotExposeSensitiveHeaders(t *testing.T) {
+	headers := map[string]string{
+		"Authorization":      "Bearer billing-secret",
+		"X-Auth-Key":         "auth-key-secret",
+		"Auth_Key":           "auth-key-secret",
+		"Cookie":             "session=billing-secret",
+		"X-Api-Key":          "api-secret",
+		"Anthropic-Beta":     "fast-mode-2026-02-01",
+		"X-Request-Trace-ID": "trace-123",
+	}
+
+	for _, headerName := range []string{"authorization", "x-auth-key", "auth_key", "cookie", "x-api-key"} {
+		cost, _, err := billingexpr.RunExprWithRequest(
+			`has(header("`+headerName+`"), "secret") ? 1 : 2`,
+			billingexpr.TokenParams{},
+			billingexpr.RequestInput{Headers: headers},
+		)
+		if err != nil {
+			t.Fatalf("header %s: %v", headerName, err)
+		}
+		if cost != 2 {
+			t.Errorf("header %s was visible to billing expression", headerName)
+		}
+	}
+
+	cost, _, err := billingexpr.RunExprWithRequest(
+		`has(header("anthropic-beta"), "fast-mode") ? 2 : 1`,
+		billingexpr.TokenParams{},
+		billingexpr.RequestInput{Headers: headers},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost != 2 {
+		t.Errorf("expected non-sensitive feature header to remain visible, got %f", cost)
+	}
+}
+
+func TestRequestHeadersRejectCaseInsensitiveDuplicates(t *testing.T) {
+	_, _, err := billingexpr.RunExprWithRequest(
+		`has(header("x-test"), "one") ? 1 : 0`,
+		billingexpr.TokenParams{},
+		billingexpr.RequestInput{Headers: map[string]string{
+			"X-Test": "one",
+			"x-test": "two",
+		}},
+	)
+	if err == nil {
+		t.Fatal("expected case-insensitive duplicate request headers to be rejected")
+	}
+}
+
 func TestParamProbeNestedBool(t *testing.T) {
 	cost, _, err := billingexpr.RunExprWithRequest(
 		`p * (param("stream_options.fast_mode") == true ? 1.5 : 1.0)`,
@@ -945,6 +997,17 @@ func TestTimeFunctions_MonthDayPattern(t *testing.T) {
 	// Either 1000 (not Jan 1) or 500 (Jan 1) - both are valid
 	if cost != 1000 && cost != 500 {
 		t.Errorf("cost = %f, want 1000 or 500", cost)
+	}
+}
+
+func TestTimeFunctions_YearPattern(t *testing.T) {
+	exprStr := `year("UTC") > 2000 ? p : 0`
+	cost, _, err := billingexpr.RunExpr(exprStr, billingexpr.TokenParams{P: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost != 1000 {
+		t.Fatalf("cost = %f, want 1000", cost)
 	}
 }
 

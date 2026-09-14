@@ -1,12 +1,14 @@
 package ali
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -134,9 +136,17 @@ func getImageBase64sFromForm(c *gin.Context, fieldName string) ([]string, error)
 		}
 
 		// 读取文件内容
-		imageData, err := io.ReadAll(image)
+		maxImageBytes := common.RequestBodyIngressLimit(c)
+		imageData, err := io.ReadAll(io.LimitReader(image, maxImageBytes+1))
+		closeErr := image.Close()
 		if err != nil {
 			return nil, errors.New("failed to read image file")
+		}
+		if closeErr != nil {
+			return nil, errors.New("failed to close image file")
+		}
+		if int64(len(imageData)) > maxImageBytes {
+			return nil, fmt.Errorf("image file exceeds %d bytes", maxImageBytes)
 		}
 
 		// 获取MIME类型
@@ -148,7 +158,6 @@ func getImageBase64sFromForm(c *gin.Context, fieldName string) ([]string, error)
 		// 构造data URL格式
 		dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)
 		imageBase64s = append(imageBase64s, dataURL)
-		image.Close()
 	}
 	return imageBase64s, nil
 }
@@ -187,12 +196,56 @@ func oaiFormEdit2AliImageEdit(c *gin.Context, info *relaycommon.RelayInfo, reque
 	return &imageRequest, nil
 }
 
+// aliTaskPollError keeps HTTP status classification attached to polling
+// failures. The async waiter should retry transient transport/server failures
+// but return ordinary client errors immediately.
+type aliTaskPollError struct {
+	err        error
+	statusCode int
+	retryable  bool
+}
+
+func (e *aliTaskPollError) Error() string {
+	if e == nil || e.err == nil {
+		return "aliyun task polling failed"
+	}
+	return e.err.Error()
+}
+
+func (e *aliTaskPollError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func isAliTaskPollRetryable(err error) bool {
+	var pollErr *aliTaskPollError
+	return errors.As(err, &pollErr) && pollErr != nil && pollErr.retryable
+}
+
+func isAliTaskHTTPStatusRetryable(statusCode int) bool {
+	return statusCode >= http.StatusInternalServerError || statusCode == http.StatusRequestTimeout || statusCode == http.StatusTooEarly || statusCode == http.StatusTooManyRequests
+}
+
 func updateTask(c *gin.Context, info *relaycommon.RelayInfo, taskID string) (*AliResponse, error, []byte) {
-	url := fmt.Sprintf("%s/api/v1/tasks/%s", info.ChannelBaseUrl, taskID)
+	if info == nil {
+		return nil, errors.New("relay info is nil"), nil
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return nil, errors.New("task id is empty"), nil
+	}
+	requestURL := fmt.Sprintf("%s/api/v1/tasks/%s", strings.TrimRight(info.ChannelBaseUrl, "/"), url.PathEscape(taskID))
 
 	var aliResponse AliResponse
 
-	req, err := http.NewRequest("GET", url, nil)
+	ctx := relaycommon.GinRequestContext(c)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return &aliResponse, err, nil
 	}
@@ -204,15 +257,35 @@ func updateTask(c *gin.Context, info *relaycommon.RelayInfo, taskID string) (*Al
 	}
 	channel.ApplyHeaderOverrideToRequest(req, headerOverride)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client, err := service.GetHttpClientWithProxy(info.ChannelSetting.Proxy)
+	if err != nil {
+		return &aliResponse, fmt.Errorf("new proxy http client failed: %w", err), nil
+	}
+	if client == nil {
+		return &aliResponse, errors.New("HTTP client is unavailable"), nil
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		common.SysLog("updateTask client.Do err: " + err.Error())
-		return &aliResponse, err, nil
+		return &aliResponse, &aliTaskPollError{err: err, retryable: true}, nil
 	}
 	defer resp.Body.Close()
 
-	responseBody, err := io.ReadAll(resp.Body)
+	const maxAliTaskResponseBodyBytes int64 = 1 << 20
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, maxAliTaskResponseBodyBytes+1))
+	if err != nil {
+		return &aliResponse, &aliTaskPollError{err: fmt.Errorf("read ali task response body: %w", err), retryable: true}, responseBody
+	}
+	if int64(len(responseBody)) > maxAliTaskResponseBodyBytes {
+		return &aliResponse, fmt.Errorf("ali task response body exceeds %d bytes", maxAliTaskResponseBodyBytes), responseBody
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return &aliResponse, &aliTaskPollError{
+			err:        fmt.Errorf("ali task status returned HTTP %d", resp.StatusCode),
+			statusCode: resp.StatusCode,
+			retryable:  isAliTaskHTTPStatusRetryable(resp.StatusCode),
+		}, responseBody
+	}
 
 	var response AliResponse
 	err = common.Unmarshal(responseBody, &response)
@@ -231,8 +304,14 @@ func asyncTaskWait(c *gin.Context, info *relaycommon.RelayInfo, taskID string) (
 
 	var taskResponse AliResponse
 	var responseBody []byte
+	ctx := relaycommon.GinRequestContext(c)
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	time.Sleep(time.Duration(5) * time.Second)
+	if err := waitForAliTask(ctx, 5*time.Second); err != nil {
+		return nil, nil, err
+	}
 
 	for {
 		logger.LogDebug(c, fmt.Sprintf("asyncTaskWait step %d/%d, wait %d seconds", step, maxStep, waitSeconds))
@@ -241,8 +320,19 @@ func asyncTaskWait(c *gin.Context, info *relaycommon.RelayInfo, taskID string) (
 		responseBody = body
 		if err != nil {
 			logger.LogWarn(c, "asyncTaskWait UpdateTask err: "+err.Error())
-			time.Sleep(time.Duration(waitSeconds) * time.Second)
+			if !isAliTaskPollRetryable(err) {
+				return nil, responseBody, err
+			}
+			if step >= maxStep {
+				return nil, responseBody, fmt.Errorf("aliAsyncTaskWait failed after %d attempts: %w", step, err)
+			}
+			if waitErr := waitForAliTask(ctx, time.Duration(waitSeconds)*time.Second); waitErr != nil {
+				return nil, responseBody, waitErr
+			}
 			continue
+		}
+		if rsp == nil {
+			return nil, responseBody, errors.New("aliAsyncTaskWait returned an empty response")
 		}
 
 		if rsp.Output.TaskStatus == "" {
@@ -262,10 +352,26 @@ func asyncTaskWait(c *gin.Context, info *relaycommon.RelayInfo, taskID string) (
 		if step >= maxStep {
 			break
 		}
-		time.Sleep(time.Duration(waitSeconds) * time.Second)
+		if waitErr := waitForAliTask(ctx, time.Duration(waitSeconds)*time.Second); waitErr != nil {
+			return nil, responseBody, waitErr
+		}
 	}
 
 	return nil, nil, fmt.Errorf("aliAsyncTaskWait timeout")
+}
+
+func waitForAliTask(ctx context.Context, delay time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func responseAli2OpenAIImage(c *gin.Context, response *AliResponse, originBody []byte, info *relaycommon.RelayInfo, responseFormat string) *dto.ImageResponse {

@@ -56,7 +56,7 @@ const (
 	ChannelTypeReplicate      = 56
 	ChannelTypeCodex          = 57
 	ChannelTypeAgnes          = 58
-	ChannelTypeDummy          // this one is only for count, do not add any channel after this
+	ChannelTypeDummy          = ChannelTypeAgnes + 1 // this one is only for count, do not add any channel after this
 
 )
 
@@ -178,6 +178,31 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeReplicate:      "Replicate",
 	ChannelTypeCodex:          "Codex",
 	ChannelTypeAgnes:          "Agnes",
+}
+
+// IsValidChannelType reports whether channelType is an assigned channel type.
+// ChannelBaseURLs is intentionally sparse because historical channel IDs were
+// removed over time; a numeric range check alone would therefore accept
+// reserved gaps such as 28-30 and 32.
+func IsValidChannelType(channelType int) bool {
+	if channelType <= ChannelTypeUnknown || channelType >= ChannelTypeDummy {
+		return false
+	}
+	if channelType < 0 || channelType >= len(ChannelBaseURLs) {
+		return false
+	}
+	_, ok := ChannelTypeNames[channelType]
+	return ok
+}
+
+// ChannelBaseURL returns the built-in endpoint for a channel type without
+// risking an out-of-range slice access. An empty URL is a valid result for
+// channel types that require a user-provided endpoint (for example Custom).
+func ChannelBaseURL(channelType int) (string, bool) {
+	if !IsValidChannelType(channelType) {
+		return "", false
+	}
+	return ChannelBaseURLs[channelType], true
 }
 
 func GetChannelTypeName(channelType int) string {

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,9 +20,18 @@ func UnmarshalMetadata(metadata map[string]any, target any) error {
 	if metadata == nil {
 		return nil
 	}
-	// Prevent metadata from overriding model fields to avoid billing bypass.
-	delete(metadata, "model")
-	metaBytes, err := common.Marshal(metadata)
+	// Prevent metadata from overriding routing/model identity fields to avoid a
+	// mapped request being billed or sent as a different upstream model. Build a
+	// shallow copy instead of deleting from the caller's map: the same metadata
+	// is also used by validation, billing and provider-specific action logic.
+	filtered := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		if isProtectedMetadataIdentityKey(key) {
+			continue
+		}
+		filtered[key] = value
+	}
+	metaBytes, err := common.Marshal(filtered)
 	if err != nil {
 		return fmt.Errorf("marshal metadata failed: %w", err)
 	}
@@ -29,6 +39,28 @@ func UnmarshalMetadata(metadata map[string]any, target any) error {
 		return fmt.Errorf("unmarshal metadata failed: %w", err)
 	}
 	return nil
+}
+
+func isProtectedMetadataIdentityKey(key string) bool {
+	// JSON decoding matches tagged fields case-insensitively, while clients may
+	// spell the same identity using camelCase, dashes or underscores. Normalize
+	// separators before comparing so those variants cannot bypass the guard.
+	var normalized strings.Builder
+	normalized.Grow(len(key))
+	for _, r := range strings.ToLower(strings.TrimSpace(key)) {
+		switch r {
+		case '_', '-', ' ', '\t', '\r', '\n':
+			continue
+		default:
+			normalized.WriteRune(r)
+		}
+	}
+	switch normalized.String() {
+	case "model", "modelname", "reqkey", "upstreammodel", "upstreammodelname", "originmodel", "originmodelname":
+		return true
+	default:
+		return false
+	}
 }
 
 // DefaultString returns val if non-empty, otherwise fallback.
@@ -86,10 +118,30 @@ func ApplyExtraHeaders(request *http.Request, extraHeaders ...http.Header) {
 	}
 }
 
+// CapturedTaskPollingPath returns the route path captured when an asynchronous
+// task was submitted. The path is supplied through the internal polling body so
+// an adaptor cannot accidentally reconstruct a follow-up URL from mutable
+// channel settings. A missing path keeps the explicit legacy fallback used by
+// rows created before route snapshots were introduced.
+func CapturedTaskPollingPath(body map[string]any, fallback string) string {
+	if body != nil {
+		if captured, ok := body["polling_path"].(string); ok {
+			// `/` is a valid captured native endpoint (Jimeng access-key
+			// mode). Only a missing or blank field means that the row predates
+			// route snapshots and needs the legacy fallback.
+			if strings.TrimSpace(captured) != "" {
+				return relaycommon.NormalizeRoutePath(captured)
+			}
+		}
+	}
+	return relaycommon.NormalizeRoutePath(fallback)
+}
+
 // BuildProxyURL constructs the video proxy URL using the public task ID.
 // e.g., "https://your-server.com/v1/videos/task_xxxx/content"
 func BuildProxyURL(taskID string) string {
-	return fmt.Sprintf("%s/v1/videos/%s/content", system_setting.ServerAddress, taskID)
+	baseURL := strings.TrimRight(strings.TrimSpace(system_setting.ServerAddress), "/")
+	return fmt.Sprintf("%s/v1/videos/%s/content", baseURL, url.PathEscape(taskID))
 }
 
 // Status-to-progress mapping constants for polling updates.

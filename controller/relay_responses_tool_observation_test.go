@@ -44,6 +44,13 @@ func TestResponsesToolCapabilityObservationFromContextRequiresEvidence(t *testin
 	require.False(t, ok)
 }
 
+func TestResponsesToolCapabilityObservationTransportOmitsQuery(t *testing.T) {
+	require.Equal(t, "/v1/responses", responsesToolCapabilityObservationTransport(
+		"/v1/responses?request_id=user-secret&debug_token=should-not-persist",
+	))
+	require.Equal(t, "/v1/responses", responsesToolCapabilityObservationTransport(" /v1/responses "))
+}
+
 func TestRecordResponsesStreamOptionsIncludeUsageCapabilityObservationAfterRecovery(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
 	channel := &model.Channel{
@@ -159,16 +166,11 @@ func TestRecordChannelRequestBodyLimitSkipsRecoverableRemoteCompaction413(t *tes
 	require.Nil(t, persisted.GetOtherSettings().RequestBodyLimit)
 }
 
-func TestRecordChannelRequestBodyLimitSkipsOpaqueResponsesReplay(t *testing.T) {
+func TestRecordResponsesCapabilityObservationSkipsRecoverableRemoteCompaction413(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
-	previousPolicy := model_setting.GetGlobalSettings().RequestBodyLimitPolicy
-	model_setting.GetGlobalSettings().RequestBodyLimitPolicy = model_setting.RequestBodyLimitPolicy{Enabled: true}
-	t.Cleanup(func() {
-		model_setting.GetGlobalSettings().RequestBodyLimitPolicy = previousPolicy
-	})
 	channel := &model.Channel{
 		Id:     8624,
-		Name:   "opaque-replay-413",
+		Name:   "remote-compaction-capability-observation",
 		Key:    "test-key",
 		Status: 1,
 		Group:  "default",
@@ -176,19 +178,21 @@ func TestRecordChannelRequestBodyLimitSkipsOpaqueResponsesReplay(t *testing.T) {
 	}
 	require.NoError(t, db.Create(channel).Error)
 
+	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	common.SetResponsesRequestMetadata(c, common.ResponsesRequestMetadata{
-		Model:                     "gpt-5.6-sol",
-		ModelPresent:              true,
-		InputPresent:              true,
-		InputKind:                 common.ResponsesJSONValueKindArray,
-		HasOpaqueEncryptedContent: true,
-	})
-	common.SetContextKey(c, constant.ContextKeyRequestBodySize, int64(12345))
+	c.Request.Header.Set("X-Codex-Beta-Features", "remote_compaction_v2")
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
+		IsStream:        true,
 		OriginModelName: "gpt-5.6-sol",
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-5.6-sol",
+			Input: common.RawMessage(`[
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"compact"}]},
+				{"type":"compaction_trigger"}
+			]`),
+		},
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelId:   channel.Id,
 			ChannelType: constant.ChannelTypeOpenAI,
@@ -200,14 +204,14 @@ func TestRecordChannelRequestBodyLimitSkipsOpaqueResponsesReplay(t *testing.T) {
 		http.StatusRequestEntityTooLarge,
 	)
 
-	recordChannelRequestBodyLimit(c, info, err)
+	recordResponsesCapabilityObservation(c, info, err)
 
 	var persisted model.Channel
 	require.NoError(t, db.First(&persisted, channel.Id).Error)
-	require.Nil(t, persisted.GetOtherSettings().RequestBodyLimit)
+	require.Nil(t, persisted.GetOtherSettings().ResponsesCapabilityRegistry)
 }
 
-func TestRecordChannelRequestBodyLimitRecordsNonOpaqueResponsesReplay(t *testing.T) {
+func TestRecordResponses413ObservationsSkipCodexLocalCompactionRecovery(t *testing.T) {
 	db := setupChannelControllerTestDB(t)
 	previousPolicy := model_setting.GetGlobalSettings().RequestBodyLimitPolicy
 	model_setting.GetGlobalSettings().RequestBodyLimitPolicy = model_setting.RequestBodyLimitPolicy{Enabled: true}
@@ -216,7 +220,7 @@ func TestRecordChannelRequestBodyLimitRecordsNonOpaqueResponsesReplay(t *testing
 	})
 	channel := &model.Channel{
 		Id:     8625,
-		Name:   "non-opaque-replay-413",
+		Name:   "codex-local-compaction-413",
 		Key:    "test-key",
 		Status: 1,
 		Group:  "default",
@@ -224,16 +228,14 @@ func TestRecordChannelRequestBodyLimitRecordsNonOpaqueResponsesReplay(t *testing
 	}
 	require.NoError(t, db.Create(channel).Error)
 
+	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	common.SetContextKey(c, constant.ContextKeyRequestBodySize, int64(12345))
+	common.SetContextKey(c, constant.ContextKeyResponsesCodexLocalCompaction413Recovery, true)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
 		OriginModelName: "gpt-5.6-sol",
-		Request: &dto.OpenAIResponsesRequest{
-			Model: "gpt-5.6-sol",
-			Input: common.RawMessage(`[{"type":"message","role":"user","content":"continue"}]`),
-		},
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelId:   channel.Id,
 			ChannelType: constant.ChannelTypeOpenAI,
@@ -245,12 +247,12 @@ func TestRecordChannelRequestBodyLimitRecordsNonOpaqueResponsesReplay(t *testing
 		http.StatusRequestEntityTooLarge,
 	)
 
+	recordResponsesCapabilityObservation(c, info, err)
 	recordChannelRequestBodyLimit(c, info, err)
 
 	var persisted model.Channel
 	require.NoError(t, db.First(&persisted, channel.Id).Error)
-	limit := persisted.GetOtherSettings().RequestBodyLimit
-	require.NotNil(t, limit)
-	require.EqualValues(t, 12345, limit.MaxBytes)
-	require.Equal(t, "upstream_413", limit.Source)
+	settings := persisted.GetOtherSettings()
+	require.Nil(t, settings.ResponsesCapabilityRegistry)
+	require.Nil(t, settings.RequestBodyLimit)
 }

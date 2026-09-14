@@ -2,6 +2,7 @@ package suno
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -129,13 +130,31 @@ func (a *TaskAdaptor) GetChannelName() string {
 }
 
 func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
-	requestUrl := fmt.Sprintf("%s/suno/fetch", baseUrl)
-	byteBody, err := common.Marshal(body)
+	return a.FetchTaskWithContext(context.Background(), baseUrl, key, body, proxy, extraHeaders...)
+}
+
+func (a *TaskAdaptor) FetchTaskWithContext(ctx context.Context, baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
+	path := taskcommon.CapturedTaskPollingPath(body, "/suno/fetch")
+	requestUrl := strings.TrimRight(baseUrl, "/") + path
+	// polling_path is an internal route snapshot used to keep follow-up
+	// requests on the same endpoint. It must never be sent to the provider as
+	// part of the public Suno fetch payload.
+	payload := make(map[string]any, len(body))
+	for field, value := range body {
+		if field == "polling_path" {
+			continue
+		}
+		payload[field] = value
+	}
+	byteBody, err := common.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", requestUrl, bytes.NewBuffer(byteBody))
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", requestUrl, bytes.NewBuffer(byteBody))
 	if err != nil {
 		common.SysLog(fmt.Sprintf("Get Task error: %v", err))
 		return nil, err

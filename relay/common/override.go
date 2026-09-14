@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
@@ -19,9 +20,10 @@ import (
 var negativeIndexRegexp = regexp.MustCompile(`\.(-\d+)`)
 
 const (
-	paramOverrideContextRequestHeaders = "request_headers"
-	paramOverrideContextHeaderOverride = "header_override"
-	paramOverrideContextAuditRecorder  = "__param_override_audit_recorder"
+	paramOverrideContextRequestHeaders       = "request_headers"
+	paramOverrideContextHeaderOverride       = "header_override"
+	paramOverrideContextPassedRequestHeaders = "__passed_request_headers"
+	paramOverrideContextAuditRecorder        = "__param_override_audit_recorder"
 )
 
 var errSourceHeaderNotFound = errors.New("source header does not exist")
@@ -181,8 +183,14 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 	if len(paramOverride) == 0 {
 		return jsonData, nil
 	}
+	if info != nil {
+		info.RuntimePassedRequestHeaders = nil
+	}
 
-	overrideCtx := BuildParamOverrideContext(info)
+	overrideCtx, err := BuildParamOverrideContextWithError(info)
+	if err != nil {
+		return nil, err
+	}
 	var recorder *paramOverrideAuditRecorder
 	if shouldEnableParamOverrideAudit(paramOverride) {
 		recorder = &paramOverrideAuditRecorder{}
@@ -204,14 +212,14 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 }
 
 // ApplyBytePreservingHeaderParamOverrideWithRelayInfo applies only operations
-// that mutate upstream request headers. It does not parse or rewrite the
-// request body, so callers can preserve the original body bytes.
+// that mutate upstream request headers. It does not parse or rewrite a request
+// body, so callers can preserve the original body bytes.
 func ApplyBytePreservingHeaderParamOverrideWithRelayInfo(info *RelayInfo) error {
 	paramOverride := getParamOverrideMap(info)
 	if err := ValidateBytePreservingParamOverride(paramOverride); err != nil {
 		return err
 	}
-	return applyHeaderOnlyParamOverrideWithRelayInfo(info, paramOverride, "byte-preserving request body")
+	return ApplyHeaderParamOverrideWithRelayInfo(info)
 }
 
 // ApplyHeaderOnlyParamOverrideWithRelayInfo retains opaque Responses replay
@@ -221,49 +229,26 @@ func ApplyHeaderOnlyParamOverrideWithRelayInfo(info *RelayInfo) error {
 	if err := ValidateOpaqueResponsesReplayParamOverride(paramOverride); err != nil {
 		return err
 	}
-	return applyHeaderOnlyParamOverrideWithRelayInfo(info, paramOverride, "opaque encrypted replay")
+	return ApplyHeaderParamOverrideWithRelayInfo(info)
 }
 
-func applyHeaderOnlyParamOverrideWithRelayInfo(info *RelayInfo, paramOverride map[string]interface{}, subject string) error {
+// ApplyHeaderParamOverrideWithRelayInfo applies header operations while
+// preserving a native pass-through request body byte-for-byte. Body
+// operations are rejected explicitly so an invalid channel configuration is
+// never silently ignored.
+func ApplyHeaderParamOverrideWithRelayInfo(info *RelayInfo) error {
+	paramOverride := getParamOverrideMap(info)
+	if err := validateHeaderOnlyParamOverride(paramOverride, "native Responses request"); err != nil {
+		return err
+	}
 	if len(paramOverride) == 0 {
 		return nil
 	}
-	operations, ok := tryParseOperations(paramOverride)
-	if !ok {
-		return fmt.Errorf("%s requires header-only param override operations", subject)
-	}
-
-	overrideCtx := BuildParamOverrideContext(info)
-	var recorder *paramOverrideAuditRecorder
-	if shouldEnableParamOverrideAudit(paramOverride) {
-		recorder = &paramOverrideAuditRecorder{}
-		overrideCtx[paramOverrideContextAuditRecorder] = recorder
-	}
-	result, err := applyOperations("{}", operations, overrideCtx)
-	if err != nil {
-		return err
-	}
-	if result != "{}" {
-		return fmt.Errorf("%s param override attempted to modify request body", subject)
-	}
-	syncRuntimeHeaderOverrideFromContext(info, overrideCtx)
-	if info != nil {
-		if recorder != nil {
-			info.ParamOverrideAudit = recorder.lines
-		} else {
-			info.ParamOverrideAudit = nil
-		}
-	}
-	return nil
+	_, err := ApplyParamOverrideWithRelayInfo([]byte(`{}`), info)
+	return err
 }
 
-// ValidateBytePreservingParamOverride verifies that an override can be applied
-// without parsing or rewriting a request body.
-func ValidateBytePreservingParamOverride(paramOverride map[string]interface{}) error {
-	return validateBytePreservingParamOverride(paramOverride, "byte-preserving request body")
-}
-
-func validateBytePreservingParamOverride(paramOverride map[string]interface{}, subject string) error {
+func validateHeaderOnlyParamOverride(paramOverride map[string]interface{}, subject string) error {
 	if len(paramOverride) == 0 {
 		return nil
 	}
@@ -272,17 +257,90 @@ func validateBytePreservingParamOverride(paramOverride map[string]interface{}, s
 		return fmt.Errorf("%s requires header-only param override operations", subject)
 	}
 	for _, operation := range operations {
-		if len(operation.Conditions) > 0 || !isHeaderOnlyParamOverrideOperation(operation.Mode) {
+		if !isHeaderOnlyParamOverrideOperation(operation.Mode) {
 			return fmt.Errorf("%s does not permit param override mode %q", subject, operation.Mode)
+		}
+		for _, condition := range operation.Conditions {
+			if !isParamOverrideContextPath(condition.Path) {
+				return fmt.Errorf("%s cannot evaluate condition path %q without parsing the request body", subject, condition.Path)
+			}
 		}
 	}
 	return nil
 }
 
-// ValidateOpaqueResponsesReplayParamOverride retains the historical opaque
-// replay contract while sharing the byte-preserving validation rules.
+// ValidateBytePreservingParamOverride verifies that an override can be
+// applied without parsing or rewriting a request body. Conditional header
+// operations are intentionally allowed for normal native pass-through.
+func ValidateBytePreservingParamOverride(paramOverride map[string]interface{}) error {
+	return validateBytePreservingParamOverride(paramOverride, "byte-preserving request body", true)
+}
+
+func validateBytePreservingParamOverride(paramOverride map[string]interface{}, subject string, allowConditions bool) error {
+	if len(paramOverride) == 0 {
+		return nil
+	}
+	operations, ok := tryParseOperations(paramOverride)
+	if !ok || len(buildLegacyParamOverride(paramOverride)) > 0 {
+		return fmt.Errorf("%s requires header-only param override operations", subject)
+	}
+	for _, operation := range operations {
+		if !isHeaderOnlyParamOverrideOperation(operation.Mode) || (!allowConditions && len(operation.Conditions) > 0) {
+			return fmt.Errorf("%s does not permit param override mode %q", subject, operation.Mode)
+		}
+		if allowConditions {
+			for _, condition := range operation.Conditions {
+				if !isParamOverrideContextPath(condition.Path) {
+					return fmt.Errorf("%s cannot evaluate condition path %q without parsing the request body", subject, condition.Path)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// isParamOverrideContextPath reports whether a condition can be resolved from
+// the request-independent context passed to header-only operations. Body paths
+// must be rejected here: the header-only execution path intentionally evaluates
+// conditions against an empty JSON object, so accepting them would silently
+// skip the operation (or pass it with pass_missing_key) instead of applying the
+// configured header rule.
+func isParamOverrideContextPath(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+
+	for _, root := range []string{
+		"model",
+		"original_model",
+		"upstream_model",
+		"request_path",
+		"is_channel_test",
+		"is_retry",
+		"retry_index",
+		"last_error",
+		"last_error_status_code",
+		"last_error_message",
+		"last_error_code",
+		"last_error_type",
+		"request_headers",
+		"header_override",
+		"retry",
+	} {
+		if path == root || strings.HasPrefix(path, root+".") {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateOpaqueResponsesReplayParamOverride retains the strict opaque replay
+// contract: only unconditional header operations can be used because the
+// original body bytes must remain untouched and no body-derived condition may
+// be evaluated against an opaque request.
 func ValidateOpaqueResponsesReplayParamOverride(paramOverride map[string]interface{}) error {
-	return validateBytePreservingParamOverride(paramOverride, "opaque encrypted replay")
+	return validateBytePreservingParamOverride(paramOverride, "opaque encrypted replay", false)
 }
 
 func isHeaderOnlyParamOverrideOperation(mode string) bool {
@@ -488,15 +546,33 @@ func getHeaderOverrideMap(info *RelayInfo) map[string]interface{} {
 }
 
 func sanitizeHeaderOverrideMap(source map[string]interface{}) map[string]interface{} {
-	if len(source) == 0 {
+	normalized, err := sanitizeHeaderOverrideMapWithError(source)
+	if err != nil {
+		// Keep the historical no-error wrapper for callers that only need a
+		// best-effort diagnostic view. Production request paths use the
+		// error-returning variant below and never silently select a colliding
+		// header by map iteration order.
 		return map[string]interface{}{}
 	}
+	return normalized
+}
+
+func sanitizeHeaderOverrideMapWithError(source map[string]interface{}) (map[string]interface{}, error) {
+	if len(source) == 0 {
+		return map[string]interface{}{}, nil
+	}
 	target := make(map[string]interface{}, len(source))
+	seen := make(map[string]string, len(source))
 	for key, value := range source {
-		normalizedKey := normalizeHeaderContextKey(key)
+		normalizedKey := normalizeHeaderOverrideKey(key)
 		if normalizedKey == "" {
 			continue
 		}
+		lookupKey := strings.ToLower(normalizedKey)
+		if previousKey, exists := seen[lookupKey]; exists {
+			return nil, fmt.Errorf("header override contains duplicate header names %q and %q", previousKey, key)
+		}
+		seen[lookupKey] = key
 		if value == nil {
 			if isHeaderPassthroughRuleKeyForOverride(normalizedKey) {
 				target[normalizedKey] = ""
@@ -512,7 +588,15 @@ func sanitizeHeaderOverrideMap(source map[string]interface{}) map[string]interfa
 		}
 		target[normalizedKey] = normalizedValue
 	}
-	return target
+	return target, nil
+}
+
+func normalizeHeaderOverrideKey(key string) string {
+	normalized := normalizeHeaderContextKey(key)
+	if strings.HasPrefix(normalized, "regex:") {
+		return "re:" + strings.TrimSpace(normalized[len("regex:"):])
+	}
+	return normalized
 }
 
 func isHeaderPassthroughRuleKeyForOverride(key string) bool {
@@ -527,13 +611,79 @@ func isHeaderPassthroughRuleKeyForOverride(key string) bool {
 }
 
 func GetEffectiveHeaderOverride(info *RelayInfo) map[string]interface{} {
-	if info == nil {
+	effective, err := GetEffectiveHeaderOverrideWithError(info)
+	if err != nil {
 		return map[string]interface{}{}
 	}
-	if info.UseRuntimeHeadersOverride {
-		return sanitizeHeaderOverrideMap(info.RuntimeHeadersOverride)
+	return effective
+}
+
+func GetEffectiveHeaderOverrideWithError(info *RelayInfo) (map[string]interface{}, error) {
+	if info == nil {
+		return map[string]interface{}{}, nil
 	}
-	return sanitizeHeaderOverrideMap(getHeaderOverrideMap(info))
+	if info.UseRuntimeHeadersOverride {
+		return sanitizeHeaderOverrideMapWithError(info.RuntimeHeadersOverride)
+	}
+	return sanitizeHeaderOverrideMapWithError(getHeaderOverrideMap(info))
+}
+
+// MissingCodexDynamicRequestHeaders returns request Codex metadata headers that
+// an explicitly selected Codex profile cannot pass through with the channel's
+// unconditional pass_headers operations. Dynamic values must come from the
+// current client request; this helper only compares header names and never
+// synthesizes or logs their values.
+func MissingCodexDynamicRequestHeaders(profileID string, paramOverride map[string]interface{}, requestHeaders map[string]string) []string {
+	baseProfileID, _, _ := strings.Cut(strings.TrimSpace(profileID), "@")
+	if baseProfileID != "codex-cli" && baseProfileID != "codex-desktop" {
+		return nil
+	}
+
+	required := make(map[string]struct{})
+	hasCodexDynamicHeader := false
+	for headerName, value := range requestHeaders {
+		normalizedName := normalizeHeaderContextKey(headerName)
+		if !operation_setting.IsCodexDynamicRequestHeader(normalizedName) || strings.TrimSpace(value) == "" {
+			continue
+		}
+		required[normalizedName] = struct{}{}
+		if strings.HasPrefix(normalizedName, "x-codex-") {
+			hasCodexDynamicHeader = true
+		}
+	}
+
+	passed := make(map[string]struct{})
+	if operations, ok := tryParseOperations(paramOverride); ok {
+		for _, operation := range operations {
+			if !strings.EqualFold(strings.TrimSpace(operation.Mode), "pass_headers") || len(operation.Conditions) > 0 {
+				continue
+			}
+			names, err := parseHeaderPassThroughNames(operation.Value)
+			if err != nil {
+				continue
+			}
+			for _, name := range names {
+				passed[normalizeHeaderContextKey(name)] = struct{}{}
+			}
+		}
+	}
+
+	missing := make([]string, 0, len(required))
+	for headerName := range required {
+		if _, ok := passed[headerName]; !ok {
+			missing = append(missing, headerName)
+		}
+	}
+	if !hasCodexDynamicHeader {
+		// Sub2API's Codex gate requires at least one non-empty x-codex-* value;
+		// a static profile cannot manufacture that per-request identity.
+		missing = append(missing, "x-codex-*")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 func tryParseOperations(paramOverride map[string]interface{}) ([]ParamOperation, bool) {
@@ -1297,11 +1447,20 @@ func copyHeaderInContext(context map[string]interface{}, fromHeader, toHeader st
 	if fromHeader == "" || toHeader == "" {
 		return fmt.Errorf("copy_header from/to is required")
 	}
+	_, sourceIsRequestHeader := getRequestHeaderValueFromContext(context, fromHeader)
 	value, exists := getHeaderValueFromContext(context, fromHeader)
 	if !exists {
 		return fmt.Errorf("%w: %s", errSourceHeaderNotFound, fromHeader)
 	}
-	return setHeaderOverrideInContext(context, toHeader, value, keepOrigin)
+	if err := setHeaderOverrideInContext(context, toHeader, value, keepOrigin); err != nil {
+		return err
+	}
+	if sourceIsRequestHeader {
+		if appliedValue, applied := getHeaderValueFromContext(context, toHeader); applied && appliedValue == value {
+			recordPassedRequestHeaderInContext(context, toHeader, value)
+		}
+	}
+	return nil
 }
 
 func passRequestHeaderInContext(context map[string]interface{}, headerName string) error {
@@ -1313,7 +1472,11 @@ func passRequestHeaderInContext(context map[string]interface{}, headerName strin
 	if !exists {
 		return fmt.Errorf("%w: %s", errSourceHeaderNotFound, headerName)
 	}
-	return setHeaderOverrideInContext(context, headerName, value, false)
+	if err := setHeaderOverrideInContext(context, headerName, value, false); err != nil {
+		return err
+	}
+	recordPassedRequestHeaderInContext(context, headerName, value)
+	return nil
 }
 
 func moveHeaderInContext(context map[string]interface{}, fromHeader, toHeader string, keepOrigin bool) error {
@@ -1613,6 +1776,19 @@ func buildRequestHeadersContext(headers map[string]string) map[string]interface{
 	})
 }
 
+func recordPassedRequestHeaderInContext(context map[string]interface{}, headerName string, value string) {
+	if context == nil {
+		return
+	}
+	headerName = normalizeHeaderContextKey(headerName)
+	value = strings.TrimSpace(value)
+	if headerName == "" || value == "" {
+		return
+	}
+	passedHeaders := ensureMapKeyInContext(context, paramOverrideContextPassedRequestHeaders)
+	passedHeaders[headerName] = value
+}
+
 func syncRuntimeHeaderOverrideFromContext(info *RelayInfo, context map[string]interface{}) {
 	if info == nil || context == nil {
 		return
@@ -1627,6 +1803,34 @@ func syncRuntimeHeaderOverrideFromContext(info *RelayInfo, context map[string]in
 	}
 	info.RuntimeHeadersOverride = sanitizeHeaderOverrideMap(rawMap)
 	info.UseRuntimeHeadersOverride = true
+	info.RuntimePassedRequestHeaders = runtimePassedRequestHeadersFromContext(context)
+}
+
+func runtimePassedRequestHeadersFromContext(context map[string]interface{}) map[string]string {
+	if context == nil {
+		return nil
+	}
+	raw, exists := context[paramOverrideContextPassedRequestHeaders]
+	if !exists {
+		return nil
+	}
+	rawMap, ok := raw.(map[string]interface{})
+	if !ok || len(rawMap) == 0 {
+		return nil
+	}
+	passedHeaders := make(map[string]string, len(rawMap))
+	for key, value := range rawMap {
+		normalizedKey := normalizeHeaderContextKey(key)
+		normalizedValue := strings.TrimSpace(fmt.Sprintf("%v", value))
+		if normalizedKey == "" || normalizedValue == "" {
+			continue
+		}
+		passedHeaders[normalizedKey] = normalizedValue
+	}
+	if len(passedHeaders) == 0 {
+		return nil
+	}
+	return passedHeaders
 }
 
 func moveValue(jsonStr, fromPath, toPath string) (string, error) {
@@ -2043,6 +2247,8 @@ func parseConditionOperations(raw interface{}) ([]ConditionOperation, error) {
 			result = append(result, condition)
 		}
 		return result, nil
+	case []ConditionOperation:
+		return append([]ConditionOperation(nil), typed...), nil
 	default:
 		return nil, fmt.Errorf("conditions must be an array or object")
 	}
@@ -2137,8 +2343,16 @@ func mergeObjects(jsonStr, path string, value interface{}, keepOrigin bool) (str
 //   - request_path：请求路径
 //   - is_channel_test：是否为渠道测试请求（同 is_test）。
 func BuildParamOverrideContext(info *RelayInfo) map[string]interface{} {
-	if info == nil {
+	context, err := BuildParamOverrideContextWithError(info)
+	if err != nil {
 		return nil
+	}
+	return context
+}
+
+func BuildParamOverrideContextWithError(info *RelayInfo) (map[string]interface{}, error) {
+	if info == nil {
+		return nil, nil
 	}
 
 	ctx := make(map[string]interface{})
@@ -2162,7 +2376,10 @@ func BuildParamOverrideContext(info *RelayInfo) map[string]interface{} {
 
 	ctx[paramOverrideContextRequestHeaders] = buildRequestHeadersContext(info.RequestHeaders)
 
-	headerOverrideSource := GetEffectiveHeaderOverride(info)
+	headerOverrideSource, err := GetEffectiveHeaderOverrideWithError(info)
+	if err != nil {
+		return nil, err
+	}
 	ctx[paramOverrideContextHeaderOverride] = sanitizeHeaderOverrideMap(headerOverrideSource)
 
 	ctx["retry_index"] = info.RetryIndex
@@ -2192,5 +2409,5 @@ func BuildParamOverrideContext(info *RelayInfo) map[string]interface{} {
 	}
 
 	ctx["is_channel_test"] = info.IsChannelTest
-	return ctx
+	return ctx, nil
 }

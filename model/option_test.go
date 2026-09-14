@@ -79,31 +79,6 @@ func TestUpdateOptionRejectsInvalidRequestHeaderPolicyAuxiliarySwitchBeforePersi
 	require.Equal(t, "true", common.OptionMap["RequestHeaderPolicyAuxiliaryRequestsEnabled"])
 }
 
-func TestUpdateOptionNormalizesLegacyEmptyStatusCodeRules(t *testing.T) {
-	previousDisableRanges := operation_setting.AutomaticDisableStatusCodeRanges
-	previousRetryRanges := operation_setting.AutomaticRetryStatusCodeRanges
-	previousOptionMap := common.OptionMap
-	common.OptionMap = map[string]string{}
-	t.Cleanup(func() {
-		DB.Where("key IN ?", []string{"AutomaticDisableStatusCodes", "AutomaticRetryStatusCodes"}).Delete(&Option{})
-		operation_setting.AutomaticDisableStatusCodeRanges = previousDisableRanges
-		operation_setting.AutomaticRetryStatusCodeRanges = previousRetryRanges
-		common.OptionMap = previousOptionMap
-	})
-
-	for _, key := range []string{"AutomaticDisableStatusCodes", "AutomaticRetryStatusCodes"} {
-		require.NoError(t, UpdateOption(key, "[]"))
-
-		var option Option
-		require.NoError(t, DB.Where("key = ?", key).First(&option).Error)
-		require.Empty(t, option.Value)
-		require.Empty(t, common.OptionMap[key])
-	}
-
-	require.Empty(t, operation_setting.AutomaticDisableStatusCodeRanges)
-	require.Empty(t, operation_setting.AutomaticRetryStatusCodeRanges)
-}
-
 func TestUpdateOptionValidatesUpstreamRateLimitRetryLimitBeforePersist(t *testing.T) {
 	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
 	previousOptionMap := common.OptionMap
@@ -127,4 +102,54 @@ func TestUpdateOptionValidatesUpstreamRateLimitRetryLimitBeforePersist(t *testin
 	require.NoError(t, DB.Where("key = ?", "UpstreamRateLimitRetryLimit").First(&option).Error)
 	require.Equal(t, "1", option.Value)
 	require.Equal(t, 1, operation_setting.GetUpstreamRateLimitRetryLimit())
+}
+
+func TestUpdateOptionValidatesChannelHealthSettingsBeforePersist(t *testing.T) {
+	previousOptionMap := common.OptionMap
+	common.OptionMap = map[string]string{}
+	settings := operation_setting.GetGeneralSetting()
+	previousEnabled := settings.ChannelHealthEnabled
+	previousCooldown := settings.ChannelHealthCooldownSeconds
+	previousProbeLease := settings.ChannelHealthProbeLeaseSeconds
+	keys := []string{
+		"general_setting.channel_health_enabled",
+		"general_setting.channel_health_cooldown_seconds",
+		"general_setting.channel_health_probe_lease_seconds",
+	}
+	t.Cleanup(func() {
+		_ = DB.Where("key IN ?", keys).Delete(&Option{}).Error
+		common.OptionMap = previousOptionMap
+		settings.ChannelHealthEnabled = previousEnabled
+		settings.ChannelHealthCooldownSeconds = previousCooldown
+		settings.ChannelHealthProbeLeaseSeconds = previousProbeLease
+	})
+
+	for _, testCase := range []struct {
+		key   string
+		value string
+	}{
+		{"general_setting.channel_health_enabled", "not-a-bool"},
+		{"general_setting.channel_health_cooldown_seconds", "0"},
+		{"general_setting.channel_health_cooldown_seconds", "301"},
+		{"general_setting.channel_health_cooldown_seconds", "1.5"},
+		{"general_setting.channel_health_probe_lease_seconds", "0"},
+		{"general_setting.channel_health_probe_lease_seconds", "61"},
+	} {
+		require.Error(t, UpdateOption(testCase.key, testCase.value))
+		require.NotContains(t, common.OptionMap, testCase.key)
+	}
+
+	var count int64
+	require.NoError(t, DB.Model(&Option{}).Where("key IN ?", keys).Count(&count).Error)
+	require.Zero(t, count)
+
+	require.NoError(t, UpdateOption("general_setting.channel_health_enabled", "1"))
+	require.NoError(t, UpdateOption("general_setting.channel_health_cooldown_seconds", " 45 "))
+	require.NoError(t, UpdateOption("general_setting.channel_health_probe_lease_seconds", "20"))
+	require.Equal(t, "true", common.OptionMap["general_setting.channel_health_enabled"])
+	require.Equal(t, "45", common.OptionMap["general_setting.channel_health_cooldown_seconds"])
+	require.Equal(t, "20", common.OptionMap["general_setting.channel_health_probe_lease_seconds"])
+	require.True(t, settings.ChannelHealthEnabled)
+	require.Equal(t, 45, settings.ChannelHealthCooldownSeconds)
+	require.Equal(t, 20, settings.ChannelHealthProbeLeaseSeconds)
 }

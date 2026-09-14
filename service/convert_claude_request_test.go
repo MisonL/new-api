@@ -847,6 +847,95 @@ func TestClaudeToOpenAIRequestUsesOriginModelNameForDeepSeekAliasedModels(t *tes
 	require.Equal(t, "deepseek origin reasoning", assistant.GetReasoningContent())
 }
 
+func TestClaudeToOpenAIRequestRejectsNonTextSystemBlock(t *testing.T) {
+	claudeRequest := dto.ClaudeRequest{
+		Model: "gpt-5.6-luna",
+		System: []any{map[string]any{
+			"type": "image",
+			"source": map[string]any{
+				"type":       "url",
+				"url":        "https://example.com/policy.png",
+				"media_type": "image/png",
+			},
+		}},
+	}
+
+	_, err := ClaudeToOpenAIRequest(claudeRequest, &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-luna",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "system block")
+}
+
+func TestClaudeToOpenAIRequestPreservesTextBeforeToolResult(t *testing.T) {
+	claudeRequest := dto.ClaudeRequest{
+		Model: "gpt-5.6-luna",
+		Messages: []dto.ClaudeMessage{
+			{Role: "assistant", Content: []any{map[string]any{
+				"type": "tool_use", "id": "toolu_1", "name": "lookup", "input": map[string]any{},
+			}}},
+			{Role: "user", Content: []any{
+				map[string]any{"type": "text", "text": "Result follows."},
+				map[string]any{"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"},
+			}},
+		},
+	}
+
+	converted, err := ClaudeToOpenAIRequest(claudeRequest, &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-luna",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, converted.Messages, 3)
+	require.Equal(t, "assistant", converted.Messages[0].Role)
+	require.Equal(t, "user", converted.Messages[1].Role)
+	require.Equal(t, "Result follows.", converted.Messages[1].StringContent())
+	require.Equal(t, "tool", converted.Messages[2].Role)
+	require.Equal(t, "toolu_1", converted.Messages[2].ToolCallId)
+}
+
+func TestResponseOpenAI2ClaudeRejectsUnknownFinishReason(t *testing.T) {
+	_, err := ResponseOpenAI2ClaudeWithError(&dto.OpenAITextResponse{
+		Model: "gpt-5.6-luna",
+		Choices: []dto.OpenAITextResponseChoice{{
+			Message:      dto.Message{Role: "assistant", Content: "answer"},
+			FinishReason: "unknown_reason",
+		}},
+	}, &relaycommon.RelayInfo{})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "finish_reason")
+}
+
+func TestClaudeToOpenAIRequestRejectsMediaAlongsideToolUse(t *testing.T) {
+	_, err := ClaudeToOpenAIRequest(dto.ClaudeRequest{
+		Model: "gpt-5.6-luna",
+		Messages: []dto.ClaudeMessage{{
+			Role: "assistant",
+			Content: []any{
+				map[string]any{
+					"type": "image",
+					"source": map[string]any{
+						"type":       "base64",
+						"media_type": "image/png",
+						"data":       "AA==",
+					},
+				},
+				map[string]any{"type": "tool_use", "id": "toolu_1", "name": "lookup", "input": map[string]any{}},
+			},
+		}},
+	}, &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-luna",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "alongside tool_use")
+}
+
 func TestResponseOpenAI2ClaudePreservesReasoningContentWithToolCalls(t *testing.T) {
 	reasoning := "Need to call the weather tool before answering."
 	message := dto.Message{Role: "assistant"}

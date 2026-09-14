@@ -211,11 +211,12 @@ func TestChannelOtherSettingsResponsesReasoningContextCapability(t *testing.T) {
 			capability: dto.ResponsesReasoningContextCapabilitySupported,
 		},
 		{
-			name: "sub2api http remains unverified",
+			name: "sub2api http does not support context",
 			settings: dto.ChannelOtherSettings{
 				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
 			},
-			capability: dto.ResponsesReasoningContextCapabilityUnknown,
+			capability: dto.ResponsesReasoningContextCapabilityUnsupported,
+			disabled:   true,
 		},
 		{
 			name: "explicit registry disables official context",
@@ -253,6 +254,131 @@ func TestChannelOtherSettingsResponsesReasoningContextCapability(t *testing.T) {
 	}
 }
 
+func TestChannelOtherSettingsResponsesEncryptedReasoningReplayCapability(t *testing.T) {
+	unsupported := false
+	supported := true
+
+	tests := []struct {
+		name        string
+		channelType int
+		settings    dto.ChannelOtherSettings
+		capability  dto.ResponsesEncryptedReasoningReplayCapability
+	}{
+		{
+			name:        "unconfigured openai remains unverified",
+			channelType: constant.ChannelTypeOpenAI,
+			capability:  dto.ResponsesEncryptedReasoningReplayCapabilityUnknown,
+		},
+		{
+			name:        "generic openai remains unverified",
+			channelType: constant.ChannelTypeOpenAI,
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericOpenAI,
+			},
+			capability: dto.ResponsesEncryptedReasoningReplayCapabilityUnknown,
+		},
+		{
+			name:        "official openai supports replay independently of reasoning context",
+			channelType: constant.ChannelTypeOpenAI,
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					SupportsReasoningContext: &unsupported,
+				},
+			},
+			capability: dto.ResponsesEncryptedReasoningReplayCapabilitySupported,
+		},
+		{
+			name:        "trusted newapi supports replay",
+			channelType: constant.ChannelTypeOpenAI,
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileTrustedNewAPI,
+			},
+			capability: dto.ResponsesEncryptedReasoningReplayCapabilitySupported,
+		},
+		{
+			name:        "sub2api websocket v2 supports replay",
+			channelType: constant.ChannelTypeOpenAI,
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIWSV2,
+			},
+			capability: dto.ResponsesEncryptedReasoningReplayCapabilitySupported,
+		},
+		{
+			name:        "native codex supports replay",
+			channelType: constant.ChannelTypeCodex,
+			capability:  dto.ResponsesEncryptedReasoningReplayCapabilitySupported,
+		},
+		{
+			name:        "sub2api http does not support replay even when reasoning context is enabled",
+			channelType: constant.ChannelTypeOpenAI,
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileSub2APIHTTP,
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					SupportsReasoningContext: &supported,
+				},
+			},
+			capability: dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported,
+		},
+		{
+			name:        "generic proxy does not support replay",
+			channelType: constant.ChannelTypeOpenAI,
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+			},
+			capability: dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported,
+		},
+		{
+			name:        "legacy strip setting disables replay",
+			channelType: constant.ChannelTypeOpenAI,
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile:   dto.ResponsesUpstreamProfileOfficialOpenAI,
+				StripCodexEncryptedContext: true,
+			},
+			capability: dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported,
+		},
+		{
+			name:        "explicit registry disables official replay",
+			channelType: constant.ChannelTypeOpenAI,
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					SupportsEncryptedReasoningReplay: &unsupported,
+				},
+			},
+			capability: dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported,
+		},
+		{
+			name:        "explicit registry verifies generic openai replay",
+			channelType: constant.ChannelTypeOpenAI,
+			settings: dto.ChannelOtherSettings{
+				ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericOpenAI,
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+					SupportsEncryptedReasoningReplay: &supported,
+				},
+			},
+			capability: dto.ResponsesEncryptedReasoningReplayCapabilitySupported,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.settings.ResolveResponsesEncryptedReasoningReplayCapability(tt.channelType)
+			require.Equal(t, tt.capability, got)
+			require.Equal(
+				t,
+				tt.capability == dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported,
+				tt.settings.ExplicitlyDisablesResponsesEncryptedReasoningReplay(tt.channelType),
+			)
+
+			channel := &Channel{}
+			channel.SetOtherSettings(tt.settings)
+			roundTripped := channel.GetOtherSettings()
+			require.Equal(t, tt.capability, roundTripped.ResolveResponsesEncryptedReasoningReplayCapability(tt.channelType))
+		})
+	}
+}
+
 func TestChannelOtherSettingsSub2APIHTTPLimitedNativeCompact(t *testing.T) {
 	settings := dto.ChannelOtherSettings{
 		ResponsesCompactMode:     dto.ResponsesCompactModeAuto,
@@ -261,8 +387,8 @@ func TestChannelOtherSettingsSub2APIHTTPLimitedNativeCompact(t *testing.T) {
 
 	require.Equal(t, dto.ResponsesUpstreamProfileSub2APIHTTP, settings.NormalizedResponsesUpstreamProfile())
 	require.False(t, settings.HasResponsesProxyCompatibilityProfile())
-	require.False(t, settings.HasResponsesEncryptedReasoningUnsupportedProfile())
-	require.False(t, settings.ShouldStripResponsesEncryptedReasoning())
+	require.True(t, settings.HasResponsesEncryptedReasoningUnsupportedProfile())
+	require.True(t, settings.ShouldStripResponsesEncryptedReasoning())
 	require.True(t, settings.DisallowsResponsesRESTPreviousResponseID())
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.ResponsesCompactModeOrDefault())
 	require.Equal(t, dto.ResponsesCompactModeNative, settings.EffectiveResponsesCompactModeOrDefault())
@@ -310,9 +436,7 @@ func TestChannelOtherSettingsDefaultProfileAllowsCompactionItemPassthrough(t *te
 
 	require.Equal(t, dto.ResponsesUpstreamProfile(""), settings.NormalizedResponsesUpstreamProfile())
 	require.False(t, settings.HasResponsesProxyCompatibilityProfile())
-	capability := settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI)
-	require.Equal(t, dto.ResponsesCompactionItemPassthroughCapabilityUnknown, capability.CompactionItemPassthroughCapability)
-	require.Nil(t, capability.SupportsCompactionItemPassthrough)
+	require.True(t, settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI).SupportsCompactionItemPassthrough)
 }
 
 func TestChannelOtherSettingsRemoteCompactionTimeoutDoesNotChangeCapabilitySource(t *testing.T) {
@@ -787,6 +911,56 @@ func TestCacheUpdateChannelStatusRemovesRouteWithoutMutatingOriginalSlice(t *tes
 	channelSyncLock.RUnlock()
 	require.Equal(t, []int{8608}, updatedRoute)
 	require.Equal(t, []int{8607, 8608}, routeSlice)
+}
+
+func TestRefreshRouteCandidateCacheDoesNotMutateMetadataSnapshots(t *testing.T) {
+	originalDB := DB
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	originalChannelsIDM := channelsIDM
+	originalLegacyRouteCandidateCache := legacyRouteCandidateCache
+	originalRouteCandidateCacheV2 := routeCandidateCacheV2
+	originalRouteCandidateCacheV2Ready := routeCandidateCacheV2Ready
+	originalRouteCandidateCacheV2KnownByChannel := routeCandidateCacheV2KnownByChannel
+
+	common.MemoryCacheEnabled = true
+	DB = nil
+	channel := &Channel{Id: 8612, Status: common.ChannelStatusEnabled}
+	otherChannel := &Channel{Id: 8613, Status: common.ChannelStatusEnabled}
+	legacyKey := routeCandidateCacheKey("default", "snapshot-model")
+	legacyEntries := []legacyRouteCandidateCacheEntry{
+		{channel: channel},
+		{channel: otherChannel},
+	}
+	v2Entries := []routeCandidateV2{
+		{Channel: channel, EffectiveRouteModel: "snapshot-model", RouteWeightBPS: RouteWeightTotalBPS},
+		{Channel: otherChannel, EffectiveRouteModel: "snapshot-model", RouteWeightBPS: RouteWeightTotalBPS},
+	}
+	channelSyncLock.Lock()
+	channelsIDM = map[int]*Channel{channel.Id: channel.CloneForCache()}
+	legacyRouteCandidateCache = map[string][]legacyRouteCandidateCacheEntry{legacyKey: legacyEntries}
+	routeCandidateCacheV2 = map[string][]routeCandidateV2{legacyKey: v2Entries}
+	routeCandidateCacheV2Ready = true
+	routeCandidateCacheV2KnownByChannel = map[string]map[int]struct{}{legacyKey: {channel.Id: {}}}
+	channelSyncLock.Unlock()
+	t.Cleanup(func() {
+		DB = originalDB
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+		channelSyncLock.Lock()
+		channelsIDM = originalChannelsIDM
+		legacyRouteCandidateCache = originalLegacyRouteCandidateCache
+		routeCandidateCacheV2 = originalRouteCandidateCacheV2
+		routeCandidateCacheV2Ready = originalRouteCandidateCacheV2Ready
+		routeCandidateCacheV2KnownByChannel = originalRouteCandidateCacheV2KnownByChannel
+		channelSyncLock.Unlock()
+	})
+
+	refreshRouteCandidateCacheV2(channel.Id, channel)
+
+	require.Equal(t, channel.Id, legacyEntries[0].channel.Id)
+	require.Equal(t, otherChannel.Id, legacyEntries[1].channel.Id)
+	require.Same(t, channel, v2Entries[0].Channel)
+	require.Equal(t, channel.Id, v2Entries[0].Channel.Id)
+	require.Equal(t, otherChannel.Id, v2Entries[1].Channel.Id)
 }
 
 func TestCacheGetChannelHandlesNilCachedEntry(t *testing.T) {

@@ -73,9 +73,6 @@ func (scanner responsesJSONScanner) visitObject(index, depth int, visitor func(s
 			return 0, false
 		}
 		key := rawStringField(scanner.data[keyStart:keyEnd])
-		if key == "" {
-			return 0, false
-		}
 		index = scanner.skipSpace(keyEnd)
 		if index >= len(scanner.data) || scanner.data[index] != ':' {
 			return 0, false

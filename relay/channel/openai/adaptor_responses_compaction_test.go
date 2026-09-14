@@ -40,58 +40,32 @@ func TestConvertOpenAIResponsesRequestPreservesCompactionInputByDefault(t *testi
 	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
 }
 
-func TestConvertOpenAIResponsesRequestPreservesMappedLogicalReasoningEffort(t *testing.T) {
-	tests := []struct {
-		name        string
-		relayMode   int
-		originModel string
-	}{
-		{
-			name:        "responses",
-			relayMode:   relayconstant.RelayModeResponses,
-			originModel: "gpt-5.6-sol-high",
-		},
-		{
-			name:        "compact",
-			relayMode:   relayconstant.RelayModeResponsesCompact,
-			originModel: "gpt-5.6-sol-low-openai-compact",
+func TestConvertOpenAIResponsesRequestPreservesInputAudio(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenAI,
 		},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c, _ := gin.CreateTestContext(nil)
-			info := &relaycommon.RelayInfo{
-				RelayMode:       tt.relayMode,
-				OriginModelName: tt.originModel,
-				ChannelMeta: &relaycommon.ChannelMeta{
-					ChannelType:       constant.ChannelTypeOpenAI,
-					IsModelMapped:     true,
-					UpstreamModelName: "provider/gpt-5.6-sol",
-				},
-			}
-			request := dto.OpenAIResponsesRequest{
-				Model: "provider/gpt-5.6-sol",
-				Input: json.RawMessage(`"continue"`),
-			}
-
-			converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, request)
-
-			require.NoError(t, err)
-			convertedRequest, ok := converted.(dto.OpenAIResponsesRequest)
-			require.True(t, ok)
-			require.Equal(t, "provider/gpt-5.6-sol", convertedRequest.Model)
-			require.NotNil(t, convertedRequest.Reasoning)
-			require.Equal(t, map[string]string{
-				"responses": "high",
-				"compact":   "low",
-			}[tt.name], convertedRequest.Reasoning.Effort)
-			require.Equal(t, convertedRequest.Reasoning.Effort, info.ReasoningEffort)
-		})
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: json.RawMessage(`[
+			{"type":"input_audio","input_audio":{"data":"DIRECT_AUDIO_DATA","format":"wav"}},
+			{"type":"message","role":"user","content":[{"type":"input_audio","input_audio":{"data":"MESSAGE_AUDIO_DATA","format":"mp3"}}]}
+		]`),
 	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
 }
 
-func TestConvertOpenAIResponsesRequestDropsInvalidFunctionCallItemID(t *testing.T) {
+func TestConvertOpenAIResponsesRequestRemovesUnprefixedFunctionCallItemID(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
@@ -100,7 +74,7 @@ func TestConvertOpenAIResponsesRequestDropsInvalidFunctionCallItemID(t *testing.
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6-sol",
 		Input: json.RawMessage(`[
-			{"type":"function_call","id":"item_invalid_prefix","call_id":"call_probe","name":"get_probe_status","arguments":"{}"},
+			{"type":"function_call","id":"iteminvalidprefix","call_id":"call_probe","name":"get_probe_status","arguments":"{}"},
 			{"type":"function_call_output","call_id":"call_probe","output":"probe-ok"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
@@ -117,6 +91,43 @@ func TestConvertOpenAIResponsesRequestDropsInvalidFunctionCallItemID(t *testing.
 	_, hasID := items[0]["id"]
 	require.False(t, hasID)
 	require.JSONEq(t, `{"type":"function_call","call_id":"call_probe","name":"get_probe_status","arguments":"{}"}`, string(mustMarshalRawMap(t, items[0])))
+	require.Equal(t, 1, common.GetContextKeyInt(c, constant.ContextKeyResponsesInputItemIDNormalizationRemovedCount))
+}
+
+func TestConvertOpenAIResponsesRequestPreservesOpaqueReasoningIDAndNormalizesToolID(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: json.RawMessage(`[
+			{"type":"reasoning","id":"clientreasoningid","encrypted_content":"opaque-reasoning-state"},
+			{"type":"function_call","id":"clientfunctionid","call_id":"call_probe","name":"exec","arguments":"{}"},
+			{"type":"message","id":"msg_valid","role":"user","content":[]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 3)
+	var reasoningID string
+	require.NoError(t, common.Unmarshal(items[0]["id"], &reasoningID))
+	require.Equal(t, "clientreasoningid", reasoningID)
+	_, hasFunctionID := items[1]["id"]
+	require.False(t, hasFunctionID)
+	var callID string
+	require.NoError(t, common.Unmarshal(items[1]["call_id"], &callID))
+	require.Equal(t, "call_probe", callID)
+	var messageID string
+	require.NoError(t, common.Unmarshal(items[2]["id"], &messageID))
+	require.Equal(t, "msg_valid", messageID)
+	require.Equal(t, 1, common.GetContextKeyInt(c, constant.ContextKeyResponsesInputItemIDNormalizationRemovedCount))
 }
 
 func TestConvertOpenAIResponsesRequestAppliesReasoningContextCapability(t *testing.T) {
@@ -128,18 +139,16 @@ func TestConvertOpenAIResponsesRequestAppliesReasoningContextCapability(t *testi
 		wantAction  string
 	}{
 		{
-			name:        "sub2api http responses forwards unverified context",
-			relayMode:   relayconstant.RelayModeResponses,
-			profile:     dto.ResponsesUpstreamProfileSub2APIHTTP,
-			wantContext: true,
-			wantAction:  "forwarded_unverified_capability",
+			name:       "sub2api http responses strips unsupported context",
+			relayMode:  relayconstant.RelayModeResponses,
+			profile:    dto.ResponsesUpstreamProfileSub2APIHTTP,
+			wantAction: "stripped_unsupported_capability",
 		},
 		{
-			name:        "sub2api http compact forwards unverified context",
-			relayMode:   relayconstant.RelayModeResponsesCompact,
-			profile:     dto.ResponsesUpstreamProfileSub2APIHTTP,
-			wantContext: true,
-			wantAction:  "forwarded_unverified_capability",
+			name:       "sub2api http compact strips unsupported context",
+			relayMode:  relayconstant.RelayModeResponsesCompact,
+			profile:    dto.ResponsesUpstreamProfileSub2APIHTTP,
+			wantAction: "stripped_unsupported_capability",
 		},
 		{
 			name:        "sub2api websocket forwards supported context",
@@ -209,7 +218,7 @@ func mustMarshalRawMap(t *testing.T, item map[string]json.RawMessage) []byte {
 	return raw
 }
 
-func TestConvertOpenAIResponsesRequestPreservesOpaqueEncryptedContextWhenLegacyStripEnabled(t *testing.T) {
+func TestConvertOpenAIResponsesRequestStripsCodexEncryptedContextWhenEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
@@ -224,9 +233,9 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueEncryptedContextWhenLegacyS
 		Model: "gpt-5.5",
 		Input: json.RawMessage(`[
 			{"type":"message","role":"developer","content":[{"type":"input_text","text":"keep prior summary"}]},
-			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+				{"type":"reasoning","id":"rs_1","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"old answer"}]},
-			{"type":"compaction","encrypted_content":"compact"},
+				{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
 	}
@@ -236,7 +245,15 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueEncryptedContextWhenLegacyS
 	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
 
-	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 4)
+
+	require.Equal(t, "developer", responseItemRole(t, items[0]))
+	require.Equal(t, "assistant", responseItemRole(t, items[1]))
+	require.Equal(t, "old answer", responseItemText(t, items[1]))
+	require.Equal(t, "compaction", responseItemType(t, items[2]))
+	require.Equal(t, "user", responseItemRole(t, items[3]))
 }
 
 func TestConvertOpenAIResponsesRequestPreservesCompactionOnlyInputWhenStripEnabled(t *testing.T) {
@@ -296,7 +313,7 @@ func TestConvertOpenAIResponsesRequestPreservesNonObjectArrayItemsWhenStripEnabl
 	require.Contains(t, string(items[1]), `"type":"compaction"`)
 }
 
-func TestConvertOpenAIResponsesRequestPreservesOpaqueAssistantHistoryWhenLegacyStripEnabled(t *testing.T) {
+func TestConvertOpenAIResponsesRequestPreservesAssistantAfterEncryptedReasoningWhenStripEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
@@ -310,7 +327,7 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueAssistantHistoryWhenLegacyS
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
 		Input: json.RawMessage(`[
-			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+				{"type":"reasoning","id":"rs_1","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"old answer"}]}
 		]`),
 	}
@@ -320,10 +337,14 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueAssistantHistoryWhenLegacyS
 	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
 
-	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 1)
+	require.Equal(t, "assistant", responseItemRole(t, items[0]))
+	require.Equal(t, "old answer", responseItemText(t, items[0]))
 }
 
-func TestConvertOpenAIResponsesRequestPreservesOpaqueNonAdjacentAssistantHistoryWhenLegacyStripEnabled(t *testing.T) {
+func TestConvertOpenAIResponsesRequestPreservesNonAdjacentAssistantWhenStripEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
@@ -337,7 +358,7 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueNonAdjacentAssistantHistory
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
 		Input: json.RawMessage(`[
-			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+				{"type":"reasoning","id":"rs_1","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]},
 			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"fresh answer"}]}
 		]`),
@@ -348,10 +369,15 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueNonAdjacentAssistantHistory
 	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
 
-	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 2)
+	require.Equal(t, "user", responseItemRole(t, items[0]))
+	require.Equal(t, "assistant", responseItemRole(t, items[1]))
+	require.Equal(t, "fresh answer", responseItemText(t, items[1]))
 }
 
-func TestConvertOpenAIResponsesRequestPreservesOpaqueAssistantToolCallsWhenLegacyStripEnabled(t *testing.T) {
+func TestConvertOpenAIResponsesRequestPreservesAssistantToolCallsWhenStripEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
@@ -365,7 +391,7 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueAssistantToolCallsWhenLegac
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
 		Input: json.RawMessage(`[
-			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+				{"type":"reasoning","id":"rs_1","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"function_call","call_id":"call_1","name":"edit","arguments":"{}"},
 			{"type":"custom_tool_call","call_id":"call_2","name":"shell","input":"go test"},
 			{"type":"function_call_output","call_id":"call_1","output":"ok"},
@@ -381,13 +407,12 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueAssistantToolCallsWhenLegac
 
 	var items []map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 6)
-	require.Equal(t, "reasoning", responseItemType(t, items[0]))
-	require.Equal(t, "function_call", responseItemType(t, items[1]))
-	require.Equal(t, "custom_tool_call", responseItemType(t, items[2]))
-	require.Equal(t, "function_call_output", responseItemType(t, items[3]))
-	require.Equal(t, "user", responseItemRole(t, items[4]))
-	require.Equal(t, "assistant", responseItemRole(t, items[5]))
+	require.Len(t, items, 5)
+	require.Equal(t, "function_call", responseItemType(t, items[0]))
+	require.Equal(t, "custom_tool_call", responseItemType(t, items[1]))
+	require.Equal(t, "function_call_output", responseItemType(t, items[2]))
+	require.Equal(t, "user", responseItemRole(t, items[3]))
+	require.Equal(t, "assistant", responseItemRole(t, items[4]))
 }
 
 func TestConvertOpenAIResponsesRequestPreservesPlainReasoningWhenStripEnabled(t *testing.T) {
@@ -442,7 +467,7 @@ func TestConvertOpenAIResponsesRequestPreservesEmptyEncryptedReasoningWhenStripE
 	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
 }
 
-func TestConvertOpenAIResponsesRequestPreservesOpaqueToolOutputWhenLegacyStripEnabled(t *testing.T) {
+func TestConvertOpenAIResponsesRequestPreservesToolOutputWhenStripEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponses,
@@ -456,7 +481,7 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueToolOutputWhenLegacyStripEn
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
 		Input: json.RawMessage(`[
-			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+				{"type":"reasoning","id":"rs_1","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"function_call","call_id":"call_1","name":"edit","arguments":"{}"},
 			{"type":"function_call_output","call_id":"call_1","metadata":{"secret":"internal"}},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
@@ -470,12 +495,11 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueToolOutputWhenLegacyStripEn
 
 	var items []map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
-	require.Len(t, items, 4)
-	require.Equal(t, "reasoning", responseItemType(t, items[0]))
-	require.Equal(t, "function_call", responseItemType(t, items[1]))
-	require.Equal(t, "function_call_output", responseItemType(t, items[2]))
-	require.Contains(t, string(items[2]["metadata"]), "internal")
-	require.Equal(t, "user", responseItemRole(t, items[3]))
+	require.Len(t, items, 3)
+	require.Equal(t, "function_call", responseItemType(t, items[0]))
+	require.Equal(t, "function_call_output", responseItemType(t, items[1]))
+	require.Contains(t, string(items[1]["metadata"]), "internal")
+	require.Equal(t, "user", responseItemRole(t, items[2]))
 }
 
 func TestConvertOpenAIResponsesCompactRequestPreservesCompactionInputForCodexChannel(t *testing.T) {
@@ -715,7 +739,7 @@ func TestConvertOpenAIResponsesRequestMarksMissingSyntheticState(t *testing.T) {
 	}
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5.5",
-		PreviousResponseID: "resp_newapi_synthcmp_55555555555555555555555555555555",
+		PreviousResponseID: "resp_newapi_synthcmp_22222222222222222222222222222222",
 		Input:              json.RawMessage(`[]`),
 	}
 
@@ -740,7 +764,7 @@ func TestConvertOpenAIResponsesRequestContinuesMissingSyntheticStateWithVisibleI
 	}
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5.5",
-		PreviousResponseID: "resp_newapi_synthcmp_55555555555555555555555555555555",
+		PreviousResponseID: "resp_newapi_synthcmp_22222222222222222222222222222222",
 		Input: json.RawMessage(`[
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue after stale local compact"}]}
 		]`),
@@ -757,7 +781,7 @@ func TestConvertOpenAIResponsesRequestContinuesMissingSyntheticStateWithVisibleI
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted))
 }
 
-func TestConvertOpenAIResponsesRequestDoesNotRestoreSyntheticStateAroundOpaqueReplay(t *testing.T) {
+func TestConvertOpenAIResponsesRequestRestoresSyntheticStateBeforeStrip(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	scope := service.SyntheticCompactStateScope{UserID: 10, TokenID: 20, Group: "default"}
 	info := &relaycommon.RelayInfo{
@@ -792,7 +816,7 @@ func TestConvertOpenAIResponsesRequestDoesNotRestoreSyntheticStateAroundOpaqueRe
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
 		Input: json.RawMessage(`[
-			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+				{"type":"reasoning","id":"rs_1","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"old answer"}]},
 			` + string(compactResp.Output)[1:len(compactResp.Output)-1] + `,
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
@@ -804,10 +828,20 @@ func TestConvertOpenAIResponsesRequestDoesNotRestoreSyntheticStateAroundOpaqueRe
 	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
 	require.Empty(t, convertedReq.PreviousResponseID)
-	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 3)
+	require.Equal(t, "developer", responseItemRole(t, items[0]))
+	require.Contains(t, responseItemText(t, items[0]), "Stored synthetic summary.")
+	require.Contains(t, responseItemText(t, items[0]), "Another language model produced the compact summary above")
+	require.Equal(t, "assistant", responseItemRole(t, items[1]))
+	require.Equal(t, "old answer", responseItemText(t, items[1]))
+	require.Equal(t, "user", responseItemRole(t, items[2]))
+	require.NotContains(t, string(convertedReq.Input), "opaque")
 }
 
-func TestConvertOpenAIResponsesCompactRequestPreservesOpaqueNativeCompactWhenLegacyStripEnabled(t *testing.T) {
+func TestConvertOpenAIResponsesCompactRequestPreservesNativeCompactWhenEncryptedContextStripEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
@@ -824,9 +858,9 @@ func TestConvertOpenAIResponsesCompactRequestPreservesOpaqueNativeCompactWhenLeg
 		Model:              "gpt-5.5",
 		PreviousResponseID: "resp_previous",
 		Input: json.RawMessage(`[
-			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+			{"type":"reasoning","id":"rs_1","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"old answer"}]},
-			{"type":"compaction","encrypted_content":"compact"},
+				{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
 	}
@@ -837,10 +871,18 @@ func TestConvertOpenAIResponsesCompactRequestPreservesOpaqueNativeCompactWhenLeg
 	require.True(t, ok)
 	require.Equal(t, "resp_previous", convertedReq.PreviousResponseID)
 
-	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 3)
+	require.Equal(t, "assistant", responseItemRole(t, items[0]))
+	require.Equal(t, "old answer", responseItemText(t, items[0]))
+	require.Equal(t, "compaction", responseItemType(t, items[1]))
+	require.Equal(t, "user", responseItemRole(t, items[2]))
+	require.NotContains(t, string(convertedReq.Input), "opaque")
+	require.Contains(t, string(convertedReq.Input), "compact")
 }
 
-func TestConvertOpenAIResponsesCompactRequestPreservesOpaqueInputWhenLegacyStripEnabled(t *testing.T) {
+func TestConvertOpenAIResponsesCompactRequestConvertsAndStripsEncryptedContextWhenEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
@@ -856,7 +898,7 @@ func TestConvertOpenAIResponsesCompactRequestPreservesOpaqueInputWhenLegacyStrip
 		Model:              "gpt-5.5",
 		PreviousResponseID: "resp_previous",
 		Input: json.RawMessage(`[
-			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+				{"type":"reasoning","id":"rs_1","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"old answer"}]},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
@@ -868,10 +910,15 @@ func TestConvertOpenAIResponsesCompactRequestPreservesOpaqueInputWhenLegacyStrip
 	require.True(t, ok)
 	require.Equal(t, "resp_previous", convertedReq.PreviousResponseID)
 
-	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 2)
+	require.Equal(t, "assistant", responseItemRole(t, items[0]))
+	require.Equal(t, "old answer", responseItemText(t, items[0]))
+	require.Equal(t, "user", responseItemRole(t, items[1]))
 }
 
-func TestConvertOpenAIResponsesCompactRequestSub2APIHTTPPreservesOpaqueReplay(t *testing.T) {
+func TestConvertOpenAIResponsesCompactRequestSub2APIHTTPPreservesNativeWithoutPreviousID(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
@@ -887,9 +934,9 @@ func TestConvertOpenAIResponsesCompactRequestSub2APIHTTPPreservesOpaqueReplay(t 
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
 		Input: json.RawMessage(`[
-			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+				{"type":"reasoning","id":"rs_1","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"compact"}]},
-			{"type":"compaction","encrypted_content":"compact"}
+				{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"}
 		]`),
 	}
 
@@ -899,10 +946,16 @@ func TestConvertOpenAIResponsesCompactRequestSub2APIHTTPPreservesOpaqueReplay(t 
 	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
 	require.Empty(t, convertedReq.PreviousResponseID)
-	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
+	require.NotContains(t, string(convertedReq.Input), "opaque")
+	require.Contains(t, string(convertedReq.Input), "compact")
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 2)
+	require.Equal(t, "user", responseItemRole(t, items[0]))
+	require.Equal(t, "compaction", responseItemType(t, items[1]))
 }
 
-func TestConvertAzureResponsesCompactRequestPreservesOpaqueReplayWhenLegacyStripEnabled(t *testing.T) {
+func TestConvertAzureResponsesCompactRequestStripsEncryptedReasoningWhenEnabled(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	info := &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
@@ -918,7 +971,7 @@ func TestConvertAzureResponsesCompactRequestPreservesOpaqueReplayWhenLegacyStrip
 		Model:              "gpt-5.5",
 		PreviousResponseID: "resp_previous",
 		Input: json.RawMessage(`[
-			{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},
+				{"type":"reasoning","id":"rs_1","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"old answer"}]},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
@@ -930,7 +983,12 @@ func TestConvertAzureResponsesCompactRequestPreservesOpaqueReplayWhenLegacyStrip
 	require.True(t, ok)
 	require.Equal(t, "resp_previous", convertedReq.PreviousResponseID)
 
-	require.JSONEq(t, string(req.Input), string(convertedReq.Input))
+	var items []map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 2)
+	require.Equal(t, "assistant", responseItemRole(t, items[0]))
+	require.Equal(t, "old answer", responseItemText(t, items[0]))
+	require.Equal(t, "user", responseItemRole(t, items[1]))
 }
 
 func TestConvertOpenAIResponsesRequestRejectsSub2APIHTTPPreviousResponseID(t *testing.T) {

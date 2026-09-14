@@ -1,7 +1,6 @@
 package volcengine
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -209,11 +208,13 @@ func handleTTSWebSocketResponse(c *gin.Context, requestURL string, volcRequest V
 
 	header := http.Header{}
 	header.Set("Authorization", fmt.Sprintf("Bearer;%s", token))
+	service.ApplyDefaultUserAgentHeader(header)
 
 	if !service.StartUpstreamRateLimitRetryFollowup(c) {
 		return nil, service.NewUpstreamRateLimitRetryExhaustedError()
 	}
-	conn, resp, dialErr := websocket.DefaultDialer.DialContext(context.Background(), requestURL, header)
+	requestContext := relaycommon.GinRequestContext(c)
+	conn, resp, dialErr := websocket.DefaultDialer.DialContext(requestContext, requestURL, header)
 	if dialErr != nil {
 		if resp != nil {
 			if resp.Body != nil {
@@ -232,6 +233,15 @@ func handleTTSWebSocketResponse(c *gin.Context, requestURL string, volcRequest V
 		)
 	}
 	defer conn.Close()
+	stopOnCancel := make(chan struct{})
+	go func() {
+		select {
+		case <-requestContext.Done():
+			_ = conn.Close()
+		case <-stopOnCancel:
+		}
+	}()
+	defer close(stopOnCancel)
 
 	payload, marshalErr := json.Marshal(volcRequest)
 	if marshalErr != nil {

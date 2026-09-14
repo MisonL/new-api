@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,23 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type errorHandlerTrackingBody struct {
+	readErr   error
+	closeSeen bool
+}
+
+func (b *errorHandlerTrackingBody) Read([]byte) (int, error) {
+	if b.readErr != nil {
+		return 0, b.readErr
+	}
+	return 0, io.EOF
+}
+
+func (b *errorHandlerTrackingBody) Close() error {
+	b.closeSeen = true
+	return nil
+}
 
 func TestRelayErrorHandlerClassifiesHTML413(t *testing.T) {
 	t.Parallel()
@@ -29,6 +47,38 @@ func TestRelayErrorHandlerClassifiesHTML413(t *testing.T) {
 	require.Equal(t, http.StatusRequestEntityTooLarge, err.StatusCode)
 	require.Equal(t, types.ErrorCodeUpstreamRequestTooLarge, err.GetErrorCode())
 	require.Contains(t, err.Error(), "upstream request too large")
+}
+
+func TestRelayErrorHandlerRejectsNilResponseWithoutPanicking(t *testing.T) {
+	t.Parallel()
+
+	err := RelayErrorHandler(context.Background(), nil, false)
+
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadGateway, err.StatusCode)
+	require.Equal(t, types.ErrorCodeEmptyResponse, err.GetErrorCode())
+	require.Contains(t, err.Error(), "upstream response is nil")
+}
+
+func TestRelayErrorHandlerRejectsNilResponseBodyWithoutPanicking(t *testing.T) {
+	t.Parallel()
+
+	err := RelayErrorHandler(context.Background(), &http.Response{StatusCode: http.StatusBadGateway}, false)
+
+	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadGateway, err.StatusCode)
+	require.Equal(t, types.ErrorCodeEmptyResponse, err.GetErrorCode())
+	require.Contains(t, err.Error(), "upstream response body is nil")
+}
+
+func TestRelayErrorHandlerClosesBodyWhenReadFails(t *testing.T) {
+	body := &errorHandlerTrackingBody{readErr: errors.New("read failed")}
+	resp := &http.Response{StatusCode: http.StatusBadGateway, Body: body}
+
+	err := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, err)
+	require.True(t, body.closeSeen)
 }
 
 func TestRelayErrorHandlerClassifiesJSON413WithoutDroppingUpstreamMessage(t *testing.T) {
@@ -108,6 +158,19 @@ func TestRelayErrorHandlerKeepsActualGatewayErrorsRetryable(t *testing.T) {
 	require.NotNil(t, err)
 	require.Equal(t, http.StatusBadGateway, err.StatusCode)
 	require.False(t, types.IsSkipRetryError(err))
+}
+
+func TestRelayErrorHandlerParsesRetryAfterSeconds(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Retry-After": []string{"42"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited","code":"rate_limit_exceeded"}}`)),
+	}
+
+	err := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, err)
+	require.Equal(t, 42, err.RetryAfterSeconds)
 }
 
 func TestResetStatusCode(t *testing.T) {
@@ -249,6 +312,26 @@ func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {
 	require.NotNil(t, newAPIError)
 	require.NotContains(t, logBuffer.String(), "[truncated")
 	require.Contains(t, logBuffer.String(), body)
+}
+
+func TestRelayErrorHandlerRedactsSensitiveBodyWhenBodyIsShown(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body: io.NopCloser(strings.NewReader(
+			"upstream failed; Authorization: Bearer bearer-secret-123; " +
+				"Api-Key: api-secret-456; https://provider.example/v1/responses?signature=signed-secret",
+		)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, true)
+
+	require.NotNil(t, newAPIError)
+	message := newAPIError.Error()
+	for _, secret := range []string{"bearer-secret-123", "api-secret-456", "signed-secret", "provider.example"} {
+		require.NotContains(t, message, secret)
+	}
+	require.Contains(t, message, "Authorization: Bearer ***")
+	require.Contains(t, message, "Api-Key: ***")
 }
 
 func withDebugEnabled(t *testing.T, enabled bool) {

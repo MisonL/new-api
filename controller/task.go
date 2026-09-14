@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
@@ -35,7 +36,11 @@ func GetAllTask(c *gin.Context) {
 		ChannelID:      c.Query("channel_id"),
 	}
 
-	items := model.TaskGetAllTasks(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
+	items, err := model.TaskGetAllTasksWithError(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("查询任务失败: %w", err))
+		return
+	}
 	total := model.TaskCountAllTasks(queryParams)
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(tasksToDto(items, true))
@@ -59,7 +64,11 @@ func GetUserTask(c *gin.Context) {
 		EndTimestamp:   endTimestamp,
 	}
 
-	items := model.TaskGetAllUserTask(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
+	items, err := model.TaskGetAllUserTaskWithError(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("查询任务失败: %w", err))
+		return
+	}
 	total := model.TaskCountAllUserTask(userId, queryParams)
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(tasksToDto(items, false))

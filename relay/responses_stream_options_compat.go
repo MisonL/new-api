@@ -95,7 +95,7 @@ func stripResponsesStreamOptionsIncludeUsage(request dto.OpenAIResponsesRequest)
 	strippedRequest := request
 	streamOptions := *request.StreamOptions
 	streamOptions.RemoveIncludeUsage()
-	if !streamOptions.IncludeObfuscation && len(streamOptions.Extra) == 0 {
+	if !streamOptions.HasIncludeObfuscationField() && len(streamOptions.Extra) == 0 {
 		strippedRequest.StreamOptions = nil
 	} else {
 		strippedRequest.StreamOptions = &streamOptions

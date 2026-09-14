@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -329,6 +330,9 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := migrateChannelPinOrder(); err != nil {
+		return err
+	}
 	if err := migratePrefillGroupTable(); err != nil {
 		return err
 	}
@@ -412,6 +416,9 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := migrateChannelPinOrder(); err != nil {
+		return err
+	}
 	if err := migratePrefillGroupTable(); err != nil {
 		return err
 	}
@@ -437,6 +444,42 @@ func migrateLOGDB() error {
 		return err
 	}
 	return nil
+}
+
+const channelPinOrderMigrationOptionKey = "migration.channel_pin_order.20260829"
+
+// migrateChannelPinOrder preserves the legacy management pin state exactly
+// once, before pin_order becomes independent from route priority. Only
+// positive legacy priorities represented a pinned channel in the old UI.
+func migrateChannelPinOrder() error {
+	var marker Option
+	if err := DB.First(&marker, "key = ?", channelPinOrderMigrationOptionKey).Error; err == nil {
+		return nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&Channel{}).
+			Where("(pin_order IS NULL OR pin_order = ?) AND priority > ?", 0, 0).
+			Update("pin_order", gorm.Expr("priority"))
+		if result.Error != nil {
+			return result.Error
+		}
+
+		marker = Option{
+			Key:   channelPinOrderMigrationOptionKey,
+			Value: "done",
+		}
+		if err := tx.Save(&marker).Error; err != nil {
+			return err
+		}
+		common.SysLog(fmt.Sprintf(
+			"channel pin order migration finished: updated_channels=%d",
+			result.RowsAffected,
+		))
+		return nil
+	})
 }
 
 const (

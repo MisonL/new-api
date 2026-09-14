@@ -14,6 +14,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -51,6 +52,7 @@ func TestConvertImageEditJSONRequestPreservesBody(t *testing.T) {
 
 func TestDoImageEditJSONRequestUsesJSONRequestPath(t *testing.T) {
 	// service.InitHttpClient mutates process-wide HTTP client state, keep this test serial.
+	allowLocalOpenAITestServer(t)
 	service.InitHttpClient()
 	gin.SetMode(gin.TestMode)
 	var upstreamContentType string
@@ -86,6 +88,21 @@ func TestDoImageEditJSONRequestUsesJSONRequestPath(t *testing.T) {
 
 	require.Equal(t, "application/json", upstreamContentType)
 	require.JSONEq(t, payload, upstreamBody)
+}
+
+func allowLocalOpenAITestServer(t *testing.T) {
+	t.Helper()
+	setting := system_setting.GetFetchSetting()
+	previous := *setting
+	t.Cleanup(func() { *setting = previous })
+	*setting = system_setting.FetchSetting{
+		EnableSSRFProtection:   true,
+		AllowPrivateIp:         true,
+		DomainFilterMode:       false,
+		IpFilterMode:           false,
+		AllowedPorts:           []string{"1-65535"},
+		ApplyIPFilterForDomain: true,
+	}
 }
 
 func mustRawMessage(t *testing.T, value string) json.RawMessage {

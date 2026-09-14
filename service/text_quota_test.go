@@ -24,12 +24,19 @@ func TestIsBenignCanceledTextStream(t *testing.T) {
 	status.SetEndReason(relaycommon.StreamEndReasonClientGone, context.Canceled)
 
 	require.True(t, isBenignCanceledTextStream(&relaycommon.RelayInfo{
-		IsStream:     true,
-		StreamStatus: status,
+		IsStream:              true,
+		ReceivedResponseCount: 1,
+		StreamStatus:          status,
 	}))
 	require.False(t, isBenignCanceledTextStream(&relaycommon.RelayInfo{
-		IsStream:     false,
-		StreamStatus: status,
+		IsStream:              false,
+		ReceivedResponseCount: 1,
+		StreamStatus:          status,
+	}))
+	require.True(t, isBenignCanceledTextStream(&relaycommon.RelayInfo{
+		IsStream:              true,
+		ReceivedResponseCount: 0,
+		StreamStatus:          status,
 	}))
 }
 
@@ -39,8 +46,9 @@ func TestIsBenignCanceledTextStreamRejectsSoftErroredClientGone(t *testing.T) {
 	status.SetEndReason(relaycommon.StreamEndReasonClientGone, context.Canceled)
 
 	require.False(t, isBenignCanceledTextStream(&relaycommon.RelayInfo{
-		IsStream:     true,
-		StreamStatus: status,
+		IsStream:              true,
+		ReceivedResponseCount: 1,
+		StreamStatus:          status,
 	}))
 }
 

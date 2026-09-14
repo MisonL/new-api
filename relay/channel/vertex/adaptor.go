@@ -234,19 +234,30 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		return nil, errors.New("request is nil")
 	}
 	if a.RequestMode == RequestModeGemini && strings.HasPrefix(info.UpstreamModelName, "imagen") {
-		prompt := ""
-		for _, m := range request.Messages {
-			if m.Role == "user" {
-				prompt = m.StringContent()
-				if prompt != "" {
-					break
-				}
+		var promptParts []string
+		for messageIndex, message := range request.Messages {
+			// Imagen's prompt is derived from user messages. System/developer and
+			// assistant history is not representable by the single prompt field;
+			// ignore those roles instead of rejecting an otherwise valid chat-shaped
+			// request before the first user message is converted.
+			if !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+				continue
+			}
+			text, err := channel.OpenAIMessageText(message, "Vertex Imagen")
+			if err != nil {
+				return nil, fmt.Errorf("messages[%d]: %w", messageIndex, err)
+			}
+			if text != "" {
+				promptParts = append(promptParts, text)
 			}
 		}
-		if prompt == "" {
-			if p, ok := request.Prompt.(string); ok {
-				prompt = p
+		prompt := strings.Join(promptParts, "\n")
+		if prompt == "" && request.Prompt != nil {
+			p, ok := request.Prompt.(string)
+			if !ok {
+				return nil, errors.New("prompt must be a string for Vertex Imagen")
 			}
+			prompt = p
 		}
 		if prompt == "" {
 			return nil, errors.New("prompt is required for image generation")

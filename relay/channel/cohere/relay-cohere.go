@@ -2,12 +2,14 @@ package cohere
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -17,7 +19,19 @@ import (
 	"github.com/samber/lo"
 )
 
-func requestOpenAI2Cohere(textRequest dto.GeneralOpenAIRequest) *CohereRequest {
+func requestOpenAI2Cohere(textRequest dto.GeneralOpenAIRequest) (*CohereRequest, error) {
+	if err := channel.RejectUnsupportedTextRequestFields(textRequest, "Cohere Chat"); err != nil {
+		return nil, err
+	}
+	if textRequest.Temperature != nil || textRequest.TopP != nil || textRequest.TopK != nil ||
+		textRequest.FrequencyPenalty != nil || textRequest.PresencePenalty != nil ||
+		textRequest.N != nil || textRequest.Stop != nil {
+		return nil, fmt.Errorf("sampling or stop options are not supported by Cohere Chat")
+	}
+	if len(textRequest.Messages) == 0 {
+		return nil, fmt.Errorf("at least one message is required by Cohere Chat")
+	}
+
 	cohereReq := CohereRequest{
 		Model:       textRequest.Model,
 		ChatHistory: []ChatHistory{},
@@ -31,26 +45,30 @@ func requestOpenAI2Cohere(textRequest dto.GeneralOpenAIRequest) *CohereRequest {
 	if cohereReq.MaxTokens == 0 {
 		cohereReq.MaxTokens = 4000
 	}
-	for _, msg := range textRequest.Messages {
-		if msg.Role == "user" {
-			cohereReq.Message = msg.StringContent()
-		} else {
-			var role string
-			if msg.Role == "assistant" {
-				role = "CHATBOT"
-			} else if msg.Role == "system" {
-				role = "SYSTEM"
-			} else {
-				role = "USER"
-			}
-			cohereReq.ChatHistory = append(cohereReq.ChatHistory, ChatHistory{
-				Role:    role,
-				Message: msg.StringContent(),
-			})
+
+	roles := map[string]string{
+		"system":    "SYSTEM",
+		"developer": "SYSTEM",
+		"user":      "USER",
+		"assistant": "CHATBOT",
+	}
+	lastIndex := len(textRequest.Messages) - 1
+	for messageIndex, msg := range textRequest.Messages {
+		role, text, err := channel.OpenAIMessageRoleText(msg, "Cohere Chat", roles)
+		if err != nil {
+			return nil, fmt.Errorf("messages[%d]: %w", messageIndex, err)
 		}
+		if messageIndex == lastIndex {
+			if role != "USER" {
+				return nil, fmt.Errorf("messages[%d]: final message must have role user for Cohere Chat", messageIndex)
+			}
+			cohereReq.Message = text
+			continue
+		}
+		cohereReq.ChatHistory = append(cohereReq.ChatHistory, ChatHistory{Role: role, Message: text})
 	}
 
-	return &cohereReq
+	return &cohereReq, nil
 }
 
 func requestConvertRerank2Cohere(rerankRequest dto.RerankRequest) *CohereRerankRequest {

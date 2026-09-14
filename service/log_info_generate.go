@@ -2,7 +2,9 @@ package service
 
 import (
 	"encoding/base64"
+	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -13,6 +15,14 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+)
+
+const streamErrorLogContentLimit = 512
+
+var (
+	streamErrorSensitiveFieldPattern = regexp.MustCompile(`(?i)(["']?(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-goog-api-key|x-codex-[a-z0-9-]+|encrypted[_-]?content|encrypted[_-]?reasoning|redacted[_-]?thinking|api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)`)
+	streamErrorAuthSchemePattern     = regexp.MustCompile(`(?i)\b(?:bearer|basic|digest|apikey|api-key)\s+[^\s,;}]+`)
+	streamErrorKeyPattern            = regexp.MustCompile(`(?i)\b(?:sk|rk|sess)-[^\s,;}]{4,}`)
 )
 
 func appendRequestPath(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
@@ -80,6 +90,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
 	AppendUpstreamRateLimitRetryAdminInfo(ctx, adminInfo)
+	AppendChannelHealthRoutingAdminInfo(ctx, adminInfo)
 
 	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)
@@ -110,6 +121,9 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if action := common.GetContextKeyString(ctx, constant.ContextKeyResponsesPreviousIDAction); action != "" {
 			other["responses_previous_id_action"] = action
 		}
+		if removedCount := common.GetContextKeyInt(ctx, constant.ContextKeyResponsesInputItemIDNormalizationRemovedCount); removedCount > 0 {
+			other["responses_input_item_id_normalization_removed_count"] = removedCount
+		}
 		if lookup := common.GetContextKeyString(ctx, constant.ContextKeyResponsesCompactStateLookup); lookup != "" {
 			other["responses_compact_state_lookup"] = lookup
 		}
@@ -128,25 +142,25 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesEncryptedContextRetry) {
 			other["responses_encrypted_context_retry"] = true
 		}
+		if eventType := common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedContextRetryBlockedAfterEvent); eventType != "" {
+			other["responses_encrypted_context_retry_blocked_after_event"] = eventType
+		}
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesNamespaceHistoryRetry) {
 			other["responses_namespace_history_retry"] = true
 		}
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesArgumentsHistoryRetry) {
 			other["responses_arguments_history_retry"] = true
 		}
-		if relayInfo.ChannelMeta != nil && common.GetContextKeyBool(ctx, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetry) &&
+		if relayInfo != nil && relayInfo.ChannelMeta != nil && common.GetContextKeyBool(ctx, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetry) &&
 			common.GetContextKeyInt(ctx, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetryChannelID) == relayInfo.ChannelMeta.ChannelId {
 			other["responses_stream_options_include_usage_retry"] = true
 		}
-		if relayInfo.ChannelMeta != nil && common.GetContextKeyBool(ctx, constant.ContextKeyResponsesStreamOptionsCapabilityStripped) &&
+		if relayInfo != nil && relayInfo.ChannelMeta != nil && common.GetContextKeyBool(ctx, constant.ContextKeyResponsesStreamOptionsCapabilityStripped) &&
 			common.GetContextKeyInt(ctx, constant.ContextKeyResponsesStreamOptionsCapabilityStrippedChannelID) == relayInfo.ChannelMeta.ChannelId {
 			other["responses_stream_options_include_usage_capability_stripped"] = true
 		}
 		if action := common.GetContextKeyString(ctx, constant.ContextKeyResponsesReasoningContextAction); action != "" {
 			other["responses_reasoning_context_action"] = action
-		}
-		if removedCount := common.GetContextKeyInt(ctx, constant.ContextKeyResponsesInputItemIDsRemoved); removedCount > 0 {
-			other["responses_input_item_ids_removed"] = removedCount
 		}
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesChatCompatIgnoredEncryptedInclude) {
 			other["responses_chat_compat_ignored_encrypted_include"] = true
@@ -160,14 +174,14 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if channelSkips, ok := common.GetContextKeyType[[]dto.ResponsesRoutingChannelSkip](ctx, constant.ContextKeyResponsesRoutingChannelSkips); ok && len(channelSkips) > 0 {
 			other["responses_routing_channel_skips"] = append([]dto.ResponsesRoutingChannelSkip(nil), channelSkips...)
 		}
+		if trace, ok := common.GetContextKeyType[*dto.ResponsesRoutingTrace](ctx, constant.ContextKeyResponsesRoutingTrace); ok && trace != nil {
+			other["responses_routing_trace"] = *trace
+		}
 		if action := common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction); action != "" {
 			other["responses_encrypted_reasoning_replay_action"] = action
 		}
 		if capability := common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayCapability); capability != "" {
 			other["responses_encrypted_reasoning_replay_capability"] = capability
-		}
-		if retryAction := common.GetContextKeyString(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayRetryAction); retryAction != "" {
-			other["responses_encrypted_reasoning_replay_retry_action"] = retryAction
 		}
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCompactStateRestored) {
 			other["responses_compact_state_restored"] = true
@@ -187,6 +201,33 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesRemoteCompactFirstDataTimeout) {
 			other["responses_remote_compact_first_data_timeout"] = true
 		}
+		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCodexLocalCompaction413Recovery) {
+			other["responses_codex_local_compaction_413_recovery"] = true
+		}
+		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCodexLocalCompaction413RecoveryFailed) {
+			other["responses_codex_local_compaction_413_recovery_failed"] = true
+		}
+		if source := common.GetContextKeyString(ctx, constant.ContextKeyResponsesCodexLocalCompactionBodyReductionSource); source != "" {
+			other["responses_codex_local_compaction_body_reduction_source"] = source
+		}
+		if originalBytes := common.GetContextKeyInt64(ctx, constant.ContextKeyResponsesCodexLocalCompactionOriginalBodyBytes); originalBytes > 0 {
+			other["responses_codex_local_compaction_original_body_bytes"] = originalBytes
+		}
+		if reducedBytes := common.GetContextKeyInt64(ctx, constant.ContextKeyResponsesCodexLocalCompactionReducedBodyBytes); reducedBytes > 0 {
+			other["responses_codex_local_compaction_reduced_body_bytes"] = reducedBytes
+		}
+		if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCodexLocalCompactionIngressReduced) {
+			other["responses_codex_local_compaction_ingress_reduced"] = true
+			if originalBytes := common.GetContextKeyInt64(ctx, constant.ContextKeyResponsesCodexLocalCompactionIngressOriginalBodyBytes); originalBytes > 0 {
+				other["responses_codex_local_compaction_ingress_original_body_bytes"] = originalBytes
+			}
+			if reducedBytes := common.GetContextKeyInt64(ctx, constant.ContextKeyResponsesCodexLocalCompactionIngressReducedBodyBytes); reducedBytes > 0 {
+				other["responses_codex_local_compaction_ingress_reduced_body_bytes"] = reducedBytes
+			}
+			if inputItems := common.GetContextKeyInt(ctx, constant.ContextKeyResponsesCodexLocalCompactionIngressInputItems); inputItems > 0 {
+				other["responses_codex_local_compaction_ingress_input_items"] = inputItems
+			}
+		}
 	}
 	if snapshot := ResponsesChannelCapabilitySnapshot(relayInfo, settings); len(snapshot) > 0 {
 		other["channel_capability_snapshot"] = snapshot
@@ -196,6 +237,16 @@ func appendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		other["responses_upstream_profile"] = string(profile)
 	}
 	appendCodexCompactionInfo(ctx, relayInfo, other)
+	appendResponsesStreamObservation(relayInfo, other)
+}
+
+func appendResponsesStreamObservation(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil || relayInfo.ResponsesStreamObservation == nil {
+		return
+	}
+	if observation := relayInfo.ResponsesStreamObservation.ToLogMap(relayInfo.ReceivedResponseCount); len(observation) > 0 {
+		other["responses_stream_observation"] = observation
+	}
 }
 
 func AppendResponsesRelayInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
@@ -208,26 +259,25 @@ func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settin
 	}
 	snapshotInfo := settings.ResolveResponsesChannelCapability(relayInfo.ChannelType)
 	snapshot := map[string]interface{}{
-		"source":                                 snapshotInfo.Source,
-		"compact_mode_setting":                   string(snapshotInfo.CompactModeSetting),
-		"compact_mode_effective":                 string(snapshotInfo.CompactModeEffective),
-		"supports_responses":                     snapshotInfo.SupportsResponses,
-		"supports_responses_compact":             snapshotInfo.SupportsResponsesCompact,
-		"supports_chat":                          snapshotInfo.SupportsChat,
-		"supports_rest_previous_response_id":     snapshotInfo.SupportsRestPreviousResponseID,
-		"compaction_item_passthrough_capability": string(snapshotInfo.CompactionItemPassthroughCapability),
-		"supports_namespace_tools":               snapshotInfo.SupportsNamespaceTools,
-		"supports_tool_search":                   snapshotInfo.SupportsToolSearch,
-		"reasoning_context_capability":           string(snapshotInfo.ReasoningContextCapability),
-		"encrypted_reasoning_replay_capability":  string(snapshotInfo.EncryptedReasoningReplayCapability),
-		"strips_responses_reasoning_context":     snapshotInfo.StripsResponsesReasoningContext,
-		"strips_responses_encrypted_reasoning":   snapshotInfo.StripsResponsesEncryptedReasoning,
+		"source":                                snapshotInfo.Source,
+		"compact_mode_setting":                  string(snapshotInfo.CompactModeSetting),
+		"compact_mode_effective":                string(snapshotInfo.CompactModeEffective),
+		"supports_responses":                    snapshotInfo.SupportsResponses,
+		"supports_responses_compact":            snapshotInfo.SupportsResponsesCompact,
+		"supports_chat":                         snapshotInfo.SupportsChat,
+		"supports_rest_previous_response_id":    snapshotInfo.SupportsRestPreviousResponseID,
+		"supports_compaction_item_passthrough":  snapshotInfo.SupportsCompactionItemPassthrough,
+		"supports_namespace_tools":              snapshotInfo.SupportsNamespaceTools,
+		"supports_tool_search":                  snapshotInfo.SupportsToolSearch,
+		"namespace_tools_capability":            string(snapshotInfo.NamespaceToolsCapability),
+		"tool_search_capability":                string(snapshotInfo.ToolSearchCapability),
+		"reasoning_context_capability":          string(snapshotInfo.ReasoningContextCapability),
+		"encrypted_reasoning_replay_capability": string(snapshotInfo.EncryptedReasoningReplayCapability),
+		"strips_responses_reasoning_context":    snapshotInfo.StripsResponsesReasoningContext,
+		"strips_responses_encrypted_reasoning":  snapshotInfo.StripsResponsesEncryptedReasoning,
 	}
 	if snapshotInfo.SupportsCustomTools != nil {
 		snapshot["supports_custom_tools"] = *snapshotInfo.SupportsCustomTools
-	}
-	if snapshotInfo.SupportsCompactionItemPassthrough != nil {
-		snapshot["supports_compaction_item_passthrough"] = *snapshotInfo.SupportsCompactionItemPassthrough
 	}
 	if snapshotInfo.SupportsFunctionTools != nil {
 		snapshot["supports_function_tools"] = *snapshotInfo.SupportsFunctionTools
@@ -235,11 +285,11 @@ func ResponsesChannelCapabilitySnapshot(relayInfo *relaycommon.RelayInfo, settin
 	if snapshotInfo.SupportsReasoningContext != nil {
 		snapshot["supports_reasoning_context"] = *snapshotInfo.SupportsReasoningContext
 	}
-	if snapshotInfo.SupportsStreamOptionsIncludeUsage != nil {
-		snapshot["supports_stream_options_include_usage"] = *snapshotInfo.SupportsStreamOptionsIncludeUsage
-	}
 	if snapshotInfo.SupportsEncryptedReasoningReplay != nil {
 		snapshot["supports_encrypted_reasoning_replay"] = *snapshotInfo.SupportsEncryptedReasoningReplay
+	}
+	if snapshotInfo.SupportsStreamOptionsIncludeUsage != nil {
+		snapshot["supports_stream_options_include_usage"] = *snapshotInfo.SupportsStreamOptionsIncludeUsage
 	}
 	if snapshotInfo.Profile != "" {
 		snapshot["profile"] = string(snapshotInfo.Profile)
@@ -275,12 +325,12 @@ func getOrCreateAdminInfo(other map[string]interface{}) map[string]interface{} {
 	return adminInfo
 }
 
-type codexTurnMetadataHeader struct {
+type CodexTurnMetadataHeader struct {
 	RequestKind string                         `json:"request_kind"`
-	Compaction  *codexCompactionMetadataHeader `json:"compaction"`
+	Compaction  *CodexCompactionMetadataHeader `json:"compaction"`
 }
 
-type codexCompactionMetadataHeader struct {
+type CodexCompactionMetadataHeader struct {
 	Trigger        string `json:"trigger"`
 	Reason         string `json:"reason"`
 	Implementation string `json:"implementation"`
@@ -293,7 +343,7 @@ func appendCodexCompactionInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		return
 	}
 
-	headerInfo, ok := parseCodexCompactionHeader(ctx)
+	headerInfo, ok := ParseCodexCompactionHeader(ctx)
 	hasTrigger := relayInfoHasCompactionTrigger(relayInfo)
 	hasOutput := ctx != nil && common.GetContextKeyBool(ctx, constant.ContextKeyResponsesCompactionOutput)
 	if !ok && !hasTrigger && !hasOutput {
@@ -325,23 +375,27 @@ func appendCodexCompactionInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	}
 }
 
-func parseCodexCompactionHeader(ctx *gin.Context) (codexCompactionMetadataHeader, bool) {
+func ParseCodexCompactionHeader(ctx *gin.Context) (CodexCompactionMetadataHeader, bool) {
 	if ctx == nil || ctx.Request == nil {
-		return codexCompactionMetadataHeader{}, false
+		return CodexCompactionMetadataHeader{}, false
 	}
 	rawHeader := strings.TrimSpace(ctx.Request.Header.Get("x-codex-turn-metadata"))
 	if rawHeader == "" {
-		return codexCompactionMetadataHeader{}, false
+		return CodexCompactionMetadataHeader{}, false
 	}
 
-	var metadata codexTurnMetadataHeader
+	var metadata CodexTurnMetadataHeader
 	if err := common.Unmarshal([]byte(rawHeader), &metadata); err != nil {
-		return codexCompactionMetadataHeader{}, false
+		return CodexCompactionMetadataHeader{}, false
 	}
-	if metadata.RequestKind != "compaction" || metadata.Compaction == nil {
-		return codexCompactionMetadataHeader{}, false
+	if !strings.EqualFold(strings.TrimSpace(metadata.RequestKind), "compaction") || metadata.Compaction == nil {
+		return CodexCompactionMetadataHeader{}, false
 	}
 	return *metadata.Compaction, true
+}
+
+func IsCodexLocalResponsesCompaction(ctx *gin.Context) bool {
+	return common.IsCodexLocalResponsesCompactionContext(ctx)
 }
 
 func relayInfoHasCompactionTrigger(relayInfo *relaycommon.RelayInfo) bool {
@@ -360,7 +414,7 @@ func isLegacyResponsesCompactRelay(relayInfo *relaycommon.RelayInfo, ctx *gin.Co
 }
 
 func codexCompactionMode(implementation string, hasTrigger bool, hasOutput bool) string {
-	switch implementation {
+	switch strings.ToLower(strings.TrimSpace(implementation)) {
 	case "responses_compaction_v2":
 		return "remote_v2"
 	case "responses_compact":
@@ -422,6 +476,38 @@ func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]
 	other["po"] = relayInfo.ParamOverrideAudit
 }
 
+func sanitizeStreamErrorForLog(value string) string {
+	value = strings.ToValidUTF8(value, "?")
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, value)
+	value = common.MaskSensitiveInfo(value)
+	value = streamErrorAuthSchemePattern.ReplaceAllString(value, "[redacted]")
+	value = streamErrorSensitiveFieldPattern.ReplaceAllString(value, "${1}[redacted]")
+	value = streamErrorKeyPattern.ReplaceAllString(value, "[redacted]")
+	value = strings.TrimSpace(value)
+	if len(value) <= streamErrorLogContentLimit {
+		return value
+	}
+
+	const truncationMarker = " ... [truncated]"
+	limit := streamErrorLogContentLimit - len(truncationMarker)
+	if limit <= 0 {
+		markerLimit := streamErrorLogContentLimit
+		if markerLimit > len(truncationMarker) {
+			markerLimit = len(truncationMarker)
+		}
+		return truncationMarker[:markerLimit]
+	}
+	for limit > 0 && !utf8.RuneStart(value[limit]) {
+		limit--
+	}
+	return value[:limit] + truncationMarker
+}
+
 func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
 	if relayInfo == nil || other == nil || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
 		return
@@ -433,17 +519,23 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 		"end_reason": string(ss.EndReason),
 	}
 	if ss.EndError != nil {
-		streamInfo["end_error"] = ss.EndError.Error()
+		streamInfo["end_error"] = sanitizeStreamErrorForLog(ss.EndError.Error())
 	}
 	if ss.ErrorCount > 0 {
 		streamInfo["error_count"] = ss.ErrorCount
 		messages := make([]string, 0, len(ss.Errors))
 		for _, e := range ss.Errors {
-			messages = append(messages, e.Message)
+			messages = append(messages, sanitizeStreamErrorForLog(e.Message))
 		}
 		streamInfo["errors"] = messages
 	}
 	other["stream_status"] = streamInfo
+}
+
+// AppendStreamStatusForLog adds the bounded stream outcome to an error log.
+// It is exported so controller error paths use the same classification as usage logs.
+func AppendStreamStatusForLog(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	appendStreamStatus(relayInfo, other)
 }
 
 func AppendRequestHeaderPolicyInfo(ctx *gin.Context, other map[string]interface{}) {
@@ -488,6 +580,12 @@ func AppendRequestHeaderPolicyInfo(ctx *gin.Context, other map[string]interface{
 	}
 	if audit.OverrideStaticUserAgent {
 		info["override_static_user_agent"] = true
+	}
+	if audit.CodexDynamicHeadersStatus != "" {
+		info["codex_dynamic_headers_status"] = audit.CodexDynamicHeadersStatus
+	}
+	if len(audit.CodexDynamicHeaderKeys) > 0 {
+		info["codex_dynamic_header_keys"] = audit.CodexDynamicHeaderKeys
 	}
 	info["user_agent_applied"] = audit.UserAgentApplied
 	other["request_header_policy"] = info

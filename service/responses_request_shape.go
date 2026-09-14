@@ -118,6 +118,7 @@ func appendOpaqueResponsesRequestShape(ctx *gin.Context, request *dto.OpaqueOpen
 	}
 	if len(metadata.Shape.InputItemTypes) > 0 {
 		shape["input_item_types"] = metadata.Shape.InputItemTypes
+		markResponsesShapeFeaturesForCounts(metadata.Shape.InputItemTypes, shape)
 	}
 	if metadata.Shape.ReasoningDetailsKnown {
 		shape["has_reasoning_context"] = metadata.Shape.HasReasoningContext
@@ -135,8 +136,8 @@ func appendOpaqueResponsesRequestShape(ctx *gin.Context, request *dto.OpaqueOpen
 
 func opaqueResponsesBodyBytes(ctx *gin.Context, metadata common.ResponsesRequestMetadata) int64 {
 	if ctx != nil {
-		if bodyBytes := common.GetContextKeyInt64(ctx, constant.ContextKeyRequestBodySize); bodyBytes > 0 {
-			return bodyBytes
+		if n := common.GetContextKeyInt64(ctx, constant.ContextKeyRequestBodySize); n > 0 {
+			return n
 		}
 	}
 	return metadata.BodySize
@@ -146,58 +147,56 @@ func appendOpaqueResponsesToolsShape(metadata common.ResponsesRequestMetadata, s
 	if shape == nil {
 		return
 	}
-	requestShape := metadata.Shape
-	markResponsesShapeFeaturesForCounts(requestShape.InputItemTypes, shape)
-	if requestShape.TopLevelToolCountKnown {
-		shape["top_level_tool_count"] = requestShape.TopLevelToolCount
+	r := metadata.Shape
+	if r.TopLevelToolCountKnown {
+		shape["top_level_tool_count"] = r.TopLevelToolCount
 	}
-	if requestShape.HasAdditionalTools && requestShape.AdditionalToolCountKnown {
-		shape["additional_tool_count"] = requestShape.AdditionalToolCount
+	if r.HasAdditionalTools && r.AdditionalToolCountKnown {
+		shape["additional_tool_count"] = r.AdditionalToolCount
 	}
-
-	toolsKnown := (!metadata.ToolsPresent || requestShape.TopLevelToolCountKnown) &&
-		(!requestShape.HasAdditionalTools || requestShape.AdditionalToolCountKnown)
-	if !toolsKnown {
+	known := (!metadata.ToolsPresent || r.TopLevelToolCountKnown) && (!r.HasAdditionalTools || r.AdditionalToolCountKnown)
+	if !known {
 		return
 	}
-	effectiveToolCount := requestShape.TopLevelToolCount
-	if requestShape.HasAdditionalTools {
-		effectiveToolCount += requestShape.AdditionalToolCount
+	effective := r.TopLevelToolCount
+	if r.HasAdditionalTools {
+		effective += r.AdditionalToolCount
 	}
-	shape["effective_tool_count"] = effectiveToolCount
-	toolTypes := mergeResponsesShapeMaps(requestShape.TopLevelToolTypes, requestShape.AdditionalToolTypes)
-	if len(toolTypes) > 0 {
-		shape["effective_tool_types"] = toolTypes
-		markResponsesShapeFeaturesForCounts(toolTypes, shape)
+	shape["effective_tool_count"] = effective
+	if types := mergeResponsesShapeMaps(r.TopLevelToolTypes, r.AdditionalToolTypes); len(types) > 0 {
+		shape["effective_tool_types"] = types
+		for typ, count := range types {
+			if count > 0 {
+				markResponsesFeature(typ, shape)
+			}
+		}
 	}
-	formatTypes := mergeResponsesShapeMaps(requestShape.TopLevelCustomFormatTypes, requestShape.AdditionalCustomFormatTypes)
-	if len(formatTypes) > 0 {
-		shape["custom_tool_format_types"] = formatTypes
+	if formats := mergeResponsesShapeMaps(r.TopLevelCustomFormatTypes, r.AdditionalCustomFormatTypes); len(formats) > 0 {
+		shape["custom_tool_format_types"] = formats
 	}
-	grammarSyntaxes := mergeResponsesShapeMaps(requestShape.TopLevelCustomGrammarSyntaxes, requestShape.AdditionalCustomGrammarSyntaxes)
-	if len(grammarSyntaxes) > 0 {
-		shape["custom_tool_grammar_syntaxes"] = grammarSyntaxes
+	if syntaxes := mergeResponsesShapeMaps(r.TopLevelCustomGrammarSyntaxes, r.AdditionalCustomGrammarSyntaxes); len(syntaxes) > 0 {
+		shape["custom_tool_grammar_syntaxes"] = syntaxes
 	}
 }
 
-func mergeResponsesShapeMaps(first map[string]int, second map[string]int) map[string]int {
+func mergeResponsesShapeMaps(first, second map[string]int) map[string]int {
 	if len(first) == 0 && len(second) == 0 {
 		return nil
 	}
 	merged := make(map[string]int, len(first)+len(second))
-	for key, value := range first {
-		merged[key] += value
+	for k, v := range first {
+		merged[k] += v
 	}
-	for key, value := range second {
-		merged[key] += value
+	for k, v := range second {
+		merged[k] += v
 	}
 	return merged
 }
 
 func markResponsesShapeFeaturesForCounts(counts map[string]int, shape map[string]interface{}) {
-	for itemType, count := range counts {
+	for typ, count := range counts {
 		if count > 0 {
-			markResponsesFeature(itemType, shape)
+			markResponsesFeature(typ, shape)
 		}
 	}
 }

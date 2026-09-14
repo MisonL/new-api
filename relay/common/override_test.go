@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	common2 "github.com/QuantumNous/new-api/common"
@@ -1946,6 +1947,123 @@ func TestApplyParamOverrideWithRelayInfoSyncRuntimeHeaders(t *testing.T) {
 	}
 }
 
+func TestApplyHeaderParamOverrideWithRelayInfoRejectsBodyOperation(t *testing.T) {
+	info := &RelayInfo{
+		RequestHeaders: map[string]string{
+			"X-Codex-Turn-Metadata": "turn-metadata",
+			"X-Client-Request-Id":   "request-123",
+		},
+		ChannelMeta: &ChannelMeta{
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"mode":  "set",
+						"path":  "model",
+						"value": "must-not-change",
+					},
+					map[string]interface{}{
+						"mode":  "pass_headers",
+						"value": []interface{}{"X-Codex-Turn-Metadata", "X-Client-Request-Id"},
+					},
+					map[string]interface{}{
+						"mode": "copy_header",
+						"from": "X-Client-Request-Id",
+						"to":   "Session_id",
+					},
+				},
+			},
+		},
+	}
+
+	if err := ApplyHeaderParamOverrideWithRelayInfo(info); err == nil {
+		t.Fatal("expected body param override to be rejected")
+	}
+	if info.UseRuntimeHeadersOverride || len(info.RuntimeHeadersOverride) != 0 {
+		t.Fatalf("body param override must not mutate runtime headers: %+v", info.RuntimeHeadersOverride)
+	}
+}
+
+func TestApplyHeaderParamOverrideWithRelayInfoPreservesNativeBody(t *testing.T) {
+	info := &RelayInfo{
+		RequestHeaders: map[string]string{
+			"X-Codex-Turn-Metadata": "turn-metadata",
+			"X-Client-Request-Id":   "request-123",
+		},
+		ChannelMeta: &ChannelMeta{
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"mode":  "pass_headers",
+						"value": []interface{}{"X-Codex-Turn-Metadata", "X-Client-Request-Id"},
+					},
+					map[string]interface{}{
+						"mode": "copy_header",
+						"from": "X-Client-Request-Id",
+						"to":   "Session_id",
+					},
+				},
+			},
+		},
+	}
+
+	if err := ApplyHeaderParamOverrideWithRelayInfo(info); err != nil {
+		t.Fatalf("ApplyHeaderParamOverrideWithRelayInfo returned error: %v", err)
+	}
+	if !info.UseRuntimeHeadersOverride {
+		t.Fatalf("expected runtime header override to be enabled")
+	}
+	if info.RuntimeHeadersOverride["x-codex-turn-metadata"] != "turn-metadata" {
+		t.Fatalf("expected x-codex-turn-metadata to be passed, got: %v", info.RuntimeHeadersOverride["x-codex-turn-metadata"])
+	}
+	if info.RuntimeHeadersOverride["session_id"] != "request-123" {
+		t.Fatalf("expected session_id fallback to be copied, got: %v", info.RuntimeHeadersOverride["session_id"])
+	}
+}
+
+func TestApplyHeaderParamOverrideWithRelayInfoAppliesConditionalHeaders(t *testing.T) {
+	info := &RelayInfo{
+		OriginModelName: "gpt-5",
+		RequestHeaders: map[string]string{
+			"X-Codex-Turn-Metadata": "turn-metadata",
+		},
+		ChannelMeta: &ChannelMeta{
+			UpstreamModelName: "gpt-5",
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"mode":  "pass_headers",
+						"value": []interface{}{"X-Codex-Turn-Metadata"},
+						"conditions": []interface{}{
+							map[string]interface{}{
+								"path":  "model",
+								"mode":  "full",
+								"value": "gpt-5",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := ApplyHeaderParamOverrideWithRelayInfo(info); err != nil {
+		t.Fatalf("ApplyHeaderParamOverrideWithRelayInfo returned error: %v", err)
+	}
+	if got := info.RuntimeHeadersOverride["x-codex-turn-metadata"]; got != "turn-metadata" {
+		t.Fatalf("expected conditional header to be passed, got: %v", got)
+	}
+
+	info.ChannelMeta.UpstreamModelName = "gpt-4o"
+	info.RuntimeHeadersOverride = nil
+	info.UseRuntimeHeadersOverride = false
+	if err := ApplyHeaderParamOverrideWithRelayInfo(info); err != nil {
+		t.Fatalf("ApplyHeaderParamOverrideWithRelayInfo with unmet condition returned error: %v", err)
+	}
+	if _, exists := info.RuntimeHeadersOverride["x-codex-turn-metadata"]; exists {
+		t.Fatalf("conditional header must not be passed when the condition is unmet")
+	}
+}
+
 func TestApplyParamOverrideWithRelayInfoMixedLegacyAndOperations(t *testing.T) {
 	info := &RelayInfo{
 		RequestHeaders: map[string]string{
@@ -2014,6 +2132,168 @@ func TestApplyParamOverridePassHeadersUsesRequestHeadersOverStaticOverride(t *te
 	}
 	if info.RuntimeHeadersOverride["originator"] != "Codex CLI" {
 		t.Fatalf("expected pass_headers to use request header, got: %v", info.RuntimeHeadersOverride["originator"])
+	}
+}
+
+func TestMissingCodexDynamicRequestHeadersRequiresUnconditionalPassHeaders(t *testing.T) {
+	requestHeaders := map[string]string{
+		"X-Codex-Turn-Metadata": "turn-metadata",
+		"X-Codex-Turn-State":    "turn-state",
+		"X-Client-Request-Id":   "request-id",
+	}
+
+	missing := MissingCodexDynamicRequestHeaders("codex-cli@latest", map[string]interface{}{}, requestHeaders)
+	if want := []string{"x-client-request-id", "x-codex-turn-metadata", "x-codex-turn-state"}; !reflect.DeepEqual(missing, want) {
+		t.Fatalf("unexpected missing dynamic headers: got=%v want=%v", missing, want)
+	}
+
+	paramOverride := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{
+				"mode":  "pass_headers",
+				"value": []interface{}{"X-Codex-Turn-Metadata"},
+			},
+			map[string]interface{}{
+				"mode":  "pass_headers",
+				"value": []interface{}{"X-Client-Request-Id"},
+			},
+			map[string]interface{}{
+				"mode":       "pass_headers",
+				"value":      []interface{}{"X-Codex-Turn-State"},
+				"conditions": []interface{}{map[string]interface{}{"path": "model", "mode": "full", "value": "gpt-5.6"}},
+			},
+		},
+	}
+	missing = MissingCodexDynamicRequestHeaders("codex-cli@latest", paramOverride, requestHeaders)
+	if want := []string{"x-codex-turn-state"}; !reflect.DeepEqual(missing, want) {
+		t.Fatalf("conditional pass_headers must not satisfy the route gate: got=%v want=%v", missing, want)
+	}
+
+	missing = MissingCodexDynamicRequestHeaders("codex-cli@latest", paramOverride, map[string]string{
+		"Session_id": "session-123",
+		"Thread-Id":  "thread-123",
+	})
+	if want := []string{"session_id", "thread-id", "x-codex-*"}; !reflect.DeepEqual(missing, want) {
+		t.Fatalf("session and thread metadata must be gated: got=%v want=%v", missing, want)
+	}
+}
+
+func TestMissingCodexDynamicRequestHeadersIgnoresNonCodexProfilesAndEmptyHeaders(t *testing.T) {
+	requestHeaders := map[string]string{
+		"X-Codex-Turn-State": "turn-state",
+		"X-Codex-Empty":      "  ",
+	}
+	if missing := MissingCodexDynamicRequestHeaders("claude-code", nil, requestHeaders); len(missing) != 0 {
+		t.Fatalf("non-Codex profile should not require Codex passthrough: %v", missing)
+	}
+	if missing := MissingCodexDynamicRequestHeaders("codex-cli", nil, nil); !reflect.DeepEqual(missing, []string{"x-codex-*"}) {
+		t.Fatalf("Codex profile without x-codex-* metadata must fail closed: %v", missing)
+	}
+}
+
+func TestValidateBytePreservingParamOverride(t *testing.T) {
+	tests := []struct {
+		name     string
+		override map[string]interface{}
+		wantErr  bool
+	}{
+		{name: "no override"},
+		{
+			name: "unconditional header operations",
+			override: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{"mode": "set_header", "path": "X-Upstream-Client", "value": "codex"},
+					map[string]interface{}{"mode": "pass_headers", "value": []interface{}{"Originator"}},
+				},
+			},
+		},
+		{
+			name: "legacy body override",
+			override: map[string]interface{}{
+				"instructions": "must not rewrite opaque replay",
+			},
+			wantErr: true,
+		},
+		{
+			name: "body operation",
+			override: map[string]interface{}{
+				"operations": []interface{}{map[string]interface{}{"mode": "set", "path": "instructions", "value": "must not rewrite opaque replay"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "conditional header operation",
+			override: map[string]interface{}{
+				"operations": []interface{}{map[string]interface{}{
+					"mode": "set_header", "path": "X-Upstream-Client", "conditions": []interface{}{map[string]interface{}{"path": "model", "mode": "full", "value": "gpt-5.6-sol"}},
+				}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "body condition path",
+			override: map[string]interface{}{
+				"operations": []interface{}{map[string]interface{}{
+					"mode": "set_header", "path": "X-Upstream-Client", "value": "codex",
+					"conditions": []interface{}{map[string]interface{}{"path": "input.0.role", "mode": "full", "value": "user"}},
+				}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "non canonical operation",
+			override: map[string]interface{}{
+				"operations": []interface{}{map[string]interface{}{"mode": " SET_HEADER ", "path": "X-Upstream-Client", "value": "codex"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "malformed operations",
+			override: map[string]interface{}{
+				"operations": []interface{}{"not an operation"},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateBytePreservingParamOverride(tt.override)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateBytePreservingParamOverride() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateOpaqueResponsesReplayParamOverridePreservesOpaqueErrors(t *testing.T) {
+	err := ValidateOpaqueResponsesReplayParamOverride(map[string]interface{}{"instructions": "must not rewrite opaque replay"})
+	if err == nil {
+		t.Fatal("expected opaque replay param override to be rejected")
+	}
+	if got, want := err.Error(), "opaque encrypted replay requires header-only param override operations"; got != want {
+		t.Fatalf("unexpected opaque replay error: got %q, want %q", got, want)
+	}
+}
+
+func TestValidateOpaqueResponsesReplayParamOverrideRejectsConditionalHeaders(t *testing.T) {
+	err := ValidateOpaqueResponsesReplayParamOverride(map[string]interface{}{
+		"operations": []interface{}{map[string]interface{}{
+			"mode": "set_header", "path": "X-Upstream-Client",
+			"conditions": []interface{}{map[string]interface{}{"path": "model", "mode": "full", "value": "gpt-5"}},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected opaque replay conditional header to be rejected")
+	}
+}
+
+func TestApplyHeaderOnlyParamOverrideWithRelayInfoRejectsMalformedOperations(t *testing.T) {
+	info := &RelayInfo{ChannelMeta: &ChannelMeta{ParamOverride: map[string]interface{}{
+		"operations": []interface{}{"not an operation"},
+	}}}
+	if err := ApplyHeaderOnlyParamOverrideWithRelayInfo(info); err == nil {
+		t.Fatal("expected malformed opaque replay param override to be rejected")
 	}
 }
 
@@ -2249,6 +2529,29 @@ func TestRemoveDisabledFieldsDefaultFiltering(t *testing.T) {
 		t.Fatalf("RemoveDisabledFields returned error: %v", err)
 	}
 	assertJSONEqual(t, `{"cache_control":{"type":"ephemeral"},"store":true}`, string(out))
+}
+
+func TestRemoveDisabledFieldsPreservesUnknownStreamOptionNumbers(t *testing.T) {
+	input := `{
+		"model":"gpt-5.6-sol",
+		"stream_options":{
+			"include_obfuscation":false,
+			"reasoning_summary_delivery":{"sequence":9007199254740993,"enabled":true}
+		},
+		"future_top_level":{"counter":9007199254740993}
+	}`
+
+	out, err := RemoveDisabledFields([]byte(input), dto.ChannelOtherSettings{}, false)
+	if err != nil {
+		t.Fatalf("RemoveDisabledFields returned error: %v", err)
+	}
+
+	if string(out) == "" || !strings.Contains(string(out), "9007199254740993") {
+		t.Fatalf("unknown numeric fields were rewritten: %s", out)
+	}
+	if strings.Contains(string(out), "include_obfuscation") {
+		t.Fatalf("disabled include_obfuscation was not removed: %s", out)
+	}
 }
 
 func TestRemoveDisabledFieldsNoControlledFieldsKeepsBody(t *testing.T) {
@@ -2496,148 +2799,6 @@ func TestShouldAuditParamPathUsesFieldBoundaryPrefixMatching(t *testing.T) {
 	}
 	if shouldAuditParamPath("message") {
 		t.Fatal("expected message not to match messages boundary")
-	}
-}
-
-func TestValidateBytePreservingParamOverride(t *testing.T) {
-	tests := []struct {
-		name     string
-		override map[string]interface{}
-		wantErr  bool
-	}{
-		{
-			name: "no override",
-		},
-		{
-			name: "unconditional header operations",
-			override: map[string]interface{}{
-				"operations": []interface{}{
-					map[string]interface{}{
-						"mode":  "set_header",
-						"path":  "X-Upstream-Client",
-						"value": "codex",
-					},
-					map[string]interface{}{
-						"mode":  "pass_headers",
-						"value": []interface{}{"Originator"},
-					},
-				},
-			},
-		},
-		{
-			name: "legacy body override",
-			override: map[string]interface{}{
-				"instructions": "must not rewrite opaque replay",
-			},
-			wantErr: true,
-		},
-		{
-			name: "mixed header operation and legacy body override",
-			override: map[string]interface{}{
-				"operations": []interface{}{map[string]interface{}{
-					"mode":  "set_header",
-					"path":  "X-Upstream-Client",
-					"value": "codex",
-				}},
-				"instructions": "must not rewrite opaque replay",
-			},
-			wantErr: true,
-		},
-		{
-			name: "body operation",
-			override: map[string]interface{}{
-				"operations": []interface{}{map[string]interface{}{
-					"mode":  "set",
-					"path":  "instructions",
-					"value": "must not rewrite opaque replay",
-				}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "conditional header operation",
-			override: map[string]interface{}{
-				"operations": []interface{}{map[string]interface{}{
-					"mode": "set_header",
-					"path": "X-Upstream-Client",
-					"conditions": []interface{}{map[string]interface{}{
-						"path":  "model",
-						"mode":  "full",
-						"value": "gpt-5.6-sol",
-					}},
-				}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "non canonical uppercase header operation",
-			override: map[string]interface{}{
-				"operations": []interface{}{map[string]interface{}{
-					"mode":  "SET_HEADER",
-					"path":  "X-Upstream-Client",
-					"value": "codex",
-				}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "non canonical spaced header operation",
-			override: map[string]interface{}{
-				"operations": []interface{}{map[string]interface{}{
-					"mode":  " set_header ",
-					"path":  "X-Upstream-Client",
-					"value": "codex",
-				}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "malformed operations",
-			override: map[string]interface{}{
-				"operations": []interface{}{"not an operation"},
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateBytePreservingParamOverride(tt.override)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("ValidateBytePreservingParamOverride() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestValidateOpaqueResponsesReplayParamOverridePreservesOpaqueErrors(t *testing.T) {
-	legacyOverride := map[string]interface{}{
-		"instructions": "must not rewrite opaque replay",
-	}
-
-	err := ValidateOpaqueResponsesReplayParamOverride(legacyOverride)
-
-	if err == nil {
-		t.Fatal("expected opaque replay param override to be rejected")
-	}
-	if got, want := err.Error(), "opaque encrypted replay requires header-only param override operations"; got != want {
-		t.Fatalf("unexpected opaque replay error: got %q, want %q", got, want)
-	}
-}
-
-func TestApplyHeaderOnlyParamOverrideWithRelayInfoRejectsMalformedOperations(t *testing.T) {
-	info := &RelayInfo{
-		ChannelMeta: &ChannelMeta{
-			ParamOverride: map[string]interface{}{
-				"operations": []interface{}{"not an operation"},
-			},
-		},
-	}
-
-	err := ApplyHeaderOnlyParamOverrideWithRelayInfo(info)
-
-	if err == nil {
-		t.Fatal("expected malformed opaque replay param override to be rejected")
 	}
 }
 

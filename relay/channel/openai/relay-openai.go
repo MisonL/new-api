@@ -61,6 +61,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 				// send `think` tag with thinking content
 				response.Choices[i].Delta.SetContentString("<think>\n" + thinkingContent.String())
 				response.Choices[i].Delta.ReasoningContent = nil
+				response.Choices[i].Delta.ThinkingContent = nil
 				response.Choices[i].Delta.Reasoning = nil
 			}
 			info.ThinkingContentInfo.IsFirstThinkingContent = false
@@ -82,6 +83,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 			for j := range response.Choices {
 				response.Choices[j].Delta.SetContentString("\n</think>\n")
 				response.Choices[j].Delta.ReasoningContent = nil
+				response.Choices[j].Delta.ThinkingContent = nil
 				response.Choices[j].Delta.Reasoning = nil
 			}
 			info.ThinkingContentInfo.SendLastThinkingContent = true
@@ -92,10 +94,12 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 		if len(choice.Delta.GetReasoningContent()) > 0 {
 			lastStreamResponse.Choices[i].Delta.SetContentString(choice.Delta.GetReasoningContent())
 			lastStreamResponse.Choices[i].Delta.ReasoningContent = nil
+			lastStreamResponse.Choices[i].Delta.ThinkingContent = nil
 			lastStreamResponse.Choices[i].Delta.Reasoning = nil
 		} else if !hasThinkingContent && !hasContent {
 			// flush thinking content
 			lastStreamResponse.Choices[i].Delta.ReasoningContent = nil
+			lastStreamResponse.Choices[i].Delta.ThinkingContent = nil
 			lastStreamResponse.Choices[i].Delta.Reasoning = nil
 		}
 	}
@@ -130,7 +134,8 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		if lastStreamData != "" {
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
-				sr.Error(err)
+				sr.Stop(err)
+				return
 			}
 		}
 		if len(data) > 0 {
@@ -143,6 +148,9 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			streamItems = append(streamItems, data)
 		}
 	})
+	if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonHandlerStop && info.StreamStatus.EndError != nil {
+		return nil, types.NewOpenAIError(info.StreamStatus.EndError, types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+	}
 
 	if newAPIError := retryableUpstreamStreamInterruptedError(c, info); newAPIError != nil {
 		return nil, newAPIError
@@ -191,7 +199,9 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
 
-	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+	if err := HandleFinalResponseWithError(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage); err != nil {
+		return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+	}
 
 	return usage, nil
 }
@@ -301,14 +311,20 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			break
 		}
 	case types.RelayFormatClaude:
-		claudeResp := service.ResponseOpenAI2Claude(&simpleResponse, info)
+		claudeResp, conversionErr := service.ResponseOpenAI2ClaudeWithError(&simpleResponse, info)
+		if conversionErr != nil {
+			return nil, types.NewOpenAIError(conversionErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
 		claudeRespStr, err := common.Marshal(claudeResp)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 		}
 		responseBody = claudeRespStr
 	case types.RelayFormatGemini:
-		geminiResp := service.ResponseOpenAI2Gemini(&simpleResponse, info)
+		geminiResp, conversionErr := service.ResponseOpenAI2GeminiWithError(&simpleResponse, info)
+		if conversionErr != nil {
+			return nil, types.NewOpenAIError(conversionErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
 		geminiRespStr, err := common.Marshal(geminiResp)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
@@ -408,6 +424,12 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					}
 				}
 
+				upstreamMessage, mappingErr := rewriteRealtimeClientModelFields(message, info)
+				if mappingErr != nil {
+					errChan <- fmt.Errorf("error mapping realtime model: %v", mappingErr)
+					return
+				}
+
 				textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
 				if err != nil {
 					errChan <- fmt.Errorf("error counting text token: %v", err)
@@ -419,7 +441,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 				localUsage.InputTokenDetails.TextTokens += textToken
 				localUsage.InputTokenDetails.AudioTokens += audioToken
 
-				err = helper.WssString(c, targetConn, string(message))
+				err = helper.WssString(c, targetConn, string(upstreamMessage))
 				if err != nil {
 					errChan <- fmt.Errorf("error writing to target: %v", err)
 					return
@@ -559,6 +581,76 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 	// check usage total tokens, if 0, use local usage
 
 	return nil, sumUsage
+}
+
+// rewriteRealtimeClientModelFields enforces the selected route for the model
+// fields accepted by session.update. Realtime normally carries the model in
+// the handshake query, but compatible providers may also inspect a top-level
+// or nested session.model field. Unknown event fields and events without a
+// model are preserved; in particular, a no-model event returns its original
+// bytes without a marshal/unmarshal round-trip.
+func rewriteRealtimeClientModelFields(message []byte, info *relaycommon.RelayInfo) ([]byte, error) {
+	if info == nil || strings.TrimSpace(info.UpstreamModelName) == "" {
+		return message, nil
+	}
+	var event map[string]common.RawMessage
+	if err := common.Unmarshal(message, &event); err != nil {
+		return nil, err
+	}
+	var eventType string
+	if rawType, ok := event["type"]; ok {
+		_ = common.Unmarshal(rawType, &eventType)
+	}
+	if eventType != dto.RealtimeEventTypeSessionUpdate {
+		return message, nil
+	}
+
+	changed := false
+	if rawModel, ok := event["model"]; ok {
+		updated, err := replaceRealtimeModelField(rawModel, info.UpstreamModelName)
+		if err != nil {
+			return nil, err
+		}
+		if updated != nil {
+			event["model"] = updated
+			changed = true
+		}
+	}
+	if rawSession, ok := event["session"]; ok {
+		var session map[string]common.RawMessage
+		if err := common.Unmarshal(rawSession, &session); err == nil && session != nil {
+			if rawModel, modelOK := session["model"]; modelOK {
+				updated, err := replaceRealtimeModelField(rawModel, info.UpstreamModelName)
+				if err != nil {
+					return nil, err
+				}
+				if updated != nil {
+					session["model"] = updated
+					rawSession, err = common.Marshal(session)
+					if err != nil {
+						return nil, err
+					}
+					event["session"] = rawSession
+					changed = true
+				}
+			}
+		}
+	}
+	if !changed {
+		return message, nil
+	}
+	return common.Marshal(event)
+}
+
+func replaceRealtimeModelField(rawModel common.RawMessage, upstreamModel string) (common.RawMessage, error) {
+	var modelName string
+	if err := common.Unmarshal(rawModel, &modelName); err != nil || strings.TrimSpace(modelName) == "" {
+		return nil, nil
+	}
+	if strings.TrimSpace(modelName) == strings.TrimSpace(upstreamModel) {
+		return nil, nil
+	}
+	return common.Marshal(strings.TrimSpace(upstreamModel))
 }
 
 func preConsumeUsage(ctx *gin.Context, info *relaycommon.RelayInfo, usage *dto.RealtimeUsage, totalUsage *dto.RealtimeUsage) error {

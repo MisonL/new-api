@@ -1,7 +1,9 @@
 package model
 
 import (
+	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,7 +11,9 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func prepareChannelCacheTest(t *testing.T) {
@@ -21,10 +25,226 @@ func prepareChannelCacheTest(t *testing.T) {
 
 	channelSyncLock.Lock()
 	group2model2channels = nil
+	legacyRouteCandidateCache = nil
 	channelsIDM = nil
+	routeCandidateCacheV2 = nil
+	routeCandidateCacheV2Ready = false
+	routeCandidateCacheV2KnownByChannel = nil
 	channelSyncLock.Unlock()
 	channelCacheRefreshInFlight.Store(false)
 	channelCacheRefreshPending.Store(false)
+}
+
+func TestUpdateChannelPinOrdersRefreshesMemoryCache(t *testing.T) {
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+	})
+	common.MemoryCacheEnabled = true
+	prepareChannelCacheTest(t)
+
+	channelID := 90701
+	initialPinOrder := int64(0)
+	require.NoError(t, DB.Create(&Channel{
+		Id:       channelID,
+		Name:     "pin-cache-refresh",
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "pin-cache-model",
+		PinOrder: &initialPinOrder,
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "pin-cache-model",
+		ChannelId: channelID,
+		Enabled:   true,
+	}).Error)
+
+	InitChannelCache()
+	cached, err := CacheGetChannel(channelID)
+	require.NoError(t, err)
+	require.Equal(t, initialPinOrder, cached.GetPinOrder())
+
+	updatedPinOrder := int64(42)
+	require.NoError(t, UpdateChannelPinOrders([]ChannelPinOrder{{
+		Id:       channelID,
+		PinOrder: &updatedPinOrder,
+	}}))
+
+	cached, err = CacheGetChannel(channelID)
+	require.NoError(t, err)
+	require.Equal(t, updatedPinOrder, cached.GetPinOrder())
+}
+
+func TestInitChannelCacheDoesNotDropPendingRefreshAfterConcurrentRun(t *testing.T) {
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+	})
+	common.MemoryCacheEnabled = true
+	prepareChannelCacheTest(t)
+
+	channelID := 90702
+	require.NoError(t, DB.Create(&Channel{
+		Id:     channelID,
+		Name:   "pending-cache-refresh",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "pending-cache-model",
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "pending-cache-model",
+		ChannelId: channelID,
+		Enabled:   true,
+	}).Error)
+
+	channelCacheRefreshInFlight.Store(true)
+	channelCacheRefreshPending.Store(false)
+	done := make(chan struct{})
+	go func() {
+		InitChannelCache()
+		close(done)
+	}()
+	require.Eventually(t, channelCacheRefreshPending.Load, time.Second, time.Millisecond)
+	channelCacheRefreshInFlight.Store(false)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for pending channel cache refresh")
+	}
+
+	cached, err := CacheGetChannel(channelID)
+	require.NoError(t, err)
+	require.Equal(t, channelID, cached.Id)
+}
+
+func TestCacheReloadChannelDoesNotPublishStaleConcurrentRead(t *testing.T) {
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousDB := DB
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		DB = previousDB
+	})
+	common.MemoryCacheEnabled = true
+	prepareChannelCacheTest(t)
+
+	channelID := 90703
+	require.NoError(t, DB.Create(&Channel{
+		Id:     channelID,
+		Name:   "reload-before",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "reload-model",
+	}).Error)
+	InitChannelCache()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var channelQueryCount int32
+	const callbackName = "test:cache_reload_channel_stale_read"
+	require.NoError(t, DB.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement == nil || tx.Statement.Schema == nil || tx.Statement.Schema.Name != "Channel" {
+			return
+		}
+		if atomic.AddInt32(&channelQueryCount, 1) != 1 {
+			return
+		}
+		close(entered)
+		<-release
+	}))
+	t.Cleanup(func() {
+		_ = DB.Callback().Query().Remove(callbackName)
+	})
+
+	staleReloadDone := make(chan struct{})
+	go func() {
+		CacheReloadChannel(channelID)
+		close(staleReloadDone)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for stale channel read")
+	}
+
+	require.NoError(t, DB.Model(&Channel{}).Where("id = ?", channelID).Update("name", "reload-after").Error)
+	CacheReloadChannel(channelID)
+	cached, err := CacheGetChannel(channelID)
+	require.NoError(t, err)
+	require.Equal(t, "reload-after", cached.Name)
+
+	close(release)
+	select {
+	case <-staleReloadDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for stale channel reload")
+	}
+
+	cached, err = CacheGetChannel(channelID)
+	require.NoError(t, err)
+	require.Equal(t, "reload-after", cached.Name)
+}
+
+func TestCacheReloadChannelDoesNotResurrectDeletedChannel(t *testing.T) {
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousDB := DB
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		DB = previousDB
+	})
+	common.MemoryCacheEnabled = true
+	prepareChannelCacheTest(t)
+
+	channelID := 90704
+	require.NoError(t, DB.Create(&Channel{
+		Id:     channelID,
+		Name:   "reload-deleted",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "reload-deleted-model",
+	}).Error)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var channelQueryCount int32
+	const callbackName = "test:cache_reload_channel_deleted_read"
+	require.NoError(t, DB.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement == nil || tx.Statement.Schema == nil || tx.Statement.Schema.Name != "Channel" {
+			return
+		}
+		if atomic.AddInt32(&channelQueryCount, 1) != 1 {
+			return
+		}
+		close(entered)
+		<-release
+	}))
+	t.Cleanup(func() {
+		_ = DB.Callback().Query().Remove(callbackName)
+	})
+
+	staleReloadDone := make(chan struct{})
+	go func() {
+		CacheReloadChannel(channelID)
+		close(staleReloadDone)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for deleted channel read")
+	}
+
+	require.NoError(t, DB.Delete(&Channel{}, channelID).Error)
+	CacheReloadChannel(channelID)
+	close(release)
+	select {
+	case <-staleReloadDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for deleted channel reload")
+	}
+
+	_, err := CacheGetChannel(channelID)
+	require.Error(t, err)
 }
 
 func TestGetRandomSatisfiedChannelFallsBackToDatabaseOnCacheMiss(t *testing.T) {
@@ -64,6 +284,35 @@ func TestGetRandomSatisfiedChannelFallsBackToDatabaseOnCacheMiss(t *testing.T) {
 		defer channelSyncLock.RUnlock()
 		return isChannelIDInList(group2model2channels["default"]["gpt-5.4"], channel.Id)
 	}, time.Second, 20*time.Millisecond)
+}
+
+func TestLegacyRouteCandidateCacheDoesNotFallbackAfterInitialization(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	channel := &Channel{
+		Id:     103,
+		Status: common.ChannelStatusEnabled,
+	}
+
+	channelSyncLock.Lock()
+	channelsIDM = map[int]*Channel{channel.Id: channel}
+	// The historical index may still contain a stale entry while a metadata
+	// cache refresh has already published its complete key space.
+	group2model2channels = map[string]map[string][]int{
+		"default": {"current-model": {channel.Id}},
+	}
+	legacyRouteCandidateCache = map[string][]legacyRouteCandidateCacheEntry{
+		routeCandidateCacheKey("default", "other-model"): {{channel: channel}},
+	}
+	channelSyncLock.Unlock()
+
+	entries, hit := getLegacyRouteCandidateCacheEntries("default", routeModelCandidate{model: "current-model"})
+	require.False(t, hit)
+	require.Empty(t, entries)
+
+	entries, hit = getLegacyRouteCandidateCacheEntries("default", routeModelCandidate{model: "other-model"})
+	require.True(t, hit)
+	require.Len(t, entries, 1)
 }
 
 func TestGetRandomSatisfiedChannelFallsBackToDatabaseWhenCacheExcluded(t *testing.T) {
@@ -131,6 +380,732 @@ func TestGetRandomSatisfiedChannelFallsBackToDatabaseWhenCacheExcluded(t *testin
 		defer channelSyncLock.RUnlock()
 		return isChannelIDInList(group2model2channels["default"]["gpt-5.4"], fallbackChannel.Id)
 	}, time.Second, 20*time.Millisecond)
+}
+
+func TestLegacySelectionSkipsDisabledChannelsOnDatabaseFallback(t *testing.T) {
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.GroupModelRouteHelperEnabled = false
+	t.Setenv("CHANNEL_ROUTING_V2_ENABLED", "false")
+	t.Setenv("CHANNEL_ROUTING_SHADOW_ENABLED", "false")
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = previousGroupModelRouteHelperEnabled
+	})
+
+	for _, memoryCacheEnabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("memory_cache_%t", memoryCacheEnabled), func(t *testing.T) {
+			prepareChannelCacheTest(t)
+			common.MemoryCacheEnabled = memoryCacheEnabled
+
+			highPriority := int64(30)
+			lowPriority := int64(10)
+			weight := uint(1)
+			high := &Channel{
+				Id:       90608,
+				Name:     "disabled-database-fallback-high",
+				Status:   common.ChannelStatusManuallyDisabled,
+				Group:    "default",
+				Models:   "disabled-database-fallback-model",
+				Priority: &highPriority,
+				Weight:   &weight,
+			}
+			low := &Channel{
+				Id:       90609,
+				Name:     "enabled-database-fallback-low",
+				Status:   common.ChannelStatusEnabled,
+				Group:    "default",
+				Models:   "disabled-database-fallback-model",
+				Priority: &lowPriority,
+				Weight:   &weight,
+			}
+			require.NoError(t, DB.Create(high).Error)
+			require.NoError(t, DB.Create(&Ability{
+				Group:     "default",
+				Model:     "disabled-database-fallback-model",
+				ChannelId: high.Id,
+				Enabled:   true,
+				Priority:  &highPriority,
+				Weight:    weight,
+			}).Error)
+
+			if memoryCacheEnabled {
+				InitChannelCache()
+			}
+
+			require.NoError(t, DB.Create(low).Error)
+			require.NoError(t, DB.Create(&Ability{
+				Group:     "default",
+				Model:     "disabled-database-fallback-model",
+				ChannelId: low.Id,
+				Enabled:   true,
+				Priority:  &lowPriority,
+				Weight:    weight,
+			}).Error)
+
+			selected, err := GetRandomSatisfiedChannelExcluding(
+				"default",
+				"disabled-database-fallback-model",
+				0,
+				map[int]struct{}{high.Id: {}},
+			)
+			require.NoError(t, err)
+			require.NotNil(t, selected)
+			require.Equal(t, low.Id, selected.Id)
+		})
+	}
+}
+
+func TestV2RouteSelectionFallsBackWhenOneCandidateCacheKeyIsMissing(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	prevMemoryCacheEnabled := common.MemoryCacheEnabled
+	prevGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Setenv("CHANNEL_ROUTING_V2_ENABLED", "true")
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = prevMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = prevGroupModelRouteHelperEnabled
+	})
+
+	exact := &Channel{
+		Id:     901,
+		Name:   "exact-route-cache",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "OpenAI/gpt-4o",
+	}
+	normalized := &Channel{
+		Id:     902,
+		Name:   "normalized-route-db",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-4o",
+	}
+	require.NoError(t, DB.Create(exact).Error)
+	require.NoError(t, DB.Create(normalized).Error)
+	priority := int64(10)
+	weight := uint(RouteWeightTotalBPS)
+	require.NoError(t, DB.Create(&Ability{Group: "default", Model: "OpenAI/gpt-4o", ChannelId: exact.Id, Enabled: true, RoutePriority: &priority, RouteWeightBPS: &weight, RoutePriorityConfigured: true, RouteWeightBPSConfigured: true}).Error)
+	require.NoError(t, DB.Create(&Ability{Group: "default", Model: "gpt-4o", ChannelId: normalized.Id, Enabled: true, RoutePriority: &priority, RouteWeightBPS: &weight, RoutePriorityConfigured: true, RouteWeightBPSConfigured: true}).Error)
+
+	channelSyncLock.Lock()
+	// The V2 completeness index is independent from the legacy candidate view.
+	group2model2channels = nil
+	channelsIDM = map[int]*Channel{
+		exact.Id: exact.CloneForCache(),
+	}
+	routeCandidateCacheV2 = map[string][]routeCandidateV2{
+		routeCandidateCacheKey("default", "OpenAI/gpt-4o"): {{
+			Group:               "default",
+			RequestedModel:      "OpenAI/gpt-4o",
+			EffectiveRouteModel: "OpenAI/gpt-4o",
+			Channel:             exact.CloneForCache(),
+			RoutePriority:       10,
+			RouteWeightBPS:      RouteWeightTotalBPS,
+		}},
+	}
+	routeCandidateCacheV2KnownByChannel = map[string]map[int]struct{}{
+		routeCandidateCacheKey("default", "OpenAI/gpt-4o"): {exact.Id: {}},
+		routeCandidateCacheKey("default", "gpt-4o"):        {normalized.Id: {}},
+	}
+	routeCandidateCacheV2Ready = true
+	channelSyncLock.Unlock()
+
+	diagnostics := &dto.ChannelRouteSelectionDiagnostics{}
+	selected, err := GetRandomSatisfiedChannelWithOptions(
+		"default",
+		"OpenAI/gpt-4o",
+		0,
+		nil,
+		SatisfiedChannelSelectionOptions{Diagnostics: diagnostics},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Contains(t, diagnostics.CandidateChannelIDs, exact.Id)
+	require.Contains(t, diagnostics.CandidateChannelIDs, normalized.Id)
+	require.Equal(t, "database", diagnostics.SelectionPath)
+}
+
+func TestV2RouteSelectionFallsBackFromInvalidCachedMappingToValidDatabaseCandidate(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Setenv("CHANNEL_ROUTING_V2_ENABLED", "true")
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = previousGroupModelRouteHelperEnabled
+	})
+
+	modelName := "cache-invalid-mapping-fallback-model"
+	highPriority := int64(20)
+	lowPriority := int64(10)
+	routeWeight := uint(RouteWeightTotalBPS)
+	invalidMapping := "{"
+	high := &Channel{
+		Id:           903,
+		Name:         "invalid-cached-mapping-high",
+		Status:       common.ChannelStatusEnabled,
+		Group:        "default",
+		Models:       modelName,
+		ModelMapping: &invalidMapping,
+	}
+	low := &Channel{
+		Id:     904,
+		Name:   "valid-database-fallback-low",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: modelName,
+	}
+	require.NoError(t, DB.Create(high).Error)
+	require.NoError(t, DB.Create(low).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:                    "default",
+		Model:                    modelName,
+		ChannelId:                high.Id,
+		Enabled:                  true,
+		RoutePriority:            &highPriority,
+		RouteWeightBPS:           &routeWeight,
+		RoutePriorityConfigured:  true,
+		RouteWeightBPSConfigured: true,
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:                    "default",
+		Model:                    modelName,
+		ChannelId:                low.Id,
+		Enabled:                  true,
+		RoutePriority:            &lowPriority,
+		RouteWeightBPS:           &routeWeight,
+		RoutePriorityConfigured:  true,
+		RouteWeightBPSConfigured: true,
+	}).Error)
+
+	cacheKey := routeCandidateCacheKey("default", modelName)
+	channelSyncLock.Lock()
+	group2model2channels = nil
+	channelsIDM = map[int]*Channel{
+		high.Id: high.CloneForCache(),
+		low.Id:  low.CloneForCache(),
+	}
+	routeCandidateCacheV2 = map[string][]routeCandidateV2{
+		cacheKey: {{
+			Group:               "default",
+			RequestedModel:      modelName,
+			EffectiveRouteModel: "provider/invalid-cached-model",
+			Channel:             high.CloneForCache(),
+			RoutePriority:       highPriority,
+			RouteWeightBPS:      routeWeight,
+		}},
+	}
+	// The completeness index says that the requested key has a cached
+	// candidate. Its invalid mapping must therefore make the snapshot
+	// incomplete instead of being treated as an empty, authoritative hit.
+	routeCandidateCacheV2KnownByChannel = map[string]map[int]struct{}{
+		cacheKey: {high.Id: {}},
+	}
+	routeCandidateCacheV2Ready = true
+	channelSyncLock.Unlock()
+
+	diagnostics := &dto.ChannelRouteSelectionDiagnostics{}
+	selected, err := GetRandomSatisfiedChannelWithOptions(
+		"default",
+		modelName,
+		0,
+		nil,
+		SatisfiedChannelSelectionOptions{Diagnostics: diagnostics},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, low.Id, selected.Id)
+	require.Equal(t, "database", diagnostics.SelectionPath)
+	require.Equal(t, low.Id, diagnostics.SelectedChannelID)
+	require.Equal(t, modelName, diagnostics.SelectedCandidateModel)
+	require.Equal(t, modelName, diagnostics.EffectiveRouteModel)
+	require.Equal(t, lowPriority, diagnostics.RoutePriority)
+}
+
+func TestV2RouteSelectionFallsBackWhenKnownChannelSetGrowsBehindCachedSlice(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Setenv("CHANNEL_ROUTING_V2_ENABLED", "true")
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = previousGroupModelRouteHelperEnabled
+	})
+
+	modelName := "cache-known-channel-set-growth-model"
+	oldPriority := int64(20)
+	newPriority := int64(10)
+	routeWeight := uint(RouteWeightTotalBPS)
+	oldChannel := &Channel{
+		Id:     905,
+		Name:   "stale-route-cache-member",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: modelName,
+	}
+	newChannel := &Channel{
+		Id:     906,
+		Name:   "new-route-cache-member",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: modelName,
+	}
+	require.NoError(t, DB.Create(oldChannel).Error)
+	require.NoError(t, DB.Create(newChannel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:                    "default",
+		Model:                    modelName,
+		ChannelId:                oldChannel.Id,
+		Enabled:                  true,
+		RoutePriority:            &oldPriority,
+		RouteWeightBPS:           &routeWeight,
+		RoutePriorityConfigured:  true,
+		RouteWeightBPSConfigured: true,
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:                    "default",
+		Model:                    modelName,
+		ChannelId:                newChannel.Id,
+		Enabled:                  true,
+		RoutePriority:            &newPriority,
+		RouteWeightBPS:           &routeWeight,
+		RoutePriorityConfigured:  true,
+		RouteWeightBPSConfigured: true,
+	}).Error)
+
+	cacheKey := routeCandidateCacheKey("default", modelName)
+	channelSyncLock.Lock()
+	group2model2channels = nil
+	channelsIDM = map[int]*Channel{
+		oldChannel.Id: oldChannel.CloneForCache(),
+		newChannel.Id: newChannel.CloneForCache(),
+	}
+	// Simulate an incremental update that published the completeness index for
+	// the new channel before the stale cache slice was appended.
+	routeCandidateCacheV2 = map[string][]routeCandidateV2{
+		cacheKey: {{
+			Group:               "default",
+			RequestedModel:      modelName,
+			EffectiveRouteModel: modelName,
+			Channel:             oldChannel.CloneForCache(),
+			RoutePriority:       oldPriority,
+			RouteWeightBPS:      routeWeight,
+		}},
+	}
+	routeCandidateCacheV2KnownByChannel = map[string]map[int]struct{}{
+		cacheKey: {oldChannel.Id: {}, newChannel.Id: {}},
+	}
+	routeCandidateCacheV2Ready = true
+	channelSyncLock.Unlock()
+
+	diagnostics := &dto.ChannelRouteSelectionDiagnostics{}
+	selected, err := GetRandomSatisfiedChannelWithOptions(
+		"default",
+		modelName,
+		0,
+		nil,
+		SatisfiedChannelSelectionOptions{Diagnostics: diagnostics},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, oldChannel.Id, selected.Id)
+	require.Equal(t, "database", diagnostics.SelectionPath)
+	require.ElementsMatch(t, []int{oldChannel.Id, newChannel.Id}, diagnostics.CandidateChannelIDs)
+}
+
+func TestV2RouteSelectionDiagnosticsIncludeBodyLimitExclusions(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
+	t.Setenv("CHANNEL_ROUTING_V2_ENABLED", "true")
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = previousGroupModelRouteHelperEnabled
+	})
+
+	modelName := "gpt-v2-body-limit-diagnostic"
+	now := time.Now().UTC()
+	priority := int64(10)
+	legacyWeight := uint(1)
+	routeWeight := uint(RouteWeightTotalBPS)
+	settings := dto.ChannelOtherSettings{
+		RequestBodyLimit: &dto.ChannelRequestBodyLimit{
+			MaxBytes:   100,
+			ObservedAt: now.Unix(),
+			Source:     "upstream_413",
+			Reason:     "request body too large",
+		},
+	}
+	rawSettings, err := common.Marshal(settings)
+	require.NoError(t, err)
+	channel := &Channel{
+		Id:            90602,
+		Name:          "v2-body-limit-diagnostic",
+		Status:        common.ChannelStatusEnabled,
+		Group:         "default",
+		Models:        modelName,
+		Priority:      &priority,
+		Weight:        &legacyWeight,
+		OtherSettings: string(rawSettings),
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:                    "default",
+		Model:                    modelName,
+		ChannelId:                channel.Id,
+		Enabled:                  true,
+		Priority:                 &priority,
+		Weight:                   legacyWeight,
+		RoutePriority:            &priority,
+		RouteWeightBPS:           &routeWeight,
+		RoutePriorityConfigured:  true,
+		RouteWeightBPSConfigured: true,
+	}).Error)
+
+	diagnostics := &dto.ChannelRouteSelectionDiagnostics{}
+	selected, err := GetRandomSatisfiedChannelWithOptions(
+		"default",
+		modelName,
+		0,
+		nil,
+		SatisfiedChannelSelectionOptions{
+			RequestBodySize:       128,
+			BodyLimitTTLHours:     0,
+			Now:                   now,
+			ExcludeBeforePriority: true,
+			Diagnostics:           diagnostics,
+		},
+	)
+	require.NoError(t, err)
+	require.Nil(t, selected)
+	require.Contains(t, diagnostics.ExcludedChannelIDs, channel.Id)
+}
+
+func TestLegacyPooledCacheRouteFilterKeepsMappedCandidateIdentity(t *testing.T) {
+	previousCache := group2model2channels
+	previousLegacyCache := legacyRouteCandidateCache
+	previousChannels := channelsIDM
+	t.Cleanup(func() {
+		channelSyncLock.Lock()
+		group2model2channels = previousCache
+		legacyRouteCandidateCache = previousLegacyCache
+		channelsIDM = previousChannels
+		channelSyncLock.Unlock()
+	})
+
+	channelID := 90603
+	weight := uint(1)
+	mapping := `{"raw-a":"provider/a","raw-b":"provider/b"}`
+	channel := &Channel{Id: channelID, Status: common.ChannelStatusEnabled, Weight: &weight, ModelMapping: &mapping}
+	channelSyncLock.Lock()
+	group2model2channels = map[string]map[string][]int{
+		"default": {"raw-a": {channelID}, "raw-b": {channelID}},
+	}
+	legacyRouteCandidateCache = nil
+	channelsIDM = map[int]*Channel{channelID: channel.CloneForCache()}
+	diagnostics := &dto.ChannelRouteSelectionDiagnostics{}
+	selected, err, cacheHit := getRandomSatisfiedPooledRouteModelsFromCacheWithRouteFilter(
+		"default",
+		[]routeModelCandidate{{model: "raw-a"}, {model: "raw-b"}},
+		0,
+		nil,
+		false,
+		nil,
+		func(_ *Channel, _ string, effectiveModel string) bool { return effectiveModel == "provider/b" },
+		nil,
+		diagnostics,
+	)
+	channelSyncLock.Unlock()
+
+	require.True(t, cacheHit)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, channelID, selected.Id)
+	require.Equal(t, "raw-b", diagnostics.SelectedCandidateModel)
+	require.Equal(t, "provider/b", diagnostics.EffectiveRouteModel)
+}
+
+func TestLegacyPooledDatabaseSelectionKeepsAbilityPriorityIdentity(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	previousRouteHelper := common.GroupModelRouteHelperEnabled
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() { common.GroupModelRouteHelperEnabled = previousRouteHelper })
+
+	compactModel := ratio_setting.WithCompactModelSuffix("priority-identity-model")
+	channelPriority := int64(1)
+	channelWeight := uint(1)
+	channel := &Channel{
+		Id:       90604,
+		Name:     "legacy-priority-identity",
+		Type:     constant.ChannelTypeCodex,
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   compactModel + ",priority-identity-model",
+		Priority: &channelPriority,
+		Weight:   &channelWeight,
+		ModelMapping: common.GetPointer(fmt.Sprintf(
+			`{"%s":"provider/priority-model","priority-identity-model":"provider/priority-model"}`,
+			compactModel,
+		)),
+	}
+	require.NoError(t, DB.Create(channel).Error)
+
+	exactPriority := int64(5)
+	basePriority := int64(20)
+	weight := uint(1)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     compactModel,
+		ChannelId: channel.Id,
+		Enabled:   true,
+		Priority:  &exactPriority,
+		Weight:    weight,
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "priority-identity-model",
+		ChannelId: channel.Id,
+		Enabled:   true,
+		Priority:  &basePriority,
+		Weight:    weight,
+	}).Error)
+
+	diagnostics := &dto.ChannelRouteSelectionDiagnostics{}
+	selected, found, err := getChannelByRouteModels(
+		"default",
+		compactModel,
+		getGroupModelRouteCandidateMeta(compactModel),
+		0,
+		nil,
+		true,
+		nil,
+		nil,
+		nil,
+		diagnostics,
+	)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, selected)
+	require.Equal(t, channel.Id, selected.Id)
+	require.Equal(t, basePriority, diagnostics.RoutePriority)
+	require.Equal(t, "priority-identity-model", diagnostics.SelectedCandidateModel)
+}
+
+func TestBuildLegacyRouteCandidateCacheFromAbilitiesKeepsChannelWeight(t *testing.T) {
+	priority := int64(10)
+	channelWeight := uint(37)
+	abilityWeight := uint(2)
+	channel := &Channel{Id: 90605, Status: common.ChannelStatusEnabled, Weight: &channelWeight}
+	ability := &Ability{Group: "default", Model: "weight-identity-model", ChannelId: channel.Id, Enabled: true, Priority: &priority, Weight: abilityWeight}
+
+	cache := buildLegacyRouteCandidateCacheFromAbilities([]*Ability{ability}, map[int]*Channel{channel.Id: channel})
+	entries := cache[routeCandidateCacheKey("default", ability.Model)]
+	require.Len(t, entries, 1)
+	require.Equal(t, abilityWeight, entries[0].abilityWeight)
+	require.Equal(t, channelWeight, entries[0].channelWeight)
+}
+
+func TestLegacySelectionFallsThroughInvalidHighPriorityMapping(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	modelName := "mapping-fallback-model"
+	highPriority := int64(20)
+	lowPriority := int64(10)
+	weight := uint(1)
+	invalidMapping := "{"
+	high := &Channel{
+		Id:           90606,
+		Type:         constant.ChannelTypeCodex,
+		Status:       common.ChannelStatusEnabled,
+		Group:        "default",
+		Models:       modelName,
+		ModelMapping: &invalidMapping,
+	}
+	low := &Channel{
+		Id:     90607,
+		Type:   constant.ChannelTypeCodex,
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: modelName,
+	}
+	require.NoError(t, DB.Create(high).Error)
+	require.NoError(t, DB.Create(low).Error)
+	require.NoError(t, DB.Create(&Ability{Group: "default", Model: modelName, ChannelId: high.Id, Enabled: true, Priority: &highPriority, Weight: weight}).Error)
+	require.NoError(t, DB.Create(&Ability{Group: "default", Model: modelName, ChannelId: low.Id, Enabled: true, Priority: &lowPriority, Weight: weight}).Error)
+
+	diagnostics := &dto.ChannelRouteSelectionDiagnostics{}
+	selected, found, err := getChannelByRouteModel(
+		"default",
+		modelName,
+		routeModelCandidate{model: modelName},
+		0,
+		nil,
+		false,
+		nil,
+		func(_ *Channel, _ string, _ string) bool { return true },
+		nil,
+		diagnostics,
+	)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, selected)
+	require.Equal(t, low.Id, selected.Id)
+	require.Equal(t, lowPriority, diagnostics.RoutePriority)
+}
+
+func TestLegacyCacheFallsBackWhenMappingRejectsCachedCandidates(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = false
+	t.Setenv("CHANNEL_ROUTING_V2_ENABLED", "false")
+	t.Setenv("CHANNEL_ROUTING_SHADOW_ENABLED", "false")
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = previousGroupModelRouteHelperEnabled
+	})
+
+	modelName := "cached-mapping-error-model"
+	highPriority := int64(20)
+	lowPriority := int64(10)
+	weight := uint(1)
+	invalidMapping := "{"
+	high := &Channel{
+		Id:           90610,
+		Status:       common.ChannelStatusEnabled,
+		Group:        "default",
+		Models:       modelName,
+		ModelMapping: &invalidMapping,
+	}
+	low := &Channel{
+		Id:     90611,
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: modelName,
+	}
+	require.NoError(t, DB.Create(high).Error)
+	require.NoError(t, DB.Create(low).Error)
+	require.NoError(t, DB.Create(&Ability{Group: "default", Model: modelName, ChannelId: high.Id, Enabled: true, Priority: &highPriority, Weight: weight}).Error)
+	require.NoError(t, DB.Create(&Ability{Group: "default", Model: modelName, ChannelId: low.Id, Enabled: true, Priority: &lowPriority, Weight: weight}).Error)
+
+	// Simulate a stale legacy route cache that still contains only the invalid
+	// high-priority channel while the database has a usable lower-priority
+	// fallback. A cache hit must not make this configuration look complete.
+	channelSyncLock.Lock()
+	legacyRouteCandidateCache = map[string][]legacyRouteCandidateCacheEntry{
+		routeCandidateCacheKey("default", modelName): {{
+			channel:       high.CloneForCache(),
+			priority:      highPriority,
+			abilityWeight: weight,
+			channelWeight: weight,
+		}},
+	}
+	group2model2channels = map[string]map[string][]int{
+		"default": {modelName: {high.Id}},
+	}
+	channelsIDM = map[int]*Channel{high.Id: high.CloneForCache()}
+	channelSyncLock.Unlock()
+
+	resolver := RouteModelResolver(func(channel *Channel, requestedModel string, compact bool) (string, bool, error) {
+		return ResolveChannelModelMappingForRouting(channel.GetModelMapping(), requestedModel, compact)
+	})
+	selected, err := GetRandomSatisfiedChannelWithOptions(
+		"default",
+		modelName,
+		0,
+		nil,
+		SatisfiedChannelSelectionOptions{RouteModelResolver: resolver},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, low.Id, selected.Id)
+}
+
+func TestLegacyCompactSelectionDoesNotReturnPartialCacheHit(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = true
+	common.GroupModelRouteHelperEnabled = true
+	t.Setenv("CHANNEL_ROUTING_V2_ENABLED", "false")
+	t.Setenv("CHANNEL_ROUTING_SHADOW_ENABLED", "false")
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = previousGroupModelRouteHelperEnabled
+	})
+
+	baseModel := "partial-cache-model"
+	compactModel := ratio_setting.WithCompactModelSuffix(baseModel)
+	highPriority := int64(20)
+	lowPriority := int64(10)
+	weight := uint(1)
+	invalidMapping := "{"
+	high := &Channel{
+		Id:           90620,
+		Type:         constant.ChannelTypeCodex,
+		Status:       common.ChannelStatusEnabled,
+		Group:        "default",
+		Models:       compactModel,
+		ModelMapping: &invalidMapping,
+	}
+	fallback := &Channel{
+		Id:     90621,
+		Type:   constant.ChannelTypeCodex,
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: baseModel,
+	}
+	require.NoError(t, DB.Create(high).Error)
+	require.NoError(t, DB.Create(fallback).Error)
+	require.NoError(t, DB.Create(&Ability{Group: "default", Model: compactModel, ChannelId: high.Id, Enabled: true, Priority: &highPriority, Weight: weight}).Error)
+	require.NoError(t, DB.Create(&Ability{Group: "default", Model: baseModel, ChannelId: fallback.Id, Enabled: true, Priority: &lowPriority, Weight: weight}).Error)
+
+	// Simulate a partial legacy snapshot: the exact compact candidate has an
+	// invalid mapping, while the base-model bucket contains a stale channel
+	// that no longer exists in the database. Returning that cached candidate
+	// would bypass the database fallback and route the request to stale state.
+	stale := &Channel{Id: 90622, Type: constant.ChannelTypeCodex, Status: common.ChannelStatusEnabled}
+	channelSyncLock.Lock()
+	legacyRouteCandidateCache = map[string][]legacyRouteCandidateCacheEntry{
+		routeCandidateCacheKey("default", compactModel): {{
+			channel:       high.CloneForCache(),
+			priority:      highPriority,
+			abilityWeight: weight,
+			channelWeight: weight,
+		}},
+		routeCandidateCacheKey("default", baseModel): {{
+			channel:       stale,
+			priority:      lowPriority,
+			abilityWeight: weight,
+			channelWeight: weight,
+		}},
+	}
+	group2model2channels = map[string]map[string][]int{
+		"default": {compactModel: {high.Id}, baseModel: {stale.Id}},
+	}
+	channelsIDM = map[int]*Channel{high.Id: high.CloneForCache(), stale.Id: stale.CloneForCache()}
+	channelSyncLock.Unlock()
+
+	selected, err := GetRandomSatisfiedChannel("default", compactModel, 0)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, fallback.Id, selected.Id)
 }
 
 func TestUpdateChannelStatusRefreshesMemoryCacheAfterEnable(t *testing.T) {
@@ -580,6 +1555,169 @@ func TestGetRandomSatisfiedChannelExcludingKeepsRetryPriorityStable(t *testing.T
 	require.Equal(t, 211, got.Id)
 }
 
+func TestLegacyRouteFilterUsesAbilityPriorityForRetry(t *testing.T) {
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.GroupModelRouteHelperEnabled = false
+	t.Setenv("CHANNEL_ROUTING_V2_ENABLED", "false")
+	t.Setenv("CHANNEL_ROUTING_SHADOW_ENABLED", "false")
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = previousGroupModelRouteHelperEnabled
+	})
+
+	testCases := []struct {
+		name               string
+		memoryCacheEnabled bool
+	}{
+		{name: "database", memoryCacheEnabled: false},
+		{name: "memory cache", memoryCacheEnabled: true},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			prepareChannelCacheTest(t)
+			common.MemoryCacheEnabled = tc.memoryCacheEnabled
+			channelPriorityA := int64(10)
+			channelPriorityB := int64(20)
+			abilityPriorityA := int64(100)
+			abilityPriorityB := int64(50)
+			weight := uint(1)
+			channelA := &Channel{
+				Id:       90501,
+				Name:     "ability-priority-a",
+				Status:   common.ChannelStatusEnabled,
+				Group:    "default",
+				Models:   "legacy-priority-model",
+				Priority: &channelPriorityA,
+				Weight:   &weight,
+			}
+			channelB := &Channel{
+				Id:       90502,
+				Name:     "ability-priority-b",
+				Status:   common.ChannelStatusEnabled,
+				Group:    "default",
+				Models:   "legacy-priority-model",
+				Priority: &channelPriorityB,
+				Weight:   &weight,
+			}
+			for _, channel := range []*Channel{channelA, channelB} {
+				require.NoError(t, DB.Create(channel).Error)
+			}
+			require.NoError(t, DB.Create(&Ability{
+				Group:     "default",
+				Model:     "legacy-priority-model",
+				ChannelId: channelA.Id,
+				Enabled:   true,
+				Priority:  &abilityPriorityA,
+				Weight:    weight,
+			}).Error)
+			require.NoError(t, DB.Create(&Ability{
+				Group:     "default",
+				Model:     "legacy-priority-model",
+				ChannelId: channelB.Id,
+				Enabled:   true,
+				Priority:  &abilityPriorityB,
+				Weight:    weight,
+			}).Error)
+			if tc.memoryCacheEnabled {
+				InitChannelCache()
+			}
+
+			routeFilter := func(_ *Channel, _ string, _ string) bool { return true }
+			selected, err := GetRandomSatisfiedChannelWithOptions(
+				"default",
+				"legacy-priority-model",
+				0,
+				nil,
+				SatisfiedChannelSelectionOptions{RouteCandidateFilter: routeFilter},
+			)
+			require.NoError(t, err)
+			require.NotNil(t, selected)
+			require.Equal(t, channelA.Id, selected.Id)
+
+			selected, err = GetRandomSatisfiedChannelWithOptions(
+				"default",
+				"legacy-priority-model",
+				1,
+				nil,
+				SatisfiedChannelSelectionOptions{RouteCandidateFilter: routeFilter},
+			)
+			require.NoError(t, err)
+			require.NotNil(t, selected)
+			require.Equal(t, channelB.Id, selected.Id)
+		})
+	}
+}
+
+func TestShadowV2PreflightFailureDoesNotOverrideLegacyResult(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.MemoryCacheEnabled = false
+	common.GroupModelRouteHelperEnabled = false
+	t.Setenv("CHANNEL_ROUTING_V2_ENABLED", "false")
+	t.Setenv("CHANNEL_ROUTING_SHADOW_ENABLED", "true")
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = previousGroupModelRouteHelperEnabled
+	})
+
+	priority := int64(10)
+	weight := uint(1)
+	routeWeight := uint(RouteWeightTotalBPS)
+	channel := &Channel{
+		Id:       90503,
+		Name:     "shadow-primary",
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "shadow-preflight-model",
+		Priority: &priority,
+		Weight:   &weight,
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:                    "default",
+		Model:                    "shadow-preflight-model",
+		ChannelId:                channel.Id,
+		Enabled:                  true,
+		Priority:                 &priority,
+		Weight:                   weight,
+		RoutePriority:            &priority,
+		RouteWeightBPS:           &routeWeight,
+		RoutePriorityConfigured:  true,
+		RouteWeightBPSConfigured: true,
+	}).Error)
+
+	preflightCalls := 0
+	preflightErr := errors.New("shadow-only preflight failure")
+	diagnostics := &dto.ChannelRouteSelectionDiagnostics{}
+	selected, err := GetRandomSatisfiedChannelWithOptions(
+		"default",
+		"shadow-preflight-model",
+		0,
+		nil,
+		SatisfiedChannelSelectionOptions{
+			Diagnostics: diagnostics,
+			CandidatePreflight: func(*Channel) (bool, error) {
+				preflightCalls++
+				if preflightCalls == 2 {
+					return false, preflightErr
+				}
+				return true, nil
+			},
+		},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, channel.Id, selected.Id)
+	require.Equal(t, 2, preflightCalls, "legacy and shadow V2 paths must each run the preflight")
+	require.Equal(t, channel.Id, diagnostics.SelectedChannelID)
+	var candidatePreflightErr *CandidatePreflightError
+	require.False(t, errors.As(err, &candidatePreflightErr), "discarded shadow failure must not escape as the primary error")
+}
+
 func TestGetNextEnabledKeyUpdatesPollingIndexInMemoryCache(t *testing.T) {
 	prepareChannelCacheTest(t)
 
@@ -633,6 +1771,29 @@ func TestGetNextEnabledKeyUpdatesPollingIndexInMemoryCache(t *testing.T) {
 	settings := cached.GetOtherSettings()
 	require.NotNil(t, settings.RequestBodyLimit)
 	require.Equal(t, int64(128), settings.RequestBodyLimit.MaxBytes)
+}
+
+func TestGetNextEnabledKeyExcludingSkipsEphemeralCredentialIndexes(t *testing.T) {
+	channel := &Channel{
+		Id:  241,
+		Key: "key-a\nkey-b\nkey-c",
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:         true,
+			MultiKeySize:       3,
+			MultiKeyMode:       "unknown",
+			MultiKeyStatusList: map[int]int{0: common.ChannelStatusEnabled, 1: common.ChannelStatusEnabled, 2: common.ChannelStatusEnabled},
+		},
+	}
+
+	key, index, apiErr := channel.GetNextEnabledKeyExcluding(map[int]struct{}{0: {}})
+	require.Nil(t, apiErr)
+	require.Equal(t, "key-b", key)
+	require.Equal(t, 1, index)
+
+	_, _, apiErr = channel.GetNextEnabledKeyExcluding(map[int]struct{}{0: {}, 1: {}, 2: {}})
+	require.NotNil(t, apiErr)
+	require.Equal(t, common.ChannelStatusEnabled, channel.ChannelInfo.MultiKeyStatusList[0])
+	require.Equal(t, types.ErrorCodeChannelNoAvailableKey, apiErr.GetErrorCode())
 }
 
 func TestUpdateBalanceRefreshesMemoryCache(t *testing.T) {
@@ -1542,6 +2703,91 @@ func TestGetRandomSatisfiedChannelPoolsExactCompactAndBaseFallbackChannels(t *te
 	require.Equal(t, compactChannel.Id, got.Id)
 }
 
+func TestGetRandomSatisfiedChannelPrefersNamespaceUnsupportedForCompact(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousGroupModelRouteHelperEnabled := common.GroupModelRouteHelperEnabled
+	common.GroupModelRouteHelperEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		common.GroupModelRouteHelperEnabled = previousGroupModelRouteHelperEnabled
+	})
+
+	highPriority := int64(20)
+	lowPriority := int64(10)
+	normalChannel := &Channel{
+		Id:       230,
+		Type:     constant.ChannelTypeOpenAI,
+		Name:     "compact-normal-priority",
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "gpt-5.5",
+		Priority: &highPriority,
+	}
+	preferredChannel := &Channel{
+		Id:       231,
+		Type:     constant.ChannelTypeOpenAI,
+		Name:     "compact-namespace-unsupported",
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "gpt-5.5",
+		Priority: &lowPriority,
+	}
+	normalChannel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode: dto.ResponsesCompactModeNative,
+	})
+	preferredChannel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesCompactMode:     dto.ResponsesCompactModeSynthetic,
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+	})
+	for _, channel := range []*Channel{normalChannel, preferredChannel} {
+		require.NoError(t, DB.Create(channel).Error)
+		require.NoError(t, DB.Create(&Ability{
+			Group:     "default",
+			Model:     "gpt-5.5",
+			ChannelId: channel.Id,
+			Enabled:   true,
+			Priority:  channel.Priority,
+		}).Error)
+	}
+
+	compactModel := ratio_setting.WithCompactModelSuffix("gpt-5.5")
+	for _, memoryCacheEnabled := range []bool{true, false} {
+		common.MemoryCacheEnabled = memoryCacheEnabled
+		if memoryCacheEnabled {
+			InitChannelCache()
+		}
+		got, err := GetRandomSatisfiedChannel("default", compactModel, 0)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, preferredChannel.Id, got.Id)
+
+		got, err = GetRandomSatisfiedChannelExcluding("default", compactModel, 1, map[int]struct{}{preferredChannel.Id: {}})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, normalChannel.Id, got.Id)
+	}
+
+	preferredDisabled := false
+	preferredSettings := preferredChannel.GetOtherSettings()
+	preferredSettings.PreferForResponsesCompactionWhenNamespaceUnsupported = &preferredDisabled
+	preferredChannel.SetOtherSettings(preferredSettings)
+	require.NoError(t, DB.Model(&Channel{}).Where("id = ?", preferredChannel.Id).Update("settings", preferredChannel.OtherSettings).Error)
+	common.MemoryCacheEnabled = true
+	InitChannelCache()
+
+	got, err := GetRandomSatisfiedChannel("default", compactModel, 0)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, normalChannel.Id, got.Id)
+
+	got, err = GetRandomSatisfiedChannelExcluding("default", compactModel, 0, map[int]struct{}{preferredChannel.Id: {}})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, normalChannel.Id, got.Id)
+}
+
 func TestGetRandomSatisfiedChannelDatabaseCompactPoolKeepsBaseFallbackPriorities(t *testing.T) {
 	prepareChannelCacheTest(t)
 
@@ -2319,6 +3565,226 @@ func TestIsChannelEnabledForGroupModelUsesGroupModelRouteHelperWhenEnabled(t *te
 	require.True(t, IsChannelEnabledForGroupModel("default", "gpt-4o-gizmo-special", channel.Id))
 }
 
+func TestCacheUpdateChannelRetainsRouteWhenDatabaseIsUnavailable(t *testing.T) {
+	originalDB := DB
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	originalChannelsIDM := channelsIDM
+	originalGroup2Model2Channels := group2model2channels
+	originalLegacyRouteCandidateCache := legacyRouteCandidateCache
+	originalRouteCandidateCache := routeCandidateCacheV2
+	originalRouteCandidateCacheV2Ready := routeCandidateCacheV2Ready
+	originalRouteCandidateCacheV2KnownByChannel := routeCandidateCacheV2KnownByChannel
+	common.MemoryCacheEnabled = true
+	channel := &Channel{
+		Id:            8610,
+		Name:          "db-failure-route-cache",
+		Status:        common.ChannelStatusEnabled,
+		Group:         "default",
+		Models:        "gpt-5",
+		OtherSettings: `{"responses_compact_mode":"auto"}`,
+	}
+	channelSyncLock.Lock()
+	channelsIDM = map[int]*Channel{channel.Id: channel.CloneForCache()}
+	group2model2channels = map[string]map[string][]int{
+		"default": {"gpt-5": {channel.Id}},
+	}
+	legacyRouteCandidateCache = map[string][]legacyRouteCandidateCacheEntry{
+		routeCandidateCacheKey("default", "gpt-5"): {{
+			channel:       channel.CloneForCache(),
+			priority:      37,
+			abilityWeight: 9,
+			channelWeight: 13,
+		}},
+	}
+	routeCandidateCacheV2 = map[string][]routeCandidateV2{
+		routeCandidateCacheKey("default", "gpt-5"): {{
+			Group:               "default",
+			RequestedModel:      "gpt-5",
+			EffectiveRouteModel: "gpt-5",
+			Channel:             channel.CloneForCache(),
+			RouteWeightBPS:      RouteWeightTotalBPS,
+		}},
+	}
+	routeCandidateCacheV2KnownByChannel = map[string]map[int]struct{}{
+		routeCandidateCacheKey("default", "gpt-5"): {channel.Id: {}},
+	}
+	routeCandidateCacheV2Ready = true
+	channelSyncLock.Unlock()
+	DB = nil
+	t.Cleanup(func() {
+		DB = originalDB
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+		channelSyncLock.Lock()
+		channelsIDM = originalChannelsIDM
+		group2model2channels = originalGroup2Model2Channels
+		legacyRouteCandidateCache = originalLegacyRouteCandidateCache
+		routeCandidateCacheV2 = originalRouteCandidateCache
+		routeCandidateCacheV2Ready = originalRouteCandidateCacheV2Ready
+		routeCandidateCacheV2KnownByChannel = originalRouteCandidateCacheV2KnownByChannel
+		channelSyncLock.Unlock()
+	})
+
+	CacheUpdateChannelOtherSettings(channel.Id, `{"responses_compact_mode":"synthetic_summary"}`)
+
+	channelSyncLock.RLock()
+	cachedChannel := channelsIDM[channel.Id]
+	entries := routeCandidateCacheV2[routeCandidateCacheKey("default", "gpt-5")]
+	modelChannels := group2model2channels["default"]["gpt-5"]
+	legacyEntries := legacyRouteCandidateCache[routeCandidateCacheKey("default", "gpt-5")]
+	channelSyncLock.RUnlock()
+
+	require.NotNil(t, cachedChannel)
+	require.Equal(t, `{"responses_compact_mode":"synthetic_summary"}`, cachedChannel.OtherSettings)
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Channel)
+	require.Equal(t, channel.Id, entries[0].Channel.Id)
+	require.Equal(t, []int{channel.Id}, modelChannels)
+	require.Len(t, legacyEntries, 1)
+	require.NotNil(t, legacyEntries[0].channel)
+	require.Equal(t, `{"responses_compact_mode":"synthetic_summary"}`, legacyEntries[0].channel.OtherSettings)
+	require.Equal(t, int64(37), legacyEntries[0].priority)
+	require.Equal(t, uint(9), legacyEntries[0].abilityWeight)
+	require.Equal(t, uint(13), legacyEntries[0].channelWeight)
+}
+
+func TestRefreshRouteCandidateCacheKeepsHistoricalFallbackWhenMetadataCacheIsUninitialized(t *testing.T) {
+	originalDB := DB
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	originalChannelsIDM := channelsIDM
+	originalGroup2Model2Channels := group2model2channels
+	originalLegacyRouteCandidateCache := legacyRouteCandidateCache
+	originalRouteCandidateCache := routeCandidateCacheV2
+	originalRouteCandidateCacheV2Ready := routeCandidateCacheV2Ready
+	originalRouteCandidateCacheV2KnownByChannel := routeCandidateCacheV2KnownByChannel
+
+	common.MemoryCacheEnabled = true
+	DB = nil
+	priority := int64(23)
+	weight := uint(7)
+	channel := &Channel{
+		Id:       8616,
+		Name:     "historical-route-fallback",
+		Status:   common.ChannelStatusEnabled,
+		Group:    "default",
+		Models:   "historical-model",
+		Priority: &priority,
+		Weight:   &weight,
+	}
+	channelSyncLock.Lock()
+	channelsIDM = map[int]*Channel{channel.Id: channel.CloneForCache()}
+	group2model2channels = map[string]map[string][]int{
+		"default": {"historical-model": {channel.Id}},
+	}
+	legacyRouteCandidateCache = nil
+	routeCandidateCacheV2 = nil
+	routeCandidateCacheV2Ready = false
+	routeCandidateCacheV2KnownByChannel = nil
+	channelSyncLock.Unlock()
+	t.Cleanup(func() {
+		DB = originalDB
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+		channelSyncLock.Lock()
+		channelsIDM = originalChannelsIDM
+		group2model2channels = originalGroup2Model2Channels
+		legacyRouteCandidateCache = originalLegacyRouteCandidateCache
+		routeCandidateCacheV2 = originalRouteCandidateCache
+		routeCandidateCacheV2Ready = originalRouteCandidateCacheV2Ready
+		routeCandidateCacheV2KnownByChannel = originalRouteCandidateCacheV2KnownByChannel
+		channelSyncLock.Unlock()
+	})
+
+	refreshRouteCandidateCacheV2(channel.Id, channel)
+
+	channelSyncLock.RLock()
+	require.Nil(t, legacyRouteCandidateCache)
+	entries, hit := getLegacyRouteCandidateCacheEntries("default", routeModelCandidate{model: "historical-model"})
+	channelSyncLock.RUnlock()
+	require.True(t, hit)
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].channel)
+	require.Equal(t, channel.Id, entries[0].channel.Id)
+	require.Equal(t, priority, entries[0].priority)
+	require.Equal(t, weight, entries[0].abilityWeight)
+	require.Equal(t, weight, entries[0].channelWeight)
+}
+
+func TestCacheReloadChannelIgnoresUnavailableDatabase(t *testing.T) {
+	previousDB := DB
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	DB = nil
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		DB = previousDB
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+	})
+
+	require.NotPanics(t, func() {
+		CacheReloadChannel(8615)
+	})
+}
+
+func TestRefreshRouteCandidateCacheV2UsesCurrentChannelSnapshot(t *testing.T) {
+	prepareChannelCacheTest(t)
+
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousChannelsIDM := channelsIDM
+	previousRouteCandidateCache := routeCandidateCacheV2
+	previousRouteCandidateCacheReady := routeCandidateCacheV2Ready
+	previousRouteCandidateCacheKnownByChannel := routeCandidateCacheV2KnownByChannel
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		channelSyncLock.Lock()
+		channelsIDM = previousChannelsIDM
+		routeCandidateCacheV2 = previousRouteCandidateCache
+		routeCandidateCacheV2Ready = previousRouteCandidateCacheReady
+		routeCandidateCacheV2KnownByChannel = previousRouteCandidateCacheKnownByChannel
+		channelSyncLock.Unlock()
+	})
+
+	channel := &Channel{
+		Id:     8611,
+		Name:   "stale-enabled-route-cache",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "gpt-5",
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-5",
+		ChannelId: channel.Id,
+		Enabled:   true,
+	}).Error)
+
+	staleSnapshot := channel.CloneForCache()
+	disabledSnapshot := channel.CloneForCache()
+	disabledSnapshot.Status = common.ChannelStatusAutoDisabled
+	channelSyncLock.Lock()
+	channelsIDM = map[int]*Channel{channel.Id: disabledSnapshot}
+	routeCandidateCacheV2 = map[string][]routeCandidateV2{
+		routeCandidateCacheKey("default", "gpt-5"): {{
+			Group:               "default",
+			RequestedModel:      "gpt-5",
+			EffectiveRouteModel: "gpt-5",
+			Channel:             staleSnapshot,
+			RouteWeightBPS:      RouteWeightTotalBPS,
+		}},
+	}
+	routeCandidateCacheV2KnownByChannel = map[string]map[int]struct{}{
+		routeCandidateCacheKey("default", "gpt-5"): {channel.Id: {}},
+	}
+	routeCandidateCacheV2Ready = true
+	channelSyncLock.Unlock()
+
+	refreshRouteCandidateCacheV2(channel.Id, staleSnapshot)
+
+	channelSyncLock.RLock()
+	entries := routeCandidateCacheV2[routeCandidateCacheKey("default", "gpt-5")]
+	channelSyncLock.RUnlock()
+	require.Empty(t, entries)
+}
+
 func TestChannelCacheSyncEnabledDefaultsToTrue(t *testing.T) {
 	t.Setenv("CHANNEL_CACHE_SYNC_ENABLED", "")
 
@@ -2329,4 +3795,45 @@ func TestChannelCacheSyncEnabledCanBeDisabled(t *testing.T) {
 	t.Setenv("CHANNEL_CACHE_SYNC_ENABLED", "false")
 
 	require.False(t, channelCacheSyncEnabled())
+}
+
+func TestRefreshRouteCandidateCacheRebuildsLegacyModelIndex(t *testing.T) {
+	prepareChannelCacheTest(t)
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCacheEnabled })
+
+	channel := &Channel{
+		Id:     8614,
+		Name:   "incremental-route-index",
+		Status: common.ChannelStatusEnabled,
+		Group:  "default",
+		Models: "new-model",
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "new-model",
+		ChannelId: channel.Id,
+		Enabled:   true,
+	}).Error)
+
+	channelSyncLock.Lock()
+	channelsIDM = map[int]*Channel{channel.Id: channel.CloneForCache()}
+	group2model2channels = map[string]map[string][]int{
+		"default": {"old-model": {channel.Id}},
+	}
+	legacyRouteCandidateCache = map[string][]legacyRouteCandidateCacheEntry{
+		routeCandidateCacheKey("default", "old-model"): {{channel: channel.CloneForCache()}},
+	}
+	channelSyncLock.Unlock()
+
+	refreshRouteCandidateCacheV2(channel.Id, channel)
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	require.Empty(t, group2model2channels["default"]["old-model"])
+	require.Equal(t, []int{channel.Id}, group2model2channels["default"]["new-model"])
+	require.Empty(t, legacyRouteCandidateCache[routeCandidateCacheKey("default", "old-model")])
+	require.Len(t, legacyRouteCandidateCache[routeCandidateCacheKey("default", "new-model")], 1)
 }

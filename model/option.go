@@ -588,8 +588,6 @@ func updateOptionMap(key string, value string) (err error) {
 
 func normalizeOptionValueForInMemoryConfig(key string, value string) (string, error) {
 	switch key {
-	case "AutomaticDisableStatusCodes", "AutomaticRetryStatusCodes":
-		return operation_setting.NormalizeHTTPStatusCodeRanges(value)
 	case "global.chat_completions_to_responses_policy":
 		return model_setting.NormalizeChatCompletionsToResponsesPolicyJSON(value)
 	case "RequestHeaderPolicyAuxiliaryRequestsEnabled":
@@ -602,6 +600,12 @@ func normalizeOptionValueForInMemoryConfig(key string, value string) (string, er
 		return normalizeInviteRebateRate(value)
 	case "UpstreamRateLimitRetryLimit":
 		return operation_setting.NormalizeUpstreamRateLimitRetryLimit(value)
+	case "general_setting.channel_health_enabled":
+		return operation_setting.NormalizeChannelHealthEnabled(value)
+	case "general_setting.channel_health_cooldown_seconds":
+		return operation_setting.NormalizeChannelHealthCooldownSeconds(value)
+	case "general_setting.channel_health_probe_lease_seconds":
+		return operation_setting.NormalizeChannelHealthProbeLeaseSeconds(value)
 	default:
 		return value, nil
 	}
@@ -644,6 +648,15 @@ func validateOptionValue(key string, value string) error {
 		return nil
 	case "InviteRebateRate":
 		_, err := normalizeInviteRebateRate(value)
+		return err
+	case "general_setting.channel_health_enabled":
+		_, err := operation_setting.NormalizeChannelHealthEnabled(value)
+		return err
+	case "general_setting.channel_health_cooldown_seconds":
+		_, err := operation_setting.NormalizeChannelHealthCooldownSeconds(value)
+		return err
+	case "general_setting.channel_health_probe_lease_seconds":
+		_, err := operation_setting.NormalizeChannelHealthProbeLeaseSeconds(value)
 		return err
 	default:
 		return nil

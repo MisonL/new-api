@@ -207,6 +207,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/rest_model_ratio", controller.ResetModelRatio)
 			optionRoute.POST("/migrate_console_setting", controller.MigrateConsoleSetting) // 用于迁移检测的旧键，下个版本会删除
 		}
+		apiRouter.GET("/option/channel_health_status", middleware.AdminAuth(), controller.GetChannelHealthRuntimeStatus)
 
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")
@@ -246,6 +247,7 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.GET("/npm_version_options/diagnostics", middleware.CriticalRateLimit(), controller.GetChannelNpmVersionDiagnostics)
 			channelRoute.POST("/npm_version_options/refresh", middleware.CriticalRateLimit(), controller.RefreshChannelNpmVersionOptions)
 			channelRoute.GET("/priorities", controller.GetTopChannelPriorities)
+			channelRoute.GET("/pins", controller.GetTopChannelPinOrders)
 			channelRoute.POST("/:id/key", middleware.RootAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), middleware.SecureVerificationRequired(), controller.GetChannelKey)
 			channelRoute.GET("/test", controller.TestAllChannels)
 			channelRoute.GET("/test/:id", controller.TestChannel)
@@ -254,6 +256,7 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.POST("/", controller.AddChannel)
 			channelRoute.PUT("/", controller.UpdateChannel)
 			channelRoute.PUT("/priorities", controller.UpdateChannelPriorities)
+			channelRoute.PUT("/pins", controller.UpdateChannelPinOrders)
 			channelRoute.DELETE("/disabled", controller.DeleteDisabledChannel)
 			channelRoute.POST("/tag/disabled", controller.DisableTagChannels)
 			channelRoute.POST("/tag/enabled", controller.EnableTagChannels)
@@ -285,6 +288,18 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.POST("/upstream_updates/apply_all", controller.ApplyAllChannelUpstreamModelUpdates)
 			channelRoute.POST("/upstream_updates/detect", controller.DetectChannelUpstreamModelUpdates)
 			channelRoute.POST("/upstream_updates/detect_all", controller.DetectAllChannelUpstreamModelUpdates)
+		}
+		routeScopeRoute := apiRouter.Group("/channel-route-scopes")
+		routeScopeRoute.Use(middleware.AdminAuth())
+		{
+			routeScopeRoute.GET("/config", controller.GetChannelRoutingConfig)
+			routeScopeRoute.GET("", controller.GetChannelRouteScopes)
+			routeScopeRoute.GET("/migration/preview", controller.PreviewChannelRouteScopeMigration)
+			routeScopeRoute.POST("/migration/apply", controller.ApplyChannelRouteScopeMigration)
+			routeScopeRoute.GET("/:scope_id", controller.GetChannelRouteScope)
+			routeScopeRoute.GET("/:scope_id/metrics", controller.GetChannelRouteScopeMetrics)
+			routeScopeRoute.PUT("/:scope_id/weights", controller.UpdateChannelRouteScopeWeights)
+			routeScopeRoute.PUT("/:scope_id/priority", controller.UpdateChannelRouteScopePriority)
 		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())

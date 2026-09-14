@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
-	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
@@ -26,11 +25,13 @@ const (
 )
 
 type Adaptor struct {
-	ClientMode ClientMode
-	AwsClient  *bedrockruntime.Client
-	AwsModelId string
-	AwsReq     any
-	IsNova     bool
+	ClientMode    ClientMode
+	AwsClient     *bedrockruntime.Client
+	AwsModelId    string
+	AwsReq        any
+	AwsResp       any
+	IsNova        bool
+	RequestFormat types.RelayFormat
 }
 
 func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dto.GeminiChatRequest) (any, error) {
@@ -86,17 +87,39 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
+	a.ClientMode = ClientModeAKSK
+	a.RequestFormat = types.RelayFormatOpenAI
+	if info == nil {
+		return
+	}
+	if info.ChannelOtherSettings.AwsKeyType == dto.AwsKeyTypeApiKey {
+		a.ClientMode = ClientModeApiKey
+	}
+	if info.RelayFormat != "" {
+		a.RequestFormat = info.RelayFormat
+	}
+	a.IsNova = isNovaModel(getAwsModelID(info.UpstreamModelName))
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	if info == nil || info.ChannelMeta == nil {
+		return "", errors.New("AWS relay info or channel metadata is nil")
+	}
+	if a.ClientMode == 0 {
+		a.Init(info)
+	}
 	if info.ChannelOtherSettings.AwsKeyType == dto.AwsKeyTypeApiKey {
 		awsModelId := getAwsModelID(info.UpstreamModelName)
 		a.ClientMode = ClientModeApiKey
-		awsSecret := strings.Split(info.ApiKey, "|")
+		awsSecret := strings.SplitN(info.ApiKey, "|", 2)
 		if len(awsSecret) != 2 {
 			return "", errors.New("invalid aws api key, should be in format of <api-key>|<region>")
 		}
-		return fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com/model/%s/converse", awsModelId, awsSecret[1]), nil
+		endpoint := "converse"
+		if info.IsStream {
+			endpoint = "converse-stream"
+		}
+		return fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com/model/%s/%s", awsSecret[1], awsModelId, endpoint), nil
 	} else {
 		a.ClientMode = ClientModeAKSK
 		return "", nil
@@ -104,9 +127,22 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
+	if info == nil || info.ChannelMeta == nil {
+		return errors.New("AWS relay info or channel metadata is nil")
+	}
+	if req == nil {
+		return errors.New("AWS request headers are nil")
+	}
+	if c == nil || c.Request == nil {
+		return errors.New("AWS request context is nil")
+	}
 	claude.CommonClaudeHeadersOperation(c, req, info)
 	if a.ClientMode == ClientModeApiKey {
-		req.Set("Authorization", "Bearer "+info.ApiKey)
+		awsSecret := strings.SplitN(info.ApiKey, "|", 2)
+		if len(awsSecret) != 2 || strings.TrimSpace(awsSecret[0]) == "" {
+			return errors.New("invalid aws api key, should be in format of <api-key>|<region>")
+		}
+		req.Set("Authorization", "Bearer "+awsSecret[0])
 	}
 	return nil
 }
@@ -115,9 +151,20 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
+	if a.ClientMode == 0 {
+		a.Init(info)
+	}
+	if a.ClientMode == ClientModeApiKey {
+		// Converse conversion runs after RemoveDisabledFields and ParamOverride
+		// in doAwsClientRequest so AWS receives the final request shape.
+		return request, nil
+	}
 	// 检查是否为Nova模型
 	if isNovaModel(request.Model) {
-		novaReq := convertToNovaRequest(request)
+		novaReq, err := convertToNovaRequest(request)
+		if err != nil {
+			return nil, err
+		}
 		a.IsNova = true
 		return novaReq, nil
 	}
@@ -146,17 +193,22 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
-	if a.ClientMode == ClientModeApiKey {
-		return channel.DoApiRequest(a, c, info, requestBody)
-	} else {
-		return doAwsClientRequest(c, info, a, requestBody)
+	if a.ClientMode == 0 {
+		a.Init(info)
 	}
+	return doAwsClientRequest(c, info, a, requestBody)
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	if a == nil || info == nil || info.ChannelMeta == nil {
+		return nil, types.NewError(errors.New("AWS response context is incomplete"), types.ErrorCodeBadResponseBody)
+	}
 	if a.ClientMode == ClientModeApiKey {
-		claudeAdaptor := claude.Adaptor{}
-		usage, err = claudeAdaptor.DoResponse(c, resp, info)
+		if info.IsStream {
+			err, usage = converseStreamHandler(c, info, a)
+		} else {
+			err, usage = converseHandler(c, info, a)
+		}
 	} else {
 		if a.IsNova {
 			err, usage = handleNovaRequest(c, info, a)

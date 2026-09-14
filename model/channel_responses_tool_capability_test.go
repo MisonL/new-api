@@ -2,6 +2,7 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/stretchr/testify/require"
@@ -89,6 +90,20 @@ func TestMarkResponsesToolCapabilityObservationMergesEvidence(t *testing.T) {
 	require.Equal(t, int64(101), settings.ResponsesCapabilityRegistry.ObservedTools.ObservedAt)
 }
 
+func TestResponsesToolCapabilityObservationSourceComparisonIsCaseInsensitive(t *testing.T) {
+	registry := &dto.ResponsesChannelCapabilityRegistry{
+		ObservedTools: &dto.ResponsesToolCapabilityObservation{
+			ObservedAt: 100,
+			Source:     "NATIVE",
+		},
+	}
+	next := dto.ResponsesToolCapabilityObservation{
+		ObservedAt: 100,
+		Source:     dto.ResponsesToolCapabilityObservationSourceNative,
+	}
+	require.False(t, responsesToolCapabilityObservationChanges(registry, next))
+}
+
 func TestMarkResponsesToolCapabilityObservationRejectsMalformedSettings(t *testing.T) {
 	channel := &Channel{
 		Id:            8612,
@@ -114,4 +129,82 @@ func TestMarkResponsesToolCapabilityObservationRejectsMalformedSettings(t *testi
 	var persisted Channel
 	require.NoError(t, DB.First(&persisted, channel.Id).Error)
 	require.Equal(t, `{`, persisted.OtherSettings)
+}
+
+func TestMarkResponsesToolCapabilityObservationBridgedDoesNotPromoteRouting(t *testing.T) {
+	channel := &Channel{
+		Id:     8613,
+		Name:   "tool-capability-bridged",
+		Key:    "test-key",
+		Status: 1,
+		Group:  "default",
+		Models: "gpt-5.6-sol",
+	}
+	require.NoError(t, DB.Delete(&Channel{}, channel.Id).Error)
+	t.Cleanup(func() {
+		require.NoError(t, DB.Delete(&Channel{}, channel.Id).Error)
+	})
+	require.NoError(t, DB.Create(channel).Error)
+
+	settings, err := MarkResponsesToolCapabilityObservation(channel.Id, dto.ResponsesToolCapabilityObservation{
+		ObservedAt:        time.Now().UTC().Unix(),
+		Source:            dto.ResponsesToolCapabilityObservationSourceBridged,
+		NamespaceToolCall: true,
+		ToolSearchCall:    true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, settings.ResponsesCapabilityRegistry)
+	require.Nil(t, settings.ResponsesCapabilityRegistry.SupportsNamespaceTools)
+	require.Nil(t, settings.ResponsesCapabilityRegistry.SupportsToolSearch)
+	require.Equal(t, dto.ResponsesToolCapabilityObservationSourceBridged,
+		settings.ResponsesCapabilityRegistry.ObservedTools.Source)
+}
+
+func TestPromoteUnknownResponsesToolCapabilitiesDoesNotPromoteModelScopedObservation(t *testing.T) {
+	registry := &dto.ResponsesChannelCapabilityRegistry{}
+	promoteUnknownResponsesToolCapabilities(registry, dto.ResponsesToolCapabilityObservation{
+		ObservedAt:        time.Now().UTC().Unix(),
+		Model:             "gpt-5.6-sol",
+		NamespaceToolCall: true,
+		ToolSearchCall:    true,
+	})
+
+	require.Nil(t, registry.SupportsNamespaceTools)
+	require.Nil(t, registry.SupportsToolSearch)
+}
+
+func TestMarkResponsesToolCapabilityObservationExpiresLegacyObservedRoutingOverride(t *testing.T) {
+	supported := true
+	settings := dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			ObservedTools: &dto.ResponsesToolCapabilityObservation{
+				ObservedAt:        time.Now().Add(-48 * time.Hour).Unix(),
+				ExpiresAt:         time.Now().Add(-24 * time.Hour).Unix(),
+				NamespaceToolCall: true,
+			},
+			SupportsNamespaceTools:       &supported,
+			SupportsNamespaceToolsSource: "",
+		},
+	}
+
+	require.Equal(t, dto.ResponsesToolCapabilityUnknown,
+		settings.ResolveResponsesNamespaceToolsCapability(0))
+}
+
+func TestExplicitUnsupportedResponsesToolCapabilityDoesNotExpireWithObservedEvidence(t *testing.T) {
+	unsupported := false
+	settings := dto.ChannelOtherSettings{
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			ObservedTools: &dto.ResponsesToolCapabilityObservation{
+				ObservedAt:        time.Now().Add(-48 * time.Hour).Unix(),
+				ExpiresAt:         time.Now().Add(-24 * time.Hour).Unix(),
+				NamespaceToolCall: true,
+			},
+			SupportsNamespaceTools:       &unsupported,
+			SupportsNamespaceToolsSource: "",
+		},
+	}
+
+	require.Equal(t, dto.ResponsesToolCapabilityUnsupported,
+		settings.ResolveResponsesNamespaceToolsCapability(0))
 }

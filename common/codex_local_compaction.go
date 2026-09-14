@@ -36,9 +36,9 @@ func IsCodexLocalResponsesCompactionRequest(request *http.Request) bool {
 	if !ok {
 		return false
 	}
-	return metadata.RequestKind == "compaction" &&
+	return strings.EqualFold(metadata.RequestKind, "compaction") &&
 		metadata.Compaction != nil &&
-		metadata.Compaction.Implementation == "responses"
+		strings.EqualFold(metadata.Compaction.Implementation, "responses")
 }
 
 // IsCodexOrdinaryResponsesRequest identifies an ordinary Codex Responses turn

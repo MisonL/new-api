@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -79,7 +80,210 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 			IncludeUsage: true,
 		}
 	}
+	if err := normalizeSenseNovaDeepSeekClaudeRequest(info, request, aiRequest); err != nil {
+		return nil, err
+	}
 	return a.ConvertOpenAIRequest(c, info, aiRequest)
+}
+
+type senseNovaDeepSeekV4Variant string
+
+const (
+	senseNovaDeepSeekV4Flash senseNovaDeepSeekV4Variant = "flash"
+	senseNovaDeepSeekV4Pro   senseNovaDeepSeekV4Variant = "pro"
+)
+
+func senseNovaDeepSeekV4VariantFor(info *relaycommon.RelayInfo, model string) senseNovaDeepSeekV4Variant {
+	if info == nil || info.ChannelMeta == nil || !isSenseNovaBaseURL(info.ChannelBaseUrl) {
+		return ""
+	}
+	baseModel := strings.TrimSpace(model)
+	if info.UpstreamModelName != "" {
+		baseModel = strings.TrimSpace(info.UpstreamModelName)
+	}
+	if parsedModel, _, _, ok := reasoning.ParseDeepSeekV4ThinkingSuffix(baseModel); ok {
+		baseModel = parsedModel
+	}
+	normalized := strings.ToLower(baseModel)
+	if strings.HasPrefix(normalized, "deepseek-v4-flash") {
+		return senseNovaDeepSeekV4Flash
+	}
+	if strings.HasPrefix(normalized, "deepseek-v4-pro") {
+		return senseNovaDeepSeekV4Pro
+	}
+	return ""
+}
+
+func isSenseNovaBaseURL(baseURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSuffix(parsed.Hostname(), "."), "token.sensenova.cn")
+}
+
+func normalizeSenseNovaDeepSeekClaudeRequest(info *relaycommon.RelayInfo, claudeRequest *dto.ClaudeRequest, request *dto.GeneralOpenAIRequest) error {
+	if claudeRequest == nil || request == nil {
+		return nil
+	}
+	variant := senseNovaDeepSeekV4VariantFor(info, request.Model)
+	if variant == "" {
+		return nil
+	}
+
+	effort := normalizeSenseNovaDeepSeekEffort(claudeRequest.GetEfforts(), variant)
+	if claudeRequest.Thinking != nil {
+		thinkingType := strings.ToLower(strings.TrimSpace(claudeRequest.Thinking.Type))
+		switch thinkingType {
+		case "enabled", "adaptive":
+			if effort == "" {
+				effort = defaultSenseNovaDeepSeekEffort(variant)
+			}
+		case "disabled":
+			effort = "none"
+		case "":
+			// An omitted type leaves the provider default unchanged. If an
+			// output_config effort was supplied, it still applies below.
+		default:
+			return fmt.Errorf("unsupported SenseNova DeepSeek thinking.type %q", claudeRequest.Thinking.Type)
+		}
+		if variant == senseNovaDeepSeekV4Pro && thinkingType != "" {
+			thinkingJSON, err := common.Marshal(map[string]string{"type": thinkingType})
+			if err != nil {
+				return fmt.Errorf("marshal SenseNova DeepSeek thinking: %w", err)
+			}
+			request.THINKING = thinkingJSON
+		} else {
+			// Flash documents reasoning_effort as its wire-level switch and
+			// does not document a top-level thinking object.
+			request.THINKING = nil
+		}
+	}
+	if effort != "" {
+		request.ReasoningEffort = effort
+	}
+	return nil
+}
+
+func normalizeSenseNovaDeepSeekOpenAIRequest(info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) error {
+	if request == nil {
+		return nil
+	}
+	variant := senseNovaDeepSeekV4VariantFor(info, request.Model)
+	if variant == "" {
+		return nil
+	}
+
+	thinkingType, err := senseNovaDeepSeekThinkingType(request.THINKING)
+	if err != nil {
+		return err
+	}
+	effort := normalizeSenseNovaDeepSeekEffort(request.ReasoningEffort, variant)
+	if thinkingType == "disabled" {
+		effort = "none"
+	}
+	if effort == "none" && variant == senseNovaDeepSeekV4Pro {
+		thinkingType = "disabled"
+	}
+	if effort != "" {
+		request.ReasoningEffort = effort
+	}
+	if variant == senseNovaDeepSeekV4Flash {
+		request.THINKING = nil
+	} else if thinkingType != "" {
+		thinkingJSON, marshalErr := common.Marshal(map[string]string{"type": thinkingType})
+		if marshalErr != nil {
+			return fmt.Errorf("marshal SenseNova DeepSeek thinking: %w", marshalErr)
+		}
+		request.THINKING = thinkingJSON
+	}
+
+	thinkingEnabled := effort != "none" && thinkingType != "disabled"
+	if err := normalizeSenseNovaDeepSeekMessages(request, variant, thinkingEnabled); err != nil {
+		return err
+	}
+	if info != nil {
+		info.ReasoningEffort = request.ReasoningEffort
+	}
+	return nil
+}
+
+func senseNovaDeepSeekThinkingType(raw json.RawMessage) (string, error) {
+	if len(bytes.TrimSpace(raw)) == 0 || common.GetJsonType(raw) == "null" {
+		return "", nil
+	}
+	var thinking dto.Thinking
+	if err := common.Unmarshal(raw, &thinking); err != nil {
+		return "", fmt.Errorf("invalid SenseNova DeepSeek thinking: %w", err)
+	}
+	typ := strings.ToLower(strings.TrimSpace(thinking.Type))
+	switch typ {
+	case "", "enabled", "disabled", "adaptive":
+		return typ, nil
+	default:
+		return "", fmt.Errorf("unsupported SenseNova DeepSeek thinking.type %q", thinking.Type)
+	}
+}
+
+func normalizeSenseNovaDeepSeekMessages(request *dto.GeneralOpenAIRequest, variant senseNovaDeepSeekV4Variant, thinkingEnabled bool) error {
+	for messageIndex := range request.Messages {
+		message := &request.Messages[messageIndex]
+		if message.Role != "assistant" {
+			continue
+		}
+		toolCalls, err := message.ParseToolCallsStrict()
+		if err != nil {
+			return fmt.Errorf("messages[%d]: %w", messageIndex, err)
+		}
+		hasReasoning := message.ReasoningContent != nil || message.ThinkingContent != nil || message.Reasoning != nil
+		reasoningText := message.GetReasoningContent()
+		if variant == senseNovaDeepSeekV4Pro {
+			if message.ThinkingContent == nil && hasReasoning {
+				message.ThinkingContent = &reasoningText
+			}
+			message.ReasoningContent = nil
+			message.Reasoning = nil
+			if len(toolCalls) > 0 && thinkingEnabled && !hasReasoning {
+				emptyThinking := ""
+				message.ThinkingContent = &emptyThinking
+			}
+			continue
+		}
+
+		if message.ReasoningContent == nil && hasReasoning {
+			message.ReasoningContent = &reasoningText
+		}
+		message.ThinkingContent = nil
+		message.Reasoning = nil
+		if len(toolCalls) > 0 && thinkingEnabled && !hasReasoning {
+			emptyReasoning := ""
+			message.ReasoningContent = &emptyReasoning
+		}
+	}
+	return nil
+}
+
+func normalizeSenseNovaDeepSeekEffort(effort string, variant senseNovaDeepSeekV4Variant) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "minimal":
+		return "low"
+	case "xhigh":
+		return "high"
+	case "max":
+		if variant == senseNovaDeepSeekV4Flash {
+			return "high"
+		}
+		return "max"
+	default:
+		return strings.ToLower(strings.TrimSpace(effort))
+	}
+}
+
+func defaultSenseNovaDeepSeekEffort(variant senseNovaDeepSeekV4Variant) string {
+	if variant == senseNovaDeepSeekV4Pro {
+		return "high"
+	}
+	return "medium"
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
@@ -207,7 +411,13 @@ func normalizeAgnesImageRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	requestURLPath := info.RequestURLPath
 	if info.RelayMode == relayconstant.RelayModeRealtime {
+		var err error
+		requestURLPath, err = rewriteRealtimeModelQuery(requestURLPath, info.UpstreamModelName)
+		if err != nil {
+			return "", fmt.Errorf("rewrite realtime model query: %w", err)
+		}
 		if strings.HasPrefix(info.ChannelBaseUrl, "https://") {
 			baseUrl := strings.TrimPrefix(info.ChannelBaseUrl, "https://")
 			baseUrl = "wss://" + baseUrl
@@ -287,8 +497,33 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 			info.RelayMode != relayconstant.RelayModeResponsesCompact {
 			return fmt.Sprintf("%s/v1/chat/completions", info.ChannelBaseUrl), nil
 		}
-		return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, info.RequestURLPath, info.ChannelType), nil
+		return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, requestURLPath, info.ChannelType), nil
 	}
+}
+
+// rewriteRealtimeModelQuery keeps the client-facing websocket path intact
+// while replacing only its model query parameter with the request-scoped
+// upstream model. If no model parameter exists, the original path is returned
+// byte-for-byte so providers that use a model encoded elsewhere are unaffected.
+func rewriteRealtimeModelQuery(requestURLPath string, upstreamModel string) (string, error) {
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	if upstreamModel == "" || !strings.Contains(requestURLPath, "?") {
+		return requestURLPath, nil
+	}
+	parsed, err := url.Parse(requestURLPath)
+	if err != nil {
+		return "", err
+	}
+	values, err := url.ParseQuery(parsed.RawQuery)
+	if err != nil {
+		return "", err
+	}
+	if _, exists := values["model"]; !exists {
+		return requestURLPath, nil
+	}
+	values.Set("model", upstreamModel)
+	parsed.RawQuery = values.Encode()
+	return parsed.String(), nil
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *relaycommon.RelayInfo) error {
@@ -396,6 +631,9 @@ func isSyntheticRemoteResponsesCompactionFallback(c *gin.Context, info *relaycom
 func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) (any, error) {
 	if request == nil {
 		return nil, errors.New("request is nil")
+	}
+	if err := normalizeSenseNovaDeepSeekOpenAIRequest(info, request); err != nil {
+		return nil, err
 	}
 	if info.ChannelType != constant.ChannelTypeOpenAI && info.ChannelType != constant.ChannelTypeAzure {
 		request.StreamOptions = nil
@@ -542,6 +780,7 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 		if err2 != nil {
 			return nil, fmt.Errorf("error parsing multipart form: %w", err2)
 		}
+		defer formData.RemoveAll()
 
 		// 打印类似 curl 命令格式的信息
 		logger.LogDebug(c.Request.Context(), fmt.Sprintf("--form 'model=\"%s\"'", request.Model))
@@ -764,45 +1003,35 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if err != nil {
 		return nil, err
 	}
-	if hasOpaqueEncryptedContent {
-		return request, nil
-	}
 	normalizedInput, normalizeResult, err := relaycommon.NormalizeResponsesInputItemIDs(request.Input)
 	if err != nil {
 		return nil, err
 	}
 	request.Input = normalizedInput
 	if normalizeResult.RemovedCount > 0 {
+		common.SetContextKey(c, constant.ContextKeyResponsesInputItemIDNormalizationRemovedCount, normalizeResult.RemovedCount)
 		logger.LogInfo(c, fmt.Sprintf("responses invalid input item ids removed: count=%d model=%s", normalizeResult.RemovedCount, request.Model))
 	}
+	if hasOpaqueEncryptedContent {
+		return request, nil
+	}
 
-	// Preserve effort from the logical model after model mapping. A mapped
-	// upstream model remains authoritative, while unmapped suffix models keep
-	// the established base-model conversion behavior.
-	if requestWithLogicalEffort, applied := relaycommon.ApplyResponsesLogicalModelReasoningEffort(info, request); applied {
-		request = requestWithLogicalEffort
-		mappedModel := info != nil && info.ChannelMeta != nil && info.IsModelMapped
-		if !mappedModel {
-			_, baseModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
-			request.Model = baseModel
-		}
-	} else {
-		effort, originModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
-		if effort != "" {
-			if request.Reasoning == nil {
-				request.Reasoning = &dto.Reasoning{
-					Effort: effort,
-				}
-			} else {
-				request.Reasoning.Effort = effort
+	//  转换模型推理力度后缀
+	effort, originModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
+	if effort != "" {
+		if request.Reasoning == nil {
+			request.Reasoning = &dto.Reasoning{
+				Effort: effort,
 			}
-			request.Model = originModel
+		} else {
+			request.Reasoning.Effort = effort
 		}
+		request.Model = originModel
 	}
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
-	request = relaycommon.ApplyResponsesReasoningContextCapability(c, info, request)
+	request = ApplyResponsesReasoningContextCapability(c, info, request)
 	stripCodexContext := relaycommon.ShouldStripCodexEncryptedContext(info)
 	syntheticContinuation := false
 	if relaycommon.IsOpenAICompatibleResponses(info) &&
@@ -811,6 +1040,15 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		syntheticContinuation, err = service.HasLocalSyntheticCompactReferenceWithContext(relaycommon.GinRequestContext(c), request)
 		if err != nil {
 			return nil, err
+		}
+		if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+			hasPreviousSynthetic, err := service.HasLocalSyntheticCompactPreviousResponseIDWithContext(relaycommon.GinRequestContext(c), request)
+			if err != nil {
+				return nil, err
+			}
+			if !hasPreviousSynthetic {
+				syntheticContinuation = false
+			}
 		}
 	}
 	if syntheticContinuation {
@@ -876,6 +1114,30 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		return convertedRequest, err
 	}
 	return request, nil
+}
+
+func ApplyResponsesReasoningContextCapability(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) dto.OpenAIResponsesRequest {
+	if request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0 {
+		return request
+	}
+
+	decision := relaycommon.ResolveResponsesReasoningContextCapabilityDecision(info, request.Model)
+	if decision.Capability == dto.ResponsesReasoningContextCapabilityUnsupported {
+		strippedRequest, stripped := relaycommon.StripResponsesReasoningContext(request)
+		if stripped {
+			request = strippedRequest
+			common.SysLog(fmt.Sprintf(
+				"responses reasoning context stripped by channel capability: channel_id=%d model=%s profile=%s",
+				decision.ChannelID,
+				decision.Model,
+				decision.Profile,
+			))
+		}
+	}
+	if c != nil {
+		common.SetContextKey(c, constant.ContextKeyResponsesReasoningContextAction, decision.Action)
+	}
+	return request
 }
 
 func markResponsesCompactVisibleOnlyForUpstreamProfile(c *gin.Context, requestContext context.Context) context.Context {

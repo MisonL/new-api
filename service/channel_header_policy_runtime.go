@@ -34,18 +34,20 @@ type runtimeHeaderPolicy struct {
 }
 
 type RuntimeHeaderPolicyAudit struct {
-	HeaderPolicyMode        string                    `json:"header_policy_mode"`
-	AppliedHeaderKeys       []string                  `json:"applied_header_keys,omitempty"`
-	AppliedHeaders          []AppliedHeaderAuditEntry `json:"applied_headers,omitempty"`
-	AppliedUserAgent        string                    `json:"applied_user_agent,omitempty"`
-	HeaderProfileID         string                    `json:"header_profile_id,omitempty"`
-	HeaderProfileMode       string                    `json:"header_profile_mode,omitempty"`
-	HeaderProfileApplied    bool                      `json:"header_profile_applied"`
-	UserAgentApplied        bool                      `json:"user_agent_applied"`
-	SelectedUserAgent       string                    `json:"selected_user_agent,omitempty"`
-	UserAgentStrategyMode   string                    `json:"ua_strategy_mode,omitempty"`
-	UserAgentStrategyScope  string                    `json:"ua_strategy_scope,omitempty"`
-	OverrideStaticUserAgent bool                      `json:"override_static_user_agent,omitempty"`
+	HeaderPolicyMode          string                    `json:"header_policy_mode"`
+	AppliedHeaderKeys         []string                  `json:"applied_header_keys,omitempty"`
+	AppliedHeaders            []AppliedHeaderAuditEntry `json:"applied_headers,omitempty"`
+	AppliedUserAgent          string                    `json:"applied_user_agent,omitempty"`
+	HeaderProfileID           string                    `json:"header_profile_id,omitempty"`
+	HeaderProfileMode         string                    `json:"header_profile_mode,omitempty"`
+	HeaderProfileApplied      bool                      `json:"header_profile_applied"`
+	UserAgentApplied          bool                      `json:"user_agent_applied"`
+	SelectedUserAgent         string                    `json:"selected_user_agent,omitempty"`
+	UserAgentStrategyMode     string                    `json:"ua_strategy_mode,omitempty"`
+	UserAgentStrategyScope    string                    `json:"ua_strategy_scope,omitempty"`
+	OverrideStaticUserAgent   bool                      `json:"override_static_user_agent,omitempty"`
+	CodexDynamicHeadersStatus string                    `json:"codex_dynamic_headers_status,omitempty"`
+	CodexDynamicHeaderKeys    []string                  `json:"codex_dynamic_header_keys,omitempty"`
 }
 
 type AppliedHeaderAuditEntry struct {
@@ -70,10 +72,36 @@ func BuildChannelRuntimeHeaderOverride(channel *model.Channel) (map[string]any, 
 }
 
 func BuildChannelRuntimeRequestHeaders(channel *model.Channel, key string, headers http.Header) (http.Header, error) {
+	return buildChannelRuntimeRequestHeaders(channel, key, headers, "", "")
+}
+
+// BuildChannelRuntimeRequestHeadersForProfile applies the exact header profile
+// captured when an asynchronous task was submitted. It intentionally bypasses
+// the current round-robin/random profile cursor; a task must not change client
+// identity between submission, polling and content retrieval.
+func BuildChannelRuntimeRequestHeadersForProfile(channel *model.Channel, key string, headers http.Header, profileID string) (http.Header, error) {
+	return buildChannelRuntimeRequestHeaders(channel, key, headers, strings.TrimSpace(profileID), "")
+}
+
+// BuildChannelRuntimeRequestHeadersForProfileWithFingerprint replays a
+// persisted asynchronous-task profile and rejects content drift explicitly.
+// The fingerprint is over the resolved profile headers only; credentials and
+// client-header passthrough values are never persisted in the task snapshot.
+func BuildChannelRuntimeRequestHeadersForProfileWithFingerprint(channel *model.Channel, key string, headers http.Header, profileID string, expectedFingerprint string) (http.Header, error) {
+	return buildChannelRuntimeRequestHeaders(channel, key, headers, strings.TrimSpace(profileID), strings.TrimSpace(expectedFingerprint))
+}
+
+func buildChannelRuntimeRequestHeaders(channel *model.Channel, key string, headers http.Header, forcedProfileID string, expectedProfileFingerprint string) (http.Header, error) {
 	if headers == nil {
 		headers = http.Header{}
 	}
+	if expectedProfileFingerprint != "" && forcedProfileID == "" {
+		return nil, errors.New("persisted header profile fingerprint is missing its profile identity")
+	}
 	if channel == nil {
+		if forcedProfileID != "" || expectedProfileFingerprint != "" {
+			return nil, fmt.Errorf("persisted header profile identity cannot be replayed without a channel")
+		}
 		return headers, nil
 	}
 	apply, err := ShouldApplyChannelRuntimeRequestHeaders(channel)
@@ -81,13 +109,40 @@ func BuildChannelRuntimeRequestHeaders(channel *model.Channel, key string, heade
 		return nil, err
 	}
 	if !apply {
+		if forcedProfileID != "" || expectedProfileFingerprint != "" {
+			return nil, fmt.Errorf("persisted header profile cannot be replayed because header policy is disabled for channel %d", channel.Id)
+		}
 		return headers, nil
 	}
 
 	settings := channel.GetOtherSettings()
-	profileHeaders, _, err := resolveChannelRuntimeHeaderProfileHeaders(channel.Id, settings.HeaderProfileStrategy)
+	var profileHeaders map[string]string
+	if forcedProfileID != "" {
+		if settings.HeaderProfileStrategy == nil || !settings.HeaderProfileStrategy.Enabled {
+			return nil, fmt.Errorf("persisted header profile %q is no longer enabled for channel %d", forcedProfileID, channel.Id)
+		}
+		selected := false
+		for _, selectedID := range settings.HeaderProfileStrategy.SelectedProfileIDs {
+			if runtimeHeaderProfileSelectionMatches(forcedProfileID, selectedID) {
+				selected = true
+				break
+			}
+		}
+		if !selected {
+			return nil, fmt.Errorf("persisted header profile %q is no longer selected for channel %d", forcedProfileID, channel.Id)
+		}
+		forcedStrategy := *settings.HeaderProfileStrategy
+		forcedStrategy.Mode = dto.HeaderProfileModeFixed
+		forcedStrategy.SelectedProfileIDs = []string{forcedProfileID}
+		profileHeaders, _, err = dto.ResolveHeaderProfileStrategyHeaders(&forcedStrategy, 0)
+	} else {
+		profileHeaders, _, err = resolveChannelRuntimeHeaderProfileHeaders(channel.Id, settings.HeaderProfileStrategy)
+	}
 	if err != nil {
 		return nil, err
+	}
+	if expectedProfileFingerprint != "" && model.ComputeTaskRouteHeaderProfileFingerprint(profileHeaders) != expectedProfileFingerprint {
+		return nil, fmt.Errorf("persisted header profile %q content changed for channel %d", forcedProfileID, channel.Id)
 	}
 	for name, value := range profileHeaders {
 		name = strings.TrimSpace(name)
@@ -116,6 +171,38 @@ func BuildChannelRuntimeRequestHeaders(channel *model.Channel, key string, heade
 		headers.Set(name, str)
 	}
 	return headers, nil
+}
+
+// runtimeHeaderProfileSelectionMatches allows a task snapshot to replay a
+// captured version when the channel still selects the same base profile (or
+// its latest alias). Explicitly pinned selections must remain an exact match.
+func runtimeHeaderProfileSelectionMatches(forcedProfileID string, selectedID string) bool {
+	forcedProfileID = strings.TrimSpace(forcedProfileID)
+	selectedID = strings.TrimSpace(selectedID)
+	if forcedProfileID == "" || selectedID == "" {
+		return false
+	}
+	if forcedProfileID == selectedID {
+		return true
+	}
+	forcedBase, forcedVersion, forcedVersioned := strings.Cut(forcedProfileID, "@")
+	selectedBase, selectedVersion, selectedVersioned := strings.Cut(selectedID, "@")
+	if forcedBase != selectedBase {
+		return false
+	}
+	if !forcedVersioned {
+		// An unversioned snapshot refers to the dynamic base profile. Treat only
+		// the explicit latest alias as the same selection; a pinned version must
+		// not be silently replaced by a dynamic profile.
+		return !selectedVersioned || strings.EqualFold(strings.TrimSpace(selectedVersion), dto.HeaderProfileLatestVersion)
+	}
+	if !selectedVersioned {
+		return strings.EqualFold(strings.TrimSpace(forcedVersion), dto.HeaderProfileLatestVersion)
+	}
+	// Two explicitly versioned selections are compatible only when they are
+	// exactly the same version. In particular, a pinned version must not match
+	// either another pinned version or the dynamic latest alias.
+	return strings.EqualFold(strings.TrimSpace(forcedVersion), strings.TrimSpace(selectedVersion))
 }
 
 func ResolveChannelRuntimeHeaderProfileHeaders(channelID int, strategy *dto.HeaderProfileStrategy) (map[string]string, string, error) {
@@ -210,7 +297,17 @@ func BuildChannelRuntimeHeaderOverrideWithAudit(channel *model.Channel) (map[str
 		return map[string]any{}, &RuntimeHeaderPolicyAudit{}, nil
 	}
 
-	channelHeaders := normalizeRuntimeHeaderOverrideMap(channel.GetHeaderOverride())
+	channelHeaders := map[string]any{}
+	if channel.HeaderOverride != nil {
+		validatedHeaders, err := validateHeaderTemplateAllowNull(*channel.HeaderOverride)
+		if err != nil {
+			return nil, nil, fmt.Errorf("channel header override is invalid: %w", err)
+		}
+		channelHeaders, err = normalizeRuntimeHeaderOverrideMapStrict(toAnyHeaderMap(validatedHeaders))
+		if err != nil {
+			return nil, nil, fmt.Errorf("channel header override is ambiguous: %w", err)
+		}
+	}
 	channelSettings := channel.GetOtherSettings()
 	channelStrategy, channelState, err := resolveRuntimeUserAgentStrategy(channelSettings.UserAgentStrategy)
 	if err != nil {
@@ -226,7 +323,10 @@ func BuildChannelRuntimeHeaderOverrideWithAudit(channel *model.Channel) (map[str
 	if err != nil {
 		return nil, nil, err
 	}
-	finalHeaders := resolveRuntimeHeaderOverrideByMode(mode, channelHeaders, tagPolicy.HeaderOverride)
+	finalHeaders, err := resolveRuntimeHeaderOverrideByMode(mode, channelHeaders, tagPolicy.HeaderOverride)
+	if err != nil {
+		return nil, nil, err
+	}
 	audit := &RuntimeHeaderPolicyAudit{
 		HeaderPolicyMode:  mode,
 		AppliedHeaderKeys: collectRuntimeHeaderKeys(finalHeaders),
@@ -313,7 +413,7 @@ func decodeStoredRuntimeHeaderOverride(raw string) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 
-	headers, err := ValidateHeaderTemplate(trimmed)
+	headers, err := validateHeaderTemplateAllowNull(trimmed)
 	if err != nil {
 		return nil, err
 	}
@@ -410,20 +510,28 @@ func getRequestHeaderPolicyDefaultMode() (string, error) {
 	return parseRuntimeHeaderPolicyMode(raw, false)
 }
 
-func resolveRuntimeHeaderOverrideByMode(mode string, channelHeaders map[string]any, tagHeaders map[string]any) map[string]any {
+func resolveRuntimeHeaderOverrideByMode(mode string, channelHeaders map[string]any, tagHeaders map[string]any) (map[string]any, error) {
+	// Channel headers are normalized and validated by the public builder before
+	// this resolver is called. Normalize tag headers here because they come from
+	// the persisted tag policy and are not otherwise validated at this boundary.
+	var err error
+	tagHeaders, err = normalizeRuntimeHeaderOverrideMapStrict(tagHeaders)
+	if err != nil {
+		return nil, fmt.Errorf("tag header override is ambiguous: %w", err)
+	}
 	switch mode {
 	case string(dto.HeaderPolicyModePreferTag):
 		if len(tagHeaders) > 0 {
-			return cloneRuntimeHeaderOverrideMap(tagHeaders)
+			return cloneRuntimeHeaderOverrideMap(tagHeaders), nil
 		}
-		return cloneRuntimeHeaderOverrideMap(channelHeaders)
+		return cloneRuntimeHeaderOverrideMap(channelHeaders), nil
 	case string(dto.HeaderPolicyModeMerge):
-		return mergeRuntimeHeaderOverrideMaps(tagHeaders, channelHeaders)
+		return mergeRuntimeHeaderOverrideMaps(tagHeaders, channelHeaders), nil
 	default:
 		if len(channelHeaders) > 0 {
-			return cloneRuntimeHeaderOverrideMap(channelHeaders)
+			return cloneRuntimeHeaderOverrideMap(channelHeaders), nil
 		}
-		return cloneRuntimeHeaderOverrideMap(tagHeaders)
+		return cloneRuntimeHeaderOverrideMap(tagHeaders), nil
 	}
 }
 
@@ -664,28 +772,60 @@ func normalizeRuntimeHeaderOverrideMap(source map[string]any) map[string]any {
 		return map[string]any{}
 	}
 
+	keys := make([]string, 0, len(source))
+	for key := range source {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 	normalized := make(map[string]any, len(source))
-	for key, value := range source {
+	for _, key := range keys {
+		value := source[key]
 		normalizedKey := normalizeRuntimeHeaderKey(key)
 		if normalizedKey == "" {
 			continue
 		}
-		if isRuntimeHeaderPassthroughRuleKey(normalizedKey) {
-			normalized[normalizedKey] = value
+		if _, exists := normalized[normalizedKey]; exists {
+			// This helper is retained for already-validated internal maps. When
+			// called defensively on a legacy map, keep the lexicographically first
+			// spelling so map iteration order cannot change the applied header.
 			continue
-		}
-
-		for existingKey := range normalized {
-			if isRuntimeHeaderPassthroughRuleKey(existingKey) {
-				continue
-			}
-			if strings.EqualFold(existingKey, normalizedKey) {
-				delete(normalized, existingKey)
-			}
 		}
 		normalized[normalizedKey] = value
 	}
 	return normalized
+}
+
+// normalizeRuntimeHeaderOverrideMapStrict is the error-returning boundary for
+// runtime maps. Header names are case-insensitive on the wire, so accepting
+// two spellings of the same name would make the selected value depend on map
+// iteration order.
+func normalizeRuntimeHeaderOverrideMapStrict(source map[string]any) (map[string]any, error) {
+	if len(source) == 0 {
+		return map[string]any{}, nil
+	}
+	keys := make([]string, 0, len(source))
+	for key := range source {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	normalized := make(map[string]any, len(source))
+	seen := make(map[string]string, len(source))
+	for _, key := range keys {
+		normalizedKey := normalizeRuntimeHeaderKey(key)
+		if normalizedKey == "" {
+			continue
+		}
+		lookupKey := normalizedKey
+		if !isRuntimeHeaderPassthroughRuleKey(normalizedKey) {
+			lookupKey = strings.ToLower(normalizedKey)
+		}
+		if previousKey, exists := seen[lookupKey]; exists {
+			return nil, fmt.Errorf("request headers contain duplicate names %q and %q", previousKey, key)
+		}
+		seen[lookupKey] = key
+		normalized[normalizedKey] = source[key]
+	}
+	return normalized, nil
 }
 
 func normalizeRuntimeHeaderKey(key string) string {

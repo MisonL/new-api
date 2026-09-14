@@ -21,18 +21,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func convertCozeChatRequest(c *gin.Context, request dto.GeneralOpenAIRequest) *CozeChatRequest {
+func convertCozeChatRequest(c *gin.Context, request dto.GeneralOpenAIRequest) (*CozeChatRequest, error) {
+	if err := channel.RejectUnsupportedTextRequestFields(request, "Coze Chat"); err != nil {
+		return nil, err
+	}
 	var messages []CozeEnterMessage
-	// 将 request的messages的role为user的content转换为CozeMessage
-	for _, message := range request.Messages {
-		if message.Role == "user" {
-			messages = append(messages, CozeEnterMessage{
-				Role:    "user",
-				Content: message.Content,
-				// TODO: support more content type
-				ContentType: "text",
-			})
+	roles := map[string]string{
+		"user":      "user",
+		"assistant": "assistant",
+	}
+	for messageIndex, message := range request.Messages {
+		role, text, err := channel.OpenAIMessageRoleText(message, "Coze Chat", roles)
+		if err != nil {
+			return nil, fmt.Errorf("messages[%d]: %w", messageIndex, err)
 		}
+		messages = append(messages, CozeEnterMessage{Role: role, Content: text, ContentType: "text"})
 	}
 	user := request.User
 	if len(user) == 0 {
@@ -44,7 +47,7 @@ func convertCozeChatRequest(c *gin.Context, request dto.GeneralOpenAIRequest) *C
 		AdditionalMessages: messages,
 		Stream:             lo.FromPtrOr(request.Stream, false),
 	}
-	return cozeRequest
+	return cozeRequest, nil
 }
 
 func cozeChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {

@@ -55,6 +55,13 @@ func copyCodexResponsesHeaders(c *gin.Context, resp *http.Response) {
 	}
 }
 
+// CopyCodexResponsesHeaders exposes the small allowlist of response headers
+// that Codex clients use for Responses turn state. It is also used by the
+// Codex folded SSE executor, which owns its own raw stream reader.
+func CopyCodexResponsesHeaders(c *gin.Context, resp *http.Response) {
+	copyCodexResponsesHeaders(c, resp)
+}
+
 func handleScannerError(c *gin.Context, info *relaycommon.RelayInfo, err error) {
 	if err == nil || err == io.EOF {
 		return
@@ -102,6 +109,9 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 	// 保留预置的 StreamStatus（例如上游已记录的错误），仅在为空时初始化
 	if info.StreamStatus == nil {
 		info.StreamStatus = relaycommon.NewStreamStatus()
+	}
+	if info.ResponsesStreamObservation == nil {
+		info.ResponsesStreamObservation = relaycommon.NewResponsesStreamObservation()
 	}
 
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
@@ -334,18 +344,18 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 				println(data)
 			}
 
-			if len(data) < 6 {
-				continue
-			}
-			if data[:5] != "data:" && data[:6] != "[DONE]" {
-				continue
-			}
-			data = data[5:]
 			data = strings.TrimSpace(data)
+			isDone := strings.HasPrefix(data, "[DONE]")
+			if strings.HasPrefix(data, "data:") {
+				data = strings.TrimSpace(data[len("data:"):])
+				isDone = strings.HasPrefix(data, "[DONE]")
+			} else if !isDone {
+				continue
+			}
 			if data == "" {
 				continue
 			}
-			if !strings.HasPrefix(data, "[DONE]") {
+			if !isDone {
 				firstDataReceived.Store(true)
 				if firstDataTimer != nil {
 					firstDataTimer.Stop()
@@ -362,6 +372,9 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 				}
 			} else {
 				receivedDone.Store(true)
+				if info.ResponsesStreamObservation != nil {
+					info.ResponsesStreamObservation.MarkDone()
+				}
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
 				if common.DebugEnabled {
 					println("received [DONE], stopping scanner")

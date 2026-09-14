@@ -21,6 +21,9 @@ type GeneralSetting struct {
 	ResponsesStreamBootstrapProbeIntervalMilliseconds int    `json:"responses_stream_bootstrap_probe_interval_milliseconds"`
 	ResponsesStreamBootstrapPingIntervalSeconds       int    `json:"responses_stream_bootstrap_ping_interval_seconds"`
 	ResponsesStreamBootstrapRetryableStatusCodes      []int  `json:"responses_stream_bootstrap_retryable_status_codes"`
+	ChannelHealthEnabled                              bool   `json:"channel_health_enabled"`
+	ChannelHealthCooldownSeconds                      int    `json:"channel_health_cooldown_seconds"`
+	ChannelHealthProbeLeaseSeconds                    int    `json:"channel_health_probe_lease_seconds"`
 	// 当前站点额度展示类型：USD / CNY / TOKENS
 	QuotaDisplayType string `json:"quota_display_type"`
 	// 自定义货币符号，用于 CUSTOM 展示类型
@@ -58,9 +61,14 @@ var generalSetting = GeneralSetting{
 	// multi-channel delivery these failures can be channel-specific, allowing
 	// fallback to another channel or a refreshed credential before the first payload.
 	ResponsesStreamBootstrapRetryableStatusCodes: DefaultResponsesBootstrapRetryableStatusCodes(),
-	QuotaDisplayType:           QuotaDisplayTypeUSD,
-	CustomCurrencySymbol:       "¤",
-	CustomCurrencyExchangeRate: 1.0,
+	// Channel health cooling changes request routing and must be enabled explicitly
+	// by an operator after its scope and failure classification are verified.
+	ChannelHealthEnabled:           false,
+	ChannelHealthCooldownSeconds:   DefaultChannelHealthCooldownSeconds,
+	ChannelHealthProbeLeaseSeconds: DefaultChannelHealthProbeLeaseSeconds,
+	QuotaDisplayType:               QuotaDisplayTypeUSD,
+	CustomCurrencySymbol:           "¤",
+	CustomCurrencyExchangeRate:     1.0,
 }
 
 func init() {

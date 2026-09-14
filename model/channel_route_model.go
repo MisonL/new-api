@@ -11,9 +11,17 @@ import (
 )
 
 type routeModelCandidate struct {
-	model           string
-	compactRequest  bool
-	compactFallback bool
+	model             string
+	compactRequest    bool
+	compactFallback   bool
+	compactAliasModel string
+	// effectiveModel is populated by the selector after mapping resolution. It
+	// lets compact capability checks consume the same immutable result instead
+	// of parsing channel.model_mapping independently.
+	effectiveModel         string
+	mappingApplied         bool
+	mappingSnapshotReady   bool
+	compactCapabilityModel string
 }
 
 func getGroupModelRouteCandidates(modelName string) []string {
@@ -26,6 +34,7 @@ func getGroupModelRouteCandidates(modelName string) []string {
 }
 
 func getGroupModelRouteCandidateMeta(modelName string) []routeModelCandidate {
+	modelName = strings.TrimSpace(modelName)
 	if modelName == "" {
 		return nil
 	}
@@ -33,6 +42,12 @@ func getGroupModelRouteCandidateMeta(modelName string) []routeModelCandidate {
 	candidates := []routeModelCandidate{{
 		model:          modelName,
 		compactRequest: isCompact,
+		compactAliasModel: func() string {
+			if isCompact {
+				return modelName
+			}
+			return ""
+		}(),
 	}}
 	if !common.GroupModelRouteHelperEnabled {
 		return candidates
@@ -57,9 +72,10 @@ func appendRouteCandidate(candidates []routeModelCandidate, modelName string, co
 		}
 	}
 	candidates = append(candidates, routeModelCandidate{
-		model:           modelName,
-		compactRequest:  compactFallback,
-		compactFallback: compactFallback,
+		model:             modelName,
+		compactRequest:    compactFallback,
+		compactFallback:   compactFallback,
+		compactAliasModel: candidates[0].compactAliasModel,
 	})
 	return candidates
 }
@@ -96,12 +112,12 @@ func channelSupportsCompactRouteCandidate(channel *Channel, candidate routeModel
 		now := time.Now()
 		switch settings.EffectiveResponsesCompactModeOrDefaultAt(now) {
 		case dto.ResponsesCompactModeNative:
-			return channelAllowsNativeCompactFallback(channel, settings, baseModelName, now)
+			return channelAllowsNativeCompactFallback(channel, candidate, settings, baseModelName, now)
 		case dto.ResponsesCompactModeSynthetic:
 			if settings.IsAutoResponsesCompact() && settings.HasActiveResponsesCompactAutoFallback(now) {
-				return channelAllowsSyntheticCompactBaseFallback(channel, baseModelName)
+				return channelAllowsSyntheticCompactBaseFallback(channel, candidate, baseModelName)
 			}
-			return channelAllowsSyntheticCompactFallback(channel, baseModelName)
+			return channelAllowsSyntheticCompactFallback(channel, candidate, baseModelName)
 		case dto.ResponsesCompactModeDisabled:
 			return false
 		default:
@@ -114,7 +130,7 @@ func channelSupportsCompactRouteCandidate(channel *Channel, candidate routeModel
 		if compactBaseModelName, isCompact := ratio_setting.CompactBaseModelName(candidate.model); isCompact {
 			baseModelName = compactBaseModelName
 		}
-		return channelAllowsAzureCompactRoute(channel, baseModelName)
+		return channelAllowsAzureCompactRoute(channel, candidate, baseModelName)
 	default:
 		return false
 	}
@@ -134,7 +150,91 @@ func channelResponsesCompactSettings(channel *Channel) (dto.ChannelOtherSettings
 	return settings, true
 }
 
-func channelAllowsNativeCompactFallback(channel *Channel, settings dto.ChannelOtherSettings, baseModelName string, now time.Time) bool {
+func channelPrefersResponsesCompactionWhenNamespaceUnsupported(channel *Channel) bool {
+	if channel == nil {
+		return false
+	}
+	settings, ok := channelResponsesCompactSettings(channel)
+	if !ok || !settings.PreferForResponsesCompactionWhenNamespaceUnsupportedOrDefault() {
+		return false
+	}
+	return settings.ResolveResponsesNamespaceToolsCapability(channel.Type) == dto.ResponsesToolCapabilityUnsupported
+}
+
+// preferResponsesCompactionChannels returns the preferred compact candidates
+// when at least one eligible channel explicitly lacks namespace support. Once
+// every preferred channel is excluded, only ordinary candidates remain so the
+// retry priority is evaluated from the ordinary pool instead of an exhausted
+// preferred priority.
+func preferResponsesCompactionChannels(channels []*Channel, compactRequest bool, excluded map[int]struct{}) []*Channel {
+	if !compactRequest || len(channels) == 0 {
+		return channels
+	}
+	preferred := make([]*Channel, 0, len(channels))
+	fallback := make([]*Channel, 0, len(channels))
+	for _, channel := range channels {
+		if channel == nil || !channelPrefersResponsesCompactionWhenNamespaceUnsupported(channel) {
+			fallback = append(fallback, channel)
+			continue
+		}
+		if _, skip := excluded[channel.Id]; skip {
+			continue
+		}
+		preferred = append(preferred, channel)
+	}
+	if len(preferred) > 0 {
+		return preferred
+	}
+	if len(fallback) == 0 {
+		return channels
+	}
+	return fallback
+}
+
+func preferResponsesCompactionChannelsWithWeights(channels []*Channel, weights []uint, compactRequest bool, excluded map[int]struct{}) ([]*Channel, []uint) {
+	if !compactRequest || len(channels) == 0 {
+		return channels, weights
+	}
+	preferredChannels := make([]*Channel, 0, len(channels))
+	preferredWeights := make([]uint, 0, len(weights))
+	fallbackChannels := make([]*Channel, 0, len(channels))
+	fallbackWeights := make([]uint, 0, len(weights))
+	for i, channel := range channels {
+		weight := uint(0)
+		if i < len(weights) {
+			weight = weights[i]
+		}
+		if channel == nil || !channelPrefersResponsesCompactionWhenNamespaceUnsupported(channel) {
+			fallbackChannels = append(fallbackChannels, channel)
+			fallbackWeights = append(fallbackWeights, weight)
+			continue
+		}
+		if _, skip := excluded[channel.Id]; skip {
+			continue
+		}
+		preferredChannels = append(preferredChannels, channel)
+		preferredWeights = append(preferredWeights, weight)
+	}
+	if len(preferredChannels) > 0 {
+		return preferredChannels, preferredWeights
+	}
+	if len(fallbackChannels) == 0 {
+		return channels, weights
+	}
+	return fallbackChannels, fallbackWeights
+}
+
+// IsResponsesCompactionNamespacePreferred reports whether a selected channel
+// matches the compact routing preference for an unsupported namespace.
+func IsResponsesCompactionNamespacePreferred(channel *Channel, modelName string) bool {
+	if channel == nil {
+		return false
+	}
+	_, isCompact := ratio_setting.CompactBaseModelName(strings.TrimSpace(modelName))
+	return isCompact && channelPrefersResponsesCompactionWhenNamespaceUnsupported(channel)
+}
+
+func channelAllowsNativeCompactFallback(channel *Channel, candidate routeModelCandidate, settings dto.ChannelOtherSettings, baseModelName string, now time.Time) bool {
 	baseModelName = strings.TrimSpace(baseModelName)
 	if baseModelName == "" {
 		return false
@@ -145,7 +245,7 @@ func channelAllowsNativeCompactFallback(channel *Channel, settings dto.ChannelOt
 	}
 
 	compactSignals := compactModelSignals(settings)
-	for _, mappedBaseModelName := range compactMappedBaseModelCandidates(channel, baseModelName, compactModelName) {
+	for _, mappedBaseModelName := range compactMappedBaseModelCandidatesForCandidate(channel, candidate, baseModelName, compactModelName) {
 		if compactRouteTargetAllowed(channel, compactSignals, mappedBaseModelName) {
 			return true
 		}
@@ -161,7 +261,7 @@ func channelAllowsNativeCompactFallback(channel *Channel, settings dto.ChannelOt
 	return ok
 }
 
-func channelAllowsSyntheticCompactFallback(channel *Channel, baseModelName string) bool {
+func channelAllowsSyntheticCompactFallback(channel *Channel, candidate routeModelCandidate, baseModelName string) bool {
 	baseModelName = strings.TrimSpace(baseModelName)
 	if baseModelName == "" {
 		return false
@@ -170,7 +270,7 @@ func channelAllowsSyntheticCompactFallback(channel *Channel, baseModelName strin
 	if modelListContains(channel.GetModels(), compactModelName) || modelListContains(channel.GetModels(), baseModelName) {
 		return true
 	}
-	for _, mappedBaseModelName := range compactMappedBaseModelCandidates(channel, baseModelName, compactModelName) {
+	for _, mappedBaseModelName := range compactMappedBaseModelCandidatesForCandidate(channel, candidate, baseModelName, compactModelName) {
 		if modelListContains(channel.GetModels(), mappedBaseModelName) ||
 			modelListContains(channel.GetModels(), ratio_setting.WithCompactModelSuffix(mappedBaseModelName)) {
 			return true
@@ -179,7 +279,7 @@ func channelAllowsSyntheticCompactFallback(channel *Channel, baseModelName strin
 	return false
 }
 
-func channelAllowsSyntheticCompactBaseFallback(channel *Channel, baseModelName string) bool {
+func channelAllowsSyntheticCompactBaseFallback(channel *Channel, candidate routeModelCandidate, baseModelName string) bool {
 	baseModelName = strings.TrimSpace(baseModelName)
 	if baseModelName == "" {
 		return false
@@ -188,7 +288,7 @@ func channelAllowsSyntheticCompactBaseFallback(channel *Channel, baseModelName s
 	if modelListContains(channel.GetModels(), baseModelName) {
 		return true
 	}
-	for _, mappedBaseModelName := range compactMappedBaseModelCandidates(channel, baseModelName, compactModelName) {
+	for _, mappedBaseModelName := range compactMappedBaseModelCandidatesForCandidate(channel, candidate, baseModelName, compactModelName) {
 		if modelListContains(channel.GetModels(), mappedBaseModelName) {
 			return true
 		}
@@ -196,7 +296,7 @@ func channelAllowsSyntheticCompactBaseFallback(channel *Channel, baseModelName s
 	return false
 }
 
-func channelAllowsAzureCompactRoute(channel *Channel, baseModelName string) bool {
+func channelAllowsAzureCompactRoute(channel *Channel, candidate routeModelCandidate, baseModelName string) bool {
 	baseModelName = strings.TrimSpace(baseModelName)
 	if baseModelName == "" {
 		return false
@@ -206,7 +306,7 @@ func channelAllowsAzureCompactRoute(channel *Channel, baseModelName string) bool
 		modelListContains(channel.GetModels(), baseModelName) {
 		return true
 	}
-	for _, mappedBaseModelName := range compactMappedBaseModelCandidates(channel, baseModelName, compactModelName) {
+	for _, mappedBaseModelName := range compactMappedBaseModelCandidatesForCandidate(channel, candidate, baseModelName, compactModelName) {
 		if modelListContains(channel.GetModels(), mappedBaseModelName) ||
 			modelListContains(channel.GetModels(), ratio_setting.WithCompactModelSuffix(mappedBaseModelName)) {
 			return true
@@ -229,48 +329,40 @@ func compactRouteTargetAllowed(channel *Channel, compactSignals map[string]struc
 		modelListContains(channel.GetModels(), baseModelName)
 }
 
-func compactMappedBaseModelCandidates(channel *Channel, baseModelName string, compactModelName string) []string {
-	if channel == nil || channel.ModelMapping == nil {
+// CompactMappedBaseModelCandidates returns mapping-derived compact targets for
+// callers that already hold a validated snapshot. It is intentionally a small
+// public adapter for route diagnostics and tests; normal selectors should pass
+// the resolved effective model through routeModelCandidate instead.
+func CompactMappedBaseModelCandidates(mapping *ChannelModelMapping, baseModelName string, compactModelName string) []string {
+	if mapping == nil {
 		return nil
 	}
-	modelMapping := strings.TrimSpace(channel.GetModelMapping())
-	if modelMapping == "" || modelMapping == "{}" {
-		return nil
+	if mappedModel, _, err := mapping.Resolve(compactModelName, true); err == nil && strings.TrimSpace(mappedModel) != "" && mappedModel != compactModelName {
+		return appendCompactMappedCandidate(nil, mappedModel)
 	}
-	modelMap := make(map[string]string)
-	if err := common.UnmarshalJsonStr(modelMapping, &modelMap); err != nil {
-		return nil
+	if mappedModel, _, err := mapping.Resolve(baseModelName, false); err == nil && strings.TrimSpace(mappedModel) != "" && mappedModel != baseModelName {
+		return appendCompactMappedCandidate(nil, mappedModel)
 	}
-	candidates := make([]string, 0, 2)
-	if mappedModel := strings.TrimSpace(modelMap[compactModelName]); mappedModel != "" {
-		return appendCompactMappedCandidate(candidates, mappedModel)
-	}
-	if mappedModel, ok := resolveCompactBaseModelMapping(modelMap, baseModelName); ok {
-		return appendCompactMappedCandidate(candidates, mappedModel)
-	}
-	return candidates
+	return nil
 }
 
-func resolveCompactBaseModelMapping(modelMap map[string]string, modelName string) (string, bool) {
-	modelName = strings.TrimSpace(modelName)
-	if modelName == "" {
-		return "", false
+func compactMappedBaseModelCandidatesForCandidate(channel *Channel, candidate routeModelCandidate, baseModelName string, compactModelName string) []string {
+	if strings.TrimSpace(candidate.compactCapabilityModel) != "" {
+		return appendCompactMappedCandidate(nil, candidate.compactCapabilityModel)
 	}
-	visited := map[string]struct{}{modelName: {}}
-	currentModel := modelName
-	mapped := false
-	for {
-		nextModel := strings.TrimSpace(modelMap[currentModel])
-		if nextModel == "" {
-			return currentModel, mapped
-		}
-		if _, ok := visited[nextModel]; ok {
-			return "", false
-		}
-		visited[nextModel] = struct{}{}
-		currentModel = nextModel
-		mapped = true
+	if candidate.mappingApplied && strings.TrimSpace(candidate.effectiveModel) != "" {
+		return appendCompactMappedCandidate(nil, candidate.effectiveModel)
 	}
+	if candidate.mappingSnapshotReady {
+		// The caller already resolved and validated this channel's mapping through
+		// its request-scoped snapshot. An empty result means there is no mapping
+		// target for this candidate; never parse channel.model_mapping again.
+		return nil
+	}
+	// Unprepared candidates are not eligible for a compact mapping target. All
+	// production selector paths call prepareResolvedRouteCandidate first, and
+	// refusing to parse here prevents a hidden second mapping implementation.
+	return nil
 }
 
 func appendCompactMappedCandidate(candidates []string, modelName string) []string {

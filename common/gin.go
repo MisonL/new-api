@@ -20,6 +20,12 @@ import (
 const KeyRequestBody = "key_request_body"
 const KeyBodyStorage = "key_body_storage"
 
+const ResponsesOpaqueReplayIngressMaxMB = 768
+
+// CodexLocalResponsesCompactionIngressMaxMB is retained for compatibility
+// with callers that used the former local-compaction-only name.
+const CodexLocalResponsesCompactionIngressMaxMB = ResponsesOpaqueReplayIngressMaxMB
+
 var ErrRequestBodyTooLarge = errors.New("request body too large")
 
 func IsRequestBodyTooLargeError(err error) bool {
@@ -31,6 +37,38 @@ func IsRequestBodyTooLargeError(err error) bool {
 	}
 	var mbe *http.MaxBytesError
 	return errors.As(err, &mbe)
+}
+
+// RequestBodyIngressLimit returns the decompressed limit applied before route
+// middleware runs. It must not trust request metadata because this stage runs
+// before token authentication. Opaque Responses replay candidates use a
+// deferred body wrapper and receive their larger bounded limit only after
+// authentication.
+func RequestBodyIngressLimit(c *gin.Context) int64 {
+	return defaultRequestBodyIngressMaxBytes()
+}
+
+func defaultRequestBodyIngressMaxBytes() int64 {
+	maxMB := constant.MaxRequestBodyMB
+	if maxMB <= 0 {
+		maxMB = 32
+	}
+	return int64(maxMB) << 20
+}
+
+func defaultRequestBodyMaxBytes() int64 {
+	maxMB := constant.MaxRequestBodyMB
+	if maxMB <= 0 {
+		maxMB = 128
+	}
+	return int64(maxMB) << 20
+}
+
+func IsCodexLocalResponsesCompactionContext(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	return IsCodexLocalResponsesCompactionRequest(c.Request)
 }
 
 func GetRequestBody(c *gin.Context) (io.Seeker, error) {
@@ -59,11 +97,8 @@ func GetRequestBody(c *gin.Context) (io.Seeker, error) {
 		}
 	}
 
-	maxMB := constant.MaxRequestBodyMB
-	if maxMB <= 0 {
-		maxMB = 128 // 默认 128MB
-	}
-	maxBytes := int64(maxMB) << 20
+	maxBytes := defaultRequestBodyMaxBytes()
+	maxMB := maxBytes >> 20
 
 	contentLength := c.Request.ContentLength
 
@@ -297,11 +332,18 @@ func ParseMultipartFormReusable(c *gin.Context) (*multipart.Form, error) {
 	reader := multipart.NewReader(bytes.NewReader(requestBody), boundary)
 	form, err := reader.ReadForm(multipartMemoryLimit())
 	if err != nil {
+		// ReadForm may return a partially populated form together with an error.
+		// Remove its temporary files before returning so malformed or oversized
+		// multipart requests cannot leak disk storage.
+		if form != nil {
+			_ = form.RemoveAll()
+		}
 		return nil, err
 	}
 
 	// Reset request body
 	if _, seekErr := storage.Seek(0, io.SeekStart); seekErr != nil {
+		_ = form.RemoveAll()
 		return nil, seekErr
 	}
 	c.Request.Body = io.NopCloser(storage)
@@ -358,6 +400,9 @@ func parseMultipartFormData(c *gin.Context, data []byte, v any) error {
 	reader := multipart.NewReader(bytes.NewReader(data), boundary)
 	form, err := reader.ReadForm(multipartMemoryLimit())
 	if err != nil {
+		if form != nil {
+			_ = form.RemoveAll()
+		}
 		return err
 	}
 	defer form.RemoveAll()

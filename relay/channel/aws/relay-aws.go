@@ -2,7 +2,6 @@ package aws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +27,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	bedrockruntimeTypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"github.com/aws/smithy-go/auth/bearer"
+	smithymiddleware "github.com/aws/smithy-go/middleware"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // getAwsErrorStatusCode extracts HTTP status code from AWS SDK error
@@ -65,6 +66,9 @@ func newAwsRateLimitAwareRetryer() aws.Retryer {
 }
 
 func newAwsClient(c *gin.Context, info *relaycommon.RelayInfo) (*bedrockruntime.Client, error) {
+	if info == nil || info.ChannelMeta == nil {
+		return nil, errors.New("AWS relay info or channel metadata is nil")
+	}
 	var (
 		httpClient *http.Client
 		err        error
@@ -79,6 +83,17 @@ func newAwsClient(c *gin.Context, info *relaycommon.RelayInfo) (*bedrockruntime.
 	}
 
 	awsSecret := strings.Split(info.ApiKey, "|")
+	var apiOptions []func(*smithymiddleware.Stack) error
+	isApiKey := info != nil && info.ChannelMeta != nil && info.ChannelOtherSettings.AwsKeyType == dto.AwsKeyTypeApiKey
+	if isApiKey {
+		headerOverride, resolveErr := channel.ResolveHeaderOverride(info, c)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if len(headerOverride) > 0 {
+			apiOptions = append(apiOptions, newAwsHeaderOverrideAPIOption(headerOverride))
+		}
+	}
 	var client *bedrockruntime.Client
 	switch len(awsSecret) {
 	case 2:
@@ -89,6 +104,7 @@ func newAwsClient(c *gin.Context, info *relaycommon.RelayInfo) (*bedrockruntime.
 			BearerAuthTokenProvider: bearer.StaticTokenProvider{Token: bearer.Token{Value: apiKey}},
 			HTTPClient:              httpClient,
 			Retryer:                 newAwsRateLimitAwareRetryer(),
+			APIOptions:              apiOptions,
 		})
 	case 3:
 		ak := awsSecret[0]
@@ -99,6 +115,7 @@ func newAwsClient(c *gin.Context, info *relaycommon.RelayInfo) (*bedrockruntime.
 			Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(ak, sk, "")),
 			HTTPClient:  httpClient,
 			Retryer:     newAwsRateLimitAwareRetryer(),
+			APIOptions:  apiOptions,
 		})
 	default:
 		return nil, errors.New("invalid aws secret key")
@@ -107,12 +124,53 @@ func newAwsClient(c *gin.Context, info *relaycommon.RelayInfo) (*bedrockruntime.
 	return client, nil
 }
 
+func newAwsHeaderOverrideAPIOption(headers map[string]string) func(*smithymiddleware.Stack) error {
+	return func(stack *smithymiddleware.Stack) error {
+		return stack.Finalize.Add(smithymiddleware.FinalizeMiddlewareFunc("new-api-header-override", func(ctx context.Context, in smithymiddleware.FinalizeInput, next smithymiddleware.FinalizeHandler) (smithymiddleware.FinalizeOutput, smithymiddleware.Metadata, error) {
+			request, ok := in.Request.(*smithyhttp.Request)
+			if !ok {
+				return smithymiddleware.FinalizeOutput{}, smithymiddleware.Metadata{}, fmt.Errorf("AWS request has unexpected transport type %T", in.Request)
+			}
+			if err := applyAwsHeaderOverrides(request, headers); err != nil {
+				return smithymiddleware.FinalizeOutput{}, smithymiddleware.Metadata{}, err
+			}
+			return next.HandleFinalize(ctx, in)
+		}), smithymiddleware.After)
+	}
+}
+
+func applyAwsHeaderOverrides(request *smithyhttp.Request, headers map[string]string) error {
+	if request == nil || request.Request == nil {
+		return errors.New("AWS request is nil while applying header overrides")
+	}
+	if request.Header == nil {
+		request.Header = make(http.Header)
+	}
+	for key, value := range headers {
+		request.Header.Set(key, value)
+		if strings.EqualFold(key, "Host") {
+			request.Host = value
+		}
+	}
+	return nil
+}
+
 func doAwsClientRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor, requestBody io.Reader) (any, error) {
+	if info == nil || info.ChannelMeta == nil {
+		return nil, types.NewError(errors.New("AWS relay info or channel metadata is nil"), types.ErrorCodeBadRequestBody)
+	}
+	if a == nil {
+		return nil, types.NewError(errors.New("AWS adaptor is nil"), types.ErrorCodeBadRequestBody)
+	}
 	awsCli, err := newAwsClient(c, info)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeChannelAwsClientError)
 	}
 	a.AwsClient = awsCli
+
+	if a.ClientMode == ClientModeApiKey {
+		return doAwsConverseRequest(c, info, a, requestBody)
+	}
 
 	// 获取对应的AWS模型ID
 	awsModelId := getAwsModelID(info.UpstreamModelName)
@@ -125,7 +183,9 @@ func doAwsClientRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor,
 
 	// init empty request.header
 	requestHeader := http.Header{}
-	a.SetupRequestHeader(c, &requestHeader, info)
+	if err := a.SetupRequestHeader(c, &requestHeader, info); err != nil {
+		return nil, types.NewError(err, types.ErrorCodeBadRequestBody)
+	}
 	headerOverride, err := channel.ResolveHeaderOverride(info, c)
 	if err != nil {
 		return nil, err
@@ -222,11 +282,30 @@ func getAwsRegionPrefix(awsRegionId string) string {
 
 func awsModelCanCrossRegion(awsModelId, awsRegionPrefix string) bool {
 	regionSet, exists := awsModelCanCrossRegionMap[awsModelId]
-	return exists && regionSet[awsRegionPrefix]
+	if !exists {
+		return false
+	}
+	if regionSet[awsRegionPrefix] {
+		return true
+	}
+	// AWS uses both "ap" (the region id prefix, for example
+	// ap-southeast-1) and "apac" (the inference-profile prefix). Keep
+	// the lookup tolerant of either spelling so Nova and Claude models use
+	// the same cross-region routing rule.
+	if awsRegionPrefix == "ap" {
+		return regionSet["apac"]
+	}
+	if awsRegionPrefix == "apac" {
+		return regionSet["ap"]
+	}
+	return false
 }
 
 func awsModelCrossRegion(awsModelId, awsRegionPrefix string) string {
 	modelPrefix, find := awsRegionCrossModelPrefixMap[awsRegionPrefix]
+	if !find && awsRegionPrefix == "apac" {
+		modelPrefix, find = awsRegionCrossModelPrefixMap["ap"]
+	}
 	if !find {
 		return awsModelId
 	}
@@ -349,11 +428,18 @@ func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) 
 		} `json:"usage"`
 	}
 
-	if err := json.Unmarshal(awsResp.Body, &novaResp); err != nil {
+	if err := common.Unmarshal(awsResp.Body, &novaResp); err != nil {
 		return types.NewError(errors.Wrap(err, "unmarshal nova response"), types.ErrorCodeBadResponseBody), nil
 	}
 
 	// 构造OpenAI格式响应
+	if len(novaResp.Output.Message.Content) == 0 {
+		return types.NewError(errors.New("Nova response contains no message content"), types.ErrorCodeBadResponseBody), nil
+	}
+	var responseText strings.Builder
+	for _, content := range novaResp.Output.Message.Content {
+		responseText.WriteString(content.Text)
+	}
 	response := dto.OpenAITextResponse{
 		Id:      helper.GetResponseID(c),
 		Object:  "chat.completion",
@@ -363,7 +449,7 @@ func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) 
 			Index: 0,
 			Message: dto.Message{
 				Role:    "assistant",
-				Content: novaResp.Output.Message.Content[0].Text,
+				Content: responseText.String(),
 			},
 			FinishReason: "stop",
 		}},

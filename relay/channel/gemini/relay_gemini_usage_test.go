@@ -17,8 +17,6 @@ import (
 )
 
 func TestGeminiChatHandlerCompletionTokensExcludeToolUsePromptTokens(t *testing.T) {
-	t.Parallel()
-
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -125,8 +123,6 @@ func TestGeminiStreamHandlerCompletionTokensExcludeToolUsePromptTokens(t *testin
 }
 
 func TestGeminiTextGenerationHandlerPromptTokensIncludeToolUsePromptTokens(t *testing.T) {
-	t.Parallel()
-
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-3-flash-preview:generateContent", nil)
@@ -175,8 +171,6 @@ func TestGeminiTextGenerationHandlerPromptTokensIncludeToolUsePromptTokens(t *te
 }
 
 func TestGeminiChatHandlerUsesEstimatedPromptTokensWhenUsagePromptMissing(t *testing.T) {
-	t.Parallel()
-
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -283,8 +277,6 @@ func TestGeminiStreamHandlerUsesEstimatedPromptTokensWhenUsagePromptMissing(t *t
 }
 
 func TestGeminiTextGenerationHandlerUsesEstimatedPromptTokensWhenUsagePromptMissing(t *testing.T) {
-	t.Parallel()
-
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-3-flash-preview:generateContent", nil)
@@ -330,4 +322,43 @@ func TestGeminiTextGenerationHandlerUsesEstimatedPromptTokensWhenUsagePromptMiss
 	require.Equal(t, 20, usage.PromptTokens)
 	require.Equal(t, 100, usage.CompletionTokens)
 	require.Equal(t, 110, usage.TotalTokens)
+}
+
+func TestBuildUsageFromGeminiMetadataMapsModalities(t *testing.T) {
+	usage := buildUsageFromGeminiMetadata(dto.GeminiUsageMetadata{
+		PromptTokenCount:        100,
+		ToolUsePromptTokenCount: 20,
+		CandidatesTokenCount:    30,
+		ThoughtsTokenCount:      5,
+		TotalTokenCount:         155,
+		CachedContentTokenCount: 7,
+		PromptTokensDetails: []dto.GeminiPromptTokensDetails{
+			{Modality: "TEXT", TokenCount: 60},
+			{Modality: "IMAGE", TokenCount: 20},
+			{Modality: "VIDEO", TokenCount: 10},
+			{Modality: "AUDIO", TokenCount: 30},
+		},
+		ToolUsePromptTokensDetails: []dto.GeminiPromptTokensDetails{
+			{Modality: "IMAGE", TokenCount: 3},
+			{Modality: "AUDIO", TokenCount: 2},
+		},
+		CandidatesTokensDetails: []dto.GeminiPromptTokensDetails{
+			{Modality: "TEXT", TokenCount: 15},
+			{Modality: "IMAGE", TokenCount: 5},
+			{Modality: "VIDEO", TokenCount: 7},
+			{Modality: "AUDIO", TokenCount: 3},
+		},
+	}, 0)
+
+	require.Equal(t, 120, usage.PromptTokens)
+	require.Equal(t, 35, usage.CompletionTokens)
+	require.Equal(t, 155, usage.TotalTokens)
+	require.Equal(t, 7, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 60, usage.PromptTokensDetails.TextTokens)
+	require.Equal(t, 33, usage.PromptTokensDetails.ImageTokens)
+	require.Equal(t, 32, usage.PromptTokensDetails.AudioTokens)
+	require.Equal(t, 15, usage.CompletionTokenDetails.TextTokens)
+	require.Equal(t, 12, usage.CompletionTokenDetails.ImageTokens)
+	require.Equal(t, 3, usage.CompletionTokenDetails.AudioTokens)
+	require.Equal(t, 5, usage.CompletionTokenDetails.ReasoningTokens)
 }

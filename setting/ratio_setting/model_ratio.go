@@ -44,10 +44,13 @@ var defaultModelRatio = map[string]float64{
 	"gpt-4o":                                  1.25, // $2.5 / 1M tokens
 	"gpt-4o-audio-preview":                    1.25, // $2.5 / 1M tokens
 	"gpt-4o-audio-preview-2024-10-01":         1.25, // $2.5 / 1M tokens
+	"gpt-4o-audio-preview-2024-12-17":         1.25,
+	"gpt-4o-audio-preview-2025-06-03":         1.25,
 	"gpt-4o-2024-05-13":                       2.5,  // $5 / 1M tokens
 	"gpt-4o-2024-08-06":                       1.25, // $2.5 / 1M tokens
 	"gpt-4o-2024-11-20":                       1.25, // $2.5 / 1M tokens
 	"gpt-4o-realtime-preview":                 2.5,
+	"gpt-4o-realtime-preview-2025-06-03":      2.5,
 	"gpt-4o-realtime-preview-2024-10-01":      2.5,
 	"gpt-4o-realtime-preview-2024-12-17":      2.5,
 	"gpt-4o-mini-realtime-preview":            0.3,
@@ -59,6 +62,7 @@ var defaultModelRatio = map[string]float64{
 	"gpt-4.1-nano":                     0.05, // $0.1 / 1M tokens
 	"gpt-4.1-nano-2025-04-14":          0.05, // $0.1 / 1M tokens
 	"gpt-image-1":                      2.5,  // $5 / 1M tokens
+	"chatgpt-image-latest":             2.5,  // $5 / 1M text tokens; same price as gpt-image-1.5
 	"o1":                               7.5,  // $15 / 1M tokens
 	"o1-2024-12-17":                    7.5,  // $15 / 1M tokens
 	"o1-preview":                       7.5,  // $15 / 1M tokens
@@ -98,11 +102,32 @@ var defaultModelRatio = map[string]float64{
 	"gpt-5-mini-2025-08-07":            0.125,
 	"gpt-5-nano":                       0.025,
 	"gpt-5-nano-2025-08-07":            0.025,
-	"gpt-5.5":                          2.5, // $5 / 1M tokens
-	"gpt-5.6":                          2.5,
-	"gpt-5.6-sol":                      2.5, // $5 / 1M tokens
-	"gpt-5.6-terra":                    1.0, // $2 / 1M tokens
-	"gpt-5.6-luna":                     0.1, // $0.2 / 1M tokens
+	"gpt-6-astra":                      5.0,  // $10 / 1M tokens; standard list price
+	"gpt-5.5":                          2.5,  // $5 / 1M tokens
+	"GPT-5.5":                          2.5,  // upstream case-preserving alias
+	"gpt-5.6":                          2.5,  // alias of gpt-5.6-sol: non-promotional $5 / 1M tokens
+	"gpt-5.6-sol":                      2.5,  // non-promotional $5 / 1M tokens; do not use OpenAI's temporary promotion
+	"gpt-5.6-terra":                    1.0,  // $2 / 1M tokens
+	"gpt-5.6-luna":                     0.1,  // $0.2 / 1M tokens
+	"gpt-5.6-cyber":                    6.25, // $12.5 / 1M tokens
+	"gpt-5.5-cyber":                    6.25, // $12.5 / 1M tokens
+	"gpt-daybreak-blue-latest":         2.5,  // alias of gpt-5.6-sol list pricing
+	"gpt-daybreak-red-latest":          6.25, // alias of gpt-5.6-cyber
+	"gpt-realtime-2.1":                 2.0,  // $4 / 1M text tokens
+	"gpt-realtime-2.1-mini":            0.3,  // $0.6 / 1M text tokens
+	"gpt-realtime-2":                   2.0,  // $4 / 1M text tokens
+	"gpt-realtime-1.5":                 2.0,  // $4 / 1M text tokens
+	"gpt-realtime-mini":                0.3,  // $0.6 / 1M text tokens
+	"gpt-realtime-mini-2025-10-06":     0.3,
+	"gpt-realtime-mini-2025-12-15":     0.3,
+	"gpt-realtime":                     2.0, // $4 / 1M text tokens
+	"gpt-realtime-2025-08-28":          2.0,
+	"gpt-audio-1.5":                    1.25, // $2.5 / 1M text tokens
+	"gpt-audio-mini":                   0.3,  // $0.6 / 1M text tokens
+	"gpt-audio-mini-2025-10-06":        0.3,
+	"gpt-audio-mini-2025-12-15":        0.3,
+	"gpt-audio":                        1.25, // $2.5 / 1M text tokens
+	"gpt-audio-2025-08-28":             1.25,
 	"gpt-5-codex":                      0.625,
 	"gpt-5-codex-mini":                 0.125,
 	"gpt-5.1":                          0.625,
@@ -115,46 +140,55 @@ var defaultModelRatio = map[string]float64{
 	"gpt-5.3-codex":                    0.875,
 	"gpt-5.3-codex-spark":              0.875,
 	// Channel aliases use the published gpt-5.3-codex price.
-	"gpt-5.3":                       0.875,
-	"gpt-5.3-spark":                 0.875,
-	"gpt-5.4":                       1.25,
-	"gpt-5.4-mini":                  0.375,
-	"gpt-5.4-nano":                  0.1,
-	"gpt-5.4-pro":                   15.0,
-	"gpt-5.5-pro":                   15.0,
-	"gpt-5-pro":                     7.5,
-	"gpt-5.4-openai-compact":        0.625,
-	"gpt-5.5-openai-compact":        1.25,
-	"gpt-image-1-mini":              1.0, // $2 / 1M tokens
-	"gpt-image-1.5":                 2.5,
-	"gpt-image-2":                   2.5,
-	"kimi-k3":                       1.5,   // $3 / 1M tokens; https://platform.kimi.ai/docs/pricing/chat-k3
-	"kimi-k2.6":                     0.475, // $0.95 / 1M tokens
-	"kimi-k2.7-code":                0.475, // $0.95 / 1M tokens; https://platform.kimi.ai/docs/pricing/chat-k27-code.md
-	"kimi-k2.7-code-highspeed":      0.95,  // $1.90 / 1M tokens; https://platform.kimi.ai/docs/pricing/chat-k27-code.md
-	"claude-fable-5":                5.0,   // $10 / 1M tokens
-	"claude-opus-5":                 2.5,   // $5 / 1M tokens
-	"claude-opus-5-thinking":        2.5,
-	"claude-sonnet-5":               1.0, // $2 / 1M tokens; Anthropic now lists this as the standard price
-	"claude-sonnet-5-thinking":      1.0,
-	"claude-haiku-4-5":              0.5,
-	"claude-sonnet-4":               1.5,
-	"claude-sonnet-4-5":             1.5,
-	"claude-sonnet-4-6":             1.5,
-	"claude-opus-4-5":               2.5,
-	"claude-opus-4-8":               2.5,
-	"codex-auto-review":             2.5,
-	"deepseek-v4-flash":             0.07, // $0.14 / 1M tokens
-	"deepseek-ai/deepseek-v4-flash": 0.07,
+	"gpt-5.3":                  0.875,
+	"gpt-5.3-spark":            0.875,
+	"gpt-5.4":                  1.25,
+	"gpt-5.4-mini":             0.375,
+	"gpt-5.4-nano":             0.1,
+	"gpt-5.4-pro":              15.0,
+	"gpt-5.5-pro":              15.0,
+	"gpt-5-pro":                7.5,
+	"gpt-5.4-openai-compact":   0.625,
+	"gpt-5.5-openai-compact":   1.25,
+	"gpt-image-1-mini":         1.0, // $2 / 1M tokens
+	"gpt-image-1.5":            2.5,
+	"gpt-image-2":              2.5,
+	"kimi-k3":                  1.5,   // $3 / 1M tokens; https://platform.kimi.ai/docs/pricing/chat-k3
+	"Kimi-K3":                  1.5,   // upstream case-preserving alias
+	"kimi-k2.6":                0.475, // $0.95 / 1M tokens
+	"kimi-k2.7-code":           0.475, // $0.95 / 1M tokens; https://platform.kimi.ai/docs/pricing/chat-k27-code.md
+	"kimi-k2.7-code-highspeed": 0.95,  // $1.90 / 1M tokens; https://platform.kimi.ai/docs/pricing/chat-k27-code.md
+	"claude-fable-5":           5.0,   // $10 / 1M tokens
+	"claude-opus-5":            2.5,   // $5 / 1M tokens
+	"claude-opus-5-thinking":   2.5,
+	"claude-sonnet-5":          1.0, // $2 / 1M tokens; Anthropic now lists this as the standard price
+	"claude-sonnet-5-thinking": 1.0,
+	"claude-haiku-4-5":         0.5,
+	"claude-sonnet-4":          1.5,
+	"claude-sonnet-4-5":        1.5,
+	"claude-sonnet-4-6":        1.5,
+	"claude-opus-4-5":          2.5,
+	"claude-opus-4-8":          2.5,
+	"codex-auto-review":        2.5,
+	// DeepSeek V4.1-Flash current price: $0.15 / 1M input tokens.
+	"deepseek-flash":             0.15 / 2,
+	"deepseek-ai/deepseek-flash": 0.15 / 2,
+	// DeepSeek V4.1-Flash dated/channel aliases use the official
+	// deepseek-flash price object.
+	"deepseek-v4.1-flash":           0.15 / 2,
+	"deepseek-v4.1-flash-0910":      0.15 / 2,
+	"deepseek-v4-flash":             0.15 / 2,
+	"deepseek-ai/deepseek-v4-flash": 0.15 / 2,
 	// DeepSeek V4 Flash Vision Exp uses the same published token prices as
 	// V4 Flash; its peak/off-peak schedule is maintained by billing_setting.
-	"deepseek-v4-flash-vision-exp":             0.07,
-	"deepseek-ai/deepseek-v4-flash-vision-exp": 0.07,
+	"deepseek-v4-flash-vision-exp":             0.15 / 2,
+	"deepseek-ai/deepseek-v4-flash-vision-exp": 0.15 / 2,
 	"deepseek-v4-pro":                          0.2175, // $0.435 / 1M tokens
 	"deepseek-ai/deepseek-v4-pro":              0.2175,
 	// MiMo V2.5 overseas price: $0.14 / 1M input tokens.
 	"mimo-v2.5":              0.07,
-	"minimax-m3":             0.15, // $0.30 / 1M tokens
+	"mimo-v2.5-pro":          0.435 / 2, // $0.435 / 1M tokens; https://mimo.mi.com/static/docs/price/pay-as-you-go.md
+	"minimax-m3":             0.15,      // $0.30 / 1M current permanent price; official page marks it Permanent 50% off $0.60 list price
 	"minimaxai/minimax-m3":   0.15,
 	"minimax-m2":             0.15, // $0.30 / 1M tokens
 	"minimax-m2.1":           0.15, // $0.30 / 1M tokens
@@ -162,21 +196,39 @@ var defaultModelRatio = map[string]float64{
 	"minimax-m2.1-highspeed": 0.3,  // $0.60 / 1M tokens
 	"minimax-m2p5-highspeed": 0.3,  // $0.60 / 1M tokens
 	"minimax-m2.7-highspeed": 0.3,  // $0.60 / 1M tokens
+	// LongCat-2.0 Chat API standard price: ¥5 / 1M input tokens.
+	// The official page also lists a limited-time discounted price; this
+	// project keeps the standard price and does not use that discount.
+	"longcat-2.0": 5.0 / 1000 * RMB, // https://longcat.ai/platform/docs/Pricing/LongCat-2.0.html
 	// Qwen3.8 official API prices are published in RMB per 1M tokens.
-	"qwen3.8-max":                            12 / 1000 * RMB,
-	"qwen3.8-flash":                          0.8 / 1000 * RMB,
-	"qwen-3.8-flash":                         0.8 / 1000 * RMB,
-	"agnes-1.5-flash":                        0.035, // $0.07 / 1M tokens
-	"agnes-2.0-flash":                        0.015, // $0.03 / 1M tokens
-	"agnes-2.5-flash":                        0.015, // $0.03 / 1M tokens
+	"qwen3.8-max":    12.0 / 1000 * RMB,
+	"qwen3.8-flash":  0.8 / 1000 * RMB,
+	"qwen-3.8-flash": 0.8 / 1000 * RMB,
+	"qwen3.8-27b":    3.0 / 1000 * RMB, // ¥3 / 1M tokens; https://www.qianwenai.com/models/qwen3.8-27b
+	"qwen-3.8-27b":   3.0 / 1000 * RMB,
+	"Qwen3.8-27B":    3.0 / 1000 * RMB,
+	// Qwen3.6-35B-A3B official API price: ¥1.8 / 1M input tokens and
+	// ¥10.8 / 1M output tokens. No cache price is published.
+	"Qwen3.6-35B-A3B": 1.8 / 1000 * RMB,  // https://www.qianwenai.com/models/qwen3.6-35b-a3b
+	"qwen3.7-max":     12.0 / 1000 * RMB, // ¥12 / 1M list price; https://www.qianwenai.com/models/qwen3.7-max
+	"qwen-3.7-max":    12.0 / 1000 * RMB,
+	"qwen3.7-plus":    2.0 / 1000 * RMB, // ¥2 / 1M list price; https://www.qianwenai.com/models/qwen3.7-plus
+	"qwen-3.7-plus":   2.0 / 1000 * RMB,
+	"agnes-1.5-flash": 0.035, // $0.07 / 1M tokens
+	// Agnes currently lists both Flash text models at $0 for input and output.
+	// agnes-2.0-flash is deprecated, but its current price remains free.
+	"agnes-2.0-flash":                        0,
+	"agnes-2.5-flash":                        0,
+	"agnes-3.0-flash":                        0,     // current official price is $0 / 1M tokens
 	"agnes-2.5-pro":                          0.225, // $0.45 / 1M tokens
 	"agnes-2.5-pro-alpha":                    0.225, // $0.45 / 1M tokens
+	"agnes-2.5-pro-beta":                     0.05,  // $0.10 / 1M tokens; https://wiki.agnes-ai.com/en/docs/pricing.md
 	"gemini-3-flash":                         0.25,
-	"gemini-3-flash-preview":                 0.25,  // $0.50 / 1M tokens
-	"gemini-3.7-flash":                       0.75,  // $1.50 / 1M tokens standard price; do not use the 2026 promotion
-	"gemini-3.6-flash":                       0.75,  // $1.50 / 1M tokens standard price; do not use the 2026 promotion
-	"gemini-3.5-flash":                       0.75,  // $1.50 / 1M tokens
-	"gemini-3.5-flash-lite":                  0.15,  // $0.30 / 1M tokens
+	"gemini-3-flash-preview":                 0.25, // $0.50 / 1M tokens
+	"gemini-3.7-flash":                       0.75, // $1.50 / 1M tokens standard price; do not use the 2026 promotion
+	"gemini-3.6-flash":                       0.75, // $1.50 / 1M tokens standard price; do not use the 2026 promotion
+	"gemini-3.5-flash":                       0.75, // $1.50 / 1M tokens
+	"gemini-3.5-flash-lite":                  0.15, // $0.30 / 1M tokens
 	"gemini-3-pro":                           1.0,
 	"gemini-3-pro-preview":                   1.0,
 	"gemini-3.1-pro":                         1.0,
@@ -201,25 +253,53 @@ var defaultModelRatio = map[string]float64{
 	"gemini-embedding-2-preview":             0.1,               // compatibility alias of Embedding 2
 	"gemma-4-31b-it":                         0.0,               // Free tier only; paid tier is unavailable
 	"gemma-4-26b-a4b-it":                     0.0,               // Free tier only; paid tier is unavailable
+	"glm-4.5":                                0.3,               // $0.60 / 1M tokens; https://docs.z.ai/guides/overview/pricing
+	"glm-4.5-air":                            0.1,               // $0.20 / 1M tokens; https://docs.z.ai/guides/overview/pricing
+	"glm-4.5-flash":                          0.0,               // Official page lists all token prices as Free
+	"glm-4.6":                                0.3,               // $0.60 / 1M tokens; https://docs.z.ai/guides/overview/pricing
+	"glm-4.7":                                0.3,               // $0.60 / 1M tokens; https://docs.z.ai/guides/overview/pricing
+	"glm-4.7-flash":                          0.0,               // Official page lists all token prices as Free
 	"glm-5.1":                                0.7,               // $1.40 / 1M tokens; https://docs.z.ai/guides/overview/pricing
 	"glm-5.2":                                0.7,               // $1.40 / 1M tokens; https://docs.z.ai/guides/overview/pricing
 	"glm-5.3":                                0.7,               // $1.40 / 1M tokens; https://docs.z.ai/guides/overview/pricing.md
 	"glm-5.3-flash":                          0.15 / 2,          // $0.15 / 1M list price; ignore the limited-time promotion
 	"step-3.7-flash":                         1.35 / 1000 * RMB, // ¥1.35 / 1M tokens; https://platform.stepfun.com/docs/zh/guides/pricing/details
-	"grok-4.3":                               0.625,             // $1.25 / 1M tokens
-	"grok-4.5":                               1.0,               // $2 / 1M tokens
-	"grok-4.20":                              0.625,             // $1.25 / 1M tokens
-	"grok-4.20-0309-non-reasoning":           0.625,
-	"grok-4.20-0309-reasoning":               0.625,
-	"grok-4.20-multi-agent-0309":             0.625,
-	"grok-4.6":                               1.0, // $2 / 1M tokens
-	"grok-build-0.1":                         0.5, // $1 / 1M tokens
-	"grok-code-fast-1":                       0.5, // official alias of grok-build-0.1
-	"sensenova-6.7-flash-lite":               0.0,
-	"sensenova-6.8-flash-lite":               0.0,
-	// SenseNova Token Plan currently lists both models as free during the public beta.
+	"step-explore":                           1.35 / 1000 * RMB, // Same price as step-3.7-flash; https://platform.stepfun.com/docs/zh/guides/models/step-explore
+	// StepAudio 2.5 ASR is ¥0.15/hour. Transcription requests are normalized
+	// to 1,000 audio tokens per minute, so the equivalent input price is
+	// ¥2.5/1M tokens. Output transcript tokens are not billed separately.
+	"stepaudio-2.5-asr": 2.5 / 1000 * RMB, // https://platform.stepfun.com/docs/zh/guides/pricing/details
+	// Standard StepAudio 2.5 TTS is ¥5.8/10K input characters. The existing
+	// audio speech path bills the input text units and does not bill audio
+	// output when AudioCompletionRatio is zero; voice cloning is a separate
+	// per-call charge and is intentionally not represented here.
+	"stepaudio-2.5-tts":      5.8 / 10 * RMB,    // https://platform.stepfun.com/docs/zh/guides/pricing/details
+	"stepaudio-2.5-chat":     10.0 / 1000 * RMB, // ¥10 / 1M tokens; https://platform.stepfun.com/docs/zh/guides/pricing/details
+	"stepaudio-2.5-realtime": 10.0 / 1000 * RMB, // ¥10 / 1M tokens; https://platform.stepfun.com/docs/zh/guides/pricing/details
+	// Spark-X2.5 official MaaS standard price: ¥3.2 / 1M input tokens.
+	// The provider currently shows a separate discount; this keeps the
+	// published original price and its explicit ¥0.48 cache-hit price.
+	"spark-x2.5": 3.2 / 1000 * RMB, // https://maas.xfyun.cn/modelSquare/base/2624708664591360
+	// xAI's published Grok 3 Mini API price is $0.30/$0.075/$0.50 per
+	// million input/cache-hit/output tokens. The fast slug is an official
+	// alias of the same pricing object.
+	"grok-3-mini":                  0.15,  // $0.30 / 1M tokens; https://docs.x.ai/llms.txt
+	"grok-3-mini-fast":             0.15,  // official alias of grok-3-mini
+	"grok-4.3":                     0.625, // $1.25 / 1M tokens
+	"grok-4.5":                     1.0,   // $2 / 1M tokens
+	"grok-4.20":                    0.625, // $1.25 / 1M tokens
+	"grok-4.20-0309-non-reasoning": 0.625,
+	"grok-4.20-0309-reasoning":     0.625,
+	"grok-4.20-multi-agent-0309":   0.625,
+	"grok-4.6":                     1.0, // $2 / 1M tokens
+	"grok-build-0.1":               0.5, // $1 / 1M tokens
+	"grok-code-fast-1":             0.5, // official alias of grok-build-0.1
+	// SenseNova Token Plan currently lists these models as free during the
+	// public beta. Keep their zero output ratio explicit instead of relying on
+	// the generic completion fallback.
 	// Source: https://www.sensenova.cn/token-plan
-	"sensenova-u1-fast": 0.0,
+	"sensenova-6.8-flash-lite": 0.0,
+	"sensenova-u1-fast":        0.0,
 	//"gpt-3.5-turbo-0301":           0.75, //deprecated
 	"gpt-3.5-turbo":          0.25,
 	"gpt-3.5-turbo-0613":     0.75,
@@ -379,14 +459,18 @@ var defaultModelRatio = map[string]float64{
 	"llama-3-sonar-large-32k-chat":   1 / 1000 * USD,
 	"llama-3-sonar-large-32k-online": 1 / 1000 * USD,
 	// grok
-	"grok-3-beta":           1.5,
-	"grok-3-mini-beta":      0.15,
-	"grok-2":                1,
-	"grok-2-vision":         1,
-	"grok-beta":             2.5,
-	"grok-vision-beta":      2.5,
-	"grok-3-fast-beta":      2.5,
-	"grok-3-mini-fast-beta": 0.3,
+	"grok-3-beta": 1.5,
+	// xAI's current grok-3-mini pricing object exposes these beta/latest
+	// aliases at the same $0.30/$0.075/$0.50 per-million-token price.
+	"grok-3-mini-beta":        0.15,
+	"grok-3-mini-latest":      0.15,
+	"grok-2":                  1,
+	"grok-2-vision":           1,
+	"grok-beta":               2.5,
+	"grok-vision-beta":        2.5,
+	"grok-3-fast-beta":        2.5,
+	"grok-3-mini-fast-beta":   0.15,
+	"grok-3-mini-fast-latest": 0.15,
 	// Fireworks AI
 	"deepseek-v3p1":             0.28,  // $0.56 / 1M tokens
 	"deepseek-v3p2":             0.28,  // $0.56 / 1M tokens
@@ -447,15 +531,24 @@ var defaultModelRatio = map[string]float64{
 	"Qwen/Qwen3-Reranker-0.6B":             0.01 / 2,
 	"baidu/ERNIE-4.5-300B-A47B":            0.28 / 2,
 	"tencent/Hunyuan-A13B-Instruct":        0.14 / 2,
+	"tencent/hunyuan-a13b-instruct":        0.14 / 2,
+	"hunyuan-a13b-instruct":                0.14 / 2,
 	"stepfun-ai/Step-3.5-Flash":            0.10 / 2,
 	"inclusionAI/Ling-flash-2.0":           0.14 / 2,
 	"ByteDance-Seed/Seed-OSS-36B-Instruct": 0.21 / 2,
 }
 
 var defaultModelPrice = map[string]float64{
-	"agnes-image-2.0-flash":               0.003,
-	"agnes-image-2.1-flash":               0.003,
-	"agnes-video-v2.0":                    0.005,
+	// Agnes currently lists these image/video models as free. Keep the entries
+	// explicit so the fixed-price path reports the current $0 price.
+	"agnes-image-2.0-flash": 0,
+	"agnes-image-2.1-flash": 0,
+	"agnes-image-2.5-flash": 0,
+	"agnes-video-v2.0":      0,
+	// Agnes Video 2.5 list and current price is $0.025 per output second.
+	"agnes-video-2.5": 0.025,
+	// Agnes currently lists Video 2.5 Flash as free for the current offer.
+	"agnes-video-2.5-flash":               0,
 	"grok-imagine-image":                  0.02,
 	"grok-imagine-image-2026-03-02":       0.02,
 	"grok-imagine-image-quality":          0.05,
@@ -466,6 +559,10 @@ var defaultModelPrice = map[string]float64{
 	"grok-imagine":                        0.02,
 	"grok-imagine-1":                      0.02,
 	"grok-imagine-edit":                   0.02,
+	// StepFun lists Step Image Edit 2 at ¥0.02 per generated image. ModelPrice
+	// uses the internal USD quota unit, so convert from RMB using the project
+	// exchange-rate constant instead of treating ¥0.02 as $0.02.
+	"step-image-edit-2": 0.02 / USD2RMB,
 	// SiliconFlow image and video prices are per generated item.
 	"Qwen/Qwen-Image":                0.02,
 	"Qwen/Qwen-Image-Edit":           0.04,
@@ -496,43 +593,96 @@ var defaultModelPrice = map[string]float64{
 	"mj_upscale":                     0.05,
 	"swap_face":                      0.05,
 	"mj_upload":                      0.05,
-	"sora-2":                         0.3,
-	"sora-2-pro":                     0.5,
-	"gpt-4o-mini-tts":                0.3,
-	"veo-3.0-generate-001":           0.4,
-	"veo-3.0-fast-generate-001":      0.1,
-	"veo-3.1-generate-preview":       0.4,
-	"veo-3.1-fast-generate-preview":  0.1,
-	"veo-3.1-lite-generate-preview":  0.05,
+	// OpenAI lists Sora 2 at $0.10/s (720p) and Sora 2 Pro at
+	// $0.30/s (720p). Resolution-specific Sora 2 Pro prices are applied by
+	// the task adaptor through the size billing ratio.
+	"sora-2":                        0.1,
+	"sora-2-pro":                    0.3,
+	"gpt-4o-mini-tts":               0.3,
+	"veo-3.0-generate-001":          0.4,
+	"veo-3.0-fast-generate-001":     0.1,
+	"veo-3.1-generate-preview":      0.4,
+	"veo-3.1-fast-generate-preview": 0.1,
+	"veo-3.1-lite-generate-preview": 0.05,
 }
 
 var defaultAudioRatio = map[string]float64{
-	"gpt-4o-audio-preview":                   16,
-	"gpt-4o-mini-audio-preview":              66.67,
-	"gpt-4o-realtime-preview":                8,
-	"gpt-4o-mini-realtime-preview":           16.67,
-	"gpt-4o-mini-tts":                        25,
-	"gemini-3.1-flash-lite":                  2,
-	"gemini-3.1-flash-lite-preview":          2,
-	"gemini-3.1-flash-live-preview":          4,
-	"gemini-3.5-live-translate-preview":      1,
-	"gemini-3.1-flash-tts-preview":           1,
-	"gemini-robotics-er-1.6-preview":         2,
-	"gemini-robotics-er-2-preview":           1,
-	"gemini-robotics-er-2-streaming-preview": 1,
+	"stepaudio-2.5-asr":                       1,
+	"stepaudio-2.5-tts":                       1,
+	"gpt-4o-audio-preview":                    16,
+	"gpt-4o-audio-preview-2025-06-03":         16,
+	"gpt-4o-audio-preview-2024-12-17":         16,
+	"gpt-4o-mini-audio-preview":               66.67,
+	"gpt-4o-mini-audio-preview-2024-12-17":    66.67,
+	"gpt-4o-realtime-preview":                 8,
+	"gpt-4o-realtime-preview-2025-06-03":      8,
+	"gpt-4o-realtime-preview-2024-12-17":      8,
+	"gpt-4o-mini-realtime-preview":            16.67,
+	"gpt-4o-mini-realtime-preview-2024-12-17": 16.67,
+	"gpt-4o-mini-tts":                         25,
+	"gpt-realtime-2.1":                        8,
+	"gpt-realtime-2.1-mini":                   10.0 / 0.6,
+	"gpt-realtime-2":                          8,
+	"gpt-realtime-1.5":                        8,
+	"gpt-realtime-mini":                       10.0 / 0.6,
+	"gpt-realtime-mini-2025-10-06":            10.0 / 0.6,
+	"gpt-realtime-mini-2025-12-15":            10.0 / 0.6,
+	"gpt-realtime":                            8,
+	"gpt-realtime-2025-08-28":                 8,
+	"gpt-audio-1.5":                           32.0 / 2.5,
+	"gpt-audio-mini":                          10.0 / 0.6,
+	"gpt-audio-mini-2025-10-06":               10.0 / 0.6,
+	"gpt-audio-mini-2025-12-15":               10.0 / 0.6,
+	"gpt-audio":                               32.0 / 2.5,
+	"gpt-audio-2025-08-28":                    32.0 / 2.5,
+	"gemini-3.1-flash-lite":                   2,
+	"gemini-3.1-flash-lite-preview":           2,
+	"gemini-3.1-flash-live-preview":           4,
+	"gemini-3.5-live-translate-preview":       1,
+	"gemini-3.1-flash-tts-preview":            1,
+	"gemini-robotics-er-1.6-preview":          2,
+	"gemini-robotics-er-2-preview":            1,
+	"gemini-robotics-er-2-streaming-preview":  1,
 }
 
 var defaultAudioCompletionRatio = map[string]float64{
-	"gpt-4o-realtime":                   2,
-	"gpt-4o-mini-realtime":              2,
-	"gpt-4o-mini-tts":                   1,
-	"gemini-3.1-flash-live-preview":     4,
-	"gemini-3.5-live-translate-preview": 6,
-	"gemini-3.1-flash-tts-preview":      20,
-	"tts-1":                             0,
-	"tts-1-hd":                          0,
-	"tts-1-1106":                        0,
-	"tts-1-hd-1106":                     0,
+	"stepaudio-2.5-asr":                       0,
+	"stepaudio-2.5-tts":                       0,
+	"gpt-4o-audio-preview":                    2,
+	"gpt-4o-audio-preview-2025-06-03":         2,
+	"gpt-4o-audio-preview-2024-12-17":         2,
+	"gpt-4o-mini-audio-preview":               2,
+	"gpt-4o-mini-audio-preview-2024-12-17":    2,
+	"gpt-4o-realtime-preview":                 2,
+	"gpt-4o-realtime-preview-2025-06-03":      2,
+	"gpt-4o-realtime-preview-2024-12-17":      2,
+	"gpt-4o-mini-realtime-preview":            2,
+	"gpt-4o-mini-realtime-preview-2024-12-17": 2,
+	"gpt-realtime-2.1":                        2,
+	"gpt-realtime-2.1-mini":                   2,
+	"gpt-realtime-2":                          2,
+	"gpt-realtime-1.5":                        2,
+	"gpt-realtime-mini":                       2,
+	"gpt-realtime-mini-2025-10-06":            2,
+	"gpt-realtime-mini-2025-12-15":            2,
+	"gpt-realtime":                            2,
+	"gpt-realtime-2025-08-28":                 2,
+	"gpt-audio-1.5":                           2,
+	"gpt-audio-mini":                          2,
+	"gpt-audio-mini-2025-10-06":               2,
+	"gpt-audio-mini-2025-12-15":               2,
+	"gpt-audio":                               2,
+	"gpt-audio-2025-08-28":                    2,
+	"gpt-4o-realtime":                         2,
+	"gpt-4o-mini-realtime":                    2,
+	"gpt-4o-mini-tts":                         1,
+	"gemini-3.1-flash-live-preview":           4,
+	"gemini-3.5-live-translate-preview":       6,
+	"gemini-3.1-flash-tts-preview":            20,
+	"tts-1":                                   0,
+	"tts-1-hd":                                0,
+	"tts-1-1106":                              0,
+	"tts-1-hd-1106":                           0,
 }
 
 var modelPriceMap = types.NewRWMap[string, float64]()
@@ -541,30 +691,77 @@ var completionRatioMap = types.NewRWMap[string, float64]()
 
 var defaultCompletionRatio = map[string]float64{
 	"agnes-1.5-flash":                          0.15 / 0.07,
-	"agnes-2.0-flash":                          5,
-	"agnes-2.5-flash":                          5,
+	"agnes-2.0-flash":                          0,
+	"agnes-2.5-flash":                          0,
+	"agnes-3.0-flash":                          0,
 	"agnes-2.5-pro":                            2,
 	"agnes-2.5-pro-alpha":                      2,
+	"agnes-2.5-pro-beta":                       3,
+	"gpt-6-astra":                              5, // $50 / $10 output/input
+	"gpt-5.6":                                  6, // gpt-5.6-sol list output/input ratio: $30 / $5
+	"gpt-5.6-sol":                              6, // list output/input ratio: $30 / $5
+	"gpt-5.6-terra":                            6, // $12 / $2 output/input
+	"gpt-5.6-luna":                             6, // $1.2 / $0.2 output/input
+	"gpt-5.6-cyber":                            6, // $75 / $12.5 output/input
+	"gpt-5.5-cyber":                            6, // $75 / $12.5 output/input
+	"gpt-daybreak-blue-latest":                 6, // alias of gpt-5.6-sol list pricing
+	"gpt-daybreak-red-latest":                  6, // alias of gpt-5.6-cyber
+	"gpt-realtime-2.1":                         6, // $24 / $4 text output/input
+	"gpt-realtime-2.1-mini":                    4, // $2.4 / $0.6 text output/input
+	"gpt-realtime-2":                           6, // $24 / $4 text output/input
+	"gpt-realtime-1.5":                         4, // $16 / $4 text output/input
+	"gpt-realtime-mini":                        4, // $2.4 / $0.6 text output/input
+	"gpt-realtime-mini-2025-10-06":             4,
+	"gpt-realtime-mini-2025-12-15":             4,
+	"gpt-realtime":                             4, // $16 / $4 text output/input
+	"gpt-realtime-2025-08-28":                  4,
+	"gpt-audio-1.5":                            4, // $10 / $2.5 text output/input
+	"gpt-audio-mini":                           4, // $2.4 / $0.6 text output/input
+	"gpt-audio-mini-2025-10-06":                4,
+	"gpt-audio-mini-2025-12-15":                4,
+	"gpt-audio":                                4, // $10 / $2.5 text output/input
+	"gpt-audio-2025-08-28":                     4,
 	"claude-fable-5":                           5,
 	"claude-opus-5":                            5,
 	"claude-opus-5-thinking":                   5,
 	"claude-sonnet-5":                          5,
 	"claude-sonnet-5-thinking":                 5,
 	"kimi-k3":                                  5,
+	"Kimi-K3":                                  5,
 	"kimi-k2.6":                                4.0 / 0.95,
 	"kimi-k2.7-code":                           4.0 / 0.95,
 	"kimi-k2.7-code-highspeed":                 8.0 / 1.90,
-	"deepseek-v4-flash":                        2,
-	"deepseek-ai/deepseek-v4-flash":            2,
-	"deepseek-v4-flash-vision-exp":             2,
-	"deepseek-ai/deepseek-v4-flash-vision-exp": 2,
+	"deepseek-flash":                           4,
+	"deepseek-ai/deepseek-flash":               4,
+	"deepseek-v4.1-flash":                      4,
+	"deepseek-v4.1-flash-0910":                 4,
+	"deepseek-v4-flash":                        4,
+	"deepseek-ai/deepseek-v4-flash":            4,
+	"deepseek-v4-flash-vision-exp":             4,
+	"deepseek-ai/deepseek-v4-flash-vision-exp": 4,
 	"deepseek-v4-pro":                          2,
 	"deepseek-ai/deepseek-v4-pro":              2,
 	"mimo-v2.5":                                0.28 / 0.14,
+	"mimo-v2.5-pro":                            0.87 / 0.435,
+	"qwen3.7-max":                              36.0 / 12.0,
+	"qwen-3.7-max":                             36.0 / 12.0,
+	"qwen3.7-plus":                             8.0 / 2.0,
+	"qwen-3.7-plus":                            8.0 / 2.0,
+	"qwen3.8-27b":                              12.0 / 3.0,
+	"qwen-3.8-27b":                             12.0 / 3.0,
+	"Qwen3.8-27B":                              12.0 / 3.0,
+	"Qwen3.6-35B-A3B":                          10.8 / 1.8,
+	"longcat-2.0":                              20.0 / 5.0,
 	"qwen3.8-max":                              36.0 / 12.0,
 	"qwen3.8-flash":                            2.7 / 0.8,
 	"qwen-3.8-flash":                           2.7 / 0.8,
 	"step-3.7-flash":                           8.1 / 1.35,
+	"step-explore":                             8.1 / 1.35,
+	"stepaudio-2.5-asr":                        0,
+	"stepaudio-2.5-tts":                        0,
+	"stepaudio-2.5-chat":                       25.0 / 10.0,
+	"stepaudio-2.5-realtime":                   70.0 / 10.0,
+	"spark-x2.5":                               12.0 / 3.2,
 	"gemini-3-flash":                           6,
 	"gemini-3-flash-preview":                   6,
 	"gemini-3.7-flash":                         5,
@@ -588,6 +785,12 @@ var defaultCompletionRatio = map[string]float64{
 	"gemini-robotics-er-2-streaming-preview":   5,
 	"gemma-4-31b-it":                           1,
 	"gemma-4-26b-a4b-it":                       1,
+	"grok-3-mini":                              5.0 / 3.0,
+	"grok-3-mini-beta":                         5.0 / 3.0,
+	"grok-3-mini-latest":                       5.0 / 3.0,
+	"grok-3-mini-fast":                         5.0 / 3.0,
+	"grok-3-mini-fast-beta":                    5.0 / 3.0,
+	"grok-3-mini-fast-latest":                  5.0 / 3.0,
 	"grok-4.3":                                 2,
 	"grok-4.5":                                 3,
 	"grok-4.20":                                2,
@@ -597,8 +800,8 @@ var defaultCompletionRatio = map[string]float64{
 	"grok-4.6":                                 3,
 	"grok-build-0.1":                           2,
 	"grok-code-fast-1":                         2,
-	"sensenova-6.7-flash-lite":                 1,
-	"sensenova-6.8-flash-lite":                 1,
+	"sensenova-6.8-flash-lite":                 0,
+	"sensenova-u1-fast":                        0,
 	"gpt-5-codex":                              8,
 	"gpt-5-codex-mini":                         8,
 	"gpt-5.1":                                  8,
@@ -617,40 +820,51 @@ var defaultCompletionRatio = map[string]float64{
 	"gpt-5.4-nano":                             6.25,
 	"gpt-5.4-pro":                              6,
 	"gpt-5.5":                                  6,
-	"gpt-5.5-pro":                              6,
-	"gpt-5-pro":                                8,
-	"minimax-m3":                               4,
-	"minimaxai/minimax-m3":                     4,
-	"minimax-m2":                               4,
-	"minimax-m2.1":                             4,
-	"minimax-m2.7":                             4,
-	"minimax-m2.1-highspeed":                   4,
-	"minimax-m2p5":                             4,
-	"minimax-m2p5-highspeed":                   4,
-	"minimax-m2.7-highspeed":                   4,
-	"deepseek-v3p1":                            3,
-	"deepseek-v3p2":                            3,
-	"glm-4p7":                                  11.0 / 3.0,
-	"glm-5":                                    3.2,
-	"glm-5.1":                                  4.4 / 1.4,
-	"glm-5.2":                                  4.4 / 1.4,
-	"glm-5.3":                                  4.4 / 1.4,
-	"glm-5.3-flash":                            0.50 / 0.15,
-	"gpt-4-gizmo-*":                            2,
-	"gpt-4o-gizmo-*":                           3,
-	"gpt-4-all":                                2,
-	"gpt-image-1-mini":                         4,
-	"gpt-image-1":                              8,
-	"gpt-image-1.5":                            2,
-	"gpt-image-2":                              6,
-	"gpt-oss-20b":                              30.0 / 7.0,
-	"gpt-oss-120b":                             4,
-	"kimi-k2-thinking":                         25.0 / 6.0,
-	"kimi-k2p5":                                5,
-	"llama-v3p3-70b-instruct":                  1,
-	"qwen3-8b":                                 1,
-	"qwen3-vl-30b-a3b-instruct":                4,
-	"qwen3-vl-30b-a3b-thinking":                4,
+	"GPT-5.5":                                  6,
+	// codex-auto-review is a project-local alias whose production pricing
+	// snapshot matches the GPT-5.6 standard tier.
+	"codex-auto-review":         6,
+	"gpt-5.5-pro":               6,
+	"gpt-5-pro":                 8,
+	"minimax-m3":                4,
+	"minimaxai/minimax-m3":      4,
+	"minimax-m2":                4,
+	"minimax-m2.1":              4,
+	"minimax-m2.7":              4,
+	"minimax-m2.1-highspeed":    4,
+	"minimax-m2p5":              4,
+	"minimax-m2p5-highspeed":    4,
+	"minimax-m2.7-highspeed":    4,
+	"deepseek-v3p1":             3,
+	"deepseek-v3p2":             3,
+	"glm-4p7":                   11.0 / 3.0,
+	"glm-5":                     3.2,
+	"glm-5.1":                   4.4 / 1.4,
+	"glm-5.2":                   4.4 / 1.4,
+	"glm-5.3":                   4.4 / 1.4,
+	"glm-5.3-flash":             0.50 / 0.15,
+	"glm-4.5":                   2.20 / 0.60,
+	"glm-4.5-air":               1.10 / 0.20,
+	"glm-4.5-flash":             0,
+	"glm-4.6":                   2.20 / 0.60,
+	"glm-4.7":                   2.20 / 0.60,
+	"glm-4.7-flash":             0,
+	"gpt-4-gizmo-*":             2,
+	"gpt-4o-gizmo-*":            3,
+	"gpt-4-all":                 2,
+	"gpt-image-1-mini":          4,
+	"gpt-image-1":               8,
+	"gpt-image-1.5":             2,
+	"gpt-image-2":               6,
+	"chatgpt-image-latest":      2,
+	"gpt-oss-20b":               30.0 / 7.0,
+	"gpt-oss-120b":              4,
+	"kimi-k2-thinking":          25.0 / 6.0,
+	"kimi-k2p5":                 5,
+	"llama-v3p3-70b-instruct":   1,
+	"qwen3-8b":                  1,
+	"qwen3-vl-30b-a3b-instruct": 4,
+	"qwen3-vl-30b-a3b-thinking": 4,
 
 	// SiliconFlow official output prices for qualified model paths.
 	"deepseek-ai/DeepSeek-R1":              2.18 / 0.5,
@@ -686,6 +900,8 @@ var defaultCompletionRatio = map[string]float64{
 	"Qwen/Qwen3-Reranker-0.6B":             1,
 	"baidu/ERNIE-4.5-300B-A47B":            1.10 / 0.28,
 	"tencent/Hunyuan-A13B-Instruct":        0.57 / 0.14,
+	"tencent/hunyuan-a13b-instruct":        0.57 / 0.14,
+	"hunyuan-a13b-instruct":                0.57 / 0.14,
 	"stepfun-ai/Step-3.5-Flash":            0.30 / 0.10,
 	"inclusionAI/Ling-flash-2.0":           0.57 / 0.14,
 	"ByteDance-Seed/Seed-OSS-36B-Instruct": 0.57 / 0.21,
@@ -1016,10 +1232,20 @@ func ModelRatio2JSONString() string {
 }
 
 var defaultImageRatio = map[string]float64{
-	"gpt-image-1-mini": 1.25, // $2.50 image input / $2 text input
-	"gpt-image-1":      2.0,  // $10 image input / $5 text input
-	"gpt-image-1.5":    1.6,  // $8 image input / $5 text input
-	"gpt-image-2":      1.6,  // $8 image input / $5 text input
+	"gpt-image-1-mini":             1.25, // $2.50 image input / $2 text input
+	"gpt-image-1":                  2.0,  // $10 image input / $5 text input
+	"gpt-image-1.5":                1.6,  // $8 image input / $5 text input
+	"gpt-image-2":                  1.6,  // $8 image input / $5 text input
+	"chatgpt-image-latest":         1.6,  // $8 image input / $5 text input
+	"gpt-realtime-2.1":             1.25, // $5 image input / $4 text input
+	"gpt-realtime-2.1-mini":        0.8 / 0.6,
+	"gpt-realtime-2":               1.25,
+	"gpt-realtime-1.5":             1.25,
+	"gpt-realtime-mini":            0.8 / 0.6,
+	"gpt-realtime-mini-2025-10-06": 0.8 / 0.6,
+	"gpt-realtime-mini-2025-12-15": 0.8 / 0.6,
+	"gpt-realtime":                 1.25,
+	"gpt-realtime-2025-08-28":      1.25,
 }
 var imageRatioMap = types.NewRWMap[string, float64]()
 var audioRatioMap = types.NewRWMap[string, float64]()

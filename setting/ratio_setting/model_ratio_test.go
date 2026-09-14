@@ -28,8 +28,11 @@ func TestGetConfiguredModelRatioFireworksModels(t *testing.T) {
 		{name: "glm-4p7", wantRatio: 0.3, wantComp: 11.0 / 3.0, wantCache: floatPtr(0.5)},
 		{name: "deepseek-v3p2", wantRatio: 0.28, wantComp: 3, wantCache: floatPtr(0.5)},
 		{name: "deepseek-v3p1", wantRatio: 0.28, wantComp: 3, wantCache: floatPtr(0.5)},
+		{name: "deepseek-flash", wantRatio: 0.15 / 2, wantComp: 4, wantCache: floatPtr(0.003 / 0.15)},
 		{name: "kimi-k2-thinking", wantRatio: 0.3, wantComp: 25.0 / 6.0, wantCache: floatPtr(0.25)},
 		{name: "kimi-k2.6", wantRatio: 0.475, wantComp: 4.0 / 0.95, wantCache: floatPtr(0.16 / 0.95)},
+		{name: "qwen3.8-max", wantRatio: 12.0 / 1000 * RMB, wantComp: 36.0 / 12.0, wantCache: floatPtr(1.5 / 12.0)},
+		{name: "qwen3.8-27b", wantRatio: 3.0 / 1000 * RMB, wantComp: 12.0 / 3.0, wantCache: floatPtr(0.6 / 3.0)},
 	}
 
 	for _, tt := range tests {
@@ -338,6 +341,23 @@ func TestMiniMaxOfficialPricingVariants(t *testing.T) {
 	}
 }
 
+func TestMiniMaxM3UsesPermanentPrice(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	for _, name := range []string{"minimax-m3", "MiniMax-M3", "minimaxai/minimax-m3"} {
+		t.Run(name, func(t *testing.T) {
+			ratio, ok, _ := GetConfiguredModelRatio(name)
+			require.True(t, ok)
+			require.InDelta(t, 0.15, ratio, 1e-9)
+			require.InDelta(t, 4.0, GetCompletionRatio(name), 1e-9)
+			cache, hasCache := GetCacheRatio(name)
+			require.True(t, hasCache)
+			require.InDelta(t, 0.2, cache, 1e-9)
+		})
+	}
+}
+
 func TestMiniMaxHighspeedRemainsDistinctFromNormalPricing(t *testing.T) {
 	require.Equal(t, "minimax-m2.7-highspeed", FormatMatchingModelName("MiniMax-M2.7-highspeed"))
 	require.Equal(t, "minimax-m2.7", FormatMatchingModelName("MiniMax-M2.7"))
@@ -348,6 +368,7 @@ func TestMiniMaxHighspeedRemainsDistinctFromNormalPricing(t *testing.T) {
 func TestModelNameMatchesLimitUsesPricingCandidates(t *testing.T) {
 	limits := map[string]bool{
 		"gpt-5.6-sol":                   true,
+		"gpt-5.5":                       true,
 		"deepseek-ai/deepseek-v4-flash": true,
 		"Kimi-K3":                       true,
 	}
@@ -355,8 +376,13 @@ func TestModelNameMatchesLimitUsesPricingCandidates(t *testing.T) {
 	require.True(t, ModelNameMatchesLimit("gpt-5.6-sol-openai-compact", limits))
 	require.True(t, ModelNameMatchesLimit("deepseek-ai/DeepSeek-V4-Flash-search", limits))
 	require.True(t, ModelNameMatchesLimit("moonshotai/kimi-k3-thinking", limits))
+	require.True(t, ModelNameMatchesLimit("gpt-5.5-20250807", limits))
 	require.False(t, ModelNameMatchesLimit("gpt-5.2-pro", limits))
 	require.False(t, ModelNameMatchesLimit("unknown-model", limits))
+	require.False(t, ModelNameMatchesLimit("kimi-k3-pro", limits))
+	require.False(t, ModelNameMatchesLimit("grok-4.3-experimental", limits))
+	require.False(t, ModelNameMatchesLimit("gpt-5.5-12345678", limits))
+	require.False(t, ModelNameMatchesLimit("claude-sonnet-4-6-12345678", limits))
 }
 
 func TestGetConfiguredModelRatioMissingModel(t *testing.T) {
@@ -380,12 +406,215 @@ func TestAgnes25ProUsesOfficialStablePricing(t *testing.T) {
 	require.InDelta(t, 2, GetCompletionRatio("agnes-2.5-pro"), 1e-9)
 	cacheRatio, hasCacheRatio := GetCacheRatio("agnes-2.5-pro")
 	require.True(t, hasCacheRatio)
-	require.InDelta(t, 0.0038/0.45, cacheRatio, 1e-9)
+	require.InDelta(t, 0.1, cacheRatio, 1e-9)
 
 	alphaRatio, alphaConfigured, alphaMatchName := GetConfiguredModelRatio("agnes-2.5-pro-alpha")
 	require.True(t, alphaConfigured)
 	require.Equal(t, "agnes-2.5-pro-alpha", alphaMatchName)
 	require.InDelta(t, 0.225, alphaRatio, 1e-9)
+}
+
+func TestAgnes25ProBetaUsesOfficialListPricing(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	ratio, ok, matchName := GetConfiguredModelRatio("agnes-2.5-pro-beta")
+	require.True(t, ok)
+	require.Equal(t, "agnes-2.5-pro-beta", matchName)
+	require.InDelta(t, 0.05, ratio, 1e-9)
+	require.InDelta(t, 3, GetCompletionRatio("agnes-2.5-pro-beta"), 1e-9)
+
+	cache, hasCache := GetCacheRatio("agnes-2.5-pro-beta")
+	require.True(t, hasCache)
+	require.InDelta(t, 0.1, cache, 1e-9)
+}
+
+func TestQwen38ModelOfficialPricingVariants(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	for _, name := range []string{"qwen3.8-27b", "qwen-3.8-27b", "Qwen3.8-27B"} {
+		t.Run(name, func(t *testing.T) {
+			ratio, ok, _ := GetConfiguredModelRatio(name)
+			require.True(t, ok)
+			require.InDelta(t, 3.0/1000*RMB, ratio, 1e-9)
+			require.InDelta(t, 4.0, GetCompletionRatio(name), 1e-9)
+			cache, hasCache := GetCacheRatio(name)
+			require.True(t, hasCache)
+			require.InDelta(t, 0.6/3.0, cache, 1e-9)
+			create, hasCreate := GetCreateCacheRatio(name)
+			require.True(t, hasCreate)
+			require.InDelta(t, 3.75/3.0, create, 1e-9)
+		})
+	}
+}
+
+func TestLongCat20UsesOfficialStandardChatPricing(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	ratio, ok, matchName := GetConfiguredModelRatio("longcat-2.0")
+	require.True(t, ok)
+	require.Equal(t, "longcat-2.0", matchName)
+	require.InDelta(t, 5.0/1000*RMB, ratio, 1e-9)
+	require.InDelta(t, 4.0, GetCompletionRatio("longcat-2.0"), 1e-9)
+
+	cache, hasCache := GetCacheRatio("longcat-2.0")
+	require.True(t, hasCache)
+	require.InDelta(t, 0.10/5.0, cache, 1e-9)
+
+	// LongCat publishes cached input but no cache-creation price. Keep the
+	// creation ratio absent instead of inferring one.
+	_, hasCreate := GetCreateCacheRatio("longcat-2.0")
+	require.False(t, hasCreate)
+}
+
+func TestQwen36OfficialAlibabaPricing(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	ratio, ok, matchName := GetConfiguredModelRatio("Qwen3.6-35B-A3B")
+	require.True(t, ok)
+	require.Equal(t, "Qwen3.6-35B-A3B", matchName)
+	require.InDelta(t, 1.8/1000*RMB, ratio, 1e-9)
+	require.InDelta(t, 10.8/1.8, GetCompletionRatio("Qwen3.6-35B-A3B"), 1e-9)
+	_, hasCache := GetCacheRatio("Qwen3.6-35B-A3B")
+	require.False(t, hasCache)
+	_, hasCreate := GetCreateCacheRatio("Qwen3.6-35B-A3B")
+	require.False(t, hasCreate)
+}
+
+func TestSparkX25OfficialOriginalPricing(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	ratio, ok, matchName := GetConfiguredModelRatio("spark-x2.5")
+	require.True(t, ok)
+	require.Equal(t, "spark-x2.5", matchName)
+	require.InDelta(t, 3.2/1000*RMB, ratio, 1e-9)
+	require.InDelta(t, 12.0/3.2, GetCompletionRatio("spark-x2.5"), 1e-9)
+	cache, hasCache := GetCacheRatio("spark-x2.5")
+	require.True(t, hasCache)
+	require.InDelta(t, 0.48/3.2, cache, 1e-9)
+	_, hasCreate := GetCreateCacheRatio("spark-x2.5")
+	require.False(t, hasCreate)
+}
+
+func TestAdditionalOfficialPricingVariants(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	cases := []struct {
+		name             string
+		modelRatio       float64
+		completionRatio  float64
+		cacheRatio       float64
+		createCacheRatio *float64
+	}{
+		{name: "mimo-v2.5-pro", modelRatio: 0.435 / 2, completionRatio: 0.87 / 0.435, cacheRatio: 0.0036 / 0.435},
+		{name: "qwen3.7-max", modelRatio: 12.0 / 1000 * RMB, completionRatio: 36.0 / 12.0, cacheRatio: 2.4 / 12.0, createCacheRatio: floatPtr(15.0 / 12.0)},
+		{name: "qwen3.7-plus", modelRatio: 2.0 / 1000 * RMB, completionRatio: 8.0 / 2.0, cacheRatio: 0.4 / 2.0, createCacheRatio: floatPtr(2.5 / 2.0)},
+		{name: "step-explore", modelRatio: 1.35 / 1000 * RMB, completionRatio: 8.1 / 1.35, cacheRatio: 0.27 / 1.35},
+		{name: "stepaudio-2.5-chat", modelRatio: 10.0 / 1000 * RMB, completionRatio: 25.0 / 10.0, cacheRatio: 2.0 / 10.0},
+		{name: "stepaudio-2.5-realtime", modelRatio: 10.0 / 1000 * RMB, completionRatio: 70.0 / 10.0, cacheRatio: 2.0 / 10.0},
+		{name: "glm-4.5", modelRatio: 0.3, completionRatio: 2.2 / 0.6, cacheRatio: 0.11 / 0.6, createCacheRatio: floatPtr(0)},
+		{name: "glm-4.5-air", modelRatio: 0.1, completionRatio: 1.1 / 0.2, cacheRatio: 0.03 / 0.2, createCacheRatio: floatPtr(0)},
+		{name: "glm-4.6", modelRatio: 0.3, completionRatio: 2.2 / 0.6, cacheRatio: 0.11 / 0.6, createCacheRatio: floatPtr(0)},
+		{name: "glm-4.7", modelRatio: 0.3, completionRatio: 2.2 / 0.6, cacheRatio: 0.11 / 0.6, createCacheRatio: floatPtr(0)},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			ratio, ok, _ := GetConfiguredModelRatio(tt.name)
+			require.True(t, ok)
+			require.InDelta(t, tt.modelRatio, ratio, 1e-9)
+			require.InDelta(t, tt.completionRatio, GetCompletionRatio(tt.name), 1e-9)
+			cache, hasCache := GetCacheRatio(tt.name)
+			require.True(t, hasCache)
+			require.InDelta(t, tt.cacheRatio, cache, 1e-9)
+			create, hasCreate := GetCreateCacheRatio(tt.name)
+			require.Equal(t, tt.createCacheRatio != nil, hasCreate)
+			if tt.createCacheRatio != nil {
+				require.InDelta(t, *tt.createCacheRatio, create, 1e-9)
+			}
+		})
+	}
+
+	for _, name := range []string{"glm-4.5-flash", "glm-4.7-flash"} {
+		t.Run(name, func(t *testing.T) {
+			ratio, ok, _ := GetConfiguredModelRatio(name)
+			require.True(t, ok)
+			require.Zero(t, ratio)
+			require.Zero(t, GetCompletionRatio(name))
+			cache, hasCache := GetCacheRatio(name)
+			require.True(t, hasCache)
+			require.Zero(t, cache)
+		})
+	}
+}
+
+func TestStepAudioASRUsesOfficialHourlyPricing(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	ratio, ok, matchName := GetConfiguredModelRatio("stepaudio-2.5-asr")
+	require.True(t, ok)
+	require.Equal(t, "stepaudio-2.5-asr", matchName)
+	require.InDelta(t, 2.5/1000*RMB, ratio, 1e-9)
+	require.Zero(t, GetCompletionRatio("stepaudio-2.5-asr"))
+
+	audioRatio, hasAudioRatio := GetAudioRatio("stepaudio-2.5-asr"), ContainsAudioRatio("stepaudio-2.5-asr")
+	require.True(t, hasAudioRatio)
+	require.InDelta(t, 1, audioRatio, 1e-9)
+	audioCompletionRatio, hasAudioCompletionRatio := GetAudioCompletionRatio("stepaudio-2.5-asr"), ContainsAudioCompletionRatio("stepaudio-2.5-asr")
+	require.True(t, hasAudioCompletionRatio)
+	require.Zero(t, audioCompletionRatio)
+}
+
+func TestStepAudioTTSUsesOfficialCharacterPricing(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	ratio, ok, matchName := GetConfiguredModelRatio("stepaudio-2.5-tts")
+	require.True(t, ok)
+	require.Equal(t, "stepaudio-2.5-tts", matchName)
+	require.InDelta(t, 5.8/10*RMB, ratio, 1e-9)
+	require.Zero(t, GetCompletionRatio("stepaudio-2.5-tts"))
+
+	audioRatio, hasAudioRatio := GetAudioRatio("stepaudio-2.5-tts"), ContainsAudioRatio("stepaudio-2.5-tts")
+	require.True(t, hasAudioRatio)
+	require.InDelta(t, 1, audioRatio, 1e-9)
+	audioCompletionRatio, hasAudioCompletionRatio := GetAudioCompletionRatio("stepaudio-2.5-tts"), ContainsAudioCompletionRatio("stepaudio-2.5-tts")
+	require.True(t, hasAudioCompletionRatio)
+	require.Zero(t, audioCompletionRatio)
+}
+
+func TestStepImageEditUsesRMBPerCallPrice(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	price, ok := GetModelPrice("step-image-edit-2", false)
+	require.True(t, ok)
+	require.InDelta(t, 0.02/USD2RMB, price, 1e-12)
+}
+
+func TestGemini25FlashControlAliasesUseBasePricing(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	for _, name := range []string{"gemini-2.5-flash-thinking", "gemini-2.5-flash-nothinking"} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, "gemini-2.5-flash", FormatMatchingModelName(name))
+			ratio, ok, matchName := GetConfiguredModelRatio(name)
+			require.True(t, ok)
+			require.Equal(t, "gemini-2.5-flash", matchName)
+			require.InDelta(t, 0.15, ratio, 1e-9)
+			require.InDelta(t, 2.5/0.3, GetCompletionRatio(name), 1e-9)
+			cache, hasCache := GetCacheRatio(name)
+			require.True(t, hasCache)
+			require.InDelta(t, 0.1, cache, 1e-9)
+		})
+	}
 }
 
 func TestGetCompletionRatioInfoGPT55AndLaterUsesUnlockedOutputMultiplier(t *testing.T) {
@@ -403,7 +632,11 @@ func TestGetCompletionRatioInfoGPT55AndLaterUsesUnlockedOutputMultiplier(t *test
 		t.Run(name, func(t *testing.T) {
 			info := GetCompletionRatioInfo(name)
 
-			require.InDelta(t, 6.0, info.Ratio, 1e-9)
+			want := 6.0
+			if name == "gpt-5.6" || name == "gpt-5.6-sol" {
+				want = 6.0
+			}
+			require.InDelta(t, want, info.Ratio, 1e-9)
 			require.False(t, info.Locked)
 		})
 	}
@@ -449,13 +682,18 @@ func TestQualifiedCompletionRatioCanOverrideLockedBase(t *testing.T) {
 func TestGPT56OfficialPricingRatios(t *testing.T) {
 	InitRatioSettings()
 	tests := []struct {
-		name       string
-		modelRatio float64
+		name            string
+		modelRatio      float64
+		completionRatio float64
 	}{
-		{name: "gpt-5.6", modelRatio: 2.5},
-		{name: "gpt-5.6-sol", modelRatio: 2.5},
-		{name: "gpt-5.6-terra", modelRatio: 1.0},
-		{name: "gpt-5.6-luna", modelRatio: 0.1},
+		{name: "gpt-5.6", modelRatio: 2.5, completionRatio: 6},
+		{name: "gpt-5.6-sol", modelRatio: 2.5, completionRatio: 6},
+		{name: "gpt-5.6-terra", modelRatio: 1.0, completionRatio: 6},
+		{name: "gpt-5.6-luna", modelRatio: 0.1, completionRatio: 6},
+		{name: "gpt-6-astra", modelRatio: 5.0, completionRatio: 5},
+		{name: "gpt-5.6-cyber", modelRatio: 6.25, completionRatio: 6},
+		{name: "gpt-daybreak-blue-latest", modelRatio: 2.5, completionRatio: 6},
+		{name: "gpt-daybreak-red-latest", modelRatio: 6.25, completionRatio: 6},
 	}
 
 	for _, tt := range tests {
@@ -464,7 +702,7 @@ func TestGPT56OfficialPricingRatios(t *testing.T) {
 			require.True(t, ok)
 			require.Equal(t, tt.name, matchName)
 			require.InDelta(t, tt.modelRatio, modelRatio, 1e-9)
-			require.InDelta(t, 6.0, GetCompletionRatio(tt.name), 1e-9)
+			require.InDelta(t, tt.completionRatio, GetCompletionRatio(tt.name), 1e-9)
 
 			cacheRatio, hasCacheRatio := GetCacheRatio(tt.name)
 			require.True(t, hasCacheRatio)
@@ -477,12 +715,29 @@ func TestGPT56OfficialPricingRatios(t *testing.T) {
 	}
 }
 
+func TestOpenAIAudioOutputRatiosUseOfficialTwoToOneMultiplier(t *testing.T) {
+	InitRatioSettings()
+	for _, name := range []string{
+		"gpt-4o-audio-preview",
+		"gpt-4o-realtime-preview",
+		"gpt-4o-mini-audio-preview",
+		"gpt-4o-mini-realtime-preview",
+	} {
+		t.Run(name, func(t *testing.T) {
+			ratio, ok := GetAudioCompletionRatio(name), ContainsAudioCompletionRatio(name)
+			require.True(t, ok)
+			require.InDelta(t, 2.0, ratio, 1e-9)
+		})
+	}
+}
+
 func TestKimiK3VariantPricingUsesOfficialBaseModel(t *testing.T) {
 	resetPricingMapsForTest(t)
 	InitRatioSettings()
 
 	for _, name := range []string{
 		"kimi-k3",
+		"Kimi-K3",
 		"kimi-k3-free",
 		"kimi-k3-thinking",
 		"kimi-k3:free",
@@ -493,7 +748,11 @@ func TestKimiK3VariantPricingUsesOfficialBaseModel(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			modelRatio, ok, matchName := GetConfiguredModelRatio(name)
 			require.True(t, ok)
-			require.Equal(t, "kimi-k3", matchName)
+			wantMatchName := "kimi-k3"
+			if name == "Kimi-K3" {
+				wantMatchName = "Kimi-K3"
+			}
+			require.Equal(t, wantMatchName, matchName)
 			require.InDelta(t, 1.5, modelRatio, 1e-9)
 			require.InDelta(t, 5.0, GetCompletionRatio(name), 1e-9)
 
@@ -556,6 +815,10 @@ func TestOpenAIImageModelVariantsUseOfficialBasePricing(t *testing.T) {
 		{name: "gpt-image-2-2k", base: "gpt-image-2", imageRatio: 1.6},
 		{name: "gpt-image-2-pro", base: "gpt-image-2", imageRatio: 1.6},
 		{name: "gpt-image-2-all", base: "gpt-image-2", imageRatio: 1.6},
+		{name: "gpt-image-2.5-sunburst", base: "gpt-image-2", imageRatio: 1.6},
+		{name: "gpt-image-2.5-flare", base: "gpt-image-2", imageRatio: 1.6},
+		{name: "openai/gpt-image-2.5-sunburst", base: "gpt-image-2", imageRatio: 1.6},
+		{name: "openai/gpt-image-2.5-flare", base: "gpt-image-2", imageRatio: 1.6},
 	}
 
 	for _, tt := range cases {
@@ -575,6 +838,16 @@ func TestOpenAIImageModelVariantsUseOfficialBasePricing(t *testing.T) {
 			imageRatio, hasImageRatio := GetImageRatio(tt.name)
 			require.True(t, hasImageRatio)
 			require.InDelta(t, tt.imageRatio, imageRatio, 1e-9)
+			wantCompletion := 6.0
+			switch tt.base {
+			case "gpt-image-1-mini":
+				wantCompletion = 4
+			case "gpt-image-1":
+				wantCompletion = 8
+			case "gpt-image-1.5":
+				wantCompletion = 2
+			}
+			require.InDelta(t, wantCompletion, GetCompletionRatio(tt.name), 1e-9)
 		})
 	}
 }
@@ -894,6 +1167,8 @@ func TestModelVariantNormalizationRespectsTokenBoundaries(t *testing.T) {
 		{name: "grok-4-1-fast-non-reasoning", want: "grok-4.1-fast-non-reasoning"},
 		{name: "mistral-3-large", want: "mistral-3.large"},
 		{name: "step-3-5-flash", want: "step-3.5-flash"},
+		{name: "qwen3-7-max", want: "qwen3.7-max"},
+		{name: "qwen3-7-plus", want: "qwen3.7-plus"},
 		{name: "doubao-seed-1-6-thinking", want: "doubao-seed-1.6-thinking"},
 	}
 
@@ -908,6 +1183,8 @@ func TestModelVariantNormalizationRespectsTokenBoundaries(t *testing.T) {
 				require.Equal(t, tt.want, normalizeMistralModelVariant(tt.name))
 			case strings.HasPrefix(tt.name, "step-"):
 				require.Equal(t, tt.want, normalizeStepModelVariant(tt.name))
+			case strings.HasPrefix(tt.name, "qwen"):
+				require.Equal(t, tt.want, normalizeQwenModelVariant(tt.name))
 			default:
 				require.Equal(t, tt.want, normalizeDoubaoModelVariant(tt.name))
 			}
@@ -921,6 +1198,8 @@ func TestModelVariantNormalizationRespectsTokenBoundaries(t *testing.T) {
 		{name: "llama-3-8b-instruct-free", want: "llama3-8b-instruct"},
 		{name: "mistral-3-large", want: "mistral-3.large"},
 		{name: "step-3-5-flash", want: "step-3.5-flash"},
+		{name: "qwen3-7-max", want: "qwen3.7-max"},
+		{name: "qwen3-7-plus", want: "qwen3.7-plus"},
 		{name: "doubao-seed-1-6-thinking", want: "doubao-seed-1.6-thinking"},
 	}
 	for _, tt := range publicCases {
@@ -986,6 +1265,31 @@ func TestGrokAliasesAndQualifiedProviderNamesUseOfficialBasePricing(t *testing.T
 	}
 }
 
+func TestGrok3MiniOfficialPricingAndFastAlias(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	for _, name := range []string{
+		"grok-3-mini",
+		"grok-3-mini-latest",
+		"grok-3-mini-beta",
+		"grok-3-mini-fast",
+		"grok-3-mini-fast-latest",
+		"grok-3-mini-fast-beta",
+	} {
+		t.Run(name, func(t *testing.T) {
+			ratio, ok, matchName := GetConfiguredModelRatio(name)
+			require.True(t, ok)
+			require.Equal(t, name, matchName)
+			require.InDelta(t, 0.15, ratio, 1e-9) // $0.30 / 1M input tokens
+			require.InDelta(t, 5.0/3.0, GetCompletionRatio(name), 1e-9)
+			cache, hasCache := GetCacheRatio(name)
+			require.True(t, hasCache)
+			require.InDelta(t, 0.25, cache, 1e-9) // $0.075 / $0.30 cached input
+		})
+	}
+}
+
 func TestGemini367UseOfficialStandardPriceInsteadOfPromotion(t *testing.T) {
 	resetPricingMapsForTest(t)
 	InitRatioSettings()
@@ -995,11 +1299,42 @@ func TestGemini367UseOfficialStandardPriceInsteadOfPromotion(t *testing.T) {
 			ratio, ok, matchName := GetConfiguredModelRatio(name)
 			require.True(t, ok)
 			require.Equal(t, name, matchName)
-			require.InDelta(t, 0.75, ratio, 1e-9) // $1.50 / 1M standard input price
+			require.InDelta(t, 0.75, ratio, 1e-9)                 // $1.50 / 1M standard input price
 			require.InDelta(t, 5, GetCompletionRatio(name), 1e-9) // $7.50 / $1.50
 			cache, hasCache := GetCacheRatio(name)
 			require.True(t, hasCache)
 			require.InDelta(t, 0.1, cache, 1e-9) // $0.15 / $1.50
+		})
+	}
+}
+
+func TestGeminiPricingControlAliasesUseOfficialBasePricing(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	cases := map[string]string{
+		"gemini-3.6-flash-high":      "gemini-3.6-flash",
+		"gemini-3.6-flash-low":       "gemini-3.6-flash",
+		"gemini-3.6-flash-medium":    "gemini-3.6-flash",
+		"gemini-3.6-flash-tiered":    "gemini-3.6-flash",
+		"gemini-3.7-flash-high":      "gemini-3.7-flash",
+		"gemini-3.7-flash-low":       "gemini-3.7-flash",
+		"gemini-3.7-flash-medium":    "gemini-3.7-flash",
+		"gemini-3.7-flash-tiered":    "gemini-3.7-flash",
+		"gemini-3.5-flash-extra-low": "gemini-3.5-flash",
+		"gemini-3.5-flash-high":      "gemini-3.5-flash",
+		"gemini-3.1-pro-high":        "gemini-3.1-pro",
+		"gemini-3.1-pro-preview-low": "gemini-3.1-pro-preview",
+		"gemini-3-pro-high":          "gemini-3-pro",
+		"gemini-3-pro-low":           "gemini-3-pro",
+	}
+	for name, wantMatch := range cases {
+		t.Run(name, func(t *testing.T) {
+			ratio, ok, matchName := GetConfiguredModelRatio(name)
+			require.True(t, ok)
+			require.Equal(t, wantMatch, matchName)
+			require.Greater(t, ratio, 0.0)
+			require.Greater(t, GetCompletionRatio(name), 0.0)
 		})
 	}
 }
@@ -1132,18 +1467,27 @@ func TestNewModelDefaultPricing(t *testing.T) {
 		{name: "claude-sonnet-4-6", modelRatio: 1.5, completionRatio: 5, cacheRatio: floatPtr(0.1), createCacheRatio: floatPtr(1.25)},
 		{name: "claude-opus-5", modelRatio: 2.5, completionRatio: 5, cacheRatio: floatPtr(0.1), createCacheRatio: floatPtr(1.25)},
 		{name: "claude-sonnet-5", modelRatio: 1, completionRatio: 5, cacheRatio: floatPtr(0.1), createCacheRatio: floatPtr(1.25)},
-		{name: "deepseek-v4-flash", modelRatio: 0.07, completionRatio: 2, cacheRatio: floatPtr(0.0028 / 0.14)},
-		{name: "deepseek-ai/deepseek-v4-flash", modelRatio: 0.07, completionRatio: 2, cacheRatio: floatPtr(0.0028 / 0.14)},
+		{name: "GPT-5.5", modelRatio: 2.5, completionRatio: 6, cacheRatio: floatPtr(0.1)},
+		{name: "deepseek-flash", modelRatio: 0.15 / 2, completionRatio: 4, cacheRatio: floatPtr(0.003 / 0.15)},
+		{name: "deepseek-ai/deepseek-flash", modelRatio: 0.15 / 2, completionRatio: 4, cacheRatio: floatPtr(0.003 / 0.15)},
+		{name: "deepseek-v4.1-flash", modelRatio: 0.15 / 2, completionRatio: 4, cacheRatio: floatPtr(0.003 / 0.15)},
+		{name: "deepseek-v4.1-flash-0910", modelRatio: 0.15 / 2, completionRatio: 4, cacheRatio: floatPtr(0.003 / 0.15)},
+		{name: "deepseek-v4-flash", modelRatio: 0.15 / 2, completionRatio: 4, cacheRatio: floatPtr(0.003 / 0.15)},
+		{name: "deepseek-ai/deepseek-v4-flash", modelRatio: 0.15 / 2, completionRatio: 4, cacheRatio: floatPtr(0.003 / 0.15)},
 		{name: "deepseek-v4-pro", modelRatio: 0.2175, completionRatio: 2, cacheRatio: floatPtr(0.003625 / 0.435)},
-		{name: "agnes-2.0-flash", modelRatio: 0.015, completionRatio: 5},
-		{name: "agnes-2.5-flash", modelRatio: 0.015, completionRatio: 5},
-		{name: "agnes-2.5-pro", modelRatio: 0.225, completionRatio: 2, cacheRatio: floatPtr(0.0038 / 0.45)},
-		{name: "agnes-2.5-pro-alpha", modelRatio: 0.225, completionRatio: 2, cacheRatio: floatPtr(0.0038 / 0.45)},
+		{name: "sensenova-6.8-flash-lite", modelRatio: 0, completionRatio: 0, cacheRatio: floatPtr(0)},
+		{name: "sensenova-u1-fast", modelRatio: 0, completionRatio: 0, cacheRatio: floatPtr(0)},
+		{name: "agnes-2.0-flash", modelRatio: 0, completionRatio: 0, cacheRatio: floatPtr(0)},
+		{name: "agnes-2.5-flash", modelRatio: 0, completionRatio: 0, cacheRatio: floatPtr(0)},
+		{name: "agnes-3.0-flash", modelRatio: 0, completionRatio: 0, cacheRatio: floatPtr(0)},
+		{name: "agnes-2.5-pro", modelRatio: 0.225, completionRatio: 2, cacheRatio: floatPtr(0.1)},
+		{name: "agnes-2.5-pro-alpha", modelRatio: 0.225, completionRatio: 2, cacheRatio: floatPtr(0.1)},
 		{name: "gemini-2.5-flash", modelRatio: 0.15, completionRatio: 2.5 / 0.3, cacheRatio: floatPtr(0.1)},
 		{name: "gemini-2.5-pro", modelRatio: 0.625, completionRatio: 8, cacheRatio: floatPtr(0.1)},
 		{name: "gemini-3-flash", modelRatio: 0.25, completionRatio: 6, cacheRatio: floatPtr(0.1)},
 		{name: "gemini-3.1-pro", modelRatio: 1, completionRatio: 6, cacheRatio: floatPtr(0.1)},
 		{name: "gpt-5.4-openai-compact", modelRatio: 0.625, completionRatio: 6, cacheRatio: floatPtr(0.104)},
+		{name: "codex-auto-review", modelRatio: 2.5, completionRatio: 6, cacheRatio: floatPtr(0.1)},
 	}
 
 	for _, tt := range modelCases {
@@ -1171,18 +1515,47 @@ func TestNewModelDefaultPricing(t *testing.T) {
 	for _, name := range []string{
 		"agnes-image-2.0-flash",
 		"agnes-image-2.1-flash",
+		"agnes-image-2.5-flash",
 		"agnes-video-v2.0",
+		"agnes-video-2.5-flash",
 	} {
 		t.Run(name, func(t *testing.T) {
 			modelPrice, ok := GetModelPrice(name, false)
 			require.True(t, ok)
-			if strings.HasPrefix(name, "agnes-image-") {
-				require.InDelta(t, 0.003, modelPrice, 1e-9)
-			} else {
-				require.InDelta(t, 0.005, modelPrice, 1e-9)
-			}
+			require.Zero(t, modelPrice)
 		})
 	}
+}
+
+func TestAgnes30FlashUsesCurrentOfficialFreePricing(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	ratio, configured, matchName := GetConfiguredModelRatio("agnes-3.0-flash")
+	require.True(t, configured)
+	require.Equal(t, "agnes-3.0-flash", matchName)
+	require.Zero(t, ratio)
+	require.Zero(t, GetCompletionRatio("agnes-3.0-flash"))
+
+	cacheRatio, hasCacheRatio := GetCacheRatio("agnes-3.0-flash")
+	require.True(t, hasCacheRatio)
+	require.Zero(t, cacheRatio)
+
+	// Agnes publishes no cache-creation price for this model; do not infer one.
+	_, hasCreateCacheRatio := GetCreateCacheRatio("agnes-3.0-flash")
+	require.False(t, hasCreateCacheRatio)
+}
+
+func TestSenseNova67UnlistedModelFailsClosed(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	_, configured, _ := GetConfiguredModelRatio("sensenova-6.7-flash-lite")
+	require.False(t, configured)
+	_, hasCacheRatio := GetCacheRatio("sensenova-6.7-flash-lite")
+	require.False(t, hasCacheRatio)
+	_, hasCreateCacheRatio := GetCreateCacheRatio("sensenova-6.7-flash-lite")
+	require.False(t, hasCreateCacheRatio)
 }
 
 func TestGetCompletionRatioGPT55DatedVariant(t *testing.T) {
@@ -1243,6 +1616,35 @@ func TestCompactModelPricingPrefersExplicitAndWildcardSettings(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, CompactWildcardModelKey, matchName)
 	require.InDelta(t, 3.0, ratio, 1e-9)
+}
+
+func TestCurrentOpenAIImageAndSoraPrices(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	for _, tt := range []struct {
+		name  string
+		price float64
+	}{
+		{name: "sora-2", price: 0.1},
+		{name: "sora-2-pro", price: 0.3},
+	} {
+		price, ok := GetModelPrice(tt.name, false)
+		require.True(t, ok)
+		require.InDelta(t, tt.price, price, 1e-9)
+	}
+
+	ratio, ok, matchName := GetConfiguredModelRatio("chatgpt-image-latest")
+	require.True(t, ok)
+	require.Equal(t, "chatgpt-image-latest", matchName)
+	require.InDelta(t, 2.5, ratio, 1e-9)
+	require.InDelta(t, 2, GetCompletionRatio("chatgpt-image-latest"), 1e-9)
+	cacheRatio, ok := GetCacheRatio("chatgpt-image-latest")
+	require.True(t, ok)
+	require.InDelta(t, 0.25, cacheRatio, 1e-9)
+	imageRatio, ok := GetImageRatio("chatgpt-image-latest")
+	require.True(t, ok)
+	require.InDelta(t, 1.6, imageRatio, 1e-9)
 }
 
 func resetPricingMapsForTest(t *testing.T) {

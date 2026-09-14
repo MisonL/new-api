@@ -22,6 +22,28 @@ func TestResponsesRequestToChatCompletionsRequestRejectsCustomToolsByDefault(t *
 	require.Contains(t, err.Error(), "custom tool bridge is not enabled")
 }
 
+func TestResponsesRequestHasUnbridgeableNamespaceToolsDefersMalformedInput(t *testing.T) {
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-luna",
+		Tools: mustMarshalJSON(t, []any{
+			42,
+			map[string]any{
+				"type":  "namespace",
+				"name":  "workspace",
+				"tools": []map[string]any{{"type": "tool_search"}},
+			},
+		}),
+	}
+
+	unbridgeable, err := ResponsesRequestHasUnbridgeableNamespaceTools(request, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+	require.NoError(t, err)
+	require.False(t, unbridgeable)
+
+	_, err = ResponsesRequestToChatCompletionsRequestWithOptions(request, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `tools[0] must be an object or string`)
+}
+
 func TestResponsesRequestToChatCompletionsRequestRejectsMalformedCustomToolHistory(t *testing.T) {
 	_, err := ResponsesRequestToChatCompletionsRequestWithOptions(&dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6-sol",
@@ -508,8 +530,17 @@ func TestResponsesChatCompatibilityLoadsOfficialToolSearchDefinitions(t *testing
 	const toolName = "calendar_create_event"
 	chatReq, toolState, err := ResponsesRequestToChatCompletionsRequestWithState(&dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6-sol",
+		Tools: mustMarshalJSON(t, []map[string]any{{
+			"type":      "tool_search",
+			"execution": "client",
+			"parameters": map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{"query": map[string]any{"type": "string"}},
+				"required":             []string{"query"},
+				"additionalProperties": false,
+			},
+		}}),
 		Input: mustMarshalJSON(t, []any{
-			map[string]any{"type": "additional_tools", "role": "developer", "tools": []map[string]any{{"type": "tool_search"}}},
 			map[string]any{"type": "tool_search_call", "call_id": "call_search", "arguments": `{"query":"calendar"}`},
 			map[string]any{
 				"type":      "tool_search_output",
@@ -529,7 +560,6 @@ func TestResponsesChatCompatibilityLoadsOfficialToolSearchDefinitions(t *testing
 					}},
 				}},
 			},
-			map[string]any{"type": "message", "role": "user", "content": []map[string]any{{"type": "input_text", "text": "Create an event."}}},
 		}),
 	}, ResponsesChatCompatibilityOptions{EnableCustomToolBridge: true})
 
@@ -540,7 +570,8 @@ func TestResponsesChatCompatibilityLoadsOfficialToolSearchDefinitions(t *testing
 	require.Contains(t, chatReq.Tools[1].Function.Description, "Plan events and manage your calendar.")
 	require.NotNil(t, chatReq.Tools[1].Function.Strict)
 	require.False(t, *chatReq.Tools[1].Function.Strict)
-	require.Len(t, chatReq.Messages, 3)
+	require.Len(t, chatReq.Messages, 2)
+	require.Equal(t, "assistant", chatReq.Messages[0].Role)
 	require.Equal(t, "tool", chatReq.Messages[1].Role)
 	require.JSONEq(t, `[{"type":"namespace","name":"mcp__codex_apps__calendar","description":"Plan events and manage your calendar.","tools":[{"type":"function","name":"calendar_create_event","strict":false,"defer_loading":true,"parameters":{"type":"object","properties":{}}}]}]`, chatReq.Messages[1].StringContent())
 

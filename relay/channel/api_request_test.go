@@ -2,6 +2,7 @@ package channel
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -58,6 +59,20 @@ func TestRecordUpstreamRequestPathFallsBackToPathFromMalformedURL(t *testing.T) 
 	require.Equal(t, "/%zz/v1/chat", info.UpstreamRequestPath)
 }
 
+func TestApplyUpstreamContentLengthUsesTrackedBodySize(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "https://upstream.example/v1/responses", nil)
+	req.ContentLength = 0
+	info := &relaycommon.RelayInfo{UpstreamRequestBodySize: 12345}
+
+	applyUpstreamContentLength(req, info)
+
+	require.Equal(t, int64(12345), req.ContentLength)
+
+	req.ContentLength = 99
+	applyUpstreamContentLength(req, info)
+	require.Equal(t, int64(99), req.ContentLength)
+}
+
 func TestDoWssRequestPreservesRateLimitHandshakeAndConsumesFollowup(t *testing.T) {
 	previousLimit := operation_setting.GetUpstreamRateLimitRetryLimit()
 	operation_setting.SetUpstreamRateLimitRetryLimit(1)
@@ -66,8 +81,10 @@ func TestDoWssRequestPreservesRateLimitHandshakeAndConsumesFollowup(t *testing.T
 	})
 
 	var calls atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	var upstreamUserAgent string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		upstreamUserAgent = r.Header.Get("User-Agent")
 		w.WriteHeader(http.StatusTooManyRequests)
 	}))
 	defer upstream.Close()
@@ -100,6 +117,7 @@ func TestDoWssRequestPreservesRateLimitHandshakeAndConsumesFollowup(t *testing.T
 	)
 	require.ErrorAs(t, err, &upstreamErr)
 	require.Equal(t, http.StatusTooManyRequests, upstreamErr.StatusCode)
+	require.Equal(t, service.DefaultUserAgent, upstreamUserAgent)
 	require.Equal(t, int32(1), calls.Load())
 }
 
@@ -305,11 +323,61 @@ func TestProcessHeaderOverride_AppliesBuiltinHeaderProfile(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Request.Header.Set("X-Codex-Turn-Metadata", "turn-metadata")
 	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, service.RuntimeHeaderPolicyAudit{
 		HeaderPolicyMode: "prefer_channel",
 	})
 
 	info := &relaycommon.RelayInfo{
+		RequestHeaders:              map[string]string{"X-Codex-Turn-Metadata": "turn-metadata"},
+		RuntimeHeadersOverride:      map[string]interface{}{"x-codex-turn-metadata": "turn-metadata"},
+		RuntimePassedRequestHeaders: map[string]string{"x-codex-turn-metadata": "turn-metadata"},
+		UseRuntimeHeadersOverride:   true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeFixed,
+					SelectedProfileIDs: []string{"codex-cli"},
+				},
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, headers["user-agent"])
+	require.Equal(t, dto.BuiltinCodexCLIOriginator, headers["originator"])
+	require.NotContains(t, headers, "x-codex-compatibility")
+	upstreamRequest := httptest.NewRequest(http.MethodPost, "https://example.test/v1/chat/completions", nil)
+	applyHeaderOverrideToRequest(upstreamRequest, headers)
+	require.Empty(t, upstreamRequest.Header.Get("X-Codex-Compatibility"))
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, codexDynamicHeadersStatusPassed, audit.CodexDynamicHeadersStatus)
+	require.Equal(t, []string{"x-codex-turn-metadata"}, audit.CodexDynamicHeaderKeys)
+	require.Equal(t, "prefer_channel", audit.HeaderPolicyMode)
+	require.Equal(t, dto.BuiltinCodexCLIUserAgent, audit.AppliedUserAgent)
+	require.ElementsMatch(t, []string{"user-agent", "originator", "x-codex-turn-metadata"}, audit.AppliedHeaderKeys)
+	require.ElementsMatch(t, []service.AppliedHeaderAuditEntry{
+		{Key: "originator", Value: dto.BuiltinCodexCLIOriginator},
+		{Key: "user-agent", Value: dto.BuiltinCodexCLIUserAgent},
+		{Key: "x-codex-turn-metadata", Value: service.AppliedHeaderAuditRedactedValue},
+	}, audit.AppliedHeaders)
+}
+
+func TestProcessHeaderOverride_CodexProfileAllowsRequestWithoutDynamicHeaders(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{
+			"Originator": "codex-tui",
+		},
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
@@ -328,13 +396,194 @@ func TestProcessHeaderOverride_AppliesBuiltinHeaderProfile(t *testing.T) {
 
 	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
 	require.True(t, ok)
-	require.Equal(t, "prefer_channel", audit.HeaderPolicyMode)
-	require.Equal(t, dto.BuiltinCodexCLIUserAgent, audit.AppliedUserAgent)
-	require.ElementsMatch(t, []string{"user-agent", "originator"}, audit.AppliedHeaderKeys)
-	require.ElementsMatch(t, []service.AppliedHeaderAuditEntry{
-		{Key: "originator", Value: dto.BuiltinCodexCLIOriginator},
-		{Key: "user-agent", Value: dto.BuiltinCodexCLIUserAgent},
-	}, audit.AppliedHeaders)
+	require.Equal(t, codexDynamicHeadersStatusAbsent, audit.CodexDynamicHeadersStatus)
+	require.Empty(t, audit.CodexDynamicHeaderKeys)
+}
+
+func TestCollectCodexDynamicHTTPHeadersHandlesNonCanonicalNames(t *testing.T) {
+	headers := http.Header{
+		"x-codex-turn-metadata": []string{"turn-metadata"},
+	}
+
+	require.Equal(t, map[string]string{
+		"x-codex-turn-metadata": "turn-metadata",
+	}, collectCodexDynamicHTTPHeaders(headers))
+}
+
+func TestProcessHeaderOverride_CodexProfileRejectsUnpassedDynamicHeader(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Header.Set("X-Codex-Turn-Metadata", "turn-metadata")
+
+	info := &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{
+			"X-Codex-Turn-Metadata": "turn-metadata",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeFixed,
+					SelectedProfileIDs: []string{"codex-cli"},
+				},
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.Error(t, err)
+	require.Nil(t, headers)
+	require.Contains(t, err.Error(), "x-codex-turn-metadata")
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, codexDynamicHeadersStatusRejected, audit.CodexDynamicHeadersStatus)
+	require.Equal(t, []string{"x-codex-turn-metadata"}, audit.CodexDynamicHeaderKeys)
+}
+
+func TestProcessHeaderOverride_CodexProfileRejectsOverriddenDynamicHeader(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Header.Set("X-Codex-Turn-Metadata", "turn-metadata")
+
+	info := &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{
+			"X-Codex-Turn-Metadata": "turn-metadata",
+		},
+		RuntimeHeadersOverride: map[string]interface{}{
+			"x-codex-turn-metadata": "stale-metadata",
+		},
+		RuntimePassedRequestHeaders: map[string]string{
+			"x-codex-turn-metadata": "turn-metadata",
+		},
+		UseRuntimeHeadersOverride: true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeFixed,
+					SelectedProfileIDs: []string{"codex-cli"},
+				},
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.Error(t, err)
+	require.Nil(t, headers)
+	require.Contains(t, err.Error(), "x-codex-turn-metadata")
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, codexDynamicHeadersStatusRejected, audit.CodexDynamicHeadersStatus)
+}
+
+func TestProcessHeaderOverride_CodexProfileRejectsStaticDynamicHeader(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Header.Set("X-Codex-Turn-Metadata", "turn-metadata")
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			HeadersOverride: map[string]any{
+				"X-Codex-Turn-Metadata": "static-metadata",
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeFixed,
+					SelectedProfileIDs: []string{"codex-cli"},
+				},
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.Error(t, err)
+	require.Nil(t, headers)
+	require.Contains(t, err.Error(), "x-codex-turn-metadata")
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, codexDynamicHeadersStatusRejected, audit.CodexDynamicHeadersStatus)
+	require.Equal(t, []string{"x-codex-turn-metadata"}, audit.CodexDynamicHeaderKeys)
+}
+
+func TestProcessHeaderOverride_CodexProfileRejectsStaticNonXCodexDynamicHeader(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Header.Set("Session-Id", "session-live")
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeFixed,
+					SelectedProfileIDs: []string{"codex-cli"},
+					Profiles: []dto.HeaderProfile{
+						{ID: "codex-cli", Headers: map[string]string{"Session-Id": "static-session"}},
+					},
+				},
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.Error(t, err)
+	require.Nil(t, headers)
+	require.Contains(t, err.Error(), "session-id")
+
+	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
+	require.True(t, ok)
+	require.Equal(t, codexDynamicHeadersStatusRejected, audit.CodexDynamicHeadersStatus)
+	require.Equal(t, []string{"session-id"}, audit.CodexDynamicHeaderKeys)
+}
+
+func TestProcessHeaderOverride_CodexProfileRejectsStaleRequestHeaderSnapshot(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Header.Set("X-Codex-Turn-Metadata", "live-metadata")
+
+	info := &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{"X-Codex-Turn-Metadata": "stale-metadata"},
+		RuntimeHeadersOverride: map[string]interface{}{
+			"x-codex-turn-metadata": "live-metadata",
+		},
+		RuntimePassedRequestHeaders: map[string]string{
+			"x-codex-turn-metadata": "stale-metadata",
+		},
+		UseRuntimeHeadersOverride: true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeFixed,
+					SelectedProfileIDs: []string{"codex-cli"},
+				},
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.Error(t, err)
+	require.Nil(t, headers)
+	require.Contains(t, err.Error(), "x-codex-turn-metadata")
 }
 
 func TestProcessHeaderOverride_LegacyOverrideCreatesAuditWhenMissing(t *testing.T) {
@@ -430,7 +679,7 @@ func TestMergeDefaultUserAgentAuditRecordsHTTP2DefaultWhenUnset(t *testing.T) {
 
 	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
 	require.True(t, ok)
-	require.Equal(t, "Go-http-client/2.0", audit.AppliedUserAgent)
+	require.Equal(t, service.DefaultUserAgent, audit.AppliedUserAgent)
 	require.False(t, audit.UserAgentApplied)
 	require.Empty(t, audit.AppliedHeaderKeys)
 }
@@ -451,7 +700,60 @@ func TestMergeDefaultUserAgentAuditRecordsHTTP1DefaultWhenUnset(t *testing.T) {
 
 	audit, ok := common.GetContextKeyType[service.RuntimeHeaderPolicyAudit](ctx, constant.ContextKeyChannelHeaderPolicyAudit)
 	require.True(t, ok)
-	require.Equal(t, "Go-http-client/1.1", audit.AppliedUserAgent)
+	require.Equal(t, service.DefaultUserAgent, audit.AppliedUserAgent)
+}
+
+func TestApplyDefaultUserAgentPreservesExplicitHeader(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	req.Header.Set("User-Agent", "Custom/1.0")
+
+	service.ApplyDefaultUserAgent(req)
+
+	require.Equal(t, "Custom/1.0", req.Header.Get("User-Agent"))
+}
+
+func TestApplyDefaultUserAgentPreservesExplicitEmptyHeader(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+	req.Header["user-agent"] = []string{""}
+
+	service.ApplyDefaultUserAgent(req)
+
+	require.Empty(t, req.Header.Get("User-Agent"))
+}
+
+func TestApplyDefaultUserAgentUsesGenericDefault(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "https://example.test/v1/responses", nil)
+
+	service.ApplyDefaultUserAgent(req)
+
+	require.Equal(t, service.DefaultUserAgent, req.Header.Get("User-Agent"))
+	require.Contains(t, service.DefaultUserAgent, "Mozilla/5.0 (")
+	require.Contains(t, service.DefaultUserAgent, "Macintosh; Intel Mac OS X 10_15_7")
+	require.Contains(t, service.DefaultUserAgent, "Chrome/")
+	require.NotContains(t, service.DefaultUserAgent, "Go-http-client")
+	require.NotContains(t, service.DefaultUserAgent, "new-api")
+}
+
+func TestDoRequestSendsGenericDefaultUserAgent(t *testing.T) {
+	var upstreamUserAgent string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamUserAgent = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	service.InitHttpClient()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	req, err := http.NewRequest(http.MethodPost, upstream.URL, http.NoBody)
+	require.NoError(t, err)
+
+	resp, err := doRequest(ctx, req, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, service.DefaultUserAgent, upstreamUserAgent)
+	require.NoError(t, resp.Body.Close())
 }
 
 func TestMergeDefaultUserAgentAuditSkipsExplicitEmptyUserAgent(t *testing.T) {
@@ -544,6 +846,10 @@ func TestProcessHeaderOverride_HeaderProfileRoundRobinAdvancesRuntimeState(t *te
 	require.NoError(t, err)
 	require.Equal(t, "A/1.0", headers["user-agent"])
 
+	// A second retry attempt is a new request-scoped selection. Reusing the
+	// same attempt must intentionally replay the first profile rather than
+	// advancing it during preflight and outbound header construction.
+	info.RetryIndex = 1
 	headers, err = processHeaderOverride(info, ctx)
 	require.NoError(t, err)
 	require.Equal(t, "B/1.0", headers["user-agent"])
@@ -567,7 +873,16 @@ func TestDoTaskApiRequestAppliesHeaderOverride(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/generations", nil)
+	ctx.Request.Header.Set("X-Codex-Turn-Metadata", "turn-metadata")
 	info := &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{"X-Codex-Turn-Metadata": "turn-metadata"},
+		RuntimeHeadersOverride: map[string]interface{}{
+			"authorization":         "Bearer override",
+			"x-codex-turn-metadata": "turn-metadata",
+			"x-static":              "yes",
+		},
+		RuntimePassedRequestHeaders: map[string]string{"x-codex-turn-metadata": "turn-metadata"},
+		UseRuntimeHeadersOverride:   true,
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ApiKey: "sk-test",
 			HeadersOverride: map[string]any{
@@ -632,8 +947,50 @@ func TestDoTaskApiRequestLetsSignedAdaptorApplyOverrideBeforeSigning(t *testing.
 	require.Equal(t, "signed:application/vnd.signed+json:signed.example.test", upstreamHeaders.Get("Authorization"))
 }
 
+func TestDoTaskApiRequestReusesPlannedTaskSubmitURL(t *testing.T) {
+	service.InitHttpClient()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/planned/v2/tasks", r.URL.Path)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	// Use a small wrapper whose URL builder records calls. The request-scoped
+	// plan must make the transport skip this builder entirely.
+	adaptor := &plannedURLTaskAdaptor{
+		testTaskAdaptor: testTaskAdaptor{url: server.URL + "/unexpected"},
+		buildCalls:      &calls,
+	}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	info := &relaycommon.RelayInfo{
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{SubmitRequestURL: server.URL + "/planned/v2/tasks?api-version=2026-01"},
+		ChannelMeta:   &relaycommon.ChannelMeta{},
+	}
+
+	resp, err := DoTaskApiRequest(adaptor, ctx, info, http.NoBody)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, int32(0), calls.Load())
+}
+
 type testTaskAdaptor struct {
 	url string
+}
+
+type plannedURLTaskAdaptor struct {
+	testTaskAdaptor
+	buildCalls *atomic.Int32
+}
+
+func (a *plannedURLTaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	if a.buildCalls != nil {
+		a.buildCalls.Add(1)
+	}
+	return a.testTaskAdaptor.BuildRequestURL(info)
 }
 
 func (a *testTaskAdaptor) Init(_ *relaycommon.RelayInfo) {}
@@ -684,6 +1041,10 @@ func (a *testTaskAdaptor) GetChannelName() string {
 }
 
 func (a *testTaskAdaptor) FetchTask(_ string, _ string, _ map[string]any, _ string, _ ...http.Header) (*http.Response, error) {
+	return nil, nil
+}
+
+func (a *testTaskAdaptor) FetchTaskWithContext(context.Context, string, string, map[string]any, string, ...http.Header) (*http.Response, error) {
 	return nil, nil
 }
 
@@ -881,6 +1242,51 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
 }
 
+func TestProcessHeaderOverride_CodexProfileAllowsDerivedSessionHeader(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Header.Set("X-Client-Request-Id", "request-123")
+
+	info := &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{
+			"X-Client-Request-Id": "request-123",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ParamOverride: map[string]any{
+				"operations": []any{
+					map[string]any{
+						"mode":  "pass_headers",
+						"value": []any{"X-Client-Request-Id"},
+					},
+					map[string]any{
+						"mode": "copy_header",
+						"from": "X-Client-Request-Id",
+						"to":   "Session_id",
+					},
+				},
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				HeaderProfileStrategy: &dto.HeaderProfileStrategy{
+					Enabled:            true,
+					Mode:               dto.HeaderProfileModeFixed,
+					SelectedProfileIDs: []string{"codex-cli"},
+				},
+			},
+		},
+	}
+
+	_, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"gpt-5.6"}`), info)
+	require.NoError(t, err)
+	require.Equal(t, "request-123", info.RuntimePassedRequestHeaders["session_id"])
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "request-123", headers["session_id"])
+}
+
 func TestDoRequestRecordsUpstreamTimingOnBodyRead(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -922,6 +1328,29 @@ func TestDoRequestRecordsUpstreamTimingOnBodyRead(t *testing.T) {
 	require.GreaterOrEqual(t, totalMs, int64(0))
 	require.LessOrEqual(t, headerMs, ttfbMs)
 	require.LessOrEqual(t, ttfbMs, totalMs)
+}
+
+func TestDoRequestCapturesStandardProviderRequestId(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Request-Id", "provider-req-456")
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	req, err := http.NewRequest(http.MethodGet, upstream.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := doRequest(ctx, req, info)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, "provider-req-456", ctx.GetString(common.UpstreamRequestIdKey))
+	require.NoError(t, resp.Body.Close())
 }
 
 func TestDoRequestRecordsUpstreamEndOnCloseWithoutRead(t *testing.T) {
@@ -1005,12 +1434,27 @@ func TestDoApiRequestNormalizesOpaqueResponsesReplayTransportHeaders(t *testing.
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	common.SetResponsesRequestMetadata(ctx, common.ResponsesRequestMetadata{HasOpaqueEncryptedContent: true})
-	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
-		HeadersOverride: map[string]interface{}{
-			"Content-Encoding": "gzip",
-			"Content-Length":   "1",
+	info := &relaycommon.RelayInfo{
+		UpstreamRequestBodySize: int64(len(wantBody)),
+		UpstreamRequestGetBody: func() (io.ReadCloser, error) {
+			replay, err := common.NewTopLevelJSONStringReplacementReader(
+				bytes.NewReader(rawBody),
+				int64(len(rawBody)),
+				location,
+				"upstream-gpt-5.6-sol-with-a-longer-name",
+			)
+			if err != nil {
+				return nil, err
+			}
+			return io.NopCloser(replay), nil
 		},
-	}}
+		ChannelMeta: &relaycommon.ChannelMeta{
+			HeadersOverride: map[string]interface{}{
+				"Content-Encoding": "gzip",
+				"Content-Length":   "1",
+			},
+		},
+	}
 
 	resp, err := DoApiRequest(&testWssAdaptor{url: upstream.URL}, ctx, info, requestBody)
 	require.NoError(t, err)
@@ -1147,7 +1591,10 @@ func TestDoRequestRecordsEndTimeForNilResponse(t *testing.T) {
 	resp, err := doRequestWithClient(ctx, req, info, doerFunc(func(req *http.Request) (*http.Response, error) {
 		return nil, nil
 	}))
-	require.Error(t, err)
+	var apiErr *types.NewAPIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, types.ErrorCodeUpstreamTransportInterrupted, apiErr.GetErrorCode())
+	require.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
 	require.Nil(t, resp)
 
 	headerMs, ok := info.UpstreamHeaderLatencyMs()

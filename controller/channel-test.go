@@ -41,6 +41,7 @@ import (
 
 type testResult struct {
 	context       *gin.Context
+	relayInfo     *relaycommon.RelayInfo
 	localErr      error
 	newAPIError   *types.NewAPIError
 	runtimeConfig *channelTestRuntimeSummary
@@ -106,6 +107,7 @@ func testChannelWithOptionsForUser(channel *model.Channel, testUserID int, testM
 	defer func() {
 		finalizeChannelTestRuntimeSummary(runtimeSummary, c, info)
 		result.runtimeConfig = runtimeSummary
+		result.relayInfo = info
 	}()
 
 	tik := time.Now()
@@ -243,6 +245,30 @@ func testChannelWithOptionsForUser(channel *model.Channel, testUserID int, testM
 			newAPIError: newAPIError,
 		}
 	}
+	// Channel tests use an explicitly selected channel and call the adaptor
+	// directly, so they do not pass through the normal relay selector. Apply the
+	// same attempt-scoped concurrency lease and strict 429 semantics here.
+	acquired, concurrencyErr := acquireSelectedChannelConcurrency(c, channel, true)
+	if concurrencyErr != nil {
+		return testResult{
+			context:     c,
+			localErr:    concurrencyErr,
+			newAPIError: concurrencyErr,
+		}
+	}
+	if !acquired {
+		return testResult{
+			context:  c,
+			localErr: errors.New("channel concurrency limit reached"),
+			newAPIError: types.NewErrorWithStatusCode(
+				errors.New("channel concurrency limit reached"),
+				types.ErrorCodeChannelConcurrencyExceeded,
+				http.StatusTooManyRequests,
+				types.ErrOptionWithSkipRetry(),
+			),
+		}
+	}
+	defer service.ReleaseChannelConcurrency(c)
 
 	// Determine relay format based on endpoint type or request path
 	var relayFormat types.RelayFormat
@@ -333,6 +359,13 @@ func testChannelWithOptionsForUser(channel *model.Channel, testUserID int, testM
 
 	request, err = applyChannelTestProtocolStrategy(c, info, request, options)
 	if err != nil {
+		return testResult{
+			context:     c,
+			localErr:    err,
+			newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest),
+		}
+	}
+	if err = validateChannelTestOpaqueReplay(info, request); err != nil {
 		return testResult{
 			context:     c,
 			localErr:    err,
@@ -520,14 +553,14 @@ func testChannelWithOptionsForUser(channel *model.Channel, testUserID int, testM
 		if httpResp.StatusCode != http.StatusOK {
 			err := service.RelayErrorHandler(c.Request.Context(), httpResp, true)
 			common.SysError(fmt.Sprintf(
-				"channel test bad response: channel_id=%d name=%s type=%d model=%s endpoint_type=%s status=%d err=%v",
+				"channel test bad response: channel_id=%d name=%s type=%d model=%s endpoint_type=%s status=%d err=%s",
 				channel.Id,
 				channel.Name,
 				channel.Type,
 				testModel,
 				endpointType,
 				httpResp.StatusCode,
-				err,
+				common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode()),
 			))
 			return testResult{
 				context:     c,
@@ -847,10 +880,15 @@ func buildChannelTestResponsesInput(prompt string) json.RawMessage {
 
 func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInfo, request dto.Request, options channelTestOptions) (dto.Request, error) {
 	options = normalizeChannelTestOptions(options)
+	if info == nil {
+		return request, errors.New("relay info is nil")
+	}
 	explicitChatProtocol := options.ResponseProtocol == channelTestResponseProtocolChatCompletions
+	var conversionRule *model_setting.ProtocolConversionRule
 	var conversionOptions service.ResponsesChatCompatibilityOptions
 	if !explicitChatProtocol {
-		conversionRule, err := findChannelTestResponsesViaChatRule(info, request)
+		var err error
+		conversionRule, err = findChannelTestResponsesViaChatRule(info, request)
 		if err != nil {
 			return request, err
 		}
@@ -859,11 +897,15 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 		}
 		conversionOptions = channelTestResponsesChatOptionsFromRule(conversionRule)
 	}
-	if info == nil {
-		return request, errors.New("relay info is nil")
-	}
 	if explicitChatProtocol && info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
 		return request, fmt.Errorf("response protocol %q only supports responses endpoints", options.ResponseProtocol)
+	}
+	if explicitChatProtocol || conversionRule != nil {
+		// Check before Responses -> Chat conversion. The conversion drops the
+		// original reasoning item, so a post-conversion check cannot detect it.
+		if err := rejectChannelTestOpaqueReplayForChat(info, request); err != nil {
+			return request, err
+		}
 	}
 	if !explicitChatProtocol && info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		responsesReq, ok := request.(*dto.OpenAIResponsesCompactionRequest)
@@ -873,6 +915,9 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 		convertedResponsesReq := responsesReq.ToResponsesRequest()
 		if convertedResponsesReq == nil {
 			return request, fmt.Errorf("invalid response compaction request type: %T", request)
+		}
+		if err := validateChannelTestOpaqueReplay(info, request); err != nil {
+			return request, err
 		}
 		converted, applied, visibleOnly, applyInfo, err := service.ApplySyntheticCompactStateOrVisibleOnlyWithInfo(relaycommon.GinRequestContext(c), service.SyntheticCompactScopeFromSource(info), *convertedResponsesReq)
 		service.SetSyntheticCompactApplyInfo(c, applyInfo)
@@ -933,6 +978,23 @@ func findChannelTestResponsesViaChatRule(info *relaycommon.RelayInfo, request dt
 			info.OriginModelName,
 		)
 	}
+	// FindResponsesViaChatRule deliberately skips opaque encrypted replay so the
+	// normal relay can preserve it on a native Responses route. A channel test is
+	// different when an explicit global rule would otherwise force a
+	// Responses-to-Chat conversion: silently skipping that rule would test a
+	// different wire protocol than the configured policy. Surface the same
+	// safety error used by the explicit Chat mode instead.
+	hasOpaqueEncryptedContent, err := relaycommon.ResponsesInputHasOpaqueEncryptedContent(responsesRequest.Input)
+	if err != nil {
+		return nil, err
+	}
+	if hasOpaqueEncryptedContent {
+		if rule, err := service.FindUnconditionalResponsesViaChatRule(info.ChannelId, info.ChannelType, info.OriginModelName); err != nil {
+			return nil, err
+		} else if rule != nil {
+			return nil, relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(info.ChannelId)
+		}
+	}
 	return service.FindResponsesViaChatRule(
 		context.Background(),
 		info.RelayMode,
@@ -944,6 +1006,52 @@ func findChannelTestResponsesViaChatRule(info *relaycommon.RelayInfo, request dt
 		responsesRequest,
 		info.ChannelOtherSettings,
 	)
+}
+
+func channelTestResponsesInput(request dto.Request) json.RawMessage {
+	switch typedRequest := request.(type) {
+	case *dto.OpenAIResponsesRequest:
+		if typedRequest != nil {
+			return typedRequest.Input
+		}
+	case *dto.OpenAIResponsesCompactionRequest:
+		if typedRequest != nil {
+			return typedRequest.Input
+		}
+	}
+	return nil
+}
+
+func rejectChannelTestOpaqueReplayForChat(info *relaycommon.RelayInfo, request dto.Request) error {
+	hasOpaqueEncryptedContent, err := relaycommon.ResponsesInputHasOpaqueEncryptedContent(channelTestResponsesInput(request))
+	if err != nil {
+		return err
+	}
+	if hasOpaqueEncryptedContent {
+		channelID := 0
+		if info != nil {
+			channelID = info.ChannelId
+		}
+		return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(channelID)
+	}
+	return nil
+}
+
+func validateChannelTestOpaqueReplay(info *relaycommon.RelayInfo, request dto.Request) error {
+	if info == nil || info.ChannelMeta == nil ||
+		(info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact) {
+		return nil
+	}
+	hasOpaqueEncryptedContent, err := relaycommon.ResponsesInputHasOpaqueEncryptedContent(channelTestResponsesInput(request))
+	if err != nil || !hasOpaqueEncryptedContent {
+		return err
+	}
+	if info.ChannelOtherSettings.ExplicitlyDisablesResponsesEncryptedReasoningReplay(info.ChannelType) ||
+		(info.RelayMode == relayconstant.RelayModeResponsesCompact &&
+			!relaycommon.SupportsNativeOpaqueResponsesCompact(info.ChannelType, info.ChannelOtherSettings)) {
+		return relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(info.ChannelId)
+	}
+	return nil
 }
 
 func channelTestResponsesChatOptionsFromRule(rule *model_setting.ProtocolConversionRule) service.ResponsesChatCompatibilityOptions {
@@ -1314,7 +1422,7 @@ func testAllChannels(notify bool) error {
 
 			// disable channel
 			if isChannelEnabled && shouldBanChannel && channel.GetAutoBan() {
-				processChannelError(result.context, nil, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+				processChannelError(result.context, result.relayInfo, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 			}
 
 			// enable channel

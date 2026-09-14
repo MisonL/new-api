@@ -10,6 +10,74 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestResponsesCompactionNamespaceUnsupportedPreferenceDefaultsOn(t *testing.T) {
+	channel := &Channel{Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+	})
+
+	require.True(t, channelPrefersResponsesCompactionWhenNamespaceUnsupported(channel))
+	require.True(t, IsResponsesCompactionNamespacePreferred(channel, ratio_setting.WithCompactModelSuffix("gpt-5.5")))
+
+	disabled := false
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile:                             dto.ResponsesUpstreamProfileGenericProxy,
+		PreferForResponsesCompactionWhenNamespaceUnsupported: &disabled,
+	})
+	require.False(t, channelPrefersResponsesCompactionWhenNamespaceUnsupported(channel))
+}
+
+func TestGroupModelRouteCandidatesRejectWhitespaceOnlyModel(t *testing.T) {
+	for _, modelName := range []string{" ", "\t", "\n", " \t\n "} {
+		require.Empty(t, getGroupModelRouteCandidateMeta(modelName), modelName)
+		require.Empty(t, getGroupModelRouteCandidates(modelName), modelName)
+	}
+}
+
+func TestResponsesCompactionNamespaceUnknownIsNotPreferred(t *testing.T) {
+	channel := &Channel{Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{})
+
+	require.False(t, channelPrefersResponsesCompactionWhenNamespaceUnsupported(channel))
+	require.False(t, IsResponsesCompactionNamespacePreferred(channel, ratio_setting.WithCompactModelSuffix("gpt-5.5")))
+}
+
+func TestResponsesCompactionNamespacePreferenceUsesExplicitCapabilityOverride(t *testing.T) {
+	unsupported := false
+	channel := &Channel{Type: constant.ChannelTypeOpenAI}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileOfficialOpenAI,
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsNamespaceTools: &unsupported,
+		},
+	})
+
+	require.True(t, channelPrefersResponsesCompactionWhenNamespaceUnsupported(channel))
+
+	supported := true
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
+			SupportsNamespaceTools: &supported,
+		},
+	})
+	require.False(t, channelPrefersResponsesCompactionWhenNamespaceUnsupported(channel))
+}
+
+func TestPreferResponsesCompactionChannelsFallsBackAfterPreferredExclusion(t *testing.T) {
+	preferred := &Channel{Id: 1, Type: constant.ChannelTypeOpenAI}
+	preferred.SetOtherSettings(dto.ChannelOtherSettings{
+		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericProxy,
+	})
+	regular := &Channel{Id: 2, Type: constant.ChannelTypeOpenAI}
+	regular.SetOtherSettings(dto.ChannelOtherSettings{})
+	channels := []*Channel{regular, preferred}
+
+	require.Equal(t, []*Channel{preferred}, preferResponsesCompactionChannels(channels, true, nil))
+	require.Equal(t, []*Channel{regular}, preferResponsesCompactionChannels(channels, true, map[int]struct{}{preferred.Id: {}}))
+	require.Equal(t, channels, preferResponsesCompactionChannels(channels, false, nil))
+}
+
 func TestChannelSupportsCompactRouteCandidateDisabledOverridesProxyProfile(t *testing.T) {
 	channel := &Channel{
 		Type:   constant.ChannelTypeOpenAI,

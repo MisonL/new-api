@@ -28,14 +28,21 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 		}
 		if hasOpaqueEncryptedContent {
 			channelID := 0
-			capability := dto.ResponsesEncryptedReasoningReplayCapabilityUnknown
 			if info != nil {
 				channelID = info.ChannelId
-				capability = info.ChannelOtherSettings.ResolveResponsesEncryptedReasoningReplayCapability(info.ChannelType)
 			}
-			relaycommon.MarkResponsesEncryptedReasoningReplayDecision(c, capability)
-			relaycommon.MarkResponsesEncryptedReasoningReplayRejected(c)
+			markResponsesEncryptedReasoningReplayDecision(c, dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported)
 			return nil, relaycommon.NewResponsesEncryptedReasoningReplayUnsupportedError(channelID)
+		}
+		normalizedInput, normalizeResult, err := relaycommon.NormalizeResponsesInputItemIDs(request.Input)
+		if err != nil {
+			return nil, newResponsesConvertRequestError(err)
+		}
+		if normalizeResult.RemovedCount > 0 {
+			normalizedRequest := *request
+			normalizedRequest.Input = normalizedInput
+			request = &normalizedRequest
+			common.SetContextKey(c, constant.ContextKeyResponsesInputItemIDNormalizationRemovedCount, normalizeResult.RemovedCount)
 		}
 		strippedRequest, stripped := relaycommon.StripResponsesReasoningContext(*request)
 		if stripped {
@@ -98,16 +105,25 @@ func responsesViaChat(c *gin.Context, info *relaycommon.RelayInfo, adaptor chann
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	applySystemPromptIfNeeded(c, info, chatReq)
+	if err := applySystemPromptIfNeeded(c, info, chatReq); err != nil {
+		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
 	info.AppendRequestConversion(types.RelayFormatOpenAI)
 
 	savedRelayMode := info.RelayMode
 	savedRequestURLPath := info.RequestURLPath
+	previousBridgeMarker, hadBridgeMarker := common.GetContextKey(c, constant.ContextKeyResponsesToolCapabilityObservationBridged)
 	defer func() {
 		info.RelayMode = savedRelayMode
 		info.RequestURLPath = savedRequestURLPath
+		if hadBridgeMarker {
+			common.SetContextKey(c, constant.ContextKeyResponsesToolCapabilityObservationBridged, previousBridgeMarker)
+		} else {
+			common.SetContextKey(c, constant.ContextKeyResponsesToolCapabilityObservationBridged, false)
+		}
 	}()
 
+	common.SetContextKey(c, constant.ContextKeyResponsesToolCapabilityObservationBridged, true)
 	info.RelayMode = relayconstant.RelayModeChatCompletions
 	info.RequestURLPath = "/v1/chat/completions"
 

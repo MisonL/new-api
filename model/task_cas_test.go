@@ -129,6 +129,63 @@ func TestSnapshot_Roundtrip(t *testing.T) {
 	assert.JSONEq(t, string(task.Data), string(snap.Data))
 }
 
+func TestTaskGetResultURLUsesValidatedLegacyFailureReason(t *testing.T) {
+	tests := []struct {
+		name       string
+		failReason string
+		want       string
+	}{
+		{name: "legacy https URL", failReason: "https://cdn.example/video.mp4", want: "https://cdn.example/video.mp4"},
+		{name: "legacy data URL", failReason: "data:video/mp4;base64,AAAA", want: "data:video/mp4;base64,AAAA"},
+		{name: "image data URL is not a video result", failReason: "data:image/png;base64,AAAA"},
+		{name: "non-base64 data URL is not a video result", failReason: "data:video/mp4,AAAA"},
+		{name: "plain failure message", failReason: "upstream returned an error"},
+		{name: "relative path", failReason: "/tmp/video.mp4"},
+		{name: "unsupported scheme", failReason: "ftp://cdn.example/video.mp4"},
+		{name: "missing HTTP host", failReason: "https://"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &Task{FailReason: tt.failReason}
+			assert.Equal(t, tt.want, task.GetResultURL())
+		})
+	}
+
+	task := &Task{
+		FailReason: "https://legacy.example/video.mp4",
+		PrivateData: TaskPrivateData{
+			ResultURL: "https://current.example/video.mp4",
+		},
+	}
+	assert.Equal(t, "https://current.example/video.mp4", task.GetResultURL())
+	assert.Empty(t, (*Task)(nil).GetResultURL())
+}
+
+func TestIsTaskStatusTransitionAllowedIsMonotonic(t *testing.T) {
+	tests := []struct {
+		name string
+		from TaskStatus
+		to   TaskStatus
+		want bool
+	}{
+		{name: "initial to submitted", from: TaskStatusNotStart, to: TaskStatusSubmitted, want: true},
+		{name: "queued to in progress", from: TaskStatusQueued, to: TaskStatusInProgress, want: true},
+		{name: "in progress to success", from: TaskStatusInProgress, to: TaskStatusSuccess, want: true},
+		{name: "in progress to failure", from: TaskStatusInProgress, to: TaskStatusFailure, want: true},
+		{name: "success duplicate", from: TaskStatusSuccess, to: TaskStatusSuccess, want: true},
+		{name: "failure duplicate", from: TaskStatusFailure, to: TaskStatusFailure, want: true},
+		{name: "success to failure is rejected", from: TaskStatusSuccess, to: TaskStatusFailure, want: false},
+		{name: "failure to success is rejected", from: TaskStatusFailure, to: TaskStatusSuccess, want: false},
+		{name: "in progress to queued is rejected", from: TaskStatusInProgress, to: TaskStatusQueued, want: false},
+		{name: "unknown incoming is rejected", from: TaskStatusInProgress, to: TaskStatusUnknown, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsTaskStatusTransitionAllowed(tt.from, tt.to))
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // UpdateWithStatus CAS - DB integration tests
 // ---------------------------------------------------------------------------

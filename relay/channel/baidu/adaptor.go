@@ -25,8 +25,7 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(*gin.Context, *relaycommon.RelayInfo, *dto.ClaudeRequest) (any, error) {
-	//TODO implement me
-	panic("implement me")
+	return nil, errors.New("Claude Messages conversion is not supported by Baidu channel")
 }
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
@@ -123,8 +122,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	}
 	switch info.RelayMode {
 	default:
-		baiduRequest := requestOpenAI2Baidu(*request)
-		return baiduRequest, nil
+		return requestOpenAI2Baidu(*request)
 	}
 }
 

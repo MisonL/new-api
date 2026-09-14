@@ -3,6 +3,7 @@ package claude
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,6 +38,25 @@ func stopReasonClaude2OpenAI(reason string) string {
 	return reasonmap.ClaudeStopReasonToOpenAIFinishReason(reason)
 }
 
+func stopReasonClaude2OpenAIStrict(reason string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(reason))
+	switch normalized {
+	case "":
+		return "stop", nil
+	case "end_turn", "stop_sequence", "max_tokens", "tool_use", "refusal":
+		return reasonmap.ClaudeStopReasonToOpenAIFinishReason(normalized), nil
+	case "pause_turn":
+		// Anthropic uses pause_turn for a resumable agent turn. Chat Completions
+		// has no equivalent lifecycle state; stop is the least lossy terminal
+		// representation and lets the client decide whether to continue.
+		return constant.FinishReasonStop, nil
+	case "model_context_window_exceeded":
+		return constant.FinishReasonLength, nil
+	default:
+		return "", fmt.Errorf("Claude stop_reason %q is not supported by OpenAI Chat Completions", reason)
+	}
+}
+
 func maybeMarkClaudeRefusal(c *gin.Context, stopReason string) {
 	if c == nil {
 		return
@@ -51,32 +71,19 @@ func buildClaudeMediaMessageFromFile(
 	mediaMessage dto.MediaContent,
 ) (*dto.ClaudeMediaMessage, bool, error) {
 	file := mediaMessage.GetFile()
-	if file == nil || file.FileData == "" {
-		return nil, false, nil
+	if file == nil {
+		return nil, true, errors.New("Claude file content is missing file metadata")
 	}
-
-	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.FileName)), ".")
-	mimeType := ""
-	if ext != "" {
-		mimeType = service.GetMimeTypeByExtension(ext)
-	}
-	if mimeType == "" {
-		return nil, false, nil
-	}
-	if mimeType == "application/octet-stream" {
-		return nil, true, nil
-	}
-
-	if strings.HasPrefix(mimeType, "text/") {
-		decoded, err := base64.StdEncoding.DecodeString(file.FileData)
-		if err != nil {
-			return nil, true, fmt.Errorf("decode text file failed: %w", err)
+	if file.FileData == "" {
+		if file.FileId == "" && file.FileUrl == "" {
+			return nil, true, errors.New("Claude file content requires file_data, file_id, or file_url")
 		}
-		text := string(decoded)
-		return &dto.ClaudeMediaMessage{
-			Type: "text",
-			Text: common.GetPointer[string](text),
-		}, true, nil
+		return nil, false, nil
+	}
+
+	mimeType, err := resolveClaudeFileMimeType(file)
+	if err != nil {
+		return nil, true, err
 	}
 
 	source := types.NewFileSourceFromData(file.FileData, mimeType)
@@ -87,6 +94,22 @@ func buildClaudeMediaMessageFromFile(
 	)
 	if err != nil {
 		return nil, true, fmt.Errorf("get file data failed: %w", err)
+	}
+	normalizedMimeType = normalizeClaudeMimeType(normalizedMimeType)
+	if normalizedMimeType == "" || normalizedMimeType == "application/octet-stream" {
+		return nil, true, fmt.Errorf("cannot determine MIME type for Claude file %q", file.FileName)
+	}
+
+	if strings.HasPrefix(normalizedMimeType, "text/") {
+		decoded, err := base64.StdEncoding.DecodeString(base64Data)
+		if err != nil {
+			return nil, true, fmt.Errorf("decode text file failed: %w", err)
+		}
+		text := string(decoded)
+		return &dto.ClaudeMediaMessage{
+			Type: "text",
+			Text: common.GetPointer[string](text),
+		}, true, nil
 	}
 
 	claudeMediaMessage := &dto.ClaudeMediaMessage{
@@ -105,36 +128,151 @@ func buildClaudeMediaMessageFromFile(
 		return claudeMediaMessage, true, nil
 	}
 
-	return nil, true, nil
+	return nil, true, fmt.Errorf("Claude does not support file MIME type %q", normalizedMimeType)
+}
+
+func resolveClaudeFileMimeType(file *dto.MessageFile) (string, error) {
+	if file == nil {
+		return "", errors.New("Claude file content is missing file metadata")
+	}
+	if mimeType := normalizeClaudeMimeType(file.MimeType); mimeType != "" && mimeType != "application/octet-stream" {
+		return mimeType, nil
+	}
+
+	if ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.FileName)), "."); ext != "" {
+		if mimeType := normalizeClaudeMimeType(service.GetMimeTypeByExtension(ext)); mimeType != "" && mimeType != "application/octet-stream" {
+			return mimeType, nil
+		}
+	}
+
+	if file.FileData != "" {
+		encoded := file.FileData
+		if comma := strings.Index(encoded, ","); comma >= 0 && strings.HasPrefix(strings.ToLower(strings.TrimSpace(encoded[:comma])), "data:") {
+			encoded = encoded[comma+1:]
+		}
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", fmt.Errorf("decode Claude file data for MIME detection failed: %w", err)
+		}
+		if mimeType := normalizeClaudeMimeType(http.DetectContentType(decoded)); mimeType != "" && mimeType != "application/octet-stream" {
+			return mimeType, nil
+		}
+	}
+
+	return "", fmt.Errorf("cannot determine MIME type for Claude file %q", file.FileName)
+}
+
+func normalizeClaudeMimeType(mimeType string) string {
+	if index := strings.Index(mimeType, ";"); index >= 0 {
+		mimeType = mimeType[:index]
+	}
+	return strings.ToLower(strings.TrimSpace(mimeType))
+}
+
+func buildClaudeMediaMessageFromSource(c *gin.Context, source types.FileSource, context string) (*dto.ClaudeMediaMessage, error) {
+	if source == nil {
+		return nil, fmt.Errorf("%s has no file source", context)
+	}
+	base64Data, mimeType, err := service.GetBase64Data(c, source, context)
+	if err != nil {
+		return nil, fmt.Errorf("get file data failed: %w", err)
+	}
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	if mimeType == "" {
+		return nil, fmt.Errorf("%s has no MIME type", context)
+	}
+	if strings.HasPrefix(mimeType, "text/") {
+		decoded, err := base64.StdEncoding.DecodeString(base64Data)
+		if err != nil {
+			return nil, fmt.Errorf("decode text file failed: %w", err)
+		}
+		return &dto.ClaudeMediaMessage{Type: "text", Text: common.GetPointer[string](string(decoded))}, nil
+	}
+	if strings.HasPrefix(mimeType, "image/") {
+		return &dto.ClaudeMediaMessage{
+			Type:   "image",
+			Source: &dto.ClaudeMessageSource{Type: "base64", MediaType: mimeType, Data: base64Data},
+		}, nil
+	}
+	if mimeType == "application/pdf" {
+		return &dto.ClaudeMediaMessage{
+			Type:   "document",
+			Source: &dto.ClaudeMessageSource{Type: "base64", MediaType: mimeType, Data: base64Data},
+		}, nil
+	}
+	return nil, fmt.Errorf("Claude does not support MIME type %q", mimeType)
 }
 
 func hasNonEmptyToolCalls(message dto.Message) bool {
-	return len(message.ParseToolCalls()) > 0
+	toolCalls, err := message.ParseToolCallsStrict()
+	return err == nil && len(toolCalls) > 0
+}
+
+func claudeUserContentBlocks(content any) ([]dto.ClaudeMediaMessage, error) {
+	switch value := content.(type) {
+	case nil:
+		return make([]dto.ClaudeMediaMessage, 0), nil
+	case string:
+		return []dto.ClaudeMediaMessage{{
+			Type: "text",
+			Text: common.GetPointer(value),
+		}}, nil
+	case []dto.ClaudeMediaMessage:
+		return append([]dto.ClaudeMediaMessage(nil), value...), nil
+	case []any:
+		blocks, err := common.Any2Type[[]dto.ClaudeMediaMessage](value)
+		if err != nil {
+			return nil, err
+		}
+		return blocks, nil
+	default:
+		return nil, fmt.Errorf("unsupported content type %T", content)
+	}
+}
+
+func normalizeClaudeInputSchema(parameters any, toolName string) (map[string]interface{}, error) {
+	if parameters == nil {
+		return map[string]interface{}{"type": "object"}, nil
+	}
+
+	schema, err := common.Any2Type[map[string]interface{}](parameters)
+	if err != nil || schema == nil {
+		if err != nil {
+			return nil, fmt.Errorf("tool %s parameters must be a JSON object: %w", toolName, err)
+		}
+		return nil, fmt.Errorf("tool %s parameters must be a JSON object", toolName)
+	}
+	if schemaType, exists := schema["type"]; exists {
+		if _, ok := schemaType.(string); !ok {
+			return nil, fmt.Errorf("tool %s parameters.type must be a string", toolName)
+		}
+	} else {
+		schema["type"] = "object"
+	}
+	return schema, nil
 }
 
 func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
 	claudeTools := make([]any, 0, len(textRequest.Tools))
 
 	for _, tool := range textRequest.Tools {
-		if params, ok := tool.Function.Parameters.(map[string]any); ok {
-			claudeTool := dto.Tool{
-				Name:        tool.Function.Name,
-				Description: tool.Function.Description,
-			}
-			claudeTool.InputSchema = make(map[string]interface{})
-			if params["type"] != nil {
-				claudeTool.InputSchema["type"] = params["type"].(string)
-			}
-			claudeTool.InputSchema["properties"] = params["properties"]
-			claudeTool.InputSchema["required"] = params["required"]
-			for s, a := range params {
-				if s == "type" || s == "properties" || s == "required" {
-					continue
-				}
-				claudeTool.InputSchema[s] = a
-			}
-			claudeTools = append(claudeTools, &claudeTool)
+		toolType := strings.TrimSpace(tool.Type)
+		if toolType != "" && toolType != "function" {
+			return nil, fmt.Errorf("tool type %q is not supported by Claude", tool.Type)
 		}
+		toolName := strings.TrimSpace(tool.Function.Name)
+		if toolName == "" {
+			return nil, errors.New("tool name is required")
+		}
+		inputSchema, err := normalizeClaudeInputSchema(tool.Function.Parameters, toolName)
+		if err != nil {
+			return nil, err
+		}
+		claudeTools = append(claudeTools, &dto.Tool{
+			Name:        toolName,
+			Description: tool.Function.Description,
+			InputSchema: inputSchema,
+		})
 	}
 
 	// Web search tool
@@ -153,21 +291,22 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 
 			// 解析 UserLocation JSON
 			var userLocationMap map[string]interface{}
-			if err := common.Unmarshal(textRequest.WebSearchOptions.UserLocation, &userLocationMap); err == nil {
-				// 检查是否有 approximate 字段
-				if approximateData, ok := userLocationMap["approximate"].(map[string]interface{}); ok {
-					if timezone, ok := approximateData["timezone"].(string); ok && timezone != "" {
-						anthropicUserLocation.Timezone = timezone
-					}
-					if country, ok := approximateData["country"].(string); ok && country != "" {
-						anthropicUserLocation.Country = country
-					}
-					if region, ok := approximateData["region"].(string); ok && region != "" {
-						anthropicUserLocation.Region = region
-					}
-					if city, ok := approximateData["city"].(string); ok && city != "" {
-						anthropicUserLocation.City = city
-					}
+			if err := common.Unmarshal(textRequest.WebSearchOptions.UserLocation, &userLocationMap); err != nil {
+				return nil, fmt.Errorf("web_search_options.user_location must be a JSON object: %w", err)
+			}
+			// 检查是否有 approximate 字段
+			if approximateData, ok := userLocationMap["approximate"].(map[string]interface{}); ok {
+				if timezone, ok := approximateData["timezone"].(string); ok && timezone != "" {
+					anthropicUserLocation.Timezone = timezone
+				}
+				if country, ok := approximateData["country"].(string); ok && country != "" {
+					anthropicUserLocation.Country = country
+				}
+				if region, ok := approximateData["region"].(string); ok && region != "" {
+					anthropicUserLocation.Region = region
+				}
+				if city, ok := approximateData["city"].(string); ok && city != "" {
+					anthropicUserLocation.City = city
 				}
 			}
 
@@ -210,7 +349,10 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 
 	// 处理 tool_choice 和 parallel_tool_calls
 	if textRequest.ToolChoice != nil || textRequest.ParallelTooCalls != nil {
-		claudeToolChoice := mapToolChoice(textRequest.ToolChoice, textRequest.ParallelTooCalls)
+		claudeToolChoice, choiceErr := mapToolChoice(textRequest.ToolChoice, textRequest.ParallelTooCalls)
+		if choiceErr != nil {
+			return nil, choiceErr
+		}
 		if claudeToolChoice != nil {
 			claudeRequest.ToolChoice = claudeToolChoice
 		}
@@ -272,7 +414,7 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 	}
 
 	if textRequest.ReasoningEffort != "" {
-		switch textRequest.ReasoningEffort {
+		switch strings.ToLower(strings.TrimSpace(textRequest.ReasoningEffort)) {
 		case "low":
 			claudeRequest.Thinking = &dto.Thinking{
 				Type:         "enabled",
@@ -288,6 +430,8 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 				Type:         "enabled",
 				BudgetTokens: common.GetPointer[int](4096),
 			}
+		default:
+			return nil, fmt.Errorf("reasoning_effort %q is not supported by Claude", textRequest.ReasoningEffort)
 		}
 	}
 
@@ -309,15 +453,23 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 
 	if textRequest.Stop != nil {
 		// stop maybe string/array string, convert to array string
-		switch textRequest.Stop.(type) {
+		switch stop := textRequest.Stop.(type) {
 		case string:
-			claudeRequest.StopSequences = []string{textRequest.Stop.(string)}
+			claudeRequest.StopSequences = []string{stop}
+		case []string:
+			claudeRequest.StopSequences = append([]string(nil), stop...)
 		case []interface{}:
-			stopSequences := make([]string, 0)
-			for _, stop := range textRequest.Stop.([]interface{}) {
-				stopSequences = append(stopSequences, stop.(string))
+			stopSequences := make([]string, 0, len(stop))
+			for index, item := range stop {
+				value, ok := item.(string)
+				if !ok {
+					return nil, fmt.Errorf("stop[%d] must be a string", index)
+				}
+				stopSequences = append(stopSequences, value)
 			}
 			claudeRequest.StopSequences = stopSequences
+		default:
+			return nil, fmt.Errorf("stop must be a string or an array of strings")
 		}
 	}
 	formatMessages := make([]dto.Message, 0)
@@ -325,13 +477,25 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 		Role: "tool",
 	}
 	for i, message := range textRequest.Messages {
+		if _, err := message.ParseToolCallsStrict(); err != nil {
+			return nil, fmt.Errorf("messages[%d]: %w", i, err)
+		}
 		if message.Role == "" {
 			textRequest.Messages[i].Role = "user"
+			message.Role = "user"
+		}
+		if message.Role == "function" {
+			message.Role = "tool"
+		}
+		if message.Role != "system" && message.Role != "developer" &&
+			message.Role != "user" && message.Role != "assistant" && message.Role != "tool" {
+			return nil, fmt.Errorf("message role %q is not supported by Claude", message.Role)
 		}
 		fmtMessage := dto.Message{
 			Role:             message.Role,
 			Content:          message.Content,
 			ReasoningContent: message.ReasoningContent,
+			ThinkingContent:  message.ThinkingContent,
 			Reasoning:        message.Reasoning,
 		}
 		if message.Role == "tool" {
@@ -368,7 +532,7 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 	var systemMessages []dto.ClaudeMediaMessage
 
 	for _, message := range formatMessages {
-		if message.Role == "system" {
+		if message.Role == "system" || message.Role == "developer" {
 			// 根据Claude API规范，system字段使用数组格式更有通用性
 			if message.IsStringContent() {
 				if text := message.StringContent(); text != "" {
@@ -378,15 +542,21 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 					})
 				}
 			} else {
-				// 支持复合内容的system消息（虽然不常见，但需要考虑完整性）
-				for _, ctx := range message.ParseContent() {
-					if ctx.Type == "text" && ctx.Text != "" {
+				// Claude system blocks are text-only. Do not silently drop media.
+				content, err := message.ParseContentStrict()
+				if err != nil {
+					return nil, fmt.Errorf("Claude system content: %w", err)
+				}
+				for _, ctx := range content {
+					if ctx.Type != dto.ContentTypeText {
+						return nil, fmt.Errorf("Claude system content type %q is not supported", ctx.Type)
+					}
+					if ctx.Text != "" {
 						systemMessages = append(systemMessages, dto.ClaudeMediaMessage{
 							Type: "text",
 							Text: common.GetPointer[string](ctx.Text),
 						})
 					}
-					// 未来可以在这里扩展对图片等其他类型的支持
 				}
 			}
 		} else {
@@ -411,17 +581,16 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 			}
 			hasAssistantReasoning := message.Role == "assistant" && message.GetReasoningContent() != ""
 			if message.Role == "tool" {
+				if strings.TrimSpace(message.ToolCallId) == "" {
+					return nil, errors.New("tool message requires tool_call_id")
+				}
 				if len(claudeMessages) > 0 && claudeMessages[len(claudeMessages)-1].Role == "user" {
 					lastMessage := claudeMessages[len(claudeMessages)-1]
-					if content, ok := lastMessage.Content.(string); ok {
-						lastMessage.Content = []dto.ClaudeMediaMessage{
-							{
-								Type: "text",
-								Text: common.GetPointer[string](content),
-							},
-						}
+					lastContent, err := claudeUserContentBlocks(lastMessage.Content)
+					if err != nil {
+						return nil, fmt.Errorf("cannot append tool result to previous user message: %w", err)
 					}
-					lastMessage.Content = append(lastMessage.Content.([]dto.ClaudeMediaMessage), dto.ClaudeMediaMessage{
+					lastMessage.Content = append(lastContent, dto.ClaudeMediaMessage{
 						Type:      "tool_result",
 						ToolUseId: message.ToolCallId,
 						Content:   message.Content,
@@ -454,7 +623,11 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 						})
 					}
 				}
-				for _, mediaMessage := range message.ParseContent() {
+				content, err := message.ParseContentStrict()
+				if err != nil {
+					return nil, fmt.Errorf("Claude message content: %w", err)
+				}
+				for _, mediaMessage := range content {
 					switch mediaMessage.Type {
 					case "text":
 						if mediaMessage.Text != "" {
@@ -474,40 +647,45 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 							}
 							continue
 						}
-						fallthrough
-					default:
-						source := mediaMessage.ToFileSource()
-						if source == nil {
-							continue
-						}
-						base64Data, mimeType, err := service.GetBase64Data(c, source, "formatting image for Claude")
+						mediaSource := mediaMessage.ToFileSource()
+						claudeMediaMessage, err = buildClaudeMediaMessageFromSource(c, mediaSource, "formatting file for Claude")
 						if err != nil {
-							return nil, fmt.Errorf("get file data failed: %s", err.Error())
+							return nil, err
 						}
-						claudeMediaMessage := dto.ClaudeMediaMessage{
-							Source: &dto.ClaudeMessageSource{
-								Type: "base64",
-							},
+						claudeMediaMessages = append(claudeMediaMessages, *claudeMediaMessage)
+					case dto.ContentTypeImageURL:
+						mediaSource := mediaMessage.ToFileSource()
+						claudeMediaMessage, err := buildClaudeMediaMessageFromSource(c, mediaSource, "formatting image for Claude")
+						if err != nil {
+							return nil, err
 						}
-						if strings.HasPrefix(mimeType, "application/pdf") {
-							claudeMediaMessage.Type = "document"
-						} else {
-							claudeMediaMessage.Type = "image"
+						if claudeMediaMessage.Type != "image" {
+							return nil, fmt.Errorf("Claude image content resolved to unsupported type %q", claudeMediaMessage.Type)
 						}
-
-						claudeMediaMessage.Source.MediaType = mimeType
-						claudeMediaMessage.Source.Data = base64Data
-						claudeMediaMessages = append(claudeMediaMessages, claudeMediaMessage)
-						continue
+						claudeMediaMessages = append(claudeMediaMessages, *claudeMediaMessage)
+					case dto.ContentTypeInputAudio, dto.ContentTypeVideoUrl:
+						return nil, fmt.Errorf("Claude content type %q is not supported", mediaMessage.Type)
+					default:
+						return nil, fmt.Errorf("Claude content type %q is not supported", mediaMessage.Type)
 					}
 				}
 
-				if hasNonEmptyToolCalls(message) {
-					for _, toolCall := range message.ParseToolCalls() {
+				if toolCalls, err := message.ParseToolCallsStrict(); err != nil {
+					return nil, fmt.Errorf("Claude message tool_calls: %w", err)
+				} else if len(toolCalls) > 0 {
+					for _, toolCall := range toolCalls {
+						if strings.TrimSpace(toolCall.ID) == "" || strings.TrimSpace(toolCall.Function.Name) == "" {
+							return nil, errors.New("tool call requires id and function name")
+						}
+						if strings.TrimSpace(toolCall.Type) != "" && toolCall.Type != "function" {
+							return nil, fmt.Errorf("tool call type %q is not supported by Claude", toolCall.Type)
+						}
 						inputObj := make(map[string]any)
-						if err := common.Unmarshal([]byte(toolCall.Function.Arguments), &inputObj); err != nil {
-							common.SysLog("tool call function arguments is not a map[string]any: " + fmt.Sprintf("%v", toolCall.Function.Arguments))
-							continue
+						arguments := strings.TrimSpace(toolCall.Function.Arguments)
+						if arguments != "" {
+							if err := common.Unmarshal([]byte(arguments), &inputObj); err != nil {
+								return nil, fmt.Errorf("invalid arguments for function %s: %w", toolCall.Function.Name, err)
+							}
 						}
 						claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
 							Type:  "tool_use",
@@ -534,6 +712,14 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 }
 
 func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCompletionsStreamResponse {
+	response, _ := StreamResponseClaude2OpenAIWithError(claudeResponse)
+	return response
+}
+
+func StreamResponseClaude2OpenAIWithError(claudeResponse *dto.ClaudeResponse) (*dto.ChatCompletionsStreamResponse, error) {
+	if claudeResponse == nil {
+		return nil, errors.New("Claude stream response is nil")
+	}
 	var response dto.ChatCompletionsStreamResponse
 	response.Object = "chat.completion.chunk"
 	response.Model = claudeResponse.Model
@@ -555,10 +741,15 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 	} else if claudeResponse.Type == "content_block_start" {
 		if claudeResponse.ContentBlock != nil {
 			// 如果是文本块，尽可能发送首段文本（若存在）
-			if claudeResponse.ContentBlock.Type == "text" && claudeResponse.ContentBlock.Text != nil {
-				choice.Delta.SetContentString(*claudeResponse.ContentBlock.Text)
-			}
-			if claudeResponse.ContentBlock.Type == "tool_use" {
+			switch claudeResponse.ContentBlock.Type {
+			case "text":
+				if claudeResponse.ContentBlock.Text != nil {
+					choice.Delta.SetContentString(*claudeResponse.ContentBlock.Text)
+				}
+			case "tool_use":
+				if strings.TrimSpace(claudeResponse.ContentBlock.Id) == "" || strings.TrimSpace(claudeResponse.ContentBlock.Name) == "" {
+					return nil, errors.New("Claude tool_use content block requires id and name")
+				}
 				tools = append(tools, dto.ToolCallResponse{
 					Index: common.GetPointer(fcIdx),
 					ID:    claudeResponse.ContentBlock.Id,
@@ -568,15 +759,25 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 						Arguments: "",
 					},
 				})
+			case "thinking":
+				// The OpenAI Chat Completions stream has no block-start event for
+				// reasoning. The following thinking_delta carries the content.
+			case "redacted_thinking":
+				return nil, errors.New("Claude redacted_thinking cannot be represented as OpenAI reasoning_content")
+			default:
+				return nil, fmt.Errorf("Claude content block type %q is not supported by OpenAI Chat Completions", claudeResponse.ContentBlock.Type)
 			}
 		} else {
-			return nil
+			return nil, errors.New("Claude content_block_start is missing content_block")
 		}
 	} else if claudeResponse.Type == "content_block_delta" {
 		if claudeResponse.Delta != nil {
 			choice.Delta.Content = claudeResponse.Delta.Text
 			switch claudeResponse.Delta.Type {
 			case "input_json_delta":
+				if claudeResponse.Delta.PartialJson == nil {
+					return nil, errors.New("Claude input_json_delta is missing partial_json")
+				}
 				tools = append(tools, dto.ToolCallResponse{
 					Type:  "function",
 					Index: common.GetPointer(fcIdx),
@@ -585,25 +786,38 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 					},
 				})
 			case "signature_delta":
-				// 加密的不处理
-				signatureContent := "\n"
-				choice.Delta.ReasoningContent = &signatureContent
+				// Claude signatures are opaque integrity metadata, not visible reasoning.
+				// OpenAI-compatible chat chunks have no field that can carry them safely.
+				return nil, nil
 			case "thinking_delta":
 				choice.Delta.ReasoningContent = claudeResponse.Delta.Thinking
+			case "text_delta":
+				if claudeResponse.Delta.Text == nil {
+					return nil, errors.New("Claude text_delta is missing text")
+				}
+			default:
+				return nil, fmt.Errorf("Claude delta type %q is not supported by OpenAI Chat Completions", claudeResponse.Delta.Type)
 			}
+		} else {
+			return nil, errors.New("Claude content_block_delta is missing delta")
 		}
 	} else if claudeResponse.Type == "message_delta" {
 		if claudeResponse.Delta != nil && claudeResponse.Delta.StopReason != nil {
-			finishReason := stopReasonClaude2OpenAI(*claudeResponse.Delta.StopReason)
+			finishReason, err := stopReasonClaude2OpenAIStrict(*claudeResponse.Delta.StopReason)
+			if err != nil {
+				return nil, err
+			}
 			if finishReason != "null" {
 				choice.FinishReason = &finishReason
 			}
 		}
 		//claudeUsage = &claudeResponse.Usage
 	} else if claudeResponse.Type == "message_stop" {
-		return nil
+		return nil, nil
+	} else if claudeResponse.Type == "content_block_stop" || claudeResponse.Type == "ping" {
+		return nil, nil
 	} else {
-		return nil
+		return nil, fmt.Errorf("Claude stream event type %q is not supported by OpenAI Chat Completions", claudeResponse.Type)
 	}
 	if len(tools) > 0 {
 		choice.Delta.Content = nil // compatible with other OpenAI derivative applications, like LobeOpenAICompatibleFactory ...
@@ -611,10 +825,18 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 	}
 	response.Choices = append(response.Choices, choice)
 
-	return &response
+	return &response, nil
 }
 
 func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextResponse {
+	response, _ := ResponseClaude2OpenAIWithError(claudeResponse)
+	return response
+}
+
+func ResponseClaude2OpenAIWithError(claudeResponse *dto.ClaudeResponse) (*dto.OpenAITextResponse, error) {
+	if claudeResponse == nil {
+		return nil, errors.New("Claude response is nil")
+	}
 	choices := make([]dto.OpenAITextResponseChoice, 0)
 	fullTextResponse := dto.OpenAITextResponse{
 		Id:      fmt.Sprintf("chatcmpl-%s", common.GetUUID()),
@@ -629,21 +851,33 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 	for _, message := range claudeResponse.Content {
 		switch message.Type {
 		case "tool_use":
-			args, _ := common.Marshal(message.Input)
+			if strings.TrimSpace(message.Id) == "" || strings.TrimSpace(message.Name) == "" {
+				return nil, errors.New("Claude tool_use response requires id and name")
+			}
+			args, err := claudeToolInputToJSONString(message.Input)
+			if err != nil {
+				return nil, fmt.Errorf("failed to encode Claude tool_use arguments: %w", err)
+			}
 			tools = append(tools, dto.ToolCallResponse{
 				ID:   message.Id,
 				Type: "function", // compatible with other OpenAI derivative applications
 				Function: dto.FunctionResponse{
 					Name:      message.Name,
-					Arguments: string(args),
+					Arguments: args,
 				},
 			})
 		case "thinking":
 			if message.Thinking != nil && *message.Thinking != "" {
 				appendClaudeThinkingText(&responseThinking, *message.Thinking)
 			}
+		case "redacted_thinking":
+			return nil, errors.New("Claude redacted_thinking cannot be represented as OpenAI reasoning_content")
 		case "text":
 			responseText.WriteString(message.GetText())
+		case "", "message_delta":
+			return nil, fmt.Errorf("Claude response content block type %q is not supported", message.Type)
+		default:
+			return nil, fmt.Errorf("Claude response content block type %q is not supported", message.Type)
 		}
 	}
 	choice := dto.OpenAITextResponseChoice{
@@ -651,12 +885,16 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 		Message: dto.Message{
 			Role: "assistant",
 		},
-		FinishReason: stopReasonClaude2OpenAI(claudeResponse.StopReason),
 	}
-	choice.SetStringContent(responseText.String())
+	finishReason, err := stopReasonClaude2OpenAIStrict(claudeResponse.StopReason)
+	if err != nil {
+		return nil, err
+	}
+	choice.FinishReason = finishReason
+	choice.Message.SetStringContent(responseText.String())
 	if responseThinking.Len() > 0 {
 		thinkingContent := responseThinking.String()
-		choice.ReasoningContent = &thinkingContent
+		choice.Message.ReasoningContent = &thinkingContent
 	}
 	if len(tools) > 0 {
 		choice.Message.SetToolCalls(tools)
@@ -664,7 +902,21 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 	fullTextResponse.Model = claudeResponse.Model
 	choices = append(choices, choice)
 	fullTextResponse.Choices = choices
-	return &fullTextResponse
+	return &fullTextResponse, nil
+}
+
+func claudeToolInputToJSONString(input any) (string, error) {
+	if input == nil {
+		return "{}", nil
+	}
+	raw, err := common.Marshal(input)
+	if err != nil {
+		return "", err
+	}
+	if common.GetJsonType(raw) != "object" {
+		return "", fmt.Errorf("tool input must be a JSON object")
+	}
+	return string(raw), nil
 }
 
 func appendClaudeThinkingText(builder *strings.Builder, text string) {
@@ -912,15 +1164,20 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 		helper.ClaudeChunkData(c, claudeResponse, data)
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
-		response := StreamResponseClaude2OpenAI(&claudeResponse)
+		response, conversionErr := StreamResponseClaude2OpenAIWithError(&claudeResponse)
+		if conversionErr != nil {
+			return types.NewOpenAIError(conversionErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+		}
 
 		if !FormatClaudeResponseInfo(&claudeResponse, response, claudeInfo) {
 			return nil
 		}
 
-		err = helper.ObjectData(c, response)
-		if err != nil {
-			logger.LogError(c, "send_stream_response_failed: "+err.Error())
+		if response != nil {
+			err = helper.ObjectData(c, response)
+			if err != nil {
+				logger.LogError(c, "send_stream_response_failed: "+err.Error())
+			}
 		}
 	}
 	return nil
@@ -1013,7 +1270,10 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	var responseData []byte
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
-		openaiResponse := ResponseClaude2OpenAI(&claudeResponse)
+		openaiResponse, conversionErr := ResponseClaude2OpenAIWithError(&claudeResponse)
+		if conversionErr != nil {
+			return types.NewOpenAIError(conversionErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
 		openaiResponse.Usage = buildOpenAIStyleUsageFromClaudeUsage(claudeInfo.Usage)
 		responseData, err = common.Marshal(openaiResponse)
 		if err != nil {
@@ -1055,12 +1315,12 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 	return claudeInfo.Usage, nil
 }
 
-func mapToolChoice(toolChoice any, parallelToolCalls *bool) *dto.ClaudeToolChoice {
+func mapToolChoice(toolChoice any, parallelToolCalls *bool) (*dto.ClaudeToolChoice, error) {
 	var claudeToolChoice *dto.ClaudeToolChoice
 
 	// 处理 tool_choice 字符串值
 	if toolChoiceStr, ok := toolChoice.(string); ok {
-		switch toolChoiceStr {
+		switch strings.TrimSpace(toolChoiceStr) {
 		case "auto":
 			claudeToolChoice = &dto.ClaudeToolChoice{
 				Type: "auto",
@@ -1073,17 +1333,28 @@ func mapToolChoice(toolChoice any, parallelToolCalls *bool) *dto.ClaudeToolChoic
 			claudeToolChoice = &dto.ClaudeToolChoice{
 				Type: "none",
 			}
+		default:
+			return nil, fmt.Errorf("tool_choice %q is not supported by Claude", toolChoiceStr)
 		}
 	} else if toolChoiceMap, ok := toolChoice.(map[string]interface{}); ok {
 		// 处理 tool_choice 对象值
-		if function, ok := toolChoiceMap["function"].(map[string]interface{}); ok {
-			if toolName, ok := function["name"].(string); ok {
-				claudeToolChoice = &dto.ClaudeToolChoice{
-					Type: "tool",
-					Name: toolName,
-				}
-			}
+		if rawType, exists := toolChoiceMap["type"]; exists && strings.TrimSpace(common.Interface2String(rawType)) != "function" {
+			return nil, fmt.Errorf("tool_choice type %q is not supported by Claude", rawType)
 		}
+		if function, ok := toolChoiceMap["function"].(map[string]interface{}); ok {
+			toolName := strings.TrimSpace(common.Interface2String(function["name"]))
+			if toolName == "" {
+				return nil, errors.New("tool_choice function name is required")
+			}
+			claudeToolChoice = &dto.ClaudeToolChoice{
+				Type: "tool",
+				Name: toolName,
+			}
+		} else {
+			return nil, errors.New("tool_choice function object is required")
+		}
+	} else if toolChoice != nil {
+		return nil, fmt.Errorf("tool_choice type %T is not supported by Claude", toolChoice)
 	}
 
 	// 处理 parallel_tool_calls
@@ -1103,5 +1374,5 @@ func mapToolChoice(toolChoice any, parallelToolCalls *bool) *dto.ClaudeToolChoic
 		}
 	}
 
-	return claudeToolChoice
+	return claudeToolChoice, nil
 }

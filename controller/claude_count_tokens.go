@@ -64,8 +64,7 @@ func validateClaudeCountTokensModelAccess(c *gin.Context, modelName string) erro
 	if !ok {
 		return errors.New("token model access configuration is invalid")
 	}
-	matchName := ratio_setting.FormatMatchingModelName(modelName)
-	if !limits[matchName] {
+	if !ratio_setting.ModelNameMatchesLimit(modelName, limits) {
 		return fmt.Errorf("token is not allowed to access model %s", modelName)
 	}
 	return nil

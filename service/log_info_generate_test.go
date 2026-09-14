@@ -2,16 +2,21 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -216,6 +221,57 @@ func TestAppendStreamStatusKeepsInterruptedBeforeChunksAsError(t *testing.T) {
 	require.Equal(t, "upstream_transport_interrupted", streamInfo["end_reason"])
 }
 
+func TestSanitizeStreamErrorForLogRedactsSensitiveValuesAndControls(t *testing.T) {
+	input := "upstream response\x00 authorization: Bearer super-secret-token cookie=session=secret; encrypted_content=opaque-reasoning https://api.example.com/v1/responses"
+	got := sanitizeStreamErrorForLog(input)
+
+	require.NotContains(t, got, "super-secret-token")
+	require.NotContains(t, got, "session=secret")
+	require.NotContains(t, got, "opaque-reasoning")
+	require.NotContains(t, got, "api.example.com")
+	require.NotContains(t, got, "\x00")
+	require.LessOrEqual(t, len(got), streamErrorLogContentLimit)
+	require.True(t, utf8.ValidString(got))
+}
+
+func TestSanitizeStreamErrorForLogPreservesFollowingDiagnosticFields(t *testing.T) {
+	got := sanitizeStreamErrorForLog("token=secret-value upstream_status=502 route=/v1/responses")
+
+	require.NotContains(t, got, "secret-value")
+	require.Contains(t, got, "upstream_status=502")
+	require.Contains(t, got, "route=/v1/responses")
+}
+
+func TestSanitizeStreamErrorForLogBoundsLongUTF8Text(t *testing.T) {
+	got := sanitizeStreamErrorForLog(strings.Repeat("界", streamErrorLogContentLimit))
+
+	require.LessOrEqual(t, len(got), streamErrorLogContentLimit)
+	require.True(t, utf8.ValidString(got))
+	require.Contains(t, got, "[truncated]")
+}
+
+func TestAppendStreamStatusSanitizesEndAndSoftErrors(t *testing.T) {
+	ss := relaycommon.NewStreamStatus()
+	ss.RecordError("Authorization: Bearer soft-secret\x01")
+	ss.SetEndReason(relaycommon.StreamEndReasonUpstreamInterrupted, errors.New("Cookie: session=private; "+strings.Repeat("x", streamErrorLogContentLimit+20)))
+
+	other := make(map[string]interface{})
+	appendStreamStatus(&relaycommon.RelayInfo{
+		IsStream:     true,
+		StreamStatus: ss,
+	}, other)
+
+	streamInfo, ok := other["stream_status"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "upstream_transport_interrupted", streamInfo["end_reason"])
+	require.NotContains(t, streamInfo["end_error"], "session=private")
+	messages, ok := streamInfo["errors"].([]string)
+	require.True(t, ok)
+	require.Len(t, messages, 1)
+	require.NotContains(t, messages[0], "soft-secret")
+	require.NotContains(t, messages[0], "\x01")
+}
+
 func TestGenerateTextOtherInfoIncludesRequestHeaderPolicyAudit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -315,6 +371,26 @@ func TestGenerateTextOtherInfoKeepsSelectedAndAppliedUserAgentSeparate(t *testin
 	require.True(t, ok)
 	require.Equal(t, "selected-ua", info["selected_user_agent"])
 	require.Equal(t, "applied-ua", info["applied_user_agent"])
+}
+
+func TestAppendRequestHeaderPolicyInfoIncludesCodexDynamicHeaderAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHeaderPolicyAudit, RuntimeHeaderPolicyAudit{
+		HeaderPolicyMode:          "prefer_channel",
+		CodexDynamicHeadersStatus: "absent",
+	})
+
+	other := map[string]interface{}{}
+	AppendRequestHeaderPolicyInfo(ctx, other)
+
+	info, ok := other["request_header_policy"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "absent", info["codex_dynamic_headers_status"])
+	_, exists := info["codex_dynamic_header_keys"]
+	require.False(t, exists)
 }
 
 func TestGenerateTextOtherInfoIncludesResponsesProfileAndPreviousIDAction(t *testing.T) {
@@ -452,32 +528,38 @@ func TestGenerateTextOtherInfoIncludesResponsesCompactChannelSkip(t *testing.T) 
 	require.Equal(t, "channel_skipped_unsupported_compaction", other["responses_compact_channel_skip"])
 }
 
-func TestGenerateTextOtherInfoIncludesOpaqueReplayRoutingAuditWithoutCiphertext(t *testing.T) {
+func TestGenerateTextOtherInfoIncludesResponsesRoutingChannelSkips(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
-	common.SetContextKey(ctx, constant.ContextKeyResponsesRoutingChannelSkips, []dto.ResponsesRoutingChannelSkip{
-		{ChannelID: 168, Reason: "unsupported_encrypted_reasoning_replay"},
-	})
-	common.SetContextKey(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayAction, "attempted_native_unverified")
-	common.SetContextKey(ctx, constant.ContextKeyResponsesEncryptedReasoningReplayCapability, "unknown")
-	common.SetContextKey(ctx, constant.ContextKey("responses_encrypted_reasoning_replay_retry_action"), "suppressed_cross_channel")
+	expected := []dto.ResponsesRoutingChannelSkip{
+		{ChannelID: 2, Reason: "unsupported_custom_tools"},
+		{ChannelID: 168, Reason: "unsupported_namespace_tools"},
+	}
+	common.SetContextKey(ctx, constant.ContextKeyResponsesRoutingChannelSkips, expected)
 
 	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
 	}, 1, 1, 1, 0, 0, -1, -1)
 
-	require.Equal(t, "attempted_native_unverified", other["responses_encrypted_reasoning_replay_action"])
+	require.Equal(t, expected, other["responses_routing_channel_skips"])
+}
+
+func TestGenerateTextOtherInfoIncludesEncryptedReasoningReplayDecision(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	ctx.Set("responses_encrypted_reasoning_replay_action", "forwarded_native_unverified")
+	ctx.Set("responses_encrypted_reasoning_replay_capability", "unknown")
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "forwarded_native_unverified", other["responses_encrypted_reasoning_replay_action"])
 	require.Equal(t, "unknown", other["responses_encrypted_reasoning_replay_capability"])
-	require.Equal(t, "suppressed_cross_channel", other["responses_encrypted_reasoning_replay_retry_action"])
-	require.Equal(t, []dto.ResponsesRoutingChannelSkip{{
-		ChannelID: 168,
-		Reason:    "unsupported_encrypted_reasoning_replay",
-	}}, other["responses_routing_channel_skips"])
-	raw, err := common.Marshal(other)
-	require.NoError(t, err)
-	require.NotContains(t, string(raw), "opaque-reasoning-state")
 }
 
 func TestResponsesChannelCapabilitySnapshotTreatsSub2APIHTTPAsNoRESTPreviousID(t *testing.T) {
@@ -496,16 +578,17 @@ func TestResponsesChannelCapabilitySnapshotTreatsSub2APIHTTPAsNoRESTPreviousID(t
 	require.Equal(t, true, snapshot["supports_responses"])
 	require.Equal(t, false, snapshot["supports_responses_compact"])
 	require.Equal(t, false, snapshot["supports_rest_previous_response_id"])
-	require.Equal(t, "unknown", snapshot["compaction_item_passthrough_capability"])
-	require.NotContains(t, snapshot, "supports_compaction_item_passthrough")
+	require.Equal(t, false, snapshot["supports_compaction_item_passthrough"])
 	require.Equal(t, true, snapshot["supports_function_tools"])
 	require.Equal(t, false, snapshot["supports_custom_tools"])
 	require.Equal(t, false, snapshot["supports_namespace_tools"])
 	require.Equal(t, false, snapshot["supports_tool_search"])
-	require.Equal(t, "unknown", snapshot["reasoning_context_capability"])
-	require.NotContains(t, snapshot, "supports_reasoning_context")
-	require.Equal(t, false, snapshot["strips_responses_reasoning_context"])
-	require.Equal(t, false, snapshot["strips_responses_encrypted_reasoning"])
+	require.Equal(t, "unsupported", snapshot["reasoning_context_capability"])
+	require.Equal(t, false, snapshot["supports_reasoning_context"])
+	require.Equal(t, "unsupported", snapshot["encrypted_reasoning_replay_capability"])
+	require.Equal(t, false, snapshot["supports_encrypted_reasoning_replay"])
+	require.Equal(t, true, snapshot["strips_responses_reasoning_context"])
+	require.Equal(t, true, snapshot["strips_responses_encrypted_reasoning"])
 }
 
 func TestResponsesChannelCapabilitySnapshotIncludesStreamOptionsIncludeUsageCapability(t *testing.T) {
@@ -521,42 +604,6 @@ func TestResponsesChannelCapabilitySnapshotIncludesStreamOptionsIncludeUsageCapa
 	})
 
 	require.Equal(t, false, snapshot["supports_stream_options_include_usage"])
-}
-
-func TestResponsesChannelCapabilitySnapshotKeepsStreamOptionsAndEncryptedReplayCapabilities(t *testing.T) {
-	unsupported := false
-	supported := true
-	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelType: constant.ChannelTypeOpenAI,
-		},
-	}, dto.ChannelOtherSettings{
-		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
-			SupportsStreamOptionsIncludeUsage: &unsupported,
-			SupportsEncryptedReasoningReplay:  &supported,
-		},
-	})
-
-	require.Equal(t, false, snapshot["supports_stream_options_include_usage"])
-	require.Equal(t, true, snapshot["supports_encrypted_reasoning_replay"])
-	require.Equal(t, "supported", snapshot["encrypted_reasoning_replay_capability"])
-}
-
-func TestResponsesChannelCapabilitySnapshotPreservesLegacyEncryptedReplaySafetyOverride(t *testing.T) {
-	supported := true
-	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelType: constant.ChannelTypeOpenAI,
-		},
-	}, dto.ChannelOtherSettings{
-		StripCodexEncryptedContext: true,
-		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
-			SupportsEncryptedReasoningReplay: &supported,
-		},
-	})
-
-	require.Equal(t, false, snapshot["supports_encrypted_reasoning_replay"])
-	require.Equal(t, "unsupported", snapshot["encrypted_reasoning_replay_capability"])
 }
 
 func TestGenerateTextOtherInfoIncludesStreamOptionsIncludeUsageRecoveryMarkers(t *testing.T) {
@@ -611,25 +658,45 @@ func TestGenerateTextOtherInfoIncludesResponsesReasoningContextAction(t *testing
 	require.Equal(t, "forwarded_unverified_capability", other["responses_reasoning_context_action"])
 }
 
-func TestGenerateTextOtherInfoIncludesResponsesInputItemIDsRemoved(t *testing.T) {
+func TestGenerateTextOtherInfoIncludesEncryptedContextRetryBlockedAfterEvent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
-	common.SetContextKey(ctx, constant.ContextKeyResponsesInputItemIDsRemoved, 2)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesEncryptedContextRetryBlockedAfterEvent, dto.ResponsesOutputTypeItemAdded)
 
 	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
 	}, 1, 1, 1, 0, 0, -1, -1)
 
-	require.Equal(t, 2, other["responses_input_item_ids_removed"])
+	require.Equal(t, dto.ResponsesOutputTypeItemAdded, other["responses_encrypted_context_retry_blocked_after_event"])
+}
 
-	common.SetContextKey(ctx, constant.ContextKeyResponsesInputItemIDsRemoved, 0)
-	other = GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+func TestGenerateTextOtherInfoIncludesChannelHealthRoutingAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(ctx, constant.ContextKeyChannelHealthRoutingState, &channelHealthRoutingState{
+		RedisUnavailable: true,
+		Events: []dto.ChannelHealthRoutingEvent{
+			{Group: "coding", ModelName: "gpt-5.6-sol", ChannelID: 206, Action: string(ChannelHealthSelectionCooldown), StatusCode: http.StatusBadGateway, ErrorCode: string(types.ErrorCodeBadResponseStatusCode)},
+			{Group: "coding", ModelName: "gpt-5.6-sol", ChannelID: 207, Action: "half_open_recovered"},
+		},
+	})
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
 	}, 1, 1, 1, 0, 0, -1, -1)
 
-	require.NotContains(t, other, "responses_input_item_ids_removed")
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	healthInfo, ok := adminInfo["channel_health"].(dto.ChannelHealthRoutingInfo)
+	require.True(t, ok)
+	require.True(t, healthInfo.RedisUnavailable)
+	require.Equal(t, []dto.ChannelHealthRoutingEvent{
+		{Group: "coding", ModelName: "gpt-5.6-sol", ChannelID: 206, Action: string(ChannelHealthSelectionCooldown), StatusCode: http.StatusBadGateway, ErrorCode: string(types.ErrorCodeBadResponseStatusCode)},
+		{Group: "coding", ModelName: "gpt-5.6-sol", ChannelID: 207, Action: "half_open_recovered"},
+	}, healthInfo.Events)
 }
 
 func TestResponsesChannelCapabilitySnapshotMarksSafeDefaultSource(t *testing.T) {
@@ -641,8 +708,7 @@ func TestResponsesChannelCapabilitySnapshotMarksSafeDefaultSource(t *testing.T) 
 
 	require.Equal(t, "safe_default", snapshot["source"])
 	require.Empty(t, snapshot["profile"])
-	require.Equal(t, "unknown", snapshot["compaction_item_passthrough_capability"])
-	require.NotContains(t, snapshot, "supports_compaction_item_passthrough")
+	require.Equal(t, true, snapshot["supports_compaction_item_passthrough"])
 	require.NotContains(t, snapshot, "supports_custom_tools")
 	require.Equal(t, "unknown", snapshot["reasoning_context_capability"])
 	require.Equal(t, false, snapshot["strips_responses_reasoning_context"])
@@ -753,101 +819,93 @@ func TestResponsesChannelCapabilitySnapshotTreatsProxyProfileAsSyntheticOnly(t *
 	require.Equal(t, true, snapshot["supports_chat"])
 	require.Equal(t, false, snapshot["supports_rest_previous_response_id"])
 	require.Equal(t, false, snapshot["supports_compaction_item_passthrough"])
-	require.Equal(t, "unsupported", snapshot["compaction_item_passthrough_capability"])
 	require.Equal(t, false, snapshot["supports_namespace_tools"])
 }
 
 func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 	testCases := []struct {
-		name                                    string
-		profile                                 dto.ResponsesUpstreamProfile
-		wantCompactMode                         string
-		wantSupportsResponsesCompact            bool
-		wantSupportsRESTPreviousResponseID      bool
-		wantCompactionItemPassthroughCapability string
-		wantSupportsCompactionItemPassthrough   *bool
-		wantSupportsCustomTools                 *bool
-		wantSupportsNamespaceTools              bool
-		wantStripsEncryptedReasoning            bool
-		wantReasoningContextCapability          string
+		name                                  string
+		profile                               dto.ResponsesUpstreamProfile
+		wantCompactMode                       string
+		wantSupportsResponsesCompact          bool
+		wantSupportsRESTPreviousResponseID    bool
+		wantSupportsCompactionItemPassthrough bool
+		wantSupportsCustomTools               *bool
+		wantSupportsNamespaceTools            bool
+		wantStripsEncryptedReasoning          bool
+		wantReasoningContextCapability        string
 	}{
 		{
-			name:                                    "official newapi",
-			profile:                                 dto.ResponsesUpstreamProfileOfficialNewAPI,
-			wantCompactMode:                         "native",
-			wantSupportsResponsesCompact:            true,
-			wantSupportsRESTPreviousResponseID:      true,
-			wantCompactionItemPassthroughCapability: "supported",
-			wantSupportsCompactionItemPassthrough:   common.GetPointer(true),
-			wantSupportsCustomTools:                 common.GetPointer(true),
-			wantSupportsNamespaceTools:              true,
-			wantStripsEncryptedReasoning:            false,
-			wantReasoningContextCapability:          "supported",
+			name:                                  "official newapi",
+			profile:                               dto.ResponsesUpstreamProfileOfficialNewAPI,
+			wantCompactMode:                       "native",
+			wantSupportsResponsesCompact:          true,
+			wantSupportsRESTPreviousResponseID:    true,
+			wantSupportsCompactionItemPassthrough: true,
+			wantSupportsCustomTools:               common.GetPointer(true),
+			wantSupportsNamespaceTools:            true,
+			wantStripsEncryptedReasoning:          false,
+			wantReasoningContextCapability:        "supported",
 		},
 		{
-			name:                                    "sub2api http",
-			profile:                                 dto.ResponsesUpstreamProfileSub2APIHTTP,
-			wantCompactMode:                         "native",
-			wantSupportsResponsesCompact:            false,
-			wantSupportsRESTPreviousResponseID:      false,
-			wantCompactionItemPassthroughCapability: "unknown",
-			wantSupportsCompactionItemPassthrough:   nil,
-			wantSupportsCustomTools:                 common.GetPointer(false),
-			wantSupportsNamespaceTools:              false,
-			wantStripsEncryptedReasoning:            false,
-			wantReasoningContextCapability:          "unknown",
+			name:                                  "sub2api http",
+			profile:                               dto.ResponsesUpstreamProfileSub2APIHTTP,
+			wantCompactMode:                       "native",
+			wantSupportsResponsesCompact:          false,
+			wantSupportsRESTPreviousResponseID:    false,
+			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsCustomTools:               common.GetPointer(false),
+			wantSupportsNamespaceTools:            false,
+			wantStripsEncryptedReasoning:          true,
+			wantReasoningContextCapability:        "unsupported",
 		},
 		{
-			name:                                    "sub2api websocket v2",
-			profile:                                 dto.ResponsesUpstreamProfileSub2APIWSV2,
-			wantCompactMode:                         "native",
-			wantSupportsResponsesCompact:            true,
-			wantSupportsRESTPreviousResponseID:      true,
-			wantCompactionItemPassthroughCapability: "supported",
-			wantSupportsCompactionItemPassthrough:   common.GetPointer(true),
-			wantSupportsCustomTools:                 common.GetPointer(true),
-			wantSupportsNamespaceTools:              true,
-			wantStripsEncryptedReasoning:            false,
-			wantReasoningContextCapability:          "supported",
+			name:                                  "sub2api websocket v2",
+			profile:                               dto.ResponsesUpstreamProfileSub2APIWSV2,
+			wantCompactMode:                       "native",
+			wantSupportsResponsesCompact:          true,
+			wantSupportsRESTPreviousResponseID:    true,
+			wantSupportsCompactionItemPassthrough: true,
+			wantSupportsCustomTools:               common.GetPointer(true),
+			wantSupportsNamespaceTools:            true,
+			wantStripsEncryptedReasoning:          false,
+			wantReasoningContextCapability:        "supported",
 		},
 		{
-			name:                                    "generic openai",
-			profile:                                 dto.ResponsesUpstreamProfileGenericOpenAI,
-			wantCompactMode:                         "native",
-			wantSupportsResponsesCompact:            true,
-			wantSupportsRESTPreviousResponseID:      false,
-			wantCompactionItemPassthroughCapability: "unknown",
-			wantSupportsCompactionItemPassthrough:   nil,
-			wantSupportsCustomTools:                 common.GetPointer(true),
-			wantSupportsNamespaceTools:              false,
-			wantStripsEncryptedReasoning:            false,
-			wantReasoningContextCapability:          "unknown",
+			name:                                  "generic openai",
+			profile:                               dto.ResponsesUpstreamProfileGenericOpenAI,
+			wantCompactMode:                       "native",
+			wantSupportsResponsesCompact:          true,
+			wantSupportsRESTPreviousResponseID:    false,
+			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsCustomTools:               common.GetPointer(true),
+			wantSupportsNamespaceTools:            false,
+			wantStripsEncryptedReasoning:          false,
+			wantReasoningContextCapability:        "unknown",
 		},
 		{
-			name:                                    "generic proxy",
-			profile:                                 dto.ResponsesUpstreamProfileGenericProxy,
-			wantCompactMode:                         "synthetic_summary",
-			wantSupportsResponsesCompact:            false,
-			wantSupportsRESTPreviousResponseID:      false,
-			wantCompactionItemPassthroughCapability: "unsupported",
-			wantSupportsCompactionItemPassthrough:   common.GetPointer(false),
-			wantSupportsCustomTools:                 common.GetPointer(false),
-			wantSupportsNamespaceTools:              false,
-			wantStripsEncryptedReasoning:            true,
-			wantReasoningContextCapability:          "unsupported",
+			name:                                  "generic proxy",
+			profile:                               dto.ResponsesUpstreamProfileGenericProxy,
+			wantCompactMode:                       "synthetic_summary",
+			wantSupportsResponsesCompact:          false,
+			wantSupportsRESTPreviousResponseID:    false,
+			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsCustomTools:               common.GetPointer(false),
+			wantSupportsNamespaceTools:            false,
+			wantStripsEncryptedReasoning:          true,
+			wantReasoningContextCapability:        "unsupported",
 		},
 		{
-			name:                                    "chat only proxy",
-			profile:                                 dto.ResponsesUpstreamProfileChatOnlyProxy,
-			wantCompactMode:                         "synthetic_summary",
-			wantSupportsResponsesCompact:            false,
-			wantSupportsRESTPreviousResponseID:      false,
-			wantCompactionItemPassthroughCapability: "unsupported",
-			wantSupportsCompactionItemPassthrough:   common.GetPointer(false),
-			wantSupportsCustomTools:                 common.GetPointer(false),
-			wantSupportsNamespaceTools:              false,
-			wantStripsEncryptedReasoning:            true,
-			wantReasoningContextCapability:          "unsupported",
+			name:                                  "chat only proxy",
+			profile:                               dto.ResponsesUpstreamProfileChatOnlyProxy,
+			wantCompactMode:                       "synthetic_summary",
+			wantSupportsResponsesCompact:          false,
+			wantSupportsRESTPreviousResponseID:    false,
+			wantSupportsCompactionItemPassthrough: false,
+			wantSupportsCustomTools:               common.GetPointer(false),
+			wantSupportsNamespaceTools:            false,
+			wantStripsEncryptedReasoning:          true,
+			wantReasoningContextCapability:        "unsupported",
 		},
 	}
 
@@ -867,12 +925,7 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			require.Equal(t, true, snapshot["supports_responses"])
 			require.Equal(t, tc.wantSupportsResponsesCompact, snapshot["supports_responses_compact"])
 			require.Equal(t, tc.wantSupportsRESTPreviousResponseID, snapshot["supports_rest_previous_response_id"])
-			require.Equal(t, tc.wantCompactionItemPassthroughCapability, snapshot["compaction_item_passthrough_capability"])
-			if tc.wantSupportsCompactionItemPassthrough == nil {
-				require.NotContains(t, snapshot, "supports_compaction_item_passthrough")
-			} else {
-				require.Equal(t, *tc.wantSupportsCompactionItemPassthrough, snapshot["supports_compaction_item_passthrough"])
-			}
+			require.Equal(t, tc.wantSupportsCompactionItemPassthrough, snapshot["supports_compaction_item_passthrough"])
 			require.Equal(t, true, snapshot["supports_function_tools"])
 			if tc.wantSupportsCustomTools == nil {
 				require.NotContains(t, snapshot, "supports_custom_tools")
@@ -890,23 +943,6 @@ func TestResponsesChannelCapabilitySnapshotProfileMatrix(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestResponsesChannelCapabilitySnapshotPrefersExplicitCompactionRegistry(t *testing.T) {
-	unsupported := false
-	snapshot := ResponsesChannelCapabilitySnapshot(&relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelType: constant.ChannelTypeOpenAI,
-		},
-	}, dto.ChannelOtherSettings{
-		ResponsesUpstreamProfile: dto.ResponsesUpstreamProfileGenericOpenAI,
-		ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{
-			SupportsCompactionItemPassthrough: &unsupported,
-		},
-	})
-
-	require.Equal(t, "unsupported", snapshot["compaction_item_passthrough_capability"])
-	require.Equal(t, false, snapshot["supports_compaction_item_passthrough"])
 }
 
 func TestGenerateTextOtherInfoMarksCodexLocalCompactionFromHeader(t *testing.T) {
@@ -937,6 +973,76 @@ func TestGenerateTextOtherInfoMarksCodexLocalCompactionFromHeader(t *testing.T) 
 	require.Equal(t, "context_limit", other["responses_compact_reason"])
 	require.Equal(t, "background", other["responses_compact_phase"])
 	require.Equal(t, "local", other["responses_compact_strategy"])
+}
+
+func TestGenerateTextOtherInfoMarksCodexLocalCompaction413Recovery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	ctx.Request.Header.Set("x-codex-turn-metadata", `{"request_kind":"compaction","compaction":{"implementation":"responses"}}`)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCodexLocalCompaction413Recovery, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCodexLocalCompaction413RecoveryFailed, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCodexLocalCompactionBodyReductionSource, "upstream_413")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCodexLocalCompactionOriginalBodyBytes, int64(34603607))
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCodexLocalCompactionReducedBodyBytes, int64(1292))
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, true, other["responses_codex_local_compaction_413_recovery"])
+	require.Equal(t, true, other["responses_codex_local_compaction_413_recovery_failed"])
+	require.Equal(t, "upstream_413", other["responses_codex_local_compaction_body_reduction_source"])
+	require.Equal(t, int64(34603607), other["responses_codex_local_compaction_original_body_bytes"])
+	require.Equal(t, int64(1292), other["responses_codex_local_compaction_reduced_body_bytes"])
+}
+
+func TestGenerateTextOtherInfoMarksCodexLocalCompactionPreemptiveBodyReduction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	ctx.Request.Header.Set("x-codex-turn-metadata", `{"request_kind":"compaction","compaction":{"implementation":"responses"}}`)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCodexLocalCompactionBodyReductionSource, "preemptive_size")
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, "preemptive_size", other["responses_codex_local_compaction_body_reduction_source"])
+	require.NotContains(t, other, "responses_codex_local_compaction_413_recovery")
+}
+
+func TestGenerateTextOtherInfoIncludesSanitizedCodexGatewayActions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	ctx.Request.Header.Set("x-codex-turn-metadata", `{"request_kind":"compaction","compaction":{"implementation":"responses"}}`)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCodexLocalCompactionIngressReduced, true)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCodexLocalCompactionBodyReductionSource, "ingress_preemptive_size")
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCodexLocalCompactionIngressOriginalBodyBytes, int64(34603607))
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCodexLocalCompactionIngressReducedBodyBytes, int64(1292))
+	common.SetContextKey(ctx, constant.ContextKeyResponsesCodexLocalCompactionIngressInputItems, 4)
+	common.SetContextKey(ctx, constant.ContextKeyResponsesInputItemIDNormalizationRemovedCount, 2)
+
+	other := GenerateTextOtherInfo(ctx, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}, 1, 1, 1, 0, 0, -1, -1)
+
+	require.Equal(t, true, other["responses_codex_local_compaction_ingress_reduced"])
+	require.Equal(t, "ingress_preemptive_size", other["responses_codex_local_compaction_body_reduction_source"])
+	require.Equal(t, int64(34603607), other["responses_codex_local_compaction_ingress_original_body_bytes"])
+	require.Equal(t, int64(1292), other["responses_codex_local_compaction_ingress_reduced_body_bytes"])
+	require.Equal(t, 4, other["responses_codex_local_compaction_ingress_input_items"])
+	require.Equal(t, 2, other["responses_input_item_id_normalization_removed_count"])
+}
+
+func TestIsCodexLocalResponsesCompactionAcceptsCaseInsensitiveMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Header.Set("x-codex-turn-metadata", `{"request_kind":"COMPACTION","compaction":{"implementation":"RESPONSES"}}`)
+
+	require.True(t, IsCodexLocalResponsesCompaction(ctx))
 }
 
 func TestGenerateTextOtherInfoMarksCodexRemoteV2CompactionFromHeader(t *testing.T) {

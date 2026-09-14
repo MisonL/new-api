@@ -70,9 +70,12 @@ func SetRelayRouter(router *gin.Engine) {
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
-	relayV1Router.Use(middleware.CodexLocalResponsesCompactionIngress())
 	relayV1Router.Use(middleware.ModelRequestRateLimit())
 	{
+		// Responses WebSocket has a distinct protocol from Realtime and is
+		// explicitly rejected until its stateful transport is implemented.
+		relayV1Router.GET("/responses", controller.RelayResponsesWebSocketNotSupported)
+
 		// WebSocket 路由（统一到 Relay）
 		wsRouter := relayV1Router.Group("")
 		wsRouter.Use(middleware.Distribute())
@@ -88,7 +91,11 @@ func SetRelayRouter(router *gin.Engine) {
 	{
 		//http router
 		httpRouter := relayV1Router.Group("")
-		httpRouter.Use(middleware.Distribute())
+		httpRouter.Use(
+			middleware.CodexLocalCompactionIngressReduction(),
+			middleware.CodexResponsesOpaqueReplayIngress(),
+			middleware.Distribute(),
+		)
 
 		// claude related routes
 		httpRouter.POST("/messages", func(c *gin.Context) {
@@ -175,11 +182,20 @@ func SetRelayRouter(router *gin.Engine) {
 	responsesCompatRouter.Use(middleware.RouteTag("relay"))
 	responsesCompatRouter.Use(middleware.SystemPerformanceCheck())
 	responsesCompatRouter.Use(middleware.TokenAuth())
-	responsesCompatRouter.Use(middleware.CodexLocalResponsesCompactionIngress())
 	responsesCompatRouter.Use(middleware.ModelRequestRateLimit())
-	responsesCompatRouter.Use(middleware.Distribute())
 	{
-		responsesCompatRouter.POST("/compact", func(c *gin.Context) {
+		responsesCompatRouter.GET("", controller.RelayResponsesWebSocketNotSupported)
+
+		responsesCompatHTTPRouter := responsesCompatRouter.Group("")
+		responsesCompatHTTPRouter.Use(
+			middleware.CodexLocalCompactionIngressReduction(),
+			middleware.CodexResponsesOpaqueReplayIngress(),
+			middleware.Distribute(),
+		)
+		responsesCompatHTTPRouter.POST("", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIResponses)
+		})
+		responsesCompatHTTPRouter.POST("/compact", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatOpenAIResponsesCompaction)
 		})
 	}
@@ -220,8 +236,12 @@ func SetRelayRouter(router *gin.Engine) {
 }
 
 func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {
+	// Image content is user-owned task data. Register it after TokenAuth but
+	// before Distribute because the image route has no model in its request and
+	// therefore cannot participate in channel selection.
+	relayMjRouter.Use(middleware.TokenAuth())
 	relayMjRouter.GET("/image/:id", relay.RelayMidjourneyImage)
-	relayMjRouter.Use(middleware.TokenAuth(), middleware.Distribute())
+	relayMjRouter.Use(middleware.Distribute())
 	{
 		relayMjRouter.POST("/submit/action", controller.RelayMidjourney)
 		relayMjRouter.POST("/submit/shorten", controller.RelayMidjourney)

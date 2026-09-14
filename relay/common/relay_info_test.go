@@ -2,8 +2,10 @@ package common
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +55,14 @@ func TestSafeElapsedSeconds(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTaskInfoResolvedURLSupportsBothURLFields(t *testing.T) {
+	require.Equal(t, "https://example.test/video.mp4", (&TaskInfo{RemoteUrl: "https://example.test/video.mp4"}).ResolvedURL())
+	require.Equal(t, "https://example.test/preferred.mp4", (&TaskInfo{
+		Url:       "https://example.test/preferred.mp4",
+		RemoteUrl: "https://example.test/fallback.mp4",
+	}).ResolvedURL())
 }
 
 func TestRelayInfoFirstResponseLatencyMs(t *testing.T) {
@@ -251,6 +261,25 @@ func TestInitChannelMetaDoesNotEnableStreamOptionsForAgnes(t *testing.T) {
 	require.False(t, info.SupportStreamOptions)
 }
 
+func TestInitChannelMetaDoesNotEnableStreamOptionsForOllama(t *testing.T) {
+	prevMode := gin.Mode()
+	t.Cleanup(func() {
+		gin.SetMode(prevMode)
+	})
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	rootcommon.SetContextKey(ctx, constant.ContextKeyChannelType, constant.ChannelTypeOllama)
+
+	info := &RelayInfo{}
+	info.InitChannelMeta(ctx)
+
+	require.NotNil(t, info.ChannelMeta)
+	require.Equal(t, constant.ChannelTypeOllama, info.ChannelType)
+	require.False(t, info.SupportStreamOptions)
+}
+
 func TestInitChannelMetaSynchronizesChannelOtherSettings(t *testing.T) {
 	prevMode := gin.Mode()
 	t.Cleanup(func() {
@@ -275,6 +304,38 @@ func TestInitChannelMetaSynchronizesChannelOtherSettings(t *testing.T) {
 	require.True(t, IsSyntheticOpenAICompatibleResponsesCompact(info))
 }
 
+func TestInitChannelMetaClearsAttemptScopedRuntimeState(t *testing.T) {
+	prevMode := gin.Mode()
+	t.Cleanup(func() {
+		gin.SetMode(prevMode)
+	})
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	rootcommon.SetContextKey(ctx, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+
+	info := &RelayInfo{
+		RuntimeHeadersOverride:      map[string]interface{}{"x-old": "value"},
+		RuntimePassedRequestHeaders: map[string]string{"x-old": "value"},
+		UseRuntimeHeadersOverride:   true,
+		ParamOverrideAudit:          []string{"set_header x-old"},
+		UpstreamRequestBodySize:     123,
+		UpstreamRequestGetBody:      func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("old")), nil },
+		CodexFoldedBaseRequestBody:  []byte(`{"model":"old"}`),
+	}
+
+	info.InitChannelMeta(ctx)
+
+	require.Nil(t, info.RuntimeHeadersOverride)
+	require.Nil(t, info.RuntimePassedRequestHeaders)
+	require.False(t, info.UseRuntimeHeadersOverride)
+	require.Nil(t, info.ParamOverrideAudit)
+	require.Zero(t, info.UpstreamRequestBodySize)
+	require.Nil(t, info.UpstreamRequestGetBody)
+	require.Nil(t, info.CodexFoldedBaseRequestBody)
+}
+
 func TestGenRelayInfoResponsesCompactionInitializesConversionChain(t *testing.T) {
 	prevMode := gin.Mode()
 	t.Cleanup(func() {
@@ -296,66 +357,6 @@ func TestGenRelayInfoResponsesCompactionInitializesConversionChain(t *testing.T)
 	require.Equal(t, types.RelayFormat(types.RelayFormatOpenAIResponsesCompaction), info.GetFinalRequestRelayFormat())
 }
 
-func TestGenRelayInfoResponsesCompactionAcceptsOpaqueReplayRequest(t *testing.T) {
-	prevMode := gin.Mode()
-	t.Cleanup(func() {
-		gin.SetMode(prevMode)
-	})
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(w)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
-	rootcommon.SetContextKey(ctx, constant.ContextKeyOriginalModel, "gpt-5.6-sol")
-	request := dto.NewOpaqueOpenAIResponsesRequest(rootcommon.ResponsesRequestMetadata{
-		Model:                     "gpt-5.6-sol",
-		ModelPresent:              true,
-		InputPresent:              true,
-		InputKind:                 rootcommon.ResponsesJSONValueKindArray,
-		HasOpaqueEncryptedContent: true,
-		HasCompactionItem:         true,
-		BodySize:                  128,
-	})
-
-	info, err := GenRelayInfo(ctx, types.RelayFormatOpenAIResponsesCompaction, request, nil)
-
-	require.NoError(t, err)
-	require.Same(t, request, info.Request)
-	require.Equal(t, relayconstant.RelayModeResponsesCompact, info.RelayMode)
-	require.Equal(t, types.RelayFormat(types.RelayFormatOpenAIResponsesCompaction), info.RelayFormat)
-	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponsesCompaction}, info.RequestConversionChain)
-}
-
-func TestGenRelayInfoResponsesAcceptsOpaqueReplayRequest(t *testing.T) {
-	prevMode := gin.Mode()
-	t.Cleanup(func() {
-		gin.SetMode(prevMode)
-	})
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(w)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	rootcommon.SetContextKey(ctx, constant.ContextKeyOriginalModel, "gpt-5.6-sol")
-	stream := true
-	request := dto.NewOpaqueOpenAIResponsesRequest(rootcommon.ResponsesRequestMetadata{
-		Model:                     "gpt-5.6-sol",
-		ModelPresent:              true,
-		InputPresent:              true,
-		InputKind:                 rootcommon.ResponsesJSONValueKindArray,
-		Stream:                    &stream,
-		HasOpaqueEncryptedContent: true,
-	})
-
-	info, err := GenRelayInfo(ctx, types.RelayFormatOpenAIResponses, request, nil)
-
-	require.NoError(t, err)
-	require.Same(t, request, info.Request)
-	require.Equal(t, relayconstant.RelayModeResponses, info.RelayMode)
-	require.True(t, info.IsStream)
-	require.NotNil(t, info.ResponsesUsageInfo)
-	require.Empty(t, info.ResponsesUsageInfo.BuiltInTools)
-	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIResponses}, info.RequestConversionChain)
-}
-
 func TestGenRelayInfoResponsesCapturesImageGenerationToolMetadata(t *testing.T) {
 	prevMode := gin.Mode()
 	t.Cleanup(func() {
@@ -370,8 +371,7 @@ func TestGenRelayInfoResponsesCapturesImageGenerationToolMetadata(t *testing.T) 
 		Tools: json.RawMessage(`[{"type":"image_generation","quality":"high","size":"1536x1024"}]`),
 	}
 
-	info, err := GenRelayInfoResponses(ctx, request)
-	require.NoError(t, err)
+	info := GenRelayInfoResponses(ctx, request)
 
 	require.NotNil(t, info.ResponsesUsageInfo)
 	require.NotNil(t, info.ResponsesUsageInfo.BuiltInTools)
@@ -394,8 +394,7 @@ func TestGenRelayInfoResponsesCapturesWebSearchPreviewToolMetadata(t *testing.T)
 		Tools: json.RawMessage(`[{"type":"web_search_preview","search_context_size":"high"}]`),
 	}
 
-	info, err := GenRelayInfoResponses(ctx, request)
-	require.NoError(t, err)
+	info := GenRelayInfoResponses(ctx, request)
 
 	require.NotNil(t, info.ResponsesUsageInfo)
 	require.NotNil(t, info.ResponsesUsageInfo.BuiltInTools)
@@ -417,8 +416,7 @@ func TestGenRelayInfoResponsesDefaultsWebSearchPreviewContextSize(t *testing.T) 
 		Tools: json.RawMessage(`[{"type":"web_search_preview"}]`),
 	}
 
-	info, err := GenRelayInfoResponses(ctx, request)
-	require.NoError(t, err)
+	info := GenRelayInfoResponses(ctx, request)
 
 	require.NotNil(t, info.ResponsesUsageInfo)
 	require.NotNil(t, info.ResponsesUsageInfo.BuiltInTools)
@@ -441,8 +439,7 @@ func TestGenRelayInfoResponsesCanonicalizesVersionedWebSearchPreviewTool(t *test
 		Tools: json.RawMessage(`[{"type":"web_search_preview_2025_03_11","search_context_size":"high"}]`),
 	}
 
-	info, err := GenRelayInfoResponses(ctx, request)
-	require.NoError(t, err)
+	info := GenRelayInfoResponses(ctx, request)
 
 	require.NotNil(t, info.ResponsesUsageInfo)
 	require.Len(t, info.ResponsesUsageInfo.BuiltInTools, 1)
@@ -471,8 +468,7 @@ func TestGenRelayInfoResponsesIgnoresOrdinaryToolDefinitions(t *testing.T) {
 		]`),
 	}
 
-	info, err := GenRelayInfoResponses(ctx, request)
-	require.NoError(t, err)
+	info := GenRelayInfoResponses(ctx, request)
 
 	require.NotNil(t, info.ResponsesUsageInfo)
 	require.Len(t, info.ResponsesUsageInfo.BuiltInTools, 1)
@@ -498,8 +494,7 @@ func TestGenRelayInfoResponsesCapturesFileSearchDefinition(t *testing.T) {
 		Tools: json.RawMessage(`[{"type":"file_search"}]`),
 	}
 
-	info, err := GenRelayInfoResponses(ctx, request)
-	require.NoError(t, err)
+	info := GenRelayInfoResponses(ctx, request)
 
 	require.NotNil(t, info.ResponsesUsageInfo)
 	require.Len(t, info.ResponsesUsageInfo.BuiltInTools, 1)
@@ -508,13 +503,11 @@ func TestGenRelayInfoResponsesCapturesFileSearchDefinition(t *testing.T) {
 }
 
 func TestGenRelayInfoResponsesCapturesBuiltInToolMetadataFromAdditionalTools(t *testing.T) {
-	prevMode := gin.Mode()
-	t.Cleanup(func() {
-		gin.SetMode(prevMode)
-	})
+	previousGinMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(w)
+	t.Cleanup(func() { gin.SetMode(previousGinMode) })
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	request := &dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6-sol",
@@ -530,9 +523,9 @@ func TestGenRelayInfoResponsesCapturesBuiltInToolMetadataFromAdditionalTools(t *
 		]`),
 	}
 
-	info, err := GenRelayInfoResponses(ctx, request)
-	require.NoError(t, err)
+	info, err := genRelayInfoResponses(ctx, request)
 
+	require.NoError(t, err)
 	require.NotNil(t, info.ResponsesUsageInfo)
 	require.Len(t, info.ResponsesUsageInfo.BuiltInTools, 2)
 	webSearch := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]
@@ -546,23 +539,112 @@ func TestGenRelayInfoResponsesCapturesBuiltInToolMetadataFromAdditionalTools(t *
 }
 
 func TestGenRelayInfoResponsesRejectsMalformedAdditionalTools(t *testing.T) {
-	prevMode := gin.Mode()
-	t.Cleanup(func() {
-		gin.SetMode(prevMode)
-	})
+	previousGinMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(w)
+	t.Cleanup(func() { gin.SetMode(previousGinMode) })
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	request := &dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6-sol",
-		Input: json.RawMessage(`[
-			{"type":"additional_tools","tools":{"type":"web_search_preview"}}
-		]`),
+		Input: json.RawMessage(`[{"type":"additional_tools","tools":{"type":"web_search_preview"}}]`),
 	}
 
-	info, err := GenRelayInfoResponses(ctx, request)
+	info, err := genRelayInfoResponses(ctx, request)
 
-	require.Nil(t, info)
+	require.NotNil(t, info)
+	require.NotNil(t, info.ResponsesUsageInfo)
+	require.Empty(t, info.ResponsesUsageInfo.BuiltInTools)
 	require.ErrorContains(t, err, "additional_tools.tools must be an array")
+}
+
+func TestGenRelayInfoResponsesWrapperRetainsInitializedInfoOnMalformedTools(t *testing.T) {
+	previousGinMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousGinMode) })
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request := &dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-luna",
+		Input: json.RawMessage(`[{"type":"additional_tools","tools":{"type":"web_search_preview"}}]`),
+	}
+
+	info := GenRelayInfoResponses(ctx, request)
+
+	require.NotNil(t, info)
+	require.NotNil(t, info.ResponsesUsageInfo)
+	require.Empty(t, info.ResponsesUsageInfo.BuiltInTools)
+}
+
+func TestGenRelayInfoResponsesAcceptsOpaqueReplayRequest(t *testing.T) {
+	previousGinMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousGinMode) })
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	stream := true
+	request := dto.NewOpaqueOpenAIResponsesRequest(rootcommon.ResponsesRequestMetadata{
+		Model:                     "gpt-5.6-sol",
+		ModelPresent:              true,
+		InputPresent:              true,
+		InputKind:                 rootcommon.ResponsesJSONValueKindArray,
+		Stream:                    &stream,
+		HasOpaqueEncryptedContent: true,
+	})
+
+	info, err := genRelayInfoResponses(ctx, request)
+
+	require.NoError(t, err)
+	require.Same(t, request, info.Request)
+	require.True(t, info.IsStream)
+	require.Empty(t, info.ResponsesUsageInfo.BuiltInTools)
+}
+
+func TestGenRelayInfoAcceptsOpaqueResponsesReplayRequest(t *testing.T) {
+	previousGinMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousGinMode) })
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request := dto.NewOpaqueOpenAIResponsesRequest(rootcommon.ResponsesRequestMetadata{
+		Model:                     "gpt-5.6-sol",
+		ModelPresent:              true,
+		InputPresent:              true,
+		InputKind:                 rootcommon.ResponsesJSONValueKindArray,
+		HasOpaqueEncryptedContent: true,
+	})
+
+	info, err := GenRelayInfo(ctx, types.RelayFormatOpenAIResponses, request, nil)
+
+	require.NoError(t, err)
+	require.Same(t, request, info.Request)
+	require.Equal(t, relayconstant.RelayModeResponses, info.RelayMode)
+	require.Equal(t, types.RelayFormat(types.RelayFormatOpenAIResponses), info.RelayFormat)
+}
+
+func TestGenRelayInfoAcceptsOpaqueResponsesCompactionReplayRequest(t *testing.T) {
+	previousGinMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousGinMode) })
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	request := dto.NewOpaqueOpenAIResponsesRequest(rootcommon.ResponsesRequestMetadata{
+		Model:                     "gpt-5.6-sol",
+		ModelPresent:              true,
+		InputPresent:              true,
+		InputKind:                 rootcommon.ResponsesJSONValueKindArray,
+		HasOpaqueEncryptedContent: true,
+		HasCompactionItem:         true,
+	})
+
+	info, err := GenRelayInfo(ctx, types.RelayFormatOpenAIResponsesCompaction, request, nil)
+
+	require.NoError(t, err)
+	require.Same(t, request, info.Request)
+	require.Equal(t, relayconstant.RelayModeResponsesCompact, info.RelayMode)
+	require.Equal(t, types.RelayFormat(types.RelayFormatOpenAIResponsesCompaction), info.RelayFormat)
 }

@@ -244,11 +244,18 @@ func (reader *codexLocalCompactionIngressJSONReader) copyEncryptedContentValueFr
 	if err := capture.writeBytes(raw); err != nil {
 		return nil, err
 	}
-	var value any
-	if err := common.Unmarshal(raw, &value); err != nil {
-		return nil, fmt.Errorf("decode codex local compaction ingress %s: %w", subject, err)
-	}
-	if relaycommon.ResponsesEncryptedContentValueIsOpaque(value) {
+	switch common.GetJsonType(raw) {
+	case "null":
+		return raw, nil
+	case "string":
+		var value string
+		if err := common.Unmarshal(raw, &value); err != nil {
+			return nil, fmt.Errorf("decode codex local compaction ingress %s: %w", subject, err)
+		}
+		if relaycommon.ResponsesEncryptedContentValueIsOpaque(value) {
+			reader.hasOpaqueEncryptedContent = true
+		}
+	default:
 		reader.hasOpaqueEncryptedContent = true
 	}
 	return raw, nil

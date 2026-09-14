@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -16,13 +17,16 @@ import (
 )
 
 func recordResponsesToolCapabilityObservation(c *gin.Context, info *relaycommon.RelayInfo) {
-	if c == nil || info == nil || info.ChannelMeta == nil || info.RelayMode != relayconstant.RelayModeResponses || relaycommon.IsResponsesOpaqueEncryptedReplay(c) {
+	if c == nil || info == nil || info.ChannelMeta == nil || info.RelayMode != relayconstant.RelayModeResponses {
 		return
 	}
 	observation, ok := responsesToolCapabilityObservationFromContext(c, time.Now().UTC())
 	if !ok {
 		return
 	}
+	observation.Model = info.OriginModelName
+	observation.Profile = string(info.ChannelOtherSettings.NormalizedResponsesUpstreamProfile())
+	observation.Transport = responsesToolCapabilityObservationTransport(info.RequestURLPath)
 	settings, err := model.MarkResponsesToolCapabilityObservation(info.ChannelMeta.ChannelId, observation)
 	if err != nil {
 		logger.LogError(c, fmt.Sprintf("mark responses tool capability observation failed: %s", err.Error()))
@@ -37,9 +41,15 @@ func recordResponsesToolCapabilityObservation(c *gin.Context, info *relaycommon.
 	logResponsesToolCapabilityConflicts(c, info.ChannelMeta.ChannelId, settings, observation)
 }
 
+func responsesToolCapabilityObservationTransport(requestURLPath string) string {
+	if queryIndex := strings.IndexByte(requestURLPath, '?'); queryIndex >= 0 {
+		requestURLPath = requestURLPath[:queryIndex]
+	}
+	return strings.TrimSpace(requestURLPath)
+}
+
 func recordResponsesStreamOptionsIncludeUsageCapabilityObservation(c *gin.Context, info *relaycommon.RelayInfo) {
 	if c == nil || info == nil || info.ChannelMeta == nil || info.RelayMode != relayconstant.RelayModeResponses ||
-		relaycommon.IsResponsesOpaqueEncryptedReplay(c) ||
 		!common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetry) ||
 		common.GetContextKeyInt(c, constant.ContextKeyResponsesStreamOptionsIncludeUsageRetryChannelID) != info.ChannelMeta.ChannelId {
 		return
@@ -77,6 +87,7 @@ func responsesToolCapabilityObservationFromContext(c *gin.Context, observedAt ti
 	}
 	observation := dto.ResponsesToolCapabilityObservation{
 		ObservedAt:        observedAt.UTC().Unix(),
+		Source:            common.GetContextKeyString(c, constant.ContextKeyResponsesToolCapabilityObservationSource),
 		CustomToolCall:    common.GetContextKeyBool(c, constant.ContextKeyResponsesObservedCustomToolCall),
 		NamespaceToolCall: common.GetContextKeyBool(c, constant.ContextKeyResponsesObservedNamespaceToolCall),
 		ToolSearchCall:    common.GetContextKeyBool(c, constant.ContextKeyResponsesObservedToolSearchCall),

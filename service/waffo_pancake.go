@@ -124,6 +124,7 @@ func CreateWaffoPancakeCheckoutSession(ctx context.Context, params *WaffoPancake
 	} else {
 		req.Header.Set("X-Environment", "prod")
 	}
+	ApplyDefaultUserAgent(req)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

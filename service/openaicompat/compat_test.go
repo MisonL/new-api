@@ -16,6 +16,26 @@ func mustMarshalJSON(t *testing.T, value any) []byte {
 	return raw
 }
 
+func TestResponsesToolMergePreservesThinkingContentAlias(t *testing.T) {
+	existingThinking := "existing"
+	newThinking := " + new"
+	messages := []dto.Message{{Role: "assistant", Content: "", ThinkingContent: &existingThinking}}
+	toolMessage := dto.Message{Role: "assistant", Content: "", ThinkingContent: &newThinking}
+	toolMessage.SetToolCalls([]dto.ToolCallRequest{{
+		ID:       "call_1",
+		Type:     "function",
+		Function: dto.FunctionRequest{Name: "lookup", Arguments: `{}`},
+	}})
+
+	appendResponsesToolMessage(&messages, toolMessage)
+
+	require.Len(t, messages, 1)
+	require.Equal(t, "existing + new", messages[0].GetReasoningContent())
+	require.NotNil(t, messages[0].ReasoningContent)
+	require.Nil(t, messages[0].ThinkingContent)
+	require.Len(t, messages[0].ParseToolCalls(), 1)
+}
+
 func TestProtocolConversionPolicySupportsLegacyAndRules(t *testing.T) {
 	legacyPolicy := model_setting.ChatCompletionsToResponsesPolicy{
 		Enabled:       true,
@@ -122,6 +142,215 @@ func TestResponsesRequestToChatCompletionsRequest(t *testing.T) {
 
 	require.NotNil(t, chatReq.ResponseFormat)
 	require.Equal(t, "json_schema", chatReq.ResponseFormat.Type)
+}
+
+func TestResponsesRequestToChatCompletionsRequestRejectsUnsupportedMessageRole(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5",
+		Input: mustMarshalJSON(t, []any{
+			map[string]any{
+				"type":    "message",
+				"role":    "tool",
+				"content": "invalid",
+			},
+		}),
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "message role")
+}
+
+func TestChatCompletionsRequestToResponsesRequestRejectsMalformedContentArray(t *testing.T) {
+	_, err := ChatCompletionsRequestToResponsesRequest(&dto.GeneralOpenAIRequest{
+		Model: "gpt-5",
+		Messages: []dto.Message{{
+			Role:    "user",
+			Content: []any{"invalid"},
+		}},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "content[0]")
+}
+
+func TestResponsesRequestToChatCompletionsRequestPreservesDeepSeekReasoningText(t *testing.T) {
+	chatReq, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+		Model: "deepseek-v4-flash",
+		Input: mustMarshalJSON(t, []any{
+			map[string]any{
+				"type": "reasoning",
+				"content": []map[string]any{
+					{"type": "reasoning_text", "text": "first\n"},
+					{"type": "reasoning_text", "text": "second"},
+				},
+			},
+			map[string]any{
+				"type":    "message",
+				"role":    "assistant",
+				"content": []map[string]any{{"type": "output_text", "text": "answer"}},
+			},
+			map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_lookup",
+				"name":      "lookup",
+				"arguments": `{"query":"status"}`,
+			},
+		}),
+	})
+
+	require.NoError(t, err)
+	require.Len(t, chatReq.Messages, 1)
+	assistant := chatReq.Messages[0]
+	require.Equal(t, "assistant", assistant.Role)
+	require.Equal(t, "answer", assistant.StringContent())
+	require.Equal(t, "first\nsecond", assistant.GetReasoningContent())
+	require.Len(t, assistant.ParseToolCalls(), 1)
+	require.Equal(t, "call_lookup", assistant.ParseToolCalls()[0].ID)
+}
+
+func TestResponsesRequestToChatCompletionsRequestRejectsUnsupportedReasoningShape(t *testing.T) {
+	_, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+		Model: "deepseek-v4-flash",
+		Input: mustMarshalJSON(t, []any{
+			map[string]any{
+				"type":    "reasoning",
+				"summary": []map[string]any{{"type": "summary_text", "text": "summary only"}},
+			},
+			map[string]any{"type": "message", "role": "assistant", "content": "answer"},
+		}),
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "reasoning content is required")
+}
+
+func TestChatCompletionsRequestToResponsesRequestPreservesDeepSeekReasoningBeforeToolCalls(t *testing.T) {
+	reasoning := "  preserve this reasoning\n"
+	req := &dto.GeneralOpenAIRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.Message{
+			{Role: "user", Content: "check the weather"},
+			{
+				Role:             "assistant",
+				Content:          "I will check that.",
+				ReasoningContent: &reasoning,
+			},
+		},
+	}
+	req.Messages[1].SetToolCalls([]dto.ToolCallRequest{{
+		ID:   "call_weather",
+		Type: "function",
+		Function: dto.FunctionRequest{
+			Name:      "get_weather",
+			Arguments: `{"city":"Hangzhou"}`,
+		},
+	}})
+
+	responsesReq, err := ChatCompletionsRequestToResponsesRequestWithOptions(req, ChatCompletionsToResponsesOptions{
+		PreserveReasoningContent: true,
+	})
+	require.NoError(t, err)
+
+	var items []map[string]any
+	require.NoError(t, common.Unmarshal(responsesReq.Input, &items))
+	require.Len(t, items, 4)
+	require.Equal(t, "user", items[0]["role"])
+	require.Equal(t, "reasoning", items[1]["type"])
+	require.Equal(t, []any{map[string]any{
+		"type": "reasoning_text",
+		"text": reasoning,
+	}}, items[1]["content"])
+	require.Equal(t, "assistant", items[2]["role"])
+	require.Equal(t, "I will check that.", items[2]["content"])
+	require.Equal(t, "function_call", items[3]["type"])
+	require.Equal(t, "call_weather", items[3]["call_id"])
+}
+
+func TestChatCompletionsRequestToResponsesRequestPreservesExplicitEmptyReasoning(t *testing.T) {
+	reasoning := ""
+	req := &dto.GeneralOpenAIRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.Message{{
+			Role:             "assistant",
+			Content:          "",
+			ReasoningContent: &reasoning,
+		}},
+	}
+
+	responsesReq, err := ChatCompletionsRequestToResponsesRequestWithOptions(req, ChatCompletionsToResponsesOptions{
+		PreserveReasoningContent: true,
+	})
+	require.NoError(t, err)
+
+	var items []map[string]any
+	require.NoError(t, common.Unmarshal(responsesReq.Input, &items))
+	require.Len(t, items, 2)
+	require.Equal(t, "reasoning", items[0]["type"])
+	require.Equal(t, []any{map[string]any{
+		"type": "reasoning_text",
+		"text": "",
+	}}, items[0]["content"])
+	require.Equal(t, "assistant", items[1]["role"])
+}
+
+func TestChatCompletionsRequestToResponsesRequestDoesNotEmitPlainTextReasoningByDefault(t *testing.T) {
+	reasoning := "do not send to native OpenAI Responses"
+	req := &dto.GeneralOpenAIRequest{
+		Model: "gpt-5.6-luna",
+		Messages: []dto.Message{{
+			Role:             "assistant",
+			Content:          "answer",
+			ReasoningContent: &reasoning,
+		}},
+	}
+
+	responsesReq, err := ChatCompletionsRequestToResponsesRequest(req)
+	require.NoError(t, err)
+
+	var items []map[string]any
+	require.NoError(t, common.Unmarshal(responsesReq.Input, &items))
+	require.Len(t, items, 1)
+	require.Equal(t, "assistant", items[0]["role"])
+}
+
+func TestResponsesRequestToChatCompletionsRequestPreservesInputAudio(t *testing.T) {
+	chatReq, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: mustMarshalJSON(t, []any{
+			map[string]any{
+				"type": "input_audio",
+				"input_audio": map[string]any{
+					"data":   "DIRECT_AUDIO_DATA",
+					"format": "wav",
+				},
+			},
+			map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "transcribe this"},
+					{"type": "input_audio", "input_audio": map[string]any{"data": "MESSAGE_AUDIO_DATA", "format": "mp3"}},
+				},
+			},
+		}),
+	})
+
+	require.NoError(t, err)
+	require.Len(t, chatReq.Messages, 2)
+
+	directAudio := chatReq.Messages[0].ParseContent()
+	require.Len(t, directAudio, 1)
+	require.Equal(t, dto.ContentTypeInputAudio, directAudio[0].Type)
+	require.NotNil(t, directAudio[0].GetInputAudio())
+	require.Equal(t, "DIRECT_AUDIO_DATA", directAudio[0].GetInputAudio().Data)
+	require.Equal(t, "wav", directAudio[0].GetInputAudio().Format)
+
+	messageAudio := chatReq.Messages[1].ParseContent()
+	require.Len(t, messageAudio, 2)
+	require.Equal(t, dto.ContentTypeInputAudio, messageAudio[1].Type)
+	require.NotNil(t, messageAudio[1].GetInputAudio())
+	require.Equal(t, "MESSAGE_AUDIO_DATA", messageAudio[1].GetInputAudio().Data)
+	require.Equal(t, "mp3", messageAudio[1].GetInputAudio().Format)
 }
 
 func TestResponsesRequestToChatCompletionsRequestRejectsUnsupportedPreviousResponseID(t *testing.T) {
@@ -286,6 +515,172 @@ func TestResponsesResponseToChatCompletionsResponseIgnoresReasoningSummaryConfig
 
 	require.NoError(t, err)
 	require.Empty(t, chatResp.Choices[0].Message.GetReasoningContent())
+}
+
+func TestResponsesResponseToChatCompletionsResponsePreservesExplicitEmptyReasoningText(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_empty_reasoning_text",
+		CreatedAt: 1710000000,
+		Model:     "deepseek-v4-flash",
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "reasoning",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "reasoning_text", Text: ""},
+				},
+			},
+			{
+				Type:    "message",
+				Role:    "assistant",
+				Content: []dto.ResponsesOutputContent{{Type: "output_text", Text: "tool follows"}},
+			},
+			{
+				Type:      "function_call",
+				ID:        "fc_empty_reasoning",
+				CallId:    "call_empty_reasoning",
+				Name:      "lookup",
+				Arguments: common.RawMessage(`{"q":"status"}`),
+			},
+		},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_empty_reasoning_text")
+
+	require.NoError(t, err)
+	require.Len(t, chatResp.Choices, 1)
+	require.NotNil(t, chatResp.Choices[0].Message.ReasoningContent)
+	require.Empty(t, *chatResp.Choices[0].Message.ReasoningContent)
+	require.Equal(t, "tool follows", chatResp.Choices[0].Message.Content)
+	require.Len(t, chatResp.Choices[0].Message.ParseToolCalls(), 1)
+}
+
+func TestResponsesResponseToChatCompletionsResponseMapsIncompleteReason(t *testing.T) {
+	tests := []struct {
+		name         string
+		reason       string
+		want         string
+		withToolCall bool
+	}{
+		{name: "max output tokens", reason: "max_output_tokens", want: "length"},
+		{name: "content filter", reason: "content_filter", want: "content_filter"},
+		{name: "unknown reason defaults to length", reason: "other", want: "length"},
+		{name: "tool call takes precedence", reason: "max_output_tokens", want: "tool_calls", withToolCall: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &dto.OpenAIResponsesResponse{
+				ID:                "resp_incomplete",
+				CreatedAt:         1710000000,
+				Model:             "gpt-5.6-sol",
+				Status:            common.RawMessage(`"incomplete"`),
+				IncompleteDetails: &dto.IncompleteDetails{Reason: tt.reason},
+			}
+			if tt.withToolCall {
+				resp.Output = []dto.ResponsesOutput{{
+					Type:      "function_call",
+					ID:        "fc_incomplete",
+					CallId:    "call_incomplete",
+					Name:      "lookup",
+					Arguments: common.RawMessage(`{"query":"status"}`),
+				}}
+			}
+
+			chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_incomplete")
+
+			require.NoError(t, err)
+			require.Len(t, chatResp.Choices, 1)
+			require.Equal(t, tt.want, chatResp.Choices[0].FinishReason)
+			if tt.withToolCall {
+				require.Len(t, chatResp.Choices[0].Message.ParseToolCalls(), 1)
+			} else {
+				require.Empty(t, chatResp.Choices[0].Message.ParseToolCalls())
+			}
+		})
+	}
+}
+
+func TestResponsesResponseToChatCompletionsResponseMapsLegacyIncompleteReason(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:                "resp_incomplete_legacy",
+		CreatedAt:         1710000000,
+		Model:             "gpt-5.6-luna",
+		Status:            common.RawMessage(`"incomplete"`),
+		IncompleteDetails: &dto.IncompleteDetails{Reasoning: "content_filter"},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_incomplete_legacy")
+
+	require.NoError(t, err)
+	require.Len(t, chatResp.Choices, 1)
+	require.Equal(t, "content_filter", chatResp.Choices[0].FinishReason)
+}
+
+func TestResponsesResponseToChatCompletionsResponseMapsCaseInsensitiveIncompleteStatus(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:                "resp_incomplete_uppercase",
+		CreatedAt:         1710000000,
+		Model:             "gpt-5.6-luna",
+		Status:            common.RawMessage(`"INCOMPLETE"`),
+		IncompleteDetails: &dto.IncompleteDetails{Reason: "content_filter"},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_incomplete_uppercase")
+
+	require.NoError(t, err)
+	require.Len(t, chatResp.Choices, 1)
+	require.Equal(t, "content_filter", chatResp.Choices[0].FinishReason)
+}
+
+func TestResponsesResponseToChatCompletionsResponseKeepsToolCallsAlongsideText(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		ID:        "resp_text_and_tool",
+		CreatedAt: 1710000000,
+		Model:     "gpt-5.6-luna",
+		Output: []dto.ResponsesOutput{
+			{
+				Type:    "message",
+				Role:    "assistant",
+				Content: []dto.ResponsesOutputContent{{Type: "output_text", Text: "checking"}},
+			},
+			{
+				Type:      "function_call",
+				ID:        "fc_text_and_tool",
+				CallId:    "call_text_and_tool",
+				Name:      "lookup",
+				Arguments: common.RawMessage(`{"query":"status"}`),
+			},
+		},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_text_and_tool")
+
+	require.NoError(t, err)
+	require.Equal(t, "checking", chatResp.Choices[0].Message.Content)
+	require.Equal(t, "tool_calls", chatResp.Choices[0].FinishReason)
+	require.Len(t, chatResp.Choices[0].Message.ParseToolCalls(), 1)
+	call := chatResp.Choices[0].Message.ParseToolCalls()[0]
+	require.Equal(t, "call_text_and_tool", call.ID)
+	require.Equal(t, "lookup", call.Function.Name)
+}
+
+func TestResponsesResponseToChatCompletionsResponseNormalizesUnknownInvalidToolName(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		Model: "gpt-5.6",
+		Output: []dto.ResponsesOutput{{
+			Type:      "function_call",
+			ID:        "fc_unknown",
+			CallId:    "call_unknown",
+			Name:      "mcp.calendar/search.v1",
+			Arguments: common.RawMessage(`{"q":"hello"}`),
+		}},
+	}
+
+	chatResp, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_unknown")
+	require.NoError(t, err)
+	calls := chatResp.Choices[0].Message.ParseToolCalls()
+	require.Len(t, calls, 1)
+	require.Equal(t, dto.NormalizeToolName("mcp.calendar/search.v1"), calls[0].Function.Name)
 }
 
 func TestResponsesRequestToChatCompletionsRequestDeduplicatesIdenticalEffectiveTools(t *testing.T) {
@@ -836,6 +1231,67 @@ func TestChatCompletionsResponseToResponsesResponse(t *testing.T) {
 	require.Equal(t, 15, usage.TotalTokens)
 }
 
+func TestChatCompletionsResponseToResponsesResponseMapsIncompleteFinishReasons(t *testing.T) {
+	for _, testCase := range []struct {
+		name           string
+		finishReason   string
+		wantReason     string
+		wantIncomplete bool
+	}{
+		{name: "length", finishReason: "length", wantReason: "max_output_tokens", wantIncomplete: true},
+		{name: "content filter", finishReason: "content_filter", wantReason: "content_filter", wantIncomplete: true},
+		{name: "stop", finishReason: "stop"},
+		{name: "tool calls", finishReason: "tool_calls"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			responsesResp, _, err := ChatCompletionsResponseToResponsesResponse(&dto.OpenAITextResponse{
+				Model: "gpt-5",
+				Choices: []dto.OpenAITextResponseChoice{{
+					Message:      dto.Message{Role: "assistant", Content: "answer"},
+					FinishReason: testCase.finishReason,
+				}},
+			}, "resp_finish_reason")
+
+			require.NoError(t, err)
+			if testCase.wantIncomplete {
+				require.JSONEq(t, `"incomplete"`, string(responsesResp.Status))
+				require.NotNil(t, responsesResp.IncompleteDetails)
+				require.Equal(t, testCase.wantReason, responsesResp.IncompleteDetails.Reason)
+			} else {
+				require.JSONEq(t, `"completed"`, string(responsesResp.Status))
+				require.Nil(t, responsesResp.IncompleteDetails)
+			}
+		})
+	}
+}
+
+func TestChatCompletionsResponseToResponsesResponsePreservesReasoningText(t *testing.T) {
+	reasoning := "  preserve this reasoning\n"
+	chatResp := &dto.OpenAITextResponse{
+		Id:      "chatcmpl_reasoning",
+		Model:   "deepseek-v4-flash",
+		Object:  "chat.completion",
+		Created: int64(12345),
+		Choices: []dto.OpenAITextResponseChoice{{
+			Index: 0,
+			Message: dto.Message{
+				Role:             "assistant",
+				Content:          "done",
+				ReasoningContent: &reasoning,
+			},
+			FinishReason: "stop",
+		}},
+	}
+
+	responsesResp, _, err := ChatCompletionsResponseToResponsesResponse(chatResp, "resp_reasoning")
+	require.NoError(t, err)
+	require.Len(t, responsesResp.Output, 2)
+	require.Equal(t, "reasoning", responsesResp.Output[0].Type)
+	require.Equal(t, "reasoning_text", responsesResp.Output[0].Content[0].Type)
+	require.Equal(t, reasoning, responsesResp.Output[0].Content[0].Text)
+	require.Equal(t, "message", responsesResp.Output[1].Type)
+}
+
 func TestChatCompletionsResponseToResponsesResponseEscapesInvalidToolArguments(t *testing.T) {
 	chatResp := &dto.OpenAITextResponse{
 		Id:      "chatcmpl_invalid_args",
@@ -866,6 +1322,22 @@ func TestChatCompletionsResponseToResponsesResponseEscapesInvalidToolArguments(t
 	require.NoError(t, err)
 	require.Len(t, responsesResp.Output, 1)
 	require.JSONEq(t, `"not-json"`, string(responsesResp.Output[0].Arguments))
+}
+
+func TestChatCompletionsResponseToResponsesResponseRejectsMalformedContentArray(t *testing.T) {
+	_, _, err := ChatCompletionsResponseToResponsesResponse(&dto.OpenAITextResponse{
+		Model: "gpt-5",
+		Choices: []dto.OpenAITextResponseChoice{{
+			Message: dto.Message{
+				Role:    "assistant",
+				Content: []any{"invalid"},
+			},
+			FinishReason: "stop",
+		}},
+	}, "resp_invalid_content")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "content[0]")
 }
 
 func TestChatCompletionsResponseToResponsesResponseRejectsCustomToolCallByDefault(t *testing.T) {

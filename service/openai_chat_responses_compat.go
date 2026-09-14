@@ -15,6 +15,7 @@ import (
 
 type ResponsesChatCompatibilityOptions = openaicompat.ResponsesChatCompatibilityOptions
 type ResponsesChatCompatibilityToolState = openaicompat.ResponsesChatCompatibilityToolState
+type ChatCompletionsToResponsesOptions = openaicompat.ChatCompletionsToResponsesOptions
 
 const responsesChatCompatibilityIDPrefix = "resp_newapi_chatcmp_"
 
@@ -39,6 +40,10 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	return openaicompat.ChatCompletionsRequestToResponsesRequest(req)
 }
 
+func ChatCompletionsRequestToResponsesRequestWithOptions(req *dto.GeneralOpenAIRequest, options ChatCompletionsToResponsesOptions) (*dto.OpenAIResponsesRequest, error) {
+	return openaicompat.ChatCompletionsRequestToResponsesRequestWithOptions(req, options)
+}
+
 func ResponsesRequestToChatCompletionsRequest(req *dto.OpenAIResponsesRequest) (*dto.GeneralOpenAIRequest, error) {
 	return openaicompat.ResponsesRequestToChatCompletionsRequest(req)
 }
@@ -54,6 +59,12 @@ func ResponsesRequestToChatCompletionsRequestWithState(req *dto.OpenAIResponsesR
 func ValidateResponsesRequestToChatCompatibility(req *dto.OpenAIResponsesRequest, options ResponsesChatCompatibilityOptions) error {
 	_, err := openaicompat.ResponsesRequestToChatCompletionsRequestWithOptions(req, options)
 	return err
+}
+
+// ResponsesRequestHasUnbridgeableNamespaceTools reports namespace declarations
+// that cannot be represented by the selected Responses-to-Chat bridge.
+func ResponsesRequestHasUnbridgeableNamespaceTools(req *dto.OpenAIResponsesRequest, options ResponsesChatCompatibilityOptions) (bool, error) {
+	return openaicompat.ResponsesRequestHasUnbridgeableNamespaceTools(req, options)
 }
 
 func ResponsesViaChatRuleOptions(rule *model_setting.ProtocolConversionRule) ResponsesChatCompatibilityOptions {
@@ -72,6 +83,9 @@ func FindResponsesViaChatRule(ctx context.Context, relayMode int, passThroughGlo
 	if request != nil && IsResponsesChatCompatibilityReference(request.PreviousResponseID) {
 		return nil, ErrResponsesChatCompatibilityPreviousIDUnsupported
 	}
+	if passThroughGlobal || channelSetting.PassThroughBodyEnabled {
+		return nil, nil
+	}
 	if request != nil {
 		hasOpaqueEncryptedContent, err := ResponsesInputHasOpaqueEncryptedContent(ctx, request.Input)
 		if err != nil {
@@ -80,9 +94,6 @@ func FindResponsesViaChatRule(ctx context.Context, relayMode int, passThroughGlo
 		if hasOpaqueEncryptedContent {
 			return nil, nil
 		}
-	}
-	if passThroughGlobal || channelSetting.PassThroughBodyEnabled {
-		return nil, nil
 	}
 	if request != nil {
 		previousResponseID := strings.TrimSpace(request.PreviousResponseID)
@@ -284,6 +295,10 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 	return openaicompat.ResponsesResponseToChatCompletionsResponse(resp, id)
 }
 
+func ValidateResponsesOutputItemForChat(out *dto.ResponsesOutput, index int) error {
+	return openaicompat.ValidateResponsesOutputItemForChat(out, index)
+}
+
 func ChatCompletionsResponseToResponsesResponse(resp *dto.OpenAITextResponse, id string) (*dto.OpenAIResponsesResponse, *dto.Usage, error) {
 	return openaicompat.ChatCompletionsResponseToResponsesResponse(resp, id)
 }
@@ -306,6 +321,10 @@ func ResponsesChatCompatibilityHasCustomTool(toolState *ResponsesChatCompatibili
 
 func ExtractOutputTextFromResponses(resp *dto.OpenAIResponsesResponse) string {
 	return openaicompat.ExtractOutputTextFromResponses(resp)
+}
+
+func ExtractReasoningContentFromResponses(resp *dto.OpenAIResponsesResponse) string {
+	return openaicompat.ExtractReasoningContentFromResponses(resp)
 }
 
 func ExtractReasoningSummaryFromResponses(resp *dto.OpenAIResponsesResponse) string {

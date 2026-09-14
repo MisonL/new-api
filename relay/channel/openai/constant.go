@@ -81,6 +81,8 @@ var AgnesModelList = []string{
 	"agnes-image-2.0-flash",
 	"agnes-image-2.1-flash",
 	"agnes-video-v2.0",
+	"agnes-video-2.5",
+	"agnes-video-2.5-flash",
 }
 
 var AgnesChannelName = "Agnes"

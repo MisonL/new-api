@@ -248,18 +248,18 @@ func aiCodingCLIPlatformTokensFor(platform string) aiCodingCLIPlatformTokens {
 	if tokens, ok := aiCodingCLIPlatformTokenMap[normalizedPlatform]; ok {
 		return tokens
 	}
-	return aiCodingCLIPlatformTokenMap[HeaderProfilePlatformMacOSX64]
+	return aiCodingCLIPlatformTokenMap[HeaderProfilePlatformMacOSArm64]
 }
 
 func normalizeHeaderProfilePlatform(platform string) string {
 	normalizedPlatform := strings.TrimSpace(platform)
 	if normalizedPlatform == "" {
-		return HeaderProfilePlatformMacOSX64
+		return HeaderProfilePlatformMacOSArm64
 	}
 	if _, exists := aiCodingCLIPlatformTokenMap[normalizedPlatform]; exists {
 		return normalizedPlatform
 	}
-	return HeaderProfilePlatformMacOSX64
+	return HeaderProfilePlatformMacOSArm64
 }
 
 func normalizeHeaderProfileVersionValue(version string, allowLatest bool) string {

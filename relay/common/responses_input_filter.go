@@ -19,6 +19,8 @@ var ErrResponsesContextCompactionInvalid = errors.New("invalid responses context
 
 type ResponsesEncryptedContentMarkerValidator func(marker string) (bool, error)
 
+const responsesSyntheticCompactMarkerPrefix = "newapi.synthetic.compact:"
+
 var responsesNamespaceParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.namespace$`)
 var responsesArgumentsParameterPattern = regexp.MustCompile(`^input\[(\d+)\]\.arguments$`)
 var responsesEncryptedContentParameterPattern = regexp.MustCompile(`^input\[(\d+)\](?:\.(content|output)\[(\d+)\])?\.encrypted_content$`)
@@ -66,9 +68,13 @@ func (r ResponsesContextCompactionNormalizeResult) ChangedCount() int {
 	return r.ConvertedCount + r.DroppedCount
 }
 
-// NormalizeResponsesInputItemIDs removes client-generated item IDs whose prefixes
-// do not match the upstream Responses item type contract. The call_id pairing is
-// intentionally left unchanged because it is the stable tool continuation key.
+// NormalizeResponsesInputItemIDs removes replayed IDs that do not satisfy the
+// known Codex Responses item prefix contract. Opaque encrypted replay items
+// retain their original IDs because those IDs belong to upstream state and are
+// not safe for the gateway to rewrite. Unknown item types are preserved because
+// their IDs are opaque references and their prefixes are not part of a stable
+// gateway contract. The call_id pairing is intentionally left unchanged because
+// it is the stable tool continuation key.
 func NormalizeResponsesInputItemIDs(input json.RawMessage) (json.RawMessage, ResponsesInputItemIDNormalizeResult, error) {
 	result := ResponsesInputItemIDNormalizeResult{}
 	trimmedInput := bytes.TrimSpace(input)
@@ -89,18 +95,16 @@ func NormalizeResponsesInputItemIDs(input json.RawMessage) (json.RawMessage, Res
 			normalized = append(normalized, rawItem)
 			continue
 		}
-		prefix := responsesInputItemIDPrefix(responsesItemType(item))
-		if prefix == "" {
-			normalized = append(normalized, rawItem)
-			continue
-		}
 		rawID, hasID := item["id"]
 		if !hasID {
 			normalized = append(normalized, rawItem)
 			continue
 		}
 		var id string
-		if basecommon.Unmarshal(rawID, &id) == nil && responsesInputItemIDHasPrefix(id, prefix) {
+		if basecommon.Unmarshal(rawID, &id) != nil {
+			id = ""
+		}
+		if !responsesInputItemIDShouldRemove(item, id) {
 			normalized = append(normalized, rawItem)
 			continue
 		}
@@ -129,44 +133,54 @@ func NormalizeResponsesInputItemIDs(input json.RawMessage) (json.RawMessage, Res
 	return json.RawMessage(normalizedInput), result, nil
 }
 
-func responsesInputItemIDPrefix(itemType string) string {
-	switch itemType {
-	case "additional_tools":
-		return "at"
-	case "message":
-		return "msg"
-	case "agent_message":
-		return "amsg"
-	case "reasoning":
-		return "rs"
-	case "local_shell_call":
-		return "lsh"
-	case "function_call", "tool_call", "mcp_tool_call":
-		return "fc"
-	case "tool_search_call":
-		return "tsc"
-	case "function_call_output":
-		return "fco"
-	case "custom_tool_call":
-		return "ctc"
-	case "custom_tool_call_output":
-		return "ctco"
-	case "tool_search_output":
-		return "tso"
-	case "web_search_call":
-		return "ws"
-	case "image_generation_call":
-		return "ig"
-	case "compaction", "context_compaction", "compaction_summary":
-		return "cmp"
-	default:
-		return ""
+func responsesInputItemIDShouldRemove(item map[string]json.RawMessage, id string) bool {
+	if responsesItemHasOpaqueEncryptedContent(item) {
+		return false
 	}
+	itemType := responsesItemType(item)
+	prefix, known := responsesInputItemIDPrefix(itemType)
+	if !known {
+		return false
+	}
+	if !strings.HasPrefix(id, prefix+"_") {
+		return true
+	}
+	return strings.TrimSpace(strings.TrimPrefix(id, prefix+"_")) == ""
 }
 
-func responsesInputItemIDHasPrefix(id string, prefix string) bool {
-	requiredPrefix := prefix + "_"
-	return len(id) > len(requiredPrefix) && strings.HasPrefix(id, requiredPrefix)
+func responsesInputItemIDPrefix(itemType string) (string, bool) {
+	switch itemType {
+	case "additional_tools":
+		return "at", true
+	case "message":
+		return "msg", true
+	case "agent_message":
+		return "amsg", true
+	case "reasoning":
+		return "rs", true
+	case "local_shell_call":
+		return "lsh", true
+	case "function_call", "tool_call", "mcp_tool_call":
+		return "fc", true
+	case "tool_search_call":
+		return "tsc", true
+	case "function_call_output":
+		return "fco", true
+	case "custom_tool_call":
+		return "ctc", true
+	case "custom_tool_call_output":
+		return "ctco", true
+	case "tool_search_output":
+		return "tso", true
+	case "web_search_call":
+		return "ws", true
+	case "image_generation_call":
+		return "ig", true
+	case "compaction", "context_compaction", "compaction_summary":
+		return "cmp", true
+	default:
+		return "", false
+	}
 }
 
 type responsesEncryptedContentInputPath struct {
@@ -240,63 +254,126 @@ func ResponsesInputHasOpaqueEncryptedContent(input json.RawMessage) (bool, error
 }
 
 func ResponsesInputHasOpaqueEncryptedContentWithMarkerValidator(input json.RawMessage, validator ResponsesEncryptedContentMarkerValidator) (bool, error) {
-	if len(bytes.TrimSpace(input)) == 0 {
+	trimmedInput := bytes.TrimSpace(input)
+	if len(trimmedInput) == 0 || trimmedInput[0] != '[' {
 		return false, nil
 	}
-	var value any
-	if err := basecommon.Unmarshal(input, &value); err != nil {
+	var items []json.RawMessage
+	if err := basecommon.Unmarshal(input, &items); err != nil {
 		return false, fmt.Errorf("parse responses input for encrypted content: %w", err)
 	}
-	return responsesValueHasOpaqueEncryptedContent(value, validator)
-}
-
-func responsesValueHasOpaqueEncryptedContent(value any, validator ResponsesEncryptedContentMarkerValidator) (bool, error) {
-	switch typedValue := value.(type) {
-	case map[string]any:
-		for key, child := range typedValue {
-			if key == "encrypted_content" {
-				opaque, err := responsesEncryptedContentValueIsOpaque(typedValue, child, validator)
-				if err != nil {
-					return false, err
-				}
-				if opaque {
-					return true, nil
-				}
-			}
-			opaque, err := responsesValueHasOpaqueEncryptedContent(child, validator)
-			if err != nil {
-				return false, err
-			}
-			if opaque {
-				return true, nil
-			}
+	for _, rawItem := range items {
+		var item map[string]json.RawMessage
+		if err := basecommon.Unmarshal(rawItem, &item); err != nil {
+			continue
 		}
-	case []any:
-		for _, child := range typedValue {
-			opaque, err := responsesValueHasOpaqueEncryptedContent(child, validator)
-			if err != nil {
-				return false, err
-			}
-			if opaque {
-				return true, nil
-			}
+		if responsesItemHasOpaqueEncryptedContentWithMarkerValidator(item, validator) {
+			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func responsesEncryptedContentValueIsOpaque(item map[string]any, value any, validator ResponsesEncryptedContentMarkerValidator) (bool, error) {
-	if validator != nil && responsesCompactionEncryptedContentMarker(item, value) {
-		marker, _ := value.(string)
-		local, err := validator(marker)
-		if err != nil {
-			return false, err
+func responsesItemHasOpaqueEncryptedContentWithMarkerValidator(item map[string]json.RawMessage, validator ResponsesEncryptedContentMarkerValidator) bool {
+	itemType := responsesItemType(item)
+	if IsResponsesCompactionItemType(itemType) || itemType == "reasoning" {
+		raw := bytes.TrimSpace(item["encrypted_content"])
+		if validator != nil && len(raw) > 0 {
+			var marker string
+			if basecommon.Unmarshal(raw, &marker) == nil {
+				local, err := validator(marker)
+				if err == nil && local {
+					return false
+				}
+			}
 		}
-		if local {
-			return false, nil
+		return responsesRawEncryptedContentIsOpaque(raw)
+	}
+	if itemType == "agent_message" {
+		return responsesNestedEncryptedContentIsOpaqueWithMarkerValidator(item["content"], validator)
+	}
+	if itemType == "function_call_output" || itemType == "custom_tool_call_output" {
+		return responsesNestedEncryptedContentIsOpaqueWithMarkerValidator(item["output"], validator)
+	}
+	return false
+}
+
+func responsesNestedEncryptedContentIsOpaqueWithMarkerValidator(raw json.RawMessage, validator ResponsesEncryptedContentMarkerValidator) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return false
+	}
+	var contentItems []json.RawMessage
+	if basecommon.Unmarshal(trimmed, &contentItems) != nil {
+		return false
+	}
+	for _, rawItem := range contentItems {
+		var item map[string]json.RawMessage
+		if basecommon.Unmarshal(rawItem, &item) != nil || responsesItemType(item) != "encrypted_content" {
+			continue
+		}
+		rawEncryptedContent := bytes.TrimSpace(item["encrypted_content"])
+		if validator != nil {
+			var marker string
+			if basecommon.Unmarshal(rawEncryptedContent, &marker) == nil {
+				local, err := validator(marker)
+				if err == nil && local {
+					continue
+				}
+			}
+		}
+		if responsesRawEncryptedContentIsOpaque(rawEncryptedContent) {
+			return true
 		}
 	}
-	return ResponsesEncryptedContentValueIsOpaque(value), nil
+	return false
+}
+
+func responsesItemHasOpaqueEncryptedContent(item map[string]json.RawMessage) bool {
+	itemType := responsesItemType(item)
+	switch itemType {
+	case "reasoning", "compaction", "context_compaction", "compaction_summary":
+		return responsesRawEncryptedContentIsOpaque(item["encrypted_content"])
+	case "agent_message":
+		return responsesNestedEncryptedContentIsOpaque(item["content"])
+	case "function_call_output", "custom_tool_call_output":
+		return responsesNestedEncryptedContentIsOpaque(item["output"])
+	default:
+		return false
+	}
+}
+
+func responsesNestedEncryptedContentIsOpaque(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return false
+	}
+	var contentItems []json.RawMessage
+	if err := basecommon.Unmarshal(trimmed, &contentItems); err != nil {
+		return false
+	}
+	for _, rawItem := range contentItems {
+		var item map[string]json.RawMessage
+		if err := basecommon.Unmarshal(rawItem, &item); err != nil || responsesItemType(item) != "encrypted_content" {
+			continue
+		}
+		if responsesRawEncryptedContentIsOpaque(item["encrypted_content"]) {
+			return true
+		}
+	}
+	return false
+}
+
+func responsesRawEncryptedContentIsOpaque(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return false
+	}
+	var value any
+	if err := basecommon.Unmarshal(trimmed, &value); err != nil {
+		return true
+	}
+	return ResponsesEncryptedContentValueIsOpaque(value)
 }
 
 func ResponsesEncryptedContentValueIsOpaque(value any) bool {
@@ -310,16 +387,7 @@ func ResponsesEncryptedContentValueIsOpaque(value any) bool {
 	if strings.TrimSpace(stringValue) == "" {
 		return false
 	}
-	return true
-}
-
-func responsesCompactionEncryptedContentMarker(item map[string]any, value any) bool {
-	itemType, _ := item["type"].(string)
-	if !IsResponsesCompactionItemType(itemType) {
-		return false
-	}
-	_, ok := value.(string)
-	return ok
+	return !strings.HasPrefix(stringValue, responsesSyntheticCompactMarkerPrefix)
 }
 
 func NormalizeContextCompactionForResponsesRequest(request dto.OpenAIResponsesRequest) (dto.OpenAIResponsesRequest, ResponsesContextCompactionNormalizeResult, error) {

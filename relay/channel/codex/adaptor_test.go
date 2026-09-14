@@ -64,6 +64,162 @@ func TestConvertOpenAIResponsesRequestRestoresSyntheticCompactState(t *testing.T
 	require.JSONEq(t, `false`, string(convertedReq.Store))
 }
 
+func TestConvertOpenAIResponsesRequestNormalizesCodexItemIDs(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodex,
+			ChannelId:   205,
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+				{"type":"function_call","id":"itemfunction","call_id":"call_stable","name":"exec","arguments":"{}"},
+			{"type":"function_call","id":"fc_valid","call_id":"call_valid","name":"exec","arguments":"{}"}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	var items []map[string]any
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	_, hasInvalidID := items[0]["id"]
+	require.False(t, hasInvalidID)
+	require.Equal(t, "call_stable", items[0]["call_id"])
+	require.Equal(t, "fc_valid", items[1]["id"])
+	require.Equal(t, 1, common.GetContextKeyInt(c, constant.ContextKeyResponsesInputItemIDNormalizationRemovedCount))
+}
+
+func TestConvertOpenAIResponsesRequestForcesParallelToolCallsFalse(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodex,
+		},
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
+		Model:             "gpt-5.6-luna",
+		ParallelToolCalls: common.RawMessage(`true`),
+		Input:             common.RawMessage(`"hello"`),
+	})
+
+	require.NoError(t, err)
+	convertedRequest, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.JSONEq(t, `false`, string(convertedRequest.ParallelToolCalls))
+}
+
+func TestConvertOpenAIResponsesCompactRequestForcesParallelToolCallsFalse(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		OriginModelName: "gpt-5.5-openai-compact",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeCodex,
+			UpstreamModelName: "gpt-5.5",
+		},
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
+		Model:             "gpt-5.5",
+		ParallelToolCalls: common.RawMessage(`true`),
+		Input:             common.RawMessage(`"compact"`),
+	})
+
+	require.NoError(t, err)
+	convertedRequest, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.JSONEq(t, `false`, string(convertedRequest.ParallelToolCalls))
+}
+
+func TestConvertOpenAIResponsesRequestPreservesOpaqueReasoningIDAndNormalizesToolID(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodex,
+			ChannelId:   205,
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"reasoning","id":"invalidreasoningid","encrypted_content":"opaque-reasoning-state"},
+			{"type":"function_call","id":"invalidfunctionid","call_id":"call_stable","name":"exec","arguments":"{}"},
+			{"type":"message","id":"msg_valid","role":"user","content":[]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	var items []map[string]any
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 3)
+	require.Equal(t, "invalidreasoningid", items[0]["id"])
+	_, hasFunctionID := items[1]["id"]
+	require.False(t, hasFunctionID)
+	require.Equal(t, "call_stable", items[1]["call_id"])
+	require.Equal(t, "msg_valid", items[2]["id"])
+	require.Equal(t, 1, common.GetContextKeyInt(c, constant.ContextKeyResponsesInputItemIDNormalizationRemovedCount))
+}
+
+func TestConvertOpenAIResponsesRequestNormalizesItemIDsInsideOpaqueEncryptedReplay(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodex,
+			ChannelId:   205,
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[
+			{"type":"reasoning","id":"rs_replay","encrypted_content":"opaque-reasoning-state"},
+			{"type":"function_call","id":"invalidfunctionid","call_id":"call_stable","name":"exec","arguments":"{}"},
+			{"type":"message","id":"msg_valid","role":"user","content":[]}
+		]`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, req)
+
+	require.NoError(t, err)
+	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	var items []map[string]any
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 3)
+	require.Equal(t, "rs_replay", items[0]["id"])
+	_, hasInvalidID := items[1]["id"]
+	require.False(t, hasInvalidID)
+	require.Equal(t, "call_stable", items[1]["call_id"])
+	require.Equal(t, "msg_valid", items[2]["id"])
+	require.Equal(t, 1, common.GetContextKeyInt(c, constant.ContextKeyResponsesInputItemIDNormalizationRemovedCount))
+}
+
 func TestConvertOpenAIResponsesCompactRestoresSyntheticCompactState(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -129,7 +285,7 @@ func TestConvertOpenAIResponsesRequestPropagatesSyntheticCompactErrors(t *testin
 	}
 	req := dto.OpenAIResponsesRequest{
 		Model:              "gpt-5.5",
-		PreviousResponseID: "resp_newapi_synthcmp_55555555555555555555555555555555",
+		PreviousResponseID: "resp_newapi_synthcmp_22222222222222222222222222222222",
 		Input:              common.RawMessage(`[]`),
 	}
 
@@ -140,7 +296,7 @@ func TestConvertOpenAIResponsesRequestPropagatesSyntheticCompactErrors(t *testin
 	require.Equal(t, "missing_local_synthetic_state", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
 }
 
-func TestConvertOpenAIResponsesRequestPreservesUnauthenticatedSyntheticMarker(t *testing.T) {
+func TestConvertOpenAIResponsesRequestContinuesMissingSyntheticStateWithVisibleInput(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -165,9 +321,12 @@ func TestConvertOpenAIResponsesRequestPreservesUnauthenticatedSyntheticMarker(t 
 	require.NoError(t, err)
 	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
-	require.Equal(t, req, convertedReq)
-	require.Empty(t, common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
-	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted))
+	require.Empty(t, convertedReq.PreviousResponseID)
+	require.Contains(t, string(convertedReq.Input), "continue with visible context")
+	require.NotContains(t, string(convertedReq.Input), "newapi.synthetic.compact")
+	require.JSONEq(t, `false`, string(convertedReq.Store))
+	require.Equal(t, "stale_local_synthetic_state_visible_only", common.GetContextKeyString(c, constant.ContextKeyResponsesPreviousIDAction))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactVisibleOnlyFallbackAttempted))
 }
 
 func codexLargeCompactTestText() string {
@@ -178,7 +337,7 @@ func codexHugeCompactTestText() string {
 	return strings.Repeat("token ", codexGPT55CompactContextLimitTokens+2048)
 }
 
-func TestConvertOpenAIResponsesRequestPreservesOpaqueReplayWithoutCodexRewrites(t *testing.T) {
+func TestConvertOpenAIResponsesRequestPreservesOpaqueReplayFieldsAfterItemIDNormalization(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
@@ -199,7 +358,7 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueReplayWithoutCodexRewrites(
 	info.SetEstimatePromptTokens(codexGPT55CompactContextLimitTokens + 1)
 	req := dto.OpenAIResponsesRequest{
 		Model:           "gpt-5.5",
-		Input:           common.RawMessage(`[{"type":"reasoning","id":"client_generated_id","encrypted_content":"opaque-reasoning-state"},{"type":"message","role":"user","content":"continue"}]`),
+		Input:           common.RawMessage(`[{"type":"reasoning","id":"clientgeneratedid","encrypted_content":"opaque-reasoning-state"},{"type":"message","role":"user","content":"continue"}]`),
 		Instructions:    common.RawMessage(`"original instructions"`),
 		Store:           common.RawMessage("true"),
 		MaxOutputTokens: &maxOutputTokens,
@@ -211,9 +370,51 @@ func TestConvertOpenAIResponsesRequestPreservesOpaqueReplayWithoutCodexRewrites(
 	require.NoError(t, err)
 	convertedReq, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
-	require.Equal(t, req, convertedReq)
+	var items []map[string]any
+	require.NoError(t, common.Unmarshal(convertedReq.Input, &items))
+	require.Len(t, items, 2)
+	require.Equal(t, "clientgeneratedid", items[0]["id"])
+	require.Equal(t, "opaque-reasoning-state", items[0]["encrypted_content"])
+	require.Equal(t, req.Instructions, convertedReq.Instructions)
+	require.Equal(t, req.Store, convertedReq.Store)
+	require.Equal(t, req.MaxOutputTokens, convertedReq.MaxOutputTokens)
+	require.Equal(t, req.Temperature, convertedReq.Temperature)
 	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactCodexContextPruned))
 	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted))
+}
+
+func TestConvertOpenAIResponsesRequestAppliesReasoningContextCapability(t *testing.T) {
+	unsupported := false
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeResponses,
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodex,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ResponsesCapabilityRegistry: &dto.ResponsesChannelCapabilityRegistry{SupportsReasoningContext: &unsupported},
+			},
+		},
+	}
+	request := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: common.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]`),
+		Reasoning: &dto.Reasoning{
+			Context: common.RawMessage(`"all_turns"`),
+			Mode:    common.RawMessage(`"adaptive"`),
+		},
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, request)
+	require.NoError(t, err)
+	convertedRequest, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.NotNil(t, convertedRequest.Reasoning)
+	require.Empty(t, convertedRequest.Reasoning.Context)
+	require.JSONEq(t, `"adaptive"`, string(convertedRequest.Reasoning.Mode))
+	require.Equal(t, "stripped_unsupported_capability", common.GetContextKeyString(c, constant.ContextKeyResponsesReasoningContextAction))
 }
 
 func TestConvertOpenAIResponsesCompactGPT55PrunesOldToolContext(t *testing.T) {
@@ -235,6 +436,7 @@ func TestConvertOpenAIResponsesCompactGPT55PrunesOldToolContext(t *testing.T) {
 		Input: common.RawMessage(fmt.Sprintf(`[
 			{"type":"function_call","call_id":"call_old","name":"read_file","arguments":"large old tool input %s"},
 			{"type":"custom_tool_call_output","call_id":"call_old","output":"large old tool output %s"},
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"keep visible context"}]}
 		]`, largePayload, largePayload)),
 	}
@@ -246,6 +448,7 @@ func TestConvertOpenAIResponsesCompactGPT55PrunesOldToolContext(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "gpt-5.5", convertedReq.Model)
 	require.NotContains(t, string(convertedReq.Input), "large old tool")
+	require.Contains(t, string(convertedReq.Input), `"type":"compaction"`)
 	require.Contains(t, string(convertedReq.Input), "keep visible context")
 	require.False(t, c.GetBool("responses_compact_context_fallback_attempted"))
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactCodexContextPruned))
@@ -274,6 +477,7 @@ func TestConvertOpenAIResponsesCompactGPT55PrunesToolCallGroups(t *testing.T) {
 			{"type":"function_call","call_id":"call_old","name":"read_file","arguments":"large old tool input %s"},
 			{"type":"function_call_output","call_id":"call_old","output":"large old tool output %s"},
 			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"keep assistant message"}]},
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"keep visible context"}]}
 		]`, largePayload, largePayload)),
 	}
@@ -340,6 +544,7 @@ func TestConvertOpenAIResponsesCompactGPT55ReestimatesHighCachedEstimateBeforeFa
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
 		Input: common.RawMessage(`[
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"small visible context"}]}
 		]`),
 	}
@@ -457,6 +662,7 @@ func TestConvertOpenAIResponsesCompactGPT55FallsBackToGPT54WhenToolPruneCannotFi
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.5",
 		Input: common.RawMessage(fmt.Sprintf(`[
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:resp_newapi_synthcmp_11111111111111111111111111111111"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"visible context without tool items %s"}]}
 		]`, largePayload)),
 	}
@@ -507,6 +713,45 @@ func TestConvertOpenAIResponsesCompactSafeguardSkipsNonGPT55(t *testing.T) {
 	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactCodexContextPruned))
 	require.False(t, c.GetBool("responses_compact_context_fallback_attempted"))
 	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted))
+}
+
+func TestConvertOpenAIResponsesCompactSafeguardSkipsGPT56Variants(t *testing.T) {
+	variants := []string{"gpt-5.6", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"}
+	for _, model := range variants {
+		t.Run(model, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+			info := &relaycommon.RelayInfo{
+				RelayMode:       relayconstant.RelayModeResponsesCompact,
+				OriginModelName: model + "-openai-compact",
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType:       constant.ChannelTypeCodex,
+					UpstreamModelName: model,
+				},
+			}
+			info.SetEstimatePromptTokens(codexGPT55CompactContextLimitTokens + 1)
+			request := dto.OpenAIResponsesRequest{
+				Model: model,
+				Input: common.RawMessage(fmt.Sprintf(`[
+					{"type":"function_call","call_id":"call_old","name":"read_file","arguments":"large old tool input %s"},
+					{"type":"message","role":"user","content":[{"type":"input_text","text":"keep visible context"}]}
+				]`, codexLargeCompactTestText())),
+			}
+
+			converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, request)
+
+			require.NoError(t, err)
+			convertedRequest, ok := converted.(dto.OpenAIResponsesRequest)
+			require.True(t, ok)
+			require.Equal(t, request.Model, convertedRequest.Model)
+			require.Equal(t, string(request.Input), string(convertedRequest.Input))
+			require.Equal(t, codexGPT55CompactContextLimitTokens+1, info.GetEstimatePromptTokens())
+			require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactCodexContextPruned))
+			require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactSummaryModelFallbackAttempted))
+			require.Empty(t, common.GetContextKeyString(c, constant.ContextKeyResponsesCompactRouteDecision))
+		})
+	}
 }
 
 func TestConvertOpenAIResponsesCompactSafeguardSkipsAlreadyFallbackModel(t *testing.T) {

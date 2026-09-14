@@ -3,7 +3,6 @@ package dto
 import (
 	"encoding/json"
 	"reflect"
-	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
@@ -83,41 +82,7 @@ func (r *OpenAIResponsesCompactionRequest) GetTokenCountMeta() *types.TokenCount
 	if r == nil {
 		return &types.TokenCountMeta{}
 	}
-
-	var parts []string
-	toolsCount := 0
-	if len(r.Instructions) > 0 {
-		parts = append(parts, string(r.Instructions))
-	}
-	if len(r.Input) > 0 {
-		parts = append(parts, string(r.Input))
-	}
-	if len(r.Tools) > 0 {
-		parts = append(parts, string(r.Tools))
-	}
-	if len(r.ParallelToolCalls) > 0 {
-		parts = append(parts, string(r.ParallelToolCalls))
-	}
-	if r.Reasoning != nil {
-		if raw, err := common.Marshal(r.Reasoning); err == nil {
-			parts = append(parts, string(raw))
-		}
-	}
-	if len(r.Text) > 0 {
-		parts = append(parts, string(r.Text))
-	}
-	if effectiveTools, err := r.ToResponsesRequest().EffectiveTools(); err == nil {
-		toolsCount = len(effectiveTools)
-	}
-	maxTokens := 0
-	if r.MaxOutputTokens != nil {
-		maxTokens = int(*r.MaxOutputTokens)
-	}
-	return &types.TokenCountMeta{
-		CombineText: strings.Join(parts, "\n"),
-		MaxTokens:   maxTokens,
-		ToolsCount:  toolsCount,
-	}
+	return r.ToResponsesRequest().GetTokenCountMeta()
 }
 
 func (r *OpenAIResponsesCompactionRequest) ToResponsesRequest() *OpenAIResponsesRequest {
@@ -126,57 +91,37 @@ func (r *OpenAIResponsesCompactionRequest) ToResponsesRequest() *OpenAIResponses
 	}
 	return &OpenAIResponsesRequest{
 		Model:                r.Model,
-		Input:                r.Input,
-		Include:              r.Include,
-		Conversation:         r.Conversation,
-		ContextManagement:    r.ContextManagement,
-		Instructions:         r.Instructions,
+		Input:                cloneRawMessage(r.Input),
+		Include:              cloneRawMessage(r.Include),
+		Conversation:         cloneRawMessage(r.Conversation),
+		ContextManagement:    cloneRawMessage(r.ContextManagement),
+		Instructions:         cloneRawMessage(r.Instructions),
 		MaxOutputTokens:      clonePtr(r.MaxOutputTokens),
 		TopLogProbs:          clonePtr(r.TopLogProbs),
-		Metadata:             r.Metadata,
-		ParallelToolCalls:    r.ParallelToolCalls,
+		Metadata:             cloneRawMessage(r.Metadata),
+		ParallelToolCalls:    cloneRawMessage(r.ParallelToolCalls),
 		PreviousResponseID:   r.PreviousResponseID,
-		Reasoning:            cloneReasoning(r.Reasoning),
+		Reasoning:            r.Reasoning.Clone(),
 		ServiceTier:          r.ServiceTier,
-		Store:                r.Store,
-		PromptCacheKey:       r.PromptCacheKey,
-		PromptCacheRetention: r.PromptCacheRetention,
-		SafetyIdentifier:     r.SafetyIdentifier,
+		Store:                cloneRawMessage(r.Store),
+		PromptCacheKey:       cloneRawMessage(r.PromptCacheKey),
+		PromptCacheRetention: cloneRawMessage(r.PromptCacheRetention),
+		SafetyIdentifier:     cloneRawMessage(r.SafetyIdentifier),
 		Stream:               clonePtr(r.Stream),
-		StreamOptions:        cloneStreamOptions(r.StreamOptions),
+		StreamOptions:        r.StreamOptions.Clone(),
 		Temperature:          clonePtr(r.Temperature),
-		Text:                 r.Text,
-		ToolChoice:           r.ToolChoice,
-		Tools:                r.Tools,
+		Text:                 cloneRawMessage(r.Text),
+		ToolChoice:           cloneRawMessage(r.ToolChoice),
+		Tools:                cloneRawMessage(r.Tools),
 		TopP:                 clonePtr(r.TopP),
-		Truncation:           r.Truncation,
-		User:                 r.User,
+		Truncation:           cloneRawMessage(r.Truncation),
+		User:                 cloneRawMessage(r.User),
 		MaxToolCalls:         clonePtr(r.MaxToolCalls),
-		Prompt:               r.Prompt,
-		EnableThinking:       r.EnableThinking,
-		Preset:               r.Preset,
+		Prompt:               cloneRawMessage(r.Prompt),
+		EnableThinking:       cloneRawMessage(r.EnableThinking),
+		Preset:               cloneRawMessage(r.Preset),
 		Extra:                cloneRawMessageMap(r.Extra),
 	}
-}
-
-func cloneReasoning(value *Reasoning) *Reasoning {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	cloned.Mode = cloneRawMessage(value.Mode)
-	cloned.Context = cloneRawMessage(value.Context)
-	cloned.Extra = cloneRawMessageMap(value.Extra)
-	return &cloned
-}
-
-func cloneStreamOptions(value *StreamOptions) *StreamOptions {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	cloned.Extra = cloneRawMessageMap(value.Extra)
-	return &cloned
 }
 
 func clonePtr[T any](value *T) *T {

@@ -130,12 +130,10 @@ func TestGetChannelSkipsResponsesViaChatForParsedCodexLiteNativeToolIdentity(t *
 
 	request, err := relayhelper.GetAndValidateResponsesRequest(ctx)
 	require.NoError(t, err)
-	parsed, ok := request.(*dto.OpenAIResponsesRequest)
-	require.True(t, ok)
+	parsed := request
 	require.Equal(t, "object", common.GetJsonType(parsed.Extra[codexResponsesLiteClientMetadataKey]))
 
-	info, err := relaycommon.GenRelayInfoResponses(ctx, parsed)
-	require.NoError(t, err)
+	info := relaycommon.GenRelayInfoResponses(ctx, parsed)
 	require.Nil(t, middleware.SetupContextForSelectedChannel(ctx, chatOnly, "gpt-5.5"))
 	channel, apiErr := getChannel(ctx, info, &service.RetryParam{
 		Ctx:        ctx,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -21,18 +22,16 @@ import (
 func OaiResponsesCompactionHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
-	responseBody, readErr := readResponsesNonStreamingResponseBody(c, resp.Body)
-	if readErr != nil {
-		return nil, readErr
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, newResponsesReadResponseBodyError(err)
+	}
+	if newAPIError := responsesSSETerminalError(c, responseBody, resp.StatusCode); newAPIError != nil {
+		return nil, newAPIError
 	}
 
 	var compactResp dto.OpenAIResponsesCompactionResponse
 	if err := common.Unmarshal(responseBody, &compactResp); err != nil {
-		if openAIError, found, sseErr := responsesSSETerminalError(responseBody); sseErr != nil {
-			return nil, types.NewOpenAIError(sseErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
-		} else if found {
-			return nil, newResponsesUpstreamOpenAIError(resp.StatusCode, openAIError)
-		}
 		return nil, types.NewOpenAIError(
 			fmt.Errorf("provider returned malformed compact output: invalid response body: %w", err),
 			types.ErrorCodeBadResponseBody,
@@ -40,13 +39,14 @@ func OaiResponsesCompactionHandler(c *gin.Context, info *relaycommon.RelayInfo, 
 		)
 	}
 	if oaiError := compactResp.GetOpenAIError(); responsesCompactOpenAIErrorHasContent(oaiError) {
-		return nil, newResponsesUpstreamOpenAIError(resp.StatusCode, oaiError)
+		common.SetContextKey(c, constant.ContextKeyResponsesErrorEvent, "json")
+		return nil, types.WithOpenAIError(*oaiError, responsesCompactOpenAIErrorStatus(resp.StatusCode, oaiError))
 	}
 	if err := validateResponsesCompactionOutput(compactResp.Output); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
 	}
 	opaqueContent := responsesCompactionOutputEncryptedContent(compactResp.Output)
-	responseBody, err := normalizeResponsesCompactionResponseBody(&compactResp, responseBody)
+	responseBody, err = normalizeResponsesCompactionResponseBody(&compactResp, responseBody)
 	if err != nil {
 		return nil, types.NewOpenAIError(
 			fmt.Errorf("provider returned malformed compact output: normalize response body: %w", err),
@@ -56,9 +56,6 @@ func OaiResponsesCompactionHandler(c *gin.Context, info *relaycommon.RelayInfo, 
 	}
 	if err := recordNativeOpaqueCompactionState(c, info, compactResp, opaqueContent); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError)
-	}
-	if info != nil && info.ChannelMeta != nil && !common.GetContextKeyBool(c, constant.ContextKeyResponsesEncryptedContextRetry) {
-		service.RecordResponsesEncryptedContentAffinityWithStatus(c, responseBody, info.ChannelMeta.ChannelId, resp.StatusCode)
 	}
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)

@@ -2,11 +2,13 @@ package openai
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -65,6 +67,14 @@ func buildResponsesCompatUsage(usage *dto.Usage) *dto.Usage {
 	return &copied
 }
 
+type responsesCompatReasoningState struct {
+	itemID           string
+	outputIndex      int
+	builder          strings.Builder
+	contentPartAdded bool
+	finalized        bool
+}
+
 func OaiChatToResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	return OaiChatToResponsesHandlerWithOptions(c, info, resp, service.ResponsesChatCompatibilityOptions{})
 }
@@ -81,15 +91,19 @@ func OaiChatToResponsesHandlerWithOptionsAndState(c *gin.Context, info *relaycom
 	defer service.CloseResponseBodyGracefully(resp)
 
 	var chatResp dto.OpenAITextResponse
-	body, readErr := readResponsesNonStreamingResponseBody(c, resp.Body)
-	if readErr != nil {
-		return nil, readErr
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, newResponsesReadResponseBodyError(err)
+	}
+	if newAPIError := responsesSSETerminalError(c, body, resp.StatusCode); newAPIError != nil {
+		return nil, newAPIError
 	}
 	if err := common.Unmarshal(body, &chatResp); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	if oaiError := chatResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
-		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	if oaiError := chatResp.GetOpenAIError(); responsesOpenAIErrorHasContent(oaiError) {
+		common.SetContextKey(c, constant.ContextKeyResponsesErrorEvent, "json")
+		return nil, types.WithOpenAIError(*oaiError, responsesOpenAIErrorStatus(resp.StatusCode, oaiError))
 	}
 
 	responsesID := getResponsesCompatID(c)
@@ -101,6 +115,13 @@ func OaiChatToResponsesHandlerWithOptionsAndState(c *gin.Context, info *relaycom
 		text := ""
 		if len(chatResp.Choices) > 0 {
 			text = chatResp.Choices[0].Message.StringContent()
+			reasoning := chatResp.Choices[0].Message.GetReasoningContent()
+			if reasoning != "" {
+				if text != "" {
+					text += "\n\n"
+				}
+				text += reasoning
+			}
 		}
 		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		responsesResp.Usage = buildResponsesCompatUsage(usage)
@@ -135,6 +156,7 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 
 	statusInProgress, _ := common.Marshal("in_progress")
 	statusCompleted, _ := common.Marshal("completed")
+	statusIncomplete, _ := common.Marshal("incomplete")
 
 	usage := &dto.Usage{}
 	textItemID := "msg_0"
@@ -144,8 +166,11 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 	var usageBuilder strings.Builder
 	completedOutput := make(map[int]dto.ResponsesOutput)
 	nextOutputIndex := 0
+	reasoningStates := make([]*responsesCompatReasoningState, 0, 1)
+	var activeReasoning *responsesCompatReasoningState
 	toolCalls := make(map[int]*chatToolCallState)
 	var streamErr *types.NewAPIError
+	finishReason := ""
 	responseCreatedSent := false
 	responseInProgressSent := false
 	textContentPartAdded := false
@@ -200,9 +225,140 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 		return true
 	}
 
+	finalizeReasoningState := func(state *responsesCompatReasoningState) bool {
+		if state == nil || state.finalized {
+			return true
+		}
+		if err := sendResponsesCompatRawEvent(c, "response.reasoning_text.done", map[string]any{
+			"type":         "response.reasoning_text.done",
+			"item_id":      state.itemID,
+			"output_index": state.outputIndex,
+			"text":         state.builder.String(),
+		}); err != nil {
+			streamErr = types.NewOpenAIError(fmt.Errorf("failed to emit reasoning text done event"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return false
+		}
+		if state.contentPartAdded {
+			if err := sendResponsesCompatRawEvent(c, "response.content_part.done", map[string]any{
+				"type":          "response.content_part.done",
+				"item_id":       state.itemID,
+				"output_index":  state.outputIndex,
+				"content_index": 0,
+				"part": map[string]any{
+					"type": "reasoning_text",
+					"text": state.builder.String(),
+				},
+			}); err != nil {
+				streamErr = types.NewOpenAIError(fmt.Errorf("failed to emit reasoning content part done event"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+				return false
+			}
+		}
+		if err := sendResponsesCompatEvent(c, dto.ResponsesOutputTypeItemDone, dto.ResponsesStreamResponse{
+			Item: &dto.ResponsesOutput{
+				Type:   "reasoning",
+				ID:     state.itemID,
+				Status: "completed",
+				Content: []dto.ResponsesOutputContent{{
+					Type: "reasoning_text",
+					Text: state.builder.String(),
+				}},
+			},
+			OutputIndex: common.GetPointer(state.outputIndex),
+		}); err != nil {
+			streamErr = types.NewOpenAIError(fmt.Errorf("failed to emit reasoning output item done event"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return false
+		}
+		completedOutput[state.outputIndex] = dto.ResponsesOutput{
+			Type:   "reasoning",
+			ID:     state.itemID,
+			Status: "completed",
+			Content: []dto.ResponsesOutputContent{{
+				Type: "reasoning_text",
+				Text: state.builder.String(),
+			}},
+		}
+		state.finalized = true
+		if activeReasoning == state {
+			activeReasoning = nil
+		}
+		return true
+	}
+
+	finalizeActiveReasoning := func() bool {
+		return finalizeReasoningState(activeReasoning)
+	}
+
+	sendReasoningItemAdded := func() bool {
+		if activeReasoning != nil && !activeReasoning.finalized {
+			return true
+		}
+		if !sendResponseInProgress() {
+			return false
+		}
+		state := &responsesCompatReasoningState{
+			itemID:      fmt.Sprintf("rs_%d", len(reasoningStates)),
+			outputIndex: allocateOutputIndex(),
+		}
+		reasoningStates = append(reasoningStates, state)
+		if err := sendResponsesCompatEvent(c, dto.ResponsesOutputTypeItemAdded, dto.ResponsesStreamResponse{
+			Item: &dto.ResponsesOutput{
+				Type:   "reasoning",
+				ID:     state.itemID,
+				Status: "in_progress",
+				Content: []dto.ResponsesOutputContent{{
+					Type: "reasoning_text",
+				}},
+			},
+			OutputIndex:  common.GetPointer(state.outputIndex),
+			ContentIndex: common.GetPointer(0),
+		}); err != nil {
+			streamErr = types.NewOpenAIError(fmt.Errorf("failed to emit reasoning output item added event"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return false
+		}
+		if err := sendResponsesCompatRawEvent(c, "response.content_part.added", map[string]any{
+			"type":          "response.content_part.added",
+			"item_id":       state.itemID,
+			"output_index":  state.outputIndex,
+			"content_index": 0,
+			"part": map[string]any{
+				"type": "reasoning_text",
+				"text": "",
+			},
+		}); err != nil {
+			streamErr = types.NewOpenAIError(fmt.Errorf("failed to emit reasoning content part added event"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return false
+		}
+		state.contentPartAdded = true
+		activeReasoning = state
+		return true
+	}
+
+	sendReasoningDelta := func(delta string) bool {
+		if delta == "" {
+			return true
+		}
+		if !sendReasoningItemAdded() {
+			return false
+		}
+		activeReasoning.builder.WriteString(delta)
+		usageBuilder.WriteString(delta)
+		if err := sendResponsesCompatEvent(c, "response.reasoning_text.delta", dto.ResponsesStreamResponse{
+			Delta:       delta,
+			ItemID:      activeReasoning.itemID,
+			OutputIndex: common.GetPointer(activeReasoning.outputIndex),
+		}); err != nil {
+			streamErr = types.NewOpenAIError(fmt.Errorf("failed to emit reasoning text delta event"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return false
+		}
+		return true
+	}
+
 	sendTextItemAdded := func() bool {
 		if textAdded {
 			return true
+		}
+		if !finalizeActiveReasoning() {
+			return false
 		}
 		if !sendResponseInProgress() {
 			return false
@@ -252,6 +408,9 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 		}
 		if strings.TrimSpace(state.name) == "" {
 			return true
+		}
+		if !finalizeActiveReasoning() {
+			return false
 		}
 		if !sendResponseInProgress() {
 			return false
@@ -576,6 +735,17 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 			return
 		}
 
+		var errorResp dto.OpenAITextResponse
+		if err := common.UnmarshalJsonStr(data, &errorResp); err == nil {
+			if oaiError := errorResp.GetOpenAIError(); responsesOpenAIErrorHasContent(oaiError) {
+				common.SetContextKey(c, constant.ContextKeyResponsesErrorEvent, "sse")
+				statusCode := responsesViaChatStreamErrorStatus(resp.StatusCode, oaiError, c.Writer.Written())
+				streamErr = types.WithOpenAIError(*oaiError, statusCode)
+				sr.Stop(streamErr)
+				return
+			}
+		}
+
 		var chunk dto.ChatCompletionsStreamResponse
 		if err := common.UnmarshalJsonStr(data, &chunk); err != nil {
 			logger.LogError(c, "failed to unmarshal chat stream event: "+err.Error())
@@ -601,6 +771,13 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 		if choice.Delta.Role != "" {
 			if !sendResponseInProgress() {
 				sr.Stop(streamErr)
+			}
+		}
+
+		if reasoningDelta := choice.Delta.GetReasoningContent(); reasoningDelta != "" {
+			if !sendReasoningDelta(reasoningDelta) {
+				sr.Stop(streamErr)
+				return
 			}
 		}
 
@@ -718,6 +895,7 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 		}
 
 		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			finishReason = strings.TrimSpace(*choice.FinishReason)
 			if !sendResponseInProgress() {
 				sr.Stop(streamErr)
 				return
@@ -728,6 +906,9 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 	if streamErr != nil {
 		return nil, streamErr
 	}
+	if streamErr := responsesViaChatStreamInterruptedError(c, info); streamErr != nil {
+		return nil, streamErr
+	}
 
 	if usage == nil || usage.TotalTokens == 0 {
 		usage = buildResponsesCompatUsage(service.ResponseText2Usage(c, usageBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens()))
@@ -735,6 +916,11 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 
 	if !sendResponseInProgress() {
 		return nil, streamErr
+	}
+	for _, state := range reasoningStates {
+		if !finalizeReasoningState(state) {
+			return nil, streamErr
+		}
 	}
 	if !finalizeTextItem() {
 		return nil, streamErr
@@ -755,15 +941,29 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 		orderedOutput = append(orderedOutput, output)
 	}
 
-	err := sendResponsesCompatEvent(c, "response.completed", dto.ResponsesStreamResponse{
+	terminalEventType := "response.completed"
+	terminalStatus := statusCompleted
+	var incompleteDetails *dto.IncompleteDetails
+	switch strings.ToLower(finishReason) {
+	case "length":
+		terminalEventType = "response.incomplete"
+		terminalStatus = statusIncomplete
+		incompleteDetails = &dto.IncompleteDetails{Reason: "max_output_tokens"}
+	case "content_filter":
+		terminalEventType = "response.incomplete"
+		terminalStatus = statusIncomplete
+		incompleteDetails = &dto.IncompleteDetails{Reason: "content_filter"}
+	}
+	err := sendResponsesCompatEvent(c, terminalEventType, dto.ResponsesStreamResponse{
 		Response: &dto.OpenAIResponsesResponse{
-			ID:        responseID,
-			Object:    "response",
-			CreatedAt: createdAt,
-			Status:    statusCompleted,
-			Model:     model,
-			Output:    orderedOutput,
-			Usage:     buildResponsesCompatUsage(usage),
+			ID:                responseID,
+			Object:            "response",
+			CreatedAt:         createdAt,
+			Status:            terminalStatus,
+			IncompleteDetails: incompleteDetails,
+			Model:             model,
+			Output:            orderedOutput,
+			Usage:             buildResponsesCompatUsage(usage),
 		},
 	})
 	if err != nil {
@@ -771,4 +971,31 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 	}
 
 	return usage, nil
+}
+
+func responsesViaChatStreamErrorStatus(upstreamStatus int, openAIError *types.OpenAIError, downstreamStarted bool) int {
+	if downstreamStarted {
+		return upstreamStatus
+	}
+	return responsesOpenAIErrorStatus(upstreamStatus, openAIError)
+}
+
+func responsesViaChatStreamInterruptedError(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
+	if retryable := retryableUpstreamStreamInterruptedError(c, info); retryable != nil {
+		return retryable
+	}
+	if info == nil || info.StreamStatus == nil ||
+		info.StreamStatus.EndReason != relaycommon.StreamEndReasonUpstreamInterrupted {
+		return nil
+	}
+	err := info.StreamStatus.EndError
+	if err == nil {
+		err = io.ErrUnexpectedEOF
+	}
+	return types.NewOpenAIError(
+		err,
+		types.ErrorCodeUpstreamTransportInterrupted,
+		http.StatusBadGateway,
+		types.ErrOptionWithSkipRetry(),
+	)
 }

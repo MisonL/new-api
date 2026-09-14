@@ -11,6 +11,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ErrOpaqueResponsesTieredBillingUnsupported is returned before evaluating a
+// tiered billing expression for an opaque encrypted Responses replay. The
+// request body is intentionally kept on disk and cannot be decoded or
+// re-marshaled safely, so expressions that inspect body parameters must not
+// run against an incomplete input snapshot.
 var ErrOpaqueResponsesTieredBillingUnsupported = errors.New("tiered expression billing is unsupported for opaque encrypted Responses replay")
 
 func ResolveIncomingBillingExprRequestInput(c *gin.Context, info *relaycommon.RelayInfo) (billingexpr.RequestInput, error) {
@@ -22,17 +27,28 @@ func ResolveIncomingBillingExprRequestInput(c *gin.Context, info *relaycommon.Re
 	}
 	if info != nil && info.BillingRequestInput != nil {
 		input := cloneRequestInput(*info.BillingRequestInput)
-		merged := cloneStringMap(info.RequestHeaders)
-		for k, v := range input.Headers {
-			merged[k] = v
+		baseHeaders, err := billingexpr.NormalizeHeaders(info.RequestHeaders)
+		if err != nil {
+			return billingexpr.RequestInput{}, err
 		}
-		input.Headers = merged
+		overrideHeaders, err := billingexpr.NormalizeHeaders(input.Headers)
+		if err != nil {
+			return billingexpr.RequestInput{}, err
+		}
+		for k, v := range overrideHeaders {
+			baseHeaders[k] = v
+		}
+		input.Headers = baseHeaders
 		return input, nil
 	}
 
 	input := billingexpr.RequestInput{}
 	if info != nil {
-		input.Headers = cloneStringMap(info.RequestHeaders)
+		var err error
+		input.Headers, err = billingexpr.NormalizeHeaders(info.RequestHeaders)
+		if err != nil {
+			return billingexpr.RequestInput{}, err
+		}
 	}
 
 	bodyBytes, err := readIncomingBillingExprBody(c)

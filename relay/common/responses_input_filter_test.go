@@ -2,7 +2,6 @@ package common
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	rootcommon "github.com/QuantumNous/new-api/common"
@@ -18,7 +17,112 @@ func TestStripEncryptedReasoningFromResponsesInputKeepsPlainInput(t *testing.T) 
 	require.Zero(t, result.RemainingCount)
 }
 
-func TestNormalizeResponsesInputItemIDsRemovesOnlyInvalidConstrainedIDs(t *testing.T) {
+func TestResponsesInputHasOpaqueEncryptedContentRecursively(t *testing.T) {
+	tests := []struct {
+		name  string
+		input rootcommon.RawMessage
+		want  bool
+	}{
+		{
+			name:  "plain input",
+			input: rootcommon.RawMessage(`[{"type":"message","content":[{"type":"input_text","text":"continue"}]}]`),
+		},
+		{
+			name:  "null encrypted content",
+			input: rootcommon.RawMessage(`[{"type":"reasoning","encrypted_content":null}]`),
+		},
+		{
+			name:  "empty encrypted content",
+			input: rootcommon.RawMessage(`[{"type":"reasoning","encrypted_content":"   "}]`),
+		},
+		{
+			name:  "local synthetic compact marker",
+			input: rootcommon.RawMessage(`[{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:n1:resp_local"}]`),
+		},
+		{
+			name:  "top level opaque reasoning",
+			input: rootcommon.RawMessage(`[{"type":"reasoning","encrypted_content":"opaque-reasoning-state"}]`),
+			want:  true,
+		},
+		{
+			name:  "nested opaque agent content",
+			input: rootcommon.RawMessage(`[{"type":"agent_message","content":[{"type":"encrypted_content","encrypted_content":"opaque-agent-state"}]}]`),
+			want:  true,
+		},
+		{
+			name:  "future nested opaque field",
+			input: rootcommon.RawMessage(`[{"type":"future_item","future":{"payload":[{"encrypted_content":"opaque-future-state"}]}}]`),
+			want:  false,
+		},
+		{
+			name:  "nested opaque tool output",
+			input: rootcommon.RawMessage(`[{"type":"function_call_output","output":[{"type":"encrypted_content","encrypted_content":"opaque-tool-state"}]}]`),
+			want:  true,
+		},
+		{
+			name:  "non string encrypted content",
+			input: rootcommon.RawMessage(`[{"type":"reasoning","encrypted_content":{"opaque":true}}]`),
+			want:  true,
+		},
+		{
+			name:  "similarly named field",
+			input: rootcommon.RawMessage(`[{"type":"message","not_encrypted_content":"opaque-looking-text"}]`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResponsesInputHasOpaqueEncryptedContent(tt.input)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestResponsesInputHasOpaqueEncryptedContentIgnoresUnknownNestedFields(t *testing.T) {
+	input := rootcommon.RawMessage(`[{
+		"type":"future_item",
+		"metadata":{"encrypted_content":"opaque-future-state"}
+	}]`)
+
+	got, err := ResponsesInputHasOpaqueEncryptedContent(input)
+
+	require.NoError(t, err)
+	require.False(t, got)
+}
+
+func TestResponsesInputHasOpaqueEncryptedContentTreatsEmptyInputAsAbsent(t *testing.T) {
+	tests := []struct {
+		name  string
+		input rootcommon.RawMessage
+	}{
+		{
+			name: "nil input",
+		},
+		{
+			name:  "whitespace input",
+			input: rootcommon.RawMessage(" \n\t"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResponsesInputHasOpaqueEncryptedContent(tt.input)
+
+			require.NoError(t, err)
+			require.False(t, got)
+		})
+	}
+}
+
+func TestResponsesInputHasOpaqueEncryptedContentRejectsMalformedInput(t *testing.T) {
+	got, err := ResponsesInputHasOpaqueEncryptedContent(rootcommon.RawMessage(`[{"encrypted_content":"opaque"}`))
+
+	require.Error(t, err)
+	require.False(t, got)
+}
+
+func TestNormalizeResponsesInputItemIDsRemovesOnlyConstrainedIDs(t *testing.T) {
 	input := rootcommon.RawMessage(`[
 		{"type":"function_call","id":"item_function","call_id":"call_1","name":"exec","arguments":"{}"},
 		{"type":"message","id":"item_message","role":"assistant","content":[]},
@@ -37,10 +141,12 @@ func TestNormalizeResponsesInputItemIDsRemovesOnlyInvalidConstrainedIDs(t *testi
 	var items []map[string]any
 	require.NoError(t, rootcommon.Unmarshal(got, &items))
 	require.Len(t, items, 8)
-	for _, index := range []int{0, 1, 2} {
-		_, hasID := items[index]["id"]
-		require.False(t, hasID)
-	}
+	_, functionHasID := items[0]["id"]
+	_, messageHasID := items[1]["id"]
+	_, reasoningHasID := items[2]["id"]
+	require.False(t, functionHasID)
+	require.False(t, messageHasID)
+	require.False(t, reasoningHasID)
 	require.Equal(t, "call_1", items[0]["call_id"])
 	require.Equal(t, "fc_valid", items[3]["id"])
 	require.Equal(t, "msg_valid", items[4]["id"])
@@ -49,7 +155,28 @@ func TestNormalizeResponsesInputItemIDsRemovesOnlyInvalidConstrainedIDs(t *testi
 	require.Equal(t, "ws_valid", items[7]["id"])
 }
 
-func TestNormalizeResponsesInputItemIDsUsesCodexItemTypePrefixes(t *testing.T) {
+func TestNormalizeResponsesInputItemIDsPreservesOpaqueReplayIDs(t *testing.T) {
+	input := rootcommon.RawMessage(`[
+		{"type":"reasoning","id":"client-reasoning-id","encrypted_content":"opaque-state"},
+		{"type":"compaction","id":"client-compaction-id","encrypted_content":"opaque-state"},
+		{"type":"function_call","id":"invalid-function-id","call_id":"call_1","name":"exec","arguments":"{}"},
+		{"type":"message","id":"msg_valid","role":"user","content":[]}
+	]`)
+
+	got, result, err := NormalizeResponsesInputItemIDs(input)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.RemovedCount)
+
+	var items []map[string]any
+	require.NoError(t, rootcommon.Unmarshal(got, &items))
+	require.Equal(t, "client-reasoning-id", items[0]["id"])
+	require.Equal(t, "client-compaction-id", items[1]["id"])
+	_, hasFunctionID := items[2]["id"]
+	require.False(t, hasFunctionID)
+	require.Equal(t, "msg_valid", items[3]["id"])
+}
+
+func TestNormalizeResponsesInputItemIDsRemovesOnlyExplicitlyInvalidPrefixes(t *testing.T) {
 	tests := []struct {
 		itemType string
 		id       string
@@ -63,9 +190,9 @@ func TestNormalizeResponsesInputItemIDsUsesCodexItemTypePrefixes(t *testing.T) {
 		{itemType: "function_call", id: "fc_1", keep: true},
 		{itemType: "tool_call", id: "fc_legacy", keep: true},
 		{itemType: "mcp_tool_call", id: "fc_mcp_legacy", keep: true},
-		{itemType: "tool_search_call", id: "tsc_1", keep: true},
+		{itemType: "tool_search_call", id: "tsc_search_1", keep: true},
 		{itemType: "function_call_output", id: "fco_1", keep: true},
-		{itemType: "custom_tool_call", id: "ctc_1", keep: true},
+		{itemType: "custom_tool_call", id: "ctc_custom_1", keep: true},
 		{itemType: "custom_tool_call_output", id: "ctco_1", keep: true},
 		{itemType: "tool_search_output", id: "tso_1", keep: true},
 		{itemType: "web_search_call", id: "ws_1", keep: true},
@@ -73,10 +200,13 @@ func TestNormalizeResponsesInputItemIDsUsesCodexItemTypePrefixes(t *testing.T) {
 		{itemType: "compaction", id: "cmp_1", keep: true},
 		{itemType: "context_compaction", id: "cmp_2", keep: true},
 		{itemType: "compaction_summary", id: "cmp_3", keep: true},
+		{itemType: "shell_call", id: "sc_future", keep: true},
+		{itemType: "mcp_call", id: "mcp_future", keep: true},
+		{itemType: "unknown_item", id: "future_prefix_value", keep: true},
 		{itemType: "function_call", id: "", keep: false},
 		{itemType: "function_call", id: "fc_", keep: false},
-		{itemType: "function_call", id: "fc1", keep: false},
-		{itemType: "tool_search_call", id: "fc_wrong", keep: false},
+		{itemType: "function_call", id: "item_wrong", keep: false},
+		{itemType: "tool_search_call", id: "item_wrong", keep: false},
 		{itemType: "custom_tool_call_output", id: "ctc_wrong", keep: false},
 		{itemType: "unknown_item", id: "legacy_id", keep: true},
 	}
@@ -94,7 +224,13 @@ func TestNormalizeResponsesInputItemIDsUsesCodexItemTypePrefixes(t *testing.T) {
 
 	got, result, err := NormalizeResponsesInputItemIDs(rawInput)
 	require.NoError(t, err)
-	require.Equal(t, 5, result.RemovedCount)
+	removedCount := 0
+	for _, tc := range tests {
+		if !tc.keep {
+			removedCount++
+		}
+	}
+	require.Equal(t, removedCount, result.RemovedCount)
 
 	var gotItems []map[string]any
 	require.NoError(t, rootcommon.Unmarshal(got, &gotItems))
@@ -106,6 +242,158 @@ func TestNormalizeResponsesInputItemIDsUsesCodexItemTypePrefixes(t *testing.T) {
 			require.Equal(t, "call_stable", gotItems[index]["call_id"])
 		}
 	}
+}
+
+func TestNormalizeResponsesInputItemIDsPreservesOutputAndUnconstrainedIDs(t *testing.T) {
+	input := rootcommon.RawMessage(`[
+		{"type":"function_call_output","id":"fco_1","call_id":"call_1","output":"done"},
+		{"type":"custom_tool_call_output","id":"ctco_legacy","call_id":"call_2","output":"done"},
+		{"type":"tool_search_output","id":"tso_001","call_id":"call_3","status":"completed"},
+		{"type":"web_search_call","id":"ws_search","status":"completed"},
+		{"type":"reasoning","id":"rs_reasoning","summary":[]}
+	]`)
+
+	got, result, err := NormalizeResponsesInputItemIDs(input)
+
+	require.NoError(t, err)
+	require.Zero(t, result.RemovedCount)
+	require.JSONEq(t, string(input), string(got))
+}
+
+func TestNormalizeResponsesInputItemIDsUsesCodexInputPrefixes(t *testing.T) {
+	tests := []struct {
+		itemType string
+		prefix   string
+	}{
+		{itemType: "message", prefix: "msg"},
+		{itemType: "additional_tools", prefix: "at"},
+		{itemType: "agent_message", prefix: "amsg"},
+		{itemType: "reasoning", prefix: "rs"},
+		{itemType: "local_shell_call", prefix: "lsh"},
+		{itemType: "function_call", prefix: "fc"},
+		{itemType: "tool_call", prefix: "fc"},
+		{itemType: "mcp_tool_call", prefix: "fc"},
+		{itemType: "tool_search_call", prefix: "tsc"},
+		{itemType: "function_call_output", prefix: "fco"},
+		{itemType: "custom_tool_call", prefix: "ctc"},
+		{itemType: "custom_tool_call_output", prefix: "ctco"},
+		{itemType: "tool_search_output", prefix: "tso"},
+		{itemType: "web_search_call", prefix: "ws"},
+		{itemType: "image_generation_call", prefix: "ig"},
+		{itemType: "compaction", prefix: "cmp"},
+		{itemType: "context_compaction", prefix: "cmp"},
+		{itemType: "compaction_summary", prefix: "cmp"},
+	}
+
+	inputItems := make([]map[string]any, 0, len(tests)*2)
+	for _, tc := range tests {
+		inputItems = append(inputItems,
+			map[string]any{"type": tc.itemType, "id": tc.prefix + "_valid"},
+			map[string]any{"type": tc.itemType, "id": "item_wrong"},
+		)
+	}
+	rawInput, err := rootcommon.Marshal(inputItems)
+	require.NoError(t, err)
+
+	got, result, err := NormalizeResponsesInputItemIDs(rawInput)
+	require.NoError(t, err)
+	require.Equal(t, len(tests), result.RemovedCount)
+
+	var items []map[string]any
+	require.NoError(t, rootcommon.Unmarshal(got, &items))
+	require.Len(t, items, len(inputItems))
+	for index, tc := range tests {
+		validItem := items[index*2]
+		invalidItem := items[index*2+1]
+		require.Equal(t, tc.prefix+"_valid", validItem["id"], tc.itemType)
+		_, invalidHasID := invalidItem["id"]
+		require.False(t, invalidHasID, tc.itemType)
+	}
+}
+
+func TestNormalizeResponsesInputItemIDsPreservesNonStringIDsAndCallPairs(t *testing.T) {
+	input := rootcommon.RawMessage(`[
+		{"type":"function_call","id":null,"call_id":"call_null","name":"exec","arguments":"{}"},
+		{"type":"function_call_output","id":42,"call_id":"call_number","output":"ok"},
+		{"type":"custom_tool_call","id":{},"call_id":"call_object","name":"exec","input":"{}"},
+		{"type":"tool_search_call","id":"TSC_wrong_case","call_id":"call_search","execution":"client","arguments":{}},
+		{"type":"message","id":" msg_1 ","role":"user","content":[]},
+		{"type":"unknown_future_item","id":42,"call_id":"call_future"}
+	]`)
+
+	got, result, err := NormalizeResponsesInputItemIDs(input)
+	require.NoError(t, err)
+	require.Equal(t, 5, result.RemovedCount)
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, rootcommon.Unmarshal(got, &items))
+	require.Len(t, items, 6)
+	for _, index := range []int{0, 1, 2, 3, 4} {
+		_, hasID := items[index]["id"]
+		require.False(t, hasID, "item index %d still has an invalid id", index)
+	}
+	require.Equal(t, `"call_null"`, string(items[0]["call_id"]))
+	require.Equal(t, `"call_number"`, string(items[1]["call_id"]))
+	require.Equal(t, `"call_object"`, string(items[2]["call_id"]))
+	require.Equal(t, `"call_search"`, string(items[3]["call_id"]))
+	require.Equal(t, `"call_future"`, string(items[5]["call_id"]))
+	require.Equal(t, `42`, string(items[5]["id"]))
+}
+
+func TestNormalizeResponsesInputItemIDsPreservesIDsForUnknownTypes(t *testing.T) {
+	input := rootcommon.RawMessage(`[
+		{"type":"future_item","id":"rs_future"},
+		{"type":"future_item","id":"legacy"},
+		{"type":"future_item","id":42},
+		{"type":"compaction_trigger","id":"cmp_trigger"},
+		{"type":"other","id":"other_id"},
+		{"type":"other","id":"future_prefix_value"}
+	]`)
+
+	got, result, err := NormalizeResponsesInputItemIDs(input)
+	require.NoError(t, err)
+	require.Zero(t, result.RemovedCount)
+	require.JSONEq(t, string(input), string(got))
+}
+
+func TestNormalizeResponsesInputItemIDsKeepsMsgPrefixRegardlessOfSuffix(t *testing.T) {
+	input := rootcommon.RawMessage(`[
+		{"type":"message","id":"MSG_1","role":"user","content":[]},
+		{"type":"message","id":"msg_1","role":"user","content":[]},
+		{"type":"message","id":"msg_","role":"user","content":[]},
+		{"type":"message","id":"msg_1_extra","role":"user","content":[]}
+	]`)
+
+	got, result, err := NormalizeResponsesInputItemIDs(input)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.RemovedCount)
+
+	var items []map[string]json.RawMessage
+	require.NoError(t, rootcommon.Unmarshal(got, &items))
+	require.Len(t, items, 4)
+	_, firstHasID := items[0]["id"]
+	_, secondHasID := items[1]["id"]
+	_, thirdHasID := items[2]["id"]
+	_, fourthHasID := items[3]["id"]
+	require.False(t, firstHasID)
+	require.True(t, secondHasID)
+	require.False(t, thirdHasID)
+	require.True(t, fourthHasID)
+}
+
+func TestNormalizeResponsesInputItemIDsKeepsFutureItemWithGenericPrefix(t *testing.T) {
+	input := rootcommon.RawMessage(`[
+		{"type":"shell_call","id":"sc_future"},
+		{"type":"apply_patch_call","id":"ap_future"},
+		{"type":"mcp_call","id":"mcp_future"},
+		{"type":"multi_agent_call_output","id":"ma_future"},
+		{"type":"future_item","id":"server_future"}
+	]`)
+
+	got, result, err := NormalizeResponsesInputItemIDs(input)
+	require.NoError(t, err)
+	require.Zero(t, result.RemovedCount)
+	require.JSONEq(t, string(input), string(got))
 }
 
 func TestNormalizeResponsesInputItemIDsKeepsUnchangedInput(t *testing.T) {
@@ -121,6 +409,40 @@ func TestNormalizeResponsesInputItemIDsKeepsUnchangedInput(t *testing.T) {
 		require.Zero(t, result.RemovedCount)
 		require.Equal(t, json.RawMessage(input), got)
 	}
+}
+
+func TestResponsesRequestHasFunctionToolsIncludesLoadedToolSearchTools(t *testing.T) {
+	request := &dto.OpenAIResponsesRequest{
+		Input: rootcommon.RawMessage(`[
+			{"type":"tool_search_call","call_id":"call_search","execution":"client","arguments":"{\"query\":\"deploy\"}"},
+			{"type":"tool_search_output","call_id":"call_search","status":"completed","execution":"client","tools":[
+				{"type":"function","name":"loaded_deploy","parameters":{"type":"object"}}
+			]}
+		]`),
+	}
+
+	hasFunctionTools, err := ResponsesRequestHasFunctionTools(request)
+
+	require.NoError(t, err)
+	require.True(t, hasFunctionTools)
+}
+
+func TestResponsesRequestHasNamespaceToolsIncludesOfficialLoadedToolSearchNamespace(t *testing.T) {
+	request := &dto.OpenAIResponsesRequest{
+		Input: rootcommon.RawMessage(`[
+			{"type":"tool_search_call","id":"tsc_search","call_id":"call_search","execution":"client","arguments":"{\"query\":\"calendar\"}"},
+			{"type":"tool_search_output","id":"tso_search","call_id":"call_search","status":"completed","execution":"client","tools":[
+				{"type":"namespace","name":"mcp__calendar","tools":[
+					{"type":"function","name":"create_event","defer_loading":true,"parameters":{"type":"object"}}
+				]}
+			]}
+		]`),
+	}
+
+	hasNamespaceTools, err := ResponsesRequestHasNamespaceTools(request)
+
+	require.NoError(t, err)
+	require.True(t, hasNamespaceTools)
 }
 
 func TestStripResponsesReasoningContextPreservesOtherReasoningFields(t *testing.T) {
@@ -231,16 +553,14 @@ func TestNormalizeContextCompactionForResponsesRequestConvertsSyntheticAndDropsE
 	req := dto.OpenAIResponsesRequest{
 		Model: "gpt-5.6-sol",
 		Input: rootcommon.RawMessage(`[
-			{"type":"context_compaction","encrypted_content":"newapi.synthetic.compact:v2:n0123456789abcdef0123456789abcdef:resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_0123456789abcdef0123456789abcdef"},
+			{"type":"context_compaction","encrypted_content":"newapi.synthetic.compact:v2:n1:resp_context"},
 			{"type":"context_compaction"},
-			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:nfedcba9876543210fedcba9876543210:resp_newapi_synthcmp_nfedcba9876543210fedcba9876543210_fedcba9876543210fedcba9876543210"},
+			{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:n2:resp_native"},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 		]`),
 	}
 
-	got, result, err := NormalizeContextCompactionForResponsesRequestWithMarkerValidator(req, func(marker string) (bool, error) {
-		return strings.HasPrefix(marker, "newapi.synthetic.compact:"), nil
-	})
+	got, result, err := NormalizeContextCompactionForResponsesRequest(req)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, result.ConvertedCount)
@@ -248,8 +568,8 @@ func TestNormalizeContextCompactionForResponsesRequestConvertsSyntheticAndDropsE
 	require.Equal(t, 3, result.RemainingCount)
 	require.NotContains(t, string(got.Input), `"type":"context_compaction"`)
 	require.JSONEq(t, `[
-		{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:n0123456789abcdef0123456789abcdef:resp_newapi_synthcmp_n0123456789abcdef0123456789abcdef_0123456789abcdef0123456789abcdef"},
-		{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:nfedcba9876543210fedcba9876543210:resp_newapi_synthcmp_nfedcba9876543210fedcba9876543210_fedcba9876543210fedcba9876543210"},
+		{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:n1:resp_context"},
+		{"type":"compaction","encrypted_content":"newapi.synthetic.compact:v2:n2:resp_native"},
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
 	]`, string(got.Input))
 }
@@ -863,6 +1183,11 @@ func TestResponsesRequestHasToolSearch(t *testing.T) {
 		request *dto.OpenAIResponsesRequest
 		want    bool
 	}{
+		{
+			name:    "top level declaration",
+			request: &dto.OpenAIResponsesRequest{Tools: rootcommon.RawMessage(`[{"type":"tool_search","execution":"client"}]`)},
+			want:    true,
+		},
 		{
 			name: "additional tools declaration",
 			request: &dto.OpenAIResponsesRequest{Input: rootcommon.RawMessage(`[

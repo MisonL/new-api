@@ -10,12 +10,19 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 )
+
+// ErrProtocolConversionUnsupported identifies a request/response conversion
+// that cannot be represented faithfully by the selected protocol. Callers
+// should surface this as a client error instead of retrying or forwarding a
+// payload using a different schema.
+var ErrProtocolConversionUnsupported = errors.New("protocol conversion unsupported")
 
 func MidjourneyErrorWrapper(code int, desc string) *dto.MidjourneyResponse {
 	return &dto.MidjourneyResponse{
@@ -59,11 +66,14 @@ func MidjourneyErrorWithStatusCodeWrapper(code int, desc string, statusCode int)
 //}
 
 func ClaudeErrorWrapper(err error, code string, statusCode int) *dto.ClaudeErrorWithStatusCode {
-	text := err.Error()
+	if err == nil {
+		err = errors.New("upstream request failed")
+	}
+	text := common.MaskSensitiveInfo(err.Error())
 	lowerText := strings.ToLower(text)
 	if !strings.HasPrefix(lowerText, "get file base64 from url") {
 		if strings.Contains(lowerText, "post") || strings.Contains(lowerText, "dial") || strings.Contains(lowerText, "http") {
-			common.SysLog(fmt.Sprintf("error: %s", text))
+			common.SysLog(fmt.Sprintf("error: %s", common.LocalLogPreview(text)))
 			text = "请求上游地址失败"
 		}
 	}
@@ -84,6 +94,19 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 }
 
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
+	if resp == nil {
+		return types.NewOpenAIError(
+			errors.New("upstream response is nil"),
+			types.ErrorCodeEmptyResponse,
+			http.StatusBadGateway,
+		)
+	}
+	retryAfterSeconds := parseRetryAfterSeconds(resp)
+	defer func() {
+		if newApiErr != nil {
+			newApiErr.RetryAfterSeconds = retryAfterSeconds
+		}
+	}()
 	statusErrorCode := types.ErrorCodeBadResponseStatusCode
 	if code, ok := types.UpstreamHTTPStatusErrorCode(resp.StatusCode); ok {
 		statusErrorCode = code
@@ -91,19 +114,29 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 	statusMessage := types.UpstreamHTTPStatusErrorMessage(statusErrorCode, resp.StatusCode)
 	newApiErr = types.InitOpenAIError(statusErrorCode, resp.StatusCode)
 
+	if resp.Body == nil {
+		newApiErr = types.NewOpenAIError(
+			fmt.Errorf("upstream response body is nil (status %d)", resp.StatusCode),
+			types.ErrorCodeEmptyResponse,
+			resp.StatusCode,
+		)
+		return
+	}
+	defer CloseResponseBodyGracefully(resp)
+
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return
 	}
-	CloseResponseBodyGracefully(resp)
 	var errResponse dto.GeneralErrorResponse
 	responseBodyText := string(responseBody)
-	responseBodyPreview := common.LocalLogPreview(responseBodyText)
+	responseBodyPreview := common.LocalLogPreview(common.MaskSensitiveInfo(responseBodyText))
 	buildErrWithBody := func(message string) error {
+		message = common.LocalLogPreview(common.MaskSensitiveInfo(message))
 		if message == "" {
-			return fmt.Errorf("%s, body: %s", statusMessage, responseBodyText)
+			return fmt.Errorf("%s, body: %s", statusMessage, responseBodyPreview)
 		}
-		return fmt.Errorf("%s, message: %s, body: %s", statusMessage, message, responseBodyText)
+		return fmt.Errorf("%s, message: %s, body: %s", statusMessage, message, responseBodyPreview)
 	}
 
 	err = common.Unmarshal(responseBody, &errResponse)
@@ -140,6 +173,29 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		newApiErr.Err = buildErrWithBody(newApiErr.Error())
 	}
 	return
+}
+
+func parseRetryAfterSeconds(resp *http.Response) int {
+	if resp == nil || resp.Header == nil {
+		return 0
+	}
+	value := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+		return seconds
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		remaining := time.Until(retryAt)
+		if remaining > 0 {
+			seconds := int((remaining + time.Second - 1) / time.Second)
+			if seconds > 0 {
+				return seconds
+			}
+		}
+	}
+	return 0
 }
 
 func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) {
@@ -206,12 +262,13 @@ func TaskErrorWrapperLocal(err error, code string, statusCode int) *dto.TaskErro
 }
 
 func TaskErrorWrapper(err error, code string, statusCode int) *dto.TaskError {
-	text := err.Error()
+	if err == nil {
+		err = errors.New("task request failed")
+	}
+	text := common.MaskSensitiveInfo(err.Error())
 	lowerText := strings.ToLower(text)
 	if strings.Contains(lowerText, "post") || strings.Contains(lowerText, "dial") || strings.Contains(lowerText, "http") {
-		common.SysLog(fmt.Sprintf("error: %s", text))
-		//text = "请求上游地址失败"
-		text = common.MaskSensitiveInfo(text)
+		common.SysLog(fmt.Sprintf("error: %s", common.LocalLogPreview(text)))
 	}
 	//避免暴露内部错误
 	taskError := &dto.TaskError{
@@ -231,7 +288,7 @@ func TaskErrorFromAPIError(apiErr *types.NewAPIError) *dto.TaskError {
 	}
 	return &dto.TaskError{
 		Code:       string(apiErr.GetErrorCode()),
-		Message:    apiErr.Err.Error(),
+		Message:    common.MaskSensitiveInfo(apiErr.Error()),
 		StatusCode: apiErr.StatusCode,
 		Error:      apiErr.Err,
 	}

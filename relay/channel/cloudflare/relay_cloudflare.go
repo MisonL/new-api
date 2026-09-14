@@ -3,12 +3,14 @@ package cloudflare
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -18,14 +20,42 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func convertCf2CompletionsRequest(textRequest dto.GeneralOpenAIRequest) *CfRequest {
-	p, _ := textRequest.Prompt.(string)
+func convertCf2CompletionsRequest(textRequest dto.GeneralOpenAIRequest) (*CfRequest, error) {
+	if err := channel.RejectUnsupportedTextRequestFields(textRequest, "Cloudflare Completions"); err != nil {
+		return nil, err
+	}
+	if len(textRequest.Messages) > 0 {
+		return nil, fmt.Errorf("messages are not supported by Cloudflare Completions; use prompt")
+	}
+	if textRequest.TopP != nil || textRequest.TopK != nil || textRequest.FrequencyPenalty != nil ||
+		textRequest.PresencePenalty != nil || textRequest.N != nil || textRequest.Stop != nil ||
+		textRequest.StreamOptions != nil || len(textRequest.ExtraBody) > 0 {
+		return nil, fmt.Errorf("request contains options that are not supported by Cloudflare Completions")
+	}
+	var prompt string
+	switch value := textRequest.Prompt.(type) {
+	case string:
+		prompt = value
+	case []any:
+		if len(value) != 1 {
+			return nil, fmt.Errorf("prompt must be a single string for Cloudflare Completions")
+		}
+		var ok bool
+		prompt, ok = value[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("prompt[0] must be a string for Cloudflare Completions")
+		}
+	case nil:
+		return nil, fmt.Errorf("prompt is required for Cloudflare Completions")
+	default:
+		return nil, fmt.Errorf("prompt must be a string for Cloudflare Completions")
+	}
 	return &CfRequest{
-		Prompt:      p,
+		Prompt:      prompt,
 		MaxTokens:   textRequest.GetMaxTokens(),
 		Stream:      lo.FromPtrOr(textRequest.Stream, false),
 		Temperature: textRequest.Temperature,
-	}
+	}, nil
 }
 
 func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*types.NewAPIError, *dto.Usage) {

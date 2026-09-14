@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -26,7 +27,15 @@ import (
 
 var baiduTokenStore sync.Map
 
-func requestOpenAI2Baidu(request dto.GeneralOpenAIRequest) *BaiduChatRequest {
+func requestOpenAI2Baidu(request dto.GeneralOpenAIRequest) (*BaiduChatRequest, error) {
+	if err := channel.RejectUnsupportedTextRequestFields(request, "Baidu Chat"); err != nil {
+		return nil, err
+	}
+	if request.TopK != nil || request.PresencePenalty != nil || request.Stop != nil || request.N != nil ||
+		request.Seed != nil || request.StreamOptions != nil || len(request.ExtraBody) > 0 || len(request.WebSearch) > 0 ||
+		len(request.EnableSearch) > 0 {
+		return nil, fmt.Errorf("request contains options that are not supported by Baidu Chat")
+	}
 	baiduRequest := BaiduChatRequest{
 		Temperature:    request.Temperature,
 		TopP:           lo.FromPtrOr(request.TopP, 0),
@@ -43,17 +52,31 @@ func requestOpenAI2Baidu(request dto.GeneralOpenAIRequest) *BaiduChatRequest {
 		}
 		baiduRequest.MaxOutputTokens = &maxTokens
 	}
-	for _, message := range request.Messages {
-		if message.Role == "system" {
-			baiduRequest.System = message.StringContent()
-		} else {
-			baiduRequest.Messages = append(baiduRequest.Messages, BaiduMessage{
-				Role:    message.Role,
-				Content: message.StringContent(),
-			})
-		}
+	roles := map[string]string{
+		"system":    "system",
+		"developer": "system",
+		"user":      "user",
+		"assistant": "assistant",
 	}
-	return &baiduRequest
+	seenConversation := false
+	var systemParts []string
+	for messageIndex, message := range request.Messages {
+		role, text, err := channel.OpenAIMessageRoleText(message, "Baidu Chat", roles)
+		if err != nil {
+			return nil, fmt.Errorf("messages[%d]: %w", messageIndex, err)
+		}
+		if role == "system" {
+			if seenConversation {
+				return nil, fmt.Errorf("messages[%d]: system/developer messages must precede conversation messages for Baidu Chat", messageIndex)
+			}
+			systemParts = append(systemParts, text)
+			continue
+		}
+		seenConversation = true
+		baiduRequest.Messages = append(baiduRequest.Messages, BaiduMessage{Role: role, Content: text})
+	}
+	baiduRequest.System = strings.Join(systemParts, "\n")
+	return &baiduRequest, nil
 }
 
 func responseBaidu2OpenAI(response *BaiduChatResponse) *dto.OpenAITextResponse {

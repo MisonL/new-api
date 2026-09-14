@@ -1,12 +1,137 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
 )
+
+// lookupIPForSSRF is a variable so callers can exercise the validation
+// boundary without opening a network connection. Production uses the standard
+// resolver with the request context; tests may replace it temporarily.
+var lookupIPForSSRF = func(ctx context.Context, host string) ([]net.IP, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return net.DefaultResolver.LookupIP(ctx, "ip", host)
+}
+
+type validatedURLIPsContextKey struct{}
+type validatedURLIPSPinningDisabledContextKey struct{}
+type ssrfValidationRequiredContextKey struct{}
+type ssrfRemoteDNSContextKey struct{}
+
+// WithSSRFValidation marks a request for destination validation by the shared
+// HTTP transport. Relay requests are not marked because their channel URL is a
+// trusted configuration value, while user-controlled fetch URLs are.
+func WithSSRFValidation(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, ssrfValidationRequiredContextKey{}, true)
+}
+
+// RequiresSSRFValidation reports whether the request explicitly opted into the
+// fetch-url SSRF boundary.
+func RequiresSSRFValidation(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	required, _ := ctx.Value(ssrfValidationRequiredContextKey{}).(bool)
+	return required
+}
+
+// WithSSRFRemoteDNS marks a protected request that uses a SOCKS transport. The
+// marker is carried across redirects; the transport still resolves and
+// validates the destination locally before pinning the connection.
+func WithSSRFRemoteDNS(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, ssrfRemoteDNSContextKey{}, true)
+}
+
+// UsesSSRFRemoteDNS reports whether the protected request uses the SOCKS
+// transport policy and must carry its marker through redirects.
+func UsesSSRFRemoteDNS(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	remote, _ := ctx.Value(ssrfRemoteDNSContextKey{}).(bool)
+	return remote
+}
+
+// WithValidatedURLIPs attaches the DNS result that has just passed the SSRF
+// policy to a request context. The HTTP transport uses it to dial the exact
+// addresses that were validated instead of resolving the hostname again.
+func WithValidatedURLIPs(ctx context.Context, host string, ips []net.IP) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cloned := make([]net.IP, 0, len(ips))
+	for _, ip := range ips {
+		if ip == nil {
+			continue
+		}
+		cloned = append(cloned, append(net.IP(nil), ip...))
+	}
+	// Attaching a validated snapshot explicitly re-enables pinning. This also
+	// prevents a proxy marker inherited through a redirect context from leaking
+	// into a later direct request.
+	ctx = context.WithValue(ctx, validatedURLIPSPinningDisabledContextKey{}, false)
+	return context.WithValue(ctx, validatedURLIPsContextKey{}, validatedURLIPs{host: canonicalizeDomainName(host), ips: cloned})
+}
+
+type validatedURLIPs struct {
+	host string
+	ips  []net.IP
+}
+
+// ValidatedURLIPs returns a copy of the validated DNS result for host.
+func ValidatedURLIPs(ctx context.Context, host string) []net.IP {
+	if ctx == nil {
+		return nil
+	}
+	value, ok := ctx.Value(validatedURLIPsContextKey{}).(validatedURLIPs)
+	if !ok || value.host != canonicalizeDomainName(host) {
+		return nil
+	}
+	result := make([]net.IP, 0, len(value.ips))
+	for _, ip := range value.ips {
+		result = append(result, append(net.IP(nil), ip...))
+	}
+	return result
+}
+
+// WithValidatedURLIPSPinningDisabled marks a request so transports that have
+// a validated-IP dial hook must keep the original dial address. This is used
+// for proxy connections, whose endpoint is not the validated target host.
+func WithValidatedURLIPSPinningDisabled(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, validatedURLIPSPinningDisabledContextKey{}, true)
+}
+
+// ValidatedURLIPSPinningDisabled reports whether validated-IP substitution is
+// disabled for the current request context.
+func ValidatedURLIPSPinningDisabled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	disabled, _ := ctx.Value(validatedURLIPSPinningDisabledContextKey{}).(bool)
+	return disabled
+}
+
+// canonicalizeDomainName applies the DNS presentation normalization shared by
+// policy matching, lookup and transport context binding. A trailing root dot
+// does not change the DNS name, so it must not create a second policy identity.
+func canonicalizeDomainName(domain string) string {
+	return strings.TrimRight(strings.ToLower(strings.TrimSpace(domain)), ".")
+}
 
 // SSRFProtection SSRF防护配置
 type SSRFProtection struct {
@@ -193,9 +318,9 @@ func isDomainListed(domain string, list []string) bool {
 		return false
 	}
 
-	domain = strings.ToLower(domain)
+	domain = canonicalizeDomainName(domain)
 	for _, item := range list {
-		item = strings.ToLower(strings.TrimSpace(item))
+		item = canonicalizeDomainName(item)
 		if item == "" {
 			continue
 		}
@@ -250,15 +375,53 @@ func (p *SSRFProtection) IsIPAccessAllowed(ip net.IP) bool {
 
 // ValidateURL 验证URL是否安全
 func (p *SSRFProtection) ValidateURL(urlStr string) error {
+	_, err := p.ValidateURLAndResolve(urlStr)
+	return err
+}
+
+// ValidateURLAndResolve validates a URL and returns the exact DNS addresses
+// observed during validation. Returning the addresses is important: validating
+// with one resolver call and letting net/http resolve the hostname again leaves
+// a DNS-rebinding time-of-check/time-of-use window.
+func (p *SSRFProtection) ValidateURLAndResolve(urlStr string) ([]net.IP, error) {
+	return p.ValidateURLAndResolveContext(context.Background(), urlStr)
+}
+
+// ValidateURLAndResolveContext is the cancellation-aware form used by HTTP
+// transports. DNS resolution must observe the originating request context so
+// a slow resolver cannot hold an upstream request until the gateway returns a
+// timeout without cancelling the validation work.
+func (p *SSRFProtection) ValidateURLAndResolveContext(ctx context.Context, urlStr string) ([]net.IP, error) {
+	return p.ValidateURLAndResolveContextWithOptions(ctx, urlStr, true)
+}
+
+// ValidateURLAndResolveContextWithOptions validates a URL and optionally
+// resolves domain names. Protected user-controlled fetch requests must keep
+// resolveDomain enabled so private and special DNS results cannot bypass the
+// SSRF boundary; the false mode is reserved for callers with an independently
+// enforced destination policy.
+func (p *SSRFProtection) ValidateURLAndResolveContextWithOptions(ctx context.Context, urlStr string, resolveDomain bool) ([]net.IP, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// 解析URL
 	u, err := url.Parse(urlStr)
 	if err != nil {
-		return fmt.Errorf("invalid URL format: %v", err)
+		return nil, fmt.Errorf("invalid URL format: %v", err)
 	}
 
 	// 只允许HTTP/HTTPS协议
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("unsupported protocol: %s (only http/https allowed)", u.Scheme)
+		return nil, fmt.Errorf("unsupported protocol: %s (only http/https allowed)", u.Scheme)
+	}
+
+	// url.Parse accepts scheme-only and authority-less forms such as
+	// "http:///path". They cannot identify a network destination and, in
+	// blacklist mode, an empty hostname would otherwise look like an
+	// unlisted domain. Reject them before port/domain/IP evaluation so the
+	// SSRF gate has one deterministic interpretation for every URL shape.
+	if strings.TrimSpace(u.Host) == "" || strings.TrimSpace(u.Hostname()) == "" {
+		return nil, fmt.Errorf("invalid URL host: authority and hostname are required")
 	}
 
 	// 解析主机和端口
@@ -272,74 +435,124 @@ func (p *SSRFProtection) ValidateURL(urlStr string) error {
 			portStr = "80"
 		}
 	}
+	host = canonicalizeDomainName(host)
+	if host == "" {
+		return nil, fmt.Errorf("invalid URL host: authority and hostname are required")
+	}
 
 	// 验证端口
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		return fmt.Errorf("invalid port: %s", portStr)
+		return nil, fmt.Errorf("invalid port: %s", portStr)
+	}
+	if port < 1 || port > 65535 {
+		return nil, fmt.Errorf("invalid port: %d (must be 1-65535)", port)
 	}
 
 	if !p.isAllowedPort(port) {
-		return fmt.Errorf("port %d is not allowed", port)
+		return nil, fmt.Errorf("port %d is not allowed", port)
 	}
 
 	// 如果 host 是 IP，则跳过域名检查
 	if ip := net.ParseIP(host); ip != nil {
 		if !p.IsIPAccessAllowed(ip) {
 			if isPrivateIP(ip) {
-				return fmt.Errorf("private IP address not allowed: %s", ip.String())
+				return nil, fmt.Errorf("private IP address not allowed: %s", ip.String())
 			}
 			if p.IpFilterMode {
-				return fmt.Errorf("ip not in whitelist: %s", ip.String())
+				return nil, fmt.Errorf("ip not in whitelist: %s", ip.String())
 			}
-			return fmt.Errorf("ip in blacklist: %s", ip.String())
+			return nil, fmt.Errorf("ip in blacklist: %s", ip.String())
 		}
-		return nil
+		return []net.IP{append(net.IP(nil), ip...)}, nil
 	}
 
 	// 先进行域名过滤
 	if !p.isDomainAllowed(host) {
 		if p.DomainFilterMode {
-			return fmt.Errorf("domain not in whitelist: %s", host)
+			return nil, fmt.Errorf("domain not in whitelist: %s", host)
 		}
-		return fmt.Errorf("domain in blacklist: %s", host)
+		return nil, fmt.Errorf("domain in blacklist: %s", host)
+	}
+	if !resolveDomain {
+		return nil, nil
 	}
 
-	// 若未启用对域名应用IP过滤，则到此通过
-	if !p.ApplyIPFilterForDomain {
-		return nil
-	}
-
-	// 解析域名对应IP并检查
-	ips, err := net.LookupIP(host)
+	// Resolve the hostname even when the optional domain IP list is disabled.
+	// The basic private/special-address check is still required to prevent a
+	// DNS-rebinding or split-horizon name from turning a domain allow-list into
+	// an SSRF bypass. ApplyIPFilterForDomain only controls the custom IpList
+	// policy; the validated result is also used to pin direct connections.
+	ips, err := lookupIPForSSRF(ctx, host)
 	if err != nil {
-		return fmt.Errorf("DNS resolution failed for %s: %v", host, err)
+		return nil, fmt.Errorf("DNS resolution failed for %s: %v", host, err)
 	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("DNS resolution returned no addresses for %s", host)
+	}
+	validated := make([]net.IP, 0, len(ips))
 	for _, ip := range ips {
-		if !p.IsIPAccessAllowed(ip) {
-			if isPrivateIP(ip) && !p.AllowPrivateIp {
-				return fmt.Errorf("private IP address not allowed: %s resolves to %s", host, ip.String())
-			}
+		// A nil or malformed resolver result must never be treated as a
+		// successful validation. If it reached the transport with an empty
+		// validated set, net/http would resolve the hostname again and reopen
+		// the DNS TOCTOU window this boundary is meant to close.
+		if ip == nil || ip.To16() == nil {
+			return nil, fmt.Errorf("DNS resolution returned an invalid address for %s", host)
+		}
+		validated = append(validated, append(net.IP(nil), ip...))
+	}
+	if len(validated) == 0 {
+		return nil, fmt.Errorf("DNS resolution returned no valid addresses for %s", host)
+	}
+	for _, ip := range validated {
+		if isPrivateIP(ip) && !p.AllowPrivateIp {
+			return nil, fmt.Errorf("private IP address not allowed: %s resolves to %s", host, ip.String())
+		}
+		if p.ApplyIPFilterForDomain && !p.IsIPAccessAllowed(ip) {
 			if p.IpFilterMode {
-				return fmt.Errorf("ip not in whitelist: %s resolves to %s", host, ip.String())
+				return nil, fmt.Errorf("ip not in whitelist: %s resolves to %s", host, ip.String())
 			}
-			return fmt.Errorf("ip in blacklist: %s resolves to %s", host, ip.String())
+			return nil, fmt.Errorf("ip in blacklist: %s resolves to %s", host, ip.String())
 		}
 	}
-	return nil
+	return validated, nil
 }
 
 // ValidateURLWithFetchSetting 使用FetchSetting配置验证URL
 func ValidateURLWithFetchSetting(urlStr string, enableSSRFProtection, allowPrivateIp bool, domainFilterMode bool, ipFilterMode bool, domainList, ipList, allowedPorts []string, applyIPFilterForDomain bool) error {
+	// This public validation boundary must always resolve domains. The
+	// applyIPFilterForDomain flag only controls the optional custom IP-list
+	// policy; using it as resolveDomain would skip the mandatory private-IP and
+	// DNS-rebinding checks whenever that optional policy is disabled.
+	_, err := ValidateURLWithFetchSettingAndResolveContextOptions(context.Background(), urlStr, enableSSRFProtection, allowPrivateIp, domainFilterMode, ipFilterMode, domainList, ipList, allowedPorts, applyIPFilterForDomain, true)
+	return err
+}
+
+// ValidateURLWithFetchSettingAndResolve is the fetch-setting variant used by
+// HTTP transports that need to pin a request to the validated DNS result.
+func ValidateURLWithFetchSettingAndResolve(urlStr string, enableSSRFProtection, allowPrivateIp bool, domainFilterMode bool, ipFilterMode bool, domainList, ipList, allowedPorts []string, applyIPFilterForDomain bool) ([]net.IP, error) {
+	return ValidateURLWithFetchSettingAndResolveContext(context.Background(), urlStr, enableSSRFProtection, allowPrivateIp, domainFilterMode, ipFilterMode, domainList, ipList, allowedPorts, applyIPFilterForDomain)
+}
+
+// ValidateURLWithFetchSettingAndResolveContext is the request-scoped fetch
+// setting variant used by HTTP transports that need both SSRF validation and
+// cancellation-aware DNS resolution.
+func ValidateURLWithFetchSettingAndResolveContext(ctx context.Context, urlStr string, enableSSRFProtection, allowPrivateIp bool, domainFilterMode bool, ipFilterMode bool, domainList, ipList, allowedPorts []string, applyIPFilterForDomain bool) ([]net.IP, error) {
+	return ValidateURLWithFetchSettingAndResolveContextOptions(ctx, urlStr, enableSSRFProtection, allowPrivateIp, domainFilterMode, ipFilterMode, domainList, ipList, allowedPorts, applyIPFilterForDomain, true)
+}
+
+// ValidateURLWithFetchSettingAndResolveContextOptions is the request-scoped
+// fetch-setting variant with an explicit domain-resolution policy.
+func ValidateURLWithFetchSettingAndResolveContextOptions(ctx context.Context, urlStr string, enableSSRFProtection, allowPrivateIp bool, domainFilterMode bool, ipFilterMode bool, domainList, ipList, allowedPorts []string, applyIPFilterForDomain, resolveDomain bool) ([]net.IP, error) {
 	// 如果SSRF防护被禁用，直接返回成功
 	if !enableSSRFProtection {
-		return nil
+		return nil, nil
 	}
 
 	// 解析端口范围配置
 	allowedPortInts, err := parsePortRanges(allowedPorts)
 	if err != nil {
-		return fmt.Errorf("request reject - invalid port configuration: %v", err)
+		return nil, fmt.Errorf("request reject - invalid port configuration: %v", err)
 	}
 
 	protection := &SSRFProtection{
@@ -351,5 +564,5 @@ func ValidateURLWithFetchSetting(urlStr string, enableSSRFProtection, allowPriva
 		AllowedPorts:           allowedPortInts,
 		ApplyIPFilterForDomain: applyIPFilterForDomain,
 	}
-	return protection.ValidateURL(urlStr)
+	return protection.ValidateURLAndResolveContextWithOptions(ctx, urlStr, resolveDomain)
 }

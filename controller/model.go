@@ -93,7 +93,7 @@ func init() {
 		openAIModelsMap[aiModel.Id] = aiModel
 	}
 	channelId2Models = make(map[int][]string)
-	for i := 1; i <= constant.ChannelTypeDummy; i++ {
+	for i := 1; i < constant.ChannelTypeDummy; i++ {
 		apiType, success := common.ChannelType2APIType(i)
 		if !success || apiType == constant.APITypeAIProxyLibrary {
 			continue
@@ -179,10 +179,10 @@ func getModelListGroups(c *gin.Context, requireUserGroup bool) (modelListGroups,
 	tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 	userID := c.GetInt("id")
-	if userGroup == "" && (tokenGroup == "" || tokenGroup == "auto") && requireUserGroup && userID <= 0 {
+	if userGroup == "" && (tokenGroup == "" || common.IsAutoGroup(tokenGroup)) && requireUserGroup && userID <= 0 {
 		return modelListGroups{}, fmt.Errorf("missing user context")
 	}
-	if userGroup == "" && (tokenGroup == "" || tokenGroup == "auto") && userID > 0 {
+	if userGroup == "" && (tokenGroup == "" || common.IsAutoGroup(tokenGroup)) && userID > 0 {
 		var err error
 		userGroup, err = model.GetUserGroup(userID, false)
 		if err != nil {
@@ -190,7 +190,8 @@ func getModelListGroups(c *gin.Context, requireUserGroup bool) (modelListGroups,
 		}
 	}
 
-	if tokenGroup == "auto" {
+	if common.IsAutoGroup(tokenGroup) {
+		tokenGroup = "auto"
 		if userGroup == "" {
 			return modelListGroups{
 				tokenGroup: tokenGroup,
@@ -271,7 +272,7 @@ func ListModels(c *gin.Context, modelType int) {
 		}
 		ownerGroups = groups.ownerGroups
 		var models []string
-		if groups.tokenGroup == "auto" {
+		if common.IsAutoGroup(groups.tokenGroup) {
 			for _, autoGroup := range ownerGroups {
 				groupModels := model.GetGroupEnabledModels(autoGroup)
 				for _, g := range groupModels {

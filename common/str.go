@@ -4,8 +4,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -18,9 +20,60 @@ var (
 	maskURLPattern    = regexp.MustCompile(`(http|https)://[^\s/$.?#].[^\s]*`)
 	maskDomainPattern = regexp.MustCompile(`\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b`)
 	maskIPPattern     = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-	// maskApiKeyPattern matches patterns like 'api_key:xxx' or "api_key:xxx" to mask the API key value
-	maskApiKeyPattern = regexp.MustCompile(`(['"]?)api_key:([^\s'"]+)(['"]?)`)
+	// IPv6 is validated with net.ParseIP after this deliberately broad token
+	// scan. This avoids treating ordinary colon-separated text as an address.
+	maskIPv6Pattern = regexp.MustCompile(`(?i)(?:[0-9a-f]{0,4}:){2,}[0-9a-z:%]{0,32}`)
+	// maskApiKeyPattern masks API keys in common header/query-style forms such as
+	// "Api-Key: secret", "api_key=secret" and quoted JSON-like values.
+	maskApiKeyPattern = regexp.MustCompile(`(?i)(^|[^[:alnum:]_])((?:['"])?api[-_]key(?:['"])?\s*[:=]\s*(?:['"])?)([^\s,;}\]"')]+)(['"]?)`)
+	// maskAuthTokenPattern masks credentials carried in common authentication
+	// schemes, including short Basic/Bearer/Token values. The replacement
+	// callback below preserves a small set of unambiguous prose words after
+	// "token" so ordinary diagnostics do not get rewritten as credentials.
+	maskAuthTokenPattern = regexp.MustCompile(`(?i)\b(basic|bearer|token)\s+([A-Za-z0-9][^\s,;}\]"']*)`)
+	// maskSensitiveHeaderPattern covers authentication values that do not use
+	// Bearer/Token syntax, including Basic and proxy credentials.
+	maskSensitiveHeaderPattern = regexp.MustCompile(`(?i)(^|[^[:alnum:]_-])((?:authorization|proxy-authorization|x-api-key|x-goog-api-key|api[-_]?key|apikey|cookie|set-cookie)\s*[:=]\s*)((?:basic|bearer|token)\s+)?([^\s,;}\]"']+)`)
+	// maskStandaloneKeyPattern masks provider-style keys when they are not preceded by a label.
+	maskStandaloneKeyPattern = regexp.MustCompile(`(?i)(^|[^[:alnum:]_-])(?:sk|rk|sess)(?:-|_)[^\s,;}\]"')]+`)
+	// maskNamedSecretPattern also covers query-style credentials without a URL
+	// scheme, for example "api.example.com?token=secret".
+	maskNamedSecretPattern = regexp.MustCompile(`(?i)(^|[^[:alnum:]_-])((?:access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|password|passwd|api[-_]?key|apikey|key)\s*[:=]\s*)(['"]?)([^\s,;&}\]"']+)(['"]?)`)
 )
+
+// Responses event names contain dots but are protocol identifiers, not hostnames.
+// Keep them intact when masking free-form error and log text.
+var protectedResponsesEventNames = map[string]struct{}{
+	"response.completed":                     {},
+	"response.created":                       {},
+	"response.done":                          {},
+	"response.error":                         {},
+	"response.failed":                        {},
+	"response.incomplete":                    {},
+	"response.queued":                        {},
+	"response.compaction":                    {},
+	"response.create":                        {},
+	"response.metadata":                      {},
+	"response.output_item.added":             {},
+	"response.output_item.done":              {},
+	"response.output_text.delta":             {},
+	"response.output_text.done":              {},
+	"response.function_call_arguments.delta": {},
+	"response.function_call_arguments.done":  {},
+	"response.reasoning_summary_part.added":  {},
+	"response.reasoning_summary_part.done":   {},
+	"response.reasoning_summary_text.delta":  {},
+	"response.reasoning_summary_text.done":   {},
+	"response.reasoning_text.delta":          {},
+	"response.reasoning_text.done":           {},
+	"response.reasoning.unknown":             {},
+	"response.content_part.added":            {},
+	"response.content_part.done":             {},
+	"response.custom_tool_call_input.delta":  {},
+	"response.custom_tool_call_input.done":   {},
+	"response.audio.delta":                   {},
+	"response.audio_transcript.delta":        {},
+}
 
 const LocalLogContentLimit = 2048
 
@@ -53,6 +106,13 @@ func GetStringIfEmpty(str string, defaultValue string) string {
 		return defaultValue
 	}
 	return str
+}
+
+// IsAutoGroup reports whether a group value denotes the reserved automatic
+// group. The sentinel is case-insensitive at all request boundaries so
+// "auto", "AUTO", and "Auto" cannot take different routing paths.
+func IsAutoGroup(group string) bool {
+	return strings.EqualFold(strings.TrimSpace(group), "auto")
 }
 
 func GetRandomString(length int) string {
@@ -180,6 +240,13 @@ func maskHostTail(parts []string) []string {
 // maskHostForURL collapses subdomains and keeps only masked prefix + preserved tail.
 // Example: api.openai.com -> ***.com, sub.domain.co.uk -> ***.co.uk
 func maskHostForURL(host string) string {
+	host = strings.TrimSpace(host)
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+		if strings.Contains(host, ":") {
+			return "[***]"
+		}
+		return "***"
+	}
 	parts := strings.Split(host, ".")
 	if len(parts) < 2 {
 		return "***"
@@ -214,6 +281,22 @@ func maskHostForPlainDomain(domain string) string {
 // www.openai.com -> ***.***.com
 // api.openai.com -> ***.***.com
 func MaskSensitiveInfo(str string) string {
+	// Mask authentication tokens before URL/domain processing so a token that
+	// happens to contain dots cannot be partially exposed by the domain masker.
+	str = maskAuthTokenPattern.ReplaceAllStringFunc(str, func(match string) string {
+		parts := maskAuthTokenPattern.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return "***"
+		}
+		if (strings.EqualFold(parts[1], "token") || strings.EqualFold(parts[1], "bearer")) && isAuthSchemeProseWord(parts[2]) {
+			return match
+		}
+		return parts[1] + " ***"
+	})
+	str = maskStandaloneKeyPattern.ReplaceAllString(str, "${1}***")
+	str = maskSensitiveHeaderPattern.ReplaceAllString(str, "${1}${2}${3}***")
+	str = maskNamedSecretPattern.ReplaceAllString(str, "${1}${2}${3}***${5}")
+
 	// Mask URLs
 	str = maskURLPattern.ReplaceAllStringFunc(str, func(urlStr string) string {
 		u, err := url.Parse(urlStr)
@@ -221,13 +304,16 @@ func MaskSensitiveInfo(str string) string {
 			return urlStr
 		}
 
-		host := u.Host
+		host := u.Hostname()
 		if host == "" {
 			return urlStr
 		}
 
 		// Mask host with unified logic
 		maskedHost := maskHostForURL(host)
+		if port := u.Port(); port != "" {
+			maskedHost += ":" + port
+		}
 
 		result := u.Scheme + "://" + maskedHost
 
@@ -254,8 +340,13 @@ func MaskSensitiveInfo(str string) string {
 				// If can't parse query, just mask the whole query string
 				result += "?***"
 			} else {
-				maskedParams := make([]string, 0, len(values))
+				keys := make([]string, 0, len(values))
 				for key := range values {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				maskedParams := make([]string, 0, len(keys))
+				for _, key := range keys {
 					maskedParams = append(maskedParams, key+"=***")
 				}
 				if len(maskedParams) > 0 {
@@ -269,14 +360,40 @@ func MaskSensitiveInfo(str string) string {
 
 	// Mask domain names without protocol (like openai.com, www.openai.com)
 	str = maskDomainPattern.ReplaceAllStringFunc(str, func(domain string) string {
+		if _, ok := protectedResponsesEventNames[strings.ToLower(domain)]; ok {
+			return domain
+		}
 		return maskHostForPlainDomain(domain)
+	})
+
+	// Mask plain IPv6 literals after URL replacement. The callback validates the
+	// candidate so timestamps and other colon-separated diagnostics remain intact.
+	str = maskIPv6Pattern.ReplaceAllStringFunc(str, func(candidate string) string {
+		original := candidate
+		candidate = strings.Trim(candidate, "[]")
+		if zoneIndex := strings.LastIndex(candidate, "%"); zoneIndex >= 0 {
+			candidate = candidate[:zoneIndex]
+		}
+		if net.ParseIP(candidate) == nil {
+			return original
+		}
+		return "***"
 	})
 
 	// Mask IP addresses
 	str = maskIPPattern.ReplaceAllString(str, "***.***.***.***")
 
 	// Mask API keys (e.g., "api_key:example-token" -> "api_key:***")
-	str = maskApiKeyPattern.ReplaceAllString(str, "${1}api_key:***${3}")
+	str = maskApiKeyPattern.ReplaceAllString(str, "${1}${2}***${4}")
 
 	return str
+}
+
+func isAuthSchemeProseWord(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "has", "is", "required", "missing", "unavailable", "invalid", "expired", "present", "not", "no", "none", "was", "were", "needed", "set", "provided", "count", "usage", "token":
+		return true
+	default:
+		return false
+	}
 }

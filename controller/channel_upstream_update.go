@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -260,7 +261,13 @@ func getUpstreamModelUpdateMinCheckIntervalSeconds() int64 {
 }
 
 func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	if channel == nil {
+		return nil, errors.New("channel is nil")
+	}
+	baseURL, ok := constant.ChannelBaseURL(channel.Type)
+	if !ok {
+		return nil, fmt.Errorf("渠道类型无效: %d", channel.Type)
+	}
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
 	}

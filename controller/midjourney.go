@@ -3,9 +3,10 @@ package controller
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,12 +15,20 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
+
+const midjourneyTaskTimeout = time.Hour
+
+func midjourneyTaskTimeoutReason() string {
+	return fmt.Sprintf("上游任务超时（超过%d小时）", int(midjourneyTaskTimeout/time.Hour))
+}
 
 func UpdateMidjourneyTaskBulk() {
 	//imageModel := "midjourney"
@@ -27,267 +36,717 @@ func UpdateMidjourneyTaskBulk() {
 	common.SleepBeforeMaintenanceLoop(common.MidjourneyTaskPollingInitialDelay)
 	for {
 		time.Sleep(common.MidjourneyTaskPollingInterval)
+		sweepTimedOutMidjourneyTasks(ctx, time.Now())
 
-		tasks := model.GetAllUnFinishTasks(constant.TaskQueryLimit)
+		tasks, queryErr := model.GetAllUnFinishTasksWithError(constant.TaskQueryLimit)
+		if queryErr != nil {
+			logger.LogError(ctx, fmt.Sprintf("Midjourney polling query/row error; continuing with valid tasks: %v", queryErr))
+		}
 		if len(tasks) == 0 {
 			continue
 		}
 
 		logger.LogInfo(ctx, fmt.Sprintf("检测到未完成的任务数有: %v", len(tasks)))
-		taskChannelM := make(map[int][]string)
-		taskM := make(map[string]*model.Midjourney)
-		nullTaskIds := make([]int, 0)
+		taskChannelM := make(map[int][]*model.Midjourney)
+		nullTasks := make([]*model.Midjourney, 0)
 		for _, task := range tasks {
-			if task.MjId == "" {
-				// 统计失败的未完成任务
-				nullTaskIds = append(nullTaskIds, task.Id)
+			if strings.TrimSpace(task.MjId) == "" {
+				// A task without an upstream ID cannot ever be polled. Transition it
+				// individually so the same CAS and refund semantics apply as for
+				// other locally unrecoverable failures.
+				nullTasks = append(nullTasks, task)
 				continue
 			}
-			taskM[task.MjId] = task
-			taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], task.MjId)
+			taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], task)
 		}
-		if len(nullTaskIds) > 0 {
-			err := model.MjBulkUpdateByTaskIds(nullTaskIds, map[string]any{
-				"status":   "FAILURE",
-				"progress": "100%",
-			})
-			if err != nil {
+		for _, task := range nullTasks {
+			if won, err := markMidjourneyTaskPollingFailure(task, "任务缺少上游任务 ID"); err != nil {
 				logger.LogError(ctx, fmt.Sprintf("Fix null mj_id task error: %v", err))
-			} else {
-				logger.LogInfo(ctx, fmt.Sprintf("Fix null mj_id task success: %v", nullTaskIds))
+			} else if won {
+				logger.LogInfo(ctx, fmt.Sprintf("Fix null mj_id task success: %d", task.Id))
 			}
 		}
 		if len(taskChannelM) == 0 {
 			continue
 		}
 
-		for channelId, taskIds := range taskChannelM {
-			logger.LogInfo(ctx, fmt.Sprintf("渠道 #%d 未完成的任务有: %d", channelId, len(taskIds)))
-			if len(taskIds) == 0 {
+		for channelId, channelTasks := range taskChannelM {
+			logger.LogInfo(ctx, fmt.Sprintf("渠道 #%d 未完成的任务有: %d", channelId, len(channelTasks)))
+			if len(channelTasks) == 0 {
 				continue
 			}
 			midjourneyChannel, err := model.CacheGetChannel(channelId)
 			if err != nil {
 				logger.LogError(ctx, fmt.Sprintf("CacheGetChannel: %v", err))
-				err := model.MjBulkUpdate(taskIds, map[string]any{
-					"fail_reason": fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId),
-					"status":      "FAILURE",
-					"progress":    "100%",
-				})
-				if err != nil {
-					logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", err))
-				}
+				// Channel cache/Redis outages are transient. Keep tasks pending and
+				// let the timeout sweeper handle only genuinely expired tasks.
 				continue
 			}
-			baseURL := strings.TrimRight(midjourneyChannel.GetBaseURL(), "/")
-			if baseURL == "" {
-				logger.LogError(ctx, fmt.Sprintf("Midjourney channel base url is empty: channel_id=%d", channelId))
-				continue
-			}
-			requestUrl := fmt.Sprintf("%s/mj/task/list-by-condition", baseURL)
-
-			body, err := common.Marshal(map[string]any{
-				"ids": taskIds,
-			})
-			if err != nil {
-				logger.LogError(ctx, fmt.Sprintf("Marshal midjourney task ids error: %v", err))
-				continue
-			}
-			req, err := http.NewRequest("POST", requestUrl, bytes.NewBuffer(body))
-			if err != nil {
-				logger.LogError(ctx, fmt.Sprintf("Get Task error: %v", err))
-				continue
-			}
-			// 设置超时时间
-			timeout := time.Second * 15
-			reqCtx, cancel := context.WithTimeout(context.Background(), timeout)
-			// 使用带有超时的 context 创建新的请求
-			req = req.WithContext(reqCtx)
-			headers := http.Header{}
-			headers.Set("Content-Type", "application/json")
-			headers.Set("mj-api-secret", midjourneyChannel.Key)
-			headers, err = service.BuildChannelRuntimeRequestHeaders(midjourneyChannel, midjourneyChannel.Key, headers)
-			if err != nil {
-				cancel()
-				logger.LogError(ctx, fmt.Sprintf("Build midjourney runtime request headers error: %v", err))
-				continue
-			}
-			service.ApplyRuntimeRequestHeaders(req, headers)
-			resp, err := service.GetHttpClient().Do(req)
-			if err != nil {
-				cancel()
-				logger.LogError(ctx, fmt.Sprintf("Get Task Do req error: %v", err))
-				continue
-			}
-			if resp.StatusCode != http.StatusOK {
-				service.CloseResponseBodyGracefully(resp)
-				cancel()
-				logger.LogError(ctx, fmt.Sprintf("Get Task status code: %d", resp.StatusCode))
-				continue
-			}
-			responseBody, err := io.ReadAll(resp.Body)
-			service.CloseResponseBodyGracefully(resp)
-			_ = req.Body.Close()
-			cancel()
-			if err != nil {
-				logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error: %v", err))
-				continue
-			}
-			var responseItems []dto.MidjourneyDto
-			err = common.Unmarshal(responseBody, &responseItems)
-			if err != nil {
-				logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error2: %v, body: %s", err, string(responseBody)))
-				continue
-			}
-
-			for _, responseItem := range responseItems {
-				task := taskM[responseItem.MjId]
-
-				useTime := (time.Now().UnixNano() / int64(time.Millisecond)) - task.SubmitTime
-				// 如果时间超过一小时，且进度不是100%，则认为任务失败
-				if useTime > 3600000 && task.Progress != "100%" {
-					responseItem.FailReason = "上游任务超时（超过1小时）"
-					responseItem.Status = "FAILURE"
-				}
-				if !checkMjTaskNeedUpdate(task, responseItem) {
+			batchesByKey := make(map[midjourneyTaskPollingBatchKey][]*model.Midjourney)
+			for _, task := range channelTasks {
+				key, keyErr := resolveMidjourneyPollingKey(midjourneyChannel, task)
+				if keyErr != nil {
+					// Credential rotation/disablement is a transient control-plane
+					// state for an in-flight task. Keep it pending so a later refresh
+					// can restore the persisted credential; the timeout sweeper is the
+					// only path that turns an unresolved task into a terminal failure.
+					logger.LogError(ctx, keyErr.Error())
 					continue
 				}
-				preStatus := task.Status
-				task.Code = 1
-				task.Progress = responseItem.Progress
-				task.PromptEn = responseItem.PromptEn
-				task.State = responseItem.State
-				task.SubmitTime = responseItem.SubmitTime
-				task.StartTime = responseItem.StartTime
-				task.FinishTime = responseItem.FinishTime
-				task.ImageUrl = responseItem.ImageUrl
-				task.Status = responseItem.Status
-				task.FailReason = responseItem.FailReason
-				if responseItem.Properties != nil {
-					propertiesStr, err := common.Marshal(responseItem.Properties)
-					if err != nil {
-						logger.LogError(ctx, fmt.Sprintf("序列化 Properties 失败: %v", err))
-						task.Properties = "{}"
-					} else {
-						task.Properties = string(propertiesStr)
-					}
+				batchKey, identityErr := midjourneyTaskPollingBatchIdentity(midjourneyChannel, task, key)
+				if identityErr != nil {
+					// A route snapshot may be temporarily unavailable while channel
+					// configuration is being refreshed. Do not convert that transient
+					// read/parse failure into an irreversible task failure.
+					logger.LogError(ctx, identityErr.Error())
+					continue
 				}
-				if responseItem.Buttons != nil {
-					buttonStr, err := common.Marshal(responseItem.Buttons)
-					if err != nil {
-						logger.LogError(ctx, fmt.Sprintf("序列化 Buttons 失败: %v", err))
-						task.Buttons = "[]"
-					} else {
-						task.Buttons = string(buttonStr)
+				batchesByKey[batchKey] = append(batchesByKey[batchKey], task)
+			}
+			batchKeys := make([]midjourneyTaskPollingBatchKey, 0, len(batchesByKey))
+			for batchKey := range batchesByKey {
+				batchKeys = append(batchKeys, batchKey)
+			}
+			sort.Slice(batchKeys, func(i, j int) bool { return batchKeys[i].sortKey() < batchKeys[j].sortKey() })
+			for _, batchKey := range batchKeys {
+				batchTasks := batchesByKey[batchKey]
+				grouped := groupMidjourneyPollingTasks(batchTasks)
+				for mjID, duplicates := range grouped.ambiguous {
+					localIDs := make([]string, 0, len(duplicates))
+					for _, task := range duplicates {
+						localIDs = append(localIDs, fmt.Sprintf("%d", task.Id))
 					}
+					logger.LogError(ctx, fmt.Sprintf(
+						"Midjourney polling skipped ambiguous duplicate upstream task ID %q; local task IDs=%s",
+						mjID,
+						strings.Join(localIDs, ","),
+					))
 				}
-				// 映射 VideoUrl
-				task.VideoUrl = responseItem.VideoUrl
-
-				// 映射 VideoUrls - 将数组序列化为 JSON 字符串
-				if responseItem.VideoUrls != nil && len(responseItem.VideoUrls) > 0 {
-					videoUrlsStr, err := common.Marshal(responseItem.VideoUrls)
-					if err != nil {
-						logger.LogError(ctx, fmt.Sprintf("序列化 VideoUrls 失败: %v", err))
-						task.VideoUrls = "[]" // 失败时设置为空数组
-					} else {
-						task.VideoUrls = string(videoUrlsStr)
-					}
-				} else {
-					task.VideoUrls = "" // 空值时清空字段
+				if len(grouped.taskIDs) == 0 {
+					continue
 				}
-
-				shouldReturnQuota := false
-				if (task.Progress != "100%" && responseItem.FailReason != "") || (task.Progress == "100%" && task.Status == "FAILURE") {
-					logger.LogInfo(ctx, task.MjId+" 构建失败，"+task.FailReason)
-					task.Progress = "100%"
-					if task.Quota != 0 {
-						shouldReturnQuota = true
-					}
-				}
-				won, err := task.UpdateWithStatus(preStatus)
-				if err != nil {
-					logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
-				} else if won && shouldReturnQuota {
-					err = model.IncreaseUserQuota(task.UserId, task.Quota, false)
-					if err != nil {
-						logger.LogError(ctx, "fail to increase user quota: "+err.Error())
-					}
-					model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-						UserId:    task.UserId,
-						LogType:   model.LogTypeRefund,
-						Content:   "",
-						ChannelId: task.ChannelId,
-						ModelName: service.CovertMjpActionToModelName(task.Action),
-						Quota:     task.Quota,
-						Other: map[string]interface{}{
-							"task_id": task.MjId,
-							"reason":  "构图失败",
-						},
-					})
+				_, _, fetchErr := fetchMidjourneyTaskBatchWithClaimsAndApply(
+					ctx,
+					midjourneyChannel,
+					batchKey.credential,
+					grouped.taskIDs,
+					grouped.unique,
+					applyMidjourneyTaskPollingResponse,
+				)
+				if fetchErr != nil {
+					logger.LogError(ctx, fetchErr.Error())
+					continue
 				}
 			}
 		}
 	}
 }
 
-func checkMjTaskNeedUpdate(oldTask *model.Midjourney, newTask dto.MidjourneyDto) bool {
-	if oldTask.Code != 1 {
-		return true
-	}
-	if oldTask.Progress != newTask.Progress {
-		return true
-	}
-	if oldTask.PromptEn != newTask.PromptEn {
-		return true
-	}
-	if oldTask.State != newTask.State {
-		return true
-	}
-	if oldTask.SubmitTime != newTask.SubmitTime {
-		return true
-	}
-	if oldTask.StartTime != newTask.StartTime {
-		return true
-	}
-	if oldTask.FinishTime != newTask.FinishTime {
-		return true
-	}
-	if oldTask.ImageUrl != newTask.ImageUrl {
-		return true
-	}
-	if oldTask.Status != newTask.Status {
-		return true
-	}
-	if oldTask.FailReason != newTask.FailReason {
-		return true
-	}
-	if oldTask.FinishTime != newTask.FinishTime {
-		return true
-	}
-	if oldTask.Progress != "100%" && newTask.FailReason != "" {
-		return true
-	}
-	// 检查 VideoUrl 是否需要更新
-	if oldTask.VideoUrl != newTask.VideoUrl {
-		return true
-	}
-	// 检查 VideoUrls 是否需要更新
-	if newTask.VideoUrls != nil && len(newTask.VideoUrls) > 0 {
-		newVideoUrlsStr, err := common.Marshal(newTask.VideoUrls)
-		if err != nil {
-			logger.LogError(context.TODO(), fmt.Sprintf("序列化 VideoUrls 失败: %v", err))
-			return true
+type midjourneyTaskPollingBatchKey struct {
+	credential              string
+	baseURL                 string
+	group                   string
+	model                   string
+	effective               string
+	operation               string
+	path                    string
+	fingerprint             string
+	snapshotFingerprint     string
+	profile                 string
+	proxyFingerprint        string
+	headerPolicyFingerprint string
+}
+
+type midjourneyPollingTaskGroup struct {
+	taskIDs   []string
+	unique    map[string]*model.Midjourney
+	ambiguous map[string][]*model.Midjourney
+}
+
+// groupMidjourneyPollingTasks keeps one local task per upstream ID. Duplicate
+// IDs are unsafe to reconcile because one provider response cannot identify
+// which local row owns it; those rows are deliberately excluded from the
+// request and left pending for explicit operator reconciliation.
+func groupMidjourneyPollingTasks(tasks []*model.Midjourney) midjourneyPollingTaskGroup {
+	byID := make(map[string][]*model.Midjourney)
+	for _, task := range tasks {
+		if task == nil {
+			continue
 		}
-		if oldTask.VideoUrls != string(newVideoUrlsStr) {
-			return true
+		mjID := strings.TrimSpace(task.MjId)
+		if mjID == "" {
+			continue
 		}
-	} else if oldTask.VideoUrls != "" {
-		// 如果新数据没有 VideoUrls 但旧数据有，需要更新（清空）
-		return true
+		byID[mjID] = append(byID[mjID], task)
 	}
 
+	grouped := midjourneyPollingTaskGroup{
+		taskIDs:   make([]string, 0, len(byID)),
+		unique:    make(map[string]*model.Midjourney),
+		ambiguous: make(map[string][]*model.Midjourney),
+	}
+	for mjID, matchingTasks := range byID {
+		if len(matchingTasks) != 1 {
+			grouped.ambiguous[mjID] = matchingTasks
+			continue
+		}
+		grouped.taskIDs = append(grouped.taskIDs, mjID)
+		grouped.unique[mjID] = matchingTasks[0]
+	}
+	sort.Strings(grouped.taskIDs)
+	return grouped
+}
+
+// claimedMidjourneyPollingTasks narrows response reconciliation to the task
+// leases actually acquired for this request. The source task map can contain
+// rows skipped because another worker owns their lease; those rows must never
+// be updated from a response returned for this worker's batch.
+func claimedMidjourneyPollingTasks(claimedTaskIDs []string, tasksByID map[string]*model.Midjourney) map[string]*model.Midjourney {
+	claimed := make(map[string]*model.Midjourney, len(claimedTaskIDs))
+	for _, taskID := range claimedTaskIDs {
+		taskID = strings.TrimSpace(taskID)
+		if taskID == "" {
+			continue
+		}
+		if task := tasksByID[taskID]; task != nil {
+			claimed[taskID] = task
+		}
+	}
+	return claimed
+}
+
+func (key midjourneyTaskPollingBatchKey) sortKey() string {
+	return strings.Join([]string{key.group, key.model, key.effective, key.baseURL, key.operation, key.path, key.fingerprint, key.snapshotFingerprint, key.profile, key.proxyFingerprint, key.headerPolicyFingerprint, key.credential}, "\x00")
+}
+
+func midjourneyTaskPollingBatchIdentity(channel *model.Channel, task *model.Midjourney, credential string) (midjourneyTaskPollingBatchKey, error) {
+	if channel == nil || task == nil {
+		return midjourneyTaskPollingBatchKey{}, fmt.Errorf("midjourney polling batch route is incomplete")
+	}
+	baseURL, route, profile, err := midjourneyTaskPollingRoute(channel, task)
+	if err != nil {
+		return midjourneyTaskPollingBatchKey{}, err
+	}
+	group := midjourneyPollingGroup(task, channel)
+	proxyFingerprint := ""
+	headerPolicyFingerprint := ""
+	snapshotFingerprint := "legacy:none"
+	if snapshot := task.PrivateData.RouteSnapshot; snapshot != nil {
+		if snapshot.SchemaVersion >= model.TaskRouteSnapshotSchemaVersion {
+			snapshotFingerprint = strings.TrimSpace(snapshot.SnapshotFingerprint)
+			if snapshotFingerprint == "" {
+				return midjourneyTaskPollingBatchKey{}, fmt.Errorf("midjourney task route snapshot fingerprint is missing")
+			}
+		} else {
+			snapshotFingerprint = fmt.Sprintf("legacy:schema-%d", snapshot.SchemaVersion)
+		}
+	}
+	if snapshot := task.PrivateData.RouteSnapshot; snapshot != nil && snapshot.SchemaVersion >= model.TaskRouteSnapshotHeaderPolicySchemaVersion {
+		// Schema-5 snapshots already bind the static Header Policy, and snapshots
+		// that captured a proxy bind that transport identity as well. A batch may
+		// only share a representative request when every captured identity is
+		// equal; otherwise the first task's transport settings would leak into the
+		// other tasks. Older schema-5 rows without ProxyCaptured intentionally keep
+		// the compatibility path, where all tasks use the current channel proxy.
+		proxyFingerprint = strings.TrimSpace(snapshot.ProxyFingerprint)
+		headerPolicyFingerprint = strings.TrimSpace(snapshot.HeaderPolicyFingerprint)
+	}
+	return midjourneyTaskPollingBatchKey{
+		credential:              credential,
+		baseURL:                 baseURL,
+		group:                   group,
+		model:                   route.RequestedModel,
+		effective:               route.EffectiveUpstreamModel,
+		operation:               route.Operation,
+		path:                    route.UpstreamPath,
+		fingerprint:             route.Fingerprint,
+		snapshotFingerprint:     snapshotFingerprint,
+		profile:                 profile,
+		proxyFingerprint:        proxyFingerprint,
+		headerPolicyFingerprint: headerPolicyFingerprint,
+	}, nil
+}
+
+func midjourneyTaskPollingRoute(channel *model.Channel, task *model.Midjourney) (string, relaycommon.ChannelRouteIdentity, string, error) {
+	if channel == nil || task == nil {
+		return "", relaycommon.ChannelRouteIdentity{}, "", fmt.Errorf("midjourney polling route is incomplete")
+	}
+	if snapshot := task.PrivateData.RouteSnapshot; snapshot != nil && snapshot.SchemaVersion >= 1 {
+		baseURL, err := service.TaskRouteSnapshotBaseURL(snapshot, channel)
+		if err != nil {
+			return "", relaycommon.ChannelRouteIdentity{}, "", fmt.Errorf("resolve Midjourney task base URL: %w", err)
+		}
+		route, err := service.TaskRouteIdentityFromSnapshot(snapshot, "poll", channel)
+		if err != nil {
+			return "", relaycommon.ChannelRouteIdentity{}, "", fmt.Errorf("resolve Midjourney task route: %w", err)
+		}
+		return baseURL, route, service.TaskRouteSnapshotHeaderProfileRef(snapshot), nil
+	}
+	modelName := service.CovertMjpActionToModelName(task.Action)
+	path := service.TaskPollingRoutePath(channel.Type, task.Action)
+	route := relaycommon.ChannelRouteIdentity{
+		RequestedModel:         modelName,
+		EffectiveUpstreamModel: modelName,
+		FinalProtocol:          "midjourney",
+		Operation:              service.TaskRouteOperation(channel.Type, constant.TaskPlatformMidjourney, task.Action) + ".poll",
+		UpstreamPath:           path,
+		ChannelID:              channel.Id,
+	}.Normalized()
+	baseURL := strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/")
+	if baseURL == "" {
+		return "", relaycommon.ChannelRouteIdentity{}, "", fmt.Errorf("Midjourney channel base URL is empty: channel_id=%d", channel.Id)
+	}
+	return baseURL, route, "", nil
+}
+
+func resolveMidjourneyPollingKey(channel *model.Channel, task *model.Midjourney) (string, error) {
+	if channel == nil || task == nil {
+		return "", fmt.Errorf("midjourney polling channel or task is nil")
+	}
+	storedKey := strings.TrimSpace(task.PrivateData.Key)
+	if storedKey != "" {
+		key, err := service.ResolveTaskCredential(channel, task.PrivateData.RouteSnapshot, storedKey)
+		if err != nil {
+			return "", fmt.Errorf("midjourney task %s: %w", task.MjId, err)
+		}
+		return key, nil
+	}
+	if snapshot := task.PrivateData.RouteSnapshot; snapshot != nil && snapshot.SchemaVersion >= model.TaskRouteSnapshotSchemaVersion {
+		// Current-schema snapshots are authoritative for the concrete credential.
+		// Falling back to the channel's current single key after the persisted key
+		// is missing would silently cross a credential rotation boundary.
+		return "", fmt.Errorf("midjourney task %s has no persisted credential for current route snapshot", task.MjId)
+	}
+	if channel.ChannelInfo.IsMultiKey {
+		return "", fmt.Errorf("midjourney task %s has no persisted credential for multi-key channel %d", task.MjId, channel.Id)
+	}
+	key := strings.TrimSpace(channel.Key)
+	if key == "" {
+		return "", fmt.Errorf("midjourney channel %d has no credential", channel.Id)
+	}
+	return key, nil
+}
+
+func sweepTimedOutMidjourneyTasks(ctx context.Context, now time.Time) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	cutoff := now.Add(-midjourneyTaskTimeout).UnixNano() / int64(time.Millisecond)
+	tasks, queryErr := model.GetTimedOutUnfinishedMidjourneyTasksWithError(cutoff, constant.TaskQueryLimit)
+	if queryErr != nil {
+		logger.LogError(ctx, fmt.Sprintf("Midjourney timeout query/row error; continuing with valid tasks: %v", queryErr))
+	}
+	for _, task := range tasks {
+		if won, err := markMidjourneyTaskPollingFailure(task, midjourneyTaskTimeoutReason()); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("sweep Midjourney task timeout failed: %v", err))
+		} else if won {
+			logger.LogInfo(ctx, fmt.Sprintf("sweep Midjourney task timeout success: %d", task.Id))
+		}
+	}
+}
+
+func isMidjourneyTaskTimedOut(task *model.Midjourney, now time.Time) bool {
+	if task == nil || task.SubmitTime <= 0 || strings.TrimSpace(task.Progress) == "100%" {
+		return false
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return now.UnixNano()/int64(time.Millisecond)-task.SubmitTime > midjourneyTaskTimeout.Milliseconds()
+}
+
+func markMidjourneyTaskPollingFailure(task *model.Midjourney, reason string) (bool, error) {
+	if task == nil {
+		return false, errors.New("midjourney task is nil")
+	}
+	if task.Status == "FAILURE" || task.Status == "SUCCESS" {
+		return false, nil
+	}
+	previousStatus := task.Status
+	candidate := *task
+	candidate.Status = "FAILURE"
+	candidate.Progress = "100%"
+	if strings.TrimSpace(reason) == "" {
+		reason = "Midjourney task polling failed locally"
+	}
+	candidate.FailReason = reason
+	if candidate.FinishTime == 0 {
+		candidate.FinishTime = time.Now().UnixNano() / int64(time.Millisecond)
+	}
+	won, err := candidate.UpdateWithStatus(previousStatus)
+	if err != nil {
+		return false, err
+	}
+	if !won {
+		common.SysLog(fmt.Sprintf("Midjourney task %s transitioned while marking polling failure", task.MjId))
+		return false, nil
+	}
+	*task = candidate
+	service.RefundMidjourneyTaskQuota(context.Background(), &candidate, reason)
+	return true, nil
+}
+
+func fetchMidjourneyTaskBatchForTask(ctx context.Context, channel *model.Channel, task *model.Midjourney, key string, taskIDs []string) ([]dto.MidjourneyDto, error) {
+	if channel == nil {
+		return nil, fmt.Errorf("midjourney polling channel is required")
+	}
+	if task == nil {
+		return nil, fmt.Errorf("midjourney polling task is required")
+	}
+	if len(taskIDs) == 0 {
+		return nil, fmt.Errorf("midjourney polling task IDs are empty")
+	}
+	baseURL, route, profileRef, err := midjourneyTaskPollingRoute(channel, task)
+	if err != nil {
+		return nil, err
+	}
+	routeSnapshot := task.PrivateData.RouteSnapshot
+	body, err := common.Marshal(map[string]any{"ids": taskIDs})
+	if err != nil {
+		return nil, fmt.Errorf("marshal midjourney task ids: %w", err)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	proxy, err := service.TaskRouteSnapshotProxy(task.PrivateData.RouteSnapshot, channel)
+	if err != nil {
+		return nil, fmt.Errorf("resolve midjourney polling proxy: %w", err)
+	}
+	var attempt *service.ChannelHealthAttempt
+	if routeSnapshot != nil && routeSnapshot.SchemaVersion >= model.TaskRouteSnapshotSchemaVersion {
+		providerRuntime, runtimeErr := service.TaskRouteSnapshotProviderRuntime(routeSnapshot)
+		if runtimeErr != nil {
+			return nil, fmt.Errorf("resolve midjourney polling provider runtime: %w", runtimeErr)
+		}
+		attempt, err = service.BeginChannelHealthAttemptWithRouteAndBaseURLAndProviderRuntime(
+			requestCtx,
+			midjourneyPollingGroup(task, channel),
+			route,
+			channel,
+			key,
+			baseURL,
+			providerRuntime,
+			proxy,
+		)
+	} else {
+		attempt, err = service.BeginChannelHealthAttemptWithRouteAndBaseURL(requestCtx, midjourneyPollingGroup(task, channel), route, channel, key, baseURL)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("begin midjourney polling health attempt: %w", err)
+	}
+	defer attempt.Release()
+	if !attempt.Selection.Allow {
+		if attempt.Selection.Err != nil {
+			return nil, fmt.Errorf("midjourney polling health gate rejected: %w", attempt.Selection.Err)
+		}
+		return nil, fmt.Errorf("midjourney polling health gate rejected: %s", attempt.Selection.Action)
+	}
+	headers := http.Header{}
+	headers.Set("Content-Type", "application/json")
+	headers.Set("mj-api-secret", key)
+	if routeSnapshot != nil {
+		headers, err = service.BuildTaskRouteSnapshotRequestHeaders(channel, key, headers, routeSnapshot)
+	} else {
+		headers, err = service.BuildChannelRuntimeRequestHeadersForProfile(channel, key, headers, profileRef)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("build midjourney runtime request headers: %w", err)
+	}
+	lease, err := service.AcquireChannelConcurrency(attempt.Context, channel)
+	if err != nil {
+		return nil, fmt.Errorf("acquire midjourney polling concurrency: %w", err)
+	}
+	if lease != nil {
+		defer lease.Release()
+	}
+	reqContext := attempt.Context.Request.Context()
+	req, err := http.NewRequestWithContext(reqContext, http.MethodPost, fmt.Sprintf("%s%s", baseURL, relaycommon.NormalizeRoutePath(route.UpstreamPath)), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create midjourney polling request: %w", err)
+	}
+	service.ApplyRuntimeRequestHeaders(req, headers)
+	client, err := service.GetHttpClientWithProxy(proxy)
+	if err != nil {
+		return nil, fmt.Errorf("create midjourney polling proxy client: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		attempt.ObserveFailure(err, http.StatusBadGateway, types.ErrorCodeDoRequestFailed)
+		return nil, fmt.Errorf("midjourney polling request failed: %w", err)
+	}
+	if resp == nil {
+		attempt.ObserveFailure(errors.New("midjourney polling returned empty response"), http.StatusBadGateway, types.ErrorCodeEmptyResponse)
+		return nil, fmt.Errorf("midjourney polling returned empty response")
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		apiErr := service.RelayErrorHandler(attempt.Context.Request.Context(), resp, false)
+		attempt.ObserveAPIError(apiErr)
+		return nil, fmt.Errorf("midjourney polling returned status %d", resp.StatusCode)
+	}
+	if resp.Body == nil {
+		err := errors.New("midjourney polling response body is nil")
+		attempt.ObserveFailure(err, http.StatusBadGateway, types.ErrorCodeEmptyResponse)
+		return nil, err
+	}
+	defer service.CloseResponseBodyGracefully(resp)
+	responseBody, err := service.ReadTaskPollingResponseBody(resp.Body)
+	if err != nil {
+		attempt.ObserveFailure(err, http.StatusBadGateway, types.ErrorCodeReadResponseBodyFailed)
+		return nil, fmt.Errorf("read midjourney polling response: %w", err)
+	}
+	if len(bytes.TrimSpace(responseBody)) == 0 {
+		attempt.ObserveFailure(errors.New("midjourney polling returned empty response body"), http.StatusBadGateway, types.ErrorCodeEmptyResponse)
+		return nil, fmt.Errorf("midjourney polling returned empty response body")
+	}
+	var responseItems []dto.MidjourneyDto
+	if err = common.Unmarshal(responseBody, &responseItems); err != nil {
+		attempt.ObserveFailure(err, http.StatusBadGateway, types.ErrorCodeBadResponseBody)
+		return nil, fmt.Errorf("parse midjourney polling response: %w", err)
+	}
+	if responseItems == nil {
+		err = errors.New("midjourney polling response items are null")
+		attempt.ObserveFailure(err, http.StatusBadGateway, types.ErrorCodeBadResponseBody)
+		return nil, err
+	}
+	if !hasRecognizedMidjourneyPollingStatus(responseItems, taskIDs) {
+		// HTTP 2xx only proves that the proxy accepted the request. A successful
+		// health probe requires a response item for one of the requested tasks
+		// with a concrete lifecycle state; an empty array, an unrelated task, or
+		// an unknown/empty status must not make a half-open channel healthy.
+		err = errors.New("midjourney polling response contains no recognized task status")
+		attempt.ObserveFailure(err, http.StatusBadGateway, types.ErrorCodeBadResponseBody)
+		return nil, err
+	}
+	attempt.MarkSuccess()
+	return responseItems, nil
+}
+
+func hasRecognizedMidjourneyPollingStatus(items []dto.MidjourneyDto, taskIDs []string) bool {
+	expected := make(map[string]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		if taskID = strings.TrimSpace(taskID); taskID != "" {
+			expected[taskID] = struct{}{}
+		}
+	}
+	if len(expected) == 0 {
+		return false
+	}
+	for _, item := range items {
+		mjID := strings.TrimSpace(item.MjId)
+		if _, ok := expected[mjID]; !ok {
+			continue
+		}
+		if isRecognizedMidjourneyTaskStatus(item.Status) {
+			return true
+		}
+	}
 	return false
+}
+
+func isRecognizedMidjourneyTaskStatus(status string) bool {
+	_, recognized := service.NormalizeMidjourneyTaskStatus(status)
+	return recognized
+}
+
+func midjourneyPollingGroup(task *model.Midjourney, channel *model.Channel) string {
+	if task != nil && task.PrivateData.RouteSnapshot != nil {
+		if group := strings.TrimSpace(task.PrivateData.RouteSnapshot.Group); group != "" && !strings.EqualFold(group, "auto") {
+			return group
+		}
+	}
+	if channel != nil {
+		for _, group := range channel.GetGroups() {
+			if group != "" && !strings.EqualFold(group, "auto") {
+				return group
+			}
+		}
+	}
+	return "default"
+}
+
+func midjourneyPollingClaimTask(task *model.Midjourney) *model.Task {
+	if task == nil {
+		return nil
+	}
+	return &model.Task{
+		ID:        int64(task.Id),
+		ChannelId: task.ChannelId,
+		UserId:    task.UserId,
+		Platform:  constant.TaskPlatformMidjourney,
+		TaskID:    task.MjId,
+		Action:    task.Action,
+	}
+}
+
+// fetchMidjourneyTaskBatchWithClaims is the compatibility wrapper used by
+// callers that only need the provider response. It releases its leases when
+// the request returns. The polling loop uses the apply variant below so the
+// leases also cover response reconciliation and the guarded database writes.
+func fetchMidjourneyTaskBatchWithClaims(ctx context.Context, channel *model.Channel, key string, taskIDs []string, tasksByID map[string]*model.Midjourney) ([]string, []dto.MidjourneyDto, error) {
+	return fetchMidjourneyTaskBatchWithClaimsAndApply(ctx, channel, key, taskIDs, tasksByID, nil)
+}
+
+type midjourneyTaskPollingResponseApplier func(context.Context, []string, []dto.MidjourneyDto, map[string]*model.Midjourney) error
+
+// fetchMidjourneyTaskBatchWithClaimsAndApply acquires a task-level lease for
+// every ID included in one provider batch. A batch-level representative lease
+// is not sufficient because it would not identify which local task rows are
+// owned by this worker. Busy tasks are skipped; coordinator failures are
+// fail-closed and do not send an unclaimed request. When apply is non-nil, the
+// leases remain held until response reconciliation and its CAS updates finish.
+func fetchMidjourneyTaskBatchWithClaimsAndApply(ctx context.Context, channel *model.Channel, key string, taskIDs []string, tasksByID map[string]*model.Midjourney, apply midjourneyTaskPollingResponseApplier) ([]string, []dto.MidjourneyDto, error) {
+	if len(taskIDs) == 0 {
+		return nil, nil, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	batchCtx, cancelBatch := context.WithCancel(ctx)
+	defer cancelBatch()
+	claims := make([]*service.TaskPollingClaimLease, 0, len(taskIDs))
+	claimedTaskIDs := make([]string, 0, len(taskIDs))
+	releaseClaims := func() {
+		for _, claim := range claims {
+			claim.Release()
+		}
+	}
+	defer releaseClaims()
+
+	for _, taskID := range taskIDs {
+		task := tasksByID[taskID]
+		if task == nil {
+			return nil, nil, fmt.Errorf("midjourney polling task %s is missing from unique task map", taskID)
+		}
+		claim, err := service.AcquireTaskPollingClaim(batchCtx, midjourneyPollingClaimTask(task))
+		if errors.Is(err, service.ErrTaskPollingClaimBusy) {
+			logger.LogDebug(ctx, "skip Midjourney task polling claim held by another worker: task=%s", task.MjId)
+			continue
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("acquire Midjourney task polling claim for %s: %w", task.MjId, err)
+		}
+		claims = append(claims, claim)
+		claimedTaskIDs = append(claimedTaskIDs, taskID)
+		go func(done <-chan struct{}) {
+			select {
+			case <-done:
+				cancelBatch()
+			case <-batchCtx.Done():
+			}
+		}(claim.Done())
+	}
+	if len(claimedTaskIDs) == 0 {
+		return nil, nil, nil
+	}
+	responseItems, err := fetchMidjourneyTaskBatchForTask(
+		batchCtx,
+		channel,
+		tasksByID[claimedTaskIDs[0]],
+		key,
+		claimedTaskIDs,
+	)
+	if err != nil {
+		return claimedTaskIDs, responseItems, err
+	}
+	if claimErr := batchCtx.Err(); claimErr != nil {
+		return claimedTaskIDs, nil, fmt.Errorf("midjourney polling task claim lost before response reconciliation: %w", claimErr)
+	}
+	if apply != nil {
+		if err := apply(batchCtx, claimedTaskIDs, responseItems, tasksByID); err != nil {
+			return claimedTaskIDs, responseItems, err
+		}
+		if claimErr := batchCtx.Err(); claimErr != nil {
+			return claimedTaskIDs, responseItems, fmt.Errorf("midjourney polling task claim lost after response reconciliation: %w", claimErr)
+		}
+	}
+	return claimedTaskIDs, responseItems, err
+}
+
+func applyMidjourneyTaskPollingResponse(ctx context.Context, claimedTaskIDs []string, responseItems []dto.MidjourneyDto, tasksByID map[string]*model.Midjourney) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("midjourney polling task claim lost before response merge: %w", err)
+	}
+	if len(claimedTaskIDs) == 0 {
+		return nil
+	}
+
+	seenResponseIDs := make(map[string]struct{}, len(responseItems))
+	claimedTasks := claimedMidjourneyPollingTasks(claimedTaskIDs, tasksByID)
+	for _, responseItem := range responseItems {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("midjourney polling task claim lost during response merge: %w", err)
+		}
+		responseID := strings.TrimSpace(responseItem.MjId)
+		matchedTask, matched := claimedTasks[responseID]
+		if !matched {
+			logger.LogError(ctx, fmt.Sprintf("Midjourney upstream returned unclaimed task %s", responseItem.MjId))
+			continue
+		}
+		if _, duplicateResponse := seenResponseIDs[responseID]; duplicateResponse {
+			logger.LogWarn(ctx, fmt.Sprintf("Midjourney upstream returned duplicate task response %q; keeping first response", responseID))
+			continue
+		}
+		seenResponseIDs[responseID] = struct{}{}
+		task := matchedTask
+		// Copy the response before applying local timeout normalization.
+		item := responseItem
+
+		if isMidjourneyTaskTimedOut(task, time.Now()) {
+			item.FailReason = midjourneyTaskTimeoutReason()
+			item.Status = "FAILURE"
+		}
+		incomingStatus := strings.ToUpper(strings.TrimSpace(item.Status))
+		if normalizedStatus, recognized := service.NormalizeMidjourneyTaskStatus(incomingStatus); recognized {
+			incomingStatus = string(normalizedStatus)
+			item.Status = incomingStatus
+		}
+		if incomingStatus == "" {
+			logger.LogWarn(ctx, fmt.Sprintf("Midjourney task %s returned empty status, merge non-empty fields only", task.MjId))
+		}
+		preStatus := task.Status
+		if incomingStatus != "" && !service.ShouldApplyTaskStatus(model.TaskStatus(preStatus), model.TaskStatus(incomingStatus)) {
+			logger.LogWarn(ctx, fmt.Sprintf(
+				"Midjourney task %s ignored stale status transition: current=%s incoming=%s",
+				task.MjId,
+				preStatus,
+				incomingStatus,
+			))
+			continue
+		}
+		mergeResult, mergeErr := service.MergeMidjourneyTask(task, item)
+		if mergeErr != nil {
+			logger.LogError(ctx, fmt.Sprintf("Merge Midjourney task %s failed: %v", task.MjId, mergeErr))
+			continue
+		}
+		if !mergeResult.Changed {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("midjourney polling task claim lost before database update: %w", err)
+		}
+		won, err := task.UpdateWithStatus(preStatus)
+		if err != nil {
+			logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
+		} else if won && mergeResult.TerminalFailureTransition {
+			logger.LogInfo(ctx, task.MjId+" 构建失败，"+task.FailReason)
+			service.RefundMidjourneyTaskQuota(ctx, task, "构图失败")
+		}
+	}
+	return nil
+}
+
+func checkMjTaskNeedUpdate(oldTask *model.Midjourney, newTask dto.MidjourneyDto) bool {
+	if oldTask == nil {
+		return false
+	}
+	copyOfTask := *oldTask
+	result, err := service.MergeMidjourneyTask(&copyOfTask, newTask)
+	return err == nil && result.Changed
 }
 
 func GetAllMidjourney(c *gin.Context) {
@@ -301,7 +760,11 @@ func GetAllMidjourney(c *gin.Context) {
 		EndTimestamp:   c.Query("end_timestamp"),
 	}
 
-	items := model.GetAllTasks(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
+	items, err := model.GetAllTasksWithError(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("查询 Midjourney 任务失败: %w", err))
+		return
+	}
 	total := model.CountAllTasks(queryParams)
 
 	if setting.MjForwardUrlEnabled {
@@ -326,7 +789,11 @@ func GetUserMidjourney(c *gin.Context) {
 		EndTimestamp:   c.Query("end_timestamp"),
 	}
 
-	items := model.GetAllUserTask(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
+	items, err := model.GetAllUserTaskWithError(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("查询 Midjourney 任务失败: %w", err))
+		return
+	}
 	total := model.CountAllUserTask(userId, queryParams)
 
 	if setting.MjForwardUrlEnabled {

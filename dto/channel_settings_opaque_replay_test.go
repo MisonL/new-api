@@ -44,12 +44,12 @@ func TestResponsesEncryptedReasoningReplayCapability(t *testing.T) {
 			want:        ResponsesEncryptedReasoningReplayCapabilitySupported,
 		},
 		{
-			name:        "sub2api http remains unknown until verified",
+			name:        "sub2api http is unsupported",
 			channelType: constant.ChannelTypeOpenAI,
 			settings: ChannelOtherSettings{
 				ResponsesUpstreamProfile: ResponsesUpstreamProfileSub2APIHTTP,
 			},
-			want: ResponsesEncryptedReasoningReplayCapabilityUnknown,
+			want: ResponsesEncryptedReasoningReplayCapabilityUnsupported,
 		},
 		{
 			name:        "legacy strip setting is unsupported",
@@ -106,28 +106,28 @@ func TestResponsesCompactionItemPassthroughCapability(t *testing.T) {
 		name        string
 		channelType int
 		settings    ChannelOtherSettings
-		want        ResponsesCompactionItemPassthroughCapability
+		want        bool
 	}{
 		{
-			name:        "unconfigured openai remains unknown",
+			name:        "unconfigured openai supports passthrough by default",
 			channelType: constant.ChannelTypeOpenAI,
-			want:        ResponsesCompactionItemPassthroughCapabilityUnknown,
+			want:        true,
 		},
 		{
-			name:        "generic openai remains unknown",
+			name:        "generic openai does not support passthrough",
 			channelType: constant.ChannelTypeOpenAI,
 			settings: ChannelOtherSettings{
 				ResponsesUpstreamProfile: ResponsesUpstreamProfileGenericOpenAI,
 			},
-			want: ResponsesCompactionItemPassthroughCapabilityUnknown,
+			want: false,
 		},
 		{
-			name:        "sub2api http remains unknown until verified",
+			name:        "sub2api http does not support passthrough",
 			channelType: constant.ChannelTypeOpenAI,
 			settings: ChannelOtherSettings{
 				ResponsesUpstreamProfile: ResponsesUpstreamProfileSub2APIHTTP,
 			},
-			want: ResponsesCompactionItemPassthroughCapabilityUnknown,
+			want: false,
 		},
 		{
 			name:        "official openai supports passthrough",
@@ -135,12 +135,12 @@ func TestResponsesCompactionItemPassthroughCapability(t *testing.T) {
 			settings: ChannelOtherSettings{
 				ResponsesUpstreamProfile: ResponsesUpstreamProfileOfficialOpenAI,
 			},
-			want: ResponsesCompactionItemPassthroughCapabilitySupported,
+			want: true,
 		},
 		{
 			name:        "native codex supports passthrough",
 			channelType: constant.ChannelTypeCodex,
-			want:        ResponsesCompactionItemPassthroughCapabilitySupported,
+			want:        true,
 		},
 		{
 			name:        "generic proxy is unsupported",
@@ -148,7 +148,7 @@ func TestResponsesCompactionItemPassthroughCapability(t *testing.T) {
 			settings: ChannelOtherSettings{
 				ResponsesUpstreamProfile: ResponsesUpstreamProfileGenericProxy,
 			},
-			want: ResponsesCompactionItemPassthroughCapabilityUnsupported,
+			want: false,
 		},
 		{
 			name:        "explicit registry disables passthrough",
@@ -159,7 +159,7 @@ func TestResponsesCompactionItemPassthroughCapability(t *testing.T) {
 					SupportsCompactionItemPassthrough: &unsupported,
 				},
 			},
-			want: ResponsesCompactionItemPassthroughCapabilityUnsupported,
+			want: false,
 		},
 		{
 			name:        "explicit registry verifies generic passthrough",
@@ -170,39 +170,28 @@ func TestResponsesCompactionItemPassthroughCapability(t *testing.T) {
 					SupportsCompactionItemPassthrough: &supported,
 				},
 			},
-			want: ResponsesCompactionItemPassthroughCapabilitySupported,
+			want: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.settings.ResolveResponsesCompactionItemPassthroughCapability(tt.channelType)
-			require.Equal(t, tt.want, got)
-
 			snapshot := tt.settings.ResolveResponsesChannelCapability(tt.channelType)
-			require.Equal(t, tt.want, snapshot.CompactionItemPassthroughCapability)
-			if tt.want == ResponsesCompactionItemPassthroughCapabilityUnknown {
-				require.Nil(t, snapshot.SupportsCompactionItemPassthrough)
-			} else {
-				require.NotNil(t, snapshot.SupportsCompactionItemPassthrough)
-				require.Equal(t, tt.want == ResponsesCompactionItemPassthroughCapabilitySupported, *snapshot.SupportsCompactionItemPassthrough)
-			}
+			require.Equal(t, tt.want, snapshot.SupportsCompactionItemPassthrough)
 
 			raw, err := common.Marshal(tt.settings)
 			require.NoError(t, err)
 			var roundTripped ChannelOtherSettings
 			require.NoError(t, common.Unmarshal(raw, &roundTripped))
-			require.Equal(t, tt.want, roundTripped.ResolveResponsesCompactionItemPassthroughCapability(tt.channelType))
+			require.Equal(t, tt.want, roundTripped.ResolveResponsesChannelCapability(tt.channelType).SupportsCompactionItemPassthrough)
 		})
 	}
 }
 
-func TestNilChannelOtherSettingsKeepsCompactionItemPassthroughUnknown(t *testing.T) {
+func TestNilChannelOtherSettingsKeepsCompactionItemPassthroughDefault(t *testing.T) {
 	var settings *ChannelOtherSettings
 
-	capability := settings.ResolveResponsesCompactionItemPassthroughCapability(constant.ChannelTypeOpenAI)
-
-	require.Equal(t, ResponsesCompactionItemPassthroughCapabilityUnknown, capability)
+	require.True(t, settings.ResolveResponsesChannelCapability(constant.ChannelTypeOpenAI).SupportsCompactionItemPassthrough)
 }
 
 func TestResponsesEncryptedReasoningReplaySnapshotHonorsLegacyStripPrecedence(t *testing.T) {

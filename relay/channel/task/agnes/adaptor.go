@@ -30,6 +30,10 @@ type videoRequest struct {
 	Mode            string                 `json:"mode,omitempty"`
 	Image           common.RawMessage      `json:"image,omitempty"`
 	Images          []string               `json:"images,omitempty"`
+	FirstFrame      string                 `json:"first_frame,omitempty"`
+	LastFrame       string                 `json:"last_frame,omitempty"`
+	Audios          []string               `json:"audios,omitempty"`
+	Videos          []videoReference       `json:"videos,omitempty"`
 	ExtraBody       common.RawMessage      `json:"extra_body,omitempty"`
 	Size            string                 `json:"size,omitempty"`
 	Duration        int                    `json:"duration,omitempty"`
@@ -40,6 +44,17 @@ type videoRequest struct {
 	FrameRate       float64                `json:"frame_rate,omitempty"`
 	normalizedImage string
 }
+
+type videoReference struct {
+	URL          string  `json:"url,omitempty"`
+	StartSeconds float64 `json:"start_seconds,omitempty"`
+	RequireAudio bool    `json:"require_audio,omitempty"`
+}
+
+const (
+	agnesVideo25BasePrice       = 0.025
+	agnesVideo25ExtraImagePrice = 0.005
+)
 
 func (r videoRequest) taskSubmitReq() relaycommon.TaskSubmitReq {
 	image := r.normalizedImage
@@ -112,6 +127,19 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if err := req.normalizeImages(); err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 	}
+	// Validation is provider-model specific. RelayTaskSubmit binds
+	// info.UpstreamModelName before calling this method, so a client alias that
+	// maps to Agnes 2.5/Flash must receive the mapped model's limits rather than
+	// silently using the alias's generic rules.
+	validationModel := strings.TrimSpace(req.Model)
+	if info != nil && info.ChannelMeta != nil {
+		if effectiveModel := strings.TrimSpace(info.ChannelMeta.UpstreamModelName); effectiveModel != "" {
+			validationModel = effectiveModel
+		}
+	}
+	if err := validateAgnesVideo25Request(req, validationModel); err != nil {
+		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
+	}
 	if req.Metadata == nil {
 		req.Metadata = map[string]interface{}{}
 	}
@@ -123,7 +151,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	}
 
 	action := constant.TaskActionTextGenerate
-	if len(req.Images) > 0 {
+	if len(req.Images) > 0 || countAgnesFrameImages(req) > 0 {
 		action = constant.TaskActionGenerate
 	}
 	if info.TaskRelayInfo == nil {
@@ -219,9 +247,128 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	if seconds <= 0 {
 		seconds = 4
 	}
-	return map[string]float64{
-		"seconds": seconds,
+	if !isAgnesVideo25Model(infoModelName(info)) {
+		return map[string]float64{
+			"seconds": seconds,
+		}
 	}
+
+	resolutionRatio := agnesVideoResolutionRatio(req.Size)
+	inputImages := len(req.Images)
+	if rawReq, rawErr := readAgnesVideoRequest(c); rawErr == nil {
+		inputImages += countAgnesFrameImages(rawReq)
+	}
+	imageFeeRatio := 1.0
+	if extraImages := inputImages - 5; extraImages > 0 {
+		basePrice := agnesVideo25BasePrice
+		if info != nil && info.PriceData.ModelPrice > 0 {
+			basePrice = info.PriceData.ModelPrice
+		}
+		baseCost := basePrice * seconds * resolutionRatio
+		if baseCost > 0 {
+			imageFeeRatio += float64(extraImages) * agnesVideo25ExtraImagePrice / baseCost
+		}
+	}
+	return map[string]float64{
+		"seconds":          seconds,
+		"resolution":       resolutionRatio,
+		"input_image_fees": imageFeeRatio,
+	}
+}
+
+func infoModelName(info *relaycommon.RelayInfo) string {
+	if info == nil {
+		return ""
+	}
+	if info.ChannelMeta != nil {
+		if effectiveModel := strings.TrimSpace(info.ChannelMeta.UpstreamModelName); effectiveModel != "" {
+			return effectiveModel
+		}
+	}
+	return info.OriginModelName
+}
+
+func isAgnesVideo25Model(modelName string) bool {
+	switch strings.ToLower(strings.TrimSpace(modelName)) {
+	case "agnes-video-2.5", "agnes-video-2.5-flash":
+		return true
+	default:
+		return false
+	}
+}
+
+func isAgnesVideo25Flash(modelName string) bool {
+	return strings.EqualFold(strings.TrimSpace(modelName), "agnes-video-2.5-flash")
+}
+
+func agnesVideoResolutionRatio(size string) float64 {
+	switch strings.ToUpper(strings.TrimSpace(size)) {
+	case "960P":
+		return 1.6
+	case "2K":
+		return 2.2
+	default:
+		return 1
+	}
+}
+
+func validateAgnesVideo25Request(req videoRequest, modelName string) error {
+	if !isAgnesVideo25Model(modelName) {
+		return nil
+	}
+
+	size := strings.ToUpper(strings.TrimSpace(req.Size))
+	if size != "" && size != "720P" && size != "960P" && size != "2K" {
+		return fmt.Errorf("size must be 720P, 960P, or 2K")
+	}
+	if isAgnesVideo25Flash(modelName) {
+		if size != "" && size != "720P" {
+			return fmt.Errorf("size must be 720P")
+		}
+		if inputImageCount := len(req.Images) + countAgnesFrameImages(req); inputImageCount > 5 {
+			return fmt.Errorf("images length must not exceed 5")
+		}
+		if len(req.Videos) > 0 {
+			return fmt.Errorf("videos is not supported")
+		}
+		return nil
+	}
+
+	// Agnes charges input video duration in addition to output duration. The
+	// OpenAI-compatible request only carries a URL, so accepting it here would
+	// silently undercharge. Keep the unsupported case explicit until the task
+	// snapshot can record a verified media duration.
+	if len(req.Videos) > 0 {
+		return fmt.Errorf("input video references are not supported because their duration cannot be billed exactly")
+	}
+	return nil
+}
+
+func readAgnesVideoRequest(c *gin.Context) (videoRequest, error) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return videoRequest{}, err
+	}
+	body, err := storage.Bytes()
+	if err != nil {
+		return videoRequest{}, err
+	}
+	var req videoRequest
+	if err := common.Unmarshal(body, &req); err != nil {
+		return videoRequest{}, err
+	}
+	return req, nil
+}
+
+func countAgnesFrameImages(req videoRequest) int {
+	count := 0
+	if strings.TrimSpace(req.FirstFrame) != "" {
+		count++
+	}
+	if strings.TrimSpace(req.LastFrame) != "" {
+		count++
+	}
+	return count
 }
 
 func requestSeconds(req relaycommon.TaskSubmitReq) float64 {
@@ -376,13 +523,21 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
+	return a.FetchTaskWithContext(context.Background(), baseUrl, key, body, proxy, extraHeaders...)
+}
+
+func (a *TaskAdaptor) FetchTaskWithContext(parent context.Context, baseUrl, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
 	taskID, ok := body["task_id"].(string)
 	if !ok || strings.TrimSpace(taskID) == "" {
 		return nil, fmt.Errorf("invalid task_id")
 	}
 
-	uri := strings.TrimRight(baseUrl, "/") + "/agnesapi?video_id=" + url.QueryEscape(taskID)
-	ctx, cancel := context.WithTimeout(context.Background(), agnesTaskFetchTimeout)
+	path := taskcommon.CapturedTaskPollingPath(body, "/agnesapi")
+	uri := strings.TrimRight(baseUrl, "/") + path + "?video_id=" + url.QueryEscape(taskID)
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, agnesTaskFetchTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
@@ -433,13 +588,11 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte, _ string, _ ...http.Heade
 			taskResult.Reason = "task failed"
 		}
 	default:
-		taskResult.Status = model.TaskStatusFailure
 		upstreamStatus := strings.TrimSpace(resTask.Status)
 		if upstreamStatus == "" {
-			taskResult.Reason = "unknown upstream status"
-		} else {
-			taskResult.Reason = fmt.Sprintf("unknown upstream status: %s", upstreamStatus)
+			return nil, errors.New("unknown upstream status")
 		}
+		return nil, fmt.Errorf("unknown upstream status: %s", upstreamStatus)
 	}
 	if resTask.Progress > 0 && resTask.Progress < 100 {
 		taskResult.Progress = fmt.Sprintf("%d%%", resTask.Progress)

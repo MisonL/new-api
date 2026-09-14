@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,6 +44,48 @@ func TestApplyMidjourneyRuntimeHeadersNoopsWithoutOverride(t *testing.T) {
 	require.NoError(t, applyMidjourneyRuntimeHeaders(ctx, req, "sk-test"))
 	require.Equal(t, originalHost, req.Host)
 	require.Empty(t, req.Header.Get("X-Test"))
+}
+
+func TestCoverPlusActionToNormalActionRejectsMalformedCustomIDWithoutPanic(t *testing.T) {
+	tests := []*dto.MidjourneyRequest{
+		nil,
+		{CustomId: "MJ"},
+		{CustomId: "MJ::JOB"},
+		{CustomId: "MJ::JOB::upsample"},
+		{CustomId: "MJ::JOB::variation"},
+		{CustomId: "MJ::JOB::unknown_action::1"},
+	}
+
+	for _, request := range tests {
+		t.Run(fmt.Sprintf("%v", request), func(t *testing.T) {
+			require.NotNil(t, CoverPlusActionToNormalAction(request))
+		})
+	}
+}
+
+func TestCoverPlusActionToNormalActionSupportsNonJobIndexPosition(t *testing.T) {
+	request := &dto.MidjourneyRequest{CustomId: "MJ::upsample::2::task-id"}
+
+	require.Nil(t, CoverPlusActionToNormalAction(request))
+	require.Equal(t, constant.MjActionUpscale, request.Action)
+	require.Equal(t, 2, request.Index)
+}
+
+func TestConvertSimpleChangeParamsRejectsEmptyAndMalformedActionWithoutPanic(t *testing.T) {
+	for _, content := range []string{"", "task ", "task   ", "task x", "task u", "task u12", "task v0", "task v5"} {
+		t.Run(fmt.Sprintf("%q", content), func(t *testing.T) {
+			require.Nil(t, ConvertSimpleChangeParams(content))
+		})
+	}
+}
+
+func TestConvertSimpleChangeParamsAcceptsValidWhitespaceSeparatedAction(t *testing.T) {
+	request := ConvertSimpleChangeParams(" task-id   v3 ")
+
+	require.NotNil(t, request)
+	require.Equal(t, "task-id", request.TaskId)
+	require.Equal(t, "VARIATION", request.Action)
+	require.Equal(t, 3, request.Index)
 }
 
 func TestApplyMidjourneyRuntimeHeadersStringifiesValuesAndApiKey(t *testing.T) {

@@ -49,7 +49,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *common.RelayInfo, r
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
-	return convertCozeChatRequest(c, *request), nil
+	return convertCozeChatRequest(c, *request)
 }
 
 // ConvertOpenAIResponsesRequest implements channel.Adaptor.

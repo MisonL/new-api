@@ -15,6 +15,78 @@ type ResponsesChatCompatibilityOptions struct {
 
 const responsesToolTypeNamespace = "namespace"
 
+// ResponsesRequestHasUnbridgeableNamespaceTools reports whether a request has
+// a namespace declaration that the configured Responses-to-Chat bridge cannot
+// convert. Malformed declarations suppress the capability skip so the normal
+// converter can return the precise input error instead of turning bad input
+// into a routing decision. String tools remain valid shorthand custom tools.
+func ResponsesRequestHasUnbridgeableNamespaceTools(req *dto.OpenAIResponsesRequest, options ResponsesChatCompatibilityOptions) (bool, error) {
+	if req == nil {
+		return false, nil
+	}
+
+	tools, err := req.EffectiveTools()
+	if err != nil {
+		return false, err
+	}
+
+	var unbridgeable bool
+	var malformed bool
+	for _, rawTool := range tools {
+		jsonType := common.GetJsonType(rawTool)
+		if jsonType == "string" {
+			continue
+		}
+		if jsonType != "object" {
+			malformed = true
+			continue
+		}
+		var tool map[string]any
+		if err := common.Unmarshal(rawTool, &tool); err != nil {
+			malformed = true
+			continue
+		}
+		if strings.TrimSpace(common.Interface2String(tool["type"])) != responsesToolTypeNamespace {
+			continue
+		}
+
+		namespace := extractResponsesToolName(tool)
+		nestedTools, err := parseResponsesNamespaceTools(tool)
+		if err != nil || namespace == "" {
+			malformed = true
+			continue
+		}
+
+		for _, nestedTool := range nestedTools {
+			nestedType := strings.TrimSpace(common.Interface2String(nestedTool["type"]))
+			switch nestedType {
+			case "function":
+				if _, err := convertResponsesFunctionToolToChat(nestedTool); err != nil {
+					malformed = true
+					continue
+				}
+			case dto.CustomType:
+				if _, err := convertResponsesCustomToolToChat(nestedTool, namespace); err != nil {
+					malformed = true
+					continue
+				}
+			default:
+				if nestedType == "" {
+					malformed = true
+					continue
+				}
+				unbridgeable = true
+				continue
+			}
+			if !options.EnableCustomToolBridge {
+				unbridgeable = true
+			}
+		}
+	}
+
+	return unbridgeable && !malformed, nil
+}
+
 type responsesNamespaceToolSelection struct {
 	name string
 }
@@ -211,7 +283,7 @@ func convertResponsesToolChoiceToChat(raw []byte, options ResponsesChatCompatibi
 		return map[string]any{
 			"type": "function",
 			"function": map[string]any{
-				"name": name,
+				"name": dto.NormalizeToolName(name),
 			},
 		}, nil, nil
 	default:
@@ -347,7 +419,7 @@ func convertResponsesNamespaceToolToChat(tool map[string]any, toolState *Respons
 			if err != nil {
 				return nil, err
 			}
-			originalName = chatTool.Function.Name
+			originalName = extractResponsesToolName(nestedTool)
 			chatTool.Function.Name = flattenResponsesNamespaceToolName(namespace, originalName)
 			identityType = "function"
 		case dto.CustomType:
@@ -481,7 +553,7 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 		}
 		duplicate, err := toolState.register(chatTool.Function.Name, ResponsesChatToolIdentity{
 			Type: "function",
-			Name: chatTool.Function.Name,
+			Name: extractResponsesToolName(tool),
 		}, chatTool)
 		if err != nil {
 			return nil, err
@@ -557,11 +629,34 @@ func convertResponsesInputToChatMessages(raw []byte, options ResponsesChatCompat
 
 	messages := make([]dto.Message, 0, len(items))
 	pendingUserParts := make([]dto.MediaContent, 0)
+	var pendingReasoning *string
+	lastMeaningfulWasAssistant := false
 
 	for _, item := range items {
 		role := strings.TrimSpace(common.Interface2String(item["role"]))
 		itemType := strings.TrimSpace(common.Interface2String(item["type"]))
 		if itemType == "additional_tools" {
+			continue
+		}
+
+		if itemType == "reasoning" {
+			reasoning, _, err := parseResponsesReasoningContent(item)
+			if err != nil {
+				return nil, err
+			}
+			if lastMeaningfulWasAssistant && len(messages) > 0 && messages[len(messages)-1].Role == "assistant" {
+				appendMessageReasoningContent(&messages[len(messages)-1], reasoning)
+			} else if pendingReasoning == nil {
+				pendingReasoning = &reasoning
+			} else {
+				*pendingReasoning += reasoning
+			}
+			// A reasoning item before an assistant is pending; a reasoning item
+			// after an assistant remains adjacent to that assistant so another
+			// reasoning item can be merged without losing ordering.
+			if !(lastMeaningfulWasAssistant && len(messages) > 0 && messages[len(messages)-1].Role == "assistant") {
+				lastMeaningfulWasAssistant = false
+			}
 			continue
 		}
 
@@ -571,12 +666,26 @@ func convertResponsesInputToChatMessages(raw []byte, options ResponsesChatCompat
 			if role == "" {
 				role = "user"
 			}
+			if role != "user" && role != "assistant" && role != "system" && role != "developer" {
+				return nil, fmt.Errorf("message role %q is not supported in chat compatibility mode", role)
+			}
+			if pendingReasoning != nil && role != "assistant" {
+				// Chat Completions has no standalone reasoning item. If the next
+				// Responses item is not an assistant message, discard the pending
+				// reasoning rather than rejecting an otherwise representable history.
+				pendingReasoning = nil
+			}
 
 			message := dto.Message{Role: role}
+			if pendingReasoning != nil {
+				appendMessageReasoningContent(&message, *pendingReasoning)
+				pendingReasoning = nil
+			}
 			content := item["content"]
 			if content == nil {
 				message.SetStringContent("")
 				messages = append(messages, message)
+				lastMeaningfulWasAssistant = role == "assistant"
 				continue
 			}
 
@@ -601,6 +710,7 @@ func convertResponsesInputToChatMessages(raw []byte, options ResponsesChatCompat
 				return nil, fmt.Errorf("message content type %T is not supported in chat compatibility mode", content)
 			}
 			messages = append(messages, message)
+			lastMeaningfulWasAssistant = role == "assistant"
 			continue
 		}
 
@@ -610,21 +720,36 @@ func convertResponsesInputToChatMessages(raw []byte, options ResponsesChatCompat
 			if err != nil {
 				return nil, err
 			}
+			if pendingReasoning != nil {
+				if toolMessage.Role != "assistant" {
+					pendingReasoning = nil
+				} else {
+					appendMessageReasoningContent(&toolMessage, *pendingReasoning)
+					pendingReasoning = nil
+				}
+			}
 			appendResponsesToolMessage(&messages, toolMessage)
+			lastMeaningfulWasAssistant = toolMessage.Role == "assistant"
 			continue
 		}
 
 		switch itemType {
 		case "input_text", "input_image", "input_audio", "input_file", "input_video":
+			if pendingReasoning != nil {
+				pendingReasoning = nil
+			}
 			part, err := convertResponsesContentPartToChat(item)
 			if err != nil {
 				return nil, err
 			}
 			pendingUserParts = append(pendingUserParts, part)
+			lastMeaningfulWasAssistant = false
 		default:
 			return nil, fmt.Errorf("input item type %q is not supported in chat compatibility mode", itemType)
 		}
 	}
+	// A trailing reasoning item cannot be represented in Chat Completions.
+	// Drop it after the complete input has been validated.
 
 	pendingUserParts = flushPendingUserMessage(&messages, pendingUserParts)
 	return messages, nil
@@ -674,6 +799,17 @@ func ResponsesRequestToChatCompletionsRequestWithOptions(req *dto.OpenAIResponse
 	}
 	if rawMessageEnabled(req.Preset) {
 		return nil, fmt.Errorf("preset is not supported in chat compatibility mode")
+	}
+	if req.Reasoning != nil {
+		if rawMessageEnabled(req.Reasoning.Context) {
+			return nil, fmt.Errorf("reasoning.context is not supported in chat compatibility mode")
+		}
+		if rawMessageEnabled(req.Reasoning.Mode) {
+			return nil, fmt.Errorf("reasoning.mode is not supported in chat compatibility mode")
+		}
+		if len(req.Reasoning.Extra) > 0 {
+			return nil, fmt.Errorf("reasoning extensions are not supported in chat compatibility mode")
+		}
 	}
 
 	out := &dto.GeneralOpenAIRequest{

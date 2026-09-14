@@ -3,6 +3,7 @@ package billing_setting
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/stretchr/testify/require"
@@ -15,15 +16,62 @@ func TestValidateBillingModeJSON(t *testing.T) {
 
 func TestValidateBillingExprJSON(t *testing.T) {
 	require.NoError(t, ValidateBillingExprJSON(`{"gpt-5":"tier(\"base\", p * 2 + c * 10)"}`))
-	require.NoError(t, ValidateBillingExprJSON(`{"deepseek-v4-flash":`+jsonString(DeepSeekV4FlashBillingExpr)+`,"deepseek-v4-pro":`+jsonString(DeepSeekV4ProBillingExpr)+`}`))
+	require.NoError(t, ValidateBillingExprJSON(`{"deepseek-flash":`+jsonString(DeepSeekV4FlashBillingExpr)+`,"deepseek-v4.1-flash":`+jsonString(DeepSeekV4FlashBillingExpr)+`,"deepseek-v4.1-flash-0910":`+jsonString(DeepSeekV4FlashBillingExpr)+`,"deepseek-v4-flash":`+jsonString(DeepSeekV4FlashBillingExpr)+`,"deepseek-v4-pro":`+jsonString(DeepSeekV4ProBillingExpr)+`}`))
 	require.NoError(t, ValidateBillingExprJSON(`{"grok-4.5":`+jsonString(Grok45BillingExpr)+`}`))
 	require.NoError(t, ValidateBillingExprJSON(`{"grok-4.3":`+jsonString(Grok43BillingExpr)+`,"grok-4.20":`+jsonString(Grok420BillingExpr)+`,"grok-4.6":`+jsonString(Grok46BillingExpr)+`,"grok-build-0.1":`+jsonString(GrokBuild01BillingExpr)+`}`))
+	require.NoError(t, ValidateBillingExprJSON(`{"gpt-6-astra":`+jsonString(GPT6AstraBillingExpr)+`,"gpt-5.6":`+jsonString(GPT56SolBillingExpr)+`,"gpt-5.6-terra":`+jsonString(GPT56TerraBillingExpr)+`,"gpt-5.6-luna":`+jsonString(GPT56LunaBillingExpr)+`,"gpt-5.5":`+jsonString(GPT55BillingExpr)+`,"gpt-5.4":`+jsonString(GPT54BillingExpr)+`}`))
+	require.NoError(t, ValidateBillingExprJSON(`{"gpt-5.5-pro":`+jsonString(GPT55ProBillingExpr)+`,"gpt-5.4-pro":`+jsonString(GPT54ProBillingExpr)+`}`))
+	require.NoError(t, ValidateBillingExprJSON(`{"gpt-5.6-cyber":`+jsonString(GPT56CyberBillingExpr)+`,"gpt-5.5-cyber":`+jsonString(GPT55CyberBillingExpr)+`}`))
 	require.NoError(t, ValidateBillingExprJSON(`{"gemini-2.5-pro":`+jsonString(Gemini25ProBillingExpr)+`}`))
 	require.NoError(t, ValidateBillingExprJSON(`{"gemini-3.1-pro-preview":"len <= 200000 ? tier(\"standard\", p * 2 + c * 12 + cr * 0.2) : tier(\"long_context\", p * 4 + c * 18 + cr * 0.4)"}`))
 	require.NoError(t, ValidateBillingExprJSON(`{"minimax-m3":"len <= 512000 ? tier(\"standard\", p * 0.3 + c * 1.2 + cr * 0.06) : tier(\"long_context\", p * 0.6 + c * 2.4 + cr * 0.12)"}`))
 	require.NoError(t, ValidateBillingExprJSON(`{"minimax-m3":`+jsonString(MiniMaxM3BillingExpr)+`}`))
+	require.NoError(t, ValidateBillingExprJSON(`{"tencent/hunyuan-a13b-instruct":`+jsonString(HunyuanA13BInstructBillingExpr)+`}`))
 	require.Error(t, ValidateBillingExprJSON(`{"gpt-5":"invalid +-+ expr"}`))
 	require.Error(t, ValidateBillingExprJSON(`{"gpt-5":""}`))
+}
+
+func TestDeepSeekV41FlashAliasesUseCurrentTieredBilling(t *testing.T) {
+	for _, name := range []string{"deepseek-v4.1-flash", "deepseek-v4.1-flash-0910"} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, BillingModeTieredExpr, GetBillingMode(name))
+			expr, ok := GetBillingExpr(name)
+			require.True(t, ok)
+			require.Equal(t, DeepSeekV4FlashBillingExpr, expr)
+		})
+	}
+}
+
+func TestHunyuanA13BInstructOfficialPricingUsesShanghaiWindow(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+
+	params := billingexpr.TokenParams{P: 1000, C: 2000, CR: 3000}
+	cost, trace, err := billingexpr.RunExpr(HunyuanA13BInstructBillingExpr, params)
+	require.NoError(t, err)
+
+	if hour := time.Now().In(loc).Hour(); hour >= 9 && hour < 18 {
+		require.Equal(t, "peak", trace.MatchedTier)
+		require.InDelta(t, 1000*0.136986301369863+2000*0.547945205479452, cost, 1e-9)
+		return
+	}
+	require.Equal(t, "off_peak", trace.MatchedTier)
+	require.InDelta(t, 1000*0.10958904109589+2000*0.438356164383562, cost, 1e-9)
+}
+
+func TestHunyuanA13BInstructOfficialAliasesUseTieredBilling(t *testing.T) {
+	for _, name := range []string{
+		"tencent/Hunyuan-A13B-Instruct",
+		"tencent/hunyuan-a13b-instruct",
+		"hunyuan-a13b-instruct",
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, BillingModeTieredExpr, GetBillingMode(name))
+			expr, ok := GetBillingExpr(name)
+			require.True(t, ok)
+			require.Equal(t, HunyuanA13BInstructBillingExpr, expr)
+		})
+	}
 }
 
 func TestMiniMaxM3OfficialPricingSelectsContextAndServiceTier(t *testing.T) {
@@ -57,6 +105,7 @@ func TestMiniMaxM3OfficialAliasesUseTieredBilling(t *testing.T) {
 	for _, name := range []string{
 		"minimax-m3",
 		"MiniMax-M3-thinking",
+		"MiniMax-M3",
 		"minimaxai/minimax-m3",
 		"minimaxai/MiniMax-M3-free",
 	} {
@@ -102,6 +151,115 @@ func TestOfficialLongContextExpressionsSelectPrices(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "long_context", trace.MatchedTier)
 	require.InDelta(t, 3120, long, 1e-9)
+}
+
+func TestOpenAIOfficialListPriceExpressionsSelect272KBoundary(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     string
+		standard float64
+		long     float64
+	}{
+		{name: "gpt-6-astra", expr: GPT6AstraBillingExpr, standard: 73500, long: 122000},
+		{name: "gpt-5.6-sol", expr: GPT56SolBillingExpr, standard: 41750, long: 68500},
+		{name: "gpt-5.6-terra", expr: GPT56TerraBillingExpr, standard: 16700, long: 27400},
+		{name: "gpt-5.6-luna", expr: GPT56LunaBillingExpr, standard: 1670, long: 2740},
+		{name: "gpt-5.6-cyber", expr: GPT56CyberBillingExpr, standard: 104375, long: 171250},
+		{name: "gpt-5.5", expr: GPT55BillingExpr, standard: 35500, long: 56000},
+		{name: "gpt-5.4", expr: GPT54BillingExpr, standard: 17750, long: 28000},
+		{name: "gpt-5.5-pro", expr: GPT55ProBillingExpr, standard: 210000, long: 330000},
+		{name: "gpt-5.4-pro", expr: GPT54ProBillingExpr, standard: 210000, long: 330000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			standard, trace, err := billingexpr.RunExpr(tt.expr, billingexpr.TokenParams{P: 1000, C: 1000, CR: 1000, CC: 1000, Len: 272000})
+			require.NoError(t, err)
+			require.Equal(t, "standard", trace.MatchedTier)
+			require.InDelta(t, tt.standard, standard, 1e-9)
+
+			long, trace, err := billingexpr.RunExpr(tt.expr, billingexpr.TokenParams{P: 1000, C: 1000, CR: 1000, CC: 1000, Len: 272001})
+			require.NoError(t, err)
+			require.Equal(t, "long_context", trace.MatchedTier)
+			require.InDelta(t, tt.long, long, 1e-9)
+		})
+	}
+}
+
+func TestOpenAIOfficialPricingAliasesUseTieredBilling(t *testing.T) {
+	cases := map[string]string{
+		"gpt-6-astra":                   GPT6AstraBillingExpr,
+		"gpt-5.6":                       GPT56SolBillingExpr,
+		"gpt-5.6-sol":                   GPT56SolBillingExpr,
+		"gpt-5.6-terra":                 GPT56TerraBillingExpr,
+		"gpt-5.6-luna":                  GPT56LunaBillingExpr,
+		"gpt-5.6-luna-wm":               GPT56LunaBillingExpr,
+		"gpt-5.6-luna-pro":              GPT56LunaBillingExpr,
+		"gpt-5.6-cyber":                 GPT56CyberBillingExpr,
+		"gpt-5.5-cyber":                 GPT55CyberBillingExpr,
+		"gpt-daybreak-blue-latest":      GPT56SolBillingExpr,
+		"gpt-daybreak-red-latest":       GPT56CyberBillingExpr,
+		"gpt-5.5":                       GPT55BillingExpr,
+		"gpt-5.4":                       GPT54BillingExpr,
+		"openai/gpt-5.4-2026-03-05":     GPT54BillingExpr,
+		"gpt-5.5-pro":                   GPT55ProBillingExpr,
+		"gpt-5.4-pro":                   GPT54ProBillingExpr,
+		"openai/gpt-5.4-pro-2026-03-05": GPT54ProBillingExpr,
+	}
+	for name, wantExpr := range cases {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, BillingModeTieredExpr, GetBillingMode(name))
+			expr, ok := GetBillingExpr(name)
+			require.True(t, ok)
+			require.Equal(t, wantExpr, expr)
+		})
+	}
+}
+
+func TestOpenAIUppercaseModelAliasUsesTieredBilling(t *testing.T) {
+	for _, name := range []string{"GPT-5.5", "GPT-5.5(high)", "openai/GPT-5.5"} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, BillingModeTieredExpr, GetBillingMode(name))
+			expr, ok := GetBillingExpr(name)
+			require.True(t, ok)
+			require.Equal(t, GPT55BillingExpr, expr)
+		})
+	}
+}
+
+func TestLegacyGPT56SolExpressionUpgradesByCanonicalAlias(t *testing.T) {
+	cases := map[string]string{
+		"gpt-5.6":                  GPT56SolBillingExpr,
+		"gpt-5.6-luna-wm":          GPT56LunaBillingExpr,
+		"gpt-5.6-luna-pro":         GPT56LunaBillingExpr,
+		"gpt-daybreak-blue-latest": GPT56SolBillingExpr,
+	}
+	for name, want := range cases {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, want, upgradeBillingExpr(name, GPT56SolLegacyBillingExpr))
+		})
+	}
+}
+
+func TestGPT56SolHistoricalExpressionUsesNonPromotionalListPrice(t *testing.T) {
+	before := GPT56SolPromotionEffectiveAt.Add(-time.Second).Unix()
+	atBoundary := GPT56SolPromotionEffectiveAt.Unix()
+	for _, name := range []string{"gpt-5.6", "gpt-5.6-sol", "gpt-5.6-sol-wm", "gpt-daybreak-blue-latest"} {
+		t.Run(name, func(t *testing.T) {
+			expr, ok := GetBillingExprAt(name, before)
+			require.True(t, ok)
+			require.Equal(t, GPT56SolBillingExpr, expr)
+
+			expr, ok = GetBillingExprAt(name, atBoundary)
+			require.True(t, ok)
+			require.Equal(t, GPT56SolBillingExpr, expr)
+		})
+	}
+
+	for _, createdAt := range []int64{0, atBoundary, atBoundary + 1} {
+		expr, ok := GetBillingExprAt("gpt-5.6-luna", createdAt)
+		require.True(t, ok)
+		require.Equal(t, GPT56LunaBillingExpr, expr)
+	}
 }
 
 func TestGeminiOfficialExpressionsSelectPublishedPrices(t *testing.T) {
@@ -177,12 +335,12 @@ func TestGemini25ProAliasesUseTieredBilling(t *testing.T) {
 }
 
 func TestGrok45OfficialLongContextExpressionSelectsPrices(t *testing.T) {
-	standard, trace, err := billingexpr.RunExpr(Grok45BillingExpr, billingexpr.TokenParams{P: 1000, C: 1000, Len: 200000, CR: 1000})
+	standard, trace, err := billingexpr.RunExpr(Grok45BillingExpr, billingexpr.TokenParams{P: 1000, C: 1000, Len: 199999, CR: 1000})
 	require.NoError(t, err)
 	require.Equal(t, "standard", trace.MatchedTier)
 	require.InDelta(t, 8300, standard, 1e-9)
 
-	long, trace, err := billingexpr.RunExpr(Grok45BillingExpr, billingexpr.TokenParams{P: 1000, C: 1000, Len: 200001, CR: 1000})
+	long, trace, err := billingexpr.RunExpr(Grok45BillingExpr, billingexpr.TokenParams{P: 1000, C: 1000, Len: 200000, CR: 1000})
 	require.NoError(t, err)
 	require.Equal(t, "long_context", trace.MatchedTier)
 	require.InDelta(t, 16600, long, 1e-9)
@@ -190,13 +348,15 @@ func TestGrok45OfficialLongContextExpressionSelectsPrices(t *testing.T) {
 
 func TestGrok45LegacyExpressionUpgradesToOfficialPricing(t *testing.T) {
 	originalExpr := billingSetting.BillingExpr
-	billingSetting.BillingExpr = map[string]string{"grok-4.5": Grok45LegacyBillingExpr}
 	t.Cleanup(func() {
 		billingSetting.BillingExpr = originalExpr
 	})
-	expr, ok := GetBillingExpr("xai/grok-4.5-latest")
-	require.True(t, ok)
-	require.Equal(t, Grok45BillingExpr, expr)
+	for _, legacyExpr := range []string{Grok45LegacyBillingExpr, Grok45LegacyThresholdBillingExpr} {
+		billingSetting.BillingExpr = map[string]string{"grok-4.5": legacyExpr}
+		expr, ok := GetBillingExpr("xai/grok-4.5-latest")
+		require.True(t, ok)
+		require.Equal(t, Grok45BillingExpr, expr)
+	}
 }
 
 func TestGrok45OfficialAliasesUseTieredBilling(t *testing.T) {
@@ -237,12 +397,12 @@ func TestGrokOfficialLongContextExpressionsSelectPrices(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			standard, trace, err := billingexpr.RunExpr(tt.expr, billingexpr.TokenParams{P: 1000, C: 1000, Len: 200000, CR: 1000})
+			standard, trace, err := billingexpr.RunExpr(tt.expr, billingexpr.TokenParams{P: 1000, C: 1000, Len: 199999, CR: 1000})
 			require.NoError(t, err)
 			require.Equal(t, "standard", trace.MatchedTier)
 			require.InDelta(t, tt.standard, standard, 1e-9)
 
-			long, trace, err := billingexpr.RunExpr(tt.expr, billingexpr.TokenParams{P: 1000, C: 1000, Len: 200001, CR: 1000})
+			long, trace, err := billingexpr.RunExpr(tt.expr, billingexpr.TokenParams{P: 1000, C: 1000, Len: 200000, CR: 1000})
 			require.NoError(t, err)
 			require.Equal(t, "long_context", trace.MatchedTier)
 			require.InDelta(t, tt.long, long, 1e-9)
@@ -276,6 +436,12 @@ func TestGrokOfficialVariantsUseTieredBilling(t *testing.T) {
 }
 
 func TestDeepSeekV4PeakPricingExpressionValidates(t *testing.T) {
+	require.Equal(t, BillingModeTieredExpr, GetBillingMode("deepseek-flash"))
+	require.Equal(t, DeepSeekV4FlashBillingExpr, func() string {
+		value, ok := GetBillingExpr("deepseek-flash")
+		require.True(t, ok)
+		return value
+	}())
 	require.Equal(t, BillingModeTieredExpr, GetBillingMode("deepseek-ai/deepseek-v4-flash"))
 	require.Equal(t, DeepSeekV4FlashBillingExpr, func() string {
 		value, ok := GetBillingExpr("deepseek-ai/deepseek-v4-flash")
@@ -287,6 +453,42 @@ func TestDeepSeekV4PeakPricingExpressionValidates(t *testing.T) {
 		require.True(t, ok)
 		return value
 	}())
+}
+
+func TestDeepSeekHistoricalExpressionsUseEffectiveBoundaries(t *testing.T) {
+	timestamp := func(year int, month time.Month, day, hour int) int64 {
+		return time.Date(year, month, day, hour, 0, 0, 0, time.UTC).Unix()
+	}
+	tests := []struct {
+		name  string
+		model string
+		at    int64
+		want  string
+	}{
+		{name: "flash before legacy change", model: "deepseek-flash", at: timestamp(2026, time.August, 15, 12), want: DeepSeekV4FlashPreChangeBillingExpr},
+		{name: "flash legacy peak", model: "deepseek-v4-flash", at: timestamp(2026, time.August, 17, 2), want: DeepSeekV4FlashLegacyPeakExpr},
+		{name: "flash new off peak at boundary", model: "deepseek-v4-flash", at: timestamp(2026, time.September, 10, 4), want: DeepSeekV4FlashOffPeakExpr},
+		{name: "flash new peak", model: "deepseek-flash", at: timestamp(2026, time.September, 10, 6), want: DeepSeekV4FlashPeakExpr},
+		{name: "pro before continued service", model: "deepseek-v4-pro", at: timestamp(2026, time.September, 14, 3), want: DeepSeekV4ProLegacyPeakExpr},
+		{name: "pro after continued service", model: "deepseek-v4-pro", at: timestamp(2026, time.September, 14, 4), want: DeepSeekV4ProLegacyOffPeakExpr},
+		{name: "pro continued service later peak", model: "deepseek-v4-pro", at: timestamp(2026, time.September, 15, 6), want: DeepSeekV4ProLegacyPeakExpr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expr, ok := GetBillingExprAt(tt.model, tt.at)
+			require.True(t, ok)
+			require.Equal(t, tt.want, expr)
+		})
+	}
+}
+
+func TestDeepSeekLegacyExpressionSnapshotsMatchPersistedLengths(t *testing.T) {
+	// These lengths are taken from the distinct expr_b64 snapshots in the
+	// production logs; keeping exact text recognition prevents silent skips.
+	require.Len(t, DeepSeekV4FlashLegacyMonthNoWeekdayExpr, 318)
+	require.Len(t, DeepSeekV4ProLegacyMonthNoWeekdayExpr, 321)
+	require.Len(t, DeepSeekV4FlashLegacyMonthBillingExpr, 370)
+	require.Len(t, DeepSeekV4ProLegacyMonthBillingExpr, 373)
 }
 
 func TestDeepSeekV4BillingAliasesUseThePublishedExpressions(t *testing.T) {

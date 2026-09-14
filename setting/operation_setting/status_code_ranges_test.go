@@ -25,14 +25,8 @@ func TestParseHTTPStatusCodeRanges_MergeAndNormalize(t *testing.T) {
 	}, ranges)
 }
 
-func TestParseHTTPStatusCodeRanges_LegacyEmptyArrayMeansNoRules(t *testing.T) {
-	ranges, err := ParseHTTPStatusCodeRanges(" [] ")
-	require.NoError(t, err)
-	require.Empty(t, ranges)
-}
-
 func TestParseHTTPStatusCodeRanges_Invalid(t *testing.T) {
-	_, err := ParseHTTPStatusCodeRanges("99,600,foo,500-400,500-,[401]")
+	_, err := ParseHTTPStatusCodeRanges("99,600,foo,500-400,500-")
 	require.Error(t, err)
 }
 

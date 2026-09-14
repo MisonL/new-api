@@ -3,6 +3,7 @@ package billingexpr
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -50,7 +51,10 @@ func RunExprByHashWithRequest(exprStr, hash string, params TokenParams, request 
 
 func runProgram(prog *vm.Program, params TokenParams, request RequestInput) (float64, TraceResult, error) {
 	trace := TraceResult{}
-	headers := normalizeHeaders(request.Headers)
+	headers, err := NormalizeHeaders(request.Headers)
+	if err != nil {
+		return 0, trace, fmt.Errorf("normalize request headers: %w", err)
+	}
 
 	env := map[string]interface{}{
 		"p":     params.P,
@@ -93,6 +97,7 @@ func runProgram(prog *vm.Program, params TokenParams, request RequestInput) (flo
 		"weekday": func(tz string) int { return int(timeInZone(tz).Weekday()) },
 		"month":   func(tz string) int { return int(timeInZone(tz).Month()) },
 		"day":     func(tz string) int { return timeInZone(tz).Day() },
+		"year":    func(tz string) int { return timeInZone(tz).Year() },
 		"max":     math.Max,
 		"min":     math.Min,
 		"abs":     math.Abs,
@@ -123,18 +128,82 @@ func timeInZone(tz string) time.Time {
 	return time.Now().In(loc)
 }
 
-func normalizeHeaders(headers map[string]string) map[string]string {
+// NormalizeHeaders canonicalizes request header names for billing expressions.
+// Header maps can be assembled from more than one source, so accepting two
+// non-identical keys that differ only by case would make header() depend on Go's
+// randomized map iteration order. Reject the ambiguity instead.
+func NormalizeHeaders(headers map[string]string) (map[string]string, error) {
 	if len(headers) == 0 {
-		return map[string]string{}
+		return map[string]string{}, nil
 	}
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 	normalized := make(map[string]string, len(headers))
-	for key, value := range headers {
+	seen := make(map[string]string, len(headers))
+	for _, key := range keys {
 		k := strings.ToLower(strings.TrimSpace(key))
-		v := strings.TrimSpace(value)
-		if k == "" || v == "" {
+		if k == "" {
+			continue
+		}
+		if IsSensitiveHeaderName(k) {
+			// Billing expressions may influence quota, but they must not be able
+			// to inspect credentials or session material supplied by the client.
+			// Keep this filtering at the expression boundary so the original
+			// headers remain available to the upstream adapter.
+			continue
+		}
+		if previousKey, exists := seen[k]; exists {
+			return nil, fmt.Errorf("request headers contain duplicate names %q and %q", previousKey, key)
+		}
+		seen[k] = key
+		v := strings.TrimSpace(headers[key])
+		if v == "" {
 			continue
 		}
 		normalized[k] = v
 	}
-	return normalized
+	return normalized, nil
+}
+
+// IsSensitiveHeaderName reports whether a request header must be hidden from
+// billing expressions. Header names are normalized case-insensitively before
+// this check. Provider feature flags such as anthropic-beta remain available;
+// only credentials, cookies, and authentication/signature material are
+// excluded.
+func IsSensitiveHeaderName(headerName string) bool {
+	headerName = strings.ToLower(strings.TrimSpace(headerName))
+	if headerName == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"authorization",
+		"auth-key",
+		"auth_key",
+		"authkey",
+		"cookie",
+		"api-key",
+		"api_key",
+		"apikey",
+		"access-token",
+		"access_token",
+		"refresh-token",
+		"refresh_token",
+		"id-token",
+		"id_token",
+		"session-token",
+		"session_token",
+		"secret",
+		"credential",
+		"signature",
+		"private-key",
+		"private_key",
+	} {
+		if strings.Contains(headerName, marker) {
+			return true
+		}
+	}
+	return headerName == "token" || strings.HasSuffix(headerName, "-token") || strings.HasSuffix(headerName, "_token")
 }

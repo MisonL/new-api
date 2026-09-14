@@ -61,7 +61,7 @@ func StartUpstreamRateLimitRetryFollowup(c *gin.Context) bool {
 }
 
 func NewUpstreamRateLimitRetryExhaustedError() *types.NewAPIError {
-	return types.NewErrorWithStatusCode(
+	return types.NewOpenAIError(
 		errors.New("upstream rate limit retry limit reached"),
 		types.ErrorCodeDoRequestFailed,
 		http.StatusTooManyRequests,

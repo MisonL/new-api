@@ -2,13 +2,13 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
 type CodexLocalCompaction413RecoveryStage string
@@ -45,7 +45,7 @@ func BuildCodexLocalCompaction413RecoveryRequest(request dto.OpenAIResponsesRequ
 }
 
 func BuildCodexLocalCompaction413RecoveryRequestForStage(request dto.OpenAIResponsesRequest, stage CodexLocalCompaction413RecoveryStage) (dto.OpenAIResponsesRequest, CodexLocalCompaction413RecoveryInfo, error) {
-	hasOpaqueEncryptedContent, err := relaycommon.ResponsesInputHasOpaqueEncryptedContent(request.Input)
+	hasOpaqueEncryptedContent, err := ResponsesInputHasOpaqueEncryptedContent(context.Background(), request.Input)
 	if err != nil {
 		return dto.OpenAIResponsesRequest{}, CodexLocalCompaction413RecoveryInfo{}, err
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -27,14 +28,72 @@ import (
 
 // https://cloud.tencent.com/document/product/1729/97732
 
-func requestOpenAI2Tencent(a *Adaptor, request dto.GeneralOpenAIRequest) *TencentChatRequest {
+func requestOpenAI2Tencent(request dto.GeneralOpenAIRequest) (*TencentChatRequest, error) {
+	if err := channel.RejectUnsupportedTextRequestFields(request, "Tencent Hunyuan"); err != nil {
+		return nil, err
+	}
+	if request.MaxTokens != nil || request.MaxCompletionTokens != nil || request.Stop != nil ||
+		request.FrequencyPenalty != nil || request.PresencePenalty != nil || request.N != nil ||
+		request.Seed != nil || request.StreamOptions != nil || len(request.ExtraBody) > 0 || len(request.WebSearch) > 0 ||
+		len(request.EnableSearch) > 0 {
+		return nil, fmt.Errorf("request contains options that are not supported by Tencent Hunyuan")
+	}
+	if len(request.Messages) == 0 {
+		return nil, fmt.Errorf("at least one message is required by Tencent Hunyuan")
+	}
+	if len(request.Messages) > 40 {
+		return nil, fmt.Errorf("Tencent Hunyuan supports at most 40 messages, got %d", len(request.Messages))
+	}
+
+	roles := map[string]string{
+		"system":    "system",
+		"developer": "system",
+		"user":      "user",
+		"assistant": "assistant",
+	}
 	messages := make([]*TencentMessage, 0, len(request.Messages))
-	for i := 0; i < len(request.Messages); i++ {
-		message := request.Messages[i]
-		messages = append(messages, &TencentMessage{
-			Content: message.StringContent(),
-			Role:    message.Role,
-		})
+	var systemText strings.Builder
+	seenConversation := false
+	nextRole := "user"
+	seenUser := false
+	for messageIndex, message := range request.Messages {
+		role, text, err := channel.OpenAIMessageRoleText(message, "Tencent Hunyuan", roles)
+		if err != nil {
+			return nil, fmt.Errorf("messages[%d]: %w", messageIndex, err)
+		}
+		if role == "system" {
+			if seenConversation {
+				return nil, fmt.Errorf("messages[%d]: system/developer messages must be first for Tencent Hunyuan", messageIndex)
+			}
+			if systemText.Len() > 0 {
+				systemText.WriteString("\n")
+			}
+			systemText.WriteString(text)
+			continue
+		}
+		seenConversation = true
+		if role != nextRole {
+			return nil, fmt.Errorf("messages[%d]: expected %s message, got %s for Tencent Hunyuan", messageIndex, nextRole, role)
+		}
+		if text == "" {
+			return nil, fmt.Errorf("messages[%d]: content must not be empty for Tencent Hunyuan", messageIndex)
+		}
+		messages = append(messages, &TencentMessage{Content: text, Role: role})
+		if role == "user" {
+			seenUser = true
+			nextRole = "assistant"
+		} else {
+			nextRole = "user"
+		}
+	}
+	if !seenUser {
+		return nil, fmt.Errorf("at least one user message is required by Tencent Hunyuan")
+	}
+	if nextRole != "assistant" {
+		return nil, fmt.Errorf("final message must have role user for Tencent Hunyuan")
+	}
+	if systemText.Len() > 0 {
+		messages = append([]*TencentMessage{{Role: "system", Content: systemText.String()}}, messages...)
 	}
 	var req = TencentChatRequest{
 		Stream:   request.Stream,
@@ -45,7 +104,7 @@ func requestOpenAI2Tencent(a *Adaptor, request dto.GeneralOpenAIRequest) *Tencen
 		req.TopP = request.TopP
 	}
 	req.Temperature = request.Temperature
-	return &req
+	return &req, nil
 }
 
 func responseTencent2OpenAI(response *TencentChatResponse) *dto.OpenAITextResponse {

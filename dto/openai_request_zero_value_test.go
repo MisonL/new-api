@@ -72,6 +72,26 @@ func TestOpenAIResponsesRequestPreserveExplicitZeroValues(t *testing.T) {
 	require.True(t, gjson.GetBytes(encoded, "top_p").Exists())
 }
 
+func TestOpenAIResponsesRequestPreservesExplicitEmptyReasoningScalars(t *testing.T) {
+	raw := []byte(`{
+		"model":"gpt-5.6-sol",
+		"reasoning":{
+			"effort":"",
+			"summary":""
+		}
+	}`)
+
+	var req OpenAIResponsesRequest
+	require.NoError(t, common.Unmarshal(raw, &req))
+
+	encoded, err := common.Marshal(req)
+	require.NoError(t, err)
+	require.True(t, gjson.GetBytes(encoded, "reasoning.effort").Exists())
+	require.Equal(t, "", gjson.GetBytes(encoded, "reasoning.effort").String())
+	require.True(t, gjson.GetBytes(encoded, "reasoning.summary").Exists())
+	require.Equal(t, "", gjson.GetBytes(encoded, "reasoning.summary").String())
+}
+
 func TestOpenAIResponsesRequestPreservesUnknownFields(t *testing.T) {
 	raw := []byte(`{
 		"model":"gpt-5.5",
@@ -134,6 +154,93 @@ func TestOpenAIResponsesRequestPreservesCodexNestedFields(t *testing.T) {
 	require.JSONEq(t, `{"enabled":true}`, gjson.GetBytes(encoded, "reasoning.future_reasoning_option").Raw)
 	require.JSONEq(t, `"sequential_cutoff"`, gjson.GetBytes(encoded, "stream_options.reasoning_summary_delivery").Raw)
 	require.JSONEq(t, `{"enabled":true}`, gjson.GetBytes(encoded, "stream_options.future_stream_option").Raw)
+}
+
+func TestResponsesDTOsPreserveExplicitNullReasoningAndStreamOptions(t *testing.T) {
+	raw := []byte(`{
+		"model":"gpt-5.6-sol",
+		"reasoning":{
+			"effort":null,
+			"summary":null,
+			"mode":null,
+			"context":null,
+			"future_reasoning_option":null
+		},
+		"stream_options":{
+			"include_usage":null,
+			"include_obfuscation":null,
+			"reasoning_summary_delivery":null,
+			"future_stream_option":null
+		}
+	}`)
+
+	var request OpenAIResponsesRequest
+	require.NoError(t, common.Unmarshal(raw, &request))
+	encoded, err := common.Marshal(request)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"effort":null,"summary":null,"mode":null,"context":null,"future_reasoning_option":null}`, gjson.GetBytes(encoded, "reasoning").Raw)
+	require.JSONEq(t, `{"include_usage":null,"include_obfuscation":null,"reasoning_summary_delivery":null,"future_stream_option":null}`, gjson.GetBytes(encoded, "stream_options").Raw)
+
+	var compactRequest OpenAIResponsesCompactionRequest
+	require.NoError(t, common.Unmarshal(raw, &compactRequest))
+	converted := compactRequest.ToResponsesRequest()
+	require.NotNil(t, converted)
+	convertedEncoded, err := common.Marshal(converted)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"effort":null,"summary":null,"mode":null,"context":null,"future_reasoning_option":null}`, gjson.GetBytes(convertedEncoded, "reasoning").Raw)
+	require.JSONEq(t, `{"include_usage":null,"include_obfuscation":null,"reasoning_summary_delivery":null,"future_stream_option":null}`, gjson.GetBytes(convertedEncoded, "stream_options").Raw)
+}
+
+func TestStreamOptionsPreservesExplicitFalseFields(t *testing.T) {
+	raw := []byte(`{
+		"include_usage":false,
+		"include_obfuscation":false,
+		"future_stream_option":{"enabled":true}
+	}`)
+
+	var options StreamOptions
+	require.NoError(t, common.Unmarshal(raw, &options))
+
+	encoded, err := common.Marshal(options)
+	require.NoError(t, err)
+	require.True(t, gjson.GetBytes(encoded, "include_usage").Exists())
+	require.False(t, gjson.GetBytes(encoded, "include_usage").Bool())
+	require.True(t, gjson.GetBytes(encoded, "include_obfuscation").Exists())
+	require.False(t, gjson.GetBytes(encoded, "include_obfuscation").Bool())
+	require.JSONEq(t, `{"enabled":true}`, gjson.GetBytes(encoded, "future_stream_option").Raw)
+}
+
+func TestMessageParseContentAcceptsObjectVideoURLAndBothFileNameSpellings(t *testing.T) {
+	message := Message{Content: []any{
+		map[string]any{
+			"type":      "video_url",
+			"video_url": map[string]any{"url": "https://example.com/video.mp4"},
+		},
+		map[string]any{
+			"type": "file",
+			"file": map[string]any{"filename": "modern.pdf", "file_data": "data:application/pdf;base64,AA==", "mime_type": "application/pdf"},
+		},
+		map[string]any{
+			"type": "file",
+			"file": map[string]any{"file_name": "legacy.txt", "file_data": "data:text/plain;base64,AA==", "mimeType": "text/plain"},
+		},
+		map[string]any{
+			"type":      "file",
+			"filename":  "flat.txt",
+			"file_data": "data:text/plain;base64,AA==",
+			"mime_type": "text/plain",
+		},
+	}}
+
+	parts := message.ParseContent()
+	require.Len(t, parts, 4)
+	require.Equal(t, "https://example.com/video.mp4", parts[0].GetVideoUrl().Url)
+	require.Equal(t, "modern.pdf", parts[1].GetFile().FileName)
+	require.Equal(t, "application/pdf", parts[1].GetFile().MimeType)
+	require.Equal(t, "legacy.txt", parts[2].GetFile().FileName)
+	require.Equal(t, "text/plain", parts[2].GetFile().MimeType)
+	require.Equal(t, "flat.txt", parts[3].GetFile().FileName)
+	require.Equal(t, "text/plain", parts[3].GetFile().MimeType)
 }
 
 func TestOpenAIResponsesCompactionRequestPreservesUnknownFieldsThroughResponsesRequest(t *testing.T) {
@@ -257,6 +364,38 @@ func TestOpenAIResponsesCompactionRequestToResponsesRequestClonesPointerFields(t
 	require.Equal(t, 0.2, *responsesReq.Temperature)
 	require.Equal(t, 0.9, *responsesReq.TopP)
 	require.Equal(t, uint(3), *responsesReq.MaxToolCalls)
+}
+
+func TestOpenAIResponsesCompactionRequestToResponsesRequestClonesRawAndNestedPresenceState(t *testing.T) {
+	raw := []byte(`{
+		"model":"gpt-5.6-sol",
+		"input":[{"type":"message","role":"user","content":"continue"}],
+		"instructions":"keep instructions",
+		"metadata":{"request":"keep metadata"},
+		"reasoning":{"effort":null,"context":"all_turns","future_reasoning_option":{"enabled":true}},
+		"stream_options":{"include_usage":null,"future_stream_option":{"enabled":true}}
+	}`)
+
+	var compactReq OpenAIResponsesCompactionRequest
+	require.NoError(t, common.Unmarshal(raw, &compactReq))
+	responsesReq := compactReq.ToResponsesRequest()
+	require.NotNil(t, responsesReq)
+
+	compactReq.Input[0] = 'x'
+	compactReq.Instructions[0] = 'x'
+	compactReq.Metadata[0] = 'x'
+	compactReq.Reasoning.effortRaw[0] = '0'
+	compactReq.StreamOptions.includeUsageRaw[0] = '0'
+
+	encoded, err := common.Marshal(responsesReq)
+	require.NoError(t, err)
+	require.Equal(t, "message", gjson.GetBytes(encoded, "input.0.type").String())
+	require.Equal(t, "keep instructions", gjson.GetBytes(encoded, "instructions").String())
+	require.Equal(t, "keep metadata", gjson.GetBytes(encoded, "metadata.request").String())
+	require.Equal(t, "null", gjson.GetBytes(encoded, "reasoning.effort").Raw)
+	require.Equal(t, "null", gjson.GetBytes(encoded, "stream_options.include_usage").Raw)
+	require.JSONEq(t, `{"enabled":true}`, gjson.GetBytes(encoded, "reasoning.future_reasoning_option").Raw)
+	require.JSONEq(t, `{"enabled":true}`, gjson.GetBytes(encoded, "stream_options.future_stream_option").Raw)
 }
 
 func TestOpenAIResponsesRequestPreservesUnknownEmptyKey(t *testing.T) {

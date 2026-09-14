@@ -46,9 +46,12 @@ func GetAPIVersion(c *gin.Context) string {
 }
 
 func createTaskError(err error, code string, statusCode int, localError bool) *dto.TaskError {
+	if err == nil {
+		err = fmt.Errorf("task request failed")
+	}
 	return &dto.TaskError{
 		Code:       code,
-		Message:    err.Error(),
+		Message:    common.MaskSensitiveInfo(err.Error()),
 		StatusCode: statusCode,
 		LocalError: localError,
 		Error:      err,
@@ -170,7 +173,7 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 		if model == "sora-2" && !lo.Contains([]string{"720x1280", "1280x720"}, size) {
 			return createTaskError(fmt.Errorf("sora-2 size is invalid"), "invalid_size", http.StatusBadRequest, true)
 		}
-		if model == "sora-2-pro" && !lo.Contains([]string{"720x1280", "1280x720", "1792x1024", "1024x1792"}, size) {
+		if model == "sora-2-pro" && !lo.Contains([]string{"720x1280", "1280x720", "1792x1024", "1024x1792", "1920x1080", "1080x1920"}, size) {
 			return createTaskError(fmt.Errorf("sora-2 size is invalid"), "invalid_size", http.StatusBadRequest, true)
 		}
 		// OtherRatios 已移到 Sora adaptor 的 EstimateBilling 中设置

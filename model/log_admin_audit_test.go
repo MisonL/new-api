@@ -46,6 +46,112 @@ func TestRecordLogWithAdminInfoKeepsAuditForAdminsOnly(t *testing.T) {
 	require.Equal(t, "管理员增加用户额度 1000", userLogs[0].Content)
 }
 
+func TestGetUserLogsRedactsResponsesRoutingDiagnostics(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&User{
+		Id:          103,
+		Username:    "responses-routing-user",
+		Password:    "password123",
+		DisplayName: "responses-routing-user",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+	}).Error)
+
+	routingOther := map[string]interface{}{
+		"error_category":                                "upstream_4xx",
+		"upstream_error_type":                           "invalid_request_error",
+		"upstream_error_code":                           "unknown_parameter",
+		"error_param":                                   "input[1].namespace",
+		"error_event":                                   "response.failed",
+		"request_path":                                  "/v1/responses",
+		"upstream_request_path":                         "/v1/responses/compact",
+		"responses_compact_mode":                        "native",
+		"responses_compact_setting":                     "auto",
+		"responses_compact_upstream_path":               "/v1/responses/compact",
+		"responses_compact_final_upstream_path":         "/v1/responses",
+		"responses_compact_native_channel_id":           901,
+		"responses_compact_native_upstream_path":        "/v1/responses/compact",
+		"responses_compact_native_status_code":          413,
+		"responses_compact_auto_fallback_reason":        "upstream payload limit",
+		"responses_compact_summary_model":               "gpt-5.6-sol",
+		"responses_compact_summary_models":              []string{"gpt-5.6-sol", "gpt-5.6-terra"},
+		"responses_routing_channel_skips":               []map[string]interface{}{{"channel_id": 902, "reason": "unsupported_custom_tools"}},
+		"channel_capability_snapshot":                   map[string]interface{}{"profile": "provider-private"},
+		"responses_reasoning_context_action":            "stripped_unsupported",
+		"responses_codex_local_compaction_413_recovery": true,
+	}
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:    103,
+		Username:  "responses-routing-user",
+		CreatedAt: common.GetTimestamp(),
+		Type:      LogTypeConsume,
+		Content: "request completed, Responses Compact mode=native setting=auto " +
+			"path=/v1/responses/compact native_path=/v1/responses/compact",
+		ModelName: "gpt-5.6-sol",
+		ChannelId: 901,
+		TokenName: "token-a",
+		Group:     "default",
+		RequestId: "req-routing-audit",
+		Other:     common.MapToJsonStr(routingOther),
+	}).Error)
+
+	adminLogs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", false, "", "", 0, 10, 0, "", "", "", false, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, adminLogs, 1)
+	adminOther, err := common.StrToMap(adminLogs[0].Other)
+	require.NoError(t, err)
+	require.Equal(t, "native", adminOther["responses_compact_mode"])
+	require.Contains(t, adminOther, "channel_capability_snapshot")
+	require.Contains(t, adminOther, "responses_routing_channel_skips")
+	require.Equal(t, 901, adminLogs[0].ChannelId)
+	require.Contains(t, adminLogs[0].Content, "path=/v1/responses/compact")
+
+	userLogs, total, err := GetUserLogs(103, LogTypeConsume, 0, 0, "", false, "", 0, 10, "", "", "", false, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, userLogs, 1)
+	require.Zero(t, userLogs[0].ChannelId)
+	require.Nil(t, userLogs[0].ChannelDetail)
+	require.Equal(t, "request completed", userLogs[0].Content)
+
+	userOther, err := common.StrToMap(userLogs[0].Other)
+	require.NoError(t, err)
+	require.Equal(t, "native", userOther["responses_compact_mode"])
+	require.Equal(t, "/v1/responses", userOther["request_path"])
+	userRoutingSummary, ok := userOther["responses_routing_summary"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, true, userRoutingSummary["automatic_reroute"])
+	require.Equal(t, float64(1), userRoutingSummary["preflight_skip_count"])
+	require.Equal(t, []interface{}{"unsupported_custom_tools"}, userRoutingSummary["reasons"])
+	require.NotContains(t, common.MapToJsonStr(userRoutingSummary), "902")
+	for _, key := range []string{
+		"upstream_request_path",
+		"responses_compact_setting",
+		"responses_compact_upstream_path",
+		"responses_compact_final_upstream_path",
+		"responses_compact_native_channel_id",
+		"responses_compact_native_upstream_path",
+		"responses_compact_native_status_code",
+		"responses_compact_auto_fallback_reason",
+		"responses_compact_summary_model",
+		"responses_compact_summary_models",
+		"responses_routing_channel_skips",
+		"channel_capability_snapshot",
+		"responses_reasoning_context_action",
+		"responses_codex_local_compaction_413_recovery",
+		"error_category",
+		"upstream_error_type",
+		"upstream_error_code",
+		"error_param",
+		"error_event",
+	} {
+		require.NotContains(t, userOther, key)
+	}
+}
+
 func TestRecordTopupLogStoresAdminOnlyAuditFields(t *testing.T) {
 	truncateTables(t)
 

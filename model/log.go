@@ -2,8 +2,11 @@ package model
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,18 +143,140 @@ func buildLogChannelDetail(channel *Channel) *LogChannelDetail {
 
 func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {
+		logs[i].ChannelId = 0
 		logs[i].ChannelName = ""
+		logs[i].ChannelDetail = nil
+		logs[i].Content = redactUserLogContent(logs[i].Content)
 		var otherMap map[string]interface{}
 		otherMap, _ = common.StrToMap(logs[i].Other)
 		if otherMap != nil {
+			if summary := buildUserResponsesRoutingSummary(otherMap); summary != nil {
+				otherMap["responses_routing_summary"] = summary
+			}
 			// Remove admin-only debug fields.
 			delete(otherMap, "admin_info")
-			// delete(otherMap, "reject_reason")
 			delete(otherMap, "stream_status")
+			delete(otherMap, "error_category")
+			delete(otherMap, "upstream_error_type")
+			delete(otherMap, "upstream_error_code")
+			delete(otherMap, "error_param")
+			delete(otherMap, "error_event")
+			delete(otherMap, "upstream_request_path")
+			delete(otherMap, "channel_capability_snapshot")
+			for key := range otherMap {
+				if strings.HasPrefix(key, "responses_") && key != "responses_compact_mode" && key != "responses_routing_summary" {
+					delete(otherMap, key)
+				}
+			}
 		}
 		logs[i].Other = common.MapToJsonStr(otherMap)
 		logs[i].Id = startIdx + i + 1
 	}
+}
+
+var userVisibleResponsesRoutingReasons = map[string]struct{}{
+	"unsupported_compaction":                 {},
+	"unsupported_encrypted_reasoning_replay": {},
+	"unsupported_codex_dynamic_headers":      {},
+	"unsupported_function_tools":             {},
+	"unsupported_custom_tools":               {},
+	"unsupported_namespace_tools":            {},
+	"unsupported_tool_search":                {},
+	"responses_to_chat_incompatible":         {},
+}
+
+var userVisibleResponsesRoutingOutcomes = map[string]struct{}{
+	"success":               {},
+	"error":                 {},
+	"rate_limited":          {},
+	"authentication_failed": {},
+	"channel_unavailable":   {},
+}
+
+func buildUserResponsesRoutingSummary(other map[string]interface{}) *dto.ResponsesRoutingUserSummary {
+	if other == nil {
+		return nil
+	}
+	trace, _ := other["responses_routing_trace"].(map[string]interface{})
+	summary := &dto.ResponsesRoutingUserSummary{}
+	if trace != nil {
+		summary.AttemptCount = userResponsesRoutingListLength(trace["attempted_channels"])
+		summary.PreflightSkipCount = userResponsesRoutingListLength(trace["preflight_skipped"])
+		if outcome, ok := trace["terminal_reason"].(string); ok {
+			outcome = strings.TrimSpace(outcome)
+			if _, allowed := userVisibleResponsesRoutingOutcomes[outcome]; allowed {
+				summary.Outcome = outcome
+			}
+		}
+	}
+	if summary.PreflightSkipCount == 0 {
+		summary.PreflightSkipCount = userResponsesRoutingListLength(other["responses_routing_channel_skips"])
+	}
+	summary.Reasons = userResponsesRoutingReasons(trace, other["responses_routing_channel_skips"])
+	summary.AutomaticReroute = summary.PreflightSkipCount > 0 || summary.AttemptCount > 1
+	if summary.Outcome == "" && !summary.AutomaticReroute && len(summary.Reasons) == 0 {
+		return nil
+	}
+	return summary
+}
+
+func userResponsesRoutingListLength(value interface{}) int {
+	switch values := value.(type) {
+	case []interface{}:
+		return len(values)
+	case []map[string]interface{}:
+		return len(values)
+	default:
+		return 0
+	}
+}
+
+func userResponsesRoutingReasons(trace map[string]interface{}, rawSkips interface{}) []string {
+	seen := make(map[string]struct{})
+	reasons := make([]string, 0)
+	appendReason := func(raw interface{}) {
+		reason, ok := raw.(string)
+		if !ok {
+			return
+		}
+		reason = strings.TrimSpace(reason)
+		if _, allowed := userVisibleResponsesRoutingReasons[reason]; !allowed {
+			return
+		}
+		if _, exists := seen[reason]; exists {
+			return
+		}
+		seen[reason] = struct{}{}
+		reasons = append(reasons, reason)
+	}
+	appendReasonsFromList := func(raw interface{}) {
+		switch values := raw.(type) {
+		case []interface{}:
+			for _, value := range values {
+				if item, ok := value.(map[string]interface{}); ok {
+					appendReason(item["reason"])
+				}
+			}
+		case []map[string]interface{}:
+			for _, item := range values {
+				appendReason(item["reason"])
+			}
+		}
+	}
+	if trace != nil {
+		appendReasonsFromList(trace["preflight_skipped"])
+	}
+	appendReasonsFromList(rawSkips)
+	return reasons
+}
+
+func redactUserLogContent(content string) string {
+	const responsesCompactLogPrefix = "Responses Compact "
+	index := strings.Index(content, responsesCompactLogPrefix)
+	if index <= 0 {
+		return content
+	}
+	return strings.TrimSuffix(strings.TrimSpace(content[:index]), ",")
 }
 
 func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
@@ -669,14 +794,276 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 }
 
 type Stat struct {
-	Quota int `json:"quota"`
-	Rpm   int `json:"rpm"`
-	Tpm   int `json:"tpm"`
+	Quota            int      `json:"quota"`
+	Rpm              int      `json:"rpm"`
+	Tpm              int      `json:"tpm"`
+	InputTokens      int      `json:"input_tokens"`
+	CacheReadTokens  int      `json:"cache_read_tokens"`
+	CacheWriteTokens int      `json:"cache_write_tokens"`
+	OutputTokens     int      `json:"output_tokens"`
+	CacheRate        *float64 `json:"cache_rate"`
 }
 
-func sumUsedQuota(filter LogFilter) (stat Stat, err error) {
+type logTokenStats struct {
+	InputTokens          uint64
+	CacheReadTokens      uint64
+	CacheWriteTokens     uint64
+	OutputTokens         uint64
+	CacheRateNumerator   uint64
+	CacheRateDenominator uint64
+}
+
+const logTokenStatsBatchSize = 512
+
+type logTokenStatsTotals struct {
+	InputTokens  int64 `gorm:"column:input_tokens"`
+	OutputTokens int64 `gorm:"column:output_tokens"`
+}
+
+type logTokenStatsRow struct {
+	Id           int            `gorm:"column:id"`
+	PromptTokens sql.NullInt64  `gorm:"column:prompt_tokens"`
+	Other        sql.NullString `gorm:"column:other"`
+}
+
+func normalizeLogTokenTotal(value int64) uint64 {
+	if value <= 0 {
+		return 0
+	}
+	return uint64(value)
+}
+
+func saturatingAddLogTokenCount(left uint64, right uint64) uint64 {
+	if ^uint64(0)-left < right {
+		return ^uint64(0)
+	}
+	return left + right
+}
+
+func logTokenCountToInt(value uint64) int {
+	maxInt := uint64(^uint(0) >> 1)
+	if value > maxInt {
+		return int(maxInt)
+	}
+	return int(value)
+}
+
+func normalizeLogTokenFloat(number float64) uint64 {
+	if number <= 0 || math.IsNaN(number) || math.IsInf(number, 0) {
+		return 0
+	}
+	// float64(^uint64(0)) rounds to 2^64, so this comparison also avoids
+	// converting an out-of-range float to uint64.
+	if number >= float64(^uint64(0)) {
+		return ^uint64(0)
+	}
+	return uint64(number)
+}
+
+func logOtherNumber(value interface{}) (float64, bool) {
+	switch value := value.(type) {
+	case float64:
+		return value, true
+	case float32:
+		return float64(value), true
+	case int:
+		return float64(value), true
+	case int8:
+		return float64(value), true
+	case int16:
+		return float64(value), true
+	case int32:
+		return float64(value), true
+	case int64:
+		return float64(value), true
+	case uint:
+		return float64(value), true
+	case uint8:
+		return float64(value), true
+	case uint16:
+		return float64(value), true
+	case uint32:
+		return float64(value), true
+	case uint64:
+		return float64(value), true
+	case common.JsonNumber:
+		parsed, err := strconv.ParseFloat(value.String(), 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
+}
+
+func logOtherTokenCount(value interface{}) uint64 {
+	switch value := value.(type) {
+	case int:
+		if value > 0 {
+			return uint64(value)
+		}
+		return 0
+	case int8:
+		if value > 0 {
+			return uint64(value)
+		}
+		return 0
+	case int16:
+		if value > 0 {
+			return uint64(value)
+		}
+		return 0
+	case int32:
+		if value > 0 {
+			return uint64(value)
+		}
+		return 0
+	case int64:
+		if value > 0 {
+			return uint64(value)
+		}
+		return 0
+	case uint:
+		return uint64(value)
+	case uint8:
+		return uint64(value)
+	case uint16:
+		return uint64(value)
+	case uint32:
+		return uint64(value)
+	case uint64:
+		return value
+	}
+	number, ok := logOtherNumber(value)
+	if !ok {
+		return 0
+	}
+	return normalizeLogTokenFloat(number)
+}
+
+type logCacheTelemetry struct {
+	CacheRead       interface{} `json:"cache_tokens"`
+	CacheWrite      interface{} `json:"cache_write_tokens"`
+	CacheCreation   interface{} `json:"cache_creation_tokens"`
+	CacheCreation5m interface{} `json:"cache_creation_tokens_5m"`
+	CacheCreation1h interface{} `json:"cache_creation_tokens_1h"`
+	Semantic        interface{} `json:"usage_semantic"`
+	Claude          interface{} `json:"claude"`
+}
+
+func logOtherCacheWriteTokens(other logCacheTelemetry) uint64 {
+	if normalized := logOtherTokenCount(other.CacheWrite); normalized > 0 {
+		return normalized
+	}
+	cacheCreation5m := logOtherTokenCount(other.CacheCreation5m)
+	cacheCreation1h := logOtherTokenCount(other.CacheCreation1h)
+	if cacheCreation5m > 0 || cacheCreation1h > 0 {
+		return saturatingAddLogTokenCount(cacheCreation5m, cacheCreation1h)
+	}
+	return logOtherTokenCount(other.CacheCreation)
+}
+
+func logOtherUsesAnthropicCacheRate(other logCacheTelemetry) bool {
+	semantic, _ := other.Semantic.(string)
+	return strings.EqualFold(strings.TrimSpace(semantic), "anthropic") || other.Claude == true
+}
+
+func logOtherHasCacheReadTelemetry(other logCacheTelemetry) bool {
+	count, ok := logOtherNumber(other.CacheRead)
+	return ok && count >= 0 && !math.IsNaN(count) && !math.IsInf(count, 0)
+}
+
+func sumLogTokenStats(ctx context.Context, filter LogFilter) (stats logTokenStats, err error) {
+	// Prompt and completion totals are ordinary numeric columns. Let the
+	// database aggregate them instead of transferring and iterating every log
+	// row in the application process.
+	totalsQuery := LOG_DB.WithContext(ctx).Table("logs").Select(
+		`COALESCE(SUM(CASE WHEN COALESCE(logs.prompt_tokens, 0) > 0 THEN logs.prompt_tokens ELSE 0 END), 0) AS input_tokens,
+		 COALESCE(SUM(CASE WHEN COALESCE(logs.completion_tokens, 0) > 0 THEN logs.completion_tokens ELSE 0 END), 0) AS output_tokens`,
+	)
+	totalsQuery, err = applyLogFilters(totalsQuery, filter)
+	if err != nil {
+		return stats, err
+	}
+	var totals logTokenStatsTotals
+	if err := totalsQuery.Scan(&totals).Error; err != nil {
+		return stats, err
+	}
+	stats.InputTokens = normalizeLogTokenTotal(totals.InputTokens)
+	stats.OutputTokens = normalizeLogTokenTotal(totals.OutputTokens)
+
+	// Cache telemetry is stored in the legacy JSON `other` column, so it still
+	// needs decoding. Restrict that pass to rows containing a cache field and
+	// fetch bounded keyset batches so a large log table never creates one
+	// unbounded result set or holds a long-lived cursor.
+	lastID := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return stats, err
+		}
+		telemetryQuery := LOG_DB.WithContext(ctx).Table("logs").Select("logs.id, logs.prompt_tokens, logs.other")
+		telemetryQuery, err = applyLogFilters(telemetryQuery, filter)
+		if err != nil {
+			return stats, err
+		}
+		telemetryQuery = telemetryQuery.
+			Where("logs.other LIKE ? ESCAPE '!'", "%cache!_%").
+			Where("logs.id > ?", lastID).
+			Order("logs.id ASC").
+			Limit(logTokenStatsBatchSize)
+
+		var rows []logTokenStatsRow
+		if err := telemetryQuery.Scan(&rows).Error; err != nil {
+			return stats, err
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for _, row := range rows {
+			inputTokens := normalizeLogTokenTotal(row.PromptTokens.Int64)
+			var otherMap logCacheTelemetry
+			if err := common.UnmarshalJsonStr(row.Other.String, &otherMap); err != nil {
+				otherMap = logCacheTelemetry{}
+			}
+			cacheReadTokens := logOtherTokenCount(otherMap.CacheRead)
+			cacheWriteTokens := logOtherCacheWriteTokens(otherMap)
+			stats.CacheReadTokens = saturatingAddLogTokenCount(stats.CacheReadTokens, cacheReadTokens)
+			stats.CacheWriteTokens = saturatingAddLogTokenCount(stats.CacheWriteTokens, cacheWriteTokens)
+
+			cacheRateDenominator := inputTokens
+			if logOtherUsesAnthropicCacheRate(otherMap) {
+				cacheRateDenominator = saturatingAddLogTokenCount(cacheRateDenominator, cacheReadTokens)
+			}
+			if cacheRateDenominator > 0 && logOtherHasCacheReadTelemetry(otherMap) {
+				stats.CacheRateNumerator = saturatingAddLogTokenCount(stats.CacheRateNumerator, cacheReadTokens)
+				stats.CacheRateDenominator = saturatingAddLogTokenCount(stats.CacheRateDenominator, cacheRateDenominator)
+			}
+		}
+		nextID := rows[len(rows)-1].Id
+		if nextID <= lastID {
+			return stats, errors.New("日志统计游标未前进")
+		}
+		lastID = nextID
+		if len(rows) < logTokenStatsBatchSize {
+			break
+		}
+	}
+	return stats, nil
+}
+
+func sumUsedQuota(ctx context.Context, filter LogFilter) (stat Stat, err error) {
+	if err := ctx.Err(); err != nil {
+		return stat, err
+	}
 	recentCutoff := time.Now().Add(-60 * time.Second).Unix()
-	tx := LOG_DB.Table("logs").Select(
+	tx := LOG_DB.WithContext(ctx).Table("logs").Select(
 		`COALESCE(SUM(quota), 0) quota,
 		COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), 0) rpm,
 		COALESCE(SUM(CASE WHEN created_at >= ? THEN COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0) ELSE 0 END), 0) tpm`,
@@ -693,6 +1080,20 @@ func sumUsedQuota(filter LogFilter) (stat Stat, err error) {
 	if err := tx.Scan(&stat).Error; err != nil {
 		common.SysError("failed to query log stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
+	}
+
+	tokenStats, err := sumLogTokenStats(ctx, filter)
+	if err != nil {
+		common.SysError("failed to query log token stat: " + err.Error())
+		return stat, errors.New("查询统计数据失败")
+	}
+	stat.InputTokens = logTokenCountToInt(tokenStats.InputTokens)
+	stat.CacheReadTokens = logTokenCountToInt(tokenStats.CacheReadTokens)
+	stat.CacheWriteTokens = logTokenCountToInt(tokenStats.CacheWriteTokens)
+	stat.OutputTokens = logTokenCountToInt(tokenStats.OutputTokens)
+	if tokenStats.CacheRateDenominator > 0 {
+		rate := float64(tokenStats.CacheRateNumerator) / float64(tokenStats.CacheRateDenominator)
+		stat.CacheRate = &rate
 	}
 
 	return stat, nil
@@ -726,7 +1127,11 @@ func SumUsedQuotaWithWildcardUsername(logType int, startTimestamp int64, endTime
 }
 
 func SumUsedQuotaByFilter(filter LogFilter) (stat Stat, err error) {
-	return sumUsedQuota(filter)
+	return SumUsedQuotaByFilterContext(context.Background(), filter)
+}
+
+func SumUsedQuotaByFilterContext(ctx context.Context, filter LogFilter) (Stat, error) {
+	return sumUsedQuota(ctx, filter)
 }
 
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {

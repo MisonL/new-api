@@ -15,50 +15,69 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	ResponsesReasoningContextActionForwardedSupported  = "forwarded_supported_capability"
+	ResponsesReasoningContextActionForwardedUnverified = "forwarded_unverified_capability"
+	ResponsesReasoningContextActionStrippedUnsupported = "stripped_unsupported_capability"
+)
+
+type ResponsesReasoningContextCapabilityDecision struct {
+	Capability  dto.ResponsesReasoningContextCapability
+	Action      string
+	ChannelID   int
+	Model       string
+	Profile     dto.ResponsesUpstreamProfile
+	ChannelType int
+	Settings    dto.ChannelOtherSettings
+}
+
+func ResolveResponsesReasoningContextCapabilityDecision(info *RelayInfo, requestModel string) ResponsesReasoningContextCapabilityDecision {
+	decision := ResponsesReasoningContextCapabilityDecision{
+		Capability: dto.ResponsesReasoningContextCapabilityUnknown,
+		Action:     ResponsesReasoningContextActionForwardedUnverified,
+		Model:      requestModel,
+	}
+	if info != nil {
+		if info.OriginModelName != "" {
+			decision.Model = info.OriginModelName
+		}
+		if info.ChannelMeta != nil {
+			decision.ChannelID = info.ChannelId
+			decision.ChannelType = info.ChannelType
+			decision.Settings = info.ChannelOtherSettings
+		}
+	}
+	decision.Profile = decision.Settings.NormalizedResponsesUpstreamProfile()
+	decision.Capability = decision.Settings.ResolveResponsesReasoningContextCapability(decision.ChannelType)
+	if decision.Capability == dto.ResponsesReasoningContextCapabilitySupported {
+		decision.Action = ResponsesReasoningContextActionForwardedSupported
+	} else if decision.Capability == dto.ResponsesReasoningContextCapabilityUnsupported {
+		decision.Action = ResponsesReasoningContextActionStrippedUnsupported
+	}
+	return decision
+}
+
 // ApplyResponsesReasoningContextCapability applies the channel's explicit
 // reasoning.context capability decision before a Responses request is sent.
-// Unsupported channels lose only reasoning.context; supported and unknown
-// channels retain the client value for native forwarding.
 func ApplyResponsesReasoningContextCapability(c *gin.Context, info *RelayInfo, request dto.OpenAIResponsesRequest) dto.OpenAIResponsesRequest {
 	if request.Reasoning == nil || len(bytes.TrimSpace(request.Reasoning.Context)) == 0 {
 		return request
 	}
-
-	channelType := 0
-	channelID := 0
-	model := request.Model
-	settings := dto.ChannelOtherSettings{}
-	if info != nil {
-		if info.OriginModelName != "" {
-			model = info.OriginModelName
-		}
-		if info.ChannelMeta != nil {
-			channelType = info.ChannelType
-			channelID = info.ChannelId
-			settings = info.ChannelOtherSettings
-		}
-	}
-
-	capability := settings.ResolveResponsesReasoningContextCapability(channelType)
-	action := "forwarded_unverified_capability"
-	switch capability {
-	case dto.ResponsesReasoningContextCapabilitySupported:
-		action = "forwarded_supported_capability"
-	case dto.ResponsesReasoningContextCapabilityUnsupported:
+	decision := ResolveResponsesReasoningContextCapabilityDecision(info, request.Model)
+	if decision.Capability == dto.ResponsesReasoningContextCapabilityUnsupported {
 		strippedRequest, stripped := StripResponsesReasoningContext(request)
 		if stripped {
 			request = strippedRequest
-			action = "stripped_unsupported_capability"
 			basecommon.SysLog(fmt.Sprintf(
 				"responses reasoning context stripped by channel capability: channel_id=%d model=%s profile=%s",
-				channelID,
-				model,
-				settings.NormalizedResponsesUpstreamProfile(),
+				decision.ChannelID,
+				decision.Model,
+				decision.Profile,
 			))
 		}
 	}
 	if c != nil {
-		basecommon.SetContextKey(c, constant.ContextKeyResponsesReasoningContextAction, action)
+		basecommon.SetContextKey(c, constant.ContextKeyResponsesReasoningContextAction, decision.Action)
 	}
 	return request
 }
@@ -70,7 +89,6 @@ func ApplyResponsesLogicalModelReasoningEffort(info *RelayInfo, request dto.Open
 	if !found {
 		return request, false
 	}
-
 	updatedRequest := request
 	if request.Reasoning == nil {
 		updatedRequest.Reasoning = &dto.Reasoning{Effort: effort}

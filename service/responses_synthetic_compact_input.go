@@ -21,7 +21,7 @@ const (
 	syntheticCompactVisibleFieldMaxBytes       = 1024 * 1024
 	syntheticCompactVisibleInputItemMaxBytes   = 1024 * 1024
 	syntheticCompactVisibleInputBufferMaxBytes = syntheticCompactVisibleTextMax * 2
-	syntheticCompactDataURIScanMaxBytes        = 4 * 1024
+	syntheticCompactDataURIScanMaxBytes        = syntheticCompactVisibleFieldMaxBytes
 	syntheticCompactDataURIHeaderMaxBytes      = 512
 	syntheticCompactJSONNestingDepthMax        = 64
 	syntheticCompactMetadataFieldMaxBytes      = 16 * 1024
@@ -91,7 +91,7 @@ func HasRemoteResponsesCompactionInput(ctx context.Context, req dto.OpenAIRespon
 			}
 			return false, ErrResponsesCompactionContentRequired
 		}
-		if ok, err := syntheticCompactMarkerReferencesStoredState(ctx, marker); err != nil {
+		if _, ok, err := syntheticCompactIDFromMarker(ctx, marker); err != nil {
 			return false, err
 		} else if !ok {
 			hasRemote = true
@@ -125,7 +125,7 @@ func removeSyntheticCompactMarkers(ctx context.Context, input common.RawMessage)
 		}
 		if relaycommon.IsResponsesCompactionItemType(rawStringField(item["type"])) {
 			if marker := rawStringField(item["encrypted_content"]); marker != "" {
-				if ok, err := syntheticCompactMarkerReferencesStoredState(ctx, marker); err != nil {
+				if _, ok, err := syntheticCompactIDFromMarker(ctx, marker); err != nil {
 					return nil, err
 				} else if ok {
 					continue
@@ -571,17 +571,29 @@ func visibleResponsesToolPayloadField(raw common.RawMessage) string {
 }
 
 func hasEmbeddedMediaDataURI(raw []byte) bool {
-	if len(raw) > syntheticCompactDataURIScanMaxBytes {
-		raw = raw[:syntheticCompactDataURIScanMaxBytes]
+	const dataURIPrefix = "data:"
+	const dataURIPrefixLen = len(dataURIPrefix)
+	scanLimit := syntheticCompactDataURIScanMaxBytes
+	if len(raw) > scanLimit {
+		// Keep enough overlap to complete a prefix that starts immediately before
+		// the bounded scan window. The header bytes are included as well, but a
+		// candidate whose start is at or beyond scanLimit remains out of scope.
+		scanLimit += syntheticCompactDataURIHeaderMaxBytes
+		if scanLimit > len(raw) {
+			scanLimit = len(raw)
+		}
+		raw = raw[:scanLimit]
 	}
-	searchStart := 0
-	for searchStart < len(raw) {
-		offset := bytes.Index(raw[searchStart:], []byte("data:"))
-		if offset < 0 {
+	for offset := 0; offset < len(raw); {
+		relativeStart := bytes.Index(raw[offset:], []byte(dataURIPrefix))
+		if relativeStart < 0 {
 			return false
 		}
-		start := searchStart + offset
-		headerStart := start + len("data:")
+		start := offset + relativeStart
+		if start >= syntheticCompactDataURIScanMaxBytes {
+			return false
+		}
+		headerStart := start + len(dataURIPrefix)
 		headerEnd := headerStart + syntheticCompactDataURIHeaderMaxBytes
 		if headerEnd > len(raw) {
 			headerEnd = len(raw)
@@ -590,7 +602,19 @@ func hasEmbeddedMediaDataURI(raw []byte) bool {
 		if separator := bytes.Index(header, []byte(";base64,")); separator > 0 && bytes.IndexByte(header[:separator], '/') > 0 {
 			return true
 		}
-		searchStart = headerStart
+		// Continue at the end of this candidate's bounded header unless another
+		// candidate starts inside the same window. This keeps adversarial runs of
+		// `data:` prefixes linear while still checking every possible URI start.
+		nextSearch := start + dataURIPrefixLen
+		if nextSearch >= headerEnd {
+			offset = nextSearch
+			continue
+		}
+		if nextRelative := bytes.Index(raw[nextSearch:headerEnd], []byte(dataURIPrefix)); nextRelative >= 0 {
+			offset = nextSearch + nextRelative
+			continue
+		}
+		offset = headerEnd
 	}
 	return false
 }

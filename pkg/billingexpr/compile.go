@@ -59,6 +59,7 @@ var compileEnvPrototypeV1 = map[string]interface{}{
 	"weekday": func(string) int { return 0 },
 	"month":   func(string) int { return 0 },
 	"day":     func(string) int { return 0 },
+	"year":    func(string) int { return 0 },
 	"max":     math.Max,
 	"min":     math.Min,
 	"abs":     math.Abs,

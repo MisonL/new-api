@@ -18,6 +18,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -165,11 +166,14 @@ func configureResponsesReadBodyRetryRelay(t *testing.T) {
 	common.RetryTimes = 1
 	constant.ErrorLogEnabled = false
 	constant.CountToken = false
+	previousFetchSetting := *system_setting.GetFetchSetting()
+	system_setting.GetFetchSetting().EnableSSRFProtection = false
 	service.InitHttpClient()
 	t.Cleanup(func() {
 		common.RetryTimes = previousRetryTimes
 		constant.ErrorLogEnabled = previousErrorLogEnabled
 		constant.CountToken = previousCountToken
+		*system_setting.GetFetchSetting() = previousFetchSetting
 		service.InitHttpClient()
 	})
 }

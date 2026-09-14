@@ -310,7 +310,7 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 		if src.Path == "" {
 			return ""
 		}
-		if hasOpaqueResponsesReplayMetadata(c) {
+		if metadata, ok := common.GetResponsesRequestMetadata(c); ok && metadata.HasOpaqueEncryptedContent {
 			return ""
 		}
 		storage, err := common.GetBodyStorage(c)
@@ -860,10 +860,6 @@ func RecordResponsesEncryptedContentAffinityWithStatus(c *gin.Context, responseB
 	}
 }
 
-// responsesEncryptedContentAffinityRecordPath returns the affinity-rule path
-// for outputs that can later be replayed as native Responses requests. Direct
-// compact outputs are consumed through /v1/responses, so they intentionally
-// reuse that existing rule path instead of expanding operator-configured regexes.
 func responsesEncryptedContentAffinityRecordPath(requestPath string) (string, bool) {
 	switch requestPath {
 	case "/v1/responses":
@@ -880,7 +876,7 @@ func responsesEncryptedContentAffinityUsingGroup(c *gin.Context) string {
 	if usingGroup == "" {
 		return channelAffinityDefaultUsingGroup
 	}
-	if usingGroup != "auto" {
+	if !common.IsAutoGroup(usingGroup) {
 		return usingGroup
 	}
 	selectedGroup := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyAutoGroup))

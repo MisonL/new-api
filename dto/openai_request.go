@@ -395,15 +395,20 @@ func (r *GeneralOpenAIRequest) ParseInput() []string {
 }
 
 type Message struct {
-	Role             string          `json:"role"`
-	Content          any             `json:"content"`
-	Name             *string         `json:"name,omitempty"`
-	Prefix           *bool           `json:"prefix,omitempty"`
-	ReasoningContent *string         `json:"reasoning_content,omitempty"`
-	Reasoning        *string         `json:"reasoning,omitempty"`
-	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
-	ToolCallId       string          `json:"tool_call_id,omitempty"`
-	parsedContent    []MediaContent
+	Role             string  `json:"role"`
+	Content          any     `json:"content"`
+	Name             *string `json:"name,omitempty"`
+	Prefix           *bool   `json:"prefix,omitempty"`
+	ReasoningContent *string `json:"reasoning_content,omitempty"`
+	// ThinkingContent is used by providers such as SenseNova DeepSeek V4 Pro.
+	// Keep it alongside the OpenAI-compatible reasoning aliases so protocol
+	// conversion can preserve the provider's documented field without losing
+	// the common reasoning accessor.
+	ThinkingContent *string         `json:"thinking_content,omitempty"`
+	Reasoning       *string         `json:"reasoning,omitempty"`
+	ToolCalls       json.RawMessage `json:"tool_calls,omitempty"`
+	ToolCallId      string          `json:"tool_call_id,omitempty"`
+	parsedContent   []MediaContent
 	//parsedStringContent *string
 }
 
@@ -423,11 +428,17 @@ func (m *MediaContent) GetImageMedia() *MessageImageUrl {
 		if _, ok := m.ImageUrl.(*MessageImageUrl); ok {
 			return m.ImageUrl.(*MessageImageUrl)
 		}
+		if imageURL, ok := m.ImageUrl.(string); ok {
+			return &MessageImageUrl{Url: imageURL}
+		}
 		if itemMap, ok := m.ImageUrl.(map[string]any); ok {
 			out := &MessageImageUrl{
 				Url:      common.Interface2String(itemMap["url"]),
 				Detail:   common.Interface2String(itemMap["detail"]),
 				MimeType: common.Interface2String(itemMap["mime_type"]),
+			}
+			if out.MimeType == "" {
+				out.MimeType = common.Interface2String(itemMap["mimeType"])
 			}
 			return out
 		}
@@ -457,10 +468,22 @@ func (m *MediaContent) GetFile() *MessageFile {
 			return m.File.(*MessageFile)
 		}
 		if itemMap, ok := m.File.(map[string]any); ok {
+			fileName := common.Interface2String(itemMap["filename"])
+			if fileName == "" {
+				fileName = common.Interface2String(itemMap["file_name"])
+			}
 			out := &MessageFile{
-				FileName: common.Interface2String(itemMap["file_name"]),
+				FileName: fileName,
 				FileData: common.Interface2String(itemMap["file_data"]),
 				FileId:   common.Interface2String(itemMap["file_id"]),
+				FileUrl:  common.Interface2String(itemMap["file_url"]),
+				MimeType: common.Interface2String(itemMap["mime_type"]),
+			}
+			if out.MimeType == "" {
+				out.MimeType = common.Interface2String(itemMap["mimeType"])
+			}
+			if out.FileUrl == "" {
+				out.FileUrl = common.Interface2String(itemMap["url"])
 			}
 			return out
 		}
@@ -503,10 +526,16 @@ func (m *MediaContent) ToFileSource() types.FileSource {
 		return types.NewFileSourceFromData(audio.Data, mimeType)
 	case ContentTypeFile:
 		file := m.GetFile()
-		if file == nil || file.FileData == "" {
+		if file == nil {
 			return nil
 		}
-		return types.NewFileSourceFromData(file.FileData, "")
+		if file.FileData != "" {
+			return types.NewFileSourceFromData(file.FileData, file.MimeType)
+		}
+		if file.FileUrl != "" {
+			return types.NewFileSourceFromData(file.FileUrl, file.MimeType)
+		}
+		return nil
 	case ContentTypeVideoUrl:
 		video := m.GetVideoUrl()
 		if video == nil || video.Url == "" {
@@ -536,6 +565,8 @@ type MessageFile struct {
 	FileName string `json:"filename,omitempty"`
 	FileData string `json:"file_data,omitempty"`
 	FileId   string `json:"file_id,omitempty"`
+	FileUrl  string `json:"file_url,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
 }
 
 type MessageVideoUrl struct {
@@ -552,11 +583,14 @@ const (
 )
 
 func (m *Message) GetReasoningContent() string {
-	if m.ReasoningContent == nil && m.Reasoning == nil {
+	if m.ReasoningContent == nil && m.ThinkingContent == nil && m.Reasoning == nil {
 		return ""
 	}
 	if m.ReasoningContent != nil {
 		return *m.ReasoningContent
+	}
+	if m.ThinkingContent != nil {
+		return *m.ThinkingContent
 	}
 	return *m.Reasoning
 }
@@ -581,6 +615,24 @@ func (m *Message) ParseToolCalls() []ToolCallRequest {
 		return toolCalls
 	}
 	return toolCalls
+}
+
+// ParseToolCallsStrict parses the OpenAI tool_calls field without treating a
+// malformed value as an empty tool list. Protocol adapters use this method at
+// conversion boundaries where silently dropping a tool call would change the
+// request semantics.
+func (m *Message) ParseToolCallsStrict() ([]ToolCallRequest, error) {
+	if m == nil || len(m.ToolCalls) == 0 || common.GetJsonType(m.ToolCalls) == "null" {
+		return nil, nil
+	}
+	if common.GetJsonType(m.ToolCalls) != "array" {
+		return nil, fmt.Errorf("tool_calls must be an array")
+	}
+	var toolCalls []ToolCallRequest
+	if err := common.Unmarshal(m.ToolCalls, &toolCalls); err != nil {
+		return nil, fmt.Errorf("tool_calls must be an array: %w", err)
+	}
+	return toolCalls, nil
 }
 
 func (m *Message) SetToolCalls(toolCalls any) {
@@ -680,6 +732,10 @@ func (m *Message) ParseContent() []MediaContent {
 
 	arrayContent, ok := m.Content.([]any)
 	if !ok {
+		if typedContent, typedOK := m.Content.([]MediaContent); typedOK {
+			m.parsedContent = typedContent
+			return typedContent
+		}
 		return contentList
 	}
 
@@ -748,30 +804,61 @@ func (m *Message) ParseContent() []MediaContent {
 			}
 		case ContentTypeFile:
 			if fileData, ok := contentItem["file"].(map[string]interface{}); ok {
-				fileId, ok3 := fileData["file_id"].(string)
-				if ok3 {
+				fileName, _ := fileData["filename"].(string)
+				if fileName == "" {
+					fileName, _ = fileData["file_name"].(string)
+				}
+				fileID, _ := fileData["file_id"].(string)
+				fileDataStr, _ := fileData["file_data"].(string)
+				fileURL, _ := fileData["file_url"].(string)
+				if fileURL == "" {
+					fileURL, _ = fileData["url"].(string)
+				}
+				mimeType, _ := fileData["mime_type"].(string)
+				if mimeType == "" {
+					mimeType, _ = fileData["mimeType"].(string)
+				}
+				if fileID != "" || fileDataStr != "" || fileURL != "" {
 					contentList = append(contentList, MediaContent{
 						Type: ContentTypeFile,
 						File: &MessageFile{
-							FileId: fileId,
+							FileName: fileName,
+							FileData: fileDataStr,
+							FileId:   fileID,
+							FileUrl:  fileURL,
+							MimeType: mimeType,
 						},
 					})
-				} else {
-					fileName, ok1 := fileData["filename"].(string)
-					fileDataStr, ok2 := fileData["file_data"].(string)
-					if ok1 && ok2 {
-						contentList = append(contentList, MediaContent{
-							Type: ContentTypeFile,
-							File: &MessageFile{
-								FileName: fileName,
-								FileData: fileDataStr,
-							},
-						})
-					}
+				}
+			} else {
+				fileName, _ := contentItem["filename"].(string)
+				fileID, _ := contentItem["file_id"].(string)
+				fileDataStr, _ := contentItem["file_data"].(string)
+				fileURL, _ := contentItem["file_url"].(string)
+				if fileURL == "" {
+					fileURL, _ = contentItem["url"].(string)
+				}
+				mimeType, _ := contentItem["mime_type"].(string)
+				if mimeType == "" {
+					mimeType, _ = contentItem["mimeType"].(string)
+				}
+				if fileID != "" || fileDataStr != "" || fileURL != "" {
+					contentList = append(contentList, MediaContent{
+						Type: ContentTypeFile,
+						File: &MessageFile{FileName: fileName, FileData: fileDataStr, FileId: fileID, FileUrl: fileURL, MimeType: mimeType},
+					})
 				}
 			}
 		case ContentTypeVideoUrl:
-			if videoUrl, ok := contentItem["video_url"].(string); ok {
+			videoValue := contentItem["video_url"]
+			var videoUrl string
+			switch value := videoValue.(type) {
+			case string:
+				videoUrl = value
+			case map[string]interface{}:
+				videoUrl, _ = value["url"].(string)
+			}
+			if videoUrl != "" {
 				contentList = append(contentList, MediaContent{
 					Type: ContentTypeVideoUrl,
 					VideoUrl: &MessageVideoUrl{
@@ -786,6 +873,68 @@ func (m *Message) ParseContent() []MediaContent {
 		m.parsedContent = contentList
 	}
 	return contentList
+}
+
+// ParseContentStrict parses string or array-form OpenAI message content and
+// reports malformed array members instead of silently ignoring them. The
+// method validates only the common envelope; protocol-specific adapters still
+// decide which media types they can represent.
+func (m *Message) ParseContentStrict() ([]MediaContent, error) {
+	if m == nil || m.Content == nil {
+		return nil, nil
+	}
+	if content, ok := m.Content.(string); ok {
+		return []MediaContent{{
+			Type: ContentTypeText,
+			Text: content,
+		}}, nil
+	}
+	if content, ok := m.Content.([]MediaContent); ok {
+		parts := append([]MediaContent(nil), content...)
+		for index, part := range parts {
+			if strings.TrimSpace(part.Type) == "" {
+				return nil, fmt.Errorf("content[%d].type is required", index)
+			}
+		}
+		return parts, nil
+	}
+
+	var raw []byte
+	switch content := m.Content.(type) {
+	case json.RawMessage:
+		raw = content
+	case []byte:
+		raw = content
+	default:
+		encoded, err := common.Marshal(content)
+		if err != nil {
+			return nil, fmt.Errorf("content cannot be encoded: %w", err)
+		}
+		raw = encoded
+	}
+	if common.GetJsonType(raw) != "array" {
+		return nil, fmt.Errorf("content must be a string or array")
+	}
+
+	var rawParts []common.RawMessage
+	if err := common.Unmarshal(raw, &rawParts); err != nil {
+		return nil, fmt.Errorf("content must be an array: %w", err)
+	}
+	parts := make([]MediaContent, 0, len(rawParts))
+	for index, rawPart := range rawParts {
+		if common.GetJsonType(rawPart) != "object" {
+			return nil, fmt.Errorf("content[%d] must be an object", index)
+		}
+		var part MediaContent
+		if err := common.Unmarshal(rawPart, &part); err != nil {
+			return nil, fmt.Errorf("content[%d] must be an object: %w", index, err)
+		}
+		if strings.TrimSpace(part.Type) == "" {
+			return nil, fmt.Errorf("content[%d].type is required", index)
+		}
+		parts = append(parts, part)
+	}
+	return parts, nil
 }
 
 // old code
@@ -1010,6 +1159,14 @@ type OpenAIResponsesRequest struct {
 	// perplexity
 	Preset json.RawMessage            `json:"preset,omitempty"`
 	Extra  map[string]json.RawMessage `json:"-"`
+
+	// effectiveToolsCache avoids reparsing the same top-level and additional
+	// tool declarations during Responses preflight. The signature invalidates
+	// the cache when callers replace Tools or Input in-place.
+	effectiveToolsCacheSignature string
+	effectiveToolsCache          []common.RawMessage
+	effectiveToolsCacheErr       error
+	effectiveToolsCacheReady     bool
 }
 
 var openAIResponsesRequestKnownFields = sync.OnceValue(func() map[string]struct{} {

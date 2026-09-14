@@ -566,7 +566,7 @@ func TestFindResponsesViaChatRuleOnlyWhenToolBridgeRequiredMatchesCustomToolsAnd
 			name: "tool search history",
 			request: &dto.OpenAIResponsesRequest{Input: common.RawMessage(`[
 				{"type":"tool_search_call","call_id":"call_1","name":"search","arguments":"{}"},
-				{"type":"tool_search_output","call_id":"call_1","output":"[]"}
+				{"type":"tool_search_output","call_id":"call_1","status":"completed","execution":"client","tools":[]}
 			]`)},
 		},
 	}
@@ -710,6 +710,22 @@ func TestFindResponsesViaChatRuleSkipsOpaqueEncryptedReasoningReplay(t *testing.
 			{"type":"reasoning","encrypted_content":"opaque-reasoning-state"},
 			{"type":"message","role":"user","content":"continue"}
 		]`)},
+	)
+
+	require.NoError(t, err)
+	require.Nil(t, rule)
+}
+
+func TestFindResponsesViaChatRulePassThroughSkipsInputParsing(t *testing.T) {
+	rule, err := FindResponsesViaChatRule(
+		context.Background(),
+		relayconstant.RelayModeResponses,
+		true,
+		dto.ChannelSettings{},
+		206,
+		1,
+		"gpt-5.6-sol",
+		&dto.OpenAIResponsesRequest{Input: common.RawMessage(`{"malformed":`)},
 	)
 
 	require.NoError(t, err)

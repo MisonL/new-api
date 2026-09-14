@@ -1,6 +1,9 @@
 package model
 
 import (
+	"strings"
+	"time"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"gorm.io/gorm"
@@ -11,6 +14,7 @@ func MarkResponsesToolCapabilityObservation(channelId int, observation dto.Respo
 	if channelId <= 0 || observation.ObservedAt <= 0 || !observation.HasEvidence() {
 		return dto.ChannelOtherSettings{}, nil
 	}
+	normalizeResponsesToolCapabilityObservation(&observation)
 	if settings, ok, err := cachedResponsesToolCapabilityObservationSettings(channelId, observation); err != nil {
 		return dto.ChannelOtherSettings{}, err
 	} else if ok {
@@ -92,6 +96,9 @@ func responsesToolCapabilityObservationChanges(registry *dto.ResponsesChannelCap
 	if existing == nil {
 		return true
 	}
+	if !strings.EqualFold(strings.TrimSpace(existing.Source), strings.TrimSpace(next.Source)) && next.IsNative() {
+		return true
+	}
 	if next.CustomToolCall && (!existing.CustomToolCall || registry.SupportsCustomTools == nil) {
 		return true
 	}
@@ -113,6 +120,21 @@ func mergeResponsesToolCapabilityObservation(existing *dto.ResponsesToolCapabili
 	if existing.ObservedAt > merged.ObservedAt {
 		merged.ObservedAt = existing.ObservedAt
 	}
+	if existing.ExpiresAt > merged.ExpiresAt {
+		merged.ExpiresAt = existing.ExpiresAt
+	}
+	if existing.IsNative() {
+		merged.Source = dto.ResponsesToolCapabilityObservationSourceNative
+	}
+	if merged.Model == "" {
+		merged.Model = existing.Model
+	}
+	if merged.Profile == "" {
+		merged.Profile = existing.Profile
+	}
+	if merged.Transport == "" {
+		merged.Transport = existing.Transport
+	}
 	merged.CustomToolCall = existing.CustomToolCall || next.CustomToolCall
 	merged.NamespaceToolCall = existing.NamespaceToolCall || next.NamespaceToolCall
 	merged.ToolSearchCall = existing.ToolSearchCall || next.ToolSearchCall
@@ -120,7 +142,14 @@ func mergeResponsesToolCapabilityObservation(existing *dto.ResponsesToolCapabili
 }
 
 func promoteUnknownResponsesToolCapabilities(registry *dto.ResponsesChannelCapabilityRegistry, observation dto.ResponsesToolCapabilityObservation) {
-	if registry == nil {
+	if registry == nil || !observation.IsNative() || !observation.IsFresh(time.Now().UTC()) {
+		return
+	}
+	// Observations are recorded with the requested model. A channel can serve
+	// multiple models, so a model-scoped success must not become a channel-wide
+	// routing override. Keep the evidence for diagnostics and let unknown
+	// models be verified by their own upstream request instead.
+	if strings.TrimSpace(observation.Model) != "" {
 		return
 	}
 	if observation.CustomToolCall && registry.SupportsCustomTools == nil {
@@ -128,8 +157,24 @@ func promoteUnknownResponsesToolCapabilities(registry *dto.ResponsesChannelCapab
 	}
 	if observation.NamespaceToolCall && registry.SupportsNamespaceTools == nil {
 		registry.SupportsNamespaceTools = common.GetPointer(true)
+		registry.SupportsNamespaceToolsSource = "observed_native"
 	}
 	if observation.ToolSearchCall && registry.SupportsToolSearch == nil {
 		registry.SupportsToolSearch = common.GetPointer(true)
+		registry.SupportsToolSearchSource = "observed_native"
+	}
+}
+
+func normalizeResponsesToolCapabilityObservation(observation *dto.ResponsesToolCapabilityObservation) {
+	if observation == nil {
+		return
+	}
+	if strings.TrimSpace(observation.Source) == "" {
+		observation.Source = dto.ResponsesToolCapabilityObservationSourceNative
+	} else {
+		observation.Source = strings.ToLower(strings.TrimSpace(observation.Source))
+	}
+	if observation.ExpiresAt <= observation.ObservedAt {
+		observation.ExpiresAt = observation.ObservedAt + dto.ResponsesToolCapabilityObservationTTLSeconds
 	}
 }

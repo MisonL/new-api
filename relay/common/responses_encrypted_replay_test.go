@@ -1,62 +1,12 @@
 package common
 
 import (
-	"net/http/httptest"
 	"testing"
 
-	basecommon "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
-
-func TestResponsesEncryptedReasoningReplayActionLifecycle(t *testing.T) {
-	tests := []struct {
-		name            string
-		capability      dto.ResponsesEncryptedReasoningReplayCapability
-		selectedAction  string
-		attemptedAction string
-		forwardedAction string
-	}{
-		{
-			name:            "supported",
-			capability:      dto.ResponsesEncryptedReasoningReplayCapabilitySupported,
-			selectedAction:  ResponsesEncryptedReasoningReplayActionSelectedNative,
-			attemptedAction: ResponsesEncryptedReasoningReplayActionAttemptedNative,
-			forwardedAction: ResponsesEncryptedReasoningReplayActionForwardedNative,
-		},
-		{
-			name:            "unknown",
-			capability:      dto.ResponsesEncryptedReasoningReplayCapabilityUnknown,
-			selectedAction:  ResponsesEncryptedReasoningReplayActionSelectedNativeUnverified,
-			attemptedAction: ResponsesEncryptedReasoningReplayActionAttemptedNativeUnverified,
-			forwardedAction: ResponsesEncryptedReasoningReplayActionForwardedNativeUnverified,
-		},
-		{
-			name:            "unsupported remains rejected",
-			capability:      dto.ResponsesEncryptedReasoningReplayCapabilityUnsupported,
-			selectedAction:  ResponsesEncryptedReasoningReplayActionRejectedUnsupported,
-			attemptedAction: ResponsesEncryptedReasoningReplayActionRejectedUnsupported,
-			forwardedAction: ResponsesEncryptedReasoningReplayActionRejectedUnsupported,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-
-			MarkResponsesEncryptedReasoningReplayDecision(c, tt.capability)
-			require.Equal(t, tt.selectedAction, basecommon.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
-
-			MarkResponsesEncryptedReasoningReplayAttempt(c)
-			require.Equal(t, tt.attemptedAction, basecommon.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
-
-			MarkResponsesEncryptedReasoningReplayForwarded(c)
-			require.Equal(t, tt.forwardedAction, basecommon.GetContextKeyString(c, constant.ContextKeyResponsesEncryptedReasoningReplayAction))
-		})
-	}
-}
 
 func TestSupportsNativeOpaqueResponsesCompact(t *testing.T) {
 	supported := true

@@ -1,8 +1,6 @@
 package openaicompat
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -12,9 +10,55 @@ import (
 
 const (
 	responsesToolTypeToolSearch = "tool_search"
-	chatToolNameMaxLength       = 64
 	responsesCustomToolPrefix   = "newapi_custom"
 )
+
+// toolNameAliasRegistry tracks the names used while converting a Chat
+// Completions request to Responses. A normalized alias must not silently
+// represent two different client names, including the edge case where a
+// valid client name happens to equal an alias generated for an invalid one.
+type toolNameAliasRegistry struct {
+	originalByAlias map[string]string
+	aliasByOriginal map[string]string
+}
+
+func newToolNameAliasRegistry() *toolNameAliasRegistry {
+	return &toolNameAliasRegistry{
+		originalByAlias: make(map[string]string),
+		aliasByOriginal: make(map[string]string),
+	}
+}
+
+func (r *toolNameAliasRegistry) normalizeDeclaration(name string) (string, error) {
+	original := strings.TrimSpace(name)
+	if original == "" {
+		return "", fmt.Errorf("tool name is required")
+	}
+	if alias, exists := r.aliasByOriginal[original]; exists {
+		return alias, nil
+	}
+	alias := dto.NormalizeToolName(original)
+	if previous, exists := r.originalByAlias[alias]; exists && previous != original {
+		return "", fmt.Errorf("tool name %q normalizes to %q, conflicting with %q", original, alias, previous)
+	}
+	r.originalByAlias[alias] = original
+	r.aliasByOriginal[original] = alias
+	return alias, nil
+}
+
+func (r *toolNameAliasRegistry) normalizeReference(name string) (string, error) {
+	original := strings.TrimSpace(name)
+	if original == "" {
+		return "", fmt.Errorf("tool name is required")
+	}
+	if alias, exists := r.aliasByOriginal[original]; exists {
+		return alias, nil
+	}
+	if _, exists := r.originalByAlias[original]; exists {
+		return original, nil
+	}
+	return r.normalizeDeclaration(original)
+}
 
 type ResponsesChatToolIdentity struct {
 	Type      string
@@ -69,6 +113,18 @@ func (s *ResponsesChatCompatibilityToolState) Resolve(chatName string) (Response
 	return identity, ok
 }
 
+func (s *ResponsesChatCompatibilityToolState) ChatNameFor(identity ResponsesChatToolIdentity) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	for chatName, registered := range s.byChatName {
+		if registered == identity {
+			return chatName, true
+		}
+	}
+	return "", false
+}
+
 func (s *ResponsesChatCompatibilityToolState) HasCustomTool() bool {
 	return s != nil && s.hasCustomTool
 }
@@ -118,19 +174,16 @@ func flattenResponsesChatToolName(parts ...string) string {
 	for _, part := range parts {
 		trimmedParts = append(trimmedParts, strings.TrimSpace(part))
 	}
-	fullName := strings.Join(trimmedParts, "__")
-	if len(fullName) <= chatToolNameMaxLength {
-		return fullName
+	return dto.NormalizeToolName(strings.Join(trimmedParts, "__"))
+}
+
+// flattenResponsesOutputToolName produces the Chat-visible name for a
+// Responses function call. Namespaced calls must use the same flattened alias
+// as their declarations and history; unnamespaced calls are normalized on the
+// boundary so an upstream cannot emit a name rejected by Chat contracts.
+func flattenResponsesOutputToolName(namespace string, name string) string {
+	if strings.TrimSpace(namespace) != "" {
+		return flattenResponsesNamespaceToolName(namespace, name)
 	}
-	sum := sha256.Sum256([]byte(fullName))
-	suffix := "__" + hex.EncodeToString(sum[:4])
-	prefixLimit := chatToolNameMaxLength - len(suffix)
-	var prefix strings.Builder
-	for _, ch := range fullName {
-		if prefix.Len()+len(string(ch)) > prefixLimit {
-			break
-		}
-		prefix.WriteRune(ch)
-	}
-	return prefix.String() + suffix
+	return dto.NormalizeToolName(name)
 }
