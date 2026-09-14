@@ -1,5 +1,10 @@
 import { api } from '@/lib/api'
-import type { QuotaDataItem, UptimeGroupResult } from './types'
+import { parseDashboardTokenStats } from './lib/token-stats'
+import type {
+  DashboardLogStats,
+  QuotaDataItem,
+  UptimeGroupResult,
+} from './types'
 
 // ============================================================================
 // Dashboard APIs
@@ -26,6 +31,19 @@ export async function getUserQuotaDates(
     { params }
   )
   return res.data
+}
+
+export async function getDashboardLogStats(
+  params: { start_timestamp: number; end_timestamp: number; username?: string },
+  isAdmin = false,
+  signal?: AbortSignal
+) {
+  const endpoint = isAdmin ? '/api/log/stat' : '/api/log/self/stat'
+  const res = await api.get<{
+    success: boolean
+    data: DashboardLogStats
+  }>(endpoint, { params: { ...params, type: 2 }, signal })
+  return parseDashboardTokenStats(res.data)
 }
 
 // ----------------------------------------------------------------------------

@@ -29,11 +29,15 @@ import {
   toBoolean,
   getDisabledRowProps,
   isUnlimitedChannelBalance,
+  isAdmin,
+  isRoot,
 } from '../../helpers';
 import { CHANNEL_OPTIONS, MODEL_TABLE_PAGE_SIZE } from '../../constants';
 import { useIsMobile } from '../common/useIsMobile';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 import { useChannelUpstreamUpdates } from './useChannelUpstreamUpdates';
+import { useChannelHealthRuntime } from './useChannelHealthRuntime';
+import { getChannelHealthRuntimeEntrySearchCriteria } from '../../helpers/channelHealthRuntime';
 import { parseUpstreamUpdateMeta } from './upstreamUpdateUtils';
 import { Modal, Button } from '@douyinfe/semi-ui';
 import { openCodexUsageModal } from '../../components/table/channels/modals/CodexUsageModal';
@@ -87,6 +91,11 @@ const getStoredChannelPageSize = () => {
 export const useChannelsData = () => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+  const canViewChannelHealthRuntime = isAdmin();
+  const canConfigureChannelHealthRuntime = isRoot();
+  const channelHealthRuntime = useChannelHealthRuntime({
+    enabled: canViewChannelHealthRuntime,
+  });
 
   // Basic states
   const [channels, setChannels] = useState([]);
@@ -146,6 +155,20 @@ export const useChannelsData = () => {
     requestHeaderPolicyAuxiliaryRequestsEnabled,
     setRequestHeaderPolicyAuxiliaryRequestsEnabled,
   ] = useState(true);
+  const [channelRoutingConfig, setChannelRoutingConfig] = useState(null);
+
+  const fetchChannelRoutingConfig = async () => {
+    try {
+      const res = await API.get('/api/channel-route-scopes/config');
+      if (res?.data?.success && res.data.data) {
+        setChannelRoutingConfig(res.data.data);
+      }
+    } catch (error) {
+      // Older deployments may not expose the additive config endpoint. The
+      // backend remains the final guard, so keep the legacy UI usable there.
+      setChannelRoutingConfig(null);
+    }
+  };
 
   const fetchRuntimePolicyOptions = async () => {
     try {
@@ -242,6 +265,7 @@ export const useChannelsData = () => {
     fetchGroups().then();
     loadChannelModels().then();
     fetchRuntimePolicyOptions().then();
+    fetchChannelRoutingConfig().then();
   }, []);
 
   // Column visibility management
@@ -456,8 +480,10 @@ export const useChannelsData = () => {
     page = 1,
     pageSz = pageSize,
     sortFlag = idSort,
+    searchCriteria,
   ) => {
-    const { searchKeyword, searchGroup, searchModel } = getFormValues();
+    const { searchKeyword, searchGroup, searchModel } =
+      searchCriteria || getFormValues();
     setSearching(true);
     try {
       if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
@@ -513,10 +539,32 @@ export const useChannelsData = () => {
     }
   };
 
+  const locateChannelHealthRuntimeEntry = async (entry) => {
+    const criteria = getChannelHealthRuntimeEntrySearchCriteria(entry);
+    if (!criteria || !formApi) {
+      return;
+    }
+
+    formApi.setValues(criteria);
+    setActiveTypeKey('all');
+    setStatusFilter('all');
+    // A runtime entry targets one concrete channel. Keep the persisted
+    // preference unchanged, but flatten this view so the row is visible.
+    setEnableTagMode(false);
+    await searchChannels(false, 'all', 'all', 1, pageSize, idSort, criteria);
+  };
+
   const upstreamUpdates = useChannelUpstreamUpdates({ t, refresh });
 
   // Channel management
   const manageChannel = async (id, action, record, value) => {
+    if (
+      channelRoutingConfig?.strict_writes === true &&
+      (action === 'priority' || action === 'weight')
+    ) {
+      showInfo(t('新路由模式下 priority/weight 请在路由 Scope 工作台调整。'));
+      return;
+    }
     let data = { id };
     let res;
     switch (action) {
@@ -693,6 +741,13 @@ export const useChannelsData = () => {
 
   // Tag edit
   const submitTagEdit = async (type, data) => {
+    if (
+      channelRoutingConfig?.strict_writes === true &&
+      (type === 'priority' || type === 'weight')
+    ) {
+      showInfo(t('新路由模式下 priority/weight 请在路由 Scope 工作台调整。'));
+      return;
+    }
     switch (type) {
       case 'priority':
         if (data.priority === undefined || data.priority === '') {
@@ -1236,6 +1291,10 @@ export const useChannelsData = () => {
     compactMode,
     globalPassThroughEnabled,
     requestHeaderPolicyAuxiliaryRequestsEnabled,
+    channelRoutingConfig,
+    canViewChannelHealthRuntime,
+    canConfigureChannelHealthRuntime,
+    channelHealthRuntime,
 
     // UI states
     showEdit,
@@ -1309,6 +1368,7 @@ export const useChannelsData = () => {
     // Functions
     loadChannels,
     searchChannels,
+    locateChannelHealthRuntimeEntry,
     refresh,
     manageChannel,
     manageTag,

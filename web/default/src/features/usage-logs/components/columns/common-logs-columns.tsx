@@ -29,6 +29,7 @@ import {
   getStreamStatusDisplayInfo,
   getTieredBillingSummary,
   hasAnyCacheTokens,
+  getLogPromptCacheStats,
   parseLogOther,
   isViolationFeeLog,
   formatDurationFromMs,
@@ -41,8 +42,10 @@ import {
   isPerCallBilling,
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
+import { ChannelHealthRoutingBadge } from '../channel-health-routing-badge'
 import { DetailsDialog } from '../dialogs/details-dialog'
 import { ModelBadge } from '../model-badge'
+import { ResponsesRoutingBadge } from '../responses-routing-badge'
 import { useUsageLogsContext } from '../usage-logs-provider'
 
 interface DetailSegment {
@@ -189,6 +192,7 @@ function buildStreamTooltip(
   log: UsageLog,
   other: LogOtherData | null,
   streamStatusDisplay: ReturnType<typeof getStreamStatusDisplayInfo> | null,
+  isAdmin: boolean,
   t: (key: string, opts?: Record<string, unknown>) => string
 ): ResponseStreamInfoTooltipRow[] {
   const rows: ResponseStreamInfoTooltipRow[] = [
@@ -209,7 +213,7 @@ function buildStreamTooltip(
     })
   }
 
-  if (other?.upstream_request_path) {
+  if (isAdmin && other?.upstream_request_path) {
     rows.push({
       key: 'upstream-path',
       label: t('Upstream Path'),
@@ -303,30 +307,44 @@ function buildReasoningEffortInfo(
 
 function buildResponsesCompactInfo(
   other: LogOtherData | null,
+  isAdmin: boolean,
   t: (key: string, opts?: Record<string, unknown>) => string
 ): ResponsesCompactInfo | null {
   const mode = other?.responses_compact_mode
   if (!mode) return null
-  const autoFallback = other.responses_compact_auto_fallback
+  const autoFallback = isAdmin
+    ? other.responses_compact_auto_fallback
+    : undefined
 
   return {
     mode,
     modeLabel: getResponsesCompactModeLabel(mode, t),
     badgeLabel: getResponsesCompactBadgeLabel(mode, autoFallback, t),
-    setting: other.responses_compact_setting,
-    upstreamPath: other.responses_compact_upstream_path,
+    setting: isAdmin ? other.responses_compact_setting : undefined,
+    upstreamPath: isAdmin ? other.responses_compact_upstream_path : undefined,
     autoFallback,
-    autoFallbackWindow: other.responses_compact_auto_fallback_window,
-    nativeAttempted: other.responses_compact_native_attempted,
-    nativePath: other.responses_compact_native_upstream_path,
-    nativeStatusCode: other.responses_compact_native_status_code,
-    fallbackReason: other.responses_compact_auto_fallback_reason,
+    autoFallbackWindow: isAdmin
+      ? other.responses_compact_auto_fallback_window
+      : undefined,
+    nativeAttempted: isAdmin
+      ? other.responses_compact_native_attempted
+      : undefined,
+    nativePath: isAdmin
+      ? other.responses_compact_native_upstream_path
+      : undefined,
+    nativeStatusCode: isAdmin
+      ? other.responses_compact_native_status_code
+      : undefined,
+    fallbackReason: isAdmin
+      ? other.responses_compact_auto_fallback_reason
+      : undefined,
     className: getResponsesCompactBadgeClassName(mode, autoFallback),
   }
 }
 
 function buildResponsesCompactTooltipRows(
   compactInfo: ResponsesCompactInfo,
+  isAdmin: boolean,
   t: (key: string, opts?: Record<string, unknown>) => string
 ): ResponsesCompactTooltipRow[] {
   const rows: ResponsesCompactTooltipRow[] = [
@@ -337,6 +355,8 @@ function buildResponsesCompactTooltipRows(
       className: 'text-secondary-foreground font-semibold',
     },
   ]
+
+  if (!isAdmin) return rows
 
   if (compactInfo.setting) {
     rows.push({
@@ -758,6 +778,50 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         meta: { label: t('User'), mobileHidden: true },
       }
     )
+
+    columns.push({
+      id: 'responses_routing',
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title={t('Responses Routing')} />
+      ),
+      cell: ({ row }) => {
+        const log = row.original
+        if (!isTimingLogType(log.type)) return null
+
+        return (
+          <ResponsesRoutingBadge
+            other={parseLogOther(log.other)}
+            isAdmin={isAdmin}
+          />
+        )
+      },
+      enableSorting: false,
+      meta: { label: t('Responses Routing'), mobileBadge: true },
+      size: 180,
+      maxSize: 220,
+    })
+
+    columns.push({
+      id: 'channel_health',
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title={t('Channel Health')} />
+      ),
+      cell: ({ row }) => {
+        const log = row.original
+        if (!isTimingLogType(log.type)) return null
+
+        return (
+          <ChannelHealthRoutingBadge
+            other={parseLogOther(log.other)}
+            isAdmin={isAdmin}
+          />
+        )
+      },
+      enableSorting: false,
+      meta: { label: t('Channel Health'), mobileBadge: true },
+      size: 180,
+      maxSize: 220,
+    })
   }
 
   columns.push({
@@ -878,7 +942,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const timeVariant = getResponseTimeColor(useTime, log.completion_tokens)
         const frtVariant =
           frt != null && frt > 0 ? getFirstResponseTimeColor(frt / 1000) : null
-        const compactInfo = buildResponsesCompactInfo(other, t)
+        const compactInfo = buildResponsesCompactInfo(other, isAdmin, t)
         const streamStatusDisplay = other?.stream_status
           ? getStreamStatusDisplayInfo(other.stream_status, t)
           : null
@@ -960,12 +1024,15 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                         <div className='flex flex-col gap-2'>
                           <div className='flex min-w-0 items-center'>
                             <span className='inline-flex rounded-md border border-violet-200/60 bg-violet-50 px-1.5 py-0.5 font-semibold text-violet-700 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-300'>
-                              {t('Responses Compact capability')}
+                              {isAdmin
+                                ? t('Responses Compact capability')
+                                : t('Responses Compact')}
                             </span>
                           </div>
                           <div className='grid grid-cols-2 gap-x-3 gap-y-1.5'>
                             {buildResponsesCompactTooltipRows(
                               compactInfo,
+                              isAdmin,
                               t
                             ).map((row) => (
                               <div
@@ -1023,6 +1090,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                               log,
                               other,
                               streamStatusDisplay,
+                              isAdmin,
                               t
                             ).map((row) => (
                               <div
@@ -1111,17 +1179,15 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         const promptTokens = log.prompt_tokens || 0
         const completionTokens = log.completion_tokens || 0
-        if (promptTokens === 0 && completionTokens === 0) {
+        const cacheStats = getLogPromptCacheStats(promptTokens, other)
+        if (
+          promptTokens === 0 &&
+          completionTokens === 0 &&
+          cacheStats.cacheReadTokens === 0 &&
+          cacheStats.cacheWriteTokens === 0
+        ) {
           return <span className='text-muted-foreground text-xs'>-</span>
         }
-
-        const cacheReadTokens = other?.cache_tokens || 0
-        const cacheWrite5m = other?.cache_creation_tokens_5m || 0
-        const cacheWrite1h = other?.cache_creation_tokens_1h || 0
-        const hasSplitCache = cacheWrite5m > 0 || cacheWrite1h > 0
-        const cacheWriteTokens = hasSplitCache
-          ? cacheWrite5m + cacheWrite1h
-          : other?.cache_creation_tokens || 0
 
         return (
           <div className='flex flex-col gap-0.5'>
@@ -1129,19 +1195,25 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               {promptTokens.toLocaleString()} /{' '}
               {completionTokens.toLocaleString()}
             </span>
-            {(cacheReadTokens > 0 || cacheWriteTokens > 0) && (
+            {(cacheStats.cacheReadTokens > 0 ||
+              cacheStats.cacheWriteTokens > 0) && (
               <div className='flex items-center gap-1 text-[11px]'>
-                {cacheReadTokens > 0 && (
+                {cacheStats.cacheReadTokens > 0 && (
                   <span className='text-muted-foreground/60'>
-                    {t('Cache')}↓ {cacheReadTokens.toLocaleString()}
+                    {t('Cache')}↓ {cacheStats.cacheReadTokens.toLocaleString()}
                   </span>
                 )}
-                {cacheWriteTokens > 0 && (
+                {cacheStats.cacheWriteTokens > 0 && (
                   <span className='text-muted-foreground/60'>
-                    ↑ {cacheWriteTokens.toLocaleString()}
+                    ↑ {cacheStats.cacheWriteTokens.toLocaleString()}
                   </span>
                 )}
               </div>
+            )}
+            {cacheStats.cacheRate !== null && (
+              <span className='text-muted-foreground/60 text-[11px]'>
+                {t('Hit Rate')} {(cacheStats.cacheRate * 100).toFixed(2)}%
+              </span>
             )}
           </div>
         )

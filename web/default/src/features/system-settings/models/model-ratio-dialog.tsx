@@ -353,9 +353,7 @@ export function ModelRatioDialog({
                                   field.onChange(value)
                                   if (value) {
                                     setPromptPrice(
-                                      formatPricingNumber(
-                                        parseFloat(value) * 2
-                                      )
+                                      formatPricingNumber(parseFloat(value) * 2)
                                     )
                                   } else {
                                     setPromptPrice('')

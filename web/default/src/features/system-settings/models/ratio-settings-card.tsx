@@ -451,10 +451,7 @@ export function RatioSettingsCard({
         </TabsContent>
 
         <TabsContent value='tool-prices'>
-          <ToolPriceSettings
-            key={toolPricesDefault}
-            defaultValue={toolPricesDefault}
-          />
+          <ToolPriceSettings defaultValue={toolPricesDefault} />
         </TabsContent>
 
         <TabsContent value='upstream-sync'>

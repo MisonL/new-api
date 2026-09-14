@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 import * as z from 'zod'
+import { useForm, type Path, type UseFormReturn } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQueryClient } from '@tanstack/react-query'
-import { useForm, type Path, type UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
@@ -16,7 +22,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { LazyMount } from '@/components/lazy-mount'
 import {
   Form,
   FormControl,
@@ -28,6 +33,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { LazyMount } from '@/components/lazy-mount'
 import { executeLogRetention } from '../api'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
@@ -115,8 +121,7 @@ const toFormValues = (
       values['log_retention_setting.server_log_cleanup_enabled'],
     server_log_keep_files:
       values['log_retention_setting.server_log_keep_files'],
-    server_log_keep_days:
-      values['log_retention_setting.server_log_keep_days'],
+    server_log_keep_days: values['log_retention_setting.server_log_keep_days'],
     server_log_max_total_size_mb:
       values['log_retention_setting.server_log_max_total_size_mb'],
   },
@@ -128,10 +133,8 @@ const toFlatValues = (
   'log_retention_setting.enabled': values.log_retention_setting.enabled,
   'log_retention_setting.run_interval_hours':
     values.log_retention_setting.run_interval_hours,
-  'log_retention_setting.batch_size':
-    values.log_retention_setting.batch_size,
-  'log_retention_setting.max_batches':
-    values.log_retention_setting.max_batches,
+  'log_retention_setting.batch_size': values.log_retention_setting.batch_size,
+  'log_retention_setting.max_batches': values.log_retention_setting.max_batches,
   'log_retention_setting.consume_retention_days':
     values.log_retention_setting.consume_retention_days,
   'log_retention_setting.error_retention_days':
@@ -196,13 +199,48 @@ const schedulerFields: NumberFieldConfig[] = [
 ]
 
 const databaseFields: NumberFieldConfig[] = [
-  { name: 'log_retention_setting.consume_retention_days', label: 'Usage logs', min: 0, max: 3650 },
-  { name: 'log_retention_setting.error_retention_days', label: 'Error logs', min: 0, max: 3650 },
-  { name: 'log_retention_setting.system_retention_days', label: 'System logs', min: 0, max: 3650 },
-  { name: 'log_retention_setting.manage_retention_days', label: 'Manage logs', min: 0, max: 3650 },
-  { name: 'log_retention_setting.topup_retention_days', label: 'Top-up logs', min: 0, max: 3650 },
-  { name: 'log_retention_setting.refund_retention_days', label: 'Refund logs', min: 0, max: 3650 },
-  { name: 'log_retention_setting.unknown_retention_days', label: 'Unknown logs', min: 0, max: 3650 },
+  {
+    name: 'log_retention_setting.consume_retention_days',
+    label: 'Usage logs',
+    min: 0,
+    max: 3650,
+  },
+  {
+    name: 'log_retention_setting.error_retention_days',
+    label: 'Error logs',
+    min: 0,
+    max: 3650,
+  },
+  {
+    name: 'log_retention_setting.system_retention_days',
+    label: 'System logs',
+    min: 0,
+    max: 3650,
+  },
+  {
+    name: 'log_retention_setting.manage_retention_days',
+    label: 'Manage logs',
+    min: 0,
+    max: 3650,
+  },
+  {
+    name: 'log_retention_setting.topup_retention_days',
+    label: 'Top-up logs',
+    min: 0,
+    max: 3650,
+  },
+  {
+    name: 'log_retention_setting.refund_retention_days',
+    label: 'Refund logs',
+    min: 0,
+    max: 3650,
+  },
+  {
+    name: 'log_retention_setting.unknown_retention_days',
+    label: 'Unknown logs',
+    min: 0,
+    max: 3650,
+  },
 ]
 
 const payloadFields: NumberFieldConfig[] = [
@@ -478,9 +516,9 @@ export function LogRetentionSection({
   const getChangedEntries = (
     values: LogRetentionFormState
   ): ChangedLogRetentionEntry[] =>
-    (
-      Object.entries(toFlatValues(values)) as ChangedLogRetentionEntry[]
-    ).filter(([key, value]) => value !== baselineRef.current[key])
+    (Object.entries(toFlatValues(values)) as ChangedLogRetentionEntry[]).filter(
+      ([key, value]) => value !== baselineRef.current[key]
+    )
 
   const onSubmit = async (values: LogRetentionFormState) => {
     const changed = getChangedEntries(values)

@@ -500,7 +500,7 @@ test("dashboard log filters preserve inherited scope fields", () => {
   const initial = buildDashboardLogInitialFilters(
     {
       logType: 2,
-      username: "mison",
+      username: "test-user",
       token_name: "desktop",
       model_name: "gpt-5.4",
       channel: "7",
@@ -518,7 +518,7 @@ test("dashboard log filters preserve inherited scope fields", () => {
   );
 
   assert.equal(initial.logType, 2);
-  assert.equal(initial.username, "mison");
+  assert.equal(initial.username, "test-user");
   assert.equal(initial.token_name, "desktop");
   assert.equal(initial.model_name, "gpt-5.4");
   assert.equal(initial.channel, "7");
@@ -544,7 +544,7 @@ test("dashboard log filters preserve inherited scope fields", () => {
     },
     {
       type: 2,
-      username: "mison",
+      username: "test-user",
       token_name: "desktop",
       model_name: "gpt-5.4",
       channel: "7",

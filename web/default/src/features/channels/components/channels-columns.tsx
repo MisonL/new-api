@@ -36,6 +36,7 @@ import {
   dotColorMap,
   textColorMap,
 } from '@/components/status-badge'
+import { ChannelHealthRuntimeChannelState } from '@/features/channel-health/components/channel-health-runtime-channel-state'
 import { getCodexUsage } from '../api'
 import { CHANNEL_STATUS_CONFIG, MODEL_FETCHABLE_TYPES } from '../constants'
 import {
@@ -237,13 +238,31 @@ function UpstreamUpdateTags({ channel }: { channel: Channel }) {
 /**
  * Priority cell component with inline editing
  */
-function PriorityCell({ channel }: { channel: Channel }) {
+function PriorityCell({
+  channel,
+  readOnly,
+}: {
+  channel: Channel
+  readOnly?: boolean
+}) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const isTagRow = isTagAggregateRow(channel)
   const priority = channel.priority
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pendingValue, setPendingValue] = useState<number | null>(null)
+
+  if (readOnly) {
+    return (
+      <span
+        className='text-muted-foreground text-xs'
+        title={t('Legacy priority is read-only in V2 routing')}
+        aria-label={t('Legacy priority is read-only in V2 routing')}
+      >
+        {priority ?? 0}
+      </span>
+    )
+  }
 
   // Tag row - editable with confirmation for all tag channels
   if (isTagRow) {
@@ -294,13 +313,31 @@ function PriorityCell({ channel }: { channel: Channel }) {
 /**
  * Weight cell component with inline editing
  */
-function WeightCell({ channel }: { channel: Channel }) {
+function WeightCell({
+  channel,
+  readOnly,
+}: {
+  channel: Channel
+  readOnly?: boolean
+}) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const isTagRow = isTagAggregateRow(channel)
   const weight = channel.weight
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pendingValue, setPendingValue] = useState<number | null>(null)
+
+  if (readOnly) {
+    return (
+      <span
+        className='text-muted-foreground text-xs'
+        title={t('Legacy weight is read-only in V2 routing')}
+        aria-label={t('Legacy weight is read-only in V2 routing')}
+      >
+        {weight ?? 0}
+      </span>
+    )
+  }
 
   // Tag row - editable with confirmation for all tag channels
   if (isTagRow) {
@@ -519,15 +556,17 @@ function BalanceCell({ channel }: { channel: Channel }) {
  * Generate channels columns configuration
  */
 export function useChannelsColumns({
-  getTopPriority,
+  getTopPinOrder,
   getTopChannels,
   topChannels,
 }: {
-  getTopPriority: () => Promise<number>
-  getTopChannels: () => Promise<Pick<Channel, 'id' | 'priority'>[]>
-  topChannels?: Pick<Channel, 'id' | 'priority'>[]
+  getTopPinOrder: () => Promise<number>
+  getTopChannels: () => Promise<Pick<Channel, 'id' | 'pin_order'>[]>
+  topChannels?: Pick<Channel, 'id' | 'pin_order'>[]
 }): ColumnDef<Channel>[] {
   const { t } = useTranslation()
+  const { channelHealthRuntime, channelRoutingConfig } = useChannels()
+  const legacyRouteFieldsReadOnly = channelRoutingConfig?.strict_writes === true
   return [
     // Checkbox column
     {
@@ -617,7 +656,7 @@ export function useChannelsColumns({
                   <ChevronRight className='h-4 w-4' />
                 )}
               </Button>
-              <div className='flex items-center gap-1.5'>
+              <div className='flex flex-wrap items-center gap-1.5'>
                 <span className='font-semibold'>Tag：{tag}</span>
                 <StatusBadge
                   label={`${childrenCount} channels`}
@@ -652,7 +691,7 @@ export function useChannelsColumns({
         return (
           <div className='flex items-center gap-2'>
             <div className='flex flex-col gap-1'>
-              <div className='flex items-center gap-1.5'>
+              <div className='flex flex-wrap items-center gap-1.5'>
                 <span className='font-medium'>{truncateText(name, 30)}</span>
                 {isPassThrough && (
                   <TooltipProvider delayDuration={100}>
@@ -703,6 +742,10 @@ export function useChannelsColumns({
                   </TooltipProvider>
                 )}
                 <UpstreamUpdateTags channel={channel} />
+                <ChannelHealthRuntimeChannelState
+                  channelId={channel.id}
+                  runtime={channelHealthRuntime.runtime}
+                />
               </div>
               {channel.remark && (
                 <TooltipProvider delayDuration={200}>
@@ -1073,7 +1116,12 @@ export function useChannelsColumns({
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title={t('Priority')} />
       ),
-      cell: ({ row }) => <PriorityCell channel={row.original} />,
+      cell: ({ row }) => (
+        <PriorityCell
+          channel={row.original}
+          readOnly={legacyRouteFieldsReadOnly}
+        />
+      ),
       size: 100,
     },
 
@@ -1082,7 +1130,12 @@ export function useChannelsColumns({
       accessorKey: 'weight',
       meta: { label: t('Weight'), mobileHidden: true },
       header: t('Weight'),
-      cell: ({ row }) => <WeightCell channel={row.original} />,
+      cell: ({ row }) => (
+        <WeightCell
+          channel={row.original}
+          readOnly={legacyRouteFieldsReadOnly}
+        />
+      ),
       size: 90,
       enableSorting: false,
     },
@@ -1178,7 +1231,7 @@ export function useChannelsColumns({
         return (
           <DataTableRowActions
             row={row}
-            getTopPriority={getTopPriority}
+            getTopPinOrder={getTopPinOrder}
             getTopChannels={getTopChannels}
             topChannels={topChannels}
           />

@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useMemo } from 'react';
-import { Wallet, Activity, Zap, Gauge } from 'lucide-react';
+import { Wallet, Activity, Zap, Gauge, Layers } from 'lucide-react';
 import {
   IconMoneyExchangeStroked,
   IconHistogram,
@@ -36,6 +36,7 @@ export const useDashboardStats = (
   userState,
   consumeQuota,
   consumeTokens,
+  tokenStats,
   times,
   trendData,
   performanceMetrics,
@@ -111,6 +112,59 @@ export const useDashboardStats = (
         ],
       },
       {
+        title: createSectionTitle(Layers, t('统计Tokens')),
+        color: 'bg-purple-50',
+        items: [
+          {
+            title: t('输入 Token 数'),
+            value: (Number(tokenStats?.input_tokens) || 0).toLocaleString(),
+            icon: <IconTextStroked />,
+            avatarColor: 'purple',
+            trendData: [],
+            trendColor: '#8b5cf6',
+          },
+          {
+            title: `${t('缓存读')} Token`,
+            value: (
+              Number(tokenStats?.cache_read_tokens) || 0
+            ).toLocaleString(),
+            icon: <IconTextStroked />,
+            avatarColor: 'cyan',
+            trendData: [],
+            trendColor: '#06b6d4',
+          },
+          {
+            title: `${t('缓存写')} Token`,
+            value: (
+              Number(tokenStats?.cache_write_tokens) || 0
+            ).toLocaleString(),
+            icon: <IconTextStroked />,
+            avatarColor: 'orange',
+            trendData: [],
+            trendColor: '#f97316',
+          },
+          {
+            title: t('输出 Token 数'),
+            value: (Number(tokenStats?.output_tokens) || 0).toLocaleString(),
+            icon: <IconTextStroked />,
+            avatarColor: 'pink',
+            trendData: [],
+            trendColor: '#ec4899',
+          },
+          {
+            title: t('命中率'),
+            value:
+              tokenStats?.cache_rate == null
+                ? 'N/A'
+                : `${(tokenStats.cache_rate * 100).toFixed(2)}%`,
+            icon: <IconTextStroked />,
+            avatarColor: 'green',
+            trendData: [],
+            trendColor: '#10b981',
+          },
+        ],
+      },
+      {
         title: createSectionTitle(Gauge, t('性能指标')),
         color: 'bg-indigo-50',
         items: [
@@ -140,6 +194,7 @@ export const useDashboardStats = (
       times,
       consumeQuota,
       consumeTokens,
+      tokenStats,
       trendData,
       performanceMetrics,
       navigate,

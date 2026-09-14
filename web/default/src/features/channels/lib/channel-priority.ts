@@ -1,9 +1,17 @@
 import type { Channel } from '../types'
+import {
+  getNextTopChannelPinOrder,
+  getTopChannelPinOrderMovePlan,
+  getTopChannelPinOrderMoveUpdates,
+  isPinnedChannel,
+  toPinOrderNumber,
+  type TopChannelMoveDirection,
+} from './channel-pin-order'
 
-type PriorityChannel = Pick<Channel, 'id' | 'priority'>
+export type { TopChannelMoveDirection } from './channel-pin-order'
 
-export type TopChannelMoveDirection = 'up' | 'down'
-
+// Compatibility aliases for integrations that imported the pre-pin_order
+// helper names. New code should import channel-pin-order directly.
 export type TopChannelPriorityUpdate = {
   id: number
   priority: number
@@ -14,107 +22,70 @@ export type TopChannelPriorityMovePlan = {
   rollbackUpdates: TopChannelPriorityUpdate[]
 }
 
-const PRIORITY_STEP = 1_000
+type LegacyPriorityChannel = Pick<Channel, 'id' | 'priority'>
 
-export function toPriorityNumber(priority: Channel['priority']): number {
-  return typeof priority === 'number' && Number.isFinite(priority) ? priority : 0
+function toPinChannel(channel: LegacyPriorityChannel) {
+  return { id: channel.id, pin_order: channel.priority }
 }
 
-export function isTopChannel(channel: Pick<Channel, 'priority'>): boolean {
-  return toPriorityNumber(channel.priority) > 0
+function toLegacyUpdates(
+  updates: Array<{ id: number; pin_order: number }>
+): TopChannelPriorityUpdate[] {
+  return updates.map((update) => ({
+    id: update.id,
+    priority: update.pin_order,
+  }))
 }
 
-function sortTopChannels(channels: readonly PriorityChannel[]): PriorityChannel[] {
-  const channelById = new Map<
-    number,
-    { channel: PriorityChannel; order: number }
-  >()
-  let order = 0
-  for (const channel of channels) {
-    if (isTopChannel(channel)) {
-      const existing = channelById.get(channel.id)
-      if (existing) {
-        existing.channel = channel
-      } else {
-        channelById.set(channel.id, { channel, order })
-        order += 1
-      }
-    }
-  }
+/** @deprecated Use toPinOrderNumber. */
+export const toPriorityNumber = (priority: Channel['priority']): number =>
+  toPinOrderNumber(priority)
 
-  return [...channelById.values()]
-    .sort((left, right) => {
-      const priorityDiff =
-        toPriorityNumber(right.channel.priority) -
-        toPriorityNumber(left.channel.priority)
-      if (priorityDiff !== 0) return priorityDiff
-      return left.order - right.order
-    })
-    .map(({ channel }) => channel)
-}
+/** @deprecated Use isPinnedChannel. */
+export const isTopChannel = (channel: Pick<Channel, 'priority'>): boolean =>
+  isPinnedChannel({ pin_order: channel.priority })
 
+/** @deprecated Use getNextTopChannelPinOrder. */
 export function getNextTopChannelPriority(
   channel: Pick<Channel, 'priority'>,
   visibleChannels: readonly Pick<Channel, 'priority'>[]
 ): number {
-  const currentPriority = Math.max(0, toPriorityNumber(channel.priority))
-  const maxPriority = visibleChannels.reduce(
-    (max, visibleChannel) =>
-      Math.max(max, Math.max(0, toPriorityNumber(visibleChannel.priority))),
-    currentPriority
+  return getNextTopChannelPinOrder(
+    { pin_order: channel.priority },
+    visibleChannels.map((visibleChannel) => ({
+      pin_order: visibleChannel.priority,
+    }))
   )
-
-  return maxPriority + PRIORITY_STEP
 }
 
-function createReindexedMovePlan(
-  sortedChannels: PriorityChannel[],
-  currentIndex: number,
-  targetIndex: number
+/** @deprecated Use getTopChannelPinOrderMovePlan. */
+export function getTopChannelPriorityMovePlan(
+  channel: LegacyPriorityChannel,
+  topChannels: readonly LegacyPriorityChannel[],
+  direction: TopChannelMoveDirection
 ): TopChannelPriorityMovePlan {
-  const reorderedChannels = [...sortedChannels]
-  const [movedChannel] = reorderedChannels.splice(currentIndex, 1)
-  reorderedChannels.splice(targetIndex, 0, movedChannel)
-
-  const originalPriorityById = new Map(
-    sortedChannels.map((item) => [item.id, toPriorityNumber(item.priority)])
+  const plan = getTopChannelPinOrderMovePlan(
+    toPinChannel(channel),
+    topChannels.map(toPinChannel),
+    direction
   )
-  const updates = reorderedChannels
-    .map((item, index) => ({
-      id: item.id,
-      priority: (reorderedChannels.length - index) * PRIORITY_STEP,
-    }))
-    .filter((update) => originalPriorityById.get(update.id) !== update.priority)
-
   return {
-    updates,
-    rollbackUpdates: updates.map((update) => ({
-      id: update.id,
-      priority: originalPriorityById.get(update.id) ?? 0,
-    })),
+    updates: toLegacyUpdates(plan.updates),
+    rollbackUpdates: toLegacyUpdates(plan.rollbackUpdates),
   }
 }
 
-export function getTopChannelPriorityMovePlan(
-  channel: PriorityChannel,
-  topChannels: readonly PriorityChannel[],
-  direction: TopChannelMoveDirection
-): TopChannelPriorityMovePlan {
-  const sortedChannels = sortTopChannels(topChannels)
-  const currentIndex = sortedChannels.findIndex((item) => item.id === channel.id)
-  if (currentIndex === -1) return { updates: [], rollbackUpdates: [] }
-
-  const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
-  const targetChannel = sortedChannels[targetIndex]
-  if (!targetChannel) return { updates: [], rollbackUpdates: [] }
-
-  return createReindexedMovePlan(sortedChannels, currentIndex, targetIndex)
-}
-
+/** @deprecated Use getTopChannelPinOrderMoveUpdates. */
 export function getTopChannelPriorityMoveUpdates(
-  channel: PriorityChannel,
-  topChannels: readonly PriorityChannel[],
+  channel: LegacyPriorityChannel,
+  topChannels: readonly LegacyPriorityChannel[],
   direction: TopChannelMoveDirection
 ): TopChannelPriorityUpdate[] {
-  return getTopChannelPriorityMovePlan(channel, topChannels, direction).updates
+  return toLegacyUpdates(
+    getTopChannelPinOrderMoveUpdates(
+      toPinChannel(channel),
+      topChannels.map(toPinChannel),
+      direction
+    )
+  )
 }

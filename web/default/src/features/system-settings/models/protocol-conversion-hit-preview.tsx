@@ -96,7 +96,7 @@ export function ProtocolConversionHitPreview({
         </PreviewField>
       </div>
       {previewChannel ? (
-        <div className='rounded-md bg-muted/40 p-3 text-sm'>
+        <div className='bg-muted/40 rounded-md p-3 text-sm'>
           <div className='font-medium'>
             {t('Loaded channel')}: #{previewChannel.id} {previewChannel.name}
           </div>

@@ -42,10 +42,7 @@ export function PageJumpInput({
 
   return (
     <div
-      className={cn(
-        'flex h-8 items-center gap-1 whitespace-nowrap',
-        className
-      )}
+      className={cn('flex h-8 items-center gap-1 whitespace-nowrap', className)}
     >
       {showLabel ? (
         <span className='text-muted-foreground hidden text-sm leading-none sm:inline'>

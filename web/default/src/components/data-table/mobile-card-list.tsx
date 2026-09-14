@@ -111,13 +111,13 @@ function CompactRow<TData>({ row }: { row: Row<TData> }) {
     .filter((cell) => cell.column.id !== 'select')
 
   const titleCell = allCells.find((c) => getCellMeta(c)?.mobileTitle)
-  const badgeCell = allCells.find((c) => getCellMeta(c)?.mobileBadge)
+  const badgeCells = allCells.filter((c) => getCellMeta(c)?.mobileBadge)
   const actionsCell = allCells.find((c) => c.column.id === 'actions')
 
   const fieldCells = allCells.filter(
     (c) =>
       c !== titleCell &&
-      c !== badgeCell &&
+      !badgeCells.includes(c) &&
       c !== actionsCell &&
       !getCellMeta(c)?.mobileHidden
   )
@@ -131,8 +131,12 @@ function CompactRow<TData>({ row }: { row: Row<TData> }) {
             {renderCellContent(titleCell)}
           </div>
         )}
-        {badgeCell && (
-          <div className='shrink-0'>{renderCellContent(badgeCell)}</div>
+        {badgeCells.length > 0 && (
+          <div className='flex shrink-0 flex-wrap justify-end gap-1'>
+            {badgeCells.map((cell) => (
+              <div key={cell.id}>{renderCellContent(cell)}</div>
+            ))}
+          </div>
         )}
       </div>
 

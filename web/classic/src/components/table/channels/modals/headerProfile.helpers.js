@@ -25,6 +25,7 @@ import {
   NPM_VERSION_LATEST_ALIAS,
   normalizeAiCodingCliPlatform,
 } from './headerProfile.constants.js';
+import { CODEX_CLI_HEADER_PASSTHROUGH_HEADERS } from '../../../../constants/channel-affinity-template.constants.js';
 
 const STRATEGIES = new Set(['fixed', 'round_robin', 'random']);
 const FALLBACK_CATEGORY = 'custom';
@@ -183,9 +184,8 @@ function normalizeProfile(profile = {}) {
     };
   }
   if (
-    !isBuiltinAiCodingCliProfileId(id) &&
-    (profile.passthroughRequired === true ||
-      profile.passthrough_required === true)
+    profile.passthroughRequired === true ||
+    profile.passthrough_required === true
   ) {
     normalized.passthroughRequired = true;
   }
@@ -542,6 +542,13 @@ function requiredPassthroughHeadersForProfile(profile) {
 function collectRequiredPassthroughHeaders(selectedProfiles = []) {
   const headers = new Set();
   selectedProfiles.forEach((profile) => {
+    const profileId = getBaseProfileIdFromProfileId(profile?.id);
+    if (profileId === 'codex-cli' || profileId === 'codex-desktop') {
+      CODEX_CLI_HEADER_PASSTHROUGH_HEADERS.forEach((header) => {
+        if (header) headers.add(header);
+      });
+      return;
+    }
     if (profile?.passthroughRequired !== true) {
       return;
     }

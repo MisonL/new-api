@@ -51,7 +51,10 @@ export const CODEX_CLI_HEADER_PASSTHROUGH_HEADERS = [
   'Session-Id',
   'Thread-Id',
   'X-Codex-Beta-Features',
+  'X-Codex-Installation-Id',
+  'X-Codex-Parent-Thread-Id',
   'X-Codex-Turn-Metadata',
+  'X-Codex-Turn-State',
   'X-Codex-Window-Id',
   'X-Client-Request-Id',
 ];

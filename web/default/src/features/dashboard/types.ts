@@ -15,6 +15,14 @@ export interface QuotaDataItem {
   quota?: number
 }
 
+export interface DashboardLogStats {
+  input_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  output_tokens: number
+  cache_rate: number | null
+}
+
 // ============================================================================
 // Uptime Monitoring Types
 // ============================================================================

@@ -39,6 +39,8 @@ export const channelSchema = z.object({
   model_mapping: z.string().nullish(),
   status_code_mapping: z.string().nullish(),
   priority: z.number().nullish(),
+  pin_order: z.number().nullish(),
+  max_concurrency: z.number().int().min(0).default(0),
   auto_ban: z.number().nullish(),
   other_info: z.string().default(''),
   tag: z.string().nullish(),
@@ -109,6 +111,7 @@ export interface ChannelOtherSettings {
   allow_safety_identifier?: boolean
   allow_include_obfuscation?: boolean
   strip_codex_encrypted_context?: boolean
+  codex_folded_sse_enabled?: boolean
   allow_inference_geo?: boolean
   allow_speed?: boolean
   claude_beta_query?: boolean
@@ -151,6 +154,88 @@ export interface GetChannelResponse {
   data?: Channel
 }
 
+export interface ChannelRouteScopeItem {
+  channel_id: number
+  channel_name: string
+  channel_type: number
+  channel_status: number
+  ability_enabled: boolean
+  route_priority: number
+  route_weight_bps: number
+  legacy_weight?: number
+  max_concurrency: number
+}
+
+export interface ChannelRouteScope {
+  id: string
+  group: string
+  effective_route_model: string
+  route_priority: number
+  version: string
+  member_hash: string
+  total_weight_bps: number
+  items: ChannelRouteScopeItem[]
+}
+
+export interface ChannelRouteScopeResponse {
+  success: boolean
+  message?: string
+  data?: ChannelRouteScope[]
+}
+
+export interface ChannelRouteScopeDetailResponse {
+  success: boolean
+  message?: string
+  data?: ChannelRouteScope
+}
+
+export interface ChannelRoutingConfig {
+  v2_enabled: boolean
+  shadow_enabled: boolean
+  strict_writes: boolean
+}
+
+export interface ChannelRoutingConfigResponse {
+  success: boolean
+  message?: string
+  data?: ChannelRoutingConfig
+}
+
+export interface ChannelRouteScopeMetricItem {
+  channel_id: number
+  max_concurrency: number
+  current_in_flight: number
+  available_slots: number
+  redis_available: boolean
+  confirmed: boolean
+  source: string
+}
+
+export interface ChannelRouteScopeMetrics {
+  scope_id: string
+  scope_version: string
+  redis_available: boolean
+  concurrency: {
+    acquire_success: number
+    acquire_rejected: number
+    acquire_unavailable: number
+    reselect_skipped: number
+    strict_429: number
+    redis_unavailable: number
+    renew_failure: number
+    release_failure: number
+    saturated_events: number
+    current_leases_local: number
+  }
+  items: ChannelRouteScopeMetricItem[]
+}
+
+export interface ChannelRouteScopeMetricsResponse {
+  success: boolean
+  message?: string
+  data?: ChannelRouteScopeMetrics
+}
+
 export interface ChannelTestResponse {
   success: boolean
   message?: string
@@ -174,10 +259,6 @@ export interface ChannelCapabilitySnapshot {
   supports_chat?: boolean
   supports_rest_previous_response_id?: boolean
   supports_compaction_item_passthrough?: boolean
-  compaction_item_passthrough_capability?:
-    | 'supported'
-    | 'unsupported'
-    | 'unknown'
   supports_custom_tools?: boolean
   supports_namespace_tools?: boolean
   supports_tool_search?: boolean
@@ -281,6 +362,7 @@ export type ChannelSortBy =
   | 'id'
   | 'name'
   | 'priority'
+  | 'pin_order'
   | 'balance'
   | 'response_time'
   | 'test_time'
@@ -352,6 +434,7 @@ export interface TagOperationParams {
   new_tag?: string
   priority?: number
   weight?: number
+  max_concurrency?: number
   model_mapping?: string
   models?: string
   groups?: string
@@ -372,6 +455,7 @@ export interface ChannelFormData {
   model_mapping?: string
   priority?: number
   weight?: number
+  max_concurrency?: number
   test_model?: string
   auto_ban?: number
   status: number

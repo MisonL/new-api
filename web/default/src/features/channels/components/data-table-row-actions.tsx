@@ -44,11 +44,11 @@ import {
   handleDeleteChannel,
   handleTestChannel,
   handleToggleChannelStatus,
-  handleUpdateChannelField,
-  handleUpdateChannelPriorityMovePlan,
-  getNextTopChannelPriority,
-  getTopChannelPriorityMovePlan,
-  isTopChannel,
+  handleUpdateChannelPinOrder,
+  handleUpdateChannelPinOrderMovePlan,
+  getNextTopChannelPinOrder,
+  getTopChannelPinOrderMovePlan,
+  isPinnedChannel,
   isChannelEnabled,
   isMultiKeyChannel,
 } from '../lib'
@@ -58,14 +58,14 @@ import { useChannels } from './channels-provider'
 
 interface DataTableRowActionsProps {
   row: Row<Channel>
-  getTopPriority: () => Promise<number>
-  getTopChannels: () => Promise<Pick<Channel, 'id' | 'priority'>[]>
-  topChannels?: Pick<Channel, 'id' | 'priority'>[]
+  getTopPinOrder: () => Promise<number>
+  getTopChannels: () => Promise<Pick<Channel, 'id' | 'pin_order'>[]>
+  topChannels?: Pick<Channel, 'id' | 'pin_order'>[]
 }
 
 export function DataTableRowActions({
   row,
-  getTopPriority,
+  getTopPinOrder,
   getTopChannels,
   topChannels,
 }: DataTableRowActionsProps) {
@@ -83,7 +83,7 @@ export function DataTableRowActions({
 
   const isEnabled = isChannelEnabled(channel)
   const isMultiKey = isMultiKeyChannel(channel)
-  const isPinned = isTopChannel(channel)
+  const isPinned = isPinnedChannel(channel)
   const pinnedOrder = topChannels ?? []
   const hasPinnedOrder = pinnedOrder.length > 0
   const pinnedIndex = pinnedOrder.findIndex((item) => item.id === channel.id)
@@ -93,7 +93,7 @@ export function DataTableRowActions({
     hasPinnedOrder &&
     pinnedIndex >= 0 &&
     pinnedIndex === pinnedOrder.length - 1
-  const isPriorityUpdating = isPinning || movingPinnedDirection !== null
+  const isPinOrderUpdating = isPinning || movingPinnedDirection !== null
   const getPinnedBoundaryMessage = (direction: 'up' | 'down') =>
     direction === 'up'
       ? t('This pinned channel is already at the top')
@@ -142,23 +142,18 @@ export function DataTableRowActions({
   }
 
   const handlePinToTop = async () => {
-    if (isPriorityUpdating) return
+    if (isPinOrderUpdating) return
     if (isPinnedFirst) {
       toast.info(getPinnedBoundaryMessage('up'))
       return
     }
     setIsPinning(true)
     try {
-      const topPriority = await getTopPriority()
-      const nextPriority = getNextTopChannelPriority(channel, [
-        { priority: topPriority },
+      const topPinOrder = await getTopPinOrder()
+      const nextPinOrder = getNextTopChannelPinOrder(channel, [
+        { pin_order: topPinOrder },
       ])
-      await handleUpdateChannelField(
-        channel.id,
-        'priority',
-        nextPriority,
-        queryClient
-      )
+      await handleUpdateChannelPinOrder(channel.id, nextPinOrder, queryClient)
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : t('Failed to pin channel')
@@ -169,7 +164,7 @@ export function DataTableRowActions({
   }
 
   const handleMovePinnedChannel = async (direction: 'up' | 'down') => {
-    if (isPriorityUpdating) return
+    if (isPinOrderUpdating) return
     if (!isPinned) {
       toast.info(t('Only pinned channels can be moved'))
       return
@@ -206,12 +201,12 @@ export function DataTableRowActions({
         return
       }
 
-      const plan = getTopChannelPriorityMovePlan(
+      const plan = getTopChannelPinOrderMovePlan(
         channel,
         latestTopChannels,
         direction
       )
-      await handleUpdateChannelPriorityMovePlan(plan, queryClient)
+      await handleUpdateChannelPinOrderMovePlan(plan, queryClient)
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -220,6 +215,16 @@ export function DataTableRowActions({
       )
     } finally {
       setMovingPinnedDirection(null)
+    }
+  }
+
+  const handleUnpin = async () => {
+    if (isPinOrderUpdating) return
+    setIsPinning(true)
+    try {
+      await handleUpdateChannelPinOrder(channel.id, 0, queryClient)
+    } finally {
+      setIsPinning(false)
     }
   }
 
@@ -248,7 +253,7 @@ export function DataTableRowActions({
             variant='ghost'
             size='icon-lg'
             onClick={handlePinToTop}
-            disabled={isPriorityUpdating || isPinnedFirst}
+            disabled={isPinOrderUpdating || isPinnedFirst}
             aria-label={t('Pin to Top')}
             className={
               isPinned
@@ -277,7 +282,7 @@ export function DataTableRowActions({
                 size='icon-lg'
                 onClick={() => handleMovePinnedChannel('up')}
                 disabled={
-                  isPriorityUpdating || !hasPinnedOrder || isPinnedFirst
+                  isPinOrderUpdating || !hasPinnedOrder || isPinnedFirst
                 }
                 aria-label={t('Move pinned channel up')}
               >
@@ -297,7 +302,7 @@ export function DataTableRowActions({
                 variant='ghost'
                 size='icon-lg'
                 onClick={() => handleMovePinnedChannel('down')}
-                disabled={isPriorityUpdating || !hasPinnedOrder || isPinnedLast}
+                disabled={isPinOrderUpdating || !hasPinnedOrder || isPinnedLast}
                 aria-label={t('Move pinned channel down')}
               >
                 {movingPinnedDirection === 'down' ? (
@@ -374,7 +379,7 @@ export function DataTableRowActions({
           {/* Pin to top */}
           <DropdownMenuItem
             onClick={handlePinToTop}
-            disabled={isPriorityUpdating || isPinnedFirst}
+            disabled={isPinOrderUpdating || isPinnedFirst}
           >
             {isPinning ? t('Pinning...') : t('Pin to Top')}
             <DropdownMenuShortcut>
@@ -387,11 +392,23 @@ export function DataTableRowActions({
           </DropdownMenuItem>
 
           {isPinned && (
+            <DropdownMenuItem
+              onClick={handleUnpin}
+              disabled={isPinOrderUpdating}
+            >
+              {isPinning ? t('Unpinning...') : t('Unpin')}
+              <DropdownMenuShortcut>
+                <Pin size={16} />
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+
+          {isPinned && (
             <>
               <DropdownMenuItem
                 onClick={() => handleMovePinnedChannel('up')}
                 disabled={
-                  isPriorityUpdating || !hasPinnedOrder || isPinnedFirst
+                  isPinOrderUpdating || !hasPinnedOrder || isPinnedFirst
                 }
               >
                 {t('Move Up')}
@@ -406,7 +423,7 @@ export function DataTableRowActions({
 
               <DropdownMenuItem
                 onClick={() => handleMovePinnedChannel('down')}
-                disabled={isPriorityUpdating || !hasPinnedOrder || isPinnedLast}
+                disabled={isPinOrderUpdating || !hasPinnedOrder || isPinnedLast}
               >
                 {t('Move Down')}
                 <DropdownMenuShortcut>

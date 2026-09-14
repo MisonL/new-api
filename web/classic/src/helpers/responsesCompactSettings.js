@@ -23,6 +23,7 @@ export const RESPONSES_COMPACT_MODE_SYNTHETIC_SUMMARY = 'synthetic_summary';
 export const RESPONSES_COMPACT_MODE_DEFAULT = RESPONSES_COMPACT_MODE_AUTO;
 export const RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT = true;
 export const RESPONSES_COMPACT_SUMMARY_MODEL_FALLBACK_DEFAULT = true;
+export const RESPONSES_COMPACT_NAMESPACE_UNSUPPORTED_PREFERENCE_DEFAULT = true;
 export const RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT = ['gpt-5.4'];
 export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT = 3;
 export const RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN = 1;
@@ -221,6 +222,10 @@ export function normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
   return rounded;
 }
 
+export function normalizeResponsesCompactNamespaceUnsupportedPreference(value) {
+  return value !== false;
+}
+
 export function buildResponsesCompactSettings(
   channelType,
   mode,
@@ -230,6 +235,7 @@ export function buildResponsesCompactSettings(
   autoFallbackRetryIntervalHours = RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
   upstreamProfile = RESPONSES_UPSTREAM_PROFILE_DEFAULT,
   remoteCompactionFirstDataTimeoutSeconds = RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT,
+  preferForResponsesCompactionWhenNamespaceUnsupported = RESPONSES_COMPACT_NAMESPACE_UNSUPPORTED_PREFERENCE_DEFAULT,
 ) {
   if (channelType !== 1) {
     return {};
@@ -248,6 +254,10 @@ export function buildResponsesCompactSettings(
     responses_compact_summary_model_fallback: summaryModelFallback !== false,
     responses_compact_summary_fallback_models:
       normalizeResponsesCompactSummaryFallbackModels(summaryFallbackModels),
+    prefer_for_responses_compaction_when_namespace_unsupported:
+      normalizeResponsesCompactNamespaceUnsupportedPreference(
+        preferForResponsesCompactionWhenNamespaceUnsupported,
+      ),
   };
   const normalizedProfile = normalizeResponsesUpstreamProfile(upstreamProfile);
   if (normalizedProfile) {
@@ -269,6 +279,7 @@ export function clearResponsesCompactSettings(settings) {
   delete settings.responses_compact_context_fallback;
   delete settings.responses_compact_summary_model_fallback;
   delete settings.responses_compact_summary_fallback_models;
+  delete settings.prefer_for_responses_compaction_when_namespace_unsupported;
   delete settings.responses_upstream_profile;
 }
 

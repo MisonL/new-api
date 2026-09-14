@@ -49,6 +49,15 @@ const LogStatsContent = ({ stat, loadingStat, handleEyeClick, t }) => (
     >
       {t('TPM')}: {stat.tpm}
     </Tag>
+    <Tag
+      color='white'
+      className='usage-logs-stat-tag usage-logs-stat-tag-neutral'
+    >
+      {t('命中率')}:{' '}
+      {stat.cache_rate == null
+        ? 'N/A'
+        : `${(stat.cache_rate * 100).toFixed(2)}%`}
+    </Tag>
     <LogStatButton
       loadingStat={loadingStat}
       handleEyeClick={handleEyeClick}
@@ -94,6 +103,7 @@ const LogsActions = ({
       <Skeleton.Title style={{ width: 108, height: 21, borderRadius: 6 }} />
       <Skeleton.Title style={{ width: 65, height: 21, borderRadius: 6 }} />
       <Skeleton.Title style={{ width: 64, height: 21, borderRadius: 6 }} />
+      <Skeleton.Title style={{ width: 74, height: 21, borderRadius: 6 }} />
     </Space>
   );
 

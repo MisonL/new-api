@@ -28,7 +28,7 @@ import {
   Typography,
 } from '@douyinfe/semi-ui';
 import { stringToColor } from '../../../helpers/color';
-import { getLogOther } from '../../../helpers/log';
+import { getLogOther, getLogPromptCacheStats } from '../../../helpers/log';
 import {
   renderGroup,
   renderQuota,
@@ -49,6 +49,10 @@ import {
 } from '../../../hooks/usage-logs/headerAuditInfo';
 import { copy, showError, showSuccess } from '../../../helpers/utils';
 import { shouldRenderResponsesCompactTag } from '../../../helpers/usageLogsResponsesCompact';
+import { shouldIncludeResponsesRoutingColumn } from '../../../helpers/usageLogsResponsesRoutingTrace';
+import { shouldIncludeChannelHealthRoutingColumn } from '../../../helpers/usageLogsChannelHealthRouting';
+import { ResponsesRoutingResult } from './ResponsesRoutingTrace';
+import { ChannelHealthRoutingResult } from './ChannelHealthRoutingTrace';
 
 const colors = [
   'amber',
@@ -447,7 +451,7 @@ function appendStreamStatusRows(rows, ss, t) {
   }
 }
 
-function buildStreamTagTooltip(other, isStream, t) {
+function buildStreamTagTooltip(other, isStream, isAdminUser, t) {
   const rows = [
     {
       key: 'mode',
@@ -466,7 +470,7 @@ function buildStreamTagTooltip(other, isStream, t) {
     });
   }
 
-  if (other?.upstream_request_path) {
+  if (isAdminUser && other?.upstream_request_path) {
     rows.push({
       key: 'upstream_path',
       label: t('上游路径'),
@@ -495,7 +499,7 @@ function buildStreamTagTooltip(other, isStream, t) {
   });
 }
 
-function renderIsStream(bool, t, streamStatus, other) {
+function renderIsStream(bool, t, streamStatus, other, isAdminUser) {
   const indicatorKind = !streamStatus
     ? 'ok'
     : streamStatus.status === 'partial'
@@ -519,7 +523,7 @@ function renderIsStream(bool, t, streamStatus, other) {
       <span style={{ position: 'relative', display: 'inline-block' }}>
         <Tooltip
           className='usage-log-info-popover-layer'
-          content={buildStreamTagTooltip(other, true, t)}
+          content={buildStreamTagTooltip(other, true, isAdminUser, t)}
           position='top'
           showArrow
         >
@@ -552,7 +556,7 @@ function renderIsStream(bool, t, streamStatus, other) {
     return (
       <Tooltip
         className='usage-log-info-popover-layer'
-        content={buildStreamTagTooltip(other, false, t)}
+        content={buildStreamTagTooltip(other, false, isAdminUser, t)}
         position='top'
         showArrow
       >
@@ -711,32 +715,6 @@ function toTokenNumber(value) {
 
 function formatTokenCount(value) {
   return toTokenNumber(value).toLocaleString();
-}
-
-function getPromptCacheSummary(other) {
-  if (!other || typeof other !== 'object') {
-    return null;
-  }
-
-  const cacheReadTokens = toTokenNumber(other.cache_tokens);
-  const cacheCreationTokens = toTokenNumber(other.cache_creation_tokens);
-  const cacheCreationTokens5m = toTokenNumber(other.cache_creation_tokens_5m);
-  const cacheCreationTokens1h = toTokenNumber(other.cache_creation_tokens_1h);
-
-  const hasSplitCacheCreation =
-    cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
-  const cacheWriteTokens = hasSplitCacheCreation
-    ? cacheCreationTokens5m + cacheCreationTokens1h
-    : cacheCreationTokens;
-
-  if (cacheReadTokens <= 0 && cacheWriteTokens <= 0) {
-    return null;
-  }
-
-  return {
-    cacheReadTokens,
-    cacheWriteTokens,
-  };
 }
 
 function normalizeDetailText(detail) {
@@ -1019,7 +997,7 @@ function getResponsesCompactTagColor(mode) {
   }
 }
 
-function buildResponsesCompactTooltipRows(other, t) {
+function buildResponsesCompactTooltipRows(other, isAdminUser, t) {
   const mode = other?.responses_compact_mode;
   const rows = [];
 
@@ -1030,6 +1008,9 @@ function buildResponsesCompactTooltipRows(other, t) {
       value: getResponsesCompactModeLabel(mode, t),
       className: 'usage-log-info-popover-value-mode',
     });
+  }
+  if (!isAdminUser) {
+    return rows;
   }
   if (other?.responses_compact_setting) {
     rows.push({
@@ -1096,12 +1077,22 @@ function buildResponsesCompactTooltipRows(other, t) {
       className: 'usage-log-info-popover-value-effective-mode is-code',
     });
   }
+  if (typeof capability?.supports_stream_options_include_usage === 'boolean') {
+    rows.push({
+      key: 'stream_usage_option',
+      label: t('流用量能力'),
+      value: capability.supports_stream_options_include_usage
+        ? t('支持')
+        : t('不支持'),
+      className: 'usage-log-info-popover-value-capability-source',
+    });
+  }
 
   return rows;
 }
 
-function buildResponsesCompactTooltip(other, t) {
-  const rows = buildResponsesCompactTooltipRows(other, t);
+function buildResponsesCompactTooltip(other, isAdminUser, t) {
+  const rows = buildResponsesCompactTooltipRows(other, isAdminUser, t);
 
   const title = other?.responses_compact_mode
     ? t('Responses Compact')
@@ -1112,31 +1103,28 @@ function buildResponsesCompactTooltip(other, t) {
   });
 }
 
-function renderResponsesCompactTag(other, t) {
+function renderResponsesCompactTag(other, isAdminUser, t) {
   const mode = other?.responses_compact_mode;
   if (!shouldRenderResponsesCompactTag(other)) {
     return null;
   }
 
-  const label = mode ? getResponsesCompactBadgeLabel(mode, t) : t('Responses');
-  const color = mode ? getResponsesCompactTagColor(mode) : 'blue';
+  const compactTag = mode ? (
+    <Tooltip
+      className='usage-log-info-popover-layer'
+      content={buildResponsesCompactTooltip(other, isAdminUser, t)}
+      position='top'
+      showArrow
+    >
+      <span>
+        <Tag color={getResponsesCompactTagColor(mode)} shape='circle'>
+          {getResponsesCompactBadgeLabel(mode, t)}
+        </Tag>
+      </span>
+    </Tooltip>
+  ) : null;
 
-  return (
-    <span style={{ position: 'relative', display: 'inline-block' }}>
-      <Tooltip
-        className='usage-log-info-popover-layer'
-        content={buildResponsesCompactTooltip(other, t)}
-        position='top'
-        showArrow
-      >
-        <span>
-          <Tag color={color} shape='circle'>
-            {label}
-          </Tag>
-        </span>
-      </Tooltip>
-    </span>
-  );
+  return compactTag;
 }
 
 function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
@@ -1464,8 +1452,9 @@ export const getLogsColumns = ({
                   t,
                   other?.stream_status,
                   other,
+                  isAdminUser,
                 )}
-                {renderResponsesCompactTag(other, t)}
+                {renderResponsesCompactTag(other, isAdminUser, t)}
               </Space>
             </>
           );
@@ -1475,14 +1464,56 @@ export const getLogsColumns = ({
             <>
               <Space>
                 {renderUseTime(text, t)}
-                {renderIsStream(record.is_stream, t, null, other)}
-                {renderResponsesCompactTag(other, t)}
+                {renderIsStream(record.is_stream, t, null, other, isAdminUser)}
+                {renderResponsesCompactTag(other, isAdminUser, t)}
               </Space>
             </>
           );
         }
       },
     },
+    ...(shouldIncludeResponsesRoutingColumn(isAdminUser)
+      ? [
+          {
+            key: COLUMN_KEYS.ROUTING_RESULT,
+            title: t('Responses 路由'),
+            dataIndex: 'other',
+            width: 180,
+            render: (text, record) => {
+              if (!(record.type === 2 || record.type === 5)) {
+                return <></>;
+              }
+              return (
+                <ResponsesRoutingResult
+                  other={getLogOther(record.other)}
+                  t={t}
+                />
+              );
+            },
+          },
+        ]
+      : []),
+    ...(shouldIncludeChannelHealthRoutingColumn(isAdminUser)
+      ? [
+          {
+            key: COLUMN_KEYS.CHANNEL_HEALTH,
+            title: t('渠道健康'),
+            dataIndex: 'other',
+            width: 180,
+            render: (text, record) => {
+              if (!(record.type === 2 || record.type === 5)) {
+                return <></>;
+              }
+              return (
+                <ChannelHealthRoutingResult
+                  other={getLogOther(record.other)}
+                  t={t}
+                />
+              );
+            },
+          },
+        ]
+      : []),
     {
       key: COLUMN_KEYS.PROMPT,
       title: (
@@ -1500,9 +1531,9 @@ export const getLogsColumns = ({
       dataIndex: 'prompt_tokens',
       render: (text, record, index) => {
         const other = getLogOther(record.other);
-        const cacheSummary = getPromptCacheSummary(other);
-        const hasCacheRead = (cacheSummary?.cacheReadTokens || 0) > 0;
-        const hasCacheWrite = (cacheSummary?.cacheWriteTokens || 0) > 0;
+        const cacheSummary = getLogPromptCacheStats(text, other);
+        const hasCacheRead = cacheSummary.cacheReadTokens > 0;
+        const hasCacheWrite = cacheSummary.cacheWriteTokens > 0;
         let cacheText = '';
         if (hasCacheRead && hasCacheWrite) {
           cacheText = `${t('缓存读')} ${formatTokenCount(cacheSummary.cacheReadTokens)} · ${t('写')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
@@ -1511,6 +1542,12 @@ export const getLogsColumns = ({
         } else if (hasCacheWrite) {
           cacheText = `${t('缓存写')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
         }
+
+        const hasInputStats =
+          Number(text) > 0 ||
+          Number(record.completion_tokens) > 0 ||
+          hasCacheRead ||
+          hasCacheWrite;
 
         return record.type === 0 ||
           record.type === 2 ||
@@ -1535,6 +1572,18 @@ export const getLogsColumns = ({
                 }}
               >
                 {cacheText}
+              </span>
+            ) : null}
+            {hasInputStats && cacheSummary.cacheRate !== null ? (
+              <span
+                style={{
+                  marginTop: 2,
+                  fontSize: 11,
+                  color: 'var(--semi-color-text-2)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t('命中率')} {(cacheSummary.cacheRate * 100).toFixed(2)}%
               </span>
             ) : null}
           </div>

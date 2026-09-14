@@ -106,6 +106,9 @@ export type GeneralSettings = {
   'channel_affinity_setting.max_entries': number
   'channel_affinity_setting.default_ttl_seconds': number
   'channel_affinity_setting.rules': string
+  'general_setting.channel_health_enabled': boolean
+  'general_setting.channel_health_cooldown_seconds': number
+  'general_setting.channel_health_probe_lease_seconds': number
 }
 
 export type AuthSettings = {

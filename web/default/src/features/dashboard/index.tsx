@@ -17,6 +17,7 @@ import { AnnouncementsPanel } from './components/overview/announcements-panel'
 import { ApiInfoPanel } from './components/overview/api-info-panel'
 import { FAQPanel } from './components/overview/faq-panel'
 import { SummaryCards } from './components/overview/summary-cards'
+import { TokenUsageSummary } from './components/overview/token-usage-summary'
 import { UptimePanel } from './components/overview/uptime-panel'
 import { DEFAULT_TIME_GRANULARITY } from './constants'
 import {
@@ -218,6 +219,7 @@ export function Dashboard() {
           {activeSection === 'overview' && (
             <>
               <SummaryCards />
+              <TokenUsageSummary />
               <CardStaggerContainer className='grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2'>
                 <CardStaggerItem>
                   <ApiInfoPanel />

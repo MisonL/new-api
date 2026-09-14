@@ -7,6 +7,7 @@ import {
 } from '../src/features/channels/lib/channel-form'
 import {
   BUILTIN_HEADER_PROFILES,
+  CODEX_DYNAMIC_HEADER_PASSTHROUGH_HEADERS,
   NPM_VERSION_FORBIDDEN_CODE,
   NPM_VERSION_LATEST_ALIAS,
   NPM_VERSION_LOAD_ERROR_CODE,
@@ -16,6 +17,7 @@ import {
   buildNpmVersionRequestConfig,
   buildSelectedProfileItems,
   buildVersionedAiCodingCliProfile,
+  applyHeaderProfileStrategyToChannelInputs,
   clearParamOverridePreservingUserAgentPassHeaders,
   disableEmptyHeaderProfileStrategy,
   getHeaderProfileStrategyFromSettings,
@@ -29,6 +31,22 @@ import {
 import { PARAM_OVERRIDE_TEMPLATES } from '../src/features/system-settings/general/channel-affinity/constants'
 
 describe('channel header profile strategy settings', () => {
+  test('Chrome macOS preset uses Apple Silicon client hints', () => {
+    const chrome = BUILTIN_HEADER_PROFILES.find(
+      (profile) => profile.id === 'chrome-macos'
+    )
+
+    expect(chrome?.headers['Sec-CH-UA']).toBe(
+      '"Google Chrome";v="151", "Chromium";v="151", "Not.A/Brand";v="24"'
+    )
+    expect(chrome?.headers['Sec-CH-UA-Platform']).toBe('"macOS"')
+    expect(chrome?.headers['Sec-CH-UA-Arch']).toBe('"arm"')
+    expect(chrome?.headers['Sec-CH-UA-Bitness']).toBe('"64"')
+    expect(chrome?.headers['User-Agent']).toBe(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.138 Safari/537.36'
+    )
+  })
+
   test('builtin Antigravity CLI profile is fixed snapshot only', () => {
     const agy = BUILTIN_HEADER_PROFILES.find(
       (profile) => profile.id === 'agy'
@@ -196,6 +214,11 @@ describe('channel header profile strategy settings', () => {
     )
     expect(codex).toBeDefined()
     expect(claude).toBeDefined()
+    expect(
+      Object.keys(codex?.headers ?? {}).some((key) =>
+        key.toLowerCase().startsWith('x-codex-')
+      )
+    ).toBe(false)
 
     const selectedProfiles = [
       buildVersionedAiCodingCliProfile(
@@ -239,6 +262,11 @@ describe('channel header profile strategy settings', () => {
     expect(
       parsed.header_profile_strategy.profiles[0].headers['User-Agent']
     ).toContain('0.200.0')
+    expect(
+      Object.keys(parsed.header_profile_strategy.profiles[0].headers).some(
+        (key) => key.toLowerCase().startsWith('x-codex-')
+      )
+    ).toBe(false)
   })
 
   test('writes fallback source for pinned built-in npm snapshot', () => {
@@ -269,6 +297,41 @@ describe('channel header profile strategy settings', () => {
       version: '0.142.4',
       platform: 'macos-x64',
     })
+  })
+
+  test('Codex profile automatically presets dynamic pass_headers', () => {
+    const result = applyHeaderProfileStrategyToChannelInputs({
+      inputs: {
+        settings: '{}',
+        param_override:
+          '{"operations":[{"mode":"trim_prefix","path":"model","value":"openai/"}]}',
+      },
+      strategy: {
+        enabled: true,
+        mode: 'fixed',
+        selectedProfileIds: ['codex-cli'],
+        profiles: [],
+      },
+    })
+
+    const settings = JSON.parse(result.settings)
+    const paramOverride = JSON.parse(result.param_override)
+
+    expect(settings.header_profile_strategy.profiles[0].passthrough_required).toBe(
+      true
+    )
+    expect(paramOverride.operations).toEqual([
+      {
+        mode: 'pass_headers',
+        value: [...CODEX_DYNAMIC_HEADER_PASSTHROUGH_HEADERS],
+        keep_origin: true,
+      },
+      {
+        mode: 'trim_prefix',
+        path: 'model',
+        value: 'openai/',
+      },
+    ])
   })
 
   test('refreshes selected fallback snapshot after npm versions load', () => {

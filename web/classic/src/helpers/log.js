@@ -31,3 +31,40 @@ export function getLogOther(otherStr) {
     return null;
   }
 }
+
+function toLogTokenCount(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+export function getLogPromptCacheStats(promptTokens, other) {
+  const inputTokens = toLogTokenCount(promptTokens);
+  const cacheReadTokens = toLogTokenCount(other?.cache_tokens);
+  const normalizedCacheWriteTokens = toLogTokenCount(other?.cache_write_tokens);
+  const cacheWrite5m = toLogTokenCount(other?.cache_creation_tokens_5m);
+  const cacheWrite1h = toLogTokenCount(other?.cache_creation_tokens_1h);
+  const cacheWriteTokens =
+    normalizedCacheWriteTokens > 0
+      ? normalizedCacheWriteTokens
+      : cacheWrite5m > 0 || cacheWrite1h > 0
+        ? cacheWrite5m + cacheWrite1h
+        : toLogTokenCount(other?.cache_creation_tokens);
+  const isAnthropic =
+    String(other?.usage_semantic || '')
+      .trim()
+      .toLowerCase() === 'anthropic' || other?.claude === true;
+  const denominator = isAnthropic ? inputTokens + cacheReadTokens : inputTokens;
+  const rawCacheRead = other?.cache_tokens;
+  const hasCacheRead =
+    (typeof rawCacheRead === 'number' ||
+      (typeof rawCacheRead === 'string' && rawCacheRead.trim() !== '')) &&
+    Number.isFinite(Number(rawCacheRead)) &&
+    Number(rawCacheRead) >= 0;
+
+  return {
+    cacheReadTokens,
+    cacheWriteTokens,
+    cacheRate:
+      hasCacheRead && denominator > 0 ? cacheReadTokens / denominator : null,
+  };
+}

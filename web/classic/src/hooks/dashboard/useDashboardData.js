@@ -48,6 +48,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const initialized = useRef(false);
   const quotaRequestSeq = useRef(0);
   const quotaAbortControllerRef = useRef(null);
+  const tokenStatsRequestSeq = useRef(0);
+  const tokenStatsAbortControllerRef = useRef(null);
 
   // Keep a small buffer so the latest records are not clipped near "now".
   const getCurrentEndTimestamp = useCallback(
@@ -163,6 +165,14 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [quotaData, setQuotaData] = useState([]);
   const [consumeQuota, setConsumeQuota] = useState(0);
   const [consumeTokens, setConsumeTokens] = useState(0);
+  const [tokenStats, setTokenStats] = useState({
+    input_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    output_tokens: 0,
+    cache_rate: null,
+  });
+  const [tokenStatsLoading, setTokenStatsLoading] = useState(false);
   const [times, setTimes] = useState(0);
   const [pieData, setPieData] = useState([{ type: 'null', value: '0' }]);
   const [lineData, setLineData] = useState([]);
@@ -468,6 +478,92 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   }, []);
 
   // ========== API 调用函数 ==========
+  const loadTokenStats = useCallback(
+    async (overrideInputs = inputs) => {
+      const requestSeq = ++tokenStatsRequestSeq.current;
+      setTokenStatsLoading(true);
+      const { start_timestamp, end_timestamp, username } = overrideInputs;
+      const localStartTimestamp =
+        parseDashboardTimestamp(start_timestamp) / 1000;
+      const localEndTimestamp = parseDashboardTimestamp(end_timestamp) / 1000;
+      if (
+        !Number.isFinite(localStartTimestamp) ||
+        !Number.isFinite(localEndTimestamp)
+      ) {
+        if (requestSeq === tokenStatsRequestSeq.current) {
+          setTokenStatsLoading(false);
+        }
+        return null;
+      }
+
+      if (tokenStatsAbortControllerRef.current) {
+        tokenStatsAbortControllerRef.current.abort();
+      }
+      const abortController = new AbortController();
+      tokenStatsAbortControllerRef.current = abortController;
+      const endpoint = isAdminUser ? '/api/log/stat' : '/api/log/self/stat';
+
+      try {
+        const res = await API.get(endpoint, {
+          params: {
+            type: 2,
+            username: isAdminUser ? username : undefined,
+            start_timestamp: localStartTimestamp,
+            end_timestamp: localEndTimestamp,
+          },
+          signal: abortController.signal,
+          skipErrorHandler: true,
+          disableDuplicate: true,
+        });
+        if (requestSeq !== tokenStatsRequestSeq.current) {
+          return null;
+        }
+        const { success, message, data } = res.data || {};
+        if (!success) {
+          setTokenStats({
+            input_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            output_tokens: 0,
+            cache_rate: null,
+          });
+          showError(message || t('请求发生错误'));
+          return null;
+        }
+        setTokenStats({
+          input_tokens: Number(data?.input_tokens) || 0,
+          cache_read_tokens: Number(data?.cache_read_tokens) || 0,
+          cache_write_tokens: Number(data?.cache_write_tokens) || 0,
+          output_tokens: Number(data?.output_tokens) || 0,
+          cache_rate: data?.cache_rate ?? null,
+        });
+        return data || null;
+      } catch (error) {
+        if (error?.code === 'ERR_CANCELED') {
+          return null;
+        }
+        if (requestSeq !== tokenStatsRequestSeq.current) {
+          return null;
+        }
+        setTokenStats({
+          input_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          output_tokens: 0,
+          cache_rate: null,
+        });
+        showError(error?.message || t('请求发生错误'));
+        return null;
+      } finally {
+        if (requestSeq === tokenStatsRequestSeq.current) {
+          tokenStatsAbortControllerRef.current = null;
+          setTokenStatsLoading(false);
+        }
+      }
+    },
+    [inputs, isAdminUser, t],
+  );
+
   const loadQuotaData = useCallback(
     async (
       overrideInputs = inputs,
@@ -532,6 +628,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
             }
             nextData.sort((a, b) => a.created_at - b.created_at);
             setQuotaData(nextData);
+            await loadTokenStats(overrideInputs);
             return nextData;
           } else {
             showError(message);
@@ -554,7 +651,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
         }
       }
     },
-    [dataExportDefaultTime, inputs, isAdminUser, t],
+    [dataExportDefaultTime, inputs, isAdminUser, loadTokenStats, t],
   );
 
   const loadUptimeData = useCallback(async () => {
@@ -698,6 +795,10 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       if (quotaAbortControllerRef.current) {
         quotaAbortControllerRef.current.abort();
       }
+      tokenStatsRequestSeq.current += 1;
+      if (tokenStatsAbortControllerRef.current) {
+        tokenStatsAbortControllerRef.current.abort();
+      }
     };
   }, []);
 
@@ -721,6 +822,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     setConsumeQuota,
     consumeTokens,
     setConsumeTokens,
+    tokenStats,
+    tokenStatsLoading,
     times,
     setTimes,
     pieData,
@@ -765,6 +868,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     showSearchModal,
     handleCloseModal,
     loadQuotaData,
+    loadTokenStats,
     loadUserQuotaData,
     loadUptimeData,
     getUserData,

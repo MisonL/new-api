@@ -89,6 +89,8 @@ const ColumnSelectorModal = ({
             COLUMN_KEYS.USERNAME,
             COLUMN_KEYS.REQUEST_UA,
             COLUMN_KEYS.REQUEST_HEADERS,
+            COLUMN_KEYS.ROUTING_RESULT,
+            COLUMN_KEYS.CHANNEL_HEALTH,
             COLUMN_KEYS.RETRY,
           ].includes(column.key);
         }
@@ -101,6 +103,8 @@ const ColumnSelectorModal = ({
       COLUMN_KEYS.USERNAME,
       COLUMN_KEYS.REQUEST_UA,
       COLUMN_KEYS.REQUEST_HEADERS,
+      COLUMN_KEYS.ROUTING_RESULT,
+      COLUMN_KEYS.CHANNEL_HEALTH,
       COLUMN_KEYS.RETRY,
     ],
   );

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import {
   Popover,
@@ -23,20 +23,31 @@ export function LongText({
   className = '',
   contentClassName = '',
 }: LongTextProps) {
-  const ref = useRef<HTMLDivElement>(null)
+  const [element, setElement] = useState<HTMLDivElement | null>(null)
   const [isOverflown, setIsOverflown] = useState(false)
 
   useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      setIsOverflown(checkOverflow(ref.current))
-    })
+    if (!element) return
 
-    return () => cancelAnimationFrame(frame)
-  }, [])
+    const updateOverflow = () => {
+      setIsOverflown(checkOverflow(element))
+    }
+    const frame = window.requestAnimationFrame(updateOverflow)
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(updateOverflow)
+    observer?.observe(element)
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      observer?.disconnect()
+    }
+  }, [children, element])
 
   if (!isOverflown)
     return (
-      <div ref={ref} className={cn('truncate', className)}>
+      <div ref={setElement} className={cn('truncate', className)}>
         {children}
       </div>
     )
@@ -47,7 +58,7 @@ export function LongText({
         <TooltipProvider delayDuration={0}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div ref={ref} className={cn('truncate', className)}>
+              <div ref={setElement} className={cn('truncate', className)}>
                 {children}
               </div>
             </TooltipTrigger>
@@ -60,7 +71,7 @@ export function LongText({
       <div className='sm:hidden'>
         <Popover>
           <PopoverTrigger asChild>
-            <div ref={ref} className={cn('truncate', className)}>
+            <div ref={setElement} className={cn('truncate', className)}>
               {children}
             </div>
           </PopoverTrigger>

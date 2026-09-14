@@ -104,6 +104,13 @@ describe('channel responses compact settings', () => {
     expect(
       CHANNEL_FORM_DEFAULT_VALUES.responses_compact_auto_fallback_retry_interval_hours
     ).toBe(RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT)
+    expect(
+      CHANNEL_FORM_DEFAULT_VALUES
+        .prefer_for_responses_compaction_when_namespace_unsupported
+    ).toBe(true)
+    expect(
+      transformChannelToFormDefaults(makeChannel()).prefer_for_responses_compaction_when_namespace_unsupported
+    ).toBe(true)
     expect(getResponsesCompactMode('{}')).toBe(RESPONSES_COMPACT_MODE_AUTO)
     expect(getResponsesCompactMode('')).toBe(RESPONSES_COMPACT_MODE_AUTO)
     expect(getResponsesCompactMode('{bad json')).toBe(
@@ -296,6 +303,22 @@ describe('channel responses compact settings', () => {
       'gpt-5.4',
       'gpt-5.4-large',
     ])
+    expect(
+      stored.prefer_for_responses_compaction_when_namespace_unsupported
+    ).toBe(true)
+  })
+
+  test('stores an explicit compact namespace preference override', () => {
+    const payload = transformFormDataToCreatePayload({
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      type: 1,
+      prefer_for_responses_compaction_when_namespace_unsupported: false,
+    })
+    const stored = JSON.parse(String(payload.channel.settings))
+
+    expect(
+      stored.prefer_for_responses_compaction_when_namespace_unsupported
+    ).toBe(false)
   })
 
   test('loads and stores auto compact mode for OpenAI channels', () => {

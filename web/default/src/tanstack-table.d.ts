@@ -11,5 +11,11 @@ declare module '@tanstack/react-table' {
     sortable?: boolean
     // Custom CSS classes to apply to the column cells
     className?: string
+    // Marks the primary row title in mobile card lists
+    mobileTitle?: boolean
+    // Places the cell beside the title in mobile card lists
+    mobileBadge?: boolean
+    // Omits the cell from mobile card lists
+    mobileHidden?: boolean
   }
 }

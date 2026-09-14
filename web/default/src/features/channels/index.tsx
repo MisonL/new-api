@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { SectionPageLayout } from '@/components/layout'
+import { ChannelHealthRoutingOverview } from './components/channel-health-routing-overview'
+import { ChannelRouteScopeWorkbench } from './components/channel-route-scope-workbench'
 import { ChannelsDialogs } from './components/channels-dialogs'
 import { ChannelsPrimaryButtons } from './components/channels-primary-buttons'
 import { ChannelsProvider } from './components/channels-provider'
@@ -18,6 +20,8 @@ export function Channels() {
           <ChannelsPrimaryButtons />
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
+          <ChannelHealthRoutingOverview />
+          <ChannelRouteScopeWorkbench />
           <ChannelsTable />
         </SectionPageLayout.Content>
       </SectionPageLayout>

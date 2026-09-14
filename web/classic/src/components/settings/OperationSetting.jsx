@@ -27,6 +27,7 @@ import SettingsLog from '../../pages/Setting/Operation/SettingsLog';
 import SettingsMonitoring from '../../pages/Setting/Operation/SettingsMonitoring';
 import SettingsCreditLimit from '../../pages/Setting/Operation/SettingsCreditLimit';
 import SettingsCheckin from '../../pages/Setting/Operation/SettingsCheckin';
+import SettingsChannelHealth from '../../pages/Setting/Operation/SettingsChannelHealth';
 import { API, showError, toBoolean } from '../../helpers';
 
 const OperationSetting = () => {
@@ -49,6 +50,9 @@ const OperationSetting = () => {
     'general_setting.responses_stream_bootstrap_ping_interval_seconds': 10,
     'general_setting.responses_stream_bootstrap_retryable_status_codes':
       '[401,403,408,429,500,502,503,504]',
+    'general_setting.channel_health_enabled': false,
+    'general_setting.channel_health_cooldown_seconds': 30,
+    'general_setting.channel_health_probe_lease_seconds': 15,
     QuotaPerUnit: 0,
     USDExchangeRate: 0,
     RetryTimes: 0,
@@ -156,6 +160,10 @@ const OperationSetting = () => {
         {/* 监控设置 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsMonitoring options={inputs} refresh={onRefresh} />
+        </Card>
+        {/* 渠道健康路由 */}
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsChannelHealth options={inputs} refresh={onRefresh} />
         </Card>
         {/* 额度设置 */}
         <Card style={{ marginTop: '10px' }}>

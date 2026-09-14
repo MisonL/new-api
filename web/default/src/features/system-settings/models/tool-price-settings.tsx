@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Code2, Copy, Eye, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -33,6 +33,12 @@ type ToolPriceRow = {
   id: number
   key: string
   price: number
+}
+
+type ToolPriceInitialState = {
+  rows: ToolPriceRow[]
+  jsonText: string
+  nextRowId: number
 }
 
 function rowsToObject(rows: ToolPriceRow[]): Record<string, number> {
@@ -73,8 +79,10 @@ function parseInitialPrices(
   return { ...DEFAULT_PRICES }
 }
 
-function createInitialToolPriceState(defaultValue: string) {
-  const prices = parseInitialPrices(defaultValue)
+function buildInitialToolPriceState(
+  rawValue: string | undefined
+): ToolPriceInitialState {
+  const prices = parseInitialPrices(rawValue)
   const rows = objectToRows(prices)
   return {
     rows,
@@ -92,15 +100,29 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
 }: ToolPriceSettingsProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
   const initialState = useMemo(
-    () => createInitialToolPriceState(defaultValue),
+    () => buildInitialToolPriceState(defaultValue),
     [defaultValue]
   )
-  const [rows, setRows] = useState<ToolPriceRow[]>(initialState.rows)
-  const [jsonText, setJsonText] = useState(initialState.jsonText)
+  const previousDefaultValue = useRef(defaultValue)
+  const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
+  const [rows, setRows] = useState<ToolPriceRow[]>(() => initialState.rows)
+  const [jsonText, setJsonText] = useState(() => initialState.jsonText)
   const [jsonError, setJsonError] = useState('')
-  const [nextRowId, setNextRowId] = useState(initialState.nextRowId)
+  const [nextRowId, setNextRowId] = useState(() => initialState.nextRowId)
+
+  useEffect(() => {
+    if (previousDefaultValue.current === defaultValue) return
+    previousDefaultValue.current = defaultValue
+
+    const frame = window.requestAnimationFrame(() => {
+      setRows(initialState.rows)
+      setJsonText(initialState.jsonText)
+      setJsonError('')
+      setNextRowId(initialState.nextRowId)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [defaultValue, initialState])
 
   const currentPrices = useMemo(() => rowsToObject(rows), [rows])
 

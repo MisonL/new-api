@@ -28,7 +28,7 @@ const StatsCards = ({ groupedStatsData, loading, CARD_PROPS }) => {
   const { t } = useTranslation();
   return (
     <div className='mb-4'>
-      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
+      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4'>
         {groupedStatsData.map((group, idx) => (
           <Card
             key={idx}

@@ -25,6 +25,8 @@ import ChannelsTable from './ChannelsTable';
 import ChannelsActions from './ChannelsActions';
 import ChannelsFilters from './ChannelsFilters';
 import ChannelsTabs from './ChannelsTabs';
+import ChannelHealthRuntimeOverview from './ChannelHealthRuntimeOverview';
+import ChannelRouteScopeOverview from './ChannelRouteScopeOverview';
 import { useChannelsData } from '../../../hooks/channels/useChannelsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
@@ -82,6 +84,7 @@ const ChannelsPage = () => {
             requestHeaderPolicyAuxiliaryRequestsEnabled={
               channelsData.requestHeaderPolicyAuxiliaryRequestsEnabled
             }
+            channelRoutingConfig={channelsData.channelRoutingConfig}
           />
         </Suspense>
       ) : null}
@@ -126,6 +129,14 @@ const ChannelsPage = () => {
           style={{ marginBottom: 12 }}
         />
       ) : null}
+      {channelsData.canViewChannelHealthRuntime ? (
+        <ChannelHealthRuntimeOverview
+          runtimeState={channelsData.channelHealthRuntime}
+          canConfigure={channelsData.canConfigureChannelHealthRuntime}
+          onLocateChannel={channelsData.locateChannelHealthRuntimeEntry}
+        />
+      ) : null}
+      <ChannelRouteScopeOverview t={channelsData.t} />
       <CardPro
         type='type3'
         className='channel-table-card'

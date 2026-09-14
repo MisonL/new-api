@@ -1,7 +1,10 @@
 export type HeaderProfileMode = 'fixed' | 'round_robin' | 'random'
 export type HeaderProfileScope = 'builtin' | 'user' | 'missing'
 export type HeaderProfileCategory =
-  'browser' | 'ai_coding_cli' | 'api_sdk' | 'custom'
+  | 'browser'
+  | 'ai_coding_cli'
+  | 'api_sdk'
+  | 'custom'
 
 export type HeaderProfileVersionMeta = {
   baseProfileId: string
@@ -36,6 +39,11 @@ export type HeaderProfileStrategy = {
   profiles: HeaderProfile[]
 }
 
+type ChannelHeaderProfileInputs = {
+  settings?: string
+  param_override?: string
+}
+
 export type HeaderProfileVersionSelection = {
   baseProfileId: string
   packageName?: string
@@ -68,7 +76,21 @@ export const NPM_VERSION_RATE_LIMITED_CODE = 'npm_version_rate_limited'
 export const NPM_VERSION_EMPTY_ERROR_CODE = 'npm_version_empty'
 export const NPM_VERSION_NOT_RECORDED_CODE = 'npm_version_not_recorded'
 export const NPM_VERSION_LATEST_ALIAS = 'latest'
-export const AI_CODING_CLI_DEFAULT_PLATFORM = 'macos-x64'
+export const AI_CODING_CLI_DEFAULT_PLATFORM = 'macos-arm64'
+
+export const CODEX_DYNAMIC_HEADER_PASSTHROUGH_HEADERS = [
+  'Originator',
+  'Session_id',
+  'Session-Id',
+  'Thread-Id',
+  'X-Codex-Beta-Features',
+  'X-Codex-Installation-Id',
+  'X-Codex-Parent-Thread-Id',
+  'X-Codex-Turn-Metadata',
+  'X-Codex-Turn-State',
+  'X-Codex-Window-Id',
+  'X-Client-Request-Id',
+] as const
 
 export class NpmVersionLoadError extends Error {
   code: string
@@ -267,11 +289,13 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
       'Sec-CH-UA':
-        '"Google Chrome";v="150", "Chromium";v="150", "Not.A/Brand";v="24"',
+        '"Google Chrome";v="151", "Chromium";v="151", "Not.A/Brand";v="24"',
       'Sec-CH-UA-Mobile': '?0',
       'Sec-CH-UA-Platform': '"macOS"',
+      'Sec-CH-UA-Arch': '"arm"',
+      'Sec-CH-UA-Bitness': '"64"',
       'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.47 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.138 Safari/537.36',
     },
     previewText: '',
   },
@@ -282,7 +306,14 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     scope: 'builtin',
     readonly: true,
     versionSource: AI_CODING_CLI_VERSION_SOURCES['codex-cli'],
-    headers: buildAiCodingCliHeaders('codex-cli', '0.142.4', 'macos-x64'),
+    passthroughRequired: true,
+    headers: buildAiCodingCliHeaders(
+      'codex-cli',
+      '0.142.4',
+      AI_CODING_CLI_DEFAULT_PLATFORM
+    ),
+    description:
+      '模板只固定客户端身份，并自动预设从真实 Codex 请求透传会话、窗口、turn metadata 与 sticky routing 动态请求头的 pass_headers。',
     previewText: '',
   },
   {
@@ -291,11 +322,14 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     category: 'ai_coding_cli',
     scope: 'builtin',
     readonly: true,
+    passthroughRequired: true,
     headers: {
       'User-Agent':
-        'Codex Desktop/0.142.4 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.623.70822)',
+        'Codex Desktop/0.142.4 (Mac OS 15.7.3; aarch64) unknown (Codex Desktop; 26.623.70822)',
       Originator: 'Codex Desktop',
     },
+    description:
+      '模板只固定 Codex App 客户端身份，不能与 codex-tui 混用，并自动预设从真实 Codex 请求透传会话、窗口、turn metadata 与 sticky routing 动态请求头的 pass_headers。',
     previewText: '',
   },
   {
@@ -305,7 +339,11 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     scope: 'builtin',
     readonly: true,
     versionSource: AI_CODING_CLI_VERSION_SOURCES['claude-code'],
-    headers: buildAiCodingCliHeaders('claude-code', '2.1.197', 'macos-x64'),
+    headers: buildAiCodingCliHeaders(
+      'claude-code',
+      '2.1.197',
+      AI_CODING_CLI_DEFAULT_PLATFORM
+    ),
     previewText: '',
   },
   {
@@ -315,7 +353,11 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     scope: 'builtin',
     readonly: true,
     versionSource: AI_CODING_CLI_VERSION_SOURCES['gemini-cli'],
-    headers: buildAiCodingCliHeaders('gemini-cli', '0.49.0', 'macos-x64'),
+    headers: buildAiCodingCliHeaders(
+      'gemini-cli',
+      '0.49.0',
+      AI_CODING_CLI_DEFAULT_PLATFORM
+    ),
     previewText: '',
   },
   {
@@ -325,7 +367,11 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     scope: 'builtin',
     readonly: true,
     versionSource: AI_CODING_CLI_VERSION_SOURCES['qwen-code'],
-    headers: buildAiCodingCliHeaders('qwen-code', '0.19.3', 'macos-x64'),
+    headers: buildAiCodingCliHeaders(
+      'qwen-code',
+      '0.19.3',
+      AI_CODING_CLI_DEFAULT_PLATFORM
+    ),
     previewText: '',
   },
   {
@@ -335,7 +381,11 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     scope: 'builtin',
     readonly: true,
     versionSource: AI_CODING_CLI_VERSION_SOURCES.droid,
-    headers: buildAiCodingCliHeaders('droid', '0.161.0', 'macos-x64'),
+    headers: buildAiCodingCliHeaders(
+      'droid',
+      '0.161.0',
+      AI_CODING_CLI_DEFAULT_PLATFORM
+    ),
     previewText: '',
   },
   {
@@ -426,7 +476,11 @@ function platformTokens(platform: string) {
   return (
     AI_CODING_CLI_PLATFORM_OPTIONS.find(
       (option) => option.value === normalizeAiCodingCliPlatform(platform)
-    ) || AI_CODING_CLI_PLATFORM_OPTIONS[0]
+    ) ||
+    AI_CODING_CLI_PLATFORM_OPTIONS.find(
+      (option) => option.value === AI_CODING_CLI_DEFAULT_PLATFORM
+    ) ||
+    AI_CODING_CLI_PLATFORM_OPTIONS[0]
   )
 }
 
@@ -459,7 +513,10 @@ function buildAiCodingCliHeaders(
 ): Record<string, string> {
   const userAgent = buildAiCodingCliUserAgent(profileId, version, platform)
   return profileId === 'codex-cli'
-    ? { Originator: 'codex-tui', 'User-Agent': userAgent }
+    ? {
+        Originator: 'codex-tui',
+        'User-Agent': userAgent,
+      }
     : { 'User-Agent': userAgent }
 }
 
@@ -522,6 +579,164 @@ function isUserAgentHeaderName(header: string): boolean {
       .trim()
       .toLowerCase() === 'user-agent'
   )
+}
+
+function isCodexHeaderProfileId(profileId: string): boolean {
+  const baseProfileId = getProfileBaseId(profileId)
+  return baseProfileId === 'codex-cli' || baseProfileId === 'codex-desktop'
+}
+
+function normalizeHeaderNameKey(header: unknown): string {
+  return String(header || '')
+    .trim()
+    .toLowerCase()
+}
+
+function isUnconditionalPassHeadersOperation(
+  value: unknown
+): value is Record<string, unknown> {
+  if (!isRecord(value) || value.mode !== 'pass_headers') return false
+  if (Array.isArray(value.conditions) && value.conditions.length > 0)
+    return false
+  if (value.conditions != null && !Array.isArray(value.conditions)) return false
+  if (typeof value.when === 'string') return value.when.trim() === ''
+  return value.when == null
+}
+
+function mergePassHeaderNames(
+  existingHeaders: string[],
+  requiredHeaders: readonly string[]
+): string[] {
+  const seen = new Set<string>()
+  const merged: string[] = []
+  for (const header of [...existingHeaders, ...requiredHeaders]) {
+    const normalizedHeader = String(header || '').trim()
+    const key = normalizeHeaderNameKey(normalizedHeader)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    merged.push(normalizedHeader)
+  }
+  return merged
+}
+
+function mergeRequiredPassHeadersIntoParamOverride(
+  paramOverrideText: string | undefined,
+  requiredHeaders: readonly string[]
+): string {
+  if (requiredHeaders.length === 0) return paramOverrideText || ''
+  const rawText =
+    typeof paramOverrideText === 'string' ? paramOverrideText.trim() : ''
+  if (!rawText) {
+    return JSON.stringify({
+      operations: [
+        {
+          mode: 'pass_headers',
+          value: [...requiredHeaders],
+          keep_origin: true,
+        },
+      ],
+    })
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawText)
+  } catch {
+    return paramOverrideText || ''
+  }
+  if (!isRecord(parsed)) return paramOverrideText || ''
+
+  const operations = Array.isArray(parsed.operations) ? parsed.operations : []
+  const passHeadersOperation = operations.find(
+    isUnconditionalPassHeadersOperation
+  )
+  if (!passHeadersOperation) {
+    return JSON.stringify({
+      ...parsed,
+      operations: [
+        {
+          mode: 'pass_headers',
+          value: [...requiredHeaders],
+          keep_origin: true,
+        },
+        ...operations,
+      ],
+    })
+  }
+
+  return JSON.stringify({
+    ...parsed,
+    operations: operations.map((operation) =>
+      operation === passHeadersOperation
+        ? {
+            ...operation,
+            value: mergePassHeaderNames(
+              normalizePassHeaderValue(passHeadersOperation.value),
+              requiredHeaders
+            ),
+            keep_origin: passHeadersOperation.keep_origin !== false,
+          }
+        : operation
+    ),
+  })
+}
+
+function collectHeaderProfileRequiredPassHeaders(
+  strategy: HeaderProfileStrategy | null,
+  selectedProfiles: HeaderProfile[]
+): string[] {
+  if (!strategy?.enabled) return []
+  const requiredHeaders: string[] = []
+  const addRequiredHeaders = (headers: readonly string[]) => {
+    requiredHeaders.push(...headers)
+  }
+  for (const profileId of strategy.selectedProfileIds) {
+    if (isCodexHeaderProfileId(profileId)) {
+      addRequiredHeaders(CODEX_DYNAMIC_HEADER_PASSTHROUGH_HEADERS)
+      continue
+    }
+    const profile = selectedProfiles.find((item) => item.id === profileId)
+    if (profile?.passthroughRequired) {
+      addRequiredHeaders(Object.keys(profile.headers).sort())
+    }
+  }
+  return mergePassHeaderNames([], requiredHeaders)
+}
+
+export function applyHeaderProfileStrategyToChannelInputs({
+  inputs,
+  strategy,
+  customProfiles = [],
+  snapshotProfiles = [],
+}: {
+  inputs: Pick<ChannelHeaderProfileInputs, 'settings' | 'param_override'>
+  strategy: HeaderProfileStrategy | null
+  customProfiles?: HeaderProfile[]
+  snapshotProfiles?: HeaderProfile[]
+}): Pick<ChannelHeaderProfileInputs, 'settings' | 'param_override'> {
+  const selectedProfiles = strategy
+    ? buildSelectedProfileItems(strategy.selectedProfileIds, customProfiles, [
+        ...snapshotProfiles,
+        ...strategy.profiles,
+      ]).filter((profile) => !profile.missing)
+    : []
+  const normalizedStrategy = strategy
+    ? { ...strategy, profiles: selectedProfiles }
+    : null
+  const requiredHeaders = collectHeaderProfileRequiredPassHeaders(
+    normalizedStrategy,
+    selectedProfiles
+  )
+  return {
+    settings: buildHeaderProfileStrategySettings(
+      inputs.settings,
+      normalizedStrategy
+    ),
+    param_override: mergeRequiredPassHeadersIntoParamOverride(
+      inputs.param_override,
+      requiredHeaders
+    ),
+  }
 }
 
 export function clearParamOverridePreservingUserAgentPassHeaders(

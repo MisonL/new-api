@@ -52,6 +52,14 @@ import {
   normalizeColumnOrder,
   reorderColumnKey,
 } from './columnPreferences';
+import { getResponsesRoutingResult } from '../../helpers/usageLogsResponsesCompact';
+import { shouldIncludeResponsesRoutingColumn } from '../../helpers/usageLogsResponsesRoutingTrace';
+import {
+  ResponsesRoutingDetails,
+  ResponsesRoutingUserSummaryDetails,
+} from '../../components/table/usage-logs/ResponsesRoutingTrace';
+import { getChannelHealthRoutingResult } from '../../helpers/usageLogsChannelHealthRouting';
+import { ChannelHealthRoutingDetails } from '../../components/table/usage-logs/ChannelHealthRoutingTrace';
 const { Text } = Typography;
 
 export const useLogsData = () => {
@@ -74,6 +82,8 @@ export const useLogsData = () => {
     REQUEST_UA: 'request_ua',
     REQUEST_HEADERS: 'request_headers',
     USE_TIME: 'use_time',
+    ROUTING_RESULT: 'routing_result',
+    CHANNEL_HEALTH: 'channel_health',
     PROMPT: 'prompt',
     COMPLETION: 'completion',
     COST: 'cost',
@@ -142,6 +152,10 @@ export const useLogsData = () => {
       [COLUMN_KEYS.REQUEST_UA]: isAdminUser,
       [COLUMN_KEYS.REQUEST_HEADERS]: isAdminUser,
       [COLUMN_KEYS.USE_TIME]: true,
+      [COLUMN_KEYS.ROUTING_RESULT]:
+        shouldIncludeResponsesRoutingColumn(isAdminUser),
+      [COLUMN_KEYS.CHANNEL_HEALTH]:
+        shouldIncludeChannelHealthRoutingColumn(isAdminUser),
       [COLUMN_KEYS.PROMPT]: true,
       [COLUMN_KEYS.COMPLETION]: true,
       [COLUMN_KEYS.COST]: true,
@@ -160,6 +174,8 @@ export const useLogsData = () => {
     COLUMN_KEYS.TYPE,
     COLUMN_KEYS.MODEL,
     COLUMN_KEYS.USE_TIME,
+    COLUMN_KEYS.ROUTING_RESULT,
+    COLUMN_KEYS.CHANNEL_HEALTH,
     COLUMN_KEYS.PROMPT,
     COLUMN_KEYS.COMPLETION,
     COLUMN_KEYS.COST,
@@ -188,6 +204,8 @@ export const useLogsData = () => {
         merged[COLUMN_KEYS.RETRY] = false;
         merged[COLUMN_KEYS.REQUEST_UA] = false;
         merged[COLUMN_KEYS.REQUEST_HEADERS] = false;
+        merged[COLUMN_KEYS.ROUTING_RESULT] = false;
+        merged[COLUMN_KEYS.CHANNEL_HEALTH] = false;
       }
 
       return merged;
@@ -316,6 +334,8 @@ export const useLogsData = () => {
           key === COLUMN_KEYS.USERNAME ||
           key === COLUMN_KEYS.REQUEST_UA ||
           key === COLUMN_KEYS.REQUEST_HEADERS ||
+          key === COLUMN_KEYS.ROUTING_RESULT ||
+          key === COLUMN_KEYS.CHANNEL_HEALTH ||
           key === COLUMN_KEYS.RETRY) &&
         !isAdminUser
       ) {
@@ -586,6 +606,42 @@ export const useLogsData = () => {
     return `${chain.join(' -> ')}`;
   };
 
+  const addResponsesRoutingDetails = (entries, other) => {
+    if (!isAdminUser && other?.responses_routing_summary) {
+      entries.push({
+        key: t('Responses 路由'),
+        value: (
+          <ResponsesRoutingUserSummaryDetails
+            summary={other.responses_routing_summary}
+            t={t}
+          />
+        ),
+      });
+      return;
+    }
+    const result = getResponsesRoutingResult(other);
+    if (!result) {
+      return;
+    }
+
+    entries.push({
+      key: t('Responses 路由'),
+      value: <ResponsesRoutingDetails other={other} t={t} />,
+    });
+  };
+
+  const addChannelHealthRoutingDetails = (entries, other) => {
+    const result = getChannelHealthRoutingResult(other);
+    if (!result) {
+      return;
+    }
+
+    entries.push({
+      key: t('渠道健康'),
+      value: <ChannelHealthRoutingDetails other={other} t={t} />,
+    });
+  };
+
   const buildLogExpandData = (log) => {
     const other = getLogOther(log.other);
     const expandDataLocal = [];
@@ -829,11 +885,24 @@ export const useLogsData = () => {
         value: other.request_path,
       });
     }
-    if (other?.upstream_request_path) {
+    if (isAdminUser && other?.upstream_request_path) {
       expandDataLocal.push({
         key: t('上游路径'),
         value: other.upstream_request_path,
       });
+    }
+    if (
+      (shouldIncludeResponsesRoutingColumn(isAdminUser) ||
+        (!isAdminUser && other?.responses_routing_summary)) &&
+      (log.type === 2 || log.type === 5)
+    ) {
+      addResponsesRoutingDetails(expandDataLocal, other);
+    }
+    if (
+      shouldIncludeChannelHealthRoutingColumn(isAdminUser) &&
+      (log.type === 2 || log.type === 5)
+    ) {
+      addChannelHealthRoutingDetails(expandDataLocal, other);
     }
     if (other?.billing_source === 'subscription') {
       const planId = other?.subscription_plan_id;

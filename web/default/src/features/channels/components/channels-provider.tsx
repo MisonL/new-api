@@ -1,6 +1,11 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useCallback } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { getRouteApi } from '@tanstack/react-router'
+import { useAuthStore } from '@/stores/auth-store'
+import { ROLE } from '@/lib/roles'
+import { useChannelHealthRuntime } from '@/features/channel-health/use-channel-health-runtime'
+import { getChannelRoutingConfig } from '../api'
 import { useChannelUpstreamUpdates } from '../hooks/use-channel-upstream-updates'
 import { channelsQueryKeys } from '../lib'
 import type { Channel } from '../types'
@@ -24,6 +29,8 @@ type DialogType =
 
 type UpstreamUpdateState = ReturnType<typeof useChannelUpstreamUpdates>
 
+const channelsRoute = getRouteApi('/_authenticated/channels/')
+
 type ChannelsContextType = {
   open: DialogType
   setOpen: (open: DialogType) => void
@@ -36,6 +43,13 @@ type ChannelsContextType = {
   idSort: boolean
   setIdSort: (enabled: boolean) => void
   upstream: UpstreamUpdateState
+  canViewChannelHealthRuntime: boolean
+  canConfigureChannelHealthRuntime: boolean
+  channelHealthRuntime: ReturnType<typeof useChannelHealthRuntime>
+  runtimeChannelFocus: number | undefined
+  channelRoutingConfig: Awaited<
+    ReturnType<typeof getChannelRoutingConfig>
+  >['data']
 }
 
 // ============================================================================
@@ -54,11 +68,26 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState<DialogType>(null)
   const [currentRow, setCurrentRow] = useState<Channel | null>(null)
   const [currentTag, setCurrentTag] = useState<string | null>(null)
-  const [enableTagMode, setEnableTagMode] = useState(() => {
+  const [enableTagModePreference, setEnableTagModePreference] = useState(() => {
     return localStorage.getItem('enable-tag-mode') === 'true'
   })
   const [idSort, setIdSort] = useState(() => {
     return localStorage.getItem('channels-id-sort') === 'true'
+  })
+  const channelSearch = channelsRoute.useSearch()
+  const runtimeChannelFocus = channelSearch.runtimeChannelFocus
+  const enableTagMode =
+    runtimeChannelFocus === undefined ? enableTagModePreference : false
+  const userRole = useAuthStore((state) => state.auth.user?.role ?? ROLE.GUEST)
+  const canViewChannelHealthRuntime = userRole >= ROLE.ADMIN
+  const canConfigureChannelHealthRuntime = userRole >= ROLE.SUPER_ADMIN
+  const channelHealthRuntime = useChannelHealthRuntime({
+    enabled: canViewChannelHealthRuntime,
+  })
+  const { data: channelRoutingConfigResponse } = useQuery({
+    queryKey: ['channel-routing-config'],
+    queryFn: getChannelRoutingConfig,
+    staleTime: 30_000,
   })
 
   const queryClient = useQueryClient()
@@ -77,10 +106,15 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
         currentTag,
         setCurrentTag,
         enableTagMode,
-        setEnableTagMode,
+        setEnableTagMode: setEnableTagModePreference,
         idSort,
         setIdSort,
         upstream,
+        canViewChannelHealthRuntime,
+        canConfigureChannelHealthRuntime,
+        channelHealthRuntime,
+        runtimeChannelFocus,
+        channelRoutingConfig: channelRoutingConfigResponse?.data,
       }}
     >
       {children}

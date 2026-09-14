@@ -227,10 +227,57 @@ export function hasAnyCacheTokens(
   if (!other) return false
   return (
     (other.cache_tokens || 0) > 0 ||
+    (other.cache_write_tokens || 0) > 0 ||
     (other.cache_creation_tokens || 0) > 0 ||
     (other.cache_creation_tokens_5m || 0) > 0 ||
     (other.cache_creation_tokens_1h || 0) > 0
   )
+}
+
+export interface LogPromptCacheStats {
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  cacheRate: number | null
+}
+
+function toLogTokenCount(value: unknown): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+}
+
+export function getLogPromptCacheStats(
+  promptTokens: number,
+  other: LogOtherData | null | undefined
+): LogPromptCacheStats {
+  const inputTokens = toLogTokenCount(promptTokens)
+  const cacheReadTokens = toLogTokenCount(other?.cache_tokens)
+  const normalizedCacheWriteTokens = toLogTokenCount(other?.cache_write_tokens)
+  const cacheWrite5m = toLogTokenCount(other?.cache_creation_tokens_5m)
+  const cacheWrite1h = toLogTokenCount(other?.cache_creation_tokens_1h)
+  const cacheWriteTokens =
+    normalizedCacheWriteTokens > 0
+      ? normalizedCacheWriteTokens
+      : cacheWrite5m > 0 || cacheWrite1h > 0
+        ? cacheWrite5m + cacheWrite1h
+        : toLogTokenCount(other?.cache_creation_tokens)
+  const isAnthropic =
+    String(other?.usage_semantic || '')
+      .trim()
+      .toLowerCase() === 'anthropic' || other?.claude === true
+  const denominator = isAnthropic ? inputTokens + cacheReadTokens : inputTokens
+  const rawCacheRead: unknown = other?.cache_tokens
+  const hasCacheRead =
+    (typeof rawCacheRead === 'number' ||
+      (typeof rawCacheRead === 'string' && rawCacheRead.trim() !== '')) &&
+    Number.isFinite(Number(rawCacheRead)) &&
+    Number(rawCacheRead) >= 0
+
+  return {
+    cacheReadTokens,
+    cacheWriteTokens,
+    cacheRate:
+      hasCacheRead && denominator > 0 ? cacheReadTokens / denominator : null,
+  }
 }
 
 export function getTieredBillingSummary(
@@ -292,7 +339,9 @@ export function formatDurationFromMs(milliseconds: number): string {
   return `${trimTrailingZeros((milliseconds / 1000).toFixed(3))}s`
 }
 
-export function isDisplayableDurationMs(milliseconds: unknown): milliseconds is number {
+export function isDisplayableDurationMs(
+  milliseconds: unknown
+): milliseconds is number {
   return (
     typeof milliseconds === 'number' &&
     Number.isFinite(milliseconds) &&

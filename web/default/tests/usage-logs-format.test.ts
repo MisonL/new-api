@@ -6,6 +6,8 @@ import {
   getResponseTimeColor,
   getTimeColor,
   getStreamStatusDisplayInfo,
+  getLogPromptCacheStats,
+  hasAnyCacheTokens,
 } from '../src/features/usage-logs/lib/format'
 import { formatUseTime } from '../src/lib/format'
 
@@ -53,6 +55,64 @@ describe('usage logs duration formatting', () => {
     expect(formatRatioDisplay(0.5)).toBe('0.5')
     expect(formatRatioDisplay(0)).toBe('0')
     expect(formatRatioDisplay(2)).toBe('2')
+  })
+})
+
+describe('usage logs prompt cache statistics', () => {
+  test('distinguishes missing cache telemetry from a measured zero', () => {
+    expect(getLogPromptCacheStats(100, {}).cacheRate).toBeNull()
+    expect(getLogPromptCacheStats(100, null).cacheRate).toBeNull()
+    expect(getLogPromptCacheStats(100, { cache_tokens: -1 }).cacheRate).toBeNull()
+    expect(getLogPromptCacheStats(100, { cache_tokens: 0 }).cacheRate).toBe(0)
+    expect(getLogPromptCacheStats(0, { cache_tokens: 0 }).cacheRate).toBeNull()
+  })
+  test('uses input tokens as the denominator for OpenAI semantics', () => {
+    expect(
+      getLogPromptCacheStats(200, {
+        cache_tokens: 50,
+        usage_semantic: 'openai',
+      })
+    ).toEqual({
+      cacheReadTokens: 50,
+      cacheWriteTokens: 0,
+      cacheRate: 0.25,
+    })
+  })
+
+  test('includes cache reads in the denominator for Anthropic semantics', () => {
+    expect(
+      getLogPromptCacheStats(100, {
+        cache_tokens: 100,
+        usage_semantic: 'anthropic',
+      })
+    ).toEqual({
+      cacheReadTokens: 100,
+      cacheWriteTokens: 0,
+      cacheRate: 0.5,
+    })
+  })
+
+  test('prefers normalized cache writes and otherwise combines split writes', () => {
+    expect(
+      getLogPromptCacheStats(100, {
+        cache_write_tokens: 80,
+        cache_creation_tokens: 20,
+        cache_creation_tokens_5m: 30,
+        cache_creation_tokens_1h: 40,
+      }).cacheWriteTokens
+    ).toBe(80)
+    expect(
+      getLogPromptCacheStats(100, {
+        cache_creation_tokens: 20,
+        cache_creation_tokens_5m: 30,
+        cache_creation_tokens_1h: 40,
+      }).cacheWriteTokens
+    ).toBe(70)
+  })
+
+  test('treats normalized cache writes as cache usage', () => {
+    expect(hasAnyCacheTokens({ cache_write_tokens: 80 })).toBe(true)
+    expect(hasAnyCacheTokens({ cache_write_tokens: 0 })).toBe(false)
   })
 })
 

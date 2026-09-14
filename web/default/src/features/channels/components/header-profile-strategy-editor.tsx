@@ -584,7 +584,9 @@ function useVersionStates(
                 currentState?.selectedPlatform ||
                 AI_CODING_CLI_DEFAULT_PLATFORM,
               packageName: versionSource.packageName,
-              source: canReuseCurrentOptions ? currentState?.source : 'fallback',
+              source: canReuseCurrentOptions
+                ? currentState?.source
+                : 'fallback',
               refreshedAt: canReuseCurrentOptions
                 ? currentState?.refreshedAt
                 : undefined,
@@ -1163,10 +1165,12 @@ export function HeaderProfileStrategyEditor({
                             'truncate',
                             item.last_error
                               ? 'text-warning'
-                            : 'text-muted-foreground'
+                              : 'text-muted-foreground'
                           )}
                         >
-                          {item.last_error ? lastErrorText || '-' : refreshedAt || '-'}
+                          {item.last_error
+                            ? lastErrorText || '-'
+                            : refreshedAt || '-'}
                         </span>
                       </div>
                     )

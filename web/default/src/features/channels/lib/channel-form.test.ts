@@ -5,6 +5,7 @@ import {
   CHANNEL_FORM_DEFAULT_VALUES,
   mergeChannelSubmitFormValues,
   transformChannelToFormDefaults,
+  transformFormDataToCreatePayload,
   transformFormDataToUpdatePayload,
   type ChannelFormValues,
 } from './channel-form'
@@ -147,6 +148,60 @@ test('generic OpenAI Responses profile survives form transform and keeps auto co
     getResponsesCompactMode(payload.settings),
     RESPONSES_COMPACT_MODE_AUTO
   )
+})
+
+test('max concurrency is preserved by channel form transforms', () => {
+  const values = makeChannelFormValues({ max_concurrency: 7 })
+  const createPayload = transformFormDataToCreatePayload(values)
+  const updatePayload = transformFormDataToUpdatePayload(values, 123)
+
+  assert.equal(createPayload.channel.max_concurrency, 7)
+  assert.equal(updatePayload.max_concurrency, 7)
+
+  const defaults = transformChannelToFormDefaults({
+    ...({} as Channel),
+    type: 1,
+    name: 'channel-a',
+    max_concurrency: 9,
+    channel_info: {
+      is_multi_key: false,
+      multi_key_size: 0,
+      multi_key_polling_index: 0,
+      multi_key_mode: 'random',
+    },
+  })
+  assert.equal(defaults.max_concurrency, 9)
+})
+
+test('Codex folded SSE setting is read and written only for Codex channels', () => {
+  const codexChannel = {
+    type: 57,
+    name: 'codex-channel',
+    settings: JSON.stringify({ codex_folded_sse_enabled: true }),
+    channel_info: {
+      is_multi_key: false,
+      multi_key_size: 0,
+      multi_key_polling_index: 0,
+      multi_key_mode: 'random',
+    },
+  } as Channel
+  const codexValues = transformChannelToFormDefaults(codexChannel)
+  assert.equal(codexValues.codex_folded_sse_enabled, true)
+  const codexSettings = JSON.parse(
+    String(transformFormDataToUpdatePayload(codexValues, 123).settings)
+  )
+  assert.equal(codexSettings.codex_folded_sse_enabled, true)
+
+  const nonCodexChannel = {
+    ...codexChannel,
+    type: 1,
+  } as Channel
+  const nonCodexValues = transformChannelToFormDefaults(nonCodexChannel)
+  assert.equal(nonCodexValues.codex_folded_sse_enabled, false)
+  const nonCodexSettings = JSON.parse(
+    String(transformFormDataToUpdatePayload(nonCodexValues, 123).settings)
+  )
+  assert.equal(nonCodexSettings.codex_folded_sse_enabled, undefined)
 })
 
 test('channel settings transform preserves capability registry observations', () => {

@@ -175,7 +175,6 @@ export function CCSwitchDialog(props: Props) {
               />
             </div>
           ))}
-
         </div>
 
         <DialogFooter>

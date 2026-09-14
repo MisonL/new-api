@@ -14,12 +14,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import {
-  formatLogQuota,
-  formatTimestampToDate,
-  formatTokens,
-  formatUseTime,
-} from '@/lib/format'
+import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { Button } from '@/components/ui/button'
@@ -58,7 +53,12 @@ import {
   isTimingLogType,
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
+import { ChannelHealthRoutingDetails } from '../channel-health-routing-details'
 import { ModelBadge, type ModelBadgeInfoRow } from '../model-badge'
+import {
+  ResponsesRoutingDetails,
+  ResponsesRoutingUserSummaryDetails,
+} from '../responses-routing-details'
 
 function timingTextColorClass(
   variant: 'success' | 'warning' | 'danger'
@@ -122,20 +122,6 @@ function DetailSection(props: {
       </div>
     </div>
   )
-}
-
-function getResponsesCompactModeLabel(
-  mode: string | undefined,
-  t: (key: string, opts?: Record<string, unknown>) => string
-): string {
-  switch (mode) {
-    case 'native':
-      return t('Compact Native')
-    case 'synthetic_summary':
-      return t('Compact Synthetic')
-    default:
-      return mode ? String(mode) : '-'
-  }
 }
 
 function formatRequestHeaderPolicyMode(
@@ -255,243 +241,6 @@ function RequestHeaderPolicyDetails(props: { other: LogOtherData }) {
           mono
         />
       )}
-    </DetailSection>
-  )
-}
-
-function ResponsesCompactDetails(props: {
-  other: LogOtherData
-  isAdmin: boolean
-}) {
-  const { t } = useTranslation()
-  const { other, isAdmin } = props
-  const capability = other.channel_capability_snapshot
-  const shouldShow =
-    Boolean(other.responses_compact_mode) ||
-    other.responses_remote_compact_first_data_timeout === true ||
-    other.responses_encrypted_context_retry === true ||
-    Boolean(capability)
-  if (!shouldShow) return null
-
-  const isAutoFallback = other.responses_compact_auto_fallback === true
-  const isAutoFallbackWindow =
-    other.responses_compact_auto_fallback_window === true
-  const retryUntil = other.responses_compact_auto_fallback_retry_until
-    ? formatTimestampToDate(other.responses_compact_auto_fallback_retry_until)
-    : ''
-  const finalPath =
-    other.responses_compact_final_upstream_path ||
-    other.responses_compact_upstream_path
-  const observedReason =
-    other.admin_info?.responses_channel_capability_observed?.reason
-  const probeReason =
-    other.admin_info?.responses_channel_capability_probe?.reason
-  const reasoningContextCapability =
-    capability?.reasoning_context_capability === 'supported'
-      ? t('Supported')
-      : capability?.reasoning_context_capability === 'unsupported'
-        ? t('Unsupported')
-        : capability?.reasoning_context_capability === 'unknown'
-          ? t('Unknown')
-          : ''
-  const compactionItemPassthroughCapability =
-    capability?.compaction_item_passthrough_capability === 'supported'
-      ? t('Supported')
-      : capability?.compaction_item_passthrough_capability === 'unsupported'
-        ? t('Unsupported')
-        : capability?.compaction_item_passthrough_capability === 'unknown'
-          ? t('Unknown')
-          : ''
-  const formatCapability = (value: boolean | undefined) => {
-    if (value === true) return t('Supported')
-    if (value === false) return t('Unsupported')
-    return '-'
-  }
-
-  return (
-    <DetailSection label={t('Responses Compact capability')}>
-      {other.responses_compact_mode && (
-        <DetailRow
-          label={t('Mode')}
-          value={getResponsesCompactModeLabel(other.responses_compact_mode, t)}
-        />
-      )}
-      {other.responses_compact_setting && (
-        <DetailRow
-          label={t('Configuration')}
-          value={other.responses_compact_setting}
-          mono
-        />
-      )}
-      {isAutoFallback && (
-        <DetailRow
-          label={t('Auto Fallback')}
-          value={
-            <StatusBadge
-              label={t('Compact Auto Switched Compatible Mode')}
-              variant='yellow'
-              size='sm'
-              copyable={false}
-            />
-          }
-        />
-      )}
-      {other.responses_compact_fallback_reason && (
-        <DetailRow
-          label={t('Auto Fallback Reason')}
-          value={other.responses_compact_fallback_reason}
-          mono
-        />
-      )}
-      {other.responses_compact_visible_only_fallback && (
-        <DetailRow label={t('Visible-only Fallback')} value={t('Yes')} mono />
-      )}
-      {other.responses_remote_compact_first_data_timeout && (
-        <DetailRow
-          label={t('Remote Compaction First Data Event Timeout')}
-          value={t('Yes')}
-          mono
-        />
-      )}
-      {other.responses_encrypted_context_retry && (
-        <DetailRow label={t('Encrypted Context Retry')} value={t('Yes')} mono />
-      )}
-      {finalPath && (
-        <DetailRow label={t('Final Path')} value={finalPath} mono />
-      )}
-      {capability?.source && (
-        <DetailRow
-          label={t('Capability Source')}
-          value={capability.source}
-          mono
-        />
-      )}
-      {capability?.profile && (
-        <DetailRow
-          label={t('Upstream Profile')}
-          value={capability.profile}
-          mono
-        />
-      )}
-      {capability?.compact_mode_effective && (
-        <DetailRow
-          label={t('Effective Compact Mode')}
-          value={capability.compact_mode_effective}
-          mono
-        />
-      )}
-      {capability && (
-        <>
-          <DetailRow
-            label={t('Responses')}
-            value={formatCapability(capability.supports_responses)}
-          />
-          <DetailRow
-            label={t('Responses Compact')}
-            value={formatCapability(capability.supports_responses_compact)}
-          />
-          <DetailRow
-            label={t('REST Previous ID')}
-            value={formatCapability(
-              capability.supports_rest_previous_response_id
-            )}
-          />
-          <DetailRow
-            label={t('Compaction Item Passthrough')}
-            value={
-              compactionItemPassthroughCapability ||
-              formatCapability(capability.supports_compaction_item_passthrough)
-            }
-          />
-          <DetailRow
-            label={t('Custom Tools')}
-            value={formatCapability(capability.supports_custom_tools)}
-          />
-          <DetailRow
-            label={t('Namespace Tools')}
-            value={formatCapability(capability.supports_namespace_tools)}
-          />
-          <DetailRow
-            label={t('Tool Search')}
-            value={formatCapability(capability.supports_tool_search)}
-          />
-          {reasoningContextCapability && (
-            <DetailRow
-              label={t('Reasoning Context')}
-              value={reasoningContextCapability}
-            />
-          )}
-          {other.responses_reasoning_context_action && (
-            <DetailRow
-              label={t('Reasoning Context Action')}
-              value={other.responses_reasoning_context_action}
-              mono
-            />
-          )}
-          <DetailRow
-            label={t('Strips Encrypted Reasoning')}
-            value={formatCapability(
-              capability.strips_responses_encrypted_reasoning
-            )}
-          />
-          {isAdmin && observedReason && (
-            <DetailRow
-              label={t('Last Observed Failure')}
-              value={observedReason}
-              mono
-            />
-          )}
-          {isAdmin && probeReason && (
-            <DetailRow
-              label={t('Last Probe Result')}
-              value={probeReason}
-              mono
-            />
-          )}
-        </>
-      )}
-      {isAdmin && isAutoFallbackWindow && (
-        <DetailRow
-          label={t('Auto Fallback')}
-          value={t('Compact Auto Fallback Window Active')}
-        />
-      )}
-      {isAdmin &&
-        (other.responses_compact_native_attempted || isAutoFallbackWindow) && (
-          <>
-            {other.responses_compact_native_upstream_path && (
-              <DetailRow
-                label={t('Native Path')}
-                value={other.responses_compact_native_upstream_path}
-                mono
-              />
-            )}
-            {other.responses_compact_native_status_code != null && (
-              <DetailRow
-                label={t('Native Status')}
-                value={String(other.responses_compact_native_status_code)}
-                mono
-              />
-            )}
-            {other.responses_compact_auto_fallback_reason && (
-              <DetailRow
-                label={t('Auto Fallback Reason')}
-                value={other.responses_compact_auto_fallback_reason}
-              />
-            )}
-            {other.responses_compact_auto_fallback_retry_interval_hours !=
-              null && (
-              <DetailRow
-                label={t('Retry Interval')}
-                value={`${other.responses_compact_auto_fallback_retry_interval_hours} ${t('Hours')}`}
-                mono
-              />
-            )}
-            {retryUntil && (
-              <DetailRow label={t('Retry After')} value={retryUntil} mono />
-            )}
-          </>
-        )}
     </DetailSection>
   )
 }
@@ -1246,11 +995,18 @@ export function DetailsDialog(props: DetailsDialogProps) {
               <RequestHeaderPolicyDetails other={other} />
             )}
 
-            {(other?.responses_compact_mode ||
-              other?.responses_remote_compact_first_data_timeout ||
-              other?.responses_encrypted_context_retry ||
-              other?.channel_capability_snapshot) && (
-              <ResponsesCompactDetails other={other} isAdmin={props.isAdmin} />
+            {props.isAdmin && other && (
+              <ResponsesRoutingDetails other={other} />
+            )}
+
+            {!props.isAdmin && other?.responses_routing_summary && (
+              <ResponsesRoutingUserSummaryDetails
+                summary={other.responses_routing_summary}
+              />
+            )}
+
+            {props.isAdmin && other && (
+              <ChannelHealthRoutingDetails other={other} />
             )}
 
             {/* Reject reason (admin only) */}

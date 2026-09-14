@@ -1,6 +1,7 @@
 {
   "name": "newapi-web",
   "private": false,
+  "packageManager": "bun@1.4.0",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -51,7 +52,7 @@
     "@visactor/vchart": "^2.0.13",
     "ai": "^6.0.27",
     "auto-skeleton-react": "^1.0.5",
-    "axios": "^1.13.6",
+    "axios": "^1.18.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -61,7 +62,7 @@
     "input-otp": "^1.4.2",
     "lucide-react": "^1.7.0",
     "motion": "^12.38.0",
-    "nanoid": "^5.1.6",
+    "nanoid": "^5.1.16",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.4",
     "react-day-picker": "^9.14.0",
@@ -110,6 +111,12 @@
     "shadcn": "^3.7.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.2"
+  },
+  "overrides": {
+    "browserslist": "4.28.8",
+    "fast-uri": "3.1.7",
+    "ip-address": "10.3.1",
+    "minimist": "1.2.6"
   },
   "browserslist": {
     "production": [

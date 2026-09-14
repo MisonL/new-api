@@ -229,11 +229,6 @@ export default defineConfig(({ command }) => {
             toast: ['react-toastify'],
             'auth-widgets': ['react-telegram-login', 'react-turnstile'],
             'file-upload': ['react-dropzone'],
-            i18n: [
-              'i18next',
-              'react-i18next',
-              'i18next-browser-languagedetector',
-            ],
           },
         },
       },

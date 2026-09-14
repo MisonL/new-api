@@ -9,6 +9,11 @@ import type {
   Channel,
   ChannelBalanceResponse,
   ChannelTestResponse,
+  ChannelRouteScope,
+  ChannelRouteScopeDetailResponse,
+  ChannelRouteScopeMetricsResponse,
+  ChannelRouteScopeResponse,
+  ChannelRoutingConfigResponse,
   CopyChannelParams,
   CopyChannelResponse,
   FetchModelsResponse,
@@ -125,6 +130,80 @@ export async function getTopChannelPriorities(): Promise<{
   return res.data
 }
 
+export async function getTopChannelPinOrders(): Promise<{
+  success: boolean
+  message?: string
+  data?: Array<Pick<Channel, 'id' | 'pin_order'>>
+}> {
+  const res = await api.get('/api/channel/pins')
+  return res.data
+}
+
+export async function getChannelRouteScopes(
+  params: {
+    group?: string
+    model?: string
+  } = {}
+): Promise<ChannelRouteScopeResponse> {
+  const res = await api.get('/api/channel-route-scopes', { params })
+  return res.data
+}
+
+export async function getChannelRoutingConfig(): Promise<ChannelRoutingConfigResponse> {
+  const res = await api.get('/api/channel-route-scopes/config')
+  return res.data
+}
+
+export async function getChannelRouteScopeMetrics(
+  scopeId: string
+): Promise<ChannelRouteScopeMetricsResponse> {
+  const res = await api.get(`/api/channel-route-scopes/${scopeId}/metrics`)
+  return res.data
+}
+
+export async function getChannelRouteScope(
+  scopeId: string
+): Promise<ChannelRouteScopeDetailResponse> {
+  const res = await api.get(`/api/channel-route-scopes/${scopeId}`)
+  return res.data
+}
+
+export async function updateChannelRouteScopeWeights(
+  scopeId: string,
+  payload: {
+    version: string
+    mode?: string
+    items: Array<{ channel_id: number; route_weight_bps: number }>
+  }
+): Promise<{
+  success: boolean
+  message?: string
+  data?: { scope: ChannelRouteScope; scope_version: string }
+}> {
+  const res = await api.put(
+    `/api/channel-route-scopes/${scopeId}/weights`,
+    payload,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export async function updateChannelRouteScopePriority(
+  scopeId: string,
+  payload: { version: string; route_priority: number }
+): Promise<{
+  success: boolean
+  message?: string
+  data?: { scope: ChannelRouteScope; scope_version: string }
+}> {
+  const res = await api.put(
+    `/api/channel-route-scopes/${scopeId}/priority`,
+    payload,
+    channelActionConfig()
+  )
+  return res.data
+}
+
 export async function getUserHeaderProfiles(): Promise<UserHeaderProfilesResponse> {
   const res = await api.get('/api/user/header_profiles')
   return res.data
@@ -164,6 +243,13 @@ export async function updateChannelPriorities(
     updates,
     channelActionConfig()
   )
+  return res.data
+}
+
+export async function updateChannelPinOrders(
+  updates: Array<{ id: number; pin_order: number }>
+): Promise<{ success: boolean; message?: string; data?: number }> {
+  const res = await api.put('/api/channel/pins', updates, channelActionConfig())
   return res.data
 }
 

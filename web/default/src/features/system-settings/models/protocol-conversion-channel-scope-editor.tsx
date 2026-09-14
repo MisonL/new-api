@@ -119,9 +119,7 @@ export function ProtocolConversionChannelScopeEditor({
         <Badge variant={rule.all_channels ? 'secondary' : 'outline'}>
           {scopeSummary}
         </Badge>
-        <div className='text-muted-foreground w-full text-sm'>
-          {scopeHint}
-        </div>
+        <div className='text-muted-foreground w-full text-sm'>{scopeHint}</div>
       </div>
       <div className='grid gap-4 md:grid-cols-2'>
         <ScopeField label={t('Channel selector')}>

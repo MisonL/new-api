@@ -8,6 +8,8 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -17,8 +19,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { GroupBadge } from '@/components/group-badge'
-import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { getPerfMetrics, type PerformanceGroup } from '../api'
 import type { PricingModel } from '../types'
 import { AvailabilityBarChart, LatencyTrendChart } from './model-details-charts'

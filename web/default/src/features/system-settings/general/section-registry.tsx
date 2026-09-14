@@ -1,6 +1,7 @@
 import type { GeneralSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 import { ChannelAffinitySection } from './channel-affinity'
+import { ChannelHealthRoutingSection } from './channel-health-routing-section'
 import { CheckinSettingsSection } from './checkin-settings-section'
 import { PricingSection } from './pricing-section'
 import { QuotaSettingsSection } from './quota-settings-section'
@@ -128,6 +129,23 @@ const GENERAL_SECTIONS = [
             settings['channel_affinity_setting.default_ttl_seconds'],
           'channel_affinity_setting.rules':
             settings['channel_affinity_setting.rules'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'channel-health',
+    titleKey: 'Channel Health Routing',
+    descriptionKey: 'Configure temporary channel cooling and recovery probes',
+    build: (settings: GeneralSettings) => (
+      <ChannelHealthRoutingSection
+        defaultValues={{
+          'general_setting.channel_health_enabled':
+            settings['general_setting.channel_health_enabled'],
+          'general_setting.channel_health_cooldown_seconds':
+            settings['general_setting.channel_health_cooldown_seconds'],
+          'general_setting.channel_health_probe_lease_seconds':
+            settings['general_setting.channel_health_probe_lease_seconds'],
         }}
       />
     ),

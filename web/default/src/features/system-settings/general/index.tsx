@@ -46,6 +46,9 @@ const defaultGeneralSettings: GeneralSettings = {
   'channel_affinity_setting.max_entries': 100000,
   'channel_affinity_setting.default_ttl_seconds': 3600,
   'channel_affinity_setting.rules': '[]',
+  'general_setting.channel_health_enabled': false,
+  'general_setting.channel_health_cooldown_seconds': 30,
+  'general_setting.channel_health_probe_lease_seconds': 15,
 }
 
 export function GeneralSettings() {
@@ -74,6 +77,7 @@ export function GeneralSettings() {
     | 'checkin'
     | 'behavior'
     | 'channel-affinity'
+    | 'channel-health'
   const sectionContent = getGeneralSectionContent(
     activeSection,
     settings,

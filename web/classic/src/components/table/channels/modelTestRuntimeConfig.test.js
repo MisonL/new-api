@@ -25,7 +25,6 @@ import { formatRuntimeResult } from './modelTestRuntimeConfig.js';
 const translations = {
   Yes: '是',
   No: '否',
-  未知: '未知',
 };
 
 const t = (value) => translations[value] || value;
@@ -49,7 +48,7 @@ test('formatRuntimeResult includes compact capability observations', () => {
         compact_mode_effective: 'native',
         supports_responses_compact: true,
         supports_rest_previous_response_id: false,
-        compaction_item_passthrough_capability: 'unknown',
+        supports_compaction_item_passthrough: false,
         strips_responses_encrypted_reasoning: true,
         observed: {
           observed_at: 1781660000,
@@ -74,7 +73,6 @@ test('formatRuntimeResult includes compact capability observations', () => {
   assert.match(result, /profile=generic_openai/);
   assert.match(result, /compact: 是/);
   assert.match(result, /previous_id: 否/);
-  assert.match(result, /compaction_pass: 未知/);
   assert.match(result, /strip_reasoning: 是/);
   assert.match(result, /last fail: status=400/);
   assert.match(result, /code=invalid_request_error/);

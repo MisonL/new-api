@@ -309,7 +309,10 @@ export function getProtocolPolicyStats(
       else stats.chatToResponses += 1
 
       if (rule.all_channels) stats.allChannels += 1
-      else if (rule.channel_ids.length === 0 && rule.channel_types.length === 0) {
+      else if (
+        rule.channel_ids.length === 0 &&
+        rule.channel_types.length === 0
+      ) {
         stats.emptyScope += 1
       } else {
         stats.limitedScope += 1
@@ -351,16 +354,10 @@ export function filterProtocolRules(
         return false
       }
 
-      if (
-        filters.state === PROTOCOL_RULE_STATE_ENABLED &&
-        !rule.enabled
-      ) {
+      if (filters.state === PROTOCOL_RULE_STATE_ENABLED && !rule.enabled) {
         return false
       }
-      if (
-        filters.state === PROTOCOL_RULE_STATE_DISABLED &&
-        rule.enabled
-      ) {
+      if (filters.state === PROTOCOL_RULE_STATE_DISABLED && rule.enabled) {
         return false
       }
       if (

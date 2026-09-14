@@ -13,7 +13,10 @@ const lintRoot = fs.existsSync(path.join(currentWorkingDir, 'i18next.config.js')
 const baselinePath = path.join(webRoot, 'tests', 'i18nLintBaseline.json');
 const baselineDisplayPath = path.relative(webRoot, baselinePath);
 const isWindows = process.platform === 'win32';
-const bunxCommand = isWindows ? 'bunx.cmd' : 'bunx';
+// Invoke the package manager explicitly instead of relying on the optional
+// `bunx` shim being installed on PATH. `bun x` is available with every Bun
+// installation and resolves the workspace-local i18next-cli dependency.
+const bunCommand = isWindows ? 'bun.exe' : 'bun';
 
 function parseIssues(output) {
   const lines = output.split(/\r?\n/);
@@ -121,7 +124,7 @@ function printIssues(title, issues) {
 const args = process.argv.slice(2);
 const writeBaseline = args.includes('--write-baseline');
 
-const lintResult = spawnSync(bunxCommand, ['i18next-cli', 'lint'], {
+const lintResult = spawnSync(bunCommand, ['x', 'i18next-cli', 'lint'], {
   cwd: lintRoot,
   encoding: 'utf8',
   shell: false,

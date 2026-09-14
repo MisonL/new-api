@@ -43,11 +43,13 @@ const browserProfiles = {
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
       'Sec-CH-UA':
-        '"Google Chrome";v="150", "Chromium";v="150", "Not.A/Brand";v="24"',
+        '"Google Chrome";v="151", "Chromium";v="151", "Not.A/Brand";v="24"',
       'Sec-CH-UA-Mobile': '?0',
       'Sec-CH-UA-Platform': '"macOS"',
+      'Sec-CH-UA-Arch': '"arm"',
+      'Sec-CH-UA-Bitness': '"64"',
       'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.47 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.138 Safari/537.36',
     },
   },
 };
@@ -97,7 +99,7 @@ const AI_CODING_CLI_VERSION_SOURCES = {
 export const NPM_VERSION_OPTION_LIMIT = 5;
 export const NPM_VERSION_LATEST_ALIAS = 'latest';
 export const NPM_VERSION_REFRESH_TIMEOUT_MS = 10000;
-export const AI_CODING_CLI_DEFAULT_PLATFORM = 'macos-x64';
+export const AI_CODING_CLI_DEFAULT_PLATFORM = 'macos-arm64';
 export const NPM_VERSION_LOAD_ERROR_CODE = 'npm_version_load_failed';
 export const NPM_VERSION_AUTH_ERROR_CODE = 'npm_version_auth_required';
 export const NPM_VERSION_FORBIDDEN_CODE = 'npm_version_forbidden';
@@ -234,7 +236,11 @@ function getAiCodingCliPlatformTokens(platform) {
   return (
     AI_CODING_CLI_PLATFORM_OPTIONS.find(
       (option) => option.value === normalizedPlatform,
-    ) || AI_CODING_CLI_PLATFORM_OPTIONS[0]
+    ) ||
+    AI_CODING_CLI_PLATFORM_OPTIONS.find(
+      (option) => option.value === AI_CODING_CLI_DEFAULT_PLATFORM,
+    ) ||
+    AI_CODING_CLI_PLATFORM_OPTIONS[0]
   );
 }
 
@@ -279,10 +285,10 @@ const aiCodingCliProfiles = {
     group: 'ai_coding_cli',
     scope: 'builtin',
     readonly: true,
-    passthroughRequired: false,
+    passthroughRequired: true,
     versionSource: AI_CODING_CLI_VERSION_SOURCES['codex-cli'],
     description:
-      '默认使用 Codex CLI npm latest 版本套用交互式 TUI 请求头生成逻辑；清单暂不可用时保留内置快照。此模板仅固定客户端身份。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex CLI 请求头透传模板。',
+      '默认使用 Codex CLI npm latest 版本套用交互式 TUI 请求头生成逻辑；清单暂不可用时保留内置快照。模板只固定客户端身份，并自动预设从真实 Codex 请求透传会话、窗口、turn metadata 与 sticky routing 动态请求头的 pass_headers。',
     headers: buildAiCodingCliHeaders('codex-cli', '0.142.4', {
       Originator: 'codex-tui',
     }),
@@ -292,12 +298,12 @@ const aiCodingCliProfiles = {
     'Codex Desktop',
     {
       'User-Agent':
-        'Codex Desktop/0.142.4 (Mac OS 15.7.3; x86_64) unknown (Codex Desktop; 26.623.70822)',
+        'Codex Desktop/0.142.4 (Mac OS 15.7.3; aarch64) unknown (Codex Desktop; 26.623.70822)',
       Originator: 'Codex Desktop',
     },
-    '固定请求头静态快照来自本机 Codex Desktop 原始请求抓包；UA 前缀 0.142.4 是内置 Codex core/app-server 客户端版本，括号尾部 26.623.70822 是 Codex Desktop App 版本。此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用。会话、窗口与 turn metadata 动态头需在高级参数覆盖中显式选择 Codex Desktop 请求头透传模板。',
+    '固定请求头静态快照来自本机 Codex Desktop 原始请求抓包；UA 前缀 0.142.4 是内置 Codex core/app-server 客户端版本，括号尾部 26.623.70822 是 Codex Desktop App 版本。此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用，并自动预设从真实 Codex 请求透传会话、窗口、turn metadata 与 sticky routing 动态请求头的 pass_headers。',
     null,
-    false,
+    true,
   ),
   'claude-code': buildAiCodingCliProfile(
     'claude-code',

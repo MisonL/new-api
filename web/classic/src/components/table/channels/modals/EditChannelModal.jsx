@@ -84,6 +84,7 @@ import {
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MAX,
   RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_MIN,
   RESPONSES_COMPACT_CONTEXT_FALLBACK_DEFAULT,
+  RESPONSES_COMPACT_NAMESPACE_UNSUPPORTED_PREFERENCE_DEFAULT,
   RESPONSES_COMPACT_MODE_DEFAULT,
   RESPONSES_COMPACT_MODE_OPTIONS,
   RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT,
@@ -98,6 +99,7 @@ import {
   getResponsesCompactModeFromSettings,
   hasResponsesProxyCompatibilityProfile,
   normalizeResponsesCompactAutoFallbackRetryIntervalHours,
+  normalizeResponsesCompactNamespaceUnsupportedPreference,
   normalizeResponsesCompactMode,
   normalizeResponsesCompactSummaryFallbackModels,
   normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds,
@@ -231,6 +233,8 @@ function type2secretPrompt(type) {
 
 const EditChannelModal = (props) => {
   const { t } = useTranslation();
+  const legacyRouteFieldsReadOnly =
+    props.channelRoutingConfig?.strict_writes === true;
   const channelId = props.editingChannel.id;
   const isEdit = channelId !== undefined;
   const [loading, setLoading] = useState(isEdit);
@@ -255,6 +259,7 @@ const EditChannelModal = (props) => {
     groups: ['default'],
     priority: 0,
     weight: 0,
+    max_concurrency: 0,
     tag: '',
     multi_key_mode: 'random',
     // 渠道额外设置的默认值
@@ -276,11 +281,14 @@ const EditChannelModal = (props) => {
     disable_store: false, // false = 允许透传（默认开启）
     allow_safety_identifier: false,
     allow_include_obfuscation: false,
+    codex_folded_sse_enabled: false,
     allow_inference_geo: false,
     allow_speed: false,
     claude_beta_query: false,
     responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_DEFAULT,
     responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
+    prefer_for_responses_compaction_when_namespace_unsupported:
+      RESPONSES_COMPACT_NAMESPACE_UNSUPPORTED_PREFERENCE_DEFAULT,
     responses_compact_auto_fallback_retry_interval_hours:
       RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT,
     responses_remote_compaction_first_data_timeout_seconds:
@@ -1513,6 +1521,9 @@ const EditChannelModal = (props) => {
             parsedSettings.allow_safety_identifier || false;
           data.allow_include_obfuscation =
             parsedSettings.allow_include_obfuscation || false;
+          data.codex_folded_sse_enabled =
+            data.type === 57 &&
+            parsedSettings.codex_folded_sse_enabled === true;
           data.allow_inference_geo =
             parsedSettings.allow_inference_geo || false;
           data.allow_speed = parsedSettings.allow_speed || false;
@@ -1524,6 +1535,10 @@ const EditChannelModal = (props) => {
             responses_compact_mode: parsedSettings.responses_compact_mode,
             responses_upstream_profile: data.responses_upstream_profile,
           });
+          data.prefer_for_responses_compaction_when_namespace_unsupported =
+            normalizeResponsesCompactNamespaceUnsupportedPreference(
+              parsedSettings.prefer_for_responses_compaction_when_namespace_unsupported,
+            );
           data.responses_compact_auto_fallback_retry_interval_hours =
             normalizeResponsesCompactAutoFallbackRetryIntervalHours(
               parsedSettings.responses_compact_auto_fallback_retry_interval_hours,
@@ -1571,11 +1586,14 @@ const EditChannelModal = (props) => {
           data.disable_store = false;
           data.allow_safety_identifier = false;
           data.allow_include_obfuscation = false;
+          data.codex_folded_sse_enabled = false;
           data.allow_inference_geo = false;
           data.allow_speed = false;
           data.claude_beta_query = false;
           data.responses_upstream_profile = RESPONSES_UPSTREAM_PROFILE_DEFAULT;
           data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
+          data.prefer_for_responses_compaction_when_namespace_unsupported =
+            RESPONSES_COMPACT_NAMESPACE_UNSUPPORTED_PREFERENCE_DEFAULT;
           data.responses_compact_auto_fallback_retry_interval_hours =
             RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT;
           data.responses_remote_compaction_first_data_timeout_seconds =
@@ -1603,11 +1621,14 @@ const EditChannelModal = (props) => {
         data.disable_store = false;
         data.allow_safety_identifier = false;
         data.allow_include_obfuscation = false;
+        data.codex_folded_sse_enabled = false;
         data.allow_inference_geo = false;
         data.allow_speed = false;
         data.claude_beta_query = false;
         data.responses_upstream_profile = RESPONSES_UPSTREAM_PROFILE_DEFAULT;
         data.responses_compact_mode = RESPONSES_COMPACT_MODE_DEFAULT;
+        data.prefer_for_responses_compaction_when_namespace_unsupported =
+          RESPONSES_COMPACT_NAMESPACE_UNSUPPORTED_PREFERENCE_DEFAULT;
         data.responses_compact_auto_fallback_retry_interval_hours =
           RESPONSES_COMPACT_AUTO_FALLBACK_RETRY_INTERVAL_HOURS_DEFAULT;
         data.responses_remote_compaction_first_data_timeout_seconds =
@@ -1637,6 +1658,10 @@ const EditChannelModal = (props) => {
 
       const autoBanEnabled = data.auto_ban !== 0;
       data.auto_ban = autoBanEnabled;
+      const parsedMaxConcurrency = Number(data.max_concurrency);
+      data.max_concurrency = Number.isFinite(parsedMaxConcurrency)
+        ? Math.max(0, Math.trunc(parsedMaxConcurrency))
+        : 0;
 
       initialBaseUrlRef.current = data.base_url || '';
       setInputs(data);
@@ -1706,7 +1731,8 @@ const EditChannelModal = (props) => {
         data.pass_through_body_enabled ||
         data.force_format ||
         data.claude_beta_query ||
-        data.system_prompt_override;
+        data.system_prompt_override ||
+        (data.type === 57 && data.codex_folded_sse_enabled);
       if (hasAdvancedValues) {
         setAdvancedSettingsOpen(true);
       }
@@ -2533,6 +2559,7 @@ const EditChannelModal = (props) => {
             localInputs.responses_compact_auto_fallback_retry_interval_hours,
             localInputs.responses_upstream_profile,
             localInputs.responses_remote_compaction_first_data_timeout_seconds,
+            localInputs.prefer_for_responses_compaction_when_namespace_unsupported,
           ),
         );
         settings.disable_store = localInputs.disable_store === true;
@@ -2546,6 +2573,12 @@ const EditChannelModal = (props) => {
         settings.allow_speed = localInputs.allow_speed === true;
         settings.claude_beta_query = localInputs.claude_beta_query === true;
       }
+    }
+    if (localInputs.type === 57) {
+      settings.codex_folded_sse_enabled =
+        localInputs.codex_folded_sse_enabled === true;
+    } else {
+      delete settings.codex_folded_sse_enabled;
     }
     if (localInputs.type !== 1) {
       clearResponsesCompactSettings(settings);
@@ -2600,6 +2633,7 @@ const EditChannelModal = (props) => {
     delete localInputs.disable_store;
     delete localInputs.allow_safety_identifier;
     delete localInputs.allow_include_obfuscation;
+    delete localInputs.codex_folded_sse_enabled;
     delete localInputs.allow_inference_geo;
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
@@ -2610,6 +2644,7 @@ const EditChannelModal = (props) => {
     delete localInputs.responses_compact_context_fallback;
     delete localInputs.responses_compact_summary_model_fallback;
     delete localInputs.responses_compact_summary_fallback_models;
+    delete localInputs.prefer_for_responses_compaction_when_namespace_unsupported;
     delete localInputs.responses_stream_bootstrap_recovery_enabled;
     delete localInputs.upstream_model_update_check_enabled;
     delete localInputs.upstream_model_update_auto_sync_enabled;
@@ -2617,6 +2652,10 @@ const EditChannelModal = (props) => {
     delete localInputs.upstream_model_update_last_detected_models;
     delete localInputs.upstream_model_update_ignored_models;
     delete localInputs.auxiliary_request_header_policy_enabled;
+    if (legacyRouteFieldsReadOnly) {
+      delete localInputs.priority;
+      delete localInputs.weight;
+    }
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -3064,6 +3103,25 @@ const EditChannelModal = (props) => {
                   : 'rotate(-90deg)';
             const advancedSettingsContent = (
               <div className='space-y-4'>
+                {inputs.type === 57 && (
+                  <div className='pb-3 border-b border-gray-100'>
+                    <Form.Switch
+                      field='codex_folded_sse_enabled'
+                      label={t('Codex folded SSE continuation')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'codex_folded_sse_enabled',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '启用 Codex Responses 流式推理截断续写折叠。默认关闭，仅作用于 Codex SSE，不作用于 WebSocket 或 compact。',
+                      )}
+                    />
+                  </div>
+                )}
                 {inputs.type === 1 && (
                   <div className='pb-3 border-b border-gray-100'>
                     <Form.Select
@@ -3135,6 +3193,25 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t(
                         '原生 compact 因上下文过大失败时，改用模拟摘要重试。',
+                      )}
+                    />
+                    <Form.Switch
+                      field='prefer_for_responses_compaction_when_namespace_unsupported'
+                      label={t('Namespace 不支持时优先用于压缩请求')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      checked={
+                        inputs.prefer_for_responses_compaction_when_namespace_unsupported !==
+                        false
+                      }
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'prefer_for_responses_compaction_when_namespace_unsupported',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '当 namespace 工具明确不支持时，优先将压缩请求路由到此渠道；缺少该设置时默认开启。',
                       )}
                     />
                     <Form.InputNumber
@@ -3989,6 +4066,7 @@ const EditChannelModal = (props) => {
                         label={t('渠道优先级')}
                         placeholder={t('渠道优先级')}
                         min={0}
+                        disabled={legacyRouteFieldsReadOnly}
                         onNumberChange={(value) =>
                           handleInputChange('priority', value)
                         }
@@ -4001,13 +4079,42 @@ const EditChannelModal = (props) => {
                         label={t('渠道权重')}
                         placeholder={t('渠道权重')}
                         min={0}
+                        disabled={legacyRouteFieldsReadOnly}
                         onNumberChange={(value) =>
                           handleInputChange('weight', value)
                         }
                         style={{ width: '100%' }}
                       />
                     </Col>
+                    <Col span={12}>
+                      <Form.InputNumber
+                        field='max_concurrency'
+                        label={t('最大并发')}
+                        placeholder={t('最大并发')}
+                        min={0}
+                        step={1}
+                        onNumberChange={(value) =>
+                          handleInputChange(
+                            'max_concurrency',
+                            Number.isFinite(Number(value))
+                              ? Math.max(0, Math.trunc(Number(value)))
+                              : 0,
+                          )
+                        }
+                        style={{ width: '100%' }}
+                      />
+                      <Text type='tertiary' size='small'>
+                        {t('0 表示不限')}
+                      </Text>
+                    </Col>
                   </Row>
+                  {legacyRouteFieldsReadOnly ? (
+                    <Text type='tertiary' size='small'>
+                      {t(
+                        '新路由模式下 priority/weight 请在路由 Scope 工作台调整。',
+                      )}
+                    </Text>
+                  ) : null}
 
                   {inputs.type === 1 && (
                     <>

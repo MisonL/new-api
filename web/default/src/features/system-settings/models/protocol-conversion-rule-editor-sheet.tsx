@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { ArrowRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,7 +17,6 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import type { Channel } from '@/features/channels/types'
-import { cn } from '@/lib/utils'
 import { ProtocolConversionChannelScopeEditor } from './protocol-conversion-channel-scope-editor'
 import { ProtocolConversionHitPreview } from './protocol-conversion-hit-preview'
 import {
@@ -219,7 +219,7 @@ export function ProtocolConversionRuleEditorSheet({
               'Options are evaluated only after direction, channel, and model match.'
             )}
           >
-            <div className='flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3'>
+            <div className='bg-muted/20 flex flex-wrap items-center justify-between gap-3 rounded-md border p-3'>
               <div>
                 <div className='flex flex-wrap items-center gap-2 text-sm font-medium'>
                   {t('Custom tool bridge')}
@@ -251,7 +251,7 @@ export function ProtocolConversionRuleEditorSheet({
                 }}
               />
             </div>
-            <div className='flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3'>
+            <div className='bg-muted/20 flex flex-wrap items-center justify-between gap-3 rounded-md border p-3'>
               <div>
                 <div className='text-sm font-medium'>
                   {t('Bridge custom tool requests only')}
@@ -316,13 +316,9 @@ type EditorSectionProps = {
   children: ReactNode
 }
 
-function EditorSection({
-  title,
-  description,
-  children,
-}: EditorSectionProps) {
+function EditorSection({ title, description, children }: EditorSectionProps) {
   return (
-    <section className='space-y-3 rounded-lg border bg-background p-4'>
+    <section className='bg-background space-y-3 rounded-lg border p-4'>
       <div className='space-y-1'>
         <div className='text-sm font-semibold'>{title}</div>
         <div className='text-muted-foreground text-sm'>{description}</div>
@@ -370,9 +366,9 @@ function DirectionOption({
         </Badge>
       </div>
       <div className='mt-3 flex flex-wrap items-center gap-2 text-xs'>
-        <span className='rounded-md bg-muted px-2 py-1'>{source}</span>
+        <span className='bg-muted rounded-md px-2 py-1'>{source}</span>
         <ArrowRight className='text-muted-foreground size-3.5' />
-        <span className='rounded-md bg-muted px-2 py-1'>{target}</span>
+        <span className='bg-muted rounded-md px-2 py-1'>{target}</span>
       </div>
       <div className='text-muted-foreground mt-3 text-xs'>{description}</div>
     </button>

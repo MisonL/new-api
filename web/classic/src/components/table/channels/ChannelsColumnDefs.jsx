@@ -51,6 +51,7 @@ import {
   IconAlertTriangle,
 } from '@douyinfe/semi-icons';
 import { FaInfinity, FaRandom } from 'react-icons/fa';
+import ChannelHealthRuntimeChannelState from './ChannelHealthRuntimeChannelState';
 
 const CHANNEL_OPERATE_COLUMN_WIDTH = 250;
 
@@ -350,7 +351,11 @@ export const getChannelsColumns = ({
   setCurrentMultiKeyChannel,
   openUpstreamUpdateModal,
   detectChannelUpstreamUpdates,
+  channelHealthRuntime,
+  channelRoutingConfig,
 }) => {
+  const legacyRouteFieldsReadOnly =
+    channelRoutingConfig?.strict_writes === true;
   return [
     {
       key: COLUMN_KEYS.ID,
@@ -406,12 +411,24 @@ export const getChannelsColumns = ({
             <span>{text}</span>
           );
 
+        const runtimeStateNode = (
+          <ChannelHealthRuntimeChannelState
+            channelId={record.id}
+            runtime={channelHealthRuntime?.runtime || null}
+          />
+        );
+
         if (!passThroughEnabled && !showUpstreamUpdateTag) {
-          return nameNode;
+          return (
+            <Space spacing={6} align='center' wrap>
+              {nameNode}
+              {runtimeStateNode}
+            </Space>
+          );
         }
 
         return (
-          <Space spacing={6} align='center'>
+          <Space spacing={6} align='center' wrap>
             {nameNode}
             {passThroughEnabled && (
               <Tooltip
@@ -476,6 +493,7 @@ export const getChannelsColumns = ({
                 ) : null}
               </Space>
             )}
+            {runtimeStateNode}
           </Space>
         );
       },
@@ -602,6 +620,17 @@ export const getChannelsColumns = ({
       dataIndex: 'priority',
       width: 95,
       render: (text, record, index) => {
+        if (legacyRouteFieldsReadOnly) {
+          return (
+            <span
+              title={t('Legacy priority is read-only in V2 routing')}
+              aria-label={t('Legacy priority is read-only in V2 routing')}
+              style={{ color: 'var(--semi-color-text-2)', fontSize: 12 }}
+            >
+              {text ?? 0}
+            </span>
+          );
+        }
         if (record.children === undefined) {
           return (
             <div>
@@ -660,6 +689,17 @@ export const getChannelsColumns = ({
       dataIndex: 'weight',
       width: 95,
       render: (text, record, index) => {
+        if (legacyRouteFieldsReadOnly) {
+          return (
+            <span
+              title={t('Legacy weight is read-only in V2 routing')}
+              aria-label={t('Legacy weight is read-only in V2 routing')}
+              style={{ color: 'var(--semi-color-text-2)', fontSize: 12 }}
+            >
+              {text ?? 0}
+            </span>
+          );
+        }
         if (record.children === undefined) {
           return (
             <div>
@@ -851,11 +891,7 @@ export const getChannelsColumns = ({
 
               {record.channel_info?.is_multi_key ? (
                 <SplitButtonGroup aria-label={t('多密钥渠道操作项目组')}>
-                  <Button
-                    type='tertiary'
-                    size='small'
-                    onClick={openEditSheet}
-                  >
+                  <Button type='tertiary' size='small' onClick={openEditSheet}>
                     {t('编辑')}
                   </Button>
                   <Dropdown

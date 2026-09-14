@@ -6,7 +6,6 @@ import { cn } from '@/lib/utils'
 import { useIsAdmin } from '@/hooks/use-admin'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getLogStats, getUserLogStats } from '../api'
-import { DEFAULT_LOG_STATS } from '../constants'
 import { buildApiParams } from '../lib/utils'
 import { useUsageLogsContext } from './usage-logs-provider'
 
@@ -34,7 +33,11 @@ export function CommonLogsStats() {
   const searchParams = route.useSearch()
   const { sensitiveVisible } = useUsageLogsContext()
 
-  const { data: stats, isLoading } = useQuery({
+  const {
+    data: stats,
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ['usage-logs-stats', isAdmin, searchParams],
     queryFn: async () => {
       const params = buildApiParams({
@@ -49,9 +52,9 @@ export function CommonLogsStats() {
         ? await getLogStats(params)
         : await getUserLogStats(params)
 
-      return result.success
-        ? result.data || DEFAULT_LOG_STATS
-        : DEFAULT_LOG_STATS
+      if (!result.success || !result.data)
+        throw new Error('log statistics unavailable')
+      return result.data
     },
     placeholderData: (previousData) => previousData,
   })
@@ -62,9 +65,17 @@ export function CommonLogsStats() {
         <Skeleton className='h-7 w-[150px] rounded-md' />
         <Skeleton className='h-7 w-[100px] rounded-md' />
         <Skeleton className='h-7 w-[120px] rounded-md' />
+        <Skeleton className='h-7 w-[90px] rounded-md' />
       </div>
     )
   }
+
+  if (isError)
+    return (
+      <p role='alert' className='text-destructive text-sm'>
+        {t('Request failed')}
+      </p>
+    )
 
   return (
     <div className='flex flex-wrap items-center gap-2'>
@@ -82,6 +93,15 @@ export function CommonLogsStats() {
         label={t('TPM')}
         value={stats?.tpm || 0}
         accent='bg-slate-400/70'
+      />
+      <StatBadge
+        label={t('Hit Rate')}
+        value={
+          stats?.cache_rate == null
+            ? 'N/A'
+            : `${(stats.cache_rate * 100).toFixed(2)}%`
+        }
+        accent='bg-emerald-500/70'
       />
     </div>
   )

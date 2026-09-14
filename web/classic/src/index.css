@@ -1171,6 +1171,475 @@ body.sidebar-resizing * {
   color: var(--semi-color-text-1);
 }
 
+.usage-log-routing-tooltip,
+.usage-log-routing-details {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--semi-color-text-0);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.usage-log-routing-tooltip {
+  max-height: min(360px, calc(100vh - 96px));
+  overflow: auto;
+}
+
+.usage-log-routing-tooltip-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.usage-log-routing-tooltip-label-tag {
+  background: var(--semi-color-primary-light-default);
+  color: var(--semi-color-primary);
+}
+
+.usage-log-routing-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.usage-log-routing-overview-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.usage-log-routing-overview-item.is-path {
+  grid-column: 1 / -1;
+}
+
+.usage-log-routing-overview-label,
+.usage-log-routing-capability-item > span,
+.usage-log-routing-capability-meta span,
+.usage-log-routing-capability-notes span {
+  color: var(--semi-color-text-2);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.usage-log-routing-overview-value {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.usage-log-routing-overview-value.is-count {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-log-routing-overview-value.is-cyan,
+.usage-log-routing-overview-value.is-blue {
+  color: var(--semi-color-primary);
+}
+
+.usage-log-routing-overview-value.is-orange {
+  color: var(--semi-color-warning);
+}
+
+.usage-log-routing-overview-value.is-red {
+  color: var(--semi-color-danger);
+}
+
+.usage-log-routing-overview-value.is-green {
+  color: var(--semi-color-success);
+}
+
+.usage-log-routing-overview-value.is-violet {
+  color: var(--semi-color-violet);
+}
+
+.usage-log-routing-overview-value.is-grey,
+.usage-log-routing-overview-unrecorded,
+.usage-log-routing-capabilities-unrecorded {
+  color: var(--semi-color-text-2);
+}
+
+.usage-log-routing-overview-path,
+.usage-log-routing-capability-meta code,
+.usage-log-routing-capability-notes code {
+  display: block;
+  min-width: 0;
+  color: var(--semi-color-text-0);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.usage-log-routing-trace,
+.usage-log-routing-capabilities {
+  min-width: 0;
+  border-top: 1px solid
+    color-mix(in srgb, var(--semi-color-border) 72%, transparent);
+  padding-top: 10px;
+}
+
+.usage-log-routing-trace-header,
+.usage-log-routing-capabilities-header {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+
+.usage-log-routing-trace-title,
+.usage-log-routing-capabilities-header > span:first-child {
+  color: var(--semi-color-text-0);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.usage-log-routing-trace-note {
+  color: var(--semi-color-text-2);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.usage-log-routing-trace-groups {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.usage-log-routing-trace-stage {
+  min-width: 0;
+}
+
+.usage-log-routing-trace-stage-title {
+  margin: 0 0 4px;
+  color: var(--semi-color-text-2);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.usage-log-routing-trace-events {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  border-left: 1px solid
+    color-mix(in srgb, var(--semi-color-border) 76%, transparent);
+  margin-left: 4px;
+  padding-left: 12px;
+}
+
+.usage-log-routing-trace-event {
+  --routing-trace-color: var(--semi-color-text-2);
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.usage-log-routing-trace-event::before {
+  position: absolute;
+  top: 6px;
+  left: -17px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--semi-color-bg-2);
+  border-radius: 50%;
+  background: var(--routing-trace-color);
+  content: '';
+}
+
+.usage-log-routing-trace-event.is-adaptation {
+  --routing-trace-color: var(--semi-color-primary);
+}
+
+.usage-log-routing-trace-event.is-recovery {
+  --routing-trace-color: var(--semi-color-warning);
+}
+
+.usage-log-routing-trace-event.is-failure {
+  --routing-trace-color: var(--semi-color-danger);
+}
+
+.usage-log-routing-trace-event-label {
+  color: var(--routing-trace-color);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.usage-log-routing-trace-event-value {
+  min-width: 0;
+  color: var(--semi-color-text-0);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.usage-log-routing-trace-event.is-adaptation
+  .usage-log-routing-trace-event-value {
+  color: var(--semi-color-primary);
+}
+
+.usage-log-routing-trace-event.is-recovery
+  .usage-log-routing-trace-event-value {
+  color: var(--semi-color-warning);
+}
+
+.usage-log-routing-trace-event.is-failure .usage-log-routing-trace-event-value {
+  color: var(--semi-color-danger);
+  font-weight: 600;
+}
+
+.usage-log-routing-trace-event-value.is-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+}
+
+.usage-log-routing-trace-empty {
+  margin-top: 6px;
+  color: var(--semi-color-text-2);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.usage-log-routing-capability-meta,
+.usage-log-routing-capability-grid,
+.usage-log-routing-capability-notes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.usage-log-routing-capability-meta > div,
+.usage-log-routing-capability-notes > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.usage-log-routing-capability-item {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.usage-log-routing-capability-item > strong {
+  color: var(--semi-color-text-0);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: right;
+}
+
+.usage-log-routing-capability-item > strong.is-supported {
+  color: var(--semi-color-success);
+}
+
+.usage-log-routing-capability-item > strong.is-unsupported {
+  color: var(--semi-color-danger);
+}
+
+.usage-log-routing-capability-item > strong.is-unknown {
+  color: var(--semi-color-text-2);
+}
+
+.usage-log-routing-capability-notes {
+  border-top: 1px dashed
+    color-mix(in srgb, var(--semi-color-border) 72%, transparent);
+  padding-top: 8px;
+}
+
+.usage-log-health-tooltip,
+.usage-log-health-details {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--semi-color-text-0);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.usage-log-health-tooltip {
+  max-height: min(360px, calc(100vh - 96px));
+  overflow: auto;
+}
+
+.usage-log-health-tooltip-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.usage-log-health-tooltip-label-tag {
+  background: var(--semi-color-danger-light-default);
+  color: var(--semi-color-danger);
+}
+
+.usage-log-health-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.usage-log-health-overview-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.usage-log-health-overview-label,
+.usage-log-health-events-note {
+  color: var(--semi-color-text-2);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.usage-log-health-overview-value {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.usage-log-health-overview-value.is-count {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-log-health-overview-value.is-red {
+  color: var(--semi-color-danger);
+}
+
+.usage-log-health-overview-value.is-orange {
+  color: var(--semi-color-warning);
+}
+
+.usage-log-health-overview-value.is-green {
+  color: var(--semi-color-success);
+}
+
+.usage-log-health-overview-value.is-cyan,
+.usage-log-health-overview-value.is-blue {
+  color: var(--semi-color-primary);
+}
+
+.usage-log-health-overview-value.is-grey {
+  color: var(--semi-color-text-2);
+}
+
+.usage-log-health-note {
+  border-top: 1px dashed
+    color-mix(in srgb, var(--semi-color-border) 72%, transparent);
+  padding-top: 8px;
+  color: var(--semi-color-text-2);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.usage-log-health-events {
+  min-width: 0;
+  border-top: 1px solid
+    color-mix(in srgb, var(--semi-color-border) 72%, transparent);
+  padding-top: 10px;
+}
+
+.usage-log-health-events-header {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+
+.usage-log-health-events-title {
+  color: var(--semi-color-text-0);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.usage-log-health-events-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.usage-log-health-event {
+  --health-event-color: var(--semi-color-text-2);
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  border-left: 2px solid var(--health-event-color);
+  padding-left: 10px;
+}
+
+.usage-log-health-event.is-failure {
+  --health-event-color: var(--semi-color-danger);
+}
+
+.usage-log-health-event.is-warning {
+  --health-event-color: var(--semi-color-warning);
+}
+
+.usage-log-health-event.is-success {
+  --health-event-color: var(--semi-color-success);
+}
+
+.usage-log-health-event.is-info,
+.usage-log-health-event.is-bypassed {
+  --health-event-color: var(--semi-color-primary);
+}
+
+.usage-log-health-event-label {
+  color: var(--health-event-color);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.usage-log-health-event-value {
+  min-width: 0;
+  color: var(--semi-color-text-0);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 html.dark .usage-log-compact-popover-label-tag {
   background: color-mix(
     in srgb,
@@ -1202,6 +1671,13 @@ html.dark .usage-log-stream-popover-label-tag {
   }
 
   .usage-log-info-popover-row-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .usage-log-routing-overview,
+  .usage-log-routing-capability-meta,
+  .usage-log-routing-capability-grid,
+  .usage-log-routing-capability-notes {
     grid-template-columns: minmax(0, 1fr);
   }
 }

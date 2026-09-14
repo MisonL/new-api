@@ -77,7 +77,7 @@ export function ProtocolConversionRuleCard({
         })
 
   return (
-    <div className='space-y-4 rounded-xl border bg-background p-4 shadow-sm'>
+    <div className='bg-background space-y-4 rounded-xl border p-4 shadow-sm'>
       <div className='flex flex-wrap items-start justify-between gap-3'>
         <div className='min-w-0 space-y-2'>
           <div className='flex flex-wrap items-center gap-2'>
@@ -97,7 +97,10 @@ export function ProtocolConversionRuleCard({
               <Badge variant='outline'>{t('Advanced fields preserved')}</Badge>
             ) : null}
             {attentionKeys.length > 0 ? (
-              <Badge variant='secondary' className='bg-amber-100 text-amber-900'>
+              <Badge
+                variant='secondary'
+                className='bg-amber-100 text-amber-900'
+              >
                 {t('{{count}} attention items', {
                   count: attentionKeys.length,
                 })}
@@ -228,7 +231,7 @@ function ProtocolRuleCardPanel({
   detail,
 }: ProtocolRuleCardPanelProps) {
   return (
-    <div className='rounded-lg border bg-muted/20 p-3'>
+    <div className='bg-muted/20 rounded-lg border p-3'>
       <div className='text-muted-foreground text-xs font-medium'>{label}</div>
       <div className='mt-1 text-sm font-semibold'>{title}</div>
       <div className='text-muted-foreground mt-1 line-clamp-2 text-xs'>

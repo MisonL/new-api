@@ -1,0 +1,7 @@
+{
+  "When namespace tool support is explicitly unsupported, route compact requests to this channel first. Missing setting defaults to enabled.": "When namespace tool support is explicitly unsupported, route compact requests to this channel first. Missing setting defaults to enabled.",
+  "Weights are stored per group, effective model, and priority.": "Weights are stored per group, effective model, and priority.",
+  "Failed to load routing scopes": "Failed to load routing scopes",
+  "Failed to save routing scope": "Failed to save routing scope",
+  "Route weights must sum to 10000 bps": "Route weights must sum to 10000 bps"
+}

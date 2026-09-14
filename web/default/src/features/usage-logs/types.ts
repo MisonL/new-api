@@ -74,11 +74,59 @@ export interface ChannelAffinityInfo {
   using_group?: string
 }
 
+export interface ResponsesRoutingChannelSkip {
+  channel_id: number
+  reason: string
+}
+
+export interface ResponsesRoutingAttempt {
+  channel_id: number
+  status_code?: number
+  error_code?: string
+  error_category?: string
+  outcome?: string
+}
+
+export interface ResponsesRoutingTrace {
+  candidates?: number[]
+  preflight_skipped?: ResponsesRoutingChannelSkip[]
+  attempted_channels?: ResponsesRoutingAttempt[]
+  final_channel?: number
+  terminal_reason?: string
+}
+
+export interface ResponsesRoutingUserSummary {
+  outcome?: string
+  automatic_reroute?: boolean
+  attempt_count?: number
+  preflight_skip_count?: number
+  reasons?: string[]
+}
+
+export interface ChannelHealthRoutingEvent {
+  group?: string
+  model_name?: string
+  channel_id?: number
+  action?: string
+  status_code?: number
+  error_code?: string
+  route_key?: string
+  effective_model?: string
+  protocol?: string
+  upstream_path?: string
+  multi_key_index?: number
+}
+
+export interface ChannelHealthRoutingInfo {
+  events?: ChannelHealthRoutingEvent[]
+  redis_unavailable?: boolean
+}
+
 export interface LogOtherData {
   admin_info?: {
     is_multi_key?: boolean
     multi_key_index?: number
-    use_channel?: number[]
+    use_channel?: string[]
     local_count_tokens?: boolean
     channel_affinity?: ChannelAffinityInfo
     // Top-up audit fields (type=1, admin only)
@@ -93,6 +141,8 @@ export interface LogOtherData {
     admin_id?: number | string
     responses_channel_capability_observed?: ResponsesCapabilityObservation
     responses_channel_capability_probe?: ResponsesCapabilityObservation
+    responses_channel_tool_capability_observed?: ResponsesToolCapabilityObservation
+    channel_health?: ChannelHealthRoutingInfo
   }
   request_path?: string
   upstream_request_path?: string
@@ -105,9 +155,12 @@ export interface LogOtherData {
   text_input?: number
   text_output?: number
   cache_tokens?: number
+  cache_write_tokens?: number
   cache_creation_tokens?: number
   cache_creation_tokens_5m?: number
   cache_creation_tokens_1h?: number
+  input_tokens_total?: number
+  usage_semantic?: string
   claude?: boolean
   model_ratio?: number
   completion_ratio?: number
@@ -156,6 +209,11 @@ export interface LogOtherData {
   responses_compact_upstream_path?: string
   responses_compact_auto_fallback?: boolean
   responses_compact_auto_fallback_window?: boolean
+  responses_compact_context_fallback?: boolean
+  responses_compact_previous_response_id_fallback?: boolean
+  responses_compact_summary_model_fallback?: boolean
+  responses_compact_summary_model?: string
+  responses_compact_summary_models?: string[]
   responses_compact_native_attempted?: boolean
   responses_compact_native_upstream_path?: string
   responses_compact_native_status_code?: number
@@ -163,12 +221,44 @@ export interface LogOtherData {
   responses_compact_auto_fallback_retry_until?: number
   responses_compact_auto_fallback_retry_interval_hours?: number
   responses_compact_final_upstream_path?: string
+  responses_compact_client?: string
+  responses_compact_client_implementation?: string
+  responses_compact_trigger?: string
+  responses_compact_reason?: string
+  responses_compact_phase?: string
+  responses_compact_strategy?: string
+  responses_compact_route_decision?: string
+  responses_compact_channel_skip?: string
+  responses_routing_channel_skips?: ResponsesRoutingChannelSkip[]
+  responses_routing_trace?: ResponsesRoutingTrace
+  responses_routing_summary?: ResponsesRoutingUserSummary
+  responses_compact_state_restored?: boolean
+  responses_compact_model_changed?: boolean
   responses_remote_compact_first_data_timeout?: boolean
+  responses_remote_compact_synthetic_fallback?: boolean
   channel_capability_snapshot?: ChannelCapabilitySnapshot
   responses_compact_fallback_reason?: string
   responses_compact_visible_only_fallback?: boolean
   responses_encrypted_context_retry?: boolean
+  responses_encrypted_context_retry_blocked_after_event?: string
+  responses_namespace_history_retry?: boolean
+  responses_arguments_history_retry?: boolean
+  responses_stream_options_include_usage_retry?: boolean
+  responses_stream_options_include_usage_capability_stripped?: boolean
+  responses_previous_id_action?: string
   responses_reasoning_context_action?: string
+  responses_chat_compat_ignored_encrypted_include?: boolean
+  responses_chat_compat_reasoning_summary_mapped?: boolean
+  responses_codex_local_compaction_413_recovery?: boolean
+  responses_codex_local_compaction_413_recovery_failed?: boolean
+  responses_codex_local_compaction_body_reduction_source?: string
+  responses_codex_local_compaction_ingress_reduced?: boolean
+  responses_codex_local_compaction_ingress_original_body_bytes?: number
+  responses_codex_local_compaction_ingress_reduced_body_bytes?: number
+  responses_codex_local_compaction_ingress_input_items?: number
+  responses_codex_local_compaction_original_body_bytes?: number
+  responses_codex_local_compaction_reduced_body_bytes?: number
+  responses_input_item_id_normalization_removed_count?: number
   request_header_policy?: RequestHeaderPolicyInfo
   request_header_policy_mode?: string
   header_policy_mode?: string
@@ -238,15 +328,14 @@ export interface ChannelCapabilitySnapshot {
   supports_chat?: boolean
   supports_rest_previous_response_id?: boolean
   supports_compaction_item_passthrough?: boolean
-  compaction_item_passthrough_capability?:
-    | 'supported'
-    | 'unsupported'
-    | 'unknown'
   supports_custom_tools?: boolean
   supports_namespace_tools?: boolean
   supports_tool_search?: boolean
+  namespace_tools_capability?: 'supported' | 'unsupported' | 'unknown'
+  tool_search_capability?: 'supported' | 'unsupported' | 'unknown'
   reasoning_context_capability?: 'supported' | 'unsupported' | 'unknown'
   supports_reasoning_context?: boolean
+  supports_stream_options_include_usage?: boolean
   strips_responses_reasoning_context?: boolean
   strips_responses_encrypted_reasoning?: boolean
 }
@@ -258,6 +347,18 @@ export interface ResponsesCapabilityObservation {
   reason?: string
 }
 
+export interface ResponsesToolCapabilityObservation {
+  observed_at?: number
+  expires_at?: number
+  source?: string
+  model?: string
+  profile?: string
+  transport?: string
+  custom_tool_call?: boolean
+  namespace_tool_call?: boolean
+  tool_search_call?: boolean
+}
+
 /**
  * Log statistics data
  */
@@ -265,6 +366,11 @@ export interface LogStatistics {
   quota: number
   rpm: number
   tpm: number
+  input_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  output_tokens: number
+  cache_rate: number | null
 }
 
 // ============================================================================

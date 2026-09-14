@@ -34,6 +34,7 @@ export const channelFormSchema = z.object({
   model_mapping: z.string().optional(),
   priority: z.number().optional(),
   weight: z.number().optional(),
+  max_concurrency: z.number().int().min(0).optional(),
   test_model: z.string().optional(),
   auto_ban: z.number().optional(),
   status: z.number(),
@@ -71,6 +72,7 @@ export const channelFormSchema = z.object({
   allow_safety_identifier: z.boolean().optional(), // OpenAI only
   allow_include_obfuscation: z.boolean().optional(), // OpenAI: include usage obfuscation
   strip_codex_encrypted_context: z.boolean().optional(), // OpenAI: strip Codex encrypted context
+  codex_folded_sse_enabled: z.boolean().optional(), // Codex only: fold reasoning continuation rounds
   responses_upstream_profile: z
     .enum([
       '',
@@ -93,6 +95,9 @@ export const channelFormSchema = z.object({
   responses_compact_summary_model_fallback: z.boolean().optional(),
   responses_compact_summary_fallback_models: z.string().optional(),
   responses_remote_compaction_first_data_timeout_seconds: z.number().optional(),
+  prefer_for_responses_compaction_when_namespace_unsupported: z
+    .boolean()
+    .optional(),
   allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
   allow_speed: z.boolean().optional(), // Anthropic: speed mode control
   claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
@@ -120,6 +125,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   model_mapping: '',
   priority: 0,
   weight: 0,
+  max_concurrency: 0,
   test_model: '',
   auto_ban: 1,
   status: CHANNEL_STATUS.ENABLED,
@@ -153,6 +159,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_safety_identifier: false,
   allow_include_obfuscation: false,
   strip_codex_encrypted_context: false,
+  codex_folded_sse_enabled: false,
   responses_upstream_profile: RESPONSES_UPSTREAM_PROFILE_DEFAULT,
   responses_compact_mode: RESPONSES_COMPACT_MODE_DEFAULT,
   responses_compact_auto_fallback_retry_interval_hours:
@@ -163,6 +170,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
     RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(','),
   responses_remote_compaction_first_data_timeout_seconds:
     RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT,
+  prefer_for_responses_compaction_when_namespace_unsupported: true,
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
@@ -271,6 +279,7 @@ export function transformChannelToFormDefaults(
   let allowSafetyIdentifier = false
   let allowIncludeObfuscation = false
   let stripCodexEncryptedContext = false
+  let codexFoldedSSEEnabled = false
   let responsesUpstreamProfile: ResponsesUpstreamProfile =
     RESPONSES_UPSTREAM_PROFILE_DEFAULT
   let responsesCompactMode: ResponsesCompactMode =
@@ -283,6 +292,7 @@ export function transformChannelToFormDefaults(
     RESPONSES_COMPACT_SUMMARY_FALLBACK_MODELS_DEFAULT.join(',')
   let responsesRemoteCompactionFirstDataTimeoutSeconds =
     RESPONSES_REMOTE_COMPACTION_FIRST_DATA_TIMEOUT_SECONDS_DEFAULT
+  let preferForResponsesCompactionWhenNamespaceUnsupported = true
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
@@ -306,6 +316,8 @@ export function transformChannelToFormDefaults(
         parsed.responses_upstream_profile
       )
       stripCodexEncryptedContext = parsed.strip_codex_encrypted_context === true
+      codexFoldedSSEEnabled =
+        channel.type === 57 && parsed.codex_folded_sse_enabled === true
       responsesCompactMode = getResponsesCompactModeFromSettings({
         responses_compact_mode: normalizeResponsesCompactMode(
           parsed.responses_compact_mode
@@ -328,6 +340,9 @@ export function transformChannelToFormDefaults(
         normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
           parsed.responses_remote_compaction_first_data_timeout_seconds
         )
+      preferForResponsesCompactionWhenNamespaceUnsupported =
+        parsed.prefer_for_responses_compaction_when_namespace_unsupported !==
+        false
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
@@ -364,6 +379,7 @@ export function transformChannelToFormDefaults(
     model_mapping: channel.model_mapping || '',
     priority: channel.priority || 0,
     weight: channel.weight || 0,
+    max_concurrency: channel.max_concurrency ?? 0,
     test_model: channel.test_model || '',
     auto_ban: channel.auto_ban ?? 1,
     status: channel.status,
@@ -394,6 +410,7 @@ export function transformChannelToFormDefaults(
     claude_beta_query: claudeBetaQuery,
     allow_safety_identifier: allowSafetyIdentifier,
     strip_codex_encrypted_context: stripCodexEncryptedContext,
+    codex_folded_sse_enabled: codexFoldedSSEEnabled,
     responses_upstream_profile: responsesUpstreamProfile,
     responses_compact_mode: responsesCompactMode,
     responses_compact_auto_fallback_retry_interval_hours:
@@ -405,6 +422,8 @@ export function transformChannelToFormDefaults(
       responsesCompactSummaryFallbackModels,
     responses_remote_compaction_first_data_timeout_seconds:
       responsesRemoteCompactionFirstDataTimeoutSeconds,
+    prefer_for_responses_compaction_when_namespace_unsupported:
+      preferForResponsesCompactionWhenNamespaceUnsupported,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
@@ -528,6 +547,9 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       normalizeResponsesRemoteCompactionFirstDataTimeoutSeconds(
         formData.responses_remote_compaction_first_data_timeout_seconds
       )
+    settingsObj.prefer_for_responses_compaction_when_namespace_unsupported =
+      formData.prefer_for_responses_compaction_when_namespace_unsupported !==
+      false
     if (previousResponsesCompactMode !== nextResponsesCompactMode) {
       delete settingsObj.responses_compact_auto_fallback_date
       delete settingsObj.responses_compact_auto_fallback_at
@@ -543,6 +565,14 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     delete settingsObj.responses_compact_summary_model_fallback
     delete settingsObj.responses_compact_summary_fallback_models
     delete settingsObj.responses_remote_compaction_first_data_timeout_seconds
+    delete settingsObj.prefer_for_responses_compaction_when_namespace_unsupported
+  }
+
+  if (formData.type === 57) {
+    settingsObj.codex_folded_sse_enabled =
+      formData.codex_folded_sse_enabled === true
+  } else if ('codex_folded_sse_enabled' in settingsObj) {
+    delete settingsObj.codex_folded_sse_enabled
   }
 
   if (formData.type === 1) {
@@ -662,6 +692,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     model_mapping: formData.model_mapping || null,
     priority: formData.priority ?? 0,
     weight: formData.weight ?? 0,
+    max_concurrency: formData.max_concurrency ?? 0,
     test_model: formData.test_model || null,
     auto_ban: formData.auto_ban ?? 1,
     status: formData.status,
@@ -710,6 +741,7 @@ export function transformFormDataToUpdatePayload(
     model_mapping: formData.model_mapping || null,
     priority: formData.priority ?? 0,
     weight: formData.weight ?? 0,
+    max_concurrency: formData.max_concurrency ?? 0,
     test_model: formData.test_model || null,
     auto_ban: formData.auto_ban ?? 1,
     status: formData.status,

@@ -41,7 +41,7 @@ import {
   getChannels,
   searchChannels,
   getGroups,
-  getTopChannelPriorities,
+  getTopChannelPinOrders,
 } from '../api'
 import {
   DEFAULT_PAGE_SIZE,
@@ -274,21 +274,21 @@ export function ChannelsTable() {
   const totalCount = data?.data?.total || 0
   const typeCounts = data?.data?.type_counts
 
-  const getTopPriority = useCallback(async () => {
-    const response = await getTopChannelPriorities()
+  const getTopPinOrder = useCallback(async () => {
+    const response = await getTopChannelPinOrders()
 
     if (!response.success) {
       throw new Error(response.message || t('Failed to pin channel'))
     }
 
-    const priority = response.data?.[0]?.priority
-    return typeof priority === 'number' && Number.isFinite(priority)
-      ? priority
+    const pinOrder = response.data?.[0]?.pin_order
+    return typeof pinOrder === 'number' && Number.isFinite(pinOrder)
+      ? pinOrder
       : 0
   }, [t])
 
   const getTopChannels = useCallback(async () => {
-    const response = await getTopChannelPriorities()
+    const response = await getTopChannelPinOrders()
     if (!response.success) {
       throw new Error(response.message || t('Failed to load pinned channels'))
     }
@@ -313,7 +313,7 @@ export function ChannelsTable() {
 
   // Columns configuration
   const columns = useChannelsColumns({
-    getTopPriority,
+    getTopPinOrder,
     getTopChannels,
     topChannels,
   })

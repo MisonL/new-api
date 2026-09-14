@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -21,7 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { getChannels } from '@/features/channels/api'
@@ -400,7 +400,7 @@ function ProtocolRuleControlPanel({
 }: ProtocolRuleControlPanelProps) {
   const { t } = useTranslation()
   return (
-    <div className='space-y-4 rounded-xl border bg-muted/20 p-4'>
+    <div className='bg-muted/20 space-y-4 rounded-xl border p-4'>
       <div className='grid gap-3 md:grid-cols-4'>
         <ProtocolMetric
           label={t('Rule inventory')}
@@ -440,9 +440,7 @@ function ProtocolRuleControlPanel({
             }
           >
             <TabsList className='grid w-full grid-cols-3'>
-              <TabsTrigger value={PROTOCOL_FILTER_ALL}>
-                {t('All')}
-              </TabsTrigger>
+              <TabsTrigger value={PROTOCOL_FILTER_ALL}>{t('All')}</TabsTrigger>
               <TabsTrigger value={TEMPLATE_CHAT_TO_RESPONSES}>
                 {t('Chat -> Responses')}
               </TabsTrigger>
@@ -489,7 +487,7 @@ function ProtocolRuleControlPanel({
             {t('Search')}
           </div>
           <div className='relative'>
-            <Search className='text-muted-foreground pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2' />
+            <Search className='text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2' />
             <Input
               value={filters.query}
               onChange={(event) =>

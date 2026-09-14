@@ -7,6 +7,7 @@ import {
   testChannel,
   updateChannel,
   updateChannelPriorities,
+  updateChannelPinOrders,
   batchDeleteChannels,
   batchSetChannelTag,
   enableTagChannels,
@@ -20,8 +21,9 @@ import {
 } from '../api'
 import { CHANNEL_STATUS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import type { ChannelTestRuntimeConfig, CopyChannelParams } from '../types'
-import { formatBalance } from './channel-utils'
+import type { TopChannelPinOrderMovePlan } from './channel-pin-order'
 import type { TopChannelPriorityMovePlan } from './channel-priority'
+import { formatBalance } from './channel-utils'
 
 // ============================================================================
 // Query Keys
@@ -191,6 +193,72 @@ export async function handleUpdateChannelPriorityMovePlan(
   } catch (error) {
     queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
     queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
+    const updateError =
+      error instanceof Error
+        ? error.message
+        : i18next.t(ERROR_MESSAGES.UPDATE_FAILED)
+    toast.error(updateError)
+    return false
+  }
+}
+
+export async function handleUpdateChannelPinOrderMovePlan(
+  plan: TopChannelPinOrderMovePlan,
+  queryClient?: QueryClient,
+  onSuccess?: () => void
+): Promise<boolean> {
+  if (plan.updates.length === 0) {
+    toast.info(i18next.t('No pinned channel to move'))
+    return false
+  }
+
+  try {
+    const response = await updateChannelPinOrders(plan.updates)
+    if (!response.success) {
+      throw new Error(
+        response.message || i18next.t(ERROR_MESSAGES.UPDATE_FAILED)
+      )
+    }
+    toast.success(i18next.t('Pinned channel order updated'))
+    queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+    queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
+    onSuccess?.()
+    return true
+  } catch (error) {
+    queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+    queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
+    const updateError =
+      error instanceof Error
+        ? error.message
+        : i18next.t(ERROR_MESSAGES.UPDATE_FAILED)
+    toast.error(updateError)
+    return false
+  }
+}
+
+export async function handleUpdateChannelPinOrder(
+  id: number,
+  pinOrder: number,
+  queryClient?: QueryClient,
+  onSuccess?: () => void
+): Promise<boolean> {
+  try {
+    const response = await updateChannelPinOrders([{ id, pin_order: pinOrder }])
+    if (!response.success) {
+      throw new Error(
+        response.message || i18next.t(ERROR_MESSAGES.UPDATE_FAILED)
+      )
+    }
+    toast.success(
+      i18next.t(
+        pinOrder > 0 ? 'Pinned channel order updated' : 'Channel unpinned'
+      )
+    )
+    queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+    queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.top() })
+    onSuccess?.()
+    return true
+  } catch (error) {
     const updateError =
       error instanceof Error
         ? error.message
