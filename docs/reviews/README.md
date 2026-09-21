@@ -103,8 +103,8 @@
 | 安全与认证 | `CR-MAIN-PAYMENT-SECURITY-GAP-2026-04-19`、`CR-HEADER-PROFILE-STRATEGY-2026-04-21`、`CR-DESKTOP-OAUTH-HANDOFF-STORE-2026-04-17` |
 | 发布记录 | `CR-GPT56-RESPONSES-PROD-UPGRADE-2026-07-12` |
 
-归档区共有 76 份记录，上表只列出本轮从根目录移入的 14 份。完整清单直接查
-`archive/` 目录，或用 `ls docs/reviews/archive/` 检索。
+archive 目录共有 76 份记录，上表只列出 2026-09-21 从根目录移入的 14 份。
+完整清单直接查 `archive/` 目录。
 
 ## 新增记录
 
