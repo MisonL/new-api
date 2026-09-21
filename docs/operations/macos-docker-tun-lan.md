@@ -8,7 +8,7 @@
 本模式只用于 macOS Docker Desktop 主机，同时满足以下条件：
 
 - 主机运行 FlClash、Clash 或类似 TUN 代理。
-- 旧的直连/回滚模式可以通过 Docker published port 使用 `0.0.0.0:3000`；本模式实施后，Docker 只发布 `127.0.0.1:13000`，由宿主机 Caddy 对外提供 `3000`。
+- 旧的直连/回滚模式可以通过 Docker published port 使用 `0.0.0.0:3000`；本模式实施后，Docker 发布 `13000`（默认绑定 `127.0.0.1`，可用 `NEW_API_BIND_ADDRESS` 放宽为 `0.0.0.0`），由宿主机 Caddy 对外提供 `3000`。
 - 本机访问 `http://localhost:3000` 时，`new-api` 使用日志记录到异常公网 IP。
 - 仍需要局域网用户访问 `http://<Mac局域网IP>:3000`。
 
@@ -23,13 +23,16 @@ Linux 原生 Docker 通常不需要本模式。Windows Docker Desktop 是否需�
 ```text
 本机 Codex 或局域网用户
 -> macOS 宿主机 Caddy 0.0.0.0:3000
--> Docker loopback 127.0.0.1:13000
+-> Docker 后端 <NEW_API_BIND_ADDRESS>:13000
 -> new-api 容器 3000
 ```
 
 在这个链路中：
 
-- Docker 只发布 `127.0.0.1:13000:3000`。
+- Docker 发布 `<NEW_API_BIND_ADDRESS>:13000:3000`，默认 `127.0.0.1`。
+  当 `NEW_API_BIND_ADDRESS=0.0.0.0` 时，局域网也可以直接访问 `13000`，绕过 Caddy；
+  此时客户端 IP 记录走 Docker published port 路径，`X-Real-IP` 由 Docker 提供而不是 Caddy，
+  异常公网 IP 问题会重新出现。需要准确客户端 IP 时保持 loopback 绑定并只经 Caddy 访问。
 - macOS 宿主机 Caddy 监听 `0.0.0.0:3000`。
 - 本模式的 Caddyfile 关闭 Caddy admin API；脚本通过用户级 launchd agent 和 PID 文件管理自己启动的专用 Caddy 进程，避免重载或停止机器上可能已有的 Caddy 服务。
 - Caddy 显式覆盖 `X-Real-IP`；`X-Forwarded-For` 和 `X-Forwarded-Proto` 由 Caddy 默认生成，不要改成透传客户端原始同名头。
@@ -238,7 +241,7 @@ python3 scripts/macos-docker-tun-port-audit.py --pretty
 
 该命令只读取 `docker ps` 和 `docker inspect`，只输出容器名、镜像、状态、健康状态、重启次数、Compose project/service/working_dir/config_files 以及端口绑定范围，不输出环境变量、密码或挂载内容。`public` 表示绑定到 `0.0.0.0` 或 `::`，`specific` 表示绑定到指定地址，`loopback` 才是本机专用。
 
-正式入口的允许状态只有：Caddy 监听 `0.0.0.0:3000` 供本机和 LAN 使用，new-api 仅绑定 `127.0.0.1:13000`。其余公共绑定必须逐项确认消费者、LAN 需求、Compose 配置和工作目录、env/data 归属、活跃连接、备份和回滚路径后，才能在维护窗口收敛为 loopback 或移除：
+正式入口的允许状态：Caddy 监听 `0.0.0.0:3000` 供本机和 LAN 使用；new-api 绑定 `NEW_API_BIND_ADDRESS:13000`，默认为 `127.0.0.1`。把 `NEW_API_BIND_ADDRESS` 设为 `0.0.0.0` 是受支持的配置，用于让局域网直接访问 `13000`，此时 `13000` 与 `3000` 同时对外提供入口。其余公共绑定必须逐项确认消费者、LAN 需求、Compose 配置和工作目录、env/data 归属、活跃连接、备份和回滚路径后，才能在维护窗口收敛为 loopback 或移除：
 
 | 端口 | 当前归属 | 处理边界 |
 | ---- | -------- | -------- |
@@ -309,7 +312,7 @@ CADDY_LAUNCHD_LABEL=com.new-api.macos-tun.new-api.3000
 CADDY_LAUNCHD_PLIST=~/Library/LaunchAgents/com.new-api.macos-tun.new-api.3000.plist
 ```
 
-其中 `NEW_API_PORT_MAPPING` 必须与 `NEW_API_LOOPBACK_PORT` 和 `NEW_API_CONTAINER_PORT` 保持一致。脚本会在预检阶段校验这三者是否匹配，并要求 Compose 渲染出的端口列表唯一且完全等于期望的 loopback 映射。`NEW_API_DEFAULT_PORT_MAPPING` 用于回滚，通常保持为原来的直接发布入口。
+其中 `NEW_API_PORT_MAPPING` 必须与 `NEW_API_BIND_ADDRESS`、`NEW_API_LOOPBACK_PORT` 和 `NEW_API_CONTAINER_PORT` 保持一致。脚本会在预检阶段校验这些值是否匹配，并要求 Compose 渲染出的端口列表唯一且完全等于期望映射。`NEW_API_BIND_ADDRESS` 未显式设置时，脚本从 `NEW_API_PORT_MAPPING` 的主机部分推导，因此把映射写成 `0.0.0.0:13000:3000` 即可让后端对局域网发布。`NEW_API_DEFAULT_PORT_MAPPING` 用于回滚，通常保持为原来的直接发布入口。
 
 正式部署脚本还会执行镜像 provenance 门禁。它读取现有 Compose service 的镜像引用、容器 image digest 和 OCI revision，并要求 TUN 与回滚两条 Compose 配置解析到同一个本地 digest。正式 `--apply` 遇到任何 tracked 或 untracked dirty worktree 都会直接拒绝，即使镜像引用和 digest 与正在运行的正式容器相同；这样 Compose、env、挂载、healthcheck、Caddyfile 和脚本改动都不会被同镜像重建顺带应用。`--check-only` 可以在 dirty worktree 上完成只读预检，但不会授权正式 apply。若镜像、digest 或 revision 不一致，默认也直接拒绝，且在拒绝前不会执行 `compose up`、Caddy 启停或端口切换。镜像 guard 变量只从调用方环境读取，不放入 `deploy/env/macos-docker-tun.env`，避免拓扑文件承担发布身份。
 
@@ -340,12 +343,12 @@ scripts/deploy-macos-docker-tun.sh --apply
 脚本会按顺序执行：
 
 - 校验 Caddyfile 和 compose 端口映射。
-- 校验端口值合法，且 LAN 入口端口与 Docker loopback 后端端口不同。
+- 校验端口值合法，绑定地址属于 `127.0.0.1`、`0.0.0.0`、`::1`、`::` 之一，且 LAN 入口端口与 Docker 后端端口不同。
 - 校验 TUN 模式和默认回滚模式的 Compose 端口映射。
 - 校验 `SESSION_SECRET` 和 `CRYPTO_SECRET` 在 TUN 模式和默认回滚模式中都已设置，正式实施时拒绝明显占位值。
-- 校验 LAN 入口端口没有被非当前服务、非脚本管理 Caddy 的进程占用；校验 Docker loopback 后端端口空闲，或已由当前服务的同一 loopback 映射占用。
+- 校验 LAN 入口端口没有被非当前服务、非脚本管理 Caddy 的进程占用；校验 Docker 后端端口空闲，或已由当前服务在相同绑定地址上的映射占用。
 - 默认等待 LAN 入口端口的已建立连接排空，超时后仍拒绝重建 `new-api` 并输出连接样本；若接受中断活跃请求，可显式设置 `NEW_API_ALLOW_ACTIVE_REQUESTS=1`。
-- 重建 `COMPOSE_SERVICE` 指定的服务到 `127.0.0.1:13000:3000`。
+- 重建 `COMPOSE_SERVICE` 指定的服务到 `<NEW_API_BIND_ADDRESS>:13000:3000`。
 - 写入用户级 launchd plist，并通过 launchd 启动宿主机 Caddy 接管 `3000`。脚本会在 Caddyfile 校验通过后复制到用户私有的 `CADDY_RUNTIME_CONFIG_FILE`，plist 使用该固定副本，不依赖 dirty worktree 的相对 `WorkingDirectory`。
 - 确认 PID 文件指向的 Caddy 进程仍存活、命令行匹配当前 Caddyfile，且实际监听 LAN 入口端口。
 - 检查 `127.0.0.1:13000/api/status` 和 `127.0.0.1:3000/api/status`。
@@ -370,7 +373,7 @@ env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME \
   | grep -A4 'ports:'
 ```
 
-确认 `new-api` 只会发布到 `127.0.0.1:13000` 后，再执行：
+确认 `new-api` 已按期望的绑定地址发布 `13000` 后，再执行：
 
 ```bash
 env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME \
@@ -447,7 +450,7 @@ docker logs --tail 20 "$(docker compose ps -q "${COMPOSE_SERVICE:-new-api}")"
 
 本机通过 `127.0.0.1:3000` 请求时，不应再出现 TUN 导致的异常公网 IP。局域网机器访问 `http://<Mac局域网IP>:3000` 后，日志中应出现该机器的局域网 IP。若服务日志中的异常 IP 不是本文示例值，可在 env 文件中配置 `NEW_API_ABNORMAL_TUN_IP_REGEX` 让脚本自动检查。
 
-本模式已在隔离开发环境按 `3001 -> 13001` 端口组合验证，记录见 [CR-MACOS-DOCKER-TUN-LAN-2026-05-22.md](../reviews/CR-MACOS-DOCKER-TUN-LAN-2026-05-22.md)。
+本模式已在隔离开发环境按 `3001 -> 13001` 端口组合验证，记录见 [CR-MACOS-DOCKER-TUN-LAN-2026-05-22.md](../reviews/archive/CR-MACOS-DOCKER-TUN-LAN-2026-05-22.md)。
 
 ## 回滚
 

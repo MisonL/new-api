@@ -10,7 +10,7 @@
 - 可按标准倍率公式继续回算的旧价格日志快照数量为 `0`
 - `106` 渠道历史错误日志已闭环
 - 全库可安全判定的同类历史金额异常已完成批量修正
-- 运行期价格维护口径已沉淀到 [pricing-maintenance.md](../operations/pricing-maintenance.md)
+- 运行期价格维护口径已沉淀到 [pricing-maintenance.md](../../operations/pricing-maintenance.md)
 
 本报告原始风险是“模型未显式配置价格时可能落到默认回退值，进而产生错误扣费日志”。当前正式库数据侧已完成清理，但后续新增模型仍必须按价格维护 runbook 做准入复核。
 
@@ -139,7 +139,7 @@ docker logs --since 15m new-api 2>&1 | rg -n '\[ERROR\]|\[FATAL\]|panic|invalid 
 
 ## Follow-up Rule
 
-后续新增或同步模型时必须先查官方价格，再按 [pricing-maintenance.md](../operations/pricing-maintenance.md) 完成：
+后续新增或同步模型时必须先查官方价格，再按 [pricing-maintenance.md](../../operations/pricing-maintenance.md) 完成：
 
 - 价格换算
 - options 更新

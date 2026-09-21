@@ -160,9 +160,9 @@ docker exec new-api-dev-isolated-new-api-1 /new-api --build-info
 - [渠道模型测试运行配置](docs/channel/model_test_runtime_config.md)
 - [邀请返利与礼品码](docs/operations/invitation-rebate-gift-code.md)
 - [模型价格维护与历史日志修正](docs/operations/pricing-maintenance.md)
-- [协议转换自定义工具桥接复核](docs/reviews/CR-PROTOCOL-CONVERSION-CUSTOM-TOOLS-2026-05-13.md)
-- [隔离开发环境复核记录](docs/reviews/CR-DEV-ISOLATED-VERIFY-2026-05-07.md)
-- [部署构建可追溯审计](docs/reviews/CR-DEPLOY-BUILD-TRACEABILITY-2026-05-01.md)
+- [协议转换自定义工具桥接复核](docs/reviews/archive/CR-PROTOCOL-CONVERSION-CUSTOM-TOOLS-2026-05-13.md)
+- [隔离开发环境复核记录](docs/reviews/archive/CR-DEV-ISOLATED-VERIFY-2026-05-07.md)
+- [部署构建可追溯审计](docs/reviews/archive/CR-DEPLOY-BUILD-TRACEABILITY-2026-05-01.md)
 
 ## Star History
 

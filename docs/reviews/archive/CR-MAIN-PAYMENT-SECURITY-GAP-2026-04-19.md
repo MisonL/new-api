@@ -64,8 +64,7 @@
 
 位置：
 
-- [model/payment_method_guard.go](../../model/payment_method_guard.go)
-- [model/subscription_payment_guard.go](../../model/subscription_payment_guard.go)
+- [model/subscription_payment_guard.go](../../model/subscription_payment_guard.go)（`CompleteSubscriptionOrderWithPaymentMethod` 与 `ExpireSubscriptionOrderWithPaymentMethod` 是当前带支付方式约束的入口；原 `model/payment_method_guard.go` 的职责已并入本文件，该文件当前不存在）
 - [controller/topup_stripe.go](../../controller/topup_stripe.go)
 - [controller/topup_creem.go](../../controller/topup_creem.go)
 - [controller/subscription_payment_epay.go](../../controller/subscription_payment_epay.go)

@@ -229,7 +229,7 @@ for `command`, `entrypoint`, or `postgres -c` lines. If the base service uses
 `-c shared_buffers=512MB -c max_connections=200` arguments into this overlay's
 final `exec docker-entrypoint.sh postgres ...` command in the same order. The
 review boundary for this repository is recorded in
-`docs/reviews/CR-STORAGE-ACCELERATION-2026-06-12.md`: the default compose file
+`docs/reviews/archive/CR-STORAGE-ACCELERATION-2026-06-12.md`: the default compose file
 has no custom PostgreSQL command flags.
 
 The standard overlay does not consume `NEW_API_POSTGRES_WAL_DIR`. WAL
