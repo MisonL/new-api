@@ -8,11 +8,38 @@
 
 这个仓库已经完成多轮协议适配、Responses 兼容、计费修正、渠道路由治理、双前端同步和 Docker 运维加固。当前最重要的事实是：
 
-- `dev` 与 `origin/dev` 当前均为 `5cda680770543782d5d0a757b31f4e783443dc03`；`origin/main` 为 `51074ac3736288ee664966e0a2109e9580d86fcf`。
+- 交接时刻 `dev` 与 `origin/dev` 均为 `5cda680770543782d5d0a757b31f4e783443dc03`；`origin/main` 为 `51074ac3736288ee664966e0a2109e9580d86fcf`。
 - 工作区不是干净候选：当前约 256 个已修改或未跟踪条目（含本文档），包含历史任务的后端、前端、测试、脚本和审计文档。不得使用 `git reset --hard`、`git checkout --` 或批量清理来“整理”它。
 - 隔离开发服务 `3001` 已运行当前 dirty 工作区构建，容器 healthy，build-info 为 `5cda6807...-dirty`。
 - 正式服务 `13000` 健康，但仍运行独立的旧正式镜像 `new-api-local:prod-codex-lite-4527d7666-litefix2`，build-info 为 `4527d7666...-litefix2`，不是当前 `dev` 工作区制品。
 - 当前不能把隔离环境通过、正式 `/api/status` 为 200 或历史发布记录，表述为“当前所有改动已发布并完成真实渠道验收”。
+
+### 状态再采样（2026-09-21）
+
+上表的运行态是交接时刻的快照。此后 `dev` 又前进了若干提交，以下为 2026-09-21
+重新采样的结果，命令与交接时刻相同：
+
+```bash
+git rev-parse HEAD
+git status --short --untracked-files=all | wc -l
+docker exec new-api /new-api --build-info
+docker exec new-api-dev-isolated-new-api-1 /new-api --build-info
+```
+
+| 项 | 交接时刻（2026-09-20） | 再采样（2026-09-21） |
+| --- | --- | --- |
+| `dev` HEAD | `5cda68077` | `6e7eed0d4` |
+| 工作区条目数 | 约 256 | 258 |
+| 隔离开发容器 build-info | `5cda6807...-dirty` | `5cda6807...-dirty`（未重建，仍为旧构建） |
+| 正式服务 | `4527d7666...-litefix2` | 未重建，`StartedAt` 与 `RestartCount` 不变 |
+
+两点边界：
+
+- 隔离开发容器**未随 `dev` 重建**，它运行的仍是 `5cda6807` 的 dirty 构建，
+  不包含 2026-09-21 之后合入的提交。要用最新源码验证需重新执行
+  `scripts/build-docker-local.sh` 并 force-recreate。
+- 正式服务在 2026-09-21 只接受了 `logs` 表的历史数据清理与保留策略配置写入
+  （见 `reviews/CR-PROD-LOG-RETENTION-2026-09-21.md`），容器本身未重建、未重启。
 
 ## 2. 当前运行态
 
