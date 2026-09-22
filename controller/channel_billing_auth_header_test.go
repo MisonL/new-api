@@ -60,19 +60,6 @@ func TestGetClaudeAuthHeaderHandlesEmptyChannelKey(t *testing.T) {
 	require.Equal(t, "2023-06-01", h.Get("anthropic-version"))
 }
 
-// The two Anthropic auth header builders in this repository must agree.
-// relay/channel/claude.Adaptor.SetupRequestHeader serves relay traffic and this
-// one serves the channel "fetch models" button; a divergence would make the
-// same channel authenticate differently depending on which code path ran.
-func TestGetClaudeAuthHeaderMatchesAdaptorContract(t *testing.T) {
-	h := GetClaudeAuthHeader("same-key")
-
-	require.Equal(t, "same-key", h.Get("x-api-key"))
-	require.Equal(t, "Bearer same-key", h.Get("Authorization"))
-
-	var _ http.Header = h
-}
-
 // End-to-end proof that the channel "fetch models" path puts both Anthropic
 // auth headers on the wire. A channel pointing at a local echo server is
 // exercised through the real buildFetchModelsHeaders -> GetResponseBody chain,

@@ -1,8 +1,8 @@
 # CR: Claude 渠道 Anthropic 原生认证头补齐
 
 - 日期：2026-09-22
-- 范围：`relay/channel/claude/adaptor.go`、`relay/channel/claude/adaptor_auth_header_test.go`、`controller/channel-billing.go`、`controller/channel_billing_auth_header_test.go`
-- 状态：两处认证头构造点均已修复；单元测试、端到端回显抓包与真实上游 A/B 通过；生产渠道配置未改动
+- 范围：`relay/channel/anthropic_auth_header.go`、`relay/channel/claude/adaptor.go`、`controller/channel-billing.go` 及对应测试
+- 状态：两处认证头构造点已改为共用同一实现（漂移在结构上不可能）；单元测试、端到端回显抓包与真实上游 A/B 通过；生产渠道配置未改动
 
 ## 缺陷
 
@@ -289,24 +289,58 @@ GET /v1/models
 
 ### 修复
 
-与 adaptor 同一方案：同时发送两个头，同源同值。
+与 adaptor 同一方案：同时发送两个头，同源同值。两处改为**共用同一个实现**，
+而不是各自维护一份：
+
+`relay/channel/anthropic_auth_header.go`（新增，低层共享包）：
 
 ```go
-func GetClaudeAuthHeader(token string) http.Header {
-	h := http.Header{}
-	h.Add("x-api-key", token)
-	h.Add("Authorization", fmt.Sprintf("Bearer %s", token))
-	h.Add("anthropic-version", "2023-06-01")
-	return h
+const (
+	AnthropicAuthorizationHeaderName = "Authorization"
+	AnthropicApiKeyHeaderName        = "x-api-key"
+	AnthropicVersionHeaderName       = "anthropic-version"
+	DefaultAnthropicVersion          = "2023-06-01"
+)
+
+func SetAnthropicAuthHeaders(header http.Header, token string) {
+	header.Set(AnthropicApiKeyHeaderName, token)
+	header.Set(AnthropicAuthorizationHeaderName, "Bearer "+token)
+}
+
+func AnthropicAuthHeaders(token string) http.Header {
+	header := http.Header{}
+	SetAnthropicAuthHeaders(header, token)
+	header.Set(AnthropicVersionHeaderName, DefaultAnthropicVersion)
+	return header
 }
 ```
 
-函数注释里显式写明它与 `relay/channel/claude.Adaptor.SetupRequestHeader` 必须保持
-同步，避免两处再次漂移。
+两处调用点：
+
+```go
+// relay/channel/claude/adaptor.go（中继路径）
+channel.SetAnthropicAuthHeaders(*req, info.ApiKey)
+
+// controller/channel-billing.go（「获取模型列表」路径）
+func GetClaudeAuthHeader(token string) http.Header {
+	return relaychannel.AnthropicAuthHeaders(token)
+}
+```
+
+**为什么不再靠"注释约定同步"**：此前两处是各写一份实现，只在注释里写明必须
+保持同步——这种约定不会被编译器或测试强制，任一处单独修改都不会有任何测试
+失败。改为共用实现后，改一处必然同时改变两处，漂移在结构上不可能发生。
+
+落点选择：`relay/channel`（package `channel`）是低层包，`claude` 子包本就导入
+它；`controller` 导入它不成环（`service` / `relay` / `setting` 等均不导入
+`controller`，已用 `grep` 确认）。因 `controller/channel-billing.go` 大量以
+`channel` 作参数名，导入时按仓库既有惯例起别名 `relaychannel`（`relay/` 下已有
+4 处同样用法）。
 
 ### 验证
 
-新增 `controller/channel_billing_auth_header_test.go`，6 个测试：
+新增 `relay/channel/anthropic_auth_header_test.go`（5 个）与
+`controller/channel_billing_auth_header_test.go`（5 个）：
 
 | 测试 | 断言 |
 | --- | --- |
@@ -314,20 +348,34 @@ func GetClaudeAuthHeader(token string) http.Header {
 | `TestGetClaudeAuthHeaderAnthropicAuthHeadersAgree` | `Authorization` 恰好一个值且等于 `Bearer ` + `x-api-key` |
 | `TestGetClaudeAuthHeaderKeepsLegacyApiKeyHeader` | 补 `Authorization` 后 `x-api-key` 仍在，且只有一个值 |
 | `TestGetClaudeAuthHeaderHandlesEmptyChannelKey` | 空 key 下两个头仍存在且不产生非法头值 |
-| `TestGetClaudeAuthHeaderMatchesAdaptorContract` | 与 adaptor 的认证头契约一致 |
 | `TestFetchModelsSendsBothAnthropicAuthHeadersOnTheWire` | **端到端**：本地回显服务器经真实 `buildFetchModelsHeaders` → `GetResponseBody` 链路，断言实际收到的出站头同时含两个头 |
+
+`relay/channel/anthropic_auth_header_test.go`（共享实现本身）：
+
+| 测试 | 断言 |
+| --- | --- |
+| `TestSetAnthropicAuthHeadersSendsBothForms` | 两种认证头都发 |
+| `TestSetAnthropicAuthHeadersFormsAgree` | `Authorization` 恰好一个值且等于 `Bearer ` + `x-api-key` |
+| `TestSetAnthropicAuthHeadersReplacesExistingCredential` | 预置的凭证被替换而非追加（锁定 `Set` 语义） |
+| `TestSetAnthropicAuthHeadersHandlesEmptyToken` | 空 token 不产生非法头值 |
+| `TestAnthropicAuthHeadersIncludesDefaultVersion` | 构造形式带默认 `anthropic-version` |
 
 前 5 个为单元测试；第 6 个覆盖"头的构建结果确实被送到了上游请求"这一接线层，
 单测不覆盖该层。
 
-反向验证：把 `GetClaudeAuthHeader` 还原为只发 `x-api-key` 后，6 个测试中 5 个
-FAIL（`TestGetClaudeAuthHeaderKeepsLegacyApiKeyHeader` 只断言 `x-api-key` 存在，
-按设计仍 PASS）；恢复后全部 PASS。
+反向验证：
+
+1. 把 `GetClaudeAuthHeader` 还原为只发 `x-api-key` 后，6 个测试中 5 个 FAIL
+   （`TestGetClaudeAuthHeaderKeepsLegacyApiKeyHeader` 只断言 `x-api-key` 存在，
+   按设计仍 PASS）；恢复后全部 PASS。
+2. **漂移不可能性**：在共享实现里把 token 改成 `token+"-DRIFT-PROBE"` 后，
+   `controller` 与 `relay/channel/claude` 两个包的测试**同时** FAIL——证明两处
+   确实由同一实现驱动，不再各自维护。
 
 ```text
-go build ./controller/   exit=0
-go vet   ./controller/   exit=0
-go test  ./controller/ ./relay/channel/claude/   ok（6.823s / 0.062s）
+go build ./...                              exit=0
+go vet   ./controller/ ./relay/channel/claude/   exit=0
+go test  ./controller/ ./relay/channel/ ./relay/channel/claude/   ok
 ```
 
 ## 未覆盖与边界

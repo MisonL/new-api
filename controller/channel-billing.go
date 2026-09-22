@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -147,20 +148,10 @@ func GetAuthHeader(token string) http.Header {
 }
 
 // GetClaudeAuthHeader builds the auth headers for a Claude (Anthropic native)
-// channel request.
-//
-// The Messages API documents Authorization: Bearer as the canonical credential
-// and x-api-key as a legacy fallback for it, and third-party
-// Anthropic-compatible gateways often implement only the bearer form. Both
-// headers are emitted from the same channel key so the authenticated principal
-// cannot depend on which header an upstream reads. This mirrors
-// relay/channel/claude.Adaptor.SetupRequestHeader; the two must stay in sync.
+// channel request. It delegates to the shared builder used by relay traffic,
+// so this path and the claude adaptor cannot diverge.
 func GetClaudeAuthHeader(token string) http.Header {
-	h := http.Header{}
-	h.Add("x-api-key", token)
-	h.Add("Authorization", fmt.Sprintf("Bearer %s", token))
-	h.Add("anthropic-version", "2023-06-01")
-	return h
+	return relaychannel.AnthropicAuthHeaders(token)
 }
 
 func GetResponseBody(method, url string, channel *model.Channel, headers http.Header) ([]byte, error) {
