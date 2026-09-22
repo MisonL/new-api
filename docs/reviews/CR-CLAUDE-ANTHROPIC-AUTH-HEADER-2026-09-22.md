@@ -1,8 +1,8 @@
 # CR: Claude 渠道 Anthropic 原生认证头补齐
 
 - 日期：2026-09-22
-- 范围：`relay/channel/claude/adaptor.go`、`relay/channel/claude/adaptor_auth_header_test.go`
-- 状态：代码修复完成，单元测试与真实上游 A/B 通过；生产渠道配置未改动
+- 范围：`relay/channel/claude/adaptor.go`、`relay/channel/claude/adaptor_auth_header_test.go`、`controller/channel-billing.go`、`controller/channel_billing_auth_header_test.go`
+- 状态：两处认证头构造点均已修复；单元测试、端到端回显抓包与真实上游 A/B 通过；生产渠道配置未改动
 
 ## 缺陷
 
@@ -243,7 +243,7 @@ commit=dfe176c64e3ec288631f0c242f014f293f652dad-dirty
 `-dirty` 来自未提交的工作区改动（含本次修复），`commit` 与 `git HEAD` 一致。
 正式环境全程未重建、未重启、未写入。
 
-## 发现的第二处同类缺陷（本轮不修，另开任务）
+## 第二处同类缺陷（同轮一并修复）
 
 影响面排查时发现：`relay/channel/claude/adaptor.go` 的 `SetupRequestHeader`
 **不是**唯一构造 Claude 出站认证头的地方。
@@ -282,15 +282,53 @@ GET /v1/models
 
 ### 影响与建议
 
-对只接受 `Authorization: Bearer` 的第三方 Anthropic 兼容网关（如
-`mass.qdama.cn`、vLLM 0.23），渠道模型测试已修复，但「获取模型列表」仍会
-因 401 失败。`GetClaudeAuthHeader` 当前无任何测试覆盖
-（`grep GetClaudeAuthHeader --include='*_test.go'` 零命中）。
+修复前，对只接受 `Authorization: Bearer` 的第三方 Anthropic 兼容网关（如
+`mass.qdama.cn`、vLLM 0.23），渠道模型测试与「获取模型列表」都会因 401 失败。
+两处现已使用同一套认证头。`GetClaudeAuthHeader` 此前无任何测试覆盖
+（`grep GetClaudeAuthHeader --include='*_test.go'` 零命中），本轮补齐。
 
-建议后续单独任务处理，方案与本次一致：同时发送两个头，同源同值；或直接复用
-`GetAuthHeader` 的 `Authorization: Bearer` 再补 `x-api-key`。需同时补单测。
+### 修复
 
-本轮按 `AGENTS.md` §1「每次只处理一个原子任务」只提交 adaptor 修复，不扩大范围。
+与 adaptor 同一方案：同时发送两个头，同源同值。
+
+```go
+func GetClaudeAuthHeader(token string) http.Header {
+	h := http.Header{}
+	h.Add("x-api-key", token)
+	h.Add("Authorization", fmt.Sprintf("Bearer %s", token))
+	h.Add("anthropic-version", "2023-06-01")
+	return h
+}
+```
+
+函数注释里显式写明它与 `relay/channel/claude.Adaptor.SetupRequestHeader` 必须保持
+同步，避免两处再次漂移。
+
+### 验证
+
+新增 `controller/channel_billing_auth_header_test.go`，6 个测试：
+
+| 测试 | 断言 |
+| --- | --- |
+| `TestGetClaudeAuthHeaderSendsBothAnthropicAuthHeaders` | 两个头都发，值正确，`anthropic-version` 默认 `2023-06-01` |
+| `TestGetClaudeAuthHeaderAnthropicAuthHeadersAgree` | `Authorization` 恰好一个值且等于 `Bearer ` + `x-api-key` |
+| `TestGetClaudeAuthHeaderKeepsLegacyApiKeyHeader` | 补 `Authorization` 后 `x-api-key` 仍在，且只有一个值 |
+| `TestGetClaudeAuthHeaderHandlesEmptyChannelKey` | 空 key 下两个头仍存在且不产生非法头值 |
+| `TestGetClaudeAuthHeaderMatchesAdaptorContract` | 与 adaptor 的认证头契约一致 |
+| `TestFetchModelsSendsBothAnthropicAuthHeadersOnTheWire` | **端到端**：本地回显服务器经真实 `buildFetchModelsHeaders` → `GetResponseBody` 链路，断言实际收到的出站头同时含两个头 |
+
+前 5 个为单元测试；第 6 个覆盖"头的构建结果确实被送到了上游请求"这一接线层，
+单测不覆盖该层。
+
+反向验证：把 `GetClaudeAuthHeader` 还原为只发 `x-api-key` 后，6 个测试中 5 个
+FAIL（`TestGetClaudeAuthHeaderKeepsLegacyApiKeyHeader` 只断言 `x-api-key` 存在，
+按设计仍 PASS）；恢复后全部 PASS。
+
+```text
+go build ./controller/   exit=0
+go vet   ./controller/   exit=0
+go test  ./controller/ ./relay/channel/claude/   ok（6.823s / 0.062s）
+```
 
 ## 未覆盖与边界
 

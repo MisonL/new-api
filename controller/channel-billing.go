@@ -146,10 +146,19 @@ func GetAuthHeader(token string) http.Header {
 	return h
 }
 
-// GetClaudeAuthHeader get claude auth header
+// GetClaudeAuthHeader builds the auth headers for a Claude (Anthropic native)
+// channel request.
+//
+// The Messages API documents Authorization: Bearer as the canonical credential
+// and x-api-key as a legacy fallback for it, and third-party
+// Anthropic-compatible gateways often implement only the bearer form. Both
+// headers are emitted from the same channel key so the authenticated principal
+// cannot depend on which header an upstream reads. This mirrors
+// relay/channel/claude.Adaptor.SetupRequestHeader; the two must stay in sync.
 func GetClaudeAuthHeader(token string) http.Header {
 	h := http.Header{}
 	h.Add("x-api-key", token)
+	h.Add("Authorization", fmt.Sprintf("Bearer %s", token))
 	h.Add("anthropic-version", "2023-06-01")
 	return h
 }

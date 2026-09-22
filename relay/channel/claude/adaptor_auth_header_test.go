@@ -69,9 +69,13 @@ func TestSetupRequestHeaderKeepsExplicitAnthropicVersion(t *testing.T) {
 	require.Equal(t, "Bearer k", header.Get("Authorization"))
 }
 
-// A client-supplied Authorization must never survive into the upstream
-// request. SetupRequestHeader sets the channel credential unconditionally, so
-// a caller cannot present itself to the upstream as a different principal.
+// A pre-existing Authorization on the outbound header must be replaced, never
+// appended to or skipped. SetupRequestHeader assigns the channel credential
+// with Set, so a credential planted by any earlier step cannot ride along to
+// the upstream: exactly one Authorization value survives, and it is the
+// channel key. (The inbound request header is not a source here - the value is
+// derived from info.ApiKey - so the credential a client sends cannot reach the
+// upstream through this path at all.)
 func TestSetupRequestHeaderOverridesCallerSuppliedAuthorization(t *testing.T) {
 	c, info := newClaudeAuthHeaderContext(t, "channel-key")
 	c.Request.Header.Set("Authorization", "Bearer attacker-supplied-token")
@@ -81,6 +85,7 @@ func TestSetupRequestHeaderOverridesCallerSuppliedAuthorization(t *testing.T) {
 	require.NoError(t, (&Adaptor{}).SetupRequestHeader(c, &header, info))
 
 	require.Equal(t, "Bearer channel-key", header.Get("Authorization"))
+	require.Len(t, header["Authorization"], 1, "the planted credential must be replaced, not appended")
 	require.Equal(t, "channel-key", header.Get("x-api-key"))
 }
 
