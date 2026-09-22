@@ -176,10 +176,32 @@ autovacuum 于 2026-09-21 10:26:55 UTC 完成一轮，`n_dead_tup` 从 934,082 �
 - 正式 `logs` 表的 41 个索引未变，索引精简仍是待部署改动，见
   `CR-LOG-INDEX-CONSOLIDATION-2026-09-21.md`。
 
-## 后续
+## 后台任务已自动接管（更正）
 
-保留策略启用后，正式容器每天自动执行一次。首次由
-`StartLogRetentionTask` 的 `logRetentionInitialDelay = 5 * time.Minute` 决定：
-**下次重启后 5 分钟**会跑第一次，之后按 `run_interval_hours` 循环。当前不重启，
-因此下一次自动执行发生在未来某次正常发布之后；在此之前如需再清理，可手动调用
-`POST /api/log/retention/execute`。
+启用配置后**无需重启**，后台任务当场就接管了。写入配置约 2 分钟后，容器日志出现：
+
+```text
+[SYS] 2026/09/21 - 18:20:26 | log retention task completed: database=5 payloads=0 server_files=0
+```
+
+该行来自 `StartLogRetentionTask`（`controller/log_retention.go:351`），
+与手动调用产生的 `log retention executed`（同文件 `:334`）是两条不同的日志，
+可据此区分。同一时刻的 GIN 行证实手动调用在 18:20:15 就已返回：
+
+```text
+[GIN] 18:18:33 | POST /api/log/retention/execute | 200 | 1m42.4s
+[SYS] 18:20:15 | log retention executed: ...        <- 手动调用
+[SYS] 18:20:26 | log retention task completed: ...  <- 后台任务
+```
+
+机制：`logRetentionSleepDuration` 在策略**禁用**时返回
+`logRetentionDisabledPollInterval = 5 * time.Minute`（而非 `run_interval_hours`），
+因此后台循环一直在每 5 分钟轮询配置。一旦 `enabled` 变为 `true`，
+下一个轮询点立即执行，不需要重启进程。
+`logRetentionInitialDelay` 只影响进程启动后的第一次唤醒。
+
+**更正说明**：本节初稿写成"必须重启后 5 分钟才会跑第一次"，那是错的。
+把 `logRetentionInitialDelay` 误当成每次启用都要重新等待的延迟，
+忽略了禁用态下的 5 分钟轮询会把新配置很快拾取。上面是据容器日志更正后的结论。
+
+此后按 `run_interval_hours = 24` 每天执行一次。
