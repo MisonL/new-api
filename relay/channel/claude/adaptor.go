@@ -82,7 +82,13 @@ func CommonClaudeHeadersOperation(c *gin.Context, req *http.Header, info *relayc
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, req)
+	// The Messages API documents x-api-key as a legacy fallback for
+	// Authorization: Bearer. Third-party Anthropic-compatible gateways often
+	// implement only the bearer form, so emit both. Both values are derived
+	// from the same channel key, so the authenticated principal cannot depend
+	// on which header an upstream reads.
 	req.Set("x-api-key", info.ApiKey)
+	req.Set("Authorization", "Bearer "+info.ApiKey)
 	anthropicVersion := c.Request.Header.Get("anthropic-version")
 	if anthropicVersion == "" {
 		anthropicVersion = "2023-06-01"
