@@ -25,6 +25,7 @@
 | [CR-PROD-LOG-RETENTION-2026-09-21.md](CR-PROD-LOG-RETENTION-2026-09-21.md) | 正式环境日志保留策略启用与历史日志清理 |
 | [CR-POSTGRES-TUNING-2026-09-21.md](CR-POSTGRES-TUNING-2026-09-21.md) | 正式 PostgreSQL 参数调优评估（未执行） |
 | [CR-DEV-ISOLATED-VERIFY-INDEX.md](CR-DEV-ISOLATED-VERIFY-INDEX.md) | 隔离开发环境验证记录索引（3 次，主次标注） |
+| [CR-DEV-LATEST-SOURCE-VERIFY-2026-09-22.md](CR-DEV-LATEST-SOURCE-VERIFY-2026-09-22.md) | 最新源码全量验证；发现 model_mapping 字面量 null 使渠道被静默排除 |
 
 ### 协议与中继
 
