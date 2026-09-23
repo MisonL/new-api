@@ -1043,3 +1043,83 @@ git diff --check -- 目标源码与本记录: exit=0
 - https://api-docs.deepseek.com/quick_start/pricing
 - https://docs.z.ai/guides/overview/pricing
 - https://ai.google.dev/gemini-api/docs/changelog
+
+## 2026-09-23 多厂商新模型官方价格补齐（第二轮）
+
+采样时间：2026-09-23（Asia/Shanghai）。本轮把枚举范围从"活跃目录"扩大到"全部渠道（含禁用状态）+ abilities + 近 30 天消费日志"，共得到 323 个模型名，其中 83 个无价格。用真实消费排序后确认 13 个模型在有流量却按 37.5 的保护性兜底倍率计费。价格来源全部为供应商官方模型页或价格页，未使用任何第三方中转站数据。
+
+### 已写入的官方价格
+
+| 模型 | 官方输入/缓存命中/输出 | 维护倍率 |
+| --- | --- | --- |
+| `claude-fable-5-1` | $10 / $0.25 / $50（缓存写 $12.50） | `5.0` / `5` / `0.025` / `1.25` |
+| `claude-opus-5-5` | $4 / $0.20 / $20（缓存写 $5） | `2.0` / `5` / `0.05` / `1.25` |
+| `gemini-3.8-flash` | $1.50 / $0.15 / $7.50 标准价 | `0.75` / `5` / `0.1` |
+| `glm-5.3-flashx` | $0.37 / $0.075 / $1.25 | `0.185` / `3.378378` / `0.202703` |
+| `mimo-v2.6-flash` | $0.14 / $0.0028 / $0.28 | `0.07` / `2` / `0.02` |
+| `mimo-v2.6-pro` | $0.435 / $0.0036 / $0.87 | `0.2175` / `2` / `0.008275862` |
+| `mimo-v2.6-pro-ultraspeed` | $4.35 / $0.036 / $8.7 | `2.175` / `2` / `0.008275862` |
+| `doubao-seed-2.1-pro` | ¥6 / ¥1.2 / ¥30 | `0.410958904` / `5` / `0.2` |
+| `doubao-seed-2.1-turbo` | ¥3 / ¥0.6 / ¥15 | `0.205479452` / `5` / `0.2` |
+| `doubao-seed-2.1-lite` | ¥0.8 / ¥0.16 / ¥2.7 | `0.054794521` / `3.375` / `0.2` |
+| `step-5-preview` | ¥7 / ¥0.35 / ¥20 | `0.479452055` / `2.857142857` / `0.05` |
+| `step-3.5-flash` | ¥0.7 / ¥0.14 / ¥2.1 | `0.047945205` / `3` / `0.2` |
+| `qwen3-embedding-8b` / `-4b` / `-0.6b` | SiliconFlow ¥0.28 / ¥0.14 / ¥0.07 | `0.02` / `0.01` / `0.005`，`CompletionRatio=1`、`CacheRatio=1` |
+
+`gemini-3.8-flash` 按仓库既有口径采用标准价，不采用 Google 标注的 2026 年底前限时价（与 `gemini-3.7-flash`、`gemini-3.6-flash` 处理一致）。人民币价格按 `元/1000*RMB`（`RMB=500/7.3`）折算，该公式已用正式库中 `step-3.7-flash`（¥1.35 → 0.09246575342465753）和 `qwen3.8-max`（¥12 → 0.8219178082191781）两个锚点反推确认。
+
+### 一并修复的归一化缺口
+
+`normalizeDoubaoModelVariant` 只处理 `doubao-seed-1-6` → `doubao-seed-1.6` 和 `seed-1-6` → `seed-1.6`，缺少 2.x 规则。上游把 Doubao Seed 2.1 写成 `doubao-seed-2-1-pro`（连字符），而官方 ID 是 `doubao-seed-2.1-pro`（点号），导致该写法无法解析到已配置价格。已补充 `doubao-seed-2-1` → `doubao-seed-2.1` 和 `seed-2-1` → `seed-2.1`，两种写法现在解析到同一价格。
+
+### 无前缀向量键补齐
+
+上游与消费日志使用无前缀写法 `Qwen3-Embedding-8B`，归一化会将其映射为 `qwen3-embedding-8b`，但此前该键只存在于正式库、源码默认值中没有对应项，源码构建后请求会落到 37.5 兜底。已在源码补齐无前缀键，与带前缀键同价。
+
+### 修正的两处自身误改
+
+本轮出现过两次基于名称相似推断归属的错误，均由既有测试拦截并回滚：
+
+1. `stepfun-ai/Step-3.5-Flash` 带有 `stepfun-ai/` 前缀，一度被当作阶跃官方模型的别名而改为阶跃官方价。该键实际属于 SiliconFlow 托管定价，`TestSiliconFlowQualifiedPricingUsesCurrentOfficialRates` 明确锁定其值为 `0.05` / `3` / `1`。源码与正式库均已回滚。
+2. `Qwen/Qwen3-Embedding-8B` 等带前缀键的值 `0.02` / `0.01` / `0.005` 一度被按精确公式改写。这些是仓库已锁定的 SiliconFlow 口径，测试同样拦截。已回滚。
+
+两处的教训一致：带厂商路径前缀的键可能指向第三方托管平台而非原厂，改动前必须先查测试锁定值与该键的既有语义。
+
+### 保持未配置的模型
+
+- `kimi-k3-1`：Kimi 官方全部来源（定价页、模型列表、API 参考、`llms.txt`、Platform Changelog、国际站与美国站）均只有 `kimi-k3`（$3/$0.3/$15），无 k3.1 或 `-1` 变体。
+- `5.6-luna`、`deepseek-v4.1-flash-expires-on-0910`、`gpt-reserve`、`composer-2.5`、`grok-composer-2.5-fast`：渠道侧自建名，无对应官方 ID（`gpt-reserve` 官方页返回 404）。
+- `hy3`、`hy4`、`hy4-preview`：腾讯官方模型列表中不存在该命名，官方只用 `hunyuan-*`。腾讯官方 token 后付费价已查明（`hunyuan-a13b` ¥0.5/¥2、`hunyuan-role-latest` ¥2.4/¥9.6、`hunyuan-turbos-vision` ¥3/¥9 等），但无法确定 `hy3`/`hy4` 的对应关系，不静默套用。
+- `step-router-v1`：阶跃官方明确说明该模型按请求实际命中的底层引擎计费（`deepseek-v4-pro` 或 `step-3.7-flash`），本身没有独立 token 单价。
+- `sensenova-*`：商汤平台定价页与 SenseCore 文档页当前均不可达（404）。
+- `spark-x2.5`：讯飞星火官方价格页当前返回 403/404/500。
+- `grok-imagine-video`、`grok-imagine-video-1.5`：xAI 官方按秒计费（$0.050/s、$0.080/s），而 `relay/channel/xai` 没有视频时长与分辨率计量入口，写入按次 `ModelPrice` 会把时长计费错算为单次固定价。
+- `Kun`、`qdama-standard`、`auto`、`nvidia/nemotron-*` 及未列出的第三方或自托管路由：无官方独立 token 原价。
+
+### 小米 MiMo 版本状态
+
+MiMo 官方价格页已明确标注 `mimo-v2.5` 与 `mimo-v2.5-pro` 将于 2026-10-21 弃用，当前在售版本为 `mimo-v2.6-pro`、`mimo-v2.6-flash`、`mimo-v2.6-pro-ultraspeed`。正式库此前只有 v2.5 系列（渠道、`abilities`、消费日志中均无 v2.6），本轮已补齐 v2.6 三个模型。v2.5 系列的现有价格保持不动，待官方正式弃用后再评估。
+
+### 正式库写入范围
+
+本轮修改 `ModelRatio`、`CompletionRatio`、`CacheRatio` 三个 option，以及此前一轮的 `CreateCacheRatio`、`billing_setting.billing_expr`、`billing_setting.billing_mode`。全部采用只新增键的合并写入，未覆盖任何既有条目。写入使用带 `BEGIN`/`COMMIT` 的、以 `$json$...$json$` 美元引号包裹的 SQL 文件经 `docker exec -i postgres psql` 执行；此前尝试的 `psql -v` 变量替换方式在超大 JSON 值上会失败且不报错，已弃用。
+
+### 验证结果
+
+`go build ./setting/...` 通过；`go test ./setting/ratio_setting/` 通过；`gofmt -l` 对改动文件无输出；正式 `/api/pricing` 返回已写入模型的新值；正式 `/api/status` 返回 `success=true`、版本 `v1.1.0`。源码默认值与正式库逐键一致。提交 `6794b63a5`（本轮）与 `5af49fd51`（GPT-6 Sol/Luna 与 Grok 4.7）均只包含本任务的改动，其他会话在工作区的未提交改动未被带入。
+
+### 尚未执行
+
+历史日志回算未在本轮进行。`Qwen3-Embedding-8B`（3 条）、`gemini-3.8-flash`（3 条）、`hy4-preview`（1 条）、`step-router-v1`（1 条）等按兜底倍率计费的历史记录，以及更早 13 个模型的历史日志，需要按本文档"历史日志修正规则"单独设计一轮修正。
+
+来源：
+
+- https://platform.claude.com/docs/en/about-claude/models/overview.md
+- https://platform.claude.com/docs/en/about-claude/pricing.md
+- https://ai.google.dev/gemini-api/docs/pricing.md
+- https://docs.z.ai/guides/overview/pricing.md
+- https://mimo.mi.com/static/docs/price/pay-as-you-go.md
+- https://www.volcengine.com/docs/82379/1099320
+- https://platform.stepfun.com/docs/zh/pricing/details
+- https://siliconflow.cn/pricing
+- https://cloud.tencent.com/document/product/1729/97731
