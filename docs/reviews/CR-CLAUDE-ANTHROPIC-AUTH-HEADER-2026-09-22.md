@@ -6,6 +6,9 @@
 
 ## 缺陷
 
+（本记录中的 `file:line` 引用统一指**修复前**的状态，即 commit
+`be1979283^`。两处修复落地后行号已变动，按符号名检索更可靠。）
+
 正式渠道 188（`mass.qdama.cn`）走 `/v1/messages` 的模型测试返回
 `bad response status code 401, body:`（空 body），但同一组 URL / key / body
 在 Postman 里返回 200。
@@ -18,7 +21,7 @@
   `x-api-key`**，从不发送 `Authorization`。
 
 ```go
-// relay/channel/claude/adaptor.go:84（修复前）
+// relay/channel/claude/adaptor.go:83（修复前）
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, req)
 	req.Set("x-api-key", info.ApiKey)
@@ -178,8 +181,9 @@ go test ./relay/... ./controller/ ./service/
 | `TestSetupRequestHeaderOverridesCallerSuppliedAuthorization` | 调用方传入的 `Authorization` 被渠道 key 覆盖 |
 | `TestSetupRequestHeaderHandlesEmptyChannelKey` | 空 key 下两个头仍存在且不产生非法头值 |
 
-反向验证：删掉 `req.Set("Authorization", ...)` 一行后，5 个测试全部 FAIL；
-恢复后全部 PASS。
+反向验证（针对本轮 adaptor 修复当时的形态，即 `req.Set("Authorization", ...)`
+尚在 `SetupRequestHeader` 内的版本）：删掉该行后 5 个测试全部 FAIL；恢复后全部
+PASS。后续把实现提取为共享函数后，等价的漂移验证见本文末尾「漂移不可能性」。
 
 ### 官方 API 认证头行为探测
 
@@ -339,7 +343,7 @@ func GetClaudeAuthHeader(token string) http.Header {
 
 ### 验证
 
-新增 `relay/channel/anthropic_auth_header_test.go`（5 个）与
+新增 `relay/channel/anthropic_auth_header_test.go`（6 个）与
 `controller/channel_billing_auth_header_test.go`（5 个）：
 
 | 测试 | 断言 |
@@ -354,18 +358,25 @@ func GetClaudeAuthHeader(token string) http.Header {
 
 | 测试 | 断言 |
 | --- | --- |
-| `TestSetAnthropicAuthHeadersSendsBothForms` | 两种认证头都发 |
+| `TestAnthropicAuthHeaderNamesMatchTheWireContract` | 四个常量的**字面值**与上游契约一致（`Authorization` / `x-api-key` / `anthropic-version` / `2023-06-01`） |
+| `TestSetAnthropicAuthHeadersSendsBothForms` | 两种认证头都发（按字面名断言，不经过包内常量） |
 | `TestSetAnthropicAuthHeadersFormsAgree` | `Authorization` 恰好一个值且等于 `Bearer ` + `x-api-key` |
 | `TestSetAnthropicAuthHeadersReplacesExistingCredential` | 预置的凭证被替换而非追加（锁定 `Set` 语义） |
 | `TestSetAnthropicAuthHeadersHandlesEmptyToken` | 空 token 不产生非法头值 |
 | `TestAnthropicAuthHeadersIncludesDefaultVersion` | 构造形式带默认 `anthropic-version` |
 
-前 5 个为单元测试；第 6 个覆盖"头的构建结果确实被送到了上游请求"这一接线层，
+前 4 个为单元测试；第 5 个覆盖"头的构建结果确实被送到了上游请求"这一接线层，
 单测不覆盖该层。
+
+共享实现的测试刻意用**字面头名**断言。复核时发现：若按包内常量断言，把
+`AnthropicApiKeyHeaderName` 的值改成上游不认的 `x-api-key-WRONG`，包内测试仍会
+PASS（自指）。改为字面值后该场景被捕获。两个消费方的测试本就使用字面量，因此
+该缺口仅存在于共享包自身的测试中，但补上后三处一致。
 
 反向验证：
 
-1. 把 `GetClaudeAuthHeader` 还原为只发 `x-api-key` 后，6 个测试中 5 个 FAIL
+1. 把 `GetClaudeAuthHeader` 还原为只发 `x-api-key`（连同移除随之不再使用的
+   `relaychannel` 导入）后，5 个测试中 4 个 FAIL
    （`TestGetClaudeAuthHeaderKeepsLegacyApiKeyHeader` 只断言 `x-api-key` 存在，
    按设计仍 PASS）；恢复后全部 PASS。
 2. **漂移不可能性**：在共享实现里把 token 改成 `token+"-DRIFT-PROBE"` 后，

@@ -4,9 +4,9 @@ import (
 	"net/http"
 )
 
-// AnthropicAuthHeaderNames are the header names an Anthropic-native request
-// carries its credential in. Authorization is the canonical form; x-api-key is
-// the legacy fallback the Messages API still accepts in its place.
+// Header names an Anthropic-native request carries its credential and protocol
+// version in. Authorization is the canonical credential form; x-api-key is the
+// legacy fallback the Messages API still accepts in its place.
 const (
 	AnthropicAuthorizationHeaderName = "Authorization"
 	AnthropicApiKeyHeaderName        = "x-api-key"

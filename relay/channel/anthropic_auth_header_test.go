@@ -7,6 +7,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// The wire header names are part of the contract with every upstream, so they
+// are pinned as literals here. Asserting through the package constants instead
+// would make this test self-referential: changing a constant's value to
+// something the upstream does not read would still pass.
+func TestAnthropicAuthHeaderNamesMatchTheWireContract(t *testing.T) {
+	require.Equal(t, "Authorization", AnthropicAuthorizationHeaderName)
+	require.Equal(t, "x-api-key", AnthropicApiKeyHeaderName)
+	require.Equal(t, "anthropic-version", AnthropicVersionHeaderName)
+	require.Equal(t, "2023-06-01", DefaultAnthropicVersion)
+}
+
 // Both Anthropic credential forms must be emitted. The Messages API documents
 // x-api-key as a fallback for Authorization: Bearer, and third-party
 // Anthropic-compatible gateways often implement only the bearer form.
@@ -14,8 +25,9 @@ func TestSetAnthropicAuthHeadersSendsBothForms(t *testing.T) {
 	header := http.Header{}
 	SetAnthropicAuthHeaders(header, "sk-ant-test-key")
 
-	require.Equal(t, "sk-ant-test-key", header.Get(AnthropicApiKeyHeaderName))
-	require.Equal(t, "Bearer sk-ant-test-key", header.Get(AnthropicAuthorizationHeaderName))
+	// Literal names: this is what an upstream actually receives.
+	require.Equal(t, "sk-ant-test-key", header.Get("x-api-key"))
+	require.Equal(t, "Bearer sk-ant-test-key", header.Get("Authorization"))
 }
 
 // Both headers must always describe the same credential. A request whose
