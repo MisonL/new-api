@@ -425,6 +425,11 @@ func normalizeStepModelVariant(name string) string {
 func normalizeDoubaoModelVariant(name string) string {
 	name = replaceModelPrefixToken(name, "doubao-seed-1-6", "doubao-seed-1.6")
 	name = replaceModelPrefixToken(name, "seed-1-6", "seed-1.6")
+	// Doubao Seed 2.1 is published with a dot in the official model id, while
+	// several upstreams spell it with a dash. Normalize the version token so
+	// both spellings resolve to the same configured price.
+	name = replaceModelPrefixToken(name, "doubao-seed-2-1", "doubao-seed-2.1")
+	name = replaceModelPrefixToken(name, "seed-2-1", "seed-2.1")
 	return replaceModelPrefixToken(name, "seedance-1-0", "seedance-1.0")
 }
 

@@ -161,6 +161,8 @@ var defaultModelRatio = map[string]float64{
 	"kimi-k2.7-code":           0.475, // $0.95 / 1M tokens; https://platform.kimi.ai/docs/pricing/chat-k27-code.md
 	"kimi-k2.7-code-highspeed": 0.95,  // $1.90 / 1M tokens; https://platform.kimi.ai/docs/pricing/chat-k27-code.md
 	"claude-fable-5":           5.0,   // $10 / 1M tokens
+	"claude-fable-5-1":         5.0,   // $10 / 1M tokens; https://platform.claude.com/docs/en/about-claude/pricing
+	"claude-opus-5-5":          2.0,   // $4 / 1M tokens; https://platform.claude.com/docs/en/about-claude/pricing
 	"claude-opus-5":            2.5,   // $5 / 1M tokens
 	"claude-opus-5-thinking":   2.5,
 	"claude-sonnet-5":          1.0, // $2 / 1M tokens; Anthropic now lists this as the standard price
@@ -189,6 +191,9 @@ var defaultModelRatio = map[string]float64{
 	"deepseek-ai/deepseek-v4-pro":              0.2175,
 	// MiMo V2.5 overseas price: $0.14 / 1M input tokens.
 	"mimo-v2.5":              0.07,
+	"mimo-v2.6-flash":          0.07,      // $0.14 / 1M tokens; https://mimo.mi.com/static/docs/price/pay-as-you-go.md
+	"mimo-v2.6-pro":            0.2175,    // $0.435 / 1M tokens; https://mimo.mi.com/static/docs/price/pay-as-you-go.md
+	"mimo-v2.6-pro-ultraspeed": 2.175,     // $4.35 / 1M tokens; https://mimo.mi.com/static/docs/price/pay-as-you-go.md
 	"mimo-v2.5-pro":          0.435 / 2, // $0.435 / 1M tokens; https://mimo.mi.com/static/docs/price/pay-as-you-go.md
 	"minimax-m3":             0.15,      // $0.30 / 1M current permanent price; official page marks it Permanent 50% off $0.60 list price
 	"minimaxai/minimax-m3":   0.15,
@@ -203,6 +208,11 @@ var defaultModelRatio = map[string]float64{
 	// project keeps the standard price and does not use that discount.
 	"longcat-2.0": 5.0 / 1000 * RMB, // https://longcat.ai/platform/docs/Pricing/LongCat-2.0.html
 	// Qwen3.8 official API prices are published in RMB per 1M tokens.
+	// Doubao Seed 2.1 official prices are published in RMB per 1M tokens;
+	// upstreams spell the version as 2-1, normalized to 2.1 before lookup.
+	"doubao-seed-2.1-pro":   6.0 / 2 * RMB,
+	"doubao-seed-2.1-turbo": 3.0 / 2 * RMB,
+	"doubao-seed-2.1-lite":  0.8 / 2 * RMB,
 	"qwen3.8-max":    12.0 / 1000 * RMB,
 	"qwen3.8-flash":  0.8 / 1000 * RMB,
 	"qwen-3.8-flash": 0.8 / 1000 * RMB,
@@ -227,6 +237,7 @@ var defaultModelRatio = map[string]float64{
 	"agnes-2.5-pro-beta":                     0.05,  // $0.10 / 1M tokens; https://wiki.agnes-ai.com/en/docs/pricing.md
 	"gemini-3-flash":                         0.25,
 	"gemini-3-flash-preview":                 0.25, // $0.50 / 1M tokens
+	"gemini-3.8-flash":                       0.75, // $1.50 / 1M tokens standard price; do not use the 2026 promotion
 	"gemini-3.7-flash":                       0.75, // $1.50 / 1M tokens standard price; do not use the 2026 promotion
 	"gemini-3.6-flash":                       0.75, // $1.50 / 1M tokens standard price; do not use the 2026 promotion
 	"gemini-3.5-flash":                       0.75, // $1.50 / 1M tokens
@@ -265,7 +276,10 @@ var defaultModelRatio = map[string]float64{
 	"glm-5.2":                                0.7,               // $1.40 / 1M tokens; https://docs.z.ai/guides/overview/pricing
 	"glm-5.3":                                0.7,               // $1.40 / 1M tokens; https://docs.z.ai/guides/overview/pricing.md
 	"glm-5.3-flash":                          0.15 / 2,          // $0.15 / 1M list price; ignore the limited-time promotion
+	"glm-5.3-flashx":                         0.37 / 2,          // $0.37 / 1M list price; https://docs.z.ai/guides/overview/pricing.md
+	"step-5-preview":                         7.0 / 1000 * RMB,  // ¥7 / 1M tokens; https://platform.stepfun.com/docs/zh/pricing/details
 	"step-3.7-flash":                         1.35 / 1000 * RMB, // ¥1.35 / 1M tokens; https://platform.stepfun.com/docs/zh/guides/pricing/details
+	"step-3.5-flash":                         0.7 / 1000 * RMB,  // ¥0.7 / 1M tokens; https://platform.stepfun.com/docs/zh/pricing/details
 	"step-explore":                           1.35 / 1000 * RMB, // Same price as step-3.7-flash; https://platform.stepfun.com/docs/zh/guides/models/step-explore
 	// StepAudio 2.5 ASR is ¥0.15/hour. Transcription requests are normalized
 	// to 1,000 audio tokens per minute, so the equivalent input price is
@@ -529,6 +543,11 @@ var defaultModelRatio = map[string]float64{
 	"Qwen/Qwen3-Embedding-8B":              0.04 / 2,
 	"Qwen/Qwen3-Embedding-4B":              0.02 / 2,
 	"Qwen/Qwen3-Embedding-0.6B":            0.01 / 2,
+	// Unprefixed spellings are what upstreams and logs actually use; the
+	// normalizer maps them here, so they must carry the same price.
+	"qwen3-embedding-8b":                   0.04 / 2,
+	"qwen3-embedding-4b":                   0.02 / 2,
+	"qwen3-embedding-0.6b":                 0.01 / 2,
 	"Qwen/Qwen3-Reranker-8B":               0.04 / 2,
 	"Qwen/Qwen3-Reranker-4B":               0.02 / 2,
 	"Qwen/Qwen3-Reranker-0.6B":             0.01 / 2,
@@ -727,6 +746,8 @@ var defaultCompletionRatio = map[string]float64{
 	"gpt-audio":                                4, // $10 / $2.5 text output/input
 	"gpt-audio-2025-08-28":                     4,
 	"claude-fable-5":                           5,
+	"claude-fable-5-1":                         5,
+	"claude-opus-5-5":                          5,
 	"claude-opus-5":                            5,
 	"claude-opus-5-thinking":                   5,
 	"claude-sonnet-5":                          5,
@@ -748,6 +769,12 @@ var defaultCompletionRatio = map[string]float64{
 	"deepseek-ai/deepseek-v4-pro":              2,
 	"mimo-v2.5":                                0.28 / 0.14,
 	"mimo-v2.5-pro":                            0.87 / 0.435,
+	"mimo-v2.6-flash":                          0.28 / 0.14,
+	"mimo-v2.6-pro":                            0.87 / 0.435,
+	"mimo-v2.6-pro-ultraspeed":                 8.7 / 4.35,
+	"doubao-seed-2.1-pro":                      30.0 / 6.0,
+	"doubao-seed-2.1-turbo":                    15.0 / 3.0,
+	"doubao-seed-2.1-lite":                     2.70 / 0.80,
 	"qwen3.7-max":                              36.0 / 12.0,
 	"qwen-3.7-max":                             36.0 / 12.0,
 	"qwen3.7-plus":                             8.0 / 2.0,
@@ -760,7 +787,9 @@ var defaultCompletionRatio = map[string]float64{
 	"qwen3.8-max":                              36.0 / 12.0,
 	"qwen3.8-flash":                            2.7 / 0.8,
 	"qwen-3.8-flash":                           2.7 / 0.8,
+	"step-5-preview":                           20.0 / 7.0,
 	"step-3.7-flash":                           8.1 / 1.35,
+	"step-3.5-flash":                           2.1 / 0.7,
 	"step-explore":                             8.1 / 1.35,
 	"stepaudio-2.5-asr":                        0,
 	"stepaudio-2.5-tts":                        0,
@@ -769,6 +798,7 @@ var defaultCompletionRatio = map[string]float64{
 	"spark-x2.5":                               12.0 / 3.2,
 	"gemini-3-flash":                           6,
 	"gemini-3-flash-preview":                   6,
+	"gemini-3.8-flash":                         5,
 	"gemini-3.7-flash":                         5,
 	"gemini-3.6-flash":                         5,
 	"gemini-3.5-flash":                         6,
@@ -849,6 +879,7 @@ var defaultCompletionRatio = map[string]float64{
 	"glm-5.2":                   4.4 / 1.4,
 	"glm-5.3":                   4.4 / 1.4,
 	"glm-5.3-flash":             0.50 / 0.15,
+	"glm-5.3-flashx":            1.25 / 0.37,
 	"glm-4.5":                   2.20 / 0.60,
 	"glm-4.5-air":               1.10 / 0.20,
 	"glm-4.5-flash":             0,
