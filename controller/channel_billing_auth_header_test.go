@@ -11,12 +11,12 @@ import (
 )
 
 // The Anthropic Messages API accepts the credential either as the canonical
-// `Authorization: Bearer` header or as the legacy `x-api-key` fallback, and
-// documents `x-api-key` as consulted only when Authorization is absent.
-// Third-party Anthropic-compatible gateways often implement only the bearer
-// form, so the channel emits both from the same channel key. The channel
-// "fetch models" button used to send only x-api-key and therefore failed with
-// 401 against such gateways.
+// `Authorization: Bearer` header or as the legacy `x-api-key` fallback. Which
+// one an upstream consults when both are present is not documented, so the
+// channel emits both from the same channel key and does not depend on the
+// answer. Third-party Anthropic-compatible gateways often implement only the
+// bearer form; the channel "fetch models" button used to send only x-api-key
+// and therefore failed with 401 against such gateways.
 func TestGetClaudeAuthHeaderSendsBothAnthropicAuthHeaders(t *testing.T) {
 	h := GetClaudeAuthHeader("sk-ant-test-key")
 

@@ -48,9 +48,39 @@ func GetClaudeSettings() *ClaudeSettings {
 	return &claudeSettings
 }
 
+// credentialHeaderNames are headers whose value is a single credential rather
+// than a list. Merging them with the value already on the request would join two
+// credentials into one malformed value, so they are replaced instead.
+var credentialHeaderNames = map[string]struct{}{
+	"authorization":       {},
+	"proxy-authorization": {},
+	"x-api-key":           {},
+	"x-goog-api-key":      {},
+}
+
+func isCredentialHeader(name string) bool {
+	_, exists := credentialHeaderNames[strings.ToLower(strings.TrimSpace(name))]
+	return exists
+}
+
+// WriteHeaders applies the operator-configured headers for originModel.
+//
+// List-valued headers (anthropic-beta and similar) are merged with whatever the
+// request already carries, deduplicating values. Credential headers are
+// replaced: an operator configuring Authorization or x-api-key means to use that
+// credential, not to append it to the channel key, and a comma-joined pair
+// authenticates as neither.
 func (c *ClaudeSettings) WriteHeaders(originModel string, httpHeader *http.Header) {
 	if headers, ok := c.HeadersSettings[originModel]; ok {
 		for headerKey, headerValues := range headers {
+			if isCredentialHeader(headerKey) {
+				replacement := normalizeHeaderListValues(headerValues)
+				if len(replacement) == 0 {
+					continue
+				}
+				httpHeader.Set(headerKey, strings.Join(replacement, ","))
+				continue
+			}
 			mergedValues := normalizeHeaderListValues(
 				append(append([]string(nil), httpHeader.Values(headerKey)...), headerValues...),
 			)

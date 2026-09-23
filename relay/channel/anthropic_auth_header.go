@@ -21,10 +21,12 @@ const DefaultAnthropicVersion = "2023-06-01"
 // Anthropic-native request onto header.
 //
 // The Messages API documents Authorization: Bearer as the canonical credential
-// and x-api-key as a legacy fallback consulted only when Authorization is
-// absent. Third-party Anthropic-compatible gateways often implement only the
-// bearer form, so both are emitted. Both carry the same token, so the
-// authenticated principal cannot depend on which header an upstream reads.
+// and x-api-key as a legacy fallback that is still accepted in its place. Which
+// of the two an upstream consults when both are present is not documented, so
+// this deliberately does not rely on it: third-party Anthropic-compatible
+// gateways often implement only the bearer form, so both headers are emitted,
+// and both always carry the same token. Whichever header an upstream reads, it
+// authenticates as the same principal.
 //
 // This is the single implementation shared by relay traffic (the claude
 // adaptor) and the channel "fetch models" path (controller), so the two cannot

@@ -91,21 +91,28 @@ Anthropic 官方文档
 
 ### 本仓库内部的不一致
 
-本仓库会向 Anthropic 原生 `/v1/messages` 发起请求的适配器共 8 个，认证头如下
+本仓库会向 Anthropic 原生 `/v1/messages` 发起请求的适配器共 7 个，认证头如下
 （`grep` 各适配器 `SetupRequestHeader` 的 `Set("Authorization"` / `Set("x-api-key"`）：
 
 | 适配器 | 认证头（修复前） |
 | --- | --- |
 | `relay/channel/claude/adaptor.go:85` | `x-api-key` |
 | `relay/channel/ali/adaptor.go` | `Authorization: Bearer` |
-| `relay/channel/aws/adaptor.go` | `Authorization: Bearer`（SigV4 派生凭证） |
 | `relay/channel/deepseek/adaptor.go` | `Authorization: Bearer` |
 | `relay/channel/minimax/adaptor.go` | `Authorization: Bearer` |
 | `relay/channel/moonshot/adaptor.go` | `Authorization: Bearer` |
 | `relay/channel/volcengine/adaptor.go` | `Authorization: Bearer` |
 | `relay/channel/zhipu_4v/adaptor.go` | `Authorization: Bearer` |
 
-即 7 个发 `Authorization: Bearer`，`claude` 是唯一只发 legacy 头的孤例。
+即 6 个发 `Authorization: Bearer`，`claude` 是唯一只发 legacy 头的孤例。
+
+（初稿曾把 `relay/channel/aws` 计入本表并标注为「SigV4 派生凭证」，复核后确认
+不成立，已移除：`aws` 包内 `v1/messages` 零命中（唯一命中是
+`relay_aws_test.go:49` 用于触发头处理的假 URL），`GetRequestURL` 打的是
+`bedrock-runtime.<region>.amazonaws.com/model/<id>/converse`；其
+`Set("Authorization", "Bearer "+awsSecret[0])` 只在 `ClientModeApiKey` 下执行，
+SigV4 由 SDK 在 AKSK 模式独立签名，与之无关。该适配器不向 Anthropic 原生端点
+发请求，故不计入。）
 
 （`relay/channel/openai/adaptor.go` 也含 `/v1/messages` 字样，但它把 Claude
 请求转换成 chat/completions 后发往 OpenAI 兼容端点，不走 Anthropic 原生协议，
@@ -389,6 +396,78 @@ go vet   ./controller/ ./relay/channel/claude/   exit=0
 go test  ./controller/ ./relay/channel/ ./relay/channel/claude/   ok
 ```
 
+## 双头引发的 WriteHeaders 合并回归（审查发现，已修）
+
+本节记录代码审查发现的、由本改动**新引入**的一处回归。
+
+### 缺陷
+
+`setting/model_setting/claude.go` 的 `WriteHeaders` 把运维配置的头值与请求上
+**已存在的**头值做**逗号拼接**（`normalizeHeaderListValues` + `strings.Join`），
+而不是覆盖：
+
+```go
+mergedValues := normalizeHeaderListValues(
+	append(append([]string(nil), httpHeader.Values(headerKey)...), headerValues...),
+)
+httpHeader.Set(headerKey, strings.Join(mergedValues, ","))
+```
+
+该合并语义对 `anthropic-beta` 这类**逗号分隔的多值头**是正确的：客户端与运维
+各自贡献值，应当合并去重（既有测试
+`TestClaudeSettingsWriteHeadersMergesConfiguredValuesIntoSingleHeader` 锁定的
+正是这一行为）。但它对**凭证头**是错的。
+
+修复前 `Authorization` 不在出站头集合里，运维在 `model_headers_settings` 配
+`{"<model>": {"Authorization": ["Bearer <key>"]}}` 时，`Values("Authorization")`
+为空，配置值被原样写入，**干净可用**——上游 issue #5491 给出的处方正是这种
+配置。本改动让 `Authorization` 进入出站头集合后，同一份配置的实际出站值变成
+`Bearer <渠道key>,Bearer <运维key>`。对只读 `Authorization` 的第三方 Anthropic
+兼容网关（`mass.qdama.cn`、vLLM 0.23），该拼接值无法认证，会把原本可用的渠道
+打成 401。
+
+`x-api-key` 在改动前就有同样的拼接行为，故这并非全新的缺陷类别；但本改动把
+`Authorization` 从「不会被污染」变成「会被污染」，扩大了受影响的头面。
+
+可达性：由管理后台 `model_headers_settings` 配置，
+`web/default/src/features/system-settings/models/claude-settings-card.tsx` 只做
+JSON 形状校验，不校验头名，也无既有清单拦截凭证头。
+
+### 修复
+
+`WriteHeaders` 内对凭证头改用**覆盖**语义，非凭证头保持**合并**语义不变：
+
+```go
+var credentialHeaderNames = map[string]struct{}{
+	"authorization":       {},
+	"proxy-authorization": {},
+	"x-api-key":           {},
+	"x-goog-api-key":      {},
+}
+```
+
+未采用「禁止配置凭证头」的方案，理由是不缩小既有能力：运维确实需要为只认
+Bearer 的上游配置 `Authorization`（issue #5491 的处方），禁止配置会把该场景
+堵死；覆盖语义与 `header_override`「用户配置优先」的既有口径一致。
+
+### 验证
+
+新增 4 个测试，撤销修复后逐个确认失败：
+
+| 测试 | 断言 | 撤销修复后 |
+| --- | --- | --- |
+| `TestClaudeSettingsWriteHeadersReplacesCredentialHeaders` | 配置的 `Authorization` 替换渠道值，且不含逗号 | FAIL |
+| `TestClaudeSettingsWriteHeadersReplacesLegacyApiKeyHeader` | `x-api-key` 同样替换 | FAIL |
+| `TestClaudeSettingsWriteHeadersReplacesCredentialHeadersCaseInsensitively` | 配置写小写 `authorization` 也命中同一分支 | FAIL |
+| `TestClaudeSettingsWriteHeadersStillMergesNonCredentialHeaders` | 非凭证头（`anthropic-beta`）**仍合并** | PASS（按设计） |
+
+两个既有测试继续通过，证明 `anthropic-beta` 的合并语义未被破坏。
+
+```text
+go test ./setting/model_setting/ -run TestClaudeSettingsWriteHeaders -count=1
+ok（6 个测试全部 PASS）
+```
+
 ## 未覆盖与边界
 
 - **未在真实官方 Anthropic 账号跑通 200**。手头无可用凭证
@@ -397,8 +476,13 @@ go test  ./controller/ ./relay/channel/ ./relay/channel/claude/   ok
   证明），以及双头能通过第三方网关认证。**「官方账号下双头返回 200」是从
   「响应逐字节相同、同一代码路径」推出的，不是实测。**
 - **`x-api-key` 优先这一行为未写入任何官方文档**。它是从报错信息反推的，
-  可能无预告变更。因此代码注释只写文档明确支持的表述（legacy fallback），
-  未把反推出的优先级当作契约。
+  可能无预告变更。代码注释只写文档明确支持的表述（legacy fallback），未把
+  反推出的优先级当作契约。**修正记录**：初稿的代码注释实为
+  「`x-api-key` … consulted only when Authorization is absent」，这既非文档
+  原文，方向也与实测相反（并存时被读取的是 `x-api-key`），与本条自我约束
+  相矛盾；审查发现后已改为「哪个头被读取未见于文档，因此不依赖该结论，
+  两头同源同值」。同一处措辞在
+  `controller/channel_billing_auth_header_test.go` 的注释中同步更正。
 - **未覆盖 `web/classic` 前端**。本改动无前端面；`web/default` 中
   `x-api-key` / `Authorization` 的既有出现均在示例文案、透传模板和
   param_override 编辑器内，与本改动无关。
@@ -408,6 +492,10 @@ go test  ./controller/ ./relay/channel/ ./relay/channel/claude/   ok
   只认 Bearer 的上游自动生效、无需运维逐渠道配置，且实测在官方 API 上无害。
   若未来出现同时拒绝两个头的上游，需重新评估是否改为渠道级开关。
 - **未新增渠道级认证头开关**。若上游同时拒绝双头，届时再单独设计。
+- **`WriteHeaders` 的凭证覆盖语义仅覆盖 Claude 模型设置路径**。本次修的是
+  `setting/model_setting/claude.go` 的 `WriteHeaders`。`x-api-key` 在该函数中
+  的历史拼接行为一并被修正，但本仓库其他按模型配置头的路径（若存在）未逐一
+  排查，未验证。
 - **未改动正式渠道 188 的配置**。用户已将其改回 type=1（OpenAI 兼容路径），
   实测正常中继 `deepseek-v4-flash`；本改动对它是零影响。
 - **渠道 key 仅经 shell 变量传递**，未写入本报告或仓库。
