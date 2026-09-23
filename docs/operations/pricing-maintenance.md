@@ -29,6 +29,21 @@ CreateCacheRatio = cache_write_usd_per_1M / input_usd_per_1M
 }
 ```
 
+### 未维护价格模型的兼容兜底
+
+本项目要求未及时维护价格的模型仍可调用。正式服务通过 `SelfUseModeEnabled=true` 启用统一兜底：未匹配到 `ModelRatio` 的 token 模型按下列口径计费，其中只有 `ModelRatio` 是固定值，`CompletionRatio` 不是固定值。
+
+| 项 | 兜底值 | 代码位置 |
+| --- | --- | --- |
+| `ModelRatio` | 固定 `37.5` | `setting/ratio_setting/model_ratio.go` 的 `GetModelRatio` |
+| `CompletionRatio` | 按模型名前缀返回，不是固定值：`gpt-5.x` 为 `6`、无点号 `gpt-5*` 为 `8`、`gpt-4o` 为 `4`、`gpt-4`/`gpt-4.5-preview` 为 `2`、`o1`/`o3` 前缀为 `4`、`claude-3`/`claude-sonnet-4`/`claude-opus-4`/`claude-haiku-4` 为 `5`，其余走各自分支 | `setting/ratio_setting/model_ratio.go` 的 `getHardcodedCompletionModelRatio` |
+| `CacheRatio` | 固定 `1` | `setting/ratio_setting/cache_ratio.go` 的 `GetCacheRatio` |
+| `CreateCacheRatio` | 固定 `1.25` | `setting/ratio_setting/cache_ratio.go` 的 `GetCreateCacheRatio` |
+
+这些是保护性临时倍率，不代表供应商官方价格。由于 `CompletionRatio` 会随模型名变化，核对未维护模型的费用时必须读取实际生效值，不能按固定倍率估算；补齐官方价格后必须覆盖对应模型键，并按实际价格复核历史日志边界。
+
+已明确为免费层的模型必须显式维护为 `0/0/0/0`，依次对应 `ModelRatio`、`CompletionRatio`、`CacheRatio` 和 `CreateCacheRatio`，不能因为启用兜底而使用保护性倍率。按秒、按字符、按图片或按视频时长计费且当前链路缺少对应计量字段的模型，可以继续使用兜底，但必须在审计记录中标明其价格尚未确认。
+
 ### 阶梯计费表达式
 
 `ModelBillingExpr` 的表达式系数直接使用供应商真实的美元每百万 token 价格，不做 `/2` 换算。
@@ -977,3 +992,54 @@ git diff --check -- 目标源码与本记录: exit=0
 - https://api-docs.deepseek.com/updates
 
 补充核查：Kimi 官方 `https://platform.kimi.ai/docs/llms.txt`、Model List 和 Model Inference Pricing 当前只列 `kimi-k3`、`kimi-k2.7-code`（含 highspeed）和 `kimi-k2.6`。`chat-k28.md` 与 `chat-k2.8.md` 虽返回 HTTP 200，但正文是通用 Quickstart 回退内容，未出现 K2.8 模型或价格表；因此没有 K2.8 的官方发布证据，本项目不新增该模型或猜测价格。
+
+## 2026-09-23 GPT-6 Sol/Luna 与 Grok 4.7 官方价格维护
+
+采样时间：2026-09-23（Asia/Shanghai）。本轮以供应商官方模型页和价格页为唯一价格来源，不使用任何第三方中转站（relay）暴露的 `ratio_config`、`/api/pricing` 或聚合站数据；这类站点的取值包含其自身加价和自建模型名，不能作为原厂价格依据。
+
+本轮重新枚举正式活跃目录的未定价项（`channels.status=1` 的 `models` 与 `abilities.enabled=true` 取并集，再与 `ModelRatio`、`ModelPrice` 匹配），得到 11 项：`5.6-luna`、`composer-2.5`、`deepseek-v4.1-flash-expires-on-0910`、`gpt-6-luna`、`gpt-6-sol`、`gpt-reserve`、`grok-4.7`、`grok-composer-2.5-fast`、`grok-imagine-video`、`grok-imagine-video-1.5`、`kimi-k3-1`。逐项核对官方来源后，只有三个模型存在可确认的官方 token 价格，本轮据此写入。
+
+写入前状态：`SelfUseModeEnabled=true`，未配置模型会落到 37.5 的保护性兜底倍率。该兜底显著高于这三个模型的官方原价，因此补价同时消除了超额计费风险。
+
+| 模型 | 官方输入 | 官方缓存命中 | 官方缓存创建 | 官方输出 | 维护倍率 |
+| --- | --- | --- | --- | --- | --- |
+| `gpt-6-luna` | $0.1 / 1M | $0.01 / 1M | $0.125 / 1M | $0.5 / 1M | `ModelRatio=0.05`、`CompletionRatio=5`、`CacheRatio=0.1`、`CreateCacheRatio=1.25` |
+| `gpt-6-sol` | $2 / 1M | $0.2 / 1M | $2.5 / 1M | $10 / 1M | `ModelRatio=1`、`CompletionRatio=5`、`CacheRatio=0.1`、`CreateCacheRatio=1.25` |
+| `grok-4.7` | $2 / 1M | $0.5 / 1M | 未公布 | $6 / 1M | `ModelRatio=1`、`CompletionRatio=3`、`CacheRatio=0.25` |
+
+`gpt-6-luna` 与 `gpt-6-sol` 官方模型页均标注：输入超过 272K tokens 的请求整体按 2 倍输入/缓存价、1.5 倍输出价计费。`grok-4.7` 官方价格页标注：prompt 达到 200K tokens 的请求整体按 `$4/$1/$12` 计费。三个模型因此都使用 `tiered_expr`，表达式沿用本仓库既有的 `gpt-6-astra`（272K）和 `grok-4.6`（200K）模板，阶梯条件使用 `len` 而非 `p`，避免缓存命中压低 `p` 造成误判档位。`grok-4.7` 官方未公布缓存创建价，表达式与倍率均不写入 `cc` 项。
+
+正式库写入结果：`ModelRatio`、`CompletionRatio`、`CacheRatio`、`CreateCacheRatio`、`billing_setting.billing_expr`、`billing_setting.billing_mode` 六个 option 只做新增键合并，未覆盖任何既有条目。写入后正式 `/api/pricing` 返回 `gpt-6-luna` 为 `0.05/5/0.1/1.25`、`gpt-6-sol` 为 `1/5/0.1/1.25`、`grok-4.7` 为 `1/3/0.25`（无缓存创建价）。三个表达式均通过 `billingexpr.CompileFromCache` 编译校验。
+
+写入过程中发现并纠正一次自身失误：首次写入复用了上一轮生成的 `after` 快照，该快照仍带有把 `kimi-k3-1` 当作 `kimi-k3` 别名、把 `5.6-luna` 当作 `gpt-5.6-luna` 别名、把 `deepseek-v4.1-flash-expires-on-0910` 当作 DeepSeek 别名的三个条目。这三个条目已随首次写入进入正式库，随后按写入前快照完整回滚（四个 key 与备份逐键 md5 一致后）再以干净集合重写。当前正式库已确认不含这三个键。
+
+以下项目本轮保持未配置，均有明确依据：
+
+- `kimi-k3-1`：Kimi 官方价格页（`chat.md`）、模型列表、API 参考、`llms.txt` 和 Platform Changelog 当前只有 `kimi-k3`（$3/$0.3/$15 每 1M）及 `kimi-k2.7-code`、`kimi-k2.6`；2026 年 9 月的 Changelog 条目只有 Web Search API 和计费方式变更，7 月条目为 Kimi K3 上线。没有任何官方来源发布 `kimi-k3.1` 或 `kimi-k3-1`。无法确认官方原价，不补价。
+- `5.6-luna`：OpenAI 官方模型列表中不存在该 ID，官方对应模型为 `gpt-5.6-luna`（$0.2/$0.02/$1.2，已按官方价维护）。该键为渠道侧自建名，不静默继承 `gpt-5.6-luna` 价格。
+- `deepseek-v4.1-flash-expires-on-0910`：DeepSeek 官方要求使用 `deepseek-flash` 作为模型名；`deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 已退役并按 Flash 价计费。官方没有 `-expires-on-` 形式的 ID，该后缀为渠道侧自建，不继承。
+- `gpt-reserve`：OpenAI 官方模型页返回 404，不存在该官方模型，不补价。
+- `composer-2.5`、`grok-composer-2.5-fast`：xAI 官方价格页的语言模型表中没有 Composer 条目，无可确认的官方独立 token 原价，继续保持 fail-closed。
+- `grok-imagine-video`、`grok-imagine-video-1.5`：官方按秒计费（$0.050/s、$0.080/s），而 `relay/channel/xai` 没有视频时长与分辨率计量入口，写入按次 `ModelPrice` 会把时长计费错算为单次固定价。与 2026-08-16 起的既有结论一致，保持显式未配置。
+
+同时复核了原厂侧的近期发布：Google 官方 Changelog 显示 2026-09-02 `gemini-3.8-flash` GA、2026-09-15 `gemini-3.8-live` 与 `gemini-3.8-live-extended-thinking` GA、2026-09-03 `lyria-3.5` GA，但这些模型均不在正式活跃目录中；`gemini-3.8-flash` 的官方价格标注为限时价（至 2026-12-31），按本项目"不采用促销价"的口径仍不写入。Z.AI 官方定价页当前最新为 GLM-5.3/GLM-5.3-Flash/GLM-5.3-FlashX 和 GLM-5.2，与已维护值一致，9 月无新增模型。DeepSeek 官方 News 索引当前最新为 2026-09-10 的 `DeepSeek-V4.1-Flash`，其价格已由既有 `tiered_expr` 峰谷表达式按官方价维护。OpenAI 官方模型列表当前新增项为 `gpt-6-luna`、`gpt-6-sol` 和已有的 `gpt-6-astra`，无其它未维护的语言模型。
+
+本轮不做历史日志回算：`kimi-k3-1`、`5.6-luna`、`deepseek-v4.1-flash-expires-on-0910` 曾在首次写入时短暂进入正式库，需确认该窗口内没有产生计费日志。近 14 天正式库消费日志中，这三个模型名的记录数均为 0；11 个未定价项中只有 `grok-composer-2.5-fast` 有 1 条记录。历史修正仍按用户决定另行处理。
+
+验证结果：`go test ./setting/ratio_setting/` 退出码为 0；`go build ./setting/... ./pkg/billingexpr/` 通过；`gofmt -l` 对改动文件无输出；正式 `/api/status` 返回 `success=true`、版本 `v1.1.0`；正式 `/api/pricing` 已返回上述三个模型的新值，服务日志显示 `syncing options from database` 正常周期同步，未重启容器。写入前快照为 `/tmp/opt-<key>-before-20260923T122636.json`，写入后为 `/tmp/opt-<key>-clean-20260923T122636.json`，`billing_expr` 写入前快照为 `/tmp/opt-billing_expr-before-20260923T122636.json`。
+
+源码侧已在 `setting/ratio_setting/model_ratio.go` 与 `setting/ratio_setting/cache_ratio.go` 补齐这三个模型的基础倍率默认值，使源码默认与正式库一致；分档表达式仅存在于正式库 `billing_setting.billing_expr`，源码默认值不含表达式。
+
+来源：
+
+- https://developers.openai.com/api/docs/models/gpt-6-luna.md
+- https://developers.openai.com/api/docs/models/gpt-6-sol.md
+- https://developers.openai.com/api/docs/models.md
+- https://docs.x.ai/developers/pricing.md
+- https://docs.x.ai/developers/release-notes.md
+- https://platform.kimi.ai/docs/pricing/chat.md
+- https://platform.kimi.ai/docs/platform-changelog.md
+- https://platform.kimi.ai/docs/llms.txt
+- https://api-docs.deepseek.com/quick_start/pricing
+- https://docs.z.ai/guides/overview/pricing
+- https://ai.google.dev/gemini-api/docs/changelog

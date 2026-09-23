@@ -103,6 +103,8 @@ var defaultModelRatio = map[string]float64{
 	"gpt-5-nano":                       0.025,
 	"gpt-5-nano-2025-08-07":            0.025,
 	"gpt-6-astra":                      5.0,  // $10 / 1M tokens; standard list price
+	"gpt-6-sol":                        1.0,  // $2 / 1M tokens; base tier, see billing tier below 272K input
+	"gpt-6-luna":                       0.05, // $0.1 / 1M tokens; base tier, see billing tier below 272K input
 	"gpt-5.5":                          2.5,  // $5 / 1M tokens
 	"GPT-5.5":                          2.5,  // upstream case-preserving alias
 	"gpt-5.6":                          2.5,  // alias of gpt-5.6-sol: non-promotional $5 / 1M tokens
@@ -292,6 +294,7 @@ var defaultModelRatio = map[string]float64{
 	"grok-4.20-0309-reasoning":     0.625,
 	"grok-4.20-multi-agent-0309":   0.625,
 	"grok-4.6":                     1.0, // $2 / 1M tokens
+	"grok-4.7":                     1.0, // $2 / 1M tokens; base tier, see billing tier below 200K prompt tokens
 	"grok-build-0.1":               0.5, // $1 / 1M tokens
 	"grok-code-fast-1":             0.5, // official alias of grok-build-0.1
 	// SenseNova Token Plan currently lists these models as free during the
@@ -698,6 +701,8 @@ var defaultCompletionRatio = map[string]float64{
 	"agnes-2.5-pro-alpha":                      2,
 	"agnes-2.5-pro-beta":                       3,
 	"gpt-6-astra":                              5, // $50 / $10 output/input
+	"gpt-6-sol":                                5, // $10 / $2 output/input; base tier
+	"gpt-6-luna":                               5, // $0.5 / $0.1 output/input; base tier
 	"gpt-5.6":                                  6, // gpt-5.6-sol list output/input ratio: $30 / $5
 	"gpt-5.6-sol":                              6, // list output/input ratio: $30 / $5
 	"gpt-5.6-terra":                            6, // $12 / $2 output/input
@@ -798,6 +803,7 @@ var defaultCompletionRatio = map[string]float64{
 	"grok-4.20-0309-reasoning":                 2,
 	"grok-4.20-multi-agent-0309":               2,
 	"grok-4.6":                                 3,
+	"grok-4.7":                                 3, // $6 / $2 output/input; base tier
 	"grok-build-0.1":                           2,
 	"grok-code-fast-1":                         2,
 	"sensenova-6.8-flash-lite":                 0,
