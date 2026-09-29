@@ -42,13 +42,21 @@ var defNext = func(c *gin.Context) {
 
 // adminRateLimitExempt reports whether the current request may skip the
 // non-critical rate limiters because it carries an authenticated administrator
-// session. It fails closed: a missing or unreadable session, or any role below
-// RoleAdminUser, keeps the request rate limited.
+// session. It fails closed: a missing or unreadable session, a disabled
+// account, or any role below RoleAdminUser keeps the request rate limited.
 //
 // Only GlobalWebRateLimit, GlobalAPIRateLimit, SearchRateLimit and
 // SuggestionRateLimit consult this. CriticalRateLimit deliberately does not, so
 // the login, registration, password-reset and payment endpoints keep their
 // IP-level protection even for administrators.
+//
+// This runs as a global middleware, well before UserAuth, so it cannot rely on
+// the user record having been re-read from the database. It therefore reads the
+// role and status that setupLogin wrote into the session and refuses to exempt
+// anything whose status is not UserStatusEnabled. A session that predates a
+// disable or a demotion stays exempt until its next authenticated request
+// refreshes it through syncSessionUserIdentity; that window is bounded by the
+// same staleness UserAuth already tolerates for these fields.
 func adminRateLimitExempt(c *gin.Context) bool {
 	if !operation_setting.GetRateLimitAdminExempt() {
 		return false
@@ -56,6 +64,13 @@ func adminRateLimitExempt(c *gin.Context) bool {
 	session := sessions.Default(c)
 	role, ok := session.Get("role").(int)
 	if !ok {
+		return false
+	}
+	status, ok := session.Get("status").(int)
+	if !ok {
+		return false
+	}
+	if status != common.UserStatusEnabled {
 		return false
 	}
 	return role >= common.RoleAdminUser

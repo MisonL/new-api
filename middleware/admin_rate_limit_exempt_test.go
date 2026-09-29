@@ -14,7 +14,8 @@ import (
 
 // setupAdminExemptRouter builds a router whose session middleware mirrors
 // production ordering (sessions are registered before the rate limiters) and
-// whose handler stamps the session role for the current request.
+// whose handler stamps the session fields for the current request the same way
+// setupLogin does, including status.
 func setupAdminExemptRouter(t *testing.T, handler gin.HandlerFunc, role int, withSession bool) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -27,6 +28,7 @@ func setupAdminExemptRouter(t *testing.T, handler gin.HandlerFunc, role int, wit
 			session := sessions.Default(c)
 			session.Set("id", 1)
 			session.Set("role", role)
+			session.Set("status", common.UserStatusEnabled)
 		}
 		c.Next()
 	})
@@ -185,6 +187,69 @@ func TestSuggestionRateLimitExemptsAdminWhenEnabled(t *testing.T) {
 	router := setupAdminExemptRouter(t, SuggestionRateLimit(), common.RoleAdminUser, true)
 	if code := probeTwice(t, router, 2); code != http.StatusOK {
 		t.Fatalf("admin should be exempt from the suggestion rate limit, got %d", code)
+	}
+}
+
+// A session for an account that has since been disabled must not be exempt.
+// The middleware runs before UserAuth, so the session status is the only
+// signal available about whether the account is still allowed to act.
+func TestGlobalAPIRateLimitStillLimitsDisabledAdmin(t *testing.T) {
+	withAdminExempt(t, true, func() {
+		common.GlobalApiRateLimitEnable = true
+		common.GlobalApiRateLimitNum = 2
+		common.GlobalApiRateLimitDuration = 60
+	})
+	t.Cleanup(func() {
+		common.GlobalApiRateLimitEnable = true
+	})
+
+	router := gin.New()
+	gin.SetMode(gin.TestMode)
+	store := cookie.NewStore([]byte("admin-exempt-test-secret"))
+	router.Use(sessions.Sessions("session", store))
+	router.Use(func(c *gin.Context) {
+		session := sessions.Default(c)
+		session.Set("id", 1)
+		session.Set("role", common.RoleAdminUser)
+		session.Set("status", common.UserStatusDisabled)
+		c.Next()
+	})
+	router.GET("/probe", GlobalAPIRateLimit(), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	if code := probeTwice(t, router, 2); code != http.StatusTooManyRequests {
+		t.Fatalf("a disabled admin session must stay rate limited, got %d", code)
+	}
+}
+
+// A session with no status at all is unreadable identity, so it fails closed.
+func TestGlobalAPIRateLimitStillLimitsSessionWithoutStatus(t *testing.T) {
+	withAdminExempt(t, true, func() {
+		common.GlobalApiRateLimitEnable = true
+		common.GlobalApiRateLimitNum = 2
+		common.GlobalApiRateLimitDuration = 60
+	})
+	t.Cleanup(func() {
+		common.GlobalApiRateLimitEnable = true
+	})
+
+	router := gin.New()
+	gin.SetMode(gin.TestMode)
+	store := cookie.NewStore([]byte("admin-exempt-test-secret"))
+	router.Use(sessions.Sessions("session", store))
+	router.Use(func(c *gin.Context) {
+		session := sessions.Default(c)
+		session.Set("id", 1)
+		session.Set("role", common.RoleAdminUser)
+		c.Next()
+	})
+	router.GET("/probe", GlobalAPIRateLimit(), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	if code := probeTwice(t, router, 2); code != http.StatusTooManyRequests {
+		t.Fatalf("a session without a status must stay rate limited, got %d", code)
 	}
 }
 
