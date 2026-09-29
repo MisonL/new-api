@@ -76,6 +76,21 @@ func adminRateLimitExempt(c *gin.Context) bool {
 	return role >= common.RoleAdminUser
 }
 
+// exemptableLimiter wraps a non-critical limiter so that a request carrying an
+// authenticated administrator session skips it while the exemption option is on.
+// It is the single place that decides the exemption applies to a limiter: only
+// the limiters wrapped here honor it, and CriticalRateLimit is deliberately not
+// one of them.
+func exemptableLimiter(limiter gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if adminRateLimitExempt(c) {
+			c.Next()
+			return
+		}
+		limiter(c)
+	}
+}
+
 func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
 	redisRateLimiterWithKey(c, maxRequestNum, duration, "rateLimit:"+mark+c.ClientIP())
 }
@@ -151,13 +166,15 @@ func rateLimitFactory(maxRequestNum int, duration int64, mark string) func(c *gi
 func GlobalWebRateLimit() func(c *gin.Context) {
 	if common.GlobalWebRateLimitEnable {
 		limiter := rateLimitFactory(common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration, "GW")
-		return func(c *gin.Context) {
-			if IsWebStaticResourcePath(c.Request.URL.Path) || adminRateLimitExempt(c) {
+		// Static assets are checked first so that a page load's asset requests
+		// never pay for the session read the exemption needs.
+		return exemptableLimiter(func(c *gin.Context) {
+			if IsWebStaticResourcePath(c.Request.URL.Path) {
 				c.Next()
 				return
 			}
 			limiter(c)
-		}
+		})
 	}
 	return defNext
 }
@@ -175,13 +192,7 @@ func IsWebStaticResourcePath(resourcePath string) bool {
 func GlobalAPIRateLimit() func(c *gin.Context) {
 	if common.GlobalApiRateLimitEnable {
 		limiter := rateLimitFactory(common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration, "GA")
-		return func(c *gin.Context) {
-			if adminRateLimitExempt(c) {
-				c.Next()
-				return
-			}
-			limiter(c)
-		}
+		return exemptableLimiter(limiter)
 	}
 	return defNext
 }
@@ -293,7 +304,7 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 				return
 			}
 			key := fmt.Sprintf("rateLimit:%s:user:%d", mark, userId)
-			userRedisRateLimiter(c, maxRequestNum, duration, key)
+			redisRateLimiterWithKey(c, maxRequestNum, duration, key)
 		}
 	}
 	// It's safe to call multi times.
@@ -314,51 +325,6 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 	}
 }
 
-// userRedisRateLimiter is like redisRateLimiter but accepts a pre-built key
-// (to support user-ID-based keys).
-func userRedisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, key string) {
-	ctx := context.Background()
-	rdb := common.RDB
-	listLength, err := rdb.LLen(ctx, key).Result()
-	if err != nil {
-		fmt.Println(err.Error())
-		c.Status(http.StatusInternalServerError)
-		c.Abort()
-		return
-	}
-	if listLength < int64(maxRequestNum) {
-		rdb.LPush(ctx, key, time.Now().Format(timeFormat))
-		rdb.Expire(ctx, key, common.RateLimitKeyExpirationDuration)
-	} else {
-		oldTimeStr, _ := rdb.LIndex(ctx, key, -1).Result()
-		oldTime, err := time.Parse(timeFormat, oldTimeStr)
-		if err != nil {
-			fmt.Println(err)
-			c.Status(http.StatusInternalServerError)
-			c.Abort()
-			return
-		}
-		nowTimeStr := time.Now().Format(timeFormat)
-		nowTime, err := time.Parse(timeFormat, nowTimeStr)
-		if err != nil {
-			fmt.Println(err)
-			c.Status(http.StatusInternalServerError)
-			c.Abort()
-			return
-		}
-		if int64(nowTime.Sub(oldTime).Seconds()) < duration {
-			rdb.Expire(ctx, key, common.RateLimitKeyExpirationDuration)
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
-			return
-		} else {
-			rdb.LPush(ctx, key, time.Now().Format(timeFormat))
-			rdb.LTrim(ctx, key, 0, int64(maxRequestNum-1))
-			rdb.Expire(ctx, key, common.RateLimitKeyExpirationDuration)
-		}
-	}
-}
-
 // SearchRateLimit returns a per-user rate limiter for search endpoints.
 // Configurable via SEARCH_RATE_LIMIT_ENABLE / SEARCH_RATE_LIMIT / SEARCH_RATE_LIMIT_DURATION.
 func SearchRateLimit() func(c *gin.Context) {
@@ -366,13 +332,7 @@ func SearchRateLimit() func(c *gin.Context) {
 		return defNext
 	}
 	limiter := userRateLimitFactory(common.SearchRateLimitNum, common.SearchRateLimitDuration, "SR")
-	return func(c *gin.Context) {
-		if adminRateLimitExempt(c) {
-			c.Next()
-			return
-		}
-		limiter(c)
-	}
+	return exemptableLimiter(limiter)
 }
 
 // SuggestionRateLimit returns a per-user rate limiter for autocomplete suggestion endpoints.
@@ -382,11 +342,5 @@ func SuggestionRateLimit() func(c *gin.Context) {
 		return defNext
 	}
 	limiter := userRateLimitFactory(common.SuggestionRateLimitNum, common.SuggestionRateLimitDuration, "SG")
-	return func(c *gin.Context) {
-		if adminRateLimitExempt(c) {
-			c.Next()
-			return
-		}
-		limiter(c)
-	}
+	return exemptableLimiter(limiter)
 }
