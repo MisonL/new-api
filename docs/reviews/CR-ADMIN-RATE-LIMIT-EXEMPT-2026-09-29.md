@@ -129,12 +129,20 @@
 
 ## 未覆盖边界
 
-- 正式环境容器 `new-api` 运行的是 2026-09-08 构建的镜像，其二进制不含
-  `GLOBAL_RATE_LIMIT_ADMIN_EXEMPT` 与 `GlobalRateLimitAdminExemptEnabled`（`strings`
-  计数为 0）。本次改动尚未部署到正式环境；需要重新构建镜像并重建容器后，`.env` 中的
-  600 / 300 与豁免开关才会生效。
-- 正式环境的 600 / 300 阈值本身未在正式环境实测，仅通过 `docker compose config` 确认
-  变量解析为 `GLOBAL_API_RATE_LIMIT: "600"`、`GLOBAL_WEB_RATE_LIMIT: "300"`。
+- 正式环境容器 `new-api` 运行的是 2026-09-08 构建的镜像。该镜像的二进制**认识阈值变量**
+  （`GLOBAL_API_RATE_LIMIT`、`GLOBAL_API_RATE_LIMIT_DURATION`、`GLOBAL_WEB_RATE_LIMIT`、
+  `GLOBAL_WEB_RATE_LIMIT_DURATION`、各自的 `_ENABLE`，`strings` 均可命中），但**不认识**
+  `GLOBAL_RATE_LIMIT_ADMIN_EXEMPT` 与 `GlobalRateLimitAdminExemptEnabled`（计数为 0）。
+  因此两件事的部署状态不同：把 600 / 300 写入 `.env` 并重建容器即可生效（无需换镜像），
+  豁免开关则必须重新构建镜像。
+  实测方式：用同一镜像起一次性容器，注入 `GLOBAL_API_RATE_LIMIT=5` 后请求 12 次
+  `/api/status`，得到 4x200 + 8x429，证明旧镜像确实按该变量生效。
+- 正式环境的 600 / 300 阈值未在正式环境实测，仅通过 `docker compose config` 确认变量解析为
+  `GLOBAL_API_RATE_LIMIT: "600"`、`GLOBAL_WEB_RATE_LIMIT: "300"`。
+- 正式容器的 compose 标签引用了 `/tmp/new-api-prod-lite-override.yml`，该文件已不存在
+  （`/tmp` 被清理）。`docker compose` 只要带上这个 `-f` 参数就会直接报错退出，因此对正式环境
+  执行任何 compose 操作前必须先决定如何处理这个覆盖文件。仅用 `docker-compose.yml` 可以正常
+  解析，且解析出的 image 与当前运行容器一致。该问题与本任务无关，为既有状态，此处仅记录。
 - 分桶塌缩问题本身未解决：只要反代不可信且 `TRUSTED_PROXIES` 未设置，所有客户端仍共享
   一个 bucket。管理员豁免只保护管理员自身，普通用户之间的相互挤占依旧存在。
 - 三库兼容：本改动不涉及数据库迁移与方言 SQL，PostgreSQL 上的选项读写已在隔离环境实测；
