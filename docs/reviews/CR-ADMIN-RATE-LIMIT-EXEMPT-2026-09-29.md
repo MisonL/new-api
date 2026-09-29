@@ -213,6 +213,70 @@ built 2026-09-29T19:56:55Z，`health=healthy`）：
 
 提交：`e75076340`、`f689e51e4`、`b3c615b3e`。
 
+## 加固轮（2026-09-30，提交 `604c1e6b6`）
+
+继续排查后修掉一处健壮性缺口，并把文档声明的不变量变成测试。
+
+1. **未注册 session 中间件时 `sessions.Default(c)` 会 panic**。`sessions.Default` 内部是
+   `c.MustGet(DefaultKey).(Session)`，key 不存在时直接 panic。`main.go` 只有一个 engine，
+   且 `server.Use(sessions.Sessions(...))`（`main.go:215`）在 `router.SetRouter(...)`
+   （`main.go:221`）之前执行，所以生产不可达；但 `GlobalAPIRateLimit` 等是导出函数，任何
+   忘记挂 session 中间件的窄 engine 都会让请求以 panic 结束而不是照常限流。已改为先检查 key，
+   缺失即按"session 不可读"失败关闭。
+
+   探针（`gin.New()` 不挂 session 中间件，豁免开启，`GlobalAPIRateLimit()` 限 2）：
+
+   | 版本 | 结果 |
+   | --- | --- |
+   | 加固前 | `panic: Key "github.com/gin-contrib/sessions" does not exist` |
+   | 加固后 | 第 3 次请求 429，无 panic |
+
+   回归测试 `TestAdminExemptionFailsClosedWithoutSessionMiddleware`；移除守卫后该用例
+   `panic: Key ... does not exist` 并使整个包失败（变异测试）。
+
+2. **把"哪些限流器豁免"从注释变成测试**。`TestExemptableLimiterCoversExactlyTheDocumentedLimiters`
+   对 8 个限流器逐一在"豁免开启 + 管理员会话"下探测：豁免的 4 个（`GlobalWebRateLimit`、
+   `GlobalAPIRateLimit`、`SearchRateLimit`、`SuggestionRateLimit`）必须返回 200，不豁免的
+   4 个（`CriticalRateLimit`、`DownloadRateLimit`、`DesktopOAuthPollRateLimit`、
+   `UploadRateLimit`）必须返回 429。判定依据是"是否被 `exemptableLimiter` 包裹"这一唯一事实，
+   因此新增限流器若忘记决策会被测出。
+   变异测试：解开 `GlobalAPIRateLimit` 的包裹 → 该用例在
+   `GlobalAPIRateLimit should exempt administrators, got 429` 失败；给 `CriticalRateLimit`
+   加上包裹 → 该用例与 `TestCriticalRateLimitNeverExemptsAdmin` 同时失败。
+
+3. **同类缺陷排查（结论：不存在第二处）**。把 `validateOptionValue` 与
+   `normalizeOptionValueForInMemoryConfig` 的 `case` 集合做差集，逐个核对运行期消费方：
+
+   | 键 | 消费方 | 空白值是否失效 |
+   | --- | --- | --- |
+   | `RequestHeaderPolicyDefaultMode` | `parseRuntimeHeaderPolicyMode` | 否，`TrimSpace` 后比较 |
+   | `RequestHeaderPolicyAuxiliaryRequestsEnabled` | `getRequestHeaderPolicyAuxiliaryRequestsEnabled` | 否，已归一化为 `FormatBool`，消费方再 `ParseBool(TrimSpace(...))` |
+   | `billing_setting.billing_mode` / `billing_expr` / `tool_price_setting.prices` | 各自 JSON 解析 | 否，JSON 解析对空白不敏感 |
+
+   即第 3 条缺陷（接受却静默失效）在本仓库只有管理员豁免那一处，已闭环。
+
+4. **排除一条错误怀疑**。一度怀疑写入 `"  merge  "` 会让 `RequestHeaderPolicyDefaultMode`
+   运行期失效，实测隔离环境：接口返回 `success:true`、库内 `  merge`，但消费方 `TrimSpace`
+   后正常解析，**不是缺陷**，未改动。探针后已删除该行，恢复库内原本不存在该键的状态。
+
+## 最终镜像复测（2026-09-30）
+
+镜像 `commit=604c1e6b631e6c896b615d8beb3907c7718c000b-dirty`（built 2026-09-29T23:24:15Z，
+`health=healthy`），隔离环境复测：
+
+| 场景 | 请求数 | 结果 |
+| --- | --- | --- |
+| 管理员 + 豁免开，`/api/user/self` | 250 | 250x200 |
+| 匿名，`/api/user/self` | 250 | 180x401 + 70x429 |
+| 管理员 + 豁免开，`/api/ratio_config`（Critical，限 20） | 25 | 20x403 + 5x429 |
+
+Redis 键名与去重前一致：搜索/联想分别落在 `rateLimit:SR:user:1`、`rateLimit:SG:user:1`
+（按用户分桶），Critical 落在 `rateLimit:CT172.18.0.1`（按 IP 分桶），`userRedisRateLimiter`
+的删除未改变任何键名。
+
+测试稳定性：`go test ./middleware/ -shuffle=11..20` 全部 ok；限流相关用例
+`-shuffle=1..10` 全部 ok。新增的两个用例（豁免集合、缺 session 中间件）未引入跨测试状态泄漏。
+
 ## 未覆盖边界
 
 - 正式环境容器 `new-api` 运行的是 2026-09-08 构建的镜像。该镜像的二进制**认识阈值变量**
@@ -233,7 +297,13 @@ built 2026-09-29T19:56:55Z，`health=healthy`）：
   一个 bucket。管理员豁免只保护管理员自身，普通用户之间的相互挤占依旧存在。
 - 三库兼容：本改动不涉及数据库迁移与方言 SQL，PostgreSQL 上的选项读写已在隔离环境实测；
   MySQL / SQLite 未单独验证。
-- `go test ./middleware/` 在本工作区有一个失败用例
+- `[sessions] ERROR!` 日志噪声：豁免开启时，携带畸形 session cookie 的请求会多打一行该库日志
+  （实测 10 次畸形 Cookie 新增 10 行；无 Cookie 或合法 Cookie 为 0 行）。该行为不是本次改动引入：
+  豁免关闭（等同改动前）时 `/api/pricing` 同样每请求一行，`/api/status` 在豁免关闭时为 0 行、
+  开启后为 10 行，差异只是豁免使全局中间件也开始读取 session。属 `gin-contrib/sessions` 的库行为，
+  本任务不修改第三方依赖。
+- `go test ./middleware/` 期间曾出现一个失败用例
   `TestDistributeSpecificChannelRejectsDisabledResponsesCompactMode`（期望 503，实得 404）。
-  该失败与本任务无关：在 HEAD 的干净 worktree 上通过，仅把另一会话未提交的
-  `middleware/distributor.go` 复制进去即复现。本任务未触碰 `Distribute`。
+  该失败与本任务无关：在 HEAD 的干净 worktree 上通过，仅把另一会话当时未提交的
+  `middleware/distributor.go` 复制进去即复现。该会话随后于 02:13 更新了该文件，用例恢复通过；
+  最终一轮 `go test ./middleware/` 在 seed 11..20 的 `-shuffle` 下全部通过，无失败用例。
