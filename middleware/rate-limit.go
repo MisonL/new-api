@@ -166,15 +166,17 @@ func rateLimitFactory(maxRequestNum int, duration int64, mark string) func(c *gi
 func GlobalWebRateLimit() func(c *gin.Context) {
 	if common.GlobalWebRateLimitEnable {
 		limiter := rateLimitFactory(common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration, "GW")
-		// Static assets are checked first so that a page load's asset requests
-		// never pay for the session read the exemption needs.
-		return exemptableLimiter(func(c *gin.Context) {
+		exempt := exemptableLimiter(limiter)
+		return func(c *gin.Context) {
+			// The static-asset check stays outside the wrapper on purpose: it
+			// short circuits before the session read that the exemption needs,
+			// so a page load's asset requests never pay for it.
 			if IsWebStaticResourcePath(c.Request.URL.Path) {
 				c.Next()
 				return
 			}
-			limiter(c)
-		})
+			exempt(c)
+		}
 	}
 	return defNext
 }
