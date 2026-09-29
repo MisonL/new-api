@@ -41,6 +41,14 @@ const REQUEST_RATE_LIMIT_FIELDS = [
   'GlobalRateLimitAdminExemptEnabled',
 ];
 
+// The two Form.Sections have their own save buttons. Saving only the fields a
+// section owns keeps each button's label true and stops a malformed JSON in the
+// model section from blocking the global-limit switch.
+const MODEL_REQUEST_RATE_LIMIT_FIELDS = REQUEST_RATE_LIMIT_FIELDS.filter(
+  (key) => key !== 'GlobalRateLimitAdminExemptEnabled',
+);
+const GLOBAL_LIMIT_FIELDS = ['GlobalRateLimitAdminExemptEnabled'];
+
 export default function RequestRateLimit(props) {
   const { t } = useTranslation();
 
@@ -56,8 +64,10 @@ export default function RequestRateLimit(props) {
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
 
-  function onSubmit() {
-    const updateArray = compareObjects(inputs, inputsRow);
+  function onSubmit(fields) {
+    const updateArray = compareObjects(inputs, inputsRow).filter((item) =>
+      fields.includes(item.key),
+    );
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
     const requestQueue = updateArray.map((item) => {
       let value = '';
@@ -243,7 +253,10 @@ export default function RequestRateLimit(props) {
               </Col>
             </Row>
             <Row>
-              <Button size='default' onClick={onSubmit}>
+              <Button
+                size='default'
+                onClick={() => onSubmit(MODEL_REQUEST_RATE_LIMIT_FIELDS)}
+              >
                 {t('保存模型速率限制')}
               </Button>
             </Row>
@@ -268,7 +281,10 @@ export default function RequestRateLimit(props) {
               </Col>
             </Row>
             <Row>
-              <Button size='default' onClick={onSubmit}>
+              <Button
+                size='default'
+                onClick={() => onSubmit(GLOBAL_LIMIT_FIELDS)}
+              >
                 {t('保存全局限流设置')}
               </Button>
             </Row>
