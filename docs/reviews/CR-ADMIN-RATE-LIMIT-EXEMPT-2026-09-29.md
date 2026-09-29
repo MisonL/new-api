@@ -34,7 +34,13 @@
    `GLOBAL_RATE_LIMIT_ADMIN_EXEMPT` 的透传，并在 `.env.example`、
    `deploy/compose/dev-isolated.yml`、`deploy/env/dev-isolated.env.example` 中记录。
 
-提交：`99f3169c8 feat(rate-limit): let administrators bypass the global rate limits`
+提交（`dev`，均未推送）：
+
+- `99f3169c8 feat(rate-limit): let administrators bypass the global rate limits`
+- `dc030333d`、`2877e5002`、`a78da04fa`：前端字段与 i18n 补齐
+- `77cfbc69d fix(rate-limit): keep disabled accounts out of the admin exemption`
+- `797ed0268`、`c160a87b5`、`0b3fc7f88`、`3cd92bc45`：复核记录与 dev 环境示例
+- `3a273494a fix(rate-limit): normalize the admin-exempt option before it is persisted`
 
 ## 环境
 
@@ -109,9 +115,9 @@
 界面侧确认：`/console/setting?tab=ratelimit` 下 `管理员豁免全局限流` 开关渲染为
 `checked: true`，与库内值一致。
 
-## 复核阶段发现并修复的两个问题
+## 复核阶段发现并修复的三个问题
 
-首轮提交后做了一次全面复核，发现并修复了两处自身缺陷：
+首轮提交后做了多轮全面复核，每轮都发现并修复了一处自身缺陷：
 
 1. **被禁用的管理员仍然豁免**。`adminRateLimitExempt` 只读 session 的 `role`，未读 `status`。该中间件
    是全局中间件，运行在 `UserAuth` 之前，而 `UserAuth` 才会从库里重新读取用户并拒绝已停用账号，
@@ -122,6 +128,43 @@
    导致项目脚本 `bun run i18n:sync` 直接 `exit 1`（`Found 2 source translation key(s) missing`）；
    `web/classic` 的四个中文串未登记，全部语言都回退到中文原文，而该区块的兄弟键在 classic 的
    7 个语言里均有译文。两处均已按各前端既有惯例补齐，并按文件原有的排序位置插入。
+
+3. **新选项的非规范布尔值被接受却静默失效**（第三轮复核发现，提交 `3a273494a`）。
+   `UpdateOption` 的写入值来自 `normalizeOptionValueForInMemoryConfig` 的返回值，而
+   `validateOptionValue` 只返回 error，它经 `NormalizeRateLimitAdminExempt` 算出的规范值被丢弃，
+   同时 `normalizeOptionValueForInMemoryConfig` 当初漏了该键的 `case`。结果是
+   `strconv.ParseBool` 认得的写法（`"True"`、`"TRUE"`、`" true "`、`"1"`、`"t"`、`"T"`）全部
+   `success:true`，却把原始串原样写进库，运行期再按 `value == "true"` 严格比较而读成 false，
+   即"配置保存成功但实际未生效"的伪成功路径。
+   修复前隔离环境实测（每轮先清 `rateLimit:GA172.18.0.1`）：
+
+   | 写入 | 接口返回 | DB 值 | 200 次探测中的 429 | 实际效果 |
+   | --- | --- | --- | --- | --- |
+   | `true` | success | `true` | 0 | 生效 |
+   | `True` | success | `True` | 20 | 未生效 |
+   | `TRUE` | success | `TRUE` | 20 | 未生效 |
+   | ` true ` | success | ` true ` | 20 | 未生效 |
+   | `1` | success | `1` | 20 | 未生效 |
+   | `t` / `T` | success | `t` / `T` | 20 | 未生效 |
+
+   修复后同一组探针（dev 镜像 `commit=3cd92bc4527caa5d935bc4de4d58fd82415e816f-dirty`）：
+
+   ```
+   "true"    DB=true   429=0   OK      "false"   DB=false  429=20  OK
+   "True"    DB=true   429=0   OK      "FALSE"   DB=false  429=20  OK
+   "TRUE"    DB=true   429=0   OK      "0"       DB=false  429=20  OK
+   " true "  DB=true   429=0   OK
+   "1"       DB=true   429=0   OK
+   "t"       DB=true   429=0   OK
+   "T"       DB=true   429=0   OK
+   ```
+
+   非法值仍被拒绝且不落库（每轮先清桶，避免上一组探测把 IP 打进限流而误读为 429）：
+   `broken`、`yes`、空串、`2`、`Truex` 均返回
+   `{"message":"strconv.ParseBool: parsing \"...\": invalid syntax","success":false}`，
+   库内保持 `false`。回归测试 `TestUpdateOptionNormalizesAdminRateLimitExemptBeforePersist`
+   覆盖 7 个接受写法与 4 个拒绝写法；删掉 `normalizeOptionValueForInMemoryConfig` 里的该
+   `case` 后测试在 `raw="True" must be stored as the canonical form` 处失败（变异测试）。
 
 补充验证：`web/default` 的 `i18n:sync` 由失败转为 `exit 0`（928 files / 4674 keys / 0 missing）；
 `web/classic` 的 `i18n:sync` 报 `All locales are already in sync`，缺失键计数由 28 降为 24，
