@@ -45,6 +45,12 @@ var defNext = func(c *gin.Context) {
 // session. It fails closed: a missing or unreadable session, a disabled
 // account, or any role below RoleAdminUser keeps the request rate limited.
 //
+// A router that never registered the session middleware is treated as a missing
+// session rather than a panic: sessions.Default calls MustGet, which panics when
+// the key is absent. main.go registers the middleware on the engine before any
+// route, so this guard is unreachable there, but the limiters are exported and a
+// narrower engine must fail closed rather than crash.
+//
 // Only GlobalWebRateLimit, GlobalAPIRateLimit, SearchRateLimit and
 // SuggestionRateLimit consult this. CriticalRateLimit deliberately does not, so
 // the login, registration, password-reset and payment endpoints keep their
@@ -59,6 +65,9 @@ var defNext = func(c *gin.Context) {
 // same staleness UserAuth already tolerates for these fields.
 func adminRateLimitExempt(c *gin.Context) bool {
 	if !operation_setting.GetRateLimitAdminExempt() {
+		return false
+	}
+	if _, registered := c.Get(sessions.DefaultKey); !registered {
 		return false
 	}
 	session := sessions.Default(c)

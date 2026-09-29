@@ -271,3 +271,97 @@ func TestCriticalRateLimitNeverExemptsAdmin(t *testing.T) {
 		t.Fatalf("critical rate limit must still apply to administrators, got %d", code)
 	}
 }
+
+// The exemption is opt-in per limiter: a limiter honors it only when it is
+// wrapped in exemptableLimiter. Pin the documented set so that adding a new
+// limiter cannot silently inherit or silently miss the exemption.
+//
+// DownloadRateLimit and DesktopOAuthPollRateLimit are deliberately absent: the
+// first has no enable switch and is not part of the documented set, the second
+// exists precisely to throttle polling of the desktop OAuth handoff.
+func TestExemptableLimiterCoversExactlyTheDocumentedLimiters(t *testing.T) {
+	wantExempt := map[string]func() gin.HandlerFunc{
+		"GlobalWebRateLimit":  func() gin.HandlerFunc { return GlobalWebRateLimit() },
+		"GlobalAPIRateLimit":  func() gin.HandlerFunc { return GlobalAPIRateLimit() },
+		"SearchRateLimit":     func() gin.HandlerFunc { return SearchRateLimit() },
+		"SuggestionRateLimit": func() gin.HandlerFunc { return SuggestionRateLimit() },
+	}
+	wantLimited := map[string]func() gin.HandlerFunc{
+		"CriticalRateLimit":         func() gin.HandlerFunc { return CriticalRateLimit() },
+		"DownloadRateLimit":         func() gin.HandlerFunc { return DownloadRateLimit() },
+		"DesktopOAuthPollRateLimit": func() gin.HandlerFunc { return DesktopOAuthPollRateLimit() },
+		"UploadRateLimit":           func() gin.HandlerFunc { return UploadRateLimit() },
+	}
+
+	// Every limiter is probed with the exemption on and an administrator
+	// session, so a limiter exempts administrators exactly when it is wrapped.
+	withAdminExempt(t, true, func() {
+		common.GlobalWebRateLimitEnable = true
+		common.GlobalWebRateLimitNum = 2
+		common.GlobalWebRateLimitDuration = 60
+		common.GlobalApiRateLimitEnable = true
+		common.GlobalApiRateLimitNum = 2
+		common.GlobalApiRateLimitDuration = 60
+		common.SearchRateLimitEnable = true
+		common.SearchRateLimitNum = 2
+		common.SearchRateLimitDuration = 60
+		common.SuggestionRateLimitEnable = true
+		common.SuggestionRateLimitNum = 2
+		common.SuggestionRateLimitDuration = 60
+		common.CriticalRateLimitEnable = true
+		common.CriticalRateLimitNum = 2
+		common.CriticalRateLimitDuration = 60
+		common.DesktopOAuthPollRateLimitEnable = true
+		common.DesktopOAuthPollRateLimitNum = 2
+		common.DesktopOAuthPollRateLimitDuration = 60
+		common.DownloadRateLimitNum = 2
+		common.DownloadRateLimitDuration = 60
+		common.UploadRateLimitNum = 2
+		common.UploadRateLimitDuration = 60
+	})
+	t.Cleanup(func() {
+		common.GlobalWebRateLimitEnable = true
+		common.GlobalApiRateLimitEnable = true
+		common.SearchRateLimitEnable = true
+		common.SuggestionRateLimitEnable = true
+		common.CriticalRateLimitEnable = true
+		common.DesktopOAuthPollRateLimitEnable = true
+	})
+
+	for name, factory := range wantExempt {
+		router := setupAdminExemptRouter(t, factory(), common.RoleAdminUser, true)
+		if code := probeTwice(t, router, 2); code != http.StatusOK {
+			t.Fatalf("%s should exempt administrators, got %d", name, code)
+		}
+	}
+	for name, factory := range wantLimited {
+		router := setupAdminExemptRouter(t, factory(), common.RoleAdminUser, true)
+		if code := probeTwice(t, router, 2); code != http.StatusTooManyRequests {
+			t.Fatalf("%s must keep rate limiting administrators, got %d", name, code)
+		}
+	}
+}
+
+// A router without the session middleware must fail closed, not panic.
+// sessions.Default calls MustGet, so reading the session on an engine that
+// never registered the middleware would abort the request with a panic.
+func TestAdminExemptionFailsClosedWithoutSessionMiddleware(t *testing.T) {
+	withAdminExempt(t, true, func() {
+		common.GlobalApiRateLimitEnable = true
+		common.GlobalApiRateLimitNum = 2
+		common.GlobalApiRateLimitDuration = 60
+	})
+	t.Cleanup(func() {
+		common.GlobalApiRateLimitEnable = true
+	})
+
+	router := gin.New()
+	gin.SetMode(gin.TestMode)
+	router.GET("/probe", GlobalAPIRateLimit(), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	if code := probeTwice(t, router, 2); code != http.StatusTooManyRequests {
+		t.Fatalf("a router without sessions must stay rate limited, got %d", code)
+	}
+}
