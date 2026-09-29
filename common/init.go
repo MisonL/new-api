@@ -149,6 +149,10 @@ func InitEnv() {
 	SuggestionRateLimitEnable = GetEnvOrDefaultBool("SUGGESTION_RATE_LIMIT_ENABLE", true)
 	SuggestionRateLimitNum = GetEnvOrDefault("SUGGESTION_RATE_LIMIT", 60)
 	SuggestionRateLimitDuration = int64(GetEnvOrDefault("SUGGESTION_RATE_LIMIT_DURATION", 60))
+
+	// Seeds the GlobalRateLimitAdminExemptEnabled option on first run only; an existing
+	// database option keeps its stored value.
+	RateLimitAdminExemptDefault = GetEnvOrDefaultBool("GLOBAL_RATE_LIMIT_ADMIN_EXEMPT", false)
 	initConstantEnv()
 }
 

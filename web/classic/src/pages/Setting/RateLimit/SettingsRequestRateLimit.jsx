@@ -29,6 +29,18 @@ import {
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 
+// Fields this section owns. Filtering props.options against the mutable inputs
+// state would drop any key that is absent from the first render's options,
+// because the effect then feeds the already-filtered state back in.
+const REQUEST_RATE_LIMIT_FIELDS = [
+  'ModelRequestRateLimitEnabled',
+  'ModelRequestRateLimitCount',
+  'ModelRequestRateLimitSuccessCount',
+  'ModelRequestRateLimitDurationMinutes',
+  'ModelRequestRateLimitGroup',
+  'GlobalRateLimitAdminExemptEnabled',
+];
+
 export default function RequestRateLimit(props) {
   const { t } = useTranslation();
 
@@ -39,6 +51,7 @@ export default function RequestRateLimit(props) {
     ModelRequestRateLimitSuccessCount: 1000,
     ModelRequestRateLimitDurationMinutes: 1,
     ModelRequestRateLimitGroup: '',
+    GlobalRateLimitAdminExemptEnabled: false,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -87,8 +100,8 @@ export default function RequestRateLimit(props) {
 
   useEffect(() => {
     const currentInputs = {};
-    for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
+    for (let key of REQUEST_RATE_LIMIT_FIELDS) {
+      if (key in props.options) {
         currentInputs[key] = props.options[key];
       }
     }
@@ -232,6 +245,31 @@ export default function RequestRateLimit(props) {
             <Row>
               <Button size='default' onClick={onSubmit}>
                 {t('保存模型速率限制')}
+              </Button>
+            </Row>
+          </Form.Section>
+          <Form.Section text={t('全局请求限流')}>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'GlobalRateLimitAdminExemptEnabled'}
+                  label={t('管理员豁免全局限流')}
+                  size='default'
+                  extraText={t(
+                    '开启后，管理员账号不再受全局 API 限流、全局页面限流以及搜索、联想限流的限制。登录、注册、找回密码、支付等关键接口的限流始终对管理员生效。',
+                  )}
+                  onChange={(value) => {
+                    setInputs({
+                      ...inputs,
+                      GlobalRateLimitAdminExemptEnabled: value,
+                    });
+                  }}
+                />
+              </Col>
+            </Row>
+            <Row>
+              <Button size='default' onClick={onSubmit}>
+                {t('保存全局限流设置')}
               </Button>
             </Row>
           </Form.Section>

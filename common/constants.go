@@ -226,6 +226,11 @@ var (
 	SuggestionRateLimitDuration int64 = 60
 )
 
+// RateLimitAdminExemptDefault carries the GLOBAL_RATE_LIMIT_ADMIN_EXEMPT
+// environment value. It seeds the GlobalRateLimitAdminExemptEnabled option on first
+// run; once the option exists in the database, the stored value wins.
+var RateLimitAdminExemptDefault bool
+
 var RateLimitKeyExpirationDuration = 20 * time.Minute
 
 const (

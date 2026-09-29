@@ -12,6 +12,8 @@ const REQUEST_LIMITS_SECTIONS = [
     build: (settings: RequestLimitsSettings) => (
       <RateLimitSection
         defaultValues={{
+          GlobalRateLimitAdminExemptEnabled:
+            settings.GlobalRateLimitAdminExemptEnabled,
           ModelRequestRateLimitEnabled: settings.ModelRequestRateLimitEnabled,
           ModelRequestRateLimitCount: settings.ModelRequestRateLimitCount,
           ModelRequestRateLimitSuccessCount:

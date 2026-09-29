@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
@@ -35,6 +38,27 @@ var inMemoryRateLimiter = &common.InMemoryRateLimiter{}
 
 var defNext = func(c *gin.Context) {
 	c.Next()
+}
+
+// adminRateLimitExempt reports whether the current request may skip the
+// non-critical rate limiters because it carries an authenticated administrator
+// session. It fails closed: a missing or unreadable session, or any role below
+// RoleAdminUser, keeps the request rate limited.
+//
+// Only GlobalWebRateLimit, GlobalAPIRateLimit, SearchRateLimit and
+// SuggestionRateLimit consult this. CriticalRateLimit deliberately does not, so
+// the login, registration, password-reset and payment endpoints keep their
+// IP-level protection even for administrators.
+func adminRateLimitExempt(c *gin.Context) bool {
+	if !operation_setting.GetRateLimitAdminExempt() {
+		return false
+	}
+	session := sessions.Default(c)
+	role, ok := session.Get("role").(int)
+	if !ok {
+		return false
+	}
+	return role >= common.RoleAdminUser
 }
 
 func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
@@ -113,7 +137,7 @@ func GlobalWebRateLimit() func(c *gin.Context) {
 	if common.GlobalWebRateLimitEnable {
 		limiter := rateLimitFactory(common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration, "GW")
 		return func(c *gin.Context) {
-			if IsWebStaticResourcePath(c.Request.URL.Path) {
+			if IsWebStaticResourcePath(c.Request.URL.Path) || adminRateLimitExempt(c) {
 				c.Next()
 				return
 			}
@@ -135,7 +159,14 @@ func IsWebStaticResourcePath(resourcePath string) bool {
 
 func GlobalAPIRateLimit() func(c *gin.Context) {
 	if common.GlobalApiRateLimitEnable {
-		return rateLimitFactory(common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration, "GA")
+		limiter := rateLimitFactory(common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration, "GA")
+		return func(c *gin.Context) {
+			if adminRateLimitExempt(c) {
+				c.Next()
+				return
+			}
+			limiter(c)
+		}
 	}
 	return defNext
 }
@@ -319,7 +350,14 @@ func SearchRateLimit() func(c *gin.Context) {
 	if !common.SearchRateLimitEnable {
 		return defNext
 	}
-	return userRateLimitFactory(common.SearchRateLimitNum, common.SearchRateLimitDuration, "SR")
+	limiter := userRateLimitFactory(common.SearchRateLimitNum, common.SearchRateLimitDuration, "SR")
+	return func(c *gin.Context) {
+		if adminRateLimitExempt(c) {
+			c.Next()
+			return
+		}
+		limiter(c)
+	}
 }
 
 // SuggestionRateLimit returns a per-user rate limiter for autocomplete suggestion endpoints.
@@ -328,5 +366,12 @@ func SuggestionRateLimit() func(c *gin.Context) {
 	if !common.SuggestionRateLimitEnable {
 		return defNext
 	}
-	return userRateLimitFactory(common.SuggestionRateLimitNum, common.SuggestionRateLimitDuration, "SG")
+	limiter := userRateLimitFactory(common.SuggestionRateLimitNum, common.SuggestionRateLimitDuration, "SG")
+	return func(c *gin.Context) {
+		if adminRateLimitExempt(c) {
+			c.Next()
+			return
+		}
+		limiter(c)
+	}
 }

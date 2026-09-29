@@ -179,6 +179,10 @@ func InitOptionMap() {
 	common.OptionMap["DemoSiteEnabled"] = strconv.FormatBool(operation_setting.DemoSiteEnabled)
 	common.OptionMap["SelfUseModeEnabled"] = strconv.FormatBool(operation_setting.SelfUseModeEnabled)
 	common.OptionMap["ModelRequestRateLimitEnabled"] = strconv.FormatBool(setting.ModelRequestRateLimitEnabled)
+	// Seed the admin exemption from the environment on first run. A stored
+	// option value overrides this through loadOptionsFromDatabase() below.
+	operation_setting.SetRateLimitAdminExempt(common.RateLimitAdminExemptDefault)
+	common.OptionMap["GlobalRateLimitAdminExemptEnabled"] = strconv.FormatBool(operation_setting.GetRateLimitAdminExempt())
 	common.OptionMap["CheckSensitiveOnPromptEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnPromptEnabled)
 	common.OptionMap["StopOnSensitiveEnabled"] = strconv.FormatBool(setting.StopOnSensitiveEnabled)
 	common.OptionMap["SensitiveWords"] = setting.SensitiveWordsToString()
@@ -347,6 +351,8 @@ func updateOptionMap(key string, value string) (err error) {
 			setting.CheckSensitiveOnPromptEnabled = boolValue
 		case "ModelRequestRateLimitEnabled":
 			setting.ModelRequestRateLimitEnabled = boolValue
+		case "GlobalRateLimitAdminExemptEnabled":
+			operation_setting.SetRateLimitAdminExempt(boolValue)
 		case "StopOnSensitiveEnabled":
 			setting.StopOnSensitiveEnabled = boolValue
 		case "SMTPSSLEnabled":
@@ -657,6 +663,9 @@ func validateOptionValue(key string, value string) error {
 		return err
 	case "general_setting.channel_health_probe_lease_seconds":
 		_, err := operation_setting.NormalizeChannelHealthProbeLeaseSeconds(value)
+		return err
+	case "GlobalRateLimitAdminExemptEnabled":
+		_, err := operation_setting.NormalizeRateLimitAdminExempt(value)
 		return err
 	default:
 		return nil

@@ -324,6 +324,7 @@ export type MaintenanceSettings = {
 }
 
 export type RequestLimitsSettings = {
+  GlobalRateLimitAdminExemptEnabled: boolean
   ModelRequestRateLimitEnabled: boolean
   ModelRequestRateLimitCount: number
   ModelRequestRateLimitSuccessCount: number

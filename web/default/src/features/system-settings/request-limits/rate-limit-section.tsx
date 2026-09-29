@@ -42,6 +42,7 @@ const isValidJSON = (value: string | undefined) => {
 
 const createRateLimitSchema = (t: (key: string) => string) =>
   z.object({
+    GlobalRateLimitAdminExemptEnabled: z.boolean(),
     ModelRequestRateLimitEnabled: z.boolean(),
     ModelRequestRateLimitDurationMinutes: z.number().min(0),
     ModelRequestRateLimitCount: z.number().min(0).max(100000000),
@@ -97,6 +98,31 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
     >
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-6'>
+          <FormField
+            control={form.control}
+            name='GlobalRateLimitAdminExemptEnabled'
+            render={({ field }) => (
+              <FormItem className='flex flex-row items-center justify-between rounded-lg border p-4'>
+                <div className='space-y-0.5'>
+                  <FormLabel className='text-base'>
+                    {t('Exempt administrators from global rate limits')}
+                  </FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Administrators skip the global API rate limit, the global page rate limit, and the search and suggestion rate limits. Critical endpoints such as login, registration, password reset and payment keep rate limiting administrators.'
+                    )}
+                  </FormDescription>
+                </div>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+
           <FormField
             control={form.control}
             name='ModelRequestRateLimitEnabled'

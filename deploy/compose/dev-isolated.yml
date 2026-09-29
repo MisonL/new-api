@@ -28,6 +28,14 @@ services:
       - TZ=${DEV_TZ:-Asia/Shanghai}
       - ERROR_LOG_ENABLED=${DEV_ERROR_LOG_ENABLED:-true}
       - BATCH_UPDATE_ENABLED=${DEV_BATCH_UPDATE_ENABLED:-true}
+      # 全局限流阈值（仅环境变量生效，后台设置页无对应选项）。
+      # 默认值与正式环境一致，便于在隔离环境复现限流与豁免行为。
+      - GLOBAL_API_RATE_LIMIT=${DEV_GLOBAL_API_RATE_LIMIT:-180}
+      - GLOBAL_API_RATE_LIMIT_DURATION=${DEV_GLOBAL_API_RATE_LIMIT_DURATION:-180}
+      - GLOBAL_WEB_RATE_LIMIT=${DEV_GLOBAL_WEB_RATE_LIMIT:-60}
+      - GLOBAL_WEB_RATE_LIMIT_DURATION=${DEV_GLOBAL_WEB_RATE_LIMIT_DURATION:-180}
+      # 仅在选项 GlobalRateLimitAdminExemptEnabled 尚不存在时播种；此后以后台开关为准
+      - GLOBAL_RATE_LIMIT_ADMIN_EXEMPT=${DEV_GLOBAL_RATE_LIMIT_ADMIN_EXEMPT:-false}
       - CHANNEL_UPSTREAM_MODEL_UPDATE_TASK_ENABLED=${DEV_CHANNEL_UPSTREAM_MODEL_UPDATE_TASK_ENABLED:-false}
       - CHANNEL_CACHE_SYNC_ENABLED=${DEV_CHANNEL_CACHE_SYNC_ENABLED:-false}
       # Exercise the route-scope selector in the isolated environment by

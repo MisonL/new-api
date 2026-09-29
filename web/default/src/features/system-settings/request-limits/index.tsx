@@ -6,6 +6,7 @@ import {
 } from './section-registry.tsx'
 
 const defaultRequestLimitsSettings: RequestLimitsSettings = {
+  GlobalRateLimitAdminExemptEnabled: false,
   ModelRequestRateLimitEnabled: false,
   ModelRequestRateLimitCount: 0,
   ModelRequestRateLimitSuccessCount: 1000,

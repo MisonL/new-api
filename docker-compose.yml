@@ -46,6 +46,13 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       - ERROR_LOG_ENABLED=${ERROR_LOG_ENABLED:-true} # 是否启用错误日志记录 (Whether to enable error log recording)
       - BATCH_UPDATE_ENABLED=${BATCH_UPDATE_ENABLED:-true}  # 是否启用批量更新 (Whether to enable batch update)
+      # 全局限流阈值（仅环境变量生效，后台设置页无对应选项）
+      - GLOBAL_API_RATE_LIMIT=${GLOBAL_API_RATE_LIMIT:-180}
+      - GLOBAL_API_RATE_LIMIT_DURATION=${GLOBAL_API_RATE_LIMIT_DURATION:-180}
+      - GLOBAL_WEB_RATE_LIMIT=${GLOBAL_WEB_RATE_LIMIT:-60}
+      - GLOBAL_WEB_RATE_LIMIT_DURATION=${GLOBAL_WEB_RATE_LIMIT_DURATION:-180}
+      # 仅在选项 GlobalRateLimitAdminExemptEnabled 尚不存在时播种；此后以后台开关为准
+      - GLOBAL_RATE_LIMIT_ADMIN_EXEMPT=${GLOBAL_RATE_LIMIT_ADMIN_EXEMPT:-false}
       - NODE_NAME=${NODE_NAME:-}  # 节点名称，用于审计日志中标识节点身份；多节点/容器部署时建议设置 (Node name used in audit logs; recommended when running multiple instances or in containers)
       - CHANNEL_ROUTING_V2_ENABLED=${CHANNEL_ROUTING_V2_ENABLED:-false}
       - CHANNEL_ROUTING_SHADOW_ENABLED=${CHANNEL_ROUTING_SHADOW_ENABLED:-false}
