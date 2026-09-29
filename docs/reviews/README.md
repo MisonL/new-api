@@ -27,7 +27,7 @@
 | [CR-DEV-ISOLATED-VERIFY-INDEX.md](CR-DEV-ISOLATED-VERIFY-INDEX.md) | 隔离开发环境验证记录索引（3 次，主次标注） |
 | [CR-DEV-LATEST-SOURCE-VERIFY-2026-09-22.md](CR-DEV-LATEST-SOURCE-VERIFY-2026-09-22.md) | 最新源码全量验证；发现 model_mapping 字面量 null 使渠道被静默排除 |
 | [CR-CLAUDE-ANTHROPIC-AUTH-HEADER-2026-09-22.md](CR-CLAUDE-ANTHROPIC-AUTH-HEADER-2026-09-22.md) | Claude 渠道两处认证头构造点补齐 Authorization；确证上游只认 Bearer 导致 401 |
-| [CR-ADMIN-RATE-LIMIT-EXEMPT-2026-09-29.md](CR-ADMIN-RATE-LIMIT-EXEMPT-2026-09-29.md) | 管理员豁免全局限流选项与后台开关（全局 API/页面/搜索/联想，CriticalRateLimit 与桌面 OAuth 轮询刻意不豁免）；顺带修复 classic 设置页字段被永久过滤丢弃的既有缺陷、补齐 compose 限流变量透传；隔离环境实测 10 组探针含反向不变量；复核三轮各修一处自身缺陷（禁用管理员仍被豁免、前端文案未登记 i18n、非规范布尔值如 `"True"`/`"1"` 被接受却静默失效——真值统一在 `normalizeOptionValueForInMemoryConfig` 归一化，提交 `3a273494a`）；正式环境镜像尚未重建，改动未部署 |
+| [CR-ADMIN-RATE-LIMIT-EXEMPT-2026-09-29.md](CR-ADMIN-RATE-LIMIT-EXEMPT-2026-09-29.md) | 管理员豁免全局限流选项与后台开关（全局 API/页面/搜索/联想，CriticalRateLimit 与桌面 OAuth 轮询刻意不豁免）；顺带修复 classic 设置页字段被永久过滤丢弃的既有缺陷、补齐 compose 限流变量透传；隔离环境实测 10 组探针含反向不变量；复核三轮各修一处自身缺陷（禁用管理员仍被豁免、前端文案未登记 i18n、非规范布尔值如 `"True"`/`"1"` 被接受却静默失效——真值统一在 `normalizeOptionValueForInMemoryConfig` 归一化，提交 `3a273494a`）；优化轮抽出 `exemptableLimiter` 作为豁免唯一入口、把静态资源短路移出包裹层以免每个资源请求多读一次 session、删除与 `redisRateLimiterWithKey` 逐字节重复的 `userRedisRateLimiter`、让 classic 两个保存按钮各自只写本区块字段；重建镜像复测 7 组探针含静态资源短路与 Critical 反向不变量；正式环境镜像尚未重建，改动未部署 |
 
 ### 协议与中继
 

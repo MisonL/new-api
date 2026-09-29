@@ -169,6 +169,50 @@
 `web/classic` 的 `i18n:sync` 报 `All locales are already in sync`，缺失键计数由 28 降为 24，
 其余 24 个属既有缺口。上述两处 i18n 修复均只暂存本任务新增的行，未触碰同一文件里其他会话的未提交改动。
 
+## 优化轮（2026-09-30）
+
+复核通过后又做了一轮不改变行为的整理，并顺手修掉两处由此暴露的问题。
+
+1. **豁免包裹闭包去重**（`e75076340`）。四个豁免限流器各自重复了同一段闭包，判断"哪些限流器
+   豁免管理员"必须同时读四个函数。抽出 `exemptableLimiter` 作为唯一入口，四个调用点收敛为
+   `return exemptableLimiter(limiter)`。`CriticalRateLimit` 刻意不包裹，因此登录、注册、
+   找回密码、支付入口的 IP 级保护不受影响。行为不变：既有 10 个豁免用例（含禁用账号、无
+   `status` 两个反向用例）全部通过。
+2. **静态资源短路移出包裹层**（`f689e51e4`）。`exemptableLimiter` 会先读 session 再决定是否
+   放行，把整个 `GlobalWebRateLimit` 函数体包进去，会让每个静态资源请求都多付一次 session
+   读取。静态资源判断因此留在包裹层之外，保持原有的短路顺序。
+3. **`userRedisRateLimiter` 删除**（并入 `e75076340`）。其函数体与 `redisRateLimiterWithKey`
+   除两行注释外逐字节相同；`userRateLimitFactory` 改为直接调用后者。逐字节比对方式：
+   `python3` 取两函数体做 `==` 比较，差异只有那两行注释。
+4. **classic 设置页两个保存按钮各自只保存自己的区块**（`b3c615b3e`）。新增第二个
+   `Form.Section` 后，两个按钮仍调用同一个 `onSubmit`，diff 覆盖全部字段：点"保存模型速率限制"
+   会连带写入管理员豁免开关；模型区块的分组 JSON 非法时，"保存全局限流设置"也会一起报
+   `部分保存失败`。改为按区块传入字段清单过滤 diff。
+
+重建镜像后的复测（`commit=b3c615b3ede7c3876e831bf06062202c2fb24eff-dirty`，
+built 2026-09-29T19:56:55Z，`health=healthy`）：
+
+| # | 场景 | 请求数 | 结果 |
+| --- | --- | --- | --- |
+| 13 | 管理员 + 豁免开启，`/api/user/self` | 250 | 250x200 |
+| 14 | 匿名，`/api/user/self` | 250 | 180x401 + 70x429 |
+| 15 | 管理员，豁免关闭，`/api/user/self` | 250 | 180x200 + 70x429 |
+| 16 | 管理员 + 豁免开启，`/api/log/self/search`（限 10） | 30 | 30x200 |
+| 17 | 管理员 + 豁免开启，`/api/ratio_config`（Critical，限 20） | 25 | 20x403 + 5x429 |
+| 18 | 匿名，真实静态资源 `/assets/index-Dh7qDsjK.js`（GW 限 60） | 100 | 100x200，无 429 |
+| 19 | 匿名，`/console`（非静态，GW 限 60） | 100 | 60x200 + 40x429 |
+
+第 17 行是反向不变量复测：CriticalRateLimit 对管理员仍按 20 生效。第 18、19 行是本次
+静态资源短路调整的直接实证：同一限流桶下，静态资源 100 次无 429，非静态路径按 60 生效。
+第 16 行的搜索限流为每用户分桶（`rateLimit:SR:user:1`），与 IP 桶无关。
+
+代码门禁：`gofmt -l` 无输出；`go vet ./middleware/ ./model/ ./setting/operation_setting/` 无输出；
+`go test ./middleware/ ./model/ ./setting/operation_setting/` 全部 ok；
+`web/classic` 的 `bun x prettier --check`、`bun run eslint`、`bun run i18n:lint`、
+`bun run build` 全部通过（Safari 兼容检查通过）。
+
+提交：`e75076340`、`f689e51e4`、`b3c615b3e`。
+
 ## 未覆盖边界
 
 - 正式环境容器 `new-api` 运行的是 2026-09-08 构建的镜像。该镜像的二进制**认识阈值变量**
@@ -189,3 +233,7 @@
   一个 bucket。管理员豁免只保护管理员自身，普通用户之间的相互挤占依旧存在。
 - 三库兼容：本改动不涉及数据库迁移与方言 SQL，PostgreSQL 上的选项读写已在隔离环境实测；
   MySQL / SQLite 未单独验证。
+- `go test ./middleware/` 在本工作区有一个失败用例
+  `TestDistributeSpecificChannelRejectsDisabledResponsesCompactMode`（期望 503，实得 404）。
+  该失败与本任务无关：在 HEAD 的干净 worktree 上通过，仅把另一会话未提交的
+  `middleware/distributor.go` 复制进去即复现。本任务未触碰 `Distribute`。
