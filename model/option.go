@@ -612,6 +612,8 @@ func normalizeOptionValueForInMemoryConfig(key string, value string) (string, er
 		return operation_setting.NormalizeChannelHealthCooldownSeconds(value)
 	case "general_setting.channel_health_probe_lease_seconds":
 		return operation_setting.NormalizeChannelHealthProbeLeaseSeconds(value)
+	case "GlobalRateLimitAdminExemptEnabled":
+		return operation_setting.NormalizeRateLimitAdminExempt(value)
 	default:
 		return value, nil
 	}

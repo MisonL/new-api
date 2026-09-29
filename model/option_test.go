@@ -153,3 +153,50 @@ func TestUpdateOptionValidatesChannelHealthSettingsBeforePersist(t *testing.T) {
 	require.Equal(t, 45, settings.ChannelHealthCooldownSeconds)
 	require.Equal(t, 20, settings.ChannelHealthProbeLeaseSeconds)
 }
+
+// A value the option accepts must also be the value the in-memory config ends up
+// with. Accepting "1" or "TRUE" while storing it verbatim leaves updateOptionMap
+// comparing against the literal "true", so the switch reads as on in the
+// database and in the settings API while the rate limiter keeps treating it as
+// off. Every accepted spelling must normalise to "true" or "false".
+func TestUpdateOptionNormalizesAdminRateLimitExemptBeforePersist(t *testing.T) {
+	// Do not run this test in parallel: it mutates the process-wide OptionMap.
+	previousOptionMap := common.OptionMap
+	previousExempt := operation_setting.GetRateLimitAdminExempt()
+	common.OptionMap = map[string]string{}
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM options")
+		common.OptionMap = previousOptionMap
+		operation_setting.SetRateLimitAdminExempt(previousExempt)
+	})
+
+	trueSpellings := []string{"true", "True", "TRUE", " true ", "1", "t", "T"}
+	for _, raw := range trueSpellings {
+		require.NoError(t, UpdateOption("GlobalRateLimitAdminExemptEnabled", raw), "raw=%q", raw)
+
+		var option Option
+		require.NoError(t, DB.Where("key = ?", "GlobalRateLimitAdminExemptEnabled").First(&option).Error)
+		require.Equal(t, "true", option.Value, "raw=%q must be stored as the canonical form", raw)
+		require.Equal(t, "true", common.OptionMap["GlobalRateLimitAdminExemptEnabled"], "raw=%q", raw)
+		require.True(t, operation_setting.GetRateLimitAdminExempt(), "raw=%q must enable the exemption at runtime", raw)
+	}
+
+	falseSpellings := []string{"false", "False", "FALSE", " false ", "0", "f", "F"}
+	for _, raw := range falseSpellings {
+		require.NoError(t, UpdateOption("GlobalRateLimitAdminExemptEnabled", raw), "raw=%q", raw)
+
+		var option Option
+		require.NoError(t, DB.Where("key = ?", "GlobalRateLimitAdminExemptEnabled").First(&option).Error)
+		require.Equal(t, "false", option.Value, "raw=%q must be stored as the canonical form", raw)
+		require.Equal(t, "false", common.OptionMap["GlobalRateLimitAdminExemptEnabled"], "raw=%q", raw)
+		require.False(t, operation_setting.GetRateLimitAdminExempt(), "raw=%q must disable the exemption at runtime", raw)
+	}
+
+	// Unparseable input must be rejected before it reaches the database.
+	for _, raw := range []string{"broken", "yes", "", "2"} {
+		require.Error(t, UpdateOption("GlobalRateLimitAdminExemptEnabled", raw), "raw=%q", raw)
+	}
+	var option Option
+	require.NoError(t, DB.Where("key = ?", "GlobalRateLimitAdminExemptEnabled").First(&option).Error)
+	require.Equal(t, "false", option.Value, "a rejected value must leave the stored value untouched")
+}
