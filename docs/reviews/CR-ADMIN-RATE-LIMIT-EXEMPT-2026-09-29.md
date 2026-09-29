@@ -128,7 +128,6 @@
    导致项目脚本 `bun run i18n:sync` 直接 `exit 1`（`Found 2 source translation key(s) missing`）；
    `web/classic` 的四个中文串未登记，全部语言都回退到中文原文，而该区块的兄弟键在 classic 的
    7 个语言里均有译文。两处均已按各前端既有惯例补齐，并按文件原有的排序位置插入。
-
 3. **新选项的非规范布尔值被接受却静默失效**（第三轮复核发现，提交 `3a273494a`）。
    `UpdateOption` 的写入值来自 `normalizeOptionValueForInMemoryConfig` 的返回值，而
    `validateOptionValue` 只返回 error，它经 `NormalizeRateLimitAdminExempt` 算出的规范值被丢弃，
@@ -168,7 +167,7 @@
 
 补充验证：`web/default` 的 `i18n:sync` 由失败转为 `exit 0`（928 files / 4674 keys / 0 missing）；
 `web/classic` 的 `i18n:sync` 报 `All locales are already in sync`，缺失键计数由 28 降为 24，
-其余 24 个属既有缺口。两处修复均只暂存本任务新增的行，未触碰同一文件里其他会话的未提交改动。
+其余 24 个属既有缺口。上述两处 i18n 修复均只暂存本任务新增的行，未触碰同一文件里其他会话的未提交改动。
 
 ## 未覆盖边界
 
