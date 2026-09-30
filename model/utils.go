@@ -55,6 +55,16 @@ func addNewRecord(type_ int, id int, value int) {
 	}
 }
 
+// FlushBatchUpdates writes the counters accumulated in memory to the database.
+// It is called on graceful shutdown so quota charged during the final batch
+// interval is not lost, and is safe to call at any time: batchUpdate swaps each
+// store out under its lock before writing, so a concurrent ticker call and this
+// one cannot double-apply a delta, and a call with nothing pending returns
+// without touching the database.
+func FlushBatchUpdates() {
+	batchUpdate()
+}
+
 func batchUpdate() {
 	stores := make([]map[int]int, BatchUpdateTypeCount)
 	hasData := false
