@@ -401,6 +401,39 @@ i18n 修复后同样通过。
 注：隔离环境的限流探针此前用的是二进制默认值 20 / 10 / 60，恰好与 compose 默认值一致，
 因此那些结果仍然有效；但当时无法通过环境变量调整这些阈值，现在可以。
 
+## 生产限流分桶实测与部署前置条件（2026-09-30）
+
+此前本文记录"所有客户端共享一个 bucket"。生产只读实测推翻了这个说法，实际行为按入口路径分两种。
+
+生产拓扑：Caddy 监听 `0.0.0.0:3000`，反代到 `127.0.0.1:13000`；new-api 容器把 3000 发布到
+`0.0.0.0:13000`（由 `deploy/env/macos-docker-tun.env` 的 `NEW_API_BIND_ADDRESS=0.0.0.0`
+与 `NEW_API_PORT_MAPPING=0.0.0.0:13000:3000` 决定），因此 13000 对局域网开放。
+
+| 路径 | 请求携带的头 | 产生的限流桶 | 说明 |
+| --- | --- | --- | --- |
+| 经 Caddy `:3000`，来源 LAN IP | 无 | `rateLimit:GA10.0.90.200` | 真实客户端 IP |
+| 经 Caddy `:3000` | 伪造 `X-Forwarded-For` | `rateLimit:GA10.0.90.200` | Caddy 覆盖了伪造值 |
+| 经 Caddy `:3000` | 伪造 `X-Real-IP` | `rateLimit:GA10.0.90.200` | 同上 |
+| 直连 `:13000` | 无 | `rateLimit:GA172.24.0.1` | 塌缩到 Docker 网关 |
+| 直连 `:13000` | 伪造 `X-Forwarded-For: 198.18.9.9` | `rateLimit:GA198.18.9.9` | **伪造值被采纳** |
+
+原因：正式容器运行的是 2026-09-08 构建的镜像，其二进制**不含** `SetTrustedProxies(nil)`
+（`strings /new-api \| grep -c 'failed to disable trusted proxies'` 结果为 0，本地新镜像为 1），
+即旧镜像信任所有代理，gin 的 `ClientIP()` 会采纳客户端自带的 `X-Forwarded-For`。经 Caddy 时
+因为 Caddy 用 `{remote_host}` 重写了 `X-Real-IP` 并重建了 XFF，所以伪造无效；直连 13000 时
+没有中间层覆盖，伪造直接生效。
+
+**这构成部署新镜像的前置条件。** 新镜像带 `SetTrustedProxies(nil)`，若不设 `TRUSTED_PROXIES`
+就上线，经 Caddy 的流量也会变成"忽略所有转发头"，全部客户端塌缩到 `rateLimit:GA172.24.0.1`
+——即从当前"按真实客户端 IP 分桶"回退成单一桶。隔离环境实测：新镜像不设该变量时，
+两个携带不同 `X-Forwarded-For` 的请求只产生 `rateLimit:GA172.18.0.1` 一个桶；
+设为 `172.18.0.0/16` 后产生 `rateLimit:GA203.0.113.1` 与 `rateLimit:GA203.0.113.2` 两个桶。
+
+因此部署新镜像必须同时设置 `TRUSTED_PROXIES` 为 Docker 网桥网段。两个 compose 文件此前都
+没有透传该变量（`.env` 里写了也不生效），本轮已补齐（提交 `fad2e9e36`）。网段未在 compose 中
+固定（`networks` 只有 `driver: bridge`），实际分配由 Docker 决定，生产当前为
+`new-api_new-api-network 172.24.0.0/16`；重建网络后网段可能变化，届时需同步更新该值。
+
 ## 未覆盖边界
 
 - 正式环境容器 `new-api` 运行的是 2026-09-08 构建的镜像。该镜像的二进制**认识阈值变量**
@@ -417,8 +450,7 @@ i18n 修复后同样通过。
   （`/tmp` 被清理）。`docker compose` 只要带上这个 `-f` 参数就会直接报错退出，因此对正式环境
   执行任何 compose 操作前必须先决定如何处理这个覆盖文件。仅用 `docker-compose.yml` 可以正常
   解析，且解析出的 image 与当前运行容器一致。该问题与本任务无关，为既有状态，此处仅记录。
-- 分桶塌缩问题本身未解决：只要反代不可信且 `TRUSTED_PROXIES` 未设置，所有客户端仍共享
-  一个 bucket。管理员豁免只保护管理员自身，普通用户之间的相互挤占依旧存在。
+- 分桶行为见下节"生产限流分桶实测与部署前置条件"。
 - 三库兼容：本改动不涉及数据库迁移与方言 SQL，PostgreSQL 上的选项读写已在隔离环境实测；
   MySQL / SQLite 未单独验证。
 - `.env.example` 声明的其余变量中，仍有约 37 个根 compose 未透传（Pyroscope、SQL 连接池、
