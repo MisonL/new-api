@@ -49,18 +49,23 @@ const MODEL_REQUEST_RATE_LIMIT_FIELDS = REQUEST_RATE_LIMIT_FIELDS.filter(
 );
 const GLOBAL_LIMIT_FIELDS = ['GlobalRateLimitAdminExemptEnabled'];
 
+// Defaults for every field this section owns. The effect below seeds from these
+// so that a key the parent has not loaded yet still exists in state; see the
+// comment there.
+const DEFAULT_INPUTS = {
+  ModelRequestRateLimitEnabled: false,
+  ModelRequestRateLimitCount: -1,
+  ModelRequestRateLimitSuccessCount: 1000,
+  ModelRequestRateLimitDurationMinutes: 1,
+  ModelRequestRateLimitGroup: '',
+  GlobalRateLimitAdminExemptEnabled: false,
+};
+
 export default function RequestRateLimit(props) {
   const { t } = useTranslation();
 
   const [loading, setLoading] = useState(false);
-  const [inputs, setInputs] = useState({
-    ModelRequestRateLimitEnabled: false,
-    ModelRequestRateLimitCount: -1,
-    ModelRequestRateLimitSuccessCount: 1000,
-    ModelRequestRateLimitDurationMinutes: 1,
-    ModelRequestRateLimitGroup: '',
-    GlobalRateLimitAdminExemptEnabled: false,
-  });
+  const [inputs, setInputs] = useState(DEFAULT_INPUTS);
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
 
@@ -109,7 +114,13 @@ export default function RequestRateLimit(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
+    // Seed from this component's own defaults rather than from the incoming
+    // options alone. Building currentInputs only from keys present in
+    // props.options drops any key the parent has not loaded yet, and both
+    // setValues and compareObjects then treat the field as absent: the switch
+    // renders off, and toggling it produces an empty diff, so the save button
+    // reports "你似乎并没有修改什么" and nothing is written.
+    const currentInputs = { ...DEFAULT_INPUTS };
     for (let key of REQUEST_RATE_LIMIT_FIELDS) {
       if (key in props.options) {
         currentInputs[key] = props.options[key];
