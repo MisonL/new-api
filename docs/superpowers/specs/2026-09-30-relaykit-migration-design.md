@@ -1,408 +1,348 @@
-# 协议转换层重构设计
+# 协议转换层收敛到上游 relaykit
 
 采样时间：2026-09-30
-本地基线：`HEAD` = `9c4758b53`（dev 分支）
-上游基线：`upstream/main` = `789c97019`（2026-09-28）
+本地基线：`HEAD` = `dbfbc096f`（dev 分支，领先 `origin/dev` 56 个提交）
+上游参照：`upstream/main` = `789c97019`（2026-09-28）
 
-行号引用一律以本文件声明的基线提交为准。工作区存在其他会话的未提交改动，工作区行号与提交行号不一致，不采用。
+行号引用以本文件声明的基线提交为准。工作区有其他会话的未提交改动，工作区行号不采用。
 
-## 1. 目标
+## 1. 定位
 
-把本地协议转换层从「单文件硬编码直调」重构为「协议层与部署层分离」的架构，采用上游 `relaykit` 独立 module 作为协议层，本地部署关切保留在宿主并收敛到明确的管道位置。
+**上游已经完成了本仓库正在规划的同一迁移。** `upstream/main` 的 `service/convert.go` 只剩 27 行纯委托，协议转换逻辑全部在独立 module `relaykit` 中，宿主有 172 个文件 import `relaykit/types`。
 
-本设计同时修复三个现存缺陷：
+因此本文件不是一份从本地现状推演的迁移方案，而是一份**差异对照清单**：逐项列出本地与上游完成态的差异，标注每项的处置方式。这样做的理由：
 
-1. `grok-4.7` 等非 DeepSeek 模型的 reasoning 被静默丢弃
-2. 降级行为不可观测（本地 `ConversionDiagnostic` 零命中）
-3. 本地 CI 不执行任何 `go test`，转换测试无门禁
+1. 上游是同一迁移的完成态，且有测试与 golden 快照——是最可靠的参照系
+2. 从本地现状推演容易得出上游已经证伪的路径（本文件前四稿即如此：曾规划"改 210 个 import 点"，而上游用类型别名做到零调用点变更）
+3. 用户诉求是"替换整体架构为上游实现"，对照清单直接服务于该目标
 
-第 3 项无可复现的测试行数口径（见第 12 节），只陈述事实：CI 无 `go test` 门禁。
+目标保持不变：
 
-## 2. 边界规则
+- 协议转换层采用上游 `relaykit` 架构
+- **兼顾思考等级与 thinking 历史回传**（见第 5 节）
+- 本地增加的功能在改造后的基础上重新设计，取最优雅最高效的处置
 
-分层判据：
+## 2. 上游完成态
 
-> relaykit 拥有「协议要求什么」，宿主拥有「这个部署或上游要求什么」。
-> 判定：换个上游还成立吗？成立 → 协议层；不成立 → 部署层。
->
-> 否决 1：若成立与否取决于模型名，一律判部署层。
-> 否决 2：若实现引用宿主发明的字面量，一律判部署层，或降级为接口注入。
-> 操作 3：若同一能力在多个调用点得到不同答案，先拆分，再对每一半单独判定。
+| 项 | 上游事实 | 核验方式 |
+|---|---|---|
+| 独立 module | `module github.com/QuantumNous/new-api/relaykit`，go 1.25.1，可 `GOWORK=off go test` | `git show upstream/main:relaykit/go.mod` |
+| 接入方式 | 根 `go.mod` 加 `require … v0.0.0` + `replace … => ./relaykit` | `git show upstream/main:go.mod` |
+| 宿主改造规模 | 172 个宿主文件 import `relaykit/types`；262 个宿主文件 import relaykit 下某包 | `git grep -l` 计数 |
+| 宿主残留 | 宿主 `dto/` 剩 8 个文件；宿主 `types/` 剩 4 个文件 | `git ls-tree upstream/main dto/ types/` |
+| 常数迁移手法 | **Go 类型别名，零调用点变更**（见下） | `git show upstream/main:constant/endpoint_type.go` |
+| 转换逻辑 | `service/convert.go` 27 行纯委托 | `git show upstream/main:service/convert.go \| wc -l` |
+| 成熟度 | 34 个测试文件 / 8430 行测试；24 个 golden 快照；仅有 2 处 TODO，无未实现桩 | `git ls-tree`、`golden_test.go` |
 
-该规则由对抗审查修正而来，原始二分版本在 15 项中有 8 项判错。
+**别名机制原文**（`upstream/main:constant/endpoint_type.go`）：
 
-relaykit 的 `boundary_test.go` 是**部分**机械对应物，不是完整实现：它的 `kitDirs` 为 `relayconvert`、`dto`、`types`、`reasonmap`（不含 `convmeta`），只检查 import 前缀是否为宿主 module 或 gin，**不检查能力归属**。边界规则中「换个上游还成立吗」这一层判据没有机械保证，靠人工审查。
+```go
+package constant
 
-## 3. 架构分层
+import "github.com/QuantumNous/new-api/relaykit/types"
 
+// EndpointType moved to types with the conversion kit; aliases keep host
+// code compiling unchanged.
+type EndpointType = types.EndpointType
+
+const (
+	EndpointTypeOpenAI         = types.EndpointTypeOpenAI
+	EndpointTypeAnthropic      = types.EndpointTypeAnthropic
+	// …
+)
 ```
-relaykit（协议层，独立 module，可 GOWORK=off go test）
-  dto/           协议 DTO
-  relayconvert/  注册表 + 分派 + 质量等级 + 4x4 矩阵
-  reasoning/     Intent 抽象 + 能力渲染 + 冲突诊断
-  convdiag/      诊断收集
-  convmeta/      Meta 接口 + Options 钩子
-        ▲ 依赖方向：宿主 -> relaykit（单向）
 
-宿主
-  出站管道      responses_input_filter / item id 规范化 / compaction 归一化
-  转换后管道    tool bridge / tool name 别名与还原 / stream_options 兼容
-  能力层        ResponsesChannelCapabilityRegistry + 观察值 TTL
-  策略层        ProtocolConversionRule（端点对）
-  路由层        渠道预检 / skip reason / synthetic compact
-  host dto/     header_profile / channel_health / responses_routing 等
-```
+所以「必须改 N 个 import 点」这类判断必须先查上游是否已用别名规避。凡宿主包是某符号的自然归属（如 `constant` 承载 `EndpointType`），别名转发即可。
 
-依赖方向单向：宿主 import relaykit，relaykit 不 import 宿主。由 `relaykit/relayconvert/boundary_test.go` 机械保证。
+注意上游两种手法并用：`constant/endpoint_type.go` 用别名；`relay/channel/openai/adaptor.go` 则**直接改 import** 到 `relaykit/types`。两个包可并存，`relay/common/relay_info.go` 同时有 `"…/relaykit/types"` 与 `hosttypes "…/new-api/types"`。
 
-## 4. relaykit 补丁
+## 3. 差异对照表
 
-relaykit 视为本仓库自有代码，允许修改。补丁限定为**两项**，均属协议语义。
+### 3.1 上游更强 → 直接采用
 
-原第三项（reasoning 暴露策略）的结论是**不打 relaykit 补丁**——响应方向的暴露策略落在宿主调用点。撤回理由见下。
+| 能力 | 本地现状 | 上游实现 | 处置 |
+|---|---|---|---|
+| 思考等级渲染 | `relay/claude_handler.go:55-104` 硬编码 `claude-opus-4-6/4-7` 前缀判断 | `reasoning.RenderClaude` + `claudeCapabilitiesFor`（`relaykit/relayconvert/reasoning/claude.go:35-74`）覆盖 fable-5、mythos-5、Opus 4.5/4.6/4.7/4.8/5、Sonnet 4.6/5，含 `defaultThinking`、`supportsEffort/XHigh/Max`、budget↔effort 互转与冲突诊断 | 采用上游 |
+| hosted 工具 | 散落在 `service/convert.go` 与 `relay/common/` | `relaykit/relayconvert/internal/toolconv/`（`decode.go`、`encode.go`、`hosted_values.go`、`model.go`、`response.go`、`response_artifacts.go`），覆盖 10 种 hosted 工具：`KindWebSearch`、`KindCodeExecution`、`KindComputerUse`、`KindFileSearch`、`KindImage`、`KindMCP`、`KindURLContext`、`KindWebFetch`、`KindFunction`、`KindNative` | 采用上游 |
+| 降级可观测性 | `ConversionDiagnostic` 本地零命中 | `convdiag` + `types.ConversionDiagnostic`（Code/Path/Message/Severity/From/To） | 新增能力 |
+| 转换质量分级 | 无 | `Good`/`Fair`/`Discouraged` + 4×4 转换矩阵 | 新增能力 |
+| 测试基线 | CI 不跑 `go test` | 24 个 golden 快照 + `-update` 机制 | 新增能力 |
 
-### 补丁 1：Claude thinking block 映射与输入校验对齐
+### 3.2 上游已覆盖 → 直接采用
 
-现状：上游两个请求转换器的 content block switch 均无 `thinking` case。`to_oai_chat_req.go:181` 与 `to_oai_responses_req.go:165` 两处 switch 本身无 `default` 分支（同文件其他 switch 有 default，例如 `to_oai_chat_req.go:269`、`to_oai_responses_req.go:265`），未知 block 被 Go switch 静默穿透丢弃。
+`service/convert.go` 的 13 个导出函数对应的协议映射逻辑，上游均有实现（`relaykit/relayconvert/internal/` 下的 `claude_messages`、`oai_chat`、`oai_responses`、`gemini_chat`、`shared` 五个族）。
 
-- `relaykit/relayconvert/internal/claude_messages/to_oai_chat_req.go:181-227`
-- `relaykit/relayconvert/internal/claude_messages/to_oai_responses_req.go:165-215`
+其中 `NormalizeCacheCreationSplit` 等辅助函数在 relaykit 中同名存在（`oai_chat/to_claude_messages_resp.go:107`）。
+
+### 3.3 上游缺失 → 需打补丁（2 项）
+
+**补丁 1：Claude thinking block 映射与输入校验对齐**
+
+上游两个请求转换器的 content block switch 均无 `thinking` case。`to_oai_chat_req.go:181`、`to_oai_responses_req.go:165` 两处 switch 本身无 `default`（同文件其他 switch 有，如 `:269`、`:265`），未知 block 被静默穿透丢弃。
 
 改为：
 
-1. 新增 `case "thinking"`，将 `ClaudeMediaMessage.Thinking` 写入目标协议的 reasoning 字段（Chat 写 `Message.ReasoningContent`，Responses 写 reasoning item）。opaque thinking（`Thinking` 为空但 `Signature` 非空）与 `redacted_thinking` 显式报错，不伪装为文本。
-2. 保留非 assistant 角色的 role 门控：非 assistant 的 `thinking` / `redacted_thinking` 静默跳过而非报错。本地有测试锁定该行为（`service/convert_claude_request_test.go` 的 `TestClaudeToOpenAIRequestIgnoresNonAssistantThinkingBlocks`、`TestClaudeToOpenAIRequestIgnoresNonAssistantRedactedThinkingBlocks`），上游 switch 无 role 门控，需补上。
-3. 为两个 switch 补 `default:` 分支，未知 block 显式报错。本地对应 `service/convert.go:355`（`Claude content block type %q ... is not supported`）。
+1. 新增 `case "thinking"`，将 `ClaudeMediaMessage.Thinking` 写入目标协议的 reasoning 字段（Chat 写 `Message.ReasoningContent`，Responses 写 reasoning item）。opaque thinking（`Thinking` 空但 `Signature` 非空）与 `redacted_thinking` 显式报错，不伪装为文本
+2. 保留非 assistant 的 role 门控：非 assistant 的 `thinking` / `redacted_thinking` 静默跳过。本地有测试锁定（`TestClaudeToOpenAIRequestIgnoresNonAssistantThinkingBlocks`、`…RedactedThinkingBlocks`），上游无此门控
+3. 补 `default:` 分支，未知 block 显式报错。本地对应 `service/convert.go:355`
 
-理由：Claude thinking block 到 Chat `reasoning_content` 是纯协议映射，不依赖任何上游特性。上游缺此分支属遗漏。
+**补丁 2：DTO presence 保真**
 
-### 补丁 2：DTO presence 保真
+上游 `relaykit/dto` 的可选标量字段缺失显式零值追踪。**注意：本地已有这些能力**，补丁 2 的实质是**把本地既有实现带进 relaykit**，而非从零设计：
 
-现状：`relaykit/dto` 的可选标量字段缺失显式零值追踪。
-
-- `OpenAIResponsesRequest` 无 `UnmarshalJSON`、无 `Extra`，未知字段在往返中被静默丢弃
-- `StreamOptions` 为两个裸 bool，无 `HasIncludeUsageField()` 等 presence 查询
-- 响应方向：本地 `ResponsesStreamResponse`（`dto/openai_response.go:450`）有 `Error *types.OpenAIError`、`Text`、`Arguments`、`CallId`、`Item` 等字段；relaykit 对应类型的 `CallId` 位于 `ResponsesOutput` 内而非事件顶层。本地**没有** `Code` 字段（此前 spec 误写「`Code` 为 `string` 而非 `any`」——本地与该字段无关，`Code any` 仅出现在 `dto/error.go:14` 的注释里）
-
-改为：可选标量用带 `omitempty` 的指针类型；`OpenAIResponsesRequest` 补未知字段保留；`StreamOptions` 补 presence 追踪；对齐 `ResponsesStreamResponse` 字段布局。
-
-理由：AGENTS.md 第 3 节明确要求「客户端 JSON 解析后再转发给上游的可选标量字段，必须用带 `omitempty` 的指针类型保留显式零值」。未知字段丢弃与「禁止静默容错」冲突。
-
-### 原补丁 3（已撤回）：reasoning 暴露策略
-
-**结论：不打 relaykit 补丁。** 响应方向的暴露策略落在宿主调用点（已知 6 条路径，见下）。撤回理由经独立复现：
-
-1. 门控依据不成立。「客户端未请求 thinking 就不应返回 thinking」不是协议不变量。relaykit 自身的 `claudeCapabilitiesFor`（`relaykit/relayconvert/reasoning/claude.go:35-74`）为 fable-5、mythos-5、opus-5、sonnet-5 置 `defaultThinking = true`——上游代码里就有「这些模型默认思考」的证据。把某一代的默认行为写成「协议正确行为」是推断而非事实。
-2. 客户端意图在响应阶段取不到正确值。`relay/claude_handler.go:34` 对 Claude 请求做 `common.DeepCopy`，此后 `-thinking` 后缀与 effort 后缀适配器写入的 `request.Thinking`（`:58`、`:79`、`:91`）全部作用于拷贝；`info.Request` 在 `genBaseRelayInfo`（`relay/common/relay_info.go:701`，`genBaseRelayInfo` 定义于 `:670`）一次性赋值。客户端发 `claude-opus-4-7-high` 时适配器让上游真的思考了，而 `info.Request.Thinking` 仍是 nil，门控会误判为「未请求」并丢弃上游真实返回的 thinking——与被修复的缺陷同构。
-
-    `grep -c "info.Request = " relay/claude_handler.go` = 0，但**全仓有一个反例**：`controller/channel-test.go:957` 的 `info.Request = chatReq`。那是渠道测试路径构造的合成请求，不是正常 relay 路径。所以准确表述是「正常 relay 路径下 `info.Request` 不反映适配器改写后的意图」，而非「从不被重新指向」。
-
-3. **`convmeta.Options` 在响应方向**有**先例，此前 spec 的表述过强。** 实测 `git grep -n OptionsOf upstream/main -- relaykit/relayconvert/`：`internal/` 下 9 处命中，8 处在 `*_req.go`（请求方向），但 `internal/shared/claude/reasoning.go:21` 与 `internal/shared/gemini/request.go:85` 在 `shared/`；
-
-   `response_registry.go:500` 的 `toolconv.AttachHostedResponse(target, current, hostedResponse, convmeta.OptionsOf(info))` 是**响应方向**读取 `Options` 的实例（用于 tool-loss 策略）。
-
-   因此「`Options` 是请求阶段机制、响应方向零先例」不成立，撤回该论据。补丁 3 的撤回改由第 1、2、4 条支撑——**真正的阻断点是拿不到客户端意图**，而不是 `Options` 不能用于响应方向。
-
-4. relaykit 内不修改签名即不可达：Responses→Claude 非流式（`to_claude_messages_resp.go:15`）与流式（`to_claude_messages_stream_resp.go:82`）**没有 `Meta` 参数**。**修正此前 spec 的过强表述**：registry 层可达 `Meta`——`response_registry.go:22-30` 的四个分派函数类型中有三个带 `info convmeta.Meta`（`:22`、`:24`、`:28`、`:30`；`:26` 的 `ResponseStreamStateFactory` 不带），且 `:1004` 的流式包装实际调用了 `info.EnsureClaudeConvertInfo()`。正确表述是「需改签名向内部转换器透传」，不是「不可达」。
-
-   综合：即使透传了 `Meta`，客户端意图数据通路仍不通（第 2 条）。这是撤回的决定性理由。
-
-现状（本地）：响应方向按**模型名**门控，非 DeepSeek 模型的 reasoning 被整段丢弃。
-
-```go
-// service/convert.go:526（定义）, 调用点 :749（流式）、:1049（非流式）
-func shouldExposeReasoningAsClaudeThinking(model string, info *relaycommon.RelayInfo) bool {
-    return hasDeepSeekModelName(model, info)
-}
-```
-
-该门控由 `2e986a65f` 引入，是**新增的抑制**（此前无条件暴露），且无任何测试锁定其行为。
-
-现状（上游）：无条件暴露。
-
-改为：**响应方向的暴露策略留在宿主，不进 relaykit。**
-
-- relaykit 保持无条件暴露（其现有行为，纯协议语义，不打补丁）
-- 宿主按部署策略处理响应方向的 reasoning 暴露。**已知有 6 条路径**会把上游响应转成 `dto.ClaudeResponse`：
-
-  | 路径 | 基线位置 | 说明 |
-  |---|---|---|
-  | `relay/channel/openai/helper.go:46` | 流式 | 经 `service.StreamResponseOpenAI2ClaudeWithError` |
-  | `relay/channel/openai/helper.go:246` | 流式（末帧） | 同上 |
-  | `relay/channel/openai/relay-openai.go:314` | 非流式 | 经 `service.ResponseOpenAI2ClaudeWithError` |
-  | `relay/channel/openai/chat_via_responses.go:280` | 非流式 | 同上 |
-  | `relay/channel/gemini/relay-gemini.go:1784` | 非流式 | 同上 |
-  | `relay/channel/aws/converse.go:748`、`:1112` | 非流式 / 流式 | **不经 `service/convert.go`**：`converseOutputToClaudeResponse`（`:713`）直接从 `ConverseOutput` 构造 `dto.ClaudeResponse` 并生成 `thinking` 块 |
-
-  前 5 条都持有 `info`，是首选落点。第 6 条（AWS Converse）是本设计此前遗漏的路径，需要单独处理——它已有独立于 `service/convert.go` 的 thinking 生成逻辑。
-- 表上前 5 条都持有 `info`，是首选落点，可覆盖绝大多数流量
-- 默认行为对齐上游（暴露），修复 grok；现有 DeepSeek-only 行为降级为宿主可配置策略
-
-理由：响应方向门控是**部署关切**（哪些上游的 reasoning 值得暴露给 Claude 客户端），不是协议语义。`Options` 是请求阶段机制（9 处使用全在 `*_req.go`），不适合承载它；在 relaykit 内部实现则需改转换器签名且仍取不到客户端意图。
-
-### 明确不打入 relaykit 的能力
-
-以下按边界规则属部署层，保留在宿主，不进入 relaykit：
-
-| 能力 | 判定依据 |
-|---|---|
-| 响应方向 reasoning 暴露策略 | 部署关切；真正的阻断点是客户端意图不可达（见第 4 节） |
-| think 标签提取族（见下） | 模型名门控（否决 1） |
-| DeepSeek 空 thinking block 保留 | 模型名门控（否决 1），以 `RetainEmptyReasoning` 钩子注入 |
-| 工具名契约与别名还原 | 引用宿主常量，且受 `IsOpenAICompatibleResponses` 门控 |
-| `context_compaction` 归一化 | 上游版本垫片，上游零命中 |
-| 加密内容探测 | 硬编码宿主 marker `newapi.synthetic.compact:`（否决 2） |
-
-**修正：hosted 工具桥接不是本地独有。** 此前 spec 把「custom / namespace / tool_search 工具桥接」列为本地独有能力，实测上游 `relaykit/relayconvert/internal/toolconv/` 在 `upstream/main` 上**已存在**，覆盖 10 种 hosted 工具：`KindWebSearch`、`KindCodeExecution`、`KindComputerUse`、`KindFileSearch`、`KindImage`、`KindMCP`、`KindURLContext`、`KindWebFetch`、`KindFunction`、`KindNative`（`toolconv/model.go`）。该目录含 `decode.go`、`encode.go`、`hosted_values.go`、`model.go`、`response.go`、`response_artifacts.go`。
-
-因此本项的正确处置不是「留在宿主」，而是**评估本地桥接与上游 `toolconv` 的差异并收敛到上游**。上游另有 `feat/relaykit-tools` 分支（`a9a0e2272 feat(relaykit): preserve hosted tools across conversions`）在其上继续扩展。列入第 11 节未决项。
-
-### 补充：think 标签提取族（此前 spec 遗漏）
-
-本地有一族 relaykit **完全没有**的能力，用于把 assistant 历史文本里的 `<think>...</think>` 拆成可见文本 + reasoning：
-
-| 函数 | 位置 |
-|---|---|
-| `shouldExtractThinkTaggedClaudeHistory` | `service/convert.go:489`（门控，由 `hasDeepSeekModelName` 判定） |
-| `splitThinkTaggedText` | `:554` |
-| `indexASCIIFold` | `:597` |
-| `appendVisibleThinkText` | `:629` |
-| `appendReasoningText` / `appendTrimmedReasoningText` | `:475` / `:485` |
-| `needsVisibleTextBoundarySpace` | `:425` |
-
-调用点 `:103`（`extractThinkTaggedHistory := shouldExtractThinkTaggedClaudeHistory(...)`）。`git grep 'think>' upstream/main -- relaykit/` 零命中。本地有 8+ 处测试锁定（`service/convert_claude_request_test.go` 的 `:488`、`:511`、`:558`、`:581`、`:607`、`:652`、`:696`、`:754`）。
-
-**这是「thinking 历史回传」的组成部分**，不是可选项。按边界规则属部署层（模型名门控），与 `RetainEmptyReasoning` 同族。实现阶段需决定：搬入 relaykit 成为带钩子的能力，或在宿主预处理阶段完成。本设计倾向前者（与补丁 1 的 thinking 处理共生），但需在实现时确认——列入第 11 节未决项。
-
-## 5. 宿主管道
-
-保留在宿主，但收敛到明确的管道位置，消除现状中「协议映射与部署特判交错」的问题。现状 `service/convert.go` 的 content block switch 内协议映射与 DeepSeek 特判交错，且 `emptyThinkingBlock`（`:198` 声明、`:244` 设置、`:365` 读取）跨越 switch 边界传递状态。
-
-| 管道 | 内容 | 位置 |
+| 能力 | 本地位置 | 本地生产使用点 |
 |---|---|---|
-| 出站前 | input item id 规范化、compaction 归一化、加密内容剔除 | `relay/common/responses_input_filter.go` |
-| 转换后 | tool name 别名注册与还原、`stream_options` 兼容 | `relay/common/responses_tool_names.go`、`relay/responses_stream_options_compat.go` |
-| 能力层 | 渠道能力注册表、观察值 TTL、fail-closed 语义 | `dto/channel_settings.go`、`model/channel_responses_tool_capability.go` |
-| 策略层 | `ProtocolConversionRule` 端点对匹配 | `setting/model_setting/global.go`、`service/openaicompat/policy.go` |
-| 路由层 | 渠道预检、skip reason、synthetic compact | `controller/relay.go`、`service/responses_synthetic_compact*.go` |
+| `OpenAIRequest.UnmarshalJSON`（未知字段保留） | `dto/openai_request.go` | — |
+| `HasIncludeUsageField` / `RemoveIncludeUsage` | 同上 | 各 1 |
+| `HasIncludeObfuscationField` | 同上 | 1 |
 
-## 6. 规则模型：保留端点对
+理由：AGENTS.md 第 3 节要求「客户端 JSON 解析后再转发给上游的可选标量字段，必须用带 `omitempty` 的指针类型保留显式零值」。
 
-不引入「转换器 ID 选择策略」。理由：
+### 3.4 本地独有 → 逐项处置
 
-1. 在只有 `chat_completions` / `responses` 两个端点的当下，「2 选 1 方向」比「8 选 1 ID（其中 6 个会报错）」更直观
-2. 上游自身也不是纯 ID：`AdvancedCustomRoute` 用 `IncomingPath` + `Models` + `Converter`，匹配条件仍是端点加模型
-3. 转换器 ID 方案无法表达 `only_when_tool_bridge_required` 的请求体乘渠道能力判定
-4. 方向校验会从「保存即拒绝」退化为「运行时才报错」
+见第 4 节。
 
-附带修正三项（审查发现，与重构同批完成）：
+## 4. 本地独有能力清单与处置
 
-1. 消除重复：`controller/relay.go` 的 `responsesLocalCompactionTriggerRuleRequiresChannelSkip` 与 `responsesCompactionRuleRequiresChannelSkip` 两个函数体**逐字相同**（仅函数名不同，diff 无其他差异），收敛为单一实现加两个调用名。
+### 4.1 属协议层语义，值得提上游
 
-   **注意：这不是向 `rule.IsChannelEnabled` 收敛。** 该函数体与库函数语义不同：`AllChannels` 分支返回能力门控结果（`!SupportsCompactionItemPassthrough`）而库函数返回 true；还多一层 `HasResponsesProxyCompatibilityProfile()` 前置检查；且不检查 `rule.Enabled`。它表达的是「该渠道能否透传 compaction item」这一部署关切，不是通用的渠道启用判定。只消除两个函数之间的重复，不改语义。
-2. `ChatCompletionsToResponsesPolicyWarnings` 无生产调用方（仅 `setting/model_setting/global.go:392` 定义与 `global_test.go:623` 测试），接入设置 API，使管理员能看到「配了不生效」的告警
-3. 前端 `serializeProtocolPolicy` 无条件写 `enabled: true`（`web/default/src/features/system-settings/models/protocol-conversion-policy-utils.ts:750`），会把停用配置翻转为启用，修复
+**待确认，不下结论。** 已核验的本地独有项中，多数属部署关切（4.2）或上游已有更好实现（3.1）。但两项尚未定论：
 
-## 7. 分阶段落地
+- `ParseContentStrict` / `ParseToolCallsStrict`（4.4）：严格解析失败即报错，与 AGENTS.md「禁止静默容错」一致。需确认 relaykit 是否已有等价严格性机制；若无，则属协议层语义，应提上游
+- think 标签提取族（4.2）：判定为部署关切是因它受模型名门控，但剥离本身是文本协议处理。若把门控与剥离拆开，剥离部分可能属协议层
 
-每阶段结束时仓库可编译、可运行、测试通过。
+本清单的完整性有限：穷尽盘点本地独有能力的工作被中断，`service/openaicompat/`、`relay/common/responses_*.go`、本地独有 `dto/` 文件均未逐项核验。**实现阶段需先完成该盘点**，列入第 10 节。
 
-阶段顺序由依赖关系决定，不是由「先易后难」决定。三处依赖是硬约束：
+### 4.2 属部署关切，保留在宿主
 
-- `types` 是 `dto` 的前置：**210 个文件** import 宿主 `types`，relaykit 的 DTO 必须 import `relaykit/types`。
-
-  **上游已完成同一迁移，可直接对照。** 上游宿主代码有 **172 个文件**改 import 到 `relaykit/types`；宿主 `types/` 仍保留 4 个文件（`price_data.go`、`rw_map.go`、`set.go`、`task_artifact.go`），另有 **24 个文件**仍 import 宿主 `types`——两个包在 `relay/common/relay_info.go` 中并存（`"…/relaykit/types"` 与 `hosttypes "…/new-api/types"`）。
-
-  **关键：常数迁移用 Go 类型别名，不动调用点。** 上游 `constant/endpoint_type.go` 原文：
-
-  ```go
-  package constant
-  import "github.com/QuantumNous/new-api/relaykit/types"
-  // EndpointType moved to types with the conversion kit; aliases keep host
-  // code compiling unchanged.
-  type EndpointType = types.EndpointType
-  const ( EndpointTypeOpenAI = types.EndpointTypeOpenAI; /* … */ )
-  ```
-
-  因此「210 个 import 点必须逐个改写」不成立——凡宿主包已承担该符号的自然归属（如 `constant`），用别名转发即可零调用点变更。210 是**上界**，实际改写量需按符号逐个判断：`types` 的别名转发 vs 直接改 import 路径。
-
-  这不是纯搬迁：本地 `types/error.go` 有上游**完全不存在**的符号——`ErrorCodeUpstreamTransportInterrupted`（本地 25 个文件引用）、`IsUpstreamTransportInterruptedError`（9 个）、`IsOpenAIRequestParameterError`（5 个）；`git grep` upstream/main 全仓均为 0 命中，上游宿主 `types/` 也没有 `error.go`。这些是本地错误处理契约，需决定迁入 `relaykit/types` 还是保留宿主。
-
-  另需注意依赖方向：本地 `types/error.go:11` import 宿主 `common`，而上游 `relaykit/types/error.go:10` 改 import `relaykit/relayconvert/kitutil`——即 `common` 的相关helper 已被抽到 `kitutil`。`types` 迁移实际牵动 `common → kitutil` 的替换。
-
-- `ClaudeConvertInfo` 别名是 `Meta` 接口实现的前置，且**不是改个类型名那么简单**：本地 `relay/common/relay_info.go` 的 `ClaudeConvertInfo` 是独立结构体，字段（`ToolCallStarted map[int]bool`、`ToolCallIDs`、`ToolCallNames`、`ToolCallPendingArgs`）与 `convmeta.ClaudeConvertInfo`（`ToolCalls []*ClaudeStreamToolCall`、`ToolCallByIndex`、`ToolCallByID`）**字段名与类型都不同**。`service/convert.go` 引用本地字段 **22 处**（`ToolCallStarted` 6 + `ToolCallIDs` 5 + `ToolCallNames` 5 + `ToolCallPendingArgs` 6）。改为别名后这 22 处全部编译失败，必须同步改写——这是阶段 3 的实际工作量。
-
-- `dto.Request.IsStream` 签名迁移是 `dto` 迁移的前置，且**不可机械替换**：本地为 `IsStream(c *gin.Context)`，relaykit 为 `IsStream(c *http.Request)`；`dto/gemini.go:112` 的实现用了 `c.Query("alt")`，`*http.Request` 无此方法。`dto/claude.go:391` 忽略参数可机械迁移。
-
-| 阶段 | 内容 | 完成判据 |
+| 能力 | 位置 | 判定依据 |
 |---|---|---|
-| 0 | `git fetch --unshallow upstream`；建立 CI 门禁（两个 module 分别 `go test`） | CI 能跑通现有测试 |
-| 1 | 引入 relaykit module（根 go.mod 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；处理本地独有错误符号；按符号逐个决定别名转发或改 import 路径（210 为上界，上游同项实测 172 个文件改 import、24 个仍用宿主 types） | 两个 module 均可编译 |
-| 2 | `dto` 拆分：协议 DTO 迁入 `relaykit/dto`，宿主 DTO 留 `dto/`（上游宿主仅剩 8 个文件）；迁移 `IsStream` 签名（`GeminiChatRequest` 需改为从 `*http.Request` 读取 query 与 path）；补未知字段保留 | 两个 module 均可编译；DTO 相关测试通过 |
-| 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 类型别名，同步改写 `service/convert.go` 的 22 处字段引用；`convmeta.Meta` 接口实现：`RelayInfo` 补齐 15 个方法 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过 |
-| 4 | 文本转换切换到 relaykit；打补丁 1、2；对齐第 10 节列出的语义差异；`*WithError` 系列（4 个 `*WithError` 转换函数有 9 个生产调用点，6 个转换函数合计 14 个，relaykit 无对应）需在宿主包装或放弃 | 转换测试通过；grok reasoning 可见 |
-| 5 | 宿主管道接入 relaykit 分派；规则模型附带修正；响应方向暴露策略落到 5 个宿主调用点 | 全量测试通过 |
-| 6 | 删除旧代码（`service/convert.go` 主体、`service/openaicompat/` 中被替代部分） | 无残留引用 |
+| 响应方向 reasoning 暴露策略 | `service/convert.go:526`（`shouldExposeReasoningAsClaudeThinking`），调用点 `:749`（流式）、`:1049`（非流式） | 模型名门控；且见第 6.1 节的撤回理由 |
+| DeepSeek 空 thinking block 保留 | `service/convert.go:365` | 模型名门控 |
+| think 标签提取族 | `service/convert.go:425`、`:475`、`:485`、`:489`、`:554`、`:597`、`:629`，调用点 `:103` | 模型名门控（`hasDeepSeekModelName`） |
+| 工具名契约与别名还原 | `dto/tool_name.go` 等 | 引用宿主常量，受 `IsOpenAICompatibleResponses` 门控 |
+| `context_compaction` 归一化 | `service/openaicompat/`、`controller/relay.go` | 上游零命中 |
+| 加密内容探测 | `relay/common/responses_input_filter.go` | 硬编码宿主 marker `newapi.synthetic.compact:` |
+| 本地专有错误契约 | `types/error.go` | 见第 4.3 节 |
 
-阶段 0 的 unshallow 是前置条件：当前仓库是 shallow clone（`.git/shallow` 截断于 `9724ef1b2`），`git merge-base HEAD upstream/main` 返回空，三点 diff 不可用。
+`RetainEmptyReasoning` 钩子设计（供第 4.2 节第二项落地）：`convmeta.Options` 增加 `RetainEmptyReasoning func(modelName string) bool`，`nil` 表示不保留（与上游一致）。判定输入均在 relaykit 内部可得——`emptyThinkingBlock` 由补丁 1 新增的 `case "thinking"` 自行计算，`hasTools` 由 relaykit 自行累计——钩子只回答策略。
 
-两点 diff（`git diff upstream/main HEAD`）当前**可以**工作，但它比较的是两棵树的最终状态，无法回答「本地相对共同祖先改了什么」。迁移需要后者来判断哪些本地改动是增强、哪些是上游已覆盖，所以 unshallow 仍是必要前置。
+### 4.3 本地专有契约（上游完全不存在）
 
-需注意 unshallow 的目标是 `upstream` 而非默认的 `origin`：`origin/main` 停在 `51074ac37`（2026-07-10），与 `upstream/main` 不是同一历史。当前本地历史与 `upstream/main` 的提交交集为 0，`9724ef1b2` 在 `upstream/main` 的祖先链上但不在 `HEAD` 的祖先链上。
+`types/error.go` 有以下符号，`git grep` upstream/main 全仓 0 命中，上游宿主 `types/` 也没有 `error.go`：
 
-## 8. CI 门禁
+| 符号 | 本地引用文件数 |
+|---|---|
+| `ErrorCodeUpstreamTransportInterrupted` | 25 |
+| `IsUpstreamTransportInterruptedError` | 9 |
+| `IsOpenAIRequestParameterError` | 5 |
 
-现状：`.github/workflows/` 下 7 个 workflow 零 `go test`，`makefile` 无 `test` 目标。
+需决定迁入 `relaykit/types` 还是保留宿主。若 relaykit 转换器需据此产生错误，则必须迁入。
 
-改为：新增 workflow，对根 module 与 relaykit module 分别执行 `go vet ./...`、`go build ./...`、`go test ./...`（`GOWORK=off`），并缓存两个 `go.sum`。
+另注依赖方向：本地 `types/error.go:11` import 宿主 `common`，上游 `relaykit/types/error.go:10` import `relaykit/relayconvert/kitutil`——即 `common` 的相关 helper 已被抽到 `kitutil`，`types` 迁移实际牵动 `common → kitutil` 替换。
 
-理由：阶段 1、2 的 DTO 拆分涉及 210 个 `types` import 点与 327 个 `dto` import 点，无自动化门禁无法保证每步可运行。这是本设计**规模最大的部分**，远超「转换层重构」的字面预期——`service/convert.go` 只有 2229 行，而 DTO 收敛的爆炸半径是其两个数量级。
+### 4.4 本地 DTO 独有方法
 
-## 9. 配置迁移
+经方法集对比，本地 DTO 有 13 个 relaykit 没有的方法，**全部在生产代码中使用**：
 
-存量配置位于 `options` 表 `global.chat_completions_to_responses_policy` 键。
-
-实测存量形态：
-
-- 生产环境：`{"all_channels":false,"enabled":false}`（纯 legacy）
-- 隔离开发环境：含 `rules[]` 与端点对
-
-规则 schema 不变，因此**存量配置零迁移**。
-
-需注意三个现存脏状态（非本次引入，但影响迁移正确性）：
-
-1. `enabled` 双语义：rules 模式下是总闸，legacy 模式下是单条开关；`UnmarshalJSON` 在有 rules 且无 `enabled` 键时自动置 true
-2. 前端会把 `enabled:false` 翻成 `true`（见第 6 节修正 3）
-3. `tool_bridge_types` 在前端 UI 不可见，仅能通过原始 JSON 维护
-
-## 10. 验证策略
-
-### 10.1 阶段 4 的语义对齐清单
-
-本地 `service/convert.go` 的 13 个导出函数与 relaykit 的同名等价物**不是逐一等价**。切换前必须对下列差异逐项决定「保留、放弃或改写」，并同步调整锁定的测试。这是阶段 4 的显式交付项，不是实现细节。
-
-| # | 差异 | 本地行为 | relaykit 行为 | 影响 |
-|---|---|---|---|---|
-| 1 | finish_reason 严格校验 | `stopReasonOpenAI2ClaudeStrict`（`service/convert.go:1125`）对未知值返回错误 | `reasonmap.OpenAIFinishReasonToClaudeStopReason` 的 `default: return finishReason` 原样透传 | 本地「拒绝未知 finish_reason」的测试会失败 |
-| 2 | 多 choice 拒绝 | `ResponseOpenAI2ClaudeWithError` 在 `len(Choices) > 1` 时报错 | 遍历所有 choice 并拼接进同一 Claude response | 语义变化，需明确取舍 |
-| 3 | `Message.ThinkingContent` | `dto/openai_request.go:407` 有该字段，`GetReasoningContent()` 三级回退 `ReasoningContent → ThinkingContent → Reasoning` | relaykit `Message` 无 `ThinkingContent`，两级回退 | 本地多处依赖：`relay/channel/claude/relay-claude.go:498`、`relay/channel/gemini/relay-gemini.go:584`、`relay/channel/ollama/relay-ollama.go:168`、`:272`、`relay/channel/openai/adaptor.go:238` 等 |
-| 4 | `ClaudeConvertInfo` 字段 | 见第 7 节依赖约束 | 字段名与类型均不同 | 阶段 3 的类型别名迁移 |
-| 5 | `ResponsesStreamResponse` 形状 | `dto/openai_response.go:450` 有 `Error *types.OpenAIError`、`Text`、`Arguments`、`CallId`、`Item` | `CallId` 在 `ResponsesOutput` 内而非事件顶层 | 补丁 2 覆盖 |
-| 6 | 本地 DTO 独有方法（此前 spec 遗漏） | 见下表，均在生产代码中使用 | relaykit 对应类型**无**这些方法 | 迁移即编译失败，必须逐个处置 |
-
-第 6 项明细（基线口径，方法集对比得出）：
-
-| DTO 文件 | 本地独有方法 | 生产使用点 |
+| DTO 文件 | 方法 | 生产使用点 |
 |---|---|---|
 | `dto/openai_request.go` | `ParseContentStrict` | 20 |
 | | `ParseToolCallsStrict` | 16 |
 | | `Clone` | 13 |
 | | `HasCompactionTrigger` | 10 |
-| | `UnmarshalJSON` | — |
-| | `HasIncludeUsageField`、`HasIncludeObfuscationField`、`RemoveIncludeUsage` | 各 1 |
+| | `UnmarshalJSON` / `HasIncludeUsageField` / `HasIncludeObfuscationField` / `RemoveIncludeUsage` | 见 3.3 |
 | `dto/openai_response.go` | `HasCompactionOutput` | 4 |
 | | `EffectiveReason` | 2 |
-| | `GetOutputTokenDetails`、`GetQuality`、`GetSize`、`HasImageGenerationCall` | — |
+| | `GetOutputTokenDetails` / `GetQuality` / `GetSize` / `HasImageGenerationCall` | — |
 | `dto/claude.go` | `SearchToolNameByToolCallId` | 1 |
 
-其中 `HasIncludeUsageField` / `RemoveIncludeUsage` / `UnmarshalJSON` 正是补丁 2 声称要「新增」的能力——**本地已有**，因此补丁 2 的正确表述是「把本地既有能力带进 relaykit」，而不是从零设计。`EffectiveReason` 属推理相关，需单独确认 relaykit 的对应机制。
+其中 `ParseContentStrict` / `ParseToolCallsStrict` 是严格解析（失败即报错），与 AGENTS.md「禁止静默容错」一致；`EffectiveReason` 属推理相关，需单独确认 relaykit 对应机制。
 
-### 10.2 阶段 4 的输入校验对齐
+### 4.5 本地独有包与文件
 
-本地对 Claude 请求做了 relaykit 没有的加固。阶段 4 切换会静默丢失，必须搬入 relaykit 或明确放弃：
+| 项 | 说明 |
+|---|---|
+| `service/openaicompat/` | 上游无此包 |
+| `relay/common/responses_input_filter.go`、`responses_tool_names.go`、`responses_stream_options_compat.go` | 上游无对应；三个 `responses_tool_names*.go` 当前未被 git 跟踪 |
+| `dto/` 独有文件 | `json_extra_fields.go`、`responses_tools.go`、`responses_input_token_meta.go`、`opaque_openai_responses_request.go`、`tool_name.go`、`channel_routing.go`、`responses_routing.go`、`header_policy.go` 等 |
+| `*WithError` 系列 | 4 个转换函数有 9 个生产调用点（6 个转换函数合计 14 个），relaykit 无对应签名 |
 
-| 校验 | 本地 | relaykit 现状 |
+## 5. 必须保留的两项能力
+
+用户明确要求保留「思考等级」与「thinking 历史回传」。这两项**都是请求方向**，映射如下：
+
+| 需求 | 方向 | 现状 | 收敛后承载 |
+|---|---|---|---|
+| 思考等级 | 请求 | `relay/claude_handler.go:55-104` 手写后缀适配 + `request.Thinking`/`OutputConfig` 组装 | `reasoning.RenderClaude` + suffix 解析（上游实现更完整，见 3.1） |
+| thinking 历史回传 | 请求 | `service/convert.go:103` 起的 `extractThinkTaggedHistory` 分支 + `case "thinking"` 提取 + DeepSeek 空块保留 | 补丁 1 的 `case "thinking"` + `RetainEmptyReasoning` 钩子 + think 标签族（归属待定，见第 10 节第 1 项） |
+
+**响应方向**的 reasoning 暴露策略是第三个独立关切，与上述两项无关，且**不能**按客户端意图门控——理由见第 6.1 节。
+
+## 6. 已撤回的设计及其理由
+
+保留此节用于避免重蹈覆辙。
+
+### 6.1 撤回「按客户端意图门控 reasoning 暴露」
+
+**结论：响应方向不打 relaykit 补丁，策略落在宿主调用点。**
+
+1. 依据不成立。「客户端未请求 thinking 就不应返回 thinking」不是协议不变量。relaykit 自身的 `claudeCapabilitiesFor` 为 fable-5、mythos-5、opus-5、sonnet-5 置 `defaultThinking = true`——上游代码里就有「这些模型默认思考」的证据。
+2. 客户端意图在响应阶段取不到正确值。`relay/claude_handler.go:34` 对 Claude 请求做 `common.DeepCopy`，此后后缀适配器写入的 `request.Thinking`（`:58`、`:79`、`:91`）全部作用于拷贝。客户端发 `claude-opus-4-7-high` 时适配器让上游真的思考了，而 `info.Request.Thinking` 仍是 nil，门控会误判为「未请求」并丢弃上游真实返回的 thinking——与被修复的缺陷同构。
+
+   `info.Request` 在 `genBaseRelayInfo`（`relay/common/relay_info.go:701`，函数定义于 `:670`）一次性赋值。`grep -c "info.Request = " relay/claude_handler.go` = 0，但全仓有一个反例：`controller/channel-test.go:957` 的 `info.Request = chatReq`（渠道测试合成请求）。准确表述是「正常 relay 路径下不反映适配器改写后的意图」。
+3. relaykit 内不修改签名即不可达：Responses→Claude 非流式（`to_claude_messages_resp.go:15`）与流式（`to_claude_messages_stream_resp.go:82`）没有 `Meta` 参数。registry 层可达 `Meta`（`response_registry.go:22`、`:24`、`:28`、`:30` 带 `info`；`:26` 的 `ResponseStreamStateFactory` 不带），缺的是向内部转换器透传。
+
+**曾用过的错误论据，不得再用**：「`convmeta.Options` 是请求阶段机制、响应方向零先例」。实测 `response_registry.go:500` 的 `toolconv.AttachHostedResponse(..., convmeta.OptionsOf(info))` 就是响应方向读取 `Options` 的实例；且 `internal/` 下 9 处 `OptionsOf` 命中中，`shared/claude/reasoning.go:21` 与 `shared/gemini/request.go:85` 不在 `*_req.go`。
+
+### 6.2 撤回「阶段 1 必须更新 210 个 import 点」
+
+见第 2 节的别名机制。210 是上界，实际改写量需按符号逐个判断。
+
+### 6.3 撤回「hosted 工具桥接是本地独有」
+
+上游 `toolconv/` 在 `main` 上已存在（见 3.1）。
+
+## 7. 收敛路径
+
+每阶段结束时仓库可编译、可运行、测试通过。
+
+| 阶段 | 内容 | 完成判据 |
+|---|---|---|
+| 0 | `git fetch --unshallow upstream`；建立 CI 门禁（两个 module 分别 `go test`，`GOWORK=off`）；**完成本地独有能力盘点**（第 10 节第 1 项） | CI 能跑通现有测试；盘点清单产出 |
+| 1 | 引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译 |
+| 2 | `dto` 拆分（上游宿主剩 8 个文件）；迁移 `IsStream` 签名；补丁 2（DTO presence）；处置 4.4 的 13 个独有方法 | 两个 module 均可编译；DTO 测试通过 |
+| 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 别名，同步改写 `service/convert.go` 的 22 处字段引用；`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过 |
+| 4 | 协议映射切换到 relaykit；打补丁 1；对齐第 4 节的处置结论；`*WithError` 系列在宿主包装 | 转换测试通过；grok reasoning 可见 |
+| 5 | 宿主管道接入 relaykit 分派；响应方向暴露策略落到 6 条调用点；规则模型附带修正 | 全量测试通过 |
+| 6 | 删除旧代码（`service/convert.go` 主体、`service/openaicompat/` 中被替代部分） | 无残留引用 |
+
+三处硬依赖：
+
+- `types` 是 `dto` 的前置（relaykit 的 DTO 必须 import `relaykit/types`）；本地 `types/error.go` import 宿主 `common`，上游改 import `kitutil`，所以 `types` 迁移牵动 `common → kitutil` 替换
+- `ClaudeConvertInfo` 别名是 `Meta` 实现的前置。本地字段（`ToolCallStarted map[int]bool`、`ToolCallIDs`、`ToolCallNames`、`ToolCallPendingArgs`）与 `convmeta.ClaudeConvertInfo`（`ToolCalls []*ClaudeStreamToolCall`、`ToolCallByIndex`、`ToolCallByID`）**字段名与类型都不同**，`service/convert.go` 引用本地字段 22 处（6+5+5+6），改别名后全部编译失败
+- `dto.Request.IsStream` 签名迁移**不可机械替换**：本地 `IsStream(c *gin.Context)`，relaykit `IsStream(c *http.Request)`；`dto/gemini.go:112` 用了 `c.Query("alt")`，`*http.Request` 无此方法
+
+阶段 0 的 unshallow：当前 `.git/shallow` 截断于 `9724ef1b2`，导致 `git merge-base HEAD upstream/main` 返回空、三点 diff 不可用。但**真实共同祖先存在**——`9724ef1b2` 的提交对象记录 `parent aa7d0d39a4`，而 `merge-base(HEAD, aa7d0d39a4)` = `dac55f0f`。空结果纯属浅克隆遮蔽。两点 diff（`git diff upstream/main HEAD`）当前可用，但它比较两棵树终态，无法回答「本地相对共同祖先改了什么」，所以 unshallow 仍是必要前置。
+
+unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `51074ac37`（2026-07-10）。
+
+## 8. 响应方向的 6 条路径
+
+响应方向把上游响应转成 `dto.ClaudeResponse` 的路径：
+
+| 路径 | 基线位置 | 经 `service/convert.go` |
+|---|---|---|
+| OpenAI 渠道流式 | `relay/channel/openai/helper.go:46` | 是 |
+| OpenAI 渠道流式末帧 | `relay/channel/openai/helper.go:246` | 是 |
+| OpenAI 渠道非流式 | `relay/channel/openai/relay-openai.go:314` | 是 |
+| Chat 经 Responses | `relay/channel/openai/chat_via_responses.go:280` | 是 |
+| Gemini 渠道 | `relay/channel/gemini/relay-gemini.go:1784` | 是 |
+| AWS Converse | `relay/channel/aws/converse.go:748`（非流式）、`:1112`（流式 `thinking_delta`） | **否**，`converseOutputToClaudeResponse`（`:713`）直接从 `ConverseOutput` 构造 |
+
+前 5 条都持有 `info`，是首选落点。第 6 条有独立于 `service/convert.go` 的 thinking 生成逻辑，需单独处理。
+
+## 9. 验证策略
+
+### 9.1 阶段 4 的语义对齐清单
+
+本地与 relaykit **不是逐一等价**，切换前须逐项决定「保留、放弃或改写」，并同步调整锁定的测试：
+
+| # | 差异 | 本地 | relaykit |
+|---|---|---|---|
+| 1 | finish_reason 严格校验 | `stopReasonOpenAI2ClaudeStrict`（`service/convert.go:1125`）对未知值返回错误 | `reasonmap.OpenAIFinishReasonToClaudeStopReason` 的 `default: return finishReason` 原样透传 |
+| 2 | 多 choice | `ResponseOpenAI2ClaudeWithError` 在 `len(Choices) > 1` 时报错 | 遍历所有 choice 并拼接 |
+| 3 | `Message.ThinkingContent` | `dto/openai_request.go:407` 有该字段，`GetReasoningContent()` 三级回退 | relaykit `Message` 无 `ThinkingContent`，两级回退 |
+| 4 | `ClaudeConvertInfo` 字段 | 见第 7 节的三处硬依赖 | 字段名与类型均不同 |
+| 5 | `ResponsesStreamResponse` 形状 | `dto/openai_response.go:450` 有 `Error`、`Text`、`Arguments`、`CallId`、`Item` | `CallId` 在 `ResponsesOutput` 内而非事件顶层 |
+| 6 | 本地 DTO 独有方法 | 见 4.4 | 无对应 |
+
+### 9.2 阶段 4 的输入校验对齐
+
+本地对 Claude 请求做了 relaykit 没有的加固，切换会静默丢失：
+
+| 校验 | 本地 | relaykit |
 |---|---|---|
 | 未知 content block | `service/convert.go:355` 显式报错 | 无 default，静默丢弃（补丁 1 第 3 项修复） |
 | image 缺 source（Chat 方向） | `:252` 显式报错 | `to_oai_chat_req.go:189` 的 `case "image"` 在 `:190` 直接解引用 `mediaMsg.Source`，**nil pointer panic** |
-| image 缺 source（Responses 方向） | `:252` 显式报错 | 有守卫：`claudeSourceURL`（`to_oai_responses_req.go:315`）对 nil 返回 `""`，安全 |
+| image 缺 source（Responses 方向） | `:252` 显式报错 | 有守卫：`claudeSourceURL`（`to_oai_responses_req.go:315`）对 nil 返回 `""` |
 | image source.type 校验 | `:282` 分派 base64/url，其他报错 | 无分派，一律按 base64 拼接 |
 | 非 assistant thinking | `:234`、`:246` 静默跳过 | 无 role 门控（补丁 1 第 2 项修复） |
 | tool_use 缺 id/name | `:287` 显式报错 | 无校验 |
 
-image 缺 source 的 panic 只存在于 Chat 方向（`to_oai_chat_req.go:189-190`），可复现：一个 `{"type":"image"}` 无 `source` 的请求在该路径下会被 `gin.CustomRecovery` 变成 500，而本地返回带定位信息的 400。Responses 方向不受影响。
-
-### 10.3 验证命令
+### 9.3 命令
 
 - 每阶段运行 `go test ./controller ./model ./relay/common ./relay/helper ./service`（AGENTS.md 第 6 节）
-- 阶段 4 需专项验证：构造含 thinking block 的 Claude 多轮工具调用请求，验证 DeepSeek 不再 400
-- 阶段 4 需验证 grok 的 reasoning 可见（当前被丢弃）
+- 阶段 4 专项：构造含 thinking block 的 Claude 多轮工具调用请求，验证 DeepSeek 不再 400；验证 grok 的 reasoning 可见（当前被丢弃）
 - 前端改动运行 `bun run lint` 与 `bun run build`
 - 验证记录沉淀到 `docs/reviews/CR-*.md`
 
 不得以局部测试通过表述为全链路已验证。
 
-## 11. 未决项
+## 10. 未决项
 
-以下项在实现阶段需实测确认，本设计不预设结论：
+1. **完成本地独有能力盘点**（4.1）：`service/openaicompat/`、`relay/common/responses_*.go`、本地独有 `dto/` 文件尚未逐项核验，清单完整性有限。这是阶段 4 的前置
+2. **think 标签提取族归属**（4.2）：6 个函数是 relaykit 零覆盖的本地增强，属「thinking 历史回传」。搬入 relaykit 成为带钩子的能力，还是留在宿主预处理阶段；若拆分门控与剥离，剥离部分可能属协议层
+3. **本地专有错误符号归属**（4.3）：迁入 `relaykit/types` 还是保留宿主
+4. **`*WithError` 系列形式**（4.5）：4 个函数 9 个生产调用点，宿主包装层怎么写
+5. **响应方向暴露策略的具体形态**：落在 6 条路径时是过滤转换结果，还是调用前决定跳过 thinking 块（流式下后者更简单）
+6. **本地 DTO 独有方法归属**（4.4）：13 个方法逐个决定提上游、宿主包装或放弃
+7. **本地 hosted 工具与上游 `toolconv` 的收敛**：比对差异后决定收敛方式
+8. **`types` 别名转发的适用范围**：逐个判断哪些符号可照上游 `constant` 办理
+9. `relaykit/dto` 补丁 2 是否影响上游 golden 快照（`relaykit/relayconvert/testdata/golden/`，24 个 JSON）
+10. `convmeta.Options` 新增钩子后，`ConvOptions()` 的缓存与失效语义是否满足跨渠道重试
+11. 钩子闭包捕获语义：`Options` 由 `ConvOptions()` 缓存，跨渠道重试时读到哪个 `UpstreamModelName`
+12. `reasonmap` 的宽松 default 是否需严格模式
+13. thinking block 的 `signature`：relaykit 响应方向产出的 thinking block 只有 `{Type, Thinking}`，不含 `signature`；本地现状同样不生成。请求方向本地接受「有文本、无签名」的块（`service/convert.go:233-244` 仅对「空文本+有签名」报错），故往返可用。但 Anthropic 是否校验签名、客户端是否接受无签名 block，未验证
+14. `enabled` 双语义在 rules 模式下的行为是否需一并规整
+15. 上游 `feat/relaykit-tools` 分支（`a9a0e2272 feat(relaykit): preserve hosted tools across conversions`）是否应作为补丁基线
 
-1. `relaykit/dto` 补丁 2 的改动会否影响上游 golden 快照（`relaykit/relayconvert/testdata/golden/`，24 个 JSON），需实测后决定是否更新快照
-2. `convmeta.Options` 新增钩子后，`ConvOptions()` 的缓存与失效语义（上游在 `InitChannelMeta` 末尾置 nil）是否满足本地跨渠道重试场景
-3. `dto.Request.IsStream` 签名迁移的调用点数量与 `GeminiChatRequest` 的改写方式（需从 `*http.Request` 读 query 与 path，不能机械替换）
-4. `relaykit` 上游仍在演进（`feat/relaykit-tools`、`feat/relaykit-perf`），补丁 1、2 可考虑提上游以减少分叉
-5. 阶段 4 的 5 项语义差异（第 10.1 节）与 5 项输入校验（第 10.2 节）的逐项取舍，需在切换前定案
-6. 钩子闭包捕获语义：`Options` 由 `ConvOptions()` 缓存，宿主注入的钩子若闭包捕获 `info`，跨渠道重试时读到的是哪个 `UpstreamModelName`，需实测
-7. `reasonmap` 的宽松 default 是否需要在 relaykit 侧增加严格模式，或由宿主包装
-8. thinking block 的 `signature`：relaykit 响应方向产出的 thinking block 只有 `{Type, Thinking}`，不含 `signature`（golden 快照确认）。本地现状同样不生成。请求方向本地接受「有文本、无签名」的 thinking 块（`service/convert.go:233-244` 仅对「空文本+有签名」报错，`:237-239` 接受有文本的块），所以往返可用。但 Anthropic 对 preserved thinking 是否校验签名，以及客户端是否接受无签名 block，未在本地验证，属未评估的风险面
-9. `enabled` 双语义在 rules 模式下的行为（第 9 节脏状态 1）是否需要在迁移中一并规整
-10. 转换测试的统计口径：本设计不引用具体行数（无可复现口径），CI 门禁按 package 覆盖而非按行数
-11. **think 标签提取族归属**（第 4 节补充小节）：`splitThinkTaggedText` 等 6 个函数是 relaykit 零覆盖的本地增强，被 `hasDeepSeekModelName` 门控，属「thinking 历史回传」的组成部分。需决定：搬入 relaykit 成为带钩子的能力，还是在宿主预处理阶段完成。本设计倾向前者，但需实现时确认
-12. **本地 `types/error.go` 独有符号的归属**：`ErrorCodeUpstreamTransportInterrupted` 等被生产代码广泛引用，需决定迁入 `relaykit/types` 还是保留宿主。若 relaykit 转换器需要据此产生错误，则必须迁入
-13. **`*WithError` 系列的处理方式**：4 个 `*WithError` 转换函数有 9 个生产调用点（6 个转换函数合计 14 个），relaykit 无对应签名。需决定宿主包装层的形式
-14. **响应方向暴露策略的具体形态**：落在宿主调用点时（已知 6 条路径），是过滤转换结果、还是在调用前决定跳过 thinking 块，需在实现时定案（流式场景下后者更简单）
-15. **本地 DTO 独有方法的归属**（第 10.1 节第 6 项）：`ParseContentStrict`（20 处）、`ParseToolCallsStrict`（16 处）、`Clone`（13 处）、`HasCompactionTrigger`（10 处）等 13 个方法在 relaykit 无对应。需逐个决定是提上游、留在宿主包装层，还是放弃
-16. **本地 hosted 工具桥接与上游 `toolconv` 的收敛**（第 4 节修正）：上游 `toolconv/` 已覆盖 10 种 hosted 工具，需比对本地实现差异，决定收敛方式；上游 `feat/relaykit-tools` 分支还在其上扩展
-17. **`types` 别名转发的适用范围**（第 7 节）：上游 `constant/endpoint_type.go` 用 Go 类型别名做到零调用点变更，需逐个判断本地哪些符号可照此办理、哪些必须改 import 路径，据此重估 210 这个上界
+## 11. 事实依据
 
-第 11 项原为「按客户端意图门控 reasoning 暴露」，已撤回，理由见第 4 节。
-
-## 12. 事实依据
-
-本设计的承重事实均经独立核验。行号以本文件声明的基线 `9c4758b53` 为准。
+行号以基线 `dbfbc096f` 声明的本地基线 `9c4758b53` 为准。
 
 | 事实 | 核验 |
 |---|---|
 | 上游 `service/convert.go` 27 行 | `git show upstream/main:service/convert.go \| wc -l` |
 | 上游无 `service/openaicompat/` | `git ls-tree -r upstream/main -- service/openaicompat/` 空 |
-| 两个 Claude 请求转换器 switch 无 `thinking`、无 `default` | `to_oai_chat_req.go:181`、`to_oai_responses_req.go:165` 逐 case 提取 |
-| 上游 `convmeta.Options` 零 tool bridge 字段 | `git grep -c ToolBridge upstream/main -- relaykit/relayconvert/convmeta/` 无命中 |
-| 上游 relaykit 无字面量 `namespace` / `tool_search` | `git grep -c` 均无命中。**注意**：这不代表上游无 hosted 工具能力——`toolconv/` 已覆盖 10 种 hosted 工具（见第 4 节修正） |
+| 两个 Claude 请求转换器 content block switch 无 `thinking`、无 `default` | `to_oai_chat_req.go:181`、`to_oai_responses_req.go:165` 逐 case 提取 |
+| 上游 relaykit 无字面量 `namespace` / `tool_search` | `git grep -c` 均无命中。**注意**：不代表无 hosted 工具能力（`toolconv/` 覆盖 10 种） |
 | 上游无 Responses→Chat 全局策略 | `git grep ShouldResponsesUseChatCompletions upstream/main` 空 |
 | 本地 `ConversionDiagnostic` 零命中 | `grep -rl` 返回 0 |
-| 本地 `dto` 被 327 个文件 import（基线口径） | `git grep -l '"github.com/QuantumNous/new-api/dto"' 9c4758b53 -- '*.go' \| wc -l`。工作区为 340——本表统一采用基线口径 |
+| 本地 `dto` 被 327 个文件 import（基线） | `git grep -l` 计数。工作区为 340 |
 | 本地 `dto` 有 10 个非测试文件 import gin | 逐文件核验 |
-| 本地 CI 不跑 `go test` | `grep -rn "go test" .github/workflows/` 命中 0；`makefile` 无 `test` 目标 |
+| 本地 CI 不跑 `go test` | `.github/workflows/` 命中 0；`makefile` 无 `test` 目标 |
 | `context_compaction` 上游零命中 | `git grep -c` 无命中 |
 | 三个 `responses_tool_names*.go` 未跟踪 | `git status --short` 显示 `??` |
 | `convmeta.Meta` 15 个方法无客户端请求访问器 | `relaykit/relayconvert/convmeta/meta.go:18-54` 逐方法核验 |
-| registry 分派函数类型带 `info convmeta.Meta` | `response_registry.go` 的 `:22`、`:24`、`:28`、`:30` 带；`:26` 的 `ResponseStreamStateFactory` 不带 |
-| `convmeta.Options` 在响应方向也有使用 | `response_registry.go:500` 的 `toolconv.AttachHostedResponse(..., convmeta.OptionsOf(info))`；`internal/` 下 9 处命中中 7 处在 `*_req.go`，`shared/claude/reasoning.go:21` 与 `shared/gemini/request.go:85` 在 `shared/` |
-| 正常 relay 路径下 `info.Request` 不反映适配器改写后的意图 | `relay/common/relay_info.go:701` 赋值（`genBaseRelayInfo` 定义于 `:670`）；`relay/claude_handler.go:34` 深拷贝。全仓唯一反例 `controller/channel-test.go:957`（渠道测试合成请求） |
-| AWS Converse 是独立的第 6 条响应方向路径 | `relay/channel/aws/converse.go:748`（非流式）、`:1112`（流式 `thinking_delta`）；`converseOutputToClaudeResponse` 在 `:713` 直接构造 `dto.ClaudeResponse`，不经 `service/convert.go` |
-| 两个 `*RequiresChannelSkip` 函数体逐字相同 | `diff` 仅函数名不同 |
-| `types` 拆分：上游 6 文件入 `relaykit/types`，宿主剩 4 | `git ls-tree` 两侧对比 |
-| `dac55f0f` 非共同祖先（浅克隆下鉴别力有限） | `git merge-base --is-ancestor dac55f0f upstream/main` rc=1；`comm -12` 两历史 = 0。**注意**：`.git/shallow` 截断上游历史，该结果是弱推论；决定性证据是 `git merge-base HEAD upstream/main` 返回空 + 三点 diff `fatal: no merge base` |
-| 本地 `types/error.go` 有上游不存在的符号 | `ErrorCodeUpstreamTransportInterrupted`（本地 25 文件引用）、`IsUpstreamTransportInterruptedError`（9）、`IsOpenAIRequestParameterError`（5）；`git grep` upstream/main 均 0 命中 |
-| 本地 `ClaudeConvertInfo` 的 map 字段被 `convert.go` 引用 22 处 | `ToolCallStarted` 6 + `ToolCallIDs` 5 + `ToolCallNames` 5 + `ToolCallPendingArgs` 6 |
-| relaykit 无 `*WithError` 系列函数 | `git grep WithError upstream/main -- relaykit/` 空；本地 4 个 `*WithError` 转换函数有 9 个生产调用点 |
-| relaykit 内建 Claude 模型代能力表 | `relaykit/relayconvert/reasoning/claude.go:35-74` 覆盖 fable-5、mythos-5、Opus 4.5/4.6/4.7/4.8/5、Sonnet 4.6/5 |
+| registry 分派函数类型带 `info convmeta.Meta` | `response_registry.go` 的 `:22`、`:24`、`:28`、`:30` 带；`:26` 的不带 |
+| `convmeta.Options` 响应方向也有使用 | `response_registry.go:500` |
+| `types` 拆分爆炸半径 210 个 import 点 | `git grep -l '"…/new-api/types"' 9c4758b53 -- '*.go' \| wc -l`（工作区 216） |
+| 上游宿主 172 个文件 import `relaykit/types` | `git grep -l` 计数 |
+| 上游宿主 24 个文件仍 import 宿主 `types` | 同上 |
+| 本地 `ClaudeConvertInfo` map 字段被引用 22 处 | `ToolCallStarted` 6 + `ToolCallIDs` 5 + `ToolCallNames` 5 + `ToolCallPendingArgs` 6 |
+| relaykit 无 `*WithError` 系列 | `git grep WithError upstream/main -- relaykit/` 空 |
+| 上游 `toolconv/` 覆盖 10 种 hosted 工具 | `toolconv/model.go` 的 `Kind*` 常量 |
+| relaykit 内建 Claude 模型代能力表 | `reasoning/claude.go:35-74` |
+| `dac55f0f` 是真实共同祖先（被浅克隆遮蔽） | `git cat-file -p 9724ef1b2` 记录 `parent aa7d0d39a4`；`git merge-base HEAD aa7d0d39a4` = `dac55f0f` |
 
-已撤回的断言（原 spec 有、经复核不成立）：
+已撤回、不得再用的断言：
 
-- 「本地 `service/convert.go` 2236 行」：那是工作区行数（含未提交改动），基线提交为 2229 行
+- 「本地 `service/convert.go` 2236 行」：工作区口径，基线 2229
 - 「22205 行转换测试」：无可复现口径
-- 「`dto` 被 340 个文件 import」：那是工作区口径，基线为 327
-- 「18 个 dto 文件 import 宿主 types」：那是工作区口径，基线为 17
-- 「真实共同祖先 `dac55f0f`」：见上表，不是共同祖先
+- 「`dto` 被 340 个文件 import」：工作区口径，基线 327
+- 「18 个 dto 文件 import 宿主 types」：工作区口径，基线 17
+- 「`dac55f0f` 不是共同祖先」：错，它是真实共同祖先，只被浅克隆遮蔽
 - 「无法用 diff 驱动迁移」：两点 diff 可用，仅三点 diff 不可用
 - 「两个 `*RequiresChannelSkip` 等价于 `IsChannelEnabled`」：两者语义不同，且这两个函数是**互相**重复
-- 「无条件暴露不符合 Anthropic 行为」：这是推断，且随模型代变化，不是协议不变量
-- 「本地 `ResponsesStreamResponse` 的 `Code` 为 `any`」：**本地根本没有 `Code` 字段**，此前把 relaykit 的字段名与本地类型名拼接了
-- 「`convmeta.Options` 是请求阶段机制、响应方向零先例」：`response_registry.go:500` 就在响应方向读取 `Options`
-- 「`info.Request` 从不被重新指向」：`controller/channel-test.go:957` 是反例，但属渠道测试路径，不影响主结论
-- 「relaykit 的 image 处理直接解引用会 panic」：只有 Chat 方向如此，Responses 方向有 nil 守卫
-- 「`*WithError` 系列 39 个生产调用点」：无可复现口径；实测 4 个 `*WithError` 转换函数有 9 个，6 个转换函数合计 14 个
-- 「relaykit 响应方向两个转换器都用 `_` 丢弃 Meta」：只有非流式如此，流式实际使用了 `info`
-- 「relaykit 响应方向两个转换器都用 `_` 丢弃 Meta」：只有非流式用 `_`，流式实际使用了 `info`
-- 「relaykit 的 image 处理直接解引用会 panic」：只有 Chat 方向如此，Responses 方向有 nil 守卫
-- 「补丁 3 在 relaykit 内不可实现」：表述过强，registry 层 `Meta` 可达，缺的是向内部转换器的透传
+- 「无条件暴露不符合 Anthropic 行为」：推断，且随模型代变化，不是协议不变量
+- 「本地 `ResponsesStreamResponse` 的 `Code` 为 `any`」：本地无 `Code` 字段
+- 「`convmeta.Options` 是请求阶段机制、响应方向零先例」：`response_registry.go:500` 即反例
+- 「`info.Request` 从不被重新指向」：`controller/channel-test.go:957` 是反例
+- 「relaykit 的 image 处理直接解引用会 panic」：只有 Chat 方向如此
+- 「`*WithError` 系列 39 个生产调用点」：无可复现口径；实测 4 个函数 9 个，6 个函数 14 个
+- 「relaykit 响应方向两个转换器都用 `_` 丢弃 Meta」：只有非流式如此
+- 「补丁 3 在 relaykit 内不可实现」：registry 层 `Meta` 可达，缺的是向内部转换器透传
+- 「hosted 工具桥接是本地独有」：上游 `toolconv/` 已存在
+- 「阶段 1 必须更新 210 个 import 点」：上游用类型别名做到零调用点变更
+- 「两个 Claude 转换器 switch 无 `default`」（未限定作用域）：只有 content block switch 无，同文件其他 switch 有
