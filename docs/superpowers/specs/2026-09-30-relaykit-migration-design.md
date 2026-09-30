@@ -175,7 +175,7 @@ const (
 | 需求 | 方向 | 现状 | 收敛后承载 |
 |---|---|---|---|
 | 思考等级 | 请求 | `relay/claude_handler.go:55-104` 手写后缀适配 + `request.Thinking`/`OutputConfig` 组装 | `reasoning.RenderClaude` + suffix 解析（上游实现更完整，见 3.1） |
-| thinking 历史回传 | 请求 | `service/convert.go:103` 起的 `extractThinkTaggedHistory` 分支 + `case "thinking"` 提取 + DeepSeek 空块保留 | 补丁 1 的 `case "thinking"` + `RetainEmptyReasoning` 钩子 + think 标签族（归属待定，见第 10 节第 1 项） |
+| thinking 历史回传 | 请求 | `service/convert.go:103` 起的 `extractThinkTaggedHistory` 分支 + `case "thinking"` 提取 + DeepSeek 空块保留 | 补丁 1 的 `case "thinking"` + `RetainEmptyReasoning` 钩子 + think 标签族（归属待定，见第 10 节第 2 项） |
 
 **响应方向**的 reasoning 暴露策略是第三个独立关切，与上述两项无关，且**不能**按客户端意图门控——理由见第 6.1 节。
 
