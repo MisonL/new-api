@@ -1,6 +1,10 @@
 package common
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/QuantumNous/new-api/constant"
+)
 
 func TestBuildInfoLinesNormalizeEmptyValues(t *testing.T) {
 	oldVersion := Version
@@ -120,5 +124,35 @@ func TestResolveSecretsFromEnvPreservesDistinctSecrets(t *testing.T) {
 	}
 	if sessionSecret != "session-secret" || cryptoSecret != "crypto-secret" {
 		t.Fatalf("unexpected secrets: session=%q crypto=%q", sessionSecret, cryptoSecret)
+	}
+}
+
+// initConstantEnv is the only path that turns the container environment into the
+// streaming timeout the relay uses. A compose file can forward the variable
+// correctly and still have no effect if this mapping breaks, so pin it here.
+func TestInitConstantEnvMapsStreamingTimeout(t *testing.T) {
+	old := constant.StreamingTimeout
+	t.Cleanup(func() { constant.StreamingTimeout = old })
+
+	t.Setenv("STREAMING_TIMEOUT", "777")
+	initConstantEnv()
+	if constant.StreamingTimeout != 777 {
+		t.Fatalf("STREAMING_TIMEOUT=777 produced %d, want 777", constant.StreamingTimeout)
+	}
+
+	// An unset variable must fall back to the code default rather than to zero:
+	// a zero value is treated as "unset" downstream and replaced by
+	// DefaultStreamingTimeout, which would hide a misconfigured deployment.
+	t.Setenv("STREAMING_TIMEOUT", "")
+	initConstantEnv()
+	if constant.StreamingTimeout != 300 {
+		t.Fatalf("unset STREAMING_TIMEOUT produced %d, want the 300 default", constant.StreamingTimeout)
+	}
+
+	// An unparsable value falls back to the default and logs; it must not panic.
+	t.Setenv("STREAMING_TIMEOUT", "not-a-number")
+	initConstantEnv()
+	if constant.StreamingTimeout != 300 {
+		t.Fatalf("unparsable STREAMING_TIMEOUT produced %d, want the 300 default", constant.StreamingTimeout)
 	}
 }

@@ -535,9 +535,30 @@ i18n 修复后同样通过。
 - 分桶行为见下节"生产限流分桶实测与部署前置条件"。
 - 三库兼容：本改动不涉及数据库迁移与方言 SQL，PostgreSQL 上的选项读写已在隔离环境实测；
   MySQL / SQLite 未单独验证。
-- `.env.example` 声明的其余变量中，仍有约 37 个根 compose 未透传（Pyroscope、SQL 连接池、
-  LinuxDO OAuth、`PORT`、`FRONTEND_BASE_URL`、`SQLITE_PATH`、`NODE_TYPE` 等）。这些不属于限流，
-  未在本任务范围内改动，仅在此记录，需要时应作为独立任务按子系统逐个核对"文档声明是否真的可设"。
+- `.env.example` 的"声明即可设"核对（2026-09-30 第三轮）：此前记录的"约 37 个根 compose 未透传"
+  已过期。用脚本把 `.env.example` 里所有形如 `VAR=` / `# VAR=` 的声明逐条与 `docker-compose.yml`
+  的实际引用比对，**未被引用的只剩 5 个**，且没有一个是真缺口：
+  - `DEV_LEGACY_COMPOSE_PROJECT_NAME` / `DEV_LEGACY_NEW_API_PORT` / `DEV_LEGACY_POSTGRES_PORT` /
+    `DEV_LEGACY_REDIS_PORT`：由兼容入口 `docker-compose.dev.yml` 消费（`.env.example` 中已注明
+    "兼容入口 docker-compose.dev.yml 仅用于本地源码构建，使用 DEV_* 参数"），不属于根编排。
+  - `HOSTNAME`：**故意不透传**。它是容器运行时注入的主机名（Docker 默认注入容器 ID），
+    Pyroscope 用它作为 profile 标签。实测 `- HOSTNAME=${HOSTNAME:-}` 会把宿主机 shell 的值
+    覆盖进去（宿主机 `HOSTNAME=my-host` 时容器内变成 `my-host`），宿主机未导出时则变成空串，
+    两种情况都会顶掉 Docker 自动注入的容器 ID。已在 `.env.example` 写明不要设置、不要透传。
+  本轮补上两个**确为缺口**的变量：
+  - `STREAMING_TIMEOUT`：代码读它（`common/init.go` 的 `initConstantEnv`），但根编排里只是一行
+    注释示例，`.env` 里设了不生效。已改为 `- STREAMING_TIMEOUT=${STREAMING_TIMEOUT:-300}`。
+    顺带修正该行注释：原文写"默认120秒"，实际默认是 **300**（`GetEnvOrDefault("STREAMING_TIMEOUT", 300)`，
+    且 `DefaultStreamingTimeout = 300s`，代码里没有 120 这个值）。
+  - `SQLITE_PATH`：代码读它（`common/init.go`），根编排完全未引用。已改为
+    `- SQLITE_PATH=${SQLITE_PATH:-}`。留空时沿用代码默认值（工作目录下的 `one-api.db`），
+    与 `common/database.go` 的 `SQLitePath` 默认一致。
+  验证：`docker compose config` 在两种取值下分别解析出 `STREAMING_TIMEOUT: "300"` / `"777"`、
+  `SQLITE_PATH: ""` / `/data/custom.db`；起容器实测环境变量到达进程，且 `SQLITE_PATH=/data/probe-custom.db`
+  时该文件确实落盘。`STREAMING_TIMEOUT` 的 env→constant 映射由新增的
+  `TestInitConstantEnvMapsStreamingTimeout` 固定，两处变异（默认值改 0、整行改成不算变量）均被捕获。
+  `dev-isolated` 编排不需要这两个变量：它固定用 PostgreSQL（`DEV_SQL_DSN` 必填），也不镜像
+  根编排的 relay 行为类参数（36 个 vs 87 个），因此未改动。
 - `[sessions] ERROR!` 日志噪声：豁免开启时，携带畸形 session cookie 的请求会多打一行该库日志
   （实测 10 次畸形 Cookie 新增 10 行；无 Cookie 或合法 Cookie 为 0 行）。该行为不是本次改动引入：
   豁免关闭（等同改动前）时 `/api/pricing` 同样每请求一行，`/api/status` 在豁免关闭时为 0 行、

@@ -42,6 +42,8 @@ services:
       - CRYPTO_SECRET=${CRYPTO_SECRET:?set CRYPTO_SECRET}
       - SQL_DSN=${SQL_DSN:?set SQL_DSN}
 #      - SQL_DSN=root:<explicit-password>@tcp(mysql:3306)/new-api  # Point to the mysql service, uncomment if using MySQL
+      # SQL_DSN=local 时使用 SQLite。留空则沿用代码默认值（工作目录下的 one-api.db）。
+      - SQLITE_PATH=${SQLITE_PATH:-}
       - REDIS_CONN_STRING=${REDIS_CONN_STRING:?set REDIS_CONN_STRING}
       - TZ=${TZ:-Asia/Shanghai}
       - ERROR_LOG_ENABLED=${ERROR_LOG_ENABLED:-true} # 是否启用错误日志记录 (Whether to enable error log recording)
@@ -145,7 +147,9 @@ services:
       - CHANNEL_CONCURRENCY_STRICT=${CHANNEL_CONCURRENCY_STRICT:-true}
       - CHANNEL_CONCURRENCY_LEASE_TTL_SECONDS=${CHANNEL_CONCURRENCY_LEASE_TTL_SECONDS:-30}
       - CHANNEL_CONCURRENCY_RESELECT_LIMIT=${CHANNEL_CONCURRENCY_RESELECT_LIMIT:-5}
-#      - STREAMING_TIMEOUT=300  # 流模式无响应超时时间，单位秒，默认120秒，如果出现空补全可以尝试改为更大值 （Streaming timeout in seconds, default is 120s. Increase if experiencing empty completions）
+      # 流模式无响应超时时间，单位秒。代码默认 300（common/init.go 的 GetEnvOrDefault）。
+      # 出现空补全时可以调大。
+      - STREAMING_TIMEOUT=${STREAMING_TIMEOUT:-300}
 #      - SESSION_SECRET=random_string  # 多机部署时设置，必须修改这个随机字符串！！ （multi-node deployment, set this to a random string!!!!!!!）
 #      - SYNC_FREQUENCY=60  # Uncomment if regular database syncing is needed
 #      - GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX  # Google Analytics 的测量 ID (Google Analytics Measurement ID)
