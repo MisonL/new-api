@@ -362,6 +362,45 @@ i18n 修复后同样通过。
 `go test ./controller ./model ./relay/common ./relay/helper ./service ./i18n ./middleware ./setting/operation_setting -count=1`
 全部 ok。
 
+## 第五轮：限流变量透传补全（2026-09-30）
+
+前一轮修 compose 透传时只补了 2 个阈值加豁免开关，本轮按"后端读取的限流变量"全集重新核对，
+发现同一处缺陷的其余部分。
+
+| 变量 | 修前根 compose | 修前 dev compose | 修前 .env.example |
+| --- | --- | --- | --- |
+| `CRITICAL_RATE_LIMIT` / `_DURATION` | 缺 | 缺 | 已声明 |
+| `SEARCH_RATE_LIMIT` / `_DURATION` | 缺 | 缺 | 已声明 |
+| `SUGGESTION_RATE_LIMIT` / `_DURATION` | 缺 | 缺 | 已声明 |
+| `DESKTOP_OAUTH_POLL_RATE_LIMIT` / `_DURATION` / `_ENABLE` | 缺 | 缺 | 已声明 |
+| `GLOBAL_API_RATE_LIMIT_ENABLE` | 缺 | 缺 | 未声明 |
+| `GLOBAL_WEB_RATE_LIMIT_ENABLE` | 缺 | 缺 | 未声明 |
+| `CRITICAL_RATE_LIMIT_ENABLE` | 缺 | 缺 | 未声明 |
+| `SEARCH_RATE_LIMIT_ENABLE` | 缺 | 缺 | 未声明 |
+| `SUGGESTION_RATE_LIMIT_ENABLE` | 缺 | 缺 | 未声明 |
+
+`.env.example` 已声明的那 9 个说明作者本意就是让用户可设，但写进 `.env` 后完全不生效；
+5 个 `_ENABLE` 开关连声明都没有，而它们的默认值是 true，因此只改阈值无法关掉限流器。
+
+修复后 19 个限流变量全部可透传（提交 `6e0f9b0f6`、`229ff5764`）。
+
+实证（`docker compose config`，`.env` 中设 `CRITICAL_RATE_LIMIT=7`、`SEARCH_RATE_LIMIT=9`、
+`SUGGESTION_RATE_LIMIT=11`、`DESKTOP_OAUTH_POLL_RATE_LIMIT=13`）：
+
+- 修前：解析结果里只有 5 个 GLOBAL 变量，上述 4 个完全不出现。
+- 修后：解析为 `CRITICAL_RATE_LIMIT: "7"`、`SEARCH_RATE_LIMIT: "9"`、
+  `SUGGESTION_RATE_LIMIT: "11"`、`DESKTOP_OAUTH_POLL_RATE_LIMIT: "13"`。
+
+端到端：
+
+- `DEV_CRITICAL_RATE_LIMIT=3` 重建隔离容器后，`/api/ratio_config` 8 次请求得到 3x403 + 5x429
+  （默认 20 时为 20x403 + 5x429）；容器内 `printenv CRITICAL_RATE_LIMIT` 为 3。
+- `DEV_GLOBAL_API_RATE_LIMIT_ENABLE=false` 重建后，匿名 `/api/user/self` 250 次 429=0
+  （默认 70）；恢复默认后回到 70。
+
+注：隔离环境的限流探针此前用的是二进制默认值 20 / 10 / 60，恰好与 compose 默认值一致，
+因此那些结果仍然有效；但当时无法通过环境变量调整这些阈值，现在可以。
+
 ## 未覆盖边界
 
 - 正式环境容器 `new-api` 运行的是 2026-09-08 构建的镜像。该镜像的二进制**认识阈值变量**
@@ -382,6 +421,9 @@ i18n 修复后同样通过。
   一个 bucket。管理员豁免只保护管理员自身，普通用户之间的相互挤占依旧存在。
 - 三库兼容：本改动不涉及数据库迁移与方言 SQL，PostgreSQL 上的选项读写已在隔离环境实测；
   MySQL / SQLite 未单独验证。
+- `.env.example` 声明的其余变量中，仍有约 37 个根 compose 未透传（Pyroscope、SQL 连接池、
+  LinuxDO OAuth、`PORT`、`FRONTEND_BASE_URL`、`SQLITE_PATH`、`NODE_TYPE` 等）。这些不属于限流，
+  未在本任务范围内改动，仅在此记录，需要时应作为独立任务按子系统逐个核对"文档声明是否真的可设"。
 - `[sessions] ERROR!` 日志噪声：豁免开启时，携带畸形 session cookie 的请求会多打一行该库日志
   （实测 10 次畸形 Cookie 新增 10 行；无 Cookie 或合法 Cookie 为 0 行）。该行为不是本次改动引入：
   豁免关闭（等同改动前）时 `/api/pricing` 同样每请求一行，`/api/status` 在豁免关闭时为 0 行、
