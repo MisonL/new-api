@@ -38,11 +38,38 @@ func setupAdminExemptRouter(t *testing.T, handler gin.HandlerFunc, role int, wit
 	return router
 }
 
+// Each test restores a snapshot of the mutable rate-limit settings on cleanup
+// so that a test which disables a limiter cannot leak that state into the next
+// one. Go runs the tests in a single process and -shuffle reorders them, so a
+// hard-coded restore to the default would silently depend on run order.
+func snapshotRateLimitGlobals() func() {
+	apiEnable, apiNum, apiDur := common.GlobalApiRateLimitEnable, common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration
+	webEnable, webNum, webDur := common.GlobalWebRateLimitEnable, common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration
+	critEnable, critNum, critDur := common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration
+	searchEnable, searchNum, searchDur := common.SearchRateLimitEnable, common.SearchRateLimitNum, common.SearchRateLimitDuration
+	suggEnable, suggNum, suggDur := common.SuggestionRateLimitEnable, common.SuggestionRateLimitNum, common.SuggestionRateLimitDuration
+	pollEnable, pollNum, pollDur := common.DesktopOAuthPollRateLimitEnable, common.DesktopOAuthPollRateLimitNum, common.DesktopOAuthPollRateLimitDuration
+	dlNum, dlDur := common.DownloadRateLimitNum, common.DownloadRateLimitDuration
+	upNum, upDur := common.UploadRateLimitNum, common.UploadRateLimitDuration
+
+	return func() {
+		common.GlobalApiRateLimitEnable, common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration = apiEnable, apiNum, apiDur
+		common.GlobalWebRateLimitEnable, common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration = webEnable, webNum, webDur
+		common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration = critEnable, critNum, critDur
+		common.SearchRateLimitEnable, common.SearchRateLimitNum, common.SearchRateLimitDuration = searchEnable, searchNum, searchDur
+		common.SuggestionRateLimitEnable, common.SuggestionRateLimitNum, common.SuggestionRateLimitDuration = suggEnable, suggNum, suggDur
+		common.DesktopOAuthPollRateLimitEnable, common.DesktopOAuthPollRateLimitNum, common.DesktopOAuthPollRateLimitDuration = pollEnable, pollNum, pollDur
+		common.DownloadRateLimitNum, common.DownloadRateLimitDuration = dlNum, dlDur
+		common.UploadRateLimitNum, common.UploadRateLimitDuration = upNum, upDur
+	}
+}
+
 func withAdminExempt(t *testing.T, enabled bool, configure func()) {
 	t.Helper()
 	original := operation_setting.GetRateLimitAdminExempt()
 	originalLimiter := inMemoryRateLimiter
 	originalRedisEnabled := common.RedisEnabled
+	restoreGlobals := snapshotRateLimitGlobals()
 
 	operation_setting.SetRateLimitAdminExempt(enabled)
 	inMemoryRateLimiter = &common.InMemoryRateLimiter{}
@@ -55,6 +82,7 @@ func withAdminExempt(t *testing.T, enabled bool, configure func()) {
 		operation_setting.SetRateLimitAdminExempt(original)
 		inMemoryRateLimiter = originalLimiter
 		common.RedisEnabled = originalRedisEnabled
+		restoreGlobals()
 	})
 }
 
@@ -100,9 +128,6 @@ func TestGlobalAPIRateLimitStillLimitsCommonUserWhenAdminExemptEnabled(t *testin
 		common.GlobalApiRateLimitNum = 2
 		common.GlobalApiRateLimitDuration = 60
 	})
-	t.Cleanup(func() {
-		common.GlobalApiRateLimitEnable = true
-	})
 
 	router := setupAdminExemptRouter(t, GlobalAPIRateLimit(), common.RoleCommonUser, true)
 	if code := probeTwice(t, router, 2); code != http.StatusTooManyRequests {
@@ -115,9 +140,6 @@ func TestGlobalAPIRateLimitStillLimitsAdminWhenExemptDisabled(t *testing.T) {
 		common.GlobalApiRateLimitEnable = true
 		common.GlobalApiRateLimitNum = 2
 		common.GlobalApiRateLimitDuration = 60
-	})
-	t.Cleanup(func() {
-		common.GlobalApiRateLimitEnable = true
 	})
 
 	router := setupAdminExemptRouter(t, GlobalAPIRateLimit(), common.RoleAdminUser, true)
@@ -132,9 +154,6 @@ func TestGlobalAPIRateLimitStillLimitsAnonymousWhenAdminExemptEnabled(t *testing
 		common.GlobalApiRateLimitNum = 2
 		common.GlobalApiRateLimitDuration = 60
 	})
-	t.Cleanup(func() {
-		common.GlobalApiRateLimitEnable = true
-	})
 
 	router := setupAdminExemptRouter(t, GlobalAPIRateLimit(), 0, false)
 	if code := probeTwice(t, router, 2); code != http.StatusTooManyRequests {
@@ -147,9 +166,6 @@ func TestGlobalWebRateLimitExemptsAdminWhenEnabled(t *testing.T) {
 		common.GlobalWebRateLimitEnable = true
 		common.GlobalWebRateLimitNum = 2
 		common.GlobalWebRateLimitDuration = 60
-	})
-	t.Cleanup(func() {
-		common.GlobalWebRateLimitEnable = true
 	})
 
 	router := setupAdminExemptRouter(t, GlobalWebRateLimit(), common.RoleAdminUser, true)
@@ -164,9 +180,6 @@ func TestSearchRateLimitExemptsAdminWhenEnabled(t *testing.T) {
 		common.SearchRateLimitNum = 2
 		common.SearchRateLimitDuration = 60
 	})
-	t.Cleanup(func() {
-		common.SearchRateLimitEnable = true
-	})
 
 	router := setupAdminExemptRouter(t, SearchRateLimit(), common.RoleAdminUser, true)
 	if code := probeTwice(t, router, 2); code != http.StatusOK {
@@ -179,9 +192,6 @@ func TestSuggestionRateLimitExemptsAdminWhenEnabled(t *testing.T) {
 		common.SuggestionRateLimitEnable = true
 		common.SuggestionRateLimitNum = 2
 		common.SuggestionRateLimitDuration = 60
-	})
-	t.Cleanup(func() {
-		common.SuggestionRateLimitEnable = true
 	})
 
 	router := setupAdminExemptRouter(t, SuggestionRateLimit(), common.RoleAdminUser, true)
@@ -198,9 +208,6 @@ func TestGlobalAPIRateLimitStillLimitsDisabledAdmin(t *testing.T) {
 		common.GlobalApiRateLimitEnable = true
 		common.GlobalApiRateLimitNum = 2
 		common.GlobalApiRateLimitDuration = 60
-	})
-	t.Cleanup(func() {
-		common.GlobalApiRateLimitEnable = true
 	})
 
 	router := gin.New()
@@ -230,9 +237,6 @@ func TestGlobalAPIRateLimitStillLimitsSessionWithoutStatus(t *testing.T) {
 		common.GlobalApiRateLimitNum = 2
 		common.GlobalApiRateLimitDuration = 60
 	})
-	t.Cleanup(func() {
-		common.GlobalApiRateLimitEnable = true
-	})
 
 	router := gin.New()
 	gin.SetMode(gin.TestMode)
@@ -261,9 +265,6 @@ func TestCriticalRateLimitNeverExemptsAdmin(t *testing.T) {
 		common.CriticalRateLimitEnable = true
 		common.CriticalRateLimitNum = 2
 		common.CriticalRateLimitDuration = 60
-	})
-	t.Cleanup(func() {
-		common.CriticalRateLimitEnable = true
 	})
 
 	router := setupAdminExemptRouter(t, CriticalRateLimit(), common.RoleRootUser, true)
@@ -319,14 +320,6 @@ func TestExemptableLimiterCoversExactlyTheDocumentedLimiters(t *testing.T) {
 		common.UploadRateLimitNum = 2
 		common.UploadRateLimitDuration = 60
 	})
-	t.Cleanup(func() {
-		common.GlobalWebRateLimitEnable = true
-		common.GlobalApiRateLimitEnable = true
-		common.SearchRateLimitEnable = true
-		common.SuggestionRateLimitEnable = true
-		common.CriticalRateLimitEnable = true
-		common.DesktopOAuthPollRateLimitEnable = true
-	})
 
 	for name, factory := range wantExempt {
 		router := setupAdminExemptRouter(t, factory(), common.RoleAdminUser, true)
@@ -350,9 +343,6 @@ func TestAdminExemptionFailsClosedWithoutSessionMiddleware(t *testing.T) {
 		common.GlobalApiRateLimitEnable = true
 		common.GlobalApiRateLimitNum = 2
 		common.GlobalApiRateLimitDuration = 60
-	})
-	t.Cleanup(func() {
-		common.GlobalApiRateLimitEnable = true
 	})
 
 	router := gin.New()
