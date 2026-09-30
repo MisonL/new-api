@@ -1,6 +1,9 @@
 package middleware
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -353,5 +356,92 @@ func TestAdminExemptionFailsClosedWithoutSessionMiddleware(t *testing.T) {
 
 	if code := probeTwice(t, router, 2); code != http.StatusTooManyRequests {
 		t.Fatalf("a router without sessions must stay rate limited, got %d", code)
+	}
+}
+
+// exportedLimiterFuncs parses rate-limit.go and returns the name of every
+// exported function that returns a rate-limit middleware.
+//
+// The probe test below can only check limiters someone remembered to list. This
+// reads the source instead, so a newly added limiter shows up without anyone
+// updating a map - which is exactly the case the map-based test missed: adding
+// an unwrapped limiter left it passing.
+func exportedLimiterFuncs(t *testing.T) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "rate-limit.go", nil, 0)
+	if err != nil {
+		t.Fatalf("failed to parse rate-limit.go: %v", err)
+	}
+
+	var names []string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || !fn.Name.IsExported() {
+			continue
+		}
+		// A limiter returns a middleware: func(...) func(*gin.Context) or
+		// func(...) gin.HandlerFunc.
+		results := fn.Type.Results
+		if results == nil || len(results.List) != 1 {
+			continue
+		}
+		switch typeText(results.List[0].Type) {
+		case "func(*gin.Context)", "gin.HandlerFunc":
+			names = append(names, fn.Name.Name)
+		}
+	}
+	return names
+}
+
+func typeText(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.SelectorExpr:
+		if x, ok := e.X.(*ast.Ident); ok {
+			return x.Name + "." + e.Sel.Name
+		}
+	case *ast.FuncType:
+		return "func(*gin.Context)"
+	}
+	return ""
+}
+
+// Every limiter the source exports must appear in one of the two documented
+// sets, so adding a limiter forces a decision instead of silently defaulting to
+// "not exempt" (or worse, being wrapped and never noticed).
+func TestEveryExportedLimiterIsDocumented(t *testing.T) {
+	documented := map[string]struct{}{
+		"GlobalWebRateLimit":        {},
+		"GlobalAPIRateLimit":        {},
+		"SearchRateLimit":           {},
+		"SuggestionRateLimit":       {},
+		"CriticalRateLimit":         {},
+		"DownloadRateLimit":         {},
+		"DesktopOAuthPollRateLimit": {},
+		"UploadRateLimit":           {},
+	}
+
+	exported := exportedLimiterFuncs(t)
+	if len(exported) == 0 {
+		t.Fatal("parsed no exported limiter functions; the parser or the file layout changed")
+	}
+	for _, name := range exported {
+		if _, ok := documented[name]; !ok {
+			t.Errorf("rate-limit.go exports limiter %s, which is in neither the exempt nor the limited set; decide whether it honors the administrator exemption and add it to TestExemptableLimiterCoversExactlyTheDocumentedLimiters", name)
+		}
+	}
+	for name := range documented {
+		found := false
+		for _, exported := range exported {
+			if exported == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s is documented as a limiter but rate-limit.go no longer exports it; remove it from the documented set", name)
+		}
 	}
 }

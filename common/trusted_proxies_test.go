@@ -194,8 +194,14 @@ func TestOwnIPv4SubnetsReturnsMaskedNetworkAddress(t *testing.T) {
 	}
 }
 
+// wantLoopback are the loopback ranges auto must trust, written out rather than
+// read from loopbackProxies. Asserting against the production constant would
+// make every check below vacuous: widening that constant to 0.0.0.0/0 - which
+// makes every client's X-Forwarded-For believed - would still satisfy them.
+var wantLoopback = []string{"127.0.0.0/8", "::1/128"}
+
 func isLoopbackEntry(entry string) bool {
-	for _, loopback := range loopbackProxies {
+	for _, loopback := range wantLoopback {
 		if entry == loopback {
 			return true
 		}
@@ -205,7 +211,7 @@ func isLoopbackEntry(entry string) bool {
 
 func assertLoopbackTrusted(t *testing.T, proxies []string, label string) {
 	t.Helper()
-	for _, loopback := range loopbackProxies {
+	for _, loopback := range wantLoopback {
 		found := false
 		for _, subnet := range proxies {
 			if subnet == loopback {
@@ -221,12 +227,20 @@ func assertLoopbackTrusted(t *testing.T, proxies []string, label string) {
 
 func assertExactlyLoopback(t *testing.T, proxies []string, label string) {
 	t.Helper()
-	if len(proxies) != len(loopbackProxies) {
-		t.Fatalf("%s returned %v, want exactly the loopback ranges", label, proxies)
+	if len(proxies) != len(wantLoopback) {
+		t.Fatalf("%s returned %v, want exactly the loopback ranges %v", label, proxies, wantLoopback)
 	}
 	for _, subnet := range proxies {
 		if !isLoopbackEntry(subnet) {
 			t.Fatalf("%s returned %s; a bare host must not trust its LAN", label, subnet)
 		}
+	}
+}
+
+// loopbackProxies must be exactly wantLoopback, so a change to the constant
+// cannot pass unnoticed by making the assertions above compare it to itself.
+func TestLoopbackProxiesAreExactlyTheLoopbackRanges(t *testing.T) {
+	if !reflect.DeepEqual(loopbackProxies, wantLoopback) {
+		t.Fatalf("loopbackProxies = %v, want %v", loopbackProxies, wantLoopback)
 	}
 }
