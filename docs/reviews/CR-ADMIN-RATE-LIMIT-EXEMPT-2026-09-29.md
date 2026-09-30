@@ -312,6 +312,44 @@ XHR 拦截记录实际发出的 `PUT /api/option/`，验证两个保存按钮的
 3. **写入 `"  merge  "` 到 `RequestHeaderPolicyDefaultMode`**。消费方 `parseRuntimeHeaderPolicyMode`
    会 `TrimSpace` 后比较，运行期正常；已实测确认并删除探针写入的行。
 
+## 第四轮：顺序依赖与启动降级路径（2026-09-30）
+
+给豁免用例加快照恢复后跑 `-shuffle`，在 seed=41 触发了一个与限流无关的 panic，追下去发现两处问题。
+
+1. **`i18n.Translate` 在 `Init()` 之前会 nil 解引用 panic**（提交 `83a134885`）。
+   `main.go:380` 的 `i18n.Init()` 失败时只记日志继续（注释写着 `i18n is not critical`），
+   但 `GetLocalizer` 会用 nil 的 `bundle` 调 `i18n.NewLocalizer`，产出的 localizer 每次查表都
+   解引用 nil，`Translate` 里"找不到就返回 key"的兜底来不及生效。结果是启动期 i18n 加载失败后，
+   每个 `i18n.T` 调用点（`middleware/distributor.go` 有 20 余处）在构造第一个错误响应时 panic。
+   已改为 `GetLocalizer` 在无 bundle 时返回 nil、`Translate` 回退为 key。
+
+   探针（`Translate` 在 `Init` 之前调用）：
+
+   | 版本 | 结果 |
+   | --- | --- |
+   | 修复前 | `panic: runtime error: invalid memory address or nil pointer dereference` |
+   | 修复后 | 返回 key `"some.missing.key"` |
+
+   回归测试 `TestTranslateFallsBackToKeyWhenBundleIsMissing` 自行构造"无 bundle"状态，
+   而不是依赖 `Init` 尚未被调用——`initOnce` 使 `Init` 第二次调用成为空操作，依赖包内执行顺序的
+   测试本身就会在 `-shuffle` 下失败。移除 nil 守卫后该测试 panic。
+
+2. **`TestDistributeTokenModelLimitRejectsDeniedSubmitModel` 依赖 i18n 已被初始化**。
+   该用例不调用 `i18n.Init()`，靠其他用例先初始化才能通过。这是**既有缺陷**：在干净 HEAD
+   worktree（不含本任务任何文件）上扫 seed 1..60，seed 29、33 即触发。修掉第 1 条后 seed 29、33、
+   41 全部恢复通过。
+
+3. **豁免用例把 enable 标志恢复成硬编码 `true` 而非原值**（提交 `6a7305749`）。
+   把某个限流器关掉的用例会把该状态泄漏给下一个用例；由于 Go 在单进程内跑包内全部用例，
+   这只在 `-shuffle` 下显现。已改为在 `withAdminExempt` 内快照全部可变限流设置并在 cleanup 恢复，
+   替换掉 11 个逐用例的硬编码 cleanup。
+
+   探针：先记录某标志，跑一个会改写它的豁免用例，再比对——快照恢复时一致；移除 `restoreGlobals()`
+   后报 `leak: before=false after=true`。
+
+`-shuffle` 扫描结果：seed 1..40 全部通过（修复前 seed 41 失败）；干净 HEAD 的 seed 29、33 在
+i18n 修复后同样通过。
+
 ## 未覆盖边界
 
 - 正式环境容器 `new-api` 运行的是 2026-09-08 构建的镜像。该镜像的二进制**认识阈值变量**
