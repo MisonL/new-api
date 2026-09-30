@@ -60,6 +60,7 @@ services:
       - CHANNEL_CONCURRENCY_STRICT=${DEV_CHANNEL_CONCURRENCY_STRICT:-true}
       - UPDATE_TASK=${DEV_UPDATE_TASK:-false}
       - SUBSCRIPTION_QUOTA_RESET_TASK_ENABLED=${DEV_SUBSCRIPTION_QUOTA_RESET_TASK_ENABLED:-false}
+      # auto 由进程按运行环境判定：两种环境都信任 loopback，容器内再信任容器网段。
       - TRUSTED_PROXIES=${DEV_TRUSTED_PROXIES-auto}
       - NODE_NAME=${DEV_NODE_NAME:-dev-isolated-node-1}
     depends_on:

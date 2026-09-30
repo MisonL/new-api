@@ -434,7 +434,7 @@ i18n 修复后同样通过。
 固定（`networks` 只有 `driver: bridge`），实际分配由 Docker 决定，生产当前为
 `new-api_new-api-network 172.24.0.0/16`；重建网络后网段可能变化，届时需同步更新该值。
 
-## 通用能力：TRUSTED_PROXIES=auto（2026-09-30，提交 `65f4299f5`）
+## 通用能力：TRUSTED_PROXIES=auto（2026-09-30，提交 `65f4299f5`，裸机分支后续补充）
 
 上一节把 `TRUSTED_PROXIES` 定为部署前置条件，但推荐的写法是硬编码本机网段
 （`172.24.0.0/16`），这只在本机成立：Docker 的网桥网段由它自己分配，compose 里
@@ -445,37 +445,76 @@ i18n 修复后同样通过。
 
 | 取值 | 语义 |
 | --- | --- |
-| `auto`（两个 compose 的默认） | 读取本进程所有非 loopback 的 IPv4 网卡，取它们的网段 |
+| `auto`（两个 compose 的默认） | 由进程按运行环境判定：容器内信任容器自身网段；裸机信任 loopback |
 | 留空 | 不信任任何转发头，请求按 socket 地址识别 |
 | IP / CIDR 逗号列表 | 原样传给 `SetTrustedProxies`，写错会在启动时报错而不是静默收窄 |
 
 实现在 `common/trusted_proxies.go` 的 `ResolveTrustedProxies`，`main.go` 调用它并在启动时
-打印结果。过滤规则：跳过 down 与 loopback 网卡，跳过非 IPv4，跳过 `/0`（默认路由）。
+打印判定依据与最终列表。`auto` 先做容器判定，再按分支推导：
 
-实测：
+| 判定 | 依据 | 信任列表 |
+| --- | --- | --- |
+| 容器 | `/.dockerenv`、`/run/.containerenv`，或 `/proc/self/cgroup` 含 `docker`/`kubepods`/`containerd`/`podman`/`lxc` | loopback + 自身非 loopback IPv4 网卡的网段（掩码归一到网络地址） |
+| 裸机 | 以上均不命中 | 仅 loopback：`127.0.0.0/8`、`::1/128` |
+
+**loopback 在两条分支里都信任。** 同机反向代理无论进程是否在容器内，都是从 loopback 连入的；
+容器内这些地址只接受本容器网络命名空间的连接，信任它们没有额外风险。真正需要它们的是
+`--network host` 的容器——它与宿主机共用网络命名空间，此时唯一的同机代理来源就是 loopback。
+
+容器分支的网卡过滤规则：跳过 down 与 loopback 网卡，跳过非 IPv4，跳过 `/0`（默认路由）。
+
+裸机分支为什么不加自身网段：非容器部署的反向代理（nginx、Caddy、Traefik）通常与网关同机，
+从 `127.0.0.1` 连入；若改为信任宿主机自身网段，等于信任整个局域网，远端可自带
+`X-Forwarded-For` 伪造来源 IP，限流分桶随之失效。这是第一版 `auto` 的实际缺陷：它只按
+"非 loopback 网卡"推导，在裸机上得到的是 `10.0.88.0/22` 这类宿主机所在局域网网段，
+既范围过宽、又漏掉了真正的同机代理地址。
+
+`--network host` 是第二轮补上的边界：这类容器**会被判定为容器**（`/.dockerenv` 存在），但
+容器分支枚举到的是**宿主机的**网卡。实测该场景返回
+`172.17.0.0/16,172.18.0.0/16,...,192.168.65.0/24,192.168.65.6/32`——即宿主机全部网桥与
+局域网，漏掉了 loopback。修复方式是让 loopback 无条件进入信任列表，容器分支再追加自身网段；
+修复后该场景返回 `127.0.0.0/8,::1/128` 加上上述网段。
+
+该场景的**信任范围过宽**是共用网络命名空间的结果，不是可以靠探测消除的：进程确实位于宿主机
+网络上，那些网卡确实是它自己的网卡。这与桥接容器信任 `172.17.0.0/16` 是同一个模型，只是范围
+更大。因此处理方式是写进文档而不是继续收窄——`--network host` 部署应显式指定 IP/CIDR 列表。
+
+实测（镜像 `new-api-local:dev`，commit `9c4758b53eec-dirty`）：
 
 | 场景 | 结果 |
 | --- | --- |
-| 隔离容器内启动，未配置任何值 | 日志 `trusted proxies: 172.18.0.0/16`，与容器实际网段一致 |
+| 容器内 `auto`，`/.dockerenv` 存在 | 日志 `running in a container (/.dockerenv), trusting loopback and the container subnet`，得到 `127.0.0.0/8,::1/128,172.17.0.0/16`；容器 `eth0` 实为 `172.17.0.4/16`，网段一致 |
+| 隔离环境容器内启动，未配置任何值 | 得到 loopback + `172.18.0.0/16`，网段与容器实际一致 |
+| 容器内删除 `/.dockerenv` 与 `/run/.containerenv` 后启动（模拟裸机） | 日志 `running on a host, trusting loopback for a same-host reverse proxy`，得到 `127.0.0.0/8,::1/128` |
+| `--network host` 容器 | loopback 在列表中（修复前不在） |
 | 容器内 `auto`，两个客户端各带不同 `X-Forwarded-For` | `rateLimit:GA203.0.113.1`、`rateLimit:GA203.0.113.2` 两个桶 |
 | 容器内留空，同样两个请求 | 日志 `trusted proxies disabled; forwarding headers are ignored`，两者塌缩为 `rateLimit:GA172.18.0.1` |
-| 宿主机（非容器）直接跑 `auto` | 推导出 `10.0.88.0/22`、`198.18.0.0/30` |
 
-第四行说明了 `auto` 的适用边界：在宿主机上它推导出的是宿主机自身网段（通常是整个局域网），
-范围过宽，裸机部署应显式指定代理地址或留空。文档已按此写明。
+第三行是裸机分支的端到端验证方式：容器里删掉两个标记文件后进程走裸机分支，证明判定不依赖
+编译期常量，而是运行时读文件系统。该行只验证分支选择与信任列表，容器内实际网卡仍是容器网卡。
 
-安全边界（已写入 `.env.example`）：`auto` 信任的是"与本进程同网段"的来源。若容器端口直接
-发布到宿主机（如 `0.0.0.0:13000:3000`），经该端口进入的请求其 socket 地址是 Docker 网关，
-同样落在容器网段内，因此它自带的 `X-Forwarded-For` 也会被采信，可用来伪造来源 IP。要么不直接
-发布应用端口，要么在该端口前置一层会重写转发头的代理。
+安全边界（已写入 `.env.example`）：`auto` 信任的是"与本进程同网段（或同机 loopback）"的来源，
+落在该网段内的来源都可以自带 `X-Forwarded-For` 而不被识破。除上面已说明的 `--network host`
+之外，还有一种形状需要留意：容器端口直接发布到宿主机（如 `0.0.0.0:13000:3000`），经该端口
+进入的请求其 socket 地址是 Docker 网关，同样落在容器网段内，因此它自带的 `X-Forwarded-For`
+也会被采信。要么不直接发布应用端口，要么在该端口前置一层会重写转发头的代理。
 
 修复过程中另发现一处 compose 语法缺陷：`${TRUSTED_PROXIES:-auto}` 在变量**显式留空**时也会
 回退为 `auto`，导致用户无法通过留空关闭信任。已改为 `${TRUSTED_PROXIES-auto}`（仅未设置时用
 默认值），并实测三种取值分别得到 `auto` / `""` / 显式值。
 
 测试：`common/trusted_proxies_test.go` 覆盖空值返回 nil（关闭信任）、显式列表原样透传、纯分隔符
-列表报错、`auto` 推导结果必须落在本机网卡网段内、大小写不敏感。变异测试两处：把网段归一化改成
-保留主机位、把空值返回值从 nil 改为空切片，都会让对应用例失败。
+列表报错、`auto` 结果与环境一致（容器内 = loopback + 本机网卡网段，裸机 = 恰好 loopback）、
+大小写不敏感、网段必须是掩码后的网络地址、返回值不得与包级 loopback 切片共享底层数组。
+`detectContainerMarker` 是包级变量，`TestDeriveTrustedProxiesBranches` 注入它分别强制两条分支，
+不依赖测试机恰好是容器还是裸机。
+
+变异测试五处，全部被捕获：网段归一化改成保留主机位（`returned 10.0.90.200/22 with host bits set`）、
+空值返回值从 nil 改为空切片、裸机分支返回自身网段（`a bare host must not trust its LAN`）、
+容器分支丢掉 loopback（`loopback 127.0.0.0/8 must always be trusted`）、返回值直接返回包级切片
+（`a caller mutating the result changed the package-level list`）。其中"保留主机位"与"共享底层数组"
+两处是第一轮变异**未被捕获**的用例——第一轮的网段断言只是把结果与本机网卡比对，掩盖了掩码差异；
+别名用例把结果与已被污染的包级切片比对，等于拿列表跟自己比。两者都已补上并复测通过。
 
 ## 未覆盖边界
 

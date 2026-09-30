@@ -124,8 +124,9 @@ services:
       - PYROSCOPE_BASIC_AUTH_PASSWORD=${PYROSCOPE_BASIC_AUTH_PASSWORD:-}
       - PYROSCOPE_MUTEX_RATE=${PYROSCOPE_MUTEX_RATE:-5}
       - PYROSCOPE_BLOCK_RATE=${PYROSCOPE_BLOCK_RATE:-5}
-      # 反向代理信任。auto 表示由进程从自身网卡推导所在网段，容器部署用这个即可；
-      # 留空则不信任任何转发头（所有客户端塌缩为一个限流桶）；也可显式写 IP/CIDR 列表。
+      # 反向代理信任。auto 表示由进程按运行环境自行判定：两种情况都信任 loopback
+      # （同机 nginx/Caddy/Traefik），容器内再额外信任容器网段；留空则不信任任何
+      # 转发头（所有客户端塌缩为一个限流桶）；也可显式写 IP/CIDR 列表。
       - TRUSTED_PROXIES=${TRUSTED_PROXIES-auto}
       # 渠道缓存与健康检查
       - CHANNEL_CACHE_SYNC_ENABLED=${CHANNEL_CACHE_SYNC_ENABLED:-true}

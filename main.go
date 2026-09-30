@@ -176,7 +176,8 @@ func main() {
 	// and choose the client IP that the login/registration/email rate limiters
 	// and the per-token IP allowlist compare against. Only trust the forwarding
 	// headers when the deployment names its proxies, or asks this process to
-	// derive them from its own interfaces with TRUSTED_PROXIES=auto.
+	// work them out from its own environment with TRUSTED_PROXIES=auto:
+	// loopback always, plus the container subnet inside a container.
 	trustedProxies, err := common.ResolveTrustedProxies(common.GetEnvOrDefaultString("TRUSTED_PROXIES", ""))
 	if err != nil {
 		common.FatalLog("invalid TRUSTED_PROXIES: " + err.Error())
