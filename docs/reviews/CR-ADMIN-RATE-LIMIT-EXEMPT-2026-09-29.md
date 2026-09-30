@@ -299,6 +299,19 @@ XHR 拦截记录实际发出的 `PUT /api/option/`，验证两个保存按钮的
 `XMLHttpRequest.prototype`，使同一次请求被重复记录（曾观察到 3 条相同 PUT）。改为单次安装后，
 每轮保存恒为 1 条。这是插桩方式的问题，不是应用行为。
 
+## 复核中排除的候选（2026-09-30）
+
+以下三处排查后判定**不是缺陷**，均未改动：
+
+1. **classic `zh.json` 缺少本次新增的三个中文串**。该文件有 2814 条、缺失率 45.2%，
+   但 `src/i18n/i18n.js` 的 `resources` 只 import 7 个语言（en、zh-CN、zh-TW、fr、ru、ja、vi），
+   `language.js` 又把 `zh` 归一化到 `zh-CN`，全仓库无任何文件引用 `zh.json`——它是未接入的孤立
+   文件，其 2311 个缺口是既有状态。不为其补键，避免让一个死文件看起来是被维护的。
+2. **classic `en.json` 缺 `已清理 {{count}} 个日志文件，释放 {{size}}_other`**。该键在 HEAD 中存在，
+   当前缺失来自另一会话未提交的 `en.json` 改动（146 增 13 删），本任务未触碰该文件。
+3. **写入 `"  merge  "` 到 `RequestHeaderPolicyDefaultMode`**。消费方 `parseRuntimeHeaderPolicyMode`
+   会 `TrimSpace` 后比较，运行期正常；已实测确认并删除探针写入的行。
+
 ## 未覆盖边界
 
 - 正式环境容器 `new-api` 运行的是 2026-09-08 构建的镜像。该镜像的二进制**认识阈值变量**
