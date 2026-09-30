@@ -418,7 +418,7 @@ i18n 修复后同样通过。
 | 直连 `:13000` | 伪造 `X-Forwarded-For: 198.18.9.9` | `rateLimit:GA198.18.9.9` | **伪造值被采纳** |
 
 原因：正式容器运行的是 2026-09-08 构建的镜像，其二进制**不含** `SetTrustedProxies(nil)`
-（`strings /new-api \| grep -c 'failed to disable trusted proxies'` 结果为 0，本地新镜像为 1），
+（`strings /new-api` 管道 `grep -c 'failed to disable trusted proxies'` 结果为 0，本地新镜像为 1），
 即旧镜像信任所有代理，gin 的 `ClientIP()` 会采纳客户端自带的 `X-Forwarded-For`。经 Caddy 时
 因为 Caddy 用 `{remote_host}` 重写了 `X-Real-IP` 并重建了 XFF，所以伪造无效；直连 13000 时
 没有中间层覆盖，伪造直接生效。
