@@ -1,7 +1,7 @@
 # CR: 协议转换层收敛到上游 relaykit 的设计与四轮对抗审查
 
-采样时间：2026-09-30
-本地基线：`9c4758b53`（dev 分支；记录写作时 HEAD = `a1d5e9aad`）
+采样时间：2026-09-30（2026-10-01 补充本地独有能力盘点）
+本地基线：`9c4758b53`（dev 分支；记录写作时 HEAD = `a1d5e9aad`；盘点时 HEAD = `2cf100a1d`）
 上游参照：`upstream/main` = `789c97019`（2026-09-28）
 
 ## 授权与边界
@@ -11,6 +11,8 @@
 - `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`
 
 工作区存在其他会话的 500+ 未提交改动，全程未触碰、未回退、未整理。所有上游代码经 `git show upstream/main:<path>` / `git grep ... upstream/main` 读取，未执行 `git checkout`。
+
+盘点阶段使用 3 个只读子代理（`service/openaicompat/`、`relay/common/responses_*.go`、本地独有 `dto/` 各一）。其中 2 个在用尽上下文前未产出完整报告，仅返回分析过程；主代理对**每一条**被采纳的结论均独立复现，包括推翻子代理自身的一处断言（其称 dto `Clone` 跨包生产引用为 0，实测有 1 个文件）。
 
 ## 任务来源
 
@@ -94,13 +96,33 @@ const (
 
 ### 5. 本地独有能力的处置
 
-**保留在宿主**（部署关切）：响应方向 reasoning 暴露策略、DeepSeek 空 thinking block 保留、think 标签提取族、工具名契约、`context_compaction` 归一化、加密内容探测。
+**保留在宿主**（部署关切）：响应方向 reasoning 暴露策略、DeepSeek 空 thinking block 保留、think 标签提取族、`context_compaction` 归一化、加密内容探测。
 
-**本地专有契约（上游全仓 0 命中）**：`types/error.go` 的 `ErrorCodeUpstreamTransportInterrupted`（25 文件引用）、`IsUpstreamTransportInterruptedError`（9）、`IsOpenAIRequestParameterError`（5）。上游宿主 `types/` 没有 `error.go`。
+**本地专有契约**：本地 `types/error.go` 37 个 `ErrorCode` 中，上游 `relaykit/types/error.go`（33 个）缺 4 个：`ErrorCodeUpstreamTransportInterrupted`（生产 14 文件）、`ErrorCodeChannelConcurrencyExceeded`（3）、`ErrorCodeUpstreamRequestTooLarge`（3）、`ErrorCodeChannelConcurrencyUnavailable`（2）。另有 2 个本地独有函数 `IsUpstreamTransportInterruptedError`（生产 8）、`IsOpenAIRequestParameterError`（5）。
 
-**本地 DTO 独有方法（13 个，全部在生产使用）**：`ParseContentStrict`(20)、`ParseToolCallsStrict`(16)、`Clone`(13)、`HasCompactionTrigger`(10)、`HasCompactionOutput`(4)、`EffectiveReason`(2)、`SearchToolNameByToolCallId`(1) 等。relaykit 对应类型无这些方法，迁移即编译失败。
+**本地 DTO 独有方法（23 个，HEAD 口径 20 个）**：`ParseContentStrict`(12)、`ParseToolCallsStrict`(11)、`HasCompactionTrigger`(9)、`ResponsesStreamResponse.GetOpenAIError`(9)、`EffectiveReason`(2)、`SearchToolNameByToolCallId`(1) 等。relaykit 对应类型无这些方法，迁移即编译失败。反向 relaykit 独有 5 个方法。
 
-**本地独有包**：`service/openaicompat/`、`relay/common/responses_*.go`、`dto/` 若干文件、`*WithError` 系列（4 个函数 9 个生产调用点）。
+**本地独有包**：`service/openaicompat/`、`relay/common/responses_*.go`、`dto/` 若干文件。**`*WithError` 系列不是能力缺口**——上游转换器本就返回 error，4 个无 error 旧包装的生产调用点为 0。
+
+### 5.1 盘点阶段的修正（2026-10-01）
+
+第 4 节本应「阶段 0 前置」的本地独有能力盘点，在本次补充完成。盘点同时推翻了本节上方若干原有数字：
+
+| 原表述 | 实测 |
+| --- | --- |
+| `ErrorCodeUpstreamTransportInterrupted` 25 文件 | 25 是**含测试**口径；生产 14。且「上游宿主 `types/` 没有 `error.go`」字面为真但误导——上游迁到了 `relaykit/types/error.go`，33 个常量与本地同名同值 |
+| `IsUpstreamTransportInterruptedError` 9 | 含测试 9，生产 8 |
+| 本地 DTO 独有方法 13 个 | **23 个**（工作区）/ 20 个（HEAD）。13 只是 `openai_request.go` 单文件数 |
+| `ParseContentStrict` 20 / `ParseToolCallsStrict` 16 / `Clone` 13 / `HasCompactionTrigger` 10 / `HasCompactionOutput` 4 | 实测 12 / 11 / **1** / 9 / 2。`Clone` 的 13 把 `http.Request.Clone`、`http.Transport.Clone`、`common.ResponsesRequestMetadata.Clone` 一并计入 |
+| 「本地 DTO 独有方法全部在生产使用」 | 不成立：`IsValidToolName`、`ToolNameMaxLength` 生产引用为 0 |
+| 「`service/openaicompat/` 上游无此包」（不加限定） | 包确无，但**能力大部分有**——上游把 chat↔responses 兼容层放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主留了同名函数的 27 行转发 shim。零覆盖的只有命名空间工具、tool_search、custom tool bridge 门控与 rules 策略扩展 |
+| 「`*WithError` 系列 relaykit 无对应签名」 | 上游 `ResponseConverterFunc` 本就返回 `(any, *dto.Usage, error)`；`WithError` 是本地命名遗留 |
+| `relay/common/responses_stream_options_compat.go` | 该文件**不存在**，系误记 |
+| 「工具名契约与别名还原属部署关切」 | 它是跨协议工具名映射，上游零覆盖，**属协议层** |
+
+**新发现的高风险项**：`relay/common/responses_tool_names.go` 及其 2 个测试文件**未被 git 跟踪**，且其 3 个调用点（`relay/responses_handler.go:1123`、`relay/channel/openai/relay_responses.go:912`/`:1296`、`relay/common/relay_info.go`）**也全部位于未提交改动中**——在 HEAD 上该能力完全不存在。与 `CR-UNTRACKED-SOURCE-DEPENDENCY-2026-09-22.md` 同型但更严重：能力本体与全部调用点都未提交。
+
+**未覆盖边界**（不得据此下结论）：`relay/channel/{claude,gemini,openai,aws}` 各通道内自有的转换辅助函数（仅核验了它们对 `service/convert.go` 的 6 个调用点）；`service/` 根目录其余本地专有文件；`controller/` 层协议相关逻辑；上游 3 个 relaykit 演进分支；`responses_input_filter.go` 第 646–1034 行的逐行细节。
 
 ## 被推翻的结论
 
@@ -117,6 +139,13 @@ const (
 | 「hosted 工具桥接是本地独有」 | 上游 `toolconv/` 在 main 上已存在，覆盖 10 种工具 |
 | 「阶段 1 必须更新 210 个 import 点」 | 上游用类型别名做到零调用点变更 |
 | 「`*WithError` 系列 39 个生产调用点」 | 无可复现口径；实测 4 个函数 9 个，6 个函数 14 个 |
+| 「本地 DTO 有 13 个独有方法」（2026-10-01 盘点推翻） | 13 只是 `openai_request.go` 单文件数，实测 23（工作区）/ 20（HEAD） |
+| 「`Clone` 有 13 个生产使用点」（同上） | 把 `http.Request.Clone`、`http.Transport.Clone`、`common.ResponsesRequestMetadata.Clone` 一并计入；dto 的 `Clone` 实际只 1 个生产文件 |
+| 「上游宿主 `types/` 没有 `error.go`」（同上） | 字面为真但误导——上游迁到 `relaykit/types/error.go`，33 个常量与本地同名同值 |
+| 「`*WithError` 系列 relaykit 无对应签名」（同上） | 上游 `ResponseConverterFunc` 本就返回 error；`WithError` 是本地命名遗留，旧包装生产调用点为 0 |
+| 「`service/openaicompat/` 上游无此包」（同上，未加限定） | 包确无但能力大部分有——上游在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，宿主留了同名函数转发 shim |
+| 「`relay/common/responses_stream_options_compat.go`」（同上） | 该文件不存在，系误记 |
+| 「工具名契约与别名还原属部署关切」（同上） | 跨协议工具名映射，上游零覆盖，属协议层 |
 
 ### 主代理坚持多轮的错误结论
 
@@ -173,13 +202,21 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 
 `convmeta.Meta` 15 个方法逐条核验无客户端请求访问器（`relaykit/relayconvert/convmeta/meta.go:18-54`）。
 
-## 未决项（设计文档第 10 节，15 项）
+## 未决项（设计文档第 10 节，20 项）
 
-其中列为**阶段 0 前置**的一项：
+原列为**阶段 0 前置**的一项已于 2026-10-01 完成：
 
-1. **完成本地独有能力盘点**。`service/openaicompat/`、`relay/common/responses_*.go`、本地独有 `dto/` 文件尚未逐项核验。第四轮负责该盘点的子代理在读完文档后用尽上下文，未产出完整清单。**当前设计文档第 4 节的清单完整性有限**，不能带着它进入阶段 4。
+1. ~~**完成本地独有能力盘点**~~。**已完成**，见设计文档 4.1–4.5.5 与第 11 节取证，本节 5.1 记录修正。剩余未覆盖边界已在设计文档 4.5.5 明确列出，不阻塞阶段 4。
 
-其余主要未决项：think 标签提取族归属、本地专有错误符号归属、`*WithError` 系列形式、响应方向暴露策略具体形态、13 个 DTO 独有方法归属、hosted 工具收敛方式、`types` 别名转发适用范围。
+本次盘点新增 5 项未决（设计文档第 10 节第 16–20 项）：
+
+16. 命名空间工具与 tool_search 的归属（上游零覆盖，本地约 20 + 3 个符号）
+17. custom tool bridge 门控语义取舍（本地默认拒绝 vs 上游无条件）
+18. `matchAnyRegex` 空模式语义（本地匹配全部 vs 上游不匹配任何）
+19. **未跟踪文件纳入版本控制**：`relay/common/responses_tool_names.go` 及 2 个测试文件，其调用点也未提交
+20. `service/openaicompat/` 的收敛边界（上游覆盖部分与本地扩展部分如何切分）
+
+其余主要未决项：think 标签提取族归属、本地专有错误符号归属（4 个常量）、`*WithError` 系列形式（倾向直接删除）、响应方向暴露策略具体形态、**23 个** DTO 独有方法归属、hosted 工具收敛方式、`types` 别名转发适用范围。
 
 ## 边界与未验证项
 
