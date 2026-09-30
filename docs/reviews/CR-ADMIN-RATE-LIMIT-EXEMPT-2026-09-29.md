@@ -350,6 +350,18 @@ XHR 拦截记录实际发出的 `PUT /api/option/`，验证两个保存按钮的
 `-shuffle` 扫描结果：seed 1..40 全部通过（修复前 seed 41 失败）；干净 HEAD 的 seed 29、33 在
 i18n 修复后同样通过。
 
+镜像 `commit=6a73057490e9bcb20bf9552cd8a5a1554c6e1b98-dirty`（built 2026-09-30T02:57:38Z，
+`health=healthy`）复测：管理员+豁免开 250 次 429=0；匿名 250 次 180x401+70x429；
+管理员 Critical 25 次 429=5；日志中 panic 次数 0。i18n 正常路径确认可用：
+用真实 token 请求无渠道模型返回
+`No available channel for model nonexistent-model-xyz under group default (distributor)`，
+即 `i18n.T` 渲染出的英文文案且模板变量已替换。
+
+全量门禁（`commit=6a7305749`）：
+`gofmt -l` 无输出；`go vet ./i18n/ ./middleware/` 无输出；`go build ./...` exit 0；
+`go test ./controller ./model ./relay/common ./relay/helper ./service ./i18n ./middleware ./setting/operation_setting -count=1`
+全部 ok。
+
 ## 未覆盖边界
 
 - 正式环境容器 `new-api` 运行的是 2026-09-08 构建的镜像。该镜像的二进制**认识阈值变量**
