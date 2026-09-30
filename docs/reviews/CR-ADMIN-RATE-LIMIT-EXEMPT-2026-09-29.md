@@ -434,6 +434,49 @@ i18n 修复后同样通过。
 固定（`networks` 只有 `driver: bridge`），实际分配由 Docker 决定，生产当前为
 `new-api_new-api-network 172.24.0.0/16`；重建网络后网段可能变化，届时需同步更新该值。
 
+## 通用能力：TRUSTED_PROXIES=auto（2026-09-30，提交 `65f4299f5`）
+
+上一节把 `TRUSTED_PROXIES` 定为部署前置条件，但推荐的写法是硬编码本机网段
+（`172.24.0.0/16`），这只在本机成立：Docker 的网桥网段由它自己分配，compose 里
+`networks` 只写了 `driver: bridge`，网络重建后网段会变。写进 `.env.example` 的网段对其他
+部署环境是错误引导。因此改为让进程自己推导。
+
+`TRUSTED_PROXIES` 现在接受三种取值：
+
+| 取值 | 语义 |
+| --- | --- |
+| `auto`（两个 compose 的默认） | 读取本进程所有非 loopback 的 IPv4 网卡，取它们的网段 |
+| 留空 | 不信任任何转发头，请求按 socket 地址识别 |
+| IP / CIDR 逗号列表 | 原样传给 `SetTrustedProxies`，写错会在启动时报错而不是静默收窄 |
+
+实现在 `common/trusted_proxies.go` 的 `ResolveTrustedProxies`，`main.go` 调用它并在启动时
+打印结果。过滤规则：跳过 down 与 loopback 网卡，跳过非 IPv4，跳过 `/0`（默认路由）。
+
+实测：
+
+| 场景 | 结果 |
+| --- | --- |
+| 隔离容器内启动，未配置任何值 | 日志 `trusted proxies: 172.18.0.0/16`，与容器实际网段一致 |
+| 容器内 `auto`，两个客户端各带不同 `X-Forwarded-For` | `rateLimit:GA203.0.113.1`、`rateLimit:GA203.0.113.2` 两个桶 |
+| 容器内留空，同样两个请求 | 日志 `trusted proxies disabled; forwarding headers are ignored`，两者塌缩为 `rateLimit:GA172.18.0.1` |
+| 宿主机（非容器）直接跑 `auto` | 推导出 `10.0.88.0/22`、`198.18.0.0/30` |
+
+第四行说明了 `auto` 的适用边界：在宿主机上它推导出的是宿主机自身网段（通常是整个局域网），
+范围过宽，裸机部署应显式指定代理地址或留空。文档已按此写明。
+
+安全边界（已写入 `.env.example`）：`auto` 信任的是"与本进程同网段"的来源。若容器端口直接
+发布到宿主机（如 `0.0.0.0:13000:3000`），经该端口进入的请求其 socket 地址是 Docker 网关，
+同样落在容器网段内，因此它自带的 `X-Forwarded-For` 也会被采信，可用来伪造来源 IP。要么不直接
+发布应用端口，要么在该端口前置一层会重写转发头的代理。
+
+修复过程中另发现一处 compose 语法缺陷：`${TRUSTED_PROXIES:-auto}` 在变量**显式留空**时也会
+回退为 `auto`，导致用户无法通过留空关闭信任。已改为 `${TRUSTED_PROXIES-auto}`（仅未设置时用
+默认值），并实测三种取值分别得到 `auto` / `""` / 显式值。
+
+测试：`common/trusted_proxies_test.go` 覆盖空值返回 nil（关闭信任）、显式列表原样透传、纯分隔符
+列表报错、`auto` 推导结果必须落在本机网卡网段内、大小写不敏感。变异测试两处：把网段归一化改成
+保留主机位、把空值返回值从 nil 改为空切片，都会让对应用例失败。
+
 ## 未覆盖边界
 
 - 正式环境容器 `new-api` 运行的是 2026-09-08 构建的镜像。该镜像的二进制**认识阈值变量**
