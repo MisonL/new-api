@@ -172,11 +172,30 @@ func main() {
 
 	// Initialize HTTP server
 	server := gin.New()
+	// gin trusts every proxy by default, so any caller can set X-Forwarded-For
+	// and choose the client IP that the login/registration/email rate limiters
+	// and the per-token IP allowlist compare against. Only trust the forwarding
+	// headers when the deployment names its proxies, or asks this process to
+	// derive them from its own interfaces with TRUSTED_PROXIES=auto.
+	trustedProxies, err := common.ResolveTrustedProxies(common.GetEnvOrDefaultString("TRUSTED_PROXIES", ""))
+	if err != nil {
+		common.FatalLog("invalid TRUSTED_PROXIES: " + err.Error())
+	}
+	if err := server.SetTrustedProxies(trustedProxies); err != nil {
+		common.FatalLog("invalid TRUSTED_PROXIES: " + err.Error())
+	}
+	if len(trustedProxies) == 0 {
+		common.SysLog("trusted proxies disabled; forwarding headers are ignored")
+	} else {
+		common.SysLog("trusted proxies: " + strings.Join(trustedProxies, ","))
+	}
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
+		// Report only a request id: the panic value can carry internal state
+		// (paths, upstream addresses) that must not reach the client.
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
-				"message": fmt.Sprintf("Panic detected, error: %v. Please submit a issue here: https://github.com/Calcium-Ion/new-api", err),
+				"message": fmt.Sprintf("Panic detected. Please submit a issue here: https://github.com/Calcium-Ion/new-api (request_id: %s)", c.GetString(common.RequestIdKey)),
 				"type":    "new_api_panic",
 			},
 		})
@@ -213,9 +232,17 @@ func main() {
 		port = strconv.Itoa(*common.Port)
 	}
 
+	// ReadHeaderTimeout bounds how long a client may take to send its request
+	// headers, which is what a slowloris connection exploits. ReadTimeout and
+	// WriteTimeout are deliberately NOT set: streaming relay responses are
+	// long-lived, and a WriteTimeout would sever them mid-stream. IdleTimeout
+	// only applies between requests on a keep-alive connection, so it is safe
+	// for SSE.
 	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: server,
+		Addr:              ":" + port,
+		Handler:           server,
+		ReadHeaderTimeout: time.Duration(common.GetEnvOrDefault("READ_HEADER_TIMEOUT_SECONDS", 30)) * time.Second,
+		IdleTimeout:       time.Duration(common.GetEnvOrDefault("IDLE_TIMEOUT_SECONDS", 120)) * time.Second,
 	}
 
 	go func() {
@@ -237,6 +264,10 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		common.SysError(fmt.Sprintf("server forced to shutdown: %v", err))
 	}
+	// Quota charged during the last batch interval is still in memory at this
+	// point. Flushing after Shutdown drains the request path first, so no new
+	// deltas are produced while this write runs. A SIGKILL skips this entirely.
+	model.FlushBatchUpdates()
 	common.SysLog("server exited")
 }
 

@@ -124,9 +124,9 @@ services:
       - PYROSCOPE_BASIC_AUTH_PASSWORD=${PYROSCOPE_BASIC_AUTH_PASSWORD:-}
       - PYROSCOPE_MUTEX_RATE=${PYROSCOPE_MUTEX_RATE:-5}
       - PYROSCOPE_BLOCK_RATE=${PYROSCOPE_BLOCK_RATE:-5}
-      # 反向代理信任。留空即不信任任何转发头；容器部署应设为 Docker 网桥网段，
-      # 否则 X-Forwarded-For 可被客户端伪造，限流分桶与登录 IP 判定都会失真。
-      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
+      # 反向代理信任。auto 表示由进程从自身网卡推导所在网段，容器部署用这个即可；
+      # 留空则不信任任何转发头（所有客户端塌缩为一个限流桶）；也可显式写 IP/CIDR 列表。
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES-auto}
       # 渠道缓存与健康检查
       - CHANNEL_CACHE_SYNC_ENABLED=${CHANNEL_CACHE_SYNC_ENABLED:-true}
       - CHANNEL_TEST_FREQUENCY=${CHANNEL_TEST_FREQUENCY:-}
