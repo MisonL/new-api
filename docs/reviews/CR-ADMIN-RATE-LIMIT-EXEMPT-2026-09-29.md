@@ -612,3 +612,62 @@ trusted proxies: 10.0.88.0/22,198.18.0.0/30
   该失败与本任务无关：在 HEAD 的干净 worktree 上通过，仅把另一会话当时未提交的
   `middleware/distributor.go` 复制进去即复现。该会话随后于 02:13 更新了该文件，用例恢复通过；
   最终一轮 `go test ./middleware/` 在 seed 11..20 的 `-shuffle` 下全部通过，无失败用例。
+
+## 独立复核轮（2026-10-01）
+
+用五个只读子代理按维度复核本任务全部改动，每条结论由本人独立复现。结果如下。
+
+### 修掉的
+
+- **分支曾编译不过，原因在本任务的一次提交。** `65f4299f5` 本应只含信任代理改动，但暂存 `main.go`
+  时把三处在途改动一并带入：`model.FlushBatchUpdates()` 调用、`ReadHeaderTimeout`/`IdleTimeout`、
+  崩溃信息带 `request_id`。后两者依赖已存在故可编译，第一处不行——其定义从未提交。干净检出即：
+
+  ```
+  ./main.go:271:8: undefined: model.FlushBatchUpdates
+  ```
+
+  已在 `aa0258248` 补上定义（`batchUpdate` 早已存在，该函数只是给关停路径一个可调用的名字）。
+  教训：文件级 `--stat` 不足以判断提交边界，必须逐 hunk 看。
+- **`trusted_proxies_test.go` 的断言全部自我引用**（`02ab2cd0f`）。所有断言都拿结果比
+  `loopbackProxies` 这个生产常量本身，没有任何一处写死字面量。把该常量换成
+  `{"0.0.0.0/0","::/0"}`（信任所有人，任何客户端的 `X-Forwarded-For` 都被采信、可自选限流桶），
+  九个测试全绿。现在范围写死在测试里，并加 `TestLoopbackProxiesAreExactlyTheLoopbackRanges`
+  把常量钉住；同一变异现在被三处断言捕获。
+- **`TestExemptableLimiterCoversExactlyTheDocumentedLimiters` 用硬编码列表**（同一提交）。实测：
+  新增一个未包装的限流器，测试仍然通过——恰是它注释里声称能防的情况。现在额外解析
+  `rate-limit.go`，要求每个返回中间件的导出函数都出现在两个集合之一，新增限流器会失败并报出名字。
+- **classic 设置页在选项未加载时开关不可保存**（`104a9ae44`）。effect 只从 `props.options` 里
+  存在的 key 构建 state，而父组件初始只有五个模型字段，`GlobalRateLimitAdminExemptEnabled`
+  在 `/api/option/` 返回前不存在。两个后果叠加：字段不在 state 里，Semi 的 `setValues` 会把
+  已注册字段清空（开关显示关闭）；而 `compareObjects` 要求两侧都 `hasOwnProperty`，切换开关
+  得到的 diff 恒为空。点"保存全局限流设置"提示"你似乎并没有修改什么"且不写库。父组件的
+  `onRefresh` 自己吞掉错误，所以任何一次选项加载失败都会停在这个状态。已改为从
+  `DEFAULT_INPUTS` 播种。用 diff 逻辑对两种形态验证：缺 key 时此前检不出、现在能检出；已加载路径不变。
+- **`.env.example` 未声明 `CRYPTO_SECRET`**（`a678db05c`），而 compose 用 `${CRYPTO_SECRET:?}`
+  强制必填。同类必填的 `SESSION_SECRET`、`SQL_DSN`、`REDIS_CONN_STRING` 与两个密码都有声明，
+  只有它没有。仅以该示例文件作环境来源实测：
+
+  ```
+  required variable CRYPTO_SECRET is missing a value: set CRYPTO_SECRET
+  ```
+- **`GEMINI_VISION_MAX_IMAGE_NUM` 是死变量**（`31ac41f2d`）。`fad2e9e36` 透传了它，但
+  `ffef33119` 早已删除其常量与消费逻辑，且该删除早于透传提交。全树 grep 只剩 `.env.example`
+  与 compose 两处。用户设置后会被接受却不产生任何效果，属于误导，已移除。
+
+### 复现为真但不在本任务改动边界内的
+
+- **classic 设置页权限错配**：`AdminRoute` 放行 `role >= 10`（引入于 `a42b39760`，2026-04-28），
+  而 `/api/option/` 走 `RootAuth()`（`RoleRootUser = 100`，引入于 `12aa6c352`，2023-04-23）。
+  role-10 管理员能看到本开关却存不下去。两者都远早于本任务，本任务只是往这个页面多加了一个控件。
+  未改动：放宽或收紧路由守卫都会改变谁能触达 root-only 设置，属产品决策而非缺陷修复。
+- **i18n 数据竞态**：`Init` 在 `i18n.go:39` 不持锁写 `bundle`，`GetLocalizer` 在 `RLock` 段读它。
+  `-race` 可复现。**但实测前像同样有竞态**，不是 `83a134885` 引入的；该改动只是把读窗口从
+  "仅缓存未命中时"扩大到"每次调用"。生产时序（`InitResources` 先于 `ListenAndServe`）使其当前
+  不可经 HTTP 触达。
+- **`0.0.0.0/0` 被静默接受**：实测 `SetTrustedProxies(["0.0.0.0/0"])` 不报错且 `ClientIP` 直接
+  等于请求头里的 `X-Forwarded-For`。这是 gin 自身语义，且属用户显式写入的合法 CIDR 而非 typo，
+  代码注释关于"typo 会报错"的表述准确（`not-an-ip` 确实报 `invalid IP address`）。不作为缺陷处理。
+- **`middleware/rate-limit.go` 工作区版本与 HEAD 不同**：另一会话正在做 `abortRateLimited`
+  重构（4 处 429 响应改为带 `Retry-After` 的函数）。已确认不触及豁免逻辑，工作区版本跑豁免
+  测试通过。
