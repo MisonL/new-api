@@ -149,10 +149,13 @@ func shouldExposeReasoningAsClaudeThinking(model string, info *relaycommon.Relay
 | 响应方向 reasoning 暴露策略 | 部署关切；真正的阻断点是客户端意图不可达（见第 4 节） |
 | think 标签提取族（见下） | 模型名门控（否决 1） |
 | DeepSeek 空 thinking block 保留 | 模型名门控（否决 1），以 `RetainEmptyReasoning` 钩子注入 |
-| custom / namespace / tool_search 工具桥接 | 依赖渠道能力快照，部署关切 |
 | 工具名契约与别名还原 | 引用宿主常量，且受 `IsOpenAICompatibleResponses` 门控 |
 | `context_compaction` 归一化 | 上游版本垫片，上游零命中 |
 | 加密内容探测 | 硬编码宿主 marker `newapi.synthetic.compact:`（否决 2） |
+
+**修正：hosted 工具桥接不是本地独有。** 此前 spec 把「custom / namespace / tool_search 工具桥接」列为本地独有能力，实测上游 `relaykit/relayconvert/internal/toolconv/` 在 `upstream/main` 上**已存在**，覆盖 10 种 hosted 工具：`KindWebSearch`、`KindCodeExecution`、`KindComputerUse`、`KindFileSearch`、`KindImage`、`KindMCP`、`KindURLContext`、`KindWebFetch`、`KindFunction`、`KindNative`（`toolconv/model.go`）。该目录含 `decode.go`、`encode.go`、`hosted_values.go`、`model.go`、`response.go`、`response_artifacts.go`。
+
+因此本项的正确处置不是「留在宿主」，而是**评估本地桥接与上游 `toolconv` 的差异并收敛到上游**。上游另有 `feat/relaykit-tools` 分支（`a9a0e2272 feat(relaykit): preserve hosted tools across conversions`）在其上继续扩展。列入第 11 节未决项。
 
 ### 补充：think 标签提取族（此前 spec 遗漏）
 
@@ -206,9 +209,26 @@ func shouldExposeReasoningAsClaudeThinking(model string, info *relaycommon.Relay
 
 阶段顺序由依赖关系决定，不是由「先易后难」决定。三处依赖是硬约束：
 
-- `types` 是 `dto` 的前置：**210 个文件** import 宿主 `types`，relaykit 的 DTO 必须 import `relaykit/types`。上游把 6 个文件移入 `relaykit/types`（`channel_error.go`、`error.go`、`file_data.go`、`file_source.go`、`relay_format.go`、`request_meta.go`），宿主 `types` 只剩 `price_data.go`、`rw_map.go`、`set.go`、`task_artifact.go`。
+- `types` 是 `dto` 的前置：**210 个文件** import 宿主 `types`，relaykit 的 DTO 必须 import `relaykit/types`。
 
-  这不是纯搬迁：本地 `types/error.go` 有上游**完全不存在**的符号（`ErrorCodeUpstreamTransportInterrupted` 被 25 个文件引用、`IsUpstreamTransportInterruptedError` 9 个、`IsOpenAIRequestParameterError` 5 个）。这些是本地错误处理契约，需迁入 `relaykit/types` 或保留在宿主，且要决定 relaykit 是否应知道它们。
+  **上游已完成同一迁移，可直接对照。** 上游宿主代码有 **172 个文件**改 import 到 `relaykit/types`；宿主 `types/` 仍保留 4 个文件（`price_data.go`、`rw_map.go`、`set.go`、`task_artifact.go`），另有 **24 个文件**仍 import 宿主 `types`——两个包在 `relay/common/relay_info.go` 中并存（`"…/relaykit/types"` 与 `hosttypes "…/new-api/types"`）。
+
+  **关键：常数迁移用 Go 类型别名，不动调用点。** 上游 `constant/endpoint_type.go` 原文：
+
+  ```go
+  package constant
+  import "github.com/QuantumNous/new-api/relaykit/types"
+  // EndpointType moved to types with the conversion kit; aliases keep host
+  // code compiling unchanged.
+  type EndpointType = types.EndpointType
+  const ( EndpointTypeOpenAI = types.EndpointTypeOpenAI; /* … */ )
+  ```
+
+  因此「210 个 import 点必须逐个改写」不成立——凡宿主包已承担该符号的自然归属（如 `constant`），用别名转发即可零调用点变更。210 是**上界**，实际改写量需按符号逐个判断：`types` 的别名转发 vs 直接改 import 路径。
+
+  这不是纯搬迁：本地 `types/error.go` 有上游**完全不存在**的符号——`ErrorCodeUpstreamTransportInterrupted`（本地 25 个文件引用）、`IsUpstreamTransportInterruptedError`（9 个）、`IsOpenAIRequestParameterError`（5 个）；`git grep` upstream/main 全仓均为 0 命中，上游宿主 `types/` 也没有 `error.go`。这些是本地错误处理契约，需决定迁入 `relaykit/types` 还是保留宿主。
+
+  另需注意依赖方向：本地 `types/error.go:11` import 宿主 `common`，而上游 `relaykit/types/error.go:10` 改 import `relaykit/relayconvert/kitutil`——即 `common` 的相关helper 已被抽到 `kitutil`。`types` 迁移实际牵动 `common → kitutil` 的替换。
 
 - `ClaudeConvertInfo` 别名是 `Meta` 接口实现的前置，且**不是改个类型名那么简单**：本地 `relay/common/relay_info.go` 的 `ClaudeConvertInfo` 是独立结构体，字段（`ToolCallStarted map[int]bool`、`ToolCallIDs`、`ToolCallNames`、`ToolCallPendingArgs`）与 `convmeta.ClaudeConvertInfo`（`ToolCalls []*ClaudeStreamToolCall`、`ToolCallByIndex`、`ToolCallByID`）**字段名与类型都不同**。`service/convert.go` 引用本地字段 **22 处**（`ToolCallStarted` 6 + `ToolCallIDs` 5 + `ToolCallNames` 5 + `ToolCallPendingArgs` 6）。改为别名后这 22 处全部编译失败，必须同步改写——这是阶段 3 的实际工作量。
 
@@ -217,7 +237,7 @@ func shouldExposeReasoningAsClaudeThinking(model string, info *relaycommon.Relay
 | 阶段 | 内容 | 完成判据 |
 |---|---|---|
 | 0 | `git fetch --unshallow upstream`；建立 CI 门禁（两个 module 分别 `go test`） | CI 能跑通现有测试 |
-| 1 | 引入 relaykit module（根 go.mod 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；处理本地独有错误符号；更新 210 个 import 点（`RelayFormat` 子集 51 个） | 两个 module 均可编译 |
+| 1 | 引入 relaykit module（根 go.mod 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；处理本地独有错误符号；按符号逐个决定别名转发或改 import 路径（210 为上界，上游同项实测 172 个文件改 import、24 个仍用宿主 types） | 两个 module 均可编译 |
 | 2 | `dto` 拆分：协议 DTO 迁入 `relaykit/dto`，宿主 DTO 留 `dto/`（上游宿主仅剩 8 个文件）；迁移 `IsStream` 签名（`GeminiChatRequest` 需改为从 `*http.Request` 读取 query 与 path）；补未知字段保留 | 两个 module 均可编译；DTO 相关测试通过 |
 | 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 类型别名，同步改写 `service/convert.go` 的 22 处字段引用；`convmeta.Meta` 接口实现：`RelayInfo` 补齐 15 个方法 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过 |
 | 4 | 文本转换切换到 relaykit；打补丁 1、2；对齐第 10 节列出的语义差异；`*WithError` 系列（4 个 `*WithError` 转换函数有 9 个生产调用点，6 个转换函数合计 14 个，relaykit 无对应）需在宿主包装或放弃 | 转换测试通过；grok reasoning 可见 |
@@ -268,6 +288,24 @@ func shouldExposeReasoningAsClaudeThinking(model string, info *relaycommon.Relay
 | 3 | `Message.ThinkingContent` | `dto/openai_request.go:407` 有该字段，`GetReasoningContent()` 三级回退 `ReasoningContent → ThinkingContent → Reasoning` | relaykit `Message` 无 `ThinkingContent`，两级回退 | 本地多处依赖：`relay/channel/claude/relay-claude.go:498`、`relay/channel/gemini/relay-gemini.go:584`、`relay/channel/ollama/relay-ollama.go:168`、`:272`、`relay/channel/openai/adaptor.go:238` 等 |
 | 4 | `ClaudeConvertInfo` 字段 | 见第 7 节依赖约束 | 字段名与类型均不同 | 阶段 3 的类型别名迁移 |
 | 5 | `ResponsesStreamResponse` 形状 | `dto/openai_response.go:450` 有 `Error *types.OpenAIError`、`Text`、`Arguments`、`CallId`、`Item` | `CallId` 在 `ResponsesOutput` 内而非事件顶层 | 补丁 2 覆盖 |
+| 6 | 本地 DTO 独有方法（此前 spec 遗漏） | 见下表，均在生产代码中使用 | relaykit 对应类型**无**这些方法 | 迁移即编译失败，必须逐个处置 |
+
+第 6 项明细（基线口径，方法集对比得出）：
+
+| DTO 文件 | 本地独有方法 | 生产使用点 |
+|---|---|---|
+| `dto/openai_request.go` | `ParseContentStrict` | 20 |
+| | `ParseToolCallsStrict` | 16 |
+| | `Clone` | 13 |
+| | `HasCompactionTrigger` | 10 |
+| | `UnmarshalJSON` | — |
+| | `HasIncludeUsageField`、`HasIncludeObfuscationField`、`RemoveIncludeUsage` | 各 1 |
+| `dto/openai_response.go` | `HasCompactionOutput` | 4 |
+| | `EffectiveReason` | 2 |
+| | `GetOutputTokenDetails`、`GetQuality`、`GetSize`、`HasImageGenerationCall` | — |
+| `dto/claude.go` | `SearchToolNameByToolCallId` | 1 |
+
+其中 `HasIncludeUsageField` / `RemoveIncludeUsage` / `UnmarshalJSON` 正是补丁 2 声称要「新增」的能力——**本地已有**，因此补丁 2 的正确表述是「把本地既有能力带进 relaykit」，而不是从零设计。`EffectiveReason` 属推理相关，需单独确认 relaykit 的对应机制。
 
 ### 10.2 阶段 4 的输入校验对齐
 
@@ -311,7 +349,10 @@ image 缺 source 的 panic 只存在于 Chat 方向（`to_oai_chat_req.go:189-19
 11. **think 标签提取族归属**（第 4 节补充小节）：`splitThinkTaggedText` 等 6 个函数是 relaykit 零覆盖的本地增强，被 `hasDeepSeekModelName` 门控，属「thinking 历史回传」的组成部分。需决定：搬入 relaykit 成为带钩子的能力，还是在宿主预处理阶段完成。本设计倾向前者，但需实现时确认
 12. **本地 `types/error.go` 独有符号的归属**：`ErrorCodeUpstreamTransportInterrupted` 等被生产代码广泛引用，需决定迁入 `relaykit/types` 还是保留宿主。若 relaykit 转换器需要据此产生错误，则必须迁入
 13. **`*WithError` 系列的处理方式**：4 个 `*WithError` 转换函数有 9 个生产调用点（6 个转换函数合计 14 个），relaykit 无对应签名。需决定宿主包装层的形式
-14. **响应方向暴露策略的具体形态**：落在 5 个宿主调用点时，是过滤转换结果、还是在调用前决定跳过 thinking 块，需在实现时定案（流式场景下后者更简单）
+14. **响应方向暴露策略的具体形态**：落在宿主调用点时（已知 6 条路径），是过滤转换结果、还是在调用前决定跳过 thinking 块，需在实现时定案（流式场景下后者更简单）
+15. **本地 DTO 独有方法的归属**（第 10.1 节第 6 项）：`ParseContentStrict`（20 处）、`ParseToolCallsStrict`（16 处）、`Clone`（13 处）、`HasCompactionTrigger`（10 处）等 13 个方法在 relaykit 无对应。需逐个决定是提上游、留在宿主包装层，还是放弃
+16. **本地 hosted 工具桥接与上游 `toolconv` 的收敛**（第 4 节修正）：上游 `toolconv/` 已覆盖 10 种 hosted 工具，需比对本地实现差异，决定收敛方式；上游 `feat/relaykit-tools` 分支还在其上扩展
+17. **`types` 别名转发的适用范围**（第 7 节）：上游 `constant/endpoint_type.go` 用 Go 类型别名做到零调用点变更，需逐个判断本地哪些符号可照此办理、哪些必须改 import 路径，据此重估 210 这个上界
 
 第 11 项原为「按客户端意图门控 reasoning 暴露」，已撤回，理由见第 4 节。
 
@@ -325,7 +366,7 @@ image 缺 source 的 panic 只存在于 Chat 方向（`to_oai_chat_req.go:189-19
 | 上游无 `service/openaicompat/` | `git ls-tree -r upstream/main -- service/openaicompat/` 空 |
 | 两个 Claude 请求转换器 switch 无 `thinking`、无 `default` | `to_oai_chat_req.go:181`、`to_oai_responses_req.go:165` 逐 case 提取 |
 | 上游 `convmeta.Options` 零 tool bridge 字段 | `git grep -c ToolBridge upstream/main -- relaykit/relayconvert/convmeta/` 无命中 |
-| 上游 responses→chat 不处理 namespace / tool_search | `git grep -c` 均无命中 |
+| 上游 relaykit 无字面量 `namespace` / `tool_search` | `git grep -c` 均无命中。**注意**：这不代表上游无 hosted 工具能力——`toolconv/` 已覆盖 10 种 hosted 工具（见第 4 节修正） |
 | 上游无 Responses→Chat 全局策略 | `git grep ShouldResponsesUseChatCompletions upstream/main` 空 |
 | 本地 `ConversionDiagnostic` 零命中 | `grep -rl` 返回 0 |
 | 本地 `dto` 被 327 个文件 import（基线口径） | `git grep -l '"github.com/QuantumNous/new-api/dto"' 9c4758b53 -- '*.go' \| wc -l`。工作区为 340——本表统一采用基线口径 |
@@ -336,7 +377,6 @@ image 缺 source 的 panic 只存在于 Chat 方向（`to_oai_chat_req.go:189-19
 | `convmeta.Meta` 15 个方法无客户端请求访问器 | `relaykit/relayconvert/convmeta/meta.go:18-54` 逐方法核验 |
 | registry 分派函数类型带 `info convmeta.Meta` | `response_registry.go` 的 `:22`、`:24`、`:28`、`:30` 带；`:26` 的 `ResponseStreamStateFactory` 不带 |
 | `convmeta.Options` 在响应方向也有使用 | `response_registry.go:500` 的 `toolconv.AttachHostedResponse(..., convmeta.OptionsOf(info))`；`internal/` 下 9 处命中中 7 处在 `*_req.go`，`shared/claude/reasoning.go:21` 与 `shared/gemini/request.go:85` 在 `shared/` |
-| 正常 relay 路径下 `info.Request` 不反映适配器改写后的意图 | `relay/common/relay_info.go:701` 赋值；`relay/claude_handler.go:34` 深拷贝。全仓唯一反例 `controller/channel-test.go:957`（渠道测试合成请求） |
 | 正常 relay 路径下 `info.Request` 不反映适配器改写后的意图 | `relay/common/relay_info.go:701` 赋值（`genBaseRelayInfo` 定义于 `:670`）；`relay/claude_handler.go:34` 深拷贝。全仓唯一反例 `controller/channel-test.go:957`（渠道测试合成请求） |
 | AWS Converse 是独立的第 6 条响应方向路径 | `relay/channel/aws/converse.go:748`（非流式）、`:1112`（流式 `thinking_delta`）；`converseOutputToClaudeResponse` 在 `:713` 直接构造 `dto.ClaudeResponse`，不经 `service/convert.go` |
 | 两个 `*RequiresChannelSkip` 函数体逐字相同 | `diff` 仅函数名不同 |
