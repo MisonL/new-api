@@ -61,15 +61,26 @@ func Init() error {
 }
 
 // GetLocalizer returns a localizer for the specified language
+// GetLocalizer returns the localizer for lang, creating one on first use.
+//
+// It returns nil when Init has not run or failed. Init is allowed to fail
+// without stopping the process (main.go logs the error and carries on), and
+// i18n.NewLocalizer(nil, ...) yields a localizer whose every lookup
+// dereferences a nil bundle and panics. Returning nil here keeps that failure
+// in the caller, where Translate can fall back to the message key instead.
 func GetLocalizer(lang string) *i18n.Localizer {
 	lang = normalizeLang(lang)
 
 	mu.RLock()
 	loc, ok := localizers[lang]
+	initialized := bundle != nil
 	mu.RUnlock()
 
 	if ok {
 		return loc
+	}
+	if !initialized {
+		return nil
 	}
 
 	// Create new localizer for unknown language (fallback to default)
@@ -79,6 +90,9 @@ func GetLocalizer(lang string) *i18n.Localizer {
 	// Double-check after acquiring write lock
 	if loc, ok = localizers[lang]; ok {
 		return loc
+	}
+	if bundle == nil {
+		return nil
 	}
 
 	loc = i18n.NewLocalizer(bundle, lang, DefaultLang)
@@ -95,6 +109,11 @@ func T(c *gin.Context, key string, args ...map[string]any) string {
 // Translate translates a message key for the specified language
 func Translate(lang, key string, args ...map[string]any) string {
 	loc := GetLocalizer(lang)
+	if loc == nil {
+		// Init has not run or failed. Returning the key matches the fallback
+		// this function already uses when a message is missing.
+		return key
+	}
 
 	config := &i18n.LocalizeConfig{
 		MessageID: key,
