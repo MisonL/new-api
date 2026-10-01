@@ -671,3 +671,87 @@ trusted proxies: 10.0.88.0/22,198.18.0.0/30
 - **`middleware/rate-limit.go` 工作区版本与 HEAD 不同**：另一会话正在做 `abortRateLimited`
   重构（4 处 429 响应改为带 `Retry-After` 的函数）。已确认不触及豁免逻辑，工作区版本跑豁免
   测试通过。
+- **i18n 数据竞态（后续修正）**：已在独立提交 `2fceeb7d1` 于 `i18n.Init()` 的 `bundle`/`localizers`
+  写入外加 `mu.Lock` 保护，将竞争窗口关闭。该竞态先于本任务存在，并在复核时被 `-race` 探出。
+
+### 优化轮（2026-10-01）
+
+本节记录独立复核后的三项加固提交（`2fceeb7d1`）。
+
+#### P0-1: i18n 数据竞态
+
+**问题**：`i18n.Init()` 在 `initOnce.Do` 闭包内无锁写入包级 `bundle`（`i18n.go:39`）与 `localizers`
+（`:53-55`），但 `GetLocalizer()` 在 `RLock` 段读 `bundle` 用于判空（`:76`）。`go test -race ./i18n/`
+检出写（`Init.func1 at i18n.go:39`）与读（`GetLocalizer at i18n.go:76`）的竞态。
+
+**影响范围**：该竞态先于本任务存在（`83a134885` 之前即有），并非本任务引入。生产环境中
+`main.InitResources()`（包含 `i18n.Init()`，`main.go:384`）在 `http.Server` 起监听（`main.go:249-253`）
+之前单线程执行，因此无 HTTP 可达路径；测试内可触发，但 `i18n/` 包内的测试因完全串行（无 `t.Parallel()`）
+而未暴露。
+
+**修复**：在 `initOnce.Do` 闭包开头加 `mu.Lock()`、结尾加 `defer mu.Unlock()`，使写入与读取由同一锁保护。
+实测：修复前 `go test -race ./i18n/` 报 `WARNING: DATA RACE`；修复后无竞态告警。
+
+**验证**：`go test -race -count=3 ./i18n/` 通过；既有的九个测试用例全部 PASS；静态 `go vet ./i18n/` 无告警。
+
+---
+
+#### P0-2: 安全边界：收紧 `.env.example` 的 `TRUSTED_PROXIES` 默认值
+
+**问题**：`.env.example` 的 `TRUSTED_PROXIES=auto` 在容器直接发布端口（无反代）时会自动信任
+Docker 网关地址。当该地址落在容器网段内（如 `172.17.0.1`）时，攻击者可自带 `X-Forwarded-For`
+头伪造来源 IP，绕过限流器的 IP 分桶。`auto` 会推导出 `172.17.0.0/16`（容器网段）或 `10.0.0.0/8`
+（Swarm overlay 网段），这些都允许容器内客户端伪造 IP。
+
+**触发条件**：
+1. 用户照抄 `.env.example` 的 `TRUSTED_PROXIES=auto`；
+2. 容器直接发布端口（如 `ports: "3000:3000"`）而非经 Nginx/Caddy；
+3. 客户端从与容器同网段的地址发起请求（如另一容器、网桥地址）。
+
+**修复**：
+1. 将 `.env.example` 的默认从 `TRUSTED_PROXIES=auto` 改为 `# TRUSTED_PROXIES=`（留空，注释掉）。
+   留空时后端不信任任何转发头，`ClientIP()` 返回真实 socket 地址。
+2. 在该行注释中增补第三条建议："或显式设为反代真实地址（如 `10.1.2.3`）"，明确安全配置路径。
+
+**行为对比**：
+- 留空（`""`）：不信任任何代理，限流按 socket 地址分桶（最严格）。
+- `auto`（容器直接发布端口）：信任 Docker 网关（172.17.0.1）与容器网段（172.17.0.0/16），
+  可被同网段客户端伪造 IP。
+- 显式 IP（如 `10.1.2.3`）：仅信任该地址，其他来源的 `X-Forwarded-For` 被忽略（推荐）。
+
+**实测**：以 `deploy/compose/dev-isolated.yml` 验证（直接发布 3000 端口，无 Nginx）：
+- `TRUSTED_PROXIES=` 时 `curl` 得 `ClientIP=172.17.0.1`（网关地址），携带 `X-Forwarded-For: 203.0.113.9`
+  的请求仍得 `ClientIP=172.17.0.1`（转发头被忽略）。
+- `TRUSTED_PROXIES=auto` 时同样请求得 `ClientIP=203.0.113.9`（转发头被采信）。
+
+**验证**：diff 已提交；`.env.example` 注释更新与三条建议覆盖全部典型场景（留空 / auto / 显式 IP）。
+
+---
+
+#### P0-5: 修正 `dev-isolated` 的 healthcheck 端口
+
+**问题**：`deploy/compose/dev-isolated.yml` 的 `new-api` 容器 healthcheck 硬编码探测 3000 端口
+（`curl -f http://localhost:3000/api/status`），但容器内监听端口实际由 `DEV_NEW_API_PORT` 控制。
+用户设置 `DEV_NEW_API_PORT=8080` 后容器监听 8080，healthcheck 仍探 3000，导致 `curl: (7) Failed to connect`，
+容器永久处于 `unhealthy` 状态。
+
+**触发条件**：用户在 `.env` 中设置 `DEV_NEW_API_PORT` 为非 3000 的值，如 8080。
+
+**修复**：将 healthcheck 的硬编码 3000 改为读取 `${DEV_NEW_API_PORT:-3000}`，与 `ports` 声明、
+`PORT` 环境变量保持一致。
+
+**修复后行为**：
+- `DEV_NEW_API_PORT=8080` 时 `ports: "8080:8080"`，容器内 `PORT=8080`，healthcheck 探 `localhost:8080`。
+- 未设置时默认 3000（`:- 后缀`），与此前行为兼容。
+
+**实测**：`docker compose -f deploy/compose/dev-isolated.yml config` 验证端口解析；起容器后
+`docker inspect` 确认 healthcheck 命令为 `curl -f http://localhost:8080/api/status || exit 1`；
+容器状态变为 `healthy`。
+
+**验证**：diff 已提交；`dev-isolated.yml` 的 3 处端口引用（`ports`、`PORT` 环境变量、healthcheck）
+现在全部由 `DEV_NEW_API_PORT` 统一控制。
+
+---
+
+**提交记录**：上述三项修复合并在单次提交 `2fceeb7d1` "fix(config): tighten default TRUSTED_PROXIES, fix healthcheck port, fix i18n race"，
+提交信息分别标记为 P0-2 / P0-5 / P0-1，按影响面排序。`Co-Authored-By` 署名复核代理。
