@@ -36,6 +36,9 @@ var (
 func Init() error {
 	var initErr error
 	initOnce.Do(func() {
+		mu.Lock()
+		defer mu.Unlock()
+
 		bundle = i18n.NewBundle(language.Chinese)
 		bundle.RegisterUnmarshalFunc("yaml", yaml.Unmarshal)
 
