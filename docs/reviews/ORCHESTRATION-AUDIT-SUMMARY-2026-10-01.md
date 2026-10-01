@@ -138,10 +138,26 @@ worker 原始结论（原文照录）：
 
 发现的真实遗留项（均为低优先级，非本轮功能缺陷）：
 
-1. `TestEveryExportedLimiterIsDocumented` 只解析单文件，跨文件限流器无覆盖（测试盲区）。
-2. `log_retention_setting` 的 validate-only 项在带首尾空白时与本次归一化修复同源。
-3. `web/default` 的 fr/ja/ru/vi 翻译仍为英文原文。
-4. 既有的数字字段类型错配（前端，与本次改动无关）。
+1. ~~`TestEveryExportedLimiterIsDocumented` 只解析单文件，跨文件限流器无覆盖（测试盲区）。~~
+   **已修复**（提交 `b0f0bfb4e`）：枚举改为扫描所有引用限流原语的文件，exempt/limited 两组集合
+   同时驱动行为探针。变异验证：把 `EmailVerificationRateLimit` 包进 `exemptableLimiter` 报
+   `got 200`，摘掉 `SearchRateLimit` 的包装报 `got 401`。
+2. ~~`log_retention_setting` 的 validate-only 项在带首尾空白时与本次归一化修复同源。~~
+   **已修复**（同一次提交）：`ValidateValue` 先 trim 再校验、而入库用的是未 trim 的值，
+   `strconv.ParseBool(" true ")` 失败后静默 `continue`。新增 `NormalizeValue` 返回规范形式并
+   接入选项管线。真实 HTTP 实测：`PUT /api/option/` 写 `" true "` 落库为 `true`。
+3. `web/default` 的 fr/ja/ru/vi 翻译仍为英文原文。**未处理**：这三个文件正被另一会话
+   大规模改写（每个 +573~598 行），该键的翻译已在它们的在途改动里，改动会冲突。
+4. ~~既有的数字字段类型错配（前端，与本次改动无关）。~~ **未复现，撤回**：审计描述的是
+   「加载完成前触碰数字框即发 PUT」，但 `web/default` 与 `web/classic` 两套前端的数字输入
+   都没有 `onChange` 直接触发保存、也没有值变化时保存的 effect，提交都走显式 Save 按钮。
+   该描述与代码不符，不作为遗留项。
+
+**顺带发现并修复（超出审计点名范围）**：审计只点了 6 个支付类 `*Enabled` 键，实测发现
+`updateOptionMap` 用 `value == "true"` 消费**整个布尔选项家族**，而接口接受任何
+`strconv.ParseBool` 认得的拼写，于是 `"True"`/`"1"`/`" t "` 都是存进去、报成功、运行时读回
+false。已用 `isBooleanOptionKey` 统一归一化（提交 `de563706d`），真实 HTTP 端到端验证。
+
 
 ---
 
