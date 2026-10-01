@@ -618,8 +618,36 @@ func normalizeOptionValueForInMemoryConfig(key string, value string) (string, er
 	case "GlobalRateLimitAdminExemptEnabled":
 		return operation_setting.NormalizeRateLimitAdminExempt(value)
 	default:
+		if isBooleanOptionKey(key) {
+			enabled, err := strconv.ParseBool(strings.TrimSpace(value))
+			if err != nil {
+				return "", errors.New(key + " 值不合法")
+			}
+			return strconv.FormatBool(enabled), nil
+		}
 		return value, nil
 	}
+}
+
+// isBooleanOptionKey reports whether updateOptionMap treats this key as a
+// switch, so that normalization and consumption agree on the same set. The
+// predicate mirrors the branch there: any "Enabled" suffix, plus the few
+// explicitly named switches that do not carry it.
+func isBooleanOptionKey(key string) bool {
+	// Dotted keys belong to the layered config system, which reflects them into
+	// their own structs and does not use the literal-true comparison.
+	if strings.Contains(key, ".") {
+		return false
+	}
+	if strings.HasSuffix(key, "Enabled") {
+		return true
+	}
+	switch key {
+	case "DefaultCollapseSidebar", "DefaultUseAutoGroup", "SMTPForceAuthLogin",
+		"CreemTestMode", "WaffoSandbox", "WaffoPancakeSandbox":
+		return true
+	}
+	return false
 }
 
 func normalizeInviteRebateRate(value string) (string, error) {

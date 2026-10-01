@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/log_retention_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/require"
@@ -228,4 +229,79 @@ func TestUpdateOptionNormalizesLogRetentionValuesBeforePersist(t *testing.T) {
 
 	// A value out of range must still be rejected before it reaches the database.
 	require.Error(t, UpdateOption(log_retention_setting.ConfigName+".batch_size", " 999999 "))
+}
+
+// Every boolean option must be normalized on the way in, not only the ones
+// with a bespoke case. updateOptionMap consumes these keys with
+// `value == "true"`, so a spelling strconv.ParseBool accepts but the comparison
+// does not ("True", "1", " t ") was stored verbatim, reported success, and read
+// back as false at runtime. That is the same accept-but-do-not-apply split the
+// admin-exempt option had; the audit named six payment keys, but the comparison
+// covers the whole "Enabled" family.
+func TestUpdateOptionNormalizesBooleanOptionsBeforePersist(t *testing.T) {
+	// Do not run this test in parallel: it mutates the process-wide OptionMap
+	// and the settings those keys drive.
+	previousOptionMap := common.OptionMap
+	common.OptionMap = map[string]string{}
+	previousWaffo := setting.WaffoEnabled
+	previousDemo := operation_setting.DemoSiteEnabled
+	previousStripe := setting.StripePromotionCodesEnabled
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM options")
+		common.OptionMap = previousOptionMap
+		setting.WaffoEnabled = previousWaffo
+		operation_setting.DemoSiteEnabled = previousDemo
+		setting.StripePromotionCodesEnabled = previousStripe
+	})
+
+	cases := []struct {
+		key string
+		get func() bool
+		set func(bool)
+	}{
+		{"WaffoEnabled", func() bool { return setting.WaffoEnabled }, func(b bool) { setting.WaffoEnabled = b }},
+		{"StripePromotionCodesEnabled", func() bool { return setting.StripePromotionCodesEnabled }, func(b bool) { setting.StripePromotionCodesEnabled = b }},
+		{"DemoSiteEnabled", func() bool { return operation_setting.DemoSiteEnabled }, func(b bool) { operation_setting.DemoSiteEnabled = b }},
+	}
+
+	for _, c := range cases {
+		for raw, want := range map[string]bool{
+			"true": true, "True": true, "TRUE": true, "1": true, "t": true, " true ": true,
+			"false": false, "False": false, "0": false, " f ": false,
+		} {
+			c.set(!want)
+			require.NoError(t, UpdateOption(c.key, raw), "key=%s raw=%q", c.key, raw)
+			canonical := "false"
+			if want {
+				canonical = "true"
+			}
+			require.Equal(t, canonical, common.OptionMap[c.key], "key=%s raw=%q", c.key, raw)
+			require.Equal(t, want, c.get(), "key=%s raw=%q must take effect at runtime", c.key, raw)
+		}
+	}
+
+	// A value strconv.ParseBool rejects must be refused, not stored as false.
+	for _, raw := range []string{"yes", "", "2", "enabled"} {
+		require.Error(t, UpdateOption("DemoSiteEnabled", raw), "raw=%q", raw)
+	}
+}
+
+// The predicate that decides whether a key is normalized must agree with the
+// branch that consumes it, or a key would be canonicalized in one place and
+// compared literally in the other.
+func TestBooleanOptionKeyPredicateMatchesConsumers(t *testing.T) {
+	for _, key := range []string{
+		"WaffoEnabled", "WaffoPancakeEnabled", "StripePromotionCodesEnabled",
+		"DemoSiteEnabled", "DrawingEnabled", "SMTPSSLEnabled",
+		"DefaultCollapseSidebar", "DefaultUseAutoGroup", "SMTPForceAuthLogin",
+		"CreemTestMode", "WaffoSandbox", "WaffoPancakeSandbox",
+	} {
+		require.True(t, isBooleanOptionKey(key), "%s is consumed as a boolean", key)
+	}
+	for _, key := range []string{
+		"StripeApiSecret", "SMTPPort", "global.pass_through_request_enabled",
+		"channel_affinity_setting.enabled", "GeneralSetting.SomethingEnabled",
+	} {
+		require.False(t, isBooleanOptionKey(key), "%s must not be treated as a top-level switch", key)
+	}
 }
