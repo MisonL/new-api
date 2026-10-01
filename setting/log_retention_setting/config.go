@@ -64,19 +64,32 @@ func GetLogRetentionSetting() LogRetentionSetting {
 }
 
 func ValidateValue(key string, value string) error {
+	_, err := NormalizeValue(key, value)
+	return err
+}
+
+// NormalizeValue validates a value and returns its canonical string form.
+//
+// ValidateValue trims whitespace before checking, but the value that reaches
+// updateConfigFromMap is the untrimmed one: strconv.ParseBool(" true ") fails,
+// the field is left at its previous value, and the write silently does nothing
+// while the API reports success. Returning the trimmed (and for booleans,
+// canonical) form lets the caller persist what it actually validated.
+func NormalizeValue(key string, value string) (string, error) {
 	trimmed := strings.TrimSpace(value)
 	switch key {
 	case "enabled", "server_log_cleanup_enabled":
-		if _, err := strconv.ParseBool(trimmed); err != nil {
-			return errors.New("日志保留策略开关值不合法")
+		enabled, err := strconv.ParseBool(trimmed)
+		if err != nil {
+			return "", errors.New("日志保留策略开关值不合法")
 		}
-		return nil
+		return strconv.FormatBool(enabled), nil
 	case "run_interval_hours":
-		return validateIntRange(trimmed, 1, maxRunIntervalHours, "日志保留执行间隔")
+		return normalizeIntRange(trimmed, 1, maxRunIntervalHours, "日志保留执行间隔")
 	case "batch_size":
-		return validateIntRange(trimmed, 1, maxBatchSize, "日志保留批大小")
+		return normalizeIntRange(trimmed, 1, maxBatchSize, "日志保留批大小")
 	case "max_batches":
-		return validateIntRange(trimmed, 1, maxMaxBatches, "日志保留最大批次数")
+		return normalizeIntRange(trimmed, 1, maxMaxBatches, "日志保留最大批次数")
 	case "consume_retention_days",
 		"error_retention_days",
 		"system_retention_days",
@@ -86,22 +99,22 @@ func ValidateValue(key string, value string) error {
 		"unknown_retention_days",
 		"request_payload_retention_days",
 		"response_payload_retention_days":
-		return validateIntRange(trimmed, 0, maxRetentionDays, "日志保留天数")
+		return normalizeIntRange(trimmed, 0, maxRetentionDays, "日志保留天数")
 	case "server_log_keep_files":
-		return validateIntRange(trimmed, 0, maxServerKeepFiles, "运行日志保留文件数")
+		return normalizeIntRange(trimmed, 0, maxServerKeepFiles, "运行日志保留文件数")
 	case "server_log_keep_days":
-		return validateIntRange(trimmed, 0, maxServerKeepDays, "运行日志保留天数")
+		return normalizeIntRange(trimmed, 0, maxServerKeepDays, "运行日志保留天数")
 	case "server_log_max_total_size_mb":
-		return validateIntRange(trimmed, 0, maxServerSizeMB, "运行日志最大总大小")
+		return normalizeIntRange(trimmed, 0, maxServerSizeMB, "运行日志最大总大小")
 	default:
-		return nil
+		return trimmed, nil
 	}
 }
 
-func validateIntRange(value string, min int, max int, name string) error {
+func normalizeIntRange(value string, min int, max int, name string) (string, error) {
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed < min || parsed > max {
-		return errors.New(name + "必须在 " + strconv.Itoa(min) + " 到 " + strconv.Itoa(max) + " 之间")
+		return "", errors.New(name + "必须在 " + strconv.Itoa(min) + " 到 " + strconv.Itoa(max) + " 之间")
 	}
-	return nil
+	return strconv.Itoa(parsed), nil
 }

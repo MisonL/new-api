@@ -593,6 +593,9 @@ func updateOptionMap(key string, value string) (err error) {
 }
 
 func normalizeOptionValueForInMemoryConfig(key string, value string) (string, error) {
+	if strings.HasPrefix(key, log_retention_setting.ConfigName+".") {
+		return log_retention_setting.NormalizeValue(strings.TrimPrefix(key, log_retention_setting.ConfigName+"."), value)
+	}
 	switch key {
 	case "global.chat_completions_to_responses_policy":
 		return model_setting.NormalizeChatCompletionsToResponsesPolicyJSON(value)

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/log_retention_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/require"
 )
@@ -199,4 +200,32 @@ func TestUpdateOptionNormalizesAdminRateLimitExemptBeforePersist(t *testing.T) {
 	var option Option
 	require.NoError(t, DB.Where("key = ?", "GlobalRateLimitAdminExemptEnabled").First(&option).Error)
 	require.Equal(t, "false", option.Value, "a rejected value must leave the stored value untouched")
+}
+
+// The log_retention_setting keys go through a second path: handleConfigUpdate
+// reflects the string into a struct with strconv, and a value strconv cannot
+// parse is skipped with `continue`, leaving the field untouched while the API
+// reports success. ValidateValue trims before checking, so " true " and " 500 "
+// passed validation and then silently did nothing. Every accepted spelling must
+// be normalised to the form that actually reaches the struct.
+func TestUpdateOptionNormalizesLogRetentionValuesBeforePersist(t *testing.T) {
+	// Do not run this test in parallel: it mutates the process-wide OptionMap
+	// and the registered log_retention_setting config.
+	previousOptionMap := common.OptionMap
+	common.OptionMap = map[string]string{}
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM options")
+		common.OptionMap = previousOptionMap
+	})
+
+	require.NoError(t, UpdateOption(log_retention_setting.ConfigName+".enabled", " true "))
+	require.Equal(t, "true", common.OptionMap[log_retention_setting.ConfigName+".enabled"])
+	require.True(t, log_retention_setting.GetLogRetentionSetting().Enabled, `" true " must enable retention at runtime`)
+
+	require.NoError(t, UpdateOption(log_retention_setting.ConfigName+".batch_size", " 500 "))
+	require.Equal(t, "500", common.OptionMap[log_retention_setting.ConfigName+".batch_size"])
+	require.Equal(t, 500, log_retention_setting.GetLogRetentionSetting().BatchSize, `" 500 " must reach the struct`)
+
+	// A value out of range must still be rejected before it reaches the database.
+	require.Error(t, UpdateOption(log_retention_setting.ConfigName+".batch_size", " 999999 "))
 }
