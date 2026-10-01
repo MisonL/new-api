@@ -210,7 +210,7 @@ const (
 
 ### 4.5 本地独有包与文件
 
-#### 4.5.1 `service/openaicompat/`（9 个非测试文件，3661 行）
+#### 4.5.1 `service/openaicompat/`（9 个非测试文件，3071 行）
 
 上游**无此包**，但**有等价能力**——上游把 chat↔responses 兼容层放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主留了一个 27 行的纯转发 shim `service/openai_chat_responses_compat.go`，函数名与本地完全相同（`ChatCompletionsRequestToResponsesRequest` 等 6 个）。**「上游无此包」不等于「上游无此能力」**，逐项对照：
 
@@ -228,9 +228,9 @@ const (
 
 #### 4.5.2 `relay/common/` 本地独有文件
 
-上游 `relay/common/` 有 17 个文件，本地 29 个。**上游没有任何 `responses_*` 文件**。本地独有并逐项核验（计数为**该文件全部导出符号的并集**，排除 `_test.go` 与定义文件自身）：
+上游 `relay/common/` 有 17 个文件（含测试；非测试 10），本地 29 个（含测试；非测试 16）。**上游没有任何 `responses_*` 文件**。本地独有并逐项核验（计数为**该文件全部导出符号的并集**，排除 `_test.go` 与定义文件自身）：
 
-| 文件 | 行数 | 能力 | 生产引用文件数（HEAD / 工作区） | 上游状态 |
+| 文件 | 行数 | 能力 | 生产引用文件数（HEAD / 工作区，**该文件全部导出符号的并集**，排除 `_test.go` 与定义文件） | 上游状态 |
 |---|---|---|---|---|
 | `responses_input_filter.go` | 1034 | 加密内容探测与剥离、`context_compaction` 归一化、input item ID 归一化、从错误文本反解 input 路径、工具形状探测、arguments 对象↔字符串转换 | 11 / 11 | **零覆盖** |
 | `responses_tool_names.go` | 536 | 工具名双向归一化与响应侧还原（别名注册表 + gjson/sjson 字节级重写） | **0 / 3** | **零覆盖**（上游 `NormalizeToolName` 全仓 0 命中） |
@@ -307,7 +307,7 @@ const (
 - **`controller/` 层的协议相关逻辑**（`controller/relay.go`、`controller/channel-test.go:957` 等）。已知 `controller/channel-test.go:957` 有 `info.Request = chatReq` 反例，但未做完整清点
 - **上游 relaykit 的 3 个演进分支**：`feat/relaykit-tools`、`feat/relaykit-perf`、`fix/relayconvert-tool-result-media-and-reasoning-parts`。未逐一核验，可能已包含本文档列为「待打补丁」的改动（见第 10 节第 15 项）
 - **`relay/common/responses_input_filter.go` 第 646–1034 行**：只按符号 grep 核验了导出能力，未逐行读取其 ID 前缀契约与错误反解逻辑的细节
-- **`dto/` 的完整方法级差集与 import 图**：早期版本只比对了 3 个文件（4.4）。实测本地 dto 共 **394 个函数**、relaykit/dto **273 个**；本地 **21 个 dto 文件 import 宿主 `common`**、3 个 import `constant`、1 个 import `logger`，而 relaykit/dto 只 import `types` 与 `kitutil`。**完整差集与依赖图仍是阶段 2 的开工前置**（见 12.0.2、12.0.3）
+- **`dto/` 的完整方法级差集与 import 图**：早期版本只比对了 3 个文件（4.4）。实测本地 dto 共 **394 个函数**、relaykit/dto **273 个**；本地 **12 个非测试 dto 文件 import 宿主 `common`**、2 个 import `constant`、1 个 import `logger`（含测试口径为 21/3/1），而 relaykit/dto 只 import `types` 与 `kitutil`。**完整差集与依赖图仍是阶段 2 的开工前置**（见 12.0.2、12.0.3）
 - **34 个字段不兼容类型的逐项对齐方案**：12.0.1 已列出清单，但每个字段「迁入 relaykit / 降为宿主自由函数 / 放弃」的取舍未逐项给出
 
 ## 5. 必须保留的两项能力
@@ -359,8 +359,8 @@ const (
 | 1 | 引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译 |
 | 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写** + **34 个类型字段差异逐项对齐** + 全部宿主独有方法（全包 394 vs 273 函数）给出出路。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**327 个 import 点全部验证** |
 | 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 别名，同步改写 `service/convert.go` 的 22 处字段引用；`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过 |
-| 4 | 协议映射切换到 relaykit；打补丁 1；对齐第 4 节的处置结论；`*WithError` 系列在宿主包装 | 转换测试通过；grok reasoning 可见 |
-| 5 | 宿主管道接入 relaykit 分派；响应方向暴露策略落到 6 条调用点；规则模型附带修正 | 全量测试通过 |
+| 4 | 协议映射切换到 relaykit；打补丁 1；对齐第 4 节的处置结论；**`*WithError` 系列直接删除**（12.3，不保留包装层） | 转换测试通过；grok reasoning 可见 |
+| 5 | 宿主管道接入 relaykit 分派；**响应方向暴露策略在 relaykit 内门控**（12.4，`convmeta.Options` 钩子，必须在索引分配之前——后置过滤不可行）；规则模型附带修正 | 全量测试通过 |
 | 6 | 删除旧代码（`service/convert.go` 主体、`service/openaicompat/` 中被替代部分） | 无残留引用 |
 
 三处硬依赖：
@@ -508,7 +508,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 | Go 别名**继承方法集**但**不能新增方法** | 最小程序实测：`type A = base.T` 后 `a.Method()` 正常；跨包给别名加方法报 `cannot define new methods on non-local type Thing` |
 | 本地 dto 394 个函数 vs relaykit 273 | `git grep -hE '^func ' HEAD -- 'dto/*.go' \| wc -l` / 同法查 `relaykit/dto/` |
 | `channel_settings.go` 本地 61 函数 / relaykit 29 | 单文件 `grep -cE '^func '`；40 个宿主独有方法上游 0 命中 |
-| 本地 21 个 dto 文件 import 宿主 `common` | 逐包 grep：`common` 21、`constant` 3、`logger` 1；relaykit/dto 只 import `types`(17) 与 `kitutil`(12) |
+| 本地 12 个**非测试** dto 文件 import 宿主 `common` | 逐文件 `git show HEAD:<f> \| grep`：非测试 `common` 12、`constant` 2、`logger` 1（含测试 21/3/1）；relaykit/dto 只 import `types`(17) 与 `kitutil`(12) |
 | `convertResponsesToolsToChat` 交织 5 种工具 | `responses_to_chat_request.go:455` 签名含 `namespaceSelection` + `toolState`；函数体内 namespace 16 / toolState 5 / ToolSearch 5 / Custom 4 / EnableCustomToolBridge 3 |
 | 本地 thinking 门控在索引分配之前 | `service/convert.go:756` 算 `allowClaudeThinking`，`:801` `if !allowClaudeThinking { continue }`；relaykit `to_claude_messages_resp.go:342-365` 无条件 `state.Index++` |
 | AWS Converse 无条件暴露 thinking | `relay/channel/aws/converse.go:746` 直接构造 `{Type:"thinking"}`；全文件 0 处调用 `shouldExposeReasoningAsClaudeThinking` |
@@ -517,6 +517,11 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 | 上游两分支早于 main 且已并入 | `feat/relaykit-tools`=`bbe20f2e1`(2026-09-01)、`feat/relaykit-perf`=`55bba35f2`(2026-09-03)，均早于 main(2026-09-28)；核心提交内容已作为 PR #7137 `0ed497f06` 并入（`git merge-base --is-ancestor 0ed497f06 upstream/main` 通过；两分支 toolconv 均 10 个 `Kind*`） |
 | `ConvOptions` 缓存跨渠道重试已处理 | `relay/common/relay_info.go:311` 在 `InitChannelMeta` 置 `info.convOptions = nil`，注释明示为跨渠道重试重建 |
 | `matchAnyRegex` 空模式语义差异 | 本地 `service/openaicompat/regex.go`：`len(patterns)==0 → true`；上游 `openai_chat_responses_mode.go:15`：`len(patterns)==0 \|\| model=="" → false` |
+| `service/openaicompat/` 共 3071 行（9 个非测试文件） | 逐文件 `wc -l` 求和；含测试 5280 |
+| 两分支 6 个提交均非 main 祖先 | `git merge-base --is-ancestor <c> upstream/main` 对 `55bba35f2`/`bbe20f2e1`/`c82c03ecd`/`60e15b53a`/`b45639116`/`a9a0e2272` 全部 exit=1 |
+| 两分支内容已被 main 覆盖（逐字节/符号集） | `toolconv/` 7 文件 5 SAME、2 处为 main 侧清理；`reasoning/claude.go` 双向独有符号均为 0；`billing_usage.go`/`usage_merge.go` 分支独有符号 0；`relaykit/` 整体 main 净增 4899 行 |
+| 非测试 dto 文件的宿主 import 分布 | 逐文件 `git show HEAD:<f> \| grep`：`common` 12、`constant` 2、`logger` 1（含测试 21/3/1） |
+| `HasCompactionTrigger` 生产引用 9（提及口径） | `git grep -lw` 排除 `_test.go` 与 `dto/`；按调用 `.HasCompactionTrigger()` 计为 7 |
 
 已撤回、不得再用的断言：
 
@@ -595,7 +600,7 @@ git grep -l '"github.com/QuantumNous/new-api/dto"' HEAD -- '*.go' | wc -l       
 
 #### 12.0.3 依赖方向
 
-`dto` 不只是 `types` 的消费者。实测本地 **21 个 dto 文件 import 宿主 `common`**、3 个 import `constant`、1 个 import `logger`；relaykit/dto 只 import `relaykit/types` 与 `relaykit/relayconvert/kitutil`。**完整的 import 图分析仍是未完成项**（见 4.5.5），阶段 2 开工前必须补齐——否则 `dto/channel_settings.go` 的 `constant.ChannelTypeCodex` 可能形成 `dto → constant → relaykit/types → dto` 的环。
+`dto` 不只是 `types` 的消费者。实测本地 **12 个非测试 dto 文件 import 宿主 `common`**、2 个 import `constant`、1 个 import `logger`（含测试口径为 21/3/1）；relaykit/dto 只 import `relaykit/types` 与 `relaykit/relayconvert/kitutil`。**完整的 import 图分析仍是未完成项**（见 4.5.5），阶段 2 开工前必须补齐——否则 `dto/channel_settings.go` 的 `constant.ChannelTypeCodex` 可能形成 `dto → constant → relaykit/types → dto` 的环。
 
 **这条约束决定了下面每一项的取舍，也解释了为何不能「先把 dto 搬过去再说」——搬的瞬间 34 个类型差异与全部宿主独有方法同时编译失败，必须同时给出出路。**
 
@@ -727,7 +732,7 @@ RetainReasoningInClaudeResponse func(modelName string) bool   // nil = 不保留
 - 二者都依赖 `ChatCompletionsToResponsesPolicy` 的 rules 模式（12.8），该策略本身是宿主配置体系的一部分
 - 上游把「是否转换」的决策明确留在宿主——其 `service/openai_chat_responses_mode.go` 注释原文：*"Chat→Responses upgrade policy is host routing logic (it decides whether to convert, reading host settings), so it lives here, not in relayconvert."*
 
-**影响**：`service/openaicompat/` **整体保留**（见 12.15——按能力切分在函数粒度不成立）。命名空间能力所依赖的字段（`ResponsesOutput.Namespace`、`ChannelOtherSettings` 的命名空间相关字段）**必须留在宿主可达的位置**：实测这些字段横跨 `dto`、`controller`、`model`、`service/openaicompat` 四个包，被 18 个 openaicompat 外的生产点使用。若 `dto` 类型整体迁入 relaykit，则这些字段要么一并迁入（使 relaykit 承载宿主协议扩展），要么由宿主维护影子结构——**这是阶段 2 必须一并决策的耦合点**，见 12.0.2。
+**影响**：`service/openaicompat/` **整体保留**（见 12.15——按能力切分在函数粒度不成立）。命名空间能力所依赖的字段（`ResponsesOutput.Namespace`、`ChannelOtherSettings` 的命名空间相关字段）**必须留在宿主可达的位置**：实测这些字段横跨 `dto`、`controller`、`model`、`service/openaicompat` 四个包，生产引用点分散在 `controller/responses_native_tool_identity.go`、`model/channel_responses_tool_capability.go`、`controller/relay_responses_tool_observation.go` 等处（**精确计数待补，见 12.18 第 26 项**）。若 `dto` 类型整体迁入 relaykit，则这些字段要么一并迁入（使 relaykit 承载宿主协议扩展），要么由宿主维护影子结构——**这是阶段 2 必须一并决策的耦合点**，见 12.0.2。
 
 ### 12.7 custom tool bridge 门控 → 保留本地语义
 
@@ -750,11 +755,24 @@ RetainReasoningInClaudeResponse func(modelName string) bool   // nil = 不保留
 **依据**（已实测）：
 
 - 两分支日期为 2026-09-01 / 2026-09-03，**早于** `upstream/main` 的 2026-09-28——是主线的**前身**，不是后续
-- 两分支均**不是** `upstream/main` 的祖先
-- `feat/relaykit-tools` 相对 main 是 **−3910 行**（删多增少），形态是「尚未完成的重构」
-- 其核心提交 `a9a0e2272`（`preserve hosted tools across conversions`）的内容**已作为 PR #7137（`0ed497f06`）并入 main**，且 `0ed497f06` 是 main 的祖先。实测 main 与分支的 `toolconv` 均有 **10 个 `Kind*` 常量**，能力一致
+- 两分支均**不是** `upstream/main` 的祖先：`git merge-base --is-ancestor <c> upstream/main` 对 6 个提交（`55bba35f2`、`bbe20f2e1`、`c82c03ecd`、`60e15b53a`、`b45639116`、`a9a0e2272`）**全部 exit=1**
+- `feat/relaykit-tools` 相对 main 是 **−3910 行**（**限定 relaykit 子目录口径**；全仓为 `1251 files changed, 35412 insertions(+), 151592 deletions(-)`），形态是「尚未完成的重构」
+- 其核心提交 `a9a0e2272`（`preserve hosted tools across conversions`）的内容**已作为 PR #7137（`0ed497f06`）并入 main**，且 `0ed497f06` 是 main 的祖先
 
-**结论**：main 已包含这些分支的最终形态。以 main 为基线即可，无需 cherry-pick。
+**「main 已含最终形态」的完整取证**（这是本结论的核心，不能只靠祖先判断——6 个提交都不在 main 里，必须证明其内容已被别的形式覆盖）：
+
+| 核验 | 结果 |
+|---|---|
+| `toolconv/` 7 个文件逐字节比对 | 5 个 SAME；`decode.go`、`encode.go` 有差异，方向是 **main 更新**——差异内容是删除 Go 1.22 前冗余的循环变量遮蔽（`function := function`）与 `interface{}` → `any`，属清理，非功能 |
+| `reasoning/claude.go` 导出符号集 | 分支独有 **0** 个，main 独有 **0** 个——符号集完全相同 |
+| `dto/billing_usage.go`、`dto/usage_merge.go` | 分支独有符号 **0** 个；diff 方向为 main 净增（usage_merge.go main +20 行） |
+| `relaykit/` 相关目录整体 | 分支相对 main 是 `98 files changed, 4899 insertions(+), 1407 deletions(-)`——**main 净增** |
+| `ClaudeToChatStreamState` / `ChatToGeminiStreamState` | main 与分支各有 6 个文件命中，同名同语义 |
+| `toolconv` 的 `Kind*` 常量 | 两边均 **10 个** |
+
+**结论**：main 已包含这些分支的最终形态，且在这些区域**更完整**。以 main 为基线即可，无需 cherry-pick。
+
+**⚠ 方法学注记**：早期版本仅凭「分支不是 main 祖先」+「toolconv 有 10 个 Kind」就下了「main 已含最终形态」的结论——**这是不充分的**。6 个提交均不在 main 中，必须逐一证明其内容已被覆盖。上表的逐字节/符号集比对是后补的取证。
 
 ### 12.10 `ConvOptions` 缓存与跨渠道重试（第 10 节第 10、11 项）
 
@@ -879,7 +897,8 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 | # | 项 | 说明 |
 |---|---|---|
 | 21 | `dto` 完整方法级差集 | 全包 394 vs 273 函数，须逐项给出出路。阶段 2 前置（12.0.2） |
-| 22 | `dto` import 图分析 | 21 个 dto 文件 import `common`、3 个 import `constant`，须确认无 `dto → constant → relaykit/types → dto` 环（12.0.3） |
+| 22 | `dto` import 图分析 | 12 个非测试 dto 文件 import `common`、2 个 import `constant`，须确认无 `dto → constant → relaykit/types → dto` 环（12.0.3） |
 | 23 | 34 个字段不兼容类型的逐项对齐 | 12.0.1 已列清单，取舍未逐项给出 |
 | 24 | `openaicompat` tool 循环重构 | 让基础分支可独立转调 relaykit 的唯一路径；独立重构，不在本次范围（12.15.3） |
 | 25 | 本地行为的 golden 基线 | 24 个快照是上游自己的基线，测不到 9.1/9.2 的 12 处本地差异。须用当前 HEAD 生成本地基线（12.16） |
+| 26 | 命名空间字段的生产引用精确计数 | 12.6 早期写「18 个生产点」无可复现口径，已改为定性表述 |
