@@ -116,7 +116,7 @@ const (
 | 本地 DTO 独有方法 13 个 | **23 个**（工作区）/ 20 个（HEAD）。13 只是 `openai_request.go` 单文件数 |
 | `ParseContentStrict` 20 / `ParseToolCallsStrict` 16 / `Clone` 13 / `HasCompactionTrigger` 10 / `HasCompactionOutput` 4 | 实测 12 / 11 / **1** / 9 / 2。`Clone` 的 13 把 `http.Request.Clone`、`http.Transport.Clone`、`common.ResponsesRequestMetadata.Clone` 一并计入 |
 | 「本地 DTO 独有方法全部在生产使用」 | 不成立：`IsValidToolName`、`ToolNameMaxLength` 生产引用为 0 |
-| 「`service/openaicompat/` 上游无此包」（不加限定） | 包确无，但**能力大部分有**——上游把 chat↔responses 兼容层放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主留了同名函数的 27 行转发 shim。零覆盖的只有命名空间工具、tool_search、custom tool bridge 门控与 rules 策略扩展 |
+| 「`service/openaicompat/` 上游无此包」（不加限定） | 包确无，但**能力大部分有**——上游把 chat↔responses 兼容层放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主留了 30 行转发 shim（6 个函数，其中 5 个与本地同名）。零覆盖的只有命名空间工具、tool_search、custom tool bridge 门控与 rules 策略扩展 |
 | 「`*WithError` 系列 relaykit 无对应签名」 | 上游 `ResponseConverterFunc` 本就返回 `(any, *dto.Usage, error)`；`WithError` 是本地命名遗留 |
 | `relay/common/responses_stream_options_compat.go` | 该文件**不存在**，系误记 |
 | 「工具名契约与别名还原属部署关切」 | 它是跨协议工具名映射，上游零覆盖，**属协议层** |
@@ -257,7 +257,7 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 | --- | --- | --- | --- |
 | 1 | 第 7 节阶段表与第 12 节决策矛盾 | 阶段 4 写「`*WithError` 在宿主包装」、阶段 5 写「落到 6 条调用点」，与 12.3「删除」、12.4「relaykit 内门控」相反 | 已同步阶段表 |
 | 2 | 12.9「main 已含最终形态」缺逐项取证 | 6 个提交**全部**不在 main（`--is-ancestor` 全 exit=1）。原结论仅凭「非祖先」+「toolconv 10 个 Kind」——**不充分** | 已补逐字节/符号集比对（toolconv 5 SAME + 2 处 main 侧清理；`reasoning/claude.go` 双向独有符号 0；relaykit 整体 main 净增 4899 行）。结论仍成立，但取证是后补的 |
-| 3 | 4.5.1「3661 行」无出处 | 实测 **3071 行**（含测试 5280）。高估 19% | 已改为 3071 |
+| 3 | 4.5.1「3661 行」无出处 | 实测基线 **3072 行**（含测试 5280；工作区因其他会话改动为 3071）。高估 19% | 已改为 3072 |
 | 4 | 12.0.3 的 dto import 计数口径矛盾 | 非测试是 **12/2/1**；21/3/1 是含测试口径，与文档自述「排除 `_test.go`」冲突 | 已改为非测试口径并注明含测试值 |
 | 5 | `HasCompactionTrigger` 写 9 | 提及口径确为 **9**（代理说 10 是把它算进了 `dto/` 自身）；调用口径 7 | 数字正确，已注明口径 |
 | 6 | 12.9「−3910 行」未限定作用域 | 该数是 **relaykit 子目录**口径；全仓为 `1251 files changed, +35412/−151592` | 已注明 |

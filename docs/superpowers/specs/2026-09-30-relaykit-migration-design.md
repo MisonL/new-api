@@ -74,7 +74,7 @@ const (
 
 其中 `NormalizeCacheCreationSplit` 等辅助函数在 relaykit 中同名存在（`oai_chat/to_claude_messages_resp.go:107`）。
 
-**chat↔responses 兼容层也已覆盖**（4.5.1 详述）：上游把该能力放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主保留 27 行转发 shim `service/openai_chat_responses_compat.go`，函数名与本地 `service/openaicompat/` 完全相同。本地该包**大部分能力上游已覆盖**，零覆盖的只有命名空间工具、tool_search、custom tool bridge 门控与 rules 策略扩展。
+**chat↔responses 兼容层也已覆盖**（4.5.1 详述）：上游把该能力放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主保留 30 行转发 shim `service/openai_chat_responses_compat.go`，其 6 个导出函数中 5 个与本地 `service/openaicompat/` 同名（第 6 个 `ResponsesFinishReasonFromStatus` 本地无对应，见 4.5.1）。本地该包**大部分能力上游已覆盖**，零覆盖的只有命名空间工具、tool_search、custom tool bridge 门控与 rules 策略扩展。
 
 ### 3.3 上游缺失 → 需打补丁（2 项）
 
@@ -212,7 +212,7 @@ const (
 
 #### 4.5.1 `service/openaicompat/`（9 个非测试文件，基线 3072 行）
 
-上游**无此包**，但**有等价能力**——上游把 chat↔responses 兼容层放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主留了一个 27 行的纯转发 shim `service/openai_chat_responses_compat.go`，函数名与本地完全相同（`ChatCompletionsRequestToResponsesRequest` 等 6 个）。**「上游无此包」不等于「上游无此能力」**，逐项对照：
+上游**无此包**，但**有等价能力**——上游把 chat↔responses 兼容层放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主留了一个 30 行的纯转发 shim `service/openai_chat_responses_compat.go`。它导出 6 个函数，其中 **5 个与本地 `service/openaicompat/` 同名同义**（`ChatCompletionsRequestToResponsesRequest`、`ResponsesRequestToChatCompletionsRequest`、`ChatCompletionsResponseToResponsesResponse`、`ResponsesResponseToChatCompletionsResponse`、`ExtractOutputTextFromResponses`）；第 6 个 `ResponsesFinishReasonFromStatus` 本地全仓无对应。**「上游无此包」不等于「上游无此能力」**，逐项对照：
 
 | 本地能力 | 位置 | 上游状态 |
 |---|---|---|
@@ -308,7 +308,7 @@ const (
 - **上游 relaykit 的 3 个演进分支**：`feat/relaykit-tools`、`feat/relaykit-perf`、`fix/relayconvert-tool-result-media-and-reasoning-parts`。未逐一核验，可能已包含本文档列为「待打补丁」的改动（见第 10 节第 15 项）
 - **`relay/common/responses_input_filter.go` 第 646–1034 行**：只按符号 grep 核验了导出能力，未逐行读取其 ID 前缀契约与错误反解逻辑的细节
 - **`dto/` 的完整方法级差集与 import 图**：早期版本只比对了 3 个文件（4.4）。实测本地 dto 共 **394 个函数**、relaykit/dto **273 个**；本地 **12 个非测试 dto 文件 import 宿主 `common`**、2 个 import `constant`、1 个 import `logger`（含测试口径为 21/3/1），而 relaykit/dto 只 import `types` 与 `kitutil`。**完整差集与依赖图仍是阶段 2 的开工前置**（见 12.0.2、12.0.3）
-- **34 个字段不兼容类型的逐项对齐方案**：12.0.1 已列出清单，但每个字段「迁入 relaykit / 降为宿主自由函数 / 放弃」的取舍未逐项给出
+- **33 个字段不兼容类型的逐项对齐方案**（基线口径，工作区 34）：12.0.1 已列出清单，但每个字段「迁入 relaykit / 降为宿主自由函数 / 放弃」的取舍未逐项给出
 
 ## 5. 必须保留的两项能力
 
@@ -468,7 +468,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 | `convmeta.Meta` 15 个方法无客户端请求访问器 | `relaykit/relayconvert/convmeta/meta.go:18-54` 逐方法核验 |
 | registry 分派函数类型带 `info convmeta.Meta` | `response_registry.go` 的 `:22`、`:24`、`:28`、`:30` 带；`:26` 的不带 |
 | `convmeta.Options` 响应方向也有使用 | `response_registry.go:500` |
-| `types` 拆分爆炸半径 210 个 import 点 | `git grep -l '"…/new-api/types"' 9c4758b53 -- '*.go' \| wc -l`（工作区 216） |
+| `types` 拆分爆炸半径 210 个 import 点 | `git grep -l '"…/new-api/types"' 9c4758b53 -- '*.go' \| wc -l`（含测试口径；工作区 212） |
 | 上游宿主 172 个文件 import `relaykit/types` | `git grep -l` 计数 |
 | 上游宿主 24 个文件仍 import 宿主 `types` | 同上 |
 | 本地 `ClaudeConvertInfo` map 字段被引用 22 处 | `ToolCallStarted` 6 + `ToolCallIDs` 5 + `ToolCallNames` 5 + `ToolCallPendingArgs` 6 |
@@ -495,7 +495,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 | 上游无 `EnableCustomToolBridge` | `git grep -ln EnableCustomToolBridge upstream/main -- 'relaykit/' 'service/'` = 0；`custom_tool_call` 在 relaykit 6 文件但不门控 |
 | 上游无 `ProtocolConversionRule` | `git grep -ln ProtocolConversionRule upstream/main -- '*.go'` = **0 文件**；`ChatCompletionsToResponsesPolicy` 存在于 `setting/model_setting/global.go:14` 但无 `Rules` |
 | 上游无 `synthetic.compact` / `encrypted_content` / `NormalizeToolName` | 三次 `git grep -ln … upstream/main -- '*.go'` 均 0 文件 |
-| 上游宿主 `service/openai_chat_responses_compat.go` 是 27 行纯转发 | `git show upstream/main:service/openai_chat_responses_compat.go`，6 个函数名与本地相同，全部转调 `relayconvert` |
+| 上游宿主 `service/openai_chat_responses_compat.go` 是 30 行纯转发 | `git show upstream/main:service/openai_chat_responses_compat.go \| wc -l` = 30。导出 6 个函数，5 个与本地同名（第 6 个 `ResponsesFinishReasonFromStatus` 本地无对应），全部转调 `relayconvert` |
 | 上游 `PrepareResponsesRequest` 无本地 4 项请求增强 | `git show upstream/main:relay/responses_request.go`（87 行）全文读取，仅 `common.SupportsResponsesCompact` 门控 |
 | 上游 `relay/common/` 五个候选文件未吸收本地能力 | 逐文件读取 `conversion_diagnostics.go`、`response_model.go`、`request_conversion.go`、`outbound_body.go`、`tool_usage.go` |
 | 上游有更强的 image generation 去重 | `relay/common/tool_usage.go` `ImageGenerationCallCounter.Observe` 按 id/callId/index/result-sha256 四别名去重 |
@@ -545,13 +545,17 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 - 「`ChannelOtherSettings` 21 个字段」「`GeneralOpenAIRequest` 21 个」：均为工作区口径，基线各为 20
 - 「`channel_settings.go` 40 个宿主独有方法」：41（且「函数」与「方法」两个口径被混写）
 - 「`service/convert.go:801` `if !allowClaudeThinking { continue }`」：实际是 `:794` 且为 `return`（闭包提前返回），非循环 `continue`
+- 「上游 shim 是 27 行」：27 是上游 `service/convert.go` 的行数，被误植到 shim；shim 实测 30 行
+- 「shim 的 6 个函数名与本地完全相同」：只有 5 个同名，第 6 个 `ResponsesFinishReasonFromStatus` 本地全仓无对应
+- 「`types` import 工作区 216」：实测 212（含测试口径）
+- 「`EnableCustomToolBridge` 8 个文件」：9 个非测试文件
 - 「relaykit `internal/oai_chat/to_claude_messages_resp.go:342-365` 无条件 `state.Index++`」：`state.Index++` 在 `:151` 的 `stopOpenBlocksAndAdvance` 内，`:342` 起是调用点
 - 「`convmeta.Options` 是请求阶段机制、响应方向零先例」：`response_registry.go:500` 即反例
 - 「`info.Request` 从不被重新指向」：`controller/channel-test.go:957` 是反例
 - 「relaykit 的 image 处理直接解引用会 panic」：只有 Chat 方向如此
 - 「`*WithError` 系列 39 个生产调用点」：无可复现口径；实测 4 个函数 9 个，6 个函数 14 个
 - 「relaykit 响应方向两个转换器都用 `_` 丢弃 Meta」：只有非流式如此
-- 「补丁 3 在 relaykit 内不可实现」：registry 层 `Meta` 可达，缺的是向内部转换器透传
+- 「响应方向门控在 relaykit 内不可实现」：registry 层 `Meta` 可达；`oai_chat` 的两个转换器（`:111`、`:449`）**本就直接接收 `info convmeta.Meta`**，零透传成本。只有 `oai_responses` 一族不接收，且本地不涉及该路径（见 12.4.2）
 - 「hosted 工具桥接是本地独有」：上游 `toolconv/` 已存在
 - 「阶段 1 必须更新 210 个 import 点」：上游用类型别名做到零调用点变更
 - 「两个 Claude 转换器 switch 无 `default`」（未限定作用域）：只有 content block switch 无，同文件其他 switch 有
@@ -936,7 +940,7 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 |---|---|---|
 | 21 | `dto` 完整方法级差集 | 全包 394 vs 273 函数，须逐项给出出路。阶段 2 前置（12.0.2） |
 | 22 | `dto` import 图分析 | 12 个非测试 dto 文件 import `common`、2 个 import `constant`，须确认无 `dto → constant → relaykit/types → dto` 环（12.0.3） |
-| 23 | 34 个字段不兼容类型的逐项对齐 | 12.0.1 已列清单，取舍未逐项给出 |
+| 23 | 33 个字段不兼容类型的逐项对齐（基线口径，工作区 34） | 12.0.1 已列清单，取舍未逐项给出 |
 | 24 | `openaicompat` tool 循环重构 | 让基础分支可独立转调 relaykit 的唯一路径；独立重构，不在本次范围（12.15.3） |
 | 25 | 本地行为的 golden 基线 | 24 个快照是上游自己的基线，测不到 9.1/9.2 的 12 处本地差异。须用当前 HEAD 生成本地基线（12.16） |
 | 26 | 命名空间字段的生产引用精确计数 | 12.6 早期写「18 个生产点」无可复现口径，已改为定性表述 |
