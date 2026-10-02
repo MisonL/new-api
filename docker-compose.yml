@@ -125,10 +125,11 @@ services:
       - PYROSCOPE_BASIC_AUTH_PASSWORD=${PYROSCOPE_BASIC_AUTH_PASSWORD:-}
       - PYROSCOPE_MUTEX_RATE=${PYROSCOPE_MUTEX_RATE:-5}
       - PYROSCOPE_BLOCK_RATE=${PYROSCOPE_BLOCK_RATE:-5}
-      # 反向代理信任。auto 表示由进程按运行环境自行判定：两种情况都信任 loopback
-      # （同机 nginx/Caddy/Traefik），容器内再额外信任容器网段；留空则不信任任何
-      # 转发头（所有客户端塌缩为一个限流桶）；也可显式写 IP/CIDR 列表。
-      - TRUSTED_PROXIES=${TRUSTED_PROXIES-auto}
+      # 反向代理信任。留空（推荐）表示不信任任何转发头（所有客户端按 socket 地址识别，
+      # 反代后会塌缩到同一个限流桶，仅在确实没有反向代理时使用）；auto 表示由进程按运行
+      # 环境自行判定：两种情况都信任 loopback（同机 nginx/Caddy/Traefik），容器内再额外
+      # 信任容器网段（存在安全边界，详见 .env.example:21-27）；也可显式写 IP/CIDR 列表。
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
       # 渠道缓存与健康检查
       - CHANNEL_CACHE_SYNC_ENABLED=${CHANNEL_CACHE_SYNC_ENABLED:-true}
       - CHANNEL_TEST_FREQUENCY=${CHANNEL_TEST_FREQUENCY:-}
@@ -164,7 +165,7 @@ services:
     networks:
       - new-api-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "-T", "10", "-O", "/dev/null", "http://127.0.0.1:3000/api/healthz"]
+      test: ["CMD", "sh", "-c", "wget -q -T 10 -O /dev/null http://127.0.0.1:$${PORT:-3000}/api/healthz"]
       interval: 30s
       timeout: 15s
       retries: 5
