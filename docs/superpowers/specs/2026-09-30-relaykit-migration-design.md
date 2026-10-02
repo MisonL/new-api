@@ -74,7 +74,7 @@ const (
 
 其中 `NormalizeCacheCreationSplit` 等辅助函数在 relaykit 中同名存在（`oai_chat/to_claude_messages_resp.go:107`）。
 
-**chat↔responses 兼容层也已覆盖**（4.5.1 详述）：上游把该能力放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主保留 30 行转发 shim `service/openai_chat_responses_compat.go`，其 6 个导出函数中 5 个与本地 `service/openaicompat/` 同名（第 6 个 `ResponsesFinishReasonFromStatus` 本地无对应，见 4.5.1）。本地该包**大部分能力上游已覆盖**，零覆盖的只有命名空间工具、tool_search、custom tool bridge 门控与 rules 策略扩展。
+**chat↔responses 兼容层也已覆盖**（4.5.1 详述）：上游把该能力放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主保留 30 行转发 shim `service/openai_chat_responses_compat.go`，其 6 个导出函数中 5 个与本地 `service/openaicompat/` 同名；第 6 个 `ResponsesFinishReasonFromStatus` 函数名本地无对应，但**同能力本地有**（`responsesIncompleteFinishReason`，`responses_to_chat.go:246`，见 4.5.1）。本地该包**大部分能力上游已覆盖**，零覆盖的只有命名空间工具、tool_search、custom tool bridge 门控与 rules 策略扩展。
 
 ### 3.3 上游缺失 → 需打补丁（2 项）
 
@@ -212,7 +212,7 @@ const (
 
 #### 4.5.1 `service/openaicompat/`（9 个非测试文件，基线 3072 行）
 
-上游**无此包**，但**有等价能力**——上游把 chat↔responses 兼容层放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主留了一个 30 行的纯转发 shim `service/openai_chat_responses_compat.go`。它导出 6 个函数，其中 **5 个与本地 `service/openaicompat/` 同名同义**（`ChatCompletionsRequestToResponsesRequest`、`ResponsesRequestToChatCompletionsRequest`、`ChatCompletionsResponseToResponsesResponse`、`ResponsesResponseToChatCompletionsResponse`、`ExtractOutputTextFromResponses`）；第 6 个 `ResponsesFinishReasonFromStatus` 本地全仓无对应。**「上游无此包」不等于「上游无此能力」**，逐项对照：
+上游**无此包**，但**有等价能力**——上游把 chat↔responses 兼容层放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主留了一个 30 行的纯转发 shim `service/openai_chat_responses_compat.go`。它导出 6 个函数，其中 **5 个与本地 `service/openaicompat/` 同名同义**（`ChatCompletionsRequestToResponsesRequest`、`ResponsesRequestToChatCompletionsRequest`、`ChatCompletionsResponseToResponsesResponse`、`ResponsesResponseToChatCompletionsResponse`、`ExtractOutputTextFromResponses`）；第 6 个 `ResponsesFinishReasonFromStatus` 函数名本地无对应，但同能力本地有（`responsesIncompleteFinishReason`，`responses_to_chat.go:246`；本地版大小写不敏感且用 `EffectiveReason()`，比上游更宽容）。**「上游无此包」不等于「上游无此能力」**，逐项对照：
 
 | 本地能力 | 位置 | 上游状态 |
 |---|---|---|
@@ -433,7 +433,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 4. ~~**`*WithError` 系列形式**（4.5.4）~~ → **12.3**：直接删除，9 个调用点改为 error 返回接口
 5. ~~**响应方向暴露策略的具体形态**~~ → **12.4**：**relaykit 内门控**（`convmeta.Options` 钩子），必须在索引分配之前。后置过滤会破坏 SSE 索引，不可行
 6. ~~**本地 DTO 独有方法归属**（4.4）~~ → **12.5**：A 类 18 个迁入 relaykit/dto，B 类 2 个降为宿主自由函数，3 个需实测（与 `InputTokenDetails` / `ImageGenerationCallCounter` 对齐）
-7. ~~**本地 hosted 工具与上游 `toolconv` 的收敛**~~ → **无差异**：上游 10 种已覆盖本地全部（且多 `apply_patch`、`local_shell`），直接采用
+7. ~~**本地 hosted 工具与上游 `toolconv` 的收敛**~~ → **无差异**：上游 10 种 `Kind`（`function`/`web_search`/`file_search`/`web_fetch`/`code_execution`/`computer_use`/`url_context`/`mcp`/`image_generation`/`native`）是本地超集。本地非测试代码出现的 hosted 工具 type 只有 3 种（`web_search`、`file_search`、`image_generation`），差集为空。直接采用
 8. ~~**`types` 别名转发的适用范围**~~ → **12.2**：仅 `endpoint_type.go`、`finish_reason.go` 两类常量用别名；其余改 import
 9. ~~`relaykit/dto` 补丁 2 是否影响上游 golden 快照~~ → **12.16**：需实测，24 个 JSON 快照逐一核对
 10. ~~`ConvOptions()` 缓存与失效语义~~ → **12.10**：无需改动，上游 `relay/common/relay_info.go:311`（`InitChannelMeta` 起于 `:245`）已在其中显式置 `nil`
@@ -495,7 +495,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 | 上游无 `EnableCustomToolBridge` | `git grep -ln EnableCustomToolBridge upstream/main -- 'relaykit/' 'service/'` = 0；`custom_tool_call` 在 relaykit 6 文件但不门控 |
 | 上游无 `ProtocolConversionRule` | `git grep -ln ProtocolConversionRule upstream/main -- '*.go'` = **0 文件**；`ChatCompletionsToResponsesPolicy` 存在于 `setting/model_setting/global.go:14` 但无 `Rules` |
 | 上游无 `synthetic.compact` / `encrypted_content` / `NormalizeToolName` | 三次 `git grep -ln … upstream/main -- '*.go'` 均 0 文件 |
-| 上游宿主 `service/openai_chat_responses_compat.go` 是 30 行纯转发 | `git show upstream/main:service/openai_chat_responses_compat.go \| wc -l` = 30。导出 6 个函数，5 个与本地同名（第 6 个 `ResponsesFinishReasonFromStatus` 本地无对应），全部转调 `relayconvert` |
+| 上游宿主 `service/openai_chat_responses_compat.go` 是 30 行纯转发 | `git show upstream/main:service/openai_chat_responses_compat.go \| wc -l` = 30。导出 6 个函数，5 个与本地同名，第 6 个 `ResponsesFinishReasonFromStatus` 对应本地 `responsesIncompleteFinishReason`（同能力、异名），全部转调 `relayconvert` |
 | 上游 `PrepareResponsesRequest` 无本地 4 项请求增强 | `git show upstream/main:relay/responses_request.go`（87 行）全文读取，仅 `common.SupportsResponsesCompact` 门控 |
 | 上游 `relay/common/` 五个候选文件未吸收本地能力 | 逐文件读取 `conversion_diagnostics.go`、`response_model.go`、`request_conversion.go`、`outbound_body.go`、`tool_usage.go` |
 | 上游有更强的 image generation 去重 | `relay/common/tool_usage.go` `ImageGenerationCallCounter.Observe` 按 id/callId/index/result-sha256 四别名去重 |
@@ -549,6 +549,8 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 - 「shim 的 6 个函数名与本地完全相同」：只有 5 个同名，第 6 个 `ResponsesFinishReasonFromStatus` 本地全仓无对应
 - 「`types` import 工作区 216」：实测 212（含测试口径）
 - 「`EnableCustomToolBridge` 8 个文件」：9 个非测试文件
+- 「上游 10 种 hosted 工具且多 `apply_patch`、`local_shell`」：`apply_patch`/`local_shell` 是 Responses **input item 类型**，不是 `toolconv` 的 `Kind`。上游 Kind 恰好 10 个，本地非测试只出现 3 种 hosted 工具 type，是其子集
+- 「上游 shim 第 6 个函数本地无对应」：函数**名**无对应，**能力**有（`responsesIncompleteFinishReason`，`responses_to_chat.go:246`）
 - 「relaykit `internal/oai_chat/to_claude_messages_resp.go:342-365` 无条件 `state.Index++`」：`state.Index++` 在 `:151` 的 `stopOpenBlocksAndAdvance` 内，`:342` 起是调用点
 - 「`convmeta.Options` 是请求阶段机制、响应方向零先例」：`response_registry.go:500` 即反例
 - 「`info.Request` 从不被重新指向」：`controller/channel-test.go:957` 是反例
@@ -919,7 +921,7 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 | 4 | `*WithError` 系列 | 删除 |
 | 5 | 响应方向暴露策略形态 | **relaykit 内门控**（`convmeta.Options` 钩子），在索引分配之前。后置过滤不可行，见 12.4。落点为 `oai_chat/to_claude_messages_resp.go`（已可达 `Meta`，零透传成本） |
 | 6 | DTO 方法归属 | 4.4 的 23 个：A 18 / B 2 / 待实测 3。**全包 394 vs 273 函数**，完整差集是阶段 2 前置 |
-| 7 | hosted 工具收敛 | 采用上游 `toolconv`（10 种），本地无独有 |
+| 7 | hosted 工具收敛 | 采用上游 `toolconv`（10 种 `Kind`），本地非测试只有 3 种且是其子集，差集为空 |
 | 8 | `types` 别名转发范围 | 仅 `endpoint_type.go`、`finish_reason.go` 两类常量；其余改 import |
 | 9 | 补丁 2 对 golden 快照 | 需实测，逐条核对 |
 | 10 | `ConvOptions` 缓存语义 | 无需改动，上游 `:311` 已处理 |
