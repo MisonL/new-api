@@ -180,7 +180,7 @@ git merge-base HEAD aa7d0d39a4  →  dac55f0f
 | OpenAI 渠道非流式 | `relay/channel/openai/relay-openai.go:314` | 是 |
 | Chat 经 Responses | `relay/channel/openai/chat_via_responses.go:280` | 是 |
 | Gemini 渠道 | `relay/channel/gemini/relay-gemini.go:1784` | 是 |
-| AWS Converse | `relay/channel/aws/converse.go:748`、`:1112` | **否** |
+| AWS Converse | `relay/channel/aws/converse.go:748`、`:1110` | **否** |
 
 `converseOutputToClaudeResponse`（`:713`）直接从 `ConverseOutput` 构造 `dto.ClaudeResponse` 并生成 thinking 块，绕过 `service/convert.go`。
 
@@ -226,11 +226,12 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 | # | 攻击 | 复现证据 | 推翻的决策 |
 | --- | --- | --- | --- |
 | 1 | `dto` 迁移规模被系统性低估 | 上游 **281** 个文件 import `relaykit/dto`（宿主 dto 327→39）；本地对应 **327** 个。第 6.2 节用整节撤回 `types` 的 210 import 点，对 dto 只字未提 | §12.0「调用点不变」 |
-| 2 | 「23 个 DTO 独有方法」只数了 3 个文件 | 本地 dto **394 函数** vs relaykit **273**；`channel_settings.go` 单文件本地 61/relaykit 29，**40 个宿主独有方法**（主代理复现后把代理给的 32 修正为 40），全部有生产引用、上游 0 命中 | §4.4、§4.5.3、§12.5 |
+| 2 | 「23 个 DTO 独有方法」只数了 3 个文件 | 本地 dto **394 函数** vs relaykit **273**；`channel_settings.go` 单文件本地 61/relaykit 29（`^func` 口径），**41 个本地独有方法**（主代理复现后把代理给的 32 修正为 41），全部有生产引用、上游 0 命中 | §4.4、§4.5.3、§12.5 |
 | 3 | `dto` 与宿主包耦合未做 import 图 | 本地 **21 个 dto 文件 import `common`**、3 个 `constant`、1 个 `logger`；relaykit/dto 只 import `types`(17) 与 `kitutil`(12) | §12.0 的依赖方向 |
 | 4 | `openaicompat` 无法按能力切分 | `convertResponsesToolsToChat`（`responses_to_chat_request.go:455`）签名同时收 `namespaceSelection`+`toolState`，体内 namespace 16/toolState 5/ToolSearch 5/Custom 4/门控 3 交织；上游 shim 无 state 变体；消费者还有第 3 个 `relay/responses_via_chat.go:104` | §12.15、§4.5.1 |
-| 5 | 流式 thinking 门控是有状态的 | 本地 `convert.go:756` 算策略、`:801` 在分配索引前 `continue`；relaykit `to_claude_messages_resp.go:342-365` 无条件 `state.Index++`。`state` 私有，后置删块产生**索引空洞** | §12.4「后置过滤」、§6.1 结论 |
-| 6 | AWS 路径套用策略会引入回归 | `aws/converse.go:746` **无条件**转 thinking，全文件 0 处调用 `shouldExposeReasoningAsClaudeThinking`（该策略只对 DeepSeek 为真） | §12.4 的落点描述 |
+| 5 | 流式 thinking 门控是有状态的 | 本地 `convert.go:749` 算策略、`:794` 在分配索引前 `return`（闭包提前返回）；relaykit `to_claude_messages_resp.go:151` 在 `stopOpenBlocksAndAdvance` 内无条件 `state.Index++`，`:342` 起无条件建块。`state` 私有，后置删块产生**索引空洞** | §12.4「后置过滤」、§6.1 结论 |
+| 5b | 12.4 补丁落点的可达性被高估（第六轮补记） | `oai_chat/to_claude_messages_resp.go:111`/`:449` **已接收 `info convmeta.Meta`**，且 `Meta` 已含 `ConvOptions()`；本地只有 Chat→Claude 两条路径，无 Responses→Claude。故门控补丁**零透传成本**，原文按「需向内部转换器透传」描述是错的 |
+| 6 | AWS 路径套用策略会引入回归 | `aws/converse.go:748` **无条件**转 thinking，全文件 0 处调用 `shouldExposeReasoningAsClaudeThinking`（该策略只对 DeepSeek 为真） | §12.4 的落点描述 |
 
 **另发现（主代理自查，非代理提出）**：主代理自己把 `IsValidToolName` / `ToolNameMaxLength` 当作「dto 独有方法」列入撤回清单，实为**包级符号**，不该出现在方法集比对里。
 
@@ -246,7 +247,7 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 
 ### 确认通过（代理逐条复现，与文档一致）
 
-方法集差集（13+9+1=23 / HEAD 20 / relaykit 独有 5）、12.5 分类（A18/B2/待实测3）、4.3 错误码（37 vs 33，本地独有 4、上游独有 0，引用数 14/3/3/2 与 8/5）、12.10（`relay_info.go:311` 确为 `info.convOptions = nil`）、12.16（golden 24 个全 .json）、12.8（空模式语义双向确认）、12.9 日期与祖先判断、4.5.2 未跟踪文件（3 个 `??`，3 个调用点 HEAD 上均不存在）、4.5.1 全部零命中（`namespace` 四作用域各 0、`tool_search`/`EnableCustomToolBridge`/`ProtocolConversionRule`/`synthetic.compact`/`encrypted_content`/`NormalizeToolName`/`context_compaction` 全仓 0）、第 6/8/9 节全部行号、12.4.1（`convert.go:756`/`:801` 与 relaykit `:348/366`）、12.4.3（AWS 无条件、策略即 `hasDeepSeekModelName`）、12.15.1（函数签名与符号分布）、第 2 节全部数字、12.0.1（281/39/327、394/273、61/29）。
+方法集差集（13+9+1=23 / HEAD 20 / relaykit 独有 5）、12.5 分类（A18/B2/待实测3）、4.3 错误码（37 vs 33，本地独有 4、上游独有 0，引用数 14/3/3/2 与 8/5）、12.10（`relay_info.go:311` 确为 `info.convOptions = nil`）、12.16（golden 24 个全 .json）、12.8（空模式语义双向确认）、12.9 日期与祖先判断、4.5.2 未跟踪文件（3 个 `??`，3 个调用点 HEAD 上均不存在）、4.5.1 全部零命中（`namespace` 四作用域各 0、`tool_search`/`EnableCustomToolBridge`/`ProtocolConversionRule`/`synthetic.compact`/`encrypted_content`/`NormalizeToolName`/`context_compaction` 全仓 0）、第 6/8/9 节全部行号、12.4.1（`convert.go:749`/`:794` 与 relaykit `:151`/`:342`）、12.4.3（AWS 无条件、策略即 `hasDeepSeekModelName`）、12.15.1（函数签名与符号分布）、第 2 节全部数字、12.0.1（281/39/327、394/273、61/29）。
 
 **循环依赖**：阶段 0→6 未见硬环。`relaykit/types/error.go` import `kitutil`，而 kitutil 不 import relaykit/types。
 
