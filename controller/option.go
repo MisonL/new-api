@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -113,6 +114,23 @@ type OptionUpdateRequest struct {
 	Value any    `json:"value"`
 }
 
+// optionValueEnabled reports whether a raw option value means "on".
+//
+// The prerequisite guards in UpdateOption run before model.UpdateOption
+// normalizes the value, so comparing the raw string against the literal "true"
+// let every other spelling strconv.ParseBool accepts slip past them: sending
+// "1" or "True" enabled e.g. GitHub login with no Client Id, because
+// normalization later turned it into the canonical "true" that the consumer
+// compares against. Decide with the same rule the consumer will apply.
+func optionValueEnabled(value any) bool {
+	raw, ok := value.(string)
+	if !ok {
+		return false
+	}
+	enabled, err := strconv.ParseBool(strings.TrimSpace(raw))
+	return err == nil && enabled
+}
+
 func UpdateOption(c *gin.Context) {
 	var option OptionUpdateRequest
 	err := common.DecodeJson(c.Request.Body, &option)
@@ -135,7 +153,7 @@ func UpdateOption(c *gin.Context) {
 	}
 	switch option.Key {
 	case "GitHubOAuthEnabled":
-		if option.Value == "true" && common.GitHubClientId == "" {
+		if optionValueEnabled(option.Value) && common.GitHubClientId == "" {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法启用 GitHub OAuth，请先填入 GitHub Client Id 以及 GitHub Client Secret！",
@@ -143,7 +161,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "discord.enabled":
-		if option.Value == "true" && system_setting.GetDiscordSettings().ClientId == "" {
+		if optionValueEnabled(option.Value) && system_setting.GetDiscordSettings().ClientId == "" {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法启用 Discord OAuth，请先填入 Discord Client Id 以及 Discord Client Secret！",
@@ -151,7 +169,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "oidc.enabled":
-		if option.Value == "true" && system_setting.GetOIDCSettings().ClientId == "" {
+		if optionValueEnabled(option.Value) && system_setting.GetOIDCSettings().ClientId == "" {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法启用 OIDC 登录，请先填入 OIDC Client Id 以及 OIDC Client Secret！",
@@ -159,7 +177,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "LinuxDOOAuthEnabled":
-		if option.Value == "true" && common.LinuxDOClientId == "" {
+		if optionValueEnabled(option.Value) && common.LinuxDOClientId == "" {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法启用 LinuxDO OAuth，请先填入 LinuxDO Client Id 以及 LinuxDO Client Secret！",
@@ -167,7 +185,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "EmailDomainRestrictionEnabled":
-		if option.Value == "true" && len(common.EmailDomainWhitelist) == 0 {
+		if optionValueEnabled(option.Value) && len(common.EmailDomainWhitelist) == 0 {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法启用邮箱域名限制，请先填入限制的邮箱域名！",
@@ -175,7 +193,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "WeChatAuthEnabled":
-		if option.Value == "true" && common.WeChatServerAddress == "" {
+		if optionValueEnabled(option.Value) && common.WeChatServerAddress == "" {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法启用微信登录，请先填入微信登录相关配置信息！",
@@ -183,7 +201,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "TurnstileCheckEnabled":
-		if option.Value == "true" && common.TurnstileSiteKey == "" {
+		if optionValueEnabled(option.Value) && common.TurnstileSiteKey == "" {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法启用 Turnstile 校验，请先填入 Turnstile 校验相关配置信息！",
@@ -192,7 +210,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "TelegramOAuthEnabled":
-		if option.Value == "true" && common.TelegramBotToken == "" {
+		if optionValueEnabled(option.Value) && common.TelegramBotToken == "" {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法启用 Telegram OAuth，请先填入 Telegram Bot Token！",

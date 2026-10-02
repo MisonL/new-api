@@ -304,4 +304,52 @@ func TestBooleanOptionKeyPredicateMatchesConsumers(t *testing.T) {
 	} {
 		require.False(t, isBooleanOptionKey(key), "%s must not be treated as a top-level switch", key)
 	}
+	// model_deployment.ionet.enabled is dotted but does NOT go through the
+	// layered config system: controller/deployment.go reads it straight out of
+	// OptionMap with a literal-true comparison, so it needs canonicalizing like
+	// any other switch.
+	require.True(t, isBooleanOptionKey("model_deployment.ionet.enabled"),
+		"the io.net switch is consumed literally and must be normalized")
+}
+
+// A dotted key is not automatically a layered-config key. model_deployment is
+// never registered with config.GlobalConfig, so handleConfigUpdate leaves the
+// value alone and controller/deployment.go compares it against the literal
+// "true". Before the predicate knew about it, every other accepted spelling was
+// stored verbatim and read back as off: the API reported success while the
+// switch stayed disabled.
+func TestUpdateOptionNormalizesDottedDeploymentSwitch(t *testing.T) {
+	previousOptionMap := common.OptionMap
+	common.OptionMap = map[string]string{}
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM options")
+		common.OptionMap = previousOptionMap
+	})
+
+	const key = "model_deployment.ionet.enabled"
+
+	// The consumer's rule, spelled out: controller/deployment.go decides with
+	// `OptionMap[key] == "true"`.
+	consumerEnabled := func() bool { return common.OptionMap[key] == "true" }
+
+	for raw, want := range map[string]bool{
+		"true": true, "True": true, "TRUE": true, "1": true, "t": true, " true ": true,
+		"false": false, "False": false, "0": false, " f ": false,
+	} {
+		require.NoError(t, UpdateOption(key, raw), "raw=%q", raw)
+
+		var option Option
+		require.NoError(t, DB.Where("key = ?", key).First(&option).Error)
+		canonical := "false"
+		if want {
+			canonical = "true"
+		}
+		require.Equal(t, canonical, option.Value, "raw=%q must be stored canonically", raw)
+		require.Equal(t, want, consumerEnabled(), "raw=%q must reach the consumer as %v", raw, want)
+	}
+
+	// A value strconv.ParseBool rejects must be refused, not silently stored.
+	for _, raw := range []string{"yes", "", "2", "enabled"} {
+		require.Error(t, UpdateOption(key, raw), "raw=%q", raw)
+	}
 }

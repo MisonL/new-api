@@ -303,6 +303,24 @@ func TestGLM51And52OfficialPricingRatios(t *testing.T) {
 	}
 }
 
+// glm-5.3-flashx is priced alongside the rest of the glm-5.3 family, so it
+// needs a cache entry too: GetCacheRatio falls back to 1.0 when the key is
+// absent, which would bill a cache hit at the full input price.
+func TestGLM53FlashxCacheRatioIsPriced(t *testing.T) {
+	resetPricingMapsForTest(t)
+	InitRatioSettings()
+
+	const name = "glm-5.3-flashx"
+
+	ratio, ok, _ := GetConfiguredModelRatio(name)
+	require.True(t, ok, "glm-5.3-flashx must have a model ratio")
+	require.InDelta(t, 0.37/2, ratio, 1e-9)
+
+	cacheRatio, hasCacheRatio := GetCacheRatio(name)
+	require.True(t, hasCacheRatio, "glm-5.3-flashx must have a cache ratio, not the 1.0 fallback")
+	require.InDelta(t, 0.075/0.37, cacheRatio, 1e-9)
+}
+
 func TestMiniMaxOfficialPricingVariants(t *testing.T) {
 	resetPricingMapsForTest(t)
 	InitRatioSettings()

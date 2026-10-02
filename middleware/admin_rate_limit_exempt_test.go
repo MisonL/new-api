@@ -408,12 +408,18 @@ func TestAdminExemptionFailsClosedWithoutSessionMiddleware(t *testing.T) {
 // limiterSourceMarkers identify a file as a rate-limiter source: a limiter
 // reaches one of these when it rejects a request. A middleware that references
 // none of them is not a limiter and needs no exemption decision.
+//
+// "429" is included because a limiter may reject without going through any of
+// the shared helpers, for instance with its own c.JSON(429, ...). The only
+// non-limiter file that carries the literal is utils.go, which exports no
+// middleware, so the marker adds no false positive.
 var limiterSourceMarkers = []string{
 	"StatusTooManyRequests",
 	"abortRateLimited",
 	"inMemoryRateLimiter",
 	"checkRedisRateLimit",
 	"redisRateLimiter",
+	"429",
 }
 
 // exportedLimiterFuncs returns the name of every exported function that returns

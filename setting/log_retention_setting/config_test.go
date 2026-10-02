@@ -28,19 +28,43 @@ func TestNormalizeValueTrimsAndCanonicalizes(t *testing.T) {
 		}
 	}
 
-	intCases := map[string]string{
-		"500":     "500",
-		" 500 ":   "500",
-		"\t12\n":  "12",
-		"0005000": "5000",
+	// Every integer key must be trimmed and canonicalized, not just the one the
+	// suite happened to name. A key that skipped normalization would accept
+	// " 12 " at the API, store it untrimmed, and leave the struct at its old
+	// value because strconv.Atoi rejects the surrounding spaces.
+	// The probe values stay inside every key's range (the tightest upper bound
+	// is run_interval_hours at 720; every lower bound is 0 or 1).
+	intCases := []struct{ raw, want string }{
+		{"500", "500"},
+		{" 500 ", "500"},
+		{"\t12\n", "12"},
+		{"0000500", "500"},
 	}
-	for raw, want := range intCases {
-		got, err := NormalizeValue("batch_size", raw)
-		if err != nil {
-			t.Fatalf("NormalizeValue(batch_size, %q) error: %v", raw, err)
-		}
-		if got != want {
-			t.Errorf("NormalizeValue(batch_size, %q) = %q, want %q", raw, got, want)
+	for _, key := range []string{
+		"run_interval_hours",
+		"batch_size",
+		"max_batches",
+		"consume_retention_days",
+		"error_retention_days",
+		"system_retention_days",
+		"manage_retention_days",
+		"topup_retention_days",
+		"refund_retention_days",
+		"unknown_retention_days",
+		"request_payload_retention_days",
+		"response_payload_retention_days",
+		"server_log_keep_files",
+		"server_log_keep_days",
+		"server_log_max_total_size_mb",
+	} {
+		for _, c := range intCases {
+			got, err := NormalizeValue(key, c.raw)
+			if err != nil {
+				t.Fatalf("NormalizeValue(%q, %q) error: %v", key, c.raw, err)
+			}
+			if got != c.want {
+				t.Errorf("NormalizeValue(%q, %q) = %q, want %q", key, c.raw, got, c.want)
+			}
 		}
 	}
 }

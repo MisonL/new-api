@@ -634,8 +634,16 @@ func normalizeOptionValueForInMemoryConfig(key string, value string) (string, er
 // predicate mirrors the branch there: any "Enabled" suffix, plus the few
 // explicitly named switches that do not carry it.
 func isBooleanOptionKey(key string) bool {
-	// Dotted keys belong to the layered config system, which reflects them into
-	// their own structs and does not use the literal-true comparison.
+	// model_deployment.ionet.enabled is the one dotted key that is consumed
+	// with a literal-true comparison instead of through the layered config
+	// system: controller/deployment.go reads it straight out of OptionMap.
+	// It therefore needs the same canonicalization as the top-level switches.
+	if key == "model_deployment.ionet.enabled" {
+		return true
+	}
+	// Every other dotted key belongs to the layered config system, which
+	// reflects it into its own struct and does not use the literal-true
+	// comparison.
 	if strings.Contains(key, ".") {
 		return false
 	}

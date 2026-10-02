@@ -71,7 +71,12 @@ services:
     networks:
       - dev-isolated-network
     healthcheck:
-      test: ["CMD", "sh", "-c", "wget -q -T 10 -O /dev/null http://127.0.0.1:$${DEV_NEW_API_PORT:-3000}/api/healthz"]
+      # The container listens on 3000: the ports mapping above publishes
+      # ${DEV_NEW_API_PORT} on the host but always targets 3000 inside, and this
+      # service forwards no PORT variable, so the app keeps main.go's 3000
+      # default. Probe that port directly rather than a host-side variable that
+      # does not exist in this namespace.
+      test: ["CMD", "sh", "-c", "wget -q -T 10 -O /dev/null http://127.0.0.1:3000/api/healthz"]
       interval: 30s
       timeout: 15s
       retries: 5

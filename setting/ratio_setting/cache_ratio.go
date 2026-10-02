@@ -193,6 +193,7 @@ var defaultCacheRatio = map[string]float64{
 	"stepaudio-2.5-realtime":                   2.0 / 10.0,
 	"glm-5.3":                                  0.26 / 1.4,
 	"glm-5.3-flash":                            0.03 / 0.15,
+	"glm-5.3-flashx":                           0.075 / 0.37,
 	"grok-3-mini":                              0.075 / 0.30,
 	"grok-3-mini-beta":                         0.075 / 0.30,
 	"grok-3-mini-latest":                       0.075 / 0.30,
