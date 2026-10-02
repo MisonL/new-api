@@ -122,7 +122,8 @@ worker 原始结论（原文照录）：
 - 两套前端提交格式不同（字符串 vs 布尔）但后端都兼容，经 Go 探针实测。
 - 既有的无关缺陷：数字字段类型错配，加载完成前触碰数字框即发 PUT。与本次改动无关，
   未在本轮修复。
-- 遗留项：`web/default` 的 fr/ja/ru/vi 翻译仍是英文原文。
+- 遗留项：`web/default` 的 fr/ja/ru/vi 翻译曾是英文原文，已由 `d871b6d73` 与 `10c6316d2`
+  补齐（见第 3 节第 3 条）。
 
 ---
 
@@ -146,15 +147,18 @@ worker 原始结论（原文照录）：
    **已修复**（同一次提交）：`ValidateValue` 先 trim 再校验、而入库用的是未 trim 的值，
    `strconv.ParseBool(" true ")` 失败后静默 `continue`。新增 `NormalizeValue` 返回规范形式并
    接入选项管线。真实 HTTP 实测：`PUT /api/option/` 写 `" true "` 落库为 `true`。
-3. ~~`web/default` 的 fr/ja/ru/vi 翻译仍为英文原文。~~ **部分修复**（提交 `d871b6d73`）：
-   补译 94 条字符串（fr 35、ja 3、ru 3、vi 53），集中在渠道路由 Scope 工作台与管理员
-   限流豁免开关。当时的顾虑（这三个文件正被另一会话大规模改写）经核查成立，因此只用
-   index-only 方式暂存 HEAD 已存在的键，工作区未改动，未与另一会话的在途键冲突。
-   **残留（实测，非推测）**：以该提交自身的代码树运行 `i18n:sync`，四个 locale 均仍报
-   未翻译——fr 5、ja 36、ru 35、vi 5；其中 ja 与 ru 另各缺 9 个键（en.json 有、这两个
-   locale 没有）。这些键属于同批新增的渠道路由 Scope 工作台，译文已存在于工作区，但
-   属于另一会话的在途改动，本提交未纳入。**因此 HEAD 上这四个 locale 尚未翻译完整，
-   该提交的信息初稿曾误称 "i18n:sync reports zero untranslated entries"，已更正。**
+3. ~~`web/default` 的 fr/ja/ru/vi 翻译仍为英文原文。~~ **已修复**（提交 `d871b6d73` 起、
+   `10c6316d2` 补齐）：`d871b6d73` 先补译 94 条字符串（fr 35、ja 3、ru 3、vi 53），集中在
+   渠道路由 Scope 工作台与管理员限流豁免开关；当时的顾虑（这三个文件正被另一会话大规模
+   改写）经核查成立，因此只用 index-only 方式暂存 HEAD 已存在的键，工作区未改动，未与
+   另一会话的在途键冲突。以该提交自身的代码树运行 `i18n:sync` 实测仍有残留——fr 5、
+   ja 36、ru 35、vi 5，其中 ja 与 ru 另各缺 9 个键（en.json 有、这两个 locale 没有）。
+   `10c6316d2` 随后补译这 81 条（fr 5、ja 36、ru 35、vi 5）并补上 ja/ru 各缺的 9 个键，
+   另修正 vi 一处 `{{LinuxDO}}` 占位符（en.json 未定义该变量、消费端不插值，会在界面
+   显示字面花括号）。验证：以 `10c6316d2` 自身的代码树在独立 worktree 重跑 `i18n:sync`，
+   工作区零改动、六语种 missing 与 untranslated 均为 0，`*.untranslated.json` 为空态
+   （四个报告文件已删除）。注：`d871b6d73` 的提交信息初稿曾误称 "i18n:sync reports zero
+   untranslated entries"，当时已更正；该表述直到 `10c6316d2` 才真正成立。
 4. ~~既有的数字字段类型错配（前端，与本次改动无关）。~~ **未复现，撤回**：审计描述的是
    「加载完成前触碰数字框即发 PUT」，但 `web/default` 与 `web/classic` 两套前端的数字输入
    都没有 `onChange` 直接触发保存、也没有值变化时保存的 effect，提交都走显式 Save 按钮。
