@@ -164,7 +164,7 @@ const (
 | `claude.go` | 31 | 30 | **1** | 0 |
 | 三个文件合计 | | | **23**（HEAD 20） | 5 |
 
-**⚠ 全包口径远大于此**：本地 `dto/` 共 **394 个函数**，relaykit/dto **273 个**。单 `dto/channel_settings.go` 本地就有 **61 个函数**（`^func` 口径）、relaykit 同名文件 29 个；按 `func (recv) Name` 提取后求差集，其中 **41 个本地独有方法**（`ResponsesCompactModeOrDefault`、`ResolveResponsesChannelCapability`、`MarkResponsesCompactAutoFallback` 等），逐个 `git grep -cw` 在上游全仓命中数为 0。
+**⚠ 全包口径远大于此**：本地 `dto/` 共 **394 个函数**，relaykit/dto **273 个**。单 `dto/channel_settings.go` 本地就有 **61 个函数**（`^func` 口径）、relaykit 同名文件 29 个；按 `func (recv) Name` 提取后求差集，其中 **42 个本地独有方法**（`ResponsesCompactModeOrDefault`、`ResolveResponsesChannelCapability`、`MarkResponsesCompactAutoFallback` 等），逐个按 `接收者.方法名` 口径在上游全仓命中数为 0。
 
 本节之所以只列 3 个文件，是因为它们承载**协议转换**语义；其余文件的方法归属见 12.0.2——**它们同样必须处置**，不能因「宿主业务域」而留在原地（`dto` 是一个包，类型迁走则方法无家可归）。完整的方法级差集仍是阶段 2 的开工前置。
 
@@ -274,7 +274,7 @@ const (
 
 | 同名文件 | 本地独有字段/方法 | 说明 |
 |---|---|---|
-| `dto/channel_settings.go` | **20 个本地独有字段**（基线口径，工作区 21；`HeaderProfileStrategy`、`ResponsesCompactMode*`、`UserAgentStrategy` 等）+ **41 个本地独有方法** | 上游同名文件只有 4 个协议相关字段；41 个方法上游全仓 0 命中 |
+| `dto/channel_settings.go` | **20 个本地独有字段**（基线口径，工作区 21；`HeaderProfileStrategy`、`ResponsesCompactMode*`、`UserAgentStrategy` 等）+ **42 个本地独有方法** | 上游同名文件 `ChannelOtherSettings` 21 个字段中只有 `ToolLossPolicy`、`AllowIncludeObfuscation` 等少数与协议转换相关，其余为宿主管辖的渠道开关；42 个方法按 `接收者.方法名` 口径上游全仓 0 命中 |
 | `dto/user_settings.go` | 3 个字段（`HeaderProfiles`、`RecordRequestContentLog`、`RecordResponseContentLog`） | 上游无 |
 | `dto/openai_request.go` | `Reasoning.Extra`、`StreamOptions.Extra`、`Message.ThinkingContent`、`OpenAIResponsesRequest.Extra` | 补丁 2 的 presence 机制 + SenseNova 支持 |
 | `dto/openai_response.go` | `ResponsesOutput.{Namespace,EncryptedContent,Execution,Input}`、`ChatCompletionsStreamResponse.Error`、`IncompleteDetails.Reasoning`、`ResponsesStreamResponse.{CallId,Error}`、`ToolCallResponse.Custom`、`ResponsesOutputContent.Refusal` 等 | 命名空间工具、加密内容、流式错误 |
@@ -507,7 +507,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 | 33 个同名类型字段集不同（双向） | `go/ast` 解析 22 个同名文件的 136 个同名导出类型的字段名集合求差集；基线/HEAD 均 33（工作区 34）。本地独有 `Reasoning.Extra`、`StreamOptions.Extra`、`Message.ThinkingContent`、`ResponsesOutput.Namespace`、`ChannelOtherSettings` 20 字段等；relaykit 独有 `GeneralOpenAIRequest` 20 字段、`ResponsesOutput` 15 字段等 |
 | Go 别名**继承方法集**但**不能新增方法** | 最小程序实测：`type A = base.T` 后 `a.Method()` 正常；跨包给别名加方法报 `cannot define new methods on non-local type Thing` |
 | 本地 dto 394 个函数 vs relaykit 273 | `git grep -hE '^func ' HEAD -- 'dto/*.go' \| wc -l` / 同法查 `relaykit/dto/` |
-| `channel_settings.go` 本地 61 函数 / relaykit 29 | 单文件 `grep -cE '^func '` 得 61/29（含包级函数）；41 个本地独有**方法**由 `func (recv) Name` 提取后求差集，上游全仓 0 命中 |
+| `channel_settings.go` 本地 61 函数 / relaykit 29 | 单文件 `grep -cE '^func '` 得 61/29（含包级函数）；42 个本地独有**方法**由 `func (recv) Name` 提取后求差集，按 `接收者.方法名` 口径上游全仓 0 命中（纯名字口径下 `IsNative` 会误命中上游 `AdvancedCustomRoute.IsNative`，须带接收者） |
 | 本地 12 个**非测试** dto 文件 import 宿主 `common` | 逐文件 `git show HEAD:<f> \| grep`：非测试 `common` 12、`constant` 2、`logger` 1（含测试 21/3/1）；relaykit/dto 只 import `types`(17) 与 `kitutil`(12) |
 | `convertResponsesToolsToChat` 交织 5 种工具 | `responses_to_chat_request.go:455` 签名含 `namespaceSelection` + `toolState`；函数体内 namespace 16 / toolState 5 / ToolSearch 5 / Custom 4 / EnableCustomToolBridge 3 |
 | 本地 thinking 门控在索引分配之前 | `service/convert.go:749` 算 `allowClaudeThinking`，`:794` `if !allowClaudeThinking { return }`；relaykit `internal/oai_chat/to_claude_messages_resp.go:137`（`state.Index++` 在 `:151`）无条件推进索引，`:342` 起无条件建块 |
@@ -525,7 +525,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 | 136 个同名类型中 33 个字段不兼容 | `go/ast` 解析 `type X struct` 字段名集合求差集；基线 `dbfbc096f` 与 `HEAD` 均为 33，工作区 34（`ChatCompletionsStreamResponse` 被其他会话改动） |
 | `ChannelOtherSettings` 本地独有 20 个字段 | 同上，AST 差集；基线/HEAD 均 20，工作区 21 |
 | `GeneralOpenAIRequest` relaykit 独有 20 个字段 | 同上，AST 差集；三口径均 20 |
-| `channel_settings.go` 41 个本地独有方法上游全仓 0 命中 | 逐个 `git grep -cw <m> upstream/main -- '*.go'`，41/41 命中数为 0 |
+| `channel_settings.go` 42 个本地独有方法上游全仓 0 命中 | 逐个 `git grep -n '<recv>) <m>' upstream/main -- '*.go'`（带接收者），42/42 命中数为 0；不带接收者时 `IsNative` 误命中 3 处 |
 | 24 个 golden 快照 | `git ls-tree -r upstream/main relaykit/ | grep -i golden | grep -v '\.go$' | wc -l` = 24（第 25 个是 `golden_test.go` 本身） |
 | relaykit `state.Index++` 的确切位置 | `internal/oai_chat/to_claude_messages_resp.go:137` 定义 `stopOpenBlocksAndAdvance`，`:151` 在 `default:` 分支执行 `state.Index++` |
 | 上游 `info.Request` 赋值位置 | 上游 `relay/common/relay_info.go:562` 定义 `genBaseRelayInfo`、`:595` 赋值；本地基线 `:670` 定义、`:701` 赋值 |
@@ -572,7 +572,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 - 「`IsValidToolName` / `ToolNameMaxLength` 是 dto 独有方法」：它们是**包级符号**（`const` / `func`），不是方法，不该出现在方法集比对里
 - 「迁入 `relaykit/dto`，调用点不变」：上游对 dto **零别名转发**，是直接改 import（281 文件）。本地对应 327 个文件
 - 「本地 DTO 有 23 个独有方法」（作为全包结论）：23 只是 3 个文件的数。全包本地 394 函数 vs relaykit 273
-- 「`dto/channel_settings.go` 属宿主业务域、不应被波及」：它是 dto 文件，类型迁走则 41 个本地独有方法无家可归
+- 「`dto/channel_settings.go` 属宿主业务域、不应被波及」：它是 dto 文件，类型迁走则 42 个本地独有方法无家可归
 - 「`service/openaicompat/` 消费者仅 2 个文件」：漏了 `relay/responses_via_chat.go:104`（调 `…WithState`）
 - 「流式下逐 chunk 剔除 thinking 是无状态操作」：relaykit 的 `state.Index` 是私有流式状态，删块产生索引空洞
 - 「AWS Converse 用同一 helper」：该路径当前**无条件**暴露 thinking，套用 DeepSeek-only 策略会新抑制 Bedrock reasoning
@@ -613,7 +613,7 @@ git grep -l '"github.com/QuantumNous/new-api/dto"' HEAD -- '*.go' | wc -l       
 
 早期版本假设可按「协议层 / 宿主业务域」切分 dto 文件，把宿主业务域留在原地。**这在 Go 里不成立**：`dto` 是一个包，类型定义在哪就属于哪；同文件的方法无法跟随部分类型迁移。实测后果：
 
-- `dto/channel_settings.go` 被早期版本归为「宿主业务域、零协议类型 import、不应被波及」——但它是 dto 文件，类型必须迁走，其 **41 个本地独有方法**（`ResponsesCompactModeOrDefault`、`ResolveResponsesChannelCapability`、`MarkResponsesCompactAutoFallback` 等，上游全仓 0 命中）随之无家可归
+- `dto/channel_settings.go` 被早期版本归为「宿主业务域、零协议类型 import、不应被波及」——但它是 dto 文件，类型必须迁走，其 **42 个本地独有方法**（`ResponsesCompactModeOrDefault`、`ResolveResponsesChannelCapability`、`MarkResponsesCompactAutoFallback` 等，按 `接收者.方法名` 口径上游全仓 0 命中）随之无家可归
 - 全 `dto` 包本地 **394 个函数**、relaykit **273 个**（`^func` 口径，含包级函数）。4.4 的「23 个方法」只比对了 3 个文件，**严重低估**
 
 #### 12.0.3 依赖方向
@@ -809,7 +809,7 @@ RetainReasoningInClaudeResponse func(modelName string) bool   // nil = 不保留
 |---|---|
 | `toolconv/` 7 个文件逐字节比对 | 5 个 SAME；`decode.go`、`encode.go` 有差异，方向是 **main 更新**——且是**功能新增**，不是清理：main 的 `decode.go` 多了 `decodeOpenAIChatPseudoHostedTool`（把 Gemini 的 `googleSearch`/`codeExecution`/`urlContext` 伪工具名识别为 hosted 工具），`encode.go` 的 `KindCodeExecution`/`KindURLContext` 分支多了 `definition.NativeType` 判断。分支上**没有**这些。同两文件另含 `function := function` 遮蔽删除与 `interface{}` → `any`，那部分是清理 |
 | `reasoning/claude.go` 导出符号集 | 分支独有 **0** 个，main 独有 **0** 个——导出符号集完全相同 |
-| `dto/billing_usage.go`、`dto/usage_merge.go` | 分支独有**导出**符号 0 个；diff 方向为 main 净增（`usage_merge.go` `52+/7−`、`billing_usage.go` `25+/38−`；后者的净变化来自函数体改写，非删能力） |
+| `dto/billing_usage.go`、`dto/usage_merge.go` | `billing_usage.go`：函数集（AST `recv.name` 口径）**双向完全相同**，diff `25+/38−` 是纯函数体改写（六处内联条件收敛为 `mergeInputTokenDetails`、手工夹紧改为 `max()`、`canonicalClaudeUsage` 由「零/非零」判定改为按非 nil 判定、`cloneOpenAIUsage` 改用 `.Clone()`），导出符号 18/18 一致。`usage_merge.go`：`52+/7−` 为净增；分支独有导出符号 0 个，**main 独有导出符号 1 个**（`MergeClaudeUsageNonZero`，即分支上未导出的 `mergeClaudeUsageNonZero` 导出后供 `relayconvert/internal/oai_chat` 跨包调用）；另 main 多一个**非导出的提取函数** `normalizeGeminiModality`（把分支里内联的 `strings.ToUpper(strings.TrimSpace(...))` 提成函数，非新逻辑）。两文件 main 侧**无能力删除** |
 | `relaykit/` 整体 | 分支相对 main 是 `68 files changed, 3910 insertions(+), 746 deletions(-)`——**main 净增** |
 | `ClaudeToChatStreamState` / `ChatToGeminiStreamState` | 类型定义在 main 与分支同名同语义（`to_oai_chat_resp.go:126`、`to_gemini_chat_resp.go:13`）；文件命中数 main 与 `feat/relaykit-perf` 各为 6/6，`feat/relaykit-tools` 为 4/2（该分支较旧） |
 | `toolconv` 的 `Kind*` 常量 | 两边均 **10 个** |

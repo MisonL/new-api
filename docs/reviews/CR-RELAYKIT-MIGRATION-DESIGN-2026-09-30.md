@@ -22,7 +22,7 @@
 
 ## 审计方式
 
-五轮对抗性审查，每轮更换角度而非重复（第五轮的事实核验部分在架构攻击之后才完成，其 6 处修正见下）；其后又对设计文档做过 4 次独立的事实复核（见「设计文档提交记录」的末 4 行）。
+五轮对抗性审查，每轮更换角度而非重复（第五轮的事实核验部分在架构攻击之后才完成，其 6 处修正见下）；其后又对设计文档做过 5 次独立的事实复核（见「设计文档提交记录」的末 5 行，其中第六轮转向此前未查区块）。
 
 | 轮次 | 子代理数 | 角度 |
 | --- | --- | --- |
@@ -32,7 +32,7 @@
 | 4 | 2 | 阶段可执行性；本地独有能力完整性 |
 | 5 | 2 | 架构攻击（决策可执行性、依赖顺序、验证策略缺口）6 条全部复现成立；事实核验（逐条复现第 12 节断言）大部分通过、6 处需修正 |
 
-主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误。
+主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误，第 6 轮再修正 3 处（含 1 处主代理自己引入的）。
 
 ## 核心结论
 
@@ -226,7 +226,7 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 | # | 攻击 | 复现证据 | 推翻的决策 |
 | --- | --- | --- | --- |
 | 1 | `dto` 迁移规模被系统性低估 | 上游 **281** 个文件 import `relaykit/dto`（宿主 dto 327→39）；本地对应 **327** 个。第 6.2 节用整节撤回 `types` 的 210 import 点，对 dto 只字未提 | §12.0「调用点不变」 |
-| 2 | 「23 个 DTO 独有方法」只数了 3 个文件 | 本地 dto **394 函数** vs relaykit **273**；`channel_settings.go` 单文件本地 61/relaykit 29（`^func` 口径），**41 个本地独有方法**（主代理复现后把代理给的 32 修正为 41），上游 0 命中。引用范围：33 个跨包生产、6 个仅 dto 包内、2 个仅测试 | §4.4、§4.5.3、§12.5 |
+| 2 | 「23 个 DTO 独有方法」只数了 3 个文件 | 本地 dto **394 函数** vs relaykit **273**；`channel_settings.go` 单文件本地 61/relaykit 29（`^func` 口径），**42 个本地独有方法**（主代理复现后把代理给的 32 修正为 41，第六轮再修正为 42；早期 41 漏算 1 个，见下）。引用范围：33 个跨包生产、6 个仅 dto 包内、2 个仅测试 | §4.4、§4.5.3、§12.5 |
 | 3 | `dto` 与宿主包耦合未做 import 图 | 本地 **12 个非测试 dto 文件 import `common`**、2 个 `constant`、1 个 `logger`（含测试口径 21/3/1）；relaykit/dto 只 import `types`(17) 与 `kitutil`(12) | §12.0 的依赖方向 |
 | 4 | `openaicompat` 无法按能力切分 | `convertResponsesToolsToChat`（`responses_to_chat_request.go:455`）签名同时收 `namespaceSelection`+`toolState`，体内 namespace 16/toolState 5/ToolSearch 5/Custom 4/门控 3 交织；上游 shim 无 state 变体；消费者还有第 3 个 `relay/responses_via_chat.go:104` | §12.15、§4.5.1 |
 | 5 | 流式 thinking 门控是有状态的 | 本地 `convert.go:749` 算策略、`:794` 在分配索引前 `return`（闭包提前返回）；relaykit `to_claude_messages_resp.go:151` 在 `stopOpenBlocksAndAdvance` 内无条件 `state.Index++`，`:342` 起无条件建块。`state` 私有，后置删块产生**索引空洞** | §12.4「后置过滤」、§6.1 结论 |
@@ -270,6 +270,32 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 | --- | --- |
 | 26 | 命名空间字段的生产引用精确计数 |
 
+## 第六轮复核：此前未查区块（2026-10-02）
+
+前五轮集中在第 3、12 节与第 4 节盘点。本轮换角度，系统核此前未被任何一轮覆盖的区块：§4.1、§4.2、§4.3、§4.5.2、§5、§6、§7、§9、§11、§12.7–§12.17。**结论：绝大多数断言复现一致，另有 3 处需修正**，其中 1 处是主代理在第五轮自己引入的。
+
+### 复现一致（本轮实测）
+
+- **§4.2 的 12 个 `service/convert.go` 行号**（`:526`、`:749`、`:1049`、`:365`、`:425`、`:475`、`:485`、`:489`、`:554`、`:597`、`:629`、`:103`）在基线 `HEAD` 上逐行命中。注意**工作区版本已被其他会话改动，行号全部漂移**——核验必须走 `git show HEAD:service/convert.go`
+- **§4.3 错误码**：AST 提取本地 37 / 上游 33，本地独有 4（`UpstreamTransportInterrupted`、`ChannelConcurrencyExceeded`、`UpstreamRequestTooLarge`、`ChannelConcurrencyUnavailable`），上游独有 0；引用数 14/3/3/2 与 8/5 均复现（口径含定义文件 `types/error.go` 自身）
+- **§4.5.2**：`responses_input_token_meta.go` 462 行、27 个方法、导出 0 个；`responses_tools.go` 111 行，`EffectiveTools` 有 9 个生产引用文件，扣除 `dto/` 自身（§4.4 声明的口径）后为 8
+- **§5 / §6.1**：`relay/claude_handler.go:34` 是 `common.DeepCopy`，后缀适配块 `:55-104`，`:58`/`:79`/`:91` 三处 `request.Thinking`；文件内 `info.Request = ` 计数为 0，全仓唯一非测试反例是 `controller/channel-test.go:957`；`genBaseRelayInfo` 本地 `:670` 定义/`:701` 赋值、上游 `:562`/`:595`；`oai_responses` 两个响应转换器确实无 `Meta` 参数，`oai_chat` 的 `:111`/`:449` 确实接收 `convmeta.Meta`
+- **§7 / §12.15**：`convertResponsesToolsToChat` 函数体 115 行、循环 93 行，符号计数 `namespace` 16 / `toolState` 5 / `ToolSearch` 5 / `Custom` 4 / `EnableCustomToolBridge` 3；上游 `ResponsesRequestToChatCompletionsRequest` 签名无 namespace/toolState；第 3 个消费者 `relay/responses_via_chat.go:104` 与 4 处 `toolState.Resolve` 均存在
+- **§9.1 / §9.2**：两表分别为 6 条与 7 条；§9.2 的 6 个 `service/convert.go` 行号（`:355`、`:252`、`:282`、`:234`、`:246`、`:287`）逐行命中；上游 `internal/claude_messages/to_oai_chat_req.go:189` 的 `case "image"` 在 `:190` 直接解引用 `mediaMsg.Source`（nil panic），而 `to_oai_responses_req.go:315` 的 `claudeSourceURL` 有 nil 守卫——与文档一致
+- **§12.7–§12.14、§12.16、§12.17**：`matchAnyRegex`（本地 `service/openaicompat/regex.go:10`）与 `matchAnyModelPattern`（上游 `service/openai_chat_responses_mode.go:15`）并存；上游 `relay_info.go:311` 的 `info.convOptions = nil` 及其原文注释；本地 `stopReasonOpenAI2ClaudeStrict`（`service/convert.go:1125`）；`case "thinking"` 只在「文本空且签名非空」时报错；`setting/model_setting/global.go:31` 的 `UnmarshalJSON` 存在性判定；上游 24 个 golden 快照（4/8/12 分目录、无 error/reject 场景）；`ImageGenerationCallCounter.Observe` 的四别名去重；本地 `HasImageGenerationCall` 的 4 个调用点；§12.16 的「12 处」= 9.1 的 6 条 + 9.2 的 6 条（9.2 第 3 行上游有守卫，不计）
+- **§11 事实表**：上游 `service/convert.go` 27 行、本地 2229 行；`openai_chat_responses_compat.go` 30 行 6 个导出函数（第 6 个确为 `ResponsesFinishReasonFromStatus`）；本地 10 个非测试 dto 文件 import gin；makefile 无 `test` 目标；上游 `relay/responses_request.go` 87 行；`convmeta.Meta` 15 个方法（含 `ConvOptions()`）；`relaykit/types` 宿主 import **172 文件**（不含 `relaykit/` 自身的 49 个；含则为 221）；relaykit 下某包 262；上游 relaykit 34 个测试文件 / 8430 行 / 2 处 TODO
+- **§12.0.x**：281 / 39 / 327（本地基线；工作区 340）；394 / 273（`^func`）；61 / 29；12 / 2 / 1（非测试）与 21 / 3 / 1（含测试）；`ChannelOtherSettings` 本地独有字段基线 20 / 工作区 21
+
+### 需修正（本轮，3 处）
+
+| # | 问题 | 实测 | 处置 |
+| --- | --- | --- | --- |
+| 1 | `channel_settings.go` 本地独有方法写 **41**（§4.4、§4.5.3、§12.0.2、§11 两行、§12.17 汇总，共 6 处） | AST 按 `接收者.方法名` 差集为 **42**（`A=43 B=15`，双向均含未导出方法）。41 是第四轮从代理的 32 修正时的漏算，此后各轮均照抄 | 6 处全部改为 42 |
+| 2 | 「42 个方法上游全仓 0 命中」的**计数方法**不成立 | 纯名字口径 `git grep -cw IsNative` 在上游有 3 处（`AdvancedCustomRoute.IsNative`、`relay/responses_websocket.go` 等），属**同名异接收者串味**。带接收者口径下 42/42 确为 0 | 三处改为「按 `接收者.方法名` 口径」并注明纯名字口径的误命中 |
+| 3 | §12.9 `billing_usage.go` 行写「diff 方向为 main 净增」 | 该文件 numstat 是 `25+/38−`，**净减 13 行**；同行的 `usage_merge.go` `52+/7−` 才是净增。且原表述「分支独有导出符号 0、main 独有 0」对 `usage_merge.go` 不成立——main 独有导出符号 `MergeClaudeUsageNonZero` | 拆开两文件分别表述；`billing_usage.go` 改为「纯函数体改写，函数集双向完全相同，导出符号 18/18」；`usage_merge.go` 改为「main 独有导出符号 1 个（`MergeClaudeUsageNonZero`，即分支未导出实现的导出化）」
+
+**方法学教训（第六轮）**：本轮 3 处错误**没有一处是数字本身抄错**——第 1 处是**差集漏算 1 个**（两侧都含未导出方法，机械对比不会漏，漏的是人工转录），第 2 处是**计数方法未随断言一起声明**（「全仓 0 命中」在名字口径下为假、接收者口径下为真，文档只写了结论没写口径），第 3 处是**同一单元格里的两个对象被合并描述**（两个文件的 diff 方向相反，却共用一句「main 净增」）。这与前五轮的教训同源：**每个数字都要在其对象上、以其口径独立复现**，且**一个单元格只放一个可证伪的断言**。
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**，未运行 Go 编译或测试。所有"编译失败"结论均为符号存在性推导，未经 `go build` 复现
@@ -297,5 +323,6 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 | `39a0c970c` | 独立复核：5 个计数与 1 个口径标签 |
 | `4181c5b62` | 独立复核：上游 shim 规模与 5 个过期数字 |
 | `eec2dd4b1` | 独立复核：修正上一轮自己引入的一处能力断言 |
+| `c4d21ce49` | 独立复核：同步审计记录、修正分支比对取证（`relaykit/` 68 文件 `3910+/746−`、toolconv 差异为功能新增） |
 
 文档当前 948 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
