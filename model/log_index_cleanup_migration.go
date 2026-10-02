@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -51,6 +52,34 @@ type logIndexCleanupExecutor interface {
 	DropIndex(dst interface{}, name string) error
 }
 
+// dropIndexConcurrently drops an index off PostgreSQL's logs table without
+// taking an ACCESS EXCLUSIVE lock for the duration of the drop.
+//
+// A plain DROP INDEX holds ACCESS EXCLUSIVE on the table while it unlinks the
+// index: every concurrent read and insert on logs waits, and on a multi-GB
+// table with many indexes to remove that is a long outage. PostgreSQL's
+// CONCURRENTLY form does the work in two shorter lock acquisitions instead.
+//
+// CONCURRENTLY cannot run inside a transaction block and cannot be prepared as
+// a statement, so it must go through Exec as literal SQL rather than through
+// the migrator (which emits a plain DROP INDEX) or PrepareStmt. The caller
+// verifies PostgreSQL first, and every other dialect keeps the plain path.
+func dropLogIndexConcurrently(db *gorm.DB, name string) error {
+	return db.Exec("DROP INDEX CONCURRENTLY IF EXISTS " + quoteIdentifier(name)).Error
+}
+
+// quoteIdentifier double-quotes a PostgreSQL identifier and escapes embedded
+// quotes so a name can never terminate the identifier and inject SQL.
+func quoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// isPostgreSQL reports whether db is backed by PostgreSQL, where the
+// concurrent drop is both available and necessary.
+func isPostgreSQL(db *gorm.DB) bool {
+	return db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres"
+}
+
 type logIndexCleanupMarker interface {
 	OptionExists(key string) (bool, error)
 	MarkOptionDone(key string) error
@@ -69,6 +98,9 @@ func (e gormLogIndexCleanupExecutor) HasIndex(dst interface{}, name string) bool
 }
 
 func (e gormLogIndexCleanupExecutor) DropIndex(dst interface{}, name string) error {
+	if isPostgreSQL(e.db) {
+		return dropLogIndexConcurrently(e.db, name)
+	}
 	return e.db.Migrator().DropIndex(dst, name)
 }
 
