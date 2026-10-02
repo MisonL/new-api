@@ -18,6 +18,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	gormlogger "gorm.io/gorm/logger"
 )
 
@@ -68,6 +69,25 @@ func initCol() {
 var DB *gorm.DB
 
 var LOG_DB *gorm.DB
+
+// forUpdate takes a row lock on the rows the following query selects.
+//
+// The previous spelling, Set("gorm:query_option", "FOR UPDATE"), is a GORM v1
+// statement setting. GORM v2 has no reader for that key, so it emitted plain
+// SELECTs and every "locked" read ran without a lock -- concurrent payment
+// callbacks could each read the same pending order and each credit it. Use this
+// helper instead of hand-writing the clause so the SQLite special case cannot
+// be forgotten.
+//
+// SQLite has no row-level locking and its driver rejects the clause outright,
+// so the transaction's own write lock is the only serialisation there; the
+// surrounding transaction still makes the read-modify-write atomic.
+func forUpdate(tx *gorm.DB) *gorm.DB {
+	if tx == nil || tx.Dialector == nil || tx.Dialector.Name() == "sqlite" {
+		return tx
+	}
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"})
+}
 
 func createRootAccountIfNeed() error {
 	var user User
