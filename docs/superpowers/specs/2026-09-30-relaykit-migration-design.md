@@ -151,7 +151,7 @@ const (
 
 需决定这 4 个常量迁入 `relaykit/types` 还是保留宿主。若 relaykit 转换器需据此产生错误，则必须迁入。
 
-另注依赖方向：本地 `types/error.go:11` import 宿主 `common`，上游 `relaykit/types/error.go:10` import `relaykit/relayconvert/kitutil`——即 `common` 的相关 helper 已被抽到 `kitutil`，`types` 迁移实际牵动 `common → kitutil` 替换。逐文件核验本地 `types/`：仅 `error.go` 与 `rw_map.go` 依赖宿主 `common`，其余 9 个文件无宿主依赖。
+另注依赖方向：本地 `types/error.go:11` import 宿主 `common`，上游 `relaykit/types/error.go:10` import `relaykit/relayconvert/kitutil`——即 `common` 的相关 helper 已被抽到 `kitutil`，`types` 迁移实际牵动 `common → kitutil` 替换。逐文件核验本地 `types/`（基线 10 个非测试文件）：仅 `error.go` 与 `rw_map.go` 依赖宿主 `common`，**其余 8 个无宿主依赖**。
 
 ### 4.4 本地 DTO 独有方法
 
@@ -210,16 +210,16 @@ const (
 
 ### 4.5 本地独有包与文件
 
-#### 4.5.1 `service/openaicompat/`（9 个非测试文件，3071 行）
+#### 4.5.1 `service/openaicompat/`（9 个非测试文件，基线 3072 行）
 
 上游**无此包**，但**有等价能力**——上游把 chat↔responses 兼容层放在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，并在宿主留了一个 27 行的纯转发 shim `service/openai_chat_responses_compat.go`，函数名与本地完全相同（`ChatCompletionsRequestToResponsesRequest` 等 6 个）。**「上游无此包」不等于「上游无此能力」**，逐项对照：
 
 | 本地能力 | 位置 | 上游状态 |
 |---|---|---|
-| Chat↔Responses 请求/响应互转 | `chat_to_responses.go:207`、`chat_to_responses_response.go:101`、`responses_to_chat_request.go:758`、`responses_to_chat.go:12` | **完全覆盖**：`relaykit/relayconvert/internal/oai_chat/to_oai_responses_{req,resp}.go`、`internal/oai_responses/to_oai_chat_{req,resp}.go`，经 `request_compat.go:60` 与 registry 暴露 |
+| Chat↔Responses 请求/响应互转 | `chat_to_responses.go:207`、`chat_to_responses_response.go:102`、`responses_to_chat_request.go:758`、`responses_to_chat.go:12` | **完全覆盖**：`relaykit/relayconvert/internal/oai_chat/to_oai_responses_{req,resp}.go`、`internal/oai_responses/to_oai_chat_{req,resp}.go`，经 `request_compat.go:60` 与 registry 暴露 |
 | 命名空间工具（namespace tools）桥接与还原 | `responses_to_chat_request.go:23`、`responses_input_tools.go`，约 20 个符号（`convertResponsesNamespaceToolToChat`、`extractResponsesToolNamespace`、`flattenResponsesNamespaceToolName`、`parseResponsesNamespaceTools` 等） | **零覆盖**：`git grep -ln namespace upstream/main -- 'relaykit/' 'relaykit/relayconvert/' 'service/' 'relay/'` = **0 文件** |
 | tool_search 还原 | `responses_to_chat.go`（`parseResponsesToolSearchOutputTools`、`responsesToolSearchArguments`、`responsesToolSearchProxyChatTool`） | **零覆盖**：上游全仓唯一命中是 `relaykit/dto/claude.go:615` 的 `ToolSearchRequests int`（计费计数字段，非协议概念） |
-| custom tool bridge（显式门控） | `EnableCustomToolBridge`，8 个文件 | **部分覆盖**：上游 `custom_tool_call` 出现在 6 个 relaykit 文件且**不门控**；`EnableCustomToolBridge` / `CustomToolBridge` 在上游 `relaykit/`、`service/` 均 **0 命中**。本地是「默认拒绝、显式开启」，上游是无条件处理 |
+| custom tool bridge（显式门控） | `EnableCustomToolBridge`，9 个非测试文件 | **部分覆盖**：上游 `custom_tool_call` 出现在 6 个 relaykit 文件（含测试口径；非测试 4）且**不门控**；`EnableCustomToolBridge` / `CustomToolBridge` 在上游 `relaykit/`、`service/` 均 **0 命中**。本地是「默认拒绝、显式开启」，上游是无条件处理 |
 | 协议转换规则策略（rules 模式） | `policy.go:40` `FindProtocolConversionRulePolicyWithFilter`、`setting/model_setting/global.go:28` `Rules`、`:65` `ProtocolConversionRule` | **部分覆盖**：上游 `setting/model_setting/global.go:14` 有 `ChatCompletionsToResponsesPolicy` 与 `:22` `IsChannelEnabled`，但**无 `Rules`、无 `ProtocolConversionRule`**（全仓 0 命中）。本地是超集扩展（`HasRules`、`LegacyRule`、`UnmarshalJSON`、`normalizeProtocolEndpoint`） |
 | 模型模式匹配语义 | `regex.go` `matchAnyRegex` | **语义不同**：本地空 patterns → `true`（匹配全部）；上游 `service/openai_chat_responses_mode.go:15` `matchAnyModelPattern` 空 patterns → `false`（不匹配任何）。迁移须显式决定取哪个语义 |
 | 严格拒绝行为（`Rejects…` 系列：不支持的 role/include/previous_response_id、加密 tool output、嵌套 tool_search、别名冲突、重复命名空间工具名） | `responses_to_chat_request.go`、`chat_to_responses.go` 多处 | **部分覆盖**：上游有 `validateResponsesRequestChatUnsupportedFields`（`internal/oai_responses/to_oai_chat_req.go:119`）与 `ValidateRequestChatUnsupportedFields`（`:139`），但覆盖范围窄于本地 |
@@ -504,7 +504,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 | 本地 `types/` 仅 2 个文件依赖宿主 `common` | 逐文件 grep `github.com/QuantumNous/new-api/[a-z]+`：`error.go`、`rw_map.go` |
 | 上游 `dto` **零别名转发**，直接改 import | 上游宿主 `dto/` 8 个文件均不 import relaykit、无 `type X =` 行；`git grep -l 'new-api/relaykit/dto' upstream/main -- '*.go'` = **281**，宿主 dto = 39 |
 | 本地 327 个文件 import 宿主 `dto` | `git grep -l '"github.com/QuantumNous/new-api/dto"' HEAD -- '*.go' \| wc -l` |
-| 34 个同名类型字段集不同（双向） | 逐字段比对 22 个同名文件的 136 个同名导出类型；本地独有 `Reasoning.Extra`、`StreamOptions.Extra`、`Message.ThinkingContent`、`ResponsesOutput.Namespace`、`ChannelOtherSettings` 21 字段等；relaykit 独有 `GeneralOpenAIRequest` 21 字段、`ResponsesOutput` 15 字段等 |
+| 33 个同名类型字段集不同（双向） | `go/ast` 解析 22 个同名文件的 136 个同名导出类型的字段名集合求差集；基线/HEAD 均 33（工作区 34）。本地独有 `Reasoning.Extra`、`StreamOptions.Extra`、`Message.ThinkingContent`、`ResponsesOutput.Namespace`、`ChannelOtherSettings` 20 字段等；relaykit 独有 `GeneralOpenAIRequest` 20 字段、`ResponsesOutput` 15 字段等 |
 | Go 别名**继承方法集**但**不能新增方法** | 最小程序实测：`type A = base.T` 后 `a.Method()` 正常；跨包给别名加方法报 `cannot define new methods on non-local type Thing` |
 | 本地 dto 394 个函数 vs relaykit 273 | `git grep -hE '^func ' HEAD -- 'dto/*.go' \| wc -l` / 同法查 `relaykit/dto/` |
 | `channel_settings.go` 本地 61 函数 / relaykit 29 | 单文件 `grep -cE '^func '` 得 61/29（含包级函数）；41 个本地独有**方法**由 `func (recv) Name` 提取后求差集，上游全仓 0 命中 |
@@ -517,7 +517,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 | 上游两分支早于 main 且已并入 | `feat/relaykit-tools`=`bbe20f2e1`(2026-09-01)、`feat/relaykit-perf`=`55bba35f2`(2026-09-03)，均早于 main(2026-09-28)；核心提交内容已作为 PR #7137 `0ed497f06` 并入（`git merge-base --is-ancestor 0ed497f06 upstream/main` 通过；两分支 toolconv 均 10 个 `Kind*`） |
 | `ConvOptions` 缓存跨渠道重试已处理 | 上游 `relay/common/relay_info.go:311` 在 `InitChannelMeta` 置 `info.convOptions = nil`，注释明示为跨渠道重试重建 |
 | `matchAnyRegex` 空模式语义差异 | 本地 `service/openaicompat/regex.go`：`len(patterns)==0 → true`；上游 `openai_chat_responses_mode.go:15`：`len(patterns)==0 \|\| model=="" → false` |
-| `service/openaicompat/` 共 3071 行（9 个非测试文件） | 逐文件 `wc -l` 求和；含测试 5280 |
+| `service/openaicompat/` 共 3072 行（9 个非测试文件，基线口径） | 逐文件 `wc -l` 求和；含测试 5280。工作区因其他会话改了 `chat_to_responses_response.go` 为 3071 |
 | 两分支 6 个提交均非 main 祖先 | `git merge-base --is-ancestor <c> upstream/main` 对 `55bba35f2`/`bbe20f2e1`/`c82c03ecd`/`60e15b53a`/`b45639116`/`a9a0e2272` 全部 exit=1 |
 | 两分支内容已被 main 覆盖（逐字节/符号集） | `toolconv/` 7 文件 5 SAME、2 处为 main 侧清理；`reasoning/claude.go` 双向独有符号均为 0；`billing_usage.go`/`usage_merge.go` 分支独有符号 0；`relaykit/` 整体 main 净增 4899 行 |
 | 非测试 dto 文件的宿主 import 分布 | 逐文件 `git show HEAD:<f> \| grep`：`common` 12、`constant` 2、`logger` 1（含测试 21/3/1） |
@@ -629,7 +629,7 @@ git grep -l '"github.com/QuantumNous/new-api/dto"' HEAD -- '*.go' | wc -l       
 
 **依据**：上游 `relaykit/types/error.go` 已经承载宿主侧语义的码——`ErrorCodeDoRequestFailed`、`ErrorCodeGetChannelFailed`、`ErrorCodeChannelNoAvailableKey`、`ErrorCodeChannelResponseTimeExceeded`。转换套件的错误词汇表本就不是纯转换语义。若把 4 个码留在宿主，会出现两个 `ErrorCode` 类型，所有跨边界的 `switch` 与比较都要转换，代价远大于收益。
 
-**影响**：`relay/channel/api_request.go`、`relay/channel/openai/responses_response_body_read.go`、`service/channel.go` 等 14 个文件的 import 路径改到 `relaykit/types`（多数本来就要改）。
+**影响**：`relay/channel/api_request.go`、`relay/channel/openai/responses_response_body_read.go`、`service/channel.go` 等 15 个非测试文件的 import 路径改到 `relaykit/types`（排除 `types/error.go` 定义处；多数本来就要改）。
 
 ### 12.3 `*WithError` 系列 → 删除，不保留包装层
 
@@ -860,7 +860,7 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
     toolState *ResponsesChatCompatibilityToolState) ([]dto.ToolCallRequest, error)
 ```
 
-函数体（115 行循环）内符号分布：`namespace` 16 处、`toolState` 5 处、`ToolSearch` 5 处、`Custom` 4 处、`EnableCustomToolBridge` 3 处——**五种工具语义交织在同一循环**，共享 `toolState.register` 与 `namespaceSelection` 过滤。
+函数体（115 行，其中 `for index, rawTool := range rawTools` 循环占 93 行）内符号分布：`namespace` 16 处、`toolState` 5 处、`ToolSearch` 5 处、`Custom` 4 处（不含 `EnableCustomToolBridge`）、`EnableCustomToolBridge` 3 处——**五种工具语义交织在同一循环**，共享 `toolState.register` 与 `namespaceSelection` 过滤。
 
 响应侧同样耦合：`chat_to_responses_response.go:193/222/243/259` 依赖 `toolState.Resolve` 做工具名还原。
 
