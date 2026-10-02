@@ -210,15 +210,15 @@ var defaultModelRatio = map[string]float64{
 	// Qwen3.8 official API prices are published in RMB per 1M tokens.
 	// Doubao Seed 2.1 official prices are published in RMB per 1M tokens;
 	// upstreams spell the version as 2-1, normalized to 2.1 before lookup.
-	"doubao-seed-2.1-pro":   6.0 / 2 * RMB,
-	"doubao-seed-2.1-turbo": 3.0 / 2 * RMB,
-	"doubao-seed-2.1-lite":  0.8 / 2 * RMB,
-	"qwen3.8-max":    12.0 / 1000 * RMB,
-	"qwen3.8-flash":  0.8 / 1000 * RMB,
-	"qwen-3.8-flash": 0.8 / 1000 * RMB,
-	"qwen3.8-27b":    3.0 / 1000 * RMB, // ¥3 / 1M tokens; https://www.qianwenai.com/models/qwen3.8-27b
-	"qwen-3.8-27b":   3.0 / 1000 * RMB,
-	"Qwen3.8-27B":    3.0 / 1000 * RMB,
+	"doubao-seed-2.1-pro":   6.0 / 1000 * RMB,
+	"doubao-seed-2.1-turbo": 3.0 / 1000 * RMB,
+	"doubao-seed-2.1-lite":  0.8 / 1000 * RMB,
+	"qwen3.8-max":           12.0 / 1000 * RMB,
+	"qwen3.8-flash":         0.8 / 1000 * RMB,
+	"qwen-3.8-flash":        0.8 / 1000 * RMB,
+	"qwen3.8-27b":           3.0 / 1000 * RMB, // ¥3 / 1M tokens; https://www.qianwenai.com/models/qwen3.8-27b
+	"qwen-3.8-27b":          3.0 / 1000 * RMB,
+	"Qwen3.8-27B":           3.0 / 1000 * RMB,
 	// Qwen3.6-35B-A3B official API price: ¥1.8 / 1M input tokens and
 	// ¥10.8 / 1M output tokens. No cache price is published.
 	"Qwen3.6-35B-A3B": 1.8 / 1000 * RMB,  // https://www.qianwenai.com/models/qwen3.6-35b-a3b

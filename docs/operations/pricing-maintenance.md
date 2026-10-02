@@ -1123,3 +1123,58 @@ MiMo 官方价格页已明确标注 `mimo-v2.5` 与 `mimo-v2.5-pro` 将于 2026-
 - https://platform.stepfun.com/docs/zh/pricing/details
 - https://siliconflow.cn/pricing
 - https://cloud.tencent.com/document/product/1729/97731
+
+## 2026-09-24 doubao-seed-2.1 源码默认倍率 500 倍修正
+
+采样时间：2026-09-24（Asia/Shanghai）。本轮在源码默认倍率与正式库 `ModelRatio` 的全量对照中发现三处算术错误。
+
+### 缺陷
+
+`setting/ratio_setting/model_ratio.go` 中三个 Doubao Seed 2.1 条目使用了错误的换算因子：
+
+```text
+修正前： "doubao-seed-2.1-pro":   6.0 / 2 * RMB
+修正后： "doubao-seed-2.1-pro":   6.0 / 1000 * RMB
+```
+
+官方单价为人民币每 1M tokens，正确倍率是 `(单价 / USD2RMB) / 2`。本文件通行的写法是 `单价 / 1000 * RMB`，两者恒等：
+
+```text
+¥6  / 1000 * RMB = 0.4109589041095891
+(6 / 7.3) / 2    = 0.4109589041095891
+```
+
+`/ 2 * RMB` 少了 1000 这个量纲因子，结果偏高 500 倍。全文件 32 处人民币条目中只有这 3 处用了 `/ 2 * RMB`（另一处 `/ 10 * RMB` 是 `stepaudio-2.5-tts` 按「每 10K 输入字符」计费的独立单位，有注释说明，不属此类）。
+
+### 三个键的对照
+
+| 键 | 官方价 | 错误值 | 正确值 |
+| --- | --- | --- | --- |
+| `doubao-seed-2.1-pro` | ¥6 / 1M | `205.479452` | `0.410958904` |
+| `doubao-seed-2.1-turbo` | ¥3 / 1M | `102.739726` | `0.205479452` |
+| `doubao-seed-2.1-lite` | ¥0.8 / 1M | `27.3972603` | `0.054794521` |
+
+本文件 2026-09-23 一节的价格表（`doubao-seed-2.1-pro` 为 `0.410958904` / `5` / `0.2`）与正式库现值都取正确值，只有源码默认倍率写错，属于同一批改动中的笔误。
+
+### 影响面
+
+- **正式库不受影响**：三个键在正式 `ModelRatio` 行中均存在且取正确值。由于 `types.LoadFromJsonStringWithCallback` 是整体替换（`m.data = make(...)`），有该行的部署不会读到源码默认值。
+- **全新部署受影响**：`ModelRatio` 行为空时由 `InitRatioSettings()` 从源码默认值播种，此时 `doubao-seed-2.1-pro` 按 `ratio=205.479452` 计费，即 `$410.96/1M` 而非 `$0.82/1M`。
+- **隔离开发库受影响**：`new-api-dev` 的 `ModelRatio` 行不含任何 `doubao` 键，实测该模型解析为 `ratio=37.5, ok=false`，走「未定价模型」兜底而非 500 倍值。
+
+### 修复与验证
+
+- 三个条目改为 `/ 1000 * RMB`。
+- 新增回归测试 `TestDoubaoSeed21RatiosMatchDocumentedPrices`，断言三个键的倍率等于官方人民币价按 `(单价 / USD2RMB) / 2` 推出的值，并直接校验 `/ 1000 * RMB` 与 `(单价 / USD2RMB) / 2` 恒等。已验证把任一条目改回 `/ 2 * RMB` 后测试失败。
+
+```text
+go test -count=1 ./setting/ratio_setting/    ok
+go build ./...                               exit 0
+gofmt -l（全部已跟踪 Go 文件）                无输出
+```
+
+### 未处理
+
+同轮对照还发现 4 处源码默认倍率与正式库不一致（`gemini-2.5-pro` `0.625` vs `1`、`kimi-k2-thinking` `0.3` vs `0.2`、`qwen3-vl-30b-a3b-instruct` / `-thinking` `0.075` vs `0.1`），以及 2 处源码为 `0.5`、正式库为 `0`（`llama-3-sonar-large-32k-chat` / `-online`）。这些不是算术错误，需要各自的官方价格依据才能判定方向；本轮已核对 Fireworks 价格页，该页已不再列出 `kimi-k2-thinking`、`kimi-k2p5`、`glm-4p7`、`glm-5` 等条目，无法据此判定，**未改动**。这些键在正式库均无启用路由。同轮还对全部 8 张倍率表（`ModelRatio`、`CompletionRatio`、`CacheRatio`、`CreateCacheRatio`、`ModelPrice`、`ImageRatio`、`AudioRatio`、`AudioCompletionRatio`）做了同样对照，除上述 6 处外其余差异均为 float64 往返噪声（相对偏差小于 1e-12）；`CacheRatio` 另有 2 处、`CompletionRatio` 另有 2 处差异，键与 `ModelRatio` 的 6 处部分重叠（`kimi-k2-thinking`、`qwen3-vl-30b-a3b-thinking`）。
+
+可达性核实：6 个键在正式库 `abilities` 中启用数均为 0；日志中仅 `qwen3-vl-30b-a3b-instruct` / `-thinking` 各 1 条（id `949361`、`949362`，2026-07-04 的管理端探测，`quota=0`、token 全 0，无计费影响）。

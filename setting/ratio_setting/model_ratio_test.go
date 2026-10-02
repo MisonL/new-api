@@ -1691,3 +1691,33 @@ func resetPricingMapsForTest(t *testing.T) {
 func floatPtr(v float64) *float64 {
 	return &v
 }
+
+// TestDoubaoSeed21RatiosMatchDocumentedPrices pins the three Doubao Seed 2.1
+// base ratios. Their prices are published in RMB per 1M tokens, so the ratio is
+// (price / USD2RMB) / 2, which the file expresses as price / 1000 * RMB. An
+// earlier revision wrote price / 2 * RMB, a 500x overcharge that only bites on a
+// deployment whose database row lacks these keys, because a DB row replaces the
+// source map instead of merging with it.
+func TestDoubaoSeed21RatiosMatchDocumentedPrices(t *testing.T) {
+	// Official prices in RMB per 1M tokens, as recorded in
+	// docs/operations/pricing-maintenance.md.
+	tests := []struct {
+		model     string
+		rmbPer1M  float64
+		wantRatio float64
+	}{
+		{model: "doubao-seed-2.1-pro", rmbPer1M: 6.0, wantRatio: 0.4109589041095891},
+		{model: "doubao-seed-2.1-turbo", rmbPer1M: 3.0, wantRatio: 0.20547945205479454},
+		{model: "doubao-seed-2.1-lite", rmbPer1M: 0.8, wantRatio: 0.05479452054794521},
+	}
+	for _, tc := range tests {
+		t.Run(tc.model, func(t *testing.T) {
+			got, ok := defaultModelRatio[tc.model]
+			require.True(t, ok, "%s missing from defaultModelRatio", tc.model)
+			require.InDelta(t, tc.wantRatio, got, 1e-12)
+			// Guard the arithmetic directly: the RMB convention used across this
+			// file is price / 1000 * RMB, which must equal (price / USD2RMB) / 2.
+			require.InDelta(t, (tc.rmbPer1M/USD2RMB)/2, tc.rmbPer1M/1000*RMB, 1e-12)
+		})
+	}
+}
