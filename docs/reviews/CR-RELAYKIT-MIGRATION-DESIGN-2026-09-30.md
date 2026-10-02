@@ -22,7 +22,7 @@
 
 ## 审计方式
 
-四轮对抗性审查，每轮更换角度而非重复：
+五轮对抗性审查，每轮更换角度而非重复（第五轮的事实核验部分在架构攻击之后才完成，其 6 处修正见下）；其后又对设计文档做过 4 次独立的事实复核（见「设计文档提交记录」的末 4 行）。
 
 | 轮次 | 子代理数 | 角度 |
 | --- | --- | --- |
@@ -32,7 +32,7 @@
 | 4 | 2 | 阶段可执行性；本地独有能力完整性 |
 | 5 | 2 | 架构攻击（决策可执行性、依赖顺序、验证策略缺口）6 条全部复现成立；事实核验（逐条复现第 12 节断言）大部分通过、6 处需修正 |
 
-主代理对每条代理结论独立复现后才采纳。**四轮中每轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处。
+主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误。
 
 ## 核心结论
 
@@ -93,7 +93,7 @@ const (
 
 **补丁 2：DTO presence 保真**
 
-实质是**把本地既有能力带进 relaykit**，非从零设计。本地已有 `UnmarshalJSON`、`HasIncludeUsageField`、`HasRemoveIncludeUsage`、`HasIncludeObfuscationField` 并用于生产。
+实质是**把本地既有能力带进 relaykit**，非从零设计。本地已有 `UnmarshalJSON`（`StreamOptions`、`OpenAIResponsesRequest`、`Reasoning`、`OpenAIResponsesCompactionRequest` 四个类型）、`HasIncludeUsageField`、`RemoveIncludeUsage`、`HasIncludeObfuscationField` 并用于生产。
 
 ### 5. 本地独有能力的处置
 
@@ -203,7 +203,7 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 
 `convmeta.Meta` 15 个方法逐条核验无客户端请求访问器（`relaykit/relayconvert/convmeta/meta.go:18-54`）。
 
-## 未决项（设计文档第 10 节，20 项）
+## 未决项（设计文档第 10 节 20 项 + 12.18 新增 6 项 = 26 项）
 
 原列为**阶段 0 前置**的一项已于 2026-10-01 完成：
 
@@ -226,11 +226,11 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 | # | 攻击 | 复现证据 | 推翻的决策 |
 | --- | --- | --- | --- |
 | 1 | `dto` 迁移规模被系统性低估 | 上游 **281** 个文件 import `relaykit/dto`（宿主 dto 327→39）；本地对应 **327** 个。第 6.2 节用整节撤回 `types` 的 210 import 点，对 dto 只字未提 | §12.0「调用点不变」 |
-| 2 | 「23 个 DTO 独有方法」只数了 3 个文件 | 本地 dto **394 函数** vs relaykit **273**；`channel_settings.go` 单文件本地 61/relaykit 29（`^func` 口径），**41 个本地独有方法**（主代理复现后把代理给的 32 修正为 41），全部有生产引用、上游 0 命中 | §4.4、§4.5.3、§12.5 |
-| 3 | `dto` 与宿主包耦合未做 import 图 | 本地 **21 个 dto 文件 import `common`**、3 个 `constant`、1 个 `logger`；relaykit/dto 只 import `types`(17) 与 `kitutil`(12) | §12.0 的依赖方向 |
+| 2 | 「23 个 DTO 独有方法」只数了 3 个文件 | 本地 dto **394 函数** vs relaykit **273**；`channel_settings.go` 单文件本地 61/relaykit 29（`^func` 口径），**41 个本地独有方法**（主代理复现后把代理给的 32 修正为 41），上游 0 命中。引用范围：33 个跨包生产、6 个仅 dto 包内、2 个仅测试 | §4.4、§4.5.3、§12.5 |
+| 3 | `dto` 与宿主包耦合未做 import 图 | 本地 **12 个非测试 dto 文件 import `common`**、2 个 `constant`、1 个 `logger`（含测试口径 21/3/1）；relaykit/dto 只 import `types`(17) 与 `kitutil`(12) | §12.0 的依赖方向 |
 | 4 | `openaicompat` 无法按能力切分 | `convertResponsesToolsToChat`（`responses_to_chat_request.go:455`）签名同时收 `namespaceSelection`+`toolState`，体内 namespace 16/toolState 5/ToolSearch 5/Custom 4/门控 3 交织；上游 shim 无 state 变体；消费者还有第 3 个 `relay/responses_via_chat.go:104` | §12.15、§4.5.1 |
 | 5 | 流式 thinking 门控是有状态的 | 本地 `convert.go:749` 算策略、`:794` 在分配索引前 `return`（闭包提前返回）；relaykit `to_claude_messages_resp.go:151` 在 `stopOpenBlocksAndAdvance` 内无条件 `state.Index++`，`:342` 起无条件建块。`state` 私有，后置删块产生**索引空洞** | §12.4「后置过滤」、§6.1 结论 |
-| 5b | 12.4 补丁落点的可达性被高估（第六轮补记） | `oai_chat/to_claude_messages_resp.go:111`/`:449` **已接收 `info convmeta.Meta`**，且 `Meta` 已含 `ConvOptions()`；本地只有 Chat→Claude 两条路径，无 Responses→Claude。故门控补丁**零透传成本**，原文按「需向内部转换器透传」描述是错的 |
+| 5b | 12.4 补丁落点的可达性被高估（本记录后续更新时补记） | `oai_chat/to_claude_messages_resp.go:111`/`:449` **已接收 `info convmeta.Meta`**，且 `Meta` 已含 `ConvOptions()`；本地只有 Chat→Claude 两条路径，无 Responses→Claude。故门控补丁**零透传成本**，原文按「需向内部转换器透传」描述是错的 |
 | 6 | AWS 路径套用策略会引入回归 | `aws/converse.go:748` **无条件**转 thinking，全文件 0 处调用 `shouldExposeReasoningAsClaudeThinking`（该策略只对 DeepSeek 为真） | §12.4 的落点描述 |
 
 **另发现（主代理自查，非代理提出）**：主代理自己把 `IsValidToolName` / `ToolNameMaxLength` 当作「dto 独有方法」列入撤回清单，实为**包级符号**，不该出现在方法集比对里。
@@ -256,7 +256,7 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 | # | 问题 | 实测 | 处置 |
 | --- | --- | --- | --- |
 | 1 | 第 7 节阶段表与第 12 节决策矛盾 | 阶段 4 写「`*WithError` 在宿主包装」、阶段 5 写「落到 6 条调用点」，与 12.3「删除」、12.4「relaykit 内门控」相反 | 已同步阶段表 |
-| 2 | 12.9「main 已含最终形态」缺逐项取证 | 6 个提交**全部**不在 main（`--is-ancestor` 全 exit=1）。原结论仅凭「非祖先」+「toolconv 10 个 Kind」——**不充分** | 已补逐字节/符号集比对（toolconv 5 SAME + 2 处 main 侧清理；`reasoning/claude.go` 双向独有符号 0；relaykit 整体 main 净增 4899 行）。结论仍成立，但取证是后补的 |
+| 2 | 12.9「main 已含最终形态」缺逐项取证 | 6 个提交**全部**不在 main（`--is-ancestor` 全 exit=1）。原结论仅凭「非祖先」+「toolconv 10 个 Kind」——**不充分** | 已补逐字节/符号集比对（toolconv 5 SAME + 2 处 main 侧功能新增；`reasoning/claude.go` 双向独有导出符号 0；relaykit 整体 main 净增 `3910+/746−`）。结论仍成立，但取证是后补的 |
 | 3 | 4.5.1「3661 行」无出处 | 实测基线 **3072 行**（含测试 5280；工作区因其他会话改动为 3071）。高估 19% | 已改为 3072 |
 | 4 | 12.0.3 的 dto import 计数口径矛盾 | 非测试是 **12/2/1**；21/3/1 是含测试口径，与文档自述「排除 `_test.go`」冲突 | 已改为非测试口径并注明含测试值 |
 | 5 | `HasCompactionTrigger` 写 9 | 提及口径确为 **9**（代理说 10 是把它算进了 `dto/` 自身）；调用口径 7 | 数字正确，已注明口径 |
@@ -290,5 +290,12 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 | `dbfbc096f` | 第四轮：上游已完成迁移、别名机制、hosted 工具 |
 | `53af20dc5` | 重构为上游对照清单 |
 | `a1d5e9aad` | 修正交叉引用编号 |
+| `b32a308e9` | 补全本地独有能力盘点（本节 5.1 记录的修正） |
+| `047d0ca09` | 第五轮架构审查的修正（新增 §12.18 的 5 项未决） |
+| `320f43b5b` | 第五轮事实核验的 6 处修正（新增未决项 26，§12.18 增至 6 项） |
+| `eb286da9d` | 独立复核：行号、计数与门控可达性（8 处修正） |
+| `39a0c970c` | 独立复核：5 个计数与 1 个口径标签 |
+| `4181c5b62` | 独立复核：上游 shim 规模与 5 个过期数字 |
+| `eec2dd4b1` | 独立复核：修正上一轮自己引入的一处能力断言 |
 
-文档当前 348 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 948 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
