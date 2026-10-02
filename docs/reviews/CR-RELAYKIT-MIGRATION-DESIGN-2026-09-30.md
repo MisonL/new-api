@@ -22,7 +22,7 @@
 
 ## 审计方式
 
-五轮对抗性审查，每轮更换角度而非重复（第五轮的事实核验部分在架构攻击之后才完成，其 6 处修正见下）；其后又对设计文档做过 5 次独立的事实复核（见「设计文档提交记录」的末 5 行，其中第六轮转向此前未查区块）。
+五轮对抗性审查，每轮更换角度而非重复（第五轮的事实核验部分在架构攻击之后才完成，其 6 处修正见下）；其后又对设计文档做过 6 次独立的事实复核（见「设计文档提交记录」的末 6 行，其中第六、七轮转向此前未查区块）。
 
 | 轮次 | 子代理数 | 角度 |
 | --- | --- | --- |
@@ -32,7 +32,7 @@
 | 4 | 2 | 阶段可执行性；本地独有能力完整性 |
 | 5 | 2 | 架构攻击（决策可执行性、依赖顺序、验证策略缺口）6 条全部复现成立；事实核验（逐条复现第 12 节断言）大部分通过、6 处需修正 |
 
-主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误，第 6 轮再修正 3 处（含 1 处主代理自己引入的）。
+主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误，第 6 轮再修正 3 处（含 1 处主代理自己引入的），第 7 轮再修正 5 处。
 
 ## 核心结论
 
@@ -77,10 +77,10 @@ const (
 
 | 能力 | 本地 | 上游 |
 | --- | --- | --- |
-| 思考等级渲染 | `relay/claude_handler.go:55-104` 硬编码 `claude-opus-4-6/4-7` 前缀 | `reasoning.RenderClaude` + `claudeCapabilitiesFor` 覆盖 fable-5、mythos-5、Opus 4.5/4.6/4.7/4.8/5、Sonnet 4.6/5，含 `defaultThinking`、`supportsEffort/XHigh/Max`、budget↔effort 互转 |
+| 思考等级渲染 | `relay/claude_handler.go:55-104` 硬编码 `claude-opus-4-6/4-7` 前缀 | `reasoning.RenderClaude` + `claudeCapabilitiesFor`（`:35-78`）覆盖 10 个模型前缀：fable-5、mythos-5、mythos-preview、Opus 4.5/4.6/4.7/4.8/5、Sonnet 4.6/5，含 `defaultThinking`、`supportsEffort/XHigh/Max`、budget↔effort 互转 |
 | hosted 工具 | 散落在 `service/convert.go` 与 `relay/common/` | `toolconv/` 覆盖 10 种：`KindWebSearch`、`KindCodeExecution`、`KindComputerUse`、`KindFileSearch`、`KindImage`、`KindMCP`、`KindURLContext`、`KindWebFetch`、`KindFunction`、`KindNative` |
 | 降级可观测性 | `ConversionDiagnostic` 本地零命中 | `convdiag` + `types.ConversionDiagnostic` |
-| 转换质量分级 | 无 | `Good`/`Fair`/`Discouraged` + 4×4 矩阵 |
+| 转换质量分级 | 无 | `Good`/`Fair`/`Discouraged` 三级；4 个文本格式间 8 个内建转换器（6 双向 + 2 单向）各自标注 quality |
 | 测试基线 | CI 不跑 `go test` | 24 个 golden 快照 + `-update` 机制 |
 
 用户要求的"思考等级"在收敛后是**净增强**，不是妥协。
@@ -163,7 +163,7 @@ git merge-base HEAD aa7d0d39a4  →  dac55f0f
 
 **「按客户端意图门控 reasoning 暴露」**（原补丁 3）。三条理由：
 
-1. 依据不成立。relaykit 自身的 `claudeCapabilitiesFor` 为 fable-5、mythos-5、opus-5、sonnet-5 置 `defaultThinking = true`——"未请求 thinking 就不应返回 thinking"不是协议不变量
+1. 依据不成立。relaykit 自身的 `claudeCapabilitiesFor` 为 fable-5、mythos-5、mythos-preview、opus-5、sonnet-5 置 `defaultThinking = true`——"未请求 thinking 就不应返回 thinking"不是协议不变量
 2. 客户端意图在响应阶段取不到正确值。`relay/claude_handler.go:34` 对 Claude 请求做 `common.DeepCopy`，后缀适配器写入的 `request.Thinking`（`:58`、`:79`、`:91`）全部作用于拷贝。客户端发 `claude-opus-4-7-high` 时适配器让上游真的思考了，而 `info.Request.Thinking` 仍是 nil
 3. relaykit 内不修改签名即不可达：Responses→Claude 非流式（`to_claude_messages_resp.go:15`）与流式（`to_claude_messages_stream_resp.go:82`）没有 `Meta` 参数
 
@@ -296,6 +296,35 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 
 **方法学教训（第六轮）**：本轮 3 处错误**没有一处是数字本身抄错**——第 1 处是**差集漏算 1 个**（两侧都含未导出方法，机械对比不会漏，漏的是人工转录），第 2 处是**计数方法未随断言一起声明**（「全仓 0 命中」在名字口径下为假、接收者口径下为真，文档只写了结论没写口径），第 3 处是**同一单元格里的两个对象被合并描述**（两个文件的 diff 方向相反，却共用一句「main 净增」）。这与前五轮的教训同源：**每个数字都要在其对象上、以其口径独立复现**，且**一个单元格只放一个可证伪的断言**。
 
+## 第七轮复核：§3、§8、§12.4 与审计记录自身（2026-10-02）
+
+转向仍未系统核过的区块：§3.1、§3.2、§4.5.3、§4.5.5、§6.1、§7、§8、§12.4.1–§12.4.3、§12.5、§12.14，以及**审计记录自身的能力表**。先复验第六轮的三处改动（`billing_usage.go` 方法集 4/4、导出符号 18/18；`usage_merge.go` main 独有 `MergeClaudeUsageNonZero`）——全部成立。
+
+### 复现一致（本轮实测）
+
+- **§8 的 8 个行号**（六条路径 + AWS 的 `:748`/`:1110`/`:713`）在基线 `HEAD` 上逐行命中
+- **§12.4.1 的代码片段**与 relaykit 原文逐行一致（`:342` 起、`:346-357` 建块、`:359-362` delta）
+- **§12.4.3**：`relay/channel/aws/converse.go` 全文件 `shouldExposeReasoningAsClaudeThinking` 调用数为 **0**；`shouldExposeReasoningAsClaudeThinking` 实测就是 `hasDeepSeekModelName`
+- **§12.14**：3 个未跟踪文件（`responses_tool_names.go` + 2 个测试）状态为 `??`；其生产调用点 `relay/responses_handler.go:1123`、`relay/channel/openai/relay_responses.go:912`/`:1296`、`relay/common/relay_info.go:250` 的 `ResponsesToolNameRestorer` 字段**在 HEAD 上全部不存在**——「该能力在 HEAD 完全不存在」成立
+- **§3.2**：`service/convert.go` 恰为 **13 个导出函数**，与列出的 13 个名字逐一对应；`NormalizeCacheCreationSplit` 在 relaykit 有 4 处定义（`oai_chat/to_claude_messages_resp.go:107`、`shared/claude/cache.go:3`、`response_compat.go:34`、宿主 `service/convert.go:9`）
+- **§4.5.3**：11 个本地独有 dto 文件（排除上游宿主 `dto/` 的 `midjourney.go`/`suno.go`/`task.go`/`video.go` 后正好 11）；表内 11 个行数与 9 个符号引用数全部复现（口径：排除 `_test.go`、定义文件、`dto/` 包内）
+- **§4.5.5**：`responses_input_filter.go` 共 1034 行，`646–1034` 范围成立；`aws/converse.go:713` 精确命中
+- **§12.5**：表内 16 个生产引用数全部精确复现（12/11/9/9/3/2/2/2/2/2/2/1/1/1/1/1）；分类 **A 18 / B 2 / 待实测 3 = 23**；`HasImageGenerationCall` 的 4 个调用点；relaykit 独有 5 个方法逐项一致
+- **§4.4**：「HEAD 与工作区差 3 个方法」实测为 `ChatCompletionsStreamResponse.GetError`、`ResponsesStreamResponse.GetOpenAIError`、`Usage.EnsureResponsesTokenDetailObjects`，与文档列出的三个完全一致
+- **§7**：本地 `ClaudeConvertInfo` 的 `ToolCallStarted map[int]bool` 等字段在 `service/convert.go` 的引用数为 6/5/5/6 = 22
+
+### 需修正（本轮，5 处）
+
+| # | 问题 | 实测 | 处置 |
+| --- | --- | --- | --- |
+| 1 | §12.4.1 称 `state` 是「relaykit 的**私有内部状态**（`ResponseStreamState` 的字段不导出）」 | `state` 是 `info.EnsureClaudeConvertInfo()` 返回的 `*convmeta.ClaudeConvertInfo`（`convmeta/meta.go:58`），**字段全部导出**且经 `convmeta.Meta` 对宿主可达。真正私有的 `ResponseStreamState` 是另一个类型（`response_registry.go`），不是这里讨论的对象 | **结论对、论据错**：索引空洞成立，但理由改为「宿主读得到 `state.Index`，却无法重排已分配的索引」 |
+| 2 | §3.1 称 `claudeCapabilitiesFor` 覆盖 9 个模型（漏 `claude-mythos-preview`），行号写 `:35-74` | 实测 **10 个模型前缀**，函数结束于 `:78` | 两处改为 10 个前缀 + `:35-78`；§11 同行号同步 |
+| 3 | §3.1 称转换质量分级含「4×4 转换矩阵」 | 实际是 4 个文本格式间的 **8 个内建转换器**（`builtinTextConverters`，6 个双向对 + 2 个单向），非 16 格矩阵 | 改为可复现表述；审计记录第 83 行同步 |
+| 4 | §12.0.1「事实一」称 `constant/finish_reason.go` 用 `type X = types.X` | 该文件用的是 **`var FinishReasonStop = types.FinishReasonStop`**（变量别名），**无任何 `type` 声明**；只有 `endpoint_type.go` 用类型别名 | 改为「两处手法不同」；§11 第 502 行同步 |
+| 5 | §7 写 `dto/gemini.go:111` 用 `c.Query("alt")` | 实测 `:112`（两个基线口径一致） | 改为 `:112` |
+
+**方法学教训（第七轮）**：本轮 5 处里，**第 1 处是唯一实质性的**——它属于「**结论正确但论据被替换**」：索引空洞的结论没错，但支撑它的那句「宿主拿不到 state」是错的，而这句话恰好**削弱**了论证（若宿主真拿不到 state，反而说明后置过滤连读都读不到，论证会更强）。第 2–5 处是**枚举不全**（漏一个模型）与**行号/机制名称错**（`type` 别名 vs `var` 别名、4×4 vs 8 个转换器）。这与前几轮合起来指向同一条：**凡「覆盖 N 个」的枚举，必须逐个列出并计数**；凡「用 X 机制」的断言，必须打开文件看第一行关键字。
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**，未运行 Go 编译或测试。所有"编译失败"结论均为符号存在性推导，未经 `go build` 复现
@@ -324,5 +353,6 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 | `4181c5b62` | 独立复核：上游 shim 规模与 5 个过期数字 |
 | `eec2dd4b1` | 独立复核：修正上一轮自己引入的一处能力断言 |
 | `c4d21ce49` | 独立复核：同步审计记录、修正分支比对取证（`relaykit/` 68 文件 `3910+/746−`、toolconv 差异为功能新增） |
+| `7b8d478d7` | 第六轮：`channel_settings.go` 方法数 41→42、补计数口径、拆分 §12.9 单元格 |
 
 文档当前 948 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
