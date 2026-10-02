@@ -66,7 +66,7 @@ func loadOrCreateSyntheticCompactLocalInstanceID(ctx context.Context) (string, e
 	defer cancel()
 
 	option := model.Option{}
-	err := model.DB.WithContext(storeCtx).First(&option, "key = ?", syntheticCompactInstanceOptionKey).Error
+	err := model.DB.WithContext(storeCtx).First(&option, model.KeyColumn()+" = ?", syntheticCompactInstanceOptionKey).Error
 	if err == nil && syntheticCompactInstanceIDValid(option.Value) {
 		return strings.TrimSpace(option.Value), nil
 	}
@@ -78,7 +78,7 @@ func loadOrCreateSyntheticCompactLocalInstanceID(ctx context.Context) (string, e
 	if err == nil {
 		if saveErr := model.DB.WithContext(storeCtx).
 			Model(&model.Option{}).
-			Where("key = ?", syntheticCompactInstanceOptionKey).
+			Where(model.KeyColumn()+" = ?", syntheticCompactInstanceOptionKey).
 			Update("value", instanceID).Error; saveErr != nil {
 			return "", saveErr
 		}
@@ -87,7 +87,7 @@ func loadOrCreateSyntheticCompactLocalInstanceID(ctx context.Context) (string, e
 
 	if createErr := model.DB.WithContext(storeCtx).Create(&model.Option{Key: syntheticCompactInstanceOptionKey, Value: instanceID}).Error; createErr != nil {
 		var reloaded model.Option
-		if reloadErr := model.DB.WithContext(storeCtx).First(&reloaded, "key = ?", syntheticCompactInstanceOptionKey).Error; reloadErr == nil && syntheticCompactInstanceIDValid(reloaded.Value) {
+		if reloadErr := model.DB.WithContext(storeCtx).First(&reloaded, model.KeyColumn()+" = ?", syntheticCompactInstanceOptionKey).Error; reloadErr == nil && syntheticCompactInstanceIDValid(reloaded.Value) {
 			return strings.TrimSpace(reloaded.Value), nil
 		}
 		return "", createErr

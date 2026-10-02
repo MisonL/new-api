@@ -574,7 +574,7 @@ func persistRecordedNpmCLIVersionOptionsSnapshot(ctx context.Context, recorded r
 		}
 		valueSQL, valueArgs := recordedNpmCLIVersionCASValuePredicate(currentRaw)
 		result := model.DB.WithContext(ctx).Model(&model.Option{}).
-			Where("key = ?", npmCliVersionRecordedOptionsKey).
+			Where(model.KeyColumn()+" = ?", npmCliVersionRecordedOptionsKey).
 			Where(valueSQL, valueArgs...).
 			Update("value", nextRaw)
 		if result.Error != nil {

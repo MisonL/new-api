@@ -30,6 +30,19 @@ var commonFalseVal string
 var logKeyCol string
 var logGroupCol string
 
+// KeyColumn returns the dialect-quoted name of the Option table's key column.
+//
+// `key` is a reserved word in MySQL, so an unquoted "key = ?" predicate is a
+// syntax error there (ERROR 1064) while PostgreSQL and SQLite accept it.
+// Callers outside this package need the quoted spelling, which is why this is
+// exported.
+func KeyColumn() string {
+	if commonKeyCol == "" {
+		initCol()
+	}
+	return commonKeyCol
+}
+
 func initCol() {
 	// init common column names
 	if common.UsingPostgreSQL {
@@ -479,7 +492,7 @@ const channelPinOrderMigrationOptionKey = "migration.channel_pin_order.20260829"
 // positive legacy priorities represented a pinned channel in the old UI.
 func migrateChannelPinOrder() error {
 	var marker Option
-	if err := DB.First(&marker, "key = ?", channelPinOrderMigrationOptionKey).Error; err == nil {
+	if err := DB.First(&marker, commonKeyCol+" = ?", channelPinOrderMigrationOptionKey).Error; err == nil {
 		return nil
 	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
@@ -516,7 +529,7 @@ const (
 
 func migrateResponsesCompactModeAuto() error {
 	var allChannelsMarker Option
-	if err := DB.First(&allChannelsMarker, "key = ?", responsesCompactModeAutoAllChannelsMigrationOptionKey).Error; err == nil {
+	if err := DB.First(&allChannelsMarker, commonKeyCol+" = ?", responsesCompactModeAutoAllChannelsMigrationOptionKey).Error; err == nil {
 		return nil
 	} else if err != nil && err != gorm.ErrRecordNotFound {
 		return err
@@ -529,7 +542,7 @@ func migrateResponsesCompactModeAuto() error {
 
 func migrateResponsesCompactModeAutoWithMarker(markerKey string, openAIOnly bool) error {
 	var marker Option
-	if err := DB.First(&marker, "key = ?", markerKey).Error; err == nil {
+	if err := DB.First(&marker, commonKeyCol+" = ?", markerKey).Error; err == nil {
 		return nil
 	} else if err != nil && err != gorm.ErrRecordNotFound {
 		return err

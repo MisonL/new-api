@@ -110,7 +110,7 @@ type gormLogIndexCleanupMarker struct {
 
 func (m gormLogIndexCleanupMarker) OptionExists(key string) (bool, error) {
 	var marker Option
-	err := m.db.First(&marker, "key = ?", key).Error
+	err := m.db.First(&marker, commonKeyCol+" = ?", key).Error
 	if err == nil {
 		return true, nil
 	}
