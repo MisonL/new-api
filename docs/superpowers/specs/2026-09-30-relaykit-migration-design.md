@@ -359,15 +359,16 @@ const (
 |---|---|---|
 | 0 | `git fetch --unshallow upstream`；建立 CI 门禁（两个 module 分别 `go test`，`GOWORK=off`）；~~完成本地独有能力盘点~~（已完成，见第 4 节）；**把 `relay/common/responses_tool_names.go` 及 2 个测试文件纳入版本控制**（第 10 节第 19 项） | CI 能跑通现有测试；盘点清单已产出；未跟踪文件已提交 |
 | 1 | **取得 relaykit 源码**（见下「阶段 1 的前置」）；引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译；`relaykit/` 的版本已锚定并记录 |
-| 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写** + **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ 全部宿主独有方法（全包 394 vs 273 函数）给出出路。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**327 个 import 点全部验证** |
+| 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写** + **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ 全部宿主独有方法（全包 394 vs 273 函数）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**327 个 import 点全部验证** |
 | 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 别名，同步改写 `service/convert.go` 的 22 处字段引用；`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过 |
 | 4 | 协议映射切换到 relaykit（**单点可逆**，见 §8.1）；打补丁 1；**按下方「阶段 4 的处置清单」逐项落地**；**`*WithError` 系列直接删除**（12.3，不保留包装层） | 转换测试通过；grok reasoning 可见；处置清单每项已确认 |
 | 5 | 宿主管道接入 relaykit 分派；**响应方向暴露策略在 relaykit 内门控**（12.4，`convmeta.Options` 钩子，必须在索引分配之前——后置过滤不可行。落点 `oai_chat/to_claude_messages_resp.go` 已接收 `info`，无需透传改造）；**`matchAnyRegex` 空模式语义显式文档化**（12.8，采用本地语义「空 patterns = 匹配全部」） | 全量测试通过；空 patterns 语义已写入配置文档 |
 | 6 | 删除旧代码：**仅** `service/convert.go` 主体（2229 行）。**`service/openaicompat/` 不删**——12.15.3 已决定该包整体保留、行数不减少，它与 relaykit 的基础转换重复但不可切分（12.15.1） | `service/convert.go` 无残留引用；`service/openaicompat/` 的 3 个消费者（4.5.1）行为不变 |
 
-三处硬依赖：
+四处硬依赖：
 
 - `types` 是 `dto` 的前置（relaykit 的 DTO 必须 import `relaykit/types`）；本地 `types/error.go` import 宿主 `common`，上游改 import `kitutil`，所以 `types` 迁移牵动 `common → kitutil` 替换
+- **`dto` 迁入 `relaykit/dto` 后不得再 import 任何宿主包或 gin——这是上游 `relaykit/relayconvert/boundary_test.go` 会断言失败的硬约束**（见下「阶段 2 的前置：`boundary_test.go` 是阶段 2 的硬门禁」）。`types` 那一处 `common → kitutil` 只是该约束在 `types` 上的体现；`dto` 自身还有 12 个 `common`、2 个 `constant`、1 个 `logger` import 必须同批清除，其中 3 个符号 `kitutil` 未提供。**这必须列入阶段 2 的动作，不能等测试红了再补。**
 - `ClaudeConvertInfo` 别名是 `Meta` 实现的前置。本地字段（`ToolCallStarted map[int]bool`、`ToolCallIDs`、`ToolCallNames`、`ToolCallPendingArgs`）与 `convmeta.ClaudeConvertInfo`（`ToolCalls []*ClaudeStreamToolCall`、`ToolCallByIndex`、`ToolCallByID`）**字段名与类型都不同**，`service/convert.go` 引用本地字段 22 处（6+5+5+6），改别名后全部编译失败
 - `dto.Request.IsStream` 签名迁移**不可机械替换**：本地 `IsStream(c *gin.Context)`，relaykit `IsStream(c *http.Request)`；`dto/gemini.go:112` 用了 `c.Query("alt")`，`*http.Request` 无此方法。影响面见下「阶段 2 的前置：`IsStream` 迁移的实际范围」
 
@@ -393,7 +394,7 @@ const (
 
 **取得方式**：整体拷贝 `upstream/main:relaykit/` 到仓库根的 `relaykit/`。依据（已实测）：
 
-- **relaykit 自包含**：全目录对宿主零 import——`git grep '^\s*[a-z]*\s*"github.com/QuantumNous/new-api/' upstream/main -- 'relaykit/**/*.go'` 排除 `relaykit/` 自身后为空。（`relayconvert/boundary_test.go:18` 里的 `modulePrefix` 是**断言该约束**的测试常量，不是反向依赖。）
+- **relaykit 自包含**：全目录对宿主零 import——`git grep '^\s*[a-z]*\s*"github.com/QuantumNous/new-api/' upstream/main -- 'relaykit/**/*.go'` 排除 `relaykit/` 自身后为空。（`relayconvert/boundary_test.go` 里的 `modulePrefix`/`forbiddenPrefixes`/`allowedViolations` 是**以测试形式强制该约束**的常量，不是反向依赖；`allowedViolations` 为空，且文件约定「只减不增」。阶段 1 拷贝它即等于拷贝了一个阶段 2 必须满足的硬门禁，详见「阶段 2 的前置：`boundary_test.go` 是阶段 2 的硬门禁」。）
 - 规模：157 个文件（96 个非测试 `.go`）、35198 行，含自己的 `relaykit/go.mod` 与 `relaykit/go.sum`。
 - 上游接入方式照抄即可：根 `go.mod` 加 `require github.com/QuantumNous/new-api/relaykit v0.0.0` + `replace ... => ./relaykit`（`upstream/main:go.mod:176,179`）。
 
@@ -411,6 +412,32 @@ const (
 - **`dto/request_common.go:10` 是接口方法**，签名一改，全部实现者同时编译失败——不能逐个改
 - **10 个非测试 `dto/` 文件 import gin**（上列 8 个 + `dto/claude.go`、`dto/opaque_openai_responses_request.go`）；迁移后 relaykit 内不得再有 gin 依赖，这些 import 必须清除
 - **5 个生产调用点**：`relay/common/relay_info.go:690`、`relay/responses_handler.go:669,755`、`service/responses_bootstrap_recovery.go:192` 手上都只有 `*gin.Context`，需要一个 `c.Request` 的取用路径；`relay/channel/claude/relay-claude.go:346` 传的是 `IsStream(nil)`——该处接收者是 `dto.GeneralOpenAIRequest`，其实现为 `lo.FromPtrOr(r.Stream, false)`，**不触碰 `c`**，所以传 `nil` 是安全的既有用法。**唯一解引用 `c` 的实现是 `dto/gemini.go:111`（`c.Query("alt")` 与 `c.Request.URL.Path`）**，迁移后这两处都要改从 `*http.Request` 取值
+
+**阶段 2 的前置：`boundary_test.go` 是阶段 2 的硬门禁**
+
+上游 relaykit 自带 `relaykit/relayconvert/boundary_test.go`，它**以测试形式强制**「将要迁入 relaykit 的包不得 import 宿主」这条边界。阶段 1 整体拷贝 `upstream/main:relaykit/` 时该测试一并进入本仓库，从阶段 1 起就被 §9.3 的 `cd relaykit && GOWORK=off go test ./...` 执行。实测该测试：
+
+- 遍历 `kitDirs = {"relayconvert", "dto", "types", "reasonmap"}` 下所有非测试 `.go`，逐个解析 import
+- `forbiddenPrefixes = {"github.com/QuantumNous/new-api/", "github.com/gin-gonic/gin"}`——命中即 `t.Errorf`，只有 `relaykit/` 自身前缀与 `allowedViolations` 可豁免
+- **`allowedViolations` 是空 map**，且文件注释明写「**shrink this list, never grow it**」（「All initial violations have been cleared」）。**因此豁免不是退路**——把宿主 import 加进该表即违反文件自身的契约
+- 它以「含 `go.mod` 的最近祖先」为根（`repoRoot`），即 `relaykit/` 自身；`kitDirs` 是相对 `relaykit/` 的路径，与 `relaykit/dto/` 直接对应
+
+**后果**：阶段 2 若把本地协议 `dto` 迁入 `relaykit/dto` 而不先清掉宿主 import，阶段 2 的完成判据「DTO 测试通过」**必然为红**，且失败信息会把每一条宿主 import 逐行列出。本仓库现状（`HEAD`，非测试 `.go`）：
+
+| 被 dto import 的宿主包 | 文件数 | 符号 |
+|---|---|---|
+| `common` | 12 | `Marshal`、`Unmarshal`、`GetJsonType`、`Interface2String`、`JsonRawMessageToString`、`Any2Type`、`RawMessage`、`JsonDelim`、`NewJsonDecoderUseNumber`、`DecodeJsonFromDecoder`、`ResponsesRequestMetadata` |
+| `constant` | 2 | `ChannelTypeCodex`、`ChannelTypeOpenAI`、`ChannelTypeAzure`、`EndpointType` |
+| `logger` | 1 | `LogError` |
+| gin | 10 | （见上一节「`IsStream` 迁移的实际范围」） |
+
+**清除路径与缺口**：`relaykit/relayconvert/kitutil` 提供 `Marshal`、`Unmarshal`、`GetJsonType`、`Interface2String`、`JsonRawMessageToString`、`Any2Type`、`RawMessage`、`LogError`——`common`、`logger` 的大部分是**直接换包名**即可。但实测以下 **3 个符号 `kitutil` 未提供**，`dto` 又确实在用，必须逐项给出路（这是阶段 2 开工前必须补齐的分析，当前文档尚未给出）：
+
+- `common.JsonDelim`、`common.NewJsonDecoderUseNumber`、`common.DecodeJsonFromDecoder`——`dto/openai_request.go:1283-1307`（`UnmarshalJSON` 的流式 decoder 路径，即补丁 2 的机制之一）在用；`kitutil` 无对应导出
+- `common.ResponsesRequestMetadata`——`dto/opaque_openai_responses_request.go` 在用；`kitutil` 无对应导出
+- `constant.ChannelType*` / `constant.EndpointType`——`constant` 是宿主包且**不在** `kitDirs` 内，其类型本身可迁 `relaykit/types`，但 `dto` 对 `constant` 的 import 无论如何都要断掉（`dto/pricing.go:11` 的 `[]constant.EndpointType` 上游已改为 `[]types.EndpointType`，可照抄）
+
+对照上游做法：上游 `relaykit/dto` 的 35 个文件对宿主与 gin 零 import，靠的正是把这些符号在迁入前全部归位（或改写实现），而非加豁免。因此**阶段 2 必须新增一条动作：清空 `dto` 的全部 `common` / `constant` / `logger` / gin import（前者换 `kitutil`，`constant.EndpointType` 换 `types.EndpointType`，其余 3 个 `kitutil` 未提供的符号另行归位），并把 `boundary_test.go` 通过作为阶段 2 的完成判据之一**——它比「两个 module 均可编译」更严，因为 import 不合规时编译仍可能通过，只有该测试会拦下。
 
 阶段 0 的 unshallow：当前 `.git/shallow` 截断于 `9724ef1b2`，导致 `git merge-base HEAD upstream/main` 返回空、三点 diff 不可用。但**真实共同祖先存在**——`9724ef1b2` 的提交对象记录 `parent aa7d0d39a4`，而 `merge-base(HEAD, aa7d0d39a4)` = `dac55f0f`。空结果纯属浅克隆遮蔽。两点 diff（`git diff upstream/main HEAD`）当前可用，但它比较两棵树终态，无法回答「本地相对共同祖先改了什么」，所以 unshallow 仍是必要前置。
 
@@ -462,7 +489,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 | 1 | finish_reason 严格校验 | `stopReasonOpenAI2ClaudeStrict`（`service/convert.go:1125`）对未知值返回错误 | `reasonmap.OpenAIFinishReasonToClaudeStopReason` 的 `default: return finishReason` 原样透传 |
 | 2 | 多 choice | `ResponseOpenAI2ClaudeWithError` 在 `len(Choices) > 1` 时报错 | 遍历所有 choice 并拼接 |
 | 3 | `Message.ThinkingContent` | `dto/openai_request.go:407` 有该字段，`GetReasoningContent()` 三级回退 | relaykit `Message` 无 `ThinkingContent`，两级回退 |
-| 4 | `ClaudeConvertInfo` 字段 | 见第 7 节的三处硬依赖 | 字段名与类型均不同 |
+| 4 | `ClaudeConvertInfo` 字段 | 见第 7 节的四处硬依赖 | 字段名与类型均不同 |
 | 5 | `ResponsesStreamResponse` 形状 | `dto/openai_response.go:450` 有 `Error`、`Text`、`Arguments`、`CallId`、`Item` | `CallId` 在 `ResponsesOutput` 内而非事件顶层 |
 | 6 | 本地 DTO 独有方法 | 见 4.4（23 个，HEAD 20 个） | 无对应；反向有 5 个 relaykit 独有方法 |
 
@@ -491,6 +518,8 @@ GOWORK=off go test $(GOWORK=off go list -e ./... | grep -vxF "$(GOWORK=off go li
 # relaykit module
 cd relaykit && GOWORK=off go test ./...
 ```
+
+relaykit module 这一条**包含边界门禁**：`relaykit/relayconvert/boundary_test.go` 会断言 `relayconvert`/`dto`/`types`/`reasonmap` 不得 import 宿主包或 gin（`allowedViolations` 为空且约定「只减不增」）。阶段 1 拷贝后该测试即开始生效；阶段 2 迁 `dto` 时必须让它保持绿色，见「阶段 2 的前置：`boundary_test.go` 是阶段 2 的硬门禁」。
 
 `GOWORK=off` 不可省略（见「阶段 1 的前置」：本仓库不引入 `go.work`）。
 
@@ -526,6 +555,7 @@ cd relaykit && GOWORK=off go test ./...
 18. ~~**`matchAnyRegex` 空模式语义**（4.5.1）~~ → **12.8**：采用本地语义（空 patterns = 匹配全部）并文档化
 19. ~~**未跟踪文件纳入版本控制**（4.5.2）~~ → **12.14**：阶段 0 门禁，与会话确认后提交
 20. ~~**`service/openaicompat/` 的收敛边界**（4.5.1）~~ → **12.15**：**整体保留**。按能力切分在函数粒度不成立（`convertResponsesToolsToChat` 内交织 5 种工具语义）
+21. ~~**`dto` 迁入后对宿主包/gin 的 import 如何处理**~~ → **12.0.4**：阶段 2 必须清零，`boundary_test.go` 是硬门禁。3 个 `kitutil` 未提供的符号（`JsonDelim`/`NewJsonDecoderUseNumber`/`DecodeJsonFromDecoder`）与 1 个类型（`ResponsesRequestMetadata`）的归位方式（改写 vs 新增到 relaykit）**待阶段 2 开工前实测确定**，优先改写
 
 ## 11. 事实依据
 
@@ -700,6 +730,23 @@ git grep -l '"github.com/QuantumNous/new-api/dto"' HEAD -- '*.go' | wc -l       
 `dto` 不只是 `types` 的消费者。实测本地 **12 个非测试 dto 文件 import 宿主 `common`**、2 个 import `constant`、1 个 import `logger`（含测试口径为 21/3/1）；relaykit/dto 只 import `relaykit/types` 与 `relaykit/relayconvert/kitutil`。**完整的 import 图分析仍是未完成项**（见 4.5.5），阶段 2 开工前必须补齐——否则 `dto/channel_settings.go` 的 `constant.ChannelTypeCodex` 可能形成 `dto → constant → relaykit/types → dto` 的环。
 
 **这条约束决定了下面每一项的取舍，也解释了为何不能「先把 dto 搬过去再说」——搬的瞬间 33 个类型差异（基线口径，工作区 34）与全部宿主独有方法同时编译失败，必须同时给出出路。**
+
+#### 12.0.4 `boundary_test.go` 决定 `dto` 的宿主 import 必须归零（本轮新增）
+
+上游 relaykit 用 `relayconvert/boundary_test.go` **以测试形式**锁死「未来迁入 relaykit 的包不得 import 宿主或 gin」。`kitDirs` 含 `dto`，`forbiddenPrefixes` 含宿主 module 前缀与 `github.com/gin-gonic/gin`，`allowedViolations` 为空且约定「只减不增」。**这不是一条背景事实，而是阶段 2 的验收条件**——阶段 2 的完成判据必须包含「`cd relaykit && GOWORK=off go test ./...` 通过」，而不只是「两个 module 均可编译」（import 不合规时编译可以过，只有该测试会拦）。
+
+**决定**：阶段 2 在迁入 `dto` 的同一批动作里，把 `dto` 对宿主包的 import 全部清零，**不新增 `allowedViolations` 条目**（那会违反文件契约，见「阶段 2 的前置」）。归位方式：
+
+| 现状 | 归位方式 |
+|---|---|
+| `common` 的 `Marshal`/`Unmarshal`/`GetJsonType`/`Interface2String`/`JsonRawMessageToString`/`Any2Type`/`RawMessage`（12 文件） | 改 import `relaykit/relayconvert/kitutil`，同签名直接替换 |
+| `logger.LogError`（1 文件，`dto/gemini.go`） | 改 `kitutil.LogError` |
+| `constant.EndpointType`（`dto/pricing.go:11`） | 改 `types.EndpointType`（上游 relaykit `pricing.go:11` 即如此） |
+| `common.JsonDelim`、`common.NewJsonDecoderUseNumber`、`common.DecodeJsonFromDecoder`（`dto/openai_request.go:1283-1307`） | **`kitutil` 无对应导出**——需在 relaykit 内新增这三个（`kitutil/json.go` 的 `Codec` 接口已提供 `Unmarshal`，可承载等价实现），或改写该 `UnmarshalJSON` 走 `kitutil` 既有原语 |
+| `common.ResponsesRequestMetadata`（`dto/opaque_openai_responses_request.go`） | **`kitutil` 无对应导出**——需迁入 `relaykit/types` 或在 relaykit 内新增，该字段是本地协议扩展（opaque request 的元数据） |
+| `constant.ChannelType*`（`dto/channel_settings.go`） | 上游 relaykit `dto/channel_settings.go` 不含这些代码路径；本地是随 `ChannelOtherSettings` 的本地独有方法一起进来的，**其归位与本文件的方法归属（4.4）绑定**：删则随之删除，留则需在 relaykit 内给出不依赖宿主 `constant` 的判定 |
+
+**风险提示**：以上 3 个新符号（`JsonDelim`/`NewJsonDecoderUseNumber`/`DecodeJsonFromDecoder`）与 1 个类型（`ResponsesRequestMetadata`）若迁入 relaykit，即为**对上游 relaykit 的本地分叉**。这与 12.9「不以上游 `feat/relaykit-tools` 分支为基线，避免与 main 产生不可合并分叉」的取舍同源，须一并评估：**优先用 `kitutil` 既有原语改写，只有确无等价时才新增**。新增项必须记入 `relaykit/VERSION`（阶段 1 建立的锚定文件），以便跟进上游时识别。
 
 ### 12.1 协议层语义 → 提上游（第 10 节第 1 项已完成的产出）
 
@@ -1029,6 +1076,7 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 | 18 | `matchAnyRegex` 空模式 | 采用本地语义并文档化 |
 | 19 | 未跟踪文件 | 阶段 0 门禁，先提交 |
 | 20 | `openaicompat` 收敛边界 | **整体保留**。按能力切分在函数粒度不成立（12.15） |
+| 21 | `dto` 宿主 import 归零 | **阶段 2 必须清零**，`boundary_test.go` 是硬门禁，不得加 `allowedViolations`（12.0.4）。3 个 `kitutil` 未提供的符号归位方式待实测（第 10 节第 27 项） |
 
 ### 12.18 本轮审查新增的未决项
 
@@ -1040,3 +1088,4 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 | 24 | `openaicompat` tool 循环重构 | 让基础分支可独立转调 relaykit 的唯一路径；独立重构，不在本次范围（12.15.3） |
 | 25 | 本地行为的 golden 基线 | 24 个快照是上游自己的基线，测不到 9.1/9.2 的 12 处本地差异。须用当前 HEAD 生成本地基线（12.16） |
 | 26 | ~~命名空间字段的生产引用精确计数~~ | **已关闭**（2026-10-03）：见 12.6，已给出「口径 + 命令 + 结果」——11 个非测试文件、跨 6 个包。早期写的「4 个包」无法用任何单一命令复现 |
+| 27 | `dto` 宿主 import 归零后 3 个符号的归位方式 | `JsonDelim`/`NewJsonDecoderUseNumber`/`DecodeJsonFromDecoder`（`kitutil` 无对应）与类型 `ResponsesRequestMetadata`：优先用 `kitutil` 既有原语改写 `dto/openai_request.go` 的 `UnmarshalJSON`，否则新增到 relaykit 并记入 `relaykit/VERSION`。**阶段 2 开工前必须实测确定**，否则 `boundary_test.go` 无法转绿（12.0.4） |

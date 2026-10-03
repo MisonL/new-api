@@ -1,4 +1,4 @@
-# CR: 协议转换层收敛到上游 relaykit 的设计与十一轮对抗审查
+# CR: 协议转换层收敛到上游 relaykit 的设计与十二轮对抗审查
 
 采样时间：2026-09-30（2026-10-01 补充本地独有能力盘点、第五轮架构审查）
 本地基线：`9c4758b53`（dev 分支；记录写作时 HEAD = `a1d5e9aad`；盘点时 HEAD = `2cf100a1d`）
@@ -22,7 +22,7 @@
 
 ## 审计方式
 
-五轮对抗性审查，每轮更换角度而非重复（第五轮的事实核验部分在架构攻击之后才完成，其 6 处修正见下）；其后又对设计文档做过 9 次独立复核（见「设计文档提交记录」的末 9 行）：第 6–8 轮转向此前未查区块的事实核验（第 8 轮零发现），第 9–10 轮转向**执行层**，补齐阶段 6 矛盾、relaykit 源码获取、`IsStream` 影响面、回滚止损点，以及阶段表逐条走查找出的 6 处引用面问题。
+五轮对抗性审查，每轮更换角度而非重复（第五轮的事实核验部分在架构攻击之后才完成，其 6 处修正见下）；其后又对设计文档做过 11 次独立复核（见「设计文档提交记录」的末 11 行）：第 6–8 轮转向此前未查区块的事实核验（第 8 轮零发现），第 9–10 轮转向**执行层**，补齐阶段 6 矛盾、relaykit 源码获取、`IsStream` 影响面、回滚止损点，以及阶段表逐条走查找出的 6 处引用面问题；第 11 轮转向**阶段间的数据流**，发现 `boundary_test.go` 是阶段 2 的隐性硬门禁；第 12 轮为全维度复核。
 
 | 轮次 | 子代理数 | 角度 |
 | --- | --- | --- |
@@ -32,7 +32,7 @@
 | 4 | 2 | 阶段可执行性；本地独有能力完整性 |
 | 5 | 2 | 架构攻击（决策可执行性、依赖顺序、验证策略缺口）6 条全部复现成立；事实核验（逐条复现第 12 节断言）大部分通过、6 处需修正 |
 
-主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误，第 6 轮再修正 3 处（含 1 处主代理自己引入的），第 7 轮再修正 5 处，第 8 轮零发现，第 9 轮补执行层 4 处缺口（其中 2 处为主代理当轮自己引入并自查修正），第 10 轮再找出 6 处阶段表引用面问题，第 11 轮（全维度复核）推翻第 7 轮写入的一处计数（内建转换器 8→12）。
+主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误，第 6 轮再修正 3 处（含 1 处主代理自己引入的），第 7 轮再修正 5 处，第 8 轮零发现，第 9 轮补执行层 4 处缺口（其中 2 处为主代理当轮自己引入并自查修正），第 10 轮再找出 6 处阶段表引用面问题，第 11 轮再找出 1 处跨阶段数据流缺口（`boundary_test.go`），第 12 轮（全维度复核）推翻第 7 轮写入的一处计数（内建转换器 8→12）。
 
 ## 核心结论
 
@@ -147,7 +147,7 @@ const (
 | 「`service/openaicompat/` 上游无此包」（同上，未加限定） | 包确无但能力大部分有——上游在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，宿主留了同名函数转发 shim |
 | 「`relay/common/responses_stream_options_compat.go`」（同上） | 该文件不存在，系误记 |
 | 「工具名契约与别名还原属部署关切」（同上） | 跨协议工具名映射，上游零覆盖，属协议层 |
-| 「4 个文本格式间的 8 个内建转换器（6 双向对 + 2 单向）」（第七轮引入，第十一轮推翻） | 实为 12 个（覆盖全部 12 个有序对，6 双向对、0 单向）；只数了 `Converter*` 命名，漏了 4 个 `requestConverter*` 条目 |
+| 「4 个文本格式间的 8 个内建转换器（6 双向对 + 2 单向）」（第七轮引入，第十二轮推翻） | 实为 12 个（覆盖全部 12 个有序对，6 双向对、0 单向）；只数了 `Converter*` 命名，漏了 4 个 `requestConverter*` 条目 |
 
 ### 主代理坚持多轮的错误结论
 
@@ -375,7 +375,45 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 
 第 5 处则说明**跨节同步是个反复出错的点**：我在第九轮改了 §12.6 的数，却漏了 §12.17 汇总表里的同一个数——**改一个数时要 grep 全文，而不是只改当前节**。
 
-## 第十一轮：全维度复核发现的计数错误（2026-10-03）
+## 第十一轮：跨阶段数据流走查——`boundary_test.go` 是阶段 2 的隐性硬门禁（2026-10-03）
+
+第九、十轮走的是「每一阶段自身是否可执行」。本轮走**阶段之间的数据流**：前一阶段的产物进入下一阶段时，是否仍以假设的形态存在；以及**每个阶段的完成判据在迁移后是否真的能通过**。找出 **1 处执行层硬缺口 + 3 处已被文档覆盖的确认项**。
+
+**核心发现：阶段 1 拷贝 relaykit 时，连带拷入了一个阶段 2 会失败的测试。**
+
+`relaykit/relayconvert/boundary_test.go` 以测试形式锁死「将要迁入 relaykit 的包不得 import 宿主或 gin」：
+
+```go
+var kitDirs = []string{"relayconvert", "dto", "types", "reasonmap"}
+var forbiddenPrefixes = []string{"github.com/QuantumNous/new-api/", "github.com/gin-gonic/gin"}
+var allowedViolations = map[string]bool{}   // 空，注释写 "All initial violations have been cleared"
+```
+
+文件注释明写「**shrink this list, never grow it**」。该测试以含 `go.mod` 的最近祖先为根（即 `relaykit/`），`kitDirs` 直接对应 `relaykit/dto` 等目录，命中即 `t.Errorf`。
+
+**为什么这是阶段 2 的问题**：阶段 2 把本地协议 `dto` 迁入 `relaykit/dto`。而本地 `dto`（`HEAD`，非测试 `.go`）有 **12 个文件 import 宿主 `common`、2 个 import `constant`、1 个 import `logger`，另 10 个 import gin**。迁入即命中该测试。**阶段 2 的完成判据写的是「两个 module 均可编译；DTO 测试通过」——但 import 不合规时编译可以过，只有 `cd relaykit && GOWORK=off go test ./...` 会拦下**，而阶段 2 的行里从未提到这个测试。
+
+| 被 dto import 的宿主包 | 文件数 | 符号 | 归位 |
+| --- | --- | --- | --- |
+| `common` | 12 | `Marshal`/`Unmarshal`/`GetJsonType`/`Interface2String`/`JsonRawMessageToString`/`Any2Type`/`RawMessage` | 改 import `relaykit/relayconvert/kitutil`，同签名直接替换 |
+| `common` | 1（`openai_request.go`） | `JsonDelim`、`NewJsonDecoderUseNumber`、`DecodeJsonFromDecoder` | **`kitutil` 无对应导出**——须改写或新增到 relaykit |
+| `common` | 1（`opaque_openai_responses_request.go`） | `ResponsesRequestMetadata` | **`kitutil` 无对应导出**——须迁 `relaykit/types` 或新增 |
+| `constant` | 2 | `EndpointType`（`pricing.go:11`） | 改 `types.EndpointType`（上游即如此） |
+| `constant` | 1（`channel_settings.go`） | `ChannelTypeCodex`/`ChannelTypeOpenAI`/`ChannelTypeAzure` | 随本地独有方法归属一并决策（4.4） |
+| `logger` | 1 | `LogError` | 改 `kitutil.LogError` |
+| gin | 10 | — | 见「阶段 2 的前置：`IsStream` 迁移的实际范围」 |
+
+**补法**：新增 §7 硬依赖第 2 条（`dto` 不得 import 宿主/gin，`boundary_test.go` 为硬门禁）；阶段 2 的行补「清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import」与完成判据「`boundary_test.go` 通过」；新增「阶段 2 的前置：`boundary_test.go` 是阶段 2 的硬门禁」整段（含上表与「不加 `allowedViolations`」的理由）；新增 §12.0.4 记录该决定；§9.3 注明 relaykit 的 `go test ./...` 含边界门禁；§11 的 boundary 提及处补 `forbiddenPrefixes`/`allowedViolations` 与「阶段 2 必须满足」；新增第 10 节第 21 项与 §12.17 #21。
+
+**同时确认的 3 处跨阶段数据流（走查后判定已覆盖，无需改动）**：
+
+1. **阶段 1 → 2**：`types` 拆分后本地独有符号靠别名转发（`constant/endpoint_type.go` 的手法），`dto` 改 import 即可，链路成立——文档已写。
+2. **阶段 2 → 3**：`service/convert.go` 对 `dto.*` 有 **37 个不同类型**引用；`dto` 迁走后改 import 路径即可（阶段 2 的 327 个 import 点含它）。`ClaudeConvertInfo.` 在 `service/convert.go` **共 59 处**，其中本地独有 4 字段（`ToolCallStarted`/`ToolCallIDs`/`ToolCallNames`/`ToolCallPendingArgs`）为 **22 处**——阶段 3 写的「22 处字段引用（6+5+5+6）」经逐行复现**完全准确**（分字段 6/5/5/6）。
+3. **阶段 3 → 4**：`RelayInfo` 在阶段 3 实现 `convmeta.Meta` 后，阶段 4 的补丁 1 落在 relaykit 的转换器内（`internal/claude_messages/to_oai_chat_req.go:181`、`to_oai_responses_req.go:165`），不依赖宿主侧改动，顺序成立。
+
+**方法学教训（第十一轮）**：前三轮分别查了事实层、阶段自身可执行性、引用面；本轮查**阶段间的契约**——一个阶段的产物是否满足下一阶段**没说出口**的前提。这次的形式是：阶段 1 的产物（拷贝 relaykit）**自带一个测试**，而该测试恰好对阶段 2 施加了阶段 2 从未声明的约束。**走查阶段时不能只看阶段表列出的动作，还要看每个动作的产物里是否藏着对后续阶段的隐含断言**——`boundary_test.go` 就是「上游代码里写死的验收标准」。同类风险面：relaykit 内任何 `*_test.go`、golden 快照、`go.mod` 的 `require` 都在拷贝瞬间成为本地契约。
+
+## 第十二轮：全维度复核发现的计数错误（2026-10-03）
 
 对本会话全部提交做全维度复核时，用一个只读 agent 独立复现 `builtinTextConverters` 的规模，推翻了第七轮（`c926fb0e9`）写入的数字：
 
@@ -393,7 +431,7 @@ git show upstream/main:relaykit/relayconvert/text_converter_registry.go \
 
 12 个 ID 中 8 个以 `Converter*` 命名、4 个以 `requestConverter*` 命名。第七轮只数了前者，漏了后 4 个复合 `StepConverters` 条目，并据此臆造了「2 个单向」——实际每个有序对都有反向条目，无一单向。**本轮修正 §3.1 表格（设计文档第 68 行）、审计记录第 83 行与第 322 行。**
 
-**方法学教训（第十一轮）**：这是一个**「计数口径未写明」**型的错误，与第九、十轮的性质不同——那两轮是「两处合理表述互相冲突」，这一轮是「一个数字对应多个可数的子集，选了错的子集且没写口径」。`builtinTextConverters` 里同时存在 `Converter*` 与 `requestConverter*` 两类命名，只按命名前缀 `grep` 会系统性漏掉后者。**凡计数结论，命令必须能唯一地圈定全集**：本轮的正确写法是按 `^\t\tID:` 的缩进层级取顶层元素，而非按命名模式。
+**方法学教训（第十二轮）**：这是一个**「计数口径未写明」**型的错误，与第九、十轮的性质不同——那两轮是「两处合理表述互相冲突」，这一轮是「一个数字对应多个可数的子集，选了错的子集且没写口径」。`builtinTextConverters` 里同时存在 `Converter*` 与 `requestConverter*` 两类命名，只按命名前缀 `grep` 会系统性漏掉后者。**凡计数结论，命令必须能唯一地圈定全集**：本轮的正确写法是按 `^\t\tID:` 的缩进层级取顶层元素，而非按命名模式。
 
 ## 边界与未验证项
 
@@ -424,8 +462,9 @@ git show upstream/main:relaykit/relayconvert/text_converter_registry.go \
 | `eec2dd4b1` | 独立复核：修正上一轮自己引入的一处能力断言 |
 | `c4d21ce49` | 独立复核：同步审计记录、修正分支比对取证（`relaykit/` 68 文件 `3910+/746−`、toolconv 差异为功能新增） |
 | `7b8d478d7` | 第六轮：`channel_settings.go` 方法数 41→42、补计数口径、拆分 §12.9 单元格 |
-| `c926fb0e9` | 第七轮：`state` 的论据纠正、`claudeCapabilitiesFor` 10 个模型 / `:35-78`、内建转换器计数（当轮误写为 8，第十一轮改为 12）、`var` 别名、`gemini.go:112` |
+| `c926fb0e9` | 第七轮：`state` 的论据纠正、`claudeCapabilitiesFor` 10 个模型 / `:35-78`、内建转换器计数（当轮误写为 8，第十二轮改为 12）、`var` 别名、`gemini.go:112` |
 | `fffa65533` | 第九轮：执行层补完——阶段 6 矛盾、relaykit 源码获取与版本锚定、`IsStream` 影响面、§8.1 回滚止损点；关闭原第 26 项 |
-| （本轮） | 第十一轮：全维度复核推翻第七轮的转换器计数（8→12），修正 §3.1、审计记录两处与本文档汇总 |
+| （本轮·第十一轮） | 跨阶段数据流走查：发现 `boundary_test.go` 是阶段 2 的隐性硬门禁（`dto` 的 24 处宿主/gin import 必须清零），补 §7 硬依赖第 2 条、阶段 2 判据、「阶段 2 的前置」整段、§12.0.4、§9.3 注、§11 注、第 10 节第 21 项、§12.17 #21 |
+| （本轮·第十二轮） | 全维度复核推翻第七轮的转换器计数（8→12），修正 §3.1、审计记录两处与本文档汇总 |
 
-文档当前 1042 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1091 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
