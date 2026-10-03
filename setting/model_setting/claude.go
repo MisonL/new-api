@@ -67,8 +67,7 @@ func isCredentialHeader(name string) bool {
 // accepts for the same credential: Authorization: Bearer is the canonical form
 // and x-api-key the legacy one. An Anthropic-native request carries both (see
 // relay/channel/anthropic_auth_header.go) because an upstream may read either,
-// so the two must name the same principal. They are therefore overridden as one
-// credential, not as two independent headers.
+// so the two must name the same principal.
 var anthropicCredentialHeaderNames = map[string]struct{}{
 	"authorization": {},
 	"x-api-key":     {},
@@ -91,9 +90,12 @@ func (c *ClaudeSettings) WriteHeaders(originModel string, httpHeader *http.Heade
 	if !ok {
 		return
 	}
-	writeAnthropicCredential(headers, httpHeader)
+	carriesAnthropicCredentialPair := httpHeader.Get("Authorization") != "" && httpHeader.Get("x-api-key") != ""
+	if carriesAnthropicCredentialPair {
+		writeAnthropicCredential(headers, httpHeader)
+	}
 	for headerKey, headerValues := range headers {
-		if isAnthropicCredentialHeader(headerKey) {
+		if carriesAnthropicCredentialPair && isAnthropicCredentialHeader(headerKey) {
 			// Written as a single credential above; rewriting one of the pair
 			// here would put the two back out of step.
 			continue
@@ -122,21 +124,27 @@ func (c *ClaudeSettings) WriteHeaders(originModel string, httpHeader *http.Heade
 // Overriding only the configured header would leave the other one carrying the
 // channel key, so a request would present two different principals depending on
 // which header the upstream happens to read - exactly the ambiguity
-// SetAnthropicAuthHeaders exists to avoid. The sibling is moved to the same
-// token, but only when the request already carries it: a path that sends just
-// one form is left alone rather than gaining a header it did not have.
+// SetAnthropicAuthHeaders exists to avoid.
+//
+// This is only correct on a request that already carries both forms, which is
+// how an Anthropic-native request is built. Vertex fills Authorization with a
+// Google OAuth token and AWS sets its own credential after this runs; on those
+// paths the pair does not exist, so moving the sibling would overwrite a
+// credential that has nothing to do with the operator's value (and, for Vertex,
+// break the Google authentication). WriteHeaders calls this only when both
+// headers are present, leaving single-form paths to the plain replacement below.
 //
 // Authorization is the canonical form, so it wins when both forms are
 // configured and the result does not depend on map iteration order.
 func writeAnthropicCredential(headers map[string][]string, httpHeader *http.Header) {
 	if value, ok := configuredHeaderValue(headers, "Authorization"); ok {
 		httpHeader.Set("Authorization", value)
-		setHeaderIfPresent(httpHeader, "x-api-key", anthropicToken(value))
+		httpHeader.Set("x-api-key", anthropicToken(value))
 		return
 	}
 	if value, ok := configuredHeaderValue(headers, "x-api-key"); ok {
 		httpHeader.Set("x-api-key", value)
-		setHeaderIfPresent(httpHeader, "Authorization", "Bearer "+anthropicToken(value))
+		httpHeader.Set("Authorization", "Bearer "+anthropicToken(value))
 	}
 }
 
@@ -162,14 +170,6 @@ func configuredHeaderValue(headers map[string][]string, name string) (string, bo
 		return "", false
 	}
 	return strings.Join(values, ","), true
-}
-
-// setHeaderIfPresent rewrites header only when the request already carries it.
-func setHeaderIfPresent(httpHeader *http.Header, name, value string) {
-	if len(httpHeader.Values(name)) == 0 {
-		return
-	}
-	httpHeader.Set(name, value)
 }
 
 // anthropicToken reduces either credential header form to the bare token:

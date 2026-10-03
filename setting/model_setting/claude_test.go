@@ -315,3 +315,78 @@ func TestClaudeSettingsWriteHeadersReplacesNonAnthropicCredentialWithoutSiblings
 		t.Fatalf("expected Authorization to be untouched, got %q", got)
 	}
 }
+
+// A request that carries only one form is not an Anthropic-native request built
+// by SetAnthropicAuthHeaders: Vertex fills Authorization with a Google OAuth
+// token and never sets x-api-key. Overriding x-api-key there must leave the
+// Google credential alone. Synchronizing the sibling unconditionally would
+// rewrite Authorization with the operator key and break the Google
+// authentication, which is worse than the split it set out to fix.
+func TestClaudeSettingsWriteHeadersLeavesForeignAuthorizationAlone(t *testing.T) {
+	settings := &ClaudeSettings{
+		HeadersSettings: map[string]map[string][]string{
+			"claude-3-5-sonnet": {
+				"x-api-key": {"operator-key"},
+			},
+		},
+	}
+
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer ya29.google-access-token")
+
+	settings.WriteHeaders("claude-3-5-sonnet", &headers)
+
+	if got := headers.Get("Authorization"); got != "Bearer ya29.google-access-token" {
+		t.Fatalf("expected the Google credential to survive, got %q", got)
+	}
+	if got := headers.Get("x-api-key"); got != "operator-key" {
+		t.Fatalf("expected the configured x-api-key, got %q", got)
+	}
+}
+
+// The same holds for the other direction: a lone Authorization that did not come
+// from the Anthropic pair must not drag an x-api-key along.
+func TestClaudeSettingsWriteHeadersLeavesForeignApiKeyAlone(t *testing.T) {
+	settings := &ClaudeSettings{
+		HeadersSettings: map[string]map[string][]string{
+			"claude-3-5-sonnet": {
+				"Authorization": {"Bearer operator-key"},
+			},
+		},
+	}
+
+	headers := http.Header{}
+	headers.Set("x-api-key", "some-other-key")
+
+	settings.WriteHeaders("claude-3-5-sonnet", &headers)
+
+	if got := headers.Get("x-api-key"); got != "some-other-key" {
+		t.Fatalf("expected the existing x-api-key to survive, got %q", got)
+	}
+	if got := headers.Get("Authorization"); got != "Bearer operator-key" {
+		t.Fatalf("expected the configured Authorization, got %q", got)
+	}
+}
+
+// AWS calls WriteHeaders before it sets its own Authorization, so neither header
+// is present yet; the operator value must not conjure the sibling.
+func TestClaudeSettingsWriteHeadersOnEmptyRequestWritesOnlyConfigured(t *testing.T) {
+	settings := &ClaudeSettings{
+		HeadersSettings: map[string]map[string][]string{
+			"claude-3-5-sonnet": {
+				"Authorization": {"Bearer operator-key"},
+			},
+		},
+	}
+
+	headers := http.Header{}
+
+	settings.WriteHeaders("claude-3-5-sonnet", &headers)
+
+	if got := headers.Get("Authorization"); got != "Bearer operator-key" {
+		t.Fatalf("expected the configured Authorization, got %q", got)
+	}
+	if values := headers.Values("x-api-key"); len(values) != 0 {
+		t.Fatalf("expected no x-api-key on a request that never carried one, got %v", values)
+	}
+}
