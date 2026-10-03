@@ -356,18 +356,43 @@ const (
 | 阶段 | 内容 | 完成判据 |
 |---|---|---|
 | 0 | `git fetch --unshallow upstream`；建立 CI 门禁（两个 module 分别 `go test`，`GOWORK=off`）；~~完成本地独有能力盘点~~（已完成，见第 4 节）；**把 `relay/common/responses_tool_names.go` 及 2 个测试文件纳入版本控制**（第 10 节第 19 项） | CI 能跑通现有测试；盘点清单已产出；未跟踪文件已提交 |
-| 1 | 引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译 |
+| 1 | **取得 relaykit 源码**（见下「阶段 1 的前置」）；引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译；`relaykit/` 的版本已锚定并记录 |
 | 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写** + **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ 全部宿主独有方法（全包 394 vs 273 函数）给出出路。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**327 个 import 点全部验证** |
 | 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 别名，同步改写 `service/convert.go` 的 22 处字段引用；`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过 |
 | 4 | 协议映射切换到 relaykit；打补丁 1；对齐第 4 节的处置结论；**`*WithError` 系列直接删除**（12.3，不保留包装层） | 转换测试通过；grok reasoning 可见 |
 | 5 | 宿主管道接入 relaykit 分派；**响应方向暴露策略在 relaykit 内门控**（12.4，`convmeta.Options` 钩子，必须在索引分配之前——后置过滤不可行。落点 `oai_chat/to_claude_messages_resp.go` 已接收 `info`，无需透传改造）；规则模型附带修正 | 全量测试通过 |
-| 6 | 删除旧代码（`service/convert.go` 主体、`service/openaicompat/` 中被替代部分） | 无残留引用 |
+| 6 | 删除旧代码：**仅** `service/convert.go` 主体（2229 行）。**`service/openaicompat/` 不删**——12.15.3 已决定该包整体保留、行数不减少，它与 relaykit 的基础转换重复但不可切分（12.15.1） | `service/convert.go` 无残留引用；`service/openaicompat/` 的 3 个消费者（4.5.1）行为不变 |
 
 三处硬依赖：
 
 - `types` 是 `dto` 的前置（relaykit 的 DTO 必须 import `relaykit/types`）；本地 `types/error.go` import 宿主 `common`，上游改 import `kitutil`，所以 `types` 迁移牵动 `common → kitutil` 替换
 - `ClaudeConvertInfo` 别名是 `Meta` 实现的前置。本地字段（`ToolCallStarted map[int]bool`、`ToolCallIDs`、`ToolCallNames`、`ToolCallPendingArgs`）与 `convmeta.ClaudeConvertInfo`（`ToolCalls []*ClaudeStreamToolCall`、`ToolCallByIndex`、`ToolCallByID`）**字段名与类型都不同**，`service/convert.go` 引用本地字段 22 处（6+5+5+6），改别名后全部编译失败
-- `dto.Request.IsStream` 签名迁移**不可机械替换**：本地 `IsStream(c *gin.Context)`，relaykit `IsStream(c *http.Request)`；`dto/gemini.go:112` 用了 `c.Query("alt")`，`*http.Request` 无此方法
+- `dto.Request.IsStream` 签名迁移**不可机械替换**：本地 `IsStream(c *gin.Context)`，relaykit `IsStream(c *http.Request)`；`dto/gemini.go:112` 用了 `c.Query("alt")`，`*http.Request` 无此方法。影响面见下「阶段 2 的前置：`IsStream` 迁移的实际范围」
+
+**阶段 1 的前置：relaykit 源码的取得与版本锚定**
+
+本仓库当前**没有** `relaykit/` 目录，`HEAD` 上也不存在；上游的 relaykit 是在提交 `86ac0f774`（`refactor: extract protocol conversion layer into standalone relaykit module (#6369)`，2026-07-27，368 文件）引入的，该提交**不是本地 `HEAD` 的祖先**。因此 relaykit 源码必须显式取得，不能靠本地历史恢复。
+
+**取得方式**：整体拷贝 `upstream/main:relaykit/` 到仓库根的 `relaykit/`。依据（已实测）：
+
+- **relaykit 自包含**：全目录对宿主零 import——`git grep '^\s*[a-z]*\s*"github.com/QuantumNous/new-api/' upstream/main -- 'relaykit/**/*.go'` 排除 `relaykit/` 自身后为空。（`relayconvert/boundary_test.go:18` 里的 `modulePrefix` 是**断言该约束**的测试常量，不是反向依赖。）
+- 规模：157 个文件（96 个非测试 `.go`）、35198 行，含自己的 `relaykit/go.mod` 与 `relaykit/go.sum`。
+- 上游接入方式照抄即可：根 `go.mod` 加 `require github.com/QuantumNous/new-api/relaykit v0.0.0` + `replace ... => ./relaykit`（`upstream/main:go.mod:176,179`）。
+
+**版本锚定（必须做，否则本文档全部行号失效）**：本文档所有 `relaykit/...` 行号均以 `upstream/main` = **`789c97019`**（2026-09-28）为准。拷贝后必须把该 commit 记入 `relaykit/VERSION` 或等价文件，并在后续需要跟进上游时**重新核对本文档的行号引用**——上游 relaykit 仍在演进（见「边界与未验证项」）。
+
+**依赖影响**：relaykit 的 `require` 会经 MVS 抬高根 module 的两个依赖版本——`github.com/samber/lo` `v1.52.0 → v1.53.0`（本地 58 个文件在用）、`github.com/tidwall/gjson` `v1.18.0 → v1.19.0`（本地 14 个文件在用）。`google/uuid`、`stretchr/testify`、`tidwall/sjson` 版本相同；`golang.org/x/text` 本地（v0.41.0）高于 relaykit 要求（v0.35.0），不受影响。阶段 1 完成后须跑全量测试确认这两个次版本升级无行为回归。
+
+**`go.work`**：上游仓库既无 `go.work` 也无 `go.work.sum`。本地与 CI 一律用 `GOWORK=off` 分别构建/测试两个 module，**不引入 `go.work`**——它会让两个 module 共享同一依赖解析结果，掩盖 relaykit 自身的依赖闭包问题。上游的 `makefile` `test` 目标（`upstream/main:makefile:43-49`）就是 `GOWORK=off go test` 两次（根 module 排除 relaykit 子目录、再 `cd relaykit` 单独测），可作模板。
+
+**阶段 2 的前置：`IsStream` 迁移的实际范围**
+
+§7 硬依赖 3 只举了 `dto/gemini.go:112` 一例，实测影响面远大于此（已逐项核验）：
+
+- **12 个方法**（11 个具体类型 + 1 个接口方法）签名从 `*gin.Context` 改为 `*http.Request`，分布在 **8 个文件**：`dto/audio.go:44`、`dto/embedding.go:48`、`dto/gemini.go:111,518,546`、`dto/openai_image.go:167`、`dto/openai_request.go:207,1253`、`dto/openai_responses_compaction_request.go:135`、`dto/request_common.go:10,22`、`dto/rerank.go:21`
+- **`dto/request_common.go:10` 是接口方法**，签名一改，全部实现者同时编译失败——不能逐个改
+- **10 个非测试 `dto/` 文件 import gin**（上列 8 个 + `dto/claude.go`、`dto/opaque_openai_responses_request.go`）；迁移后 relaykit 内不得再有 gin 依赖，这些 import 必须清除
+- **5 个生产调用点**：`relay/common/relay_info.go:690`、`relay/responses_handler.go:669,755`、`service/responses_bootstrap_recovery.go:192` 手上都只有 `*gin.Context`，需要一个 `c.Request` 的取用路径；`relay/channel/claude/relay-claude.go:346` 传的是 `IsStream(nil)`——该处接收者是 `dto.GeneralOpenAIRequest`，其实现为 `lo.FromPtrOr(r.Stream, false)`，**不触碰 `c`**，所以传 `nil` 是安全的既有用法。**唯一解引用 `c` 的实现是 `dto/gemini.go:111`（`c.Query("alt")` 与 `c.Request.URL.Path`）**，迁移后这两处都要改从 `*http.Request` 取值
 
 阶段 0 的 unshallow：当前 `.git/shallow` 截断于 `9724ef1b2`，导致 `git merge-base HEAD upstream/main` 返回空、三点 diff 不可用。但**真实共同祖先存在**——`9724ef1b2` 的提交对象记录 `parent aa7d0d39a4`，而 `merge-base(HEAD, aa7d0d39a4)` = `dac55f0f`。空结果纯属浅克隆遮蔽。两点 diff（`git diff upstream/main HEAD`）当前可用，但它比较两棵树终态，无法回答「本地相对共同祖先改了什么」，所以 unshallow 仍是必要前置。
 
@@ -387,6 +412,26 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 | AWS Converse | `relay/channel/aws/converse.go:748`（非流式）、`:1110`（流式 `thinking_delta`） | **否**，`converseOutputToClaudeResponse`（`:713`）直接从 `ConverseOutput` 构造 |
 
 前 5 条都持有 `info`，是首选落点。第 6 条有独立于 `service/convert.go` 的 thinking 生成逻辑，需单独处理。
+
+## 8.1 回滚与止损点
+
+本文档前 7 节讲「怎么做成」，本节讲「做不成时怎么办」。这是 6 个阶段里唯一涉及生产行为切换（阶段 4/5）的迁移，必须有中途止损点。
+
+**分层止损**（前两层是本迁移特有的，第三层复用既有门禁）：
+
+| 层 | 触发 | 动作 |
+|---|---|---|
+| **阶段内** | 任一阶段的完成判据不满足 | 该阶段**不合并**。阶段 1–3 纯属「新旧并存 + 编译期切换」，不改变任何运行时行为，失败即丢弃分支重来，代价可控 |
+| **阶段间** | 阶段 4 或 5 合并后发现回归 | **阶段 4 与 5 必须各自独立成一次合并**，不得压成一次。回归发生在阶段 4 就回滚到阶段 3 的末态——此时 `service/convert.go` 主体仍在，协议映射可切回本地实现，不需要 revert 阶段 2 的 327 个 import |
+| **发布** | 阶段 6 完成后上线 | 复用 `docs/operations/new-api-production-release-gates.md` 的门禁 E（灰度）与门禁 F（回滚）。本迁移**不新增发布流程**，也不改变该文档的停止条件 |
+
+**关键设计约束**：阶段 4「协议映射切换到 relaykit」必须是**单点可逆**的。即，切换动作收敛为一个可回退的开关或一次集中的函数体替换，而不是散落在 6 条响应路径（第 8 节）里的多点改写。若做不到单点可逆，则阶段 4 不能合并。
+
+**为什么阶段 2 的回滚代价可以接受**：阶段 2 只改 import 路径与类型对齐，`dto` 包的类型在迁移前后**语义一致**（33 个字段差异在阶段 2 内逐项对齐完毕，见 12.0.1）。这意味着阶段 2 的产物是「同一个包换了个位置」，出问题可以整体 revert，不会留下半迁移状态。
+
+**已知不可逆项**：无。本迁移不涉及数据库 schema 变更、不涉及数据回填、不改变持久化格式——`relaykit` 只承载协议转换的纯函数与状态机。因此回滚不需要独立的数据恢复方案（与门禁 F 提到的「Schema 或数据变更」不同）。
+
+**明确不做的事**：不引入双跑（新旧转换器同时执行并比对输出）。理由：转换是纯函数，双跑的比对结果等价于 golden 基线测试（12.16 已要求补建本地基线），却要在生产路径上付出双倍 CPU 与一份差异日志的维护成本。用测试覆盖等价性，不用生产双跑。
 
 ## 9. 验证策略
 
@@ -776,7 +821,20 @@ RetainReasoningInClaudeResponse func(modelName string) bool   // nil = 不保留
 - 二者都依赖 `ChatCompletionsToResponsesPolicy` 的 rules 模式（12.8），该策略本身是宿主配置体系的一部分
 - 上游把「是否转换」的决策明确留在宿主——其 `service/openai_chat_responses_mode.go` 注释原文：*"Chat→Responses upgrade policy is host routing logic (it decides **whether** to convert, reading host settings), so it lives here, not in relayconvert."*
 
-**影响**：`service/openaicompat/` **整体保留**（见 12.15——按能力切分在函数粒度不成立）。命名空间能力所依赖的字段（`ResponsesOutput.Namespace`、`ChannelOtherSettings` 的命名空间相关字段）**必须留在宿主可达的位置**：实测这些字段横跨 `dto`、`controller`、`model`、`service/openaicompat` 四个包，生产引用点分散在 `controller/responses_native_tool_identity.go`、`model/channel_responses_tool_capability.go`、`controller/relay_responses_tool_observation.go` 等处（**精确计数待补，见 12.18 第 26 项**）。若 `dto` 类型整体迁入 relaykit，则这些字段要么一并迁入（使 relaykit 承载宿主协议扩展），要么由宿主维护影子结构——**这是阶段 2 必须一并决策的耦合点**，见 12.0.2。
+**影响**：`service/openaicompat/` **整体保留**（见 12.15——按能力切分在函数粒度不成立）。命名空间能力所依赖的字段（`ResponsesOutput.Namespace`、`ChannelOtherSettings` 的命名空间相关字段）**必须留在宿主可达的位置**。
+
+**精确引用面（口径必须随结论给出）**：以命名空间**工具**相关的全部符号为口径——
+
+```bash
+PAT='NamespaceToolCall|SupportsNamespaceTools|NamespaceToolsCapability|ResolveResponsesNamespaceTools|ExplicitlyDisablesResponsesNamespaceTools|responsesNamespaceToolSelection|responsesToolTypeNamespace|NamespaceTools'
+git grep -lE "$PAT" HEAD -- '*.go' | grep -v '_test.go'
+```
+
+得 **11 个非测试文件，跨 6 个包**：`constant/context_key.go`、`controller/{relay.go,relay_responses_tool_observation.go}`、`dto/channel_settings.go`、`model/{channel_responses_tool_capability.go,channel_route_model.go}`、`relay/{channel/openai/responses_tool_capability.go,common/responses_input_filter.go}`、`service/{log_info_generate.go,openai_chat_responses_compat.go,openaicompat/responses_to_chat_request.go}`。
+
+**注意口径陷阱**：早期版本写「横跨 4 个包」（`dto`/`controller`/`model`/`service/openaicompat`），该数字**无法用任何单一命令复现**——它既漏了 `constant`、`relay/common` 与 `relay/channel/openai`，也漏了 `service/log_info_generate.go`。窄口径（只搜 `NamespaceToolCall` 等 4 个符号）得 8 个文件 / 6 个包，宽口径（上列 8 个符号）得 11 个文件 / 6 个包；无论哪个口径都不是 4 个包。本项即 12.18 原第 26 项，现以「口径 + 命令 + 结果」三者齐全的形式关闭。
+
+若 `dto` 类型整体迁入 relaykit，则这些字段要么一并迁入（使 relaykit 承载宿主协议扩展），要么由宿主维护影子结构——**这是阶段 2 必须一并决策的耦合点**，见 12.0.2。
 
 ### 12.7 custom tool bridge 门控 → 保留本地语义
 
@@ -945,4 +1003,4 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 | 23 | 33 个字段不兼容类型的逐项对齐（基线口径，工作区 34） | 12.0.1 已列清单，取舍未逐项给出 |
 | 24 | `openaicompat` tool 循环重构 | 让基础分支可独立转调 relaykit 的唯一路径；独立重构，不在本次范围（12.15.3） |
 | 25 | 本地行为的 golden 基线 | 24 个快照是上游自己的基线，测不到 9.1/9.2 的 12 处本地差异。须用当前 HEAD 生成本地基线（12.16） |
-| 26 | 命名空间字段的生产引用精确计数 | 12.6 早期写「18 个生产点」无可复现口径，已改为定性表述 |
+| 26 | ~~命名空间字段的生产引用精确计数~~ | **已关闭**（2026-10-03）：见 12.6，已给出「口径 + 命令 + 结果」——11 个非测试文件、跨 6 个包。早期写的「4 个包」无法用任何单一命令复现 |
