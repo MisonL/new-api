@@ -1,4 +1,4 @@
-# CR: 协议转换层收敛到上游 relaykit 的设计与五轮对抗审查
+# CR: 协议转换层收敛到上游 relaykit 的设计与十一轮对抗审查
 
 采样时间：2026-09-30（2026-10-01 补充本地独有能力盘点、第五轮架构审查）
 本地基线：`9c4758b53`（dev 分支；记录写作时 HEAD = `a1d5e9aad`；盘点时 HEAD = `2cf100a1d`）
@@ -32,7 +32,7 @@
 | 4 | 2 | 阶段可执行性；本地独有能力完整性 |
 | 5 | 2 | 架构攻击（决策可执行性、依赖顺序、验证策略缺口）6 条全部复现成立；事实核验（逐条复现第 12 节断言）大部分通过、6 处需修正 |
 
-主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误，第 6 轮再修正 3 处（含 1 处主代理自己引入的），第 7 轮再修正 5 处，第 8 轮零发现，第 9 轮补执行层 4 处缺口（其中 2 处为主代理当轮自己引入并自查修正），第 10 轮再找出 6 处阶段表引用面问题。
+主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误，第 6 轮再修正 3 处（含 1 处主代理自己引入的），第 7 轮再修正 5 处，第 8 轮零发现，第 9 轮补执行层 4 处缺口（其中 2 处为主代理当轮自己引入并自查修正），第 10 轮再找出 6 处阶段表引用面问题，第 11 轮（全维度复核）推翻第 7 轮写入的一处计数（内建转换器 8→12）。
 
 ## 核心结论
 
@@ -80,7 +80,7 @@ const (
 | 思考等级渲染 | `relay/claude_handler.go:55-104` 硬编码 `claude-opus-4-6/4-7` 前缀 | `reasoning.RenderClaude` + `claudeCapabilitiesFor`（`:35-78`）覆盖 10 个模型前缀：fable-5、mythos-5、mythos-preview、Opus 4.5/4.6/4.7/4.8/5、Sonnet 4.6/5，含 `defaultThinking`、`supportsEffort/XHigh/Max`、budget↔effort 互转 |
 | hosted 工具 | 散落在 `service/convert.go` 与 `relay/common/` | `toolconv/` 覆盖 10 种：`KindWebSearch`、`KindCodeExecution`、`KindComputerUse`、`KindFileSearch`、`KindImage`、`KindMCP`、`KindURLContext`、`KindWebFetch`、`KindFunction`、`KindNative` |
 | 降级可观测性 | `ConversionDiagnostic` 本地零命中 | `convdiag` + `types.ConversionDiagnostic` |
-| 转换质量分级 | 无 | `Good`/`Fair`/`Discouraged` 三级；4 个文本格式间 8 个内建转换器（6 双向 + 2 单向）各自标注 quality |
+| 转换质量分级 | 无 | `Good`/`Fair`/`Discouraged` 三级；4 个文本格式间 12 个内建转换器（覆盖全部 12 个有序对，即 6 双向对，无单向）各自标注 quality |
 | 测试基线 | CI 不跑 `go test` | 24 个 golden 快照 + `-update` 机制 |
 
 用户要求的"思考等级"在收敛后是**净增强**，不是妥协。
@@ -147,6 +147,7 @@ const (
 | 「`service/openaicompat/` 上游无此包」（同上，未加限定） | 包确无但能力大部分有——上游在 `relaykit/relayconvert/internal/{oai_chat,oai_responses}/`，宿主留了同名函数转发 shim |
 | 「`relay/common/responses_stream_options_compat.go`」（同上） | 该文件不存在，系误记 |
 | 「工具名契约与别名还原属部署关切」（同上） | 跨协议工具名映射，上游零覆盖，属协议层 |
+| 「4 个文本格式间的 8 个内建转换器（6 双向对 + 2 单向）」（第七轮引入，第十一轮推翻） | 实为 12 个（覆盖全部 12 个有序对，6 双向对、0 单向）；只数了 `Converter*` 命名，漏了 4 个 `requestConverter*` 条目 |
 
 ### 主代理坚持多轮的错误结论
 
@@ -319,7 +320,7 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 | --- | --- | --- | --- |
 | 1 | §12.4.1 称 `state` 是「relaykit 的**私有内部状态**（`ResponseStreamState` 的字段不导出）」 | `state` 是 `info.EnsureClaudeConvertInfo()` 返回的 `*convmeta.ClaudeConvertInfo`（`convmeta/meta.go:58`），**字段全部导出**且经 `convmeta.Meta` 对宿主可达。真正私有的 `ResponseStreamState` 是另一个类型（`response_registry.go`），不是这里讨论的对象 | **结论对、论据错**：索引空洞成立，但理由改为「宿主读得到 `state.Index`，却无法重排已分配的索引」 |
 | 2 | §3.1 称 `claudeCapabilitiesFor` 覆盖 9 个模型（漏 `claude-mythos-preview`），行号写 `:35-74` | 实测 **10 个模型前缀**，函数结束于 `:78` | 两处改为 10 个前缀 + `:35-78`；§11 同行号同步 |
-| 3 | §3.1 称转换质量分级含「4×4 转换矩阵」 | 实际是 4 个文本格式间的 **8 个内建转换器**（`builtinTextConverters`，6 个双向对 + 2 个单向），非 16 格矩阵 | 改为可复现表述；审计记录第 83 行同步 |
+| 3 | §3.1 称转换质量分级含「4×4 转换矩阵」 | 实际是 4 个文本格式间的 **12 个内建转换器**（`builtinTextConverters`，覆盖全部 12 个有序对，即 6 个双向对，无单向），非 16 格矩阵 | 改为可复现表述；审计记录第 83 行同步 |
 | 4 | §12.0.1「事实一」称 `constant/finish_reason.go` 用 `type X = types.X` | 该文件用的是 **`var FinishReasonStop = types.FinishReasonStop`**（变量别名），**无任何 `type` 声明**；只有 `endpoint_type.go` 用类型别名 | 改为「两处手法不同」；§11 第 502 行同步 |
 | 5 | §7 写 `dto/gemini.go:111` 用 `c.Query("alt")` | 实测 `:112`（两个基线口径一致） | 改为 `:112` |
 
@@ -374,6 +375,26 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 
 第 5 处则说明**跨节同步是个反复出错的点**：我在第九轮改了 §12.6 的数，却漏了 §12.17 汇总表里的同一个数——**改一个数时要 grep 全文，而不是只改当前节**。
 
+## 第十一轮：全维度复核发现的计数错误（2026-10-03）
+
+对本会话全部提交做全维度复核时，用一个只读 agent 独立复现 `builtinTextConverters` 的规模，推翻了第七轮（`c926fb0e9`）写入的数字：
+
+| 错误断言 | 实际 |
+| --- | --- |
+| 「4 个文本格式间的 **8 个**内建转换器（6 个双向对 + 2 个单向）」 | `builtinTextConverters` 顶层 **12 个**元素，覆盖 4 格式的全部 12 个有序对，即 **6 个双向对、0 个单向** |
+
+**复现命令**（`upstream/main` 已在本地）：
+
+```bash
+git show upstream/main:relaykit/relayconvert/text_converter_registry.go \
+  | awk '/var builtinTextConverters/,/^}$/' | grep -cE '^\t\tID:'
+# 12
+```
+
+12 个 ID 中 8 个以 `Converter*` 命名、4 个以 `requestConverter*` 命名。第七轮只数了前者，漏了后 4 个复合 `StepConverters` 条目，并据此臆造了「2 个单向」——实际每个有序对都有反向条目，无一单向。**本轮修正 §3.1 表格（设计文档第 68 行）、审计记录第 83 行与第 322 行。**
+
+**方法学教训（第十一轮）**：这是一个**「计数口径未写明」**型的错误，与第九、十轮的性质不同——那两轮是「两处合理表述互相冲突」，这一轮是「一个数字对应多个可数的子集，选了错的子集且没写口径」。`builtinTextConverters` 里同时存在 `Converter*` 与 `requestConverter*` 两类命名，只按命名前缀 `grep` 会系统性漏掉后者。**凡计数结论，命令必须能唯一地圈定全集**：本轮的正确写法是按 `^\t\tID:` 的缩进层级取顶层元素，而非按命名模式。
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**，未运行 Go 编译或测试。所有"编译失败"结论均为符号存在性推导，未经 `go build` 复现
@@ -403,7 +424,8 @@ git grep -c "tool_search" upstream/main -- relaykit/relayconvert/   # 空
 | `eec2dd4b1` | 独立复核：修正上一轮自己引入的一处能力断言 |
 | `c4d21ce49` | 独立复核：同步审计记录、修正分支比对取证（`relaykit/` 68 文件 `3910+/746−`、toolconv 差异为功能新增） |
 | `7b8d478d7` | 第六轮：`channel_settings.go` 方法数 41→42、补计数口径、拆分 §12.9 单元格 |
-| `c926fb0e9` | 第七轮：`state` 的论据纠正、`claudeCapabilitiesFor` 10 个模型 / `:35-78`、8 个内建转换器、`var` 别名、`gemini.go:112` |
+| `c926fb0e9` | 第七轮：`state` 的论据纠正、`claudeCapabilitiesFor` 10 个模型 / `:35-78`、内建转换器计数（当轮误写为 8，第十一轮改为 12）、`var` 别名、`gemini.go:112` |
 | `fffa65533` | 第九轮：执行层补完——阶段 6 矛盾、relaykit 源码获取与版本锚定、`IsStream` 影响面、§8.1 回滚止损点；关闭原第 26 项 |
+| （本轮） | 第十一轮：全维度复核推翻第七轮的转换器计数（8→12），修正 §3.1、审计记录两处与本文档汇总 |
 
 文档当前 1042 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。

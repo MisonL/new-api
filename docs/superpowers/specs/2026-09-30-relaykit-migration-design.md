@@ -65,7 +65,7 @@ const (
 | 思考等级渲染 | `relay/claude_handler.go:55-104` 硬编码 `claude-opus-4-6/4-7` 前缀判断 | `reasoning.RenderClaude` + `claudeCapabilitiesFor`（`relaykit/relayconvert/reasoning/claude.go:35-78`）覆盖 10 个模型前缀：`claude-fable-5`、`claude-mythos-5`、`claude-mythos-preview`、`claude-opus-4-5/4-6/4-7/4-8/5`、`claude-sonnet-4-6/5`，含 `defaultThinking`、`supportsEffort/XHigh/Max`、budget↔effort 互转与冲突诊断 | 采用上游 |
 | hosted 工具 | 散落在 `service/convert.go` 与 `relay/common/` | `relaykit/relayconvert/internal/toolconv/`（`decode.go`、`encode.go`、`hosted_values.go`、`model.go`、`response.go`、`response_artifacts.go`），覆盖 10 种 hosted 工具：`KindWebSearch`、`KindCodeExecution`、`KindComputerUse`、`KindFileSearch`、`KindImage`、`KindMCP`、`KindURLContext`、`KindWebFetch`、`KindFunction`、`KindNative` | 采用上游 |
 | 降级可观测性 | `ConversionDiagnostic` 本地零命中 | `convdiag` + `types.ConversionDiagnostic`（Code/Path/Message/Severity/From/To） | 新增能力 |
-| 转换质量分级 | 无 | `Good`/`Fair`/`Discouraged` 三级 + 4 个文本格式（Claude / Gemini / OpenAI / OpenAIResponses）间的 8 个内建转换器（`builtinTextConverters`，6 个双向对 + 2 个单向）各自标注 quality | 新增能力 |
+| 转换质量分级 | 无 | `Good`/`Fair`/`Discouraged` 三级 + 4 个文本格式（Claude / Gemini / OpenAI / OpenAIResponses）间的 12 个内建转换器（`builtinTextConverters`，覆盖 4 格式的全部 12 个有序对，即 6 个双向对，无单向）各自标注 quality | 新增能力 |
 | 测试基线 | CI 不跑 `go test` | 24 个 golden 快照 + `-update` 机制 | 新增能力 |
 
 ### 3.2 上游已覆盖 → 直接采用

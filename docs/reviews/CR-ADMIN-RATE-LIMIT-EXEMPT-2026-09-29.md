@@ -219,8 +219,8 @@ built 2026-09-29T19:56:55Z，`health=healthy`）：
 
 1. **未注册 session 中间件时 `sessions.Default(c)` 会 panic**。`sessions.Default` 内部是
    `c.MustGet(DefaultKey).(Session)`，key 不存在时直接 panic。`main.go` 只有一个 engine，
-   且 `server.Use(sessions.Sessions(...))`（`main.go:215`）在 `router.SetRouter(...)`
-   （`main.go:221`）之前执行，所以生产不可达；但 `GlobalAPIRateLimit` 等是导出函数，任何
+   且 `server.Use(sessions.Sessions(...))`（采样环境 `ef093ab64a` 的 `main.go:199`）在 `router.SetRouter(...)`
+   （同环境 `main.go:205`）之前执行，所以生产不可达；但 `GlobalAPIRateLimit` 等是导出函数，任何
    忘记挂 session 中间件的窄 engine 都会让请求以 panic 结束而不是照常限流。已改为先检查 key，
    缺失即按"session 不可读"失败关闭。
 
@@ -317,7 +317,7 @@ XHR 拦截记录实际发出的 `PUT /api/option/`，验证两个保存按钮的
 给豁免用例加快照恢复后跑 `-shuffle`，在 seed=41 触发了一个与限流无关的 panic，追下去发现两处问题。
 
 1. **`i18n.Translate` 在 `Init()` 之前会 nil 解引用 panic**（提交 `83a134885`）。
-   `main.go:380` 的 `i18n.Init()` 失败时只记日志继续（注释写着 `i18n is not critical`），
+   `main.go:352` 的 `i18n.Init()` 失败时只记日志继续（注释写着 `i18n is not critical`），
    但 `GetLocalizer` 会用 nil 的 `bundle` 调 `i18n.NewLocalizer`，产出的 localizer 每次查表都
    解引用 nil，`Translate` 里"找不到就返回 key"的兜底来不及生效。结果是启动期 i18n 加载失败后，
    每个 `i18n.T` 调用点（`middleware/distributor.go` 有 20 余处）在构造第一个错误响应时 panic。
@@ -698,7 +698,8 @@ worker 复核的是已含 `02ab2cd0f`、`104a9ae44` 修复的工作区状态，�
 
 **影响范围**：该竞态先于本任务存在（`83a134885` 之前即有），并非本任务引入。生产环境中
 `main.InitResources()`（包含 `i18n.Init()`，`main.go:384`）在 `http.Server` 起监听（`main.go:249-253`）
-之前单线程执行，因此无 HTTP 可达路径。
+之前单线程执行，因此无 HTTP 可达路径（本段行号取本节撰写时的代码树；本文件其它段落引用的行号
+以各自标注的环境为准，`main.go` 行号随提交漂移，跨节不通用）。
 
 **修复**：在 `initOnce.Do` 闭包开头加 `mu.Lock()`、结尾加 `defer mu.Unlock()`，使写入与读取由同一锁保护。
 

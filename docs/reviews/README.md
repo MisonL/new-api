@@ -56,7 +56,7 @@
 | [CR-PROTOCOL-CONVERSION-RECHECK-2026-09-01.md](CR-PROTOCOL-CONVERSION-RECHECK-2026-09-01.md) | 协议转换复核 |
 | [CR-CODEX-SUB2API-FINGERPRINT-2026-08-18.md](CR-CODEX-SUB2API-FINGERPRINT-2026-08-18.md) | Codex 指纹比对 |
 | [CR-CODEX-PARALLEL-REAL-CHANNELS-2026-09-08.md](CR-CODEX-PARALLEL-REAL-CHANNELS-2026-09-08.md) | 真实渠道并行验证 |
-| [CR-RELAYKIT-MIGRATION-DESIGN-2026-09-30.md](CR-RELAYKIT-MIGRATION-DESIGN-2026-09-30.md) | 协议转换层收敛到上游 relaykit 的设计与四轮对抗审查；确认上游已完成同一迁移（172 宿主文件 import `relaykit/types`、类型别名做到零调用点变更、`toolconv/` 覆盖 10 种 hosted 工具）；撤回"按客户端意图门控 reasoning 暴露"；记录 7 条主代理自身被推翻的错误断言（含存活四轮的"`dac55f0f` 非共同祖先"）；设计文档在 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`，未改生产代码 |
+| [CR-RELAYKIT-MIGRATION-DESIGN-2026-09-30.md](CR-RELAYKIT-MIGRATION-DESIGN-2026-09-30.md) | 协议转换层收敛到上游 relaykit 的设计与十一轮对抗审查；确认上游已完成同一迁移（172 宿主文件 import `relaykit/types`、类型别名做到零调用点变更、`toolconv/` 覆盖 10 种 hosted 工具）；撤回"按客户端意图门控 reasoning 暴露"；记录 15 条主代理自身被推翻的错误断言（含存活四稿的"`dac55f0f` 非共同祖先"）；设计文档在 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`，未改生产代码 |
 
 ### 渠道与路由
 
