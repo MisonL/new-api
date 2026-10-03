@@ -95,9 +95,10 @@ func MigrateConsoleSetting(c *gin.Context) {
 		model.UpdateOption("UptimeKumaSlug", "")
 	}
 
-	// 删除旧键记录
+	// 删除旧键记录。key 在 MySQL 是保留字，必须用方言引号，否则谓词在
+	// MySQL 上是语法错误（ERROR 1064）。
 	oldKeys := []string{"ApiInfo", "Announcements", "FAQ", "UptimeKumaUrl", "UptimeKumaSlug"}
-	model.DB.Where("key IN ?", oldKeys).Delete(&model.Option{})
+	model.DB.Where(model.KeyColumn()+" IN ?", oldKeys).Delete(&model.Option{})
 
 	// 重新加载 OptionMap
 	model.InitOptionMap()

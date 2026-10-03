@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -80,6 +81,10 @@ func TestUpdateOptionGuardsCoverEveryProvider(t *testing.T) {
 		"TelegramBotToken":    common.TelegramBotToken,
 	}
 	savedWhitelist := common.EmailDomainWhitelist
+	discordSettings := system_setting.GetDiscordSettings()
+	savedDiscordClientId := discordSettings.ClientId
+	oidcSettings := system_setting.GetOIDCSettings()
+	savedOIDCClientId := oidcSettings.ClientId
 	t.Cleanup(func() {
 		common.GitHubClientId = saved["GitHubClientId"]
 		common.LinuxDOClientId = saved["LinuxDOClientId"]
@@ -87,6 +92,8 @@ func TestUpdateOptionGuardsCoverEveryProvider(t *testing.T) {
 		common.TurnstileSiteKey = saved["TurnstileSiteKey"]
 		common.TelegramBotToken = saved["TelegramBotToken"]
 		common.EmailDomainWhitelist = savedWhitelist
+		discordSettings.ClientId = savedDiscordClientId
+		oidcSettings.ClientId = savedOIDCClientId
 		db.Exec("DELETE FROM options")
 	})
 
@@ -96,9 +103,16 @@ func TestUpdateOptionGuardsCoverEveryProvider(t *testing.T) {
 	common.TurnstileSiteKey = ""
 	common.TelegramBotToken = ""
 	common.EmailDomainWhitelist = nil
+	discordSettings.ClientId = ""
+	oidcSettings.ClientId = ""
 
+	// Every key here has a prerequisite guard in UpdateOption. Discord and OIDC
+	// are spelled with a dot ("discord.enabled", "oidc.enabled"), which is why an
+	// earlier version of this list missed them even though the guard was present.
 	for _, key := range []string{
 		"GitHubOAuthEnabled",
+		"discord.enabled",
+		"oidc.enabled",
 		"LinuxDOOAuthEnabled",
 		"WeChatAuthEnabled",
 		"TurnstileCheckEnabled",

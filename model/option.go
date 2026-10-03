@@ -625,7 +625,14 @@ func normalizeOptionValueForInMemoryConfig(key string, value string) (string, er
 			}
 			return strconv.FormatBool(enabled), nil
 		}
-		return value, nil
+		// Every other branch returns a canonical form, and the consumers of a
+		// plain value parse it with strconv without trimming: the layered config
+		// system uses ParseBool/ParseInt and skips the field on failure, and
+		// updateOptionMap uses Atoi/ParseFloat and discards the error. A value
+		// that arrives with surrounding whitespace therefore passes validation,
+		// is stored as-is, and then silently fails to apply. Trim here so the
+		// stored value is the one the consumer can actually parse.
+		return strings.TrimSpace(value), nil
 	}
 }
 
