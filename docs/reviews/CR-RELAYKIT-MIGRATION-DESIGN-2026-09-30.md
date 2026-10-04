@@ -1,4 +1,4 @@
-# CR: 协议转换层收敛到上游 relaykit 的设计与十五轮对抗审查
+# CR: 协议转换层收敛到上游 relaykit 的设计与十六轮对抗审查
 
 采样时间：2026-09-30（2026-10-01 补充本地独有能力盘点、第五轮架构审查）
 本地基线：`9c4758b53`（dev 分支；记录写作时 HEAD = `a1d5e9aad`；盘点时 HEAD = `2cf100a1d`）
@@ -22,7 +22,7 @@
 
 ## 审计方式
 
-五轮对抗性审查，每轮更换角度而非重复（第五轮的事实核验部分在架构攻击之后才完成，其 6 处修正见下）；其后又对设计文档做过 14 次独立复核（见「设计文档提交记录」的末 14 行）：第 6–8 轮转向此前未查区块的事实核验（第 8 轮零发现），第 9–10 轮转向**执行层**，补齐阶段 6 矛盾、relaykit 源码获取、`IsStream` 影响面、回滚止损点，以及阶段表逐条走查找出的 6 处引用面问题；第 11 轮转向**阶段间的数据流**，发现 `boundary_test.go` 是阶段 2 的隐性硬门禁；第 12 轮为全维度复核；第 13 轮把文档自认的「未决/未核验」逐条做成结论，发现 459 行遗漏转换器；第 14 轮补测字段 tag 与 Go 类型两个维度，推翻上一轮刚写的「17 个纯增益」；第 15 轮把四维比较工具化，工具又抓出第 14 轮两处分类错误。
+五轮对抗性审查，每轮更换角度而非重复（第五轮的事实核验部分在架构攻击之后才完成，其 6 处修正见下）；其后又对设计文档做过 15 次独立复核（见「设计文档提交记录」的末 15 行）：第 6–8 轮转向此前未查区块的事实核验（第 8 轮零发现），第 9–10 轮转向**执行层**，补齐阶段 6 矛盾、relaykit 源码获取、`IsStream` 影响面、回滚止损点，以及阶段表逐条走查找出的 6 处引用面问题；第 11 轮转向**阶段间的数据流**，发现 `boundary_test.go` 是阶段 2 的隐性硬门禁；第 12 轮为全维度复核；第 13 轮把文档自认的「未决/未核验」逐条做成结论，发现 459 行遗漏转换器；第 14 轮补测字段 tag 与 Go 类型两个维度，推翻上一轮刚写的「17 个纯增益」；第 15 轮把四维比较工具化，工具又抓出第 14 轮两处分类错误；第 16 轮把三个「待定」逐项取证后关闭，未决项由 6 项降至 3 项。
 
 | 轮次 | 子代理数 | 角度 |
 | --- | --- | --- |
@@ -32,7 +32,7 @@
 | 4 | 2 | 阶段可执行性；本地独有能力完整性 |
 | 5 | 2 | 架构攻击（决策可执行性、依赖顺序、验证策略缺口）6 条全部复现成立；事实核验（逐条复现第 12 节断言）大部分通过、6 处需修正 |
 
-主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误，第 6 轮再修正 3 处（含 1 处主代理自己引入的），第 7 轮再修正 5 处，第 8 轮零发现，第 9 轮补执行层 4 处缺口（其中 2 处为主代理当轮自己引入并自查修正），第 10 轮再找出 6 处阶段表引用面问题，第 11 轮再找出 1 处跨阶段数据流缺口（`boundary_test.go`），第 12 轮（全维度复核）推翻第 7 轮写入的一处计数（内建转换器 8→12），第 13 轮关闭 3 项未决并新发现 1 处 459 行的遗漏转换路径，第 14 轮在「已完成」的结论上补出 13 处此前未比的 tag/类型差异，第 15 轮把它固化成带 `--strict` 门禁的可重跑脚本。
+主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误，第 6 轮再修正 3 处（含 1 处主代理自己引入的），第 7 轮再修正 5 处，第 8 轮零发现，第 9 轮补执行层 4 处缺口（其中 2 处为主代理当轮自己引入并自查修正），第 10 轮再找出 6 处阶段表引用面问题，第 11 轮再找出 1 处跨阶段数据流缺口（`boundary_test.go`），第 12 轮（全维度复核）推翻第 7 轮写入的一处计数（内建转换器 8→12），第 13 轮关闭 3 项未决并新发现 1 处 459 行的遗漏转换路径，第 14 轮在「已完成」的结论上补出 13 处此前未比的 tag/类型差异，第 15 轮把它固化成带 `--strict` 门禁的可重跑脚本，第 16 轮关闭 27/28/29 三项未决。
 
 ## 核心结论
 
@@ -530,6 +530,28 @@ git show upstream/main:relaykit/relayconvert/text_converter_registry.go \
 
 **方法学教训（第十五轮）**：第十四轮的教训是「一次性的核查发现不了下一条」，本轮的解法是**把核查本身变成可重跑的东西**。人肉复核的三个结构性缺陷——会漏维度、结论无法复算、上游演进后要重来一遍——都由工具一次性消掉。**能写成代码的核查规则，就不该只留在一次性的报告里**；反过来，把规则写成代码时**必须配测试**，否则规则里的分类边界（什么叫「等价」）和实现盲区会一起固化，而且比人肉更难察觉——本轮工具自己的嵌入字段 bug 就是例证。
 
+## 第十六轮：把三个「待定」变成决定（2026-10-04）
+
+前几轮把未决项从 7 项压到 6 项，但剩下三项（27 三个符号归位、28 通道级转换器归属、29 未导出缓存字段）都标着「阶段 2/4 开工前必须确定」。本轮逐项取证，三项全部关闭。
+
+**未决项 27 上半：三个符号是 `encoding/json` 的薄包装，直接换 stdlib。** 打开 `common/json.go` 看第一行就够——`type JsonDelim = json.Delim`、`NewJsonDecoderUseNumber` = `json.NewDecoder` + `UseNumber()`、`DecodeJsonFromDecoder` = `decoder.Decode(v)`。而 relaykit/dto **本就 import `encoding/json`**。此前把它们当作「`kitutil` 未提供的宿主能力」是误判：它们没有宿主语义。改写只需补 `bytes`/`io` 两个 stdlib import。**教训：凡「X 未提供 Y」的结论，先打开 Y 的定义看它是不是 stdlib 包装。**
+
+**未决项 27 下半：`ResponsesRequestMetadata` 不是「一个类型」，是 488 行文件 + 650 行扫描器依赖。** 前几轮一直按「一个类型」估它，实测它所在的 `common/responses_request_metadata.go` 有 488 行，还依赖 `common/json_top_level_replay.go` 的 650 行扫描器，而那个扫描器**同时被 `relay/responses_handler.go` 使用**（不是 dto 专属）。整体迁入 relaykit 等于把 ~1100 行本地 responses 解析基础设施拉进套件。决定：**`dto/opaque_openai_responses_request.go`（64 行，本地独有类型）保留在宿主 `dto`**，与 `midjourney`/`suno`/`task`/`video` 同类；副作用是本地协议类型分居两包，通过 relaykit 的 `dto.Request` 接口协作，可接受。
+
+**未决项 28：收敛到 relaykit，不是「保留双实现」也不是「原样不动」。** 上几轮把该函数的三类宿主耦合（`model_setting`、`buildClaudeMediaMessageFromFile/Source`、`normalizeClaudeInputSchema`）当作「relaykit 零对应」，因而只敢判「需决定」。本轮打开 relaykit 侧，发现**三类都有注入机制**：
+
+| 本地能力 | relaykit 机制 |
+| --- | --- |
+| 思考等级适配器 | `sharedclaude.ApplyReasoning` **完全经 `convmeta.Options` 取策略**（`ShouldPreserveThinkingSuffix`、`Claude.ThinkingAdapterBudgetTokensPercentage`），relaykit 内零 `model_setting` 引用 |
+| 媒体/文件解析 | `relayconvert.MediaResolver`，其 `GetBase64Data` 字段**与 `service.GetBase64Data` 签名完全一致**；MIME→`ClaudeMediaMessage` 映射已在 relaykit 内 |
+| schema 归一化 | `sharedclaude.FunctionParametersToInputSchema`（内置） |
+
+于是决定：阶段 4 注册 `SetMediaResolver` 与 `Options` 钩子，三个通道改调 relaykit，**459 行本地实现删除**。留了两条必须实测的边界（`normalizeClaudeInputSchema` 行为是否逐项对齐、本地 `text/*` MIME 分支是否仍需要），并给出退路（若边界不成立则迁入 relaykit 而非保留）。**教训：判「上游没有对应能力」之前，先搜上游有没有「注入点」——钩子式设计里，能力在宿主、机制在套件。**
+
+**未决项 29：问题问错了。** 原表述是「4 个未导出字段不能声明在 relaykit 的类型上，须改为方法级缓存或宿主侧旁路」。前半句对，后半句是错误推论——未导出字段**在自己包里声明完全合法**，上游 relaykit 本就有（`Reasoning.effortRaw`）。把 `EffectiveTools()` 连缓存字段一起迁入 `relaykit/dto` 即可，13 个调用点改 import，**不需要任何旁路**。**教训：「A 不能做 X」不等于「必须用 B 绕开」——先问 X 的约束条件是什么，往往换个位置约束就消失了。**
+
+**验证**：本轮结论全部由读码得出（`git show` / `git grep`），未改生产代码。三项关闭后，第 10 节未决项由 6 项降至 3 项（24 openaicompat 重构、25 golden 基线、30 tag/类型差异）。
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**，未运行 Go 编译或测试。所有"编译失败"结论均为符号存在性推导，未经 `go build` 复现
@@ -566,5 +588,6 @@ git show upstream/main:relaykit/relayconvert/text_converter_registry.go \
 | （本轮·第十三轮） | 关闭未决项 21/22/23（dto 完整差集、import 图无环、字段对齐 16 需动作/17 纯增益）；修正「relaykit 独有 5 个方法」为全包 31 个、补 394/273 的「含测试」口径；**新发现 `relay/channel/claude/relay-claude.go:255` 459 行入向转换器被 3 通道共用且第 8 节遗漏**（未决项 28）；§4.5.5 六条未核验边界全部转为结论 |
 | （本轮·第十四轮） | 补测字段 **JSON tag** 与 **Go 类型** 两个维度（13 轮从未查过）：tag 差异 5 处（静默改变序列化）、类型真差异 3 处（编译期破坏，`IncludeThoughts` 一项 8 处赋值点）、`interface{}`/`any` 拼写差异 8 处；**推翻上一轮自己写的「17 个纯增益」**，新增 §12.0.6 与未决项 30 |
 | （本轮·第十五轮） | 把四维比较工具化：`tools/relaykit-dto-compat/`（7 个测试）+ `scripts/relaykit-dto-compat.sh`（含 `--strict` 门禁，经反转验证）。**工具当场抓出上一轮两处分类错误**：类型真差异 3→6、签名差异 13→12（后者含 1 处 `interface{}`/`any` 等价拼写）。编写中工具的嵌入字段维度自身有 bug，由单元测试捕获 |
+| （本轮·第十六轮） | 关闭未决项 27/28/29：三个符号换 stdlib（是 `encoding/json` 薄包装，此前误判为宿主能力）、`ResponsesRequestMetadata` 判为宿主类型（488 行文件 + 650 行扫描器依赖）、通道级转换器**收敛到 relaykit**（三类宿主耦合 relaykit 侧均有注入机制：`Options` 钩子 / `MediaResolver` / 内置 schema）、`EffectiveTools()` 连缓存字段迁入 relaykit。未决项 6→3 |
 
-文档当前 1277 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1340 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
