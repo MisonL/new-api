@@ -381,7 +381,7 @@ const (
 |---|---|---|
 | 0 | `git fetch --unshallow upstream`；建立 CI 门禁（两个 module 分别 `go test`，`GOWORK=off`）；~~完成本地独有能力盘点~~（已完成，见第 4 节）；**把 `relay/common/responses_tool_names.go` 及 2 个测试文件纳入版本控制**（第 10 节第 19 项） | CI 能跑通现有测试；盘点清单已产出；未跟踪文件已提交 |
 | 1 | **取得 relaykit 源码**（见下「阶段 1 的前置」）；引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译；`relaykit/` 的版本已锚定并记录 |
-| 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写** + **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ **同名字段的 JSON tag / Go 类型差异逐项对齐**（12.0.6：tag 5 处、类型真差异 3 处）+ 全部宿主独有方法（全包 394 vs 273 函数，含测试口径）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**327 个 import 点全部验证**；**13 处 tag/类型差异逐项有决定** |
+| 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写** + **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ **同名字段的 JSON tag / Go 类型差异逐项对齐**（12.0.6：tag 5 处、类型真差异 6 处、等价拼写 15 处）+ 全部宿主独有方法（全包 394 vs 273 函数，含测试口径）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**327 个 import 点全部验证**；**5 处 tag + 6 处类型差异逐项有决定** |
 | 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 别名，同步改写 `service/convert.go` 的 22 处字段引用；`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过 |
 | 4 | 协议映射切换到 relaykit（**单点可逆**，见 §8.1）；打补丁 1；**按下方「阶段 4 的处置清单」逐项落地**；**`*WithError` 系列直接删除**（12.3，不保留包装层） | 转换测试通过；grok reasoning 可见；处置清单每项已确认 |
 | 5 | 宿主管道接入 relaykit 分派；**响应方向暴露策略在 relaykit 内门控**（12.4，`convmeta.Options` 钩子，必须在索引分配之前——后置过滤不可行。落点 `oai_chat/to_claude_messages_resp.go` 已接收 `info`，无需透传改造）；**`matchAnyRegex` 空模式语义显式文档化**（12.8，采用本地语义「空 patterns = 匹配全部」） | 全量测试通过；空 patterns 语义已写入配置文档 |
@@ -552,6 +552,13 @@ relaykit module 这一条**包含边界门禁**：`relaykit/relayconvert/boundar
 **阶段 4 专项**：构造含 thinking block 的 Claude 多轮工具调用请求，验证 DeepSeek 不再 400；验证 grok 的 reasoning 可见（当前被丢弃）。
 
 **前端改动**：`cd web/default && bun run lint && bun run build`（AGENTS.md 第 4 节）。
+
+**dto 兼容性四维比较**（阶段 2 前必跑，上游 relaykit 每次变动后重跑）：
+
+```bash
+scripts/relaykit-dto-compat.sh --strict
+# 计数: fieldSet=33 tag=5 type=6 embed=0 sig=12（2026-10-04 基线）
+```
 
 **验证记录**：沉淀到 `docs/reviews/CR-*.md`，含命令、退出码、通过或失败摘要。
 
@@ -872,19 +879,23 @@ relaykit/dto 有、本地 dto 无：`alpha_search_request.go`、`billing_usage.g
 | `IncompleteDetails.Reason` | `reason,omitempty` | `reason` | **出向**：`"reason":""` 是否出现 |
 | `ClaudeServerToolUse.WebSearchRequests` | `web_search_requests` | `web_search_requests,omitempty` | **出向**：relaykit 在计数为 0 时省略（另 3 个兄弟字段 relaykit 也带 `omitempty`） |
 
-**二、Go 类型差异：12 个类型，分三类**
+**二、Go 类型差异：21 处，其中真差异 6 处、等价拼写 15 处**
 
-**类别 A——纯写法差异，无语义变化（8 个）**：`interface{}` 与 `any` 是同一类型的两种拼写，`map[string]interface{}` 与 `map[string]any`、`[]interface{}` 与 `[]any` 同理。涉及 `DifferenceItem`、`GeminiFunctionResponse`、`GeminiModel`（13 个字段）、`Notify`、`RealtimeSession`、`ResponsesOutputContent`、`Tool.InputSchema`。**无需动作**，但会在 diff 里产生噪音，评审时不要误判为不兼容。
+口径：工具的「类型不同」维度报 **6 处**（`[]constant.EndpointType` 被单列，因为它不是拼写等价），另有 **15 处** `interface{}`/`any` 及其复合形式（`map[string]interface{}`/`map[string]any`、`[]interface{}`/`[]any`）被判为**等价拼写**、单独成一组供参考。两组合计 21 处，涉及 9 个类型与 1 个函数。
 
-**类别 B——类型换了但语义等价，改的是**引用**而非形状（1 个）**：`OpenAIModels.SupportedEndpointTypes` 由 `[]constant.EndpointType` 变为 `[]types.EndpointType`。两者是同一底层类型（12.0.1 已证 `constant.EndpointType` 是 `types.EndpointType` 的别名），**JSON 形状不变**。但它再次确认 12.0.4 的结论：`constant` 不能出现在 relaykit 内。
+**类别 A——纯写法差异，无语义变化（15 处）**：`interface{}` 与 `any` 是同一类型的两种拼写。涉及 `DifferenceItem`、`GeminiFunctionResponse`、`GeminiModel`（13 个字段）、`Notify`、`RealtimeSession`、`ResponsesOutputContent`、`Tool.InputSchema`，以及 `NewNotify` 的形参。**无需动作**，但会在 diff 里产生噪音，评审时不要误判为不兼容——本工具把它们单列一组正是为此。
 
-**类别 C——真正的语义变化，必须处置（3 个）**：
+**类别 B——类型换了但语义等价，改的是引用而非形状（1 个）**：`OpenAIModels.SupportedEndpointTypes` 由 `[]constant.EndpointType` 变为 `[]types.EndpointType`。两者是同一底层类型（12.0.1 已证 `constant.EndpointType` 是 `types.EndpointType` 的别名），**JSON 形状不变**，但**仍需改 import**（`constant` 不能出现在 relaykit 内，见 12.0.4）。工具的「类型不同」维度把它计入 6 处，是对的——它不是拼写等价。
+
+**类别 C——真正的语义变化，必须处置（4 个字段 / 3 个类型）**：
 
 | 类型.字段 | 本地 | relaykit | 为何是语义变化 |
 |---|---|---|---|
 | `ResponsesStreamResponse.Text`、`.Arguments` | `string` | `*string` | `omitempty` 对 `string` 与 `*string` 语义不同：本地空串被省略，relaykit 只有 `nil` 才省略、空串会输出 `"text":""`。**且 `string`→`*string` 是编译期破坏**，所有读写点必须改 |
 | `GeminiThinkingConfig.IncludeThoughts` | `bool` | `*bool` | 同上，且这是**思考等级**链路的一环。本地 `relay/channel/gemini/relay-gemini.go` 有 **8 处**直接赋值/读取（`:148`、`:167`、`:171`、`:192` 字面量 `true`；`:302`/`:305` 赋 `true`/`false`；`:315` 赋变量；`:339` 读取），改为指针后每处都要改成 `common.GetPointer[...]` 或解引用 |
 | `OpenAIResponsesResponse.CreatedAt`、`OpenAIResponsesCompactionResponse.CreatedAt` | `int` | `IntValue` | `IntValue`（`relaykit/dto/values.go:32`）自定义了 `UnmarshalJSON`，**接受 int / float / string 三种形态**；本地 `int` 只接受数字。取 relaykit 版是**能力增强**，但需确认本地没有依赖「字符串形态应当报错」的行为 |
+
+**计数口径（第 15 轮用工具复核）**：类型维度 = 等价拼写 15 + 真差异 6（类别 B 1 + 类别 C 3 个类型共 4 个字段）；签名维度 = 12（12 个 `IsStream`；`NewNotify` 的 `interface{}`/`any` 已归入等价拼写，不计入签名差异）。**上一轮曾把这两个数写成「类型真差异 3 处」「签名差异 13 处」，前者漏了 `OpenAIModels`、后者把等价拼写算作了差异**，见第 15 轮说明。
 
 **结论**：12.0.5 第五节「17 个取 relaykit 即纯增益」的表述**不完整**——那 17 个是**按字段名集合**判定的；按 tag 与类型两个维度复核后，其中 `ChatCompletionsStreamResponseChoice`、`GeminiChatRequest`、`ToolCallRequest`、`IncompleteDetails`、`ClaudeServerToolUse`、`ResponsesStreamResponse`、`OpenAIResponsesResponse`、`OpenAIResponsesCompactionResponse`、`GeminiThinkingConfig`、`OpenAIModels` **10 个另有 tag 或类型差异，须逐项确认**。真正的「零动作」只有类别 A 的 8 个类型（`interface{}`/`any` 拼写差异）。
 
@@ -895,9 +906,26 @@ relaykit/dto 有、本地 dto 无：`alpha_search_request.go`、`billing_usage.g
 字段名差集还有一个固有盲区：`ast.Field.Names` 对**匿名嵌入字段**为空，因此嵌入字段在字段名差集与类型差集里**都是隐形的**。另补两个维度：
 
 - **嵌入（匿名）字段**：本地 7 个、relaykit 7 个，**逐类型对比零差异**（都在 `embedding.go`、`openai_response.go`，均为 `Usage`/`Message` 的 JSON 嵌入）
-- **函数/方法签名**（此前只比了名字，没比参数与返回值）：135 个同名函数中 **13 个签名不同**——12 个是 `IsStream` 的 `*gin.Context → *http.Request`（与 §7「阶段 2 的前置」记录的 12 个方法完全一致，互为印证），1 个是 `NewNotify` 的 `interface{} → any`（等价写法）。**无未知项**
+- **函数/方法签名**（此前只比了名字，没比参数与返回值）：135 个同名函数中 **13 处签名文本不同**——12 个是 `IsStream` 的 `*gin.Context → *http.Request`（与 §7「阶段 2 的前置」记录的 12 个方法完全一致，互为印证），1 个是 `NewNotify` 的 `interface{} → any`（等价写法，工具归入等价拼写组，**故签名真差异为 12**）。**无未知项**
 
 至此，dto 的兼容性核查覆盖四个维度：字段名（12.0.5）、JSON tag、Go 类型（本节）、嵌入字段与函数签名。四维之外未再发现未比较的结构面。
+
+**四、工具化（第 15 轮新增）**
+
+本节与 12.0.5 的全部数字，已固化为可重跑的工具：
+
+- `tools/relaykit-dto-compat/`（独立 Go module，含单元测试，不进根 module 的 `./...` 构建）
+- `scripts/relaykit-dto-compat.sh`（从 git 拉两侧源码——本地取 `HEAD`、relaykit 取 `upstream/main:relaykit/dto`——再调用上述工具）
+
+```bash
+scripts/relaykit-dto-compat.sh            # 人读报告
+scripts/relaykit-dto-compat.sh --markdown # 供粘进审查记录
+scripts/relaykit-dto-compat.sh --strict   # 计数漂移即非零退出
+```
+
+**这解决了本文档最大的一个结构性弱点**：此前每一次「上游 relaykit 演进后需重新核对」都得靠人肉复核，而 12.0.6 已证明人肉复核会漏维度。现在四维比较是一条命令；`--strict` 把当前基线（fieldSet=33、tag=5、type=6、embed=0、sig=12）变成门禁，**上游一漂移就报警**，而不是等到阶段 2 编译失败才发现。基线是**时间点快照**，本地 `dto` 或锚定的 relaykit 提交变动时须有意重录——这正是门禁的意义。
+
+工具同时修掉了本节上一轮的两处计数错误（见下）。
 
 ### 12.1 协议层语义 → 提上游（第 10 节第 1 项已完成的产出）
 
@@ -1246,4 +1274,4 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 | 27 | `dto` 宿主 import 归零后 3 个符号的归位方式 | `JsonDelim`/`NewJsonDecoderUseNumber`/`DecodeJsonFromDecoder`（`kitutil` 无对应）与类型 `ResponsesRequestMetadata`：优先用 `kitutil` 既有原语改写 `dto/openai_request.go` 的 `UnmarshalJSON`，否则新增到 relaykit 并记入 `relaykit/VERSION`。**阶段 2 开工前必须实测确定**，否则 `boundary_test.go` 无法转绿（12.0.4） |
 | 28 | 通道级 Claude 入向转换器的归属（第 12 轮新增） | `relay/channel/claude/relay-claude.go:255 RequestOpenAI2ClaudeMessage`（**459 行**，仅次 `service/convert.go`；claude/aws/vertex 三通道共用）与 relaykit 的 `OpenAIChatRequestToClaudeMessages` 重复，但绑定 `model_setting.*`、`buildClaudeMediaMessageFromFile/Source`、`normalizeClaudeInputSchema` 三类宿主能力（relaykit 零对应）。另 3 个同族（`StreamResponseClaude2OpenAI`、`ResponseClaude2OpenAI{,WithError}`、`responseGeminiChat2OpenAI{,WithError}`）。**第 8 节「6 条路径」只列出向，遗漏此入向路径**。处置决定未给出，阶段 4/6 前必须定（4.5.5、第 10 节第 24 项） |
 | 29 | `dto` 未导出缓存字段的承载方式（第 12 轮新增） | `OpenAIResponsesRequest.effectiveToolsCache{,Err,Ready,Signature}` 4 个未导出字段不能声明在 relaykit 类型上（Go 未导出字段属声明包）。取 relaykit 类型后须改为方法级缓存或宿主侧旁路。阶段 2 内解决（12.0.5 第五节、第 10 节第 25 项） |
-| 30 | 字段名相同但 tag / Go 类型不同（第 14 轮新增） | tag 差异 5 处（**静默改变序列化输出**）、Go 类型真差异 3 处（**编译期破坏**，`IncludeThoughts` 一项就有 8 处赋值点），另 8 处是 `interface{}`/`any` 拼写差异。阶段 2 内逐项决定「采用 relaykit 语义 / 打补丁保留本地语义」（12.0.6、第 10 节第 30 项） |
+| 30 | 字段名相同但 tag / Go 类型不同（第 14 轮新增） | tag 差异 5 处（**静默改变序列化输出**）、Go 类型真差异 6 处（**编译期破坏**，`IncludeThoughts` 一项就有 8 处赋值点），另 15 处是 `interface{}`/`any` 等价拼写。签名差异 12 处（全为 `IsStream`）。阶段 2 内逐项决定「采用 relaykit 语义 / 打补丁保留本地语义」（12.0.6、第 10 节第 30 项） |
