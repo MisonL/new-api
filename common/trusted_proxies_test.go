@@ -244,3 +244,57 @@ func TestLoopbackProxiesAreExactlyTheLoopbackRanges(t *testing.T) {
 		t.Fatalf("loopbackProxies = %v, want %v", loopbackProxies, wantLoopback)
 	}
 }
+
+// A stray comma around auto must not turn the keyword into a literal entry.
+// Before this, "auto," failed the whole-string comparison and was passed to gin
+// as the string "auto", which is not an IP: SetTrustedProxies rejected it and
+// the process refused to start with a ParseError that never mentioned the comma.
+func TestResolveTrustedProxiesAcceptsAutoWithSurroundingSeparators(t *testing.T) {
+	original := detectContainerMarker
+	t.Cleanup(func() { detectContainerMarker = original })
+	detectContainerMarker = func() string { return "" }
+
+	for _, raw := range []string{"auto,", ",auto", " , auto , ", "auto,,", "  auto  "} {
+		proxies, err := ResolveTrustedProxies(raw)
+		if err != nil {
+			t.Fatalf("ResolveTrustedProxies(%q) returned error: %v", raw, err)
+		}
+		assertExactlyLoopback(t, proxies, "auto with separators")
+	}
+}
+
+// auto is documented as standing alone. Mixing it with explicit entries is
+// ambiguous - replace the derived set or add to it - so it is rejected rather
+// than silently resolved one way.
+func TestResolveTrustedProxiesRejectsAutoMixedWithEntries(t *testing.T) {
+	for _, raw := range []string{"auto,10.0.0.1", "10.0.0.1,auto", "auto, 172.16.0.0/12"} {
+		proxies, err := ResolveTrustedProxies(raw)
+		if err == nil {
+			t.Fatalf("ResolveTrustedProxies(%q) = %v, want an error for mixing auto with explicit entries", raw, proxies)
+		}
+		if proxies != nil {
+			t.Fatalf("ResolveTrustedProxies(%q) returned %v alongside the error", raw, proxies)
+		}
+	}
+}
+
+// A leading comma before a real entry must keep the entry, and the empty segment
+// must not survive as a blank proxy (which gin would reject as an invalid IP).
+func TestResolveTrustedProxiesDropsEmptySegmentsAroundEntries(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want []string
+	}{
+		{",1.2.3.4", []string{"1.2.3.4"}},
+		{"1.2.3.4,", []string{"1.2.3.4"}},
+		{",,1.2.3.4,,", []string{"1.2.3.4"}},
+	} {
+		proxies, err := ResolveTrustedProxies(tc.raw)
+		if err != nil {
+			t.Fatalf("ResolveTrustedProxies(%q) returned error: %v", tc.raw, err)
+		}
+		if !reflect.DeepEqual(proxies, tc.want) {
+			t.Fatalf("ResolveTrustedProxies(%q) = %v, want %v", tc.raw, proxies, tc.want)
+		}
+	}
+}

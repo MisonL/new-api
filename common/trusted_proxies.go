@@ -44,22 +44,37 @@ var containerCgroupFragments = []string{
 //
 // Any other value is a comma-separated list of IPs or CIDRs, returned as
 // written so that a typo surfaces as an error from SetTrustedProxies rather
-// than as silently narrowed trust.
+// than as silently narrowed trust. "auto" is recognized as a whole entry, so a
+// stray comma around it ("auto,", ", auto") still selects auto rather than
+// being passed to gin as the literal string "auto"; combining it with other
+// entries is rejected, because the two readings (replace the derived set or add
+// to it) differ and the setting documents auto as standing alone.
 func ResolveTrustedProxies(raw string) ([]string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil, nil
 	}
-	if strings.EqualFold(trimmed, TrustedProxiesAuto) {
-		return deriveTrustedProxies()
-	}
 
 	parts := strings.Split(trimmed, ",")
 	proxies := make([]string, 0, len(parts))
+	autoEntries := 0
 	for _, part := range parts {
-		if entry := strings.TrimSpace(part); entry != "" {
-			proxies = append(proxies, entry)
+		entry := strings.TrimSpace(part)
+		if entry == "" {
+			continue
 		}
+		if strings.EqualFold(entry, TrustedProxiesAuto) {
+			autoEntries++
+			continue
+		}
+		proxies = append(proxies, entry)
+	}
+
+	if autoEntries > 0 {
+		if len(proxies) > 0 {
+			return nil, fmt.Errorf("TRUSTED_PROXIES=%q mixes %q with explicit entries; use either %q alone or an explicit list", raw, TrustedProxiesAuto, TrustedProxiesAuto)
+		}
+		return deriveTrustedProxies()
 	}
 	if len(proxies) == 0 {
 		return nil, fmt.Errorf("TRUSTED_PROXIES=%q contains no usable entry", raw)
