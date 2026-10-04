@@ -79,9 +79,13 @@ func TestGormExecutorDropsIndexOnPostgres(t *testing.T) {
 	require.NoError(t, db.Exec("CREATE INDEX "+quoteIdentifier(name)+" ON logs(created_at)").Error)
 
 	executor := gormLogIndexCleanupExecutor{db: db}
-	require.True(t, executor.HasIndex(&Log{}, name))
+	present, err := executor.HasIndex(&Log{}, name)
+	require.NoError(t, err)
+	require.True(t, present)
 	require.NoError(t, executor.DropIndex(&Log{}, name))
-	require.False(t, executor.HasIndex(&Log{}, name), "the executor must drop the index")
+	present, err = executor.HasIndex(&Log{}, name)
+	require.NoError(t, err)
+	require.False(t, present, "the executor must drop the index")
 }
 
 // Dropping the index successfully does not prove the concurrent path was used:

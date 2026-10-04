@@ -48,7 +48,7 @@ var legacyLogIndexes = []string{
 
 type logIndexCleanupExecutor interface {
 	HasTable(dst interface{}) bool
-	HasIndex(dst interface{}, name string) bool
+	HasIndex(dst interface{}, name string) (bool, error)
 	DropIndex(dst interface{}, name string) error
 }
 
@@ -93,8 +93,60 @@ func (e gormLogIndexCleanupExecutor) HasTable(dst interface{}) bool {
 	return e.db.Migrator().HasTable(dst)
 }
 
-func (e gormLogIndexCleanupExecutor) HasIndex(dst interface{}, name string) bool {
-	return e.db.Migrator().HasIndex(dst, name)
+// HasIndex reports whether the named index exists. gorm's Migrator.HasIndex
+// returns a bare bool: it runs a cursor query whose error it discards, so a
+// failed lookup (permission denied, lock timeout, a dropped connection) is
+// indistinguishable from "the index is not there". In a migration that decides
+// whether to drop an index and then records completion, that conflation is
+// destructive: the index is treated as already gone, the drop is skipped, and
+// the done-marker is written anyway, so the next start never retries. The count
+// query is therefore run directly here so its error reaches the caller, which
+// aborts without writing the marker.
+func (e gormLogIndexCleanupExecutor) HasIndex(dst interface{}, name string) (bool, error) {
+	stmt := &gorm.Statement{DB: e.db}
+	if err := stmt.Parse(dst); err != nil {
+		return false, err
+	}
+	table := stmt.Table
+	if stmt.Schema != nil {
+		if idx := stmt.Schema.LookIndex(name); idx != nil {
+			name = idx.Name
+		}
+	}
+
+	var count int64
+	switch {
+	case isPostgreSQL(e.db):
+		var schema string
+		if err := e.db.Raw("SELECT current_schema()").Scan(&schema).Error; err != nil {
+			return false, err
+		}
+		if err := e.db.Raw(
+			"SELECT count(*) FROM pg_indexes WHERE tablename = ? AND indexname = ? AND schemaname = ?",
+			table, name, schema,
+		).Scan(&count).Error; err != nil {
+			return false, err
+		}
+	case e.db.Dialector.Name() == "sqlite":
+		if err := e.db.Raw(
+			"SELECT count(*) FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name = ?",
+			table, name,
+		).Scan(&count).Error; err != nil {
+			return false, err
+		}
+	default:
+		var currentDatabase string
+		if err := e.db.Raw("SELECT DATABASE()").Scan(&currentDatabase).Error; err != nil {
+			return false, err
+		}
+		if err := e.db.Raw(
+			"SELECT count(*) FROM information_schema.statistics WHERE table_schema = ? AND table_name = ? AND index_name = ?",
+			currentDatabase, table, name,
+		).Scan(&count).Error; err != nil {
+			return false, err
+		}
+	}
+	return count > 0, nil
 }
 
 func (e gormLogIndexCleanupExecutor) DropIndex(dst interface{}, name string) error {
@@ -150,7 +202,11 @@ func migrateLogIndexCleanupWithExecutor(executor logIndexCleanupExecutor, marker
 
 	dropped := 0
 	for _, name := range legacyLogIndexes {
-		if !executor.HasIndex(&Log{}, name) {
+		present, err := executor.HasIndex(&Log{}, name)
+		if err != nil {
+			return fmt.Errorf("failed to check legacy logs index %s: %w", name, err)
+		}
+		if !present {
 			continue
 		}
 		if err := executor.DropIndex(&Log{}, name); err != nil {
