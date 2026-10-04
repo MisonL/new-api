@@ -34,6 +34,46 @@ func putOption(t *testing.T, db *gorm.DB, key string, rawValue string) (bool, st
 	return resp.Success, resp.Message
 }
 
+// restoreBooleanOptionGlobals snapshots and restores the process-wide switch
+// globals that updateOptionMap writes. A guard test deliberately lets one
+// request through (to prove the guard does not over-fire), and that request
+// sets the corresponding global; without this the value leaks into every later
+// test in the same process, which model.InitOptionMap then seeds into
+// common.OptionMap.
+func restoreBooleanOptionGlobals(t *testing.T) {
+	t.Helper()
+
+	snapshot := map[*bool]bool{
+		&common.PasswordLoginEnabled:           common.PasswordLoginEnabled,
+		&common.PasswordRegisterEnabled:        common.PasswordRegisterEnabled,
+		&common.EmailVerificationEnabled:       common.EmailVerificationEnabled,
+		&common.GitHubOAuthEnabled:             common.GitHubOAuthEnabled,
+		&common.LinuxDOOAuthEnabled:            common.LinuxDOOAuthEnabled,
+		&common.WeChatAuthEnabled:              common.WeChatAuthEnabled,
+		&common.TelegramOAuthEnabled:           common.TelegramOAuthEnabled,
+		&common.TurnstileCheckEnabled:          common.TurnstileCheckEnabled,
+		&common.RegisterEnabled:                common.RegisterEnabled,
+		&common.EmailDomainRestrictionEnabled:  common.EmailDomainRestrictionEnabled,
+		&common.EmailAliasRestrictionEnabled:   common.EmailAliasRestrictionEnabled,
+		&common.AutomaticDisableChannelEnabled: common.AutomaticDisableChannelEnabled,
+		&common.AutomaticEnableChannelEnabled:  common.AutomaticEnableChannelEnabled,
+		&common.GroupModelRouteHelperEnabled:   common.GroupModelRouteHelperEnabled,
+		&common.LogConsumeEnabled:              common.LogConsumeEnabled,
+		&common.DrawingEnabled:                 common.DrawingEnabled,
+		&common.TaskEnabled:                    common.TaskEnabled,
+		&common.DataExportEnabled:              common.DataExportEnabled,
+		&common.SMTPSSLEnabled:                 common.SMTPSSLEnabled,
+		&common.DisplayTokenStatEnabled:        common.DisplayTokenStatEnabled,
+		&common.DefaultCollapseSidebar:         common.DefaultCollapseSidebar,
+		&common.SMTPForceAuthLogin:             common.SMTPForceAuthLogin,
+	}
+	t.Cleanup(func() {
+		for ptr, value := range snapshot {
+			*ptr = value
+		}
+	})
+}
+
 // The prerequisite guards in UpdateOption compare the option value to "on"
 // before model.UpdateOption canonicalizes it. Comparing the raw string to the
 // literal "true" let every other spelling strconv.ParseBool accepts bypass
@@ -43,6 +83,7 @@ func putOption(t *testing.T, db *gorm.DB, key string, rawValue string) (bool, st
 // missing, exactly like the canonical "true".
 func TestUpdateOptionOAuthGuardsRejectEveryTrueSpelling(t *testing.T) {
 	db := setupSetupControllerTestDB(t)
+	restoreBooleanOptionGlobals(t)
 
 	previousClientId := common.GitHubClientId
 	common.GitHubClientId = ""
@@ -72,6 +113,7 @@ func TestUpdateOptionOAuthGuardsRejectEveryTrueSpelling(t *testing.T) {
 // the full set so a new one cannot be added with the old raw-string compare.
 func TestUpdateOptionGuardsCoverEveryProvider(t *testing.T) {
 	db := setupSetupControllerTestDB(t)
+	restoreBooleanOptionGlobals(t)
 
 	saved := map[string]string{
 		"GitHubClientId":      common.GitHubClientId,
