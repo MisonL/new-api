@@ -594,7 +594,7 @@ scripts/relaykit-dto-compat.sh --strict
 22. ~~**`dto` import 图是否成环**~~ → **12.0.5 第六节已关闭**：`constant` 不 import relaykit，`types`/`kitutil` 不 import dto，成环不成立
 23. ~~**33 个字段不兼容类型的逐项对齐**~~ → **12.0.5 第五节已关闭**：136 个同名结构体中 33 个字段集不同，但按「取 relaykit 后本地是否丢字段」二分后，**只需动作的 16 个**，清单与处置已逐项给出；另 17 个是纯增益
 24. **`openaicompat` tool 循环重构**：让基础分支可独立转调 relaykit 的唯一路径；独立重构，不在本次迁移范围（12.15.3）
-25. **本地行为的 golden 基线**：24 个快照是上游自己的基线，测不到 9.1/9.2 的 12 处本地差异。须用当前 HEAD 生成本地基线（12.16）
+25. ~~**本地行为的 golden 基线**~~ **已关闭**（2026-10-04）：见 12.16——`service/convert_golden_test.go` 已建于 `HEAD`，覆盖请求/响应/流三个矩阵共 8 个快照（含 DeepSeek 与非 DeepSeek 两侧的 thinking 门控），并实测「扰动任一快照即测试失败」
 26. ~~**命名空间字段的生产引用精确计数**~~ **已关闭**（2026-10-03）：见 12.6——11 个非测试文件、跨 6 个包，已给出「口径 + 命令 + 结果」
 27. ~~**`dto` 宿主 import 归零后 3 个符号的归位方式**~~ → **12.0.7 已关闭**（2026-10-04）：三个符号是 `encoding/json` 的薄包装，直接换 stdlib（relaykit/dto 本就 import 它）；`ResponsesRequestMetadata` 判为宿主类型（488 行文件 + 650 行扫描器依赖），随 `dto/opaque_openai_responses_request.go` 保留在宿主 `dto`
 28. ~~**通道级转换器的归属（第 12 轮新增）**~~ → **12.15.4 已关闭**（2026-10-04）：**收敛到 relaykit**，本地只留薄适配。三类宿主耦合 relaykit 侧均有注入机制——思考等级走 `convmeta.Options` 钩子（`sharedclaude.ApplyReasoning`）、媒体解析走 `relayconvert.MediaResolver`（签名与 `service.GetBase64Data` 一致）、schema 归一化内置 `FunctionParametersToInputSchema`。阶段 4 注册钩子后删除 459 行本地实现。两个待阶段 4 前实测的边界（schema 行为对齐、`text/*` MIME 分支）已在该节列出
@@ -1326,11 +1326,38 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 **决定**：
 
 1. **补建本地的 golden 基线**：用当前 `HEAD` 跑同一批 fixture 生成快照，作为「本地行为」的对照。这是「本地没退化」这一核心目标的**唯一**验证手段
-2. **补建针对 9.1/9.2 的 12 处差异的专项用例**，每处至少一个：输入侧（未知 block、image 缺 source、非 assistant thinking、tool_use 缺字段）与输出侧（多 choice、`finish_reason` 严格、命名空间往返、AWS 流式索引、Bedrock 非 DeepSeek thinking）
+2. **补建针对 9.1/9.2 的 12 处差异的专项用例**，每处至少一个：输入侧（未知 block、image 缺 source、非 assistant thinking、tool_use 缺字段）与输出侧（多 choice、`finish_reason` 严格、命名空间往返、AWS 流式索引、Bedrock 非 DeepSeek thinking）。**现状（2026-10-04 实测）**：这些用例**大部分已存在**——`service/convert_claude_request_test.go`（1118 行）与 `service/convert_claude_stream_test.go`（330 行）已逐条覆盖（如 `TestClaudeToOpenAIRequestIgnoresNonAssistantThinkingBlocks`、`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason`、`TestClaudeToOpenAIRequestRejectsNonTextSystemBlock`、`TestStreamResponseOpenAI2ClaudeDoesNotExposeReasoningForNonDeepSeekModel` 等）；两文件均为 git 跟踪且在 `HEAD` 上通过。**阶段 4 的待办不是「补用例」而是「确认这些既有用例在切换后仍通过」**——切换会让它们失败得其所，无需新建
 3. 第 9.3 节的专项清单需扩充，覆盖 12.4.1（索引空洞）、12.4.3（AWS 回归）、12.6（命名空间往返）、12.8（`matchAnyRegex` 语义）、12.7（custom bridge fail-closed）
 4. 12.12 的 thinking `signature` 与本节均属「需实测」，须给出可执行命令而非仅标注
 
 **依据**：AGENTS.md 第 6 节「不得把局部测试通过表述成全链路已验证」。若以「快照全绿」作为完成判据，实际会得到**上游行为未变 + 本地行为未知**的结论。
+
+#### 12.16.1 已建成的本地基线（2026-10-04 关闭第 10 节第 25 项）
+
+**产物**：`service/convert_golden_test.go` + `service/testdata/golden/`（8 个 JSON 快照）。
+
+| 矩阵 | 快照 | 覆盖 |
+|---|---|---|
+| request | `claude_to_openai`、`gemini_to_openai` | 含 tool_use / tool_result / functionCall 的多轮工具调用 |
+| response | `openai_to_claude`、`openai_to_claude_deepseek`、`openai_to_gemini` | reasoning 生成 + tool_calls + usage 明细 |
+| stream | `openai_to_claude`、`openai_to_claude_deepseek`、`openai_to_gemini` | 逐 chunk 的 SSE 事件序列，含工具参数分片 |
+
+命令：
+
+```bash
+go test ./service -run TestGolden -count=1           # 校验
+go test ./service -run TestGolden -count=1 -update   # 重录
+```
+
+**must-fix（建基线时发现）**：第一版 fixture 全用非 DeepSeek 模型名，导致**thinking 门控整条路径未被任何快照覆盖**——而这恰是本次迁移要保住的第 5 节能力。真实行为是 `shouldExposeReasoningAsClaudeThinking`（`service/convert.go:533`）**仅对 DeepSeek 模型名**暴露 reasoning（门控依据是 `IsDeepSeekModelName`，`:512`）。因此补了 DeepSeek 侧的 response 与 stream 两个快照：非 DeepSeek 快照里 reasoning 被丢弃、DeepSeek 快照里出现 `content_block_start`（`type: thinking`，index 0）并把后续 text/tool 块顺移到 index 1/2。**两侧同时钉住**，门控翻成 always-on 或 always-off 都会被检出。
+
+**门控依赖基线模型名的口径**：`HasDeepSeekModelName`（`:544`）综合 `openAIResponse.Model`、`info.OriginModelName`、`info.UpstreamModelName` 三者判定，故 fixture 的模型名即门控开关，改动 fixture 必须重录快照。
+
+**反向验证（已实测）**：分别扰动 `response/openai_to_claude_deepseek`（thinking→text）、`stream/openai_to_claude_deepseek`（index 2→3）、`request/claude_to_openai`（删 tool_call_id），三次均 `FAIL` 且报「drifted from golden snapshot …」，恢复后 `PASS`。另跑 `-count=3 -shuffle=on` 保持通过，确认无跨运行状态泄漏。
+
+**基线口径（已实测）**：生成时工作区的 `service/convert.go` 有**其他会话的未提交改动**（在 `ClaudeToOpenAIRequest` 的 `else` 分支加 `ReasoningEffort` 透传）。为避免快照编码未提交行为，把 `convert.go` 换成 `HEAD` 版本重跑同一批快照，**结果一致通过**——该改动读 `claudeRequest.OutputConfig`（fixture 未设），对快照为 no-op。故本基线等价于 `HEAD` 口径，快照中不含未提交行为。（生成后已还原工作区文件。）
+
+**边界（未覆盖，须在阶段 4 单列）**：本基线只钉「当前 HEAD 的本地输出字节」。9.1/9.2 的 12 处差异（未知 block 报错、image 缺 source 报错、多 choice 报错、`finish_reason` 严格校验、非 assistant thinking 门控、tool_use 缺 id/name 报错等）**多数是错误路径**，不产出「可快照的正常输出」，因此由既有**专用单测**覆盖（`service/convert_claude_request_test.go`、`service/convert_claude_stream_test.go`，本次已核两文件为 git 跟踪且在 `HEAD` 上通过），**不在** golden 基线的职责内。golden 基线的职责是「正常路径的字节级不漂移」。
 
 ### 12.17 决策汇总
 
@@ -1370,7 +1397,7 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 | 22 | ~~`dto` import 图分析~~ | **已关闭**（2026-10-04）：见 12.0.5 第六节——`constant` 是叶子（0 个 relaykit import），`types`/`kitutil` 均不 import dto，**成环不成立**。真正的问题是 `constant.ChannelType*` 在 `relaykit/types` 中不存在，属归属问题（12.0.4） |
 | 23 | ~~33 个字段不兼容类型的逐项对齐~~ | **已关闭**（2026-10-04）：见 12.0.5 第五节——33 个中 **16 个需动作**（含 `ChannelOtherSettings` 20 / `OpenAIResponsesCompactionRequest` 20 / `UserSetting` 3 等保留项，`Message.ThinkingContent` 等保留项），**17 个取 relaykit 即纯增益** |
 | 24 | `openaicompat` tool 循环重构 | 让基础分支可独立转调 relaykit 的唯一路径；独立重构，不在本次范围（12.15.3） |
-| 25 | 本地行为的 golden 基线 | 24 个快照是上游自己的基线，测不到 9.1/9.2 的 12 处本地差异。须用当前 HEAD 生成本地基线（12.16） |
+| 25 | ~~本地行为的 golden 基线~~ | **已关闭**（2026-10-04）：见 12.16——`service/convert_golden_test.go` 建于 `HEAD`，8 个快照覆盖请求/响应/流三矩阵，且把 thinking 门控的两侧（DeepSeek 暴露 / 非 DeepSeek 丢弃）都钉住；反向验证：扰动任一快照即失败 |
 | 26 | ~~命名空间字段的生产引用精确计数~~ | **已关闭**（2026-10-03）：见 12.6，已给出「口径 + 命令 + 结果」——11 个非测试文件、跨 6 个包。早期写的「4 个包」无法用任何单一命令复现 |
 | 27 | ~~`dto` 宿主 import 归零后 3 个符号的归位方式~~ | **已关闭**（2026-10-04）：见 12.0.7——三个符号是 `encoding/json` 薄包装，换 stdlib；`ResponsesRequestMetadata` 判为宿主类型，随 `dto/opaque_openai_responses_request.go` 留在宿主 `dto` |
 | 28 | ~~通道级 Claude 入向转换器的归属（第 12 轮新增）~~ | **已关闭**（2026-10-04）：见 12.15.4——收敛到 relaykit。三类宿主耦合 relaykit 侧均有注入机制（`convmeta.Options` 钩子 / `MediaResolver` / 内置 `FunctionParametersToInputSchema`），阶段 4 接线后删除 459 行本地实现。两条待实测边界（schema 对齐、`text/*` MIME）已列入该节 |

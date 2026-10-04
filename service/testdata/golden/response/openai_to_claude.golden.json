@@ -1,0 +1,29 @@
+{
+  "id": "chatcmpl-fixed",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "The answer is 42."
+    },
+    {
+      "type": "tool_use",
+      "id": "call_abc",
+      "name": "get_weather",
+      "input": {
+        "city": "Paris"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "model": "gpt-test",
+  "usage": {
+    "input_tokens": 10,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 3,
+    "output_tokens": 5,
+    "claude_cache_creation_5_m_tokens": 0,
+    "claude_cache_creation_1_h_tokens": 0
+  }
+}

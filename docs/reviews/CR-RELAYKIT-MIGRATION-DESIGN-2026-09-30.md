@@ -574,10 +574,30 @@ git show upstream/main:relaykit/relayconvert/text_converter_registry.go \
 
 **方法学教训（第十七轮）**：第十四、十五、十六轮连续三轮都在「tag 差异」这个题目上工作，但直到本轮**打开字段类型**才判准。前两轮把「tag 文本不同」直接等同于「序列化输出不同」——**这是个未经检验的推理**。`omitempty` 的语义依赖字段类型，是 Go 的既定行为，但只有把类型摆到 tag 旁边才看得出来。**「A 的属性不同」不等于「A 的行为不同」；属性到行为之间隔着一条要单独验证的推理链**——本轮的形式是：tag 差异（属性）→ `omitempty` 是否生效（取决于类型）→ 输出是否不同（行为）。跳过中间一环，就会把 3 处空操作误报成 3 处风险。
 
+## 第十八轮：补建本地 golden 基线——建基线时发现第一版漏掉了整个 thinking 门控（2026-10-04）
+
+第 10 节第 25 项要求「用当前 `HEAD` 生成本地 golden 基线」。本轮把它建成，并首次**实际运行 `go test ./service`**（此前十七轮全部是静态阅读，审计记录此前明确标注「未运行 Go 编译或测试」）。
+
+**产物**：`service/convert_golden_test.go` + `service/testdata/golden/`（8 个 JSON 快照，覆盖请求/响应/流三个矩阵）。校验命令 `go test ./service -run TestGolden -count=1`，重录加 `-update`。
+
+**建基线时发现的 must-fix**：第一版 fixture 全用非 DeepSeek 模型名（`gpt-test` / `claude-test` / `gemini-test`）。跑出来的第一版快照**全部通过**，但都是**没有 thinking block 的**。核对 `shouldExposeReasoningAsClaudeThinking`（`service/convert.go:533`）后确认：reasoning 暴露**仅对 DeepSeek 模型名**生效（门控依据 `IsDeepSeekModelName`，`:512`）。也就是说，第一版基线把**本次迁移存在的理由**——第 5 节「必须保留 thinking 历史回传」的能力——整个排除在覆盖之外。补 DeepSeek 侧两个快照后：非 DeepSeek 快照里 reasoning 被丢弃、DeepSeek 快照里出现 `content_block_start{type:thinking, index:0}` 且后续块顺移到 index 1/2。**只有两侧都在，门控翻成 always-on 或 always-off 才会被检出。**
+
+这与第八节（12.4.1）的索引空洞是同一类风险：thinking 一出现，后面所有块的索引都要顺移；基线必须同时钉住「有/无 thinking」两种索引布局。
+
+**门控的模型名口径**：`HasDeepSeekModelName`（`:544`）综合响应 `Model`、`info.OriginModelName`、`info.UpstreamModelName` 三者判定。故 fixture 的模型名**就是**门控开关，改 fixture 必须重录快照。
+
+**基线口径的实测（工作区有他人未提交改动）**：生成时工作区的 `service/convert.go` 有**其他会话的未提交改动**（`ClaudeToOpenAIRequest` 的 `else` 分支加 `ReasoningEffort` 透传）。若快照编码了未提交行为，提交它就是错的。验证方式：把 `convert.go` 换成 `HEAD` 版本（2229 行 vs 工作区 2236 行）重跑同一批快照，**结果一致通过**——该改动读 `claudeRequest.OutputConfig`（fixture 未设 `output_config`，`GetEfforts` 返回 `""`），对快照为 no-op。故基线等价于 `HEAD` 口径。验证后已还原工作区文件（`git diff --stat service/convert.go` 恢复为 `7 insertions`）。
+
+**反向验证（已实测）**：扰动 `response/openai_to_claude_deepseek`（thinking→text）、`stream/openai_to_claude_deepseek`（index 2→3）、`request/claude_to_openai`（删 tool_call_id），三次均 `FAIL` 且报「drifted from golden snapshot …」；恢复后 `PASS`。`-count=3 -shuffle=on` 保持通过，无跨运行泄漏。`gofmt` 已修正（`types` 与 `relaycommon` 的 import 顺序）。
+
+**baseline 的职责边界（重要）**：本基线只钉「正常路径的字节级不漂移」。9.1/9.2 的 12 处差异**多数是错误路径**（未知 block 报错、image 缺 source 报错、多 choice 报错、`finish_reason` 严格校验、tool_use 缺 id/name 报错），不产出「可快照的正常输出」，因此由既有**专用单测**覆盖（`service/convert_claude_request_test.go`、`service/convert_claude_stream_test.go`；本次已核两文件为 git 跟踪、在 `HEAD` 上通过），**不在** golden 基线职责内。不能因为「golden 基线建好了」就宣称 9.1/9.2 的 12 处差异已被覆盖——那是另一批测试的职责。
+
+**方法学教训（第十八轮）**：十七轮都在读代码，本轮第一次**跑**测试。「第一版快照全绿」本身是个陷阱——绿只证明 fixture 的输入能跑通，不证明 fixture 覆盖了要保护的能力。**基线通过 ≠ 基线有效**；有效性的判据是「把被测能力改坏，基线会不会红」。本轮形式：fixture 选了非 DeepSeek 模型（输入）→ 门控不触发（分支）→ 快照里没有 thinking（输出），三环里第一环选错，后两环再对也没用。检验基线有效性的唯一手段是**反向验证**（扰动后必须失败），而不是正向跑绿。
+
 ## 边界与未验证项
 
-- 本记录及设计文档**未修改任何生产代码**，未运行 Go 编译或测试。所有"编译失败"结论均为符号存在性推导，未经 `go build` 复现
-- 未实测 `service/convert.go` 的转换测试在阶段 4 是否失败（需真实运行 `go test ./service`）
+- 本记录及设计文档**未修改任何生产代码**。第十八轮起已实际运行 `go test ./service -run TestGolden`（见该轮），但「编译失败」类结论仍未逐条 `go build` 复现
+- 未实测 `service/convert.go` 的**全部**转换测试在阶段 4 是否失败——第十八轮只跑了 `TestGolden` 与相邻转换测试，未跑 `go test ./service` 全包
 - 「适配器写入拷贝后 `info.Request.Thinking` 仍为 nil」是代码阅读推断，与文档同源，非独立运行时复现
 - thinking block 的 `signature`：relaykit 响应方向产出的 thinking block 只有 `{Type, Thinking}`，不含 `signature`；本地现状同样不生成。Anthropic 是否校验签名、客户端是否接受无签名 block，未验证
 - 上游 relaykit 仍在演进，存在 `feat/relaykit-tools`、`feat/relaykit-perf`、`fix/relayconvert-tool-result-media-and-reasoning-parts` 等分支，未逐一核验
@@ -612,5 +632,6 @@ git show upstream/main:relaykit/relayconvert/text_converter_registry.go \
 | （本轮·第十五轮） | 把四维比较工具化：`tools/relaykit-dto-compat/`（7 个测试）+ `scripts/relaykit-dto-compat.sh`（含 `--strict` 门禁，经反转验证）。**工具当场抓出上一轮两处分类错误**：类型真差异 3→6、签名差异 13→12（后者含 1 处 `interface{}`/`any` 等价拼写）。编写中工具的嵌入字段维度自身有 bug，由单元测试捕获 |
 | （本轮·第十六轮） | 关闭未决项 27/28/29：三个符号换 stdlib（是 `encoding/json` 薄包装，此前误判为宿主能力）、`ResponsesRequestMetadata` 判为宿主类型（488 行文件 + 650 行扫描器依赖）、通道级转换器**收敛到 relaykit**（三类宿主耦合 relaykit 侧均有注入机制：`Options` 钩子 / `MediaResolver` / 内置 schema）、`EffectiveTools()` 连缓存字段迁入 relaykit。未决项 6→3 |
 | （本轮·第十七轮） | 关闭未决项 30：15 处 tag/类型差异**全部采用 relaykit**。**推翻第十四轮对 tag 差异的判断**——5 处中 3 处因字段是 struct 值而 `omitempty` 无效，是空操作而非「静默改变输出」；另 2 处风险逐点排除。类型 6 处含 1 处纯增益（`IntValue.MarshalJSON` 与 int 相同）、3 处改读写点、2 处改 import。未决项 3→2 |
+| （本轮·第十八轮） | 关闭未决项 25：建成 `service/convert_golden_test.go` + 8 个快照的本地基线（首次实际运行 `go test`）。**建基线时发现第一版 fixture 全用非 DeepSeek 模型名，导致 thinking 门控整条路径未被覆盖**——补 DeepSeek 侧两个快照，把门控两侧都钉住。实测基线与 `HEAD` 等价（工作区他人未提交改动对快照为 no-op）。反向验证三处扰动均失败。未决项 2→1 |
 
-文档当前 1378 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1405 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
