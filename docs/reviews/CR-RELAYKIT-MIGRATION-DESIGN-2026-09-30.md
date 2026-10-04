@@ -1,4 +1,4 @@
-# CR: 协议转换层收敛到上游 relaykit 的设计与十六轮对抗审查
+# CR: 协议转换层收敛到上游 relaykit 的设计与十七轮对抗审查
 
 采样时间：2026-09-30（2026-10-01 补充本地独有能力盘点、第五轮架构审查）
 本地基线：`9c4758b53`（dev 分支；记录写作时 HEAD = `a1d5e9aad`；盘点时 HEAD = `2cf100a1d`）
@@ -22,7 +22,7 @@
 
 ## 审计方式
 
-五轮对抗性审查，每轮更换角度而非重复（第五轮的事实核验部分在架构攻击之后才完成，其 6 处修正见下）；其后又对设计文档做过 15 次独立复核（见「设计文档提交记录」的末 15 行）：第 6–8 轮转向此前未查区块的事实核验（第 8 轮零发现），第 9–10 轮转向**执行层**，补齐阶段 6 矛盾、relaykit 源码获取、`IsStream` 影响面、回滚止损点，以及阶段表逐条走查找出的 6 处引用面问题；第 11 轮转向**阶段间的数据流**，发现 `boundary_test.go` 是阶段 2 的隐性硬门禁；第 12 轮为全维度复核；第 13 轮把文档自认的「未决/未核验」逐条做成结论，发现 459 行遗漏转换器；第 14 轮补测字段 tag 与 Go 类型两个维度，推翻上一轮刚写的「17 个纯增益」；第 15 轮把四维比较工具化，工具又抓出第 14 轮两处分类错误；第 16 轮把三个「待定」逐项取证后关闭，未决项由 6 项降至 3 项。
+五轮对抗性审查，每轮更换角度而非重复（第五轮的事实核验部分在架构攻击之后才完成，其 6 处修正见下）；其后又对设计文档做过 16 次独立复核（见「设计文档提交记录」的末 16 行）：第 6–8 轮转向此前未查区块的事实核验（第 8 轮零发现），第 9–10 轮转向**执行层**，补齐阶段 6 矛盾、relaykit 源码获取、`IsStream` 影响面、回滚止损点，以及阶段表逐条走查找出的 6 处引用面问题；第 11 轮转向**阶段间的数据流**，发现 `boundary_test.go` 是阶段 2 的隐性硬门禁；第 12 轮为全维度复核；第 13 轮把文档自认的「未决/未核验」逐条做成结论，发现 459 行遗漏转换器；第 14 轮补测字段 tag 与 Go 类型两个维度，推翻上一轮刚写的「17 个纯增益」；第 15 轮把四维比较工具化，工具又抓出第 14 轮两处分类错误；第 16 轮把三个「待定」逐项取证后关闭，未决项由 6 项降至 3 项；第 17 轮决定 tag/类型差异 15 处全部采用 relaykit，未决项降至 2 项。
 
 | 轮次 | 子代理数 | 角度 |
 | --- | --- | --- |
@@ -32,7 +32,7 @@
 | 4 | 2 | 阶段可执行性；本地独有能力完整性 |
 | 5 | 2 | 架构攻击（决策可执行性、依赖顺序、验证策略缺口）6 条全部复现成立；事实核验（逐条复现第 12 节断言）大部分通过、6 处需修正 |
 
-主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误，第 6 轮再修正 3 处（含 1 处主代理自己引入的），第 7 轮再修正 5 处，第 8 轮零发现，第 9 轮补执行层 4 处缺口（其中 2 处为主代理当轮自己引入并自查修正），第 10 轮再找出 6 处阶段表引用面问题，第 11 轮再找出 1 处跨阶段数据流缺口（`boundary_test.go`），第 12 轮（全维度复核）推翻第 7 轮写入的一处计数（内建转换器 8→12），第 13 轮关闭 3 项未决并新发现 1 处 459 行的遗漏转换路径，第 14 轮在「已完成」的结论上补出 13 处此前未比的 tag/类型差异，第 15 轮把它固化成带 `--strict` 门禁的可重跑脚本，第 16 轮关闭 27/28/29 三项未决。
+主代理对每条代理结论独立复现后才采纳。**每一轮都抓出主代理在上一轮刚引入的错误**：6 → 3 → 2 → 3 处（第 1–4 轮），第 5 轮另修正 6 处事实错误，第 6 轮再修正 3 处（含 1 处主代理自己引入的），第 7 轮再修正 5 处，第 8 轮零发现，第 9 轮补执行层 4 处缺口（其中 2 处为主代理当轮自己引入并自查修正），第 10 轮再找出 6 处阶段表引用面问题，第 11 轮再找出 1 处跨阶段数据流缺口（`boundary_test.go`），第 12 轮（全维度复核）推翻第 7 轮写入的一处计数（内建转换器 8→12），第 13 轮关闭 3 项未决并新发现 1 处 459 行的遗漏转换路径，第 14 轮在「已完成」的结论上补出 13 处此前未比的 tag/类型差异，第 15 轮把它固化成带 `--strict` 门禁的可重跑脚本，第 16 轮关闭 27/28/29 三项未决，第 17 轮关闭第 30 项。
 
 ## 核心结论
 
@@ -552,6 +552,28 @@ git show upstream/main:relaykit/relayconvert/text_converter_registry.go \
 
 **验证**：本轮结论全部由读码得出（`git show` / `git grep`），未改生产代码。三项关闭后，第 10 节未决项由 6 项降至 3 项（24 openaicompat 重构、25 golden 基线、30 tag/类型差异）。
 
+## 第十七轮：tag 与类型差异逐项决定——15 处全部采用 relaykit（2026-10-04）
+
+第十四轮发现 5 处 tag 差异与 6 处类型差异，第十五轮用工具确认计数，本轮逐项决定「采用 relaykit / 打补丁保留本地」。**结论：15 处全部采用 relaykit，零处打补丁。** 但更重要的是过程中推翻了第十四轮对 tag 差异的判断。
+
+**第十四轮的过度警告**：那一轮把 5 处 tag 差异一律描述为「**静默改变序列化输出**」。本轮打开字段类型后发现，**3 处是空操作**：
+
+`encoding/json` 的 `omitempty` 只对 false / 0 / nil 指针或接口 / 长度 0 的 string / array / map / slice 生效，**对 struct 值不生效**。`ChatCompletionsStreamResponseChoice.Delta`、`ToolCallRequest.Function`、`GeminiChatRequest.GenerationConfig` 三者都是 **struct 值**，所以两侧都输出 `"delta":{...}` / `"function":{...}` / `"generationConfig":{...}`——**tag 不同但输出完全相同**。
+
+只有 `IncompleteDetails.Reason`（string）与 `ClaudeServerToolUse.WebSearchRequests`（int）是真实行为变化，而两处风险都能排除：
+- `IncompleteDetails` 只在两个构造点产生，**两处都设非空 Reason**，故实际输出不变
+- `ClaudeServerToolUse` 生产代码从不读取，省略行为无影响
+
+**类型差异 6 处的处置**：
+- `OpenAIResponsesResponse.CreatedAt` / `OpenAIResponsesCompactionResponse.CreatedAt`（`int` → `IntValue`）：**纯增益**。`IntValue.MarshalJSON` 输出 `int(i)`，与本地 `int` **完全相同**；`UnmarshalJSON` 额外接受 float 与 string，是超集
+- `ResponsesStreamResponse.Text` / `.Arguments`（`string` → `*string`）：采用。本地构造点**不显式写空串**（逐点核实），故「空串 vs nil」的 `omitempty` 差异不触发；须改读写点
+- `GeminiThinkingConfig.IncludeThoughts`（`bool` → `*bool`）：采用。relaykit 用 nil 表示「客户端未指定」，**正是思考等级链路所需**（`shared/gemini/request.go:168` 的 `if native.IncludeThoughts == nil` 依赖它）；本地 8 处赋值点改 `kitutil.GetPointer(...)` 或解引用
+- `OpenAIModels.SupportedEndpointTypes`（`[]constant.EndpointType` → `[]types.EndpointType`）：采用，改 import
+
+**实际工作量**：改 8 处 `IncludeThoughts` 赋值点 + 所有 `Text`/`Arguments` 读写点 + 4 处 import。tag 差异中 3 处无需动作。
+
+**方法学教训（第十七轮）**：第十四、十五、十六轮连续三轮都在「tag 差异」这个题目上工作，但直到本轮**打开字段类型**才判准。前两轮把「tag 文本不同」直接等同于「序列化输出不同」——**这是个未经检验的推理**。`omitempty` 的语义依赖字段类型，是 Go 的既定行为，但只有把类型摆到 tag 旁边才看得出来。**「A 的属性不同」不等于「A 的行为不同」；属性到行为之间隔着一条要单独验证的推理链**——本轮的形式是：tag 差异（属性）→ `omitempty` 是否生效（取决于类型）→ 输出是否不同（行为）。跳过中间一环，就会把 3 处空操作误报成 3 处风险。
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**，未运行 Go 编译或测试。所有"编译失败"结论均为符号存在性推导，未经 `go build` 复现
@@ -589,5 +611,6 @@ git show upstream/main:relaykit/relayconvert/text_converter_registry.go \
 | （本轮·第十四轮） | 补测字段 **JSON tag** 与 **Go 类型** 两个维度（13 轮从未查过）：tag 差异 5 处（静默改变序列化）、类型真差异 3 处（编译期破坏，`IncludeThoughts` 一项 8 处赋值点）、`interface{}`/`any` 拼写差异 8 处；**推翻上一轮自己写的「17 个纯增益」**，新增 §12.0.6 与未决项 30 |
 | （本轮·第十五轮） | 把四维比较工具化：`tools/relaykit-dto-compat/`（7 个测试）+ `scripts/relaykit-dto-compat.sh`（含 `--strict` 门禁，经反转验证）。**工具当场抓出上一轮两处分类错误**：类型真差异 3→6、签名差异 13→12（后者含 1 处 `interface{}`/`any` 等价拼写）。编写中工具的嵌入字段维度自身有 bug，由单元测试捕获 |
 | （本轮·第十六轮） | 关闭未决项 27/28/29：三个符号换 stdlib（是 `encoding/json` 薄包装，此前误判为宿主能力）、`ResponsesRequestMetadata` 判为宿主类型（488 行文件 + 650 行扫描器依赖）、通道级转换器**收敛到 relaykit**（三类宿主耦合 relaykit 侧均有注入机制：`Options` 钩子 / `MediaResolver` / 内置 schema）、`EffectiveTools()` 连缓存字段迁入 relaykit。未决项 6→3 |
+| （本轮·第十七轮） | 关闭未决项 30：15 处 tag/类型差异**全部采用 relaykit**。**推翻第十四轮对 tag 差异的判断**——5 处中 3 处因字段是 struct 值而 `omitempty` 无效，是空操作而非「静默改变输出」；另 2 处风险逐点排除。类型 6 处含 1 处纯增益（`IntValue.MarshalJSON` 与 int 相同）、3 处改读写点、2 处改 import。未决项 3→2 |
 
-文档当前 1340 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1378 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。

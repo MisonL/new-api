@@ -381,7 +381,7 @@ const (
 |---|---|---|
 | 0 | `git fetch --unshallow upstream`；建立 CI 门禁（两个 module 分别 `go test`，`GOWORK=off`）；~~完成本地独有能力盘点~~（已完成，见第 4 节）；**把 `relay/common/responses_tool_names.go` 及 2 个测试文件纳入版本控制**（第 10 节第 19 项） | CI 能跑通现有测试；盘点清单已产出；未跟踪文件已提交 |
 | 1 | **取得 relaykit 源码**（见下「阶段 1 的前置」）；引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译；`relaykit/` 的版本已锚定并记录 |
-| 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写** + **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ **同名字段的 JSON tag / Go 类型差异逐项对齐**（12.0.6：tag 5 处、类型真差异 6 处、等价拼写 15 处）+ 全部宿主独有方法（全包 394 vs 273 函数，含测试口径）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**327 个 import 点全部验证**；**5 处 tag + 6 处类型差异逐项有决定** |
+| 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写** + **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ **同名字段的 JSON tag / Go 类型差异逐项对齐**（12.0.8：15 处全部采用 relaykit，改 8 处 `IncludeThoughts` 赋值点 + `Text`/`Arguments` 读写点 + 4 处 import）+ 全部宿主独有方法（全包 394 vs 273 函数，含测试口径）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**327 个 import 点全部验证**；**15 处 tag/类型差异逐项有决定（12.0.8）** |
 | 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 别名，同步改写 `service/convert.go` 的 22 处字段引用；`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过 |
 | 4 | 协议映射切换到 relaykit（**单点可逆**，见 §8.1）；**接线 `relayconvert.SetMediaResolver`（指向 `service.GetBase64Data`）与 `convmeta.Options` 钩子（指向 `model_setting`）**，随后通道级转换器改调 relaykit（12.15.4）；打补丁 1；**按下方「阶段 4 的处置清单」逐项落地**；**`*WithError` 系列直接删除**（12.3，不保留包装层） | 转换测试通过；grok reasoning 可见；处置清单每项已确认；**12.15.4 的两条边界（schema 行为对齐、`text/*` MIME 分支）已实测** |
 | 5 | 宿主管道接入 relaykit 分派；**响应方向暴露策略在 relaykit 内门控**（12.4，`convmeta.Options` 钩子，必须在索引分配之前——后置过滤不可行。落点 `oai_chat/to_claude_messages_resp.go` 已接收 `info`，无需透传改造）；**`matchAnyRegex` 空模式语义显式文档化**（12.8，采用本地语义「空 patterns = 匹配全部」） | 全量测试通过；空 patterns 语义已写入配置文档 |
@@ -508,7 +508,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 
 ### 9.1 阶段 4 的语义对齐清单
 
-**本清单只覆盖行为语义；另有两层结构语义见 12.0.6**——同名字段的 JSON tag 差异（5 处，静默改变序列化输出）与 Go 类型差异（3 处真差异，编译期破坏）。两层都必须纳入阶段 4 的逐项核对。
+**本清单只覆盖行为语义；结构语义见 12.0.6 与 12.0.8**——同名字段的 JSON tag 差异（5 处，其中 3 处因 struct 值而 `omitempty` 无效、2 处为真实变化）与 Go 类型差异（6 处，3 处编译期破坏）。15 处**全部采用 relaykit**，逐项决定见 12.0.8。
 
 本地与 relaykit **不是逐一等价**，切换前须逐项决定「保留、放弃或改写」，并同步调整锁定的测试：
 
@@ -599,7 +599,7 @@ scripts/relaykit-dto-compat.sh --strict
 27. ~~**`dto` 宿主 import 归零后 3 个符号的归位方式**~~ → **12.0.7 已关闭**（2026-10-04）：三个符号是 `encoding/json` 的薄包装，直接换 stdlib（relaykit/dto 本就 import 它）；`ResponsesRequestMetadata` 判为宿主类型（488 行文件 + 650 行扫描器依赖），随 `dto/opaque_openai_responses_request.go` 保留在宿主 `dto`
 28. ~~**通道级转换器的归属（第 12 轮新增）**~~ → **12.15.4 已关闭**（2026-10-04）：**收敛到 relaykit**，本地只留薄适配。三类宿主耦合 relaykit 侧均有注入机制——思考等级走 `convmeta.Options` 钩子（`sharedclaude.ApplyReasoning`）、媒体解析走 `relayconvert.MediaResolver`（签名与 `service.GetBase64Data` 一致）、schema 归一化内置 `FunctionParametersToInputSchema`。阶段 4 注册钩子后删除 459 行本地实现。两个待阶段 4 前实测的边界（schema 行为对齐、`text/*` MIME 分支）已在该节列出
 29. ~~**`dto` 独有缓存字段的承载方式（第 12 轮新增）**~~ → **12.0.7 已关闭**（2026-10-04）：把 `EffectiveTools()` 连缓存字段一起**迁入 `relaykit/dto`**——未导出字段在**自己的包**内声明即合法（上游 relaykit 已有同例，如 `Reasoning.effortRaw`），不需要宿主侧旁路。13 个调用点改 import 即可
-30. **字段名相同但 tag / Go 类型不同的 10 个类型（第 14 轮新增）**：tag 差异 5 处（`ChatCompletionsStreamResponseChoice.Delta`、`GeminiChatRequest.GenerationConfig`、`ToolCallRequest.Function`、`IncompleteDetails.Reason`、`ClaudeServerToolUse.WebSearchRequests`）会**静默改变序列化输出**；类型差异 3 处（`ResponsesStreamResponse.Text/Arguments` 与 `GeminiThinkingConfig.IncludeThoughts` 由值改指针、`*.CreatedAt` 由 `int` 改 `IntValue`）会**编译失败**且需逐个改写读写点（仅 `IncludeThoughts` 就有 8 处）。阶段 2 内必须逐项决定「采用 relaykit 语义 / 保留本地语义（打补丁）」。详见 12.0.6
+30. ~~**字段名相同但 tag / Go 类型不同的 10 个类型（第 14 轮新增）**~~ → **12.0.8 已关闭**（2026-10-04）：15 处**全部采用 relaykit、零处打补丁**。tag 5 处中 3 处因字段是 struct 值而 `omitempty` 无效（空操作）、2 处风险已逐点排除；类型 6 处中 `CreatedAt` 为纯增益（`MarshalJSON` 与 int 相同）、`IncludeThoughts`/`Text`/`Arguments` 须改读写点、`SupportedEndpointTypes` 改 import
 
 ## 11. 事实依据
 
@@ -873,13 +873,15 @@ relaykit/dto 有、本地 dto 无：`alpha_search_request.go`、`billing_usage.g
 
 **一、JSON tag 差异：5 处（此前完全未知）**
 
-| 类型.字段 | 本地 | relaykit | 影响 |
-|---|---|---|---|
-| `ChatCompletionsStreamResponseChoice.Delta` | `delta,omitempty` | `delta` | **出向**：`Delta` 为空结构体时，本地省略该键、relaykit 输出 `"delta":{}`。流式响应的客户端兼容面 |
-| `GeminiChatRequest.GenerationConfig` | `generationConfig,omitempty` | `generationConfig` | **入向**：本地空配置不发该键，relaykit 会发 `"generationConfig":{…零值}` 给 Gemini |
-| `ToolCallRequest.Function` | `function,omitempty` | `function` | **出向**：`"function":{}` 是否出现 |
-| `IncompleteDetails.Reason` | `reason,omitempty` | `reason` | **出向**：`"reason":""` 是否出现 |
-| `ClaudeServerToolUse.WebSearchRequests` | `web_search_requests` | `web_search_requests,omitempty` | **出向**：relaykit 在计数为 0 时省略（另 3 个兄弟字段 relaykit 也带 `omitempty`） |
+| 类型.字段 | 本地 | relaykit | 字段类型 | 影响 |
+|---|---|---|---|---|
+| `ChatCompletionsStreamResponseChoice.Delta` | `delta,omitempty` | `delta` | **struct 值** | **空操作**：`omitempty` 对 struct 值无效，两侧都输出 `"delta":{...}` |
+| `GeminiChatRequest.GenerationConfig` | `generationConfig,omitempty` | `generationConfig` | **struct 值** | **空操作**，同上 |
+| `ToolCallRequest.Function` | `function,omitempty` | `function` | **struct 值** | **空操作**，同上 |
+| `IncompleteDetails.Reason` | `reason,omitempty` | `reason` | `string` | **真实变化**：本地空串省略，relaykit 输出 `"reason":""` |
+| `ClaudeServerToolUse.WebSearchRequests` | `web_search_requests` | `web_search_requests,omitempty` | `int` | **真实变化**：relaykit 在 0 时省略该键 |
+
+**`omitempty` 只对 false/0/nil/空串/空集合生效，对 struct 值无效**——所以前 3 行两侧输出完全一致。两处真实变化的风险判定与逐项结论见 12.0.8。
 
 **二、Go 类型差异：21 处，其中真差异 6 处、等价拼写 15 处**
 
@@ -965,6 +967,42 @@ err = decoder.Decode(&item)
 **为什么这解决了问题**：原表述「取 relaykit 类型后须改为方法级缓存或宿主侧旁路」暗示要在宿主侧做旁路（如 `map[*Request]entry`），那是脆弱的。真正的问题只是「字段不能声明在**别的包**的类型上」——把方法连字段一起放进 relaykit，问题消失。
 
 **阶段 2 的动作**：迁 `EffectiveTools` 及其两个辅助函数到 `relaykit/dto`，13 个调用点改 import。**无缓存语义变化**（同包内，逻辑不变）。
+
+#### 12.0.8 tag 与类型差异的逐项决定（第 17 轮，关闭未决项 30）
+
+**决定：全部 15 处采用 relaykit 侧，零处打补丁。** 但理由分三类，不能一律说「无影响」。
+
+**类别 I——tag 差异 5 处，其中 3 处是空操作、2 处是真实行为变化**
+
+关键判据：`encoding/json` 的 `omitempty` 只对 **false / 0 / nil 指针或接口 / 长度 0 的 string / array / map / slice** 生效，**对 struct 值不生效**。据此：
+
+| 类型.字段 | 本地 | relaykit | 字段类型 | 判定 |
+|---|---|---|---|---|
+| `ChatCompletionsStreamResponseChoice.Delta` | `delta,omitempty` | `delta` | `ChatCompletionsStreamResponseChoiceDelta`（**struct 值**） | **空操作**——struct 值永不被 `omitempty` 省略，两侧输出都是 `"delta":{...}` |
+| `ToolCallRequest.Function` | `function,omitempty` | `function` | `FunctionRequest`（**struct 值**） | **空操作** |
+| `GeminiChatRequest.GenerationConfig` | `generationConfig,omitempty` | `generationConfig` | `GeminiChatGenerationConfig`（**struct 值**） | **空操作** |
+| `IncompleteDetails.Reason` | `reason,omitempty` | `reason` | `string` | **真实变化**——本地空串省略，relaykit 输出 `"reason":""` |
+| `ClaudeServerToolUse.WebSearchRequests` | `web_search_requests` | `web_search_requests,omitempty` | `int` | **真实变化**——relaykit 在 0 时省略该键 |
+
+两处真实变化的**风险与结论**：
+- `IncompleteDetails` 只在两个构造点产生（`relay/channel/openai/responses_via_chat.go:951/955`、`service/openaicompat/chat_to_responses_response.go:51/53`），**两处都设非空 Reason**（`"max_output_tokens"` / `"content_filter"`），故实际输出不变。采用 relaykit，**无需动作**
+- `ClaudeServerToolUse` 本地只有 1 个字段（relaykit 有 4 个），生产代码**从不读取**该结构（只在 dto 内声明），省略行为无影响。采用 relaykit
+
+**类别 II——Go 类型差异 6 处**
+
+| 类型.字段 | 本地 | relaykit | 判定 |
+|---|---|---|---|
+| `ChatCompletionsStreamResponseChoice`… 无关 | — | — | — |
+| `ResponsesStreamResponse.Text`、`.Arguments` | `string` | `*string` | **采用**。本地构造点**不显式写空串**（已逐点核实），故「空串 vs nil」的 `omitempty` 差异不触发；`*string` 只是把「显式空串」与「未设置」分开。**须改所有读写点**（编译期破坏） |
+| `GeminiThinkingConfig.IncludeThoughts` | `bool` | `*bool` | **采用**。relaykit 用 nil 表示「客户端未指定」，语义比 `bool` 更精确，且**正是思考等级链路**所需（`shared/gemini/request.go:168` 的 `if native.IncludeThoughts == nil` 依赖它）。本地 8 处赋值点（`relay/channel/gemini/relay-gemini.go:148/167/171/192/302/305/315/339`）改 `kitutil.GetPointer(...)` 或解引用 |
+| `OpenAIModels.SupportedEndpointTypes` | `[]constant.EndpointType` | `[]types.EndpointType` | **采用**（别名等价，JSON 形状不变）；改 import 即可，与 12.0.4 同因 |
+| `OpenAIResponsesResponse.CreatedAt`、`OpenAIResponsesCompactionResponse.CreatedAt` | `int` | `IntValue` | **采用，纯增益**。`IntValue.MarshalJSON` 输出 `int(i)`，**与本地 `int` 完全相同**；`UnmarshalJSON` 额外接受 float 与 **string**。是超集，无行为回退 |
+
+**类别 III——等价拼写 15 处**：`interface{}`/`any`，采用 relaykit，零动作。
+
+**结论**：未决项 30 关闭。阶段 2 的实际工作量是**改 8 处 `IncludeThoughts` 赋值点 + 所有 `Text`/`Arguments` 读写点 + 4 处 import**；tag 差异中 3 处无需动作、2 处风险已排除。
+
+**这一节同时修正了 12.0.6 的一个过度警告**：那里写「tag 差异会**静默改变序列化输出**」，对 3 个 struct 值字段不成立——`omitempty` 对 struct 值无效，那是 Go 的既定语义。**凡「tag 不同即输出不同」的判断，必须先看字段类型**。
 
 ### 12.1 协议层语义 → 提上游（第 10 节第 1 项已完成的产出）
 
@@ -1322,7 +1360,7 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 | 22 | `dto` 方法/函数/字段差集与 import 图 | **已完成**（12.0.5）：方法本地独有 101、relaykit 独有 31；函数 65 / 44；136 个同名结构体 33 个不同，其中 16 个需动作（另 17 个按字段名口径为增益，但**其中 10 个另有 tag/类型差异**，见 12.0.6）；import 图**无环** |
 | 23 | 通道级 Claude 入向转换器 | **已决定**（12.15.4）：收敛到 relaykit，宿主只留钩子接线，459 行本地实现删除（原未决项 28） |
 | 24 | `dto` 未导出缓存字段承载 | **已决定**（12.0.7）：`EffectiveTools()` 连字段迁入 `relaykit/dto`，同包内未导出字段合法（原未决项 29） |
-| 25 | 字段 tag / Go 类型差异 | **需逐项决定**（未决项 30）：tag 5 处、类型 3 处为真差异，另 8 处是 `interface{}`/`any` 拼写（12.0.6） |
+| 25 | 字段 tag / Go 类型差异 | **已决定**（12.0.8）：15 处全部采用 relaykit、零打补丁。tag 5 处中 3 处空操作（struct 值 `omitempty` 无效）、2 处风险排除；类型 6 处含 1 处纯增益、3 处改读写点、2 处改 import |
 
 ### 12.18 本轮审查新增的未决项
 
@@ -1337,4 +1375,4 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 | 27 | ~~`dto` 宿主 import 归零后 3 个符号的归位方式~~ | **已关闭**（2026-10-04）：见 12.0.7——三个符号是 `encoding/json` 薄包装，换 stdlib；`ResponsesRequestMetadata` 判为宿主类型，随 `dto/opaque_openai_responses_request.go` 留在宿主 `dto` |
 | 28 | ~~通道级 Claude 入向转换器的归属（第 12 轮新增）~~ | **已关闭**（2026-10-04）：见 12.15.4——收敛到 relaykit。三类宿主耦合 relaykit 侧均有注入机制（`convmeta.Options` 钩子 / `MediaResolver` / 内置 `FunctionParametersToInputSchema`），阶段 4 接线后删除 459 行本地实现。两条待实测边界（schema 对齐、`text/*` MIME）已列入该节 |
 | 29 | ~~`dto` 未导出缓存字段的承载方式（第 12 轮新增）~~ | **已关闭**（2026-10-04）：见 12.0.7——`EffectiveTools()` 连缓存字段迁入 `relaykit/dto`，未导出字段在自己包内声明合法（上游已有 `Reasoning.effortRaw` 同例），无需旁路。13 个调用点改 import |
-| 30 | 字段名相同但 tag / Go 类型不同（第 14 轮新增） | tag 差异 5 处（**静默改变序列化输出**）、Go 类型真差异 6 处（**编译期破坏**，`IncludeThoughts` 一项就有 8 处赋值点），另 15 处是 `interface{}`/`any` 等价拼写。签名差异 12 处（全为 `IsStream`）。阶段 2 内逐项决定「采用 relaykit 语义 / 打补丁保留本地语义」（12.0.6、第 10 节第 30 项） |
+| 30 | ~~字段名相同但 tag / Go 类型不同（第 14 轮新增）~~ | **已关闭**（2026-10-04）：见 12.0.8——15 处全部采用 relaykit。tag 3 处空操作（struct 值）、2 处风险排除；类型 `CreatedAt` 纯增益、`IncludeThoughts`(8 处)+`Text`/`Arguments` 改读写点、`SupportedEndpointTypes` 改 import |
