@@ -63,7 +63,6 @@ func Init() error {
 	return initErr
 }
 
-// GetLocalizer returns a localizer for the specified language
 // GetLocalizer returns the localizer for lang, creating one on first use.
 //
 // It returns nil when Init has not run or failed. Init is allowed to fail
