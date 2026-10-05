@@ -760,6 +760,26 @@ if from == to || to == types.RelayFormatGemini ||
 - **门禁的正则决定什么被检查，不只是决定什么被排除**。新增引用格式时要问「这个正则匹配它吗」，扩门禁时同样要问「我会不会把示例、占位符、宿主路径一起吞进来」——**假绿与假红都是正则的副作用**。
 - **「优先 A 方案避免分叉」与「实测证明必须走 B」冲突时，先写下这条冲突**，别让「优先」二字把 B 悄悄压掉。第 26 轮的「必然分叉 vs 避免分叉」是同型的第三次复发。
 
+**第二十九轮（2026-10-05）——「严格校验留宿主调用点」没有落点，且差异被少算成 1 条**：核 §12.11（`reasonmap` 宽松 default）。它写着「严格化应在**宿主调用点**做」，另有三处同义复述（处置清单第 9 项、§10 收尾第 12 条、§12.17 汇总表第 12 行）——**没有一处指明是哪个调用点**。本轮实测后确认：这个落点在阶段 6 之后**不存在**。
+
+事实（逐条读 `HEAD:service/convert.go`、`upstream/main:relaykit/...` 与 `convmeta.Options`）：
+
+1. **严格校验的两个唯一调用点都在阶段 6 要删的文件里**。`stopReasonOpenAI2ClaudeStrict` 定义在 `service/convert.go:1125`，只被 `:738`（`StreamResponseOpenAI2ClaudeWithError`）与 `:1057`（`ResponseOpenAI2ClaudeWithError`）调用；阶段表第 6 行删除 `service/convert.go` 主体（2229 行），处置清单第 2 项在**阶段 4** 就删掉 `*WithError` 系列。
+2. **宿主 5 个 Claude 响应方向的调用点全都不做校验**。`relay/channel/openai/relay-openai.go:314`、`openai/helper.go:46,246`、`openai/chat_via_responses.go:280`、`gemini/relay-gemini.go:1784`——每一处都只是 `if conversionErr != nil { return … }` 的转发，校验被**委托**给被删的 `*WithError`。（全仓库 `*WithError` 调用点共 9 个，其余 4 个是 Gemini 方向。）
+3. **relaykit 侧没有任何注入点**。`reasonmap.OpenAIFinishReasonToClaudeStopReason`（`relaykit/reasonmap/reasonmap.go:31`）是**纯包级函数**、无 receiver、零钩子，两个调用点（`oai_chat/to_claude_messages_resp.go:502`、`oai_responses/to_claude_messages_resp.go:87`）都在 `internal/` 内；`convmeta.Options` 的**全部字段**（`relaykit/relayconvert/convmeta/options.go`）没有一项涉及 finish_reason/stop_reason。**这与 12.4（有 `Options` 钩子）、12.15.4（有 `MediaResolver`）不同**——那两处的「宿主耦合」都真有注入机制，finish_reason 没有。所以「在宿主调用点做」实际意味着**在 5 个 relay 调用点各写一遍前置校验**，5 份重复逻辑，且顺序与 relaykit 内已完成的转换相反（先转换、才发现非法值，只能丢弃结果）。
+4. **差异是 5 条，不是 1 条**。9.1 第 1 条与 §12.11 原文只写「未知值报错 vs 透传」。逐条对 `reasonmap` 后：`content_filter` 两侧同为 `refusal`（**无差异**，旧文隐含「有差异」）；`""` 本地 `end_turn`、上游 `default` 返回空串；`function_call` 本地 `tool_use`、上游无此分支而透传成非法 stop_reason；本地 `ToLower`+`TrimSpace`、上游只 `ToLower`。**后三条都是行为回归，不是错误路径**。
+5. **`""` 那条会整字段消失**。`dto.ClaudeResponse.StopReason` 是 `string` + `omitempty`（`dto/claude.go:560`、`relaykit/dto/claude.go:510`）；上游**非流式**路径（`oai_chat/to_claude_messages_resp.go:450-495`）在无 choice 携带 `FinishReason` 时 `stopReason` 停在 `""`，序列化时**省略 `stop_reason`**，本地返回 `end_turn`。流式两侧都有 guard（上游 `:220-222`/`:429-431`），无差异。**两条 golden 基线都测不到**：本地 fixture 只有 `finish_reason: "tool_calls"`（快照 `stop_reason: "tool_use"`），relaykit 24 个 golden 只有 `tool_calls`/`stop`/`null`——无空串样例。
+6. **`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 会编译失败，不是「失败得其所」**。它（`service/convert_claude_request_test.go:900`）直接调 `ResponseOpenAI2ClaudeWithError`——该函数阶段 4 即删。§12.16 的「确认这些既有用例在切换后仍通过」对它不成立；它钉的行为在阶段 6 后无落点。故它是 12.16.1 里**除第 7 条外的第二个例外**。
+
+修法：§12.11 重写为 12.11.1/12.11.2/12.11.3——列出「无落点」的四条证据、把差异补成 5 条、给出**二选一**（A：给 `reasonmap` 加可选注入钩子，登记进本地改动清单第 12 行；B：宿主 5 处前置校验）。同步改 9.1 第 1 条、处置清单第 9 项、§10 收尾第 12 条、§12.17 第 12 行、阶段表第 4 行判据、12.16.1 第二例外、本地改动清单第 12 行、新增未决项 31。引用数 34 → 40（新增 `reasonmap.go:31`、`to_claude_messages_resp.go:502`、`oai_responses/to_claude_messages_resp.go:87`、`oai_chat/to_claude_messages_resp.go:450/495/220/429`、`dto/claude.go:560`/`relaykit/dto/claude.go:510`），**门禁 40/40 通过**；反向验证：扰动 `reasonmap.go:31` → `:9999` 退出码 1 报 `out of range`，改幻影文件 → 报 `file not found`，还原后退出码 0。
+
+**教训**：
+
+- **「留宿主调用点」是一句没有主语的话**。它省略了「哪个文件、哪个函数、由谁调用」——而这三个正是可执行性的全部。**凡写「在宿主侧做」，必须当场写出文件与函数名，并确认它在所有删除阶段之后仍然存在**。第 25 轮（门控留宿主）是同一个坑的第一次，本轮是第二次。
+- **「某处有注入机制」要逐个能力核实，不能从一个能力外推**。12.15.4 的「三类宿主耦合都有注入机制」让「finish_reason 也在宿主做」看起来顺理成章，但 `Options`/`MediaResolver` 是**具体某几项能力**的钩子，不是通用注入点。**套件有没有钩子，取决于那个函数有没有接 `Meta`/`Options`**——`reasonmap` 是纯函数，就没有。
+- **差异清单要把「无差异」也写出来**。旧文写「严格校验 vs 宽松 default」，读起来是一条差异；实际是 4 条差异 + 1 条无差异。**不逐条列全，就会把「行为回归」误当成「严格度取舍」而默认放行**。
+- **测试的「仍通过」前提是它还能编译**。一个调用待删函数的用例，在删除发生的那一刻就不再是「会失败」而是「编译不过」——「失败得其所」这类措辞要先确认被删符号的引用是否已被改指。
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**。第十八轮起已实际运行 `go test ./service -run TestGolden` 与全包 `go test ./service`（见该轮），但「编译失败」类结论仍未逐条 `go build` 复现
@@ -810,4 +830,6 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第二十七轮） | 核阶段 5 判据能否验证 12.4 的语义条件，**发现更硬的问题：阶段顺序自相矛盾**——门控排在阶段 5，但阶段 4 判据「8 个快照逐字节一致」已要求门控生效，而上游 relaykit **默认无条件暴露 reasoning**（实测 `ResponseOpenAI2Claude(resp, nil)` 函数体 0 次引用 `info`、`:463` 无门控、整文件 0 处 `Options`）→ 阶段 4 必红且豁免条款覆盖不到。决定：门控移入阶段 4（处置清单新增第 13 项），阶段 5 只核验位置语义。**连带修出 12.4 自身四处错误**：钩子 nil 语义写反（`nil = 不保留` 应为 `nil = 保留`，否则破坏上游默认）、单参钩子复现不了三名字门控（须调用点各调一次取或）、插入点写错一层（须在外层二选一之前归零，否则同 chunk text 被丢）、同 chunk reasoning+text 是本地能力却未列入 9.1（已补第 7 条）。另修正 12.4.3 的落点文件名错误（`to_claude_messages_stream_resp.go` 不在 `oai_chat/` 下）。新增引用一度写成工作区口径（`:800/830/857`、`:544`），已按 HEAD 口径改正（`:793/823/850`、`:537`） |
 | （本轮·第二十八轮） | 核 §12.15.4 被多个判据引为「已实测」的两条边界——**实测后两条都不成立，且依据表把 schema 归一化标为「已内置」，掩盖了一个行为回归**。边界 1（schema）：本地 `normalizeClaudeInputSchema` 报错语义 vs 上游 `FunctionParametersToInputSchema` 静默降级，4 处差异（新增 §12.15.4.1）。边界 2（媒体）：上游 `switch` 只有 `case "text"` 与 `default`，`default` 里非 pdf 一律当 image——**`text/*` 文件被当图片发给 Claude**；另发现上游**无 `ContentTypeFile` case**、`ToFileSource()==nil` 静默丢内容、无 MIME 归一化、本地自身 pdf 判定不一致（`:122` 前缀 vs `:197` 精确），共 7 处差异（新增 §12.15.4.2）。9.2 补第 7、8 条（6→8）。退路条款被激活但原文写错（差异部分是纯函数、本就该在 relaykit，须**改上游实现**而非「迁入」），与「避免对 relaykit 产生分叉」冲突——按「保行为优先」处置，本地改动清单新增第 10、11 行。**顺带修门禁盲区（第 26 轮假绿复发）**：检查器报 18/18 绿，而 **23 处唯一简写引用**（`internal/...`、`oai_chat/...`、`convmeta/...`、`shared/claude/...`）全在门禁外——旧正则要求 `relaykit/` 前缀；加显式映射表 `SHORT_PACKAGES` 后覆盖 18→**34/34**，单测 10→15（先写测试确认 3 个失败再实现），反向验证短路径越界/文件不存在均能检出。**又踩一次「示例文本进入门禁」**：文档里写 `internal/oai_chat/foo.go:12` 当示例被检查器当真引用，已改占位符 |
 
-文档当前 1663 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+| （本轮·第二十九轮） | 核 §12.11（`reasonmap` 宽松 default）：原文写「严格化在宿主调用点做」，**实测该落点在阶段 6 后不存在**——严格校验的两个唯一调用点（`service/convert.go:738`、`:1057`）都在阶段 6 删除的文件内，宿主 5 个 Claude 方向调用点全部只做错误转发，relaykit 侧 `reasonmap.OpenAIFinishReasonToClaudeStopReason` 是纯包级函数、零钩子（与 12.4 的 `Options` 钩子、12.15.4 的 `MediaResolver` 不同）。且差异被少算：实际 **5 条**（未知值报错、`""`、`TrimSpace`、`function_call`、`content_filter` 无差异），其中 3 条是行为回归；`""` 那条因 `stop_reason` 带 `omitempty` 会整字段消失，且两条 golden 基线都测不到。`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 调用的函数阶段 4 即删，是「编译失败」而非「失败得其所」——12.16.1 的第二个例外。§12.11 重写为 12.11.1/12.11.2/12.11.3（二选一：A 加钩子 / B 宿主 5 处前置校验），同步 9.1 第 1 条、处置清单 9、§10 收尾 12、§12.17 第 12 行、阶段表第 4 行判据、本地改动清单第 12 行、未决项 31。引用 34→40，门禁 40/40，反向验证通过 |
+
+文档当前 1703 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
