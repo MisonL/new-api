@@ -42,6 +42,47 @@ class ExtractCitationsTests(unittest.TestCase):
     def test_ignores_bare_relaykit_dir_without_line(self):
         self.assertEqual(MODULE.extract_citations("relaykit/dto/ has types"), [])
 
+    def test_expands_short_internal_paths(self):
+        # internal/... is a shorthand for relaykit/relayconvert/internal/...
+        text = "see internal/oai_chat/to_claude_messages_resp.go:345 for the gate"
+        self.assertEqual(
+            MODULE.extract_citations(text),
+            [("relaykit/relayconvert/internal/oai_chat/to_claude_messages_resp.go", 345)],
+        )
+
+    def test_expands_bare_package_paths(self):
+        # oai_chat/... has no internal/ component, so it maps under
+        # relaykit/relayconvert/internal/ as well.
+        text = "internal and bare: oai_chat/to_claude_messages_req.go:277"
+        self.assertEqual(
+            MODULE.extract_citations(text),
+            [("relaykit/relayconvert/internal/oai_chat/to_claude_messages_req.go", 277)],
+        )
+
+    def test_expands_convmeta_and_shared_paths(self):
+        text = "convmeta/meta.go:58 shared/claude/schema.go:3 shared/gemini/request.go:85"
+        self.assertEqual(
+            MODULE.extract_citations(text),
+            [
+                ("relaykit/relayconvert/convmeta/meta.go", 58),
+                ("relaykit/relayconvert/internal/shared/claude/schema.go", 3),
+                ("relaykit/relayconvert/internal/shared/gemini/request.go", 85),
+            ],
+        )
+
+    def test_does_not_expand_host_paths(self):
+        # relay/, service/, controller/ and a bare dto/ are host paths; the
+        # checker must not claim them.
+        text = "relay/claude_handler.go:55 service/convert.go:749 dto/gemini.go:112"
+        self.assertEqual(MODULE.extract_citations(text), [])
+
+    def test_keeps_full_relaykit_paths_unchanged(self):
+        text = "relaykit/relayconvert/convmeta/options.go:9"
+        self.assertEqual(
+            MODULE.extract_citations(text),
+            [("relaykit/relayconvert/convmeta/options.go", 9)],
+        )
+
 
 class CheckTests(unittest.TestCase):
     def test_resolvable_citation_passes(self):

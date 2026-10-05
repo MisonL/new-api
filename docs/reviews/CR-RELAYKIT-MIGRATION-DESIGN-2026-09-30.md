@@ -737,6 +737,29 @@ if from == to || to == types.RelayFormatGemini ||
 - **「加一次判断」这种措辞要落到代码结构上验证**。本轮三处错误（nil 语义、单参、插入点）都藏在「加一个 if」这五个字里，读起来无懈可击。
 - **能力差异与严格度差异要分开处理**。12.16.1 的「失败得其所」对错误路径成立，对**本地刻意支持的渲染能力**不成立——后者失败是回归，不是「上游更宽松」。
 
+**第二十八轮（2026-10-05）——「须实测」的两条边界实测后都不成立，而依据表里写着「已内置」**：核 §12.15.4 被多个判据引用为「已实测」的两条边界（schema 行为对齐、`text/*` MIME 归属）。它们都写着「阶段 4 开工前必须实测比对」而**没给命令**。实测结论：**两条都不成立**，且 12.15.4 的依据表把 `FunctionParametersToInputSchema` 标为「已内置」——**掩盖了一个行为回归**。
+
+事实（逐条读 `upstream/main` 与 HEAD 源码）：
+
+1. **边界 1 不成立：schema 归一化有 4 处差异**（12.15.4.1 表）。本地 `normalizeClaudeInputSchema`（`relay/channel/claude/relay-claude.go:233`）用 `common.Any2Type`（JSON 往返）并在失败时报错；上游 `FunctionParametersToInputSchema`（`relaykit/relayconvert/internal/shared/claude/schema.go:3`）用类型断言、失败**静默**产出 `{"type":"object","properties":{}}`。**D1 是行为回归**：非法 `input_schema` 从「明确报错」变成「静默降级后发给 Claude」。D3（`type` 非 string）同类。
+2. **边界 2 不成立：`text/*` 分支仍在用且上游完全没有**（12.15.4.2 表）。上游 `oai_chat/to_claude_messages_req.go` 的 `switch mediaMessage.Type` 只有 `case "text"`（字符串内容）与 `default`，`default` 里 `application/pdf` 前缀→`document`、**其余全部→`image`**——**上游会把 `text/plain` 文件当图片发给 Claude**。
+3. **边界 3 是本轮新增的同类差异**：上游**没有 `ContentTypeFile` 这个 case**（本地有独立分支，支持 `file_data` 内联 / `file_id` / `file_url` / 拒绝 `application/octet-stream`），落进 `default` 与 `image_url` 同路；`ToFileSource()` 返回 nil 时**静默 `continue`**（内容被丢弃无错，本地显式报错）；`ContentTypeAudio`/`ContentTypeVideoUrl` 本地显式报错、上游静默当 image；上游**没有 `normalizeClaudeMimeType`**（`ResolveBase64Data` 纯转发给宿主注入的 resolver，自身零归一化）。**M1 是能力缺失，M2/M4/M5/M6 是行为回归，M3 是归一化缺失，M7 是本地自身不一致**（`:122` 用前缀判 pdf、`:197` 用精确相等）。
+4. **9.2 表没有 schema 归一化与媒体分派这两条**——已补为第 7、8 条，处置清单第 6 项的计数由「6 条」改为「8 条」。
+5. **12.15.4 的退路条款被激活，但它本身写得不对**：原文说「把该函数迁入 relaykit」——而实测发现的不一致部分**本来就是纯函数**（`normalizeClaudeInputSchema` 只依赖 `common.Any2Type` + `fmt`），它们不是「绑定宿主业务」而是「绑定协议转换」，恰恰本就该在 relaykit 里。所以正确处置不是「迁入」（那是现状）而是**改 relaykit 现有实现**。这与「优先走接线方案、避免对 relaykit 产生分叉」**直接冲突**：要保行为一致必须改上游源码。已按「保行为优先于避免分叉」处置，并登记进本地改动清单（新增第 10、11 行）。
+
+**顺带修一处门禁盲区——本轮是第 26 轮那类假绿的复发**：检查器报「18/18 绿」，但文档里**23 处唯一简写引用**（`internal/oai_chat/...`、`oai_chat/...`、`convmeta/...`、`shared/claude/...`）**全部不在门禁内**——旧正则要求 `relaykit/` 前缀，而第 26 轮补的正是那些带前缀的。**第 27 轮我新写的 `:345`、`:247`、`:463` 也在这批盲区里。**
+
+修法：给 `scripts/relaykit-citation-check.py` 加**显式映射表** `SHORT_PACKAGES`（逐个核实过真实目录，不用「试前缀」——试探会把 `shared/claude/` 解析成不存在的 `relayconvert/shared/`），覆盖数 18 → **34/34**。**宿主路径一律不扩展**（`relay/`、`service/`、`controller/`、`common/`、`setting/`、裸 `dto/`、`types/`）——宿主有自己的 `dto/`，文档里的 `dto/...:NN` 指宿主，误扩展会造出假引用；这一条由单测覆盖。测试从 10 个增到 **15 个**（新增「简写路径展开」「宿主路径不展开」「全路径不变」），**先写测试确认 3 个失败再实现**。反向验证：短路径越界 → 退出码 1 报 `out of range`；短路径文件不存在 → 报 `file not found`；还原后退出码 0、文档字节一致。
+
+**又一次踩到「示例文本进入门禁」**：我在文档里写「形如 `internal/oai_chat/foo.go:12`」当示例，检查器立刻把 `foo.go:12` 当成待解析引用并报错（35 处、1 失败）。已改成 `<文件>.go:<行>` 占位。这与第 26 轮是同一类错误的镜像——那次是**真引用漏出门禁**，这次是**假引用混进门禁**。
+
+**教训**：
+
+- **依据表里的「已内置」是最容易藏回归的地方**。它读起来像「能力对齐、只差接线」，于是差异被推到「阶段 4 再验」——而阶段 4 的判据根本不会去看它。**凡写「已内置 / 已有对应机制」，必须当场把两侧实现的输入、输出、错误路径逐项列出**。
+- **「已实测」是引用别人结论的词，不是自己做过**。12.15.4 两条边界写着「须实测比对」被多个判据引为「已实测」——实际从未比对过。本轮把这类措辞全部改成有结论的句子。
+- **门禁的正则决定什么被检查，不只是决定什么被排除**。新增引用格式时要问「这个正则匹配它吗」，扩门禁时同样要问「我会不会把示例、占位符、宿主路径一起吞进来」——**假绿与假红都是正则的副作用**。
+- **「优先 A 方案避免分叉」与「实测证明必须走 B」冲突时，先写下这条冲突**，别让「优先」二字把 B 悄悄压掉。第 26 轮的「必然分叉 vs 避免分叉」是同型的第三次复发。
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**。第十八轮起已实际运行 `go test ./service -run TestGolden` 与全包 `go test ./service`（见该轮），但「编译失败」类结论仍未逐条 `go build` 复现
@@ -785,5 +808,6 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第二十五轮） | 核阶段 4 处置清单第 4、5 项（**「反向新增」类**任务）：第 4 项上游**无同名方法**，且 `kitutil` **不提供 `RawMessage` 类型别名** → 须把 `[]common.RawMessage` 改 `[]json.RawMessage`；第 5 项「门控留宿主」**没写落点**——门控 3 个调用点全在 `convert.go`（阶段 6 删），必须落到注入机制。另修正一个**幻影符号**（`extractThinkTaggedHistory` 实为局部变量） |
 | （本轮·第二十六轮） | 核阶段 5：**发现「必然分叉」与「避免分叉」的矛盾**——三处补丁都要改写 relaykit 内部源码 + 给 `convmeta.Options` 新增字段，而 12.9/12.15.4 两处写「避免分叉」，且规格**从未汇总改了哪些文件**。补 8 条「本地改动清单」表（核实过的行号），并要求另立 `relaykit/LOCAL_PATCHES.md`。**顺带修一处假绿**：新表路径原缺 `relaykit/` 前缀，6 处新引用一度在门禁之外（检查器仍报 10/10），补前缀后升到 16/16 |
 | （本轮·第二十七轮） | 核阶段 5 判据能否验证 12.4 的语义条件，**发现更硬的问题：阶段顺序自相矛盾**——门控排在阶段 5，但阶段 4 判据「8 个快照逐字节一致」已要求门控生效，而上游 relaykit **默认无条件暴露 reasoning**（实测 `ResponseOpenAI2Claude(resp, nil)` 函数体 0 次引用 `info`、`:463` 无门控、整文件 0 处 `Options`）→ 阶段 4 必红且豁免条款覆盖不到。决定：门控移入阶段 4（处置清单新增第 13 项），阶段 5 只核验位置语义。**连带修出 12.4 自身四处错误**：钩子 nil 语义写反（`nil = 不保留` 应为 `nil = 保留`，否则破坏上游默认）、单参钩子复现不了三名字门控（须调用点各调一次取或）、插入点写错一层（须在外层二选一之前归零，否则同 chunk text 被丢）、同 chunk reasoning+text 是本地能力却未列入 9.1（已补第 7 条）。另修正 12.4.3 的落点文件名错误（`to_claude_messages_stream_resp.go` 不在 `oai_chat/` 下）。新增引用一度写成工作区口径（`:800/830/857`、`:544`），已按 HEAD 口径改正（`:793/823/850`、`:537`） |
+| （本轮·第二十八轮） | 核 §12.15.4 被多个判据引为「已实测」的两条边界——**实测后两条都不成立，且依据表把 schema 归一化标为「已内置」，掩盖了一个行为回归**。边界 1（schema）：本地 `normalizeClaudeInputSchema` 报错语义 vs 上游 `FunctionParametersToInputSchema` 静默降级，4 处差异（新增 §12.15.4.1）。边界 2（媒体）：上游 `switch` 只有 `case "text"` 与 `default`，`default` 里非 pdf 一律当 image——**`text/*` 文件被当图片发给 Claude**；另发现上游**无 `ContentTypeFile` case**、`ToFileSource()==nil` 静默丢内容、无 MIME 归一化、本地自身 pdf 判定不一致（`:122` 前缀 vs `:197` 精确），共 7 处差异（新增 §12.15.4.2）。9.2 补第 7、8 条（6→8）。退路条款被激活但原文写错（差异部分是纯函数、本就该在 relaykit，须**改上游实现**而非「迁入」），与「避免对 relaykit 产生分叉」冲突——按「保行为优先」处置，本地改动清单新增第 10、11 行。**顺带修门禁盲区（第 26 轮假绿复发）**：检查器报 18/18 绿，而 **23 处唯一简写引用**（`internal/...`、`oai_chat/...`、`convmeta/...`、`shared/claude/...`）全在门禁外——旧正则要求 `relaykit/` 前缀；加显式映射表 `SHORT_PACKAGES` 后覆盖 18→**34/34**，单测 10→15（先写测试确认 3 个失败再实现），反向验证短路径越界/文件不存在均能检出。**又踩一次「示例文本进入门禁」**：文档里写 `internal/oai_chat/foo.go:12` 当示例被检查器当真引用，已改占位符 |
 
-文档当前 1621 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1663 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。

@@ -33,8 +33,47 @@ import subprocess
 import sys
 
 CITATION = re.compile(r"relaykit/([A-Za-z0-9_./-]+\.go):(\d+)")
+
+# The doc also cites relaykit files by shorthand that omits the
+# `relaykit/relayconvert/` prefix -- e.g. `internal/oai_chat/foo.go:12`,
+# `oai_chat/foo.go:12`, `convmeta/meta.go:58`, `shared/claude/schema.go:3`.
+# Those were invisible to CITATION (which requires the full prefix), so 23
+# unique shorthand citations sat outside the gate while it still reported
+# green. SHORT_PACKAGES lists the package roots that exist only under
+# relaykit, each mapped to its real directory -- verified against the
+# upstream tree, not guessed. Never relay/, service/, controller/ or a bare
+# dto/: the host has its own dto/ and the doc's `dto/...:NN` refs are the
+# host's.
+SHORT_PACKAGES = {
+    "internal": "relaykit/relayconvert/internal/",
+    "oai_chat": "relaykit/relayconvert/internal/oai_chat/",
+    "oai_responses": "relaykit/relayconvert/internal/oai_responses/",
+    "claude_messages": "relaykit/relayconvert/internal/claude_messages/",
+    "gemini_chat": "relaykit/relayconvert/internal/gemini_chat/",
+    "shared": "relaykit/relayconvert/internal/shared/",
+    "media": "relaykit/relayconvert/internal/media/",
+    "convdiag": "relaykit/relayconvert/internal/convdiag/",
+    "convmeta": "relaykit/relayconvert/convmeta/",
+    "kitutil": "relaykit/relayconvert/kitutil/",
+    "reasonmap": "relaykit/reasonmap/",
+}
+
+SHORT_CITATION = re.compile(
+    r"(?<![A-Za-z0-9_./-])"
+    r"((?:" + "|".join(SHORT_PACKAGES) + r")/[A-Za-z0-9_./-]+\.go):(\d+)"
+)
+
 DEFAULT_REF = "upstream/main"
 DEFAULT_DOC = "docs/superpowers/specs/2026-09-30-relaykit-migration-design.md"
+
+
+def _expand(path):
+    """Map a shorthand path to its real relaykit path via SHORT_PACKAGES."""
+    root = path.split("/", 1)[0]
+    base = SHORT_PACKAGES.get(root)
+    if base is None:
+        return None
+    return base + path.split("/", 1)[1]
 
 
 def extract_citations(text):
@@ -42,6 +81,10 @@ def extract_citations(text):
     seen = {}
     for path, line in CITATION.findall(text):
         seen.setdefault(("relaykit/" + path, int(line)), None)
+    for path, line in SHORT_CITATION.findall(text):
+        expanded = _expand(path)
+        if expanded is not None:
+            seen.setdefault((expanded, int(line)), None)
     return sorted(seen)
 
 
