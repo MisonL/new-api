@@ -267,8 +267,9 @@ func main() {
 	section("函数/方法签名不同", r.sigDiff)
 	section("等价拼写（interface{} vs any），仅供参考", r.tagEquivalents)
 
-	fmt.Printf("\n计数: fieldSet=%d tag=%d type=%d embed=%d sig=%d\n",
-		len(r.fieldSetDiff), len(r.tagDiff), len(r.typeDiff), len(r.embedDiff), len(r.sigDiff))
+	fmt.Printf("\n计数: fieldSet=%d tag=%d type=%d embed=%d sig=%d equiv=%d\n",
+		len(r.fieldSetDiff), len(r.tagDiff), len(r.typeDiff), len(r.embedDiff), len(r.sigDiff),
+		len(r.tagEquivalents))
 
 	// Recorded expectation as of the 15th review round (2026-10-04), against
 	// HEAD:dto and upstream/main:relaykit/dto. This is a point-in-time
@@ -276,16 +277,21 @@ func main() {
 	// pinned relaykit commit moves, these numbers change and -strict fails
 	// until the baseline is re-recorded deliberately. That is the point -- it
 	// is a gate against silent drift, not a permanent invariant.
+	//
+	// equiv is included because the 30th review round found the design doc
+	// claiming 15 interface{}/any spellings when the tool has always reported
+	// 21. The group was printed but never gated, so nothing caught it.
 	const (
 		wantFieldSet = 33 // types whose field-name sets differ
 		wantTag      = 5
 		wantType     = 6  // excludes interface{}/any spellings, reported separately
 		wantEmbed    = 0
 		wantSig      = 12 // all IsStream; NewNotify's interface{}/any is a spelling
+		wantEquiv    = 21 // 20 fields + NewNotify's one parameter, in its own group
 	)
 	if *strict {
-		got := []int{len(r.fieldSetDiff), len(r.tagDiff), len(r.typeDiff), len(r.embedDiff), len(r.sigDiff)}
-		want := []int{wantFieldSet, wantTag, wantType, wantEmbed, wantSig}
+		got := []int{len(r.fieldSetDiff), len(r.tagDiff), len(r.typeDiff), len(r.embedDiff), len(r.sigDiff), len(r.tagEquivalents)}
+		want := []int{wantFieldSet, wantTag, wantType, wantEmbed, wantSig, wantEquiv}
 		for i := range want {
 			if got[i] != want[i] {
 				fmt.Fprintf(os.Stderr, "strict: dimension %d changed: got %d want %d\n", i, got[i], want[i])

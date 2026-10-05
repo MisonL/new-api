@@ -780,6 +780,33 @@ if from == to || to == types.RelayFormatGemini ||
 - **差异清单要把「无差异」也写出来**。旧文写「严格校验 vs 宽松 default」，读起来是一条差异；实际是 4 条差异 + 1 条无差异。**不逐条列全，就会把「行为回归」误当成「严格度取舍」而默认放行**。
 - **测试的「仍通过」前提是它还能编译**。一个调用待删函数的用例，在删除发生的那一刻就不再是「会失败」而是「编译不过」——「失败得其所」这类措辞要先确认被删符号的引用是否已被改指。
 
+**第三十轮（2026-10-05）——顺着一个聚合计数查下去，牵出工具门禁漏掉的一整个维度**：第 29 轮修完 §12.11 后，本轮核 §12.16.2/12.16.3（基线生命周期）。起因是文档里「9.1/9.2 的 **13 处**本地差异」——第 28 轮给 9.2 加了第 7、8 条（schema 归一化、媒体分派）却漏改聚合处。顺着一个数查下去，共 **8 处错误**，其中 5 处是计数、2 处是事实断言、1 处是死代码。
+
+事实（逐条实测）：
+
+1. **聚合计数 13 → 15**：9.1 表 **7 行**、9.2 表 **8 行**（机械数行，非印象）。第 27 轮加 9.1 第 7 条后 13 是对的，第 28 轮加 9.2 两行时只改了处置清单第 6 项，四处聚合处未同步。
+2. **「6 个调用点」是 6 个函数、8 个调用点**：`ResponseOpenAI2ClaudeWithError` 与 `StreamResponseOpenAI2ClaudeWithError` 各被调两次（门控两侧各跑一遍）。`grep -c` 实测 8。处置清单第 12 项、§9.3 命令块注释、§12.16.2 决定 1 三处都写成 6。
+3. **`mustUnmarshalFixture` 不是「同签名」**：12.16.3 的表头写「与我方同名同签名」，逐行 diff 后 4 行确实同签名，但这一行**不同**——上游 `(raw string, out any)`、本地 `(t *testing.T, raw string, v any)`。同名即冲突（结论不变），但它决定了阶段 6 合并时本地 **8 处调用都得去掉首参**，原表没写。
+4. **「与 15 处差异无一重叠」不成立**：至少 3 处重叠——`ChatCompletionsStreamResponseChoice.Delta`（输入侧，流式 fixture 逐 chunk 带 `delta`）、`GeminiChatRequest.GenerationConfig`（输入侧，Gemini fixture 用的就是该类型）、`ToolCallRequest.Function`（**输出侧**，`request/claude_to_claude`… 实为 `request/claude_to_openai` 与 `request/gemini_to_openai` 两个快照都输出 `tools`）。**结论仍成立，但理由不是「无重叠」而是「重叠的几处都是 struct 值空操作」**——`Delta`/`GenerationConfig`/`Function` 三者在 12.0.6 已判为 `omitempty` 无效的空操作。另两处真实变化（`IncompleteDetails.Reason` 属 `OpenAIResponsesResponse`、本基线不走 responses 方向；`ClaudeServerToolUse.WebSearchRequests` 属 `ClaudeUsage`、快照实测无 `server_tool_use` 键）确实无重叠。
+5. **12.0.8 的「全部 15 处采用 relaykit」与工具实测不符**：跑 `scripts/relaykit-dto-compat.sh`（`--strict` 通过）得 **tag=5、type=6**，即真正需逐项决定的是 **11 处**，不是 15。且原文自列的三类 5+6+15=26 与句首「15 处」自相矛盾。
+6. **12.0.6 的「等价拼写 15 处」实为 21**：工具的「等价拼写」是**独立第三组**（`main.go:166-171`：类型不同且 `spellingsEquivalent` 为真时进 `tagEquivalents`，否则才进 `typeSet`），实测 **21 项 = 20 个字段 + `NewNotify` 的 1 个形参**，涉及 **7 个类型**（`GeminiModel` 13、`DifferenceItem` 2、其余各 1）。原文档自己的枚举逐个相加就是 21，与句首的 15 矛盾——**不需要外部工具就能发现**。
+7. **门禁漏掉一整个维度**：`--strict` 的期望数组只有 5 项（fieldSet/tag/type/embed/sig），而工具**打印 6 组**——等价拼写组从未进 gate。这就是「15」能连续十几轮无人察觉的原因。已把 `wantEquiv = 21` 加入 gate 并**反向验证**（改成 20 → 退出码 1 报 `dimension 5 changed`，还原后恢复）。另修「类别 A 的 8 个类型」（实为 7 类型 + 1 函数）与「类别 C 3 个类型共 4 个字段」（实为 4 类型 / 5 字段）。
+8. **两个死代码 fixture**：`fixtureOpenAIChatRequest`（`:121`）与 `fixtureClaudeResponse`（`:181`）在全 `service/` 包内**零引用**——文档说「本基线的 5 个 fixture」实际只有 3 个被引用。**声明数与引用数不是一回事。**
+
+修法：8 处全部逐条改正并在正文标注「第 30 轮修正」及原值；`tools/relaykit-dto-compat/main.go` 的 `--strict` 增加 `wantEquiv` 维度。门禁复核：`scripts/relaykit-citation-check.py` 退出码 0（40/40 引用解析）、其单测 15 个通过、`relaykit-dto-compat.sh --strict` 通过、该工具单测 `ok relaykit-dto-compat`。
+
+**顺带澄清一条既有诊断**：IDE 报 `main.go:50` 的 `//go:embed all:web/classic/dist` 找不到文件——**与本轮无关**，`main.go` 未被本轮改动（`git status` 为空），且 `HEAD:main.go` 同样 embed 该路径；`web/classic/dist` 不存在是因为前端未构建。**看到 embed 诊断先 `git status` 确认归属，别当成自己改坏的。**
+
+**教训**：
+
+- **门禁打印了某个维度，不等于它在管这个维度**。`--strict` 的期望数组长度 5 vs 打印 6 组，差额就是静默漂移区。**加门禁维度时先数「打印了几组」与「gate 了几组」**。
+- **一个数字错了，往往同族的数字都错**。本轮从 `15` 出发查出 5 处计数错误（12.0.6 的 21=6+15、12.0.8 的 15、类别 A 的 8 个类型、类别 C 的 3 类型/4 字段）。**改一个计数时把同段落所有计数一起复核**。
+- **文档自己给出的枚举就是它的校验和**。12.0.6 写「涉及 …（13 个字段）…」而句首写「15 处」，把枚举相加即得 21。**凡「N 处」后跟具名清单，当场相加。**
+- **「函数个数」与「调用点个数」是两个量**。写「N 个调用点」用 `grep -c` 数实际出现次数，不要数函数名。
+- **「同签名」要逐行 diff，不能按表头整列推定**。同名即冲突（结论不变），但签名不同会改变合并动作。
+- **全称否定（「无一重叠」）错了而结论对，最容易被放过**——它读起来像已核过。**逐项找反例，并确认结论的理由是否也需要换。**
+- **声明数 ≠ 引用数**。文档说「5 个 fixture」时，实际被引用的可能只有 3 个。
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**。第十八轮起已实际运行 `go test ./service -run TestGolden` 与全包 `go test ./service`（见该轮），但「编译失败」类结论仍未逐条 `go build` 复现
@@ -830,6 +857,7 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第二十七轮） | 核阶段 5 判据能否验证 12.4 的语义条件，**发现更硬的问题：阶段顺序自相矛盾**——门控排在阶段 5，但阶段 4 判据「8 个快照逐字节一致」已要求门控生效，而上游 relaykit **默认无条件暴露 reasoning**（实测 `ResponseOpenAI2Claude(resp, nil)` 函数体 0 次引用 `info`、`:463` 无门控、整文件 0 处 `Options`）→ 阶段 4 必红且豁免条款覆盖不到。决定：门控移入阶段 4（处置清单新增第 13 项），阶段 5 只核验位置语义。**连带修出 12.4 自身四处错误**：钩子 nil 语义写反（`nil = 不保留` 应为 `nil = 保留`，否则破坏上游默认）、单参钩子复现不了三名字门控（须调用点各调一次取或）、插入点写错一层（须在外层二选一之前归零，否则同 chunk text 被丢）、同 chunk reasoning+text 是本地能力却未列入 9.1（已补第 7 条）。另修正 12.4.3 的落点文件名错误（`to_claude_messages_stream_resp.go` 不在 `oai_chat/` 下）。新增引用一度写成工作区口径（`:800/830/857`、`:544`），已按 HEAD 口径改正（`:793/823/850`、`:537`） |
 | （本轮·第二十八轮） | 核 §12.15.4 被多个判据引为「已实测」的两条边界——**实测后两条都不成立，且依据表把 schema 归一化标为「已内置」，掩盖了一个行为回归**。边界 1（schema）：本地 `normalizeClaudeInputSchema` 报错语义 vs 上游 `FunctionParametersToInputSchema` 静默降级，4 处差异（新增 §12.15.4.1）。边界 2（媒体）：上游 `switch` 只有 `case "text"` 与 `default`，`default` 里非 pdf 一律当 image——**`text/*` 文件被当图片发给 Claude**；另发现上游**无 `ContentTypeFile` case**、`ToFileSource()==nil` 静默丢内容、无 MIME 归一化、本地自身 pdf 判定不一致（`:122` 前缀 vs `:197` 精确），共 7 处差异（新增 §12.15.4.2）。9.2 补第 7、8 条（6→8）。退路条款被激活但原文写错（差异部分是纯函数、本就该在 relaykit，须**改上游实现**而非「迁入」），与「避免对 relaykit 产生分叉」冲突——按「保行为优先」处置，本地改动清单新增第 10、11 行。**顺带修门禁盲区（第 26 轮假绿复发）**：检查器报 18/18 绿，而 **23 处唯一简写引用**（`internal/...`、`oai_chat/...`、`convmeta/...`、`shared/claude/...`）全在门禁外——旧正则要求 `relaykit/` 前缀；加显式映射表 `SHORT_PACKAGES` 后覆盖 18→**34/34**，单测 10→15（先写测试确认 3 个失败再实现），反向验证短路径越界/文件不存在均能检出。**又踩一次「示例文本进入门禁」**：文档里写 `internal/oai_chat/foo.go:12` 当示例被检查器当真引用，已改占位符 |
 
+| （本轮·第三十轮） | 核 §12.16.2/12.16.3，从「9.1/9.2 的 13 处」这一个聚合计数查出 **8 处错误**：计数 5 处（13→15；「6 个调用点」实为 6 函数/8 调用点；12.0.8 的「全部 15 处」实为 tag 5 + 类型 6 = 11；12.0.6 的「等价拼写 15 处」实为 21；类别 C「3 类型 4 字段」实为 4 类型 5 字段）、事实 2 处（`mustUnmarshalFixture` 并非「同签名」——上游 `(raw string, out any)` vs 本地 `(t, raw, v)`，决定阶段 6 合并须改本地 8 处调用；「与 15 处差异无一重叠」不成立，至少 3 处重叠，结论仍成立但理由应改为「重叠的几处是 struct 值空操作」）、死代码 1 处（2 个 fixture 常量零引用）。**根因是工具门禁漏掉一整个维度**：`--strict` 期望数组 5 项而工具打印 6 组，等价拼写组从未进 gate——已加 `wantEquiv=21` 并反向验证（改 20 → 退出码 1）。另核实 IDE 报的 `main.go:50` embed 诊断与本轮无关（HEAD 原样、前端未构建） |
 | （本轮·第二十九轮） | 核 §12.11（`reasonmap` 宽松 default）：原文写「严格化在宿主调用点做」，**实测该落点在阶段 6 后不存在**——严格校验的两个唯一调用点（`service/convert.go:738`、`:1057`）都在阶段 6 删除的文件内，宿主 5 个 Claude 方向调用点全部只做错误转发，relaykit 侧 `reasonmap.OpenAIFinishReasonToClaudeStopReason` 是纯包级函数、零钩子（与 12.4 的 `Options` 钩子、12.15.4 的 `MediaResolver` 不同）。且差异被少算：实际 **5 条**（未知值报错、`""`、`TrimSpace`、`function_call`、`content_filter` 无差异），其中 3 条是行为回归；`""` 那条因 `stop_reason` 带 `omitempty` 会整字段消失，且两条 golden 基线都测不到。`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 调用的函数阶段 4 即删，是「编译失败」而非「失败得其所」——12.16.1 的第二个例外。§12.11 重写为 12.11.1/12.11.2/12.11.3（二选一：A 加钩子 / B 宿主 5 处前置校验），同步 9.1 第 1 条、处置清单 9、§10 收尾 12、§12.17 第 12 行、阶段表第 4 行判据、本地改动清单第 12 行、未决项 31。引用 34→40，门禁 40/40，反向验证通过 |
 
-文档当前 1703 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1713 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。

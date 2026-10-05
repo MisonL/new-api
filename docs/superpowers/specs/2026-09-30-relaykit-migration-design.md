@@ -409,7 +409,7 @@ const (
 | 9 | finish_reason 严格语义：**二选一**（第 29 轮重写）——**A**：给 `reasonmap` 加可选注入钩子并接线本地严格语义（本地改动清单第 12 行）；**B**：在宿主 5 个 `*WithError` 调用点各自前置校验 `Choices[].FinishReason`。**不得**沿用「留宿主调用点」的原表述——原调用点全在阶段 6 删除的 `service/convert.go` 内（12.11.1）。无论选哪个，须为 `""`/`TrimSpace`/`function_call` 三条各补测试（12.11.3） | 12.11、12.11.1、12.11.3 |
 | 10 | 接线 `relayconvert.SetMediaResolver(service.GetBase64Data 包装)` 与 `convmeta.Options` 钩子（`model_setting` 适配）；通道级转换器改调 relaykit。**第 28 轮已实测两条边界，均不成立**（12.15.4.1/12.15.4.2）：schema 归一化有 4 处差异、媒体分派有 7 处差异（含能力缺失与行为回归）。故本项**不是纯接线**——须把 schema 归一化（改 relaykit 的 `FunctionParametersToInputSchema` 或留宿主 pre-step）与媒体分派（`text/*`→text 块、`ContentTypeFile` 独立分支、不支持的 MIME 报错、`ToFileSource()==nil` 报错）一并处置，否则 9.2 新增的第 7、8 条即为回归 | 12.15.4、12.15.4.1、12.15.4.2 |
 | 11 | `dto` 的 `EffectiveTools()` 及缓存字段迁入 `relaykit/dto`，13 个调用点改 import | 12.0.7 |
-| 12 | **把 `service/convert_golden_test.go` 的 6 个调用点改指 `relayconvert` 包级入口**（换函数名、`info` 由 `*relaycommon.RelayInfo` 换成 `convmeta.Meta`、删去 `*WithError` 变体），**快照内容保持不变**；随后逐条解释差异。**不得 import `relayconvert/internal/...`**（Go 的 `internal` 规则禁止） | 12.16.2 |
+| 12 | **把 `service/convert_golden_test.go` 的 8 个调用点改指 `relayconvert` 包级入口**（**第 30 轮修正：8 个调用点分布在 6 个不同函数上**——`ClaudeToOpenAIRequest`、`GeminiToOpenAIRequest`、`ResponseOpenAI2ClaudeWithError`×2、`ResponseOpenAI2GeminiWithError`、`StreamResponseOpenAI2ClaudeWithError`×2、`StreamResponseOpenAI2GeminiWithError`；早期版本写「6 个调用点」是把**函数个数**当成了**调用点个数**）（换函数名、`info` 由 `*relaycommon.RelayInfo` 换成 `convmeta.Meta`、删去 `*WithError` 变体），**快照内容保持不变**；随后逐条解释差异。**不得 import `relayconvert/internal/...`**（Go 的 `internal` 规则禁止） | 12.16.2 |
 | 13 | **落地 12.4 的响应方向门控（补丁 3）**：`convmeta.Options` 加 `RetainReasoningInClaudeResponse` 字段（12.4.2，**nil = 保留上游默认**）、宿主 `ConvOptions()` 接线（阶段 3 的 `convOptions` 快照里填该钩子，指向 `model_setting` 适配）、`oai_chat/to_claude_messages_resp.go` 流式与非流式两条入口在**进入 `reasoning/text` 二选一之前**归零被抑制的 reasoning。**必须在本阶段完成，不能留到阶段 5**——本阶段的判据要求 4 个门控快照逐字节一致，而 relaykit 默认无条件暴露，不门控即失败（12.4.4）。**验证条件：上游两条依赖默认暴露的测试（`to_claude_messages_resp_test.go:82`、`:125`）仍绿**（本地改动清单第 9 行） | 12.4、12.4.4 |
 
 **不在阶段 4 范围内**：向**上游**提 `ParseContentStrict`/`ParseToolCallsStrict` 的 PR（4.1「值得提上游」）——那是对上游仓库的贡献，不阻塞本迁移，也不属于本仓库的任何阶段。
@@ -559,7 +559,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 
 ### 9.1 阶段 4 的语义对齐清单
 
-**本清单只覆盖行为语义；结构语义见 12.0.6 与 12.0.8**——同名字段的 JSON tag 差异（5 处，其中 3 处因 struct 值而 `omitempty` 无效、2 处为真实变化）与 Go 类型差异（6 处，3 处编译期破坏）。15 处**全部采用 relaykit**，逐项决定见 12.0.8。
+**本清单只覆盖行为语义；结构语义见 12.0.6 与 12.0.8**——同名字段的 JSON tag 差异（5 处，其中 3 处因 struct 值而 `omitempty` 无效、2 处为真实变化）与 Go 类型差异（6 处，3 处编译期破坏）。**11 处**（tag 5 + 类型 6；**第 30 轮修正**，原文写 15）**全部采用 relaykit**，逐项决定见 12.0.8。
 
 本地与 relaykit **不是逐一等价**，切换前须逐项决定「保留、放弃或改写」，并同步调整锁定的测试：
 
@@ -615,7 +615,7 @@ relaykit module 这一条**包含边界门禁**：`relaykit/relayconvert/boundar
 # 阶段 4 之前：钉住本地实现的行为（测试文件在 service/，调用本地函数）
 go test ./service -run TestGolden -count=1
 
-# 阶段 4 之内/之后：测试文件**仍留在 service/**，只把 6 个调用点改指 relayconvert 包级入口
+# 阶段 4 之内/之后：测试文件**仍留在 service/**，只把 8 个调用点（分布在 6 个函数上）改指 relayconvert 包级入口
 # （12.16.2 决定 1；快照不改）。因此命令**不变**——仍是上面那条。
 # 差异必须对应处置清单第 6 项为 9.1/9.2 产出的决定，否则视为回归。
 
@@ -690,7 +690,7 @@ python3 scripts/relaykit-citation-check.test.py  # 10 个单测
 27. ~~**`dto` 宿主 import 归零后 3 个符号的归位方式**~~ → **12.0.7 已关闭**（2026-10-04）：三个符号是 `encoding/json` 的薄包装，直接换 stdlib（relaykit/dto 本就 import 它）；`ResponsesRequestMetadata` 判为宿主类型（488 行文件 + 650 行扫描器依赖），随 `dto/opaque_openai_responses_request.go` 保留在宿主 `dto`
 28. ~~**通道级转换器的归属（第 12 轮新增）**~~ → **12.15.4 已关闭**（2026-10-04）：**收敛到 relaykit**，本地只留薄适配。三类宿主耦合 relaykit 侧均有注入机制——思考等级走 `convmeta.Options` 钩子（`sharedclaude.ApplyReasoning`）、媒体解析走 `relayconvert.MediaResolver`（签名与 `service.GetBase64Data` 一致）、schema 归一化对应 `FunctionParametersToInputSchema`。阶段 4 注册钩子后删除 459 行本地实现。**第 28 轮实测了两条边界，均不成立**（12.15.4.1/12.15.4.2），故收敛不是纯接线：须一并改上游的 schema 归一化与媒体分派（本地改动清单第 10、11 行）
 29. ~~**`dto` 独有缓存字段的承载方式（第 12 轮新增）**~~ → **12.0.7 已关闭**（2026-10-04）：把 `EffectiveTools()` 连缓存字段一起**迁入 `relaykit/dto`**——未导出字段在**自己的包**内声明即合法（上游 relaykit 已有同例，如 `Reasoning.effortRaw`），不需要宿主侧旁路。13 个调用点改 import 即可
-30. ~~**字段名相同但 tag / Go 类型不同的 10 个类型（第 14 轮新增）**~~ → **12.0.8 已关闭**（2026-10-04）：15 处**全部采用 relaykit、零处打补丁**。tag 5 处中 3 处因字段是 struct 值而 `omitempty` 无效（空操作）、2 处风险已逐点排除；类型 6 处中 `CreatedAt` 为纯增益（`MarshalJSON` 与 int 相同）、`IncludeThoughts`/`Text`/`Arguments` 须改读写点、`SupportedEndpointTypes` 改 import
+30. ~~**字段名相同但 tag / Go 类型不同的 10 个类型（第 14 轮新增）**~~ → **12.0.8 已关闭**（2026-10-04；**第 30 轮修正计数**）：**11 处**（tag 5 + 类型 6，原文写 15）**全部采用 relaykit、零处打补丁**。tag 5 处中 3 处因字段是 struct 值而 `omitempty` 无效（空操作）、2 处风险已逐点排除；类型 6 处中 `CreatedAt` 为纯增益（`MarshalJSON` 与 int 相同）、`IncludeThoughts`/`Text`/`Arguments` 须改读写点、`SupportedEndpointTypes` 改 import
 
 ## 11. 事实依据
 
@@ -821,7 +821,7 @@ python3 scripts/relaykit-citation-check.test.py  # 10 个单测
 - 「流式下逐 chunk 剔除 thinking 是无状态操作」：relaykit 的 `state.Index` 是私有流式状态，删块产生索引空洞
 - 「AWS Converse 用同一 helper」：该路径当前**无条件**暴露 thinking，套用 DeepSeek-only 策略会新抑制 Bedrock reasoning
 - 「`openaicompat` 按能力切分，基础转换转调 relaykit」：`convertResponsesToolsToChat` 一个函数内交织 5 种工具语义，函数粒度不可切
-- 「24 个 golden 快照是唯一的机械回归网」：它是上游自己的基线，测不到 9.1/9.2 的 13 处本地差异（第 27 轮把 9.1 的第 7 条「同 chunk reasoning+text」计入）
+- 「24 个 golden 快照是唯一的机械回归网」：它是上游自己的基线，测不到 9.1/9.2 的 15 处本地差异（第 27 轮把 9.1 的第 7 条「同 chunk reasoning+text」计入；**第 30 轮把 9.2 的第 7、8 条计入，故 7 + 8 = 15**——第 28 轮加 9.2 两行时漏改此处的聚合计数）
 - 「响应方向不打 relaykit 补丁」（第 6.1 节结论）：已被 12.4 推翻——门控必须在索引分配之前，只能在 relaykit 内
 
 ## 12. 决策
@@ -974,11 +974,11 @@ relaykit/dto 有、本地 dto 无：`alpha_search_request.go`、`billing_usage.g
 
 **`omitempty` 只对 false/0/nil/空串/空集合生效，对 struct 值无效**——所以前 3 行两侧输出完全一致。两处真实变化的风险判定与逐项结论见 12.0.8。
 
-**二、Go 类型差异：21 处，其中真差异 6 处、等价拼写 15 处**
+**二、Go 类型差异：真差异 6 处，另有等价拼写 21 处（**第 30 轮修正**：原文写「21 处，其中真差异 6 处、等价拼写 15 处」，三处数字全错——等价拼写组实测 **21** 项，不是 15）
 
-口径：工具的「类型不同」维度报 **6 处**（`[]constant.EndpointType` 被单列，因为它不是拼写等价），另有 **15 处** `interface{}`/`any` 及其复合形式（`map[string]interface{}`/`map[string]any`、`[]interface{}`/`[]any`）被判为**等价拼写**、单独成一组供参考。两组合计 21 处，涉及 9 个类型与 1 个函数。
+口径：工具的「类型不同」维度报 **6 处**（`[]constant.EndpointType` 被单列，因为它不是拼写等价）。**等价拼写是工具单列的第三组，不并入类型维度**（`main.go:166-171`：类型不同且 `spellingsEquivalent` 为真时进 `tagEquivalents`，否则才进 `typeSet`）——实测该组 **21 项 = 20 个字段 + `NewNotify` 的 1 个形参**，涉及 **7 个类型 + 1 个函数**。两组合计 **27 处**。
 
-**类别 A——纯写法差异，无语义变化（15 处）**：`interface{}` 与 `any` 是同一类型的两种拼写。涉及 `DifferenceItem`、`GeminiFunctionResponse`、`GeminiModel`（13 个字段）、`Notify`、`RealtimeSession`、`ResponsesOutputContent`、`Tool.InputSchema`，以及 `NewNotify` 的形参。**无需动作**，但会在 diff 里产生噪音，评审时不要误判为不兼容——本工具把它们单列一组正是为此。
+**类别 A——纯写法差异，无语义变化（21 项 = 20 个字段 + 1 个形参；**第 30 轮修正**，原文写「15 处」，与紧随其后的枚举相加不符）**：`interface{}` 与 `any` 是同一类型的两种拼写。逐类型计数（工具实测）：`GeminiModel` 13、`DifferenceItem` 2、`GeminiFunctionResponse` 1、`Notify` 1、`RealtimeSession` 1、`ResponsesOutputContent` 1、`Tool.InputSchema` 1 = **20 个字段**，加 `NewNotify` 的形参 1 = **21 项**。**无需动作**，但会在 diff 里产生噪音，评审时不要误判为不兼容——本工具把它们单列一组正是为此。
 
 **类别 B——类型换了但语义等价，改的是引用而非形状（1 个）**：`OpenAIModels.SupportedEndpointTypes` 由 `[]constant.EndpointType` 变为 `[]types.EndpointType`。两者是同一底层类型（12.0.1 已证 `constant.EndpointType` 是 `types.EndpointType` 的别名），**JSON 形状不变**，但**仍需改 import**（`constant` 不能出现在 relaykit 内，见 12.0.4）。工具的「类型不同」维度把它计入 6 处，是对的——它不是拼写等价。
 
@@ -990,9 +990,9 @@ relaykit/dto 有、本地 dto 无：`alpha_search_request.go`、`billing_usage.g
 | `GeminiThinkingConfig.IncludeThoughts` | `bool` | `*bool` | 同上，且这是**思考等级**链路的一环。本地 `relay/channel/gemini/relay-gemini.go` 有 **8 处**直接赋值/读取（`:148`、`:167`、`:171`、`:192` 字面量 `true`；`:302`/`:305` 赋 `true`/`false`；`:315` 赋变量；`:339` 读取），改为指针后每处都要改成 `common.GetPointer[...]` 或解引用 |
 | `OpenAIResponsesResponse.CreatedAt`、`OpenAIResponsesCompactionResponse.CreatedAt` | `int` | `IntValue` | `IntValue`（`relaykit/dto/values.go:32`）自定义了 `UnmarshalJSON`，**接受 int / float / string 三种形态**；本地 `int` 只接受数字。取 relaykit 版是**能力增强**，但需确认本地没有依赖「字符串形态应当报错」的行为 |
 
-**计数口径（第 15 轮用工具复核）**：类型维度 = 等价拼写 15 + 真差异 6（类别 B 1 + 类别 C 3 个类型共 4 个字段）；签名维度 = 12（12 个 `IsStream`；`NewNotify` 的 `interface{}`/`any` 已归入等价拼写，不计入签名差异）。**上一轮曾把这两个数写成「类型真差异 3 处」「签名差异 13 处」，前者漏了 `OpenAIModels`、后者把等价拼写算作了差异**，见第 15 轮说明。
+**计数口径（第 15 轮用工具复核；第 30 轮修正三处数字）**：类型维度 = **真差异 6**（类别 B 1 + 类别 C **4 个类型共 5 个字段**——`ResponsesStreamResponse` 的 `Text`/`Arguments` 各算一个字段）；**等价拼写 21 项是工具的独立第三组，不并入类型维度**（原文写「等价拼写 15 + 真差异 6」把两者相加，实为并列关系且 15 应为 21）。签名维度 = 12（12 个 `IsStream`；`NewNotify` 的 `interface{}`/`any` 已归入等价拼写，不计入签名差异）。**上一轮曾把这两个数写成「类型真差异 3 处」「签名差异 13 处」，前者漏了 `OpenAIModels`、后者把等价拼写算作了差异**，见第 15 轮说明。
 
-**结论**：12.0.5 第五节「17 个取 relaykit 即纯增益」的表述**不完整**——那 17 个是**按字段名集合**判定的；按 tag 与类型两个维度复核后，其中 `ChatCompletionsStreamResponseChoice`、`GeminiChatRequest`、`ToolCallRequest`、`IncompleteDetails`、`ClaudeServerToolUse`、`ResponsesStreamResponse`、`OpenAIResponsesResponse`、`OpenAIResponsesCompactionResponse`、`GeminiThinkingConfig`、`OpenAIModels` **10 个另有 tag 或类型差异，须逐项确认**。真正的「零动作」只有类别 A 的 8 个类型（`interface{}`/`any` 拼写差异）。
+**结论**：12.0.5 第五节「17 个取 relaykit 即纯增益」的表述**不完整**——那 17 个是**按字段名集合**判定的；按 tag 与类型两个维度复核后，其中 `ChatCompletionsStreamResponseChoice`、`GeminiChatRequest`、`ToolCallRequest`、`IncompleteDetails`、`ClaudeServerToolUse`、`ResponsesStreamResponse`、`OpenAIResponsesResponse`、`OpenAIResponsesCompactionResponse`、`GeminiThinkingConfig`、`OpenAIModels` **10 个另有 tag 或类型差异，须逐项确认**（工具实测：tag 组 5 个类型 + type 组 5 个类型，两组无交集）。**第 30 轮修正**：紧接的「真正的『零动作』只有类别 A 的 **8 个类型**」——实测是 **7 个类型 + 1 个函数**（`DifferenceItem`、`GeminiFunctionResponse`、`GeminiModel`、`Notify`、`RealtimeSession`、`ResponsesOutputContent`、`Tool.InputSchema`，加 `NewNotify` 的形参），不是 8 个类型。
 
 **阶段 4 的语义对齐清单（§9.1）与阶段 2 的完成判据都应纳入这两个维度**：字段名集合相同只是第一层，tag 与类型是第二、三层。已列为未决项 30。
 
@@ -1061,7 +1061,7 @@ err = decoder.Decode(&item)
 
 #### 12.0.8 tag 与类型差异的逐项决定（第 17 轮，关闭未决项 30）
 
-**决定：全部 15 处采用 relaykit 侧，零处打补丁。** 但理由分三类，不能一律说「无影响」。
+**决定：全部 11 处采用 relaykit 侧，零处打补丁**（**第 30 轮修正**：原文写「15 处」，与本节自列的三类 5 + 6 + 15 = 26 对不上；真正需要逐项决定的是 **tag 5 + 类型 6 = 11 处**，等价拼写 21 项零动作、不进入该计数）。但理由分三类，不能一律说「无影响」。
 
 **类别 I——tag 差异 5 处，其中 3 处是空操作、2 处是真实行为变化**
 
@@ -1089,7 +1089,7 @@ err = decoder.Decode(&item)
 | `OpenAIModels.SupportedEndpointTypes` | `[]constant.EndpointType` | `[]types.EndpointType` | **采用**（别名等价，JSON 形状不变）；改 import 即可，与 12.0.4 同因 |
 | `OpenAIResponsesResponse.CreatedAt`、`OpenAIResponsesCompactionResponse.CreatedAt` | `int` | `IntValue` | **采用，纯增益**。`IntValue.MarshalJSON` 输出 `int(i)`，**与本地 `int` 完全相同**；`UnmarshalJSON` 额外接受 float 与 **string**。是超集，无行为回退 |
 
-**类别 III——等价拼写 15 处**：`interface{}`/`any`，采用 relaykit，零动作。
+**类别 III——等价拼写 21 项**（**第 30 轮修正**，原文写 15）：`interface{}`/`any`，采用 relaykit，零动作。
 
 **结论**：未决项 30 关闭。阶段 2 的实际工作量是**改 8 处 `IncludeThoughts` 赋值点 + 所有 `Text`/`Arguments` 读写点 + 4 处 import**；tag 差异中 3 处无需动作、2 处风险已排除。
 
@@ -1530,13 +1530,13 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 具体缺陷：
 
 - 打补丁 1/2 后快照会因「presence 保真生效」而 fail，上游的 `-update` 机制会把差异**直接吸收为新的正确值**——无法区分「保真生效」与「行为回归」
-- 第 9.1、9.2 节列出的 **13 处本地差异**（第 27 轮把 9.1 的第 7 条计入）——其中 12 处是「本地更强/更严行为」（未知 block 报错、image 缺 source 报错、多 choice 报错、`finish_reason` 严格校验、非 assistant thinking 门控、tool_use 缺 id/name 报错…），**这 24 个快照一处都测不到**
+- 第 9.1、9.2 节列出的 **15 处本地差异**（9.1 的 7 条 + 9.2 的 8 条；第 27 轮把 9.1 的第 7 条计入，第 30 轮把 9.2 的第 7、8 条计入——**第 28 轮加 9.2 两行时漏改了此处的聚合计数**）——其中 **12 处是「本地更强/更严行为」**（9.2 全部 8 条 + 9.1 第 1、2、3、7 条），另 **3 处是结构差异**（9.1 第 4、5、6 条：字段名/形状/方法集），**这 24 个快照一处都测不到**
 - 早期版本称其为「唯一的机械回归网」——该表述不成立
 
 **决定**：
 
 1. **补建本地的 golden 基线**：用当前 `HEAD` 跑同一批 fixture 生成快照，作为「本地行为」的对照。这是「本地没退化」这一核心目标的**唯一**验证手段
-2. **补建针对 9.1/9.2 的 13 处差异的专项用例**（第 27 轮把 9.1 的第 7 条计入），每处至少一个：输入侧（未知 block、image 缺 source、非 assistant thinking、tool_use 缺字段）与输出侧（多 choice、`finish_reason` 严格、命名空间往返、AWS 流式索引、Bedrock 非 DeepSeek thinking、**同 chunk reasoning+text 都发**）。**现状（2026-10-04 实测，2026-10-05 补第 7 条）**：这些用例**大部分已存在**——`service/convert_claude_request_test.go`（1118 行）与 `service/convert_claude_stream_test.go`（330 行）已逐条覆盖（如 `TestClaudeToOpenAIRequestIgnoresNonAssistantThinkingBlocks`、`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason`、`TestClaudeToOpenAIRequestRejectsNonTextSystemBlock`、`TestStreamResponseOpenAI2ClaudeDoesNotExposeReasoningForNonDeepSeekModel`，以及第 7 条的 `TestStreamResponseOpenAI2ClaudeEmitsThinkingTextAndToolBlocksFromOneChunk`）；两文件均为 git 跟踪且在 `HEAD` 上通过。**阶段 4 的待办不是「补用例」而是「确认这些既有用例在切换后仍通过」**——切换会让它们失败得其所，无需新建（下述两处例外除外）。**例外有两处**：第 7 条（同 chunk reasoning+text）与 **finish_reason 严格校验**。第 7 条的用例会失败但**不得其所**（本地能力被上游丢弃，见 9.1 表下注），须明确取舍而非默认放行。**finish_reason 一条（第 29 轮新增）更特殊**：`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 直接调用 `ResponseOpenAI2ClaudeWithError`——**该函数在阶段 4 即被删除**（处置清单第 2 项、12.3），故它**不会「失败得其所」，而是编译失败**；它钉的行为（未知 finish_reason 报错）在阶段 6 后**无落点**（12.11.1）。阶段 4 须先按 12.11.3 定下 A/B 选项，再决定该用例是改指新落点还是删除，并补 b/c/d 三条新用例（12.11.2）
+2. **补建针对 9.1/9.2 的 15 处差异的专项用例**（9.1 的 7 条 + 9.2 的 8 条；第 27 轮把 9.1 的第 7 条计入，第 30 轮把 9.2 的第 7、8 条计入），每处至少一个：输入侧（未知 block、image 缺 source、非 assistant thinking、tool_use 缺字段、schema 归一化、媒体分派）与输出侧（多 choice、`finish_reason` 严格、命名空间往返、AWS 流式索引、Bedrock 非 DeepSeek thinking、**同 chunk reasoning+text 都发**）。**现状（2026-10-04 实测，2026-10-05 补第 7 条）**：这些用例**大部分已存在**——`service/convert_claude_request_test.go`（1118 行）与 `service/convert_claude_stream_test.go`（330 行）已逐条覆盖（如 `TestClaudeToOpenAIRequestIgnoresNonAssistantThinkingBlocks`、`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason`、`TestClaudeToOpenAIRequestRejectsNonTextSystemBlock`、`TestStreamResponseOpenAI2ClaudeDoesNotExposeReasoningForNonDeepSeekModel`，以及第 7 条的 `TestStreamResponseOpenAI2ClaudeEmitsThinkingTextAndToolBlocksFromOneChunk`）；两文件均为 git 跟踪且在 `HEAD` 上通过。**阶段 4 的待办不是「补用例」而是「确认这些既有用例在切换后仍通过」**——切换会让它们失败得其所，无需新建（下述两处例外除外）。**例外有两处**：第 7 条（同 chunk reasoning+text）与 **finish_reason 严格校验**。第 7 条的用例会失败但**不得其所**（本地能力被上游丢弃，见 9.1 表下注），须明确取舍而非默认放行。**finish_reason 一条（第 29 轮新增）更特殊**：`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 直接调用 `ResponseOpenAI2ClaudeWithError`——**该函数在阶段 4 即被删除**（处置清单第 2 项、12.3），故它**不会「失败得其所」，而是编译失败**；它钉的行为（未知 finish_reason 报错）在阶段 6 后**无落点**（12.11.1）。阶段 4 须先按 12.11.3 定下 A/B 选项，再决定该用例是改指新落点还是删除，并补 b/c/d 三条新用例（12.11.2）
 3. 第 9.3 节的专项清单需扩充，覆盖 12.4.1（索引空洞）、12.4.3（AWS 回归）、12.6（命名空间往返）、12.8（`matchAnyRegex` 语义）、12.7（custom bridge fail-closed）
 4. 12.12 的 thinking `signature` 与本节均属「需实测」，须给出可执行命令而非仅标注
 
@@ -1567,7 +1567,7 @@ go test ./service -run TestGolden -count=1 -update   # 重录
 
 **基线口径（已实测）**：生成时工作区的 `service/convert.go` 有**其他会话的未提交改动**（在 `ClaudeToOpenAIRequest` 的 `else` 分支加 `ReasoningEffort` 透传）。为避免快照编码未提交行为，把 `convert.go` 换成 `HEAD` 版本重跑同一批快照，**结果一致通过**——该改动读 `claudeRequest.OutputConfig`（fixture 未设），对快照为 no-op。故本基线等价于 `HEAD` 口径，快照中不含未提交行为。（生成后已还原工作区文件。）
 
-**边界（未覆盖，须在阶段 4 单列）**：本基线只钉「当前 HEAD 的本地输出字节」。9.1/9.2 的 13 处差异（第 27 轮把 9.1 的第 7 条计入；未知 block 报错、image 缺 source 报错、多 choice 报错、`finish_reason` 严格校验、非 assistant thinking 门控、tool_use 缺 id/name 报错等）**多数是错误路径**，不产出「可快照的正常输出」，因此由既有**专用单测**覆盖（`service/convert_claude_request_test.go`、`service/convert_claude_stream_test.go`，本次已核两文件为 git 跟踪且在 `HEAD` 上通过），**不在** golden 基线的职责内。golden 基线的职责是「正常路径的字节级不漂移」。**唯一例外是第 7 条**（同 chunk reasoning+text 都发）——它是正常路径，但**本 golden 也未覆盖**：本地流式 fixture 的 `reasoning_content` 与 `content` 落在**不同 chunk**（`convert_golden_test.go:255-258`），故不触及该分支；它只由单测 `TestStreamResponseOpenAI2ClaudeEmitsThinkingTextAndToolBlocksFromOneChunk` 钉住。阶段 4 须按 9.1 表下注明确取舍。
+**边界（未覆盖，须在阶段 4 单列）**：本基线只钉「当前 HEAD 的本地输出字节」。9.1/9.2 的 15 处差异（9.1 的 7 条 + 9.2 的 8 条；第 27 轮把 9.1 的第 7 条计入，第 30 轮把 9.2 的第 7、8 条计入；未知 block 报错、image 缺 source 报错、多 choice 报错、`finish_reason` 严格校验、非 assistant thinking 门控、tool_use 缺 id/name 报错、schema 归一化、媒体分派等）**多数是错误路径**，不产出「可快照的正常输出」，因此由既有**专用单测**覆盖（`service/convert_claude_request_test.go`、`service/convert_claude_stream_test.go`，本次已核两文件为 git 跟踪且在 `HEAD` 上通过），**不在** golden 基线的职责内。golden 基线的职责是「正常路径的字节级不漂移」。**唯一例外是第 7 条**（同 chunk reasoning+text 都发）——它是正常路径，但**本 golden 也未覆盖**：本地流式 fixture 的 `reasoning_content` 与 `content` 落在**不同 chunk**（`convert_golden_test.go:255-258`），故不触及该分支；它只由单测 `TestStreamResponseOpenAI2ClaudeEmitsThinkingTextAndToolBlocksFromOneChunk` 钉住。阶段 4 须按 9.1 表下注明确取舍。
 
 #### 12.16.2 基线的生命周期：阶段 4 必须改指 relaykit，阶段 6 必须迁移（2026-10-05 补充）
 
@@ -1601,11 +1601,21 @@ go test ./service -run TestGolden -count=1 -update   # 重录
 
 **决定**：
 
-1. **阶段 4 把 6 个调用点改指 relaykit**（处置清单第 12 项）：换函数名、`info` 换成 `convmeta.Meta`、删去 `*WithError`。**快照内容一律不改**——同一批 fixture 的输出在改指后应当逐字节相同，这正是 12.16 所说「本地没退化」的判据。
+1. **阶段 4 把 8 个调用点（6 个不同函数）改指 relaykit**（处置清单第 12 项）：换函数名、`info` 换成 `convmeta.Meta`、删去 `*WithError`。**快照内容一律不改**——同一批 fixture 的输出在改指后应当逐字节相同，这正是 12.16 所说「本地没退化」的判据。
+
+   **调用点清单（第 30 轮实测，`service/convert_golden_test.go`）**：`ClaudeToOpenAIRequest`(`:204`)、`GeminiToOpenAIRequest`(`:213`)、`ResponseOpenAI2ClaudeWithError`(`:224`、`:238`)、`ResponseOpenAI2GeminiWithError`(`:247`)、`StreamResponseOpenAI2ClaudeWithError`(`:271`、`:291`)、`StreamResponseOpenAI2GeminiWithError`(`:307`)——**共 8 处，分布在 6 个函数上**。两个函数各被调用两次，是因为门控两侧各跑一遍（非 DeepSeek 与 DeepSeek）。**改指时这 8 处都要改，漏掉任一处即编译失败**。
 
    **「逐字节一致」的前提是两侧结构体字段顺序相同**（`json.MarshalIndent` 按声明顺序输出，顺序不同则语义等价也会失败）。已机械核验（正则抽 `struct` 体内字段名序列）fixture 涉及的 4 个输出类型，**共有字段的相对顺序两侧全部一致**：`OpenAITextResponse`（7/7 字段全同序）、`GeminiChatResponse`（本地 3 / kit 4，共有 3 全同序）、`GeneralOpenAIRequest`（本地 61 / kit 81，共有 61 全同序）、`ClaudeResponse`（12/12 全同序）。**注意后两个是「共有字段同序」而非「字段集相同」**——relaykit 的 `GeneralOpenAIRequest` 多 20 个字段、`GeminiChatResponse` 多 1 个，多出来的字段不参与同一 fixture 的输出，故不影响本基线比对。**但这是一次性抽查，不是门禁**——阶段 4 改指后若快照出现「内容相同、顺序不同」的差异，应判定为字段顺序差异而非行为回归，并**先核字段顺序再谈回归**。可复用 `tools/relaykit-dto-compat/`（它已抽字段名集合）扩一个「顺序」维度来机械判定，避免人工误判。
 
-   **另一个前置**：本基线的 5 个 fixture 只用到 `dto.ChatCompletionsStreamResponse`、`dto.ClaudeRequest`、`dto.GeminiChatRequest`、`dto.OpenAITextResponse`、`dto.UserSetting` 五个类型，与 12.0.8 那 15 处 tag/类型差异涉及的字段（`Delta`、`Function`、`GenerationConfig`、`IncludeThoughts`、`Text`/`Arguments`、`CreatedAt`、`SupportedEndpointTypes`）**无一重叠**。故阶段 2 的对齐动作**不应**改变这 8 个快照；若阶段 2 后快照漂移，原因在别处（实现改动或字段顺序），**不要归因到那 15 处差异**。
+   **另一个前置**：本基线声明了 5 个 fixture 常量，但**只有 3 个真被引用**——`fixtureOpenAIChatRequest`（`:121`）与 `fixtureClaudeResponse`（`:181`）在全 `service/` 包内零引用，是死代码（**第 30 轮实测**：两者各自只出现在自己的声明行）。实际用到的输入类型是 `dto.ChatCompletionsStreamResponse`、`dto.ClaudeRequest`、`dto.GeminiChatRequest`、`dto.OpenAITextResponse` 与 `dto.UserSetting`，输出侧是 `GeneralOpenAIRequest`、`ClaudeResponse`、`GeminiChatResponse`。**第 30 轮修正**：原文写「与 12.0.8 那 15 处差异涉及的字段**无一重叠**」——**该断言不成立**。逐条核后的实际情况是**有重叠，且输出侧也重叠**：
+
+   | 重叠的差异 | 宿主类型 | 与 fixture 的关系 |
+   |---|---|---|
+   | `ChatCompletionsStreamResponseChoice.Delta`（tag） | `ChatCompletionsStreamResponse.Choices[].Delta` | **输入侧**，流式 fixture 逐 chunk 都带 `delta` |
+   | `GeminiChatRequest.GenerationConfig`（tag） | `GeminiChatRequest.GenerationConfig` | **输入侧**，Gemini 请求 fixture 用的就是该类型（尽管该 fixture 未设 `generationConfig`，`omitempty` 对 struct 值本就无效） |
+   | `ToolCallRequest.Function`（tag） | `GeneralOpenAIRequest.Tools[].Function` | **输出侧**，`request/claude_to_openai` 与 `request/gemini_to_openai` 两个快照都输出 `tools` |
+
+   **但结论仍成立**，理由与原文给的**不是同一条**：这 3 处重叠的 tag 差异**全部是 struct 值的空操作**（12.0.6 已核：两侧都输出 `"delta":{...}`／`"generationConfig":{...}`／`"function":{...}`），因此阶段 2 的对齐动作**不应**改变这 8 个快照。**不能用「无重叠」当理由**——那是不成立的事实；正确理由是「重叠的那几处都是空操作」。12.0.6 列的另两处**真实变化**（`IncompleteDetails.Reason`、`ClaudeServerToolUse.WebSearchRequests`）**确实与本基线无重叠**：前者属 `OpenAIResponsesResponse`（本基线不走 responses 方向），后者属 `ClaudeUsage.ServerToolUse`（`dto/claude.go:628`，而快照里实测无 `server_tool_use`／`web_search_requests` 键）。故若阶段 2 后快照漂移，**不要归因于这 15 处差异**——但理由是「重叠的几处为空操作」，不是「无重叠」。
 2. **差异必须逐条解释，不得用 `-update` 吸收**：若改指后快照有差异，每一处都要能对应到**处置清单第 6 项**为 9.1/9.2 逐条产出的「保留/放弃/改写」决定（该清单在阶段 4 内产出，见第 6 项），否则视为回归。**禁止**用 `go test -update` 把差异直接写成新的正确值——那正是 12.16 批评上游 `-update` 机制的原话（「无法区分『保真生效』与『行为回归』」）。
 3. **阶段 6 不是「整体移入」，而是「把 fixture 与门控用例并入上游已有的 `golden_test.go`」**（详见下节 12.16.3：直接移入会因包级符号重名而编译失败）。
 4. §9.3 增列该基线的校验命令。
@@ -1614,15 +1624,15 @@ go test ./service -run TestGolden -count=1 -update   # 重录
 
 上节决定 3 的原始表述是「阶段 6 把测试与快照整体移入 `relaykit/relayconvert/`」。**该表述会编译失败**，实测证据：
 
-`upstream/main:relaykit/relayconvert/golden_test.go`（`package relayconvert`，同一包）已声明以下**与我方同名同签名**的包级符号：
+`upstream/main:relaykit/relayconvert/golden_test.go`（`package relayconvert`，同一包）已声明以下**与我方同名**的包级符号（**第 30 轮修正**：其中 `mustUnmarshalFixture` 是**同名不同签名**，其余 4 个同名同签名——同名即冲突，签名不同不改变冲突结论）：
 
 | 符号 | 上游 `golden_test.go` | 本地 `convert_golden_test.go` |
 |---|---|---|
 | `updateGolden` | `:25` `var updateGolden = flag.Bool("update", ...)` | `:32` 同 |
 | `goldenDir` | `:42` `const goldenDir = "testdata/golden"` | `:34` 同 |
-| `marshalGolden` | `:55` | `:47` 同签名 |
-| `checkGolden` | `:62` | `:54` 同签名 |
-| `mustUnmarshalFixture` | `:460` | `:112` 同签名 |
+| `marshalGolden` | `:55` `func marshalGolden(t *testing.T, value any) []byte` | `:47` 同签名 |
+| `checkGolden` | `:62` `func checkGolden(t *testing.T, name string, got []byte)` | `:54` 同签名 |
+| `mustUnmarshalFixture` | `:460` `func mustUnmarshalFixture(raw string, out any)`（**无 `*testing.T`**，失败即 `panic`） | `:112` `func mustUnmarshalFixture(t *testing.T, raw string, v any)`（**签名不同**：多一个 `t`，用 `require.NoError` 而非 `panic`）。**合并时须删本地这一个、改用上游的**，而本地 **8 处调用**都传了 `t`（`:202`、`:211`、`:222`、`:236`、`:245`、`:270`、`:290`、`:306`），须逐个去掉首参 |
 | `TestMain` | `:29` | 无（本地不需要） |
 
 两文件的 `normalizeVolatile`/`normalizeGolden` 也是**同一套正则**（`[0-9a-f]{32}` → `<uuid>`、`("created(_at)?"\s*:\s*)\d{9,}` → `${1}0`）。因此同包共存必然 `redeclared in this block`。**修正后的做法**：阶段 6 只把**本地独有**的部分并入上游文件——DeepSeek 门控 fixture 与两条 `*_deepseek` 用例——复用上游既有的 `goldenInfo()`/`checkGolden()`/`checkStreamEventsGolden()`，不重复声明任何 helper。
@@ -1684,7 +1694,7 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 | 22 | `dto` 方法/函数/字段差集与 import 图 | **已完成**（12.0.5）：方法本地独有 101、relaykit 独有 31；函数 65 / 44；136 个同名结构体 33 个不同，其中 16 个需动作（另 17 个按字段名口径为增益，但**其中 10 个另有 tag/类型差异**，见 12.0.6）；import 图**无环** |
 | 23 | 通道级 Claude 入向转换器 | **已决定**（12.15.4）：收敛到 relaykit，宿主只留钩子接线，459 行本地实现删除（原未决项 28） |
 | 24 | `dto` 未导出缓存字段承载 | **已决定**（12.0.7）：`EffectiveTools()` 连字段迁入 `relaykit/dto`，同包内未导出字段合法（原未决项 29） |
-| 25 | 字段 tag / Go 类型差异 | **已决定**（12.0.8）：15 处全部采用 relaykit、零打补丁。tag 5 处中 3 处空操作（struct 值 `omitempty` 无效）、2 处风险排除；类型 6 处含 1 处纯增益、3 处改读写点、2 处改 import |
+| 25 | 字段 tag / Go 类型差异 | **已决定**（12.0.8）：**11 处**（tag 5 + 类型 6；第 30 轮修正，原文写 15）全部采用 relaykit、零打补丁。tag 5 处中 3 处空操作（struct 值 `omitempty` 无效）、2 处风险排除；类型 6 处含 1 处纯增益、3 处改读写点、2 处改 import |
 
 ### 12.18 本轮审查新增的未决项
 
@@ -1699,5 +1709,5 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 | 27 | ~~`dto` 宿主 import 归零后 3 个符号的归位方式~~ | **已关闭**（2026-10-04）：见 12.0.7——三个符号是 `encoding/json` 薄包装，换 stdlib；`ResponsesRequestMetadata` 判为宿主类型，随 `dto/opaque_openai_responses_request.go` 留在宿主 `dto` |
 | 28 | ~~通道级 Claude 入向转换器的归属（第 12 轮新增）~~ | **已关闭**（2026-10-04；第 28 轮补注）：见 12.15.4——收敛到 relaykit。三类宿主耦合 relaykit 侧均有注入机制（`convmeta.Options` 钩子 / `MediaResolver` / `FunctionParametersToInputSchema`），阶段 4 接线后删除 459 行本地实现。**但第 28 轮实测两条边界均不成立**（12.15.4.1 的 4 处 schema 差异、12.15.4.2 的 7 处媒体分派差异），故收敛须连同改上游实现（本地改动清单第 10、11 行），不是纯接线 |
 | 29 | ~~`dto` 未导出缓存字段的承载方式（第 12 轮新增）~~ | **已关闭**（2026-10-04）：见 12.0.7——`EffectiveTools()` 连缓存字段迁入 `relaykit/dto`，未导出字段在自己包内声明合法（上游已有 `Reasoning.effortRaw` 同例），无需旁路。13 个调用点改 import |
-| 30 | ~~字段名相同但 tag / Go 类型不同（第 14 轮新增）~~ | **已关闭**（2026-10-04）：见 12.0.8——15 处全部采用 relaykit。tag 3 处空操作（struct 值）、2 处风险排除；类型 `CreatedAt` 纯增益、`IncludeThoughts`(8 处)+`Text`/`Arguments` 改读写点、`SupportedEndpointTypes` 改 import |
+| 30 | ~~字段名相同但 tag / Go 类型不同（第 14 轮新增）~~ | **已关闭**（2026-10-04；**第 30 轮修正计数**）：见 12.0.8——**11 处**（tag 5 + 类型 6，原文写 15）全部采用 relaykit。tag 3 处空操作（struct 值）、2 处风险排除；类型 `CreatedAt` 纯增益、`IncludeThoughts`(8 处)+`Text`/`Arguments` 改读写点、`SupportedEndpointTypes` 改 import |
 | 31 | **finish_reason 严格语义的落点（第 29 轮新增）** | **未决，阶段 4 开工前须二选一**（12.11.3）：**A** 给 `reasonmap` 加可选注入钩子（本地改动清单第 12 行）；**B** 宿主 5 处调用点各自前置校验。原表述「留宿主调用点」无落点——两个原调用点都在阶段 6 删除的 `service/convert.go` 内（12.11.1）。另须为 b/c/d 三条差异各补测试（12.11.2） |
