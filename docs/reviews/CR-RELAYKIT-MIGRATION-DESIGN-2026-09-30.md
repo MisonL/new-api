@@ -677,6 +677,20 @@ if from == to || to == types.RelayFormatGemini ||
 - **「实现 N 个方法」里的 N 是接口的方法总数，不是工作量**。工作量的正确单位是「**已存在几个**」，须用集合差集算（本地方法名 ∩ 接口方法名）。**凡写「实现 N 个 X」，必须同时给出「其中 M 个已存在、须新增 N−M 个」**，否则阶段判据无法估工作量、也无法在阶段 3 定位「还差哪几个」。
 - **如果上游已有实现，先确认它能不能照抄**——本轮的 13 个方法上游全有，阶段 3 从「设计任务」降级为「移植任务」，这两者的风险完全不同。
 
+**第二十五轮（2026-10-05）——「反向新增」与「照抄」是两类任务**：本轮核阶段 4 处置清单第 4、5 项，两项都是**从宿主往 relaykit 反向新增**（前二十四轮核的全是「照抄上游」）。实测四件事：
+
+1. **第 4 项上游无同名方法**。`ParseContentStrict`（`dto/openai_request.go:882`）与 `ParseToolCallsStrict`（`:624`）在 `upstream/main:relaykit/` 里 `git grep` 为空——**确属本地专有**。两方法只用 `common.{GetJsonType,Marshal,Unmarshal,RawMessage}` + stdlib，前三个 `kitutil` 有等价物，**但 `kitutil` 不提供 `RawMessage` 类型别名**（本地 `common/json.go:9` 是 `type RawMessage = json.RawMessage`；`kitutil/json.go` 里 `RawMessage` 只作为 `json.RawMessage` 的参数类型出现）——故迁入时 `[]common.RawMessage` 须改 `[]json.RawMessage`。**原处置项只写「迁入 `relaykit/dto`」，没写这个改名动作。**
+2. **第 5 项「门控留宿主」没写落点**。think 标签族实测拆两半：纯函数 `splitThinkTaggedText`(`:554`)、`indexASCIIFold`(`:597`)、`appendVisibleThinkText`(`:629`) **只依赖 `strings`**，可无改动迁入；门控 `shouldExtractThinkTaggedClaudeHistory`(`:489`)、`shouldExposeReasoningAsClaudeThinking`(`:526`) **依赖宿主 `*relaycommon.RelayInfo`**，须留宿主。**但门控的 3 个调用点全在 `service/convert.go` 内**（`:103`/`:749`/`:1049`）——**阶段 6 删该文件主体，调用点随之消失**。故「门控留宿主」必须落到**注入机制**（请求方向 `convmeta.Options` 钩子、响应方向 12.4 的 relaykit 内门控），原处置项未提。
+3. **上游 relaykit 无 think 标签提取函数**（`git grep -E "func [a-zA-Z]*[Tt]hink[a-zA-Z]*\(" upstream/main -- 'relaykit/**'` 只命中 Qwen thinking budget 等无关符号），确认本地专有；上游 `to_oai_chat_req.go` 的 think 相关只有 `:82-88` 的 `-thinking` 后缀，与标签族无关。
+4. **一个幻影符号**：§5 把 `extractThinkTaggedHistory` 当函数名写，实测它是 `service/convert.go:103` 的**局部变量**（`:=` 赋值，内容为门控函数返回值），真函数是 `shouldExtractThinkTaggedClaudeHistory`。
+
+**顺带一处自纠**：我一度把 `ParseContentStrict`/`ParseToolCallsStrict` 的行号对调——起因是 `sed -n '882p;624p'` 按**文件行序**输出（624 先出），我按参数顺序读成了倒序，于是「修正」反而改错，第二次才改回。**凡一次读多个行号，输出顺序不等于参数顺序**，要么分行打印，要么用 `grep -n` 逐个核。
+
+**教训**：
+
+- **「反向新增」与「照抄」是两类任务，风险点不同**——照抄的风险是抄错，反向新增的风险是**边界与依赖**（会不会 import 宿主、缺的符号怎么办、删除宿主文件后调用点去哪）。**核一类任务不能拿另一类的检查清单。**
+- **「留宿主」必须同时说清「放哪个文件、谁调用它、经哪条钩子」**——留宿主的函数若其调用点在被删文件里，它就是不可达的。
+
 顺带把阶段 1 的两个隐含前提**核实**（此前是推断）：上游 relaykit **当前没有版本文件**（顶层仅 `README.md`/`go.mod`/`go.sum` + 4 个目录），故新建 `relaykit/VERSION` **不与上游冲突**；`relaykit/relayconvert/boundary_test.go:53` 的过滤条件是「只处理 `.go` 且非 `_test.go`」，且遍历范围是 `kitDirs`（`relayconvert`/`dto`/`types`/`reasonmap`），故**新增 `VERSION` 文件不会触发边界门禁**。
 
 **顺带修正两处自己的数字错**：本地 `makefile` 目标数先写 8（实为 9）；`pr-check.yml` 的构成先写成「只跑 anti-slop」（漏了它其实有且仅有 1 个 `uses:` 步骤、**0 个 `run:`**，故「只跑 action 不跑命令」的说法才准确）。
@@ -726,5 +740,6 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第二十二轮） | 核阶段 0 的 CI 门禁：照抄上游 `ci.yml` **三处不够**（挂载点未定、本地无 `make test` 目标、上游 `make test` 不含 `-count=1`/`-shuffle` 会继承已知跨运行泄漏盲区）；**且 `TestGolden` 从未进入任何 CI 表述**，而它是阶段 2/4/6 判据的共同依赖。已写入 §9.3 |
 | （本轮·第二十三轮） | 核阶段 1 的版本锚定可执行性：原文只写「须重新核对行号引用」而**无任何可执行手段**。实测全文 10 处唯一 `relaykit/<path>.go:<line>` 引用、**当前 10/10 全部可解析**，但无工具保证。新增 `scripts/relaykit-citation-check.py` + 10 个单测（按仓库既有 `scripts/*.py` + `*.test.py` 模式），经**反向验证**（`:99999` → 退出码 1 报 out of range；`nonexistent.go` → 报 file not found；还原后退出码 0）。另实测：上游 relaykit 无版本文件、且 `boundary_test.go:53` 只遍历 `kitDirs` 下的 `.go`，故新建 `relaykit/VERSION` 既不冲突也不触发边界门禁 |
 | （本轮·第二十四轮） | 复现「`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法」：**接口确为 15 个**（机械枚举），但本地 `RelayInfo` 现有 26 个方法中**只有 2 个重名**（`GetEstimatePromptTokens`、`AppendRequestConversion`），**须新增 13 个**。上游已全部实现于 `relay_info.go:825-953`（含断言 `:823`），可整体照抄；12 个是纯访问器，**仅 `ConvOptions` 需新写逻辑**（import `model_setting`，本地 `claude.go:55`/`gemini.go:53` 已有，且本地**无** `convOptions` 缓存字段）。阶段 3 判据由「实现 15 个」改为「13 个逐个落地」 |
+| （本轮·第二十五轮） | 核阶段 4 处置清单第 4、5 项（**「反向新增」类**任务）：第 4 项上游**无同名方法**，且 `kitutil` **不提供 `RawMessage` 类型别名** → 须把 `[]common.RawMessage` 改 `[]json.RawMessage`；第 5 项「门控留宿主」**没写落点**——门控 3 个调用点全在 `convert.go`（阶段 6 删），必须落到注入机制。另修正一个**幻影符号**（`extractThinkTaggedHistory` 实为局部变量） |
 
 文档当前 1554 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。

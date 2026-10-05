@@ -401,8 +401,8 @@ const (
 | 1 | 打补丁 1：两个请求转换器的 content block switch 增加 `case "thinking"` 与非 assistant role 门控，并补 `default:` 显式报错 | 3.3 |
 | 2 | 删除 `service/convert.go` 的 4 个 `*WithError` 与 4 个无 error 旧包装 | 12.3 |
 | 3 | 4 个本地专有 `ErrorCode` 与 2 个判定函数：搬迁动作在**阶段 1**（随 `types` 拆分），阶段 4 只做**确认**——宿主侧无残留引用 | 12.2、4.3 |
-| 4 | `ParseContentStrict` / `ParseToolCallsStrict` 迁入 `relaykit/dto` | 12.1、12.5（A 类） |
-| 5 | think 标签剥离族迁入 relaykit（纯函数），门控留宿主 | 12.1、4.3 |
+| 4 | `ParseContentStrict`（`dto/openai_request.go:882`）/ `ParseToolCallsStrict`（`:624`）迁入 `relaykit/dto`。**上游 relaykit/dto 无同名方法**（实测 `git grep` 空）——这是**本地专有的反向新增**，不是照抄。**两个方法只用 `common.{GetJsonType,Marshal,Unmarshal,RawMessage}` + stdlib**，其中前三个 `kitutil` 有等价物（`kitutil/json.go` 的 `GetJsonType`/`Marshal`/`Unmarshal`），但 **`kitutil` 不提供 `RawMessage` 类型别名**（本地 `common.RawMessage = json.RawMessage`，`common/json.go:9`；`kitutil/json.go` 里 `RawMessage` 只作为 `json.RawMessage` 的参数类型出现）。故 `ParseContentStrict` 里的 `[]common.RawMessage` 须改为 `[]json.RawMessage`。**不得 import 宿主 `common`**（`boundary_test.go` 会红） | 12.1、12.5（A 类） |
+| 5 | think 标签剥离族迁入 relaykit（纯函数），门控留宿主。**具体拆分（实测，HEAD 口径）**：纯函数是 `splitThinkTaggedText`（`service/convert.go:554`）、`indexASCIIFold`（`:597`）、`appendVisibleThinkText`（`:629`），**只依赖 `strings`**，可无改动迁入 relaykit；门控是 `shouldExtractThinkTaggedClaudeHistory`（`:489`）与 `shouldExposeReasoningAsClaudeThinking`（`:526`），**依赖宿主 `*relaycommon.RelayInfo`**，须留宿主。**但门控的 3 个调用点全在 `service/convert.go` 内**（`:103`、`:749`、`:1049`）——**阶段 6 删该文件主体，调用点随之消失**。故「门控留宿主」必须落到**注入机制**上（阶段 4 接线）：请求方向的历史回传门控走 `convmeta.Options` 钩子、响应方向的 reasoning 暴露门控走 12.4 的 relaykit 内门控。**本节此前只写「门控留宿主」，没说门控函数放哪个文件、由谁调用、经哪条钩子**——阶段 4 开工前须定（与第 6.1 节「不能按客户端意图门控」的结论配套） | 12.1、4.3、12.4、6.1 |
 | 6 | 逐项核对 9.1 的 6 条语义差异与 9.2 的 6 条输入校验差异，每项确认「保留 / 放弃 / 改写」 | 9.1、9.2 |
 | 7 | 确认 hosted 工具改用上游 `toolconv`（本地 3 种子集，差集为空） | 12.17 #7、3.1 |
 | 8 | custom tool bridge 保持本地 fail-closed（默认拒绝、显式开启） | 12.7 |
