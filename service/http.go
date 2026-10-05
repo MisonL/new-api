@@ -23,8 +23,29 @@ func CloseResponseBodyGracefully(httpResponse *http.Response) {
 	}
 }
 
+// upstreamHeaderDenylistLower holds response headers that must never be
+// mirrored onto new-api's own origin. Set-Cookie is the significant one: the
+// upstream would otherwise set a session cookie on the new-api domain, which
+// is cookie tossing and a foothold for session fixation. The RFC 7230
+// hop-by-hop set describes a connection between new-api and the upstream that
+// does not exist between the client and new-api, so forwarding it is wrong too.
+var upstreamHeaderDenylistLower = map[string]struct{}{
+	"set-cookie":          {},
+	"connection":          {},
+	"keep-alive":          {},
+	"proxy-authenticate":  {},
+	"proxy-authorization": {},
+	"te":                  {},
+	"trailer":             {},
+	"transfer-encoding":   {},
+	"upgrade":             {},
+}
+
 func ShouldCopyUpstreamHeader(c *gin.Context, key string, values []string) bool {
 	if strings.EqualFold(key, "Content-Length") {
+		return false
+	}
+	if _, denied := upstreamHeaderDenylistLower[strings.ToLower(strings.TrimSpace(key))]; denied {
 		return false
 	}
 	if captureUpstreamRequestID(c, key, values) {
