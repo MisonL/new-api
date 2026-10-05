@@ -709,6 +709,34 @@ if from == to || to == types.RelayFormatGemini ||
 
 **顺带修正两处自己的数字错**：本地 `makefile` 目标数先写 8（实为 9）；`pr-check.yml` 的构成先写成「只跑 anti-slop」（漏了它其实有且仅有 1 个 `uses:` 步骤、**0 个 `run:`**，故「只跑 action 不跑命令」的说法才准确）。
 
+**第二十七轮（2026-10-05）——门控排在阶段 5，但阶段 4 的判据先红**：核阶段 5 判据能否验证 12.4 要求的语义条件（门控必须在索引分配之前）。**起点是错的**：我原本以为缺口只是「判据没写这条」，实测后发现更硬的问题是**阶段顺序本身自相矛盾**。
+
+事实（均实测）：
+
+1. **阶段 4 判据要求「`TestGolden` 改指 relaykit 后 8 个快照逐字节一致」**，其中 4 个门控快照在非 DeepSeek 侧要求「reasoning 被丢弃」。
+2. **上游 relaykit 默认无条件暴露 reasoning**：`ResponseOpenAI2Claude(resp, nil)`（`oai_chat/to_claude_messages_resp.go:449`）签名收 `info` 但**函数体 0 次引用**（`grep -c info` 在 :449-520 只命中签名行本身），`:463` 的 `if reasoningContent != ""` 无任何门控；整个文件 `grep -c "Options\|Retain"` = **0**。`Values.ConvOptions()`（`convmeta/meta.go`）在 `Options` 未设时返回 `&Options{}`（钩子 nil）。
+3. **12.4 的门控排在阶段 5**，而阶段 4 就要完成切换。**切换而不门控 → 非 DeepSeek 快照多出 thinking 块 → 阶段 4 判据必红**；豁免条款只认「处置清单第 6 项（9.1/9.2）」，门控不在其中 → **阶段 4 无法通过**。
+
+**决定**：门控随阶段 4 的切换同时落地（新增处置清单第 13 项），阶段 5 只核验其位置语义；阶段 5 判据补上「4 个门控快照逐字节一致」这一可执行条件。
+
+**连带修出四处 12.4 自身的错误**（都是我在同一轮里发现的）：
+
+4. **钩子 nil 语义写反了**。12.4.2 写 `nil = 不保留（与上游一致）`。前半句与后半句不能同真——上游没有这个钩子，其行为是**无条件保留**。按原语义实现，所有不设钩子的调用点（上游自身测试、独立 relaykit 用户）行为从「暴露」翻转成「不暴露」，是**破坏性默认值变更**。正确语义是 `nil = 保留（维持上游默认）`。**这一改同时让上游两条依赖默认暴露的测试保持绿色、无需改动**（`to_claude_messages_resp_test.go:82`、`:125`，该文件 0 处 `Options:`）；按原语义则两条必红。**故这两条测试是 nil 语义实现的验证条件，不是待改对象**——本地改动清单第 9 行据此从「改写」改为「不改动，但须保持绿色」。
+5. **单参钩子复现不了三名字门控**。本地 `HasDeepSeekModelName`（`convert.go:537`）综合 `Model`/`OriginModelName`/`UpstreamModelName` **三者**判定，钩子 `func(modelName string) bool` 只收一个。12.4.2 写「加**一次**判断」会丢掉另两个名字 → 公开名非 DeepSeek 但路由到 DeepSeek 上游时 reasoning 被错误抑制，是**行为回归**。解法同上游 `ApplyReasoning` 对 `ShouldPreserveThinkingSuffix` 的连调两次（`shared/claude/reasoning.go:25-26`）：调用点对每个名字各调一次取或。
+6. **插入点写错一层**。上游是 `if reasoning != "" { thinking } else { text }` **互斥**结构。只在内层 `if reasoning != ""` 加判断是错的：门控关闭时该分支跳过，`else`（text）也不执行，**同 chunk 的 text 被静默丢弃**。正确做法是在**外层条件之前**把被抑制的 reasoning 归零（`if reasoning != "" && !retain { reasoning = "" }`）。「在索引分配之前」的精确含义是**进入 `reasoning/text` 二选一之前**，不只是 `stopOpenBlocksAndAdvance()` 之前。
+7. **同 chunk reasoning+text 是本地能力，上游没有，且未列入 9.1**。上游互斥结构下同 chunk 只发 thinking、丢 text（若还含 tools 则两者都丢）；本地两个独立闭包三者都发，有专门用例 `TestStreamResponseOpenAI2ClaudeEmitsThinkingTextAndToolBlocksFromOneChunk`（`convert_claude_stream_test.go:119`）。**这是能力差异不是严格度差异**——12.16.1 说「阶段 4 的待办是确认既有用例仍通过、失败得其所」，但这条用例失败**不得其所**。已补入 9.1 第 7 条并要求明确取舍。
+
+**顺带**：12.4.3 的「影响」段写门控落点含 `to_claude_messages_stream_resp.go`，但该文件只在 `internal/oai_responses/` 下（`oai_chat/` 无此文件），而 `oai_responses` 一族不接收 `Meta` 且本地不涉及（12.4.2 已述）——已修正。
+
+**引用口径自查**：新增引用时先写成工作区口径（`convert.go:800/830/857`、`:544`），而文档既有引用是 **HEAD 口径**（如 `:794` 正是 `if !allowClaudeThinking`）。工作区当时有**其他会话的 +7 行改动**（在 `:59` 处加 `ReasoningEffort` 透传），使后续行号整体偏移。已全部改回 HEAD 口径（`:793`/`:823`/`:850`、`:537`）。**这正是第 18 轮确立的「HEAD 口径」纪律的又一次应用**。
+
+**教训**：
+
+- **判据引用了一个「后续阶段才产出」的行为时，先检查产出的阶段早于判据的阶段**。本轮的真问题不是「判据不够细」，而是**判据依赖的行为排在判据之后**——这类矛盾在逐条读判据时看不出来，只有把「判据要求的状态」与「阶段表里的动作顺序」放在一起才暴露。
+- **默认值是契约的一部分，方向写反等于破坏性变更**。`nil = 不保留` 与 `nil = 保留` 在「没人设这个钩子」时行为相反；而 relaykit 是**公开模块**，不设钩子的调用方不只是本仓库。
+- **「加一次判断」这种措辞要落到代码结构上验证**。本轮三处错误（nil 语义、单参、插入点）都藏在「加一个 if」这五个字里，读起来无懈可击。
+- **能力差异与严格度差异要分开处理**。12.16.1 的「失败得其所」对错误路径成立，对**本地刻意支持的渲染能力**不成立——后者失败是回归，不是「上游更宽松」。
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**。第十八轮起已实际运行 `go test ./service -run TestGolden` 与全包 `go test ./service`（见该轮），但「编译失败」类结论仍未逐条 `go build` 复现
@@ -756,5 +784,6 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第二十四轮） | 复现「`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法」：**接口确为 15 个**（机械枚举），但本地 `RelayInfo` 现有 26 个方法中**只有 2 个重名**（`GetEstimatePromptTokens`、`AppendRequestConversion`），**须新增 13 个**。上游已全部实现于 `relay_info.go:825-953`（含断言 `:823`），可整体照抄；12 个是纯访问器，**仅 `ConvOptions` 需新写逻辑**（import `model_setting`，本地 `claude.go:55`/`gemini.go:53` 已有，且本地**无** `convOptions` 缓存字段）。阶段 3 判据由「实现 15 个」改为「13 个逐个落地」 |
 | （本轮·第二十五轮） | 核阶段 4 处置清单第 4、5 项（**「反向新增」类**任务）：第 4 项上游**无同名方法**，且 `kitutil` **不提供 `RawMessage` 类型别名** → 须把 `[]common.RawMessage` 改 `[]json.RawMessage`；第 5 项「门控留宿主」**没写落点**——门控 3 个调用点全在 `convert.go`（阶段 6 删），必须落到注入机制。另修正一个**幻影符号**（`extractThinkTaggedHistory` 实为局部变量） |
 | （本轮·第二十六轮） | 核阶段 5：**发现「必然分叉」与「避免分叉」的矛盾**——三处补丁都要改写 relaykit 内部源码 + 给 `convmeta.Options` 新增字段，而 12.9/12.15.4 两处写「避免分叉」，且规格**从未汇总改了哪些文件**。补 8 条「本地改动清单」表（核实过的行号），并要求另立 `relaykit/LOCAL_PATCHES.md`。**顺带修一处假绿**：新表路径原缺 `relaykit/` 前缀，6 处新引用一度在门禁之外（检查器仍报 10/10），补前缀后升到 16/16 |
+| （本轮·第二十七轮） | 核阶段 5 判据能否验证 12.4 的语义条件，**发现更硬的问题：阶段顺序自相矛盾**——门控排在阶段 5，但阶段 4 判据「8 个快照逐字节一致」已要求门控生效，而上游 relaykit **默认无条件暴露 reasoning**（实测 `ResponseOpenAI2Claude(resp, nil)` 函数体 0 次引用 `info`、`:463` 无门控、整文件 0 处 `Options`）→ 阶段 4 必红且豁免条款覆盖不到。决定：门控移入阶段 4（处置清单新增第 13 项），阶段 5 只核验位置语义。**连带修出 12.4 自身四处错误**：钩子 nil 语义写反（`nil = 不保留` 应为 `nil = 保留`，否则破坏上游默认）、单参钩子复现不了三名字门控（须调用点各调一次取或）、插入点写错一层（须在外层二选一之前归零，否则同 chunk text 被丢）、同 chunk reasoning+text 是本地能力却未列入 9.1（已补第 7 条）。另修正 12.4.3 的落点文件名错误（`to_claude_messages_stream_resp.go` 不在 `oai_chat/` 下）。新增引用一度写成工作区口径（`:800/830/857`、`:544`），已按 HEAD 口径改正（`:793/823/850`、`:537`） |
 
-文档当前 1569 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1621 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
