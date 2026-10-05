@@ -253,6 +253,14 @@ func normalizeClaudeInputSchema(parameters any, toolName string) (map[string]int
 }
 
 func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
+	// The Claude Messages API returns exactly one completion. Dropping n>1
+	// silently made the gateway answer with a single choice for a request that
+	// asked for several, so the mismatch is reported instead. Other adaptors
+	// that cannot represent multiple choices reject it the same way.
+	if textRequest.N != nil && *textRequest.N > 1 {
+		return nil, fmt.Errorf("n>1 is not supported by the Claude Messages API")
+	}
+
 	claudeTools := make([]any, 0, len(textRequest.Tools))
 
 	for _, tool := range textRequest.Tools {
@@ -1138,7 +1146,7 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		common.SysLog("error unmarshalling stream response: " + err.Error())
 		return types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
-	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
+	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.HasContent() {
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
 	}
 	if claudeResponse.StopReason != "" {
@@ -1184,9 +1192,10 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
-	if claudeInfo.Usage.PromptTokens == 0 {
-		//上游出错
-	}
+	// 已知缺口：当 Done 为 true 且 CompletionTokens > 0，但 PromptTokens == 0 时
+	// （上游 message_start 未回报 InputTokens，且 message_delta 也缺该字段，
+	// AWS Bedrock 存在此行为），下面的守卫不成立，本函数不会回填 PromptTokens，
+	// 结算会按 0 输入 token 计算。此处仅记录，不改动回填条件：那会改变计费口径。
 	if claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done {
 		if common.DebugEnabled {
 			common.SysLog("claude response usage is not complete, maybe upstream error")
@@ -1250,7 +1259,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
-	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
+	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.HasContent() {
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
 	}
 	maybeMarkClaudeRefusal(c, claudeResponse.StopReason)

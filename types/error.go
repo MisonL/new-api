@@ -56,6 +56,16 @@ type ClaudeError struct {
 	Message string `json:"message,omitempty"`
 }
 
+// HasContent reports whether the error carries any usable detail.
+// Upstreams emit both the canonical form (with "type") and a bare
+// {"code","message"} form; GetClaudeError only fills Type when the frame
+// has a "type" key, so a guard that checks Type alone drops the latter.
+// An empty error object decodes to a non-nil but all-empty ClaudeError and
+// must not count as an error.
+func (c ClaudeError) HasContent() bool {
+	return c.Type != "" || c.Message != ""
+}
+
 type ErrorType string
 
 const (
@@ -67,6 +77,108 @@ const (
 	ErrorTypeRerankError     ErrorType = "rerank_error"
 	ErrorTypeUpstreamError   ErrorType = "upstream_error"
 )
+
+// Standard OpenAI error `type` values. Clients route on the HTTP status and
+// surface `type` to users, so it has to come from a fixed vocabulary rather
+// than from this gateway's internal error codes.
+const (
+	standardErrorTypeInvalidRequest    = "invalid_request_error"
+	standardErrorTypeAuthentication    = "authentication_error"
+	standardErrorTypePermission        = "permission_error"
+	standardErrorTypeNotFound          = "not_found_error"
+	standardErrorTypeRateLimit         = "rate_limit_error"
+	standardErrorTypeServer            = "server_error"
+	standardErrorTypeInsufficientQuota = "insufficient_quota"
+)
+
+// standardErrorTypes is the set of `type` values clients already handle. A value
+// outside it is one this gateway or a foreign upstream invented.
+var standardErrorTypes = map[string]struct{}{
+	standardErrorTypeInvalidRequest:    {},
+	standardErrorTypeAuthentication:    {},
+	standardErrorTypePermission:        {},
+	standardErrorTypeNotFound:          {},
+	standardErrorTypeRateLimit:         {},
+	standardErrorTypeServer:            {},
+	standardErrorTypeInsufficientQuota: {},
+}
+
+// standardErrorType maps an internal error code and HTTP status onto the OpenAI
+// error `type` vocabulary. InitOpenAIError and NewOpenAIError previously wrote
+// the raw internal code into Type, so a client saw
+// "type": "bad_response_status_code" -- a value that exists nowhere in the
+// OpenAI API. The status code is the primary signal; the code only breaks ties
+// where the status alone is ambiguous.
+func standardErrorType(code ErrorCode, statusCode int) string {
+	switch statusCode {
+	case http.StatusUnauthorized:
+		return standardErrorTypeAuthentication
+	case http.StatusForbidden:
+		if code == ErrorCodeInsufficientUserQuota || code == ErrorCodePreConsumeTokenQuotaFailed {
+			return standardErrorTypeInsufficientQuota
+		}
+		return standardErrorTypePermission
+	case http.StatusNotFound:
+		return standardErrorTypeNotFound
+	case http.StatusTooManyRequests:
+		return standardErrorTypeRateLimit
+	}
+	if statusCode >= 400 && statusCode < 500 {
+		return standardErrorTypeInvalidRequest
+	}
+	// A 5xx status is a gateway-side or upstream failure, and the code below
+	// only carries 4xx meanings: mapping it here would label a 503 "no free
+	// channel right now" as not_found_error, which a client that routes on
+	// `type` reads as "the model does not exist" and stops retrying. 5xx is
+	// never ambiguous, so it needs no tiebreaker.
+	if statusCode >= 500 {
+		return standardErrorTypeServer
+	}
+	switch code {
+	case ErrorCodeModelNotFound:
+		return standardErrorTypeNotFound
+	case ErrorCodeInsufficientUserQuota, ErrorCodePreConsumeTokenQuotaFailed:
+		return standardErrorTypeInsufficientQuota
+	case ErrorCodeAccessDenied, ErrorCodeChannelInvalidKey:
+		return standardErrorTypePermission
+	case ErrorCodeModelPriceError, ErrorCodeSensitiveWordsDetected:
+		return standardErrorTypeInvalidRequest
+	}
+	return standardErrorTypeServer
+}
+
+// StandardizeErrorType rewrites an OpenAIError's `type` field onto the OpenAI
+// vocabulary using its own code as a tiebreaker. RelayErrorHandler uses it for
+// errors built from an upstream body, where the upstream may supply a `type`
+// from a different vocabulary entirely (for example a Python SDK class name).
+// The message and code are left untouched.
+func StandardizeErrorType(openAIError OpenAIError, statusCode int) OpenAIError {
+	// An upstream that already speaks the standard vocabulary is left alone; only
+	// foreign values (an internal error code, a Python SDK class name, another
+	// provider's wording) are replaced.
+	if _, ok := standardErrorTypes[openAIError.Type]; ok {
+		return openAIError
+	}
+	// ErrorCode is a distinct named type, so a plain assertion to string fails
+	// for the errors this gateway builds itself (NewOpenAIError and friends set
+	// Code to an ErrorCode). Without this case the tiebreaker silently no-ops
+	// and the code is read as empty. A nil Code stays empty rather than being
+	// rendered, so the caller falls through to the status-only mapping.
+	var code string
+	switch typed := openAIError.Code.(type) {
+	case nil:
+		code = ""
+	case string:
+		code = typed
+	case ErrorCode:
+		code = string(typed)
+	default:
+		// An upstream may send a numeric or object code.
+		code = fmt.Sprint(typed)
+	}
+	openAIError.Type = standardErrorType(ErrorCode(code), statusCode)
+	return openAIError
+}
 
 type ErrorCode string
 
@@ -290,14 +402,24 @@ func (e *NewAPIError) ToOpenAIError() OpenAIError {
 			}
 		}
 	default:
+		// An internally built error carries no upstream `type` of its own, so its
+		// type comes from the standard vocabulary. Emitting the internal marker
+		// ("new_api_error" and friends) leaked this gateway's own taxonomy into a
+		// field clients switch on, next to real OpenAI values from other paths.
 		result = OpenAIError{
 			Message: e.Error(),
-			Type:    string(e.errorType),
+			Type:    standardErrorType(e.errorCode, e.StatusCode),
 			Param:   "",
 			Code:    e.errorCode,
 		}
 	}
 	result = sanitizeOpenAIError(result)
+	if result.Message == "" {
+		// Fall back to the human-readable error, not to the internal type name.
+		// The type fallback produced "message": "openai_error" for errors built
+		// from an upstream body that carried no message of its own.
+		result.Message = e.Error()
+	}
 	if result.Message == "" {
 		result.Message = string(e.errorType)
 	}
@@ -315,9 +437,17 @@ func (e *NewAPIError) ToClaudeError() ClaudeError {
 	switch e.errorType {
 	case ErrorTypeOpenAIError:
 		if openAIError, ok := e.RelayError.(OpenAIError); ok {
+			// OpenAIError.Code is `any` and stays nil when the upstream error body
+			// carries no code field. Rendering it with %v produced the literal
+			// "<nil>" as the client-facing Claude error type. Fall back to this
+			// gateway's own error code, matching what ToOpenAIError does.
+			claudeType := strings.TrimSpace(fmt.Sprintf("%v", openAIError.Code))
+			if claudeType == "" || claudeType == "<nil>" {
+				claudeType = string(e.errorCode)
+			}
 			result = ClaudeError{
 				Message: e.Error(),
-				Type:    fmt.Sprintf("%v", openAIError.Code),
+				Type:    claudeType,
 			}
 		}
 	case ErrorTypeClaudeError:
@@ -369,7 +499,7 @@ func NewOpenAIError(err error, errorCode ErrorCode, statusCode int, ops ...NewAP
 		if newErr.RelayError == nil {
 			openaiError := OpenAIError{
 				Message: newErr.Error(),
-				Type:    string(errorCode),
+				Type:    standardErrorType(errorCode, statusCode),
 				Code:    errorCode,
 			}
 			newErr.RelayError = openaiError
@@ -381,7 +511,7 @@ func NewOpenAIError(err error, errorCode ErrorCode, statusCode int, ops ...NewAP
 	}
 	openaiError := OpenAIError{
 		Message: errorMessage(err),
-		Type:    string(errorCode),
+		Type:    standardErrorType(errorCode, statusCode),
 		Code:    errorCode,
 	}
 	return WithOpenAIError(openaiError, statusCode, ops...)
@@ -389,7 +519,7 @@ func NewOpenAIError(err error, errorCode ErrorCode, statusCode int, ops ...NewAP
 
 func InitOpenAIError(errorCode ErrorCode, statusCode int, ops ...NewAPIErrorOptions) *NewAPIError {
 	openaiError := OpenAIError{
-		Type: string(errorCode),
+		Type: standardErrorType(errorCode, statusCode),
 		Code: errorCode,
 	}
 	return WithOpenAIError(openaiError, statusCode, ops...)
