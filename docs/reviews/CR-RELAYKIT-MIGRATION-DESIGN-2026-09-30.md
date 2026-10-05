@@ -668,6 +668,15 @@ if from == to || to == types.RelayFormatGemini ||
 
 新增 `scripts/relaykit-citation-check.py`（按仓库既有 `scripts/*.py` + `*.test.py` 模式，用 `importlib` 加载 + `unittest`）：从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效、**不断言该行内容**（引用指向的符号变了仍需人工复核）。**10 个单测**，含「引用不存在的文件」「行越界」「指向空行」「混合通过与失败各自报出」四类。**反向验证**：把 `values.go:32` 改成 `:99999` → 退出码 1 且报 `out of range`；改成 `nonexistent.go:32` → 退出码 1 且报 `file not found`；还原后退出码 0，文档 `git diff --numstat` 为空。
 
+**第二十四轮（2026-10-05）——「15 个方法」复现为「13 个要新增」**：阶段 3 写「`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法」。机械枚举 `convmeta.Meta`（`convmeta/meta.go:18`）：**确为 15 个**。但比对本地 `relay/common/relay_info.go`（HEAD 口径）现有 26 个方法后，**只有 2 个重名**——`GetEstimatePromptTokens`、`AppendRequestConversion`（本地 `:897`、`:844`），**其余 13 个本地完全没有**。所以真实工作量是**新增 13 个方法**，不是「实现 15 个」。
+
+而这 13 个**上游已全部实现**（`upstream/main:relay/common/relay_info.go:825-953`，且 `:823` 就有编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)`），阶段 3 实际是**照抄**而非设计。其中 **12 个是纯访问器**，**只有 `ConvOptions` 需新写逻辑**——它 import `model_setting.GetClaudeSettings/GetGeminiSettings`（本地 `setting/model_setting/claude.go:55`、`gemini.go:53` 实测存在），并按 relay 会话缓存 `convOptions` 字段（本地 `RelayInfo` **无**该字段，须新增）。阶段 3 判据已改为「13 个方法逐个落地」。
+
+**教训**：
+
+- **「实现 N 个方法」里的 N 是接口的方法总数，不是工作量**。工作量的正确单位是「**已存在几个**」，须用集合差集算（本地方法名 ∩ 接口方法名）。**凡写「实现 N 个 X」，必须同时给出「其中 M 个已存在、须新增 N−M 个」**，否则阶段判据无法估工作量、也无法在阶段 3 定位「还差哪几个」。
+- **如果上游已有实现，先确认它能不能照抄**——本轮的 13 个方法上游全有，阶段 3 从「设计任务」降级为「移植任务」，这两者的风险完全不同。
+
 顺带把阶段 1 的两个隐含前提**核实**（此前是推断）：上游 relaykit **当前没有版本文件**（顶层仅 `README.md`/`go.mod`/`go.sum` + 4 个目录），故新建 `relaykit/VERSION` **不与上游冲突**；`relaykit/relayconvert/boundary_test.go:53` 的过滤条件是「只处理 `.go` 且非 `_test.go`」，且遍历范围是 `kitDirs`（`relayconvert`/`dto`/`types`/`reasonmap`），故**新增 `VERSION` 文件不会触发边界门禁**。
 
 **顺带修正两处自己的数字错**：本地 `makefile` 目标数先写 8（实为 9）；`pr-check.yml` 的构成先写成「只跑 anti-slop」（漏了它其实有且仅有 1 个 `uses:` 步骤、**0 个 `run:`**，故「只跑 action 不跑命令」的说法才准确）。
@@ -716,5 +725,6 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第二十一轮） | 走六个阶段判据的依赖链：**无矛盾**，但发现阶段 4「8 个快照逐字节一致」有未写前提——`json.MarshalIndent` 按声明顺序输出，两侧字段顺序不同则语义等价也失败。机械核验 4 个输出类型共有字段全部同序；并确认基线 fixture 与 12.0.8 的 15 处差异无重叠 |
 | （本轮·第二十二轮） | 核阶段 0 的 CI 门禁：照抄上游 `ci.yml` **三处不够**（挂载点未定、本地无 `make test` 目标、上游 `make test` 不含 `-count=1`/`-shuffle` 会继承已知跨运行泄漏盲区）；**且 `TestGolden` 从未进入任何 CI 表述**，而它是阶段 2/4/6 判据的共同依赖。已写入 §9.3 |
 | （本轮·第二十三轮） | 核阶段 1 的版本锚定可执行性：原文只写「须重新核对行号引用」而**无任何可执行手段**。实测全文 10 处唯一 `relaykit/<path>.go:<line>` 引用、**当前 10/10 全部可解析**，但无工具保证。新增 `scripts/relaykit-citation-check.py` + 10 个单测（按仓库既有 `scripts/*.py` + `*.test.py` 模式），经**反向验证**（`:99999` → 退出码 1 报 out of range；`nonexistent.go` → 报 file not found；还原后退出码 0）。另实测：上游 relaykit 无版本文件、且 `boundary_test.go:53` 只遍历 `kitDirs` 下的 `.go`，故新建 `relaykit/VERSION` 既不冲突也不触发边界门禁 |
+| （本轮·第二十四轮） | 复现「`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法」：**接口确为 15 个**（机械枚举），但本地 `RelayInfo` 现有 26 个方法中**只有 2 个重名**（`GetEstimatePromptTokens`、`AppendRequestConversion`），**须新增 13 个**。上游已全部实现于 `relay_info.go:825-953`（含断言 `:823`），可整体照抄；12 个是纯访问器，**仅 `ConvOptions` 需新写逻辑**（import `model_setting`，本地 `claude.go:55`/`gemini.go:53` 已有，且本地**无** `convOptions` 缓存字段）。阶段 3 判据由「实现 15 个」改为「13 个逐个落地」 |
 
 文档当前 1554 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
