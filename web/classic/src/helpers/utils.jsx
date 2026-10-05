@@ -120,11 +120,23 @@ if (isMobileScreen) {
   // showNoticeOptions.transition = 'flip';
 }
 
+// The backend serialises failures as {message, success}, which is more useful
+// than axios' "Request failed with status code N". A network-level AxiosError
+// carries no `response` at all, so the status read must stay behind a guard.
 export function showError(error) {
   console.error(error);
   if (error.message) {
     if (error.name === 'AxiosError') {
-      switch (error.response.status) {
+      const response = error.response;
+      if (!response) {
+        Toast.error('错误：' + error.message);
+        return;
+      }
+      const backendMessage =
+        response.data && typeof response.data.message === 'string'
+          ? response.data.message
+          : '';
+      switch (response.status) {
         case 401:
           handleAuthExpired(window.location);
           break;
@@ -138,7 +150,7 @@ export function showError(error) {
           Toast.info('本站仅作演示之用，无服务端！');
           break;
         default:
-          Toast.error('错误：' + error.message);
+          Toast.error('错误：' + (backendMessage || error.message));
       }
       return;
     }
