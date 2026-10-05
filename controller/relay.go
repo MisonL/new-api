@@ -57,6 +57,33 @@ func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIErro
 	return err
 }
 
+func beginResponsesStreamRelayAttempt(c *gin.Context, info *relaycommon.RelayInfo) {
+	if info == nil || !info.IsStream {
+		return
+	}
+	// StreamStatus is attempt-scoped and uses sync.Once for its terminal
+	// reason. A channel retry must not inherit the previous upstream stream's
+	// interruption or completion state, so every streaming attempt gets a
+	// fresh one -- not only the Responses formats.
+	info.StreamStatus = relaycommon.NewStreamStatus()
+	if info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
+		return
+	}
+	if info.ResponsesStreamObservation == nil {
+		info.ResponsesStreamObservation = relaycommon.NewResponsesStreamObservation()
+	}
+	if info.ResponsesStreamAttemptStarted {
+		info.ResponsesStreamObservation.BeginAttempt()
+	}
+	// A retry reuses the downstream gin context, but each upstream Responses
+	// stream has its own sequence-number space. Do not let a failed stream's
+	// high-water mark leak into the next stream's generated error event.
+	if c != nil {
+		common.SetContextKey(c, constant.ContextKeyResponsesStreamSequenceNumber, 0)
+	}
+	info.ResponsesStreamAttemptStarted = true
+}
+
 func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
 	if strings.Contains(c.Request.URL.Path, "embed") {
@@ -258,6 +285,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			// Record an upstream attempt only after request-body preparation and
 			// billing pre-consumption have succeeded. A locally rejected request
 			// must not make this channel look as if it already received traffic.
+			beginResponsesStreamRelayAttempt(c, relayInfo)
 			addUsedChannel(c, channel.Id)
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
@@ -411,6 +439,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			if opaqueResponsesReplay || shouldSuppressBootstrapRecoveryAutoBan(c, newAPIError) {
 				channelError.AutoBan = false
 			}
+			// Record which channel this attempt ran against before the error is
+			// logged, so the log attributes the failure to it rather than to the
+			// channel the distributor selected before the retry loop started.
+			common.SetContextKey(c, relayAttemptChannelIdKey, channel.Id)
 			processChannelError(c, relayInfo, channelError, newAPIError)
 
 			if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
@@ -458,6 +490,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 func writeRelayErrorResponse(c *gin.Context, relayFormat types.RelayFormat, relayInfo *relaycommon.RelayInfo, ws *websocket.Conn, newAPIError *types.NewAPIError) {
 	if c == nil || newAPIError == nil {
 		return
+	}
+	// A streamed request whose upstream failed before the first frame still has
+	// SSE headers on the writer. Writing a JSON body under text/event-stream
+	// leaves the client parsing SSE and finding a bare object, so drop the SSE
+	// headers first. Once a frame has been written the response really is SSE
+	// and the error goes out as an SSE event instead (handled below).
+	if !c.Writer.Written() {
+		helper.ResetEventStreamHeaders(c)
 	}
 	switch relayFormat {
 	case types.RelayFormatOpenAIRealtime:
@@ -615,6 +655,13 @@ var upgrader = websocket.Upgrader{
 const relayInitialChannelConsumedKey = "relay_initial_channel_consumed"
 const responsesCompactUnsafeCompactionInputKey = "responses_compact_unsafe_compaction_input"
 const relayUpstreamErrorStateKey constant.ContextKey = "relay_upstream_error_state"
+
+// relayAttemptChannelIdKey carries the channel of the attempt currently being
+// processed. The distributor writes ContextKeyChannelId exactly once, before the
+// retry loop, so it names the initially selected channel and goes stale as soon
+// as a retry moves to another one. Error logs and routing trace readers use this
+// key to attribute a failure to the channel that actually produced it.
+const relayAttemptChannelIdKey constant.ContextKey = "relay_attempt_channel_id"
 
 type relayUpstreamErrorState struct {
 	lastModelNotFoundError *types.NewAPIError
@@ -1607,6 +1654,16 @@ func missingResponsesCodexDynamicHeaders(c *gin.Context, info *relaycommon.Relay
 		return nil
 	}
 	settings := responsesCompactionChannelOtherSettings(c, info, channel)
+	if settings.AllowMissingCodexDynamicRequestHeaders != nil && *settings.AllowMissingCodexDynamicRequestHeaders {
+		// Channel-level opt-out. The routing preflight requires at least one
+		// x-codex-* value because a Sub2API upstream refuses clients that cannot
+		// prove Codex identity; a channel that does not sit behind such a gate
+		// would otherwise be marked unusable for every non-Codex client even
+		// though its upstream accepts the request. The runtime passthrough check
+		// in the request path is unaffected: a Codex client whose metadata cannot
+		// be forwarded still fails there.
+		return nil
+	}
 	strategy := settings.HeaderProfileStrategy
 	if strategy == nil || !strategy.Enabled {
 		return nil
@@ -2014,6 +2071,13 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return false
 	}
 	if isPermanentUpstreamUnavailableError(openaiErr) {
+		return false
+	}
+	// A deterministic model-not-found is the same answer from every channel, so
+	// retrying only burns the budget and then lets the terminal classification
+	// overwrite the original 404 with a get_channel_failed. Stop here and let the
+	// caller surface the upstream's own error.
+	if isDeterministicModelNotFoundError(openaiErr) {
 		return false
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) &&
@@ -2662,6 +2726,7 @@ func retryResponsesCompactWithBody(c *gin.Context, info *relaycommon.RelayInfo, 
 		return types.NewErrorWithStatusCode(wrappedErr, types.ErrorCodeReadRequestBodyFailed, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
 	}
 	c.Request.Body = io.NopCloser(bodyStorage)
+	beginResponsesStreamRelayAttempt(c, info)
 	err := relayHandler(c, info)
 	if err == nil {
 		return nil
@@ -3468,7 +3533,7 @@ func RelayMidjourney(c *gin.Context) {
 func RelayNotImplemented(c *gin.Context) {
 	err := types.OpenAIError{
 		Message: "API not implemented",
-		Type:    "new_api_error",
+		Type:    types.StandardizeErrorType(types.OpenAIError{Code: "api_not_implemented"}, http.StatusNotImplemented).Type,
 		Param:   "",
 		Code:    "api_not_implemented",
 	}
