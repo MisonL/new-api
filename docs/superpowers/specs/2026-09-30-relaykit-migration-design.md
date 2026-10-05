@@ -554,16 +554,23 @@ relaykit module 这一条**包含边界门禁**：`relaykit/relayconvert/boundar
 
 **阶段 4 专项**：构造含 thinking block 的 Claude 多轮工具调用请求，验证 DeepSeek 不再 400；验证 grok 的 reasoning 可见（当前被丢弃）。
 
-**本地 golden 基线（阶段 4 前后都要跑，见 12.16）**：
+**本地 golden 基线（见 12.16；阶段 4 与阶段 6 的命令不同）**：
 
 ```bash
-# 阶段 4 之前：钉住本地实现的行为
+# 阶段 4 之前：钉住本地实现的行为（测试文件在 service/，调用本地函数）
 go test ./service -run TestGolden -count=1
-# 阶段 4 之后：同一批快照改指 relaykit，差异必须对应处置清单第 6 项产出的 9.1/9.2 决定
+
+# 阶段 4 之内/之后：测试文件**仍留在 service/**，只把 6 个调用点改指 relayconvert 包级入口
+# （12.16.2 决定 1；快照不改）。因此命令**不变**——仍是上面那条。
+# 差异必须对应处置清单第 6 项为 9.1/9.2 产出的决定，否则视为回归。
+
+# 阶段 6：测试与快照并入 relaykit/relayconvert/ 之后才换到这条
 cd relaykit && GOWORK=off go test ./relayconvert -run TestGolden -count=1
 ```
 
-`-run TestGolden` 是**前缀匹配**，可命中上游既有的三个矩阵测试（`TestGoldenRequestConversionMatrix`、`TestGoldenResponseConversionMatrix`、`TestGoldenStreamConversionMatrix`，`golden_test.go:290/319/337`）与阶段 6 并入的 DeepSeek 用例。
+**注意两条命令的分界**：`cd relaykit` 那条**只在阶段 6 之后有效**。阶段 4 只改调用点、不搬文件，所以在阶段 4 用 `cd relaykit` 会**找不到测试**（文件还在 `service/`）。§12.16.2 决定 1 与阶段 6 行的分工即此。
+
+`-run TestGolden` 是**前缀匹配**，在阶段 4 命中本地三个测试（`TestGoldenRequestConversion`/`TestGoldenResponseConversion`/`TestGoldenStreamConversion`）；在阶段 6 并入后命中上游三个矩阵测试（`TestGoldenRequestConversionMatrix`/`TestGoldenResponseConversionMatrix`/`TestGoldenStreamConversionMatrix`，`golden_test.go:290/319/337`）与并入的 DeepSeek 用例。
 
 **`-update` 只用于重录基线，不得用于吸收阶段 4 的差异**——那会把「行为回归」直接写成新的正确值，正是 12.16 批评上游 `-update` 机制的原话。
 
@@ -1445,7 +1452,9 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 
 **待阶段 6 实测的边界**：合并后上游 `TestMain`（`:29`）会接管 `flag.Parse()`，本地文件的 `-update` 行为随之改变（同一 flag，语义不变）。
 
-**快照文件名冲突（实测，非推测）**：本地 8 个快照与上游 24 个快照的**交集是两个**——`stream/openai_to_claude.golden.json` 与 `stream/openai_to_gemini.golden.json`，且**两者内容都不同**（上游 3489 / 4050 字节，本地 1536 / 4243 字节）。这两个名字**必须改名**（例如加 `_local` 后缀）才能并入，否则合并即**静默覆盖上游快照**——而上游那两个快照正是 `TestGoldenStreamConversionMatrix` 的基线。两条 `*_deepseek` 快照（`response/openai_to_claude_deepseek`、`stream/openai_to_claude_deepseek`）**不与上游重名**，是纯新增。**注意方向**：冲突源是**不带后缀**的两条，不是带 `_deepseek` 的两条——上一版本此处写反了。此外，合并时还须确认本地 fixture 的模型名不与上游 `fixtureStreamChunks()` 的 `stream-model` 冲突（本地用 `gpt-test`/`deepseek-v4`，不冲突）。
+**快照文件名冲突（实测，非推测）**：本地 8 个快照与上游 24 个快照的**交集是两个**——`stream/openai_to_claude.golden.json` 与 `stream/openai_to_gemini.golden.json`，且**两者内容都不同**（上游 3489 / 4050 字节，本地 1536 / 4243 字节）。这两个名字**必须改名**（例如加 `_local` 后缀）才能并入，否则合并即**静默覆盖上游快照**——而上游那两个快照正是 `TestGoldenStreamConversionMatrix` 的基线。两条 `*_deepseek` 快照（`response/openai_to_claude_deepseek`、`stream/openai_to_claude_deepseek`）**不与上游重名**，是纯新增。**注意方向**：冲突源是**不带后缀**的两条，不是带 `_deepseek` 的两条——上一版本此处写反了。
+
+**改名之外还有一层 fixture 混淆**：上游 `goldenInfo()` 用 `UpstreamModelName: "upstream-model"`、流式状态用 `Model: "stream-model"`，而上游快照的 payload 与本地同名快照**高度相似**：`response/claude_to_openai` 两侧 `model` 都是 `claude-test`；`stream/openai_to_claude` 上游首事件是 `message_start`（含 `"model": "gpt-test"`），**本地那条没有 `message_start`**（首事件直接是 `content_block_start`）。即两套 fixture 在同名快照上产出**结构相似但内容不同**的 JSON，且**文件名与部分字段值不足以区分两者**。合并时若只按文件名判断「已有基线，跳过」，会**拿上游基线去比本地输出**，得到的是结构性假失败（事件序列起点都不同）。**改名是前提，且不能靠字段值判断两个快照是否同源。**
 
 **待阶段 4 实测的边界**（不得写成既成事实）：
 

@@ -634,6 +634,8 @@ if from == to || to == types.RelayFormatGemini ||
 - **接手任何「搬到另一个模块/包」的方案前，先 grep 目标包是否已有同名测试文件与同名 helper**。上游往往已经把同类测试写好了——本轮的发现不是「要新建测试」，而是「上游已有一份，且它刻意没测我们要保的那条路径」。
 - **判据、清单、决定之间要查是否存在循环引用**：若 A 判据要求「对应 B 清单」，而 B 清单是 A 所在阶段的产出，则 A 无法在阶段入口判定。**写任何判据后，立刻问「它引用的东西在阶段开始时存在吗」。**
 - **比较两组文件名的交集时，把交集和差集都算出来，并核内容是否相同**——「文件名冲突」与「内容冲突」是两件事；本轮两次都差点只凭印象判断方向（先写反、后靠 `comm` + `diff` 才定准）。
+- **命令块要标注它属于哪个阶段**：§9.3 我一度把「`cd relaykit && ... -run TestGolden`」写成「阶段 4 之后」的命令——但按 12.16.2，阶段 4 只改调用点、**测试文件仍在 `service/`**，搬进 relaykit 是阶段 6 的事。阶段 4 用 `cd relaykit` 会**找不到测试**。**凡写命令，先问「这条命令在它标注的阶段能不能跑起来」**（文件在不在、包存不存在）。
+- **同名对象的字段值相近时会互相串味**：本轮我把上游 `response/claude_to_openai` 的 `model` 说成 `gpt-test`（实为 `claude-test`，`gpt-test` 是 stream 那条的），又把「两侧 model 相同」写成通用结论（本地 stream 快照根本没有 `model` 字段——它没有 `message_start` 事件）。**核对同名对象时逐个取值，不要用一个对象的值概括另一个；写「两侧相同」前先把两侧都打印出来。**
 
 ## 边界与未验证项
 
@@ -676,4 +678,4 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第十八轮） | 关闭未决项 25：建成 `service/convert_golden_test.go` + 8 个快照的本地基线（首次实际运行 `go test`）。**建基线时发现第一版 fixture 全用非 DeepSeek 模型名，导致 thinking 门控整条路径未被覆盖**——补 DeepSeek 侧两个快照，把门控两侧都钉住。实测基线与 `HEAD` 等价（工作区他人未提交改动对快照为 no-op）。反向验证三处扰动均失败。未决项 2→1（第 24 项 `openaicompat` tool 循环重构仍开放，范围外） |
 | （本轮·第十九轮） | 发现并修补**第十八轮自己引入的缺口**——基线的生命周期无归属（其 6 个被调函数定义在阶段 6 要删的 `service/convert.go`）。修正过程又推翻自己三次：`internal/` 包宿主不可 import、请求入口无 `ctx`、阶段 6「整体移入」会因同包同名符号而编译失败。四项修正落入阶段 4 判据 / 处置清单 12 / 阶段 6 / §9.3；新增 §12.16.2、§12.16.3。**独立印证上游 24 快照刻意排除 `openai_to_claude`（`golden_test.go:323-325` 的 `continue`），正是本地 thinking 门控所在路径** |
 
-文档当前 1500 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1509 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
