@@ -282,10 +282,52 @@ type AdminBindSubscriptionRequest struct {
 	PlanId int `json:"plan_id"`
 }
 
+// Subscription admin endpoints move real entitlements: binding a plan can raise
+// the target's group via plan.UpgradeGroup, and the invalidate/delete pair can
+// cancel anyone's plan. They must apply the same guard UpdateUser and
+// AdminClearUserBinding already use, so a plain admin cannot grant or revoke a
+// peer or root user's subscription. Root keeps its bypass.
+//
+// The invalidate and delete routes address a subscription rather than a user,
+// so the owner is resolved from the subscription row first.
+func adminCanActOnSubscriptionOwner(c *gin.Context, targetUserId int) bool {
+	if targetUserId <= 0 {
+		common.ApiErrorMsg(c, "无效的用户ID")
+		return false
+	}
+	targetUser, err := model.GetUserById(targetUserId, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return false
+	}
+	myRole := c.GetInt("role")
+	if myRole <= targetUser.Role && myRole != common.RoleRootUser {
+		common.ApiErrorMsg(c, "无权操作同级或更高级用户的订阅")
+		return false
+	}
+	return true
+}
+
+func adminCanActOnUserSubscription(c *gin.Context, subId int) bool {
+	if subId <= 0 {
+		common.ApiErrorMsg(c, "无效的订阅ID")
+		return false
+	}
+	var sub model.UserSubscription
+	if err := model.DB.Where("id = ?", subId).First(&sub).Error; err != nil {
+		common.ApiError(c, err)
+		return false
+	}
+	return adminCanActOnSubscriptionOwner(c, sub.UserId)
+}
+
 func AdminBindSubscription(c *gin.Context) {
 	var req AdminBindSubscriptionRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.UserId <= 0 || req.PlanId <= 0 {
 		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	if !adminCanActOnSubscriptionOwner(c, req.UserId) {
 		return
 	}
 	msg, err := model.AdminBindSubscription(req.UserId, req.PlanId, "")
@@ -306,6 +348,9 @@ func AdminListUserSubscriptions(c *gin.Context) {
 	userId, _ := strconv.Atoi(c.Param("id"))
 	if userId <= 0 {
 		common.ApiErrorMsg(c, "无效的用户ID")
+		return
+	}
+	if !adminCanActOnSubscriptionOwner(c, userId) {
 		return
 	}
 	subs, err := model.GetAllUserSubscriptions(userId)
@@ -332,6 +377,9 @@ func AdminCreateUserSubscription(c *gin.Context) {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
+	if !adminCanActOnSubscriptionOwner(c, userId) {
+		return
+	}
 	msg, err := model.AdminBindSubscription(userId, req.PlanId, "")
 	if err != nil {
 		common.ApiError(c, err)
@@ -351,6 +399,9 @@ func AdminInvalidateUserSubscription(c *gin.Context) {
 		common.ApiErrorMsg(c, "无效的订阅ID")
 		return
 	}
+	if !adminCanActOnUserSubscription(c, subId) {
+		return
+	}
 	msg, err := model.AdminInvalidateUserSubscription(subId)
 	if err != nil {
 		common.ApiError(c, err)
@@ -368,6 +419,9 @@ func AdminDeleteUserSubscription(c *gin.Context) {
 	subId, _ := strconv.Atoi(c.Param("id"))
 	if subId <= 0 {
 		common.ApiErrorMsg(c, "无效的订阅ID")
+		return
+	}
+	if !adminCanActOnUserSubscription(c, subId) {
 		return
 	}
 	msg, err := model.AdminDeleteUserSubscription(subId)
