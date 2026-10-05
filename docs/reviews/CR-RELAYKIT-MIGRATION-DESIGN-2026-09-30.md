@@ -637,6 +637,14 @@ if from == to || to == types.RelayFormatGemini ||
 - **命令块要标注它属于哪个阶段**：§9.3 我一度把「`cd relaykit && ... -run TestGolden`」写成「阶段 4 之后」的命令——但按 12.16.2，阶段 4 只改调用点、**测试文件仍在 `service/`**，搬进 relaykit 是阶段 6 的事。阶段 4 用 `cd relaykit` 会**找不到测试**。**凡写命令，先问「这条命令在它标注的阶段能不能跑起来」**（文件在不在、包存不存在）。
 - **同名对象的字段值相近时会互相串味**：本轮我把上游 `response/claude_to_openai` 的 `model` 说成 `gpt-test`（实为 `claude-test`，`gpt-test` 是 stream 那条的），又把「两侧 model 相同」写成通用结论（本地 stream 快照根本没有 `model` 字段——它没有 `message_start` 事件）。**核对同名对象时逐个取值，不要用一个对象的值概括另一个；写「两侧相同」前先把两侧都打印出来。**
 
+**第二十轮（2026-10-05）——判据的数字看不见新引入的文件**：第十八轮新建的 `service/convert_golden_test.go` import 宿主 `dto`/`constant`/`types`，而阶段 2 要把 `dto` 迁进 relaykit。实测**它不在「327 个 import 点」里**——`dbfbc096f` 的 327 = 205 非测试 + 122 测试，而该文件在基线上**根本不存在**（`git cat-file -e dbfbc096f:service/convert_golden_test.go` 报 does not exist），工作区已漂到 341。所以阶段 2 一迁 `dto`，这个测试**编译失败**，而阶段 2 判据「327 个 import 点全部验证」**恰好以那个旧数字为界，覆盖不到它**——判据会绿而测试是红的。
+
+**教训**：
+
+- **判据里的数字是「快照」，新引入的产物不在其中**。凡「N 个 X 全部验证」型判据，必须问「这 N 是哪个时点数的？此后我又新增了几个 X？」。本例中的 `N` 是基线 `dbfbc096f` 的，而基线测试是基线**之后**才有的。**这与第十一轮（拷贝进来的上游测试变成硬门禁）、第十九轮（基线测试的生命周期无归属）是同一个结构：某样东西的存在/变化没有被任何判据覆盖。**
+- **判据的覆盖范围要用「集合」而非「数字」表述**。把「327 个 import 点全部验证」写成「**所有** import 宿主 `dto` 的文件都改完（含测试文件，且以开工时的清单为准）」就不会漏——**数字会过期，集合的界定方式不会**。
+- **顺带核实了一件此前只是断言的事**：12.0.8 判 `Delta`/`Function`/`GenerationConfig` 三处 tag 差异为「空操作」（struct 值使 `omitempty` 失效），本轮打开字段确认——`dto/openai_response.go:86` 的 `Delta` 确为 `ChatCompletionsStreamResponseChoiceDelta` **值类型**、`dto/openai_request.go:240` 的 `Function` 确为 `FunctionRequest` **值类型**。故阶段 2 迁 `dto` 后**基线快照不应因这 3 处 tag 而漂移**；若漂移则另有原因，须查字段对齐或实现改动，而不是归因到 tag。**「空操作」这个结论第一次被独立复现。**
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**。第十八轮起已实际运行 `go test ./service -run TestGolden` 与全包 `go test ./service`（见该轮），但「编译失败」类结论仍未逐条 `go build` 复现
@@ -678,4 +686,4 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第十八轮） | 关闭未决项 25：建成 `service/convert_golden_test.go` + 8 个快照的本地基线（首次实际运行 `go test`）。**建基线时发现第一版 fixture 全用非 DeepSeek 模型名，导致 thinking 门控整条路径未被覆盖**——补 DeepSeek 侧两个快照，把门控两侧都钉住。实测基线与 `HEAD` 等价（工作区他人未提交改动对快照为 no-op）。反向验证三处扰动均失败。未决项 2→1（第 24 项 `openaicompat` tool 循环重构仍开放，范围外） |
 | （本轮·第十九轮） | 发现并修补**第十八轮自己引入的缺口**——基线的生命周期无归属（其 6 个被调函数定义在阶段 6 要删的 `service/convert.go`）。修正过程又推翻自己三次：`internal/` 包宿主不可 import、请求入口无 `ctx`、阶段 6「整体移入」会因同包同名符号而编译失败。四项修正落入阶段 4 判据 / 处置清单 12 / 阶段 6 / §9.3；新增 §12.16.2、§12.16.3。**独立印证上游 24 快照刻意排除 `openai_to_claude`（`golden_test.go:323-325` 的 `continue`），正是本地 thinking 门控所在路径** |
 
-文档当前 1509 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1523 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。

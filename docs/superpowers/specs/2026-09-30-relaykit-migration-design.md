@@ -381,7 +381,7 @@ const (
 |---|---|---|
 | 0 | `git fetch --unshallow upstream`；建立 CI 门禁（两个 module 分别 `go test`，`GOWORK=off`）；~~完成本地独有能力盘点~~（已完成，见第 4 节）；**把 `relay/common/responses_tool_names.go` 及 2 个测试文件纳入版本控制**（第 10 节第 19 项） | CI 能跑通现有测试；盘点清单已产出；未跟踪文件已提交 |
 | 1 | **取得 relaykit 源码**（见下「阶段 1 的前置」）；引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译；`relaykit/` 的版本已锚定并记录 |
-| 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写** + **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ **同名字段的 JSON tag / Go 类型差异逐项对齐**（12.0.8：15 处全部采用 relaykit，改 8 处 `IncludeThoughts` 赋值点 + `Text`/`Arguments` 读写点 + 4 处 import）+ 全部宿主独有方法（全包 394 vs 273 函数，含测试口径）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**327 个 import 点全部验证**；**15 处 tag/类型差异逐项有决定（12.0.8）** |
+| 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写**（**基线口径，含测试**：基线 `dbfbc096f` 实测 205 非测试 + 122 测试 = 327；工作区已漂到 341）+ **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ **同名字段的 JSON tag / Go 类型差异逐项对齐**（12.0.8：15 处全部采用 relaykit，改 8 处 `IncludeThoughts` 赋值点 + `Text`/`Arguments` 读写点 + 4 处 import）+ 全部宿主独有方法（全包 394 vs 273 函数，含测试口径）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。**另须改 `service/convert_golden_test.go` 的 import**——它是第 18 轮新增、**不在上述 327 的基线口径内**，却 import 宿主 `dto`/`constant`/`types`，`dto` 一迁即编译失败（见下「阶段 2 的前置：基线测试的 import 不在 327 内」）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**327 个 import 点全部验证**；**15 处 tag/类型差异逐项有决定（12.0.8）**；**`convert_golden_test.go` 的 import 已随之迁移且 `TestGolden` 仍绿** |
 | 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 别名，同步改写 `service/convert.go` 的 22 处字段引用；`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过 |
 | 4 | 协议映射切换到 relaykit（**单点可逆**，见 §8.1）；**接线 `relayconvert.SetMediaResolver`（指向 `service.GetBase64Data`）与 `convmeta.Options` 钩子（指向 `model_setting`）**，随后通道级转换器改调 relaykit（12.15.4）；打补丁 1；**按下方「阶段 4 的处置清单」逐项落地**；**`*WithError` 系列直接删除**（12.3，不保留包装层）；**把 `convert_golden_test.go` 的调用点改指 relaykit**（处置清单 12） | **`TestGolden` 改指 relaykit 后 8 个快照逐字节一致，或每一处差异都能对应到处置清单第 6 项为 9.1/9.2 逐条产出的「保留/放弃/改写」决定**（12.16.2；该决定清单是**阶段 4 的产出**，不是既有物——判据引用的是它，不是预先存在的清单）；grok reasoning 可见；处置清单每项已确认；**12.15.4 的两条边界（schema 行为对齐、`text/*` MIME 分支）已实测** |
 | 5 | 宿主管道接入 relaykit 分派；**响应方向暴露策略在 relaykit 内门控**（12.4，`convmeta.Options` 钩子，必须在索引分配之前——后置过滤不可行。落点 `oai_chat/to_claude_messages_resp.go` 已接收 `info`，无需透传改造）；**`matchAnyRegex` 空模式语义显式文档化**（12.8，采用本地语义「空 patterns = 匹配全部」） | 全量测试通过；空 patterns 语义已写入配置文档 |
@@ -464,7 +464,21 @@ const (
 
 对照上游做法：上游 `relaykit/dto` 的 35 个文件对宿主与 gin 零 import，靠的正是把这些符号在迁入前全部归位（或改写实现），而非加豁免。因此**阶段 2 必须新增一条动作：清空 `dto` 的全部 `common` / `constant` / `logger` / gin import（前者换 `kitutil`，`constant.EndpointType` 换 `types.EndpointType`，其余 3 个 `kitutil` 未提供的符号另行归位），并把 `boundary_test.go` 通过作为阶段 2 的完成判据之一**——它比「两个 module 均可编译」更严，因为 import 不合规时编译仍可能通过，只有该测试会拦下。
 
-阶段 0 的 unshallow：当前 `.git/shallow` 截断于 `9724ef1b2`，导致 `git merge-base HEAD upstream/main` 返回空、三点 diff 不可用。但**真实共同祖先存在**——`9724ef1b2` 的提交对象记录 `parent aa7d0d39a4`，而 `merge-base(HEAD, aa7d0d39a4)` = `dac55f0f`。空结果纯属浅克隆遮蔽。两点 diff（`git diff upstream/main HEAD`）当前可用，但它比较两棵树终态，无法回答「本地相对共同祖先改了什么」，所以 unshallow 仍是必要前置。
+**阶段 2 的前置：基线测试的 import 不在 327 内**
+
+第 18 轮新建的 `service/convert_golden_test.go` import 宿主 `dto`、`constant`、`types`。**它不在「327 个 import 点」的基线口径内**——实测 `dbfbc096f` 的 327 = **205 个非测试文件 + 122 个测试文件**，而该文件在基线上**不存在**（`git cat-file -e dbfbc096f:service/convert_golden_test.go` 报 does not exist）。工作区实测已漂到 **341**（含测试）。
+
+因此阶段 2 迁走 `dto` 后，这个测试会**编译失败**，而阶段 2 的判据「327 个 import 点全部验证」**恰好以那个旧数字为界，覆盖不到它**——判据会绿，而测试是红的。这与第十一轮 `boundary_test.go`、第十九轮基线生命周期属同一类：**判据的覆盖范围必须包含新引入的产物**。
+
+**阶段 2 须一并处理**：
+
+1. 把 `convert_golden_test.go` 的 3 个 import 改到 `relaykit/dto`、`relaykit/types`（实际用到 4 个：`ChannelTypeAnthropic`、`ChannelTypeOpenAI`、`ChannelTypeGemini`、`ChannelTypeDeepSeek`；随 12.0.4 的归属一并处理）。
+2. **8 个快照内容应保持不变**：本轮已核 12.0.8 判为「空操作」的那 3 处 tag 差异（`Delta`、`Function`、`GenerationConfig`）在本仓库对应字段确为 **struct 值**——`dto/openai_response.go:86` 的 `Delta` 是 `ChatCompletionsStreamResponseChoiceDelta`（值类型，非指针）、`dto/openai_request.go:240` 的 `Function` 是 `FunctionRequest` 值类型。故 `omitempty` 对其无效，改 tag 不改变输出。**若阶段 2 后快照发生漂移，那不是 tag 差异造成的，须查字段差异对齐或实现改动。**
+3. 阶段 2 判据追加「`TestGolden` 仍绿」。
+
+**口径提醒**：`327` 与工作区的 `341` 差 14 个文件——其中含本轮新增的 `service/convert_golden_test.go`，也有其他会话的在途文件（如 `service/convert_effort_test.go`），**不全是本轮新增**。**凡引用「327」处都是基线口径（含测试）**，工作区数字须另行标注，不要混用。
+
+**阶段 0 的 unshallow：当前 `.git/shallow` 截断于 `9724ef1b2`，导致 `git merge-base HEAD upstream/main` 返回空、三点 diff 不可用。但**真实共同祖先存在**——`9724ef1b2` 的提交对象记录 `parent aa7d0d39a4`，而 `merge-base(HEAD, aa7d0d39a4)` = `dac55f0f`。空结果纯属浅克隆遮蔽。两点 diff（`git diff upstream/main HEAD`）当前可用，但它比较两棵树终态，无法回答「本地相对共同祖先改了什么」，所以 unshallow 仍是必要前置。
 
 unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `51074ac37`（2026-07-10）。
 
