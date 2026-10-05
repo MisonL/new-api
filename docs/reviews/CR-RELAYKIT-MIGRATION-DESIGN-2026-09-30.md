@@ -654,6 +654,17 @@ if from == to || to == types.RelayFormatGemini ||
 
 - **「逐字节/逐字段一致」型判据，先确认两侧的可比性是同构的**——序列化顺序、零值与缺失的表示、浮点格式、时间格式，任何一项不同都会让判据在语义等价时失败。**写「应逐字节相同」之前，先问「两侧的序列化规则是否相同」。**
 - **一次走判据依赖链没找到矛盾，本身就是有价值的结论**（说明六个阶段的判据在顺序上自洽），但它**不等于判据已完备**——本轮的收获全在「判据的**前提**」而非「判据的矛盾」上。**「没矛盾」与「没缺口」是两回事**，与第八轮「零发现不等于完备」同源。
+- **判据要能自动执行，才等于判据**——阶段 0 的 CI 门禁若不含 `TestGolden`，阶段 2/4/6 三个判据就只在本机手工跑时有效，PR 上无人拦截。**每写一个判据，顺手问「它在 CI 里吗」。**
+
+**第二十二轮（2026-10-05）——照抄上游的 CI 门禁有三处不够**：阶段 0 要「建立 CI 门禁」，§9.3 说照抄上游 `ci.yml:43-58`（两个 module 各 `go vet`+`go build`，再 `make test`）。实测三处照抄即错：
+
+1. **挂载点没说**。上游 `ci.yml` 触发于 `pull_request`；本仓库唯一在 PR 上触发的质量类 workflow 是 `pr-check.yml`，它用 **`pull_request_target`**——在 base 分支上下文运行，**无法检出 PR 代码来测试**。规格此前只说「建立 CI 门禁」，没写挂哪个 workflow、用哪个事件。
+2. **`make test` 目标本地不存在**。本地 `makefile` 实测 9 个目标（`all`/`build-frontend`/`build-frontend-classic`/`build-all-frontends`/`start-backend`/`dev-api`/`dev-web`/`dev-web-classic`/`dev`），**无 `test`**。（顺带确认工作区的 `Makefile` 是 macOS 大小写不敏感文件系统的同名别名，与 `makefile` 内容完全相同、不被 git 跟踪。）
+3. **上游 `make test` 不含 `-count=1` 与 `-shuffle`**。实测命令是 `GOWORK=off go test $$root_packages` 与 `cd relaykit && GOWORK=off go test ./...`，两个 flag 都没有。而本仓库有已知的跨运行状态泄漏（命名 in-memory DB 未关闭、包级 limiter 单例、`sync.Once` 捕获 Redis client）——**`-count=1` 绿会隐藏失败**。照抄上游等于把这个盲区带进 CI。
+
+**更要紧的是第 4 点，本轮才意识到**：`TestGolden` 是阶段 2/4/6 三个判据的**共同依赖**，而**规格此前从未把它写进任何 CI 表述**（实测全文 `TestGolden` 无一处出现在 CI/门禁语境）。若它不在 CI 里，那三个判据只在本机手工执行时才成立。已写入 §9.3。
+
+**顺带修正两处自己的数字错**：本地 `makefile` 目标数先写 8（实为 9）；`pr-check.yml` 的构成先写成「只跑 anti-slop」（漏了它其实有且仅有 1 个 `uses:` 步骤、**0 个 `run:`**，故「只跑 action 不跑命令」的说法才准确）。
 
 ## 边界与未验证项
 
@@ -695,5 +706,8 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第十七轮） | 关闭未决项 30：15 处 tag/类型差异**全部采用 relaykit**。**推翻第十四轮对 tag 差异的判断**——5 处中 3 处因字段是 struct 值而 `omitempty` 无效，是空操作而非「静默改变输出」；另 2 处风险逐点排除。类型 6 处含 1 处纯增益（`IntValue.MarshalJSON` 与 int 相同）、3 处改读写点、2 处改 import。未决项 3→2 |
 | （本轮·第十八轮） | 关闭未决项 25：建成 `service/convert_golden_test.go` + 8 个快照的本地基线（首次实际运行 `go test`）。**建基线时发现第一版 fixture 全用非 DeepSeek 模型名，导致 thinking 门控整条路径未被覆盖**——补 DeepSeek 侧两个快照，把门控两侧都钉住。实测基线与 `HEAD` 等价（工作区他人未提交改动对快照为 no-op）。反向验证三处扰动均失败。未决项 2→1（第 24 项 `openaicompat` tool 循环重构仍开放，范围外） |
 | （本轮·第十九轮） | 发现并修补**第十八轮自己引入的缺口**——基线的生命周期无归属（其 6 个被调函数定义在阶段 6 要删的 `service/convert.go`）。修正过程又推翻自己三次：`internal/` 包宿主不可 import、请求入口无 `ctx`、阶段 6「整体移入」会因同包同名符号而编译失败。四项修正落入阶段 4 判据 / 处置清单 12 / 阶段 6 / §9.3；新增 §12.16.2、§12.16.3。**独立印证上游 24 快照刻意排除 `openai_to_claude`（`golden_test.go:323-325` 的 `continue`），正是本地 thinking 门控所在路径** |
+| （本轮·第二十轮） | 发现阶段 2 判据「327 个 import 点全部验证」**覆盖不到第 18 轮新建的基线测试**——327 是基线 `dbfbc096f` 口径（205 非测试 + 122 测试），而 `convert_golden_test.go` 在基线上不存在；阶段 2 迁 `dto` 后它会编译失败，判据却仍绿。补阶段 2 判据与前置节。**顺带独立复现了 12.0.8 的「3 处 tag 差异是空操作」**（`Delta`/`Function` 确为 struct 值） |
+| （本轮·第二十一轮） | 走六个阶段判据的依赖链：**无矛盾**，但发现阶段 4「8 个快照逐字节一致」有未写前提——`json.MarshalIndent` 按声明顺序输出，两侧字段顺序不同则语义等价也失败。机械核验 4 个输出类型共有字段全部同序；并确认基线 fixture 与 12.0.8 的 15 处差异无重叠 |
+| （本轮·第二十二轮） | 核阶段 0 的 CI 门禁：照抄上游 `ci.yml` **三处不够**（挂载点未定、本地无 `make test` 目标、上游 `make test` 不含 `-count=1`/`-shuffle` 会继承已知跨运行泄漏盲区）；**且 `TestGolden` 从未进入任何 CI 表述**，而它是阶段 2/4/6 判据的共同依赖。已写入 §9.3 |
 
-文档当前 1527 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1535 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。

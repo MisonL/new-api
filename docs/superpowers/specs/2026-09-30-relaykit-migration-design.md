@@ -601,7 +601,15 @@ scripts/relaykit-dto-compat.sh --strict
 
 不得以局部测试通过表述为全链路已验证。
 
-**CI 门禁（阶段 0 建立）**：上游的 `.github/workflows/ci.yml` 已给出可照抄的形态——对两个 module 各跑一遍 `go vet` + `go build`，再 `make test`（`:43-58`）。本仓库当前 **7 个 workflow 中没有一个跑 `go test`**（`release.yml` 只做 `go build` 出包，其余 6 个无 Go 步骤），阶段 0 需补齐。
+**CI 门禁（阶段 0 建立）**：上游的 `.github/workflows/ci.yml` 已给出可照抄的形态——对两个 module 各跑一遍 `go vet` + `go build`，再 `make test`（`:43-58`）。本仓库当前 **7 个 workflow 中没有一个跑 `go test`**（实测：`pr-check.yml` 只跑 `peakoss/anti-slop`，`tauri-build.yml` 只在 PR 上构建桌面端，`release.yml` 是 `workflow_dispatch` + `go build` 出包，其余 3 个 docker/tauri 的 `push` 字段是 docker 的 `push: true` 而非事件触发器），阶段 0 需补齐。
+
+**照抄上游有三处不够，须在本仓库补齐**（实测，非推测）：
+
+1. **挂载点**：上游 `ci.yml` 触发于 `pull_request`；本仓库唯一在 PR 上触发且与代码质量相关的是 `pr-check.yml`（`pull_request_target`）。阶段 0 的门禁应挂到 `pull_request`（**不是** `pull_request_target`——后者在 base 分支上下文运行，无法检出 PR 的代码来测试）。**规格此前只说「建立 CI 门禁」，没写挂到哪个 workflow、用哪个事件**，这是阶段 0 开工前必须定的。
+2. **`make test` 目标本仓库不存在**：本地 `makefile` 有 `all`/`build-frontend`/`build-frontend-classic`/`build-all-frontends`/`start-backend`/`dev-api`/`dev-web`/`dev-web-classic`/`dev` 共 9 个目标，**没有 `test`**。上游的 `make test`（`makefile:43-49`，两个 module 分别 `GOWORK=off go test`）须照抄进来。（注：工作区的 `Makefile` 是 macOS 大小写不敏感文件系统的同名别名，50 行与 `makefile` 相同，不被 git 跟踪。）
+3. **上游 `make test` 不含 `-count=1` 与 `-shuffle`**：实测其命令为 `GOWORK=off go test $$root_packages` 与 `cd relaykit && GOWORK=off go test ./...`，**两个 flag 都没有**。而本仓库有已知的跨运行状态泄漏（命名 in-memory DB 未关闭、包级 limiter 单例、`sync.Once` 缓存捕获 Redis client——`-count=1` 绿会隐藏失败）。**故照抄上游会让 CI 继承这个盲区**；本仓库的 `test` 目标须显式加 `-count=1`，并在至少一条路径上加 `-shuffle=on`。
+
+**`TestGolden` 须进入 CI 门禁**：它是阶段 2/4/6 三个判据的共同依赖（阶段 2「`TestGolden` 仍绿」、阶段 4「8 个快照逐字节一致」、阶段 6「golden 基线已在 `relaykit/` 下运行」）。**规格此前从未把 `TestGolden` 写进任何 CI 表述**——若它不在 CI 里，上述三个判据就只在本机手工执行时才有效，PR 上无人拦截。阶段 0 的 `test` 目标须确保它被 `go test ./service`（阶段 2 前）与 `cd relaykit && go test ./relayconvert`（阶段 6 后）覆盖到。
 
 ## 10. 未决项
 
