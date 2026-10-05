@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -185,4 +186,38 @@ func TestRealtimeBilling_TurnDebitAndSettleMustNotBothDebitWallet(t *testing.T) 
 
 	require.Equal(t, userQuota-realtimeTurnQuota, readUserQuota(t, 3),
 		"终态结算不得再次扣减已被逐 turn 扣过的同一份用量")
+}
+
+// TestRealtimeBilling_TrustedUserStillChargedOnce 钉住信任额度旁路分支。
+// trusted 时 Reserve 直接返回 nil（不预扣），收尾 Settle 必须按全额扣一次；
+// 若修复让 trusted 用户变成零扣款，本用例失败。
+func TestRealtimeBilling_TrustedUserStillChargedOnce(t *testing.T) {
+	setupRealtimeBillingProbe(t)
+
+	// common.GetTrustQuota() = 10 * QuotaPerUnit，是固定值，无 setter。
+	// 用户与令牌额度都必须高于它，shouldTrust 才为真。
+	trustQuota := common.GetTrustQuota()
+	userQuota := trustQuota * 2
+
+	seedUser(t, 4, userQuota)
+	seedToken(t, 4, 4, "realtime-probe-key-4", userQuota)
+
+	c, _ := newRealtimeProbeContext()
+	c.Set("token_quota", userQuota)
+
+	info := newRealtimeProbeInfo(4, 4, "realtime-probe-key-4")
+	info.PriceData.ModelRatio = 1
+	info.PriceData.GroupRatioInfo.GroupRatio = 1
+
+	require.Nil(t, PreConsumeBilling(c, 500, info))
+	require.Equal(t, userQuota, readUserQuota(t, 4),
+		"信任用户预扣 0，余额不应变化（必须真的走 trusted 分支）")
+
+	turn := realtimeTextTurn(1500)
+	require.NoError(t, PreWssConsumeQuota(c, info, turn))
+
+	PostWssConsumeQuota(c, info, realtimeDoubleChargeModel, turn, "")
+
+	require.Equal(t, userQuota-realtimeTurnQuota, readUserQuota(t, 4),
+		"信任用户必须被按实际用量扣费一次，不得零扣也不得双扣")
 }

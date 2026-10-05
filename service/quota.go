@@ -148,9 +148,17 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
 	}
 
-	err = PostConsumeQuota(relayInfo, quota, 0, false)
-	if err != nil {
-		return err
+	if relayInfo.Billing != nil {
+		// 逐 turn 的增量消耗并入计费会话：把已消耗额度累加进预扣值，收尾的
+		// PostWssConsumeQuota 按 delta = 实际用量 - 预扣 结算，只补差额。
+		// 若这里直接调 PostConsumeQuota 直扣，同一份用量会在终态结算时再扣一次。
+		if err = relayInfo.Billing.Reserve(relayInfo.Billing.GetPreConsumedQuota() + quota); err != nil {
+			return err
+		}
+	} else {
+		if err = PostConsumeQuota(relayInfo, quota, 0, false); err != nil {
+			return err
+		}
 	}
 	logger.LogInfo(ctx, "realtime streaming consume quota success, quota: "+fmt.Sprintf("%d", quota))
 	return nil
