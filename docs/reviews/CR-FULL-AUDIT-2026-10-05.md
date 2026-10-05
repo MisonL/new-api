@@ -189,3 +189,52 @@ Message:"SQL logic error: near \"=\": syntax error (1)"
 - 未重启、未重建、未写入正式服务（`new-api`，13000）与正式数据库。
 - 未回退、覆盖或整理其他并行会话的 504 项未提交改动。
 - 未推送。`dev` 领先 `origin/dev` 124 个提交。
+
+## 7. 后续修复轮次（2026-10-05 夜 - 10-06）
+
+以下每条都先写回归测试、确认「修复前失败」，再改生产代码。测试与实现同一次提交。
+
+| 提交 | 内容 | 回归测试 |
+| --- | --- | --- |
+| `ea4033114` | 前端错误提示：`web/default` 的 `handleServerError` 读 `.data.title` 改为 `.message`；`web/classic` 的 `showError` 补 `error.response` 空值守卫，并在 default 分支优先展示后端 message | `web/default/tests/handle-server-error.test.ts`、`web/classic/tests/showError.test.js` |
+| `2b70bae80` | `AdminResetPasskey` 补目标角色校验（原先任何管理员可删除 root 用户的 Passkey） | `controller/passkey_admin_test.go` |
+| `38fe02eba` | 凭证请求头不得透传：通配/正则透传补 `api-key`；`pass_headers` 新增凭证拒绝名单，两条路径共用 `relay/common.IsCredentialHeader` | `relay/channel/header_passthrough_credentials_test.go`、`relay/common/header_credentials_test.go` |
+| `5040f4d98` | 上游响应头镜像：`ShouldCopyUpstreamHeader` 拒绝 `Set-Cookie` 与 RFC 7230 hop-by-hop 集合 | `service/http_header_mirror_test.go` |
+| `aff83779d` | 订阅管理五个 admin 接口补目标角色校验；按订阅 ID 寻址的两个接口先解析归属用户 | `controller/subscription_admin_role_test.go` |
+| `a80f89ac7` | Claude 通道不再丢弃 `response_format`：映射到 `output_config.format`，并与 `effort` 合并而非互相覆盖 | `relay/channel/claude/claude_response_format_test.go` |
+
+### 7.1 被推翻的第 2 节条目
+
+- **「默认重试含 404/422」不成立，不改**。404 重试是**有意设计**且已有测试钉住：
+  `controller/relay_retry_test.go:3333` 起的三条用例分别要求
+  「model 404 不 fallback」「compact route 404 fallback」「generic compact 404 fallback」。
+  更根本的是 `shouldRetry` 在到达状态码规则前已有两道拦截：
+  `isDeterministicModelNotFoundError`（`controller/relay.go:672`）直接对确定性
+  model-not-found 返回 false，`shouldRetryUpstreamRequestTooLargeForResponsesCompact`
+  （`:2332`）对 compact 路由显式返回 true。改默认范围会破坏这两条已声明的行为。
+  第 2 节该条目属**未复现即转述**，此处更正。
+
+### 7.2 本轮实测踩到的测试环境陷阱（补充第 3 节）
+
+两处都让「拒绝类」用例**因为错误原因通过**（SQL 语法错误被当成权限拒绝），
+必须记下以免下一轮重蹈：
+
+- `model.KeyColumn()` 不只初始化 `commonKeyCol`，还会初始化 `commonGroupCol`。
+  `controller` 包测试若不调用它，`getUserGroupByIdTx`（`model/subscription.go:396`）
+  会生成 `SELECT  FROM users` 并报 `near "FROM": syntax error`。
+- 订阅套餐缓存是**进程级**的（`sync.Once` + 内存 hot cache，`model/subscription.go:47`）。
+  每个测试各有独立 sqlite 库，但缓存不随库重建，前一个测试写入的套餐会残留到下一个。
+  本轮的处理是：每个测试用互不相同的 `plan_id`，且请求体里的 `plan_id` 必须与种入的
+  一致——最初只改了种入值没改请求体，用例于是因「套餐不存在」而假通过。
+
+### 7.3 本轮未做
+
+- 未处理 `readonly-guard` 的尾斜杠/百分号编码绕过：该守卫与其测试文件
+  （`web/default/src/lib/readonly-guard.ts`、`web/classic/src/helpers/readonlyGuard.js`
+  及两侧 `tests/readonly-*`）在本轮开始时**均为其他会话的未跟踪文件**，
+  改动它们等于接手他人未提交的工作，按仓库规则不越界。
+- 未改 `controller/user.go`（`HardDeleteUserById` 缓存）、`model/main.go`（连接池默认值）、
+  `relay/channel/gemini/relay-gemini.go`（fallback tool-call ID 冲突）：
+  这三个文件在本轮开始时带有其他会话的未提交改动。
+- 未推送。
+
