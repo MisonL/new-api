@@ -423,7 +423,19 @@ const (
 - 规模：157 个文件（96 个非测试 `.go`）、35198 行，含自己的 `relaykit/go.mod` 与 `relaykit/go.sum`。
 - 上游接入方式照抄即可：根 `go.mod` 加 `require github.com/QuantumNous/new-api/relaykit v0.0.0` + `replace ... => ./relaykit`（`upstream/main:go.mod:176,179`）。
 
-**版本锚定（必须做，否则本文档全部行号失效）**：本文档所有 `relaykit/...` 行号均以 `upstream/main` = **`789c97019`**（2026-09-28）为准。拷贝后必须把该 commit 记入 `relaykit/VERSION` 或等价文件，并在后续需要跟进上游时**重新核对本文档的行号引用**——上游 relaykit 仍在演进（见「边界与未验证项」）。
+**版本锚定（必须做，否则本文档全部行号失效）**：本文档所有 `relaykit/...` 行号均以 `upstream/main` = **`789c97019`**（2026-09-28）为准。拷贝后必须把该 commit 记入 `relaykit/VERSION` 或等价文件。
+
+**行号引用的机械核对（已补工具，原先只有一句「须重新核对」）**：本文档共 **10 处唯一 `relaykit/<path>.go:<line>` 引用**（13 处出现、9 个文件）。原先只写「后续需要跟进上游时重新核对本文档的行号引用」，**没给任何可执行手段**——而上游 relaykit 仍在演进（见「边界与未验证项」），锚定一漂移，全部引用静默失效。现已固化为：
+
+```bash
+scripts/relaykit-citation-check.py            # 校验，漂移时退出码 1
+scripts/relaykit-citation-check.py --ref <ref>  # 换锚点复核
+python3 scripts/relaykit-citation-check.test.py # 10 个单测
+```
+
+它从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效（文件没了、行越界、指向空行），**不断言该行内容**——引用指向的符号变了仍需人工复核。当前实测：**10/10 全部可解析**（`ref=upstream/main`）。已做**反向验证**：把 `values.go:32` 改成 `:99999` → 退出码 1 且报 `out of range`；改成 `nonexistent.go:32` → 退出码 1 且报 `file not found`；还原后退出码 0。
+
+**实测补充**（阶段 1 执行时需知）：上游 relaykit **当前没有版本文件**（顶层仅 `README.md`、`go.mod`、`go.sum` 与 4 个目录），故新建 `relaykit/VERSION` 不与上游冲突；且 `relaykit/relayconvert/boundary_test.go` 只遍历 `kitDirs`（`relayconvert`/`dto`/`types`/`reasonmap`）下的 `.go` 文件，**新增 `relaykit/VERSION` 不会触发边界门禁**（已读 `boundary_test.go:53` 的过滤条件确认）。
 
 **依赖影响**：relaykit 的 `require` 会经 MVS 抬高根 module 的两个依赖版本——`github.com/samber/lo` `v1.52.0 → v1.53.0`（本地 58 个文件在用）、`github.com/tidwall/gjson` `v1.18.0 → v1.19.0`（本地 14 个文件在用）。`google/uuid`、`stretchr/testify`、`tidwall/sjson` 版本相同；`golang.org/x/text` 本地（v0.41.0）高于 relaykit 要求（v0.35.0），不受影响。阶段 1 完成后须跑全量测试确认这两个次版本升级无行为回归。
 
@@ -595,6 +607,13 @@ cd relaykit && GOWORK=off go test ./relayconvert -run TestGolden -count=1
 ```bash
 scripts/relaykit-dto-compat.sh --strict
 # 计数: fieldSet=33 tag=5 type=6 embed=0 sig=12（2026-10-04 基线）
+```
+
+**设计文档行号引用的完整性**（锚定漂移后重跑，见「阶段 1 的前置：relaykit 源码的取得与版本锚定」）：
+
+```bash
+scripts/relaykit-citation-check.py            # 10 处引用全部可解析时退出码 0
+python3 scripts/relaykit-citation-check.test.py  # 10 个单测
 ```
 
 **验证记录**：沉淀到 `docs/reviews/CR-*.md`，含命令、退出码、通过或失败摘要。

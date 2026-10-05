@@ -664,6 +664,12 @@ if from == to || to == types.RelayFormatGemini ||
 
 **更要紧的是第 4 点，本轮才意识到**：`TestGolden` 是阶段 2/4/6 三个判据的**共同依赖**，而**规格此前从未把它写进任何 CI 表述**（实测全文 `TestGolden` 无一处出现在 CI/门禁语境）。若它不在 CI 里，那三个判据只在本机手工执行时才成立。已写入 §9.3。
 
+**第二十三轮（2026-10-05）——「须重新核对」不是可执行指令，给它一个命令**：阶段 1 要求「把 commit 记入 `relaykit/VERSION`」，并说后续跟进上游时**「重新核对本文档的行号引用」**。全文实测 **10 处唯一 `relaykit/<path>.go:<line>` 引用**（13 处出现、9 个文件），当前锚点下 **10/10 全部可解析**——但**没有任何工具保证它继续准确**。这与第十五轮把四维比较工具化是同一条理由：**能写成代码的核查规则不要留在文档里等人手工执行**。
+
+新增 `scripts/relaykit-citation-check.py`（按仓库既有 `scripts/*.py` + `*.test.py` 模式，用 `importlib` 加载 + `unittest`）：从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效、**不断言该行内容**（引用指向的符号变了仍需人工复核）。**10 个单测**，含「引用不存在的文件」「行越界」「指向空行」「混合通过与失败各自报出」四类。**反向验证**：把 `values.go:32` 改成 `:99999` → 退出码 1 且报 `out of range`；改成 `nonexistent.go:32` → 退出码 1 且报 `file not found`；还原后退出码 0，文档 `git diff --numstat` 为空。
+
+顺带把阶段 1 的两个隐含前提**核实**（此前是推断）：上游 relaykit **当前没有版本文件**（顶层仅 `README.md`/`go.mod`/`go.sum` + 4 个目录），故新建 `relaykit/VERSION` **不与上游冲突**；`relaykit/relayconvert/boundary_test.go:53` 的过滤条件是「只处理 `.go` 且非 `_test.go`」，且遍历范围是 `kitDirs`（`relayconvert`/`dto`/`types`/`reasonmap`），故**新增 `VERSION` 文件不会触发边界门禁**。
+
 **顺带修正两处自己的数字错**：本地 `makefile` 目标数先写 8（实为 9）；`pr-check.yml` 的构成先写成「只跑 anti-slop」（漏了它其实有且仅有 1 个 `uses:` 步骤、**0 个 `run:`**，故「只跑 action 不跑命令」的说法才准确）。
 
 ## 边界与未验证项
@@ -709,5 +715,6 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第二十轮） | 发现阶段 2 判据「327 个 import 点全部验证」**覆盖不到第 18 轮新建的基线测试**——327 是基线 `dbfbc096f` 口径（205 非测试 + 122 测试），而 `convert_golden_test.go` 在基线上不存在；阶段 2 迁 `dto` 后它会编译失败，判据却仍绿。补阶段 2 判据与前置节。**顺带独立复现了 12.0.8 的「3 处 tag 差异是空操作」**（`Delta`/`Function` 确为 struct 值） |
 | （本轮·第二十一轮） | 走六个阶段判据的依赖链：**无矛盾**，但发现阶段 4「8 个快照逐字节一致」有未写前提——`json.MarshalIndent` 按声明顺序输出，两侧字段顺序不同则语义等价也失败。机械核验 4 个输出类型共有字段全部同序；并确认基线 fixture 与 12.0.8 的 15 处差异无重叠 |
 | （本轮·第二十二轮） | 核阶段 0 的 CI 门禁：照抄上游 `ci.yml` **三处不够**（挂载点未定、本地无 `make test` 目标、上游 `make test` 不含 `-count=1`/`-shuffle` 会继承已知跨运行泄漏盲区）；**且 `TestGolden` 从未进入任何 CI 表述**，而它是阶段 2/4/6 判据的共同依赖。已写入 §9.3 |
+| （本轮·第二十三轮） | 核阶段 1 的版本锚定可执行性：原文只写「须重新核对行号引用」而**无任何可执行手段**。实测全文 10 处唯一 `relaykit/<path>.go:<line>` 引用、**当前 10/10 全部可解析**，但无工具保证。新增 `scripts/relaykit-citation-check.py` + 10 个单测（按仓库既有 `scripts/*.py` + `*.test.py` 模式），经**反向验证**（`:99999` → 退出码 1 报 out of range；`nonexistent.go` → 报 file not found；还原后退出码 0）。另实测：上游 relaykit 无版本文件、且 `boundary_test.go:53` 只遍历 `kitDirs` 下的 `.go`，故新建 `relaykit/VERSION` 既不冲突也不触发边界门禁 |
 
-文档当前 1535 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1554 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
