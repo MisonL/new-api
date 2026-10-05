@@ -351,6 +351,17 @@ func AdminResetPasskey(c *gin.Context) {
 		return
 	}
 
+	// 检查目标用户权限。与 AdminDisable2FA 同一套判断：删除 Passkey 比禁用 2FA
+	// 的后果更重（凭证可直接用于登录），因此不得对同级或更高级的用户下手。
+	myRole := c.GetInt("role")
+	if myRole <= user.Role && myRole != common.RoleRootUser {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无权重置同级或更高级用户的 Passkey",
+		})
+		return
+	}
+
 	if _, err := model.GetPasskeyByUserID(user.Id); err != nil {
 		if errors.Is(err, model.ErrPasskeyNotFound) {
 			c.JSON(http.StatusOK, gin.H{
