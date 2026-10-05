@@ -252,6 +252,62 @@ func normalizeClaudeInputSchema(parameters any, toolName string) (map[string]int
 	return schema, nil
 }
 
+// claudeOutputFormatFromResponseFormat maps an OpenAI response_format onto the
+// Claude equivalent: output_config.format, whose schema is the raw JSON Schema.
+// Claude has no OpenAI-style name/strict envelope, so the wrapper is unwrapped
+// rather than forwarded. A text format produces no constraint at all.
+func claudeOutputFormatFromResponseFormat(format *dto.ResponseFormat) (map[string]any, error) {
+	formatType := strings.ToLower(strings.TrimSpace(format.Type))
+	switch formatType {
+	case "", "text":
+		return nil, nil
+	case "json_object":
+		// Claude has no schema-free JSON mode, so accept any JSON object.
+		return map[string]any{
+			"type":   "json_schema",
+			"schema": map[string]any{"type": "object"},
+		}, nil
+	case "json_schema":
+		if len(format.JsonSchema) == 0 {
+			return nil, errors.New("response_format.json_schema is required")
+		}
+		var wrapper dto.FormatJsonSchema
+		if err := common.Unmarshal(format.JsonSchema, &wrapper); err != nil {
+			return nil, fmt.Errorf("response_format.json_schema is invalid: %w", err)
+		}
+		schema, err := normalizeClaudeInputSchema(wrapper.Schema, "response_format.json_schema")
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"type":   "json_schema",
+			"schema": schema,
+		}, nil
+	default:
+		return nil, fmt.Errorf("response_format.type %q is not supported by Claude", format.Type)
+	}
+}
+
+// mergeClaudeOutputConfig folds a format into the existing output_config so it
+// survives alongside the reasoning effort, which is written to the same object.
+func mergeClaudeOutputConfig(existing json.RawMessage, format map[string]any) (json.RawMessage, error) {
+	if format == nil {
+		return existing, nil
+	}
+	merged := map[string]any{}
+	if len(existing) > 0 {
+		if err := common.Unmarshal(existing, &merged); err != nil {
+			return nil, fmt.Errorf("output_config is invalid: %w", err)
+		}
+	}
+	merged["format"] = format
+	encoded, err := common.Marshal(merged)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(encoded), nil
+}
+
 func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
 	// The Claude Messages API returns exactly one completion. Dropping n>1
 	// silently made the gateway answer with a single choice for a request that
@@ -712,6 +768,20 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 	// 设置累积的system消息
 	if len(systemMessages) > 0 {
 		claudeRequest.System = systemMessages
+	}
+
+	// response_format lands in the same output_config object the reasoning
+	// effort uses, so it is merged after the effort branches above have run.
+	if textRequest.ResponseFormat != nil {
+		claudeFormat, formatErr := claudeOutputFormatFromResponseFormat(textRequest.ResponseFormat)
+		if formatErr != nil {
+			return nil, formatErr
+		}
+		mergedConfig, mergeErr := mergeClaudeOutputConfig(claudeRequest.OutputConfig, claudeFormat)
+		if mergeErr != nil {
+			return nil, mergeErr
+		}
+		claudeRequest.OutputConfig = mergedConfig
 	}
 
 	claudeRequest.Prompt = ""
