@@ -383,7 +383,7 @@ const (
 | 1 | **取得 relaykit 源码**（见下「阶段 1 的前置」）；引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译；`relaykit/` 的版本已锚定并记录 |
 | 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写** + **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ **同名字段的 JSON tag / Go 类型差异逐项对齐**（12.0.8：15 处全部采用 relaykit，改 8 处 `IncludeThoughts` 赋值点 + `Text`/`Arguments` 读写点 + 4 处 import）+ 全部宿主独有方法（全包 394 vs 273 函数，含测试口径）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**327 个 import 点全部验证**；**15 处 tag/类型差异逐项有决定（12.0.8）** |
 | 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 别名，同步改写 `service/convert.go` 的 22 处字段引用；`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过 |
-| 4 | 协议映射切换到 relaykit（**单点可逆**，见 §8.1）；**接线 `relayconvert.SetMediaResolver`（指向 `service.GetBase64Data`）与 `convmeta.Options` 钩子（指向 `model_setting`）**，随后通道级转换器改调 relaykit（12.15.4）；打补丁 1；**按下方「阶段 4 的处置清单」逐项落地**；**`*WithError` 系列直接删除**（12.3，不保留包装层）；**把 `convert_golden_test.go` 的调用点改指 relaykit**（处置清单 12） | **`TestGolden` 改指 relaykit 后 8 个快照逐字节一致，或每一处差异逐条对应 9.1/9.2 的已决定项**（12.16.2）；grok reasoning 可见；处置清单每项已确认；**12.15.4 的两条边界（schema 行为对齐、`text/*` MIME 分支）已实测** |
+| 4 | 协议映射切换到 relaykit（**单点可逆**，见 §8.1）；**接线 `relayconvert.SetMediaResolver`（指向 `service.GetBase64Data`）与 `convmeta.Options` 钩子（指向 `model_setting`）**，随后通道级转换器改调 relaykit（12.15.4）；打补丁 1；**按下方「阶段 4 的处置清单」逐项落地**；**`*WithError` 系列直接删除**（12.3，不保留包装层）；**把 `convert_golden_test.go` 的调用点改指 relaykit**（处置清单 12） | **`TestGolden` 改指 relaykit 后 8 个快照逐字节一致，或每一处差异都能对应到处置清单第 6 项为 9.1/9.2 逐条产出的「保留/放弃/改写」决定**（12.16.2；该决定清单是**阶段 4 的产出**，不是既有物——判据引用的是它，不是预先存在的清单）；grok reasoning 可见；处置清单每项已确认；**12.15.4 的两条边界（schema 行为对齐、`text/*` MIME 分支）已实测** |
 | 5 | 宿主管道接入 relaykit 分派；**响应方向暴露策略在 relaykit 内门控**（12.4，`convmeta.Options` 钩子，必须在索引分配之前——后置过滤不可行。落点 `oai_chat/to_claude_messages_resp.go` 已接收 `info`，无需透传改造）；**`matchAnyRegex` 空模式语义显式文档化**（12.8，采用本地语义「空 patterns = 匹配全部」） | 全量测试通过；空 patterns 语义已写入配置文档 |
 | 6 | 删除旧代码：`service/convert.go` 主体（2229 行）**与 4 个通道级转换器**（`relay-claude.go:255` 459 行等——12.15.4 已定收敛到 relaykit，本阶段删除本地实现）。**`service/openaicompat/` 不删**——12.15.3 已决定该包整体保留、行数不减少，它与 relaykit 的基础转换重复但不可切分（12.15.1）。**`convert_golden_test.go` 与 `service/testdata/golden/` 不得随主体一起删除**：阶段 4 已把它改指 relaykit，本阶段须把**本地独有部分**（DeepSeek 门控 fixture 与两条 `*_deepseek` 用例）并入上游已有的 `relaykit/relayconvert/golden_test.go`，复用其 helper，**不得整体移入**（同包同名符号会编译失败，见 12.16.3） | `service/convert.go` 无残留引用；`service/openaicompat/` 的 3 个消费者（4.5.1）行为不变；**4 个通道级转换器已删除且无残留引用**；**golden 基线已在 `relaykit/` 下运行且快照与阶段 4 末态一致** |
 
@@ -559,7 +559,7 @@ relaykit module 这一条**包含边界门禁**：`relaykit/relayconvert/boundar
 ```bash
 # 阶段 4 之前：钉住本地实现的行为
 go test ./service -run TestGolden -count=1
-# 阶段 4 之后：同一批快照改指 relaykit，差异必须逐条对应 9.1/9.2 的已决定项
+# 阶段 4 之后：同一批快照改指 relaykit，差异必须对应处置清单第 6 项产出的 9.1/9.2 决定
 cd relaykit && GOWORK=off go test ./relayconvert -run TestGolden -count=1
 ```
 
@@ -1406,7 +1406,7 @@ go test ./service -run TestGolden -count=1 -update   # 重录
 **决定**：
 
 1. **阶段 4 把 6 个调用点改指 relaykit**（处置清单第 12 项）：换函数名、`info` 换成 `convmeta.Meta`、删去 `*WithError`。**快照内容一律不改**——同一批 fixture 的输出在改指后应当逐字节相同，这正是 12.16 所说「本地没退化」的判据。
-2. **差异必须逐条解释，不得用 `-update` 吸收**：若改指后快照有差异，每一处都要能对应到 9.1/9.2 的已决定项（12 处之一），否则视为回归。**禁止**用 `go test -update` 把差异直接写成新的正确值——那正是 12.16 批评上游 `-update` 机制的原话（「无法区分『保真生效』与『行为回归』」）。
+2. **差异必须逐条解释，不得用 `-update` 吸收**：若改指后快照有差异，每一处都要能对应到**处置清单第 6 项**为 9.1/9.2 逐条产出的「保留/放弃/改写」决定（该清单在阶段 4 内产出，见第 6 项），否则视为回归。**禁止**用 `go test -update` 把差异直接写成新的正确值——那正是 12.16 批评上游 `-update` 机制的原话（「无法区分『保真生效』与『行为回归』」）。
 3. **阶段 6 不是「整体移入」，而是「把 fixture 与门控用例并入上游已有的 `golden_test.go`」**（详见下节 12.16.3：直接移入会因包级符号重名而编译失败）。
 4. §9.3 增列该基线的校验命令。
 
@@ -1443,7 +1443,9 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 
 这从**上游侧独立印证**了 12.16.1 在本地侧发现的问题，并把 12.16 原有的论断精确化：原文写「24 个快照一处都测不到 9.1/9.2 的 12 处差异」——现在可以指出**最要害的那一处（thinking 门控）是被上游矩阵的 `continue` 条件主动排除的**，不是偶然遗漏。这也解释了为什么必须补本地基线，以及为什么补出来的 DeepSeek 侧快照在上游找不到对应物：**它填补的正是上游刻意留白的格子**。
 
-**待阶段 6 实测的边界**：合并后上游 `TestMain`（`:29`）会接管 `flag.Parse()`，本地文件的 `-update` 行为随之改变（同一 flag，语义不变）；合并时须确认本地 fixture 的模型名不与上游 `fixtureStreamChunks()` 的 `stream-model` 冲突，且两条 `*_deepseek` 快照的路径不覆盖上游既有文件名。
+**待阶段 6 实测的边界**：合并后上游 `TestMain`（`:29`）会接管 `flag.Parse()`，本地文件的 `-update` 行为随之改变（同一 flag，语义不变）。
+
+**快照文件名冲突（实测，非推测）**：本地 8 个快照与上游 24 个快照的**交集是两个**——`stream/openai_to_claude.golden.json` 与 `stream/openai_to_gemini.golden.json`，且**两者内容都不同**（上游 3489 / 4050 字节，本地 1536 / 4243 字节）。这两个名字**必须改名**（例如加 `_local` 后缀）才能并入，否则合并即**静默覆盖上游快照**——而上游那两个快照正是 `TestGoldenStreamConversionMatrix` 的基线。两条 `*_deepseek` 快照（`response/openai_to_claude_deepseek`、`stream/openai_to_claude_deepseek`）**不与上游重名**，是纯新增。**注意方向**：冲突源是**不带后缀**的两条，不是带 `_deepseek` 的两条——上一版本此处写反了。此外，合并时还须确认本地 fixture 的模型名不与上游 `fixtureStreamChunks()` 的 `stream-model` 冲突（本地用 `gpt-test`/`deepseek-v4`，不冲突）。
 
 **待阶段 4 实测的边界**（不得写成既成事实）：
 
