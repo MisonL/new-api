@@ -383,9 +383,9 @@ const (
 | 1 | **取得 relaykit 源码**（见下「阶段 1 的前置」）；引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译；`relaykit/` 的版本已锚定并记录 |
 | 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写** + **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ **同名字段的 JSON tag / Go 类型差异逐项对齐**（12.0.8：15 处全部采用 relaykit，改 8 处 `IncludeThoughts` 赋值点 + `Text`/`Arguments` 读写点 + 4 处 import）+ 全部宿主独有方法（全包 394 vs 273 函数，含测试口径）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**327 个 import 点全部验证**；**15 处 tag/类型差异逐项有决定（12.0.8）** |
 | 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 别名，同步改写 `service/convert.go` 的 22 处字段引用；`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过 |
-| 4 | 协议映射切换到 relaykit（**单点可逆**，见 §8.1）；**接线 `relayconvert.SetMediaResolver`（指向 `service.GetBase64Data`）与 `convmeta.Options` 钩子（指向 `model_setting`）**，随后通道级转换器改调 relaykit（12.15.4）；打补丁 1；**按下方「阶段 4 的处置清单」逐项落地**；**`*WithError` 系列直接删除**（12.3，不保留包装层） | 转换测试通过；grok reasoning 可见；处置清单每项已确认；**12.15.4 的两条边界（schema 行为对齐、`text/*` MIME 分支）已实测** |
+| 4 | 协议映射切换到 relaykit（**单点可逆**，见 §8.1）；**接线 `relayconvert.SetMediaResolver`（指向 `service.GetBase64Data`）与 `convmeta.Options` 钩子（指向 `model_setting`）**，随后通道级转换器改调 relaykit（12.15.4）；打补丁 1；**按下方「阶段 4 的处置清单」逐项落地**；**`*WithError` 系列直接删除**（12.3，不保留包装层）；**把 `convert_golden_test.go` 的调用点改指 relaykit**（处置清单 12） | **`TestGolden` 改指 relaykit 后 8 个快照逐字节一致，或每一处差异逐条对应 9.1/9.2 的已决定项**（12.16.2）；grok reasoning 可见；处置清单每项已确认；**12.15.4 的两条边界（schema 行为对齐、`text/*` MIME 分支）已实测** |
 | 5 | 宿主管道接入 relaykit 分派；**响应方向暴露策略在 relaykit 内门控**（12.4，`convmeta.Options` 钩子，必须在索引分配之前——后置过滤不可行。落点 `oai_chat/to_claude_messages_resp.go` 已接收 `info`，无需透传改造）；**`matchAnyRegex` 空模式语义显式文档化**（12.8，采用本地语义「空 patterns = 匹配全部」） | 全量测试通过；空 patterns 语义已写入配置文档 |
-| 6 | 删除旧代码：`service/convert.go` 主体（2229 行）**与 4 个通道级转换器**（`relay-claude.go:255` 459 行等——12.15.4 已定收敛到 relaykit，本阶段删除本地实现）。**`service/openaicompat/` 不删**——12.15.3 已决定该包整体保留、行数不减少，它与 relaykit 的基础转换重复但不可切分（12.15.1） | `service/convert.go` 无残留引用；`service/openaicompat/` 的 3 个消费者（4.5.1）行为不变；**4 个通道级转换器已删除且无残留引用** |
+| 6 | 删除旧代码：`service/convert.go` 主体（2229 行）**与 4 个通道级转换器**（`relay-claude.go:255` 459 行等——12.15.4 已定收敛到 relaykit，本阶段删除本地实现）。**`service/openaicompat/` 不删**——12.15.3 已决定该包整体保留、行数不减少，它与 relaykit 的基础转换重复但不可切分（12.15.1）。**`convert_golden_test.go` 与 `service/testdata/golden/` 不得随主体一起删除**：阶段 4 已把它改指 relaykit，本阶段须把**本地独有部分**（DeepSeek 门控 fixture 与两条 `*_deepseek` 用例）并入上游已有的 `relaykit/relayconvert/golden_test.go`，复用其 helper，**不得整体移入**（同包同名符号会编译失败，见 12.16.3） | `service/convert.go` 无残留引用；`service/openaicompat/` 的 3 个消费者（4.5.1）行为不变；**4 个通道级转换器已删除且无残留引用**；**golden 基线已在 `relaykit/` 下运行且快照与阶段 4 末态一致** |
 
 四处硬依赖：
 
@@ -409,6 +409,7 @@ const (
 | 9 | 保留下游宽松 `reasonmap` default，严格校验留宿主调用点 | 12.11 |
 | 10 | 接线 `relayconvert.SetMediaResolver(service.GetBase64Data 包装)` 与 `convmeta.Options` 钩子（`model_setting` 适配）；通道级转换器改调 relaykit；**实测** `normalizeClaudeInputSchema` 与 `FunctionParametersToInputSchema` 的行为对齐、`text/*` MIME 分支归属 | 12.15.4 |
 | 11 | `dto` 的 `EffectiveTools()` 及缓存字段迁入 `relaykit/dto`，13 个调用点改 import | 12.0.7 |
+| 12 | **把 `service/convert_golden_test.go` 的 6 个调用点改指 `relayconvert` 包级入口**（换函数名、`info` 由 `*relaycommon.RelayInfo` 换成 `convmeta.Meta`、删去 `*WithError` 变体），**快照内容保持不变**；随后逐条解释差异。**不得 import `relayconvert/internal/...`**（Go 的 `internal` 规则禁止） | 12.16.2 |
 
 **不在阶段 4 范围内**：向**上游**提 `ParseContentStrict`/`ParseToolCallsStrict` 的 PR（4.1「值得提上游」）——那是对上游仓库的贡献，不阻塞本迁移，也不属于本仓库的任何阶段。
 
@@ -552,6 +553,19 @@ relaykit module 这一条**包含边界门禁**：`relaykit/relayconvert/boundar
 `GOWORK=off` 不可省略（见「阶段 1 的前置」：本仓库不引入 `go.work`）。
 
 **阶段 4 专项**：构造含 thinking block 的 Claude 多轮工具调用请求，验证 DeepSeek 不再 400；验证 grok 的 reasoning 可见（当前被丢弃）。
+
+**本地 golden 基线（阶段 4 前后都要跑，见 12.16）**：
+
+```bash
+# 阶段 4 之前：钉住本地实现的行为
+go test ./service -run TestGolden -count=1
+# 阶段 4 之后：同一批快照改指 relaykit，差异必须逐条对应 9.1/9.2 的已决定项
+cd relaykit && GOWORK=off go test ./relayconvert -run TestGolden -count=1
+```
+
+`-run TestGolden` 是**前缀匹配**，可命中上游既有的三个矩阵测试（`TestGoldenRequestConversionMatrix`、`TestGoldenResponseConversionMatrix`、`TestGoldenStreamConversionMatrix`，`golden_test.go:290/319/337`）与阶段 6 并入的 DeepSeek 用例。
+
+**`-update` 只用于重录基线，不得用于吸收阶段 4 的差异**——那会把「行为回归」直接写成新的正确值，正是 12.16 批评上游 `-update` 机制的原话。
 
 **前端改动**：`cd web/default && bun run lint && bun run build`（AGENTS.md 第 4 节）。
 
@@ -1358,6 +1372,85 @@ go test ./service -run TestGolden -count=1 -update   # 重录
 **基线口径（已实测）**：生成时工作区的 `service/convert.go` 有**其他会话的未提交改动**（在 `ClaudeToOpenAIRequest` 的 `else` 分支加 `ReasoningEffort` 透传）。为避免快照编码未提交行为，把 `convert.go` 换成 `HEAD` 版本重跑同一批快照，**结果一致通过**——该改动读 `claudeRequest.OutputConfig`（fixture 未设），对快照为 no-op。故本基线等价于 `HEAD` 口径，快照中不含未提交行为。（生成后已还原工作区文件。）
 
 **边界（未覆盖，须在阶段 4 单列）**：本基线只钉「当前 HEAD 的本地输出字节」。9.1/9.2 的 12 处差异（未知 block 报错、image 缺 source 报错、多 choice 报错、`finish_reason` 严格校验、非 assistant thinking 门控、tool_use 缺 id/name 报错等）**多数是错误路径**，不产出「可快照的正常输出」，因此由既有**专用单测**覆盖（`service/convert_claude_request_test.go`、`service/convert_claude_stream_test.go`，本次已核两文件为 git 跟踪且在 `HEAD` 上通过），**不在** golden 基线的职责内。golden 基线的职责是「正常路径的字节级不漂移」。
+
+#### 12.16.2 基线的生命周期：阶段 4 必须改指 relaykit，阶段 6 必须迁移（2026-10-05 补充）
+
+**问题（第 19 轮审查发现，且是本轮自己引入的）**：12.16.1 建成的基线调用 6 个**本地**函数，它们全部定义在 `service/convert.go`：
+
+| 基线调用的本地函数 | 定义位置 |
+|---|---|
+| `ClaudeToOpenAIRequest` | `service/convert.go:18` |
+| `GeminiToOpenAIRequest` | `service/convert.go:1248` |
+| `ResponseOpenAI2ClaudeWithError` | `service/convert.go:1040` |
+| `ResponseOpenAI2GeminiWithError` | `service/convert.go:1831` |
+| `StreamResponseOpenAI2ClaudeWithError` | `service/convert.go:730` |
+| `StreamResponseOpenAI2GeminiWithError` | `service/convert.go:2101` |
+
+而阶段 6 明确**删除 `service/convert.go` 主体**。两侧的入口签名不同（已从 `upstream/main` 读出，属**签名级证据、非编译验证**）：
+
+| 方向 | 本地入口（`service/convert.go`，HEAD 口径） | relaykit 公开入口（`relayconvert` 包级，`upstream/main`） |
+|---|---|---|
+| Claude 请求 | `ClaudeToOpenAIRequest(req dto.ClaudeRequest, info *relaycommon.RelayInfo) (*dto.GeneralOpenAIRequest, error)` | `ClaudeMessagesRequestToOpenAIChat(req dto.ClaudeRequest, info convmeta.Meta) (*dto.GeneralOpenAIRequest, error)`（`request_compat.go:16`） |
+| Gemini 请求 | `GeminiToOpenAIRequest(req *dto.GeminiChatRequest, info *relaycommon.RelayInfo) (*dto.GeneralOpenAIRequest, error)` | `GeminiGenerateContentRequestToOpenAIChat(req *dto.GeminiChatRequest, info convmeta.Meta) (*dto.GeneralOpenAIRequest, error)`（`request_compat.go:24`） |
+| Claude 响应 | `ResponseOpenAI2ClaudeWithError(resp *dto.OpenAITextResponse, info *relaycommon.RelayInfo) (*dto.ClaudeResponse, error)` | `ResponseOpenAI2Claude(resp *dto.OpenAITextResponse, info convmeta.Meta) *dto.ClaudeResponse`（`response_compat.go:38`） |
+| Gemini 响应 | `ResponseOpenAI2GeminiWithError(resp *dto.OpenAITextResponse, info *relaycommon.RelayInfo) (*dto.GeminiChatResponse, error)` | `ResponseOpenAI2Gemini(resp *dto.OpenAITextResponse, info convmeta.Meta) *dto.GeminiChatResponse`（`response_compat.go:128`） |
+| Claude 流 | `StreamResponseOpenAI2ClaudeWithError(chunk *dto.ChatCompletionsStreamResponse, info *relaycommon.RelayInfo) ([]*dto.ClaudeResponse, error)` | `StreamResponseOpenAI2Claude(chunk *dto.ChatCompletionsStreamResponse, info convmeta.Meta) []*dto.ClaudeResponse`（`response_compat.go:42`） |
+| Gemini 流 | `StreamResponseOpenAI2GeminiWithError(chunk *dto.ChatCompletionsStreamResponse, info *relaycommon.RelayInfo) (*dto.GeminiChatResponse, error)` | `StreamResponseOpenAI2Gemini(chunk *dto.ChatCompletionsStreamResponse, info convmeta.Meta) *dto.GeminiChatResponse`（`response_compat.go:132`） |
+
+**入口可达性（必须区分，否则会写出无法编译的迁移）**：relaykit 的真实实现在 `relayconvert/internal/{claude_messages,gemini_chat,oai_chat}/` 下，**`internal/` 包宿主无法 import**。宿主可达的只有 `relayconvert` 包顶层的 `request_compat.go` / `response_compat.go` 两个转发文件。**故上表「relaykit 入口」一列指的是 `relayconvert.` 的包级函数，不是 `internal/` 里的同名实现。** 这与第 77 行已记录的「上游在宿主保留 30 行转发 shim」是同一模式：上游自己也是通过 `relayconvert.` 顶层转发调用 `internal/` 实现的。
+
+差异分四类：**函数名**（`ClaudeToOpenAIRequest` → `ClaudeMessagesRequestToOpenAIChat`；`GeminiToOpenAIRequest` → `GeminiGenerateContentRequestToOpenAIChat`）、**`info` 由具体指针变为接口 `convmeta.Meta`**、**`*WithError` 变体不存在**（12.3 已决定删除，relaykit 侧只有无 error 版本）、**请求方向的 `ctx` 差异并不存在**——`request_compat.go` 的两个请求入口（`:16`、`:24`）内部用 `context.Background()`，**签名里没有 `ctx`**（只有 `OpenAIChatRequestToClaudeMessages`、`OpenAIChatRequestToGeminiGenerateContent` 等反向入口才收 `c context.Context`）。因此请求方向改指时**不需要补 `ctx`**，只需换名与换 `info` 类型。
+
+**若不处理，两种结局都错**：要么阶段 6 连测试一起删掉（第 25 项白做，基线在最需要它的时刻消失），要么测试悬空指向已删除的函数、阶段 6 编译失败后被人草率删除。这与第十一轮发现的 `boundary_test.go` 是同一类错误——**一个阶段的产物对后续阶段有隐含前提，而前提没被写出来**；区别在于那个前提由上游代码带入，这一个由本地基线自带。
+
+**决定**：
+
+1. **阶段 4 把 6 个调用点改指 relaykit**（处置清单第 12 项）：换函数名、`info` 换成 `convmeta.Meta`、删去 `*WithError`。**快照内容一律不改**——同一批 fixture 的输出在改指后应当逐字节相同，这正是 12.16 所说「本地没退化」的判据。
+2. **差异必须逐条解释，不得用 `-update` 吸收**：若改指后快照有差异，每一处都要能对应到 9.1/9.2 的已决定项（12 处之一），否则视为回归。**禁止**用 `go test -update` 把差异直接写成新的正确值——那正是 12.16 批评上游 `-update` 机制的原话（「无法区分『保真生效』与『行为回归』」）。
+3. **阶段 6 不是「整体移入」，而是「把 fixture 与门控用例并入上游已有的 `golden_test.go`」**（详见下节 12.16.3：直接移入会因包级符号重名而编译失败）。
+4. §9.3 增列该基线的校验命令。
+
+#### 12.16.3 上游已有一份同名 golden 测试，且它恰好漏掉本地要保的那条路径（2026-10-05 补充）
+
+上节决定 3 的原始表述是「阶段 6 把测试与快照整体移入 `relaykit/relayconvert/`」。**该表述会编译失败**，实测证据：
+
+`upstream/main:relaykit/relayconvert/golden_test.go`（`package relayconvert`，同一包）已声明以下**与我方同名同签名**的包级符号：
+
+| 符号 | 上游 `golden_test.go` | 本地 `convert_golden_test.go` |
+|---|---|---|
+| `updateGolden` | `:25` `var updateGolden = flag.Bool("update", ...)` | `:32` 同 |
+| `goldenDir` | `:42` `const goldenDir = "testdata/golden"` | `:34` 同 |
+| `marshalGolden` | `:55` | `:47` 同签名 |
+| `checkGolden` | `:62` | `:54` 同签名 |
+| `mustUnmarshalFixture` | `:460` | `:112` 同签名 |
+| `TestMain` | `:29` | 无（本地不需要） |
+
+两文件的 `normalizeVolatile`/`normalizeGolden` 也是**同一套正则**（`[0-9a-f]{32}` → `<uuid>`、`("created(_at)?"\s*:\s*)\d{9,}` → `${1}0`）。因此同包共存必然 `redeclared in this block`。**修正后的做法**：阶段 6 只把**本地独有**的部分并入上游文件——DeepSeek 门控 fixture 与两条 `*_deepseek` 用例——复用上游既有的 `goldenInfo()`/`checkGolden()`/`checkStreamEventsGolden()`，不重复声明任何 helper。
+
+**更重要的是：上游那份测试恰好漏掉本地要保的那条路径。** 上游 24 个快照里，response 矩阵**显式排除** `openai_to_claude`：
+
+```go
+// upstream/main:relaykit/relayconvert/golden_test.go:323-325
+if from == to || to == types.RelayFormatGemini ||
+    (from == types.RelayFormatOpenAI && to == types.RelayFormatClaude) {
+    continue
+}
+```
+
+`response/` 目录实测确实没有 `openai_to_claude.golden.json`（只有 `claude_to_openai`、`gemini_to_claude`、`openai_responses_to_claude` 等 8 个）。而**本地 thinking 门控正落在这条被排除的路径上**（`ResponseOpenAI2Claude`，见 12.16.1）。
+
+stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` 出现 **0 次**，且上游 fixture 的模型名是 `stream-model`、`goldenInfo()` 不设 DeepSeek 模型名，**chunk fixture 里完全没有 `reasoning_content`**。因此上游 24 个快照**没有一个覆盖 thinking 暴露路径**。
+
+这从**上游侧独立印证**了 12.16.1 在本地侧发现的问题，并把 12.16 原有的论断精确化：原文写「24 个快照一处都测不到 9.1/9.2 的 12 处差异」——现在可以指出**最要害的那一处（thinking 门控）是被上游矩阵的 `continue` 条件主动排除的**，不是偶然遗漏。这也解释了为什么必须补本地基线，以及为什么补出来的 DeepSeek 侧快照在上游找不到对应物：**它填补的正是上游刻意留白的格子**。
+
+**待阶段 6 实测的边界**：合并后上游 `TestMain`（`:29`）会接管 `flag.Parse()`，本地文件的 `-update` 行为随之改变（同一 flag，语义不变）；合并时须确认本地 fixture 的模型名不与上游 `fixtureStreamChunks()` 的 `stream-model` 冲突，且两条 `*_deepseek` 快照的路径不覆盖上游既有文件名。
+
+**待阶段 4 实测的边界**（不得写成既成事实）：
+
+- 上表 relaykit 侧签名读自 `upstream/main` 的 `request_compat.go` / `response_compat.go`，**未经编译验证**——relaykit 目录在阶段 1 才拷入本仓库，`convmeta.Meta` 的构造方式（`RelayInfo` 在阶段 3 才实现该接口）要到阶段 4 才能确认。
+- 两个**请求方向**入口（`ClaudeMessagesRequestToOpenAIChat`、`GeminiGenerateContentRequestToOpenAIChat`）签名**不含 `ctx`**——它们在内部用 `context.Background()`，因此宿主无法向转换过程传递请求上下文或取消信号。本地现有实现同样不接收 `ctx`（只接收 `info`），故**行为等价**；但若阶段 4 需要传递 trace/diagnostic 上下文，须另找路径（`request_compat.go` 的反向入口才收 `c context.Context`）。
+- **流式路径的状态承载两侧同构，改指时不需要构造新对象**：本地 `streamResponseOpenAI2Claude` 读 `info.ClaudeConvertInfo`（`Done`、`Index`、`LastMessagesType`、`ToolCall*`），relaykit 版读 `info.EnsureClaudeConvertInfo()` 返回的同类状态。两侧都把状态挂在 `info` 上，**签名里都没有独立的 `state` 参数**。因此改指 `StreamResponseOpenAI2Claude` / `StreamResponseOpenAI2Gemini` 时，只需把 `goldenRelayInfo` 返回的 `*relaycommon.RelayInfo` 作为 `convmeta.Meta` 传入即可——但**前提是该 `RelayInfo` 的 `EnsureClaudeConvertInfo()` 返回的状态初始值与本地 `goldenRelayInfo` 里手工设的 `ClaudeConvertInfo{LastMessagesType: LastMessageTypeNone}` 等价**，否则首个 chunk 的 `Done`/`Index` 起点不同、快照会整体偏移。这一条**待阶段 4 实测**（阶段 3 才把 `ClaudeConvertInfo` 改为 `convmeta` 别名）。
+- 本地 `goldenRelayInfo` 返回 `*relaycommon.RelayInfo`，改指后需换成 `convmeta.Meta`；阶段 3 已让 `RelayInfo` 实现该接口（编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)`），故 `goldenRelayInfo` 的返回值可直接作为 `Meta` 传入，无需改 fixture。
 
 ### 12.17 决策汇总
 

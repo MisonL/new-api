@@ -594,10 +594,44 @@ git show upstream/main:relaykit/relayconvert/text_converter_registry.go \
 
 **方法学教训（第十八轮）**：十七轮都在读代码，本轮第一次**跑**测试。「第一版快照全绿」本身是个陷阱——绿只证明 fixture 的输入能跑通，不证明 fixture 覆盖了要保护的能力。**基线通过 ≠ 基线有效**；有效性的判据是「把被测能力改坏，基线会不会红」。本轮形式：fixture 选了非 DeepSeek 模型（输入）→ 门控不触发（分支）→ 快照里没有 thinking（输出），三环里第一环选错，后两环再对也没用。检验基线有效性的唯一手段是**反向验证**（扰动后必须失败），而不是正向跑绿。
 
+## 第十九轮：把「已完成的产物」当成新起点——基线的生命周期是本轮自己造的缺口（2026-10-05）
+
+第十八轮把第 25 项关掉、写完「已关闭」就收工了。本轮问了一个前十八轮都成立、但第十八轮的产物**恰好使其失效**的问题：**这份基线在阶段 4/6 之后还在吗？** 答案是「不在，且没人负责」。
+
+**缺口（第十八轮自己引入的）**：`service/convert_golden_test.go` 调用 6 个**本地**函数，实测全部定义在 `service/convert.go`（HEAD 口径 `:18`、`:1248`、`:1040`、`:1831`、`:730`、`:2101`）——而**阶段 6 明确删除该文件主体**。若不处理，两种结局都错：要么阶段 6 连测试一起删（第 25 项白做，基线在最需要它的时刻消失），要么测试悬空指向已删除的函数、编译失败后被人草率删除。这与第十一轮的 `boundary_test.go` 是**同一类错误**：一个阶段的产物对后续阶段有隐含前提，而前提没被写出来。区别在于那个前提由上游代码带入，这一个由本地基线自带——**上一轮刚写完「已关闭」，就给下一个阶段造了一个未声明的依赖**。
+
+**修的过程本身又错了三次，全部由取证推翻**（这是本轮最值得记的部分）：
+
+1. **入口可达性错了**。我先写 relaykit 侧入口是 `claude_messages.ClaudeMessagesRequestToOpenAIChat(ctx, req, info)` 这类形式。实测 `relayconvert/internal/{claude_messages,gemini_chat,oai_chat}/` 是 **`internal/` 包，Go 语言规则禁止宿主 import**；宿主可达的只有 `relayconvert` 包顶层的 `request_compat.go` / `response_compat.go`。**写迁移方案时必须先问「这个包宿主能 import 吗」，而不是看到函数存在就写进表格。**
+2. **`ctx` 参数是臆造的**。我断言「请求方向改指要补 `ctx`」。实测 `request_compat.go:16`/`:24` 内部用 `context.Background()`，**签名里根本没有 `ctx`**；只有反向入口（`OpenAIChatRequestToClaudeMessages` 等）收 `c context.Context`。**「两个签名长得像」不等于「参数一样」。**
+3. **阶段 6「整体移入 `relaykit/relayconvert/`」会编译失败**。上游 `relaykit/relayconvert/golden_test.go`（同包 `package relayconvert`）已声明**同名同签名**的 `updateGolden`（`:25`）、`goldenDir`（`:42`）、`marshalGolden`（`:55`）、`checkGolden`（`:62`）、`mustUnmarshalFixture`（`:460`）、`TestMain`（`:29`），两文件的归一化正则也逐字相同 → 同包共存必然 `redeclared in this block`。**改为「只把本地独有的部分并入上游文件，复用其 helper」。**
+
+**四项修正**（已落入设计文档）：阶段 4 完成判据由含糊的「转换测试通过」改为「`TestGolden` 改指 relaykit 后 8 个快照逐字节一致，或每处差异逐条对应 9.1/9.2 的已决定项」；处置清单加第 12 项（改指调用点，**快照内容保持不变**，且**禁止用 `-update` 吸收差异**——那正是 12.16 批评上游的原话）；阶段 6 明确「本地独有部分并入上游 `golden_test.go`，不得整体移入」；§9.3 增列两个 module 的校验命令。
+
+**顺带的独立印证（比 12.16 原有的论断更精确）**：上游 24 个快照**恰好漏掉**本地要保的那条路径。上游 response 矩阵**显式排除** `openai_to_claude`：
+
+```go
+// upstream/main:relaykit/relayconvert/golden_test.go:323-325
+if from == to || to == types.RelayFormatGemini ||
+    (from == types.RelayFormatOpenAI && to == types.RelayFormatClaude) {
+    continue
+}
+```
+
+实测 `response/` 目录 8 个快照里确实没有 `openai_to_claude.golden.json`。而**本地 thinking 门控正落在这条被排除的路径上**。stream 矩阵虽包含 `openai_to_claude`，但实测该快照 `thinking` 出现 **0 次**——上游 fixture 用 `stream-model` 且 chunk 里完全没有 `reasoning_content`。**故上游 24 个快照没有一个覆盖 thinking 暴露路径**。这把 12.16 的「24 个快照一处都测不到」从断言升级为**可指认的代码位置**：不是偶然遗漏，是被 `continue` 主动排除；而本地补出的 DeepSeek 快照填补的正是上游刻意留白的格子。
+
+**同时修正了自己引入的行号口径错**：`service/convert.go` 有他会话的 7 行未提交改动，我一度按工作区写了 `:1255`/`:1047`/`:736`，按 HEAD 应为 `:1248`/`:1040`/`:730`。
+
+**方法学教训（第十九轮）**：
+
+- **「已完成 / 已关闭」是风险最高的措辞，因为它终止了后续检查**——第十八轮刚写下这个措辞，本轮立刻发现该产物有个没人负责的下半场。凡关闭一项时产出的**代码、测试、快照、脚本**，都要多问一句「它在后续阶段还在吗，谁维护它」。
+- **写「X 迁到 Y」时，先问 Y 的包宿主能否 import**，再问参数是否一致。前者零成本，后者要读源码，两者都不能靠函数名相似推断。
+- **接手任何「搬到另一个模块/包」的方案前，先 grep 目标包是否已有同名测试文件与同名 helper**。上游往往已经把同类测试写好了——本轮的发现不是「要新建测试」，而是「上游已有一份，且它刻意没测我们要保的那条路径」。
+
 ## 边界与未验证项
 
-- 本记录及设计文档**未修改任何生产代码**。第十八轮起已实际运行 `go test ./service -run TestGolden`（见该轮），但「编译失败」类结论仍未逐条 `go build` 复现
-- 未实测 `service/convert.go` 的**全部**转换测试在阶段 4 是否失败——第十八轮只跑了 `TestGolden` 与相邻转换测试，未跑 `go test ./service` 全包
+- 本记录及设计文档**未修改任何生产代码**。第十八轮起已实际运行 `go test ./service -run TestGolden` 与全包 `go test ./service`（见该轮），但「编译失败」类结论仍未逐条 `go build` 复现
+- 第十九轮给出的 relaykit 入口签名、`internal/` 不可达、上游 `golden_test.go` 的符号冲突与矩阵排除条件，均读自 `upstream/main` 的源码（**签名级证据**），**未经编译验证**——relaykit 目录在阶段 1 才拷入本仓库。`convmeta.Meta` 的构造方式、改指后快照是否逐字节一致，须到阶段 4 实测
 - 「适配器写入拷贝后 `info.Request.Thinking` 仍为 nil」是代码阅读推断，与文档同源，非独立运行时复现
 - thinking block 的 `signature`：relaykit 响应方向产出的 thinking block 只有 `{Type, Thinking}`，不含 `signature`；本地现状同样不生成。Anthropic 是否校验签名、客户端是否接受无签名 block，未验证
 - 上游 relaykit 仍在演进，存在 `feat/relaykit-tools`、`feat/relaykit-perf`、`fix/relayconvert-tool-result-media-and-reasoning-parts` 等分支，未逐一核验
@@ -632,6 +666,7 @@ git show upstream/main:relaykit/relayconvert/text_converter_registry.go \
 | （本轮·第十五轮） | 把四维比较工具化：`tools/relaykit-dto-compat/`（7 个测试）+ `scripts/relaykit-dto-compat.sh`（含 `--strict` 门禁，经反转验证）。**工具当场抓出上一轮两处分类错误**：类型真差异 3→6、签名差异 13→12（后者含 1 处 `interface{}`/`any` 等价拼写）。编写中工具的嵌入字段维度自身有 bug，由单元测试捕获 |
 | （本轮·第十六轮） | 关闭未决项 27/28/29：三个符号换 stdlib（是 `encoding/json` 薄包装，此前误判为宿主能力）、`ResponsesRequestMetadata` 判为宿主类型（488 行文件 + 650 行扫描器依赖）、通道级转换器**收敛到 relaykit**（三类宿主耦合 relaykit 侧均有注入机制：`Options` 钩子 / `MediaResolver` / 内置 schema）、`EffectiveTools()` 连缓存字段迁入 relaykit。未决项 6→3 |
 | （本轮·第十七轮） | 关闭未决项 30：15 处 tag/类型差异**全部采用 relaykit**。**推翻第十四轮对 tag 差异的判断**——5 处中 3 处因字段是 struct 值而 `omitempty` 无效，是空操作而非「静默改变输出」；另 2 处风险逐点排除。类型 6 处含 1 处纯增益（`IntValue.MarshalJSON` 与 int 相同）、3 处改读写点、2 处改 import。未决项 3→2 |
-| （本轮·第十八轮） | 关闭未决项 25：建成 `service/convert_golden_test.go` + 8 个快照的本地基线（首次实际运行 `go test`）。**建基线时发现第一版 fixture 全用非 DeepSeek 模型名，导致 thinking 门控整条路径未被覆盖**——补 DeepSeek 侧两个快照，把门控两侧都钉住。实测基线与 `HEAD` 等价（工作区他人未提交改动对快照为 no-op）。反向验证三处扰动均失败。未决项 2→1 |
+| （本轮·第十八轮） | 关闭未决项 25：建成 `service/convert_golden_test.go` + 8 个快照的本地基线（首次实际运行 `go test`）。**建基线时发现第一版 fixture 全用非 DeepSeek 模型名，导致 thinking 门控整条路径未被覆盖**——补 DeepSeek 侧两个快照，把门控两侧都钉住。实测基线与 `HEAD` 等价（工作区他人未提交改动对快照为 no-op）。反向验证三处扰动均失败。未决项 2→1（第 24 项 `openaicompat` tool 循环重构仍开放，范围外） |
+| （本轮·第十九轮） | 发现并修补**第十八轮自己引入的缺口**——基线的生命周期无归属（其 6 个被调函数定义在阶段 6 要删的 `service/convert.go`）。修正过程又推翻自己三次：`internal/` 包宿主不可 import、请求入口无 `ctx`、阶段 6「整体移入」会因同包同名符号而编译失败。四项修正落入阶段 4 判据 / 处置清单 12 / 阶段 6 / §9.3；新增 §12.16.2、§12.16.3。**独立印证上游 24 快照刻意排除 `openai_to_claude`（`golden_test.go:323-325` 的 `continue`），正是本地 thinking 门控所在路径** |
 
-文档当前 1405 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1498 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
