@@ -1427,6 +1427,10 @@ go test ./service -run TestGolden -count=1 -update   # 重录
 **决定**：
 
 1. **阶段 4 把 6 个调用点改指 relaykit**（处置清单第 12 项）：换函数名、`info` 换成 `convmeta.Meta`、删去 `*WithError`。**快照内容一律不改**——同一批 fixture 的输出在改指后应当逐字节相同，这正是 12.16 所说「本地没退化」的判据。
+
+   **「逐字节一致」的前提是两侧结构体字段顺序相同**（`json.MarshalIndent` 按声明顺序输出，顺序不同则语义等价也会失败）。已机械核验（正则抽 `struct` 体内字段名序列）fixture 涉及的 4 个输出类型，**共有字段的相对顺序两侧全部一致**：`OpenAITextResponse`（7/7 字段全同序）、`GeminiChatResponse`（本地 3 / kit 4，共有 3 全同序）、`GeneralOpenAIRequest`（本地 61 / kit 81，共有 61 全同序）、`ClaudeResponse`（12/12 全同序）。**注意后两个是「共有字段同序」而非「字段集相同」**——relaykit 的 `GeneralOpenAIRequest` 多 20 个字段、`GeminiChatResponse` 多 1 个，多出来的字段不参与同一 fixture 的输出，故不影响本基线比对。**但这是一次性抽查，不是门禁**——阶段 4 改指后若快照出现「内容相同、顺序不同」的差异，应判定为字段顺序差异而非行为回归，并**先核字段顺序再谈回归**。可复用 `tools/relaykit-dto-compat/`（它已抽字段名集合）扩一个「顺序」维度来机械判定，避免人工误判。
+
+   **另一个前置**：本基线的 5 个 fixture 只用到 `dto.ChatCompletionsStreamResponse`、`dto.ClaudeRequest`、`dto.GeminiChatRequest`、`dto.OpenAITextResponse`、`dto.UserSetting` 五个类型，与 12.0.8 那 15 处 tag/类型差异涉及的字段（`Delta`、`Function`、`GenerationConfig`、`IncludeThoughts`、`Text`/`Arguments`、`CreatedAt`、`SupportedEndpointTypes`）**无一重叠**。故阶段 2 的对齐动作**不应**改变这 8 个快照；若阶段 2 后快照漂移，原因在别处（实现改动或字段顺序），**不要归因到那 15 处差异**。
 2. **差异必须逐条解释，不得用 `-update` 吸收**：若改指后快照有差异，每一处都要能对应到**处置清单第 6 项**为 9.1/9.2 逐条产出的「保留/放弃/改写」决定（该清单在阶段 4 内产出，见第 6 项），否则视为回归。**禁止**用 `go test -update` 把差异直接写成新的正确值——那正是 12.16 批评上游 `-update` 机制的原话（「无法区分『保真生效』与『行为回归』」）。
 3. **阶段 6 不是「整体移入」，而是「把 fixture 与门控用例并入上游已有的 `golden_test.go`」**（详见下节 12.16.3：直接移入会因包级符号重名而编译失败）。
 4. §9.3 增列该基线的校验命令。

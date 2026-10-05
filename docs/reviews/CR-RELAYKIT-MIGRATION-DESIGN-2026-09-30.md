@@ -645,6 +645,16 @@ if from == to || to == types.RelayFormatGemini ||
 - **判据的覆盖范围要用「集合」而非「数字」表述**。把「327 个 import 点全部验证」写成「**所有** import 宿主 `dto` 的文件都改完（含测试文件，且以开工时的清单为准）」就不会漏——**数字会过期，集合的界定方式不会**。
 - **顺带核实了一件此前只是断言的事**：12.0.8 判 `Delta`/`Function`/`GenerationConfig` 三处 tag 差异为「空操作」（struct 值使 `omitempty` 失效），本轮打开字段确认——`dto/openai_response.go:86` 的 `Delta` 确为 `ChatCompletionsStreamResponseChoiceDelta` **值类型**、`dto/openai_request.go:240` 的 `Function` 确为 `FunctionRequest` **值类型**。故阶段 2 迁 `dto` 后**基线快照不应因这 3 处 tag 而漂移**；若漂移则另有原因，须查字段对齐或实现改动，而不是归因到 tag。**「空操作」这个结论第一次被独立复现。**
 
+**第二十一轮（2026-10-05）——走判据间的依赖，找到「逐字节一致」的隐藏前提**：上一轮建议的方向是「判据与判据之间是否互相矛盾」，本轮走了一遍六个阶段的判据依赖链。**没有发现判据互相矛盾**，但发现阶段 4 的「8 个快照逐字节一致」有一条**未写出的前提**：
+
+- **`json.MarshalIndent` 按结构体声明顺序输出**。若两侧 `dto` 类型的字段顺序不同，「逐字节一致」会在**语义完全等价时也失败**——判据本身不可达，而不是发现了回归。两侧 `dto` 恰有 33 个类型字段双向不同（12.0.1），顺序不同的可能性真实存在。本轮**机械核验**（正则抽 `struct` 体字段名序列）了 fixture 涉及的 4 个输出类型：`OpenAITextResponse`(7/7)、`ClaudeResponse`(12/12)、`GeminiChatResponse`(共有 3/3)、`GeneralOpenAIRequest`(共有 61/61) **共有字段相对顺序全部一致**。**但这是一次性抽查**——已写入文档，并注明「阶段 4 若出现『内容相同、顺序不同』的差异，先核字段顺序再谈回归」，且可扩 `tools/relaykit-dto-compat/` 加一个「顺序」维度机械判定。
+- **顺带核实基线快照与 12.0.8 的 15 处差异无重叠**：本基线的 5 个 fixture 只用 `dto.ChatCompletionsStreamResponse`、`dto.ClaudeRequest`、`dto.GeminiChatRequest`、`dto.OpenAITextResponse`、`dto.UserSetting`，与 12.0.8 涉及的字段（`Delta`/`Function`/`GenerationConfig`/`IncludeThoughts`/`Text`/`Arguments`/`CreatedAt`/`SupportedEndpointTypes`）**无一重叠**。故阶段 2 的对齐**不应**改变这 8 个快照；若漂移，原因在别处。**这是「阶段 2 判据要求 `TestGolden` 仍绿」这条能否成立的关键前提**——它成立，判据才有意义。
+
+**教训**：
+
+- **「逐字节/逐字段一致」型判据，先确认两侧的可比性是同构的**——序列化顺序、零值与缺失的表示、浮点格式、时间格式，任何一项不同都会让判据在语义等价时失败。**写「应逐字节相同」之前，先问「两侧的序列化规则是否相同」。**
+- **一次走判据依赖链没找到矛盾，本身就是有价值的结论**（说明六个阶段的判据在顺序上自洽），但它**不等于判据已完备**——本轮的收获全在「判据的**前提**」而非「判据的矛盾」上。**「没矛盾」与「没缺口」是两回事**，与第八轮「零发现不等于完备」同源。
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**。第十八轮起已实际运行 `go test ./service -run TestGolden` 与全包 `go test ./service`（见该轮），但「编译失败」类结论仍未逐条 `go build` 复现
@@ -686,4 +696,4 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第十八轮） | 关闭未决项 25：建成 `service/convert_golden_test.go` + 8 个快照的本地基线（首次实际运行 `go test`）。**建基线时发现第一版 fixture 全用非 DeepSeek 模型名，导致 thinking 门控整条路径未被覆盖**——补 DeepSeek 侧两个快照，把门控两侧都钉住。实测基线与 `HEAD` 等价（工作区他人未提交改动对快照为 no-op）。反向验证三处扰动均失败。未决项 2→1（第 24 项 `openaicompat` tool 循环重构仍开放，范围外） |
 | （本轮·第十九轮） | 发现并修补**第十八轮自己引入的缺口**——基线的生命周期无归属（其 6 个被调函数定义在阶段 6 要删的 `service/convert.go`）。修正过程又推翻自己三次：`internal/` 包宿主不可 import、请求入口无 `ctx`、阶段 6「整体移入」会因同包同名符号而编译失败。四项修正落入阶段 4 判据 / 处置清单 12 / 阶段 6 / §9.3；新增 §12.16.2、§12.16.3。**独立印证上游 24 快照刻意排除 `openai_to_claude`（`golden_test.go:323-325` 的 `continue`），正是本地 thinking 门控所在路径** |
 
-文档当前 1523 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1527 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
