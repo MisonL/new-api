@@ -1468,6 +1468,12 @@ func passRequestHeaderInContext(context map[string]interface{}, headerName strin
 	if headerName == "" {
 		return fmt.Errorf("pass_headers header name is required")
 	}
+	// 客户端凭证头不得透传到上游：调用方的 Authorization 就是它自己的 new-api
+	// 令牌，api-key / x-api-key / x-goog-api-key 是 Azure、Google 一类的上游凭证。
+	// 这里显式报错而不是静默跳过，否则配置方会以为该头已按预期透传。
+	if IsCredentialHeader(headerName) {
+		return fmt.Errorf("pass_headers must not pass credential header: %s", headerName)
+	}
 	value, exists := getRequestHeaderValueFromContext(context, headerName)
 	if !exists {
 		return fmt.Errorf("%w: %s", errSourceHeaderNotFound, headerName)
