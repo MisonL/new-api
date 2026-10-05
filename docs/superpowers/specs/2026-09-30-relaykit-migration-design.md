@@ -425,7 +425,7 @@ const (
 
 **版本锚定（必须做，否则本文档全部行号失效）**：本文档所有 `relaykit/...` 行号均以 `upstream/main` = **`789c97019`**（2026-09-28）为准。拷贝后必须把该 commit 记入 `relaykit/VERSION` 或等价文件。
 
-**行号引用的机械核对（已补工具，原先只有一句「须重新核对」）**：本文档共 **10 处唯一 `relaykit/<path>.go:<line>` 引用**（13 处出现、9 个文件）。原先只写「后续需要跟进上游时重新核对本文档的行号引用」，**没给任何可执行手段**——而上游 relaykit 仍在演进（见「边界与未验证项」），锚定一漂移，全部引用静默失效。现已固化为：
+**行号引用的机械核对（已补工具，原先只有一句「须重新核对」）**：本文档共 **16 处唯一 `relaykit/<path>.go:<line>` 引用**（第 23 轮补工具时为 10 处，第 25 轮新增「本地改动清单」表后又补 6 处）。原先只写「后续需要跟进上游时重新核对本文档的行号引用」，**没给任何可执行手段**——而上游 relaykit 仍在演进（见「边界与未验证项」），锚定一漂移，全部引用静默失效。现已固化为：
 
 ```bash
 scripts/relaykit-citation-check.py            # 校验，漂移时退出码 1
@@ -436,6 +436,21 @@ python3 scripts/relaykit-citation-check.test.py # 10 个单测
 它从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效（文件没了、行越界、指向空行），**不断言该行内容**——引用指向的符号变了仍需人工复核。当前实测：**10/10 全部可解析**（`ref=upstream/main`）。已做**反向验证**：把 `values.go:32` 改成 `:99999` → 退出码 1 且报 `out of range`；改成 `nonexistent.go:32` → 退出码 1 且报 `file not found`；还原后退出码 0。
 
 **实测补充**（阶段 1 执行时需知）：上游 relaykit **当前没有版本文件**（顶层仅 `README.md`、`go.mod`、`go.sum` 与 4 个目录），故新建 `relaykit/VERSION` 不与上游冲突；且 `relaykit/relayconvert/boundary_test.go` 只遍历 `kitDirs`（`relayconvert`/`dto`/`types`/`reasonmap`）下的 `.go` 文件，**新增 `relaykit/VERSION` 不会触发边界门禁**（已读 `boundary_test.go:53` 的过滤条件确认）。
+
+**本迁移对上游 relaykit 的本地改动清单（必须维护，否则「避免分叉」无从谈起）**：本迁移**必然对上游 relaykit 产生本地分叉**——补丁 1、补丁 2 与 12.4 的门控都要**改写 relaykit 内部的 `.go` 源码**，而非仅在宿主侧接线。这与 12.9「不以上游分支为补丁基线，避免与 main 产生不可合并分叉」的取舍**方向不同**（那一条讲的是「基线选哪个分支」，本条讲的是「本地必然有改动」）。规格此前**散落三处提到补丁，但没有一处汇总改动落在哪些文件**，而 `relaykit/VERSION` 锚定的意义正是：跟进上游时要能一眼看出「哪些差异是本地有意为之、哪些是上游漂移」。
+
+| # | 改动 | 落点文件（上游 `789c97019`） | 阶段 |
+|---|---|---|---|
+| 1 | content block switch 加 `case "thinking"`、非 assistant role 门控、补 `default:` 显式报错 | `relaykit/relayconvert/internal/claude_messages/to_oai_chat_req.go:181`、`relaykit/relayconvert/internal/claude_messages/to_oai_responses_req.go:165` | 4（补丁 1） |
+| 2 | DTO presence 保真（把本地既有实现带进 relaykit） | `relaykit/dto/*`（见 3.3 补丁 2 表） | 2 |
+| 3 | 响应方向 reasoning 暴露门控（**在索引分配之前**，见 12.4.1） | `relaykit/relayconvert/internal/oai_chat/to_claude_messages_resp.go:111`（流式）、`relaykit/relayconvert/internal/oai_chat/to_claude_messages_resp.go:449`（非流式）两条入口，已接收 `info convmeta.Meta`，零透传成本） | 5 |
+| 4 | `convmeta.Options` 新增钩子字段 | `relaykit/relayconvert/convmeta/options.go:9`（`type Options struct`）；现有同类字段 `relaykit/relayconvert/convmeta/options.go:29`（`PreserveThinkingSuffix`）、`:33`（`PreserveEffortTail`）、`:52`（`DefaultMaxTokens`）、`:72`（`SupportsImagine`）、`:75`（`SafetySetting`） | 4–5 |
+| 5 | think 标签剥离纯函数迁入 | 新增（宿主 `service/convert.go:554`/`:597`/`:629` 原样移入） | 4 |
+| 6 | `ParseContentStrict`/`ParseToolCallsStrict` 迁入 | `relaykit/dto/openai_request.go`（新增；上游无同名方法） | 4 |
+| 7 | `EffectiveTools()` 及缓存字段 | `relaykit/dto`（12.0.7） | 2 |
+| 8 | `ClaudeConvertInfo` 等宿主专有错误符号 | `relaykit/types`（12.2） | 1 |
+
+**维护要求**：`relaykit/VERSION` 只记上游锚点一个字段，**不足以识别本地改动**。须再有一份「本地改动记录」——最简形式是 `relaykit/LOCAL_PATCHES.md`，逐条记上表的落点与目的；跟进上游升级时，先用它定位「哪些 hunk 会冲突」，再跑 `scripts/relaykit-citation-check.py`（行号）与 `scripts/relaykit-dto-compat.sh --strict`（结构）复核。**没有这份记录，锚定就只能锚住「上游是哪天」，回答不了「我们改了什么」。**
 
 **依赖影响**：relaykit 的 `require` 会经 MVS 抬高根 module 的两个依赖版本——`github.com/samber/lo` `v1.52.0 → v1.53.0`（本地 58 个文件在用）、`github.com/tidwall/gjson` `v1.18.0 → v1.19.0`（本地 14 个文件在用）。`google/uuid`、`stretchr/testify`、`tidwall/sjson` 版本相同；`golang.org/x/text` 本地（v0.41.0）高于 relaykit 要求（v0.35.0），不受影响。阶段 1 完成后须跑全量测试确认这两个次版本升级无行为回归。
 
@@ -612,7 +627,7 @@ scripts/relaykit-dto-compat.sh --strict
 **设计文档行号引用的完整性**（锚定漂移后重跑，见「阶段 1 的前置：relaykit 源码的取得与版本锚定」）：
 
 ```bash
-scripts/relaykit-citation-check.py            # 10 处引用全部可解析时退出码 0
+scripts/relaykit-citation-check.py            # 全部引用可解析时退出码 0（当前 16 处）
 python3 scripts/relaykit-citation-check.test.py  # 10 个单测
 ```
 

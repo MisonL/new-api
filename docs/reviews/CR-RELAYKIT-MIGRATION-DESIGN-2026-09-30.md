@@ -691,6 +691,20 @@ if from == to || to == types.RelayFormatGemini ||
 - **「反向新增」与「照抄」是两类任务，风险点不同**——照抄的风险是抄错，反向新增的风险是**边界与依赖**（会不会 import 宿主、缺的符号怎么办、删除宿主文件后调用点去哪）。**核一类任务不能拿另一类的检查清单。**
 - **「留宿主」必须同时说清「放哪个文件、谁调用它、经哪条钩子」**——留宿主的函数若其调用点在被删文件里，它就是不可达的。
 
+**第二十六轮（2026-10-05）——「避免分叉」与「必然分叉」没有和解**：核阶段 5（唯一还没读过的阶段行）。实测发现规格**必然对上游 relaykit 产生本地分叉**——补丁 1、补丁 2、12.4 的门控都要**改写 relaykit 内部的 `.go` 源码**（`internal/claude_messages/to_oai_chat_req.go:181`、`to_oai_responses_req.go:165`、`internal/oai_chat/to_claude_messages_resp.go`），12.4.2 还要给公开包 `convmeta.Options` **新增字段**。而规格里 12.9 写「不采用分支，**避免与 main 产生不可合并分叉**」、12.15.4 写「优先走接线方案，**避免对 relaykit 产生分叉**」——**三处补丁与两处「避免分叉」的基调直接矛盾**，而规格**从未汇总「本迁移改了 relaykit 哪些文件」**。
+
+更关键的是：`relaykit/VERSION`（第 23 轮加的）**只记上游锚点一个字段，回答不了「我们改了什么」**。锚定的意义正是跟进上游时能一眼看出「哪些差异是本地有意为之、哪些是上游漂移」——没有改动清单，锚定只锚住「上游是哪天」。
+
+已补「本迁移对上游 relaykit 的本地改动清单」表（8 条：补丁 1 的 2 个 switch、补丁 2 的 dto presence、12.4 的响应门控两条入口、`convmeta.Options` 新增钩子、think 标签纯函数、两个 `*Strict` 方法、`EffectiveTools()`、错误符号），每条带**核实过的落点行号**，并要求另立 `relaykit/LOCAL_PATCHES.md` 维护。
+
+**顺带让引用门禁真正覆盖新表**：新表里的路径原写成 `relayconvert/...`（无 `relaykit/` 前缀），而 `scripts/relaykit-citation-check.py` 的正则要求 `relaykit/` 前缀——所以**新增的 6 处引用一度完全在门禁之外**（检查器仍报 10/10 绿）。补前缀后覆盖数升到 **16/16**。**这是个假绿**：门禁看起来在跑，实际漏掉了新写的那批引用。**凡新增引用，先确认工具的正则能匹配它。**
+
+**教训**：
+
+- **「避免分叉」与「必然分叉」要和解，不能各说各话**。本迁移必须改上游源码，正确表述是「**基线选 main（不打分支分叉），但接受本地 hunk 分叉，并维护改动清单**」——两件事被混成一句「避免分叉」，导致改动清单从未被写出来。
+- **锚定文件要成对**：`VERSION`（上游是谁）+ `LOCAL_PATCHES.md`（我们改了什么）。只有前者，升级上游时无法区分「本地有意」与「上游漂移」。
+- **新增引用后立刻重跑门禁，并核对覆盖数是否真的上升**——门禁不报错不等于它在管你（正则前缀不匹配就是静默漏检）。
+
 顺带把阶段 1 的两个隐含前提**核实**（此前是推断）：上游 relaykit **当前没有版本文件**（顶层仅 `README.md`/`go.mod`/`go.sum` + 4 个目录），故新建 `relaykit/VERSION` **不与上游冲突**；`relaykit/relayconvert/boundary_test.go:53` 的过滤条件是「只处理 `.go` 且非 `_test.go`」，且遍历范围是 `kitDirs`（`relayconvert`/`dto`/`types`/`reasonmap`），故**新增 `VERSION` 文件不会触发边界门禁**。
 
 **顺带修正两处自己的数字错**：本地 `makefile` 目标数先写 8（实为 9）；`pr-check.yml` 的构成先写成「只跑 anti-slop」（漏了它其实有且仅有 1 个 `uses:` 步骤、**0 个 `run:`**，故「只跑 action 不跑命令」的说法才准确）。
@@ -741,5 +755,6 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第二十三轮） | 核阶段 1 的版本锚定可执行性：原文只写「须重新核对行号引用」而**无任何可执行手段**。实测全文 10 处唯一 `relaykit/<path>.go:<line>` 引用、**当前 10/10 全部可解析**，但无工具保证。新增 `scripts/relaykit-citation-check.py` + 10 个单测（按仓库既有 `scripts/*.py` + `*.test.py` 模式），经**反向验证**（`:99999` → 退出码 1 报 out of range；`nonexistent.go` → 报 file not found；还原后退出码 0）。另实测：上游 relaykit 无版本文件、且 `boundary_test.go:53` 只遍历 `kitDirs` 下的 `.go`，故新建 `relaykit/VERSION` 既不冲突也不触发边界门禁 |
 | （本轮·第二十四轮） | 复现「`RelayInfo` 实现 `convmeta.Meta` 全部 15 个方法」：**接口确为 15 个**（机械枚举），但本地 `RelayInfo` 现有 26 个方法中**只有 2 个重名**（`GetEstimatePromptTokens`、`AppendRequestConversion`），**须新增 13 个**。上游已全部实现于 `relay_info.go:825-953`（含断言 `:823`），可整体照抄；12 个是纯访问器，**仅 `ConvOptions` 需新写逻辑**（import `model_setting`，本地 `claude.go:55`/`gemini.go:53` 已有，且本地**无** `convOptions` 缓存字段）。阶段 3 判据由「实现 15 个」改为「13 个逐个落地」 |
 | （本轮·第二十五轮） | 核阶段 4 处置清单第 4、5 项（**「反向新增」类**任务）：第 4 项上游**无同名方法**，且 `kitutil` **不提供 `RawMessage` 类型别名** → 须把 `[]common.RawMessage` 改 `[]json.RawMessage`；第 5 项「门控留宿主」**没写落点**——门控 3 个调用点全在 `convert.go`（阶段 6 删），必须落到注入机制。另修正一个**幻影符号**（`extractThinkTaggedHistory` 实为局部变量） |
+| （本轮·第二十六轮） | 核阶段 5：**发现「必然分叉」与「避免分叉」的矛盾**——三处补丁都要改写 relaykit 内部源码 + 给 `convmeta.Options` 新增字段，而 12.9/12.15.4 两处写「避免分叉」，且规格**从未汇总改了哪些文件**。补 8 条「本地改动清单」表（核实过的行号），并要求另立 `relaykit/LOCAL_PATCHES.md`。**顺带修一处假绿**：新表路径原缺 `relaykit/` 前缀，6 处新引用一度在门禁之外（检查器仍报 10/10），补前缀后升到 16/16 |
 
-文档当前 1554 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1569 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
