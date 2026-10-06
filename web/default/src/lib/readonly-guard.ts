@@ -46,12 +46,20 @@ const READONLY_SAFE_METHODS = new Set(['get', 'head', 'options'])
  * - `/api/user/epay/notify` and `/api/subscription/epay/(notify|return)`
  *   complete a payment order.
  * - `/api/oauth/*` writes OAuth state into the session.
+ *
+ * The exact-path entries are GET endpoints with side effects, so the proxy's
+ * method check cannot stop them. POST /api/setup is not listed separately
+ * because every unsafe method is already rejected above -- and unlike its
+ * siblings `GET /api/setup` is a pure read (router/api-router.go:23) that the
+ * root bootstrap calls once per session, so blocking it surfaced an error toast
+ * for a request that has no side effect.
  */
 const READONLY_BLOCKED_PATHS = [
   /^\/api\/oauth\//,
   /^\/api\/auth\/external\//,
   /^\/api\/user\/logout$/,
-  /^\/api\/setup$/,
+  // GET /api/verification and GET /api/reset_password are on this list as GET
+  // endpoints that have side effects: both send an email (router/api-router.go:43-44).
   /^\/api\/verification$/,
   /^\/api\/reset_password$/,
   /^\/api\/channel\/test$/,

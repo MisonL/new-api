@@ -30,7 +30,6 @@ describe('readonly request guard', () => {
       '/api/oauth/github',
       '/api/auth/external/github',
       '/api/user/logout',
-      '/api/setup',
       '/api/verification',
       '/api/reset_password',
       '/api/channel/test',
@@ -49,6 +48,15 @@ describe('readonly request guard', () => {
     for (const path of blocked) {
       expect(isReadonlyBlockedRequest('get', path, BASE)).toBe(true);
     }
+  });
+
+  // setup is not on the path list: GET /api/setup is a pure read that the root
+  // bootstrap calls once per session, and blocking it surfaced an error toast
+  // for a request with no side effect. POST is already caught by the method
+  // check, so nothing is left unguarded.
+  test('blocks POST /api/setup while letting its GET through', () => {
+    expect(isReadonlyBlockedRequest('get', '/api/setup', BASE)).toBe(false);
+    expect(isReadonlyBlockedRequest('post', '/api/setup', BASE)).toBe(true);
   });
 
   // The read-only proxy only rejects unsafe methods, but the gateway endpoints

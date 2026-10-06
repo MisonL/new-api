@@ -30,8 +30,13 @@ export const READONLY_SAFE_METHODS = new Set(['get', 'head', 'options']);
 
 // Paths the read-only frontend must never reach, even with a safe method.
 //
-// The first six are auth, account lifecycle and OAuth/CAS callback entry
-// points. The rest are gateway endpoints registered as GET that still write
+// The first five are auth, account lifecycle and OAuth/CAS callback entry
+// points. setup is deliberately absent: POST /api/setup is already rejected by
+// the method check, and GET /api/setup is a pure read that the root bootstrap
+// calls once per session to decide whether to redirect to the setup wizard.
+// Blocking it made that read fail, so the read-only frontend surfaced an error
+// toast for a request that has no side effect. The rest are gateway endpoints
+// registered as GET that still write
 // state, so the proxy's method check cannot stop them:
 //   - /api/channel/test and /api/channel/test/:id run upstream probes and then
 //     update response times and disable failing channels.
@@ -48,7 +53,8 @@ export const READONLY_BLOCKED_PATHS = [
   /^\/api\/oauth\//,
   /^\/api\/auth\/external\//,
   /^\/api\/user\/logout$/,
-  /^\/api\/setup$/,
+  // setup is deliberately absent: POST /api/setup is already rejected by the
+  // method check, and GET /api/setup is a pure read the bootstrap needs.
   /^\/api\/verification$/,
   /^\/api\/reset_password$/,
   /^\/api\/channel\/test$/,

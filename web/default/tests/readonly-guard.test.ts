@@ -80,7 +80,6 @@ describe('readonly guard blocks unsafe requests', () => {
       '/api/oauth/state',
       '/api/auth/external/foo/cas/start',
       '/api/user/logout',
-      '/api/setup',
       '/api/verification',
       '/api/reset_password',
     ]
@@ -91,6 +90,23 @@ describe('readonly guard blocks unsafe requests', () => {
       ).rejects.toThrow(READONLY_FRONTEND_MESSAGE)
       expect(seen).toHaveLength(0)
     }
+  })
+
+  test('still blocks POST /api/setup while letting its GET through', async () => {
+    // setup is not on the path list: GET /api/setup is a pure read that the
+    // root bootstrap calls once per session (__root.tsx), and blocking it
+    // surfaced an error toast for a request with no side effect. POST is
+    // already caught by the method check, so nothing is left unguarded.
+    const seen: AxiosRequestConfig[] = []
+    await expect(
+      api.post('/api/setup', {}, { adapter: recordingAdapter(seen) })
+    ).rejects.toThrow(READONLY_FRONTEND_MESSAGE)
+    expect(seen).toHaveLength(0)
+
+    await api.get('/api/setup', { adapter: recordingAdapter(seen) })
+    expect(seen).toHaveLength(1)
+    expect(isReadonlyBlockedRequest('get', '/api/setup')).toBe(false)
+    expect(isReadonlyBlockedRequest('post', '/api/setup')).toBe(true)
   })
 
   // These routes are registered with GET in router/api-router.go but write

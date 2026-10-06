@@ -11,7 +11,10 @@ server {
         return 405;
     }
 
-    location ~ ^/api/(oauth/|auth/external/|user/logout$|setup$|verification$|reset_password$) {
+    # setup is deliberately absent: POST /api/setup is already rejected by the
+    # method check above, and GET /api/setup is a pure read the root bootstrap
+    # calls once per session.
+    location ~ ^/api/(oauth/|auth/external/|user/logout$|verification$|reset_password$) {
         return 403;
     }
 
