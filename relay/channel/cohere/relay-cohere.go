@@ -126,6 +126,7 @@ func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}()
 	helper.SetEventStreamHeaders(c)
 	isFirst := true
+	sawFinished := false
 	c.Stream(func(w io.Writer) bool {
 		select {
 		case data := <-dataChan:
@@ -149,6 +150,8 @@ func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			openaiResp.Object = "chat.completion.chunk"
 			openaiResp.Model = info.UpstreamModelName
 			if cohereResp.IsFinished {
+				// is_finished=true 的收尾块是 Cohere 流式的终止信号。
+				sawFinished = true
 				finishReason := stopReasonCohere2OpenAI(cohereResp.FinishReason)
 				openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{
 					{
@@ -185,6 +188,7 @@ func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			return false
 		}
 	})
+	helper.RecordStreamEnd(c, info, sawFinished)
 	if usage.PromptTokens == 0 {
 		usage = service.ResponseText2Usage(c, responseText, info.UpstreamModelName, info.GetEstimatePromptTokens())
 	}

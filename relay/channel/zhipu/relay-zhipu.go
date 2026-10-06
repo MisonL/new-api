@@ -185,6 +185,7 @@ func streamMetaResponseZhipu2OpenAI(zhipuResponse *ZhipuStreamMetaResponse) (*dt
 
 func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	var usage *dto.Usage
+	sawMeta := false
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
 	dataChan := make(chan string)
@@ -236,6 +237,8 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 				return true
 			}
 			usage = zhipuUsage
+			// meta 事件携带 usage，是智谱流式的终止信号。
+			sawMeta = true
 			c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonResponse)})
 			return true
 		case <-stopChan:
@@ -243,6 +246,7 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 			return false
 		}
 	})
+	helper.RecordStreamEnd(c, info, sawMeta)
 	service.CloseResponseBodyGracefully(resp)
 	return usage, nil
 }

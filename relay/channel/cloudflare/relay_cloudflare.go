@@ -66,6 +66,7 @@ func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 	id := helper.GetResponseID(c)
 	var responseText string
 	isFirst := true
+	sawDone := false
 
 	for scanner.Scan() {
 		data := scanner.Text()
@@ -76,6 +77,7 @@ func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 		data = strings.TrimSuffix(data, "\r")
 
 		if data == "[DONE]" {
+			sawDone = true
 			break
 		}
 
@@ -104,6 +106,7 @@ func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 	if err := scanner.Err(); err != nil {
 		logger.LogError(c, "error_scanning_stream_response: "+err.Error())
 	}
+	helper.RecordStreamEnd(c, info, sawDone)
 	usage := service.ResponseText2Usage(c, responseText, info.UpstreamModelName, info.GetEstimatePromptTokens())
 	if info.ShouldIncludeUsage {
 		response := helper.GenerateFinalUsageResponse(id, info.StartTime.Unix(), info.UpstreamModelName, *usage)

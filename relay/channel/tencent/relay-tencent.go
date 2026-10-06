@@ -153,6 +153,7 @@ func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *htt
 	var responseText string
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
+	sawFinish := false
 
 	helper.SetEventStreamHeaders(c)
 
@@ -170,6 +171,11 @@ func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *htt
 			continue
 		}
 
+		// 尾包以 FinishReason=stop 标记流结束（见 dto.go 注释）。
+		if len(tencentResponse.Choices) > 0 && tencentResponse.Choices[0].FinishReason == "stop" {
+			sawFinish = true
+		}
+
 		response := streamResponseTencent2OpenAI(&tencentResponse)
 		if len(response.Choices) != 0 {
 			responseText += response.Choices[0].Delta.GetContentString()
@@ -185,6 +191,7 @@ func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *htt
 		common.SysLog("error reading stream: " + err.Error())
 	}
 
+	helper.RecordStreamEnd(c, info, sawFinish)
 	helper.Done(c)
 
 	service.CloseResponseBodyGracefully(resp)

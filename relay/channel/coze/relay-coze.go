@@ -111,6 +111,7 @@ func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 	var currentEvent string
 	var currentData string
 	var usage = &dto.Usage{}
+	sawCompleted := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -118,7 +119,9 @@ func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 		if line == "" {
 			if currentEvent != "" && currentData != "" {
 				// handle last event
-				handleCozeEvent(c, currentEvent, currentData, &responseText, usage, id, info)
+				if handleCozeEvent(c, currentEvent, currentData, &responseText, usage, id, info) {
+					sawCompleted = true
+				}
 				currentEvent = ""
 				currentData = ""
 			}
@@ -138,12 +141,15 @@ func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 
 	// Last event
 	if currentEvent != "" && currentData != "" {
-		handleCozeEvent(c, currentEvent, currentData, &responseText, usage, id, info)
+		if handleCozeEvent(c, currentEvent, currentData, &responseText, usage, id, info) {
+			sawCompleted = true
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
+	helper.RecordStreamEnd(c, info, sawCompleted)
 	helper.Done(c)
 
 	if usage.TotalTokens == 0 {
@@ -153,7 +159,9 @@ func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 	return usage, nil
 }
 
-func handleCozeEvent(c *gin.Context, event string, data string, responseText *string, usage *dto.Usage, id string, info *relaycommon.RelayInfo) {
+// handleCozeEvent 处理单个 SSE 事件；返回值表示是否收到了终止事件
+// conversation.chat.completed，供调用方记录流的正常结束。
+func handleCozeEvent(c *gin.Context, event string, data string, responseText *string, usage *dto.Usage, id string, info *relaycommon.RelayInfo) bool {
 	switch event {
 	case "conversation.chat.completed":
 		// 将 data 解析为 CozeChatResponseData
@@ -161,7 +169,7 @@ func handleCozeEvent(c *gin.Context, event string, data string, responseText *st
 		err := json.Unmarshal([]byte(data), &chatData)
 		if err != nil {
 			common.SysLog("error_unmarshalling_stream_response: " + err.Error())
-			return
+			return false
 		}
 
 		usage.PromptTokens = chatData.Usage.InputCount
@@ -171,6 +179,7 @@ func handleCozeEvent(c *gin.Context, event string, data string, responseText *st
 		finishReason := "stop"
 		stopResponse := helper.GenerateStopResponse(id, common.GetTimestamp(), info.UpstreamModelName, finishReason)
 		helper.ObjectData(c, stopResponse)
+		return true
 
 	case "conversation.message.delta":
 		// 将 data 解析为 CozeChatV3MessageDetail
@@ -178,14 +187,14 @@ func handleCozeEvent(c *gin.Context, event string, data string, responseText *st
 		err := json.Unmarshal([]byte(data), &messageData)
 		if err != nil {
 			common.SysLog("error_unmarshalling_stream_response: " + err.Error())
-			return
+			return false
 		}
 
 		var content string
 		err = json.Unmarshal(messageData.Content, &content)
 		if err != nil {
 			common.SysLog("error_unmarshalling_stream_response: " + err.Error())
-			return
+			return false
 		}
 
 		*responseText += content
@@ -210,11 +219,12 @@ func handleCozeEvent(c *gin.Context, event string, data string, responseText *st
 		err := json.Unmarshal([]byte(data), &errorData)
 		if err != nil {
 			common.SysLog("error_unmarshalling_stream_response: " + err.Error())
-			return
+			return false
 		}
 
 		common.SysLog(fmt.Sprintf("stream event error: %v %v", errorData.Code, errorData.Message))
 	}
+	return false
 }
 
 func checkIfChatComplete(a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo) (error, bool) {

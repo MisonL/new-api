@@ -470,6 +470,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if !sawDone {
 		return usage, types.NewOpenAIError(fmt.Errorf("ollama stream ended without done frame"), types.ErrorCodeUpstreamTransportInterrupted, http.StatusBadGateway)
 	}
+	helper.RecordStreamEnd(c, info, true)
 	return usage, nil
 }
 
