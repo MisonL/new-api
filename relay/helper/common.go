@@ -44,11 +44,35 @@ func FlushWriter(c *gin.Context) (err error) {
 	return nil
 }
 
+// ResetEventStreamHeaders undoes SetEventStreamHeaders for a request that never
+// produced an SSE frame. doRequestWithClient sets the SSE headers as soon as a
+// stream is attempted, so an upstream that fails before the first frame leaves
+// the response claiming text/event-stream while the error handler writes a JSON
+// body. gin only fills Content-Type when the header is empty, so it has to be
+// removed explicitly.
+func ResetEventStreamHeaders(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	header := c.Writer.Header()
+	header.Del("Content-Type")
+	header.Del("Cache-Control")
+	header.Del("Connection")
+	header.Del("Transfer-Encoding")
+	header.Del("X-Accel-Buffering")
+	// Clear the marker so a later SetEventStreamHeaders call, which a real SSE
+	// error frame still needs, is not suppressed.
+	c.Set("event_stream_headers_set", false)
+}
+
 // SetEventStreamHeaders writes SSE headers once for the current response.
 func SetEventStreamHeaders(c *gin.Context) {
-	// 检查是否已经设置过头部
-	if _, exists := c.Get("event_stream_headers_set"); exists {
-		return
+	// 检查是否已经设置过头部。ResetEventStreamHeaders clears the flag to false
+	// rather than deleting it, so the value -- not just its presence -- decides.
+	if set, exists := c.Get("event_stream_headers_set"); exists {
+		if alreadySet, ok := set.(bool); !ok || alreadySet {
+			return
+		}
 	}
 
 	// 设置标志，表示头部已经设置过

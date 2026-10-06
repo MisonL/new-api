@@ -73,14 +73,15 @@ const (
 	// ContextKeyResponsesInputItemIDsRemoved is kept as a compatibility alias
 	// for older relay tests and integrations. Both names intentionally share
 	// the same context value.
-	ContextKeyResponsesInputItemIDsRemoved ContextKey = ContextKeyResponsesInputItemIDNormalizationRemovedCount
-	ContextKeyResponsesRequestMetadata     ContextKey = "responses_request_metadata"
-	ContextKeyResponsesProxyBilledUsage    ContextKey = "responses_proxy_billed_usage"
-	ContextKeyResponsesErrorEvent          ContextKey = "responses_error_event"
-	ContextKeyUpstreamRateLimitRetryState  ContextKey = "upstream_rate_limit_retry_state"
-	ContextKeyChannelHealthRoutingState    ContextKey = "channel_health_routing_state"
-	ContextKeyChannelHealthUnavailable     ContextKey = "channel_health_unavailable"
-	ContextKeyChannelHealthRoutes          ContextKey = "channel_health_routes"
+	ContextKeyResponsesInputItemIDsRemoved  ContextKey = ContextKeyResponsesInputItemIDNormalizationRemovedCount
+	ContextKeyResponsesRequestMetadata      ContextKey = "responses_request_metadata"
+	ContextKeyResponsesProxyBilledUsage     ContextKey = "responses_proxy_billed_usage"
+	ContextKeyResponsesErrorEvent           ContextKey = "responses_error_event"
+	ContextKeyResponsesStreamSequenceNumber ContextKey = "responses_stream_sequence_number"
+	ContextKeyUpstreamRateLimitRetryState   ContextKey = "upstream_rate_limit_retry_state"
+	ContextKeyChannelHealthRoutingState     ContextKey = "channel_health_routing_state"
+	ContextKeyChannelHealthUnavailable      ContextKey = "channel_health_unavailable"
+	ContextKeyChannelHealthRoutes           ContextKey = "channel_health_routes"
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"

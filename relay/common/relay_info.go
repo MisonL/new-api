@@ -251,6 +251,12 @@ type RelayInfo struct {
 	StreamStatus               *StreamStatus
 	ResponsesStreamObservation *ResponsesStreamObservation
 
+	// ResponsesStreamAttemptStarted tracks whether an upstream Responses relay
+	// has already been started for this request. It is independent of
+	// RetryIndex because auto-group selection and compact fallbacks may reset
+	// the retry counter while still issuing another upstream request.
+	ResponsesStreamAttemptStarted bool
+
 	ThinkingContentInfo
 	TokenCountMeta
 	*ClaudeConvertInfo

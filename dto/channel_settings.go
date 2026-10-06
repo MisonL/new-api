@@ -217,7 +217,8 @@ type ChannelOtherSettings struct {
 	DisableStore                                         bool                                `json:"disable_store,omitempty"`             // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）
 	AllowIncludeObfuscation                              bool                                `json:"allow_include_obfuscation,omitempty"` // 是否允许 stream_options.include_obfuscation 透传（默认过滤以避免关闭流混淆保护）
 	StripCodexEncryptedContext                           bool                                `json:"strip_codex_encrypted_context,omitempty"`
-	CodexFoldedSSEEnabled                                bool                                `json:"codex_folded_sse_enabled,omitempty"` // 是否启用 Codex SSE 截断续写折叠（默认关闭）
+	AllowMissingCodexDynamicRequestHeaders               *bool                               `json:"allow_missing_codex_dynamic_request_headers,omitempty"` // 是否允许该渠道在缺少 Codex 动态请求头时仍被选中（默认不允许）
+	CodexFoldedSSEEnabled                                bool                                `json:"codex_folded_sse_enabled,omitempty"`                    // 是否启用 Codex SSE 截断续写折叠（默认关闭）
 	AwsKeyType                                           AwsKeyType                          `json:"aws_key_type,omitempty"`
 	HeaderPolicyMode                                     HeaderPolicyMode                    `json:"header_policy_mode,omitempty"`
 	AuxiliaryRequestHeaderPolicyEnabled                  *bool                               `json:"auxiliary_request_header_policy_enabled,omitempty"`
