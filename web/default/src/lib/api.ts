@@ -47,6 +47,15 @@ api.get = ((url: string, config = {}) => {
     ?.disableDuplicate
   if (disableDuplicate) return originalGet(url, config)
 
+  // A request carrying an AbortSignal must keep its own lifecycle. A shared
+  // promise cannot honour two independent abort lifecycles: the joiner's
+  // signal never reaches the request, and the creator's abort cancels every
+  // joiner with it. Callers that opt into cancellation therefore skip the
+  // dedup map entirely; signal-less duplicates (the case the map exists for)
+  // are still merged.
+  if ((config as { signal?: AbortSignal }).signal)
+    return originalGet(url, config)
+
   const params = (config as unknown as Record<string, unknown>)?.params
     ? JSON.stringify((config as unknown as Record<string, unknown>).params)
     : '{}'
