@@ -585,7 +585,7 @@ users=10 channels=22 logs=413177   # 与重建前一致
 | --- | --- | --- |
 | `222876349` | Claude/Gemini 健康流被误判为上游中断：共享扫描器把「干净 EOF 且无 `data: [DONE]`」判为中断，而两家协议分别以 `message_stop` 与候选 `finishReason` 收尾。Claude 见到 `message_stop` 后 `sr.Done()`；Gemini 用新增的 `sr.MarkDone()` 只记结束原因不停扫描器（终止分片后可能还有 usage 分片） | 修复前 3 条断言 `EndReason="upstream_transport_interrupted"`；缺少终止分片的反向对照仍判中断 |
 | `ea334e4ce` | `ManageUser` 的 delete 分支补 `return`：原先落到 `user.Update(false)`，`DB.First` 对已软删行必然 not found（错误被忽略），末尾 `updateUserCache` 把已删用户以 `Status=enabled` 写回 Redis，TokenAuth 在 TTL 内继续放行 | 撤 `return` 后新用例失败（缓存仍在），恢复后全绿 |
-| `0618c2f0c` | `check-browser-compatibility.mjs`：dist 目录不存在时改为收集并 exit 1，不再静默通过 | 三个用例按退出码验证：不存在目录 1、真实 dist 0、无参数 1 |
+| `87679b0aa` | `check-browser-compatibility.mjs`：dist 目录不存在时改为收集并 exit 1，不再静默通过 | 三个用例按退出码验证：不存在目录 1、真实 dist 0、无参数 1 |
 | `816e15f72` | 6 个自建扫描器渠道（cloudflare/coze/tencent/zhipu/cohere/ollama）从不写 `StreamStatus`，健康流被 `classifyStreamStatus` 记成 `error`、健康探针永不成功；新增 `helper.RecordStreamEnd` 按共享扫描器规则分类（见 10.2） | 修复前 6 条健康流用例 `EndReason=""` 全 FAIL；把 `RecordStreamEnd` 扰动为恒判正常后 5 条反向对照全 FAIL |
 | `38f9e101a` | `AdminCompleteTopUp` 补与 `ManageUser` 相同的层级护栏：管理员不得给自己、同级或更高角色补单（此前可借补单绕过 `add_quota` 的限制） | 扰动护栏后恰好 3 条拒绝用例失败；普通用户补单与 root 补单两条正向对照不受影响 |
 | `11e7fec27` | cloudflare 流解析对齐共享扫描器：接受 `data:` 后不带空格的帧（原先这类帧 Unmarshal 失败被静默丢弃） | 撤解析改动后新用例失败（内容帧丢失） |
