@@ -328,11 +328,16 @@ info := &RelayInfo{RequestHeaders: map[string]string{"Authorization": "Bearer cl
 即 `{from: Authorization, to: X-Upstream-Auth}` 仍能把调用方令牌交给上游。
 `move_header` 委托给 `copy_header`，同样漏。
 
-**未修**：修复会破坏既有测试 `TestApplyParamOverrideCopyHeaderFromRequestHeaders`
-（`relay/common/override_test.go:1324`，由 `7633863c9` 引入），该用例正是拿
-`copy_header from Authorization` 来验证 conditions 机制——**这是一处设计冲突，
-需要先决定「conditions 依赖能否读凭证头」，不是一行守卫能了**。已写好回归测试
-草案但连同试探性改动一并撤回，验证方式与结论见下。
+**已修**（`f874fe95e`）。判据落在「值的来源」而不是「头的名字」：
+`getHeaderValueFromContext` 先查 `header_override` 再查 `request_headers`，
+所以运维若已用 `set_header` 主动写入同名头，复制的是他们自己配置的值，
+必须放行；只有**只可能来自客户端**的值才拒绝。一刀切拒绝头名更简单，但是错的。
+
+既有测试 `TestApplyParamOverrideCopyHeaderFromRequestHeaders`
+（`relay/common/override_test.go:1324`，由 `7633863c9` 引入）用 `Authorization`
+作复制来源，正是有漏洞的那种形态；它的主题是 copy+conditions 机制，
+来源头名只是顺带，已改为非凭证名 `X-Client-Auth`，覆盖的机制不变。
+反向验证：新测试在撤掉守卫后失败、恢复后通过。
 
 **F2 — 生产与开发复用同一套 PG/Redis 口令，且口令是 `123456`（P1）**
 
@@ -351,6 +356,26 @@ prod SQL_DSN  : <cred sha=e64d02ea82df>@postgres:5432/new-api
 
 **因此这不是当前的越权路径**，但根 `docker-compose.yml:206` 已要求
 `POSTGRES_PASSWORD:?` 显式提供，即代码侧已经认定弱口令不可接受，只是存量实例未轮换。
+
+**已部分处理（2026-10-06）**：开发侧口令已轮换为独立强口令（48 位十六进制），
+`DEV_POSTGRES_PASSWORD` / `DEV_REDIS_PASSWORD` / `DEV_SQL_DSN` / `DEV_REDIS_CONN_STRING`
+四处同步更新。轮换后实测：
+
+```
+dev  PG    sha256[:12] = e509bc82c379   (原 8d969eef6eca，与生产相同)
+prod PG    sha256[:12] = 8d969eef6eca
+dev  Redis sha256[:12] = 5dc58a9ce5e9   (原与生产相同)
+prod Redis sha256[:12] = 8d969eef6eca
+```
+
+从容器网络内以 scram 验证：旧口令 `FATAL: password authentication failed`，
+新口令成功。数据无损（users 10 / channels 22 / logs 413163，与轮换前一致），
+容器 `healthy`，启动日志 ERROR/WARN/panic 命中 0，应用持有活跃 Redis 连接
+（`172.18.0.4`，`tot-cmds=8`）。
+
+**生产侧口令未轮换**：交接约束禁止触碰生产服务与数据库，轮换需停服窗口。
+生产 `.env` 未被 git 跟踪（`.gitignore:16`），未修改；生产三个容器启动时间
+仍为 2026-10-05，本会话未触碰。生产弱口令仍是待办。
 
 **F3 — HEAD 上存在「有写入、无读取」的代码，其注释声称已被使用（P2）**
 
