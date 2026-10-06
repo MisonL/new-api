@@ -238,3 +238,89 @@ Message:"SQL logic error: near \"=\": syntax error (1)"
   这三个文件在本轮开始时带有其他会话的未提交改动。
 - 未推送。
 
+## 8. 2026-10-06 升级开发环境后的全场景复核
+
+开发环境已重建到 `8584dde2b`（此前是 `b1cf361fe`，落后 18 个提交）。用 6 个只读
+子代理分维度复核，我自己逐条独立复现了其中可验证的部分。
+
+### 8.1 已确认成立的发现
+
+**F1 — `copy_header` / `move_header` 可绕过凭证拒绝名单（P1，本轮新发现）**
+
+第 7 节 `38fe02eba` 只给 `pass_headers` 加了凭证拒绝名单。我实测确认
+`copy_header` 走同一个数据源（`getRequestHeaderValueFromContext`，`relay/common/override.go:1450`）
+却没有同样的判据：
+
+```go
+info := &RelayInfo{RequestHeaders: map[string]string{"Authorization": "Bearer client-new-api-token"}}
+// param_override: [{"mode":"copy_header","from":"Authorization","to":"X-Upstream-Auth"}]
+// 结果：err=<nil>，runtime headers = map[x-upstream-auth:Bearer client-new-api-token]
+```
+
+即 `{from: Authorization, to: X-Upstream-Auth}` 仍能把调用方令牌交给上游。
+`move_header` 委托给 `copy_header`，同样漏。
+
+**未修**：修复会破坏既有测试 `TestApplyParamOverrideCopyHeaderFromRequestHeaders`
+（`relay/common/override_test.go:1324`，由 `7633863c9` 引入），该用例正是拿
+`copy_header from Authorization` 来验证 conditions 机制——**这是一处设计冲突，
+需要先决定「conditions 依赖能否读凭证头」，不是一行守卫能了**。已写好回归测试
+草案但连同试探性改动一并撤回，验证方式与结论见下。
+
+**F2 — 生产与开发复用同一套 PG/Redis 口令，且口令是 `123456`（P1）**
+
+生产 `.env` 显式设置 `POSTGRES_PASSWORD=123456`（sha256 前 12 位 `8d969eef6eca`，长度 6），
+开发 `deploy/env/dev-isolated.env` 用**同一个值**。实测比对：
+
+```
+dev  SQL_DSN  : <cred sha=e64d02ea82df>@postgres:5432/new-api-dev
+prod SQL_DSN  : <cred sha=e64d02ea82df>@postgres:5432/new-api
+```
+
+**缓解事实**（实测）：生产 `postgres` 与 `redis` 均**无宿主端口映射**
+（`{"5432/tcp":null}` / `{"6379/tcp":null}`），只在 `new-api_new-api-network`
+（172.24.0.0/16）内可达；开发在 `172.18.0.0/16`，两个网络成员无交集，
+跨项目 DNS 解析在机制上不可能。生产 PG 创建于 2026-08-06，早于编排改为 fail-closed。
+
+**因此这不是当前的越权路径**，但根 `docker-compose.yml:206` 已要求
+`POSTGRES_PASSWORD:?` 显式提供，即代码侧已经认定弱口令不可接受，只是存量实例未轮换。
+
+### 8.2 被推翻或降级的说法
+
+- **`DEV_GLOBAL_RATE_LIMIT_ADMIN_EXEMPT=true` 与注释矛盾**——**成立但影响很小**。
+  compose 第 38 行注释写「默认值与正式环境一致」，实际 `dev-isolated.env:52` 覆盖为 `true`，
+  容器内实测为 `true`，而生产根本不设该变量（走代码默认 `false`）。
+  结果是隔离环境不复现生产的限流豁免行为。仅影响复现保真度，不构成安全缺陷。
+- **`/api/uptime` 返回 404**——**不是问题**。该路径本就不存在，
+  真实路由是 `/api/uptime/status`（`router/api-router.go:26`），返回 200。
+- **健康探针超时一次**——**非故障**。容器 Health.Log 有 1/5 条
+  `wget: download timed out`，但同秒应用侧日志显示 `/api/healthz` 返回 200、耗时 32µs，
+  且后续 4 次全部成功、`FailingStreak=0`、`RestartCount=0`。判为探针侧瞬时抖动，证据不足以定论。
+
+### 8.3 环境侧事实（复核通过）
+
+- **隔离性**：三个容器 Compose 标签齐备指向 `dev-isolated.yml`；端口全部绑 `127.0.0.1`
+  （3001/5433/6381），无 `0.0.0.0`；挂载全用 `type: bind` + 显式变量 + `:?` 强制；
+  开发无任何挂载指向生产目录；两个 Docker 网络成员无交集。
+- **密钥隔离**：`SESSION_SECRET` / `CRYPTO_SECRET` 生产与开发四项哈希两两不同，已正确隔离。
+- **运行健康**：`healthy`、`RestartCount=0`、启动至今 ERROR/WARN/panic/FATAL 命中 0；
+  实连 Postgres（`172.18.0.4` 有活跃连接、58 张表）非 SQLite 回退；
+  Redis 有真实读写（`tot-cmds=55`，键为限流器写入）；CPU 约 0.05%。
+- **服务面**：3001 提供的是 **classic** 前端（`/assets/index-DbfGiSNE.js` + semi-ui，
+  且 `/api/status` 自报 `theme: classic`，DB 无 theme 覆盖，代码默认即 `classic`）。
+  **因此不能用 3001 验证 `web/default` 的改动**，与 AGENTS.md 第 4 节一致。
+
+### 8.4 复核方法上的一条教训
+
+子代理报告 F1 类问题时容易只给结论。我要求每个结论附「确切命令 + 原始输出」后，
+`copy_header` 那一项才能被我独立复现。**在此之前它只是一个可疑线索。**
+本次已按此法逐条重跑：F1、F2 与三条被推翻项均由我自己重新取证，未直接采信子代理结论。
+
+### 8.5 复核未覆盖的边界
+
+- 未做计费、鉴权、转发链路的写操作验证（只读约束）。
+- 未验证 `a846e1c64` 对镜像二进制的影响——该提交只改 `docs/` 与 `tools/`
+  （后者有独立 `go.mod`，根模块不 import），Dockerfile 不 COPY 这两个目录，
+  判定不影响运行时；但**未重建镜像做字节级比对**。
+- `logs` 表 41 万行而 `pg_stat_user_tables.n_live_tup` 仅 7、从未 autoanalyze，
+  属既有批量导入数据的状态，是否需要处理未评估。
+
