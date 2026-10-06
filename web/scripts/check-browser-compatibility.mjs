@@ -15,9 +15,14 @@ if (roots.length === 0) {
 }
 
 const violations = [];
+const missingRoots = [];
 
 const scanDirectory = (rootDir) => {
   if (!fs.existsSync(rootDir)) {
+    // A directory that is not there has not been checked. Reporting "passed"
+    // for it would turn a renamed or never-built output path into a silent
+    // success, which is the one result a compatibility gate must not produce.
+    missingRoots.push(rootDir);
     return;
   }
 
@@ -48,6 +53,14 @@ const scanDirectory = (rootDir) => {
 
 for (const rootDir of roots) {
   scanDirectory(rootDir);
+}
+
+if (missingRoots.length > 0) {
+  console.error("Safari compatibility check failed: directory not found:");
+  for (const rootDir of missingRoots) {
+    console.error(rootDir);
+  }
+  process.exit(1);
 }
 
 if (violations.length > 0) {
