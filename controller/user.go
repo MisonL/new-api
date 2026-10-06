@@ -810,6 +810,15 @@ func DeleteUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	// 硬删除后必须清理缓存：TokenAuth 只读 userCache.Status（middleware/auth.go:442），
+	// 缓存不失效则被删用户的令牌在 TTL 内仍可用。DisableUser 已因同一原因清理两者，
+	// 删除路径同样需要。日志按 DisableUser 的既有方式记录，不阻断主流程。
+	if err := model.InvalidateUserCache(originUser.Id); err != nil {
+		common.SysLog(fmt.Sprintf("failed to invalidate user cache for user %d: %s", originUser.Id, err.Error()))
+	}
+	if err := model.InvalidateUserTokensCache(originUser.Id); err != nil {
+		common.SysLog(fmt.Sprintf("failed to invalidate tokens cache for user %d: %s", originUser.Id, err.Error()))
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
