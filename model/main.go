@@ -230,6 +230,18 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 	return gorm.Open(sqlite.Open(common.SQLitePath), newGormConfig())
 }
 
+// 数据库连接池的默认上限。
+//
+// 默认值必须能被一台默认配置的 PostgreSQL 接住：stock PG 的 max_connections 是
+// 100，其中 3 个预留给超级用户，非超级用户可用 97。请求数超过池上限时，
+// database/sql 会让调用方排队；但池上限高于服务端容量时，超出的连接会直接被
+// 拒绝（"too many clients already"），排队就变成了报错。留出余量给管理会话和
+// 其他客户端，因此默认取 50。服务端已调优的部署用 SQL_MAX_OPEN_CONNS 显式抬高。
+const (
+	defaultSQLMaxIdleConns = 25
+	defaultSQLMaxOpenConns = 50
+)
+
 func InitDB() (err error) {
 	db, err := chooseDB("SQL_DSN", false)
 	if err == nil {
@@ -247,8 +259,8 @@ func InitDB() (err error) {
 		if err != nil {
 			return err
 		}
-		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
-		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
+		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", defaultSQLMaxIdleConns))
+		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", defaultSQLMaxOpenConns))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
 
 		if !common.IsMasterNode {
@@ -289,8 +301,8 @@ func InitLogDB() (err error) {
 		if err != nil {
 			return err
 		}
-		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
-		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
+		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", defaultSQLMaxIdleConns))
+		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", defaultSQLMaxOpenConns))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
 
 		if !common.IsMasterNode {

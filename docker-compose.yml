@@ -87,8 +87,11 @@ services:
       - BATCH_UPDATE_INTERVAL=${BATCH_UPDATE_INTERVAL:-5}
       - UPDATE_TASK=${UPDATE_TASK:-true}
       - SYNC_FREQUENCY=${SYNC_FREQUENCY:-60}
-      - SQL_MAX_OPEN_CONNS=${SQL_MAX_OPEN_CONNS:-1000}
-      - SQL_MAX_IDLE_CONNS=${SQL_MAX_IDLE_CONNS:-100}
+      # 默认值须能被 stock PostgreSQL 接住（max_connections=100，扣掉 3 个超级用户
+      # 预留后可用 97）。池上限高于服务端容量不会变成排队，而是直接
+      # "too many clients already" 失败，因此留足余量；调优过的部署用环境变量抬高。
+      - SQL_MAX_OPEN_CONNS=${SQL_MAX_OPEN_CONNS:-50}
+      - SQL_MAX_IDLE_CONNS=${SQL_MAX_IDLE_CONNS:-25}
       - SQL_MAX_LIFETIME=${SQL_MAX_LIFETIME:-60}
       - REDIS_POOL_SIZE=${REDIS_POOL_SIZE:-10}
       - STREAM_SCANNER_MAX_BUFFER_MB=${STREAM_SCANNER_MAX_BUFFER_MB:-}
