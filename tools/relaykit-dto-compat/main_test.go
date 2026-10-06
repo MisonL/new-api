@@ -194,3 +194,86 @@ type T struct{}
 		t.Errorf("test files must not contribute functions, got %d", r.sharedFuncs)
 	}
 }
+
+// encoding/json emits struct fields in declaration order, so two sides that
+// agree on every name, tag and type still serialize to different bytes when a
+// shared field is declared in a different position. That is the order
+// dimension; without it a golden snapshot diff looks like a behaviour change.
+func TestFieldOrderDifferenceIsDetected(t *testing.T) {
+	ld, kd := twoSides(t, `package dto
+
+type T struct {
+	A string `+"`"+`json:"a"`+"`"+`
+	B string `+"`"+`json:"b"`+"`"+`
+}
+`, `package dto
+
+type T struct {
+	B string `+"`"+`json:"b"`+"`"+`
+	A string `+"`"+`json:"a"`+"`"+`
+}
+`)
+	r, err := build(ld, kd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.orderDiff) != 1 {
+		t.Fatalf("want 1 order diff, got %d: %v", len(r.orderDiff), r.orderDiff)
+	}
+	if !strings.Contains(r.orderDiff[0], "[A B]") || !strings.Contains(r.orderDiff[0], "[B A]") {
+		t.Errorf("order diff should name both sequences: %v", r.orderDiff[0])
+	}
+}
+
+// An identical declaration order is the baseline case: no report.
+func TestIdenticalFieldOrderIsNotReported(t *testing.T) {
+	ld, kd := twoSides(t, `package dto
+
+type T struct {
+	A string `+"`"+`json:"a"`+"`"+`
+	B string `+"`"+`json:"b"`+"`"+`
+}
+`, `package dto
+
+type T struct {
+	A string `+"`"+`json:"a"`+"`"+`
+	B string `+"`"+`json:"b"`+"`"+`
+}
+`)
+	r, err := build(ld, kd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.orderDiff) != 0 {
+		t.Fatalf("same order must not report: %v", r.orderDiff)
+	}
+}
+
+// A field present on one side only shifts the shared fields' positions without
+// any shared field changing relative order. That is the fieldSetDiff
+// dimension; reporting it here too would double-count one difference.
+func TestOneSidedFieldDoesNotCountAsOrderDiff(t *testing.T) {
+	ld, kd := twoSides(t, `package dto
+
+type T struct {
+	A string `+"`"+`json:"a"`+"`"+`
+	B string `+"`"+`json:"b"`+"`"+`
+}
+`, `package dto
+
+type T struct {
+	A string `+"`"+`json:"a"`+"`"+`
+	C string `+"`"+`json:"c"`+"`"+`
+}
+`)
+	r, err := build(ld, kd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.orderDiff) != 0 {
+		t.Fatalf("a one-sided field is a name diff, not an order diff: %v", r.orderDiff)
+	}
+	if len(r.fieldSetDiff) != 1 {
+		t.Errorf("want 1 name diff, got %d: %v", len(r.fieldSetDiff), r.fieldSetDiff)
+	}
+}

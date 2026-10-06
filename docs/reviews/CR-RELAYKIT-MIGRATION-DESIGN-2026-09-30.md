@@ -807,6 +807,35 @@ if from == to || to == types.RelayFormatGemini ||
 - **全称否定（「无一重叠」）错了而结论对，最容易被放过**——它读起来像已核过。**逐项找反例，并确认结论的理由是否也需要换。**
 - **声明数 ≠ 引用数**。文档说「5 个 fixture」时，实际被引用的可能只有 3 个。
 
+**第三十一轮（2026-10-05）——文档自标「一次性抽查、不是门禁」的那句话，正是缺口所在**：核 §12.16.2 里「4 个输出类型共有字段同序」这一段。它自己写着「但这是一次性抽查，不是门禁」，并建议「可复用 `tools/relaykit-dto-compat/` 扩一个『顺序』维度」——**建议从未执行，而抽查的结论是错的**。
+
+事实（逐条实测）：
+
+1. **「4 个输出类型」里有一个不是输出类型**：8 个快照真正 marshal 的顶层类型是 **3 个**——`GeneralOpenAIRequest`（2 个 request 快照）、`ClaudeResponse`、`GeminiChatResponse`（6 个 response/stream 快照）。`OpenAITextResponse` 是 response 方向的**输入**类型，被误列进「输出类型」。
+2. **真正需要同序的不止顶层类型**：`json.MarshalIndent` 递归输出嵌套结构，所以凡从输出根可达的类型都要同序。按「从 3 个输出根沿字段类型递归」重算：本地闭包 **28 个类型**、relaykit 闭包 **36 个**（kit 多出 `Usage`、`BillingUsage`、`CachedTokenDetails`、`InputTokenDetails`、`OutputTokenDetails`、`ReasoningConversionState`、`GeminiPartialArg`、`GeminiGroundingMetadata`），两侧共有 **28 个**。
+3. **共有 28 个里有 2 个顺序不同**：`ClaudeMediaMessage`（本地 `Thinking, Signature, Data, Delta`；kit `Thinking, Data, Signature, Delta`）与 `FunctionRequest`（本地 `Parameters, Strict, Arguments`；kit `Parameters, Arguments, Strict`）。原文的「全部一致」不成立。
+4. **本基线确实不受影响，但理由是另一条**：那两对字段在 8 个快照里**从未同时非空**——`signature`/`data` 在全部 8 个快照中出现 **0 次**；`strict` 在 fixture 与快照里均 0 次，且 `tools[].function` 实际输出的键是 `["description","name","parameters"]`（`arguments` 只出现在 `messages[].tool_calls[].function`，那是 `FunctionResponse`，两侧同序）。**这是运气不是保证**：fixture 一旦产出带 `signature` 的 thinking 块或带 `strict` 的工具定义，同一份快照就会纯因序列化顺序而红。
+5. **包级另有 2 个顺序差异类型**，不在本基线可达闭包内：`OpenAIResponsesCompactionRequest`、`ResponsesStreamResponse`（responses 方向）。
+6. **文档自报的维度数也不准**：12.0.6 写「覆盖四个维度」并把「嵌入字段与函数签名」并作一项，而工具一直打印 **5 组**（字段名/tag/类型/嵌入/签名）；§9.3 标题写「四维比较」，基线列表还漏了 `equiv`。
+
+修法（本轮把建议变成门禁）：
+
+- `tools/relaykit-dto-compat/main.go` 新增**第五维 `共有字段声明顺序不同`**（`orderDiff`）。`scan()` 原先只返回 `map[string]fieldInfo`——**map 丢失声明顺序**，这正是顺序维度长期缺席的结构性原因；改为额外返回 `orders map[string][]string`。**嵌入字段也计入顺序**（它在序列化输出里同样占位）。
+- 新增 `sharedOrderDiff()`：只比**两侧共有**字段的相对顺序，单边字段跳过（那是 `fieldSetDiff` 的职责，重复计数会把「增删一个字段」也报成顺序问题）。
+- `--strict` 加入 `wantOrder = 4`，**反向验证**：改成 3 → 退出码 1 报 `dimension 4 changed: got 4 want 3`，还原后恢复。
+- 新增 3 条单测：顺序不同要报、同序不报、单边字段不算顺序差异（后者同时断言它仍落在 `fieldSetDiff`）。
+- 文档侧：重写 §12.16.2 该段（列出 2 个顺序差异类型、说明本基线为何仍安全、并指明「先核字段顺序再谈回归」）、§9.3 改为六维基线 `fieldSet=33 tag=5 type=6 embed=0 order=4 sig=12 equiv=21`、12.0.6 维度数改为五个、阶段 4 判据补一条。
+
+门禁复核：`relaykit-citation-check.py` 退出码 0（40/40）、其单测 15 个通过；`relaykit-dto-compat.sh --strict` 通过（7 项计数）、工具单测 10 个通过（原 7 + 新增 3）。
+
+**教训**：
+
+- **文档里「这是一次性抽查，不是门禁」的句子，就是下一个缺口的位置**——它自己知道结论不可靠、也知道该怎么做（扩一个维度），却停在建议上。**凡写「不是门禁」并给出「可扩成门禁」的方案，当场把方案做掉**。
+- **「N 个类型」要先确认这 N 个是不是同一个集合**。原文把输入类型混进输出类型，于是「4 个」本身就不成立；而真正要核的是**可达闭包**（递归），不是顶层。
+- **序列化顺序的检查必须递归**。顶层同序不代表嵌套同序——2 个顺序差异类型都在第二层。
+- **map 是有损容器，凡是「顺序/位置」相关的维度都不能用它存**。工具的 `map[string]fieldInfo` 从第 15 轮起就在，顺序维度因此一直不可能实现。
+- **「本次不受影响」与「两侧一致」是两个结论**。本轮 2 处顺序差异都不影响基线，但原因是「那两对字段恰好为空」（偶然），不是「两侧一致」（事实）。**把偶然写成事实，下次 fixture 一改就翻车。**
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**。第十八轮起已实际运行 `go test ./service -run TestGolden` 与全包 `go test ./service`（见该轮），但「编译失败」类结论仍未逐条 `go build` 复现
@@ -857,7 +886,8 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第二十七轮） | 核阶段 5 判据能否验证 12.4 的语义条件，**发现更硬的问题：阶段顺序自相矛盾**——门控排在阶段 5，但阶段 4 判据「8 个快照逐字节一致」已要求门控生效，而上游 relaykit **默认无条件暴露 reasoning**（实测 `ResponseOpenAI2Claude(resp, nil)` 函数体 0 次引用 `info`、`:463` 无门控、整文件 0 处 `Options`）→ 阶段 4 必红且豁免条款覆盖不到。决定：门控移入阶段 4（处置清单新增第 13 项），阶段 5 只核验位置语义。**连带修出 12.4 自身四处错误**：钩子 nil 语义写反（`nil = 不保留` 应为 `nil = 保留`，否则破坏上游默认）、单参钩子复现不了三名字门控（须调用点各调一次取或）、插入点写错一层（须在外层二选一之前归零，否则同 chunk text 被丢）、同 chunk reasoning+text 是本地能力却未列入 9.1（已补第 7 条）。另修正 12.4.3 的落点文件名错误（`to_claude_messages_stream_resp.go` 不在 `oai_chat/` 下）。新增引用一度写成工作区口径（`:800/830/857`、`:544`），已按 HEAD 口径改正（`:793/823/850`、`:537`） |
 | （本轮·第二十八轮） | 核 §12.15.4 被多个判据引为「已实测」的两条边界——**实测后两条都不成立，且依据表把 schema 归一化标为「已内置」，掩盖了一个行为回归**。边界 1（schema）：本地 `normalizeClaudeInputSchema` 报错语义 vs 上游 `FunctionParametersToInputSchema` 静默降级，4 处差异（新增 §12.15.4.1）。边界 2（媒体）：上游 `switch` 只有 `case "text"` 与 `default`，`default` 里非 pdf 一律当 image——**`text/*` 文件被当图片发给 Claude**；另发现上游**无 `ContentTypeFile` case**、`ToFileSource()==nil` 静默丢内容、无 MIME 归一化、本地自身 pdf 判定不一致（`:122` 前缀 vs `:197` 精确），共 7 处差异（新增 §12.15.4.2）。9.2 补第 7、8 条（6→8）。退路条款被激活但原文写错（差异部分是纯函数、本就该在 relaykit，须**改上游实现**而非「迁入」），与「避免对 relaykit 产生分叉」冲突——按「保行为优先」处置，本地改动清单新增第 10、11 行。**顺带修门禁盲区（第 26 轮假绿复发）**：检查器报 18/18 绿，而 **23 处唯一简写引用**（`internal/...`、`oai_chat/...`、`convmeta/...`、`shared/claude/...`）全在门禁外——旧正则要求 `relaykit/` 前缀；加显式映射表 `SHORT_PACKAGES` 后覆盖 18→**34/34**，单测 10→15（先写测试确认 3 个失败再实现），反向验证短路径越界/文件不存在均能检出。**又踩一次「示例文本进入门禁」**：文档里写 `internal/oai_chat/foo.go:12` 当示例被检查器当真引用，已改占位符 |
 
+| （本轮·第三十一轮） | 核 §12.16.2「4 个输出类型共有字段同序」。**文档自标「一次性抽查、不是门禁」并建议扩维度——建议从未执行，抽查结论也是错的**。三处错：①「4 个输出类型」里有 1 个是**输入**类型（`OpenAITextResponse`），真正 marshal 的顶层类型是 3 个；②需同序的是**可达闭包**（递归），实测本地 28 / kit 36 / 共有 28 个类型，其中 **2 个顺序不同**（`ClaudeMediaMessage` 的 `Signature`/`Data`、`FunctionRequest` 的 `Strict`/`Arguments`）；③「全部一致」不成立。本基线仍安全，但理由是「那两对字段在快照里恰好都为空」（偶然），不是「两侧一致」。修法：给工具加**第五维 orderDiff**——根因是 `scan()` 用 `map[string]fieldInfo` 存字段，**map 丢失声明顺序**，顺序维度从第 15 轮起就不可能实现；改返回 `orders map[string][]string`（嵌入字段也计入），新增 `sharedOrderDiff`（只比共有字段，避免与 fieldSetDiff 重复计数），`--strict` 加 `wantOrder=4` 并反向验证（改 3 → 退出码 1）。新增 3 条单测（10 个通过）。文档侧重写该段、§9.3 改六维基线、12.0.6 维度数改五、阶段 4 判据补一条 |
 | （本轮·第三十轮） | 核 §12.16.2/12.16.3，从「9.1/9.2 的 13 处」这一个聚合计数查出 **8 处错误**：计数 5 处（13→15；「6 个调用点」实为 6 函数/8 调用点；12.0.8 的「全部 15 处」实为 tag 5 + 类型 6 = 11；12.0.6 的「等价拼写 15 处」实为 21；类别 C「3 类型 4 字段」实为 4 类型 5 字段）、事实 2 处（`mustUnmarshalFixture` 并非「同签名」——上游 `(raw string, out any)` vs 本地 `(t, raw, v)`，决定阶段 6 合并须改本地 8 处调用；「与 15 处差异无一重叠」不成立，至少 3 处重叠，结论仍成立但理由应改为「重叠的几处是 struct 值空操作」）、死代码 1 处（2 个 fixture 常量零引用）。**根因是工具门禁漏掉一整个维度**：`--strict` 期望数组 5 项而工具打印 6 组，等价拼写组从未进 gate——已加 `wantEquiv=21` 并反向验证（改 20 → 退出码 1）。另核实 IDE 报的 `main.go:50` embed 诊断与本轮无关（HEAD 原样、前端未构建） |
 | （本轮·第二十九轮） | 核 §12.11（`reasonmap` 宽松 default）：原文写「严格化在宿主调用点做」，**实测该落点在阶段 6 后不存在**——严格校验的两个唯一调用点（`service/convert.go:738`、`:1057`）都在阶段 6 删除的文件内，宿主 5 个 Claude 方向调用点全部只做错误转发，relaykit 侧 `reasonmap.OpenAIFinishReasonToClaudeStopReason` 是纯包级函数、零钩子（与 12.4 的 `Options` 钩子、12.15.4 的 `MediaResolver` 不同）。且差异被少算：实际 **5 条**（未知值报错、`""`、`TrimSpace`、`function_call`、`content_filter` 无差异），其中 3 条是行为回归；`""` 那条因 `stop_reason` 带 `omitempty` 会整字段消失，且两条 golden 基线都测不到。`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 调用的函数阶段 4 即删，是「编译失败」而非「失败得其所」——12.16.1 的第二个例外。§12.11 重写为 12.11.1/12.11.2/12.11.3（二选一：A 加钩子 / B 宿主 5 处前置校验），同步 9.1 第 1 条、处置清单 9、§10 收尾 12、§12.17 第 12 行、阶段表第 4 行判据、本地改动清单第 12 行、未决项 31。引用 34→40，门禁 40/40，反向验证通过 |
 
-文档当前 1713 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+文档当前 1727 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。

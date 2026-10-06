@@ -1,5 +1,5 @@
 // Command relaykit-dto-compat compares the local dto package against the
-// relaykit dto package across four dimensions that a field-name diff misses:
+// relaykit dto package across dimensions that a field-name diff misses:
 //
 //  1. field names        - which fields exist on same-named structs
 //  2. JSON tags          - same name, different serialized key or omitempty
@@ -7,6 +7,9 @@
 //  4. embedded fields    - ast.Field.Names is empty for these, so they are
 //     invisible to the name and type diffs, and function signatures, which a
 //     name-only method diff never compares
+//  5. declaration order  - encoding/json emits struct fields in declaration
+//     order, so two sides with identical names/tags/types still serialize to
+//     different bytes when a shared field is declared in a different position
 //
 // Usage:
 //
@@ -42,17 +45,21 @@ type fieldInfo struct {
 }
 
 // scan parses every .go file in dir and indexes, per named struct type, its
-// named fields (with type and JSON tag) and its embedded field types; and,
-// per function or method key, its signature.
-func scan(dir string) (structs map[string]map[string]fieldInfo, embeds map[string][]string, sigs map[string]string, err error) {
+// named fields (with type and JSON tag), its declaration order, and its
+// embedded field types; and, per function or method key, its signature.
+//
+// The field map loses declaration order, which is exactly what dimension 5
+// needs, so the order is recorded separately as a slice.
+func scan(dir string) (structs map[string]map[string]fieldInfo, orders map[string][]string, embeds map[string][]string, sigs map[string]string, err error) {
 	structs = map[string]map[string]fieldInfo{}
+	orders = map[string][]string{}
 	embeds = map[string][]string{}
 	sigs = map[string]string{}
 	fset := token.NewFileSet()
 
 	ents, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	for _, e := range ents {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
@@ -60,7 +67,7 @@ func scan(dir string) (structs map[string]map[string]fieldInfo, embeds map[strin
 		}
 		f, perr := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, 0)
 		if perr != nil {
-			return nil, nil, nil, fmt.Errorf("parse %s: %w", e.Name(), perr)
+			return nil, nil, nil, nil, fmt.Errorf("parse %s: %w", e.Name(), perr)
 		}
 		for _, d := range f.Decls {
 			switch decl := d.(type) {
@@ -78,9 +85,15 @@ func scan(dir string) (structs map[string]map[string]fieldInfo, embeds map[strin
 						continue
 					}
 					fields := map[string]fieldInfo{}
+					var order []string
 					for _, fl := range st.Fields.List {
 						if len(fl.Names) == 0 {
+							// An embedded field still occupies a position in the
+							// serialized output (under its tag, or its type name),
+							// so it belongs in the order slice too -- otherwise a
+							// moved embed would change the bytes unobserved.
 							embeds[ts.Name.Name] = append(embeds[ts.Name.Name], render(fset, fl.Type))
+							order = append(order, render(fset, fl.Type))
 							continue
 						}
 						tag := ""
@@ -89,9 +102,11 @@ func scan(dir string) (structs map[string]map[string]fieldInfo, embeds map[strin
 						}
 						for _, nm := range fl.Names {
 							fields[nm.Name] = fieldInfo{typ: render(fset, fl.Type), tag: tag}
+							order = append(order, nm.Name)
 						}
 					}
 					structs[ts.Name.Name] = fields
+					orders[ts.Name.Name] = order
 				}
 			case *ast.FuncDecl:
 				key := decl.Name.Name
@@ -105,7 +120,7 @@ func scan(dir string) (structs map[string]map[string]fieldInfo, embeds map[strin
 	for k := range embeds {
 		sort.Strings(embeds[k])
 	}
-	return structs, embeds, sigs, nil
+	return structs, orders, embeds, sigs, nil
 }
 
 func render(fset *token.FileSet, n ast.Node) string {
@@ -119,6 +134,7 @@ type report struct {
 	tagDiff        []string
 	typeDiff       []string
 	embedDiff      []string
+	orderDiff      []string // shared fields declared in a different position
 	sigDiff        []string
 	sharedTypes    int
 	sharedFuncs    int
@@ -135,12 +151,52 @@ func spellingsEquivalent(a, b string) bool {
 	return norm(a) == norm(b)
 }
 
+// sharedOrderDiff reports whether the fields the two sides share are declared
+// in a different relative order. encoding/json emits struct fields in
+// declaration order, so same names, tags and types still serialize to different
+// bytes when this differs -- which is what makes a golden snapshot comparison
+// fail for a reason that is not a behaviour change.
+//
+// Fields present on only one side are skipped rather than counted: they are
+// already the fieldSetDiff dimension, and including them would report every
+// type that gained or lost a field as an order problem too.
+func sharedOrderDiff(local, kit []string) (string, bool) {
+	inKit := map[string]bool{}
+	for _, f := range kit {
+		inKit[f] = true
+	}
+	inLocal := map[string]bool{}
+	for _, f := range local {
+		inLocal[f] = true
+	}
+	var lo, ko []string
+	for _, f := range local {
+		if inKit[f] {
+			lo = append(lo, f)
+		}
+	}
+	for _, f := range kit {
+		if inLocal[f] {
+			ko = append(ko, f)
+		}
+	}
+	if len(lo) < 2 || len(ko) < 2 {
+		return "", false
+	}
+	for i := range lo {
+		if lo[i] != ko[i] {
+			return fmt.Sprintf("local=%v kit=%v", lo, ko), true
+		}
+	}
+	return "", false
+}
+
 func build(localDir, kitDir string) (*report, error) {
-	ls, le, lf, err := scan(localDir)
+	ls, lo, le, lf, err := scan(localDir)
 	if err != nil {
 		return nil, err
 	}
-	ks, ke, kf, err := scan(kitDir)
+	ks, ko, ke, kf, err := scan(kitDir)
 	if err != nil {
 		return nil, err
 	}
@@ -151,6 +207,9 @@ func build(localDir, kitDir string) (*report, error) {
 			continue
 		}
 		r.sharedTypes++
+		if o, ok := sharedOrderDiff(lo[name], ko[name]); ok {
+			r.orderDiff = append(r.orderDiff, fmt.Sprintf("%s: %s", name, o))
+		}
 		var nameSet, tagSet, typeSet []string
 		for fn, lf := range lfields {
 			kfi, ok := kfields[fn]
@@ -222,6 +281,7 @@ func build(localDir, kitDir string) (*report, error) {
 	}
 	sort.Strings(r.fieldSetDiff)
 	sort.Strings(r.embedDiff)
+	sort.Strings(r.orderDiff)
 	sort.Strings(r.sigDiff)
 	sort.Strings(r.tagEquivalents)
 	return r, nil
@@ -264,12 +324,13 @@ func main() {
 	section("JSON tag 不同", r.tagDiff)
 	section("Go 类型不同（含 interface{}/any 等价项）", r.typeDiff)
 	section("嵌入字段不同", r.embedDiff)
+	section("共有字段声明顺序不同", r.orderDiff)
 	section("函数/方法签名不同", r.sigDiff)
 	section("等价拼写（interface{} vs any），仅供参考", r.tagEquivalents)
 
-	fmt.Printf("\n计数: fieldSet=%d tag=%d type=%d embed=%d sig=%d equiv=%d\n",
-		len(r.fieldSetDiff), len(r.tagDiff), len(r.typeDiff), len(r.embedDiff), len(r.sigDiff),
-		len(r.tagEquivalents))
+	fmt.Printf("\n计数: fieldSet=%d tag=%d type=%d embed=%d order=%d sig=%d equiv=%d\n",
+		len(r.fieldSetDiff), len(r.tagDiff), len(r.typeDiff), len(r.embedDiff), len(r.orderDiff),
+		len(r.sigDiff), len(r.tagEquivalents))
 
 	// Recorded expectation as of the 15th review round (2026-10-04), against
 	// HEAD:dto and upstream/main:relaykit/dto. This is a point-in-time
@@ -284,14 +345,17 @@ func main() {
 	const (
 		wantFieldSet = 33 // types whose field-name sets differ
 		wantTag      = 5
-		wantType     = 6  // excludes interface{}/any spellings, reported separately
+		wantType     = 6 // excludes interface{}/any spellings, reported separately
 		wantEmbed    = 0
-		wantSig      = 12 // all IsStream; NewNotify's interface{}/any is a spelling
-		wantEquiv    = 21 // 20 fields + NewNotify's one parameter, in its own group
+		wantOrder    = 4 // package-wide; only 2 of them (ClaudeMediaMessage,
+		// FunctionRequest) are reachable from the 3 golden output roots -- see
+		// the 31st review round in the design doc
+		wantSig   = 12 // all IsStream; NewNotify's interface{}/any is a spelling
+		wantEquiv = 21 // 20 fields + NewNotify's one parameter, in its own group
 	)
 	if *strict {
-		got := []int{len(r.fieldSetDiff), len(r.tagDiff), len(r.typeDiff), len(r.embedDiff), len(r.sigDiff), len(r.tagEquivalents)}
-		want := []int{wantFieldSet, wantTag, wantType, wantEmbed, wantSig, wantEquiv}
+		got := []int{len(r.fieldSetDiff), len(r.tagDiff), len(r.typeDiff), len(r.embedDiff), len(r.orderDiff), len(r.sigDiff), len(r.tagEquivalents)}
+		want := []int{wantFieldSet, wantTag, wantType, wantEmbed, wantOrder, wantSig, wantEquiv}
 		for i := range want {
 			if got[i] != want[i] {
 				fmt.Fprintf(os.Stderr, "strict: dimension %d changed: got %d want %d\n", i, got[i], want[i])

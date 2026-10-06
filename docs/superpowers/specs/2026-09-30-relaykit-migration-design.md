@@ -383,7 +383,7 @@ const (
 | 1 | **取得 relaykit 源码**（见下「阶段 1 的前置」）；引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译；`relaykit/` 的版本已锚定并记录 |
 | 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写**（**基线口径，含测试**：基线 `dbfbc096f` 实测 205 非测试 + 122 测试 = 327；工作区已漂到 341）+ **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ **同名字段的 JSON tag / Go 类型差异逐项对齐**（12.0.8：15 处全部采用 relaykit，改 8 处 `IncludeThoughts` 赋值点 + `Text`/`Arguments` 读写点 + 4 处 import）+ 全部宿主独有方法（全包 394 vs 273 函数，含测试口径）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。**另须改 `service/convert_golden_test.go` 的 import**——它是第 18 轮新增、**不在上述 327 的基线口径内**，却 import 宿主 `dto`/`constant`/`types`，`dto` 一迁即编译失败（见下「阶段 2 的前置：基线测试的 import 不在 327 内」）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**327 个 import 点全部验证**；**15 处 tag/类型差异逐项有决定（12.0.8）**；**`convert_golden_test.go` 的 import 已随之迁移且 `TestGolden` 仍绿** |
 | 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 别名，同步改写 `service/convert.go` 的 22 处字段引用；**`RelayInfo` 补齐 `convmeta.Meta` 的 13 个缺失方法**——接口共 15 个（已机械核验），本地 `RelayInfo` 现有 26 个方法中**只有 2 个重名**（`GetEstimatePromptTokens`、`AppendRequestConversion`），**须新增 13 个**，可整体照抄上游 `upstream/main:relay/common/relay_info.go:823-953`（上游已有编译期断言 `:823`，13 个实现自 `:825` 的 `GetOriginModelName` 至 `:922-953` 的 `ConvOptions`）。其中 12 个是纯访问器，**只有 `ConvOptions` 需新写逻辑**——它 import `model_setting.GetClaudeSettings/GetGeminiSettings`（本地已存在：`setting/model_setting/claude.go:55`、`gemini.go:53`）并按会话缓存 `convOptions` 字段（本地**尚无**该字段） | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过；**13 个方法逐个落地**（非「实现 15 个」）；`ConvOptions` 的缓存语义按上游（首次调用建快照、同一 relay 会话复用） |
-| 4 | 协议映射切换到 relaykit（**单点可逆**，见 §8.1）；**接线 `relayconvert.SetMediaResolver`（指向 `service.GetBase64Data`）与 `convmeta.Options` 钩子（指向 `model_setting`）**，随后通道级转换器改调 relaykit（12.15.4）；打补丁 1；**打补丁 3 并落地 12.4 的响应方向门控**（`convmeta.Options` 新增 `RetainReasoningInClaudeResponse` + 宿主接线 + `oai_chat/to_claude_messages_resp.go` 两条入口加判断，处置清单 13）——**门控必须与本阶段的切换同时落地**：relaykit 默认无条件暴露 reasoning，切换而不门控即等于把非 DeepSeek 的 reasoning 泄漏给客户端（见 12.4.4）；**按下方「阶段 4 的处置清单」逐项落地**；**`*WithError` 系列直接删除**（12.3，不保留包装层）；**把 `convert_golden_test.go` 的调用点改指 relaykit**（处置清单 12）；**落地 finish_reason 严格语义**（处置清单 9，12.11.3 的选项 A/B 二选一） | **`TestGolden` 改指 relaykit 后 8 个快照逐字节一致，或每一处差异都能对应到处置清单第 6 项为 9.1/9.2 逐条产出的「保留/放弃/改写」决定**（12.16.2；该决定清单是**阶段 4 的产出**，不是既有物——判据引用的是它，不是预先存在的清单）；**4 个门控相关快照（`response/openai_to_claude`、`stream/openai_to_claude`、`response/openai_to_claude_deepseek`、`stream/openai_to_claude_deepseek`）不适用上述豁免**——第 6 项只覆盖 9.1/9.2，门控不在其中，它们逐字节一致**直接证明门控已随切换落地**；grok reasoning 可见；处置清单每项已确认；**12.15.4 的两条边界已实测且均不成立**（12.15.4.1/12.15.4.2：schema 归一化 4 处差异、媒体分派 7 处差异）——须按处置清单第 10 项连同上游实现一并改，不能只接线；**finish_reason 严格语义的 b/c/d 三条有新测试**（12.11.3——`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 只覆盖未知值一条，两条 golden 基线都测不到其余三条） |
+| 4 | 协议映射切换到 relaykit（**单点可逆**，见 §8.1）；**接线 `relayconvert.SetMediaResolver`（指向 `service.GetBase64Data`）与 `convmeta.Options` 钩子（指向 `model_setting`）**，随后通道级转换器改调 relaykit（12.15.4）；打补丁 1；**打补丁 3 并落地 12.4 的响应方向门控**（`convmeta.Options` 新增 `RetainReasoningInClaudeResponse` + 宿主接线 + `oai_chat/to_claude_messages_resp.go` 两条入口加判断，处置清单 13）——**门控必须与本阶段的切换同时落地**：relaykit 默认无条件暴露 reasoning，切换而不门控即等于把非 DeepSeek 的 reasoning 泄漏给客户端（见 12.4.4）；**按下方「阶段 4 的处置清单」逐项落地**；**`*WithError` 系列直接删除**（12.3，不保留包装层）；**把 `convert_golden_test.go` 的调用点改指 relaykit**（处置清单 12）；**落地 finish_reason 严格语义**（处置清单 9，12.11.3 的选项 A/B 二选一） | **`TestGolden` 改指 relaykit 后 8 个快照逐字节一致，或每一处差异都能对应到处置清单第 6 项为 9.1/9.2 逐条产出的「保留/放弃/改写」决定**（12.16.2；该决定清单是**阶段 4 的产出**，不是既有物——判据引用的是它，不是预先存在的清单）；**4 个门控相关快照（`response/openai_to_claude`、`stream/openai_to_claude`、`response/openai_to_claude_deepseek`、`stream/openai_to_claude_deepseek`）不适用上述豁免**——第 6 项只覆盖 9.1/9.2，门控不在其中，它们逐字节一致**直接证明门控已随切换落地**；grok reasoning 可见；处置清单每项已确认；**12.15.4 的两条边界已实测且均不成立**（12.15.4.1/12.15.4.2：schema 归一化 4 处差异、媒体分派 7 处差异）——须按处置清单第 10 项连同上游实现一并改，不能只接线；**finish_reason 严格语义的 b/c/d 三条有新测试**（12.11.3——`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 只覆盖未知值一条，两条 golden 基线都测不到其余三条）；**快照差异先排除「字段顺序」再谈回归**——`ClaudeMediaMessage`（`Signature`/`Data`）与 `FunctionRequest`（`Strict`/`Arguments`）两侧声明顺序不同（12.16.2，第 31 轮实测），本基线因那两对字段在快照里恰好都为空而未受影响，但改动 fixture 使其非空即会纯因序列化顺序而红 |
 | 5 | 宿主管道接入 relaykit 分派；**`matchAnyRegex` 空模式语义显式文档化**（12.8，采用本地语义「空 patterns = 匹配全部」）。**响应方向暴露门控已在阶段 4 落地**（12.4.4 已说明为何不能留到本阶段），本阶段只需**核验其位置语义**：门控必须在**索引分配之前**（`stopOpenBlocksAndAdvance()` 推进 `state.Index` 之前），后置过滤不可行——见 12.4.1 | 全量测试通过；空 patterns 语义已写入配置文档；**门控位置已核验**：`stream/openai_to_claude` 快照（非 DeepSeek + 输入含 `reasoning_content`）的输出为 text 在 index 0、tool 在 index 1——若门控后置于索引分配，reasoning 会先占 index 0、text 顺移到 index 1，该快照必红（12.4.4） |
 | 6 | 删除旧代码：`service/convert.go` 主体（2229 行）**与 4 个通道级转换器**（`relay-claude.go:255` 459 行等——12.15.4 已定收敛到 relaykit，本阶段删除本地实现）。**`service/openaicompat/` 不删**——12.15.3 已决定该包整体保留、行数不减少，它与 relaykit 的基础转换重复但不可切分（12.15.1）。**`convert_golden_test.go` 与 `service/testdata/golden/` 不得随主体一起删除**：阶段 4 已把它改指 relaykit，本阶段须把**本地独有部分**（DeepSeek 门控 fixture 与两条 `*_deepseek` 用例）并入上游已有的 `relaykit/relayconvert/golden_test.go`，复用其 helper，**不得整体移入**（同包同名符号会编译失败，见 12.16.3） | `service/convert.go` 无残留引用；`service/openaicompat/` 的 3 个消费者（4.5.1）行为不变；**4 个通道级转换器已删除且无残留引用**；**golden 基线已在 `relaykit/` 下运行且快照与阶段 4 末态一致** |
 
@@ -631,11 +631,12 @@ cd relaykit && GOWORK=off go test ./relayconvert -run TestGolden -count=1
 
 **前端改动**：`cd web/default && bun run lint && bun run build`（AGENTS.md 第 4 节）。
 
-**dto 兼容性四维比较**（阶段 2 前必跑，上游 relaykit 每次变动后重跑）：
+**dto 兼容性六维比较**（阶段 2 前必跑，上游 relaykit 每次变动后重跑）：
 
 ```bash
 scripts/relaykit-dto-compat.sh --strict
-# 计数: fieldSet=33 tag=5 type=6 embed=0 sig=12（2026-10-04 基线）
+# 计数: fieldSet=33 tag=5 type=6 embed=0 order=4 sig=12 equiv=21
+# （2026-10-06 基线；order 与 equiv 是第 30/31 轮补入 gate 的两个维度）
 ```
 
 **设计文档行号引用的完整性**（锚定漂移后重跑，见「阶段 1 的前置：relaykit 源码的取得与版本锚定」）：
@@ -1003,9 +1004,9 @@ relaykit/dto 有、本地 dto 无：`alpha_search_request.go`、`billing_usage.g
 - **嵌入（匿名）字段**：本地 7 个、relaykit 7 个，**逐类型对比零差异**（都在 `embedding.go`、`openai_response.go`，均为 `Usage`/`Message` 的 JSON 嵌入）
 - **函数/方法签名**（此前只比了名字，没比参数与返回值）：135 个同名函数中 **13 处签名文本不同**——12 个是 `IsStream` 的 `*gin.Context → *http.Request`（与 §7「阶段 2 的前置」记录的 12 个方法完全一致，互为印证），1 个是 `NewNotify` 的 `interface{} → any`（等价写法，工具归入等价拼写组，**故签名真差异为 12**）。**无未知项**
 
-至此，dto 的兼容性核查覆盖四个维度：字段名（12.0.5）、JSON tag、Go 类型（本节）、嵌入字段与函数签名。四维之外未再发现未比较的结构面。
+至此，dto 的兼容性核查覆盖五个维度：字段名（12.0.5）、JSON tag、Go 类型（本节）、嵌入字段与函数签名、**共有字段的声明顺序**（第 31 轮新增，见下）。**第 31 轮修正**：原文写「四个维度」并把「嵌入字段与函数签名」并作一项，实际工具一直报 5 组（字段名/tag/类型/嵌入/签名），第 31 轮再加顺序组，共 6 组。
 
-**四、工具化（第 15 轮新增）**
+**四、工具化（第 15 轮新增；第 31 轮补第五维）**
 
 本节与 12.0.5 的全部数字，已固化为可重跑的工具：
 
@@ -1018,7 +1019,7 @@ scripts/relaykit-dto-compat.sh --markdown # 供粘进审查记录
 scripts/relaykit-dto-compat.sh --strict   # 计数漂移即非零退出
 ```
 
-**这解决了本文档最大的一个结构性弱点**：此前每一次「上游 relaykit 演进后需重新核对」都得靠人肉复核，而 12.0.6 已证明人肉复核会漏维度。现在四维比较是一条命令；`--strict` 把当前基线（fieldSet=33、tag=5、type=6、embed=0、sig=12）变成门禁，**上游一漂移就报警**，而不是等到阶段 2 编译失败才发现。基线是**时间点快照**，本地 `dto` 或锚定的 relaykit 提交变动时须有意重录——这正是门禁的意义。
+**这解决了本文档最大的一个结构性弱点**：此前每一次「上游 relaykit 演进后需重新核对」都得靠人肉复核，而 12.0.6 已证明人肉复核会漏维度。现在比较是一条命令；`--strict` 把当前基线（fieldSet=33、tag=5、type=6、embed=0、**order=4**、sig=12、**equiv=21**）变成门禁，**上游一漂移就报警**，而不是等到阶段 2 编译失败才发现。**第 31 轮修正两处**：一是原文的基线列表漏了 `equiv`（等价拼写 21，第 30 轮才纳入门禁）；二是**「打印了几组」与「gate 了几组」曾经不等**——工具打印 6 组而 `--strict` 只 gate 5 项，等价拼写组因此长期在门外。基线是**时间点快照**，本地 `dto` 或锚定的 relaykit 提交变动时须有意重录——这正是门禁的意义。
 
 工具同时修掉了本节上一轮的两处计数错误（见下）。
 
@@ -1605,7 +1606,20 @@ go test ./service -run TestGolden -count=1 -update   # 重录
 
    **调用点清单（第 30 轮实测，`service/convert_golden_test.go`）**：`ClaudeToOpenAIRequest`(`:204`)、`GeminiToOpenAIRequest`(`:213`)、`ResponseOpenAI2ClaudeWithError`(`:224`、`:238`)、`ResponseOpenAI2GeminiWithError`(`:247`)、`StreamResponseOpenAI2ClaudeWithError`(`:271`、`:291`)、`StreamResponseOpenAI2GeminiWithError`(`:307`)——**共 8 处，分布在 6 个函数上**。两个函数各被调用两次，是因为门控两侧各跑一遍（非 DeepSeek 与 DeepSeek）。**改指时这 8 处都要改，漏掉任一处即编译失败**。
 
-   **「逐字节一致」的前提是两侧结构体字段顺序相同**（`json.MarshalIndent` 按声明顺序输出，顺序不同则语义等价也会失败）。已机械核验（正则抽 `struct` 体内字段名序列）fixture 涉及的 4 个输出类型，**共有字段的相对顺序两侧全部一致**：`OpenAITextResponse`（7/7 字段全同序）、`GeminiChatResponse`（本地 3 / kit 4，共有 3 全同序）、`GeneralOpenAIRequest`（本地 61 / kit 81，共有 61 全同序）、`ClaudeResponse`（12/12 全同序）。**注意后两个是「共有字段同序」而非「字段集相同」**——relaykit 的 `GeneralOpenAIRequest` 多 20 个字段、`GeminiChatResponse` 多 1 个，多出来的字段不参与同一 fixture 的输出，故不影响本基线比对。**但这是一次性抽查，不是门禁**——阶段 4 改指后若快照出现「内容相同、顺序不同」的差异，应判定为字段顺序差异而非行为回归，并**先核字段顺序再谈回归**。可复用 `tools/relaykit-dto-compat/`（它已抽字段名集合）扩一个「顺序」维度来机械判定，避免人工误判。
+   **「逐字节一致」的前提是两侧结构体字段顺序相同**（`json.MarshalIndent` 按声明顺序输出，顺序不同则语义等价也会失败）。
+
+   **第 31 轮实测推翻本段原结论。** 原文写「已机械核验 fixture 涉及的 4 个输出类型，共有字段的相对顺序两侧全部一致」——**两处错**：其一，**4 个类型里有 1 个不是输出类型**（`OpenAITextResponse` 是 response 方向的**输入**）；其二，真正需要同序的不止顶层类型，而是**从 3 个输出根可达的全部嵌套类型**。按「从 `GeneralOpenAIRequest` / `ClaudeResponse` / `GeminiChatResponse` 出发、沿字段类型递归」重算，本地闭包 **28 个类型**、relaykit 闭包 **36 个**（kit 多出 `Usage`、`BillingUsage`、`CachedTokenDetails`、`InputTokenDetails`、`OutputTokenDetails`、`ReasoningConversionState`、`GeminiPartialArg`、`GeminiGroundingMetadata` 8 个），**两侧共有 28 个，其中 2 个字段顺序不同**：
+
+   | 类型 | 本地顺序 | relaykit 顺序 | 是否影响本基线 |
+   |---|---|---|---|
+   | `ClaudeMediaMessage`（`dto/claude.go`） | …`Thinking`, **`Signature`**, **`Data`**, `Delta`… | …`Thinking`, **`Data`**, **`Signature`**, `Delta`… | **否**——两者都是 `string` + `omitempty`，快照里 `signature`/`data` 均**未出现**（8 个快照实测 0 次），只有同时非空才影响字节序 |
+   | `FunctionRequest`（`dto/openai_request.go`） | …`Parameters`, **`Strict`**, **`Arguments`** | …`Parameters`, **`Arguments`**, **`Strict`** | **否**——快照里 `tools[].function` 实际输出的键是 `["description","name","parameters"]`（`arguments` 只出现在 `messages[].tool_calls[].function`，那是 `FunctionResponse`，两侧顺序一致）；`strict` 在 fixture 与快照里均为 0 次 |
+
+   **另 2 个顺序差异类型不在本基线可达闭包内**：`OpenAIResponsesCompactionRequest`、`ResponsesStreamResponse`（属 responses 方向，本基线不走）。
+
+   **结论不变但理由要换**：本基线 8 个快照**不会因字段顺序而漂移**——不是因为「所有类型同序」，而是因为**被交换的那对字段在快照里恰好都不非空**。这是**运气，不是保证**：本地若产出带 `signature` 的 thinking 块或带 `strict` 的 tool 定义，同一份快照就会因纯序列化顺序而红。**阶段 4 改指后若快照出现「内容相同、顺序不同」的差异，先核字段顺序再谈回归**（这仍是本段原来的正确部分）。
+
+   **已工具化，不再靠人肉**：第 31 轮给 `tools/relaykit-dto-compat/` 加了**第五维 `共有字段声明顺序不同`**（`orderDiff`，嵌入字段也计入顺序），当前包级基线 **order=4**，已进 `--strict` 门禁并经**反转验证**（改成 3 → 退出码 1 报 `dimension 4 changed`）。三条新增单测覆盖「顺序不同要报」「同序不报」「单边字段不算顺序差异（那是 name 维度，避免重复计数）」。
 
    **另一个前置**：本基线声明了 5 个 fixture 常量，但**只有 3 个真被引用**——`fixtureOpenAIChatRequest`（`:121`）与 `fixtureClaudeResponse`（`:181`）在全 `service/` 包内零引用，是死代码（**第 30 轮实测**：两者各自只出现在自己的声明行）。实际用到的输入类型是 `dto.ChatCompletionsStreamResponse`、`dto.ClaudeRequest`、`dto.GeminiChatRequest`、`dto.OpenAITextResponse` 与 `dto.UserSetting`，输出侧是 `GeneralOpenAIRequest`、`ClaudeResponse`、`GeminiChatResponse`。**第 30 轮修正**：原文写「与 12.0.8 那 15 处差异涉及的字段**无一重叠**」——**该断言不成立**。逐条核后的实际情况是**有重叠，且输出侧也重叠**：
 
