@@ -70,11 +70,12 @@ func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 
 	for scanner.Scan() {
 		data := scanner.Text()
-		if len(data) < len("data: ") {
+		if len(data) < len("data:") || !strings.HasPrefix(data, "data:") {
 			continue
 		}
-		data = strings.TrimPrefix(data, "data: ")
-		data = strings.TrimSuffix(data, "\r")
+		// SSE 规范允许 data: 后不带空格；与共享扫描器一致（stream_scanner.go:343），
+		// 否则这类帧会解析失败并被静默丢弃。
+		data = strings.TrimSpace(data[len("data:"):])
 
 		if data == "[DONE]" {
 			sawDone = true
