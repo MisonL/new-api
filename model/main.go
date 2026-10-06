@@ -57,12 +57,21 @@ func initCol() {
 		commonFalseVal = "0"
 	}
 	if os.Getenv("LOG_SQL_DSN") != "" {
+		// The log database can be a different engine than the main one, so its
+		// column quoting has to follow the log database, not the main database.
+		// Copying the main database's quoting produced `"group"` for a MySQL log
+		// database under a PostgreSQL main database, and MySQL reads a
+		// double-quoted name as a string literal unless ANSI_QUOTES is set, so the
+		// predicate silently matched nothing. SQLite accepts backticks too, so the
+		// non-PostgreSQL branch is safe for both remaining engines.
+		//
+		// logKeyCol is left alone: nothing reads it.
 		switch common.LogSqlType {
 		case common.DatabaseTypePostgreSQL:
 			logGroupCol = `"group"`
 			logKeyCol = `"key"`
 		default:
-			logGroupCol = commonGroupCol
+			logGroupCol = "`group`"
 			logKeyCol = commonKeyCol
 		}
 	} else {
