@@ -245,11 +245,11 @@ Message:"SQL logic error: near \"=\": syntax error (1)"
 
 ### 8.1 已确认成立的发现
 
-**F0 — `ec666d063` 是「只提交消费方、没提交定义方」的半个提交，导致 HEAD 不可编译（P0）**
+**F0 — 从 `6a5374a32` 起 HEAD 一直不可编译，第一个破损提交就是我自己的（P0）**
 
-这是本轮最严重的发现，且**归因到我自己**：`ec666d063` 正是第 1 节记录的污染提交
-（我用 `git add controller/relay.go` 把其他会话在同一文件里的未提交改动一并扫入）。
-被扫入的那部分引用了 5 个符号，而**定义方全部停留在未提交状态**：
+这是本轮最严重的发现，且**归因到我自己**。
+
+`ec666d063`（污染提交）引用了 4 个符号，而**定义方全部停留在未提交状态**：
 
 | 符号 | 使用点（已提交） | 定义位置（未提交） |
 | --- | --- | --- |
@@ -258,30 +258,59 @@ Message:"SQL logic error: near \"=\": syntax error (1)"
 | `helper.ResetEventStreamHeaders` | `controller/relay.go:500` | `relay/helper/common.go` |
 | `settings.AllowMissingCodexDynamicRequestHeaders` | `controller/relay.go:1657` | `dto/channel_settings.go` |
 
-复现（把 HEAD 干净导出到 `/tmp` 后编译，绕开工作树里那些未提交的定义）：
+但**第一个破损的提交不是 `ec666d063`，而是它前面一个**。逐提交验证
+（每个提交 `git archive` 到 `/tmp` 后 `go vet ./controller/`）：
+
+```
+d253d1fb9  OK          <- 破损前的基线
+6a5374a32  BROKEN      <- 我的第一个提交
+ec666d063  BROKEN
+2cf89cbea  BROKEN
+253d93101  BROKEN
+ea4033114  BROKEN
+2b70bae80  BROKEN
+38fe02eba  BROKEN
+5040f4d98  BROKEN
+aff83779d  BROKEN
+a80f89ac7  BROKEN
+8584dde2b  BROKEN
+```
+
+`6a5374a32` 的破损原因不同：它新增的 `controller/relay_stream_attempt_boundary_test.go`
+调用了 `beginResponsesStreamRelayAttempt`，而该函数是**下一个**提交 `ec666d063` 才引入的：
 
 ```console
-$ git archive HEAD | tar -x -C /tmp/hc && cd /tmp/hc
-$ go build ./controller/
+$ git archive 6a5374a32 | tar -x -C /tmp/hc3 && cd /tmp/hc3 && go vet ./controller/
+vet: controller/relay_stream_attempt_boundary_test.go:39:2: undefined: beginResponsesStreamRelayAttempt
+```
+
+即该提交的说明「both tests are expected to fail」在 controller 包处**不成立**——
+它不是「按预期失败」，而是**编译不过**。当时我用「service 包那个测试依赖齐全可编译」
+来支撑整句结论，没有单独验证 controller 包。
+
+`ec666d063` 的 4 个符号问题可复现（干净导出 HEAD 后编译）：
+
+```console
+$ git archive HEAD | tar -x -C /tmp/hc && cd /tmp/hc && go build ./controller/
 controller/relay.go:75:10: info.ResponsesStreamAttemptStarted undefined
 controller/relay.go:82:36: undefined: constant.ContextKeyResponsesStreamSequenceNumber
 controller/relay.go:500:10: undefined: helper.ResetEventStreamHeaders
 controller/relay.go:1657:14: settings.AllowMissingCodexDynamicRequestHeaders undefined
 ```
 
-定位：父提交 `d253d1fb9` 的 `controller/relay.go` 编译**通过**（exit=0），
-`ec666d063` 之后失败。`git log -S` 对这 4 个符号在**全部历史**中均无命中，
-证明它们从未被提交过。
+`git log -S` 对这 4 个符号在**全部历史**中均无命中，证明它们从未被提交过。
+
+**为什么一直没被发现**：所有构建路径都用工作树，而工作树里那 4 个定义都在、能编译。
+开发环境容器也是从工作树构建的。**没有人从 HEAD 树构建过。**
 
 **影响范围**：任何人 `git clone` 后按官方流程建完前端再 `go build` 都会失败。
-工作树本身可编译（定义都在），**开发环境容器也是从工作树构建的，所以运行中的服务不受影响**——
-这正是这个缺陷一直没被发现的原因：构建脚本用工作树，没人从 HEAD 树构建过。
+工作树与运行中的服务不受影响。
 
 **未修**。三条可选路径都需要你决定，我都不应单方面执行：
 1. 把 4 个定义文件与 `controller/relay.go` 一起补提交——但这会把其他会话更大一块
    在途工作提交进版本库，正是我一直在避免的越界；
 2. 从 `ec666d063` 撤掉那 5 处引用——需改写其他会话已基于其上的历史，且会让工作树失去
-   当前可编译状态（工作树依赖这些引用）；
+   当前可编译状态；
 3. 保持现状并记录，等定义方会话自己提交。
 
 **F1 — `copy_header` / `move_header` 可绕过凭证拒绝名单（P1，本轮新发现）**
