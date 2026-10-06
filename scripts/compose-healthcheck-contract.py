@@ -77,12 +77,19 @@ def check_new_api_healthcheck(service: dict[str, Any], name: str) -> None:
     test = healthcheck.get("test")
     require(isinstance(test, list) and len(test) >= 2, f"{name} healthcheck test is incomplete")
     require(test[0] == "CMD", f"{name} healthcheck must use CMD")
-    require("wget" in test, f"{name} healthcheck must use wget")
-    require("-T" in test, f"{name} healthcheck must set wget timeout")
-    timeout_index = test.index("-T") + 1
-    require(timeout_index < len(test), f"{name} healthcheck wget timeout is missing")
+    # The command is either a direct argv or a shell string: ["CMD", "sh", "-c",
+    # "wget -q -T 10 ..."]. Membership checks against the top-level list only see
+    # the first form, so split the shell string before looking for wget and -T,
+    # otherwise the shell form fails the contract even when it is correct.
+    words = [str(item) for item in test[1:]]
+    if len(words) >= 2 and words[0] == "sh" and words[1] == "-c":
+        words = words[2].split()
+    require("wget" in words, f"{name} healthcheck must use wget")
+    require("-T" in words, f"{name} healthcheck must set wget timeout")
+    timeout_index = words.index("-T") + 1
+    require(timeout_index < len(words), f"{name} healthcheck wget timeout is missing")
     try:
-        wget_timeout = int(test[timeout_index])
+        wget_timeout = int(words[timeout_index])
     except (TypeError, ValueError):
         fail(f"{name} healthcheck wget timeout is not numeric")
     require(wget_timeout >= 10, f"{name} healthcheck wget timeout is too short")
