@@ -352,6 +352,29 @@ prod SQL_DSN  : <cred sha=e64d02ea82df>@postgres:5432/new-api
 **因此这不是当前的越权路径**，但根 `docker-compose.yml:206` 已要求
 `POSTGRES_PASSWORD:?` 显式提供，即代码侧已经认定弱口令不可接受，只是存量实例未轮换。
 
+**F3 — HEAD 上存在「有写入、无读取」的代码，其注释声称已被使用（P2）**
+
+`ec666d063` 一并扫入的另一段代码在 HEAD 上是空转的。实测：
+
+```console
+$ git grep -n "relayAttemptChannelIdKey" HEAD -- '*.go'
+HEAD:controller/relay.go:445:  common.SetContextKey(c, relayAttemptChannelIdKey, channel.Id)
+HEAD:controller/relay.go:659:  // relayAttemptChannelIdKey carries the channel of the attempt currently being
+HEAD:controller/relay.go:664:  const relayAttemptChannelIdKey constant.ContextKey = "relay_attempt_channel_id"
+
+$ git grep -n "GetContextKeyInt(c, relayAttemptChannelIdKey)" HEAD -- '*.go'
+  （无输出）
+$ git grep -n "GetContextKeyInt(c, relayAttemptChannelIdKey)" -- '*.go'
+controller/relay_responses_routing_trace.go:158:  if attemptChannelId := common.GetContextKeyInt(c, relayAttemptChannelIdKey); ...
+```
+
+即写入点在 HEAD、读取点只在工作树（`controller/relay_responses_routing_trace.go`
+同样是未提交文件）。注释说它「carries the channel of the attempt currently
+being traced」，但在已提交的树里这个 context key 没有任何消费者。
+
+**为什么记这条**：它与 F0 同源——都是污染提交把别处的在途改动切成了碎片。
+一个注释描述的行为在 HEAD 上不存在，比一段缺失的代码更容易骗过后续审查。
+
 ### 8.2 被推翻或降级的说法
 
 - **`DEV_GLOBAL_RATE_LIMIT_ADMIN_EXEMPT=true` 与注释矛盾**——**成立但影响很小**。
@@ -383,7 +406,54 @@ prod SQL_DSN  : <cred sha=e64d02ea82df>@postgres:5432/new-api
 `copy_header` 那一项才能被我独立复现。**在此之前它只是一个可疑线索。**
 本次已按此法逐条重跑：F1、F2 与三条被推翻项均由我自己重新取证，未直接采信子代理结论。
 
-### 8.5 复核未覆盖的边界
+### 8.5 部署验证（运行中的二进制）
+
+用二进制级证据确认 7 项修复确实编进了正在运行的服务（容器 `new-api-dev-isolated-new-api-1`），
+不止是字符串匹配。关键点：该二进制被 strip，`go tool nm` 不可用（`no symbol section`），
+所以证据取自 `.gopclntab`（Go 函数名表 + 源码行号表，未 strip）。
+
+我独立复现的部分：
+
+```console
+$ docker exec ... grep -a -c -F 'pass_headers must not pass credential header' /new-api
+1
+$ docker exec ... grep -a -o -E '[a-zA-Z0-9_./-]*IsCredentialHeader[a-zA-Z0-9_./()-]*' /new-api
+github.com/QuantumNous/new-api/relay/common.IsCredentialHeader
+$ docker exec ... grep -a -o -E '[a-zA-Z0-9_./()-]*ClaudeError[).]*HasContent[a-zA-Z0-9_./()-]*' /new-api
+github.com/QuantumNous/new-api/types.ClaudeError.HasContent
+```
+
+逐项字符串命中（`grep -a -c -F`）：`pass_headers must not pass credential header`=1、
+`无权重置同级或更高级用户的 Passkey`=1、`无权操作同级或更高级用户的订阅`=1、
+`response_format.type %q is not supported by Claude`=1、`response_format.json_schema is required`=1。
+9 个相关提交全部是构建提交 `8584dde2b` 的祖先（`git merge-base --is-ancestor` 逐条 YES）。
+
+子代理另用行号表做了更强的证明（例如 `service.ShouldCopyUpstreamHeader` 的行号从修复前
+的 `http.go:26` 移到 `http.go:44-54`，且新增了 `ToLower`/`TrimSpace`/`mapaccess2_faststr`
+三个修复前不可能出现的调用），以及 `PreWssConsumeQuota` 在 `quota.go:155` 的两处接口间接调用
+（`FF /2`）。这些我未逐条复现，**标注为未独立验证**。
+
+### 8.6 鉴权边界：一条必须说清的验证局限
+
+```console
+$ curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/api/user/self
+401
+$ curl ... -H 'Cookie: session=deadbeef' ... /api/user/self
+401
+$ curl ... -H 'Cookie: session=deadbeef' -H 'New-Api-User: 1' ... /api/user/self
+401
+$ curl ... /api/status
+200
+```
+
+**这证明了什么**：`/api/user/self` 挂在 `UserAuth()` 下（`router/api-router.go:89`），
+未认证请求被正确拒绝，中间件链在运行二进制中生效，服务健康（`/api/status` 200 是对照）。
+
+**这没有证明什么**：它**不能**证明 `New-Api-User` 头的强校验。伪造的 session cookie
+在第一道「未登录」检查就被拦下，永远走不到 `middleware/auth.go` 里校验该头的分支。
+要隔离验证需要有效登录态，而登录是 POST，本轮只读约束不允许。
+
+### 8.7 复核未覆盖的边界
 
 - 未做计费、鉴权、转发链路的写操作验证（只读约束）。
 - 未验证 `a846e1c64` 对镜像二进制的影响——该提交只改 `docs/` 与 `tools/`
