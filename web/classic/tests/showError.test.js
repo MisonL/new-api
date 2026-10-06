@@ -38,7 +38,13 @@ mock.module('../src/helpers/authRedirect', () => ({
 
 // utils.jsx reads window.matchMedia at module scope to pick its toast options.
 globalThis.window = {
-  matchMedia: mock(() => ({ matches: false, addListener: mock(() => {}), addEventListener: mock(() => {}), removeListener: mock(() => {}), removeEventListener: mock(() => {}) })),
+  matchMedia: mock(() => ({
+    matches: false,
+    addListener: mock(() => {}),
+    addEventListener: mock(() => {}),
+    removeListener: mock(() => {}),
+    removeEventListener: mock(() => {}),
+  })),
 };
 
 const { showError } = await import('../src/helpers/utils.jsx');

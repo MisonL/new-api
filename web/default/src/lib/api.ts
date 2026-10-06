@@ -2,6 +2,10 @@ import axios from 'axios'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import {
+  applyReadonlyRequestGuard,
+  installReadonlyFetchGuard,
+} from '@/lib/readonly-guard'
 
 // ============================================================================
 // Axios Instance Configuration
@@ -18,6 +22,16 @@ export const api = axios.create({
     'Cache-Control': 'no-store', // Prevent caching
   },
 })
+
+// Read-only frontend guard. AGENTS.md section 7 requires the request layer to
+// block unsafe methods and high-risk entry points itself, because the nginx
+// read-only proxy only sees the HTTP method and several gateway endpoints are
+// registered as GET while writing state. No-op unless the read-only mode env
+// var is set. The global fetch patch covers call sites that do not go through
+// this instance (the Ollama pull stream, the status bootstrap) so a future
+// direct fetch cannot silently reopen the hole.
+applyReadonlyRequestGuard(api)
+installReadonlyFetchGuard()
 
 // ============================================================================
 // Request Deduplication

@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import axios from 'axios';
 import { getUserIdFromLocalStorage, showError } from './utils';
 import { handleAuthExpired } from './authRedirect';
+import { isReadonlyBlockedRequest as shouldBlockReadonlyRequest } from './readonlyGuard';
 import {
   IS_READONLY_FRONTEND,
   READONLY_FRONTEND_MESSAGE,
@@ -35,16 +36,6 @@ export let API = axios.create({
   },
 });
 
-const READONLY_SAFE_METHODS = new Set(['get', 'head', 'options']);
-const READONLY_BLOCKED_PATHS = [
-  /^\/api\/oauth\//,
-  /^\/api\/auth\/external\//,
-  /^\/api\/user\/logout$/,
-  /^\/api\/setup$/,
-  /^\/api\/verification$/,
-  /^\/api\/reset_password$/,
-];
-
 const DEFAULT_LOCAL_SERVER_ADDRESSES = new Set([
   'http://localhost:3000',
   'https://localhost:3000',
@@ -52,16 +43,11 @@ const DEFAULT_LOCAL_SERVER_ADDRESSES = new Set([
   'https://127.0.0.1:3000',
 ]);
 
-function normalizeRequestPath(url) {
-  if (typeof url !== 'string' || url.trim() === '') {
-    return '';
-  }
-
-  try {
-    return new URL(url, window.location.origin).pathname;
-  } catch {
-    return url;
-  }
+// Whether the read-only frontend must reject this request. Kept in its own
+// module so the decision is unit testable without pulling in the Semi UI
+// runtime that this module's axios instance drags in.
+function isReadonlyBlockedRequest(method, url) {
+  return shouldBlockReadonlyRequest(method, url, window.location.origin);
 }
 
 function applyReadonlyRequestGuard(instance) {
@@ -70,22 +56,47 @@ function applyReadonlyRequestGuard(instance) {
       return config;
     }
 
-    const method = String(config.method || 'get').toLowerCase();
-    const path = normalizeRequestPath(config.url);
-
-    if (!READONLY_SAFE_METHODS.has(method)) {
-      return Promise.reject(new Error(READONLY_FRONTEND_MESSAGE));
-    }
-
-    const isBlockedReadonlyPath = READONLY_BLOCKED_PATHS.some((pattern) =>
-      pattern.test(path),
-    );
-    if (isBlockedReadonlyPath) {
+    if (isReadonlyBlockedRequest(config.method, config.url)) {
       return Promise.reject(new Error(READONLY_FRONTEND_MESSAGE));
     }
 
     return config;
   });
+}
+
+// Installs the guard on the global fetch. The axios instance covers the API
+// helpers, but fetch is used directly (the playground request path, the Ollama
+// pull stream) and any future call site would silently bypass the guard.
+// Patching the global makes the guard a layer instead of an opt-in helper.
+let fetchGuardInstalled = false;
+
+function installReadonlyFetchGuard() {
+  if (!IS_READONLY_FRONTEND || fetchGuardInstalled) {
+    return;
+  }
+  if (typeof globalThis.fetch !== 'function') {
+    return;
+  }
+  fetchGuardInstalled = true;
+
+  const originalFetch = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (input, init) => {
+    const method =
+      init?.method ??
+      (typeof Request !== 'undefined' && input instanceof Request
+        ? input.method
+        : 'get');
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    if (isReadonlyBlockedRequest(method, url)) {
+      return Promise.reject(new Error(READONLY_FRONTEND_MESSAGE));
+    }
+    return originalFetch(input, init);
+  };
 }
 
 function patchAPIInstance(instance) {
@@ -135,6 +146,7 @@ function applyResponseErrorHandler(instance) {
 function configureAPIInstance(instance) {
   patchAPIInstance(instance);
   applyReadonlyRequestGuard(instance);
+  installReadonlyFetchGuard();
   applyResponseErrorHandler(instance);
 }
 
