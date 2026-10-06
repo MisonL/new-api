@@ -75,7 +75,7 @@ func TestProcessHeaderOverride_WildcardPassthroughKeepsNormalHeaders(t *testing.
 	t.Parallel()
 
 	headers := passthroughHeadersFor(t, map[string]string{
-		"X-Trace-Id": "trace-123",
+		"X-Trace-Id":    "trace-123",
 		"X-Client-Hint": "hint",
 	})
 
