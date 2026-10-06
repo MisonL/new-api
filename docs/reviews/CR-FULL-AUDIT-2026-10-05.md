@@ -573,3 +573,64 @@ users=10 channels=22 logs=413177   # 与重建前一致
   的 64KiB 上限）来自并行会话，我只核对了代码位置，**未逐条独立复现**。
 - 生产容器本轮仍未触碰；生产侧配置一致性、`redis:latest` 非固定 tag、
   compose 无资源限制等部署类发现仅记录，未改动。
+
+
+## 10. 2026-10-06 审计发现修复（第三批）
+
+§9 写成之后的七个提交。每条都在本机复现、按 TDD 先写失败用例、反向验证后落地。
+
+### 10.1 修复清单
+
+| 提交 | 内容 | 反向验证 |
+| --- | --- | --- |
+| `222876349` | Claude/Gemini 健康流被误判为上游中断：共享扫描器把「干净 EOF 且无 `data: [DONE]`」判为中断，而两家协议分别以 `message_stop` 与候选 `finishReason` 收尾。Claude 见到 `message_stop` 后 `sr.Done()`；Gemini 用新增的 `sr.MarkDone()` 只记结束原因不停扫描器（终止分片后可能还有 usage 分片） | 修复前 3 条断言 `EndReason="upstream_transport_interrupted"`；缺少终止分片的反向对照仍判中断 |
+| `ea334e4ce` | `ManageUser` 的 delete 分支补 `return`：原先落到 `user.Update(false)`，`DB.First` 对已软删行必然 not found（错误被忽略），末尾 `updateUserCache` 把已删用户以 `Status=enabled` 写回 Redis，TokenAuth 在 TTL 内继续放行 | 撤 `return` 后新用例失败（缓存仍在），恢复后全绿 |
+| `0618c2f0c` | `check-browser-compatibility.mjs`：dist 目录不存在时改为收集并 exit 1，不再静默通过 | 三个用例按退出码验证：不存在目录 1、真实 dist 0、无参数 1 |
+| `816e15f72` | 6 个自建扫描器渠道（cloudflare/coze/tencent/zhipu/cohere/ollama）从不写 `StreamStatus`，健康流被 `classifyStreamStatus` 记成 `error`、健康探针永不成功；新增 `helper.RecordStreamEnd` 按共享扫描器规则分类（见 10.2） | 修复前 6 条健康流用例 `EndReason=""` 全 FAIL；把 `RecordStreamEnd` 扰动为恒判正常后 5 条反向对照全 FAIL |
+| `38f9e101a` | `AdminCompleteTopUp` 补与 `ManageUser` 相同的层级护栏：管理员不得给自己、同级或更高角色补单（此前可借补单绕过 `add_quota` 的限制） | 扰动护栏后恰好 3 条拒绝用例失败；普通用户补单与 root 补单两条正向对照不受影响 |
+| `11e7fec27` | cloudflare 流解析对齐共享扫描器：接受 `data:` 后不带空格的帧（原先这类帧 Unmarshal 失败被静默丢弃） | 撤解析改动后新用例失败（内容帧丢失） |
+| `b0602e4df` | `web/default` GET 去重不再吞掉 `AbortSignal`：带 signal 的请求各自成请求，不再共享 promise（共享 promise 无法同时满足两份独立取消生命周期；react-query 的 dashboard 查询会转发 signal） | 撤护栏后恰好 2 条生命周期用例失败；`bun test tests/` 207 通过 0 失败 |
+
+### 10.2 自建扫描器渠道的终止标记
+
+`RecordStreamEnd(c, info, sawTerminalMarker)`（`relay/helper/stream_end.go`）与共享扫描器
+（`stream_scanner.go:202`）同一规则：见到协议终止标记记 `EOF`，干净结束但缺标记则记
+`upstream_transport_interrupted` 并写 ERROR 日志。各渠道的标记：cloudflare `data: [DONE]`、
+coze `conversation.chat.completed`、tencent 尾包 `FinishReason=stop`、zhipu `meta` 事件、
+cohere `is_finished=true`、ollama `done` 帧（该渠道本就对缺帧返回错误，只在成功路径补记录）。
+
+**同类缺陷未覆盖**（记录待办，均为代码级核对、未修复）：
+- `aws/converse.go`：成功路径已强制要求 `message_stop`+`metadata`，但 `AwsClient` 是具体类型
+  `*bedrockruntime.Client`，写回归测试需要事件流 fake；仅缺一行 `SetEndReason`。
+- `xunfei`：WebSocket 读取器在消费端无法区分「收到 status=2 终止帧」与「读错误」，两者都走
+  `stopChan`，修复需要跨 goroutine 传递终止标志。
+- `palm`：`palmStreamHandler(c, resp)` 没有 `RelayInfo` 参数，无法写 `StreamStatus`；
+  且 PaLM API 已下线。
+- `openai/relay_responses_synthetic_compact.go`：合成流写出 `response.completed` 后结束，
+  没有上游可截断，属另一类。
+
+### 10.3 已核验但未由本会话修复的发现
+
+- **`model.User.AccessToken` 的 JSON 序列化（P1，链路已复现）**：HEAD 中该字段是
+  `json:"access_token"`，而 `authHelper`（`middleware/auth.go:105`）接受 `Authorization`
+  头里的 access token 作为完整会话。管理员调用返回 `model.User` 列表的接口即可拿到任意用户
+  （含 root）的 access token，再以该用户身份调用管理接口。工作区已有其他会话的在途修复
+  （`json:"-"`，未提交），按「不回退、不整理其他会话改动」的约定，本会话只核验并记录，
+  未代为提交。
+- **`model.SumUsedToken`（P2，死代码）**：`model/log.go:1138` 使用 `ifnull(...)`，
+  PostgreSQL 无此函数（应为 `COALESCE`）；两处调用点（`controller/log.go:134/179`）均被
+  注释，当前不可达，记录不改。
+- **共享扫描器不聚合多行 `data:`（P2）**：SSE 规范允许一个事件的多行 `data:` 拼接，
+  `stream_scanner.go:342` 逐行独立处理。改为聚合会改变所有共享扫描器渠道的帧语义，
+  本会话仅核对代码位置，未复现、未改动。
+
+### 10.4 本轮方法教训
+
+- **反向验证要「失败在正确的原因上」**：撤掉 `AdminCompleteTopUp` 护栏的第一次尝试直接
+  构建失败（`i18n` 变成未使用导入），改用 `if false &&` 扰动条件后才得到干净的用例级失败。
+- **bun 的 `mock.module` 对同进程其他测试文件同样生效**：新测试文件里 mock 掉
+  `@/stores/auth-store` 会让 `api-session-expired.test.ts` 的 `setState` 失效；
+  修复是根本不 mock 真实 store，而不是把 mock 补全。
+- **测试文件间的隐藏耦合**：`api.get` 去重表是模块级状态，一个用例在断言失败提前退出后
+  会把 in-flight 表项留给下一个用例；每个用例使用独立 URL 隔离。
+
