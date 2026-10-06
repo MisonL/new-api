@@ -275,6 +275,18 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 			c.Request.Body = io.NopCloser(bodyStorage)
 
+			// Restore the client's own stream intent before this attempt runs.
+			// The handlers below derive IsStream from the upstream response
+			// (helper.ShouldTreatAsEventStream), and that derivation happens
+			// before the status code is even inspected, so a failed channel that
+			// answered with an SSE content type would otherwise leave IsStream
+			// true for every later channel -- ShouldTreatAsEventStream returns
+			// its requestedStream argument unchanged once it is true. A retry
+			// would then run a JSON response through the streaming path. The
+			// client's intent is recorded once at request setup and never
+			// rewritten, so it is the value to restore.
+			relayInfo.IsStream = common.GetContextKeyBool(c, constant.ContextKeyIsStream)
+
 			if !priceData.FreeModel && relayInfo.Billing == nil {
 				newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
 				if newAPIError != nil {
