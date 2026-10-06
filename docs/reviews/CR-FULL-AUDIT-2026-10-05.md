@@ -238,6 +238,10 @@ Message:"SQL logic error: near \"=\": syntax error (1)"
   这三个文件在本轮开始时带有其他会话的未提交改动。
 - 未推送。
 
+> 本节列出的四项代码工作已于 2026-10-06 全部完成（`readonly-guard` 路径归一化见
+> `a65345cca`，其余三项见 `4b2ad1282`、`6331a1dad`、`4dee3b71b`），详见第 9 节；
+> 「未推送」一项截至第 9 节写作时仍然成立。
+
 ## 8. 2026-10-06 升级开发环境后的全场景复核
 
 开发环境已重建到 `8584dde2b`（此前是 `b1cf361fe`，落后 18 个提交）。用 6 个只读
@@ -491,3 +495,81 @@ $ curl ... /api/status
 - `logs` 表 41 万行而 `pg_stat_user_tables.n_live_tup` 仅 7、从未 autoanalyze，
   属既有批量导入数据的状态，是否需要处理未评估。
 
+
+## 9. 2026-10-06 服务重建与全维度审查（第二轮）
+
+开发环境已重建并升级到 `a65345cca`，随后用 7 个只读子代理分维度审查源码与部署环境，
+本节的每条修复都由我自己复现后落地。
+
+### 9.1 服务重建
+
+起因：`new-api-dev-isolated-redis-1` 与 `postgres-1` 容器创建于 09-29，凭据轮换后只更新了
+env 文件与运行中的服务，容器 env 仍是旧值。redis 的 healthcheck 读容器 env，因此恒失败。
+
+```console
+$ docker inspect ...redis-1 --format '{{range .Config.Env}}...' | grep REDIS_PASSWORD  # 长度=6
+$ grep DEV_REDIS_PASSWORD deploy/env/dev-isolated.env                                   # 长度=48
+$ docker exec ...redis-1 redis-cli -a <env文件密码> CONFIG GET requirepass              # 长度=48
+```
+
+修复方式是重建两个容器（数据在 bind mount 上，redis 为空库）：
+
+```console
+$ docker compose -f deploy/compose/dev-isolated.yml --env-file deploy/env/dev-isolated.env \
+    up -d --no-deps --force-recreate redis postgres
+$ docker exec ...postgres-1 psql -U root -d new-api-dev -c "SELECT count(*) FROM users/channels/logs"
+users=10 channels=22 logs=413177   # 与重建前一致
+```
+
+重建后三容器均 healthy，`new-api` 运行二进制 commit 与 HEAD 一致，`/api/status` 与
+`/api/healthz` 均 200。
+
+**一条测试方法教训**：初次判断 postgres 凭据时在容器内用 `127.0.0.1` 连接，
+`pg_hba_file_rules` 显示 `local`/`127.0.0.1`/`::1` 为 `trust`，密码根本未被校验，
+因此「任意密码都能连」是假象。改从容器网络（应用实际路径）重测后，
+新密码通过、旧密码 `123456` 与错误密码均被 `scram-sha-256` 拒绝。
+
+### 9.2 本轮修复（均已提交，附反向验证）
+
+| 提交 | 内容 | 验证方式 |
+| --- | --- | --- |
+| `fcc4d2fed` | `sync_fields` 与 `{client_header:}` 读取客户端凭证 | 撤护栏后两侧 10 条 FAIL；恢复后 6 包全绿 |
+| `32a6fef2f` | 日志库分组列按日志库方言引用（主库 PG + 日志库 MySQL 时曾生成 `"group"`） | 真实 MySQL 8.4 实测：`SELECT "group"` 返回字面量、`WHERE "group"='g1'` 返回 0 行；干净树双向验证 |
+| `6af42c521` | 每次重试前恢复客户端流式意图（`IsStream` 派生状态跨渠道泄漏） | 两个 httptest 上游端到端复现：修复前渠道 B 的 JSON 被当 SSE 处理并返回 500 |
+| `8cd99b329` | 只读守卫不再拦截纯读的 `GET /api/setup`（两层同步修改） | 恢复条目后两侧新用例失败；nginx 正则用等价判定表复核 |
+| `0582fb1be` | compose 契约脚本接受 `sh -c` 形式的 healthcheck | 新增单测锁定两种形态 + 6 个反例；干净树双向验证 |
+
+`32a6fef2f` 与 `0582fb1be` 所在文件带有其他会话的在途改动，两笔提交均以 HEAD 版本为基线、
+只叠加本次改动（提交信息中已注明）。
+
+### 9.3 被推翻或修正的结论
+
+- **跨渠道重试请求体不回绕**：不成立。`common/gin.go:76-84` 的 `GetRequestBody` 每次命中
+  缓存的 `BodyStorage` 都执行 `bs.Seek(0, io.SeekStart)`，控制器循环在 `controller/relay.go:265`
+  取 body 时游标已复位。提出该结论的代理已撤回。
+- **「只读前端每次导航都重试并重复弹提示」**：不成立。`web/default/src/routes/__root.tsx:96-108`
+  的 `getSetupStatus().catch(...)` 返回 `null` 后仍会执行 `setupStatusChecked = true` 并写入
+  localStorage，所以是**一次**误报而非每次导航。缺陷本身成立（纯读被拦 + 一次无谓报错），
+  但严重度按实测下调，注释按实测行为改写。
+- **`logs` 表统计异常**：不需要处理。规划器读 `pg_class.reltuples` 并按物理块数缩放
+  （实测推算 413589 对实际 413177，差 0.1%），`n_live_tup` 归零不影响执行计划；
+  表无膨胀（填充率约 93%，`n_dead_tup=0`）。
+
+### 9.4 复核方法教训
+
+- **状态码不等于路由命中**：`//api/status` 返回 200 但响应体是前端 `index.html` 外壳，
+  请求并未到达 API。探测路径解析必须同时看响应体，并用 `curl --path-as-is`
+  关闭 curl 自身的路径归一化。
+- **容器内测凭据会绕过校验**：见 9.1，`trust` 规则使密码校验失效。
+- **子代理结论仍需逐条复现**：本轮子代理提出的 P0/P1 中，有 1 条被完全推翻、
+  1 条的严重度被下调、1 条的影响面被证实更窄。
+
+### 9.5 本轮未覆盖的边界
+
+- 计费与配额维度的子代理因 API 超时未交付报告，该维度本轮**无已验证结论**。
+- 中继协议转换维度、鉴权维度、桌面端与工具链维度的子代理报告尚未全部交付或未成文，
+  其结论未经我复现。
+- SSE 解析相关的一批候选（多行 `data:` 不聚合、`[DONE]` 前缀匹配、若干渠道自写扫描器
+  的 64KiB 上限）来自并行会话，我只核对了代码位置，**未逐条独立复现**。
+- 生产容器本轮仍未触碰；生产侧配置一致性、`redis:latest` 非固定 tag、
+  compose 无资源限制等部署类发现仅记录，未改动。
