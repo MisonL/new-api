@@ -139,6 +139,12 @@ func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey str
 		if name == "" {
 			return "", false, fmt.Errorf("client_header placeholder name is empty: %q", template)
 		}
+		// A credential header belongs to the caller; resolving it here would
+		// hand the caller's own key to a third-party upstream, which is what the
+		// wildcard passthrough rule and copy_header already refuse to do.
+		if common.IsCredentialHeader(name) {
+			return "", false, fmt.Errorf("client_header placeholder must not read credential header: %s", name)
+		}
 		if c == nil || c.Request == nil {
 			return "", false, fmt.Errorf("missing request context for client_header placeholder")
 		}

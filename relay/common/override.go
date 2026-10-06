@@ -1714,6 +1714,17 @@ func syncFieldsBetweenTargets(jsonStr string, context map[string]interface{}, fr
 		return "", err
 	}
 
+	// Same judgement as copy_header: refuse to read a credential that came from
+	// the client. getHeaderValueFromContext consults header_override before
+	// request_headers, so an operator who already wrote a value under that name
+	// with set_header is syncing their own configuration and must keep working.
+	// Only the source is checked -- writing a value INTO a credential-named
+	// target is deliberate configuration.
+	if fromTarget.kind == "header" && IsCredentialHeader(fromTarget.key) &&
+		getHeaderOverrideValueFromContext(context, fromTarget.key) == "" {
+		return "", fmt.Errorf("sync_fields must not read credential header: %s", fromTarget.key)
+	}
+
 	fromValue, fromExists, err := readSyncTargetValue(jsonStr, context, fromTarget)
 	if err != nil {
 		return "", err
