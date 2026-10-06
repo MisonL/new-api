@@ -623,6 +623,15 @@ cohere `is_finished=true`、ollama `done` 帧（该渠道本就对缺帧返回�
 - **共享扫描器不聚合多行 `data:`（P2）**：SSE 规范允许一个事件的多行 `data:` 拼接，
   `stream_scanner.go:342` 逐行独立处理。改为聚合会改变所有共享扫描器渠道的帧语义，
   本会话仅核对代码位置，未复现、未改动。
+- **桌面 OAuth「内存回退」——不成立**：`controller/oauth_desktop_store.go:82-90` 的
+  `currentDesktopOAuthStore` 在 Redis 未启用时使用内存存储，但 Redis 已配置而不可用时
+  全部操作返回 `errDesktopOAuthStoreUnavailable`，调用方（`controller/oauth_desktop.go:121/137/162`）
+  显式返回 503「状态存储暂不可用」，没有伪造完成态。内存存储是单实例/桌面 sidecar
+  （按 AGENTS.md §8 显式清空 `REDIS_CONN_STRING`）的设计路径；多实例误配无 Redis 时，
+  跨实例消费表现为显式 state-not-found，也不是静默降级。
+- **前端 401 后不导航（未复现，记录）**：`web/default/src/lib/api.ts` 的 401 分支只做
+  `auth.reset()` + toast；`_authenticated/route.tsx` 的鉴权在 `beforeLoad`（导航时）执行，
+  所以 401 后页面停留到下一次导航才跳登录。属设计取舍而非功能破坏，未改动。
 
 ### 10.4 本轮方法教训
 
