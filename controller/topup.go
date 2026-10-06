@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -475,6 +476,25 @@ func AdminCompleteTopUp(c *gin.Context) {
 	var req AdminCompleteTopupRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.TradeNo == "" {
 		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+
+	// 与 ManageUser 相同的层级护栏：补单会直接给订单所属用户充值，管理员
+	// 不得给自己、同级或更高角色补单，否则可以借补单绕过 add_quota 对
+	// 同级与自身操作的限制。订单的 UserId 创建后不变，预先读取不会引入竞态。
+	topUp := model.GetTopUpByTradeNo(req.TradeNo)
+	if topUp == nil {
+		common.ApiErrorMsg(c, "充值订单不存在")
+		return
+	}
+	targetUser, err := model.GetUserById(topUp.UserId, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	myRole := c.GetInt("role")
+	if myRole <= targetUser.Role && myRole != common.RoleRootUser {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
 		return
 	}
 
