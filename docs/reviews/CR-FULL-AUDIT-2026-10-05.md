@@ -245,6 +245,45 @@ Message:"SQL logic error: near \"=\": syntax error (1)"
 
 ### 8.1 已确认成立的发现
 
+**F0 — `ec666d063` 是「只提交消费方、没提交定义方」的半个提交，导致 HEAD 不可编译（P0）**
+
+这是本轮最严重的发现，且**归因到我自己**：`ec666d063` 正是第 1 节记录的污染提交
+（我用 `git add controller/relay.go` 把其他会话在同一文件里的未提交改动一并扫入）。
+被扫入的那部分引用了 5 个符号，而**定义方全部停留在未提交状态**：
+
+| 符号 | 使用点（已提交） | 定义位置（未提交） |
+| --- | --- | --- |
+| `info.ResponsesStreamAttemptStarted` | `controller/relay.go:75,84` | `relay/common/relay_info.go` |
+| `constant.ContextKeyResponsesStreamSequenceNumber` | `controller/relay.go:82` | `constant/context_key.go` |
+| `helper.ResetEventStreamHeaders` | `controller/relay.go:500` | `relay/helper/common.go` |
+| `settings.AllowMissingCodexDynamicRequestHeaders` | `controller/relay.go:1657` | `dto/channel_settings.go` |
+
+复现（把 HEAD 干净导出到 `/tmp` 后编译，绕开工作树里那些未提交的定义）：
+
+```console
+$ git archive HEAD | tar -x -C /tmp/hc && cd /tmp/hc
+$ go build ./controller/
+controller/relay.go:75:10: info.ResponsesStreamAttemptStarted undefined
+controller/relay.go:82:36: undefined: constant.ContextKeyResponsesStreamSequenceNumber
+controller/relay.go:500:10: undefined: helper.ResetEventStreamHeaders
+controller/relay.go:1657:14: settings.AllowMissingCodexDynamicRequestHeaders undefined
+```
+
+定位：父提交 `d253d1fb9` 的 `controller/relay.go` 编译**通过**（exit=0），
+`ec666d063` 之后失败。`git log -S` 对这 4 个符号在**全部历史**中均无命中，
+证明它们从未被提交过。
+
+**影响范围**：任何人 `git clone` 后按官方流程建完前端再 `go build` 都会失败。
+工作树本身可编译（定义都在），**开发环境容器也是从工作树构建的，所以运行中的服务不受影响**——
+这正是这个缺陷一直没被发现的原因：构建脚本用工作树，没人从 HEAD 树构建过。
+
+**未修**。三条可选路径都需要你决定，我都不应单方面执行：
+1. 把 4 个定义文件与 `controller/relay.go` 一起补提交——但这会把其他会话更大一块
+   在途工作提交进版本库，正是我一直在避免的越界；
+2. 从 `ec666d063` 撤掉那 5 处引用——需改写其他会话已基于其上的历史，且会让工作树失去
+   当前可编译状态（工作树依赖这些引用）；
+3. 保持现状并记录，等定义方会话自己提交。
+
 **F1 — `copy_header` / `move_header` 可绕过凭证拒绝名单（P1，本轮新发现）**
 
 第 7 节 `38fe02eba` 只给 `pass_headers` 加了凭证拒绝名单。我实测确认
