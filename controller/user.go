@@ -941,6 +941,19 @@ func ManageUser(c *gin.Context) {
 		if err := model.InvalidateUserTokensCache(user.Id); err != nil {
 			common.SysLog(fmt.Sprintf("failed to invalidate tokens cache for user %d: %s", user.Id, err.Error()))
 		}
+		// 删除后必须在此返回，不能落入 switch 之后的 user.Update(false)：
+		// 用户行已被软删，Update 内部的 DB.First 会 not found（错误被忽略），
+		// 但末尾的 updateUserCache 会把已删用户以原状态写回 Redis，
+		// 而 TokenAuth 只查 userCache.Status，缓存 TTL 内会继续放行该用户。
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data": model.User{
+				Role:   user.Role,
+				Status: user.Status,
+			},
+		})
+		return
 	case "promote":
 		if myRole != common.RoleRootUser {
 			common.ApiErrorI18n(c, i18n.MsgUserAdminCannotPromote)
