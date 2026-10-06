@@ -1321,13 +1321,18 @@ func TestApplyParamOverrideSetHeaderAndUseInLaterCondition(t *testing.T) {
 	assertJSONEqual(t, `{"temperature":0.1}`, string(out))
 }
 
+// This covers the copy_header-then-condition mechanism: a request header is
+// copied into header_override, and a later operation's condition reads the
+// result. The source header is deliberately NOT a credential name -- copying a
+// client credential upstream is refused (see header_credentials_copy_test.go),
+// and the name was incidental to what this test checks.
 func TestApplyParamOverrideCopyHeaderFromRequestHeaders(t *testing.T) {
 	input := []byte(`{"temperature":0.7}`)
 	override := map[string]interface{}{
 		"operations": []interface{}{
 			map[string]interface{}{
 				"mode": "copy_header",
-				"from": "Authorization",
+				"from": "X-Client-Auth",
 				"to":   "X-Upstream-Auth",
 			},
 			map[string]interface{}{
@@ -1346,7 +1351,7 @@ func TestApplyParamOverrideCopyHeaderFromRequestHeaders(t *testing.T) {
 	}
 	ctx := map[string]interface{}{
 		"request_headers": map[string]interface{}{
-			"authorization": "Bearer token-123",
+			"x-client-auth": "Bearer token-123",
 		},
 	}
 

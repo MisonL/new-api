@@ -1452,6 +1452,13 @@ func copyHeaderInContext(context map[string]interface{}, fromHeader, toHeader st
 	if !exists {
 		return fmt.Errorf("%w: %s", errSourceHeaderNotFound, fromHeader)
 	}
+	// 只有当值确实来自客户端请求头时才拦。getHeaderValueFromContext 先查
+	// header_override 再查 request_headers：若运维已经用 set_header 等写入了同名头，
+	// 复制的是他们自己配置的值，不是调用方的凭证，必须放行。
+	// 与 pass_headers 的判据一致：拦的是"读取客户端凭证"，不是"凭证名出现在配置里"。
+	if IsCredentialHeader(fromHeader) && getHeaderOverrideValueFromContext(context, fromHeader) == "" {
+		return fmt.Errorf("copy_header must not read credential header: %s", fromHeader)
+	}
 	if err := setHeaderOverrideInContext(context, toHeader, value, keepOrigin); err != nil {
 		return err
 	}
@@ -1461,6 +1468,22 @@ func copyHeaderInContext(context map[string]interface{}, fromHeader, toHeader st
 		}
 	}
 	return nil
+}
+
+// getHeaderOverrideValueFromContext returns the operator-configured value for a
+// header, ignoring anything the client sent. It is the counterpart to
+// getRequestHeaderValueFromContext, which reads only the client's headers.
+func getHeaderOverrideValueFromContext(context map[string]interface{}, headerName string) string {
+	headerName = normalizeHeaderContextKey(headerName)
+	if headerName == "" {
+		return ""
+	}
+	source := ensureMapKeyInContext(context, paramOverrideContextHeaderOverride)
+	raw, ok := source[headerName]
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", raw))
 }
 
 func passRequestHeaderInContext(context map[string]interface{}, headerName string) error {
