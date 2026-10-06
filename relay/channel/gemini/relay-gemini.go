@@ -2,6 +2,8 @@ package gemini
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1144,6 +1146,28 @@ func getResponseToolCall(item *dto.GeminiPart, fallbackID ...string) *dto.ToolCa
 	return call
 }
 
+// geminiToolCallContentFingerprint derives a stable identity from a function
+// call's content, so the same call synthesises the same ID on every chunk while
+// two different calls never collide. Sorting is unnecessary: common.Marshal
+// emits map keys in sorted order, so equal content always yields equal bytes.
+func geminiToolCallContentFingerprint(call *dto.FunctionCall) string {
+	if call == nil {
+		return "nil"
+	}
+	arguments := call.Arguments
+	if arguments == nil {
+		arguments = map[string]interface{}{}
+	}
+	encoded, err := common.Marshal(arguments)
+	if err != nil {
+		// Unencodable arguments still need a distinct ID per call; fall back to
+		// the name so the two cases cannot collapse into one.
+		return "name:" + call.FunctionName
+	}
+	sum := sha256.Sum256(append([]byte(call.FunctionName+"\x00"), encoded...))
+	return hex.EncodeToString(sum[:8])
+}
+
 func getResponseToolCallWithError(item *dto.GeminiPart, fallbackID ...string) (*dto.ToolCallResponse, error) {
 	if item == nil || item.FunctionCall == nil {
 		return nil, errors.New("Gemini functionCall is missing")
@@ -1469,7 +1493,18 @@ func streamResponseGeminiChat2OpenAIWithError(geminiResponse *dto.GeminiChatResp
 				}
 			} else if part.FunctionCall != nil {
 				isTools = true
-				fallbackID := fmt.Sprintf("call_gemini_%d_%d", candidate.Index, toolCallOrdinal)
+				// 合成 ID 必须同时满足两件事：
+				//  1) 同一个 functionCall 若在多个 chunk 里重复出现，ID 要一致——下游
+				//     GeminiChatStreamHandler 按 ID 归并 tool call index，ID 变了客户端
+				//     会看到重复的调用；
+				//  2) 不同调用即使落在相同位置，ID 也必须不同——candidate.Index 通常恒为
+				//     0 且 toolCallOrdinal 每个 chunk 都从 0 开始，仅用位置会让两个不同
+				//     调用都得到 call_gemini_0_0，下游就会把第二个当成第一个的续传。
+				// 因此身份取自「内容」（函数名 + 参数），而不是位置。Gemini 的
+				// functionCall 必须带完整 JSON 对象参数（见 getResponseToolCallWithError
+				// 的校验），不会被拆到多个 chunk，所以内容相同即可视为同一次调用。
+				fallbackID := fmt.Sprintf("call_gemini_%d_%d_%s",
+					candidate.Index, toolCallOrdinal, geminiToolCallContentFingerprint(part.FunctionCall))
 				toolCallOrdinal++
 				call, err := getResponseToolCallWithError(&part, fallbackID)
 				if err != nil {
