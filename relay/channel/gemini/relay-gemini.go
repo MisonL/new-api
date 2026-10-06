@@ -1209,6 +1209,22 @@ func getResponseToolCallWithError(item *dto.GeminiPart, fallbackID ...string) (*
 	}, nil
 }
 
+// geminiResponseHasFinishReason reports whether any candidate in the chunk
+// carries a finishReason. Gemini marks the end of a generation this way and
+// never sends OpenAI's `data: [DONE]`, so the stream scanner needs this signal
+// to classify the stream as a normal end.
+func geminiResponseHasFinishReason(resp *dto.GeminiChatResponse) bool {
+	if resp == nil {
+		return false
+	}
+	for _, candidate := range resp.Candidates {
+		if candidate.FinishReason != nil && strings.TrimSpace(*candidate.FinishReason) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func geminiFinishReasonToOpenAI(reason string) (*string, error) {
 	var mapped string
 	switch strings.TrimSpace(reason) {
@@ -1606,8 +1622,18 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			*usage = mappedUsage
 		}
 
+		// 在回调之前判断终止信号：回调链会改写 response（例如 STOP 会被清空），
+		// 之后再看就晚了。
+		hasFinishReason := geminiResponseHasFinishReason(&geminiResponse)
 		if !callback(data, &geminiResponse) {
 			sr.Stop(fmt.Errorf("gemini callback stopped"))
+			return
+		}
+		// Gemini 以候选分片携带 finishReason 作为生成终止信号，且从不发送
+		// OpenAI 风格的 `data: [DONE]`。这里只标记正常结束、不停扫描器：
+		// 终止分片之后仍可能跟随仅带 usageMetadata 的分片，提前停止会漏计用量。
+		if hasFinishReason {
+			sr.MarkDone()
 		}
 	})
 

@@ -1014,6 +1014,10 @@ type ClaudeResponseInfo struct {
 	ResponseText strings.Builder
 	Usage        *dto.Usage
 	Done         bool
+	// SawMessageStop 记录上游发来过协议终止事件 message_stop。Anthropic 不发送
+	// OpenAI 风格的 `data: [DONE]`，扫描器在干净 EOF 时若未见 [DONE] 会把流判成
+	// 上游中断；处理器见到 message_stop 时据此标记正常结束。
+	SawMessageStop bool
 }
 
 func cacheCreationTokensForOpenAIUsage(usage *dto.Usage) int {
@@ -1219,6 +1223,9 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.HasContent() {
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
 	}
+	if claudeResponse.Type == "message_stop" {
+		claudeInfo.SawMessageStop = true
+	}
 	if claudeResponse.StopReason != "" {
 		maybeMarkClaudeRefusal(c, claudeResponse.StopReason)
 	}
@@ -1313,6 +1320,13 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		err = HandleStreamResponseData(c, info, claudeInfo, data)
 		if err != nil {
 			sr.Stop(err)
+			return
+		}
+		if claudeInfo.SawMessageStop {
+			// message_stop 是 Anthropic 协议的最后一个事件，与 OpenAI 的
+			// [DONE] 等价：标记正常结束并停止扫描，避免扫描器的 EOF 兜底
+			// 把健康流判成 upstream_transport_interrupted。
+			sr.Done()
 		}
 	})
 	if err != nil {

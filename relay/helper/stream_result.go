@@ -41,6 +41,17 @@ func (r *StreamResult) Done() {
 	r.stopped = true
 }
 
+// MarkDone records a normal stream end without stopping the scanner after this
+// chunk. A protocol whose terminal marker can be followed by trailing metadata
+// needs this: Gemini marks the end with a candidate finishReason but may send a
+// usage-only chunk afterwards, and stopping at the marker would drop that usage.
+// The recorded reason is final (SetEndReason runs once), so a later transport
+// error is reported as "scanner closed after normal stream end", not as an
+// interruption.
+func (r *StreamResult) MarkDone() {
+	r.status.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+}
+
 // IsStopped returns whether Stop() or Done() was called during this chunk.
 func (r *StreamResult) IsStopped() bool {
 	return r.stopped
