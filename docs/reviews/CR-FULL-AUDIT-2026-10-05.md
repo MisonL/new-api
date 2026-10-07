@@ -723,3 +723,48 @@ bun 在同一进程按文件顺序执行测试，模块只求值一次，且 `im
 
 axios 只对 2xx resolve，304 走 reject。修复后 304 有专门文案且只弹一次；但正常页面不发
 条件请求（axios 不自动带 `If-None-Match`），没有已知故障路径。
+
+## 13. 2026-10-07 自建扫描器的 64KiB 行上限（第五批）
+
+§9.5 的 SSE 候选清单里有一条「若干渠道自写扫描器的 64KiB 上限」当时只核对了代码位置，
+本节把它复现并修掉。
+
+### 13.1 复现（成立，已修 `94c07e8b5`）
+
+五个渠道驱动自己的 `bufio.Scanner` 且都没有调 `Buffer`：`cloudflare`、`tencent`、
+`coze`、`zhipu`、`cohere`。裸 `bufio.NewScanner` 的 token 上限是
+`bufio.MaxScanTokenSize` = 64KiB（`go doc bufio.MaxScanTokenSize` 实证）。上游单个
+SSE 帧超过该值（典型形态是大 tool-call 参数）时 `Scan` 停在 `ErrTooLong`：
+
+- cloudflare / tencent / zhipu / cohere：终止标记（`[DONE]`、尾包、`meta`、
+  `is_finished`）永远读不到，健康流被 `RecordStreamEnd` 判成
+  `upstream_transport_interrupted`；
+- coze：`scanner.Err()` 被当作响应体错误返回，健康流直接变成 500。
+
+对照：共享扫描器（`stream_scanner.go:218`）早已用
+`Buffer(make([]byte, InitialScannerBufferSize), getScannerBufferSize())` 抬到 64MiB
+并支持 `StreamScannerMaxBufferMB` 覆盖；`ollama`（16MiB）、`codex`（64MiB）也各自设了
+上限，只有这五家漏了。
+
+### 13.2 修复
+
+`helper.GetScannerBufferSize()` 导出共享扫描器的同一判据（默认 64MiB、
+`StreamScannerMaxBufferMB` 覆盖生效），五个渠道在 `NewScanner` 后调用
+`scanner.Buffer(make([]byte, helper.InitialScannerBufferSize), helper.GetScannerBufferSize())`。
+
+### 13.3 验证
+
+每个渠道一个回归用例：70KiB 帧 + 终止标记，断言正常结束且内容完整转发。
+修复前五条全 FAIL（四条 `EndReason="upstream_transport_interrupted"`，coze 为
+`bad_response_body` 500）；修复后全 PASS。反向验证：把 `GetScannerBufferSize`
+扰动回恒返 64KiB，六条用例（含 helper 的 env 覆盖用例）全部再次 FAIL，恢复后全绿。
+
+`relay/channel/{cloudflare,tencent,coze,zhipu,cohere}` 与 `relay/helper` 全包通过；
+最小回归集 `go test ./controller ./model ./relay/common ./relay/helper ./service` 通过。
+干净树验证：`git archive HEAD` + 本提交的 12 个文件，`go test` 六包全绿。
+
+### 13.4 提交边界
+
+五个渠道文件与 `stream_scanner.go` 都带其他会话的在途改动（`encoding/json` →
+`common.*` 迁移、ping 写入重构），提交以 HEAD 为基线、只叠加本次的 3 行/渠道与
+导出函数；`git show 94c07e8b5 --stat` 可复核为纯新增。
