@@ -670,3 +670,56 @@ Claude 两条成功路径 + 缺 `message_stop` 的反向对照）。
 - `openai/relay_responses_synthetic_compact.go`：合成流无上游可截断，属另一类。
 
 
+
+
+## 12. 2026-10-07 前端 toast 去重与只读守卫重装
+
+### 12.1 web/default 三层 toast 重叠（已修复 `ee8445ffe`）
+
+`web/default` 有三处独立弹 toast：axios 拦截器、React Query 默认 `mutations.onError`
+（`main.tsx` 接的是 `handleServerError`）、以及 `main.tsx` 的 `QueryCache` 401/500 分支。
+一次失败的 mutation 因此弹两个文案不同的同因提示（拦截器用后端 message，React Query 用
+兜底文案）；304 更是弹三个——`handleServerError` 当时根本不识别 304，而 304 无响应体，
+拦截器会把 axios 的原始状态文本直接展示给用户。
+
+修复：拦截器给已提示过的 error 打不可枚举 Symbol 标记；`handleServerError` 跳过已标记的
+error，并新增 304 →「Content not modified!」分支（拦截器同步补上该分支）；`QueryCache`
+的 401/500 在已标记时不再重复弹，但副作用（重置登录态、跳转）照常执行。
+
+用例驱动真实 api 实例 + 与 `main.tsx` 同构的 QueryClient：失败 mutation 与 304 mutation
+各恰好一个 toast；未标记的 error（`skipErrorHandler` 调用方）仍弹一次。
+反向验证：关掉标记守卫，恰好两条去重用例失败。
+
+**同一提交内的第二个缺陷（验证过程中发现，属产品缺口）**：只读 fetch 守卫原先用
+`fetchGuardInstalled` 布尔量记录「已安装」，任何在守卫安装之后替换 `globalThis.fetch`
+的代码都会让守卫永久失效——只读层被静默解除，而 `AGENTS.md` §7 要求它必须生效。
+改为记录「当前包装函数」本身，当 `globalThis.fetch` 不等于它时重新安装。
+反向验证：把重装条件改成「装过就永不重装」，恰好 Ollama fetch 拦截用例失败。
+
+### 12.2 测试文件的跨文件污染（同提交一并处理）
+
+bun 在同一进程按文件顺序执行测试，模块只求值一次，且 `import.meta.env` 的赋值不跨文件
+传播。新测试文件若先加载 `@/lib/api`，会让 `readonly-guard.test.ts` 的 `beforeAll`
+读到未设置的开关而失败；反之，`readonly-guard.test.ts` 替换 `globalThis.fetch` 后，
+守卫若不再重装，其 Ollama 用例也会失败。两侧修法：新文件在导入前设置与对方一致的开关值；
+`readonly-guard.test.ts` 在替换 fetch 后显式调用 `installReadonlyFetchGuard()`。
+两种文件顺序下全套 211 通过。
+
+### 12.3 classic 双 toast（已修复 `e9ce7e86a`）
+
+`apiCore.js:140` 的拦截器在 reject 前调 `showError`，调用方 catch 里普遍再调一次。
+`showError` 现在给 error 打不可枚举 Symbol 标记，第二次直接返回；不同 error 各弹一次，
+冻结对象也能弹唯一那次。classic 全套 95 通过。
+
+### 12.4 classic 英文界面回退中文——成立，但数字修正（未修）
+
+上一轮审计称「951/4040 key」。实测（2026-10-07，对 `zh-CN.json` 与 `en.json` 的
+`translation` 键集做差集）：`en` 缺失的中文键只有 2 个；但 1207 个键的英文值是空串，
+`returnEmptyString: false`（`i18n.js:51`）会把空值解析回 `fallbackLng: 'zh-CN'`，
+所以英文界面确实出现中文——机制成立，计数口径不同。其余语种缺失 184-215 键、
+空值 859-1142 键。未改：属翻译补全工作。
+
+### 12.5 POST 返回 304——成立但无故障路径，记录不修
+
+axios 只对 2xx resolve，304 走 reject。修复后 304 有专门文案且只弹一次；但正常页面不发
+条件请求（axios 不自动带 `If-None-Match`），没有已知故障路径。
