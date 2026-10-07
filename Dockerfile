@@ -47,7 +47,7 @@ RUN VERSION_VALUE="${EFFECTIVE_APP_VERSION}"; \
     DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION="$VERSION_VALUE" bun run build && \
     sh /scripts/write-frontend-release-metadata.sh classic dist "$VERSION_VALUE" "$VCS_REF" "$BUILD_DATE"
 
-FROM golang:1.26.2-alpine@sha256:c2a1f7b2095d046ae14b286b18413a05bb82c9bca9b25fe7ff5efef0f0826166 AS builder2
+FROM golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS builder2
 ENV GO111MODULE=on CGO_ENABLED=0
 
 ARG TARGETOS
